@@ -13,8 +13,16 @@ test('deployment is explicit and validated by the build wrapper', () => {
 	assert.throws(() => parseArguments(['--upload', '--allow-incomplete-backup']), /unknown|unsupported/i)
 })
 
+test('build helper executables use stable product paths, never Go temporary paths', () => {
+	const env = { LOCALAPPDATA: join(tmpdir(), 'local-app-data') }
+	assert.equal(goBuildHelperPath('generate-icon', env, 'win32'), join(env.LOCALAPPDATA, 'PCController', 'build-programs', 'generate-icon.exe'))
+	assert.equal(goBuildHelperPath('default-assets', env, 'win32'), join(env.LOCALAPPDATA, 'PCController', 'build-programs', 'default-assets.exe'))
+	assert.throws(() => goBuildHelperPath('../unsafe', env, 'win32'), /unknown build helper/)
+})
+
 import {
 	BuildError,
+	goBuildHelperPath,
 	PROJECT_ROOT,
 	assertGeneratedPath,
 	collectWebNotices,
@@ -1108,7 +1116,7 @@ test('browser ICO is the exact seven-size native executable icon', async () => {
 	)
 	assert.match(
 		buildSource,
-		/generate_icon\.go', '\.\/winres\/icon\.png', '\.\/winres\/icon\.ico'/u
+		/generate_icon\.go', \['\.\/winres\/icon\.png', '\.\/winres\/icon\.ico'\]/u
 	)
 	assert.match(
 		buildSource,

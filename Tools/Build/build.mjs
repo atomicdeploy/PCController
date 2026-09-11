@@ -891,11 +891,7 @@ function buildWebUI(options, env, log, expectedAppName) {
 		verbose: options.verbose
 	})
 	log.stage('🎨', 'Regenerating the canonical native and browser product mark')
-	run(go, ['run', './winres/generate_icon.go', './winres/icon.png', './winres/icon.ico'], {
-		cwd: HOST_ROOT,
-		env,
-		verbose: options.verbose
-	})
+	runGoBuildHelper(go, 'generate-icon', './winres/generate_icon.go', ['./winres/icon.png', './winres/icon.ico'], env, options)
 	copyFileSync(join(HOST_ROOT, 'winres', 'icon.ico'), join(WEB_ROOT, 'public', 'favicon.ico'))
 	const inputsBefore = directoryIdentity(WEB_ROOT, true)
 	log.stage('🔒', 'Installing locked web dependencies')
@@ -1359,6 +1355,21 @@ export function windowsCompilerProvisionArguments(env, goArch, packageVersion = 
 		environmentValue(env, 'ALL_PROXY')
 	if (proxy) args.push('--proxy', proxy)
 	return args
+}
+
+export function goBuildHelperPath(name, env = process.env, platform = process.platform) {
+	if (!['generate-icon', 'default-assets'].includes(name)) throw new BuildError('unknown build helper')
+	const root = platform === 'win32'
+		? join(env.LOCALAPPDATA || join(env.USERPROFILE || PROJECT_ROOT, 'AppData', 'Local'), 'PCController', 'build-programs')
+		: join(BUILD_ROOT, 'helpers')
+	return join(root, name + (platform === 'win32' ? '.exe' : ''))
+}
+
+function runGoBuildHelper(go, name, source, args, env, options) {
+	const executable = goBuildHelperPath(name, env)
+	mkdirSync(dirname(executable), { recursive: true })
+	run(go, ['build', '-buildvcs=false', '-o', executable, source], { cwd: HOST_ROOT, env, verbose: options.verbose })
+	run(executable, args, { cwd: HOST_ROOT, env, verbose: options.verbose })
 }
 
 function provisionWindowsCCompiler(env, goArch, options) {
@@ -2046,9 +2057,7 @@ function compileFirmware(options, identity, env, controllerPath, log) {
 	run(command.file, command.args, { cwd: command.cwd, env, verbose: options.verbose })
 	log.stage('💾', 'Generating and validating the complete safe default EEPROM image')
 	const go = requireTool('go', env)
-	run(go, [
-		'run', '-buildvcs=false', './cmd/default-assets', '--output', SAFE_DEFAULT_EEPROM
-	], { cwd: HOST_ROOT, env, verbose: options.verbose })
+	runGoBuildHelper(go, 'default-assets', './cmd/default-assets', ['--output', SAFE_DEFAULT_EEPROM], env, options)
 	run(process.execPath, [FIRMWARE_TOOL, 'manifest', '--quiet', '--no-color'], {
 		cwd: PROJECT_ROOT, env, verbose: options.verbose
 	})
