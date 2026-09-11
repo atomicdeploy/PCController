@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -277,16 +279,32 @@ func (runtime *Runtime) startPortProcessMonitor() {
 }
 
 func (runtime *Runtime) refreshPortProcess() {
+	runtime.refreshPortProcessWith(portowner.FindOwner)
+}
+
+func (runtime *Runtime) refreshPortProcessWith(findOwner func(context.Context, string) (portowner.Owner, bool, error)) {
 	runtime.mu.RLock()
 	port, previous := runtime.port.Name, runtime.portProcess
-	paused, connected := runtime.paused, runtime.session != nil
+	paused, session := runtime.paused, runtime.session
 	runtime.mu.RUnlock()
+	connected := session != nil
 	if port == "" {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 350*time.Millisecond)
-	owner, found, err := portowner.FindOwner(ctx, port)
-	cancel()
+	var owner portowner.Owner
+	var found bool
+	var err error
+	if connected {
+		// An open exclusive serial session is direct ownership evidence. Do not
+		// turn a privileged OS enumeration failure into "unknown" for our own port.
+		executable, _ := os.Executable()
+		owner = portowner.Owner{PID: uint32(os.Getpid()), Name: filepath.Base(executable), Executable: executable}
+		found = true
+	} else {
+		ctx, cancel := context.WithTimeout(context.Background(), 350*time.Millisecond)
+		owner, found, err = findOwner(ctx, port)
+		cancel()
+	}
 	next := PortProcessSnapshot{Supported: true, State: "free", Port: port, ObservedAt: time.Now(), TakeoverReady: !connected && !paused}
 	if err != nil {
 		next.State, next.Error = "unknown", err.Error()
@@ -295,15 +313,17 @@ func (runtime *Runtime) refreshPortProcess() {
 		next.State = "owned"
 		next.PID, next.Name, next.Executable, next.ProcessStartTime, next.Window = owner.PID, owner.Name, owner.Executable, owner.ProcessStartTime, owner.Window
 	}
-	if previous.State == next.State && previous.PID == next.PID && previous.Port == next.Port && previous.Error == next.Error {
-		runtime.mu.Lock()
-		runtime.portProcess = next
+	runtime.mu.Lock()
+	// A slow OS lookup must not overwrite a connection opened/closed meanwhile.
+	if runtime.port.Name != port || runtime.session != session || runtime.paused != paused {
 		runtime.mu.Unlock()
 		return
 	}
-	runtime.mu.Lock()
 	runtime.portProcess = next
 	runtime.mu.Unlock()
+	if previous.State == next.State && previous.PID == next.PID && previous.Port == next.Port && previous.Error == next.Error {
+		return
+	}
 	metadata := map[string]string{"port": port, "state": next.State}
 	if next.PID != 0 {
 		metadata["pid"] = strconv.FormatUint(uint64(next.PID), 10)
