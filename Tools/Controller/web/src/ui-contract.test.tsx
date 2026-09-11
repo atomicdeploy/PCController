@@ -47,6 +47,24 @@ function shared(): SharedViewProps {
 }
 
 describe('offline and settings UI contracts', () => {
+  it.each([true, false])('renders only the Physical LED mirror hex value in monospace (live=%s)', haveStatusLED => {
+    const snapshot = {
+      ...emptySnapshot,
+      connected: true,
+      have_status: true,
+      have_status_led: haveStatusLED,
+      hello: { ...emptySnapshot.hello, capabilities: 0xFFFFFFFF },
+      status_led: { red: 171, green: 205, blue: 239, brightness: 128, effect: 2, condition: 3 },
+    }
+    const markup = renderToStaticMarkup(<ControlsView {...shared()} snapshot={snapshot} />)
+    if (haveStatusLED) {
+      expect(markup).toContain('<span class="mono">#ABCDEF</span> · effect 2 · condition 3')
+    } else {
+      expect(markup).toContain('Awaiting pushed board state')
+      expect(markup).not.toContain('<span class="mono">#ABCDEF</span>')
+    }
+  })
+
   it('distinguishes missing or rejected credentials from ordinary authenticated transport loss', () => {
     const base = {
       hostRequiresAuthentication: true,
