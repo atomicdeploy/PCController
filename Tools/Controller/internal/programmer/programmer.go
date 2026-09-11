@@ -342,7 +342,7 @@ func Build(options Options) (Command, error) {
 // Execute performs an operation with safety preflights that cannot be
 // represented by a single command line.
 func Execute(ctx context.Context, options Options, output io.Writer) error {
-	return ExecuteWithRunner(ctx, options, output, NewCommandRunner())
+	return ExecuteWithRunner(ctx, options, output, CommandRunnerFunc(Run))
 }
 
 // ExecuteWithRunner exposes the exact guarded operation flow to stable offline
@@ -530,11 +530,6 @@ func verifyMandatoryProgrammerReadback(
 	if err != nil {
 		return fmt.Errorf("build mandatory %s readback: %w", memory, err)
 	}
-	if preparer, ok := runner.(readbackPreparer); ok {
-		if err := preparer.PrepareReadback(ctx, readOptions, output); err != nil {
-			return fmt.Errorf("prepare independent %s readback: %w", memory, err)
-		}
-	}
 	if output != nil {
 		fmt.Fprintln(output, "Mandatory programmer readback:", command.String())
 	}
@@ -600,7 +595,7 @@ func VerifyFlashReadback(
 	output io.Writer,
 ) error {
 	return VerifyFlashReadbackWithRunner(
-		ctx, options, output, NewCommandRunner(),
+		ctx, options, output, CommandRunnerFunc(Run),
 	)
 }
 

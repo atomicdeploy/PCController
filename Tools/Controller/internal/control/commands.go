@@ -4285,7 +4285,7 @@ func safeFlashCommand(
 	}
 	runner := options.ProgramRunner
 	if runner == nil {
-		runner = programmer.NewCommandRunner()
+		runner = programmer.CommandRunnerFunc(programmer.Run)
 	}
 	execute := options.ProgramExecute
 	if execute == nil {
@@ -4572,7 +4572,7 @@ func recoverProgrammingCommand(
 	}
 	runner := options.ProgramRunner
 	if runner == nil {
-		runner = programmer.NewCommandRunner()
+		runner = programmer.CommandRunnerFunc(programmer.Run)
 	}
 	verifyOptions := programmer.Options{
 		Method: programmer.MethodUrclock, Port: snapshot.Port.Name,

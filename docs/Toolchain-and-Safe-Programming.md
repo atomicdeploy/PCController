@@ -358,37 +358,6 @@ melody may occur and TM1637 must retain `Prog` across every flash,
 EEPROM-readback, and application-authentication reset. Repeated startup notes
 are a lifecycle failure even when programming ultimately succeeds.
 
-### UART write-to-readback boundary
-
-Issue #319 exposed a successful UART write followed by a failed independent
-readback, while that same image verified after explicit DTR recovery. The
-production Go programmer runner now performs a separate local-UART re-entry
-stage before mandatory Urclock readback (including recovery verification):
-
-| Stage | Ownership and guarantee |
-| --- | --- |
-| Write process exits | Wait for the synchronous programmer process to finish; never reset while it is running or repeat the write to repair verification |
-| Reset helper opens | Keep application discovery/HELLO paused; open the transaction's exact local port with DTR/RTS initially inactive |
-| DTR pulse | Use the existing 120 ms DTR-only recovery gesture within a two-second context budget; release DTR on cancellation |
-| Helper closes | Close the temporary handle before starting the independent reader; pulse/close failure stops the readback stage |
-| Independent read | Launch a fresh programmer read and retain the mandatory byte comparison; no reset, build identity or successful write substitutes for verification |
-| Application returns | Only the transaction coordinator reconnects the exact device and restores verified settings/recovery state |
-
-The pulse deliberately uses the existing recovery timing. There is no added
-settling sleep or speculative retry; the reader still performs its own normal
-bootloader handshake. The context bounds cooperative reset operations, while
-OS serial-open/close calls remain subject to the driver's own behavior. Physical
-acceptance must verify this boundary on the target USB/UART adapter; it is not
-a claim of guaranteed timing across every driver.
-
-USBasp and unrelated programmer methods do not receive UART pulses. Network
-serial endpoints cannot provide local DTR and fail explicitly at this stage;
-remote API/IPC requests instead execute on the edge that owns the local port.
-Injected test runners have no implicit hardware access. Production `Execute`,
-fresh verification, and the primary's recovery command use the reset-enabled
-runner; deterministic fixtures inject their own opener and reset behavior.
-Firmware, EEPROM schema and mandatory readback policy are unchanged.
-
 ### Read-only recovery of an already-written image
 
 Use the following only when a guarded write transaction ended as failed but the
