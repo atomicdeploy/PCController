@@ -227,6 +227,30 @@ func TestNavigationCoordinatorCommitIsIdempotentAndRejectsConflictingReuse(t *te
 	}
 }
 
+func TestNavigationCoordinatorRejectsDelayedReplayAfterNewerOperation(t *testing.T) {
+	coordinator := deterministicCoordinator(groupEpoch1)
+	one := follower("tui:one", "dashboard", participantEpoch1, 1)
+	two := follower("tui:two", "dashboard", participantEpoch2, 1)
+	observeJoined(coordinator, one, one)
+	observeJoined(coordinator, two, one, two)
+	first := NavigationCommand{
+		Group: DefaultNavigationGroup, Source: one.ID, Page: "events", OperationID: "operation-1",
+	}
+	if _, err := coordinator.Commit(first, []AppInstance{one, two}); err != nil {
+		t.Fatal(err)
+	}
+	second := NavigationCommand{
+		Group: DefaultNavigationGroup, Source: one.ID, Page: "settings", OperationID: "operation-2",
+	}
+	if _, err := coordinator.Commit(second, []AppInstance{one, two}); err != nil {
+		t.Fatal(err)
+	}
+	replay, err := coordinator.Commit(first, []AppInstance{one, two})
+	if err == nil || replay.Page != "" {
+		t.Fatalf("delayed replay rolled canonical navigation back: outcome=%#v err=%v", replay, err)
+	}
+}
+
 func TestNavigationCommitLANBudgetHarness(t *testing.T) {
 	coordinator := deterministicCoordinator(groupEpoch1)
 	one := follower("tui:one", "dashboard", participantEpoch1, 1)
