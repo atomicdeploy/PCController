@@ -166,7 +166,7 @@ export interface IlluminationState {
 }
 
 export interface MacroSnapshot {
-  library: Array<{ id: number; name: string; mode?: string; category?: string; steps: Array<{ kind: string; at_us?: number }> }>
+  library: Array<{ id: number; name: string; mode?: string; category?: string; steps?: Array<{ kind: string; at_us?: number }> | null }>
   playback: { running: boolean; name: string; mode: string; step: number; step_count: number; lifecycle?: string; last_error?: string; faithful: boolean; maximum_timing_error_us: number; startup_delay_us?: number }
   recording: { active: boolean; name: string; mode: string; steps: number; last_error?: string }
 }
