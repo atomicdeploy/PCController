@@ -248,7 +248,9 @@ Before releasing the application UART, Controller performs this sequence:
 8. wait beyond the firmware's deferred EEPROM-write window and verify the
    temporary settings by querying them back;
 9. close the application UART;
-10. read and verify full flash, EEPROM, and programmer-metadata backup;
+10. apply the [explicit deployment backup policy](#development-iterations-and-protected-checkpoints):
+    capture/verify raw memory for protected checkpoints, or skip new raw archival
+    capture for an explicitly selected development iteration;
 11. write and verify the selected firmware image;
 12. durably mark the host programming outcome, reconnect to a fresh
     application HELLO, restore exact original MCU settings, wait, query and
@@ -259,10 +261,10 @@ Before releasing the application UART, Controller performs this sequence:
 If the board was already silent, it remains silent. If it was audible, it is
 made audible again only by restoring the captured MCU settings. Unsupported
 display and LCD operations are capability warnings so a reduced board can still
-use mandatory raw EEPROM backup. Failure to force safe outputs or persist safe
+use the selected capture policy. Failure to force safe outputs or persist safe
 settings is fatal while retaining the recovery marker. A normally returned
-failed flash still records its final host outcome, then attempts reconnection
-and exact restoration.
+failed flash records its outcome and attempts reconnection but retains the
+safety latch/marker until verified recovery or explicit abandonment restores it.
 
 On Windows, the Urclock flash and EEPROM backup reads run as separate AVRDUDE
 processes. If AVRDUDE explicitly reports that the serial handle is still busy,
@@ -298,8 +300,8 @@ firmware artifact and this flag to the primary through the typed
 result. The primary remains the only process that opens the port.
 
 The exception still requires a complete verified flash, raw EEPROM, and
-programmer-metadata backup before the firmware write. It cannot be combined
-with `--allow-incomplete-backup`. Before releasing UART ownership, the host
+programmer-metadata backup before the firmware write, even with an explicit
+development deployment. Before releasing UART ownership, the host
 persists the settings-query failure and any live state it could capture,
 cancels macros, releases all relays, fades PWM when possible (otherwise forces
 it off), shows the programming cues, and plays the power-down melody. It does
@@ -477,11 +479,57 @@ override the host's configured ISP backend for different hardware.
 instance selectors as the ordinary connection layer. The resolved application
 port is kept separate and is never placed in the ISP command.
 
-Standalone USBasp fails closed when the application-lifecycle selector is
-absent or cannot authenticate. `--allow-incomplete-backup` is the explicit,
-logged recovery override for an application UART that is genuinely
-unavailable; it is never the default. When the primary TUI owns the board, the
+Standalone USBasp firmware uploads fail closed when the application-lifecycle
+selector is absent or cannot authenticate. Use `board initialize` for blank or
+unresponsive board recovery; development classification does not waive output
+safety or semantic settings preparation. When the primary TUI owns the board, the
 request routes through that owner and reuses its authenticated runtime.
+
+### Development iterations and protected checkpoints
+
+Deployment describes the **upload workflow**, not whether the physical board is
+used live. A live board can be under development. An alpha version string never
+silently selects a backup exemption, and a successful flash does not promote a
+build to known-good or production.
+
+| Selection | Current behavior |
+|---|---|
+| `production` (fail-safe default) | Require the existing complete verified raw backup before writing |
+| Explicit `development` | Skip new archival flash/EEPROM/metadata capture; preserve existing backups untouched |
+| Either plus `--reinitialize-eeprom` | Require raw backup because the operation destroys semantic settings |
+
+All modes retain target hash validation, safe outputs, current semantic EEPROM
+settings/live-state capture, write verification, reconnect and verified restore.
+The removed incomplete-backup escape hatch is not an alternative safety mode.
+
+| Interface | Selection |
+|---|---|
+| Config file | `programming.deployment: "development"` (JSON/YAML/TOML) |
+| Environment | `PCCONTROLLER_DEPLOYMENT=development` |
+| CLI / `build.cmd` | `--deployment development` |
+| TUI or shared command console | `program flash candidate.hex --deployment development` |
+| API / RPC / IPC update request | `deployment: "development"` with the existing explicit authorization |
+
+Priority is explicit flag/request > environment > config > `production`. The
+effective classification is frozen into an API operation's idempotency identity,
+so a retry cannot silently change the backup policy. Example (only select
+development intentionally for the current upload):
+
+```console
+controller program flash candidate.hex COM18 --deployment development
+controller program flash candidate.hex COM18 --deployment production --dry-run
+build.cmd --upload --port COM18 --deployment development
+```
+
+**Remaining checkpoint strategy — issue #216 in the [requirements backlog](Requirements-Backlog.md):**
+reuse an already available firmware artifact only when reliable full-SHA and
+manifest identity match the installed image; a short build hash is insufficient.
+Capture mutable semantic EEPROM state separately; pair optional raw EEPROM with
+its firmware when rollback requires it. Add explicit user-confirmed or defined
+verification-based known-good promotion, with deduplicated protected retention.
+The current development skip path is a building block, not completion of that
+artifact-reuse/known-good strategy. Do not archive every failed development build
+as a valuable production checkpoint merely because it was flashed successfully.
 
 Installing Urboot-Custom itself requires ISP because the running bootloader
 protects its region and the custom image begins one page lower. Application

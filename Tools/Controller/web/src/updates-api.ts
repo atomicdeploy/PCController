@@ -145,7 +145,7 @@ export interface ArtifactUpdateRequest {
   authorized: true
   method?: ProgrammerMethod
   port?: string
-  allow_incomplete_backup?: boolean
+  deployment?: 'production' | 'development'
   /** Development data loss: retain raw EEPROM backup, but do not restore incompatible semantic settings. */
   reinitialize_eeprom?: boolean
   idempotency_key?: string

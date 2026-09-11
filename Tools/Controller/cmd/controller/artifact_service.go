@@ -16,6 +16,7 @@ import (
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/artifacts"
 	"pccontroller.local/controller/internal/defaultassets"
+	"pccontroller.local/controller/internal/deployment"
 	"pccontroller.local/controller/internal/programmer"
 	"pccontroller.local/controller/internal/shell"
 )
@@ -54,6 +55,7 @@ func newArtifactHostService(
 	}
 	service, err := artifacts.NewService(artifacts.Options{
 		Store: artifactStore, Executor: executor,
+		Deployment: func() string { return store.Current().Programming.Deployment },
 		Events: func(kind, text string, metadata map[string]string) {
 			client.EmitHostActionEvent(kind, text, "artifact-service", "update", metadata)
 		},
@@ -204,8 +206,13 @@ func (executor *primaryArtifactExecutor) ProgramFirmware(
 	request artifacts.UpdateRequest,
 	progress artifacts.ProgressFunc,
 ) error {
-	if request.ReinitializeEEPROM && request.AllowIncompleteBackup {
-		return errors.New("development EEPROM reinitialization requires a complete verified raw backup")
+	configured := ""
+	if executor.store != nil {
+		configured = executor.store.Current().Programming.Deployment
+	}
+	classification, err := deployment.Resolve(configured, request.Deployment)
+	if err != nil {
+		return err
 	}
 	method, err := executor.method(request.Method)
 	if err != nil {
@@ -214,7 +221,7 @@ func (executor *primaryArtifactExecutor) ProgramFirmware(
 	if strings.TrimSpace(artifact.LocalPath) == "" {
 		return errors.New("firmware artifact has no verified local path")
 	}
-	words := []string{"program", "flash", artifact.LocalPath, "--method", method}
+	words := []string{"program", "flash", artifact.LocalPath, "--method", method, "--deployment", classification}
 	if method == string(programmer.MethodUrclock) {
 		port := executor.port(request.Port)
 		if port == "" {
@@ -225,9 +232,6 @@ func (executor *primaryArtifactExecutor) ProgramFirmware(
 			)
 		}
 		words = append(words, port)
-	}
-	if request.AllowIncompleteBackup {
-		words = append(words, "--allow-incomplete-backup")
 	}
 	if request.ReinitializeEEPROM {
 		words = append(words, "--reinitialize-eeprom")

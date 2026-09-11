@@ -426,9 +426,13 @@ func macroProgressBar(current, total, width int) string {
 }
 
 func macroTimingSummary(state control.MacroState) string {
-	return fmt.Sprintf("last %s · max %s · tolerance %s · violations %d",
+	text := fmt.Sprintf("last %s · max %s · tolerance %s · violations %d",
 		formatSignedMicros(state.LastTimingDeltaUS), formatMicros(state.MaximumTimingErrorUS),
 		formatMicros(state.TimingToleranceUS), state.TimingViolations)
+	if state.Mode == "host" {
+		return "startup " + formatMicros(state.StartupDelayUS) + " · " + text
+	}
+	return text
 }
 
 func macroResultSummary(state control.MacroState) string {
