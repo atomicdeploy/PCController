@@ -69,11 +69,13 @@ client. Its console accepts the identical commands. `controller.snapshot` and
 `/api/snapshot` expose `macros.library`, `macros.recording` and `macros.playback`;
 command transports use the existing `controller.command.execute` route rather
 than a second macro engine. All clients refresh host snapshots on macro events;
-no board polling or manual page refresh is required for macro progress.
+the UI needs no polling or manual page refresh for macro progress. The MCU
+streaming runner also retains a 100 ms status-query fallback alongside its
+execution/status-event handling; it is not an entirely poll-free board path.
 
 Empty saves and storage failures retain the take for retry or explicit discard.
-Recording cannot start during playback. Cancellation is checked before every
-dispatch, including simultaneous steps. Raw relay/motion opcodes still use the
+Recording cannot start during playback. Host cancellation is checked before
+every dispatch, including simultaneous steps. Raw relay/motion opcodes still use the
 host motion-permission check. Existing output interlocks remain authoritative.
 Host playback and its cancellation cleanup stay bound to the session captured at
 start. If USB disconnects or another board/session replaces it, playback fails
