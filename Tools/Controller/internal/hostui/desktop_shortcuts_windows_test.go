@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"pccontroller.local/controller/internal/productidentity"
 )
 
 func temporaryShortcutStatus(t *testing.T) DesktopIntegrationStatus {
@@ -138,5 +140,44 @@ func TestWindowsShortcutPathPreservesKnownFolderDestination(t *testing.T) {
 	}
 	if _, err := shortcutPathInDirectory("", "Controller"); err == nil {
 		t.Fatal("missing known folder accepted")
+	}
+}
+
+func TestWindowsShortcutsMigrateOnlyValidatedPreviousSlot(t *testing.T) {
+	status := temporaryShortcutStatus(t)
+	previous := filepath.Join(t.TempDir(), "packages", "previous", "controller.exe")
+	for _, path := range []string{status.Shortcut, status.DesktopShortcut} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := createWindowsShortcut(previous, path, productidentity.StableAppID, "Controller Tests"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Installer tests prove the validator's marker, active/previous-state and
+	// full-package checks; these native tests prove both Shell links use it.
+	checks := 0
+	validated := func(executable, candidate string) (bool, error) {
+		checks++
+		return sameWindowsPath(executable, status.Executable) && sameWindowsPath(candidate, previous), nil
+	}
+	if err := ensureWindowsShortcutsWithPredecessor(&status, productidentity.StableAppID, "Controller Tests", validated); err != nil {
+		t.Fatal(err)
+	}
+	if !status.ShortcutReady || !status.DesktopShortcutReady || checks != 4 {
+		t.Fatalf("migration status=%+v checks=%d", status, checks)
+	}
+	for _, path := range []string{status.Shortcut, status.DesktopShortcut} {
+		link, err := inspectWindowsShortcut(path)
+		if err != nil || !sameWindowsPath(link.Target, status.Executable) || !sameWindowsPath(link.Icon, status.Executable) {
+			t.Fatalf("old target/icon remains: %+v err=%v", link, err)
+		}
+	}
+	if err := createWindowsShortcut(previous, status.DesktopShortcut, "Tests.ForeignIdentity", "User link"); err != nil {
+		t.Fatal(err)
+	}
+	status.DesktopShortcutReady = false
+	if err := ensureWindowsShortcutsWithPredecessor(&status, productidentity.StableAppID, "Controller Tests", validated); err == nil || status.DesktopShortcutReady {
+		t.Fatalf("foreign AppID accepted via valid slot: %+v err=%v", status, err)
 	}
 }
