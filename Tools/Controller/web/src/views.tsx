@@ -560,7 +560,7 @@ export function ControlsView(props: SharedViewProps) {
 			</div>
 			<div className="status-led-live" style={{ '--preview': liveHex } as React.CSSProperties}>
 				<i aria-hidden="true" />
-				<div><strong>{copy('Physical LED mirror', 'بازتاب LED فیزیکی')}</strong><small dir="ltr">{liveLED ? `${liveHex} · effect ${liveLED.effect} · condition ${liveLED.condition}` : copy('Awaiting pushed board state', 'در انتظار وضعیت ارسالی برد')}</small></div>
+				<div><strong>{copy('Physical LED mirror', 'بازتاب LED فیزیکی')}</strong><small dir="ltr">{liveLED ? <><span className="mono">{liveHex}</span>{` · effect ${liveLED.effect} · condition ${liveLED.condition}`}</> : copy('Awaiting pushed board state', 'در انتظار وضعیت ارسالی برد')}</small></div>
 			</div>
 		  </div>
           <label className="native-color-field">
