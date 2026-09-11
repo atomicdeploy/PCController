@@ -1729,7 +1729,7 @@ func (client *Client) SetStatusRGBBase(
 	ctx context.Context,
 	red, green, blue, brightness byte,
 ) error {
-	return client.outputs.SetStatusBase(ctx, red, green, blue, brightness)
+	return client.outputs.SetStatusBase(control.WithBackgroundCommand(ctx), red, green, blue, brightness)
 }
 
 // OutputState returns active melody and status-effect operation metadata.

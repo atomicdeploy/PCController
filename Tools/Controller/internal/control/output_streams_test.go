@@ -15,6 +15,7 @@ type recordedOutputCommand struct {
 	at      time.Time
 	opcode  byte
 	payload []byte
+	source  CommandSource
 }
 
 type recordingOutputTarget struct {
@@ -37,6 +38,7 @@ func (target *recordingOutputTarget) Command(
 	target.commands = append(target.commands, recordedOutputCommand{
 		at: time.Now(), opcode: opcode,
 		payload: append([]byte(nil), payload...),
+		source:  CommandSourceFromContext(ctx),
 	})
 	commandCount := len(target.commands)
 	delay := target.ackDelay
@@ -306,6 +308,12 @@ func TestStatusEffectRestoresNewestPolicyBase(t *testing.T) {
 	want := native.StatusRGBPayload(7, 8, 9, 100)
 	if string(last.payload) != string(want) {
 		t.Fatalf("latest policy base was not restored: got=% X want=% X", last.payload, want)
+	}
+	if last.source != CommandSourceBackground {
+		t.Fatalf("automatic policy restore lacks capture provenance: %#v", last)
+	}
+	if commands[0].source != "" {
+		t.Fatal("explicit base write was incorrectly classified as background")
 	}
 }
 

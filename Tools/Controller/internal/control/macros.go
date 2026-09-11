@@ -385,7 +385,7 @@ func (runner *MacroRunner) StopRecording(save bool) (appconfig.Macro, error) {
 func (runner *MacroRunner) captureCommand(evidence CommandEvidence) {
 	runner.recordMu.Lock()
 	defer runner.recordMu.Unlock()
-	if !runner.recording.Active {
+	if !runner.recording.Active || evidence.Source == CommandSourceBackground {
 		return
 	}
 	if len(runner.recordMacro.Steps) >= 65535 {

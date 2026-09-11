@@ -9,6 +9,7 @@ import (
 
 	controller "pccontroller.local/controller"
 	"pccontroller.local/controller/internal/appconfig"
+	"pccontroller.local/controller/internal/control"
 )
 
 const (
@@ -119,7 +120,7 @@ func (arbiter *statusLEDArbiter) PrepareDisconnect(ctx context.Context) error {
 	arbiter.mu.Unlock()
 	frame := statusLEDVisualFrame(visual, 0)
 	return arbiter.target.SetStatusRGB(
-		ctx, frame.red, frame.green, frame.blue, frame.brightness,
+		control.WithBackgroundCommand(ctx), frame.red, frame.green, frame.blue, frame.brightness,
 	)
 }
 
@@ -220,6 +221,7 @@ func sendStatusLEDFrame(
 	state string,
 	frame statusLEDFrame,
 ) error {
+	ctx = control.WithBackgroundCommand(ctx)
 	if state == statusLEDDoorWarning {
 		// A Running+door-open safety warning must preempt an informational
 		// streamed overlay instead of waiting for that effect or macro to end.
