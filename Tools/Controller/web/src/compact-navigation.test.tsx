@@ -7,6 +7,14 @@ import { NavButton } from './components'
 const css = readFileSync(new URL('./styles.css', import.meta.url), 'utf8')
 
 describe('collapsed navigation layout contract', () => {
+  it('keeps a visible expand control and removes status text from the compact grid', () => {
+    const toggle = css.match(/\.is-sidebar-compact \.sidebar-toggle\s*\{([^}]+)\}/)?.[1]
+    expect(toggle).toContain('width: 44px')
+    expect(toggle).toContain('height: 44px')
+    expect(toggle).not.toContain('opacity: 0')
+    expect(css).not.toContain('.is-sidebar-compact .sidebar__status::after')
+    expect(css).toContain('.is-sidebar-compact .sidebar__status > div { display: none; }')
+  })
   it.each([undefined, '8'])('keeps an accessible name when the visible label is removed (badge=%s)', badge => {
     const html = renderToStaticMarkup(<NavButton icon={House} label="Overview" active badge={badge} onClick={() => {}} />)
     expect(html).toContain('aria-label="Overview"')
