@@ -225,17 +225,29 @@ func TestNavigationCoordinatorCommitIsIdempotentAndRejectsConflictingReuse(t *te
 	if _, err = coordinator.Commit(command, []AppInstance{one, two}); err == nil {
 		t.Fatal("conflicting operation ID reuse was accepted")
 	}
+}
+
+func TestNavigationCoordinatorRejectsDelayedReplayAfterNewerOperation(t *testing.T) {
+	coordinator := deterministicCoordinator(groupEpoch1)
+	one := follower("tui:one", "dashboard", participantEpoch1, 1)
+	two := follower("tui:two", "dashboard", participantEpoch2, 1)
+	observeJoined(coordinator, one, one)
+	observeJoined(coordinator, two, one, two)
+	first := NavigationCommand{
+		Group: DefaultNavigationGroup, Source: one.ID, Page: "events", OperationID: "operation-1",
+	}
+	if _, err := coordinator.Commit(first, []AppInstance{one, two}); err != nil {
+		t.Fatal(err)
+	}
 	second, err := coordinator.Commit(NavigationCommand{
 		Group: DefaultNavigationGroup, Source: one.ID, Page: "settings", OperationID: "newer-operation-2",
 	}, []AppInstance{one, two})
 	if err != nil || second.Page != "settings" {
 		t.Fatalf("newer outcome=%#v err=%v", second, err)
 	}
-	replay, err = coordinator.Commit(NavigationCommand{
-		Group: DefaultNavigationGroup, Source: one.ID, Page: "events", OperationID: "same-operation-1",
-	}, []AppInstance{one, two})
-	if err != nil || replay.Page != "events" || replay.Revision != first.Revision {
-		t.Fatalf("older retry replay=%#v err=%v", replay, err)
+	replay, err := coordinator.Commit(first, []AppInstance{one, two})
+	if err == nil || replay.Page != "" || replay.Revision != 0 || replay.Epoch != "" {
+		t.Fatalf("superseded retry replay=%#v err=%v", replay, err)
 	}
 	if coordinator.groups[DefaultNavigationGroup].page != "settings" {
 		t.Fatalf("older retry rolled canonical page back to %q", coordinator.groups[DefaultNavigationGroup].page)
