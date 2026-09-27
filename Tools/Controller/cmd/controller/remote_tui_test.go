@@ -3,19 +3,22 @@ package main
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	controllerapi "pccontroller.local/controller"
 	"pccontroller.local/controller/internal/control"
+	"pccontroller.local/controller/internal/hostui"
 	"pccontroller.local/controller/internal/shell"
 )
 
 func TestRemoteTUIPollEventsBacksOffAndRediscoversAfterTransportFailure(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	client := &remoteTUIIPC{
-		events: make(chan control.Event, 1), done: make(chan struct{}), retry: 80 * time.Millisecond,
+		events: make(chan control.Event, 1), ready: make(chan struct{}),
+		done: make(chan struct{}), retry: 80 * time.Millisecond,
 	}
 	var calls atomic.Int32
 	fourthCall := make(chan struct{})
@@ -56,6 +59,120 @@ func TestRemoteTUIPollEventsBacksOffAndRediscoversAfterTransportFailure(t *testi
 	if got := calls.Load(); got != 4 {
 		t.Fatalf("RPC calls=%d, want one backoff then cursor rediscovery", got)
 	}
+}
+
+func TestRemoteTUIInstanceLeaseReportsRefreshesAndRemoves(t *testing.T) {
+	reporter, err := hostui.NewNavigationReporter(true, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &remoteTUIIPC{sessions: make(chan struct{}, 1)}
+	var mu sync.Mutex
+	methods := make([]string, 0, 4)
+	reports := make([]hostui.AppInstance, 0, 4)
+	refreshed := make(chan struct{}, 1)
+	catchUp := make(chan struct{}, 1)
+	client.callFn = func(_ context.Context, method string, params any, _ any) error {
+		mu.Lock()
+		defer mu.Unlock()
+		methods = append(methods, method)
+		if method == "controller.app.instance.report" {
+			report := params.(hostui.AppInstance)
+			reports = append(reports, report)
+			if len(reports) >= 2 {
+				select {
+				case refreshed <- struct{}{}:
+				default:
+				}
+			}
+			if report.Values[hostui.NavigationCatchUpKey] == "true" {
+				select {
+				case catchUp <- struct{}{}:
+				default:
+				}
+			}
+		}
+		return nil
+	}
+	lease := newRemoteTUIInstanceLease(client, reporter, 15*time.Millisecond)
+	if err := lease.Update("events", "PCController — Activity"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-refreshed:
+	case <-time.After(time.Second):
+		t.Fatal("instance lease did not refresh")
+	}
+	client.sessions <- struct{}{}
+	select {
+	case <-catchUp:
+	case <-time.After(time.Second):
+		t.Fatal("instance lease did not request canonical catch-up after reconnect")
+	}
+	lease.Close()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(reports) < 2 {
+		t.Fatalf("instance reports=%d methods=%#v", len(reports), methods)
+	}
+	first, last := reports[0], reports[len(reports)-1]
+	if first.ID != reporter.InstanceID() || first.Surface != "tui" || first.Page != "events" ||
+		first.LeaseSeconds != remoteTUIInstanceLeaseSeconds || first.Self == nil ||
+		first.Values[hostui.NavigationSyncKey] != hostui.NavigationSyncFollow ||
+		first.Values[hostui.NavigationGroupKey] != hostui.DefaultNavigationGroup ||
+		first.Values["terminal_title"] != "PCController — Activity" {
+		t.Fatalf("first report=%#v", first)
+	}
+	if first.Values[hostui.NavigationRevisionKey] >= last.Values[hostui.NavigationRevisionKey] {
+		t.Fatalf("non-monotonic reports first=%#v last=%#v", first.Values, last.Values)
+	}
+	if methods[len(methods)-1] != "controller.app.instance.remove" {
+		t.Fatalf("last method=%q methods=%#v", methods[len(methods)-1], methods)
+	}
+}
+
+func TestRemoteTUIPollerEmitsAuthoritativeSessionResetBeforeNewEpoch(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	client := &remoteTUIIPC{
+		events: make(chan control.Event, 4), ready: make(chan struct{}),
+		done: make(chan struct{}), retry: time.Millisecond,
+	}
+	var nextCalls atomic.Int32
+	client.callFn = func(_ context.Context, method string, _ any, target any) error {
+		switch method {
+		case "controller.event.latest":
+			latest := target.(*struct {
+				ID uint64 `json:"id"`
+			})
+			if nextCalls.Load() == 0 {
+				latest.ID = 20
+			} else {
+				latest.ID = 1
+			}
+			return nil
+		case "controller.event.next":
+			if nextCalls.Add(1) == 1 {
+				return errors.New("primary restarted")
+			}
+			<-ctx.Done()
+			return ctx.Err()
+		default:
+			return errors.New("unexpected method")
+		}
+	}
+	go client.pollEvents(ctx)
+	select {
+	case event := <-client.events:
+		if event.Kind != "client.navigation.session.reset" {
+			t.Fatalf("reset event=%#v", event)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("poller did not emit session reset")
+	}
+	cancel()
+	<-client.done
 }
 
 func TestRemoteTUICommandEngineMirrorsPrimaryCatalog(t *testing.T) {

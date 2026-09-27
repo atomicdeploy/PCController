@@ -347,6 +347,17 @@ controller tui --columns 144 --rows 44 --console-font "Cascadia Mono" --console-
 controller tui --console-management=false
 ```
 
+Attach the same full TUI to an authenticated primary without approaching this
+machine's serial ports:
+
+```console
+controller tui --ipc-addr peer-host.local:8787 --ipc-token-ref os:ipc.remote
+```
+
+Full TUIs attached to that primary synchronize their active page by default.
+Use `--sync-navigation=false` for an independent page in one process; explicit
+authenticated instance-targeted navigation remains available.
+
 The same values are persisted under `ui.tui_console` in JSON, YAML, or TOML,
 can be edited live on the TUI **HOST Settings** page, and can be changed with
 `config set ui.tui_console.columns 144` (likewise `rows`, `font_face`,
@@ -722,10 +733,10 @@ origins, then use a vault reference from another machine without placing the
 bearer token on its command line:
 
 ```console
-bin\controller.exe network edge-enable --origin David-PC:* --origin 192.168.100.130:*
-bin\controller.exe ipc call --addr 192.168.100.155:8787 --token-ref os:edge/cafe-pc --method controller.ping
-bin\controller.exe network peer-add --name cafe-pc --url ws://192.168.100.155:8787/ipc --secret-ref os:edge/cafe-pc
-bin\controller.exe network probe --addr 192.168.100.155:8787 --token-ref os:edge/cafe-pc --origin http://David-PC:8787
+bin\controller.exe network edge-enable --origin development-host:* --origin 192.0.2.130:*
+bin\controller.exe ipc call --addr 192.0.2.155:8787 --token-ref os:edge/peer-host --method controller.ping
+bin\controller.exe network peer-add --name peer-host --url ws://192.0.2.155:8787/ipc --secret-ref os:edge/peer-host
+bin\controller.exe network probe --addr 192.0.2.155:8787 --token-ref os:edge/peer-host --origin http://development-host:8787
 ```
 
 The edge command enables mDNS/SSDP and the selected IPC, REST, WebSocket,

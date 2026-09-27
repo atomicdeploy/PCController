@@ -67,6 +67,31 @@ func TestActionBrokerValidatesAndDelivers(t *testing.T) {
 	}
 }
 
+func TestActionBrokerValidatesAndCopiesBoundedMetadata(t *testing.T) {
+	broker := NewActionBroker()
+	events := broker.Events()
+	metadata := map[string]string{" Navigation_Group ": " default "}
+	if err := broker.Publish(AppAction{
+		Kind: "app.page", Value: "events", Metadata: metadata,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	metadata[" Navigation_Group "] = "mutated"
+	action := <-events
+	if action.Metadata[NavigationGroupKey] != DefaultNavigationGroup {
+		t.Fatalf("metadata was not normalized/copied: %#v", action.Metadata)
+	}
+	for _, invalid := range []map[string]string{
+		{"session_token": "secret"},
+		{"bad key": "value"},
+		{"detail": "line one\nline two"},
+	} {
+		if err := broker.Publish(AppAction{Kind: "app.page", Value: "events", Metadata: invalid}); err == nil {
+			t.Fatalf("invalid metadata accepted: %#v", invalid)
+		}
+	}
+}
+
 func TestActionBrokerObserverOutlivesBoundedTUIQueue(t *testing.T) {
 	broker := NewActionBroker()
 	events := broker.Events()

@@ -607,7 +607,7 @@ required `-32001`, remote capability denied `-32003`, and runtime/device error
 | `controller.app.instances` | `{}` | list live UI/automation instances and bounded non-secret state |
 | `controller.app.bridge` | `{}` | query the original coordinator bridge instance, including bounded process self-information |
 | `controller.app.instance.get` | `id` | query one exact live instance |
-| `controller.app.instance.report` | `id`, `surface`, `page`, optional `state`, `lease_seconds`, `values`, `self` | create or refresh an ephemeral instance report |
+| `controller.app.instance.report` | `id`, `surface`, `page`, optional `state`, `lease_seconds`, `values`, `self` | create or refresh an ephemeral instance report; TUI followers use bounded navigation mode/group/epoch/revision values |
 | `controller.app.instance.remove` | `id` | remove one instance report immediately |
 | `controller.app.navigate` | `page`, optional `target` | navigate `*`, a surface such as `webui`/`tui`, or one exact instance ID |
 | `controller.history.status` | optional ISO-8601 `since` | retained measurement samples, including samples restored from the bounded host data store after restart |
@@ -633,6 +633,31 @@ required `-32001`, remote capability denied `-32003`, and runtime/device error
 | `controller.integrations.local.set` | `local_device`, `data_hub` | validate and persist LAN-only device and loopback-only data roots |
 | `controller.ports` | `{}` | current serial devices with stable identity fields |
 | `controller.quit`, `controller.exit` | `{}` | close the primary and emit lifecycle shutdown |
+
+Full TUI instances follow the ephemeral `default` navigation group unless that
+process starts with navigation synchronization disabled. A follower reports
+`navigation_sync=follow`, `navigation_group`, a random process-session
+`navigation_epoch`, and a monotonically increasing `navigation_revision` in
+its instance values. The primary keeps one in-memory canonical page, epoch, and
+revision per live group. The first live follower seeds an empty group; later
+followers receive an exact-instance catch-up, and a fresh local page report is
+fanned out only to the other live followers. Receiver acknowledgements of the
+canonical page are no-ops. When the last lease leaves or expires the group is
+discarded, so active pages are never persisted as host configuration.
+After an event-session reconnect a follower adds
+`navigation_catch_up=true`; the coordinator then re-sends the canonical page
+instead of treating the client's potentially stale page as new intent.
+
+Coordinator navigation actions carry `navigation_sync=group`, group, epoch,
+revision, and source-instance metadata. Clients reject duplicate, older, or
+foreign-epoch deliveries until an authoritative primary reconnect resets their
+acceptance cursor. Generic `controller.app.action` and `/api/app/action`
+callers cannot supply these coordinator-owned fields. Authenticated remote
+control instead uses `controller.app.navigate` or `/api/app/navigate`, which is
+individually authorized and audited under `host_configuration`. An explicit
+navigation can still target an opted-out instance, but does not enroll it in a
+group or make it follow later broadcasts. Prompt input, cursor/editor/modal
+state, terminal visibility, and serial ownership always remain local.
 
 RF learning has two mutually exclusive modes. An omitted mode or
 `{"mode":"indefinite"}` keeps accepting codes until cancellation. A bounded

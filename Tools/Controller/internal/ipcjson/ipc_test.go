@@ -110,6 +110,71 @@ func TestAppInstanceRPCQueriesAndTargetsNavigation(t *testing.T) {
 	}
 }
 
+func TestRemoteAppNavigationRejectsCoordinatorMetadataAndKeepsExplicitPath(t *testing.T) {
+	runtime := control.New(control.Options{})
+	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	broker := hostui.NewActionBroker()
+	actions := broker.Events()
+	config := appconfig.Defaults()
+	config.IPC.AllowRemote = true
+	service := Service{
+		Client: client, AppAction: broker.Publish,
+		HostConfig: func() appconfig.Config { return config },
+	}
+	injected, _ := json.Marshal(hostui.AppAction{
+		Kind: "app.page", Value: "settings", Target: "tui:one",
+		Metadata: map[string]string{
+			hostui.NavigationSyncKey:     hostui.NavigationSyncGroupUpdate,
+			hostui.NavigationGroupKey:    hostui.DefaultNavigationGroup,
+			hostui.NavigationEpochKey:    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			hostui.NavigationRevisionKey: "99",
+			hostui.NavigationSourceKey:   "tui:attacker",
+		},
+	})
+	denied := service.DispatchRemote(context.Background(), Request{
+		Method: "controller.app.action", Params: injected,
+	}, "bridge")
+	if denied.Error == nil || denied.Error.Code != -32003 ||
+		!strings.Contains(denied.Error.Message, capabilityHostConfig) {
+		t.Fatalf("disabled host-configuration policy=%#v", denied)
+	}
+
+	config.IPC.RemotePolicy.HostConfiguration = true
+	spoofed := service.DispatchRemote(context.Background(), Request{
+		Method: "controller.app.action", Params: injected,
+	}, "bridge")
+	if spoofed.Error == nil || !strings.Contains(spoofed.Error.Message, "coordinator-owned") {
+		t.Fatalf("authorized generic metadata injection=%#v", spoofed)
+	}
+	select {
+	case action := <-actions:
+		t.Fatalf("spoofed action reached broker: %#v", action)
+	default:
+	}
+
+	explicitParams, _ := json.Marshal(map[string]string{
+		"page": "settings", "target": "tui:one",
+	})
+	explicit := service.DispatchRemote(context.Background(), Request{
+		Method: "controller.app.navigate", Params: explicitParams,
+	}, "bridge")
+	if explicit.Error != nil {
+		t.Fatalf("explicit authorized navigation=%#v", explicit)
+	}
+	select {
+	case action := <-actions:
+		if action.Kind != "app.page" || action.Target != "tui:one" ||
+			action.Value != "settings" || hostui.HasCoordinatorNavigationMetadata(action.Metadata) {
+			t.Fatalf("explicit action=%#v", action)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("explicit navigation did not reach broker")
+	}
+	if client.LatestEventID() == 0 {
+		t.Fatal("remote navigation authorization was not audited")
+	}
+}
+
 func TestAppBridgeReturnsCoordinatorSelfInformation(t *testing.T) {
 	runtime := control.New(control.Options{})
 	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))

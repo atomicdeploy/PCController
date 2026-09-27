@@ -1096,7 +1096,9 @@ func (service *Service) dispatch(
 	case "controller.app.action":
 		var action hostui.AppAction
 		if err = decodeParams(request.Params, &action); err == nil {
-			if service.AppAction == nil {
+			if hostui.HasCoordinatorNavigationMetadata(action.Metadata) {
+				err = errors.New("navigation synchronization metadata is coordinator-owned; use controller.app.navigate")
+			} else if service.AppAction == nil {
 				err = errors.New("primary app action routing is unavailable")
 			} else {
 				action.Source = firstNonempty(action.Source, "ipc")
@@ -2762,6 +2764,12 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 			return
 		}
 		action.Source = "rest"
+		if hostui.HasCoordinatorNavigationMetadata(action.Metadata) {
+			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{
+				"error": "navigation synchronization metadata is coordinator-owned; use /api/app/navigate",
+			})
+			return
+		}
 		if err := service.AppAction(action); err != nil {
 			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
