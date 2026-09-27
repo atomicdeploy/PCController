@@ -318,7 +318,7 @@ func startPrimaryIPCAtWithIdentity(
 	}
 	server.actions = hostui.NewActionBroker()
 	server.instances = hostui.NewInstanceRegistry()
-	server.actionCoordinator = hostui.NewActionCoordinator(server.instances, server.actions.Publish)
+	server.actionCoordinator = hostui.NewActionCoordinator(server.instances, server.actions.PublishTracked)
 	server.actionCoordinator.SetObserver(func(change hostui.ActionOutcomeChange) {
 		runtime.PublishStructuredEvent(appActionOutcomeEvent(change))
 	})

@@ -32,7 +32,7 @@ func TestTypedAppActionPushAckOutcomeAcrossBrowserTransports(t *testing.T) {
 				t.Fatal(err)
 			}
 			broker := hostui.NewActionBroker()
-			coordinator := hostui.NewActionCoordinator(registry, broker.Publish)
+			coordinator := hostui.NewActionCoordinator(registry, broker.PublishTracked)
 			defer coordinator.Close()
 			broker.SetObserver(func(action hostui.AppAction) {
 				metadata := map[string]string{

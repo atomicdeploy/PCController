@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -28,6 +29,10 @@ type AppAction struct {
 // still received the action. A correlated operation must await its receipt or
 // deadline rather than claiming all delivery paths rejected it.
 var ErrPartialActionDelivery = errors.New("app action queue is full; observer delivery remains active")
+
+const MaximumCustomActionValueBytes = 4096
+
+var customActionKindPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)+$`)
 
 type ActionBroker struct {
 	events     chan AppAction
@@ -70,6 +75,42 @@ func (broker *ActionBroker) Publish(action AppAction) error {
 	if err != nil {
 		return err
 	}
+	return broker.publishNormalized(action)
+}
+
+// PublishTracked is the coordinator-only delivery path. It accepts bounded
+// custom namespaces after Submit verified the live target advertisement, and
+// requires the correlation metadata which only the coordinator manufactures.
+// Ordinary broker callers continue through Publish and remain built-in-only.
+func (broker *ActionBroker) PublishTracked(action AppAction) error {
+	var err error
+	action, err = normalizeAppActionEnvelope(action)
+	if err != nil {
+		return err
+	}
+	recognized, err := validateBuiltInAppAction(&action)
+	if err != nil {
+		return err
+	}
+	if !recognized {
+		if !isRegisteredCustomActionKind(action.Kind) {
+			return fmt.Errorf("unsupported app action %q", action.Kind)
+		}
+		if len(action.Value) > MaximumCustomActionValueBytes || strings.ContainsAny(action.Value, "\x00\r\n") {
+			return fmt.Errorf(
+				"custom app action value exceeds %d bytes or contains controls",
+				MaximumCustomActionValueBytes,
+			)
+		}
+		if action.OperationID == "" || action.Metadata[ActionDeliveryIDKey] == "" ||
+			action.Metadata[ActionDeliveryDeadlineKey] == "" {
+			return errors.New("custom app action requires coordinator delivery metadata")
+		}
+	}
+	return broker.publishNormalized(action)
+}
+
+func (broker *ActionBroker) publishNormalized(action AppAction) error {
 	broker.mu.RLock()
 	observer := broker.watch
 	subscribed := broker.subscribed
@@ -100,6 +141,51 @@ func (broker *ActionBroker) Publish(action AppAction) error {
 // this before freezing a target set so an invalid command cannot create a
 // partially published operation.
 func NormalizeAppAction(action AppAction) (AppAction, error) {
+	action, err := normalizeAppActionEnvelope(action)
+	if err != nil {
+		return AppAction{}, err
+	}
+	recognized, err := validateBuiltInAppAction(&action)
+	if err != nil {
+		return AppAction{}, err
+	}
+	if !recognized {
+		return AppAction{}, fmt.Errorf("unsupported app action %q", action.Kind)
+	}
+	return action, nil
+}
+
+// NormalizeTrackedAppAction extends the built-in action contract only for a
+// bounded custom namespace explicitly advertised by a currently-live matched
+// client. Custom actions never enter the untracked legacy delivery path.
+func NormalizeTrackedAppAction(action AppAction, registry *InstanceRegistry) (AppAction, error) {
+	action, err := normalizeAppActionEnvelope(action)
+	if err != nil {
+		return AppAction{}, err
+	}
+	recognized, err := validateBuiltInAppAction(&action)
+	if err != nil {
+		return AppAction{}, err
+	}
+	if recognized {
+		return action, nil
+	}
+	if !isRegisteredCustomActionKind(action.Kind) {
+		return AppAction{}, fmt.Errorf("unsupported app action %q", action.Kind)
+	}
+	if !TracksRegisteredAppActionOutcome(registry, action.Kind, action.Target) {
+		return AppAction{}, fmt.Errorf("custom app action %q is not advertised by a live target", action.Kind)
+	}
+	if len(action.Value) > MaximumCustomActionValueBytes || strings.ContainsAny(action.Value, "\x00\r\n") {
+		return AppAction{}, fmt.Errorf(
+			"custom app action value exceeds %d bytes or contains controls",
+			MaximumCustomActionValueBytes,
+		)
+	}
+	return action, nil
+}
+
+func normalizeAppActionEnvelope(action AppAction) (AppAction, error) {
 	action.Kind = strings.ToLower(strings.TrimSpace(action.Kind))
 	action.Value = strings.TrimSpace(action.Value)
 	action.Target = strings.TrimSpace(action.Target)
@@ -118,41 +204,54 @@ func NormalizeAppAction(action AppAction) (AppAction, error) {
 		return AppAction{}, err
 	}
 	action.Metadata = metadata
+	return action, nil
+}
+
+func validateBuiltInAppAction(action *AppAction) (bool, error) {
 	switch action.Kind {
 	case "app.page":
 		if action.Value == "" {
-			return AppAction{}, errors.New("app.page requires a page name")
+			return true, errors.New("app.page requires a page name")
 		}
 	case "app.title":
 		if !strings.EqualFold(action.Value, "auto") {
-			var err error
-			action.Value, err = ValidateTerminalTitle(action.Value)
+			value, err := ValidateTerminalTitle(action.Value)
 			if err != nil {
-				return AppAction{}, err
+				return true, err
 			}
+			action.Value = value
 		}
 	case "app.osc":
-		var err error
-		action.Value, err = ValidateOSCPayload(action.Value)
+		value, err := ValidateOSCPayload(action.Value)
 		if err != nil {
-			return AppAction{}, err
+			return true, err
 		}
+		action.Value = value
 	case "app.progress":
 		if _, err := ParseTerminalProgress(action.Value); err != nil {
-			return AppAction{}, err
+			return true, err
 		}
 	case "app.quit", "app.port.open", "app.port.close":
 		if action.Value != "" {
-			return AppAction{}, fmt.Errorf("%s does not accept a value", action.Kind)
+			return true, fmt.Errorf("%s does not accept a value", action.Kind)
 		}
 	case "command":
 		if action.Value == "" {
-			return AppAction{}, errors.New("command action requires a command")
+			return true, errors.New("command action requires a command")
 		}
 	default:
-		return AppAction{}, fmt.Errorf("unsupported app action %q", action.Kind)
+		return false, nil
 	}
-	return action, nil
+	return true, nil
+}
+
+func isRegisteredCustomActionKind(kind string) bool {
+	kind = strings.ToLower(strings.TrimSpace(kind))
+	if len(kind) > 64 || !customActionKindPattern.MatchString(kind) {
+		return false
+	}
+	namespace, _, _ := strings.Cut(kind, ".")
+	return namespace != "app" && namespace != "controller" && kind != "command"
 }
 
 func normalizeAppActionMetadata(values map[string]string) (map[string]string, error) {

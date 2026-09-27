@@ -674,7 +674,13 @@ not flood operator activity logs, while rejection and timeout remain visible
 one-shot activity events.
 
 Unknown well-formed optional action capabilities remain visible in discovery
-without rejecting the whole instance; only implemented action names execute.
+without rejecting the whole instance. A namespaced custom action such as
+`pealayer.play` becomes executable only while a matched live instance advertises
+that exact capability. Custom namespaces cannot use the reserved `app.*`,
+`controller.*`, or `command` names; values are limited to 4096 bytes and cannot
+contain NUL, CR, or LF. They always use the correlated exact-target path with a
+delivery nonce, deadline, deduplication receipt, and terminal ACK outcome; they
+never fall back to untracked legacy delivery.
 These receipts provide correlation and deduplication, **not responder
 authentication**: alpha clients share a trusted event fabric and authorization
 is disabled by policy. Transport-session identity binding remains tracked in

@@ -4129,19 +4129,29 @@
         "properties": {
           "kind": {
             "type": "string",
-            "enum": [
-              "app.page",
-              "app.title",
-              "app.progress",
-              "app.osc",
-              "app.quit",
-              "app.port.open",
-              "app.port.close",
-              "command"
+            "oneOf": [
+              {
+                "enum": [
+                  "app.page",
+                  "app.title",
+                  "app.progress",
+                  "app.osc",
+                  "app.quit",
+                  "app.port.open",
+                  "app.port.close",
+                  "command"
+                ]
+              },
+              {
+                "maxLength": 64,
+                "pattern": "^(?!app\\.)(?!controller\\.)(?:[A-Za-z0-9_-]+\\.)+[A-Za-z0-9_-]+$"
+              }
             ]
           },
           "value": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 4096,
+            "pattern": "^[^\\u0000\\r\\n]*$"
           },
           "source": {
             "type": "string"
@@ -4193,19 +4203,29 @@
         "properties": {
           "kind": {
             "type": "string",
-            "enum": [
-              "app.page",
-              "app.title",
-              "app.progress",
-              "app.osc",
-              "app.quit",
-              "app.port.open",
-              "app.port.close",
-              "command"
+            "oneOf": [
+              {
+                "enum": [
+                  "app.page",
+                  "app.title",
+                  "app.progress",
+                  "app.osc",
+                  "app.quit",
+                  "app.port.open",
+                  "app.port.close",
+                  "command"
+                ]
+              },
+              {
+                "maxLength": 64,
+                "pattern": "^(?!app\\.)(?!controller\\.)(?:[A-Za-z0-9_-]+\\.)+[A-Za-z0-9_-]+$"
+              }
             ]
           },
           "value": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 4096,
+            "pattern": "^[^\\u0000\\r\\n]*$"
           },
           "source": {
             "type": "string"
