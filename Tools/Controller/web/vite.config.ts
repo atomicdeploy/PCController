@@ -85,9 +85,10 @@ export default defineConfig(() => {
   },
   base: '/',
   // Managed worktrees may share node_modules with the canonical checkout.
-  // Keep disposable Vite state local so tests and previews never require a
-  // writable dependency junction.
-  cacheDir: resolve(webRoot, '.vite-cache'),
+  // Keep disposable Vite state in this worktree, but outside WEB_ROOT: the
+  // host packager fingerprints that source tree before and after the build.
+  // This also avoids writing through a shared node_modules junction.
+  cacheDir: resolve(webRoot, '../.vite-cache'),
   build: {
     outDir: resolve(webRoot, '../internal/webui/dist'),
     emptyOutDir: true,
