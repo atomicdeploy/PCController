@@ -9,8 +9,9 @@
 - Use `go vet ./...` for the non-executing static-analysis pass. CI may use its
   native test runner on non-Windows hosts.
 - For a focused pass, use `node Tools/Build/go-tests.mjs --package
-  internal/artifacts --run TestPeer` with a unique product-owned `--output`
-  directory when parallel agents run tests. Repeat `--package` as needed.
+  internal/artifacts --run TestPeer`. On Windows use the canonical output;
+  do not choose per-task `--output` paths, override `GOTMPDIR`, or copy/rename
+  test executables. Repeat `--package` as needed.
   Partial passes use separate caches and never satisfy the default full suite.
 - This workstation also routes Go temporary output to
   `%LOCALAPPDATA%\PCController\go-noexec-temp`; files created there inherit a
