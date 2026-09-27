@@ -112,6 +112,7 @@ type Service struct {
 }
 
 var readInstallationRoot = os.ReadDir
+var canonicalInstallRootForAdoption = DefaultInstallRoot
 
 type ChangeRequest struct {
 	Root                  string
@@ -740,7 +741,7 @@ func (service *Service) checkOwnership(root string, create bool) error {
 		if readErr != nil {
 			return readErr
 		}
-		defaultRoot, _ := DefaultInstallRoot()
+		defaultRoot, _ := canonicalInstallRootForAdoption()
 		adoptCanonical := samePath(root, defaultRoot)
 		allowedCanonical := map[string]bool{
 			"bin": true, "source": true, "data": true, "coordination": true,
@@ -764,17 +765,18 @@ func (service *Service) checkOwnership(root string, create bool) error {
 		if nonLockEntries > 0 {
 			bin := filepath.Join(root, canonicalDirectory)
 			manifestContent, manifestErr := readBoundedRegularFile(filepath.Join(bin, PackageManifestName), maximumManifestBytes)
-			if manifestErr != nil {
-				return fmt.Errorf("%w: canonical adoption requires a verified legacy bin package", ErrOwnershipMismatch)
-			}
-			var legacy PackageManifest
-			if decodeErr := decodeStrictJSON(manifestContent, &legacy); decodeErr != nil {
-				return fmt.Errorf("%w: canonical adoption package inventory is invalid", ErrOwnershipMismatch)
-			}
-			if _, verifyErr := VerifyPackage(bin, legacy.RootSHA256, ManifestOptions{
-				Platform: service.Platform, Architecture: service.Architecture, VerifyExecutable: service.VerifyExecutable,
-			}); verifyErr != nil {
-				return fmt.Errorf("%w: canonical adoption package is not verified: %v", ErrOwnershipMismatch, verifyErr)
+			if manifestErr == nil {
+				var legacy PackageManifest
+				if decodeErr := decodeStrictJSON(manifestContent, &legacy); decodeErr != nil {
+					return fmt.Errorf("%w: canonical adoption package inventory is invalid", ErrOwnershipMismatch)
+				}
+				if _, verifyErr := VerifyPackage(bin, legacy.RootSHA256, ManifestOptions{
+					Platform: service.Platform, Architecture: service.Architecture, VerifyExecutable: service.VerifyExecutable,
+				}); verifyErr != nil {
+					return fmt.Errorf("%w: canonical adoption package is not verified: %v", ErrOwnershipMismatch, verifyErr)
+				}
+			} else if sourceErr := verifyCanonicalSourceOnlyLayout(root, entries); sourceErr != nil {
+				return fmt.Errorf("%w: canonical adoption has neither a verified bin nor source layout: %v", ErrOwnershipMismatch, sourceErr)
 			}
 		}
 		marker := ownerMarker{
@@ -790,6 +792,31 @@ func (service *Service) checkOwnership(root string, create bool) error {
 		return err
 	}
 	return service.validateOwnershipMarker(content, root)
+}
+
+func verifyCanonicalSourceOnlyLayout(root string, entries []os.DirEntry) error {
+	allowed := map[string]bool{"source": true, "data": true, "coordination": true, "recovery-quarantine": true, lockName: true}
+	for _, entry := range entries {
+		if !allowed[strings.ToLower(entry.Name())] {
+			return fmt.Errorf("unexpected source-only root entry %q", entry.Name())
+		}
+	}
+	source := filepath.Join(root, "source", productidentity.ConfigDirectory)
+	if err := pathguard.ValidateComponents(source, false); err != nil {
+		return err
+	}
+	info, err := os.Lstat(source)
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return errors.New("canonical source repository is not a real directory")
+	}
+	for _, relative := range []string{"AGENTS.md", "PCController.ino", filepath.Join("Tools", "Controller", "go.mod")} {
+		path := filepath.Join(source, relative)
+		file, err := os.Lstat(path)
+		if err != nil || !file.Mode().IsRegular() || file.Mode()&os.ModeSymlink != 0 || file.Size() == 0 {
+			return fmt.Errorf("canonical source marker %s is missing or invalid", filepath.ToSlash(relative))
+		}
+	}
+	return nil
 }
 
 func (service *Service) checkDetachedOwnership(location, originalRoot string) error {

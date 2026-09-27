@@ -205,6 +205,41 @@ func TestHealthyLegacyHashedActiveMigratesToCanonicalBin(t *testing.T) {
 	}
 }
 
+func TestCanonicalSourceOnlyRootAdoptsAndSurvivesUninstall(t *testing.T) {
+	root := filepath.Join(t.TempDir(), productidentity.ConfigDirectory)
+	source := filepath.Join(root, "source", productidentity.ConfigDirectory)
+	for relative, content := range map[string]string{
+		"AGENTS.md": "repository rules", "PCController.ino": "void setup() {}",
+		filepath.Join("Tools", "Controller", "go.mod"): "module pccontroller.local/controller",
+	} {
+		path := filepath.Join(source, relative)
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	original := canonicalInstallRootForAdoption
+	defer func() { canonicalInstallRootForAdoption = original }()
+	canonicalInstallRootForAdoption = func() (string, error) { return root, nil }
+	packageRoot, _ := writeTestPackage(t, "1.0.0", "source-only")
+	service := testService(t, nil)
+	installed, err := service.Install(context.Background(), ChangeRequest{Root: root, PackageRoot: packageRoot})
+	if err != nil || !installed.Healthy {
+		t.Fatalf("source-only adoption=%#v err=%v", installed, err)
+	}
+	if _, err := service.Uninstall(context.Background(), UninstallRequest{Root: root}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(source, "AGENTS.md")); err != nil {
+		t.Fatalf("uninstall removed canonical source: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ownerMarkerName)); err != nil {
+		t.Fatalf("uninstall removed retained-root ownership: %v", err)
+	}
+}
+
 func TestCanonicalRunningHostSchedulesVerifiedExternalActivationHelper(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "installation")
 	service := testService(t, nil)
