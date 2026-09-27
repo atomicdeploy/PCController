@@ -123,3 +123,41 @@ func TestSOAPEventInfoUsesConfiguredTransportPaths(t *testing.T) {
 		t.Fatalf("configured GetEventInfo response=%d %s", response.Code, response.Body.String())
 	}
 }
+
+func TestUPnPDiscoveryReportsActiveAlphaAndRetainedFutureAuthentication(t *testing.T) {
+	for _, test := range []struct {
+		name                  string
+		authorizationDisabled bool
+		authMode              string
+		authDescription       string
+		serverProof           bool
+	}{
+		{name: "production alpha", authorizationDisabled: true, authMode: "disabled-alpha", authDescription: "No credential required in production alpha"},
+		{name: "retained future", authMode: "bearer-session", authDescription: "Bearer token required for control", serverProof: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			config := appconfig.Defaults()
+			client := controllerapi.AttachSharedRuntime(control.New(control.Options{}), shell.New(8))
+			defer client.Shutdown()
+			service := &Service{
+				Client: client, AuthorizationDisabled: test.authorizationDisabled,
+				HostConfig: func() appconfig.Config { return config },
+			}
+			request := httptest.NewRequest(http.MethodGet, "http://controller.test"+discovery.PublicInfoPath, nil)
+			info := publicInfo(service, request)
+			if info.Health.Auth != test.authMode || (info.Endpoints.ServerProof != "") != test.serverProof {
+				t.Fatalf("auth=%q server_proof=%q", info.Health.Auth, info.Endpoints.ServerProof)
+			}
+
+			mux := http.NewServeMux()
+			registerUPnPHTTP(mux, service)
+			soapRequest := httptest.NewRequest(http.MethodPost, "http://controller.test/upnp/control", strings.NewReader(`<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:GetProtocolInfo xmlns:u="`+upnpServiceType+`"/></s:Body></s:Envelope>`))
+			soapRequest.Header.Set("SOAPAction", upnpServiceType+"#GetProtocolInfo")
+			response := httptest.NewRecorder()
+			mux.ServeHTTP(response, soapRequest)
+			if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), test.authDescription) {
+				t.Fatalf("GetProtocolInfo response=%d %s", response.Code, response.Body.String())
+			}
+		})
+	}
+}

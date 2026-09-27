@@ -3,6 +3,7 @@
 package hostbridge
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -151,7 +152,7 @@ func (session *peerRPCSession) Call(
 	}
 }
 
-func (session *peerRPCSession) Resolve(response ipcjson.Response) bool {
+func (session *peerRPCSession) resolve(response ipcjson.Response) bool {
 	key := string(response.ID)
 	session.mu.Lock()
 	channel, ok := session.pending[key]
@@ -163,6 +164,121 @@ func (session *peerRPCSession) Resolve(response ipcjson.Response) bool {
 		channel <- response
 	}
 	return ok
+}
+
+func (session *peerRPCSession) Resolve(response ipcjson.Response) bool {
+	encoded, err := json.Marshal(response)
+	if err != nil {
+		return false
+	}
+	handled, err := session.resolveRawResponse(encoded, true)
+	return handled && err == nil
+}
+
+func (session *peerRPCSession) hasPending(id json.RawMessage) bool {
+	key := string(bytes.TrimSpace(id))
+	if key == "" || key == "null" {
+		return false
+	}
+	session.mu.Lock()
+	_, ok := session.pending[key]
+	session.mu.Unlock()
+	return ok
+}
+
+func (session *peerRPCSession) resolveRawResponse(raw []byte, responseEvent bool) (bool, error) {
+	var probe struct {
+		ID     json.RawMessage `json:"id"`
+		Method json.RawMessage `json:"method"`
+		Result json.RawMessage `json:"result"`
+		Error  json.RawMessage `json:"error"`
+	}
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		if !responseEvent {
+			return false, nil
+		}
+		wrapped := fmt.Errorf("invalid peer JSON-RPC response: %w", err)
+		session.Close(wrapped)
+		return true, wrapped
+	}
+	pending := session.hasPending(probe.ID)
+	candidate := responseEvent || (len(probe.Method) == 0 &&
+		(len(probe.Result) != 0 || len(probe.Error) != 0 || pending))
+	if !candidate {
+		return false, nil
+	}
+	response, err := decodePeerRPCResponse(raw)
+	if err != nil {
+		wrapped := fmt.Errorf("invalid peer JSON-RPC response: %w", err)
+		session.Close(wrapped)
+		return true, wrapped
+	}
+	_ = session.resolve(response) // A late, already-cancelled response is harmless.
+	return true, nil
+}
+
+func decodePeerRPCResponse(raw []byte) (ipcjson.Response, error) {
+	var envelope struct {
+		JSONRPC string          `json:"jsonrpc"`
+		ID      json.RawMessage `json:"id"`
+		Method  json.RawMessage `json:"method"`
+		Result  json.RawMessage `json:"result"`
+		Error   json.RawMessage `json:"error"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return ipcjson.Response{}, err
+	}
+	if envelope.JSONRPC != ipcjson.Version {
+		return ipcjson.Response{}, errors.New("jsonrpc must be \"2.0\"")
+	}
+	if len(envelope.Method) != 0 {
+		return ipcjson.Response{}, errors.New("response must not contain method")
+	}
+	id := bytes.TrimSpace(envelope.ID)
+	if !validPeerRPCID(id) {
+		return ipcjson.Response{}, errors.New("response id must be a non-null string or number")
+	}
+	hasResult, hasError := len(envelope.Result) != 0, len(envelope.Error) != 0
+	if hasResult == hasError {
+		return ipcjson.Response{}, errors.New("response must contain exactly one of result or error")
+	}
+	response := ipcjson.Response{JSONRPC: ipcjson.Version, ID: append(json.RawMessage(nil), id...)}
+	if hasResult {
+		decoder := json.NewDecoder(bytes.NewReader(envelope.Result))
+		decoder.UseNumber()
+		if err := decoder.Decode(&response.Result); err != nil {
+			return ipcjson.Response{}, fmt.Errorf("invalid result: %w", err)
+		}
+		return response, nil
+	}
+	var wireError struct {
+		Code    *int    `json:"code"`
+		Message *string `json:"message"`
+	}
+	if string(bytes.TrimSpace(envelope.Error)) == "null" || json.Unmarshal(envelope.Error, &wireError) != nil ||
+		wireError.Code == nil || wireError.Message == nil {
+		return ipcjson.Response{}, errors.New("error must contain an integer code and string message")
+	}
+	response.Error = &ipcjson.RPCError{Code: *wireError.Code, Message: *wireError.Message}
+	return response, nil
+}
+
+func validPeerRPCID(raw json.RawMessage) bool {
+	if len(raw) == 0 || string(raw) == "null" {
+		return false
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return false
+	}
+	switch value.(type) {
+	case string, json.Number:
+		return true
+	default:
+		return false
+	}
 }
 
 func (session *peerRPCSession) Close(err error) {
@@ -214,6 +330,7 @@ type Manager struct {
 	notifier           hostui.Notifier
 	notificationQueue  *notificationQueue
 	warningBeep        func() error
+	buzzerPlayer       func(context.Context, buzzerMirrorJob) error
 	runningDoorWarning bool
 	statusLED          *statusLEDArbiter
 	segmentScroll      *segmentScrollPresenter
@@ -255,6 +372,7 @@ func Start(
 		notifier:          hostui.NewNotifier(hostui.NotifierOptions{AppID: productidentity.StableAppID}),
 		notificationQueue: newNotificationQueue(16, 3*time.Second, 500*time.Millisecond),
 		warningBeep:       hostui.WarningBeep,
+		buzzerPlayer:      playNativeBuzzer,
 		buzzerJobs:        make(chan buzzerMirrorJob, 32),
 		discoveryRefresh:  make(chan struct{}, 1),
 	}
@@ -501,6 +619,9 @@ func (manager *Manager) CallBridge(
 	name string,
 	request ipcjson.Request,
 ) (ipcjson.Response, error) {
+	if err := ipcjson.ValidateBridgeRequest(request); err != nil {
+		return ipcjson.Response{}, err
+	}
 	manager.mu.RLock()
 	peer := manager.peers[strings.ToLower(strings.TrimSpace(name))]
 	manager.mu.RUnlock()
@@ -926,6 +1047,14 @@ func (manager *Manager) ingestPeerEvent(peerName string, raw json.RawMessage) bo
 	return true
 }
 
+func peerSubscriptionTopics(config appconfig.WebSocketClient) []string {
+	topics := append([]string(nil), config.Topics...)
+	if len(topics) == 0 {
+		return []string{"events", "state"}
+	}
+	return topics
+}
+
 // observeRunningDoor combines the explicit HOST-owned Running state with the
 // live reed input. The door never changes ProgramState; it only raises/clears
 // this host warning and its configurable desktop sound/toast presentation.
@@ -1225,10 +1354,7 @@ func (manager *Manager) webSocketPeerSession(
 	rpcSession := newPeerRPCSession(writeJSON)
 	detach := peer.attach(rpcSession)
 	defer detach()
-	topics := append([]string(nil), config.Topics...)
-	if len(topics) == 0 {
-		topics = []string{"events"}
-	}
+	topics := peerSubscriptionTopics(config)
 	if err := writeJSON(map[string]any{
 		"jsonrpc": "2.0", "id": 1, "method": "controller.subscribe",
 		"params": map[string]any{"topics": topics},
@@ -1291,18 +1417,9 @@ func (manager *Manager) webSocketPeerSession(
 		if messageType != websocket.MessageText {
 			continue
 		}
-		var responseEnvelope struct {
-			ID     json.RawMessage   `json:"id"`
-			Method string            `json:"method"`
-			Result json.RawMessage   `json:"result"`
-			Error  *ipcjson.RPCError `json:"error"`
-		}
-		if json.Unmarshal(data, &responseEnvelope) == nil &&
-			len(responseEnvelope.ID) != 0 && responseEnvelope.Method == "" &&
-			(len(responseEnvelope.Result) != 0 || responseEnvelope.Error != nil) {
-			var response ipcjson.Response
-			if json.Unmarshal(data, &response) == nil {
-				_ = rpcSession.Resolve(response)
+		if handled, resolveErr := rpcSession.resolveRawResponse(data, false); handled {
+			if resolveErr != nil {
+				return resolveErr
 			}
 			continue
 		}
@@ -1310,12 +1427,12 @@ func (manager *Manager) webSocketPeerSession(
 		if err := json.Unmarshal(data, &request); err != nil {
 			continue
 		}
-		if request.Method == "controller.event" {
+		if request.Method == "controller.event" || request.Method == "controller.state" {
 			if manager.ingestPeerEvent(config.Name, request.Params) {
 				continue
 			}
 		}
-		if request.Method == "controller.event" || request.Method == "controller.status" {
+		if request.Method == "controller.event" || request.Method == "controller.state" || request.Method == "controller.status" {
 			_, _ = manager.client.SendTextMessage(ctx, controller.TextMessage{
 				Source: "websocket", Target: "host", Type: "remote-event",
 				Text: string(request.Params),
@@ -1406,10 +1523,7 @@ func (manager *Manager) socketIOPeerSession(
 	})
 	detach := peer.attach(rpcSession)
 	defer detach()
-	topics := append([]string(nil), config.Topics...)
-	if len(topics) == 0 {
-		topics = []string{"events"}
-	}
+	topics := peerSubscriptionTopics(config)
 	if err := writeEvent("subscribe", map[string]any{"topics": topics}); err != nil {
 		return err
 	}
@@ -1468,11 +1582,10 @@ func (manager *Manager) socketIOPeerSession(
 		}
 		switch name {
 		case "rpc.response":
-			var response ipcjson.Response
-			if json.Unmarshal(raw, &response) == nil {
-				_ = rpcSession.Resolve(response)
+			if _, resolveErr := rpcSession.resolveRawResponse(raw, true); resolveErr != nil {
+				return resolveErr
 			}
-		case "controller.event":
+		case "controller.event", "controller.state":
 			if manager.ingestPeerEvent(config.Name, raw) {
 				continue
 			}

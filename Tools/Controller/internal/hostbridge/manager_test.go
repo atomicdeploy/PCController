@@ -3,6 +3,7 @@ package hostbridge
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -69,6 +70,9 @@ func TestEnabledTextMappingExecutesAllowlistedCommandOnly(t *testing.T) {
 	manager, err := Start(ctx, client, store, nil)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !manager.remotePeerService().AuthorizationDisabled {
+		t.Fatal("production peer bridge did not activate the explicit alpha authorization contract")
 	}
 	defer func() {
 		cancel()
@@ -172,6 +176,136 @@ func TestPeerRPCSessionCorrelatesResponseAndPreservesCallerID(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("correlated bridge call timed out")
+	}
+}
+
+func TestPeerRPCSessionRejectsMalformedMatchingResponsesAcrossTransports(t *testing.T) {
+	tests := []struct {
+		name string
+		wire func(string) string
+	}{
+		{"missing jsonrpc", func(id string) string { return `{"id":` + id + `,"result":{}}` }},
+		{"wrong jsonrpc", func(id string) string { return `{"jsonrpc":"1.0","id":` + id + `,"result":{}}` }},
+		{"result and error", func(id string) string {
+			return `{"jsonrpc":"2.0","id":` + id + `,"result":{},"error":{"code":-32000,"message":"failed"}}`
+		}},
+		{"neither result nor error", func(id string) string { return `{"jsonrpc":"2.0","id":` + id + `}` }},
+		{"malformed error", func(id string) string {
+			return `{"jsonrpc":"2.0","id":` + id + `,"error":{"code":"bad","message":7}}`
+		}},
+	}
+	for _, responseEvent := range []bool{false, true} {
+		transport := "jsonrpc"
+		if responseEvent {
+			transport = "socketio"
+		}
+		for _, test := range tests {
+			t.Run(transport+"/"+test.name, func(t *testing.T) {
+				writes := make(chan ipcjson.Request, 1)
+				session := newPeerRPCSession(func(value any) error {
+					writes <- value.(ipcjson.Request)
+					return nil
+				})
+				result := make(chan error, 1)
+				go func() {
+					_, err := session.Call(context.Background(), ipcjson.Request{Method: "controller.snapshot"})
+					result <- err
+				}()
+				request := <-writes
+				handled, resolveErr := session.resolveRawResponse(
+					[]byte(test.wire(string(request.ID))), responseEvent,
+				)
+				if !handled || resolveErr == nil || !strings.Contains(resolveErr.Error(), "invalid peer JSON-RPC response") {
+					t.Fatalf("handled=%v err=%v", handled, resolveErr)
+				}
+				select {
+				case callErr := <-result:
+					if callErr == nil || !strings.Contains(callErr.Error(), "invalid peer JSON-RPC response") {
+						t.Fatalf("call error=%v", callErr)
+					}
+				case <-time.After(time.Second):
+					t.Fatal("malformed response did not fail the pending bridge call")
+				}
+			})
+		}
+	}
+}
+
+func TestPeerRPCSessionIgnoresMismatchedResponseThenAcceptsExactValidResponse(t *testing.T) {
+	for _, responseEvent := range []bool{false, true} {
+		transport := "jsonrpc"
+		if responseEvent {
+			transport = "socketio"
+		}
+		t.Run(transport, func(t *testing.T) {
+			writes := make(chan ipcjson.Request, 1)
+			session := newPeerRPCSession(func(value any) error {
+				writes <- value.(ipcjson.Request)
+				return nil
+			})
+			defer session.Close(nil)
+			type callResult struct {
+				response ipcjson.Response
+				err      error
+			}
+			result := make(chan callResult, 1)
+			go func() {
+				response, err := session.Call(context.Background(), ipcjson.Request{
+					ID: json.RawMessage(`"caller"`), Method: "controller.snapshot",
+				})
+				result <- callResult{response, err}
+			}()
+			request := <-writes
+			mismatch := []byte(`{"jsonrpc":"2.0","id":999999,"result":{"stale":true}}`)
+			if handled, err := session.resolveRawResponse(mismatch, responseEvent); !handled || err != nil {
+				t.Fatalf("mismatch handled=%v err=%v", handled, err)
+			}
+			select {
+			case completed := <-result:
+				t.Fatalf("mismatched response completed call: %#v", completed)
+			case <-time.After(10 * time.Millisecond):
+			}
+			valid := []byte(fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,"result":{"accepted":true}}`, request.ID))
+			if handled, err := session.resolveRawResponse(valid, responseEvent); !handled || err != nil {
+				t.Fatalf("valid handled=%v err=%v", handled, err)
+			}
+			select {
+			case completed := <-result:
+				if completed.err != nil || string(completed.response.ID) != `"caller"` {
+					t.Fatalf("completed=%#v", completed)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("exact valid response did not complete call")
+			}
+		})
+	}
+}
+
+func TestCallBridgeRejectsDirectAndShellWrappedPeerUpdateChains(t *testing.T) {
+	manager := &Manager{}
+	peerUpdate, _ := json.Marshal(map[string]string{
+		"command": "peer-update host second " + strings.Repeat("a", 64) + " intent:nested",
+	})
+	bridgeCommand, _ := json.Marshal(map[string]string{
+		"command": "bridge call second controller.snapshot",
+	})
+	bridgeAction, _ := json.Marshal(map[string]string{
+		"kind": "command", "value": "bridge call second controller.snapshot",
+	})
+	for _, test := range []struct {
+		request ipcjson.Request
+		detail  string
+	}{
+		{request: ipcjson.Request{JSONRPC: ipcjson.Version, Method: "controller.peer.update.host"}, detail: "may not be chained"},
+		{request: ipcjson.Request{JSONRPC: ipcjson.Version, Method: "controller.command.execute", Params: peerUpdate}, detail: "may not be chained"},
+		{request: ipcjson.Request{JSONRPC: ipcjson.Version, Method: "controller.bridge.call"}, detail: "recursive bridge calls"},
+		{request: ipcjson.Request{JSONRPC: ipcjson.Version, Method: "controller.command.execute", Params: bridgeCommand}, detail: "recursive bridge calls"},
+		{request: ipcjson.Request{JSONRPC: ipcjson.Version, Method: "controller.app.action", Params: bridgeAction}, detail: "recursive bridge calls"},
+	} {
+		if _, err := manager.CallBridge(context.Background(), "edge", test.request); err == nil ||
+			!strings.Contains(err.Error(), test.detail) {
+			t.Fatalf("request=%#v err=%v", test.request, err)
+		}
 	}
 }
 

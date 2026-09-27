@@ -20,7 +20,7 @@ func TestNetworkPeerAddUsesSecretReferenceAndCanBeRemoved(t *testing.T) {
 	}
 	var output bytes.Buffer
 	err = runNetwork([]string{
-		"peer-add", "--name", "edge", "--url", "ws://192.168.1.2:8787/ipc",
+		"peer-add", "--name", "edge", "--url", "ws://192.0.2.2:8787/ipc",
 		"--secret-ref", "env:TEST_EDGE_TOKEN",
 	}, &output, &output, store)
 	if err != nil {
@@ -58,12 +58,12 @@ func TestAlphaNetworkConfigurationDoesNotRequireOrGenerateCredentials(t *testing
 	if !configured.IPC.AllowRemote || configured.IPC.AuthToken != "" || configured.IPC.AuthTokenRef != "" {
 		t.Fatalf("alpha edge config=%#v", configured.IPC)
 	}
-	if !bytes.Contains(output.Bytes(), []byte("alpha authentication disabled")) {
+	if !strings.Contains(output.String(), "authentication disabled") {
 		t.Fatalf("edge output=%q", output.String())
 	}
 
 	output.Reset()
-	if err := runNetwork([]string{"peer-add", "--name", "lab", "--url", "ws://192.168.1.2:8787/ipc"}, &output, &output, store); err != nil {
+	if err := runNetwork([]string{"peer-add", "--name", "lab", "--url", "ws://192.0.2.2:8787/ipc"}, &output, &output, store); err != nil {
 		t.Fatal(err)
 	}
 	peer := store.Current().Integrations.WebSocketClients[0]
@@ -87,6 +87,17 @@ func TestBoundedDiscoveryInstanceName(t *testing.T) {
 	}
 	if got := boundedDiscoveryInstanceName("   "); got != "PCController" {
 		t.Fatalf("empty instance name=%q", got)
+	}
+}
+
+func TestDefaultEdgeOriginsPermitThisHostWithoutWildcardHostTrust(t *testing.T) {
+	origins := strings.Join(defaultEdgeOrigins("0.0.0.0", "server"), ",")
+	if !strings.Contains(origins, "server:*") || strings.Contains(origins, "0.0.0.0:*") || strings.Contains(origins, "*.*") {
+		t.Fatalf("default edge origins=%q", origins)
+	}
+	origins = strings.Join(defaultEdgeOrigins("192.0.2.20", "server"), ",")
+	if !strings.Contains(origins, "192.0.2.20:*") {
+		t.Fatalf("concrete listen origin missing: %q", origins)
 	}
 }
 

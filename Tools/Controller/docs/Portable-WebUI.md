@@ -76,8 +76,10 @@ Cross-origin browser access is still denied by default. The static page origin
 must match the controller's explicit `ipc.allowed_origins` policy. For an
 allowed origin, the host returns a narrowly scoped CORS response for control
 plane routes and accepts only the required methods and request headers. It does
-not emit a wildcard origin or enable credentialed cookie requests. Bearer and
-capability authorization still run on the actual request after preflight.
+not emit a wildcard origin or enable credentialed cookie requests. Current
+production alpha deliberately skips bearer and capability authorization, but
+the exact Origin, `ipc.allow_remote`, topology, no-chain, and board-safety
+checks still run on the actual request after preflight.
 
 For example, a bundle at `http://localhost:4177` can use the existing loopback
 origin policy. A page at `https://console.example:9443` requires an explicit

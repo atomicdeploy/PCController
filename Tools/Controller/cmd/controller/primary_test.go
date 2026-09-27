@@ -2,18 +2,125 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	controllerapi "pccontroller.local/controller"
 	"pccontroller.local/controller/internal/control"
 	"pccontroller.local/controller/internal/hostui"
+	"pccontroller.local/controller/internal/ipcjson"
 	"pccontroller.local/controller/internal/sessionsnapshot"
 	"pccontroller.local/controller/internal/shell"
 )
+
+func TestGeneratedPeerUpdateIntentIsActionableAfterUncertainOutcome(t *testing.T) {
+	const (
+		peer     = "peer-host"
+		digest   = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		intentID = "0123456789abcdef0123456789abcdef"
+	)
+	generated := 0
+	var keys []string
+	dispatches := 0
+	run := peerHostUpdateCommand(func(_ context.Context, request ipcjson.Request) ipcjson.Response {
+		dispatches++
+		var params struct {
+			IdempotencyKey string `json:"idempotency_key"`
+		}
+		if err := json.Unmarshal(request.Params, &params); err != nil {
+			t.Fatal(err)
+		}
+		keys = append(keys, params.IdempotencyKey)
+		if dispatches == 1 {
+			return ipcjson.Response{Error: &ipcjson.RPCError{
+				Code: ipcjson.ErrorCodeOutcomeUncertain, Message: "peer outcome uncertain",
+			}}
+		}
+		return ipcjson.Response{Result: map[string]string{"stage": "remote-staged"}}
+	}, func() (string, error) {
+		generated++
+		return intentID, nil
+	})
+
+	_, err := run(context.Background(), []string{"host", peer, digest})
+	if err == nil {
+		t.Fatal("uncertain peer update unexpectedly succeeded")
+	}
+	expectedKey := "peer-host-aaaaaaaaaaaa-" + intentID
+	expectedRetry := joinControllerCommand([]string{"peer-update", "host", peer, digest, expectedKey})
+	if !strings.Contains(err.Error(), "idempotency_key="+expectedKey) ||
+		!strings.Contains(err.Error(), "retry exactly: "+expectedRetry) {
+		t.Fatalf("uncertain error is not actionable: %v", err)
+	}
+	words, splitErr := shell.Split(expectedRetry)
+	if splitErr != nil || len(words) != 5 {
+		t.Fatalf("retry command=%q words=%#v err=%v", expectedRetry, words, splitErr)
+	}
+	if _, err = run(context.Background(), words[1:]); err != nil {
+		t.Fatalf("same-key retry failed: %v", err)
+	}
+	if generated != 1 || len(keys) != 2 || keys[0] != expectedKey || keys[1] != expectedKey {
+		t.Fatalf("generated=%d keys=%#v", generated, keys)
+	}
+}
+
+func TestGeneratedPeerUpdateIntentIsExposedOnSuccessAndRotatesAfterRejection(t *testing.T) {
+	const digest = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	intentIDs := []string{
+		"11111111111111111111111111111111",
+		"22222222222222222222222222222222",
+		"33333333333333333333333333333333",
+	}
+	nextIntent := 0
+	var keys []string
+	responseCode := 0
+	run := peerHostUpdateCommand(func(_ context.Context, request ipcjson.Request) ipcjson.Response {
+		var params struct {
+			IdempotencyKey string `json:"idempotency_key"`
+		}
+		if err := json.Unmarshal(request.Params, &params); err != nil {
+			t.Fatal(err)
+		}
+		keys = append(keys, params.IdempotencyKey)
+		if responseCode != 0 {
+			return ipcjson.Response{Error: &ipcjson.RPCError{Code: responseCode, Message: "authoritative rejection"}}
+		}
+		return ipcjson.Response{Result: map[string]string{"stage": "remote-staged"}}
+	}, func() (string, error) {
+		value := intentIDs[nextIntent]
+		nextIntent++
+		return value, nil
+	})
+
+	output, err := run(context.Background(), []string{"host", "edge", digest})
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstKey := "peer-host-bbbbbbbbbbbb-" + intentIDs[0]
+	if !strings.Contains(output, `"idempotency_key": "`+firstKey+`"`) ||
+		!strings.Contains(output, `"retry_command": "peer-update host edge `+digest+` `+firstKey+`"`) {
+		t.Fatalf("generated success identity missing: %s", output)
+	}
+
+	responseCode = -32602
+	_, err = run(context.Background(), []string{"host", "edge", digest})
+	if err == nil || !strings.Contains(err.Error(), "authoritative rejection permits a new deliberate retry key") ||
+		strings.Contains(err.Error(), "retry exactly") {
+		t.Fatalf("authoritative error=%v", err)
+	}
+	_, err = run(context.Background(), []string{"host", "edge", digest})
+	if err == nil {
+		t.Fatal("second authoritative rejection unexpectedly succeeded")
+	}
+	if len(keys) != 3 || keys[0] == keys[1] || keys[1] == keys[2] || nextIntent != 3 {
+		t.Fatalf("keys=%#v generated=%d", keys, nextIntent)
+	}
+}
 
 func TestHostUpdateEventRequestsSecondaryConsoleExit(t *testing.T) {
 	if !eventRequestsSecondaryExit(controllerapi.Event{

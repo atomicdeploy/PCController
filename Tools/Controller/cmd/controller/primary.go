@@ -95,6 +95,68 @@ type primaryIPC struct {
 	coordinatorInstanceID string
 }
 
+func peerHostUpdateCommand(
+	dispatch func(context.Context, ipcjson.Request) ipcjson.Response,
+	newIntentID func() (string, error),
+) func(context.Context, []string) (string, error) {
+	return func(ctx context.Context, args []string) (string, error) {
+		if (len(args) != 3 && len(args) != 4) || !strings.EqualFold(args[0], "host") {
+			return "", errors.New("usage: peer-update host PEER ARTIFACT_SHA256 [IDEMPOTENCY_KEY]")
+		}
+		idempotencyKey := ""
+		generatedIntent := false
+		if len(args) == 4 {
+			idempotencyKey = args[3]
+		} else {
+			generatedIntent = true
+			intentID, err := newIntentID()
+			if err != nil {
+				return "", fmt.Errorf("generate peer-update intent: %w", err)
+			}
+			digestPrefix := strings.ToLower(strings.TrimSpace(args[2]))
+			if len(digestPrefix) > 12 {
+				digestPrefix = digestPrefix[:12]
+			}
+			idempotencyKey = "peer-host-" + digestPrefix + "-" + intentID
+		}
+		params, _ := json.Marshal(map[string]any{
+			"peer": args[1], "artifact_sha256": args[2], "authorized": true,
+			"idempotency_key": idempotencyKey,
+		})
+		response := dispatch(ctx, ipcjson.Request{
+			JSONRPC: ipcjson.Version, Method: "controller.peer.update.host", Params: params,
+		})
+		retryCommand := joinControllerCommand([]string{
+			"peer-update", "host", args[1], args[2], idempotencyKey,
+		})
+		if response.Error != nil {
+			if response.Error.Code == ipcjson.ErrorCodeOutcomeUncertain {
+				return "", fmt.Errorf(
+					"%w; idempotency_key=%s; retry exactly: %s",
+					response.Error, idempotencyKey, retryCommand,
+				)
+			}
+			if generatedIntent {
+				return "", fmt.Errorf(
+					"%w; generated idempotency_key=%s; authoritative rejection permits a new deliberate retry key",
+					response.Error, idempotencyKey,
+				)
+			}
+			return "", response.Error
+		}
+		if generatedIntent {
+			returnValue := map[string]any{
+				"result": response.Result, "idempotency_key": idempotencyKey,
+				"retry_command": retryCommand,
+			}
+			encoded, err := json.MarshalIndent(returnValue, "", "  ")
+			return string(encoded), err
+		}
+		encoded, err := json.MarshalIndent(response.Result, "", "  ")
+		return string(encoded), err
+	}
+}
+
 type primaryExecutor struct{}
 
 func (primaryExecutor) Execute(
@@ -192,24 +254,9 @@ func startPrimaryIPCClaimed(
 		return nil, fmt.Errorf("register bridge command: %w", err)
 	}
 	if err := engine.Register(shell.Command{
-		Name: "peer-update", Usage: "peer-update host PEER ARTIFACT_SHA256",
+		Name: "peer-update", Usage: "peer-update host PEER ARTIFACT_SHA256 [IDEMPOTENCY_KEY]",
 		Summary: "transfer a verified host artifact and ask the peer coordinator to upgrade",
-		Run: func(ctx context.Context, args []string) (string, error) {
-			if len(args) != 3 || !strings.EqualFold(args[0], "host") {
-				return "", errors.New("usage: peer-update host PEER ARTIFACT_SHA256")
-			}
-			params, _ := json.Marshal(map[string]any{
-				"peer": args[1], "artifact_sha256": args[2], "authorized": true,
-			})
-			response := server.ipc.Dispatch(ctx, ipcjson.Request{
-				JSONRPC: ipcjson.Version, Method: "controller.peer.update.host", Params: params,
-			})
-			if response.Error != nil {
-				return "", response.Error
-			}
-			encoded, err := json.MarshalIndent(response.Result, "", "  ")
-			return string(encoded), err
-		},
+		Run:     peerHostUpdateCommand(server.ipc.Dispatch, newHostInstanceID),
 	}); err != nil {
 		manager.Close()
 		_ = server.Close()

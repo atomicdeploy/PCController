@@ -202,9 +202,9 @@ func resolveConfigSecrets(value Config, resolver *secretstore.Resolver) (Config,
 		*plaintext, *reference = secret, ""
 		return nil
 	}
-	// #148 keeps every application authentication mechanism dormant during the
-	// immediate alpha. Preserve references in persisted configuration for a
-	// future explicit migration, but never resolve or inject them at runtime.
+	// #148 keeps inbound application authentication dormant during the immediate
+	// alpha. Preserve references in persisted configuration for a future explicit
+	// migration, but never resolve or inject them at runtime.
 	result.IPC.AuthToken, result.IPC.AuthTokenRef = "", ""
 	for index := range result.Integrations.WebSocketClients {
 		peer := &result.Integrations.WebSocketClients[index]

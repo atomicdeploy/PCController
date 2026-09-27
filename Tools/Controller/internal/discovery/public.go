@@ -16,9 +16,10 @@ import (
 )
 
 const (
-	// PublicInfoPath is the bounded device-directory document. During the
-	// immediate alpha, application auth/authZ is disabled; capability and live
-	// availability still determine whether board-specific keys are present.
+	// PublicInfoPath is the bounded, unauthenticated device-directory document.
+	// It contains health and identity data only; capability and live availability
+	// determine board-specific keys, while exposure/topology/safety still gate
+	// control during production alpha authorization bypass.
 	PublicInfoPath   = "/upnp/public.json"
 	PublicInfoSchema = "pccontroller.public.v1"
 )
@@ -382,7 +383,12 @@ func pinPublicInfoEndpoints(info *PublicInfo, instance Instance) {
 	}
 	info.Endpoints.Web = pin(info.Endpoints.Web, "http", "/")
 	info.Endpoints.API = pin(info.Endpoints.API, "http", "/api/snapshot")
-	info.Endpoints.ServerProof = pin(info.Endpoints.ServerProof, "http", "/api/auth/server-proof")
+	if strings.EqualFold(strings.TrimSpace(info.Health.Auth), "disabled-alpha") ||
+		strings.EqualFold(strings.TrimSpace(info.Health.Auth), "none") {
+		info.Endpoints.ServerProof = ""
+	} else {
+		info.Endpoints.ServerProof = pin(info.Endpoints.ServerProof, "http", "/api/auth/server-proof")
+	}
 	info.Endpoints.Operations = pin(info.Endpoints.Operations, "http", "/api/rpc")
 	info.Endpoints.Commands = pin(info.Endpoints.Commands, "http", "/api/commands")
 	info.Endpoints.Events = pin(info.Endpoints.Events, "ws", "/ipc")

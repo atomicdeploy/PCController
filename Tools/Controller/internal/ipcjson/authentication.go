@@ -462,11 +462,15 @@ func (service *Service) authorizeHTTPRequest(writer http.ResponseWriter, request
 		return false
 	}
 	if service.authorizationDisabled() {
-		base, _ = service.authenticateAccess(base, "", "disabled-alpha")
-		requestWithAccess := request.WithContext(context.WithValue(request.Context(), authenticatedAccessKey{}, base))
+		access, _ := service.authenticateAccess(base, "", "disabled-alpha")
+		if transport := websocketTransport(request, service); transport != "" {
+			access.Transport = transport
+		}
+		access = service.normalizeAccess(access)
+		requestWithAccess := request.WithContext(context.WithValue(request.Context(), authenticatedAccessKey{}, access))
 		*request = *requestWithAccess
-		writer.Header().Set("X-PCController-Principal", base.Principal)
-		writer.Header().Set("X-PCController-Authentication", base.Authentication)
+		writer.Header().Set("X-PCController-Principal", access.Principal)
+		writer.Header().Set("X-PCController-Authentication", access.Authentication)
 		return true
 	}
 

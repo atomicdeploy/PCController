@@ -36,6 +36,11 @@ class FakeWebSocket {
     this.emit('close', { reason: 'closed by test' })
   }
 
+  pushClose(reason = 'closed by test'): void {
+    this.readyState = 0
+    this.emit('close', { reason })
+  }
+
   pushMessage(value: unknown): void {
     this.emit('message', { data: JSON.stringify(value) })
   }
@@ -88,8 +93,101 @@ describe('Web IPC transport', () => {
       params: { id: 7, kind: 'status_led.changed', stream: 'state', text: '#12AB34', time: '2026-08-03T00:00:00Z' },
     })
     expect(events).toEqual([{ id: 7, kind: 'status_led.changed', stream: 'state', text: '#12AB34', time: '2026-08-03T00:00:00Z' }])
+		stop()
+	})
+
+  it('ignores stale callbacks after a newer event socket becomes current', async () => {
+    const sockets: FakeWebSocket[] = []
+    class CapturingSocket extends FakeWebSocket {
+      constructor(url: string) { super(url); sockets.push(this) }
+    }
+    Object.defineProperty(CapturingSocket, 'OPEN', { value: 1 })
+    vi.stubGlobal('WebSocket', CapturingSocket)
+    vi.stubGlobal('location', { protocol: 'http:', host: '127.0.0.1:18887' })
+    vi.stubGlobal('sessionStorage', { getItem: () => null, setItem: () => undefined, removeItem: () => undefined })
+    const retryTimers = new Map<number, () => void>()
+    let nextTimer = 0
+    vi.stubGlobal('window', {
+      setTimeout: (callback: () => void) => {
+        const id = ++nextTimer
+        retryTimers.set(id, callback)
+        return id
+      },
+      clearTimeout: (id: number) => { retryTimers.delete(Number(id)) },
+    })
+
+    const states: string[] = []
+    const statuses: number[] = []
+    const events: string[] = []
+    const stop = connectStream({
+      name: 'PCController', setup_complete: true, websocket_path: '/ipc', session_ticket_path: '/api/session/ticket', auth_required: false,
+      appearance: { theme: 'system', locale: 'en', direction: 'auto', reduceMotion: false, compactNumbers: false, audioMuted: false, audioVolume: 0.42 },
+      appearance_etag: 'a'.repeat(64),
+    }, {
+      status: (value) => statuses.push(value.status.supply_mv),
+      event: (value) => events.push(value.kind),
+      state: (state, detail) => states.push(`${state}:${detail ?? ''}`),
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(sockets).toHaveLength(1)
+
+    sockets[0].pushClose('primary A disconnected')
+    expect(retryTimers.size).toBe(1)
+    const retry = [...retryTimers.entries()][0]
+    retryTimers.delete(retry[0])
+    retry[1]()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(sockets).toHaveLength(2)
+    sockets[1].pushMessage({
+      jsonrpc: '2.0', method: 'controller.status',
+      params: { time: '2026-08-14T00:00:02Z', status: { supply_mv: 13_002 } },
+    })
+    expect(statuses).toEqual([13_002])
+
+    const stateCount = states.length
+    sockets[0].pushMessage({
+      jsonrpc: '2.0', method: 'controller.status',
+      params: { time: '2026-08-14T00:00:03Z', status: { supply_mv: 9_999 } },
+    })
+    sockets[0].pushMessage({
+      jsonrpc: '2.0', method: 'controller.event', params: { kind: 'stale.event' },
+    })
+    sockets[0].pushMessage({
+      jsonrpc: '2.0', method: 'controller.error', params: { error: 'late primary A error' },
+    })
+    sockets[0].pushClose('late primary A close')
+    expect(states).toHaveLength(stateCount)
+    expect(statuses).toEqual([13_002])
+    expect(events).toEqual([])
+    expect(retryTimers.size).toBe(0)
+    expect(sockets).toHaveLength(2)
     stop()
   })
+
+	it('ignores a stale stored token when the alpha host reports auth disabled', async () => {
+		const sockets: FakeWebSocket[] = []
+		class CapturingSocket extends FakeWebSocket {
+			constructor(url: string, protocols?: string | string[]) { super(url, protocols); sockets.push(this) }
+		}
+		Object.defineProperty(CapturingSocket, 'OPEN', { value: 1 })
+		vi.stubGlobal('WebSocket', CapturingSocket)
+		vi.stubGlobal('location', { protocol: 'http:', host: '127.0.0.1:18887' })
+		vi.stubGlobal('sessionStorage', { getItem: () => 'stale-old-host-token', setItem: () => undefined, removeItem: () => undefined })
+		vi.stubGlobal('window', { setTimeout, clearTimeout })
+		const fetchSpy = vi.fn()
+		vi.stubGlobal('fetch', fetchSpy)
+
+		const stop = connectStream({
+			name: 'PCController', setup_complete: true, websocket_path: '/ipc',
+			session_ticket_path: '/api/session/ticket', auth_required: false,
+			appearance: { theme: 'system', locale: 'en', direction: 'auto', reduceMotion: false, compactNumbers: false, audioMuted: false, audioVolume: 0.42 },
+			appearance_etag: 'a'.repeat(64),
+		}, { status: () => undefined, event: () => undefined, state: () => undefined })
+		await new Promise((resolve) => setTimeout(resolve, 0))
+		expect(fetchSpy).not.toHaveBeenCalled()
+		expect(sockets[0]?.protocols).toEqual([])
+		stop()
+	})
 
   it('uses one validated external host for canonical REST and WebSocket paths', async () => {
     const sockets: FakeWebSocket[] = []

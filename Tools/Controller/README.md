@@ -355,7 +355,7 @@ Attach the same full TUI to an authenticated primary without approaching this
 machine's serial ports:
 
 ```console
-controller tui --ipc-addr cafe-pc.local:8787 --ipc-token-ref os:ipc.remote
+controller tui --ipc-addr peer-host.local:8787 --ipc-token-ref os:ipc.remote
 ```
 
 Full TUIs attached to that primary synchronize their active page by default.
@@ -763,24 +763,25 @@ bin\controller.exe ipc call --method controller.app.action --params "{\"kind\":\
 bin\controller.exe ipc call --method controller.command.execute --params "{\"command\":\"app title auto\"}"
 bin\controller.exe ipc call --method controller.bridge.list
 bin\controller.exe ipc call --method controller.bridge.call --params "{\"peer\":\"lab\",\"request\":{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"controller.snapshot\"}}"
-bin\controller.exe exec peer-update host cafe-pc HOST_ARTIFACT_SHA256
-bin\controller.exe ipc call --method controller.peer.update.host --params "{\"peer\":\"cafe-pc\",\"artifact_sha256\":\"HOST_ARTIFACT_SHA256\",\"authorized\":true}"
+bin\controller.exe exec peer-update host peer-host HOST_ARTIFACT_SHA256 [IDEMPOTENCY_KEY]
+bin\controller.exe ipc call --method controller.peer.update.host --params "{\"peer\":\"peer-host\",\"artifact_sha256\":\"HOST_ARTIFACT_SHA256\",\"authorized\":true,\"idempotency_key\":\"INTENT_KEY\"}"
 ```
 
-Enable an immediate-alpha edge host on a trusted LAN with explicit browser
-origins. #148 deliberately disables application authentication and
-authorization, so these commands neither generate nor require a bearer token:
+Enable an edge host on a trusted LAN with explicit browser origins. The current
+alpha runtime deliberately ignores host/API credentials and capability grants;
+no inbound token is created or required. An optional peer token reference is
+accepted only while replacing an older auth-on host:
 
 ```console
-bin\controller.exe network edge-enable --origin David-PC:* --origin 192.168.100.130:*
-bin\controller.exe ipc call --addr 192.168.100.155:8787 --method controller.ping
-bin\controller.exe network peer-add --name cafe-pc --url ws://192.168.100.155:8787/ipc
+bin\controller.exe network edge-enable --origin development-host:* --origin 192.0.2.130:*
+bin\controller.exe ipc call --addr 192.0.2.155:8787 --method controller.ping
+bin\controller.exe network peer-add --name peer-host --url ws://192.0.2.155:8787/ipc
 bin\controller.exe ipc call --method controller.network.peers.get
-bin\controller.exe ipc call --method controller.network.peers.set --params "{\"peers\":[{\"name\":\"cafe-pc\",\"enabled\":true,\"url\":\"ws://192.168.100.155:8787/ipc\",\"protocol\":\"jsonrpc\",\"topics\":[\"events\",\"state\",\"status\"],\"forward_events\":true,\"allow_commands\":true}]}"
-bin\controller.exe network probe --addr 192.168.100.155:8787 --origin http://David-PC:8787
+bin\controller.exe ipc call --method controller.network.peers.set --params "{\"peers\":[{\"name\":\"peer-host\",\"enabled\":true,\"url\":\"ws://192.0.2.155:8787/ipc\",\"protocol\":\"jsonrpc\",\"topics\":[\"events\",\"state\",\"status\"],\"forward_events\":true,\"allow_commands\":true}]}"
+bin\controller.exe network probe --addr 192.0.2.155:8787 --origin http://development-host:8787
 bin\controller.exe network discover --protocols dns-sd,ssdp,upnp,ws-discovery,broadcast,netbios
 bin\controller.exe network list --timeout 3s
-bin\controller.exe network connect --target cafe-pc
+bin\controller.exe network connect --target peer-host
 bin\controller.exe network advertise --enabled=true --protocols all --broadcast-port 37889
 bin\controller.exe ipc call --method controller.discovery.scan --params "{\"protocols\":[\"dns-sd\",\"ssdp\",\"upnp\",\"ws-discovery\",\"broadcast\",\"netbios\"],\"timeout_ms\":3000}"
 ```
@@ -791,13 +792,14 @@ file. Discovery exposes one merged record per host: system hostname, persistent
 host identity/build, board firmware and serial-port identity, health and current
 voltage/current/power/temperature/door state, plus Web/API/operation/event/opcode
 endpoints. `GET /upnp/public.json` is intentionally bounded and secret-free.
-Finding a host does not enable its listener: `ipc.allow_remote` and allowed
-origins remain explicit. Bearer/session credentials and remote capability
-policy are persisted only as dormant future-design fields during the alpha.
+Finding a host never grants control by itself. In the current alpha,
+`ipc.allow_remote`, allowed browser origins, configured peer topology, and
+bridge no-chain rules remain authoritative; credential and capability checks
+are explicitly dormant under the non-configurable production alpha flag.
 
-The edge command enables the selected IPC, REST, WebSocket,
-Socket.IO, programming, and bridge capabilities. Shutdown, virtual-key, and
-host power-action access remain disabled. A LocalSubnet-only firewall rule is
+The edge command enables IPC exposure and records the selected REST, WebSocket,
+Socket.IO, programming, and bridge grants for the later authorization phase.
+The current alpha bypasses those grants. A LocalSubnet-only firewall rule is
 still an operating-system deployment step.
 
 Use `ipc serve --stdio` for a parent process that wants newline-delimited
@@ -818,16 +820,18 @@ bounded. The important-event timeline is compacted at 8 MiB and defaults to
 retention without disabling the important-event timeline.
 
 The TCP listener rejects non-loopback addresses by default. Remote mode still
-requires `ipc.allow_remote` and a non-wildcard browser origin list. The
-immediate-alpha contract in #148 disables all application auth/authZ gates;
-stored inbound tokens, principals, and `ipc.remote_policy` bits are not resolved
-or enforced until a replacement design is explicitly reactivated. An optional
-outbound peer bearer may still be resolved and sent solely so a new alpha host
-can reach and upgrade a still-authenticated older peer.
+requires deliberate `ipc.allow_remote` and a non-wildcard browser origin list.
+For the current alpha, production service constructors set an explicit,
+non-configurable authorization-disabled flag: bearer/session credentials and
+`ipc.remote_policy` grants are not enforced. Their configuration and classifier
+tests remain dormant for the future authorization phase. Stored inbound token
+references are not resolved into the alpha runtime. Origin checks,
+configured peer topology, bridge no-chain rules, board safety, and single-owner
+programming remain active.
 
-The following credential/session flow is retained as deferred design context,
-not current alpha behavior. When reactivated, HTTP and native socket clients
-would authenticate with a Bearer or compatibility header. A client connecting from an unauthenticated discovery record first
+The dormant server-proof and ticket routes return a conflict during alpha. The
+deferred authorization design uses a Bearer or compatibility header. A
+client connecting from an unauthenticated discovery record would first
 calls `GET /api/auth/server-proof` with a fresh random nonce and verifies the
 returned address-bound HMAC locally; it sends the bearer only after proving
 that the exact reached listener knows it. This prevents a spoofed LAN
@@ -856,11 +860,22 @@ safety guards remain active. New peers subscribe to `events`, `state`, and
 `buzzer.note`; ingress provenance prevents those updates from being forwarded
 again through another bridge.
 
-Host upgrades use that same connected peer path. A verified executable is
+Host upgrades use that same configured connection. A verified executable is
 chunked below the RPC frame limit, validated again by the receiving artifact
-store, and passed to the receiving coordinator for graceful replacement and
-health-checked rollback. No SSH command is embedded in this path. The Updates
-page exposes the same operation for every connected command-enabled peer.
+store, and passed to the receiving coordinator for journaled replacement. The
+source response stops at truthful remote `queued` or `staged` acceptance; it
+does not assert process restart, candidate health, rollback outcome, reconnect,
+or the final active executable SHA. Those remain a separate terminal acceptance
+gate on the target. No SSH command is embedded in this path. The Updates page
+exposes the same operation for every connected command-enabled peer and keeps
+that peer staging result separate from local update status. The browser retains
+one generated key only while a logical attempt has a transport-uncertain
+outcome, then rotates it after an authoritative response. The coordinator
+includes that non-secret key in pushed `peer-update.*` metadata so another
+connected client or a reload adopts the same retry intent instead of scheduling
+a duplicate replacement. The CLI creates a new intent by default; pass and
+reuse an explicit key for scripted retries. Raw API callers must always provide
+their own retry-stable `idempotency_key`.
 
 Go programs can import the module-root `controller` package directly:
 

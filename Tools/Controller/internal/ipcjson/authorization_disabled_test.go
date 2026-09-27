@@ -6,13 +6,18 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/coder/websocket"
 
+	controllerapi "pccontroller.local/controller"
 	"pccontroller.local/controller/internal/appconfig"
+	"pccontroller.local/controller/internal/control"
+	"pccontroller.local/controller/internal/hostui"
+	"pccontroller.local/controller/internal/shell"
 )
 
 func TestAlphaAuthorizationDisabledAcrossHTTPRawIPCAndWebSocket(t *testing.T) {
@@ -273,5 +278,94 @@ func TestAlphaBridgeIngressCannotPivotThroughAnotherPeer(t *testing.T) {
 				t.Fatalf("response=%#v", response)
 			}
 		})
+	}
+}
+
+func TestBridgeIngressCannotPersistDelayedNetworkOrCommandPivots(t *testing.T) {
+	hostMenus, err := json.Marshal(appconfig.Defaults().HostMenus)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configSet := `config set automations '[{"name":"bridge-planted","actions":[{"type":"host","executable":"calc.exe"}]}]'`
+	commandParams, _ := json.Marshal(map[string]string{"command": configSet})
+	actionParams, _ := json.Marshal(hostui.AppAction{Kind: "command", Value: configSet})
+	tests := []struct {
+		name   string
+		method string
+		params json.RawMessage
+	}{
+		{"network peers", "controller.network.peers.set", json.RawMessage(`{"peers":[{"name":"third","enabled":true,"url":"ws://192.0.2.30:8787/ipc","protocol":"jsonrpc","topics":["events"],"forward_events":true,"allow_commands":true}]}`)},
+		{"local integrations", "controller.integrations.local.set", json.RawMessage(`{"local_device":{"enabled":true,"base_url":"http://192.0.2.31:8787"},"data_hub":{"enabled":false},"buzzer_mirror":{"enabled":true,"native_enabled":false,"web_audio_enabled":false,"backend":"external","executable":"calc.exe","driver_directory":""}}`)},
+		{"hotkey command", "controller.hotkeys.set", json.RawMessage(`{"operation":"upsert","name":"bridge-planted","enabled":true,"chord":"F13","command":"config set automations []"}`)},
+		{"host menu command", "controller.host_menu.config.set", hostMenus},
+		{"shell config set", "controller.command.execute", commandParams},
+		{"app command config set", "controller.app.action", actionParams},
+	}
+	for _, authorizationDisabled := range []bool{false, true} {
+		mode := "future-auth"
+		if authorizationDisabled {
+			mode = "alpha-auth-disabled"
+		}
+		for _, test := range tests {
+			t.Run(mode+"/"+test.name, func(t *testing.T) {
+				engine := shell.New(4)
+				executed := 0
+				if err := engine.Register(shell.Command{
+					Name: "config", Run: func(context.Context, []string) (string, error) {
+						executed++
+						return "configuration accepted", nil
+					},
+				}); err != nil {
+					t.Fatal(err)
+				}
+				runtime := control.New(control.Options{})
+				client := controllerapi.AttachSharedRuntime(runtime, engine)
+				defer client.Shutdown()
+				config := appconfig.Defaults()
+				config.IPC.AllowRemote = true
+				config.IPC.RemotePolicy = appconfig.RemoteAccessPolicy{
+					Read: true, Events: true, Messages: true, BoardCommands: true,
+					HostConfiguration: true, ConnectionControl: true, Reset: true,
+					Programming: true, Shutdown: true, VirtualKeys: true,
+					PowerActions: true, HostAutomations: true, BridgeCalls: true,
+					Integrations: true,
+				}
+				before := config
+				updates, appActions := 0, 0
+				service := &Service{
+					Client: client, AuthorizationDisabled: authorizationDisabled,
+					HostConfig:           func() appconfig.Config { return config },
+					PersistentHostConfig: func() appconfig.Config { return config },
+					UpdateHostConfig: func(change func(*appconfig.Config) error) error {
+						updates++
+						candidate := config
+						if err := change(&candidate); err != nil {
+							return err
+						}
+						config = candidate
+						return nil
+					},
+					AppAction: func(hostui.AppAction) error { appActions++; return nil },
+				}
+				response := service.DispatchRemote(context.Background(), Request{
+					JSONRPC: Version, ID: json.RawMessage("1"), Method: test.method,
+					Params: test.params,
+				}, "bridge")
+				if response.Error == nil || response.Error.Code != -32003 ||
+					!strings.Contains(response.Error.Message, "persist delayed") {
+					t.Fatalf("bridge response=%#v", response)
+				}
+				if updates != 0 || executed != 0 || appActions != 0 || !reflect.DeepEqual(config, before) {
+					t.Fatalf("bridge mutation escaped: updates=%d executed=%d app_actions=%d", updates, executed, appActions)
+				}
+				local := service.Dispatch(context.Background(), Request{
+					JSONRPC: Version, ID: json.RawMessage("2"), Method: test.method,
+					Params: test.params,
+				})
+				if local.Error != nil {
+					t.Fatalf("native mutation was blocked: %#v", local.Error)
+				}
+			})
+		}
 	}
 }

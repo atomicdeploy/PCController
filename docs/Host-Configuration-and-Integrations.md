@@ -370,7 +370,7 @@ Both companion applications are disabled by default and are host-side only:
 "integrations": {
   "local_device": {
     "enabled": false,
-    "base_url": "http://192.168.1.50"
+    "base_url": "http://192.0.2.50"
   },
   "data_hub": {
     "enabled": false,
@@ -509,6 +509,11 @@ remote HTTP, raw IPC, and WebSocket requests and immediately cancels existing
 remote standard-WebSocket and Socket.IO sessions through the pushed config
 subscription. Loopback sessions remain available.
 
+The retained future design uses a Bearer or `X-PCController-Token` header.
+Browser clients would exchange that header for an Origin-, peer-, and
+transport-bound one-use ticket. During alpha these proof/ticket routes return
+HTTP 409; URL credentials remain rejected.
+
 Topology safety is also independent of auth: bridge ingress cannot call
 `controller.bridge.call`, `controller.peer.update.host`, or discovery-connect,
 including through generic command and app-action wrappers. Direct updates of
@@ -557,9 +562,12 @@ Configured WebSocket clients let one host subscribe to another host and make
 correlated calls through `controller.bridge.call`, `/api/bridges/call`, or
 the `bridge call` shell command. They retry with bounded backoff and preserve
 the rule that exactly one local primary owns the attached serial port. The
-target host independently checks its exposure and ordinary safety guards;
-bridge ingress cannot pivot to another peer directly or through command/action
-wrappers. Remote programming still closes that
+target host independently checks exposure, topology/no-chain, and ordinary
+safety guards; bridge ingress cannot pivot to another peer directly or through
+command/action wrappers, and recursive bridge calls plus direct or shell-wrapped
+peer-update/discovery-connect chaining are rejected. Programming/bridge
+capability classification is retained only for the deferred authorization
+phase. Remote board programming still closes that
 primary's UART, runs the guarded toolchain/Urclock workflow exclusively, and
 requires a fresh application `HELLO` afterward.
 
@@ -567,9 +575,12 @@ The peer connection also carries structured changed-state events and guarded
 host upgrades. Board-originated `buzzer.note` events keep their metadata so an
 enabled PC buzzer on another instance can render them immediately; an ingress
 marker prevents event cycles. `controller.peer.update.host` transfers a
-content-addressed executable through the configured bridge and invokes the
-target's own graceful coordinator. SSH remains an operator test/deployment
-harness only and is not part of the application update implementation.
+content-addressed executable through the configured bridge and requests the
+target's journaled coordinator operation. Its response proves only remote
+`queued` or `staged` acceptance; restart health, rollback outcome, reconnect,
+and active executable SHA remain a separate terminal acceptance gate. SSH
+remains an operator test/deployment harness only and is not part of the
+application update implementation.
 
 ## HTTP, webhooks, WebSocket, and Socket.IO
 
@@ -581,9 +592,11 @@ template. Timeouts, response-size bounds, concurrency limits, loop prevention,
 and non-2xx event reporting keep a slow endpoint from blocking serial control.
 
 The standard WebSocket endpoint is bidirectional: clients submit JSON-RPC and
-subscribe to `events` and/or `status`; the server pushes correlated responses,
-events, status samples, and errors. A configured host can also act as an
-outbound WebSocket client/bridge.
+subscribe to `events`, changed `state`, and/or `status`; the server pushes
+correlated responses, events, state frames, status samples, and errors. A
+configured host can also act as an outbound WebSocket client/bridge. Outbound
+peer configuration defaults to `events` plus `state` when topics are omitted,
+so structured buzzer notes reach an independently enabled host renderer.
 
 Socket.IO is not an alias for ordinary WebSocket. The implemented compatibility
 surface uses Engine.IO 4 with `transport=websocket`, connection and ping/pong
