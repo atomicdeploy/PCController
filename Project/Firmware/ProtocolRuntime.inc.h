@@ -231,15 +231,16 @@ void sendMenuList(uint8_t sequence, uint8_t cursor) {
   while (cursor < PAGE_COUNT && payload[3] < 7) {
     payload[index++] = cursor;
     payload[index++] = static_cast<uint8_t>(pageToMode(cursor));
-    for (uint8_t character = 0; character < 4; ++character) {
 #if PCCONTROLLER_ENABLE_EEPROM_MENU_LABELS
-      payload[index++] = static_cast<uint8_t>(
-          EepromMenuLabels::read(cursor, character));
+    EepromMenuLabels::copy(cursor,
+                            reinterpret_cast<char *>(payload + index));
+    index += 4;
 #else
+    for (uint8_t character = 0; character < 4; ++character) {
       payload[index++] = pgm_read_byte(
           MenuLabels + static_cast<uint8_t>(cursor * 4U + character));
-#endif
     }
+#endif
     ++cursor;
     ++payload[3];
   }

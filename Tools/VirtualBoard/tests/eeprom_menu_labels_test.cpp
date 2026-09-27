@@ -43,10 +43,12 @@ void testErasedAndCorruptBlocksFallBackSafely() {
   EepromMenuLabels::begin();
   require(!EepromMenuLabels::available(),
           "erased EEPROM label block must not become available");
+  char label[EepromMenuLabels::LabelWidth];
+  EepromMenuLabels::copy(0, label);
   for (std::uint8_t character = 0; character < EepromMenuLabels::LabelWidth;
        ++character) {
-    require(EepromMenuLabels::read(0, character) == '-',
-            "erased EEPROM label byte did not use a safe fallback");
+    require(label[character] == '-',
+            "erased EEPROM labels did not use a safe fallback");
   }
 
   writeFactoryLabels();
@@ -54,8 +56,19 @@ void testErasedAndCorruptBlocksFallBackSafely() {
   EepromMenuLabels::begin();
   require(!EepromMenuLabels::available(),
           "checksum-corrupt EEPROM label block must not become available");
-  require(EepromMenuLabels::read(3, 0) == '-',
-          "corrupt EEPROM label byte did not use a safe fallback");
+  EepromMenuLabels::copy(3, label);
+  require(label[0] == '-', "corrupt EEPROM labels did not use a safe fallback");
+
+  writeFactoryLabels();
+  const std::uint8_t originalChecksum =
+      EEPROM.read(EepromLayout::MenuLabelsChecksumAddress);
+  EEPROM.update(EepromLayout::MenuLabelsAddress + 1, '\x01');
+  EEPROM.update(EepromLayout::MenuLabelsChecksumAddress,
+                static_cast<std::uint8_t>(originalChecksum ^
+                                          kFactoryLabels[1] ^ '\x01'));
+  EepromMenuLabels::begin();
+  require(!EepromMenuLabels::available(),
+          "non-printable EEPROM label block must not become available");
 }
 
 void testFactoryBlockReadsEveryPackedCell() {
@@ -65,18 +78,19 @@ void testFactoryBlockReadsEveryPackedCell() {
   require(EepromMenuLabels::available(),
           "factory EEPROM label block did not validate");
   for (std::uint8_t page = 0; page < EepromLayout::MenuLabelCount; ++page) {
+    char label[EepromMenuLabels::LabelWidth];
+    EepromMenuLabels::copy(page, label);
     for (std::uint8_t character = 0;
          character < EepromMenuLabels::LabelWidth; ++character) {
       const std::uint8_t index = static_cast<std::uint8_t>(
           page * EepromMenuLabels::LabelWidth + character);
-      require(EepromMenuLabels::read(page, character) == kFactoryLabels[index],
-              "validated EEPROM label byte changed");
+      require(label[character] == kFactoryLabels[index],
+              "validated EEPROM labels changed");
     }
   }
-  require(EepromMenuLabels::read(EepromLayout::MenuLabelCount, 0) == '-',
-          "out-of-range page did not use a safe fallback");
-  require(EepromMenuLabels::read(0, EepromMenuLabels::LabelWidth) == '-',
-          "out-of-range character did not use a safe fallback");
+  char outOfRange[EepromMenuLabels::LabelWidth];
+  EepromMenuLabels::copy(EepromLayout::MenuLabelCount, outOfRange);
+  require(outOfRange[0] == '-', "out-of-range page did not use a safe fallback");
 }
 
 } // namespace
