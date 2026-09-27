@@ -92,6 +92,16 @@ func (service *Service) currentRemotePrincipal() string {
 
 func (service *Service) authenticateAccess(access Access, token, mechanism string) (Access, bool) {
 	access = service.normalizeAccess(access)
+	if service.authorizationDisabled() {
+		access.authenticated = true
+		access.Authentication = "disabled"
+		if access.Remote {
+			access.Principal = service.currentRemotePrincipal()
+		} else {
+			access.Principal = "local-operator"
+		}
+		return access, true
+	}
 	provided := strings.TrimSpace(token)
 	expected := strings.TrimSpace(service.currentAuthToken())
 	delegation := strings.TrimSpace(service.HostInstanceToken)
@@ -353,6 +363,14 @@ func (service *Service) authorizeHTTPRequest(writer http.ResponseWriter, request
 		base = accessFromAddress(stringAddress(request.RemoteAddr), "rest")
 	}
 	base = service.normalizeAccess(base)
+	if service.authorizationDisabled() {
+		base, _ = service.authenticateAccess(base, "", "disabled")
+		requestWithAccess := request.WithContext(context.WithValue(request.Context(), authenticatedAccessKey{}, base))
+		*request = *requestWithAccess
+		writer.Header().Set("X-PCController-Principal", base.Principal)
+		writer.Header().Set("X-PCController-Authentication", base.Authentication)
+		return true
+	}
 
 	credential, mechanism, headerPresent, credentialErr := headerCredential(request)
 	if request != nil && request.URL != nil &&

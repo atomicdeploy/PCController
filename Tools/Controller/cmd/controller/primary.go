@@ -332,6 +332,7 @@ func startPrimaryIPCAtWithIdentity(
 		SocketIOPath:          endpoint.SocketIOPath,
 		WebUI:                 webui.Handler(endpoint.WebSocketPath),
 		AuthToken:             endpoint.AuthToken,
+		AuthorizationDisabled: true,
 		AllowedOrigins:        append([]string(nil), endpoint.AllowedOrigins...),
 		InboundWebhooks:       endpoint.InboundWebhooks,
 		HostVersion:           version,

@@ -3,17 +3,58 @@ package main
 import (
 	"context"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
 	controllerapi "pccontroller.local/controller"
+	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/control"
 	"pccontroller.local/controller/internal/hostui"
 	"pccontroller.local/controller/internal/sessionsnapshot"
 	"pccontroller.local/controller/internal/shell"
 )
+
+func TestPrimaryIPCExplicitlyUsesAlphaAuthorizationMode(t *testing.T) {
+	t.Setenv("PCCONTROLLER_DATA_DIR", filepath.Join(t.TempDir(), "host-data"))
+	previous := currentPrimaryEndpoint()
+	defer primaryEndpoint.Store(previous)
+
+	store, err := appconfig.Open(filepath.Join(t.TempDir(), "controller.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.Update(func(config *appconfig.Config) error {
+		config.IPC.AuthToken = "configured-but-unused-alpha-token"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	configurePrimaryIPC(store.CurrentRuntime())
+
+	runtime := control.New(control.Options{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	server, err := startPrimaryIPCAt(
+		ctx, "127.0.0.1:0", runtime, shell.New(4), store,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+
+	response, err := http.Get("http://" + server.listener.Addr().String() + "/api/snapshot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK ||
+		response.Header.Get("X-PCController-Authentication") != "disabled" {
+		t.Fatalf("primary status=%d headers=%v", response.StatusCode, response.Header)
+	}
+}
 
 func TestHostUpdateEventRequestsSecondaryConsoleExit(t *testing.T) {
 	if !eventRequestsSecondaryExit(controllerapi.Event{

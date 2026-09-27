@@ -81,6 +81,19 @@ func TestArtifactHTTPRequiresRemoteAuthenticationAndProgrammingPolicy(t *testing
 		t.Fatalf("anonymous remote status=%d body=%s", response.Code, response.Body.String())
 	}
 
+	config.IPC.AllowRemote = false
+	service.AuthorizationDisabled = true
+	request = httptest.NewRequest(http.MethodGet, "http://controller.example/api/artifacts/manifest", nil)
+	request.RemoteAddr = "198.51.100.10:43100"
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK ||
+		response.Header().Get("X-PCController-Authentication") != "disabled" {
+		t.Fatalf("alpha anonymous remote status=%d headers=%v body=%s", response.Code, response.Header(), response.Body.String())
+	}
+
+	service.AuthorizationDisabled = false
+	config.IPC.AllowRemote = true
 	config.IPC.AuthToken = "0123456789abcdefghijklmn"
 	request = httptest.NewRequest(http.MethodGet, "http://controller.example/api/artifacts/manifest", nil)
 	request.RemoteAddr = "198.51.100.10:43100"
