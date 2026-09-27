@@ -615,7 +615,10 @@ with a client operation ID. The primary commits exactly once, returns
 the same ordered action to the source and every live follower. A late title or
 lease callback is therefore unable to roll a source back. When the last lease
 leaves or expires the group is discarded, so active pages are never persisted
-as host configuration.
+as host configuration. Retrying the same operation ID is idempotent only while
+its epoch, revision, and page remain canonical. Once a newer operation advances
+the group, replaying the older operation returns an error instead of a stale
+cached page that could roll a client back.
 After an event-session reconnect a follower adds
 `navigation_catch_up=true`; the coordinator then re-sends the canonical page
 instead of treating the client's potentially stale page as new intent.
@@ -674,7 +677,13 @@ not flood operator activity logs, while rejection and timeout remain visible
 one-shot activity events.
 
 Unknown well-formed optional action capabilities remain visible in discovery
-without rejecting the whole instance; only implemented action names execute.
+without rejecting the whole instance. A namespaced custom action such as
+`pealayer.play` becomes executable only while a matched live instance advertises
+that exact capability. Custom namespaces cannot use the reserved `app.*`,
+`controller.*`, or `command` names; values are limited to 4096 bytes and cannot
+contain NUL, CR, or LF. They always use the correlated exact-target path with a
+delivery nonce, deadline, deduplication receipt, and terminal ACK outcome; they
+never fall back to untracked legacy delivery.
 These receipts provide correlation and deduplication, **not responder
 authentication**: alpha clients share a trusted event fabric and authorization
 is disabled by policy. Transport-session identity binding remains tracked in
