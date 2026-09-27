@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -35,13 +34,7 @@ func TestWaitForIntegrationShutdownIsBounded(t *testing.T) {
 }
 
 func TestEnabledTextMappingExecutesAllowlistedCommandOnly(t *testing.T) {
-	store, err := appconfig.Open(filepath.Join(t.TempDir(), "config.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = store.Update(func(config *appconfig.Config) error {
-		config.Integrations.Hotkeys = nil
-		config.Integrations.Notifications.Enabled = false
+	store := openHostBridgeTestStore(t, func(config *appconfig.Config) error {
 		config.Integrations.TextMappings = []appconfig.TextMapping{{
 			Name: "trusted-door", Enabled: true,
 			Source: "ipc", Target: "host", Type: "door-command",
@@ -49,9 +42,6 @@ func TestEnabledTextMappingExecutesAllowlistedCommandOnly(t *testing.T) {
 		}}
 		return nil
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	runtime := control.New(control.Options{})
 	engine := shell.New(8)
 	called := make(chan struct{}, 1)
@@ -225,13 +215,7 @@ func TestOutboundBridgeCanCallRemoteJSONRPCService(t *testing.T) {
 	}))
 	defer remote.Close()
 
-	store, err := appconfig.Open(filepath.Join(t.TempDir(), "config.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = store.Update(func(config *appconfig.Config) error {
-		config.Integrations.Hotkeys = nil
-		config.Integrations.Notifications.Enabled = false
+	store := openHostBridgeTestStore(t, func(config *appconfig.Config) error {
 		config.Integrations.WebSocketClients = []appconfig.WebSocketClient{{
 			Name: "remote-lab", Enabled: true,
 			URL:      strings.Replace(remote.URL, "http://", "ws://", 1),
@@ -240,9 +224,6 @@ func TestOutboundBridgeCanCallRemoteJSONRPCService(t *testing.T) {
 		}}
 		return nil
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	runtime := control.New(control.Options{})
 	client := controller.AttachSharedRuntime(runtime, shell.New(8))
 	ctx, cancel := context.WithCancel(context.Background())
