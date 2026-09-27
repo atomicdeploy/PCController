@@ -1206,6 +1206,9 @@ func runToolchain(
 	if len(args) != 0 && strings.EqualFold(args[0], "runtime-window-ready") {
 		return runToolchainRuntimeWindowReady(args[1:], stdout, stderr, store)
 	}
+	if len(args) != 0 && strings.EqualFold(args[0], "runtime-window-open") {
+		return runToolchainRuntimeWindowOpen(args[1:], stdout, stderr, store)
+	}
 	if len(args) != 0 && configIndependentToolchainRuntime(append([]string{"toolchain"}, args...)) {
 		if strings.EqualFold(args[0], "prepare-host-data") {
 			return runToolchainPrepareHostData(args[1:], stdout, stderr)
