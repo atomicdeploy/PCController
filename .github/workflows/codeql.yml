@@ -160,7 +160,7 @@ jobs:
         shell: cmd
         run: |
           @echo off
-          node ../Build/go-tests.mjs --module . --output ../../.build/tests/go --go go
+          node ../Build/go-tests.mjs --module . --go go
           if errorlevel 1 exit /b 1
           go run ./winres/generate_icon.go "%RUNNER_TEMP%\codeql-icon.png"
           if errorlevel 1 exit /b 1
