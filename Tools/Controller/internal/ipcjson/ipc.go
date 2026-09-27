@@ -336,8 +336,8 @@ func appActionEnvelope(operation hostui.ActionOperation) appActionOperationEnvel
 	return appActionOperationEnvelope{Accepted: accepted, Operation: operation}
 }
 
-func appActionTracksOutcome(action hostui.AppAction) bool {
-	return hostui.TracksAppActionOutcome(action.Kind)
+func appActionTracksOutcome(registry *hostui.InstanceRegistry, action hostui.AppAction) bool {
+	return hostui.TracksRegisteredAppActionOutcome(registry, action.Kind, action.Target)
 }
 
 func validateLegacyAppActionTracking(action hostui.AppAction, timeoutMS int) error {
@@ -1228,7 +1228,7 @@ func (service *Service) dispatch(
 				err = errors.New("navigation synchronization metadata is coordinator-owned; use controller.app.navigate")
 			} else if hostui.HasCoordinatorActionDeliveryMetadata(action.Metadata) {
 				err = errors.New("app action delivery metadata is coordinator-owned")
-			} else if service.AppActionSubmit != nil && appActionTracksOutcome(action) {
+			} else if service.AppActionSubmit != nil && appActionTracksOutcome(service.AppInstances, action) {
 				action.Source = firstNonempty(action.Source, "ipc")
 				var timeout time.Duration
 				timeout, err = appActionTimeout(params.TimeoutMS)
@@ -3258,7 +3258,7 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 			})
 			return
 		}
-		if service.AppActionSubmit != nil && appActionTracksOutcome(action) {
+		if service.AppActionSubmit != nil && appActionTracksOutcome(service.AppInstances, action) {
 			timeout, timeoutErr := appActionTimeout(params.TimeoutMS)
 			if timeoutErr != nil {
 				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": timeoutErr.Error()})

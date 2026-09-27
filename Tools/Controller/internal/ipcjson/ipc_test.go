@@ -399,6 +399,58 @@ func TestTypedCoordinatorPreservesLegacyAppActions(t *testing.T) {
 	}
 }
 
+func TestTypedCustomAppActionRequiresLiveAdvertisement(t *testing.T) {
+	runtime := control.New(control.Options{})
+	defer runtime.Close()
+	registry := hostui.NewInstanceRegistry()
+	if _, err := registry.Upsert(hostui.AppInstance{
+		ID: "pealayer:rpc", Surface: "pealayer", State: "active", LeaseSeconds: 45,
+		Values: map[string]string{hostui.ActionCapabilitiesKey: "pealayer.play"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	broker := hostui.NewActionBroker()
+	deliveries := broker.Events()
+	coordinator := hostui.NewActionCoordinator(registry, broker.Publish)
+	defer coordinator.Close()
+	service := Service{
+		Client:    controllerapi.AttachSharedRuntime(runtime, shell.New(8)),
+		AppAction: broker.Publish, AppActionSubmit: coordinator.Submit,
+		AppActionAck: coordinator.Ack, AppActionOutcome: coordinator.Outcome,
+		AppInstances: registry,
+	}
+	params, _ := json.Marshal(map[string]any{
+		"kind": "pealayer.play", "target": "pealayer:rpc",
+		"operation_id": "rpc-custom-play", "timeout_ms": 1000,
+	})
+	response := service.Dispatch(context.Background(), Request{Method: "controller.app.action", Params: params})
+	if response.Error != nil {
+		t.Fatal(response.Error)
+	}
+	envelope, ok := response.Result.(appActionOperationEnvelope)
+	if !ok || !envelope.Accepted || envelope.Operation.Kind != "pealayer.play" {
+		t.Fatalf("response=%#v", response.Result)
+	}
+	select {
+	case delivery := <-deliveries:
+		if delivery.Kind != "pealayer.play" || delivery.Target != "pealayer:rpc" ||
+			delivery.Metadata[hostui.ActionDeliveryIDKey] == "" {
+			t.Fatalf("delivery=%#v", delivery)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("custom app action was not delivered")
+	}
+
+	unregistered, _ := json.Marshal(map[string]any{
+		"kind": "pealayer.pause", "target": "pealayer:rpc",
+		"operation_id": "rpc-unregistered", "timeout_ms": 1000,
+	})
+	response = service.Dispatch(context.Background(), Request{Method: "controller.app.action", Params: unregistered})
+	if response.Error == nil || !strings.Contains(response.Error.Message, "outcome-capable") {
+		t.Fatalf("unregistered custom action response=%#v", response)
+	}
+}
+
 func TestExecuteRoutesAppPageThroughTypedActionBroker(t *testing.T) {
 	runtime := control.New(control.Options{})
 	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
@@ -1392,7 +1444,7 @@ func TestIlluminationStatePushReachesTwoIndependentWebSocketClients(t *testing.T
 	}
 	runtime.PublishStructuredEvent(control.Event{
 		Kind: "illumination.changed", Stream: control.EventStreamState,
-		Text: "enclosure illumination applied 1024/4095 toward 2056/4095",
+		Text:     "enclosure illumination applied 1024/4095 toward 2056/4095",
 		Metadata: map[string]string{"applied_pwm": "1024", "target_pwm": "2056"},
 	})
 	for index, connection := range connections {

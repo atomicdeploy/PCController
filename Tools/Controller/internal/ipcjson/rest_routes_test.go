@@ -101,8 +101,8 @@ func TestRESTTypedAppActionOutcomeLifecycle(t *testing.T) {
 	defer runtime.Close()
 	registry := hostui.NewInstanceRegistry()
 	if _, err := registry.Upsert(hostui.AppInstance{
-		ID: "web:one", Surface: "webui", State: "active", LeaseSeconds: 45,
-		Values: map[string]string{hostui.ActionCapabilitiesKey: hostui.WebActionCapabilities},
+		ID: "pealayer:rest", Surface: "pealayer", State: "active", LeaseSeconds: 45,
+		Values: map[string]string{hostui.ActionCapabilitiesKey: "pealayer.play"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +118,7 @@ func TestRESTTypedAppActionOutcomeLifecycle(t *testing.T) {
 	})
 
 	request := httptest.NewRequest(http.MethodPost, "/api/app/action", strings.NewReader(
-		`{"kind":"app.title","value":"Bench","target":"web:one","operation_id":"rest-operation","timeout_ms":1000}`,
+		`{"kind":"pealayer.play","target":"pealayer:rest","operation_id":"rest-operation","timeout_ms":1000}`,
 	))
 	request.RemoteAddr = "127.0.0.1:43210"
 	response := httptest.NewRecorder()
@@ -136,7 +136,7 @@ func TestRESTTypedAppActionOutcomeLifecycle(t *testing.T) {
 
 	ackBody, _ := json.Marshal(hostui.ActionAck{
 		OperationID: "rest-operation", DeliveryID: delivery.Metadata[hostui.ActionDeliveryIDKey],
-		InstanceID: "web:one", State: hostui.ActionStateApplied,
+		InstanceID: "pealayer:rest", State: hostui.ActionStateApplied,
 	})
 	request = httptest.NewRequest(http.MethodPost, "/api/app/action/ack", bytes.NewReader(ackBody))
 	request.RemoteAddr = "127.0.0.1:43210"

@@ -141,3 +141,32 @@ func TestActionBrokerHeadlessObserverDoesNotAccumulateTUIActions(t *testing.T) {
 		t.Fatalf("unsubscribed TUI queue contains %d actions", got)
 	}
 }
+
+func TestNormalizeTrackedAppActionRequiresAdvertisedCustomNamespace(t *testing.T) {
+	registry := NewInstanceRegistry()
+	if _, err := registry.Upsert(AppInstance{
+		ID: "pealayer:desktop", Surface: "pealayer", State: "active",
+		Values: map[string]string{ActionCapabilitiesKey: "pealayer.open,pealayer.play"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	action, err := NormalizeTrackedAppAction(AppAction{
+		Kind: " PEALAYER.OPEN ", Value: " movie.mp4 ", Target: "pealayer:desktop",
+	}, registry)
+	if err != nil || action.Kind != "pealayer.open" || action.Value != "movie.mp4" {
+		t.Fatalf("action=%#v err=%v", action, err)
+	}
+	if _, err := NormalizeAppAction(action); err == nil {
+		t.Fatal("custom action entered the untracked legacy validator")
+	}
+	for _, invalid := range []AppAction{
+		{Kind: "pealayer.pause", Target: "pealayer:desktop"},
+		{Kind: "app.future", Target: "pealayer:desktop"},
+		{Kind: "controller.future", Target: "pealayer:desktop"},
+		{Kind: "pealayer.open", Value: "first\nsecond", Target: "pealayer:desktop"},
+	} {
+		if _, err := NormalizeTrackedAppAction(invalid, registry); err == nil {
+			t.Fatalf("invalid custom action accepted: %#v", invalid)
+		}
+	}
+}
