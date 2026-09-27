@@ -15,12 +15,14 @@ import (
 )
 
 func currentHelloPayload(capabilities uint32) []byte {
-	payload := make([]byte, 14)
+	payload := make([]byte, 16)
 	payload[0] = native.IdentitySchemaCompact
 	payload[1] = native.BoardKindPCController
 	binary.LittleEndian.PutUint32(payload[2:6], capabilities)
 	binary.LittleEndian.PutUint32(payload[6:10], 0x2FD9F81C)
 	binary.LittleEndian.PutUint32(payload[10:14], 0x35019D5D)
+	payload[14] = native.FeatureProfileFullPeripheral
+	payload[15] = native.BuildFeatureLocalMacroCapture
 	return payload
 }
 
@@ -117,10 +119,11 @@ func TestAuthenticateRequiresPCControllerIdentity(t *testing.T) {
 	}
 }
 
-func TestAuthenticateAcceptsCompactHelloSchema3(t *testing.T) {
+func TestAuthenticateAcceptsCompactHelloSchema4(t *testing.T) {
 	payload := []byte{
-		0x03, native.BoardKindPCController, 0x00, 0x00, 0x00, 0x00,
+		0x04, native.BoardKindPCController, 0x00, 0x00, 0x00, 0x00,
 		0x1C, 0xF8, 0xD9, 0x2F, 0x5D, 0x9D, 0x01, 0x35,
+		native.FeatureProfileFullPeripheral, native.BuildFeatureLocalMacroCapture,
 	}
 	port := newFakePort()
 	port.onWrite = func(encoded []byte) {

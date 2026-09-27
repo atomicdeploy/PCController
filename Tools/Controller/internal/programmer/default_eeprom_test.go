@@ -35,18 +35,17 @@ func TestGenerateDefaultEEPROMIntelHexCreatesSafeCurrentSettings(t *testing.T) {
 	if record[EEPROMSettingsValueBytes] != avrCRC8(record[:EEPROMSettingsValueBytes]) {
 		t.Fatal("default settings CRC does not match")
 	}
-	wantOrder := []byte{0x10, 0x32, 0x54, 0x76, 0x98, 0xBA, 0xDC}
-	if !bytes.Equal(record[21:28], wantOrder) || record[28]&0x07 != 0 {
-		t.Fatalf("dense menu order / closed brightness = % X / %d", record[21:28], record[28])
+	if record[19]&0x07 != 0 {
+		t.Fatalf("closed brightness = %d", record[19]&0x07)
 	}
 	if record[1] != 0 || record[6] != 0 {
 		t.Fatalf("deployment defaults must keep illumination/PWM off: mode=%d pwm=%d", record[1], record[6])
 	}
-	if record[30] != 1 {
-		t.Fatalf("default motion break=%d ms, want 1", record[30])
+	if record[21] != 1 {
+		t.Fatalf("default motion break=%d ms, want 1", record[21])
 	}
 	decoded := decodeOfflineSettings(image)
-	if !decoded.Valid || decoded.Values.DefaultMenuPage != 0 || decoded.Values.VisibleMenuMask != DefaultVisibleMenuMask {
+	if !decoded.Valid || decoded.Schema != EEPROMSettingsRecordSchema || decoded.Values.DefaultMenuPage != 0 {
 		t.Fatalf("generated default settings = %#v", decoded)
 	}
 	remotes := decodeOfflineRemotes(image)
@@ -90,11 +89,11 @@ func TestGenerateProgrammingEEPROMIntelHexArmsQuietVisibleLatch(t *testing.T) {
 	}
 	wantFlags := native.SettingsSilent | native.SettingsProgrammingMode
 	if record[0]&wantFlags != wantFlags || record[1] != 0 || record[2] != 0 ||
-		record[3] != 0 || record[5] != 0 || record[6] != 0 || record[29] != 0 {
+		record[3] != 0 || record[5] != 0 || record[6] != 0 || record[20] != 0 {
 		t.Fatalf("programming image is not latched/off: % X", record)
 	}
-	if record[4] == 0 || record[28]&0x07 != record[4] {
-		t.Fatalf("Prog must remain visible with door closed: open=%d closed=%d", record[4], record[28]&0x07)
+	if record[4] == 0 || record[19]&0x07 != record[4] {
+		t.Fatalf("Prog must remain visible with door closed: open=%d closed=%d", record[4], record[19]&0x07)
 	}
 	decoded := decodeOfflineSettings(image)
 	if !decoded.Valid || decoded.Values.Flags&wantFlags != wantFlags {

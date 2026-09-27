@@ -287,7 +287,20 @@ func buildSerialStackPath(listing *avrListing) ([]compileManifestStackStage, str
 	if err != nil {
 		return nil, "", 0, err
 	}
-	writeCobsStage, err := functionOrInlineStage(listing, sendStage.Function, listingFunctionSpec{
+	timestampedStage, err := functionOrInlineStage(listing, sendStage.Function, listingFunctionSpec{
+		Name: "timestamped UART response", Match: "ControllerProtocol::UartProtocol::sendTimestamped(", InlineLabel: "sendTimestamped",
+	})
+	if err != nil {
+		return nil, "", 0, err
+	}
+	responseWriter := sendStage.Function
+	if timestampedStage.Function != nil {
+		if !functionCalls(sendStage.Function, timestampedStage.Function) {
+			return nil, "", 0, errors.New("final listing has no UART send -> timestamped response CALL edge")
+		}
+		responseWriter = timestampedStage.Function
+	}
+	writeCobsStage, err := functionOrInlineStage(listing, responseWriter, listingFunctionSpec{
 		Name: "COBS response writer", Match: "ControllerProtocol::UartProtocol::writeCobs(", InlineLabel: "writeCobs",
 	})
 	if err != nil {
@@ -301,15 +314,15 @@ func buildSerialStackPath(listing *avrListing) ([]compileManifestStackStage, str
 	if err != nil {
 		return nil, "", 0, err
 	}
-	if !functionHasMnemonic(sendStage.Function, "icall") {
-		return nil, "", 0, errors.New("UART send no longer has the expected virtual Print write edge")
+	if !functionHasMnemonic(responseWriter, "icall") {
+		return nil, "", 0, errors.New("timestamped UART response no longer has the expected virtual Print write edge")
 	}
 	if !functionHasMnemonic(printStage.Function, "icall") {
 		return nil, "", 0, errors.New("Print buffer writer no longer has the expected virtual byte-write edge")
 	}
 
 	prefix := []listingStage{mainStage, loopStage, serviceStage, decodeStage, handlerStage}
-	common := []listingStage{sendStage, writeCobsStage, printStage, hardwareStage}
+	common := []listingStage{sendStage, timestampedStage, writeCobsStage, printStage, hardwareStage}
 	if drain, ok, drainErr := optionalCalledListingStage(listing, hardwareStage.Function, listingFunctionSpec{
 		Name: "HardwareSerial TX drain", Match: "HardwareSerial::_tx_udr_empty_irq(",
 	}); drainErr != nil {

@@ -1217,9 +1217,10 @@ func (model Model) header(snapshot control.Snapshot) string {
 		style = lipgloss.NewStyle().Foreground(colorGood).Bold(true)
 		if snapshot.Hello.IdentitySchema == native.IdentitySchemaCompact {
 			detail = fmt.Sprintf(
-				"%s · %s build %08X · %s",
+				"%s · %s build %08X · %s · %s",
 				snapshot.Port.Name, snapshot.Hello.Name, snapshot.Hello.BuildHash,
 				snapshot.Hello.BuildStamp,
+				native.FeatureProfileName(snapshot.Hello.FeatureProfile),
 			)
 		} else {
 			detail = snapshot.Port.Name + " · " + snapshot.Hello.Name

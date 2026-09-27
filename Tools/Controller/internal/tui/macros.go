@@ -443,7 +443,11 @@ func macroRecordingSummary(state control.MacroRecordingState, now time.Time) str
 	if elapsed < 0 {
 		elapsed = 0
 	}
+<<<<<<< HEAD
 	return fmt.Sprintf("%d · %s · %s · %d steps · %s", state.ID, state.Name, state.Category, state.Steps, formatMacroDuration(elapsed))
+=======
+	return fmt.Sprintf("%d · %s · %s · %d steps (host %d · panel %d · RF %d) · last at %dµs, delta %dµs · %s", state.ID, state.Name, state.Category, state.Steps, state.HostSteps, state.PanelSteps, state.RFSteps, state.LastAtUS, state.LastDeltaUS, formatMacroDuration(elapsed))
+>>>>>>> e2958b6 (feat(macros): recover timed capture and safe schema migration)
 }
 
 func macroRecordingHelp(state control.MacroRecordingState) string {

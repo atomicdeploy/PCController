@@ -450,7 +450,7 @@ func TestProgrammingLifecycleSettingsQueryFailureStopsBeforeMutation(t *testing.
 		context.Background(), device, firmware,
 		ProgrammingLifecycleOptions{DataPaths: paths, Wait: noProgrammingWait}, io.Discard,
 	)
-	if err == nil || !strings.Contains(err.Error(), "capture exact MCU EEPROM settings") {
+	if err == nil || !strings.Contains(err.Error(), "capture semantic MCU EEPROM settings") {
 		t.Fatalf("settings query failure was not rejected: session=%+v err=%v", session, err)
 	}
 	if session != nil || len(device.stores) != 0 || device.safeCalls != 0 {
@@ -458,80 +458,21 @@ func TestProgrammingLifecycleSettingsQueryFailureStopsBeforeMutation(t *testing.
 	}
 }
 
-func TestProgrammingLifecycleDevelopmentEEPROMReinitializationCapturesErrorAndKeepsOutputsOff(t *testing.T) {
+func TestProgrammingLifecycleDevelopmentEEPROMMigrationRejectsMissingSemanticCapture(t *testing.T) {
 	paths, firmware := programmingLifecycleFixture(t)
 	queryErr := errors.New("SETTINGS payload length 13, expected 15")
-	liveErr := errors.New("PWM_VALUES unavailable on development firmware")
 	device := &fakeProgrammingDevice{
-		snapshot: connectedProgrammingSnapshot(
-			native.CapabilityHostFrontPanel | native.CapabilityI2CTransfer,
-		),
+		snapshot: connectedProgrammingSnapshot(native.CapabilityHostFrontPanel),
 		queryErr: queryErr,
-		liveErr:  liveErr,
-		rampErr:  liveErr,
-		liveState: ProgrammingLiveState{
-			PWM: &native.PWMValues{Available: true, Values: [16]uint16{120, 240}},
-		},
 	}
 	options := ProgrammingLifecycleOptions{
 		DataPaths: paths, Wait: noProgrammingWait, ReinitializeEEPROM: true,
 	}
-	var output strings.Builder
 	session, err := prepareProgrammingSession(
-		context.Background(), device, firmware, options, &output,
+		context.Background(), device, firmware, options, io.Discard,
 	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !session.ReinitializeEEPROM || session.SettingsQueryError != queryErr.Error() ||
-		session.OriginalSettings != nil || session.OriginalLiveState == nil ||
-		session.Phase != "development-reinitialize-safe" || len(device.stores) != 0 {
-		t.Fatalf("development preparation session=%+v stores=%v", session, device.stores)
-	}
-	content, err := os.ReadFile(session.SettingsSnapshotPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(content), `"settings_query_error": "SETTINGS payload length 13, expected 15"`) ||
-		!strings.Contains(string(content), `"live_state_query_error": "PWM_VALUES unavailable on development firmware"`) ||
-		!strings.Contains(output.String(), "DEVELOPMENT EEPROM REINITIALIZATION") {
-		t.Fatalf("snapshot/output did not preserve the compatibility exception:\n%s\n%s", content, output.String())
-	}
-
-	if err := MarkProgrammingSessionComplete(session, true); err != nil {
-		t.Fatal(err)
-	}
-	device.queryErr = nil
-	device.settings = native.Settings{
-		Flags: native.SettingsSilent | native.SettingsProgrammingMode, LightMode: 2,
-		OnBrightness: 180, DisplayBrightness: 5,
-		StatusBrightness: 128, OutputPersistence: native.OutputPersistenceMask,
-		RelayRestoreMask: 0xFF, MotionBreakMSValue: 1,
-	}
-	if err := restoreProgrammingSession(
-		context.Background(), device, session, options, &output,
-	); err != nil {
-		t.Fatal(err)
-	}
-	if len(device.stores) != 1 || device.settings.Flags&native.SettingsSilent != 0 ||
-		device.settings.Flags&native.SettingsProgrammingMode != 0 ||
-		device.settings.LightMode != 0 || device.settings.OutputPersistence != 0 ||
-		device.settings.RelayRestoreMask != 0 || device.safeCalls != 3 ||
-		device.settings.OnBrightness != native.DefaultSettings().OnBrightness ||
-		device.settings.DisplayBrightness != native.DefaultSettings().DisplayBrightness ||
-		device.settings.StatusBrightness != native.DefaultSettings().StatusBrightness ||
-		strings.Join(device.melodies, ",") != "power-down,programming-ready" {
-		t.Fatalf("post-flash development settings were not safe and audible: %+v", device)
-	}
-	if device.restoredLive != nil {
-		t.Fatalf("incompatible live state was restored: %+v", device.restoredLive)
-	}
-	if _, err := os.Stat(session.RecoveryMarkerPath); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("verified development marker still exists: %v", err)
-	}
-	if !strings.Contains(output.String(), "old semantic settings were not restored") ||
-		!strings.Contains(output.String(), "Silent off") {
-		t.Fatalf("data-loss result was not explicit:\n%s", output.String())
+	if err == nil || session != nil || !strings.Contains(err.Error(), queryErr.Error()) {
+		t.Fatalf("migration accepted missing semantic capture: session=%+v err=%v", session, err)
 	}
 }
 
@@ -575,9 +516,26 @@ func TestDevelopmentReinitializationArmsDurableLatchOnlyAfterRawBackup(t *testin
 		!session.TemporarySilent || device.panelShown != 2 {
 		t.Fatalf("post-backup latch was not durable/visible: session=%+v device=%+v", session, device)
 	}
+	if err := MarkProgrammingSessionComplete(session, true); err != nil {
+		t.Fatal(err)
+	}
+	var output strings.Builder
+	if err := restoreProgrammingSession(
+		context.Background(), device, session, options, &output,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if device.settings != original || len(device.stores) != 3 ||
+		device.restoredLive == nil ||
+		!strings.Contains(output.String(), "compatible settings and live state restored semantically") {
+		t.Fatalf("semantic post-HELLO restore failed: settings=%+v stores=%d live=%+v output=%q", device.settings, len(device.stores), device.restoredLive, output.String())
+	}
+	if _, err := os.Stat(session.RecoveryMarkerPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("verified migration marker still exists: %v", err)
+	}
 }
 
-func TestDevelopmentReinitializationDefersUnsupportedLatchToNewFactoryImage(t *testing.T) {
+func TestDevelopmentMigrationNeverFallsBackToUnmigratedFactoryImage(t *testing.T) {
 	paths, firmware := programmingLifecycleFixture(t)
 	device := &fakeProgrammingDevice{
 		snapshot: connectedProgrammingSnapshot(0),
@@ -589,18 +547,8 @@ func TestDevelopmentReinitializationDefersUnsupportedLatchToNewFactoryImage(t *t
 	session, err := prepareProgrammingSession(
 		context.Background(), device, firmware, options, io.Discard,
 	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var output strings.Builder
-	if err := armProgrammingSessionAfterBackup(
-		context.Background(), device, session, options, &output,
-	); err != nil {
-		t.Fatal(err)
-	}
-	if len(device.stores) != 0 || len(session.Warnings) == 0 ||
-		!strings.Contains(output.String(), "factory EEPROM will arm Prog") {
-		t.Fatalf("unsupported latch fallback was not explicit: session=%+v output=%q", session, output.String())
+	if err == nil || session != nil || !strings.Contains(err.Error(), "obsolete settings schema") {
+		t.Fatalf("unsupported semantic schema reached a raw/factory fallback: session=%+v err=%v", session, err)
 	}
 }
 

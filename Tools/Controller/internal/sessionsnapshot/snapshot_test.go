@@ -41,7 +41,7 @@ func TestBuildCapturesUsefulStateWithoutSecretsOrReplayableRF(t *testing.T) {
 				InstanceID: "USB\\VID_1A86&PID_7523\\BOARD-01",
 			},
 			Hello: controller.Hello{
-				BoardKind: 1, Name: "PCController", IdentitySchema: 3,
+				BoardKind: 1, Name: "PCController", IdentitySchema: 4,
 				Capabilities: 0x12345678, BuildHash: 0xAABBCCDD,
 				BuildTimestamp: 0x3456789A, BuildStamp: "260802131416",
 			},

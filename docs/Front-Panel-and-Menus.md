@@ -353,6 +353,16 @@ starts. Status RGB is channels 13-15. EEPROM factory brightness is 128.
 Animated levels change by four every 20 ms, and informational transitions ease
 toward their new color instead of inserting a black or unrelated frame.
 
+Production full-peripheral builds omit the 1,918-byte local status-effect
+engine to remain inside the ATmega328P application limit. They still drive the
+critical PCA9685 Power/On signal directly on channel 12; the connected Go host
+owns RGB channels 13-15 through the ordinary RGB opcode. The table below
+describes the optional status-engine feature profile, not offline production
+behavior. Local boot/fault animations are therefore unavailable without the
+host. A tiny fixed critical offline indicator remains tracked in
+[#21](https://github.com/atomicdeploy/PCController/issues/21); it must fit the
+proven stack/flash margin before being enabled.
+
 | Priority/state | RGB behavior |
 |---|---|
 | Programming latch | Power indicator and RGB remain off until the host completes verify/reconnect/restore |
@@ -920,8 +930,9 @@ protocol and host:
   display, menu, reset, and generic I2C commands;
 - graceful reboot sequence that stops the buzzer, RF momentary action, motion,
   relays, and user PWM outputs while playing the Reset RGB cue;
-- boot melody and boot/status RGB indication; door, BT Audio, RF, navigation,
-  save/discard, warning/hot, fault, and reset RGB cues;
+- boot melody plus direct PCA9685 Power/On indication; when the host is
+  connected it supplies door, BT Audio, RF, navigation, save/discard,
+  warning/hot, fault, and reset RGB cues through the native opcode;
 - door and relay audio enable flags plus global Silent mode in EEPROM;
 - two DS18B20 ROM identities, role swap setting, asynchronous 11-bit
   conversion, and temperature smoothing; OneWire work pauses during RF learn;

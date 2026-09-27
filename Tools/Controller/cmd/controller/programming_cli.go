@@ -98,7 +98,7 @@ func runProgramWithConfig(
 	reinitializeEEPROM := flags.Bool(
 		"reinitialize-eeprom",
 		false,
-		"development only: retain raw EEPROM backup but discard incompatible semantic settings",
+		"development only: retain raw EEPROM backup and migrate compatible semantic settings into the compiled layout",
 	)
 	confirmEEPROM := flags.Bool(
 		"confirm-eeprom-write",
@@ -816,7 +816,7 @@ func executeGuardedCLIFlash(
 	if application != nil && programmingSession != nil && reinitializeEEPROM {
 		afterBackup = func(
 			backupContext context.Context,
-			_ programmer.AutomaticPreflashResult,
+			backupResult programmer.AutomaticPreflashResult,
 			writer io.Writer,
 		) error {
 			application.ResumeAuto()
@@ -842,6 +842,13 @@ func executeGuardedCLIFlash(
 			if closeErr != nil {
 				return fmt.Errorf("release application UART after arming programming latch: %w", closeErr)
 			}
+			if err := programmer.ProgramMigratedProgrammingEEPROM(
+				context.WithoutCancel(backupContext), backupResult.BackupManifest,
+				paths, options, programmer.Execute, writer,
+			); err != nil {
+				return fmt.Errorf("preseed migrated Silent/Prog EEPROM before flash: %w", err)
+			}
+			fmt.Fprintln(writer, "semantic EEPROM migration programmed and verified before firmware write")
 			return nil
 		}
 	}
@@ -874,16 +881,6 @@ func executeGuardedCLIFlash(
 		fmt.Fprintln(output, "guarded firmware flash completed")
 	}
 	verifiedProgram := flashErr == nil && result.Flashed
-	if verifiedProgram && reinitializeEEPROM {
-		if factoryErr := programFactoryEEPROM(
-			context.WithoutCancel(ctx), paths, options, output,
-		); factoryErr != nil {
-			flashErr = errors.Join(flashErr, factoryErr)
-			verifiedProgram = false
-		} else {
-			fmt.Fprintln(output, "host-owned Silent/Prog factory EEPROM programmed and independently read back")
-		}
-	}
 	if programmingSession != nil {
 		if markerErr := control.MarkProgrammingSessionComplete(
 			programmingSession, verifiedProgram,
@@ -945,17 +942,6 @@ func executeGuardedCLIFlash(
 		)
 	}
 	return errors.Join(flashErr, reconnectErr, restoreErr)
-}
-
-func programFactoryEEPROM(
-	ctx context.Context,
-	paths programmer.HostDataPaths,
-	base programmer.Options,
-	output io.Writer,
-) error {
-	return programmer.ProgramLatchedFactoryEEPROM(
-		ctx, paths, base, programmer.Execute, output,
-	)
 }
 
 func readApplicationIdentityBeforeProgramming(
@@ -1604,7 +1590,7 @@ func runWS(args []string, stdout, stderr io.Writer, store *appconfig.Store) erro
 		avrdude := flags.String("avrdude", config.Programming.Avrdude, "avrdude executable")
 		avrdudeConf := flags.String("avrdude-conf", config.Programming.AvrdudeConf, "avrdude.conf path")
 		allowIncomplete := flags.Bool("allow-incomplete-backup", false, "explicitly allow flashing without a complete verified backup")
-		reinitializeEEPROM := flags.Bool("reinitialize-eeprom", false, "development only: retain raw EEPROM backup but discard incompatible semantic settings")
+		reinitializeEEPROM := flags.Bool("reinitialize-eeprom", false, "development only: retain raw EEPROM backup and migrate compatible semantic settings into the compiled layout")
 		reconnect := flags.Duration("reconnect", 2*time.Second, "reconnect delay")
 		maxSize := flags.Int64("max-size", wsrelay.DefaultMaxSize, "maximum firmware bytes")
 		if err := flags.Parse(args[1:]); err != nil {

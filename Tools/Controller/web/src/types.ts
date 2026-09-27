@@ -35,6 +35,8 @@ export interface Hello {
   build_date?: string
   build_time?: string
   build_timestamp?: string
+  feature_profile?: number
+  build_features?: number
 }
 
 export interface ControllerStatus {

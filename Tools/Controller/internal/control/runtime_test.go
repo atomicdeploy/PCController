@@ -17,6 +17,30 @@ type reconnectTestPort struct {
 	closed chan struct{}
 }
 
+func TestOldPumpFramesAreRejectedAfterSessionReplacement(t *testing.T) {
+	runtime := New(Options{})
+	oldSession := &link.Session{}
+	newSession := &link.Session{}
+	runtime.mu.Lock()
+	runtime.session = oldSession
+	runtime.generation = 7
+	runtime.mu.Unlock()
+	if !runtime.sessionGenerationCurrent(oldSession, 7) {
+		t.Fatal("current pump generation was rejected")
+	}
+	runtime.mu.Lock()
+	runtime.session = newSession
+	runtime.generation = 8
+	runtime.mu.Unlock()
+	if runtime.sessionGenerationCurrent(oldSession, 7) ||
+		runtime.sessionGenerationCurrent(oldSession, 8) {
+		t.Fatal("buffered old-session frame could enter replacement generation")
+	}
+	if !runtime.sessionGenerationCurrent(newSession, 8) {
+		t.Fatal("replacement session generation was rejected")
+	}
+}
+
 func newReconnectTestPort() *reconnectTestPort {
 	return &reconnectTestPort{closed: make(chan struct{})}
 }
