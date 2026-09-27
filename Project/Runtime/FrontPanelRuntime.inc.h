@@ -31,6 +31,11 @@ bool isMenuMode(ProgramMode mode) {
 
 // Converts a stable page ID to its contiguous top-level program mode.
 ProgramMode pageToMode(uint8_t page) {
+#if PCCONTROLLER_ENABLE_MENU_DIRECTORY
+  // MENU_LIST retains the retired direct selector but reports the unified KEY
+  // program mode. Ordinary local callers already canonicalize in setMenuPage.
+  page = canonicalMenuPage(page);
+#endif
   return static_cast<ProgramMode>(
       static_cast<uint8_t>(MODE_DOOR) + page);
 }
@@ -99,7 +104,8 @@ uint8_t nextConfiguredMenuPage(uint8_t page, bool forward,
       rank = static_cast<uint8_t>(rank - PAGE_COUNT);
     }
     const uint8_t candidate = configuredMenuPageAt(rank);
-    if (!settingsStore.values().menuPageVisible(candidate)) {
+    if (!menuPageNavigable(candidate) ||
+        !settingsStore.values().menuPageVisible(candidate)) {
       continue;
     }
 #if PCCONTROLLER_MENU_HIERARCHY
@@ -120,7 +126,8 @@ uint8_t nextConfiguredMenuPage(uint8_t page, bool forward,
 uint8_t firstConfiguredMenuPage(uint8_t category) {
   for (uint8_t rank = 0; rank < PAGE_COUNT; ++rank) {
     const uint8_t page = configuredMenuPageAt(rank);
-    if (settingsStore.values().menuPageVisible(page) &&
+    if (menuPageNavigable(page) &&
+        settingsStore.values().menuPageVisible(page) &&
         menuCategory(page) == category) {
       return page;
     }
@@ -156,7 +163,7 @@ void moveMenuCategory(bool forward, uint32_t at) {
 
 // Activates a stable page and optionally persists it as the boot default.
 void setMenuPage(uint8_t page) {
-  menuPage = page;
+  menuPage = canonicalMenuPage(page);
 #if PCCONTROLLER_MENU_HIERARCHY
   menuTreeState = menuCategory(menuPage);
 #endif
@@ -212,7 +219,6 @@ void programService(uint32_t at) {
         menuLabelEndsAt = at + 450;
         break;
       case MODE_MOTION_CONTROL:
-        relays.allOff(at);
         display.showText(commonText(TextGo));
         menuLabelEndsAt = at + 450;
         break;
@@ -226,7 +232,6 @@ void programService(uint32_t at) {
         break;
       case MODE_FAULT:
         display.showText(commonText(TextError));
-        buzzer.error();
         break;
       default:
         break;
@@ -253,7 +258,7 @@ void programService(uint32_t at) {
     case MODE_MOTION_CONTROL:
       if (!relays.motionAllowed()) {
         relays.allOff(at);
-        modeManager.transitionTo(MODE_MOTION);
+        modeManager.transitionTo(MODE_DOOR);
       }
       break;
 
@@ -297,11 +302,22 @@ void programService(uint32_t at) {
   }
 }
 
-// Emits one canonical audio acknowledgement for physical, RF, and host input.
+// Emits the visual acknowledgement shared by generic and actuator-specific
+// feedback. Relay/motion actions use this path while their committed output
+// transition owns the distinct audio cue.
+void menuVisualFeedback(bool fromRemote) {
+  static_assert(static_cast<uint8_t>(StatusLedCue::Radio) ==
+                    static_cast<uint8_t>(StatusLedCue::Menu) + 1U,
+                "menu/radio cues must remain adjacent");
+  statusLeds.playCue(
+      static_cast<StatusLedCue>(static_cast<uint8_t>(StatusLedCue::Menu) +
+                                static_cast<uint8_t>(fromRemote)),
+      260, now);
+}
+
+// Emits one canonical generic acknowledgement for menu navigation/editing.
 void menuFeedback(bool fromRemote) {
-  statusLeds.playCue(fromRemote ? StatusLedCue::Radio
-                                : StatusLedCue::Menu,
-                     260, now);
+  menuVisualFeedback(fromRemote);
   buzzer.beep();
 }
 
@@ -460,10 +476,8 @@ void finishEditTransaction(bool save, uint32_t at) {
   flashMessageSaved = save;
   flashMessageEndsAt = at + 900;
   if (save) {
-    buzzer.success();
     statusLeds.playCue(StatusLedCue::Save, 900, at);
   } else {
-    buzzer.error();
     statusLeds.playCue(StatusLedCue::Discard, 900, at);
   }
   modeManager.transitionTo(MODE_FLASH_MESSAGE);
@@ -514,13 +528,15 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
 
 #endif
 
-  // KEY owns all four actions, including K3 identification, before the generic
-  // leaf hierarchy considers K3 as Back.
+  // Production has one input page: K1/K2 are Side A forward/reverse and
+  // K3/K4 are Side B forward/reverse. The same mapping is used by physical,
+  // RF, and host actions.
   if (modeManager.current() == MODE_KEYS) {
-    identifiedKey = static_cast<uint8_t>(action + 1);
-    identifiedKeyEndsAt = actionNow + 900;
-    menuFeedback(fromRemote);
-    return;
+    if (!relays.motionAllowed()) {
+      return;
+    }
+    relays.allOff(actionNow);
+    modeManager.transitionTo(MODE_MOTION_CONTROL);
   }
 
   switch (modeManager.current()) {
@@ -715,13 +731,14 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       } else {
         setSelectedUserRelay(true, actionNow);
       }
-      menuFeedback(fromRemote);
+      // Relay state commit owns the actuator-specific tone. Starting the
+      // generic menu beep here makes it audibly precede that feedback.
+      menuVisualFeedback(fromRemote);
       return;
 
     case MODE_MOTION_CONTROL: {
       const uint8_t side = action >= MENU_DECREASE ? 1 : 0;
-      const bool reverse =
-          action == MENU_NEXT || action == MENU_INCREASE;
+      const bool reverse = action == MENU_NEXT || action == MENU_INCREASE;
       const bool accepted = relays.requestSide(
           static_cast<::RelaySide>(side),
           reverse ? RelayDirection::Reverse : RelayDirection::Forward, true,
@@ -731,7 +748,12 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
         remoteMomentaryValue = side;
         remoteMomentaryEndsAt = actionNow + 350;
       }
-      menuFeedback(fromRemote);
+      // Motion feedback is emitted when the relay sequencer commits the new
+      // state; do not start a generic menu tone ahead of it.
+      menuVisualFeedback(fromRemote);
+      if (!accepted) {
+        buzzer.beep();
+      }
       return;
     }
 
@@ -766,13 +788,18 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       } else {
         setSelectedRelay(action == MENU_INCREASE, actionNow);
       }
-      menuFeedback(fromRemote);
+      if (action == MENU_PREVIOUS || action == MENU_NEXT) {
+        menuFeedback(fromRemote);
+      } else {
+        menuVisualFeedback(fromRemote);
+      }
       return;
 
     default:
       break;
   }
 
+  bool outputAction = false;
   switch (action) {
     case MENU_PREVIOUS:
 #if PCCONTROLLER_MENU_VISIBILITY
@@ -783,7 +810,10 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
 #endif
           ));
 #else
-      setMenuPage(menuPage == 0 ? PAGE_COUNT - 1 : menuPage - 1);
+      setMenuPage(menuPage == PAGE_DOOR
+                      ? PAGE_RF
+                      : (menuPage == PAGE_RF ? PAGE_USER_RELAYS
+                                             : menuPage - 1));
 #endif
       break;
     case MENU_NEXT:
@@ -795,7 +825,9 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
 #endif
           ));
 #else
-      setMenuPage(static_cast<uint8_t>((menuPage + 1) % PAGE_COUNT));
+      setMenuPage(menuPage == PAGE_USER_RELAYS
+                      ? static_cast<uint8_t>(PAGE_RF)
+                      : static_cast<uint8_t>((menuPage + 1) % PAGE_COUNT));
 #endif
       break;
     case MENU_DECREASE:
@@ -804,6 +836,8 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       if (leafDecreaseAction(modeManager.current()) ==
           LeafDecreaseAction::AllRelaysOff) {
         relays.allOff(actionNow);
+        menuVisualFeedback(fromRemote);
+        return;
 #if PCCONTROLLER_MENU_HIERARCHY
       } else {
         menuTreeState = static_cast<uint8_t>(
@@ -826,6 +860,7 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       } else if (menuPage == PAGE_RELAY) {
         relays.allOff(actionNow);
         modeManager.transitionTo(MODE_RELAY_CHANNEL_EDIT);
+        outputAction = true;
       } else if (menuPage == PAGE_USER_PWM) {
         beginEditTransaction(MODE_USER_PWM);
         for (uint8_t channel = 0; channel < 8; ++channel) {
@@ -836,24 +871,20 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
         modeManager.transitionTo(MODE_USER_PWM_CHANNEL_EDIT);
       } else if (menuPage == PAGE_USER_RELAYS) {
         modeManager.transitionTo(MODE_USER_RELAY_CHANNEL_EDIT);
-      } else if (menuPage == PAGE_MOTION) {
-        if (relays.motionAllowed()) {
-          modeManager.transitionTo(MODE_MOTION_CONTROL);
-        } else {
-          buzzer.error();
-        }
       } else if (menuPage == PAGE_RF) {
         beginLearning(RF_LEARN_INDEFINITE, 0);
       } else {
         display.showText(commonText(TextError));
         menuLabelEndsAt = actionNow + 650;
         statusLeds.playCue(StatusLedCue::Discard, 650, actionNow);
-        buzzer.error();
         return;
       }
       break;
   }
-  menuFeedback(fromRemote);
+  menuVisualFeedback(fromRemote);
+  if (!outputAction) {
+    buzzer.beep();
+  }
 }
 
 // Applies one physical or injected lifecycle without duplicating the local
@@ -861,7 +892,16 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
 // deferred classification only and must never sit on the control path.
 void applyKeyGesture(uint8_t bit, KeyEvent event) {
   const ProgramMode mode = modeManager.current();
-  const bool momentary = mode == MODE_MOTION_CONTROL ||
+  if (motionExitStartedAt == 0xFFFFFFFFUL) {
+    return;
+  }
+  // A second opposing key completes the exit chord. Suppress that Down so it
+  // cannot reverse a side before serviceMotionExit() stops both outputs.
+  if (mode == MODE_MOTION_CONTROL && event == KeyEvent::Down &&
+      shiftRegisters.inputActive(bit ^ 1U)) {
+    return;
+  }
+  const bool momentary = mode == MODE_KEYS || mode == MODE_MOTION_CONTROL ||
                          (mode == MODE_USER_RELAY_CONTROL &&
                           userRelayBehavior && bit == BoardPins::KeyIncrease);
   if (momentary) {
@@ -870,7 +910,7 @@ void applyKeyGesture(uint8_t bit, KeyEvent event) {
     } else if (event == KeyEvent::Up) {
       now = millis();
       const uint32_t releaseNow = now;
-      if (mode == MODE_MOTION_CONTROL) {
+      if (mode == MODE_KEYS || mode == MODE_MOTION_CONTROL) {
         relays.stopSide(
             static_cast<::RelaySide>(bit <= BoardPins::KeyNext ? 0 : 1),
             releaseNow);
@@ -897,30 +937,37 @@ void keyGesture(uint8_t bit, KeyEvent event, void *) {
   appEvents.key(bit, static_cast<uint8_t>(event));
 }
 
-// Stops motion and exits its modal page after either side's two-key hold.
+// Stops motion and exits after a configured single-key, opposing-pair, or
+// all-four hold. Chords stop outputs immediately; a completed gesture is
+// quarantined until release so its Up/HoldRelease events cannot leak to door.
 void serviceMotionExit(uint32_t at) {
+  const bool anyPressed = menuKeys[0].isPressed() || menuKeys[1].isPressed() ||
+                          menuKeys[2].isPressed() || menuKeys[3].isPressed();
+  if (motionExitStartedAt == 0xFFFFFFFFUL) {
+    if (!anyPressed) {
+      motionExitStartedAt = 0;
+    }
+    return;
+  }
   const bool motionControl = modeManager.current() == MODE_MOTION_CONTROL;
   const bool sideAExit =
       menuKeys[0].isPressed() && menuKeys[1].isPressed();
   const bool sideBExit =
       menuKeys[2].isPressed() && menuKeys[3].isPressed();
-  if (!motionControl || (!sideAExit && !sideBExit)) {
+  if (!motionControl || !anyPressed) {
     motionExitStartedAt = 0;
     return;
   }
-  if (motionControl) {
+  if (sideAExit || sideBExit) {
     relays.allOff(at);
-  }
-  if (motionExitStartedAt == 0xFFFFFFFFUL) {
-    return;
   }
   if (motionExitStartedAt == 0) {
     motionExitStartedAt = at;
   } else if (static_cast<uint32_t>(at - motionExitStartedAt) >=
              static_cast<uint16_t>(
                  settingsStore.values().motionExitHoldSeconds()) * 1000U) {
-    setMenuPage(PAGE_MOTION);
-    buzzer.success();
+    relays.allOff(at);
+    setMenuPage(PAGE_DOOR);
     motionExitStartedAt = 0xFFFFFFFFUL;
   }
 }
@@ -932,16 +979,23 @@ void serviceSystemInputs(uint32_t at) {
   bool value;
   if (systemInputs.consumeDoorChange(value)) {
     appEvents.door(value);
+#if PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
     if (settingsStore.values().doorAudioEnabled()) {
-      buzzer.beep(45, value ? 1700 : 1100);
+      audioCues.play(value ? AudioCue::DoorOpen : AudioCue::DoorClosed);
     }
-    statusLeds.playCue(value ? StatusLedCue::DoorOpen
-                             : StatusLedCue::DoorClosed,
-                       720, at);
+#endif
+    static_assert(static_cast<uint8_t>(StatusLedCue::DoorClosed) ==
+                      static_cast<uint8_t>(StatusLedCue::DoorOpen) + 1U,
+                  "door cues must remain adjacent");
+    statusLeds.playCue(
+        static_cast<StatusLedCue>(
+            static_cast<uint8_t>(StatusLedCue::DoorClosed) -
+            static_cast<uint8_t>(value)),
+        720, at);
     relays.setMotionAllowed(motionPolicyAllows(), at);
     if (!relays.motionAllowed()) {
       if (modeManager.current() == MODE_MOTION_CONTROL) {
-        modeManager.transitionTo(MODE_MOTION);
+        setMenuPage(PAGE_DOOR);
       }
     }
     if (!value && !editTransactionActive &&
@@ -1214,11 +1268,7 @@ void serviceDisplay(uint32_t at) {
     return;
   }
   if (currentMode == MODE_KEYS) {
-    if (!timeReached(at, identifiedKeyEndsAt) && identifiedKey != 0) {
-      display.showInteger(identifiedKey);
-    } else {
-      display.showText(commonText(TextKey));
-    }
+    display.showText(commonText(TextKey));
     return;
   }
   if (currentMode == MODE_USER_PWM) {

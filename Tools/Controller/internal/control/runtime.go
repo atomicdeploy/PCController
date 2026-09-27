@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,12 +19,14 @@ import (
 )
 
 type Options struct {
-	Filter           ports.Filter
-	BaudRate         int
-	StartupWait      time.Duration
-	RequestTimeout   time.Duration
-	HelloAttempts    int
-	ResetOnReconnect bool
+	Filter                ports.Filter
+	BaudRate              int
+	StartupWait           time.Duration
+	RequestTimeout        time.Duration
+	HelloAttempts         int
+	ResetOnReconnect      bool
+	ReconnectInitialDelay time.Duration
+	ReconnectMaximumDelay time.Duration
 }
 
 type Snapshot struct {
@@ -46,6 +50,7 @@ type Snapshot struct {
 	StatusLEDUpdated  time.Time
 	ProgramState      ProgramStateSnapshot
 	RFLearning        RFLearnState
+	Macros            MacroSnapshot
 	PortProcess       PortProcessSnapshot `json:"port_process"`
 }
 
@@ -94,11 +99,12 @@ type Event struct {
 // MCU timestamp lets recorders preserve activation deltas without trusting
 // host USB/network arrival time.
 type CommandEvidence struct {
-	Opcode       byte      `json:"opcode"`
-	Payload      []byte    `json:"payload,omitempty"`
-	DeviceMicros uint32    `json:"device_micros"`
-	Timed        bool      `json:"timed"`
-	ObservedAt   time.Time `json:"observed_at"`
+	Opcode       byte          `json:"opcode"`
+	Payload      []byte        `json:"payload,omitempty"`
+	DeviceMicros uint32        `json:"device_micros"`
+	Timed        bool          `json:"timed"`
+	ObservedAt   time.Time     `json:"observed_at"`
+	Source       CommandSource `json:"source,omitempty"`
 }
 
 type rfGestureKey struct {
@@ -129,6 +135,17 @@ type rfClickState struct {
 	event      native.DeviceEvent
 }
 
+type connectionEventSignature struct {
+	Lifecycle  string
+	State      string
+	Reason     string
+	Port       string
+	VID        string
+	PID        string
+	Serial     string
+	InstanceID string
+}
+
 type Runtime struct {
 	options Options
 
@@ -155,6 +172,7 @@ type Runtime struct {
 	connectionUpdated      time.Time
 	reconnectEpoch         uint64
 	resetIssued            bool
+	portRebindAllowed      bool
 	deviceObserver         func(ports.Info, native.Hello)
 	connectionReadyHandler func(ports.Info, native.Hello)
 	beforeDisconnect       func(string)
@@ -206,15 +224,24 @@ type Runtime struct {
 	hostMenuRequestHandler func(native.HostMenuContentRequest)
 	portProcess            PortProcessSnapshot
 	portMonitorStarted     bool
+	connectionEventMu      sync.Mutex
+	connectionEvents       map[string]connectionEventSignature
 }
 
-const programStateHeartbeatPeriod = 2 * time.Second
+var openResetSession = link.OpenContext
+
+const (
+	programStateHeartbeatPeriod  = 2 * time.Second
+	defaultReconnectInitialDelay = 500 * time.Millisecond
+	defaultReconnectMaximumDelay = 15 * time.Second
+)
 
 func New(options Options) *Runtime {
 	options = normalizedOptions(options)
 	runtime := &Runtime{
 		options: options, events: make(chan Event, 512),
 		eventNotify:        make(chan struct{}),
+		connectionEvents:   make(map[string]connectionEventSignature),
 		connectionState:    "disconnected",
 		connectionUpdated:  time.Now(),
 		historyRetention:   24 * time.Hour,
@@ -252,16 +279,32 @@ func (runtime *Runtime) startPortProcessMonitor() {
 }
 
 func (runtime *Runtime) refreshPortProcess() {
+	runtime.refreshPortProcessWith(portowner.FindOwner)
+}
+
+func (runtime *Runtime) refreshPortProcessWith(findOwner func(context.Context, string) (portowner.Owner, bool, error)) {
 	runtime.mu.RLock()
 	port, previous := runtime.port.Name, runtime.portProcess
-	paused, connected := runtime.paused, runtime.session != nil
+	paused, session := runtime.paused, runtime.session
 	runtime.mu.RUnlock()
+	connected := session != nil
 	if port == "" {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 350*time.Millisecond)
-	owner, found, err := portowner.FindOwner(ctx, port)
-	cancel()
+	var owner portowner.Owner
+	var found bool
+	var err error
+	if connected {
+		// An open exclusive serial session is direct ownership evidence. Do not
+		// turn a privileged OS enumeration failure into "unknown" for our own port.
+		executable, _ := os.Executable()
+		owner = portowner.Owner{PID: uint32(os.Getpid()), Name: filepath.Base(executable), Executable: executable}
+		found = true
+	} else {
+		ctx, cancel := context.WithTimeout(context.Background(), 350*time.Millisecond)
+		owner, found, err = findOwner(ctx, port)
+		cancel()
+	}
 	next := PortProcessSnapshot{Supported: true, State: "free", Port: port, ObservedAt: time.Now(), TakeoverReady: !connected && !paused}
 	if err != nil {
 		next.State, next.Error = "unknown", err.Error()
@@ -270,15 +313,17 @@ func (runtime *Runtime) refreshPortProcess() {
 		next.State = "owned"
 		next.PID, next.Name, next.Executable, next.ProcessStartTime, next.Window = owner.PID, owner.Name, owner.Executable, owner.ProcessStartTime, owner.Window
 	}
-	if previous.State == next.State && previous.PID == next.PID && previous.Port == next.Port && previous.Error == next.Error {
-		runtime.mu.Lock()
-		runtime.portProcess = next
+	runtime.mu.Lock()
+	// A slow OS lookup must not overwrite a connection opened/closed meanwhile.
+	if runtime.port.Name != port || runtime.session != session || runtime.paused != paused {
 		runtime.mu.Unlock()
 		return
 	}
-	runtime.mu.Lock()
 	runtime.portProcess = next
 	runtime.mu.Unlock()
+	if previous.State == next.State && previous.PID == next.PID && previous.Port == next.Port && previous.Error == next.Error {
+		return
+	}
 	metadata := map[string]string{"port": port, "state": next.State}
 	if next.PID != 0 {
 		metadata["pid"] = strconv.FormatUint(uint64(next.PID), 10)
@@ -343,6 +388,15 @@ func normalizedOptions(options Options) Options {
 	}
 	if options.HelloAttempts == 0 {
 		options.HelloAttempts = 3
+	}
+	if options.ReconnectInitialDelay <= 0 {
+		options.ReconnectInitialDelay = defaultReconnectInitialDelay
+	}
+	if options.ReconnectMaximumDelay <= 0 {
+		options.ReconnectMaximumDelay = defaultReconnectMaximumDelay
+	}
+	if options.ReconnectMaximumDelay < options.ReconnectInitialDelay {
+		options.ReconnectMaximumDelay = options.ReconnectInitialDelay
 	}
 	return options
 }
@@ -484,7 +538,7 @@ func EventStreamForKind(kind string) string {
 		return EventStreamTelemetry
 	case "rx", "tx", "opcode":
 		return EventStreamDebug
-	case "front_panel.segment", "status_led.changed", "buzzer.note":
+	case "front_panel.segment", "status_led.changed", "buzzer.note", "illumination.changed", "settings.changed":
 		return EventStreamState
 	}
 	if strings.HasPrefix(kind, "measurement.") || strings.HasSuffix(kind, ".measurement") ||
@@ -495,6 +549,62 @@ func EventStreamForKind(kind string) string {
 		return EventStreamState
 	}
 	return EventStreamActivity
+}
+
+// Settings reads the authoritative live EEPROM settings and updates the shared
+// runtime snapshot through the ordinary response observer.
+func (runtime *Runtime) Settings(ctx context.Context) (native.Settings, error) {
+	frame, err := runtime.Request(ctx, native.OpGetSettings, nil, native.OpSettings)
+	if err != nil {
+		return native.Settings{}, err
+	}
+	return native.ParseSettings(frame.Payload)
+}
+
+// SetSettings applies a complete settings record, waits for durable readback,
+// then publishes one shared state event so every client converges without
+// polling. Callers must first read and preserve fields they do not own.
+func (runtime *Runtime) SetSettings(
+	ctx context.Context,
+	settings native.Settings,
+) (native.Settings, error) {
+	payload, err := settings.Payload()
+	if err != nil {
+		return native.Settings{}, err
+	}
+	if err := runtime.Command(ctx, native.OpSetSettings, payload); err != nil {
+		return native.Settings{}, err
+	}
+	wanted := settings
+	wanted.Persisted = true
+	deadline := time.Now().Add(1700 * time.Millisecond)
+	for {
+		confirmed, readErr := runtime.Settings(ctx)
+		if readErr == nil && confirmed == wanted {
+			runtime.PublishStructuredEvent(Event{
+				Kind: "settings.changed", Stream: EventStreamState,
+				Text: "board settings applied live and verified durable",
+				Metadata: map[string]string{
+					"light_mode":     strconv.Itoa(int(confirmed.LightMode)),
+					"on_brightness":  strconv.Itoa(int(confirmed.OnBrightness)),
+					"off_brightness": strconv.Itoa(int(confirmed.OffBrightness)),
+					"persisted":      strconv.FormatBool(confirmed.Persisted),
+				},
+			})
+			return confirmed, nil
+		}
+		if time.Now().After(deadline) {
+			if readErr != nil {
+				return native.Settings{}, fmt.Errorf("verify settings persistence: %w", readErr)
+			}
+			return native.Settings{}, errors.New("settings were applied but EEPROM persistence was not confirmed")
+		}
+		select {
+		case <-ctx.Done():
+			return native.Settings{}, ctx.Err()
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
 }
 
 func IsActivityEvent(event Event) bool {
@@ -603,14 +713,23 @@ func (runtime *Runtime) ApplyOptions(options Options) bool {
 	}
 	previous.ResetOnReconnect = options.ResetOnReconnect
 	previous.Filter.Preferred = options.Filter.Preferred
+	previous.ReconnectInitialDelay = options.ReconnectInitialDelay
+	previous.ReconnectMaximumDelay = options.ReconnectMaximumDelay
 	if previous == options {
 		runtime.mu.Lock()
 		runtime.options.ResetOnReconnect = options.ResetOnReconnect
 		runtime.options.Filter.Preferred = options.Filter.Preferred
+		runtime.options.ReconnectInitialDelay = options.ReconnectInitialDelay
+		runtime.options.ReconnectMaximumDelay = options.ReconnectMaximumDelay
 		runtime.mu.Unlock()
 		runtime.publish(
 			"config",
-			fmt.Sprintf("reset_on_reconnect=%t applied without reconnect", options.ResetOnReconnect),
+			fmt.Sprintf(
+				"connection retry policy applied without reconnect: reset_on_reconnect=%t initial=%s maximum=%s",
+				options.ResetOnReconnect,
+				options.ReconnectInitialDelay,
+				options.ReconnectMaximumDelay,
+			),
 			native.Frame{},
 		)
 		return true
@@ -625,6 +744,7 @@ func (runtime *Runtime) ApplyOptions(options Options) bool {
 	runtime.reconnectEpoch++
 	epoch := runtime.reconnectEpoch
 	runtime.resetIssued = true // A configuration reload is not a USB reappearance.
+	runtime.portRebindAllowed = false
 	runtime.mu.Unlock()
 	runtime.publish(
 		"config",
@@ -663,6 +783,7 @@ func (runtime *Runtime) Reconnect(ctx context.Context, reason string) error {
 	runtime.reconnectEpoch++
 	epoch := runtime.reconnectEpoch
 	runtime.resetIssued = true
+	runtime.portRebindAllowed = false
 	port := runtime.port
 	runtime.mu.Unlock()
 	runtime.publishConnection("reconnecting", port, reason)
@@ -815,12 +936,17 @@ func (runtime *Runtime) Command(
 	if err != nil {
 		return err
 	}
+	runtime.publishCommandEvidence(acknowledgedCommandEvidence(ctx, opcode, payload, frame))
+	return nil
+}
+
+func acknowledgedCommandEvidence(ctx context.Context, opcode byte, payload []byte, frame native.Frame) CommandEvidence {
 	deviceMicros, timed := native.ResponseDeviceMicros(frame)
-	runtime.publishCommandEvidence(CommandEvidence{
+	return CommandEvidence{
 		Opcode: opcode, Payload: append([]byte(nil), payload...),
 		DeviceMicros: deviceMicros, Timed: timed, ObservedAt: time.Now(),
-	})
-	return nil
+		Source: CommandSourceFromContext(ctx),
+	}
 }
 
 func (runtime *Runtime) publishCommandEvidence(evidence CommandEvidence) {
@@ -858,12 +984,41 @@ func (runtime *Runtime) PulseReset(ctx context.Context) error {
 }
 
 func (runtime *Runtime) PulseResetFor(ctx context.Context, duration time.Duration) error {
+	return runtime.PulseResetPortFor(ctx, "", duration)
+}
+
+func (runtime *Runtime) PulseResetPortFor(ctx context.Context, name string, duration time.Duration) error {
 	session := runtime.currentSession()
-	if session == nil {
-		return errors.New("device is not connected")
+	snapshot := runtime.Snapshot()
+	name = strings.TrimSpace(name)
+	if session != nil && (name == "" || strings.EqualFold(name, snapshot.Port.Name)) {
+		runtime.publish("tx", "pulsing DTR reset", native.Frame{})
+		return session.PulseReset(ctx, duration)
 	}
-	runtime.publish("tx", "pulsing DTR reset", native.Frame{})
-	return session.PulseReset(ctx, duration)
+
+	// A failed Urclock attempt can leave the primary intentionally paused with
+	// no authenticated session. DTR is precisely the recovery mechanism for
+	// that state, so use the remembered physical port without requiring HELLO.
+	if name == "" {
+		name = strings.TrimSpace(snapshot.Port.Name)
+	}
+	if name == "" {
+		return errors.New("DTR reset requires a connected or remembered serial port")
+	}
+	if link.IsNetworkEndpoint(name) {
+		return link.ErrControlLinesUnsupported
+	}
+	runtime.mu.RLock()
+	baudRate := runtime.options.BaudRate
+	runtime.mu.RUnlock()
+	temporary, err := openResetSession(ctx, name, baudRate)
+	if err != nil {
+		return fmt.Errorf("open remembered port %s for DTR reset: %w", name, err)
+	}
+	runtime.publish("tx", "pulsing DTR reset before application authentication", native.Frame{})
+	pulseErr := temporary.PulseReset(ctx, duration)
+	closeErr := temporary.Close()
+	return errors.Join(pulseErr, closeErr)
 }
 
 func (runtime *Runtime) RefreshStatus(ctx context.Context) (native.Status, error) {
@@ -874,6 +1029,35 @@ func (runtime *Runtime) RefreshStatus(ctx context.Context) (native.Status, error
 	return native.ParseStatus(frame.Payload)
 }
 
+// SetBoardSilent updates only the MCU Silent bit and verifies the resulting
+// SETTINGS frame. Callers must invoke it only for an explicit routing policy.
+func (runtime *Runtime) SetBoardSilent(ctx context.Context, silent bool) (native.Settings, error) {
+	settings, err := querySettings(ctx, runtime)
+	if err != nil {
+		return native.Settings{}, err
+	}
+	current := settings.Flags&native.SettingsSilent != 0
+	if current == silent {
+		return settings, nil
+	}
+	if silent {
+		settings.Flags |= native.SettingsSilent
+	} else {
+		settings.Flags &^= native.SettingsSilent
+	}
+	if err := storeSettings(ctx, runtime, settings); err != nil {
+		return native.Settings{}, err
+	}
+	verified, err := querySettings(ctx, runtime)
+	if err != nil {
+		return native.Settings{}, err
+	}
+	if (verified.Flags&native.SettingsSilent != 0) != silent {
+		return native.Settings{}, errors.New("board silent-state readback did not match requested state")
+	}
+	return verified, nil
+}
+
 func (runtime *Runtime) currentSession() *link.Session {
 	runtime.mu.RLock()
 	defer runtime.mu.RUnlock()
@@ -881,12 +1065,54 @@ func (runtime *Runtime) currentSession() *link.Session {
 }
 
 func (runtime *Runtime) discoveryOptions(options Options) link.DiscoveryOptions {
-	return link.DiscoveryOptions{
-		Filter: options.Filter, BaudRate: options.BaudRate,
-		StartupWait: options.StartupWait, RequestTimeout: options.RequestTimeout,
-		HelloAttempts:  options.HelloAttempts,
-		ResetAfterOpen: runtime.resetAfterOpen,
+	runtime.mu.RLock()
+	allowPortRebind := runtime.connectionState == "reconnecting" &&
+		runtime.session == nil && runtime.portRebindAllowed && runtime.port.IsUSB
+	lastPort := runtime.port
+	runtime.mu.RUnlock()
+	filter := options.Filter
+	if allowPortRebind {
+		filter.Preferred = mergeObservedDeviceIdentity(filter.Preferred, lastPort)
 	}
+	return link.DiscoveryOptions{
+		Filter: filter, BaudRate: options.BaudRate,
+		StartupWait: options.StartupWait, RequestTimeout: options.RequestTimeout,
+		HelloAttempts:   options.HelloAttempts,
+		ResetAfterOpen:  runtime.resetAfterOpen,
+		AllowPortRebind: allowPortRebind,
+	}
+}
+
+func mergeObservedDeviceIdentity(
+	preferred ports.Identity,
+	observed ports.Info,
+) ports.Identity {
+	if value := strings.TrimSpace(observed.Name); value != "" {
+		preferred.Port = value
+	}
+	if value := strings.TrimSpace(observed.VID); value != "" {
+		preferred.VID = value
+	}
+	if value := strings.TrimSpace(observed.PID); value != "" {
+		preferred.PID = value
+	}
+	if value := strings.TrimSpace(observed.SerialNumber); value != "" {
+		preferred.SerialNumber = value
+	}
+	if value := strings.TrimSpace(observed.InstanceID); value != "" {
+		preferred.InstanceID = value
+	}
+	for _, value := range []string{
+		observed.FriendlyName,
+		observed.Product,
+		observed.Manufacturer,
+	} {
+		if value = strings.TrimSpace(value); value != "" {
+			preferred.Name = value
+			break
+		}
+	}
+	return preferred
 }
 
 // resetAfterOpen consumes the reconnect reset permit before pulsing. Failed
@@ -927,9 +1153,22 @@ func (runtime *Runtime) attach(result link.OpenResult) {
 	runtime.connectionReason = ""
 	runtime.connectionUpdated = time.Now()
 	runtime.reconnectEpoch++
+	runtime.portRebindAllowed = false
 	observer := runtime.deviceObserver
 	ready := runtime.connectionReadyHandler
 	runtime.mu.Unlock()
+
+	lifecycle := "connect"
+	if reconnected {
+		lifecycle = "reconnected"
+	}
+	// Publish the authoritative connected state before callbacks or the pump can
+	// observe a rapidly disappearing transport. This prevents an older
+	// reconnecting event from landing after the new connected generation.
+	runtime.publishConnection(lifecycle, result.Port, "")
+	if result.Port.IsUSB {
+		runtime.publishUSBConnection("usb.reconnected", lifecycle, result.Port, "", "connected")
+	}
 
 	if observer != nil {
 		observer(result.Port, result.Hello)
@@ -941,16 +1180,6 @@ func (runtime *Runtime) attach(result link.OpenResult) {
 	go runtime.syncProgramState(runtime.ProgramState(), "connected")
 	go runtime.provisionDefaultStatusProfiles(generation)
 	go runtime.programStateHeartbeat(generation)
-
-	lifecycle := "connect"
-	if reconnected {
-		lifecycle = "reconnected"
-	}
-	runtime.publishConnection(
-		lifecycle,
-		result.Port,
-		"",
-	)
 }
 
 // provisionDefaultStatusProfiles installs the Go-owned factory table only
@@ -1224,12 +1453,16 @@ func (runtime *Runtime) detachReason(pause bool, reason string) error {
 	runtime.connectionState = "disconnected"
 	runtime.connectionReason = reason
 	runtime.connectionUpdated = time.Now()
+	runtime.portRebindAllowed = false
 	runtime.mu.Unlock()
 	if session == nil {
 		return nil
 	}
 	err := session.Close()
 	runtime.publishConnection("disconnect", port, reason)
+	if port.IsUSB {
+		runtime.publishUSBConnection("usb.disconnected", "disconnect", port, reason, "disconnected")
+	}
 	return err
 }
 
@@ -1351,14 +1584,18 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 						},
 					})
 				} else if parsedBuzzer != nil {
+					metadata := map[string]string{
+						"frequency_hz": strconv.Itoa(int(parsedBuzzer.FrequencyHz)),
+						"duration_ms":  strconv.Itoa(int(parsedBuzzer.DurationMS)),
+						"muted":        strconv.FormatBool(parsedBuzzer.Muted),
+					}
+					if parsedBuzzer.Timed {
+						metadata["device_micros"] = strconv.FormatUint(uint64(parsedBuzzer.DeviceMicros), 10)
+					}
 					runtime.publishEvent(Event{
 						Kind: kind, Text: text, Frame: event.Frame,
 						Source: "board", Target: "host", MessageType: "event",
-						Metadata: map[string]string{
-							"frequency_hz": strconv.Itoa(int(parsedBuzzer.FrequencyHz)),
-							"duration_ms":  strconv.Itoa(int(parsedBuzzer.DurationMS)),
-							"muted":        strconv.FormatBool(parsedBuzzer.Muted),
-						},
+						Metadata: metadata,
 					})
 				} else if parsedStatusLED != nil {
 					runtime.publishEvent(Event{
@@ -1418,11 +1655,20 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 				runtime.reconnectEpoch++
 				epoch = runtime.reconnectEpoch
 				runtime.resetIssued = false
+				runtime.portRebindAllowed = port.IsUSB
 			}
 			runtime.mu.Unlock()
 			if owned {
 				runtime.markRFLearningDisconnected("device disconnected")
-				runtime.publishConnection("disconnect", port, disconnectReason)
+				if port.IsUSB {
+					runtime.publishUSBConnection(
+						"usb.disconnected", "disconnect", port,
+						disconnectReason, "disconnected",
+					)
+				}
+				// The runtime transitions directly to reconnecting. Publishing a
+				// transient generic disconnected state made TUI/Web clients flicker
+				// even though automatic recovery was already active.
 				runtime.publishConnection("reconnecting", port, disconnectReason)
 				go runtime.autoReconnect(epoch)
 			}
@@ -1438,15 +1684,20 @@ func (runtime *Runtime) autoReconnect(epoch uint64) {
 	if watchErr != nil {
 		runtime.publish(
 			"error",
-			"serial device notifications unavailable; using safety retry: "+
+			"serial device notifications unavailable; using bounded retry: "+
 				watchErr.Error(),
 			native.Frame{},
 		)
 	}
 	activityCheck := time.NewTicker(500 * time.Millisecond)
 	defer activityCheck.Stop()
-	safetyRetry := time.NewTimer(30 * time.Second)
-	defer safetyRetry.Stop()
+	retryTimer := time.NewTimer(time.Hour)
+	if !retryTimer.Stop() {
+		<-retryTimer.C
+	}
+	defer retryTimer.Stop()
+	var retry <-chan time.Time
+	delay := time.Duration(0)
 	attempt := true
 	for {
 		runtime.mu.RLock()
@@ -1475,21 +1726,15 @@ func (runtime *Runtime) autoReconnect(epoch uint64) {
 				return
 			}
 			if err != nil {
-				reason := err.Error()
-				runtime.mu.Lock()
-				changed := runtime.reconnectEpoch == epoch &&
-					runtime.connectionState == "reconnecting" &&
-					runtime.connectionReason != reason
-				if changed {
-					runtime.connectionReason = reason
-					runtime.connectionUpdated = time.Now()
-				}
-				port := runtime.port
-				runtime.mu.Unlock()
-				if changed {
-					runtime.publishConnection("reconnecting", port, reason)
-				}
+				runtime.publishReconnectFailure(epoch, err.Error())
 			}
+			delay = nextReconnectDelay(
+				delay,
+				options.ReconnectInitialDelay,
+				options.ReconnectMaximumDelay,
+			)
+			retryTimer.Reset(delay)
+			retry = retryTimer.C
 		}
 
 		select {
@@ -1497,14 +1742,63 @@ func (runtime *Runtime) autoReconnect(epoch uint64) {
 			if !ok {
 				changes = nil
 			}
+			if retry != nil && !retryTimer.Stop() {
+				select {
+				case <-retryTimer.C:
+				default:
+				}
+			}
+			retry = nil
+			delay = 0
 			attempt = true
 		case <-activityCheck.C:
 			// Re-check epoch/pause state without periodically enumerating.
-		case <-safetyRetry.C:
+		case <-retry:
+			retry = nil
 			attempt = true
-			safetyRetry.Reset(30 * time.Second)
 		}
 	}
+}
+
+func nextReconnectDelay(current, initial, maximum time.Duration) time.Duration {
+	if initial <= 0 {
+		initial = defaultReconnectInitialDelay
+	}
+	if maximum <= 0 {
+		maximum = defaultReconnectMaximumDelay
+	}
+	if maximum < initial {
+		maximum = initial
+	}
+	if current < initial {
+		return initial
+	}
+	if current >= maximum || current > maximum/2 {
+		return maximum
+	}
+	next := current * 2
+	if next > maximum {
+		return maximum
+	}
+	return next
+}
+
+// publishReconnectFailure updates and emits one failure only while its epoch
+// still owns the reconnecting state. Keeping the runtime lock through event
+// publication prevents a stale failure from landing after a successful attach.
+func (runtime *Runtime) publishReconnectFailure(epoch uint64, reason string) bool {
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	if runtime.reconnectEpoch != epoch ||
+		runtime.connectionState != "reconnecting" ||
+		runtime.paused || runtime.session != nil ||
+		runtime.connectionReason == reason {
+		return false
+	}
+	runtime.connectionReason = reason
+	runtime.connectionUpdated = time.Now()
+	runtime.publishConnection("reconnecting", runtime.port, reason)
+	return true
 }
 
 func (runtime *Runtime) observe(frame native.Frame) {
@@ -1876,13 +2170,55 @@ func (runtime *Runtime) publish(kind, text string, frame native.Frame) {
 	runtime.publishEvent(event)
 }
 
-func (runtime *Runtime) publishConnection(lifecycle string, port ports.Info, reason string) {
+func (runtime *Runtime) publishConnection(lifecycle string, port ports.Info, reason string) bool {
 	state := lifecycle
 	if lifecycle == "connect" || lifecycle == "reconnected" {
 		state = "connected"
 	} else if lifecycle == "disconnect" {
 		state = "disconnected"
 	}
+	return runtime.publishConnectionEvent(
+		"connection", lifecycle, port, reason, state,
+	)
+}
+
+func (runtime *Runtime) publishUSBConnection(
+	kind string,
+	lifecycle string,
+	port ports.Info,
+	reason string,
+	state string,
+) bool {
+	return runtime.publishConnectionEvent(kind, lifecycle, port, reason, state)
+}
+
+func (runtime *Runtime) publishConnectionEvent(
+	kind string,
+	lifecycle string,
+	port ports.Info,
+	reason string,
+	state string,
+) bool {
+	signature := connectionEventSignature{
+		Lifecycle: lifecycle, State: state, Reason: reason,
+		Port: port.Name, VID: port.VID, PID: port.PID,
+		Serial: port.SerialNumber, InstanceID: port.InstanceID,
+	}
+	deduplicationKey := kind
+	if strings.HasPrefix(kind, "usb.") {
+		deduplicationKey = "usb"
+	}
+	runtime.connectionEventMu.Lock()
+	if runtime.connectionEvents == nil {
+		runtime.connectionEvents = make(map[string]connectionEventSignature)
+	}
+	if previous, ok := runtime.connectionEvents[deduplicationKey]; ok && previous == signature {
+		runtime.connectionEventMu.Unlock()
+		return false
+	}
+	runtime.connectionEvents[deduplicationKey] = signature
+	runtime.connectionEventMu.Unlock()
+
 	text := lifecycle
 	if port.Name != "" {
 		text += " " + port.Name
@@ -1890,10 +2226,16 @@ func (runtime *Runtime) publishConnection(lifecycle string, port ports.Info, rea
 	if reason != "" {
 		text += ": " + reason
 	}
-	runtime.publishEvent(Event{
-		Kind: "connection", Text: text,
+	event := Event{
+		Kind: kind, Text: text,
 		Lifecycle: lifecycle, Port: port, Reason: reason, State: state,
-	})
+	}
+	if strings.HasPrefix(kind, "usb.") {
+		event.Source = "host"
+		event.Target = "app.clients"
+	}
+	runtime.publishEvent(event)
+	return true
 }
 
 func (runtime *Runtime) publishEvent(event Event) Event {

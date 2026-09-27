@@ -89,6 +89,9 @@ describe('Web IPC transport', () => {
     })
     expect(events).toEqual([{ id: 7, kind: 'status_led.changed', stream: 'state', text: '#12AB34', time: '2026-08-03T00:00:00Z' }])
     stop()
+    // Late frames from a closed/replaced connection must not update the UI.
+    sockets[0].pushMessage({ jsonrpc: '2.0', method: 'controller.state', params: { kind: 'stale' } })
+    expect(events).toHaveLength(1)
   })
 
   it('uses one validated external host for canonical REST and WebSocket paths', async () => {

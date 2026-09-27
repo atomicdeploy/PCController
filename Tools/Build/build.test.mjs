@@ -6,8 +6,23 @@ import { tmpdir } from 'node:os'
 import { delimiter, join, resolve, sep } from 'node:path'
 import test from 'node:test'
 
+test('deployment is explicit and validated by the build wrapper', () => {
+	assert.equal(parseArguments(['--upload', '--port', 'COM18', '--deployment', 'development']).deployment, 'development')
+	assert.equal(parseArguments(['--upload', '--port', 'COM18', '--deployment=production']).deployment, 'production')
+	assert.throws(() => parseArguments(['--upload', '--deployment', 'skip-all']), /production or development/)
+	assert.throws(() => parseArguments(['--upload', '--allow-incomplete-backup']), /unknown|unsupported/i)
+})
+
+test('build helper executables use stable product paths, never Go temporary paths', () => {
+	const env = { LOCALAPPDATA: join(tmpdir(), 'local-app-data') }
+	assert.equal(goBuildHelperPath('generate-icon', env, 'win32'), join(env.LOCALAPPDATA, 'PCController', 'build-programs', 'generate-icon.exe'))
+	assert.equal(goBuildHelperPath('default-assets', env, 'win32'), join(env.LOCALAPPDATA, 'PCController', 'build-programs', 'default-assets.exe'))
+	assert.throws(() => goBuildHelperPath('../unsafe', env, 'win32'), /unknown build helper/)
+})
+
 import {
 	BuildError,
+	goBuildHelperPath,
 	PROJECT_ROOT,
 	assertGeneratedPath,
 	collectWebNotices,
@@ -555,13 +570,13 @@ test('build plan and execution share exact Controller programming argv construct
 		appDevice: 'DO_NOT_OPEN',
 		programmer: 'atmelice_isp',
 		hex: commandPlanPaths(PROJECT_ROOT).completeFlash,
-		allowIncompleteBackup: true
+		deployment: 'development'
 	})
 	assert.deepEqual(usbasp.args.slice(0, 8), [
 		'program', '--method', 'usbasp', '--app-device', 'DO_NOT_OPEN',
 		'--programmer', 'atmelice_isp', '--operation'
 	])
-	assert.equal(usbasp.args.at(-1), '--allow-incomplete-backup')
+	assert.deepEqual(usbasp.args.slice(-2), ['--deployment', 'development'])
 	assert.throws(
 		() => createControllerProgramCommand({
 			invocation: packaged,
@@ -1035,6 +1050,13 @@ test('Windows installation inventory follows the final packed host manifest', ()
 	assert.equal(linux.actions.some(action => action.id === 'installation-inventory'), false)
 })
 
+test('Windows package carries the hash-bound toast logo before inventory generation', async () => {
+	const source = await readFile(join(PROJECT_ROOT, 'Tools', 'Build', 'build.mjs'), 'utf8')
+	assert.match(source, /copyFileSync\(join\(HOST_ROOT, 'winres', 'icon\.png'\), toastLogo\)/)
+	assert.match(source, /\[executable, \.\.\.\(toastLogo \? \[toastLogo\] : \[\]\), \.\.\.shared\.paths\]/)
+	assert.ok(source.indexOf("toastLogo = join(stage, 'toast-logo.png')") < source.indexOf("'installation-package.json'"))
+})
+
 test('Win32 resource configuration retains icon, manifest, and version data', async () => {
 	const source = await readFile(
 		join(PROJECT_ROOT, 'Tools', 'Controller', 'winres', 'winres.json'),
@@ -1094,7 +1116,7 @@ test('browser ICO is the exact seven-size native executable icon', async () => {
 	)
 	assert.match(
 		buildSource,
-		/generate_icon\.go', '\.\/winres\/icon\.png', '\.\/winres\/icon\.ico'/u
+		/generate_icon\.go', \['\.\/winres\/icon\.png', '\.\/winres\/icon\.ico'\]/u
 	)
 	assert.match(
 		buildSource,

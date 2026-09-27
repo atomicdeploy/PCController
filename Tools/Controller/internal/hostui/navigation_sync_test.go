@@ -239,15 +239,36 @@ func TestNavigationCoordinatorRejectsDelayedReplayAfterNewerOperation(t *testing
 	if _, err := coordinator.Commit(first, []AppInstance{one, two}); err != nil {
 		t.Fatal(err)
 	}
-	second := NavigationCommand{
-		Group: DefaultNavigationGroup, Source: one.ID, Page: "settings", OperationID: "operation-2",
-	}
-	if _, err := coordinator.Commit(second, []AppInstance{one, two}); err != nil {
-		t.Fatal(err)
+	second, err := coordinator.Commit(NavigationCommand{
+		Group: DefaultNavigationGroup, Source: one.ID, Page: "settings", OperationID: "newer-operation-2",
+	}, []AppInstance{one, two})
+	if err != nil || second.Page != "settings" {
+		t.Fatalf("newer outcome=%#v err=%v", second, err)
 	}
 	replay, err := coordinator.Commit(first, []AppInstance{one, two})
-	if err == nil || replay.Page != "" {
-		t.Fatalf("delayed replay rolled canonical navigation back: outcome=%#v err=%v", replay, err)
+	if err == nil || replay.Page != "" || replay.Revision != 0 || replay.Epoch != "" {
+		t.Fatalf("superseded retry replay=%#v err=%v", replay, err)
+	}
+	if coordinator.groups[DefaultNavigationGroup].page != "settings" {
+		t.Fatalf("older retry rolled canonical page back to %q", coordinator.groups[DefaultNavigationGroup].page)
+	}
+}
+
+func TestNavigationCoordinatorForgetsOperationsWhenSourceLeaseLeaves(t *testing.T) {
+	coordinator := deterministicCoordinator(groupEpoch1)
+	one := follower("web:one", "dashboard", participantEpoch1, 1)
+	two := follower("tui:two", "dashboard", participantEpoch2, 1)
+	observeJoined(coordinator, one, one)
+	observeJoined(coordinator, two, one, two)
+	command := NavigationCommand{
+		Group: DefaultNavigationGroup, Source: one.ID, Page: "events", OperationID: "source-session-1",
+	}
+	if _, err := coordinator.Commit(command, []AppInstance{one, two}); err != nil {
+		t.Fatal(err)
+	}
+	coordinator.Observe(InstanceChange{Kind: "left", Instance: one}, []AppInstance{two})
+	if len(coordinator.operations) != 0 || len(coordinator.operationOrder) != 0 {
+		t.Fatalf("departed source operations retained: map=%d order=%d", len(coordinator.operations), len(coordinator.operationOrder))
 	}
 }
 

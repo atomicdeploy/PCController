@@ -117,7 +117,19 @@ bool ShiftRegisters::inputActive(uint8_t bit) const {
 }
 
 uint8_t ShiftRegisters::activeInputs() const {
-  return static_cast<uint8_t>(~(inputRegister_ & virtualInputs_));
+  const uint8_t physicalActive = static_cast<uint8_t>(~inputRegister_);
+  uint8_t logicalKeys = static_cast<uint8_t>(physicalActive & 0x0FU);
+  logicalKeys = static_cast<uint8_t>(((logicalKeys & 0x05U) << 1) |
+                                     ((logicalKeys & 0x0AU) >> 1));
+  logicalKeys = static_cast<uint8_t>(((logicalKeys & 0x03U) << 2) |
+                                     ((logicalKeys & 0x0CU) >> 2));
+  const uint8_t logicalPhysical = static_cast<uint8_t>(
+      (physicalActive & 0xF0U) | logicalKeys);
+  // K1..K4 are physically wired in reverse order. Virtual inputs remain in
+  // logical order so protocol injection and native tests use the same stable
+  // key identifiers as every front-panel consumer.
+  return static_cast<uint8_t>(logicalPhysical |
+                              static_cast<uint8_t>(~virtualInputs_));
 }
 
 uint8_t ShiftRegisters::rawInputs() const { return inputRegister_; }

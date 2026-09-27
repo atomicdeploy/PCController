@@ -79,6 +79,7 @@ import {
   Icon,
   MetricCard,
   RangeField,
+  RelayToggle,
   SectionTitle,
   Segmented,
   StatusBadge,
@@ -122,6 +123,7 @@ import type {
   ControllerEvent,
   DialogState,
   HostUISettings,
+  IlluminationState,
   LifecycleSafetyAction,
   LocalIntegrationSettings,
   Locale,
@@ -136,6 +138,7 @@ import { buzzerPathFromState, type BuzzerPath } from './buzzer-routing'
 import { peripheralAvailability } from './peripheral-availability'
 
 export interface SharedViewProps {
+  reduceMotion?: boolean
   appTitle: string
   snapshot: Snapshot
   samples: MetricSample[]
@@ -181,11 +184,11 @@ export function DashboardView(props: SharedViewProps) {
   const boardReady = props.transport.boardState === 'ready' && snapshot.connected && snapshot.have_status
   const available = peripheralAvailability(snapshot)
   const haveMeasurements = available.ina219 || available.temperatureLED || available.temperatureBTAudio
-  const haveMetricCards = haveMeasurements || available.pwm
+  const haveMetricCards = haveMeasurements
   const invalidMeasurements = [
     available.invalidINA219 ? copy('Power measurements unavailable', 'اندازه‌گیری‌های توان در دسترس نیست') : '',
     available.invalidTemperatureLED ? copy('LED temperature unavailable', 'دمای LED در دسترس نیست') : '',
-    available.invalidTemperatureBTAudio ? copy('Buzzer temperature unavailable', 'دمای بیزر در دسترس نیست') : '',
+    available.invalidTemperatureBTAudio ? copy('BT Amplifier temperature unavailable', 'دمای آمپلی‌فایر بلوتوث در دسترس نیست') : '',
   ].filter(Boolean)
   const connectedTone = boardReady ? 'good' : snapshot.paused ? 'warn' : 'bad'
   const authenticationRequired = !boardReady && props.transport.authenticationRequired
@@ -245,8 +248,7 @@ export function DashboardView(props: SharedViewProps) {
         {available.ina219 && <MetricCard icon={Zap} label={peripheralName('sensor.supply-voltage', t('voltage'))} value={formatNumber(locale, status.supply_mv / 1000, 2)} unit="V" values={values(samples, 'supply')} tone="accent" detail={`${peripheralName('sensor.bus-voltage', copy('Bus voltage', 'ولتاژ باس'))} · ${formatNumber(locale, status.bus_mv / 1000, 2)} V`} />}
         {available.ina219 && <MetricCard icon={Waves} label={peripheralName('sensor.current', t('current'))} value={formatNumber(locale, status.current_ma, 0)} unit="mA" values={values(samples, 'current')} tone="green" detail={`${peripheralName('sensor.power', copy('Load power', 'توان بار'))} · ${formatNumber(locale, status.power_mw / 1000, 2)} W`} />}
         {available.temperatureLED && <MetricCard icon={Thermometer} label={peripheralName('sensor.temperature-led', `${t('temperature')} · LED`)} value={formatNumber(locale, status.temperature_led_centi_c / 100, 1)} unit="°C" values={values(samples, 'ledTemp')} tone="amber" />}
-        {available.temperatureBTAudio && <MetricCard icon={Thermometer} label={peripheralName('sensor.temperature-audio', copy('Buzzer temperature', 'دمای بیزر'))} value={formatNumber(locale, status.temperature_bt_audio_centi_c / 100, 1)} unit="°C" values={values(samples, 'btTemp')} tone="violet" />}
-        {available.pwm && <MetricCard icon={PlugZap} label="PWM" value={formatNumber(locale, status.pwm_value * 100 / 4095, 1)} unit="%" values={[]} tone="violet" detail={`${copy('CH', 'کانال')} ${status.pwm_channel + 1} · ${copy('ready', 'آماده')}`} />}
+        {available.temperatureBTAudio && <MetricCard icon={Thermometer} label={peripheralName('sensor.temperature-audio', copy('BT Amplifier temperature', 'دمای آمپلی‌فایر بلوتوث'))} value={formatNumber(locale, status.temperature_bt_audio_centi_c / 100, 1)} unit="°C" values={values(samples, 'btTemp')} tone="violet" />}
       </section>}
 
       {boardReady && invalidMeasurements.length > 0 && <div className="measurement-alerts" role="status" aria-live="polite">
@@ -266,7 +268,7 @@ export function DashboardView(props: SharedViewProps) {
         ]}
       >
         <Suspense fallback={<div className="telemetry-chart__empty" role="status"><Activity size={22} /><span>{locale === 'fa' ? 'در حال آماده‌سازی نمودار…' : 'Preparing chart…'}</span></div>}>
-          <TelemetryChart connected locale={locale} samples={samples} />
+          <TelemetryChart connected locale={locale} samples={samples} reduceMotion={props.reduceMotion} />
         </Suspense>
       </Card>}
 
@@ -504,7 +506,7 @@ export function ControlsView(props: SharedViewProps) {
               const active = Boolean(snapshot.status.active_relays & (1 << index))
               return (
                 <article key={index} className={`relay-switch${active ? ' is-active' : ''}`}>
-                  <span>R{index + 1}</span><i aria-hidden="true"><b /></i><small>{peripheralName(`relay.${index + 1}`, relayDefaults[index])}</small>
+                  <span>R{index + 1}</span><RelayToggle active={active} disabled={!snapshot.connected} label={copy(`Toggle relay ${index + 1}`, `تغییر وضعیت رله ${index + 1}`)} onToggle={() => void command(`relay ${index + 1} ${active ? 'off' : 'on'}`)} /><small>{peripheralName(`relay.${index + 1}`, relayDefaults[index])}</small>
                   <div className="relay-switch__actions"><Button compact disabled={active} onClick={() => void command(`relay ${index + 1} on`)}>{t('on')}</Button><Button compact disabled={!active} onClick={() => void command(`relay ${index + 1} off`)}>{t('off')}</Button></div>
                 </article>
               )
@@ -558,7 +560,7 @@ export function ControlsView(props: SharedViewProps) {
 			</div>
 			<div className="status-led-live" style={{ '--preview': liveHex } as React.CSSProperties}>
 				<i aria-hidden="true" />
-				<div><strong>{copy('Physical LED mirror', 'بازتاب LED فیزیکی')}</strong><small dir="ltr">{liveLED ? `${liveHex} · effect ${liveLED.effect} · condition ${liveLED.condition}` : copy('Awaiting pushed board state', 'در انتظار وضعیت ارسالی برد')}</small></div>
+				<div><strong>{copy('Physical LED mirror', 'بازتاب LED فیزیکی')}</strong><small dir="ltr">{liveLED ? <><span className="mono">{liveHex}</span>{` · effect ${liveLED.effect} · condition ${liveLED.condition}`}</> : copy('Awaiting pushed board state', 'در انتظار وضعیت ارسالی برد')}</small></div>
 			</div>
 		  </div>
           <label className="native-color-field">
@@ -782,6 +784,13 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
   const [streamPeriod, setStreamPeriod] = useState(snapshot.settings.stream_period_ms || 200)
   const [outputPersistence, setOutputPersistence] = useState(snapshot.settings.output_persistence)
   const [relayRestoreMask, setRelayRestoreMask] = useState(snapshot.settings.relay_restore_mask)
+  const [illuminationMode, setIlluminationMode] = useState(String(snapshot.settings.light_mode))
+  const [illuminationOn, setIlluminationOn] = useState(snapshot.settings.on_brightness)
+  const [illuminationOff, setIlluminationOff] = useState(snapshot.settings.off_brightness)
+  const [illuminationLive, setIlluminationLive] = useState<IlluminationState>(snapshot.illumination)
+  const [illuminationBusy, setIlluminationBusy] = useState(false)
+  const [illuminationNotice, setIlluminationNotice] = useState('')
+  const [illuminationError, setIlluminationError] = useState(false)
   const [segmentScroll, setSegmentScroll] = useState<SegmentScrollSettings>({
     enabled: true,
     pages: ['door'],
@@ -810,18 +819,26 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
   const [integrationsBusy, setIntegrationsBusy] = useState(true)
   const [integrationsLoaded, setIntegrationsLoaded] = useState(false)
   const [integrationsNotice, setIntegrationsNotice] = useState('')
+	const [buzzerRuntime, setBuzzerRuntime] = useState<LocalIntegrationSettings['buzzer_runtime']>(uiConfig?.buzzer_runtime)
   const updateAppearance = <K extends keyof Appearance>(key: K, value: Appearance[K]) => onAppearance({ ...appearance, [key]: value })
   const titleValidation = useMemo(() => validateAppTitle(draftAppTitle), [draftAppTitle])
   const normalizedToken = useMemo(() => normalizeSessionToken(draftToken), [draftToken])
-	const boardSilent = (snapshot.settings.flags & 0x01) !== 0
-	const hostSilent = !(uiConfig?.integrations?.buzzer_host_enabled ?? false)
-	const buzzerPath = buzzerPathFromState(boardSilent, hostSilent)
+	const boardStateKnown = snapshot.connected && snapshot.have_settings
+	const boardSilent = boardStateKnown && (snapshot.settings.flags & 0x01) !== 0
+	const effectiveBuzzerRuntime = buzzerRuntime ?? uiConfig?.buzzer_runtime
+	const hostSilent = effectiveBuzzerRuntime ? !effectiveBuzzerRuntime.host_mirror : !(uiConfig?.integrations?.buzzer_host_enabled ?? false)
+	const fallbackBuzzerPath = boardStateKnown ? buzzerPathFromState(boardSilent, hostSilent) : null
+	const buzzerPath = effectiveBuzzerRuntime?.effective_path && effectiveBuzzerRuntime.effective_path !== 'unknown'
+		? effectiveBuzzerRuntime.effective_path
+		: fallbackBuzzerPath
 	const applyBuzzerPath = async (value: BuzzerPath) => {
 		setBuzzerPathBusy(true)
 		setBuzzerPathNotice('')
 		try {
 			await onBuzzerPath(value)
-			setBuzzerPathNotice(copy('Applied immediately to board and host.', 'فوراً روی برد و میزبان اعمال شد.'))
+			const status = await rpc<{ buzzer_runtime: LocalIntegrationSettings['buzzer_runtime'] }>('controller.integrations.status')
+			setBuzzerRuntime(status.buzzer_runtime)
+			setBuzzerPathNotice(copy('Applied and verified.', 'اعمال و تأیید شد.'))
 		} catch (cause) {
 			setBuzzerPathNotice(cause instanceof Error ? cause.message : String(cause))
 		} finally {
@@ -903,6 +920,9 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
     return () => { active = false }
   }, [])
   useEffect(() => {
+	setIlluminationMode(String(snapshot.settings.light_mode))
+	setIlluminationOn(snapshot.settings.on_brightness)
+	setIlluminationOff(snapshot.settings.off_brightness)
     setDisplayBrightness(snapshot.settings.display_brightness)
     setDisplayClosedBrightness(snapshot.settings.display_closed_brightness)
     setMotionExitHoldSeconds(snapshot.settings.motion_exit_hold_seconds || 2)
@@ -911,6 +931,9 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
     setOutputPersistence(snapshot.settings.output_persistence)
     setRelayRestoreMask(snapshot.settings.relay_restore_mask)
   }, [
+	snapshot.settings.light_mode,
+	snapshot.settings.on_brightness,
+	snapshot.settings.off_brightness,
     snapshot.settings.display_brightness,
     snapshot.settings.display_closed_brightness,
     snapshot.settings.motion_exit_hold_seconds,
@@ -919,6 +942,44 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
     snapshot.settings.output_persistence,
     snapshot.settings.relay_restore_mask,
   ])
+
+  useEffect(() => {
+	setIlluminationLive(snapshot.illumination)
+  }, [snapshot.illumination])
+
+  useEffect(() => {
+	if (!snapshot.connected || !snapshot.have_settings || !available.pwm) return
+	const abort = new AbortController()
+	void rpc<IlluminationState>('controller.illumination.get', {}, abort.signal)
+		.then((state) => { if (!abort.signal.aborted) setIlluminationLive(state) })
+		.catch((cause) => {
+			if (!abort.signal.aborted) {
+				setIlluminationNotice(cause instanceof Error ? cause.message : String(cause))
+				setIlluminationError(true)
+			}
+		})
+	return () => abort.abort()
+  }, [snapshot.connected, snapshot.have_settings, available.pwm])
+
+  const saveIllumination = async () => {
+	setIlluminationBusy(true)
+	setIlluminationNotice('')
+	setIlluminationError(false)
+	try {
+		const state = await rpc<IlluminationState>('controller.illumination.set', {
+			mode: Number(illuminationMode),
+			on_brightness: illuminationOn,
+			off_brightness: illuminationOff,
+		})
+		setIlluminationLive(state)
+		setIlluminationNotice(copy('Applied live and verified durable in EEPROM.', 'به‌صورت زنده اعمال و ماندگاری آن در EEPROM تأیید شد.'))
+	} catch (cause) {
+		setIlluminationNotice(cause instanceof Error ? cause.message : String(cause))
+		setIlluminationError(true)
+	} finally {
+		setIlluminationBusy(false)
+	}
+  }
 
   const setPersistenceBit = (bit: number, enabled: boolean) => {
     setOutputPersistence((current) => enabled ? current | bit : current & ~bit)
@@ -1003,7 +1064,9 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
           buzzer_mirror: value.buzzer_mirror ?? {
             enabled: false, native_enabled: false, web_audio_enabled: true, backend: 'auto', executable: '', driver_directory: '',
           },
+			buzzer_runtime: value.buzzer_runtime,
         }
+		setBuzzerRuntime(value.buzzer_runtime)
         setLocalIntegrations(normalized)
         setSavedIntegrations(normalized)
         setIntegrationsLoaded(true)
@@ -1041,7 +1104,9 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
         data_hub: { ...saved.data_hub, base_url: normalizeRootURLInput(saved.data_hub.base_url ?? '') },
         lifecycle_safety: saved.lifecycle_safety,
         buzzer_mirror: saved.buzzer_mirror,
+		buzzer_runtime: saved.buzzer_runtime,
       }
+		setBuzzerRuntime(saved.buzzer_runtime)
       setLocalIntegrations(canonical)
       setSavedIntegrations(canonical)
       setIntegrationsNotice('Saved')
@@ -1159,10 +1224,10 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
           </form>
         </Card>
 
-		<Card icon={Volume2} iconTone="green" title={copy('Buzzer routing', 'مسیر بیزر')} eyebrow={buzzerPath.toUpperCase()} className="settings-card settings-card--wide">
+		<Card icon={Volume2} iconTone="green" title={copy('Buzzer routing', 'مسیر بیزر')} eyebrow={(buzzerPath ?? copy('Pending', 'در انتظار')).toUpperCase()} className="settings-card settings-card--wide">
 			<div className="setting-group">
 				<label>{copy('Playback path', 'مسیر پخش')}</label>
-				<Segmented value={buzzerPath} label={copy('Buzzer playback path', 'مسیر پخش بیزر')} options={[
+				<Segmented value={buzzerPath ?? effectiveBuzzerRuntime?.requested_path ?? localIntegrations.buzzer_mirror.path ?? 'none'} label={copy('Buzzer playback path', 'مسیر پخش بیزر')} options={[
 					{ value: 'board', label: copy('Board', 'برد') },
 					{ value: 'host', label: copy('PC', 'رایانه') },
 					{ value: 'both', label: copy('Both', 'هر دو') },
@@ -1170,16 +1235,20 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
 				]} onChange={(value) => void applyBuzzerPath(value as BuzzerPath)} />
 			</div>
 			<div className="settings-inline-status">
-				<StatusBadge tone={boardSilent ? 'neutral' : 'good'}>{copy(`Board ${boardSilent ? 'silent' : 'active'}`, `برد ${boardSilent ? 'بی‌صدا' : 'فعال'}`)}</StatusBadge>
+				{boardStateKnown
+					? <StatusBadge tone={boardSilent ? 'neutral' : 'good'}>{copy(`Board ${boardSilent ? 'silent' : 'active'}`, `برد ${boardSilent ? 'بی‌صدا' : 'فعال'}`)}</StatusBadge>
+					: <StatusBadge tone="neutral">{copy('Board state unavailable', 'وضعیت برد در دسترس نیست')}</StatusBadge>}
 				<StatusBadge tone={hostSilent ? 'neutral' : 'good'}>{copy(`PC ${hostSilent ? 'silent' : 'active'}`, `رایانه ${hostSilent ? 'بی‌صدا' : 'فعال'}`)}</StatusBadge>
 				{buzzerPathBusy && <StatusBadge tone="warn">{copy('Applying…', 'در حال اعمال…')}</StatusBadge>}
+				{effectiveBuzzerRuntime?.requested_path && effectiveBuzzerRuntime.requested_path !== 'unknown' && effectiveBuzzerRuntime.requested_path !== effectiveBuzzerRuntime.effective_path && <StatusBadge tone={effectiveBuzzerRuntime.board_apply_state === 'error' ? 'warn' : 'neutral'}>{`${effectiveBuzzerRuntime.requested_path} · ${effectiveBuzzerRuntime.board_apply_state}`}</StatusBadge>}
+				{effectiveBuzzerRuntime && <StatusBadge tone={effectiveBuzzerRuntime.backend_error ? 'warn' : 'neutral'}>{`${effectiveBuzzerRuntime.backend_requested} → ${effectiveBuzzerRuntime.backend_effective}`}</StatusBadge>}
 			</div>
-			<Toggle checked={localIntegrations.buzzer_mirror.enabled} onChange={(enabled) => { setIntegrationsNotice(''); setLocalIntegrations((current) => ({ ...current, buzzer_mirror: { ...current.buzzer_mirror, enabled } })) }} label={copy('Mirror board beeps on this host', 'بازپخش بوق‌های برد روی این میزبان')} detail={copy('Applies to this instance and synchronizes through the shared host configuration.', 'روی این نمونه اعمال می‌شود و از تنظیمات مشترک میزبان همگام می‌ماند.')} />
+			<Toggle checked={localIntegrations.buzzer_mirror.enabled} onChange={(enabled) => { setIntegrationsNotice(''); setLocalIntegrations((current) => { const path = current.buzzer_mirror.path; const boardSilent = path === 'host' || path === 'none'; return { ...current, buzzer_mirror: { ...current.buzzer_mirror, enabled, path: path ? buzzerPathFromState(boardSilent, !enabled) : path } } }) }} label={copy('Mirror board beeps on this host', 'بازپخش بوق‌های برد روی این میزبان')} />
 			{localIntegrations.buzzer_mirror.enabled && <>
-				<Toggle checked={localIntegrations.buzzer_mirror.native_enabled} onChange={(native_enabled) => { setIntegrationsNotice(''); setLocalIntegrations((current) => ({ ...current, buzzer_mirror: { ...current.buzzer_mirror, native_enabled } })) }} label={copy('PC speaker renderer', 'پخش‌کنندهٔ بلندگوی رایانه')} detail={copy('Uses the selected native or external beep backend.', 'از پشتیبان بوق بومی یا خارجی انتخاب‌شده استفاده می‌کند.')} />
-				<Toggle checked={localIntegrations.buzzer_mirror.web_audio_enabled} onChange={(web_audio_enabled) => { setIntegrationsNotice(''); setLocalIntegrations((current) => ({ ...current, buzzer_mirror: { ...current.buzzer_mirror, web_audio_enabled } })) }} label={copy('Web browser renderer', 'پخش‌کنندهٔ مرورگر وب')} detail={copy('Lets each connected WebUI render the pushed note with WebAudio.', 'هر WebUI متصل می‌تواند نت دریافتی را با WebAudio پخش کند.')} />
-				<div className="setting-group"><label>{copy('PC speaker backend', 'پشتیبان بلندگوی رایانه')}</label><Segmented value={localIntegrations.buzzer_mirror.backend} label={copy('PC speaker backend', 'پشتیبان بلندگوی رایانه')} options={[{ value: 'auto', label: copy('Auto', 'خودکار') }, { value: 'native', label: copy('Native', 'بومی') }, { value: 'external', label: copy('Command', 'فرمان') }]} onChange={(backend) => { setIntegrationsNotice(''); setLocalIntegrations((current) => ({ ...current, buzzer_mirror: { ...current.buzzer_mirror, backend: backend as 'auto' | 'native' | 'external' } })) }} /></div>
-				{localIntegrations.buzzer_mirror.backend !== 'native' && <TextField label={copy('Beep executable (optional)', 'فایل اجرایی بوق (اختیاری)')} dir="ltr" spellCheck={false} value={localIntegrations.buzzer_mirror.executable ?? ''} placeholder={copy('Blank uses beep from PATH', 'خالی: استفاده از beep در PATH')} onChange={(event) => { setIntegrationsNotice(''); setLocalIntegrations((current) => ({ ...current, buzzer_mirror: { ...current.buzzer_mirror, executable: event.currentTarget.value } })) }} />}
+				<Toggle checked={localIntegrations.buzzer_mirror.native_enabled} onChange={(native_enabled) => { setIntegrationsNotice(''); setLocalIntegrations((current) => ({ ...current, buzzer_mirror: { ...current.buzzer_mirror, native_enabled, backend: native_enabled && current.buzzer_mirror.backend === 'off' ? 'auto' : current.buzzer_mirror.backend } })) }} label={copy('PC speaker renderer', 'پخش‌کنندهٔ بلندگوی رایانه')} />
+				<Toggle checked={localIntegrations.buzzer_mirror.web_audio_enabled} onChange={(web_audio_enabled) => { setIntegrationsNotice(''); setLocalIntegrations((current) => ({ ...current, buzzer_mirror: { ...current.buzzer_mirror, web_audio_enabled } })) }} label={copy('Web browser renderer', 'پخش‌کنندهٔ مرورگر وب')} />
+				<div className="setting-group"><label>{copy('PC speaker backend', 'پشتیبان بلندگوی رایانه')}</label><Segmented value={localIntegrations.buzzer_mirror.backend} label={copy('PC speaker backend', 'پشتیبان بلندگوی رایانه')} options={[{ value: 'auto', label: copy('Auto', 'خودکار') }, { value: 'native', label: copy('Native', 'بومی') }, { value: 'external', label: copy('Command', 'فرمان') }, { value: 'off', label: copy('Off', 'خاموش') }]} onChange={(backend) => { setIntegrationsNotice(''); setLocalIntegrations((current) => ({ ...current, buzzer_mirror: { ...current.buzzer_mirror, backend: backend as 'auto' | 'native' | 'external' | 'off', native_enabled: backend === 'off' ? false : current.buzzer_mirror.native_enabled } })) }} /></div>
+				{localIntegrations.buzzer_mirror.backend !== 'native' && localIntegrations.buzzer_mirror.backend !== 'off' && <TextField label={copy('Beep executable (optional)', 'فایل اجرایی بوق (اختیاری)')} dir="ltr" spellCheck={false} value={localIntegrations.buzzer_mirror.executable ?? ''} placeholder={copy('Blank uses beep from PATH', 'خالی: استفاده از beep در PATH')} onChange={(event) => { setIntegrationsNotice(''); setLocalIntegrations((current) => ({ ...current, buzzer_mirror: { ...current.buzzer_mirror, executable: event.currentTarget.value } })) }} />}
 			</>}
 			<div className="inline-actions"><Button icon={ShieldCheck} tone="primary" busy={integrationsBusy} disabled={!integrationsDirty} onClick={() => void persistLocalIntegrations()}>{copy('Save PC buzzer settings', 'ذخیرهٔ تنظیمات بیزر رایانه')}</Button></div>
 			{buzzerPathNotice && <p className="settings-action-feedback" role="status">{buzzerPathNotice}</p>}
@@ -1224,6 +1293,33 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
             action={<Button tone="primary" icon={ShieldCheck} disabled={!tokenDirty} onClick={() => { onToken(normalizedToken); setDraftToken(normalizedToken) }}>{t('apply')}</Button>}
           />
         </Card>}
+
+        {boardReady && available.settings && <Card icon={Lightbulb} iconTone="amber" title={copy('Enclosure illumination', 'روشنایی محفظه')} eyebrow={illuminationLive.available ? illuminationLive.at_target ? copy('Applied · at target', 'اعمال‌شده · در مقدار هدف') : copy('Transitioning to target', 'در حال گذار به مقدار هدف') : copy('Waiting for live PWM state', 'در انتظار وضعیت زندهٔ PWM')} className="settings-card settings-card--wide illumination-settings-card">
+		{!snapshot.have_settings ? <EmptyState
+			icon={Lightbulb}
+			title={copy('Reading illumination policy', 'در حال خواندن سیاست روشنایی')}
+			detail={copy('The controls appear only after the board returns authoritative EEPROM settings.', 'کنترل‌ها پس از دریافت تنظیمات معتبر EEPROM از برد نمایش داده می‌شوند.')}
+		/> : <>
+			<div className="illumination-state-grid" aria-label={copy('Live enclosure illumination state', 'وضعیت زندهٔ روشنایی محفظه')}>
+				<DataRow label={copy('Policy', 'سیاست')} value={[copy('Off', 'خاموش'), copy('Auto', 'خودکار'), copy('On', 'روشن')][illuminationLive.mode] ?? String(illuminationLive.mode)} />
+				<DataRow label={copy('Door input', 'ورودی درب')} value={illuminationLive.door_open ? copy('Open', 'باز') : copy('Closed', 'بسته')} tone={illuminationLive.door_open ? 'warn' : 'good'} />
+				<DataRow label={copy('Selected target', 'مقدار هدف انتخاب‌شده')} value={`${illuminationLive.target_brightness}/255 · ${illuminationLive.target_pwm}/4095`} mono />
+				<DataRow label={copy('Applied channel 11', 'مقدار اعمال‌شدهٔ کانال ۱۱')} value={illuminationLive.available ? `${illuminationLive.applied_brightness}/255 · ${illuminationLive.applied_pwm}/4095` : copy('Unavailable', 'در دسترس نیست')} tone={illuminationLive.available ? illuminationLive.at_target ? 'good' : 'warn' : undefined} mono />
+				<DataRow label={copy('EEPROM durability', 'ماندگاری EEPROM')} value={illuminationLive.persisted ? copy('Verified', 'تأییدشده') : copy('Not confirmed', 'تأییدنشده')} tone={illuminationLive.persisted ? 'good' : 'warn'} />
+			</div>
+			<div className="setting-group"><label>{copy('Operating mode', 'حالت عملکرد')}</label><Segmented value={illuminationMode} label={copy('Enclosure illumination mode', 'حالت روشنایی محفظه')} options={[
+				{ value: '0', label: copy('Off', 'خاموش') },
+				{ value: '1', label: copy('Auto · door', 'خودکار · درب') },
+				{ value: '2', label: copy('On', 'روشن') },
+			]} onChange={(value) => { setIlluminationNotice(''); setIlluminationMode(value) }} /></div>
+			<RangeField label={copy('Door-open / On brightness', 'روشنایی درب باز / حالت روشن')} value={illuminationOn} min={0} max={255} onChange={(value) => { setIlluminationNotice(''); setIlluminationOn(value) }} />
+			<RangeField label={copy('Door-closed / Off brightness', 'روشنایی درب بسته / حالت خاموش')} value={illuminationOff} min={0} max={255} onChange={(value) => { setIlluminationNotice(''); setIlluminationOff(value) }} />
+			<div className="illumination-settings-card__footer">
+				<p className={illuminationError ? 'settings-action-feedback text-bad' : 'settings-action-feedback'} role={illuminationError ? 'alert' : 'status'}>{illuminationNotice || copy('Only these three illumination fields change; every unrelated board setting is preserved.', 'فقط همین سه فیلد روشنایی تغییر می‌کنند و همهٔ تنظیمات نامرتبط برد حفظ می‌شوند.')}</p>
+				<Button tone="primary" icon={Lightbulb} busy={illuminationBusy} disabled={!available.pwm || !illuminationLive.available} onClick={() => void saveIllumination()}>{copy('Apply illumination', 'اعمال روشنایی')}</Button>
+			</div>
+		</>}
+		</Card>}
 
         {boardReady && available.settings && <Card icon={CircuitBoard} iconTone="amber" title={copy('Board EEPROM settings', 'تنظیمات EEPROM برد')} eyebrow={snapshot.have_settings ? copy('Live draft · explicit write', 'پیش‌نویس زنده · نوشتن صریح') : boardSettingsReadState === 'loading' ? copy('Reading board settings', 'در حال خواندن تنظیمات برد') : copy('Settings unavailable', 'تنظیمات در دسترس نیست')} className="settings-card">
           {!snapshot.have_settings ? <EmptyState

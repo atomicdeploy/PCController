@@ -32,7 +32,7 @@ power-indicator, and status-RGB state is applied.
 | TM1637 | D13/SCK clock, D11/MOSI data, 3 us bit timing; 20 ms render service; cached four-segment writes; EEPROM brightness 0..7, factory 5 | Fast menu response while avoiding repeated writes of unchanged segments | Brightness and voltage/current decimal places are EEPROM settings |
 | 433 MHz | RX D2/INT0 on CHANGE, TX D3/INT1 pin; rc-switch 2.6.4; 70% receive tolerance; TX defaults to protocol 1, 350 us pulse, 10 repeats | Broad compatibility with the observed low-cost remote family | Lower tolerance reduces false matches; protocol/pulse can be supplied per transmit command |
 | Shift I/O | 74HC165 input and 74HC595 active-low output; 5 ms scan; first four input bits are keys; outputs start `0xFF`/off | Deterministic safe relay state and responsive keys | Electrical polarity constants must change only after a raw-input/output test |
-| Buzzer | D9/PB1/OC1A; Timer1 CTC hardware toggle; no audio-rate ISR | Removes the former timer/interrupt jitter and leaves Timer0 timing intact | Do not combine with Servo or `analogWrite()` on D9/D10 |
+| Buzzer | D9/PB1/OC1A; Timer1 CTC `/8` hardware toggle; no audio-rate ISR; CRC-backed core cues at EEPROM `0..12` | Keeps exact offline door/output feedback configurable without duplicating the tone engine | Do not combine with Servo or `analogWrite()` on D9/D10 |
 | Addressable LEDs | D6/PD6, 11 pixels, 800 kHz, WS2811 BRG order, cleared at startup | Matches the installed strip without heap-heavy libraries | Set `PCCONTROLLER_USE_WS2812B=1` for a confirmed WS2812B/GRB strip |
 | HOST LCD | Firmware HD44780 renderer disabled; the host scans common PCF8574 addresses `0x27` and `0x3F` and uses generic I2C transfers | Saves AVR flash while retaining richer text whenever the host is connected | An MCU LCD renderer can be restored at a measurable flash cost |
 
@@ -296,7 +296,12 @@ between the two sides are separated by at least 5 ms. Factory motion-door policy
 The buzzer is driven by Timer1 CTC hardware output on OC1A/D9. No Timer1 compare
 ISR runs at audio frequency, so buzzer playback does not starve INT0/INT1 RF or
 UART service. Factory EEPROM is audible; the persistent silent flag suppresses
-tones without changing command acknowledgement.
+tones without changing command acknowledgement. `TonePlayer` is the sole
+engine. `AudioCueStore` validates four EEPROM frequency/duration triples plus
+CRC-8 at startup; any blank, corrupt, zero-duration, or out-of-range record
+falls back atomically to door 1,700/1,100 Hz for 45 ms and output/motion
+1,900/1,250 Hz for 35 ms. Rich completion/error melodies are retained by name
+on the host and streamed through the same board engine when routed there.
 
 PWM channel 12 is the power indicator, and channels 13..15 are status RGB. The
 factory status brightness is 128/255. Animation service runs every 20 ms with a
@@ -332,7 +337,7 @@ particular board.
 | Voltage / current decimals | 2 / 2 |
 | Motion door policy | Always |
 | Break before direction | 1 ms |
-| Door / relay buzzer cues | enabled |
+| Door / output buzzer cues | enabled; 1,700/1,100 Hz × 45 ms and 1,900/1,250 Hz × 35 ms |
 | Temperature identity swap | off; sorted ROM 0 is tLED, ROM 1 is tBT |
 
 ## What to verify before tuning

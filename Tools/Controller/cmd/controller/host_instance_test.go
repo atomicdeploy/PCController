@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,15 +14,17 @@ import (
 
 	"pccontroller.local/controller/internal/control"
 	"pccontroller.local/controller/internal/hostui"
-	"pccontroller.local/controller/internal/productidentity"
 	"pccontroller.local/controller/internal/shell"
 )
 
 func testHostInstancePaths(t *testing.T) hostInstancePaths {
 	t.Helper()
 	directory := t.TempDir()
+	// Darwin semaphore names are limited to 31 bytes. A full Go test name
+	// exceeded that limit even though the production identity was short.
+	identity := sha256.Sum256([]byte(t.Name() + directory))
 	return hostInstancePaths{
-		LockName: productidentity.StableAppID + ".Test." + strings.ReplaceAll(t.Name(), "/", ".") + "." + time.Now().Format("150405.000000000"),
+		LockName: fmt.Sprintf("pc-test-%x", identity[:8]),
 		LockPath: filepath.Join(directory, "host-instance.lock"),
 		RecordPath: filepath.Join(
 			directory,

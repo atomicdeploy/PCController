@@ -19,7 +19,7 @@ and readback.
 | BT Audio indicator | 74HC165 bit 6 | Classifies the BT-5.0-Pro Audio LED as Off, On, or Blinking |
 | Door reed | 74HC165 bit 7 | Door events, illumination target, default-page return, motion handling |
 | Relays R1-R8 | Active-low 74HC595 outputs | Two interlocked motion sides plus four general outputs |
-| Buzzer | D9 / PB1 | Nonblocking Timer1 tones, boot melody, keys, door, relay, save/error cues |
+| Buzzer | D9 / PB1 | Nonblocking Timer1 engine; autonomous boot/key/door/output cues plus host-streamed named melodies |
 | Two DS18B20s | D10 / PB2 / CS | `Temperature LED` and `Temperature BT`; external 4.7 kOhm pull-up to VCC is required |
 | 433 MHz receive | D2 / INT0 | rc-switch receive, learning, repeat handling, mapped actions, events |
 | 433 MHz transmit | D3 / INT1 | Host/protocol transmission; receiver is paused only for the send |
@@ -325,8 +325,9 @@ and host presentation defaults in
 ### Buzzer, relays, illumination, and status-light profile
 
 The buzzer is fixed to D9/PB1/OC1A. Timer1 runs CTC with OCR1A as TOP and
-hardware-toggles OC1A, selecting the first usable prescaler from 1, 8, 64, 256,
-or 1024. No audio-rate interrupt runs, so tones cannot starve INT0/INT1 radio
+hardware-toggles OC1A with the fixed `/8` prescaler. At the required 16 MHz
+clock that covers the entire validated 20..20,000 Hz command range. No
+audio-rate interrupt runs, so tones cannot starve INT0/INT1 radio
 edges; Timer0 (`millis`/`micros`) and Timer2 remain untouched. The nonblocking
 queue holds ten frequency/duration steps, including zero-frequency pauses.
 The ordinary key cue is 40 ms at 2 kHz. Silent mode stops electrical tone
@@ -357,7 +358,7 @@ toward their new color instead of inserting a black or unrelated frame.
 |---|---|
 | Programming latch | Power indicator and RGB remain off until the host completes verify/reconnect/restore |
 | Fault, host offline, or Running with door open | Immediate hard red flash |
-| HOT | Orange/red breathing plus the configured audio warning |
+| HOT | Orange/red breathing plus a host-routable warning event |
 | RF learning | Violet breathing; received RF activity overlays a smooth violet cue |
 | Host status override | Host-supplied color/effect |
 | Running with door closed | Orange/yellow |
@@ -386,6 +387,8 @@ Safe changes:
   all-off logic together.
 
 Canonical sources: [TonePlayer.cpp](../LocalLib/TonePlayer.cpp),
+[AudioCues.cpp](../Project/AudioCues.cpp),
+[EepromLayout.h](../Project/EepromLayout.h),
 [RelayController.cpp](../Project/RelayController.cpp),
 [IlluminationController.cpp](../Project/IlluminationController.cpp), and
 [StatusLedController.cpp](../Project/StatusLedController.cpp).
@@ -484,8 +487,8 @@ reported as `Down`, not as the later physical `Click` classification.
 
 Motion and Push-relay control use true down/up behavior rather than repeated
 menu actions, so their output starts immediately after debounce and stops on
-release. The KEY identification page reports one classified press and
-suppresses ordinary hold repeat.
+release. The production `KEY` page maps the four keys directly to Side A/B
+Forward/Reverse motion.
 
 This is a non-negotiable responsiveness invariant. Future work must not move
 the initial action back to `Click`/`HoldStart`, debounce it twice, wait for a
@@ -502,7 +505,7 @@ latency regression.
 
 The current hierarchy has four category parents. On an ordinary leaf, K1/K2
 move through visible pages in that category, K3 goes Back, and K4 enters the
-page's editor/action. `KEY` owns all four keys for identification and `rELY`
+page's editor/action. `KEY` owns all four keys for motion and `rELY`
 owns K3 as immediate All Off. On a category parent, K1/K2 move among non-empty
 categories, K4 enters the first visible child in EEPROM order, and K3 returns
 to the previously active leaf. Navigation wraps. A page/category label is
@@ -515,29 +518,35 @@ additional stable page IDs:
 |---|---|---|
 | Monitoring | `door` | 0 `door`, 1 `VOLT`, 2 `CURR`, 3 `tLED`, 4 `tBT` |
 | Environment | `LItE` | 5 `LItE`, 6 `bEEP` |
-| Outputs | `PWM` | 7 `PWM`, 8 `rELY`, 10 `uPWM`, 11 `r5-8`, 12 `MOVE` |
+| Outputs | `PWM` | 7 `PWM`, 8 `rELY`, 10 `uPWM`, 11 `r5-8` |
 | Inputs/RF | `KEY` | 9 `KEY`, 13 `LErn` |
 
-| ID | Label | What the display shows | K3/K4 behavior |
+| ID | Label | What the display shows | Key behavior |
 |---:|---|---|---|
 | 0 | `door` | Door `OPEN` or `CLSd` | K3 Back; K4 currently gives the common read-only error cue |
 | 1 | `VOLT` | INA219 supply voltage using 0-2 configured decimals | K3 Back; K4 read-only error cue |
 | 2 | `CURR` | INA219 current using 0-2 configured decimals | K3 Back; K4 read-only error cue |
 | 3 | `tLED` | Enclosure-light sensor as `LxxC` | K3 Back; K4 read-only error cue |
-| 4 | `tBT` | BT Audio sensor as `bxxC` | K3 Back; K4 read-only error cue |
+| 4 | `tBT` | BT Amplifier temperature sensor as `bxxC` | K3 Back; K4 read-only error cue |
 | 5 | `LItE` | Illumination `oFF`, `Auto`, or `on` | K3 Back; K4 opens Illumination editor |
 | 6 | `bEEP` | `Mute` or `bEEP` | K3 Back; K4 opens Board Settings editor |
 | 7 | `PWM` | Alternates channel (`P-00`..`P-15`) and current 0-4095 value | K3 Back; K4 opens all-channel commissioning editor |
 | 8 | `rELY` | Alternates selected R1-R8 and Off/On | K3 immediately turns all relays off; K4 first turns all relays off, then opens commissioning |
-| 9 | `KEY` | `KEY`, then the identified number for about 900 ms | K1-K4 identify 1-4; double-click K1 returns to the configured default page |
+| 9 | `KEY` | `KEY`, then live relay mask while moving | K1-K4 control Side A Forward/Reverse and Side B Forward/Reverse |
 | 10 | `uPWM` | Alternates user channel 1-8 and its stored 8-bit value | K3 Back; K4 opens persistent user-PWM editor |
 | 11 | `r5-8` | Active R5-R8 mask as 0-15 | K3 Back; K4 opens general-relay control |
-| 12 | `MOVE` | Door `OPEN` or `CLSd` | K3 Back; K4 enters motion if the configured door policy permits it |
+| 12 | `MOVE` | Retired wire alias; never separately browsable | Direct `MENU_SET_PAGE 12` selects page 9 `KEY` |
 | 13 | `LErn` | Learned RF count, or unavailable dashes | K3 Back; K4 starts the default indefinite, multi-code learning session |
 
 The board-authoritative `MenuList` opcode returns these 14 dense IDs,
-program-mode IDs, and four-character labels in pages. Category membership is
-the fixed mapping above and is not part of that six-byte entry. The retired
+program-mode IDs, and four-character labels in pages. ID 12 remains `MOVE`
+for cursor and client compatibility, but reports the `KEY` program-mode ID;
+it is a direct selector alias rather than a second local page. The persistent
+layout always clears visibility bit 12. On an older persisted/layout-write
+mask that sets bit 12, firmware promotes it to bit 9 and, when 9 was hidden,
+swaps the stored 9/12 ranks so the effective `KEY` position is preserved
+without moving `LErn`/RF or any other page. Category membership is the fixed
+mapping above and is not part of that six-byte entry. The retired
 `bt` page was the redundant BT Audio **connection-state** page and remains
 removed: BT input sensing, telemetry/events, automations, host monitoring, and
 RGB status convey that state. The distinct `tBT` page above is intentionally
@@ -680,7 +689,8 @@ menu state, not an EEPROM setting.
 
 ### Two-side motion control
 
-Enter from `MOVE` with K4 when the EEPROM motion-door policy allows it:
+Enter the unified `KEY` page when the EEPROM motion-door policy allows it.
+The first physical Down enters motion and actuates immediately:
 
 | Key | While held |
 |---:|---|
@@ -689,12 +699,14 @@ Enter from `MOVE` with K4 when the EEPROM motion-door policy allows it:
 | 3 | Side B Forward |
 | 4 | Side B Reverse |
 
-Release stops that side. Hold K1+K2 or K3+K4 together for 600 ms to stop all
-relays and exit. A door-close edge exits a local motion session and returns to
+Release stops that side. Hold any single key, K1+K2, K3+K4, or all four for
+the configured motion-exit duration (factory 2 seconds) to stop all relays and
+return to `door`. Opposing-key chords stop immediately while the exit timer
+completes. A door-close edge exits a local motion session and returns to
 the default page. The locally and host-configurable policy is Always, Closed
 only, Open only, or Never; the erased/factory default is Always. Edit it as
 item 8 (`SAFE`) in Board Settings. Host/API motion that is not running through
-the local MOVE page follows the same selected policy.
+the local KEY page follows the same selected policy.
 
 ### Save and discard
 
@@ -706,8 +718,9 @@ entry. At the confirmation display:
 - A default-page double-click is accepted only on an ordinary leaf, so it
   cannot bypass an active editor or its Save/Discard decision.
 - `SAVE` or `diSC` flashes for about 900 ms.
-- Save uses a rising audio/RGB cue; Discard uses an error/descending cue.
-- Silent mode mutes the audio but not the visual cue.
+- Save and Discard keep their distinct RGB/result presentation. Their exact
+  `success-cue` and `error-cue` melodies are host-owned named definitions.
+- Silent mode mutes every board tone but never suppresses the visual cue.
 
 ### 433 MHz learning and mappings
 
@@ -804,7 +817,7 @@ independently false. New/default configurations get both `CFG` items. Existing
 user-customized `host_menus` arrays are not silently rewritten, so users may
 add the service item explicitly if they want it on an older custom panel.
 
-Local `door`, measurements, lighting, key identification, user relays, motion,
+Local `door`, measurements, lighting, user relays, motion,
 and RF learning remain available without a PC. The host adds richer labels,
 search, graphs, exact numeric controls, and automation without replacing the
 firmware's offline safety behavior. Future size tradeoffs must follow
@@ -1024,23 +1037,27 @@ The current logical EEPROM map is:
 
 | Range | Bytes | Owner |
 |---:|---:|---|
-| 0-31 | 32 | Unallocated |
-| 32-63 | 32 | Packed settings plus checksum |
-| 64-307 | 244 | RF header plus 20 learned records |
-| 308-319 | 12 | Unallocated |
-| 320-703 | 384 | 64-slot reset-count journal |
-| 704-950 | 247 | Nineteen status-effect condition descriptors plus CRCs |
-| 951-1023 | 73 | Unallocated |
+| 0-12 | 13 | Four autonomous audio descriptors plus CRC-8 |
+| 13-31 | 19 | Reserved for the broader startup/boot-opcode executor |
+| 32-72 | 41 | Current packed settings/board-name values plus CRC-8 |
+| 73 | 1 | Optional menu-label CRC header |
+| 74-79 | 6 | Unallocated alignment gap |
+| 80-323 | 244 | RF header plus 20 learned records |
+| 324-335 | 12 | Unallocated alignment gap |
+| 336-719 | 384 | 64-slot reset-count journal |
+| 720-966 | 247 | Nineteen status-effect condition descriptors plus CRCs |
+| 967-1023 | 57 | Fourteen packed menu labels plus commit byte |
 
-That leaves 117 logically unallocated bytes. The generated safe-default EEPROM
+That leaves 37 reserved or unallocated bytes outside current records. The
+generated safe-default EEPROM
 image still covers all 1,024 bytes so a programming/restore operation is
 deterministic; that does not make the erased regions owned records.
 
-The following requested behavior is **not** EEPROM-backed in this candidate:
+The following broader behavior is **not** EEPROM-backed in this candidate:
 
 | Area | What exists | What is still missing |
 |---|---|---|
-| Configurable buzzer cues | Global Silent plus door/relay enable bits; door and relay tones are fixed in flash | Persistent cue IDs or note/frequency/duration descriptors for door-open, door-close, relay-on, and relay-off |
+| Generic startup/event opcode executor | Door-open, door-close, output-on, and output-off frequency/duration values are already CRC-backed in EEPROM with exact compiled fallbacks | Bounded multi-step relay, PWM, display, RF, macro, and rich-melody actions triggered by startup or other events |
 | Board automation | Twenty RF records map codes directly to Key, Menu, Relay, Side, or PWM actions; host automations can consume events | A generic board rule table for door, BT Audio, relay, host-loss, temperature, RF transmit, macro start, or other opcode actions |
 
 Structured host-menu pull is also not implemented by the AVR: the current
