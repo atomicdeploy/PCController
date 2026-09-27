@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build !windows && !linux
 
 package hostfacts
 
@@ -9,9 +9,13 @@ import (
 
 type nativeBackend struct{}
 
+func platformHostFactsSource() string { return "unsupported" }
+
+func platformHostFactsClass(_ string, windowsClass string) string { return windowsClass }
+
 func (nativeBackend) query(
 	context.Context,
 	querySpec,
 ) ([]map[string]any, bool, error) {
-	return nil, false, errors.New("host facts through WMI are available on Windows only")
+	return nil, false, errors.New("native host facts are unavailable on this operating system")
 }
