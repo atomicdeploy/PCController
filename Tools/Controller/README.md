@@ -240,13 +240,17 @@ rebuilt from the verified package. If the canonical executable is running, a
 hash-bound external helper waits for that exact process to exit and rolls the
 durable directory-replacement journal forward. Healthy legacy hashed-slot
 installations migrate to `bin` on the next install or repair. Unknown files in
-`bin` are preserved while package-owned paths are replaced, and a damaged image
-is never promoted to rollback. One exact prior package is retained for rollback. The per-user root carries
+`bin` are copied into a transaction-specific `recovery-quarantine/installer-*`
+directory rather than kept active; files removed from the old inventory retire
+with that package. A damaged image is never promoted to rollback. One exact
+prior package is retained for rollback. The per-user root carries
 a product-and-user ownership marker, and lifecycle commands refuse a foreign or
 unmarked non-empty root.
 
-Uninstall preserves configuration, board backups, downloaded tools, logs, and
-host state. Purging them is a separate destructive choice that requires both
+Uninstall removes only installer-owned `bin`, package, staging, state, marker,
+and lock paths. It preserves the canonical source tree, coordination evidence,
+recovery quarantine, configuration, board backups, downloaded tools, logs, and
+host state. Purging user data is a separate destructive choice that requires both
 flags and the exact confirmation shown by `controller help`:
 
 ```console
