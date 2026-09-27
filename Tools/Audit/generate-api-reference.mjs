@@ -295,14 +295,20 @@ const actionIdentifierSchema = { type: "string", pattern: "^[A-Za-z0-9._:-]{1,18
 const actionSelectorSchema = { type: "string", pattern: "^(?:\\*|[A-Za-z0-9._:-]{1,180})$", default: "*" };
 const actionKindSchema = {
 	type: "string",
-	enum: ["app.page", "app.title", "app.progress", "app.osc", "app.quit", "app.port.open", "app.port.close", "command"],
+	oneOf: [
+		{ enum: ["app.page", "app.title", "app.progress", "app.osc", "app.quit", "app.port.open", "app.port.close", "command"] },
+		{
+			maxLength: 64,
+			pattern: "^(?!app\\.)(?!controller\\.)(?:[A-Za-z0-9_-]+\\.)+[A-Za-z0-9_-]+$",
+		},
+	],
 };
 
 function actionSchemas(refPrefix) {
 	const ref = (name) => ({ $ref: `${refPrefix}${name}` });
 	const actionProperties = {
 		kind: actionKindSchema,
-		value: { type: "string" },
+		value: { type: "string", maxLength: 4096, pattern: "^[^\\u0000\\r\\n]*$" },
 		source: { type: "string" },
 		target: actionSelectorSchema,
 		operation_id: actionIdentifierSchema,

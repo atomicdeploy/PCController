@@ -45,6 +45,31 @@ func TracksAppActionOutcome(kind string) bool {
 	return ok
 }
 
+// TracksRegisteredAppActionOutcome reports whether a built-in action or a
+// bounded custom namespace is eligible for correlated delivery. Custom action
+// names are accepted only when a currently-live matched client advertised the
+// exact capability in app_actions.
+func TracksRegisteredAppActionOutcome(registry *InstanceRegistry, kind, target string) bool {
+	kind = strings.ToLower(strings.TrimSpace(kind))
+	if TracksAppActionOutcome(kind) {
+		return true
+	}
+	if registry == nil || !isRegisteredCustomActionKind(kind) {
+		return false
+	}
+	selector := strings.TrimSpace(target)
+	if selector == "" {
+		selector = "*"
+	}
+	for _, instance := range registry.List() {
+		if TargetsInstance(selector, instance.ID, instance.Surface) &&
+			instanceAdvertisesAction(instance, kind) {
+			return true
+		}
+	}
+	return false
+}
+
 // HasCoordinatorActionDeliveryMetadata reports whether a caller attempted to
 // manufacture the exact-target nonce or deadline added only by Submit.
 func HasCoordinatorActionDeliveryMetadata(metadata map[string]string) bool {
@@ -210,7 +235,7 @@ func (coordinator *ActionCoordinator) Submit(action AppAction, timeout time.Dura
 	if timeout < time.Millisecond || timeout > MaximumActionTimeout {
 		return ActionOperation{}, fmt.Errorf("app action timeout must be 1..%d milliseconds", MaximumActionTimeout.Milliseconds())
 	}
-	normalized, err := NormalizeAppAction(action)
+	normalized, err := NormalizeTrackedAppAction(action, coordinator.registry)
 	if err != nil {
 		return ActionOperation{}, err
 	}
@@ -500,17 +525,24 @@ func resolveActionTargets(live []AppInstance, selector string) []AppInstance {
 func actionDeliveryState(instance AppInstance, kind string) (string, string) {
 	advertised := strings.TrimSpace(instance.Values[ActionCapabilitiesKey])
 	if advertised == "" {
-		if knownActionDeliverySurface(instance.Surface) {
+		if TracksAppActionOutcome(kind) && knownActionDeliverySurface(instance.Surface) {
 			return ActionStateQueued, ""
 		}
 		return ActionStateRejected, "delivery_not_supported"
 	}
-	for _, value := range strings.Split(advertised, ",") {
-		if strings.EqualFold(strings.TrimSpace(value), kind) {
-			return ActionStateQueued, ""
-		}
+	if instanceAdvertisesAction(instance, kind) {
+		return ActionStateQueued, ""
 	}
 	return ActionStateRejected, "capability_not_advertised"
+}
+
+func instanceAdvertisesAction(instance AppInstance, kind string) bool {
+	for _, value := range strings.Split(instance.Values[ActionCapabilitiesKey], ",") {
+		if strings.EqualFold(strings.TrimSpace(value), strings.TrimSpace(kind)) {
+			return true
+		}
+	}
+	return false
 }
 
 func knownActionDeliverySurface(surface string) bool {
