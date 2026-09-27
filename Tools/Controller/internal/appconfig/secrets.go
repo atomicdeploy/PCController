@@ -32,9 +32,10 @@ func (store *Store) Runtime() (Config, error) {
 	return resolveConfigSecrets(store.effectiveLocked(), store.secrets)
 }
 
-// CurrentRuntime returns a fail-closed runtime view. Call Runtime when the
-// caller can surface resolution errors; this helper is for long-lived request
-// paths that must immediately stop remote/integration access on vault failure.
+// CurrentRuntime returns the last successfully resolved runtime view. Secret
+// references are resolved when the store opens or its active config/secret is
+// changed, never on a request path. Call Runtime when a caller explicitly
+// needs to revalidate the backing vault and can surface resolution errors.
 func (store *Store) CurrentRuntime() Config {
 	store.mu.RLock()
 	defer store.mu.RUnlock()
@@ -114,10 +115,17 @@ func (store *Store) SetSecret(reference, value string) error {
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	if _, err := resolveConfigSecrets(store.value, store.secrets); err != nil {
+	runtimeValue, err := resolveConfigSecrets(store.value, store.secrets)
+	if err != nil {
+		// Set already changed a credential referenced by the active config. Do
+		// not keep authorizing with a stale cached token when the new active
+		// runtime cannot be resolved completely.
+		store.runtimeValue = failClosedRuntime(store.effectiveLocked())
+		store.notifyRuntimeLocked()
 		return fmt.Errorf("secret stored but active configuration remains unresolved: %w", err)
 	}
-	store.notifyRuntimeLocked(store.value)
+	store.runtimeValue = clone(runtimeValue)
+	store.notifyRuntimeLocked()
 	return nil
 }
 

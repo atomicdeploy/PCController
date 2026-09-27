@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -45,6 +46,142 @@ func (port *reconnectTestPort) Close() error {
 	return nil
 }
 func (*reconnectTestPort) Break(time.Duration) error { return nil }
+
+type statusLEDTestPort struct {
+	reads     chan []byte
+	closed    chan struct{}
+	closeOnce sync.Once
+}
+
+func newStatusLEDTestPort() *statusLEDTestPort {
+	return &statusLEDTestPort{
+		reads:  make(chan []byte, 16),
+		closed: make(chan struct{}),
+	}
+}
+
+func (*statusLEDTestPort) SetMode(*serial.Mode) error { return nil }
+func (port *statusLEDTestPort) Read(data []byte) (int, error) {
+	select {
+	case encoded := <-port.reads:
+		return copy(data, encoded), nil
+	case <-port.closed:
+		return 0, errors.New("test port closed")
+	}
+}
+func (*statusLEDTestPort) Write(data []byte) (int, error) { return len(data), nil }
+func (*statusLEDTestPort) Drain() error                   { return nil }
+func (*statusLEDTestPort) ResetInputBuffer() error        { return nil }
+func (*statusLEDTestPort) ResetOutputBuffer() error       { return nil }
+func (*statusLEDTestPort) SetDTR(bool) error              { return nil }
+func (*statusLEDTestPort) SetRTS(bool) error              { return nil }
+func (*statusLEDTestPort) GetModemStatusBits() (*serial.ModemStatusBits, error) {
+	return &serial.ModemStatusBits{}, nil
+}
+func (*statusLEDTestPort) SetReadTimeout(time.Duration) error { return nil }
+func (port *statusLEDTestPort) Close() error {
+	port.closeOnce.Do(func() { close(port.closed) })
+	return nil
+}
+func (*statusLEDTestPort) Break(time.Duration) error { return nil }
+
+func (port *statusLEDTestPort) sendStatusLED(state native.StatusLEDState) error {
+	encoded, err := native.Encode(native.Frame{
+		Opcode: native.OpStatusLEDChanged,
+		Payload: []byte{
+			state.Red, state.Green, state.Blue, state.Brightness,
+			state.Effect, state.Condition,
+		},
+	})
+	if err != nil {
+		return err
+	}
+	select {
+	case port.reads <- encoded:
+		return nil
+	case <-port.closed:
+		return errors.New("test port closed")
+	}
+}
+
+func TestStatusLEDPumpSuppressesOnlyUnchangedFrames(t *testing.T) {
+	runtime := New(Options{})
+	port := newStatusLEDTestPort()
+	session := link.NewForPort("STATUS-LED-TEST", port)
+	pumpDone := make(chan struct{})
+	go func() {
+		runtime.pump(session, 0)
+		close(pumpDone)
+	}()
+	defer func() {
+		if err := session.Close(); err != nil {
+			t.Error(err)
+		}
+		select {
+		case <-pumpDone:
+		case <-time.After(time.Second):
+			t.Error("status LED pump did not stop")
+		}
+	}()
+
+	state := native.StatusLEDState{
+		Red: 1, Green: 2, Blue: 3, Brightness: 4,
+		Effect: native.StatusEffectNone, Condition: 5,
+	}
+	cursor := runtime.LatestEventID()
+	if err := port.sendStatusLED(state); err != nil {
+		t.Fatal(err)
+	}
+	first := waitTestEvent(t, runtime, cursor, "status_led.changed")
+	firstSnapshot := runtime.Snapshot()
+	if !firstSnapshot.HaveStatusLED || firstSnapshot.StatusLED != state {
+		t.Fatalf("initial status LED snapshot=%#v", firstSnapshot.StatusLED)
+	}
+
+	if err := port.sendStatusLED(state); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 75*time.Millisecond)
+	_, err := runtime.WaitEvent(ctx, first.ID, "status_led.changed")
+	cancel()
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("unchanged status LED event was published: %v", err)
+	}
+	duplicateSnapshot := runtime.Snapshot()
+	if !duplicateSnapshot.StatusLEDUpdated.Equal(firstSnapshot.StatusLEDUpdated) {
+		t.Fatalf("unchanged frame advanced status timestamp: before=%v after=%v",
+			firstSnapshot.StatusLEDUpdated, duplicateSnapshot.StatusLEDUpdated)
+	}
+
+	changes := []native.StatusLEDState{
+		{Red: 6, Green: 2, Blue: 3, Brightness: 4, Effect: native.StatusEffectNone, Condition: 5},
+		{Red: 6, Green: 7, Blue: 3, Brightness: 4, Effect: native.StatusEffectNone, Condition: 5},
+		{Red: 6, Green: 7, Blue: 8, Brightness: 4, Effect: native.StatusEffectNone, Condition: 5},
+		{Red: 6, Green: 7, Blue: 8, Brightness: 9, Effect: native.StatusEffectNone, Condition: 5},
+		{Red: 6, Green: 7, Blue: 8, Brightness: 9, Effect: native.StatusEffectBreathe, Condition: 5},
+		{Red: 6, Green: 7, Blue: 8, Brightness: 9, Effect: native.StatusEffectBreathe, Condition: 10},
+	}
+	cursor = first.ID
+	for index, changed := range changes {
+		if err := port.sendStatusLED(changed); err != nil {
+			t.Fatal(err)
+		}
+		event := waitTestEvent(t, runtime, cursor, "status_led.changed")
+		cursor = event.ID
+		published, err := native.ParseStatusLEDState(event.Frame.Payload)
+		if err != nil || published != changed {
+			t.Fatalf("change %d event was lost/reordered: got=%#v err=%v want=%#v",
+				index, published, err, changed)
+		}
+		snapshot := runtime.Snapshot()
+		if snapshot.StatusLED != changed {
+			t.Fatalf("change %d was lost: got=%#v want=%#v", index, snapshot.StatusLED, changed)
+		}
+	}
+	if got, want := runtime.LatestEventID(), first.ID+uint64(len(changes)); got != want {
+		t.Fatalf("status LED event count=%d, want %d (duplicate was published)", got, want)
+	}
+}
 
 func TestDoorEventUpdatesSnapshotAndWakesWaiters(t *testing.T) {
 	runtime := New(Options{})
