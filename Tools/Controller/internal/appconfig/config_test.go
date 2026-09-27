@@ -139,6 +139,9 @@ func TestPeripheralRegistryCoversEveryCoreRoleAndNamingCapacity(t *testing.T) {
 		if descriptor.Key == "" || descriptor.DefaultName == "" || descriptor.Control == "" {
 			t.Fatalf("incomplete descriptor: %+v", descriptor)
 		}
+		if descriptor.DefaultDescription != "" {
+			t.Fatalf("descriptor %q has a deployment-specific default description %q", descriptor.Key, descriptor.DefaultDescription)
+		}
 		if seen[descriptor.Key] {
 			t.Fatalf("duplicate peripheral key %q", descriptor.Key)
 		}
@@ -169,6 +172,152 @@ func TestPeripheralRegistryCoversEveryCoreRoleAndNamingCapacity(t *testing.T) {
 	if name, _ := PeripheralDefaultName("relay.1"); name == "mutated" {
 		t.Fatal("callers can mutate the canonical peripheral registry")
 	}
+	for key, want := range map[string]string{
+		"relay.1": "Relay 1", "motion.a": "Motion A", "pwm.0": "PWM 0", "pwm.15": "PWM 15",
+	} {
+		if got, ok := PeripheralDefaultName(key); !ok || got != want {
+			t.Fatalf("generic default name for %s=%q found=%t, want %q", key, got, ok, want)
+		}
+	}
+}
+
+func TestControlDescriptorsResolveOneOrderedCrossSurfaceContract(t *testing.T) {
+	config := Defaults()
+	config.UI.PeripheralNames = map[string]string{"relay.5": "Legacy bench lamp"}
+	first, last := 0, MaxPresentedControls-1
+	config.UI.PeripheralPresentation = map[string]PeripheralPresentation{
+		"relay.5":  {Name: "Bench lamp", Description: "Overhead work light", Order: &last},
+		"pwm.0":    {Name: "Left MOSFET", Description: "Left bank dimmer"},
+		"motion.b": {Name: "Rear side", Description: "Rear lift", Order: &first},
+	}
+	if err := config.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	controls := ControlDescriptors(config.UI)
+	if len(controls) != MaxPresentedControls {
+		t.Fatalf("control count=%d, want %d", len(controls), MaxPresentedControls)
+	}
+	byKey := make(map[string]ControlDescriptor, len(controls))
+	for _, control := range controls {
+		if _, duplicate := byKey[control.Key]; duplicate {
+			t.Fatalf("duplicate control key %q", control.Key)
+		}
+		byKey[control.Key] = control
+	}
+	for key, want := range map[string]struct {
+		kind        string
+		name        string
+		description string
+	}{
+		"relay.5":  {"relay", "Bench lamp", "Overhead work light"},
+		"pwm.0":    {"mosfet", "Left MOSFET", "Left bank dimmer"},
+		"motion.b": {"side", "Rear side", "Rear lift"},
+	} {
+		got, ok := byKey[key]
+		if !ok || got.Kind != want.kind || got.Name != want.name || got.Description != want.description {
+			t.Fatalf("control %q=%+v, want kind=%q name=%q description=%q", key, got, want.kind, want.name, want.description)
+		}
+	}
+	if controls[0].Key != "motion.b" || controls[len(controls)-1].Key != "relay.5" {
+		t.Fatalf("custom order was not normalized: first=%s last=%s", controls[0].Key, controls[len(controls)-1].Key)
+	}
+	for order, control := range controls {
+		if control.Order != order {
+			t.Fatalf("control %s order=%d, want normalized %d", control.Key, control.Order, order)
+		}
+	}
+	if control, found := byKey["pwm.11"]; !found || control.Control != "role-specific" {
+		t.Fatalf("role-specific MOSFET/PWM descriptor is missing: %+v", control)
+	}
+}
+
+func TestLegacyCopiedPeripheralDefaultsAreRemovedOnLoadAndWrite(t *testing.T) {
+	order := 4
+	value := Defaults()
+	value.UI.PeripheralNames = map[string]string{
+		"relay.5":      "User Relay 5",
+		"relay.6":      "Relay 6",
+		"relay.7":      "Bench extraction",
+		"sensor.power": "Load power",
+	}
+	value.UI.PeripheralPresentation = map[string]PeripheralPresentation{
+		"relay.5": {
+			Name: "User Relay 5", Description: "Protected relay output R5 (user output)",
+		},
+		"relay.6": {Name: "Relay 6"},
+		"pwm.11": {
+			Name: "Enclosure light", Description: "12-bit PWM channel 11 (illumination)", Order: &order,
+		},
+		"pwm.0": {Name: "Cooling fan", Description: "Variable-speed cooling output"},
+	}
+	byKey := make(map[string]ControlDescriptor, MaxPresentedControls)
+	for _, control := range ControlDescriptors(value.UI) {
+		byKey[control.Key] = control
+	}
+	if relay := byKey["relay.5"]; relay.Name != "Relay 5" || relay.Description != "" {
+		t.Fatalf("resolved contract exposed a copied legacy default: %#v", relay)
+	}
+	if roleSpecific := byKey["pwm.11"]; roleSpecific.Name != "PWM 11" || roleSpecific.Description != "" {
+		t.Fatalf("resolved contract exposed a copied role-specific default: %#v", roleSpecific)
+	}
+
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := Write(path, value); err != nil {
+		t.Fatal(err)
+	}
+	if value.UI.PeripheralNames["relay.5"] != "User Relay 5" ||
+		value.UI.PeripheralPresentation["pwm.11"].Name != "Enclosure light" {
+		t.Fatal("Write mutated the caller's presentation maps")
+	}
+	written, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, copiedDefault := range []string{"User Relay 5", "Enclosure light", "Load power"} {
+		if strings.Contains(string(written), copiedDefault) {
+			t.Fatalf("copied registry default %q remained in persisted config:\n%s", copiedDefault, written)
+		}
+	}
+	assertMigrated := func(label string, loaded Config) {
+		t.Helper()
+		if len(loaded.UI.PeripheralNames) != 1 || loaded.UI.PeripheralNames["relay.7"] != "Bench extraction" {
+			t.Fatalf("%s names=%#v", label, loaded.UI.PeripheralNames)
+		}
+		if _, exists := loaded.UI.PeripheralPresentation["relay.5"]; exists {
+			t.Fatalf("%s retained legacy relay presentation: %#v", label, loaded.UI.PeripheralPresentation)
+		}
+		if _, exists := loaded.UI.PeripheralPresentation["relay.6"]; exists {
+			t.Fatalf("%s retained copied current default: %#v", label, loaded.UI.PeripheralPresentation)
+		}
+		roleSpecific, exists := loaded.UI.PeripheralPresentation["pwm.11"]
+		if !exists || roleSpecific.Name != "" || roleSpecific.Description != "" ||
+			roleSpecific.Order == nil || *roleSpecific.Order != order {
+			t.Fatalf("%s did not preserve the independent order override: %#v", label, roleSpecific)
+		}
+		custom := loaded.UI.PeripheralPresentation["pwm.0"]
+		if custom.Name != "Cooling fan" || custom.Description != "Variable-speed cooling output" {
+			t.Fatalf("%s lost custom presentation: %#v", label, custom)
+		}
+	}
+	loaded, _, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertMigrated("write", loaded)
+
+	legacyPath := filepath.Join(t.TempDir(), "legacy.json")
+	legacyDocument, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacyPath, legacyDocument, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, _, err = Load(legacyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertMigrated("load", loaded)
 }
 
 func TestInvalidReloadRetainsLastGoodValue(t *testing.T) {
@@ -218,6 +367,57 @@ func TestWatcherAppliesValidChange(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("watcher did not observe change")
+	}
+}
+
+func TestFilesystemWatchRegistrationRetriesOnlyDisappearingEntries(t *testing.T) {
+	transient := &os.PathError{
+		Op:   "lstat",
+		Path: filepath.Join(t.TempDir(), ".config-123.json"),
+		Err:  os.ErrNotExist,
+	}
+	attempts := 0
+	err := retryFilesystemWatchRegistration(context.Background(), 4, 0, func() error {
+		attempts++
+		if attempts < 3 {
+			return transient
+		}
+		return nil
+	})
+	if err != nil || attempts != 3 {
+		t.Fatalf("transient registration err=%v attempts=%d, want success on attempt 3", err, attempts)
+	}
+
+	permanent := errors.New("watch permission denied")
+	attempts = 0
+	err = retryFilesystemWatchRegistration(context.Background(), 4, 0, func() error {
+		attempts++
+		return permanent
+	})
+	if !errors.Is(err, permanent) || attempts != 1 {
+		t.Fatalf("permanent registration err=%v attempts=%d, want immediate failure", err, attempts)
+	}
+
+	attempts = 0
+	err = retryFilesystemWatchRegistration(context.Background(), 4, 0, func() error {
+		attempts++
+		return transient
+	})
+	if !errors.Is(err, os.ErrNotExist) || attempts != 4 {
+		t.Fatalf("persistent disappearing entry err=%v attempts=%d, want bounded failure", err, attempts)
+	}
+}
+
+func TestFilesystemWatchRegistrationStopsWhenCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	attempts := 0
+	err := retryFilesystemWatchRegistration(ctx, 4, time.Hour, func() error {
+		attempts++
+		return os.ErrNotExist
+	})
+	if !errors.Is(err, context.Canceled) || attempts != 0 {
+		t.Fatalf("canceled registration err=%v attempts=%d", err, attempts)
 	}
 }
 

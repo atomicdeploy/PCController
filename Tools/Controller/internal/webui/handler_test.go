@@ -24,12 +24,12 @@ func testHandler(t *testing.T, additionalReserved ...string) http.Handler {
 		"index.html":                {Data: []byte("<!doctype html><title>PCController</title><main>app shell</main>"), ModTime: modified},
 		"favicon.ico":               {Data: []byte{0, 0, 1, 0, 1, 0, 16, 16}, ModTime: modified},
 		"favicon.svg":               {Data: []byte("<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>"), ModTime: modified},
-		"assets/chunk-abcdef12.bin": {Data: append([]byte(nil), testAsset...), ModTime: modified},
-		"assets/app-abcdef12.js":    {Data: []byte("export const ready = true\n"), ModTime: modified},
-		"assets/app-abcdef12.css":   {Data: []byte(":root { color-scheme: dark }\n"), ModTime: modified},
-		"assets/index-abcdef12.css": {Data: []byte("body { color: white }\n"), ModTime: modified},
-		"assets/icon-abcdef12.svg":  {Data: []byte("<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>"), ModTime: modified},
-		"assets/ui-abcdef12.woff2":  {Data: []byte("test-font-data"), ModTime: modified},
+		"assets/chunk-telemetry.bin": {Data: append([]byte(nil), testAsset...), ModTime: modified},
+		"assets/app.js":              {Data: []byte("export const ready = true\n"), ModTime: modified},
+		"assets/app.css":             {Data: []byte(":root { color-scheme: dark }\n"), ModTime: modified},
+		"assets/index.css":           {Data: []byte("body { color: white }\n"), ModTime: modified},
+		"assets/icon.svg":            {Data: []byte("<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>"), ModTime: modified},
+		"assets/ui.woff2":            {Data: []byte("test-font-data"), ModTime: modified},
 		"assets/plain.js":           {Data: []byte("export {}\n"), ModTime: modified},
 		"manifest.webmanifest":      {Data: []byte(`{"name":"PCController"}`), ModTime: modified},
 		"service-worker.js":         {Data: []byte("self.addEventListener('fetch', () => {})\n"), ModTime: modified},
@@ -63,7 +63,7 @@ func TestEmbeddedHandlerServesUsefulAppShell(t *testing.T) {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 	body := response.Body.String()
-	for _, expected := range []string{"data-pccontroller-shell", "type=\"module\"", "/theme-init.js", "/assets/app-"} {
+	for _, expected := range []string{"data-pccontroller-shell", "type=\"module\"", "/theme-init.js", "/assets/app.js"} {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("embedded app shell is missing %q", expected)
 		}
@@ -91,8 +91,8 @@ func TestStaleFingerprintedEntryAssetsRedirectToCurrentBundle(t *testing.T) {
 		path     string
 		location string
 	}{
-		{path: "/assets/app-stale000.js", location: "/assets/app-abcdef12.js"},
-		{path: "/assets/index-stale000.css", location: "/assets/index-abcdef12.css"},
+		{path: "/assets/app-stale000.js", location: "/assets/app.js"},
+		{path: "/assets/index-stale000.css", location: "/assets/index.css"},
 	}
 	for _, test := range tests {
 		t.Run(test.path, func(t *testing.T) {
@@ -120,7 +120,7 @@ func TestStaleEntryRecoveryDoesNotMaskMissingChunksOrAmbiguousBundles(t *testing
 
 	files := fstest.MapFS{
 		"index.html":             {Data: []byte("<!doctype html><title>PCController</title>")},
-		"assets/app-first000.js": {Data: []byte("export {}")},
+		"assets/app-first000.js":  {Data: []byte("export {}")},
 		"assets/app-second00.js": {Data: []byte("export {}")},
 	}
 	ambiguous, err := NewHandler(files)
@@ -157,7 +157,7 @@ func TestServeContentRangesAndHead(t *testing.T) {
 			if test.rangeHeader != "" {
 				headers["Range"] = test.rangeHeader
 			}
-			response := request(t, handler, test.method, "/assets/chunk-abcdef12.bin", headers)
+			response := request(t, handler, test.method, "/assets/chunk-telemetry.bin", headers)
 			if response.Code != test.wantStatus {
 				t.Fatalf("status=%d want=%d body=%s", response.Code, test.wantStatus, response.Body.String())
 			}
@@ -186,7 +186,7 @@ func TestServeContentRangesAndHead(t *testing.T) {
 
 func TestServeContentMultipartAndUnsatisfiableRanges(t *testing.T) {
 	handler := testHandler(t)
-	response := request(t, handler, http.MethodGet, "/assets/chunk-abcdef12.bin", map[string]string{
+	response := request(t, handler, http.MethodGet, "/assets/chunk-telemetry.bin", map[string]string{
 		"Range": "bytes=0-1,4-5",
 	})
 	if response.Code != http.StatusPartialContent {
@@ -221,7 +221,7 @@ func TestServeContentMultipartAndUnsatisfiableRanges(t *testing.T) {
 		t.Fatalf("multipart ranges=%q", ranges)
 	}
 
-	unsatisfied := request(t, handler, http.MethodGet, "/assets/chunk-abcdef12.bin", map[string]string{
+	unsatisfied := request(t, handler, http.MethodGet, "/assets/chunk-telemetry.bin", map[string]string{
 		"Range": "bytes=999-1200",
 	})
 	if unsatisfied.Code != http.StatusRequestedRangeNotSatisfiable {
@@ -239,27 +239,27 @@ func TestServeContentMultipartAndUnsatisfiableRanges(t *testing.T) {
 
 func TestETagConditionalAndIfRangeBehavior(t *testing.T) {
 	handler := testHandler(t)
-	initial := request(t, handler, http.MethodGet, "/assets/chunk-abcdef12.bin", nil)
+	initial := request(t, handler, http.MethodGet, "/assets/chunk-telemetry.bin", nil)
 	etag := initial.Header().Get("ETag")
 	if len(etag) < 3 || !strings.HasPrefix(etag, `"`) || !strings.HasSuffix(etag, `"`) {
 		t.Fatalf("strong ETag=%q", etag)
 	}
 
-	matching := request(t, handler, http.MethodGet, "/assets/chunk-abcdef12.bin", map[string]string{
+	matching := request(t, handler, http.MethodGet, "/assets/chunk-telemetry.bin", map[string]string{
 		"Range": "bytes=2-5", "If-Range": etag,
 	})
 	if matching.Code != http.StatusPartialContent || matching.Body.String() != string(testAsset[2:6]) {
 		t.Fatalf("matching If-Range status=%d body=%q", matching.Code, matching.Body.String())
 	}
 
-	mismatch := request(t, handler, http.MethodGet, "/assets/chunk-abcdef12.bin", map[string]string{
+	mismatch := request(t, handler, http.MethodGet, "/assets/chunk-telemetry.bin", map[string]string{
 		"Range": "bytes=2-5", "If-Range": `"different"`,
 	})
 	if mismatch.Code != http.StatusOK || !bytes.Equal(mismatch.Body.Bytes(), testAsset) {
 		t.Fatalf("mismatched If-Range status=%d body=%q", mismatch.Code, mismatch.Body.Bytes())
 	}
 
-	notModified := request(t, handler, http.MethodGet, "/assets/chunk-abcdef12.bin", map[string]string{
+	notModified := request(t, handler, http.MethodGet, "/assets/chunk-telemetry.bin", map[string]string{
 		"If-None-Match": etag,
 	})
 	if notModified.Code != http.StatusNotModified || notModified.Body.Len() != 0 {
@@ -277,10 +277,10 @@ func TestMIMEAndCachePolicies(t *testing.T) {
 		{path: "/index.html", contentType: "text/html; charset=utf-8", cache: "no-cache"},
 		{path: "/favicon.svg", contentType: "image/svg+xml", cache: "no-cache"},
 		{path: "/favicon.ico", contentType: "image/x-icon", cache: "no-cache"},
-		{path: "/assets/app-abcdef12.js", contentType: "text/javascript; charset=utf-8", cache: "public, max-age=31536000, immutable"},
-		{path: "/assets/app-abcdef12.css", contentType: "text/css; charset=utf-8", cache: "public, max-age=31536000, immutable"},
-		{path: "/assets/icon-abcdef12.svg", contentType: "image/svg+xml", cache: "public, max-age=31536000, immutable"},
-		{path: "/assets/ui-abcdef12.woff2", contentType: "font/woff2", cache: "public, max-age=31536000, immutable"},
+		{path: "/assets/app.js", contentType: "text/javascript; charset=utf-8", cache: "no-cache"},
+		{path: "/assets/app.css", contentType: "text/css; charset=utf-8", cache: "no-cache"},
+		{path: "/assets/icon.svg", contentType: "image/svg+xml", cache: "no-cache"},
+		{path: "/assets/ui.woff2", contentType: "font/woff2", cache: "no-cache"},
 		{path: "/assets/plain.js", contentType: "text/javascript; charset=utf-8", cache: "no-cache"},
 		{path: "/manifest.webmanifest", contentType: "application/manifest+json", cache: "no-cache"},
 		{path: "/service-worker.js", contentType: "text/javascript; charset=utf-8", cache: "no-cache"},

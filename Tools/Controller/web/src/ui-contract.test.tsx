@@ -4,17 +4,25 @@ import { describe, expect, it, vi } from 'vitest'
 import { BootGate, Card, HoldActionButton, HotkeyHelp, RangeField, TextField } from './components'
 import type { Appearance } from './types'
 import { emptySnapshot } from './types'
+<<<<<<< HEAD
 import { artifactUpdateAvailable, UpdatesView } from './updates-view'
 import { translator } from './i18n'
 import { sessionAuthenticationGuidanceRequired } from './authentication-guidance'
 import { WorkbenchView } from './workbench'
+=======
+import { artifactUpdateAvailable, isActiveUpdateStatus, updateStateIsFresh, updateStatusFromEvent, UpdatesView } from './updates-view'
+>>>>>>> origin/agent/webui-defects
 import {
   ControlsView,
   DashboardView,
+  dashboardDeviceSummary,
+  dashboardRelayToggleCommand,
+  dashboardSocketIsFresh,
   LocalDeviceView,
   SettingsView,
   localDeviceControlsAvailable,
   localDeviceReconnectAvailable,
+  localDeviceSnapshotIsFresh,
   type SharedViewProps,
 } from './views'
 
@@ -34,15 +42,19 @@ function shared(): SharedViewProps {
     snapshot: emptySnapshot,
     samples: [],
     events: [],
+    macroEvents: [],
     locale: 'en',
     t: (key) => key,
     command: vi.fn(async () => ''),
+    relayToggle: vi.fn(async () => undefined),
+    relayPending: new Set(),
     refresh: vi.fn(async () => undefined),
     openDialog: vi.fn(),
     transport: { streamState: 'open', authenticationRequired: false, boardState: 'ready', tabBusSupported: true, tabPeers: 0 },
     relayedTerminal: [],
     broadcastTerminal: vi.fn(),
     boardSettingsReadState: 'idle',
+    openAppPreferences: vi.fn(),
   }
 }
 
@@ -94,6 +106,7 @@ describe('offline and settings UI contracts', () => {
     expect(markup).not.toContain('Status lighting')
   })
 
+<<<<<<< HEAD
   it('exposes the complete display presentation policy on a connected controller', () => {
     const connected = {
       ...emptySnapshot,
@@ -129,6 +142,13 @@ describe('offline and settings UI contracts', () => {
     expect(markup).toContain('New draft · host · 0 steps')
     expect(markup).toContain('Macro inspection &amp; recording')
     expect(markup).toContain('Play selected')
+=======
+  it('uses one real relay switch button so nested lamp clicks have one optimistic route', () => {
+    const markup = renderToStaticMarkup(<ControlsView {...shared()} snapshot={{ ...emptySnapshot, connected: true, have_status: true }} />)
+    expect(markup).toContain('relay-switch__toggle')
+    expect(markup).toContain('data-relay="1"')
+    expect(markup).toContain('<i aria-hidden="true"><b></b></i>')
+>>>>>>> origin/agent/webui-defects
   })
 
   it('renders only user PWM channels in the generic mixer and keeps system channels role-specific', () => {
@@ -149,12 +169,13 @@ describe('offline and settings UI contracts', () => {
     expect(markup).not.toContain('Controller command')
   })
 
-  it('never labels disconnected dashboard telemetry as live', () => {
+  it('hides board telemetry entirely while the controller is disconnected', () => {
     const markup = renderToStaticMarkup(<DashboardView {...shared()} />)
     expect(markup).not.toContain('Telemetry history')
     expect(markup).not.toMatch(/\bLive\b/)
   })
 
+<<<<<<< HEAD
   it('routes an unauthenticated dashboard directly to secure session settings', () => {
     const markup = renderToStaticMarkup(<DashboardView
       {...shared()}
@@ -190,10 +211,25 @@ describe('offline and settings UI contracts', () => {
 
   it('shows Bluetooth Audio state only when HELLO advertises capability bit 11', () => {
     const base = {
+=======
+  it('only treats an open, recent event stream as live and derives relay toggle commands directly', () => {
+    const now = Date.now()
+    const connected = { ...emptySnapshot, connected: true, status_updated: new Date(now - 300).toISOString() }
+    expect(dashboardSocketIsFresh(connected, 'open', now)).toBe(true)
+    expect(dashboardSocketIsFresh(connected, 'waiting', now)).toBe(false)
+    expect(dashboardSocketIsFresh({ ...connected, status_updated: new Date(now - 1200).toISOString() }, 'open', now)).toBe(false)
+    expect(dashboardRelayToggleCommand(3, false)).toBe('relay 3 on')
+    expect(dashboardRelayToggleCommand(3, true)).toBe('relay 3 off')
+  })
+
+  it('hides manual refresh only for a fresh open stream and labels the direct relay action', () => {
+    const liveSnapshot = {
+>>>>>>> origin/agent/webui-defects
       ...emptySnapshot,
       connected: true,
       have_status: true,
       connection_state: 'connected',
+<<<<<<< HEAD
       status: { ...emptySnapshot.status, bluetooth_audio_state: 2 },
     }
     const withoutCapability = renderToStaticMarkup(<DashboardView {...shared()} t={translator('en')} snapshot={base} />)
@@ -275,6 +311,71 @@ describe('offline and settings UI contracts', () => {
     expect(workbench).not.toContain('TM1637 + LCD')
     expect(workbench).not.toContain('Display target')
     expect(workbench).not.toContain('Temperature identities')
+=======
+      status_updated: new Date().toISOString(),
+    }
+    const live = renderToStaticMarkup(<DashboardView {...shared()} snapshot={liveSnapshot} />)
+    const stale = renderToStaticMarkup(<DashboardView {...shared()} snapshot={{ ...liveSnapshot, status_updated: new Date(Date.now() - 2500).toISOString() }} />)
+    expect(live).not.toContain('>refresh<')
+    expect(stale).toContain('>refresh<')
+    expect(live).toContain('aria-label="Turn relay 1 on"')
+    expect(live.toLowerCase()).not.toMatch(/\breleased\b|\bconfirmed\b/)
+    expect(live).toContain('All relay and motion outputs are off')
+    expect(live).toContain('Live physical seven-segment display')
+    expect(live).toContain('aria-label="Page"')
+    expect(live).toContain('aria-label="LCD line 1"')
+    expect(live).toContain('aria-label="LCD line 2"')
+    expect(live).toContain('aria-label="Buzzer frequency Hz"')
+    expect(live).toContain('Test beep')
+  })
+
+  it('uses exact one-second freshness gates for local-device and update controls', () => {
+    const now = Date.now()
+    const updatedAt = new Date(now - 250).toISOString()
+    expect(localDeviceSnapshotIsFresh({ events_online: true, updated_at: updatedAt }, 'open', now)).toBe(true)
+    expect(localDeviceSnapshotIsFresh({ events_online: true, updated_at: updatedAt }, 'waiting', now)).toBe(false)
+    expect(localDeviceSnapshotIsFresh({ events_online: false, updated_at: updatedAt }, 'open', now)).toBe(false)
+    expect(localDeviceSnapshotIsFresh({ events_online: true, updated_at: new Date(now - 1000).toISOString() }, 'open', now)).toBe(false)
+    expect(updateStateIsFresh('open', updatedAt, now)).toBe(true)
+    expect(updateStateIsFresh('closed', updatedAt, now)).toBe(false)
+    expect(updateStateIsFresh('open', new Date(now - 1000).toISOString(), now)).toBe(false)
+  })
+
+  it('reduces typed update events immediately without a status poll', () => {
+    const event = {
+      id: 41,
+      time: '2026-08-12T10:00:00.250Z',
+      kind: 'update.programming',
+      text: 'verified write in progress',
+      metadata: { operation_id: 'op-9', kind: 'firmware', progress_percent: '42', programming_method: 'urclock' },
+    }
+    expect(updateStatusFromEvent(null, event)).toMatchObject({
+      id: 'op-9', kind: 'firmware', state: 'programming', progress_percent: 42,
+      updated_at: event.time, detail: event.text, programming_method: 'urclock',
+    })
+    expect(updateStatusFromEvent(null, { ...event, kind: 'door' })).toBeNull()
+  })
+
+  it('shows progress only while an update operation is actively running', () => {
+    const status = { id: 'op-9', kind: 'firmware' as const, progress_percent: 100 }
+    expect(isActiveUpdateStatus(null)).toBe(false)
+    expect(isActiveUpdateStatus({ ...status, state: 'staged' })).toBe(false)
+    expect(isActiveUpdateStatus({ ...status, state: 'downloaded' })).toBe(false)
+    expect(isActiveUpdateStatus({ ...status, state: 'completed' })).toBe(false)
+    expect(isActiveUpdateStatus({ ...status, state: 'failed' })).toBe(false)
+    expect(isActiveUpdateStatus({ ...status, state: 'queued', progress_percent: 0 })).toBe(true)
+    expect(isActiveUpdateStatus({ ...status, state: 'programming', progress_percent: 42 })).toBe(true)
+  })
+
+  it('shows useful controller identity states instead of a placeholder', () => {
+    expect(dashboardDeviceSummary(emptySnapshot, 'en')).toEqual({ device: 'Awaiting controller', firmware: 'No controller connected' })
+    expect(dashboardDeviceSummary({
+      ...emptySnapshot,
+      connected: true,
+      port: { friendly_name: 'USB Serial COM4' },
+      hello: { firmware_major: 1, firmware_minor: 2, firmware_patch: 3, build_hash: 0x1234ABCD },
+    }, 'en')).toEqual({ device: 'USB Serial COM4', firmware: 'v1.2.3 · #1234ABCD' })
+>>>>>>> origin/agent/webui-defects
   })
 
   it('keeps the first-run synchronization phase truthful before a controller is known', () => {
@@ -297,6 +398,10 @@ describe('offline and settings UI contracts', () => {
     expect(artifactUpdateAvailable(true, 'firmware')).toBe(true)
     const markup = renderToStaticMarkup(<UpdatesView {...shared()} />)
     expect(markup).toContain('Stage a local artifact')
+    expect(markup).toContain('CHECKING SERVICE')
+    expect(markup).not.toContain('0%')
+    expect(markup).not.toContain('DISABLED')
+    expect(markup).not.toContain('>Refresh<')
     expect(markup).not.toContain('Review firmware programming')
     expect(markup).not.toContain('Review EEPROM restore')
     expect(markup).not.toContain('Review ISP programming')

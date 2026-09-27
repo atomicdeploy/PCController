@@ -24,6 +24,7 @@ import (
 	"pccontroller.local/controller/internal/discovery"
 	"pccontroller.local/controller/internal/hostos"
 	"pccontroller.local/controller/internal/link"
+	"pccontroller.local/controller/internal/messagefabric"
 	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/ports"
 	"pccontroller.local/controller/internal/programmer"
@@ -100,9 +101,14 @@ type (
 	ProgramStateOwner         = control.ProgramStateOwner
 	ProgramStateSnapshot      = control.ProgramStateSnapshot
 	ProgramStateLease         = control.ProgramStateLease
+<<<<<<< HEAD
 	PortProcessSnapshot       = control.PortProcessSnapshot
 	DiscoveryInstance         = discovery.Instance
 	DiscoveryOptions          = discovery.Options
+=======
+	MacroState                = control.MacroState
+	MacroRecordingState       = control.MacroRecordingState
+>>>>>>> origin/agent/webui-defects
 )
 
 // RF learning modes select indefinite multi-code or bounded timer operation.
@@ -115,6 +121,27 @@ const (
 	DisplayRepeatOnce     = control.DisplayRepeatOnce
 	DisplayRepeatLoop     = control.DisplayRepeatLoop
 	DisplayRepeatInterval = control.DisplayRepeatInterval
+)
+
+// Status-effect capability and kind constants are exposed for embedders that
+// select between MCU-rendered descriptors and the legacy direct-RGB path.
+const (
+	CapabilityStatusEffects     = native.CapabilityStatusEffects
+	StatusEffectBreathe         = native.StatusEffectBreathe
+	StatusEffectFlash           = native.StatusEffectFlash
+	StatusEffectCycle           = native.StatusEffectCycle
+	StatusEffectTransition      = native.StatusEffectTransition
+	StatusEffectMinimumPeriodMS = native.StatusEffectMinimumPeriodMS
+)
+
+// Temperature availability and physical range constants are shared by native
+// GUI embedders with the CLI/TUI and network surfaces.
+const (
+	StatusTemperatureLED     = native.StatusTemperatureLED
+	StatusTemperatureBT      = native.StatusTemperatureBT
+	InvalidTemperatureCentiC = native.InvalidTemperatureCentiC
+	MinimumTemperatureCentiC = native.MinimumTemperatureCentiC
+	MaximumTemperatureCentiC = native.MaximumTemperatureCentiC
 )
 
 // ParseRFLearnMode accepts the canonical RF learning mode and documented aliases.
@@ -230,7 +257,23 @@ type Macro struct {
 	LCDMessage          string      `json:"lcd_message,omitempty"`
 	TimingToleranceUS   uint32      `json:"timing_tolerance_us,omitempty"`
 	KeepOutputsOnCancel bool        `json:"keep_outputs_on_cancel,omitempty"`
+	RecordingSource     string      `json:"recording_source,omitempty"`
+	CaptureDroppedSteps uint16      `json:"capture_dropped_steps,omitempty"`
+	CaptureMissingSteps uint16      `json:"capture_missing_steps,omitempty"`
+	CaptureImportKey    string      `json:"capture_import_key,omitempty"`
+	CaptureBoard        string      `json:"capture_board,omitempty"`
+	CaptureID           byte        `json:"capture_id,omitempty"`
+	CaptureStartedAtUS  uint32      `json:"capture_started_at_us,omitempty"`
 	Steps               []MacroStep `json:"steps"`
+}
+
+// MacroSnapshot is the typed, point-in-time model shared by Web, IPC, RPC,
+// REST, native embedders, and bridge consumers.
+type MacroSnapshot struct {
+	Library       []Macro             `json:"library"`
+	Playback      MacroState          `json:"playback"`
+	Recording     MacroRecordingState `json:"recording"`
+	LatestEventID uint64              `json:"latest_event_id"`
 }
 
 // MacroStep describes one timestamped operation within a Macro.
@@ -351,6 +394,7 @@ type IlluminationState struct {
 
 // Snapshot is a point-in-time view of connection, board, and front-panel state.
 type Snapshot struct {
+<<<<<<< HEAD
 	Connected         bool                  `json:"connected"`
 	Paused            bool                  `json:"paused"`
 	Port              PortInfo              `json:"port"`
@@ -374,6 +418,30 @@ type Snapshot struct {
 	StatusLEDUpdated  time.Time             `json:"status_led_updated,omitempty"`
 	Illumination      IlluminationState     `json:"illumination"`
 	PortProcess       PortProcessSnapshot   `json:"port_process"`
+=======
+	Connected         bool                 `json:"connected"`
+	Paused            bool                 `json:"paused"`
+	Port              PortInfo             `json:"port"`
+	Hello             Hello                `json:"hello"`
+	Status            Status               `json:"status"`
+	Settings          Settings             `json:"settings"`
+	HaveStatus        bool                 `json:"have_status"`
+	HaveSettings      bool                 `json:"have_settings"`
+	StatusUpdated     time.Time            `json:"status_updated,omitempty"`
+	ConnectionState   string               `json:"connection_state"`
+	ConnectionReason  string               `json:"connection_reason,omitempty"`
+	ConnectionUpdated time.Time            `json:"connection_updated,omitempty"`
+	ProgramState      ProgramStateSnapshot `json:"program_state"`
+	RFLearning        RFLearnState         `json:"rf_learning"`
+	FrontPanel        FrontPanel           `json:"front_panel"`
+	HaveFrontPanel    bool                 `json:"have_front_panel"`
+	FrontPanelUpdated time.Time            `json:"front_panel_updated,omitempty"`
+	StatusLED         StatusLEDState       `json:"status_led"`
+	HaveStatusLED     bool                 `json:"have_status_led"`
+	StatusLEDUpdated  time.Time            `json:"status_led_updated,omitempty"`
+	Macro             MacroState           `json:"macro"`
+	MacroRecording    MacroRecordingState  `json:"macro_recording"`
+>>>>>>> origin/agent/webui-defects
 }
 
 // Event is the normalized event envelope shared by embedders and bridge clients.
@@ -395,8 +463,12 @@ type Event struct {
 	Gesture     string            `json:"gesture,omitempty"`
 	Source      string            `json:"source,omitempty"`
 	Target      string            `json:"target,omitempty"`
+	Targets     []string          `json:"targets,omitempty"`
 	MessageType string            `json:"message_type,omitempty"`
 	Action      string            `json:"action,omitempty"`
+	Severity    string            `json:"severity,omitempty"`
+	Correlation string            `json:"correlation,omitempty"`
+	Delivery    string            `json:"delivery,omitempty"`
 	Metadata    map[string]string `json:"metadata,omitempty"`
 	SourceID    *byte             `json:"source_id,omitempty"`
 	RFID        *byte             `json:"rf_id,omitempty"`
@@ -438,14 +510,18 @@ type OpcodeFrame struct {
 // bridge, and LCD presentation. Action is descriptive; it is never executed
 // implicitly. Remote command execution uses the authenticated execute method.
 type TextMessage struct {
-	Source   string            `json:"source"`
-	Target   string            `json:"target"`
-	Type     string            `json:"type"`
-	Text     string            `json:"text"`
-	Line1    string            `json:"line1,omitempty"`
-	Line2    string            `json:"line2,omitempty"`
-	Action   string            `json:"action,omitempty"`
-	Metadata map[string]string `json:"metadata,omitempty"`
+	Source      string            `json:"source"`
+	Target      string            `json:"target"`
+	Targets     []string          `json:"targets,omitempty"`
+	Type        string            `json:"type"`
+	Text        string            `json:"text"`
+	Line1       string            `json:"line1,omitempty"`
+	Line2       string            `json:"line2,omitempty"`
+	Action      string            `json:"action,omitempty"`
+	Severity    string            `json:"severity,omitempty"`
+	Correlation string            `json:"correlation,omitempty"`
+	Delivery    string            `json:"delivery,omitempty"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
 }
 
 // Client owns one controller runtime, command engine, and host integration state.
@@ -817,7 +893,13 @@ func toAppMacros(macros []Macro) []appconfig.Macro {
 			Mode: macro.Mode, Color: macro.Color, Label: macro.Label, LCDMessage: macro.LCDMessage,
 			TimingToleranceUS:   macro.TimingToleranceUS,
 			KeepOutputsOnCancel: macro.KeepOutputsOnCancel,
-			Steps:               make([]appconfig.MacroStep, len(macro.Steps)),
+			RecordingSource:     macro.RecordingSource,
+			CaptureDroppedSteps: macro.CaptureDroppedSteps,
+			CaptureMissingSteps: macro.CaptureMissingSteps,
+			CaptureImportKey:    macro.CaptureImportKey,
+			CaptureBoard:        macro.CaptureBoard, CaptureID: macro.CaptureID,
+			CaptureStartedAtUS: macro.CaptureStartedAtUS,
+			Steps:              make([]appconfig.MacroStep, len(macro.Steps)),
 		}
 		for stepIndex, step := range macro.Steps {
 			result[index].Steps[stepIndex] = appconfig.MacroStep{
@@ -1020,6 +1102,7 @@ func (client *Client) Execute(ctx context.Context, command string) (string, erro
 	return client.engine.Execute(ctx, command)
 }
 
+<<<<<<< HEAD
 // BuildFirmware compiles the configured canonical project without accepting
 // an arbitrary remote filesystem path or raw compiler flags.
 func (client *Client) BuildFirmware(
@@ -1076,6 +1159,154 @@ func (client *Client) BuildFirmware(
 	)
 	result.Output = control.NormalizeProgramOutput(output, options.ProjectPath, options.ArduinoCLI, options.ArduinoConfig)
 	return result, buildErr
+=======
+func fromAppMacros(macros []appconfig.Macro) []Macro {
+	result := make([]Macro, len(macros))
+	for index, macro := range macros {
+		result[index] = fromAppMacro(macro)
+	}
+	return result
+}
+
+func fromAppMacro(macro appconfig.Macro) Macro {
+	result := Macro{
+		ID: macro.ID, Name: macro.Name, Category: macro.Category,
+		Color: macro.Color, Label: macro.Label, LCDMessage: macro.LCDMessage,
+		TimingToleranceUS:   macro.TimingToleranceUS,
+		KeepOutputsOnCancel: macro.KeepOutputsOnCancel,
+		RecordingSource:     macro.RecordingSource,
+		CaptureDroppedSteps: macro.CaptureDroppedSteps,
+		CaptureMissingSteps: macro.CaptureMissingSteps,
+		CaptureImportKey:    macro.CaptureImportKey,
+		CaptureBoard:        macro.CaptureBoard, CaptureID: macro.CaptureID,
+		CaptureStartedAtUS: macro.CaptureStartedAtUS,
+		Steps:              make([]MacroStep, len(macro.Steps)),
+	}
+	for index, step := range macro.Steps {
+		result.Steps[index] = MacroStep{
+			AtUS: step.AtUS, Kind: step.Kind,
+			Target: step.Target, Value: step.Value,
+			DurationMS: step.DurationMS, FrequencyHz: step.FrequencyHz,
+			Text: step.Text, Destination: step.Destination,
+			Code: step.Code, Bits: step.Bits, Protocol: step.Protocol,
+			PulseUS: step.PulseUS, Red: step.Red, Green: step.Green,
+			Blue: step.Blue, Brightness: step.Brightness,
+			Opcode: step.Opcode, PayloadHex: step.PayloadHex,
+		}
+	}
+	return result
+}
+
+// MacroLibrary returns the defensive, ID-ordered catalog used by every host
+// surface. Definitions remain host-persisted; playback still uses MacroRunner.
+func (client *Client) MacroLibrary() []Macro {
+	runner := client.runtime.MacroRunner()
+	if runner == nil {
+		return nil
+	}
+	return fromAppMacros(runner.List())
+}
+
+// MacroStatus returns one coherent live monitor snapshot without polling the
+// board or parsing CLI text.
+func (client *Client) MacroStatus() (MacroState, MacroRecordingState) {
+	runner := client.runtime.MacroRunner()
+	if runner == nil {
+		return MacroState{}, MacroRecordingState{}
+	}
+	return runner.State(), runner.RecordingState()
+}
+
+func (client *Client) MacroSnapshot() MacroSnapshot {
+	playback, recording := client.MacroStatus()
+	return MacroSnapshot{
+		Library: client.MacroLibrary(), Playback: playback,
+		Recording: recording, LatestEventID: client.LatestEventID(),
+	}
+}
+
+func (client *Client) MacroCreate(id byte, name, category, color string) (Macro, error) {
+	runner := client.runtime.MacroRunner()
+	if runner == nil {
+		return Macro{}, errors.New("macro service is unavailable")
+	}
+	macro, err := runner.CreateDraft(id, name, category, color)
+	return fromAppMacro(macro), err
+}
+
+func (client *Client) MacroUpdate(reference, name string, category, color *string) (Macro, error) {
+	runner := client.runtime.MacroRunner()
+	if runner == nil {
+		return Macro{}, errors.New("macro service is unavailable")
+	}
+	macro, err := runner.UpdateMetadata(reference, name, category, color)
+	return fromAppMacro(macro), err
+}
+
+func (client *Client) MacroDelete(reference string) error {
+	runner := client.runtime.MacroRunner()
+	if runner == nil {
+		return errors.New("macro service is unavailable")
+	}
+	return runner.Delete(reference)
+}
+
+func (client *Client) MacroRecordStart(name, category, color string) (MacroRecordingState, error) {
+	runner := client.runtime.MacroRunner()
+	if runner == nil {
+		return MacroRecordingState{}, errors.New("macro service is unavailable")
+	}
+	return runner.StartRecording(name, category, color)
+}
+
+func (client *Client) MacroRecordStop(save bool) (Macro, error) {
+	runner := client.runtime.MacroRunner()
+	if runner == nil {
+		return Macro{}, errors.New("macro service is unavailable")
+	}
+	macro, err := runner.StopRecording(save)
+	return fromAppMacro(macro), err
+}
+
+func (client *Client) MacroBoardRecordStart(ctx context.Context, id byte) (MacroRecordingState, error) {
+	runner := client.runtime.MacroRunner()
+	if runner == nil {
+		return MacroRecordingState{}, errors.New("macro service is unavailable")
+	}
+	return runner.StartBoardCapture(ctx, id)
+}
+
+func (client *Client) MacroBoardRecordStop(ctx context.Context) (MacroRecordingState, error) {
+	runner := client.runtime.MacroRunner()
+	if runner == nil {
+		return MacroRecordingState{}, errors.New("macro service is unavailable")
+	}
+	return runner.StopBoardCapture(ctx)
+}
+
+func (client *Client) MacroBoardRecordClear(ctx context.Context, force bool) (native.MacroStatus, error) {
+	runner := client.runtime.MacroRunner()
+	if runner == nil {
+		return native.MacroStatus{}, errors.New("macro service is unavailable")
+	}
+	return runner.ClearBoardCapture(ctx, force)
+}
+
+func (client *Client) MacroPlay(ctx context.Context, reference string) (MacroState, error) {
+	runner := client.runtime.MacroRunner()
+	if runner == nil {
+		return MacroState{}, errors.New("macro service is unavailable")
+	}
+	return runner.Start(ctx, reference)
+}
+
+func (client *Client) MacroCancel(ctx context.Context, keepOutputs bool) error {
+	runner := client.runtime.MacroRunner()
+	if runner == nil {
+		return errors.New("macro service is unavailable")
+	}
+	return runner.CancelWithPolicy(ctx, keepOutputs)
+>>>>>>> origin/agent/webui-defects
 }
 
 // CommandCatalog exposes the same discoverable command contract used by the
@@ -1732,6 +1963,25 @@ func (client *Client) SetStatusRGBBase(
 	return client.outputs.SetStatusBase(control.WithBackgroundCommand(ctx), red, green, blue, brightness)
 }
 
+// SetStatusLEDEffectBase updates the host policy base with one native MCU
+// descriptor without canceling an explicit user/macro overlay.
+func (client *Client) SetStatusLEDEffectBase(
+	ctx context.Context,
+	effect StatusEffectOptions,
+) error {
+	return client.outputs.SetStatusEffectBase(ctx, effect)
+}
+
+// SetStatusLEDEffect replaces an active overlay with a safety-priority native
+// descriptor and makes it the newest host policy base.
+func (client *Client) SetStatusLEDEffect(
+	ctx context.Context,
+	effect StatusEffectOptions,
+) error {
+	client.outputs.OverrideStatusEffect()
+	return client.outputs.SetStatusEffectBase(ctx, effect)
+}
+
 // OutputState returns active melody and status-effect operation metadata.
 func (client *Client) OutputState() OutputStreamState {
 	return client.outputs.State()
@@ -1742,11 +1992,15 @@ func (client *Client) PlayTone(
 	ctx context.Context,
 	frequencyHz, durationMS uint16,
 ) error {
-	if durationMS == 0 {
-		return errors.New("tone duration must be nonzero")
+	stopping := frequencyHz == 0 && durationMS == 0
+	if !stopping && durationMS == 0 {
+		return errors.New("tone duration must be nonzero unless frequency/duration are 0/0 to stop")
 	}
-	if frequencyHz != 0 && (frequencyHz < 20 || frequencyHz > 20000) {
-		return fmt.Errorf("tone frequency must be 0 or 20..20000 Hz")
+	if frequencyHz == 0 && durationMS != 0 {
+		return errors.New("tone stop is exactly frequency/duration 0/0")
+	}
+	if !stopping && (frequencyHz < 20 || frequencyHz > 20000) {
+		return fmt.Errorf("tone frequency must be 20..20000 Hz, or 0 with duration 0 to stop")
 	}
 	client.outputs.StopMelody()
 	return client.runtime.Command(
@@ -1923,6 +2177,7 @@ func (client *Client) MapLearnedRF(
 // Snapshot returns the latest cached connection and board state without polling.
 func (client *Client) Snapshot() Snapshot {
 	snapshot := client.runtime.Snapshot()
+<<<<<<< HEAD
 	// Library snapshots belong to client queries, not the hot board-status
 	// path: copying a long take for every internal status check is unnecessary.
 	if runner := client.runtime.MacroRunner(); runner != nil {
@@ -1935,6 +2190,9 @@ func (client *Client) Snapshot() Snapshot {
 		illumination = IlluminationState{}
 	}
 	return Snapshot{
+=======
+	result := Snapshot{
+>>>>>>> origin/agent/webui-defects
 		Connected: snapshot.Connected,
 		Paused:    snapshot.Paused,
 		Port: PortInfo{
@@ -1968,6 +2226,8 @@ func (client *Client) Snapshot() Snapshot {
 		Illumination:      illumination,
 		PortProcess:       snapshot.PortProcess,
 	}
+	result.Macro, result.MacroRecording = client.MacroStatus()
+	return result
 }
 
 // Discover scans the local network using DNS-SD/mDNS, SSDP/UPnP,
@@ -2097,11 +2357,32 @@ func (client *Client) SendTextMessage(
 	message.Type = strings.ToLower(strings.TrimSpace(message.Type))
 	message.Text = strings.TrimSpace(message.Text)
 	message.Action = strings.TrimSpace(message.Action)
+	message.Severity = strings.ToLower(strings.TrimSpace(message.Severity))
+	message.Correlation = strings.TrimSpace(message.Correlation)
+	message.Delivery = strings.ToLower(strings.TrimSpace(message.Delivery))
 	if !oneOf(message.Source, "client", "server", "bridge", "board", "lcd", "host", "ipc", "rest", "webhook", "websocket", "socket_io") {
 		return Event{}, fmt.Errorf("unsupported message source %q", message.Source)
 	}
-	if !oneOf(message.Target, "client", "server", "bridge", "board", "lcd", "host", "all") {
-		return Event{}, fmt.Errorf("unsupported message target %q", message.Target)
+	targets, err := normalizeMessageTargets(message.Target, message.Targets)
+	if err != nil {
+		return Event{}, err
+	}
+	message.Targets = targets
+	message.Target = strings.Join(targets, ",")
+	if message.Severity == "" {
+		message.Severity = "info"
+	}
+	if !oneOf(message.Severity, "debug", "info", "success", "warning", "error") {
+		return Event{}, fmt.Errorf("unsupported message severity %q", message.Severity)
+	}
+	if message.Delivery == "" {
+		message.Delivery = "sync"
+	}
+	if !oneOf(message.Delivery, "sync", "async") {
+		return Event{}, fmt.Errorf("unsupported message delivery %q", message.Delivery)
+	}
+	if len(message.Correlation) > 96 {
+		return Event{}, errors.New("message correlation exceeds 96 characters")
 	}
 	if message.Type == "" || len(message.Type) > 32 {
 		return Event{}, errors.New("message type must contain 1..32 characters")
@@ -2127,7 +2408,7 @@ func (client *Client) SendTextMessage(
 			return Event{}, errors.New("message metadata keys/values exceed limits")
 		}
 	}
-	if message.Target == "lcd" || message.Target == "board" {
+	if containsMessageTarget(targets, "lcd") || containsMessageTarget(targets, "board") || containsMessageTarget(targets, "all") {
 		line1, line2 := message.Line1, message.Line2
 		if line1 == "" && line2 == "" {
 			line1, line2 = splitLCDText(message.Text)
@@ -2144,13 +2425,160 @@ func (client *Client) SendTextMessage(
 			return Event{}, err
 		}
 	}
+	surfaces := messageDeliverySurfaces(targets)
+	lifecycle := "completed"
+	state := "delivered"
+	if message.Delivery == "async" {
+		lifecycle, state = "accepted", "accepted"
+	} else if len(surfaces) != 0 {
+		lifecycle, state = "pending", "awaiting_delivery"
+	}
 	event := client.runtime.PublishStructuredEvent(control.Event{
 		Kind: "message", Text: message.Text,
 		Source: message.Source, Target: message.Target,
-		MessageType: message.Type, Action: message.Action,
+		Targets: targets, MessageType: message.Type, Action: message.Action,
+		Severity: message.Severity, Correlation: message.Correlation, Delivery: message.Delivery,
+		Lifecycle: lifecycle, State: state,
 		Metadata: message.Metadata,
 	})
+	if message.Delivery == "sync" && len(surfaces) != 0 {
+		return client.waitMessageDelivery(ctx, event, surfaces), nil
+	}
 	return publicEvent(event), nil
+}
+
+const messageSyncDeliveryTimeout = 2 * time.Second
+
+func messageDeliverySurfaces(targets []string) []string {
+	result := make([]string, 0, 3)
+	for _, surface := range []string{"native", "web", "tui"} {
+		if messagefabric.TargetsSurface("", targets, surface) {
+			result = append(result, surface)
+		}
+	}
+	return result
+}
+
+func (client *Client) waitMessageDelivery(
+	ctx context.Context,
+	message control.Event,
+	surfaces []string,
+) Event {
+	waitContext, cancel := context.WithTimeout(ctx, messageSyncDeliveryTimeout)
+	defer cancel()
+	pending := make(map[string]bool, len(surfaces))
+	failed := make(map[string]string)
+	for _, surface := range surfaces {
+		pending[surface] = true
+	}
+	afterID := message.ID
+	for len(pending) != 0 {
+		outcome, err := client.runtime.WaitEvent(waitContext, afterID, "message.delivery")
+		if err != nil {
+			break
+		}
+		afterID = outcome.ID
+		if outcome.Metadata["message_event_id"] != fmt.Sprintf("%d", message.ID) {
+			continue
+		}
+		surface := strings.ToLower(strings.TrimSpace(outcome.Metadata["surface"]))
+		if !pending[surface] {
+			continue
+		}
+		delete(pending, surface)
+		if strings.EqualFold(outcome.Lifecycle, "failed") {
+			failed[surface] = firstNonemptyString(outcome.Metadata["error"], "presentation failed")
+		}
+	}
+	missing := sortedMessageDeliveryKeys(pending)
+	failedNames := sortedMessageDeliveryKeys(failed)
+	lifecycle, state, severity := "completed", "delivered", message.Severity
+	text := "message delivered to " + strings.Join(surfaces, ", ")
+	if len(missing) != 0 || len(failedNames) != 0 {
+		lifecycle, state, severity = "failed", "failed", "error"
+		parts := make([]string, 0, 2)
+		if len(failedNames) != 0 {
+			parts = append(parts, "failed="+strings.Join(failedNames, ","))
+		}
+		if len(missing) != 0 {
+			parts = append(parts, "unconfirmed="+strings.Join(missing, ","))
+		}
+		text = "message delivery failed: " + strings.Join(parts, " ")
+	}
+	metadata := map[string]string{
+		"message_event_id": fmt.Sprintf("%d", message.ID),
+		"surfaces":         strings.Join(surfaces, ","),
+	}
+	if len(missing) != 0 {
+		metadata["unconfirmed_surfaces"] = strings.Join(missing, ",")
+	}
+	if len(failedNames) != 0 {
+		metadata["failed_surfaces"] = strings.Join(failedNames, ",")
+	}
+	outcome := client.runtime.PublishStructuredEvent(control.Event{
+		Kind: "message.delivery", Text: text, State: state,
+		Lifecycle: lifecycle, Source: "host", Target: message.Target,
+		Targets: append([]string(nil), message.Targets...), MessageType: message.MessageType,
+		Action: message.Action, Severity: severity, Correlation: message.Correlation,
+		Delivery: message.Delivery, Metadata: metadata,
+	})
+	return publicEvent(outcome)
+}
+
+func sortedMessageDeliveryKeys[T any](values map[string]T) []string {
+	result := make([]string, 0, len(values))
+	for key := range values {
+		result = append(result, key)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func firstNonemptyString(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func normalizeMessageTargets(target string, targets []string) ([]string, error) {
+	values := append([]string(nil), targets...)
+	if target = strings.TrimSpace(target); target != "" {
+		values = append(values, strings.Split(target, ",")...)
+	}
+	if len(values) == 0 {
+		return nil, errors.New("message target or targets is required")
+	}
+	result := make([]string, 0, len(values))
+	seen := make(map[string]bool, len(values))
+	for _, raw := range values {
+		value := strings.ToLower(strings.TrimSpace(raw))
+		if !oneOf(value, "client", "server", "bridge", "board", "lcd", "host", "all", "native", "web", "tui") {
+			return nil, fmt.Errorf("unsupported message target %q", raw)
+		}
+		if !seen[value] {
+			seen[value] = true
+			result = append(result, value)
+		}
+	}
+	return result, nil
+}
+
+func containsMessageTarget(targets []string, target string) bool {
+	for _, candidate := range targets {
+		if candidate == target {
+			return true
+		}
+	}
+	return false
+}
+
+// EventTargetsSurface applies the canonical message target convention used by
+// native, Web, TUI, and bridge presentation adapters.
+func EventTargetsSurface(event Event, surface string) bool {
+	return messagefabric.TargetsSurface(event.Target, event.Targets, surface)
 }
 
 func oneOf(value string, allowed ...string) bool {
@@ -2217,6 +2645,7 @@ func (client *Client) EmitHostActionEvent(
 	return publicEvent(event)
 }
 
+<<<<<<< HEAD
 // IngestBridgeEvent republishes one authenticated peer event through the
 // local runtime without flattening its kind or metadata into a text message.
 // The ingress marker prevents bridge cycles while allowing local integrations
@@ -2242,6 +2671,118 @@ func (client *Client) IngestBridgeEvent(peer string, event Event) Event {
 		RFPulseUS: event.RFPulseUS, ResetCause: event.ResetCause, ResetCount: event.ResetCount,
 	})
 	return publicEvent(forwarded)
+=======
+// EmitMessageDeliveryOutcome publishes a correlated adapter result without
+// pretending that presentation is a new operator message. Consumers can
+// observe native delivery success/failure through the same retained event
+// cursor used for commands and state.
+func (client *Client) EmitMessageDeliveryOutcome(
+	message Event,
+	surface string,
+	deliveryErr error,
+) Event {
+	surface = strings.ToLower(strings.TrimSpace(surface))
+	lifecycle, state := "completed", "delivered"
+	severity := message.Severity
+	text := surface + " presentation completed"
+	metadata := map[string]string{
+		"surface":          surface,
+		"message_event_id": fmt.Sprintf("%d", message.ID),
+	}
+	if deliveryErr != nil {
+		lifecycle, state, severity = "failed", "failed", "error"
+		text = surface + " presentation failed: " + deliveryErr.Error()
+		metadata["error"] = deliveryErr.Error()
+	}
+	event := client.runtime.PublishStructuredEvent(control.Event{
+		Kind: "message.delivery", Text: text, State: state,
+		Lifecycle: lifecycle, Source: surface, Target: surface,
+		Targets: []string{surface}, MessageType: message.MessageType,
+		Action: message.Action, Severity: severity,
+		Correlation: message.Correlation, Delivery: message.Delivery,
+		Metadata: metadata,
+	})
+	return publicEvent(event)
+}
+
+// MessageForSurface resolves one still-retained message and verifies that the
+// named presentation surface was an intended recipient. Action and delivery
+// RPCs use this lookup so a client cannot substitute arbitrary action text.
+func (client *Client) MessageForSurface(eventID uint64, surface string) (Event, error) {
+	surface = strings.ToLower(strings.TrimSpace(surface))
+	if !oneOf(surface, "native", "web", "tui") {
+		return Event{}, fmt.Errorf("unsupported message surface %q", surface)
+	}
+	event, ok := client.runtime.EventByID(eventID)
+	if !ok || !strings.EqualFold(event.Kind, "message") {
+		return Event{}, fmt.Errorf("message event %d is no longer retained", eventID)
+	}
+	result := publicEvent(event)
+	if !EventTargetsSurface(result, surface) {
+		return Event{}, fmt.Errorf("message event %d does not target %s", eventID, surface)
+	}
+	return result, nil
+}
+
+// AcknowledgeMessageDelivery publishes the presentation result supplied by a
+// Web or other out-of-process adapter after validating the retained envelope.
+func (client *Client) AcknowledgeMessageDelivery(
+	eventID uint64,
+	surface string,
+	errorText string,
+) (Event, error) {
+	message, err := client.MessageForSurface(eventID, surface)
+	if err != nil {
+		return Event{}, err
+	}
+	errorText = strings.TrimSpace(errorText)
+	if len(errorText) > 512 {
+		return Event{}, errors.New("message delivery error exceeds 512 characters")
+	}
+	if errorText != "" {
+		err = errors.New(errorText)
+	}
+	return client.EmitMessageDeliveryOutcome(message, surface, err), nil
+}
+
+// EmitMessageActionOutcome records only an explicitly selected message
+// action. Presentation never calls this implicitly; every surface must require
+// an operator gesture before routing the retained action through its engine.
+func (client *Client) EmitMessageActionOutcome(
+	message Event,
+	surface string,
+	output string,
+	actionErr error,
+) Event {
+	surface = strings.ToLower(strings.TrimSpace(surface))
+	lifecycle, state := "completed", "applied"
+	severity := message.Severity
+	text := surface + " message action completed"
+	metadata := map[string]string{
+		"surface":          surface,
+		"message_event_id": fmt.Sprintf("%d", message.ID),
+	}
+	if output = strings.TrimSpace(output); output != "" {
+		if len(output) > 1024 {
+			output = output[:1024]
+		}
+		metadata["output"] = output
+	}
+	if actionErr != nil {
+		lifecycle, state, severity = "failed", "failed", "error"
+		text = surface + " message action failed: " + actionErr.Error()
+		metadata["error"] = actionErr.Error()
+	}
+	event := client.runtime.PublishStructuredEvent(control.Event{
+		Kind: "message.action", Text: text, State: state,
+		Lifecycle: lifecycle, Source: surface, Target: surface,
+		Targets: []string{surface}, MessageType: message.MessageType,
+		Action: message.Action, Severity: severity,
+		Correlation: message.Correlation, Delivery: message.Delivery,
+		Metadata: metadata,
+	})
+	return publicEvent(event)
+>>>>>>> origin/agent/webui-defects
 }
 
 // SyncToolchain updates installed cores/libraries and ensures every
@@ -2488,7 +3029,8 @@ func publicEvent(event control.Event) Event {
 		},
 		Reason: event.Reason, State: event.State,
 		Gesture: event.Gesture, Source: event.Source,
-		Target: event.Target, MessageType: event.MessageType, Action: event.Action,
+		Target: event.Target, Targets: append([]string(nil), event.Targets...), MessageType: event.MessageType, Action: event.Action,
+		Severity: event.Severity, Correlation: event.Correlation, Delivery: event.Delivery,
 		Metadata: cloneStringMap(event.Metadata),
 		RFCode:   event.RFCode, RFBits: event.RFBits,
 		RFProtocol: event.RFProtocol, RFPulseUS: event.RFPulseUS,

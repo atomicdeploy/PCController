@@ -2,11 +2,23 @@
 
 #include <Arduino.h>
 
+<<<<<<< HEAD
 #include "ProtocolCodec.h"
+=======
+>>>>>>> origin/agent/webui-defects
 #include "ProtocolContract.h"
 
 namespace ControllerProtocol {
 
+<<<<<<< HEAD
+=======
+// Native frame marker and bounded payload capacity for the AVR transport.
+constexpr uint8_t Magic = 0xA5;
+// Sent as an advisory envelope revision. Receivers validate the canonical
+// magic/length/CRC shape and opcode payload semantics instead of rejecting an
+// otherwise understandable peer solely because this byte differs.
+constexpr uint8_t EnvelopeRevision = 1;
+>>>>>>> origin/agent/webui-defects
 // Frame is a validated zero-copy view of one decoded native packet.
 struct Frame {
   uint8_t opcode;
@@ -27,6 +39,10 @@ using FrameHandler = void (*)(const Frame &frame, void *context);
 // UartProtocol incrementally decodes COBS frames and owns bounded RX/TX scratch.
 class UartProtocol {
 public:
+  // One service turn consumes no more than one maximum encoded packet's worth
+  // of bytes, even when a hostile stream never supplies a delimiter.
+  static constexpr uint8_t MaximumServiceBytes = MaximumPayload + 8;
+
   explicit UartProtocol(HardwareSerial &serial);
 
   void begin(uint32_t baud, FrameHandler handler, void *context = nullptr);
@@ -34,7 +50,13 @@ public:
 
   bool send(uint8_t opcode, uint8_t sequence, const uint8_t *payload = nullptr,
             uint8_t payloadLength = 0);
+  // Preserves the action's sampling edge when reporting board-origin macro
+  // capture.  Ordinary events keep their existing micros() timestamp.
+  bool sendEventAt(const uint8_t *payload, uint8_t payloadLength,
+                   uint32_t capturedAtUs);
   bool sendAck(uint8_t sequence, uint8_t requestOpcode);
+  bool sendAckAt(uint8_t sequence, uint8_t requestOpcode,
+                 uint32_t capturedAtUs);
   bool sendError(uint8_t sequence, uint8_t requestOpcode, Error error);
 
   uint16_t framingErrors() const;
@@ -49,10 +71,16 @@ public:
   static uint8_t crc8(const uint8_t *data, uint8_t length);
 
 private:
+<<<<<<< HEAD
   static constexpr uint8_t RawOverhead = WireContract::RawFrameOverhead;
   static constexpr uint8_t MaximumRaw = WireContract::MaximumRawFrame;
   static constexpr uint8_t MaximumEncoded =
       WireContract::MaximumEncodedFrame;
+=======
+  static constexpr uint8_t RawOverhead = 6;
+  static constexpr uint8_t MaximumRaw = MaximumPayload + RawOverhead;
+  static constexpr uint8_t MaximumEncoded = MaximumServiceBytes;
+>>>>>>> origin/agent/webui-defects
 
   bool writeCobs(const uint8_t *input, uint8_t length);
   void processEncodedFrame();
@@ -67,6 +95,10 @@ private:
   uint8_t receive_[MaximumEncoded];
   uint8_t receiveLength_ = 0;
   bool dropping_ = false;
+  // A board-origin action samples its timestamp before any later work.  The
+  // one-shot override lets the established send() path retain that edge.
+  bool timingOverrideActive_ = false;
+  uint32_t timingOverrideUs_ = 0;
   uint16_t framingErrors_ = 0;
   uint16_t crcErrors_ = 0;
   uint16_t responseErrors_ = 0;

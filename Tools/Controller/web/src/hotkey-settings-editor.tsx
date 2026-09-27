@@ -195,7 +195,7 @@ export function HotkeyEditor({ locale }: { locale: Locale }) {
             ? { tone: 'bad' as const, label: localized(locale, 'Registration failed', 'ثبت ناموفق') }
             : reconciliation?.state === 'idle'
               ? { tone: 'neutral' as const, label: localized(locale, 'No active bindings', 'بدون میانبر فعال') }
-              : { tone: 'warn' as const, label: localized(locale, 'Not confirmed', 'تأیید نشده') }
+              : { tone: 'warn' as const, label: localized(locale, 'Not applied', 'اعمال نشده') }
 
   const reconcile = async (initial: HotkeySettingsResponse) => {
     pollRef.current?.abort()

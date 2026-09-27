@@ -88,14 +88,20 @@ const capabilityGroups = {
   ],
   reset: ["controller.reset.lines", "controller.reset", "controller.port.reset"],
   shutdown: ["controller.quit", "controller.exit"],
-  messages: ["controller.message.send"],
+  messages: ["controller.message.send", "controller.message.delivery", "controller.message.action"],
   host_configuration: [
     "controller.host_menu.configure", "controller.host_menu.config.set", "controller.ui.config.set",
     "controller.peripherals.set", "controller.hotkeys.set", "controller.os.configure",
     "controller.lcd.presentation.configure", "controller.app.page", "controller.app.navigate",
+<<<<<<< HEAD
     "controller.app.launch", "controller.app.navigation.commit",
     "controller.app.instance.report", "controller.app.instance.remove", "controller.app.action.ack",
 		"controller.network.peers.set",
+=======
+    "controller.app.instance.report", "controller.app.instance.remove",
+    "controller.macro.create", "controller.macro.update", "controller.macro.delete",
+    "controller.macro.record.start", "controller.macro.record.stop",
+>>>>>>> origin/agent/webui-defects
   ],
   virtual_keys: ["controller.os.key", "controller.virtual_key"],
   power_actions: ["controller.os.power"],
@@ -116,7 +122,7 @@ const capabilityGroups = {
     "controller.hotkeys.get", "controller.bridge.list", "controller.webhooks.status",
     "controller.webhooks.pending", "controller.webhooks.dead", "controller.ping", "controller.snapshot",
     "controller.session.snapshot", "controller.session.snapshot.last", "controller.status",
-    "controller.front_panel", "controller.front-panel", "controller.command.catalog",
+    "controller.front_panel", "controller.front-panel", "controller.command.catalog", "controller.melodies.list",
     "controller.program_state.get", "controller.program-state.get", "controller.temperatures",
     "controller.menu.list", "controller.menu.current", "controller.menu.layout.get",
     "controller.host_menu.state", "controller.rf.list", "controller.rf.presentation",
@@ -126,7 +132,11 @@ const capabilityGroups = {
     "controller.discovery.scan", "controller.discovery.config", "controller.discovery.config.get",
 		"controller.integrations.status", "controller.pwm.values", "controller.illumination.get", "controller.port.owner", "controller.port.process",
     "controller.app.instances", "controller.app.instance.get", "controller.app.bridge",
+<<<<<<< HEAD
 		"controller.network.peers.get", "controller.app.action.outcome",
+=======
+    "controller.macro.snapshot", "controller.macro.list", "controller.macro.status",
+>>>>>>> origin/agent/webui-defects
   ],
   board_commands: [
     "controller.program_state.set", "controller.program-state.set", "controller.menu.layout.set",
@@ -136,6 +146,8 @@ const capabilityGroups = {
 		"controller.rf.transmit", "controller.lcd.prompt", "controller.lcd.priority",
 		"controller.display.send", "controller.opcode.send", "controller.opcode.exchange",
 		"controller.opcode.request",
+    "controller.macro.board_record.start", "controller.macro.board_record.stop",
+    "controller.macro.board_record.clear", "controller.macro.play", "controller.macro.cancel",
   ],
   dynamic: ["controller.command.execute", "controller.app.action"],
 };
@@ -146,6 +158,7 @@ const methodOverrides = {
   "controller.command.execute": "Run a shared command after semantic capability classification.",
 	"controller.firmware.build": "Compile the canonical host project with reviewed feature names and publish correlated ordered program progress events.",
   "controller.command.catalog": "Return the machine-readable shared command catalog.",
+  "controller.melodies.list": "Return the effective configured host melody catalog.",
   "controller.event.next": "Long-poll the next retained event after an event ID, optionally selecting activity, state, telemetry, or debug.",
   "controller.rf.map": "Replace one learned RF mapping and return board readback.",
   "controller.rf.transmit": "Transmit one validated RF waveform request.",
@@ -175,6 +188,7 @@ const methodOverrides = {
   "controller.app.instance.get": "Read one live application instance by ID.",
   "controller.app.instance.report": "Create or refresh one leased application-instance report.",
   "controller.app.instance.remove": "Remove one application instance from the live registry.",
+<<<<<<< HEAD
   "controller.discovery.connect": "Verify an authenticated discovered host and return its health and snapshot.",
   "controller.discovery.config": "Return persistent network advertisement configuration.",
   "controller.discovery.config.get": "Return persistent network advertisement configuration.",
@@ -184,6 +198,24 @@ const methodOverrides = {
 	"controller.network.peers.set": "Replace and hot-apply peer topology; events, state, and status topics are accepted, and only optional secret references may carry compatibility credentials.",
 	"controller.illumination.get": "Read persisted enclosure-light policy, live door-selected target, and exact applied channel-11 PWM.",
 	"controller.illumination.set": "Change only mode/on/off illumination fields, verify EEPROM durability, and return authoritative live state.",
+=======
+  "controller.macro.snapshot": "Return the macro library, active recording, board capture, and playback state.",
+  "controller.macro.list": "List named and categorized macros through the shared library.",
+  "controller.macro.status": "Return current macro recording, board-capture, and playback progress.",
+  "controller.macro.create": "Create a validated named macro with ordinary opcode steps.",
+  "controller.macro.update": "Rename, recategorize, recolor, or replace a validated macro.",
+  "controller.macro.delete": "Delete one macro from the shared persistent library.",
+  "controller.macro.record.start": "Start host-connected recording from timestamped board and host action evidence.",
+  "controller.macro.record.stop": "Save or discard the active host-connected recording.",
+  "controller.macro.board_record.start": "Start the board-owned capture ring and host-connected continuation stream.",
+  "controller.macro.board_record.stop": "Stop board-owned capture and import the retained timed records.",
+  "controller.macro.board_record.clear": "Acknowledge and clear an exact retained board-capture identity.",
+  "controller.macro.play": "Play one named macro through the ordinary opcode path with live timing evidence.",
+  "controller.macro.cancel": "Cancel active playback and apply the macro output safe-stop policy.",
+  "controller.message.send": "Publish one bounded typed message; synchronous delivery waits for requested presentation outcomes.",
+  "controller.message.delivery": "Acknowledge presentation of one retained targeted message from an explicit surface.",
+  "controller.message.action": "Run a retained message action only after an explicit surface gesture and publish its correlated outcome.",
+>>>>>>> origin/agent/webui-defects
   "controller.unsubscribe": "Remove this WebSocket connection's active subscriptions.",
 };
 
@@ -191,11 +223,20 @@ const nonIdempotentMethods = new Set([
   "controller.reset.lines", "controller.reset", "controller.port.reset", "controller.command.execute",
 	"controller.firmware.build",
   "controller.rf.learn.start", "controller.rf.transmit", "controller.lcd.prompt", "controller.lcd.priority",
-  "controller.message.send", "controller.bridge.call", "controller.os.key", "controller.os.power",
+  "controller.message.send", "controller.message.delivery", "controller.message.action",
+  "controller.bridge.call", "controller.os.key", "controller.os.power",
 	"controller.device.action", "controller.app.action", "controller.artifact.fetch",
 	"controller.display.send", "controller.opcode.send", "controller.opcode.exchange",
 	"controller.opcode.request",
+<<<<<<< HEAD
   "controller.app.page", "controller.app.navigate", "controller.app.navigation.commit", "controller.app.instance.report",
+=======
+  "controller.macro.create", "controller.macro.update", "controller.macro.delete",
+  "controller.macro.record.start", "controller.macro.record.stop",
+  "controller.macro.board_record.start", "controller.macro.board_record.stop",
+  "controller.macro.board_record.clear", "controller.macro.play", "controller.macro.cancel",
+  "controller.app.page", "controller.app.navigate", "controller.app.instance.report",
+>>>>>>> origin/agent/webui-defects
   "controller.app.instance.remove",
   "controller.artifact.capture", "controller.update.firmware", "controller.restore.flash",
   "controller.artifact.upload.begin", "controller.artifact.upload.chunk",
@@ -234,8 +275,8 @@ const routes = [
   { path: "/api/session/ticket", methods: ["post"], capability: "session", summary: "Dormant alpha compatibility endpoint; returns 409 while application authentication is disabled" },
   { path: "/api/rpc", methods: ["post"], capability: "dynamic", summary: "JSON-RPC 2.0 request" },
   { path: "/api/snapshot", methods: ["get"], capability: "read", summary: "Authoritative cached controller snapshot" },
-  { path: "/api/peripherals", methods: ["get"], capability: "read", summary: "Peripheral descriptors and host-owned names" },
-  { path: "/api/peripherals", methods: ["put"], capability: "host_configuration", summary: "Replace host-owned peripheral names" },
+  { path: "/api/peripherals", methods: ["get"], capability: "read", summary: "Ordered peripheral presentation descriptors" },
+  { path: "/api/peripherals", methods: ["put"], capability: "host_configuration", summary: "Replace peripheral name, description, and order metadata" },
   { path: "/api/pwm", methods: ["get"], capability: "read", summary: "Authoritative PWM state" },
   { path: "/api/pwm", methods: ["put", "delete"], capability: "board_commands", summary: "Mutate PWM state with board readback" },
   { path: "/api/commands", methods: ["get"], capability: "read", summary: "Shared command catalog" },
@@ -252,6 +293,12 @@ const routes = [
   { path: "/api/os/power", methods: ["post"], capability: "power_actions", summary: "Confirmed system or display action" },
   { path: "/api/command", methods: ["post"], capability: "dynamic", summary: "Shared command dispatcher" },
 	{ path: "/api/messages", methods: ["post"], capability: "messages", summary: "Typed source-tagged message" },
+	{ path: "/api/macros", methods: ["get"], capability: "read", summary: "Macro library, recording, and playback snapshot" },
+	{ path: "/api/macros", methods: ["post", "put", "patch", "delete"], capability: "host_configuration", summary: "Create, rename, categorize, recolor, or delete a named macro" },
+	{ path: "/api/macros/recording", methods: ["post", "delete"], capability: "host_configuration", summary: "Start or save/discard host-connected exact-delta recording" },
+	{ path: "/api/macros/board-recording", methods: ["post", "delete"], capability: "board_commands", summary: "Start or stop the board capture ring and continuation stream" },
+	{ path: "/api/macros/board-recording/clear", methods: ["post"], capability: "board_commands", summary: "Acknowledge and clear one retained board capture" },
+	{ path: "/api/macros/playback", methods: ["post", "delete"], capability: "board_commands", summary: "Play or cancel a named macro through ordinary opcodes" },
 	{ path: "/api/display", methods: ["post"], capability: "board_commands", summary: "Present arbitrary seven-segment or LCD text with scroll and repeat timing" },
 	{ path: "/api/opcode", methods: ["post"], capability: "board_commands", summary: "Exchange an opaque versionless UART opcode" },
   { path: "/api/app/bridge", methods: ["get"], capability: "read", summary: "Original coordinator bridge instance and process identity" },
@@ -558,10 +605,18 @@ const openapi = {
     title: product.httpTitle,
 		version: "unversioned",
 		summary: "Unversioned living REST and JSON-RPC surface of the primary controller host.",
+<<<<<<< HEAD
     description: "Loopback is the safe default. Immediate-alpha authentication and authorization are disabled under issue #148. The built-in listener does not terminate TLS.",
   },
   servers: [{ url: "http://127.0.0.1:8787", description: "Default loopback primary" }],
   security: [],
+=======
+    description: "Loopback is the default. This alpha build deliberately disables authentication and authorization until issue #148; remote exposure still requires an explicit bind and Origin allow-list. The built-in listener does not terminate TLS.",
+  },
+  servers: [{ url: "http://127.0.0.1:8787", description: "Default loopback primary" }],
+  security: [],
+	"x-authentication-state": "disabled-until-issue-148",
+>>>>>>> origin/agent/webui-defects
   paths: openAPIPaths,
   components: {
     securitySchemes: {
@@ -748,9 +803,14 @@ const rpcSchema = {
 	})),
   "x-error-codes": {
     "-32700": "parse error", "-32600": "invalid request", "-32601": "method not found",
+<<<<<<< HEAD
     "-32602": "invalid params", "-32001": "authentication required",
     "-32003": "remote capability denied", "-32000": "runtime or device error",
     "-32004": "peer outcome uncertain; retry with the same idempotency key",
+=======
+    "-32602": "invalid params", "-32001": "reserved for deferred authentication",
+    "-32003": "reserved for deferred authorization", "-32000": "runtime or device error",
+>>>>>>> origin/agent/webui-defects
   },
 };
 
@@ -758,12 +818,20 @@ const asyncapi = {
   asyncapi: "3.0.0",
   info: {
 		title: product.eventTitle, version: "unversioned",
+<<<<<<< HEAD
     description: "Immediate-alpha unauthenticated full-duplex JSON-RPC, event, status, and Socket.IO-compatible messaging. WebSocket transport is required; deferred security schemes are retained as non-active design metadata.",
+=======
+    description: "Full-duplex JSON-RPC, event, status, and Socket.IO-compatible messaging. Authentication and authorization are disabled in this alpha build until issue #148. WebSocket transport is required.",
+>>>>>>> origin/agent/webui-defects
   },
   servers: {
     loopback: {
       host: "127.0.0.1:8787", protocol: "ws", pathname: "/ipc",
+<<<<<<< HEAD
       description: "Default loopback primary. Remote exposure requires an explicit listener and allowed origin; alpha authentication is disabled under #148.",
+=======
+      description: "Default loopback primary. Alpha remote exposure requires an explicit bind and allowed Origin; authentication and authorization are deferred to issue #148.",
+>>>>>>> origin/agent/webui-defects
 	  security: [],
     },
   },
@@ -826,9 +894,13 @@ const reference = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark"><title>${escapeHTML(product.referenceTitle)}</title>
 <style>:root{font-family:Inter,Segoe UI,system-ui,sans-serif;color-scheme:light dark;--bg:#f6f7fb;--panel:#fff;--text:#172033;--muted:#647087;--line:#dfe3ec;--accent:#6d4aff}@media(prefers-color-scheme:dark){:root{--bg:#11131a;--panel:#191c25;--text:#edf0f7;--muted:#a8b0c2;--line:#303543;--accent:#a995ff}}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text)}main{width:min(1180px,calc(100% - 32px));margin:auto;padding:48px 0 80px}header{display:grid;gap:12px;margin-bottom:34px}h1{font-size:clamp(2rem,5vw,4rem);letter-spacing:-.05em;margin:0}p{color:var(--muted);max-width:76ch;line-height:1.65}.pills{display:flex;flex-wrap:wrap;gap:8px}.pills a,.pills span,td span{border:1px solid var(--line);border-radius:999px;padding:6px 10px;color:var(--text);text-decoration:none;background:color-mix(in srgb,var(--panel) 88%,var(--accent) 12%)}section{margin-top:34px;background:color-mix(in srgb,var(--panel) 92%,transparent);border:1px solid var(--line);border-radius:20px;overflow:hidden;box-shadow:0 18px 55px color-mix(in srgb,var(--text) 8%,transparent)}section>div{padding:22px 24px 6px}h2{margin:0;font-size:1.25rem}table{border-collapse:collapse;width:100%;font-size:.9rem}th,td{text-align:left;padding:13px 16px;border-top:1px solid var(--line);vertical-align:top}th{color:var(--muted);font-weight:600}code{font-family:Cascadia Code,ui-monospace,monospace;color:var(--accent);overflow-wrap:anywhere}@media(max-width:720px){main{width:min(100% - 20px,1180px);padding-top:26px}section{overflow:auto}table{min-width:760px}}</style></head>
+<<<<<<< HEAD
 <body><main><header><span>OFFLINE CONTRACT · LIVING API</span><h1>${escapeHTML(product.referenceHeading)}</h1><p>The primary host exposes one unversioned, safety-gated living surface across REST, JSON-RPC, WebSocket, and the bounded Socket.IO adapter. Loopback is the default; immediate-alpha application authentication and authorization are disabled under issue #148.</p><div class="pills"><a href="openapi.json">OpenAPI 3.1</a><a href="asyncapi.json">AsyncAPI 3.0</a><a href="jsonrpc.schema.json">JSON-RPC schema</a><span>${methods.length} RPC methods</span><span>${routes.reduce((count, route) => count + route.methods.length, 0)} HTTP operations</span></div></header>
+=======
+<body><main><header><span>OFFLINE CONTRACT · LIVING API</span><h1>${escapeHTML(product.referenceHeading)}</h1><p>The primary host exposes one unversioned living surface across REST, JSON-RPC, WebSocket, and the bounded Socket.IO adapter. In this alpha build authentication and authorization are deliberately disabled until issue #148; remote exposure still requires an explicit listener and Origin allow-list.</p><div class="pills"><a href="openapi.json">OpenAPI 3.1</a><a href="asyncapi.json">AsyncAPI 3.0</a><a href="jsonrpc.schema.json">JSON-RPC schema</a><span>${methods.length} RPC methods</span><span>${routes.reduce((count, route) => count + route.methods.length, 0)} HTTP operations</span></div></header>
+>>>>>>> origin/agent/webui-defects
 <section><div><h2>HTTP operations</h2><p>Canonical routes live directly under <code>/api/</code>; versioned aliases are rejected. JSON bodies are capped at 1 MiB.</p></div><table><thead><tr><th>Method</th><th>Path</th><th>Purpose</th><th>Capability</th></tr></thead><tbody>${routeRows}</tbody></table></section>
-<section><div><h2>JSON-RPC methods</h2><p>Standard JSON-RPC errors are preserved; host extensions use -32001 for authentication, -32003 for capability denial, and -32000 for runtime or device failures.</p></div><table><thead><tr><th>Method</th><th>Purpose</th><th>Capability</th><th>Idempotency</th></tr></thead><tbody>${methodRows}</tbody></table></section>
+<section><div><h2>JSON-RPC methods</h2><p>Standard JSON-RPC errors are preserved. Codes -32001 and -32003 are reserved for the deferred authentication design; -32000 reports runtime or device failures.</p></div><table><thead><tr><th>Method</th><th>Purpose</th><th>Capability</th><th>Idempotency</th></tr></thead><tbody>${methodRows}</tbody></table></section>
 <p>Contract digest <code>${digest}</code>. Generated by <code>Tools/Audit/generate-api-reference.mjs</code>.</p></main></body></html>\n`;
 outputs.set("reference.html", reference);
 

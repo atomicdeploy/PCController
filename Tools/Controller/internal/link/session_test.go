@@ -15,12 +15,14 @@ import (
 )
 
 func currentHelloPayload(capabilities uint32) []byte {
-	payload := make([]byte, 14)
+	payload := make([]byte, 16)
 	payload[0] = native.IdentitySchemaCompact
 	payload[1] = native.BoardKindPCController
 	binary.LittleEndian.PutUint32(payload[2:6], capabilities)
 	binary.LittleEndian.PutUint32(payload[6:10], 0x2FD9F81C)
 	binary.LittleEndian.PutUint32(payload[10:14], 0x35019D5D)
+	payload[14] = native.FeatureProfileFullPeripheral
+	payload[15] = native.BuildFeatureLocalMacroCapture
 	return payload
 }
 
@@ -117,10 +119,11 @@ func TestAuthenticateRequiresPCControllerIdentity(t *testing.T) {
 	}
 }
 
-func TestAuthenticateAcceptsCompactHelloSchema3(t *testing.T) {
+func TestAuthenticateAcceptsCompactHelloSchema4(t *testing.T) {
 	payload := []byte{
-		0x03, native.BoardKindPCController, 0x00, 0x00, 0x00, 0x00,
+		0x04, native.BoardKindPCController, 0x00, 0x00, 0x00, 0x00,
 		0x1C, 0xF8, 0xD9, 0x2F, 0x5D, 0x9D, 0x01, 0x35,
+		native.FeatureProfileFullPeripheral, native.BuildFeatureLocalMacroCapture,
 	}
 	port := newFakePort()
 	port.onWrite = func(encoded []byte) {
@@ -154,6 +157,54 @@ func TestAuthenticateAcceptsCompactHelloSchema3(t *testing.T) {
 	if !hello.IsPCController() || hello.IdentitySchema != native.IdentitySchemaCompact ||
 		hello.BuildHash != 0x2FD9F81C || hello.BuildStamp != "260801194258" {
 		t.Fatalf("unexpected compact identity: %#v", hello)
+	}
+}
+
+func TestAuthenticatePublishesForcedOutputStateFrames(t *testing.T) {
+	port := newFakePort()
+	port.onWrite = func(encoded []byte) {
+		request, err := native.Decode(encoded)
+		if err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+		frames := []native.Frame{
+			{Opcode: native.OpHelloResp, Seq: request.Seq, Payload: currentHelloPayload(
+				native.CapabilitySegmentPush | native.CapabilityBuzzerPush | native.CapabilityStatusLEDPush,
+			)},
+			{Opcode: native.OpSegmentChanged, Payload: []byte{1, 2, 3, 4, 5}},
+			{Opcode: native.OpBuzzerChanged, Payload: []byte{0xD0, 0x07, 40, 0, 0}},
+			{Opcode: native.OpStatusLEDChanged, Payload: []byte{1, 2, 3, 128, 0, 1}},
+		}
+		var response []byte
+		for _, frame := range frames {
+			encodedFrame, encodeErr := native.Encode(frame)
+			if encodeErr != nil {
+				t.Errorf("encode response: %v", encodeErr)
+				return
+			}
+			response = append(response, encodedFrame...)
+		}
+		port.reads <- response
+	}
+
+	session := NewForPort("TEST", port)
+	defer session.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if _, err := session.Authenticate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	want := []byte{native.OpSegmentChanged, native.OpBuzzerChanged, native.OpStatusLEDChanged}
+	for _, opcode := range want {
+		select {
+		case event := <-session.Events():
+			if event.Frame.Opcode != opcode || event.Frame.Seq != 0 {
+				t.Fatalf("forced state frame=(0x%02X,%d), want (0x%02X,0)", event.Frame.Opcode, event.Frame.Seq, opcode)
+			}
+		case <-ctx.Done():
+			t.Fatalf("forced state frame 0x%02X was not published", opcode)
+		}
 	}
 }
 

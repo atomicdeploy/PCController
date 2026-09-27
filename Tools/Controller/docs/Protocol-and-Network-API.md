@@ -12,6 +12,108 @@ without a documentation server. Repository validation regenerates the
 contracts logically and rejects drift from the actual RPC dispatcher or REST
 route families.
 
+## Cross-surface control contract
+
+Public REST routes are versionless: use `/api/peripherals`, `/api/pwm`, and
+`/api/rpc`; `/api/v1/...` is deliberately not a supported alias. JSON-RPC,
+WebUI, TUI, and CLI all consume the same host-owned peripheral registry rather
+than maintaining their own relay/PWM labels. `GET /api/peripherals` and
+`controller.peripherals.get` return both the complete `peripherals` catalog
+and a compact ordered `controls` list:
+
+| Control kind | Canonical key | Order | Scope |
+|---|---|---:|---|
+| `relay` | `relay.1` … `relay.8` | 1 … 8 | Relay outputs; first four retain motion safety interlocks. |
+| `side` | `motion.a`, `motion.b` | 1, 2 | Directional motion through the guarded side command. |
+| `mosfet` | `pwm.0` … `pwm.10` | 0 … 10 | Generic user/commissioning PWM channels. |
+
+`name` is resolved from persistent host configuration (falling back to the
+registry default), while `key` and `order` are stable machine identifiers.
+System-owned illumination, power-indicator, and RGB PWM channels are retained
+in the complete catalog but not presented as generic MOSFET controls.
+
+For a safe one-shot board tone, use the typed CLI spelling:
+
+```console
+controller beep --frequency 440 --duration 125 [connection flags]
+```
+
+It is exactly equivalent to `controller exec buzzer 440 125` and is routed
+through the primary/IPC command engine. Before any tone opcode is sent, the
+engine reads the firmware-owned EEPROM settings; a board marked silent returns
+`buzzer suppressed: board is silent` without a board write. The same behavior
+therefore applies to Web/RPC/TUI test actions that execute `buzzer`.
+
+EEPROM settings reports distinguish *accepted/live* from *persisted*. A
+successful settings command is immediately applied by the firmware and its
+next `GET_SETTINGS` response is the observable live state. The response's
+`persisted` flag is authoritative for whether the EEPROM commit is complete;
+callers must surface it rather than claiming a reboot is required or that an
+ACK alone proves durability.
+
+## Typed host notification envelope
+
+`controller.message.send` and `POST /api/messages` use the same bounded host
+envelope and publish a normal `message` event through IPC, WebSocket,
+Socket.IO, bridge, TUI, WebUI, and native-host listeners. It does not alter the
+firmware protocol or open a serial connection for host-only deliveries.
+
+```json
+{
+  "source": "ipc",
+  "targets": ["native", "web", "tui"],
+  "type": "operator.notice",
+  "text": "Commissioning is ready",
+  "severity": "warning",
+  "correlation": "commission-42",
+  "delivery": "async",
+  "action": "app page events"
+}
+```
+
+`target` remains accepted as a comma-separated shorthand; `targets` is the
+preferred ordered list. Valid presentation targets are `native`, `web`, and
+`tui`; transport/system targets (`host`, `client`, `server`, `bridge`, `board`,
+`lcd`, `all`) remain available for existing integrations. Duplicate targets are
+removed in order. Severity is one of `debug`, `info`, `success`, `warning`, or
+`error`; `async` delivery returns `accepted`, while `sync` remains `pending`
+until every requested presentation surface reports `completed`/`failed` or a
+bounded two-second deadline identifies an unconfirmed (usually disconnected)
+surface. Correlation and action remain inert data until an operator invokes
+them. A native-targeted
+message becomes a desktop notification. If it carries an action, its button
+converts the validated `app ...` or ordinary command to the existing
+`pccontroller://` route. Web and TUI adapters only present messages that target
+their surface (or `all`), retain the correlation and action, and require an
+explicit button click or `Ctrl+A` before the shared command/app-action path is
+entered. Presentation publishes `controller.message.delivery`; explicit
+selection publishes `controller.message.action`. Both outcomes retain the
+original event ID, correlation, action, surface, and `completed`/`failed`
+lifecycle. No surface executes an action merely because it rendered a message.
+
+The minimal CLI spelling is:
+
+```console
+controller message native,web,tui operator.notice "Commissioning is ready"
+```
+
+It deliberately permits disconnected operation and publishes to the same
+runtime event stream. Independent clients consume retained activity and state
+cursors, so one browser's `BroadcastChannel` is never treated as cross-client
+delivery. Interactive Web/TUI action controls, per-recipient render
+acknowledgements, delivery expiry, and generalized board-operation migration
+continue under #164, #165, and #166.
+
+After an ordinary board operation receives its MCU ACK, the host also emits a
+retained state-stream result for every WebSocket, Socket.IO, TUI, and bridge
+subscriber. The generic kind is `operation.applied`; relay, motion, PWM,
+buzzer, and display operations use specialized `*.changed` kinds and bounded
+metadata. Relay ACKs immediately update the shared snapshot and include the
+post-ACK active mask. These server-side events are the convergence path for
+separate browsers and processes; optimistic UI state may improve latency but
+must not replace them. A later board-origin event/readback may further confirm
+the state.
+
 ## Framing
 
 Frames are COBS encoded and terminated by `0x00`. The decoded frame is:
@@ -478,6 +580,7 @@ still interoperate.
 
 ### Immediate-alpha exposure
 
+<<<<<<< HEAD
 Issue #148 is the active contract: application authentication and
 authorization are disabled across raw IPC, HTTP/REST, standard WebSocket,
 Socket.IO, browser UI configuration, and peer bridges. Product entry points
@@ -504,6 +607,53 @@ compatibility code, not active evidence of a security boundary. Do not expose
 the alpha listener to an untrusted network. Motion policies, door checks, relay
 sequencing, numeric bounds, OS confirmations, and exclusive programming
 ownership remain functional safety checks and are not application auth/authZ.
+=======
+The current alpha host deliberately disables authentication and authorization
+on native IPC, HTTP, WebSocket, Socket.IO, bridge, CLI, TUI, and Web surfaces.
+No token or login is required, the UI reports `auth_required: false`, and
+credentials or `remote_policy` values are not enforced. The complete session,
+native-user, remote-login, approval-toast, and persistent-client design is
+deferred to GitHub issue #148 and must not be partially re-enabled before that
+work is explicitly requested.
+
+Exposure remains explicit and configurable. Loopback is the default. A
+non-loopback bind requires `ipc.allow_remote: true`, a selected `ipc.listen`,
+and a non-wildcard `ipc.allowed_origins` list. Those settings control reach and
+browser Origin acceptance, not identity or permission. The ordinary precedence
+is unchanged: built-in defaults, then config file, then environment, then CLI
+flags. Existing token/principal/policy fields remain accepted for config-file
+compatibility but are dormant.
+
+This alpha bypass does not remove hardware semantics such as motion-door
+policy, relay sequencing, range validation, programming ownership, or explicit
+destructive-operation confirmations. The built-in listener does not terminate
+TLS; expose it only on networks selected by the operator.
+
+```json
+"ipc": {
+  "allow_remote": true,
+  "auth_token_ref": "os:ipc/remote",
+  "remote_principal": "maintenance-console",
+  "allowed_origins": ["controller.example:*"],
+  "remote_policy": {
+    "read": true,
+    "events": true,
+    "messages": false,
+    "board_commands": false,
+    "host_configuration": false,
+    "connection_control": false,
+    "reset": false,
+    "programming": false,
+    "shutdown": false,
+    "virtual_keys": false,
+    "power_actions": false,
+    "host_automations": false,
+    "bridge_calls": false,
+    "integrations": false
+  }
+}
+```
+>>>>>>> origin/agent/webui-defects
 
 ## JSON-RPC 2.0
 
@@ -540,9 +690,10 @@ request error.
 | `controller.reset`, `controller.reset.lines`, `controller.port.reset` | optional `pulse_ms` | one explicit DTR-only pulse, then fresh application authentication |
 | `controller.snapshot` | `{}` | cached connection, identity, status, and settings |
 | `controller.command.catalog` | `{}` | machine-readable registered command names, aliases, usage, summary, and task group |
+| `controller.melodies.list` | `{}` | effective configured host melody catalog with validated note timing |
 | `controller.status` | `{}` | fresh board status |
-| `controller.peripherals.get` | `{}` | host-owned custom names plus the canonical 34-entry peripheral descriptor registry; requires `read` |
-| `controller.peripherals.set` | `peripheral_names` object | atomically replace custom host names and return the normalized names plus registry; requires `host_configuration` |
+| `controller.peripherals.get` | `{}` | canonical registry plus the resolved ordered relay, Side, and MOSFET/PWM presentation descriptors; requires `read` |
+| `controller.peripherals.set` | `peripheral_presentation` object, or legacy `peripheral_names` | atomically replace validated name/description/order metadata and broadcast a `config` event; requires `host_configuration` |
 | `controller.pwm.values` | `{}` | authoritative board availability, selected channel, and all sixteen logical values; requires `read` |
 | `controller.illumination.get` | `{}` | persisted Off/Auto/On policy, on/off brightness, live door-selected target, and exact applied enclosure PWM channel 11; requires `read` |
 | `controller.illumination.set` | `{ "mode": 0..2, "on_brightness": 0..255, "off_brightness": 0..255 }` | preserves every unrelated board setting, applies live, waits for durable EEPROM readback, and returns the authoritative illumination state; requires `board_commands` |
@@ -586,6 +737,8 @@ request error.
 | `controller.lcd.prompt` | `line1`, `line2` | queue a debounced prompt mirror |
 | `controller.lcd.priority` | `kind`, `line1`, `line2`, optional `hold_ms` | display a priority overlay, then restore the prompt |
 | `controller.message.send` | typed message envelope below | route/log a message and optionally display it on the board LCD |
+| `controller.message.delivery` | `event_id`, `surface`, optional `error` | report completed/failed presentation for one retained, targeted message |
+| `controller.message.action` | `event_id`, `surface`, optional `instance_id` | explicitly invoke the retained action and publish its correlated outcome |
 | `controller.bridge.list` | `{}` | configured peers and live connection state, without URLs or credentials |
 | `controller.bridge.call` | `peer`, nested JSON-RPC `request` | correlated call through that peer; bridge ingress cannot invoke this method or pivot through command/app-action wrappers |
 | `controller.network.peers.get` | `{}` | persistent peer topology including optional secret references but never resolved or plaintext credentials |
@@ -838,7 +991,8 @@ routed path—not the raw `RequestURI` or query string.
       "kind": "relay",
       "role": "user-output",
       "index": 5,
-      "default_name": "User Relay 5",
+      "default_name": "Relay 5",
+      "default_description": "",
       "control": "relay"
     }
   ]
@@ -846,11 +1000,14 @@ routed path—not the raw `RequestURI` or query string.
 ```
 
 The complete registry always contains 34 descriptors: eight relays, two motion
-sides, sixteen PWM channels, two displays, and six sensors. Custom values are
-presentation names in `ui.peripheral_names`, not device settings. Set methods
-trim keys and names, reject invalid input atomically, and treat a blank name as
-a request to remove that override so the descriptor's `default_name` becomes
-visible again. No peripheral-name operation reads or writes MCU EEPROM.
+sides, sixteen PWM channels, two displays, and six sensors. Registry fallback
+names are derived from stable hardware IDs (`Relay 5`, `Motion A`, `PWM 0`), and
+fallback descriptions are empty. Friendly operator copy belongs in
+`ui.peripheral_presentation`; the legacy `ui.peripheral_names` map remains a
+name-only compatibility surface. Set methods trim keys and names, reject invalid
+input atomically, and treat a blank name as a request to remove that override so
+the descriptor's `default_name` becomes visible again. No peripheral-name
+operation reads or writes MCU EEPROM.
 
 All PWM read and mutation methods return the native `PWM_VALUES` JSON shape:
 
@@ -1456,7 +1613,7 @@ one schema:
 
 Allowed sources are `client`, `server`, `bridge`, `board`, `lcd`, `host`,
 `ipc`, `rest`, `webhook`, `websocket`, and `socket_io`. Targets are `client`, `server`, `bridge`,
-`board`, `lcd`, `host`, and `all`. `type` contains 1..32 lowercase letters,
+`board`, `lcd`, `host`, `native`, `web`, `tui`, and `all`. `type` contains 1..32 lowercase letters,
 digits, dot, dash, or underscore. Text/action lengths are bounded. A board/LCD
 target is converted to two printable 16-byte rows and sent through
 `DISPLAY_TEXT`; every accepted message is also a source-tagged host event.
@@ -1469,8 +1626,9 @@ Authenticated messages also carry bounded `metadata.principal` and
 `metadata.authentication`. This prevents a remote message from impersonating a
 physical `board` event in text mappings.
 
-`action` is descriptive metadata. It is never executed automatically. A
-deliberately enabled host `text_mappings` rule can match source, target, type,
+`action` is inert metadata. It is never executed automatically. An operator
+may invoke a native notification action through the validated application
+protocol described above. A deliberately enabled host `text_mappings` rule can match source, target, type,
 and text content and then submit a fixed configured command. This separation
 prevents received text from becoming shell input and retains authentication,
 logging, motion policy, and board safety.

@@ -48,6 +48,21 @@ uint8_t modeToPage(ProgramMode mode) {
              : menuPage;
 }
 
+// PAGE_KEYS is an immutable wire alias for the one unified input page, not a
+// second navigable page.  Keep navigation entirely within compiled pages.
+uint8_t nextCompiledMenuPage(uint8_t page, bool forward) {
+  uint8_t candidate = canonicalFrontPanelPage(page);
+  for (uint8_t checked = 0; checked < PAGE_COUNT; ++checked) {
+    candidate = forward
+                    ? static_cast<uint8_t>((candidate + 1U) % PAGE_COUNT)
+                    : (candidate == 0 ? PAGE_COUNT - 1U : candidate - 1U);
+    if (frontPanelPageCompiled(candidate)) {
+      return candidate;
+    }
+  }
+  return PAGE_MOTION;
+}
+
 #if PCCONTROLLER_MENU_VISIBILITY
 // Reads the stable page ID stored at a presentation rank.
 uint8_t configuredMenuPageAt(uint8_t rank) {
@@ -163,7 +178,17 @@ void moveMenuCategory(bool forward, uint32_t at) {
 
 // Activates a stable page and optionally persists it as the boot default.
 void setMenuPage(uint8_t page) {
+<<<<<<< HEAD:Project/Runtime/FrontPanelRuntime.inc.h
   menuPage = canonicalMenuPage(page);
+=======
+  menuPage = canonicalFrontPanelPage(page);
+  if (!frontPanelPageCompiled(menuPage)) {
+    menuPage = PAGE_MOTION;
+  }
+#if PCCONTROLLER_ENABLE_MACRO_CAPTURE
+  suppressLocalMacroClassification = false;
+#endif
+>>>>>>> origin/agent/webui-defects:Project/Firmware/FrontPanelRuntime.inc.h
 #if PCCONTROLLER_MENU_HIERARCHY
   menuTreeState = menuCategory(menuPage);
 #endif
@@ -177,6 +202,19 @@ void setMenuPage(uint8_t page) {
     settingsStore.markDirty(now);
   }
   modeManager.transitionTo(pageToMode(menuPage));
+}
+
+void moveTopLevelPage(bool forward) {
+#if PCCONTROLLER_MENU_VISIBILITY
+  setMenuPage(nextConfiguredMenuPage(
+      menuPage, forward
+#if PCCONTROLLER_MENU_HIERARCHY
+      , menuTreeState
+#endif
+      ));
+#else
+  setMenuPage(nextCompiledMenuPage(menuPage, forward));
+#endif
 }
 
 // Runs mode entry actions and time-based exits for transient/modal states.
@@ -193,10 +231,12 @@ void programService(uint32_t at) {
       return;
     }
 
+#if PCCONTROLLER_ENABLE_LOCAL_SETTINGS_EDITOR
     if (current == MODE_SOUND_EDIT) {
       showPackedLabel(SettingsLabels, settingsMenuItem, at);
       return;
     }
+#endif
 
     const uint8_t editLabel =
         static_cast<uint8_t>(current) -
@@ -227,11 +267,19 @@ void programService(uint32_t at) {
         break;
       case MODE_FLASH_MESSAGE:
         break;
+#if PCCONTROLLER_ENABLE_LOCAL_RF_LEARNING_UI
       case MODE_RF_LEARNING:
         display.showText(commonText(TextLearn));
         break;
+#endif
       case MODE_FAULT:
         display.showText(commonText(TextError));
+<<<<<<< HEAD:Project/Runtime/FrontPanelRuntime.inc.h
+=======
+#if PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
+        buzzer.error();
+#endif
+>>>>>>> origin/agent/webui-defects:Project/Firmware/FrontPanelRuntime.inc.h
         break;
       default:
         break;
@@ -247,6 +295,7 @@ void programService(uint32_t at) {
       }
       break;
 
+#if PCCONTROLLER_ENABLE_LOCAL_RF_LEARNING_UI
     case MODE_RF_LEARNING:
       if (!learningActive) {
         modeManager.transitionTo(modeBeforeLearning);
@@ -254,6 +303,7 @@ void programService(uint32_t at) {
         serviceLearningTimer(at);
       }
       break;
+#endif
 
     case MODE_MOTION_CONTROL:
       if (!relays.motionAllowed()) {
@@ -286,7 +336,14 @@ void programService(uint32_t at) {
     case MODE_ILLUMINATION_MODE_EDIT:
     case MODE_ILLUMINATION_ON_EDIT:
     case MODE_ILLUMINATION_OFF_EDIT:
+#if PCCONTROLLER_ENABLE_LOCAL_SETTINGS_EDITOR
     case MODE_SOUND_EDIT:
+#else
+    // Stable mode ID retained for host diagnostics; compact builds never enter
+    // the omitted local settings editor.
+    case MODE_SOUND_EDIT:
+      break;
+#endif
     case MODE_PWM_CHANNEL_EDIT:
     case MODE_PWM_VALUE_EDIT:
     case MODE_RELAY_CHANNEL_EDIT:
@@ -297,6 +354,9 @@ void programService(uint32_t at) {
     case MODE_USER_RELAY_BEHAVIOR_EDIT:
     case MODE_USER_RELAY_CONTROL:
     case MODE_SAVE_PROMPT:
+#if !PCCONTROLLER_ENABLE_LOCAL_RF_LEARNING_UI
+    case MODE_RF_LEARNING:
+#endif
     case MODE_UNDEFINED:
       break;
   }
@@ -317,8 +377,16 @@ void menuVisualFeedback(bool fromRemote) {
 
 // Emits one canonical generic acknowledgement for menu navigation/editing.
 void menuFeedback(bool fromRemote) {
+<<<<<<< HEAD:Project/Runtime/FrontPanelRuntime.inc.h
   menuVisualFeedback(fromRemote);
+=======
+  statusLeds.playCue(fromRemote ? StatusLedCue::Radio
+                                : StatusLedCue::Menu,
+                     260, now);
+#if PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
+>>>>>>> origin/agent/webui-defects:Project/Firmware/FrontPanelRuntime.inc.h
   buzzer.beep();
+#endif
 }
 
 // Rolls an 8-bit brightness by the configured front-panel step.
@@ -403,7 +471,7 @@ void applyStoredSettings(uint32_t at) {
                             ? settings.displayBrightness
                             : settings.displayClosedBrightness());
   statusLeds.setBrightness(settings.statusBrightness);
-  statusLeds.setPowerSignal(true);
+  pwm.setPowerSignal(true);
   relays.setMotionAllowed(motionPolicyAllows(), at);
 }
 
@@ -476,12 +544,57 @@ void finishEditTransaction(bool save, uint32_t at) {
   flashMessageSaved = save;
   flashMessageEndsAt = at + 900;
   if (save) {
+<<<<<<< HEAD:Project/Runtime/FrontPanelRuntime.inc.h
     statusLeds.playCue(StatusLedCue::Save, 900, at);
   } else {
+=======
+#if PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
+    buzzer.success();
+#endif
+    statusLeds.playCue(StatusLedCue::Save, 900, at);
+  } else {
+#if PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
+    buzzer.error();
+#endif
+>>>>>>> origin/agent/webui-defects:Project/Firmware/FrontPanelRuntime.inc.h
     statusLeds.playCue(StatusLedCue::Discard, 900, at);
   }
   modeManager.transitionTo(MODE_FLASH_MESSAGE);
 }
+
+// The four physical motion keys call the same relay safety controller as RF
+// and UART.  This is deliberately a Down-edge operation: click/hold parsing
+// must never add a 500 ms latency to live motion.
+bool handleMotionPanelAction(uint8_t action, bool fromRemote,
+                             uint32_t actionNow) {
+  const MotionKeyBinding binding =
+      motionKeyBinding(static_cast<MenuAction>(action));
+  const bool accepted = relays.requestSide(
+      static_cast<::RelaySide>(binding.side),
+      binding.reverse ? RelayDirection::Reverse : RelayDirection::Forward,
+      true, actionNow);
+  if (accepted && fromRemote) {
+    remoteMomentaryKind = RemoteActionKind::Side;
+    remoteMomentaryValue = binding.side;
+    remoteMomentaryEndsAt = actionNow + 350;
+  }
+  menuFeedback(fromRemote);
+  return accepted;
+}
+
+#if PCCONTROLLER_ENABLE_MACRO_CAPTURE && \
+    !PCCONTROLLER_UNIFIED_PAGE_IDENTIFIES_KEYS
+void beginLocalMacroCapture() {
+  const uint8_t id = nextLocalMacroId;
+  if (!macroPlayback.beginCapture(id, micros())) {
+    return;
+  }
+  ++nextLocalMacroId;
+  if (nextLocalMacroId == 0) {
+    nextLocalMacroId = 1;
+  }
+}
+#endif
 
 // Dispatches physical, RF, or host navigation through the modal menu state machine.
 void handleMenuAction(uint8_t action, bool fromRemote) {
@@ -528,6 +641,7 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
 
 #endif
 
+<<<<<<< HEAD:Project/Runtime/FrontPanelRuntime.inc.h
   // Production has one input page: K1/K2 are Side A forward/reverse and
   // K3/K4 are Side B forward/reverse. The same mapping is used by physical,
   // RF, and host actions.
@@ -537,9 +651,41 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
     }
     relays.allOff(actionNow);
     modeManager.transitionTo(MODE_MOTION_CONTROL);
+=======
+  // One input page: K1/K2 navigate in every build. A diagnostic build uses
+  // K3/K4 for ID; the normal image reserves K3 for the local macro lifecycle
+  // and K4 enters immediate four-key motion control.
+  if (modeManager.current() == MODE_MOTION) {
+    const UnifiedInputIntent intent = unifiedInputIntent(
+        static_cast<MenuAction>(action),
+        PCCONTROLLER_UNIFIED_PAGE_IDENTIFIES_KEYS != 0);
+    if (intent == UnifiedInputIntent::PreviousPage) {
+      moveTopLevelPage(false);
+    } else if (intent == UnifiedInputIntent::NextPage) {
+      moveTopLevelPage(true);
+#if PCCONTROLLER_UNIFIED_PAGE_IDENTIFIES_KEYS
+    } else if (intent == UnifiedInputIntent::Identify) {
+      identifiedKey = static_cast<uint8_t>(action + 1);
+      identifiedKeyEndsAt = actionNow + 900;
+#else
+    } else if (intent == UnifiedInputIntent::Macro) {
+      // The physical classified-key path below owns record/stop/replay.
+    } else if (relays.motionAllowed()) {
+      modeManager.transitionTo(MODE_MOTION_CONTROL);
+    } else {
+#if PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
+      buzzer.error();
+#endif
+    }
+#endif
+    menuFeedback(fromRemote);
+    return;
+>>>>>>> origin/agent/webui-defects:Project/Firmware/FrontPanelRuntime.inc.h
   }
 
   switch (modeManager.current()) {
+#if PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES && \
+    PCCONTROLLER_ENABLE_ILLUMINATION_AUTOMATION
     case MODE_ILLUMINATION_MODE_EDIT:
       if (action == MENU_PREVIOUS) {
         modeManager.transitionTo(MODE_SAVE_PROMPT);
@@ -576,7 +722,9 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       }
       menuFeedback(fromRemote);
       return;
+#endif
 
+#if PCCONTROLLER_ENABLE_LOCAL_SETTINGS_EDITOR
     case MODE_SOUND_EDIT:
       if (action == MENU_PREVIOUS) {
         if (settingsMenuItem == 0) {
@@ -632,7 +780,9 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       }
       menuFeedback(fromRemote);
       return;
+#endif
 
+#if PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES
     case MODE_PWM_CHANNEL_EDIT:
       if (action == MENU_PREVIOUS) {
         modeManager.transitionTo(MODE_SAVE_PROMPT);
@@ -688,6 +838,7 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       menuFeedback(fromRemote);
       return;
     }
+#endif
 
     case MODE_USER_RELAY_CHANNEL_EDIT:
       if (action == MENU_PREVIOUS) {
@@ -802,6 +953,7 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
   bool outputAction = false;
   switch (action) {
     case MENU_PREVIOUS:
+<<<<<<< HEAD:Project/Runtime/FrontPanelRuntime.inc.h
 #if PCCONTROLLER_MENU_VISIBILITY
       setMenuPage(nextConfiguredMenuPage(
           menuPage, false
@@ -829,11 +981,22 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
                       ? static_cast<uint8_t>(PAGE_RF)
                       : static_cast<uint8_t>((menuPage + 1) % PAGE_COUNT));
 #endif
+=======
+      moveTopLevelPage(false);
+      break;
+    case MENU_NEXT:
+      moveTopLevelPage(true);
+>>>>>>> origin/agent/webui-defects:Project/Firmware/FrontPanelRuntime.inc.h
       break;
     case MENU_DECREASE:
-      // The shared K3 dispatch preserves the two leaf-owned actions: KEY was
-      // handled above, while rELY is All-Off. Other leaves open their parent.
-      if (leafDecreaseAction(modeManager.current()) ==
+      // Sound is a safety-relevant global setting, not a buried editor-only
+      // action: K3 always mutes immediately and persistence is serviced after
+      // the latency-sensitive input turn. K4 below performs the reciprocal
+      // unmute, so a silent board can always be recovered from the TM1637.
+      if (menuPage == PAGE_SOUND) {
+        setSilentMode(true, actionNow);
+      // rELY owns immediate All-Off; the unified page handled its own K3.
+      } else if (leafDecreaseAction(modeManager.current()) ==
           LeafDecreaseAction::AllRelaysOff) {
         relays.allOff(actionNow);
         menuVisualFeedback(fromRemote);
@@ -847,20 +1010,28 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       }
       break;
     case MENU_INCREASE:
+#if PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES && \
+    PCCONTROLLER_ENABLE_ILLUMINATION_AUTOMATION
       if (menuPage == PAGE_ILLUMINATION) {
         beginEditTransaction(MODE_ILLUMINATION);
         modeManager.transitionTo(MODE_ILLUMINATION_MODE_EDIT);
-      } else if (menuPage == PAGE_SOUND) {
-        beginEditTransaction(MODE_SOUND);
-        settingsMenuItem = 0;
-        modeManager.transitionTo(MODE_SOUND_EDIT);
+      } else
+#endif
+      if (menuPage == PAGE_SOUND) {
+        setSilentMode(false, actionNow);
+#if PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES
       } else if (menuPage == PAGE_PWM) {
         beginEditTransaction(MODE_PWM);
         modeManager.transitionTo(MODE_PWM_CHANNEL_EDIT);
+#endif
       } else if (menuPage == PAGE_RELAY) {
         relays.allOff(actionNow);
         modeManager.transitionTo(MODE_RELAY_CHANNEL_EDIT);
+<<<<<<< HEAD:Project/Runtime/FrontPanelRuntime.inc.h
         outputAction = true;
+=======
+#if PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES
+>>>>>>> origin/agent/webui-defects:Project/Firmware/FrontPanelRuntime.inc.h
       } else if (menuPage == PAGE_USER_PWM) {
         beginEditTransaction(MODE_USER_PWM);
         for (uint8_t channel = 0; channel < 8; ++channel) {
@@ -869,6 +1040,7 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
               userPwm12(settingsStore.values().userPwm[channel]));
         }
         modeManager.transitionTo(MODE_USER_PWM_CHANNEL_EDIT);
+#endif
       } else if (menuPage == PAGE_USER_RELAYS) {
         modeManager.transitionTo(MODE_USER_RELAY_CHANNEL_EDIT);
       } else if (menuPage == PAGE_RF) {
@@ -890,8 +1062,10 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
 // Applies one physical or injected lifecycle without duplicating the local
 // safety path in protocol dispatch. Primary actions run on Down; Click remains
 // deferred classification only and must never sit on the control path.
-void applyKeyGesture(uint8_t bit, KeyEvent event) {
+void applyKeyGesture(uint8_t bit, KeyEvent event, InputEventSource source,
+                     bool emitEvidence) {
   const ProgramMode mode = modeManager.current();
+<<<<<<< HEAD:Project/Runtime/FrontPanelRuntime.inc.h
   if (motionExitStartedAt == 0xFFFFFFFFUL) {
     return;
   }
@@ -902,28 +1076,129 @@ void applyKeyGesture(uint8_t bit, KeyEvent event) {
     return;
   }
   const bool momentary = mode == MODE_KEYS || mode == MODE_MOTION_CONTROL ||
+=======
+#if PCCONTROLLER_ENABLE_MACRO_CAPTURE && \
+    !PCCONTROLLER_UNIFIED_PAGE_IDENTIFIES_KEYS
+  if (source == InputEventSource::Physical && mode == MODE_MOTION &&
+      bit == BoardPins::KeyDecrease) {
+    const UnifiedMacroGesture gesture = unifiedMacroGesture(
+        event, macroPlayback.captured(), suppressLocalMacroClassification);
+    switch (gesture) {
+      case UnifiedMacroGesture::ImmediateCapture:
+        suppressLocalMacroClassification = true;
+        if (macroPlayback.recording()) {
+          macroPlayback.finishCapture();
+        } else {
+          beginLocalMacroCapture();
+        }
+        return;
+      case UnifiedMacroGesture::Replay:
+        macroPlayback.playCapture(micros());
+        return;
+      case UnifiedMacroGesture::ReplaceCapture:
+        beginLocalMacroCapture();
+        return;
+      case UnifiedMacroGesture::SuppressClassification:
+        suppressLocalMacroClassification = false;
+        return;
+      case UnifiedMacroGesture::None:
+        return;
+    }
+  }
+#endif
+
+  const bool momentary = mode == MODE_MOTION_CONTROL ||
+>>>>>>> origin/agent/webui-defects:Project/Firmware/FrontPanelRuntime.inc.h
                          (mode == MODE_USER_RELAY_CONTROL &&
                           userRelayBehavior && bit == BoardPins::KeyIncrease);
   if (momentary) {
     if (event == KeyEvent::Down) {
-      handleMenuAction(bit);
+      if (mode == MODE_MOTION_CONTROL) {
+        // A physical second same-side key is the exit chord, never a transient
+        // reverse command.  RF/host input cannot claim the chord path.
+        if (source == InputEventSource::Physical &&
+            motionKeyCompletesExitChord(shiftRegisters.activeInputs(), bit)) {
+          return;
+        }
+        now = millis();
+        const MotionKeyBinding binding =
+            motionKeyBinding(static_cast<MenuAction>(bit));
+        if (handleMotionPanelAction(bit, source == InputEventSource::Radio,
+                                    now)) {
+          motionPressedMask |= _BV(bit);
+          const uint8_t payload[] = {
+              binding.side,
+              static_cast<uint8_t>(binding.reverse ? 2 : 1)};
+          if (emitEvidence) {
+            acceptedAction(source, ControllerProtocol::RelaySide, payload,
+                           sizeof(payload));
+          }
+        }
+      } else {
+        handleMenuAction(bit, source == InputEventSource::Radio);
+        const uint8_t payload[] = {bit, static_cast<uint8_t>(event)};
+        if (emitEvidence) {
+          acceptedAction(source, ControllerProtocol::RemoteKeyGesture, payload,
+                         sizeof(payload));
+        }
+      }
     } else if (event == KeyEvent::Up) {
       now = millis();
       const uint32_t releaseNow = now;
+<<<<<<< HEAD:Project/Runtime/FrontPanelRuntime.inc.h
       if (mode == MODE_KEYS || mode == MODE_MOTION_CONTROL) {
         relays.stopSide(
             static_cast<::RelaySide>(bit <= BoardPins::KeyNext ? 0 : 1),
             releaseNow);
+=======
+      if (mode == MODE_MOTION_CONTROL) {
+        if ((motionPressedMask & _BV(bit)) == 0) {
+          return;
+        }
+        motionPressedMask &= static_cast<uint8_t>(~_BV(bit));
+        const MotionKeyBinding binding =
+            motionKeyBinding(static_cast<MenuAction>(bit));
+        relays.stopSide(static_cast<::RelaySide>(binding.side), releaseNow);
+        const uint8_t payload[] = {binding.side, 0};
+        if (emitEvidence) {
+          acceptedAction(source, ControllerProtocol::RelaySide, payload,
+                         sizeof(payload));
+        }
+>>>>>>> origin/agent/webui-defects:Project/Firmware/FrontPanelRuntime.inc.h
       } else {
         setSelectedUserRelay(false, releaseNow);
       }
     }
   } else if (keyEventRunsPrimaryAction(event) &&
-             (event != KeyEvent::HoldRepeat || mode != MODE_KEYS)) {
-    handleMenuAction(bit);
+             (event != KeyEvent::HoldRepeat ||
+              (mode != MODE_KEYS && mode != MODE_MOTION))) {
+#if PCCONTROLLER_ENABLE_MACRO_CAPTURE
+    const bool recordingBefore = macroPlayback.recording();
+#endif
+    handleMenuAction(bit, source == InputEventSource::Radio);
+    const bool unifiedLifecycle = mode == MODE_MOTION &&
+                                  bit >= BoardPins::KeyDecrease;
+    const uint8_t payload[] = {bit, static_cast<uint8_t>(event)};
+#if PCCONTROLLER_ENABLE_MACRO_CAPTURE
+    const bool openedCapture = !recordingBefore && macroPlayback.recording();
+    if (emitEvidence && !unifiedLifecycle) {
+      acceptedAction(source, ControllerProtocol::RemoteKeyGesture, payload,
+                     sizeof(payload), !openedCapture);
+    }
+#else
+    if (emitEvidence && !unifiedLifecycle) {
+      acceptedAction(source, ControllerProtocol::RemoteKeyGesture, payload,
+                     sizeof(payload));
+    }
+#endif
   } else if (event == KeyEvent::DoubleClick &&
              bit == BoardPins::KeyPrevious && isMenuMode(mode)) {
     setMenuPage(settingsStore.values().defaultMenuPage);
+    const uint8_t payload[] = {bit, static_cast<uint8_t>(event)};
+    if (emitEvidence) {
+      acceptedAction(source, ControllerProtocol::RemoteKeyGesture, payload,
+                     sizeof(payload));
+    }
   }
 }
 
@@ -931,7 +1206,7 @@ void applyKeyGesture(uint8_t bit, KeyEvent event) {
 // Feedback, display work, and later gesture classification never gate input.
 void keyGesture(uint8_t bit, KeyEvent event, void *) {
   if ((hostLcdFlags & HOST_PANEL_CAPTURED) == 0) {
-    applyKeyGesture(bit, event);
+    applyKeyGesture(bit, event, InputEventSource::Physical, true);
   }
 
   appEvents.key(bit, static_cast<uint8_t>(event));
@@ -958,16 +1233,50 @@ void serviceMotionExit(uint32_t at) {
     motionExitStartedAt = 0;
     return;
   }
+<<<<<<< HEAD:Project/Runtime/FrontPanelRuntime.inc.h
   if (sideAExit || sideBExit) {
     relays.allOff(at);
+=======
+  if (motionExitStartedAt == 0xFFFFFFFFUL) {
+    return;
+>>>>>>> origin/agent/webui-defects:Project/Firmware/FrontPanelRuntime.inc.h
   }
   if (motionExitStartedAt == 0) {
-    motionExitStartedAt = at;
+    // Stop both sides on the first observed chord edge, rather than waiting
+    // out the exit hold. The paired key that completed the chord was already
+    // suppressed before relay dispatch, so this cannot twitch directions.
+    for (uint8_t side = 0; side < 2; ++side) {
+      const ::RelaySide relaySide = static_cast<::RelaySide>(side);
+      const RelaySideStatus status = relays.sideStatus(relaySide);
+      if (!status.requestedEnabled && !status.appliedEnabled &&
+          status.phase == RelaySequencePhase::Idle) {
+        continue;
+      }
+      relays.stopSide(relaySide, at);
+      const uint8_t payload[] = {side, 0};
+      acceptedAction(InputEventSource::Physical,
+                     ControllerProtocol::RelaySide, payload,
+                     sizeof(payload));
+    }
+    relays.allOff(at);
+    acceptedAction(InputEventSource::Physical,
+                   ControllerProtocol::RelayAllOff, nullptr, 0);
+    motionPressedMask = 0;
+    // A zero-millisecond startup tick must not look like "not started" on
+    // the next cooperative pass.
+    motionExitStartedAt = at == 0 ? 1 : at;
   } else if (static_cast<uint32_t>(at - motionExitStartedAt) >=
              static_cast<uint16_t>(
                  settingsStore.values().motionExitHoldSeconds()) * 1000U) {
+<<<<<<< HEAD:Project/Runtime/FrontPanelRuntime.inc.h
     relays.allOff(at);
     setMenuPage(PAGE_DOOR);
+=======
+    setMenuPage(PAGE_MOTION);
+#if PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
+    buzzer.success();
+#endif
+>>>>>>> origin/agent/webui-defects:Project/Firmware/FrontPanelRuntime.inc.h
     motionExitStartedAt = 0xFFFFFFFFUL;
   }
 }
@@ -984,6 +1293,7 @@ void serviceSystemInputs(uint32_t at) {
       audioCues.play(value ? AudioCue::DoorOpen : AudioCue::DoorClosed);
     }
 #endif
+<<<<<<< HEAD:Project/Runtime/FrontPanelRuntime.inc.h
     static_assert(static_cast<uint8_t>(StatusLedCue::DoorClosed) ==
                       static_cast<uint8_t>(StatusLedCue::DoorOpen) + 1U,
                   "door cues must remain adjacent");
@@ -992,6 +1302,11 @@ void serviceSystemInputs(uint32_t at) {
             static_cast<uint8_t>(StatusLedCue::DoorClosed) -
             static_cast<uint8_t>(value)),
         720, at);
+=======
+    statusLeds.playCue(value ? StatusLedCue::DoorOpen
+                             : StatusLedCue::DoorClosed,
+                       720, at);
+>>>>>>> origin/agent/webui-defects:Project/Firmware/FrontPanelRuntime.inc.h
     relays.setMotionAllowed(motionPolicyAllows(), at);
     if (!relays.motionAllowed()) {
       if (modeManager.current() == MODE_MOTION_CONTROL) {
@@ -1044,12 +1359,16 @@ void serviceShiftRegisterAndKeys(uint32_t at) {
 }
 
 // Renders the current illumination mode from the packed flash text table.
+#if PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES && \
+    PCCONTROLLER_ENABLE_ILLUMINATION_AUTOMATION
 void showIlluminationMode() {
   display.showText(commonText(pgm_read_byte(
       ModeTextOffsets + static_cast<uint8_t>(illumination.mode()))));
 }
+#endif
 
 // Renders the selected PWM channel without a hidden demo/mode state.
+#if PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES
 void showPwmChannel() {
   const uint8_t channel = pwm.channel();
   char label[5] = {
@@ -1061,8 +1380,10 @@ void showPwmChannel() {
   };
   display.showText(label);
 }
+#endif
 
 // Alternates timer total/remaining while indefinite learning keeps LErn.
+#if PCCONTROLLER_ENABLE_LOCAL_RF_LEARNING_UI
 void showLearningProgress(uint32_t at) {
   if (learningMode != RF_LEARN_TIMER) {
     display.showText(commonText(TextLearn));
@@ -1080,11 +1401,13 @@ void showLearningProgress(uint32_t at) {
   };
   display.showText(text);
 }
+#endif
 
 // Advances a host-owned presentation. Every marquee walks beyond the last
 // character and renders one completely empty frame before it stops, waits, or
 // explicitly loops. Interval waits return ownership to the local menu page.
 bool showHostSegmentText(uint32_t at) {
+#if PCCONTROLLER_ENABLE_SCHEDULED_SEGMENTS
   constexpr uint8_t RepeatMask = 0x03U;
   constexpr uint8_t IntervalWaiting = 0x40U;
   constexpr uint8_t ForceScroll = 0x80U;
@@ -1131,6 +1454,27 @@ bool showHostSegmentText(uint32_t at) {
       return false;
     }
   }
+#else
+  // The production image retains ordinary static/scrolling host text without
+  // duplicating the host's once/loop/interval scheduler on the AVR.
+  const bool scrolling = hostSegmentTextLength > 4;
+  if (!scrolling) {
+    if (hostSegmentTextEndsAt != 0 &&
+        timeReached(at, hostSegmentTextEndsAt)) {
+      clearHostSegmentText();
+      return false;
+    }
+    display.showText(hostSegmentText);
+    return true;
+  }
+  if (timeReached(at, hostSegmentTextEndsAt)) {
+    hostSegmentScrollIndex =
+        hostSegmentScrollIndex < hostSegmentTextLength
+            ? static_cast<uint8_t>(hostSegmentScrollIndex + 1U)
+            : 0;
+    hostSegmentTextEndsAt = at + hostSegmentStepMs;
+  }
+#endif
   char window[5];
   for (uint8_t index = 0; index < 4; ++index) {
     const uint8_t source =
@@ -1156,10 +1500,12 @@ void serviceDisplay(uint32_t at) {
   if (currentMode == MODE_BOOT || currentMode == MODE_FAULT) {
     return;
   }
+#if PCCONTROLLER_ENABLE_LOCAL_RF_LEARNING_UI
   if (learningActive) {
     showLearningProgress(at);
     return;
   }
+#endif
   if (currentMode == MODE_FLASH_MESSAGE) {
     if (((at / 150U) & 1U) != 0) {
       display.showText(commonText(flashMessageSaved ? TextSave
@@ -1233,16 +1579,20 @@ void serviceDisplay(uint32_t at) {
     display.showText(temperatureSegmentText[index]);
     return;
   }
+#if PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES && \
+    PCCONTROLLER_ENABLE_ILLUMINATION_AUTOMATION
   if (currentMode == MODE_ILLUMINATION) {
     showIlluminationMode();
     return;
   }
+#endif
   if (currentMode == MODE_SOUND) {
     display.showText(commonText(settingsStore.values().silent()
                                     ? TextMute
                                     : TextBeep));
     return;
   }
+#if PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES
   if (currentMode == MODE_PWM) {
     if (!pwm.available()) {
       display.showUnavailable();
@@ -1253,6 +1603,7 @@ void serviceDisplay(uint32_t at) {
     }
     return;
   }
+#endif
   if (currentMode == MODE_RELAY) {
     if (((at / 900UL) & 1U) == 0) {
       const char relayLabel[4] = {
@@ -1271,6 +1622,7 @@ void serviceDisplay(uint32_t at) {
     display.showText(commonText(TextKey));
     return;
   }
+#if PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES
   if (currentMode == MODE_USER_PWM) {
     if (((at / 900UL) & 1U) == 0) {
       display.showInteger(static_cast<int32_t>(userPwmMenuIndex + 1));
@@ -1279,14 +1631,32 @@ void serviceDisplay(uint32_t at) {
     }
     return;
   }
+#endif
   if (currentMode == MODE_USER_RELAYS) {
     display.showInteger(static_cast<int32_t>(
         relays.activeRelayMask() >> 4));
     return;
   }
   if (currentMode == MODE_MOTION) {
-    display.showText(commonText(systemInputs.doorOpen() ? TextOpen
-                                                       : TextClosed));
+#if PCCONTROLLER_UNIFIED_PAGE_IDENTIFIES_KEYS
+    if (!timeReached(at, identifiedKeyEndsAt) && identifiedKey != 0) {
+      display.showInteger(identifiedKey);
+    } else {
+      display.showText(commonText(TextKey));
+    }
+#else
+#if PCCONTROLLER_ENABLE_MACRO_CAPTURE
+    if (macroPlayback.recording()) {
+      display.showText(commonText(TextRecord));
+    } else if (macroPlayback.captured()) {
+      display.showText(commonText(TextPlay));
+    } else {
+      display.showText(commonText(TextSide));
+    }
+#else
+    display.showText(commonText(TextSide));
+#endif
+#endif
     return;
   }
   if (currentMode == MODE_RF) {
@@ -1297,8 +1667,9 @@ void serviceDisplay(uint32_t at) {
     }
     return;
   }
-
   switch (currentMode) {
+#if PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES && \
+    PCCONTROLLER_ENABLE_ILLUMINATION_AUTOMATION
     case MODE_ILLUMINATION_MODE_EDIT:
       showIlluminationMode();
       return;
@@ -1308,6 +1679,8 @@ void serviceDisplay(uint32_t at) {
     case MODE_ILLUMINATION_OFF_EDIT:
       display.showInteger(illumination.offBrightness());
       return;
+#endif
+#if PCCONTROLLER_ENABLE_LOCAL_SETTINGS_EDITOR
     case MODE_SOUND_EDIT:
       if (settingsMenuItem == 0) {
         display.showText(commonText(settingsStore.values().silent()
@@ -1339,6 +1712,8 @@ void serviceDisplay(uint32_t at) {
         display.showInteger(value);
       }
       return;
+#endif
+#if PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES
     case MODE_PWM_CHANNEL_EDIT:
       display.showInteger(pwm.channel());
       return;
@@ -1358,6 +1733,7 @@ void serviceDisplay(uint32_t at) {
       display.showInteger(
           settingsStore.values().userPwm[userPwmMenuIndex]);
       return;
+#endif
     case MODE_USER_RELAY_CHANNEL_EDIT:
       display.showInteger(static_cast<int32_t>(userRelayMenuIndex + 5));
       return;
@@ -1369,9 +1745,24 @@ void serviceDisplay(uint32_t at) {
       display.showText(
           commonText(selectedUserRelayActive() ? TextOn : TextOff));
       return;
-    case MODE_MOTION_CONTROL:
-      display.showInteger(relays.activeRelayMask());
+    case MODE_MOTION_CONTROL: {
+      const uint8_t mask = relays.activeRelayMask();
+      const bool sideA = (mask & _BV(1)) != 0;
+      const bool sideB = (mask & _BV(3)) != 0;
+      if (!sideA && !sideB) {
+        display.showText(commonText(TextSide));
+        return;
+      }
+      const uint8_t side = sideA && sideB
+                               ? static_cast<uint8_t>((at / 500U) & 1U)
+                               : static_cast<uint8_t>(sideB);
+      const bool reverse = (mask & _BV(static_cast<uint8_t>(side * 2U))) != 0;
+      const char motion[5] = {
+          side == 0 ? 'A' : 'b', '-', reverse ? 'd' : 'U',
+          reverse ? 'n' : 'P', '\0'};
+      display.showText(motion);
       return;
+    }
     default:
       break;
   }

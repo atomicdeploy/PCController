@@ -1,6 +1,7 @@
 package installer
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -55,6 +56,35 @@ func TestPackageInventoryBindsHostExecutableAndResources(t *testing.T) {
 	}
 	if _, err := VerifyPackage(packageRoot, manifest.RootSHA256, ManifestOptions{Platform: "windows", Architecture: "amd64"}); err == nil {
 		t.Fatal("tampered executable was accepted")
+	}
+}
+
+func TestPackageInventoryAcceptsPackedRuntimeIdentity(t *testing.T) {
+	const version = "1.2.3-packed"
+	packageRoot, manifest := writeTestPackage(t, version, "packed")
+	executable, err := os.ReadFile(filepath.Join(packageRoot, "controller.exe"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Model the observable layout of an UPX-packed controller: runtime linker
+	// identity is not available as plaintext, while the Win32 version resource
+	// remains inspectable without executing the package.
+	for label, value := range map[string]string{
+		"source hash": testSourceSHA,
+		"version":     version,
+		"build time":  manifest.BuildTime,
+	} {
+		if bytes.Contains(executable, []byte(value)) {
+			t.Fatalf("packed-like executable unexpectedly exposes plaintext %s", label)
+		}
+	}
+	if !bytes.Contains(executable, utf16Bytes(version)) {
+		t.Fatal("packed-like executable lost its Win32 version resource")
+	}
+	if _, err := VerifyPackage(packageRoot, manifest.RootSHA256, ManifestOptions{
+		Platform: "windows", Architecture: "amd64",
+	}); err != nil {
+		t.Fatalf("packed-like package verification failed: %v", err)
 	}
 }
 
@@ -732,7 +762,7 @@ func writeTestPackage(t *testing.T, version, marker string) (string, PackageMani
 	t.Helper()
 	root := t.TempDir()
 	buildTime := "2026-08-02T12:34:56Z"
-	executable := minimalResourcePE(version, testSourceSHA, buildTime, marker)
+	executable := minimalResourcePE(version, marker)
 	executablePath := filepath.Join(root, "controller.exe")
 	if err := os.WriteFile(executablePath, executable, 0o755); err != nil {
 		t.Fatal(err)
@@ -772,7 +802,7 @@ func writeTestPackage(t *testing.T, version, marker string) (string, PackageMani
 	return root, manifest
 }
 
-func minimalResourcePE(version, sourceSHA, buildTime, marker string) []byte {
+func minimalResourcePE(version, marker string) []byte {
 	const peOffset = 64
 	const optionalBytes = 240
 	const sectionTable = peOffset + 24 + optionalBytes
@@ -793,6 +823,7 @@ func minimalResourcePE(version, sourceSHA, buildTime, marker string) []byte {
 	binary.LittleEndian.PutUint32(header[12:16], 0x1000)
 	binary.LittleEndian.PutUint32(header[16:20], uint32(resourceSize))
 	binary.LittleEndian.PutUint32(header[20:24], resourceOffset)
+<<<<<<< HEAD
 	resource := content[resourceOffset : resourceOffset+resourceSize]
 	// IMAGE_RESOURCE_DIRECTORY tree: numeric RT_VERSION (16), name ID 1,
 	// language 0409, then one data entry. The payload is real VS_VERSIONINFO.
@@ -834,6 +865,16 @@ func versionBlockBytes(key string, typeCode uint16, value []byte, children ...[]
 	valueLength := len(value)
 	if typeCode == 1 {
 		valueLength /= 2
+=======
+	resource := content[resourceOffset:]
+	offset := 0
+	for _, value := range [][]byte{
+		utf16Bytes(productidentity.DefaultTitle), utf16Bytes(version), utf16Bytes("controller.exe"),
+		[]byte(marker),
+	} {
+		copy(resource[offset:], value)
+		offset += len(value) + 8
+>>>>>>> origin/agent/webui-defects
 	}
 	binary.LittleEndian.PutUint16(content[2:4], uint16(valueLength))
 	binary.LittleEndian.PutUint16(content[4:6], typeCode)

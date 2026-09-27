@@ -27,6 +27,7 @@ func (roundTrip inventoryRoundTripper) RoundTrip(request *http.Request) (*http.R
 	return roundTrip(request)
 }
 
+<<<<<<< HEAD
 func TestRESTAppActionCannotInjectCoordinatorNavigationMetadata(t *testing.T) {
 	runtime := control.New(control.Options{})
 	broker := hostui.NewActionBroker()
@@ -152,6 +153,53 @@ func TestRESTTypedAppActionOutcomeLifecycle(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"state":"applied"`) {
 		t.Fatalf("outcome status=%d body=%s", response.Code, response.Body.String())
+=======
+func TestMacroRESTCRUDUsesSharedTypedLibrary(t *testing.T) {
+	client := controllerapi.New(controllerapi.Options{})
+	defer client.Close()
+	handler := websocketMux(context.Background(), &Service{
+		Client: client,
+		WebUI:  webui.Handler("/ipc"),
+	})
+
+	request := func(method, body string, wantStatus int) controllerapi.MacroSnapshot {
+		t.Helper()
+		httpRequest := httptest.NewRequest(method, "/api/macros", strings.NewReader(body))
+		httpRequest.RemoteAddr = "127.0.0.1:43210"
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httpRequest)
+		if response.Code != wantStatus {
+			t.Fatalf("%s /api/macros status=%d want=%d body=%s", method, response.Code, wantStatus, response.Body.String())
+		}
+		var snapshot controllerapi.MacroSnapshot
+		if err := json.Unmarshal(response.Body.Bytes(), &snapshot); err != nil {
+			t.Fatalf("decode %s macro snapshot: %v", method, err)
+		}
+		return snapshot
+	}
+
+	created := request(http.MethodPost, `{"id":42,"name":"Door close","category":"motion","color":"purple"}`, http.StatusCreated)
+	if len(created.Library) != 1 || created.Library[0].ID != 42 ||
+		created.Library[0].Name != "Door close" || created.Library[0].Category != "motion" {
+		t.Fatalf("unexpected created library: %+v", created.Library)
+	}
+
+	category := "maintenance"
+	updated := request(http.MethodPatch, `{"reference":"42","name":"Door park","category":"maintenance"}`, http.StatusOK)
+	if len(updated.Library) != 1 || updated.Library[0].Name != "Door park" ||
+		updated.Library[0].Category != category {
+		t.Fatalf("unexpected updated library: %+v", updated.Library)
+	}
+
+	listed := request(http.MethodGet, "", http.StatusOK)
+	if len(listed.Library) != 1 || listed.Library[0].Name != "Door park" {
+		t.Fatalf("GET did not return authoritative macro library: %+v", listed.Library)
+	}
+
+	deleted := request(http.MethodDelete, `{"reference":"42"}`, http.StatusOK)
+	if len(deleted.Library) != 0 {
+		t.Fatalf("DELETE retained macro library entries: %+v", deleted.Library)
+>>>>>>> origin/agent/webui-defects
 	}
 }
 
@@ -257,6 +305,17 @@ func TestCanonicalRESTRouteInventory(t *testing.T) {
 		{name: "power action", method: http.MethodPost, path: "/api/os/power", body: `{}`},
 		{name: "command", method: http.MethodPost, path: "/api/command", body: `{"command":"status"}`},
 		{name: "message", method: http.MethodPost, path: "/api/messages", body: `{"source":"client","target":"host","type":"operator.notice","text":"inventory"}`},
+		{name: "macro snapshot", method: http.MethodGet, path: "/api/macros"},
+		{name: "macro create", method: http.MethodPost, path: "/api/macros", body: `{"id":254,"name":"Inventory"}`},
+		{name: "macro update", method: http.MethodPatch, path: "/api/macros", body: `{"reference":"254","name":"Inventory updated"}`},
+		{name: "macro delete", method: http.MethodDelete, path: "/api/macros", body: `{"reference":"254"}`},
+		{name: "macro record start", method: http.MethodPost, path: "/api/macros/recording", body: `{"name":"Inventory recording"}`},
+		{name: "macro record stop", method: http.MethodDelete, path: "/api/macros/recording", body: `{"save":false}`},
+		{name: "board macro record start", method: http.MethodPost, path: "/api/macros/board-recording", body: `{"id":253}`},
+		{name: "board macro record stop", method: http.MethodDelete, path: "/api/macros/board-recording"},
+		{name: "board macro clear", method: http.MethodPost, path: "/api/macros/board-recording/clear", body: `{}`},
+		{name: "macro playback", method: http.MethodPost, path: "/api/macros/playback", body: `{"reference":"Inventory"}`},
+		{name: "macro playback cancel", method: http.MethodDelete, path: "/api/macros/playback", body: `{}`},
 		{name: "display", method: http.MethodPost, path: "/api/display", body: `{"target":"segments","text":"TEST","repeat":"once"}`},
 		{name: "app action", method: http.MethodPost, path: "/api/app/action", body: `{"kind":"app.progress","value":"normal 42","target":"tui"}`},
 		{name: "app action ack", method: http.MethodPost, path: "/api/app/action/ack", body: `{}`},

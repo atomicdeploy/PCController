@@ -71,6 +71,7 @@ func TestAppPageRPCPublishesValidatedTUIAction(t *testing.T) {
 	}
 }
 
+<<<<<<< HEAD
 func TestNavigationCommitRPCReturnsCorrelatedCoordinatorOutcome(t *testing.T) {
 	runtime := control.New(control.Options{})
 	defer runtime.Close()
@@ -85,6 +86,80 @@ func TestNavigationCommitRPCReturnsCorrelatedCoordinatorOutcome(t *testing.T) {
 	outcome, ok := response.Result.(hostui.NavigationOutcome)
 	if response.Error != nil || !ok || outcome.Revision != 7 || outcome.OperationID != "op-1" || outcome.Page != "events" {
 		t.Fatalf("response=%#v error=%+v", response, response.Error)
+=======
+func TestMessageSurfaceDeliveryAndExplicitActionRemainCorrelated(t *testing.T) {
+	runtime := control.New(control.Options{})
+	engine := shell.New(8)
+	if err := engine.Register(shell.Command{
+		Name: "mark", Usage: "mark", Summary: "record explicit action",
+		Run: func(context.Context, []string) (string, error) { return "marked", nil },
+	}); err != nil {
+		t.Fatal(err)
+	}
+	client := controllerapi.AttachSharedRuntime(runtime, engine)
+	defer client.Close()
+	message, err := client.SendTextMessage(context.Background(), controllerapi.TextMessage{
+		Source: "ipc", Target: "web", Type: "operator.prompt", Text: "Run mark",
+		Action: "mark", Correlation: "job-42", Delivery: "async",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := Service{Client: client}
+	deliveryParams, _ := json.Marshal(map[string]any{
+		"event_id": message.ID, "surface": "web",
+	})
+	delivery := service.Dispatch(context.Background(), Request{
+		Method: "controller.message.delivery", Params: deliveryParams,
+	})
+	if delivery.Error != nil {
+		t.Fatal(delivery.Error)
+	}
+	delivered, ok := delivery.Result.(controllerapi.Event)
+	if !ok || delivered.Kind != "message.delivery" || delivered.Correlation != "job-42" ||
+		delivered.Lifecycle != "completed" || delivered.Metadata["message_event_id"] == "" {
+		t.Fatalf("delivery=%#v", delivery.Result)
+	}
+
+	actionParams, _ := json.Marshal(map[string]any{
+		"event_id": message.ID, "surface": "web", "instance_id": "web:tab-1",
+	})
+	action := service.Dispatch(context.Background(), Request{
+		Method: "controller.message.action", Params: actionParams,
+	})
+	if action.Error != nil {
+		t.Fatal(action.Error)
+	}
+	applied, ok := action.Result.(controllerapi.Event)
+	if !ok || applied.Kind != "message.action" || applied.Correlation != "job-42" ||
+		applied.Action != "mark" || applied.Lifecycle != "completed" ||
+		applied.Metadata["output"] != "marked" {
+		t.Fatalf("action=%#v", action.Result)
+	}
+}
+
+func TestMessageActionPublishesFailureForUnsupportedAction(t *testing.T) {
+	client := controllerapi.AttachSharedRuntime(control.New(control.Options{}), shell.New(8))
+	defer client.Close()
+	message, err := client.SendTextMessage(context.Background(), controllerapi.TextMessage{
+		Source: "ipc", Target: "web", Type: "operator.prompt", Text: "Broken action",
+		Action: "app page", Correlation: "bad-action", Delivery: "async",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	params, _ := json.Marshal(map[string]any{"event_id": message.ID, "surface": "web"})
+	response := (&Service{Client: client}).Dispatch(context.Background(), Request{
+		Method: "controller.message.action", Params: params,
+	})
+	if response.Error != nil {
+		t.Fatal(response.Error)
+	}
+	failed, ok := response.Result.(controllerapi.Event)
+	if !ok || failed.Kind != "message.action" || failed.Lifecycle != "failed" ||
+		failed.State != "failed" || failed.Metadata["error"] == "" {
+		t.Fatalf("failed action=%#v", response.Result)
+>>>>>>> origin/agent/webui-defects
 	}
 }
 
@@ -1098,6 +1173,96 @@ func TestSocketIOEngineV4WebSocketAdapter(t *testing.T) {
 	}
 }
 
+func TestTwoWebSocketSubscribersReceiveSameActivityAndStateWithoutPolling(t *testing.T) {
+	runtime := control.New(control.Options{})
+	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	server := httptest.NewServer(websocketMux(context.Background(), &Service{
+		Client: client, WebSocketPath: "/ipc",
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	dial := func(name string) *websocket.Conn {
+		connection, _, err := websocket.Dial(
+			ctx, "ws"+strings.TrimPrefix(server.URL, "http")+"/ipc", nil,
+		)
+		if err != nil {
+			t.Fatalf("dial %s: %v", name, err)
+		}
+		t.Cleanup(func() { connection.CloseNow() })
+		request := map[string]any{
+			"jsonrpc": "2.0", "id": name, "method": "controller.subscribe",
+			"params": map[string]any{"topics": []string{"events", "state"}},
+		}
+		encoded, err := json.Marshal(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := connection.Write(ctx, websocket.MessageText, encoded); err != nil {
+			t.Fatalf("subscribe %s: %v", name, err)
+		}
+		for {
+			_, data, err := connection.Read(ctx)
+			if err != nil {
+				t.Fatalf("subscription acknowledgement %s: %v", name, err)
+			}
+			var response Response
+			if json.Unmarshal(data, &response) == nil && string(response.ID) == `"`+name+`"` {
+				if response.Error != nil {
+					t.Fatalf("subscription %s rejected: %#v", name, response.Error)
+				}
+				return connection
+			}
+		}
+	}
+	first, second := dial("first"), dial("second")
+
+	activity := runtime.PublishStructuredEvent(control.Event{
+		Kind: "message", Text: "Inspect output 3", Source: "ipc",
+		Target: "web,tui", Targets: []string{"web", "tui"},
+		MessageType: "operator.prompt", Correlation: "job-23",
+	})
+	state := runtime.PublishStructuredEvent(control.Event{
+		Kind: "status_led.changed", Text: "#12AB34", State: "#12AB34",
+	})
+
+	type pushedEvent struct {
+		Method string        `json:"method"`
+		Params control.Event `json:"params"`
+	}
+	readBoth := func(name string, connection *websocket.Conn) (control.Event, control.Event) {
+		var gotActivity, gotState control.Event
+		for gotActivity.ID == 0 || gotState.ID == 0 {
+			_, data, err := connection.Read(ctx)
+			if err != nil {
+				t.Fatalf("read %s broadcast events: %v", name, err)
+			}
+			var pushed pushedEvent
+			if json.Unmarshal(data, &pushed) != nil {
+				continue
+			}
+			switch pushed.Params.ID {
+			case activity.ID:
+				gotActivity = pushed.Params
+			case state.ID:
+				gotState = pushed.Params
+			}
+		}
+		return gotActivity, gotState
+	}
+	for name, connection := range map[string]*websocket.Conn{"first": first, "second": second} {
+		gotActivity, gotState := readBoth(name, connection)
+		if gotActivity.Kind != "message" || gotActivity.Stream != "activity" ||
+			gotActivity.Correlation != "job-23" {
+			t.Fatalf("%s activity=%+v", name, gotActivity)
+		}
+		if gotState.Kind != "status_led.changed" || gotState.Stream != "state" {
+			t.Fatalf("%s state=%+v", name, gotState)
+		}
+	}
+}
+
 func TestRawJSONRPCAndWebSocketShareOneIPCListener(t *testing.T) {
 	runtime := control.New(control.Options{})
 	engine := shell.New(8)
@@ -1626,6 +1791,13 @@ func TestCommandCatalogAndProgramStateReachRPCAndREST(t *testing.T) {
 		!catalogContains(descriptors, "program") {
 		t.Fatalf("RPC command catalog=%#v", catalog.Result)
 	}
+	melodies := service.Dispatch(context.Background(), Request{
+		Method: "controller.melodies.list",
+	})
+	_, ok = melodies.Result.([]controllerapi.Melody)
+	if melodies.Error != nil || !ok {
+		t.Fatalf("RPC melody catalog=%#v", melodies)
+	}
 	executeParams, _ := json.Marshal(map[string]string{"command": "help strip"})
 	executed := service.Dispatch(context.Background(), Request{
 		Method: "controller.command.execute", Params: executeParams,
@@ -1717,8 +1889,12 @@ func TestGenericCommandRemoteCapabilitiesDistinguishReadsFromMutations(t *testin
 		{"rf inspect 3", capabilityRead},
 		{"rf send 0x1234 24 1 350", capabilityBoard},
 		{"macro show demo", capabilityRead},
+		{"macro monitor", capabilityRead},
 		{"macro play demo", capabilityBoard},
 		{"macro create 1 demo", capabilityHostConfig},
+		{"macro update 1 renamed motion green", capabilityHostConfig},
+		{"macro rename 1 renamed", capabilityHostConfig},
+		{"macro category 1 motion", capabilityHostConfig},
 		{"macro record save", capabilityHostConfig},
 		{"melody create notify C4:100", capabilityHostConfig},
 		{"automation run door-open", capabilityAutomations},
@@ -1745,6 +1921,28 @@ func TestGenericCommandRemoteCapabilitiesDistinguishReadsFromMutations(t *testin
 		if got := commandCapability(test.command); got != test.want {
 			t.Errorf("commandCapability(%q)=%q want %q", test.command, got, test.want)
 		}
+	}
+
+	params, err := json.Marshal(map[string]string{
+		"command": "macro update 7 renamed motion green",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	access := Access{Remote: true, Transport: "websocket", Principal: "config-peer"}
+	config := appconfig.Defaults()
+	config.IPC.AllowRemote = true
+	config.IPC.RemotePolicy.HostConfiguration = true
+	config.IPC.RemotePolicy.BoardCommands = false
+	service := &Service{HostConfig: func() appconfig.Config { return config }}
+	if err := service.authorizeAccess(access, "controller.command.execute", params); err != nil {
+		t.Fatalf("config-only peer could not rename macro metadata: %v", err)
+	}
+	config.IPC.RemotePolicy.HostConfiguration = false
+	config.IPC.RemotePolicy.BoardCommands = true
+	if err := service.authorizeAccess(access, "controller.command.execute", params); err == nil ||
+		!strings.Contains(err.Error(), capabilityHostConfig) {
+		t.Fatalf("board-only peer mutated host macro metadata: %v", err)
 	}
 }
 

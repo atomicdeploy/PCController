@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"reflect"
 	"sort"
 	"strconv"
@@ -202,6 +203,22 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 		Summary: "inspect or update supported watched host settings",
 		Run: func(_ context.Context, args []string) (string, error) {
 			return hostConfigCommand(options, args)
+		},
+	})
+	mustRegister(shell.Command{
+		Name: "peripherals", Usage: "peripherals", Summary: "list ordered host presentation descriptors",
+		Run: func(_ context.Context, args []string) (string, error) {
+			if len(args) != 0 {
+				return "", errors.New("usage: peripherals")
+			}
+			if options.HostConfig == nil {
+				return "", errors.New("host configuration is unavailable")
+			}
+			encoded, err := json.MarshalIndent(appconfig.ControlDescriptors(options.HostConfig().UI), "", "  ")
+			if err != nil {
+				return "", err
+			}
+			return string(encoded), nil
 		},
 	})
 	mustRegister(shell.Command{
@@ -443,9 +460,9 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 					return "", err
 				}
 				return fmt.Sprintf(
-					"tLED=%.2f C tBT=%.2f C",
-					float64(status.TLEDCenti)/100,
-					float64(status.TBTCenti)/100,
+					"tLED=%s tBT=%s",
+					formatLEDTemperature(status, 2),
+					formatBTAudioTemperature(status, 2),
 				), nil
 			}
 			if len(args) != 1 ||
@@ -484,6 +501,34 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 				return "", err
 			}
 			return fmt.Sprintf("stream period set to %d ms", value), nil
+		},
+	})
+	mustRegister(shell.Command{
+		Name: "message", Usage: "message TARGETS TYPE TEXT",
+		Summary: "publish a bounded host notification event to native, web, TUI, or other targets",
+		Run: func(_ context.Context, args []string) (string, error) {
+			if len(args) < 3 {
+				return "", errors.New("usage: message TARGETS TYPE TEXT")
+			}
+			targets := strings.Split(strings.ToLower(strings.TrimSpace(args[0])), ",")
+			for _, target := range targets {
+				if !messageTargetAllowed(strings.TrimSpace(target)) {
+					return "", fmt.Errorf("unsupported message target %q", target)
+				}
+			}
+			kind := strings.ToLower(strings.TrimSpace(args[1]))
+			if kind == "" || len(kind) > 32 {
+				return "", errors.New("message type must contain 1..32 characters")
+			}
+			text := strings.TrimSpace(strings.Join(args[2:], " "))
+			if text == "" || len(text) > 4096 {
+				return "", errors.New("message text must contain 1..4096 characters")
+			}
+			event := runtime.PublishStructuredEvent(Event{
+				Kind: "message", Lifecycle: "completed", Source: "cli", Target: strings.Join(targets, ","),
+				Targets: targets, MessageType: kind, Severity: "info", Delivery: "sync", Text: text,
+			})
+			return fmt.Sprintf("message id=%d targets=%s", event.ID, strings.Join(targets, ",")), nil
 		},
 	})
 	mustRegister(shell.Command{
@@ -529,7 +574,8 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 				if err := settings.SetMotionBreakMS(uint16(milliseconds)); err != nil {
 					return "", err
 				}
-				if err := storeSettings(ctx, runtime, settings); err != nil {
+				settings, err = storeSettingsLive(ctx, runtime, settings)
+				if err != nil {
 					return "", err
 				}
 				return formatSettings(settings), nil
@@ -561,7 +607,8 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 				if err := settings.SetMotionDoorPolicy(policy); err != nil {
 					return "", err
 				}
-				if err := storeSettings(ctx, runtime, settings); err != nil {
+				settings, err = storeSettingsLive(ctx, runtime, settings)
+				if err != nil {
 					return "", err
 				}
 				return formatSettings(settings), nil
@@ -587,7 +634,8 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 					return "", err
 				}
 				settings.MotionExitHoldSeconds = holdSeconds
-				if err := storeSettings(ctx, runtime, settings); err != nil {
+				settings, err = storeSettingsLive(ctx, runtime, settings)
+				if err != nil {
 					return "", err
 				}
 				return formatSettings(settings), nil
@@ -614,7 +662,8 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 				default:
 					return "", fmt.Errorf("buzzer cue group must be door or relay")
 				}
-				if err := storeSettings(ctx, runtime, settings); err != nil {
+				settings, err = storeSettingsLive(ctx, runtime, settings)
+				if err != nil {
 					return "", err
 				}
 				return formatSettings(settings), nil
@@ -651,7 +700,8 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 				if err := settings.SetCurrentDecimals(current); err != nil {
 					return "", err
 				}
-				if err := storeSettings(ctx, runtime, settings); err != nil {
+				settings, err = storeSettingsLive(ctx, runtime, settings)
+				if err != nil {
 					return "", err
 				}
 				return formatSettings(settings), nil
@@ -671,7 +721,8 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 				if err := settings.SetStatusColor(color); err != nil {
 					return "", err
 				}
-				if err := storeSettings(ctx, runtime, settings); err != nil {
+				settings, err = storeSettingsLive(ctx, runtime, settings)
+				if err != nil {
 					return "", err
 				}
 				return formatSettings(settings), nil
@@ -684,7 +735,8 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 				if err != nil {
 					return "", err
 				}
-				if err := storeSettings(ctx, runtime, settings); err != nil {
+				settings, err = storeSettingsLive(ctx, runtime, settings)
+				if err != nil {
 					return "", err
 				}
 				return formatSettings(settings), nil
@@ -807,25 +859,35 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 		},
 	})
 	mustRegister(shell.Command{
-		Name: "buzzer", Usage: "buzzer FREQUENCY_HZ DURATION_MS | buzzer status | buzzer path board|host|both|none", Summary: "play a tone or select board/PC buzzer routing",
+		Name: "buzzer", Aliases: []string{"beep"}, Usage: "buzzer|beep [FREQUENCY_HZ [DURATION_MS]] | buzzer 0 0 | buzzer status | buzzer path board|host|both|none", Summary: "play/stop a bounded tone or select board/PC buzzer routing",
 		Run: func(ctx context.Context, args []string) (string, error) {
 			if len(args) >= 1 && (strings.EqualFold(args[0], "status") || strings.EqualFold(args[0], "path")) {
 				return buzzerRoutingCommand(ctx, runtime, options, args)
 			}
-			values, err := exactUintArgs(args, 2, 16, "buzzer FREQUENCY_HZ DURATION_MS")
+			frequencyHz, durationMS, err := parseBuzzerToneArgs(args)
 			if err != nil {
 				return "", err
 			}
-			if values[1] == 0 {
-				return "", errors.New("buzzer duration must be nonzero")
-			}
-			if values[0] != 0 && (values[0] < 20 || values[0] > 20000) {
-				return "", errors.New(
-					"buzzer frequency must be 0 or 20..20000 Hz",
-				)
-			}
+			stopping := frequencyHz == 0 && durationMS == 0
 			outputs.StopMelody()
-			if err := command(ctx, runtime, native.OpBuzzer, native.BuzzerPayload(uint16(values[0]), uint16(values[1]))); err != nil {
+			if stopping {
+				if err := command(ctx, runtime, native.OpBuzzer, native.BuzzerPayload(0, 0)); err != nil {
+					return "", err
+				}
+				return "buzzer stopped", nil
+			}
+			// A direct tone is an explicit action on every surface, but it must
+			// never bypass the firmware-owned silent flag.  Query before sending
+			// so CLI/RPC/Web/TUI can report a safe, observable suppression rather
+			// than relying on an inaudible side effect on the board.
+			settings, err := querySettings(ctx, runtime)
+			if err != nil {
+				return "", err
+			}
+			if settings.Flags&native.SettingsSilent != 0 {
+				return "buzzer suppressed: board is silent", nil
+			}
+			if err := command(ctx, runtime, native.OpBuzzer, native.BuzzerPayload(frequencyHz, durationMS)); err != nil {
 				return "", err
 			}
 			return "buzzer command accepted", nil
@@ -876,8 +938,13 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 		},
 	})
 	mustRegister(shell.Command{
+<<<<<<< HEAD
 		Name: "macro", Usage: "macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|rename NAME_OR_ID NAME|category NAME_OR_ID CATEGORY|delete NAME_OR_ID|record start|start-mcu NAME [CATEGORY [COLOR]]|record status|record save|record discard|play NAME_OR_ID|status|monitor|cancel [keep]",
 		Summary: "record and play named host or MCU-timed multi-peripheral macros",
+=======
+		Name: "macro", Usage: "macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|update NAME_OR_ID NEW_NAME [CATEGORY [COLOR]]|rename NAME_OR_ID NAME|category NAME_OR_ID CATEGORY|delete NAME_OR_ID|record start NAME [CATEGORY [COLOR]]|record board start ID|stop|clear [force]|status|record status|save|stop|discard|play NAME_OR_ID|status|monitor|cancel [keep]",
+		Summary: "manage and play MCU-timed multi-peripheral macros",
+>>>>>>> origin/agent/webui-defects
 		Run: func(ctx context.Context, args []string) (string, error) {
 			return macroCommand(ctx, macroRunner, args)
 		},
@@ -1236,6 +1303,15 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 		},
 	})
 	return engine
+}
+
+func messageTargetAllowed(target string) bool {
+	switch target {
+	case "native", "web", "tui", "host", "client", "server", "bridge", "board", "lcd", "all":
+		return true
+	default:
+		return false
+	}
 }
 
 func encodeLiveSettingsExport(settings native.Settings) (string, error) {
@@ -2409,16 +2485,22 @@ func silentCommand(
 	default:
 		return "", errors.New(usage)
 	}
+<<<<<<< HEAD
 	if (settings.Flags&native.SettingsSilent != 0) == beforeSilent {
 		return fmt.Sprintf("silent=%t board_silent=%t already applied", beforeSilent, beforeSilent), nil
 	}
 	if err := storeSettings(ctx, runtime, settings); err != nil {
+=======
+	settings, err = storeSettingsLive(ctx, runtime, settings)
+	if err != nil {
+>>>>>>> origin/agent/webui-defects
 		return "", err
 	}
 	return fmt.Sprintf(
-		"silent=%t board_silent=%t saved to board EEPROM and applied live",
+		"silent=%t board_silent=%t applied_live=true persisted=%t",
 		settings.Flags&native.SettingsSilent != 0,
 		settings.Flags&native.SettingsSilent != 0,
+		settings.Persisted,
 	), nil
 }
 
@@ -2485,8 +2567,44 @@ func storeSettings(
 	runtime *Runtime,
 	settings native.Settings,
 ) error {
+<<<<<<< HEAD
 	_, err := runtime.SetSettings(ctx, settings)
 	return err
+=======
+	_, err := storeSettingsLive(ctx, runtime, settings)
+	return err
+}
+
+// storeSettingsLive acknowledges the distinction between command acceptance
+// and observable live state.  SET_SETTINGS has no response body, so every
+// host-owned settings mutation performs one bounded GET_SETTINGS readback.
+// The returned persistence bit is deliberately not guessed: callers display
+// exactly what the board reports while its EEPROM commit completes.
+func storeSettingsLive(
+	ctx context.Context,
+	runtime *Runtime,
+	settings native.Settings,
+) (native.Settings, error) {
+	payload, err := settings.Payload()
+	if err != nil {
+		return native.Settings{}, err
+	}
+	if err := command(ctx, runtime, native.OpSetSettings, payload); err != nil {
+		return native.Settings{}, err
+	}
+	live, err := querySettings(ctx, runtime)
+	if err != nil {
+		return native.Settings{}, fmt.Errorf("read live settings after accepted write: %w", err)
+	}
+	livePayload, err := live.Payload()
+	if err != nil {
+		return native.Settings{}, fmt.Errorf("encode live settings readback: %w", err)
+	}
+	if !bytes.Equal(payload, livePayload) {
+		return native.Settings{}, errors.New("settings write was accepted but live readback differs")
+	}
+	return live, nil
+>>>>>>> origin/agent/webui-defects
 }
 
 func settingsFromSetArgs(args []string) (native.Settings, error) {
@@ -3266,7 +3384,11 @@ func relayCommand(
 	args []string,
 ) (string, error) {
 	if len(args) == 1 && strings.EqualFold(args[0], "off") {
-		return "all relays off", command(ctx, runtime, native.OpRelayAllOff, nil)
+		snapshot := runtime.Snapshot()
+		changed := !snapshot.HaveStatus || snapshot.Status.ActiveRelays != 0
+		return "all relays off", commandRelayWithCue(
+			ctx, runtime, native.OpRelayAllOff, nil, false, changed,
+		)
 	}
 	if len(args) >= 1 && strings.EqualFold(args[0], "test") {
 		step := uint64(250)
@@ -3310,8 +3432,12 @@ func relayCommand(
 				return "", err
 			}
 		}
+		snapshot := runtime.Snapshot()
+		changed := relaySideStateChanged(snapshot, side, motion)
 		return fmt.Sprintf("relay side %s %s", args[1], args[2]),
-			command(ctx, runtime, native.OpRelaySide, payload)
+			commandRelayWithCue(
+				ctx, runtime, native.OpRelaySide, payload, motion != 0, changed,
+			)
 	}
 	if len(args) == 2 {
 		number, err := strconv.ParseUint(args[0], 0, 8)
@@ -3347,10 +3473,71 @@ func relayCommand(
 				return "", err
 			}
 		}
+		snapshot := runtime.Snapshot()
+		changed := !snapshot.HaveStatus ||
+			(snapshot.Status.ActiveRelays&(1<<byte(number-1)) != 0) != active
 		return fmt.Sprintf("relay R%d %s", number, onOff(active)),
-			command(ctx, runtime, native.OpRelaySet, payload)
+			commandRelayWithCue(
+				ctx, runtime, native.OpRelaySet, payload, active, changed,
+			)
 	}
 	return "", fmt.Errorf("usage: relay N on|off|toggle | relay side left|right stop|up|down | relay off | relay test [MS]")
+}
+
+// commandRelayWithCue keeps every shell-backed surface on one policy. The cue
+// is emitted once per accepted logical action, never once per electrical frame
+// of a firmware motion reversal. Board silent/relay-audio settings remain the
+// authoritative user controls.
+func commandRelayWithCue(
+	ctx context.Context,
+	runtime *Runtime,
+	opcode byte,
+	payload []byte,
+	activated, changed bool,
+) error {
+	if err := command(ctx, runtime, opcode, payload); err != nil {
+		return err
+	}
+	if !changed {
+		return nil
+	}
+	snapshot := runtime.Snapshot()
+	if !snapshot.HaveSettings ||
+		!snapshot.Settings.RelayAudioEnabled() ||
+		snapshot.Settings.Flags&native.SettingsSilent != 0 {
+		return nil
+	}
+	frequency := uint16(1250)
+	if activated {
+		frequency = 1900
+	}
+	if err := command(
+		ctx, runtime, native.OpBuzzer, native.BuzzerPayload(frequency, 35),
+	); err != nil {
+		return fmt.Errorf("relay applied but its buzzer cue failed: %w", err)
+	}
+	return nil
+}
+
+func relaySideStateChanged(snapshot Snapshot, side, motion byte) bool {
+	if !snapshot.HaveStatus {
+		return true
+	}
+	shift := side * 2
+	current := (snapshot.Status.ActiveRelays >> shift) & 0x03
+	var desired byte
+	switch motion {
+	case 1:
+		desired = 0x02
+	case 2:
+		desired = 0x03
+	default:
+		if snapshot.HaveSettings &&
+			snapshot.Settings.OutputPersistence&native.OutputPersistDirectionOnly != 0 {
+			desired = current & 0x01
+		}
+	}
+	return current != desired
 }
 
 func requireMotionAllowed(
@@ -4365,11 +4552,17 @@ func safeFlashCommand(
 	}
 	fmt.Fprintln(&output, "application UART released; guarded programmer transaction has exclusive ownership")
 	fmt.Fprintf(&output, "pre-flash method=%s firmware=%s\n", method, firmwarePath)
+	var migratedEEPROMPath string
+	defer func() {
+		if migratedEEPROMPath != "" {
+			_ = os.Remove(migratedEEPROMPath)
+		}
+	}()
 	var afterBackup programmer.PostBackupOperation
 	if serialWasOpen && programmingSession != nil && reinitializeEEPROM {
 		afterBackup = func(
 			backupContext context.Context,
-			_ programmer.AutomaticPreflashResult,
+			backupResult programmer.AutomaticPreflashResult,
 			writer io.Writer,
 		) error {
 			reconnectContext, reconnectCancel := context.WithTimeout(
@@ -4396,6 +4589,18 @@ func safeFlashCommand(
 			if closeErr != nil {
 				return fmt.Errorf("release application UART after arming programming latch: %w", closeErr)
 			}
+			path, decoded, err := programmer.StageMigratedProgrammingEEPROM(
+				backupResult.BackupManifest, dataPaths,
+			)
+			if err != nil {
+				return fmt.Errorf("stage migrated Silent/Prog EEPROM for atomic application write: %w", err)
+			}
+			migratedEEPROMPath = path
+			fmt.Fprintf(
+				writer,
+				"semantic EEPROM schema-%d migration staged for the same flash programmer session\n",
+				decoded.Schema,
+			)
 			return nil
 		}
 	}
@@ -4411,6 +4616,11 @@ func safeFlashCommand(
 		runner,
 		func(flashContext context.Context, path string, writer io.Writer) error {
 			writeOptions.HexPath = path
+			if migratedEEPROMPath != "" {
+				writeOptions.EEPROMHexPath = migratedEEPROMPath
+				writeOptions.ConfirmEEPROMWrite = true
+				fmt.Fprintln(writer, "atomic programmer transaction: flash first, migrated EEPROM second, one final target reset")
+			}
 			return execute(flashContext, writeOptions, writer)
 		},
 		&output,
@@ -4429,19 +4639,6 @@ func safeFlashCommand(
 		fmt.Fprintln(&output, "guarded firmware flash completed")
 	}
 	verifiedProgram := flashErr == nil && result.Flashed
-	if verifiedProgram && reinitializeEEPROM {
-		factoryErr := programmer.ProgramLatchedFactoryEEPROM(
-			context.WithoutCancel(ctx), dataPaths, writeOptions,
-			programmer.EEPROMProgramOperation(execute), &output,
-		)
-		if factoryErr != nil {
-			flashErr = errors.Join(flashErr, factoryErr)
-			verifiedProgram = false
-		} else {
-			fmt.Fprintln(&output,
-				"host-owned Silent/Prog factory EEPROM programmed and independently read back")
-		}
-	}
 	if programmingSession != nil {
 		if markerErr := MarkProgrammingSessionComplete(
 			programmingSession, verifiedProgram,
@@ -4677,8 +4874,10 @@ func parseProgramOperation(value string) programmer.Operation {
 }
 
 func formatStatus(status native.Status) string {
+	ledTemperature := formatLEDTemperature(status, 2)
+	btTemperature := formatBTAudioTemperature(status, 2)
 	return fmt.Sprintf(
-		"uptime=%s supply=%.3fV bus=%.3fV current=%dmA power=%dmW tLED=%.2fC tBT=%.2fC\n"+
+		"uptime=%s supply=%.3fV bus=%.3fV current=%dmA power=%dmW tLED=%s tBT=%s\n"+
 			"flags=0x%04X running=%t host_offline=%t hot=%t inputs=0x%02X keys=0x%02X relays=0x%02X menu=%d mode=%d door=%t bt=%d\n"+
 			"PWM available=%t channel=%d value=%d errors=%d LCD=0x%02X framing=%d crc=%d reset_cause=0x%02X reset_count=%d",
 		(time.Duration(status.UptimeMS) * time.Millisecond).Round(time.Millisecond),
@@ -4686,8 +4885,8 @@ func formatStatus(status native.Status) string {
 		float64(status.BusMV)/1000,
 		status.CurrentMA,
 		status.PowerMW,
-		float64(status.TLEDCenti)/100,
-		float64(status.TBTCenti)/100,
+		ledTemperature,
+		btTemperature,
 		status.Flags,
 		status.ProgramRunning,
 		status.HostOffline,
@@ -4711,13 +4910,71 @@ func formatStatus(status native.Status) string {
 	)
 }
 
+func formatStatusTemperature(value int16, available bool, decimals int) string {
+	if !available {
+		return "unavailable"
+	}
+	return fmt.Sprintf("%.*fC", decimals, float64(value)/100)
+}
+
+func formatLEDTemperature(status native.Status, decimals int) string {
+	value, available := status.LEDTemperature()
+	return formatStatusTemperature(value, available, decimals)
+}
+
+func formatBTAudioTemperature(status native.Status, decimals int) string {
+	value, available := status.BTAudioTemperature()
+	return formatStatusTemperature(value, available, decimals)
+}
+
+const (
+	defaultBuzzerFrequencyHz uint16 = 2000
+	defaultBuzzerDurationMS  uint16 = 40
+	minimumBuzzerFrequencyHz uint64 = 20
+	maximumBuzzerFrequencyHz uint64 = 20000
+	maximumBuzzerDurationMS  uint64 = 60000
+)
+
+func parseBuzzerToneArgs(args []string) (uint16, uint16, error) {
+	if len(args) > 2 {
+		return 0, 0, errors.New("usage: buzzer|beep [FREQUENCY_HZ [DURATION_MS]]")
+	}
+	if len(args) == 0 {
+		return defaultBuzzerFrequencyHz, defaultBuzzerDurationMS, nil
+	}
+	frequency, err := strconv.ParseUint(args[0], 0, 16)
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid buzzer frequency %q", args[0])
+	}
+	duration := uint64(defaultBuzzerDurationMS)
+	if len(args) == 2 {
+		duration, err = strconv.ParseUint(args[1], 0, 16)
+		if err != nil {
+			return 0, 0, fmt.Errorf("invalid buzzer duration %q", args[1])
+		}
+	}
+	if frequency == 0 && duration == 0 && len(args) == 2 {
+		return 0, 0, nil
+	}
+	if frequency == 0 {
+		return 0, 0, errors.New("buzzer stop is exactly 0 0; timed pauses belong to melodies")
+	}
+	if frequency < minimumBuzzerFrequencyHz || frequency > maximumBuzzerFrequencyHz {
+		return 0, 0, fmt.Errorf("buzzer frequency must be %d..%d Hz", minimumBuzzerFrequencyHz, maximumBuzzerFrequencyHz)
+	}
+	if duration == 0 || duration > maximumBuzzerDurationMS {
+		return 0, 0, fmt.Errorf("buzzer duration must be 1..%d ms", maximumBuzzerDurationMS)
+	}
+	return uint16(frequency), uint16(duration), nil
+}
+
 func formatSettings(settings native.Settings) string {
 	return fmt.Sprintf(
 		"flags=0x%02X light=%d on=%d off=%d display_open=%d display_closed=%d status=%d "+
 			"output_persistence=0x%02X relay_restore_mask=0x%02X stream=%dms default_page=%d save_last=%t "+
 			"status_color=%d voltage_decimals=%d current_decimals=%d "+
 			"motion_door=%s motion_break=%dms motion_exit_hold=%ds "+
-			"door_audio=%t relay_audio=%t programming_latch=%t extended=0x%02X",
+			"door_audio=%t relay_audio=%t programming_latch=%t persisted=%t extended=0x%02X",
 		settings.Flags,
 		settings.LightMode,
 		settings.OnBrightness,
@@ -4739,6 +4996,7 @@ func formatSettings(settings native.Settings) string {
 		settings.DoorAudioEnabled(),
 		settings.RelayAudioEnabled(),
 		settings.Flags&native.SettingsProgrammingMode != 0,
+		settings.Persisted,
 		settings.ExtendedFlags,
 	)
 }
@@ -4765,11 +5023,14 @@ func formatHello(hello native.Hello) string {
 			stamp = "unknown"
 		}
 		return fmt.Sprintf(
-			"%s build=%08X timestamp=%s packed=0x%08X",
+			"%s build=%08X timestamp=%s packed=0x%08X profile=%s(%d) build_features=0x%02X",
 			base,
 			hello.BuildHash,
 			stamp,
 			hello.BuildTimestamp,
+			native.FeatureProfileName(hello.FeatureProfile),
+			hello.FeatureProfile,
+			hello.BuildFeatures,
 		)
 	}
 	return base + " build identity unavailable"
@@ -4807,7 +5068,11 @@ func macroCommand(
 	runner *MacroRunner,
 	args []string,
 ) (string, error) {
+<<<<<<< HEAD
 	const usage = "macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|rename NAME_OR_ID NEW_NAME|category NAME_OR_ID CATEGORY|delete NAME_OR_ID|record start|start-mcu NAME [CATEGORY [COLOR]]|record status|record save|record discard|play NAME_OR_ID|status|monitor|cancel [keep]"
+=======
+	const usage = "macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|update NAME_OR_ID NEW_NAME [CATEGORY [COLOR]]|rename NAME_OR_ID NAME|category NAME_OR_ID CATEGORY|delete NAME_OR_ID|record start NAME [CATEGORY [COLOR]]|record board start ID|stop|clear [force]|status|record status|save|stop|discard|play NAME_OR_ID|status|monitor|cancel [keep]"
+>>>>>>> origin/agent/webui-defects
 	if len(args) < 1 {
 		return "", fmt.Errorf("usage: %s", usage)
 	}
@@ -4853,18 +5118,33 @@ func macroCommand(
 			return "", err
 		}
 		lines := []string{fmt.Sprintf(
+<<<<<<< HEAD
 			"macro id=%d name=%q mode=%s category=%q color=%q label=%q steps=%d duration=%s encoded=%dB tolerance=%dus keep_on_cancel=%t",
 			macro.ID, macro.Name, normalizedMacroMode(macro.Mode), macro.Category, normalizedMacroColor(macro.Color),
+=======
+			"macro id=%d name=%q category=%q color=%q label=%q steps=%d duration=%s encoded=%dB tolerance=%dus keep_on_cancel=%t recording_source=%q capture_dropped=%d capture_missing=%d",
+			macro.ID, macro.Name, macro.Category, normalizedMacroColor(macro.Color),
+>>>>>>> origin/agent/webui-defects
 			macro.Label, len(macro.Steps), time.Duration(compiled.durationUS)*time.Microsecond,
 			len(compiled.stream), macro.TimingToleranceUS, macro.KeepOutputsOnCancel,
+			macro.RecordingSource, macro.CaptureDroppedSteps, macro.CaptureMissingSteps,
 		)}
+		previousDue := uint32(0)
 		for index, step := range macro.Steps {
 			due, _ := macroStepDueUS(step)
+			delta := due - previousDue
 			lines = append(lines, fmt.Sprintf(
+<<<<<<< HEAD
 				"%3d  +%-12s %-12s target=%d value=%d opcode=0x%02X payload=%X text=%q frequency=%dHz duration=%dms",
 				index+1, time.Duration(due)*time.Microsecond, step.Kind, step.Target, step.Value,
 				compiled.steps[index].opcode, compiled.steps[index].payload, step.Text, step.FrequencyHz, step.DurationMS,
+=======
+				"%3d  at_us=%-10d delta_us=%-10d (+%-12s) %-12s target=%d value=%d",
+				index+1, due, delta, time.Duration(due)*time.Microsecond,
+				step.Kind, step.Target, step.Value,
+>>>>>>> origin/agent/webui-defects
 			))
+			previousDue = due
 		}
 		return strings.Join(lines, "\n"), nil
 	case "create":
@@ -4887,6 +5167,7 @@ func macroCommand(
 			return "", err
 		}
 		return fmt.Sprintf("macro %d/%s draft created; add steps in the watched host config or record a new macro", macro.ID, macro.Name), nil
+<<<<<<< HEAD
 	case "rename", "category":
 		if len(args) != 3 {
 			return "", fmt.Errorf("usage: macro %s NAME_OR_ID VALUE", args[0])
@@ -4900,6 +5181,24 @@ func macroCommand(
 			return "", err
 		}
 		return fmt.Sprintf("macro %d/%s category=%q updated", macro.ID, macro.Name, macro.Category), nil
+=======
+	case "update":
+		if len(args) < 3 || len(args) > 5 {
+			return "", fmt.Errorf("usage: macro update NAME_OR_ID NEW_NAME [CATEGORY [COLOR]]")
+		}
+		var category, color *string
+		if len(args) >= 4 {
+			category = &args[3]
+		}
+		if len(args) == 5 {
+			color = &args[4]
+		}
+		macro, err := runner.UpdateMetadata(args[1], args[2], category, color)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("macro %d renamed to %q category=%q color=%q", macro.ID, macro.Name, macro.Category, macro.Color), nil
+>>>>>>> origin/agent/webui-defects
 	case "delete", "remove":
 		if len(args) != 2 {
 			return "", fmt.Errorf("usage: macro delete NAME_OR_ID")
@@ -4908,12 +5207,83 @@ func macroCommand(
 			return "", err
 		}
 		return "macro deleted from HOST configuration", nil
+	case "rename":
+		if len(args) != 3 {
+			return "", fmt.Errorf("usage: macro rename NAME_OR_ID NAME")
+		}
+		macro, err := runner.Rename(args[1], args[2])
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("macro %d renamed to %q in HOST configuration", macro.ID, macro.Name), nil
+	case "category", "categorize":
+		if len(args) != 3 {
+			return "", fmt.Errorf("usage: macro category NAME_OR_ID CATEGORY")
+		}
+		macro, err := runner.SetCategory(args[1], args[2])
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("macro %d/%s category set to %q in HOST configuration", macro.ID, macro.Name, macro.Category), nil
 	case "record":
 		if len(args) < 2 {
+<<<<<<< HEAD
 			return "", fmt.Errorf("usage: macro record start|start-mcu NAME [CATEGORY [COLOR]]|status|save|discard")
 		}
 		switch strings.ToLower(args[1]) {
 		case "start", "start-mcu":
+=======
+			return "", fmt.Errorf("usage: macro record start NAME [CATEGORY [COLOR]]|board start ID|stop|clear [force]|status|save|stop|discard")
+		}
+		switch strings.ToLower(args[1]) {
+		case "board":
+			if len(args) < 3 {
+				return "", errors.New("usage: macro record board start ID|stop|clear [force]|status")
+			}
+			switch strings.ToLower(args[2]) {
+			case "start":
+				if len(args) != 4 {
+					return "", errors.New("usage: macro record board start ID")
+				}
+				id, parseErr := strconv.ParseUint(args[3], 0, 8)
+				if parseErr != nil {
+					return "", fmt.Errorf("macro capture ID: %w", parseErr)
+				}
+				state, startErr := runner.StartBoardCapture(ctx, byte(id))
+				if startErr != nil {
+					return "", startErr
+				}
+				return fmt.Sprintf("board macro capture %d started; front-panel, RF, and accepted ordinary actions use the retained MCU ring", state.BoardID), nil
+			case "stop", "save":
+				if len(args) != 3 {
+					return "", errors.New("usage: macro record board stop")
+				}
+				state, stopErr := runner.StopBoardCapture(ctx)
+				if stopErr != nil {
+					return "", stopErr
+				}
+				return fmt.Sprintf("board macro capture %d sealed; retained pages are being fetched, deduplicated, saved, and export-acknowledged", state.BoardID), nil
+			case "clear":
+				if len(args) > 4 || (len(args) == 4 && !strings.EqualFold(args[3], "force")) {
+					return "", errors.New("usage: macro record board clear [force]")
+				}
+				status, clearErr := runner.ClearBoardCapture(ctx, len(args) == 4)
+				if clearErr != nil {
+					return "", clearErr
+				}
+				return fmt.Sprintf("retained board macro capture cleared; state=%d fill=%d", status.State, status.Fill), nil
+			case "status":
+				if len(args) != 3 {
+					return "", errors.New("usage: macro record board status")
+				}
+				state := runner.RecordingState()
+				device := runner.State().Device
+				return fmt.Sprintf("board macro recording active=%t owned=%t id=%d steps=%d dropped=%d device_state=%d fill=%d accepted=%d", state.Active, state.BoardOwned, state.BoardID, state.Steps, state.DroppedSteps, device.State, device.Fill, device.AcceptedSteps), nil
+			default:
+				return "", errors.New("usage: macro record board start ID|stop|clear [force]|status")
+			}
+		case "start":
+>>>>>>> origin/agent/webui-defects
 			if len(args) < 3 || len(args) > 5 {
 				return "", fmt.Errorf("usage: macro record %s NAME [CATEGORY [COLOR]]", args[1])
 			}
@@ -4934,10 +5304,14 @@ func macroCommand(
 			if err != nil {
 				return "", err
 			}
+<<<<<<< HEAD
 			if state.Mode == macroModeHost {
 				return fmt.Sprintf("recording macro %d/%s in host mode; relay/motion, PWM, beep, display, RF and strip commands use host deltas (100ms tolerance)", state.ID, state.Name), nil
 			}
 			return fmt.Sprintf("recording macro %d/%s in MCU mode; acknowledged board commands use MCU deltas", state.ID, state.Name), nil
+=======
+			return fmt.Sprintf("recording macro %d/%s; host, front-panel, and RF actions use exact MCU deltas", state.ID, state.Name), nil
+>>>>>>> origin/agent/webui-defects
 		case "status":
 			if len(args) != 2 {
 				return "", fmt.Errorf("usage: macro record status")
@@ -4946,10 +5320,14 @@ func macroCommand(
 			if !state.Active && state.Name == "" {
 				return "no macro has been recorded in this session", nil
 			}
+<<<<<<< HEAD
 			return fmt.Sprintf("macro recording active=%t id=%d name=%q mode=%s category=%q color=%q steps=%d started=%s error=%q", state.Active, state.ID, state.Name, state.Mode, state.Category, state.Color, state.Steps, state.StartedAt.Format(time.RFC3339), state.LastError), nil
+=======
+			return fmt.Sprintf("macro recording active=%t id=%d name=%q category=%q color=%q steps=%d host=%d panel=%d rf=%d last_at_us=%d last_delta_us=%d last_opcode=0x%02X last_source=%d started=%s error=%q", state.Active, state.ID, state.Name, state.Category, state.Color, state.Steps, state.HostSteps, state.PanelSteps, state.RFSteps, state.LastAtUS, state.LastDeltaUS, state.LastOpcode, state.LastSource, state.StartedAt.Format(time.RFC3339), state.LastError), nil
+>>>>>>> origin/agent/webui-defects
 		case "save", "stop":
 			if len(args) != 2 {
-				return "", fmt.Errorf("usage: macro record save")
+				return "", fmt.Errorf("usage: macro record save|stop")
 			}
 			macro, err := runner.StopRecording(true)
 			if err != nil {
@@ -4966,7 +5344,11 @@ func macroCommand(
 			}
 			return fmt.Sprintf("macro %d/%s recording discarded", macro.ID, macro.Name), nil
 		default:
+<<<<<<< HEAD
 			return "", fmt.Errorf("usage: macro record start|start-mcu NAME [CATEGORY [COLOR]]|status|save|discard")
+=======
+			return "", fmt.Errorf("usage: macro record start NAME [CATEGORY [COLOR]]|board start ID|stop|clear [force]|status|save|stop|discard")
+>>>>>>> origin/agent/webui-defects
 		}
 	case "play", "run", "start":
 		if len(args) != 2 {
@@ -5002,7 +5384,11 @@ func macroCommand(
 			return "no macro has run in this session", nil
 		}
 		return fmt.Sprintf(
+<<<<<<< HEAD
 			"macro id=%d name=%q mode=%s lifecycle=%s running=%t step=%d/%d evidence=%d/%d buffer=%dB timing=%dus max=%dus startup_delay_us=%d violations=%d underruns=%d dispatch_errors=%d faithful=%t started=%s error=%q",
+=======
+			"macro id=%d name=%q lifecycle=%s running=%t step=%d/%d buffer=%dB timing=%dus max=%dus violations=%d underruns=%d dispatch_errors=%d dropped=%d faithful=%t started=%s error=%q",
+>>>>>>> origin/agent/webui-defects
 			state.ID,
 			state.Name,
 			state.Mode,
@@ -5019,9 +5405,22 @@ func macroCommand(
 			state.TimingViolations,
 			state.Underruns,
 			state.DispatchErrors,
+			state.DroppedSteps,
 			state.Faithful,
 			state.StartedAt.Format(time.RFC3339),
 			state.LastError,
+		), nil
+	case "monitor":
+		if len(args) != 1 {
+			return "", fmt.Errorf("usage: macro monitor")
+		}
+		state := runner.State()
+		recording := runner.RecordingState()
+		return fmt.Sprintf(
+			"macro monitor playback=%s running=%t id=%d name=%q step=%d/%d buffer=%dB underruns=%d faithful=%t recording=%t record_id=%d record_name=%q record_steps=%d",
+			state.Lifecycle, state.Running, state.ID, state.Name, state.Step, state.StepCount,
+			state.BufferFill, state.Underruns, state.Faithful, recording.Active, recording.ID,
+			recording.Name, recording.Steps,
 		), nil
 	case "cancel", "stop":
 		if len(args) > 2 || (len(args) == 2 && !strings.EqualFold(args[1], "keep")) {

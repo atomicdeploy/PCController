@@ -2,6 +2,8 @@
 
 #include <Arduino.h>
 
+#include "../ProjectConfig.h"
+
 using TaskCallback = void (*)(void *context);
 
 // Tiny fixed-capacity scheduler for cooperative one-shot callbacks.
@@ -32,8 +34,8 @@ private:
   uint8_t itemCount_ = 0;
 };
 
-// taskManager is the single board-wide cooperative callback scheduler.
+#if PCCONTROLLER_ENABLE_TASK_SCHEDULER
+// Optional board-wide callback scheduler. The 328P production profile leaves
+// it out because it registers no tasks; larger feature profiles can opt in.
 extern Tasks taskManager;
-
-// Services the shared scheduler using the current Arduino millisecond clock.
-void serviceTasks();
+#endif

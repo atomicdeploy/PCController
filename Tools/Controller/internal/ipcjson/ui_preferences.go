@@ -32,13 +32,14 @@ type browserAppearancePatch struct {
 }
 
 type browserUIConfigMutation struct {
-	AppTitle        *string                  `json:"app_title,omitempty"`
-	Tagline         *string                  `json:"tagline,omitempty"`
-	SetupComplete   *bool                    `json:"setup_complete,omitempty"`
-	SegmentScroll   *appconfig.SegmentScroll `json:"segment_scroll,omitempty"`
-	PeripheralNames *map[string]string       `json:"peripheral_names,omitempty"`
-	Appearance      *browserAppearancePatch  `json:"appearance,omitempty"`
-	IfMatch         string                   `json:"if_match,omitempty"`
+	AppTitle               *string                                      `json:"app_title,omitempty"`
+	Tagline                *string                                      `json:"tagline,omitempty"`
+	SetupComplete          *bool                                        `json:"setup_complete,omitempty"`
+	SegmentScroll          *appconfig.SegmentScroll                     `json:"segment_scroll,omitempty"`
+	PeripheralNames        *map[string]string                           `json:"peripheral_names,omitempty"`
+	PeripheralPresentation *map[string]appconfig.PeripheralPresentation `json:"peripheral_presentation,omitempty"`
+	Appearance             *browserAppearancePatch                      `json:"appearance,omitempty"`
+	IfMatch                string                                       `json:"if_match,omitempty"`
 }
 
 var errNoBrowserUIChange = errors.New("browser UI configuration is unchanged")
@@ -88,7 +89,7 @@ func (patch browserAppearancePatch) apply(value appconfig.Appearance) appconfig.
 
 func (params browserUIConfigMutation) empty() bool {
 	return params.AppTitle == nil && params.Tagline == nil && params.SetupComplete == nil &&
-		params.SegmentScroll == nil && params.PeripheralNames == nil &&
+		params.SegmentScroll == nil && params.PeripheralNames == nil && params.PeripheralPresentation == nil &&
 		params.Appearance == nil
 }
 
@@ -112,6 +113,13 @@ func (params browserUIConfigMutation) apply(value *appconfig.Config) error {
 		}
 		value.UI.PeripheralNames = clonePeripheralNames(names)
 	}
+	if params.PeripheralPresentation != nil {
+		presentation, err := normalizePeripheralPresentation(*params.PeripheralPresentation)
+		if err != nil {
+			return err
+		}
+		applyPeripheralSettings(&value.UI, nil, presentation, false, true)
+	}
 	if params.Appearance != nil {
 		value.UI.Appearance = params.Appearance.apply(value.UI.Appearance)
 	}
@@ -134,6 +142,7 @@ func browserUIConfigDiff(before, after appconfig.Config) ([]string, map[string]a
 	add("setup_complete", before.UI.SetupComplete, after.UI.SetupComplete)
 	add("segment_scroll", before.UI.SegmentScroll, after.UI.SegmentScroll)
 	add("peripheral_names", before.UI.PeripheralNames, after.UI.PeripheralNames)
+	add("peripheral_presentation", before.UI.PeripheralPresentation, after.UI.PeripheralPresentation)
 	oldAppearance := browserAppearanceFromConfig(before.UI.Appearance)
 	newAppearance := browserAppearanceFromConfig(after.UI.Appearance)
 	add("appearance.theme", oldAppearance.Theme, newAppearance.Theme)
@@ -163,7 +172,7 @@ func (service *Service) updateBrowserUISettings(raw json.RawMessage) (any, error
 		params.SegmentScroll = &merged
 	}
 	if params.empty() {
-		return nil, errors.New("app_title, tagline, setup_complete, segment_scroll, peripheral_names, or appearance is required")
+		return nil, errors.New("app_title, tagline, setup_complete, segment_scroll, peripheral_names, peripheral_presentation, or appearance is required")
 	}
 	if service.UpdateHostConfig == nil {
 		return nil, errors.New("persistent host configuration is unavailable")
@@ -213,6 +222,9 @@ func (service *Service) updateBrowserUISettings(raw json.RawMessage) (any, error
 		return nil, err
 	}
 	fields, beforeValues, afterValues = browserUIConfigDiff(appliedBefore, appliedAfter)
+	if service.Client != nil && (params.PeripheralNames != nil || params.PeripheralPresentation != nil) {
+		service.Client.EmitHostActionEvent("config", "Peripheral presentation updated", "host", "peripheral.presentation.set", map[string]string{"scope": "peripherals"})
+	}
 	changed := true
 	result := service.browserUISettings()
 	result.Changed, result.ChangedFields = &changed, fields

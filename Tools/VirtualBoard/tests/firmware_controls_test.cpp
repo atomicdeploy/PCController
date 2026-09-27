@@ -9,6 +9,7 @@
 #include "LocalLib/TonePlayer.h"
 #include "Project/FrontPanelModel.h"
 #include "Project/MotionDoorPolicy.h"
+#include "Project/PwmController.h"
 #include "Project/RelayController.h"
 #include "Project/SettingsStore.h"
 #include "Project/TemperatureRoles.h"
@@ -43,6 +44,7 @@ void bind(Key &key, KeyTrace &trace) {
 }
 
 void testKeyGestures() {
+  shiftRegisters.begin();
   shiftRegisters.clearVirtualInputs();
 
   require(KEY_DEBOUNCE_MS <= 25,
@@ -228,6 +230,47 @@ void testRelayInterlocks() {
   require((preciseController.activeRelayMask() & (_BV(0) | _BV(1))) ==
               (_BV(0) | _BV(1)),
           "configured 37 ms break did not apply exactly");
+
+  ShiftRegisters cueRegisters;
+  RelayController cueController(cueRegisters);
+  cueController.begin(0);
+  cueController.setBreakBeforeDirectionMs(1);
+  uint8_t previousMask = cueController.activeRelayMask();
+  uint8_t cueCount = 0;
+  const auto observeSettledCue = [&]() {
+    const uint8_t activeMask = cueController.activeRelayMask();
+    if (activeMask != previousMask && !cueController.anySideBusy()) {
+      ++cueCount;
+    }
+    previousMask = activeMask;
+  };
+  require(cueController.requestSide(RelaySide::A, RelayDirection::Forward,
+                                    true, 1),
+          "relay cue fixture could not start motion");
+  observeSettledCue();
+  require(cueCount == 1,
+          "ordinary motion activation did not produce one settled cue");
+
+  require(cueController.requestSide(RelaySide::A, RelayDirection::Reverse,
+                                    true, 10),
+          "relay cue fixture rejected reversal");
+  observeSettledCue();
+  require(cueController.anySideBusy() && cueCount == 1,
+          "motion reversal exposed its interlock-disable cue");
+  cueController.service(11);
+  observeSettledCue();
+  require(!cueController.anySideBusy() && cueCount == 2,
+          "motion reversal did not coalesce to one settled cue");
+  observeSettledCue();
+  require(cueCount == 2,
+          "stable relay state repeated its cue");
+
+  ControllerSettings cueSettings{};
+  require(cueSettings.relayAudioEnabled(),
+          "factory relay cue policy is unexpectedly disabled");
+  cueSettings.flags |= SettingsFlags::RelayAudioDisabled;
+  require(!cueSettings.relayAudioEnabled(),
+          "persisted relay cue disable policy was ignored");
 }
 
 void testMotionDoorPolicyMatrixAndEntryPaths() {
@@ -351,6 +394,12 @@ void testTransitionsAndRollover() {
               rollByte(0, 16, false) == 255,
           "front-panel byte rollover skipped or trapped an endpoint");
 
+  require(PwmValueRollover::next(3840, 256) == 4095 &&
+              PwmValueRollover::next(4095, 256) == 0 &&
+              PwmValueRollover::next(255, -256) == 0 &&
+              PwmValueRollover::next(0, -256) == 4095,
+          "seven-segment PWM editor rollover skipped an endpoint");
+
   std::uint8_t value = 128;
   std::uint8_t previous = value;
   unsigned frames = 0;
@@ -393,8 +442,26 @@ void testTransitionsAndRollover() {
 }
 
 void testDisplayBrightnessFade() {
+  SevenSegments initiallyOff;
+  initiallyOff.begin(0);
+  require(initiallyOff.lastCommandForTest() == 0x80,
+          "TM1637 begin(0) did not issue the display-off command");
+
   SevenSegments segments;
   segments.begin(5);
+  const auto initialRevision = segments.revision();
+  require(initialRevision != 0 &&
+              std::equal(segments.rawSegments(), segments.rawSegments() + 4,
+                         segments.presentationState()) &&
+              segments.presentationState()[4] == segments.brightness(),
+          "TM1637 push state is not contiguous segments plus brightness");
+  segments.showText("test");
+  const auto textRevision = segments.revision();
+  require(textRevision != initialRevision,
+          "TM1637 segment change did not advance its push revision");
+  segments.showText("test");
+  require(segments.revision() == textRevision,
+          "unchanged TM1637 cells generated a duplicate push revision");
   segments.serviceBrightness(0, 69);
   require(segments.brightness() == 5,
           "TM1637 brightness moved before its quiet fade interval");
@@ -408,6 +475,9 @@ void testDisplayBrightnessFade() {
   }
   require(segments.brightness() == 7,
           "door-open TM1637 fade did not clamp/reach full brightness");
+  require(segments.revision() != textRevision &&
+              segments.presentationState()[4] == 7,
+          "TM1637 brightness changes did not update the push state");
 }
 
 void testSemanticProtocolAndTemperatureRoles() {
@@ -429,16 +499,68 @@ void testFrontPanelLeafDecreaseDispatch() {
   for (std::uint8_t mode = MODE_DOOR; mode <= MODE_RF; ++mode) {
     const auto current = static_cast<ProgramMode>(mode);
     const LeafDecreaseAction expected =
-        current == MODE_KEYS
-            ? LeafDecreaseAction::IdentifyKey3
-            : (current == MODE_RELAY
-                   ? LeafDecreaseAction::AllRelaysOff
-                   : LeafDecreaseAction::ParentCategory);
+        current == MODE_RELAY ? LeafDecreaseAction::AllRelaysOff
+                              : LeafDecreaseAction::ParentCategory;
     require(leafDecreaseAction(current) == expected,
             "leaf K3 dispatch no longer matches its page context");
   }
-  require(static_cast<std::uint8_t>(MENU_DECREASE) + 1U == 3U,
-          "KEY-page K3 identification no longer resolves to key 3");
+
+  require(canonicalFrontPanelPage(PAGE_KEYS) == PAGE_MOTION &&
+              canonicalFrontPanelPage(PAGE_MOTION) == PAGE_MOTION &&
+              !frontPanelPageCompiled(PAGE_KEYS) &&
+              frontPanelPageCompiled(PAGE_MOTION),
+          "retired KEY page is no longer one canonical MOVE surface");
+  require(unifiedInputIntent(MENU_PREVIOUS, true) ==
+                  UnifiedInputIntent::PreviousPage &&
+              unifiedInputIntent(MENU_NEXT, true) ==
+                  UnifiedInputIntent::NextPage,
+          "diagnostic key page lost a direct exit");
+  require(unifiedInputIntent(MENU_DECREASE, false) ==
+                  UnifiedInputIntent::Macro &&
+              unifiedInputIntent(MENU_INCREASE, false) ==
+                  UnifiedInputIntent::Motion,
+          "normal unified page no longer exposes macro/motion actions");
+  require(unifiedMacroGesture(KeyEvent::Down, false, false) ==
+                  UnifiedMacroGesture::ImmediateCapture &&
+              unifiedMacroGesture(KeyEvent::HoldRepeat, false, false) ==
+                  UnifiedMacroGesture::None &&
+              unifiedMacroGesture(KeyEvent::Down, true, false) ==
+                  UnifiedMacroGesture::None &&
+              unifiedMacroGesture(KeyEvent::Click, true, false) ==
+                  UnifiedMacroGesture::Replay &&
+              unifiedMacroGesture(KeyEvent::HoldStart, true, false) ==
+                  UnifiedMacroGesture::ReplaceCapture &&
+              unifiedMacroGesture(KeyEvent::Click, true, true) ==
+                  UnifiedMacroGesture::SuppressClassification,
+          "unified macro key lost one-shot replay/replace classification");
+
+  const MotionKeyBinding expectedMotion[] = {
+      {0, false}, {0, true}, {1, false}, {1, true}};
+  for (std::uint8_t action = MENU_PREVIOUS; action <= MENU_INCREASE;
+       ++action) {
+    const auto actual = motionKeyBinding(static_cast<MenuAction>(action));
+    require(actual.side == expectedMotion[action].side &&
+                actual.reverse == expectedMotion[action].reverse,
+            "four front keys no longer map to A/B up/down immediately");
+  }
+}
+
+void testPowerSignalFallbackPolicy() {
+  std::uint16_t value = 0;
+  const std::uint16_t first =
+      PowerSignalFallback::nextValue(value, true, false);
+  require(first == PowerSignalFallback::Step,
+          "offline power signal did not start with one bounded fade step");
+  value = first;
+  for (std::uint8_t turn = 0; turn < 20; ++turn) {
+    value = PowerSignalFallback::nextValue(value, true, false);
+  }
+  require(value == PowerSignalFallback::FullBrightness,
+          "offline power signal did not saturate at full brightness");
+  require(PowerSignalFallback::nextValue(731, false, false) == 731,
+          "reconnected host did not retain channel-12 ownership");
+  require(PowerSignalFallback::nextValue(0, true, true) == 0,
+          "Prog mode allowed the fallback to re-enable channel 12");
 }
 
 void testRetiredMotionMenuAlias() {
@@ -530,6 +652,7 @@ void testBuzzerTimerAndQueue() {
 
 int main() {
   try {
+    testPowerSignalFallbackPolicy();
     testKeyGestures();
     testRelayInterlocks();
     testMotionDoorPolicyMatrixAndEntryPaths();

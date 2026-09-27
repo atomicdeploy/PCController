@@ -1050,6 +1050,32 @@ func (manager *Manager) dispatchNotification(
 	config appconfig.Config,
 	event controller.Event,
 ) {
+	if strings.EqualFold(event.Kind, "message") && controller.EventTargetsSurface(event, "native") {
+		if !config.Integrations.Notifications.Enabled || manager.notifier == nil {
+			manager.client.EmitMessageDeliveryOutcome(event, "native", errors.New("native notifications are disabled or unavailable"))
+			return
+		}
+		notification, err := hostui.NotificationForMessage(hostui.MessageNotification{
+			ID: event.ID, Type: event.MessageType, Text: event.Text,
+			Severity: event.Severity, Correlation: event.Correlation,
+			Action: event.Action, Metadata: event.Metadata, AppTitle: config.UI.AppTitle,
+		})
+		if err != nil {
+			manager.recordError("message notification: " + err.Error())
+			manager.client.EmitMessageDeliveryOutcome(event, "native", err)
+			return
+		}
+		key := fmt.Sprintf("message:%d", event.ID)
+		if strings.TrimSpace(event.Correlation) != "" {
+			key = "message:" + event.Correlation
+		}
+		message := event
+		manager.notificationQueue.enqueue(notificationJob{
+			key: key, notification: notification,
+			priority: notificationPriority(event.Severity), message: &message,
+		})
+		return
+	}
 	if !config.Integrations.Notifications.Enabled || manager.notifier == nil ||
 		strings.HasPrefix(strings.ToLower(strings.TrimSpace(event.Kind)), "notification.") {
 		return
@@ -1194,6 +1220,9 @@ func (manager *Manager) notificationLoop() {
 		err := manager.notifier.Notify(ctx, job.notification)
 		cancel()
 		manager.notificationQueue.complete(job.key)
+		if job.message != nil {
+			manager.client.EmitMessageDeliveryOutcome(*job.message, "native", err)
+		}
 		if err != nil && manager.ctx.Err() == nil {
 			manager.recordError("notification: " + err.Error())
 		}
@@ -1686,9 +1715,13 @@ func (manager *Manager) remotePeerService() ipcjson.Service {
 	return ipcjson.Service{
 		Client:                manager.client,
 		AuthorizationDisabled: true,
+<<<<<<< HEAD
 		HostConfig:            manager.store.CurrentRuntime,
 		PersistentHostConfig:  manager.store.Current,
 		SubscribeHostConfig:   manager.store.SubscribeRuntime,
+=======
+		HostConfig:            manager.store.Current,
+>>>>>>> origin/agent/webui-defects
 		UpdateHostConfig: func(change func(*appconfig.Config) error) error {
 			_, err := manager.store.Update(change)
 			return err

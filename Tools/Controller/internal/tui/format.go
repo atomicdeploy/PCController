@@ -5,6 +5,8 @@ import (
 	"math"
 	"strings"
 	"time"
+
+	"pccontroller.local/controller/internal/native"
 )
 
 // formatEngineering chooses a readable SI prefix without throwing away the
@@ -50,6 +52,11 @@ func formatPower(milliwatts int32, decimals int) string {
 }
 
 func formatTemperature(centiCelsius int16, decimals int) string {
+	if centiCelsius == native.InvalidTemperatureCentiC ||
+		centiCelsius < native.MinimumTemperatureCentiC ||
+		centiCelsius > native.MaximumTemperatureCentiC {
+		return "Unavailable"
+	}
 	if decimals < 0 {
 		decimals = 0
 	}
@@ -59,6 +66,7 @@ func formatTemperature(centiCelsius int16, decimals int) string {
 	return fmt.Sprintf("%.*f °C", decimals, float64(centiCelsius)/100)
 }
 
+<<<<<<< HEAD
 func validVoltageReading(millivolts int32) bool {
 	return millivolts >= 0 && millivolts <= 100_000
 }
@@ -75,6 +83,13 @@ func validTemperatureReading(centiCelsius int16) bool {
 	// DS18B20's specified measurement range is -55..125 C. This also rejects
 	// the firmware's INT16_MIN missing-reading sentinel before it is formatted.
 	return centiCelsius >= -5_500 && centiCelsius <= 12_500
+=======
+func formatStatusTemperature(centiCelsius int16, flags, availabilityFlag uint16, decimals int) string {
+	if !native.TemperatureAvailable(flags, centiCelsius, availabilityFlag) {
+		return "Unavailable"
+	}
+	return formatTemperature(centiCelsius, decimals)
+>>>>>>> origin/agent/webui-defects
 }
 
 func formatUptime(milliseconds uint32) string {

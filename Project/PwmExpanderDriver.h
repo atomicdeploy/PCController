@@ -13,6 +13,8 @@ public:
   bool setFrequency(uint16_t frequencyHz);
   // Writes one channel's 12-bit on/off counters; zero return means success.
   uint8_t setPWM(uint8_t channel, uint16_t on, uint16_t off);
+  // Uses the PCA9685 ALL_LED register for one-transaction emergency all-off.
+  uint8_t setAllPWM(uint16_t on, uint16_t off);
 
 private:
   bool write8(uint8_t reg, uint8_t value);

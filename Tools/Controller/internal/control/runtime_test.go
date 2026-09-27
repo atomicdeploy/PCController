@@ -18,6 +18,30 @@ type reconnectTestPort struct {
 	dtr    []bool
 }
 
+func TestOldPumpFramesAreRejectedAfterSessionReplacement(t *testing.T) {
+	runtime := New(Options{})
+	oldSession := &link.Session{}
+	newSession := &link.Session{}
+	runtime.mu.Lock()
+	runtime.session = oldSession
+	runtime.generation = 7
+	runtime.mu.Unlock()
+	if !runtime.sessionGenerationCurrent(oldSession, 7) {
+		t.Fatal("current pump generation was rejected")
+	}
+	runtime.mu.Lock()
+	runtime.session = newSession
+	runtime.generation = 8
+	runtime.mu.Unlock()
+	if runtime.sessionGenerationCurrent(oldSession, 7) ||
+		runtime.sessionGenerationCurrent(oldSession, 8) {
+		t.Fatal("buffered old-session frame could enter replacement generation")
+	}
+	if !runtime.sessionGenerationCurrent(newSession, 8) {
+		t.Fatal("replacement session generation was rejected")
+	}
+}
+
 func newReconnectTestPort() *reconnectTestPort {
 	return &reconnectTestPort{closed: make(chan struct{})}
 }
@@ -239,21 +263,52 @@ func TestUnplugReplugLifecycleAndOneResetPermit(t *testing.T) {
 	_ = runtime.Close()
 }
 
+<<<<<<< HEAD
 func TestReconnectDiscoveryRebindsAuthenticatedUSBIdentity(t *testing.T) {
+=======
+func TestUSBConnectionEventsAreNormalizedForAllConsumers(t *testing.T) {
+	runtime := New(Options{})
+	after := runtime.LatestEventID()
+	port := ports.Info{
+		Name: "COM4", IsUSB: true, VID: "1A86", PID: "7523",
+		SerialNumber: "BOARD-A", InstanceID: `USB\CH340\A`,
+	}
+	runtime.publishConnection("disconnect", port, "USB removed")
+	first, err := runtime.WaitEvent(context.Background(), after, "usb.disconnected")
+	if err != nil || first.Port.Name != "COM4" || first.Target != "app.clients" {
+		t.Fatalf("usb disconnect event=%#v err=%v", first, err)
+	}
+	port.Name = "COM9"
+	runtime.publishConnection("reconnected", port, "")
+	second, err := runtime.WaitEvent(context.Background(), first.ID, "usb.reconnected")
+	if err != nil || second.Port.Name != "COM9" || second.Source != "host" ||
+		second.Port.SerialNumber != "BOARD-A" || second.Target != "app.clients" {
+		t.Fatalf("usb reconnect event=%#v err=%v", second, err)
+	}
+}
+
+func TestReconnectDiscoveryUsesLastAuthenticatedPortIdentity(t *testing.T) {
+>>>>>>> origin/agent/webui-defects
 	runtime := New(Options{Filter: ports.Filter{Port: "COM4"}})
 	runtime.mu.Lock()
 	runtime.connectionState = "reconnecting"
 	runtime.portRebindAllowed = true
 	runtime.port = ports.Info{
 		Name: "COM4", IsUSB: true, VID: "1A86", PID: "7523",
+<<<<<<< HEAD
 		FriendlyName: "USB-SERIAL CH340",
 		InstanceID:   `USB\VID_1A86&PID_7523\OLD-PATH`,
+=======
+		SerialNumber: "BOARD-A", FriendlyName: "USB-SERIAL CH340",
+		InstanceID: `USB\CH340\A`,
+>>>>>>> origin/agent/webui-defects
 	}
 	options := runtime.options
 	runtime.mu.Unlock()
 
 	discovery := runtime.discoveryOptions(options)
 	if !discovery.AllowPortRebind {
+<<<<<<< HEAD
 		t.Fatal("physical USB disappearance did not arm identity rebind")
 	}
 	candidates := ports.ReconnectCandidates([]ports.Info{
@@ -278,10 +333,46 @@ func TestExplicitConnectionPathRemainsStrict(t *testing.T) {
 		Name: "COM4", IsUSB: true, VID: "1A86", PID: "7523",
 	}
 	options := runtime.options
+=======
+		t.Fatal("authenticated reconnect did not permit stale COM rebinding")
+	}
+	preferred := discovery.Filter.Preferred
+	if preferred.Port != "COM4" || preferred.VID != "1A86" ||
+		preferred.PID != "7523" || preferred.SerialNumber != "BOARD-A" ||
+		preferred.Name != "USB-SERIAL CH340" ||
+		preferred.InstanceID != `USB\CH340\A` {
+		t.Fatalf("observed reconnect identity=%#v", preferred)
+	}
+	candidates := ports.ReconnectCandidates([]ports.Info{
+		{
+			Name: "COM9", IsUSB: true, VID: "1A86", PID: "7523",
+			SerialNumber: "BOARD-A", FriendlyName: "USB-SERIAL CH340",
+			InstanceID: `USB\CH340\A`,
+		},
+		{Name: "COM12", IsUSB: true, VID: "2341", PID: "0043"},
+	}, discovery.Filter)
+	if len(candidates) != 1 || candidates[0].Name != "COM9" {
+		t.Fatalf("authenticated COM reassignment candidates=%#v", candidates)
+	}
+}
+
+func TestExplicitReconnectDoesNotRelaxChangedPortSelection(t *testing.T) {
+	runtime := New(Options{Filter: ports.Filter{Port: "COM4"}})
+	runtime.mu.Lock()
+	runtime.connectionState = "reconnecting"
+	runtime.portRebindAllowed = false // Explicit/configured reconnect, not USB removal.
+	runtime.port = ports.Info{
+		Name: "COM4", IsUSB: true, VID: "1A86", PID: "7523",
+		SerialNumber: "BOARD-A",
+	}
+	options := runtime.options
+	options.Filter.Port = "COM12"
+>>>>>>> origin/agent/webui-defects
 	runtime.mu.Unlock()
 
 	discovery := runtime.discoveryOptions(options)
 	if discovery.AllowPortRebind {
+<<<<<<< HEAD
 		t.Fatal("explicit/configuration reconnect relaxed the selected COM port")
 	}
 	all := []ports.Info{{Name: "COM3", IsUSB: true, VID: "1A86", PID: "7523"}}
@@ -359,6 +450,12 @@ func TestConnectionTransitionsAreChangedOnlyAndRejectStaleFailures(t *testing.T)
 	}
 	if got := runtime.LatestEventID(); got != afterTransitions {
 		t.Fatalf("stale reconnect event advanced event ID to %d", got)
+=======
+		t.Fatal("explicit reconnect relaxed the requested COM selection")
+	}
+	if discovery.Filter.Preferred.SerialNumber != "" {
+		t.Fatalf("explicit reconnect inherited old device identity: %#v", discovery.Filter.Preferred)
+>>>>>>> origin/agent/webui-defects
 	}
 }
 
@@ -621,15 +718,50 @@ func TestActivityStreamIsRetainedSeparatelyFromContinuousFrames(t *testing.T) {
 func TestEventStreamClassification(t *testing.T) {
 	tests := map[string]string{
 		"door": EventStreamActivity, "telemetry": EventStreamTelemetry,
+<<<<<<< HEAD
 		"rx": EventStreamDebug, "front_panel.segment": EventStreamState,
 		"status_led.changed": EventStreamState, "buzzer.note": EventStreamState,
 		"illumination.changed": EventStreamState, "settings.changed": EventStreamState,
 		"sensor.sample": EventStreamTelemetry, "animation.frame": EventStreamState,
+=======
+		"rx": EventStreamDebug, "action.applied": EventStreamDebug,
+		"front_panel.segment": EventStreamState,
+		"status_led.changed":   EventStreamState, "buzzer.note": EventStreamState,
+		"app.instance.changed": EventStreamState, "relay.changed": EventStreamState,
+		"operation.applied": EventStreamState, "sensor.sample": EventStreamTelemetry,
+		"animation.frame": EventStreamState,
+>>>>>>> origin/agent/webui-defects
 	}
 	for kind, expected := range tests {
 		if got := EventStreamForKind(kind); got != expected {
 			t.Errorf("EventStreamForKind(%q)=%q want %q", kind, got, expected)
 		}
+	}
+}
+
+func TestAcknowledgedRelayPublishesAuthoritativeStateForEverySubscriber(t *testing.T) {
+	runtime := New(Options{})
+	defer runtime.Close()
+	afterID := runtime.LatestEventID()
+	if !runtime.publishAcknowledgedHostAction(
+		native.OpRelaySet, []byte{4, 1}, native.Frame{Opcode: native.OpACK}, 7,
+	) {
+		t.Fatal("valid acknowledged relay action was not recorded")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	event, err := runtime.WaitEventStreamFilter(ctx, afterID, "relay.changed", nil, EventStreamState)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if event.State != "on" || event.Lifecycle != "completed" ||
+		event.Source != "host" || event.Target != "app.clients" ||
+		event.Metadata["relay"] != "5" || event.Metadata["active"] != "true" ||
+		event.Metadata["connection_generation"] != "7" {
+		t.Fatalf("event=%+v", event)
+	}
+	if runtime.Snapshot().Status.ActiveRelays&(1<<4) == 0 {
+		t.Fatal("post-ACK relay state was not reflected in the shared snapshot")
 	}
 }
 

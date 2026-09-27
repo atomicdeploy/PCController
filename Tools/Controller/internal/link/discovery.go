@@ -21,10 +21,17 @@ type DiscoveryOptions struct {
 	// serial transport. It is never called for TCP endpoints or HELLO retries.
 	ResetAfterOpen func(ports.Info) bool
 	ResetPulse     time.Duration
+<<<<<<< HEAD
 	// AllowPortRebind is armed only after a previously authenticated physical
 	// USB session disappears. Initial and user-requested explicit opens remain
 	// strict, while reconnect may replace a stale COM number with one unique
 	// matching USB identity.
+=======
+	// AllowPortRebind is set only by an already-running Runtime after a USB
+	// disconnect. It lets discovery replace a stale COM number with one
+	// unambiguous present USB identity; initial explicit --port selection stays
+	// strict.
+>>>>>>> origin/agent/webui-defects
 	AllowPortRebind bool
 }
 

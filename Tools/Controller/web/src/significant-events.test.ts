@@ -11,7 +11,7 @@ function event(id: number, kind: string, stream?: ControllerEvent['stream']): Co
 }
 
 describe('significant controller events', () => {
-	it.each(['telemetry', ' TELEMETRY ', 'rx', ' Rx\t', 'TX', '\ttx ', 'front_panel.segment', 'status_led.changed', 'buzzer.note'])(
+	it.each(['telemetry', ' TELEMETRY ', 'rx', ' Rx\t', 'TX', '\ttx ', 'front_panel.segment', 'status_led.changed', 'buzzer.note', 'action.applied', 'device event 13'])(
     'keeps routine %j transport activity out of human-facing feeds',
     (kind) => expect(isSignificantControllerEvent(event(1, kind))).toBe(false),
 	)
@@ -21,6 +21,16 @@ describe('significant controller events', () => {
 		expect(isSignificantControllerEvent(event(2, 'future.event', 'telemetry'))).toBe(false)
 		expect(isSignificantControllerEvent(event(3, 'future.event', 'debug'))).toBe(false)
 		expect(isSignificantControllerEvent(event(4, 'future.event', 'activity'))).toBe(true)
+		expect(isSignificantControllerEvent(event(5, 'device event 13', 'activity'))).toBe(false)
+	})
+
+	it('hides unchanged app-instance heartbeats but keeps material lifecycle changes', () => {
+		expect(isSignificantControllerEvent({ ...event(1, 'app.instance.changed', 'activity'), lifecycle: 'updated' })).toBe(false)
+		expect(isSignificantControllerEvent({ ...event(2, 'app.instance.changed', 'activity'), state: 'heartbeat' })).toBe(false)
+		expect(isSignificantControllerEvent({ ...event(3, 'app.instance.changed', 'activity'), lifecycle: 'joined' })).toBe(true)
+		expect(isSignificantControllerEvent({ ...event(4, 'app.instance.changed', 'activity'), lifecycle: 'left' })).toBe(true)
+		expect(isSignificantControllerEvent({ ...event(5, 'app.instance.changed', 'activity'), metadata: { change: 'disconnected' } })).toBe(true)
+		expect(isSignificantControllerEvent({ ...event(6, 'app.instance.changed', 'activity'), metadata: { change: 'updated' } })).toBe(false)
 	})
 
   it.each(['door', 'rf.received', 'macro.completed', 'connection', 'warning', 'app.page'])(

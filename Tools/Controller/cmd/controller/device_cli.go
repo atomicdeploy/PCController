@@ -145,6 +145,14 @@ func runExec(args []string, stdout, stderr io.Writer, store *appconfig.Store) er
 		return errors.New("exec requires a controller shell command")
 	}
 	commandText := joinControllerCommand(flags.Args())
+	return runExecCommand(connection, commandText, stdout, store)
+}
+
+// runExecCommand owns the one local/primary routing path used by typed CLI
+// commands as well as `exec`.  Keeping this below the argument parsers means
+// connection selection, capability discovery, and command safety cannot drift
+// between surfaces.
+func runExecCommand(connection *connectionFlags, commandText string, stdout io.Writer, store *appconfig.Store) error {
 	claim, havePrimary, err := preparePrimaryMode("exec")
 	if err != nil {
 		return err
@@ -212,7 +220,7 @@ func runExec(args []string, stdout, stderr io.Writer, store *appconfig.Store) er
 
 func commandAllowsDisconnected(command string) bool {
 	words := strings.Fields(strings.ToLower(strings.TrimSpace(command)))
-	return len(words) >= 2 && words[0] == "board" && words[1] == "initialize"
+	return len(words) >= 1 && (words[0] == "message" || (len(words) >= 2 && words[0] == "board" && words[1] == "initialize"))
 }
 
 func runBatch(args []string, stdout, stderr io.Writer, store *appconfig.Store) error {
@@ -615,6 +623,7 @@ func runIPC(args []string, stdout, stderr io.Writer, store *appconfig.Store) err
 				); historyErr != nil {
 					fmt.Fprintln(stderr, "history configuration rejected:", historyErr)
 				}
+				client.EmitHostEvent("config", "host configuration reloaded")
 				fmt.Fprintln(stderr, "configuration reloaded:", store.Path())
 			},
 			func(err error) {
@@ -667,12 +676,17 @@ func runIPC(args []string, stdout, stderr io.Writer, store *appconfig.Store) err
 			IntegrationProxy:      integrationProxy,
 			LocalDevice:           localDevice,
 			AuthToken:             serverConfig.IPC.AuthToken,
+<<<<<<< HEAD
                         AuthorizationDisabled: true,
+=======
+			AuthorizationDisabled: true,
+>>>>>>> origin/agent/webui-defects
 			AllowedOrigins:        append([]string(nil), serverConfig.IPC.AllowedOrigins...),
 			InboundWebhooks:       serverConfig.Integrations.InboundWebhooksEnabled,
 			HostVersion:           version,
 			HostSourceHash:        sourceHash,
 			HostBuildTime:         buildTime,
+<<<<<<< HEAD
                         HostInstanceID:        strings.TrimSuffix(coordinatorID, ":bridge"),
                         HostProcessID:         os.Getpid(),
                         HostSurface:           "ipc",
@@ -684,6 +698,12 @@ func runIPC(args []string, stdout, stderr io.Writer, store *appconfig.Store) err
                         HostConfig:            store.CurrentRuntime,
                         PersistentHostConfig:  store.Current,
                         SubscribeHostConfig:   store.SubscribeRuntime,
+=======
+			AppAction:             actions.Publish,
+			Shutdown:              cancel,
+			LastSessionSnapshot:   sessionSnapshot.read,
+			HostConfig:            store.CurrentRuntime,
+>>>>>>> origin/agent/webui-defects
 			UpdateHostConfig: func(change func(*appconfig.Config) error) error {
 				_, err := store.Update(change)
 				return err

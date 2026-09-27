@@ -1,5 +1,7 @@
 #include "IlluminationController.h"
 
+#if PCCONTROLLER_ENABLE_PCA9685 && PCCONTROLLER_ENABLE_ILLUMINATION_AUTOMATION
+
 #include "PwmController.h"
 #include "TransitionMath.h"
 
@@ -9,8 +11,6 @@ namespace {
 constexpr uint16_t FadeIntervalMs = 20;
 
 } // namespace
-
-IlluminationController illumination;
 
 void IlluminationController::begin(PwmController &pwm, bool doorOpen,
                                    uint32_t now) {
@@ -98,3 +98,7 @@ IlluminationController::targetBrightness(bool doorOpen) const {
   }
   return offBrightness_;
 }
+
+#endif
+
+IlluminationController illumination;

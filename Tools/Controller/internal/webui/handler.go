@@ -188,21 +188,11 @@ func (handler *staticHandler) staleEntryReplacement(name string) (string, bool) 
 		return "", false
 	}
 
-	replacement := ""
-	for candidate := range handler.assets {
-		candidateBase := path.Base(candidate)
-		if path.Dir(candidate) != "assets" || !strings.HasPrefix(candidateBase, prefix) ||
-			!strings.EqualFold(path.Ext(candidateBase), path.Ext(base)) || !fingerprintedAsset(candidate) {
-			continue
-		}
-		if replacement != "" {
-			// Multiple entry candidates indicate a malformed or transitional
-			// bundle. Do not guess which executable resource is authoritative.
-			return "", false
-		}
-		replacement = candidate
-	}
-	return replacement, replacement != ""
+	// Stable entry names use ETag revalidation. A legacy hashed entry can be
+	// redirected deterministically without guessing among multiple bundles.
+	replacement := "assets/" + strings.TrimSuffix(prefix, "-") + path.Ext(base)
+	_, exists := handler.assets[replacement]
+	return replacement, exists
 }
 
 func (handler *staticHandler) serveAsset(
@@ -237,11 +227,10 @@ func (handler *staticHandler) serveAsset(
 	writer.Header().Set("Accept-Ranges", "bytes")
 	writer.Header().Set("Content-Type", contentType(name))
 	writer.Header().Set("ETag", metadata.etag)
-	if name != "index.html" && fingerprintedAsset(name) {
-		writer.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-	} else {
-		writer.Header().Set("Cache-Control", "no-cache")
-	}
+	// Bundle URLs are intentionally deterministic. Always revalidate through
+	// the strong content ETag so an embedded host update cannot execute a stale
+	// entry/chunk combination from a browser cache.
+	writer.Header().Set("Cache-Control", "no-cache")
 	http.ServeContent(writer, request, path.Base(name), metadata.modTime, content)
 }
 

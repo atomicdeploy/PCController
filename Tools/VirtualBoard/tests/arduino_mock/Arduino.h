@@ -7,6 +7,12 @@
 
 using std::size_t;
 
+// Production structs retain AVR/GCC packing.  Native MSVC tests need the
+// spelling to compile so they can exercise the actual queue implementation.
+#if defined(_MSC_VER)
+#define __attribute__(value)
+#endif
+
 class __FlashStringHelper;
 
 inline std::uint8_t pgm_read_byte(const void *address) {

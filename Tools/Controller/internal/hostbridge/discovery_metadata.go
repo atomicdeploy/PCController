@@ -78,8 +78,19 @@ func discoveryMetadata(config appconfig.Config, snapshot controller.Snapshot, id
 	}
 	if snapshot.Connected && snapshot.HaveStatus {
 		status := snapshot.Status
+		_, ledTemperatureAvailable := status.LEDTemperature()
+		_, btTemperatureAvailable := status.BTAudioTemperature()
 		values = append(values,
 			"board.uptime_ms="+strconv.FormatUint(uint64(status.UptimeMS), 10),
+<<<<<<< HEAD
+=======
+			"board.supply_mv="+strconv.FormatInt(int64(status.SupplyMV), 10),
+			"board.bus_mv="+strconv.FormatInt(int64(status.BusMV), 10),
+			"board.current_ma="+strconv.FormatInt(int64(status.CurrentMA), 10),
+			"board.power_mw="+strconv.FormatInt(int64(status.PowerMW), 10),
+			"board.temperature_led_available="+strconv.FormatBool(ledTemperatureAvailable),
+			"board.temperature_bt_audio_available="+strconv.FormatBool(btTemperatureAvailable),
+>>>>>>> origin/agent/webui-defects
 			"board.flags="+strconv.FormatUint(uint64(status.Flags), 10),
 			"board.program_running="+strconv.FormatBool(status.ProgramRunning),
 			"board.host_offline="+strconv.FormatBool(status.HostOffline),
@@ -88,6 +99,7 @@ func discoveryMetadata(config appconfig.Config, snapshot controller.Snapshot, id
 			"board.reset_count="+strconv.FormatUint(uint64(status.ResetCount), 10),
 			"board.status_at="+snapshot.StatusUpdated.UTC().Format(time.RFC3339),
 		)
+<<<<<<< HEAD
 		capabilities := snapshot.Hello.Capabilities
 		if capabilities&native.CapabilityINA219 != 0 && status.INA219Available {
 			values = append(values, "board.supply_mv="+strconv.FormatInt(int64(status.SupplyMV), 10), "board.bus_mv="+strconv.FormatInt(int64(status.BusMV), 10), "board.current_ma="+strconv.FormatInt(int64(status.CurrentMA), 10), "board.power_mw="+strconv.FormatInt(int64(status.PowerMW), 10))
@@ -119,6 +131,14 @@ func discoveryMetadata(config appconfig.Config, snapshot controller.Snapshot, id
 		if capabilities&native.CapabilityLCD != 0 && status.LCDAddress != 0 {
 			values = append(values, "board.lcd_address="+strconv.FormatUint(uint64(status.LCDAddress), 10))
 		}
+=======
+		if native.TemperatureAvailable(status.Flags, status.TLEDCenti, native.StatusTemperatureLED) {
+			values = append(values, "board.temperature_led_centi_c="+strconv.FormatInt(int64(status.TLEDCenti), 10))
+		}
+		if native.TemperatureAvailable(status.Flags, status.TBTCenti, native.StatusTemperatureBT) {
+			values = append(values, "board.temperature_bt_audio_centi_c="+strconv.FormatInt(int64(status.TBTCenti), 10))
+		}
+>>>>>>> origin/agent/webui-defects
 	}
 	if snapshot.HaveSettings && snapshot.Hello.Capabilities&native.CapabilityPersistentSettings != 0 {
 		settings := snapshot.Settings

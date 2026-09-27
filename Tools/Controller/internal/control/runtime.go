@@ -31,6 +31,7 @@ type Options struct {
 
 type Snapshot struct {
 	Connected         bool
+	Generation        uint64
 	Paused            bool
 	Port              ports.Info
 	Hello             native.Hello
@@ -82,8 +83,12 @@ type Event struct {
 	Gesture     string
 	Source      string
 	Target      string
+	Targets     []string
 	MessageType string
 	Action      string
+	Severity    string
+	Correlation string
+	Delivery    string
 	Metadata    map[string]string
 	RFCode      uint32
 	RFBits      byte
@@ -95,6 +100,7 @@ type Event struct {
 	ResetCount  uint32
 }
 
+<<<<<<< HEAD
 // CommandEvidence is emitted only after the board acknowledges a command. Its
 // MCU timestamp lets recorders preserve activation deltas without trusting
 // host USB/network arrival time.
@@ -105,6 +111,21 @@ type CommandEvidence struct {
 	Timed        bool          `json:"timed"`
 	ObservedAt   time.Time     `json:"observed_at"`
 	Source       CommandSource `json:"source,omitempty"`
+=======
+// ActionEvidence is the canonical recorder input for both acknowledged host
+// commands and successfully applied physical/RF board actions. Its MCU clock
+// is authoritative; ObservedAt is informational and never drives playback.
+type ActionEvidence struct {
+	Opcode       byte      `json:"opcode"`
+	Payload      []byte    `json:"payload,omitempty"`
+	Source       byte      `json:"source"`
+	SourceID     byte      `json:"source_id,omitempty"`
+	BoardOrigin  bool      `json:"board_origin,omitempty"`
+	DeviceMicros uint32    `json:"device_micros"`
+	Timed        bool      `json:"timed"`
+	ObservedAt   time.Time `json:"observed_at"`
+	Generation   uint64    `json:"connection_generation"`
+>>>>>>> origin/agent/webui-defects
 }
 
 type rfGestureKey struct {
@@ -176,6 +197,9 @@ type Runtime struct {
 	deviceObserver         func(ports.Info, native.Hello)
 	connectionReadyHandler func(ports.Info, native.Hello)
 	beforeDisconnect       func(string)
+	connectionObserverMu   sync.RWMutex
+	connectionObservers    map[uint64]func(uint64, ports.Info, native.Hello)
+	nextConnectionObserver uint64
 
 	events chan Event
 
@@ -215,8 +239,10 @@ type Runtime struct {
 	programStateSentMode       ProgramMode
 	macroRunner                *MacroRunner
 	displayMu                  sync.Mutex
+	segmentMessageCancel       context.CancelFunc
 	lcdMessageCancel           context.CancelFunc
 
+<<<<<<< HEAD
 	commandObserverMu      sync.RWMutex
 	commandObservers       map[uint64]func(CommandEvidence)
 	nextCommandObserver    uint64
@@ -226,6 +252,16 @@ type Runtime struct {
 	portMonitorStarted     bool
 	connectionEventMu      sync.Mutex
 	connectionEvents       map[string]connectionEventSignature
+=======
+	actionObserverMu        sync.RWMutex
+	actionObservers         map[uint64]func(ActionEvidence)
+	nextActionObserver      uint64
+	macroStatusObserverMu   sync.RWMutex
+	macroStatusObservers    map[uint64]func(native.MacroStatus, uint64)
+	nextMacroStatusObserver uint64
+	hostMenuRequestMu       sync.RWMutex
+	hostMenuRequestHandler  func(native.HostMenuContentRequest)
+>>>>>>> origin/agent/webui-defects
 }
 
 var openResetSession = link.OpenContext
@@ -405,26 +441,27 @@ func (runtime *Runtime) Events() <-chan Event {
 	return runtime.events
 }
 
-// ObserveCommands registers a lightweight command recorder. Callbacks run in
-// acknowledgement order; the returned release function is idempotent.
-func (runtime *Runtime) ObserveCommands(observer func(CommandEvidence)) func() {
+// ObserveActions registers a lightweight macro-recorder input. Host actions
+// arrive in acknowledgement order; physical/RF actions arrive in board event
+// order. Both use the same MCU timestamp domain. The release is idempotent.
+func (runtime *Runtime) ObserveActions(observer func(ActionEvidence)) func() {
 	if observer == nil {
 		return func() {}
 	}
-	runtime.commandObserverMu.Lock()
-	if runtime.commandObservers == nil {
-		runtime.commandObservers = make(map[uint64]func(CommandEvidence))
+	runtime.actionObserverMu.Lock()
+	if runtime.actionObservers == nil {
+		runtime.actionObservers = make(map[uint64]func(ActionEvidence))
 	}
-	runtime.nextCommandObserver++
-	id := runtime.nextCommandObserver
-	runtime.commandObservers[id] = observer
-	runtime.commandObserverMu.Unlock()
+	runtime.nextActionObserver++
+	id := runtime.nextActionObserver
+	runtime.actionObservers[id] = observer
+	runtime.actionObserverMu.Unlock()
 	var once sync.Once
 	return func() {
 		once.Do(func() {
-			runtime.commandObserverMu.Lock()
-			delete(runtime.commandObservers, id)
-			runtime.commandObserverMu.Unlock()
+			runtime.actionObserverMu.Lock()
+			delete(runtime.actionObservers, id)
+			runtime.actionObserverMu.Unlock()
 		})
 	}
 }
@@ -459,6 +496,26 @@ func (runtime *Runtime) LatestEventID() uint64 {
 	runtime.eventMu.Lock()
 	defer runtime.eventMu.Unlock()
 	return runtime.nextEventID
+}
+
+// EventByID returns one retained event by its stable runtime identifier. The
+// bounded event ring is the authority used by presentation acknowledgements:
+// callers cannot invent a message action or acknowledge an unrelated event.
+func (runtime *Runtime) EventByID(id uint64) (Event, bool) {
+	if id == 0 {
+		return Event{}, false
+	}
+	runtime.eventMu.Lock()
+	defer runtime.eventMu.Unlock()
+	for index := len(runtime.eventLog) - 1; index >= 0; index-- {
+		if runtime.eventLog[index].ID == id {
+			return runtime.eventLog[index], true
+		}
+		if runtime.eventLog[index].ID < id {
+			break
+		}
+	}
+	return Event{}, false
 }
 
 func (runtime *Runtime) WaitEvent(
@@ -536,9 +593,18 @@ func EventStreamForKind(kind string) string {
 	switch kind {
 	case "telemetry":
 		return EventStreamTelemetry
-	case "rx", "tx", "opcode":
+	case "rx", "tx", "opcode", "action.applied":
 		return EventStreamDebug
+<<<<<<< HEAD
 	case "front_panel.segment", "status_led.changed", "buzzer.note", "illumination.changed", "settings.changed":
+=======
+	case "front_panel.segment", "status_led.changed", "buzzer.note",
+		"app.instance.changed", "operation.applied", "relay.changed",
+		"relays.changed", "motion.changed", "pwm.changed", "buzzer.changed",
+		"display.changed":
+		return EventStreamState
+	case "macro.step", "macro.recording.step":
+>>>>>>> origin/agent/webui-defects
 		return EventStreamState
 	}
 	if strings.HasPrefix(kind, "measurement.") || strings.HasSuffix(kind, ".measurement") ||
@@ -629,6 +695,7 @@ func (runtime *Runtime) Snapshot() Snapshot {
 	defer runtime.mu.RUnlock()
 	return Snapshot{
 		Connected:         runtime.session != nil,
+		Generation:        runtime.generation,
 		Paused:            runtime.paused,
 		Port:              runtime.port,
 		Hello:             runtime.hello,
@@ -688,6 +755,50 @@ func (runtime *Runtime) SetConnectionReadyHandler(handler func(ports.Info, nativ
 	runtime.mu.Lock()
 	runtime.connectionReadyHandler = handler
 	runtime.mu.Unlock()
+}
+
+// ObserveConnectionReady adds a non-exclusive service hook for every
+// authenticated initial connection and reconnect. Unlike
+// SetConnectionReadyHandler, independent subsystems cannot replace each
+// other's callback. The release function is idempotent.
+func (runtime *Runtime) ObserveConnectionReady(
+	observer func(uint64, ports.Info, native.Hello),
+) func() {
+	if observer == nil {
+		return func() {}
+	}
+	runtime.connectionObserverMu.Lock()
+	if runtime.connectionObservers == nil {
+		runtime.connectionObservers = make(map[uint64]func(uint64, ports.Info, native.Hello))
+	}
+	runtime.nextConnectionObserver++
+	id := runtime.nextConnectionObserver
+	runtime.connectionObservers[id] = observer
+	runtime.connectionObserverMu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			runtime.connectionObserverMu.Lock()
+			delete(runtime.connectionObservers, id)
+			runtime.connectionObserverMu.Unlock()
+		})
+	}
+}
+
+func (runtime *Runtime) notifyConnectionReady(
+	generation uint64,
+	port ports.Info,
+	hello native.Hello,
+) {
+	runtime.connectionObserverMu.RLock()
+	observers := make([]func(uint64, ports.Info, native.Hello), 0, len(runtime.connectionObservers))
+	for _, observer := range runtime.connectionObservers {
+		observers = append(observers, observer)
+	}
+	runtime.connectionObserverMu.RUnlock()
+	for _, observer := range observers {
+		go observer(generation, port, hello)
+	}
 }
 
 // SetBeforeDisconnect installs one synchronous host-side fail-safe hook. The
@@ -915,7 +1026,10 @@ func (runtime *Runtime) Request(
 	payload []byte,
 	expected ...byte,
 ) (native.Frame, error) {
-	session := runtime.currentSession()
+	runtime.mu.RLock()
+	session := runtime.session
+	generation := runtime.generation
+	runtime.mu.RUnlock()
 	if session == nil {
 		return native.Frame{}, errors.New("device is not connected")
 	}
@@ -923,7 +1037,44 @@ func (runtime *Runtime) Request(
 	if err != nil {
 		return native.Frame{}, err
 	}
-	runtime.observe(frame)
+	if !runtime.observeAtGeneration(frame, generation) {
+		return native.Frame{}, fmt.Errorf("connection generation %d changed while the request was in flight", generation)
+	}
+	runtime.publishAcknowledgedHostAction(opcode, payload, frame, generation)
+	return frame, nil
+}
+
+// requestAtGeneration pins one request to the authenticated session that
+// produced an asynchronous lifecycle token. It can never fall through to a
+// replacement board after reconnect, even if the old request completes late.
+func (runtime *Runtime) requestAtGeneration(
+	ctx context.Context,
+	generation uint64,
+	opcode byte,
+	payload []byte,
+	expected ...byte,
+) (native.Frame, error) {
+	runtime.mu.RLock()
+	if runtime.generation != generation || runtime.session == nil {
+		runtime.mu.RUnlock()
+		return native.Frame{}, fmt.Errorf("connection generation %d is no longer active", generation)
+	}
+	session := runtime.session
+	runtime.mu.RUnlock()
+
+	frame, err := session.Request(ctx, opcode, payload, expected...)
+	if err != nil {
+		return native.Frame{}, err
+	}
+	runtime.mu.RLock()
+	current := runtime.generation == generation && runtime.session == session
+	runtime.mu.RUnlock()
+	if !current {
+		return native.Frame{}, fmt.Errorf("connection generation %d changed while the request was in flight", generation)
+	}
+	if !runtime.observeAtGeneration(frame, generation) {
+		return native.Frame{}, fmt.Errorf("connection generation %d changed before its response could be observed", generation)
+	}
 	return frame, nil
 }
 
@@ -932,10 +1083,17 @@ func (runtime *Runtime) Command(
 	opcode byte,
 	payload []byte,
 ) error {
-	frame, err := runtime.Request(ctx, opcode, payload, native.OpACK)
+	snapshot := runtime.Snapshot()
+	if !snapshot.Connected {
+		return errors.New("device is not connected")
+	}
+	frame, err := runtime.requestAtGeneration(
+		ctx, snapshot.Generation, opcode, payload, native.OpACK,
+	)
 	if err != nil {
 		return err
 	}
+<<<<<<< HEAD
 	runtime.publishCommandEvidence(acknowledgedCommandEvidence(ctx, opcode, payload, frame))
 	return nil
 }
@@ -947,19 +1105,189 @@ func acknowledgedCommandEvidence(ctx context.Context, opcode byte, payload []byt
 		DeviceMicros: deviceMicros, Timed: timed, ObservedAt: time.Now(),
 		Source: CommandSourceFromContext(ctx),
 	}
+=======
+	runtime.publishAcknowledgedHostAction(opcode, payload, frame, snapshot.Generation)
+	return nil
+>>>>>>> origin/agent/webui-defects
 }
 
-func (runtime *Runtime) publishCommandEvidence(evidence CommandEvidence) {
-	runtime.commandObserverMu.RLock()
-	observers := make([]func(CommandEvidence), 0, len(runtime.commandObservers))
-	for _, observer := range runtime.commandObservers {
+// publishAcknowledgedHostAction is the one recorder ingress for both typed
+// Command calls and raw Request/ExchangeOpcode surfaces. Board SourceHost
+// echoes remain filtered, so each accepted operation is recorded exactly once.
+func (runtime *Runtime) publishAcknowledgedHostAction(
+	opcode byte,
+	payload []byte,
+	frame native.Frame,
+	generation uint64,
+) bool {
+	if frame.Opcode != native.OpACK {
+		return false
+	}
+	deviceMicros, timed := native.ResponseDeviceMicros(frame)
+	runtime.publishAcknowledgedOperationState(
+		opcode, payload, deviceMicros, timed, generation,
+	)
+	if !native.MacroPlaybackPayloadSemanticallyValid(opcode, payload) {
+		return false
+	}
+	runtime.publishActionEvidence(ActionEvidence{
+		Opcode: opcode, Payload: append([]byte(nil), payload...),
+		Source: native.InputSourceHost, SourceID: 0xFF,
+		DeviceMicros: deviceMicros, Timed: timed, ObservedAt: time.Now(),
+		Generation: generation,
+	})
+	return true
+}
+
+// publishAcknowledgedOperationState turns the board ACK into one retained,
+// server-side state event. This is deliberately independent of any browser's
+// optimistic state or BroadcastChannel, so every WS/Socket.IO/TUI subscriber
+// converges from the same post-ACK evidence without polling.
+func (runtime *Runtime) publishAcknowledgedOperationState(
+	opcode byte,
+	payload []byte,
+	deviceMicros uint32,
+	timed bool,
+	generation uint64,
+) {
+	kind, state := "operation.applied", "applied"
+	text := native.OpcodeName(opcode) + " accepted by controller"
+	metadata := map[string]string{
+		"opcode":                fmt.Sprintf("0x%02X", opcode),
+		"opcode_name":           native.OpcodeName(opcode),
+		"payload":               fmt.Sprintf("%X", payload),
+		"connection_generation": strconv.FormatUint(generation, 10),
+		"device_micros":         strconv.FormatUint(uint64(deviceMicros), 10),
+		"timed":                 strconv.FormatBool(timed),
+	}
+	switch opcode {
+	case native.OpRelaySet:
+		if len(payload) != 2 || payload[0] > 7 || payload[1] > 1 {
+			break
+		}
+		active := payload[1] != 0
+		kind = "relay.changed"
+		state = map[bool]string{true: "on", false: "off"}[active]
+		text = fmt.Sprintf("relay %d %s", payload[0]+1, state)
+		metadata["relay"] = strconv.Itoa(int(payload[0] + 1))
+		metadata["active"] = strconv.FormatBool(active)
+		runtime.mu.Lock()
+		mask := byte(1 << payload[0])
+		if active {
+			runtime.status.ActiveRelays |= mask
+		} else {
+			runtime.status.ActiveRelays &^= mask
+		}
+		runtime.statusUpdated = time.Now()
+		metadata["active_mask"] = fmt.Sprintf("0x%02X", runtime.status.ActiveRelays)
+		runtime.mu.Unlock()
+	case native.OpRelayAllOff:
+		if len(payload) != 0 {
+			break
+		}
+		kind, state, text = "relays.changed", "off", "all relays off"
+		runtime.mu.Lock()
+		runtime.status.ActiveRelays = 0
+		runtime.statusUpdated = time.Now()
+		runtime.mu.Unlock()
+		metadata["active_mask"] = "0x00"
+	case native.OpRelaySide:
+		if len(payload) != 2 || payload[0] > 1 || payload[1] > 2 {
+			break
+		}
+		kind = "motion.changed"
+		state = []string{"stop", "up", "down"}[payload[1]]
+		text = fmt.Sprintf("motion side %d %s", payload[0]+1, state)
+		metadata["side"] = strconv.Itoa(int(payload[0] + 1))
+		metadata["motion"] = state
+	case native.OpPWMSet:
+		if len(payload) != 3 || payload[0] > 15 {
+			break
+		}
+		value := uint32(payload[1]) | uint32(payload[2])<<8
+		kind, state = "pwm.changed", strconv.Itoa(int(value))
+		text = fmt.Sprintf("PWM channel %d set to %d", payload[0], value)
+		metadata["channel"] = strconv.Itoa(int(payload[0]))
+		metadata["value"] = strconv.Itoa(int(value))
+	case native.OpPWMAllOff:
+		kind, state, text = "pwm.changed", "off", "all PWM channels off"
+		metadata["all"] = "true"
+	case native.OpBuzzer:
+		kind = "buzzer.changed"
+	case native.OpDisplayText:
+		kind = "display.changed"
+	}
+	runtime.publishEvent(Event{
+		Kind: kind, Text: text, State: state, Lifecycle: "completed",
+		Source: "host", Target: "app.clients", MessageType: "command.result",
+		Action: native.OpcodeName(opcode), Metadata: metadata,
+	})
+}
+
+func (runtime *Runtime) publishActionEvidence(evidence ActionEvidence) {
+	runtime.actionObserverMu.RLock()
+	observers := make([]func(ActionEvidence), 0, len(runtime.actionObservers))
+	for _, observer := range runtime.actionObservers {
 		observers = append(observers, observer)
 	}
-	runtime.commandObserverMu.RUnlock()
+	runtime.actionObserverMu.RUnlock()
 	for _, observer := range observers {
 		copyEvidence := evidence
 		copyEvidence.Payload = append([]byte(nil), evidence.Payload...)
 		observer(copyEvidence)
+	}
+}
+
+// ObserveMacroStatuses subscribes board-local capture and playback services
+// without competing for Runtime.Events. The callback receives a value copy in
+// UART order; the returned release function is idempotent.
+func (runtime *Runtime) ObserveMacroStatuses(observer func(native.MacroStatus, uint64)) func() {
+	if observer == nil {
+		return func() {}
+	}
+	runtime.macroStatusObserverMu.Lock()
+	if runtime.macroStatusObservers == nil {
+		runtime.macroStatusObservers = make(map[uint64]func(native.MacroStatus, uint64))
+	}
+	runtime.nextMacroStatusObserver++
+	id := runtime.nextMacroStatusObserver
+	runtime.macroStatusObservers[id] = observer
+	runtime.macroStatusObserverMu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			runtime.macroStatusObserverMu.Lock()
+			delete(runtime.macroStatusObservers, id)
+			runtime.macroStatusObserverMu.Unlock()
+		})
+	}
+}
+
+func (runtime *Runtime) publishBoardAction(event native.DeviceEvent, generation uint64) {
+	if event.Type != native.EventAction {
+		return
+	}
+	runtime.publishActionEvidence(ActionEvidence{
+		Opcode: event.ActionOpcode, Payload: append([]byte(nil), event.ActionPayload...),
+		Source: event.Source, SourceID: event.SourceID, BoardOrigin: true,
+		DeviceMicros: event.DeviceMicros, Timed: event.Timed, ObservedAt: time.Now(),
+		Generation: generation,
+	})
+}
+
+func (runtime *Runtime) publishMacroStatus(status native.MacroStatus, generation ...uint64) {
+	value := runtime.Snapshot().Generation
+	if len(generation) != 0 {
+		value = generation[0]
+	}
+	runtime.macroStatusObserverMu.RLock()
+	observers := make([]func(native.MacroStatus, uint64), 0, len(runtime.macroStatusObservers))
+	for _, observer := range runtime.macroStatusObservers {
+		observers = append(observers, observer)
+	}
+	runtime.macroStatusObserverMu.RUnlock()
+	for _, observer := range observers {
+		observer(status, value)
 	}
 }
 
@@ -1066,12 +1394,27 @@ func (runtime *Runtime) currentSession() *link.Session {
 
 func (runtime *Runtime) discoveryOptions(options Options) link.DiscoveryOptions {
 	runtime.mu.RLock()
+<<<<<<< HEAD
+=======
+	// pump arms rebinding only for a disappeared USB transport. Explicit
+	// reconnects and configuration changes never relax a newly requested COM
+	// selector, while a failed HELLO attempt may safely retry the rebound port.
+>>>>>>> origin/agent/webui-defects
 	allowPortRebind := runtime.connectionState == "reconnecting" &&
 		runtime.session == nil && runtime.portRebindAllowed && runtime.port.IsUSB
 	lastPort := runtime.port
 	runtime.mu.RUnlock()
 	filter := options.Filter
 	if allowPortRebind {
+<<<<<<< HEAD
+=======
+		// The just-authenticated transport is the freshest identity available.
+		// In particular, an explicit --port/--device override deliberately
+		// clears the persisted preference, but must not make a later COM
+		// reassignment forget the VID/PID, friendly name, serial, or instance
+		// that the host actually opened. Missing fields retain any durable
+		// preference because inexpensive bridges expose uneven metadata.
+>>>>>>> origin/agent/webui-defects
 		filter.Preferred = mergeObservedDeviceIdentity(filter.Preferred, lastPort)
 	}
 	return link.DiscoveryOptions{
@@ -1176,6 +1519,7 @@ func (runtime *Runtime) attach(result link.OpenResult) {
 	if ready != nil {
 		go ready(result.Port, result.Hello)
 	}
+	runtime.notifyConnectionReady(generation, result.Port, result.Hello)
 	go runtime.pump(result.Session, generation)
 	go runtime.syncProgramState(runtime.ProgramState(), "connected")
 	go runtime.provisionDefaultStatusProfiles(generation)
@@ -1471,11 +1815,19 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 	for {
 		select {
 		case event := <-session.Events():
+			// A replaced session may still have buffered frames when its read
+			// goroutine unwinds. Reject them before any cache, action, or macro
+			// observer can relabel the frame with the new connection generation.
+			if !runtime.sessionGenerationCurrent(session, generation) {
+				return
+			}
 			if event.Err != nil {
 				disconnectReason = event.Err.Error()
 				runtime.publish("error", event.Err.Error(), native.Frame{})
 			} else {
-				runtime.observe(event.Frame)
+				if !runtime.observeAtGeneration(event.Frame, generation) {
+					return
+				}
 				kind := "rx"
 				text := fmt.Sprintf(
 					"%s seq=%d payload=% X",
@@ -1506,6 +1858,10 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 						rfMappingRequired, rfCaptured = runtime.observeRFLearningEvent(parsed)
 						kind, text = describeDeviceEvent(parsed)
 						parsedDevice = &parsed
+						runtime.publishBoardAction(parsed, generation)
+						if parsed.Macro != nil {
+							runtime.publishMacroStatus(*parsed.Macro, generation)
+						}
 					} else {
 						kind = "error"
 						text = err.Error()
@@ -1623,6 +1979,16 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 							"page": parsedDevice.AppPage, "value": parsedDevice.AppPage,
 							"target_instance": parsedDevice.AppTarget,
 						}
+					} else if parsedDevice.Type == native.EventAction {
+						deviceEvent.Metadata = map[string]string{
+							"connection_generation": strconv.FormatUint(generation, 10),
+							"device_micros":         strconv.FormatUint(uint64(parsedDevice.DeviceMicros), 10),
+							"source":                inputSourceName(parsedDevice.Source),
+							"source_id":             strconv.Itoa(int(parsedDevice.SourceID)),
+							"opcode":                fmt.Sprintf("0x%02X", parsedDevice.ActionOpcode),
+							"opcode_name":           native.OpcodeName(parsedDevice.ActionOpcode),
+							"payload":               fmt.Sprintf("%X", parsedDevice.ActionPayload),
+						}
 					}
 					runtime.publishEvent(deviceEvent)
 				} else {
@@ -1675,6 +2041,15 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 			return
 		}
 	}
+}
+
+func (runtime *Runtime) sessionGenerationCurrent(
+	session *link.Session,
+	generation uint64,
+) bool {
+	runtime.mu.RLock()
+	defer runtime.mu.RUnlock()
+	return runtime.session == session && runtime.generation == generation
 }
 
 func (runtime *Runtime) autoReconnect(epoch uint64) {
@@ -1804,6 +2179,20 @@ func (runtime *Runtime) publishReconnectFailure(epoch uint64, reason string) boo
 func (runtime *Runtime) observe(frame native.Frame) {
 	runtime.mu.Lock()
 	defer runtime.mu.Unlock()
+	runtime.observeLocked(frame)
+}
+
+func (runtime *Runtime) observeAtGeneration(frame native.Frame, generation uint64) bool {
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	if runtime.generation != generation || runtime.session == nil {
+		return false
+	}
+	runtime.observeLocked(frame)
+	return true
+}
+
+func (runtime *Runtime) observeLocked(frame native.Frame) {
 	switch frame.Opcode {
 	case native.OpStatus:
 		if status, err := native.ParseStatus(frame.Payload); err == nil {
@@ -1916,6 +2305,9 @@ func describeDeviceEvent(event native.DeviceEvent) (string, string) {
 				native.MacroCancelled: "cancelled",
 				native.MacroCompleted: "completed",
 				native.MacroFailed:    "failed",
+				native.MacroRecording: "recording",
+				native.MacroCaptured:  "captured",
+				native.MacroExported:  "exported",
 			}[event.Macro.State]
 			if state == "" {
 				state = fmt.Sprintf("state-%d", event.Macro.State)
@@ -1998,6 +2390,16 @@ func describeDeviceEvent(event native.DeviceEvent) (string, string) {
 			"board requested page %s for %s",
 			event.AppPage,
 			event.AppTarget,
+		)
+	case native.EventAction:
+		source := inputSourceName(event.Source)
+		if source == "" {
+			source = fmt.Sprintf("source-%d", event.Source)
+		}
+		return "action.applied", fmt.Sprintf(
+			"%s action %s payload=% X at MCU %d us",
+			source, native.OpcodeName(event.ActionOpcode), event.ActionPayload,
+			event.DeviceMicros,
 		)
 	default:
 		return "event", fmt.Sprintf("device event %d payload=% X", event.Type, event.Raw)
@@ -2229,6 +2631,7 @@ func (runtime *Runtime) publishConnectionEvent(
 	event := Event{
 		Kind: kind, Text: text,
 		Lifecycle: lifecycle, Port: port, Reason: reason, State: state,
+<<<<<<< HEAD
 	}
 	if strings.HasPrefix(kind, "usb.") {
 		event.Source = "host"
@@ -2236,6 +2639,29 @@ func (runtime *Runtime) publishConnectionEvent(
 	}
 	runtime.publishEvent(event)
 	return true
+=======
+	})
+	// Keep transport transitions first-class for every consumer of the common
+	// event stream (Web UI, TUI, IPC, API, and relays), rather than making each
+	// surface infer USB state from a generic connection string.
+	usbKind := ""
+	switch lifecycle {
+	case "disconnect":
+		usbKind = "usb.disconnected"
+	case "reconnecting":
+		usbKind = "usb.reconnecting"
+	case "connect", "reconnected":
+		if port.IsUSB {
+			usbKind = "usb.reconnected"
+		}
+	}
+	if usbKind != "" && port.IsUSB {
+		runtime.publishEvent(Event{
+			Kind: usbKind, Text: text, Lifecycle: lifecycle, Port: port,
+			Reason: reason, State: state, Source: "host", Target: "app.clients",
+		})
+	}
+>>>>>>> origin/agent/webui-defects
 }
 
 func (runtime *Runtime) publishEvent(event Event) Event {

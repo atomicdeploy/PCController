@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyPushedOutputEvent, applyStatusLEDEvent, segmentStateFromEvent, statusLEDFromEvent } from './status-led-event'
+import { applyPushedOutputEvent, applyStatusLEDEvent, isPushedOutputEvent, relayMaskFromEvent, segmentStateFromEvent, statusLEDFromEvent } from './status-led-event'
 import { emptySnapshot } from './types'
 
 describe('pushed status LED events', () => {
@@ -24,6 +24,13 @@ describe('pushed status LED events', () => {
     const snapshot = applyPushedOutputEvent(emptySnapshot, event)
     expect(snapshot.front_panel?.raw_segments).toEqual([0x06, 0x5B, 0x4F, 0x66])
     expect(snapshot.have_front_panel).toBe(true)
+  })
+
+  it('applies an optimistic or authoritative relay mask without a physical refresh', () => {
+    const event = { id: 6, time: '2026-08-03T10:00:02Z', kind: 'relay.state', text: 'changed', source: 'webui', metadata: { active_relays: '5' } }
+    expect(isPushedOutputEvent(event)).toBe(true)
+    expect(relayMaskFromEvent(event)).toBe(5)
+    expect(applyPushedOutputEvent(emptySnapshot, event).status.active_relays).toBe(5)
   })
 
   it('ignores incomplete or unrelated events', () => {

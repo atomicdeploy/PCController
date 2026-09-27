@@ -255,11 +255,18 @@ type Service struct {
 	Artifacts        *artifacts.Service
 	ReleaseDiscovery ReleaseDiscoveryService
 	AuthToken        string
+<<<<<<< HEAD
 	// AuthorizationDisabled is the product-wide alpha contract from #148.
 	// Configured credentials and remote capability bits remain readable so a
 	// future complete session design can adopt them, but they are dormant while
 	// this flag is set. This is intentionally selected by product entry points,
 	// not exposed as another end-user security mode.
+=======
+	// AuthorizationDisabled is the explicit alpha-only escape hatch used by the
+	// host while the durable remote-login design is deferred. It deliberately
+	// bypasses credential and remote-capability policy; the future authentication
+	// feature replaces this flag with its own reviewed policy.
+>>>>>>> origin/agent/webui-defects
 	AuthorizationDisabled bool
 	RemotePrincipal       string
 	AllowedOrigins        []string
@@ -350,24 +357,28 @@ func validateLegacyAppActionTracking(action hostui.AppAction, timeoutMS int) err
 // browserUISettings is the narrow persistent host-owned subset exposed to the
 // browser. Board EEPROM settings remain on the independent board command path.
 type browserUISettings struct {
-	AppTitle        string                           `json:"app_title"`
-	Tagline         string                           `json:"tagline"`
-	SetupComplete   bool                             `json:"setup_complete"`
-	WelcomeMelody   string                           `json:"welcome_melody"`
-	Appearance      browserAppearance                `json:"appearance"`
-	AppearanceETag  string                           `json:"appearance_etag"`
-	SegmentScroll   appconfig.SegmentScroll          `json:"segment_scroll"`
-	PeripheralNames map[string]string                `json:"peripheral_names"`
-	Peripherals     []appconfig.PeripheralDescriptor `json:"peripherals"`
-	Changed         *bool                            `json:"changed,omitempty"`
-	ChangedFields   []string                         `json:"changed_fields,omitempty"`
-	Before          map[string]any                   `json:"before,omitempty"`
-	After           map[string]any                   `json:"after,omitempty"`
+	AppTitle               string                                      `json:"app_title"`
+	Tagline                string                                      `json:"tagline"`
+	SetupComplete          bool                                        `json:"setup_complete"`
+	WelcomeMelody          string                                      `json:"welcome_melody"`
+	Appearance             browserAppearance                           `json:"appearance"`
+	AppearanceETag         string                                      `json:"appearance_etag"`
+	SegmentScroll          appconfig.SegmentScroll                     `json:"segment_scroll"`
+	PeripheralNames        map[string]string                           `json:"peripheral_names"`
+	PeripheralPresentation map[string]appconfig.PeripheralPresentation `json:"peripheral_presentation"`
+	Peripherals            []appconfig.PeripheralDescriptor            `json:"peripherals"`
+	Controls               []appconfig.ControlDescriptor               `json:"controls"`
+	Changed                *bool                                       `json:"changed,omitempty"`
+	ChangedFields          []string                                    `json:"changed_fields,omitempty"`
+	Before                 map[string]any                              `json:"before,omitempty"`
+	After                  map[string]any                              `json:"after,omitempty"`
 }
 
 type peripheralSettings struct {
-	Names       map[string]string                `json:"peripheral_names"`
-	Peripherals []appconfig.PeripheralDescriptor `json:"peripherals"`
+	Names        map[string]string                           `json:"peripheral_names"`
+	Presentation map[string]appconfig.PeripheralPresentation `json:"peripheral_presentation"`
+	Peripherals  []appconfig.PeripheralDescriptor            `json:"peripherals"`
+	Controls     []appconfig.ControlDescriptor               `json:"controls"`
 }
 
 // networkPeerConfig is the versionless bridge topology contract. Deliberately
@@ -716,12 +727,13 @@ func (service *Service) dispatch(
 		result = service.peripheralSettings()
 	case "controller.peripherals.set":
 		var params struct {
-			PeripheralNames map[string]string `json:"peripheral_names"`
+			PeripheralNames        *map[string]string                           `json:"peripheral_names,omitempty"`
+			PeripheralPresentation *map[string]appconfig.PeripheralPresentation `json:"peripheral_presentation,omitempty"`
 		}
 		if err = decodeParams(request.Params, &params); err == nil {
-			if params.PeripheralNames == nil {
-				err = errors.New("peripheral_names is required")
-			} else if err = service.setPeripheralNames(params.PeripheralNames); err == nil {
+			if params.PeripheralNames == nil && params.PeripheralPresentation == nil {
+				err = errors.New("peripheral_names or peripheral_presentation is required")
+			} else if err = service.setPeripheralSettings(params.PeripheralNames, params.PeripheralPresentation); err == nil {
 				result = service.peripheralSettings()
 			}
 		}
@@ -785,6 +797,8 @@ func (service *Service) dispatch(
 		result, err = service.Client.RefreshFrontPanel(ctx)
 	case "controller.command.catalog":
 		result = service.Client.CommandCatalog()
+	case "controller.melodies.list":
+		result = service.Client.ConfiguredMelodies()
 	case "controller.program_state.get", "controller.program-state.get":
 		result = service.Client.ProgramState()
 	case "controller.program_state.set", "controller.program-state.set":
@@ -900,6 +914,123 @@ func (service *Service) dispatch(
 		}
 	case "controller.host_menu.state":
 		result, err = service.Client.HostMenuState(ctx)
+	case "controller.macro.snapshot", "controller.macro.list", "controller.macro.status":
+		result = service.Client.MacroSnapshot()
+	case "controller.macro.create":
+		var params struct {
+			ID       *int   `json:"id"`
+			Name     string `json:"name"`
+			Category string `json:"category,omitempty"`
+			Color    string `json:"color,omitempty"`
+		}
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			if params.ID == nil || *params.ID < 0 || *params.ID > 255 {
+				err = errors.New("macro id is required and must be 0..255")
+			} else {
+				_, err = service.Client.MacroCreate(byte(*params.ID), params.Name, params.Category, params.Color)
+				if err == nil {
+					result = service.Client.MacroSnapshot()
+				}
+			}
+		}
+	case "controller.macro.update":
+		var params struct {
+			Reference string  `json:"reference"`
+			Name      string  `json:"name"`
+			Category  *string `json:"category,omitempty"`
+			Color     *string `json:"color,omitempty"`
+		}
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			_, err = service.Client.MacroUpdate(params.Reference, params.Name, params.Category, params.Color)
+			if err == nil {
+				result = service.Client.MacroSnapshot()
+			}
+		}
+	case "controller.macro.delete":
+		var params struct {
+			Reference string `json:"reference"`
+		}
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			err = service.Client.MacroDelete(params.Reference)
+			if err == nil {
+				result = service.Client.MacroSnapshot()
+			}
+		}
+	case "controller.macro.record.start":
+		var params struct {
+			Name     string `json:"name"`
+			Category string `json:"category,omitempty"`
+			Color    string `json:"color,omitempty"`
+		}
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			_, err = service.Client.MacroRecordStart(params.Name, params.Category, params.Color)
+			if err == nil {
+				result = service.Client.MacroSnapshot()
+			}
+		}
+	case "controller.macro.record.stop":
+		var params struct {
+			Save *bool `json:"save,omitempty"`
+		}
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			save := true
+			if params.Save != nil {
+				save = *params.Save
+			}
+			_, err = service.Client.MacroRecordStop(save)
+			if err == nil {
+				result = service.Client.MacroSnapshot()
+			}
+		}
+	case "controller.macro.board_record.start":
+		var params struct {
+			ID *int `json:"id"`
+		}
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			if params.ID == nil || *params.ID < 0 || *params.ID > 255 {
+				err = errors.New("macro capture id is required and must be 0..255")
+			} else {
+				_, err = service.Client.MacroBoardRecordStart(ctx, byte(*params.ID))
+				if err == nil {
+					result = service.Client.MacroSnapshot()
+				}
+			}
+		}
+	case "controller.macro.board_record.stop":
+		_, err = service.Client.MacroBoardRecordStop(ctx)
+		if err == nil {
+			result = service.Client.MacroSnapshot()
+		}
+	case "controller.macro.board_record.clear":
+		var params struct {
+			Force bool `json:"force,omitempty"`
+		}
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			_, err = service.Client.MacroBoardRecordClear(ctx, params.Force)
+			if err == nil {
+				result = service.Client.MacroSnapshot()
+			}
+		}
+	case "controller.macro.play":
+		var params struct {
+			Reference string `json:"reference"`
+		}
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			_, err = service.Client.MacroPlay(ctx, params.Reference)
+			if err == nil {
+				result = service.Client.MacroSnapshot()
+			}
+		}
+	case "controller.macro.cancel":
+		var params struct {
+			KeepOutputs bool `json:"keep_outputs,omitempty"`
+		}
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			err = service.Client.MacroCancel(ctx, params.KeepOutputs)
+			if err == nil {
+				result = service.Client.MacroSnapshot()
+			}
+		}
 	case "controller.menu.jump", "controller.menu.page":
 		var params struct {
 			Page string `json:"page"`
@@ -1185,6 +1316,56 @@ func (service *Service) dispatch(
 		if err = decodeParams(request.Params, &message); err == nil {
 			message = tagInboundAccess(message, access)
 			result, err = service.Client.SendTextMessage(ctx, message)
+		}
+	case "controller.message.delivery":
+		var params struct {
+			EventID uint64 `json:"event_id"`
+			Surface string `json:"surface"`
+			Error   string `json:"error,omitempty"`
+		}
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			result, err = service.Client.AcknowledgeMessageDelivery(
+				params.EventID, params.Surface, params.Error,
+			)
+		}
+	case "controller.message.action":
+		var params struct {
+			EventID    uint64 `json:"event_id"`
+			Surface    string `json:"surface"`
+			InstanceID string `json:"instance_id,omitempty"`
+		}
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			var message controller.Event
+			message, err = service.Client.MessageForSurface(params.EventID, params.Surface)
+			if err == nil {
+				var output string
+				var actionErr error
+				if strings.TrimSpace(message.Action) == "" {
+					actionErr = errors.New("message has no action")
+				} else {
+					var action hostui.AppAction
+					action, actionErr = hostui.ParseAction(
+						message.Action,
+						"message:"+strings.ToLower(strings.TrimSpace(params.Surface)),
+					)
+					if actionErr == nil && action.Kind == "command" {
+						output, actionErr = service.Client.Execute(ctx, action.Value)
+					} else if actionErr == nil {
+						if service.AppAction == nil {
+							actionErr = errors.New("primary app action routing is unavailable")
+						} else {
+							action.Target = strings.TrimSpace(params.InstanceID)
+							actionErr = service.AppAction(action)
+							if actionErr == nil {
+								output = "accepted"
+							}
+						}
+					}
+				}
+				result = service.Client.EmitMessageActionOutcome(
+					message, params.Surface, output, actionErr,
+				)
+			}
 		}
 	case "controller.bridge.list":
 		if service.BridgeList == nil {
@@ -1666,15 +1847,17 @@ func (service *Service) setNetworkPeers(raw json.RawMessage) (networkPeersConfig
 func (service *Service) browserUISettings() browserUISettings {
 	ui := service.hostConfig().UI
 	return browserUISettings{
-		AppTitle:        productidentity.Title(ui.AppTitle),
-		Tagline:         ui.Tagline,
-		SetupComplete:   ui.SetupComplete,
-		WelcomeMelody:   ui.WelcomeMelody,
-		Appearance:      browserAppearanceFromConfig(ui.Appearance),
-		AppearanceETag:  appearanceETag(ui.Appearance),
-		SegmentScroll:   ui.SegmentScroll,
-		PeripheralNames: clonePeripheralNames(ui.PeripheralNames),
-		Peripherals:     appconfig.PeripheralDescriptors(),
+		AppTitle:               productidentity.Title(ui.AppTitle),
+		Tagline:                ui.Tagline,
+		SetupComplete:          ui.SetupComplete,
+		WelcomeMelody:          ui.WelcomeMelody,
+		Appearance:             browserAppearanceFromConfig(ui.Appearance),
+		AppearanceETag:         appearanceETag(ui.Appearance),
+		SegmentScroll:          ui.SegmentScroll,
+		PeripheralNames:        clonePeripheralNames(ui.PeripheralNames),
+		PeripheralPresentation: appconfig.ResolvedPeripheralPresentation(ui),
+		Peripherals:            appconfig.PeripheralDescriptors(),
+		Controls:               appconfig.ControlDescriptors(ui),
 	}
 }
 
@@ -1682,6 +1865,19 @@ func clonePeripheralNames(names map[string]string) map[string]string {
 	result := make(map[string]string, len(names))
 	for key, name := range names {
 		result[key] = name
+	}
+	return result
+}
+
+func clonePeripheralPresentation(values map[string]appconfig.PeripheralPresentation) map[string]appconfig.PeripheralPresentation {
+	result := make(map[string]appconfig.PeripheralPresentation, len(values))
+	for key, value := range values {
+		copy := value
+		if value.Order != nil {
+			order := *value.Order
+			copy.Order = &order
+		}
+		result[key] = copy
 	}
 	return result
 }
@@ -1705,30 +1901,125 @@ func normalizePeripheralNames(names map[string]string) (map[string]string, error
 	return result, nil
 }
 
+func normalizePeripheralPresentation(values map[string]appconfig.PeripheralPresentation) (map[string]appconfig.PeripheralPresentation, error) {
+	result := make(map[string]appconfig.PeripheralPresentation, len(values))
+	for rawKey, rawValue := range values {
+		key := strings.ToLower(strings.TrimSpace(rawKey))
+		if key == "" || !appconfig.IsPresentedControlKey(key) {
+			return nil, fmt.Errorf("peripheral_presentation key %q is not a relay, motion side, or PWM ID", rawKey)
+		}
+		if _, duplicate := result[key]; duplicate {
+			return nil, fmt.Errorf("peripheral_presentation contains duplicate normalized key %q", key)
+		}
+		value := rawValue
+		value.Name = strings.TrimSpace(value.Name)
+		value.Description = strings.TrimSpace(value.Description)
+		if value.Order != nil {
+			order := *value.Order
+			value.Order = &order
+		}
+		result[key] = value
+	}
+	return result, nil
+}
+
 func (service *Service) peripheralSettings() peripheralSettings {
 	return peripheralSettings{
-		Names:       clonePeripheralNames(service.hostConfig().UI.PeripheralNames),
-		Peripherals: appconfig.PeripheralDescriptors(),
+		Names:        clonePeripheralNames(service.hostConfig().UI.PeripheralNames),
+		Presentation: appconfig.ResolvedPeripheralPresentation(service.hostConfig().UI),
+		Peripherals:  appconfig.PeripheralDescriptors(),
+		Controls:     appconfig.ControlDescriptors(service.hostConfig().UI),
 	}
 }
 
 func (service *Service) setPeripheralNames(names map[string]string) error {
+	return service.setPeripheralSettings(&names, nil)
+}
+
+func (service *Service) setPeripheralSettings(
+	names *map[string]string,
+	presentation *map[string]appconfig.PeripheralPresentation,
+) error {
 	if service.UpdateHostConfig == nil {
 		return errors.New("persistent host configuration is unavailable")
 	}
-	normalized, err := normalizePeripheralNames(names)
-	if err != nil {
-		return err
+	var normalizedNames map[string]string
+	var normalizedPresentation map[string]appconfig.PeripheralPresentation
+	var err error
+	if names != nil {
+		normalizedNames, err = normalizePeripheralNames(*names)
+		if err != nil {
+			return err
+		}
+	}
+	if presentation != nil {
+		normalizedPresentation, err = normalizePeripheralPresentation(*presentation)
+		if err != nil {
+			return err
+		}
 	}
 	candidate := service.hostConfig()
-	candidate.UI.PeripheralNames = normalized
+	applyPeripheralSettings(&candidate.UI, normalizedNames, normalizedPresentation, names != nil, presentation != nil)
 	if err := candidate.Validate(); err != nil {
 		return err
 	}
-	return service.UpdateHostConfig(func(value *appconfig.Config) error {
-		value.UI.PeripheralNames = clonePeripheralNames(normalized)
+	err = service.UpdateHostConfig(func(value *appconfig.Config) error {
+		applyPeripheralSettings(&value.UI, normalizedNames, normalizedPresentation, names != nil, presentation != nil)
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	if service.Client != nil {
+		service.Client.EmitHostActionEvent(
+			"config", "Peripheral presentation updated", "host", "peripheral.presentation.set",
+			map[string]string{"scope": "peripherals"},
+		)
+	}
+	return nil
+}
+
+func applyPeripheralSettings(
+	ui *appconfig.UI,
+	names map[string]string,
+	presentation map[string]appconfig.PeripheralPresentation,
+	setNames bool,
+	setPresentation bool,
+) {
+	if setPresentation {
+		ui.PeripheralPresentation = clonePeripheralPresentation(presentation)
+	}
+	if setNames {
+		ui.PeripheralNames = clonePeripheralNames(names)
+		if ui.PeripheralPresentation == nil {
+			ui.PeripheralPresentation = make(map[string]appconfig.PeripheralPresentation)
+		}
+		for _, descriptor := range appconfig.PeripheralDescriptors() {
+			if !appconfig.IsPresentedControlKey(descriptor.Key) {
+				continue
+			}
+			value := ui.PeripheralPresentation[descriptor.Key]
+			value.Name = strings.TrimSpace(names[descriptor.Key])
+			ui.PeripheralPresentation[descriptor.Key] = value
+		}
+	}
+	// Keep the historical name map as a compatibility projection for older
+	// clients while presentation remains authoritative for controllable IDs.
+	if setPresentation {
+		if ui.PeripheralNames == nil {
+			ui.PeripheralNames = make(map[string]string)
+		}
+		for key := range ui.PeripheralNames {
+			if appconfig.IsPresentedControlKey(key) {
+				delete(ui.PeripheralNames, key)
+			}
+		}
+		for key, value := range ui.PeripheralPresentation {
+			if value.Name != "" {
+				ui.PeripheralNames[key] = value.Name
+			}
+		}
+	}
 }
 
 func (service *Service) hostFacts() hostfacts.Provider {
@@ -1952,6 +2243,9 @@ func (service *Service) authorizeCapability(
 	operation, capability string,
 ) error {
 	access = service.normalizeAccess(access)
+	if service.authorizationDisabled() {
+		return nil
+	}
 	if !access.Remote {
 		if service.authorizationDisabled() {
 			return nil
@@ -2071,10 +2365,18 @@ func requestCapability(method string, params json.RawMessage) string {
 		return capabilityReset
 	case "controller.quit", "controller.exit":
 		return capabilityShutdown
-	case "controller.message.send":
+	case "controller.message.send", "controller.message.delivery", "controller.message.action":
 		return capabilityMessages
 	case "controller.display.send", "controller.opcode.send",
 		"controller.opcode.exchange", "controller.opcode.request":
+		return capabilityBoard
+	case "controller.macro.snapshot", "controller.macro.list", "controller.macro.status":
+		return capabilityRead
+	case "controller.macro.create", "controller.macro.update", "controller.macro.delete",
+		"controller.macro.record.start", "controller.macro.record.stop":
+		return capabilityHostConfig
+	case "controller.macro.board_record.start", "controller.macro.board_record.stop",
+		"controller.macro.board_record.clear", "controller.macro.play", "controller.macro.cancel":
 		return capabilityBoard
 	case "controller.host_menu.config", "controller.host_menu.config.get",
 		"controller.ui.config", "controller.ui.config.get",
@@ -2130,7 +2432,7 @@ func requestCapability(method string, params json.RawMessage) string {
 	case "controller.ping", "controller.snapshot", "controller.port.process", "controller.port.owner", "controller.session.snapshot",
 		"controller.session.snapshot.last", "controller.status",
 		"controller.front_panel", "controller.front-panel",
-		"controller.command.catalog", "controller.program_state.get", "controller.program-state.get",
+		"controller.command.catalog", "controller.melodies.list", "controller.program_state.get", "controller.program-state.get",
 		"controller.temperatures", "controller.menu.list", "controller.menu.current",
 		"controller.menu.layout.get", "controller.host_menu.state",
 		"controller.rf.list", "controller.rf.presentation",
@@ -2208,11 +2510,11 @@ func commandCapability(command string) string {
 		}
 		return capabilityBoard
 	case "macro":
-		if len(words) >= 2 && (words[1] == "list" || words[1] == "show" || words[1] == "status" ||
+		if len(words) >= 2 && (words[1] == "list" || words[1] == "show" || words[1] == "status" || words[1] == "monitor" ||
 			(words[1] == "record" && len(words) >= 3 && words[2] == "status")) {
 			return capabilityRead
 		}
-		if len(words) >= 2 && (words[1] == "create" || words[1] == "delete" || words[1] == "remove" || words[1] == "record") {
+		if len(words) >= 2 && (words[1] == "create" || words[1] == "update" || words[1] == "rename" || words[1] == "category" || words[1] == "categorize" || words[1] == "delete" || words[1] == "remove" || words[1] == "record") {
 			return capabilityHostConfig
 		}
 		return capabilityBoard
@@ -2566,7 +2868,10 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 			"websocket_path":      webSocketPath,
 			"socket_io_path":      socketIOPath,
 			"session_ticket_path": SessionTicketPath,
+<<<<<<< HEAD
 			"server_proof_path":   ServerProofPath,
+=======
+>>>>>>> origin/agent/webui-defects
 			"auth_required":       !service.authorizationDisabled() && strings.TrimSpace(service.currentAuthToken()) != "",
 			"integrations": map[string]bool{
 				"local_device":          config.Integrations.LocalDevice.Enabled,
@@ -2634,18 +2939,19 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 			return
 		}
 		var params struct {
-			PeripheralNames map[string]string `json:"peripheral_names"`
+			PeripheralNames        *map[string]string                           `json:"peripheral_names,omitempty"`
+			PeripheralPresentation *map[string]appconfig.PeripheralPresentation `json:"peripheral_presentation,omitempty"`
 		}
 		decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, maxMessage))
 		decoder.DisallowUnknownFields()
-		if err := decoder.Decode(&params); err != nil || params.PeripheralNames == nil {
+		if err := decoder.Decode(&params); err != nil || (params.PeripheralNames == nil && params.PeripheralPresentation == nil) {
 			if err == nil {
-				err = errors.New("peripheral_names is required")
+				err = errors.New("peripheral_names or peripheral_presentation is required")
 			}
 			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
-		if err := service.setPeripheralNames(params.PeripheralNames); err != nil {
+		if err := service.setPeripheralSettings(params.PeripheralNames, params.PeripheralPresentation); err != nil {
 			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
@@ -3019,6 +3325,223 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 			return
 		}
 		writeHTTPJSON(writer, http.StatusAccepted, event)
+	})
+	mux.HandleFunc("/api/macros", func(writer http.ResponseWriter, request *http.Request) {
+		if !authorizeHTTPRequest(writer, request, service) {
+			return
+		}
+		capability := capabilityRead
+		if request.Method != http.MethodGet {
+			capability = capabilityHostConfig
+		}
+		if !authorizeHTTPCapability(writer, request, service, capability) {
+			return
+		}
+		decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, maxMessage))
+		decoder.DisallowUnknownFields()
+		switch request.Method {
+		case http.MethodGet:
+			writeHTTPJSON(writer, http.StatusOK, service.Client.MacroSnapshot())
+		case http.MethodPost:
+			var params struct {
+				ID       *int   `json:"id"`
+				Name     string `json:"name"`
+				Category string `json:"category,omitempty"`
+				Color    string `json:"color,omitempty"`
+			}
+			if err := decoder.Decode(&params); err != nil {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			if params.ID == nil || *params.ID < 0 || *params.ID > 255 {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": "macro id is required and must be 0..255"})
+				return
+			}
+			if _, err := service.Client.MacroCreate(byte(*params.ID), params.Name, params.Category, params.Color); err != nil {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			writeHTTPJSON(writer, http.StatusCreated, service.Client.MacroSnapshot())
+		case http.MethodPut, http.MethodPatch:
+			var params struct {
+				Reference string  `json:"reference"`
+				Name      string  `json:"name"`
+				Category  *string `json:"category,omitempty"`
+				Color     *string `json:"color,omitempty"`
+			}
+			if err := decoder.Decode(&params); err != nil {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			if _, err := service.Client.MacroUpdate(params.Reference, params.Name, params.Category, params.Color); err != nil {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			writeHTTPJSON(writer, http.StatusOK, service.Client.MacroSnapshot())
+		case http.MethodDelete:
+			var params struct {
+				Reference string `json:"reference"`
+			}
+			if err := decoder.Decode(&params); err != nil {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			if err := service.Client.MacroDelete(params.Reference); err != nil {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			writeHTTPJSON(writer, http.StatusOK, service.Client.MacroSnapshot())
+		default:
+			writer.Header().Set("Allow", http.MethodGet+", "+http.MethodPost+", "+http.MethodPut+", "+http.MethodPatch+", "+http.MethodDelete)
+			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/api/macros/recording", func(writer http.ResponseWriter, request *http.Request) {
+		if !authorizeHTTPRequest(writer, request, service) ||
+			!authorizeHTTPCapability(writer, request, service, capabilityHostConfig) {
+			return
+		}
+		decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, maxMessage))
+		decoder.DisallowUnknownFields()
+		switch request.Method {
+		case http.MethodPost:
+			var params struct {
+				Name     string `json:"name"`
+				Category string `json:"category,omitempty"`
+				Color    string `json:"color,omitempty"`
+			}
+			if err := decoder.Decode(&params); err != nil {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			if _, err := service.Client.MacroRecordStart(params.Name, params.Category, params.Color); err != nil {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			writeHTTPJSON(writer, http.StatusAccepted, service.Client.MacroSnapshot())
+		case http.MethodDelete:
+			var params struct {
+				Save *bool `json:"save,omitempty"`
+			}
+			if err := decoder.Decode(&params); err != nil && !errors.Is(err, io.EOF) {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			save := true
+			if params.Save != nil {
+				save = *params.Save
+			}
+			if _, err := service.Client.MacroRecordStop(save); err != nil {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			writeHTTPJSON(writer, http.StatusOK, service.Client.MacroSnapshot())
+		default:
+			writer.Header().Set("Allow", http.MethodPost+", "+http.MethodDelete)
+			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/api/macros/board-recording", func(writer http.ResponseWriter, request *http.Request) {
+		if !authorizeHTTPRequest(writer, request, service) ||
+			!authorizeHTTPCapability(writer, request, service, capabilityBoard) {
+			return
+		}
+		switch request.Method {
+		case http.MethodPost:
+			var params struct {
+				ID *int `json:"id"`
+			}
+			decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, maxMessage))
+			decoder.DisallowUnknownFields()
+			if err := decoder.Decode(&params); err != nil {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			if params.ID == nil || *params.ID < 0 || *params.ID > 255 {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": "macro capture id is required and must be 0..255"})
+				return
+			}
+			if _, err := service.Client.MacroBoardRecordStart(request.Context(), byte(*params.ID)); err != nil {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			writeHTTPJSON(writer, http.StatusAccepted, service.Client.MacroSnapshot())
+		case http.MethodDelete:
+			if _, err := service.Client.MacroBoardRecordStop(request.Context()); err != nil {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			writeHTTPJSON(writer, http.StatusOK, service.Client.MacroSnapshot())
+		default:
+			writer.Header().Set("Allow", http.MethodPost+", "+http.MethodDelete)
+			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/api/macros/board-recording/clear", func(writer http.ResponseWriter, request *http.Request) {
+		if !authorizeHTTPRequest(writer, request, service) {
+			return
+		}
+		if request.Method != http.MethodPost {
+			writer.Header().Set("Allow", http.MethodPost)
+			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !authorizeHTTPCapability(writer, request, service, capabilityBoard) {
+			return
+		}
+		var params struct {
+			Force bool `json:"force,omitempty"`
+		}
+		decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, maxMessage))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&params); err != nil && !errors.Is(err, io.EOF) {
+			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		if _, err := service.Client.MacroBoardRecordClear(request.Context(), params.Force); err != nil {
+			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		writeHTTPJSON(writer, http.StatusOK, service.Client.MacroSnapshot())
+	})
+	mux.HandleFunc("/api/macros/playback", func(writer http.ResponseWriter, request *http.Request) {
+		if !authorizeHTTPRequest(writer, request, service) ||
+			!authorizeHTTPCapability(writer, request, service, capabilityBoard) {
+			return
+		}
+		decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, maxMessage))
+		decoder.DisallowUnknownFields()
+		switch request.Method {
+		case http.MethodPost:
+			var params struct {
+				Reference string `json:"reference"`
+			}
+			if err := decoder.Decode(&params); err != nil {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			if _, err := service.Client.MacroPlay(request.Context(), params.Reference); err != nil {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			writeHTTPJSON(writer, http.StatusAccepted, service.Client.MacroSnapshot())
+		case http.MethodDelete:
+			var params struct {
+				KeepOutputs bool `json:"keep_outputs,omitempty"`
+			}
+			if err := decoder.Decode(&params); err != nil && !errors.Is(err, io.EOF) {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			if err := service.Client.MacroCancel(request.Context(), params.KeepOutputs); err != nil {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			writeHTTPJSON(writer, http.StatusOK, service.Client.MacroSnapshot())
+		default:
+			writer.Header().Set("Allow", http.MethodPost+", "+http.MethodDelete)
+			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
+		}
 	})
 	mux.HandleFunc("/api/display", func(writer http.ResponseWriter, request *http.Request) {
 		if !authorizeHTTPRequest(writer, request, service) {

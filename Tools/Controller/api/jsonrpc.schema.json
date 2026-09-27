@@ -438,12 +438,28 @@
             "controller.lcd.presentation.status",
             "controller.lcd.priority",
             "controller.lcd.prompt",
+            "controller.macro.board_record.clear",
+            "controller.macro.board_record.start",
+            "controller.macro.board_record.stop",
+            "controller.macro.cancel",
+            "controller.macro.create",
+            "controller.macro.delete",
+            "controller.macro.list",
+            "controller.macro.play",
+            "controller.macro.record.start",
+            "controller.macro.record.stop",
+            "controller.macro.snapshot",
+            "controller.macro.status",
+            "controller.macro.update",
+            "controller.melodies.list",
             "controller.menu.current",
             "controller.menu.jump",
             "controller.menu.layout.get",
             "controller.menu.layout.set",
             "controller.menu.list",
             "controller.menu.page",
+            "controller.message.action",
+            "controller.message.delivery",
             "controller.message.send",
             "controller.network.peers.get",
             "controller.network.peers.set",
@@ -1046,6 +1062,76 @@
       "summary": "lcd prompt",
       "idempotency": "non-idempotent"
     },
+    "controller.macro.board_record.clear": {
+      "capability": "board_commands",
+      "summary": "Acknowledge and clear an exact retained board-capture identity.",
+      "idempotency": "non-idempotent"
+    },
+    "controller.macro.board_record.start": {
+      "capability": "board_commands",
+      "summary": "Start the board-owned capture ring and host-connected continuation stream.",
+      "idempotency": "non-idempotent"
+    },
+    "controller.macro.board_record.stop": {
+      "capability": "board_commands",
+      "summary": "Stop board-owned capture and import the retained timed records.",
+      "idempotency": "non-idempotent"
+    },
+    "controller.macro.cancel": {
+      "capability": "board_commands",
+      "summary": "Cancel active playback and apply the macro output safe-stop policy.",
+      "idempotency": "non-idempotent"
+    },
+    "controller.macro.create": {
+      "capability": "host_configuration",
+      "summary": "Create a validated named macro with ordinary opcode steps.",
+      "idempotency": "non-idempotent"
+    },
+    "controller.macro.delete": {
+      "capability": "host_configuration",
+      "summary": "Delete one macro from the shared persistent library.",
+      "idempotency": "non-idempotent"
+    },
+    "controller.macro.list": {
+      "capability": "read",
+      "summary": "List named and categorized macros through the shared library.",
+      "idempotency": "safe"
+    },
+    "controller.macro.play": {
+      "capability": "board_commands",
+      "summary": "Play one named macro through the ordinary opcode path with live timing evidence.",
+      "idempotency": "non-idempotent"
+    },
+    "controller.macro.record.start": {
+      "capability": "host_configuration",
+      "summary": "Start host-connected recording from timestamped board and host action evidence.",
+      "idempotency": "non-idempotent"
+    },
+    "controller.macro.record.stop": {
+      "capability": "host_configuration",
+      "summary": "Save or discard the active host-connected recording.",
+      "idempotency": "non-idempotent"
+    },
+    "controller.macro.snapshot": {
+      "capability": "read",
+      "summary": "Return the macro library, active recording, board capture, and playback state.",
+      "idempotency": "safe"
+    },
+    "controller.macro.status": {
+      "capability": "read",
+      "summary": "Return current macro recording, board-capture, and playback progress.",
+      "idempotency": "safe"
+    },
+    "controller.macro.update": {
+      "capability": "host_configuration",
+      "summary": "Rename, recategorize, recolor, or replace a validated macro.",
+      "idempotency": "non-idempotent"
+    },
+    "controller.melodies.list": {
+      "capability": "read",
+      "summary": "Return the effective configured host melody catalog.",
+      "idempotency": "safe"
+    },
     "controller.menu.current": {
       "capability": "read",
       "summary": "menu current",
@@ -1076,9 +1162,19 @@
       "summary": "menu page",
       "idempotency": "idempotent-with-authoritative-readback"
     },
+    "controller.message.action": {
+      "capability": "messages",
+      "summary": "Run a retained message action only after an explicit surface gesture and publish its correlated outcome.",
+      "idempotency": "non-idempotent"
+    },
+    "controller.message.delivery": {
+      "capability": "messages",
+      "summary": "Acknowledge presentation of one retained targeted message from an explicit surface.",
+      "idempotency": "non-idempotent"
+    },
     "controller.message.send": {
       "capability": "messages",
-      "summary": "message send",
+      "summary": "Publish one bounded typed message; synchronous delivery waits for requested presentation outcomes.",
       "idempotency": "non-idempotent"
     },
     "controller.network.peers.get": {
@@ -1412,9 +1508,15 @@
     "-32600": "invalid request",
     "-32601": "method not found",
     "-32602": "invalid params",
+<<<<<<< HEAD
     "-32001": "authentication required",
     "-32003": "remote capability denied",
     "-32000": "runtime or device error",
     "-32004": "peer outcome uncertain; retry with the same idempotency key"
+=======
+    "-32001": "reserved for deferred authentication",
+    "-32003": "reserved for deferred authorization",
+    "-32000": "runtime or device error"
+>>>>>>> origin/agent/webui-defects
   }
 }

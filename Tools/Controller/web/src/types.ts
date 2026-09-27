@@ -49,6 +49,8 @@ export interface Hello {
   build_date?: string
   build_time?: string
   build_timestamp?: string
+  feature_profile?: number
+  build_features?: number
 }
 
 export interface ControllerStatus {
@@ -141,6 +143,29 @@ export interface FrontPanelState {
   host_editable_value: number
 }
 
+export interface MenuPageInfo {
+  id: number
+  key: string
+  label: string
+  name: string
+  description: string
+}
+
+export interface MenuLayout {
+  visible_mask: number
+  order: number[]
+}
+
+export interface MenuCatalog {
+  source: string
+  live_list: boolean
+  firmware_hash: number
+  current_page: number
+  program_mode: number
+  pages: MenuPageInfo[]
+  layout: MenuLayout
+}
+
 export interface StatusLEDState {
   red: number
   green: number
@@ -214,8 +239,12 @@ export interface ControllerEvent {
   reason?: string
   source?: string
   target?: string
+  targets?: string[]
   message_type?: string
   action?: string
+  severity?: 'debug' | 'info' | 'success' | 'warning' | 'error'
+  correlation?: string
+  delivery?: 'sync' | 'async'
   gesture?: string
   key?: number
   rf_id?: number
@@ -224,6 +253,99 @@ export interface ControllerEvent {
   rf_protocol?: number
   rf_pulse_us?: number
   metadata?: Record<string, string>
+}
+
+export interface MacroStep {
+  at_us?: number
+  kind: string
+  target?: number
+  value?: number
+  duration_ms?: number
+  frequency_hz?: number
+  text?: string
+  destination?: string
+  code?: number
+  bits?: number
+  protocol?: number
+  pulse_us?: number
+  red?: number
+  green?: number
+  blue?: number
+  brightness?: number
+  opcode?: number
+  payload_hex?: string
+}
+
+export interface ControllerMacro {
+  id: number
+  name: string
+  category?: string
+  color?: string
+  label?: string
+  lcd_message?: string
+  timing_tolerance_us?: number
+  keep_outputs_on_cancel?: boolean
+  recording_source?: string
+  capture_dropped_steps?: number
+  capture_missing_steps?: number
+  steps: MacroStep[]
+}
+
+export interface MacroPlaybackState {
+  running: boolean
+  connection_generation?: number
+  id: number
+  name: string
+  category?: string
+  color?: string
+  step: number
+  step_count: number
+  duration_us: number
+  started_at?: string
+  finished_at?: string
+  device_started_at_us?: number
+  accepted_bytes: number
+  buffer_fill: number
+  underruns: number
+  dispatch_errors: number
+  dropped_steps: number
+  evidence_steps: number
+  timing_violations: number
+  last_timing_delta_us: number
+  maximum_timing_error_us: number
+  timing_tolerance_us: number
+  faithful: boolean
+  lifecycle?: string
+  last_error?: string
+  device?: Record<string, unknown>
+}
+
+export interface MacroRecordingState {
+  active: boolean
+  id: number
+  name: string
+  category?: string
+  color?: string
+  steps: number
+  host_steps: number
+  panel_steps: number
+  rf_steps: number
+  last_at_us: number
+  last_delta_us: number
+  last_opcode: number
+  last_source: number
+  board_owned?: boolean
+  board_id?: number
+  dropped_steps?: number
+  started_at?: string
+  last_error?: string
+}
+
+export interface MacroSnapshot {
+  library: ControllerMacro[]
+  playback: MacroPlaybackState
+  recording: MacroRecordingState
+  latest_event_id: number
 }
 
 export interface RFLearnedEntry {
@@ -291,7 +413,9 @@ export interface HostUISettings {
   appearance_etag: string
   segment_scroll: SegmentScrollSettings
   peripheral_names: Record<string, string>
+  peripheral_presentation: Record<string, PeripheralPresentation>
   peripherals: PeripheralDescriptor[]
+  controls: PeripheralControlDescriptor[]
   changed?: boolean
   changed_fields?: string[]
   before?: Record<string, unknown>
@@ -304,12 +428,34 @@ export interface PeripheralDescriptor {
   role: string
   index: number
   default_name: string
+  default_description: string
   control: 'relay' | 'motion' | 'pwm-user' | 'role-specific' | 'read-only'
+}
+
+export interface PeripheralPresentation {
+  name: string
+  description: string
+  order: number
+}
+
+export interface PeripheralControlDescriptor {
+  key: string
+  kind: 'relay' | 'side' | 'mosfet'
+  role: string
+  index: number
+  order: number
+  name: string
+  description: string
+  default_name: string
+  default_description: string
+  control: PeripheralDescriptor['control']
 }
 
 export interface PeripheralSettings {
   peripheral_names: Record<string, string>
+  peripheral_presentation: Record<string, PeripheralPresentation>
   peripherals: PeripheralDescriptor[]
+  controls: PeripheralControlDescriptor[]
 }
 
 export interface PWMValues {
@@ -423,7 +569,7 @@ export interface LocalDeviceSnapshot {
   power?: 'ON' | 'OFF' | 'UNKNOWN'
   phase?: string
   http_reachable?: boolean
-  websocket_online?: boolean
+  events_online?: boolean
   updated_at?: string
   last_error?: string
   last_event?: string
@@ -436,6 +582,12 @@ export interface ToastMessage {
   tone: 'info' | 'success' | 'warning' | 'danger'
   title: string
   detail?: string
+  messageEventID?: number
+  correlation?: string
+  action?: string
+  actionLabel?: string
+  actionBusy?: boolean
+  persistent?: boolean
 }
 
 export interface DialogState {

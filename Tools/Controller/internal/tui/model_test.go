@@ -746,6 +746,7 @@ func TestTargetedAndBoardAppPageActionsSelectOnlyTheIntendedTUI(t *testing.T) {
 	}
 }
 
+<<<<<<< HEAD
 func navigationSyncAction(epoch string, revision string, page string) hostui.AppAction {
 	return hostui.AppAction{
 		Kind: "app.page", Value: page, Source: "navigation-sync", Target: "tui:one",
@@ -962,6 +963,61 @@ func TestRemoteRuntimeNavigationMetadataUsesSameReplayCursor(t *testing.T) {
 	updated, _ = model.Update(runtimeEventMsg(event))
 	if got := updated.(Model).page; got != PageAppSettings {
 		t.Fatalf("out-of-order runtime event changed page=%v", got)
+=======
+func TestTUIMessagePresentationHonorsTargetsAndExposesAction(t *testing.T) {
+	model := readyModel(t, PageDashboard)
+	updated, _ := model.Update(runtimeEventMsg(control.Event{
+		ID: 23, Kind: "message", Text: "Inspect output 3", MessageType: "operator.prompt",
+		Targets: []string{"native", "tui"}, Action: "app page events",
+		Correlation: "job-23", Delivery: "sync",
+	}))
+	model = updated.(Model)
+	if !strings.Contains(model.notice, "Inspect output 3") ||
+		!strings.Contains(model.notice, "Ctrl+A: app page events") || len(model.pendingMessageActions) != 1 {
+		t.Fatalf("TUI notice=%q", model.notice)
+	}
+	delivery, ok := model.runtime.EventByID(model.runtime.LatestEventID())
+	if !ok || delivery.Kind != "message.delivery" || delivery.Correlation != "job-23" ||
+		delivery.Lifecycle != "completed" || delivery.Metadata["message_event_id"] != "23" {
+		t.Fatalf("delivery=%+v ok=%t", delivery, ok)
+	}
+	updated, command := model.Update(tea.KeyMsg{Type: tea.KeyCtrlA})
+	model = updated.(Model)
+	if command != nil || model.page != PageEvents || len(model.pendingMessageActions) != 0 {
+		t.Fatalf("explicit action page=%v command=%v pending=%d", model.page, command, len(model.pendingMessageActions))
+	}
+	action, ok := model.runtime.EventByID(model.runtime.LatestEventID())
+	if !ok || action.Kind != "message.action" || action.Correlation != "job-23" ||
+		action.Lifecycle != "completed" || action.Action != "app page events" {
+		t.Fatalf("action=%+v ok=%t", action, ok)
+	}
+	previous := model.notice
+	updated, _ = model.Update(runtimeEventMsg(control.Event{
+		Kind: "message", Text: "Web only", Targets: []string{"web"},
+	}))
+	if got := updated.(Model).notice; got != previous {
+		t.Fatalf("web-only message changed TUI notice to %q", got)
+	}
+}
+
+func TestTUIMessageActionPublishesUnsupportedFailureOnlyAfterCtrlA(t *testing.T) {
+	model := readyModel(t, PageDashboard)
+	updated, _ := model.Update(runtimeEventMsg(control.Event{
+		ID: 44, Kind: "message", Text: "Broken action", Targets: []string{"tui"},
+		Action: "app page", Correlation: "bad-action", Delivery: "async",
+	}))
+	model = updated.(Model)
+	beforeAction := model.runtime.LatestEventID()
+	updated, command := model.Update(tea.KeyMsg{Type: tea.KeyCtrlA})
+	model = updated.(Model)
+	if command != nil || model.runtime.LatestEventID() == beforeAction {
+		t.Fatalf("unsupported action command=%v latest=%d", command, model.runtime.LatestEventID())
+	}
+	action, ok := model.runtime.EventByID(model.runtime.LatestEventID())
+	if !ok || action.Kind != "message.action" || action.Lifecycle != "failed" ||
+		action.Metadata["error"] == "" || len(model.pendingMessageActions) != 0 {
+		t.Fatalf("action=%+v pending=%d", action, len(model.pendingMessageActions))
+>>>>>>> origin/agent/webui-defects
 	}
 }
 
@@ -2241,6 +2297,7 @@ func TestAutomationLifecycleButtonsDispatchEveryRecorderAndCancelPolicy(t *testi
 		{key: "c", command: "macro cancel", playing: true},
 		{key: "k", command: "macro cancel keep", playing: true},
 		{key: "i", command: "macro show 1"},
+		{key: "o", command: "macro monitor"},
 		{key: "a", command: "automation list"},
 		{key: "m", command: "macro list"},
 	}
@@ -2252,6 +2309,24 @@ func TestAutomationLifecycleButtonsDispatchEveryRecorderAndCancelPolicy(t *testi
 			updated, command, handled := model.macroShortcut(test.key)
 			if !handled || command == nil || !logsContain(updated.logs, test.command) {
 				t.Fatalf("key %q handled=%v command=%v logs=%#v", test.key, handled, command, updated.logs)
+			}
+		})
+	}
+}
+
+func TestAutomationMetadataShortcutsPrepareSelectedMacroCommands(t *testing.T) {
+	for _, test := range []struct {
+		key  string
+		want string
+	}{
+		{key: "u", want: "macro rename 1 "},
+		{key: "g", want: "macro category 1 "},
+	} {
+		t.Run(test.key, func(t *testing.T) {
+			model := readyModel(t, PageAutomations)
+			updated, command, handled := model.macroShortcut(test.key)
+			if !handled || command != nil || updated.input.Value() != test.want {
+				t.Fatalf("key %q handled=%v command=%v input=%q, want %q", test.key, handled, command, updated.input.Value(), test.want)
 			}
 		})
 	}

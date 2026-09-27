@@ -173,7 +173,11 @@ func (service *Service) authenticateAccess(access Access, token, mechanism strin
 	access = service.normalizeAccess(access)
 	if service.authorizationDisabled() {
 		access.authenticated = true
+<<<<<<< HEAD
 		access.Authentication = "disabled-alpha"
+=======
+		access.Authentication = "disabled"
+>>>>>>> origin/agent/webui-defects
 		if access.Remote {
 			access.Principal = service.currentRemotePrincipal()
 		} else {
@@ -442,6 +446,19 @@ func (service *Service) authorizeHTTPRequest(writer http.ResponseWriter, request
 		base = accessFromAddress(stringAddress(request.RemoteAddr), "rest")
 	}
 	base = service.normalizeAccess(base)
+<<<<<<< HEAD
+=======
+	if service.authorizationDisabled() {
+		base, _ = service.authenticateAccess(base, "", "disabled")
+		requestWithAccess := request.WithContext(context.WithValue(request.Context(), authenticatedAccessKey{}, base))
+		*request = *requestWithAccess
+		writer.Header().Set("X-PCController-Principal", base.Principal)
+		writer.Header().Set("X-PCController-Authentication", base.Authentication)
+		return true
+	}
+
+	credential, mechanism, headerPresent, credentialErr := headerCredential(request)
+>>>>>>> origin/agent/webui-defects
 	if request != nil && request.URL != nil &&
 		(request.URL.Query().Has("access_token") || request.URL.Query().Has("ticket")) {
 		writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{

@@ -5,6 +5,7 @@
 // Canonical MCU-owned layout. Invalid records are replaced with defaults;
 // firmware never carries a chain of development-layout migration handlers.
 namespace EepromLayout {
+<<<<<<< HEAD
 // Compact autonomous door/output cues occupy the first startup-parameter
 // record. Bytes 13..31 remain reserved for the broader boot-opcode executor;
 // keeping the cue record here avoids the menu-label record at the EEPROM tail.
@@ -15,6 +16,15 @@ constexpr int SettingsAddress = 32;
 constexpr uint8_t SettingsValueBytes = 40;
 constexpr uint8_t SettingsRecordBytes = SettingsValueBytes + 1;
 constexpr int SettingsEnd = SettingsAddress + SettingsRecordBytes;
+=======
+// Production settings use two CRC banks. Urboot owns no EEPROM metadata; bank
+// zero was previously unallocated application space.
+constexpr int SettingsStagingAddress = 0;
+constexpr uint8_t SettingsBankBytes = 32;
+constexpr int SettingsAddress = 32;
+constexpr int TemperatureRoleAddress = 64;
+constexpr uint8_t TemperatureRoleBytes = 16;
+>>>>>>> origin/agent/webui-defects
 constexpr int RemoteHeaderAddress = 80;
 constexpr int RemoteEntriesAddress = RemoteHeaderAddress + 4;
 constexpr uint8_t RemoteCapacity = 20;
@@ -68,8 +78,18 @@ static_assert(ResetJournalEnd <= E2END + 1,
               "EEPROM layout exceeds ATmega328P EEPROM");
 static_assert(StatusProfileEnd <= E2END + 1,
               "status profiles exceed ATmega328P EEPROM");
+<<<<<<< HEAD
 static_assert(MenuLabelsAddress == StatusProfileEnd,
               "menu labels must begin after status profiles");
 static_assert(MenuLabelsEnd <= E2END + 1,
               "menu labels exceed ATmega328P EEPROM");
+=======
+static_assert(SettingsStagingAddress + SettingsBankBytes <= SettingsAddress,
+              "settings staging bank overlaps canonical settings");
+static_assert(SettingsAddress + SettingsBankBytes <= TemperatureRoleAddress,
+              "canonical settings bank overlaps temperature role identity");
+static_assert(TemperatureRoleAddress + TemperatureRoleBytes <=
+                  RemoteHeaderAddress,
+              "temperature role identity overlaps learned RF header");
+>>>>>>> origin/agent/webui-defects
 } // namespace EepromLayout

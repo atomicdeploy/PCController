@@ -186,7 +186,11 @@ func NotificationForMessage(message MessageNotification) (Notification, error) {
 	pageURI := productidentity.ProtocolScheme + "://page/events"
 	notification := Notification{
 		ID: id, Title: title, Body: message.Text,
+<<<<<<< HEAD
 		Severity:  strings.ToLower(strings.TrimSpace(message.Severity)),
+=======
+		Severity: strings.ToLower(strings.TrimSpace(message.Severity)),
+>>>>>>> origin/agent/webui-defects
 		LaunchURI: pageURI,
 	}
 	if strings.TrimSpace(message.Action) == "" {

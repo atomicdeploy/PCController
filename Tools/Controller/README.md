@@ -285,6 +285,16 @@ control panel. When optional interaction cues are enabled, supported
 visible-page mobile clients may also use restrained vibration for select,
 success, and warning feedback; no workflow depends on haptics.
 
+The embedded WebUI uses readable, deterministic asset names and strong ETags
+with revalidation instead of opaque hashed filenames. This keeps deployment
+artifacts inspectable while ensuring a browser checks for a changed asset before
+reuse. For browser-console integration, the page exposes a deliberately small
+`window.PCController` helper: `inspect()` returns the current published state,
+`command("status")` follows the normal command path, `refresh()` requests a
+snapshot, and `navigate("overview")` selects a page. Consumers can subscribe to
+the `pccontroller:state` browser event; this is an observation/control surface,
+not a separate protocol or authentication bypass.
+
 The exact embedded distribution also has a deterministic, secret-free ZIP
 export contract for trusted static hosting. See
 [Portable WebUI bundle](docs/Portable-WebUI.md) for archive guarantees,
@@ -550,9 +560,16 @@ silent status|on|off                  # legacy alias for board silent
 silent board|host|both status|on|off
 display segments|lcd|both [--speed 220ms] [--duration 5s]
   [--repeat once|loop|interval] [--interval 30s] [--scroll] [--] [TEXT]
+<<<<<<< HEAD
 macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|delete NAME_OR_ID
 macro record start NAME [CATEGORY [COLOR]]|record start-mcu NAME [CATEGORY [COLOR]]|record status|record save|record discard
 macro play NAME_OR_ID|status|cancel [keep]
+=======
+macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|update NAME_OR_ID NEW_NAME [CATEGORY [COLOR]]|rename NAME_OR_ID NAME
+  |category NAME_OR_ID CATEGORY|delete NAME_OR_ID
+macro record start NAME [CATEGORY [COLOR]]|record status|record save|stop|discard
+macro play NAME_OR_ID|status|monitor|cancel [keep]
+>>>>>>> origin/agent/webui-defects
 automation list|run NAME
 rf send CODE BITS PROTOCOL [PULSE_US]  # protocol 1..12
 rf learn [indefinite|timer [DURATION]] # default indefinite + multi-code; timer aliases: single, one-shot
@@ -1182,9 +1199,14 @@ remains marked `incomplete`; it is never reported as a complete backup.
 
 ### Offline current settings transfer
 
-No unpublished alpha-build migration/version chain is retained. File-only
-commands understand the current semantic 40-value-byte settings/name record
-plus CRC-8 and report any other width/layout as unsupported:
+No unpublished alpha-build migration/version chain is retained. Production
+schema 1 has two power-loss-safe 32-byte banks at `0x0000` and `0x0020`: 22
+controller bytes, one name metadata byte, eight name bytes, and CRC-8. The
+metadata low nibble is name length and its high nibble is a modulo-16
+generation. File-only commands select the same newest valid bank as firmware
+and also recognize the retired 41-byte menu-layout record only for an explicit,
+one-time connected-board safety conversion; they never replay its raw bytes
+into production firmware or promise alpha-to-alpha compatibility:
 
 During alpha, version builds may replace unpublished layouts and use the raw
 backup plus explicit `--reinitialize-eeprom` path. Compatibility/preservation
@@ -1203,8 +1225,9 @@ bin\controller.exe program --operation write-eeprom --method urclock --port COM1
 ```
 
 Export, import, and restore require a complete validated backup manifest.
-Import overlays only EEPROM addresses `0x0020..0x0048` and preserves every
-other byte from the full 1,024-byte backup. Outputs are canonical, hashed,
+Import overlays only the compiled 32-byte settings record, erases the retired
+layout tail at `0x0040..0x0048`, and preserves every other byte from the full
+1,024-byte backup. Outputs are canonical, hashed,
 created without overwrite, and never written to a device by these commands.
 An actual EEPROM write remains a separate explicitly confirmed operation.
 

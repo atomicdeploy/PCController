@@ -396,10 +396,15 @@ std::vector<wire::Frame> VirtualBoard::handle(const wire::Frame &request) {
   };
 
   switch (request.opcode) {
-  case wire::Hello:
-    return payload.empty()
-               ? std::vector<wire::Frame>{helloFrame(request.sequence)}
-               : bad();
+  case wire::Hello: {
+    if (!payload.empty()) {
+      return bad();
+    }
+    std::vector<wire::Frame> response{helloFrame(request.sequence)};
+    auto synchronized = outputStateFrames();
+    response.insert(response.end(), synchronized.begin(), synchronized.end());
+    return response;
+  }
   case wire::GetStatus:
     return payload.empty()
                ? std::vector<wire::Frame>{statusFrame(request.sequence, now)}
@@ -2495,6 +2500,42 @@ void VirtualBoard::queueEvent(std::vector<std::uint8_t> payload) {
   payload[0] |= 0x80U;
   appendU32(payload, deviceMicros(Clock::now()));
   pendingEvents_.push_back({wire::Event, 0, std::move(payload)});
+}
+
+std::vector<wire::Frame> VirtualBoard::outputStateFrames() {
+  const DisplayState display = displays_.state();
+  std::array<std::uint8_t, 4> segments{};
+  for (std::size_t index = 0; index < segments.size(); ++index) {
+    segments[index] = encodeSegment(display.segments[index]);
+  }
+  std::vector<std::uint8_t> segmentPayload(segments.begin(), segments.end());
+  segmentPayload.push_back(settings_.displayBrightness);
+
+  const bool muted = (settings_.flags & kSettingsSilent) != 0;
+  std::vector<std::uint8_t> buzzerPayload;
+  appendU16(buzzerPayload, display.buzzerFrequencyHz);
+  appendU16(buzzerPayload, display.buzzerDurationMs);
+  buzzerPayload.push_back(static_cast<std::uint8_t>(muted));
+
+  const std::array<std::uint8_t, 6> statusLed{{
+      static_cast<std::uint8_t>(pwm_.value(13) >> 4U),
+      static_cast<std::uint8_t>(pwm_.value(14) >> 4U),
+      static_cast<std::uint8_t>(pwm_.value(15) >> 4U),
+      statusEffectBrightness_, statusEffect_, statusCondition_}};
+
+  lastPushedSegments_ = segments;
+  lastPushedSegmentBrightness_ = settings_.displayBrightness;
+  lastPushedBuzzerFrequencyHz_ = display.buzzerFrequencyHz;
+  lastPushedBuzzerDurationMs_ = display.buzzerDurationMs;
+  lastPushedBuzzerMuted_ = muted;
+  lastPushedStatusLed_ = statusLed;
+
+  return {
+      {wire::SegmentChanged, 0, std::move(segmentPayload)},
+      {wire::BuzzerChanged, 0, std::move(buzzerPayload)},
+      {wire::StatusLedChanged, 0,
+       std::vector<std::uint8_t>(statusLed.begin(), statusLed.end())},
+  };
 }
 
 void VirtualBoard::queueMirrorChanges() {

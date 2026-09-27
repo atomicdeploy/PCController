@@ -208,6 +208,16 @@ export function rpc<T>(method: string, params: unknown = {}, signal?: AbortSigna
   return restRPC<T>(request, signal)
 }
 
+/**
+ * Reports presentation work over an independent HTTP request. A synchronous
+ * message.send may itself be waiting on the subscribed WebSocket; reusing that
+ * socket for its delivery acknowledgement would serialize into a deadlock.
+ */
+export function presentationRPC<T>(method: string, params: unknown = {}, signal?: AbortSignal): Promise<T> {
+  const request = { jsonrpc: '2.0' as const, id: nextID++, method, params }
+  return restRPC<T>(request, signal)
+}
+
 /** Executes one canonical controller command through JSON-RPC. */
 export function execute(command: string, signal?: AbortSignal): Promise<CommandResult> {
 	return rpc<CommandResult>('controller.command.execute', { command }, signal)
@@ -218,6 +228,7 @@ export interface StreamHandlers {
   status: (value: StatusUpdate) => void
   event: (value: ControllerEvent) => void
   state: (state: 'connecting' | 'open' | 'waiting' | 'closed', detail?: string) => void
+  error?: (detail: string, source?: string) => void
 }
 
 interface SessionTicket {
@@ -341,8 +352,8 @@ export function connectStream(config: UIConfig, handlers: StreamHandlers): () =>
 			handlers.event(value.params as ControllerEvent)
 		}
         if (value.method === 'controller.error') {
-          const detail = (value.params as { error?: string } | undefined)?.error
-          handlers.state('open', detail)
+          const problem = value.params as { error?: string; source?: string } | undefined
+          handlers.error?.(problem?.error || 'Controller status stream failed', problem?.source)
         }
       } catch {
         // The controller protocol is JSON-only; malformed frames are ignored and

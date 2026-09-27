@@ -10,15 +10,20 @@ import {
   YAxis,
 } from 'recharts'
 import { Segmented, StatusBadge } from './components'
+import { focusedCurrentDomain, focusedThermalDomain, focusedVoltageDomain, medianSmoothTelemetrySamples, normalizeTelemetrySamples, stabilizeCurrentSeries } from './telemetry-filter'
 import type { Locale, MetricSample } from './types'
 
-type ChartMode = 'electrical' | 'power' | 'thermal'
+export type ChartMode = 'electrical' | 'power' | 'thermal'
 type WindowSize = '30' | '60' | 'all'
+type Smoothing = 'raw' | 'median'
 
 interface TelemetryChartProps {
   connected: boolean
   locale: Locale
   samples: MetricSample[]
+  mode?: ChartMode
+  onModeChange?: (mode: ChartMode) => void
+  thermalSeries?: 'led' | 'audio'
 }
 
 const modeLabels = {
@@ -31,22 +36,28 @@ function valueLabel(value: unknown): string {
   return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(2) : String(value ?? '—')
 }
 
-export function TelemetryChart({ connected, locale, samples }: TelemetryChartProps) {
-  const [mode, setMode] = useState<ChartMode>('electrical')
+export function TelemetryChart({ connected, locale, samples, mode: requestedMode, onModeChange, thermalSeries }: TelemetryChartProps) {
+  const [localMode, setLocalMode] = useState<ChartMode>('electrical')
+  const mode = requestedMode ?? localMode
+  const setMode = (next: ChartMode) => { if (requestedMode === undefined) setLocalMode(next); onModeChange?.(next) }
   const [windowSize, setWindowSize] = useState<WindowSize>('60')
+  const [smoothing, setSmoothing] = useState<Smoothing>('median')
   const persian = locale === 'fa'
   const visible = useMemo(() => {
-    const count = windowSize === 'all' ? samples.length : Number(windowSize)
+    const normalized = normalizeTelemetrySamples(samples)
+    const count = windowSize === 'all' ? normalized.length : Number(windowSize)
     const formatter = new Intl.DateTimeFormat(persian ? 'fa-IR' : 'en-US', {
       hour: '2-digit',
       minute: '2-digit',
       second: '2-digit',
     })
-    return samples.slice(-count).map((sample) => ({
+    const filtered = normalized.slice(-count)
+    const chartSamples = stabilizeCurrentSeries(smoothing === 'median' ? medianSmoothTelemetrySamples(filtered) : filtered)
+    return chartSamples.map((sample) => ({
       ...sample,
       timeLabel: formatter.format(sample.at),
     }))
-  }, [persian, samples, windowSize])
+  }, [persian, samples, smoothing, windowSize])
 
   const availableModes = useMemo(() => {
     const modes: ChartMode[] = []
@@ -58,6 +69,9 @@ export function TelemetryChart({ connected, locale, samples }: TelemetryChartPro
   const visibleMode = availableModes.includes(mode) ? mode : availableModes[0] ?? 'electrical'
 
   const latest = visible.at(-1)
+  const voltageDomain = useMemo(() => focusedVoltageDomain(visible), [visible])
+  const thermalDomain = useMemo(() => focusedThermalDomain(visible), [visible])
+  const currentDomain = useMemo(() => focusedCurrentDomain(visible), [visible])
   const chartLabel = persian
     ? `نمودار ${modeLabels[visibleMode].fa} با ${visible.length} نمونه`
     : `${modeLabels[visibleMode].en} chart with ${visible.length} samples`
@@ -90,6 +104,15 @@ export function TelemetryChart({ connected, locale, samples }: TelemetryChartPro
           ]}
           onChange={setWindowSize}
         />
+        <Segmented
+          value={smoothing}
+          label={persian ? 'نویزگیری' : 'Noise filtering'}
+          options={[
+            { value: 'median', label: persian ? 'هموار' : 'Smoothed' },
+            { value: 'raw', label: persian ? 'خام' : 'Raw' },
+          ]}
+          onChange={(value) => setSmoothing(value as Smoothing)}
+        />
       </div>
 
       <div className="telemetry-chart__canvas" role="img" aria-label={chartLabel}>
@@ -106,8 +129,13 @@ export function TelemetryChart({ connected, locale, samples }: TelemetryChartPro
               </linearGradient>
             </defs>
             <XAxis dataKey="timeLabel" minTickGap={38} tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={{ stroke: 'var(--line-strong)' }} tickLine={false} />
+<<<<<<< HEAD
             <YAxis yAxisId="left" width={44} tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} domain={['auto', 'auto']} />
             {visibleMode === 'electrical' && <YAxis yAxisId="right" orientation="right" width={46} tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} domain={['auto', 'auto']} />}
+=======
+            <YAxis yAxisId="left" width={44} tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} domain={mode === 'electrical' ? voltageDomain : mode === 'thermal' ? thermalDomain : ['auto', 'auto']} />
+            {mode === 'electrical' && <YAxis yAxisId="right" orientation="right" width={46} tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} domain={currentDomain} />}
+>>>>>>> origin/agent/webui-defects
             <Tooltip
               cursor={{ stroke: 'var(--line-strong)', strokeWidth: 1 }}
               contentStyle={{ background: 'var(--glass-strong)', border: '1px solid var(--line-strong)', borderRadius: 12, boxShadow: 'var(--shadow-tight)', color: 'var(--text)' }}
@@ -115,6 +143,7 @@ export function TelemetryChart({ connected, locale, samples }: TelemetryChartPro
               formatter={(value, name) => [valueLabel(value), String(name)]}
             />
             <Legend iconType="plainline" wrapperStyle={{ color: 'var(--text-soft)', fontSize: 10, paddingTop: 7 }} />
+<<<<<<< HEAD
             {visibleMode === 'electrical' && <>
               <Area yAxisId="left" type="monotone" dataKey="supply" name={persian ? 'تغذیه V' : 'Supply V'} stroke="var(--accent)" strokeWidth={2.2} fill="url(#telemetry-accent-fill)" isAnimationActive={false} />
               <Line yAxisId="left" type="monotone" dataKey="bus" name={persian ? 'باس V' : 'Bus V'} stroke="var(--violet)" strokeWidth={1.8} dot={false} isAnimationActive={false} />
@@ -124,6 +153,17 @@ export function TelemetryChart({ connected, locale, samples }: TelemetryChartPro
             {visibleMode === 'thermal' && <>
               <Area yAxisId="left" type="monotone" dataKey="ledTemp" name={persian ? 'دمای LED °C' : 'LED °C'} stroke="var(--red)" strokeWidth={2.1} fill="url(#telemetry-amber-fill)" isAnimationActive={false} />
               <Line yAxisId="left" type="monotone" dataKey="btTemp" name={persian ? 'دمای صدا °C' : 'Audio °C'} stroke="var(--violet)" strokeWidth={1.9} dot={false} isAnimationActive={false} />
+=======
+            {mode === 'electrical' && <>
+              <Area yAxisId="left" type="monotone" dataKey="supply" name={persian ? 'تغذیه V' : 'Supply V'} stroke="var(--accent)" strokeWidth={2.2} fill="url(#telemetry-accent-fill)" isAnimationActive animationDuration={260} animationEasing="linear" />
+              <Line yAxisId="left" type="monotone" dataKey="bus" name={persian ? 'باس V' : 'Bus V'} stroke="var(--violet)" strokeWidth={1.8} dot={false} isAnimationActive animationDuration={260} animationEasing="linear" />
+              <Line yAxisId="right" type="monotone" dataKey="current" name={persian ? 'جریان mA' : 'Current mA'} stroke="var(--amber)" strokeWidth={1.8} dot={false} isAnimationActive animationDuration={260} animationEasing="linear" />
+            </>}
+            {mode === 'power' && <Area yAxisId="left" type="monotone" dataKey="power" name={persian ? 'توان W' : 'Power W'} stroke="var(--amber)" strokeWidth={2.2} fill="url(#telemetry-amber-fill)" isAnimationActive animationDuration={260} animationEasing="linear" />}
+            {mode === 'thermal' && <>
+              {thermalSeries !== 'audio' && <Area yAxisId="left" type="monotone" dataKey="ledTemp" name={persian ? 'دمای LED °C' : 'LED °C'} stroke="var(--red)" strokeWidth={2.1} fill="url(#telemetry-amber-fill)" isAnimationActive animationDuration={260} animationEasing="linear" />}
+              {thermalSeries !== 'led' && <Line yAxisId="left" type="monotone" dataKey="btTemp" name={persian ? 'دمای صدا °C' : 'Audio °C'} stroke="var(--violet)" strokeWidth={1.9} dot={false} isAnimationActive animationDuration={260} animationEasing="linear" />}
+>>>>>>> origin/agent/webui-defects
             </>}
           </AreaChart>
         </ResponsiveContainer>

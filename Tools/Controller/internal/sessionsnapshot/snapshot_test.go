@@ -41,7 +41,7 @@ func TestBuildCapturesUsefulStateWithoutSecretsOrReplayableRF(t *testing.T) {
 				InstanceID: "USB\\VID_1A86&PID_7523\\BOARD-01",
 			},
 			Hello: controller.Hello{
-				BoardKind: 1, Name: "PCController", IdentitySchema: 3,
+				BoardKind: 1, Name: "PCController", IdentitySchema: 4,
 				Capabilities: 0x12345678, BuildHash: 0xAABBCCDD,
 				BuildTimestamp: 0x3456789A, BuildStamp: "260802131416",
 			},
@@ -49,6 +49,7 @@ func TestBuildCapturesUsefulStateWithoutSecretsOrReplayableRF(t *testing.T) {
 				UptimeMS: 123456, SupplyMV: 12270, BusMV: 12262,
 				CurrentMA: 73, PowerMW: 895, TLEDCenti: 2989,
 				TBTCenti: 2599, Hot: false, DoorOpen: true,
+				Flags:        controller.StatusTemperatureLED | controller.StatusTemperatureBT,
 				ActiveRelays: 0x50, PWMAvailable: true,
 				PWMChannel: 11, PWMValue: 2048, PWMErrors: 2,
 			},
@@ -116,7 +117,9 @@ func TestBuildCapturesUsefulStateWithoutSecretsOrReplayableRF(t *testing.T) {
 	}
 	if document.PWM == nil || document.PWM.SelectedChannel != 11 ||
 		document.PWM.SelectedValue != 2048 || document.Temperatures == nil ||
-		document.Temperatures.IlluminationCentiC != 2989 {
+		document.Temperatures.IlluminationCentiC != 2989 ||
+		!document.Temperatures.IlluminationAvailable ||
+		!document.Temperatures.BTAudioAvailable {
 		t.Fatalf("live summaries missing: pwm=%#v temperatures=%#v", document.PWM, document.Temperatures)
 	}
 	if document.FrontPanel == nil || !document.FrontPanel.LCDTextPresent ||

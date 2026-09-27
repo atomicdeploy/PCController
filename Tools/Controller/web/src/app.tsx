@@ -5,10 +5,12 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from 'react'
+import { createPortal } from 'react-dom'
 import {
   Activity,
   Bell,
@@ -39,8 +41,14 @@ import {
 import { AnimatePresence, MotionConfig, motion } from 'motion/react'
 import { createAudioEngine, type AudioCue, type AudioEngine } from './audio-engine'
 import { BoardSettingsReadGate, boardSettingsGeneration } from './board-settings-read'
+<<<<<<< HEAD
 import { BootGate, BrandIcon, Button, HotkeyHelp, Icon, KeyCombo, Modal, NavButton, PageTransition, StatusBadge, ToastStack } from './components'
 import { connectStream, execute, getSnapshot, getToken, getUIConfig, rpc, setToken as storeToken } from './api'
+=======
+import { BootGate, Button, HotkeyHelp, Icon, KeyCombo, Modal, NavButton, PageTransition, StatusBadge, ToastStack } from './components'
+import { connectStream, execute, getSnapshot, getUIConfig, presentationRPC, rpc } from './api'
+import { primaryShortcutARIA, primaryShortcutModifier } from './client-platform'
+>>>>>>> origin/agent/webui-defects
 import {
   adjacentPageHotkey,
   ignoresGlobalHotkeys,
@@ -61,6 +69,7 @@ import {
 } from './significant-events'
 import { createResourceReconnectCheck, embeddedResourcesMismatch, hostResourceIdentity } from './resource-version'
 import { emitStartupConsoleIntroduction } from './startup-console'
+import { normalizeBrowserBeep, publishBrowserConsole, publishBrowserConsoleState } from './browser-console'
 import {
   createTabChannel,
   type TabChannel,
@@ -86,6 +95,7 @@ import type {
   ToastMessage,
   UIConfig,
 } from './types'
+<<<<<<< HEAD
 import { peripheralAvailability } from './peripheral-availability'
 import { applyPushedOutputEvent } from './status-led-event'
 import { BuzzerPlaybackTimeline, type BuzzerPath } from './buzzer-routing'
@@ -99,6 +109,23 @@ import {
   processWebAppAction,
   type WebActionProgress,
 } from './app-actions'
+=======
+import { applyPushedOutputEvent, isPushedOutputEvent } from './status-led-event'
+import { shouldToastControllerEvent } from './event-notification-policy'
+import { isMacroControllerEvent, prependMacroControllerEvent } from './macro-live'
+import type { BuzzerPath } from './buzzer-routing'
+import { emptySnapshot } from './types'
+import type { SharedViewProps } from './views'
+import { AppPreferencesDialog } from './app-preferences-dialog'
+import { loadQuickHeaderPreferences, normalizeQuickHeaderPreferences, saveQuickHeaderPreferences } from './quick-header-preferences'
+import { messageActionParams, messageDeliveryParams, messageToast } from './message-presentation'
+import { commandSuccessShouldToast } from './command-feedback'
+import { parseStatusCommandOutput } from './status-output'
+import { audioTemperatureAvailableFlag, controllerTemperatureSample, lightingTemperatureAvailableFlag } from './temperature-status'
+import type { CommandOptions } from './views'
+import { SettingsDialog } from './settings-dialog'
+import { canonicalPeripheralHash, peripheralDestinationFromHash } from './peripheral-navigation'
+>>>>>>> origin/agent/webui-defects
 
 const DashboardPage = lazy(() => import('./views').then(({ DashboardView }) => ({ default: DashboardView })))
 const ControlsPage = lazy(() => import('./views').then(({ ControlsView }) => ({ default: ControlsView })))
@@ -130,7 +157,6 @@ export const navigation: NavDefinition[] = [
   { id: 'data', label: 'data', icon: Boxes, view: DataWorkspacePage, group: 'integrations' },
   { id: 'updates', label: 'updates', icon: PackageOpen, view: UpdatesPage, group: 'system' },
   { id: 'events', label: 'events', icon: Activity, view: EventsPage, group: 'system' },
-  { id: 'settings', label: 'settings', icon: Settings, view: SettingsPage, group: 'system' },
 ]
 
 export function pageViewFor(page: PageID): LazyExoticComponent<ComponentType<any>> {
@@ -154,7 +180,10 @@ const defaultAppearance: Appearance = {
 const appearanceStorageKey = `${__PRODUCT_PROTOCOL__}.appearance`
 const resourceReloadStorageKey = `${__PRODUCT_PROTOCOL__}.resource-reload`
 
-export function reloadForResourceMismatch(config: Pick<UIConfig, 'host_version' | 'build_time'>): boolean {
+export function reloadForResourceMismatch(
+  config: Pick<UIConfig, 'host_version' | 'build_time'>,
+  beforeReload?: (identity: string) => void,
+): boolean {
   const identity = hostResourceIdentity(config)
   if (!embeddedResourcesMismatch(config)) {
     try { sessionStorage.removeItem(resourceReloadStorageKey) } catch { /* storage may be disabled */ }
@@ -167,6 +196,7 @@ export function reloadForResourceMismatch(config: Pick<UIConfig, 'host_version' 
     // Never risk an unbounded reload loop when private storage is unavailable.
     return false
   }
+  beforeReload?.(identity)
   window.location.reload()
   return true
 }
@@ -211,11 +241,22 @@ function applyAppearance(value: Appearance): void {
 
 export function pageFromHash(hash: string): PageID {
   const value = hash.replace(/^#\/?/, '').split(/[/?#]/)[0] as PageID
+  if (value === 'settings') return 'settings'
   return navigation.some((item) => item.id === value) ? value : 'dashboard'
 }
 
 export function canonicalPageHash(page: PageID): string {
   return `#/${page}`
+}
+
+/** Keeps a recognized Workbench subpage shareable while normalizing bad URLs. */
+export function canonicalLocationHash(hash: string): string {
+  const page = pageFromHash(hash)
+  if (page === 'workbench') {
+    const destination = peripheralDestinationFromHash(hash)
+    if (destination) return canonicalPeripheralHash(destination)
+  }
+  return canonicalPageHash(page)
 }
 
 export function canonicalPageURL(page: PageID, pathname = location.pathname, search = location.search): string {
@@ -231,6 +272,7 @@ function sampleFrom(snapshot: Snapshot, at = Date.now()): MetricSample {
   const available = peripheralAvailability(snapshot)
   return {
     at,
+<<<<<<< HEAD
     ...(available.ina219 ? {
       supply: status.supply_mv / 1000,
       bus: status.bus_mv / 1000,
@@ -239,6 +281,14 @@ function sampleFrom(snapshot: Snapshot, at = Date.now()): MetricSample {
     } : {}),
     ...(available.temperatureLED ? { ledTemp: status.temperature_led_centi_c / 100 } : {}),
     ...(available.temperatureBTAudio ? { btTemp: status.temperature_bt_audio_centi_c / 100 } : {}),
+=======
+    supply: status.supply_mv / 1000,
+    bus: status.bus_mv / 1000,
+    current: status.current_ma,
+    power: status.power_mw / 1000,
+    ledTemp: controllerTemperatureSample(status.temperature_led_centi_c, status.flags, lightingTemperatureAvailableFlag),
+    btTemp: controllerTemperatureSample(status.temperature_bt_audio_centi_c, status.flags, audioTemperatureAvailableFlag),
+>>>>>>> origin/agent/webui-defects
   }
 }
 
@@ -314,7 +364,7 @@ function demoSnapshot(now = Date.now()): Snapshot {
 
 function demoEvent(id: number): ControllerEvent {
   const definitions = [
-    ['device.state', 'Authenticated controller identity on COM18', 'host'],
+    ['device.state', 'Controller identity on COM18', 'host'],
     ['door', 'Door input returned to closed', 'physical'],
     ['macro.completed', 'Ambient evening macro completed faithfully', 'host'],
     ['rf.received', 'Remote #3 · living-room toggle', 'rf'],
@@ -336,7 +386,7 @@ export function commandWarning(command: string, locale: Appearance['locale']): C
   if (/^(reset|boot|program|programmer|firmware|flash|upload|restore|query|write)(?: |$)/.test(normalized)) {
     return fa
       ? warning('ورود به مسیر بازیابی یا برنامه‌ریزی؟', 'این فرمان ممکن است درگاه سریال را آزاد کند، خطوط کنترل را تغییر دهد یا وارد مسیر محافظت‌شدهٔ برنامه‌ریزی شود. فرمان را یک‌بار دیگر بررسی کنید.', 'تأیید و ارسال')
-      : warning('Enter a recovery or programming path?', 'This command may release the serial port, pulse control lines, or enter the guarded programming workflow. Review the exact command before dispatch.', 'Confirm and dispatch')
+      : warning('Enter a recovery or programming path?', 'This command may close the serial port, pulse control lines, or enter the guarded programming workflow. Review the exact command before dispatch.', 'Review and dispatch')
   }
   if (/^rf send(?: |$)/.test(normalized)) {
     return fa
@@ -351,7 +401,7 @@ export function commandWarning(command: string, locale: Appearance['locale']): C
   if (/^(os (power|sleep|suspend|hibernate|restart|shutdown|lock)|quit|exit)(?: |$)/.test(normalized)) {
     return fa
       ? warning('عملیات میزبان اجرا شود؟', 'این فرمان می‌تواند نشست یا رایانه را متوقف کند. سیاست و توکن تأیید میزبان همچنان در سمت سرویس اعمال می‌شود.', 'تأیید عملیات')
-      : warning('Run the host operation?', 'This command can end the session or affect the computer. Host-side policy and confirmation-token checks still apply.', 'Confirm operation')
+      : warning('Run the host operation?', 'This command can end the session or affect the computer. Review the selected operation before continuing.', 'Confirm operation')
   }
   return null
 }
@@ -362,13 +412,29 @@ export function snapshotAfterTransportLoss(
   detail = '',
 ): Snapshot {
   return {
+<<<<<<< HEAD
     ...emptySnapshot,
     paused: current.paused,
+=======
+    ...current,
+    connected: false,
+    // A disconnect must not leave actuator, telemetry, or EEPROM values looking
+    // live.  Keep host state and event history, but make every board-derived
+    // surface wait for a new authoritative snapshot.
+    have_status: false,
+    have_settings: false,
+    have_front_panel: false,
+    have_status_led: false,
+    hello: emptySnapshot.hello,
+    status: emptySnapshot.status,
+    settings: emptySnapshot.settings,
+>>>>>>> origin/agent/webui-defects
     connection_state: current.paused ? 'paused' : state === 'connecting' ? 'connecting' : 'disconnected',
     connection_reason: detail || (state === 'connecting' ? 'Re-establishing the host event stream' : 'Host event stream unavailable'),
   }
 }
 
+<<<<<<< HEAD
 export function controllerConnectionLabel(
   snapshot: Pick<Snapshot, 'connected' | 'connection_state'>,
   streamState: 'connecting' | 'open' | 'waiting' | 'closed',
@@ -386,6 +452,22 @@ export function controllerConnectionLabel(
     return copy('Searching', 'در حال جستجو')
   }
   return copy('No controller', 'بدون برد')
+=======
+export function snapshotAfterStatusRecovery(
+  current: Snapshot,
+  status: Snapshot['status'],
+  updatedAt: string,
+): Snapshot {
+  return {
+    ...current,
+    connected: true,
+    connection_state: 'connected',
+    connection_reason: '',
+    have_status: true,
+    status,
+    status_updated: updatedAt,
+  }
+>>>>>>> origin/agent/webui-defects
 }
 
 export function isCompletedHostUpdate(event: Pick<ControllerEvent, 'kind' | 'metadata'>): boolean {
@@ -421,12 +503,13 @@ export function transportReconnectAvailable(
 export default function App() {
   const demo = import.meta.env.DEV && new URLSearchParams(location.search).get('demo') === '1'
   const [appearance, setAppearance] = useState(loadAppearance)
-  const [page, setPage] = useState<PageID>(pageFromLocation)
+  const [page, setPage] = useState<PageID>(() => pageFromLocation() === 'settings' ? 'dashboard' : pageFromLocation())
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [mobileNav, setMobileNav] = useState(false)
   const [snapshot, setSnapshot] = useState<Snapshot>(demo ? demoSnapshot() : emptySnapshot)
   const [samples, setSamples] = useState<MetricSample[]>(() => demo ? Array.from({ length: 48 }, (_, index) => sampleFrom(demoSnapshot(Date.now() - (47 - index) * 1000), Date.now() - (47 - index) * 1000)) : [])
   const [events, setEvents] = useState<ControllerEvent[]>(() => demo ? Array.from({ length: 12 }, (_, index) => demoEvent(index + 1)) : [])
+  const [macroEvents, setMacroEvents] = useState<ControllerEvent[]>([])
   const [boardSettingsReadState, setBoardSettingsReadState] = useState<BoardSettingsReadState>(demo ? 'ready' : 'idle')
   const [uiConfig, setUIConfig] = useState<UIConfig | null>(null)
   const [streamState, setStreamState] = useState<'connecting' | 'open' | 'waiting' | 'closed'>(demo ? 'open' : 'connecting')
@@ -439,12 +522,16 @@ export default function App() {
   const [paletteQuery, setPaletteQuery] = useState('')
   const [paletteIndex, setPaletteIndex] = useState(0)
   const [hotkeyHelp, setHotkeyHelp] = useState(false)
+  const [appPreferencesOpen, setAppPreferencesOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(() => pageFromLocation() === 'settings')
+  const [quickHeader, setQuickHeader] = useState(loadQuickHeaderPreferences)
+  const [sidebarStatusMenu, setSidebarStatusMenu] = useState(false)
+  const [sidebarStatusMenuPosition, setSidebarStatusMenuPosition] = useState({ left: 0, top: 0 })
   const [bootOpen, setBootOpen] = useState(demo)
   const [bootResolved, setBootResolved] = useState(demo)
   const [bootProgress, setBootProgress] = useState(12)
   const [bootTarget, setBootTarget] = useState(demo ? 100 : 24)
   const [startupProbeResolved, setStartupProbeResolved] = useState(demo)
-  const [token, setTokenState] = useState(getToken)
   const [tabBusSupported, setTabBusSupported] = useState(false)
   const [tabPeers, setTabPeers] = useState(0)
   const [appInstanceID, setAppInstanceID] = useState('')
@@ -467,11 +554,20 @@ export default function App() {
   const appearanceDesiredRef = useRef(appearance)
   const appearanceSaveChain = useRef<Promise<void>>(Promise.resolve())
   const refreshAfterHostRestart = useRef(false)
+  const resourceRetryTimer = useRef<number | null>(null)
+  const resourceRetryAttempt = useRef(0)
+  const statusRecoveryPending = useRef(false)
+  const relayOptimisticRef = useRef(new Map<number, boolean>())
   const startupConsoleShown = useRef(false)
   const pageRef = useRef(page)
+<<<<<<< HEAD
   const navigationSyncRef = useRef(navigationSync)
   const reportAppInstanceRef = useRef<(catchUp?: boolean) => void>(() => undefined)
   const historyNavigationRef = useRef<(page: PageID) => void>(() => undefined)
+=======
+  const sidebarStatusRef = useRef<HTMLDivElement>(null)
+  const sidebarStatusMenuRef = useRef<HTMLDivElement>(null)
+>>>>>>> origin/agent/webui-defects
   const boardSettingsReadGate = useRef(new BoardSettingsReadGate())
   const boardSettingsRequestGeneration = useRef('')
   const snapshotRef = useRef(snapshot)
@@ -494,6 +590,12 @@ export default function App() {
     audioRef.current?.setMuted(value.audioMuted)
   }, [])
 
+  const saveQuickHeader = useCallback((value: ReturnType<typeof normalizeQuickHeaderPreferences>) => {
+    const normalized = normalizeQuickHeaderPreferences(value)
+    setQuickHeader(normalized)
+    saveQuickHeaderPreferences(normalized)
+  }, [])
+
   const adoptHostAppearance = useCallback((value: Appearance, etag: string) => {
     const authoritative = normalizeAppearance(value)
     appearanceETagRef.current = etag
@@ -501,12 +603,35 @@ export default function App() {
     applyLocalAppearance(authoritative)
   }, [applyLocalAppearance])
 
-  const refreshHostAppearance = useCallback(async () => {
-    const config = await getUIConfig()
-    setUIConfig(config)
+	const refreshHostAppearance = useCallback(async (): Promise<boolean> => {
+		const config = await getUIConfig()
+		if (reloadForResourceMismatch(config, (identity) => tabChannelRef.current?.publishResourceReload(identity))) return true
+		setUIConfig(config)
     adoptHostAppearance(config.appearance, config.appearance_etag)
-    return config
+    return false
   }, [adoptHostAppearance])
+
+  const verifyHostResources = useCallback(() => {
+    if (resourceRetryTimer.current !== null) window.clearTimeout(resourceRetryTimer.current)
+    resourceRetryTimer.current = null
+    resourceRetryAttempt.current = 0
+    const attempt = async () => {
+      try {
+        await refreshHostAppearance()
+        resourceRetryAttempt.current = 0
+      } catch {
+        resourceRetryAttempt.current += 1
+        if (resourceRetryAttempt.current >= 6) return
+        const delay = Math.min(30_000, 1_000 * 2 ** (resourceRetryAttempt.current - 1))
+        resourceRetryTimer.current = window.setTimeout(() => { void attempt() }, delay)
+      }
+    }
+    void attempt()
+  }, [refreshHostAppearance])
+
+  useEffect(() => () => {
+    if (resourceRetryTimer.current !== null) window.clearTimeout(resourceRetryTimer.current)
+  }, [])
 
   useEffect(() => {
 	const pageTitle = t(navigation.find((item) => item.id === page)?.label ?? 'dashboard')
@@ -531,6 +656,51 @@ export default function App() {
   }, [demo, productTitle, snapshot.connected, snapshot.port.name, startupProbeResolved, streamState, uiConfig])
 
   useEffect(() => { pageRef.current = page }, [page])
+
+  const openSidebarStatusMenu = useCallback((left?: number, top?: number) => {
+    const bounds = sidebarStatusRef.current?.getBoundingClientRect()
+    setSidebarStatusMenuPosition({
+      left: left ?? (sidebarOpen ? bounds?.left ?? 10 : (bounds?.right ?? 84) + 7),
+      top: top ?? (bounds?.bottom ?? 10) + 7,
+    })
+    setSidebarStatusMenu(true)
+  }, [sidebarOpen])
+
+  useLayoutEffect(() => {
+    if (!sidebarStatusMenu || !sidebarStatusMenuRef.current) return
+    const bounds = sidebarStatusMenuRef.current.getBoundingClientRect()
+    const margin = 10
+    setSidebarStatusMenuPosition((current) => ({
+      left: Math.max(margin, Math.min(current.left, window.innerWidth - bounds.width - margin)),
+      top: Math.max(margin, Math.min(current.top, window.innerHeight - bounds.height - margin)),
+    }))
+  }, [sidebarStatusMenu])
+
+  useEffect(() => {
+    if (!sidebarStatusMenu) return
+    const outside = (event: PointerEvent | FocusEvent) => {
+      const target = event.target as Node
+      if (!sidebarStatusRef.current?.contains(target) && !sidebarStatusMenuRef.current?.contains(target)) setSidebarStatusMenu(false)
+    }
+    const key = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSidebarStatusMenu(false)
+    }
+    const close = () => setSidebarStatusMenu(false)
+    const focusFrame = window.requestAnimationFrame(() => sidebarStatusMenuRef.current?.querySelector<HTMLButtonElement>('button')?.focus())
+    window.addEventListener('pointerdown', outside)
+    window.addEventListener('focusin', outside)
+    window.addEventListener('keydown', key)
+    window.addEventListener('blur', close)
+    window.addEventListener('hashchange', close)
+    return () => {
+      window.cancelAnimationFrame(focusFrame)
+      window.removeEventListener('pointerdown', outside)
+      window.removeEventListener('focusin', outside)
+      window.removeEventListener('keydown', key)
+      window.removeEventListener('blur', close)
+      window.removeEventListener('hashchange', close)
+    }
+  }, [sidebarStatusMenu])
 
   useEffect(() => {
     const engine = createAudioEngine({
@@ -602,7 +772,26 @@ export default function App() {
       }
       if (payload.type === 'controller-event') {
         const event = payload.event as ControllerEvent
+        if (isMacroControllerEvent(event)) {
+          setMacroEvents((current) => prependMacroControllerEvent(current, event))
+        }
+        if (isPushedOutputEvent(event)) setSnapshot((current) => {
+          const next = applyPushedOutputEvent(current, event)
+          if (event.kind.trim().toLowerCase() === 'relay.state' && event.metadata?.optimistic === 'true') {
+            const changed = current.status.active_relays ^ next.status.active_relays
+            for (let relay = 1; relay <= 8; relay += 1) {
+              const mask = 1 << (relay - 1)
+              if (changed & mask) relayOptimisticRef.current.set(relay, Boolean(next.status.active_relays & mask))
+            }
+          }
+          return next
+        })
         setEvents((current) => prependSignificantControllerEvent(current, event))
+      }
+      if (payload.type === 'resource-reload') {
+        // The hint is intentionally credential-free. Every receiving tab still
+        // fetches the authoritative no-store config and verifies it itself.
+        verifyHostResources()
       }
     })
     const announce = () => channel.publishPresence(document.hidden ? 'hidden' : 'active', pageRef.current)
@@ -619,7 +808,7 @@ export default function App() {
       if (tabChannelRef.current === channel) tabChannelRef.current = null
       setAppInstanceID((current) => current === channel.tabId ? '' : current)
     }
-  }, [refreshHostAppearance])
+  }, [refreshHostAppearance, verifyHostResources])
 
   const reportAppInstance = useCallback((state = document.hidden ? 'hidden' : 'active', catchUp = false) => {
     if (demo || !startupProbeResolved || !appInstanceID) return Promise.resolve()
@@ -677,7 +866,11 @@ export default function App() {
       document.removeEventListener('visibilitychange', onVisibility)
       window.clearInterval(leaseRefresh)
     }
+<<<<<<< HEAD
   }, [appInstanceID, demo, reportAppInstance, startupProbeResolved, token])
+=======
+  }, [appInstanceID, appearance.locale, appearance.theme, demo, page, resolvedDirection, startupProbeResolved])
+>>>>>>> origin/agent/webui-defects
 
   useEffect(() => () => {
     if (!appInstanceID) return
@@ -700,15 +893,62 @@ export default function App() {
     return () => window.clearInterval(timer)
   }, [bootProgress, bootTarget])
 
-  const notify = useCallback((tone: ToastMessage['tone'], title: string, detail?: string) => {
+  const enqueueToast = useCallback((message: Omit<ToastMessage, 'id'>) => {
     toastID.current += 1
     const id = toastID.current
-    setToasts((current) => [...current.slice(-3), { id, tone, title, detail }])
-    if (tone === 'danger') audioRef.current?.cue('error')
-    if (tone === 'warning') audioRef.current?.cue('warning')
-    if (tone === 'success') audioRef.current?.cue('success')
-    window.setTimeout(() => setToasts((current) => current.filter((item) => item.id !== id)), 5200)
+    setToasts((current) => [...current.slice(-3), { id, ...message }])
+    if (message.tone === 'danger') audioRef.current?.cue('error')
+    if (message.tone === 'warning') audioRef.current?.cue('warning')
+    if (message.tone === 'success') audioRef.current?.cue('success')
+    if (!message.persistent) {
+      window.setTimeout(() => setToasts((current) => current.filter((item) => item.id !== id)), 5200)
+    }
+    return id
   }, [])
+
+  const notify = useCallback((tone: ToastMessage['tone'], title: string, detail?: string) => {
+    enqueueToast({ tone, title, detail })
+  }, [enqueueToast])
+
+  const acknowledgeMessageToast = useCallback((message: ToastMessage) => {
+    if (!message.messageEventID) return
+    void presentationRPC<ControllerEvent>('controller.message.delivery', messageDeliveryParams(message)).catch((cause) => {
+      setToasts((current) => current.map((item) => item.id === message.id ? {
+        ...item,
+        tone: 'danger',
+        detail: `Presentation acknowledgement failed: ${cause instanceof Error ? cause.message : String(cause)}`,
+        persistent: true,
+      } : item))
+    })
+  }, [])
+
+  const activateMessageToast = useCallback((message: ToastMessage) => {
+    if (!message.messageEventID || !message.action || message.actionBusy) return
+    setToasts((current) => current.map((item) => item.id === message.id ? { ...item, actionBusy: true } : item))
+    void presentationRPC<ControllerEvent>(
+      'controller.message.action',
+      messageActionParams(message, appInstanceID),
+    ).then((outcome) => {
+      const failed = outcome.lifecycle === 'failed'
+      setToasts((current) => current.map((item) => item.id === message.id ? {
+        ...item,
+        tone: failed ? 'danger' : 'success',
+        actionBusy: false,
+        action: failed ? item.action : undefined,
+        actionLabel: failed ? item.actionLabel : undefined,
+        detail: failed ? outcome.metadata?.error || outcome.text : outcome.metadata?.output || outcome.text,
+        persistent: failed,
+      } : item))
+    }).catch((cause) => {
+      setToasts((current) => current.map((item) => item.id === message.id ? {
+        ...item,
+        tone: 'danger',
+        actionBusy: false,
+        detail: cause instanceof Error ? cause.message : String(cause),
+        persistent: true,
+      } : item))
+    })
+  }, [appInstanceID])
 
   useEffect(() => {
     const testFeedback = () => {
@@ -741,8 +981,13 @@ export default function App() {
   }, [demo, notify])
 
   useEffect(() => {
+<<<<<<< HEAD
     const shouldRead = boardSettingsReadGate.current.shouldRead(snapshot, page === 'settings')
     if (streamState !== 'open' || !snapshot.connected || !snapshot.have_status) {
+=======
+    const shouldRead = boardSettingsReadGate.current.shouldRead(snapshot, settingsOpen)
+    if (!snapshot.connected) {
+>>>>>>> origin/agent/webui-defects
       boardSettingsRequestGeneration.current = ''
       setBoardSettingsReadState('idle')
       return
@@ -775,24 +1020,44 @@ export default function App() {
     snapshot.port.instance_id,
     snapshot.port.name,
     snapshot.port.serial_number,
+<<<<<<< HEAD
     streamState,
+=======
+    settingsOpen,
+>>>>>>> origin/agent/webui-defects
   ])
 
-  const dispatchCommand = useCallback(async (command: string, success?: string): Promise<string> => {
+  const dispatchCommand = useCallback(async (command: string, success?: string, options: CommandOptions = {}): Promise<string> => {
     const safeCommand = redactSensitiveCommand(command)
+    const notifyOnSuccess = options.notifyOnSuccess ?? commandSuccessShouldToast(command, success)
     tabChannelRef.current?.publishTerminal({ kind: 'command', text: `pc› ${safeCommand}`, at: Date.now() })
     if (demo) {
       const output = `[demo] ${safeCommand}`
       tabChannelRef.current?.publishTerminal({ kind: 'output', text: output, at: Date.now() })
-      notify('info', success || 'Demonstration command', output)
+      if (notifyOnSuccess) notify('info', success || 'Demonstration command', output)
       return output
     }
     try {
       const result = await execute(command)
       const output = result.output ?? ''
       tabChannelRef.current?.publishTerminal({ kind: 'output', text: output || '✓ accepted', at: Date.now() })
-      notify('success', success || 'Command completed', output || safeCommand)
-      void refresh()
+      if (notifyOnSuccess) notify('success', success || 'Command completed', output || safeCommand)
+      if (/^status(?:\s|$)/i.test(command.trim())) {
+        const parsed = parseStatusCommandOutput(output)
+        if (parsed && snapshot.connected) {
+          const sampledAt = Date.now()
+          setSnapshot((current) => {
+            if (!current.connected) return current
+            const next = { ...current, have_status: true, status: { ...current.status, ...parsed }, status_updated: new Date(sampledAt).toISOString() }
+            setSamples((samples) => [...samples.slice(-71), sampleFrom(next, sampledAt)])
+            return next
+          })
+        }
+      }
+      // State-bearing commands normally converge through the event/status
+      // stream for every client. Poll only when a caller explicitly selects a
+      // legacy capability path whose firmware cannot emit presentation state.
+      if (options.refreshAfter) void refresh()
       return output
     } catch (cause) {
       const detail = cause instanceof Error ? cause.message : String(cause)
@@ -800,11 +1065,11 @@ export default function App() {
       notify('danger', 'Command failed', detail)
       throw cause
     }
-  }, [demo, notify, refresh])
+  }, [demo, notify, refresh, snapshot.connected])
 
-  const runCommand = useCallback((command: string, success?: string): Promise<string> => {
+  const runCommand = useCallback((command: string, success?: string, options?: CommandOptions): Promise<string> => {
     const caution = demo ? null : commandWarning(command, appearance.locale)
-    if (!caution) return dispatchCommand(command, success)
+    if (!caution) return dispatchCommand(command, success, options)
     return new Promise<string>((resolve, reject) => {
       let settled = false
       setDialog({
@@ -820,7 +1085,7 @@ export default function App() {
         },
         action: async () => {
           try {
-            const output = await dispatchCommand(command, success)
+            const output = await dispatchCommand(command, success, options)
             settled = true
             resolve(output)
           } catch (cause) {
@@ -833,12 +1098,56 @@ export default function App() {
     })
   }, [appearance.locale, demo, dispatchCommand])
 
+  const [relayPending, setRelayPending] = useState<ReadonlySet<number>>(() => new Set())
+  const relayToggle = useCallback(async (relay: number, active: boolean) => {
+    const mask = 1 << (relay - 1)
+    const previous = snapshot.status.active_relays
+    const next = active ? previous & ~mask : previous | mask
+    const desired = !active
+    relayOptimisticRef.current.set(relay, desired)
+    const shareRelayState = (activeRelays: number) => tabChannelRef.current?.publishControllerEvent({
+      id: Date.now(),
+      time: new Date().toISOString(),
+      kind: 'relay.state',
+      stream: 'state',
+      text: 'relay mask changed',
+      source: 'webui',
+      metadata: { active_relays: String(activeRelays), optimistic: 'true' },
+    })
+    // Flip locally and across sibling Web tabs before serial transport latency.
+    // The next matching status sample clears the optimistic overlay.
+    setSnapshot((current) => ({ ...current, status: { ...current.status, active_relays: next } }))
+    shareRelayState(next)
+    setRelayPending((current) => new Set(current).add(relay))
+    try {
+      // The event/status stream is authoritative; an immediate status poll can
+      // race the board acknowledgement and visibly undo the optimistic click.
+      await dispatchCommand(`relay ${relay} ${active ? 'off' : 'on'}`, undefined, { notifyOnSuccess: false })
+    } catch {
+      relayOptimisticRef.current.delete(relay)
+      setSnapshot((current) => current.status.active_relays === next ? { ...current, status: { ...current.status, active_relays: previous } } : current)
+      shareRelayState(previous)
+    } finally {
+      setRelayPending((current) => { const nextPending = new Set(current); nextPending.delete(relay); return nextPending })
+    }
+  }, [dispatchCommand, snapshot.status.active_relays])
+
   const openDialog = useCallback((value: Omit<DialogState, 'open'>) => {
     setDialog({ ...value, open: true })
   }, [])
 
+<<<<<<< HEAD
   const applyPage = useCallback((value: PageID, historyMode: 'push' | 'replace' | 'none' = 'push') => {
     const changed = pageRef.current !== value
+=======
+  const navigate = useCallback((value: PageID) => {
+    if (value === 'settings') {
+      if (location.hash !== canonicalPageHash('settings')) history.pushState({ page: 'settings', modal: true }, '', canonicalPageURL('settings'))
+      setSettingsOpen(true)
+      setMobileNav(false)
+      return
+    }
+>>>>>>> origin/agent/webui-defects
     const nextHash = canonicalPageHash(value)
     if (historyMode === 'push' && (pageRef.current !== value || location.hash !== nextHash)) {
       history.pushState({ page: value }, '', canonicalPageURL(value))
@@ -853,6 +1162,7 @@ export default function App() {
     document.querySelector('.app-main')?.scrollTo({ top: 0, behavior: appearance.reduceMotion ? 'auto' : 'smooth' })
   }, [appearance.reduceMotion])
 
+<<<<<<< HEAD
   const navigate = useCallback((value: PageID, historyMode: 'push' | 'none' = 'push') => {
     applyPage(value, historyMode)
     if (demo || !navigationSync || !startupProbeResolved || !appInstanceID) return
@@ -896,6 +1206,47 @@ export default function App() {
     setNavigationSyncStatus(value ? { state: 'pending', detail: '' } : { state: 'idle', detail: '' })
     setNavigationSyncEnabled(value)
   }, [navigationSession])
+=======
+  const browserConsoleState = useMemo(() => ({
+    title: productTitle,
+    hostVersion: uiConfig?.host_version || 'not reported',
+    page,
+    connected: !demo && snapshot.connected,
+    port: snapshot.port.name || '',
+    transport: streamState,
+    eventCount: events.length,
+  }), [demo, events.length, page, productTitle, snapshot.connected, snapshot.port.name, streamState, uiConfig?.host_version])
+
+  useEffect(() => publishBrowserConsole({
+    api: 'PCController.browser/1',
+    inspect: () => browserConsoleState,
+    command: (value) => {
+      const command = value.trim()
+      if (!command) return Promise.reject(new Error('PCController.command requires a non-empty normalized command string'))
+      return runCommand(command)
+    },
+    beep: async (frequencyHz, durationMS, target) => {
+      const normalized = normalizeBrowserBeep(frequencyHz, durationMS, target)
+      const tasks: Promise<unknown>[] = []
+      if (normalized.target !== 'board') {
+        tasks.push(Promise.resolve(audioRef.current?.playTone(normalized.frequencyHz, normalized.durationMS)))
+      }
+      if (normalized.target !== 'browser') {
+        if (!snapshot.connected) throw new Error('No authenticated controller is connected for board audio')
+        tasks.push(runCommand(`buzzer ${normalized.frequencyHz} ${normalized.durationMS}`, undefined, { notifyOnSuccess: false }))
+      }
+      await Promise.all(tasks)
+    },
+    refresh: async () => { await refresh() },
+    navigate: (value) => {
+      const destination = navigation.find((candidate) => candidate.id === value)?.id
+      if (!destination) throw new Error(`Unknown PCController page: ${value}`)
+      navigate(destination)
+    },
+  }), [browserConsoleState, navigate, refresh, runCommand, snapshot.connected])
+
+  useEffect(() => { publishBrowserConsoleState(browserConsoleState) }, [browserConsoleState])
+>>>>>>> origin/agent/webui-defects
 
   const saveAppearance = useCallback((value: Appearance) => {
     const safeValue = normalizeAppearance(value, appearanceDesiredRef.current)
@@ -984,13 +1335,6 @@ export default function App() {
     saveAppearance({ ...appearance, audioMuted: !appearance.audioMuted })
   }, [appearance, saveAppearance])
 
-  const saveToken = useCallback((value: string) => {
-    storeToken(value)
-    setTokenState(value.trim())
-    notify('success', value.trim() ? 'Session token applied' : 'Session token cleared')
-    window.setTimeout(() => location.reload(), 180)
-  }, [notify])
-
   useEffect(() => {
     applyAppearance(appearance)
     const media = matchMedia('(prefers-color-scheme: light)')
@@ -1001,12 +1345,25 @@ export default function App() {
 
   useEffect(() => {
     const initialPage = pageFromLocation()
-    if (location.hash !== canonicalPageHash(initialPage)) {
-      history.replaceState(history.state, '', canonicalPageURL(initialPage))
+    const initialHash = canonicalLocationHash(location.hash)
+    if (location.hash !== initialHash) {
+      history.replaceState(history.state, '', `${location.pathname}${location.search}${initialHash}`)
     }
     const syncFromHistory = () => {
       const next = pageFromLocation()
+<<<<<<< HEAD
       historyNavigationRef.current(next)
+=======
+      if (next === 'settings') {
+        setSettingsOpen(true)
+        setMobileNav(false)
+        return
+      }
+      setSettingsOpen(false)
+      pageRef.current = next
+      setPage(next)
+      setMobileNav(false)
+>>>>>>> origin/agent/webui-defects
     }
     window.addEventListener('hashchange', syncFromHistory)
     window.addEventListener('popstate', syncFromHistory)
@@ -1018,7 +1375,7 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (bootOpen) return
+      if (bootOpen || settingsOpen || appPreferencesOpen) return
       const composing = event.isComposing || event.keyCode === 229
       if (palette) {
         if (composing) return
@@ -1116,7 +1473,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [bootOpen, dialog.open, hotkeyHelp, mobileNav, navigate, page, palette, paletteIndex, paletteQuery, t, toggleAudio])
+  }, [appPreferencesOpen, bootOpen, dialog.open, hotkeyHelp, mobileNav, navigate, page, palette, paletteIndex, paletteQuery, settingsOpen, t, toggleAudio])
 
   useEffect(() => {
     setPaletteIndex(0)
@@ -1173,7 +1530,7 @@ export default function App() {
       try {
         setBootTarget(42)
         const config = await getUIConfig(abort.signal)
-		if (reloadForResourceMismatch(config)) return
+		if (reloadForResourceMismatch(config, (identity) => tabChannelRef.current?.publishResourceReload(identity))) return
         setUIConfig(config)
         adoptHostAppearance(config.appearance, config.appearance_etag)
         const firstSetup = shouldOpenSetup(config)
@@ -1196,6 +1553,7 @@ export default function App() {
         }
         if (eventHistory.status === 'fulfilled') {
           setEvents(significantControllerEvents(eventHistory.value).slice(-500).reverse())
+          setMacroEvents(eventHistory.value.filter(isMacroControllerEvent).slice(-80).reverse())
         }
         setBootTarget(92)
         if (firstSetup && value.connected && config.welcome_melody?.trim()) {
@@ -1212,6 +1570,7 @@ export default function App() {
             // Keeping the old detail made the live badge expose stale offline
             // text through its tooltip after the transport had recovered.
             setStreamDetail('')
+<<<<<<< HEAD
             const previous = snapshotRef.current
             const next = { ...previous, connected: true, have_status: true, status: update.status, status_updated: update.time }
             snapshotRef.current = next
@@ -1246,9 +1605,48 @@ export default function App() {
               }
             }
             if (isSignificantControllerEvent(event)) {
-              setEvents((current) => prependSignificantControllerEvent(current, event))
-              tabChannelRef.current?.publishControllerEvent(event)
+=======
+            const status = { ...update.status }
+            for (const [relay, desired] of relayOptimisticRef.current) {
+              const mask = 1 << (relay - 1)
+              const authoritative = Boolean(status.active_relays & mask)
+              if (authoritative === desired) relayOptimisticRef.current.delete(relay)
+              else status.active_relays = desired ? status.active_relays | mask : status.active_relays & ~mask
             }
+            const recovered = statusRecoveryPending.current
+            statusRecoveryPending.current = false
+            setSnapshot((current) => snapshotAfterStatusRecovery(current, status, update.time))
+            setSamples((current) => [...current.slice(-71), sampleFrom({ ...emptySnapshot, status: update.status }, new Date(update.time).getTime())])
+            // A transient status error clears stale board-derived surfaces.
+            // Recover their complete authoritative state exactly once, after
+            // the first good stream sample proves the controller is back.
+            if (recovered) void refresh()
+          },
+          error: (detail) => {
+            statusRecoveryPending.current = true
+            setStreamDetail(detail)
+            setSnapshot((current) => current.connected
+              ? snapshotAfterTransportLoss(current, 'waiting', detail)
+              : { ...current, connection_reason: detail })
+          },
+          event: (event) => {
+			const eventKind = event.kind.toLowerCase()
+            const macroEvent = isMacroControllerEvent(event)
+            if (macroEvent) setMacroEvents((current) => prependMacroControllerEvent(current, event))
+            if (isPushedOutputEvent(event)) {
+				setSnapshot((current) => applyPushedOutputEvent(current, event))
+			}
+						if (config.integrations?.buzzer_web_audio && event.kind.toLowerCase() === 'buzzer.note') {
+							const frequencyHz = Number(event.metadata?.frequency_hz)
+							const durationMS = Number(event.metadata?.duration_ms)
+							audioRef.current?.playTone(frequencyHz, durationMS)
+						}
+            const significant = isSignificantControllerEvent(event)
+            if (significant) {
+>>>>>>> origin/agent/webui-defects
+              setEvents((current) => prependSignificantControllerEvent(current, event))
+            }
+<<<<<<< HEAD
 			const processedAction = processWebAppAction(event, appInstanceID, appActionReceipts.current)
 			if (processedAction) {
 				const { acknowledgement } = processedAction
@@ -1274,6 +1672,10 @@ export default function App() {
 				})
 			}
             if (!event.metadata?.operation_id && event.kind.toLowerCase() === 'app.page' && isFreshAppAction(event.time) &&
+=======
+            if (significant || isPushedOutputEvent(event) || macroEvent) tabChannelRef.current?.publishControllerEvent(event)
+            if (event.kind.toLowerCase() === 'app.page' && isFreshAppAction(event.time) &&
+>>>>>>> origin/agent/webui-defects
                 matchesAppTarget(event.metadata?.target_instance, appInstanceID, 'webui')) {
               const destination = pageFromAppAction(event.metadata?.page ?? event.metadata?.value ?? event.text)
               if (destination) {
@@ -1292,7 +1694,11 @@ export default function App() {
 				applyPage('updates', 'replace')
 				audioRef.current?.cue('navigation', 'forward')
 			}
-            if (/error|warning|hot|door/i.test(event.kind)) notify(eventToneForToast(event), event.kind, event.text)
+			if (shouldToastControllerEvent(event)) {
+              const targetedMessage = messageToast(event)
+              if (targetedMessage) enqueueToast(targetedMessage)
+              else notify(eventToneForToast(event), event.kind, event.text)
+            }
             if (isCompletedHostUpdate(event)) {
               refreshAfterHostRestart.current = true
             }
@@ -1304,6 +1710,7 @@ export default function App() {
             setStreamState(state)
             setStreamDetail(detail ?? '')
             if (state === 'open') {
+<<<<<<< HEAD
               navigationSession.resetCoordinator()
               reportAppInstanceRef.current(true)
               if (refreshAfterHostRestart.current) {
@@ -1312,6 +1719,19 @@ export default function App() {
                 return
               }
               void refresh()
+=======
+				if (refreshAfterHostRestart.current) {
+					refreshAfterHostRestart.current = false
+					void refreshHostAppearance().then((alreadyReloading) => {
+						// A restart with unchanged identity still deserves one reconnect,
+						// while a changed identity reloads inside refreshHostAppearance.
+						if (!alreadyReloading) window.location.reload()
+					}).catch(() => window.location.reload())
+					return
+				}
+				verifyHostResources()
+				void refresh()
+>>>>>>> origin/agent/webui-defects
             } else {
               setSnapshot((current) => {
                 const next = snapshotAfterTransportLoss(current, state, detail)
@@ -1340,8 +1760,13 @@ export default function App() {
         setBootTarget(100)
       }
     })()
+<<<<<<< HEAD
     return () => { abort.abort(); resourceCheck.dispose(); stopStream() }
   }, [adoptHostAppearance, appInstanceID, applyPage, demo, navigate, navigationSession, notify, refresh, refreshHostAppearance, streamGeneration, token])
+=======
+    return () => { abort.abort(); stopStream() }
+  }, [adoptHostAppearance, appInstanceID, demo, enqueueToast, navigate, notify, refresh, refreshHostAppearance, verifyHostResources])
+>>>>>>> origin/agent/webui-defects
 
   const authenticationRequired = sessionAuthenticationGuidanceRequired({
     hostRequiresAuthentication: uiConfig?.auth_required === true,
@@ -1357,7 +1782,7 @@ export default function App() {
       ? 'loading'
       : 'unavailable'
   const shared: SharedViewProps = {
-    appTitle: productTitle, snapshot, samples, events, locale: appearance.locale, t, command: runCommand, refresh, openDialog,
+    appTitle: productTitle, snapshot, samples, events, macroEvents, locale: appearance.locale, t, command: runCommand, relayToggle, relayPending, refresh, openDialog,
     boardSettingsReadState,
     transport: {
       streamState,
@@ -1368,16 +1793,26 @@ export default function App() {
     },
     relayedTerminal,
     broadcastTerminal: (entry) => { tabChannelRef.current?.publishTerminal(entry) },
+    openAppPreferences: () => setAppPreferencesOpen(true),
   }
 
   const PageView = pageViewFor(page)
   const view = (
     <Suspense fallback={<section className="page-loading" role="status" aria-live="polite"><span className="spinner" />{appearance.locale === 'fa' ? 'در حال بارگیری…' : 'Loading page…'}</section>}>
+<<<<<<< HEAD
       {page === 'settings'
         ? <PageView {...shared} appearance={appearance} onAppearance={saveAppearance} token={token} onToken={saveToken} onAppTitle={saveAppTitle} uiConfig={uiConfig} onBuzzerPath={setBuzzerPath} navigationSync={navigationSync} navigationSyncStatus={navigationSyncStatus} onNavigationSync={setNavigationSync} />
         : <PageView {...shared} />}
+=======
+      <PageView {...shared} />
+>>>>>>> origin/agent/webui-defects
     </Suspense>
   )
+
+  const closeSettings = useCallback(() => {
+    setSettingsOpen(false)
+    if (location.hash === canonicalPageHash('settings')) history.replaceState({ page: pageRef.current }, '', canonicalPageURL(pageRef.current))
+  }, [])
 
   const current = navigation.find((item) => item.id === page) ?? navigation[0]
   const filteredPalette = navigation.filter((item) => t(item.label).toLowerCase().includes(paletteQuery.toLowerCase()))
@@ -1411,7 +1846,7 @@ export default function App() {
           ? appearance.locale === 'fa'
             ? `${snapshot.status.active_relays.toString(2).replace(/0/g, '').length} خروجی فعال`
             : `${snapshot.status.active_relays.toString(2).replace(/0/g, '').length} active outputs`
-          : appearance.locale === 'fa' ? 'همهٔ خروجی‌ها آزادند' : 'All outputs released'],
+          : appearance.locale === 'fa' ? 'همهٔ خروجی‌ها خاموش‌اند' : 'All outputs are off'],
         ['rf list', appearance.locale === 'fa' ? 'فهرست رادیویی کنترلر' : 'Controller radio inventory'],
         ['macro list', appearance.locale === 'fa' ? 'فهرست ماکروهای کنترلر' : 'Controller macro inventory'],
       ]
@@ -1435,8 +1870,8 @@ export default function App() {
     <MotionConfig reducedMotion={appearance.reduceMotion ? 'always' : 'user'}>
     <div
       className={`app-shell${sidebarOpen ? '' : ' is-sidebar-compact'}${bootResolved ? '' : ' is-bootstrap-pending'}`}
-      inert={!bootResolved || bootOpen || hotkeyHelp ? true : undefined}
-      aria-hidden={!bootResolved || bootOpen || hotkeyHelp ? true : undefined}
+      inert={!bootResolved || bootOpen || hotkeyHelp || settingsOpen || appPreferencesOpen ? true : undefined}
+      aria-hidden={!bootResolved || bootOpen || hotkeyHelp || settingsOpen || appPreferencesOpen ? true : undefined}
     >
 	  {remoteActionProgress && (
 		<div
@@ -1457,11 +1892,41 @@ export default function App() {
           <button className="sidebar-toggle" aria-label={t(sidebarOpen ? 'collapseNavigation' : 'expandNavigation')} onClick={() => setSidebarOpen((value) => !value)}>{sidebarOpen ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}</button>
         </div>
 
-        <div className="sidebar__status">
+        <div
+          ref={sidebarStatusRef}
+          className="sidebar__status"
+          role="button"
+          tabIndex={0}
+          aria-haspopup="menu"
+          aria-expanded={sidebarStatusMenu}
+          aria-label={appearance.locale === 'fa' ? 'منوی اتصال کنترلر' : 'Controller connection menu'}
+          onClick={() => { if (sidebarStatusMenu) setSidebarStatusMenu(false); else openSidebarStatusMenu() }}
+          onContextMenu={(event) => { event.preventDefault(); openSidebarStatusMenu(event.clientX, event.clientY) }}
+          onKeyDown={(event) => {
+            if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10') || event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault()
+              openSidebarStatusMenu()
+            }
+            if (event.key === 'Escape') setSidebarStatusMenu(false)
+          }}
+        >
           <span className={`status-rail status-rail--${snapshot.connected ? 'good' : 'bad'}`} aria-hidden="true" />
           <div><strong>{snapshot.connected ? t('online') : t('offline')}</strong><small>{snapshot.port.name || snapshot.connection_state}</small></div>
           <Cpu size={18} />
         </div>
+        {sidebarStatusMenu && typeof document !== 'undefined' && createPortal(<div
+          ref={sidebarStatusMenuRef}
+          className="sidebar__status-menu"
+          role="menu"
+          aria-label={appearance.locale === 'fa' ? 'عملیات اتصال کنترلر' : 'Controller connection actions'}
+          style={sidebarStatusMenuPosition}
+          onClick={(event) => event.stopPropagation()}
+        >
+            <button role="menuitem" onClick={() => { setSidebarStatusMenu(false); void runCommand('reconnect') }}>{appearance.locale === 'fa' ? 'اتصال مجدد' : 'Reconnect'}</button>
+            {snapshot.connected && <button role="menuitem" onClick={() => { setSidebarStatusMenu(false); void runCommand('close') }}>{appearance.locale === 'fa' ? 'بستن درگاه' : 'Close port'}</button>}
+            <button role="menuitem" onClick={() => { setSidebarStatusMenu(false); setPaletteQuery('ports'); setPaletteIndex(0); setPalette(true) }}>{appearance.locale === 'fa' ? 'انتخاب درگاه USB' : 'Choose USB port'}</button>
+            <button role="menuitem" onClick={() => { setSidebarStatusMenu(false); navigate('device') }}>{appearance.locale === 'fa' ? 'جزئیات دستگاه' : 'Device details'}</button>
+        </div>, document.body)}
 
         <nav className="sidebar__nav">
           {(['core', 'integrations', 'system'] as const).map((group) => (
@@ -1478,9 +1943,10 @@ export default function App() {
       <header className="topbar">
         <button className="mobile-menu" aria-label={t('openNavigation')} onClick={() => setMobileNav(true)}><Menu size={20} /></button>
         <div className="breadcrumbs"><span>{productShortName}</span><i>/</i><strong>{t(current.label)}</strong></div>
-        <button className="command-trigger" aria-keyshortcuts="Control+K Meta+K" onClick={() => { setPaletteIndex(0); setPalette(true) }}><Search size={16} /><span>{t('searchCommands')}</span><KeyCombo keys={[["Ctrl", "⌘"], "K"]} /></button>
+        <button className="command-trigger" aria-keyshortcuts={primaryShortcutARIA()} onClick={() => { setPaletteIndex(0); setPalette(true) }}><Search size={16} /><span>{t('searchCommands')}</span><KeyCombo keys={[primaryShortcutModifier(), "K"]} /></button>
         <div className="topbar__actions">
           {demo && <StatusBadge tone="warn">{t('demoMode')}</StatusBadge>}
+<<<<<<< HEAD
           {reconnectAvailable
             ? <button className="transport-reconnect" title={streamDetail || undefined} aria-label={appearance.locale === 'fa' ? 'اتصال مجدد فوری میزبان' : 'Reconnect host now'} onClick={reconnectTransport}><StatusBadge tone={transportTone}>{transportLabel}</StatusBadge></button>
             : <span title={streamDetail || undefined}><StatusBadge tone={transportTone} pulse={streamState === 'connecting'}>{transportLabel}</StatusBadge></span>}
@@ -1489,6 +1955,15 @@ export default function App() {
           <button className="topbar-icon topbar-audio" aria-label={t(appearance.audioMuted ? 'enableAudio' : 'muteAudio')} aria-pressed={appearance.audioMuted} aria-keyshortcuts="M" onClick={toggleAudio}>{appearance.audioMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}</button>
           <button className="topbar-icon topbar-hotkeys" aria-label={t('keyboardShortcuts')} aria-keyshortcuts="?" onClick={() => setHotkeyHelp(true)}><Keyboard size={18} /></button>
           <button className="topbar-icon" aria-label={t('notifications')} onClick={() => navigate('events')}><Bell size={18} />{events.length > 0 && <i />}</button>
+=======
+          <span title={streamDetail || undefined}><StatusBadge tone={transportTone} pulse={streamState === 'connecting'}>{transportLabel}</StatusBadge></span>
+          <button className="topbar-icon" aria-label={t('settings')} aria-haspopup="dialog" aria-expanded={settingsOpen} onClick={() => navigate('settings')}><Settings size={18} /></button>
+          {quickHeader.theme && <button className="topbar-icon" aria-label={t('toggleTheme')} onClick={() => saveAppearance({ ...appearance, theme: (document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark') })}>{document.documentElement.dataset.theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}</button>}
+          {quickHeader.language && <button className="topbar-icon" aria-label={t('switchLanguage')} onClick={() => saveAppearance({ ...appearance, locale: appearance.locale === 'en' ? 'fa' : 'en' })}><Languages size={18} /></button>}
+          {quickHeader.audio && <button className="topbar-icon topbar-audio" aria-label={t(appearance.audioMuted ? 'enableAudio' : 'muteAudio')} aria-pressed={appearance.audioMuted} aria-keyshortcuts="M" onClick={toggleAudio}>{appearance.audioMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}</button>}
+          {quickHeader.hotkeys && <button className="topbar-icon topbar-hotkeys" aria-label={t('keyboardShortcuts')} aria-keyshortcuts="?" onClick={() => setHotkeyHelp(true)}><Keyboard size={18} /></button>}
+          {quickHeader.notifications && <button className="topbar-icon" aria-label={t('notifications')} onClick={() => navigate('events')}><Bell size={18} />{events.length > 0 && <i />}</button>}
+>>>>>>> origin/agent/webui-defects
         </div>
       </header>
 
@@ -1537,7 +2012,18 @@ export default function App() {
       </AnimatePresence>
 
       <Modal state={{ ...dialog, action: confirmDialog }} onClose={closeDialog} busy={dialogBusy} />
-      <ToastStack messages={toasts} dismiss={(id) => setToasts((current) => current.filter((item) => item.id !== id))} />
+      <SettingsDialog open={settingsOpen} active={!appPreferencesOpen} title={t('settings')} closeLabel={appearance.locale === 'fa' ? 'بستن تنظیمات' : 'Close settings'} onClose={closeSettings}>
+        <Suspense fallback={<section className="page-loading" role="status"><span className="spinner" />{appearance.locale === 'fa' ? 'در حال بارگیری تنظیمات…' : 'Loading settings…'}</section>}>
+          <SettingsPage {...shared} appearance={appearance} onAppearance={saveAppearance} onAppTitle={saveAppTitle} uiConfig={uiConfig} onBuzzerPath={setBuzzerPath} />
+        </Suspense>
+      </SettingsDialog>
+      <AppPreferencesDialog open={appPreferencesOpen} locale={appearance.locale} appearance={appearance} quickHeader={quickHeader} onAppearance={saveAppearance} onQuickHeader={saveQuickHeader} onClose={() => setAppPreferencesOpen(false)} />
+      <ToastStack
+        messages={toasts}
+        dismiss={(id) => setToasts((current) => current.filter((item) => item.id !== id))}
+        act={activateMessageToast}
+        presented={acknowledgeMessageToast}
+      />
     </div>
     <BootGate open={bootResolved && bootOpen} progress={bootProgress} locale={appearance.locale} productTitle={productTitle} productShortName={productShortName} productTagline={productTagline} onEnter={enterApp} />
     <HotkeyHelp open={hotkeyHelp} locale={appearance.locale} onClose={() => setHotkeyHelp(false)} />

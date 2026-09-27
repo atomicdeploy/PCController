@@ -46,9 +46,13 @@ const (
 )
 
 type Options struct {
-	Method                     Method
-	Port                       string
-	HexPath                    string
+	Method  Method
+	Port    string
+	HexPath string
+	// EEPROMHexPath pairs a complete EEPROM image with OperationWriteFlash.
+	// AVRDUDE receives flash first and EEPROM second in one invocation so the
+	// target cannot reboot old firmware against a new, incompatible schema.
+	EEPROMHexPath              string
 	SketchPath                 string
 	OutputDir                  string
 	BuildPath                  string
@@ -161,7 +165,21 @@ func Build(options Options) (Command, error) {
 		args = append(
 			args,
 			"--build-property",
+<<<<<<< HEAD
 			extraFlags,
+=======
+			fmt.Sprintf(
+				"build.extra_flags=-DPCCONTROLLER_BUILD_HASH=0x%08XUL "+
+					"-DPCCONTROLLER_BUILD_TIMESTAMP=0x%08XUL "+
+					"-DPCCONTROLLER_IDENTITY_ADDRESS=0x%XUL -mcall-prologues "+
+					"-fmerge-all-constants -fno-split-wide-types -fno-tree-scev-cprop "+
+					"-fipa-pta -fstack-usage -fno-partial-inlining "+
+					"-fno-inline-functions-called-once -fno-tree-ccp -fno-tree-fre",
+				options.FirmwareSourceHash,
+				options.FirmwareBuildTimestamp,
+				FirmwareIdentityAddress,
+			),
+>>>>>>> origin/agent/webui-defects
 			"--build-property",
 			fmt.Sprintf(
 				"compiler.c.elf.extra_flags=-w -flto -fipa-pta -g -Wl,--relax "+
@@ -185,6 +203,9 @@ func Build(options Options) (Command, error) {
 		}
 		switch options.Operation {
 		case OperationWriteFlash:
+			if options.EEPROMHexPath != "" {
+				return Command{}, errors.New("dependency CLI upload cannot pair flash and EEPROM in one programmer session")
+			}
 			if options.Port == "" {
 				return Command{}, errors.New("dependency CLI upload requires a serial port")
 			}
@@ -286,6 +307,16 @@ func Build(options Options) (Command, error) {
 				args = append(args, "-D", "-xnometadata")
 			}
 			args = append(args, "-Uflash:w:"+options.HexPath+":i")
+			if options.EEPROMHexPath != "" {
+				if !options.ConfirmEEPROMWrite {
+					return Command{}, errors.New(
+						"paired EEPROM write is destructive; pass --confirm-eeprom-write",
+					)
+				}
+				// AVRDUDE executes -U options in order and returns control to
+				// the application only once after both memory writes.
+				args = append(args, "-Ueeprom:w:"+options.EEPROMHexPath+":i")
+			}
 		case OperationReadFlash:
 			if options.OutputPath == "" {
 				return Command{}, errors.New("read-flash requires --output")
@@ -475,13 +506,31 @@ func validateMandatoryWriteReadback(options Options) error {
 	default:
 		return fmt.Errorf("%s through %q cannot provide mandatory programmer readback", options.Operation, options.Method)
 	}
-	capacity := ATmega328PFlashSize
-	memory := "flash"
 	if options.Operation == OperationWriteEEPROM {
-		capacity = atmega328PEEPROMCapacity
-		memory = "EEPROM"
+		return validateProgrammerWriteImage(
+			options.HexPath, "EEPROM", atmega328PEEPROMCapacity,
+		)
 	}
-	document, err := LoadIntelHex(options.HexPath)
+	if err := validateProgrammerWriteImage(
+		options.HexPath, "flash", ATmega328PFlashSize,
+	); err != nil {
+		return err
+	}
+	if options.EEPROMHexPath != "" {
+		if !options.ConfirmEEPROMWrite {
+			return errors.New("paired EEPROM write requires explicit confirmation")
+		}
+		if err := validateProgrammerWriteImage(
+			options.EEPROMHexPath, "EEPROM", atmega328PEEPROMCapacity,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateProgrammerWriteImage(path, memory string, capacity uint32) error {
+	document, err := LoadIntelHex(path)
 	if err != nil {
 		return fmt.Errorf("validate %s write input: %w", memory, err)
 	}
@@ -495,6 +544,33 @@ func validateMandatoryWriteReadback(options Options) error {
 }
 
 func verifyMandatoryProgrammerReadback(
+	ctx context.Context,
+	options Options,
+	output io.Writer,
+	runner CommandRunner,
+) error {
+	primary := options
+	primary.EEPROMHexPath = ""
+	if err := verifyMandatorySingleProgrammerReadback(
+		ctx, primary, output, runner,
+	); err != nil {
+		return err
+	}
+	if options.Operation == OperationWriteFlash && options.EEPROMHexPath != "" {
+		eeprom := options
+		eeprom.Operation = OperationWriteEEPROM
+		eeprom.HexPath = options.EEPROMHexPath
+		eeprom.EEPROMHexPath = ""
+		if err := verifyMandatorySingleProgrammerReadback(
+			ctx, eeprom, output, runner,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func verifyMandatorySingleProgrammerReadback(
 	ctx context.Context,
 	options Options,
 	output io.Writer,
@@ -516,6 +592,7 @@ func verifyMandatoryProgrammerReadback(
 
 	readOptions := options
 	readOptions.HexPath = ""
+	readOptions.EEPROMHexPath = ""
 	readOptions.OutputPath = readbackPath
 	readOptions.NoVerify = false
 	memory := "flash"
@@ -993,6 +1070,14 @@ func ValidateBackup(options Options) error {
 	return nil
 }
 
+<<<<<<< HEAD
+=======
+// currentIdentitySchema accepts the stable identity prefix used by the
+// immediately preceding schema during a guarded migration.  Schema 3 has the
+// same compact build-hash/timestamp prefix as schema 4; schema 4 additionally
+// carries the build-profile suffix.  This is deliberately a host backup and
+// migration boundary, not a firmware compatibility promise.
+>>>>>>> origin/agent/webui-defects
 func currentIdentitySchema(schema byte) bool { return schema == 3 || schema == 4 }
 
 func createBackupDirectory(root string, timestamp time.Time) (string, error) {

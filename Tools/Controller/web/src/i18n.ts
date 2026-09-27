@@ -33,10 +33,15 @@ export const messages = {
     rangeReady: 'Byte-range downloads are served by the host', integrations: 'Integrations',
     reduceMotion: 'Reduce motion', compactNumbers: 'Compact large numbers', liveTelemetry: 'Live telemetry',
     outputSafety: 'Safety confirmation is required for destructive actions.',
+<<<<<<< HEAD
     confirmEmergencyTitle: 'Stop every output?', confirmEmergencyBody: 'This releases all relays and clears PWM output through the same guarded controller command path.',
     noHardware: 'Controller offline — check the connection details below.',
     authenticationDashboard: 'Authentication required',
     authenticationDashboardDetail: 'Enter this host’s access token.',
+=======
+    confirmEmergencyTitle: 'Turn every output off?', confirmEmergencyBody: 'This turns every relay off and clears PWM through the same guarded controller command path.',
+    noHardware: 'The dashboard is ready; connect an authenticated controller to receive live telemetry.',
+>>>>>>> origin/agent/webui-defects
     demoMode: 'Visual demonstration data', eventStream: 'Event stream', status: 'Status',
   },
   fa: {
@@ -68,10 +73,15 @@ export const messages = {
     rangeReady: 'دانلودهای بایتی به‌درستی توسط میزبان ارائه می‌شوند', integrations: 'یکپارچه‌سازی‌ها',
     reduceMotion: 'کاهش حرکت‌ها', compactNumbers: 'نمایش فشرده اعداد بزرگ', liveTelemetry: 'تله‌متری زنده',
     outputSafety: 'برای عملیات مخرب تأیید ایمنی لازم است.',
+<<<<<<< HEAD
     confirmEmergencyTitle: 'همه خروجی‌ها متوقف شوند؟', confirmEmergencyBody: 'این کار همه رله‌ها را آزاد و PWM را از همان مسیر امن فرمان کنترلر پاک می‌کند.',
     noHardware: 'کنترلر آفلاین است — جزئیات اتصال را در ادامه بررسی کنید.',
     authenticationDashboard: 'احراز هویت لازم است',
     authenticationDashboardDetail: 'توکن دسترسی این میزبان را وارد کنید.',
+=======
+    confirmEmergencyTitle: 'همهٔ خروجی‌ها خاموش شوند؟', confirmEmergencyBody: 'این کار همهٔ رله‌ها را خاموش و PWM را از همان مسیر امن فرمان کنترلر پاک می‌کند.',
+    noHardware: 'داشبورد آماده است؛ برای دریافت داده زنده یک کنترلر معتبر متصل کنید.',
+>>>>>>> origin/agent/webui-defects
     demoMode: 'داده نمایشی رابط', eventStream: 'جریان رویدادها', status: 'وضعیت',
   },
 } as const

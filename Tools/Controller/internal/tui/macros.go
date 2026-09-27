@@ -44,10 +44,15 @@ var macroPrimaryButtons = []macroButtonDefinition{
 }
 
 var macroSecondaryButtons = []macroButtonDefinition{
+	{key: "b", label: "B Board rec", tone: macroButtonGood},
 	{key: "c", label: "C Cancel off", tone: macroButtonDanger},
 	{key: "k", label: "K Cancel keep"},
 	{key: "/", label: "/ Find"},
 	{key: "i", label: "I Info"},
+	{key: "e", label: "E Edit"},
+	{key: "u", label: "U Rename"},
+	{key: "g", label: "G Category"},
+	{key: "o", label: "O Monitor"},
 	{key: "x", label: "X Delete", tone: macroButtonDanger},
 	{key: "a", label: "A Rules"},
 }
@@ -279,6 +284,16 @@ func (model Model) macroShortcut(key string) (Model, tea.Cmd, bool) {
 		model.revealTerminal()
 		model.setNotice("Complete NAME [CATEGORY [COLOR]], then operate relay/motion, PWM, beep or display controls; host timing is used")
 		return model, nil, true
+	case "b":
+		recording := model.macroRecordingState()
+		if recording.Active {
+			if !recording.BoardOwned {
+				model.setNotice(fmt.Sprintf("Host recording %d/%s is active; save or discard it first", recording.ID, recording.Name))
+				return model, nil, true
+			}
+			return model.dispatchLine("macro record board stop")
+		}
+		return model.dispatchLine(fmt.Sprintf("macro record board start %d", model.nextMacroID()))
 	case "s":
 		if !model.macroRecordingState().Active {
 			model.setNotice("No active recording to save")
@@ -312,6 +327,41 @@ func (model Model) macroShortcut(key string) (Model, tea.Cmd, bool) {
 			return model, nil, true
 		}
 		return model.dispatchLine(fmt.Sprintf("macro show %d", macro.ID))
+	case "e":
+		macro, ok := model.selectedMacro()
+		if !ok {
+			model.setNotice("No macro selected")
+			return model, nil, true
+		}
+		model.input.SetValue(fmt.Sprintf("macro update %d %s %s %s", macro.ID, strconv.Quote(macro.Name), strconv.Quote(macro.Category), strconv.Quote(macro.Color)))
+		model.input.CursorEnd()
+		model.revealTerminal()
+		model.setNotice("Edit name, category, and color; use - to clear category or color")
+		return model, nil, true
+	case "u":
+		macro, ok := model.selectedMacro()
+		if !ok {
+			model.setNotice("No macro selected")
+			return model, nil, true
+		}
+		model.input.SetValue(fmt.Sprintf("macro rename %d ", macro.ID))
+		model.input.CursorEnd()
+		model.revealTerminal()
+		model.setNotice("Complete the new printable ASCII macro name")
+		return model, nil, true
+	case "g":
+		macro, ok := model.selectedMacro()
+		if !ok {
+			model.setNotice("No macro selected")
+			return model, nil, true
+		}
+		model.input.SetValue(fmt.Sprintf("macro category %d ", macro.ID))
+		model.input.CursorEnd()
+		model.revealTerminal()
+		model.setNotice("Complete the category (up to 64 printable ASCII bytes)")
+		return model, nil, true
+	case "o":
+		return model.dispatchLine("macro monitor")
 	case "x":
 		return model.deleteSelectedMacro()
 	}
@@ -459,7 +509,11 @@ func macroRecordingSummary(state control.MacroRecordingState, now time.Time) str
 	if elapsed < 0 {
 		elapsed = 0
 	}
+<<<<<<< HEAD
 	return fmt.Sprintf("%d · %s · %s · %s · %d steps · %s", state.ID, state.Name, state.Mode, state.Category, state.Steps, formatMacroDuration(elapsed))
+=======
+	return fmt.Sprintf("%d · %s · %s · %d steps (host %d · panel %d · RF %d) · last at %dµs, delta %dµs · %s", state.ID, state.Name, state.Category, state.Steps, state.HostSteps, state.PanelSteps, state.RFSteps, state.LastAtUS, state.LastDeltaUS, formatMacroDuration(elapsed))
+>>>>>>> origin/agent/webui-defects
 }
 
 func macroRecordingHelp(state control.MacroRecordingState) string {
@@ -467,12 +521,21 @@ func macroRecordingHelp(state control.MacroRecordingState) string {
 		return errorStyle.Render("Recorder error: " + state.LastError)
 	}
 	if state.Active {
+<<<<<<< HEAD
 		if state.Mode == "host" {
 			return warnStyle.Render("Operate relay/motion, PWM, beep or display controls; housekeeping is ignored. S saves, D discards.")
 		}
 		return warnStyle.Render("MCU mode records acknowledged queueable commands. S saves, D discards.")
 	}
 	return labelStyle.Render("R starts a basic host recording (100 ms tolerance); CLI start-mcu selects precise MCU capture. N creates a draft.")
+=======
+		if state.BoardOwned {
+			return warnStyle.Render("Board capture owns the retained MCU ring. B seals/fetches it; the host deduplicates, saves, and ACKs the export automatically.")
+		}
+		return warnStyle.Render("Operate the host, front panel, or RF controls; queueable relay, motion, PWM/MOSFET, buzzer, display, RF, RGB, LED, and menu actions share MCU timing. S saves, D discards.")
+	}
+	return labelStyle.Render("R starts a named host recording; B starts/stops retained board capture; exact MCU timestamps become step offsets. N creates a draft.")
+>>>>>>> origin/agent/webui-defects
 }
 
 func macroTableHeader(width int) string {

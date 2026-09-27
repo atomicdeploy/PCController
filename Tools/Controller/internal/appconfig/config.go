@@ -34,6 +34,12 @@ const (
 	// DefaultWatchInterval bounds the polling fallback when file notifications
 	// are unavailable.
 	DefaultWatchInterval = 150 * time.Millisecond
+	// The kqueue fsnotify backend enumerates existing directory entries while
+	// registering a directory. An atomic configuration write can rename its
+	// temporary file between ReadDir and Lstat, which is transient and safe to
+	// retry with a fresh watcher.
+	filesystemWatchRegistrationAttempts   = 4
+	filesystemWatchRegistrationRetryDelay = 10 * time.Millisecond
 )
 
 // Config is the persistent host-side configuration root; it never mirrors or
@@ -86,6 +92,7 @@ type DeviceIdentity struct {
 
 // UI configures host presentation, measurement visibility, and display mirroring.
 type UI struct {
+<<<<<<< HEAD
 	AppTitle             string            `json:"app_title"`
 	Tagline              string            `json:"tagline"`
 	Appearance           Appearance        `json:"appearance"`
@@ -119,6 +126,41 @@ type UI struct {
 	LCDPromptDebounceMS  int               `json:"lcd_prompt_debounce_ms"`
 	LCDPriorityHoldMS    int               `json:"lcd_priority_hold_ms"`
 	SegmentScroll        SegmentScroll     `json:"segment_scroll"`
+=======
+	AppTitle               string                            `json:"app_title"`
+	Tagline                string                            `json:"tagline"`
+	Appearance             Appearance                        `json:"appearance"`
+	TUIConsole             TUIConsole                        `json:"tui_console"`
+	SeparatePortButtons    bool                              `json:"separate_port_buttons"`
+	TableLayout            string                            `json:"table_layout"`
+	PeripheralNames        map[string]string                 `json:"peripheral_names,omitempty"`
+	PeripheralPresentation map[string]PeripheralPresentation `json:"peripheral_presentation,omitempty"`
+	SetupComplete          bool                              `json:"setup_complete"`
+	WelcomeMelody          string                            `json:"welcome_melody"`
+	StatusIntervalMS       int                               `json:"status_interval_ms"`
+	IdleStatusIntervalMS   int                               `json:"idle_status_interval_ms"`
+	EventLogLimit          int                               `json:"event_log_limit"`
+	HistoryHours           int                               `json:"history_hours"`
+	HistorySampleMS        int                               `json:"history_sample_ms"`
+	VoltageDecimals        int                               `json:"voltage_decimals"`
+	CurrentDecimals        int                               `json:"current_decimals"`
+	PowerDecimals          int                               `json:"power_decimals"`
+	TemperatureDecimals    int                               `json:"temperature_decimals"`
+	ShowSupplyVoltage      bool                              `json:"show_supply_voltage"`
+	ShowBusVoltage         bool                              `json:"show_bus_voltage"`
+	ShowCurrent            bool                              `json:"show_current"`
+	ShowPower              bool                              `json:"show_power"`
+	ShowTemperatureLED     bool                              `json:"show_temperature_led"`
+	ShowTemperatureBT      bool                              `json:"show_temperature_bt"`
+	ShowIO                 bool                              `json:"show_io"`
+	ShowDiagnostics        bool                              `json:"show_diagnostics"`
+	ShowGraphs             bool                              `json:"show_graphs"`
+	LCDServiceEnabled      bool                              `json:"lcd_service_enabled"`
+	MirrorPromptToLCD      bool                              `json:"mirror_prompt_to_lcd"`
+	LCDPromptDebounceMS    int                               `json:"lcd_prompt_debounce_ms"`
+	LCDPriorityHoldMS      int                               `json:"lcd_priority_hold_ms"`
+	SegmentScroll          SegmentScroll                     `json:"segment_scroll"`
+>>>>>>> origin/agent/webui-defects
 }
 
 // TUIConsole contains local classic-console presentation preferences. These
@@ -241,6 +283,13 @@ type Macro struct {
 	LCDMessage          string      `json:"lcd_message,omitempty"`
 	TimingToleranceUS   uint32      `json:"timing_tolerance_us,omitempty"`
 	KeepOutputsOnCancel bool        `json:"keep_outputs_on_cancel,omitempty"`
+	RecordingSource     string      `json:"recording_source,omitempty"`
+	CaptureDroppedSteps uint16      `json:"capture_dropped_steps,omitempty"`
+	CaptureMissingSteps uint16      `json:"capture_missing_steps,omitempty"`
+	CaptureImportKey    string      `json:"capture_import_key,omitempty"`
+	CaptureBoard        string      `json:"capture_board,omitempty"`
+	CaptureID           byte        `json:"capture_id,omitempty"`
+	CaptureStartedAtUS  uint32      `json:"capture_started_at_us,omitempty"`
 	Steps               []MacroStep `json:"steps"`
 }
 
@@ -466,9 +515,13 @@ func Load(path string) (Config, [sha256.Size]byte, error) {
 	}
 	value.RF = canonicalizeRFConfig(value.RF)
 	value.HostMenus = normalizeHostMenus(value.HostMenus)
+<<<<<<< HEAD
 	if err := normalizeProgramming(&value.Programming); err != nil {
 		return Config{}, [sha256.Size]byte{}, fmt.Errorf("validate %s: programming.firmware_features: %w", path, err)
 	}
+=======
+	value.UI = normalizePeripheralPresentationDefaults(value.UI)
+>>>>>>> origin/agent/webui-defects
 	value.UI.Appearance = NormalizeAppearance(value.UI.Appearance)
 	value.UI.TUIConsole.FontFace = strings.TrimSpace(value.UI.TUIConsole.FontFace)
 	if err := value.Validate(); err != nil {
@@ -498,9 +551,13 @@ func LoadOrCreate(path string) (Config, [sha256.Size]byte, error) {
 func Write(path string, value Config) error {
 	value.RF = canonicalizeRFConfig(value.RF)
 	value.HostMenus = normalizeHostMenus(value.HostMenus)
+<<<<<<< HEAD
 	if err := normalizeProgramming(&value.Programming); err != nil {
 		return fmt.Errorf("programming.firmware_features: %w", err)
 	}
+=======
+	value.UI = normalizePeripheralPresentationDefaults(value.UI)
+>>>>>>> origin/agent/webui-defects
 	value.UI.Appearance = NormalizeAppearance(value.UI.Appearance)
 	value.UI.TUIConsole.FontFace = strings.TrimSpace(value.UI.TUIConsole.FontFace)
 	if err := value.Validate(); err != nil {
@@ -644,6 +701,34 @@ func (value Config) Validate() error {
 			return fmt.Errorf("ui.peripheral_names[%q] must be 1..64 printable characters", key)
 		}
 	}
+	if len(value.UI.PeripheralPresentation) > MaxPresentedControls {
+		return fmt.Errorf("ui.peripheral_presentation may contain at most %d entries", MaxPresentedControls)
+	}
+	seenOrders := make(map[int]string, len(value.UI.PeripheralPresentation))
+	for rawKey, presentation := range value.UI.PeripheralPresentation {
+		key := strings.TrimSpace(rawKey)
+		if key != rawKey || !IsPresentedControlKey(key) {
+			return fmt.Errorf("ui.peripheral_presentation key %q is not a canonical relay, motion side, or PWM ID", rawKey)
+		}
+		name := strings.TrimSpace(presentation.Name)
+		if name != presentation.Name || utf8.RuneCountInString(name) > 64 || (name != "" && !printableText(name)) {
+			return fmt.Errorf("ui.peripheral_presentation[%q].name must be at most 64 printable characters without surrounding whitespace", key)
+		}
+		description := strings.TrimSpace(presentation.Description)
+		if description != presentation.Description || utf8.RuneCountInString(description) > MaxPeripheralDescriptionRunes || (description != "" && !printableText(description)) {
+			return fmt.Errorf("ui.peripheral_presentation[%q].description must be at most %d printable characters without surrounding whitespace", key, MaxPeripheralDescriptionRunes)
+		}
+		if presentation.Order != nil {
+			order := *presentation.Order
+			if order < 0 || order >= MaxPresentedControls {
+				return fmt.Errorf("ui.peripheral_presentation[%q].order must be 0..%d", key, MaxPresentedControls-1)
+			}
+			if previous, duplicate := seenOrders[order]; duplicate {
+				return fmt.Errorf("ui.peripheral_presentation order %d is assigned to both %q and %q", order, previous, key)
+			}
+			seenOrders[order] = key
+		}
+	}
 	if melody := strings.TrimSpace(value.UI.WelcomeMelody); melody == "" || len(melody) > 64 {
 		return errors.New("ui.welcome_melody must contain 1..64 characters")
 	}
@@ -733,6 +818,15 @@ func (value Config) Validate() error {
 		if macro.TimingToleranceUS > 1_000_000 {
 			return fmt.Errorf("macros[%d].timing_tolerance_us must be 0..1000000", index)
 		}
+		if macro.CaptureImportKey != "" {
+			decoded, err := hex.DecodeString(macro.CaptureImportKey)
+			if err != nil || len(decoded) != sha256.Size {
+				return fmt.Errorf("macros[%d].capture_import_key must be a 64-character SHA-256 hex digest", index)
+			}
+		}
+		if len(macro.CaptureBoard) > 256 || !printableASCII(macro.CaptureBoard) {
+			return fmt.Errorf("macros[%d].capture_board must be at most 256 printable ASCII bytes", index)
+		}
 		if len(macro.Label) > 4 || !printableASCII(macro.Label) {
 			return fmt.Errorf("macros[%d].label must be at most four printable ASCII bytes", index)
 		}
@@ -773,8 +867,9 @@ func (value Config) Validate() error {
 				if frequency == 0 {
 					frequency = step.Value
 				}
-				if step.DurationMS == 0 || (frequency != 0 && (frequency < 20 || frequency > 20000)) {
-					return fmt.Errorf("macros[%d].steps[%d] buzzer needs duration_ms and frequency 0 or 20..20000 Hz", index, stepIndex)
+				if (frequency == 0 && step.DurationMS != 0) ||
+					(frequency != 0 && (step.DurationMS == 0 || frequency < 20 || frequency > 20000)) {
+					return fmt.Errorf("macros[%d].steps[%d] buzzer needs either frequency/duration 0/0 (stop) or frequency 20..20000 Hz with nonzero duration_ms", index, stepIndex)
 				}
 			case "display", "message":
 				if len(step.Text) > 40 || !printableASCII(step.Text) {
@@ -1427,6 +1522,7 @@ func (store *Store) Watch(
 	if interval <= 0 {
 		interval = DefaultWatchInterval
 	}
+<<<<<<< HEAD
 	var watcher *fsnotify.Watcher
 	err := retryWatchRegistration(ctx, func() error {
 		var err error
@@ -1442,6 +1538,9 @@ func (store *Store) Watch(
 		}
 		return err
 	})
+=======
+	watcher, err := openFilesystemWatcher(ctx, filepath.Dir(store.path))
+>>>>>>> origin/agent/webui-defects
 	if err != nil {
 		if ctx.Err() != nil {
 			return
@@ -1526,6 +1625,69 @@ func (store *Store) Watch(
 			reload()
 		}
 	}
+}
+
+func openFilesystemWatcher(ctx context.Context, directory string) (*fsnotify.Watcher, error) {
+	var watcher *fsnotify.Watcher
+	err := retryFilesystemWatchRegistration(
+		ctx,
+		filesystemWatchRegistrationAttempts,
+		filesystemWatchRegistrationRetryDelay,
+		func() error {
+			candidate, err := fsnotify.NewWatcher()
+			if err != nil {
+				return err
+			}
+			if err := candidate.Add(directory); err != nil {
+				// Add can partially register a kqueue directory before its entry
+				// scan fails. Never reuse that uncertain watcher on retry.
+				_ = candidate.Close()
+				return err
+			}
+			watcher = candidate
+			return nil
+		},
+	)
+	return watcher, err
+}
+
+func retryFilesystemWatchRegistration(
+	ctx context.Context,
+	attempts int,
+	delay time.Duration,
+	register func() error,
+) error {
+	if attempts < 1 {
+		attempts = 1
+	}
+	for attempt := 0; attempt < attempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		err := register()
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, os.ErrNotExist) || attempt == attempts-1 {
+			return err
+		}
+		if delay <= 0 {
+			continue
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return nil
 }
 
 func (store *Store) watchPolling(

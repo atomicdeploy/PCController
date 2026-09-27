@@ -17,6 +17,7 @@ import {
   AudioLines,
   AlertTriangle,
   Check,
+  ChevronDown,
   ChevronRight,
   Keyboard,
   LoaderCircle,
@@ -27,6 +28,8 @@ import {
 } from 'lucide-react'
 import type { DialogState, ToastMessage } from './types'
 import { HoldActionSession } from './hold-action'
+import { primaryShortcutModifier } from './client-platform'
+import { sparklinePoints, type SparklineScale } from './sparkline-scale'
 
 function interfaceCopy(english: string, persian: string): string {
   return typeof document !== 'undefined' && document.documentElement.lang.toLowerCase().startsWith('fa') ? persian : english
@@ -62,6 +65,88 @@ export function KeyCombo({ keys, separator = '+' }: { keys: Array<string | strin
       ))}
     </span>
   )
+}
+
+export interface SelectOption {
+  value: string
+  label: string
+  detail?: string
+  disabled?: boolean
+}
+
+export function SelectMenu({
+  label,
+  value,
+  options,
+  placeholder,
+  disabled,
+  onChange,
+}: {
+  label: string
+  value: string
+  options: readonly SelectOption[]
+  placeholder?: string
+  disabled?: boolean
+  onChange: (value: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const root = useRef<HTMLDivElement>(null)
+  const listID = `select-menu-${useId().replace(/:/g, '')}`
+  const selected = options.find((option) => option.value === value)
+
+  useEffect(() => {
+    if (!open) return
+    const close = (event: PointerEvent) => { if (!root.current?.contains(event.target as Node)) setOpen(false) }
+    document.addEventListener('pointerdown', close, true)
+    return () => document.removeEventListener('pointerdown', close, true)
+  }, [open])
+
+  const move = (delta: number) => {
+    const available = options.filter((option) => !option.disabled)
+    if (!available.length) return
+    const index = Math.max(0, available.findIndex((option) => option.value === value))
+    onChange(available[(index + delta + available.length) % available.length].value)
+  }
+
+  return <div className={`select-menu${open ? ' is-open' : ''}`} ref={root}>
+    <span className="select-menu__label">{label}</span>
+    <button
+      type="button"
+      className="select-menu__trigger"
+      aria-label={label}
+      aria-haspopup="listbox"
+      aria-controls={listID}
+      aria-expanded={open}
+      disabled={disabled}
+      onClick={() => setOpen((current) => !current)}
+      onKeyDown={(event) => {
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); move(event.key === 'ArrowDown' ? 1 : -1); setOpen(true) }
+        if (event.key === 'Escape') { event.preventDefault(); setOpen(false) }
+      }}
+    >
+      <span><strong>{selected?.label ?? placeholder ?? interfaceCopy('Select…', 'انتخاب…')}</strong>{selected?.detail && <small>{selected.detail}</small>}</span>
+      <ChevronDown size={16} aria-hidden="true" />
+    </button>
+    <AnimatePresence>
+      {open && <motion.div
+        id={listID}
+        className="select-menu__options"
+        role="listbox"
+        aria-label={label}
+        initial={{ opacity: 0, y: -7, scale: .985 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: -5, scale: .99 }}
+        transition={{ duration: .18, ease: [0.22, 1, 0.36, 1] }}
+      >{options.map((option) => <button
+        key={option.value}
+        type="button"
+        role="option"
+        aria-selected={option.value === value}
+        disabled={option.disabled}
+        onClick={() => { onChange(option.value); setOpen(false) }}
+      ><span><strong>{option.label}</strong>{option.detail && <small>{option.detail}</small>}</span>{option.value === value && <Check size={15} />}</button>)}</motion.div>}
+    </AnimatePresence>
+  </div>
 }
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -401,22 +486,17 @@ export function Sparkline({
   values,
   tone = 'accent',
   label,
+  scale = 'auto',
 }: {
   values: number[]
   tone?: 'accent' | 'green' | 'amber' | 'violet'
   label: string
+  scale?: SparklineScale
 }) {
   const id = useId().replace(/:/g, '')
   const width = 300
   const height = 92
-  const data = values.length > 1 ? values : [0, 0]
-  const minimum = Math.min(...data)
-  const maximum = Math.max(...data)
-  const span = Math.max(1, maximum - minimum)
-  const points = data.map((value, index) => ({
-    x: (index / Math.max(1, data.length - 1)) * width,
-    y: height - 8 - ((value - minimum) / span) * (height - 20),
-  }))
+  const points = sparklinePoints(values, scale, width, height)
   const line = points.map((point, index) => `${index === 0 ? 'M' : 'L'}${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(' ')
   const area = `${line} L${width},${height} L0,${height} Z`
   return (
@@ -435,20 +515,18 @@ export function Sparkline({
       <path className="sparkline__grid" d="M0 24H300 M0 48H300 M0 72H300" />
       <motion.path
         className="sparkline__area"
-        d={area}
         fill={`url(#fill-${id})`}
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: .7 }}
+        initial={false}
+        animate={{ d: area, opacity: 1 }}
+        transition={{ d: { duration: .26, ease: 'linear' }, opacity: { duration: .18 } }}
       />
       <motion.path
         className="sparkline__line"
-        d={line}
         fill="none"
         stroke={`url(#line-${id})`}
-        initial={{ pathLength: 0, opacity: 0 }}
-        animate={{ pathLength: 1, opacity: 1 }}
-        transition={{ duration: .8, ease: [0.22, 1, 0.36, 1] }}
+        initial={false}
+        animate={{ d: line, pathLength: 1, opacity: 1 }}
+        transition={{ d: { duration: .26, ease: 'linear' }, opacity: { duration: .18 } }}
       />
     </svg>
   )
@@ -462,26 +540,30 @@ export function MetricCard({
   values,
   tone,
   detail,
+  scale = 'auto',
 }: {
   icon: LucideIcon
   label: string
   value: string
-  unit: string
+  unit?: string
   values: number[]
   tone: 'accent' | 'green' | 'amber' | 'violet'
   detail?: string
+  scale?: SparklineScale
 }) {
   return (
     <article className={`metric metric--${tone}`}>
       <div className="metric__top">
         <span className="metric__icon"><Icon icon={icon} size={19} /></span>
-        <span className="metric__label">{label}</span>
+        <span className="metric__heading">
+          <span className="metric__label">{label}</span>
+          {detail && <span className="metric__detail">{detail}</span>}
+        </span>
       </div>
       <div className="metric__value" dir="ltr">
-        <strong>{value}</strong><span>{unit}</span>
+        <strong>{value}</strong>{unit && <span>{unit}</span>}
       </div>
-      {detail && <div className="metric__detail">{detail}</div>}
-      <Sparkline values={values} tone={tone} label={interfaceCopy(`${label} trend`, `روند ${label}`)} />
+      <Sparkline values={values} tone={tone} scale={scale} label={interfaceCopy(`${label} trend`, `روند ${label}`)} />
     </article>
   )
 }
@@ -803,21 +885,22 @@ export function BootGate({
 
 export function HotkeyHelp({ open, locale, onClose }: { open: boolean; locale: 'en' | 'fa'; onClose: () => void }) {
   const title = locale === 'fa' ? 'میانبرهای مرکز کنترل' : 'Control center shortcuts'
+  const modifier = primaryShortcutModifier()
   const shortcuts: Array<{ keys: Array<string | string[]>; separator?: string; detail: string }> = locale === 'fa'
     ? [
-        { keys: [['Ctrl', '⌘'], 'K'], detail: 'فرمان‌ها و صفحه‌ها' },
+        { keys: [modifier, 'K'], detail: 'فرمان‌ها و صفحه‌ها' },
         { keys: ['Alt', '1…8'], detail: 'رفتن مستقیم به صفحه' },
         { keys: ['G', ['D', 'C', 'B', 'V', 'W', 'E', 'S']], separator: 'سپس', detail: 'رفتن به داشبورد، کنترلر، میزکار تجهیزات، دستگاه، فضای داده، رویدادها یا تنظیمات' },
-        { keys: [['Ctrl', '⌘'], 'Shift', ['←', '→']], detail: 'صفحهٔ کناری در جهت دیداری' },
+        { keys: [modifier, 'Shift', ['←', '→']], detail: 'صفحهٔ کناری در جهت دیداری' },
         { keys: ['?'], detail: 'نمایش یا بستن این راهنما' },
         { keys: ['M'], detail: 'قطع یا وصل نشانه‌های صوتی' },
         { keys: ['Esc'], detail: 'بستن لایهٔ فعال' },
       ]
     : [
-        { keys: [['Ctrl', '⌘'], 'K'], detail: 'Commands and pages' },
+        { keys: [modifier, 'K'], detail: 'Commands and pages' },
         { keys: ['Alt', '1…8'], detail: 'Open a page directly' },
         { keys: ['G', ['D', 'C', 'B', 'V', 'W', 'E', 'S']], separator: 'then', detail: 'Go to dashboard, controls, peripheral workbench, device, data workspace, events, or settings' },
-        { keys: [['Ctrl', '⌘'], 'Shift', ['←', '→']], detail: 'Adjacent page in the visual direction' },
+        { keys: [modifier, 'Shift', ['←', '→']], detail: 'Adjacent page in the visual direction' },
         { keys: ['?'], detail: 'Show or close this guide' },
         { keys: ['M'], detail: 'Mute or enable interaction cues' },
         { keys: ['Esc'], detail: 'Close the active layer' },
@@ -937,23 +1020,74 @@ export function Modal({ state, onClose, busy }: { state: DialogState; onClose: (
   )
 }
 
-export function ToastStack({ messages, dismiss }: { messages: ToastMessage[]; dismiss: (id: number) => void }) {
+function ToastItem({
+  message,
+  dismiss,
+  act,
+  presented,
+}: {
+  message: ToastMessage
+  dismiss: (id: number) => void
+  act?: (message: ToastMessage) => void
+  presented?: (message: ToastMessage) => void
+}) {
+  const presentedRef = useRef(false)
+  useEffect(() => {
+    if (presentedRef.current) return
+    presentedRef.current = true
+    presented?.(message)
+  }, [message, presented])
+  return (
+    <motion.article
+      className={`toast toast--${message.tone}`}
+      initial={{ opacity: 0, x: 18 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: 12 }}
+      transition={{ duration: .32, ease: [0.22, 1, 0.36, 1] }}
+    >
+      <span className="toast__rail" aria-hidden="true" />
+      <div className="toast__body">
+        <strong>{message.title}</strong>
+        {message.detail && <p>{message.detail}</p>}
+        {message.correlation && <code className="toast__correlation">#{message.correlation}</code>}
+        {message.action && (
+          <button
+            className="toast__action"
+            type="button"
+            disabled={message.actionBusy}
+            onClick={() => act?.(message)}
+          >
+            {message.actionBusy ? interfaceCopy('Running…', 'در حال اجرا…') : message.actionLabel}
+          </button>
+        )}
+      </div>
+      <button className="toast__dismiss" aria-label={interfaceCopy('Dismiss', 'بستن اعلان')} onClick={() => dismiss(message.id)}><X size={16} /></button>
+    </motion.article>
+  )
+}
+
+export function ToastStack({
+  messages,
+  dismiss,
+  act,
+  presented,
+}: {
+  messages: ToastMessage[]
+  dismiss: (id: number) => void
+  act?: (message: ToastMessage) => void
+  presented?: (message: ToastMessage) => void
+}) {
   return (
     <div className="toast-stack" aria-live="polite" aria-atomic="false">
       <AnimatePresence initial={false}>
         {messages.map((message) => (
-          <motion.article
+          <ToastItem
             key={message.id}
-            className={`toast toast--${message.tone}`}
-            initial={{ opacity: 0, x: 18 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: 12 }}
-            transition={{ duration: .32, ease: [0.22, 1, 0.36, 1] }}
-          >
-            <span className="toast__rail" aria-hidden="true" />
-            <div><strong>{message.title}</strong>{message.detail && <p>{message.detail}</p>}</div>
-            <button aria-label={interfaceCopy('Dismiss', 'بستن اعلان')} onClick={() => dismiss(message.id)}><X size={16} /></button>
-          </motion.article>
+            message={message}
+            dismiss={dismiss}
+            act={act}
+            presented={presented}
+          />
         ))}
       </AnimatePresence>
     </div>

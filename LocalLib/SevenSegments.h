@@ -24,7 +24,14 @@ public:
   // Moves one hardware brightness step toward the target at a quiet 70 ms cadence.
   void serviceBrightness(uint8_t target, uint32_t now = millis());
   const uint8_t *rawSegments() const { return cachedSegments_; }
+  const uint8_t *presentationState() const {
+    return reinterpret_cast<const uint8_t *>(this);
+  }
   uint8_t brightness() const { return brightness_; }
+  uint8_t revision() const { return revision_; }
+#if defined(PCCONTROLLER_NATIVE_TEST)
+  uint8_t lastCommandForTest() const { return lastCommand_; }
+#endif
 
 private:
   static uint8_t encodeCharacter(char value);
@@ -34,10 +41,14 @@ private:
   void sendCommand(uint8_t command);
   void writeSegments(const uint8_t segments[4]);
 
-  uint8_t cachedSegments_[4] = {0xFF, 0xFF, 0xFF, 0xFF};
-  uint8_t brightness_ = 0xFF;
+  uint8_t cachedSegments_[4] = {};
+  uint8_t brightness_ = 0;
+  uint8_t revision_ = 0;
   uint16_t brightnessChangedAt_ = 0;
   bool begun_ = false;
+#if defined(PCCONTROLLER_NATIVE_TEST)
+  uint8_t lastCommand_ = 0;
+#endif
 };
 
 // display is the single board-wide TM1637 presentation service.

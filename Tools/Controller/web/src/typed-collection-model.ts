@@ -8,6 +8,7 @@ export interface CollectionSort {
 
 export interface CollectionFieldDefinition<T extends object> {
   id: string
+  icon?: 'time' | 'type' | 'message' | 'source' | 'metadata'
   label?: string
   get?: (row: T) => unknown
   visible?: boolean

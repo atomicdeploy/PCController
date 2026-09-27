@@ -149,7 +149,7 @@ void testBoardAndPersistence() {
 
     auto response = board.handle(
         {pccontroller::wire::Hello, 42, {}});
-    require(response.size() == 1 &&
+    require(response.size() == 4 &&
                 response[0].opcode == pccontroller::wire::HelloResponse &&
                 response[0].sequence == 42,
             "HELLO response is invalid");
@@ -163,6 +163,19 @@ void testBoardAndPersistence() {
                             response[0].payload.end(),
                             [](std::uint8_t value) { return value != 0; }),
             "HELLO compact schema-3 identity is not production-shaped");
+    const auto *initialSegments =
+        findOpcode(response, pccontroller::wire::SegmentChanged);
+    const auto *initialBuzzer =
+        findOpcode(response, pccontroller::wire::BuzzerChanged);
+    const auto *initialStatusLed =
+        findOpcode(response, pccontroller::wire::StatusLedChanged);
+    require(initialSegments != nullptr && initialSegments->sequence == 0 &&
+                initialSegments->payload.size() == 5 &&
+                initialBuzzer != nullptr && initialBuzzer->sequence == 0 &&
+                initialBuzzer->payload.size() == 5 &&
+                initialStatusLed != nullptr && initialStatusLed->sequence == 0 &&
+                initialStatusLed->payload.size() == 6,
+            "authenticated HELLO did not force exact output-state frames");
     const std::uint32_t capabilities =
         static_cast<std::uint32_t>(response[0].payload[2]) |
         (static_cast<std::uint32_t>(response[0].payload[3]) << 8U) |

@@ -12,7 +12,6 @@ import {
   BookOpen,
   Cable,
   ChevronDown,
-  CircleDot,
   CircleStop,
   Cpu,
   Database,
@@ -27,7 +26,6 @@ import {
   LayoutDashboard,
   LayoutPanelTop,
   List,
-  ListChecks,
   ListTree,
   MemoryStick,
   MessageSquareText,
@@ -69,13 +67,20 @@ import {
 } from './components'
 import { rpc } from './api'
 import { redactSensitiveCommand, shellArgument as quoteArgument } from './command-line'
-import type { FrontPanelState } from './types'
+import { SevenSegmentPreview } from './seven-segment-preview'
+import type { MenuCatalog } from './types'
 import type { SharedViewProps } from './views'
+<<<<<<< HEAD
 import { peripheralAvailability } from './peripheral-availability'
+=======
+import type { PeripheralDestinationID } from './peripheral-navigation'
+import { advancedWorkbenchPanelVisible, type AdvancedWorkbenchPanelID } from './workbench-subpages'
+>>>>>>> origin/agent/webui-defects
 
 interface AdvancedWorkbenchProps extends SharedViewProps {
   run: (command: string) => Promise<string>
   busy: string
+  destination: PeripheralDestinationID
 }
 
 interface DiscoveredDevice {
@@ -133,6 +138,7 @@ interface PanelProps {
   defaultOpen?: boolean
   tone?: 'good' | 'warn' | 'bad' | 'info' | 'neutral'
   status?: string
+  visible?: boolean
 }
 
 function AdvancedPanel({
@@ -144,8 +150,10 @@ function AdvancedPanel({
   defaultOpen = false,
   tone = 'neutral',
   status,
+  visible = true,
 }: PanelProps) {
   const [open, setOpen] = useState(defaultOpen)
+  if (!visible) return null
   return (
     <details
       className="advanced-panel"
@@ -185,40 +193,23 @@ export function hostMenuLabelCommand(reference: string, label: string): string |
   return `host-menu set ${quoteArgument(normalizedReference)} label ${quoteArgument(normalizedLabel)}`
 }
 
-const segmentLines = [
-  ['a', 8, 5, 28, 5], ['b', 31, 8, 31, 27], ['c', 31, 32, 31, 51],
-  ['d', 8, 54, 28, 54], ['e', 5, 32, 5, 51], ['f', 5, 8, 5, 27],
-  ['g', 8, 29.5, 28, 29.5],
-] as const
-
-function SevenSegmentPreview({ panel }: { panel?: FrontPanelState }) {
-  const raw = panel?.raw_segments ?? [0, 0, 0, 0]
-  return (
-    <div className={`live-segment-preview${panel?.segments_active ? ' is-active' : ''}`} dir="ltr" aria-label="Live four-digit display preview">
-      {raw.map((mask, index) => (
-        <svg key={index} viewBox="0 0 40 62" role="img" aria-label={`digit ${index + 1} raw 0x${mask.toString(16).padStart(2, '0')}`}>
-          {segmentLines.map(([name, x1, y1, x2, y2], bit) => (
-            <line key={name} x1={x1} y1={y1} x2={x2} y2={y2} className={(mask & (1 << bit)) !== 0 ? 'is-lit' : ''} />
-          ))}
-          <circle cx="36" cy="54" r="2.2" className={(mask & 0x80) !== 0 ? 'is-lit' : ''} />
-        </svg>
-      ))}
-    </div>
-  )
-}
-
 export function AdvancedWorkbench({
   snapshot,
   locale,
   run,
   busy,
+<<<<<<< HEAD
   transport,
+=======
+  destination,
+>>>>>>> origin/agent/webui-defects
 }: AdvancedWorkbenchProps) {
   const available = peripheralAvailability(snapshot)
   const isPersian = locale === 'fa'
   const copy = (english: string, persian: string) => isPersian ? persian : english
   const online = transport.boardState === 'ready' && snapshot.connected && snapshot.have_status
   const boardBusy = busy.length > 0
+  const show = (panel: AdvancedWorkbenchPanelID) => advancedWorkbenchPanelVisible(destination, panel)
 
   const [port, setPort] = useState('')
   const [streamEnabled, setStreamEnabled] = useState(true)
@@ -231,12 +222,13 @@ export function AdvancedWorkbench({
   const [doorAudio, setDoorAudio] = useState(true)
   const [relayAudio, setRelayAudio] = useState(true)
 
-  const [menuPage, setMenuPage] = useState('status')
+  const [menuCatalog, setMenuCatalog] = useState<MenuCatalog | null>(null)
+  const [menuPage, setMenuPage] = useState('')
   const [menuMask, setMenuMask] = useState('0xFFFF')
   const [menuOrder, setMenuOrder] = useState('status voltage current temperature')
   const [hostMenuID, setHostMenuID] = useState('')
   const [hostMenuLabel, setHostMenuLabel] = useState('')
-  const [frontPanel, setFrontPanel] = useState<FrontPanelState | undefined>(snapshot.front_panel)
+  const frontPanel = snapshot.have_front_panel ? snapshot.front_panel : undefined
 
   const [pixel, setPixel] = useState(0)
   const [pixelRed, setPixelRed] = useState(32)
@@ -249,11 +241,6 @@ export function AdvancedWorkbench({
   const [rfKind, setRFKind] = useState<'none' | 'key' | 'menu' | 'relay' | 'side' | 'pwm'>('key')
   const [rfValue, setRFValue] = useState('1')
   const [rfBehavior, setRFBehavior] = useState('press')
-
-  const [macroRef, setMacroRef] = useState('')
-  const [macroName, setMacroName] = useState('')
-  const [macroCategory, setMacroCategory] = useState('Web')
-  const [macroColor, setMacroColor] = useState<'red' | 'blue' | 'violet' | 'green' | 'white'>('red')
 
   const [i2cAddress, setI2CAddress] = useState('0x27')
   const [i2cLease, setI2CLease] = useState(2)
@@ -314,6 +301,25 @@ export function AdvancedWorkbench({
   }, [port, snapshot.port.name])
 
   useEffect(() => {
+    if (!online) {
+      setMenuCatalog(null)
+      setMenuPage('')
+      return
+    }
+    const abort = new AbortController()
+    void rpc<MenuCatalog>('controller.menu.list', {}, abort.signal).then((catalog) => {
+      setMenuCatalog(catalog)
+      setMenuPage(String(catalog.current_page))
+    }).catch(() => {
+      if (!abort.signal.aborted) {
+        setMenuCatalog(null)
+        setMenuPage('')
+      }
+    })
+    return () => abort.abort()
+  }, [online, snapshot.hello.build_hash, snapshot.port.instance_id])
+
+  useEffect(() => {
     if (programModeTouched || !snapshot.program_state?.mode) return
     setProgramMode(snapshot.program_state.mode.toLowerCase() === 'running' ? 'running' : 'idle')
   }, [programModeTouched, snapshot.program_state?.mode])
@@ -321,10 +327,6 @@ export function AdvancedWorkbench({
   useEffect(() => {
     if (!online && messageTarget === 'lcd') setMessageTarget('host')
   }, [messageTarget, online])
-
-  useEffect(() => {
-    if (snapshot.have_front_panel && snapshot.front_panel) setFrontPanel(snapshot.front_panel)
-  }, [snapshot.front_panel_updated, snapshot.have_front_panel, snapshot.front_panel])
 
   useEffect(() => {
     setServiceOutput(copy('No service query yet.', 'هنوز پرس‌وجوی سرویسی انجام نشده است.'))
@@ -514,12 +516,6 @@ export function AdvancedWorkbench({
   const i2cBytes = normalizeTokens(i2cWrite)
   const i2cCommand = `i2c transfer ${i2cAddress.trim() || '0x27'} ${i2cLease} ${i2cReadCount}${i2cBytes ? ` ${i2cBytes}` : ''}`
   const hostMenuLabelUpdate = hostMenuLabelCommand(hostMenuID, hostMenuLabel)
-  const macroRecordCommand = [
-    'macro record start',
-    quoteArgument(macroName.trim()),
-    ...(macroCategory.trim() ? [quoteArgument(macroCategory.trim())] : []),
-    ...(macroColor.trim() ? [quoteArgument(macroColor.trim())] : []),
-  ].join(' ')
   const messageByteLength = new TextEncoder().encode(messageText.trim()).byteLength
   const lcdMessageValid = Boolean(messageLine1 || messageLine2) &&
     messageLine1.length <= 16 && messageLine2.length <= 16 &&
@@ -547,6 +543,7 @@ export function AdvancedWorkbench({
 
       <div className="advanced-grid">
         <AdvancedPanel
+          visible={show('connection')}
           icon={Usb}
           eyebrow={copy('SERIAL LIFECYCLE', 'چرخه اتصال سریال')}
           title={copy('Connection, stream & program state', 'اتصال، جریان وضعیت و حالت برنامه')}
@@ -596,7 +593,12 @@ export function AdvancedWorkbench({
           </div>
         </AdvancedPanel>
 
+<<<<<<< HEAD
         {online && <>{(available.temperatureLED || available.temperatureBTAudio) && <AdvancedPanel
+=======
+        {online && <><AdvancedPanel
+          visible={show('temperature')}
+>>>>>>> origin/agent/webui-defects
           icon={Thermometer}
           eyebrow="DS18B20"
           title={copy('Temperature identities', 'شناسه‌های دما')}
@@ -613,6 +615,7 @@ export function AdvancedWorkbench({
         </AdvancedPanel>}
 
         <AdvancedPanel
+          visible={show('audio')}
           icon={AudioLines}
           eyebrow={copy('EEPROM-BACKED', 'ذخیره‌شده در EEPROM')}
           title={copy('Silent mode & firmware buzzer cues', 'حالت بی‌صدا و اعلان‌های بیزر')}
@@ -637,6 +640,7 @@ export function AdvancedWorkbench({
         </AdvancedPanel>
 
         <AdvancedPanel
+          visible={show('front-panel')}
           icon={LayoutPanelTop}
           eyebrow={copy('FRONT PANEL', 'پنل جلویی')}
           title={copy('Catalog, layout & navigation', 'کاتالوگ، چیدمان و پیمایش')}
@@ -648,11 +652,10 @@ export function AdvancedWorkbench({
             <div>
               <strong>{copy('Live physical display', 'نمایش زنده پنل')}</strong>
               <span>{frontPanel ? `${copy('page', 'صفحه')} ${frontPanel.menu_page} · ${copy('brightness', 'روشنایی')} ${frontPanel.brightness}/7` : copy('Awaiting exact front-panel state', 'در انتظار وضعیت دقیق پنل')}</span>
-			  <small>{copy('Changed-only board opcodes update this preview immediately; refresh is explicit.', 'اپ‌کدهای تغییرمحور برد این پیش‌نمایش را فوری به‌روز می‌کنند؛ تازه‌سازی صریح است.')}</small>
+			  <small>{copy('Changed-only board events update this preview immediately for every connected client.', 'رویدادهای تغییرمحور برد این پیش‌نمایش را برای همهٔ کاربران متصل فوری به‌روز می‌کنند.')}</small>
             </div>
           </div>
           <div className="advanced-actions">
-			<Button icon={RefreshCw} disabled={!online} onClick={() => void rpc<FrontPanelState>('controller.front_panel').then(setFrontPanel).catch(() => undefined)}>{copy('Refresh physical state', 'تازه‌سازی وضعیت فیزیکی')}</Button>
             <Button icon={BookOpen} disabled={!online} busy={busy === 'menu list'} onClick={() => void run('menu list')}>{copy('Firmware catalog', 'کاتالوگ میان‌افزار')}</Button>
             <Button icon={LayoutDashboard} disabled={!online} busy={busy === 'menu current'} onClick={() => void run('menu current')}>{copy('Current page', 'صفحه فعلی')}</Button>
             <Button icon={LayoutPanelTop} disabled={!online} busy={busy === 'menu layout'} onClick={() => void run('menu layout')}>{copy('Stored layout', 'چیدمان ذخیره‌شده')}</Button>
@@ -673,14 +676,21 @@ export function AdvancedWorkbench({
           </div>
           <p className="advanced-note advanced-note--safe">{copy('The Macro front-panel page uses the shared host library, records host command timing by default, shows playback progress, and offers safe cancel or guarded keep-output cancel.', 'صفحه ماکروی پنل از کتابخانه مشترک میزبان استفاده می‌کند، زمان فرمان‌های میزبان را ضبط می‌کند و پیشرفت اجرا و لغو امن را نشان می‌دهد.')}</p>
           <div className="advanced-fields">
-            <TextField
-              label={copy('Firmware page ID or key', 'شناسه یا کلید صفحه میان‌افزار')}
-              value={menuPage}
-              dir="ltr"
-              spellCheck={false}
-              onChange={(event) => setMenuPage(event.target.value)}
-              action={<Button icon={LayoutDashboard} disabled={!online || !menuPage.trim()} busy={busy === `menu page ${menuPage.trim()}`} onClick={() => void run(`menu page ${quoteArgument(menuPage.trim())}`)}>{copy('Go to page', 'رفتن به صفحه')}</Button>}
-            />
+            <label className="advanced-select-field">
+              <span>{copy('Firmware page', 'صفحه میان‌افزار')}</span>
+              <div>
+                <select
+                  aria-label={copy('Firmware page', 'صفحه میان‌افزار')}
+                  value={menuPage}
+                  disabled={!online || !menuCatalog?.pages.length}
+                  onChange={(event) => setMenuPage(event.target.value)}
+                >
+                  {!menuCatalog?.pages.length && <option value="">{copy('Loading verified catalog…', 'در حال دریافت کاتالوگ معتبر…')}</option>}
+                  {menuCatalog?.pages.map((page) => <option key={page.id} value={String(page.id)}>{page.label} · {page.name}</option>)}
+                </select>
+                <Button icon={LayoutDashboard} disabled={!online || !menuCatalog?.pages.some((page) => String(page.id) === menuPage)} busy={busy === `menu page ${menuPage}`} onClick={() => void run(`menu page ${menuPage}`)}>{copy('Go to page', 'رفتن به صفحه')}</Button>
+              </div>
+            </label>
             <TextField
               label={copy('Host menu ID · optional', 'شناسه منوی میزبان · اختیاری')}
               value={hostMenuID}
@@ -712,6 +722,7 @@ export function AdvancedWorkbench({
         </AdvancedPanel>
 
         <AdvancedPanel
+          visible={show('lighting')}
           icon={SlidersHorizontal}
           eyebrow="WS281X + STATUS RGB"
           title={copy('Per-pixel light & effect engine', 'نور هر پیکسل و موتور افکت')}
@@ -736,6 +747,7 @@ export function AdvancedWorkbench({
         </AdvancedPanel>
 
         <AdvancedPanel
+          visible={show('radio')}
           icon={Radio}
           eyebrow="433 MHz"
           title={copy('RF inspection, removal & mapping', 'بررسی، حذف و نگاشت RF')}
@@ -773,6 +785,7 @@ export function AdvancedWorkbench({
         </AdvancedPanel>
 
         <AdvancedPanel
+<<<<<<< HEAD
           icon={Workflow}
           eyebrow={copy('HOST RECORDING', 'ضبط میزبان')}
           title={copy('Macro inspection & recording', 'بررسی و ضبط ماکرو')}
@@ -826,6 +839,9 @@ export function AdvancedWorkbench({
         </AdvancedPanel>
 
         <AdvancedPanel
+=======
+          visible={show('i2c')}
+>>>>>>> origin/agent/webui-defects
           icon={Cable}
           eyebrow="I²C + LCD"
           title={copy('Cooperative bus & raw transfer', 'گذرگاه اشتراکی و انتقال خام')}
@@ -837,7 +853,7 @@ export function AdvancedWorkbench({
             <Button icon={ScanSearch} disabled={!online} busy={busy === 'i2c scan'} onClick={() => void run('i2c scan')}>{copy('Scan bus', 'پویش گذرگاه')}</Button>
             {available.lcd && <Button icon={MonitorCog} busy={busy === 'i2c lcd status'} onClick={() => void run('i2c lcd status')}>{copy('LCD status', 'وضعیت LCD')}</Button>}
             <Button icon={RefreshCw} disabled={!online} busy={busy === 'i2c lcd rescan'} onClick={() => void run('i2c lcd rescan')}>{copy('Rescan LCD', 'پویش دوباره LCD')}</Button>
-            <Button icon={Unplug} disabled={!online} busy={busy === 'i2c release'} onClick={() => void run('i2c release')}>{copy('Release lease', 'آزادسازی دسترسی')}</Button>
+            <Button icon={Unplug} disabled={!online} busy={busy === 'i2c release'} onClick={() => void run('i2c release')}>{copy('Stop bus access', 'پایان دسترسی به گذرگاه')}</Button>
           </div>
           <div className="advanced-fields advanced-fields--i2c">
             <TextField label={copy('7-bit address', 'نشانی ۷ بیتی')} value={i2cAddress} dir="ltr" spellCheck={false} onChange={(event) => setI2CAddress(event.target.value)} />
@@ -850,22 +866,24 @@ export function AdvancedWorkbench({
         </AdvancedPanel>
 
         <AdvancedPanel
+          visible={show('keyboard')}
           icon={Keyboard}
           eyebrow={copy('GLOBAL INPUT', 'ورودی سراسری')}
-          title={copy('Keyboard lifecycle & emergency release', 'چرخه صفحه‌کلید و آزادسازی اضطراری')}
-          detail={copy('Inspect bindings, control the primary Windows hook, or release every held and latched output.', 'نگاشت‌ها را ببینید، هوک اصلی ویندوز را کنترل یا همه خروجی‌های نگه‌داشته‌شده را آزاد کنید.')}
+          title={copy('Keyboard lifecycle & all-off control', 'چرخه صفحه‌کلید و خاموش‌کردن همه')}
+          detail={copy('Inspect bindings, control the primary Windows hook, or turn every held and latched output off.', 'نگاشت‌ها را ببینید، هوک اصلی ویندوز را کنترل یا همهٔ خروجی‌های نگه‌داشته‌شده را خاموش کنید.')}
         >
           <div className="advanced-actions">
             <Button icon={Activity} busy={busy === 'keyboard status'} onClick={() => void run('keyboard status')}>{copy('Hook status', 'وضعیت هوک')}</Button>
             <Button icon={ListTree} busy={busy === 'keyboard list'} onClick={() => void run('keyboard list')}>{copy('Binding catalog', 'فهرست نگاشت‌ها')}</Button>
             <Button icon={Keyboard} onClick={() => prepare('keyboard enable', copy('Enabling the global hook activates the configured bindings; review them first with Keyboard list.', 'فعال‌سازی هوک سراسری، نگاشت‌های پیکربندی‌شده را فعال می‌کند؛ ابتدا فهرست صفحه‌کلید را بازبینی کنید.'), 'caution')}>{copy('Review enable', 'بازبینی فعال‌سازی')}</Button>
-            <Button icon={KeyboardOff} busy={busy === 'keyboard disable'} onClick={() => void run('keyboard disable')}>{copy('Disable & release', 'غیرفعال و آزادسازی')}</Button>
-            <Button tone="danger" icon={CircleStop} busy={busy === 'keyboard stop'} onClick={() => void run('keyboard stop')}>{copy('Emergency output release', 'آزادسازی اضطراری خروجی‌ها')}</Button>
+            <Button icon={KeyboardOff} busy={busy === 'keyboard disable'} onClick={() => void run('keyboard disable')}>{copy('Disable & turn off', 'غیرفعال و خاموش‌کردن')}</Button>
+            <Button tone="danger" icon={CircleStop} busy={busy === 'keyboard stop'} onClick={() => void run('keyboard stop')}>{copy('Turn all keyboard outputs off', 'خاموش‌کردن همهٔ خروجی‌های صفحه‌کلید')}</Button>
           </div>
-          <p className="advanced-note advanced-note--safe">{copy('The stop command releases keyboard-held and latched outputs without shutting down the host.', 'فرمان توقف، خروجی‌های نگه‌داشته‌شده توسط صفحه‌کلید را بدون خاموش‌کردن میزبان آزاد می‌کند.')}</p>
+          <p className="advanced-note advanced-note--safe">{copy('The stop command turns keyboard-held and latched outputs off without shutting down the host.', 'فرمان توقف، خروجی‌های نگه‌داشته‌شده توسط صفحه‌کلید را بدون خاموش‌کردن میزبان خاموش می‌کند.')}</p>
         </AdvancedPanel></>}
 
         <AdvancedPanel
+          visible={show('os')}
           icon={MonitorCog}
           eyebrow={copy('POLICY-GATED OS', 'سیستم‌عامل تحت سیاست امنیتی')}
           title={copy('Brightness, virtual key & power preparation', 'روشنایی، کلید مجازی و آماده‌سازی توان')}
@@ -902,6 +920,7 @@ export function AdvancedWorkbench({
         </AdvancedPanel>
 
         <AdvancedPanel
+          visible={show('services')}
           icon={Network}
           eyebrow={copy('TYPED HOST SERVICES', 'سرویس‌های تایپ‌شده میزبان')}
           title={copy('Messages, discovery & history', 'پیام‌ها، کشف شبکه و تاریخچه')}
@@ -977,6 +996,7 @@ export function AdvancedWorkbench({
         </AdvancedPanel>
 
         <AdvancedPanel
+          visible={show('firmware')}
           icon={Cpu}
           eyebrow={copy('READ-FIRST RECOVERY', 'بازیابی با اولویت خواندن')}
           title={copy('Firmware, toolchain & boot preparation', 'میان‌افزار، زنجیره‌ابزار و آماده‌سازی بوت')}

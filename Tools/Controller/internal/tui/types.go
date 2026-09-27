@@ -125,6 +125,7 @@ func preferencesFromUI(value appconfig.UI) Preferences {
 }
 
 type measurementSample struct {
+<<<<<<< HEAD
 	At          time.Time
 	SupplyMV    int32
 	BusMV       int32
@@ -138,6 +139,16 @@ type measurementSample struct {
 	HavePower   bool
 	HaveTLED    bool
 	HaveTBT     bool
+=======
+	At        time.Time
+	Flags     uint16
+	SupplyMV  int32
+	BusMV     int32
+	CurrentMA int32
+	PowerMW   int32
+	TLEDCenti int16
+	TBTCenti  int16
+>>>>>>> origin/agent/webui-defects
 }
 
 type timelineEntry struct {

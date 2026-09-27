@@ -109,6 +109,7 @@ func TestPreferredIdentityResolvesOnlyStrongUniqueMatch(t *testing.T) {
 	}
 }
 
+<<<<<<< HEAD
 func TestReconnectCandidatesRebindCOMByUniqueIdentity(t *testing.T) {
 	all := []Info{
 		{
@@ -159,6 +160,59 @@ func TestReconnectCandidatesDoNotGuessAmbiguousOrUnidentifiedPorts(t *testing.T)
 		Filter{Port: "COM4"},
 	); candidates != nil {
 		t.Fatalf("unidentified USB port was guessed: %#v", candidates)
+=======
+func TestReconnectCandidatesReplaceOnlyStaleCOMName(t *testing.T) {
+	all := []Info{
+		{Name: "COM4", IsUSB: true, VID: "1A86", PID: "7523", InstanceID: `USB\CH340\NEW`},
+		{Name: "COM7", IsUSB: true, VID: "2341", PID: "0043"},
+	}
+	candidates := ReconnectCandidates(all, Filter{
+		Port: "COM5", VID: "1A86", PID: "7523",
+		Preferred: Identity{Port: "COM5", InstanceID: `USB\CH340\OLD`},
+	})
+	if len(candidates) != 1 || candidates[0].Name != "COM4" {
+		t.Fatalf("stale COM rebind=%#v", candidates)
+	}
+}
+
+func TestReconnectCandidatesUsePreferredStrongIdentityAmongUSBDevices(t *testing.T) {
+	all := []Info{
+		{
+			Name: "COM9", IsUSB: true, VID: "1A86", PID: "7523",
+			SerialNumber: "BOARD-A", InstanceID: `USB\CH340\A`,
+		},
+		{
+			Name: "COM12", IsUSB: true, VID: "2341", PID: "0043",
+			SerialNumber: "OTHER", InstanceID: `USB\OTHER\B`,
+		},
+	}
+	tests := []struct {
+		name      string
+		preferred Identity
+	}{
+		{name: "serial", preferred: Identity{SerialNumber: "BOARD-A"}},
+		{name: "instance", preferred: Identity{InstanceID: `USB\CH340\A`}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			candidates := ReconnectCandidates(all, Filter{
+				Port: "COM4", Preferred: test.preferred,
+			})
+			if len(candidates) != 1 || candidates[0].Name != "COM9" {
+				t.Fatalf("strong preferred rebind=%#v", candidates)
+			}
+		})
+	}
+}
+
+func TestReconnectCandidatesNeverGuessAmongUSBPorts(t *testing.T) {
+	all := []Info{
+		{Name: "COM4", IsUSB: true},
+		{Name: "COM7", IsUSB: true},
+	}
+	if candidates := ReconnectCandidates(all, Filter{Port: "COM5"}); candidates != nil {
+		t.Fatalf("ambiguous USB rebind=%#v", candidates)
+>>>>>>> origin/agent/webui-defects
 	}
 }
 

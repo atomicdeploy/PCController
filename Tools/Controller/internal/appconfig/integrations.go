@@ -713,9 +713,16 @@ func validateIPC(value IPC) error {
 	if err := validateSecretChoice("ipc.auth_token", value.AuthToken, value.AuthTokenRef); err != nil {
 		return err
 	}
+<<<<<<< HEAD
 	// The complete login/session model is explicitly deferred by #148. Remote
 	// exposure still requires allow_remote and an exact Origin allow-list, while
 	// optional credentials and policy bits remain stored but dormant.
+=======
+	// Authentication and authorization are deliberately disabled for the alpha
+	// host until the complete login/session design tracked by issue #148 lands.
+	// Keep accepting an optional secret so existing configs remain readable, but
+	// never require one merely to expose the explicitly selected listener.
+>>>>>>> origin/agent/webui-defects
 	if len(value.AuthToken) > 512 || !printableText(value.AuthToken) {
 		return fmt.Errorf("ipc.auth_token must be at most 512 printable characters")
 	}

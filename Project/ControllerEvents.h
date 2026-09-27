@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 
+#include "MacroAction.h"
 #include "UartProtocol.h"
 
 // ControllerEventType identifies one asynchronous native event payload shape.
@@ -20,6 +21,9 @@ enum class ControllerEventType : uint8_t {
   // Host-routed page navigation: [type, target, ASCII page...]. Target is
   // 0=all, 1=WebUI, 2=TUI. Firmware may emit it without knowing host UI APIs.
   AppNavigation = 12,
+  // [type, source, opcode, canonical payload length, action payload...]
+  // followed by the transport's MCU timestamp trailer.
+  Action = 13,
 };
 
 // ControllerAlertKind classifies board-generated warning notifications.
@@ -45,6 +49,9 @@ public:
   void key(uint8_t bit, uint8_t gesture,
            InputEventSource source = InputEventSource::Physical,
            uint8_t sourceId = 0xFF);
+  // Emits one successful capture-eligible action with its exact MCU edge.
+  bool action(InputEventSource source, uint8_t opcode, const uint8_t *payload,
+              uint8_t availablePayload, uint32_t capturedAtUs);
   // State-change methods emit only normalized event payloads, never debug text.
   void door(bool open);
   void bluetooth(uint8_t state);
@@ -63,7 +70,7 @@ public:
 
 private:
   // Prepends the event type and sends it as an unsolicited native Event frame.
-  void send(const uint8_t *payload, uint8_t length);
+  bool send(const uint8_t *payload, uint8_t length);
 
   ControllerProtocol::UartProtocol &protocol_;
 };

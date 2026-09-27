@@ -772,7 +772,12 @@ func restoreProgrammingSessionWithDisposition(
 	if session == nil {
 		return nil
 	}
+<<<<<<< HEAD
 	if session.HostResult != "succeeded" && !(abandonFailed && session.HostResult == "failed") {
+=======
+	if session.HostResult != "succeeded" &&
+		session.HostResult != "aborted-before-write" {
+>>>>>>> origin/agent/webui-defects
 		return fmt.Errorf(
 			"programming host result is %q, not verified success; safety latch and recovery marker retained",
 			session.HostResult,
@@ -793,7 +798,7 @@ func restoreProgrammingSessionWithDisposition(
 			live.Port.Name, session.Device.Port,
 		)
 	}
-	if session.ReinitializeEEPROM {
+	if session.ReinitializeEEPROM && session.HostResult == "succeeded" {
 		if err := advanceProgrammingSessionPhase(device, session, "application-authenticated"); err != nil {
 			return err
 		}
@@ -1000,6 +1005,25 @@ func MarkProgrammingSessionComplete(session *ProgrammingSession, succeeded bool)
 	return nil
 }
 
+// AbortProgrammingSessionBeforeWrite is the only recovery transition allowed
+// when the mandatory raw backup failed before the programmer was invoked. The
+// application image is therefore still the authenticated pre-flash image, so
+// it is safe to restore the captured settings/live state instead of stranding
+// the board in Prog. Any failure after a complete backup remains fail-closed.
+func AbortProgrammingSessionBeforeWrite(session *ProgrammingSession) error {
+	if session == nil {
+		return nil
+	}
+	previousPhase, previousResult := session.Phase, session.HostResult
+	session.Phase = "aborted-before-write"
+	session.HostResult = "aborted-before-write"
+	if err := rewriteProgrammingMarker(session); err != nil {
+		session.Phase, session.HostResult = previousPhase, previousResult
+		return err
+	}
+	return nil
+}
+
 // RecoverPendingProgrammingSessions is used after a later authenticated
 // reconnect (including a restarted host) to finish any interrupted restore.
 func RecoverPendingProgrammingSessions(
@@ -1031,7 +1055,8 @@ func RecoverPendingProgrammingSessions(
 		if !sameProgrammingDevice(session.Device, programmingIdentity(runtime.Snapshot().Port)) {
 			continue
 		}
-		if session.HostResult != "succeeded" {
+		if session.HostResult != "succeeded" &&
+			session.HostResult != "aborted-before-write" {
 			if safeErr := reassertProgrammingSession(ctx, runtimeProgrammingDevice{runtime: runtime, options: options}, session, options); safeErr != nil {
 				failures = append(failures, safeErr)
 			} else if output != nil {

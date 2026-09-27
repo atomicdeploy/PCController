@@ -2,6 +2,7 @@ package hostbridge
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -28,9 +29,23 @@ func TestStatusLEDStatePriority(t *testing.T) {
 	snapshot.Status.DoorOpen = true
 	assertStatusLEDState(t, policy, snapshot, now.Add(time.Second), now, statusLEDDoorWarning)
 	snapshot.Status.TLEDCenti = policy.HotThresholdCentiC
+	snapshot.Status.Flags |= controller.StatusTemperatureLED
 	assertStatusLEDState(t, policy, snapshot, now.Add(time.Second), now, statusLEDHot)
 	snapshot.Connected = false
 	assertStatusLEDState(t, policy, snapshot, now.Add(time.Second), now, statusLEDOffline)
+}
+
+func TestStatusLEDPolicyIgnoresInvalidTemperature(t *testing.T) {
+	policy := appconfig.DefaultStatusLEDPolicy()
+	now := time.Now()
+	snapshot := controller.Snapshot{
+		Connected: true, HaveStatus: true,
+		ProgramState: controller.ProgramStateSnapshot{Mode: controller.ProgramIdle},
+	}
+	snapshot.Status.Flags = controller.StatusTemperatureLED | controller.StatusTemperatureBT
+	snapshot.Status.TLEDCenti = controller.InvalidTemperatureCentiC
+	snapshot.Status.TBTCenti = controller.MaximumTemperatureCentiC + 1
+	assertStatusLEDState(t, policy, snapshot, time.Time{}, now, statusLEDBTOff)
 }
 
 func TestStatusLEDVisualsAreSmoothAndBounded(t *testing.T) {
@@ -150,7 +165,8 @@ func TestStatusLEDRunningDoorOpenRemainsPersistentCritical(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	if target.direct != 1 || target.base != 0 {
+	base, direct, _, _ := target.counts()
+	if direct != 1 || base != 0 {
 		t.Fatalf("critical door warning did not preempt overlays: %#v", target)
 	}
 	if err := sendStatusLEDFrame(
@@ -159,7 +175,8 @@ func TestStatusLEDRunningDoorOpenRemainsPersistentCritical(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	if target.direct != 1 || target.base != 1 {
+	base, direct, _, _ = target.counts()
+	if direct != 1 || base != 1 {
 		t.Fatalf("ordinary door cue unexpectedly cancelled overlays: %#v", target)
 	}
 	if len(target.sources) != 2 || target.sources[0] != control.CommandSourceBackground || target.sources[1] != control.CommandSourceBackground {
@@ -175,6 +192,84 @@ func TestStatusLEDPrepareDisconnectIsBackground(t *testing.T) {
 	}
 	if target.direct != 1 || len(target.sources) != 1 || target.sources[0] != control.CommandSourceBackground {
 		t.Fatalf("planned-disconnect status frame lost provenance: %#v", target)
+	}
+}
+
+func TestStatusLEDCapableBoardReceivesOneNativeDescriptorPerStateEntry(t *testing.T) {
+	policy := appconfig.DefaultStatusLEDPolicy()
+	policy.TransitionMS = 0
+	policy.StepMS = 50
+	snapshot := controller.Snapshot{Connected: true, HaveStatus: true}
+	snapshot.Hello.Capabilities = controller.CapabilityStatusEffects
+	snapshot.Status.BluetoothState = 2
+
+	ctx, cancel := context.WithCancel(context.Background())
+	target := &statusLEDTargetRecorder{}
+	arbiter := newStatusLEDArbiter(ctx, target, nil, nil)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		arbiter.Run()
+	}()
+	arbiter.Observe(policy, snapshot, controller.Event{Kind: "telemetry"})
+	time.Sleep(220 * time.Millisecond)
+	cancel()
+	<-done
+
+	base, direct, nativeBase, nativeDirect := target.counts()
+	if nativeBase != 1 || nativeDirect != 0 {
+		t.Fatalf("native descriptor counts base=%d direct=%d, want 1/0", nativeBase, nativeDirect)
+	}
+	if base != 0 || direct != 0 {
+		t.Fatalf("capable board received streamed RGB frames: base=%d direct=%d", base, direct)
+	}
+	if effect := target.lastNativeEffect(); effect.Kind != controller.StatusEffectBreathe ||
+		effect.PeriodMS != uint16(policy.BluetoothAudioSearching.PeriodMS) {
+		t.Fatalf("native effect=%#v", effect)
+	}
+}
+
+func TestStatusLEDLegacyBoardKeepsSmoothRGBCompatibilityStream(t *testing.T) {
+	policy := appconfig.DefaultStatusLEDPolicy()
+	policy.TransitionMS = 0
+	policy.StepMS = 50
+	snapshot := controller.Snapshot{Connected: true, HaveStatus: true}
+	snapshot.Status.BluetoothState = 2
+
+	ctx, cancel := context.WithCancel(context.Background())
+	target := &statusLEDTargetRecorder{}
+	arbiter := newStatusLEDArbiter(ctx, target, nil, nil)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		arbiter.Run()
+	}()
+	arbiter.Observe(policy, snapshot, controller.Event{Kind: "telemetry"})
+	feedbackDone := make(chan struct{})
+	go func() {
+		defer close(feedbackDone)
+		ticker := time.NewTicker(2 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				arbiter.Observe(policy, snapshot, controller.Event{Kind: "status_led.changed"})
+			}
+		}
+	}()
+	time.Sleep(220 * time.Millisecond)
+	cancel()
+	<-done
+	<-feedbackDone
+
+	base, direct, nativeBase, nativeDirect := target.counts()
+	if base < 3 || base > 6 || direct != 0 {
+		t.Fatalf("legacy RGB frames base=%d direct=%d, want a bounded smooth 50ms stream", base, direct)
+	}
+	if nativeBase != 0 || nativeDirect != 0 {
+		t.Fatalf("legacy board received native descriptors: base=%d direct=%d", nativeBase, nativeDirect)
 	}
 }
 
@@ -195,15 +290,26 @@ func assertStatusLEDState(
 }
 
 type statusLEDTargetRecorder struct {
+<<<<<<< HEAD
 	base    int
 	direct  int
 	sources []control.CommandSource
+=======
+	mu            sync.Mutex
+	base          int
+	direct        int
+	nativeBase    int
+	nativeDirect  int
+	nativeEffects []controller.StatusEffectOptions
+>>>>>>> origin/agent/webui-defects
 }
 
 func (target *statusLEDTargetRecorder) SetStatusRGBBase(
 	ctx context.Context,
 	_, _, _, _ byte,
 ) error {
+	target.mu.Lock()
+	defer target.mu.Unlock()
 	target.base++
 	target.sources = append(target.sources, control.CommandSourceFromContext(ctx))
 	return nil
@@ -213,7 +319,46 @@ func (target *statusLEDTargetRecorder) SetStatusRGB(
 	ctx context.Context,
 	_, _, _, _ byte,
 ) error {
+	target.mu.Lock()
+	defer target.mu.Unlock()
 	target.direct++
 	target.sources = append(target.sources, control.CommandSourceFromContext(ctx))
 	return nil
+}
+
+func (target *statusLEDTargetRecorder) SetStatusLEDEffectBase(
+	_ context.Context,
+	effect controller.StatusEffectOptions,
+) error {
+	target.mu.Lock()
+	defer target.mu.Unlock()
+	target.nativeBase++
+	target.nativeEffects = append(target.nativeEffects, effect)
+	return nil
+}
+
+func (target *statusLEDTargetRecorder) SetStatusLEDEffect(
+	_ context.Context,
+	effect controller.StatusEffectOptions,
+) error {
+	target.mu.Lock()
+	defer target.mu.Unlock()
+	target.nativeDirect++
+	target.nativeEffects = append(target.nativeEffects, effect)
+	return nil
+}
+
+func (target *statusLEDTargetRecorder) counts() (int, int, int, int) {
+	target.mu.Lock()
+	defer target.mu.Unlock()
+	return target.base, target.direct, target.nativeBase, target.nativeDirect
+}
+
+func (target *statusLEDTargetRecorder) lastNativeEffect() controller.StatusEffectOptions {
+	target.mu.Lock()
+	defer target.mu.Unlock()
+	if len(target.nativeEffects) == 0 {
+		return controller.StatusEffectOptions{}
+	}
+	return target.nativeEffects[len(target.nativeEffects)-1]
 }

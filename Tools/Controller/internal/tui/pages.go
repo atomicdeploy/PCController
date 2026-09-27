@@ -131,6 +131,7 @@ func (model Model) dashboardPage(snapshot control.Snapshot) string {
 		validPowerReading(status.PowerMW) && model.prefs.Visible["power"] {
 		measurementLines = append(measurementLines, kvCard(sectionWidth, 33, model.peripheralName("sensor.power", "Load Power"), formatPower(status.PowerMW, model.prefs.PowerDecimals)))
 	}
+<<<<<<< HEAD
 	if haveStatus && capabilities&native.CapabilityTemperatures != 0 && status.TLEDAvailable &&
 		validTemperatureReading(status.TLEDCenti) && model.prefs.Visible["temperature_led"] {
 		measurementLines = append(measurementLines, kvCard(sectionWidth, 33, model.peripheralName("sensor.temperature-led", "Temperature · Illumination LED"), formatTemperature(status.TLEDCenti, model.prefs.TemperatureDecimals)))
@@ -139,6 +140,13 @@ func (model Model) dashboardPage(snapshot control.Snapshot) string {
 		capabilities&native.CapabilityBluetoothAudio != 0 && status.TBTAvailable &&
 		validTemperatureReading(status.TBTCenti) && model.prefs.Visible["temperature_bt"] {
 		measurementLines = append(measurementLines, kvCard(sectionWidth, 33, model.peripheralName("sensor.temperature-audio", "BT Amplifier temperature"), formatTemperature(status.TBTCenti, model.prefs.TemperatureDecimals)))
+=======
+	if model.prefs.Visible["temperature_led"] {
+		measurementLines = append(measurementLines, kvCard(sectionWidth, 33, model.peripheralName("sensor.temperature-led", "Temperature · Illumination LED"), formatStatusTemperature(status.TLEDCenti, status.Flags, native.StatusTemperatureLED, model.prefs.TemperatureDecimals)))
+	}
+	if model.prefs.Visible["temperature_bt"] {
+		measurementLines = append(measurementLines, kvCard(sectionWidth, 33, model.peripheralName("sensor.temperature-audio", "Temperature · BT Audio"), formatStatusTemperature(status.TBTCenti, status.Flags, native.StatusTemperatureBT, model.prefs.TemperatureDecimals)))
+>>>>>>> origin/agent/webui-defects
 	}
 
 	stateTitle := ""
@@ -1032,12 +1040,21 @@ func (model Model) graphTable(width int) string {
 		format func(float64) string
 	}
 	metrics := []metric{
+<<<<<<< HEAD
 		{"Supply Voltage", availableSampleValues(model.samples, func(sample measurementSample) bool { return sample.HaveSupply }, func(sample measurementSample) float64 { return float64(sample.SupplyMV) }), func(value float64) string { return formatVoltage(int32(value), model.prefs.VoltageDecimals) }},
 		{"Bus Voltage", availableSampleValues(model.samples, func(sample measurementSample) bool { return sample.HaveBus }, func(sample measurementSample) float64 { return float64(sample.BusMV) }), func(value float64) string { return formatVoltage(int32(value), model.prefs.VoltageDecimals) }},
 		{"Load Current", availableSampleValues(model.samples, func(sample measurementSample) bool { return sample.HaveCurrent }, func(sample measurementSample) float64 { return float64(sample.CurrentMA) }), func(value float64) string { return formatCurrent(int32(value), model.prefs.CurrentDecimals) }},
 		{"Load Power", availableSampleValues(model.samples, func(sample measurementSample) bool { return sample.HavePower }, func(sample measurementSample) float64 { return float64(sample.PowerMW) }), func(value float64) string { return formatPower(int32(value), model.prefs.PowerDecimals) }},
 		{"Illumination Temperature", availableSampleValues(model.samples, func(sample measurementSample) bool { return sample.HaveTLED }, func(sample measurementSample) float64 { return float64(sample.TLEDCenti) }), func(value float64) string { return formatTemperature(int16(value), model.prefs.TemperatureDecimals) }},
 		{"Bluetooth Audio Temperature", availableSampleValues(model.samples, func(sample measurementSample) bool { return sample.HaveTBT }, func(sample measurementSample) float64 { return float64(sample.TBTCenti) }), func(value float64) string { return formatTemperature(int16(value), model.prefs.TemperatureDecimals) }},
+=======
+		{"Supply Voltage", sampleValues(model.samples, func(sample measurementSample) float64 { return float64(sample.SupplyMV) }), func(value float64) string { return formatVoltage(int32(value), model.prefs.VoltageDecimals) }},
+		{"Bus Voltage", sampleValues(model.samples, func(sample measurementSample) float64 { return float64(sample.BusMV) }), func(value float64) string { return formatVoltage(int32(value), model.prefs.VoltageDecimals) }},
+		{"Load Current", sampleValues(model.samples, func(sample measurementSample) float64 { return float64(sample.CurrentMA) }), func(value float64) string { return formatCurrent(int32(value), model.prefs.CurrentDecimals) }},
+		{"Load Power", sampleValues(model.samples, func(sample measurementSample) float64 { return float64(sample.PowerMW) }), func(value float64) string { return formatPower(int32(value), model.prefs.PowerDecimals) }},
+		{"Illumination Temperature", temperatureSampleValues(model.samples, native.StatusTemperatureLED, func(sample measurementSample) int16 { return sample.TLEDCenti }), func(value float64) string { return formatTemperature(int16(value), model.prefs.TemperatureDecimals) }},
+		{"BT Audio Temperature", temperatureSampleValues(model.samples, native.StatusTemperatureBT, func(sample measurementSample) int16 { return sample.TBTCenti }), func(value float64) string { return formatTemperature(int16(value), model.prefs.TemperatureDecimals) }},
+>>>>>>> origin/agent/webui-defects
 	}
 	rows := make([][]string, 0, len(metrics))
 	for _, item := range metrics {
@@ -1125,10 +1142,12 @@ func firmwareIdentity(snapshot control.Snapshot) string {
 			stamp = "timestamp unavailable"
 		}
 		return fmt.Sprintf(
-			"hash %08X · %s · packed %08X",
+			"hash %08X · %s · packed %08X · %s · flags %02X",
 			snapshot.Hello.BuildHash,
 			stamp,
 			snapshot.Hello.BuildTimestamp,
+			native.FeatureProfileName(snapshot.Hello.FeatureProfile),
+			snapshot.Hello.BuildFeatures,
 		)
 	}
 	if snapshot.Hello.Name != "" {
@@ -1145,11 +1164,20 @@ func sampleValues(samples []measurementSample, value func(measurementSample) flo
 	return result
 }
 
+<<<<<<< HEAD
 func availableSampleValues(samples []measurementSample, available func(measurementSample) bool, value func(measurementSample) float64) []float64 {
 	result := make([]float64, 0, len(samples))
 	for _, sample := range samples {
 		if available(sample) {
 			result = append(result, value(sample))
+=======
+func temperatureSampleValues(samples []measurementSample, availabilityFlag uint16, value func(measurementSample) int16) []float64 {
+	result := make([]float64, 0, len(samples))
+	for _, sample := range samples {
+		measurement := value(sample)
+		if native.TemperatureAvailable(sample.Flags, measurement, availabilityFlag) {
+			result = append(result, float64(measurement))
+>>>>>>> origin/agent/webui-defects
 		}
 	}
 	return result

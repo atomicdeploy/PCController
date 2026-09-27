@@ -90,15 +90,22 @@ test("derives public API titles and schema ID from product metadata", () => {
   assert.equal(reference.includes(`<title>${expected.referenceTitle}</title>`), true);
   assert.equal(reference.includes(`<h1>${expected.referenceHeading}</h1>`), true);
   assert.equal(openapi.components.securitySchemes.tokenHeader.name, "X-PCController-Token");
+<<<<<<< HEAD
   assert.equal(openapi.paths["/api/session/ticket"].post.responses["409"].description.includes("disabled"), true);
   assert.equal(openapi.paths["/api/auth/server-proof"].get.security.length, 0);
   assert.equal(openapi.paths["/api/auth/server-proof"].get.parameters[0].name, "X-PCController-Nonce");
+=======
+  assert.deepEqual(openapi.security, []);
+  assert.equal(openapi["x-authentication-state"], "disabled-until-issue-148");
+  assert.equal(openapi.paths["/api/session/ticket"].post.responses["201"].description.includes("One-use"), true);
+>>>>>>> origin/agent/webui-defects
   assert.equal(openapi.components.schemas.SessionTicket.properties.ticket.writeOnly, true);
   assert.equal(openapi.components.schemas.OpcodeRequest.properties.opcode.maximum, 255);
   assert.equal(openapi.components.schemas.AppInstanceReport.properties.lease_seconds.maximum, 300);
   assert.equal(openapi.paths["/api/app/instances"].delete.parameters[0].required, true);
   assert.equal(openapi.paths["/api/app/navigate"].post.requestBody.content["application/json"].schema.$ref, "#/components/schemas/AppNavigation");
   assert.equal(asyncapi.components.securitySchemes.browserTicket.name, "Sec-WebSocket-Protocol");
+  assert.deepEqual(asyncapi.servers.loopback.security, []);
   assert.equal(JSON.stringify(asyncapi).includes("access_token"), false);
 });
 

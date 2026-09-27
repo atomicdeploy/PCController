@@ -13,16 +13,21 @@ import {
 import {
   ArrowDownAZ,
   ArrowUpAZ,
+  Braces,
   Check,
   ChevronLeft,
   ChevronRight,
   Clipboard,
+  Clock3,
   Columns3,
   Download,
-  Eye,
+  Ellipsis,
   EyeOff,
   GripVertical,
+  MessageSquareText,
+  Radio,
   Search,
+  Tag,
   X,
 } from 'lucide-react'
 import {
@@ -48,6 +53,20 @@ import {
   type CollectionSort,
   type GridFocus,
 } from './typed-collection-model'
+import { pointerReorderTargetChanged } from './pointer-reorder'
+
+const fieldIcons = {
+  time: Clock3,
+  type: Tag,
+  message: MessageSquareText,
+  source: Radio,
+  metadata: Braces,
+} as const
+
+function FieldIcon<T extends object>({ field }: { field: CollectionFieldDefinition<T> }) {
+  const FieldIconComponent = field.icon ? fieldIcons[field.icon] : Columns3
+  return <FieldIconComponent size={14} aria-hidden="true" />
+}
 
 export interface TypedCollectionLabels {
   search: string
@@ -73,9 +92,12 @@ export interface TypedCollectionLabels {
   showColumn: string
   moveEarlier: string
   moveLater: string
+  columnActions: string
+  reorderColumn: string
   resizeColumn: string
   previousWindow: string
   nextWindow: string
+  goTo: string
   showing: string
   of: string
   copied: string
@@ -120,6 +142,11 @@ interface AnchorSnapshot {
   nearStart: boolean
 }
 
+interface PointerGuide {
+  clientX: number
+  clientY: number
+}
+
 const englishLabels: TypedCollectionLabels = {
   search: 'Filter records', columns: 'Columns', export: 'Export',
   exportAllJSON: 'All · JSON', exportFilteredJSON: 'Filtered · JSON',
@@ -129,8 +156,8 @@ const englishLabels: TypedCollectionLabels = {
   copyCell: 'Copy cell', copyRow: 'Copy row as JSON', copyColumn: 'Copy filtered column',
   selectRow: 'Select row', deselectRow: 'Deselect row', sortAscending: 'Sort ascending',
   sortDescending: 'Sort descending', hideColumn: 'Hide column', showColumn: 'Show column',
-  moveEarlier: 'Move earlier', moveLater: 'Move later', resizeColumn: 'Resize column',
-  previousWindow: 'Previous rows', nextWindow: 'Next rows', showing: 'Showing', of: 'of',
+  moveEarlier: 'Move earlier', moveLater: 'Move later', columnActions: 'Column actions', reorderColumn: 'Reorder column', resizeColumn: 'Resize column',
+  previousWindow: 'Previous rows', nextWindow: 'Next rows', goTo: 'Go to', showing: 'Showing', of: 'of',
   copied: 'Copied to clipboard', copyUnavailable: 'Clipboard unavailable', filtered: 'filtered',
   all: 'all', structuredValue: 'Structured value',
 }
@@ -144,8 +171,8 @@ const persianLabels: TypedCollectionLabels = {
   copyCell: 'کپی سلول', copyRow: 'کپی رکورد به‌صورت JSON', copyColumn: 'کپی ستون فیلترشده',
   selectRow: 'انتخاب ردیف', deselectRow: 'برداشتن انتخاب ردیف', sortAscending: 'مرتب‌سازی صعودی',
   sortDescending: 'مرتب‌سازی نزولی', hideColumn: 'پنهان‌کردن ستون', showColumn: 'نمایش ستون',
-  moveEarlier: 'انتقال به قبل', moveLater: 'انتقال به بعد', resizeColumn: 'تغییر عرض ستون',
-  previousWindow: 'ردیف‌های قبلی', nextWindow: 'ردیف‌های بعدی', showing: 'نمایش', of: 'از',
+  moveEarlier: 'انتقال به قبل', moveLater: 'انتقال به بعد', columnActions: 'اقدام‌های ستون', reorderColumn: 'جابجایی ستون', resizeColumn: 'تغییر عرض ستون',
+  previousWindow: 'ردیف‌های قبلی', nextWindow: 'ردیف‌های بعدی', goTo: 'رفتن به', showing: 'نمایش', of: 'از',
   copied: 'در کلیپ‌بورد کپی شد', copyUnavailable: 'کلیپ‌بورد در دسترس نیست', filtered: 'فیلترشده',
   all: 'همه', structuredValue: 'مقدار ساخت‌یافته',
 }
@@ -322,6 +349,9 @@ export function TypedCollection<T extends object>({
   const [focus, setFocus] = useState<GridFocus>({ area: 'header', field: 0, row: 0 })
   const [menu, setMenu] = useState<MenuTarget | null>(null)
   const [notice, setNotice] = useState('')
+  const [draggingField, setDraggingField] = useState<string | null>(null)
+  const [dragPosition, setDragPosition] = useState<PointerGuide | null>(null)
+  const [resizeGuide, setResizeGuide] = useState<number | null>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const anchorRef = useRef<AnchorSnapshot | null>(null)
@@ -407,13 +437,32 @@ export function TypedCollection<T extends object>({
     const escape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setMenu(null)
     }
+    const focusLoss = (event: FocusEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) setMenu(null)
+    }
+    const windowBlur = () => setMenu(null)
     document.addEventListener('pointerdown', close)
     document.addEventListener('keydown', escape)
+    document.addEventListener('focusin', focusLoss)
+    globalThis.addEventListener('blur', windowBlur)
     menuRef.current?.querySelector<HTMLButtonElement>('button')?.focus()
     return () => {
       document.removeEventListener('pointerdown', close)
       document.removeEventListener('keydown', escape)
+      document.removeEventListener('focusin', focusLoss)
+      globalThis.removeEventListener('blur', windowBlur)
     }
+  }, [menu])
+
+  useLayoutEffect(() => {
+    if (!menu || !menuRef.current) return
+    const bounds = menuRef.current.getBoundingClientRect()
+    const visualViewport = globalThis.visualViewport
+    const width = visualViewport?.width ?? globalThis.innerWidth
+    const height = visualViewport?.height ?? globalThis.innerHeight
+    const left = Math.round(Math.max(8, Math.min(menu.left, width - bounds.width - 8)))
+    const top = Math.round(Math.max(8, Math.min(menu.top, height - bounds.height - 8)))
+    if (left !== menu.left || top !== menu.top) setMenu((current) => current ? { ...current, left, top } : current)
   }, [menu])
 
   const updateRegistry = (update: (fields: CollectionField<T>[]) => CollectionField<T>[]) => {
@@ -423,12 +472,12 @@ export function TypedCollection<T extends object>({
     current.map((field) => field.id === id ? { ...field, width: clampColumnWidth(width) } : field))
   const setFieldVisible = (id: string, visible: boolean) => updateRegistry((current) =>
     current.map((field) => field.id === id ? { ...field, visible } : field))
-  const moveField = (id: string, delta: number) => updateRegistry((current) => {
-    const index = current.findIndex((field) => field.id === id)
-    const target = Math.max(0, Math.min(current.length - 1, index + delta))
-    if (index < 0 || index === target) return current
+  const moveFieldTo = (id: string, targetID: string) => updateRegistry((current) => {
+    const from = current.findIndex((field) => field.id === id)
+    const target = current.findIndex((field) => field.id === targetID)
+    if (from < 0 || target < 0 || from === target) return current
     const next = [...current]
-    const [field] = next.splice(index, 1)
+    const [field] = next.splice(from, 1)
     next.splice(target, 0, field)
     return next
   })
@@ -516,11 +565,45 @@ export function TypedCollection<T extends object>({
 
   const beginResize = (field: CollectionField<T>, event: ReactPointerEvent<HTMLButtonElement>) => {
     event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
     const startX = event.clientX
     const startWidth = field.width
     const sign = direction === 'rtl' ? -1 : 1
-    const move = (moveEvent: PointerEvent) => setFieldWidth(field.id, startWidth + (moveEvent.clientX - startX) * sign)
+    setResizeGuide(event.clientX)
+    document.documentElement.classList.add('is-resizing-collection')
+    const move = (moveEvent: PointerEvent) => {
+      setResizeGuide(moveEvent.clientX)
+      setFieldWidth(field.id, startWidth + (moveEvent.clientX - startX) * sign)
+    }
     const finish = () => {
+      setResizeGuide(null)
+      document.documentElement.classList.remove('is-resizing-collection')
+      globalThis.removeEventListener('pointermove', move)
+      globalThis.removeEventListener('pointerup', finish)
+      globalThis.removeEventListener('pointercancel', finish)
+    }
+    globalThis.addEventListener('pointermove', move)
+    globalThis.addEventListener('pointerup', finish)
+    globalThis.addEventListener('pointercancel', finish)
+  }
+
+  const beginColumnReorder = (field: CollectionField<T>, event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (event.button !== 0) return
+    event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    setDraggingField(field.id)
+    setDragPosition({ clientX: event.clientX, clientY: event.clientY })
+    let previousTarget: string | null = null
+    const move = (moveEvent: PointerEvent) => {
+      setDragPosition({ clientX: moveEvent.clientX, clientY: moveEvent.clientY })
+      const target = document.elementFromPoint(moveEvent.clientX, moveEvent.clientY)?.closest<HTMLElement>('[data-collection-field-id]')?.dataset.collectionFieldId
+      if (!pointerReorderTargetChanged(previousTarget, field.id, target)) return
+      previousTarget = target
+      moveFieldTo(field.id, target)
+    }
+    const finish = () => {
+      setDraggingField(null)
+      setDragPosition(null)
       globalThis.removeEventListener('pointermove', move)
       globalThis.removeEventListener('pointerup', finish)
       globalThis.removeEventListener('pointercancel', finish)
@@ -549,6 +632,8 @@ export function TypedCollection<T extends object>({
 
   return (
     <section className={`typed-collection ${className}`.trim()} dir={direction} aria-label={ariaLabel}>
+      {resizeGuide !== null && <div className="typed-collection__resize-guide" aria-hidden="true" style={{ left: resizeGuide }} />}
+      {draggingField && dragPosition && <div className="typed-collection__drag-overlay" aria-hidden="true" style={{ left: dragPosition.clientX, top: dragPosition.clientY }}>{effectiveRegistry.find((field) => field.id === draggingField)?.label}</div>}
       {toolbar && <div className="typed-collection__toolbar">
         <label className="typed-collection__search">
           <Search size={16} aria-hidden="true" />
@@ -561,20 +646,20 @@ export function TypedCollection<T extends object>({
           {selected.size > 0 && <><i aria-hidden="true" /><strong>{selected.size}</strong><span>{labels.selected}</span></>}
         </div>
         {selected.size > 0 && <button type="button" className="typed-collection__quiet-action" onClick={() => setSelected(new Set())}>{labels.clearSelection}</button>}
-        <details className="typed-collection__popover typed-collection__columns">
+        <details className="typed-collection__popover typed-collection__columns" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) event.currentTarget.open = false }}>
           <summary><Columns3 size={16} />{labels.columns}</summary>
           <div className="typed-collection__popover-panel" role="group" aria-label={labels.columns}>
-            {effectiveRegistry.map((field, index) => <div className="typed-collection__column-option" key={field.id}>
-              <label><input type="checkbox" checked={field.visible} disabled={field.visible && visibleCount <= 1} onChange={(event) => setFieldVisible(field.id, event.target.checked)} />{field.visible ? <Eye size={14} /> : <EyeOff size={14} />}<span>{field.label}</span></label>
-              <div>
-                <button type="button" disabled={index === 0} aria-label={`${labels.moveEarlier}: ${field.label}`} onClick={() => moveField(field.id, -1)}><ChevronLeft size={14} /></button>
-                <button type="button" disabled={index === effectiveRegistry.length - 1} aria-label={`${labels.moveLater}: ${field.label}`} onClick={() => moveField(field.id, 1)}><ChevronRight size={14} /></button>
-              </div>
-              <label className="typed-collection__column-width"><span className="sr-only">{`${labels.resizeColumn}: ${field.label}`}</span><input type="range" min="88" max="520" step="8" value={field.width} onChange={(event) => setFieldWidth(field.id, event.target.valueAsNumber)} /><output>{field.width}px</output></label>
+            {effectiveRegistry.map((field) => <div
+              className={`typed-collection__column-option${draggingField === field.id ? ' is-dragging' : ''}`}
+              key={field.id}
+              data-collection-field-id={field.id}
+            >
+              <label><input type="checkbox" checked={field.visible} disabled={field.visible && visibleCount <= 1} onChange={(event) => setFieldVisible(field.id, event.target.checked)} /><FieldIcon field={field} /><span>{field.label}</span>{field.visible && <Check className="typed-collection__column-check" size={14} />}</label>
+              <button type="button" className="typed-collection__column-drag" aria-label={`${labels.reorderColumn}: ${field.label}`} onPointerDown={(event) => beginColumnReorder(field, event)}><GripVertical size={15} /></button>
             </div>)}
           </div>
         </details>
-        <details className="typed-collection__popover typed-collection__export">
+        <details className="typed-collection__popover typed-collection__export" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) event.currentTarget.open = false }}>
           <summary><Download size={16} />{labels.export}</summary>
           <div className="typed-collection__popover-panel" role="group" aria-label={labels.export}>
             <button type="button" onClick={() => exportRows('all', 'json')}>{labels.exportAllJSON}</button>
@@ -618,9 +703,12 @@ export function TypedCollection<T extends object>({
                   onContextMenu={(event) => { event.preventDefault(); openContext('header', fieldIndex, 0, event.currentTarget, { left: event.clientX, top: event.clientY }) }}
                 >
                   <button type="button" className="typed-collection__sort" tabIndex={-1} disabled={!field.sortable} onClick={() => toggleSort(field)}>
-                    <span>{field.label}</span>
+                    <span className="typed-collection__header-label"><FieldIcon field={field} />{field.label}</span>
                     {sorted === 'asc' ? <ArrowDownAZ size={14} /> : sorted === 'desc' ? <ArrowUpAZ size={14} /> : <span className="typed-collection__sort-placeholder" aria-hidden="true" />}
                   </button>
+                  <span className="typed-collection__header-actions">
+                    <button type="button" className="typed-collection__header-menu" tabIndex={-1} aria-label={`${labels.columnActions}: ${field.label}`} onClick={(event) => openContext('header', fieldIndex, 0, event.currentTarget)}><Ellipsis size={14} /></button>
+                  </span>
                   <button
                     type="button"
                     className="typed-collection__resize"
@@ -633,7 +721,7 @@ export function TypedCollection<T extends object>({
                       const physical = event.key === 'ArrowRight' ? 12 : -12
                       setFieldWidth(field.id, field.width + (direction === 'rtl' ? -physical : physical))
                     }}
-                  ><GripVertical size={13} /></button>
+                  ><span className="typed-collection__resize-mark" aria-hidden="true" /></button>
                 </th>
               })}
             </tr></thead>
@@ -674,6 +762,7 @@ export function TypedCollection<T extends object>({
         {filtered.length > windowSize && <nav className="typed-collection__window-nav" aria-label={`${ariaLabel} · ${labels.showing}`}>
           <button type="button" disabled={boundedWindowStart === 0} onClick={() => setWindowStart(Math.max(0, boundedWindowStart - windowSize))}><ChevronLeft size={15} />{labels.previousWindow}</button>
           <span>{labels.showing} <strong>{boundedWindowStart + 1}–{windowEnd}</strong> {labels.of} <strong>{filtered.length}</strong></span>
+          <label className="typed-collection__go-to"><span>{labels.goTo}</span><select value={boundedWindowStart} onChange={(event) => setWindowStart(Number(event.target.value))}>{Array.from({ length: Math.ceil(filtered.length / windowSize) }, (_, index) => { const start = index * windowSize; return <option key={start} value={start}>{start + 1}–{Math.min(filtered.length, start + windowSize)}</option> })}</select></label>
           <button type="button" disabled={windowEnd >= filtered.length} onClick={() => setWindowStart(Math.min(maximumWindowStart, boundedWindowStart + windowSize))}>{labels.nextWindow}<ChevronRight size={15} /></button>
         </nav>}
       </>}

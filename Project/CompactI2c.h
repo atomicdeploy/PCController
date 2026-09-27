@@ -44,8 +44,8 @@ private:
   uint8_t rxLength_ = 0;
   uint8_t rxIndex_ = 0;
   uint8_t rx_[BufferSize]{};
-  uint16_t timeoutMicros_ = 25000;
-  bool resetOnTimeout_ = true;
+  uint16_t timeoutMicros_ = 0;
+  bool resetOnTimeout_ = false;
 };
 
 // i2cBus is the single board-wide bounded TWI master.

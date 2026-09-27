@@ -40,6 +40,7 @@ void ShiftRegisters::begin() {
 #endif
 
   allOutputsOff();
+  clearVirtualInputs();
   service();
 
 #if defined(__AVR__)

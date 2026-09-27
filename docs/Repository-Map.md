@@ -137,8 +137,13 @@ byte-tight layout remain predictable:
 | `PwmController.*`, `PwmExpanderDriver.*` | logical PWM ownership and optional PCA9685 transport |
 | `AddressableLeds.*`, `IlluminationController.*`, `StatusLedController.*` | strip, enclosure light, and status/effect rendering |
 | `CompactI2c.*`, `Ina219Sensor.*`, `SystemInputs.*`, `TemperatureRoles.h` | shared bus recovery, optional sensors, panel inputs, temperature roles |
+<<<<<<< HEAD
 | `FrontPanelModel.h`, `BootMelody.*`, `AudioCues.*` | front-panel state, welcome sequence, and compact EEPROM-backed autonomous cue policy |
 | `MacroQueue.*`, `TransitionMath.h` | deterministic timed operations and bounded transitions |
+=======
+| `FrontPanelModel.h`, `BootMelody.*`, `FeedbackMelodies.*` | front-panel state and board-owned audible feedback |
+| `MacroQueue.*`, `TransitionMath.h` | deterministic timed capture/playback, bounded transitions, and raw ordinary-opcode macro records |
+>>>>>>> origin/agent/webui-defects
 | `ResetTelemetry.*` | reset-cause/boot-count persistence and reporting |
 
 ## 🖥️ Native Go host

@@ -7,6 +7,12 @@ import {
   type TabChannelEnvelope,
   type TabChannelIDKind,
 } from './tab-channel'
+import { applyPushedOutputEvent } from './status-led-event'
+import { applyMacroEventToSnapshot } from './macro-live'
+import { updateStatusFromEvent } from './updates-view'
+import type { UpdateStatus } from './updates-api'
+import { emptySnapshot } from './types'
+import type { ControllerEvent, MacroSnapshot, Snapshot } from './types'
 
 class FakeBroadcastChannel implements BroadcastChannelPort {
   static rooms = new Map<string, Set<FakeBroadcastChannel>>()
@@ -67,6 +73,14 @@ function sequenceFactory(prefix: string) {
   return (kind: TabChannelIDKind) => `${prefix}-${kind}-${++sequence}`
 }
 
+function emptyMacroSnapshot(): MacroSnapshot {
+  return {
+    library: [], latest_event_id: 0,
+    recording: { active: false, id: 0, name: '', steps: 0, host_steps: 0, panel_steps: 0, rf_steps: 0, last_at_us: 0, last_delta_us: 0, last_opcode: 0, last_source: 0 },
+    playback: { running: false, id: 0, name: '', step: 0, step_count: 0, duration_us: 0, accepted_bytes: 0, buffer_fill: 0, underruns: 0, dispatch_errors: 0, dropped_steps: 0, evidence_steps: 0, timing_violations: 0, last_timing_delta_us: 0, maximum_timing_error_us: 0, timing_tolerance_us: 2500, faithful: false },
+  }
+}
+
 function baseEnvelope(
   channel: ReturnType<typeof createTabChannel>,
   now: number,
@@ -124,10 +138,11 @@ describe('tab channel', () => {
       state: 'open',
       metadata: { zone: 'front' },
     })).toBeTruthy()
+    expect(sender.publishResourceReload('1.4.1|2026-08-12T12:00:00Z')).toBeTruthy()
 
-    expect(received).toHaveLength(4)
+    expect(received).toHaveLength(5)
     expect(received.map((message) => message.payload.type)).toEqual([
-      'presence', 'appearance', 'terminal', 'controller-event',
+      'presence', 'appearance', 'terminal', 'controller-event', 'resource-reload',
     ])
     expect(received[0]).toMatchObject({
       protocol: TAB_CHANNEL_PROTOCOL,
@@ -143,10 +158,127 @@ describe('tab channel', () => {
     expect(received[3].payload).toMatchObject({
       event: { id: 9, metadata: { zone: 'front' } },
     })
+    expect(received[4].payload).toEqual({ type: 'resource-reload', identity: '1.4.1|2026-08-12T12:00:00Z' })
 
     now += 1
     sender.close()
     receiver.close()
+  })
+
+  it('keeps two Web tabs on the same pushed seven-segment frame without refresh polling', () => {
+    const first = createTabChannel({ origin: 'https://control.example', BroadcastChannel: FakeBroadcastChannel, idFactory: sequenceFactory('first') })
+    const second = createTabChannel({ origin: 'https://control.example', BroadcastChannel: FakeBroadcastChannel, idFactory: sequenceFactory('second') })
+    const frame: ControllerEvent = {
+      id: 44,
+      time: '2026-08-12T10:00:00.000Z',
+      kind: 'front_panel.segment',
+      stream: 'state',
+      text: 'changed',
+      metadata: { raw_segments: '6D3F546E', brightness: '7' },
+    }
+    let firstSnapshot: Snapshot = applyPushedOutputEvent(emptySnapshot, frame)
+    let secondSnapshot: Snapshot = emptySnapshot
+    second.subscribe(({ payload }) => {
+      if (payload.type === 'controller-event') secondSnapshot = applyPushedOutputEvent(secondSnapshot, payload.event as ControllerEvent)
+    })
+
+    first.publishControllerEvent(frame)
+
+    expect(firstSnapshot.front_panel?.raw_segments).toEqual([0x6d, 0x3f, 0x54, 0x6e])
+    expect(secondSnapshot.front_panel?.raw_segments).toEqual(firstSnapshot.front_panel?.raw_segments)
+    expect(firstSnapshot.front_panel_updated).toBe(frame.time)
+    expect(secondSnapshot.front_panel_updated).toBe(frame.time)
+    first.close()
+    second.close()
+  })
+
+  it('keeps two Web clients on the same exact macro recording delta without a manual refresh', () => {
+    const first = createTabChannel({ origin: 'https://control.example', BroadcastChannel: FakeBroadcastChannel, idFactory: sequenceFactory('macro-first') })
+    const second = createTabChannel({ origin: 'https://control.example', BroadcastChannel: FakeBroadcastChannel, idFactory: sequenceFactory('macro-second') })
+    const evidence: ControllerEvent = {
+      id: 57,
+      time: '2026-08-12T10:01:00.000Z',
+      kind: 'macro.recording.step',
+      stream: 'state',
+      lifecycle: 'captured',
+      state: 'recording',
+      text: 'captured exact MCU delta',
+      metadata: { macro_id: '12', macro_name: 'Relay cadence', step: '4', at_us: '91250', delta_us: '7500', opcode: '0x31', source: '1' },
+    }
+    let firstState = applyMacroEventToSnapshot(emptyMacroSnapshot(), evidence)
+    let secondState = emptyMacroSnapshot()
+    second.subscribe(({ payload }) => {
+      if (payload.type === 'controller-event') {
+        secondState = applyMacroEventToSnapshot(secondState, payload.event as ControllerEvent)
+      }
+    })
+
+    first.publishControllerEvent(evidence)
+
+    expect(firstState.recording).toMatchObject({ id: 12, name: 'Relay cadence', steps: 4, last_at_us: 91250, last_delta_us: 7500 })
+    expect(secondState.recording).toEqual(firstState.recording)
+    expect(secondState.latest_event_id).toBe(57)
+    first.close()
+    second.close()
+  })
+
+  it('keeps two Web clients on the same pushed update progress without manual refresh', () => {
+    const first = createTabChannel({ origin: 'https://control.example', BroadcastChannel: FakeBroadcastChannel, idFactory: sequenceFactory('update-first') })
+    const second = createTabChannel({ origin: 'https://control.example', BroadcastChannel: FakeBroadcastChannel, idFactory: sequenceFactory('update-second') })
+    const progress: ControllerEvent = {
+      id: 58,
+      time: '2026-08-12T10:02:00.000Z',
+      kind: 'update.verifying',
+      stream: 'state',
+      text: 'readback verified',
+      metadata: { operation_id: 'op-live', kind: 'firmware', progress_percent: '91', programming_method: 'urclock' },
+    }
+    let firstStatus: UpdateStatus | null = updateStatusFromEvent(null, progress)
+    let secondStatus: UpdateStatus | null = null
+    second.subscribe(({ payload }) => {
+      if (payload.type === 'controller-event') secondStatus = updateStatusFromEvent(secondStatus, payload.event as ControllerEvent)
+    })
+
+    first.publishControllerEvent(progress)
+
+    expect(firstStatus).toMatchObject({ id: 'op-live', state: 'verifying', progress_percent: 91 })
+    expect(secondStatus).toEqual(firstStatus)
+    first.close()
+    second.close()
+  })
+
+  it('retains actionable message identity across Web tabs', () => {
+    const first = createTabChannel({ origin: 'https://control.example', BroadcastChannel: FakeBroadcastChannel, idFactory: sequenceFactory('message-first') })
+    const second = createTabChannel({ origin: 'https://control.example', BroadcastChannel: FakeBroadcastChannel, idFactory: sequenceFactory('message-second') })
+    let received: ControllerEvent | undefined
+    second.subscribe(({ payload }) => {
+      if (payload.type === 'controller-event') received = payload.event as ControllerEvent
+    })
+    first.publishControllerEvent({
+      id: 88,
+      time: '2026-08-12T12:00:00.000Z',
+      kind: 'message',
+      stream: 'activity',
+      text: 'Inspect output 3',
+      target: 'web,tui',
+      targets: ['web', 'tui'],
+      message_type: 'operator.prompt',
+      severity: 'warning',
+      correlation: 'job-88',
+      delivery: 'sync',
+      action: 'relay off',
+    })
+    expect(received).toMatchObject({
+      id: 88,
+      targets: ['web', 'tui'],
+      message_type: 'operator.prompt',
+      severity: 'warning',
+      correlation: 'job-88',
+      delivery: 'sync',
+      action: 'relay off',
+    })
+    first.close()
+    second.close()
   })
 
   it('rejects secrets, unknown fields, invalid values, and oversized content before posting', () => {

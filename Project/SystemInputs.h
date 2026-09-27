@@ -47,7 +47,9 @@ private:
 
   DebouncedInput door_;
   DebouncedInput bluetooth_;
-  uint8_t rawInputs_ = 0xFF; // Active-low 74HC165 physical representation.
+  // begin() seeds this before any consumer; zero initialization keeps the
+  // whole 39-byte singleton out of the flash-backed .data section.
+  uint8_t rawInputs_ = 0;
   bool bluetoothHasTransitioned_ = false;
   bool bluetoothBlinkObserved_ = false;
   uint32_t lastBluetoothTransitionAt_ = 0;

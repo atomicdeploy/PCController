@@ -57,9 +57,9 @@ export interface TerminalPayload {
 export type SharedControllerEvent = Pick<ControllerEvent, 'id' | 'time' | 'kind' | 'text'> &
   Partial<Pick<
     ControllerEvent,
-    'state' | 'lifecycle' | 'reason' | 'source' | 'target' | 'message_type' |
-    'action' | 'gesture' | 'key' | 'rf_id' | 'rf_code' | 'rf_bits' | 'rf_protocol' |
-    'metadata'
+    'stream' | 'state' | 'lifecycle' | 'reason' | 'source' | 'target' | 'message_type' |
+    'targets' | 'action' | 'severity' | 'correlation' | 'delivery' | 'gesture' | 'key' |
+    'rf_id' | 'rf_code' | 'rf_bits' | 'rf_protocol' | 'metadata'
   >>
 
 /** Controller event update shared between tabs. */
@@ -68,12 +68,19 @@ export interface ControllerEventPayload {
   event: SharedControllerEvent
 }
 
+/** Credential-free hint that asks every tab to verify its embedded resource identity. */
+export interface ResourceReloadPayload {
+  type: 'resource-reload'
+  identity: string
+}
+
 /** Payload variants accepted by the tab-channel wire contract. */
 export type TabChannelPayload =
   | PresencePayload
   | AppearancePayload
   | TerminalPayload
   | ControllerEventPayload
+  | ResourceReloadPayload
 
 /** Versioned and expiring envelope sent through BroadcastChannel. */
 export interface TabChannelEnvelope {
@@ -123,6 +130,7 @@ export interface TabChannel {
   publishAppearance(appearance: AppearancePatch, etag?: string): string | null
   publishTerminal(entry: TerminalEntry): string | null
   publishControllerEvent(event: SharedControllerEvent): string | null
+  publishResourceReload(identity: string): string | null
   subscribe(listener: TabChannelListener): () => void
   close(): void
 }
@@ -301,8 +309,8 @@ function sanitizeControllerEvent(raw: RecordValue): ControllerEventPayload | nul
   if (!hasOnlyKeys(raw, ['type', 'event']) || !isRecord(raw.event)) return null
   const event = raw.event
   const allowed = [
-    'id', 'time', 'kind', 'text', 'state', 'lifecycle', 'reason', 'source', 'target',
-    'message_type', 'action', 'gesture', 'key', 'rf_id', 'rf_code', 'rf_bits',
+    'id', 'time', 'kind', 'text', 'stream', 'state', 'lifecycle', 'reason', 'source', 'target',
+    'targets', 'message_type', 'action', 'severity', 'correlation', 'delivery', 'gesture', 'key', 'rf_id', 'rf_code', 'rf_bits',
     'rf_protocol', 'metadata',
   ] as const
   if (!hasOnlyKeys(event, allowed)) return null
@@ -312,7 +320,9 @@ function sanitizeControllerEvent(raw: RecordValue): ControllerEventPayload | nul
   const text = safeText(event.text, maximumEventTextBytes, true)
   if (id === null || id === undefined || time === null || kind === null || text === null) return null
 
-  const optionalTextKeys = ['state', 'lifecycle', 'reason', 'source', 'target', 'message_type', 'action', 'gesture'] as const
+  const stream = safeOptionalText(event.stream, 16)
+  if (stream === null || (stream !== undefined && !['activity', 'state', 'telemetry', 'debug'].includes(stream))) return null
+  const optionalTextKeys = ['state', 'lifecycle', 'reason', 'source', 'target', 'message_type', 'action', 'correlation', 'gesture'] as const
   const optionalTexts: Partial<Record<(typeof optionalTextKeys)[number], string>> = {}
   for (const key of optionalTextKeys) {
     const value = safeOptionalText(event[key], key === 'reason' ? 1024 : 256)
@@ -331,6 +341,20 @@ function sanitizeControllerEvent(raw: RecordValue): ControllerEventPayload | nul
 
   const metadata = sanitizeMetadata(event.metadata)
   if (metadata === null) return null
+  let targets: string[] | undefined
+  if (event.targets !== undefined) {
+    if (!Array.isArray(event.targets) || event.targets.length > 12) return null
+    targets = []
+    for (const rawTarget of event.targets) {
+      const target = safeText(rawTarget, 32)
+      if (target === null) return null
+      targets.push(target)
+    }
+  }
+  const severity = safeOptionalText(event.severity, 16)
+  if (severity === null || (severity !== undefined && !['debug', 'info', 'success', 'warning', 'error'].includes(severity))) return null
+  const delivery = safeOptionalText(event.delivery, 16)
+  if (delivery === null || (delivery !== undefined && delivery !== 'sync' && delivery !== 'async')) return null
   return {
     type: 'controller-event',
     event: {
@@ -338,11 +362,21 @@ function sanitizeControllerEvent(raw: RecordValue): ControllerEventPayload | nul
       time,
       kind,
       text,
+      ...(stream === undefined ? {} : { stream: stream as ControllerEvent['stream'] }),
       ...optionalTexts,
+      ...(severity === undefined ? {} : { severity: severity as ControllerEvent['severity'] }),
+      ...(delivery === undefined ? {} : { delivery: delivery as ControllerEvent['delivery'] }),
       ...optionalIntegers,
+      ...(targets === undefined ? {} : { targets }),
       ...(metadata === undefined ? {} : { metadata }),
     },
   }
+}
+
+function sanitizeResourceReload(raw: RecordValue): ResourceReloadPayload | null {
+  if (!hasOnlyKeys(raw, ['type', 'identity'])) return null
+  const identity = safeText(raw.identity, 512)
+  return identity === null ? null : { type: 'resource-reload', identity }
 }
 
 function sanitizePayload(value: unknown): TabChannelPayload | null {
@@ -352,6 +386,7 @@ function sanitizePayload(value: unknown): TabChannelPayload | null {
     case 'appearance': return sanitizeAppearance(value)
     case 'terminal': return sanitizeTerminal(value)
     case 'controller-event': return sanitizeControllerEvent(value)
+    case 'resource-reload': return sanitizeResourceReload(value)
     default: return null
   }
 }
@@ -489,6 +524,7 @@ export function createTabChannel(options: TabChannelOptions = {}): TabChannel {
     publishAppearance: (appearance, etag) => publish({ type: 'appearance', appearance, ...(etag === undefined ? {} : { etag }) }),
     publishTerminal: (entry) => publish({ type: 'terminal', entry }),
     publishControllerEvent: (event) => publish({ type: 'controller-event', event }),
+    publishResourceReload: (identity) => publish({ type: 'resource-reload', identity }),
     subscribe(listener) {
       if (closed) return () => undefined
       listeners.add(listener)

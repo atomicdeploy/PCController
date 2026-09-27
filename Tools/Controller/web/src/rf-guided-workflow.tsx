@@ -229,7 +229,7 @@ export function RFGuidedWorkflow({ snapshot, events, locale, openDialog }: RFGui
     setPhase('interrupted')
     setMessage(ended.kind.toLowerCase().includes('full')
       ? copy('RF storage is full. Review stale records before capturing again.', 'حافظه RF پر است؛ پیش از دریافت دوباره، ورودی‌های قدیمی را بازبینی کنید.')
-      : copy('No button was confirmed in this capture window. Retry when the handset is ready.', 'در این بازه دکمه‌ای تأیید نشد؛ وقتی فرستنده آماده است دوباره تلاش کنید.'))
+      : copy('No button was detected in this capture window. Retry when the handset is ready.', 'در این بازه دکمه‌ای شناسایی نشد؛ وقتی فرستنده آماده است دوباره تلاش کنید.'))
   }, [copy, events, phase])
 
   const chooseStep = (index: number) => {
@@ -295,8 +295,8 @@ export function RFGuidedWorkflow({ snapshot, events, locale, openDialog }: RFGui
     setDraft(defaultRFMapDraft(candidate))
     setPhase('mapping')
     setMessage(candidate.action_kind === 0
-      ? copy(`Identity confirmed for button ${RF_GUIDE_LABELS[activeIndex]}. It remains Unmapped unless you explicitly choose an action.`, `هویت دکمه ${RF_GUIDE_LABELS[activeIndex]} تأیید شد؛ تا زمانی که صریحاً عملی انتخاب نکنید، بدون نگاشت می‌ماند.`)
-      : copy(`Identity confirmed for button ${RF_GUIDE_LABELS[activeIndex]}. Its existing board mapping is preserved for review.`, `هویت دکمه ${RF_GUIDE_LABELS[activeIndex]} تأیید شد؛ نگاشت موجود برد برای بازبینی حفظ شده است.`))
+      ? copy(`Button ${RF_GUIDE_LABELS[activeIndex]} was detected. It remains Unmapped unless you explicitly choose an action.`, `دکمهٔ ${RF_GUIDE_LABELS[activeIndex]} شناسایی شد؛ تا زمانی که صریحاً عملی انتخاب نکنید، بدون نگاشت می‌ماند.`)
+      : copy(`Button ${RF_GUIDE_LABELS[activeIndex]} was detected. Its existing board mapping is preserved for review.`, `دکمهٔ ${RF_GUIDE_LABELS[activeIndex]} شناسایی شد؛ نگاشت موجود برد برای بازبینی حفظ شده است.`))
   }
 
   const saveMapping = async () => {
@@ -536,7 +536,7 @@ export function RFGuidedWorkflow({ snapshot, events, locale, openDialog }: RFGui
         <section className="rf-inventory" aria-labelledby="rf-inventory-title">
           <header><div><span className="eyebrow">{copy('BOARD READBACK', 'بازخوانی برد')}</span><h3 id="rf-inventory-title">{copy('Learned record review', 'بازبینی ورودی‌های آموخته‌شده')}</h3></div><div><StatusBadge tone={reviewRecords.length ? 'warn' : 'good'}>{reviewRecords.length} {copy('need review', 'نیازمند بررسی')}</StatusBadge>{snapshot.connected && <Button compact tone="ghost" icon={RefreshCw} onClick={() => void loadRecords()}>{copy('Refresh', 'تازه‌سازی')}</Button>}</div></header>
           {records.length === 0
-            ? <div className="rf-inventory__empty"><Radio size={24} /><strong>{copy('No learned records', 'ورودی آموخته‌شده‌ای نیست')}</strong><p>{copy('The inventory will update after the first confirmed capture.', 'فهرست پس از نخستین دریافت تأییدشده به‌روز می‌شود.')}</p></div>
+            ? <div className="rf-inventory__empty"><Radio size={24} /><strong>{copy('No learned records', 'ورودی آموخته‌شده‌ای نیست')}</strong><p>{copy('The inventory will update after the first learned button.', 'فهرست پس از یادگیری نخستین دکمه به‌روز می‌شود.')}</p></div>
             : <div className="rf-inventory__list">{records.map((entry) => {
               const needsReview = rfEntryNeedsReview(entry, records)
               return <article key={entry.id} className={needsReview ? 'needs-review' : ''}>

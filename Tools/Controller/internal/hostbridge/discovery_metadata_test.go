@@ -30,6 +30,9 @@ func TestDiscoveryMetadataIncludesWebAppAndCurrentBoardValues(t *testing.T) {
 	snapshot.Status.SupplyMV = 12280
 	snapshot.Status.INA219Available = true
 	snapshot.Status.DoorOpen = true
+	snapshot.Status.Flags = controller.StatusTemperatureLED
+	snapshot.Status.TLEDCenti = 2512
+	snapshot.Status.TBTCenti = controller.InvalidTemperatureCentiC
 	snapshot.Settings.Persisted = true
 	values := discoveryMetadata(config, snapshot)
 	for _, expected := range []string{
@@ -40,16 +43,22 @@ func TestDiscoveryMetadataIncludesWebAppAndCurrentBoardValues(t *testing.T) {
 		"board.identity=/api/snapshot",
 		"app.title=Lab Controller", "app.locale=fa-ir", "board.connected=true",
 		"board.build_hash=ADFAEDAB", "board.supply_mv=12280", "board.door_open=true",
-		"board.settings_persisted=true",
+		"board.temperature_led_available=true", "board.temperature_led_centi_c=2512",
+		"board.temperature_bt_audio_available=false", "board.settings_persisted=true",
 	} {
 		if !slices.Contains(values, expected) {
 			t.Fatalf("metadata missing %q: %#v", expected, values)
 		}
 	}
+<<<<<<< HEAD
 	if slices.Contains(values, "remote.connectable=true") {
 		t.Fatalf("loopback default must not advertise remote connectability: %#v", values)
 	}
 	if slices.Contains(values, "server_proof=/api/auth/server-proof") {
 		t.Fatal("alpha discovery advertised a dormant authentication endpoint")
+=======
+	if slices.Contains(values, "board.temperature_bt_audio_centi_c=-32768") {
+		t.Fatalf("discovery advertised disconnected temperature sentinel: %#v", values)
+>>>>>>> origin/agent/webui-defects
 	}
 }

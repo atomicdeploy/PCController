@@ -126,6 +126,7 @@ private:
   void queueMacroEvent();
   void queueEvent(std::initializer_list<std::uint8_t> payload);
   void queueEvent(std::vector<std::uint8_t> payload);
+  std::vector<wire::Frame> outputStateFrames();
   void queueMirrorChanges();
   bool applyStatusEffect(const std::vector<std::uint8_t> &payload,
                          TimePoint now);

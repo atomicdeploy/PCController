@@ -255,16 +255,28 @@ func PreferredCandidate(candidates []Info, preferred Identity) (Info, bool) {
 	return Info{}, false
 }
 
+<<<<<<< HEAD
 // ReconnectCandidates relaxes only a stale COM-name constraint after an
 // authenticated USB transport disappears. Strong serial/PnP identity wins
 // when it survives the move. Bridges such as CH340 often expose neither, so a
 // unique VID/PID/friendly-name match may rebind to the new COM assignment.
 // Ambiguous matches are returned unchanged and remain subject to the ordinary
 // explicit-selection rule; an arbitrary serial device is never guessed.
+=======
+// ReconnectCandidates relaxes only a stale COM-name constraint after a
+// previously connected USB transport disappeared.  A serial number or PnP
+// instance remains authoritative when it is still present.  When Windows has
+// reassigned the port (or the inexpensive bridge exposes neither identifier),
+// the host may continue only with a unique match for the remaining configured
+// identity, or a single present USB serial device.  It deliberately returns
+// multiple candidates for an ambiguous topology so the caller can require an
+// explicit user selection rather than opening an arbitrary board.
+>>>>>>> origin/agent/webui-defects
 func ReconnectCandidates(all []Info, filter Filter) []Info {
 	if strings.TrimSpace(filter.Port) == "" {
 		return nil
 	}
+<<<<<<< HEAD
 
 	base := filter
 	base.Port = ""
@@ -273,29 +285,62 @@ func ReconnectCandidates(all []Info, filter Filter) []Info {
 			strong := base
 			strong.SerialNumber = serial
 			if candidates := Candidates(all, strong); len(candidates) != 0 {
+=======
+	withoutPort := filter
+	withoutPort.Port = ""
+	// Preferred is normally populated from the last authenticated device. Try
+	// its strong identifiers before relaxing to descriptive identity. This is
+	// essential when an explicit COM selector supplied no VID/PID/name and an
+	// unrelated second USB serial device is also present.
+	if withoutPort.SerialNumber == "" && withoutPort.InstanceID == "" {
+		if serial := strings.TrimSpace(filter.Preferred.SerialNumber); serial != "" {
+			strong := withoutPort
+			strong.SerialNumber = serial
+			if candidates := Candidates(all, strong); len(candidates) > 0 {
+>>>>>>> origin/agent/webui-defects
 				return candidates
 			}
 		}
 		if instance := strings.TrimSpace(filter.Preferred.InstanceID); instance != "" {
+<<<<<<< HEAD
 			strong := base
 			strong.InstanceID = instance
 			if candidates := Candidates(all, strong); len(candidates) != 0 {
+=======
+			strong := withoutPort
+			strong.InstanceID = instance
+			if candidates := Candidates(all, strong); len(candidates) > 0 {
+>>>>>>> origin/agent/webui-defects
 				return candidates
 			}
 		}
 	}
+<<<<<<< HEAD
 
 	if base.VID != "" || base.PID != "" || base.Name != "" ||
 		base.SerialNumber != "" || base.InstanceID != "" {
 		if candidates := Candidates(all, base); len(candidates) != 0 {
+=======
+	if withoutPort.VID != "" || withoutPort.PID != "" ||
+		withoutPort.Name != "" || withoutPort.SerialNumber != "" ||
+		withoutPort.InstanceID != "" {
+		if candidates := Candidates(all, withoutPort); len(candidates) > 0 {
+>>>>>>> origin/agent/webui-defects
 			return candidates
 		}
 	}
 
+<<<<<<< HEAD
 	// Moving a non-serialized bridge can change its Windows instance ID. Retain
 	// descriptive identity from the last authenticated transport and relax only
 	// the identifiers that are known to change with the physical USB path.
 	loose := base
+=======
+	// USB bridges commonly lack a serial number and can receive a fresh PnP
+	// instance on another physical hub.  Keep the descriptive USB identity;
+	// it is still safer than the obsolete COM number.
+	loose := withoutPort
+>>>>>>> origin/agent/webui-defects
 	loose.SerialNumber = ""
 	loose.InstanceID = ""
 	if loose.VID == "" {
@@ -307,10 +352,32 @@ func ReconnectCandidates(all []Info, filter Filter) []Info {
 	if loose.Name == "" {
 		loose.Name = filter.Preferred.Name
 	}
+<<<<<<< HEAD
 	if loose.VID == "" && loose.PID == "" && loose.Name == "" {
 		return nil
 	}
 	return Candidates(all, loose)
+=======
+	if loose.VID != "" || loose.PID != "" || loose.Name != "" {
+		if candidates := Candidates(all, loose); len(candidates) > 0 {
+			return candidates
+		}
+	}
+
+	// Last-resort rebind is intentionally narrow: a single USB serial device
+	// is unambiguous even if its driver did not expose VID/PID, a friendly name,
+	// or a durable serial number.  More than one candidate is never guessed.
+	usb := make([]Info, 0, 1)
+	for _, candidate := range all {
+		if candidate.IsUSB {
+			usb = append(usb, candidate)
+		}
+	}
+	if len(usb) == 1 {
+		return usb
+	}
+	return nil
+>>>>>>> origin/agent/webui-defects
 }
 
 // ParseSelector accepts a COM device ID, tcp endpoint, VID:PID pair,

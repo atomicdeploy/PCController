@@ -114,6 +114,13 @@ new assignment only when its serial/PnP identity still matches or its
 VID/PID/friendly-name combination has exactly one present match. Initial and
 user-requested explicit opens remain strict.
 
+The host also keeps the successfully authenticated port identity in memory.
+If Windows assigns a different COM number after a physical reconnect,
+discovery can still use the observed VID/PID, friendly name, USB serial, and
+PnP instance even when an explicit `--port` or `--device` override suppressed
+the persisted preference. Automatic rebind still requires one unique match;
+ambiguous devices require an explicit selection.
+
 The first long-running host becomes the primary process and is the only process
 that opens the serial port. Later CLI or UI instances use its IPC service. An
 explicit Close pauses reconnect until Open is requested. On Windows, registry
@@ -126,7 +133,10 @@ default) through `connection.reconnect_maximum_ms` (15 seconds by default).
 change wakes discovery immediately and resets the delay. Repeated identical
 connection states are not broadcast, preventing disconnected/scanning flicker.
 Connection lifecycle events are available to the TUI, scripts, IPC, WebSocket,
-and host automations.
+and host automations. The normalized `usb.disconnected`, `usb.reconnecting`,
+and `usb.reconnected` records use the same retained event IDs for TUI and Web
+clients, raw IPC, REST `controller.event.next`, standard WebSocket, and
+Socket.IO subscribers; no manual refresh is required to receive them.
 
 Live acceptance and remaining platform verification are tracked by issue #51.
 
@@ -163,23 +173,25 @@ Every status-LED state has its own effect, primary/alternate RGB, brightness,
 minimum, and period editor with a live terminal color preview. The fixed sensor
 role assignment is intentionally absent from daily settings.
 
-### Semantic peripheral names
+### Peripheral presentation metadata
 
 The host exposes one canonical registry of 34 physical or logical peripherals:
 eight relays, two motion sides, sixteen PWM channels, two displays, and six
 sensors. Every descriptor has a stable `key`, `kind`, `role`, `index`,
-`default_name`, and `control` hint. TUI and Web surfaces resolve labels from
+`default_name`, `default_description`, and `control` hint. TUI, CLI, Web,
+REST, and RPC surfaces resolve one ordered descriptor list from this registry
 this registry so a custom name remains consistent across dashboards, controls,
 graphs, and settings rather than being copied into individual pages.
 
-Overrides are stored under `ui.peripheral_names`, for example:
+Relay, motion-side, and all sixteen MOSFET/PWM presentation overrides are
+stored under `ui.peripheral_presentation`, for example:
 
 ```json
 {
   "ui": {
-    "peripheral_names": {
-      "relay.5": "Workbench lamp",
-      "sensor.power": "Cabinet load"
+    "peripheral_presentation": {
+      "relay.5": {"name": "Workbench lamp", "description": "Overhead work light", "order": 4},
+      "motion.a": {"name": "Left", "description": "Left lift", "order": 8}
     }
   }
 }
@@ -187,12 +199,12 @@ Overrides are stored under `ui.peripheral_names`, for example:
 
 These names belong only to the PC host. They do not consume EEPROM and never
 rename, reconfigure, or write a board peripheral. Through
-`controller.peripherals.set` or `PUT /api/peripherals`, keys and names are
-trimmed and the complete update is validated before persistence. Supplying a
-blank name removes that override and restores the registry default. A blank
-value written directly into the configuration file is invalid; omit the key
-instead. Reads return both the current override map and the complete descriptor
-registry so clients do not need a duplicated peripheral list.
+`controller.peripherals.set` or `PUT /api/peripherals`, keys, names,
+descriptions, and the normalized `0..25` ordering are validated before atomic
+persistence. Reads return the resolved ordered `controls` list. The historical
+`ui.peripheral_names` map remains accepted and returned as a compatibility
+projection. A successful change publishes one `config` event to every live
+subscriber so Web, TUI, CLI, REST, and RPC readers converge without refresh.
 
 PWM channels `0..10` are the generic user/commissioning outputs. Channels
 `11..15` remain visible in authoritative sixteen-channel readback but are
@@ -385,7 +397,17 @@ The action keys are:
 - `P` plays the selected macro; `C` cancels and safely turns affected outputs
   off, while `K` explicitly cancels and keeps their current states;
 - `I` shows the selected definition, `X` requires a second `X` before deleting
-  PC-side metadata, and `A` opens the automation rules list.
+  PC-side metadata, `U` prepares a rename, `G` prepares a category change,
+  `O` writes a current monitor summary to the terminal, and `A` opens the
+  automation rules list.
+
+The CLI and every command-capable host surface use the same closed command
+family: `macro list`, `show`, `record start`, `record save` (or `record stop`),
+`record discard`, `rename`, `category`, `play`, `cancel`, and `monitor`.
+`macro monitor` is an immediate shared-runner snapshot—playback identity,
+progress, queue health, faithfulness, and recording state—not a second polling
+or streaming mechanism. Long-lived TUI, API, and Web views consume the
+existing lifecycle events instead.
 
 Playback reads the same `MacroRunner` instance used by shell, IPC, and API
 commands. Newly recorded macros use the basic `host` mode: it records
@@ -611,6 +633,7 @@ The default service is `127.0.0.1:8787`. One listener multiplexes:
 - a bounded Engine.IO v4 / Socket.IO WebSocket adapter at `/socket.io/`;
 - an optional inbound webhook.
 
+<<<<<<< HEAD
 Issue #148 is authoritative for the immediate alpha: application
 authentication and capability authorization are dormant on loopback and
 deliberately enabled LAN listeners. The server reports `auth_required: false`;
@@ -633,6 +656,23 @@ the receiving peer remain available through its guarded update RPC. Ordinary
 motion, door, relay, numeric, OS-confirmation, and programming-ownership
 checks remain functional safety boundaries. Do not expose this alpha listener
 to an untrusted network.
+=======
+For the current alpha build, authentication and authorization are deliberately
+disabled on every native and network surface. This is a temporary product
+decision, not a partial security design: clients do not need a token, the Web
+UI must not prompt for one, and supplied credentials or remote-policy bits do
+not grant or deny operations. The complete native/localhost and remote-login
+mission is deferred to GitHub issue #148.
+
+A non-loopback listener still requires deliberate `ipc.allow_remote: true`, a
+non-loopback `ipc.listen`, and an explicit non-wildcard
+`ipc.allowed_origins` list. Those fields select where the service is exposed
+and which browser origins may connect; they are not authentication. Config
+file, environment, and CLI overrides use the normal precedence path. Existing
+`auth_token`, `auth_token_ref`, `remote_principal`, and `remote_policy` fields
+remain readable so old local configs are not broken, but the current host does
+not enforce them.
+>>>>>>> origin/agent/webui-defects
 
 The exact methods, routes, frames, Socket.IO subset, and examples are in
 [Protocol and Network API](../Tools/Controller/docs/Protocol-and-Network-API.md).
@@ -851,6 +891,37 @@ measurement retention. Important events remain separate in the bounded
 `timeline.jsonl` file so telemetry volume cannot obscure the event timeline.
 
 ## Commissioning boundaries
+
+## Web control centre interaction contract
+
+The Web UI, TUI, CLI, bridge, and API must present the same controller
+capabilities rather than inventing parallel menu or opcode definitions.  The
+host remains the single source for the menu registry; interfaces select and
+render that registry according to their available space and transport.
+
+- The compact Web sidebar is intentionally icon-only: labels remain available
+  to assistive technology and tooltips, while its layout must never retain
+  zero-width text that can produce horizontal overflow.
+- The header offers a small, local **App settings** dialog (appearance,
+  language, and feedback) and a full settings page.  A disconnected board is
+  described as disconnected; board-only controls and firmware actions are not
+  presented as actionable until the host has a live board capability report.
+- Tables use the shared typed-collection control.  It provides column
+  visibility, a visible direct resize affordance, drag-to-reorder grips in
+  both the column selector and headers, a valid page-range **Go to** selector,
+  keyboard/focus handling, and context-menu dismissal on pointer, Escape,
+  window blur, or focus loss.  Selector ordering deliberately has no second
+  width slider: the header resize control is the one authoritative width path.
+  The events table also filters by event type.  High-rate diagnostic events
+  such as `STATUS_RGB` stay hidden unless the operator enables the debug-noise
+  toggle, so normal operational history remains readable.
+- Peripheral settings are nested under the reported peripheral menu, not
+  copied into each surface.  Only capabilities reported by the connected
+  board are shown; the same definitions feed user documentation and firmware
+  profile generation.
+
+This is the delivery direction for the shell/data-grid work tracked by #160
+and #161, and builds on the disconnected/offline visibility contract in #101.
 
 Automated tests can prove parsing, routing, safety checks, reconnect state,
 mock TUI rendering, and network framing. They cannot prove that Windows toast

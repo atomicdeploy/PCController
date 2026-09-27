@@ -917,22 +917,37 @@ func TestProgrammingLifecycleFailedProgrammerResultRetainsLatchAndMarker(t *test
 	}
 }
 
+<<<<<<< HEAD
 func TestProgrammingLifecycleExplicitAbandonRestoresFailedTransaction(t *testing.T) {
 	paths, firmware := programmingLifecycleFixture(t)
 	original := native.Settings{
 		Flags: native.SettingsSilent, LightMode: 2, OnBrightness: 128,
 		DisplayBrightness: 5, StatusBrightness: 128, MotionBreakMSValue: 1,
+=======
+func TestProgrammingLifecycleBackupFailureBeforeWriteRestoresOriginalState(t *testing.T) {
+	paths, firmware := programmingLifecycleFixture(t)
+	original := native.Settings{
+		Flags: native.SettingsSilent, LightMode: 2, OnBrightness: 180,
+		DisplayBrightness: 6, MotionBreakMSValue: 1,
+>>>>>>> origin/agent/webui-defects
 	}
 	device := &fakeProgrammingDevice{
 		snapshot: connectedProgrammingSnapshot(0), settings: original,
 	}
 	session, err := prepareProgrammingSession(
 		context.Background(), device, firmware,
+<<<<<<< HEAD
 		ProgrammingLifecycleOptions{DataPaths: paths, Wait: noProgrammingWait}, io.Discard,
+=======
+		ProgrammingLifecycleOptions{
+			DataPaths: paths, Wait: noProgrammingWait, ReinitializeEEPROM: true,
+		}, io.Discard,
+>>>>>>> origin/agent/webui-defects
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
+<<<<<<< HEAD
 	if err := MarkProgrammingSessionComplete(session, false); err != nil {
 		t.Fatal(err)
 	}
@@ -947,6 +962,30 @@ func TestProgrammingLifecycleExplicitAbandonRestoresFailedTransaction(t *testing
 	}
 	if _, statErr := os.Stat(session.RecoveryMarkerPath); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("abandonment retained recovery marker: %v", statErr)
+=======
+	if err := AbortProgrammingSessionBeforeWrite(session); err != nil {
+		t.Fatal(err)
+	}
+	if session.HostResult != "aborted-before-write" ||
+		session.Phase != "aborted-before-write" {
+		t.Fatalf("pre-write abort marker = %+v", session)
+	}
+	if err := restoreProgrammingSession(
+		context.Background(), device, session,
+		ProgrammingLifecycleOptions{
+			DataPaths: paths, Wait: noProgrammingWait, ReinitializeEEPROM: true,
+		}, io.Discard,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if device.settings.Flags&native.SettingsProgrammingMode != 0 ||
+		device.settings.LightMode != original.LightMode ||
+		device.settings.OnBrightness != original.OnBrightness {
+		t.Fatalf("pre-write abort did not restore original settings: %+v", device.settings)
+	}
+	if _, err := os.Stat(session.RecoveryMarkerPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("pre-write abort retained marker: %v", err)
+>>>>>>> origin/agent/webui-defects
 	}
 }
 
