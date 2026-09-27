@@ -18,6 +18,7 @@ const (
 	urbootApplicationCapacity = generatedBoardApplicationBytes
 	atmega328PEEPROMCapacity  = generatedBoardEEPROMBytes
 	firmwareManifestFormat    = "pccontroller-avr-firmware-manifest/v1"
+	firmwareManifestFormatV2  = "pccontroller-avr-firmware-manifest/v2"
 )
 
 type compileManifest struct {
@@ -47,6 +48,7 @@ type compileManifestPatchField struct {
 }
 
 type compileManifestTarget struct {
+	Profile               string `json:"profile"`
 	FQBN                  string `json:"fqbn"`
 	MCU                   string `json:"mcu"`
 	ClockHz               uint32 `json:"clockHz"`
@@ -58,11 +60,12 @@ type compileManifestTarget struct {
 }
 
 type compileManifestSource struct {
-	SHA256          string `json:"sha256"`
-	Files           int    `json:"files"`
-	BuildHash       string `json:"buildHash"`
-	PackedTimestamp string `json:"packedTimestamp"`
-	BuildTimestamp  string `json:"buildTimestamp,omitempty"`
+	SHA256          string   `json:"sha256"`
+	Files           int      `json:"files"`
+	CompileFeatures []string `json:"compileFeatures,omitempty"`
+	BuildHash       string   `json:"buildHash"`
+	PackedTimestamp string   `json:"packedTimestamp"`
+	BuildTimestamp  string   `json:"buildTimestamp,omitempty"`
 }
 
 type compileManifestRange struct {
@@ -159,16 +162,22 @@ func writeCompileManifest(
 	if decoded, decodeErr := DecodeFirmwareTimestamp(identity.PackedTimestamp); decodeErr == nil {
 		buildTimestamp = decoded.Compact
 	}
+	manifestFormat := firmwareManifestFormat
+	if len(identity.Features) != 0 {
+		manifestFormat = firmwareManifestFormatV2
+	}
 	manifest := compileManifest{
-		Format: firmwareManifestFormat, GeneratedUTC: time.Now().UTC(),
+		Format: manifestFormat, GeneratedUTC: time.Now().UTC(),
 		Target: compileManifestTarget{
-			FQBN: options.FQBN, MCU: generatedBoardMCU, ClockHz: generatedBoardClockHz,
+			Profile: generatedBoardProfile,
+			FQBN:    options.FQBN, MCU: generatedBoardMCU, ClockHz: generatedBoardClockHz,
 			Bootloader: generatedBoardBootloader, Baud: generatedBoardBaud,
 			ApplicationLimitBytes: urbootApplicationCapacity,
 			FlashBytes:            ATmega328PFlashSize, EEPROMBytes: atmega328PEEPROMCapacity,
 		},
 		Source: compileManifestSource{
 			SHA256: identity.SourceSHA256, Files: identity.SourceFiles,
+			CompileFeatures: firmwareFeatureNames(identity.Features),
 			BuildHash:       fmt.Sprintf("%08X", identity.SourceHash),
 			PackedTimestamp: fmt.Sprintf("%08X", identity.PackedTimestamp),
 			BuildTimestamp:  buildTimestamp,

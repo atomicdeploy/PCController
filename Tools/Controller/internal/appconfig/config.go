@@ -21,6 +21,8 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 
+	"pccontroller.local/controller/internal/deployment"
+	"pccontroller.local/controller/internal/firmwarefeatures"
 	"pccontroller.local/controller/internal/hostos"
 	"pccontroller.local/controller/internal/productidentity"
 	"pccontroller.local/controller/internal/secretstore"
@@ -57,16 +59,18 @@ type Config struct {
 
 // Connection configures serial discovery, handshake timing, and reconnect behavior.
 type Connection struct {
-	Port             string          `json:"port,omitempty"`
-	VID              string          `json:"vid,omitempty"`
-	PID              string          `json:"pid,omitempty"`
-	Name             string          `json:"name,omitempty"`
-	BaudRate         int             `json:"baud_rate"`
-	StartupWaitMS    int             `json:"startup_wait_ms"`
-	RequestTimeoutMS int             `json:"request_timeout_ms"`
-	HelloAttempts    int             `json:"hello_attempts"`
-	ResetOnReconnect bool            `json:"reset_on_reconnect"`
-	LastDevice       *DeviceIdentity `json:"last_device,omitempty"`
+	Port               string          `json:"port,omitempty"`
+	VID                string          `json:"vid,omitempty"`
+	PID                string          `json:"pid,omitempty"`
+	Name               string          `json:"name,omitempty"`
+	BaudRate           int             `json:"baud_rate"`
+	StartupWaitMS      int             `json:"startup_wait_ms"`
+	RequestTimeoutMS   int             `json:"request_timeout_ms"`
+	HelloAttempts      int             `json:"hello_attempts"`
+	ResetOnReconnect   bool            `json:"reset_on_reconnect"`
+	ReconnectInitialMS int             `json:"reconnect_initial_ms"`
+	ReconnectMaximumMS int             `json:"reconnect_maximum_ms"`
+	LastDevice         *DeviceIdentity `json:"last_device,omitempty"`
 }
 
 // DeviceIdentity records the last successfully connected USB serial device.
@@ -213,19 +217,24 @@ type Paths struct {
 
 // Programming selects the host toolchain and default programming transport.
 type Programming struct {
-	Method          string `json:"method,omitempty"`
-	FQBN            string `json:"fqbn,omitempty"`
-	Programmer      string `json:"programmer,omitempty"`
-	ToolchainCLI    string `json:"toolchain_cli,omitempty"`
-	ToolchainConfig string `json:"toolchain_config,omitempty"`
-	Avrdude         string `json:"avrdude,omitempty"`
-	AvrdudeConf     string `json:"avrdude_conf,omitempty"`
+	Deployment       string                     `json:"deployment,omitempty"`
+	Method           string                     `json:"method,omitempty"`
+	FQBN             string                     `json:"fqbn,omitempty"`
+	Programmer       string                     `json:"programmer,omitempty"`
+	ToolchainCLI     string                     `json:"toolchain_cli,omitempty"`
+	ToolchainConfig  string                     `json:"toolchain_config,omitempty"`
+	FirmwareFeatures []firmwarefeatures.Feature `json:"firmware_features,omitempty"`
+	Avrdude          string                     `json:"avrdude,omitempty"`
+	AvrdudeConf      string                     `json:"avrdude_conf,omitempty"`
 }
 
-// Macro defines a named, host-persisted sequence streamed to the MCU executor.
+// Macro defines a named, host-persisted sequence. Mode "host" schedules
+// ordinary commands from the controller process; mode "mcu" (and the legacy
+// empty value) streams the sequence to the firmware timing engine.
 type Macro struct {
 	ID                  byte        `json:"id"`
 	Name                string      `json:"name"`
+	Mode                string      `json:"mode,omitempty"`
 	Category            string      `json:"category,omitempty"`
 	Color               string      `json:"color,omitempty"`
 	Label               string      `json:"label,omitempty"`
@@ -312,13 +321,15 @@ func Defaults() Config {
 	return Config{
 		Schema: SchemaVersion,
 		Connection: Connection{
-			VID:              "1A86",
-			PID:              "7523",
-			Name:             "USB-SERIAL CH340",
-			BaudRate:         115200,
-			StartupWaitMS:    1200,
-			RequestTimeoutMS: 1200,
-			HelloAttempts:    3,
+			VID:                "1A86",
+			PID:                "7523",
+			Name:               "USB-SERIAL CH340",
+			BaudRate:           115200,
+			StartupWaitMS:      1200,
+			RequestTimeoutMS:   1200,
+			HelloAttempts:      3,
+			ReconnectInitialMS: 500,
+			ReconnectMaximumMS: 15_000,
 		},
 		UI: UI{
 			AppTitle: productidentity.DefaultAppTitle(),
@@ -362,10 +373,11 @@ func Defaults() Config {
 			SocketIOPath:    "/socket.io/",
 			RemotePolicy:    DefaultRemoteAccessPolicy(),
 		},
-		Safety:    Safety{MotionDoorPolicy: "always"},
-		RF:        DefaultRFConfig(),
-		HostMenus: DefaultHostMenus(),
-		OSActions: hostos.DefaultPolicy(),
+		Programming: Programming{Deployment: deployment.Production},
+		Safety:      Safety{MotionDoorPolicy: "always"},
+		RF:          DefaultRFConfig(),
+		HostMenus:   DefaultHostMenus(),
+		OSActions:   hostos.DefaultPolicy(),
 		Integrations: Integrations{
 			Keyboard:     DefaultKeyboardControl(),
 			Lifecycle:    DefaultLifecycleSafety(),
@@ -454,6 +466,9 @@ func Load(path string) (Config, [sha256.Size]byte, error) {
 	}
 	value.RF = canonicalizeRFConfig(value.RF)
 	value.HostMenus = normalizeHostMenus(value.HostMenus)
+	if err := normalizeProgramming(&value.Programming); err != nil {
+		return Config{}, [sha256.Size]byte{}, fmt.Errorf("validate %s: programming.firmware_features: %w", path, err)
+	}
 	value.UI.Appearance = NormalizeAppearance(value.UI.Appearance)
 	value.UI.TUIConsole.FontFace = strings.TrimSpace(value.UI.TUIConsole.FontFace)
 	if err := value.Validate(); err != nil {
@@ -483,6 +498,9 @@ func LoadOrCreate(path string) (Config, [sha256.Size]byte, error) {
 func Write(path string, value Config) error {
 	value.RF = canonicalizeRFConfig(value.RF)
 	value.HostMenus = normalizeHostMenus(value.HostMenus)
+	if err := normalizeProgramming(&value.Programming); err != nil {
+		return fmt.Errorf("programming.firmware_features: %w", err)
+	}
 	value.UI.Appearance = NormalizeAppearance(value.UI.Appearance)
 	value.UI.TUIConsole.FontFace = strings.TrimSpace(value.UI.TUIConsole.FontFace)
 	if err := value.Validate(); err != nil {
@@ -535,8 +553,16 @@ func Write(path string, value Config) error {
 
 // Validate rejects unsafe, ambiguous, or unsupported host configuration values.
 func (value Config) Validate() error {
+	if _, err := deployment.Normalize(value.Programming.Deployment); err != nil {
+		return fmt.Errorf("programming.deployment: %w", err)
+	}
 	if value.Schema != SchemaVersion {
 		return fmt.Errorf("unsupported schema %d", value.Schema)
+	}
+	if _, err := firmwarefeatures.Normalize(
+		firmwarefeatures.Names(value.Programming.FirmwareFeatures),
+	); err != nil {
+		return fmt.Errorf("programming.firmware_features: %w", err)
 	}
 	connection := value.Connection
 	if connection.BaudRate < 1200 || connection.BaudRate > 2_000_000 {
@@ -550,6 +576,13 @@ func (value Config) Validate() error {
 	}
 	if connection.HelloAttempts < 1 || connection.HelloAttempts > 10 {
 		return fmt.Errorf("connection.hello_attempts must be 1..10")
+	}
+	if connection.ReconnectInitialMS < 100 || connection.ReconnectInitialMS > 60_000 {
+		return fmt.Errorf("connection.reconnect_initial_ms must be 100..60000")
+	}
+	if connection.ReconnectMaximumMS < connection.ReconnectInitialMS ||
+		connection.ReconnectMaximumMS > 300_000 {
+		return fmt.Errorf("connection.reconnect_maximum_ms must be reconnect_initial_ms..300000")
 	}
 	if title := strings.TrimSpace(value.UI.AppTitle); title == "" ||
 		utf8.RuneCountInString(title) > 64 || !printableText(title) {
@@ -687,6 +720,11 @@ func (value Config) Validate() error {
 		if len(macro.Category) > 64 || !printableASCII(macro.Category) {
 			return fmt.Errorf("macros[%d].category must be at most 64 printable ASCII bytes", index)
 		}
+		switch strings.ToLower(strings.TrimSpace(macro.Mode)) {
+		case "", "mcu", "host":
+		default:
+			return fmt.Errorf("macros[%d].mode must be host or mcu", index)
+		}
 		switch strings.ToLower(strings.TrimSpace(macro.Color)) {
 		case "", "red", "blue", "purple", "violet", "green", "white":
 		default:
@@ -730,7 +768,7 @@ func (value Config) Validate() error {
 				if step.Target != 0 || step.Value != 0 {
 					return fmt.Errorf("macros[%d].steps[%d] all-off target/value must be zero", index, stepIndex)
 				}
-			case "buzzer", "tone":
+			case "beep", "buzzer", "tone":
 				frequency := step.FrequencyHz
 				if frequency == 0 {
 					frequency = step.Value
@@ -969,6 +1007,22 @@ func (value Config) Validate() error {
 	return nil
 }
 
+func normalizeProgramming(value *Programming) error {
+	classification, err := deployment.Normalize(value.Deployment)
+	if err != nil {
+		return err
+	}
+	value.Deployment = classification
+	features, err := firmwarefeatures.Normalize(
+		firmwarefeatures.Names(value.FirmwareFeatures),
+	)
+	if err != nil {
+		return err
+	}
+	value.FirmwareFeatures = features
+	return nil
+}
+
 func printableASCII(value string) bool {
 	for _, char := range []byte(value) {
 		if char < 0x20 || char > 0x7E {
@@ -999,6 +1053,7 @@ type Store struct {
 	secrets            *secretstore.Resolver
 	appTitleOverride   string
 	taglineOverride    string
+	buzzerOverride     BuzzerRuntimeOverrides
 }
 
 // Open resolves and loads a persistent configuration store, creating defaults
@@ -1066,6 +1121,65 @@ func (store *Store) SetPresentationOverrides(appTitle, tagline string) error {
 	return nil
 }
 
+// SetBuzzerRuntimeOverrides applies flags/environment choices for this process
+// without writing the watched configuration. The owning bridge separately
+// reconciles an explicit Path to board EEPROM.
+func (store *Store) SetBuzzerRuntimeOverrides(override BuzzerRuntimeOverrides) error {
+	path, err := NormalizeBuzzerPath(override.Path)
+	if err != nil {
+		return err
+	}
+	backend, err := NormalizeBuzzerBackend(override.Backend)
+	if err != nil {
+		return err
+	}
+	override.Path = path
+	override.Backend = backend
+	if override.Executable != nil {
+		value := strings.TrimSpace(*override.Executable)
+		override.Executable = &value
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	candidate := clone(store.value)
+	applyBuzzerRuntimeOverrides(&candidate, override)
+	if err := candidate.Validate(); err != nil {
+		return fmt.Errorf("buzzer runtime override: %w", err)
+	}
+	store.buzzerOverride = override
+	store.notifyLocked(store.value)
+	store.notifyRuntimeLocked(store.value)
+	return nil
+}
+
+// Persistent returns the watched configuration without process-lifetime
+// presentation or buzzer overrides. Editors use this to avoid copying env/flag values
+// into the JSON file when another field is saved.
+func (store *Store) Persistent() Config {
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	return clone(store.value)
+}
+
+func (store *Store) BuzzerRuntimeState() BuzzerRuntimeState {
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	effective := store.effectiveLocked().Integrations.BuzzerMirror
+	requested := store.buzzerOverride.Path
+	if requested != "" && store.buzzerOverride.Mirror != nil {
+		desiredSilent, _ := buzzerPathParts(requested)
+		requested = BuzzerPath(desiredSilent, *store.buzzerOverride.Mirror)
+	}
+	return BuzzerRuntimeState{
+		Configured: store.value.Integrations.BuzzerMirror,
+		Effective:  effective, RequestedPath: requested,
+		PathOverridden:       store.buzzerOverride.Path != "",
+		MirrorOverridden:     store.buzzerOverride.Mirror != nil,
+		BackendOverridden:    store.buzzerOverride.Backend != "",
+		ExecutableOverridden: store.buzzerOverride.Executable != nil,
+	}
+}
+
 func (store *Store) effectiveLocked() Config {
 	value := clone(store.value)
 	if store.appTitleOverride != "" {
@@ -1074,6 +1188,7 @@ func (store *Store) effectiveLocked() Config {
 	if store.taglineOverride != "" {
 		value.UI.Tagline = store.taglineOverride
 	}
+	applyBuzzerRuntimeOverrides(&value, store.buzzerOverride)
 	return value
 }
 
@@ -1159,6 +1274,7 @@ func (store *Store) notifyLocked(value Config) {
 	if store.taglineOverride != "" {
 		value.UI.Tagline = store.taglineOverride
 	}
+	applyBuzzerRuntimeOverrides(&value, store.buzzerOverride)
 	for _, subscriber := range store.subscribers {
 		copyValue := clone(value)
 		select {
@@ -1183,6 +1299,7 @@ func (store *Store) notifyRuntimeLocked(value Config) {
 	if store.taglineOverride != "" {
 		value.UI.Tagline = store.taglineOverride
 	}
+	applyBuzzerRuntimeOverrides(&value, store.buzzerOverride)
 	runtime, err := resolveConfigSecrets(value, store.secrets)
 	if err != nil {
 		runtime = failClosedRuntime(value)
@@ -1310,13 +1427,24 @@ func (store *Store) Watch(
 	if interval <= 0 {
 		interval = DefaultWatchInterval
 	}
-	watcher, err := fsnotify.NewWatcher()
-	if err == nil {
-		err = watcher.Add(filepath.Dir(store.path))
-	}
-	if err != nil {
-		if watcher != nil {
+	var watcher *fsnotify.Watcher
+	err := retryWatchRegistration(ctx, func() error {
+		var err error
+		watcher, err = fsnotify.NewWatcher()
+		if err == nil {
+			err = watcher.Add(filepath.Dir(store.path))
+		}
+		if err != nil && watcher != nil {
+			// kqueue may have registered part of the directory before a
+			// temporary entry disappeared. Retry with an entirely fresh watch.
 			_ = watcher.Close()
+			watcher = nil
+		}
+		return err
+	})
+	if err != nil {
+		if ctx.Err() != nil {
+			return
 		}
 		if onError != nil {
 			onError(fmt.Errorf("filesystem watcher unavailable; using polling fallback: %w", err))
@@ -1446,6 +1574,10 @@ func reportDistinctReloadError(last *string, err error, onError func(error)) {
 
 func clone(value Config) Config {
 	copyValue := value
+	copyValue.Programming.FirmwareFeatures = append(
+		[]firmwarefeatures.Feature(nil),
+		value.Programming.FirmwareFeatures...,
+	)
 	if value.Connection.LastDevice != nil {
 		identity := *value.Connection.LastDevice
 		copyValue.Connection.LastDevice = &identity

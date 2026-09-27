@@ -6,8 +6,23 @@ import { tmpdir } from 'node:os'
 import { delimiter, join, resolve, sep } from 'node:path'
 import test from 'node:test'
 
+test('deployment is explicit and validated by the build wrapper', () => {
+	assert.equal(parseArguments(['--upload', '--port', 'COM18', '--deployment', 'development']).deployment, 'development')
+	assert.equal(parseArguments(['--upload', '--port', 'COM18', '--deployment=production']).deployment, 'production')
+	assert.throws(() => parseArguments(['--upload', '--deployment', 'skip-all']), /production or development/)
+	assert.throws(() => parseArguments(['--upload', '--allow-incomplete-backup']), /unknown|unsupported/i)
+})
+
+test('build helper executables use stable product paths, never Go temporary paths', () => {
+	const env = { LOCALAPPDATA: join(tmpdir(), 'local-app-data') }
+	assert.equal(goBuildHelperPath('generate-icon', env, 'win32'), join(env.LOCALAPPDATA, 'PCController', 'build-programs', 'generate-icon.exe'))
+	assert.equal(goBuildHelperPath('default-assets', env, 'win32'), join(env.LOCALAPPDATA, 'PCController', 'build-programs', 'default-assets.exe'))
+	assert.throws(() => goBuildHelperPath('../unsafe', env, 'win32'), /unknown build helper/)
+})
+
 import {
 	BuildError,
+	goBuildHelperPath,
 	PROJECT_ROOT,
 	assertGeneratedPath,
 	collectWebNotices,
@@ -541,9 +556,10 @@ test('build plan and execution share exact Controller programming argv construct
 		compile.args[compile.args.indexOf('--output-dir') + 1],
 		commandPlanPaths(PROJECT_ROOT).firmwareOutput
 	)
-	assert.deepEqual(compile.args.slice(-4), [
+	assert.deepEqual(compile.args.slice(-5), [
 		'--toolchain-cli', 'C:\\portable\\arduino-cli.exe',
-		'--toolchain-config', 'C:\\portable\\firmware-cli.yaml'
+		'--toolchain-config', 'C:\\portable\\firmware-cli.yaml',
+		'--no-firmware-features'
 	])
 
 	const packaged = canonicalControllerInvocation(PROJECT_ROOT, 'win32')
@@ -554,13 +570,13 @@ test('build plan and execution share exact Controller programming argv construct
 		appDevice: 'DO_NOT_OPEN',
 		programmer: 'atmelice_isp',
 		hex: commandPlanPaths(PROJECT_ROOT).completeFlash,
-		allowIncompleteBackup: true
+		deployment: 'development'
 	})
 	assert.deepEqual(usbasp.args.slice(0, 8), [
 		'program', '--method', 'usbasp', '--app-device', 'DO_NOT_OPEN',
 		'--programmer', 'atmelice_isp', '--operation'
 	])
-	assert.equal(usbasp.args.at(-1), '--allow-incomplete-backup')
+	assert.deepEqual(usbasp.args.slice(-2), ['--deployment', 'development'])
 	assert.throws(
 		() => createControllerProgramCommand({
 			invocation: packaged,
@@ -569,6 +585,106 @@ test('build plan and execution share exact Controller programming argv construct
 			hex: 'firmware.hex'
 		}),
 		/serial device is required/
+	)
+})
+
+test('build forwards only named firmware features to the Controller compiler', () => {
+	const options = parseArguments([
+		'--firmware-only',
+		'--firmware-feature', 'EEPROM-MENU-LABELS',
+		'--firmware-feature=eeprom-boot-opcodes',
+		'--firmware-feature', 'eeprom-menu-labels'
+	], {})
+	assert.deepEqual(options.firmwareFeatures, [
+		'eeprom-boot-opcodes', 'eeprom-menu-labels'
+	])
+	const command = createPlan(options, resolveBuildIdentity(options, {}), 'win32')
+		.actions.find(action => action.id === 'firmware-compile').command.args
+	assert.deepEqual(command.filter((value, index) => command[index - 1] === '--firmware-feature'), [
+		'eeprom-boot-opcodes', 'eeprom-menu-labels'
+	])
+	assert.ok(!command.includes('--no-firmware-features'))
+	const environment = {
+		PCCONTROLLER_FIRMWARE_FEATURES: 'eeprom-menu-labels'
+	}
+	const fromEnvironment = parseArguments(['--firmware-only'], environment)
+	assert.deepEqual(fromEnvironment.firmwareFeatures, ['eeprom-menu-labels'])
+	const environmentCommand = createPlan(
+		fromEnvironment, resolveBuildIdentity(fromEnvironment, {}), 'win32'
+	).actions.find(action => action.id === 'firmware-compile').command.args
+	assert.equal(environmentCommand.at(-2), '--firmware-feature')
+	assert.equal(environmentCommand.at(-1), 'eeprom-menu-labels')
+	const replaced = parseArguments([
+		'--firmware-only', '--firmware-feature', 'eeprom-boot-opcodes'
+	], environment)
+	assert.deepEqual(replaced.firmwareFeatures, ['eeprom-boot-opcodes'])
+	const defaultOff = parseArguments([
+		'--firmware-only', '--no-firmware-features'
+	], environment)
+	assert.deepEqual(defaultOff.firmwareFeatures, [])
+	assert.ok(createPlan(
+		defaultOff, resolveBuildIdentity(defaultOff, {}), 'win32'
+	).actions.find(action => action.id === 'firmware-compile').command.args.includes('--no-firmware-features'))
+	for (const malformed of ['eeprom-menu-labels,', 'eeprom-menu-labels,,eeprom-boot-opcodes']) {
+		assert.throws(
+			() => parseArguments(['--firmware-only'], { PCCONTROLLER_FIRMWARE_FEATURES: malformed }),
+			/firmware feature must not be empty|invalid named firmware feature/
+		)
+	}
+	assert.throws(
+		() => createControllerProgramCommand({
+			invocation: sourceControllerInvocation(PROJECT_ROOT), method: 'compile',
+			sketch: PROJECT_ROOT, outputDir: commandPlanPaths(PROJECT_ROOT).firmwareOutput,
+			firmwareFeatures: ['-DUNSAFE=1']
+		}),
+		/invalid named firmware feature/
+	)
+	assert.throws(
+		() => parseArguments([
+			'--firmware-only', '--firmware-feature', 'unknown'
+		], {}),
+		error => error.exitCode === 2 && /unsupported firmware feature/.test(error.message)
+	)
+	for (const selection of [['--host-only'], ['--virtual-board-only'], ['--clean']]) {
+		const inherited = parseArguments(selection, environment)
+		assert.deepEqual(inherited.firmwareFeatures, [], `${selection} ignored environment selection`)
+		assert.deepEqual(
+			parseArguments(selection, { PCCONTROLLER_FIRMWARE_FEATURES: 'unknown' }).firmwareFeatures,
+			[],
+			`${selection} ignored invalid environment selection`
+		)
+		assert.throws(
+			() => parseArguments([
+				...selection, '--firmware-feature', 'eeprom-menu-labels'
+			], {}),
+			error => error.exitCode === 2 && /requires firmware compilation/.test(error.message)
+		)
+		assert.throws(
+			() => parseArguments([...selection, '--no-firmware-features'], environment),
+			error => error.exitCode === 2 && /requires firmware compilation/.test(error.message)
+		)
+	}
+	const inheritedHostOnly = parseArguments(['--host-only'], {})
+	inheritedHostOnly.firmwareFeatures = ['unknown']
+	inheritedHostOnly.firmwareFeaturesFromEnvironment = true
+	const inheritedHostPlan = createPlan(
+		inheritedHostOnly, resolveBuildIdentity(inheritedHostOnly, {}), 'win32'
+	)
+	assert.equal(
+		inheritedHostPlan.actions.some(action => action.id === 'firmware-compile'),
+		false,
+		'direct host-only plans ignore invalid inherited firmware defaults'
+	)
+	assert.throws(
+		() => createControllerProgramCommand({
+			invocation: canonicalControllerInvocation(PROJECT_ROOT, 'win32'),
+			method: 'urclock',
+			operation: PROGRAMMING_OPERATIONS.upload,
+			device: 'DO_NOT_OPEN',
+			hex: 'firmware.hex',
+			firmwareFeatures: ['eeprom-menu-labels']
+		}),
+		/only valid with compile/
 	)
 })
 
@@ -934,6 +1050,13 @@ test('Windows installation inventory follows the final packed host manifest', ()
 	assert.equal(linux.actions.some(action => action.id === 'installation-inventory'), false)
 })
 
+test('Windows package carries the hash-bound toast logo before inventory generation', async () => {
+	const source = await readFile(join(PROJECT_ROOT, 'Tools', 'Build', 'build.mjs'), 'utf8')
+	assert.match(source, /copyFileSync\(join\(HOST_ROOT, 'winres', 'icon\.png'\), toastLogo\)/)
+	assert.match(source, /\[executable, \.\.\.\(toastLogo \? \[toastLogo\] : \[\]\), \.\.\.shared\.paths\]/)
+	assert.ok(source.indexOf("toastLogo = join(stage, 'toast-logo.png')") < source.indexOf("'installation-package.json'"))
+})
+
 test('Win32 resource configuration retains icon, manifest, and version data', async () => {
 	const source = await readFile(
 		join(PROJECT_ROOT, 'Tools', 'Controller', 'winres', 'winres.json'),
@@ -993,7 +1116,7 @@ test('browser ICO is the exact seven-size native executable icon', async () => {
 	)
 	assert.match(
 		buildSource,
-		/generate_icon\.go', '\.\/winres\/icon\.png', '\.\/winres\/icon\.ico'/u
+		/generate_icon\.go', \['\.\/winres\/icon\.png', '\.\/winres\/icon\.ico'\]/u
 	)
 	assert.match(
 		buildSource,

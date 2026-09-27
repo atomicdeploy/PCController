@@ -125,13 +125,19 @@ func preferencesFromUI(value appconfig.UI) Preferences {
 }
 
 type measurementSample struct {
-	At        time.Time
-	SupplyMV  int32
-	BusMV     int32
-	CurrentMA int32
-	PowerMW   int32
-	TLEDCenti int16
-	TBTCenti  int16
+	At          time.Time
+	SupplyMV    int32
+	BusMV       int32
+	CurrentMA   int32
+	PowerMW     int32
+	TLEDCenti   int16
+	TBTCenti    int16
+	HaveSupply  bool
+	HaveBus     bool
+	HaveCurrent bool
+	HavePower   bool
+	HaveTLED    bool
+	HaveTBT     bool
 }
 
 type timelineEntry struct {
@@ -162,31 +168,86 @@ type FrontPanelState struct {
 	HaveStatusLED    bool
 }
 
+// RemoteLiveUpdate is one coalescible high-rate patch from the primary host.
+// Status measurements and the composed status-light frame share this bounded
+// path so a slow terminal always renders the newest state instead of building
+// an unbounded animation backlog.
+type RemoteLiveUpdate struct {
+	Status              native.Status
+	HaveStatus          bool
+	StatusUpdated       time.Time
+	StatusReceivedAt    time.Time
+	StatusLED           native.StatusLEDState
+	HaveStatusLED       bool
+	StatusLEDUpdated    time.Time
+	StatusLEDReceivedAt time.Time
+	ConnectionChange    bool
+	Connected           bool
+	Error               string
+}
+
+// RemoteBackend supplies the live board state and activity stream for a TUI
+// attached to another controller host. Command execution deliberately remains
+// on the injected shell.Engine so the remote command catalog, completion,
+// history, prompt, and console are identical to a locally owned TUI.
+//
+// A remote backend never owns or scans a local serial port. Snapshot polling
+// and Events are expected to travel over the authenticated controller IPC.
+type RemoteBackend struct {
+	Endpoint                  string
+	InitialSnapshot           control.Snapshot
+	InitialSnapshotReceivedAt time.Time
+	Snapshot                  func(context.Context) (control.Snapshot, error)
+	Events                    <-chan control.Event
+	Live                      <-chan RemoteLiveUpdate
+	// SetLiveInterval switches both producer measurement demand and the bounded
+	// client-to-render flush between an active 20 Hz view and low-rate idle view.
+	SetLiveInterval func(time.Duration)
+	// SaveHostUI persists the host-owned UI subset (identity and peripheral
+	// names) through the remote primary's structured IPC contract. Client
+	// appearance and terminal preferences continue to use Options.SaveUI.
+	SaveHostUI func(appconfig.UI) error
+}
+
 type Options struct {
-	UIConfig         func() appconfig.UI
-	SaveUI           func(appconfig.UI) error
-	ApplyTUIConsole  func(appconfig.TUIConsole) error
-	HostIntegrations func() appconfig.Integrations
-	SaveIntegrations func(appconfig.Integrations) error
-	RFConfig         func() appconfig.RFConfig
-	SaveRF           func(appconfig.RFConfig) error
-	RFFetch          func(context.Context) ([]native.RFEntry, error)
-	RFApplyOrder     func(context.Context, []native.RFEntry) error
-	RFReplaceSupport func() control.RFReplaceSupport
-	RFProbeReplace   func(context.Context) (control.RFReplaceSupport, error)
-	HostMenus        *hostmenu.Manager
-	PushHostPanel    func(hostmenu.Snapshot) error
-	ReleaseHostPanel func() error
-	FrontPanel       func() FrontPanelState
-	FrontPanelKey    func(key int, phase string) error
-	MirrorLCD        func(line1, line2 string) error
-	Integrations     func() hostui.IntegrationStatus
-	Notifier         hostui.Notifier
-	AppActions       <-chan hostui.AppAction
-	InstanceID       string
-	ReportPage       func(string) error
-	ReportTerminal   func(page, title string) error
+	UIConfig           func() appconfig.UI
+	SaveUI             func(appconfig.UI) error
+	ApplyTUIConsole    func(appconfig.TUIConsole) error
+	HostIntegrations   func() appconfig.Integrations
+	SaveIntegrations   func(appconfig.Integrations) error
+	BuzzerRuntime      func() appconfig.BuzzerRuntimeStatus
+	RFConfig           func() appconfig.RFConfig
+	SaveRF             func(appconfig.RFConfig) error
+	RFFetch            func(context.Context) ([]native.RFEntry, error)
+	RFApplyOrder       func(context.Context, []native.RFEntry) error
+	RFReplaceSupport   func() control.RFReplaceSupport
+	RFProbeReplace     func(context.Context) (control.RFReplaceSupport, error)
+	HostMenus          *hostmenu.Manager
+	PushHostPanel      func(hostmenu.Snapshot) error
+	ReleaseHostPanel   func() error
+	FrontPanel         func() FrontPanelState
+	FrontPanelKey      func(key int, phase string) error
+	MirrorLCD          func(line1, line2 string) error
+	Integrations       func() hostui.IntegrationStatus
+	Notifier           hostui.Notifier
+	AppActions         <-chan hostui.AppAction
+	InstanceID         string
+	NavigationSync     bool
+	NavigationGroup    string
+	SetNavigationSync  func(bool)
+	NavigationIdentity func() (string, uint64)
+	ReportPage         func(string) error
+	ReportTerminal     func(page, title string) error
+	// ReportTerminalAsync keeps network-backed instance reporting out of the
+	// Bubble Tea update loop. The callback owns coalescing and error delivery.
+	ReportTerminalAsync func(page, title string)
+	// CommitNavigation asynchronously submits a local page intent to the
+	// coordinator. Presence reports and coordinator-applied pages must never
+	// pass through this callback.
+	CommitNavigation func(page string)
 	WriteOSC         func(payload string) error
+	AckAppAction     func(hostui.ActionAck) error
+	Remote           *RemoteBackend
 	Preview          *control.Snapshot
 	ForceWelcome     bool
 	DisableWelcome   bool

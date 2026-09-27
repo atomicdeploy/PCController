@@ -68,11 +68,11 @@ func (model Model) currentFrontPanel(snapshot control.Snapshot) FrontPanelState 
 		}
 	}
 	var lcdPresentation control.LCDPresentationState
-	haveLCDPresentation := model.preview == nil && model.runtime != nil
+	haveLCDPresentation := model.preview == nil && model.remote == nil && model.runtime != nil
 	if haveLCDPresentation {
 		lcdPresentation = model.runtime.LCDPresenter().State()
 	}
-	if model.preview == nil && model.runtime != nil &&
+	if model.preview == nil && model.remote == nil && model.runtime != nil &&
 		snapshot.Hello.Capabilities&native.CapabilityI2CTransfer != 0 {
 		if lcdPresentation.Physical {
 			state.LCDLine1 = lcdPresentation.PhysicalLine1

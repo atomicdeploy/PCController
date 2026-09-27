@@ -70,7 +70,7 @@ func (model Model) automationsPage() string {
 	}
 
 	lines := []string{
-		sectionHeader(model.width, "AUTOMATIONS & MACROS", "searchable PC library · MCU-timed queue · exact acknowledgement deltas"),
+		sectionHeader(model.width, "AUTOMATIONS & MACROS", "searchable PC library · basic HOST or precise MCU playback"),
 		renderMacroButtonRow(macroPrimaryButtons),
 		renderMacroButtonRow(macroSecondaryButtons),
 		ansi.Truncate(searchLine, model.width, "…"),
@@ -80,7 +80,7 @@ func (model Model) automationsPage() string {
 		model.macroKV("Steps / Queue", macroProgressSummary(state, model.width)),
 		model.macroKV("Timing", macroTimingSummary(state)),
 		model.macroKV("Result", macroResultSummary(state)),
-		sectionHeader(model.width, "RECORDING", boolWord(recording.Active, "ACTIVE · MCU acknowledgements are authoritative", "idle")),
+		sectionHeader(model.width, "RECORDING", boolWord(recording.Active, "ACTIVE · "+strings.ToUpper(recording.Mode)+" clock", "idle")),
 		model.macroKV("Recorder", macroRecordingSummary(recording, time.Now())),
 		ansi.Truncate(macroRecordingHelp(recording), model.width, "…"),
 		sectionHeader(model.width, "MACRO LIBRARY", fmt.Sprintf("%d of %d match · ID-sorted · metadata stays on PC", len(filtered), len(allMacros))),
@@ -101,12 +101,15 @@ func (model Model) automationsPage() string {
 		lines[len(lines)-macroLibraryVisibleRows] = warnStyle.Render("  No macros match. Press / to change the search or N to create a draft.")
 	}
 
-	lines = append(lines, "", titleStyle.Render("HOST PLATFORM & BRIDGES"))
-	if model.width < 100 {
-		lines = append(lines, labelStyle.Render("Widen the terminal to inspect hotkeys, toasts, discovery, webhooks, messaging, and Socket.IO."))
-	} else {
-		for _, line := range model.integrationStatusLines() {
-			lines = append(lines, ansi.Truncate(line, model.width, "…"))
+	integrationLines := model.integrationStatusLines()
+	if len(integrationLines) != 0 {
+		lines = append(lines, "", titleStyle.Render("HOST PLATFORM & BRIDGES"))
+		if model.width < 100 {
+			lines = append(lines, labelStyle.Render("Widen the terminal to inspect the advertised host integrations."))
+		} else {
+			for _, line := range integrationLines {
+				lines = append(lines, ansi.Truncate(line, model.width, "…"))
+			}
 		}
 	}
 	return strings.Join(lines, "\n")
@@ -121,6 +124,9 @@ func (model Model) macroLibrary() []appconfig.Macro {
 		sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
 		return result
 	}
+	if model.remote != nil {
+		return model.remoteSnapshot.Macros.Library
+	}
 	if runner := model.runtime.MacroRunner(); runner != nil {
 		return runner.List()
 	}
@@ -131,6 +137,9 @@ func (model Model) macroState() control.MacroState {
 	if model.preview != nil {
 		return model.previewMacroState
 	}
+	if model.remote != nil {
+		return model.remoteSnapshot.Macros.Playback
+	}
 	if runner := model.runtime.MacroRunner(); runner != nil {
 		return runner.State()
 	}
@@ -140,6 +149,9 @@ func (model Model) macroState() control.MacroState {
 func (model Model) macroRecordingState() control.MacroRecordingState {
 	if model.preview != nil {
 		return model.previewMacroRecording
+	}
+	if model.remote != nil {
+		return model.remoteSnapshot.Macros.Recording
 	}
 	if runner := model.runtime.MacroRunner(); runner != nil {
 		return runner.RecordingState()
@@ -265,7 +277,7 @@ func (model Model) macroShortcut(key string) (Model, tea.Cmd, bool) {
 		model.input.SetValue("macro record start ")
 		model.input.CursorEnd()
 		model.revealTerminal()
-		model.setNotice("Complete NAME [CATEGORY [COLOR]], then operate relays/PWM/etc.; MCU ACK deltas set timing")
+		model.setNotice("Complete NAME [CATEGORY [COLOR]], then operate relay/motion, PWM, beep or display controls; host timing is used")
 		return model, nil, true
 	case "s":
 		if !model.macroRecordingState().Active {
@@ -414,9 +426,13 @@ func macroProgressBar(current, total, width int) string {
 }
 
 func macroTimingSummary(state control.MacroState) string {
-	return fmt.Sprintf("last %s · max %s · tolerance %s · violations %d",
+	text := fmt.Sprintf("last %s · max %s · tolerance %s · violations %d",
 		formatSignedMicros(state.LastTimingDeltaUS), formatMicros(state.MaximumTimingErrorUS),
 		formatMicros(state.TimingToleranceUS), state.TimingViolations)
+	if state.Mode == "host" {
+		return "startup " + formatMicros(state.StartupDelayUS) + " · " + text
+	}
+	return text
 }
 
 func macroResultSummary(state control.MacroState) string {
@@ -443,7 +459,7 @@ func macroRecordingSummary(state control.MacroRecordingState, now time.Time) str
 	if elapsed < 0 {
 		elapsed = 0
 	}
-	return fmt.Sprintf("%d · %s · %s · %d steps · %s", state.ID, state.Name, state.Category, state.Steps, formatMacroDuration(elapsed))
+	return fmt.Sprintf("%d · %s · %s · %s · %d steps · %s", state.ID, state.Name, state.Mode, state.Category, state.Steps, formatMacroDuration(elapsed))
 }
 
 func macroRecordingHelp(state control.MacroRecordingState) string {
@@ -451,9 +467,12 @@ func macroRecordingHelp(state control.MacroRecordingState) string {
 		return errorStyle.Render("Recorder error: " + state.LastError)
 	}
 	if state.Active {
-		return warnStyle.Render("Operate any queueable relay, motion, PWM, buzzer, display, RF, RGB, LED, or menu command; S saves, D discards.")
+		if state.Mode == "host" {
+			return warnStyle.Render("Operate relay/motion, PWM, beep or display controls; housekeeping is ignored. S saves, D discards.")
+		}
+		return warnStyle.Render("MCU mode records acknowledged queueable commands. S saves, D discards.")
 	}
-	return labelStyle.Render("R starts a named recording; exact MCU acknowledgement timestamps become step offsets. N creates an editable empty draft.")
+	return labelStyle.Render("R starts a basic host recording (100 ms tolerance); CLI start-mcu selects precise MCU capture. N creates a draft.")
 }
 
 func macroTableHeader(width int) string {

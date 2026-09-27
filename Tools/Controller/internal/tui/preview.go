@@ -28,8 +28,12 @@ func RichPreviewSnapshot() control.Snapshot {
 		},
 		Hello: native.Hello{
 			Name: "PCController", BoardKind: native.BoardKindPCController,
-			Capabilities: native.CapabilityFrontPanelSnapshot | native.CapabilityMenuDirectory | native.CapabilityRFLearnReplace |
-				native.CapabilityHostFrontPanel | native.CapabilityBuzzerBusy | native.CapabilityMenuLayout | native.CapabilityTimedMacroQueue,
+			Capabilities: native.CapabilityINA219 | native.CapabilityTemperatures | native.CapabilityPWM |
+				native.CapabilityRelayMotion | native.CapabilitySegments | native.CapabilityLCD |
+				native.CapabilityPersistentSettings | native.CapabilityMenuRemote | native.CapabilityBluetoothAudio |
+				native.CapabilityRemoteKeys | native.CapabilityFrontPanelSnapshot | native.CapabilityMenuDirectory | native.CapabilityRFLearnReplace |
+				native.CapabilityHostFrontPanel | native.CapabilityBuzzerBusy | native.CapabilityMenuLayout | native.CapabilityTimedMacroQueue |
+				native.CapabilityStatusEffects | native.CapabilityProgramState | native.CapabilityScheduledSegments,
 			IdentitySchema: native.IdentitySchemaCompact, BuildHash: 0x5DF10D05,
 			BuildTimestamp: 0x3501645C, BuildStamp: "260801123456",
 		},
@@ -78,6 +82,8 @@ func RichPreviewModel(welcome bool) Model {
 			SupplyMV: 12220 + int32(index%5), BusMV: 12195 + int32(index%7),
 			CurrentMA: 270 + int32((index*7)%24), PowerMW: 3310 + int32((index*31)%230),
 			TLEDCenti: 2680 + int16(index*2), TBTCenti: 2630 + int16(index%5),
+			HaveSupply: true, HaveBus: true, HaveCurrent: true, HavePower: true,
+			HaveTLED: true, HaveTBT: true,
 		})
 	}
 	model.timeline = []timelineEntry{

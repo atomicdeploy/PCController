@@ -151,6 +151,7 @@ export function WorkbenchView(props: SharedViewProps) {
   const displayTextLimit = displayTarget === 'segments' ? 40 : 32
   const displayTextIsValid = displayText.length > 0 && displayText.length <= displayTextLimit && /^[\x20-\x7e]*$/.test(displayText)
   const available = peripheralAvailability(snapshot)
+  const boardReady = transport.boardState === 'ready' && snapshot.connected && snapshot.have_status
   const displayTargetOptions = [
     { value: 'segments' as const, label: copy('Segments', 'سون‌سگمنت') },
     ...(available.lcd ? [
@@ -238,10 +239,10 @@ export function WorkbenchView(props: SharedViewProps) {
   return (
     <>
       <SectionTitle
-        eyebrow={snapshot.connected ? copy('Controller and host tools', 'ابزارهای برد و میزبان') : copy('Host tools', 'ابزارهای میزبان')}
+        eyebrow={boardReady ? copy('Controller and host tools', 'ابزارهای برد و میزبان') : copy('Host tools', 'ابزارهای میزبان')}
         title={t('workbench')}
         detail={`${transport.streamState.toUpperCase()} · ${events.length} ${copy('events', 'رویداد')} · ${transport.tabPeers + 1} ${copy('tabs', 'تب')}`}
-        action={<StatusBadge tone={snapshot.connected ? 'good' : 'warn'}>{snapshot.connected ? copy('BOARD + HOST', 'برد + میزبان') : copy('HOST ONLY', 'فقط میزبان')}</StatusBadge>}
+        action={<StatusBadge tone={boardReady ? 'good' : 'warn'}>{boardReady ? copy('BOARD + HOST', 'برد + میزبان') : copy('HOST ONLY', 'فقط میزبان')}</StatusBadge>}
       />
 
       <section className="workbench-grid">
@@ -269,7 +270,7 @@ export function WorkbenchView(props: SharedViewProps) {
           </div>
         </Card>
 
-        {snapshot.connected && <Card icon={Binary} iconTone="violet" title={copy('Displays', 'نمایشگرها')} eyebrow={available.lcd ? 'TM1637 + LCD' : 'TM1637'}>
+        {boardReady && available.segments && <Card icon={Binary} iconTone="violet" title={copy('Displays', 'نمایشگرها')} eyebrow={available.lcd ? 'TM1637 + LCD' : 'TM1637'}>
           {available.lcd && <div className="setting-group"><label>{copy('Target', 'مقصد')}</label><Segmented value={displayTarget} label={copy('Display target', 'مقصد نمایش')} options={displayTargetOptions} onChange={setDisplayTarget} /></div>}
           <TextField
             label={copy(`Display text · ${displayTextLimit} characters maximum`, `متن نمایشگر، حداکثر ${displayTextLimit} نویسه`)}
@@ -290,7 +291,7 @@ export function WorkbenchView(props: SharedViewProps) {
           <div className="inline-actions"><Button tone="primary" icon={Lightbulb} disabled={!displayTextIsValid} onClick={() => void run(displayPresentationCommand({ target: displayTarget, text: displayText, speedMS: displaySpeed, durationMS: displayDuration, repeat: displayRepeat, intervalMS: displayInterval, scroll: displayScroll }))}>{copy('Show text', 'نمایش متن')}</Button><Button icon={Eraser} onClick={() => void run(`display ${displayTarget} 0`)}>{copy('Clear', 'پاک‌کردن')}</Button></div>
         </Card>}
 
-        {snapshot.connected && <Card icon={Lightbulb} iconTone="amber" title={copy('Addressable strip', 'نوار LED آدرس‌پذیر')} eyebrow={copy('11 pixels · status light', '۱۱ پیکسل · نور وضعیت')}>
+        {boardReady && available.statusLED && <Card icon={Lightbulb} iconTone="amber" title={copy('Addressable strip', 'نوار LED آدرس‌پذیر')} eyebrow={copy('11 pixels · status light', '۱۱ پیکسل · نور وضعیت')}>
           <RangeField label={copy('Red', 'قرمز')} value={red} min={0} max={255} onChange={setRed} />
           <RangeField label={copy('Green', 'سبز')} value={green} min={0} max={255} onChange={setGreen} />
           <RangeField label={copy('Blue', 'آبی')} value={blue} min={0} max={255} onChange={setBlue} />
@@ -298,7 +299,7 @@ export function WorkbenchView(props: SharedViewProps) {
           <div className="inline-actions"><Button tone="primary" icon={Palette} onClick={() => void run(`strip fill ${red} ${green} ${blue} ${stripBrightness}`)}>{copy('Fill strip', 'اعمال رنگ')}</Button><Button icon={Eraser} onClick={() => void run('strip clear')}>{copy('Clear', 'پاک‌کردن')}</Button></div>
         </Card>}
 
-        {snapshot.connected && <Card icon={AudioLines} iconTone="green" title={copy('Buzzer & melody', 'بیزر و ملودی')} eyebrow={copy('Timed audio', 'صدای زمان‌بندی‌شده')}>
+        {boardReady && available.buzzer && <Card icon={AudioLines} iconTone="green" title={copy('Buzzer & melody', 'بیزر و ملودی')} eyebrow={copy('Timed audio', 'صدای زمان‌بندی‌شده')}>
           <RangeField label={copy('Frequency', 'فرکانس')} value={frequency} min={20} max={20000} step={10} unit="Hz" onChange={setFrequency} />
           <RangeField label={copy('Duration', 'مدت')} value={toneDuration} min={20} max={5000} step={20} unit="ms" onChange={setToneDuration} />
           <Button icon={Volume2} onClick={() => void run(`buzzer ${frequency} ${toneDuration}`)}>{copy('Play tone', 'پخش صدا')}</Button>
@@ -306,16 +307,16 @@ export function WorkbenchView(props: SharedViewProps) {
           <div className="inline-actions"><Button icon={Play} disabled={!melody.trim()} onClick={() => void run(`melody play ${shellArgument(melody.trim())}`)}>{copy('Play', 'پخش')}</Button><Button icon={StopCircle} onClick={() => void run('melody stop')}>{copy('Stop', 'توقف')}</Button><Button icon={List} onClick={() => void run('melody list')}>{copy('List', 'فهرست')}</Button></div>
         </Card>}
 
-        <RFGuidedWorkflow snapshot={snapshot} events={events} locale={locale} openDialog={props.openDialog} />
+        {boardReady && available.rf && <RFGuidedWorkflow snapshot={snapshot} events={events} locale={locale} openDialog={props.openDialog} />}
 
-        <Card icon={Workflow} iconTone="green" title={copy('Macros & automations', 'ماکروها و خودکارسازی')} eyebrow={snapshot.connected ? copy('Controller timing · host rules', 'زمان‌بندی برد · قواعد میزبان') : copy('Host rules', 'قواعد میزبان')}>
-          {snapshot.connected && <><TextField label={copy('Macro name or ID', 'نام یا شناسه ماکرو')} value={macro} onChange={(event) => setMacro(event.target.value)} />
+        <Card icon={Workflow} iconTone="green" title={copy('Macros & automations', 'ماکروها و خودکارسازی')} eyebrow={boardReady ? copy('Controller timing · host rules', 'زمان‌بندی برد · قواعد میزبان') : copy('Host rules', 'قواعد میزبان')}>
+          {boardReady && <><TextField label={copy('Macro name or ID', 'نام یا شناسه ماکرو')} value={macro} onChange={(event) => setMacro(event.target.value)} />
           <div className="inline-actions"><Button icon={Play} disabled={!macro.trim()} onClick={() => void run(`macro play ${shellArgument(macro.trim())}`)}>{copy('Run macro', 'اجرای ماکرو')}</Button><Button icon={StopCircle} onClick={() => void run('macro cancel')}>{copy('Cancel', 'لغو')}</Button><Button icon={List} onClick={() => void run('macro list')}>{copy('List', 'فهرست')}</Button></div></>}
           <TextField label={copy('Host automation name', 'نام خودکارسازی میزبان')} value={automation} onChange={(event) => setAutomation(event.target.value)} />
           <div className="inline-actions"><Button icon={Bot} disabled={!automation.trim()} onClick={() => void run(`automation run ${shellArgument(automation.trim())}`)}>{copy('Run automation', 'اجرای خودکارسازی')}</Button><Button icon={List} onClick={() => void run('automation list')}>{copy('List', 'فهرست')}</Button></div>
         </Card>
 
-        {snapshot.connected && <Card icon={Cable} iconTone="accent" title={copy('I²C & peripherals', 'I²C و تجهیزات جانبی')} eyebrow={copy('Cooperative host lease', 'دسترسی هماهنگ میزبان')}>
+        {boardReady && <Card icon={Cable} iconTone="accent" title={copy('I²C & peripherals', 'I²C و تجهیزات جانبی')} eyebrow={copy('Cooperative host lease', 'دسترسی هماهنگ میزبان')}>
           <div className="operation-buttons"><Button icon={ScanSearch} onClick={() => void run('i2c scan')}>{copy('Scan bus', 'پویش گذرگاه')}</Button><Button icon={Unplug} onClick={() => void run('i2c release')}>{copy('Release lease', 'آزادسازی دسترسی')}</Button><Button icon={Settings2} onClick={() => void run('settings')}>{copy('Board settings', 'تنظیمات برد')}</Button><Button icon={LayoutDashboard} onClick={() => void run('menu current')}>{copy('Menu state', 'وضعیت منو')}</Button></div>
         </Card>}
 
@@ -330,7 +331,7 @@ export function WorkbenchView(props: SharedViewProps) {
         </Card>
 
         <Card icon={Cpu} iconTone="amber" title={copy('Firmware & recovery', 'میان‌افزار و بازیابی')} eyebrow={copy('Read-only first', 'ابتدا فقط خواندنی')}>
-          <div className="operation-buttons">{snapshot.connected && <><Button icon={Cpu} onClick={() => void run('hello')}>{copy('Identity', 'شناسه')}</Button><Button icon={ListRestart} onClick={() => void run('reset lines')}>{copy('Reconnect pulse', 'پالس اتصال مجدد')}</Button></>}<Button icon={MemoryStick} onClick={() => void run('toolchain profile')}>{copy('Toolchain profile', 'مشخصات زنجیره‌ابزار')}</Button><Button icon={SquareTerminal} onClick={() => setLine('boot info')}>{copy('Prepare boot info', 'آماده‌سازی اطلاعات راه‌اندازی')}</Button></div>
+          <div className="operation-buttons">{boardReady && <><Button icon={Cpu} onClick={() => void run('hello')}>{copy('Identity', 'شناسه')}</Button><Button icon={ListRestart} onClick={() => void run('reset lines')}>{copy('Reconnect pulse', 'پالس اتصال مجدد')}</Button></>}<Button icon={MemoryStick} onClick={() => void run('toolchain profile')}>{copy('Toolchain profile', 'مشخصات زنجیره‌ابزار')}</Button><Button icon={SquareTerminal} onClick={() => setLine('boot info')}>{copy('Prepare boot info', 'آماده‌سازی اطلاعات راه‌اندازی')}</Button></div>
         </Card>
       </section>
       <AdvancedWorkbench {...props} run={run} busy={busy} />

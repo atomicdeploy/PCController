@@ -8,6 +8,7 @@ import {
   Tooltip,
   XAxis,
   YAxis,
+  matchByDataKey,
 } from 'recharts'
 import { Segmented, StatusBadge } from './components'
 import type { Locale, MetricSample } from './types'
@@ -19,6 +20,7 @@ interface TelemetryChartProps {
   connected: boolean
   locale: Locale
   samples: MetricSample[]
+  reduceMotion?: boolean
 }
 
 const modeLabels = {
@@ -31,7 +33,20 @@ function valueLabel(value: unknown): string {
   return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(2) : String(value ?? '—')
 }
 
-export function TelemetryChart({ connected, locale, samples }: TelemetryChartProps) {
+const matchTimestamp = matchByDataKey('at')
+
+export function telemetryAnimation(reduceMotion = false) {
+  return {
+    isAnimationActive: reduceMotion ? false : 'auto' as const,
+    animationBegin: 0,
+    animationDuration: 250,
+    animationEasing: 'linear' as const,
+    animationMatchBy: matchTimestamp,
+  }
+}
+
+export function TelemetryChart({ connected, locale, samples, reduceMotion = false }: TelemetryChartProps) {
+  const animation = telemetryAnimation(reduceMotion)
   const [mode, setMode] = useState<ChartMode>('electrical')
   const [windowSize, setWindowSize] = useState<WindowSize>('60')
   const persian = locale === 'fa'
@@ -116,14 +131,14 @@ export function TelemetryChart({ connected, locale, samples }: TelemetryChartPro
             />
             <Legend iconType="plainline" wrapperStyle={{ color: 'var(--text-soft)', fontSize: 10, paddingTop: 7 }} />
             {visibleMode === 'electrical' && <>
-              <Area yAxisId="left" type="monotone" dataKey="supply" name={persian ? 'تغذیه V' : 'Supply V'} stroke="var(--accent)" strokeWidth={2.2} fill="url(#telemetry-accent-fill)" isAnimationActive={false} />
-              <Line yAxisId="left" type="monotone" dataKey="bus" name={persian ? 'باس V' : 'Bus V'} stroke="var(--violet)" strokeWidth={1.8} dot={false} isAnimationActive={false} />
-              <Line yAxisId="right" type="monotone" dataKey="current" name={persian ? 'جریان mA' : 'Current mA'} stroke="var(--amber)" strokeWidth={1.8} dot={false} isAnimationActive={false} />
+              <Area yAxisId="left" type="linear" dataKey="supply" name={persian ? 'تغذیه V' : 'Supply V'} stroke="var(--accent)" strokeWidth={2.2} fill="url(#telemetry-accent-fill)" {...animation} />
+              <Line yAxisId="left" type="linear" dataKey="bus" name={persian ? 'باس V' : 'Bus V'} stroke="var(--violet)" strokeWidth={1.8} dot={false} {...animation} />
+              <Line yAxisId="right" type="linear" dataKey="current" name={persian ? 'جریان mA' : 'Current mA'} stroke="var(--amber)" strokeWidth={1.8} dot={false} {...animation} />
             </>}
-            {visibleMode === 'power' && <Area yAxisId="left" type="monotone" dataKey="power" name={persian ? 'توان W' : 'Power W'} stroke="var(--amber)" strokeWidth={2.2} fill="url(#telemetry-amber-fill)" isAnimationActive={false} />}
+            {visibleMode === 'power' && <Area yAxisId="left" type="linear" dataKey="power" name={persian ? 'توان W' : 'Power W'} stroke="var(--amber)" strokeWidth={2.2} fill="url(#telemetry-amber-fill)" {...animation} />}
             {visibleMode === 'thermal' && <>
-              <Area yAxisId="left" type="monotone" dataKey="ledTemp" name={persian ? 'دمای LED °C' : 'LED °C'} stroke="var(--red)" strokeWidth={2.1} fill="url(#telemetry-amber-fill)" isAnimationActive={false} />
-              <Line yAxisId="left" type="monotone" dataKey="btTemp" name={persian ? 'دمای صدا °C' : 'Audio °C'} stroke="var(--violet)" strokeWidth={1.9} dot={false} isAnimationActive={false} />
+              <Area yAxisId="left" type="linear" dataKey="ledTemp" name={persian ? 'دمای LED °C' : 'LED °C'} stroke="var(--red)" strokeWidth={2.1} fill="url(#telemetry-amber-fill)" {...animation} />
+              <Line yAxisId="left" type="linear" dataKey="btTemp" name={persian ? 'دمای صدا °C' : 'Audio °C'} stroke="var(--violet)" strokeWidth={1.9} dot={false} {...animation} />
             </>}
           </AreaChart>
         </ResponsiveContainer>

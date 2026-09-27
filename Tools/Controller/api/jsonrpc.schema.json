@@ -17,6 +17,355 @@
     }
   ],
   "$defs": {
+    "AppAction": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "oneOf": [
+            {
+              "enum": [
+                "app.page",
+                "app.title",
+                "app.progress",
+                "app.osc",
+                "app.quit",
+                "app.port.open",
+                "app.port.close",
+                "command"
+              ]
+            },
+            {
+              "maxLength": 64,
+              "pattern": "^(?!app\\.)(?!controller\\.)(?:[A-Za-z0-9_-]+\\.)+[A-Za-z0-9_-]+$"
+            }
+          ]
+        },
+        "value": {
+          "type": "string",
+          "maxLength": 4096,
+          "pattern": "^[^\\u0000\\r\\n]*$"
+        },
+        "source": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string",
+          "pattern": "^(?:\\*|[A-Za-z0-9._:-]{1,180})$",
+          "default": "*"
+        },
+        "operation_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:-]{1,180}$"
+        },
+        "metadata": {
+          "type": "object",
+          "maxProperties": 16,
+          "propertyNames": {
+            "pattern": "^[A-Za-z0-9._-]{1,64}$"
+          },
+          "properties": {
+            "operation_delivery_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{1,180}$"
+            },
+            "operation_expires_at": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 1024,
+            "pattern": "^[^\\u0000\\r\\n]*$"
+          },
+          "description": "Bounded non-secret action metadata. Exact-target pushes include coordinator-owned operation_delivery_id and operation_expires_at values. Credential-shaped keys are rejected by the host."
+        },
+        "at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "AppActionRequest": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "oneOf": [
+            {
+              "enum": [
+                "app.page",
+                "app.title",
+                "app.progress",
+                "app.osc",
+                "app.quit",
+                "app.port.open",
+                "app.port.close",
+                "command"
+              ]
+            },
+            {
+              "maxLength": 64,
+              "pattern": "^(?!app\\.)(?!controller\\.)(?:[A-Za-z0-9_-]+\\.)+[A-Za-z0-9_-]+$"
+            }
+          ]
+        },
+        "value": {
+          "type": "string",
+          "maxLength": 4096,
+          "pattern": "^[^\\u0000\\r\\n]*$"
+        },
+        "source": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string",
+          "pattern": "^(?:\\*|[A-Za-z0-9._:-]{1,180})$",
+          "default": "*"
+        },
+        "operation_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:-]{1,180}$"
+        },
+        "metadata": {
+          "type": "object",
+          "maxProperties": 16,
+          "propertyNames": {
+            "pattern": "^[A-Za-z0-9._-]{1,64}$"
+          },
+          "properties": {
+            "operation_delivery_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{1,180}$"
+            },
+            "operation_expires_at": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 1024,
+            "pattern": "^[^\\u0000\\r\\n]*$"
+          },
+          "description": "Bounded non-secret action metadata. Exact-target pushes include coordinator-owned operation_delivery_id and operation_expires_at values. Credential-shaped keys are rejected by the host."
+        },
+        "at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 30000,
+          "default": 5000,
+          "description": "Acknowledgement deadline in milliseconds; zero or omission selects the 5000 ms host default."
+        }
+      }
+    },
+    "ActionAck": {
+      "type": "object",
+      "required": [
+        "operation_id",
+        "delivery_id",
+        "instance_id",
+        "state"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "operation_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:-]{1,180}$"
+        },
+        "delivery_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:-]{1,180}$"
+        },
+        "instance_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:-]{1,180}$"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "applied",
+            "rejected"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+        }
+      }
+    },
+    "ActionOutcomeRequest": {
+      "type": "object",
+      "required": [
+        "operation_id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "operation_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:-]{1,180}$"
+        }
+      }
+    },
+    "ActionTargetOutcome": {
+      "type": "object",
+      "required": [
+        "instance_id",
+        "surface",
+        "state",
+        "updated_at"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "instance_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:-]{1,180}$"
+        },
+        "surface": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._-]{1,64}$"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "queued",
+            "applied",
+            "rejected",
+            "timeout"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "ActionOperation": {
+      "type": "object",
+      "required": [
+        "operation_id",
+        "kind",
+        "selector",
+        "state",
+        "created_at",
+        "expires_at",
+        "targets"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "operation_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:-]{1,180}$"
+        },
+        "kind": {
+          "type": "string",
+          "oneOf": [
+            {
+              "enum": [
+                "app.page",
+                "app.title",
+                "app.progress",
+                "app.osc",
+                "app.quit",
+                "app.port.open",
+                "app.port.close",
+                "command"
+              ]
+            },
+            {
+              "maxLength": 64,
+              "pattern": "^(?!app\\.)(?!controller\\.)(?:[A-Za-z0-9_-]+\\.)+[A-Za-z0-9_-]+$"
+            }
+          ]
+        },
+        "source": {
+          "type": "string"
+        },
+        "selector": {
+          "type": "string",
+          "pattern": "^(?:\\*|[A-Za-z0-9._:-]{1,180})$",
+          "default": "*"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "queued",
+            "applied",
+            "rejected",
+            "timeout",
+            "partial"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ActionTargetOutcome"
+          }
+        }
+      }
+    },
+    "ActionOperationEnvelope": {
+      "type": "object",
+      "required": [
+        "accepted",
+        "operation"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "accepted": {
+          "type": "boolean"
+        },
+        "operation": {
+          "$ref": "#/$defs/ActionOperation"
+        }
+      }
+    },
+    "AppActionSubmitEnvelope": {
+      "type": "object",
+      "required": [
+        "accepted"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "accepted": {
+          "type": "boolean"
+        },
+        "operation": {
+          "$ref": "#/$defs/ActionOperation"
+        }
+      },
+      "description": "Backward-compatible acceptance result. Outcome-capable actions also include the correlated operation."
+    },
     "id": {
       "oneOf": [
         {
@@ -47,18 +396,26 @@
         "method": {
           "enum": [
             "controller.app.action",
+            "controller.app.action.ack",
+            "controller.app.action.outcome",
             "controller.app.bridge",
             "controller.app.instance.get",
             "controller.app.instance.remove",
             "controller.app.instance.report",
             "controller.app.instances",
+            "controller.app.launch",
             "controller.app.navigate",
+            "controller.app.navigation.commit",
             "controller.app.page",
             "controller.artifact.capture",
             "controller.artifact.fetch",
             "controller.artifact.list",
             "controller.artifact.manifest",
             "controller.artifact.upload",
+            "controller.artifact.upload.abort",
+            "controller.artifact.upload.begin",
+            "controller.artifact.upload.chunk",
+            "controller.artifact.upload.finish",
             "controller.bridge.call",
             "controller.bridge.list",
             "controller.close",
@@ -84,6 +441,7 @@
             "controller.event.latest",
             "controller.event.next",
             "controller.exit",
+            "controller.firmware.build",
             "controller.front_panel",
             "controller.front-panel",
             "controller.history.status",
@@ -99,8 +457,11 @@
             "controller.host.facts.catalog",
             "controller.hotkeys.get",
             "controller.hotkeys.set",
+            "controller.illumination.get",
+            "controller.illumination.set",
             "controller.integrations.local.get",
             "controller.integrations.local.set",
+            "controller.integrations.status",
             "controller.lcd.presentation.configure",
             "controller.lcd.presentation.status",
             "controller.lcd.priority",
@@ -112,6 +473,8 @@
             "controller.menu.list",
             "controller.menu.page",
             "controller.message.send",
+            "controller.network.peers.get",
+            "controller.network.peers.set",
             "controller.opcode.exchange",
             "controller.opcode.request",
             "controller.opcode.send",
@@ -123,6 +486,7 @@
             "controller.os.policy",
             "controller.os.power",
             "controller.os.status",
+            "controller.peer.update.host",
             "controller.peripherals",
             "controller.peripherals.get",
             "controller.peripherals.set",
@@ -187,7 +551,75 @@
           "type": "string",
           "writeOnly": true
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "controller.app.action"
+              }
+            },
+            "required": [
+              "method"
+            ]
+          },
+          "then": {
+            "required": [
+              "params"
+            ],
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/AppActionRequest"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "controller.app.action.ack"
+              }
+            },
+            "required": [
+              "method"
+            ]
+          },
+          "then": {
+            "required": [
+              "params"
+            ],
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/ActionAck"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "controller.app.action.outcome"
+              }
+            },
+            "required": [
+              "method"
+            ]
+          },
+          "then": {
+            "required": [
+              "params"
+            ],
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/ActionOutcomeRequest"
+              }
+            }
+          }
+        }
+      ]
     },
     "success": {
       "type": "object",
@@ -235,7 +667,8 @@
             },
             "message": {
               "type": "string"
-            }
+            },
+            "data": true
           }
         }
       }
@@ -270,8 +703,36 @@
   "x-methods": {
     "controller.app.action": {
       "capability": "dynamic",
-      "summary": "Route a validated page, title, OSC progress, raw OSC, port, command, or lifecycle action to live application instances.",
-      "idempotency": "non-idempotent"
+      "summary": "Freeze a validated action to exact live targets and return its correlated per-target delivery operation.",
+      "idempotency": "non-idempotent",
+      "params_schema": {
+        "$ref": "#/$defs/AppActionRequest"
+      },
+      "result_schema": {
+        "$ref": "#/$defs/AppActionSubmitEnvelope"
+      }
+    },
+    "controller.app.action.ack": {
+      "capability": "host_configuration",
+      "summary": "Acknowledge one exact app-action target as applied or rejected.",
+      "idempotency": "idempotent-with-authoritative-readback",
+      "params_schema": {
+        "$ref": "#/$defs/ActionAck"
+      },
+      "result_schema": {
+        "$ref": "#/$defs/ActionOperationEnvelope"
+      }
+    },
+    "controller.app.action.outcome": {
+      "capability": "read",
+      "summary": "Return one bounded app-action operation and its exact per-target outcomes.",
+      "idempotency": "safe",
+      "params_schema": {
+        "$ref": "#/$defs/ActionOutcomeRequest"
+      },
+      "result_schema": {
+        "$ref": "#/$defs/ActionOperationEnvelope"
+      }
     },
     "controller.app.bridge": {
       "capability": "read",
@@ -298,9 +759,19 @@
       "summary": "List live application instances and their bounded non-secret state.",
       "idempotency": "safe"
     },
+    "controller.app.launch": {
+      "capability": "host_configuration",
+      "summary": "Ensure, launch, or focus a named TUI or WebUI surface without arbitrary process execution.",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
     "controller.app.navigate": {
       "capability": "host_configuration",
       "summary": "Navigate all, one surface, or one exact live application instance.",
+      "idempotency": "non-idempotent"
+    },
+    "controller.app.navigation.commit": {
+      "capability": "host_configuration",
+      "summary": "Commit one follower group's canonical page and return its correlated coordinator outcome.",
       "idempotency": "non-idempotent"
     },
     "controller.app.page": {
@@ -332,6 +803,26 @@
       "capability": "programming",
       "summary": "artifact upload",
       "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.artifact.upload.abort": {
+      "capability": "programming",
+      "summary": "Abort and remove an incomplete peer artifact transfer.",
+      "idempotency": "non-idempotent"
+    },
+    "controller.artifact.upload.begin": {
+      "capability": "programming",
+      "summary": "Begin a bounded correlated peer artifact transfer.",
+      "idempotency": "non-idempotent"
+    },
+    "controller.artifact.upload.chunk": {
+      "capability": "programming",
+      "summary": "Append one ordered bounded chunk to a peer artifact transfer.",
+      "idempotency": "non-idempotent"
+    },
+    "controller.artifact.upload.finish": {
+      "capability": "programming",
+      "summary": "Revalidate and publish a completed peer artifact transfer.",
+      "idempotency": "non-idempotent"
     },
     "controller.bridge.call": {
       "capability": "bridge_calls",
@@ -458,6 +949,11 @@
       "summary": "exit",
       "idempotency": "idempotent-with-authoritative-readback"
     },
+    "controller.firmware.build": {
+      "capability": "programming",
+      "summary": "Compile the canonical host project with reviewed feature names and publish correlated ordered program progress events.",
+      "idempotency": "non-idempotent"
+    },
     "controller.front_panel": {
       "capability": "read",
       "summary": "front panel",
@@ -533,6 +1029,16 @@
       "summary": "hotkeys set",
       "idempotency": "idempotent-with-authoritative-readback"
     },
+    "controller.illumination.get": {
+      "capability": "read",
+      "summary": "Read persisted enclosure-light policy, live door-selected target, and exact applied channel-11 PWM.",
+      "idempotency": "safe"
+    },
+    "controller.illumination.set": {
+      "capability": "board_commands",
+      "summary": "Change only mode/on/off illumination fields, verify EEPROM durability, and return authoritative live state.",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
     "controller.integrations.local.get": {
       "capability": "integrations",
       "summary": "integrations local get",
@@ -542,6 +1048,11 @@
       "capability": "integrations",
       "summary": "integrations local set",
       "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.integrations.status": {
+      "capability": "read",
+      "summary": "Return requested and effective buzzer routing and playback state.",
+      "idempotency": "safe"
     },
     "controller.lcd.presentation.configure": {
       "capability": "host_configuration",
@@ -598,6 +1109,16 @@
       "summary": "message send",
       "idempotency": "non-idempotent"
     },
+    "controller.network.peers.get": {
+      "capability": "read",
+      "summary": "Return persistent peer topology with secret references and no plaintext credentials.",
+      "idempotency": "safe"
+    },
+    "controller.network.peers.set": {
+      "capability": "host_configuration",
+      "summary": "Replace and hot-apply peer topology; events, state, and status topics are accepted, and only optional secret references may carry compatibility credentials.",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
     "controller.opcode.exchange": {
       "capability": "board_commands",
       "summary": "Exchange an opaque versionless UART opcode and caller-selected response opcode.",
@@ -652,6 +1173,11 @@
       "capability": "read",
       "summary": "os status",
       "idempotency": "safe"
+    },
+    "controller.peer.update.host": {
+      "capability": "programming",
+      "summary": "Transfer a verified executable using a caller-generated idempotency_key; report remote queued/staged acceptance, not terminal replacement health. Retry uncertain outcomes with the same key.",
+      "idempotency": "non-idempotent"
     },
     "controller.peripherals": {
       "capability": "read",
@@ -916,6 +1442,7 @@
     "-32602": "invalid params",
     "-32001": "authentication required",
     "-32003": "remote capability denied",
-    "-32000": "runtime or device error"
+    "-32000": "runtime or device error",
+    "-32004": "peer outcome uncertain; retry with the same idempotency key"
   }
 }

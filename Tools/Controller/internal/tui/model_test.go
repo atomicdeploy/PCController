@@ -30,6 +30,81 @@ func readyModel(t *testing.T, page Page) Model {
 	return model
 }
 
+func TestQQuitsEveryNormalTUIPage(t *testing.T) {
+	for page := PageDashboard; page < pageCount; page++ {
+		t.Run(pageDefinitions[page].Short, func(t *testing.T) {
+			model := readyModel(t, page)
+			model.input.SetValue("")
+			updated, command := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+			if command == nil {
+				t.Fatal("q did not return a quit command")
+			}
+			if _, ok := command().(tea.QuitMsg); !ok {
+				t.Fatalf("q command returned %T, want tea.QuitMsg", command())
+			}
+			if updated.(Model).page != page {
+				t.Fatalf("q changed page from %v to %v before quitting", page, updated.(Model).page)
+			}
+		})
+	}
+}
+
+func TestQPreservesFocusedTextAndModalInput(t *testing.T) {
+	t.Run("nonempty terminal", func(t *testing.T) {
+		model := readyModel(t, PageConsole)
+		model.input.SetValue("bee")
+		model.input.CursorEnd()
+		updated, command := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+		if command != nil {
+			if _, quits := command().(tea.QuitMsg); quits {
+				t.Fatal("q quit while the command input contained text")
+			}
+		}
+		if got := updated.(Model).input.Value(); got != "beeq" {
+			t.Fatalf("terminal input=%q, want %q", got, "beeq")
+		}
+	})
+
+	t.Run("display editor", func(t *testing.T) {
+		model := readyModel(t, PageMenus)
+		model.displayEditor = &displayEditor{Targets: []string{"segments"}}
+		updated, command := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+		if command != nil {
+			if _, quits := command().(tea.QuitMsg); quits {
+				t.Fatal("q quit while the display editor owned keyboard focus")
+			}
+		}
+		if got := updated.(Model).displayEditor.Text; got != "q" {
+			t.Fatalf("display editor text=%q, want q", got)
+		}
+	})
+
+	t.Run("port picker", func(t *testing.T) {
+		model := readyModel(t, PageDashboard)
+		model.portPicker = true
+		updated, command := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+		if command != nil {
+			if _, quits := command().(tea.QuitMsg); quits {
+				t.Fatal("q quit while the port picker owned keyboard focus")
+			}
+		}
+		if !updated.(Model).portPicker {
+			t.Fatal("q unexpectedly closed the port picker")
+		}
+	})
+}
+
+func TestPortPickerOmitsRedundantAuthenticationHint(t *testing.T) {
+	model := readyModel(t, PageDashboard)
+	rendered := ansi.Strip(model.portPickerPage(model.snapshot()))
+	if strings.Contains(strings.ToLower(rendered), "authentication") {
+		t.Fatalf("port picker retained redundant authentication copy:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "SELECT SERIAL DEVICE") {
+		t.Fatalf("port picker lost its actionable heading:\n%s", rendered)
+	}
+}
+
 func TestPreviewFramesCoverEveryDomainPage(t *testing.T) {
 	expected := map[Page]string{
 		PageDashboard:     "LIVE MEASUREMENTS",
@@ -41,7 +116,7 @@ func TestPreviewFramesCoverEveryDomainPage(t *testing.T) {
 		PageProgramming:   "PROGRAMMING",
 		PageAutomations:   "AUTOMATIONS & MACROS",
 		PageEvents:        "24-HOUR HISTORY",
-		PageConsole:       "command console",
+		PageConsole:       "CONSOLE",
 	}
 	for page, needle := range expected {
 		rendered := PreviewFrame(page, 132, 38)
@@ -59,11 +134,127 @@ func TestDashboardUsesExpandedNamesAndAdaptiveUnits(t *testing.T) {
 	for _, expected := range []string{
 		"Supply Voltage", "12.22 V", "Load Current", "286.0 mA",
 		"Load Power", "3.49 W", "Temperature · Illumination LED",
-		"Temperature · BT Audio", "BT Audio · disconnected /",
+		"BT Amplifier temperature", "Bluetooth audio", "disconnected or pairing",
 	} {
 		if !strings.Contains(rendered, expected) {
 			t.Errorf("dashboard missing %q:\n%s", expected, rendered)
 		}
+	}
+}
+
+func TestDashboardWaitsOnlyForAdvertisedStateAndNeverRendersDefaultValues(t *testing.T) {
+	model := readyModel(t, PageDashboard)
+	snapshot := control.Snapshot{Connected: true, Hello: native.Hello{
+		Capabilities: native.CapabilityRelayMotion | native.CapabilityINA219 | native.CapabilityPersistentSettings,
+	}}
+	dashboard := ansi.Strip(model.dashboardPage(snapshot))
+	if !strings.Contains(dashboard, "Waiting for the first STATUS frame") {
+		t.Fatalf("advertised in-flight measurements did not render loading state:\n%s", dashboard)
+	}
+	for _, stale := range []string{"Device Uptime", "Enclosure Door", "Active Relays", "Bluetooth audio", "Supply Voltage", "0 ms"} {
+		if strings.Contains(dashboard, stale) {
+			t.Fatalf("dashboard rendered unfetched %q:\n%s", stale, dashboard)
+		}
+	}
+	if rows := model.controlTableRows(snapshot, 16); len(rows) != 0 {
+		t.Fatalf("control rows rendered before STATUS: %#v", rows)
+	}
+	model.preview = &snapshot
+	if rows := model.boardSettingRows(); len(rows) != 0 {
+		t.Fatalf("settings rows rendered before SETTINGS: %#v", rows)
+	}
+}
+
+func TestBluetoothAndInvalidMeasurementsRequireAdvertisedValidLiveState(t *testing.T) {
+	model := readyModel(t, PageDashboard)
+	snapshot := RichPreviewSnapshot()
+	snapshot.Hello.Capabilities &^= native.CapabilityBluetoothAudio
+	snapshot.Status.TLEDCenti = -32768
+	snapshot.Status.TBTCenti = 32767
+	snapshot.Status.SupplyMV = -2147483648
+	model.preview = &snapshot
+
+	dashboard := ansi.Strip(model.dashboardPage(snapshot))
+	for _, absent := range []string{"Bluetooth audio", "BT Amplifier temperature", "Temperature · Illumination LED", "Supply Voltage", "-32768", "327.67"} {
+		if strings.Contains(dashboard, absent) {
+			t.Fatalf("dashboard rendered unavailable or invalid %q:\n%s", absent, dashboard)
+		}
+	}
+	settings := model.appSettingRows()
+	for _, row := range settings {
+		if strings.Contains(strings.ToLower(row.Label), "bt audio") || strings.Contains(row.Key, "bt-") || strings.Contains(row.Key, "temperature-audio") {
+			t.Fatalf("settings exposed absent Bluetooth capability: %#v", row)
+		}
+	}
+}
+
+func TestIntegrationRowsStayEmptyUntilBackendsReportCapabilities(t *testing.T) {
+	model := readyModel(t, PageAutomations)
+	model.integrations = nil
+	if lines := model.integrationStatusLines(); len(lines) != 0 {
+		t.Fatalf("unfetched integrations rendered static rows: %#v", lines)
+	}
+	model.integrations = func() hostui.IntegrationStatus { return hostui.IntegrationStatus{} }
+	if lines := model.integrationStatusLines(); len(lines) != 0 {
+		t.Fatalf("unadvertised integrations rendered rows: %#v", lines)
+	}
+}
+
+func TestDisconnectedHeaderReconnectsByKeyboardAndMouseWithBoundedRetry(t *testing.T) {
+	newModel := func() Model {
+		model := New(control.New(control.Options{}), shell.New(10))
+		updated, _ := model.Update(tea.WindowSizeMsg{Width: 132, Height: 38})
+		return updated.(Model)
+	}
+
+	keyboard := newModel()
+	rendered := ansi.Strip(keyboard.header(keyboard.snapshot()))
+	for _, expected := range []string{"DISCONNECTED", "Enter or click to reconnect", "background retry armed"} {
+		if !strings.Contains(rendered, expected) {
+			t.Fatalf("disconnected header missing %q:\n%s", expected, rendered)
+		}
+	}
+	updated, command := keyboard.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	keyboard = updated.(Model)
+	if command == nil || !keyboard.connectPending {
+		t.Fatal("Enter on disconnected TUI did not start an immediate reconnect")
+	}
+	if header := ansi.Strip(keyboard.header(keyboard.snapshot())); !strings.Contains(header, "CONNECTING") || strings.Contains(header, "RECONNECTING") {
+		t.Fatalf("active attempt has an untruthful lifecycle label:\n%s", header)
+	}
+
+	mouse := newModel()
+	updated, command = mouse.Update(tea.MouseMsg{
+		X: 131, Y: 0, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress,
+	})
+	mouse = updated.(Model)
+	if command == nil || !mouse.connectPending {
+		t.Fatal("clicking disconnected header did not start an immediate reconnect")
+	}
+
+	for attempt := 0; attempt < 8; attempt++ {
+		updated, _ = mouse.Update(connectResultMsg{err: errors.New("not present")})
+		mouse = updated.(Model)
+	}
+	if mouse.connectRetryDelay != 30*time.Second {
+		t.Fatalf("retry delay=%s, want bounded 30s", mouse.connectRetryDelay)
+	}
+	if !mouse.connectRetryAt.After(time.Now()) {
+		t.Fatalf("failed attempt did not schedule a future background retry: %s", mouse.connectRetryAt)
+	}
+}
+
+func TestDisconnectedRemoteSnapshotDropsPeerOwnedValues(t *testing.T) {
+	snapshot := RichPreviewSnapshot()
+	snapshot.Connected = false
+	cleared := clearDisconnectedPeerState(snapshot)
+	if cleared.Hello != (native.Hello{}) || cleared.Status != (native.Status{}) ||
+		cleared.Settings != (native.Settings{}) || cleared.HaveStatus || cleared.HaveSettings ||
+		cleared.HaveFrontPanel || cleared.HaveStatusLED || !cleared.StatusUpdated.IsZero() {
+		t.Fatalf("disconnected snapshot retained peer-owned state: %#v", cleared)
+	}
+	if cleared.Port.Name != snapshot.Port.Name {
+		t.Fatalf("reconnect identity was discarded: got %#v, want %#v", cleared.Port, snapshot.Port)
 	}
 }
 
@@ -295,18 +486,18 @@ func TestRFNameAndRadixPersistPCSideOnly(t *testing.T) {
 	}
 }
 
-func TestDashboardAndProgrammingExposeUptimeAndGuardedFlash(t *testing.T) {
+func TestDashboardAndProgrammingExposeLiveStateAndGuardedActions(t *testing.T) {
 	dashboard := PreviewFrame(PageDashboard, 132, 38)
 	if !strings.Contains(dashboard, "Device Uptime") || !strings.Contains(dashboard, "1h13m12s") {
 		t.Fatalf("polished uptime missing:\n%s", dashboard)
 	}
 	programming := PreviewFrame(PageProgramming, 160, 46)
-	for _, expected := range []string{"U Flash", "backup flash + EEPROM + metadata", "content-addressed SHA-256"} {
+	for _, expected := range []string{"U Flash", "Application protocol", "Current firmware", "5DF10D05"} {
 		if !strings.Contains(programming, expected) {
 			t.Errorf("programming page missing %q:\n%s", expected, programming)
 		}
 	}
-	for _, hidden := range []string{"Safe app reset", "Safe flash", "Advanced USBasp", "--method usbasp"} {
+	for _, hidden := range []string{"Safe app reset", "Safe flash", "Advanced USBasp", "--method usbasp", "backup flash + EEPROM + metadata", "content-addressed SHA-256"} {
 		if strings.Contains(programming, hidden) {
 			t.Errorf("programming page exposed %q:\n%s", hidden, programming)
 		}
@@ -352,6 +543,24 @@ func TestNestedTabAndRightArrowCompletion(t *testing.T) {
 	model = updated.(Model)
 	if got := model.input.Value(); got != "relay side left " {
 		t.Fatalf("right completion=%q", got)
+	}
+}
+
+func TestFirmwareFeatureConfigurationCompletion(t *testing.T) {
+	engine := shell.New(10)
+	for _, test := range []struct {
+		line string
+		want string
+	}{
+		{"config get programming.f", "config get programming.firmware_features"},
+		{"config set programming.f", "config set programming.firmware_features"},
+		{"config set programming.firmware_features eeprom-m", "config set programming.firmware_features eeprom-menu-labels"},
+		{"config set programming.firmware_features d", "config set programming.firmware_features default-off"},
+	} {
+		candidates := completionCandidates(engine, test.line)
+		if len(candidates) != 1 || candidates[0] != test.want {
+			t.Fatalf("completion %q=%#v want %q", test.line, candidates, test.want)
+		}
 	}
 }
 
@@ -537,6 +746,225 @@ func TestTargetedAndBoardAppPageActionsSelectOnlyTheIntendedTUI(t *testing.T) {
 	}
 }
 
+func navigationSyncAction(epoch string, revision string, page string) hostui.AppAction {
+	return hostui.AppAction{
+		Kind: "app.page", Value: page, Source: "navigation-sync", Target: "tui:one",
+		Metadata: map[string]string{
+			hostui.NavigationSyncKey:     hostui.NavigationSyncGroupUpdate,
+			hostui.NavigationGroupKey:    hostui.DefaultNavigationGroup,
+			hostui.NavigationEpochKey:    epoch,
+			hostui.NavigationRevisionKey: revision,
+			hostui.NavigationSourceKey:   "tui:two",
+		},
+	}
+}
+
+func TestTUINavigationSyncRejectsReplayAndResetsOnlyOnRemoteSession(t *testing.T) {
+	snapshot := RichPreviewSnapshot()
+	model := NewWithOptions(control.New(control.Options{}), shell.New(10), Options{
+		Preview: &snapshot, DisableWelcome: true, InstanceID: "tui:one",
+		NavigationSync: true, NavigationGroup: hostui.DefaultNavigationGroup,
+	})
+	firstEpoch := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	secondEpoch := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	updated, _ := model.Update(appActionMsg(navigationSyncAction(firstEpoch, "2", "events")))
+	model = updated.(Model)
+	if model.page != PageEvents {
+		t.Fatalf("fresh synchronized page=%v", model.page)
+	}
+	for _, stale := range []hostui.AppAction{
+		navigationSyncAction(firstEpoch, "2", "settings"),
+		navigationSyncAction(firstEpoch, "1", "controls"),
+		navigationSyncAction(secondEpoch, "3", "updates"),
+	} {
+		updated, _ = model.Update(appActionMsg(stale))
+		model = updated.(Model)
+		if model.page != PageEvents {
+			t.Fatalf("stale/foreign action changed page to %v: %#v", model.page, stale)
+		}
+	}
+	updated, _ = model.Update(runtimeEventMsg(control.Event{
+		Kind: "client.navigation.session.reset", Source: "remote-ipc",
+	}))
+	model = updated.(Model)
+	updated, _ = model.Update(appActionMsg(navigationSyncAction(secondEpoch, "1", "updates")))
+	if got := updated.(Model).page; got != PageProgramming {
+		t.Fatalf("new primary-session epoch page=%v", got)
+	}
+}
+
+func TestTUINavigationCommitsLocalIntentWithoutEchoingCoordinatorPage(t *testing.T) {
+	snapshot := RichPreviewSnapshot()
+	commits := make([]string, 0, 2)
+	model := NewWithOptions(control.New(control.Options{}), shell.New(10), Options{
+		Preview: &snapshot, DisableWelcome: true, InstanceID: "tui:one",
+		NavigationSync: true, NavigationGroup: hostui.DefaultNavigationGroup,
+		CommitNavigation: func(page string) { commits = append(commits, page) },
+	})
+	model.switchPage(PageEvents)
+	if len(commits) != 1 || commits[0] != "events" {
+		t.Fatalf("local navigation commits=%#v", commits)
+	}
+	updated, _ := model.Update(appActionMsg(navigationSyncAction(
+		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "2", "settings",
+	)))
+	model = updated.(Model)
+	if model.page != PageAppSettings {
+		t.Fatalf("coordinator page=%v", model.page)
+	}
+	if len(commits) != 1 {
+		t.Fatalf("coordinator page echoed as new commit: %#v", commits)
+	}
+}
+
+func TestTUIExactTypedPageDoesNotCommitOrFanOutNavigation(t *testing.T) {
+	snapshot := RichPreviewSnapshot()
+	var commits []string
+	var acknowledgements []hostui.ActionAck
+	model := NewWithOptions(control.New(control.Options{}), shell.New(10), Options{
+		Preview: &snapshot, DisableWelcome: true, InstanceID: "tui:exact",
+		NavigationSync: true, NavigationGroup: hostui.DefaultNavigationGroup,
+		CommitNavigation: func(page string) { commits = append(commits, page) },
+		AckAppAction: func(ack hostui.ActionAck) error {
+			acknowledgements = append(acknowledgements, ack)
+			return nil
+		},
+	})
+	action := hostui.AppAction{
+		Kind: "app.page", Value: "events", Target: model.instanceID,
+		OperationID: "exact-page", Metadata: map[string]string{
+			hostui.ActionDeliveryIDKey: "exact-delivery",
+			hostui.ActionExpiresAtKey:  time.Now().Add(time.Minute).UTC().Format(time.RFC3339Nano),
+		},
+	}
+	updated, command := model.Update(appActionMsg(action))
+	model = updated.(Model)
+	runTeaCommandTree(command)
+	if model.page != PageEvents || len(commits) != 0 {
+		t.Fatalf("exact page=%v navigation commits=%#v", model.page, commits)
+	}
+	if len(acknowledgements) != 1 || acknowledgements[0].OperationID != action.OperationID ||
+		acknowledgements[0].DeliveryID != "exact-delivery" ||
+		acknowledgements[0].State != hostui.ActionStateApplied {
+		t.Fatalf("acknowledgements=%#v", acknowledgements)
+	}
+}
+
+func TestTUISettingsCanOptThisInstanceOutAndReportMembershipImmediately(t *testing.T) {
+	model := readyModel(t, PageAppSettings)
+	model.navigationSync = true
+	var modes []bool
+	reports := 0
+	model.setNavigationSync = func(value bool) { modes = append(modes, value) }
+	model.reportTerminalAsync = func(_, _ string) { reports++ }
+	for index, row := range model.appSettingRows() {
+		if row.Key == "instance.navigation" {
+			model.cursor = index
+			break
+		}
+	}
+	var opened bool
+	model, opened = model.beginSettingEditor()
+	if !opened || model.settingEditor == nil || model.settingEditor.Key != "instance.navigation" {
+		t.Fatalf("navigation editor=%#v", model.settingEditor)
+	}
+	model.settingEditor.Fields[0].Value = 0
+	model, _, _ = model.commitAppSettingEditor()
+	if model.navigationSync || len(modes) != 1 || modes[0] || reports != 1 {
+		t.Fatalf("sync=%t modes=%#v reports=%d", model.navigationSync, modes, reports)
+	}
+}
+
+func TestTUIRejectsNavigationQueuedBeforeLatestPresenceReport(t *testing.T) {
+	snapshot := RichPreviewSnapshot()
+	model := NewWithOptions(control.New(control.Options{}), shell.New(10), Options{
+		Preview: &snapshot, DisableWelcome: true, InstanceID: "tui:one",
+		NavigationSync: true, NavigationGroup: hostui.DefaultNavigationGroup,
+		NavigationIdentity: func() (string, uint64) {
+			return "11111111111111111111111111111111", 2
+		},
+	})
+	stale := navigationSyncAction("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "1", "events")
+	stale.Metadata[hostui.NavigationTargetEpochKey] = "11111111111111111111111111111111"
+	stale.Metadata[hostui.NavigationTargetRevisionKey] = "1"
+	updated, _ := model.Update(appActionMsg(stale))
+	model = updated.(Model)
+	if model.page != PageDashboard {
+		t.Fatalf("stale target generation page=%v", model.page)
+	}
+	stale.Metadata[hostui.NavigationRevisionKey] = "2"
+	stale.Metadata[hostui.NavigationTargetRevisionKey] = "2"
+	updated, _ = model.Update(appActionMsg(stale))
+	if got := updated.(Model).page; got != PageEvents {
+		t.Fatalf("current target generation page=%v", got)
+	}
+}
+
+func TestTUIOptOutIgnoresGroupSyncButAcceptsExplicitRemoteNavigation(t *testing.T) {
+	model := readyModel(t, PageDashboard)
+	model.instanceID = "tui:private"
+	model.navigationGroup = hostui.DefaultNavigationGroup
+	model.navigationSync = false
+	group := navigationSyncAction("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "1", "events")
+	group.Target = model.instanceID
+	updated, _ := model.Update(appActionMsg(group))
+	model = updated.(Model)
+	if model.page != PageDashboard {
+		t.Fatalf("opted-out TUI followed group page %v", model.page)
+	}
+	updated, _ = model.Update(appActionMsg(hostui.AppAction{
+		Kind: "app.page", Value: "events", Source: "ipc", Target: model.instanceID,
+	}))
+	if got := updated.(Model).page; got != PageEvents {
+		t.Fatalf("explicit remote navigation page=%v", got)
+	}
+}
+
+func TestRemoteTUIOptOutAcceptsExplicitNavigationRuntimeEvent(t *testing.T) {
+	model := readyModel(t, PageDashboard)
+	model.remote = &RemoteBackend{}
+	model.instanceID = "tui:private"
+	model.navigationSync = false
+	updated, _ := model.Update(runtimeEventMsg(control.Event{
+		Kind: "app.page", Source: "ipc", Action: "navigate",
+		Metadata: map[string]string{
+			"page": "events", "target_instance": model.instanceID,
+		},
+	}))
+	if got := updated.(Model).page; got != PageEvents {
+		t.Fatalf("explicit remote runtime navigation page=%v", got)
+	}
+}
+
+func TestRemoteRuntimeNavigationMetadataUsesSameReplayCursor(t *testing.T) {
+	model := readyModel(t, PageDashboard)
+	model.remote = &RemoteBackend{}
+	model.instanceID = "tui:one"
+	model.navigationSync = true
+	model.navigationGroup = hostui.DefaultNavigationGroup
+	action := navigationSyncAction("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "4", "settings")
+	event := control.Event{
+		Kind: action.Kind, Source: action.Source,
+		Metadata: map[string]string{},
+	}
+	for key, value := range action.Metadata {
+		event.Metadata[key] = value
+	}
+	event.Metadata["page"] = action.Value
+	event.Metadata["target_instance"] = action.Target
+	updated, _ := model.Update(runtimeEventMsg(event))
+	model = updated.(Model)
+	if model.page != PageAppSettings {
+		t.Fatalf("runtime synchronized page=%v", model.page)
+	}
+	event.Metadata[hostui.NavigationRevisionKey] = "3"
+	event.Metadata["page"] = "events"
+	updated, _ = model.Update(runtimeEventMsg(event))
+	if got := updated.(Model).page; got != PageAppSettings {
+		t.Fatalf("out-of-order runtime event changed page=%v", got)
+	}
+}
+
 func TestTUITerminalTitleAndOSCAppActions(t *testing.T) {
 	snapshot := RichPreviewSnapshot()
 	var payloads []string
@@ -570,6 +998,207 @@ func TestTUITerminalTitleAndOSCAppActions(t *testing.T) {
 	}
 }
 
+func TestTUITypedActionAcknowledgesActualResultAndDeduplicates(t *testing.T) {
+	snapshot := RichPreviewSnapshot()
+	var acknowledgements []hostui.ActionAck
+	model := NewWithOptions(control.New(control.Options{}), shell.New(10), Options{
+		Preview: &snapshot, DisableWelcome: true, InstanceID: "host:tui",
+		WriteOSC: func(string) error { return nil },
+		AckAppAction: func(ack hostui.ActionAck) error {
+			acknowledgements = append(acknowledgements, ack)
+			return nil
+		},
+	})
+	expiresAt := time.Now().Add(time.Minute).UTC().Format(time.RFC3339Nano)
+	titleAction := hostui.AppAction{
+		Kind: "app.title", Value: "Bench", Target: "host:tui", OperationID: "title-one",
+		Metadata: map[string]string{
+			hostui.ActionDeliveryIDKey: "title-delivery", hostui.ActionExpiresAtKey: expiresAt,
+		},
+	}
+	updated, command := model.Update(appActionMsg(titleAction))
+	model = updated.(Model)
+	if receipt := model.actionReceipts[hostui.AppActionReceiptKey(titleAction)]; receipt.State != hostui.ActionStateApplied ||
+		model.terminalTitle() != "Bench" {
+		t.Fatalf("receipt=%#v title=%q", receipt, model.terminalTitle())
+	}
+	runTeaCommandTree(command)
+	if len(acknowledgements) != 1 || acknowledgements[0].OperationID != "title-one" ||
+		acknowledgements[0].DeliveryID != "title-delivery" {
+		t.Fatalf("acknowledgements=%#v", acknowledgements)
+	}
+
+	titleAction.Value = "must-not-reapply"
+	updated, command = model.Update(appActionMsg(titleAction))
+	model = updated.(Model)
+	runTeaCommandTree(command)
+	if model.terminalTitle() != "Bench" || len(acknowledgements) != 2 ||
+		acknowledgements[1] != acknowledgements[0] {
+		t.Fatalf("duplicate title=%q acknowledgements=%#v", model.terminalTitle(), acknowledgements)
+	}
+
+	progressAction := hostui.AppAction{
+		Kind: "app.progress", Value: "warning 73", Target: "host:tui", OperationID: "progress-one",
+		Metadata: map[string]string{
+			hostui.ActionDeliveryIDKey: "progress-delivery", hostui.ActionExpiresAtKey: expiresAt,
+		},
+	}
+	updated, command = model.Update(appActionMsg(progressAction))
+	model = updated.(Model)
+	messages := runTeaCommandTree(command)
+	var terminalResult terminalOSCResultMsg
+	for _, message := range messages {
+		if result, ok := message.(terminalOSCResultMsg); ok {
+			terminalResult = result
+		}
+	}
+	if terminalResult.ack == nil || terminalResult.ack.OperationID != "progress-one" {
+		t.Fatalf("terminal result=%#v messages=%#v", terminalResult, messages)
+	}
+	updated, command = model.Update(terminalResult)
+	model = updated.(Model)
+	runTeaCommandTree(command)
+	if receipt := model.actionReceipts[hostui.AppActionReceiptKey(progressAction)]; receipt.State != hostui.ActionStateApplied ||
+		len(acknowledgements) != 3 || acknowledgements[2].OperationID != "progress-one" ||
+		acknowledgements[2].DeliveryID != "progress-delivery" {
+		t.Fatalf("receipt=%#v acknowledgements=%#v", receipt, acknowledgements)
+	}
+}
+
+func TestTUITypedActionReceiptIdentityIncludesDeliveryAndDropsExpiredReplay(t *testing.T) {
+	snapshot := RichPreviewSnapshot()
+	var acknowledgements []hostui.ActionAck
+	model := NewWithOptions(control.New(control.Options{}), shell.New(10), Options{
+		Preview: &snapshot, DisableWelcome: true, InstanceID: "host:tui",
+		AckAppAction: func(ack hostui.ActionAck) error {
+			acknowledgements = append(acknowledgements, ack)
+			return nil
+		},
+	})
+	firstDeadline := time.Now().Add(time.Minute).UTC().Format(time.RFC3339Nano)
+	secondDeadline := time.Now().Add(2 * time.Minute).UTC().Format(time.RFC3339Nano)
+	action := hostui.AppAction{
+		Kind: "app.title", Value: "First", Target: "host:tui", OperationID: "reusable-id",
+		Metadata: map[string]string{
+			hostui.ActionDeliveryIDKey: "delivery-first", hostui.ActionExpiresAtKey: firstDeadline,
+		},
+	}
+	updated, command := model.Update(appActionMsg(action))
+	model = updated.(Model)
+	runTeaCommandTree(command)
+	action.Value = "duplicate-must-not-apply"
+	updated, command = model.Update(appActionMsg(action))
+	model = updated.(Model)
+	runTeaCommandTree(command)
+	if model.terminalTitle() != "First" || len(acknowledgements) != 2 {
+		t.Fatalf("same delivery title=%q acknowledgements=%#v", model.terminalTitle(), acknowledgements)
+	}
+
+	action.Value = "Reused later"
+	action.Metadata[hostui.ActionDeliveryIDKey] = "delivery-second"
+	action.Metadata[hostui.ActionExpiresAtKey] = secondDeadline
+	updated, command = model.Update(appActionMsg(action))
+	model = updated.(Model)
+	runTeaCommandTree(command)
+	if model.terminalTitle() != "Reused later" || len(acknowledgements) != 3 {
+		t.Fatalf("reused delivery title=%q acknowledgements=%#v", model.terminalTitle(), acknowledgements)
+	}
+
+	action.Value = "expired-must-not-apply"
+	action.OperationID = "expired-id"
+	action.Metadata[hostui.ActionDeliveryIDKey] = "delivery-expired"
+	action.Metadata[hostui.ActionExpiresAtKey] = time.Now().Add(-time.Second).UTC().Format(time.RFC3339Nano)
+	updated, command = model.Update(appActionMsg(action))
+	model = updated.(Model)
+	runTeaCommandTree(command)
+	if model.terminalTitle() != "Reused later" || len(acknowledgements) != 3 {
+		t.Fatalf("expired delivery title=%q acknowledgements=%#v", model.terminalTitle(), acknowledgements)
+	}
+
+	action.Value = "missing-deadline-must-not-apply"
+	action.OperationID = "missing-deadline"
+	action.Metadata[hostui.ActionDeliveryIDKey] = "delivery-without-deadline"
+	delete(action.Metadata, hostui.ActionExpiresAtKey)
+	updated, command = model.Update(appActionMsg(action))
+	model = updated.(Model)
+	runTeaCommandTree(command)
+	if model.terminalTitle() != "Reused later" || len(acknowledgements) != 3 {
+		t.Fatalf("unbounded delivery title=%q acknowledgements=%#v", model.terminalTitle(), acknowledgements)
+	}
+
+	action.Value = "missing-delivery-must-not-apply"
+	action.OperationID = "missing-delivery"
+	delete(action.Metadata, hostui.ActionDeliveryIDKey)
+	action.Metadata[hostui.ActionExpiresAtKey] = secondDeadline
+	updated, command = model.Update(appActionMsg(action))
+	model = updated.(Model)
+	runTeaCommandTree(command)
+	if model.terminalTitle() != "Reused later" || len(acknowledgements) != 3 {
+		t.Fatalf("delivery-less title=%q acknowledgements=%#v", model.terminalTitle(), acknowledgements)
+	}
+}
+
+func TestTUIAppActionAcknowledgementRetriesBoundedlyAndLogsOnlyFinalFailure(t *testing.T) {
+	snapshot := RichPreviewSnapshot()
+	attempts := 0
+	model := NewWithOptions(control.New(control.Options{}), shell.New(10), Options{
+		Preview: &snapshot, DisableWelcome: true, InstanceID: "host:tui",
+		AckAppAction: func(hostui.ActionAck) error {
+			attempts++
+			if attempts < maximumAppActionAckAttempts {
+				return errors.New("temporarily unavailable")
+			}
+			return nil
+		},
+	})
+	ack := hostui.ActionAck{
+		OperationID: "retry-operation", DeliveryID: "retry-delivery",
+		InstanceID: "host:tui", State: hostui.ActionStateApplied,
+	}
+	result := acknowledgeAppAction(model.ackAppAction, ack)().(appActionAckResultMsg)
+	for result.err != nil && result.attempt < maximumAppActionAckAttempts {
+		before := len(model.logs)
+		updated, retryCommand := model.Update(result)
+		model = updated.(Model)
+		if retryCommand == nil || len(model.logs) != before {
+			t.Fatalf("attempt %d retry=%v logs=%#v", result.attempt, retryCommand != nil, model.logs[before:])
+		}
+		retry := appActionAckRetryMsg{ack: result.ack, attempt: result.attempt + 1}
+		updated, command := model.Update(retry)
+		model = updated.(Model)
+		result = command().(appActionAckResultMsg)
+	}
+	updated, command := model.Update(result)
+	model = updated.(Model)
+	if command != nil || attempts != maximumAppActionAckAttempts || logsContain(model.logs, "app action acknowledgement failed") {
+		t.Fatalf("recovered attempts=%d command=%v logs=%#v", attempts, command != nil, model.logs)
+	}
+
+	finalFailure := appActionAckResultMsg{
+		ack: ack, attempt: maximumAppActionAckAttempts, err: errors.New("still unavailable"),
+	}
+	updated, command = model.Update(finalFailure)
+	model = updated.(Model)
+	if command != nil || !logsContain(model.logs, "app action acknowledgement failed: still unavailable") {
+		t.Fatalf("final failure command=%v logs=%#v", command != nil, model.logs)
+	}
+}
+
+func runTeaCommandTree(command tea.Cmd) []tea.Msg {
+	if command == nil {
+		return nil
+	}
+	message := command()
+	if batch, ok := message.(tea.BatchMsg); ok {
+		var result []tea.Msg
+		for _, nested := range batch {
+			result = append(result, runTeaCommandTree(nested)...)
+		}
+		return result
+	}
+	return []tea.Msg{message}
+}
+
 func TestUpdateEventsOpenProgrammingPageAndTrackVisibleProgress(t *testing.T) {
 	model := readyModel(t, PageDashboard)
 	model.writeOSC = func(string) error { return nil }
@@ -594,6 +1223,26 @@ func TestUpdateEventsOpenProgrammingPageAndTrackVisibleProgress(t *testing.T) {
 	}
 	if strings.Contains(rendered, "Progress and hashes appear in Console") {
 		t.Fatal("programming page retained the obsolete static progress hint")
+	}
+}
+
+func TestIdleUpdatePresentationAndDefaultFooterStayQuiet(t *testing.T) {
+	model := readyModel(t, PageProgramming)
+	rendered := ansi.Strip(model.programmingPage(model.snapshot()))
+	for _, forbidden := range []string{
+		"Update state", "Update progress", "0%", "Normal flash gate",
+		"Backup storage", "Blank-board flow", "application opcodes and bootloader operations are mutually exclusive",
+	} {
+		if strings.Contains(rendered, forbidden) {
+			t.Fatalf("idle programming view retained static or false progress copy %q:\n%s", forbidden, rendered)
+		}
+	}
+	if footer := ansi.Strip(model.footer()); footer != "" {
+		t.Fatalf("default TUI footer retained static shortcut noise: %q", footer)
+	}
+	model.setNotice("Firmware build started")
+	if footer := ansi.Strip(model.footer()); footer != "Firmware build started" {
+		t.Fatalf("dynamic notice footer=%q", footer)
 	}
 }
 
@@ -1208,7 +1857,7 @@ func TestPrimaryTablesFitRepresentativeNarrowAndWideWidths(t *testing.T) {
 }
 
 func TestDashboardLongValuesWrapInsideTheirValueColumn(t *testing.T) {
-	row := ansi.Strip(kvCard(55, 22, "Bluetooth", "BT Audio · disconnected / pairing (blinking indicator)"))
+	row := ansi.Strip(kvCard(55, 22, "Bluetooth", "disconnected or pairing · blinking indicator"))
 	lines := strings.Split(row, "\n")
 	if len(lines) < 2 {
 		t.Fatalf("representative long value did not wrap: %q", row)
@@ -1443,8 +2092,8 @@ func TestAutomationPageShowsHostPlatformAndBridgeStatus(t *testing.T) {
 			t.Errorf("integration status missing %q:\n%s", expected, rendered)
 		}
 	}
-	if !strings.Contains(rendered, "actions require registered") {
-		t.Fatal("toast activation limitation is not visible")
+	if strings.Contains(rendered, "actions require registered") {
+		t.Fatal("automation page rendered a static capability hint before the backend supplied it")
 	}
 }
 
@@ -1641,6 +2290,25 @@ func TestTUIUsesCommandEngineMacroRunner(t *testing.T) {
 	library := model.macroLibrary()
 	if len(library) != 1 || library[0].ID != 9 || library[0].Name != "shared-runner" {
 		t.Fatalf("TUI did not read command engine macro runner: %#v", library)
+	}
+}
+
+func TestRemoteTUIMacroWorkspaceUsesAuthoritativeSnapshot(t *testing.T) {
+	model := Model{remote: &RemoteBackend{}, remoteSnapshot: control.Snapshot{
+		Macros: control.MacroSnapshot{
+			Library:   []appconfig.Macro{{ID: 9, Name: "remote take"}},
+			Playback:  control.MacroState{Name: "remote take", Mode: "host", Running: true, Step: 2, StepCount: 3},
+			Recording: control.MacroRecordingState{Name: "next take", Steps: 4},
+		},
+	}}
+	if got := model.macroLibrary(); len(got) != 1 || got[0].Name != "remote take" {
+		t.Fatal(got)
+	}
+	if got := model.macroState(); !got.Running || got.Step != 2 {
+		t.Fatal(got)
+	}
+	if got := model.macroRecordingState(); got.Name != "next take" || got.Steps != 4 {
+		t.Fatal(got)
 	}
 }
 

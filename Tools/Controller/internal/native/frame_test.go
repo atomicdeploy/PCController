@@ -230,6 +230,13 @@ func TestParseHelloCompactIdentitySchema3(t *testing.T) {
 	if _, err := ParseHello(payload[:13]); err == nil {
 		t.Fatal("truncated compact HELLO was accepted")
 	}
+	profileAware := append(append([]byte(nil), payload...), 0x00, 0xD9)
+	profileAware[0] = 4
+	profileHello, err := ParseHello(profileAware)
+	if err != nil || profileHello.IdentitySchema != 4 ||
+		profileHello.FeatureProfile != 0 || profileHello.BuildFeatures != 0xD9 {
+		t.Fatalf("unexpected profile-aware HELLO: %#v err=%v", profileHello, err)
+	}
 	wrongSchema := append([]byte(nil), payload...)
 	wrongSchema[0] = 2
 	if _, err := ParseHello(wrongSchema); err == nil {
@@ -296,7 +303,7 @@ func TestConfirmedResponseSchemas(t *testing.T) {
 		status.ResetCause != 0x0A || status.ResetCount != 0x12345678 {
 		t.Fatalf("unexpected STATUS: %#v", status)
 	}
-	if CapabilityProgramState != 1<<24 || SupportsHostMenuOverlay(Hello{Capabilities: CapabilityProgramState}) {
+	if CapabilityBluetoothAudio != 1<<11 || CapabilityProgramState != 1<<24 || SupportsHostMenuOverlay(Hello{Capabilities: CapabilityProgramState}) {
 		t.Fatal("capability bit 24 must identify PROGRAM_STATE, not host-menu overlay")
 	}
 	if got := ProgramStatePayload(false); !bytes.Equal(got, []byte{ProgramStateIdle}) {
@@ -307,6 +314,18 @@ func TestConfirmedResponseSchemas(t *testing.T) {
 	}
 	if _, err := ParseStatus(statusPayload[:StatusPayloadSize-1]); err == nil {
 		t.Fatal("STATUS without reset telemetry was accepted")
+	}
+}
+
+func TestStatusAvailabilityRejectsSentinelAndOutOfRangeMeasurements(t *testing.T) {
+	status := Status{
+		Flags:    StatusINA219Available | StatusTLEDAvailable | StatusTBTAvailable,
+		SupplyMV: -1, BusMV: -1, CurrentMA: -1, PowerMW: -1,
+		TLEDCenti: -32768, TBTCenti: 12501,
+	}
+	status.applyAvailability()
+	if status.INA219Available || status.TLEDAvailable || status.TBTAvailable {
+		t.Fatalf("invalid measurements advertised as available: %#v", status)
 	}
 }
 
@@ -700,15 +719,25 @@ func TestParseChangedDisplayAndBuzzerPushes(t *testing.T) {
 		t.Fatal("truncated SEGMENT_CHANGED payload was accepted")
 	}
 
-	buzzer, err := ParseBuzzerState([]byte{0xB8, 0x01, 0xDC, 0x00, 0})
+	compact, err := ParseBuzzerState([]byte{0xB8, 0x01, 0xDC, 0x00, 0})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if buzzer.FrequencyHz != 440 || buzzer.DurationMS != 220 || buzzer.Muted {
-		t.Fatalf("buzzer=%#v", buzzer)
+	if compact.Timed || compact.DeviceMicros != 0 || compact.FrequencyHz != 440 || compact.DurationMS != 220 || compact.Muted {
+		t.Fatalf("compact buzzer state=%+v", compact)
 	}
-	if _, err := ParseBuzzerState([]byte{0, 0, 0, 0, 2}); err == nil {
+	if _, err := ParseBuzzerState([]byte{0, 0, 0, 0, 2, 0, 0, 0, 0}); err == nil {
 		t.Fatal("invalid BUZZER_CHANGED muted flag was accepted")
+	}
+	timed, err := ParseBuzzerState([]byte{0x70, 0x03, 125, 0, 1, 0x78, 0x56, 0x34, 0x12})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !timed.Timed || timed.DeviceMicros != 0x12345678 || timed.FrequencyHz != 880 || timed.DurationMS != 125 || !timed.Muted {
+		t.Fatalf("timed buzzer state=%+v", timed)
+	}
+	if _, err := ParseBuzzerState([]byte{0, 0, 0, 0, 0, 0}); err == nil {
+		t.Fatal("invalid six-byte BUZZER_CHANGED payload was accepted")
 	}
 }
 

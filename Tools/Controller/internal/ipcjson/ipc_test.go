@@ -20,6 +20,7 @@ import (
 	"pccontroller.local/controller/internal/hostfacts"
 	"pccontroller.local/controller/internal/hostos"
 	"pccontroller.local/controller/internal/hostui"
+	"pccontroller.local/controller/internal/programmer"
 	"pccontroller.local/controller/internal/shell"
 	"pccontroller.local/controller/internal/webui"
 )
@@ -70,6 +71,23 @@ func TestAppPageRPCPublishesValidatedTUIAction(t *testing.T) {
 	}
 }
 
+func TestNavigationCommitRPCReturnsCorrelatedCoordinatorOutcome(t *testing.T) {
+	runtime := control.New(control.Options{})
+	defer runtime.Close()
+	service := Service{Client: controllerapi.AttachSharedRuntime(runtime, shell.New(8)), NavigationCommand: func(command hostui.NavigationCommand) (hostui.NavigationOutcome, error) {
+		if command.Group != "default" || command.Source != "tui:one" || command.Page != "events" || command.OperationID != "op-1" {
+			t.Fatalf("command=%#v", command)
+		}
+		return hostui.NavigationOutcome{Group: "default", Epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Revision: 7, OperationID: command.OperationID, Page: "events"}, nil
+	}}
+	params, _ := json.Marshal(hostui.NavigationCommand{Group: "default", Source: "tui:one", Page: "events", OperationID: "op-1"})
+	response := service.Dispatch(context.Background(), Request{Method: "controller.app.navigation.commit", Params: params})
+	outcome, ok := response.Result.(hostui.NavigationOutcome)
+	if response.Error != nil || !ok || outcome.Revision != 7 || outcome.OperationID != "op-1" || outcome.Page != "events" {
+		t.Fatalf("response=%#v error=%+v", response, response.Error)
+	}
+}
+
 func TestAppInstanceRPCQueriesAndTargetsNavigation(t *testing.T) {
 	runtime := control.New(control.Options{})
 	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
@@ -109,6 +127,112 @@ func TestAppInstanceRPCQueriesAndTargetsNavigation(t *testing.T) {
 	}
 }
 
+func TestAppLaunchRPCUsesTypedBoundedCallback(t *testing.T) {
+	runtime := control.New(control.Options{})
+	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	defer client.Shutdown()
+	var received hostui.SurfaceLaunchRequest
+	service := Service{
+		Client: client,
+		AppLaunch: func(
+			_ context.Context,
+			request hostui.SurfaceLaunchRequest,
+		) (hostui.SurfaceLaunchResult, error) {
+			received = request
+			return hostui.SurfaceLaunchResult{
+				Surface: request.Surface, Requested: request.Mode,
+				Effective: "started", Accepted: true,
+			}, nil
+		},
+	}
+	params := json.RawMessage(`{"surface":"tui","mode":"launch","page":"updates","idempotency_key":"test-launch"}`)
+	response := service.Dispatch(context.Background(), Request{
+		Method: "controller.app.launch", Params: params,
+	})
+	if response.Error != nil {
+		t.Fatal(response.Error)
+	}
+	result, ok := response.Result.(hostui.SurfaceLaunchResult)
+	if !ok || !result.Accepted || result.Effective != "started" ||
+		received.Surface != "tui" || received.Page != "updates" ||
+		received.IdempotencyKey != "test-launch" {
+		t.Fatalf("received=%#v result=%#v", received, response.Result)
+	}
+
+	response = service.Dispatch(context.Background(), Request{
+		Method: "controller.app.launch",
+		Params: json.RawMessage(`{"surface":"tui","command":"cmd.exe /c whoami"}`),
+	})
+	if response.Error == nil || !strings.Contains(response.Error.Message, "unknown field") {
+		t.Fatalf("arbitrary execution field accepted: %#v", response)
+	}
+}
+
+func TestRemoteAppNavigationRejectsCoordinatorMetadataAndKeepsExplicitPath(t *testing.T) {
+	runtime := control.New(control.Options{})
+	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	broker := hostui.NewActionBroker()
+	actions := broker.Events()
+	config := appconfig.Defaults()
+	config.IPC.AllowRemote = true
+	service := Service{
+		Client: client, AppAction: broker.Publish,
+		HostConfig: func() appconfig.Config { return config },
+	}
+	injected, _ := json.Marshal(hostui.AppAction{
+		Kind: "app.page", Value: "settings", Target: "tui:one",
+		Metadata: map[string]string{
+			hostui.NavigationSyncKey:     hostui.NavigationSyncGroupUpdate,
+			hostui.NavigationGroupKey:    hostui.DefaultNavigationGroup,
+			hostui.NavigationEpochKey:    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			hostui.NavigationRevisionKey: "99",
+			hostui.NavigationSourceKey:   "tui:attacker",
+		},
+	})
+	denied := service.DispatchRemote(context.Background(), Request{
+		Method: "controller.app.action", Params: injected,
+	}, "bridge")
+	if denied.Error == nil || denied.Error.Code != -32003 ||
+		!strings.Contains(denied.Error.Message, capabilityHostConfig) {
+		t.Fatalf("disabled host-configuration policy=%#v", denied)
+	}
+
+	config.IPC.RemotePolicy.HostConfiguration = true
+	spoofed := service.DispatchRemote(context.Background(), Request{
+		Method: "controller.app.action", Params: injected,
+	}, "bridge")
+	if spoofed.Error == nil || !strings.Contains(spoofed.Error.Message, "coordinator-owned") {
+		t.Fatalf("authorized generic metadata injection=%#v", spoofed)
+	}
+	select {
+	case action := <-actions:
+		t.Fatalf("spoofed action reached broker: %#v", action)
+	default:
+	}
+
+	explicitParams, _ := json.Marshal(map[string]string{
+		"page": "settings", "target": "tui:one",
+	})
+	explicit := service.DispatchRemote(context.Background(), Request{
+		Method: "controller.app.navigate", Params: explicitParams,
+	}, "bridge")
+	if explicit.Error != nil {
+		t.Fatalf("explicit authorized navigation=%#v", explicit)
+	}
+	select {
+	case action := <-actions:
+		if action.Kind != "app.page" || action.Target != "tui:one" ||
+			action.Value != "settings" || hostui.HasCoordinatorNavigationMetadata(action.Metadata) {
+			t.Fatalf("explicit action=%#v", action)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("explicit navigation did not reach broker")
+	}
+	if client.LatestEventID() == 0 {
+		t.Fatal("remote navigation authorization was not audited")
+	}
+}
+
 func TestAppBridgeReturnsCoordinatorSelfInformation(t *testing.T) {
 	runtime := control.New(control.Options{})
 	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
@@ -137,6 +261,193 @@ func TestAppBridgeReturnsCoordinatorSelfInformation(t *testing.T) {
 		instance.Self.ProcessID != 36152 || instance.Self.ImagePath == "" ||
 		instance.Self.Vars["processor_architecture"] != "AMD64" {
 		t.Fatalf("bridge instance=%#v", response.Result)
+	}
+}
+
+func TestTypedAppActionRPCSubmitsAcknowledgesAndQueriesExactOutcome(t *testing.T) {
+	runtime := control.New(control.Options{})
+	defer runtime.Close()
+	registry := hostui.NewInstanceRegistry()
+	if _, err := registry.Upsert(hostui.AppInstance{
+		ID: "tui:one", Surface: "tui", State: "active", LeaseSeconds: 45,
+		Values: map[string]string{hostui.ActionCapabilitiesKey: hostui.TUIActionCapabilities},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	broker := hostui.NewActionBroker()
+	deliveries := broker.Events()
+	coordinator := hostui.NewActionCoordinator(registry, broker.PublishTracked)
+	defer coordinator.Close()
+	service := Service{
+		Client:    controllerapi.AttachSharedRuntime(runtime, shell.New(8)),
+		AppAction: broker.Publish, AppActionSubmit: coordinator.Submit,
+		AppActionAck: coordinator.Ack, AppActionOutcome: coordinator.Outcome,
+		AppInstances: registry,
+	}
+	params, _ := json.Marshal(map[string]any{
+		"kind": "app.progress", "value": "normal 42", "target": "tui:one",
+		"operation_id": "rpc-operation", "timeout_ms": 1000,
+	})
+	response := service.Dispatch(context.Background(), Request{Method: "controller.app.action", Params: params})
+	if response.Error != nil {
+		t.Fatal(response.Error)
+	}
+	envelope, ok := response.Result.(appActionOperationEnvelope)
+	if !ok || !envelope.Accepted || envelope.Operation.OperationID != "rpc-operation" ||
+		len(envelope.Operation.Targets) != 1 || envelope.Operation.Targets[0].State != hostui.ActionStateQueued {
+		t.Fatalf("submit response=%#v", response.Result)
+	}
+	var delivered hostui.AppAction
+	select {
+	case delivery := <-deliveries:
+		delivered = delivery
+		if delivery.OperationID != "rpc-operation" || delivery.Target != "tui:one" {
+			t.Fatalf("delivery=%#v", delivery)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("typed app action was not delivered")
+	}
+
+	ack, _ := json.Marshal(hostui.ActionAck{
+		OperationID: "rpc-operation", DeliveryID: delivered.Metadata[hostui.ActionDeliveryIDKey],
+		InstanceID: "tui:one", State: hostui.ActionStateApplied,
+	})
+	response = service.Dispatch(context.Background(), Request{Method: "controller.app.action.ack", Params: ack})
+	if response.Error != nil {
+		t.Fatal(response.Error)
+	}
+	envelope, ok = response.Result.(appActionOperationEnvelope)
+	if !ok || envelope.Operation.State != hostui.ActionStateApplied {
+		t.Fatalf("ack response=%#v", response.Result)
+	}
+	query, _ := json.Marshal(map[string]string{"operation_id": "rpc-operation"})
+	response = service.Dispatch(context.Background(), Request{Method: "controller.app.action.outcome", Params: query})
+	if response.Error != nil {
+		t.Fatal(response.Error)
+	}
+	envelope, ok = response.Result.(appActionOperationEnvelope)
+	if !ok || envelope.Operation.Targets[0].State != hostui.ActionStateApplied {
+		t.Fatalf("query response=%#v", response.Result)
+	}
+	if requestCapability("controller.app.action.ack", ack) != capabilityHostConfig ||
+		requestCapability("controller.app.action.outcome", query) != capabilityRead {
+		t.Fatal("typed app action capabilities are not mutation/read separated")
+	}
+}
+
+func TestTypedCoordinatorPreservesLegacyAppActions(t *testing.T) {
+	runtime := control.New(control.Options{})
+	defer runtime.Close()
+	registry := hostui.NewInstanceRegistry()
+	if _, err := registry.Upsert(hostui.AppInstance{
+		ID: "tui:legacy-actions", Surface: "tui", State: "active", LeaseSeconds: 45,
+		Values: map[string]string{hostui.ActionCapabilitiesKey: hostui.TUIActionCapabilities},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	broker := hostui.NewActionBroker()
+	deliveries := broker.Events()
+	coordinator := hostui.NewActionCoordinator(registry, broker.PublishTracked)
+	defer coordinator.Close()
+	service := Service{
+		Client:    controllerapi.AttachSharedRuntime(runtime, shell.New(8)),
+		AppAction: broker.Publish, AppActionSubmit: coordinator.Submit,
+	}
+
+	tests := []hostui.AppAction{
+		{Kind: "command", Value: "status", Target: "tui:legacy-actions"},
+		{Kind: "app.quit", Target: "tui:legacy-actions"},
+		{Kind: "app.port.open", Target: "tui:legacy-actions"},
+		{Kind: "app.port.close", Target: "tui:legacy-actions"},
+	}
+	for _, action := range tests {
+		params, _ := json.Marshal(action)
+		response := service.Dispatch(context.Background(), Request{
+			Method: "controller.app.action", Params: params,
+		})
+		if response.Error != nil {
+			t.Fatalf("%s legacy response=%#v", action.Kind, response)
+		}
+		accepted, ok := response.Result.(map[string]bool)
+		if !ok || !accepted["accepted"] {
+			t.Fatalf("%s legacy result=%#v", action.Kind, response.Result)
+		}
+		select {
+		case delivery := <-deliveries:
+			if delivery.Kind != action.Kind || delivery.Value != action.Value || delivery.OperationID != "" {
+				t.Fatalf("%s delivery=%#v", action.Kind, delivery)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("%s was not delivered through legacy broker", action.Kind)
+		}
+	}
+
+	trackedLegacy, _ := json.Marshal(map[string]any{
+		"kind": "command", "value": "status", "target": "tui:legacy-actions",
+		"operation_id": "unsupported-tracking",
+	})
+	response := service.Dispatch(context.Background(), Request{
+		Method: "controller.app.action", Params: trackedLegacy,
+	})
+	if response.Error == nil || !strings.Contains(response.Error.Message, "outcome-capable") {
+		t.Fatalf("legacy action fabricated tracking=%#v", response)
+	}
+	select {
+	case delivery := <-deliveries:
+		t.Fatalf("invalid tracked legacy action was delivered: %#v", delivery)
+	default:
+	}
+}
+
+func TestTypedCustomAppActionRequiresLiveAdvertisement(t *testing.T) {
+	runtime := control.New(control.Options{})
+	defer runtime.Close()
+	registry := hostui.NewInstanceRegistry()
+	if _, err := registry.Upsert(hostui.AppInstance{
+		ID: "pealayer:rpc", Surface: "pealayer", State: "active", LeaseSeconds: 45,
+		Values: map[string]string{hostui.ActionCapabilitiesKey: "pealayer.play"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	broker := hostui.NewActionBroker()
+	deliveries := broker.Events()
+	coordinator := hostui.NewActionCoordinator(registry, broker.PublishTracked)
+	defer coordinator.Close()
+	service := Service{
+		Client:    controllerapi.AttachSharedRuntime(runtime, shell.New(8)),
+		AppAction: broker.Publish, AppActionSubmit: coordinator.Submit,
+		AppActionAck: coordinator.Ack, AppActionOutcome: coordinator.Outcome,
+		AppInstances: registry,
+	}
+	params, _ := json.Marshal(map[string]any{
+		"kind": "pealayer.play", "target": "pealayer:rpc",
+		"operation_id": "rpc-custom-play", "timeout_ms": 1000,
+	})
+	response := service.Dispatch(context.Background(), Request{Method: "controller.app.action", Params: params})
+	if response.Error != nil {
+		t.Fatal(response.Error)
+	}
+	envelope, ok := response.Result.(appActionOperationEnvelope)
+	if !ok || !envelope.Accepted || envelope.Operation.Kind != "pealayer.play" {
+		t.Fatalf("response=%#v", response.Result)
+	}
+	select {
+	case delivery := <-deliveries:
+		if delivery.Kind != "pealayer.play" || delivery.Target != "pealayer:rpc" ||
+			delivery.Metadata[hostui.ActionDeliveryIDKey] == "" {
+			t.Fatalf("delivery=%#v", delivery)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("custom app action was not delivered")
+	}
+
+	unregistered, _ := json.Marshal(map[string]any{
+		"kind": "pealayer.pause", "target": "pealayer:rpc",
+		"operation_id": "rpc-unregistered", "timeout_ms": 1000,
+	})
+	response = service.Dispatch(context.Background(), Request{Method: "controller.app.action", Params: unregistered})
+	if response.Error == nil || !strings.Contains(response.Error.Message, "outcome-capable") {
+		t.Fatalf("unregistered custom action response=%#v", response)
 	}
 }
 
@@ -393,6 +704,61 @@ func TestHostMenuConfigRPCAndRESTUsePersistentHostConfig(t *testing.T) {
 	_ = response.Body.Close()
 	if response.StatusCode != http.StatusOK || config.HostMenus.Menus[0].Content != "REST applied" {
 		t.Fatalf("host-menu REST PUT status=%d body=%s content=%q", response.StatusCode, body, config.HostMenus.Menus[0].Content)
+	}
+}
+
+func TestNetworkPeersRPCUsesSecretReferencesAndHotApplies(t *testing.T) {
+	runtime := control.New(control.Options{})
+	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	config := appconfig.Defaults()
+	config.Integrations.WebSocketClients = []appconfig.WebSocketClient{{
+		Name: "old", Enabled: true, URL: "ws://192.0.2.8:8787/ipc",
+		AuthToken: "resolved-plaintext-must-not-escape", AuthTokenRef: "os:bridge/old",
+		Topics: []string{"events"},
+	}}
+	updates := 0
+	service := Service{
+		Client:               client,
+		HostConfig:           func() appconfig.Config { return config },
+		PersistentHostConfig: func() appconfig.Config { return config },
+		UpdateHostConfig: func(change func(*appconfig.Config) error) error {
+			candidate := config
+			if err := change(&candidate); err != nil {
+				return err
+			}
+			if err := candidate.Validate(); err != nil {
+				return err
+			}
+			config = candidate
+			updates++
+			return nil
+		},
+	}
+
+	get := service.Dispatch(context.Background(), Request{Method: "controller.network.peers.get"})
+	encoded, _ := json.Marshal(get.Result)
+	if get.Error != nil || !strings.Contains(string(encoded), `"auth_token_ref":"os:bridge/old"`) ||
+		strings.Contains(string(encoded), "resolved-plaintext") {
+		t.Fatalf("secret-safe peer get=%s error=%v", encoded, get.Error)
+	}
+	params := json.RawMessage(`{"peers":[{"name":"cafe","enabled":true,"url":"ws://192.0.2.9:8787/ipc","protocol":"jsonrpc","auth_token_ref":"os:bridge/cafe","topics":["events","state","status"],"forward_events":true,"allow_commands":true}]}`)
+	set := service.Dispatch(context.Background(), Request{Method: "controller.network.peers.set", Params: params})
+	if set.Error != nil || updates != 1 || len(config.Integrations.WebSocketClients) != 1 ||
+		config.Integrations.WebSocketClients[0].Name != "cafe" ||
+		config.Integrations.WebSocketClients[0].AuthTokenRef != "os:bridge/cafe" ||
+		strings.Join(config.Integrations.WebSocketClients[0].Topics, ",") != "events,state,status" {
+		t.Fatalf("peer set=%#v error=%v updates=%d config=%#v", set.Result, set.Error, updates, config.Integrations.WebSocketClients)
+	}
+	plaintext := service.Dispatch(context.Background(), Request{
+		Method: "controller.network.peers.set",
+		Params: json.RawMessage(`{"peers":[{"name":"bad","enabled":true,"url":"ws://192.0.2.10:8787/ipc","auth_token":"plaintext"}]}`),
+	})
+	if plaintext.Error == nil || !strings.Contains(plaintext.Error.Message, "unknown field") || updates != 1 {
+		t.Fatalf("plaintext peer mutation was accepted: %#v updates=%d", plaintext, updates)
+	}
+	if requestCapability("controller.network.peers.get", nil) != capabilityRead ||
+		requestCapability("controller.network.peers.set", nil) != capabilityHostConfig {
+		t.Fatal("network peer RPC capabilities are not read/configuration separated")
 	}
 }
 
@@ -1033,11 +1399,67 @@ func TestStreamableEventKindSeparatesTimelineFromStatusTraffic(t *testing.T) {
 		{kind: "front_panel.segment", want: false},
 		{kind: "status_led.changed", want: false},
 		{kind: "buzzer.note", want: false},
+		{kind: "illumination.changed", want: false},
+		{kind: "settings.changed", want: false},
 		{kind: "", want: false},
 	}
 	for _, test := range tests {
 		if got := streamableEventKind(test.kind); got != test.want {
 			t.Errorf("streamableEventKind(%q)=%v want %v", test.kind, got, test.want)
+		}
+	}
+}
+
+func TestIlluminationStatePushReachesTwoIndependentWebSocketClients(t *testing.T) {
+	runtime := control.New(control.Options{})
+	client := controllerapi.AttachSharedRuntime(runtime, shell.New(2))
+	server := httptest.NewServer(websocketMux(context.Background(), &Service{
+		Client: client, WebSocketPath: "/ipc", AuthorizationDisabled: true,
+		AllowedOrigins: []string{"127.0.0.1:*"},
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	connections := make([]*websocket.Conn, 2)
+	for index := range connections {
+		connection, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+"/ipc", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer connection.CloseNow()
+		connections[index] = connection
+		request := []byte(`{"jsonrpc":"2.0","id":1,"method":"controller.subscribe","params":{"topics":["state"]}}`)
+		if err := connection.Write(ctx, websocket.MessageText, request); err != nil {
+			t.Fatal(err)
+		}
+		for {
+			_, data, err := connection.Read(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(data), `"id":1`) {
+				break
+			}
+		}
+	}
+	runtime.PublishStructuredEvent(control.Event{
+		Kind: "illumination.changed", Stream: control.EventStreamState,
+		Text:     "enclosure illumination applied 1024/4095 toward 2056/4095",
+		Metadata: map[string]string{"applied_pwm": "1024", "target_pwm": "2056"},
+	})
+	for index, connection := range connections {
+		for {
+			_, data, err := connection.Read(ctx)
+			if err != nil {
+				t.Fatalf("client %d: %v", index, err)
+			}
+			if strings.Contains(string(data), `"method":"controller.state"`) &&
+				strings.Contains(string(data), `"kind":"illumination.changed"`) {
+				if !strings.Contains(string(data), `"applied_pwm":"1024"`) {
+					t.Fatalf("client %d state=%s", index, data)
+				}
+				break
+			}
 		}
 	}
 }
@@ -1236,7 +1658,11 @@ func TestInvalidParamsRetainStandardJSONRPCErrorCode(t *testing.T) {
 
 func TestCommandCatalogAndProgramStateReachRPCAndREST(t *testing.T) {
 	runtime := control.New(control.Options{})
-	engine := control.NewCommandEngine(runtime, control.CommandOptions{})
+	engine := control.NewCommandEngine(runtime, control.CommandOptions{
+		FirmwareFeatures: []programmer.FirmwareFeature{
+			programmer.FirmwareFeatureEEPROMMenuLabels,
+		},
+	})
 	client := controllerapi.AttachSharedRuntime(runtime, engine)
 	service := &Service{Client: client}
 
@@ -1258,6 +1684,14 @@ func TestCommandCatalogAndProgramStateReachRPCAndREST(t *testing.T) {
 	})
 	if executed.Error != nil || !strings.Contains(fmt.Sprint(executed.Result), "strip pixel") {
 		t.Fatalf("command.execute=%#v", executed)
+	}
+	featureParams, _ := json.Marshal(map[string]string{"command": "toolchain features"})
+	featureStatus := service.Dispatch(context.Background(), Request{
+		Method: "controller.command.execute", Params: featureParams,
+	})
+	if featureStatus.Error != nil ||
+		!strings.Contains(fmt.Sprint(featureStatus.Result), "firmware features: eeprom-menu-labels") {
+		t.Fatalf("firmware feature status=%#v", featureStatus)
 	}
 
 	stateParams, _ := json.Marshal(map[string]string{
@@ -1430,6 +1864,19 @@ func TestRFGuidedRPCMutationsValidateBeforeBoardAccess(t *testing.T) {
 		if capability := requestCapability(method, nil); capability != capabilityBoard {
 			t.Errorf("%s capability=%q want %q", method, capability, capabilityBoard)
 		}
+	}
+}
+
+func TestFirmwareBuildRejectsUnknownRemoteInputsBeforeExecution(t *testing.T) {
+	runtime := control.New(control.Options{})
+	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	service := &Service{Client: client}
+	response := service.Dispatch(context.Background(), Request{
+		Method: "controller.firmware.build",
+		Params: json.RawMessage(`{"path":"C:\\\\untrusted","raw_flags":["--verbose"]}`),
+	})
+	if response.Error == nil || !strings.Contains(response.Error.Message, "unknown field") {
+		t.Fatalf("response=%#v, want strict unknown-field rejection", response)
 	}
 }
 

@@ -59,6 +59,24 @@ func formatTemperature(centiCelsius int16, decimals int) string {
 	return fmt.Sprintf("%.*f °C", decimals, float64(centiCelsius)/100)
 }
 
+func validVoltageReading(millivolts int32) bool {
+	return millivolts >= 0 && millivolts <= 100_000
+}
+
+func validCurrentReading(milliamps int32) bool {
+	return milliamps >= -1_000_000 && milliamps <= 1_000_000
+}
+
+func validPowerReading(milliwatts int32) bool {
+	return milliwatts >= 0 && milliwatts <= 1_000_000_000
+}
+
+func validTemperatureReading(centiCelsius int16) bool {
+	// DS18B20's specified measurement range is -55..125 C. This also rejects
+	// the firmware's INT16_MIN missing-reading sentinel before it is formatted.
+	return centiCelsius >= -5_500 && centiCelsius <= 12_500
+}
+
 func formatUptime(milliseconds uint32) string {
 	duration := time.Duration(milliseconds) * time.Millisecond
 	if duration < time.Second {
@@ -67,9 +85,14 @@ func formatUptime(milliseconds uint32) string {
 	return duration.Truncate(time.Second).String()
 }
 
-// freshnessLabel deliberately suppresses rapidly changing sub-500 ms values.
-// Below that threshold "live" conveys the useful state without a visual
-// 0/100/200 ms counter. Once stale, the age is stable enough to be actionable.
+// freshnessLiveThreshold covers the four-Hz remote convergence path with
+// enough scheduling and network headroom. A 500 ms threshold previously made
+// a healthy remote view alternate between "live" and a fractional age on every
+// poll. Once this window expires, the age is actionable and shown.
+const freshnessLiveThreshold = 1500 * time.Millisecond
+
+// freshnessLabel reports data as live while it remains within the expected
+// convergence window. Once stale, the age is stable enough to be actionable.
 func freshnessLabel(updated, now time.Time) string {
 	if updated.IsZero() {
 		return "waiting for device"
@@ -78,7 +101,7 @@ func freshnessLabel(updated, now time.Time) string {
 	if age < 0 {
 		age = 0
 	}
-	if age < 500*time.Millisecond {
+	if age < freshnessLiveThreshold {
 		return "live"
 	}
 	if age < 10*time.Second {
@@ -90,16 +113,44 @@ func freshnessLabel(updated, now time.Time) string {
 	return age.Round(time.Minute).String() + " ago"
 }
 
+const remoteClockSkewWarningThreshold = 3 * time.Second
+
+// remoteClockSkewWarning keeps clock diagnostics separate from freshness.
+// Remote status timestamps cross a JSON boundary and cannot carry Go's
+// monotonic clock reading; using them directly for age makes clock skew look
+// like transport lag. The offset remains useful as an explicit warning.
+func remoteClockSkewWarning(offset time.Duration) string {
+	if offset > -remoteClockSkewWarningThreshold && offset < remoteClockSkewWarningThreshold {
+		return ""
+	}
+	direction := "ahead"
+	magnitude := offset
+	if magnitude < 0 {
+		direction = "behind"
+		magnitude = -magnitude
+	}
+	var formatted string
+	switch {
+	case magnitude < 10*time.Second:
+		formatted = fmt.Sprintf("%.1f s", magnitude.Seconds())
+	case magnitude < time.Minute:
+		formatted = fmt.Sprintf("%d s", int(magnitude.Round(time.Second)/time.Second))
+	default:
+		formatted = magnitude.Round(time.Minute).String()
+	}
+	return fmt.Sprintf("Clock skew · remote ≈%s %s · check time sync", formatted, direction)
+}
+
 func bluetoothAudioState(value byte) string {
 	switch value {
 	case 0:
-		return "BT Audio · off / indicator dark"
+		return "off · indicator dark"
 	case 1:
-		return "BT Audio · connected (solid indicator)"
+		return "connected · solid indicator"
 	case 2:
-		return "BT Audio · disconnected / pairing (blinking indicator)"
+		return "disconnected or pairing · blinking indicator"
 	default:
-		return fmt.Sprintf("BT Audio · unknown state %d", value)
+		return fmt.Sprintf("unknown state %d", value)
 	}
 }
 

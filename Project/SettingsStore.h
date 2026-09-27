@@ -5,6 +5,7 @@
 
 #include "../ProjectConfig.h"
 #include "EepromLayout.h"
+#include "FrontPanelModel.h"
 #include "MotionDoorPolicy.h"
 
 // Persistent built-in menu geometry; stable page IDs are packed two per byte.
@@ -223,7 +224,7 @@ struct ControllerSettings {
   }
 #if PCCONTROLLER_MENU_VISIBILITY
   bool menuPageVisible(uint8_t page) const {
-    return page < PersistentMenuPageCount &&
+    return page < PersistentMenuPageCount && !retiredMenuPageAlias(page) &&
            (visibleMenuMask & static_cast<uint16_t>(1U << page)) != 0;
   }
 #endif
@@ -268,6 +269,11 @@ public:
   // Returns the single MCU-owned live settings record.
   ControllerSettings &values();
   const ControllerSettings &values() const;
+
+  // Converts retained page-12 layout/default values to the unified KEY page
+  // without changing the packed 14-ID wire permutation. Returns true when the
+  // in-memory record must be persisted again.
+  bool normalizeMenuLayout();
 
   // Coalesces edits before a delayed EEPROM write to reduce wear.
   void markDirty(uint32_t now = millis());

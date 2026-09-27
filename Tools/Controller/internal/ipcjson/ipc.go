@@ -18,7 +18,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -34,6 +33,7 @@ import (
 	"pccontroller.local/controller/internal/hostfacts"
 	"pccontroller.local/controller/internal/hostos"
 	"pccontroller.local/controller/internal/hostui"
+	"pccontroller.local/controller/internal/lanresolver"
 	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/ports"
 	"pccontroller.local/controller/internal/productidentity"
@@ -63,6 +63,7 @@ type Response struct {
 type RPCError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
+	Data    any    `json:"data,omitempty"`
 }
 
 type opcodeExchangeParams struct {
@@ -244,16 +245,22 @@ const (
 )
 
 type Service struct {
-	Client                *controller.Client
-	WebSocketPath         string
-	SocketIOPath          string
-	WebUI                 http.Handler
-	IntegrationProxy      http.Handler
-	LocalDevice           LocalDeviceService
-	HostFacts             hostfacts.Provider
-	Artifacts             *artifacts.Service
-	ReleaseDiscovery      ReleaseDiscoveryService
-	AuthToken             string
+	Client           *controller.Client
+	WebSocketPath    string
+	SocketIOPath     string
+	WebUI            http.Handler
+	IntegrationProxy http.Handler
+	LocalDevice      LocalDeviceService
+	HostFacts        hostfacts.Provider
+	Artifacts        *artifacts.Service
+	ReleaseDiscovery ReleaseDiscoveryService
+	AuthToken        string
+	// AuthorizationDisabled is the product-wide alpha contract from #148.
+	// Configured credentials and remote capability bits remain readable so a
+	// future complete session design can adopt them, but they are dormant while
+	// this flag is set. This is intentionally selected by product entry points,
+	// not exposed as another end-user security mode.
+	AuthorizationDisabled bool
 	RemotePrincipal       string
 	AllowedOrigins        []string
 	InboundWebhooks       bool
@@ -266,19 +273,78 @@ type Service struct {
 	HostSurface           string
 	CoordinatorInstanceID string
 	AppAction             func(hostui.AppAction) error
+	AppActionSubmit       func(hostui.AppAction, time.Duration) (hostui.ActionOperation, error)
+	AppActionAck          func(hostui.ActionAck) (hostui.ActionOperation, error)
+	AppActionOutcome      func(string) (hostui.ActionOperation, error)
+	AppLaunch             func(context.Context, hostui.SurfaceLaunchRequest) (hostui.SurfaceLaunchResult, error)
+	NavigationCommand     func(hostui.NavigationCommand) (hostui.NavigationOutcome, error)
 	AppInstances          *hostui.InstanceRegistry
 	Shutdown              func()
 	HostConfig            func() appconfig.Config
-	UpdateHostConfig      func(func(*appconfig.Config) error) error
-	BridgeList            func() any
-	BridgeCall            func(context.Context, string, Request) (Response, error)
-	WebhookAdmin          func() WebhookAdminService
-	HotkeyStatus          func() any
-	LastSessionSnapshot   func() (any, error)
-	commandMu             sync.Mutex
-	sessionMu             sync.Mutex
-	sessionTickets        map[[sha256.Size]byte]sessionTicket
-	sessionClock          func() time.Time
+	// PersistentHostConfig returns the unresolved file-backed view. It is used
+	// only by contracts that must return secret references while never exposing
+	// resolved plaintext values.
+	PersistentHostConfig func() appconfig.Config
+	UpdateHostConfig     func(func(*appconfig.Config) error) error
+	// SubscribeHostConfig delivers the current effective host configuration and
+	// every hot-applied replacement. Long-lived remote transports use it to
+	// revoke already-open sessions as soon as ipc.allow_remote becomes false.
+	SubscribeHostConfig func(context.Context) <-chan appconfig.Config
+	BuzzerRuntimeStatus func() appconfig.BuzzerRuntimeStatus
+	BridgeList          func() any
+	BridgeCall          func(context.Context, string, Request) (Response, error)
+	WebhookAdmin        func() WebhookAdminService
+	HotkeyStatus        func() any
+	LastSessionSnapshot func() (any, error)
+	commandMu           sync.Mutex
+	sessionMu           sync.Mutex
+	sessionTickets      map[[sha256.Size]byte]sessionTicket
+	sessionClock        func() time.Time
+}
+
+type appActionRequest struct {
+	hostui.AppAction
+	TimeoutMS int `json:"timeout_ms,omitempty"`
+}
+
+type appActionOperationEnvelope struct {
+	Accepted  bool                   `json:"accepted"`
+	Operation hostui.ActionOperation `json:"operation"`
+}
+
+func appActionTimeout(milliseconds int) (time.Duration, error) {
+	if milliseconds == 0 {
+		return 0, nil
+	}
+	if milliseconds < 1 || int64(milliseconds) > hostui.MaximumActionTimeout.Milliseconds() {
+		return 0, fmt.Errorf(
+			"app action timeout_ms must be 1..%d",
+			hostui.MaximumActionTimeout.Milliseconds(),
+		)
+	}
+	return time.Duration(milliseconds) * time.Millisecond, nil
+}
+
+func appActionEnvelope(operation hostui.ActionOperation) appActionOperationEnvelope {
+	accepted := false
+	for _, target := range operation.Targets {
+		if target.State != hostui.ActionStateRejected {
+			accepted = true
+			break
+		}
+	}
+	return appActionOperationEnvelope{Accepted: accepted, Operation: operation}
+}
+
+func appActionTracksOutcome(registry *hostui.InstanceRegistry, action hostui.AppAction) bool {
+	return hostui.TracksRegisteredAppActionOutcome(registry, action.Kind, action.Target)
+}
+
+func validateLegacyAppActionTracking(action hostui.AppAction, timeoutMS int) error {
+	if strings.TrimSpace(action.OperationID) != "" || timeoutMS != 0 {
+		return errors.New("operation_id and timeout_ms require an outcome-capable app action")
+	}
+	return nil
 }
 
 // browserUISettings is the narrow persistent host-owned subset exposed to the
@@ -302,6 +368,24 @@ type browserUISettings struct {
 type peripheralSettings struct {
 	Names       map[string]string                `json:"peripheral_names"`
 	Peripherals []appconfig.PeripheralDescriptor `json:"peripherals"`
+}
+
+// networkPeerConfig is the versionless bridge topology contract. Deliberately
+// do not add an auth_token field: callers may store or read only an opaque
+// secret reference, never plaintext credential material.
+type networkPeerConfig struct {
+	Name          string   `json:"name"`
+	Enabled       bool     `json:"enabled"`
+	URL           string   `json:"url"`
+	Protocol      string   `json:"protocol,omitempty"`
+	AuthTokenRef  string   `json:"auth_token_ref,omitempty"`
+	Topics        []string `json:"topics,omitempty"`
+	ForwardEvents bool     `json:"forward_events"`
+	AllowCommands bool     `json:"allow_commands"`
+}
+
+type networkPeersConfig struct {
+	Peers []networkPeerConfig `json:"peers"`
 }
 
 type hostFactsParams struct {
@@ -401,9 +485,9 @@ func (service *Service) Dispatch(ctx context.Context, request Request) Response 
 	return service.dispatch(ctx, request, Access{Transport: "ipc"})
 }
 
-// DispatchRemote applies the current file-watched remote capability policy in
-// addition to request authentication. Outbound host bridges use this entry
-// point for requests arriving from their authenticated peer.
+// DispatchRemote identifies requests arriving through a configured peer. Alpha
+// auth/authZ is dormant; the semantic capability classification remains for
+// the deferred complete permission design.
 func (service *Service) DispatchRemote(
 	ctx context.Context,
 	request Request,
@@ -464,6 +548,10 @@ func (service *Service) dispatch(
 		}
 		if err := decodeParams(request.Params, &params); err != nil {
 			response.Error = &RPCError{Code: -32602, Message: err.Error()}
+			return response
+		}
+		if params.TimeoutMS < 0 || params.TimeoutMS > int((24*time.Hour)/time.Millisecond) {
+			response.Error = &RPCError{Code: -32602, Message: "timeout_ms must be 0..86400000"}
 			return response
 		}
 		timeout := time.Duration(params.TimeoutMS) * time.Millisecond
@@ -578,17 +666,22 @@ func (service *Service) dispatch(
 			}
 		}
 	case "controller.integrations.local.get":
-		config := service.hostConfig().Integrations
+		config := service.persistentHostConfig().Integrations
 		result = map[string]any{
 			"local_device":     config.LocalDevice,
 			"data_hub":         config.DataHub,
 			"lifecycle_safety": config.Lifecycle,
+			"buzzer_mirror":    config.BuzzerMirror,
+			"buzzer_runtime":   service.buzzerRuntimeStatus(),
 		}
+	case "controller.integrations.status":
+		result = map[string]any{"buzzer_runtime": service.buzzerRuntimeStatus()}
 	case "controller.integrations.local.set":
 		var params struct {
 			LocalDevice     appconfig.LocalDevice      `json:"local_device"`
 			DataHub         appconfig.DataHub          `json:"data_hub"`
 			LifecycleSafety *appconfig.LifecycleSafety `json:"lifecycle_safety,omitempty"`
+			BuzzerMirror    *appconfig.BuzzerMirror    `json:"buzzer_mirror,omitempty"`
 		}
 		if err = decodeParams(request.Params, &params); err == nil {
 			if service.UpdateHostConfig == nil {
@@ -600,14 +693,19 @@ func (service *Service) dispatch(
 					if params.LifecycleSafety != nil {
 						value.Integrations.Lifecycle = *params.LifecycleSafety
 					}
+					if params.BuzzerMirror != nil {
+						value.Integrations.BuzzerMirror = *params.BuzzerMirror
+					}
 					return nil
 				})
 				if err == nil {
-					config := service.hostConfig().Integrations
+					config := service.persistentHostConfig().Integrations
 					result = map[string]any{
 						"local_device":     config.LocalDevice,
 						"data_hub":         config.DataHub,
 						"lifecycle_safety": config.Lifecycle,
+						"buzzer_mirror":    config.BuzzerMirror,
+						"buzzer_runtime":   service.buzzerRuntimeStatus(),
 					}
 				}
 			}
@@ -638,6 +736,10 @@ func (service *Service) dispatch(
 		} else {
 			result, err = service.applyHotkeyMutation(params)
 		}
+	case "controller.network.peers.get":
+		result = service.networkPeersConfig()
+	case "controller.network.peers.set":
+		result, err = service.setNetworkPeers(request.Params)
 	case "controller.connect", "controller.open", "controller.port.open":
 		var params struct {
 			Port string `json:"port"`
@@ -710,6 +812,21 @@ func (service *Service) dispatch(
 		}
 	case "controller.pwm.values":
 		result, err = service.Client.PWMValues(ctx)
+	case "controller.illumination.get":
+		result, err = service.Client.Illumination(ctx)
+	case "controller.illumination.set":
+		var params struct {
+			Mode          int `json:"mode"`
+			OnBrightness  int `json:"on_brightness"`
+			OffBrightness int `json:"off_brightness"`
+		}
+		if err = decodeParams(request.Params, &params); err == nil {
+			if params.Mode < 0 || params.Mode > 2 || params.OnBrightness < 0 || params.OnBrightness > 255 || params.OffBrightness < 0 || params.OffBrightness > 255 {
+				err = &RPCError{Code: -32602, Message: "mode must be 0..2 and brightness values must be 0..255"}
+			} else {
+				result, err = service.Client.SetIllumination(ctx, byte(params.Mode), byte(params.OnBrightness), byte(params.OffBrightness))
+			}
+		}
 	case "controller.pwm.set":
 		var params struct {
 			Channel int `json:"channel"`
@@ -833,6 +950,14 @@ func (service *Service) dispatch(
 				if err == nil {
 					result = map[string]string{"output": output}
 				}
+			}
+		}
+	case "controller.firmware.build":
+		var params controller.FirmwareBuildRequest
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			result, err = service.Client.BuildFirmware(ctx, params)
+			if err != nil {
+				err = &RPCError{Code: -32000, Message: err.Error(), Data: result}
 			}
 		}
 	case "controller.rf.list":
@@ -1075,8 +1200,8 @@ func (service *Service) dispatch(
 		if err = decodeParams(request.Params, &params); err == nil {
 			if strings.TrimSpace(params.Peer) == "" || strings.TrimSpace(params.Request.Method) == "" {
 				err = errors.New("bridge peer and request.method are required")
-			} else if params.Request.Method == "controller.bridge.call" {
-				err = errors.New("recursive bridge calls are not permitted")
+			} else if bridgeErr := ValidateBridgeRequest(params.Request); bridgeErr != nil {
+				err = bridgeErr
 			} else if service.BridgeCall == nil {
 				err = errors.New("host bridge manager is unavailable")
 			} else {
@@ -1090,15 +1215,66 @@ func (service *Service) dispatch(
 				}
 			}
 		}
+	case "controller.peer.update.host":
+		var params peerHostUpdateRequest
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			result, err = service.updatePeerHost(ctx, params)
+		}
 	case "controller.app.action":
-		var action hostui.AppAction
-		if err = decodeParams(request.Params, &action); err == nil {
-			if service.AppAction == nil {
+		var params appActionRequest
+		if err = decodeParams(request.Params, &params); err == nil {
+			action := params.AppAction
+			if hostui.HasCoordinatorNavigationMetadata(action.Metadata) {
+				err = errors.New("navigation synchronization metadata is coordinator-owned; use controller.app.navigate")
+			} else if hostui.HasCoordinatorActionDeliveryMetadata(action.Metadata) {
+				err = errors.New("app action delivery metadata is coordinator-owned")
+			} else if service.AppActionSubmit != nil && appActionTracksOutcome(service.AppInstances, action) {
+				action.Source = firstNonempty(action.Source, "ipc")
+				var timeout time.Duration
+				timeout, err = appActionTimeout(params.TimeoutMS)
+				if err == nil {
+					var operation hostui.ActionOperation
+					operation, err = service.AppActionSubmit(action, timeout)
+					if err == nil {
+						result = appActionEnvelope(operation)
+					}
+				}
+			} else if service.AppAction == nil {
 				err = errors.New("primary app action routing is unavailable")
 			} else {
 				action.Source = firstNonempty(action.Source, "ipc")
-				err = service.AppAction(action)
-				result = map[string]bool{"accepted": err == nil}
+				if err = validateLegacyAppActionTracking(action, params.TimeoutMS); err == nil {
+					err = service.AppAction(action)
+					result = map[string]bool{"accepted": err == nil}
+				}
+			}
+		}
+	case "controller.app.action.ack":
+		var params hostui.ActionAck
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			if service.AppActionAck == nil {
+				err = errors.New("app action acknowledgement routing is unavailable")
+			} else {
+				var operation hostui.ActionOperation
+				operation, err = service.AppActionAck(params)
+				if err == nil {
+					result = appActionOperationEnvelope{Accepted: true, Operation: operation}
+				}
+			}
+		}
+	case "controller.app.action.outcome":
+		var params struct {
+			OperationID string `json:"operation_id"`
+		}
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			if service.AppActionOutcome == nil {
+				err = errors.New("app action outcome routing is unavailable")
+			} else {
+				var operation hostui.ActionOperation
+				operation, err = service.AppActionOutcome(params.OperationID)
+				if err == nil {
+					result = appActionOperationEnvelope{Accepted: true, Operation: operation}
+				}
 			}
 		}
 	case "controller.app.page":
@@ -1129,10 +1305,26 @@ func (service *Service) dispatch(
 				if target == "" {
 					target = "*"
 				}
-				err = service.AppAction(hostui.AppAction{
-					Kind: "app.page", Value: params.Page, Source: "ipc", Target: target,
-				})
+				err = service.AppAction(hostui.AppAction{Kind: "app.page", Value: params.Page, Source: "ipc", Target: target})
 				result = map[string]bool{"accepted": err == nil}
+			}
+		}
+	case "controller.app.launch":
+		var params hostui.SurfaceLaunchRequest
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			if service.AppLaunch == nil {
+				err = errors.New("application surface launcher is unavailable")
+			} else {
+				result, err = service.AppLaunch(ctx, params)
+			}
+		}
+	case "controller.app.navigation.commit":
+		var params hostui.NavigationCommand
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			if service.NavigationCommand == nil {
+				err = errors.New("authoritative navigation coordinator is unavailable")
+			} else {
+				result, err = service.NavigationCommand(params)
 			}
 		}
 	case "controller.app.instances":
@@ -1410,6 +1602,67 @@ func (service *Service) hostConfig() appconfig.Config {
 	return appconfig.Defaults()
 }
 
+func (service *Service) persistentHostConfig() appconfig.Config {
+	if service.PersistentHostConfig != nil {
+		return service.PersistentHostConfig()
+	}
+	return appconfig.Redacted(service.hostConfig())
+}
+
+func (service *Service) buzzerRuntimeStatus() appconfig.BuzzerRuntimeStatus {
+	if service.BuzzerRuntimeStatus != nil {
+		return service.BuzzerRuntimeStatus()
+	}
+	config := service.hostConfig().Integrations.BuzzerMirror
+	return appconfig.BuzzerRuntimeState{Configured: config, Effective: config}.Status(false, false, "", "", "")
+}
+
+func networkPeerFromConfig(peer appconfig.WebSocketClient) networkPeerConfig {
+	return networkPeerConfig{
+		Name: strings.TrimSpace(peer.Name), Enabled: peer.Enabled,
+		URL: strings.TrimSpace(peer.URL), Protocol: strings.TrimSpace(peer.Protocol),
+		AuthTokenRef:  strings.TrimSpace(peer.AuthTokenRef),
+		Topics:        append([]string(nil), peer.Topics...),
+		ForwardEvents: peer.ForwardEvents, AllowCommands: peer.AllowCommands,
+	}
+}
+
+func (service *Service) networkPeersConfig() networkPeersConfig {
+	configured := service.persistentHostConfig().Integrations.WebSocketClients
+	result := networkPeersConfig{Peers: make([]networkPeerConfig, 0, len(configured))}
+	for _, peer := range configured {
+		result.Peers = append(result.Peers, networkPeerFromConfig(peer))
+	}
+	return result
+}
+
+func (service *Service) setNetworkPeers(raw json.RawMessage) (networkPeersConfig, error) {
+	if service.UpdateHostConfig == nil {
+		return networkPeersConfig{}, errors.New("persistent host configuration is unavailable")
+	}
+	var params networkPeersConfig
+	if err := decodeStrictParams(raw, &params); err != nil {
+		return networkPeersConfig{}, &RPCError{Code: -32602, Message: err.Error()}
+	}
+	configured := make([]appconfig.WebSocketClient, 0, len(params.Peers))
+	for _, peer := range params.Peers {
+		configured = append(configured, appconfig.WebSocketClient{
+			Name: strings.TrimSpace(peer.Name), Enabled: peer.Enabled,
+			URL: strings.TrimSpace(peer.URL), Protocol: strings.TrimSpace(peer.Protocol),
+			AuthTokenRef:  strings.TrimSpace(peer.AuthTokenRef),
+			Topics:        append([]string(nil), peer.Topics...),
+			ForwardEvents: peer.ForwardEvents, AllowCommands: peer.AllowCommands,
+		})
+	}
+	if err := service.UpdateHostConfig(func(value *appconfig.Config) error {
+		value.Integrations.WebSocketClients = configured
+		return nil
+	}); err != nil {
+		return networkPeersConfig{}, err
+	}
+	return service.networkPeersConfig(), nil
+}
+
 func (service *Service) browserUISettings() browserUISettings {
 	ui := service.hostConfig().UI
 	return browserUISettings{
@@ -1634,8 +1887,64 @@ func (service *Service) authorizeAccess(
 	if !access.Remote {
 		return nil
 	}
+	if strings.EqualFold(strings.TrimSpace(access.Transport), "bridge") {
+		if err := ValidateBridgeRequest(Request{Method: method, Params: params}); err != nil {
+			return err
+		}
+	}
+	if peerUpdate, chained := requestInvokesPeerHostUpdate(method, params, 0); peerUpdate {
+		if chained {
+			return errors.New("peer host updates may not be chained through a bridge")
+		}
+		if err := service.authorizeCapability(access, method, capabilityProgramming); err != nil {
+			return err
+		}
+		return service.authorizeCapability(access, method, capabilityBridgeCalls)
+	}
 	capability := requestCapability(method, params)
 	return service.authorizeCapability(access, method, capability)
+}
+
+func bridgeIngressCanPivot(method string, params json.RawMessage) bool {
+	switch strings.ToLower(strings.TrimSpace(method)) {
+	case "controller.bridge.call", "controller.peer.update.host", "controller.discovery.connect":
+		return true
+	case "controller.network.peers.set", "controller.integrations.local.set", "controller.hotkeys.set",
+		"controller.host_menu.configure", "controller.host_menu.config.set", "controller.host_menu.directory.replace", "controller.host_menu.content.push":
+		return true
+	case "controller.command.execute":
+		var value struct {
+			Command string `json:"command"`
+		}
+		return json.Unmarshal(params, &value) == nil && bridgeCommandCanPivot(value.Command)
+	case "controller.app.action":
+		var action hostui.AppAction
+		return json.Unmarshal(params, &action) == nil &&
+			strings.EqualFold(strings.TrimSpace(action.Kind), "command") &&
+			bridgeCommandCanPivot(action.Value)
+	default:
+		return false
+	}
+}
+
+func bridgeCommandCanPivot(command string) bool {
+	words := bridgeCommandWords(command)
+	if len(words) == 0 {
+		return false
+	}
+	if words[0] == "peer-update" {
+		return true
+	}
+	if words[0] == "config" && len(words) >= 3 && words[1] == "set" {
+		root := strings.FieldsFunc(words[2], func(character rune) bool { return character == '.' || character == '[' })
+		if len(root) != 0 {
+			switch root[0] {
+			case "integrations", "host_menu", "host_menus", "hotkeys", "automations":
+				return true
+			}
+		}
+	}
+	return words[0] == "bridge" && (len(words) < 2 || words[1] != "list")
 }
 
 func (service *Service) authorizeCapability(
@@ -1644,6 +1953,9 @@ func (service *Service) authorizeCapability(
 ) error {
 	access = service.normalizeAccess(access)
 	if !access.Remote {
+		if service.authorizationDisabled() {
+			return nil
+		}
 		if capability != capabilityRead && capability != capabilityEvents {
 			service.auditAccess(access, operation, capability, true)
 		}
@@ -1653,6 +1965,9 @@ func (service *Service) authorizeCapability(
 	if !config.IPC.AllowRemote {
 		service.auditAccess(access, operation, capability, false)
 		return errors.New("remote network access is disabled")
+	}
+	if service.authorizationDisabled() {
+		return nil
 	}
 	if !remoteCapabilityAllowed(config.IPC.RemotePolicy, capability) {
 		service.auditAccess(access, operation, capability, false)
@@ -1741,9 +2056,13 @@ func requestCapability(method string, params json.RawMessage) string {
 		"controller.discovery.manifest", "controller.discovery.local_manifest",
 		"controller.discovery.check", "controller.discovery.status":
 		return capabilityRead
-	case "controller.artifact.fetch", "controller.artifact.upload", "controller.artifact.capture",
+	case "controller.artifact.fetch", "controller.artifact.upload",
+		"controller.artifact.upload.begin", "controller.artifact.upload.chunk",
+		"controller.artifact.upload.finish", "controller.artifact.upload.abort",
+		"controller.artifact.capture", "controller.peer.update.host",
 		"controller.update.firmware", "controller.restore.flash",
-		"controller.update.eeprom", "controller.update.host", "controller.discovery.stage":
+		"controller.update.eeprom", "controller.update.host", "controller.discovery.stage",
+		"controller.firmware.build":
 		return capabilityProgramming
 	case "controller.connect", "controller.open", "controller.port.open",
 		"controller.close", "controller.port.close":
@@ -1762,8 +2081,9 @@ func requestCapability(method string, params json.RawMessage) string {
 		"controller.peripherals", "controller.peripherals.get",
 		"controller.os.policy", "controller.os.facts.catalog",
 		"controller.host.facts.catalog", "controller.hotkeys.get",
-		"controller.bridge.list", "controller.app.instances", "controller.app.instance.get",
-		"controller.app.bridge",
+		"controller.bridge.list", "controller.network.peers.get",
+		"controller.app.instances", "controller.app.instance.get",
+		"controller.app.bridge", "controller.app.action.outcome",
 		"controller.webhooks.status",
 		"controller.webhooks.pending", "controller.webhooks.dead":
 		return capabilityRead
@@ -1772,8 +2092,9 @@ func requestCapability(method string, params json.RawMessage) string {
 		"controller.peripherals.set",
 		"controller.hotkeys.set",
 		"controller.os.configure", "controller.lcd.presentation.configure",
-		"controller.app.page", "controller.app.navigate",
-		"controller.app.instance.report", "controller.app.instance.remove":
+		"controller.app.page", "controller.app.navigate", "controller.app.action.ack", "controller.app.launch",
+		"controller.app.instance.report", "controller.app.instance.remove",
+		"controller.network.peers.set":
 		return capabilityHostConfig
 	case "controller.os.key", "controller.virtual_key":
 		return capabilityVirtualKeys
@@ -1784,7 +2105,7 @@ func requestCapability(method string, params json.RawMessage) string {
 	case "controller.webhooks.replay", "controller.webhooks.clear":
 		return capabilityIntegrations
 	case "controller.device.status", "controller.device.action",
-		"controller.device.inspect", "controller.integrations.local.get",
+		"controller.device.inspect", "controller.integrations.local.get", "controller.integrations.status",
 		"controller.integrations.local.set":
 		return capabilityIntegrations
 	case "controller.command.execute":
@@ -1817,8 +2138,10 @@ func requestCapability(method string, params json.RawMessage) string {
 		"controller.history.timeline", "controller.lcd.presentation.status",
 		"controller.ports", "controller.os.status", "controller.system.status",
 		"controller.os.facts", "controller.host.facts",
-		"controller.discovery.scan", "controller.discovery.config", "controller.discovery.config.get", "controller.pwm.values":
+		"controller.discovery.scan", "controller.discovery.config", "controller.discovery.config.get", "controller.pwm.values", "controller.illumination.get":
 		return capabilityRead
+	case "controller.illumination.set":
+		return capabilityBoard
 	case "controller.discovery.connect":
 		return capabilityBridgeCalls
 	case "controller.discovery.config.set":
@@ -2244,7 +2567,7 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 			"socket_io_path":      socketIOPath,
 			"session_ticket_path": SessionTicketPath,
 			"server_proof_path":   ServerProofPath,
-			"auth_required":       strings.TrimSpace(service.currentAuthToken()) != "",
+			"auth_required":       !service.authorizationDisabled() && strings.TrimSpace(service.currentAuthToken()) != "",
 			"integrations": map[string]bool{
 				"local_device":          config.Integrations.LocalDevice.Enabled,
 				"data_hub":              config.Integrations.DataHub.Enabled,
@@ -2252,7 +2575,19 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 				"buzzer_native_enabled": config.Integrations.BuzzerMirror.Enabled && config.Integrations.BuzzerMirror.NativeEnabled,
 				"buzzer_web_audio":      config.Integrations.BuzzerMirror.Enabled && config.Integrations.BuzzerMirror.WebAudioEnabled,
 			},
+			"buzzer_runtime": service.buzzerRuntimeStatus(),
 		})
+	})
+	mux.HandleFunc("/api/integrations/status", func(writer http.ResponseWriter, request *http.Request) {
+		if !authorizeHTTPCapability(writer, request, service, capabilityIntegrations) {
+			return
+		}
+		if request.Method != http.MethodGet {
+			writer.Header().Set("Allow", http.MethodGet)
+			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		writeHTTPJSON(writer, http.StatusOK, map[string]any{"buzzer_runtime": service.buzzerRuntimeStatus()})
 	})
 	mux.HandleFunc(SessionTicketPath, func(writer http.ResponseWriter, request *http.Request) {
 		serveSessionTicket(writer, request, service)
@@ -2646,11 +2981,8 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 			return
 		}
 		access := accessFromHTTPRequest(request, "rest")
-		if err := service.authorizeCapability(
-			access,
-			"REST "+request.URL.Path,
-			commandCapability(params.Command),
-		); err != nil {
+		encoded, _ := json.Marshal(params)
+		if err := service.authorizeAccess(access, "controller.command.execute", encoded); err != nil {
 			writeHTTPJSON(writer, http.StatusForbidden, map[string]string{"error": err.Error()})
 			return
 		}
@@ -2821,6 +3153,36 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 		}
 		writeHTTPJSON(writer, http.StatusOK, instance)
 	})
+	mux.HandleFunc("/api/app/launch", func(writer http.ResponseWriter, request *http.Request) {
+		if !authorizeHTTPRequest(writer, request, service) {
+			return
+		}
+		if request.Method != http.MethodPost {
+			writer.Header().Set("Allow", http.MethodPost)
+			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !authorizeHTTPCapability(writer, request, service, capabilityHostConfig) {
+			return
+		}
+		if service.AppLaunch == nil {
+			writeHTTPJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "application surface launcher is unavailable"})
+			return
+		}
+		var params hostui.SurfaceLaunchRequest
+		decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, maxMessage))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&params); err != nil {
+			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		result, err := service.AppLaunch(request.Context(), params)
+		if err != nil {
+			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		writeHTTPJSON(writer, http.StatusOK, result)
+	})
 	mux.HandleFunc("/api/app/navigate", func(writer http.ResponseWriter, request *http.Request) {
 		if !authorizeHTTPRequest(writer, request, service) {
 			return
@@ -2866,26 +3228,117 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		if !authorizeHTTPCapability(writer, request, service, capabilityHostConfig) {
-			return
-		}
-		if service.AppAction == nil {
+		if service.AppActionSubmit == nil && service.AppAction == nil {
 			writeHTTPJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "primary app action routing is unavailable"})
 			return
 		}
-		var action hostui.AppAction
+		var params appActionRequest
 		decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, maxMessage))
 		decoder.DisallowUnknownFields()
-		if err := decoder.Decode(&action); err != nil {
+		if err := decoder.Decode(&params); err != nil {
 			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
+		encoded, _ := json.Marshal(params)
+		if err := service.authorizeAccess(accessFromHTTPRequest(request, "rest"), "controller.app.action", encoded); err != nil {
+			writeHTTPJSON(writer, http.StatusForbidden, map[string]string{"error": err.Error()})
+			return
+		}
+		action := params.AppAction
 		action.Source = "rest"
+		if hostui.HasCoordinatorNavigationMetadata(action.Metadata) {
+			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{
+				"error": "navigation synchronization metadata is coordinator-owned; use /api/app/navigate",
+			})
+			return
+		}
+		if hostui.HasCoordinatorActionDeliveryMetadata(action.Metadata) {
+			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{
+				"error": "app action delivery metadata is coordinator-owned",
+			})
+			return
+		}
+		if service.AppActionSubmit != nil && appActionTracksOutcome(service.AppInstances, action) {
+			timeout, timeoutErr := appActionTimeout(params.TimeoutMS)
+			if timeoutErr != nil {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": timeoutErr.Error()})
+				return
+			}
+			operation, submitErr := service.AppActionSubmit(action, timeout)
+			if submitErr != nil {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": submitErr.Error()})
+				return
+			}
+			envelope := appActionEnvelope(operation)
+			status := http.StatusAccepted
+			if !envelope.Accepted {
+				status = http.StatusConflict
+			}
+			writeHTTPJSON(writer, status, envelope)
+			return
+		}
+		if err := validateLegacyAppActionTracking(action, params.TimeoutMS); err != nil {
+			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
 		if err := service.AppAction(action); err != nil {
 			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
 		writeHTTPJSON(writer, http.StatusAccepted, map[string]bool{"accepted": true})
+	})
+	mux.HandleFunc("/api/app/action/ack", func(writer http.ResponseWriter, request *http.Request) {
+		if !authorizeHTTPRequest(writer, request, service) {
+			return
+		}
+		if request.Method != http.MethodPost {
+			writer.Header().Set("Allow", http.MethodPost)
+			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !authorizeHTTPCapability(writer, request, service, capabilityHostConfig) {
+			return
+		}
+		if service.AppActionAck == nil {
+			writeHTTPJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "app action acknowledgement routing is unavailable"})
+			return
+		}
+		var params hostui.ActionAck
+		decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, maxMessage))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&params); err != nil {
+			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		operation, err := service.AppActionAck(params)
+		if err != nil {
+			writeHTTPJSON(writer, http.StatusConflict, map[string]string{"error": err.Error()})
+			return
+		}
+		writeHTTPJSON(writer, http.StatusOK, appActionOperationEnvelope{Accepted: true, Operation: operation})
+	})
+	mux.HandleFunc("/api/app/action/outcome", func(writer http.ResponseWriter, request *http.Request) {
+		if !authorizeHTTPRequest(writer, request, service) {
+			return
+		}
+		if request.Method != http.MethodGet {
+			writer.Header().Set("Allow", http.MethodGet)
+			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !authorizeHTTPCapability(writer, request, service, capabilityRead) {
+			return
+		}
+		if service.AppActionOutcome == nil {
+			writeHTTPJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "app action outcome routing is unavailable"})
+			return
+		}
+		operation, err := service.AppActionOutcome(request.URL.Query().Get("operation_id"))
+		if err != nil {
+			writeHTTPJSON(writer, http.StatusNotFound, map[string]string{"error": err.Error()})
+			return
+		}
+		writeHTTPJSON(writer, http.StatusOK, appActionOperationEnvelope{Accepted: true, Operation: operation})
 	})
 	mux.HandleFunc("/api/bridges", func(writer http.ResponseWriter, request *http.Request) {
 		if !authorizeHTTPRequest(writer, request, service) {
@@ -2932,10 +3385,14 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
-		if strings.TrimSpace(params.Peer) == "" || strings.TrimSpace(params.Request.Method) == "" ||
-			params.Request.Method == "controller.bridge.call" {
+		bridgeErr := ValidateBridgeRequest(params.Request)
+		if strings.TrimSpace(params.Peer) == "" || strings.TrimSpace(params.Request.Method) == "" || bridgeErr != nil {
+			detail := "bridge peer and non-recursive request.method are required"
+			if bridgeErr != nil {
+				detail = bridgeErr.Error()
+			}
 			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{
-				"error": "bridge peer and non-recursive request.method are required",
+				"error": detail,
 			})
 			return
 		}
@@ -3302,6 +3759,7 @@ func serveWebSocket(
 	// be used afterward. The server-owned context keeps shutdown deterministic.
 	ctx, cancel := context.WithCancel(serverContext)
 	defer cancel()
+	cancelWhenRemoteAccessDisabled(ctx, service, access, cancel)
 	var writeMu sync.Mutex
 	writeJSON := func(value any) error {
 		encoded, encodeErr := json.Marshal(value)
@@ -3436,6 +3894,7 @@ func serveSocketIO(
 	// be used afterward. The server-owned context keeps shutdown deterministic.
 	ctx, cancel := context.WithCancel(serverContext)
 	defer cancel()
+	cancelWhenRemoteAccessDisabled(ctx, service, access, cancel)
 
 	var writeMu sync.Mutex
 	writePacket := func(packet string) error {
@@ -3615,6 +4074,37 @@ func serveSocketIO(
 	}
 }
 
+func cancelWhenRemoteAccessDisabled(
+	ctx context.Context,
+	service *Service,
+	access Access,
+	cancel context.CancelFunc,
+) {
+	if service == nil || !access.Remote || service.SubscribeHostConfig == nil {
+		return
+	}
+	updates := service.SubscribeHostConfig(ctx)
+	if updates == nil {
+		return
+	}
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case config, ok := <-updates:
+				if !ok {
+					return
+				}
+				if !config.IPC.AllowRemote {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+}
+
 func decodeSocketIOEvent(payload string) (string, json.RawMessage, error) {
 	var values []json.RawMessage
 	if err := json.Unmarshal([]byte(payload), &values); err != nil {
@@ -3635,6 +4125,10 @@ func (service *Service) currentAuthToken() string {
 		return service.HostConfig().IPC.AuthToken
 	}
 	return service.AuthToken
+}
+
+func (service *Service) authorizationDisabled() bool {
+	return service != nil && service.AuthorizationDisabled
 }
 
 func (service *Service) currentAllowedOrigins() []string {
@@ -3674,28 +4168,25 @@ func httpOriginAllowed(request *http.Request, allowedPatterns []string) bool {
 		parsed.RawQuery != "" || parsed.Fragment != "" {
 		return false
 	}
-	originHost := strings.ToLower(parsed.Host)
-	if strings.EqualFold(originHost, strings.TrimSpace(request.Host)) {
-		return true
+	originName := strings.ToLower(strings.TrimSuffix(parsed.Hostname(), "."))
+	originPort := parsed.Port()
+	if originPort == "" {
+		if parsed.Scheme == "https" {
+			originPort = "443"
+		} else {
+			originPort = "80"
+		}
 	}
 	if len(allowedPatterns) == 0 {
 		allowedPatterns = []string{"localhost:*", "127.0.0.1:*", "[::1]:*"}
 	}
 	for _, pattern := range allowedPatterns {
-		pattern = strings.ToLower(strings.TrimSpace(pattern))
-		if pattern == "*" || pattern == "*:*" {
+		patternHost, patternPort, splitErr := net.SplitHostPort(strings.TrimSpace(pattern))
+		if splitErr != nil || patternHost == "" || strings.ContainsAny(patternHost, "*?[]") {
 			continue
 		}
-		if strings.HasSuffix(pattern, ":*") {
-			hostPattern := strings.TrimSuffix(pattern, ":*")
-			originName := strings.ToLower(parsed.Hostname())
-			if strings.EqualFold(hostPattern, originName) ||
-				strings.EqualFold(hostPattern, "["+originName+"]") {
-				return true
-			}
-			continue
-		}
-		if match, matchErr := path.Match(pattern, originHost); matchErr == nil && match {
+		patternHost = strings.ToLower(strings.TrimSuffix(patternHost, "."))
+		if patternHost == originName && (patternPort == "*" || patternPort == originPort) {
 			return true
 		}
 	}
@@ -3967,7 +4458,7 @@ func streamWebSocketEventStream(
 // have not yet received an explicit stream field.
 func streamableEventKind(kind string) bool {
 	switch strings.ToLower(strings.TrimSpace(kind)) {
-	case "", "telemetry", "rx", "tx", "front_panel.segment", "status_led.changed", "buzzer.note":
+	case "", "telemetry", "rx", "tx", "front_panel.segment", "status_led.changed", "buzzer.note", "illumination.changed", "settings.changed":
 		return false
 	default:
 		return true
@@ -4065,8 +4556,7 @@ func Call(
 	if address == "" {
 		address = DefaultListen
 	}
-	dialer := net.Dialer{}
-	connection, err := dialer.DialContext(ctx, "tcp", address)
+	connection, err := lanresolver.Default().DialContext(ctx, "tcp", address)
 	if err != nil {
 		return Response{}, err
 	}

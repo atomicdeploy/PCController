@@ -3,22 +3,15 @@
   "info": {
     "title": "PCController event and WebSocket API",
     "version": "unversioned",
-    "description": "Authenticated full-duplex JSON-RPC, event, status, and Socket.IO-compatible messaging. WebSocket transport is required."
+    "description": "Immediate-alpha unauthenticated full-duplex JSON-RPC, event, status, and Socket.IO-compatible messaging. WebSocket transport is required; deferred security schemes are retained as non-active design metadata."
   },
   "servers": {
     "loopback": {
       "host": "127.0.0.1:8787",
       "protocol": "ws",
       "pathname": "/ipc",
-      "description": "Default loopback primary. Remote exposure requires explicit origin, authentication, and capability policy.",
-      "security": [
-        {
-          "$ref": "#/components/securitySchemes/durableHeader"
-        },
-        {
-          "$ref": "#/components/securitySchemes/browserTicket"
-        }
-      ]
+      "description": "Default loopback primary. Remote exposure requires an explicit listener and allowed origin; alpha authentication is disabled under #148.",
+      "security": []
     }
   },
   "channels": {

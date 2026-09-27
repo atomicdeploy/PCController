@@ -30,6 +30,20 @@ test("firmware defaults require an exact application and 1 KiB EEPROM pair", asy
     ],
   };
   assert.equal(assertFirmwareDefaults(manifest, root).eeprom.dataBytes, 1024);
+	assert.equal(assertFirmwareDefaults({
+		...manifest,
+		format: "pccontroller-avr-firmware-manifest/v2",
+		source: { compileFeatures: ["eeprom-menu-labels"] },
+	}, root).application.dataBytes, 12);
+	for (const [name, invalid, expected] of [
+		["v1 features", { ...manifest, source: { compileFeatures: ["eeprom-menu-labels"] } }, /v1 cannot declare/u],
+		["v2 empty", { ...manifest, format: "pccontroller-avr-firmware-manifest/v2" }, /v2 requires/u],
+		["unknown", { ...manifest, format: "pccontroller-avr-firmware-manifest/v2", source: { compileFeatures: ["unknown"] } }, /unsupported firmware feature/u],
+		["duplicate", { ...manifest, format: "pccontroller-avr-firmware-manifest/v2", source: { compileFeatures: ["eeprom-menu-labels", "eeprom-menu-labels"] } }, /unique and sorted/u],
+		["unsorted", { ...manifest, format: "pccontroller-avr-firmware-manifest/v2", source: { compileFeatures: ["eeprom-menu-labels", "eeprom-boot-opcodes"] } }, /unique and sorted/u],
+	]) {
+		assert.throws(() => assertFirmwareDefaults(invalid, root), expected, name);
+	}
   assert.throws(
     () => assertFirmwareDefaults({
       ...manifest,

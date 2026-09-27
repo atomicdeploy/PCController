@@ -150,6 +150,27 @@ export interface StatusLEDState {
   condition: number
 }
 
+export interface IlluminationState {
+  available: boolean
+  mode: number
+  on_brightness: number
+  off_brightness: number
+  door_open: boolean
+  target_brightness: number
+  target_pwm: number
+  applied_brightness: number
+  applied_pwm: number
+  at_target: boolean
+  persisted: boolean
+  updated_at?: string
+}
+
+export interface MacroSnapshot {
+  library: Array<{ id: number; name: string; mode?: string; category?: string; steps?: Array<{ kind: string; at_us?: number }> | null }>
+  playback: { running: boolean; name: string; mode: string; step: number; step_count: number; lifecycle?: string; last_error?: string; faithful: boolean; maximum_timing_error_us: number; startup_delay_us?: number }
+  recording: { active: boolean; name: string; mode: string; steps: number; last_error?: string }
+}
+
 export interface Snapshot {
   connected: boolean
   paused: boolean
@@ -166,12 +187,14 @@ export interface Snapshot {
   port_process?: PortProcessSnapshot
   program_state?: ProgramState
   rf_learning?: RFLearnState
+  macros?: MacroSnapshot
   front_panel?: FrontPanelState
   have_front_panel?: boolean
   front_panel_updated?: string
 	status_led?: StatusLEDState
 	have_status_led?: boolean
 	status_led_updated?: string
+	illumination: IlluminationState
 }
 
 export interface StatusUpdate {
@@ -253,6 +276,7 @@ export interface UIConfig {
 		buzzer_native_enabled: boolean
 		buzzer_web_audio: boolean
   }
+	buzzer_runtime?: BuzzerRuntimeStatus
   host_version?: string
   source_hash?: string
   build_time?: string
@@ -317,6 +341,36 @@ export interface LocalIntegrationSettings {
     suspend: LifecycleSafetyAction
     refresh_on_resume: boolean
   }
+  buzzer_mirror: {
+		path?: 'board' | 'host' | 'both' | 'none'
+    enabled: boolean
+    native_enabled: boolean
+    web_audio_enabled: boolean
+		backend: 'auto' | 'native' | 'external' | 'off'
+    executable?: string
+    driver_directory?: string
+  }
+	buzzer_runtime?: BuzzerRuntimeStatus
+}
+
+export interface BuzzerRuntimeStatus {
+	requested_path: 'board' | 'host' | 'both' | 'none' | 'unknown'
+	effective_path: 'board' | 'host' | 'both' | 'none' | 'unknown'
+	board_state_known: boolean
+	board_silent: boolean
+	board_change_required: boolean
+	board_apply_state: 'unspecified' | 'pending' | 'applying' | 'verified' | 'error'
+	board_apply_error?: string
+	host_mirror: boolean
+	backend_requested: 'auto' | 'native' | 'external' | 'off'
+	backend_effective: 'native' | 'external' | 'off' | 'unavailable'
+	executable_requested?: string
+	executable_effective?: string
+	backend_error?: string
+	path_overridden: boolean
+	mirror_overridden: boolean
+	backend_overridden: boolean
+	executable_overridden: boolean
 }
 
 export type LifecycleSafetyAction = 'leave' | 'stop-motion' | 'all-off'
@@ -452,6 +506,19 @@ export const emptySnapshot: Snapshot = {
   },
   have_status: false,
   have_settings: false,
+	illumination: {
+		available: false,
+		mode: 0,
+		on_brightness: 0,
+		off_brightness: 0,
+		door_open: false,
+		target_brightness: 0,
+		target_pwm: 0,
+		applied_brightness: 0,
+		applied_pwm: 0,
+		at_target: false,
+		persisted: false,
+	},
   front_panel: {
     schema: 0,
     raw_segments: [0, 0, 0, 0],

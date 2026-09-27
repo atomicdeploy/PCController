@@ -100,6 +100,41 @@ if(BUILD_TESTING)
   add_test(NAME firmware_motion_policy_contract_unit
     COMMAND firmware_motion_policy_contract_tests)
 
+  # Exercise the target-neutral relay state machine with a deterministic sink
+  # before the AVR adapter or a future VirtualBoard adapter consumes it.
+  add_executable(firmware_relay_motion_machine_tests
+    tests/relay_motion_machine_test.cpp
+  )
+  target_include_directories(firmware_relay_motion_machine_tests PRIVATE ../..)
+  set_property(TARGET firmware_relay_motion_machine_tests PROPERTY CXX_STANDARD 11)
+  if(MSVC)
+    target_compile_options(firmware_relay_motion_machine_tests PRIVATE /W4 /permissive-)
+  else()
+    target_compile_options(firmware_relay_motion_machine_tests PRIVATE ${VIRTUAL_BOARD_WARNINGS})
+  endif()
+  add_test(NAME firmware_relay_motion_machine_unit
+    COMMAND firmware_relay_motion_machine_tests)
+
+  # Compare the production ShiftRegisters/RelayController adapter against the
+  # same portable trace so AVR-only glue cannot drift from the safety core.
+  add_executable(firmware_relay_controller_adapter_tests
+    tests/relay_controller_adapter_test.cpp
+    ../../LocalLib/ShiftRegisters.cpp
+    ../../Project/RelayController.cpp
+  )
+  target_include_directories(firmware_relay_controller_adapter_tests PRIVATE
+    tests/arduino_mock
+    ../..
+  )
+  set_property(TARGET firmware_relay_controller_adapter_tests PROPERTY CXX_STANDARD 17)
+  if(MSVC)
+    target_compile_options(firmware_relay_controller_adapter_tests PRIVATE /W4 /permissive-)
+  else()
+    target_compile_options(firmware_relay_controller_adapter_tests PRIVATE ${VIRTUAL_BOARD_WARNINGS})
+  endif()
+  add_test(NAME firmware_relay_controller_adapter_unit
+    COMMAND firmware_relay_controller_adapter_tests)
+
   # The scheduler remains target-neutral: this C++11 trace suite compiles the
   # same bounded macro ring that the AVR/UART adapter uses, without linking or
   # altering the VirtualBoard runtime implementation.
@@ -120,8 +155,10 @@ if(BUILD_TESTING)
   # trace confirms that replay still reaches the ordinary protocol dispatcher.
   add_executable(firmware_macro_queue_adapter_tests
     tests/macro_queue_adapter_test.cpp
+    ../../LocalLib/ShiftRegisters.cpp
     ../../Project/Core/MacroRing.cpp
     ../../Project/MacroQueue.cpp
+    ../../Project/RelayController.cpp
     ../../Project/UartProtocol.cpp
   )
   target_include_directories(firmware_macro_queue_adapter_tests PRIVATE
@@ -172,10 +209,19 @@ if(BUILD_TESTING)
     ../../LocalLib/ShiftRegisters.cpp
     ../../LocalLib/TonePlayer.cpp
     ../../Project/RelayController.cpp
+    ../../Project/SettingsStore.cpp
+    ../../Project/UartProtocol.cpp
   )
   target_include_directories(firmware_controls_tests PRIVATE
     tests/arduino_mock
     ../..
+  )
+  # Exercise the persisted page-rank compatibility path without linking or
+  # changing the VirtualBoard runtime.
+  target_compile_definitions(firmware_controls_tests PRIVATE
+    PCCONTROLLER_MENU_VISIBILITY=1
+    PCCONTROLLER_MENU_ORDERING=1
+    PCCONTROLLER_SETTINGS_TEST_LAYOUT=1
   )
   if(MSVC)
     target_compile_options(firmware_controls_tests PRIVATE /W4 /permissive-)
@@ -225,4 +271,28 @@ if(BUILD_TESTING)
     target_compile_options(firmware_eeprom_menu_labels_tests PRIVATE ${VIRTUAL_BOARD_WARNINGS})
   endif()
   add_test(NAME firmware_eeprom_menu_labels_unit COMMAND firmware_eeprom_menu_labels_tests)
+
+  # Compile the production Timer1 engine and compact EEPROM-backed cue policy
+  # together. This catches exact door/output tones, atomic CRC fallback,
+  # specific-cue preemption, and the global Silent electrical invariant.
+  add_executable(firmware_audio_cue_tests
+    tests/audio_cue_test.cpp
+    ../../LocalLib/TonePlayer.cpp
+    ../../Project/AudioCues.cpp
+    ../../Project/UartProtocol.cpp
+  )
+  target_include_directories(firmware_audio_cue_tests PRIVATE
+    tests/arduino_mock
+    ../..
+  )
+  target_compile_definitions(firmware_audio_cue_tests PRIVATE
+    PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES=1
+    PCCONTROLLER_ENABLE_EEPROM_AUDIO_CUES=1
+  )
+  if(MSVC)
+    target_compile_options(firmware_audio_cue_tests PRIVATE /W4 /permissive-)
+  else()
+    target_compile_options(firmware_audio_cue_tests PRIVATE ${VIRTUAL_BOARD_WARNINGS})
+  endif()
+  add_test(NAME firmware_audio_cue_unit COMMAND firmware_audio_cue_tests)
 endif()

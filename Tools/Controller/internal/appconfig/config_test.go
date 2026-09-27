@@ -11,8 +11,55 @@ import (
 	"testing"
 	"time"
 
+	"pccontroller.local/controller/internal/firmwarefeatures"
 	"pccontroller.local/controller/internal/productidentity"
 )
+
+func TestProgrammingFirmwareFeaturesRoundTripCanonically(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	content := `{"schema":1,"programming":{"firmware_features":["EEPROM-MENU-LABELS","eeprom-boot-opcodes","eeprom-menu-labels"]}}`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	config, _, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []firmwarefeatures.Feature{
+		firmwarefeatures.EEPROMBootOpcodes,
+		firmwarefeatures.EEPROMMenuLabels,
+	}
+	if !reflect.DeepEqual(config.Programming.FirmwareFeatures, want) {
+		t.Fatalf("features=%v want=%v", config.Programming.FirmwareFeatures, want)
+	}
+	if err := Write(path, config); err != nil {
+		t.Fatal(err)
+	}
+	written, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(written), `"firmware_features": [`) ||
+		strings.Index(string(written), "eeprom-boot-opcodes") >
+			strings.Index(string(written), "eeprom-menu-labels") {
+		t.Fatalf("features were not persisted canonically: %s", written)
+	}
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	detached := store.Current()
+	detached.Programming.FirmwareFeatures[0] = firmwarefeatures.EEPROMMenuLabels
+	if store.Current().Programming.FirmwareFeatures[0] != firmwarefeatures.EEPROMBootOpcodes {
+		t.Fatal("Current exposed the store's firmware feature slice")
+	}
+	if err := os.WriteFile(path, []byte(`{"schema":1,"programming":{"firmware_features":["unknown"]}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Load(path); err == nil || !strings.Contains(err.Error(), "unsupported firmware feature") {
+		t.Fatalf("unknown feature error=%v", err)
+	}
+}
 
 func TestLoadOrCreateAndReload(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "config.json")
@@ -36,6 +83,19 @@ func TestLoadOrCreateAndReload(t *testing.T) {
 	if !changed || reloaded.Connection.Port != "COM18" ||
 		!reloaded.Connection.ResetOnReconnect {
 		t.Fatalf("reload got changed=%t config=%#v", changed, reloaded)
+	}
+}
+
+func TestReconnectBackoffDefaultsAndBounds(t *testing.T) {
+	value := Defaults()
+	if value.Connection.ReconnectInitialMS != 500 ||
+		value.Connection.ReconnectMaximumMS != 15_000 {
+		t.Fatalf("reconnect defaults = %#v", value.Connection)
+	}
+	value.Connection.ReconnectMaximumMS = 499
+	if err := value.Validate(); err == nil ||
+		!strings.Contains(err.Error(), "reconnect_maximum_ms") {
+		t.Fatalf("inverted reconnect bounds error = %v", err)
 	}
 }
 
@@ -444,6 +504,54 @@ func TestPresentationOverridesRemainRuntimeOnlyAndSurviveUIUpdates(t *testing.T)
 	}
 	if current := store.Current(); current.UI.AppTitle != "Environment Name" || current.UI.Tagline != "Flag tagline" || current.UI.ShowGraphs {
 		t.Fatalf("effective configuration lost override/update: %#v", current.UI)
+	}
+}
+
+func TestBuzzerRuntimeOverridesRemainProcessOnlyAndSurviveUpdates(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	value := Defaults()
+	value.Integrations.BuzzerMirror.Enabled = false
+	value.Integrations.BuzzerMirror.NativeEnabled = true
+	value.Integrations.BuzzerMirror.Backend = "auto"
+	value.Integrations.BuzzerMirror.Executable = "configured-beep"
+	if err := Write(path, value); err != nil {
+		t.Fatal(err)
+	}
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mirror := true
+	executable := "runtime-beep"
+	if err := store.SetBuzzerRuntimeOverrides(BuzzerRuntimeOverrides{
+		Path: BuzzerPathHost, Mirror: &mirror, Backend: "external", Executable: &executable,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	effective := store.Current().Integrations.BuzzerMirror
+	if !effective.Enabled || effective.Backend != "external" || effective.Executable != "runtime-beep" {
+		t.Fatalf("effective buzzer=%+v", effective)
+	}
+	persistent := store.Persistent().Integrations.BuzzerMirror
+	if persistent.Enabled || persistent.Backend != "auto" || persistent.Executable != "configured-beep" {
+		t.Fatalf("persistent buzzer absorbed runtime values: %+v", persistent)
+	}
+	if _, err := store.Update(func(config *Config) error {
+		config.UI.ShowGraphs = false
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, _, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.Integrations.BuzzerMirror != persistent || reloaded.UI.ShowGraphs {
+		t.Fatalf("persisted=%+v", reloaded.Integrations.BuzzerMirror)
+	}
+	status := store.BuzzerRuntimeState().Status(true, false, "external", "runtime-beep", "")
+	if status.RequestedPath != BuzzerPathHost || status.EffectivePath != BuzzerPathBoth || !status.BoardChangeRequired {
+		t.Fatalf("runtime status=%+v", status)
 	}
 }
 

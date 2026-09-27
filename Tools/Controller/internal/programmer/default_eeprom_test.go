@@ -28,6 +28,22 @@ func TestGenerateDefaultEEPROMIntelHexCreatesSafeCurrentSettings(t *testing.T) {
 		inspection.MaximumAddress+1 != PCControllerEEPROMBytes {
 		t.Fatalf("default EEPROM coverage = %#v", inspection)
 	}
+	audio, err := image.BytesAt(EEPROMAudioCueAddress, EEPROMAudioCueRecordBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if audio[len(audio)-1] != avrCRC8(audio[:len(audio)-1]) {
+		t.Fatal("default autonomous audio-cue CRC does not match")
+	}
+	wantAudio := []byte{
+		0xA4, 0x06, 45, // 1700 Hz door open
+		0x4C, 0x04, 45, // 1100 Hz door closed
+		0x6C, 0x07, 35, // 1900 Hz output on
+		0xE2, 0x04, 35, // 1250 Hz output off
+	}
+	if !bytes.Equal(audio[:len(audio)-1], wantAudio) {
+		t.Fatalf("default autonomous audio cues = % X, want % X", audio[:len(audio)-1], wantAudio)
+	}
 	record, err := image.BytesAt(EEPROMSettingsAddress, EEPROMSettingsRecordBytes)
 	if err != nil {
 		t.Fatal(err)
@@ -46,7 +62,10 @@ func TestGenerateDefaultEEPROMIntelHexCreatesSafeCurrentSettings(t *testing.T) {
 		t.Fatalf("default motion break=%d ms, want 1", record[30])
 	}
 	decoded := decodeOfflineSettings(image)
-	if !decoded.Valid || decoded.Values.DefaultMenuPage != 0 || decoded.Values.VisibleMenuMask != DefaultVisibleMenuMask {
+	if !decoded.Valid || decoded.Values.DefaultMenuPage != 0 ||
+		decoded.Values.VisibleMenuMask != DefaultVisibleMenuMask ||
+		decoded.Values.VisibleMenuMask&(uint16(1)<<DefaultMenuPageMotionAlias) != 0 ||
+		decoded.Values.VisibleMenuMask&(uint16(1)<<9) == 0 {
 		t.Fatalf("generated default settings = %#v", decoded)
 	}
 	remotes := decodeOfflineRemotes(image)
@@ -77,12 +96,16 @@ func TestGenerateDefaultEEPROMIntelHexCreatesSafeCurrentSettings(t *testing.T) {
 	if got, want := string(labels), defaultEEPROMMenuLabels; got != want {
 		t.Fatalf("factory menu labels = %q, want %q", got, want)
 	}
-	checksum, err := image.BytesAt(EEPROMMenuLabelsChecksumAddress, 1)
+	all, err := image.BytesAt(0, PCControllerEEPROMBytes)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if checksum[0] != xorChecksum(labels) {
-		t.Fatalf("factory menu-label checksum = 0x%02X, want 0x%02X", checksum[0], xorChecksum(labels))
+	if !validMenuLabelsRecord(all) {
+		t.Fatal("factory menu-label record did not pass versioned CRC validation")
+	}
+	if all[EEPROMMenuLabelsCommitAddress] != EEPROMMenuLabelsFormatMarker ||
+		all[EEPROMMenuLabelsCRCAddress] != menuLabelsCRC(labels) {
+		t.Fatalf("factory menu-label header = % X", all[EEPROMMenuLabelsHeaderAddress:EEPROMMenuLabelsHeaderEnd])
 	}
 }
 

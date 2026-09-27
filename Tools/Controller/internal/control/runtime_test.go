@@ -15,6 +15,7 @@ import (
 
 type reconnectTestPort struct {
 	closed chan struct{}
+	dtr    []bool
 }
 
 func newReconnectTestPort() *reconnectTestPort {
@@ -30,8 +31,11 @@ func (*reconnectTestPort) Write(data []byte) (int, error) { return len(data), ni
 func (*reconnectTestPort) Drain() error                   { return nil }
 func (*reconnectTestPort) ResetInputBuffer() error        { return nil }
 func (*reconnectTestPort) ResetOutputBuffer() error       { return nil }
-func (*reconnectTestPort) SetDTR(bool) error              { return nil }
-func (*reconnectTestPort) SetRTS(bool) error              { return nil }
+func (port *reconnectTestPort) SetDTR(value bool) error {
+	port.dtr = append(port.dtr, value)
+	return nil
+}
+func (*reconnectTestPort) SetRTS(bool) error { return nil }
 func (*reconnectTestPort) GetModemStatusBits() (*serial.ModemStatusBits, error) {
 	return &serial.ModemStatusBits{}, nil
 }
@@ -45,6 +49,26 @@ func (port *reconnectTestPort) Close() error {
 	return nil
 }
 func (*reconnectTestPort) Break(time.Duration) error { return nil }
+
+func TestPulseResetUsesRememberedPortBeforeAuthentication(t *testing.T) {
+	port := newReconnectTestPort()
+	previous := openResetSession
+	openResetSession = func(context.Context, string, int) (*link.Session, error) {
+		return link.NewForPort("COM4", port), nil
+	}
+	defer func() { openResetSession = previous }()
+
+	runtime := New(Options{BaudRate: link.DefaultBaudRate})
+	runtime.mu.Lock()
+	runtime.paused = true
+	runtime.mu.Unlock()
+	if err := runtime.PulseResetPortFor(context.Background(), "COM4", time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	if len(port.dtr) != 2 || !port.dtr[0] || port.dtr[1] {
+		t.Fatalf("unexpected DTR sequence: %v", port.dtr)
+	}
+}
 
 func TestDoorEventUpdatesSnapshotAndWakesWaiters(t *testing.T) {
 	runtime := New(Options{})
@@ -149,7 +173,7 @@ func TestUnplugReplugLifecycleAndOneResetPermit(t *testing.T) {
 	firstPort := newReconnectTestPort()
 	firstSession := link.NewForPort("TEST-NOT-A-REAL-PORT", firstPort)
 	info := ports.Info{
-		Name: "TEST-NOT-A-REAL-PORT", VID: "1A86", PID: "7523",
+		Name: "TEST-NOT-A-REAL-PORT", IsUSB: true, VID: "1A86", PID: "7523",
 		SerialNumber: "controller-1",
 	}
 	runtime.attach(link.OpenResult{
@@ -161,12 +185,13 @@ func TestUnplugReplugLifecycleAndOneResetPermit(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	disconnected, err := runtime.WaitEvent(ctx, after, "connection")
+	disconnected, err := runtime.WaitEvent(ctx, after, "usb.disconnected")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if disconnected.Lifecycle != "disconnect" ||
-		disconnected.Port.SerialNumber != "controller-1" {
+		disconnected.Port.SerialNumber != "controller-1" ||
+		disconnected.State != "disconnected" {
 		t.Fatalf("unexpected disconnect: %#v", disconnected)
 	}
 	reconnecting, err := runtime.WaitEvent(ctx, disconnected.ID, "connection")
@@ -214,6 +239,129 @@ func TestUnplugReplugLifecycleAndOneResetPermit(t *testing.T) {
 	_ = runtime.Close()
 }
 
+func TestReconnectDiscoveryRebindsAuthenticatedUSBIdentity(t *testing.T) {
+	runtime := New(Options{Filter: ports.Filter{Port: "COM4"}})
+	runtime.mu.Lock()
+	runtime.connectionState = "reconnecting"
+	runtime.portRebindAllowed = true
+	runtime.port = ports.Info{
+		Name: "COM4", IsUSB: true, VID: "1A86", PID: "7523",
+		FriendlyName: "USB-SERIAL CH340",
+		InstanceID:   `USB\VID_1A86&PID_7523\OLD-PATH`,
+	}
+	options := runtime.options
+	runtime.mu.Unlock()
+
+	discovery := runtime.discoveryOptions(options)
+	if !discovery.AllowPortRebind {
+		t.Fatal("physical USB disappearance did not arm identity rebind")
+	}
+	candidates := ports.ReconnectCandidates([]ports.Info{
+		{
+			Name: "COM3", IsUSB: true, VID: "1A86", PID: "7523",
+			FriendlyName: "USB-SERIAL CH340",
+			InstanceID:   `USB\VID_1A86&PID_7523\NEW-PATH`,
+		},
+		{Name: "COM8", IsUSB: true, VID: "2341", PID: "0043"},
+	}, discovery.Filter)
+	if len(candidates) != 1 || candidates[0].Name != "COM3" {
+		t.Fatalf("COM4 -> COM3 runtime rebind = %#v", candidates)
+	}
+}
+
+func TestExplicitConnectionPathRemainsStrict(t *testing.T) {
+	runtime := New(Options{Filter: ports.Filter{Port: "COM4"}})
+	runtime.mu.Lock()
+	runtime.connectionState = "reconnecting"
+	runtime.portRebindAllowed = false
+	runtime.port = ports.Info{
+		Name: "COM4", IsUSB: true, VID: "1A86", PID: "7523",
+	}
+	options := runtime.options
+	runtime.mu.Unlock()
+
+	discovery := runtime.discoveryOptions(options)
+	if discovery.AllowPortRebind {
+		t.Fatal("explicit/configuration reconnect relaxed the selected COM port")
+	}
+	all := []ports.Info{{Name: "COM3", IsUSB: true, VID: "1A86", PID: "7523"}}
+	if candidates := ports.Candidates(all, discovery.Filter); len(candidates) != 0 {
+		t.Fatalf("strict COM4 selector matched COM3: %#v", candidates)
+	}
+}
+
+func TestReconnectBackoffIsExponentialAndBounded(t *testing.T) {
+	options := New(Options{}).options
+	if options.ReconnectInitialDelay != 500*time.Millisecond ||
+		options.ReconnectMaximumDelay != 15*time.Second {
+		t.Fatalf("default reconnect policy = %+v", options)
+	}
+	var got []time.Duration
+	delay := time.Duration(0)
+	for index := 0; index < 8; index++ {
+		delay = nextReconnectDelay(delay, 500*time.Millisecond, 15*time.Second)
+		got = append(got, delay)
+	}
+	want := []time.Duration{
+		500 * time.Millisecond, time.Second, 2 * time.Second, 4 * time.Second,
+		8 * time.Second, 15 * time.Second, 15 * time.Second, 15 * time.Second,
+	}
+	for index := range want {
+		if got[index] != want[index] {
+			t.Fatalf("retry %d delay=%s want=%s; sequence=%v", index, got[index], want[index], got)
+		}
+	}
+}
+
+func TestConnectionTransitionsAreChangedOnlyAndRejectStaleFailures(t *testing.T) {
+	runtime := New(Options{})
+	port := ports.Info{Name: "COM4", IsUSB: true, VID: "1A86", PID: "7523"}
+	after := runtime.LatestEventID()
+	if !runtime.publishConnection("reconnecting", port, "USB removed") {
+		t.Fatal("first reconnecting transition was suppressed")
+	}
+	if runtime.publishConnection("reconnecting", port, "USB removed") {
+		t.Fatal("duplicate reconnecting transition was published")
+	}
+	if got := runtime.LatestEventID(); got != after+1 {
+		t.Fatalf("duplicate transition advanced event ID to %d, want %d", got, after+1)
+	}
+	if !runtime.publishUSBConnection(
+		"usb.disconnected", "disconnect", port, "USB removed", "disconnected",
+	) {
+		t.Fatal("first USB disconnect transition was suppressed")
+	}
+	if runtime.publishUSBConnection(
+		"usb.disconnected", "disconnect", port, "USB removed", "disconnected",
+	) {
+		t.Fatal("duplicate USB disconnect transition was published")
+	}
+	if !runtime.publishUSBConnection(
+		"usb.reconnected", "reconnected", port, "", "connected",
+	) {
+		t.Fatal("USB reconnect transition was suppressed")
+	}
+	if !runtime.publishUSBConnection(
+		"usb.disconnected", "disconnect", port, "USB removed", "disconnected",
+	) {
+		t.Fatal("new USB disconnect cycle was suppressed")
+	}
+	afterTransitions := runtime.LatestEventID()
+
+	runtime.mu.Lock()
+	runtime.reconnectEpoch = 9
+	runtime.connectionState = "connected"
+	runtime.connectionReason = ""
+	runtime.session = &link.Session{}
+	runtime.mu.Unlock()
+	if runtime.publishReconnectFailure(8, "old COM4 scan failed") {
+		t.Fatal("stale reconnect epoch published after connection")
+	}
+	if got := runtime.LatestEventID(); got != afterTransitions {
+		t.Fatalf("stale reconnect event advanced event ID to %d", got)
+	}
+}
+
 func TestHotResetPolicyChangeDoesNotDropLiveConnection(t *testing.T) {
 	runtime := New(Options{})
 	port := newReconnectTestPort()
@@ -230,6 +378,34 @@ func TestHotResetPolicyChangeDoesNotDropLiveConnection(t *testing.T) {
 		t.Fatal("reset policy-only hot reload dropped the live transport")
 	}
 	_ = runtime.Close()
+}
+
+func TestDisconnectedRuntimeDropsPeerOwnedSnapshotValues(t *testing.T) {
+	runtime := New(Options{})
+	runtime.mu.Lock()
+	runtime.port = ports.Info{Name: "COM18", SerialNumber: "controller-1"}
+	runtime.hello = native.Hello{Name: "PCController", Capabilities: native.CapabilityINA219}
+	runtime.status = native.Status{SupplyMV: 12220}
+	runtime.settings = native.DefaultSettings()
+	runtime.haveStatus = true
+	runtime.haveSettings = true
+	runtime.statusUpdated = time.Now()
+	runtime.frontPanel = native.FrontPanel{MenuPage: 3}
+	runtime.haveFrontPanel = true
+	runtime.statusLED = native.StatusLEDState{Brightness: 255}
+	runtime.haveStatusLED = true
+	runtime.clearPeerStateLocked()
+	runtime.mu.Unlock()
+
+	snapshot := runtime.Snapshot()
+	if snapshot.Hello != (native.Hello{}) || snapshot.Status != (native.Status{}) ||
+		snapshot.Settings != (native.Settings{}) || snapshot.HaveStatus || snapshot.HaveSettings ||
+		snapshot.HaveFrontPanel || snapshot.HaveStatusLED || !snapshot.StatusUpdated.IsZero() {
+		t.Fatalf("disconnected runtime retained peer-owned state: %#v", snapshot)
+	}
+	if snapshot.Port.Name != "COM18" || snapshot.Port.SerialNumber != "controller-1" {
+		t.Fatalf("reconnect identity was discarded: %#v", snapshot.Port)
+	}
 }
 
 func TestRememberedPreferredDeviceChangeDoesNotDropLiveConnection(t *testing.T) {
@@ -447,6 +623,7 @@ func TestEventStreamClassification(t *testing.T) {
 		"door": EventStreamActivity, "telemetry": EventStreamTelemetry,
 		"rx": EventStreamDebug, "front_panel.segment": EventStreamState,
 		"status_led.changed": EventStreamState, "buzzer.note": EventStreamState,
+		"illumination.changed": EventStreamState, "settings.changed": EventStreamState,
 		"sensor.sample": EventStreamTelemetry, "animation.frame": EventStreamState,
 	}
 	for kind, expected := range tests {

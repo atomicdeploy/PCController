@@ -149,6 +149,27 @@ func TestMatchingInstallPersistsNewDesktopIntegration(t *testing.T) {
 	}
 }
 
+func TestMatchingInstallDoesNotClaimHealthyWhenDesktopRepairFails(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "installation")
+	packageRoot, manifest := writeTestPackage(t, "1.0.0", "one")
+	desktop := &fakeDesktop{}
+	service := testService(t, desktop)
+	request := ChangeRequest{Root: root, PackageRoot: packageRoot, ExpectedPackageSHA256: manifest.RootSHA256, ConfigureDesktop: true}
+	if _, err := service.Install(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+	desktop.ensureErr = errors.New("Desktop link is not owned; existing link preserved")
+	result, err := service.Install(context.Background(), request)
+	if err == nil || result.Healthy || len(desktop.ensure) != 2 {
+		t.Fatalf("false desktop repair success: %+v err=%v calls=%d", result, err, len(desktop.ensure))
+	}
+	desktop.ensureErr = nil
+	result, err = service.Install(context.Background(), request)
+	if err != nil || !result.Healthy || !result.DesktopManaged || len(desktop.ensure) != 3 {
+		t.Fatalf("desktop repair did not recover: %+v err=%v", result, err)
+	}
+}
+
 func TestDesktopFailureRetainsJournalAndRollsForwardOnRetry(t *testing.T) {
 	ctx := context.Background()
 	root := filepath.Join(t.TempDir(), "installation")

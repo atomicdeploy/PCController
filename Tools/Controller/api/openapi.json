@@ -4,7 +4,7 @@
     "title": "PCController HTTP API",
     "version": "unversioned",
     "summary": "Unversioned living REST and JSON-RPC surface of the primary controller host.",
-    "description": "Loopback is the safe default. Remote requests require authentication and an explicit capability. The built-in listener does not terminate TLS."
+    "description": "Loopback is the safe default. Immediate-alpha authentication and authorization are disabled under issue #148. The built-in listener does not terminate TLS."
   },
   "servers": [
     {
@@ -12,14 +12,7 @@
       "description": "Default loopback primary"
     }
   ],
-  "security": [
-    {
-      "bearerAuth": []
-    },
-    {
-      "tokenHeader": []
-    }
-  ],
+  "security": [],
   "paths": {
     "/healthz": {
       "get": {
@@ -135,23 +128,13 @@
     "/api/auth/server-proof": {
       "get": {
         "operationId": "get_api_auth_server_proof",
-        "summary": "Nonce/address-bound proof that the reached LAN endpoint knows the configured bearer",
+        "summary": "Dormant alpha compatibility endpoint; returns 409 while application authentication is disabled",
         "tags": [
           "server-proof"
         ],
         "x-required-capability": "public",
         "x-idempotency": "safe",
         "responses": {
-          "200": {
-            "description": "Responder-bound HMAC proof verified locally before a client transmits its bearer",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ServerProof"
-                }
-              }
-            }
-          },
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
@@ -163,6 +146,9 @@
           },
           "405": {
             "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "409": {
+            "description": "Application authentication is disabled in the immediate alpha"
           }
         },
         "security": [],
@@ -184,23 +170,13 @@
     "/api/session/ticket": {
       "post": {
         "operationId": "post_api_session_ticket",
-        "summary": "Exchange a header credential for a short-lived one-use browser WebSocket ticket",
+        "summary": "Dormant alpha compatibility endpoint; returns 409 while application authentication is disabled",
         "tags": [
           "ticket"
         ],
         "x-required-capability": "session",
         "x-idempotency": "see operation semantics and idempotency keys",
         "responses": {
-          "201": {
-            "description": "One-use Origin-bound browser session ticket",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SessionTicket"
-                }
-              }
-            }
-          },
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
@@ -212,6 +188,9 @@
           },
           "405": {
             "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "409": {
+            "description": "Application authentication is disabled in the immediate alpha"
           }
         },
         "requestBody": {
@@ -1488,20 +1467,19 @@
     "/api/app/action": {
       "post": {
         "operationId": "post_api_app_action",
-        "summary": "Route a validated action to all, one surface, or one live application instance",
+        "summary": "Freeze and route a correlated action to exact live application instances",
         "tags": [
           "action"
         ],
         "x-required-capability": "host_configuration",
         "x-idempotency": "see operation semantics and idempotency keys",
         "responses": {
-          "200": {
-            "description": "Accepted response",
+          "202": {
+            "description": "Action frozen to its exact live target set",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true
+                  "$ref": "#/components/schemas/AppActionSubmitEnvelope"
                 }
               }
             }
@@ -1517,6 +1495,16 @@
           },
           "405": {
             "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "409": {
+            "description": "The selector resolved only to rejected targets",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionOperationEnvelope"
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -1524,12 +1512,123 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "additionalProperties": true
+                "$ref": "#/components/schemas/AppActionRequest"
               }
             }
           }
         }
+      }
+    },
+    "/api/app/action/ack": {
+      "post": {
+        "operationId": "post_api_app_action_ack",
+        "summary": "Acknowledge one exact app-action target outcome",
+        "tags": [
+          "action"
+        ],
+        "x-required-capability": "host_configuration",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Updated correlated operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionOperationEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "409": {
+            "description": "Unknown, expired, foreign, offline, or conflicting acknowledgement",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActionAck"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/app/action/outcome": {
+      "get": {
+        "operationId": "get_api_app_action_outcome",
+        "summary": "Read one bounded app-action operation outcome",
+        "tags": [
+          "action"
+        ],
+        "x-required-capability": "read",
+        "x-idempotency": "safe",
+        "responses": {
+          "200": {
+            "description": "Current bounded per-target operation outcome",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionOperationEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "Operation is unknown or expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "parameters": [
+          {
+            "name": "operation_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{1,180}$"
+            },
+            "description": "Correlated app-action operation identifier."
+          }
+        ]
       }
     },
     "/api/app/navigate": {
@@ -1572,6 +1671,52 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/AppNavigation"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/app/launch": {
+      "post": {
+        "operationId": "post_api_app_launch",
+        "summary": "Ensure, launch, or focus a named TUI or WebUI surface",
+        "tags": [
+          "launch"
+        ],
+        "x-required-capability": "host_configuration",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppSurfaceLaunch"
               }
             }
           }
@@ -2793,6 +2938,42 @@
         }
       }
     },
+    "/api/integrations/status": {
+      "get": {
+        "operationId": "get_api_integrations_status",
+        "summary": "Requested and effective buzzer routing and playback state",
+        "tags": [
+          "status"
+        ],
+        "x-required-capability": "read",
+        "x-idempotency": "safe",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      }
+    },
     "/api/integrations/datahub/{path}": {
       "get": {
         "operationId": "get_api_integrations_datahub_path",
@@ -3450,18 +3631,26 @@
             "type": "string",
             "enum": [
               "controller.app.action",
+              "controller.app.action.ack",
+              "controller.app.action.outcome",
               "controller.app.bridge",
               "controller.app.instance.get",
               "controller.app.instance.remove",
               "controller.app.instance.report",
               "controller.app.instances",
+              "controller.app.launch",
               "controller.app.navigate",
+              "controller.app.navigation.commit",
               "controller.app.page",
               "controller.artifact.capture",
               "controller.artifact.fetch",
               "controller.artifact.list",
               "controller.artifact.manifest",
               "controller.artifact.upload",
+              "controller.artifact.upload.abort",
+              "controller.artifact.upload.begin",
+              "controller.artifact.upload.chunk",
+              "controller.artifact.upload.finish",
               "controller.bridge.call",
               "controller.bridge.list",
               "controller.close",
@@ -3487,6 +3676,7 @@
               "controller.event.latest",
               "controller.event.next",
               "controller.exit",
+              "controller.firmware.build",
               "controller.front_panel",
               "controller.front-panel",
               "controller.history.status",
@@ -3502,8 +3692,11 @@
               "controller.host.facts.catalog",
               "controller.hotkeys.get",
               "controller.hotkeys.set",
+              "controller.illumination.get",
+              "controller.illumination.set",
               "controller.integrations.local.get",
               "controller.integrations.local.set",
+              "controller.integrations.status",
               "controller.lcd.presentation.configure",
               "controller.lcd.presentation.status",
               "controller.lcd.priority",
@@ -3515,6 +3708,8 @@
               "controller.menu.list",
               "controller.menu.page",
               "controller.message.send",
+              "controller.network.peers.get",
+              "controller.network.peers.set",
               "controller.opcode.exchange",
               "controller.opcode.request",
               "controller.opcode.send",
@@ -3526,6 +3721,7 @@
               "controller.os.policy",
               "controller.os.power",
               "controller.os.status",
+              "controller.peer.update.host",
               "controller.peripherals",
               "controller.peripherals.get",
               "controller.peripherals.set",
@@ -3877,7 +4073,7 @@
         "properties": {
           "page": {
             "type": "string",
-            "pattern": "^[A-Za-z0-9._/-]{1,96}$"
+            "pattern": "^[A-Za-z0-9._-]{1,96}$"
           },
           "target": {
             "type": "string",
@@ -3885,6 +4081,393 @@
             "default": "*"
           }
         }
+      },
+      "AppSurfaceLaunch": {
+        "type": "object",
+        "required": [
+          "surface"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "surface": {
+            "type": "string",
+            "enum": [
+              "tui",
+              "webui"
+            ]
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "ensure",
+              "launch",
+              "focus"
+            ],
+            "default": "ensure"
+          },
+          "target": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._:-]{1,180}$"
+          },
+          "page": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._/-]{1,96}$"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._:-]{1,180}$"
+          }
+        },
+        "description": "Named product surface only. Executables, arguments, environment, shell text, and credentials are not accepted."
+      },
+      "AppAction": {
+        "type": "object",
+        "required": [
+          "kind"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "oneOf": [
+              {
+                "enum": [
+                  "app.page",
+                  "app.title",
+                  "app.progress",
+                  "app.osc",
+                  "app.quit",
+                  "app.port.open",
+                  "app.port.close",
+                  "command"
+                ]
+              },
+              {
+                "maxLength": 64,
+                "pattern": "^(?!app\\.)(?!controller\\.)(?:[A-Za-z0-9_-]+\\.)+[A-Za-z0-9_-]+$"
+              }
+            ]
+          },
+          "value": {
+            "type": "string",
+            "maxLength": 4096,
+            "pattern": "^[^\\u0000\\r\\n]*$"
+          },
+          "source": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string",
+            "pattern": "^(?:\\*|[A-Za-z0-9._:-]{1,180})$",
+            "default": "*"
+          },
+          "operation_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._:-]{1,180}$"
+          },
+          "metadata": {
+            "type": "object",
+            "maxProperties": 16,
+            "propertyNames": {
+              "pattern": "^[A-Za-z0-9._-]{1,64}$"
+            },
+            "properties": {
+              "operation_delivery_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9._:-]{1,180}$"
+              },
+              "operation_expires_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 1024,
+              "pattern": "^[^\\u0000\\r\\n]*$"
+            },
+            "description": "Bounded non-secret action metadata. Exact-target pushes include coordinator-owned operation_delivery_id and operation_expires_at values. Credential-shaped keys are rejected by the host."
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "AppActionRequest": {
+        "type": "object",
+        "required": [
+          "kind"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "oneOf": [
+              {
+                "enum": [
+                  "app.page",
+                  "app.title",
+                  "app.progress",
+                  "app.osc",
+                  "app.quit",
+                  "app.port.open",
+                  "app.port.close",
+                  "command"
+                ]
+              },
+              {
+                "maxLength": 64,
+                "pattern": "^(?!app\\.)(?!controller\\.)(?:[A-Za-z0-9_-]+\\.)+[A-Za-z0-9_-]+$"
+              }
+            ]
+          },
+          "value": {
+            "type": "string",
+            "maxLength": 4096,
+            "pattern": "^[^\\u0000\\r\\n]*$"
+          },
+          "source": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string",
+            "pattern": "^(?:\\*|[A-Za-z0-9._:-]{1,180})$",
+            "default": "*"
+          },
+          "operation_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._:-]{1,180}$"
+          },
+          "metadata": {
+            "type": "object",
+            "maxProperties": 16,
+            "propertyNames": {
+              "pattern": "^[A-Za-z0-9._-]{1,64}$"
+            },
+            "properties": {
+              "operation_delivery_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9._:-]{1,180}$"
+              },
+              "operation_expires_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 1024,
+              "pattern": "^[^\\u0000\\r\\n]*$"
+            },
+            "description": "Bounded non-secret action metadata. Exact-target pushes include coordinator-owned operation_delivery_id and operation_expires_at values. Credential-shaped keys are rejected by the host."
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 30000,
+            "default": 5000,
+            "description": "Acknowledgement deadline in milliseconds; zero or omission selects the 5000 ms host default."
+          }
+        }
+      },
+      "ActionAck": {
+        "type": "object",
+        "required": [
+          "operation_id",
+          "delivery_id",
+          "instance_id",
+          "state"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._:-]{1,180}$"
+          },
+          "delivery_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._:-]{1,180}$"
+          },
+          "instance_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._:-]{1,180}$"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "applied",
+              "rejected"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 256,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+          }
+        }
+      },
+      "ActionOutcomeRequest": {
+        "type": "object",
+        "required": [
+          "operation_id"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._:-]{1,180}$"
+          }
+        }
+      },
+      "ActionTargetOutcome": {
+        "type": "object",
+        "required": [
+          "instance_id",
+          "surface",
+          "state",
+          "updated_at"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "instance_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._:-]{1,180}$"
+          },
+          "surface": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,64}$"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "applied",
+              "rejected",
+              "timeout"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 256
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ActionOperation": {
+        "type": "object",
+        "required": [
+          "operation_id",
+          "kind",
+          "selector",
+          "state",
+          "created_at",
+          "expires_at",
+          "targets"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._:-]{1,180}$"
+          },
+          "kind": {
+            "type": "string",
+            "oneOf": [
+              {
+                "enum": [
+                  "app.page",
+                  "app.title",
+                  "app.progress",
+                  "app.osc",
+                  "app.quit",
+                  "app.port.open",
+                  "app.port.close",
+                  "command"
+                ]
+              },
+              {
+                "maxLength": 64,
+                "pattern": "^(?!app\\.)(?!controller\\.)(?:[A-Za-z0-9_-]+\\.)+[A-Za-z0-9_-]+$"
+              }
+            ]
+          },
+          "source": {
+            "type": "string"
+          },
+          "selector": {
+            "type": "string",
+            "pattern": "^(?:\\*|[A-Za-z0-9._:-]{1,180})$",
+            "default": "*"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "applied",
+              "rejected",
+              "timeout",
+              "partial"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 256
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActionTargetOutcome"
+            }
+          }
+        }
+      },
+      "ActionOperationEnvelope": {
+        "type": "object",
+        "required": [
+          "accepted",
+          "operation"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          },
+          "operation": {
+            "$ref": "#/components/schemas/ActionOperation"
+          }
+        }
+      },
+      "AppActionSubmitEnvelope": {
+        "type": "object",
+        "required": [
+          "accepted"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          },
+          "operation": {
+            "$ref": "#/components/schemas/ActionOperation"
+          }
+        },
+        "description": "Backward-compatible acceptance result. Outcome-capable actions also include the correlated operation."
       },
       "JSONRPCError": {
         "type": "object",
@@ -3901,6 +4484,7 @@
               -32600,
               -32601,
               -32602,
+              -32004,
               -32003,
               -32001,
               -32000
@@ -3908,7 +4492,8 @@
           },
           "message": {
             "type": "string"
-          }
+          },
+          "data": true
         },
         "examples": [
           {

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -21,6 +22,9 @@ func (model Model) handleKey(message tea.KeyMsg) (Model, tea.Cmd, bool) {
 	key := message.String()
 	if model.settingEditor != nil {
 		return model.handleSettingEditorKey(message)
+	}
+	if model.displayEditor != nil {
+		return model.handleDisplayEditorKey(message)
 	}
 	inputEmpty := !model.terminalIsVisible() || strings.TrimSpace(model.input.Value()) == ""
 	if model.renameTarget != "" {
@@ -207,6 +211,15 @@ func (model Model) handleKey(message tea.KeyMsg) (Model, tea.Cmd, bool) {
 			return updated, command, true
 		}
 	}
+	// q is the conventional fast exit while the TUI itself owns the keyboard.
+	// Focused editors, searches, and pickers keep ownership so entering a literal
+	// q or operating a modal can never close the application unexpectedly.
+	if key == "q" && inputEmpty && !model.modalOwnsKeyboard() {
+		if model.preview == nil && model.remote == nil {
+			_ = model.runtime.Close()
+		}
+		return model, tea.Quit, true
+	}
 	if model.portPicker {
 		switch key {
 		case "esc", "ctrl+p":
@@ -257,7 +270,7 @@ func (model Model) handleKey(message tea.KeyMsg) (Model, tea.Cmd, bool) {
 
 	switch key {
 	case "ctrl+c":
-		if model.preview == nil {
+		if model.preview == nil && model.remote == nil {
 			_ = model.runtime.Close()
 		}
 		return model, tea.Quit, true
@@ -281,6 +294,9 @@ func (model Model) handleKey(message tea.KeyMsg) (Model, tea.Cmd, bool) {
 		line := strings.TrimSpace(model.input.Value())
 		if line != "" {
 			return model.submitLine(line)
+		}
+		if model.page == PageDashboard && model.connectionCanReconnect(model.snapshot()) {
+			return model.reconnectNow()
 		}
 		return model.activateSelection()
 	case "tab":
@@ -381,12 +397,25 @@ func (model Model) handleKey(message tea.KeyMsg) (Model, tea.Cmd, bool) {
 	return model, nil, false
 }
 
+func (model Model) modalOwnsKeyboard() bool {
+	return model.settingEditor != nil ||
+		model.displayEditor != nil ||
+		model.renameTarget != "" ||
+		model.macroSearchEditing ||
+		model.menuLayoutSearchEditing ||
+		model.rfActionPicker ||
+		model.rfCategoryPicker ||
+		model.rfEditMode != "" ||
+		model.rfGuideActive ||
+		model.portPicker
+}
+
 func (model Model) showPortPicker() (Model, tea.Cmd, bool) {
 	model.portPicker = true
 	model.portCursor = 0
 	model.portError = ""
-	if model.preview != nil {
-		model.portCandidates = []ports.Info{model.preview.Port}
+	if model.preview != nil || model.remote != nil {
+		model.portCandidates = []ports.Info{model.snapshot().Port}
 		model.portLoading = false
 		return model, nil, true
 	}
@@ -398,7 +427,7 @@ func (model Model) submitLine(line string) (Model, tea.Cmd, bool) {
 	switch strings.ToLower(strings.TrimSpace(line)) {
 	case "quit", "exit":
 		model.appendLog("info", "Exiting "+model.prefs.AppTitle+" cleanly…")
-		if model.preview == nil {
+		if model.preview == nil && model.remote == nil {
 			_ = model.runtime.Close()
 		}
 		return model, tea.Quit, true
@@ -428,6 +457,9 @@ func (model Model) dispatchLine(line string) (Model, tea.Cmd, bool) {
 	if strings.EqualFold(line, "reset app") {
 		model.rebootPending = true
 		model.setNotice("Rebooting controller…")
+	}
+	if model.remote != nil {
+		return model, execute(model.engine, line), true
 	}
 	if model.preview != nil {
 		return model.simulateCommand(line)
@@ -496,6 +528,10 @@ func (model Model) simulateCommand(line string) (Model, tea.Cmd, bool) {
 }
 
 func (model Model) openPort() (Model, tea.Cmd, bool) {
+	if model.remote != nil {
+		model.setNotice("Requesting remote serial owner to connect…")
+		return model.dispatchLine("port open")
+	}
 	if model.preview != nil {
 		model.setNotice("Preview mode: serial open intentionally disabled")
 		return model, nil, true
@@ -508,7 +544,30 @@ func (model Model) openPort() (Model, tea.Cmd, bool) {
 	return model, connect(model.runtime), true
 }
 
+func (model Model) reconnectNow() (Model, tea.Cmd, bool) {
+	if model.remote != nil {
+		model.setNotice("Requesting immediate reconnect from the remote serial owner…")
+		model.connectPending = true
+		return model.dispatchLine("reconnect")
+	}
+	if model.preview != nil {
+		return model, nil, true
+	}
+	if model.connectPending {
+		return model, nil, true
+	}
+	model.connectPending = true
+	model.connectRetryAt = time.Time{}
+	model.connectRetryDelay = 0
+	model.runtime.ResumeAuto()
+	return model, connect(model.runtime), true
+}
+
 func (model Model) closePort() (Model, tea.Cmd, bool) {
+	if model.remote != nil {
+		model.setNotice("Requesting remote serial owner to close…")
+		return model.dispatchLine("port close")
+	}
 	if model.preview != nil {
 		model.setNotice("Preview mode: no serial port is owned")
 		return model, nil, true
@@ -575,6 +634,7 @@ func (model *Model) switchPage(page Page) {
 		page += pageCount
 	}
 	page %= pageCount
+	changed := model.page != page
 	model.page = page
 	model.cursor = 0
 	model.pageOffset = 0
@@ -589,6 +649,22 @@ func (model *Model) switchPage(page Page) {
 	model.macroDeleteArmed = false
 	model.macroDeleteReference = ""
 	model.terminalTitleDirty = true
+	if model.remote != nil && model.remote.SetLiveInterval != nil {
+		model.remote.SetLiveInterval(model.remoteLiveInterval())
+	}
+	if changed && model.navigationSync && model.commitNavigation != nil &&
+		!model.suppressNavigationCommit {
+		model.commitNavigation(pageInstanceName(page))
+	}
+}
+
+// applySynchronizedPage renders a coordinator-owned page without echoing it
+// back as a fresh intent. Presence/title reporting still runs normally.
+func (model *Model) applySynchronizedPage(page Page) {
+	previous := model.suppressNavigationCommit
+	model.suppressNavigationCommit = true
+	model.switchPage(page)
+	model.suppressNavigationCommit = previous
 }
 
 func pageInstanceName(page Page) string {
@@ -836,7 +912,9 @@ func (model Model) finishPeripheralRename() (Model, tea.Cmd, bool) {
 	if restored {
 		action = "restored"
 	}
-	if updated.saveUI == nil {
+	if updated.remote != nil && updated.remote.SaveHostUI != nil {
+		updated.setNotice(fmt.Sprintf("%s %s to %q on the remote host", target, action, name))
+	} else if updated.saveUI == nil {
 		updated.setNotice(fmt.Sprintf("%s %s to %q for this session", target, action, name))
 	} else {
 		updated.setNotice(fmt.Sprintf("%s %s to %q and saved", target, action, name))
@@ -845,6 +923,9 @@ func (model Model) finishPeripheralRename() (Model, tea.Cmd, bool) {
 }
 
 func (model Model) savePeripheralName(descriptor appconfig.PeripheralDescriptor, value string) (Model, string, bool, error) {
+	if model.remote != nil && model.remote.SaveHostUI == nil {
+		return model, "", false, errors.New("remote peripheral naming is unavailable")
+	}
 	name := strings.TrimSpace(value)
 	if len([]rune(name)) > 64 {
 		return model, "", false, fmt.Errorf("peripheral name must be at most 64 printable characters")
@@ -869,8 +950,12 @@ func (model Model) savePeripheralName(descriptor appconfig.PeripheralDescriptor,
 	}
 	ui.PeripheralNames = names
 	ui.SetupComplete = true
-	if model.saveUI != nil {
-		if err := model.saveUI(ui); err != nil {
+	save := model.saveUI
+	if model.remote != nil {
+		save = model.remote.SaveHostUI
+	}
+	if save != nil {
+		if err := save(ui); err != nil {
 			return model, "", false, err
 		}
 	}
@@ -1084,6 +1169,10 @@ func (model Model) adjustAppSetting(delta int, activate bool) (Model, tea.Cmd, b
 }
 
 func (model Model) adjustStatusLEDSetting(delta int, activate bool) (Model, tea.Cmd, bool) {
+	if model.remote != nil {
+		model.setNotice("Remote status-light host settings are unavailable; no local setting was changed")
+		return model, nil, true
+	}
 	value := model.hostIntegrationValue
 	policy := value.StatusLED
 	step := deltaOrOne(delta)
@@ -1197,19 +1286,19 @@ func (model Model) pageShortcut(key string) (Model, tea.Cmd, bool) {
 			model = model.beginRFGuidedWorkflow()
 			return model, nil, true
 		case "l":
-			if model.preview == nil && model.runtime.RFLearnState().Active {
+			if model.preview == nil && model.rfLearnState().Active {
 				model.setNotice("RF learning is already active; cancel it before starting another session")
 				return model, nil, true
 			}
 			return model.dispatchLine("rf learn indefinite")
 		case "y":
-			if model.preview == nil && model.runtime.RFLearnState().Active {
+			if model.preview == nil && model.rfLearnState().Active {
 				model.setNotice("RF learning is already active; cancel it before starting another session")
 				return model, nil, true
 			}
 			return model.dispatchLine("rf learn timer 30s")
 		case "c":
-			if model.preview == nil && !model.runtime.RFLearnState().Active {
+			if model.preview == nil && !model.rfLearnState().Active {
 				model.setNotice("RF learning is idle")
 				return model, nil, true
 			}
@@ -1331,6 +1420,8 @@ func (model Model) pageShortcut(key string) (Model, tea.Cmd, bool) {
 		}
 	case PageMenus:
 		switch key {
+		case "d":
+			return model.beginDisplayEditor()
 		case "/":
 			model.menuLayoutSearchEditing = true
 			return model, nil, true
@@ -1370,6 +1461,9 @@ func (model Model) pageShortcut(key string) (Model, tea.Cmd, bool) {
 			}
 			if model.menuCatalogPending {
 				return model, nil, true
+			}
+			if model.remote != nil {
+				return model.dispatchLine("menu list")
 			}
 			model.menuCatalogPending = true
 			model.menuCatalogLastAttempt = time.Now()
@@ -1688,6 +1782,15 @@ func (model Model) handleMouse(message tea.MouseMsg) (tea.Model, tea.Cmd) {
 		}
 		return model, nil
 	}
+	if model.displayEditor != nil {
+		switch message.Button {
+		case tea.MouseButtonWheelUp:
+			model.adjustDisplayEditor(-1)
+		case tea.MouseButtonWheelDown:
+			model.adjustDisplayEditor(1)
+		}
+		return model, nil
+	}
 	if model.page == PageOutputs {
 		if message.Action == tea.MouseActionRelease {
 			model.pwmDragChannel = -1
@@ -1734,6 +1837,10 @@ func (model Model) handleMouse(message tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 	if message.Button != tea.MouseButtonLeft {
 		return model, nil
+	}
+	if message.Y == 0 && message.X >= model.width/2 && model.connectionCanReconnect(model.snapshot()) {
+		updated, command, _ := model.reconnectNow()
+		return updated, command
 	}
 	// Header is row 0; bordered action buttons occupy rows 1..3.
 	if message.Y >= 1 && message.Y <= 3 {

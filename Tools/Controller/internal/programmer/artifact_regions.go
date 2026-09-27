@@ -13,6 +13,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -30,6 +31,7 @@ type ManifestRegionInspection struct {
 
 // ManifestInspectionTarget is the memory layout used to derive region bounds.
 type ManifestInspectionTarget struct {
+	Profile               string `json:"profile"`
 	MCU                   string `json:"mcu"`
 	ApplicationLimitBytes uint32 `json:"application_limit_bytes"`
 	FlashBytes            uint32 `json:"flash_bytes"`
@@ -93,8 +95,23 @@ func InspectManifestRegions(manifestPath string) (ManifestRegionInspection, erro
 		}
 		return report, fmt.Errorf("decode firmware manifest trailing data: %w", err)
 	}
-	if manifest.Format != firmwareManifestFormat {
+	if manifest.Format != firmwareManifestFormat &&
+		manifest.Format != firmwareManifestFormatV2 {
 		return report, fmt.Errorf("unsupported firmware manifest format %q", manifest.Format)
+	}
+	features, err := NormalizeFirmwareFeatures(manifest.Source.CompileFeatures)
+	if err != nil {
+		return report, fmt.Errorf("firmware manifest compile features: %w", err)
+	}
+	canonicalFeatures := firmwareFeatureNames(features)
+	if !slices.Equal(canonicalFeatures, manifest.Source.CompileFeatures) {
+		return report, errors.New("firmware manifest compile features must be unique and sorted canonically")
+	}
+	if manifest.Format == firmwareManifestFormat && len(features) != 0 {
+		return report, errors.New("firmware manifest v1 cannot declare compile features")
+	}
+	if manifest.Format == firmwareManifestFormatV2 && len(features) == 0 {
+		return report, errors.New("firmware manifest v2 requires at least one compile feature")
 	}
 	if manifest.GeneratedUTC.IsZero() {
 		return report, errors.New("firmware manifest has no generation timestamp")
@@ -111,6 +128,9 @@ func InspectManifestRegions(manifestPath string) (ManifestRegionInspection, erro
 	}
 	if !strings.EqualFold(strings.TrimSpace(manifest.Target.MCU), generatedBoardMCU) {
 		return report, fmt.Errorf("firmware manifest targets unsupported MCU %q", manifest.Target.MCU)
+	}
+	if strings.TrimSpace(manifest.Target.Profile) != generatedBoardProfile {
+		return report, fmt.Errorf("firmware manifest targets unsupported profile %q", manifest.Target.Profile)
 	}
 	if _, err := normalizeRequiredSHA256(manifest.Source.SHA256); err != nil {
 		return report, fmt.Errorf("firmware manifest source SHA-256: %w", err)
@@ -147,6 +167,7 @@ func InspectManifestRegions(manifestPath string) (ManifestRegionInspection, erro
 	report = ManifestRegionInspection{
 		ManifestPath: absolute, ManifestSHA256: sha256Hex(content), Format: manifest.Format,
 		Target: ManifestInspectionTarget{
+			Profile:               manifest.Target.Profile,
 			MCU:                   manifest.Target.MCU,
 			ApplicationLimitBytes: manifest.Target.ApplicationLimitBytes,
 			FlashBytes:            manifest.Target.FlashBytes,

@@ -2520,6 +2520,7 @@ void VirtualBoard::queueMirrorChanges() {
     appendU16(payload, display.buzzerFrequencyHz);
     appendU16(payload, display.buzzerDurationMs);
     payload.push_back(static_cast<std::uint8_t>(muted));
+    appendU32(payload, deviceMicros(Clock::now()));
     pendingEvents_.push_back({wire::BuzzerChanged, 0, std::move(payload)});
     lastPushedBuzzerFrequencyHz_ = display.buzzerFrequencyHz;
     lastPushedBuzzerDurationMs_ = display.buzzerDurationMs;

@@ -23,13 +23,25 @@ import (
 	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/portowner"
 	"pccontroller.local/controller/internal/ports"
-	"pccontroller.local/controller/internal/productidentity"
 	"pccontroller.local/controller/internal/shell"
 )
 
 type Model struct {
 	runtime *control.Runtime
 	engine  *shell.Engine
+	remote  *RemoteBackend
+
+	remoteSnapshot         control.Snapshot
+	remoteSnapshotPending  bool
+	remoteSnapshotError    string
+	remoteStatusReceivedAt time.Time
+	remoteStatusSequence   uint64
+	remoteLEDSequence      uint64
+	remoteLiveConnected    bool
+	remoteLiveSeen         bool
+	remoteClockOffset      time.Duration
+	remoteEventsClosed     bool
+	remoteLiveClosed       bool
 
 	width  int
 	height int
@@ -56,9 +68,12 @@ type Model struct {
 	renameTarget             string
 	renameTerminalWasVisible bool
 	settingEditor            *settingEditor
+	displayEditor            *displayEditor
 	eventsExpanded           bool
 
 	connectPending           bool
+	connectRetryAt           time.Time
+	connectRetryDelay        time.Duration
 	rebootPending            bool
 	statusPending            bool
 	uiConfig                 func() appconfig.UI
@@ -67,6 +82,7 @@ type Model struct {
 	uiValue                  appconfig.UI
 	hostIntegrations         func() appconfig.Integrations
 	saveHostIntegrations     func(appconfig.Integrations) error
+	buzzerRuntime            func() appconfig.BuzzerRuntimeStatus
 	hostIntegrationValue     appconfig.Integrations
 	rfConfig                 func() appconfig.RFConfig
 	saveRF                   func(appconfig.RFConfig) error
@@ -138,9 +154,20 @@ type Model struct {
 	notifier                 hostui.Notifier
 	appActions               <-chan hostui.AppAction
 	instanceID               string
+	navigationSync           bool
+	setNavigationSync        func(bool)
+	navigationIdentity       func() (string, uint64)
+	navigationGroup          string
+	navigationCursor         hostui.NavigationCursor
 	reportPage               func(string) error
 	reportTerminal           func(page, title string) error
+	reportTerminalAsync      func(page, title string)
+	commitNavigation         func(page string)
+	suppressNavigationCommit bool
 	writeOSC                 func(string) error
+	ackAppAction             func(hostui.ActionAck) error
+	actionReceipts           map[string]hostui.ActionAck
+	actionReceiptOrder       []string
 	terminalTitleOverride    string
 	terminalTitleDirty       bool
 	update                   updatePresentation
@@ -195,6 +222,7 @@ type tickMsg time.Time
 type welcomeTickMsg time.Time
 type welcomeMelodyResultMsg struct{ err error }
 type runtimeEventMsg control.Event
+type controlEventClosedMsg struct{}
 type commandResultMsg struct {
 	line   string
 	output string
@@ -215,6 +243,15 @@ type menuCatalogResultMsg struct {
 }
 type frontPanelResultMsg struct{ err error }
 type resetResultMsg struct{ err error }
+type remoteSnapshotResultMsg struct {
+	snapshot       control.Snapshot
+	err            error
+	receivedAt     time.Time
+	statusSequence uint64
+	ledSequence    uint64
+}
+type remoteLiveUpdateMsg RemoteLiveUpdate
+type remoteLiveClosedMsg struct{}
 type portsResultMsg struct {
 	values []ports.Info
 	err    error
@@ -301,9 +338,11 @@ func NewApplicationWithOptions(
 	}
 	value := provider()
 	if options.MirrorLCD == nil {
-		options.MirrorLCD = func(line1, line2 string) error {
-			runtime.LCDPresenter().MirrorPrompt(line1, line2)
-			return nil
+		if options.Remote == nil {
+			options.MirrorLCD = func(line1, line2 string) error {
+				runtime.LCDPresenter().MirrorPrompt(line1, line2)
+				return nil
+			}
 		}
 	}
 	if !options.DisableWelcome {
@@ -400,11 +439,12 @@ func NewWithOptions(runtime *control.Runtime, engine *shell.Engine, options Opti
 		ownerActions = portowner.DefaultActions()
 	}
 	model := Model{
-		runtime: runtime, engine: engine, input: input, spinner: progress,
+		runtime: runtime, engine: engine, remote: options.Remote, input: input, spinner: progress,
 		page: PageDashboard, historyPos: -1, completionIndex: -1, uiConfig: options.UIConfig,
 		saveUI: options.SaveUI, applyTUIConsole: options.ApplyTUIConsole, uiValue: uiValue,
 		hostIntegrations:     options.HostIntegrations,
 		saveHostIntegrations: options.SaveIntegrations,
+		buzzerRuntime:        options.BuzzerRuntime,
 		hostIntegrationValue: hostIntegrationValue,
 		rfConfig:             options.RFConfig, saveRF: options.SaveRF, rfValue: rfValue,
 		rfFetch: options.RFFetch, rfApplyOrder: options.RFApplyOrder,
@@ -415,9 +455,16 @@ func NewWithOptions(runtime *control.Runtime, engine *shell.Engine, options Opti
 		integrations: options.Integrations, notifier: options.Notifier,
 		networkDiscovery: options.NetworkDiscovery, openNetwork: options.OpenNetwork,
 		appActions: options.AppActions, instanceID: options.InstanceID,
-		reportPage: options.ReportPage, reportTerminal: options.ReportTerminal,
-		writeOSC:  options.WriteOSC,
-		hostMenus: options.HostMenus, pushHostPanel: options.PushHostPanel,
+		navigationSync:     options.NavigationSync,
+		setNavigationSync:  options.SetNavigationSync,
+		navigationIdentity: options.NavigationIdentity,
+		navigationGroup:    strings.ToLower(strings.TrimSpace(options.NavigationGroup)),
+		reportPage:         options.ReportPage, reportTerminal: options.ReportTerminal,
+		reportTerminalAsync: options.ReportTerminalAsync,
+		commitNavigation:    options.CommitNavigation,
+		writeOSC:            options.WriteOSC, ackAppAction: options.AckAppAction,
+		actionReceipts: make(map[string]hostui.ActionAck),
+		hostMenus:      options.HostMenus, pushHostPanel: options.PushHostPanel,
 		releaseHostPanel: options.ReleaseHostPanel,
 		prefs:            prefs, preview: options.Preview, welcome: welcome,
 		pwmDragChannel:   -1,
@@ -425,7 +472,21 @@ func NewWithOptions(runtime *control.Runtime, engine *shell.Engine, options Opti
 		welcomeStarted:   welcomeStarted, welcomeDeadline: welcomeStarted.Add(30 * time.Second),
 		welcomePhase: "Waiting for USB and application HELLO", welcomeMelody: options.WelcomeMelody,
 		markWelcomed: marker, debug: debug,
-		logs: []string{productidentity.ServiceName(prefs.AppTitle, "command console ready")},
+		logs: nil,
+	}
+	if model.navigationGroup == "" {
+		model.navigationGroup = hostui.DefaultNavigationGroup
+	}
+	if options.Remote != nil {
+		model.remoteSnapshot = options.Remote.InitialSnapshot
+		model.remoteSnapshotPending = options.Remote.Snapshot != nil
+		model.remoteSnapshot.ConnectionState = strings.TrimSpace(model.remoteSnapshot.ConnectionState)
+		if model.remoteSnapshot.ConnectionState == "" {
+			model.remoteSnapshot.ConnectionState = "remote IPC"
+		}
+		if endpoint := strings.TrimSpace(options.Remote.Endpoint); endpoint != "" {
+			model.logs = append(model.logs, "remote IPC attached: "+endpoint)
+		}
 	}
 	capabilities := uint32(0)
 	if options.Preview != nil {
@@ -468,13 +529,13 @@ func NewWithOptions(runtime *control.Runtime, engine *shell.Engine, options Opti
 			model.previewPanel.LCDLine1 = "PC offline"
 			model.previewPanel.LCDLine2 = "Connect USB toPC"
 		}
-		model.recordSample(options.Preview.Status, options.Preview.StatusUpdated)
+		model.recordSample(*options.Preview)
 	}
 	return model
 }
 
 func (model Model) Init() tea.Cmd {
-	commands := []tea.Cmd{model.spinner.Tick, tick(model.statusInterval()), tea.SetWindowTitle(model.terminalTitle())}
+	commands := []tea.Cmd{tick(model.statusInterval()), tea.SetWindowTitle(model.terminalTitle())}
 	if model.appActions != nil {
 		commands = append(commands, waitAppAction(model.appActions))
 	}
@@ -482,7 +543,25 @@ func (model Model) Init() tea.Cmd {
 		commands = append(commands, welcomeTick())
 	}
 	if model.preview == nil {
-		commands = append(commands, waitRuntimeEvent(model.runtime))
+		if model.remote != nil {
+			if model.remote.SetLiveInterval != nil {
+				model.remote.SetLiveInterval(model.remoteLiveInterval())
+			}
+			if model.remote.Events != nil {
+				commands = append(commands, waitControlEvent(model.remote.Events))
+			}
+			if model.remote.Live != nil {
+				commands = append(commands, waitRemoteLiveUpdate(model.remote.Live))
+			}
+			if model.remote.Snapshot != nil {
+				model.remoteSnapshotPending = true
+				commands = append(commands, refreshRemoteSnapshot(
+					model.remote.Snapshot, model.remoteStatusSequence, model.remoteLEDSequence,
+				))
+			}
+		} else {
+			commands = append(commands, waitControlEvent(model.runtime.Events()))
+		}
 	}
 	return tea.Batch(commands...)
 }
@@ -500,45 +579,23 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			break
 		}
-		switch action.Kind {
-		case "app.page":
-			if page, ok := pageForName(action.Value); ok {
-				model.switchPage(page)
-				model.setNotice("Opened " + pageDefinitions[page].Title)
-			} else {
-				model.appendLog("warn", "unknown app page: "+action.Value)
+		if hostui.AppActionExpired(action, time.Now()) {
+			if model.appActions != nil {
+				commands = append(commands, waitAppAction(model.appActions))
 			}
-		case "app.quit":
-			return model, tea.Quit
-		case "app.title":
-			if strings.EqualFold(action.Value, "auto") {
-				model.terminalTitleOverride = ""
-			} else {
-				model.terminalTitleOverride = action.Value
+			break
+		}
+		receiptKey := hostui.AppActionReceiptKey(action)
+		if receipt, duplicate := model.actionReceipts[receiptKey]; receiptKey != "" && duplicate {
+			commands = append(commands, acknowledgeAppAction(model.ackAppAction, receipt))
+		} else {
+			var actionCommands []tea.Cmd
+			var quit bool
+			model, actionCommands, quit = model.applyAppAction(action)
+			commands = append(commands, actionCommands...)
+			if quit {
+				return model, tea.Quit
 			}
-			model.terminalTitleDirty = true
-			model.setNotice("Terminal title updated")
-		case "app.osc":
-			commands = append(commands, terminalOSCCommand(model.writeOSC, action.Value, "OSC"))
-		case "app.progress":
-			progress, err := hostui.ParseTerminalProgress(action.Value)
-			if err != nil {
-				model.appendLog("warn", "terminal progress: "+err.Error())
-			} else if payload, payloadErr := progress.OSCPayload(); payloadErr != nil {
-				model.appendLog("warn", "terminal progress: "+payloadErr.Error())
-			} else {
-				commands = append(commands, terminalOSCCommand(model.writeOSC, payload, "terminal progress"))
-			}
-		case "app.port.open":
-			commands = append(commands, execute(model.engine, "port open"))
-		case "app.port.close":
-			commands = append(commands, execute(model.engine, "port close"))
-		case "command":
-			if strings.EqualFold(strings.TrimSpace(action.Value), "reset app") {
-				model.rebootPending = true
-				model.setNotice("Rebooting controller…")
-			}
-			commands = append(commands, execute(model.engine, action.Value))
 		}
 		if model.appActions != nil {
 			commands = append(commands, waitAppAction(model.appActions))
@@ -586,7 +643,10 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if command := model.syncHostPanelCommand(); command != nil {
 			commands = append(commands, command)
 		}
-		model.recordSample(snapshot.Status, snapshot.StatusUpdated)
+		if model.remote != nil && !model.remoteStatusReceivedAt.IsZero() {
+			snapshot.StatusUpdated = model.remoteStatusReceivedAt
+		}
+		model.recordSample(snapshot)
 		if model.frontOverlayNeedsRestore && time.Now().After(model.frontOverlayUntil) {
 			model.frontOverlayNeedsRestore = false
 			model.frontOverlay1, model.frontOverlay2 = "", ""
@@ -595,8 +655,27 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				commands = append(commands, mirrorLCDCommand(model.mirrorLCD, state.LCDLine1, state.LCDLine2, "restore LCD prompt"))
 			}
 		}
-		if model.preview == nil {
-			if !snapshot.Connected && !snapshot.Paused && !model.connectPending {
+		if model.remote != nil {
+			if !model.remoteSnapshotPending && model.remote.Snapshot != nil {
+				model.remoteSnapshotPending = true
+				commands = append(commands, refreshRemoteSnapshot(
+					model.remote.Snapshot, model.remoteStatusSequence, model.remoteLEDSequence,
+				))
+			}
+			if snapshot.Connected && model.page == PageOutputs && !model.pwmPending &&
+				time.Since(model.lastPWMRefresh) >= time.Second {
+				model.pwmPending = true
+				commands = append(commands, execute(model.engine, "pwm get"))
+			}
+			if snapshot.Connected && model.page == PageRF && !model.rfPending &&
+				time.Since(model.rfLastRefresh) >= 2*time.Second {
+				model.rfPending = true
+				commands = append(commands, model.fetchRFEntriesCommand())
+			}
+		} else if model.preview == nil {
+			if !snapshot.Connected && !snapshot.Paused && !model.connectPending &&
+				snapshot.ConnectionState != "reconnecting" &&
+				(model.connectRetryAt.IsZero() || !time.Now().Before(model.connectRetryAt)) {
 				model.connectPending = true
 				commands = append(commands, connect(model.runtime))
 			}
@@ -654,14 +733,64 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 
 	case runtimeEventMsg:
 		event := control.Event(message)
+		if strings.HasPrefix(event.Kind, "macro") && model.remote != nil && model.remote.Snapshot != nil && !model.remoteSnapshotPending {
+			model.remoteSnapshotPending = true
+			commands = append(commands, refreshRemoteSnapshot(model.remote.Snapshot, model.remoteStatusSequence, model.remoteLEDSequence))
+		}
+		if event.Kind == "client.navigation.session.reset" {
+			model.navigationCursor.Reset()
+			if model.remote != nil && model.remote.Events != nil && !model.remoteEventsClosed {
+				commands = append(commands, waitControlEvent(model.remote.Events))
+			}
+			break
+		}
 		if command := model.observeUpdateEvent(event); command != nil {
 			commands = append(commands, command)
 		}
+		if operationID := strings.TrimSpace(event.Metadata["operation_id"]); operationID != "" &&
+			isAcknowledgedAppActionKind(event.Kind) &&
+			hostui.TargetsInstance(event.Metadata["target_instance"], model.instanceID, "tui") {
+			value := event.Metadata["value"]
+			if strings.EqualFold(event.Kind, "app.page") {
+				value = event.Metadata["page"]
+			}
+			action := hostui.AppAction{
+				Kind: event.Kind, Value: value, Source: event.Source,
+				Target: event.Metadata["target_instance"], OperationID: operationID,
+				Metadata: event.Metadata, At: event.Time,
+			}
+			commands = append(commands, func() tea.Msg { return appActionMsg(action) })
+		}
 		if event.Source == "board" && strings.EqualFold(event.Kind, "app.page") &&
+			strings.TrimSpace(event.Metadata["operation_id"]) == "" &&
 			hostui.TargetsInstance(event.Metadata["target_instance"], model.instanceID, "tui") {
 			if page, ok := pageForName(event.Metadata["page"]); ok {
 				model.switchPage(page)
 				model.setNotice("Board opened " + pageDefinitions[page].Title)
+			}
+		}
+		if strings.EqualFold(event.Kind, "app.page") &&
+			strings.TrimSpace(event.Metadata["operation_id"]) == "" &&
+			strings.EqualFold(event.Metadata[hostui.NavigationSyncKey], hostui.NavigationSyncGroupUpdate) &&
+			hostui.TargetsInstance(event.Metadata["target_instance"], model.instanceID, "tui") &&
+			model.navigationSync {
+			action := hostui.AppAction{
+				Kind: event.Kind, Value: event.Metadata["page"], Source: event.Source,
+				Target: event.Metadata["target_instance"], Metadata: event.Metadata,
+			}
+			if pageName, accepted := model.acceptNavigationAction(action); accepted {
+				if page, ok := pageForName(pageName); ok {
+					model.applySynchronizedPage(page)
+				}
+			}
+		}
+		if model.remote != nil && strings.EqualFold(event.Kind, "app.page") &&
+			strings.TrimSpace(event.Metadata["operation_id"]) == "" &&
+			!strings.EqualFold(event.Source, "board") &&
+			!hostui.HasCoordinatorNavigationMetadata(event.Metadata) &&
+			hostui.TargetsInstance(event.Metadata["target_instance"], model.instanceID, "tui") {
+			if page, ok := pageForName(event.Metadata["page"]); ok {
+				model.switchPage(page)
 			}
 		}
 		if command := model.observeRFGuidedEvent(event); command != nil {
@@ -688,16 +817,117 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if show {
 			model.appendLog(event.Kind, event.Text)
 		}
-		commands = append(commands, waitRuntimeEvent(model.runtime))
+		if model.remote != nil {
+			if model.remote.Events != nil && !model.remoteEventsClosed {
+				commands = append(commands, waitControlEvent(model.remote.Events))
+			}
+		} else {
+			commands = append(commands, waitControlEvent(model.runtime.Events()))
+		}
+
+	case controlEventClosedMsg:
+		// A remote event channel is terminal. Do not subscribe to an already
+		// closed channel again: receiving from it would complete immediately
+		// and spin Bubble Tea's command loop. Snapshot polling remains active
+		// and truthfully reports whether command/snapshot IPC can reconnect.
+		if model.remote != nil && !model.remoteEventsClosed {
+			model.remoteEventsClosed = true
+			model.appendLog("warning", "remote IPC event stream closed; live snapshots continue")
+		}
+
+	case remoteLiveUpdateMsg:
+		update := RemoteLiveUpdate(message)
+		if update.ConnectionChange {
+			wasConnected := model.remoteLiveConnected
+			model.remoteLiveConnected = update.Connected
+			if !update.Connected && update.Error != "" && (wasConnected || !model.remoteLiveSeen) {
+				model.appendLog("warning", "remote live stream reconnecting: "+update.Error)
+			}
+			model.remoteLiveSeen = true
+		}
+		if update.HaveStatus {
+			receivedAt := update.StatusReceivedAt
+			if receivedAt.IsZero() {
+				receivedAt = time.Now()
+			}
+			updatedAt := update.StatusUpdated
+			if updatedAt.IsZero() {
+				updatedAt = receivedAt
+			}
+			model.remoteStatusReceivedAt = receivedAt
+			model.remoteStatusSequence++
+			model.remoteClockOffset = updatedAt.Sub(receivedAt)
+			model.remoteSnapshot.Status = update.Status
+			model.remoteSnapshot.HaveStatus = true
+			model.remoteSnapshot.StatusUpdated = updatedAt
+			sampleSnapshot := model.remoteSnapshot
+			sampleSnapshot.StatusUpdated = receivedAt
+			model.recordSample(sampleSnapshot)
+		}
+		if update.HaveStatusLED {
+			// A reconnect may replay the last composed frame. Preserve the current
+			// phase/timestamp for identical data so the visual never jumps backward.
+			if !model.remoteSnapshot.HaveStatusLED || model.remoteSnapshot.StatusLED != update.StatusLED {
+				model.remoteSnapshot.StatusLED = update.StatusLED
+				model.remoteSnapshot.HaveStatusLED = true
+				model.remoteSnapshot.StatusLEDUpdated = update.StatusLEDUpdated
+				if model.remoteSnapshot.StatusLEDUpdated.IsZero() {
+					model.remoteSnapshot.StatusLEDUpdated = update.StatusLEDReceivedAt
+				}
+				model.remoteLEDSequence++
+			}
+		}
+		if model.remote != nil && model.remote.Live != nil && !model.remoteLiveClosed {
+			commands = append(commands, waitRemoteLiveUpdate(model.remote.Live))
+		}
+
+	case remoteLiveClosedMsg:
+		if model.remote != nil && !model.remoteLiveClosed {
+			model.remoteLiveClosed = true
+			model.appendLog("warning", "remote live stream closed; snapshot convergence continues")
+		}
+
+	case remoteSnapshotResultMsg:
+		model.remoteSnapshotPending = false
+		if message.err != nil {
+			model.remoteSnapshotError = message.err.Error()
+			model.remoteSnapshot = clearDisconnectedPeerState(model.remoteSnapshot)
+			model.remoteSnapshot.ConnectionState = "remote IPC unavailable"
+			model.remoteSnapshot.ConnectionReason = message.err.Error()
+			model.remoteSnapshot.ConnectionUpdated = time.Now()
+			break
+		}
+		wasUnavailable := model.remoteSnapshotError != ""
+		acceptStatus := message.statusSequence == model.remoteStatusSequence
+		acceptLED := message.ledSequence == model.remoteLEDSequence
+		if acceptStatus {
+			model.observeRemoteStatus(message.snapshot, message.receivedAt)
+		}
+		model.remoteSnapshot = mergeRemoteSnapshot(
+			model.remoteSnapshot, message.snapshot, acceptStatus, acceptLED,
+		)
+		if !model.remoteSnapshot.Connected {
+			model.remoteSnapshot = clearDisconnectedPeerState(model.remoteSnapshot)
+		}
+		model.remoteSnapshotError = ""
+		if strings.TrimSpace(model.remoteSnapshot.ConnectionState) == "" {
+			model.remoteSnapshot.ConnectionState = "remote IPC"
+		}
+		if wasUnavailable {
+			model.appendLog("info", "remote IPC connection restored")
+		}
 
 	case commandResultMsg:
 		normalizedLine := strings.ToLower(strings.TrimSpace(message.line))
+		if normalizedLine == "reconnect" {
+			model.connectPending = false
+		}
 		if strings.EqualFold(strings.TrimSpace(message.line), "reset app") {
 			model.rebootPending = false
 		}
 
 		if errors.Is(message.err, shell.ErrExit) {
-			if model.preview == nil {
+			if model.preview == nil && model.remote == nil {
 				_ = model.runtime.Close()
 			}
 			return model, tea.Quit
@@ -721,9 +951,13 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				model.menuLayoutError = ""
 				model.menuCatalogLoaded = false
 				if !model.menuCatalogPending {
-					model.menuCatalogPending = true
-					model.menuCatalogLastAttempt = time.Now()
-					commands = append(commands, refreshMenuCatalog(model.runtime))
+					if model.remote != nil {
+						commands = append(commands, execute(model.engine, "menu list"))
+					} else {
+						model.menuCatalogPending = true
+						model.menuCatalogLastAttempt = time.Now()
+						commands = append(commands, refreshMenuCatalog(model.runtime))
+					}
 				}
 			}
 		}
@@ -766,7 +1000,7 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			model.clearRFGuideArms()
 		}
-		if message.err == nil && model.preview == nil && outputCommandNeedsReadback(message.line) {
+		if message.err == nil && model.preview == nil && model.remote == nil && outputCommandNeedsReadback(message.line) {
 			if !model.statusPending {
 				model.statusPending = true
 				commands = append(commands, refreshStatus(model.runtime))
@@ -785,13 +1019,40 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case terminalOSCResultMsg:
 		if message.err != nil {
 			model.appendLog("warn", message.kind+": "+message.err.Error())
-		} else {
+		} else if message.ack == nil {
 			model.setNotice(message.kind + " emitted")
 		}
+		if message.ack != nil {
+			ack := *message.ack
+			if message.err != nil {
+				ack.State = hostui.ActionStateRejected
+				ack.Reason = "terminal_output_unavailable"
+			}
+			model.rememberActionReceipt(ack)
+			commands = append(commands, acknowledgeAppAction(model.ackAppAction, ack))
+		}
+
+	case appActionAckResultMsg:
+		if message.err != nil {
+			if message.attempt < maximumAppActionAckAttempts {
+				commands = append(commands, retryAppActionAcknowledgement(message.ack, message.attempt+1))
+			} else {
+				model.appendLog("warn", "app action acknowledgement failed: "+message.err.Error())
+			}
+		}
+
+	case appActionAckRetryMsg:
+		commands = append(commands, acknowledgeAppAction(model.ackAppAction, message.ack, message.attempt))
 
 	case connectResultMsg:
 		model.connectPending = false
 		if message.err != nil {
+			if model.connectRetryDelay <= 0 {
+				model.connectRetryDelay = time.Second
+			} else {
+				model.connectRetryDelay = min(model.connectRetryDelay*2, 30*time.Second)
+			}
+			model.connectRetryAt = time.Now().Add(model.connectRetryDelay)
 			model.portOwner = nil
 			var busy *portowner.BusyError
 			if errors.As(message.err, &busy) && busy.Owner != nil {
@@ -801,6 +1062,8 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			model.appendLog("warn", "auto-connect: "+message.err.Error())
 		} else {
+			model.connectRetryAt = time.Time{}
+			model.connectRetryDelay = 0
 			model.portOwner = nil
 			model.ownerTerminateArmedUntil = time.Time{}
 			model.setNotice("Port opened and application protocol authenticated")
@@ -823,7 +1086,11 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if message.err != nil {
 			model.appendLog("warn", "status: "+message.err.Error())
 		} else {
-			model.recordSample(message.status, time.Now())
+			snapshot := model.snapshot()
+			snapshot.Status = message.status
+			snapshot.HaveStatus = true
+			snapshot.StatusUpdated = time.Now()
+			model.recordSample(snapshot)
 		}
 
 	case menuCatalogResultMsg:
@@ -956,9 +1223,14 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case spinner.TickMsg:
+		if !model.spinnerActive() {
+			break
+		}
 		var command tea.Cmd
 		model.spinner, command = model.spinner.Update(message)
-		commands = append(commands, command)
+		if command != nil {
+			commands = append(commands, command)
+		}
 	}
 
 	if model.terminalIsVisible() {
@@ -979,7 +1251,142 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		commands = append(commands, tea.SetWindowTitle(model.terminalTitle()))
 		model.reportInstance()
 	}
+	if len(commands) == 0 {
+		return model, nil
+	}
 	return model, tea.Batch(commands...)
+}
+
+func (model Model) applyAppAction(action hostui.AppAction) (Model, []tea.Cmd, bool) {
+	var commands []tea.Cmd
+	acknowledge := func(state, reason string) {
+		if action.OperationID == "" {
+			return
+		}
+		ack := hostui.ActionAck{
+			OperationID: action.OperationID, DeliveryID: action.Metadata[hostui.ActionDeliveryIDKey],
+			InstanceID: model.instanceID,
+			State:      state, Reason: reason, ReceiptKey: hostui.AppActionReceiptKey(action),
+		}
+		model.rememberActionReceipt(ack)
+		commands = append(commands, acknowledgeAppAction(model.ackAppAction, ack))
+	}
+
+	switch action.Kind {
+	case "app.page":
+		coordinatorNavigation := hostui.HasCoordinatorNavigationMetadata(action.Metadata)
+		if coordinatorNavigation {
+			if !model.navigationSync {
+				acknowledge(hostui.ActionStateRejected, "navigation_sync_disabled")
+				return model, commands, false
+			}
+			pageName, accepted := model.acceptNavigationAction(action)
+			if !accepted {
+				acknowledge(hostui.ActionStateRejected, "stale_navigation")
+				return model, commands, false
+			}
+			action.Value = pageName
+		}
+		if page, ok := pageForName(action.Value); ok {
+			if coordinatorNavigation || action.OperationID != "" {
+				// Both coordinator navigation and exact typed app.page deliveries
+				// are remote application, not a fresh local group-navigation intent.
+				model.applySynchronizedPage(page)
+			} else {
+				model.switchPage(page)
+			}
+			if action.OperationID == "" {
+				model.setNotice("Opened " + pageDefinitions[page].Title)
+			}
+			acknowledge(hostui.ActionStateApplied, "")
+		} else {
+			model.appendLog("warn", "unknown app page: "+action.Value)
+			acknowledge(hostui.ActionStateRejected, "unknown_page")
+		}
+	case "app.quit":
+		return model, commands, true
+	case "app.title":
+		if strings.EqualFold(action.Value, "auto") {
+			model.terminalTitleOverride = ""
+		} else {
+			model.terminalTitleOverride = action.Value
+		}
+		model.terminalTitleDirty = true
+		if action.OperationID == "" {
+			model.setNotice("Terminal title updated")
+		}
+		acknowledge(hostui.ActionStateApplied, "")
+	case "app.osc":
+		ack := model.pendingActionAck(action)
+		commands = append(commands, terminalOSCCommand(model.writeOSC, action.Value, "OSC", ack))
+	case "app.progress":
+		progress, err := hostui.ParseTerminalProgress(action.Value)
+		if err != nil {
+			model.appendLog("warn", "terminal progress: "+err.Error())
+			acknowledge(hostui.ActionStateRejected, "invalid_progress")
+		} else if payload, payloadErr := progress.OSCPayload(); payloadErr != nil {
+			model.appendLog("warn", "terminal progress: "+payloadErr.Error())
+			acknowledge(hostui.ActionStateRejected, "invalid_progress")
+		} else {
+			ack := model.pendingActionAck(action)
+			commands = append(commands, terminalOSCCommand(model.writeOSC, payload, "terminal progress", ack))
+		}
+	case "app.port.open":
+		commands = append(commands, execute(model.engine, "port open"))
+	case "app.port.close":
+		commands = append(commands, execute(model.engine, "port close"))
+	case "command":
+		if strings.EqualFold(strings.TrimSpace(action.Value), "reset app") {
+			model.rebootPending = true
+			model.setNotice("Rebooting controller…")
+		}
+		commands = append(commands, execute(model.engine, action.Value))
+	default:
+		acknowledge(hostui.ActionStateRejected, "unsupported_action")
+	}
+	return model, commands, false
+}
+
+func isAcknowledgedAppActionKind(kind string) bool {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "app.page", "app.title", "app.progress", "app.osc":
+		return true
+	default:
+		return false
+	}
+}
+
+func (model Model) pendingActionAck(action hostui.AppAction) *hostui.ActionAck {
+	if action.OperationID == "" {
+		return nil
+	}
+	return &hostui.ActionAck{
+		OperationID: action.OperationID, DeliveryID: action.Metadata[hostui.ActionDeliveryIDKey],
+		InstanceID: model.instanceID,
+		State:      hostui.ActionStateApplied, ReceiptKey: hostui.AppActionReceiptKey(action),
+	}
+}
+
+func (model *Model) rememberActionReceipt(ack hostui.ActionAck) {
+	if model == nil || ack.OperationID == "" {
+		return
+	}
+	if model.actionReceipts == nil {
+		model.actionReceipts = make(map[string]hostui.ActionAck)
+	}
+	key := strings.TrimSpace(ack.ReceiptKey)
+	if key == "" {
+		key = ack.OperationID
+	}
+	if _, exists := model.actionReceipts[key]; !exists {
+		model.actionReceiptOrder = append(model.actionReceiptOrder, key)
+	}
+	model.actionReceipts[key] = ack
+	for len(model.actionReceiptOrder) > hostui.MaximumActionOperations {
+		oldest := model.actionReceiptOrder[0]
+		model.actionReceiptOrder = model.actionReceiptOrder[1:]
+		delete(model.actionReceipts, oldest)
+	}
 }
 
 func waitAppAction(actions <-chan hostui.AppAction) tea.Cmd {
@@ -1034,7 +1441,9 @@ func (model Model) View() string {
 	if model.terminalIsVisible() {
 		parts = append(parts, model.completionView(), model.commandBar())
 	}
-	parts = append(parts, footer)
+	if footer != "" {
+		parts = append(parts, footer)
+	}
 	view := lipgloss.JoinVertical(lipgloss.Left, parts...)
 	return lipgloss.NewStyle().MaxWidth(model.width).Render(view)
 }
@@ -1066,10 +1475,94 @@ func (model *Model) resize() {
 }
 
 func (model Model) snapshot() control.Snapshot {
+	if model.remote != nil {
+		return model.remoteSnapshot
+	}
 	if model.preview != nil {
 		return *model.preview
 	}
 	return model.runtime.Snapshot()
+}
+
+func (model *Model) observeRemoteStatus(snapshot control.Snapshot, receivedAt time.Time) {
+	if snapshot.StatusUpdated.IsZero() {
+		model.remoteStatusReceivedAt = time.Time{}
+		model.remoteClockOffset = 0
+		return
+	}
+	if !model.remoteStatusReceivedAt.IsZero() &&
+		snapshot.StatusUpdated.Equal(model.remoteSnapshot.StatusUpdated) {
+		return
+	}
+	if receivedAt.IsZero() {
+		receivedAt = time.Now()
+	}
+	model.remoteStatusReceivedAt = receivedAt
+	// StatusUpdated arrived over JSON and contains only the source wall clock.
+	// Keep it untouched in remoteSnapshot, while recording the observed offset
+	// separately so freshness can use this process's monotonic time component.
+	model.remoteClockOffset = snapshot.StatusUpdated.Sub(receivedAt)
+}
+
+func mergeRemoteSnapshot(current, incoming control.Snapshot, allowStatus, allowLED bool) control.Snapshot {
+	if !allowStatus {
+		incoming.Status = current.Status
+		incoming.HaveStatus = current.HaveStatus
+		incoming.StatusUpdated = current.StatusUpdated
+	}
+	// Missing LED state means this primary has not observed a frame yet; it is
+	// not an authoritative black/off frame. Preserve the last known composed
+	// value. A real off frame has HaveStatusLED=true and six explicit zero/color
+	// fields, and therefore still replaces the current value.
+	if !allowLED || (current.HaveStatusLED && !incoming.HaveStatusLED) {
+		incoming.StatusLED = current.StatusLED
+		incoming.HaveStatusLED = current.HaveStatusLED
+		incoming.StatusLEDUpdated = current.StatusLEDUpdated
+	}
+	return incoming
+}
+
+func clearDisconnectedPeerState(snapshot control.Snapshot) control.Snapshot {
+	snapshot.Connected = false
+	snapshot.Hello = native.Hello{}
+	snapshot.Status = native.Status{}
+	snapshot.Settings = native.Settings{}
+	snapshot.HaveStatus = false
+	snapshot.HaveSettings = false
+	snapshot.StatusUpdated = time.Time{}
+	snapshot.FrontPanel = native.FrontPanel{}
+	snapshot.HaveFrontPanel = false
+	snapshot.FrontPanelUpdated = time.Time{}
+	snapshot.StatusLED = native.StatusLEDState{}
+	snapshot.HaveStatusLED = false
+	snapshot.StatusLEDUpdated = time.Time{}
+	snapshot.RFLearning = control.RFLearnState{}
+	return snapshot
+}
+
+func (model Model) statusFreshnessLabel(snapshot control.Snapshot, now time.Time) string {
+	updated := snapshot.StatusUpdated
+	if model.remote != nil && !model.remoteStatusReceivedAt.IsZero() {
+		updated = model.remoteStatusReceivedAt
+	}
+	return freshnessLabel(updated, now)
+}
+
+func (model Model) remoteClockWarning() string {
+	if model.remote == nil || model.remoteStatusReceivedAt.IsZero() {
+		return ""
+	}
+	return remoteClockSkewWarning(model.remoteClockOffset)
+}
+
+func (model Model) rfLearnState() control.RFLearnState {
+	if model.remote != nil {
+		return model.remoteSnapshot.RFLearning
+	}
+	if model.preview != nil {
+		return model.preview.RFLearning
+	}
+	return model.runtime.RFLearnState()
 }
 
 func (model *Model) finishWelcome() {
@@ -1186,8 +1679,10 @@ func (model *Model) syncUIConfig(value appconfig.UI) {
 	}
 }
 
-func (model *Model) recordSample(status native.Status, at time.Time) {
-	if at.IsZero() || at.Equal(model.lastSample) {
+func (model *Model) recordSample(snapshot control.Snapshot) {
+	status, at := snapshot.Status, snapshot.StatusUpdated
+	if at.IsZero() || at.Equal(model.lastSample) ||
+		(!model.lastSample.IsZero() && at.Sub(model.lastSample) < 100*time.Millisecond) {
 		return
 	}
 	model.lastSample = at
@@ -1198,6 +1693,14 @@ func (model *Model) recordSample(status native.Status, at time.Time) {
 		At: at, SupplyMV: status.SupplyMV, BusMV: status.BusMV,
 		CurrentMA: status.CurrentMA, PowerMW: status.PowerMW,
 		TLEDCenti: status.TLEDCenti, TBTCenti: status.TBTCenti,
+		HaveSupply:  snapshot.Connected && snapshot.HaveStatus && status.INA219Available && validVoltageReading(status.SupplyMV),
+		HaveBus:     snapshot.Connected && snapshot.HaveStatus && status.INA219Available && validVoltageReading(status.BusMV),
+		HaveCurrent: snapshot.Connected && snapshot.HaveStatus && status.INA219Available && validCurrentReading(status.CurrentMA),
+		HavePower:   snapshot.Connected && snapshot.HaveStatus && status.INA219Available && validPowerReading(status.PowerMW),
+		HaveTLED:    snapshot.Connected && snapshot.HaveStatus && status.TLEDAvailable && validTemperatureReading(status.TLEDCenti),
+		HaveTBT: snapshot.Connected && snapshot.HaveStatus &&
+			snapshot.Hello.Capabilities&native.CapabilityBluetoothAudio != 0 &&
+			status.TBTAvailable && validTemperatureReading(status.TBTCenti),
 	})
 	cutoff := at.Add(-model.prefs.HistoryWindow)
 	first := 0
@@ -1251,7 +1754,7 @@ func (model *Model) setFrontPanelEvent(event control.Event) bool {
 func (model Model) header(snapshot control.Snapshot) string {
 	status := "DISCONNECTED"
 	style := errorStyle
-	detail := "authenticated device discovery"
+	detail := "Enter or click to reconnect · background retry armed"
 	if model.preview != nil {
 		status = "PREVIEW"
 		style = warnStyle.Copy().Bold(true)
@@ -1271,13 +1774,13 @@ func (model Model) header(snapshot control.Snapshot) string {
 	} else if snapshot.Paused {
 		status = "CLOSED"
 		detail = "auto-reconnect paused"
-	} else if snapshot.ConnectionState == "reconnecting" {
-		status = model.spinner.View() + " RECONNECTING"
+	} else if model.connectPending {
+		status = model.spinnerView() + " CONNECTING"
 		style = warnStyle
 		detail = strings.TrimSpace(snapshot.Port.Name + " · " + snapshot.ConnectionReason)
-	} else if model.connectPending {
-		status = model.spinner.View() + " SCANNING"
-		style = warnStyle
+		if detail == "" {
+			detail = "authenticated device discovery"
+		}
 	}
 	left := titleStyle.Render("◆ " + model.prefs.AppTitle)
 	statusRendered := style.Render(status)
@@ -1295,6 +1798,10 @@ func (model Model) header(snapshot control.Snapshot) string {
 		gap = 1
 	}
 	return left + strings.Repeat(" ", gap) + right
+}
+
+func (model Model) connectionCanReconnect(snapshot control.Snapshot) bool {
+	return model.preview == nil && !snapshot.Connected && !snapshot.Paused && !model.connectPending
 }
 
 type actionBarItem struct {
@@ -1322,7 +1829,7 @@ func (model Model) actionBarItems(snapshot control.Snapshot) []actionBarItem {
 	rebootLabel := "R Reboot"
 	rebootAction := "reboot"
 	if model.rebootPending {
-		rebootLabel = model.spinner.View() + " Rebooting"
+		rebootLabel = model.spinnerView() + " Rebooting"
 		rebootAction = ""
 	}
 	items = append(items,
@@ -1432,17 +1939,13 @@ func (model Model) completionView() string {
 }
 
 func (model Model) footer() string {
-	left := "←/→ tabs or value  ↑/↓ navigate  Enter activate  ~ terminal  Ctrl+C quit  Mouse enabled"
-	if model.terminalIsVisible() {
-		left = "Terminal visible · ~ hide  Tab/→ complete  Ctrl+C quit  Mouse enabled"
-	}
 	if model.portOwner != nil {
-		left = "Serial busy · Ctrl+F show owner · Ctrl+W ask close · Ctrl+T twice to terminate · primary controller protected"
+		return errorStyle.Render("Serial busy · Ctrl+F show owner · Ctrl+W ask close · Ctrl+T twice to terminate · primary controller protected")
 	}
 	if model.notice != "" && time.Now().Before(model.noticeUntil) {
-		left = model.notice
+		return labelStyle.Render(model.notice)
 	}
-	return labelStyle.Render(left)
+	return ""
 }
 
 func intersperseStrings(values []string, separator string) []string {
@@ -1495,21 +1998,69 @@ func notifyImportant(notifier hostui.Notifier, notification hostui.Notification)
 }
 
 func (model Model) statusInterval() time.Duration {
+	var interval time.Duration
 	if !model.pageNeedsStatus() {
 		if model.uiValue.IdleStatusIntervalMS >= 100 {
-			return time.Duration(model.uiValue.IdleStatusIntervalMS) * time.Millisecond
+			interval = time.Duration(model.uiValue.IdleStatusIntervalMS) * time.Millisecond
+		} else {
+			// Keep lightweight UI/reconnect housekeeping without polling STATUS.
+			interval = time.Second
 		}
-		// Keep lightweight UI/reconnect housekeeping without polling STATUS.
-		return time.Second
+	} else {
+		interval = model.prefs.PollInterval
+		if interval < 100*time.Millisecond {
+			interval = 100 * time.Millisecond
+		}
+		if model.snapshot().Status.DoorOpen && interval > 125*time.Millisecond {
+			interval = 125 * time.Millisecond
+		}
 	}
-	interval := model.prefs.PollInterval
-	if interval < 100*time.Millisecond {
-		interval = 100 * time.Millisecond
-	}
-	if model.snapshot().Status.DoorOpen && interval > 125*time.Millisecond && model.pageNeedsStatus() {
-		return 125 * time.Millisecond
+	// Remote activity events remain push-driven. The snapshot poll is only a
+	// convergence/backstop path, so rendering and making an authenticated RPC
+	// eight times per second adds load without improving control latency.
+	if model.remote != nil && interval < time.Second {
+		interval = time.Second
 	}
 	return interval
+}
+
+func (model Model) spinnerActive() bool {
+	return model.connectPending || model.rebootPending || model.portLoading ||
+		model.remoteSnapshotPending || model.statusPending || model.pwmPending ||
+		model.rfPending || model.frontPanelPending || model.networkDiscoveryPending ||
+		model.hostPanelPending || model.menuCatalogPending
+}
+
+const (
+	remoteActiveLiveInterval = 50 * time.Millisecond
+	remoteIdleLiveInterval   = time.Second
+)
+
+// remoteLiveInterval keeps active board pages at the authenticated status
+// stream's supported 20 Hz ceiling. Non-board pages retain a one-second
+// convergence sample; state frames such as the status light remain push-driven.
+func (model Model) remoteLiveInterval() time.Duration {
+	if model.pageNeedsStatus() {
+		return remoteActiveLiveInterval
+	}
+	return remoteIdleLiveInterval
+}
+
+// spinnerView advances progress glyphs from wall time instead of running a
+// permanent Bubble Tea spinner command. Any real UI event (including the
+// bounded status tick) redraws an active operation; an idle connected TUI no
+// longer performs a full Lip Gloss render at the spinner's frame rate.
+func (model Model) spinnerView() string {
+	frames := model.spinner.Spinner.Frames
+	if len(frames) == 0 {
+		return ""
+	}
+	interval := model.spinner.Spinner.FPS
+	if interval <= 0 {
+		interval = 100 * time.Millisecond
+	}
+	frame := int(time.Now().UnixNano()/int64(interval)) % len(frames)
+	return model.spinner.Style.Render(frames[frame])
 }
 
 func (model Model) eventLogLimit() int {
@@ -1685,8 +2236,39 @@ func welcomeTick() tea.Cmd {
 	return tea.Tick(75*time.Millisecond, func(value time.Time) tea.Msg { return welcomeTickMsg(value) })
 }
 
-func waitRuntimeEvent(runtime *control.Runtime) tea.Cmd {
-	return func() tea.Msg { return runtimeEventMsg(<-runtime.Events()) }
+func waitControlEvent(events <-chan control.Event) tea.Cmd {
+	return func() tea.Msg {
+		event, ok := <-events
+		if !ok {
+			return controlEventClosedMsg{}
+		}
+		return runtimeEventMsg(event)
+	}
+}
+
+func waitRemoteLiveUpdate(updates <-chan RemoteLiveUpdate) tea.Cmd {
+	return func() tea.Msg {
+		update, ok := <-updates
+		if !ok {
+			return remoteLiveClosedMsg{}
+		}
+		return remoteLiveUpdateMsg(update)
+	}
+}
+
+func refreshRemoteSnapshot(
+	fetch func(context.Context) (control.Snapshot, error),
+	statusSequence, ledSequence uint64,
+) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		snapshot, err := fetch(ctx)
+		return remoteSnapshotResultMsg{
+			snapshot: snapshot, err: err, receivedAt: time.Now(),
+			statusSequence: statusSequence, ledSequence: ledSequence,
+		}
+	}
 }
 
 func connect(runtime *control.Runtime) tea.Cmd {

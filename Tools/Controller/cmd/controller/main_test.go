@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -21,7 +22,13 @@ import (
 	"pccontroller.local/controller/internal/programmer"
 )
 
-func TestCompileOnlyCommandDoesNotLoadOrMutateRuntimeConfig(t *testing.T) {
+func TestCompileOnlyCommandLoadsConfiguredFeaturesWithoutRuntimeStartup(t *testing.T) {
+	if value, present := os.LookupEnv(firmwareFeaturesEnvironment); present {
+		t.Cleanup(func() { _ = os.Setenv(firmwareFeaturesEnvironment, value) })
+	} else {
+		t.Cleanup(func() { _ = os.Unsetenv(firmwareFeaturesEnvironment) })
+	}
+	_ = os.Unsetenv(firmwareFeaturesEnvironment)
 	for _, test := range []struct {
 		name string
 		args func(string, string, string) []string
@@ -49,8 +56,15 @@ func TestCompileOnlyCommandDoesNotLoadOrMutateRuntimeConfig(t *testing.T) {
 			// Compile planning must not depend on a machine-installed dependency.
 			t.Setenv("PATH", t.TempDir())
 			path := filepath.Join(t.TempDir(), "config.json")
-			invalid := []byte(`{"schema":1,"host_menus":{"request_gesture":"status-hold-k4"}}`)
-			if err := os.WriteFile(path, invalid, 0o600); err != nil {
+			config := appconfig.Defaults()
+			config.Programming.FirmwareFeatures = []programmer.FirmwareFeature{
+				programmer.FirmwareFeatureEEPROMMenuLabels,
+			}
+			if err := appconfig.Write(path, config); err != nil {
+				t.Fatal(err)
+			}
+			before, err := os.ReadFile(path)
+			if err != nil {
 				t.Fatal(err)
 			}
 			cli := filepath.Join(t.TempDir(), "arduino-cli")
@@ -59,21 +73,57 @@ func TestCompileOnlyCommandDoesNotLoadOrMutateRuntimeConfig(t *testing.T) {
 			}
 			args := append([]string{"--config", path}, test.args(findProjectRoot(), t.TempDir(), cli)...)
 			var stdout, stderr bytes.Buffer
-			err := run(args, &stdout, &stderr)
+			err = run(args, &stdout, &stderr)
 			if err != nil {
 				t.Fatalf("compile-only command depended on runtime config: %v\nstderr: %s", err, stderr.String())
 			}
-			if !strings.Contains(stdout.String(), "compile") {
+			if !strings.Contains(stdout.String(), "compile") ||
+				!strings.Contains(stdout.String(), "PCCONTROLLER_ENABLE_EEPROM_MENU_LABELS=1") {
 				t.Fatalf("compile plan missing from output: %q", stdout.String())
 			}
 			after, err := os.ReadFile(path)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !bytes.Equal(after, invalid) {
+			if !bytes.Equal(after, before) {
 				t.Fatalf("compile-only command mutated runtime config:\n%s", after)
 			}
 		})
+	}
+}
+
+func TestCompileOnlyCommandRejectsInvalidSelectedConfigWithoutMutation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	invalid := []byte(`{"schema":1,"programming":{"firmware_features":["unknown"]}}`)
+	if err := os.WriteFile(path, invalid, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	err := run([]string{
+		"--config", path, "toolchain", "compile", findProjectRoot(),
+		"--output-dir", t.TempDir(), "--dry-run",
+	}, &stdout, &stderr)
+	if err == nil || !strings.Contains(err.Error(), "unsupported firmware feature") {
+		t.Fatalf("invalid configured feature error=%v", err)
+	}
+	after, readErr := os.ReadFile(path)
+	if readErr != nil || !bytes.Equal(after, invalid) {
+		t.Fatalf("invalid config mutated: %q err=%v", after, readErr)
+	}
+}
+
+func TestCompileOnlyCommandDoesNotCreateMissingSelectedConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "missing.json")
+	var stdout, stderr bytes.Buffer
+	err := run([]string{
+		"--config", path, "program", "--method", "compile",
+		"--sketch", findProjectRoot(), "--output-dir", t.TempDir(), "--dry-run",
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("missing config compile: %v", err)
+	}
+	if _, statErr := os.Stat(path); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("compile created missing config: %v", statErr)
 	}
 }
 
@@ -94,6 +144,126 @@ func TestCompileDryRunDoesNotRequireToolchainOnPATH(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "compile") {
 		t.Fatalf("compile plan missing from output: %q", stdout.String())
+	}
+}
+
+func TestCompileFeatureDryRunAcceptsOnlyNamedEEPROMGates(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	var stdout, stderr bytes.Buffer
+	err := runProgramWithConfig(
+		[]string{
+			"--method", "compile", "--sketch", findProjectRoot(),
+			"--output-dir", t.TempDir(),
+			"--firmware-feature", "eeprom-menu-labels",
+			"--firmware-feature", "eeprom-boot-opcodes",
+			"--dry-run",
+		},
+		&stdout, &stderr, appconfig.Defaults(),
+	)
+	if err != nil {
+		t.Fatalf("compile feature dry-run: %v\\nstderr: %s", err, stderr.String())
+	}
+	for _, expected := range []string{
+		"PCCONTROLLER_ENABLE_EEPROM_BOOT_OPCODES=1",
+		"PCCONTROLLER_ENABLE_EEPROM_MENU_LABELS=1",
+	} {
+		if !strings.Contains(stdout.String(), expected) {
+			t.Fatalf("compile command missing %q: %s", expected, stdout.String())
+		}
+	}
+	if err := runProgramWithConfig(
+		[]string{
+			"--method", "compile", "--sketch", findProjectRoot(),
+			"--output-dir", t.TempDir(), "--firmware-feature", "-DUNSAFE=1", "--dry-run",
+		},
+		io.Discard, io.Discard, appconfig.Defaults(),
+	); err == nil || !strings.Contains(err.Error(), "unsupported firmware feature") {
+		t.Fatalf("unsafe raw feature error=%v", err)
+	}
+
+	configured := appconfig.Defaults()
+	configured.Programming.FirmwareFeatures = []programmer.FirmwareFeature{
+		programmer.FirmwareFeatureEEPROMMenuLabels,
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if err := runProgramWithConfig(
+		[]string{
+			"--method", "compile", "--sketch", findProjectRoot(),
+			"--output-dir", t.TempDir(), "--dry-run",
+		},
+		&stdout, &stderr, configured,
+	); err != nil || !strings.Contains(stdout.String(), "PCCONTROLLER_ENABLE_EEPROM_MENU_LABELS=1") {
+		t.Fatalf("configured feature output=%q err=%v", stdout.String(), err)
+	}
+	stdout.Reset()
+	if err := runProgramWithConfig(
+		[]string{
+			"--method", "compile", "--sketch", findProjectRoot(),
+			"--output-dir", t.TempDir(),
+			"--firmware-feature", "eeprom-boot-opcodes", "--dry-run",
+		},
+		&stdout, &stderr, configured,
+	); err != nil || !strings.Contains(stdout.String(), "PCCONTROLLER_ENABLE_EEPROM_BOOT_OPCODES=1") ||
+		strings.Contains(stdout.String(), "PCCONTROLLER_ENABLE_EEPROM_MENU_LABELS=1") {
+		t.Fatalf("explicit replacement output=%q err=%v", stdout.String(), err)
+	}
+	stdout.Reset()
+	if err := runProgramWithConfig(
+		[]string{
+			"--method", "compile", "--sketch", findProjectRoot(),
+			"--output-dir", t.TempDir(), "--no-firmware-features", "--dry-run",
+		},
+		&stdout, &stderr, configured,
+	); err != nil || strings.Contains(stdout.String(), "PCCONTROLLER_ENABLE_EEPROM_") {
+		t.Fatalf("default-off output=%q err=%v", stdout.String(), err)
+	}
+	if err := runProgramWithConfig(
+		[]string{
+			"--method", "compile", "--sketch", findProjectRoot(),
+			"--output-dir", t.TempDir(), "--dry-run", "EXTRA",
+		},
+		io.Discard, io.Discard, appconfig.Defaults(),
+	); err == nil || !strings.Contains(err.Error(), "unexpected program argument") {
+		t.Fatalf("leftover argument error=%v", err)
+	}
+
+	t.Setenv(firmwareFeaturesEnvironment, "eeprom-menu-labels,eeprom-boot-opcodes")
+	stdout.Reset()
+	if err := runProgramWithConfig(
+		[]string{
+			"--method", "compile", "--sketch", findProjectRoot(),
+			"--output-dir", t.TempDir(), "--dry-run",
+		},
+		&stdout, &stderr, appconfig.Defaults(),
+	); err != nil || !strings.Contains(stdout.String(), "PCCONTROLLER_ENABLE_EEPROM_BOOT_OPCODES=1") ||
+		!strings.Contains(stdout.String(), "PCCONTROLLER_ENABLE_EEPROM_MENU_LABELS=1") {
+		t.Fatalf("environment feature output=%q err=%v", stdout.String(), err)
+	}
+	t.Setenv(firmwareFeaturesEnvironment, "unknown")
+	if err := runProgramWithConfig(
+		[]string{"--method", "compile", "--dry-run"},
+		io.Discard, io.Discard, appconfig.Defaults(),
+	); err == nil || !strings.Contains(err.Error(), firmwareFeaturesEnvironment) {
+		t.Fatalf("invalid environment error=%v", err)
+	}
+	for _, featureFlag := range [][]string{
+		nil,
+		{"--firmware-feature", "eeprom-menu-labels"},
+		{"--no-firmware-features"},
+	} {
+		args := []string{
+			"--method", "toolchain", "--operation", "core-info",
+			"--toolchain-cli", "arduino-cli", "--dry-run",
+		}
+		args = append(args, featureFlag...)
+		err := runProgramWithConfig(args, io.Discard, io.Discard, appconfig.Defaults())
+		if len(featureFlag) == 0 && err != nil {
+			t.Fatalf("irrelevant invalid environment blocked probe: %v", err)
+		}
+		if len(featureFlag) != 0 && (err == nil || !strings.Contains(err.Error(), "only valid with --method compile")) {
+			t.Fatalf("explicit noncompile features args=%v err=%v", featureFlag, err)
+		}
 	}
 }
 
@@ -602,7 +772,7 @@ func TestBootAndToolchainCLIArguments(t *testing.T) {
 
 func TestNormalizeGuardedFlashCLIArguments(t *testing.T) {
 	got, err := normalizeProgramCLIArgs([]string{
-		"flash", "firmware image.hex", "COM18", "--allow-incomplete-backup",
+		"flash", "firmware image.hex", "COM18", "--deployment", "development",
 		"--reinitialize-eeprom",
 	})
 	if err != nil {
@@ -610,7 +780,7 @@ func TestNormalizeGuardedFlashCLIArguments(t *testing.T) {
 	}
 	want := []string{
 		"--operation", "write-flash", "--method", "urclock",
-		"--hex", "firmware image.hex", "--allow-incomplete-backup",
+		"--hex", "firmware image.hex", "--deployment", "development",
 		"--reinitialize-eeprom", "--port", "COM18",
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -630,7 +800,7 @@ func TestNormalizeGuardedFlashCLIArguments(t *testing.T) {
 		t.Fatalf("prefixed USBasp normalized=%#v want=%#v err=%v", prefixedUSBasp, usb, err)
 	}
 	before, err := normalizeProgramCLIArgs([]string{
-		"--allow-incomplete-backup", "--app-reconnect=false", "flash",
+		"--deployment=development", "--app-reconnect=false", "flash",
 		"firmware.hex", "--dry-run", "COM18",
 	})
 	if err != nil {
@@ -638,7 +808,7 @@ func TestNormalizeGuardedFlashCLIArguments(t *testing.T) {
 	}
 	wantBefore := []string{
 		"--operation", "write-flash", "--method", "urclock", "--hex", "firmware.hex",
-		"--allow-incomplete-backup", "--app-reconnect=false", "--dry-run", "--port", "COM18",
+		"--deployment=development", "--app-reconnect=false", "--dry-run", "--port", "COM18",
 	}
 	if !reflect.DeepEqual(before, wantBefore) {
 		t.Fatalf("flags-before normalized=%#v want=%#v", before, wantBefore)
@@ -650,13 +820,13 @@ func TestNormalizeGuardedFlashCLIArguments(t *testing.T) {
 	}
 }
 
-func TestProgramCLIRejectsEEPROMReinitializationWithoutCompleteBackup(t *testing.T) {
+func TestProgramCLIRemovesIncompleteBackupEscapeHatch(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	err := runProgramWithConfig([]string{
 		"flash", "candidate.hex", "COM18",
 		"--reinitialize-eeprom", "--allow-incomplete-backup",
 	}, &stdout, &stderr, appconfig.Defaults())
-	if err == nil || !strings.Contains(err.Error(), "requires a complete verified raw flash") {
+	if err == nil || !strings.Contains(err.Error(), "unknown guarded flash flag") {
 		t.Fatalf("unsafe development EEPROM reinitialization was accepted: %v", err)
 	}
 }
@@ -708,12 +878,9 @@ func TestStandaloneUSBaspRequiresSeparateApplicationLifecycleSelector(t *testing
 
 	stdout.Reset()
 	stderr.Reset()
-	withOverride := append(append([]string(nil), base...), "--allow-incomplete-backup")
-	if err := runProgram(withOverride, &stdout, &stderr, store); err != nil {
-		t.Fatalf("explicit recovery override rejected: %v", err)
-	}
-	if !strings.Contains(stderr.String(), "application lifecycle skipped") {
-		t.Fatalf("override warning missing: stdout=%s stderr=%s", stdout.String(), stderr.String())
+	withDevelopment := append(append([]string(nil), base...), "--deployment", "development")
+	if err := runProgram(withDevelopment, &stdout, &stderr, store); err == nil || !strings.Contains(err.Error(), "--app-device") {
+		t.Fatalf("development classification bypassed application lifecycle: %v", err)
 	}
 }
 
@@ -805,7 +972,7 @@ func TestSecondaryFirmwareDelegatesToPrimaryOperationAndFollowsProgress(t *testi
 		case "controller.update.firmware":
 			request := params.(artifacts.UpdateRequest)
 			if !request.Authorized || request.Method != "urclock" ||
-				!request.AllowIncompleteBackup || !request.ReinitializeEEPROM ||
+				request.Deployment != "development" || !request.ReinitializeEEPROM ||
 				request.IdempotencyKey == "" ||
 				request.ArtifactSHA256 != document.SourceSHA256 {
 				t.Fatalf("update request=%+v", request)
@@ -833,7 +1000,7 @@ func TestSecondaryFirmwareDelegatesToPrimaryOperationAndFollowsProgress(t *testi
 	}
 	var output bytes.Buffer
 	if err := delegatePrimaryFirmwareUpdate(
-		context.Background(), firmware, "urclock", "", true, true, &output, call,
+		context.Background(), firmware, "urclock", "", "development", true, &output, call,
 	); err != nil {
 		t.Fatal(err)
 	}

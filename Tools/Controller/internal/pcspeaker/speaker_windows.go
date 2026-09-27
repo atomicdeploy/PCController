@@ -42,6 +42,24 @@ const (
 
 var speakerMu sync.Mutex
 
+func probeNative(driverDirectory string) error {
+	if err := validateDriverDirectory(driverDirectory); err != nil {
+		return err
+	}
+	driverPath, err := filepath.Abs(filepath.Join(driverDirectory, winRing0DriverFile))
+	if err != nil {
+		return err
+	}
+	if info, statErr := os.Stat(driverPath); statErr != nil || !info.Mode().IsRegular() {
+		return fmt.Errorf("WinRing0 driver is unavailable at %s", driverPath)
+	}
+	handle, err := openWinRing0Device()
+	if err != nil {
+		return fmt.Errorf("WinRing0 device is not ready: %w", err)
+	}
+	return windows.CloseHandle(handle)
+}
+
 type winRing0Driver struct {
 	handle  windows.Handle
 	manager *mgr.Mgr

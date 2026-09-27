@@ -2,9 +2,28 @@ package controller
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestPublicOptionsExposeCanonicalFirmwareFeatureStatus(t *testing.T) {
+	client := New(Options{FirmwareFeatures: []string{
+		"EEPROM-MENU-LABELS",
+		"eeprom-boot-opcodes",
+		"eeprom-menu-labels",
+	}})
+	defer client.Shutdown()
+	status, err := client.Execute(context.Background(), "toolchain features")
+	if err != nil || status != "firmware features: eeprom-boot-opcodes, eeprom-menu-labels" {
+		t.Fatalf("status=%q err=%v", status, err)
+	}
+	client.ApplyHostOptions(Options{FirmwareFeatures: []string{"unknown"}})
+	if _, err := client.Execute(context.Background(), "toolchain features"); err == nil ||
+		!strings.Contains(err.Error(), "unsupported firmware feature") {
+		t.Fatalf("invalid public feature error=%v", err)
+	}
+}
 
 func TestPublicRFValidationWithoutDevice(t *testing.T) {
 	client := New(Options{})

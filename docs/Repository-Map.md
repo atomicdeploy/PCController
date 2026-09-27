@@ -64,7 +64,7 @@ PCController/
 ├─ LICENSES/                license texts used by REUSE/third-party notices
 ├─ LocalLib/                compact reusable AVR drivers and primitives
 ├─ Project/                 controller-specific firmware domains
-│  └─ Firmware/             single-translation-unit runtime fragments
+│  └─ Runtime/              single-translation-unit runtime fragments
 ├─ Tools/
 │  ├─ Audit/                API, Wiki, prompt/issue traceability helpers
 │  ├─ Bootloader/           reproducible Urboot customization
@@ -75,8 +75,8 @@ PCController/
 │  ├─ Firmware/             firmware build/check/watch/upload orchestrator
 │  └─ VirtualBoard/         C++ board simulator and protocol tests
 ├─ PCController.ino         Arduino sketch entry and firmware composition
-├─ PCControllerProject.cpp  includes Project implementations exactly once
-├─ PCControllerLocalLib.cpp includes LocalLib implementations exactly once
+├─ ControllerDomainSources.cpp aggregates Project implementations exactly once
+├─ BoardSupportSources.cpp  aggregates LocalLib implementations exactly once
 ├─ ProjectConfig.h          compile-time firmware feature/electrical switches
 ├─ build.cmd / build.sh     portable whole-product launcher pair
 ├─ firmware.cmd / .sh       portable firmware-tool launcher pair
@@ -97,11 +97,11 @@ that is excluded by `.gitignore`.
 | Path | Responsibility | Edit rule |
 |---|---|---|
 | [`PCController.ino`](../PCController.ino) | Includes firmware domains and exposes only `setup()`/`loop()` | Edit lifecycle composition here; keep domain logic in its owning file |
-| [`PCControllerProject.cpp`](../PCControllerProject.cpp) | Aggregates `Project/*.cpp` because Arduino does not compile arbitrary nested source automatically | Add each new Project implementation exactly once |
-| [`PCControllerLocalLib.cpp`](../PCControllerLocalLib.cpp) | Aggregates `LocalLib/*.cpp` | Add each new LocalLib implementation exactly once |
+| [`ControllerDomainSources.cpp`](../ControllerDomainSources.cpp) | Aggregates `Project/*.cpp` because Arduino does not compile arbitrary nested source automatically | Add each new Project implementation exactly once |
+| [`BoardSupportSources.cpp`](../BoardSupportSources.cpp) | Aggregates `LocalLib/*.cpp` | Add each new LocalLib implementation exactly once |
 | [`ProjectConfig.h`](../ProjectConfig.h) | UART rate and hardware/feature compile switches | Change only with memory, electrical, and profile evidence |
 
-The files under [`Project/Firmware/`](../Project/Firmware) are deliberately
+The files under [`Project/Runtime/`](../Project/Runtime) are deliberately
 included into the sketch's one translation unit so AVR LTO, stack use, and
 byte-tight layout remain predictable:
 
@@ -125,7 +125,7 @@ byte-tight layout remain predictable:
 | `SevenSegments.*`, `I2cLcd.*` | TM1637 and optional LCD presentation primitives |
 | `ShiftRegisters.*` | 74HC165/74HC595-style input/output transport |
 | `DallasTemperatureBus.*` | bounded DS18B20/OneWire access |
-| `TonePlayer.*`, `pitches.h` | non-blocking notes/melodies and pitch constants |
+| `TonePlayer.*`, `pitches.h` | non-blocking Timer1 playback engine and pitch constants |
 
 ### `Project/`: controller-specific domains
 
@@ -137,7 +137,7 @@ byte-tight layout remain predictable:
 | `PwmController.*`, `PwmExpanderDriver.*` | logical PWM ownership and optional PCA9685 transport |
 | `AddressableLeds.*`, `IlluminationController.*`, `StatusLedController.*` | strip, enclosure light, and status/effect rendering |
 | `CompactI2c.*`, `Ina219Sensor.*`, `SystemInputs.*`, `TemperatureRoles.h` | shared bus recovery, optional sensors, panel inputs, temperature roles |
-| `FrontPanelModel.h`, `BootMelody.*`, `FeedbackMelodies.*` | front-panel state and board-owned audible feedback |
+| `FrontPanelModel.h`, `BootMelody.*`, `AudioCues.*` | front-panel state, welcome sequence, and compact EEPROM-backed autonomous cue policy |
 | `MacroQueue.*`, `TransitionMath.h` | deterministic timed operations and bounded transitions |
 | `ResetTelemetry.*` | reset-cause/boot-count persistence and reporting |
 

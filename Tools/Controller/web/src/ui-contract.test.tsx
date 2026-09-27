@@ -5,6 +5,8 @@ import { BootGate, Card, HoldActionButton, HotkeyHelp, RangeField, TextField } f
 import type { Appearance } from './types'
 import { emptySnapshot } from './types'
 import { artifactUpdateAvailable, UpdatesView } from './updates-view'
+import { translator } from './i18n'
+import { sessionAuthenticationGuidanceRequired } from './authentication-guidance'
 import { WorkbenchView } from './workbench'
 import {
   ControlsView,
@@ -37,7 +39,7 @@ function shared(): SharedViewProps {
     command: vi.fn(async () => ''),
     refresh: vi.fn(async () => undefined),
     openDialog: vi.fn(),
-    transport: { streamState: 'open', tabBusSupported: true, tabPeers: 0 },
+    transport: { streamState: 'open', authenticationRequired: false, boardState: 'ready', tabBusSupported: true, tabPeers: 0 },
     relayedTerminal: [],
     broadcastTerminal: vi.fn(),
     boardSettingsReadState: 'idle',
@@ -45,6 +47,37 @@ function shared(): SharedViewProps {
 }
 
 describe('offline and settings UI contracts', () => {
+  it.each([true, false])('renders only the Physical LED mirror hex value in monospace (live=%s)', haveStatusLED => {
+    const snapshot = {
+      ...emptySnapshot,
+      connected: true,
+      have_status: true,
+      have_status_led: haveStatusLED,
+      hello: { ...emptySnapshot.hello, capabilities: 0xFFFFFFFF },
+      status_led: { red: 171, green: 205, blue: 239, brightness: 128, effect: 2, condition: 3 },
+    }
+    const markup = renderToStaticMarkup(<ControlsView {...shared()} snapshot={snapshot} />)
+    if (haveStatusLED) {
+      expect(markup).toContain('<span class="mono">#ABCDEF</span> · effect 2 · condition 3')
+    } else {
+      expect(markup).toContain('Awaiting pushed board state')
+      expect(markup).not.toContain('<span class="mono">#ABCDEF</span>')
+    }
+  })
+
+  it('distinguishes missing or rejected credentials from ordinary authenticated transport loss', () => {
+    const base = {
+      hostRequiresAuthentication: true,
+      streamState: 'waiting' as const,
+      token: 'valid-looking-token',
+    }
+    expect(sessionAuthenticationGuidanceRequired({ ...base, hostRequiresAuthentication: false })).toBe(false)
+    expect(sessionAuthenticationGuidanceRequired({ ...base, streamState: 'open' })).toBe(false)
+    expect(sessionAuthenticationGuidanceRequired({ ...base, token: '' })).toBe(true)
+    expect(sessionAuthenticationGuidanceRequired({ ...base, streamDetail: 'HTTP 401: authentication required' })).toBe(true)
+    expect(sessionAuthenticationGuidanceRequired({ ...base, streamDetail: 'network timeout' })).toBe(false)
+  })
+
   it('keeps neutral field guidance contextual while validation feedback stays visible', () => {
     const neutral = renderToStaticMarkup(<TextField label="Address" hint="Use a private service root" />)
     const invalid = renderToStaticMarkup(<TextField label="Address" hint="Use a private service root" error="Address is invalid" />)
@@ -65,7 +98,9 @@ describe('offline and settings UI contracts', () => {
     const connected = {
       ...emptySnapshot,
       connected: true,
+      have_status: true,
       connection_state: 'connected',
+      hello: { ...emptySnapshot.hello, capabilities: (1 << 5) | (1 << 6) },
       status: { ...emptySnapshot.status, lcd_address: 0x27 },
     }
     const markup = renderToStaticMarkup(<WorkbenchView {...shared()} snapshot={connected} />)
@@ -79,12 +114,30 @@ describe('offline and settings UI contracts', () => {
     expect(markup).toContain('Show text')
   })
 
+  it.each([null, undefined, []])('renders an empty macro draft without crashing when steps is %s', (steps) => {
+    const snapshot = {
+      ...emptySnapshot,
+      connected: true,
+      have_status: true,
+      macros: {
+        library: [{ id: 4, name: 'New draft', mode: 'host', steps }],
+        playback: { running: false, name: '', mode: 'host', step: 0, step_count: 0, faithful: false, maximum_timing_error_us: 0 },
+        recording: { active: false, name: '', mode: 'host', steps: 0 },
+      },
+    }
+    const markup = renderToStaticMarkup(<WorkbenchView {...shared()} snapshot={snapshot} />)
+    expect(markup).toContain('New draft · host · 0 steps')
+    expect(markup).toContain('Macro inspection &amp; recording')
+    expect(markup).toContain('Play selected')
+  })
+
   it('renders only user PWM channels in the generic mixer and keeps system channels role-specific', () => {
     const connected = {
       ...emptySnapshot,
       connected: true,
       have_status: true,
       connection_state: 'connected',
+      hello: { ...emptySnapshot.hello, capabilities: 1 << 2 },
       status: { ...emptySnapshot.status, pwm_available: true, pwm_channel: 2, pwm_value: 1024 },
     }
     const markup = renderToStaticMarkup(<ControlsView {...shared()} snapshot={connected} />)
@@ -102,12 +155,102 @@ describe('offline and settings UI contracts', () => {
     expect(markup).not.toMatch(/\bLive\b/)
   })
 
+  it('routes an unauthenticated dashboard directly to secure session settings', () => {
+    const markup = renderToStaticMarkup(<DashboardView
+      {...shared()}
+      t={translator('en')}
+      transport={{ ...shared().transport, streamState: 'waiting', authenticationRequired: true }}
+    />)
+    expect(markup).toContain('Authentication required')
+    expect(markup).toContain('Enter this host’s access token.')
+    expect(markup).toContain('Enter access token')
+    expect(markup).not.toContain('The dashboard is ready')
+  })
+
+  it('renders no stale board keys or values while host authentication is required', () => {
+    const stale = {
+      ...emptySnapshot,
+      connected: true,
+      have_status: true,
+      hello: { capabilities: 0xffffffff, build_hash: 0xdeadbeef, build_timestamp: '260812120000' },
+      port: { name: 'COM18', vid: '1A86', pid: '7523' },
+      status: { ...emptySnapshot.status, door_open: true, bluetooth_audio_state: 2, reset_count: 9, uptime_ms: 1000 },
+    }
+    const markup = renderToStaticMarkup(<DashboardView
+      {...shared()}
+      snapshot={stale}
+      t={translator('en')}
+      transport={{ ...shared().transport, streamState: 'waiting', boardState: 'unavailable', authenticationRequired: true }}
+    />)
+    for (const forbidden of ['device-card', 'Door', 'Bluetooth audio', 'Firmware', 'BUILD', 'UPTIME', 'COM18', 'DEADBEEF', 'Events']) {
+      expect(markup).not.toContain(forbidden)
+    }
+    expect(markup).toContain('Authentication required')
+  })
+
+  it('shows Bluetooth Audio state only when HELLO advertises capability bit 11', () => {
+    const base = {
+      ...emptySnapshot,
+      connected: true,
+      have_status: true,
+      connection_state: 'connected',
+      status: { ...emptySnapshot.status, bluetooth_audio_state: 2 },
+    }
+    const withoutCapability = renderToStaticMarkup(<DashboardView {...shared()} t={translator('en')} snapshot={base} />)
+    expect(withoutCapability).not.toContain('Bluetooth audio')
+    const advertised = renderToStaticMarkup(<DashboardView {...shared()} t={translator('en')} snapshot={{ ...base, hello: { capabilities: 1 << 11 } }} />)
+    expect(advertised).toContain('Bluetooth audio')
+  })
+
+  it('reports advertised invalid measurements without formatting sentinel values', () => {
+    const snapshot = {
+      ...emptySnapshot,
+      connected: true,
+      have_status: true,
+      connection_state: 'connected',
+      hello: { capabilities: (1 << 0) | (1 << 1) },
+      status: {
+        ...emptySnapshot.status,
+        flags: (1 << 0) | (1 << 2) | (1 << 3),
+        supply_mv: -2147483648,
+        bus_mv: -2147483648,
+        current_ma: -2147483648,
+        power_mw: -2147483648,
+        temperature_led_centi_c: -32768,
+        temperature_bt_audio_centi_c: 32767,
+      },
+    }
+    const markup = renderToStaticMarkup(<DashboardView {...shared()} snapshot={snapshot} />)
+    expect(markup).toContain('Power measurements unavailable')
+    expect(markup).toContain('LED temperature unavailable')
+    expect(markup).toContain('BT Amplifier temperature unavailable')
+    expect(markup).not.toContain('Measurement unavailable')
+    expect(markup).not.toContain('Invalid controller sample')
+    expect(markup).not.toContain('The controller advertised')
+    expect(markup).not.toContain('-2147483648')
+    expect(markup).not.toContain('-32768')
+    expect(markup).not.toContain('32767')
+  })
+
+  it('does not mislabel an authenticated host with an offline board as an authentication failure', () => {
+    const markup = renderToStaticMarkup(<DashboardView
+      {...shared()}
+      t={translator('en')}
+      snapshot={{ ...emptySnapshot, connection_reason: 'Serial controller is offline' }}
+    />)
+    expect(markup).toContain('Controller offline — check the connection details below.')
+    expect(markup).toContain('Serial controller is offline')
+    expect(markup).not.toContain('Authentication required')
+    expect(markup).not.toContain('The dashboard is ready')
+  })
+
   it('hides unavailable peripherals and their invalid readings', () => {
     const connected = {
       ...emptySnapshot,
       connected: true,
       have_status: true,
       connection_state: 'connected',
+      hello: { ...emptySnapshot.hello, capabilities: 1 << 5 },
       status: {
         ...emptySnapshot.status,
         supply_mv: -2147483648,
@@ -123,6 +266,9 @@ describe('offline and settings UI contracts', () => {
     expect(dashboard).not.toContain('Telemetry history')
     expect(dashboard).not.toContain('-2147483648')
     expect(dashboard).not.toContain('-32768')
+    expect(dashboard).not.toContain('Power measurements unavailable')
+    expect(dashboard).not.toContain('LED temperature unavailable')
+    expect(dashboard).not.toContain('BT Amplifier temperature unavailable')
 
     const workbench = renderToStaticMarkup(<WorkbenchView {...shared()} snapshot={connected} />)
     expect(workbench).toContain('TM1637')
@@ -166,6 +312,8 @@ describe('offline and settings UI contracts', () => {
       onAppTitle={vi.fn(async (value: string) => value)}
 			uiConfig={null}
 			onBuzzerPath={vi.fn(async () => undefined)}
+      navigationSync
+      onNavigationSync={vi.fn()}
     />)
     expect(markup).toContain('text-field__control')
     expect(markup).toContain('text-field__action')
@@ -173,16 +321,40 @@ describe('offline and settings UI contracts', () => {
     expect(markup).toContain('Peripheral names')
     expect(markup).toContain('Global shortcuts')
     expect(markup).toContain('Record shortcut')
+    expect(markup).toContain('Sync this tab with other instances')
+    expect(markup).not.toContain('This tab follows the live default navigation group')
     expect(markup).not.toContain('TM1637')
     expect(markup).not.toContain('Write controller settings')
+    expect(markup).not.toContain('Security')
+    expect(markup).not.toContain('authToken')
+    expect(markup).not.toContain('No session token')
+  })
+
+  it('shows navigation synchronization state only while it is factual and actionable', () => {
+    const pending = renderToStaticMarkup(<SettingsView
+      {...shared()} appearance={appearance} onAppearance={vi.fn()} token="" onToken={vi.fn()}
+      onAppTitle={vi.fn(async (value: string) => value)} uiConfig={null}
+      onBuzzerPath={vi.fn(async () => undefined)} navigationSync
+      navigationSyncStatus={{ state: 'pending', detail: '' }} onNavigationSync={vi.fn()}
+    />)
+    expect(pending).toContain('Synchronizing')
+    const failed = renderToStaticMarkup(<SettingsView
+      {...shared()} appearance={appearance} onAppearance={vi.fn()} token="" onToken={vi.fn()}
+      onAppTitle={vi.fn(async (value: string) => value)} uiConfig={null}
+      onBuzzerPath={vi.fn(async () => undefined)} navigationSync
+      navigationSyncStatus={{ state: 'error', detail: 'Coordinator unavailable' }} onNavigationSync={vi.fn()}
+    />)
+    expect(failed).toContain('Coordinator unavailable')
   })
 
   it('never presents empty board settings as an authoritative EEPROM report', () => {
     const connectedWithoutSettings = {
       ...emptySnapshot,
       connected: true,
+      have_status: true,
       connection_state: 'connected',
       have_settings: false,
+      hello: { ...emptySnapshot.hello, capabilities: 1 << 8 },
     }
     const markup = renderToStaticMarkup(<SettingsView
       {...shared()}
@@ -195,11 +367,54 @@ describe('offline and settings UI contracts', () => {
       onAppTitle={vi.fn(async (value: string) => value)}
 			uiConfig={null}
 			onBuzzerPath={vi.fn(async () => undefined)}
+      navigationSync
+      onNavigationSync={vi.fn()}
     />)
     expect(markup).toContain('Reading board settings')
     expect(markup).toContain('Waiting for the controller to return its live EEPROM settings')
+		expect(markup).toContain('Board state unavailable')
+		expect(markup).not.toContain('Board active')
+		expect(markup).not.toContain('Board silent')
     expect(markup).not.toContain('EEPROM report')
     expect(markup).not.toContain('Write board settings')
+  })
+
+  it('renders complete authoritative enclosure illumination settings and state', () => {
+	const connected = {
+		...emptySnapshot,
+		connected: true,
+		have_status: true,
+		have_settings: true,
+		connection_state: 'connected',
+		hello: { ...emptySnapshot.hello, capabilities: (1 << 2) | (1 << 8) },
+		status: { ...emptySnapshot.status, pwm_available: true, door_open: true },
+		settings: { ...emptySnapshot.settings, persisted: true, light_mode: 1, on_brightness: 180, off_brightness: 12 },
+		illumination: {
+			available: true, mode: 1, on_brightness: 180, off_brightness: 12,
+			door_open: true, target_brightness: 180, target_pwm: 2891,
+			applied_brightness: 160, applied_pwm: 2570, at_target: false, persisted: true,
+		},
+	}
+	const markup = renderToStaticMarkup(<SettingsView
+		{...shared()}
+		snapshot={connected}
+		appearance={appearance}
+		onAppearance={vi.fn()}
+		token=""
+		onToken={vi.fn()}
+		onAppTitle={vi.fn(async (value: string) => value)}
+		uiConfig={null}
+		onBuzzerPath={vi.fn(async () => undefined)}
+		navigationSync
+		onNavigationSync={vi.fn()}
+	/>)
+	expect(markup).toContain('Enclosure illumination')
+	expect(markup).toContain('Auto · door')
+	expect(markup).toContain('Door-open / On brightness')
+	expect(markup).toContain('Door-closed / Off brightness')
+	expect(markup).toContain('Applied channel 11')
+	expect(markup).toContain('2570/4095')
+	expect(markup).toContain('Apply illumination')
   })
 
   it('renders offline controls and settings copy in Persian', () => {
@@ -215,6 +430,8 @@ describe('offline and settings UI contracts', () => {
       onAppTitle={vi.fn(async (value: string) => value)}
 			uiConfig={null}
 			onBuzzerPath={vi.fn(async () => undefined)}
+      navigationSync
+      onNavigationSync={vi.fn()}
     />)
     expect(controls).toContain('کنترل‌های برد در دسترس نیست')
     expect(settings).toContain('هویت میزبان رایانه')
