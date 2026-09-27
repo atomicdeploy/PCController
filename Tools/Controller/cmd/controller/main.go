@@ -272,7 +272,7 @@ func runDesktop(
 	store *appconfig.Store,
 ) error {
 	if len(args) > 1 {
-		return errors.New("usage: desktop install|ensure|uninstall|remove")
+		return errors.New("usage: desktop install|ensure|test|uninstall|remove")
 	}
 	action := "ensure"
 	if len(args) == 1 {
@@ -287,10 +287,38 @@ func runDesktop(
 	switch action {
 	case "install", "ensure":
 		status, integrationErr = hostui.EnsureDesktopIntegration(options)
+	case "test":
+		integration, err := hostui.EnsureDesktopIntegration(options)
+		if err != nil {
+			status, integrationErr = integration, err
+			break
+		}
+		notifier := hostui.NewNotifier(hostui.NotifierOptions{
+			AppID: productidentity.StableAppID, LogoPath: integration.Logo,
+		})
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err = notifier.Notify(ctx, hostui.Notification{
+			Title:     productidentity.Title(store.Current().UI.AppTitle) + " · Notification test",
+			Body:      "The installed Windows notification logo and action route are working.",
+			LaunchURI: productidentity.ProtocolScheme + "://page/events",
+			Actions: []hostui.NotificationAction{{
+				Label: "Open events", URI: productidentity.ProtocolScheme + "://page/events",
+			}},
+		})
+		cancel()
+		notificationStatus := notifier.Status()
+		status = struct {
+			Desktop      hostui.DesktopIntegrationStatus `json:"desktop"`
+			Notification hostui.NotificationStatus       `json:"notification"`
+		}{integration, notificationStatus}
+		integrationErr = err
+		if integrationErr == nil && (!notificationStatus.Branded || notificationStatus.Backend != "winrt-toast") {
+			integrationErr = errors.New("Windows notification test did not use the branded WinRT toast backend")
+		}
 	case "uninstall", "remove":
 		status, integrationErr = hostui.RemoveDesktopIntegration(options)
 	default:
-		return errors.New("usage: desktop install|ensure|uninstall|remove")
+		return errors.New("usage: desktop install|ensure|test|uninstall|remove")
 	}
 	encoded, _ := json.MarshalIndent(status, "", "  ")
 	fmt.Fprintln(stdout, string(encoded))
@@ -361,6 +389,10 @@ func runWebWithInitialAction(
 	flags := flag.NewFlagSet("web", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	connection := addConnectionFlags(flags, store.Current().Connection)
+	buzzerOptions, err := addBuzzerRuntimeFlags(flags, store.Persistent().Integrations.BuzzerMirror)
+	if err != nil {
+		return err
+	}
 	noAuto := flags.Bool("no-auto", false, "start with automatic connection paused")
 	noOpen := flags.Bool("no-open", false, "serve the web app without opening a browser")
 	noTray := flags.Bool("no-tray", false, "serve the web app without a native system-tray menu")
@@ -371,6 +403,12 @@ func runWebWithInitialAction(
 		return errors.New("usage: controller web [--no-open] [--no-tray] [--no-auto] [connection flags]")
 	}
 	connection.captureOverrides(flags)
+	if err := buzzerOptions.captureOverrides(flags); err != nil {
+		return err
+	}
+	if err := buzzerOptions.apply(store); err != nil {
+		return err
+	}
 	claimContext, claimCancel := context.WithTimeout(context.Background(), 3*time.Second)
 	claim, existing, err := claimOrResolveHostInstance(claimContext, "web")
 	claimCancel()
@@ -427,7 +465,7 @@ func runWebWithInitialAction(
 	// prevents a notification registration write.
 	if status, desktopErr := ensureWebDesktopIntegration(store); desktopErr != nil {
 		fmt.Fprintln(stderr, "desktop notification identity:", desktopErr)
-	} else if status.Supported && (!status.ProtocolReady || !status.ShortcutReady) {
+	} else if status.Supported && (!status.ProtocolReady || !status.ShortcutReady || !status.DesktopShortcutReady) {
 		fmt.Fprintln(stderr, "desktop notification identity is incomplete")
 	}
 	runtime := newRuntime(connection, store)
@@ -752,6 +790,10 @@ func runTUIWithInitialAction(
 	flags := flag.NewFlagSet("tui", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	connection := addConnectionFlags(flags, store.Current().Connection)
+	buzzerOptions, err := addBuzzerRuntimeFlags(flags, store.Persistent().Integrations.BuzzerMirror)
+	if err != nil {
+		return err
+	}
 	consoleOptions, err := addTUIConsoleFlags(flags, store.Current().UI.TUIConsole)
 	if err != nil {
 		return err
@@ -766,6 +808,12 @@ func runTUIWithInitialAction(
 		return err
 	}
 	connection.captureOverrides(flags)
+	if err := buzzerOptions.captureOverrides(flags); err != nil {
+		return err
+	}
+	if err := buzzerOptions.apply(store); err != nil {
+		return err
+	}
 	if err := consoleOptions.captureOverrides(flags); err != nil {
 		return err
 	}
@@ -996,10 +1044,13 @@ func runTUIWithInitialAction(
 				return nil
 			},
 			HostIntegrations: func() appconfig.Integrations {
-				return store.Current().Integrations
+				return store.Persistent().Integrations
+			},
+			BuzzerRuntime: func() appconfig.BuzzerRuntimeStatus {
+				return primary.IntegrationStatus().BuzzerRuntime
 			},
 			SaveIntegrations: func(value appconfig.Integrations) error {
-				if value.Discovery != store.Current().Integrations.Discovery {
+				if value.Discovery != store.Persistent().Integrations.Discovery {
 					ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 					var persisted appconfig.Discovery
 					err := callPrimary(ctx, "controller.discovery.config.set", value.Discovery, &persisted)
@@ -1057,6 +1108,10 @@ func runTUIWithInitialAction(
 			WriteOSC: func(payload string) error {
 				return hostui.WriteOSC(stdout, payload)
 			},
+			AckAppAction: func(ack hostui.ActionAck) error {
+				_, ackErr := primary.actionCoordinator.Ack(ack)
+				return ackErr
+			},
 			ReportTerminal: func(page, title string) error {
 				ui := store.Current().UI
 				values := navigationReporter.NextValues()
@@ -1065,6 +1120,7 @@ func runTUIWithInitialAction(
 				values["terminal_title"] = title
 				values["terminal_osc"] = "enabled"
 				values["terminal_progress"] = "osc-9-4"
+				values[hostui.ActionCapabilitiesKey] = hostui.TUIActionCapabilities
 				_, err := primary.instances.Upsert(hostui.AppInstance{
 					ID: tuiInstanceID, Surface: "tui", Page: page, State: "active",
 					Self: &tuiSelf, Values: values,

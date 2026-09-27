@@ -103,6 +103,7 @@ type remoteSnapshotWire struct {
 	StatusLEDUpdated  time.Time                    `json:"status_led_updated,omitempty"`
 	ProgramState      control.ProgramStateSnapshot `json:"program_state"`
 	RFLearning        control.RFLearnState         `json:"rf_learning"`
+	Macros            control.MacroSnapshot        `json:"macros"`
 }
 
 type remoteUISettingsWire struct {
@@ -287,7 +288,7 @@ func (client *remoteTUIIPC) Snapshot(ctx context.Context) (control.Snapshot, err
 		FrontPanel: wire.FrontPanel, HaveFrontPanel: wire.HaveFrontPanel,
 		FrontPanelUpdated: wire.FrontPanelUpdated, StatusLED: wire.StatusLED,
 		HaveStatusLED: wire.HaveStatusLED, StatusLEDUpdated: wire.StatusLEDUpdated,
-		ProgramState: wire.ProgramState, RFLearning: wire.RFLearning,
+		ProgramState: wire.ProgramState, RFLearning: wire.RFLearning, Macros: wire.Macros,
 	}, nil
 }
 
@@ -384,6 +385,13 @@ func (client *remoteTUIIPC) RemoveInstance(ctx context.Context, id string) error
 	return client.call(
 		ctx, "controller.app.instance.remove", map[string]string{"id": id}, nil,
 	)
+}
+
+func (client *remoteTUIIPC) AckAppAction(ctx context.Context, ack hostui.ActionAck) error {
+	var result struct {
+		Accepted bool `json:"accepted"`
+	}
+	return client.call(ctx, "controller.app.action.ack", ack, &result)
 }
 
 type remoteTUIInstanceLease struct {
@@ -536,6 +544,7 @@ func (lease *remoteTUIInstanceLease) report(catchUp bool) error {
 	values["terminal_title"] = title
 	values["terminal_osc"] = "enabled"
 	values["terminal_progress"] = "osc-9-4"
+	values[hostui.ActionCapabilitiesKey] = hostui.TUIActionCapabilities
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	_, err := lease.client.ReportInstance(ctx, hostui.AppInstance{
@@ -1211,6 +1220,11 @@ func runRemoteTUI(
 					ReportTerminalAsync: instanceLease.QueueUpdate,
 					CommitNavigation:    instanceLease.QueueNavigation,
 					WriteOSC:            func(payload string) error { return hostui.WriteOSC(stdout, payload) },
+					AckAppAction: func(ack hostui.ActionAck) error {
+						ackContext, ackCancel := context.WithTimeout(ctx, 3*time.Second)
+						defer ackCancel()
+						return client.AckAppAction(ackContext, ack)
+					},
 					Remote: &tui.RemoteBackend{
 						Endpoint:                  strings.TrimSpace(address),
 						InitialSnapshot:           initial,

@@ -211,6 +211,7 @@ func (scheduler *OutputScheduler) StartStatusEffect(
 				effect.Brightness,
 			)
 			if scheduler.haveStatusBase {
+				requestContext = WithBackgroundCommand(requestContext)
 				payload = native.StatusRGBPayload(
 					scheduler.statusBase[0],
 					scheduler.statusBase[1],
@@ -400,6 +401,10 @@ func (scheduler *OutputScheduler) streamMelody(
 	melody appconfig.Melody,
 	repeats int,
 ) error {
+	// Keep cadence on one monotonic timeline. Waiting a complete note interval
+	// after every acknowledged command adds USB/bridge round-trip latency to
+	// every note and audibly stretches melodies on the host and board alike.
+	nextNoteAt := time.Now()
 	for repeat := 0; repeats == 0 || repeat < repeats; repeat++ {
 		for _, note := range melody.Notes {
 			if err := scheduler.send(
@@ -409,10 +414,10 @@ func (scheduler *OutputScheduler) streamMelody(
 			); err != nil {
 				return err
 			}
-			if err := waitOutput(
-				ctx,
-				time.Duration(note.DurationMS+note.GapMS)*time.Millisecond,
-			); err != nil {
+			nextNoteAt = nextNoteAt.Add(
+				time.Duration(note.DurationMS+note.GapMS) * time.Millisecond,
+			)
+			if err := waitOutput(ctx, time.Until(nextNoteAt)); err != nil {
 				return err
 			}
 		}

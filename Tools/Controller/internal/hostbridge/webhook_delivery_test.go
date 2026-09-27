@@ -211,22 +211,13 @@ func TestManagerDispatchUsesDurableWebhookQueue(t *testing.T) {
 		writer.WriteHeader(http.StatusNoContent)
 	}))
 	defer server.Close()
-	store, err := appconfig.Open(filepath.Join(t.TempDir(), "config.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = store.Update(func(config *appconfig.Config) error {
-		config.Integrations.Hotkeys = nil
-		config.Integrations.Notifications.Enabled = false
+	store := openHostBridgeTestStore(t, func(config *appconfig.Config) error {
 		config.Integrations.OutboundWebhooks = []appconfig.Webhook{{
 			Name: "manager", Enabled: true, EventKind: "door",
 			URL: server.URL, Method: http.MethodPost,
 		}}
 		return nil
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	runtime := control.New(control.Options{})
 	client := controller.AttachSharedRuntime(runtime, shell.New(8))
 	ctx, cancel := context.WithCancel(context.Background())

@@ -20,8 +20,12 @@ func (registry recordingRegistry) Set(path, name, value string) error {
 func TestDesktopRegistryUsesCurrentExecutableAndQuotedURIArgument(t *testing.T) {
 	record := recordingRegistry{}
 	executable := `C:\Program Files\PCController\controller.exe`
-	if err := ensureProtocolRegistry(record, executable, "Test.PCController", "Test Controller"); err != nil {
+	logo := `C:\Program Files\PCController\toast-logo.png`
+	if err := ensureProtocolRegistry(record, executable, logo, "Test.PCController", "Test Controller"); err != nil {
 		t.Fatal(err)
+	}
+	if got := record[`Software\Classes\AppUserModelId\Test.PCController|IconUri`]; got != logo {
+		t.Fatalf("AppUserModelID IconUri=%q; want %q", got, logo)
 	}
 	command := record[`Software\Classes\pccontroller\shell\open\command|`]
 	if !strings.Contains(command, `"C:\Program Files\PCController\controller.exe"`) ||
@@ -118,7 +122,7 @@ func TestNativeShortcutRoundTripAndOwnership(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !sameWindowsPath(link.Target, executable) || link.Arguments != "web" {
+	if !sameWindowsPath(link.Target, executable) || link.Arguments != "web" || !sameWindowsPath(link.Icon, executable) || link.IconIndex != 0 {
 		t.Fatalf("shortcut=%+v executable=%q", link, executable)
 	}
 	if !shortcutOwnedBy(executable, link) {
@@ -145,7 +149,7 @@ func TestRemoveOwnedShortcutUsesNativeInspection(t *testing.T) {
 	if err := createWindowsShortcut(executable, shortcut, "Tests.Controller", "Controller Tests"); err != nil {
 		t.Fatal(err)
 	}
-	removed, preserved, err := removeOwnedShortcut(executable, shortcut)
+	removed, preserved, err := removeOwnedShortcut(executable, shortcut, "Tests.Controller")
 	if err != nil || !removed || preserved {
 		t.Fatalf("remove=(removed=%t preserved=%t error=%v)", removed, preserved, err)
 	}

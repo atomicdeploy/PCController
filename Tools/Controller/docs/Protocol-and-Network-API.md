@@ -165,17 +165,28 @@ normal low-latency path.
 The board pushes changed physical outputs instead of requiring the host to poll
 the active front panel. `SEGMENT_CHANGED` (`9C`) carries four raw TM1637 segment
 bytes followed by `u8 brightness`. `BUZZER_CHANGED` (`9D`) carries
-`u16 frequency_hz, u16 duration_ms, u8 muted`. Both use sequence zero and are
-emitted only when the corresponding physical output changes. The host may
-still request `FRONT_PANEL_GET` during connection, manual refresh, or recovery.
+the five-byte state `u16 frequency_hz, u16 duration_ms, u8 muted`, optionally
+followed by `u32 device_micros` when the producer can timestamp the physical
+edge. This is one current variable-length contract, not a migration chain.
+These frames use sequence zero and are emitted only when the
+corresponding physical output changes. The host may still request
+`FRONT_PANEL_GET` during connection, manual refresh, or recovery.
 
-The host's melody scheduler sends acknowledged `BUZZER` frames. Each accepted
-firmware note is mirrored through `BUZZER_CHANGED`, then published immediately
-through IPC, WebSocket, Socket.IO, bridge peers, optional native WinRing0
-motherboard-speaker playback, and optional Web Audio. Current firmware receives
-one compact `STATUS_EFFECT` descriptor and renders the animation locally; the
-rate-limited `STATUS_RGB` stream remains only as a bounded older-firmware
-compatibility path.
+The host's melody scheduler sends acknowledged `BUZZER` frames on one monotonic
+deadline sequence; command/ACK latency is not added to every note interval.
+Each accepted firmware note or explicit pause is mirrored through
+`BUZZER_CHANGED`, then published immediately through IPC, WebSocket, Socket.IO,
+bridge peers, optional native motherboard-speaker playback, and optional Web
+Audio. Host renderers map a present `device_micros` onto their local monotonic
+clocks; late notes are shortened or discarded instead of shifting later notes. Current
+firmware receives one compact `STATUS_EFFECT` descriptor and renders the
+animation locally; the rate-limited `STATUS_RGB` stream remains only as a
+bounded older-firmware compatibility path.
+
+Every buzzer state from one source supersedes its preceding state. A zero-
+frequency positive-duration record is a timed pause; zero frequency and zero
+duration is an authoritative stop. Both cancel an active mirrored tone at the
+mapped MCU timestamp and never start a host speaker backend.
 
 At the command/API layer a melody repeat count of zero means repeat until an
 explicit stop, while 1..20 remains the bounded mode. This is the reusable
@@ -238,7 +249,7 @@ off only outputs claimed by that macro.
 | TEMPERATURES | `95` | named temperature records below |
 | MENU_LIST | `97` | paginated firmware-owned menu entries below |
 | SEGMENT_CHANGED | `9C` | `u8 raw_segments[4], u8 brightness`; unsolicited, changed-only |
-| BUZZER_CHANGED | `9D` | `u16 frequency_hz, u16 duration_ms, u8 muted`; unsolicited, changed-only |
+| BUZZER_CHANGED | `9D` | `u16 frequency_hz, u16 duration_ms, u8 muted[, u32 device_micros]`; unsolicited, changed-only |
 | EVENT | `A0` | `u8 eventType, event-specific data...` |
 
 `MENU_LIST` schema `1` starts with `u8 schema, u8 total, u8 nextCursor,
@@ -533,12 +544,15 @@ request error.
 | `controller.peripherals.get` | `{}` | host-owned custom names plus the canonical 34-entry peripheral descriptor registry; requires `read` |
 | `controller.peripherals.set` | `peripheral_names` object | atomically replace custom host names and return the normalized names plus registry; requires `host_configuration` |
 | `controller.pwm.values` | `{}` | authoritative board availability, selected channel, and all sixteen logical values; requires `read` |
+| `controller.illumination.get` | `{}` | persisted Off/Auto/On policy, on/off brightness, live door-selected target, and exact applied enclosure PWM channel 11; requires `read` |
+| `controller.illumination.set` | `{ "mode": 0..2, "on_brightness": 0..255, "off_brightness": 0..255 }` | preserves every unrelated board setting, applies live, waits for durable EEPROM readback, and returns the authoritative illumination state; requires `board_commands` |
 | `controller.pwm.set` | `channel` (`0..15`), `value` (`0..4095`) | write one channel, read back, and return the complete authoritative sixteen-channel snapshot; requires `board_commands` |
 | `controller.pwm.off` | `{}` | clear every PWM channel, read back, and return the complete authoritative snapshot; requires `board_commands` |
 | `controller.temperatures` | optional `rescan` | named temperatures and ROM identities |
 | `controller.menu.list`, `controller.menu.current` | `{}` | live board catalog when advertised, otherwise the canonical capability-limited manifest |
 | `controller.menu.jump`, `controller.menu.page` | `page` ID or name | select a board menu page |
 | `controller.command.execute` | `command` | run any ordinary controller command; `quit`/`exit` requests primary shutdown |
+| `controller.firmware.build` | optional `firmware_features` array or `no_firmware_features: true` | compile only the host's canonical configured project; returns an operation ID and normalized final log; requires `programming` |
 | `controller.program_state.get` | `{}` | current host-owned Idle/Running owners, reason, and revision |
 | `controller.program_state.set` | `mode`, optional `owner`, `reason` | set/clear one host-owned Running claim and mirror it to capable firmware |
 | `controller.rf.list` | `{}` | all learned records |
@@ -560,6 +574,9 @@ request error.
 | `controller.app.navigate` | `page`, optional `target` | navigate `*`, a surface such as `webui`/`tui`, or one exact instance ID |
 | `controller.app.launch` | `surface`, optional `mode`, `target`, `page`, `idempotency_key` | ensure, launch, or focus only the named `tui` or `webui`; reports OS acceptance separately from live instance confirmation |
 | `controller.app.navigation.commit` | `group`, `source`, `page`, `operation_id` | commit a follower group's canonical page and return its epoch, revision, correlated operation ID, and ordered deliveries |
+| `controller.app.action` | `kind`, optional `value`, `target`, `operation_id`, `timeout_ms` | freeze the selector to exact live clients, push one correlated delivery per target, and return queued/rejected outcomes |
+| `controller.app.action.ack` | `operation_id`, `delivery_id`, `instance_id`, `state`, optional `reason` | acknowledge one exact delivery as `applied` or `rejected`; duplicate identical terminal acknowledgements are idempotent |
+| `controller.app.action.outcome` | `operation_id` | read the bounded current operation with per-target `queued`, `applied`, `rejected`, or `timeout` state |
 | `controller.history.status` | optional ISO-8601 `since` | retained measurement samples, including samples restored from the bounded host data store after restart |
 | `controller.history.timeline` | optional `since`, `limit` | durable important-event timeline |
 | `controller.os.facts.catalog`, `controller.host.facts.catalog` | `{}` | fixed read-only Windows profile descriptors, columns, and row limits |
@@ -583,6 +600,7 @@ request error.
 | `controller.device.inspect` | `resource` | sanitized `capabilities` or `snapshot` document only |
 | `controller.integrations.local.get` | `{}` | credential-free local-device and data-hub enable/URL settings |
 | `controller.integrations.local.set` | `local_device`, `data_hub` | validate and persist LAN-only device and loopback-only data roots |
+| `controller.integrations.status` | `{}` | requested and effective buzzer route, mirror backend, and board reconciliation state |
 | `controller.ports` | `{}` | current serial devices with stable identity fields |
 | `controller.quit`, `controller.exit` | `{}` | close the primary and emit lifecycle shutdown |
 
@@ -597,7 +615,10 @@ with a client operation ID. The primary commits exactly once, returns
 the same ordered action to the source and every live follower. A late title or
 lease callback is therefore unable to roll a source back. When the last lease
 leaves or expires the group is discarded, so active pages are never persisted
-as host configuration.
+as host configuration. Retrying the same operation ID is idempotent only while
+its epoch, revision, and page remain canonical. Once a newer operation advances
+the group, replaying the older operation returns an error instead of a stale
+cached page that could roll a client back.
 After an event-session reconnect a follower adds
 `navigation_catch_up=true`; the coordinator then re-sends the canonical page
 instead of treating the client's potentially stale page as new intent.
@@ -634,6 +655,40 @@ at most three new-window start attempts per surface in a rolling ten-second
 window; `ensure`/`focus` calls that reuse an existing instance do not consume
 that allowance. A limited request returns `effective=unavailable` with a
 rate-limit reason rather than invoking an OS launcher.
+
+Typed application actions are resolved once against the pruned live instance
+registry. The returned operation records the exact instance IDs and surfaces;
+an unknown or offline selector is rejected with an empty target set rather than
+inventing an instance. Clients advertise a bounded `app_actions` list in
+their presence values and apply only a push addressed to their exact instance
+ID. Each target push carries coordinator-owned `operation_delivery_id` and
+`operation_expires_at` metadata. Callers cannot supply or override either
+field. The client rejects an expired or malformed deadline, deduplicates the
+operation-plus-delivery receipt, and returns that delivery nonce as the
+required `delivery_id` in its acknowledgement. The coordinator accepts only a
+nonce issued for that exact operation target before its deadline, then records the client-reported
+`applied` or `rejected` result. A legacy TUI/WebUI without the new advertisement
+may still receive an action through a known delivery path, but it remains
+`queued` until acknowledgement and becomes `timeout` after the bounded
+deadline. Operation history is bounded and expires; ordinary delivery and
+outcome transitions use the existing event streams and bridge fan-out, never
+polling. Successful queued/applied transitions use the state stream so they do
+not flood operator activity logs, while rejection and timeout remain visible
+one-shot activity events.
+
+Unknown well-formed optional action capabilities remain visible in discovery
+without rejecting the whole instance. A namespaced custom action such as
+`pealayer.play` becomes executable only while a matched live instance advertises
+that exact capability. Custom namespaces cannot use the reserved `app.*`,
+`controller.*`, or `command` names; values are limited to 4096 bytes and cannot
+contain NUL, CR, or LF. They always use the correlated exact-target path with a
+delivery nonce, deadline, deduplication receipt, and terminal ACK outcome; they
+never fall back to untracked legacy delivery.
+These receipts provide correlation and deduplication, **not responder
+authentication**: alpha clients share a trusted event fabric and authorization
+is disabled by policy. Transport-session identity binding remains tracked in
+#108 and must be implemented with the future auth work, not inferred from a
+delivery nonce visible to event subscribers.
 
 RF learning has two mutually exclusive modes. An omitted mode or
 `{"mode":"indefinite"}` keeps accepting codes until cancellation. A bounded
@@ -748,7 +803,9 @@ All JSON endpoints share the IPC listener:
 | `POST /api/app/instances` | create/refresh an instance report |
 | `DELETE /api/app/instances?id=...` | remove one instance report |
 | `POST /api/app/navigate` | navigate a page with optional target instance/surface |
-| `POST /api/app/action` | route a validated page/title/progress/OSC/command/lifecycle action with optional target instance/surface |
+| `POST /api/app/action` | freeze and route a correlated page/title/progress/OSC/command/lifecycle action to exact live targets; response includes `accepted` plus the operation |
+| `POST /api/app/action/ack` | acknowledge one exact target as applied/rejected |
+| `GET /api/app/action/outcome?operation_id=...` | read one bounded per-target operation outcome |
 | `POST /api/app/launch` | ensure, start, or focus the named TUI/WebUI surface without accepting process or shell input |
 | `GET /api/bridges` | configured peer names/protocols and live state |
 | `POST /api/bridges/call` | `peer` plus a nested JSON-RPC `request` |
@@ -1094,12 +1151,13 @@ local serial owner. Programming through a remote primary requires the target's
 application-UART close, guarded toolchain/Urclock run, and fresh `HELLO`
 recovery as local programming.
 
-Subscribed peer state remains structured. In particular, an unsolicited
-`buzzer.note` retains its frequency/duration metadata so an independently
-enabled host renderer can play it immediately. The receiver stamps
-`bridge.ingress` and never forwards an ingressed event again; this gives
-server-to-edge mirroring exactly once without polling or bridge cycles. Both
-JSON-RPC and Socket.IO peers must include `state` in their configured topics.
+Subscribed peer events and state remain structured. In particular, an
+unsolicited `buzzer.note` retains its frequency, duration, and optional
+MCU-clock metadata so an independently enabled host renderer can reconstruct
+its source timeline. The receiver stamps `bridge.ingress` and never forwards
+an ingressed event again; this gives server-to-edge mirroring exactly once
+without polling or bridge cycles. Both JSON-RPC and Socket.IO peers must
+include `state` in their configured topics.
 
 ## Artifact distribution and remote updates
 
@@ -1200,7 +1258,7 @@ Artifact and update JSON-RPC methods are:
 | `controller.artifact.fetch` | `url`, `kind`, optional `name`, `sha256`, `bytes`, build identity, `idempotency_key` | queue a verified proxy-aware HTTP download |
 | `controller.artifact.upload.begin`, `.chunk`, `.finish`, `.abort` | bounded transfer descriptor, ordered binary chunks, or `transfer_id` | authenticated bridge artifact transport; incomplete transfers expire and never enter the immutable store |
 | `controller.artifact.capture` | `components`, `authorized`, optional `method`, `port`, `idempotency_key` | explicitly read and verify current flash/EEPROM through the primary |
-| `controller.update.firmware` | `artifact_sha256`, `authorized`, optional `method`, `port`, `allow_incomplete_backup`, `reinitialize_eeprom`, `idempotency_key` | guarded backup-then-flash; explicit reinitialization retains raw EEPROM, programs/readbacks the complete Go-owned factory image, and discards incompatible semantic settings |
+| `controller.update.firmware` | `artifact_sha256`, `authorized`, optional `method`, `port`, `deployment`, `reinitialize_eeprom`, `idempotency_key` | guarded flash; explicit development workflow skips new raw capture, production defaults to verified backup; reinitialization always retains raw EEPROM, programs/readbacks the Go-owned factory image, and discards incompatible semantic settings |
 | `controller.restore.flash` | `artifact_sha256`, `authorized`, optional `method`, `port` | guarded restore of a `flash-backup`; Urclock by default, explicit USBasp fallback |
 | `controller.update.eeprom` | same | full pre-write capture, then confirmed EEPROM restore |
 | `controller.update.host` | `artifact_sha256`, `authorized` | stage a verified deferred self-update |
@@ -1329,8 +1387,8 @@ growing EEPROM.
 
 For an unpublished development board whose settings payload cannot be decoded,
 the authorized firmware-update request may set `reinitialize_eeprom: true`.
-This option is mutually exclusive with `allow_incomplete_backup`: the primary
-must first retain a complete verified raw EEPROM image. The marker records the
+The primary must first retain a complete verified raw EEPROM image even when
+`deployment: "development"` is selected. The marker records the
 query error and partial live-state result, outputs are forced safe, and after
 flashing only the new firmware's current settings schema is accepted. Silent
 is cleared, illumination/persistence/relay restore are disabled, outputs and

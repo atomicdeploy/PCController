@@ -371,7 +371,10 @@ Release archives add the version and include SHA-256 metadata. Follow
 
 ## 🤝 Contributing
 
-Start with the [Repository and File Map](docs/Repository-Map.md). It identifies
+Use [GitHub Collaboration and Handoffs](docs/GitHub-Collaboration-and-Handoffs.md)
+for the required issue, PR, WIP checkpoint, lane ownership, privacy, and merge
+workflow. Start implementation with the
+[Repository and File Map](docs/Repository-Map.md). It identifies
 the authoritative file for each domain, the tests and documentation that move
 with it, and generated/runtime paths that must not be edited or committed.
 

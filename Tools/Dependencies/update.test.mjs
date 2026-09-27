@@ -19,6 +19,7 @@ import {
   run,
   sameSubstantive,
   stableParts,
+  synchronizeNpmLockHashes,
   validateHostSourcePolicy,
   validateHostToolsLock,
   validateToolchainLockSources,
@@ -227,6 +228,30 @@ test('resolved tool lock comparison ignores timestamp-only churn', () => {
   assert.equal(sameSubstantive(current, resolved), true)
   resolved.tool = { version: '1.2.4', sha256: 'def' }
   assert.equal(sameSubstantive(current, resolved), false)
+})
+
+test('offline npm lock synchronization changes only stale hashes and their resolution time', () => {
+  const current = {
+    format: 'pccontroller-host-tool-lock/v1',
+    resolved_at_utc: '2026-01-01T00:00:00Z',
+    web: { package_lock_sha256: 'a'.repeat(64) },
+    build: { package_lock_sha256: 'b'.repeat(64) },
+    preserved: { identity: 'exact' },
+  }
+  const changed = synchronizeNpmLockHashes(
+    current, 'c'.repeat(64), 'b'.repeat(64), '2026-08-24T12:00:00Z',
+  )
+  assert.deepEqual(changed.changes.map((item) => item.name), ['web package lock'])
+  assert.equal(changed.lock.web.package_lock_sha256, 'c'.repeat(64))
+  assert.equal(changed.lock.build.package_lock_sha256, 'b'.repeat(64))
+  assert.equal(changed.lock.resolved_at_utc, '2026-08-24T12:00:00Z')
+  assert.deepEqual(changed.lock.preserved, current.preserved)
+  assert.equal(current.web.package_lock_sha256, 'a'.repeat(64), 'input lock must stay immutable')
+
+  const unchanged = synchronizeNpmLockHashes(changed.lock, 'c'.repeat(64), 'b'.repeat(64), '2099-01-01T00:00:00Z')
+  assert.deepEqual(unchanged.changes, [])
+  assert.equal(unchanged.lock.resolved_at_utc, '2026-08-24T12:00:00Z')
+  assert.throws(() => synchronizeNpmLockHashes(current, 'invalid', 'b'.repeat(64)), /not SHA-256/u)
 })
 
 test('npm projects declare compatibility ranges while each lock stays exact', () => {

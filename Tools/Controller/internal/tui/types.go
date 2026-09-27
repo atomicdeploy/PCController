@@ -215,6 +215,7 @@ type Options struct {
 	ApplyTUIConsole    func(appconfig.TUIConsole) error
 	HostIntegrations   func() appconfig.Integrations
 	SaveIntegrations   func(appconfig.Integrations) error
+	BuzzerRuntime      func() appconfig.BuzzerRuntimeStatus
 	RFConfig           func() appconfig.RFConfig
 	SaveRF             func(appconfig.RFConfig) error
 	RFFetch            func(context.Context) ([]native.RFEntry, error)
@@ -245,6 +246,7 @@ type Options struct {
 	// pass through this callback.
 	CommitNavigation func(page string)
 	WriteOSC         func(payload string) error
+	AckAppAction     func(hostui.ActionAck) error
 	Remote           *RemoteBackend
 	Preview          *control.Snapshot
 	ForceWelcome     bool
