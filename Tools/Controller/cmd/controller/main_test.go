@@ -772,7 +772,7 @@ func TestBootAndToolchainCLIArguments(t *testing.T) {
 
 func TestNormalizeGuardedFlashCLIArguments(t *testing.T) {
 	got, err := normalizeProgramCLIArgs([]string{
-		"flash", "firmware image.hex", "COM18", "--allow-incomplete-backup",
+		"flash", "firmware image.hex", "COM18", "--deployment", "development",
 		"--reinitialize-eeprom",
 	})
 	if err != nil {
@@ -780,7 +780,7 @@ func TestNormalizeGuardedFlashCLIArguments(t *testing.T) {
 	}
 	want := []string{
 		"--operation", "write-flash", "--method", "urclock",
-		"--hex", "firmware image.hex", "--allow-incomplete-backup",
+		"--hex", "firmware image.hex", "--deployment", "development",
 		"--reinitialize-eeprom", "--port", "COM18",
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -800,7 +800,7 @@ func TestNormalizeGuardedFlashCLIArguments(t *testing.T) {
 		t.Fatalf("prefixed USBasp normalized=%#v want=%#v err=%v", prefixedUSBasp, usb, err)
 	}
 	before, err := normalizeProgramCLIArgs([]string{
-		"--allow-incomplete-backup", "--app-reconnect=false", "flash",
+		"--deployment=development", "--app-reconnect=false", "flash",
 		"firmware.hex", "--dry-run", "COM18",
 	})
 	if err != nil {
@@ -808,7 +808,7 @@ func TestNormalizeGuardedFlashCLIArguments(t *testing.T) {
 	}
 	wantBefore := []string{
 		"--operation", "write-flash", "--method", "urclock", "--hex", "firmware.hex",
-		"--allow-incomplete-backup", "--app-reconnect=false", "--dry-run", "--port", "COM18",
+		"--deployment=development", "--app-reconnect=false", "--dry-run", "--port", "COM18",
 	}
 	if !reflect.DeepEqual(before, wantBefore) {
 		t.Fatalf("flags-before normalized=%#v want=%#v", before, wantBefore)
@@ -820,13 +820,13 @@ func TestNormalizeGuardedFlashCLIArguments(t *testing.T) {
 	}
 }
 
-func TestProgramCLIRejectsEEPROMReinitializationWithoutCompleteBackup(t *testing.T) {
+func TestProgramCLIRemovesIncompleteBackupEscapeHatch(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	err := runProgramWithConfig([]string{
 		"flash", "candidate.hex", "COM18",
 		"--reinitialize-eeprom", "--allow-incomplete-backup",
 	}, &stdout, &stderr, appconfig.Defaults())
-	if err == nil || !strings.Contains(err.Error(), "requires a complete verified raw flash") {
+	if err == nil || !strings.Contains(err.Error(), "unknown guarded flash flag") {
 		t.Fatalf("unsafe development EEPROM reinitialization was accepted: %v", err)
 	}
 }
@@ -878,12 +878,9 @@ func TestStandaloneUSBaspRequiresSeparateApplicationLifecycleSelector(t *testing
 
 	stdout.Reset()
 	stderr.Reset()
-	withOverride := append(append([]string(nil), base...), "--allow-incomplete-backup")
-	if err := runProgram(withOverride, &stdout, &stderr, store); err != nil {
-		t.Fatalf("explicit recovery override rejected: %v", err)
-	}
-	if !strings.Contains(stderr.String(), "application lifecycle skipped") {
-		t.Fatalf("override warning missing: stdout=%s stderr=%s", stdout.String(), stderr.String())
+	withDevelopment := append(append([]string(nil), base...), "--deployment", "development")
+	if err := runProgram(withDevelopment, &stdout, &stderr, store); err == nil || !strings.Contains(err.Error(), "--app-device") {
+		t.Fatalf("development classification bypassed application lifecycle: %v", err)
 	}
 }
 
@@ -975,7 +972,7 @@ func TestSecondaryFirmwareDelegatesToPrimaryOperationAndFollowsProgress(t *testi
 		case "controller.update.firmware":
 			request := params.(artifacts.UpdateRequest)
 			if !request.Authorized || request.Method != "urclock" ||
-				!request.AllowIncompleteBackup || !request.ReinitializeEEPROM ||
+				request.Deployment != "development" || !request.ReinitializeEEPROM ||
 				request.IdempotencyKey == "" ||
 				request.ArtifactSHA256 != document.SourceSHA256 {
 				t.Fatalf("update request=%+v", request)
@@ -1003,7 +1000,7 @@ func TestSecondaryFirmwareDelegatesToPrimaryOperationAndFollowsProgress(t *testi
 	}
 	var output bytes.Buffer
 	if err := delegatePrimaryFirmwareUpdate(
-		context.Background(), firmware, "urclock", "", true, true, &output, call,
+		context.Background(), firmware, "urclock", "", "development", true, &output, call,
 	); err != nil {
 		t.Fatal(err)
 	}

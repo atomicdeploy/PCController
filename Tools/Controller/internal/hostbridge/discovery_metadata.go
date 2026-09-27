@@ -48,7 +48,6 @@ func discoveryMetadata(config appconfig.Config, snapshot controller.Snapshot, id
 		"protocol.discovery=" + strings.Join(configuredDiscoveryProtocols(config.Integrations.Discovery), ","),
 		"public=/upnp/public.json",
 		"api=/api",
-		"server_proof=/api/auth/server-proof",
 		"operations=/api/rpc",
 		"commands=/api/commands",
 		"events=ws:" + config.IPC.WebSocketPath + ",socketio:" + config.IPC.SocketIOPath,

@@ -21,6 +21,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 
+	"pccontroller.local/controller/internal/deployment"
 	"pccontroller.local/controller/internal/firmwarefeatures"
 	"pccontroller.local/controller/internal/hostos"
 	"pccontroller.local/controller/internal/productidentity"
@@ -58,16 +59,18 @@ type Config struct {
 
 // Connection configures serial discovery, handshake timing, and reconnect behavior.
 type Connection struct {
-	Port             string          `json:"port,omitempty"`
-	VID              string          `json:"vid,omitempty"`
-	PID              string          `json:"pid,omitempty"`
-	Name             string          `json:"name,omitempty"`
-	BaudRate         int             `json:"baud_rate"`
-	StartupWaitMS    int             `json:"startup_wait_ms"`
-	RequestTimeoutMS int             `json:"request_timeout_ms"`
-	HelloAttempts    int             `json:"hello_attempts"`
-	ResetOnReconnect bool            `json:"reset_on_reconnect"`
-	LastDevice       *DeviceIdentity `json:"last_device,omitempty"`
+	Port               string          `json:"port,omitempty"`
+	VID                string          `json:"vid,omitempty"`
+	PID                string          `json:"pid,omitempty"`
+	Name               string          `json:"name,omitempty"`
+	BaudRate           int             `json:"baud_rate"`
+	StartupWaitMS      int             `json:"startup_wait_ms"`
+	RequestTimeoutMS   int             `json:"request_timeout_ms"`
+	HelloAttempts      int             `json:"hello_attempts"`
+	ResetOnReconnect   bool            `json:"reset_on_reconnect"`
+	ReconnectInitialMS int             `json:"reconnect_initial_ms"`
+	ReconnectMaximumMS int             `json:"reconnect_maximum_ms"`
+	LastDevice         *DeviceIdentity `json:"last_device,omitempty"`
 }
 
 // DeviceIdentity records the last successfully connected USB serial device.
@@ -214,6 +217,7 @@ type Paths struct {
 
 // Programming selects the host toolchain and default programming transport.
 type Programming struct {
+	Deployment       string                     `json:"deployment,omitempty"`
 	Method           string                     `json:"method,omitempty"`
 	FQBN             string                     `json:"fqbn,omitempty"`
 	Programmer       string                     `json:"programmer,omitempty"`
@@ -224,10 +228,13 @@ type Programming struct {
 	AvrdudeConf      string                     `json:"avrdude_conf,omitempty"`
 }
 
-// Macro defines a named, host-persisted sequence streamed to the MCU executor.
+// Macro defines a named, host-persisted sequence. Mode "host" schedules
+// ordinary commands from the controller process; mode "mcu" (and the legacy
+// empty value) streams the sequence to the firmware timing engine.
 type Macro struct {
 	ID                  byte        `json:"id"`
 	Name                string      `json:"name"`
+	Mode                string      `json:"mode,omitempty"`
 	Category            string      `json:"category,omitempty"`
 	Color               string      `json:"color,omitempty"`
 	Label               string      `json:"label,omitempty"`
@@ -314,13 +321,15 @@ func Defaults() Config {
 	return Config{
 		Schema: SchemaVersion,
 		Connection: Connection{
-			VID:              "1A86",
-			PID:              "7523",
-			Name:             "USB-SERIAL CH340",
-			BaudRate:         115200,
-			StartupWaitMS:    1200,
-			RequestTimeoutMS: 1200,
-			HelloAttempts:    3,
+			VID:                "1A86",
+			PID:                "7523",
+			Name:               "USB-SERIAL CH340",
+			BaudRate:           115200,
+			StartupWaitMS:      1200,
+			RequestTimeoutMS:   1200,
+			HelloAttempts:      3,
+			ReconnectInitialMS: 500,
+			ReconnectMaximumMS: 15_000,
 		},
 		UI: UI{
 			AppTitle: productidentity.DefaultAppTitle(),
@@ -364,10 +373,11 @@ func Defaults() Config {
 			SocketIOPath:    "/socket.io/",
 			RemotePolicy:    DefaultRemoteAccessPolicy(),
 		},
-		Safety:    Safety{MotionDoorPolicy: "always"},
-		RF:        DefaultRFConfig(),
-		HostMenus: DefaultHostMenus(),
-		OSActions: hostos.DefaultPolicy(),
+		Programming: Programming{Deployment: deployment.Production},
+		Safety:      Safety{MotionDoorPolicy: "always"},
+		RF:          DefaultRFConfig(),
+		HostMenus:   DefaultHostMenus(),
+		OSActions:   hostos.DefaultPolicy(),
 		Integrations: Integrations{
 			Keyboard:     DefaultKeyboardControl(),
 			Lifecycle:    DefaultLifecycleSafety(),
@@ -543,6 +553,9 @@ func Write(path string, value Config) error {
 
 // Validate rejects unsafe, ambiguous, or unsupported host configuration values.
 func (value Config) Validate() error {
+	if _, err := deployment.Normalize(value.Programming.Deployment); err != nil {
+		return fmt.Errorf("programming.deployment: %w", err)
+	}
 	if value.Schema != SchemaVersion {
 		return fmt.Errorf("unsupported schema %d", value.Schema)
 	}
@@ -563,6 +576,13 @@ func (value Config) Validate() error {
 	}
 	if connection.HelloAttempts < 1 || connection.HelloAttempts > 10 {
 		return fmt.Errorf("connection.hello_attempts must be 1..10")
+	}
+	if connection.ReconnectInitialMS < 100 || connection.ReconnectInitialMS > 60_000 {
+		return fmt.Errorf("connection.reconnect_initial_ms must be 100..60000")
+	}
+	if connection.ReconnectMaximumMS < connection.ReconnectInitialMS ||
+		connection.ReconnectMaximumMS > 300_000 {
+		return fmt.Errorf("connection.reconnect_maximum_ms must be reconnect_initial_ms..300000")
 	}
 	if title := strings.TrimSpace(value.UI.AppTitle); title == "" ||
 		utf8.RuneCountInString(title) > 64 || !printableText(title) {
@@ -700,6 +720,11 @@ func (value Config) Validate() error {
 		if len(macro.Category) > 64 || !printableASCII(macro.Category) {
 			return fmt.Errorf("macros[%d].category must be at most 64 printable ASCII bytes", index)
 		}
+		switch strings.ToLower(strings.TrimSpace(macro.Mode)) {
+		case "", "mcu", "host":
+		default:
+			return fmt.Errorf("macros[%d].mode must be host or mcu", index)
+		}
 		switch strings.ToLower(strings.TrimSpace(macro.Color)) {
 		case "", "red", "blue", "purple", "violet", "green", "white":
 		default:
@@ -743,7 +768,7 @@ func (value Config) Validate() error {
 				if step.Target != 0 || step.Value != 0 {
 					return fmt.Errorf("macros[%d].steps[%d] all-off target/value must be zero", index, stepIndex)
 				}
-			case "buzzer", "tone":
+			case "beep", "buzzer", "tone":
 				frequency := step.FrequencyHz
 				if frequency == 0 {
 					frequency = step.Value
@@ -983,6 +1008,11 @@ func (value Config) Validate() error {
 }
 
 func normalizeProgramming(value *Programming) error {
+	classification, err := deployment.Normalize(value.Deployment)
+	if err != nil {
+		return err
+	}
+	value.Deployment = classification
 	features, err := firmwarefeatures.Normalize(
 		firmwarefeatures.Names(value.FirmwareFeatures),
 	)
@@ -1397,13 +1427,24 @@ func (store *Store) Watch(
 	if interval <= 0 {
 		interval = DefaultWatchInterval
 	}
-	watcher, err := fsnotify.NewWatcher()
-	if err == nil {
-		err = watcher.Add(filepath.Dir(store.path))
-	}
-	if err != nil {
-		if watcher != nil {
+	var watcher *fsnotify.Watcher
+	err := retryWatchRegistration(ctx, func() error {
+		var err error
+		watcher, err = fsnotify.NewWatcher()
+		if err == nil {
+			err = watcher.Add(filepath.Dir(store.path))
+		}
+		if err != nil && watcher != nil {
+			// kqueue may have registered part of the directory before a
+			// temporary entry disappeared. Retry with an entirely fresh watch.
 			_ = watcher.Close()
+			watcher = nil
+		}
+		return err
+	})
+	if err != nil {
+		if ctx.Err() != nil {
+			return
 		}
 		if onError != nil {
 			onError(fmt.Errorf("filesystem watcher unavailable; using polling fallback: %w", err))

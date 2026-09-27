@@ -16,7 +16,36 @@ DTR or reset the board merely because the application started. Use the visible
 Open, Close, and Reset controls or the matching commands when you intend those
 actions.
 
+## Serial request budgets and cancellation
+
+`connection.request_timeout_ms` is the shared configured response budget
+(1200 ms by default). The status-RGB policy uses that current setting instead
+of a separate 500 ms deadline. Changing the budget does not lower the configured
+animation cadence, bypass safety ownership, or suppress actual I/O failures.
+Caller/operation deadlines still apply; the existing base-output scheduler also
+caps its operation at two seconds.
+
+Serial requests, raw writes and DTR pulses share one write-admission gate.
+A request cancelled before writing, including while waiting behind another
+writer, does not subsequently send stale bytes. Cancellation cannot retract
+bytes already handed to the operating system: a timeout after sending does
+not prove the board ignored the command, so non-idempotent commands must not be
+blindly retried. DTR cancellation restores an asserted line before releasing
+the gate. These transport rules apply to the shared Go command path used by
+CLI, TUI, IPC, API and Web clients. See RGB follow-up issue #277
+for the remaining visual ownership and frame-rate acceptance work.
+
 ## Keep PC and MCU settings separate
+
+Physical LCD outage notifications are emitted once per outage. Changing probe
+errors, USB reconnects, and disabling presentation do not re-arm the warning.
+A successful physical render or detection re-arms it for the next failure;
+current diagnostic state remains available while repeated warnings stay quiet.
+
+Reciprocal peer subscriptions consume already-bridged events without publishing
+them again. This ingress check complements outbound forwarding guards: otherwise
+subscription echoes can flood activity history and repeat old notifications.
+Direct peer events retain their structured payload and provenance.
 
 There are two independent persistence domains:
 
@@ -79,15 +108,27 @@ or Windows PnP instance ID. The shipped defaults identify the observed CH340
 as VID `1A86`, PID `7523`, and friendly name `USB-SERIAL CH340`; flags and the
 host file can override all three. After a successful native `HELLO`, the host
 stores the stable identity and prefers it on the next launch. A unique match is
-selected automatically; ambiguous matches are shown for selection.
+selected automatically; ambiguous matches are shown for selection. After an
+authenticated USB device disappears, its stale COM name may be rebound to a
+new assignment only when its serial/PnP identity still matches or its
+VID/PID/friendly-name combination has exactly one present match. Initial and
+user-requested explicit opens remain strict.
 
 The first long-running host becomes the primary process and is the only process
 that opens the serial port. Later CLI or UI instances use its IPC service. An
 explicit Close pauses reconnect until Open is requested. On Windows, registry
 change notifications from the Plug-and-Play serial map drive arrival/removal;
-the fallback retry is used only when native notification cannot be established.
+the retry path is exponential from `connection.reconnect_initial_ms` (500 ms by
+default) through `connection.reconnect_maximum_ms` (15 seconds by default).
+`--reconnect-initial` / `--reconnect-maximum` override the file, and
+`PCCONTROLLER_RECONNECT_INITIAL_MS` /
+`PCCONTROLLER_RECONNECT_MAXIMUM_MS` provide the environment layer. A PnP
+change wakes discovery immediately and resets the delay. Repeated identical
+connection states are not broadcast, preventing disconnected/scanning flicker.
 Connection lifecycle events are available to the TUI, scripts, IPC, WebSocket,
 and host automations.
+
+Live acceptance and remaining platform verification are tracked by issue #51.
 
 The serial driver opens with DTR and RTS inactive. If
 `reset_on_reconnect=true`, only a genuine physical reappearance may issue one
@@ -223,6 +264,22 @@ implementation preference.
 }
 ```
 
+The host keeps the historical rich feedback catalog as immutable named
+fallbacks. Watched configuration may override a name, but omission restores
+the exact definition instead of losing a melody that was moved out of AVR
+flash. Availability does not force playback: buzzer routing and global board
+Silent remain authoritative.
+
+| Name | Exact host-owned sequence |
+|---|---|
+| `finish` | 659 Hz/100 ms, 784 Hz/100 ms, 880 Hz/250 ms |
+| `lost` | 392, 330, 262, 196 Hz; 100 ms each |
+| `incorrect-beep` | Three 2,000 Hz/100 ms notes with 100 ms gaps |
+| `error-beep` | Five 2,000 Hz/10 ms notes with 10 ms gaps |
+| `fault-beep` | 1,000 Hz/250 ms, 500 Hz/500 ms, then 5 s gap |
+| `success-cue` | 1,047 Hz/70 ms, 30 ms gap, 1,319 Hz/110 ms |
+| `error-cue` | 330 Hz/90 ms, 50 ms gap, 262 Hz/160 ms |
+
 The optional Windows native path calls the controller's Go WinRing0
 implementation directly and uses an explicitly configured directory containing
 `WinRing0x64.sys`; no
@@ -286,6 +343,15 @@ WebSocket. Incoming event lines also appear in the bounded terminal transcript,
 so command and event traffic remain visible together without losing the full
 filterable timeline.
 
+Board Settings includes a dedicated enclosure-illumination surface. It edits
+the persisted Off/Auto/On policy plus door-open/On and door-closed/Off
+brightness without rewriting unrelated settings. The host independently reads
+PWM channel 11, shows the door-selected target and exact applied 0..4095 value,
+and publishes changed-only `illumination.changed` state events. Every connected
+Web/TUI/API consumer therefore sees fades and settings changes without a manual
+refresh or one serial poll per browser tab. A successful write is reported only
+after live application and EEPROM durability have both been read back.
+
 Supported browsers may install this same URL as a standalone desktop or mobile
 app. The manifest includes shortcuts to Overview, Workbench, Activity, and
 Settings. The worker retains only the versioned application shell and never
@@ -322,14 +388,26 @@ The action keys are:
   PC-side metadata, and `A` opens the automation rules list.
 
 Playback reads the same `MacroRunner` instance used by shell, IPC, and API
-commands. The page therefore reports live macro identity, elapsed/duration,
-step progress, MCU circular-buffer fill out of 127 bytes, accepted bytes,
-last/maximum device timing delta, configured tolerance, violations, underruns,
-dispatch errors, lifecycle, and final faithfulness. Recording offsets come from
-MCU acknowledgement timestamps, not variable USB/network arrival time. Macro
-definitions remain PC configuration; only the active timing queue occupies AVR
-RAM. The deterministic preview contains a safe representative library for UI
-inspection and never opens serial.
+commands. Newly recorded macros use the basic `host` mode: it records
+relay on/off, side-motion, PWM/MOSFET, beep, display/message, RF transmit,
+addressable-strip and all-off acknowledgements, ignores status
+LED/telemetry housekeeping, and schedules ordinary commands from the host's
+monotonic clock with a 100 ms acceptance tolerance. This is the quick
+prototyping path and works without the MCU timed-queue capability. Use
+`macro record start-mcu NAME ...` for the stricter MCU acknowledgement-clocked
+recorder and firmware queue. Existing macros whose `mode` is absent retain MCU
+semantics; the host never silently changes their executor.
+
+See [Host macro recording and playback](Host-Macro-Recording.md) for the
+CLI walkthrough, live Web/remote-TUI state, rename/category operations, and
+explicit outstanding MCU/physical-input acceptance boundaries.
+
+The page reports the selected mode plus live identity, elapsed/duration, step
+progress, timing delta/tolerance, lifecycle, and final faithfulness. MCU mode
+additionally reports circular-buffer fill, accepted bytes, underruns, and
+dispatch errors. Macro definitions remain PC configuration. The deterministic
+preview contains a safe representative library for UI inspection and never
+opens serial.
 
 The same library is now available as the default HOST-presented physical
 `MACR` submenu. Its selector is rebuilt from the watched macro array and sorted
@@ -339,6 +417,25 @@ status/progress, safe cancel, and a guarded keep-output cancel. The TUI Menus
 page and embedded web workbench open and drive this exact shared menu manager,
 so their four virtual keys preview the same TM1637/LCD text and actions as the
 physical keys.
+
+## Web client resources after host replacement
+
+An open Web UI checks the serving host's version and build time on every live
+transport attachment, including reconnects after an external installer or
+service restart. A changed identity uses the existing once-per-identity reload
+guard so the client loads the new entry point and lazy page bundles without a
+manual refresh. Matching identities do not reload. The canonical build stamps
+the host and embedded Web UI together; an unstamped development build is not
+release evidence.
+
+The identity request bypasses the browser cache and has a five-second timeout
+with one retry after 250 ms. Disconnecting or disposing the view cancels the
+request and retry; late replies from an earlier connection cannot reload the
+current view. This is reconnect-driven, not background polling. If browser
+session storage is unavailable, automatic mismatch reload stays disabled to
+avoid an unbounded reload loop. A client already running an older bundle that
+lacks this reconnect check needs the existing updater-completion reload path
+or one initial manual reload before it can gain this behavior.
 
 ## Global hotkeys
 
@@ -483,6 +580,26 @@ The primary then applies the same authentication, logging, and board safety
 guards as every other command source. The TUI reports whether the notifier and
 action handler are actually available; accepting toast XML alone is not proof
 that a button activation is installed.
+
+Door notifications use the normalized physical-device event, not status-poll
+text. The host accepts a door toast only when the local serial runtime produced
+an `OpEvent` door record with `board -> host` event provenance. Initial status,
+reconnect snapshots, host-generated text, and bridge-replayed events still
+update their appropriate state/event surfaces, but cannot impersonate a local
+reed transition and cannot create a native door notification.
+
+| Physical transition | Native presentation | Queue behavior |
+| --- | --- | --- |
+| Door opened while Idle | Device/friendly name, current COM port, open state, and current program state; **Open Events** action | `door.opened` |
+| Door closed | Device/friendly name, current COM port, closed state, and current program state; **Open Events** action | `door.closed` |
+| Door opened while Running | One host-owned **Door open during operation** warning with dynamic device/port details plus **Open Events** and **Stop outputs** actions | `warning.door-open-running` |
+
+Open and close use different coalescing keys, so a quick close does not get
+discarded as a duplicate open notification. When the Running warning toast is
+enabled, it owns the single open presentation and the ordinary open toast is
+suppressed; disabling that warning leaves the ordinary physical-open toast in
+place. The corresponding warning-cleared event remains available to history,
+scripts, IPC, WebSocket, and UI clients without creating a second native toast.
 
 ## Local API and primary IPC
 

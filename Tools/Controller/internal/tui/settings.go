@@ -560,7 +560,7 @@ func (model Model) buildAppSettingEditor(editor *settingEditor) {
 			{appconfig.PeripheralDescriptor{Kind: "sensor", Role: "current"}, "current", "Load current", ui.ShowCurrent},
 			{appconfig.PeripheralDescriptor{Kind: "sensor", Role: "power"}, "power", "Load power", ui.ShowPower},
 			{appconfig.PeripheralDescriptor{Kind: "sensor", Role: "temperature-led"}, "temperature-led", "Illumination temperature", ui.ShowTemperatureLED},
-			{appconfig.PeripheralDescriptor{Kind: "sensor", Role: "temperature-audio"}, "temperature-bt", "Bluetooth audio temperature", ui.ShowTemperatureBT},
+			{appconfig.PeripheralDescriptor{Kind: "sensor", Role: "temperature-audio"}, "temperature-bt", "BT Amplifier temperature", ui.ShowTemperatureBT},
 		} {
 			if model.peripheralAdvertised(item.descriptor) {
 				editor.Fields = append(editor.Fields, boolean(item.key, item.label, item.value))

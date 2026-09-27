@@ -79,6 +79,7 @@ import {
   Icon,
   MetricCard,
   RangeField,
+  RelayToggle,
   SectionTitle,
   Segmented,
   StatusBadge,
@@ -122,6 +123,7 @@ import type {
   ControllerEvent,
   DialogState,
   HostUISettings,
+  IlluminationState,
   LifecycleSafetyAction,
   LocalIntegrationSettings,
   Locale,
@@ -136,6 +138,7 @@ import { buzzerPathFromState, type BuzzerPath } from './buzzer-routing'
 import { peripheralAvailability } from './peripheral-availability'
 
 export interface SharedViewProps {
+  reduceMotion?: boolean
   appTitle: string
   snapshot: Snapshot
   samples: MetricSample[]
@@ -181,11 +184,11 @@ export function DashboardView(props: SharedViewProps) {
   const boardReady = props.transport.boardState === 'ready' && snapshot.connected && snapshot.have_status
   const available = peripheralAvailability(snapshot)
   const haveMeasurements = available.ina219 || available.temperatureLED || available.temperatureBTAudio
-  const haveMetricCards = haveMeasurements || available.pwm
+  const haveMetricCards = haveMeasurements
   const invalidMeasurements = [
     available.invalidINA219 ? copy('Power measurements unavailable', 'اندازه‌گیری‌های توان در دسترس نیست') : '',
     available.invalidTemperatureLED ? copy('LED temperature unavailable', 'دمای LED در دسترس نیست') : '',
-    available.invalidTemperatureBTAudio ? copy('Buzzer temperature unavailable', 'دمای بیزر در دسترس نیست') : '',
+    available.invalidTemperatureBTAudio ? copy('BT Amplifier temperature unavailable', 'دمای آمپلی‌فایر بلوتوث در دسترس نیست') : '',
   ].filter(Boolean)
   const connectedTone = boardReady ? 'good' : snapshot.paused ? 'warn' : 'bad'
   const authenticationRequired = !boardReady && props.transport.authenticationRequired
@@ -245,8 +248,7 @@ export function DashboardView(props: SharedViewProps) {
         {available.ina219 && <MetricCard icon={Zap} label={peripheralName('sensor.supply-voltage', t('voltage'))} value={formatNumber(locale, status.supply_mv / 1000, 2)} unit="V" values={values(samples, 'supply')} tone="accent" detail={`${peripheralName('sensor.bus-voltage', copy('Bus voltage', 'ولتاژ باس'))} · ${formatNumber(locale, status.bus_mv / 1000, 2)} V`} />}
         {available.ina219 && <MetricCard icon={Waves} label={peripheralName('sensor.current', t('current'))} value={formatNumber(locale, status.current_ma, 0)} unit="mA" values={values(samples, 'current')} tone="green" detail={`${peripheralName('sensor.power', copy('Load power', 'توان بار'))} · ${formatNumber(locale, status.power_mw / 1000, 2)} W`} />}
         {available.temperatureLED && <MetricCard icon={Thermometer} label={peripheralName('sensor.temperature-led', `${t('temperature')} · LED`)} value={formatNumber(locale, status.temperature_led_centi_c / 100, 1)} unit="°C" values={values(samples, 'ledTemp')} tone="amber" />}
-        {available.temperatureBTAudio && <MetricCard icon={Thermometer} label={peripheralName('sensor.temperature-audio', copy('Buzzer temperature', 'دمای بیزر'))} value={formatNumber(locale, status.temperature_bt_audio_centi_c / 100, 1)} unit="°C" values={values(samples, 'btTemp')} tone="violet" />}
-        {available.pwm && <MetricCard icon={PlugZap} label="PWM" value={formatNumber(locale, status.pwm_value * 100 / 4095, 1)} unit="%" values={[]} tone="violet" detail={`${copy('CH', 'کانال')} ${status.pwm_channel + 1} · ${copy('ready', 'آماده')}`} />}
+        {available.temperatureBTAudio && <MetricCard icon={Thermometer} label={peripheralName('sensor.temperature-audio', copy('BT Amplifier temperature', 'دمای آمپلی‌فایر بلوتوث'))} value={formatNumber(locale, status.temperature_bt_audio_centi_c / 100, 1)} unit="°C" values={values(samples, 'btTemp')} tone="violet" />}
       </section>}
 
       {boardReady && invalidMeasurements.length > 0 && <div className="measurement-alerts" role="status" aria-live="polite">
@@ -266,7 +268,7 @@ export function DashboardView(props: SharedViewProps) {
         ]}
       >
         <Suspense fallback={<div className="telemetry-chart__empty" role="status"><Activity size={22} /><span>{locale === 'fa' ? 'در حال آماده‌سازی نمودار…' : 'Preparing chart…'}</span></div>}>
-          <TelemetryChart connected locale={locale} samples={samples} />
+          <TelemetryChart connected locale={locale} samples={samples} reduceMotion={props.reduceMotion} />
         </Suspense>
       </Card>}
 
@@ -504,7 +506,7 @@ export function ControlsView(props: SharedViewProps) {
               const active = Boolean(snapshot.status.active_relays & (1 << index))
               return (
                 <article key={index} className={`relay-switch${active ? ' is-active' : ''}`}>
-                  <span>R{index + 1}</span><i aria-hidden="true"><b /></i><small>{peripheralName(`relay.${index + 1}`, relayDefaults[index])}</small>
+                  <span>R{index + 1}</span><RelayToggle active={active} disabled={!snapshot.connected} label={copy(`Toggle relay ${index + 1}`, `تغییر وضعیت رله ${index + 1}`)} onToggle={() => void command(`relay ${index + 1} ${active ? 'off' : 'on'}`)} /><small>{peripheralName(`relay.${index + 1}`, relayDefaults[index])}</small>
                   <div className="relay-switch__actions"><Button compact disabled={active} onClick={() => void command(`relay ${index + 1} on`)}>{t('on')}</Button><Button compact disabled={!active} onClick={() => void command(`relay ${index + 1} off`)}>{t('off')}</Button></div>
                 </article>
               )
@@ -558,7 +560,7 @@ export function ControlsView(props: SharedViewProps) {
 			</div>
 			<div className="status-led-live" style={{ '--preview': liveHex } as React.CSSProperties}>
 				<i aria-hidden="true" />
-				<div><strong>{copy('Physical LED mirror', 'بازتاب LED فیزیکی')}</strong><small dir="ltr">{liveLED ? `${liveHex} · effect ${liveLED.effect} · condition ${liveLED.condition}` : copy('Awaiting pushed board state', 'در انتظار وضعیت ارسالی برد')}</small></div>
+				<div><strong>{copy('Physical LED mirror', 'بازتاب LED فیزیکی')}</strong><small dir="ltr">{liveLED ? <><span className="mono">{liveHex}</span>{` · effect ${liveLED.effect} · condition ${liveLED.condition}`}</> : copy('Awaiting pushed board state', 'در انتظار وضعیت ارسالی برد')}</small></div>
 			</div>
 		  </div>
           <label className="native-color-field">
@@ -782,6 +784,13 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
   const [streamPeriod, setStreamPeriod] = useState(snapshot.settings.stream_period_ms || 200)
   const [outputPersistence, setOutputPersistence] = useState(snapshot.settings.output_persistence)
   const [relayRestoreMask, setRelayRestoreMask] = useState(snapshot.settings.relay_restore_mask)
+  const [illuminationMode, setIlluminationMode] = useState(String(snapshot.settings.light_mode))
+  const [illuminationOn, setIlluminationOn] = useState(snapshot.settings.on_brightness)
+  const [illuminationOff, setIlluminationOff] = useState(snapshot.settings.off_brightness)
+  const [illuminationLive, setIlluminationLive] = useState<IlluminationState>(snapshot.illumination)
+  const [illuminationBusy, setIlluminationBusy] = useState(false)
+  const [illuminationNotice, setIlluminationNotice] = useState('')
+  const [illuminationError, setIlluminationError] = useState(false)
   const [segmentScroll, setSegmentScroll] = useState<SegmentScrollSettings>({
     enabled: true,
     pages: ['door'],
@@ -911,6 +920,9 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
     return () => { active = false }
   }, [])
   useEffect(() => {
+	setIlluminationMode(String(snapshot.settings.light_mode))
+	setIlluminationOn(snapshot.settings.on_brightness)
+	setIlluminationOff(snapshot.settings.off_brightness)
     setDisplayBrightness(snapshot.settings.display_brightness)
     setDisplayClosedBrightness(snapshot.settings.display_closed_brightness)
     setMotionExitHoldSeconds(snapshot.settings.motion_exit_hold_seconds || 2)
@@ -919,6 +931,9 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
     setOutputPersistence(snapshot.settings.output_persistence)
     setRelayRestoreMask(snapshot.settings.relay_restore_mask)
   }, [
+	snapshot.settings.light_mode,
+	snapshot.settings.on_brightness,
+	snapshot.settings.off_brightness,
     snapshot.settings.display_brightness,
     snapshot.settings.display_closed_brightness,
     snapshot.settings.motion_exit_hold_seconds,
@@ -927,6 +942,44 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
     snapshot.settings.output_persistence,
     snapshot.settings.relay_restore_mask,
   ])
+
+  useEffect(() => {
+	setIlluminationLive(snapshot.illumination)
+  }, [snapshot.illumination])
+
+  useEffect(() => {
+	if (!snapshot.connected || !snapshot.have_settings || !available.pwm) return
+	const abort = new AbortController()
+	void rpc<IlluminationState>('controller.illumination.get', {}, abort.signal)
+		.then((state) => { if (!abort.signal.aborted) setIlluminationLive(state) })
+		.catch((cause) => {
+			if (!abort.signal.aborted) {
+				setIlluminationNotice(cause instanceof Error ? cause.message : String(cause))
+				setIlluminationError(true)
+			}
+		})
+	return () => abort.abort()
+  }, [snapshot.connected, snapshot.have_settings, available.pwm])
+
+  const saveIllumination = async () => {
+	setIlluminationBusy(true)
+	setIlluminationNotice('')
+	setIlluminationError(false)
+	try {
+		const state = await rpc<IlluminationState>('controller.illumination.set', {
+			mode: Number(illuminationMode),
+			on_brightness: illuminationOn,
+			off_brightness: illuminationOff,
+		})
+		setIlluminationLive(state)
+		setIlluminationNotice(copy('Applied live and verified durable in EEPROM.', 'به‌صورت زنده اعمال و ماندگاری آن در EEPROM تأیید شد.'))
+	} catch (cause) {
+		setIlluminationNotice(cause instanceof Error ? cause.message : String(cause))
+		setIlluminationError(true)
+	} finally {
+		setIlluminationBusy(false)
+	}
+  }
 
   const setPersistenceBit = (bit: number, enabled: boolean) => {
     setOutputPersistence((current) => enabled ? current | bit : current & ~bit)
@@ -1240,6 +1293,33 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
             action={<Button tone="primary" icon={ShieldCheck} disabled={!tokenDirty} onClick={() => { onToken(normalizedToken); setDraftToken(normalizedToken) }}>{t('apply')}</Button>}
           />
         </Card>}
+
+        {boardReady && available.settings && <Card icon={Lightbulb} iconTone="amber" title={copy('Enclosure illumination', 'روشنایی محفظه')} eyebrow={illuminationLive.available ? illuminationLive.at_target ? copy('Applied · at target', 'اعمال‌شده · در مقدار هدف') : copy('Transitioning to target', 'در حال گذار به مقدار هدف') : copy('Waiting for live PWM state', 'در انتظار وضعیت زندهٔ PWM')} className="settings-card settings-card--wide illumination-settings-card">
+		{!snapshot.have_settings ? <EmptyState
+			icon={Lightbulb}
+			title={copy('Reading illumination policy', 'در حال خواندن سیاست روشنایی')}
+			detail={copy('The controls appear only after the board returns authoritative EEPROM settings.', 'کنترل‌ها پس از دریافت تنظیمات معتبر EEPROM از برد نمایش داده می‌شوند.')}
+		/> : <>
+			<div className="illumination-state-grid" aria-label={copy('Live enclosure illumination state', 'وضعیت زندهٔ روشنایی محفظه')}>
+				<DataRow label={copy('Policy', 'سیاست')} value={[copy('Off', 'خاموش'), copy('Auto', 'خودکار'), copy('On', 'روشن')][illuminationLive.mode] ?? String(illuminationLive.mode)} />
+				<DataRow label={copy('Door input', 'ورودی درب')} value={illuminationLive.door_open ? copy('Open', 'باز') : copy('Closed', 'بسته')} tone={illuminationLive.door_open ? 'warn' : 'good'} />
+				<DataRow label={copy('Selected target', 'مقدار هدف انتخاب‌شده')} value={`${illuminationLive.target_brightness}/255 · ${illuminationLive.target_pwm}/4095`} mono />
+				<DataRow label={copy('Applied channel 11', 'مقدار اعمال‌شدهٔ کانال ۱۱')} value={illuminationLive.available ? `${illuminationLive.applied_brightness}/255 · ${illuminationLive.applied_pwm}/4095` : copy('Unavailable', 'در دسترس نیست')} tone={illuminationLive.available ? illuminationLive.at_target ? 'good' : 'warn' : undefined} mono />
+				<DataRow label={copy('EEPROM durability', 'ماندگاری EEPROM')} value={illuminationLive.persisted ? copy('Verified', 'تأییدشده') : copy('Not confirmed', 'تأییدنشده')} tone={illuminationLive.persisted ? 'good' : 'warn'} />
+			</div>
+			<div className="setting-group"><label>{copy('Operating mode', 'حالت عملکرد')}</label><Segmented value={illuminationMode} label={copy('Enclosure illumination mode', 'حالت روشنایی محفظه')} options={[
+				{ value: '0', label: copy('Off', 'خاموش') },
+				{ value: '1', label: copy('Auto · door', 'خودکار · درب') },
+				{ value: '2', label: copy('On', 'روشن') },
+			]} onChange={(value) => { setIlluminationNotice(''); setIlluminationMode(value) }} /></div>
+			<RangeField label={copy('Door-open / On brightness', 'روشنایی درب باز / حالت روشن')} value={illuminationOn} min={0} max={255} onChange={(value) => { setIlluminationNotice(''); setIlluminationOn(value) }} />
+			<RangeField label={copy('Door-closed / Off brightness', 'روشنایی درب بسته / حالت خاموش')} value={illuminationOff} min={0} max={255} onChange={(value) => { setIlluminationNotice(''); setIlluminationOff(value) }} />
+			<div className="illumination-settings-card__footer">
+				<p className={illuminationError ? 'settings-action-feedback text-bad' : 'settings-action-feedback'} role={illuminationError ? 'alert' : 'status'}>{illuminationNotice || copy('Only these three illumination fields change; every unrelated board setting is preserved.', 'فقط همین سه فیلد روشنایی تغییر می‌کنند و همهٔ تنظیمات نامرتبط برد حفظ می‌شوند.')}</p>
+				<Button tone="primary" icon={Lightbulb} busy={illuminationBusy} disabled={!available.pwm || !illuminationLive.available} onClick={() => void saveIllumination()}>{copy('Apply illumination', 'اعمال روشنایی')}</Button>
+			</div>
+		</>}
+		</Card>}
 
         {boardReady && available.settings && <Card icon={CircuitBoard} iconTone="amber" title={copy('Board EEPROM settings', 'تنظیمات EEPROM برد')} eyebrow={snapshot.have_settings ? copy('Live draft · explicit write', 'پیش‌نویس زنده · نوشتن صریح') : boardSettingsReadState === 'loading' ? copy('Reading board settings', 'در حال خواندن تنظیمات برد') : copy('Settings unavailable', 'تنظیمات در دسترس نیست')} className="settings-card">
           {!snapshot.have_settings ? <EmptyState

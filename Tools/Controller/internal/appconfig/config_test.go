@@ -86,6 +86,19 @@ func TestLoadOrCreateAndReload(t *testing.T) {
 	}
 }
 
+func TestReconnectBackoffDefaultsAndBounds(t *testing.T) {
+	value := Defaults()
+	if value.Connection.ReconnectInitialMS != 500 ||
+		value.Connection.ReconnectMaximumMS != 15_000 {
+		t.Fatalf("reconnect defaults = %#v", value.Connection)
+	}
+	value.Connection.ReconnectMaximumMS = 499
+	if err := value.Validate(); err == nil ||
+		!strings.Contains(err.Error(), "reconnect_maximum_ms") {
+		t.Fatalf("inverted reconnect bounds error = %v", err)
+	}
+}
+
 func TestUIPeripheralNamesAreValidatedAndRemainFileBacked(t *testing.T) {
 	value := Defaults()
 	value.UI.SeparatePortButtons = true

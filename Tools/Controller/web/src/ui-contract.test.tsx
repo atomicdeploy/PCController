@@ -47,6 +47,24 @@ function shared(): SharedViewProps {
 }
 
 describe('offline and settings UI contracts', () => {
+  it.each([true, false])('renders only the Physical LED mirror hex value in monospace (live=%s)', haveStatusLED => {
+    const snapshot = {
+      ...emptySnapshot,
+      connected: true,
+      have_status: true,
+      have_status_led: haveStatusLED,
+      hello: { ...emptySnapshot.hello, capabilities: 0xFFFFFFFF },
+      status_led: { red: 171, green: 205, blue: 239, brightness: 128, effect: 2, condition: 3 },
+    }
+    const markup = renderToStaticMarkup(<ControlsView {...shared()} snapshot={snapshot} />)
+    if (haveStatusLED) {
+      expect(markup).toContain('<span class="mono">#ABCDEF</span> · effect 2 · condition 3')
+    } else {
+      expect(markup).toContain('Awaiting pushed board state')
+      expect(markup).not.toContain('<span class="mono">#ABCDEF</span>')
+    }
+  })
+
   it('distinguishes missing or rejected credentials from ordinary authenticated transport loss', () => {
     const base = {
       hostRequiresAuthentication: true,
@@ -94,6 +112,23 @@ describe('offline and settings UI contracts', () => {
     expect(markup).toContain('Force marquee')
     expect(markup).toContain('Overflow scrolls automatically')
     expect(markup).toContain('Show text')
+  })
+
+  it.each([null, undefined, []])('renders an empty macro draft without crashing when steps is %s', (steps) => {
+    const snapshot = {
+      ...emptySnapshot,
+      connected: true,
+      have_status: true,
+      macros: {
+        library: [{ id: 4, name: 'New draft', mode: 'host', steps }],
+        playback: { running: false, name: '', mode: 'host', step: 0, step_count: 0, faithful: false, maximum_timing_error_us: 0 },
+        recording: { active: false, name: '', mode: 'host', steps: 0 },
+      },
+    }
+    const markup = renderToStaticMarkup(<WorkbenchView {...shared()} snapshot={snapshot} />)
+    expect(markup).toContain('New draft · host · 0 steps')
+    expect(markup).toContain('Macro inspection &amp; recording')
+    expect(markup).toContain('Play selected')
   })
 
   it('renders only user PWM channels in the generic mixer and keeps system channels role-specific', () => {
@@ -188,7 +223,7 @@ describe('offline and settings UI contracts', () => {
     const markup = renderToStaticMarkup(<DashboardView {...shared()} snapshot={snapshot} />)
     expect(markup).toContain('Power measurements unavailable')
     expect(markup).toContain('LED temperature unavailable')
-    expect(markup).toContain('Buzzer temperature unavailable')
+    expect(markup).toContain('BT Amplifier temperature unavailable')
     expect(markup).not.toContain('Measurement unavailable')
     expect(markup).not.toContain('Invalid controller sample')
     expect(markup).not.toContain('The controller advertised')
@@ -233,7 +268,7 @@ describe('offline and settings UI contracts', () => {
     expect(dashboard).not.toContain('-32768')
     expect(dashboard).not.toContain('Power measurements unavailable')
     expect(dashboard).not.toContain('LED temperature unavailable')
-    expect(dashboard).not.toContain('Buzzer temperature unavailable')
+    expect(dashboard).not.toContain('BT Amplifier temperature unavailable')
 
     const workbench = renderToStaticMarkup(<WorkbenchView {...shared()} snapshot={connected} />)
     expect(workbench).toContain('TM1637')
@@ -342,6 +377,44 @@ describe('offline and settings UI contracts', () => {
 		expect(markup).not.toContain('Board silent')
     expect(markup).not.toContain('EEPROM report')
     expect(markup).not.toContain('Write board settings')
+  })
+
+  it('renders complete authoritative enclosure illumination settings and state', () => {
+	const connected = {
+		...emptySnapshot,
+		connected: true,
+		have_status: true,
+		have_settings: true,
+		connection_state: 'connected',
+		hello: { ...emptySnapshot.hello, capabilities: (1 << 2) | (1 << 8) },
+		status: { ...emptySnapshot.status, pwm_available: true, door_open: true },
+		settings: { ...emptySnapshot.settings, persisted: true, light_mode: 1, on_brightness: 180, off_brightness: 12 },
+		illumination: {
+			available: true, mode: 1, on_brightness: 180, off_brightness: 12,
+			door_open: true, target_brightness: 180, target_pwm: 2891,
+			applied_brightness: 160, applied_pwm: 2570, at_target: false, persisted: true,
+		},
+	}
+	const markup = renderToStaticMarkup(<SettingsView
+		{...shared()}
+		snapshot={connected}
+		appearance={appearance}
+		onAppearance={vi.fn()}
+		token=""
+		onToken={vi.fn()}
+		onAppTitle={vi.fn(async (value: string) => value)}
+		uiConfig={null}
+		onBuzzerPath={vi.fn(async () => undefined)}
+		navigationSync
+		onNavigationSync={vi.fn()}
+	/>)
+	expect(markup).toContain('Enclosure illumination')
+	expect(markup).toContain('Auto · door')
+	expect(markup).toContain('Door-open / On brightness')
+	expect(markup).toContain('Door-closed / Off brightness')
+	expect(markup).toContain('Applied channel 11')
+	expect(markup).toContain('2570/4095')
+	expect(markup).toContain('Apply illumination')
   })
 
   it('renders offline controls and settings copy in Persian', () => {

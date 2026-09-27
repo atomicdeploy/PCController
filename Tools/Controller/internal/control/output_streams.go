@@ -211,6 +211,7 @@ func (scheduler *OutputScheduler) StartStatusEffect(
 				effect.Brightness,
 			)
 			if scheduler.haveStatusBase {
+				requestContext = WithBackgroundCommand(requestContext)
 				payload = native.StatusRGBPayload(
 					scheduler.statusBase[0],
 					scheduler.statusBase[1],

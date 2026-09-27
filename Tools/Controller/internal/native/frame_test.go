@@ -230,6 +230,13 @@ func TestParseHelloCompactIdentitySchema3(t *testing.T) {
 	if _, err := ParseHello(payload[:13]); err == nil {
 		t.Fatal("truncated compact HELLO was accepted")
 	}
+	profileAware := append(append([]byte(nil), payload...), 0x00, 0xD9)
+	profileAware[0] = 4
+	profileHello, err := ParseHello(profileAware)
+	if err != nil || profileHello.IdentitySchema != 4 ||
+		profileHello.FeatureProfile != 0 || profileHello.BuildFeatures != 0xD9 {
+		t.Fatalf("unexpected profile-aware HELLO: %#v err=%v", profileHello, err)
+	}
 	wrongSchema := append([]byte(nil), payload...)
 	wrongSchema[0] = 2
 	if _, err := ParseHello(wrongSchema); err == nil {
@@ -712,8 +719,12 @@ func TestParseChangedDisplayAndBuzzerPushes(t *testing.T) {
 		t.Fatal("truncated SEGMENT_CHANGED payload was accepted")
 	}
 
-	if _, err := ParseBuzzerState([]byte{0xB8, 0x01, 0xDC, 0x00, 0}); err == nil {
-		t.Fatal("obsolete five-byte BUZZER_CHANGED payload was accepted")
+	compact, err := ParseBuzzerState([]byte{0xB8, 0x01, 0xDC, 0x00, 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if compact.Timed || compact.DeviceMicros != 0 || compact.FrequencyHz != 440 || compact.DurationMS != 220 || compact.Muted {
+		t.Fatalf("compact buzzer state=%+v", compact)
 	}
 	if _, err := ParseBuzzerState([]byte{0, 0, 0, 0, 2, 0, 0, 0, 0}); err == nil {
 		t.Fatal("invalid BUZZER_CHANGED muted flag was accepted")
@@ -724,6 +735,9 @@ func TestParseChangedDisplayAndBuzzerPushes(t *testing.T) {
 	}
 	if !timed.Timed || timed.DeviceMicros != 0x12345678 || timed.FrequencyHz != 880 || timed.DurationMS != 125 || !timed.Muted {
 		t.Fatalf("timed buzzer state=%+v", timed)
+	}
+	if _, err := ParseBuzzerState([]byte{0, 0, 0, 0, 0, 0}); err == nil {
+		t.Fatal("invalid six-byte BUZZER_CHANGED payload was accepted")
 	}
 }
 

@@ -29,6 +29,7 @@ type Notification struct {
 type NotificationStatus struct {
 	Supported    bool      `json:"supported"`
 	Available    bool      `json:"available"`
+	Branded      bool      `json:"branded"`
 	Accepted     uint64    `json:"accepted"`
 	Backend      string    `json:"backend,omitempty"`
 	Degraded     bool      `json:"degraded,omitempty"`
@@ -43,7 +44,8 @@ type Notifier interface {
 }
 
 type NotifierOptions struct {
-	AppID string
+	AppID    string
+	LogoPath string
 }
 
 func NewNotifier(options NotifierOptions) Notifier { return newPlatformNotifier(options) }
@@ -59,8 +61,14 @@ type toastVisual struct {
 	Binding toastBinding `xml:"binding"`
 }
 type toastBinding struct {
-	Template string   `xml:"template,attr"`
-	Texts    []string `xml:"text"`
+	Template string       `xml:"template,attr"`
+	Texts    []string     `xml:"text"`
+	Images   []toastImage `xml:"image,omitempty"`
+}
+type toastImage struct {
+	Placement string `xml:"placement,attr"`
+	Source    string `xml:"src,attr"`
+	Alternate string `xml:"alt,attr,omitempty"`
 }
 type toastActions struct {
 	Actions []toastAction `xml:"action"`
@@ -71,7 +79,7 @@ type toastAction struct {
 	ActivationType string `xml:"activationType,attr"`
 }
 
-func buildToastXML(notification Notification) ([]byte, error) {
+func buildToastXML(notification Notification, logoURI string) ([]byte, error) {
 	if strings.TrimSpace(notification.Title) == "" || len([]rune(notification.Title)) > 128 {
 		return nil, errors.New("notification title must contain 1..128 characters")
 	}
@@ -84,6 +92,15 @@ func buildToastXML(notification Notification) ([]byte, error) {
 	value := toastXML{
 		Launch: notification.LaunchURI,
 		Visual: toastVisual{Binding: toastBinding{Template: "ToastGeneric", Texts: []string{notification.Title, notification.Body}}},
+	}
+	if strings.TrimSpace(logoURI) != "" {
+		if err := validateToastLogoURI(logoURI); err != nil {
+			return nil, fmt.Errorf("notification logo: %w", err)
+		}
+		value.Visual.Binding.Images = []toastImage{{
+			Placement: "appLogoOverride", Source: logoURI,
+			Alternate: productidentity.DefaultAppTitle(),
+		}}
 	}
 	if notification.LaunchURI != "" {
 		if err := validateActionURI(notification.LaunchURI); err != nil {
@@ -106,6 +123,17 @@ func buildToastXML(notification Notification) ([]byte, error) {
 	return xml.Marshal(value)
 }
 
+func validateToastLogoURI(value string) error {
+	parsed, err := url.Parse(value)
+	if err != nil || !strings.EqualFold(parsed.Scheme, "file") || parsed.Path == "" {
+		return errors.New("logo URI must be an absolute local file URI")
+	}
+	if parsed.Host != "" && !strings.EqualFold(parsed.Host, "localhost") {
+		return errors.New("logo URI must not reference a remote host")
+	}
+	return nil
+}
+
 func validateActionURI(value string) error {
 	parsed, err := url.Parse(value)
 	if err != nil || parsed.Scheme == "" {
@@ -124,6 +152,60 @@ type ImportantEvent struct {
 	Title    string
 	Message  string
 	AppTitle string
+}
+
+// MessageNotification is the presentation-neutral subset of the canonical
+// message envelope needed by the native notification adapter.
+type MessageNotification struct {
+	ID          uint64
+	Type        string
+	Text        string
+	Severity    string
+	Correlation string
+	Action      string
+	Metadata    map[string]string
+	AppTitle    string
+}
+
+// NotificationForMessage converts an explicitly native-targeted message into
+// a desktop notification. The action stays inert until the operator chooses
+// it; activation then re-enters the existing pccontroller:// action route.
+func NotificationForMessage(message MessageNotification) (Notification, error) {
+	typeName := strings.TrimSpace(message.Type)
+	if typeName == "" {
+		typeName = "message"
+	}
+	title := strings.TrimSpace(message.Metadata["title"])
+	if title == "" {
+		title = productidentity.Title(message.AppTitle) + " · " + strings.ToUpper(typeName)
+	}
+	id := strings.TrimSpace(message.Correlation)
+	if id == "" {
+		id = fmt.Sprintf("message-%d", message.ID)
+	}
+	pageURI := productidentity.ProtocolScheme + "://page/events"
+	notification := Notification{
+		ID: id, Title: title, Body: message.Text,
+		Severity:  strings.ToLower(strings.TrimSpace(message.Severity)),
+		LaunchURI: pageURI,
+	}
+	if strings.TrimSpace(message.Action) == "" {
+		return notification, nil
+	}
+	action, err := ParseAction(message.Action, "message:"+id)
+	if err != nil {
+		return Notification{}, fmt.Errorf("message action: %w", err)
+	}
+	actionURI, err := ActionURI(action)
+	if err != nil {
+		return Notification{}, fmt.Errorf("message action URI: %w", err)
+	}
+	label := strings.TrimSpace(message.Metadata["action_label"])
+	if label == "" {
+		label = "Run action"
+	}
+	notification.Actions = []NotificationAction{{Label: label, URI: actionURI}}
+	return notification, nil
 }
 
 // NotificationForImportantEvent maps only actionable/high-signal events.

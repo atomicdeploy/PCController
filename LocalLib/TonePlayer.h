@@ -39,12 +39,6 @@ private:
 
   bool startHardwareTone(uint16_t frequencyHz);
   void stopHardwareTone();
-  static bool timerSettings(uint16_t frequencyHz, uint16_t &top,
-                            uint8_t &clockBits);
-  static bool timerSettingForPrescaler(uint16_t frequencyHz,
-                                       uint16_t divisor,
-                                       uint8_t candidateClockBits,
-                                       uint16_t &top, uint8_t &clockBits);
 
   uint8_t pin_;
   ToneStep queue_[MAX_TONES];

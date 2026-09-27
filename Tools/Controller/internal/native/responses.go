@@ -187,19 +187,22 @@ type BuzzerState struct {
 }
 
 func ParseBuzzerState(payload []byte) (BuzzerState, error) {
-	if len(payload) != 9 {
-		return BuzzerState{}, fmt.Errorf("BUZZER_CHANGED payload is %d bytes, need 9", len(payload))
+	if len(payload) != 5 && len(payload) != 9 {
+		return BuzzerState{}, fmt.Errorf("BUZZER_CHANGED payload is %d bytes, need 5 or 9", len(payload))
 	}
 	if payload[4] > 1 {
 		return BuzzerState{}, fmt.Errorf("BUZZER_CHANGED muted flag is %d, need 0 or 1", payload[4])
 	}
-	return BuzzerState{
-		FrequencyHz:  binary.LittleEndian.Uint16(payload[:2]),
-		DurationMS:   binary.LittleEndian.Uint16(payload[2:4]),
-		Muted:        payload[4] != 0,
-		DeviceMicros: binary.LittleEndian.Uint32(payload[5:9]),
-		Timed:        true,
-	}, nil
+	state := BuzzerState{
+		FrequencyHz: binary.LittleEndian.Uint16(payload[:2]),
+		DurationMS:  binary.LittleEndian.Uint16(payload[2:4]),
+		Muted:       payload[4] != 0,
+	}
+	if len(payload) == 9 {
+		state.DeviceMicros = binary.LittleEndian.Uint32(payload[5:9])
+		state.Timed = true
+	}
+	return state, nil
 }
 
 // StatusLEDState is the changed-only physical RGB result pushed after the MCU
@@ -340,22 +343,28 @@ type Hello struct {
 	BuildHash      uint32 `json:"build_hash"`
 	BuildTimestamp uint32 `json:"build_timestamp_packed,omitempty"`
 	BuildStamp     string `json:"build_timestamp,omitempty"`
+	FeatureProfile byte   `json:"feature_profile,omitempty"`
+	BuildFeatures  byte   `json:"build_features,omitempty"`
 }
 
 func ParseHello(payload []byte) (Hello, error) {
-	if len(payload) != 14 {
-		return Hello{}, fmt.Errorf("HELLO payload is %d bytes, need exactly 14", len(payload))
+	if len(payload) != 14 && len(payload) != 16 {
+		return Hello{}, fmt.Errorf("HELLO payload is %d bytes, need 14 or 16", len(payload))
 	}
-	if payload[0] != IdentitySchemaCompact {
+	if payload[0] != IdentitySchemaCompact && !(len(payload) == 16 && payload[0] == 4) {
 		return Hello{}, fmt.Errorf("unsupported HELLO identity schema %d", payload[0])
 	}
 	hello := Hello{
 		BoardKind:      payload[1],
 		Capabilities:   binary.LittleEndian.Uint32(payload[2:6]),
 		Name:           "PCController",
-		IdentitySchema: IdentitySchemaCompact,
+		IdentitySchema: payload[0],
 		BuildHash:      binary.LittleEndian.Uint32(payload[6:10]),
 		BuildTimestamp: binary.LittleEndian.Uint32(payload[10:14]),
+	}
+	if len(payload) == 16 {
+		hello.FeatureProfile = payload[14]
+		hello.BuildFeatures = payload[15]
 	}
 	stamp, err := FormatBuildTimestamp(hello.BuildTimestamp)
 	if err != nil {

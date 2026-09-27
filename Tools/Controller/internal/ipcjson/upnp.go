@@ -189,7 +189,7 @@ func publicInfo(service *Service, request *http.Request) discovery.PublicInfo {
 			Port:     discovery.PublicPort{Name: snapshot.Port.Name, VID: snapshot.Port.VID, PID: snapshot.Port.PID, Product: snapshot.Port.Product, Manufacturer: snapshot.Port.Manufacturer, SerialNumber: snapshot.Port.SerialNumber, FriendlyName: snapshot.Port.FriendlyName, InstanceID: snapshot.Port.InstanceID},
 		},
 		Endpoints: discovery.PublicEndpoints{
-			Web: httpBase + "/", API: httpBase + "/api/snapshot", ServerProof: httpBase + ServerProofPath, Operations: httpBase + "/api/rpc", Commands: httpBase + "/api/commands", Events: wsBase + config.IPC.WebSocketPath, Opcodes: httpBase + "/api/opcode", WebSocket: wsBase + config.IPC.WebSocketPath, SocketIO: wsBase + config.IPC.SocketIOPath, PublicInfo: httpBase + discovery.PublicInfoPath,
+			Web: httpBase + "/", API: httpBase + "/api/snapshot", Operations: httpBase + "/api/rpc", Commands: httpBase + "/api/commands", Events: wsBase + config.IPC.WebSocketPath, Opcodes: httpBase + "/api/opcode", WebSocket: wsBase + config.IPC.WebSocketPath, SocketIO: wsBase + config.IPC.SocketIOPath, PublicInfo: httpBase + discovery.PublicInfoPath,
 		},
 		Discovery: discovery.PublicDiscovery{Enabled: len(protocols) != 0, Protocols: protocols, BroadcastPort: broadcastPort},
 		UpdatedAt: time.Now().UTC(),

@@ -39,7 +39,7 @@ import {
 import { AnimatePresence, MotionConfig, motion } from 'motion/react'
 import { createAudioEngine, type AudioCue, type AudioEngine } from './audio-engine'
 import { BoardSettingsReadGate, boardSettingsGeneration } from './board-settings-read'
-import { BootGate, Button, HotkeyHelp, Icon, KeyCombo, Modal, NavButton, PageTransition, StatusBadge, ToastStack } from './components'
+import { BootGate, BrandIcon, Button, HotkeyHelp, Icon, KeyCombo, Modal, NavButton, PageTransition, StatusBadge, ToastStack } from './components'
 import { connectStream, execute, getSnapshot, getToken, getUIConfig, rpc, setToken as storeToken } from './api'
 import {
   adjacentPageHotkey,
@@ -59,7 +59,7 @@ import {
   prependSignificantControllerEvent,
   significantControllerEvents,
 } from './significant-events'
-import { embeddedResourcesMismatch, hostResourceIdentity } from './resource-version'
+import { createResourceReconnectCheck, embeddedResourcesMismatch, hostResourceIdentity } from './resource-version'
 import { emitStartupConsoleIntroduction } from './startup-console'
 import {
   createTabChannel,
@@ -92,6 +92,13 @@ import { BuzzerPlaybackTimeline, type BuzzerPath } from './buzzer-routing'
 import { emptySnapshot } from './types'
 import type { SharedViewProps } from './views'
 import { sessionAuthenticationGuidanceRequired } from './authentication-guidance'
+import {
+  AppActionReceiptCache,
+  acknowledgeWebAppAction,
+  applyExactTargetWebActionEffect,
+  processWebAppAction,
+  type WebActionProgress,
+} from './app-actions'
 
 const DashboardPage = lazy(() => import('./views').then(({ DashboardView }) => ({ default: DashboardView })))
 const ControlsPage = lazy(() => import('./views').then(({ ControlsView }) => ({ default: ControlsView })))
@@ -447,6 +454,8 @@ export default function App() {
     detail: string
   }>({ state: 'idle', detail: '' })
   const [navigationSession] = useState(() => new NavigationSession())
+	const [remoteTitleOverride, setRemoteTitleOverride] = useState<string | null>(null)
+	const [remoteActionProgress, setRemoteActionProgress] = useState<WebActionProgress | null>(null)
   const [relayedTerminal, setRelayedTerminal] = useState<RelayedTerminalEntry[]>([])
   const toastID = useRef(0)
   const goChordUntil = useRef(0)
@@ -466,6 +475,7 @@ export default function App() {
   const boardSettingsReadGate = useRef(new BoardSettingsReadGate())
   const boardSettingsRequestGeneration = useRef('')
   const snapshotRef = useRef(snapshot)
+  const appActionReceipts = useRef(new AppActionReceiptCache())
   const t = useMemo(() => translator(appearance.locale), [appearance.locale])
   const productTitle = effectiveProductTitle(uiConfig?.name, __PRODUCT_NAME__)
   const productShortName = productMark(productTitle, __PRODUCT_SHORT_NAME__)
@@ -500,8 +510,8 @@ export default function App() {
 
   useEffect(() => {
 	const pageTitle = t(navigation.find((item) => item.id === page)?.label ?? 'dashboard')
-	document.title = `${productTitle} — ${pageTitle}`
-	}, [page, productTitle, t])
+	document.title = remoteTitleOverride ?? `${productTitle} — ${pageTitle}`
+	}, [page, productTitle, remoteTitleOverride, t])
 
   useEffect(() => {
     updateRuntimeFavicon(demo ? 'offline' : controllerFaviconState(snapshot))
@@ -632,6 +642,7 @@ export default function App() {
         color_mode: appearance.theme,
         locale: appearance.locale,
         direction: resolvedDirection,
+		app_actions: 'app.page,app.progress,app.title',
         ...navigationSession.nextValues(navigationSync, catchUp),
       },
     })
@@ -1153,6 +1164,10 @@ export default function App() {
       return () => window.clearInterval(timer)
     }
     const abort = new AbortController()
+    const resourceCheck = createResourceReconnectCheck(getUIConfig, reloadForResourceMismatch, {
+      signal: abort.signal,
+      onError: (cause) => setStreamDetail(`Host resource check: ${cause instanceof Error ? cause.message : String(cause)}`),
+    })
     let stopStream = () => {}
     void (async () => {
       try {
@@ -1234,7 +1249,31 @@ export default function App() {
               setEvents((current) => prependSignificantControllerEvent(current, event))
               tabChannelRef.current?.publishControllerEvent(event)
             }
-            if (event.kind.toLowerCase() === 'app.page' && isFreshAppAction(event.time) &&
+			const processedAction = processWebAppAction(event, appInstanceID, appActionReceipts.current)
+			if (processedAction) {
+				const { acknowledgement } = processedAction
+				if (!processedAction.duplicate) {
+					const { effect } = processedAction
+					applyExactTargetWebActionEffect(effect, {
+						replacePage: (page) => {
+							applyPage(page, 'replace')
+							audioRef.current?.cue('navigation', 'forward')
+						},
+						setTitle: setRemoteTitleOverride,
+						setProgress: setRemoteActionProgress,
+					})
+				}
+				void acknowledgeWebAppAction(
+					acknowledgement,
+					(value) => rpc('controller.app.action.ack', value),
+				).catch((cause) => {
+					const locale = appearanceDesiredRef.current.locale
+					notify('warning',
+						locale === 'fa' ? 'تأیید فرمان ارسال نشد' : 'Action not confirmed',
+						cause instanceof Error ? cause.message : String(cause))
+				})
+			}
+            if (!event.metadata?.operation_id && event.kind.toLowerCase() === 'app.page' && isFreshAppAction(event.time) &&
                 matchesAppTarget(event.metadata?.target_instance, appInstanceID, 'webui')) {
               const destination = pageFromAppAction(event.metadata?.page ?? event.metadata?.value ?? event.text)
               if (destination) {
@@ -1258,9 +1297,10 @@ export default function App() {
               refreshAfterHostRestart.current = true
             }
             if (/config/i.test(event.kind)) void refreshHostAppearance().catch(() => undefined)
-            if (/device|connection|settings/i.test(event.kind)) void refresh()
+            if (/device|connection|settings|illumination|^macro/i.test(event.kind)) void refresh()
           },
           state: (state, detail) => {
+            resourceCheck.state(state)
             setStreamState(state)
             setStreamDetail(detail ?? '')
             if (state === 'open') {
@@ -1300,7 +1340,7 @@ export default function App() {
         setBootTarget(100)
       }
     })()
-    return () => { abort.abort(); stopStream() }
+    return () => { abort.abort(); resourceCheck.dispose(); stopStream() }
   }, [adoptHostAppearance, appInstanceID, applyPage, demo, navigate, navigationSession, notify, refresh, refreshHostAppearance, streamGeneration, token])
 
   const authenticationRequired = sessionAuthenticationGuidanceRequired({
@@ -1317,6 +1357,7 @@ export default function App() {
       ? 'loading'
       : 'unavailable'
   const shared: SharedViewProps = {
+    reduceMotion: appearance.reduceMotion,
     appTitle: productTitle, snapshot, samples, events, locale: appearance.locale, t, command: runCommand, refresh, openDialog,
     boardSettingsReadState,
     transport: {
@@ -1398,20 +1439,32 @@ export default function App() {
       inert={!bootResolved || bootOpen || hotkeyHelp ? true : undefined}
       aria-hidden={!bootResolved || bootOpen || hotkeyHelp ? true : undefined}
     >
+	  {remoteActionProgress && (
+		<div
+		  className={`app-action-progress app-action-progress--${remoteActionProgress.state}`}
+		  role="progressbar"
+		  aria-label={appearance.locale === 'fa' ? 'پیشرفت فرمان راه دور' : 'Remote action progress'}
+		  aria-valuemin={0}
+		  aria-valuemax={100}
+		  aria-valuenow={remoteActionProgress.percent}
+		>
+		  <span style={remoteActionProgress.percent === undefined ? undefined : { width: `${remoteActionProgress.percent}%` }} />
+		</div>
+	  )}
       <aside className="sidebar" aria-label={t('primaryNavigation')}>
         <div className="brand">
-          <a className="brand__mark" href="#/dashboard" aria-label={`${productTitle} ${t('dashboardLink')}`}><span aria-hidden="true">{productShortName}</span><i /><i /></a>
+          <a className="brand__mark" href="#/dashboard" aria-label={`${productTitle} ${t('dashboardLink')}`}><BrandIcon fallback={productShortName} /></a>
           <a className="brand__copy" href="#/dashboard"><strong>{productTitle}</strong><span>{productTagline}</span></a>
-          <button className="sidebar-toggle" aria-label={t(sidebarOpen ? 'collapseNavigation' : 'expandNavigation')} onClick={() => setSidebarOpen((value) => !value)}>{sidebarOpen ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}</button>
+          <button className="sidebar-toggle" aria-label={t(sidebarOpen ? 'collapseNavigation' : 'expandNavigation')} title={t(sidebarOpen ? 'collapseNavigation' : 'expandNavigation')} aria-expanded={sidebarOpen} aria-controls="primary-navigation" onClick={() => setSidebarOpen((value) => !value)}>{sidebarOpen ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}</button>
         </div>
 
-        <div className="sidebar__status">
+        <div className="sidebar__status" role="img" aria-label={`${snapshot.connected ? t('online') : t('offline')} · ${snapshot.port.name || snapshot.connection_state}`} title={`${snapshot.connected ? t('online') : t('offline')} · ${snapshot.port.name || snapshot.connection_state}`}>
           <span className={`status-rail status-rail--${snapshot.connected ? 'good' : 'bad'}`} aria-hidden="true" />
           <div><strong>{snapshot.connected ? t('online') : t('offline')}</strong><small>{snapshot.port.name || snapshot.connection_state}</small></div>
           <Cpu size={18} />
         </div>
 
-        <nav className="sidebar__nav">
+        <nav className="sidebar__nav" id="primary-navigation">
           {(['core', 'integrations', 'system'] as const).map((group) => (
             <div className="nav-group" key={group}>
               <span className="nav-group__label">{t(group === 'core' ? 'system' : group === 'integrations' ? 'integrations' : 'operations').toUpperCase()}</span>
@@ -1459,7 +1512,7 @@ export default function App() {
               exit={{ x: drawerClosedOffset, opacity: 0 }}
               transition={{ duration: .32, ease: [0.22, 1, 0.36, 1] }}
             >
-              <header><div className="brand__mark"><span>{productShortName}</span><i /><i /></div><strong>{productTitle}</strong><button type="button" aria-label={t('closeNavigation')} onClick={() => setMobileNav(false)}><X size={19} /></button></header>
+              <header><div className="brand__mark"><BrandIcon fallback={productShortName} /></div><strong>{productTitle}</strong><button type="button" aria-label={t('closeNavigation')} onClick={() => setMobileNav(false)}><X size={19} /></button></header>
               {navigation.map((item) => <NavButton key={item.id} icon={item.icon} label={t(item.label)} active={page === item.id} onClick={() => navigate(item.id)} />)}
             </motion.aside>
           </motion.div>

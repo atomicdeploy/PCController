@@ -413,7 +413,8 @@ Ctrl+R    pulse DTR and RTS
 Ctrl+F    bring a diagnosed serial-port owner window to the foreground
 Ctrl+W    ask a diagnosed serial-port owner window to close gracefully
 Ctrl+T    press twice within five seconds to terminate a diagnosed owner
-Ctrl+C    exit
+q         exit when the TUI command prompt is empty and no editor/picker owns focus
+Ctrl+C    exit from any TUI state
 Up/Down  shell history
 Tab       command completion
 PgUp/Dn  scroll the event log
@@ -550,7 +551,7 @@ silent board|host|both status|on|off
 display segments|lcd|both [--speed 220ms] [--duration 5s]
   [--repeat once|loop|interval] [--interval 30s] [--scroll] [--] [TEXT]
 macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|delete NAME_OR_ID
-macro record start NAME [CATEGORY [COLOR]]|record status|record save|record discard
+macro record start NAME [CATEGORY [COLOR]]|record start-mcu NAME [CATEGORY [COLOR]]|record status|record save|record discard
 macro play NAME_OR_ID|status|cancel [keep]
 automation list|run NAME
 rf send CODE BITS PROTOCOL [PULSE_US]  # protocol 1..12
@@ -780,6 +781,8 @@ Start cross-platform JSON-RPC IPC on loopback:
 bin\controller.exe ipc serve --port COM18
 bin\controller.exe ipc call --method controller.snapshot
 bin\controller.exe ipc call --method controller.command.execute --params "{\"command\":\"rf list\"}"
+bin\controller.exe ipc monitor --addr 192.168.100.155:8787 --token-ref os:edge/cafe-pc --kind program --after latest
+bin\controller.exe ipc call --addr 192.168.100.155:8787 --token-ref os:edge/cafe-pc --timeout 15m --method controller.firmware.build --params "{}"
 bin\controller.exe ipc call --method controller.rf.map --params "{\"id\":3,\"action\":\"key\",\"target\":\"2\",\"behavior\":\"press\"}"
 bin\controller.exe ipc call --method controller.rf.transmit --params "{\"code\":1193046,\"bits\":24,\"protocol\":1,\"pulse_us\":350,\"repeats\":1}"
 bin\controller.exe ipc call --method controller.command.execute --params "{\"command\":\"melody play notify\"}"
@@ -794,6 +797,8 @@ bin\controller.exe ipc call --method controller.app.launch --params "{\"surface\
 bin\controller.exe ipc call --method controller.app.action --params "{\"kind\":\"app.title\",\"value\":\"Bench update\",\"target\":\"tui\"}"
 bin\controller.exe ipc call --method controller.app.action --params "{\"kind\":\"app.progress\",\"value\":\"normal 42\",\"target\":\"tui\"}"
 bin\controller.exe ipc call --method controller.app.action --params "{\"kind\":\"app.osc\",\"value\":\"9;4;4;73\",\"target\":\"tui\"}"
+bin\controller.exe ipc call --method controller.app.action --params "{\"kind\":\"app.title\",\"value\":\"Bench update\",\"target\":\"webui\",\"operation_id\":\"bench-title-1\",\"timeout_ms\":5000}"
+bin\controller.exe ipc call --method controller.app.action.outcome --params "{\"operation_id\":\"bench-title-1\"}"
 bin\controller.exe ipc call --method controller.command.execute --params "{\"command\":\"app title auto\"}"
 bin\controller.exe ipc call --method controller.bridge.list
 bin\controller.exe ipc call --method controller.bridge.call --params "{\"peer\":\"lab\",\"request\":{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"controller.snapshot\"}}"
@@ -1141,6 +1146,17 @@ delegate it through IPC. Verification or identity failure retains safe outputs
 and the recovery marker; an absent optional LCD is only a presentation warning.
 Do not substitute a direct programmer invocation or another COM port.
 
+`reset lines [PORT]` also works while the primary is paused after a failed
+bootloader attempt: it opens only the remembered or explicitly selected
+physical port, pulses DTR, closes that temporary handle, and then performs the
+normal authenticated reconnect.
+
+If that exact staging HEX was lost after a failed transaction, use
+`program abandon TARGET_SHA256 ABANDON`. The target hash must exactly match the
+newest marker for the currently authenticated physical board. This path never
+reads or writes flash: it reasserts safe outputs, restores the captured EEPROM
+settings and live state, verifies them, and only then removes the marker.
+
 The direct USBasp workflow writes only the selected flash image. It does not
 invent a sibling `.eep` filename and does not use the unsafe
 dependency-backend `upload --programmer ... --input-file ...with_bootloader.hex`
@@ -1151,6 +1167,7 @@ Inside the TUI/shell, the compact equivalent is:
 ```text
 program flash ..\..\.build\firmware\PCController.ino.hex COM18
 program recover ..\..\.build\firmware\PCController.ino.hex [PORT]
+program abandon TARGET_SHA256 ABANDON
 program flash ..\..\.build\firmware\PCController.ino.with_bootloader.hex --method usbasp
 boot backup .\backups
 ```

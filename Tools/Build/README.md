@@ -175,8 +175,11 @@ path selected explicitly through `--method usbasp`; `--programmer` is only an
 optional backend-ID override for different ISP hardware. Controller owns
 pre-flash backup, artifact validation, write/verify, and application
 reauthentication. On standalone USBasp writes, `--port` supplies the separate
-application lifecycle selector and is never sent to ISP. The advanced
-`--allow-incomplete-backup` override is never implied.
+application lifecycle selector and is never sent to ISP. `--deployment development`
+selects a development upload workflow (including on a live board): skip new raw
+archival capture, but retain semantic settings recovery and all output/write
+safety checks. Default `production` requires verified backup. Environment/config
+and API use the same [deployment policy](../../docs/Toolchain-and-Safe-Programming.md#development-iterations-and-protected-checkpoints).
 
 Use `--dry-run` to inspect the full ordered plan without starting a
 subprocess, changing a file, or opening a device. `--plan-json` is intended
@@ -259,6 +262,13 @@ passing result; `--retest` runs the same binaries again without inventing new
 temporary executable names. The cache identity includes embedded WebUI and
 default-recovery assets, and the shared lock prevents concurrent worktrees from
 overwriting one another's binary/cache pair.
+
+Windows output is fixed at `%LOCALAPPDATA%\PCController\test-programs\go`.
+The runner rejects alternate `--output` directories, including per-task child
+directories, because the complete executable path determines firewall identity.
+Do not override `GOTMPDIR` or copy/rename test binaries to bypass this policy.
+Use `--package` and `--run` for focused checks; non-Windows output remains
+configurable. This recovers the unfinished runner policy tracked in issue #344.
 
 For a machine-level Windows backstop, this workstation sets Go's `GOTMPDIR` to
 `%LOCALAPPDATA%\PCController\go-noexec-temp` and grants the interactive user an

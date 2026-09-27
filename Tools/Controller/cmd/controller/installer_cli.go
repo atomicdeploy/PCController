@@ -212,7 +212,7 @@ func (installerDesktopAdapter) Ensure(
 	if err != nil {
 		return err
 	}
-	if !status.Supported || !status.ProtocolReady || !status.ShortcutReady {
+	if !status.Supported || !status.ProtocolReady || !status.ShortcutReady || !status.DesktopShortcutReady {
 		return errors.New("native desktop integration did not become ready")
 	}
 	return nil

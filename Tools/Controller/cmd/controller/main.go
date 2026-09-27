@@ -272,7 +272,7 @@ func runDesktop(
 	store *appconfig.Store,
 ) error {
 	if len(args) > 1 {
-		return errors.New("usage: desktop install|ensure|uninstall|remove")
+		return errors.New("usage: desktop install|ensure|test|uninstall|remove")
 	}
 	action := "ensure"
 	if len(args) == 1 {
@@ -287,10 +287,38 @@ func runDesktop(
 	switch action {
 	case "install", "ensure":
 		status, integrationErr = hostui.EnsureDesktopIntegration(options)
+	case "test":
+		integration, err := hostui.EnsureDesktopIntegration(options)
+		if err != nil {
+			status, integrationErr = integration, err
+			break
+		}
+		notifier := hostui.NewNotifier(hostui.NotifierOptions{
+			AppID: productidentity.StableAppID, LogoPath: integration.Logo,
+		})
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err = notifier.Notify(ctx, hostui.Notification{
+			Title:     productidentity.Title(store.Current().UI.AppTitle) + " · Notification test",
+			Body:      "The installed Windows notification logo and action route are working.",
+			LaunchURI: productidentity.ProtocolScheme + "://page/events",
+			Actions: []hostui.NotificationAction{{
+				Label: "Open events", URI: productidentity.ProtocolScheme + "://page/events",
+			}},
+		})
+		cancel()
+		notificationStatus := notifier.Status()
+		status = struct {
+			Desktop      hostui.DesktopIntegrationStatus `json:"desktop"`
+			Notification hostui.NotificationStatus       `json:"notification"`
+		}{integration, notificationStatus}
+		integrationErr = err
+		if integrationErr == nil && (!notificationStatus.Branded || notificationStatus.Backend != "winrt-toast") {
+			integrationErr = errors.New("Windows notification test did not use the branded WinRT toast backend")
+		}
 	case "uninstall", "remove":
 		status, integrationErr = hostui.RemoveDesktopIntegration(options)
 	default:
-		return errors.New("usage: desktop install|ensure|uninstall|remove")
+		return errors.New("usage: desktop install|ensure|test|uninstall|remove")
 	}
 	encoded, _ := json.MarshalIndent(status, "", "  ")
 	fmt.Fprintln(stdout, string(encoded))
@@ -437,7 +465,7 @@ func runWebWithInitialAction(
 	// prevents a notification registration write.
 	if status, desktopErr := ensureWebDesktopIntegration(store); desktopErr != nil {
 		fmt.Fprintln(stderr, "desktop notification identity:", desktopErr)
-	} else if status.Supported && (!status.ProtocolReady || !status.ShortcutReady) {
+	} else if status.Supported && (!status.ProtocolReady || !status.ShortcutReady || !status.DesktopShortcutReady) {
 		fmt.Fprintln(stderr, "desktop notification identity is incomplete")
 	}
 	runtime := newRuntime(connection, store)
@@ -1080,6 +1108,10 @@ func runTUIWithInitialAction(
 			WriteOSC: func(payload string) error {
 				return hostui.WriteOSC(stdout, payload)
 			},
+			AckAppAction: func(ack hostui.ActionAck) error {
+				_, ackErr := primary.actionCoordinator.Ack(ack)
+				return ackErr
+			},
 			ReportTerminal: func(page, title string) error {
 				ui := store.Current().UI
 				values := navigationReporter.NextValues()
@@ -1088,6 +1120,7 @@ func runTUIWithInitialAction(
 				values["terminal_title"] = title
 				values["terminal_osc"] = "enabled"
 				values["terminal_progress"] = "osc-9-4"
+				values[hostui.ActionCapabilitiesKey] = hostui.TUIActionCapabilities
 				_, err := primary.instances.Upsert(hostui.AppInstance{
 					ID: tuiInstanceID, Surface: "tui", Page: page, State: "active",
 					Self: &tuiSelf, Values: values,

@@ -223,7 +223,7 @@ export function createControllerProgramCommand({
 	firmwareFeatures = [],
 	noFirmwareFeatures,
 	dryRun = false,
-	allowIncompleteBackup = false
+	deployment = ''
 }) {
 	const normalizedMethod = String(method || '').toLowerCase()
 	const normalizedFeatures = normalizeFirmwareFeatures(firmwareFeatures)
@@ -281,11 +281,14 @@ export function createControllerProgramCommand({
 	if (normalizedOperation === PROGRAMMING_OPERATIONS.backup) {
 		args.push('--output', requireValue(output, 'read-flash output'))
 	}
-	if (allowIncompleteBackup) {
+	if (deployment) {
 		if (normalizedOperation !== PROGRAMMING_OPERATIONS.upload) {
-			throw new CommandPlanError('--allow-incomplete-backup is only valid with write-flash')
+			throw new CommandPlanError('--deployment is only valid with write-flash')
 		}
-		args.push('--allow-incomplete-backup')
+		if (!['production', 'development'].includes(deployment)) {
+			throw new CommandPlanError('--deployment must be production or development')
+		}
+		args.push('--deployment', deployment)
 	}
 	if (dryRun) args.push('--dry-run')
 	return controllerCommand(invocation, args)
