@@ -111,3 +111,11 @@ func scheduleHelperRemoval(path string) error {
 	}
 	return windows.MoveFileEx(value, nil, windows.MOVEFILE_DELAY_UNTIL_REBOOT)
 }
+
+func scheduleActivationCleanup(outcomePath, helperPath, directory string) error {
+	return errors.Join(
+		scheduleHelperRemoval(outcomePath),
+		scheduleHelperRemoval(helperPath),
+		scheduleHelperRemoval(directory),
+	)
+}

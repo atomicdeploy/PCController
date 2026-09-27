@@ -23,6 +23,7 @@ const (
 )
 
 var startActivationHelper = launchActivationHelper
+var scheduleActivationArtifacts = scheduleActivationCleanup
 
 type uninstallHelperPlan struct {
 	Format         string           `json:"format"`
@@ -202,7 +203,9 @@ func RunExternalActivationHelper(ctx context.Context, planPath string, service *
 	}
 	if resultErr == nil {
 		_ = os.Remove(plan.PlanPath)
-		_ = scheduleHelperRemoval(plan.HelperPath)
+		if err := scheduleActivationArtifacts(plan.OutcomePath, plan.HelperPath, filepath.Dir(plan.HelperPath)); err != nil {
+			resultErr = fmt.Errorf("schedule activation helper cleanup: %w", err)
+		}
 	}
 	return resultErr
 }

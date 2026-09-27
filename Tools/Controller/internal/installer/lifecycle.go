@@ -316,7 +316,15 @@ func (service *Service) activate(ctx context.Context, operation string, request 
 			next.DisplayName = service.DisplayName
 			next.DesktopManaged = desktopManaged
 			nameChanged := !strings.EqualFold(strings.TrimSpace(previous.DisplayName), strings.TrimSpace(next.DisplayName))
-			stateChanged := previous.DesktopManaged != desktopManaged || nameChanged
+			rollbackChanged := false
+			if next.PreviousSlot != "" {
+				if rollbackErr := service.verifySlot(root, next.PreviousSlot, next.PreviousSHA256); rollbackErr != nil {
+					next.PreviousSlot, next.PreviousSHA256 = "", ""
+					rollbackChanged = true
+					result.Warnings = append(result.Warnings, "damaged rollback package was retired: "+rollbackErr.Error())
+				}
+			}
+			stateChanged := previous.DesktopManaged != desktopManaged || nameChanged || rollbackChanged
 			desktopTransition := service.desktopTransitionRequired(root, &previous, next)
 			if stateChanged {
 				next.UpdatedAt = service.now()
@@ -361,6 +369,7 @@ func (service *Service) activate(ctx context.Context, operation string, request 
 			}
 			result.Healthy, result.DesktopManaged, result.Executable = true, desktopManaged, filepath.Join(root, filepath.FromSlash(next.Executable))
 			result.State = &next
+			result.Warnings = append(result.Warnings, prunePackageSlots(root, next)...)
 			return result, nil
 		} else if !repair {
 			result.Warnings = append(result.Warnings, "matching installed package was damaged and has been replaced from the verified source")

@@ -60,3 +60,7 @@ func waitForParentExit(ctx context.Context, pid int, expectedIdentity string, ti
 }
 
 func scheduleHelperRemoval(path string) error { return os.Remove(path) }
+
+func scheduleActivationCleanup(outcomePath, helperPath, directory string) error {
+	return errors.Join(os.Remove(outcomePath), os.Remove(helperPath), os.Remove(directory))
+}

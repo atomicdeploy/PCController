@@ -173,6 +173,39 @@ func TestCanonicalBinQuarantinesUnknownContentRetiresRemovedFilesAndKeepsOneRoll
 	}
 }
 
+func TestHealthyNoOpPrunesSupersededAndDropsDamagedRollback(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "installation")
+	service := testService(t, nil)
+	one, _ := writeTestPackage(t, "1.0.0", "one")
+	if _, err := service.Install(context.Background(), ChangeRequest{Root: root, PackageRoot: one}); err != nil {
+		t.Fatal(err)
+	}
+	two, manifestTwo := writeTestPackage(t, "2.0.0", "two")
+	updated, err := service.Install(context.Background(), ChangeRequest{Root: root, PackageRoot: two})
+	if err != nil || updated.State == nil || updated.State.PreviousSlot == "" {
+		t.Fatalf("update=%#v err=%v", updated, err)
+	}
+	extra := filepath.Join(root, packagesDirectory, "superseded")
+	if err := os.MkdirAll(extra, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(extra, "stale.exe"), []byte("stale"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rollbackExecutable := filepath.Join(root, filepath.FromSlash(updated.State.PreviousSlot), "controller.exe")
+	if err := os.WriteFile(rollbackExecutable, []byte("damaged"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	noop, err := service.Install(context.Background(), ChangeRequest{Root: root, PackageRoot: two, ExpectedPackageSHA256: manifestTwo.RootSHA256})
+	if err != nil || !noop.Healthy || !noop.Changed || noop.State.PreviousSlot != "" || noop.State.PreviousSHA256 != "" {
+		t.Fatalf("no-op reconciliation=%#v err=%v", noop, err)
+	}
+	entries, err := os.ReadDir(filepath.Join(root, packagesDirectory))
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("superseded packages remain: %v err=%v", entries, err)
+	}
+}
+
 func TestHealthyLegacyHashedActiveMigratesToCanonicalBin(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "installation")
 	service := testService(t, nil)
@@ -313,6 +346,59 @@ func TestExternalActivationHelperRejectsTamperedCopy(t *testing.T) {
 	helperService.CurrentExecutable = plan.HelperPath
 	if err := RunExternalActivationHelper(context.Background(), plan.PlanPath, &helperService); err == nil || !strings.Contains(err.Error(), "digest") {
 		t.Fatalf("tampered activation helper error=%v", err)
+	}
+	if err := removeTreeSecure(filepath.Dir(plan.HelperPath)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSuccessfulActivationSchedulesOutcomeHelperAndDirectoryCleanup(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "installation")
+	service := testService(t, nil)
+	packageRoot, _ := writeTestPackage(t, "1.0.0", "helper-cleanup")
+	installed, err := service.Install(context.Background(), ChangeRequest{Root: root, PackageRoot: packageRoot})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.CurrentExecutable = installed.Executable
+	originalStart, originalCleanup := startActivationHelper, scheduleActivationArtifacts
+	defer func() { startActivationHelper, scheduleActivationArtifacts = originalStart, originalCleanup }()
+	startActivationHelper = func(_ context.Context, _, _ string) error { return nil }
+	plan, err := service.PrepareExternalActivation(context.Background(), ChangeRequest{Root: root, PackageRoot: packageRoot}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := readBoundedRegularFile(plan.PlanPath, 256<<10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var helperPlan activationHelperPlan
+	if err := decodeStrictJSON(content, &helperPlan); err != nil {
+		t.Fatal(err)
+	}
+	helperPlan.ParentPID, helperPlan.ParentIdentity = 2147483647, "nonexistent-test-process"
+	if err := writeJSONAtomic(plan.PlanPath, helperPlan, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var scheduled []string
+	scheduleActivationArtifacts = func(outcome, helper, directory string) error {
+		if _, err := os.Stat(outcome); err != nil {
+			return err
+		}
+		scheduled = []string{outcome, helper, directory}
+		return nil
+	}
+	helperService := *service
+	helperService.CurrentExecutable = plan.HelperPath
+	if err := RunExternalActivationHelper(context.Background(), plan.PlanPath, &helperService); err != nil {
+		t.Fatal(err)
+	}
+	expected := []string{plan.OutcomePath, plan.HelperPath, filepath.Dir(plan.HelperPath)}
+	if !reflect.DeepEqual(scheduled, expected) {
+		t.Fatalf("scheduled cleanup=%v expected=%v", scheduled, expected)
+	}
+	if _, err := os.Stat(plan.PlanPath); !os.IsNotExist(err) {
+		t.Fatalf("successful helper retained plan: %v", err)
 	}
 	if err := removeTreeSecure(filepath.Dir(plan.HelperPath)); err != nil {
 		t.Fatal(err)
