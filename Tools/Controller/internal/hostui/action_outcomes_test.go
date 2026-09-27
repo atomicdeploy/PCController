@@ -320,6 +320,40 @@ func TestActionCapabilitiesAreBoundedAndCanonical(t *testing.T) {
 	}
 }
 
+func TestActionCoordinatorTracksAdvertisedCustomCapability(t *testing.T) {
+	registry := NewInstanceRegistry()
+	liveActionInstance(t, registry, "pealayer:desktop", "pealayer", "pealayer.play")
+	if !TracksRegisteredAppActionOutcome(registry, "pealayer.play", "pealayer:desktop") {
+		t.Fatal("advertised custom action was not outcome-capable")
+	}
+	if TracksRegisteredAppActionOutcome(registry, "pealayer.pause", "pealayer:desktop") ||
+		TracksRegisteredAppActionOutcome(registry, "command", "pealayer:desktop") {
+		t.Fatal("unadvertised or legacy action was promoted to tracked delivery")
+	}
+	var delivery AppAction
+	coordinator := NewActionCoordinator(registry, func(action AppAction) error {
+		delivery = action
+		return nil
+	})
+	defer coordinator.Close()
+	operation, err := coordinator.Submit(AppAction{
+		Kind: "pealayer.play", Target: "pealayer:desktop", OperationID: "custom-play",
+	}, time.Second)
+	if err != nil || operation.State != ActionStateQueued || delivery.Kind != "pealayer.play" ||
+		delivery.Target != "pealayer:desktop" || delivery.Metadata[ActionDeliveryIDKey] == "" {
+		t.Fatalf("operation=%#v delivery=%#v err=%v", operation, delivery, err)
+	}
+	operation, err = coordinator.Ack(ActionAck{
+		OperationID: operation.OperationID,
+		DeliveryID:  delivery.Metadata[ActionDeliveryIDKey],
+		InstanceID:  "pealayer:desktop",
+		State:       ActionStateApplied,
+	})
+	if err != nil || operation.State != ActionStateApplied {
+		t.Fatalf("operation=%#v err=%v", operation, err)
+	}
+}
+
 func TestActionCoordinatorRejectsAckAtExactDeadline(t *testing.T) {
 	registry := NewInstanceRegistry()
 	liveActionInstance(t, registry, "web:deadline", "webui", WebActionCapabilities)
@@ -355,7 +389,7 @@ func TestActionCoordinatorWaitsForObserverReceiptWhenLocalQueueFull(t *testing.T
 	}
 	var delivery AppAction
 	broker.SetObserver(func(action AppAction) { delivery = action })
-	coordinator := NewActionCoordinator(registry, broker.Publish)
+	coordinator := NewActionCoordinator(registry, broker.PublishTracked)
 	defer coordinator.Close()
 	operation, err := coordinator.Submit(AppAction{Kind: "app.title", Value: "delivered over events", Target: "web:overflow"}, MaximumActionTimeout)
 	if err != nil || operation.State != ActionStateQueued {
