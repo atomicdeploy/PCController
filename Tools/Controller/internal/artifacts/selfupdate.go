@@ -470,7 +470,7 @@ func launchRestoredHost(journal selfUpdateJournal) error {
 	command.Dir = journal.WorkingDirectory
 	command.Env = withoutSelfUpdateEnvironment(os.Environ())
 	inheritSelfUpdateIO(command)
-	if err := command.Start(); err != nil {
+	if err := platformStartReplacementProcess(command); err != nil {
 		return err
 	}
 	return command.Process.Release()
