@@ -318,7 +318,7 @@ func startPrimaryIPCAtWithIdentity(
 	}
 	server.actions = hostui.NewActionBroker()
 	server.instances = hostui.NewInstanceRegistry()
-	server.actionCoordinator = hostui.NewActionCoordinator(server.instances, server.actions.Publish)
+	server.actionCoordinator = hostui.NewActionCoordinator(server.instances, server.actions.PublishTracked)
 	server.actionCoordinator.SetObserver(func(change hostui.ActionOutcomeChange) {
 		runtime.PublishStructuredEvent(appActionOutcomeEvent(change))
 	})
@@ -343,7 +343,7 @@ func startPrimaryIPCAtWithIdentity(
 		}
 	})
 	server.actions.SetObserver(func(action hostui.AppAction) {
-		if event, ok := browserAppActionEvent(action); ok {
+		if event, ok := ipcjson.AppActionDeliveryEvent(action); ok {
 			runtime.PublishStructuredEvent(event)
 		}
 	})
@@ -498,46 +498,6 @@ func startPrimaryIPCAtWithIdentity(
 		close(server.done)
 	}()
 	return server, nil
-}
-
-func browserAppActionEvent(action hostui.AppAction) (control.Event, bool) {
-	kind := strings.ToLower(strings.TrimSpace(action.Kind))
-	value := strings.TrimSpace(action.Value)
-	if !strings.HasPrefix(kind, "app.") {
-		return control.Event{}, false
-	}
-	target := strings.TrimSpace(action.Target)
-	if target == "" {
-		target = "*"
-	}
-	verb := strings.TrimPrefix(kind, "app.")
-	text := verb
-	if value != "" {
-		text += " " + value
-	}
-	metadata := make(map[string]string, len(action.Metadata)+3)
-	for key, item := range action.Metadata {
-		metadata[key] = item
-	}
-	metadata["value"] = value
-	metadata["target_instance"] = target
-	if action.OperationID != "" {
-		metadata["operation_id"] = action.OperationID
-	}
-	actionName := verb
-	if kind == "app.page" {
-		metadata["page"] = value
-		actionName = "navigate"
-		text = "Open page " + value
-	}
-	return control.Event{
-		Kind:     kind,
-		Text:     text,
-		Source:   action.Source,
-		Target:   "app.clients",
-		Action:   actionName,
-		Metadata: metadata,
-	}, true
 }
 
 func appActionOutcomeEvent(change hostui.ActionOutcomeChange) control.Event {
