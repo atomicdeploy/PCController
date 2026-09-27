@@ -255,6 +255,56 @@ test('persistent Ready profile remains host-owned with a compact firmware fallba
         assert.doesNotMatch(firmware, /ReadyPalette/u)
 })
 
+test('status LED breathe has one rise and fall without a second rise per cycle', async () => {
+	const firmware = await readFile(
+		new URL('../../Project/StatusLedController.cpp', import.meta.url),
+		'utf8'
+	)
+	assert.match(firmware, /effectPhase_ \+ EffectPhaseStep/u)
+	assert.match(firmware, /effectPhase_ < 128U[^]*?effectPhase_ << 1[^]*?255U - effectPhase_/u)
+	assert.match(firmware, /minimumBrightness_ \+\s*scale\([^]*?brightness_ - minimumBrightness_[^]*?triangle/u)
+
+	const scale = (value, level) => (value * (level + 1)) >> 8
+	const phases = Array.from({ length: 33 }, (_, step) => (step * 8) & 0xFF)
+	let profilePairs = 0
+	for (let brightness = 0; brightness <= 0xFF; brightness += 1) {
+		for (let minimum = 0; minimum <= brightness; minimum += 1) {
+			profilePairs += 1
+			const levels = phases.map((phase) => {
+				const triangle = phase < 128 ? phase << 1 : (255 - phase) << 1
+				return minimum + scale(brightness - minimum, triangle)
+			})
+			const directions = levels.slice(1).map((level, index) =>
+				Math.sign(level - levels[index])
+			).filter(Boolean)
+			const firstFall = directions.indexOf(-1)
+			assert.equal(
+				firstFall < 0 ? false : directions.slice(firstFall + 1).includes(1),
+				false,
+				`second rise for brightness=${brightness}, minimum=${minimum}`
+			)
+		}
+	}
+	assert.equal(profilePairs, 32_896)
+
+	const representative = phases.map((phase) => {
+		const triangle = phase < 128 ? phase << 1 : (255 - phase) << 1
+		return scale(145, triangle)
+	})
+	const representativeDirections = representative.slice(1).map((level, index) =>
+		Math.sign(level - representative[index])
+	).filter(Boolean)
+	assert.ok(representativeDirections.includes(1), 'representative cycle must rise')
+	assert.ok(representativeDirections.includes(-1), 'representative cycle must fall')
+	assert.equal(
+		representativeDirections.slice(1).filter((direction, index) =>
+			direction === -1 && representativeDirections[index] === 1
+		).length,
+		1,
+		'representative cycle must have exactly one rise-to-fall turn'
+	)
+})
+
 test('physical, injected, and RF key actions retain the immediate dispatch contract', async () => {
 	const [configuration, keys, frontPanel, protocol, radio] = await Promise.all([
 		readFile(new URL('../../Project/Firmware/ControllerConfiguration.inc.h', import.meta.url), 'utf8'),

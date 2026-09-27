@@ -174,6 +174,9 @@ type RemoteLiveUpdate struct {
 	HaveStatusLED       bool
 	StatusLEDUpdated    time.Time
 	StatusLEDReceivedAt time.Time
+	StatusLEDOrderKnown bool
+	StatusLEDEpoch      uint64
+	StatusLEDRevision   uint64
 	ConnectionChange    bool
 	Connected           bool
 	Error               string

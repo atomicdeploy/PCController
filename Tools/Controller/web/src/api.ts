@@ -12,6 +12,7 @@ const tokenKey = 'pccontroller.session-token'
 const browserTicketPrefix = 'pccontroller.ticket.'
 let nextID = 1
 let streamSocket: WebSocket | null = null
+let nextStreamGeneration = 0
 
 interface PendingSocketRPC {
   socket: WebSocket
@@ -198,8 +199,13 @@ export function execute(command: string, signal?: AbortSignal): Promise<CommandR
 /** Receives live status, event, and transport-lifecycle notifications. */
 export interface StreamHandlers {
   status: (value: StatusUpdate) => void
-  event: (value: ControllerEvent) => void
-  state: (state: StreamState, detail?: string) => void
+  event: (value: ControllerEvent, source: StreamSource) => void
+  state: (state: StreamState, detail?: string, source?: StreamSource) => void
+}
+
+export interface StreamSource {
+  generation: number
+  instanceID?: string
 }
 
 interface SessionTicket {
@@ -238,11 +244,15 @@ export function connectStream(config: UIConfig, handlers: StreamHandlers): () =>
   let attempt = 0
   let ticketAbort: AbortController | null = null
 
-  const scheduleRetry = (detail: string, state: StreamFailureState = 'waiting') => {
+  const scheduleRetry = (
+    detail: string,
+    state: StreamFailureState = 'waiting',
+    source?: StreamSource,
+  ) => {
     if (stopped) return
     retry += 1
     const delay = Math.min(12_000, 500 * 2 ** Math.min(retry, 5)) + Math.floor(Math.random() * 250)
-    handlers.state(state, detail || `retrying in ${Math.ceil(delay / 1000)}s`)
+    handlers.state(state, detail || `retrying in ${Math.ceil(delay / 1000)}s`, source)
     if (state === 'authentication-required') return
     window.clearTimeout(timer)
     timer = window.setTimeout(() => { void open() }, delay)
@@ -251,7 +261,8 @@ export function connectStream(config: UIConfig, handlers: StreamHandlers): () =>
   const open = async () => {
     if (stopped) return
     const currentAttempt = ++attempt
-    handlers.state('connecting')
+    const currentGeneration = ++nextStreamGeneration
+    handlers.state('connecting', undefined, { generation: currentGeneration })
     ticketAbort?.abort()
     const authorizationAbort = new AbortController()
     ticketAbort = authorizationAbort
@@ -260,7 +271,10 @@ export function connectStream(config: UIConfig, handlers: StreamHandlers): () =>
       protocols = await websocketProtocols(config, authorizationAbort.signal)
     } catch (cause) {
       if (stopped || currentAttempt !== attempt || authorizationAbort.signal.aborted) return
-      scheduleRetry(transportFailureDetail(cause), streamFailureState(cause))
+      scheduleRetry(
+        transportFailureDetail(cause), streamFailureState(cause),
+        { generation: currentGeneration },
+      )
       return
     } finally {
       if (ticketAbort === authorizationAbort) ticketAbort = null
@@ -272,19 +286,35 @@ export function connectStream(config: UIConfig, handlers: StreamHandlers): () =>
       const url = controllerWebSocketURL(config.websocket_path)
       activeSocket = protocols.length > 0 ? new WebSocket(url, protocols) : new WebSocket(url)
     } catch (cause) {
-      scheduleRetry(cause instanceof Error ? cause.message : String(cause))
+      scheduleRetry(
+        cause instanceof Error ? cause.message : String(cause),
+        'waiting', { generation: currentGeneration },
+      )
       return
     }
     socket = activeSocket
+    let subscriptionID = 0
+    let sourceInstanceID = ''
+    let subscriptionAcknowledged = false
+    const pendingStateEvents: ControllerEvent[] = []
+    const source = (): StreamSource => ({
+      generation: currentGeneration,
+      ...(sourceInstanceID ? { instanceID: sourceInstanceID } : {}),
+    })
+    const deliverEvent = (event: ControllerEvent) => {
+      if (activeSocket !== socket) return
+      handlers.event(event, source())
+    }
     activeSocket.addEventListener('open', () => {
+      if (activeSocket !== socket) return
       retry = 0
       streamSocket = activeSocket
-      handlers.state('open')
+      subscriptionID = nextID++
       activeSocket.send(JSON.stringify({
         jsonrpc: '2.0',
-        id: nextID++,
+        id: subscriptionID,
         method: 'controller.subscribe',
-		params: { topics: ['events', 'state', 'status'], interval_ms: 500, after_id: 0 },
+        params: { topics: ['events', 'state', 'status'], interval_ms: 500, after_id: 0 },
       }))
     })
     activeSocket.addEventListener('message', (message) => {
@@ -304,14 +334,34 @@ export function connectStream(config: UIConfig, handlers: StreamHandlers): () =>
             if (value.error) pending.reject(new Error(value.error.message || 'WebSocket RPC failed'))
             else pending.resolve(value.result)
           }
+          if (activeSocket !== socket) return
+          if (value.id === subscriptionID) {
+            if (value.error) {
+              activeSocket.close()
+              return
+            }
+            const acknowledgement = value.result as { subscribed?: boolean; instance_id?: string } | undefined
+            if (acknowledgement?.subscribed !== true) {
+              activeSocket.close()
+              return
+            }
+            sourceInstanceID = acknowledgement.instance_id?.trim() ?? ''
+            subscriptionAcknowledged = true
+            handlers.state('open', undefined, source())
+            for (const event of pendingStateEvents.splice(0)) deliverEvent(event)
+          }
         }
+        if (activeSocket !== socket) return
         if (value.method === 'controller.status') handlers.status(value.params as StatusUpdate)
-		if (value.method === 'controller.event' || value.method === 'controller.state') {
-			handlers.event(value.params as ControllerEvent)
-		}
+        if (value.method === 'controller.event') deliverEvent(value.params as ControllerEvent)
+        if (value.method === 'controller.state') {
+          const event = value.params as ControllerEvent
+          if (subscriptionAcknowledged) deliverEvent(event)
+          else pendingStateEvents.push(event)
+        }
         if (value.method === 'controller.error') {
           const detail = (value.params as { error?: string } | undefined)?.error
-          handlers.state('open', detail)
+          handlers.state('open', detail, source())
         }
       } catch {
         // The controller protocol is JSON-only; malformed frames are ignored and
@@ -319,16 +369,20 @@ export function connectStream(config: UIConfig, handlers: StreamHandlers): () =>
       }
     })
     activeSocket.addEventListener('close', (event) => {
-      if (socket === activeSocket) socket = null
+      const wasCurrent = socket === activeSocket
+      if (wasCurrent) socket = null
       if (streamSocket === activeSocket) streamSocket = null
       rejectSocketRequests(activeSocket, event.reason || 'WebSocket RPC connection closed')
+      if (!wasCurrent) return
       if (stopped) {
-        handlers.state('closed')
+        handlers.state('closed', undefined, source())
         return
       }
-      scheduleRetry(event.reason || 'WebSocket connection closed')
+      scheduleRetry(event.reason || 'WebSocket connection closed', 'waiting', source())
     })
-    activeSocket.addEventListener('error', () => activeSocket.close())
+    activeSocket.addEventListener('error', () => {
+      if (activeSocket === socket) activeSocket.close()
+    })
   }
 
   void open()

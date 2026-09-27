@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -59,6 +60,10 @@ type remoteTUIIPC struct {
 	liveRequestID         uint64
 	liveStateCursor       uint64
 	liveRequestedAfter    uint64
+	liveEpoch             uint64
+	liveInstanceID        string
+	liveSessionEpoch      uint64
+	liveSessionInstanceID string
 }
 
 const remoteTUIInstanceLeaseSeconds = 45
@@ -81,6 +86,7 @@ type remotePortWire struct {
 }
 
 type remoteSnapshotWire struct {
+	HostInstanceID    string                       `json:"host_instance_id,omitempty"`
 	Connected         bool                         `json:"connected"`
 	Paused            bool                         `json:"paused"`
 	Port              remotePortWire               `json:"port"`
@@ -99,6 +105,7 @@ type remoteSnapshotWire struct {
 	StatusLED         native.StatusLEDState        `json:"status_led"`
 	HaveStatusLED     bool                         `json:"have_status_led"`
 	StatusLEDUpdated  time.Time                    `json:"status_led_updated,omitempty"`
+	StatusLEDRevision uint64                       `json:"status_led_revision,omitempty"`
 	ProgramState      control.ProgramStateSnapshot `json:"program_state"`
 	RFLearning        control.RFLearnState         `json:"rf_learning"`
 }
@@ -227,10 +234,23 @@ func (client *remoteTUIIPC) nextLiveRequest() (uint64, uint64) {
 	return client.liveRequestID, client.liveStateCursor
 }
 
-func (client *remoteTUIIPC) acceptLiveAcknowledgement(latestID uint64) bool {
+func (client *remoteTUIIPC) acceptLiveAcknowledgement(latestID uint64, instanceID string) bool {
 	client.liveMu.Lock()
 	defer client.liveMu.Unlock()
-	if latestID < client.liveRequestedAfter {
+	previousEpoch := client.ensureLiveEpochLocked()
+	client.adoptLiveInstanceLocked(instanceID)
+	sourceChanged := client.liveEpoch != previousEpoch
+	instanceReset := client.liveSessionInstanceID != "" && instanceID != "" &&
+		instanceID != client.liveSessionInstanceID
+	cursorReset := latestID < client.liveRequestedAfter
+	if cursorReset && !sourceChanged {
+		// Compatibility fallback for a primary that predates process identities.
+		client.liveEpoch++
+	}
+	reset := sourceChanged || instanceReset || cursorReset
+	client.liveSessionInstanceID = instanceID
+	client.liveSessionEpoch = client.liveEpoch
+	if reset {
 		// The primary restarted and its event epoch reset. Adopt the new retained
 		// cursor; the caller refreshes one authoritative snapshot before accepting
 		// subsequent state frames from this epoch.
@@ -239,6 +259,40 @@ func (client *remoteTUIIPC) acceptLiveAcknowledgement(latestID uint64) bool {
 		return true
 	}
 	return false
+}
+
+func (client *remoteTUIIPC) adoptLiveInstanceLocked(instanceID string) uint64 {
+	client.ensureLiveEpochLocked()
+	instanceID = strings.TrimSpace(instanceID)
+	if instanceID != "" && client.liveInstanceID != instanceID {
+		if client.liveInstanceID != "" {
+			client.liveEpoch++
+		}
+		client.liveInstanceID = instanceID
+	}
+	return client.liveEpoch
+}
+
+func (client *remoteTUIIPC) ensureLiveEpochLocked() uint64 {
+	if client.liveEpoch == 0 {
+		client.liveEpoch = 1
+	}
+	return client.liveEpoch
+}
+
+func (client *remoteTUIIPC) liveSourceMarker() (uint64, string) {
+	client.liveMu.Lock()
+	defer client.liveMu.Unlock()
+	return client.ensureLiveEpochLocked(), client.liveInstanceID
+}
+
+func (client *remoteTUIIPC) currentLiveSessionEpoch() uint64 {
+	client.liveMu.Lock()
+	defer client.liveMu.Unlock()
+	if client.liveSessionEpoch != 0 {
+		return client.liveSessionEpoch
+	}
+	return client.adoptLiveInstanceLocked("")
 }
 
 func (client *remoteTUIIPC) advanceLiveStateCursor(id uint64) bool {
@@ -266,27 +320,48 @@ func (client *remoteTUIIPC) call(
 }
 
 func (client *remoteTUIIPC) Snapshot(ctx context.Context) (control.Snapshot, error) {
-	var wire remoteSnapshotWire
-	if err := client.call(ctx, "controller.snapshot", map[string]any{}, &wire); err != nil {
-		return control.Snapshot{}, err
+	for {
+		startEpoch, startInstanceID := client.liveSourceMarker()
+		var wire remoteSnapshotWire
+		if err := client.call(ctx, "controller.snapshot", map[string]any{}, &wire); err != nil {
+			return control.Snapshot{}, err
+		}
+		responseInstanceID := strings.TrimSpace(wire.HostInstanceID)
+		client.liveMu.Lock()
+		currentEpoch := client.ensureLiveEpochLocked()
+		currentInstanceID := client.liveInstanceID
+		changedDuringCall := currentEpoch != startEpoch || currentInstanceID != startInstanceID
+		staleResponse := changedDuringCall &&
+			(responseInstanceID == "" ||
+				(currentInstanceID != "" && responseInstanceID != currentInstanceID))
+		if staleResponse {
+			client.liveMu.Unlock()
+			if err := ctx.Err(); err != nil {
+				return control.Snapshot{}, err
+			}
+			continue
+		}
+		epoch := client.adoptLiveInstanceLocked(responseInstanceID)
+		client.liveMu.Unlock()
+		return control.Snapshot{
+			Connected: wire.Connected, Paused: wire.Paused,
+			Port: ports.Info{
+				Name: wire.Port.Name, IsUSB: wire.Port.VID != "" || wire.Port.PID != "",
+				VID: wire.Port.VID, PID: wire.Port.PID, Product: wire.Port.Product,
+				Manufacturer: wire.Port.Manufacturer, SerialNumber: wire.Port.SerialNumber,
+				FriendlyName: wire.Port.FriendlyName, InstanceID: wire.Port.InstanceID,
+			},
+			Hello: wire.Hello, Status: wire.Status, Settings: native.Settings(wire.Settings),
+			HaveStatus: wire.HaveStatus, HaveSettings: wire.HaveSettings,
+			StatusUpdated: wire.StatusUpdated, ConnectionState: wire.ConnectionState,
+			ConnectionReason: wire.ConnectionReason, ConnectionUpdated: wire.ConnectionUpdated,
+			FrontPanel: wire.FrontPanel, HaveFrontPanel: wire.HaveFrontPanel,
+			FrontPanelUpdated: wire.FrontPanelUpdated, StatusLED: wire.StatusLED,
+			HaveStatusLED: wire.HaveStatusLED, StatusLEDUpdated: wire.StatusLEDUpdated,
+			StatusLEDEpoch: epoch, StatusLEDRevision: wire.StatusLEDRevision,
+			ProgramState: wire.ProgramState, RFLearning: wire.RFLearning,
+		}, nil
 	}
-	return control.Snapshot{
-		Connected: wire.Connected, Paused: wire.Paused,
-		Port: ports.Info{
-			Name: wire.Port.Name, IsUSB: wire.Port.VID != "" || wire.Port.PID != "",
-			VID: wire.Port.VID, PID: wire.Port.PID, Product: wire.Port.Product,
-			Manufacturer: wire.Port.Manufacturer, SerialNumber: wire.Port.SerialNumber,
-			FriendlyName: wire.Port.FriendlyName, InstanceID: wire.Port.InstanceID,
-		},
-		Hello: wire.Hello, Status: wire.Status, Settings: native.Settings(wire.Settings),
-		HaveStatus: wire.HaveStatus, HaveSettings: wire.HaveSettings,
-		StatusUpdated: wire.StatusUpdated, ConnectionState: wire.ConnectionState,
-		ConnectionReason: wire.ConnectionReason, ConnectionUpdated: wire.ConnectionUpdated,
-		FrontPanel: wire.FrontPanel, HaveFrontPanel: wire.HaveFrontPanel,
-		FrontPanelUpdated: wire.FrontPanelUpdated, StatusLED: wire.StatusLED,
-		HaveStatusLED: wire.HaveStatusLED, StatusLEDUpdated: wire.StatusLEDUpdated,
-		ProgramState: wire.ProgramState, RFLearning: wire.RFLearning,
-	}, nil
 }
 
 func (client *remoteTUIIPC) Execute(ctx context.Context, command string) (string, error) {
@@ -683,6 +758,8 @@ func (client *remoteTUIIPC) liveSession(ctx context.Context) error {
 	ackTimer := time.NewTimer(3 * time.Second)
 	defer ackTimer.Stop()
 	acknowledgement := ackTimer.C
+	subscriptionAcknowledged := false
+	var pendingStateMessages [][]byte
 
 	reads := make(chan remoteLiveRead, 1)
 	go func() {
@@ -719,13 +796,16 @@ func (client *remoteTUIIPC) liveSession(ctx context.Context) error {
 			}
 			ackTimer.Reset(3 * time.Second)
 			acknowledgement = ackTimer.C
+			subscriptionAcknowledged = false
 		case <-acknowledgement:
 			return errors.New("remote live subscription acknowledgement timed out")
 		case read := <-reads:
 			if read.err != nil {
 				return read.err
 			}
-			acknowledged, err := client.consumeLiveMessage(read.data, pendingRequestID)
+			acknowledged, err := client.consumeOrBufferLiveMessage(
+				read.data, pendingRequestID, subscriptionAcknowledged, &pendingStateMessages,
+			)
 			if err != nil {
 				return err
 			}
@@ -737,19 +817,25 @@ func (client *remoteTUIIPC) liveSession(ctx context.Context) error {
 					}
 				}
 				acknowledgement = nil
-				client.publishLive(tui.RemoteLiveUpdate{
-					ConnectionChange: true, Connected: true,
-				})
 				var response struct {
 					Result struct {
-						LatestID uint64 `json:"latest_id"`
+						LatestID   uint64 `json:"latest_id"`
+						InstanceID string `json:"instance_id"`
 					} `json:"result"`
 				}
 				if json.Unmarshal(read.data, &response) == nil {
-					reset, resetErr := client.consumeLiveEpochReset(response.Result.LatestID)
+					reset, resetErr := client.consumeLiveEpochReset(
+						response.Result.LatestID, response.Result.InstanceID,
+					)
 					if resetErr != nil {
 						return resetErr
 					}
+					for _, pending := range pendingStateMessages {
+						if _, replayErr := client.consumeLiveMessage(pending, 0); replayErr != nil {
+							return replayErr
+						}
+					}
+					pendingStateMessages = pendingStateMessages[:0]
 					if reset {
 						pendingRequestID, err = writeSubscription(currentInterval)
 						if err != nil {
@@ -757,11 +843,35 @@ func (client *remoteTUIIPC) liveSession(ctx context.Context) error {
 						}
 						ackTimer.Reset(3 * time.Second)
 						acknowledgement = ackTimer.C
+						subscriptionAcknowledged = false
+						continue
 					}
 				}
+				subscriptionAcknowledged = true
+				client.publishLive(tui.RemoteLiveUpdate{
+					ConnectionChange: true, Connected: true,
+				})
 			}
 		}
 	}
+}
+
+func (client *remoteTUIIPC) consumeOrBufferLiveMessage(
+	data []byte,
+	pendingRequestID uint64,
+	subscriptionAcknowledged bool,
+	pendingStateMessages *[][]byte,
+) (bool, error) {
+	if !subscriptionAcknowledged {
+		var message remoteLiveMessage
+		if json.Unmarshal(data, &message) == nil && message.Method == "controller.state" {
+			if pendingStateMessages != nil {
+				*pendingStateMessages = append(*pendingStateMessages, append([]byte(nil), data...))
+			}
+			return false, nil
+		}
+	}
+	return client.consumeLiveMessage(data, pendingRequestID)
 }
 
 func (client *remoteTUIIPC) consumeLiveMessage(data []byte, pendingRequestID uint64) (bool, error) {
@@ -784,6 +894,7 @@ func (client *remoteTUIIPC) consumeLiveMessage(data []byte, pendingRequestID uin
 		var acknowledgement struct {
 			Subscribed bool   `json:"subscribed"`
 			LatestID   uint64 `json:"latest_id"`
+			InstanceID string `json:"instance_id"`
 		}
 		if json.Unmarshal(envelope.Result, &acknowledgement) != nil || !acknowledgement.Subscribed {
 			return false, errors.New("remote live subscription was not acknowledged")
@@ -831,17 +942,20 @@ func (client *remoteTUIIPC) consumeLiveMessage(data []byte, pendingRequestID uin
 		if err != nil {
 			return false, nil
 		}
+		revision, _ := strconv.ParseUint(event.Metadata["revision"], 10, 64)
 		client.publishLive(tui.RemoteLiveUpdate{
 			StatusLED: state, HaveStatusLED: true,
 			StatusLEDUpdated: event.Time, StatusLEDReceivedAt: now,
-			ConnectionChange: true, Connected: true,
+			StatusLEDOrderKnown: true, StatusLEDEpoch: client.currentLiveSessionEpoch(),
+			StatusLEDRevision: revision,
+			ConnectionChange:  true, Connected: true,
 		})
 	}
 	return false, nil
 }
 
-func (client *remoteTUIIPC) consumeLiveEpochReset(latestID uint64) (bool, error) {
-	if !client.acceptLiveAcknowledgement(latestID) {
+func (client *remoteTUIIPC) consumeLiveEpochReset(latestID uint64, instanceID string) (bool, error) {
+	if !client.acceptLiveAcknowledgement(latestID, instanceID) {
 		return false, nil
 	}
 	requestContext, cancel := context.WithTimeout(client.ctx, 3*time.Second)
@@ -856,7 +970,9 @@ func (client *remoteTUIIPC) consumeLiveEpochReset(latestID uint64) (bool, error)
 		StatusUpdated: snapshot.StatusUpdated, StatusReceivedAt: now,
 		StatusLED: snapshot.StatusLED, HaveStatusLED: snapshot.HaveStatusLED,
 		StatusLEDUpdated: snapshot.StatusLEDUpdated, StatusLEDReceivedAt: now,
-		ConnectionChange: true, Connected: true,
+		StatusLEDOrderKnown: true, StatusLEDEpoch: snapshot.StatusLEDEpoch,
+		StatusLEDRevision: snapshot.StatusLEDRevision,
+		ConnectionChange:  true, Connected: true,
 	})
 	return true, nil
 }
@@ -889,17 +1005,60 @@ func mergeRemoteLiveUpdate(pending *tui.RemoteLiveUpdate, update tui.RemoteLiveU
 		pending.StatusUpdated = update.StatusUpdated
 		pending.StatusReceivedAt = update.StatusReceivedAt
 	}
-	if update.HaveStatusLED {
-		pending.StatusLED = update.StatusLED
-		pending.HaveStatusLED = true
-		pending.StatusLEDUpdated = update.StatusLEDUpdated
-		pending.StatusLEDReceivedAt = update.StatusLEDReceivedAt
+	if update.HaveStatusLED || update.StatusLEDOrderKnown {
+		acceptLED := true
+		if pending.HaveStatusLED || pending.StatusLEDOrderKnown {
+			acceptLED = compareRemoteLEDOrder(
+				pending.StatusLEDEpoch, pending.StatusLEDRevision,
+				update.StatusLEDEpoch, update.StatusLEDRevision,
+			) >= 0
+		}
+		if acceptLED {
+			if update.HaveStatusLED {
+				pending.StatusLED = update.StatusLED
+				pending.HaveStatusLED = true
+				pending.StatusLEDUpdated = update.StatusLEDUpdated
+				pending.StatusLEDReceivedAt = update.StatusLEDReceivedAt
+			}
+			pending.StatusLEDOrderKnown = update.StatusLEDOrderKnown
+			pending.StatusLEDEpoch = update.StatusLEDEpoch
+			pending.StatusLEDRevision = update.StatusLEDRevision
+		}
 	}
 	if update.ConnectionChange {
 		pending.ConnectionChange = true
 		pending.Connected = update.Connected
 		pending.Error = update.Error
 	}
+}
+
+// compareRemoteLEDOrder returns -1 for older/equal, 0 when neither source has
+// an ordering marker, and 1 for a provably newer source frame. Keeping this
+// check in the capacity-one transport coalescer prevents a delayed WebSocket
+// frame from replacing a newer restart baseline before the model can see it.
+func compareRemoteLEDOrder(currentEpoch, currentRevision, incomingEpoch, incomingRevision uint64) int {
+	if currentEpoch == 0 && incomingEpoch == 0 {
+		if currentRevision == 0 && incomingRevision == 0 {
+			return 0
+		}
+		if incomingRevision > currentRevision {
+			return 1
+		}
+		return -1
+	}
+	if currentEpoch == 0 || incomingEpoch > currentEpoch {
+		return 1
+	}
+	if incomingEpoch == 0 || incomingEpoch < currentEpoch {
+		return -1
+	}
+	if currentRevision == 0 && incomingRevision == 0 {
+		return 0
+	}
+	if incomingRevision > currentRevision {
+		return 1
+	}
+	return -1
 }
 
 func (client *remoteTUIIPC) notifySession() {
