@@ -21,6 +21,15 @@ func launchUninstallHelper(_ context.Context, helperPath, planPath string) error
 	return command.Process.Release()
 }
 
+func launchActivationHelper(_ context.Context, helperPath, planPath string) error {
+	command := exec.Command(helperPath, activationHelperCommand, planPath)
+	command.Env = os.Environ()
+	if err := command.Start(); err != nil {
+		return err
+	}
+	return command.Process.Release()
+}
+
 func parentProcessIdentity(pid int) (string, error) { return "pid:" + strconv.Itoa(pid), nil }
 
 func waitForParentExit(ctx context.Context, pid int, expectedIdentity string, timeout time.Duration) error {

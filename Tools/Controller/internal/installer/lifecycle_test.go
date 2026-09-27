@@ -95,10 +95,10 @@ func TestInstallUpdateAndRepairAreAtomicAndIdempotent(t *testing.T) {
 	if err != nil || !updated.Changed || updated.State.PreviousSHA256 != manifestOne.RootSHA256 {
 		t.Fatalf("update=%#v err=%v", updated, err)
 	}
-	if samePath(updated.Executable, first.Executable) {
-		t.Fatal("content-addressed update replaced a mapped executable in place")
+	if !samePath(updated.Executable, first.Executable) || updated.State.ActiveSlot != canonicalDirectory || updated.State.Executable != "bin/controller.exe" {
+		t.Fatalf("canonical executable path drifted: first=%s updated=%#v", first.Executable, updated.State)
 	}
-	if _, err := os.Stat(filepath.Dir(first.Executable)); err != nil {
+	if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(updated.State.PreviousSlot))); err != nil {
 		t.Fatalf("rollback package was not retained: %v", err)
 	}
 
@@ -109,7 +109,7 @@ func TestInstallUpdateAndRepairAreAtomicAndIdempotent(t *testing.T) {
 		Root: root, PackageRoot: packageTwo,
 		ExpectedPackageSHA256: manifestTwo.RootSHA256,
 	})
-	if err != nil || !repaired.Changed || !repaired.Healthy || samePath(repaired.Executable, updated.Executable) {
+	if err != nil || !repaired.Changed || !repaired.Healthy || !samePath(repaired.Executable, updated.Executable) {
 		t.Fatalf("repair=%#v err=%v", repaired, err)
 	}
 	status, err := service.Status(ctx, root)
@@ -118,6 +118,98 @@ func TestInstallUpdateAndRepairAreAtomicAndIdempotent(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, transactionName)); !os.IsNotExist(err) {
 		t.Fatalf("committed transaction journal remains: %v", err)
+	}
+}
+
+func TestCanonicalBinPreservesUnknownContentAndOneRollback(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "installation")
+	service := testService(t, nil)
+	install := func(version string) LifecycleResult {
+		t.Helper()
+		packageRoot, manifest := writeTestPackage(t, version, version)
+		result, err := service.Install(context.Background(), ChangeRequest{Root: root, PackageRoot: packageRoot, ExpectedPackageSHA256: manifest.RootSHA256})
+		if err != nil || result.State == nil {
+			t.Fatalf("install %s=%#v err=%v", version, result, err)
+		}
+		return result
+	}
+	first := install("1.0.0")
+	unknown := filepath.Join(root, canonicalDirectory, "operator-notes.txt")
+	if err := os.WriteFile(unknown, []byte("preserve me"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	second := install("2.0.0")
+	third := install("3.0.0")
+	if first.Executable != second.Executable || second.Executable != third.Executable || third.State.ActiveSlot != canonicalDirectory {
+		t.Fatalf("canonical path drifted: %#v %#v %#v", first.State, second.State, third.State)
+	}
+	content, err := os.ReadFile(unknown)
+	if err != nil || string(content) != "preserve me" {
+		t.Fatalf("unknown canonical content was lost: %q %v", content, err)
+	}
+	entries, err := os.ReadDir(filepath.Join(root, packagesDirectory))
+	if err != nil || len(entries) != 1 || entries[0].Name() != third.State.PreviousSHA256 {
+		t.Fatalf("rollback set=%v state=%#v err=%v", entries, third.State, err)
+	}
+}
+
+func TestHealthyLegacyHashedActiveMigratesToCanonicalBin(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "installation")
+	service := testService(t, nil)
+	packageRoot, manifest := writeTestPackage(t, "1.0.0", "legacy")
+	installed, err := service.Install(context.Background(), ChangeRequest{Root: root, PackageRoot: packageRoot})
+	if err != nil || installed.State == nil {
+		t.Fatal(err)
+	}
+	legacyRelative := filepath.ToSlash(filepath.Join(packagesDirectory, manifest.RootSHA256))
+	legacy := filepath.Join(root, filepath.FromSlash(legacyRelative))
+	if err := os.MkdirAll(filepath.Dir(legacy), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(root, canonicalDirectory), legacy); err != nil {
+		t.Fatal(err)
+	}
+	state := *installed.State
+	state.ActiveSlot = legacyRelative
+	state.Executable = filepath.ToSlash(filepath.Join(legacyRelative, "controller.exe"))
+	state.PreviousSlot, state.PreviousSHA256 = "", ""
+	if err := writeJSONAtomic(filepath.Join(root, installationStateName), state, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	migrated, err := service.Install(context.Background(), ChangeRequest{Root: root, PackageRoot: packageRoot})
+	if err != nil || migrated.State == nil || migrated.State.ActiveSlot != canonicalDirectory || migrated.State.Executable != "bin/controller.exe" {
+		t.Fatalf("legacy migration=%#v err=%v", migrated, err)
+	}
+	if migrated.State.PreviousSlot != legacyRelative || migrated.State.PreviousSHA256 != manifest.RootSHA256 {
+		t.Fatalf("legacy rollback identity was not retained: %#v", migrated.State)
+	}
+}
+
+func TestCanonicalRunningHostSchedulesVerifiedExternalActivationHelper(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "installation")
+	service := testService(t, nil)
+	packageRoot, _ := writeTestPackage(t, "1.0.0", "helper")
+	installed, err := service.Install(context.Background(), ChangeRequest{Root: root, PackageRoot: packageRoot})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.CurrentExecutable = installed.Executable
+	original := startActivationHelper
+	defer func() { startActivationHelper = original }()
+	var launchedHelper, launchedPlan string
+	startActivationHelper = func(_ context.Context, helper, plan string) error {
+		launchedHelper, launchedPlan = helper, plan
+		return nil
+	}
+	plan, err := service.PrepareExternalActivation(context.Background(), ChangeRequest{Root: root, PackageRoot: packageRoot}, true)
+	if err != nil || launchedHelper != plan.HelperPath || launchedPlan != plan.PlanPath {
+		t.Fatalf("external activation plan=%#v helper=%q/%q err=%v", plan, launchedHelper, launchedPlan, err)
+	}
+	if _, err := os.Stat(plan.HelperPath); err != nil {
+		t.Fatalf("verified helper copy missing: %v", err)
+	}
+	if err := removeTreeSecure(filepath.Dir(plan.HelperPath)); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -184,8 +276,8 @@ func TestDesktopFailureRetainsJournalAndRollsForwardOnRetry(t *testing.T) {
 	if _, err := service.Install(ctx, ChangeRequest{Root: root, PackageRoot: packageTwo}); err == nil {
 		t.Fatal("desktop activation failure was ignored")
 	}
-	if len(desktop.remove) != 1 {
-		t.Fatalf("prior desktop activation was not cleaned up: %#v", desktop.remove)
+	if len(desktop.remove) != 0 {
+		t.Fatalf("stable canonical desktop target was unnecessarily removed: %#v", desktop.remove)
 	}
 	if _, err := os.Stat(filepath.Join(root, transactionName)); err != nil {
 		t.Fatalf("failed desktop activation did not retain its journal: %v", err)
@@ -204,7 +296,7 @@ func TestDesktopFailureRetainsJournalAndRollsForwardOnRetry(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, transactionName)); !os.IsNotExist(err) {
 		t.Fatalf("successful recovery retained its journal: %v", err)
 	}
-	if len(desktop.remove) != 3 || len(desktop.ensure) != 4 {
+	if len(desktop.remove) != 0 || len(desktop.ensure) != 4 {
 		t.Fatalf("desktop transition was not retried idempotently: %#v", desktop)
 	}
 }

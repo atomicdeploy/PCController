@@ -24,6 +24,16 @@ func launchUninstallHelper(_ context.Context, helperPath, planPath string) error
 	return command.Process.Release()
 }
 
+func launchActivationHelper(_ context.Context, helperPath, planPath string) error {
+	command := exec.Command(helperPath, activationHelperCommand, planPath)
+	command.Env = os.Environ()
+	command.SysProcAttr = &windows.SysProcAttr{CreationFlags: windows.CREATE_NO_WINDOW}
+	if err := command.Start(); err != nil {
+		return err
+	}
+	return command.Process.Release()
+}
+
 func parentProcessIdentity(pid int) (string, error) {
 	handle, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
 	if err != nil {

@@ -217,9 +217,10 @@ foreign registrations or shortcuts:
 Windows packages include `installation-package.json`, a deterministic inventory
 that binds every installable file to its size and SHA-256, the exact host
 manifest, source identity, target architecture, executable, embedded WebUI, and
-verified Win32 resources. Installation copies only inventoried files into a
-content-addressed per-user slot; it never trusts an archive filename or loose
-shadow executable.
+verified Win32 resources. Installation publishes the active package at the
+stable `%LOCALAPPDATA%\Programs\PCController\bin` directory; it never trusts an
+archive filename or loose shadow executable. `packages/<digest>` contains only
+the single verified rollback package and is never an active launch target.
 
 From an extracted, verified package:
 
@@ -235,8 +236,12 @@ desktop enable and display-name changes journal both the prior and desired
 identity before touching native artifacts, then roll forward idempotently after
 an interruption; a failed cleanup or registration retains the journal for the
 next retry. A healthy repeated install or repair is a no-op; a damaged slot is
-rebuilt from the verified package without replacing a mapped executable in
-place. One exact prior slot is retained for rollback. The per-user root carries
+rebuilt from the verified package. If the canonical executable is running, a
+hash-bound external helper waits for that exact process to exit and rolls the
+durable directory-replacement journal forward. Healthy legacy hashed-slot
+installations migrate to `bin` on the next install or repair. Unknown files in
+`bin` are preserved while package-owned paths are replaced, and a damaged image
+is never promoted to rollback. One exact prior package is retained for rollback. The per-user root carries
 a product-and-user ownership marker, and lifecycle commands refuse a foreign or
 unmarked non-empty root.
 
