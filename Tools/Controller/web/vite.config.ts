@@ -84,6 +84,10 @@ export default defineConfig(() => {
 		__HOST_BUILD_TIME__: JSON.stringify(hostBuildTime),
   },
   base: '/',
+  // Managed worktrees may share node_modules with the canonical checkout.
+  // Keep disposable Vite state local so tests and previews never require a
+  // writable dependency junction.
+  cacheDir: resolve(webRoot, '.vite-cache'),
   build: {
     outDir: resolve(webRoot, '../internal/webui/dist'),
     emptyOutDir: true,
