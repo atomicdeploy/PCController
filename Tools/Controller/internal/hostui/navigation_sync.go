@@ -366,6 +366,10 @@ func (coordinator *NavigationCoordinator) Commit(command NavigationCommand, live
 			operation.page != command.Page {
 			return NavigationOutcome{}, errors.New("navigation operation ID was reused with a different page")
 		}
+		if operation.outcome.Epoch != group.epoch || operation.outcome.Revision != group.revision ||
+			operation.outcome.Page != group.page {
+			return NavigationOutcome{}, errors.New("navigation operation was superseded by a newer canonical revision")
+		}
 		return operation.outcome, nil
 	}
 	changed := group.page != command.Page
