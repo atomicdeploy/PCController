@@ -254,6 +254,12 @@ func isRegisteredCustomActionKind(kind string) bool {
 	return namespace != "app" && namespace != "controller" && kind != "command"
 }
 
+// IsRegisteredCustomActionKind reports whether kind uses the bounded,
+// non-reserved namespace accepted for explicitly advertised client actions.
+func IsRegisteredCustomActionKind(kind string) bool {
+	return isRegisteredCustomActionKind(kind)
+}
+
 func normalizeAppActionMetadata(values map[string]string) (map[string]string, error) {
 	if len(values) > 16 {
 		return nil, errors.New("app action metadata exceeds 16 entries")
