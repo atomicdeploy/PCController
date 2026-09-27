@@ -58,6 +58,47 @@ func TestPackageInventoryBindsHostExecutableAndResources(t *testing.T) {
 	}
 }
 
+func TestPackageInventoryAcceptsDeclaredBrandedExecutable(t *testing.T) {
+	root := t.TempDir()
+	const executableName = "workshop-host.exe"
+	const productName = "Workshop Control Suite"
+	const version = "2.4.6"
+	const buildTime = "2026-08-02T12:34:56Z"
+	executablePath := filepath.Join(root, executableName)
+	if err := os.WriteFile(executablePath, minimalBrandedResourcePE(version, testSourceSHA, buildTime, productName, executableName, "brand"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	executableSHA, executableBytes, err := digestFile(executablePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	host := map[string]any{
+		"format": hostManifestFormat,
+		"target": map[string]any{"platform": "windows", "architecture": "amd64"},
+		"identity": map[string]any{
+			"version": version, "appName": "Workshop Console", "productName": productName,
+			"executableName": executableName, "tagline": "test package", "sourceSHA256": testSourceSHA,
+			"sourceFiles": 1, "buildTime": buildTime,
+		},
+		"validation": map[string]any{"windowsResources": "verified", "webUI": map[string]any{"status": "passed"}},
+		"artifacts":  []map[string]any{{"path": executableName, "bytes": executableBytes, "sha256": executableSHA}},
+	}
+	content, err := json.MarshalIndent(host, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "host-manifest.json"), append(content, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := GeneratePackageManifest(root, filepath.Join(root, PackageManifestName), ManifestOptions{Platform: "windows", Architecture: "amd64"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.ExecutablePath != executableName {
+		t.Fatalf("branded executable=%q", manifest.ExecutablePath)
+	}
+}
+
 func TestInstallUpdateAndRepairAreAtomicAndIdempotent(t *testing.T) {
 	ctx := context.Background()
 	root := filepath.Join(t.TempDir(), "installation")
@@ -773,6 +814,10 @@ func writeTestPackage(t *testing.T, version, marker string) (string, PackageMani
 }
 
 func minimalResourcePE(version, sourceSHA, buildTime, marker string) []byte {
+	return minimalBrandedResourcePE(version, sourceSHA, buildTime, productidentity.DefaultTitle, "controller.exe", marker)
+}
+
+func minimalBrandedResourcePE(version, sourceSHA, buildTime, productName, executableName, marker string) []byte {
 	const peOffset = 64
 	const optionalBytes = 240
 	const sectionTable = peOffset + 24 + optionalBytes
@@ -805,7 +850,7 @@ func minimalResourcePE(version, sourceSHA, buildTime, marker string) []byte {
 	binary.LittleEndian.PutUint16(resource[0x30+14:0x30+16], 1)
 	binary.LittleEndian.PutUint32(resource[0x30+16:0x30+20], 0x0409)
 	binary.LittleEndian.PutUint32(resource[0x30+20:0x30+24], 0x48)
-	payload := versionInfoPayload(version, sourceSHA, buildTime)
+	payload := versionInfoPayload(version, sourceSHA, buildTime, productName, executableName)
 	binary.LittleEndian.PutUint32(resource[0x48:0x4c], 0x1000+0x100)
 	binary.LittleEndian.PutUint32(resource[0x4c:0x50], uint32(len(payload)))
 	copy(resource[0x100:], payload)
@@ -813,9 +858,9 @@ func minimalResourcePE(version, sourceSHA, buildTime, marker string) []byte {
 	return content
 }
 
-func versionInfoPayload(version, sourceSHA, buildTime string) []byte {
-	table := versionContainer("040904B0", versionString("ProductName", productidentity.DefaultTitle), versionString("ProductVersion", version),
-		versionString("OriginalFilename", "controller.exe"), versionString("PrivateBuild", sourceSHA), versionString("SpecialBuild", buildTime))
+func versionInfoPayload(version, sourceSHA, buildTime, productName, executableName string) []byte {
+	table := versionContainer("040904B0", versionString("ProductName", productName), versionString("ProductVersion", version),
+		versionString("OriginalFilename", executableName), versionString("PrivateBuild", sourceSHA), versionString("SpecialBuild", buildTime))
 	strings := versionContainer("StringFileInfo", table)
 	fixed := make([]byte, 52)
 	return versionBlockBytes("VS_VERSION_INFO", 0, fixed, strings)
