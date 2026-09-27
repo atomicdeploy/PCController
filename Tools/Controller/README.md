@@ -250,7 +250,9 @@ unmarked non-empty root.
 Uninstall removes only installer-owned `bin`, package, staging, state, marker,
 and lock paths. It preserves the canonical source tree, coordination evidence,
 recovery quarantine, configuration, board backups, downloaded tools, logs, and
-host state. Purging user data is a separate destructive choice that requires both
+host state. When such canonical-root content remains, its ownership marker is
+retained so a later verified reinstall does not need to claim an unmarked tree.
+Purging user data is a separate destructive choice that requires both
 flags and the exact confirmation shown by `controller help`:
 
 ```console

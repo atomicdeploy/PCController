@@ -233,6 +233,28 @@ func TestCanonicalRunningHostSchedulesVerifiedExternalActivationHelper(t *testin
 	}
 }
 
+func TestRunningCanonicalInstallStopsBeforeDirectoryRename(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "installation")
+	service := testService(t, nil)
+	oldPackage, oldManifest := writeTestPackage(t, "1.0.0", "running-old")
+	installed, err := service.Install(context.Background(), ChangeRequest{Root: root, PackageRoot: oldPackage})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.CurrentExecutable = installed.Executable
+	newPackage, _ := writeTestPackage(t, "2.0.0", "running-new")
+	if _, err := service.Install(context.Background(), ChangeRequest{Root: root, PackageRoot: newPackage}); !errors.Is(err, ErrExternalActivationRequired) {
+		t.Fatalf("running canonical install error=%v", err)
+	}
+	if err := service.verifySlot(root, canonicalDirectory, oldManifest.RootSHA256); err != nil {
+		t.Fatalf("canonical bin changed before helper: %v", err)
+	}
+	retired, err := filepath.Glob(filepath.Join(root, stagingDirectory, "retired-*"))
+	if err != nil || len(retired) != 0 {
+		t.Fatalf("canonical directory was retired before helper: %v err=%v", retired, err)
+	}
+}
+
 func TestExternalActivationHelperRejectsTamperedCopy(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "installation")
 	service := testService(t, nil)
@@ -811,6 +833,12 @@ func TestUninstallPreservesDataUnlessSeparatelyConfirmed(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, canonicalDirectory)); !os.IsNotExist(err) {
 		t.Fatalf("uninstall retained installer-owned bin: %v", err)
 	}
+	if reinstalled, err := service.Install(ctx, ChangeRequest{Root: root, PackageRoot: packageRoot}); err != nil || !reinstalled.Healthy {
+		t.Fatalf("reinstall beside preserved source=%#v err=%v", reinstalled, err)
+	}
+	if content, err := os.ReadFile(preservedSource); err != nil || string(content) != "canonical source" {
+		t.Fatalf("reinstall changed preserved source: %q %v", content, err)
+	}
 
 	root = filepath.Join(t.TempDir(), "installation")
 	if _, err := service.Install(ctx, ChangeRequest{Root: root, PackageRoot: packageRoot}); err != nil {
@@ -849,6 +877,46 @@ func TestUninstallPreservesDataUnlessSeparatelyConfirmed(t *testing.T) {
 	}
 	if _, err := os.Stat(sibling); err != nil {
 		t.Fatalf("confirmed purge removed a repository sibling: %v", err)
+	}
+}
+
+func TestDirectUninstallQuarantinesUnknownBinContent(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "installation")
+	packageRoot, _ := writeTestPackage(t, "1.0.0", "uninstall-quarantine")
+	service := testService(t, nil)
+	if _, err := service.Install(context.Background(), ChangeRequest{Root: root, PackageRoot: packageRoot}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, canonicalDirectory, "operator.dll"), []byte("unknown"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Uninstall(context.Background(), UninstallRequest{Root: root}); err != nil {
+		t.Fatal(err)
+	}
+	matches, err := filepath.Glob(filepath.Join(root, "recovery-quarantine", "installer-*", "operator.dll"))
+	if err != nil || len(matches) != 1 {
+		t.Fatalf("uninstall quarantine=%v err=%v", matches, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, canonicalDirectory)); !os.IsNotExist(err) {
+		t.Fatalf("uninstall retained active bin: %v", err)
+	}
+}
+
+func TestUninstallMetadataReadFailureRetainsOwnershipMarker(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "installation")
+	packageRoot, _ := writeTestPackage(t, "1.0.0", "uninstall-metadata")
+	service := testService(t, nil)
+	if _, err := service.Install(context.Background(), ChangeRequest{Root: root, PackageRoot: packageRoot}); err != nil {
+		t.Fatal(err)
+	}
+	original := readInstallationRoot
+	defer func() { readInstallationRoot = original }()
+	readInstallationRoot = func(string) ([]os.DirEntry, error) { return nil, errors.New("injected metadata failure") }
+	if _, err := service.Uninstall(context.Background(), UninstallRequest{Root: root}); err == nil || !strings.Contains(err.Error(), "injected metadata failure") {
+		t.Fatalf("metadata failure error=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ownerMarkerName)); err != nil {
+		t.Fatalf("metadata failure removed ownership marker: %v", err)
 	}
 }
 

@@ -111,6 +111,8 @@ type Service struct {
 	VerifyExecutable  packageVerifier
 }
 
+var readInstallationRoot = os.ReadDir
+
 type ChangeRequest struct {
 	Root                  string
 	PackageRoot           string
@@ -506,8 +508,12 @@ func (service *Service) Uninstall(ctx context.Context, request UninstallRequest)
 	if exists && state.OwnerID != service.OwnerID {
 		return result, ErrOwnershipMismatch
 	}
+	uninstallID, err := transactionID()
+	if err != nil {
+		return result, err
+	}
 	journal := transactionJournal{
-		Format: transactionFormat, ID: "uninstall", Operation: "uninstall",
+		Format: transactionFormat, ID: uninstallID, Operation: "uninstall",
 		Phase: "uninstall-prepared", UpdatedAt: service.now(),
 	}
 	if exists {
@@ -516,6 +522,16 @@ func (service *Service) Uninstall(ctx context.Context, request UninstallRequest)
 	}
 	if err := writeJSONAtomic(filepath.Join(root, transactionName), journal, 0o600); err != nil {
 		return result, err
+	}
+	quarantine, err := service.quarantineUnknownCanonicalContent(root, uninstallID)
+	if err != nil {
+		return result, fmt.Errorf("quarantine unknown canonical content before uninstall: %w", err)
+	}
+	if quarantine != "" {
+		journal.Quarantine, journal.UpdatedAt = quarantine, service.now()
+		if err := writeJSONAtomic(filepath.Join(root, transactionName), journal, 0o600); err != nil {
+			return result, err
+		}
 	}
 	if exists && state.DesktopManaged {
 		if service.Desktop == nil {
@@ -563,7 +579,7 @@ func removeInstallerOwnedPaths(root string) (bool, error) {
 		}
 		changed = true
 	}
-	for _, name := range []string{installationStateName, transactionName, ownerMarkerName, lockName} {
+	for _, name := range []string{installationStateName, transactionName, lockName} {
 		target := filepath.Join(root, name)
 		if err := pathguard.ValidateComponents(target, true); err != nil {
 			return changed, err
@@ -574,8 +590,22 @@ func removeInstallerOwnedPaths(root string) (bool, error) {
 			return changed, fmt.Errorf("remove installer-owned %s: %w", name, err)
 		}
 	}
-	entries, err := os.ReadDir(root)
-	if err == nil && len(entries) == 0 {
+	entries, err := readInstallationRoot(root)
+	if err != nil {
+		return changed, err
+	}
+	preserved := 0
+	for _, entry := range entries {
+		if entry.Name() != ownerMarkerName {
+			preserved++
+		}
+	}
+	if preserved == 0 {
+		if err := os.Remove(filepath.Join(root, ownerMarkerName)); err == nil {
+			changed = true
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return changed, err
+		}
 		if err := os.Remove(root); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return changed, err
 		}
