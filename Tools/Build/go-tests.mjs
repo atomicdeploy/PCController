@@ -18,7 +18,7 @@ import {
 	statSync,
 	writeFileSync
 } from 'node:fs'
-import { basename, dirname, extname, join, relative, resolve } from 'node:path'
+import { basename, dirname, extname, join, relative, resolve, win32 as windowsPath } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { loadProjectEnv } from './env.mjs'
 
@@ -26,14 +26,28 @@ loadProjectEnv()
 
 const SCRIPT = fileURLToPath(import.meta.url)
 const DEFAULT_MODULE = resolve(dirname(SCRIPT), '..', 'Controller')
-const DEFAULT_OUTPUT = process.platform === 'win32' && process.env.LOCALAPPDATA
-	? resolve(process.env.LOCALAPPDATA, 'PCController', 'test-programs', 'go')
-	: resolve(dirname(SCRIPT), '..', '..', '.build', 'tests', 'go')
+const DEFAULT_NON_WINDOWS_OUTPUT = resolve(dirname(SCRIPT), '..', '..', '.build', 'tests', 'go')
+
+export function stableTestOutput(requested, platform = process.platform, environment = process.env) {
+	if (platform !== 'win32') return requested ? resolve(requested) : DEFAULT_NON_WINDOWS_OUTPUT
+	if (!environment.LOCALAPPDATA) {
+		throw new Error('LOCALAPPDATA is required for the canonical Windows Go test executable path')
+	}
+	const canonical = windowsPath.resolve(
+		environment.LOCALAPPDATA, 'PCController', 'test-programs', 'go'
+	)
+	if (requested && windowsPath.resolve(requested).toLowerCase() !== canonical.toLowerCase()) {
+		throw new Error(
+			`Windows Go test output is fixed at ${canonical}; per-task or per-worktree output paths are forbidden because they create new Windows Firewall identities`
+		)
+	}
+	return canonical
+}
 
 function parseArguments(argv) {
 	const options = {
 		module: DEFAULT_MODULE,
-		output: DEFAULT_OUTPUT,
+		output: undefined,
 		go: 'go',
 		retest: false,
 		dryRun: false,
@@ -66,7 +80,7 @@ function usage() {
 Usage: node Tools/Build/go-tests.mjs [options]
 
   --module DIR   Go module root (default: Tools/Controller)
-  --output DIR   Stable test executable/cache directory
+	  --output DIR   Test executable/cache directory (must be the canonical machine path on Windows)
   --go PATH      Go executable override
   --retest       Re-run unchanged binaries without rebuilding them
   --dry-run      Show the stable plan without compiling or running tests`
@@ -228,6 +242,7 @@ export function createStableTestPlan(packages, output, platform = process.platfo
 
 export function main(argv = process.argv.slice(2), env = process.env) {
 	const options = parseArguments(argv)
+	options.output = stableTestOutput(options.output, process.platform, env)
 	if (options.help) {
 		process.stdout.write(`${usage()}\n`)
 		return 0
