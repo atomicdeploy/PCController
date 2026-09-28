@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -41,6 +42,31 @@ func TestStoreContentAddressesAndDeduplicatesFirmware(t *testing.T) {
 	}
 	if first.SHA256 != second.SHA256 {
 		t.Fatalf("same content produced %s and %s", first.SHA256, second.SHA256)
+	}
+	metadataPath, err := metadataRelativePath(KindFirmware, first.SHA256)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{filepath.Join(store.Root(), metadataPath), filepath.Join(store.Root(), "current.json")} {
+		content, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(content, &fields); err != nil {
+			t.Fatal(err)
+		}
+		if _, exists := fields["schema"]; exists {
+			t.Fatalf("artifact state retained a generation selector in %s", path)
+		}
+		fields["future_optional"] = json.RawMessage(`true`)
+		content, err = json.Marshal(fields)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, content, 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
 	entries, err := os.ReadDir(filepath.Join(store.blobs, first.SHA256[:2]))
 	if err != nil {
@@ -99,6 +125,36 @@ func TestStoreEmbeddedDefaultIdentitySurvivesDuplicateUpload(t *testing.T) {
 	if uploaded.Name != "default-eeprom.hex" || stored.Name != "default-eeprom.hex" ||
 		stored.Source != "embedded" || !stored.Embedded {
 		t.Fatalf("embedded default identity drifted: uploaded=%#v stored=%#v", uploaded, stored)
+	}
+}
+
+func TestStoreRejectsMalformedCurrentStateWithoutOverwriting(t *testing.T) {
+	store := newTestStore(t)
+	descriptor, err := store.Put(strings.NewReader(validIntelHEX), PutOptions{
+		Kind: KindFirmware, Name: "firmware.hex", Source: "test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(store.Root(), "current.json")
+	for _, content := range []string{
+		`{}`,
+		`{"kinds":{"firmware":"invalid"}}`,
+		`{"kinds":{"unsupported":"` + descriptor.SHA256 + `"}}`,
+	} {
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.Current(KindFirmware); err == nil {
+			t.Fatalf("malformed current state was read: %s", content)
+		}
+		if err := store.SetCurrent(KindFirmware, descriptor.SHA256); err == nil {
+			t.Fatalf("malformed current state was overwritten: %s", content)
+		}
+		actual, err := os.ReadFile(path)
+		if err != nil || string(actual) != content {
+			t.Fatalf("malformed current state changed: %q, %v", actual, err)
+		}
 	}
 }
 

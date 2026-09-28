@@ -24,7 +24,6 @@ import (
 
 const (
 	Format           = "pccontroller.host-diagnostic-snapshot"
-	Schema           = 2
 	RecentEventLimit = 16
 	maxSnapshotBytes = 1024 * 1024
 )
@@ -251,7 +250,6 @@ type Issue struct {
 // EEPROM image. Settings is only the last board-reported decoded live value.
 type Document struct {
 	Format                 string                `json:"format"`
-	Schema                 int                   `json:"schema"`
 	CapturedAt             time.Time             `json:"captured_at"`
 	StorageClass           string                `json:"storage_class"`
 	ContainsHostConfig     bool                  `json:"contains_host_config"`
@@ -410,7 +408,7 @@ func BuildWithOperationalContext(
 	}
 	host = normalizedHostIdentity(host)
 	document := Document{
-		Format: Format, Schema: Schema, CapturedAt: capturedAt,
+		Format: Format, CapturedAt: capturedAt,
 		StorageClass:       "host-diagnostic-cache",
 		ContainsHostConfig: false, ContainsMCUEEPROMImage: false,
 		Host: host, Errors: []Issue{}, Warnings: []Issue{},
@@ -554,7 +552,7 @@ type RecoveryDiagnosticInput struct {
 	WriteCompletionProven bool                  `json:"write_completion_proven"`
 }
 
-// ConsumeRecoveryDiagnosticSnapshot validates the stored schema and returns a
+// ConsumeRecoveryDiagnosticSnapshot validates the stored diagnostic and returns a
 // safe advisory input. The rolling snapshot remains intact for later audit.
 func ConsumeRecoveryDiagnosticSnapshot(path string) (RecoveryDiagnosticInput, error) {
 	stored, err := Read(path)
@@ -602,7 +600,6 @@ func Read(path string) (Stored, error) {
 	}
 	defer file.Close()
 	decoder := json.NewDecoder(bufio.NewReader(io.LimitReader(file, maxSnapshotBytes+1)))
-	decoder.DisallowUnknownFields()
 	var document Document
 	if err := decoder.Decode(&document); err != nil {
 		return Stored{}, fmt.Errorf("decode session snapshot: %w", err)
@@ -614,7 +611,7 @@ func Read(path string) (Stored, error) {
 		}
 		return Stored{}, fmt.Errorf("decode session snapshot trailing data: %w", err)
 	}
-	if document.Format != Format || document.Schema != Schema || document.CapturedAt.IsZero() {
+	if document.Format != Format || document.CapturedAt.IsZero() {
 		return Stored{}, errors.New("session snapshot identity or timestamp is invalid")
 	}
 	if document.StorageClass != "host-diagnostic-cache" ||
