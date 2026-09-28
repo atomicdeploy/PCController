@@ -25,12 +25,14 @@ func currentHelloPayload(capabilities uint32) []byte {
 }
 
 type fakePort struct {
-	mu      sync.Mutex
-	reads   chan []byte
-	closed  chan struct{}
-	onWrite func([]byte)
-	dtr     []bool
-	rts     []bool
+	mu                 sync.Mutex
+	reads              chan []byte
+	closed             chan struct{}
+	onWrite            func([]byte)
+	onSetReadTimeout   func(time.Duration) error
+	onResetInputBuffer func() error
+	dtr                []bool
+	rts                []bool
 }
 
 type openAcquisitionPort struct {
@@ -80,8 +82,13 @@ func (port *fakePort) Write(data []byte) (int, error) {
 	}
 	return len(data), nil
 }
-func (port *fakePort) Drain() error             { return nil }
-func (port *fakePort) ResetInputBuffer() error  { return nil }
+func (port *fakePort) Drain() error { return nil }
+func (port *fakePort) ResetInputBuffer() error {
+	if port.onResetInputBuffer != nil {
+		return port.onResetInputBuffer()
+	}
+	return nil
+}
 func (port *fakePort) ResetOutputBuffer() error { return nil }
 func (port *fakePort) SetDTR(value bool) error {
 	port.mu.Lock()
@@ -98,7 +105,12 @@ func (port *fakePort) SetRTS(value bool) error {
 func (port *fakePort) GetModemStatusBits() (*serial.ModemStatusBits, error) {
 	return &serial.ModemStatusBits{}, nil
 }
-func (port *fakePort) SetReadTimeout(time.Duration) error { return nil }
+func (port *fakePort) SetReadTimeout(timeout time.Duration) error {
+	if port.onSetReadTimeout != nil {
+		return port.onSetReadTimeout(timeout)
+	}
+	return nil
+}
 func (port *fakePort) Close() error {
 	select {
 	case <-port.closed:
@@ -255,6 +267,53 @@ func TestOpenContextNormalSerialAcquisitionStartsSession(t *testing.T) {
 	defer port.closeMu.Unlock()
 	if port.closeCalls != 1 {
 		t.Fatalf("normal port close calls = %d, want 1", port.closeCalls)
+	}
+}
+
+func TestOpenContextCancellationDuringSerialConfigurationRetainsPort(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	port := newOpenAcquisitionPort()
+	port.onResetInputBuffer = func() error {
+		close(started)
+		<-release
+		return nil
+	}
+	originalOpen := openSerialPort
+	openSerialPort = func(string, *serial.Mode) (serial.Port, error) { return port, nil }
+	t.Cleanup(func() { openSerialPort = originalOpen })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	type openResult struct {
+		session *Session
+		err     error
+	}
+	opened := make(chan openResult, 1)
+	go func() {
+		session, err := OpenContext(ctx, "COM3", DefaultBaudRate)
+		opened <- openResult{session: session, err: err}
+	}()
+
+	<-started
+	cancel()
+	close(release)
+
+	select {
+	case result := <-opened:
+		if result.session == nil || !errors.Is(result.err, context.Canceled) {
+			t.Fatalf("OpenContext session=%p error=%v, want retained configured port and cancellation", result.session, result.err)
+		}
+		if err := result.session.Close(); err != nil {
+			t.Fatalf("Close configured canceled session: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("OpenContext did not return after cancellation during configuration")
+	}
+
+	port.closeMu.Lock()
+	defer port.closeMu.Unlock()
+	if port.closeCalls != 1 {
+		t.Fatalf("configured canceled port close calls = %d, want 1", port.closeCalls)
 	}
 }
 
