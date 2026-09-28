@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   TAB_CHANNEL_PROTOCOL,
-  TAB_CHANNEL_VERSION,
   createTabChannel,
   type BroadcastChannelPort,
   type TabChannelEnvelope,
@@ -74,7 +73,6 @@ function baseEnvelope(
 ): TabChannelEnvelope {
   return {
     protocol: TAB_CHANNEL_PROTOCOL,
-    version: TAB_CHANNEL_VERSION,
     origin: channel.origin,
     messageId: 'remote-message-0001',
     tabId: 'tab:remote-identity:1',
@@ -88,7 +86,7 @@ function baseEnvelope(
 describe('tab channel', () => {
   beforeEach(() => FakeBroadcastChannel.reset())
 
-  it('scopes its versioned transport to origin and gives every tab a distinct identity', () => {
+  it('scopes its living transport to origin and gives every tab a distinct identity', () => {
     const fixedFactory = () => 'fixed-identity'
     const first = createTabChannel({ origin: 'HTTPS://CONTROL.EXAMPLE/', BroadcastChannel: FakeBroadcastChannel, idFactory: fixedFactory })
     const second = createTabChannel({ origin: 'https://control.example', BroadcastChannel: FakeBroadcastChannel, idFactory: fixedFactory })
@@ -97,7 +95,8 @@ describe('tab channel', () => {
     expect(first.supported).toBe(true)
     expect(first.origin).toBe('https://control.example')
     expect(first.channelName).toBe(second.channelName)
-    expect(first.channelName).toContain(`:v${TAB_CHANNEL_VERSION}:`)
+    expect(first.channelName.startsWith(`${TAB_CHANNEL_PROTOCOL}:`)).toBe(true)
+    expect(first.channelName).not.toMatch(/:v\d+:/)
     expect(isolated.channelName).not.toBe(first.channelName)
     expect(first.tabId).not.toBe(second.tabId)
 
@@ -131,7 +130,6 @@ describe('tab channel', () => {
     ])
     expect(received[0]).toMatchObject({
       protocol: TAB_CHANNEL_PROTOCOL,
-      version: TAB_CHANNEL_VERSION,
       origin: 'https://control.example',
       tabId: sender.tabId,
     })
@@ -149,7 +147,7 @@ describe('tab channel', () => {
     receiver.close()
   })
 
-  it('rejects secrets, unknown fields, invalid values, and oversized content before posting', () => {
+  it('rejects secrets, invalid values, and oversized content before posting', () => {
     const channel = createTabChannel({ origin: 'https://control.example', BroadcastChannel: FakeBroadcastChannel, now: () => 1_000, idFactory: sequenceFactory('safe') })
 
     expect(channel.publishTerminal({ kind: 'command', text: 'Authorization: Bearer abcdefghijklmnop' })).toBeNull()
@@ -196,7 +194,7 @@ describe('tab channel', () => {
     receiver.close()
   })
 
-  it('ignores self, expired, future, wrong-origin, wrong-version, malformed, and duplicate envelopes', () => {
+  it('accepts additive fields but ignores self, expired, future, wrong-origin, malformed, and duplicate envelopes', () => {
     let now = 50_000
     const channel = createTabChannel({ origin: 'https://control.example', BroadcastChannel: FakeBroadcastChannel, now: () => now, idFactory: sequenceFactory('local') })
     const listener = vi.fn()
@@ -206,17 +204,25 @@ describe('tab channel', () => {
     FakeBroadcastChannel.inject(channel.channelName, baseEnvelope(channel, now, { expiresAt: now, messageId: 'expired-message-0001' }))
     FakeBroadcastChannel.inject(channel.channelName, baseEnvelope(channel, now, { sentAt: now + 300_001, expiresAt: now + 300_002, messageId: 'future-message-0001' }))
     FakeBroadcastChannel.inject(channel.channelName, baseEnvelope(channel, now, { origin: 'https://other.example', messageId: 'origin-message-0001' }))
-    FakeBroadcastChannel.inject(channel.channelName, { ...baseEnvelope(channel, now), version: 99, messageId: 'version-message-0001' })
     FakeBroadcastChannel.inject(channel.channelName, { hello: 'world' })
+
+    FakeBroadcastChannel.inject(channel.channelName, {
+      ...baseEnvelope(channel, now, { messageId: 'additive-message-0001' }),
+      futureEnvelopeField: true,
+      payload: { type: 'presence', state: 'active', page: 'dashboard', futurePayloadField: 'ignored' },
+    })
+    expect(listener).toHaveBeenCalledTimes(1)
+    expect(listener.mock.calls[0]?.[0]).not.toHaveProperty('futureEnvelopeField')
+    expect(listener.mock.calls[0]?.[0].payload).not.toHaveProperty('futurePayloadField')
 
     const valid = baseEnvelope(channel, now, { messageId: 'dedupe-message-0001' })
     FakeBroadcastChannel.inject(channel.channelName, valid)
     FakeBroadcastChannel.inject(channel.channelName, valid)
-    expect(listener).toHaveBeenCalledTimes(1)
+    expect(listener).toHaveBeenCalledTimes(2)
 
     now += 2_000
     FakeBroadcastChannel.inject(channel.channelName, baseEnvelope(channel, now, { messageId: 'fresh-message-0001' }))
-    expect(listener).toHaveBeenCalledTimes(2)
+    expect(listener).toHaveBeenCalledTimes(3)
     channel.close()
   })
 
