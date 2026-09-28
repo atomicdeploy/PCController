@@ -4618,7 +4618,6 @@
   },
   "x-body-limit-bytes": 1048576,
   "x-unsupported-transports": [
-    "versioned /api/v* paths",
     "built-in TLS termination",
     "Socket.IO long-polling",
     "Socket.IO namespaces",

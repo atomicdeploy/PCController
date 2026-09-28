@@ -476,7 +476,7 @@ func nextBoardConnection(t *testing.T, board *rawVirtualBoard) *rawBoardConnecti
 	}
 }
 
-func TestIndependentRawClientsInteroperateWithAllVersionedSocketSurfaces(t *testing.T) {
+func TestIndependentRawClientsInteroperateWithAllSocketSurfaces(t *testing.T) {
 	const token = "raw-wire-interoperability-token"
 	board := startRawVirtualBoard(t)
 	defer board.close()
