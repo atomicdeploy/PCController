@@ -61,6 +61,9 @@ type Session struct {
 	done    chan struct{}
 
 	closeMu     sync.Mutex
+	observerMu  sync.Mutex
+	beforeClose func()
+	closeSeen   bool
 	closingOnce sync.Once
 	doneOnce    sync.Once
 	closed      bool
@@ -480,6 +483,40 @@ func (s *Session) Done() <-chan struct{} {
 	return s.done
 }
 
+// SetBeforeClose installs a synchronous observer that runs exactly once before
+// closing is announced to pending requests. Higher layers use this boundary to
+// preserve live-operation evidence before request failures can unwind and clear
+// their state. Installing the observer after closing has begun invokes it
+// immediately, which keeps attachment races conservative and lossless.
+func (s *Session) SetBeforeClose(observer func()) {
+	if observer == nil {
+		return
+	}
+	s.observerMu.Lock()
+	if !s.closeSeen {
+		s.beforeClose = observer
+		s.observerMu.Unlock()
+		return
+	}
+	s.observerMu.Unlock()
+	observer()
+}
+
+func (s *Session) notifyBeforeClose() {
+	s.observerMu.Lock()
+	if s.closeSeen {
+		s.observerMu.Unlock()
+		return
+	}
+	s.closeSeen = true
+	observer := s.beforeClose
+	s.beforeClose = nil
+	s.observerMu.Unlock()
+	if observer != nil {
+		observer()
+	}
+}
+
 func (s *Session) Close() error {
 	if err := s.closeTransport(); err != nil {
 		// A Windows transport may retain a live handle and pending OVERLAPPED
@@ -498,6 +535,7 @@ func (s *Session) closeTransport() error {
 	if s.closed {
 		return nil
 	}
+	s.notifyBeforeClose()
 	s.closingOnce.Do(func() { close(s.closing) })
 	if s.pendingOpen != nil {
 		select {

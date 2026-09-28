@@ -321,6 +321,7 @@ func (runner *MacroRunner) startRecording(name, category, color, mode string) (M
 	runner.recordRelease = runner.runtime.ObserveCommands(runner.captureCommand)
 	state := runner.recording
 	runner.recordMu.Unlock()
+	runner.runtime.setActiveUseState(activeUseMacroRecording, true)
 	runner.runtime.PublishStructuredEvent(Event{
 		Kind: "macro.recording", Lifecycle: "started", State: "recording",
 		Text:     fmt.Sprintf("macro recording %d/%s started in %s mode", id, name, mode),
@@ -351,6 +352,7 @@ func (runner *MacroRunner) StopRecording(save bool) (appconfig.Macro, error) {
 	runner.recording.Active = false
 	runner.recording.Steps = len(macro.Steps)
 	runner.recordMu.Unlock()
+	runner.runtime.setActiveUseState(activeUseMacroRecording, false)
 
 	if save {
 		if err := runner.updateHostConfig(func(config *appconfig.Config) error {
@@ -367,6 +369,7 @@ func (runner *MacroRunner) StopRecording(save bool) (appconfig.Macro, error) {
 			runner.recording.LastError = "save failed; recording retained: " + err.Error()
 			runner.recordRelease = runner.runtime.ObserveCommands(runner.captureCommand)
 			runner.recordMu.Unlock()
+			runner.runtime.setActiveUseState(activeUseMacroRecording, true)
 			return macro, err
 		}
 	}
@@ -499,6 +502,7 @@ func (runner *MacroRunner) Start(ctx context.Context, reference string) (MacroSt
 		Lifecycle: "buffering",
 	}
 	runner.mu.Unlock()
+	runner.runtime.setActiveUseState(activeUseMacroPlayback, true)
 
 	lease, _, err := runner.runtime.AcquireProgramState(
 		fmt.Sprintf("macro:%d", macro.ID),
@@ -1113,6 +1117,7 @@ func (runner *MacroRunner) finishPlayback(
 	runner.done = nil
 	state := runner.state
 	runner.mu.Unlock()
+	runner.runtime.setActiveUseState(activeUseMacroPlayback, false)
 	runner.publishLifecycle(state.Lifecycle, state, err)
 }
 
@@ -1148,6 +1153,7 @@ func (runner *MacroRunner) finishHostPlayback(
 	runner.done = nil
 	state := runner.state
 	runner.mu.Unlock()
+	runner.runtime.setActiveUseState(activeUseMacroPlayback, false)
 	runner.publishLifecycle(state.Lifecycle, state, err)
 }
 
@@ -1159,6 +1165,7 @@ func (runner *MacroRunner) failStart(macro appconfig.Macro, err error) {
 	runner.state.LastError = err.Error()
 	state := runner.state
 	runner.mu.Unlock()
+	runner.runtime.setActiveUseState(activeUseMacroPlayback, false)
 	runner.publishLifecycle("failed", state, err)
 }
 

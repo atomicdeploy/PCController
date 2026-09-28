@@ -271,6 +271,31 @@ func TestDisconnectedHeaderReconnectsByKeyboardAndMouseWithBoundedRetry(t *testi
 	}
 }
 
+func TestHardwareProblemIsActionableInHeaderAndDashboard(t *testing.T) {
+	model := New(control.New(control.Options{}), shell.New(10))
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 160, Height: 38})
+	model = updated.(Model)
+	snapshot := model.snapshot()
+	snapshot.HardwareProblems = []ports.HardwareProblem{{
+		Code:   ports.HardwareProblemUSBDescriptorFailure,
+		Impact: ports.HardwareImpactActiveOutcomeUnknown,
+	}}
+
+	header := ansi.Strip(model.header(snapshot))
+	for _, expected := range []string{
+		"⚠ HARDWARE", "USB descriptor failed", "check controller cable",
+		"ACTIVE OPERATION OUTCOME UNKNOWN",
+	} {
+		if !strings.Contains(header, expected) {
+			t.Fatalf("hardware warning header missing %q:\n%s", expected, header)
+		}
+	}
+	dashboard := ansi.Strip(model.dashboardPage(snapshot))
+	if !strings.Contains(dashboard, "⚠ USB descriptor failed") {
+		t.Fatalf("dashboard did not surface the hardware warning:\n%s", dashboard)
+	}
+}
+
 func TestDisconnectedRemoteSnapshotDropsPeerOwnedValues(t *testing.T) {
 	snapshot := RichPreviewSnapshot()
 	snapshot.Connected = false

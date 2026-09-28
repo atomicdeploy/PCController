@@ -161,9 +161,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 	)
 	runtime.setMacroRunner(macroRunner)
 	outputs := options.Outputs
-	if outputs == nil {
-		outputs = NewOutputScheduler(runtime)
-	}
+	outputs = runtime.bindOutputScheduler(outputs)
 	// Keep the runtime-owned scheduler attached when a watched configuration
 	// resolver refreshes only file-backed options. Programming capture/restore
 	// must observe the same RGB/melody owner used by the live command engine.

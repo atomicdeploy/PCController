@@ -11,6 +11,10 @@ func enrichPlatform(values []Info) []Info {
 	return values
 }
 
+func listPlatformHardwareProblems(Filter) ([]HardwareProblem, error) {
+	return nil, nil
+}
+
 func watchPlatformChanges(ctx context.Context) (<-chan Change, error) {
 	changes := make(chan Change, 1)
 	go func() {
