@@ -507,6 +507,62 @@ func TestOpenAlreadyConnectedSelectorIsIdempotent(t *testing.T) {
 	_ = runtime.Close()
 }
 
+func TestOpenAuthenticationFailurePreservesActiveSession(t *testing.T) {
+	runtime := New(Options{})
+	port := newReconnectTestPort()
+	session := link.NewForPort("COM3", port)
+	runtime.attach(link.OpenResult{
+		Session: session,
+		Port:    ports.Info{Name: "COM3", IsUSB: true},
+		Hello:   native.Hello{Name: "PCController"},
+	})
+	authErr := errors.New("replacement HELLO timed out")
+	runtime.openAuthenticated = func(context.Context, ports.Info, link.DiscoveryOptions) (link.OpenResult, error) {
+		return link.OpenResult{}, authErr
+	}
+
+	if err := runtime.Open(context.Background(), "tcp://127.0.0.1:8787"); !errors.Is(err, authErr) {
+		t.Fatalf("replacement error = %v, want %v", err, authErr)
+	}
+	if current := runtime.currentSession(); current != session {
+		t.Fatalf("failed replacement changed active session to %p, want %p", current, session)
+	}
+	if snapshot := runtime.Snapshot(); !snapshot.Connected || snapshot.Port.Name != "COM3" {
+		t.Fatalf("failed replacement changed active snapshot: %#v", snapshot)
+	}
+	select {
+	case <-port.closed:
+		t.Fatal("failed replacement closed the healthy active transport")
+	default:
+	}
+	if err := runtime.Close(); err != nil {
+		t.Fatalf("close preserved active session: %v", err)
+	}
+}
+
+func TestApplyOptionsPreservesExplicitPause(t *testing.T) {
+	runtime := New(Options{})
+	runtime.mu.Lock()
+	runtime.paused = true
+	runtime.mu.Unlock()
+	openCalls := 0
+	runtime.autoOpen = func(context.Context, link.DiscoveryOptions) (link.OpenResult, error) {
+		openCalls++
+		return link.OpenResult{}, errors.New("unexpected reconnect")
+	}
+
+	if !runtime.ApplyOptions(Options{BaudRate: 57600}) {
+		t.Fatal("transport option update was not applied")
+	}
+	time.Sleep(25 * time.Millisecond)
+	if snapshot := runtime.Snapshot(); !snapshot.Paused || snapshot.ConnectionState != "disconnected" {
+		t.Fatalf("option update resumed an explicitly paused runtime: %#v", snapshot)
+	}
+	if openCalls != 0 {
+		t.Fatalf("option update launched %d reconnect attempts while paused", openCalls)
+	}
+}
+
 func TestCloseCancelsInflightReconnectAndReleasesTransport(t *testing.T) {
 	port := newReconnectTestPort()
 	opened := make(chan struct{})
