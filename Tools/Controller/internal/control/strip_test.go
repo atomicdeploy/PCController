@@ -2,9 +2,31 @@ package control
 
 import (
 	"context"
+	"errors"
+	"pccontroller.local/controller/internal/link"
+	"pccontroller.local/controller/internal/native"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestStripRetainedMacroErrorExplainsRecovery(t *testing.T) {
+	original := &link.RemoteError{RequestOpcode: native.OpAddressableLED, Code: native.ErrorBusy}
+	err := stripCommandError(original)
+	if !errors.Is(err, original) || !strings.Contains(err.Error(), "macro buffer clear") {
+		t.Fatalf("missing actionable recovery: %v", err)
+	}
+}
+
+func TestStripActivityDoesNotClearOtherOutputLanes(t *testing.T) {
+	runtime := New(Options{})
+	runtime.setOutputActivity("melody", true)
+	runtime.setOutputActivity("strip", true)
+	runtime.setOutputActivity("strip", false)
+	if runtime.activeUseMask.Load() != activeUseMelody {
+		t.Fatalf("strip changed melody activity: %d", runtime.activeUseMask.Load())
+	}
+}
 
 func (target *recordingOutputTarget) snapshotCommands() []recordedOutputCommand {
 	target.mu.Lock()

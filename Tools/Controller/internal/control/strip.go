@@ -4,13 +4,27 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
+	"pccontroller.local/controller/internal/link"
 	"pccontroller.local/controller/internal/native"
 )
+
+func stripCommandError(err error) error {
+	var remote *link.RemoteError
+	if errors.As(err, &remote) && remote.Code == native.ErrorBusy {
+		return fmt.Errorf("strip is blocked by an active or retained MCU macro; stop playback or save the recording, then run 'macro buffer clear': %w", err)
+	}
+	return err
+}
+
+func (outputs *OutputScheduler) sendStrip(ctx context.Context, payload []byte) error {
+	return stripCommandError(outputs.send(ctx, native.OpAddressableLED, payload))
+}
 
 func stripStreamCommand(ctx context.Context, outputs *OutputScheduler, args []string) (string, error) {
 	switch strings.ToLower(args[0]) {
@@ -45,7 +59,7 @@ func stripStreamCommand(ctx context.Context, outputs *OutputScheduler, args []st
 		outputs.stop("strip")
 		outputs.stripMu.Lock()
 		defer outputs.stripMu.Unlock()
-		if err := outputs.send(ctx, native.OpAddressableLED, payload); err != nil {
+		if err := outputs.sendStrip(ctx, payload); err != nil {
 			return "", err
 		}
 		return fmt.Sprintf("strip configured: %d LEDs", count), nil
@@ -93,7 +107,7 @@ func stripStreamCommand(ctx context.Context, outputs *OutputScheduler, args []st
 		// Validate configuration synchronously, so offline/old firmware never reports a started stream.
 		outputs.stop("strip")
 		outputs.stripMu.Lock()
-		err = outputs.send(ctx, native.OpAddressableLED, payload)
+		err = outputs.sendStrip(ctx, payload)
 		outputs.stripMu.Unlock()
 		if err != nil {
 			return "", err
@@ -125,7 +139,7 @@ func (outputs *OutputScheduler) sendStripFrame(ctx context.Context, rgb []byte) 
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := outputs.send(ctx, native.OpAddressableLED, payload); err != nil {
+		if err := outputs.sendStrip(ctx, payload); err != nil {
 			return err
 		}
 	}

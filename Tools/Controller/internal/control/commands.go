@@ -729,7 +729,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 					0, 0, 0, 0,
 				)
 				if err := command(ctx, runtime, native.OpAddressableLED, payload); err != nil {
-					return "", err
+					return "", stripCommandError(err)
 				}
 				return "addressable LED strip cleared", nil
 			}
@@ -786,7 +786,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 				return "", err
 			}
 			if err := command(ctx, runtime, native.OpAddressableLED, payload); err != nil {
-				return "", err
+				return "", stripCommandError(err)
 			}
 			if pixel == native.AddressableLEDFill {
 				return fmt.Sprintf(

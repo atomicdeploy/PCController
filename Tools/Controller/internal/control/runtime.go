@@ -274,6 +274,7 @@ const (
 	activeUseMacroRecording
 	activeUseMelody
 	activeUseStatusEffect
+	activeUseStrip
 )
 
 func New(options Options) *Runtime {
@@ -779,6 +780,9 @@ func (runtime *Runtime) setOutputActivity(kind string, active bool) {
 	bit := activeUseMelody
 	if kind == "effect" {
 		bit = activeUseStatusEffect
+	}
+	if kind == "strip" {
+		bit = activeUseStrip
 	}
 	runtime.setActiveUseState(bit, active)
 }
