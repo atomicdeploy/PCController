@@ -12,7 +12,7 @@ import (
 // The active executable must match current persisted state; an old running
 // process cannot use this to retarget current links back to an earlier build.
 func (service *Service) OwnsDesktopPredecessor(executable, candidate string) (bool, error) {
-	root, activeSlot, ok := desktopPackageSlot(executable)
+	root, activeSlot, ok := desktopActiveSlot(executable)
 	if !ok {
 		return false, nil
 	}
@@ -48,7 +48,19 @@ func (service *Service) OwnsDesktopPredecessor(executable, candidate string) (bo
 	return samePath(candidate, filepath.Join(previousSlot, filepath.FromSlash(manifest.ExecutablePath))), nil
 }
 
-// Current packages keep their executable directly in packages/<digest>/.
+func desktopActiveSlot(executable string) (root, slot string, ok bool) {
+	resolved, err := filepath.Abs(executable)
+	if err != nil {
+		return "", "", false
+	}
+	slot = filepath.Dir(resolved)
+	if strings.EqualFold(filepath.Base(slot), canonicalDirectory) {
+		return filepath.Dir(slot), slot, true
+	}
+	return desktopPackageSlot(executable)
+}
+
+// Rollback packages keep their executable directly in packages/<digest>/.
 // Do not broaden ownership to arbitrary sibling directories or path prefixes.
 func desktopPackageSlot(executable string) (root, slot string, ok bool) {
 	resolved, err := filepath.Abs(executable)
