@@ -37,6 +37,9 @@ func TestLifecycleAndInProcessRPC(t *testing.T) {
 		t.Fatalf("second Start error = %v, want ErrAlreadyStarted", err)
 	}
 	assertPing(t, host)
+	if endpoints := host.Endpoints(); endpoints == nil || len(endpoints) != 0 {
+		t.Fatalf("Endpoints() = %#v, want a non-nil empty collection", endpoints)
+	}
 	if client, err := host.Controller(); err != nil || client == nil {
 		t.Fatalf("Controller() = %v, %v", client, err)
 	}

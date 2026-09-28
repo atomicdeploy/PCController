@@ -634,7 +634,7 @@ func (host *Host) Endpoints() []rpc.Endpoint {
 	}
 	host.mu.RLock()
 	defer host.mu.RUnlock()
-	return append([]rpc.Endpoint(nil), host.endpoints...)
+	return append(make([]rpc.Endpoint, 0, len(host.endpoints)), host.endpoints...)
 }
 
 // Done closes after complete shutdown.
