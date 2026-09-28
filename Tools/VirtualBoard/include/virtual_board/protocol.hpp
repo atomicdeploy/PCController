@@ -8,7 +8,7 @@
 namespace pccontroller::wire {
 
 constexpr std::uint8_t kMagic = 0xA5;
-constexpr std::uint8_t kEnvelopeRevision = 1;
+constexpr std::uint8_t kReservedEnvelopeByte = 1;
 constexpr std::size_t kMaximumPayload = 48;
 constexpr std::size_t kRawOverhead = 6;
 constexpr std::size_t kMaximumRaw = kMaximumPayload + kRawOverhead;

@@ -84,10 +84,6 @@ const STALE_HOST_OUTPUTS = [
 	join(HOST_ROOT, 'controller.exe'),
 	join(HOST_ROOT, 'controller')
 ]
-const FIRMWARE_MANIFEST_FORMATS = Object.freeze([
-	'pccontroller-avr-firmware-manifest/v1',
-	'pccontroller-avr-firmware-manifest/v2'
-])
 const WINDOWS_GNU_PACKAGE_ID = 'BrechtSanders.WinLibs.POSIX.UCRT'
 const MINIMUM_NODE = [22, 12, 0]
 const MINIMUM_WEB_NODE = [22, 12, 0]
@@ -1760,7 +1756,7 @@ int main(void) {
   unsigned long long handle = strtoull(handle_field + 9, NULL, 10);
   release(response);
 
-  char request[160];
+  char request[512];
   snprintf(request, sizeof(request),
            "{\\\"operation\\\":\\\"build-smoke-invalid\\\",\\\"handle\\\":%llu}",
            handle);
@@ -1773,6 +1769,36 @@ int main(void) {
   response = invoke(request);
   if (!response || !strstr(response, "\\\"destroyed\\\":true")) return 15;
   release(response);
+
+  char host_create[] = "{\\\"operation\\\":\\\"host_create\\\",\\\"host_options\\\":{\\\"config_path\\\":\\\"pccontroller-smoke-config.json\\\",\\\"app_id\\\":\\\"pccontroller.build-smoke\\\",\\\"controller_options\\\":{},\\\"disable_auto_connect\\\":true,\\\"disable_native\\\":true}}";
+  response = invoke(host_create);
+  if (!response || !strstr(response, "\\\"ok\\\":true")) return 16;
+  handle_field = strstr(response, "\\\"handle\\\":");
+  if (!handle_field) return 17;
+  handle = strtoull(handle_field + 9, NULL, 10);
+  release(response);
+
+  snprintf(request, sizeof(request),
+           "{\\\"operation\\\":\\\"host_start\\\",\\\"handle\\\":%llu}", handle);
+  response = invoke(request);
+  if (!response || !strstr(response, "\\\"ok\\\":true")) return 18;
+  release(response);
+
+  snprintf(request, sizeof(request),
+           "{\\\"operation\\\":\\\"host_call\\\",\\\"handle\\\":%llu,\\\"method\\\":\\\"controller.ping\\\",\\\"params\\\":{}}",
+           handle);
+  response = invoke(request);
+  char *result_field = response ? strstr(response, "\\\"result\\\":{") : NULL;
+  if (!response || !strstr(response, "\\\"ok\\\":true") ||
+      !result_field || !strstr(result_field, "\\\"ok\\\":true")) return 19;
+  release(response);
+
+  snprintf(request, sizeof(request),
+           "{\\\"operation\\\":\\\"host_destroy\\\",\\\"handle\\\":%llu}", handle);
+  response = invoke(request);
+  if (!response || !strstr(response, "\\\"destroyed\\\":true")) return 20;
+  release(response);
+  remove("pccontroller-smoke-config.json");
   // The Go shared runtime owns process-lifetime state; leave it loaded.
   return 0;
 }
@@ -1803,7 +1829,7 @@ int main(void) {
   unsigned long long handle = strtoull(handle_field + 9, NULL, 10);
   release(response);
 
-  char request[160];
+  char request[512];
   snprintf(request, sizeof(request),
            "{\\"operation\\":\\"build-smoke-invalid\\",\\"handle\\":%llu}",
            handle);
@@ -1816,6 +1842,35 @@ int main(void) {
   response = invoke(request);
   if (!response || !strstr(response, "\\"destroyed\\":true")) return 15;
   release(response);
+  char host_create[] = "{\\"operation\\":\\"host_create\\",\\"host_options\\":{\\"config_path\\":\\"pccontroller-smoke-config.json\\",\\"app_id\\":\\"pccontroller.build-smoke\\",\\"controller_options\\":{},\\"disable_auto_connect\\":true,\\"disable_native\\":true}}";
+  response = invoke(host_create);
+  if (!response || !strstr(response, "\\"ok\\":true")) return 16;
+  handle_field = strstr(response, "\\"handle\\":");
+  if (!handle_field) return 17;
+  handle = strtoull(handle_field + 9, NULL, 10);
+  release(response);
+
+  snprintf(request, sizeof(request),
+           "{\\"operation\\":\\"host_start\\",\\"handle\\":%llu}", handle);
+  response = invoke(request);
+  if (!response || !strstr(response, "\\"ok\\":true")) return 18;
+  release(response);
+
+  snprintf(request, sizeof(request),
+           "{\\"operation\\":\\"host_call\\",\\"handle\\":%llu,\\"method\\":\\"controller.ping\\",\\"params\\":{}}",
+           handle);
+  response = invoke(request);
+  char *result_field = response ? strstr(response, "\\"result\\":{") : NULL;
+  if (!response || !strstr(response, "\\"ok\\":true") ||
+      !result_field || !strstr(result_field, "\\"ok\\":true")) return 19;
+  release(response);
+
+  snprintf(request, sizeof(request),
+           "{\\"operation\\":\\"host_destroy\\",\\"handle\\":%llu}", handle);
+  response = invoke(request);
+  if (!response || !strstr(response, "\\"destroyed\\":true")) return 20;
+  release(response);
+  remove("pccontroller-smoke-config.json");
   // The Go c-shared runtime owns process-lifetime state; do not dlclose it.
   return 0;
 }
@@ -2308,9 +2363,6 @@ function readFirmwareManifest() {
 	try { manifest = JSON.parse(readFileSync(path, 'utf8')) } catch (error) {
 		throw new BuildError(`decode firmware manifest: ${error.message}`)
 	}
-	if (!FIRMWARE_MANIFEST_FORMATS.includes(manifest.format)) {
-		throw new BuildError(`unexpected firmware manifest format: ${manifest.format}`)
-	}
 	let features
 	try {
 		features = normalizeFirmwareFeatures(manifest.source?.compileFeatures || [])
@@ -2319,12 +2371,6 @@ function readFirmwareManifest() {
 	}
 	if (JSON.stringify(features) !== JSON.stringify(manifest.source?.compileFeatures || [])) {
 		throw new BuildError('firmware manifest compile features must be unique and sorted canonically')
-	}
-	if (manifest.format.endsWith('/v1') && features.length !== 0) {
-		throw new BuildError('firmware manifest v1 cannot declare compile features')
-	}
-	if (manifest.format.endsWith('/v2') && features.length === 0) {
-		throw new BuildError('firmware manifest v2 requires at least one compile feature')
 	}
 	if (!Array.isArray(manifest.artifacts) || !manifest.artifacts.some(artifact => artifact.role === 'application')) {
 		throw new BuildError('firmware manifest has no canonical application artifact')

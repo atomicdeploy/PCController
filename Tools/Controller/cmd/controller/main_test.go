@@ -16,6 +16,7 @@ import (
 
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/artifacts"
+	"pccontroller.local/controller/internal/consolewindow"
 	"pccontroller.local/controller/internal/hostmenu"
 	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/productidentity"
@@ -462,6 +463,72 @@ func TestHelpAndVersion(t *testing.T) {
 	}
 }
 
+func TestInitialWebConnectionCannotBlockHostStartup(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	started := make(chan struct{})
+	done := startInitialWebConnection(ctx, func(connectContext context.Context, reason string) error {
+		if reason != "web host initial automatic connection" {
+			t.Errorf("reason=%q", reason)
+		}
+		close(started)
+		<-connectContext.Done()
+		return connectContext.Err()
+	}, func(error) {})
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("background connection did not start")
+	}
+	select {
+	case <-done:
+		t.Fatal("blocked connection unexpectedly completed")
+	default:
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("background connection did not honor cancellation")
+	}
+}
+
+func TestConfiguredConsoleTitleAndWebAnnouncementUseProductName(t *testing.T) {
+	original := setProcessConsoleTitle
+	t.Cleanup(func() { setProcessConsoleTitle = original })
+	var title string
+	setProcessConsoleTitle = func(value string) (consolewindow.Result, error) {
+		title = value
+		return consolewindow.Result{Applied: true}, nil
+	}
+	applyConfiguredConsoleTitle("Workshop Controller")
+	if title != "Workshop Controller" {
+		t.Fatalf("console title=%q", title)
+	}
+	var output bytes.Buffer
+	announceWebStartup(&output, "Workshop Controller", "http://127.0.0.1:8787/")
+	if got := output.String(); !strings.Contains(got, "Workshop Controller web app: http://127.0.0.1:8787/") {
+		t.Fatalf("startup output=%q", got)
+	}
+}
+
+func TestInitialWebConnectionReportsFailure(t *testing.T) {
+	want := errors.New("serial unavailable")
+	reported := make(chan error, 1)
+	done := startInitialWebConnection(context.Background(), func(context.Context, string) error {
+		return want
+	}, func(err error) { reported <- err })
+	<-done
+	select {
+	case got := <-reported:
+		if !errors.Is(got, want) {
+			t.Fatalf("reported error=%v", got)
+		}
+	default:
+		t.Fatal("connection failure was not reported")
+	}
+}
+
 func TestPersistedProductTitleAppearsInHelpAndVersion(t *testing.T) {
 	t.Setenv("APP_NAME", "")
 	path := filepath.Join(t.TempDir(), "config.json")
@@ -887,9 +954,12 @@ func TestStandaloneUSBaspRequiresSeparateApplicationLifecycleSelector(t *testing
 func TestProgramShellWordsPreserveBackupAndEEPROMIntent(t *testing.T) {
 	backup := programShellWords(programmer.Options{
 		Method: programmer.MethodUrclock, Operation: programmer.OperationBackup,
-		OutputPath: `C:\safe backups`,
+		OutputPath: `C:\safe backups`, ProgrammerTimeout: 45 * time.Second,
 	})
-	wantBackup := []string{"program", "backup", "urclock", `C:\safe backups`}
+	wantBackup := []string{
+		"program", "backup", "urclock", `C:\safe backups`,
+		"--programmer-timeout", "45s",
+	}
 	if !reflect.DeepEqual(backup, wantBackup) {
 		t.Fatalf("backup words = %#v, want %#v", backup, wantBackup)
 	}

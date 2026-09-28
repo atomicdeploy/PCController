@@ -171,6 +171,20 @@ export interface MacroSnapshot {
   recording: { active: boolean; name: string; mode: string; steps: number; last_error?: string }
 }
 
+export interface HardwareProblem {
+  code: string
+  severity: 'warning' | 'error' | string
+  impact?: string
+  os_problem_code?: number
+  device_id?: string
+  hardware_ids?: string[]
+  description?: string
+  class?: string
+  location?: string
+  location_paths?: string[]
+  observed_at: string
+}
+
 export interface Snapshot {
   connected: boolean
   paused: boolean
@@ -188,6 +202,7 @@ export interface Snapshot {
   program_state?: ProgramState
   rf_learning?: RFLearnState
   macros?: MacroSnapshot
+  hardware_problems?: HardwareProblem[]
   front_panel?: FrontPanelState
   have_front_panel?: boolean
   front_panel_updated?: string
@@ -506,6 +521,7 @@ export const emptySnapshot: Snapshot = {
   },
   have_status: false,
   have_settings: false,
+	hardware_problems: [],
 	illumination: {
 		available: false,
 		mode: 0,

@@ -15,8 +15,8 @@ import (
 func TestMacroHostMenuUsesSortedWatchedLibraryAndSharedCommandEngine(t *testing.T) {
 	config := appconfig.Defaults()
 	config.Macros = []appconfig.Macro{
-		{ID: 9, Name: "Long output demonstration"},
-		{ID: 2, Name: "Door cue"},
+		{ID: 9, Name: "Long output demonstration", Mode: "mcu"},
+		{ID: 2, Name: "Door cue", Mode: "mcu"},
 	}
 	path := filepath.Join(t.TempDir(), "controller.json")
 	if err := appconfig.Write(path, config); err != nil {

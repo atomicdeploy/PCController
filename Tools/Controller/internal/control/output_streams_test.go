@@ -19,11 +19,19 @@ type recordedOutputCommand struct {
 }
 
 type recordingOutputTarget struct {
-	mu       sync.Mutex
-	commands []recordedOutputCommand
-	events   []string
-	failAt   int
-	ackDelay time.Duration
+	mu              sync.Mutex
+	commands        []recordedOutputCommand
+	events          []string
+	failAt          int
+	ackDelay        time.Duration
+	noStatusEffects bool
+}
+
+func (target *recordingOutputTarget) Snapshot() Snapshot {
+	if target.noStatusEffects {
+		return Snapshot{}
+	}
+	return Snapshot{Hello: native.Hello{Capabilities: native.CapabilityStatusEffects}}
 }
 
 func (target *recordingOutputTarget) Command(
@@ -226,7 +234,7 @@ func TestMelodyZeroRepeatsUntilExplicitStop(t *testing.T) {
 	}
 }
 
-func TestBreatheEffectIsRateLimitedAndRestoresSteadyBase(t *testing.T) {
+func TestBreatheEffectUsesOneDescriptorAndRestoresSteadyBase(t *testing.T) {
 	target := &recordingOutputTarget{}
 	scheduler := NewOutputScheduler(target)
 	defer scheduler.Close()
@@ -236,7 +244,7 @@ func TestBreatheEffectIsRateLimitedAndRestoresSteadyBase(t *testing.T) {
 			Name: "test", Kind: "breathe",
 			Red: 10, Green: 20, Blue: 30,
 			Brightness: 100, MinBrightness: 10,
-			PeriodMS: 640, DurationMS: 220,
+			PeriodMS: 640, Repeats: 1,
 		},
 	)
 	if err != nil {
@@ -251,8 +259,8 @@ func TestBreatheEffectIsRateLimitedAndRestoresSteadyBase(t *testing.T) {
 		t.Fatal("effect did not complete")
 	}
 	commands := target.snapshot()
-	if len(commands) < 4 || len(commands) > 7 {
-		t.Fatalf("rate-limited effect emitted %d commands", len(commands))
+	if len(commands) != 2 || commands[0].opcode != native.OpStatusEffect {
+		t.Fatalf("effect did not use one native descriptor and restore: %#v", commands)
 	}
 	last := commands[len(commands)-1]
 	if last.opcode != native.OpStatusRGB ||
@@ -260,10 +268,20 @@ func TestBreatheEffectIsRateLimitedAndRestoresSteadyBase(t *testing.T) {
 		last.payload[3] != 100 {
 		t.Fatalf("final steady frame=% X", last.payload)
 	}
-	for index := 1; index < len(commands)-1; index++ {
-		if spacing := commands[index].at.Sub(commands[index-1].at); spacing < 45*time.Millisecond {
-			t.Fatalf("frames %d/%d are too close: %v", index-1, index, spacing)
-		}
+}
+
+func TestStatusEffectRequiresAdvertisedFirmwareCapability(t *testing.T) {
+	target := &recordingOutputTarget{noStatusEffects: true}
+	scheduler := NewOutputScheduler(target)
+	defer scheduler.Close()
+	_, err := scheduler.StartStatusEffect(context.Background(), appconfig.StatusLEDEffect{
+		Name: "pulse", Kind: "flash", Brightness: 100, PeriodMS: 640, Repeats: 1,
+	})
+	if err == nil || err.Error() != "connected firmware does not advertise status effects" {
+		t.Fatalf("missing capability error=%v", err)
+	}
+	if commands := target.snapshot(); len(commands) != 0 {
+		t.Fatalf("unsupported effect sent commands: %#v", commands)
 	}
 }
 
@@ -280,7 +298,7 @@ func TestStatusEffectRestoresNewestPolicyBase(t *testing.T) {
 			Name: "overlay", Kind: "breathe",
 			Red: 90, Green: 20, Blue: 200,
 			Brightness: 180, MinBrightness: 10,
-			PeriodMS: 640, DurationMS: 220,
+			PeriodMS: 640, Repeats: 1,
 		},
 	)
 	if err != nil {

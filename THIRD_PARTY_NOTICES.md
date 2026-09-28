@@ -76,7 +76,15 @@ the generated host binary; that generated directory is excluded from Git.
 
 The resolved module graph was audited in these license groups:
 
+`go.bug.st/serial` is resolved from the public
+[`DRSDavidSoft/go-serial`](https://github.com/DRSDavidSoft/go-serial) fork at
+merge commit `fa09c8b9a680de6b432bf437ed15092add910ae1`, based on upstream 1.8.0.
+The fork retains the upstream BSD-3-Clause license and adds Windows
+`CancelIoEx` lifecycle handling plus close-before-join, event-based completion
+for pending overlapped reads and writes.
+
 - MIT: `github.com/MakeNowJust/heredoc`,
+  `github.com/Microsoft/go-winio`,
   `github.com/aymanbagabas/go-osc52/v2`,
   `github.com/aymanbagabas/go-udiff`,
   `github.com/charmbracelet/bubbles`,

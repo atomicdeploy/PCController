@@ -502,7 +502,6 @@ func runMonitor(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 			if err := refresh(); err != nil {
 				fmt.Fprintln(stderr, "monitor:", err)
 				if !runtime.Snapshot().Connected {
-					runtime.ResumeAuto()
 					if reconnectErr := connectWithTimeout(ctx, runtime); reconnectErr != nil {
 						continue
 					}
@@ -517,7 +516,7 @@ func runMonitor(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 func connectWithTimeout(ctx context.Context, runtime *control.Runtime) error {
 	connectContext, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	return runtime.EnsureConnected(connectContext)
+	return runtime.Connect(connectContext)
 }
 
 func runIPC(args []string, stdout, stderr io.Writer, store *appconfig.Store) error {

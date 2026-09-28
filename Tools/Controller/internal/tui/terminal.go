@@ -82,7 +82,7 @@ func (model *Model) reportInstance() {
 
 func (model *Model) acceptNavigationAction(action hostui.AppAction) (string, bool) {
 	if model.navigationIdentity == nil {
-		return model.navigationCursor.Accept(action, model.navigationGroup)
+		return "", false
 	}
 	epoch, revision := model.navigationIdentity()
 	return model.navigationCursor.AcceptFor(action, model.navigationGroup, epoch, revision)

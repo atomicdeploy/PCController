@@ -33,6 +33,7 @@ import {
   Search,
   Settings,
   Sun,
+  TriangleAlert,
   Volume2,
   VolumeX,
   Wrench,
@@ -95,6 +96,7 @@ import { BuzzerPlaybackTimeline, type BuzzerPath } from './buzzer-routing'
 import { emptySnapshot } from './types'
 import type { SharedViewProps } from './views'
 import { sessionAuthenticationGuidanceRequired } from './authentication-guidance'
+import { hardwareProblemPresentation } from './hardware-problem'
 import {
   AppActionReceiptCache,
   acknowledgeWebAppAction,
@@ -1434,6 +1436,10 @@ export default function App() {
   }
 
   const PageView = pageViewFor(page)
+	const globalHardwareProblem = snapshot.hardware_problems?.[0]
+	const globalHardwareWarning = globalHardwareProblem
+		? hardwareProblemPresentation(globalHardwareProblem, appearance.locale)
+		: undefined
   const view = (
     <Suspense fallback={<section className="page-loading" role="status" aria-live="polite"><span className="spinner" />{appearance.locale === 'fa' ? 'در حال بارگیری…' : 'Loading page…'}</section>}>
       {page === 'settings'
@@ -1597,6 +1603,14 @@ export default function App() {
       </header>
 
       <main className="app-main">
+		{page !== 'dashboard' && globalHardwareProblem && globalHardwareWarning && <section className={`hardware-alert app-hardware-alert is-${globalHardwareProblem.severity}`} role="alert" aria-live="assertive">
+			<div className="hardware-alert__icon"><TriangleAlert size={24} aria-hidden="true" /></div>
+			<div className="hardware-alert__copy">
+				<strong>{globalHardwareWarning.title}</strong>
+				<p>{globalHardwareWarning.guidance}</p>
+				{globalHardwareWarning.impact && <p className="hardware-alert__impact">{globalHardwareWarning.impact}</p>}
+			</div>
+		</section>}
         <PageTransition pageKey={page}>{view}</PageTransition>
       </main>
 
