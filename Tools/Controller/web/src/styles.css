@@ -664,6 +664,13 @@ kbd { padding: 3px 6px; border: 1px solid var(--line-strong); border-bottom-colo
 .command-form { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 9px; align-items: center; padding: 8px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-deep); }
 .command-prompt { padding-inline-start: 5px; color: var(--accent); font: 700 13px var(--font-mono); }
 .command-form input { min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); font: 12px var(--font-mono); }
+.terminal-command-box { position: relative; min-width: 0; }
+.terminal-command-box > input { width: 100%; }
+.terminal-completions { position: absolute; z-index: 30; inset: calc(100% + 9px) 0 auto; display: grid; max-height: 250px; padding: 5px; overflow: auto; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface-solid); box-shadow: var(--shadow-tight); }
+.terminal-completions button { display: grid; grid-template-columns: minmax(72px, auto) minmax(0, 1fr); gap: 10px; align-items: baseline; padding: 8px 9px; border: 0; border-radius: 7px; background: transparent; color: var(--text); text-align: start; cursor: pointer; }
+.terminal-completions button:hover, .terminal-completions button[aria-selected="true"] { background: var(--accent-soft); }
+.terminal-completions strong { font: 700 10px var(--font-mono); }
+.terminal-completions small { overflow: hidden; color: var(--text-muted); font: 9px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
 .command-output, .diagnostic-output, .operation-output { min-height: 120px; max-height: 340px; margin: 10px 0; padding: 14px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--bg-deep) 90%, transparent); color: var(--text-soft); font: 10px/1.65 var(--font-mono); white-space: pre-wrap; overflow: auto; }
 .command-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .command-chips button, .diagnostic-picker button { padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-muted); color: var(--text-muted); font: 9px var(--font-mono); cursor: pointer; }
@@ -1907,7 +1914,7 @@ kbd { padding: 3px 6px; border: 1px solid var(--line-strong); border-bottom-colo
 .macro-library__monitor em { overflow: hidden; color: var(--text-muted); font: 8px var(--font-mono); font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
 .macro-library__monitor > .status-badge { align-self: center; }
 .macro-library__error { padding: 9px 11px; border: 1px solid color-mix(in srgb, var(--red) 35%, var(--line)); border-radius: 8px; background: var(--red-soft); color: var(--red); font-size: 9px; line-height: 1.5; }
-.macro-library__legacy { display: flex; justify-content: space-between; gap: 10px; align-items: center; padding: 9px 11px; border: 1px solid color-mix(in srgb, var(--amber) 30%, var(--line)); border-radius: 8px; background: var(--amber-soft); color: var(--text-soft); font-size: 9px; line-height: 1.5; }
+.macro-library__command-surface { display: flex; justify-content: space-between; gap: 10px; align-items: center; padding: 9px 11px; border: 1px solid color-mix(in srgb, var(--amber) 30%, var(--line)); border-radius: 8px; background: var(--amber-soft); color: var(--text-soft); font-size: 9px; line-height: 1.5; }
 .macro-library__workspace { display: grid; grid-template-columns: minmax(270px, .9fr) minmax(360px, 1.1fr); gap: 10px; }
 .macro-library__workspace > section,
 .macro-library__control-grid > section,
