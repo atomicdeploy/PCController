@@ -32,10 +32,6 @@ void clear();
 void show();
 bool setPixel(uint8_t index, const RgbColor &color);
 bool stagePixels(uint8_t index, const uint8_t *rgb, uint8_t length);
-#if defined(__GNUC__)
-__attribute__((noinline))
-#endif
-bool apply(const uint8_t *payload, uint8_t length);
 void fill(const RgbColor &color);
 void brightness(uint8_t value);
 uint8_t brightness();

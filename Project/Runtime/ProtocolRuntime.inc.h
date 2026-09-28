@@ -624,7 +624,30 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
       AddressableLeds::bindWorkspace(workspace);
       // 0xFE configures count; 0xFD stages RGB pixels; 0xFC commits once.
       // ACK each chunk before transmitting another: show masks UART IRQs.
-      if (!AddressableLeds::apply(payload, length)) goto badPayload;
+      if (length == 2 && payload[0] == 0xFE) {
+        if (!AddressableLeds::configure(payload[1])) goto badPayload;
+        goto acknowledged;
+      }
+      if (length == 1 && payload[0] == 0xFC) {
+        AddressableLeds::show();
+        goto acknowledged;
+      }
+      if (length >= 5 && payload[0] == 0xFD) {
+        if (!AddressableLeds::stagePixels(payload[1], payload + 2, length - 2)) goto badPayload;
+        goto acknowledged;
+      }
+      if (length != 5 ||
+          (payload[0] != 0xFF &&
+           payload[0] >= AddressableLeds::count())) {
+        goto badPayload;
+      }
+      const RgbColor color(payload[1], payload[2], payload[3]);
+      if (payload[0] == 0xFF) {
+        AddressableLeds::fill(color);
+      } else {
+        AddressableLeds::setPixel(payload[0], color);
+      }
+      AddressableLeds::show();
       goto acknowledged;
     }
 
