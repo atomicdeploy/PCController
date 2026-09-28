@@ -454,6 +454,58 @@ func TestOpenAlreadyConnectedSelectorIsIdempotent(t *testing.T) {
 	_ = runtime.Close()
 }
 
+func TestCloseCancelsInflightReconnectAndReleasesTransport(t *testing.T) {
+	port := newReconnectTestPort()
+	opened := make(chan struct{})
+	runtime := New(Options{})
+	observed := make(chan struct{}, 1)
+	runtime.SetDeviceObserver(func(ports.Info, native.Hello) { observed <- struct{}{} })
+	runtime.autoOpen = func(ctx context.Context, _ link.DiscoveryOptions) (link.OpenResult, error) {
+		session := link.NewForPort("COM3", port)
+		close(opened)
+		<-ctx.Done()
+		return link.OpenResult{
+			Session: session,
+			Port:    ports.Info{Name: "COM3", IsUSB: true},
+			Hello:   native.Hello{Name: "PCController"},
+		}, nil
+	}
+
+	connectDone := make(chan error, 1)
+	go func() { connectDone <- runtime.EnsureConnected(context.Background()) }()
+	select {
+	case <-opened:
+	case <-time.After(time.Second):
+		t.Fatal("reconnect did not acquire the transport")
+	}
+
+	if err := runtime.Close(); err != nil {
+		t.Fatalf("close failed: %v", err)
+	}
+	select {
+	case <-port.closed:
+	default:
+		t.Fatal("close returned before the reconnect transport was released")
+	}
+	select {
+	case err := <-connectDone:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("reconnect error = %v, want cancellation", err)
+		}
+	default:
+		t.Fatal("close returned before the reconnect attempt ended")
+	}
+	select {
+	case <-observed:
+		t.Fatal("cancelled reconnect attached and invoked the device observer")
+	default:
+	}
+	if snapshot := runtime.Snapshot(); snapshot.Connected || !snapshot.Paused ||
+		snapshot.ConnectionState != "disconnected" || snapshot.ConnectionReason != "closed by host" {
+		t.Fatalf("close snapshot = %#v", snapshot)
+	}
+}
+
 func TestRFReceiveInfersDownAndTimedUp(t *testing.T) {
 	runtime := New(Options{})
 	after := runtime.LatestEventID()
