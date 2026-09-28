@@ -462,6 +462,7 @@ func Load(path string) (Config, [sha256.Size]byte, error) {
 	}
 	value.RF = canonicalizeRFConfig(value.RF)
 	value.HostMenus = normalizeHostMenus(value.HostMenus)
+	normalizeMacros(value.Macros)
 	if err := normalizeProgramming(&value.Programming); err != nil {
 		return Config{}, [sha256.Size]byte{}, fmt.Errorf("validate %s: programming.firmware_features: %w", path, err)
 	}
@@ -494,6 +495,7 @@ func LoadOrCreate(path string) (Config, [sha256.Size]byte, error) {
 func Write(path string, value Config) error {
 	value.RF = canonicalizeRFConfig(value.RF)
 	value.HostMenus = normalizeHostMenus(value.HostMenus)
+	normalizeMacros(value.Macros)
 	if err := normalizeProgramming(&value.Programming); err != nil {
 		return fmt.Errorf("programming.firmware_features: %w", err)
 	}
@@ -545,6 +547,21 @@ func Write(path string, value Config) error {
 	}
 	keep = true
 	return nil
+}
+
+// normalizeMacros keeps file-backed alpha configurations usable as the macro
+// execution target becomes explicit. An omitted mode can only describe the
+// host scheduler that existed before the MCU timing engine was selectable.
+// Persisting the next write makes that choice explicit instead of retaining an
+// ambiguous empty value.
+func normalizeMacros(macros []Macro) {
+	for index := range macros {
+		mode := strings.ToLower(strings.TrimSpace(macros[index].Mode))
+		if mode == "" {
+			mode = "host"
+		}
+		macros[index].Mode = mode
+	}
 }
 
 // Validate rejects unsafe, ambiguous, or unsupported host configuration values.
