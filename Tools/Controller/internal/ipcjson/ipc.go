@@ -3503,10 +3503,6 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 		mux.Handle("/", service.WebUI)
 	}
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.URL.Path == "/api/v1" || strings.HasPrefix(request.URL.Path, "/api/v1/") {
-			http.NotFound(writer, request)
-			return
-		}
 		if serveBrowserCORS(writer, request, service, webSocketPath) {
 			return
 		}

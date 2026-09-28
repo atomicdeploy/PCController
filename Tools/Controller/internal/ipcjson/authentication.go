@@ -34,10 +34,7 @@ const (
 	maxSessionTickets        = 256
 )
 
-const (
-	serverProofFormat       = "pccontroller-server-proof"
-	legacyServerProofFormat = "pccontroller-server-proof/v1"
-)
+const serverProofFormat = "pccontroller-server-proof"
 
 // ServerProof is a nonce-bound, address-bound proof returned before a LAN
 // discovery client transmits its durable bearer credential.
@@ -52,17 +49,16 @@ type ServerProof struct {
 // VerifyServerProof authenticates a bounded proof with the caller-held bearer.
 func VerifyServerProof(token string, value ServerProof) bool {
 	provided, err := base64.RawURLEncoding.DecodeString(value.Proof)
-	if err != nil || len(provided) != sha256.Size ||
-		(value.Format != serverProofFormat && value.Format != legacyServerProofFormat) {
+	if err != nil || len(provided) != sha256.Size || value.Format != serverProofFormat {
 		return false
 	}
-	expected := serverProofMAC(value.Format, token, value.Nonce, value.Audience, value.InstanceID)
+	expected := serverProofMAC(token, value.Nonce, value.Audience, value.InstanceID)
 	return hmac.Equal(expected, provided)
 }
 
-func serverProofMAC(format, token, nonce, audience, instanceID string) []byte {
+func serverProofMAC(token, nonce, audience, instanceID string) []byte {
 	mac := hmac.New(sha256.New, []byte(token))
-	_, _ = io.WriteString(mac, format+"\n"+nonce+"\n"+audience+"\n"+instanceID)
+	_, _ = io.WriteString(mac, serverProofFormat+"\n"+nonce+"\n"+audience+"\n"+instanceID)
 	return mac.Sum(nil)
 }
 
@@ -101,7 +97,7 @@ func serveServerProof(writer http.ResponseWriter, request *http.Request, service
 	value := ServerProof{
 		Format: serverProofFormat, Nonce: nonce, Audience: audience, InstanceID: instanceID,
 	}
-	value.Proof = base64.RawURLEncoding.EncodeToString(serverProofMAC(value.Format, token, nonce, audience, instanceID))
+	value.Proof = base64.RawURLEncoding.EncodeToString(serverProofMAC(token, nonce, audience, instanceID))
 	writer.Header().Set("Cache-Control", "no-store")
 	writeHTTPJSON(writer, http.StatusOK, value)
 }

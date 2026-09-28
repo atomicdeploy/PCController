@@ -52,7 +52,7 @@ func (client *Client) DiscoverManifest(ctx context.Context, request ManifestRequ
 	if err := decodeJSONResponse(response, &manifest); err != nil {
 		return DiscoveryResult{}, err
 	}
-	if !supportedManifestFormat(manifest.Format) {
+	if manifest.Format != ManifestFormat {
 		return DiscoveryResult{}, fmt.Errorf("unsupported update manifest format %q", manifest.Format)
 	}
 	base, err := url.Parse(effectiveManifestURL)

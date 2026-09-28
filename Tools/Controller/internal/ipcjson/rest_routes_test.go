@@ -302,40 +302,4 @@ func TestCanonicalRESTRouteInventory(t *testing.T) {
 			}
 		})
 	}
-
-	for _, route := range routes {
-		if !strings.HasPrefix(route.path, "/api/") {
-			continue
-		}
-		t.Run("reject versioned "+route.name, func(t *testing.T) {
-			alias := "/api/v1/" + strings.TrimPrefix(route.path, "/api/")
-			request := httptest.NewRequest(route.method, alias, strings.NewReader(route.body))
-			request.RemoteAddr = "127.0.0.1:43210"
-			response := httptest.NewRecorder()
-			handler.ServeHTTP(response, request)
-			if (response.Code != http.StatusNotFound && response.Code != http.StatusMethodNotAllowed) ||
-				response.Header().Get("Location") != "" {
-				t.Fatalf("versioned alias %s %s status=%d location=%q body=%s", route.method, alias, response.Code, response.Header().Get("Location"), response.Body.String())
-			}
-		})
-	}
-}
-
-func TestVersionedRESTPreflightIsRejected(t *testing.T) {
-	runtime := control.New(control.Options{})
-	handler := websocketMux(context.Background(), &Service{
-		Client:         controllerapi.AttachSharedRuntime(runtime, shell.New(8)),
-		AllowedOrigins: []string{"console.example:*"},
-		WebUI:          webui.Handler("/ipc"),
-	})
-	request := httptest.NewRequest(http.MethodOptions, "http://127.0.0.1:8787/api/v1/rpc", nil)
-	request.RemoteAddr = "127.0.0.1:43210"
-	request.Header.Set("Origin", "https://console.example:9443")
-	request.Header.Set("Access-Control-Request-Method", http.MethodPost)
-	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, request)
-	if (response.Code != http.StatusNotFound && response.Code != http.StatusMethodNotAllowed) ||
-		response.Header().Get("Access-Control-Allow-Origin") != "" {
-		t.Fatalf("versioned preflight status=%d origin=%q body=%s", response.Code, response.Header().Get("Access-Control-Allow-Origin"), response.Body.String())
-	}
 }

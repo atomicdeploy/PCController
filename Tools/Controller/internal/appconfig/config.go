@@ -29,8 +29,6 @@ import (
 )
 
 const (
-	// SchemaVersion identifies the current host configuration schema.
-	SchemaVersion = 1
 	// DefaultWatchInterval bounds the polling fallback when file notifications
 	// are unavailable.
 	DefaultWatchInterval = 150 * time.Millisecond
@@ -39,7 +37,6 @@ const (
 // Config is the persistent host-side configuration root; it never mirrors or
 // replaces the MCU's EEPROM-owned settings.
 type Config struct {
-	Schema        int               `json:"schema"`
 	Connection    Connection        `json:"connection"`
 	UI            UI                `json:"ui"`
 	IPC           IPC               `json:"ipc"`
@@ -319,7 +316,6 @@ type RFTransmit struct {
 // Defaults returns a complete safe host configuration for a new installation.
 func Defaults() Config {
 	return Config{
-		Schema: SchemaVersion,
 		Connection: Connection{
 			VID:                "1A86",
 			PID:                "7523",
@@ -555,9 +551,6 @@ func Write(path string, value Config) error {
 func (value Config) Validate() error {
 	if _, err := deployment.Normalize(value.Programming.Deployment); err != nil {
 		return fmt.Errorf("programming.deployment: %w", err)
-	}
-	if value.Schema != SchemaVersion {
-		return fmt.Errorf("unsupported schema %d", value.Schema)
 	}
 	if _, err := firmwarefeatures.Normalize(
 		firmwarefeatures.Names(value.Programming.FirmwareFeatures),

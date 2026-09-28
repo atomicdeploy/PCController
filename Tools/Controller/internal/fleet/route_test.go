@@ -42,17 +42,16 @@ func TestRouteJSONUsesLivingUnversionedContractAndToleratesAdditions(t *testing.
 		t.Fatalf("writer emitted a protocol generation: %s", encoded)
 	}
 
-	document["schema"] = json.RawMessage(`1`)
 	document["future_capability"] = json.RawMessage(`{"enabled":true}`)
-	legacy, err := json.Marshal(document)
+	extended, err := json.Marshal(document)
 	if err != nil {
 		t.Fatal(err)
 	}
-	decoder := json.NewDecoder(strings.NewReader(string(legacy)))
+	decoder := json.NewDecoder(strings.NewReader(string(extended)))
 	decoder.DisallowUnknownFields()
 	var decoded RouteEnvelope
 	if err := decoder.Decode(&decoded); err != nil {
-		t.Fatalf("tolerant living-contract decode rejected legacy/additive fields: %v", err)
+		t.Fatalf("tolerant living-contract decode rejected additive fields: %v", err)
 	}
 	if err := decoded.ValidateAt(now); err != nil {
 		t.Fatalf("decoded route rejected: %v", err)
