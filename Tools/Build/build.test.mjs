@@ -17,6 +17,7 @@ test('build helper executables use stable product paths, never Go temporary path
 	const env = { LOCALAPPDATA: join(tmpdir(), 'local-app-data') }
 	assert.equal(goBuildHelperPath('generate-icon', env, 'win32'), join(env.LOCALAPPDATA, 'PCController', 'build-programs', 'generate-icon.exe'))
 	assert.equal(goBuildHelperPath('default-assets', env, 'win32'), join(env.LOCALAPPDATA, 'PCController', 'build-programs', 'default-assets.exe'))
+	assert.equal(goBuildHelperPath('controller-tool', env, 'win32'), join(env.LOCALAPPDATA, 'PCController', 'build-programs', 'controller-tool.exe'))
 	assert.throws(() => goBuildHelperPath('../unsafe', env, 'win32'), /unknown build helper/)
 })
 

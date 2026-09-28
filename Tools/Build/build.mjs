@@ -1632,17 +1632,22 @@ export function windowsCompilerProvisionArguments(env, goArch, packageVersion = 
 }
 
 export function goBuildHelperPath(name, env = process.env, platform = process.platform) {
-	if (!['generate-icon', 'default-assets'].includes(name)) throw new BuildError('unknown build helper')
+	if (!['generate-icon', 'default-assets', 'controller-tool'].includes(name)) throw new BuildError('unknown build helper')
 	const root = platform === 'win32'
 		? join(env.LOCALAPPDATA || join(env.USERPROFILE || PROJECT_ROOT, 'AppData', 'Local'), 'PCController', 'build-programs')
 		: join(BUILD_ROOT, 'helpers')
 	return join(root, name + (platform === 'win32' ? '.exe' : ''))
 }
 
-function runGoBuildHelper(go, name, source, args, env, options) {
+function buildGoHelper(go, name, source, env, options) {
 	const executable = goBuildHelperPath(name, env)
 	mkdirSync(dirname(executable), { recursive: true })
 	run(go, ['build', '-buildvcs=false', '-o', executable, source], { cwd: HOST_ROOT, env, verbose: options.verbose })
+	return executable
+}
+
+function runGoBuildHelper(go, name, source, args, env, options) {
+	const executable = buildGoHelper(go, name, source, env, options)
 	run(executable, args, { cwd: HOST_ROOT, env, verbose: options.verbose })
 }
 
@@ -2561,9 +2566,15 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
 		if (options.cleanOnly) return 0
 	}
 	let manifest = null
-	if (options.toolchainSync) syncToolchain(options, refreshed, '', log)
-	if (options.firmware) manifest = compileFirmware(options, identity, refreshed, '', log)
+	// Never execute temporary go-run binaries. This source-built helper is a
+	// tooling executable, not the installed/delivered host application.
 	let controllerPath = ''
+	if (options.toolchainSync || options.firmware || (!options.host && (options.installBootloader || options.upload))) {
+		log.stage('🛠️', 'Building stable Controller tooling helper')
+		controllerPath = buildGoHelper(requireTool('go', refreshed), 'controller-tool', './cmd/controller', refreshed, options)
+	}
+	if (options.toolchainSync) syncToolchain(options, refreshed, controllerPath, log)
+	if (options.firmware) manifest = compileFirmware(options, identity, refreshed, controllerPath, log)
 	if (options.host) {
 		if (!manifest && existsSync(COMMAND_PATHS.manifest)) manifest = readFirmwareManifest()
 		log.stage('📎', 'Staging the exact validated firmware and safe EEPROM pair for embedding')
