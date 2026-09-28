@@ -90,15 +90,30 @@ func (caller *streamCaller) Call(ctx context.Context, request Request) (Response
 		return Response{}, err
 	}
 	defer connection.Close()
+	finished := make(chan struct{})
+	defer close(finished)
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = connection.Close()
+		case <-finished:
+		}
+	}()
 	if deadline, ok := ctx.Deadline(); ok {
 		_ = connection.SetDeadline(deadline)
 	}
 	if err := json.NewEncoder(connection).Encode(request); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return Response{}, ctxErr
+		}
 		return Response{}, err
 	}
 	var response Response
 	decoder := json.NewDecoder(io.LimitReader(connection, MaxMessageBytes))
 	if err := decoder.Decode(&response); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return Response{}, ctxErr
+		}
 		return Response{}, err
 	}
 	if response.Error != nil {
