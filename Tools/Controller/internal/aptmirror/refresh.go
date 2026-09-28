@@ -393,7 +393,7 @@ func loadState(path string) (State, error) {
 		return State{}, fmt.Errorf("read APT mirror state: %w", err)
 	}
 	var state State
-	if err := json.Unmarshal(content, &state); err != nil || !compatibleFormat(state.Format, StateFormat, legacyStateFormat) {
+	if err := json.Unmarshal(content, &state); err != nil || state.Format != StateFormat {
 		return State{}, errors.New("APT mirror state is corrupt or has an unsupported format; last-good output was preserved")
 	}
 	if state.References == nil {

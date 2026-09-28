@@ -27,7 +27,7 @@ import (
 const (
 	PackageManifestName   = "installation-package.json"
 	packageManifestFormat = "pccontroller-installation-package/v1"
-	hostManifestFormat    = "pccontroller-host-package-manifest/v1"
+	hostManifestFormat    = "pccontroller-host-package-manifest"
 	maximumPackageFiles   = 4096
 	maximumManifestBytes  = 4 << 20
 )

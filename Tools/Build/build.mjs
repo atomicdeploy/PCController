@@ -82,7 +82,7 @@ const STALE_HOST_OUTPUTS = [
 	join(HOST_ROOT, 'controller.exe'),
 	join(HOST_ROOT, 'controller')
 ]
-const HOST_MANIFEST_FORMAT = 'pccontroller-host-package-manifest/v1'
+const HOST_MANIFEST_FORMAT = 'pccontroller-host-package-manifest'
 const FIRMWARE_MANIFEST_FORMATS = Object.freeze([
 	'pccontroller-avr-firmware-manifest/v1',
 	'pccontroller-avr-firmware-manifest/v2'

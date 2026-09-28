@@ -17,24 +17,18 @@ import (
 )
 
 const (
-	HostManifestFormat          = "pccontroller-host-package-manifest"
-	RuntimeManifestFormat       = "pccontroller-linux-runtime-manifest"
-	legacyHostManifestFormat    = "pccontroller-host-package-manifest/v1"
-	legacyRuntimeManifestFormat = "pccontroller-linux-runtime-manifest/v1"
-	DefaultRoot                 = "/opt/pccontroller/runtime"
-	DefaultStageRoot            = "/var/lib/pccontroller/runtime-input"
-	maximumManifestBytes        = 1 << 20
-	maximumBinaryBytes          = 256 << 20
+	HostManifestFormat    = "pccontroller-host-package-manifest"
+	RuntimeManifestFormat = "pccontroller-linux-runtime-manifest"
+	DefaultRoot           = "/opt/pccontroller/runtime"
+	DefaultStageRoot      = "/var/lib/pccontroller/runtime-input"
+	maximumManifestBytes  = 1 << 20
+	maximumBinaryBytes    = 256 << 20
 	// Chrome's native executable can exceed the Controller/VirtualBoard cap
 	// (current stable Linux builds are roughly 275 MB). Keep the exception
 	// browser-specific and bounded while preserving the tighter artifact cap.
 	maximumBrowserExecutableBytes = 512 << 20
 	maximumSmokeOutput            = 32 << 10
 )
-
-func compatibleFormat(value, current, legacy string) bool {
-	return value == current || value == legacy
-}
 
 type HostArtifact struct {
 	Path   string `json:"path"`
@@ -243,7 +237,7 @@ func validatePackageFor(
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		return result, errors.New("host package manifest has trailing JSON values")
 	}
-	if !compatibleFormat(manifest.Format, HostManifestFormat, legacyHostManifestFormat) {
+	if manifest.Format != HostManifestFormat {
 		return result, fmt.Errorf("unsupported host package manifest format %q", manifest.Format)
 	}
 	if manifest.Target.Platform != platform || manifest.Target.Architecture != architecture {
@@ -313,7 +307,7 @@ func decodeHostManifest(content []byte, platform, architecture string) (HostMani
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		return manifest, HostArtifact{}, errors.New("host package manifest has trailing JSON values")
 	}
-	if !compatibleFormat(manifest.Format, HostManifestFormat, legacyHostManifestFormat) {
+	if manifest.Format != HostManifestFormat {
 		return manifest, HostArtifact{}, fmt.Errorf("unsupported host package manifest format %q", manifest.Format)
 	}
 	if manifest.Target.Platform != platform || manifest.Target.Architecture != architecture {

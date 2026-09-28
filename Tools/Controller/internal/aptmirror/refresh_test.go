@@ -177,7 +177,7 @@ func TestRefreshDryRunAndCorruptStatePreserveHost(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(config.Paths.MirrorList), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	state := []byte(`{"format":"pccontroller-ubuntu-apt-mirror-state/v1","official_references":{},"domestic_last_good":{}}`)
+	state := []byte(`{"format":"pccontroller-ubuntu-apt-mirror-state","official_references":{},"domestic_last_good":{}}`)
 	mirror := []byte("last-known-good\n")
 	_ = os.WriteFile(config.Paths.State, state, 0o600)
 	_ = os.WriteFile(config.Paths.MirrorList, mirror, 0o644)
@@ -234,7 +234,7 @@ func TestRefreshCancellationAndMirrorFailurePreserveState(t *testing.T) {
 	if _, err := os.Stat(config.Paths.Lock); !os.IsNotExist(err) {
 		t.Fatal("canceled apply created a lock")
 	}
-	prior := []byte(`{"format":"pccontroller-ubuntu-apt-mirror-state/v1","official_references":{},"domestic_last_good":{}}`)
+	prior := []byte(`{"format":"pccontroller-ubuntu-apt-mirror-state","official_references":{},"domestic_last_good":{}}`)
 	if err := os.MkdirAll(filepath.Dir(config.Paths.State), 0o755); err != nil {
 		t.Fatal(err)
 	}

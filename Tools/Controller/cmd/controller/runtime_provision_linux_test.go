@@ -99,7 +99,7 @@ func TestRuntimeInstallDryRunValidatesCanonicalInputsWithoutOpeningConfig(t *tes
 	}
 	digest := sha256.Sum256(content)
 	manifest := map[string]any{
-		"format": "pccontroller-host-package-manifest/v1",
+		"format": "pccontroller-host-package-manifest",
 		"target": map[string]any{"platform": runtime.GOOS, "architecture": runtime.GOARCH},
 		"identity": map[string]any{
 			"version": "1.2.3", "sourceSHA256": strings.Repeat("a", 64), "buildTime": "2026-08-09T00:00:00Z",

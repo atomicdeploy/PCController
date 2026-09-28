@@ -65,7 +65,7 @@ func (notifier *linuxNotifier) Notify(ctx context.Context, notification Notifica
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-	if _, err := buildToastXML(notification); err != nil {
+	if _, err := buildToastXML(notification, ""); err != nil {
 		return err
 	}
 	err := notifier.deliver(ctx, notifier.tool, notifier.appID, notification)
