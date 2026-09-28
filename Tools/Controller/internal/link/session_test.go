@@ -258,6 +258,17 @@ func TestOpenContextNormalSerialAcquisitionStartsSession(t *testing.T) {
 	}
 }
 
+func TestOpenContextRejectsNilSerialPort(t *testing.T) {
+	originalOpen := openSerialPort
+	openSerialPort = func(string, *serial.Mode) (serial.Port, error) { return nil, nil }
+	t.Cleanup(func() { openSerialPort = originalOpen })
+
+	session, err := OpenContext(context.Background(), "COM3", DefaultBaudRate)
+	if session != nil || err == nil {
+		t.Fatalf("OpenContext session=%p error=%v, want explicit nil-port error", session, err)
+	}
+}
+
 func awaitAcquisitionClose(session *Session) error {
 	deadline := time.Now().Add(time.Second)
 	for {

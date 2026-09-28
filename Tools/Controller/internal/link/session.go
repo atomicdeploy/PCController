@@ -125,6 +125,9 @@ func OpenContext(ctx context.Context, name string, baudRate int) (*Session, erro
 		}
 		return nil, portowner.EnrichOpenError(ctx, name, err)
 	}
+	if port == nil {
+		return nil, fmt.Errorf("open %s returned no serial port", name)
+	}
 	if err := ctx.Err(); err != nil {
 		return newSession(name, port), fmt.Errorf("open %s canceled after serial acquisition: %w", name, err)
 	}
