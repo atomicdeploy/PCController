@@ -24,11 +24,21 @@ const (
 
 var (
 	ErrClosed                  = errors.New("serial session is closed")
+	ErrSerialOpenPending       = errors.New("serial port acquisition is still pending")
 	ErrSequenceExhaust         = errors.New("all request sequence numbers are in use")
 	ErrControlLinesUnsupported = errors.New("transport does not support DTR/RTS")
 )
 
 var openSerialPort = serial.Open
+
+type serialOpenResult struct {
+	port serial.Port
+	err  error
+}
+
+type serialOpenAcquisition struct {
+	result chan serialOpenResult
+}
 
 type Event struct {
 	Frame        native.Frame
@@ -55,6 +65,7 @@ type Session struct {
 	doneOnce    sync.Once
 	closed      bool
 	readDone    sync.WaitGroup
+	pendingOpen *serialOpenAcquisition
 }
 
 type sessionPort interface {
@@ -85,9 +96,37 @@ func OpenContext(ctx context.Context, name string, baudRate int) (*Session, erro
 	if baudRate == 0 {
 		baudRate = DefaultBaudRate
 	}
-	port, err := openSerialPort(name, serialMode(baudRate))
+	acquisition := &serialOpenAcquisition{result: make(chan serialOpenResult, 1)}
+	go func() {
+		port, err := openSerialPort(name, serialMode(baudRate))
+		acquisition.result <- serialOpenResult{port: port, err: err}
+	}()
+
+	var result serialOpenResult
+	select {
+	case result = <-acquisition.result:
+	case <-ctx.Done():
+		// serial.Open has no cancellation API. Return the acquisition itself as
+		// a close-only Session so a late handle can never become unowned. Close
+		// reports ErrSerialOpenPending until the open call completes, then closes
+		// (and, when needed, retries) that exact port.
+		return newPendingOpenSession(name, acquisition), fmt.Errorf(
+			"open %s canceled while serial acquisition is pending: %w",
+			name,
+			ctx.Err(),
+		)
+	}
+	port, err := result.port, result.err
 	if err != nil {
+		if port != nil {
+			// Preserve even a nonstandard non-nil-on-error result. The caller can
+			// quarantine this close-only owner and retry release deterministically.
+			return newSession(name, port), portowner.EnrichOpenError(ctx, name, err)
+		}
 		return nil, portowner.EnrichOpenError(ctx, name, err)
+	}
+	if err := ctx.Err(); err != nil {
+		return newSession(name, port), fmt.Errorf("open %s canceled after serial acquisition: %w", name, err)
 	}
 	if err := port.SetReadTimeout(DefaultReadTimeout); err != nil {
 		configureErr := fmt.Errorf("configure %s: %w", name, err)
@@ -144,6 +183,12 @@ func newSession(name string, port sessionPort) *Session {
 		closing:   make(chan struct{}),
 		done:      make(chan struct{}),
 	}
+}
+
+func newPendingOpenSession(name string, acquisition *serialOpenAcquisition) *Session {
+	session := newSession(name, nil)
+	session.pendingOpen = acquisition
+	return session
 }
 
 func IsNetworkEndpoint(name string) bool {
@@ -430,6 +475,22 @@ func (s *Session) closeTransport() error {
 		return nil
 	}
 	s.closingOnce.Do(func() { close(s.closing) })
+	if s.pendingOpen != nil {
+		select {
+		case result := <-s.pendingOpen.result:
+			s.pendingOpen = nil
+			if result.port == nil {
+				// The acquisition produced no handle, so cleanup is complete. The
+				// original OpenContext error remains the caller-facing open failure.
+				s.closed = true
+				s.doneOnce.Do(func() { close(s.done) })
+				return nil
+			}
+			s.port = result.port
+		default:
+			return ErrSerialOpenPending
+		}
+	}
 	if err := s.port.Close(); err != nil {
 		return err
 	}
