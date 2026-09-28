@@ -6,6 +6,7 @@
 
 #include "../LocalLib/BoardPins.h"
 #include "../ProjectConfig.h"
+#include <string.h>
 
 #if defined(__AVR__)
 #include <avr/interrupt.h>
@@ -32,7 +33,9 @@ void begin() {
   show();
 }
 
-void clear() { fill(RgbColor()); }
+void clear() {
+  if (pixels) memset(pixels, 0, static_cast<uint16_t>(pixelCount) * 3);
+}
 
 void show() {
   if (!pixels) return;
