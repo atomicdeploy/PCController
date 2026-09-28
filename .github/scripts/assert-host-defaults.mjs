@@ -8,9 +8,6 @@ loadProjectEnv();
 const hashPattern = /^[0-9a-f]{64}$/u;
 
 export function assertHostDefaults(manifest) {
-  if (manifest?.format !== "pccontroller-host-package-manifest/v1") {
-    throw new Error("unexpected host manifest format");
-  }
   const defaults = manifest.validation?.embeddedDefaults;
   if (
     defaults?.enabled !== true ||

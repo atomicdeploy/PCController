@@ -16,7 +16,6 @@ func TestReleaseDiscoveryRPCAndRemotePolicy(t *testing.T) {
 	artifactService, client := newIPCArtifactService(t)
 	manifestServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(writer).Encode(map[string]any{
-			"format": releaseplane.ManifestFormat,
 			"artifacts": []map[string]any{{
 				"kind": "firmware", "name": "board.hex",
 				"url": "/board.hex", "packed_timestamp": 1234,

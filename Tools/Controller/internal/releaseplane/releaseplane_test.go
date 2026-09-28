@@ -85,7 +85,7 @@ func TestGitHubWorkflowAndReleaseDiscoveryPreserveDigests(t *testing.T) {
 
 func TestManifestResolutionAndPlatformAwareComparison(t *testing.T) {
 	manifest := Manifest{
-		Format: ManifestFormat, GeneratedAt: time.Date(2026, 8, 2, 3, 0, 0, 0, time.UTC),
+		GeneratedAt: time.Date(2026, 8, 2, 3, 0, 0, 0, time.UTC),
 		Artifacts: []ManifestArtifact{{
 			Kind: artifacts.KindFirmware, Name: "board.hex", URL: "files/board.hex",
 			Bytes: 42, SHA256: strings.Repeat("c", 64), BuildHash: "beef1234",
@@ -121,11 +121,10 @@ func TestManifestResolutionAndPlatformAwareComparison(t *testing.T) {
 	}
 }
 
-func TestManifestIgnoresAdditiveFieldsWithinLivingFormat(t *testing.T) {
+func TestManifestIgnoresAdditiveFieldsInLivingContract(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(writer, `{
-			"format":"controller-update-manifest",
 			"publisher_extension":{"channel":"canary"},
 			"artifacts":[{
 				"kind":"firmware","name":"board.hex","url":"/board.hex",
@@ -151,7 +150,7 @@ func TestManifestRelativeArtifactsUseValidatedFinalResponseURL(t *testing.T) {
 		case "/manifest.json":
 			http.Redirect(writer, request, "/channels/stable/manifest.json", http.StatusFound)
 		case "/channels/stable/manifest.json":
-			writeTestJSON(writer, Manifest{Format: ManifestFormat, Artifacts: []ManifestArtifact{{
+			writeTestJSON(writer, Manifest{Artifacts: []ManifestArtifact{{
 				Kind: artifacts.KindFirmware, Name: "board.hex", URL: "files/board.hex",
 			}}})
 		default:
@@ -321,7 +320,7 @@ func TestArchiveStageStreamsProgressAndPreservesMetadata(t *testing.T) {
 }
 
 func TestDefaultClientUsesProxyEnvironment(t *testing.T) {
-	manifest := Manifest{Format: ManifestFormat, Artifacts: []ManifestArtifact{{
+	manifest := Manifest{Artifacts: []ManifestArtifact{{
 		Kind: artifacts.KindFirmware, Name: "board.hex", URL: "http://1.1.1.1/board.hex",
 	}}}
 	proxy := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -400,7 +399,7 @@ func TestLocalManifestServesContentAddressedInventory(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &manifest); err != nil {
 		t.Fatal(err)
 	}
-	if manifest.Format != ManifestFormat || len(manifest.Artifacts) != 1 {
+	if len(manifest.Artifacts) != 1 {
 		t.Fatalf("manifest=%#v", manifest)
 	}
 	item := manifest.Artifacts[0]
