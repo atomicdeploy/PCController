@@ -1130,21 +1130,6 @@ func runTUIWithInitialAction(
 				runtime.LCDPresenter().MirrorPrompt(line1, line2)
 				return nil
 			},
-			FrontPanelKey: func(key int, phase string) error {
-				payloads, err := frontPanelGesturePayloads(key, phase)
-				if err != nil {
-					return err
-				}
-				for _, payload := range payloads {
-					ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
-					err = runtime.Command(ctx, native.OpRemoteKeyGesture, payload)
-					cancel()
-					if err != nil {
-						return err
-					}
-				}
-				return nil
-			},
 			HostMenus:        hostMenus,
 			PushHostPanel:    hostPanel.Push,
 			ReleaseHostPanel: hostPanel.Release,

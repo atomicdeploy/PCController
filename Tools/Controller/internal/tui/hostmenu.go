@@ -146,7 +146,7 @@ func renderHostMenuDirectory(manager *hostmenu.Manager, width int, keyControlsAv
 		if keyControlsAvailable {
 			lines = append(lines, labelStyle.Render("K1/K2 navigate · K3/K4 adjust · hold K3 back · guarded actions require hold K4"))
 		} else {
-			lines = append(lines, warnStyle.Render("Front-panel key controls unavailable · waiting for exact panel and RemoteKeys readback"))
+			lines = append(lines, warnStyle.Render("Front-panel key controls unavailable · board deadman/lease not advertised"))
 		}
 	} else {
 		lines = append(lines, labelStyle.Render("inactive · default "+config.DefaultMenu))
