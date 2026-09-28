@@ -40,6 +40,7 @@ import {
   Toggle,
 } from './components'
 import { formatClock } from './i18n'
+import { rpc } from './api'
 import { redactSensitiveCommand, shellArgument } from './command-line'
 import {
   BrowserConsoleModel,
@@ -54,6 +55,12 @@ import { displayPresentationCommand, type DisplayRepeat, type DisplayTarget } fr
 import { peripheralAvailability } from './peripheral-availability'
 import { RFGuidedWorkflow } from './rf-guided-workflow'
 import { MacroLibraryPanel } from './macro-library'
+import {
+  normalizeCommandCatalog,
+  TerminalHistory,
+  terminalCompletions,
+  type CommandDescriptor,
+} from './terminal-session'
 import type { SharedViewProps } from './views'
 
 interface TextTerminalRow {
@@ -125,10 +132,13 @@ export function WorkbenchView(props: SharedViewProps) {
   const { events, locale, t, command, snapshot, transport, relayedTerminal } = props
   const isPersian = locale === 'fa'
   const copy = (english: string, persian: string) => isPersian ? persian : english
-  const [line, setLine] = useState('status')
+  const [line, setLine] = useState('')
   const [transcript, setTranscript] = useState<TerminalRow[]>([])
   const [consoleHelpOpen, setConsoleHelpOpen] = useState(false)
   const [busy, setBusy] = useState('')
+  const [commandCatalog, setCommandCatalog] = useState<CommandDescriptor[]>([])
+  const [completionOpen, setCompletionOpen] = useState(false)
+  const [completionIndex, setCompletionIndex] = useState(0)
   const [displayTarget, setDisplayTarget] = useState<DisplayTarget>('both')
   const [displaySpeed, setDisplaySpeed] = useState(220)
   const [displayDuration, setDisplayDuration] = useState(5000)
@@ -148,10 +158,13 @@ export function WorkbenchView(props: SharedViewProps) {
   const latestStreamEventID = useRef(events.reduce((latest, event) => Math.max(latest, event.id), 0))
   const relayedTerminalIDs = useRef(new Set<string>())
   const consoleModel = useRef(new BrowserConsoleModel({ maxEntries: 240 }))
+  const terminalHistory = useRef(new TerminalHistory())
   const displayTextLimit = displayTarget === 'segments' ? 40 : 32
   const displayTextIsValid = displayText.length > 0 && displayText.length <= displayTextLimit && /^[\x20-\x7e]*$/.test(displayText)
   const available = peripheralAvailability(snapshot)
   const boardReady = transport.boardState === 'ready' && snapshot.connected && snapshot.have_status
+  const completionItems = terminalCompletions(line, commandCatalog)
+  const activeCompletionIndex = Math.min(completionIndex, Math.max(0, completionItems.length - 1))
   const displayTargetOptions = [
     { value: 'segments' as const, label: copy('Segments', 'سون‌سگمنت') },
     ...(available.lcd ? [
@@ -163,6 +176,19 @@ export function WorkbenchView(props: SharedViewProps) {
   useEffect(() => {
     if (!available.lcd && displayTarget !== 'segments') setDisplayTarget('segments')
   }, [available.lcd, displayTarget])
+
+  useEffect(() => {
+    const abort = new AbortController()
+    setCommandCatalog([])
+    void rpc<unknown>('controller.command.catalog', {}, abort.signal)
+      .then((catalog) => {
+        if (!abort.signal.aborted) setCommandCatalog(normalizeCommandCatalog(catalog))
+      })
+      .catch(() => {
+        if (!abort.signal.aborted) setCommandCatalog([])
+      })
+    return () => abort.abort()
+  }, [transport.authenticationRequired, transport.streamState])
 
   useEffect(() => {
     const incoming = events
@@ -224,8 +250,22 @@ export function WorkbenchView(props: SharedViewProps) {
 
   const submit = (event: FormEvent) => {
     event.preventDefault()
-    if (redactSensitiveCommand(line.trim()) !== line.trim()) setLine('')
-    void run(line)
+    const submitted = line.trim()
+    if (!submitted) return
+    if (redactSensitiveCommand(submitted) === submitted) terminalHistory.current.record(submitted)
+    else terminalHistory.current.edited('')
+    setLine('')
+    setCompletionOpen(false)
+    void run(submitted)
+  }
+
+  const acceptCompletion = (index: number) => {
+    const completion = completionItems[index]
+    if (!completion) return
+    terminalHistory.current.edited(completion.value)
+    setLine(completion.value)
+    setCompletionOpen(false)
+    window.requestAnimationFrame(() => document.getElementById('workbench-command')?.focus())
   }
 
   const inspectEvent = (event: (typeof events)[number]) => {
@@ -258,8 +298,67 @@ export function WorkbenchView(props: SharedViewProps) {
           </div>
           <form className="command-form" onSubmit={submit}>
             <span className="command-prompt">pc›</span>
-            <input aria-label={copy('Primary bridge command', 'فرمان پل اصلی')} value={line} onChange={(event) => setLine(event.target.value)} spellCheck={false} dir="ltr" />
-            <Button type="submit" tone="primary" icon={Send} busy={busy === line.trim()}>{t('run')}</Button>
+            <div className="terminal-command-box" onBlur={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setCompletionOpen(false)
+            }}>
+              <input
+                id="workbench-command"
+                aria-label={copy('Primary bridge command', 'فرمان پل اصلی')}
+                aria-autocomplete="list"
+                aria-controls="workbench-command-completions"
+                aria-expanded={completionOpen && completionItems.length > 0}
+                aria-activedescendant={completionOpen && completionItems.length ? `workbench-command-completion-${activeCompletionIndex}` : undefined}
+                value={line}
+                onFocus={() => setCompletionOpen(completionItems.length > 0)}
+                onChange={(event) => {
+                  terminalHistory.current.edited(event.target.value)
+                  setLine(event.target.value)
+                  setCompletionIndex(0)
+                  setCompletionOpen(true)
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Tab' && completionItems.length) {
+                    event.preventDefault()
+                    acceptCompletion(activeCompletionIndex)
+                    return
+                  }
+                  if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && completionOpen && completionItems.length) {
+                    event.preventDefault()
+                    setCompletionIndex((current) => {
+                      const delta = event.key === 'ArrowDown' ? 1 : -1
+                      return (current + delta + completionItems.length) % completionItems.length
+                    })
+                    return
+                  }
+                  if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+                    event.preventDefault()
+                    const recalled = terminalHistory.current.move(event.key === 'ArrowUp' ? -1 : 1, line)
+                    setLine(recalled)
+                    setCompletionOpen(false)
+                    return
+                  }
+                  if (event.key === 'Escape') {
+                    event.preventDefault()
+                    setCompletionOpen(false)
+                  }
+                }}
+                spellCheck={false}
+                autoComplete="off"
+                dir="ltr"
+              />
+              {completionOpen && completionItems.length > 0 && <div id="workbench-command-completions" className="terminal-completions" role="listbox" aria-label={copy('Command completions', 'پیشنهادهای فرمان')}>
+                {completionItems.map((completion, index) => <button
+                  id={`workbench-command-completion-${index}`}
+                  key={`${completion.value}-${completion.label}`}
+                  type="button"
+                  role="option"
+                  aria-selected={index === activeCompletionIndex}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => acceptCompletion(index)}
+                ><strong>{completion.label}</strong><small>{completion.detail}</small></button>)}
+              </div>}
+            </div>
+            <Button type="submit" tone="primary" icon={Send} busy={busy !== ''}>{t('run')}</Button>
           </form>
           <div className="terminal-console-help">
             <Button compact tone="ghost" onClick={() => setConsoleHelpOpen((open) => !open)} aria-expanded={consoleHelpOpen}>{consoleHelpOpen ? copy('Hide console syntax', 'بستن راهنما') : copy('Console syntax', 'راهنمای کنسول')}</Button>
