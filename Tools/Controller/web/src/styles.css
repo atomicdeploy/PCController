@@ -1892,7 +1892,7 @@ kbd { padding: 3px 6px; border: 1px solid var(--line-strong); border-bottom-colo
 .macro-library__monitor em { overflow: hidden; color: var(--text-muted); font: 8px var(--font-mono); font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
 .macro-library__monitor > .status-badge { align-self: center; }
 .macro-library__error { padding: 9px 11px; border: 1px solid color-mix(in srgb, var(--red) 35%, var(--line)); border-radius: 8px; background: var(--red-soft); color: var(--red); font-size: 9px; line-height: 1.5; }
-.macro-library__legacy { display: flex; justify-content: space-between; gap: 10px; align-items: center; padding: 9px 11px; border: 1px solid color-mix(in srgb, var(--amber) 30%, var(--line)); border-radius: 8px; background: var(--amber-soft); color: var(--text-soft); font-size: 9px; line-height: 1.5; }
+.macro-library__command-surface { display: flex; justify-content: space-between; gap: 10px; align-items: center; padding: 9px 11px; border: 1px solid color-mix(in srgb, var(--amber) 30%, var(--line)); border-radius: 8px; background: var(--amber-soft); color: var(--text-soft); font-size: 9px; line-height: 1.5; }
 .macro-library__workspace { display: grid; grid-template-columns: minmax(270px, .9fr) minmax(360px, 1.1fr); gap: 10px; }
 .macro-library__workspace > section,
 .macro-library__control-grid > section,
