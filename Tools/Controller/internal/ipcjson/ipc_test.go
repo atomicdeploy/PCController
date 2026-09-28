@@ -1504,7 +1504,7 @@ func TestRemoteCapabilityPolicyAndMessageProvenance(t *testing.T) {
 	}
 
 	messageParams, _ := json.Marshal(controllerapi.TextMessage{
-		Source: "board", Target: "host", Type: "operator.notice", Text: "hello",
+		Source: "board", Targets: []string{"host"}, Type: "operator.notice", Text: "hello",
 	})
 	denied := service.DispatchRemote(context.Background(), Request{
 		Method: "controller.message.send", Params: messageParams,

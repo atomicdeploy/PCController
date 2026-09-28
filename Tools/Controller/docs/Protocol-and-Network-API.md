@@ -32,14 +32,16 @@ firmware protocol or open a serial connection for host-only deliveries.
 }
 ```
 
-`target` remains accepted as a comma-separated shorthand; `targets` is the
-preferred ordered list. Valid presentation targets are `native`, `web`, and
-`tui`; transport/system targets (`host`, `client`, `server`, `bridge`, `board`,
-`lcd`, `all`) remain available for existing integrations. Duplicate targets are
-removed in order. Severity is one of `debug`, `info`, `success`, `warning`, or
-`error`; delivery is `sync` (completed) or `async` (accepted). Correlation and
-action are descriptive event fields in this first host slice—actions are never
-implicitly executed.
+`targets` is the one canonical ordered request shape. Each entry is a bounded
+receiver capability, surface, or exact-instance selector learned from live
+endpoint/application advertisement; the host deliberately does not keep a
+closed product/surface list. Duplicate selectors are removed in order. `lcd`
+and `board` explicitly require a connected board that advertises LCD delivery.
+`all` delivers to the board LCD only when that capability is live and otherwise
+continues to the currently attached host receivers. Severity is one of `debug`,
+`info`, `success`, `warning`, or `error`; delivery is `sync` (completed) or
+`async` (accepted). Correlation and action are descriptive event fields in this
+slice—actions are never implicitly executed.
 
 The minimal CLI spelling is:
 
@@ -47,12 +49,11 @@ The minimal CLI spelling is:
 controller message native,web,tui operator.notice "Commissioning is ready"
 ```
 
-It deliberately permits disconnected operation and publishes to the same
-runtime event stream. Native/Web/TUI action adapters, delivery expiry,
-deduplication, and generalized board-operation migration continue under
-[#164](https://github.com/atomicdeploy/PCController/issues/164),
-[#165](https://github.com/atomicdeploy/PCController/issues/165), and
-[#166](https://github.com/atomicdeploy/PCController/issues/166).
+It permits disconnected operation only for selectors whose delivery does not
+require the board; explicit `board` or `lcd` delivery connects first and fails
+clearly when LCD delivery is unavailable. Native/Web/TUI action adapters, delivery expiry,
+deduplication, and generalized board-operation migration continue under #164,
+#165, and #166.
 
 ## Framing
 
@@ -1551,7 +1552,7 @@ one schema:
 ```json
 {
   "source": "client",
-  "target": "lcd",
+  "targets": ["lcd"],
   "type": "operator.notice",
   "text": "Service required",
   "line1": "SERVICE",
@@ -1561,11 +1562,14 @@ one schema:
 ```
 
 Allowed sources are `client`, `server`, `bridge`, `board`, `lcd`, `host`,
-`ipc`, `rest`, `webhook`, `websocket`, and `socket_io`. Targets are `client`, `server`, `bridge`,
-`board`, `lcd`, `host`, and `all`. `type` contains 1..32 lowercase letters,
-digits, dot, dash, or underscore. Text/action lengths are bounded. A board/LCD
-target is converted to two printable 16-byte rows and sent through
-`DISPLAY_TEXT`; every accepted message is also a source-tagged host event.
+`ipc`, `rest`, `webhook`, `websocket`, and `socket_io`. `targets` contains
+bounded capability, surface, or exact-instance selectors; it is the only
+request shape and is not constrained to a hardcoded product list. `type`
+contains 1..32 lowercase letters, digits, dot, dash, or underscore. Text/action
+lengths are bounded. Explicit `board`/`lcd` delivery requires a live board LCD;
+`all` adds the LCD only when that capability is live. Successful board delivery
+uses the ordinary display presenter before the source-tagged host event is
+published.
 
 Network ingress does not trust a payload's claimed source. Raw IPC is tagged
 `ipc`, REST is `rest`, standard WebSocket is `websocket`, Socket.IO is

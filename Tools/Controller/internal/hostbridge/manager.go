@@ -1273,7 +1273,7 @@ func (manager *Manager) dispatchTextMappings(
 	for _, mapping := range config.Integrations.TextMappings {
 		if !mapping.Enabled ||
 			!optionalEqual(mapping.Source, event.Source) ||
-			!optionalEqual(mapping.Target, event.Target) ||
+			!optionalMessageTarget(mapping.Target, event.Targets) ||
 			!optionalEqual(mapping.Type, event.MessageType) ||
 			(mapping.Contains != "" && !strings.Contains(
 				strings.ToLower(event.Text), strings.ToLower(mapping.Contains),
@@ -1291,6 +1291,19 @@ func (manager *Manager) dispatchTextMappings(
 			manager.client.EmitHostEvent("message.action", mapping.Name+": "+output)
 		}(mapping)
 	}
+}
+
+func optionalMessageTarget(expected string, actual []string) bool {
+	expected = strings.TrimSpace(expected)
+	if expected == "" {
+		return true
+	}
+	for _, target := range actual {
+		if strings.EqualFold(expected, strings.TrimSpace(target)) {
+			return true
+		}
+	}
+	return false
 }
 
 func optionalEqual(expected, actual string) bool {
@@ -1399,7 +1412,7 @@ func (manager *Manager) webSocketPeerSession(
 						text = text[:4096]
 					}
 					params, _ := json.Marshal(controller.TextMessage{
-						Source: "bridge", Target: "host", Type: "local-event",
+						Source: "bridge", Targets: []string{"host"}, Type: "local-event",
 						Text: text, Metadata: map[string]string{
 							"event.id":   strconv.FormatUint(event.ID, 10),
 							"event.kind": event.Kind,
@@ -1461,7 +1474,7 @@ func (manager *Manager) webSocketPeerSession(
 		}
 		if request.Method == "controller.event" || request.Method == "controller.state" || request.Method == "controller.status" {
 			_, _ = manager.client.SendTextMessage(ctx, controller.TextMessage{
-				Source: "websocket", Target: "host", Type: "remote-event",
+				Source: "websocket", Targets: []string{"host"}, Type: "remote-event",
 				Text: string(request.Params),
 			})
 			continue
@@ -1569,7 +1582,7 @@ func (manager *Manager) socketIOPeerSession(
 				case event := <-peer.events:
 					encoded, _ := json.Marshal(event)
 					err := writeEvent("message", controller.TextMessage{
-						Source: "bridge", Target: "host", Type: "local-event",
+						Source: "bridge", Targets: []string{"host"}, Type: "local-event",
 						Text: string(encoded),
 					})
 					if err != nil {
@@ -1620,7 +1633,7 @@ func (manager *Manager) socketIOPeerSession(
 			fallthrough
 		case "controller.status", "message.accepted":
 			_, _ = manager.client.SendTextMessage(ctx, controller.TextMessage{
-				Source: "websocket", Target: "host", Type: "remote-event",
+				Source: "websocket", Targets: []string{"host"}, Type: "remote-event",
 				Text: string(raw),
 			})
 		case "message", "controller.message":

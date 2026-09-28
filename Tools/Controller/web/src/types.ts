@@ -223,8 +223,12 @@ export interface ControllerEvent {
   reason?: string
   source?: string
   target?: string
+  targets?: string[]
   message_type?: string
   action?: string
+  severity?: string
+  correlation?: string
+  delivery?: string
   gesture?: string
   key?: number
   rf_id?: number

@@ -445,8 +445,7 @@ type OpcodeFrame struct {
 // implicitly. Remote command execution uses the authenticated execute method.
 type TextMessage struct {
 	Source      string            `json:"source"`
-	Target      string            `json:"target"`
-	Targets     []string          `json:"targets,omitempty"`
+	Targets     []string          `json:"targets"`
 	Type        string            `json:"type"`
 	Text        string            `json:"text"`
 	Line1       string            `json:"line1,omitempty"`
@@ -2113,7 +2112,6 @@ func (client *Client) SendTextMessage(
 	message TextMessage,
 ) (Event, error) {
 	message.Source = strings.ToLower(strings.TrimSpace(message.Source))
-	message.Target = strings.ToLower(strings.TrimSpace(message.Target))
 	message.Type = strings.ToLower(strings.TrimSpace(message.Type))
 	message.Text = strings.TrimSpace(message.Text)
 	message.Action = strings.TrimSpace(message.Action)
@@ -2123,12 +2121,6 @@ func (client *Client) SendTextMessage(
 	if !oneOf(message.Source, "client", "server", "bridge", "board", "lcd", "host", "ipc", "rest", "webhook", "websocket", "socket_io") {
 		return Event{}, fmt.Errorf("unsupported message source %q", message.Source)
 	}
-	targets, err := normalizeMessageTargets(message.Target, message.Targets)
-	if err != nil {
-		return Event{}, err
-	}
-	message.Targets = targets
-	message.Target = strings.Join(targets, ",")
 	if message.Severity == "" {
 		message.Severity = "info"
 	}
@@ -2168,64 +2160,17 @@ func (client *Client) SendTextMessage(
 			return Event{}, errors.New("message metadata keys/values exceed limits")
 		}
 	}
-	if containsMessageTarget(targets, "lcd") || containsMessageTarget(targets, "board") || containsMessageTarget(targets, "all") {
-		line1, line2 := message.Line1, message.Line2
-		if line1 == "" && line2 == "" {
-			line1, line2 = splitLCDText(message.Text)
-		}
-		payload, err := native.DisplayTextPayload(
-			native.DisplayLCD,
-			0,
-			lcdASCII(line1)+lcdASCII(line2),
-		)
-		if err != nil {
-			return Event{}, err
-		}
-		if err := client.runtime.Command(ctx, native.OpDisplayText, payload); err != nil {
-			return Event{}, err
-		}
-	}
-	event := client.runtime.PublishStructuredEvent(control.Event{
-		Kind: "message", Text: message.Text,
-		Source: message.Source, Target: message.Target,
-		Targets: targets, MessageType: message.Type, Action: message.Action,
+	event, err := control.SendMessage(ctx, client.runtime, control.Message{
+		Source: message.Source, Targets: message.Targets,
+		MessageType: message.Type, Text: message.Text,
+		Line1: message.Line1, Line2: message.Line2, Action: message.Action,
 		Severity: message.Severity, Correlation: message.Correlation, Delivery: message.Delivery,
-		Lifecycle: map[bool]string{true: "accepted", false: "completed"}[message.Delivery == "async"],
-		Metadata:  message.Metadata,
+		Metadata: message.Metadata,
 	})
+	if err != nil {
+		return Event{}, err
+	}
 	return publicEvent(event), nil
-}
-
-func normalizeMessageTargets(target string, targets []string) ([]string, error) {
-	values := append([]string(nil), targets...)
-	if target = strings.TrimSpace(target); target != "" {
-		values = append(values, strings.Split(target, ",")...)
-	}
-	if len(values) == 0 {
-		return nil, errors.New("message target or targets is required")
-	}
-	result := make([]string, 0, len(values))
-	seen := make(map[string]bool, len(values))
-	for _, raw := range values {
-		value := strings.ToLower(strings.TrimSpace(raw))
-		if !oneOf(value, "client", "server", "bridge", "board", "lcd", "host", "all", "native", "web", "tui") {
-			return nil, fmt.Errorf("unsupported message target %q", raw)
-		}
-		if !seen[value] {
-			seen[value] = true
-			result = append(result, value)
-		}
-	}
-	return result, nil
-}
-
-func containsMessageTarget(targets []string, target string) bool {
-	for _, candidate := range targets {
-		if candidate == target {
-			return true
-		}
-	}
-	return false
 }
 
 func oneOf(value string, allowed ...string) bool {

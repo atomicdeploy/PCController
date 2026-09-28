@@ -1185,9 +1185,11 @@ func remoteControlEvent(event controllerapi.Event) control.Event {
 			FriendlyName: event.Port.FriendlyName, InstanceID: event.Port.InstanceID,
 		},
 		Reason: event.Reason, State: event.State, Gesture: event.Gesture,
-		Source: event.Source, Target: event.Target, MessageType: event.MessageType,
-		Action: event.Action, Metadata: event.Metadata,
-		RFCode: event.RFCode, RFBits: event.RFBits, RFProtocol: event.RFProtocol,
+		Source: event.Source, Target: event.Target, Targets: append([]string(nil), event.Targets...),
+		MessageType: event.MessageType, Action: event.Action,
+		Severity: event.Severity, Correlation: event.Correlation, Delivery: event.Delivery,
+		Metadata: event.Metadata,
+		RFCode:   event.RFCode, RFBits: event.RFBits, RFProtocol: event.RFProtocol,
 		RFPulseUS: event.RFPulseUS, ResetCause: event.ResetCause, ResetCount: event.ResetCount,
 	}
 }
