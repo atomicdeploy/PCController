@@ -1026,10 +1026,11 @@ test('shared branding manifest drives metadata, output name, and multiple multi-
 	const root = await mkdtemp(join(tmpdir(), 'pccontroller-branding-'))
 	try {
 		const icon = join(PROJECT_ROOT, 'Tools', 'Controller', 'winres', 'icon.ico')
+		const manifestIcon = join(PROJECT_ROOT, 'Tools', 'Controller', 'winres', 'icon-paused.ico')
+		const environmentIcon = join(PROJECT_ROOT, 'Tools', 'Controller', 'winres', 'icon-connected.ico')
 		const toast = join(PROJECT_ROOT, 'Tools', 'Controller', 'winres', 'icon.png')
 		const branding = join(root, 'brand.json')
 		await writeFile(branding, `${JSON.stringify({
-			format: 'application-brand/v1',
 			applicationName: 'Workshop Console',
 			tagline: 'One workshop. Every controller.',
 			productName: 'Workshop Control Suite',
@@ -1038,15 +1039,25 @@ test('shared branding manifest drives metadata, output name, and multiple multi-
 			legalCopyright: 'Copyright 2026 Example Devices LLC',
 			executableName: 'workshop-host',
 			toastIcon: toast,
-			windowsIcons: { APP: icon, WORKSHOP: icon }
+			windowsIcons: { APP: manifestIcon, WORKSHOP: icon }
 		}, null, 2)}\n`)
-		const options = parseArguments(['--host-only', '--branding', branding], {})
-		const identity = resolveBuildIdentity(options, {}, new Date('2026-08-01T16:12:58Z'))
+		const options = parseArguments(['--host-only', '--branding', branding], {
+			PCCONTROLLER_BUILD_ICON: environmentIcon
+		})
+		const identity = resolveBuildIdentity(options, {
+			PCCONTROLLER_BUILD_ICON: environmentIcon
+		}, new Date('2026-08-01T16:12:58Z'))
 		assert.equal(identity.appName, 'Workshop Console')
 		assert.equal(identity.productName, 'Workshop Control Suite')
 		assert.equal(identity.companyName, 'Example Devices LLC')
 		assert.equal(identity.executableName, 'workshop-host')
 		assert.deepEqual(Object.keys(identity.iconResources), ['APP', 'WORKSHOP'])
+		assert.equal(identity.iconResources.APP, manifestIcon, 'branding manifest must take precedence over environment')
+		const explicit = resolveBuildIdentity(
+			parseArguments(['--branding', branding, '--icon', icon], { PCCONTROLLER_BUILD_ICON: environmentIcon }),
+			{ PCCONTROLLER_BUILD_ICON: environmentIcon }
+		)
+		assert.equal(explicit.iconResources.APP, icon, 'explicit flag must take precedence over branding manifest')
 		assert.equal(inspectICO(await readFile(icon)).count, 7)
 		const configPath = createWinresIdentityConfig(root, identity, 'a'.repeat(64))
 		const resources = JSON.parse(await readFile(configPath, 'utf8'))
@@ -1056,7 +1067,8 @@ test('shared branding manifest drives metadata, output name, and multiple multi-
 		assert.equal(info.FileDescription, 'Workshop controller host')
 		assert.equal(info.LegalCopyright, 'Copyright 2026 Example Devices LLC')
 		assert.equal(info.OriginalFilename, 'workshop-host.exe')
-		assert.ok(resources.RT_GROUP_ICON.APP['0000'].includes('icon.ico'))
+		assert.equal(resources.RT_MANIFEST['#1']['0409'].description, 'Workshop controller host')
+		assert.ok(resources.RT_GROUP_ICON.APP['0000'].includes('icon-paused.ico'))
 		assert.ok(resources.RT_GROUP_ICON.WORKSHOP['0000'].includes('icon.ico'))
 		const plan = createPlan(options, identity, 'win32')
 		assert.match(JSON.stringify(plan.actions), /<staging>\/workshop-host\.exe/)
@@ -1072,6 +1084,41 @@ test('branding inputs reject unsafe names and malformed icon assets', async () =
 		const icon = join(root, 'bad.ico')
 		await writeFile(icon, 'not-an-icon')
 		assert.throws(() => resolveBuildIdentity(parseArguments(['--icon', icon], {}), {}), /not a Windows ICO/)
+
+		const malformedICO = join(root, 'bad-payload.ico')
+		const icoBytes = Buffer.alloc(62)
+		icoBytes.writeUInt16LE(1, 2)
+		icoBytes.writeUInt16LE(1, 4)
+		icoBytes[6] = 16
+		icoBytes[7] = 16
+		icoBytes.writeUInt32LE(40, 14)
+		icoBytes.writeUInt32LE(22, 18)
+		icoBytes.writeUInt32LE(40, 22)
+		icoBytes.writeInt32LE(16, 26)
+		icoBytes.writeInt32LE(32, 30)
+		icoBytes.writeUInt16LE(1, 34)
+		icoBytes.writeUInt16LE(32, 36)
+		await writeFile(malformedICO, icoBytes)
+		assert.throws(
+			() => resolveBuildIdentity(parseArguments(['--icon', malformedICO], {}), {}),
+			/invalid ICO bitmap payload/
+		)
+
+		const signatureOnlyPNG = join(root, 'signature-only.png')
+		await writeFile(signatureOnlyPNG, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+		assert.throws(
+			() => resolveBuildIdentity(parseArguments(['--toast-icon', signatureOnlyPNG], {}), {}),
+			/not a PNG image/
+		)
+
+		const corruptPNG = join(root, 'bad-crc.png')
+		const corruptBytes = Buffer.from(await readFile(join(PROJECT_ROOT, 'Tools', 'Controller', 'winres', 'icon.png')))
+		corruptBytes[corruptBytes.length - 1] ^= 0xff
+		await writeFile(corruptPNG, corruptBytes)
+		assert.throws(
+			() => resolveBuildIdentity(parseArguments(['--toast-icon', corruptPNG], {}), {}),
+			/invalid PNG .* CRC/
+		)
 		assert.throws(() => resolveBuildIdentity(parseArguments(['--resource-icon', 'bad'], {}), {}), /NAME=PATH/)
 	} finally {
 		await rm(root, { recursive: true, force: true })

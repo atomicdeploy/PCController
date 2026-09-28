@@ -2,18 +2,19 @@
 
 PCController accepts product branding as build input. A branded build does not
 require editing tracked source or generated assets. Pealayer can consume the
-same `application-brand/v1` document so a bundled release uses one product
+same living, unversioned JSON document so a bundled release uses one product
 name, publisher, executable name, and icon set.
 
 ## Shared document
 
 Paths are resolved relative to the JSON document. Unknown additive fields may
 be retained by coordinators, but each product must validate every field it
-uses. PCController currently consumes:
+uses. The document deliberately has no format version or schema-version field:
+compatibility comes from additive fields and tolerant readers rather than
+parallel contract generations. PCController currently consumes:
 
 ```json
 {
-  "format": "application-brand/v1",
   "applicationName": "Workshop Console",
   "tagline": "One workshop. Every controller.",
   "productName": "Workshop Control Suite",

@@ -79,7 +79,6 @@ type hostPackageManifest struct {
 		FileDescription         string          `json:"fileDescription,omitempty"`
 		LegalCopyright          string          `json:"legalCopyright,omitempty"`
 		ExecutableName          string          `json:"executableName,omitempty"`
-		BrandingFormat          string          `json:"brandingFormat,omitempty"`
 		IconResources           json.RawMessage `json:"iconResources,omitempty"`
 		SourceSHA256            string          `json:"sourceSHA256"`
 		SourceFiles             int             `json:"sourceFiles"`
@@ -503,16 +502,30 @@ func verifyWindowsResourceIdentity(values map[string]string, manifest PackageMan
 	if originalFilename == "." || originalFilename == "" {
 		originalFilename = "controller.exe"
 	}
-	for label, value := range map[string]string{
+	required := map[string]string{
 		"product name":      productName,
 		"product version":   host.Identity.Version,
 		"original filename": originalFilename,
 		"source hash":       manifest.SourceSHA256,
 		"build time":        manifest.BuildTime,
+	}
+	// Older host manifests predate customizable publisher metadata. Keep those
+	// packages installable, but when a current package declares branded values,
+	// bind every declaration to the executable's structured version resource.
+	for label, value := range map[string]string{
+		"company name":     host.Identity.CompanyName,
+		"file description": host.Identity.FileDescription,
+		"legal copyright":  host.Identity.LegalCopyright,
 	} {
+		if value != "" {
+			required[label] = value
+		}
+	}
+	for label, value := range required {
 		key := map[string]string{
 			"product name": "ProductName", "product version": "ProductVersion",
 			"original filename": "OriginalFilename", "source hash": "PrivateBuild", "build time": "SpecialBuild",
+			"company name": "CompanyName", "file description": "FileDescription", "legal copyright": "LegalCopyright",
 		}[label]
 		if values[key] != value {
 			return fmt.Errorf("Windows version resource %s does not match declared %s", key, label)

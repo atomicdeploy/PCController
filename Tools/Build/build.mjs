@@ -6,6 +6,7 @@
 
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
+import { inflateSync } from 'node:zlib'
 import {
 	chmodSync,
 	copyFileSync,
@@ -265,9 +266,7 @@ function loadBrandingManifest(path) {
 	try { value = JSON.parse(readFileSync(absolute, 'utf8')) } catch (error) {
 		throw new BuildError(`read branding manifest ${absolute}: ${error.message}`, 2)
 	}
-	if (!value || value.format !== 'application-brand/v1' || Array.isArray(value)) {
-		throw new BuildError('branding manifest format must be application-brand/v1', 2)
-	}
+	if (!value || typeof value !== 'object' || Array.isArray(value)) throw new BuildError('branding manifest must be a JSON object', 2)
 	if (value.windowsIcons !== undefined && (!value.windowsIcons || Array.isArray(value.windowsIcons) || typeof value.windowsIcons !== 'object')) {
 		throw new BuildError('branding manifest windowsIcons must be an object', 2)
 	}
@@ -281,10 +280,84 @@ function resolveBrandAsset(path, directory, label, extension) {
 	let content
 	try { content = readFileSync(absolute) } catch (error) { throw new BuildError(`read ${label} ${absolute}: ${error.message}`, 2) }
 	if (extension === 'ico') inspectICO(content, label)
-	if (extension === 'png' && !content.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
+	if (extension === 'png') inspectPNG(content, label)
+	return absolute
+}
+
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+
+function crc32(content) {
+	let crc = 0xffffffff
+	for (const byte of content) {
+		crc ^= byte
+		for (let bit = 0; bit < 8; bit += 1) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1))
+	}
+	return (crc ^ 0xffffffff) >>> 0
+}
+
+export function inspectPNG(content, label = 'image') {
+	if (!Buffer.isBuffer(content) || content.length < 45 || !content.subarray(0, 8).equals(PNG_SIGNATURE)) {
 		throw new BuildError(`${label} is not a PNG image`, 2)
 	}
-	return absolute
+	let offset = 8
+	let header = null
+	let ended = false
+	const compressed = []
+	while (offset < content.length) {
+		if (offset + 12 > content.length) throw new BuildError(`${label} has a truncated PNG chunk`, 2)
+		const bytes = content.readUInt32BE(offset)
+		const end = offset + 12 + bytes
+		if (bytes > 64 << 20 || end > content.length) throw new BuildError(`${label} has an invalid PNG chunk length`, 2)
+		const type = content.toString('ascii', offset + 4, offset + 8)
+		const payload = content.subarray(offset + 8, offset + 8 + bytes)
+		const expectedCRC = content.readUInt32BE(offset + 8 + bytes)
+		if (crc32(content.subarray(offset + 4, offset + 8 + bytes)) !== expectedCRC) {
+			throw new BuildError(`${label} has an invalid PNG ${type} CRC`, 2)
+		}
+		if (header === null && type !== 'IHDR') throw new BuildError(`${label} PNG does not start with IHDR`, 2)
+		if (type === 'IHDR') {
+			if (header !== null || bytes !== 13) throw new BuildError(`${label} has an invalid PNG IHDR`, 2)
+			const width = payload.readUInt32BE(0)
+			const height = payload.readUInt32BE(4)
+			const bitDepth = payload[8]
+			const colorType = payload[9]
+			const validDepths = { 0: [1, 2, 4, 8, 16], 2: [8, 16], 3: [1, 2, 4, 8], 4: [8, 16], 6: [8, 16] }
+			if (width < 1 || height < 1 || width > 16384 || height > 16384 ||
+				!validDepths[colorType]?.includes(bitDepth) || payload[10] !== 0 || payload[11] !== 0 || ![0, 1].includes(payload[12])) {
+				throw new BuildError(`${label} has unsupported PNG image parameters`, 2)
+			}
+			header = { width, height, bitDepth, colorType, interlace: payload[12] }
+		} else if (type === 'IDAT') compressed.push(payload)
+		else if (type === 'IEND') {
+			if (bytes !== 0 || ended) throw new BuildError(`${label} has an invalid PNG IEND`, 2)
+			ended = true
+			if (end !== content.length) throw new BuildError(`${label} has data after PNG IEND`, 2)
+		}
+		offset = end
+	}
+	if (!header || !ended || compressed.length === 0) throw new BuildError(`${label} PNG is missing image data`, 2)
+	try {
+		const decoded = inflateSync(Buffer.concat(compressed), { maxOutputLength: 256 << 20 })
+		const channels = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 }[header.colorType]
+		const passes = header.interlace === 0
+			? [[0, 0, 1, 1]]
+			: [[0, 0, 8, 8], [4, 0, 8, 8], [0, 4, 4, 8], [2, 0, 4, 4], [0, 2, 2, 4], [1, 0, 2, 2], [0, 1, 1, 2]]
+		let decodedOffset = 0
+		for (const [startX, startY, stepX, stepY] of passes) {
+			const passWidth = header.width > startX ? Math.ceil((header.width - startX) / stepX) : 0
+			const passHeight = header.height > startY ? Math.ceil((header.height - startY) / stepY) : 0
+			if (passWidth === 0 || passHeight === 0) continue
+			const rowBytes = Math.ceil(passWidth * channels * header.bitDepth / 8)
+			for (let row = 0; row < passHeight; row += 1) {
+				if (decodedOffset >= decoded.length || decoded[decodedOffset] > 4) throw new Error('invalid PNG scanline filter')
+				decodedOffset += 1 + rowBytes
+			}
+		}
+		if (decodedOffset !== decoded.length) throw new Error('unexpected PNG scanline payload length')
+	} catch (error) {
+		throw new BuildError(`${label} has an invalid PNG image payload: ${error.message}`, 2)
+	}
+	return Object.freeze(header)
 }
 
 export function inspectICO(content, label = 'icon') {
@@ -294,6 +367,7 @@ export function inspectICO(content, label = 'icon') {
 	const count = content.readUInt16LE(4)
 	if (count < 1 || 6 + count * 16 > content.length) throw new BuildError(`${label} has an invalid ICO directory`, 2)
 	const sizes = []
+	const ranges = []
 	for (let index = 0; index < count; index += 1) {
 		const entry = 6 + index * 16
 		const width = content[entry] || 256
@@ -303,6 +377,32 @@ export function inspectICO(content, label = 'icon') {
 		if (width !== height || bytes === 0 || offset < 6 + count * 16 || offset + bytes > content.length) {
 			throw new BuildError(`${label} has an invalid ICO image entry`, 2)
 		}
+		if (ranges.some(range => offset < range.end && offset + bytes > range.start)) {
+			throw new BuildError(`${label} has overlapping ICO image entries`, 2)
+		}
+		ranges.push({ start: offset, end: offset + bytes })
+		const image = content.subarray(offset, offset + bytes)
+		if (image.subarray(0, 8).equals(PNG_SIGNATURE)) {
+			const png = inspectPNG(image, `${label} ${width}x${height}`)
+			if (png.width !== width || png.height !== height) throw new BuildError(`${label} ICO directory dimensions differ from its PNG payload`, 2)
+		} else {
+			if (image.length < 40) throw new BuildError(`${label} has an invalid ICO bitmap payload`, 2)
+			const headerBytes = image.readUInt32LE(0)
+			const bitmapWidth = Math.abs(image.readInt32LE(4))
+			const bitmapHeight = Math.abs(image.readInt32LE(8))
+			const planes = image.readUInt16LE(12)
+			const bitDepth = image.readUInt16LE(14)
+			const compression = image.readUInt32LE(16)
+			const colorsUsed = image.readUInt32LE(32)
+			const paletteEntries = bitDepth <= 8 ? (colorsUsed || (1 << bitDepth)) : colorsUsed
+			const xorStride = Math.ceil(width * bitDepth / 32) * 4
+			const pixelBytes = headerBytes + paletteEntries * 4 + xorStride * height
+			if (![40, 52, 56, 108, 124].includes(headerBytes) || headerBytes > image.length || bitmapWidth !== width ||
+				bitmapHeight !== height * 2 || planes !== 1 || ![1, 4, 8, 16, 24, 32].includes(bitDepth) ||
+				![0, 3, 6].includes(compression) || pixelBytes > image.length) {
+				throw new BuildError(`${label} has an invalid ICO bitmap payload`, 2)
+			}
+		}
 		sizes.push(width)
 	}
 	return Object.freeze({ count, sizes: Object.freeze(sizes) })
@@ -310,8 +410,11 @@ export function inspectICO(content, label = 'icon') {
 
 function resolveIconResources(options, branding, env) {
 	const resources = { ...branding.windowsIcons }
-	const applicationIcon = options.icon ?? environmentValue(env, 'PCCONTROLLER_BUILD_ICON')
-	if (applicationIcon) resources.APP = applicationIcon
+	if (options.icon !== undefined) resources.APP = options.icon
+	else if (!resources.APP) {
+		const applicationIcon = environmentValue(env, 'PCCONTROLLER_BUILD_ICON')
+		if (applicationIcon) resources.APP = applicationIcon
+	}
 	for (const entry of options.iconResources || []) {
 		const separator = entry.indexOf('=')
 		if (separator <= 0) throw new BuildError('--resource-icon requires NAME=PATH', 2)
@@ -806,7 +909,7 @@ Safe build options:
   --version VALUE           Host version identity (default: product metadata)
   --app-name TEXT           Embed the default host/WebUI application name
   --tagline TEXT            Embed the default first-run host/WebUI tagline
-  --branding FILE           Shared application-brand/v1 JSON (also for Pealayer)
+  --branding FILE           Shared unversioned branding JSON (also for Pealayer)
   --product-name TEXT       Win32 ProductName (default: application name)
   --company-name TEXT       Win32 CompanyName
   --file-description TEXT   Win32 FileDescription
@@ -1804,6 +1907,9 @@ export function createWinresIdentityConfig(stage, identity, sourceSHA256) {
 	info.OriginalFilename = `${identity.executableName}.exe`
 	if (identity.legalCopyright) info.LegalCopyright = identity.legalCopyright
 	else delete info.LegalCopyright
+	const manifest = config.RT_MANIFEST?.['#1']?.['0409']
+	if (!manifest) throw new BuildError('winres configuration has no application manifest')
+	manifest.description = identity.fileDescription
 	for (const [name, iconPath] of Object.entries(identity.iconResources || {})) {
 		config.RT_GROUP_ICON[name] = { '0000': iconPath }
 	}
@@ -2137,7 +2243,6 @@ function buildHost(options, identity, env, log, embeddedDefaults = { enabled: fa
 			fileDescription: identity.fileDescription,
 			legalCopyright: identity.legalCopyright,
 			executableName,
-			brandingFormat: 'application-brand/v1',
 			iconResources: Object.fromEntries(Object.entries(identity.iconResources || {}).map(([name, path]) => {
 				const ico = inspectICO(readFileSync(path), `Win32 icon resource ${name}`)
 				return [name, { sha256: sha256File(path), sizes: ico.sizes }]

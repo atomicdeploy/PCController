@@ -147,7 +147,7 @@ generated C ABI library. The manifest records exact artifact sizes and SHA-256
 hashes.
 
 Custom product builds use the shared
-[`application-brand/v1`](../../docs/Application-Branding.md) document via
+unversioned [application-branding contract](../../docs/Application-Branding.md) via
 `--branding FILE`. Focused flags can override product/company/description,
 copyright, extension-free executable name, the multi-resolution `APP` icon,
 additional named Win32 icon resources, and the toast PNG. Inputs are validated
