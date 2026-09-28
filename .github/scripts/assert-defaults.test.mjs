@@ -52,7 +52,6 @@ test("firmware defaults require an exact application and 1 KiB EEPROM pair", asy
 
 test("host defaults report firmware and EEPROM independently enabled", () => {
   const manifest = {
-    format: "pccontroller-host-package-manifest/v1",
     validation: {
       embeddedDefaults: {
         enabled: true,

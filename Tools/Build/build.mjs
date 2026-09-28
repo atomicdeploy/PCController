@@ -82,7 +82,6 @@ const STALE_HOST_OUTPUTS = [
 	join(HOST_ROOT, 'controller.exe'),
 	join(HOST_ROOT, 'controller')
 ]
-const HOST_MANIFEST_FORMAT = 'pccontroller-host-package-manifest/v1'
 const WINDOWS_GNU_PACKAGE_ID = 'BrechtSanders.WinLibs.POSIX.UCRT'
 const MINIMUM_NODE = [22, 12, 0]
 const MINIMUM_WEB_NODE = [22, 12, 0]
@@ -588,7 +587,6 @@ export function createPlan(options, identity, platform = process.platform) {
 	}
 	const paths = relativeCommandPlanPaths(PROJECT_ROOT, platform)
 	return {
-		format: 'pccontroller-build-plan/v1',
 		canonicalController: paths.controller,
 		firmwareOutput: paths.firmwareOutput,
 		target: BOARD,
@@ -1931,7 +1929,6 @@ function buildHost(options, identity, env, log, embeddedDefaults = { enabled: fa
 	}
 	const artifacts = [executable, ...(toastLogo ? [toastLogo] : []), ...shared.paths].map(path => artifactRecord(path, stage))
 	const manifest = {
-		format: HOST_MANIFEST_FORMAT,
 		generatedUtc: identity.hostBuildTime,
 		target: { platform: process.platform, architecture: goArch },
 		identity: {

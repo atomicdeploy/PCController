@@ -41,7 +41,7 @@ type Metadata struct {
 	EEPROM       Artifact `json:"eeprom"`
 }
 
-// Bundle is enabled only when both current-format recovery images validate.
+// Bundle is enabled only when both recovery images validate.
 type Bundle struct {
 	Enabled  bool
 	Metadata Metadata
