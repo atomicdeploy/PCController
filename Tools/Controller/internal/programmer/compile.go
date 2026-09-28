@@ -248,8 +248,8 @@ func firmwareCompileInputHash(root string, features []FirmwareFeature) (uint32, 
 	return hash, err
 }
 
-// firmwareCompileInputDigest preserves the historic source-only digest for a
-// feature-off build. Enabled feature names are then added canonically, so an
+// firmwareCompileInputDigest preserves the source-only digest for a
+// feature-off build. Enabled feature names are added canonically, so an
 // image cannot be mistaken for the same source compiled with different gates.
 func firmwareCompileInputDigest(root string, features []FirmwareFeature) (uint32, string, int, error) {
 	sourceHash, sourceSHA256, sourceFiles, err := firmwareSourceDigest(root)
@@ -257,7 +257,7 @@ func firmwareCompileInputDigest(root string, features []FirmwareFeature) (uint32
 		return sourceHash, sourceSHA256, sourceFiles, err
 	}
 	manifest := sha256.New()
-	_, _ = fmt.Fprintf(manifest, "pccontroller-avr-compile-input/v1\nsource-sha256:%s\n", sourceSHA256)
+	_, _ = fmt.Fprintf(manifest, "pccontroller-avr-compile-input\nsource-sha256:%s\n", sourceSHA256)
 	for _, feature := range features {
 		_, _ = fmt.Fprintf(manifest, "feature:%s\n", feature)
 	}

@@ -1020,7 +1020,6 @@ function main() {
   const options = parseArgs(process.argv.slice(2))
   mkdirSync(buildReportDir, { recursive: true })
   const report = {
-    format: 'pccontroller-dependency-update-report/v1',
     mode: options.mode,
     started_at_utc: new Date().toISOString(),
     proxy_variables: configuredProxyNames(),
