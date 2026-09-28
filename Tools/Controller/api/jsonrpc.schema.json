@@ -1350,17 +1350,17 @@
     },
     "controller.ui.config": {
       "capability": "read",
-      "summary": "ui config",
+      "summary": "Return host-owned UI settings, including status_interval_ms and measurement_freshness_ms.",
       "idempotency": "safe"
     },
     "controller.ui.config.get": {
       "capability": "read",
-      "summary": "ui config get",
+      "summary": "Return host-owned UI settings, including status_interval_ms and measurement_freshness_ms.",
       "idempotency": "safe"
     },
     "controller.ui.config.set": {
       "capability": "host_configuration",
-      "summary": "ui config set",
+      "summary": "Atomically persist host UI fields; status_interval_ms is 50..60000 and measurement_freshness_ms is refresh+100..120000.",
       "idempotency": "idempotent-with-authoritative-readback"
     },
     "controller.unsubscribe": {

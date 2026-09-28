@@ -29,6 +29,7 @@
     "setup_complete": false,
     "welcome_melody": "notify",
     "status_interval_ms": 250,
+    "measurement_freshness_ms": 1500,
     "idle_status_interval_ms": 0,
     "event_log_limit": 500,
     "history_hours": 24,
