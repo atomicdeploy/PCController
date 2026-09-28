@@ -40,6 +40,12 @@ export function segmentStateFromEvent(event: ControllerEvent): Pick<FrontPanelSt
   }
 }
 
+/** Identifies pushed output frames that can update a snapshot without polling. */
+export function isPushedOutputEvent(event: Pick<ControllerEvent, 'kind'>): boolean {
+  const kind = event.kind.trim().toLowerCase()
+  return kind === 'status_led.changed' || kind === 'front_panel.segment'
+}
+
 export function applyPushedOutputEvent(snapshot: Snapshot, event: ControllerEvent): Snapshot {
   const led = statusLEDFromEvent(event)
   if (led) return applyStatusLEDEvent(snapshot, event)
