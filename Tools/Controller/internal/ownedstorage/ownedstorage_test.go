@@ -42,7 +42,7 @@ func TestMarkerUsesUnversionedProductIdentityAndChecksOwner(t *testing.T) {
 	if err := VerifyFor(root, "different-owner"); !errors.Is(err, ErrNotOwned) {
 		t.Fatalf("different owner verification = %v", err)
 	}
-	fields["format"] = json.RawMessage(`"pccontroller-host-data-owner/v1"`)
+	fields["format"] = json.RawMessage(`"foreign-data-owner"`)
 	content, err = json.Marshal(fields)
 	if err != nil {
 		t.Fatal(err)
