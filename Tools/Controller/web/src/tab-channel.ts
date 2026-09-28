@@ -2,8 +2,6 @@ import type { Appearance, ControllerEvent } from './types'
 
 /** Same-origin protocol name used to isolate controller tab messages. */
 export const TAB_CHANNEL_PROTOCOL = `${__PRODUCT_PROTOCOL__}.tab-sync`
-/** Wire schema version for same-origin tab synchronization. */
-export const TAB_CHANNEL_VERSION = 1 as const
 
 const localTabOrigin = `${__PRODUCT_PROTOCOL__}://local`
 
@@ -75,10 +73,9 @@ export type TabChannelPayload =
   | TerminalPayload
   | ControllerEventPayload
 
-/** Versioned and expiring envelope sent through BroadcastChannel. */
+/** Expiring envelope sent through BroadcastChannel. */
 export interface TabChannelEnvelope {
   protocol: typeof TAB_CHANNEL_PROTOCOL
-  version: typeof TAB_CHANNEL_VERSION
   origin: string
   messageId: string
   tabId: string
@@ -197,17 +194,36 @@ function isRecord(value: unknown): value is RecordValue {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function hasOnlyKeys(value: RecordValue, allowed: readonly string[]): boolean {
-  const permitted = new Set(allowed)
-  return Object.keys(value).every((key) => permitted.has(key))
-}
-
 function byteLength(value: string): number {
   return new TextEncoder().encode(value).byteLength
 }
 
 function containsSecret(value: string): boolean {
   return secretValuePatterns.some((pattern) => pattern.test(value))
+}
+
+function containsSecretMaterial(value: unknown): boolean {
+  const pending: unknown[] = [value]
+  const seen = new Set<object>()
+  while (pending.length > 0) {
+    const current = pending.pop()
+    if (typeof current === 'string') {
+      if (containsSecret(current)) return true
+      continue
+    }
+    if (typeof current !== 'object' || current === null) continue
+    if (seen.has(current)) return true
+    seen.add(current)
+    if (Array.isArray(current)) {
+      pending.push(...current)
+      continue
+    }
+    for (const [key, nested] of Object.entries(current)) {
+      if (secretKeyPattern.test(key)) return true
+      pending.push(nested)
+    }
+  }
+  return false
 }
 
 function safeText(value: unknown, maximumBytes: number, allowEmpty = false): string | null {
@@ -231,7 +247,6 @@ function safeInteger(value: unknown, minimum: number, maximum: number): number |
 }
 
 function sanitizePresence(raw: RecordValue): PresencePayload | null {
-  if (!hasOnlyKeys(raw, ['type', 'state', 'page'])) return null
   if (raw.state !== 'active' && raw.state !== 'hidden' && raw.state !== 'leaving') return null
   if (raw.page !== undefined && (typeof raw.page !== 'string' || !pagePattern.test(raw.page))) return null
   return {
@@ -242,11 +257,9 @@ function sanitizePresence(raw: RecordValue): PresencePayload | null {
 }
 
 function sanitizeAppearance(raw: RecordValue): AppearancePayload | null {
-  if (!hasOnlyKeys(raw, ['type', 'appearance', 'etag']) || !isRecord(raw.appearance)) return null
+  if (!isRecord(raw.appearance)) return null
   if (raw.etag !== undefined && (typeof raw.etag !== 'string' || !/^[a-f0-9]{64}$/.test(raw.etag))) return null
   const value = raw.appearance
-  const keys = ['theme', 'locale', 'direction', 'reduceMotion', 'compactNumbers', 'audioMuted', 'audioVolume'] as const
-  if (!hasOnlyKeys(value, keys) || Object.keys(value).length === 0) return null
   const appearance: AppearancePatch = {}
   if (value.theme !== undefined) {
     if (value.theme !== 'system' && value.theme !== 'light' && value.theme !== 'dark') return null
@@ -270,13 +283,13 @@ function sanitizeAppearance(raw: RecordValue): AppearancePayload | null {
     if (typeof value.audioVolume !== 'number' || !Number.isFinite(value.audioVolume) || value.audioVolume < 0 || value.audioVolume > 1) return null
     appearance.audioVolume = value.audioVolume
   }
+  if (Object.keys(appearance).length === 0) return null
   return { type: 'appearance', appearance, ...(raw.etag === undefined ? {} : { etag: raw.etag }) }
 }
 
 function sanitizeTerminal(raw: RecordValue): TerminalPayload | null {
-  if (!hasOnlyKeys(raw, ['type', 'entry']) || !isRecord(raw.entry)) return null
+  if (!isRecord(raw.entry)) return null
   const entry = raw.entry
-  if (!hasOnlyKeys(entry, ['kind', 'text', 'at'])) return null
   if (entry.kind !== 'command' && entry.kind !== 'output' && entry.kind !== 'error' && entry.kind !== 'system') return null
   const text = safeText(entry.text, maximumTerminalBytes)
   const at = safeInteger(entry.at, 0, Number.MAX_SAFE_INTEGER)
@@ -298,14 +311,8 @@ function sanitizeMetadata(value: unknown): Record<string, string> | undefined | 
 }
 
 function sanitizeControllerEvent(raw: RecordValue): ControllerEventPayload | null {
-  if (!hasOnlyKeys(raw, ['type', 'event']) || !isRecord(raw.event)) return null
+  if (!isRecord(raw.event)) return null
   const event = raw.event
-  const allowed = [
-    'id', 'time', 'kind', 'text', 'state', 'lifecycle', 'reason', 'source', 'target',
-    'message_type', 'action', 'gesture', 'key', 'rf_id', 'rf_code', 'rf_bits',
-    'rf_protocol', 'metadata',
-  ] as const
-  if (!hasOnlyKeys(event, allowed)) return null
   const id = safeInteger(event.id, 0, Number.MAX_SAFE_INTEGER)
   const time = safeText(event.time, 80)
   const kind = safeText(event.kind, 128)
@@ -346,7 +353,7 @@ function sanitizeControllerEvent(raw: RecordValue): ControllerEventPayload | nul
 }
 
 function sanitizePayload(value: unknown): TabChannelPayload | null {
-  if (!isRecord(value) || typeof value.type !== 'string') return null
+  if (!isRecord(value) || !envelopeSizeIsSafe(value) || containsSecretMaterial(value) || typeof value.type !== 'string') return null
   switch (value.type) {
     case 'presence': return sanitizePresence(value)
     case 'appearance': return sanitizeAppearance(value)
@@ -381,7 +388,7 @@ export function createTabChannel(options: TabChannelOptions = {}): TabChannel {
   const instanceSequence = ++localTabSequence
   const tabSeed = safeID(idFactory('tab'), `fallback-${instanceSequence.toString(36)}`, 64)
   const tabId = `tab:${tabSeed}:${instanceSequence.toString(36)}`
-  const channelName = `${TAB_CHANNEL_PROTOCOL}:v${TAB_CHANNEL_VERSION}:${originHash(origin)}`
+  const channelName = `${TAB_CHANNEL_PROTOCOL}:${originHash(origin)}`
   const listeners = new Set<TabChannelListener>()
   const seen = new Map<string, number>()
   let messageSequence = 0
@@ -401,8 +408,8 @@ export function createTabChannel(options: TabChannelOptions = {}): TabChannel {
 
   const decodeEnvelope = (value: unknown): TabChannelEnvelope | null => {
     if (!isRecord(value) || !envelopeSizeIsSafe(value)) return null
-    if (!hasOnlyKeys(value, ['protocol', 'version', 'origin', 'messageId', 'tabId', 'sentAt', 'expiresAt', 'payload'])) return null
-    if (value.protocol !== TAB_CHANNEL_PROTOCOL || value.version !== TAB_CHANNEL_VERSION || value.origin !== origin) return null
+    if (containsSecretMaterial(value)) return null
+    if (value.protocol !== TAB_CHANNEL_PROTOCOL || value.origin !== origin) return null
     if (typeof value.messageId !== 'string' || !identifierPattern.test(value.messageId)) return null
     if (typeof value.tabId !== 'string' || !identifierPattern.test(value.tabId) || value.tabId === tabId) return null
     if (typeof value.sentAt !== 'number' || !Number.isSafeInteger(value.sentAt) || value.sentAt < 0) return null
@@ -416,7 +423,6 @@ export function createTabChannel(options: TabChannelOptions = {}): TabChannel {
     seen.set(value.messageId, value.expiresAt)
     return {
       protocol: TAB_CHANNEL_PROTOCOL,
-      version: TAB_CHANNEL_VERSION,
       origin,
       messageId: value.messageId,
       tabId: value.tabId,
@@ -460,7 +466,6 @@ export function createTabChannel(options: TabChannelOptions = {}): TabChannel {
     const messageId = `${tabId}:${messageSequence.toString(36)}:${seed}`
     const envelope: TabChannelEnvelope = {
       protocol: TAB_CHANNEL_PROTOCOL,
-      version: TAB_CHANNEL_VERSION,
       origin,
       messageId,
       tabId,
