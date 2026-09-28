@@ -42,6 +42,20 @@ func TestMarkerUsesUnversionedProductIdentityAndChecksOwner(t *testing.T) {
 	if err := VerifyFor(root, "different-owner"); !errors.Is(err, ErrNotOwned) {
 		t.Fatalf("different owner verification = %v", err)
 	}
+	fields["format"] = json.RawMessage(`"pccontroller-host-data-owner/v1"`)
+	content, err = json.Marshal(fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, MarkerName), content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyFor(root, "test-owner"); err != nil {
+		t.Fatalf("initial alpha ownership marker was rejected: %v", err)
+	}
+	if err := VerifyFor(root, "different-owner"); !errors.Is(err, ErrNotOwned) {
+		t.Fatalf("initial alpha marker bypassed owner check: %v", err)
+	}
 	fields["format"] = json.RawMessage(`"foreign-data-owner"`)
 	content, err = json.Marshal(fields)
 	if err != nil {
