@@ -38,6 +38,7 @@ coverage.html
 
 # Node package/install state
 **/node_modules/
+**/.vite-cache/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

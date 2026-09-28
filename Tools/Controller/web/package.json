@@ -17,9 +17,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "vite build",
-    "dev": "vite --host 127.0.0.1",
-    "test": "vitest run",
+    "build": "vite build --configLoader runner",
+    "dev": "vite --configLoader runner --host 127.0.0.1",
+    "test": "vitest run --configLoader runner",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
