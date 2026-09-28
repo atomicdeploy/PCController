@@ -281,11 +281,11 @@ not be committed.
 
 [`Tools/VirtualBoard/`](../Tools/VirtualBoard) is a transitional, independently
 implemented C++ model. It is not the intended long-term architecture. Issue
-[#103](https://github.com/atomicdeploy/PCController/issues/103) owns moving its
+PCController issue #103 owns moving its
 valid behavior into one production firmware/core compiled for AVR and supported
 OS-native platforms, then deleting the duplicate parser, dispatcher, state
 machines, and capability model. Issue
-[#227](https://github.com/atomicdeploy/PCController/issues/227) owns standalone,
+PCController issue #227 owns standalone,
 native-local, stream, and loadable adapters around that same firmware.
 
 Until that migration is complete, this directory contains:

@@ -10,9 +10,9 @@ embedding application become an independent UART owner.
 
 This package embeds the **PC host**, not a second firmware implementation. The
 one production firmware compiled for AVR and supported OS-native targets is
-tracked by [#103](https://github.com/atomicdeploy/PCController/issues/103);
+tracked by PCController issue #103;
 its standalone, native-local, stream, and loadable adapters are tracked by
-[#227](https://github.com/atomicdeploy/PCController/issues/227). An OS-native
+PCController issue #227 tracks its adapters. An OS-native
 firmware instance remains a board peer reached through the same negotiated
 board contract as AVR, never through a VirtualBoard-only semantic shortcut.
 
