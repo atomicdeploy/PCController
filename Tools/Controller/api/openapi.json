@@ -3826,7 +3826,7 @@
         "properties": {
           "format": {
             "type": "string",
-            "const": "pccontroller-server-proof/v1"
+            "const": "pccontroller-server-proof"
           },
           "nonce": {
             "type": "string",

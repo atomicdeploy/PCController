@@ -12,8 +12,14 @@ import (
 	"pccontroller.local/controller/internal/artifacts"
 )
 
-// ManifestFormat identifies the supported remote update-manifest schema.
-const ManifestFormat = "controller-update-manifest/v1"
+// ManifestFormat identifies the living remote update-manifest contract.
+const ManifestFormat = "controller-update-manifest"
+
+const legacyManifestFormat = "controller-update-manifest/v1"
+
+func supportedManifestFormat(value string) bool {
+	return value == ManifestFormat || value == legacyManifestFormat
+}
 
 // Candidate preserves the source metadata needed to compare and stage one
 // immutable update without smuggling authentication secrets into inventories.

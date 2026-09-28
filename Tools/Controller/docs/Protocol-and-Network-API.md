@@ -1293,7 +1293,7 @@ Provider and manifest discovery use a companion, product-neutral contract:
 |---|---|---|
 | `controller.discovery.github.workflow` | `repository`, `kind`, optional `branch`, `workflow`, `platform`, `api_base_url`, build identity, `packed_timestamp`, `bearer_token` | newest successful matching run and its non-expired artifacts; metadata only |
 | `controller.discovery.github.release` | `repository`, `kind`, optional `tag`, `include_prerelease`, `platform`, `api_base_url`, `packed_timestamp`, `bearer_token` | latest stable, requested tag, or opted-in prerelease assets; reads `SHA256SUMS` when provided |
-| `controller.discovery.manifest` | `url`, optional `bearer_token` | fetch and validate a `controller-update-manifest/v1` document |
+| `controller.discovery.manifest` | `url`, optional `bearer_token` | fetch and validate a living `controller-update-manifest` document |
 | `controller.discovery.local_manifest` | `{}` | publish this primary host's deduplicated inventory in the same portable manifest format |
 | `controller.discovery.check` | current artifact identity, `kind`, optional `platform`, candidate list | `same`, `newer`, `older`, `different`, or `unavailable`, using digest before packed/build time |
 | `controller.discovery.stage` | candidate, optional transient `bearer_token`, `idempotency_key` | queue proxy-aware download, digest/size verification, safe ZIP member selection, and content-store import; never programs |
@@ -1310,7 +1310,7 @@ A minimal independently hosted manifest is:
 
 ```json
 {
-  "format": "controller-update-manifest/v1",
+  "format": "controller-update-manifest",
   "generated_at": "2026-08-02T00:00:00Z",
   "artifacts": [
     {

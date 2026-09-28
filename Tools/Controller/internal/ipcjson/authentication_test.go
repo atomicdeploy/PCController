@@ -3,6 +3,7 @@ package ipcjson
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -154,6 +155,23 @@ func TestServerProofAuthenticatesExactListenerBeforeBearerUse(t *testing.T) {
 	if response.StatusCode != http.StatusOK || proof.Nonce != nonce || proof.Audience != listenerAddress ||
 		proof.InstanceID != "edge-instance" || !VerifyServerProof(testServerProofToken, proof) || VerifyServerProof("wrong-token", proof) {
 		t.Fatalf("server proof status=%d value=%#v", response.StatusCode, proof)
+	}
+}
+
+func TestServerProofAcceptsLegacyDomainWithoutAllowingFormatSubstitution(t *testing.T) {
+	proof := ServerProof{
+		Format: legacyServerProofFormat, Nonce: strings.Repeat("A", 43),
+		Audience: "192.0.2.5:8787", InstanceID: "edge-instance",
+	}
+	proof.Proof = base64.RawURLEncoding.EncodeToString(serverProofMAC(
+		proof.Format, testServerProofToken, proof.Nonce, proof.Audience, proof.InstanceID,
+	))
+	if !VerifyServerProof(testServerProofToken, proof) {
+		t.Fatal("legacy proof domain was not accepted")
+	}
+	proof.Format = serverProofFormat
+	if VerifyServerProof(testServerProofToken, proof) {
+		t.Fatal("proof remained valid after authenticated format substitution")
 	}
 }
 

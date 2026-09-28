@@ -3,13 +3,13 @@ package fleet
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
 
 func validRoute(now time.Time) RouteEnvelope {
 	return RouteEnvelope{
-		SchemaVersion:    RouteSchemaVersion,
 		RouteID:          "00112233445566778899aabbccddeeff",
 		OperationID:      "operation-1",
 		TraceID:          "trace-1",
@@ -25,6 +25,37 @@ func validRoute(now time.Time) RouteEnvelope {
 				"enabled": json.RawMessage(`true`),
 			},
 		},
+	}
+}
+
+func TestRouteJSONUsesLivingUnversionedContractAndToleratesAdditions(t *testing.T) {
+	now := time.Now().UTC()
+	encoded, err := json.Marshal(validRoute(now))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &document); err != nil {
+		t.Fatal(err)
+	}
+	if _, present := document["schema"]; present {
+		t.Fatalf("writer emitted a protocol generation: %s", encoded)
+	}
+
+	document["schema"] = json.RawMessage(`1`)
+	document["future_capability"] = json.RawMessage(`{"enabled":true}`)
+	legacy, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoder := json.NewDecoder(strings.NewReader(string(legacy)))
+	decoder.DisallowUnknownFields()
+	var decoded RouteEnvelope
+	if err := decoder.Decode(&decoded); err != nil {
+		t.Fatalf("tolerant living-contract decode rejected legacy/additive fields: %v", err)
+	}
+	if err := decoded.ValidateAt(now); err != nil {
+		t.Fatalf("decoded route rejected: %v", err)
 	}
 }
 
