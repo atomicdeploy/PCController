@@ -108,6 +108,8 @@ import {
   type WebActionProgress,
 } from './app-actions'
 import { AppPreferencesDialog } from './app-preferences-dialog'
+import { primaryShortcutARIA, primaryShortcutModifier } from './client-platform'
+import { publishBrowserController, publishBrowserControllerState } from './browser-controller'
 import {
   loadQuickHeaderPreferences,
   normalizeQuickHeaderPreferences,
@@ -989,6 +991,35 @@ export default function App() {
       })
   }, [appInstanceID, appearance.locale, applyPage, demo, navigationSession, navigationSync, startupProbeResolved])
 
+  const browserControllerState = useMemo(() => ({
+    title: productTitle,
+    hostVersion: uiConfig?.host_version || '',
+    page,
+    hostOnline: !demo && streamState === 'open',
+    boardConnected: !demo && snapshot.connected,
+    port: snapshot.port.name || '',
+    transport: streamState,
+    eventCount: events.length,
+  }), [demo, events.length, page, productTitle, snapshot.connected, snapshot.port.name, streamState, uiConfig?.host_version])
+
+  useEffect(() => publishBrowserController({
+    api: 'PCController.browser',
+    inspect: () => browserControllerState,
+    command: (value) => {
+      const command = value.trim()
+      if (!command) return Promise.reject(new Error('PCController.command requires a non-empty command'))
+      return runCommand(command)
+    },
+    refresh,
+    navigate: (value) => {
+      const destination = navigation.find((candidate) => candidate.id === value)?.id
+      if (!destination) throw new Error(`Unknown PCController page: ${value}`)
+      navigate(destination)
+    },
+  }), [browserControllerState, navigate, refresh, runCommand])
+
+  useEffect(() => { publishBrowserControllerState(browserControllerState) }, [browserControllerState])
+
   useEffect(() => {
     historyNavigationRef.current = (value) => navigate(value, 'none')
     return () => { historyNavigationRef.current = () => undefined }
@@ -1640,7 +1671,7 @@ export default function App() {
       <header className="topbar">
         <button className="mobile-menu" aria-label={t('openNavigation')} onClick={() => setMobileNav(true)}><Menu size={20} /></button>
         <div className="breadcrumbs"><span>{productShortName}</span><i>/</i><strong>{t(current.label)}</strong></div>
-        <button className="command-trigger" aria-keyshortcuts="Control+K Meta+K" onClick={() => { setPaletteIndex(0); setPalette(true) }}><Search size={16} /><span>{t('searchCommands')}</span><KeyCombo keys={[["Ctrl", "⌘"], "K"]} /></button>
+        <button className="command-trigger" aria-keyshortcuts={primaryShortcutARIA()} onClick={() => { setPaletteIndex(0); setPalette(true) }}><Search size={16} /><span>{t('searchCommands')}</span><KeyCombo keys={[primaryShortcutModifier(), "K"]} /></button>
         <div className="topbar__actions">
           {demo && <StatusBadge tone="warn">{t('demoMode')}</StatusBadge>}
           {reconnectAvailable
