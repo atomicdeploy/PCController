@@ -105,6 +105,16 @@ bool setPixel(uint8_t index, const RgbColor &color) {
   return true;
 }
 
+bool stagePixels(uint8_t index, const uint8_t *rgb, uint8_t length) {
+  // Walk triples instead of pulling AVR integer division/modulo into dispatch.
+  while (length) {
+    if (length < 3 || !setPixel(index++, RgbColor(rgb[0], rgb[1], rgb[2]))) return false;
+    rgb += 3;
+    length -= 3;
+  }
+  return true;
+}
+
 void fill(const RgbColor &color) {
   for (uint8_t index = 0; index < pixelCount; ++index) {
     setPixel(index, color);

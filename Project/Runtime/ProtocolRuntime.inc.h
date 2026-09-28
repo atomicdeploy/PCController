@@ -620,7 +620,7 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
 
     case AddressableLed: {
       uint8_t *workspace = macroPlayback.claimSharedWorkspace();
-      if (!workspace) goto badPayload;
+      if (!workspace) goto busy;
       AddressableLeds::bindWorkspace(workspace);
       // 0xFE configures count; 0xFD stages RGB pixels; 0xFC commits once.
       // ACK each chunk before transmitting another: show masks UART IRQs.
@@ -633,12 +633,7 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
         goto acknowledged;
       }
       if (length >= 5 && payload[0] == 0xFD) {
-        const uint8_t pixels = (length - 2) / 3;
-        if ((length - 2) % 3 || payload[1] + pixels > AddressableLeds::count()) goto badPayload;
-        for (uint8_t i = 0; i < pixels; ++i) {
-          const uint8_t offset = 2 + i * 3;
-          AddressableLeds::setPixel(payload[1] + i, RgbColor(payload[offset], payload[offset + 1], payload[offset + 2]));
-        }
+        if (!AddressableLeds::stagePixels(payload[1], payload + 2, length - 2)) goto badPayload;
         goto acknowledged;
       }
       if (length != 5 ||
@@ -821,6 +816,10 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
       return;
 
     case RelaySet:
+      if (length == 1) {
+        if (!relays.requestMask(payload[0], frameNow)) goto unsafe;
+        goto acknowledged;
+      }
       if (length < 2 || payload[0] > 7 || payload[1] > 1) {
         goto badPayload;
       }
