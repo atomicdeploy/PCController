@@ -37,7 +37,7 @@ func (desktop *fakeDesktop) RemoveOwned(_ context.Context, target DesktopTarget)
 
 func TestPackageInventoryBindsHostExecutableAndResources(t *testing.T) {
 	packageRoot, manifest := writeTestPackage(t, "1.2.3", "first")
-	if manifest.Format != packageManifestFormat || manifest.Target.Platform != "windows" || manifest.Target.Architecture != "amd64" {
+	if manifest.Target.Platform != "windows" || manifest.Target.Architecture != "amd64" {
 		t.Fatalf("manifest identity=%#v", manifest)
 	}
 	if manifest.ExecutablePath != "controller.exe" || len(manifest.Files) != 3 {
@@ -426,7 +426,7 @@ func TestCanonicalRetiringJournalRecoversBothRenameBoundaries(t *testing.T) {
 			next.PreviousSlot = filepath.ToSlash(filepath.Join(packagesDirectory, installed.State.ActiveSHA256))
 			next.PreviousSHA256 = installed.State.ActiveSHA256
 			journal := transactionJournal{
-				Format: transactionFormat, ID: "crash", Operation: "install", Phase: "canonical-retiring",
+				ID: "crash", Operation: "install", Phase: "canonical-retiring",
 				Stage: stageRelative, Retired: filepath.ToSlash(filepath.Join(stagingDirectory, "retired-crash")),
 				NewSlot: canonicalDirectory, NewSHA256: manifest.RootSHA256, PreviousState: installed.State, DesiredState: &next,
 				UpdatedAt: time.Now().UTC(),
@@ -553,7 +553,7 @@ func TestRecoveryCompletesDesktopActivationAfterStateCommit(t *testing.T) {
 	desktop.ensure = nil
 	desired := *installed.State
 	journal := transactionJournal{
-		Format: transactionFormat, ID: "state-committed", Operation: "install",
+		ID: "state-committed", Operation: "install",
 		Phase: "slot-ready", NewSlot: installed.State.ActiveSlot,
 		NewSHA256: installed.State.ActiveSHA256, DesiredState: &desired, UpdatedAt: time.Now().UTC(),
 	}
@@ -585,7 +585,7 @@ func TestRecoveryVerifiesSlotBeforeDesktopActivation(t *testing.T) {
 			desktop.ensure = nil
 			desired := *installed.State
 			journal := transactionJournal{
-				Format: transactionFormat, ID: "corrupt-recovery", Operation: "install",
+				ID: "corrupt-recovery", Operation: "install",
 				Phase: phase, NewSlot: installed.State.ActiveSlot,
 				NewSHA256: installed.State.ActiveSHA256, DesiredState: &desired, UpdatedAt: time.Now().UTC(),
 			}
@@ -646,7 +646,7 @@ func TestPresentationJournalRecoversEnableAndRenameCrashBoundaries(t *testing.T)
 				}
 			}
 			journal := transactionJournal{
-				Format: transactionFormat, ID: test.name, Operation: "install", Phase: "presentation",
+				ID: test.name, Operation: "install", Phase: "presentation",
 				NewSlot: desired.ActiveSlot, NewSHA256: desired.ActiveSHA256,
 				PreviousState: &previous, DesiredState: &desired, UpdatedAt: time.Now().UTC(),
 			}
@@ -703,7 +703,7 @@ func TestPackageRenameRecoveryCleansPriorIdentityAndRetainsFailures(t *testing.T
 			}
 			desired := *updated.State
 			journal := transactionJournal{
-				Format: transactionFormat, ID: test.name, Operation: "install", Phase: test.phase,
+				ID: test.name, Operation: "install", Phase: test.phase,
 				NewSlot: desired.ActiveSlot, NewSHA256: desired.ActiveSHA256,
 				PreviousState: &previous, DesiredState: &desired, UpdatedAt: time.Now().UTC(),
 			}
@@ -752,7 +752,7 @@ func TestInterruptedUninstallRollsBackToRetryableState(t *testing.T) {
 			desktop.ensure = nil
 			stateCopy := *installed.State
 			journal := transactionJournal{
-				Format: transactionFormat, ID: "uninstall", Operation: "uninstall",
+				ID: "uninstall", Operation: "uninstall",
 				Phase: phase, PreviousState: &stateCopy, UpdatedAt: time.Now().UTC(),
 			}
 			if err := writeJSONAtomic(filepath.Join(root, transactionName), journal, 0o600); err != nil {
@@ -781,7 +781,7 @@ func TestDetachedUninstallTombstoneIsRecovered(t *testing.T) {
 		t.Fatal(err)
 	}
 	journal := transactionJournal{
-		Format: transactionFormat, ID: "uninstall", Operation: "uninstall",
+		ID: "uninstall", Operation: "uninstall",
 		Phase: "uninstalling", UpdatedAt: time.Now().UTC(),
 	}
 	if err := writeJSONAtomic(filepath.Join(root, transactionName), journal, 0o600); err != nil {
@@ -887,7 +887,7 @@ func TestOwnershipChecksAndInterruptedStagingRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	journal := transactionJournal{
-		Format: transactionFormat, ID: "abandoned", Operation: "repair",
+		ID: "abandoned", Operation: "repair",
 		Phase: "staging", Stage: filepath.ToSlash(filepath.Join(stagingDirectory, "abandoned")), UpdatedAt: time.Now().UTC(),
 	}
 	if err := writeJSONAtomic(filepath.Join(root, transactionName), journal, 0o600); err != nil {
@@ -1127,7 +1127,6 @@ func writeTestPackage(t *testing.T, version, marker string) (string, PackageMani
 		t.Fatal(err)
 	}
 	host := map[string]any{
-		"format": hostManifestFormat,
 		"target": map[string]any{"platform": "windows", "architecture": "amd64"},
 		"identity": map[string]any{
 			"version": version, "appName": productidentity.DefaultTitle,

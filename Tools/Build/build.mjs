@@ -82,7 +82,6 @@ const STALE_HOST_OUTPUTS = [
 	join(HOST_ROOT, 'controller.exe'),
 	join(HOST_ROOT, 'controller')
 ]
-const HOST_MANIFEST_FORMAT = 'pccontroller-host-package-manifest/v1'
 const FIRMWARE_MANIFEST_FORMATS = Object.freeze([
 	'pccontroller-avr-firmware-manifest/v1',
 	'pccontroller-avr-firmware-manifest/v2'
@@ -592,7 +591,6 @@ export function createPlan(options, identity, platform = process.platform) {
 	}
 	const paths = relativeCommandPlanPaths(PROJECT_ROOT, platform)
 	return {
-		format: 'pccontroller-build-plan/v1',
 		canonicalController: paths.controller,
 		firmwareOutput: paths.firmwareOutput,
 		target: BOARD,
@@ -1791,7 +1789,6 @@ export function stageEmbeddedDefaults(manifest, identity) {
 		data_bytes: Number(eeprom.dataBytes), source_path: String(eeprom.path || '')
 	}
 	const metadata = {
-		format: 'controller-embedded-defaults/v1',
 		generated_utc: identity.hostBuildTime,
 		firmware: firmwareRecord,
 		eeprom: eepromRecord
@@ -1936,7 +1933,6 @@ function buildHost(options, identity, env, log, embeddedDefaults = { enabled: fa
 	}
 	const artifacts = [executable, ...(toastLogo ? [toastLogo] : []), ...shared.paths].map(path => artifactRecord(path, stage))
 	const manifest = {
-		format: HOST_MANIFEST_FORMAT,
 		generatedUtc: identity.hostBuildTime,
 		target: { platform: process.platform, architecture: goArch },
 		identity: {

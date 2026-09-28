@@ -25,11 +25,9 @@ import (
 )
 
 const (
-	PackageManifestName   = "installation-package.json"
-	packageManifestFormat = "pccontroller-installation-package/v1"
-	hostManifestFormat    = "pccontroller-host-package-manifest/v1"
-	maximumPackageFiles   = 4096
-	maximumManifestBytes  = 4 << 20
+	PackageManifestName  = "installation-package.json"
+	maximumPackageFiles  = 4096
+	maximumManifestBytes = 4 << 20
 )
 
 // PackageFile binds one installable relative path to its exact bytes. Only
@@ -50,7 +48,6 @@ type PackageTarget struct {
 // package identity. RootSHA256 hashes every identity field and ordered file
 // record, so state cannot accidentally combine files from different builds.
 type PackageManifest struct {
-	Format             string        `json:"format"`
 	ProductAppID       string        `json:"product_app_id"`
 	Version            string        `json:"version"`
 	SourceSHA256       string        `json:"source_sha256"`
@@ -64,7 +61,6 @@ type PackageManifest struct {
 }
 
 type hostPackageManifest struct {
-	Format       string `json:"format"`
 	GeneratedUTC string `json:"generatedUtc,omitempty"`
 	Target       struct {
 		Platform     string `json:"platform"`
@@ -160,8 +156,8 @@ func GeneratePackageManifest(packageRoot, outputPath string, options ManifestOpt
 		return PackageManifest{}, errors.New("host manifest does not declare controller.exe")
 	}
 	manifest := PackageManifest{
-		Format: packageManifestFormat, ProductAppID: productidentity.StableAppID,
-		Version: host.Identity.Version, SourceSHA256: strings.ToLower(host.Identity.SourceSHA256),
+		ProductAppID: productidentity.StableAppID,
+		Version:      host.Identity.Version, SourceSHA256: strings.ToLower(host.Identity.SourceSHA256),
 		BuildTime:      host.Identity.BuildTime,
 		Target:         PackageTarget{Platform: platform, Architecture: architecture},
 		ExecutablePath: executable, HostManifestPath: "host-manifest.json",
@@ -272,8 +268,8 @@ func VerifyPackage(packageRoot, expectedRootSHA256 string, options ManifestOptio
 }
 
 func validatePackageManifest(manifest PackageManifest) error {
-	if manifest.Format != packageManifestFormat || manifest.ProductAppID != productidentity.StableAppID {
-		return errors.New("installation package format or product identity is unsupported")
+	if manifest.ProductAppID != productidentity.StableAppID {
+		return errors.New("installation package product identity is unsupported")
 	}
 	if manifest.Target.Platform != "windows" || strings.TrimSpace(manifest.Target.Architecture) == "" {
 		return errors.New("installation package target is invalid")
@@ -327,9 +323,6 @@ func validatePackageManifest(manifest PackageManifest) error {
 }
 
 func validateHostManifest(host hostPackageManifest) error {
-	if host.Format != hostManifestFormat {
-		return fmt.Errorf("unsupported host package manifest format %q", host.Format)
-	}
 	if normalizeHostPlatform(host.Target.Platform) != "windows" || strings.TrimSpace(host.Target.Architecture) == "" {
 		return errors.New("host package is not a Windows target")
 	}
