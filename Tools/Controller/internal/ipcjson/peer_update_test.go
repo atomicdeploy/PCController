@@ -568,9 +568,14 @@ func TestAuthenticatedRemoteHTTPCommandSurfacesApplyPeerUpdateDualCapability(t *
 	config.IPC.AllowRemote = true
 	config.IPC.AuthToken = "0123456789abcdefghijklmn"
 	config.IPC.RemotePolicy.Programming = true
+	registry := hostui.NewInstanceRegistry()
 	service := &Service{
 		Client: client, HostConfig: func() appconfig.Config { return config },
-		AppAction: func(hostui.AppAction) error { return nil },
+		AppAction: func(hostui.AppAction) error { return nil }, AppInstances: registry,
+		AppActionSubmit: func(hostui.AppAction, time.Duration) (hostui.ActionOperation, error) {
+			t.Fatal("a command-shaped app action must not reach tracked action delivery")
+			return hostui.ActionOperation{}, nil
+		},
 	}
 	handler := websocketMux(context.Background(), service)
 	command := "peer-update host edge " + strings.Repeat("a", 64) + " intent:http"
@@ -579,7 +584,6 @@ func TestAuthenticatedRemoteHTTPCommandSurfacesApplyPeerUpdateDualCapability(t *
 		body string
 	}{
 		{path: "/api/command", body: `{"command":` + strconv.Quote(command) + `}`},
-		{path: "/api/app/action", body: `{"kind":"command","value":` + strconv.Quote(command) + `}`},
 		{path: "/api/rpc", body: `{"jsonrpc":"2.0","id":1,"method":"controller.command.execute","params":{"command":` + strconv.Quote(command) + `}}`},
 	} {
 		t.Run(endpoint.path, func(t *testing.T) {
@@ -597,6 +601,21 @@ func TestAuthenticatedRemoteHTTPCommandSurfacesApplyPeerUpdateDualCapability(t *
 			}
 		})
 	}
+	t.Run("/api/app/action rejects command bypass", func(t *testing.T) {
+		request := httptest.NewRequest(
+			http.MethodPost, "http://controller.example/api/app/action",
+			strings.NewReader(`{"kind":"command","value":`+strconv.Quote(command)+`}`),
+		)
+		request.RemoteAddr = "198.51.100.10:43100"
+		request.Header.Set("Authorization", "Bearer "+config.IPC.AuthToken)
+		request.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusBadRequest ||
+			!strings.Contains(response.Body.String(), "not outcome-capable") {
+			t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+		}
+	})
 }
 
 func TestBridgeCallEntryPointsRejectPeerHostUpdatePivot(t *testing.T) {

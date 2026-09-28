@@ -876,6 +876,7 @@
     {
       "id": 1,
       "name": "output-demo",
+      "mode": "mcu",
       "category": "lighting",
       "color": "violet",
       "label": "dEMO",

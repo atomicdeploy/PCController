@@ -161,10 +161,16 @@ func TestPrimaryAppPagePreservesTUIDeliveryAndFansOutRuntimeEvent(t *testing.T) 
 	defer server.Close()
 
 	actions := server.AppActions()
-	afterID := runtime.LatestEventID()
-	if err := server.actions.Publish(hostui.AppAction{
-		Kind: "app.page", Value: "events", Source: "global-hotkey", Target: "webui",
+	if _, err := server.instances.Upsert(hostui.AppInstance{
+		ID: "webui", Surface: "webui", State: "active", LeaseSeconds: 45,
+		Values: map[string]string{hostui.ActionCapabilitiesKey: hostui.WebActionCapabilities},
 	}); err != nil {
+		t.Fatal(err)
+	}
+	afterID := runtime.LatestEventID()
+	if _, err := server.actionCoordinator.Submit(hostui.AppAction{
+		Kind: "app.page", Value: "events", Source: "global-hotkey", Target: "webui",
+	}, time.Second); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -197,17 +203,17 @@ func TestPrimaryAppPagePreservesTUIDeliveryAndFansOutRuntimeEvent(t *testing.T) 
 	// A subscribed TUI queue remains bounded without interrupting the
 	// observer-backed browser event stream.
 	for index := 0; index < cap(actions); index++ {
-		if err := server.actions.Publish(hostui.AppAction{
-			Kind: "app.page", Value: "events", Source: "global-hotkey",
-		}); err != nil {
+		if _, err := server.actionCoordinator.Submit(hostui.AppAction{
+			Kind: "app.page", Value: "events", Source: "global-hotkey", Target: "webui",
+		}, time.Second); err != nil {
 			t.Fatalf("fill TUI queue at %d: %v", index, err)
 		}
 	}
 	overflowCursor := runtime.LatestEventID()
-	if err := server.actions.Publish(hostui.AppAction{
-		Kind: "app.page", Value: "settings", Source: "global-hotkey",
-	}); err == nil {
-		t.Fatal("expected the full TUI queue to report an error")
+	if _, err := server.actionCoordinator.Submit(hostui.AppAction{
+		Kind: "app.page", Value: "settings", Source: "global-hotkey", Target: "webui",
+	}, time.Second); err != nil {
+		t.Fatalf("observer-backed delivery failed with a full TUI queue: %v", err)
 	}
 	overflowEvent, err := runtime.WaitEvent(waitContext, overflowCursor, "app.page")
 	if err != nil {
@@ -295,10 +301,16 @@ func TestTerminalAppActionFansOutWithoutInterpretingOSC(t *testing.T) {
 	}
 	defer server.Close()
 	_ = server.AppActions()
-	afterID := runtime.LatestEventID()
-	if err := server.actions.Publish(hostui.AppAction{
-		Kind: "app.progress", Value: "normal 42", Source: "ipc", Target: "tui",
+	if _, err := server.instances.Upsert(hostui.AppInstance{
+		ID: "tui", Surface: "tui", State: "active", LeaseSeconds: 45,
+		Values: map[string]string{hostui.ActionCapabilitiesKey: hostui.TUIActionCapabilities},
 	}); err != nil {
+		t.Fatal(err)
+	}
+	afterID := runtime.LatestEventID()
+	if _, err := server.actionCoordinator.Submit(hostui.AppAction{
+		Kind: "app.progress", Value: "normal 42", Source: "ipc", Target: "tui",
+	}, time.Second); err != nil {
 		t.Fatal(err)
 	}
 	waitContext, stop := context.WithTimeout(context.Background(), time.Second)
