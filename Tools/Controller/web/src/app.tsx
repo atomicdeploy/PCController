@@ -114,6 +114,7 @@ import {
   saveQuickHeaderPreferences,
   type QuickHeaderPreferences,
 } from './quick-header-preferences'
+import { messageToast } from './message-presentation'
 
 const DashboardPage = lazy(() => import('./views').then(({ DashboardView }) => ({ default: DashboardView })))
 const ControlsPage = lazy(() => import('./views').then(({ ControlsView }) => ({ default: ControlsView })))
@@ -801,15 +802,22 @@ export default function App() {
     return () => window.clearInterval(timer)
   }, [bootProgress, bootTarget])
 
-  const notify = useCallback((tone: ToastMessage['tone'], title: string, detail?: string) => {
+  const enqueueToast = useCallback((message: Omit<ToastMessage, 'id'>) => {
     toastID.current += 1
     const id = toastID.current
-    setToasts((current) => [...current.slice(-3), { id, tone, title, detail }])
-    if (tone === 'danger') audioRef.current?.cue('error')
-    if (tone === 'warning') audioRef.current?.cue('warning')
-    if (tone === 'success') audioRef.current?.cue('success')
-    window.setTimeout(() => setToasts((current) => current.filter((item) => item.id !== id)), 5200)
+    setToasts((current) => [...current.slice(-3), { id, ...message }])
+    if (message.tone === 'danger') audioRef.current?.cue('error')
+    if (message.tone === 'warning') audioRef.current?.cue('warning')
+    if (message.tone === 'success') audioRef.current?.cue('success')
+    if (!message.persistent) {
+      window.setTimeout(() => setToasts((current) => current.filter((item) => item.id !== id)), 5200)
+    }
+    return id
   }, [])
+
+  const notify = useCallback((tone: ToastMessage['tone'], title: string, detail?: string) => {
+    enqueueToast({ tone, title, detail })
+  }, [enqueueToast])
 
   useEffect(() => {
     const testFeedback = () => {
@@ -1400,7 +1408,11 @@ export default function App() {
 				applyPage('updates', 'replace')
 				audioRef.current?.cue('navigation', 'forward')
 			}
-            if (shouldToastControllerEvent(event)) notify(eventToneForToast(event), event.kind, event.text)
+            if (shouldToastControllerEvent(event, appInstanceID)) {
+              const targetedMessage = messageToast(event, appearanceDesiredRef.current.locale)
+              if (targetedMessage) enqueueToast(targetedMessage)
+              else notify(eventToneForToast(event), event.kind, event.text)
+            }
             if (isCompletedHostUpdate(event)) {
               refreshAfterHostRestart.current = true
             }
@@ -1455,7 +1467,7 @@ export default function App() {
       if (streamControlRef.current === stopStream) streamControlRef.current = null
       stopStream()
     }
-  }, [adoptHostAppearance, appInstanceID, applyPage, demo, navigate, navigationSession, notify, refresh, refreshHostAppearance, streamGeneration, token])
+  }, [adoptHostAppearance, appInstanceID, applyPage, demo, enqueueToast, navigate, navigationSession, notify, refresh, refreshHostAppearance, streamGeneration, token])
 
   const authenticationRequired = sessionAuthenticationGuidanceRequired({
     hostRequiresAuthentication: uiConfig?.auth_required === true,

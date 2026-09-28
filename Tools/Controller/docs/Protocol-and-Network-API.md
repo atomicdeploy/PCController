@@ -1585,6 +1585,12 @@ and text content and then submit a fixed configured command. This separation
 prevents received text from becoming shell input and retains authentication,
 logging, motion policy, and board safety.
 
+The Web presentation retains severity, correlation, and optional action text.
+Correlated or actionable notices remain visible until dismissed, but action
+text is rendered as context rather than a command control. Exact-target UI
+work uses the separately validated `controller.app.action` coordinator, and
+remote commands use the authenticated execute method.
+
 ## Host configuration and USB lifecycle
 
 JSON, YAML, and TOML use one semantic schema selected by file extension.

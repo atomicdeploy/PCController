@@ -949,8 +949,23 @@ export function ToastStack({ messages, dismiss }: { messages: ToastMessage[]; di
             transition={{ duration: .32, ease: [0.22, 1, 0.36, 1] }}
           >
             <span className="toast__rail" aria-hidden="true" />
-            <div><strong>{message.title}</strong>{message.detail && <p>{message.detail}</p>}</div>
-            <button aria-label={interfaceCopy('Dismiss', 'بستن اعلان')} onClick={() => dismiss(message.id)}><X size={16} /></button>
+            <div className="toast__body">
+              <strong>{message.title}</strong>
+              {message.detail && <p>{message.detail}</p>}
+              {message.correlation && (
+                <code className="toast__correlation">
+                  <span>{interfaceCopy('Reference', 'شناسه')}</span>
+                  <bdi>#{message.correlation}</bdi>
+                </code>
+              )}
+              {message.action && (
+                <div className="toast__action-context">
+                  <span>{message.actionLabel || interfaceCopy('Suggested action', 'عملیات پیشنهادی')}</span>
+                  <code dir="ltr">{message.action}</code>
+                </div>
+              )}
+            </div>
+            <button className="toast__dismiss" aria-label={interfaceCopy('Dismiss', 'بستن اعلان')} onClick={() => dismiss(message.id)}><X size={16} /></button>
           </motion.article>
         ))}
       </AnimatePresence>

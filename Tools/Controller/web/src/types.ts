@@ -550,6 +550,11 @@ export interface ToastMessage {
   tone: 'info' | 'success' | 'warning' | 'danger'
   title: string
   detail?: string
+  messageEventID?: number
+  correlation?: string
+  action?: string
+  actionLabel?: string
+  persistent?: boolean
 }
 
 export interface DialogState {

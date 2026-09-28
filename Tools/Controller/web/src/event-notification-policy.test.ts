@@ -20,10 +20,13 @@ describe('controller event toast policy', () => {
     expect(shouldToastControllerEvent({ kind: 'telemetry.sample' })).toBe(false)
   })
 
-  it('presents only messages explicitly targeted to the Web surface or all clients', () => {
-    expect(shouldToastControllerEvent({ kind: 'message', target: 'web' })).toBe(true)
-    expect(shouldToastControllerEvent({ kind: 'message', target: 'native, all' })).toBe(true)
-    expect(shouldToastControllerEvent({ kind: 'message', target: 'native,tui' })).toBe(false)
-    expect(shouldToastControllerEvent({ kind: 'message.delivery', target: 'web' })).toBe(false)
+  it('presents only messages explicitly targeted to this Web capability, surface, or instance', () => {
+    expect(shouldToastControllerEvent({ kind: 'message', targets: ['surface:webui'] })).toBe(true)
+    expect(shouldToastControllerEvent({ kind: 'message', targets: ['surface:desktop', 'all'] })).toBe(true)
+    expect(shouldToastControllerEvent({ kind: 'message', targets: ['capability:messages'] })).toBe(true)
+    expect(shouldToastControllerEvent({ kind: 'message', targets: ['tab:one'] }, 'tab:one')).toBe(true)
+    expect(shouldToastControllerEvent({ kind: 'message', targets: ['surface:desktop', 'tui'] })).toBe(false)
+    expect(shouldToastControllerEvent({ kind: 'message', target: 'webui' } as never)).toBe(false)
+    expect(shouldToastControllerEvent({ kind: 'message.delivery', targets: ['surface:webui'] })).toBe(false)
   })
 })
