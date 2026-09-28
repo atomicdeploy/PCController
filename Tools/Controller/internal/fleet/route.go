@@ -77,9 +77,8 @@ type RouteEnvelope struct {
 	Intent           Intent              `json:"intent"`
 }
 
-// UnmarshalJSON deliberately uses a tolerant alias decoder. Route envelopes
-// are a living contract: legacy generation markers and future additive fields
-// are accepted, while writers emit only the current semantic fields.
+// UnmarshalJSON tolerates safe additive fields while decoding the living route
+// contract. Writers emit only the current semantic fields.
 func (route *RouteEnvelope) UnmarshalJSON(content []byte) error {
 	type livingRoute RouteEnvelope
 	var decoded livingRoute

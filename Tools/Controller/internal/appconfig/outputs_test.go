@@ -1,6 +1,22 @@
 package appconfig
 
-import "testing"
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
+
+func TestStatusEffectWritesOnlyRepeatDuration(t *testing.T) {
+	encoded, err := json.Marshal(StatusLEDEffect{
+		Name: "pulse", Kind: "flash", Brightness: 100, PeriodMS: 640, Repeats: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"repeats":2`) || strings.Contains(string(encoded), `"duration_ms"`) {
+		t.Fatalf("status effect emitted a second duration contract: %s", encoded)
+	}
+}
 
 func TestDefaultOutputDefinitionsValidateAndClone(t *testing.T) {
 	value := Defaults()

@@ -681,10 +681,9 @@ field. The client rejects an expired or malformed deadline, deduplicates the
 operation-plus-delivery receipt, and returns that delivery nonce as the
 required `delivery_id` in its acknowledgement. The coordinator accepts only a
 nonce issued for that exact operation target before its deadline, then records the client-reported
-`applied` or `rejected` result. A legacy TUI/WebUI without the new advertisement
-may still receive an action through a known delivery path, but it remains
-`queued` until acknowledgement and becomes `timeout` after the bounded
-deadline. Operation history is bounded and expires; ordinary delivery and
+`applied` or `rejected` result. An action without a live outcome-capable
+advertisement is rejected; it is not delivered through an untracked path.
+Operation history is bounded and expires; ordinary delivery and
 outcome transitions use the existing event streams and bridge fan-out, never
 polling. Successful queued/applied transitions use the state stream so they do
 not flood operator activity logs, while rejection and timeout remain visible
@@ -696,8 +695,7 @@ without rejecting the whole instance. A namespaced custom action such as
 that exact capability. Custom namespaces cannot use the reserved `app.*`,
 `controller.*`, or `command` names; values are limited to 4096 bytes and cannot
 contain NUL, CR, or LF. They always use the correlated exact-target path with a
-delivery nonce, deadline, deduplication receipt, and terminal ACK outcome; they
-never fall back to untracked legacy delivery.
+delivery nonce, deadline, deduplication receipt, and terminal ACK outcome.
 These receipts provide correlation and deduplication, **not responder
 authentication**: alpha clients share a trusted event fabric and authorization
 is disabled by policy. Transport-session identity binding remains tracked in
