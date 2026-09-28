@@ -139,6 +139,9 @@ type Model struct {
 	frontPanelPending        bool
 	frontPanelLastRefresh    time.Time
 	frontPanelKey            func(key int, phase string) error
+
+	frontPanelRefreshRequired bool
+
 	lcdPresentation          control.LCDPresentationState
 	haveLCDPresentation      bool
 	lcdPresentationPending   bool
@@ -408,11 +411,10 @@ func NewPreview(engine *shell.Engine, snapshot control.Snapshot, welcome bool) M
 	return NewWithOptions(runtime, engine, Options{
 		UIConfig: func() appconfig.UI { return ui },
 		Preview:  &snapshot, ForceWelcome: welcome, DisableWelcome: !welcome,
-		HostMenus:     menus,
-		RFFetch:       func(context.Context) ([]native.RFEntry, error) { return previewRFEntries(), nil },
-		RFApplyOrder:  func(context.Context, []native.RFEntry) error { return nil },
-		FrontPanelKey: func(int, string) error { return nil },
-		MirrorLCD:     func(string, string) error { return nil },
+		HostMenus:    menus,
+		RFFetch:      func(context.Context) ([]native.RFEntry, error) { return previewRFEntries(), nil },
+		RFApplyOrder: func(context.Context, []native.RFEntry) error { return nil },
+		MirrorLCD:    func(string, string) error { return nil },
 		RFReplaceSupport: func() control.RFReplaceSupport {
 			return control.RFReplaceSupport{Known: true, Supported: true, Reason: "advertised by preview HELLO"}
 		},
@@ -504,6 +506,7 @@ func NewWithOptions(runtime *control.Runtime, engine *shell.Engine, options Opti
 	if options.Remote != nil {
 		model.remoteSnapshot = options.Remote.InitialSnapshot
 		model.remoteSnapshotPending = options.Remote.Snapshot != nil
+		model.frontPanelRefreshRequired = options.Remote.FrontPanel != nil
 		model.remoteSnapshot.ConnectionState = strings.TrimSpace(model.remoteSnapshot.ConnectionState)
 		if model.remoteSnapshot.ConnectionState == "" {
 			model.remoteSnapshot.ConnectionState = "remote IPC"
@@ -702,7 +705,8 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			if snapshot.Connected && model.remote.FrontPanel != nil &&
 				snapshot.Hello.Capabilities&native.CapabilityFrontPanelSnapshot != 0 &&
 				!model.frontPanelPending &&
-				((!snapshot.HaveFrontPanel && time.Since(model.frontPanelLastRefresh) >= time.Second) ||
+				((model.frontPanelRefreshRequired && time.Since(model.frontPanelLastRefresh) >= time.Second) ||
+					(!snapshot.HaveFrontPanel && time.Since(model.frontPanelLastRefresh) >= time.Second) ||
 					(snapshot.HaveFrontPanel && model.page == PageMenus &&
 						time.Since(model.frontPanelLastRefresh) >= 250*time.Millisecond)) {
 				model.frontPanelPending = true
@@ -948,6 +952,7 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			model.remoteSnapshot.ConnectionUpdated = time.Now()
 			model.haveLCDPresentation = false
 			model.lcdPresentation = control.LCDPresentationState{}
+			model.frontPanelRefreshRequired = true
 			model.frontPanelLastRefresh = time.Time{}
 			model.lcdPresentationLastFetch = time.Time{}
 			break
@@ -968,6 +973,7 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			model.remoteAuthorityEpoch++
 			model.haveLCDPresentation = false
 			model.lcdPresentation = control.LCDPresentationState{}
+			model.frontPanelRefreshRequired = true
 			model.frontPanelLastRefresh = time.Time{}
 			model.lcdPresentationLastFetch = time.Time{}
 		}
@@ -1180,6 +1186,7 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			model.remoteSnapshot.FrontPanel = message.panel
 			model.remoteSnapshot.HaveFrontPanel = true
 			model.remoteSnapshot.FrontPanelUpdated = time.Now()
+			model.frontPanelRefreshRequired = false
 		}
 
 	case lcdPresentationResultMsg:

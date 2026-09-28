@@ -325,53 +325,6 @@ func (client *remoteTUIIPC) MirrorLCD(line1, line2 string) error {
 	return nil
 }
 
-func frontPanelGesturePayloads(key int, phase string) ([][]byte, error) {
-	if key < 1 || key > 4 {
-		return nil, fmt.Errorf("front-panel key must be 1..4")
-	}
-	events := []byte(nil)
-	switch strings.ToLower(strings.TrimSpace(phase)) {
-	case "press", "tap":
-		events = []byte{native.KeyEventDown, native.KeyEventUp}
-	case "hold":
-		events = []byte{native.KeyEventDown, native.KeyEventHoldRepeat, native.KeyEventUp}
-	case "down":
-		events = []byte{native.KeyEventDown}
-	case "release", "up":
-		events = []byte{native.KeyEventUp}
-	default:
-		return nil, fmt.Errorf("front-panel phase %q is unsupported", phase)
-	}
-	payloads := make([][]byte, 0, len(events))
-	for _, event := range events {
-		payload, err := native.RemoteKeyGesturePayload(byte(key-1), event)
-		if err != nil {
-			return nil, err
-		}
-		payloads = append(payloads, payload)
-	}
-	return payloads, nil
-}
-
-func (client *remoteTUIIPC) FrontPanelKey(key int, phase string) error {
-	payloads, err := frontPanelGesturePayloads(key, phase)
-	if err != nil {
-		return err
-	}
-	for _, payload := range payloads {
-		ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
-		var result native.Frame
-		err = client.call(ctx, "controller.opcode.send", map[string]any{
-			"opcode": native.OpRemoteKeyGesture, "payload": payload,
-		}, &result)
-		cancel()
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func (client *remoteTUIIPC) Execute(ctx context.Context, command string) (string, error) {
 	var result struct {
 		Output string `json:"output"`
@@ -1327,7 +1280,6 @@ func runRemoteTUI(
 						SaveHostUI:                saveRemoteHostUI,
 					},
 					MirrorLCD:      client.MirrorLCD,
-					FrontPanelKey:  client.FrontPanelKey,
 					DisableWelcome: true,
 				}),
 				tea.WithAltScreen(),
