@@ -231,6 +231,18 @@ export function DashboardView(props: SharedViewProps) {
 	const hardwareWarning = hardwareProblem ? hardwareProblemPresentation(hardwareProblem, locale) : undefined
   const connectedTone = boardReady ? 'good' : snapshot.paused ? 'warn' : 'bad'
   const authenticationRequired = !boardReady && props.transport.authenticationRequired
+  const boardLoading = props.transport.boardState === 'loading'
+  const boardUnavailableTitle = hardwareWarning?.title || (boardLoading
+    ? copy('Discovering controller board…', 'در حال جستجوی برد کنترلر…')
+    : copy('Controller board disconnected', 'برد کنترلر قطع است'))
+  const boardUnavailableDetail = hardwareWarning?.guidance || snapshot.connection_reason || t('noHardware')
+  const boardStatusLabel = boardReady
+    ? t('online')
+    : boardLoading
+      ? copy('Searching for board', 'در حال جستجوی برد')
+      : snapshot.paused
+        ? copy('Board paused', 'اتصال برد متوقف')
+        : copy('Board offline', 'برد آفلاین')
   const hash = snapshot.hello.build_hash ? snapshot.hello.build_hash.toString(16).toUpperCase().padStart(8, '0') : '—'
   const activeRelayCount = Array.from({ length: 8 }, (_, index) => Boolean(status.active_relays & (1 << index))).filter(Boolean).length
   const configurationEventID = events.find((event) => event.kind === 'config')?.id ?? 0
@@ -327,13 +339,13 @@ export function DashboardView(props: SharedViewProps) {
   return (
     <>
       <SectionTitle
-        eyebrow={boardReady ? measurementFreshness : snapshot.paused ? copy('Connection paused', 'اتصال متوقف شده') : copy('Awaiting controller', 'در انتظار کنترلر')}
+        eyebrow={boardReady ? measurementFreshness : snapshot.paused ? copy('Board connection paused', 'اتصال برد متوقف شده') : boardLoading ? copy('Discovering board', 'در حال جستجوی برد') : copy('PCController host online', 'میزبان PCController آنلاین است')}
         title={t('dashboard')}
-        detail={authenticationRequired ? t('authenticationDashboardDetail') : boardReady ? pageDetail(snapshot, appTitle, locale) : hardwareWarning?.guidance || snapshot.connection_reason || t('noHardware')}
+        detail={authenticationRequired ? t('authenticationDashboardDetail') : boardReady ? pageDetail(snapshot, appTitle, locale) : boardUnavailableDetail}
         action={
           <div className="header-actions">
             <StatusBadge tone={connectedTone} pulse={snapshot.connection_state === 'connecting'}>
-              {boardReady ? t('online') : props.transport.boardState === 'loading' ? t('connecting') : t('offline')}
+              {boardStatusLabel}
             </StatusBadge>
             {!boardReady && !authenticationRequired && <Button icon={Cable} compact onClick={() => void command('reconnect', t('reconnect'))}>{t('reconnect')}</Button>}
             <Button icon={RefreshCw} compact onClick={() => void refresh()}>{t('refresh')}</Button>
@@ -352,9 +364,9 @@ export function DashboardView(props: SharedViewProps) {
 
       <section className={`hero-panel${boardReady ? ' is-online' : ''}`}>
         <div className="hero-panel__identity">
-          <div className="eyebrow">{boardReady ? `${copy('Controller', 'کنترلر')} · ${snapshot.connection_state}` : copy('Host connection', 'اتصال میزبان')}</div>
-          <h2>{boardReady ? snapshot.hello.name || appTitle : authenticationRequired ? t('authenticationDashboard') : hardwareWarning?.title || (props.transport.boardState === 'loading' ? copy('Loading controller state…', 'در حال بارگیری وضعیت کنترلر…') : t('noHardware'))}</h2>
-          <p>{boardReady ? `USB ${snapshot.port.vid || '—'}:${snapshot.port.pid || '—'} · ${snapshot.port.name || copy('automatic port', 'درگاه خودکار')}` : authenticationRequired ? t('authenticationDashboardDetail') : hardwareWarning?.guidance || snapshot.connection_reason || t('noHardware')}</p>
+          <div className="eyebrow">{boardReady ? `${copy('Controller board', 'برد کنترلر')} · ${snapshot.connection_state}` : copy('PCController host · online', 'میزبان PCController · آنلاین')}</div>
+          <h2>{boardReady ? snapshot.hello.name || appTitle : authenticationRequired ? t('authenticationDashboard') : boardUnavailableTitle}</h2>
+          <p>{boardReady ? `USB ${snapshot.port.vid || '—'}:${snapshot.port.pid || '—'} · ${snapshot.port.name || copy('automatic port', 'درگاه خودکار')}` : authenticationRequired ? t('authenticationDashboardDetail') : boardUnavailableDetail}</p>
           {authenticationRequired && <Button icon={ShieldCheck} tone="primary" onClick={() => { window.location.hash = '#/settings' }}>{copy('Enter access token', 'ورود توکن دسترسی')}</Button>}
         </div>
         {boardReady && <div className="hero-panel__readout" dir="ltr">
@@ -612,7 +624,7 @@ export function ControlsView(props: SharedViewProps) {
   if (!boardReady) {
     return (
       <>
-        <SectionTitle eyebrow={copy('Controller controls', 'کنترل‌های برد')} title={t('controls')} detail={snapshot.connection_reason || copy('Controller offline', 'کنترلر آفلاین است')} />
+        <SectionTitle eyebrow={copy('Controller board controls', 'کنترل‌های برد')} title={t('controls')} detail={snapshot.connection_reason || copy('Board offline; the PCController host remains available', 'برد آفلاین است؛ میزبان PCController همچنان در دسترس است')} />
         <Card icon={CircuitBoard} iconTone="amber" title={props.transport.boardState === 'loading' ? copy('Loading controller controls', 'در حال بارگیری کنترل‌های برد') : copy('Controller controls are unavailable', 'کنترل‌های برد در دسترس نیست')} eyebrow={copy('Host connection', 'اتصال میزبان')}>
           <EmptyState
             icon={Cable}
@@ -1550,7 +1562,7 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
           </>}
         </Card>}
 
-        {boardReady && <Card icon={Usb} iconTone="green" title={t('connection')} eyebrow={copy('Controller connected', 'کنترلر متصل است')} className="settings-card">
+        {boardReady && <Card icon={Usb} iconTone="green" title={t('connection')} eyebrow={copy('Controller board connected', 'برد کنترلر متصل است')} className="settings-card">
           <div className="data-list"><DataRow label={copy('State', 'وضعیت')} value={snapshot.connection_state} tone="good" /><DataRow label={copy('Port', 'درگاه')} value={snapshot.port.name || copy('automatic', 'خودکار')} mono /><DataRow label="VID:PID" value={`${snapshot.port.vid || '—'}:${snapshot.port.pid || '—'}`} mono /><DataRow label={copy('Serial', 'سریال')} value={snapshot.port.serial_number || '—'} mono /><DataRow label={copy('Baud', 'نرخ باد')} value="115200 8N1" mono /></div>
           {snapshot.port_process && <div className="data-list"><DataRow label={copy('Port process', 'پردازش درگاه')} value={snapshot.port_process.state} tone={snapshot.port_process.state === 'free' ? 'good' : snapshot.port_process.state === 'owned' ? 'warn' : undefined} /><DataRow label={copy('Owner', 'مالک')} value={snapshot.port_process.pid ? `${snapshot.port_process.name || 'unknown'} · PID ${snapshot.port_process.pid}` : (snapshot.port_process.error || '—')} mono />{snapshot.port_process.executable && <DataRow label={copy('Executable', 'فایل اجرا')} value={snapshot.port_process.executable} mono />}<DataRow label={copy('Takeover', 'واگذاری')} value={snapshot.port_process.takeover_ready ? copy('armed when free', 'با آزادشدن آماده') : copy('not armed', 'مسلح نیست')} /></div>}
           <div className="inline-actions"><Button icon={Unplug} onClick={() => void command('close')}>{copy('Pause controller', 'توقف کنترلر')}</Button>
