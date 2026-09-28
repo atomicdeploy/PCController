@@ -13,6 +13,9 @@ import {
 import { basename, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PRODUCT_METADATA } from "../../Tools/Build/product-metadata.mjs";
+import { loadProjectEnv } from "../../Tools/Build/env.mjs";
+
+loadProjectEnv();
 
 import { usageProgress } from "./usage-progress.mjs";
 

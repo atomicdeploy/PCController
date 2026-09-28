@@ -5,6 +5,9 @@ import { createHash } from 'node:crypto'
 import { appendFileSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { loadProjectEnv } from '../Build/env.mjs'
+
+loadProjectEnv()
 
 const here = dirname(fileURLToPath(import.meta.url))
 const repository = resolve(here, '..', '..')
@@ -29,7 +32,7 @@ function invariant(condition, message) {
 }
 
 function validateLock(lock) {
-  invariant(lock?.format === 'pccontroller-toolchain-lock/v1', 'unsupported canonical toolchain lock format')
+  invariant(lock && typeof lock === 'object', 'canonical toolchain lock must be an object')
   invariant(typeof lock?.firmware?.fqbn === 'string' && lock.firmware.fqbn, 'toolchain lock is missing the firmware FQBN')
   invariant(typeof lock?.firmware?.core_id === 'string' && lock.firmware.core_id, 'toolchain lock is missing the firmware core ID')
   invariant(typeof lock?.firmware?.core_version === 'string' && lock.firmware.core_version, 'toolchain lock is missing the firmware core version')

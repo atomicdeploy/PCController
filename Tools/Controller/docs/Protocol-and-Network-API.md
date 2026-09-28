@@ -19,7 +19,7 @@ Frames are COBS encoded and terminated by `0x00`. The decoded frame is:
 ```text
 offset  type          meaning
 0       u8            magic = 0xA5
-1       u8            advisory envelope revision (currently 1)
+1       u8            reserved/advisory byte (senders currently write 1)
 2       u8            opcode
 3       u8            sequence
 4       u8            payload length, 0..48
@@ -31,7 +31,9 @@ CRC uses polynomial `0x07`, initial value `0x00`, over every decoded byte
 before the CRC. Multi-byte values are little-endian.
 
 The MCU accepts a frame by canonical magic, bounded length, and CRC rather
-than requiring its advisory revision byte to equal the local build's value.
+than requiring the reserved/advisory byte to equal the local build's value.
+The byte is not a protocol generation: senders preserve the current value for
+stable physical framing, while readers tolerate unknown values.
 Known write operations validate a required semantic payload prefix and ignore
 trailing extension fields. Structurally distinct record shapes retain their
 shape byte; unknown opcodes receive `Unsupported`. This provides loose
@@ -165,27 +167,79 @@ normal low-latency path.
 The board pushes changed physical outputs instead of requiring the host to poll
 the active front panel. `SEGMENT_CHANGED` (`9C`) carries four raw TM1637 segment
 bytes followed by `u8 brightness`. `BUZZER_CHANGED` (`9D`) carries
-`u16 frequency_hz, u16 duration_ms, u8 muted`. Both use sequence zero and are
-emitted only when the corresponding physical output changes. The host may
-still request `FRONT_PANEL_GET` during connection, manual refresh, or recovery.
+the five-byte state `u16 frequency_hz, u16 duration_ms, u8 muted`, optionally
+followed by `u32 device_micros` when the producer can timestamp the physical
+edge. This is one current variable-length contract, not a migration chain.
+These frames use sequence zero and are emitted only when the
+corresponding physical output changes. The host may still request
+`FRONT_PANEL_GET` during connection, manual refresh, or recovery.
 
-The host's melody scheduler sends acknowledged `BUZZER` frames. Each accepted
-firmware note is mirrored through `BUZZER_CHANGED`, then published immediately
-through IPC, WebSocket, Socket.IO, bridge peers, optional native WinRing0
-motherboard-speaker playback, and optional Web Audio. Current firmware receives
-one compact `STATUS_EFFECT` descriptor and renders the animation locally; the
-rate-limited `STATUS_RGB` stream remains only as a bounded older-firmware
-compatibility path.
+The host's melody scheduler sends acknowledged `BUZZER` frames on one monotonic
+deadline sequence; command/ACK latency is not added to every note interval.
+Each accepted firmware note or explicit pause is mirrored through
+`BUZZER_CHANGED`, then published immediately through IPC, WebSocket, Socket.IO,
+bridge peers, optional native motherboard-speaker playback, and optional Web
+Audio. Host renderers map a present `device_micros` onto their local monotonic
+clocks; late notes are shortened or discarded instead of shifting later notes. Current
+firmware receives one compact `STATUS_EFFECT` descriptor and renders the
+animation locally; the rate-limited `STATUS_RGB` stream remains only as a
+bounded older-firmware compatibility path or an explicitly owned static
+preview.
+
+`STATUS_EFFECT` (`17`) accepts either the exact one-byte release `{0}` or this
+exact 12-byte board-owned descriptor:
+
+```text
+u8  effect              1 breathe, 2 flash, 3 cycle, 4 transition
+u8  primary_r, primary_g, primary_b
+u8  alternate_r, alternate_g, alternate_b
+u8  brightness
+u8  minimum_brightness  must be <= brightness
+u16 period_ms           little-endian, 640..60000
+u8  repeats             0 loops; 1..255 completes on the MCU
+```
+
+Byte-identical descriptors are idempotent and retain phase. A changed valid
+descriptor atomically replaces the acknowledged manual owner without first
+releasing to a native profile. Learning, Warning, Fault, Boot, and the Reset
+watchdog cue may render above that owner; the exact latest request remains
+retained and restores deterministically when the higher-priority layer clears.
+Routine menu, radio, door, Bluetooth, save, and discard cues cannot steal a
+manual owner. Release clears the retained request while preserving the last
+physical frame until native lifecycle presentation resumes.
+
+`STATUS_RGB` (`14`) is exactly four bytes (`r,g,b,brightness`) and claims a
+manual static preview. It uses the same explicit `STATUS_EFFECT {0}` release.
+`STATUS_PROFILE_GET` (`18`) is exactly one condition byte;
+`STATUS_PROFILE_SET` (`19`) is exactly one condition plus the 12-byte
+descriptor. `STATUS_LED_CHANGED` (`9E`) is the six-byte actual rendered state
+`r,g,b,brightness,effect,condition`. It is changed-only and coalesces the
+latest physical frame to at most one transmission per 17 ms; it does not
+fabricate samples during static or flash holds. Link liveness is separate.
+
+This is one living, unversioned board/host contract. It has no numbered route,
+generation field, or version-selected descriptor identity. Compatible additions
+use explicit capability/feature identifiers and new optional opcodes or fields;
+readers ignore unknown optional messages while preserving strict bounds for
+safety-critical owner-changing payloads such as the exact `STATUS_EFFECT`
+descriptor above. A new behavior must not fork the protocol into parallel
+numbered contract generations.
+
+Every buzzer state from one source supersedes its preceding state. A zero-
+frequency positive-duration record is a timed pause; zero frequency and zero
+duration is an authoritative stop. Both cancel an active mirrored tone at the
+mapped MCU timestamp and never start a host speaker backend.
 
 At the command/API layer a melody repeat count of zero means repeat until an
 explicit stop, while 1..20 remains the bounded mode. This is the reusable
 continuous `WAIT`/attention-ringtone path; it does not change the `BUZZER`
 wire payload.
 
-These effects are intentionally PC-side configuration, not firmware EEPROM
-settings. They stop producing future frames if the host is canceled or
-disconnected. A buzzer note already accepted by the MCU continues until its
-duration expires because there is no dedicated buzzer-stop opcode.
+Melody sequencing remains PC-side configuration and stops producing future
+notes if the host is canceled or disconnected. A buzzer note already accepted
+by the MCU continues until its duration expires because there is no dedicated
+buzzer-stop opcode. Status-LED effects are different: their descriptors and
+condition profiles are rendered by the board as described above.
 
 `RELAY_SIDE` sides are 0 left and 1 right; motion is 0 stop, 1 up, 2 down.
 The firmware owns safe disable-before-direction sequencing. Direct
@@ -238,7 +292,7 @@ off only outputs claimed by that macro.
 | TEMPERATURES | `95` | named temperature records below |
 | MENU_LIST | `97` | paginated firmware-owned menu entries below |
 | SEGMENT_CHANGED | `9C` | `u8 raw_segments[4], u8 brightness`; unsolicited, changed-only |
-| BUZZER_CHANGED | `9D` | `u16 frequency_hz, u16 duration_ms, u8 muted`; unsolicited, changed-only |
+| BUZZER_CHANGED | `9D` | `u16 frequency_hz, u16 duration_ms, u8 muted[, u32 device_micros]`; unsolicited, changed-only |
 | EVENT | `A0` | `u8 eventType, event-specific data...` |
 
 `MENU_LIST` schema `1` starts with `u8 schema, u8 total, u8 nextCursor,
@@ -454,99 +508,59 @@ share one current file-watched policy and one audit-event path. Brightness and
 power writes are disabled by default, and a DDC/CI-unsupported display returns
 a capability error rather than falling back to an untracked shell command.
 
-The default host endpoint is `127.0.0.1:8787`. A single TCP listener
+The default network host endpoint is `127.0.0.1:8787`. Its TCP listener
 multiplexes newline-delimited JSON-RPC and HTTP by inspecting the first request
-bytes. HTTP then serves REST, standard WebSocket, and Socket.IO paths. Closing
+bytes. HTTP then serves REST, standard WebSocket, and Socket.IO paths. The
+public Go `rpc` package defines the same request, response, structured-error,
+message-bound, and caller contract for direct in-process dispatch, Windows
+named pipes, Unix-domain sockets, and TCP. Native-local listeners use raw
+newline-delimited JSON-RPC only; they never run the HTTP protocol sniffer.
+Windows pipe listeners reject remote clients and use a protected current-user
+plus LocalSystem DACL. Unix listeners require an owner-only directory, publish
+a `0600` socket, reject symlink/non-socket replacements, and recover a stale
+socket only when the caller explicitly confirms it holds the ownership lock.
+
+The reusable transport/client foundation is additive. Until the primary-host
+record and live endpoint advertisement are advanced by issue #373, the product
+primary continues to publish TCP `listen` as its automatic attachment path;
+embedders may explicitly construct and serve a native endpoint through `rpc`
+plus `ipcjson.ServeRaw`. Native-local and `:8787` network listeners are meant
+to run concurrently, not replace one another. Closing
 the serial port does not stop this service; closing the service does not erase
 MCU EEPROM or the PC configuration. JSON-RPC uses protocol `2.0`; schema
 negotiation reports JSON-RPC `2.0` only because that standards-defined marker
 is required by the wire format. Canonical REST URLs live directly under
-`/api/`; product-version prefixes such as `/api/v1/` are unsupported and
-rejected. JSON-RPC and WebSocket peers remain capability- and semantics-driven so different feature sets can
-still interoperate.
+`/api/`. JSON-RPC and WebSocket peers remain capability- and semantics-driven,
+so different feature sets can still interoperate.
 
-### Authentication and exposure
+### Immediate-alpha exposure
 
-Loopback-only use is the safe default. When `ipc.allow_remote` is false, a
-non-loopback bind is rejected. Remote access requires all of the following:
+Issue #148 is the active contract: application authentication and
+authorization are disabled across raw IPC, HTTP/REST, standard WebSocket,
+Socket.IO, browser UI configuration, and peer bridges. Product entry points
+report `auth_required: false`; inbound bearer references are neither resolved
+nor injected, and configured principals, Origin rules, session tickets, and
+`remote_policy` bits do not grant or deny an operation. The capability
+classifier remains in the protocol so a complete future permission design can
+reuse semantic operation names, but it is dormant in the alpha runtime.
 
-- `ipc.allow_remote: true`;
-- an `ipc.auth_token` containing at least 24 characters, or a resolvable
-  `ipc.auth_token_ref`;
-- a stable, machine-safe `ipc.remote_principal` audit name;
-- an explicit, non-wildcard `ipc.allowed_origins` list for browser WebSocket
-  clients;
-- the relevant `ipc.remote_policy` capability set to `true`.
+Loopback remains the default listener. Selecting a non-loopback listener still
+requires the explicit `ipc.allow_remote` configuration choice and a valid
+non-wildcard Origin list so exposure cannot happen accidentally through a bind
+typo. These are configuration/exposure checks, not caller authentication. An
+already-open remote standard-WebSocket or Socket.IO session is cancelled from
+the pushed configuration subscription as soon as `ipc.allow_remote` becomes
+false; a hot edge-disable therefore revokes both new requests and live event
+delivery without waiting for a listener restart. An
+optional *outbound* peer secret reference may be resolved only to contact and
+upgrade an older host that still enforces the superseded bearer flow. New alpha
+peers work without it.
 
-Raw JSON-RPC carries the token in the top-level `auth` member. HTTP and native
-WebSocket/Socket.IO clients use `Authorization: Bearer TOKEN` or
-`X-PCController-Token: TOKEN`. Durable URL credentials are rejected. A browser
-that cannot add an upgrade header uses this two-step exchange instead:
-
-1. `POST /api/session/ticket` with the durable credential in an HTTP header,
-   an allowed `Origin`, and `{"transport":"websocket"}` (or `socket_io`).
-2. Open the clean WebSocket URL while offering subprotocols `pccontroller`
-   and `pccontroller.ticket.TICKET`.
-
-The 256-bit ticket expires after 15 seconds and is consumed once, before the
-upgrade. It is bound to the issuing principal, exact Origin, peer address, and
-transport, so it cannot be replayed on the other socket surface. Unauthorized
-standard WebSocket and Socket.IO handshakes are rejected before the server
-sends any application or Engine.IO frame. Token comparison is constant-time;
-discovery advertisements and responses never contain a durable token. The
-server retains only a SHA-256 digest of each outstanding ticket, never the raw
-ticket returned to the browser.
-
-Missing-Origin handling is explicit. Loopback native clients may omit
-`Origin`; non-loopback native requests may omit it only when they present a
-durable Authorization/token header. Browser session tickets always require and
-remain bound to an allowed Origin. Conflicting Authorization and compatibility
-headers fail closed.
-
-Authentication proves possession of the host token; authorization is separate.
-The default remote policy permits only `read` and `events`. Messages, board
-commands, host-configuration writes, connection control, reset, programming,
-shutdown, virtual keys, power/display actions, host-automation execution,
-integration access, and bridge calls are independent
-opt-ins. Programming additionally requires connection control. A remote
-`controller.command.execute` request is classified before execution, so using the
-generic command surface cannot bypass the reset, programming, OS-action, or
-bridge-call gates. Authorized mutating attempts and denied attempts publish
-`security.local.*` or `security.remote.*` timeline events with stable
-`principal`, `transport`, `authentication`, `capability`, and operation fields,
-without recording the token or request payload. The configured token maps to
-`ipc.remote_principal`; local transport trust and host-instance/bridge
-delegation use separate fixed principals.
-
-Motion policies, door checks, relay sequencing, bounds, OS confirmation rules,
-and exclusive programming ownership still apply after authorization. Use TLS
-termination, a VPN, or an SSH tunnel on untrusted networks; the built-in
-listener does not itself terminate TLS.
-
-```json
-"ipc": {
-  "allow_remote": true,
-  "auth_token_ref": "os:ipc/remote",
-  "remote_principal": "maintenance-console",
-  "allowed_origins": ["controller.example:*"],
-  "remote_policy": {
-    "read": true,
-    "events": true,
-    "messages": false,
-    "board_commands": false,
-    "host_configuration": false,
-    "connection_control": false,
-    "reset": false,
-    "programming": false,
-    "shutdown": false,
-    "virtual_keys": false,
-    "power_actions": false,
-    "host_automations": false,
-    "bridge_calls": false,
-    "integrations": false
-  }
-}
-```
+The retained server-proof and session-ticket endpoints are dormant
+compatibility code, not active evidence of a security boundary. Do not expose
+the alpha listener to an untrusted network. Motion policies, door checks, relay
+sequencing, numeric bounds, OS confirmations, and exclusive programming
+ownership remain functional safety checks and are not application auth/authZ.
 
 ## JSON-RPC 2.0
 
@@ -554,7 +568,7 @@ The raw transport contains one UTF-8 JSON object per line. HTTP and WebSocket
 use the same request and response model:
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"controller.status","params":{},"auth":"..."}
+{"jsonrpc":"2.0","id":1,"method":"controller.status","params":{}}
 ```
 
 ```json
@@ -567,9 +581,11 @@ mutating RPC calls through the same controller client while snapshot and event
 subscriptions use cached/thread-safe paths.
 
 Standard codes are parse error `-32700`, invalid request `-32600`, method not
-found `-32601`, and invalid params `-32602`. Host extensions use authentication
-required `-32001`, remote capability denied `-32003`, and runtime/device error
-`-32000`. The request ID is preserved on every parsed request error.
+found `-32601`, and invalid params `-32602`. Runtime/device failures use
+`-32000`. The dormant future-auth implementation reserves authentication
+required `-32001` and remote capability denied `-32003`; alpha product entry
+points do not emit those outcomes. The request ID is preserved on every parsed
+request error.
 
 ### RPC methods
 
@@ -581,16 +597,20 @@ required `-32001`, remote capability denied `-32003`, and runtime/device error
 | `controller.reset`, `controller.reset.lines`, `controller.port.reset` | optional `pulse_ms` | one explicit DTR-only pulse, then fresh application authentication |
 | `controller.snapshot` | `{}` | cached connection, identity, status, and settings |
 | `controller.command.catalog` | `{}` | machine-readable registered command names, aliases, usage, summary, and task group |
+| `controller.melodies.list` | `{}` | effective configured host melody catalog with validated note timing |
 | `controller.status` | `{}` | fresh board status |
 | `controller.peripherals.get` | `{}` | host-owned custom names plus the canonical 34-entry peripheral descriptor registry; requires `read` |
 | `controller.peripherals.set` | `peripheral_names` object | atomically replace custom host names and return the normalized names plus registry; requires `host_configuration` |
 | `controller.pwm.values` | `{}` | authoritative board availability, selected channel, and all sixteen logical values; requires `read` |
+| `controller.illumination.get` | `{}` | persisted Off/Auto/On policy, on/off brightness, live door-selected target, and exact applied enclosure PWM channel 11; requires `read` |
+| `controller.illumination.set` | `{ "mode": 0..2, "on_brightness": 0..255, "off_brightness": 0..255 }` | preserves every unrelated board setting, applies live, waits for durable EEPROM readback, and returns the authoritative illumination state; requires `board_commands` |
 | `controller.pwm.set` | `channel` (`0..15`), `value` (`0..4095`) | write one channel, read back, and return the complete authoritative sixteen-channel snapshot; requires `board_commands` |
 | `controller.pwm.off` | `{}` | clear every PWM channel, read back, and return the complete authoritative snapshot; requires `board_commands` |
 | `controller.temperatures` | optional `rescan` | named temperatures and ROM identities |
 | `controller.menu.list`, `controller.menu.current` | `{}` | live board catalog when advertised, otherwise the canonical capability-limited manifest |
 | `controller.menu.jump`, `controller.menu.page` | `page` ID or name | select a board menu page |
 | `controller.command.execute` | `command` | run any ordinary controller command; `quit`/`exit` requests primary shutdown |
+| `controller.firmware.build` | optional `firmware_features` array or `no_firmware_features: true` | compile only the host's canonical configured project; returns an operation ID and normalized final log; requires `programming` |
 | `controller.program_state.get` | `{}` | current host-owned Idle/Running owners, reason, and revision |
 | `controller.program_state.set` | `mode`, optional `owner`, `reason` | set/clear one host-owned Running claim and mirror it to capable firmware |
 | `controller.rf.list` | `{}` | all learned records |
@@ -607,9 +627,14 @@ required `-32001`, remote capability denied `-32003`, and runtime/device error
 | `controller.app.instances` | `{}` | list live UI/automation instances and bounded non-secret state |
 | `controller.app.bridge` | `{}` | query the original coordinator bridge instance, including bounded process self-information |
 | `controller.app.instance.get` | `id` | query one exact live instance |
-| `controller.app.instance.report` | `id`, `surface`, `page`, optional `state`, `lease_seconds`, `values`, `self` | create or refresh an ephemeral instance report |
+| `controller.app.instance.report` | `id`, `surface`, `page`, optional `state`, `lease_seconds`, `values`, `self` | create or refresh an ephemeral instance report; WebUI/TUI followers use bounded navigation mode/group/epoch/revision values |
 | `controller.app.instance.remove` | `id` | remove one instance report immediately |
 | `controller.app.navigate` | `page`, optional `target` | navigate `*`, a surface such as `webui`/`tui`, or one exact instance ID |
+| `controller.app.launch` | `surface`, optional `mode`, `target`, `page`, `idempotency_key` | ensure, launch, or focus only the named `tui` or `webui`; reports OS acceptance separately from live instance confirmation |
+| `controller.app.navigation.commit` | `group`, `source`, `page`, `operation_id` | commit a follower group's canonical page and return its epoch, revision, correlated operation ID, and ordered deliveries |
+| `controller.app.action` | `kind`, optional `value`, `target`, `operation_id`, `timeout_ms` | freeze the selector to exact live clients, push one correlated delivery per target, and return queued/rejected outcomes |
+| `controller.app.action.ack` | `operation_id`, `delivery_id`, `instance_id`, `state`, optional `reason` | acknowledge one exact delivery as `applied` or `rejected`; duplicate identical terminal acknowledgements are idempotent |
+| `controller.app.action.outcome` | `operation_id` | read the bounded current operation with per-target `queued`, `applied`, `rejected`, or `timeout` state |
 | `controller.history.status` | optional ISO-8601 `since` | retained measurement samples, including samples restored from the bounded host data store after restart |
 | `controller.history.timeline` | optional `since`, `limit` | durable important-event timeline |
 | `controller.os.facts.catalog`, `controller.host.facts.catalog` | `{}` | fixed read-only Windows profile descriptors, columns, and row limits |
@@ -620,7 +645,9 @@ required `-32001`, remote capability denied `-32003`, and runtime/device error
 | `controller.lcd.priority` | `kind`, `line1`, `line2`, optional `hold_ms` | display a priority overlay, then restore the prompt |
 | `controller.message.send` | typed message envelope below | route/log a message and optionally display it on the board LCD |
 | `controller.bridge.list` | `{}` | configured peers and live connection state, without URLs or credentials |
-| `controller.bridge.call` | `peer`, nested JSON-RPC `request` | correlated call through that peer; recursive bridge calls are rejected |
+| `controller.bridge.call` | `peer`, nested JSON-RPC `request` | correlated call through that peer; bridge ingress cannot invoke this method or pivot through command/app-action wrappers |
+| `controller.network.peers.get` | `{}` | persistent peer topology including optional secret references but never resolved or plaintext credentials |
+| `controller.network.peers.set` | `peers` array | atomically replace and hot-apply peer topology; unknown fields and plaintext `auth_token` are rejected, and `host_configuration` classifies remote policy when permissions return |
 | `controller.artifact.manifest`, `controller.artifact.list` | optional artifact `kind` | update capability/default/current discovery and content-addressed catalog |
 | `controller.artifact.fetch`, `controller.artifact.capture` | typed fetch or explicitly authorized capture request | queue transfer/readback through the primary |
 | `controller.update.firmware`, `controller.update.eeprom`, `controller.update.host` | artifact SHA-256 plus `authorized: true` | queue the guarded update for that domain |
@@ -631,8 +658,93 @@ required `-32001`, remote capability denied `-32003`, and runtime/device error
 | `controller.device.inspect` | `resource` | sanitized `capabilities` or `snapshot` document only |
 | `controller.integrations.local.get` | `{}` | credential-free local-device and data-hub enable/URL settings |
 | `controller.integrations.local.set` | `local_device`, `data_hub` | validate and persist LAN-only device and loopback-only data roots |
+| `controller.integrations.status` | `{}` | requested and effective buzzer route, mirror backend, and board reconciliation state |
 | `controller.ports` | `{}` | current serial devices with stable identity fields |
 | `controller.quit`, `controller.exit` | `{}` | close the primary and emit lifecycle shutdown |
+
+Full TUI instances and each browser tab follow the ephemeral `default`
+navigation group unless that client opts out. Browser opt-out is scoped to the
+current tab; it is not host configuration and does not affect other clients.
+A lease reports only
+presence, capabilities, and a process-session epoch/revision; it never mutates
+the canonical page. A local page change calls `controller.app.navigation.commit`
+with a client operation ID. The primary commits exactly once, returns
+`group_epoch`, `revision`, `operation_id`, and canonical page, then publishes
+the same ordered action to the source and every live follower. A late title or
+lease callback is therefore unable to roll a source back. When the last lease
+leaves or expires the group is discarded, so active pages are never persisted
+as host configuration. Retrying the same operation ID is idempotent only while
+its epoch, revision, and page remain canonical. Once a newer operation advances
+the group, replaying the older operation returns an error instead of a stale
+cached page that could roll a client back.
+After an event-session reconnect a follower adds
+`navigation_catch_up=true`; the coordinator then re-sends the canonical page
+instead of treating the client's potentially stale page as new intent.
+
+Coordinator navigation actions carry `navigation_sync=group`, group, epoch,
+revision, source-instance, and operation-ID metadata. Clients reject duplicate, older, or
+foreign-epoch deliveries until an authoritative primary reconnect resets their
+acceptance cursor. Generic `controller.app.action` and `/api/app/action`
+callers cannot supply these coordinator-owned fields. Authenticated remote
+control instead uses `controller.app.navigate` or `/api/app/navigate`, which is
+individually authorized and audited under `host_configuration`. An explicit
+navigation can still target an opted-out instance, but does not enroll it in a
+group or make it follow later broadcasts. Prompt input, cursor/editor/modal
+state, terminal visibility, and serial ownership always remain local.
+
+`controller.app.launch` and `/api/app/launch` are coordinator-owned graphical
+entry points, not process execution APIs. They accept only `tui` or `webui` and
+the modes `ensure`, `launch`, or `focus`; there is no executable, argument,
+environment, command, or shell field. `ensure` reuses a matching live instance
+when one is registered. `focus` never creates a duplicate and truthfully returns
+`unavailable` where the desktop/compositor has no safe focusing primitive.
+`launch` creates a new surface. An optional exact instance ID targets only
+`ensure` or `focus`, and an idempotency key deduplicates retries. The result
+distinguishes an OS-accepted request (`accepted`) from a subsequently registered
+live app instance (`confirmed`). On Linux the coordinator must already run as
+the non-root graphical user and inherit `DISPLAY` or `WAYLAND_DISPLAY`; it does
+not search other users' sessions or use SSH. The TUI child attaches to the
+coordinator IPC endpoint and cannot become a second UART owner.
+
+Launch and registration are serialized per surface through the bounded
+registration wait, so a request cannot confirm a window started by another
+concurrent request. To prevent accidental window storms, the coordinator permits
+at most three new-window start attempts per surface in a rolling ten-second
+window; `ensure`/`focus` calls that reuse an existing instance do not consume
+that allowance. A limited request returns `effective=unavailable` with a
+rate-limit reason rather than invoking an OS launcher.
+
+Typed application actions are resolved once against the pruned live instance
+registry. The returned operation records the exact instance IDs and surfaces;
+an unknown or offline selector is rejected with an empty target set rather than
+inventing an instance. Clients advertise a bounded `app_actions` list in
+their presence values and apply only a push addressed to their exact instance
+ID. Each target push carries coordinator-owned `operation_delivery_id` and
+`operation_expires_at` metadata. Callers cannot supply or override either
+field. The client rejects an expired or malformed deadline, deduplicates the
+operation-plus-delivery receipt, and returns that delivery nonce as the
+required `delivery_id` in its acknowledgement. The coordinator accepts only a
+nonce issued for that exact operation target before its deadline, then records the client-reported
+`applied` or `rejected` result. An action without a live outcome-capable
+advertisement is rejected; it is not delivered through an untracked path.
+Operation history is bounded and expires; ordinary delivery and
+outcome transitions use the existing event streams and bridge fan-out, never
+polling. Successful queued/applied transitions use the state stream so they do
+not flood operator activity logs, while rejection and timeout remain visible
+one-shot activity events.
+
+Unknown well-formed optional action capabilities remain visible in discovery
+without rejecting the whole instance. A namespaced custom action such as
+`pealayer.play` becomes executable only while a matched live instance advertises
+that exact capability. Custom namespaces cannot use the reserved `app.*`,
+`controller.*`, or `command` names; values are limited to 4096 bytes and cannot
+contain NUL, CR, or LF. They always use the correlated exact-target path with a
+delivery nonce, deadline, deduplication receipt, and terminal ACK outcome.
+These receipts provide correlation and deduplication, **not responder
+authentication**: alpha clients share a trusted event fabric and authorization
+is disabled by policy. Transport-session identity binding remains tracked in
+#108 and must be implemented with the future auth work, not inferred from a
+delivery nonce visible to event subscribers.
 
 RF learning has two mutually exclusive modes. An omitted mode or
 `{"mode":"indefinite"}` keeps accepting codes until cancellation. A bounded
@@ -747,7 +859,10 @@ All JSON endpoints share the IPC listener:
 | `POST /api/app/instances` | create/refresh an instance report |
 | `DELETE /api/app/instances?id=...` | remove one instance report |
 | `POST /api/app/navigate` | navigate a page with optional target instance/surface |
-| `POST /api/app/action` | route a validated page/title/progress/OSC/command/lifecycle action with optional target instance/surface |
+| `POST /api/app/action` | freeze and route a correlated page/title/progress/OSC/command/lifecycle action to exact live targets; response includes `accepted` plus the operation |
+| `POST /api/app/action/ack` | acknowledge one exact target as applied/rejected |
+| `GET /api/app/action/outcome?operation_id=...` | read one bounded per-target operation outcome |
+| `POST /api/app/launch` | ensure, start, or focus the named TUI/WebUI surface without accepting process or shell input |
 | `GET /api/bridges` | configured peer names/protocols and live state |
 | `POST /api/bridges/call` | `peer` plus a nested JSON-RPC `request` |
 | `GET /api/artifacts/manifest` | artifact/default/current discovery and latest operation |
@@ -879,6 +994,14 @@ browser event history. Browsers apply matching page actions and fresh update
 lifecycle navigation; terminal-only actions remain available to matching TUI
 instances without being interpreted by the browser.
 
+The loaded application publishes the living, unversioned `window.PCController`
+browser surface for local automation and inspection. Its `inspect()` result
+reports host transport and physical-board connection as separate facts;
+`command()`, `refresh()`, and `navigate()` use the same validated host paths as
+visible UI actions. State changes also dispatch `pccontroller:state` with the
+same non-secret snapshot. This surface is a convenience adapter, not a second
+contract or an authorization bypass.
+
 The local-integration proxy resolves only the configured short names; request
 data can never supply an upstream URL. The data hub is restricted to loopback,
 while the typed device manager accepts only loopback/private/link-local addresses or explicitly local names. The bridge
@@ -955,9 +1078,9 @@ It sends an Engine.IO open packet, accepts Socket.IO connect/disconnect, and
 implements Engine.IO ping/pong. Socket.IO event packets use the usual
 `42["name",payload]` form. Supported incoming events are:
 
-Authentication completes before the Engine.IO open packet. Native clients use
-a header; browser-capable clients may request a `socket_io` one-use ticket and
-offer the same two WebSocket subprotocols as the standard endpoint.
+In the immediate alpha, Engine.IO opens without an application credential;
+Origin enforcement still precedes the open packet. Header and one-use ticket
+code is retained only for future design and older-host upgrade compatibility.
 
 | Event | Payload | Response/push events |
 |---|---|---|
@@ -1023,7 +1146,7 @@ final URL explicitly.
 
 When `signing_secret` is configured, the sender also sets
 `X-PCController-Timestamp`, `X-PCController-Nonce`, and
-`X-PCController-Signature`. The signature is `v1=` followed by the lowercase
+`X-PCController-Signature`. The signature is `sha256=` followed by the lowercase
 hex HMAC-SHA256 of this exact byte sequence:
 
 ```text
@@ -1064,12 +1187,14 @@ also emitted to the host timeline.
 ## Outbound WebSocket bridge
 
 An enabled `integrations.websocket_clients` entry makes the primary host a
-standard WebSocket or bounded Socket.IO client. It authenticates with a Bearer
-token, subscribes to validated `events`/`opcodes`/`status` topics, reconnects with bounded
+standard WebSocket or bounded Socket.IO client. During alpha it connects
+without credentials unless an optional compatibility bearer is configured for
+an older peer. It subscribes to validated `events`/`state`/`status` topics, reconnects with bounded
 backoff, and can forward local events as correlated `controller.message.send`
 calls. Transport/control/error events and remote-origin messages are not
 re-forwarded, preventing a direct two-host echo loop. Incoming remote
-events/status are re-emitted locally as source-tagged messages.
+events and state remain structured; status is re-emitted locally as a
+source-tagged message.
 
 `controller.bridge.call`, `POST /api/bridges/call`, and
 `bridge call PEER METHOD [PARAMS_JSON]` use the existing persistent connection
@@ -1089,6 +1214,14 @@ local serial owner. Programming through a remote primary requires the target's
 `programming` and `connection_control` permissions and follows the same
 application-UART close, guarded toolchain/Urclock run, and fresh `HELLO`
 recovery as local programming.
+
+Subscribed peer events and state remain structured. In particular, an
+unsolicited `buzzer.note` retains its frequency, duration, and optional
+MCU-clock metadata so an independently enabled host renderer can reconstruct
+its source timeline. The receiver stamps `bridge.ingress` and never forwards
+an ingressed event again; this gives server-to-edge mirroring exactly once
+without polling or bridge cycles. Both JSON-RPC and Socket.IO peers must
+include `state` in their configured topics.
 
 ## Artifact distribution and remote updates
 
@@ -1124,7 +1257,7 @@ HTTPS-to-HTTP downgrade, remove bearer credentials on cross-authority
 redirects (including after a composed client redirect callback), and verify
 declared size plus SHA-256 before the final name appears. An injected ordinary
 HTTP client is only a settings template: its proxy and dial hooks cannot relax
-the public-source invariant. A local test or authenticated peer must select the
+the public-source invariant. A local test or explicitly trusted peer must select the
 separately named trusted constructor explicitly.
 Remote artifact and update sources are public-network only: the initial URL,
 every redirect, and the effective response URL reject loopback, private,
@@ -1187,12 +1320,21 @@ Artifact and update JSON-RPC methods are:
 | `controller.artifact.manifest` | `{}` | feature/default/current artifacts, board identity, policy, and latest update status |
 | `controller.artifact.list` | optional `kind` | SHA-256-sorted artifact descriptors |
 | `controller.artifact.fetch` | `url`, `kind`, optional `name`, `sha256`, `bytes`, build identity, `idempotency_key` | queue a verified proxy-aware HTTP download |
+| `controller.artifact.upload.begin`, `.chunk`, `.finish`, `.abort` | bounded transfer descriptor, ordered binary chunks, or `transfer_id` | authenticated bridge artifact transport; incomplete transfers expire and never enter the immutable store |
 | `controller.artifact.capture` | `components`, `authorized`, optional `method`, `port`, `idempotency_key` | explicitly read and verify current flash/EEPROM through the primary |
-| `controller.update.firmware` | `artifact_sha256`, `authorized`, optional `method`, `port`, `allow_incomplete_backup`, `reinitialize_eeprom`, `idempotency_key` | guarded backup-then-flash; explicit reinitialization retains raw EEPROM, programs/readbacks the complete Go-owned factory image, and discards incompatible semantic settings |
+| `controller.update.firmware` | `artifact_sha256`, `authorized`, optional `method`, `port`, `deployment`, `reinitialize_eeprom`, `idempotency_key` | guarded flash; explicit development workflow skips new raw capture, production defaults to verified backup; reinitialization always retains raw EEPROM, programs/readbacks the Go-owned factory image, and discards incompatible semantic settings |
 | `controller.restore.flash` | `artifact_sha256`, `authorized`, optional `method`, `port` | guarded restore of a `flash-backup`; Urclock by default, explicit USBasp fallback |
 | `controller.update.eeprom` | same | full pre-write capture, then confirmed EEPROM restore |
 | `controller.update.host` | `artifact_sha256`, `authorized` | stage a verified deferred self-update |
+| `controller.peer.update.host` | `peer`, host `artifact_sha256`, `authorized`, optional `idempotency_key` | transfer through the existing authenticated bridge, revalidate on the peer, then ask that peer coordinator to replace itself gracefully |
 | `controller.update.status` | optional operation `id` | latest or selected asynchronous status |
+
+Peer host replacement is an application protocol, not an SSH deployment
+recipe. The source streams a verified executable through its already-connected
+bridge in bounded chunks; the target rehashes and reparses it before its own
+coordinator performs the ordinary journaled self-update and rollback health
+check. Either host can be source or target. `allow_commands`, the target's
+`programming` policy, and explicit `authorized: true` are all required.
 
 Provider and manifest discovery use a companion, product-neutral contract:
 
@@ -1200,7 +1342,7 @@ Provider and manifest discovery use a companion, product-neutral contract:
 |---|---|---|
 | `controller.discovery.github.workflow` | `repository`, `kind`, optional `branch`, `workflow`, `platform`, `api_base_url`, build identity, `packed_timestamp`, `bearer_token` | newest successful matching run and its non-expired artifacts; metadata only |
 | `controller.discovery.github.release` | `repository`, `kind`, optional `tag`, `include_prerelease`, `platform`, `api_base_url`, `packed_timestamp`, `bearer_token` | latest stable, requested tag, or opted-in prerelease assets; reads `SHA256SUMS` when provided |
-| `controller.discovery.manifest` | `url`, optional `bearer_token` | fetch and validate a `controller-update-manifest/v1` document |
+| `controller.discovery.manifest` | `url`, optional `bearer_token` | fetch and validate the living update-manifest document |
 | `controller.discovery.local_manifest` | `{}` | publish this primary host's deduplicated inventory in the same portable manifest format |
 | `controller.discovery.check` | current artifact identity, `kind`, optional `platform`, candidate list | `same`, `newer`, `older`, `different`, or `unavailable`, using digest before packed/build time |
 | `controller.discovery.stage` | candidate, optional transient `bearer_token`, `idempotency_key` | queue proxy-aware download, digest/size verification, safe ZIP member selection, and content-store import; never programs |
@@ -1217,7 +1359,6 @@ A minimal independently hosted manifest is:
 
 ```json
 {
-  "format": "controller-update-manifest/v1",
   "generated_at": "2026-08-02T00:00:00Z",
   "artifacts": [
     {
@@ -1234,9 +1375,10 @@ A minimal independently hosted manifest is:
 }
 ```
 
-Artifact URLs may be absolute or relative to the manifest. Unknown additive
-fields are ignored within the recognized format, while required known fields,
-URLs, sizes, kinds, and digests are still validated.
+Artifact URLs may be absolute or relative to the manifest. This contract has no
+format or schema-version discriminator: unknown additive fields are ignored,
+while required known fields, URLs, sizes, kinds, and digests are still
+validated.
 
 The equivalent REST routes are:
 
@@ -1309,8 +1451,8 @@ growing EEPROM.
 
 For an unpublished development board whose settings payload cannot be decoded,
 the authorized firmware-update request may set `reinitialize_eeprom: true`.
-This option is mutually exclusive with `allow_incomplete_backup`: the primary
-must first retain a complete verified raw EEPROM image. The marker records the
+The primary must first retain a complete verified raw EEPROM image even when
+`deployment: "development"` is selected. The marker records the
 query error and partial live-state result, outputs are forced safe, and after
 flashing only the new firmware's current settings schema is accepted. Silent
 is cleared, illumination/persistence/relay restore are disabled, outputs and
@@ -1335,19 +1477,38 @@ runtime board identity. During alpha, successive version builds do not gain
 layout migrations or compatibility aliases; those are reserved for distinct
 profile/feature builds that are intentionally supported concurrently.
 
-## mDNS and SSDP discovery
+## Network device directory and discovery
 
-When enabled, mDNS advertises `_pccontroller._tcp.local.` with non-secret TXT
-metadata for the WebSocket path, Socket.IO path, and authentication requirement.
-SSDP advertises and discovers
-`urn:pccontroller-org:service:bridge:1`, responds to its own type and
-`ssdp:all` searches, sends alive/byebye notifications, and publishes a
-`/healthz` location. Instance discovery returns protocol, name, host, port,
-addresses/TXT or SSDP location/USN, and observation time.
+Advertisement is enabled by default for mDNS/DNS-SD, SSDP/UPnP,
+WS-Discovery, bounded UDP broadcast, and NetBIOS. SSDP advertises
+`urn:pccontroller-org:service:bridge:1`, answers its type and `ssdp:all`, and
+publishes the UPnP device description. `GET /upnp/public.json` is the canonical
+secret-free document containing hostname, host build, board firmware and port
+identity, service/connection health, current public telemetry, and API/Web/
+WebSocket/Socket.IO/operation/event/opcode endpoints. SOAP `GetPublicInfo`
+locates that document and `GetStatus` returns the principal health/telemetry
+fields directly.
 
-Discovery is optional because multicast can be blocked by Windows Firewall,
-VLANs, VPNs, or Wi-Fi isolation. Finding an instance does not authenticate the
-client and never grants command authority.
+`controller.discovery.scan` and `controller network discover|list` query any
+combination of the transports and return one merged `Instance` per host.
+`protocols` identifies every successful path and `sources` retains each raw
+transport observation. `controller.discovery.connect` opens raw IPC and reads
+the remote snapshot; `controller network connect --target NAME` also probes
+HTTP, WebSocket, and Socket.IO. Optional `--token-ref REF` exists only for an
+older auth-on host during upgrade. The TUI HOST
+Settings page uses `D` to scan and Enter/C on a discovered row to open its Web
+endpoint. The Web workbench renders the same merged directory and Connect
+navigates to the selected host.
+
+Advertisement can be disabled or narrowed per protocol through host config,
+`controller.discovery.config.get|set`, the Web workbench, the TUI network
+editor, or `controller network advertise`. Scan start, each merged device,
+completion/failure, connection, and configuration-change events fan out through
+the ordinary WebSocket and Socket.IO event subscriptions. Public-document HTTP
+enrichment bypasses Internet proxies and is pinned to the discovery responder's
+exact host and port. Discovery can still be blocked by Windows Firewall,
+VLANs, VPNs, or Wi-Fi isolation. Finding an instance does not enable its
+listener or change board/OS safety policy.
 
 ## Typed text-message envelope
 

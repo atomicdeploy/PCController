@@ -13,8 +13,10 @@ import (
 
 const (
 	DefaultPersistentMenuPageCount = 14
-	DefaultVisibleMenuMask         = uint16(1<<DefaultPersistentMenuPageCount) - 1
+	DefaultMenuPageMotionAlias     = 12
+	DefaultVisibleMenuMask         = uint16((1<<DefaultPersistentMenuPageCount)-1) &^ (uint16(1) << DefaultMenuPageMotionAlias)
 	defaultEEPROMCompileArtifact   = "safe-default-eeprom.hex"
+	defaultEEPROMMenuLabels        = "doorVOLTCURRtLEDtBT LItEbEEPPWM rELYKEY uPWMr5-8MOVELErn"
 )
 
 type EEPROMProgramOperation func(context.Context, Options, io.Writer) error
@@ -49,6 +51,19 @@ func generateEEPROMIntelHex(factory native.Settings) ([]byte, error) {
 	for index := range data {
 		data[index] = 0xFF
 	}
+
+	// The compact startup region stores the four exact autonomous physical
+	// cues as {frequencyLE16,duration8}, followed by CRC-8. Firmware validates
+	// the record atomically and falls back to the same values if it is blank,
+	// corrupt, or built with EEPROM cue loading disabled.
+	audio := data[EEPROMAudioCueAddress : EEPROMAudioCueAddress+EEPROMAudioCueRecordBytes]
+	for index, cue := range [][2]uint16{{1700, 45}, {1100, 45}, {1900, 35}, {1250, 35}} {
+		offset := index * int(EEPROMAudioCueDescriptorBytes)
+		binary.LittleEndian.PutUint16(audio[offset:offset+2], cue[0])
+		audio[offset+2] = byte(cue[1])
+	}
+	audio[len(audio)-1] = avrCRC8(audio[:len(audio)-1])
+
 	settings := data[EEPROMSettingsAddress : EEPROMSettingsAddress+EEPROMSettingsRecordBytes]
 	values := settings[:EEPROMSettingsValueBytes]
 	values[0] = factory.Flags
@@ -101,6 +116,14 @@ func generateEEPROMIntelHex(factory native.Settings) ([]byte, error) {
 		record := data[start : start+EEPROMStatusProfileRecordBytes]
 		copy(record, descriptor[1:])
 		record[EEPROMStatusProfileBytes] = avrCRC8(record[:EEPROMStatusProfileBytes])
+	}
+
+	// The optional EEPROM-label firmware build reads this exact packed table
+	// from the final EEPROM bytes. Provision the versioned record in every
+	// factory image so a later feature-enabled flash needs no second write.
+	labels := []byte(defaultEEPROMMenuLabels)
+	if err := applyMenuLabelsWritePlan(data, labels); err != nil {
+		return nil, fmt.Errorf("encode factory menu labels: %w", err)
 	}
 
 	image := &IntelHexImage{data: make(map[uint32]byte, PCControllerEEPROMBytes)}

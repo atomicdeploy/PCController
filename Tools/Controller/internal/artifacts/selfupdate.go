@@ -17,7 +17,6 @@ import (
 )
 
 const (
-	selfUpdateJournalSchema  = 1
 	selfUpdateHelperCommand  = "__self-update-helper"
 	healthPathEnvironment    = "CONTROLLER_SELF_UPDATE_HEALTH_PATH"
 	healthTokenEnvironment   = "CONTROLLER_SELF_UPDATE_HEALTH_TOKEN"
@@ -37,7 +36,6 @@ type SelfUpdatePlan struct {
 }
 
 type selfUpdateJournal struct {
-	Schema            int       `json:"schema"`
 	State             string    `json:"state"`
 	UpdatedAt         time.Time `json:"updated_at"`
 	ParentPID         int       `json:"parent_pid"`
@@ -174,7 +172,7 @@ func PrepareSelfUpdateWithOptions(ctx context.Context, options SelfUpdateOptions
 		return SelfUpdatePlan{}, err
 	}
 	journal := selfUpdateJournal{
-		Schema: selfUpdateJournalSchema, State: "prepared", UpdatedAt: time.Now().UTC(),
+		State: "prepared", UpdatedAt: time.Now().UTC(),
 		ParentPID: os.Getpid(), CurrentPath: plan.CurrentPath, StagedPath: plan.StagedPath,
 		BackupPath: plan.BackupPath, HelperPath: plan.HelperPath, JournalPath: plan.JournalPath,
 		HealthPath: plan.HealthPath, HealthToken: token,
@@ -238,6 +236,7 @@ func RunSelfUpdateHelper(ctx context.Context, journalPath string) error {
 	child := exec.Command(journal.CurrentPath, journal.Arguments...)
 	child.Dir = journal.WorkingDirectory
 	child.Env = selfUpdateEnvironment(os.Environ(), journal)
+	inheritSelfUpdateIO(child)
 	if err := platformStartReplacementProcess(child); err != nil {
 		_ = rollbackSelfUpdate(&journal)
 		return updateJournalFailure(&journal, "candidate-start-failed", err)
@@ -415,17 +414,18 @@ func loadSelfUpdateJournal(path string) (selfUpdateJournal, error) {
 		return selfUpdateJournal{}, err
 	}
 	var journal selfUpdateJournal
-	if err := strictJSON(content, &journal); err != nil {
+	if err := decodeStoredJSON(content, &journal); err != nil {
 		return selfUpdateJournal{}, fmt.Errorf("decode self-update journal: %w", err)
 	}
-	if journal.JournalPath == "" {
-		journal.JournalPath = path
+	if journal.JournalPath == "" || filepath.Clean(journal.JournalPath) != filepath.Clean(path) {
+		return selfUpdateJournal{}, errors.New("self-update journal path identity mismatch")
 	}
 	return journal, nil
 }
 
 func validateSelfUpdateJournal(journal selfUpdateJournal) error {
-	if journal.Schema != selfUpdateJournalSchema || journal.State != "prepared" {
+	if journal.State != "prepared" || journal.UpdatedAt.IsZero() || journal.ParentPID <= 0 ||
+		strings.TrimSpace(journal.HealthToken) == "" {
 		return errors.New("self-update journal is not a prepared transaction")
 	}
 	paths := []string{journal.CurrentPath, journal.StagedPath, journal.BackupPath,
@@ -468,10 +468,25 @@ func launchRestoredHost(journal selfUpdateJournal) error {
 	command := exec.Command(journal.CurrentPath, journal.Arguments...)
 	command.Dir = journal.WorkingDirectory
 	command.Env = withoutSelfUpdateEnvironment(os.Environ())
-	if err := command.Start(); err != nil {
+	inheritSelfUpdateIO(command)
+	if err := platformStartReplacementProcess(command); err != nil {
 		return err
 	}
 	return command.Process.Release()
+}
+
+// inheritSelfUpdateIO preserves the coordinator's visible terminal or service
+// log streams while the external helper replaces and restarts it. Leaving the
+// exec.Cmd streams nil connects the candidate to null devices, which makes an
+// interactive TUI exit immediately and leaves its terminal blank after an
+// otherwise valid bridge-initiated update.
+func inheritSelfUpdateIO(command *exec.Cmd) {
+	if command == nil {
+		return
+	}
+	command.Stdin = os.Stdin
+	command.Stdout = os.Stdout
+	command.Stderr = os.Stderr
 }
 
 func selfUpdateEnvironment(environment []string, journal selfUpdateJournal) []string {

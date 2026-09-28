@@ -34,7 +34,9 @@ export const messages = {
     reduceMotion: 'Reduce motion', compactNumbers: 'Compact large numbers', liveTelemetry: 'Live telemetry',
     outputSafety: 'Safety confirmation is required for destructive actions.',
     confirmEmergencyTitle: 'Stop every output?', confirmEmergencyBody: 'This releases all relays and clears PWM output through the same guarded controller command path.',
-    noHardware: 'The dashboard is ready; connect an authenticated controller to receive live telemetry.',
+    noHardware: 'The PCController host is online, but no controller board is connected. Check the USB cable or choose a detected serial port.',
+    authenticationDashboard: 'Authentication required',
+    authenticationDashboardDetail: 'Enter this host’s access token.',
     demoMode: 'Visual demonstration data', eventStream: 'Event stream', status: 'Status',
   },
   fa: {
@@ -67,7 +69,9 @@ export const messages = {
     reduceMotion: 'کاهش حرکت‌ها', compactNumbers: 'نمایش فشرده اعداد بزرگ', liveTelemetry: 'تله‌متری زنده',
     outputSafety: 'برای عملیات مخرب تأیید ایمنی لازم است.',
     confirmEmergencyTitle: 'همه خروجی‌ها متوقف شوند؟', confirmEmergencyBody: 'این کار همه رله‌ها را آزاد و PWM را از همان مسیر امن فرمان کنترلر پاک می‌کند.',
-    noHardware: 'داشبورد آماده است؛ برای دریافت داده زنده یک کنترلر معتبر متصل کنید.',
+    noHardware: 'میزبان PCController آنلاین است، اما هیچ برد کنترلری متصل نیست. کابل USB را بررسی کنید یا یک درگاه شناسایی‌شده را انتخاب کنید.',
+    authenticationDashboard: 'احراز هویت لازم است',
+    authenticationDashboardDetail: 'توکن دسترسی این میزبان را وارد کنید.',
     demoMode: 'داده نمایشی رابط', eventStream: 'جریان رویدادها', status: 'وضعیت',
   },
 } as const
@@ -97,15 +101,40 @@ export function localizeDigits(locale: Locale, value: number): string {
 }
 
 export function formatDuration(locale: Locale, milliseconds: number): string {
-  if (!Number.isFinite(milliseconds) || milliseconds <= 0) return '—'
+  if (!Number.isFinite(milliseconds) || milliseconds < 0) return '—'
   const seconds = Math.floor(milliseconds / 1000)
   const days = Math.floor(seconds / 86400)
   const hours = Math.floor((seconds % 86400) / 3600)
   const minutes = Math.floor((seconds % 3600) / 60)
-  const pieces = days > 0 ? [`${days}d`, `${hours}h`] : hours > 0 ? [`${hours}h`, `${minutes}m`] : [`${minutes}m`]
+  const remainingSeconds = seconds % 60
+  const pieces = days > 0
+    ? [`${days}d`, `${hours}h`, `${minutes}m`, `${remainingSeconds}s`]
+    : hours > 0
+      ? [`${hours}h`, `${minutes}m`, `${remainingSeconds}s`]
+      : minutes > 0
+        ? [`${minutes}m`, `${remainingSeconds}s`]
+        : [`${remainingSeconds}s`]
   const value = pieces.join(' ')
   if (locale !== 'fa') return value
-  return value.replace(/\d+/g, (digits) => localizeDigits(locale, Number(digits))).replace('d', 'ر').replace('h', 'س').replace('m', 'د')
+  return value.replace(/\d+/g, (digits) => localizeDigits(locale, Number(digits)))
+    .replace('d', 'ر').replace('h', 'س').replace('m', 'د').replace('s', 'ث')
+}
+
+export function formatMeasurementFreshness(
+  locale: Locale,
+  updated: string | number | Date | undefined,
+  freshnessMS: number,
+  now = Date.now(),
+): string {
+  if (updated === undefined) return locale === 'fa' ? 'در انتظار دستگاه' : 'Waiting for device'
+  const observed = updated instanceof Date ? updated.getTime() : typeof updated === 'number' ? updated : Date.parse(updated)
+  if (!Number.isFinite(observed)) return locale === 'fa' ? 'در انتظار دستگاه' : 'Waiting for device'
+  const ageMS = Math.max(0, now - observed)
+  if (ageMS < freshnessMS) return locale === 'fa' ? 'زنده' : 'Live'
+  const seconds = ageMS / 1000
+  const amount = seconds < 10 ? seconds.toFixed(1) : String(Math.round(seconds))
+  const localized = locale === 'fa' ? localizeDigits(locale, Number(amount)) : amount
+  return locale === 'fa' ? `${localized} ثانیه پیش` : `${localized} s ago`
 }
 
 export function formatClock(locale: Locale, value?: string | number | Date): string {

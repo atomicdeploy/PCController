@@ -17,6 +17,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadProjectEnv } from "../Build/env.mjs";
 import {
   createChalk,
   renderUnicodeTable,
@@ -29,6 +30,8 @@ import {
   repositoryWebUrl,
   resolveRepository,
 } from "../../.github/scripts/repository-context.mjs";
+
+loadProjectEnv();
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..", "..");

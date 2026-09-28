@@ -233,7 +233,6 @@ func applyTUIConsole(settings consolewindow.Settings, output io.Writer, strict b
 		if strict {
 			return errors.New(result.Reason)
 		}
-		fmt.Fprintln(output, "notice: local TUI console settings skipped:", result.Reason)
 	}
 	return nil
 }

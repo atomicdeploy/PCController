@@ -4,6 +4,9 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadProjectEnv } from "../Build/env.mjs";
+
+loadProjectEnv();
 
 /** Resolve the public API identity from the shared product manifest. */
 export function productIdentity(metadata) {
@@ -73,9 +76,12 @@ const capabilityGroups = {
     "controller.event.next", "controller.event.latest", "controller.subscribe", "controller.unsubscribe",
   ],
   programming: [
+	"controller.firmware.build",
     "controller.artifact.fetch", "controller.artifact.upload", "controller.artifact.capture",
+    "controller.artifact.upload.begin", "controller.artifact.upload.chunk",
+    "controller.artifact.upload.finish", "controller.artifact.upload.abort",
     "controller.update.firmware", "controller.restore.flash", "controller.update.eeprom",
-    "controller.update.host", "controller.discovery.stage",
+    "controller.update.host", "controller.peer.update.host", "controller.discovery.stage",
   ],
   connection_control: [
     "controller.connect", "controller.open", "controller.port.open", "controller.close", "controller.port.close",
@@ -87,15 +93,18 @@ const capabilityGroups = {
     "controller.host_menu.configure", "controller.host_menu.config.set", "controller.ui.config.set",
     "controller.peripherals.set", "controller.hotkeys.set", "controller.os.configure",
     "controller.lcd.presentation.configure", "controller.app.page", "controller.app.navigate",
-    "controller.app.instance.report", "controller.app.instance.remove",
+    "controller.app.launch", "controller.app.navigation.commit",
+    "controller.app.instance.report", "controller.app.instance.remove", "controller.app.action.ack",
+		"controller.network.peers.set",
   ],
   virtual_keys: ["controller.os.key", "controller.virtual_key"],
   power_actions: ["controller.os.power"],
-  bridge_calls: ["controller.bridge.call"],
+  bridge_calls: ["controller.bridge.call", "controller.discovery.connect"],
   integrations: [
     "controller.device.status", "controller.device.action", "controller.device.inspect",
     "controller.integrations.local.get", "controller.integrations.local.set",
     "controller.webhooks.replay", "controller.webhooks.clear",
+		"controller.discovery.config.set",
   ],
   read: [
     "controller.artifact.manifest", "controller.artifact.list", "controller.update.status",
@@ -107,20 +116,22 @@ const capabilityGroups = {
     "controller.hotkeys.get", "controller.bridge.list", "controller.webhooks.status",
     "controller.webhooks.pending", "controller.webhooks.dead", "controller.ping", "controller.snapshot",
     "controller.session.snapshot", "controller.session.snapshot.last", "controller.status",
-    "controller.front_panel", "controller.front-panel", "controller.command.catalog",
+    "controller.front_panel", "controller.front-panel", "controller.command.catalog", "controller.melodies.list",
     "controller.program_state.get", "controller.program-state.get", "controller.temperatures",
     "controller.menu.list", "controller.menu.current", "controller.menu.layout.get",
     "controller.host_menu.state", "controller.rf.list", "controller.rf.presentation",
     "controller.rf.learn.status", "controller.history.status", "controller.history.timeline",
     "controller.lcd.presentation.status", "controller.ports", "controller.os.status",
     "controller.system.status", "controller.os.facts", "controller.host.facts",
-    "controller.discovery.scan", "controller.pwm.values",
+    "controller.discovery.scan", "controller.discovery.config", "controller.discovery.config.get",
+		"controller.integrations.status", "controller.pwm.values", "controller.illumination.get", "controller.port.owner", "controller.port.process",
     "controller.app.instances", "controller.app.instance.get", "controller.app.bridge",
+		"controller.network.peers.get", "controller.app.action.outcome",
   ],
   board_commands: [
     "controller.program_state.set", "controller.program-state.set", "controller.menu.layout.set",
     "controller.host_menu.directory.replace", "controller.host_menu.content.push", "controller.menu.jump",
-    "controller.menu.page", "controller.pwm.set", "controller.pwm.off", "controller.rf.learn.start",
+    "controller.menu.page", "controller.pwm.set", "controller.pwm.off", "controller.illumination.set", "controller.rf.learn.start",
     "controller.rf.learn.cancel", "controller.rf.map", "controller.rf.remove", "controller.rf.clear",
 		"controller.rf.transmit", "controller.lcd.prompt", "controller.lcd.priority",
 		"controller.display.send", "controller.opcode.send", "controller.opcode.exchange",
@@ -131,13 +142,23 @@ const capabilityGroups = {
 
 const methodOverrides = {
 	"controller.ping": "Return service health and protocol identity.",
+  "controller.ui.config": "Return host-owned UI settings, including status_interval_ms and measurement_freshness_ms.",
+  "controller.ui.config.get": "Return host-owned UI settings, including status_interval_ms and measurement_freshness_ms.",
+  "controller.ui.config.set": "Atomically persist host UI fields; status_interval_ms is 50..60000 and measurement_freshness_ms is refresh+100..120000.",
   "controller.snapshot": "Return the authoritative cached controller snapshot.",
   "controller.command.execute": "Run a shared command after semantic capability classification.",
+	"controller.firmware.build": "Compile the canonical host project with reviewed feature names and publish correlated ordered program progress events.",
   "controller.command.catalog": "Return the machine-readable shared command catalog.",
+  "controller.melodies.list": "Return the effective configured host melody catalog.",
   "controller.event.next": "Long-poll the next retained event after an event ID, optionally selecting activity, state, telemetry, or debug.",
   "controller.rf.map": "Replace one learned RF mapping and return board readback.",
   "controller.rf.transmit": "Transmit one validated RF waveform request.",
   "controller.restore.flash": "Restore a captured flash backup through the guarded restore path.",
+  "controller.artifact.upload.begin": "Begin a bounded correlated peer artifact transfer.",
+  "controller.artifact.upload.chunk": "Append one ordered bounded chunk to a peer artifact transfer.",
+  "controller.artifact.upload.finish": "Revalidate and publish a completed peer artifact transfer.",
+  "controller.artifact.upload.abort": "Abort and remove an incomplete peer artifact transfer.",
+  "controller.peer.update.host": "Transfer a verified executable using a caller-generated idempotency_key; report remote queued/staged acceptance, not terminal replacement health. Retry uncertain outcomes with the same key.",
   "controller.webhooks.status": "Return bounded outbound queue and dead-letter counters.",
   "controller.webhooks.pending": "List bounded non-secret pending outbound deliveries.",
   "controller.webhooks.dead": "List bounded non-secret dead-letter deliveries.",
@@ -148,26 +169,43 @@ const methodOverrides = {
 	"controller.opcode.request": "Alias for an opaque versionless UART opcode exchange.",
 	"controller.opcode.send": "Send an opaque versionless UART opcode; ACK is expected by default.",
 	"controller.app.navigate": "Navigate all, one surface, or one exact live application instance.",
-	"controller.app.action": "Route a validated page, title, OSC progress, raw OSC, port, command, or lifecycle action to live application instances.",
+	"controller.app.launch": "Ensure, launch, or focus a named TUI or WebUI surface without arbitrary process execution.",
+	"controller.app.navigation.commit": "Commit one follower group's canonical page and return its correlated coordinator outcome.",
+	"controller.app.action": "Freeze a validated action to exact live targets and return its correlated per-target delivery operation.",
+	"controller.app.action.ack": "Acknowledge one exact app-action target as applied or rejected.",
+	"controller.app.action.outcome": "Return one bounded app-action operation and its exact per-target outcomes.",
   "controller.app.instances": "List live application instances and their bounded non-secret state.",
   "controller.app.bridge": "Return the original coordinator bridge instance and its bounded process self-information.",
   "controller.app.instance.get": "Read one live application instance by ID.",
   "controller.app.instance.report": "Create or refresh one leased application-instance report.",
   "controller.app.instance.remove": "Remove one application instance from the live registry.",
+  "controller.discovery.connect": "Verify an authenticated discovered host and return its health and snapshot.",
+  "controller.discovery.config": "Return persistent network advertisement configuration.",
+  "controller.discovery.config.get": "Return persistent network advertisement configuration.",
+  "controller.discovery.config.set": "Persist and hot-apply network advertisement configuration.",
+  "controller.integrations.status": "Return requested and effective buzzer routing and playback state.",
+	"controller.network.peers.get": "Return persistent peer topology with secret references and no plaintext credentials.",
+	"controller.network.peers.set": "Replace and hot-apply peer topology; events, state, and status topics are accepted, and only optional secret references may carry compatibility credentials.",
+	"controller.illumination.get": "Read persisted enclosure-light policy, live door-selected target, and exact applied channel-11 PWM.",
+	"controller.illumination.set": "Change only mode/on/off illumination fields, verify EEPROM durability, and return authoritative live state.",
   "controller.unsubscribe": "Remove this WebSocket connection's active subscriptions.",
 };
 
 const nonIdempotentMethods = new Set([
   "controller.reset.lines", "controller.reset", "controller.port.reset", "controller.command.execute",
+	"controller.firmware.build",
   "controller.rf.learn.start", "controller.rf.transmit", "controller.lcd.prompt", "controller.lcd.priority",
   "controller.message.send", "controller.bridge.call", "controller.os.key", "controller.os.power",
 	"controller.device.action", "controller.app.action", "controller.artifact.fetch",
 	"controller.display.send", "controller.opcode.send", "controller.opcode.exchange",
 	"controller.opcode.request",
-  "controller.app.page", "controller.app.navigate", "controller.app.instance.report",
+  "controller.app.page", "controller.app.navigate", "controller.app.navigation.commit", "controller.app.instance.report",
   "controller.app.instance.remove",
   "controller.artifact.capture", "controller.update.firmware", "controller.restore.flash",
-  "controller.update.eeprom", "controller.update.host", "controller.discovery.stage",
+  "controller.artifact.upload.begin", "controller.artifact.upload.chunk",
+  "controller.artifact.upload.finish", "controller.artifact.upload.abort",
+  "controller.update.eeprom", "controller.update.host", "controller.peer.update.host",
+  "controller.discovery.stage",
   "controller.webhooks.replay",
 ]);
 
@@ -194,8 +232,10 @@ if (new Set(methods.map(({ name }) => name)).size !== methods.length) {
 
 const routes = [
   { path: "/healthz", methods: ["get"], public: true, capability: "public", summary: "Service liveness and API identity" },
+  { path: "/upnp/public.json", methods: ["get"], public: true, capability: "public", summary: "Bounded public host, board, endpoint, health, and telemetry directory" },
   { path: "/api/ui-config", methods: ["get"], public: true, capability: "public", summary: "Non-secret browser bootstrap" },
-  { path: "/api/session/ticket", methods: ["post"], capability: "session", summary: "Exchange a header credential for a short-lived one-use browser WebSocket ticket" },
+  { path: "/api/auth/server-proof", methods: ["get"], public: true, capability: "public", summary: "Dormant alpha compatibility endpoint; returns 409 while application authentication is disabled" },
+  { path: "/api/session/ticket", methods: ["post"], capability: "session", summary: "Dormant alpha compatibility endpoint; returns 409 while application authentication is disabled" },
   { path: "/api/rpc", methods: ["post"], capability: "dynamic", summary: "JSON-RPC 2.0 request" },
   { path: "/api/snapshot", methods: ["get"], capability: "read", summary: "Authoritative cached controller snapshot" },
   { path: "/api/peripherals", methods: ["get"], capability: "read", summary: "Peripheral descriptors and host-owned names" },
@@ -221,8 +261,11 @@ const routes = [
   { path: "/api/app/bridge", methods: ["get"], capability: "read", summary: "Original coordinator bridge instance and process identity" },
   { path: "/api/app/instances", methods: ["get"], capability: "read", summary: "List or query live application instances" },
   { path: "/api/app/instances", methods: ["post", "delete"], capability: "host_configuration", summary: "Report or remove one live application instance" },
-	{ path: "/api/app/action", methods: ["post"], capability: "host_configuration", summary: "Route a validated action to all, one surface, or one live application instance" },
+	{ path: "/api/app/action", methods: ["post"], capability: "host_configuration", summary: "Freeze and route a correlated action to exact live application instances" },
+	{ path: "/api/app/action/ack", methods: ["post"], capability: "host_configuration", summary: "Acknowledge one exact app-action target outcome" },
+	{ path: "/api/app/action/outcome", methods: ["get"], capability: "read", summary: "Read one bounded app-action operation outcome" },
   { path: "/api/app/navigate", methods: ["post"], capability: "host_configuration", summary: "Navigate all, one surface, or one exact application instance" },
+  { path: "/api/app/launch", methods: ["post"], capability: "host_configuration", summary: "Ensure, launch, or focus a named TUI or WebUI surface" },
   { path: "/api/bridges", methods: ["get"], capability: "read", summary: "Configured bridge state" },
   { path: "/api/bridges/call", methods: ["post"], capability: "bridge_calls", summary: "Correlated bridge call" },
   { path: "/api/artifacts/manifest", methods: ["get"], capability: "read", summary: "Artifact/default/current manifest" },
@@ -247,9 +290,116 @@ const routes = [
   { path: "/api/webhooks/outbound/dead", methods: ["get"], capability: "read", summary: "Bounded non-secret dead-letter list" },
   { path: "/api/webhooks/outbound/replay", methods: ["post"], capability: "integrations", summary: "Replay explicitly selected dead-letter deliveries" },
   { path: "/api/webhooks/outbound/clear", methods: ["post"], capability: "integrations", summary: "Clear explicitly selected dead-letter deliveries" },
+  { path: "/api/integrations/status", methods: ["get"], capability: "read", summary: "Requested and effective buzzer routing and playback state" },
   { path: "/api/integrations/datahub/{path}", methods: ["get", "head", "post", "put", "patch", "delete"], capability: "integrations", summary: "Sanitized loopback data-service proxy" },
   { path: "/api/integrations/device/{path}", methods: ["get", "head", "post", "put", "patch", "delete"], capability: "integrations", summary: "Fail-closed device route; use typed RPC" },
 ];
+
+const actionIdentifierSchema = { type: "string", pattern: "^[A-Za-z0-9._:-]{1,180}$" };
+const actionSelectorSchema = { type: "string", pattern: "^(?:\\*|[A-Za-z0-9._:-]{1,180})$", default: "*" };
+const actionKindSchema = {
+	type: "string",
+	oneOf: [
+		{ enum: ["app.page", "app.title", "app.progress", "app.osc", "app.quit", "app.port.open", "app.port.close", "command"] },
+		{
+			maxLength: 64,
+			pattern: "^(?!app\\.)(?!controller\\.)(?:[A-Za-z0-9_-]+\\.)+[A-Za-z0-9_-]+$",
+		},
+	],
+};
+
+function actionSchemas(refPrefix) {
+	const ref = (name) => ({ $ref: `${refPrefix}${name}` });
+	const actionProperties = {
+		kind: actionKindSchema,
+		value: { type: "string", maxLength: 4096, pattern: "^[^\\u0000\\r\\n]*$" },
+		source: { type: "string" },
+		target: actionSelectorSchema,
+		operation_id: actionIdentifierSchema,
+		metadata: {
+			type: "object", maxProperties: 16,
+			propertyNames: { pattern: "^[A-Za-z0-9._-]{1,64}$" },
+			properties: {
+				operation_delivery_id: actionIdentifierSchema,
+				operation_expires_at: { type: "string", format: "date-time" },
+			},
+			additionalProperties: { type: "string", maxLength: 1024, pattern: "^[^\\u0000\\r\\n]*$" },
+			description: "Bounded non-secret action metadata. Exact-target pushes include coordinator-owned operation_delivery_id and operation_expires_at values. Credential-shaped keys are rejected by the host.",
+		},
+		at: { type: "string", format: "date-time" },
+	};
+	return {
+		AppAction: {
+			type: "object", required: ["kind"], additionalProperties: false,
+			properties: actionProperties,
+		},
+		AppActionRequest: {
+			type: "object", required: ["kind"], additionalProperties: false,
+			properties: {
+				...actionProperties,
+				timeout_ms: {
+					type: "integer", minimum: 0, maximum: 30000, default: 5000,
+					description: "Acknowledgement deadline in milliseconds; zero or omission selects the 5000 ms host default.",
+				},
+			},
+		},
+		ActionAck: {
+			type: "object", required: ["operation_id", "delivery_id", "instance_id", "state"], additionalProperties: false,
+			properties: {
+				operation_id: actionIdentifierSchema,
+				delivery_id: actionIdentifierSchema,
+				instance_id: actionIdentifierSchema,
+				state: { type: "string", enum: ["applied", "rejected"] },
+				reason: { type: "string", maxLength: 256, pattern: "^[^\\u0000-\\u001f\\u007f]*$" },
+			},
+		},
+		ActionOutcomeRequest: {
+			type: "object", required: ["operation_id"], additionalProperties: false,
+			properties: { operation_id: actionIdentifierSchema },
+		},
+		ActionTargetOutcome: {
+			type: "object", required: ["instance_id", "surface", "state", "updated_at"], additionalProperties: false,
+			properties: {
+				instance_id: actionIdentifierSchema,
+				surface: { type: "string", pattern: "^[A-Za-z0-9._-]{1,64}$" },
+				state: { type: "string", enum: ["queued", "applied", "rejected", "timeout"] },
+				reason: { type: "string", maxLength: 256 },
+				updated_at: { type: "string", format: "date-time" },
+			},
+		},
+		ActionOperation: {
+			type: "object",
+			required: ["operation_id", "kind", "selector", "state", "created_at", "expires_at", "targets"],
+			additionalProperties: false,
+			properties: {
+				operation_id: actionIdentifierSchema,
+				kind: actionKindSchema,
+				source: { type: "string" },
+				selector: actionSelectorSchema,
+				state: { type: "string", enum: ["queued", "applied", "rejected", "timeout", "partial"] },
+				reason: { type: "string", maxLength: 256 },
+				created_at: { type: "string", format: "date-time" },
+				expires_at: { type: "string", format: "date-time" },
+				targets: { type: "array", items: ref("ActionTargetOutcome") },
+			},
+		},
+		ActionOperationEnvelope: {
+			type: "object", required: ["accepted", "operation"], additionalProperties: false,
+			properties: {
+				accepted: { type: "boolean" },
+				operation: ref("ActionOperation"),
+			},
+		},
+	};
+}
+
+const openAPIActionSchemas = actionSchemas("#/components/schemas/");
+const rpcActionSchemas = actionSchemas("#/$defs/");
+const rpcActionMethodContracts = {
+	"controller.app.action": { params: "AppActionRequest", result: "ActionOperationEnvelope" },
+	"controller.app.action.ack": { params: "ActionAck", result: "ActionOperationEnvelope" },
+	"controller.app.action.outcome": { params: "ActionOutcomeRequest", result: "ActionOperationEnvelope" },
+};
 
 function operationFor(route, method) {
   const operation = {
@@ -269,15 +419,48 @@ function operationFor(route, method) {
   if (route.public) operation.security = [];
 	if (route.path === "/api/session/ticket") {
     delete operation.responses["200"];
-    operation.responses["201"] = {
-      description: "One-use Origin-bound browser session ticket",
-      content: { "application/json": { schema: { $ref: "#/components/schemas/SessionTicket" } } },
-    };
+		operation.responses["409"] = { description: "Application authentication is disabled in the immediate alpha" };
+	}
+	if (route.path === "/api/auth/server-proof") {
+		operation.parameters = [{ name: "X-PCController-Nonce", in: "header", required: true, schema: { type: "string", minLength: 22, maxLength: 86 }, description: "16..64 random bytes encoded as unpadded base64url" }];
+		delete operation.responses["200"];
+		operation.responses["409"] = { description: "Application authentication is disabled in the immediate alpha" };
 	}
 	if (route.path === "/api/opcode") {
 		operation.responses["200"] = {
 			description: "Opaque UART response frame",
 			content: { "application/json": { schema: { $ref: "#/components/schemas/OpcodeFrame" } } },
+		};
+	}
+	if (route.path === "/api/app/action" && method === "post") {
+		delete operation.responses["200"];
+		operation.responses["202"] = {
+			description: "Action frozen to its exact live target set",
+			content: { "application/json": { schema: { $ref: "#/components/schemas/ActionOperationEnvelope" } } },
+		};
+		operation.responses["409"] = {
+			description: "The selector resolved only to rejected targets",
+			content: { "application/json": { schema: { $ref: "#/components/schemas/ActionOperationEnvelope" } } },
+		};
+	}
+	if (route.path === "/api/app/action/ack" && method === "post") {
+		operation.responses["200"] = {
+			description: "Updated correlated operation",
+			content: { "application/json": { schema: { $ref: "#/components/schemas/ActionOperationEnvelope" } } },
+		};
+		operation.responses["409"] = {
+			description: "Unknown, expired, foreign, offline, or conflicting acknowledgement",
+			content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } },
+		};
+	}
+	if (route.path === "/api/app/action/outcome" && method === "get") {
+		operation.responses["200"] = {
+			description: "Current bounded per-target operation outcome",
+			content: { "application/json": { schema: { $ref: "#/components/schemas/ActionOperationEnvelope" } } },
+		};
+		operation.responses["404"] = {
+			description: "Operation is unknown or expired",
+			content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } },
 		};
 	}
   if (route.path === "/api/app/instances" && method === "get") {
@@ -309,12 +492,18 @@ function operationFor(route, method) {
 			? { $ref: "#/components/schemas/JSONRPCRequest" }
 			: route.path === "/api/session/ticket"
 				? { $ref: "#/components/schemas/SessionTicketRequest" }
-				: route.path === "/api/opcode"
+			: route.path === "/api/opcode"
 					? { $ref: "#/components/schemas/OpcodeRequest" }
 					: route.path === "/api/app/instances"
 						? { $ref: "#/components/schemas/AppInstanceReport" }
+						: route.path === "/api/app/action"
+							? { $ref: "#/components/schemas/AppActionRequest" }
+							: route.path === "/api/app/action/ack"
+								? { $ref: "#/components/schemas/ActionAck" }
 						: route.path === "/api/app/navigate"
 							? { $ref: "#/components/schemas/AppNavigation" }
+							: route.path === "/api/app/launch"
+								? { $ref: "#/components/schemas/AppSurfaceLaunch" }
 				: { type: "object", additionalProperties: true } },
       },
     };
@@ -341,6 +530,14 @@ function operationFor(route, method) {
       schema: { type: "string", pattern: "^[A-Za-z0-9._:-]{1,180}$" },
     });
   }
+	if (route.path === "/api/app/action/outcome" && method === "get") {
+		operation.parameters ??= [];
+		operation.parameters.push({
+			name: "operation_id", in: "query", required: true,
+			schema: actionIdentifierSchema,
+			description: "Correlated app-action operation identifier.",
+		});
+	}
   return operation;
 }
 
@@ -363,10 +560,10 @@ const openapi = {
     title: product.httpTitle,
 		version: "unversioned",
 		summary: "Unversioned living REST and JSON-RPC surface of the primary controller host.",
-    description: "Loopback is the safe default. Remote requests require authentication and an explicit capability. The built-in listener does not terminate TLS.",
+    description: "Loopback is the safe default. Immediate-alpha authentication and authorization are disabled under issue #148. The built-in listener does not terminate TLS.",
   },
   servers: [{ url: "http://127.0.0.1:8787", description: "Default loopback primary" }],
-  security: [{ bearerAuth: [] }, { tokenHeader: [] }],
+  security: [],
   paths: openAPIPaths,
   components: {
     securitySchemes: {
@@ -389,6 +586,16 @@ const openapi = {
         type: "object", required: ["transport"], additionalProperties: false,
         properties: { transport: { type: "string", enum: ["websocket", "socket_io"] } },
       },
+		ServerProof: {
+			type: "object", required: ["format", "nonce", "audience", "instance_id", "proof"], additionalProperties: false,
+			properties: {
+				format: { type: "string", const: "pccontroller-server-proof" },
+				nonce: { type: "string", description: "The caller-supplied unpadded base64url nonce." },
+				audience: { type: "string", description: "The IP:port of the exact local listener that accepted the request." },
+				instance_id: { type: "string", minLength: 1 },
+				proof: { type: "string", description: "Unpadded base64url HMAC-SHA256 over format, nonce, audience, and instance identity." },
+			},
+		},
 		SessionTicket: {
         type: "object", required: ["ticket", "protocol", "expires_at", "expires_in_ms", "principal"], additionalProperties: false,
         properties: {
@@ -455,13 +662,25 @@ const openapi = {
 		AppNavigation: {
 			type: "object", required: ["page"], additionalProperties: false,
 			properties: {
-				page: { type: "string", pattern: "^[A-Za-z0-9._/-]{1,96}$" },
+				page: { type: "string", pattern: "^[A-Za-z0-9._-]{1,96}$" },
 				target: { type: "string", pattern: "^(?:\\*|[A-Za-z0-9._:-]{1,180})$", default: "*" },
 			},
 		},
+		AppSurfaceLaunch: {
+			type: "object", required: ["surface"], additionalProperties: false,
+			properties: {
+				surface: { type: "string", enum: ["tui", "webui"] },
+				mode: { type: "string", enum: ["ensure", "launch", "focus"], default: "ensure" },
+				target: { type: "string", pattern: "^[A-Za-z0-9._:-]{1,180}$" },
+				page: { type: "string", pattern: "^[A-Za-z0-9._/-]{1,96}$" },
+				idempotency_key: { type: "string", pattern: "^[A-Za-z0-9._:-]{1,180}$" },
+			},
+			description: "Named product surface only. Executables, arguments, environment, shell text, and credentials are not accepted.",
+		},
+		...openAPIActionSchemas,
       JSONRPCError: {
         type: "object", required: ["code", "message"], additionalProperties: false,
-        properties: { code: { type: "integer", enum: [-32700, -32600, -32601, -32602, -32003, -32001, -32000] }, message: { type: "string" } },
+        properties: { code: { type: "integer", enum: [-32700, -32600, -32601, -32602, -32004, -32003, -32001, -32000] }, message: { type: "string" }, data: true },
         examples: [{ code: -32003, message: "remote capability board_commands is disabled" }],
       },
       Error: errorSchema,
@@ -474,7 +693,7 @@ const openapi = {
     },
   },
   "x-body-limit-bytes": 1048576,
-	"x-unsupported-transports": ["versioned /api/v* paths", "built-in TLS termination", "Socket.IO long-polling", "Socket.IO namespaces", "Socket.IO rooms", "binary Socket.IO attachments"],
+	"x-unsupported-transports": ["built-in TLS termination", "Socket.IO long-polling", "Socket.IO namespaces", "Socket.IO rooms", "binary Socket.IO attachments"],
 };
 
 const rpcSchema = {
@@ -484,7 +703,8 @@ const rpcSchema = {
   oneOf: [
     { $ref: "#/$defs/request" }, { $ref: "#/$defs/success" }, { $ref: "#/$defs/error" }, { $ref: "#/$defs/notification" },
   ],
-  $defs: {
+	$defs: {
+		...rpcActionSchemas,
     id: { oneOf: [{ type: "string" }, { type: "integer" }, { type: "null" }] },
     request: {
       type: "object", required: ["jsonrpc", "method"], additionalProperties: false,
@@ -493,6 +713,10 @@ const rpcSchema = {
         method: { enum: methods.map(({ name }) => name) }, params: { type: ["object", "array", "null"] },
         auth: { type: "string", writeOnly: true },
       },
+		allOf: Object.entries(rpcActionMethodContracts).map(([method, contract]) => ({
+			if: { properties: { method: { const: method } }, required: ["method"] },
+			then: { required: ["params"], properties: { params: { $ref: `#/$defs/${contract.params}` } } },
+		})),
     },
     success: {
       type: "object", required: ["jsonrpc", "id", "result"], additionalProperties: false,
@@ -504,7 +728,7 @@ const rpcSchema = {
         jsonrpc: { const: "2.0" }, id: { $ref: "#/$defs/id" },
         error: {
           type: "object", required: ["code", "message"], additionalProperties: false,
-          properties: { code: { type: "integer" }, message: { type: "string" } },
+          properties: { code: { type: "integer" }, message: { type: "string" }, data: true },
         },
       },
     },
@@ -515,11 +739,20 @@ const rpcSchema = {
       },
     },
   },
-  "x-methods": Object.fromEntries(methods.map(({ name, ...metadata }) => [name, metadata])),
+	"x-methods": Object.fromEntries(methods.map(({ name, ...metadata }) => {
+		const contract = rpcActionMethodContracts[name];
+		if (!contract) return [name, metadata];
+		return [name, {
+			...metadata,
+			params_schema: { $ref: `#/$defs/${contract.params}` },
+			result_schema: { $ref: `#/$defs/${contract.result}` },
+		}];
+	})),
   "x-error-codes": {
     "-32700": "parse error", "-32600": "invalid request", "-32601": "method not found",
     "-32602": "invalid params", "-32001": "authentication required",
     "-32003": "remote capability denied", "-32000": "runtime or device error",
+    "-32004": "peer outcome uncertain; retry with the same idempotency key",
   },
 };
 
@@ -527,16 +760,13 @@ const asyncapi = {
   asyncapi: "3.0.0",
   info: {
 		title: product.eventTitle, version: "unversioned",
-    description: "Authenticated full-duplex JSON-RPC, event, status, and Socket.IO-compatible messaging. WebSocket transport is required.",
+    description: "Immediate-alpha unauthenticated full-duplex JSON-RPC, event, status, and Socket.IO-compatible messaging. WebSocket transport is required; deferred security schemes are retained as non-active design metadata.",
   },
   servers: {
     loopback: {
       host: "127.0.0.1:8787", protocol: "ws", pathname: "/ipc",
-      description: "Default loopback primary. Remote exposure requires explicit origin, authentication, and capability policy.",
-	  security: [
-		{ $ref: "#/components/securitySchemes/durableHeader" },
-		{ $ref: "#/components/securitySchemes/browserTicket" },
-	  ],
+      description: "Default loopback primary. Remote exposure requires an explicit listener and allowed origin; alpha authentication is disabled under #148.",
+	  security: [],
     },
   },
   channels: {
@@ -598,8 +828,8 @@ const reference = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark"><title>${escapeHTML(product.referenceTitle)}</title>
 <style>:root{font-family:Inter,Segoe UI,system-ui,sans-serif;color-scheme:light dark;--bg:#f6f7fb;--panel:#fff;--text:#172033;--muted:#647087;--line:#dfe3ec;--accent:#6d4aff}@media(prefers-color-scheme:dark){:root{--bg:#11131a;--panel:#191c25;--text:#edf0f7;--muted:#a8b0c2;--line:#303543;--accent:#a995ff}}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text)}main{width:min(1180px,calc(100% - 32px));margin:auto;padding:48px 0 80px}header{display:grid;gap:12px;margin-bottom:34px}h1{font-size:clamp(2rem,5vw,4rem);letter-spacing:-.05em;margin:0}p{color:var(--muted);max-width:76ch;line-height:1.65}.pills{display:flex;flex-wrap:wrap;gap:8px}.pills a,.pills span,td span{border:1px solid var(--line);border-radius:999px;padding:6px 10px;color:var(--text);text-decoration:none;background:color-mix(in srgb,var(--panel) 88%,var(--accent) 12%)}section{margin-top:34px;background:color-mix(in srgb,var(--panel) 92%,transparent);border:1px solid var(--line);border-radius:20px;overflow:hidden;box-shadow:0 18px 55px color-mix(in srgb,var(--text) 8%,transparent)}section>div{padding:22px 24px 6px}h2{margin:0;font-size:1.25rem}table{border-collapse:collapse;width:100%;font-size:.9rem}th,td{text-align:left;padding:13px 16px;border-top:1px solid var(--line);vertical-align:top}th{color:var(--muted);font-weight:600}code{font-family:Cascadia Code,ui-monospace,monospace;color:var(--accent);overflow-wrap:anywhere}@media(max-width:720px){main{width:min(100% - 20px,1180px);padding-top:26px}section{overflow:auto}table{min-width:760px}}</style></head>
-<body><main><header><span>OFFLINE CONTRACT · LIVING API</span><h1>${escapeHTML(product.referenceHeading)}</h1><p>The primary host exposes one unversioned, safety-gated living surface across REST, JSON-RPC, WebSocket, and the bounded Socket.IO adapter. Loopback is the default; every remote operation requires authentication and an explicit capability.</p><div class="pills"><a href="openapi.json">OpenAPI 3.1</a><a href="asyncapi.json">AsyncAPI 3.0</a><a href="jsonrpc.schema.json">JSON-RPC schema</a><span>${methods.length} RPC methods</span><span>${routes.reduce((count, route) => count + route.methods.length, 0)} HTTP operations</span></div></header>
-<section><div><h2>HTTP operations</h2><p>Canonical routes live directly under <code>/api/</code>; versioned aliases are rejected. JSON bodies are capped at 1 MiB.</p></div><table><thead><tr><th>Method</th><th>Path</th><th>Purpose</th><th>Capability</th></tr></thead><tbody>${routeRows}</tbody></table></section>
+<body><main><header><span>OFFLINE CONTRACT · LIVING API</span><h1>${escapeHTML(product.referenceHeading)}</h1><p>The primary host exposes one unversioned, safety-gated living surface across REST, JSON-RPC, WebSocket, and the bounded Socket.IO adapter. Loopback is the default; immediate-alpha application authentication and authorization are disabled under issue #148.</p><div class="pills"><a href="openapi.json">OpenAPI 3.1</a><a href="asyncapi.json">AsyncAPI 3.0</a><a href="jsonrpc.schema.json">JSON-RPC schema</a><span>${methods.length} RPC methods</span><span>${routes.reduce((count, route) => count + route.methods.length, 0)} HTTP operations</span></div></header>
+<section><div><h2>HTTP operations</h2><p>Canonical routes live directly under <code>/api/</code>. JSON bodies are capped at 1 MiB.</p></div><table><thead><tr><th>Method</th><th>Path</th><th>Purpose</th><th>Capability</th></tr></thead><tbody>${routeRows}</tbody></table></section>
 <section><div><h2>JSON-RPC methods</h2><p>Standard JSON-RPC errors are preserved; host extensions use -32001 for authentication, -32003 for capability denial, and -32000 for runtime or device failures.</p></div><table><thead><tr><th>Method</th><th>Purpose</th><th>Capability</th><th>Idempotency</th></tr></thead><tbody>${methodRows}</tbody></table></section>
 <p>Contract digest <code>${digest}</code>. Generated by <code>Tools/Audit/generate-api-reference.mjs</code>.</p></main></body></html>\n`;
 outputs.set("reference.html", reference);
@@ -623,13 +853,14 @@ validateMethodCatalog({
 
 const routeSourceFiles = [
   "Tools/Controller/internal/ipcjson/ipc.go",
+	"Tools/Controller/internal/ipcjson/upnp.go",
   "Tools/Controller/internal/ipcjson/artifacts_http.go",
   "Tools/Controller/internal/releaseplane/http.go",
 ];
 const routeLiterals = new Set();
 for (const file of routeSourceFiles) {
   const source = readFileSync(resolve(root, file), "utf8");
-	for (const match of source.matchAll(/"(\/(?:healthz|api)[^"? ]*)"/gu)) routeLiterals.add(match[1]);
+	for (const match of source.matchAll(/"(\/(?:healthz|api[^"? ]*|upnp\/public\.json))"/gu)) routeLiterals.add(match[1]);
 }
 const documentedPaths = Object.keys(openAPIPaths);
 const routeCovered = (literal) => {
@@ -646,7 +877,7 @@ const routeCovered = (literal) => {
 const missingRoutes = [...routeLiterals].filter((literal) => !routeCovered(literal)).sort();
 if (missingRoutes.length > 0) throw new Error(`OpenAPI catalog is missing source route families: ${missingRoutes.join(", ")}`);
 for (const path of documentedPaths) {
-	if (path !== "/healthz" && !path.startsWith("/api/")) throw new Error(`OpenAPI route is outside the living /api surface: ${path}`);
+	if (path !== "/healthz" && path !== "/upnp/public.json" && !path.startsWith("/api/")) throw new Error(`OpenAPI route is outside the living /api surface: ${path}`);
 }
 
 function normalize(content) {

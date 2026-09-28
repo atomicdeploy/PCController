@@ -72,14 +72,21 @@ type Options struct {
 	FirmwareSourceSHA256       string
 	FirmwareSourceFiles        int
 	FirmwareBuildTimestamp     uint32
-	compilePlanned             bool
-	compileStaged              bool
+	// FirmwareFeatures selects only reviewed named feature gates. Raw compiler
+	// flags are intentionally not exposed because they would bypass the
+	// source-identity and artifact-verifier contract.
+	FirmwareFeatures []FirmwareFeature
+	compilePlanned   bool
+	compileStaged    bool
 	// USBaspBitClockUS forces AVRDUDE's -B bit-clock period. USBaspAutoSlow
 	// retries a failed USBasp exchange at MiniCore's conservative 32-microsecond
 	// period. Multi-step callers may deliberately return to normal speed after
 	// repairing a target clock/fuse policy.
 	USBaspBitClockUS float64
 	USBaspAutoSlow   bool
+	// ProgrammerTimeout overrides the operation-specific deadline for each
+	// AVRDUDE subprocess. Zero selects the safe default for that operation.
+	ProgrammerTimeout time.Duration
 }
 
 type BackupFile struct {
@@ -111,11 +118,42 @@ type BackupManifest struct {
 }
 
 type Command struct {
-	Name string
-	Args []string
+	Name    string
+	Args    []string
+	Stage   string
+	Timeout time.Duration
 }
 
+const (
+	defaultProgrammerHandshakeTimeout = 30 * time.Second
+	defaultProgrammerTransferTimeout  = 10 * time.Minute
+	programmerWaitDelay               = 5 * time.Second
+)
+
+// CommandTimeoutError identifies a programmer-owned deadline rather than a
+// caller cancellation or an AVRDUDE exit. It retains the exact stage and
+// command needed to diagnose a board, port, or programmer synchronization
+// failure.
+type CommandTimeoutError struct {
+	Stage   string
+	Command string
+	Timeout time.Duration
+	Elapsed time.Duration
+}
+
+func (err *CommandTimeoutError) Error() string {
+	return fmt.Sprintf(
+		"programmer %s timed out after %s (deadline %s); command: %s",
+		err.Stage, err.Elapsed.Round(time.Millisecond), err.Timeout, err.Command,
+	)
+}
+
+func (err *CommandTimeoutError) Unwrap() error { return context.DeadlineExceeded }
+
 func Build(options Options) (Command, error) {
+	if options.ProgrammerTimeout < 0 {
+		return Command{}, errors.New("programmer timeout must be zero or positive")
+	}
 	if options.FQBN == "" {
 		options.FQBN = DefaultFQBN()
 	}
@@ -141,19 +179,23 @@ func Build(options Options) (Command, error) {
 			return Command{}, err
 		}
 		args := []string{"compile", "--fqbn", options.FQBN}
+		extraFlags := fmt.Sprintf(
+			"build.extra_flags=-DPCCONTROLLER_BUILD_HASH=0x%08XUL "+
+				"-DPCCONTROLLER_BUILD_TIMESTAMP=0x%08XUL "+
+				"-DPCCONTROLLER_IDENTITY_ADDRESS=0x%XUL -mcall-prologues "+
+				"-fmerge-all-constants -fno-split-wide-types -fno-tree-scev-cprop "+
+				"-fipa-pta -fstack-usage",
+			options.FirmwareSourceHash,
+			options.FirmwareBuildTimestamp,
+			FirmwareIdentityAddress,
+		)
+		if defines := firmwareFeatureBuildDefines(options.FirmwareFeatures); len(defines) != 0 {
+			extraFlags += " " + strings.Join(defines, " ")
+		}
 		args = append(
 			args,
 			"--build-property",
-			fmt.Sprintf(
-				"build.extra_flags=-DPCCONTROLLER_BUILD_HASH=0x%08XUL "+
-					"-DPCCONTROLLER_BUILD_TIMESTAMP=0x%08XUL "+
-					"-DPCCONTROLLER_IDENTITY_ADDRESS=0x%XUL -mcall-prologues "+
-					"-fmerge-all-constants -fno-split-wide-types -fno-tree-scev-cprop "+
-					"-fipa-pta -fstack-usage",
-				options.FirmwareSourceHash,
-				options.FirmwareBuildTimestamp,
-				FirmwareIdentityAddress,
-			),
+			extraFlags,
 			"--build-property",
 			fmt.Sprintf(
 				"compiler.c.elf.extra_flags=-w -flto -fipa-pta -g -Wl,--relax "+
@@ -255,6 +297,17 @@ func Build(options Options) (Command, error) {
 		if options.BaudRate > 0 && programmer == "urclock" {
 			args = append(args, "-b"+strconv.Itoa(options.BaudRate))
 		}
+		if programmer == "urclock" {
+			// The installed MiniCore image can enter urprotocol compatibility
+			// mode when its metadata is unavailable. AVRDUDE then requires the
+			// canonical protected boot size, plus the board's EEPROM capability,
+			// before any signature/read/write operation is safe.
+			bootloaderBytes := generatedBoardFlashBytes - generatedBoardApplicationBytes
+			args = append(args,
+				"-xbootsize="+strconv.FormatUint(uint64(bootloaderBytes), 10),
+				"-xeepromrw",
+			)
+		}
 		switch options.Operation {
 		case OperationWriteFlash:
 			if options.HexPath == "" {
@@ -314,7 +367,11 @@ func Build(options Options) (Command, error) {
 		default:
 			return Command{}, fmt.Errorf("unknown programmer operation %q", options.Operation)
 		}
-		return Command{Name: executable, Args: args}, nil
+		stage, timeout := programmerCommandPolicy(options.Operation)
+		if options.ProgrammerTimeout > 0 {
+			timeout = options.ProgrammerTimeout
+		}
+		return Command{Name: executable, Args: args, Stage: stage, Timeout: timeout}, nil
 	default:
 		return Command{}, fmt.Errorf("unknown programming method %q", options.Method)
 	}
@@ -834,7 +891,9 @@ func BackupWithRunner(
 			return
 		}
 		fmt.Fprintln(output, command.String())
-		if runErr := runner.Run(ctx, command, output); runErr != nil {
+		if runErr := runBackupCommandWithPortReleaseRetry(
+			ctx, options.Method, command, output, runner,
+		); runErr != nil {
 			failures = append(failures, fmt.Errorf("%s: %w", kind, runErr))
 			manifest.Errors = append(manifest.Errors, failures[len(failures)-1].Error())
 			return
@@ -902,7 +961,10 @@ func BackupWithRunner(
 			manifest.Errors = append(manifest.Errors, failures[len(failures)-1].Error())
 		} else {
 			fmt.Fprintln(output, command.String())
-			runErr := runner.Run(ctx, command, io.MultiWriter(output, metadataFile))
+			runErr := runBackupCommandWithPortReleaseRetry(
+				ctx, options.Method, command,
+				io.MultiWriter(output, metadataFile), runner,
+			)
 			if runErr != nil {
 				failures = append(failures, fmt.Errorf("metadata: %w", runErr))
 				manifest.Errors = append(manifest.Errors, failures[len(failures)-1].Error())
@@ -942,6 +1004,9 @@ func BackupWithRunner(
 }
 
 func ValidateBackup(options Options) error {
+	if options.ProgrammerTimeout < 0 {
+		return errors.New("programmer timeout must be zero or positive")
+	}
 	switch options.Method {
 	case MethodUrclock, MethodUSBasp, MethodAvrdude:
 	default:
@@ -963,7 +1028,7 @@ func ValidateBackup(options Options) error {
 	}
 	if options.ApplicationPackedTimestamp != 0 {
 		if !currentIdentitySchema(options.ApplicationIdentitySchema) {
-			return errors.New("packed firmware timestamp requires compact identity schema 3")
+			return errors.New("packed firmware timestamp requires compact identity schema 3 or 4")
 		}
 		if _, err := DecodeFirmwareTimestamp(options.ApplicationPackedTimestamp); err != nil {
 			return err
@@ -972,7 +1037,7 @@ func ValidateBackup(options Options) error {
 	return nil
 }
 
-func currentIdentitySchema(schema byte) bool { return schema == 3 }
+func currentIdentitySchema(schema byte) bool { return schema == 3 || schema == 4 }
 
 func createBackupDirectory(root string, timestamp time.Time) (string, error) {
 	if err := os.MkdirAll(root, 0o755); err != nil {
@@ -1093,8 +1158,14 @@ func verifyEESAVEWithRunner(
 	if mcu == "" {
 		mcu = generatedBoardMCU
 	}
+	preflightTimeout := defaultProgrammerHandshakeTimeout
+	if options.ProgrammerTimeout > 0 {
+		preflightTimeout = options.ProgrammerTimeout
+	}
 	preflight := Command{
-		Name: executable,
+		Name:    executable,
+		Stage:   "EEPROM-preservation fuse read",
+		Timeout: preflightTimeout,
 		Args: []string{
 			"-C" + configuration, "-q", "-p" + mcu, "-cusbasp",
 			"-Uhfuse:r:" + path + ":h",
@@ -1138,14 +1209,93 @@ func Run(ctx context.Context, command Command, output io.Writer) error {
 	if output == nil {
 		output = io.Discard
 	}
-	process := exec.CommandContext(ctx, command.Name, command.Args...)
+	started := time.Now()
+	runContext := ctx
+	cancel := func() {}
+	if command.Timeout > 0 {
+		runContext, cancel = context.WithTimeoutCause(
+			ctx, command.Timeout, errProgrammerCommandTimeout,
+		)
+	}
+	defer cancel()
+	process := exec.CommandContext(runContext, command.Name, command.Args...)
 	process.Stdout = output
 	process.Stderr = output
 	process.Stdin = nil
-	if err := process.Run(); err != nil {
+	process.WaitDelay = programmerWaitDelay
+	processTree, err := prepareProgrammerProcessTree(process)
+	if err != nil {
+		return fmt.Errorf("prepare %s process tree: %w", commandStage(command), err)
+	}
+	defer processTree.Close()
+	process.Cancel = func() error {
+		return processTree.Terminate(process.Process)
+	}
+	if err := process.Start(); err != nil {
 		return fmt.Errorf("%s failed: %w", command.String(), err)
 	}
-	return nil
+	if err := processTree.Attach(process.Process); err != nil {
+		_ = processTree.Terminate(process.Process)
+		_ = process.Wait()
+		return fmt.Errorf("isolate %s process tree: %w", commandStage(command), err)
+	}
+	// Close the narrow Start/Attach race: CommandContext may have observed a
+	// cancellation before the process entered its job/process group.
+	if runContext.Err() != nil {
+		_ = processTree.Terminate(process.Process)
+	}
+	err = process.Wait()
+	elapsed := time.Since(started)
+	if err == nil {
+		return nil
+	}
+	if command.Timeout > 0 && context.Cause(runContext) == errProgrammerCommandTimeout {
+		return &CommandTimeoutError{
+			Stage: commandStage(command), Command: command.String(),
+			Timeout: command.Timeout, Elapsed: elapsed,
+		}
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return fmt.Errorf(
+			"%s canceled during %s after %s: %w",
+			command.String(), commandStage(command), elapsed.Round(time.Millisecond), ctxErr,
+		)
+	}
+	return fmt.Errorf("%s failed during %s: %w", command.String(), commandStage(command), err)
+}
+
+var errProgrammerCommandTimeout = errors.New("programmer command deadline exceeded")
+
+func programmerCommandPolicy(operation Operation) (string, time.Duration) {
+	switch operation {
+	case OperationMetadata:
+		return "metadata handshake", defaultProgrammerHandshakeTimeout
+	case OperationProbe:
+		return "programmer handshake", defaultProgrammerHandshakeTimeout
+	case OperationStart:
+		return "bootloader start handshake", defaultProgrammerHandshakeTimeout
+	case OperationReadFlash:
+		return "flash read", defaultProgrammerTransferTimeout
+	case OperationWriteFlash:
+		return "flash write", defaultProgrammerTransferTimeout
+	case OperationVerifyFlash:
+		return "flash verification", defaultProgrammerTransferTimeout
+	case OperationReadEEPROM:
+		return "EEPROM read", defaultProgrammerTransferTimeout
+	case OperationWriteEEPROM:
+		return "EEPROM write", defaultProgrammerTransferTimeout
+	case OperationChipErase:
+		return "chip erase", defaultProgrammerTransferTimeout
+	default:
+		return string(operation), defaultProgrammerTransferTimeout
+	}
+}
+
+func commandStage(command Command) string {
+	if stage := strings.TrimSpace(command.Stage); stage != "" {
+		return stage
+	}
+	return "external command"
 }
 
 const defaultUSBaspSlowBitClockUS = 32.0
@@ -1213,7 +1363,9 @@ func hasBitClock(command Command) bool {
 func withUSBaspBitClock(command Command, microseconds float64) Command {
 	// Avoid a len+1 capacity computation for caller-owned argument slices; the
 	// append growth path performs its own checked allocation.
-	result := Command{Name: command.Name}
+	result := Command{
+		Name: command.Name, Stage: command.Stage, Timeout: command.Timeout,
+	}
 	inserted := false
 	for _, argument := range command.Args {
 		result.Args = append(result.Args, argument)

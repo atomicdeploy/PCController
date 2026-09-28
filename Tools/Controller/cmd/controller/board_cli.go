@@ -19,7 +19,9 @@ import (
 	"pccontroller.local/controller/internal/programmer"
 )
 
-const boardInitializeUsage = "usage: controller board initialize [--name NAME] [--uart auto|PORT|none] [--firmware HEX] [--bootloader-only] [--skip-toolchain] [--portable-cli] | controller board blank --confirm NAME [--uart auto|PORT|none] | controller board name [get|set NAME|clear]"
+var closeBoardRuntime = func(runtime *control.Runtime) error { return runtime.Close() }
+
+const boardInitializeUsage = "usage: controller board initialize [--name NAME] [--uart auto|PORT|none] [--firmware HEX] [--firmware-feature NAME ...|--no-firmware-features] [--bootloader-only] [--skip-toolchain] [--portable-cli] | controller board blank --confirm NAME [--uart auto|PORT|none] | controller board name [get|set NAME|clear]"
 
 func runBoard(args []string, stdout, stderr io.Writer, store *appconfig.Store) error {
 	if len(args) == 0 {
@@ -47,13 +49,40 @@ func runBoard(args []string, stdout, stderr io.Writer, store *appconfig.Store) e
 	}
 	runtime := newRuntime(&connectionFlags{}, store)
 	bindRuntimeDevicePersistence(runtime, store)
-	defer runtime.Close()
 	ctx, cancel := signalContext()
 	defer cancel()
+	return runBoardLocally(ctx, action, runtime, args[1:], store, stdout)
+}
+
+func runBoardLocally(
+	ctx context.Context,
+	action string,
+	runtime *control.Runtime,
+	args []string,
+	store *appconfig.Store,
+	stdout io.Writer,
+) (resultErr error) {
+	defer func() {
+		if closeErr := closeOwnedBoardRuntime(runtime); closeErr != nil {
+			resultErr = errors.Join(
+				resultErr,
+				fmt.Errorf("close board command runtime: %w", closeErr),
+			)
+		}
+	}()
 	if action == "blank" {
-		return blankBoard(ctx, runtime, args[1:], store, stdout)
+		return blankBoard(ctx, runtime, args, store, stdout)
 	}
-	return initializeBoard(ctx, runtime, args[1:], store, findProjectRoot(), stdout)
+	return initializeBoard(ctx, runtime, args, store, findProjectRoot(), stdout)
+}
+
+func closeOwnedBoardRuntime(runtime *control.Runtime) error {
+	closeRuntime := closeBoardRuntime
+	return closeCommandRuntime(
+		runtime,
+		func() error { return closeRuntime(runtime) },
+		"close board command runtime",
+	)
 }
 
 func blankBoard(
@@ -112,7 +141,9 @@ func blankBoard(
 		}
 		fmt.Fprintln(output, "WARNING: proceeding without an application identity; USBasp signature and complete backup remain mandatory.")
 	}
-	_ = runtime.Close()
+	if err := closeOwnedBoardRuntime(runtime); err != nil {
+		return fmt.Errorf("release application UART before blanking: %w", err)
+	}
 
 	paths, err := programmer.DefaultHostDataPaths()
 	if err != nil {
@@ -171,6 +202,7 @@ func initializeBoard(
 	if runtime == nil || store == nil {
 		return errors.New("board initialization requires the primary runtime and configuration store")
 	}
+	firmwareFeatures := newFirmwareFeatureSelection(nil)
 	flags := flag.NewFlagSet("board initialize", flag.ContinueOnError)
 	flags.SetOutput(output)
 	uart := flags.String("uart", "auto", "application UART port, auto, or none")
@@ -182,6 +214,8 @@ func initializeBoard(
 	toolchainCLI := flags.String("cli", "", "explicit arduino-cli executable")
 	fqbn := flags.String("fqbn", configuredFQBN(store.Current()), "board FQBN and core bootloader policy")
 	programmerName := flags.String("programmer", configuredProgrammer(store.Current()), "ISP programmer (usbasp or usbasp_slow)")
+	flags.Var(firmwareFeatures, "firmware-feature", "repeatable named compile feature (supported: eeprom-boot-opcodes, eeprom-menu-labels)")
+	noFirmwareFeatures := flags.Bool("no-firmware-features", false, "override configured compile features with the default-off profile")
 	bitClock := flags.Float64("usbasp-bitclock-us", 0, "force the USBasp AVRDUDE -B period")
 	jsonReport := flags.Bool("json", false, "append the machine-readable initialization report")
 	if err := flags.Parse(args); err != nil {
@@ -189,6 +223,9 @@ func initializeBoard(
 	}
 	if flags.NArg() != 0 || *bitClock < 0 {
 		return errors.New(boardInitializeUsage)
+	}
+	if *noFirmwareFeatures && firmwareFeatures.explicit {
+		return errors.New("--no-firmware-features cannot be combined with --firmware-feature")
 	}
 	if err := native.ValidateBoardName(*boardName); err != nil {
 		return err
@@ -199,6 +236,17 @@ func initializeBoard(
 	project := configuredProject(store.Current(), fallbackProject)
 	if strings.TrimSpace(project) == "" || project == "." {
 		return errors.New("board initialization cannot locate the firmware project; configure paths.project")
+	}
+	applicationHex := strings.TrimSpace(*firmware)
+	compileFirmware := !*bootloaderOnly && applicationHex == ""
+	if (firmwareFeatures.explicit || *noFirmwareFeatures) && !compileFirmware {
+		return errors.New("--firmware-feature and --no-firmware-features require board initialization to compile the application; omit --firmware and --bootloader-only")
+	}
+	selectedFeatures, err := resolveCompileFirmwareFeatures(
+		store.Current(), firmwareFeatures, *noFirmwareFeatures, compileFirmware,
+	)
+	if err != nil {
+		return err
 	}
 	dataPaths, err := programmer.DefaultHostDataPaths()
 	if err != nil {
@@ -245,13 +293,16 @@ func initializeBoard(
 		return errors.New("--skip-toolchain requires a configured or explicit --cli executable")
 	}
 
-	applicationHex := strings.TrimSpace(*firmware)
-	if !*bootloaderOnly && applicationHex == "" {
+	if compileFirmware {
 		fmt.Fprintln(output, "\n[firmware] Compiling the current project before touching the MCU")
-		compileOptions, identity, planErr := programmer.PlanCompile(programmer.Options{
-			Method: programmer.MethodCompile, SketchPath: project,
-			ArduinoCLI: cli, ArduinoConfig: cliConfig, FQBN: *fqbn,
-		})
+		if len(selectedFeatures) == 0 {
+			fmt.Fprintln(output, "Firmware features: default-off")
+		} else {
+			fmt.Fprintln(output, "Firmware features:", strings.Join(programmer.FirmwareFeatureNames(selectedFeatures), ", "))
+		}
+		compileOptions, identity, planErr := planBoardInitializationCompile(
+			project, cli, cliConfig, *fqbn, selectedFeatures,
+		)
 		if planErr != nil {
 			return planErr
 		}
@@ -272,7 +323,9 @@ func initializeBoard(
 
 	// No authenticated application is expected yet, but close any stale UART
 	// session before ISP takes ownership of RESET and the target clock.
-	_ = runtime.Close()
+	if err := closeOwnedBoardRuntime(runtime); err != nil {
+		return fmt.Errorf("release application UART before initialization: %w", err)
+	}
 	fmt.Fprintln(output, "\n[isp] USBasp signature, complete backup, core bootloader/fuses, and post-write verification")
 	coreReport, err := programmer.InitializeBoardCore(ctx, programmer.BoardCoreInitializeOptions{
 		FQBN: *fqbn, Programmer: *programmerName, ArduinoCLI: cli, ArduinoConfig: cliConfig,
@@ -290,6 +343,9 @@ func initializeBoard(
 		"core": coreReport, "application_hex": applicationHex,
 		"uart_requested": *uart, "uart_programmed": false,
 		"board_name_requested": *boardName,
+	}
+	if compileFirmware {
+		result["firmware_features"] = programmer.FirmwareFeatureNames(selectedFeatures)
 	}
 	if *bootloaderOnly {
 		fmt.Fprintln(output, "\nREADY (bootloader-only): UART application programming and first-boot checks were explicitly skipped.")
@@ -347,6 +403,17 @@ func initializeBoard(
 	result["health"] = health
 	fmt.Fprintln(output, "\nREADY: bootloader, application, UART authentication, defaults, and available peripherals verified.")
 	return appendBoardInitializationReport(output, result, *jsonReport)
+}
+
+func planBoardInitializationCompile(
+	project, cli, cliConfig, fqbn string,
+	features []programmer.FirmwareFeature,
+) (programmer.Options, programmer.CompileIdentity, error) {
+	return programmer.PlanCompile(programmer.Options{
+		Method: programmer.MethodCompile, SketchPath: project,
+		ArduinoCLI: cli, ArduinoConfig: cliConfig, FQBN: fqbn,
+		FirmwareFeatures: features,
+	})
 }
 
 func findCompiledApplicationHex(directory string) (string, error) {

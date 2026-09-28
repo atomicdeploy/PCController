@@ -2,6 +2,9 @@ import { readFileSync, statSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
+import { loadProjectEnv } from '../Build/env.mjs'
+
+loadProjectEnv()
 
 export const EXIT = Object.freeze({
 	OK: 0,
@@ -22,7 +25,12 @@ export const PROGRAMMING_OPERATIONS = Object.freeze({
 	installBootloader: 'install-bootloader'
 })
 
-const TOOLCHAIN_POLICY_FORMAT = 'pccontroller-toolchain-policy/v1'
+export const FIRMWARE_FEATURES = Object.freeze([
+	'eeprom-boot-opcodes',
+	'eeprom-menu-labels'
+])
+const FIRMWARE_FEATURE_SET = new Set(FIRMWARE_FEATURES)
+
 const TOOLCHAIN_POLICY_URL = new URL('../Controller/toolchain-profile.json', import.meta.url)
 
 export class CommandPlanError extends Error {
@@ -49,11 +57,6 @@ export function parseToolchainPolicy(contents, source = 'toolchain policy') {
 	}
 	if (!policy || typeof policy !== 'object' || Array.isArray(policy)) {
 		throw new Error(`Toolchain policy ${source} must be a JSON object`)
-	}
-	if (policy.format !== TOOLCHAIN_POLICY_FORMAT) {
-		throw new Error(
-			`Toolchain policy ${source} uses unsupported format ${JSON.stringify(policy.format)}`
-		)
 	}
 	if (typeof policy.fqbn !== 'string' || !policy.fqbn.trim()) {
 		throw new Error(`Toolchain policy ${source} requires a non-empty fqbn string`)
@@ -211,11 +214,19 @@ export function createControllerProgramCommand({
 	outputDir = '',
 	toolchainCLI = '',
 	toolchainConfig = '',
+	firmwareFeatures = [],
+	noFirmwareFeatures,
 	dryRun = false,
-	allowIncompleteBackup = false
+	deployment = ''
 }) {
 	const normalizedMethod = String(method || '').toLowerCase()
+	const normalizedFeatures = normalizeFirmwareFeatures(firmwareFeatures)
+	const freezeDefaultOff = noFirmwareFeatures ??
+		(normalizedMethod === 'compile' && normalizedFeatures.length === 0)
 	if (normalizedMethod === 'compile') {
+		if (freezeDefaultOff && normalizedFeatures.length !== 0) {
+			throw new CommandPlanError('--no-firmware-features cannot be combined with --firmware-feature')
+		}
 		const args = [
 			'program', '--method', 'compile',
 			'--sketch', requireValue(sketch, 'compile sketch'),
@@ -223,6 +234,10 @@ export function createControllerProgramCommand({
 		]
 		if (String(toolchainCLI).trim()) args.push('--toolchain-cli', String(toolchainCLI))
 		if (String(toolchainConfig).trim()) args.push('--toolchain-config', String(toolchainConfig))
+		for (const feature of normalizedFeatures) {
+			args.push('--firmware-feature', feature)
+		}
+		if (freezeDefaultOff) args.push('--no-firmware-features')
 		if (dryRun) args.push('--dry-run')
 		return controllerCommand(invocation, args)
 	}
@@ -230,6 +245,9 @@ export function createControllerProgramCommand({
 		throw new CommandPlanError(
 			`programming method ${JSON.stringify(method)} is unsupported; use ${PROGRAMMING_METHODS.join(' or ')}`
 		)
+	}
+	if (normalizedFeatures.length !== 0 || freezeDefaultOff) {
+		throw new CommandPlanError('--firmware-feature and --no-firmware-features are only valid with compile')
 	}
 	const normalizedOperation = String(operation || '').toLowerCase()
 	const knownOperations = Object.values(PROGRAMMING_OPERATIONS)
@@ -257,14 +275,37 @@ export function createControllerProgramCommand({
 	if (normalizedOperation === PROGRAMMING_OPERATIONS.backup) {
 		args.push('--output', requireValue(output, 'read-flash output'))
 	}
-	if (allowIncompleteBackup) {
+	if (deployment) {
 		if (normalizedOperation !== PROGRAMMING_OPERATIONS.upload) {
-			throw new CommandPlanError('--allow-incomplete-backup is only valid with write-flash')
+			throw new CommandPlanError('--deployment is only valid with write-flash')
 		}
-		args.push('--allow-incomplete-backup')
+		if (!['production', 'development'].includes(deployment)) {
+			throw new CommandPlanError('--deployment must be production or development')
+		}
+		args.push('--deployment', deployment)
 	}
 	if (dryRun) args.push('--dry-run')
 	return controllerCommand(invocation, args)
+}
+
+// Keep every Node entrypoint aligned with the Controller's finite feature
+// contract before a plan can claim success without starting the Go process.
+export function normalizeFirmwareFeatures(features) {
+	if (!Array.isArray(features)) throw new CommandPlanError('firmware features must be an array')
+	const selected = new Set()
+	for (const feature of features) {
+		const normalized = String(feature || '').trim().toLowerCase()
+		if (!/^[a-z0-9][a-z0-9-]*$/.test(normalized)) {
+			throw new CommandPlanError(`invalid named firmware feature ${JSON.stringify(feature)}`)
+		}
+		if (!FIRMWARE_FEATURE_SET.has(normalized)) {
+			throw new CommandPlanError(
+				`unsupported firmware feature ${JSON.stringify(feature)}; supported: ${FIRMWARE_FEATURES.join(', ')}`
+			)
+		}
+		selected.add(normalized)
+	}
+	return [...selected].sort()
 }
 
 export function programmingArtifact(paths, method) {

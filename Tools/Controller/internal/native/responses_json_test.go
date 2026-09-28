@@ -8,10 +8,12 @@ import (
 
 func TestStatusJSONUsesStableProtocolNamesAndRetainsRawUptime(t *testing.T) {
 	original := Status{
-		UptimeMS:  4_392_210,
-		SupplyMV:  12_224,
-		TLEDCenti: 2_650,
-		TBTCenti:  2_410,
+		UptimeMS:        4_392_210,
+		SupplyMV:        12_224,
+		TLEDCenti:       2_650,
+		TBTCenti:        2_410,
+		Flags:           StatusINA219Available | StatusTLEDAvailable | StatusTBTAvailable,
+		INA219Available: true, TLEDAvailable: true, TBTAvailable: true,
 	}
 	encoded, err := json.Marshal(original)
 	if err != nil {
@@ -24,6 +26,9 @@ func TestStatusJSONUsesStableProtocolNamesAndRetainsRawUptime(t *testing.T) {
 		`"supply_mv":12224`,
 		`"temperature_led_centi_c":2650`,
 		`"temperature_bt_audio_centi_c":2410`,
+		`"ina219_available":true`,
+		`"temperature_led_available":true`,
+		`"temperature_bt_audio_available":true`,
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("status JSON %s does not contain %s", text, want)
