@@ -898,6 +898,78 @@ func TestConnectRacingCloseCannotReopenAfterCloseBarrier(t *testing.T) {
 	}
 }
 
+func TestCloseRejectsConnectionBeforeCancellationSlotAdmission(t *testing.T) {
+	tests := []struct {
+		name string
+		run  func(*Runtime) error
+	}{
+		{name: "Connect", run: func(runtime *Runtime) error {
+			return runtime.Connect(context.Background())
+		}},
+		{name: "Reconnect", run: func(runtime *Runtime) error {
+			return runtime.Reconnect(context.Background(), "test reconnect")
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			runtime := New(Options{})
+			admissionReached := make(chan struct{})
+			releaseAdmission := make(chan struct{})
+			runtime.beforeConnectAdmission = func() {
+				close(admissionReached)
+				<-releaseAdmission
+			}
+			openCalled := false
+			runtime.autoOpen = func(context.Context, link.DiscoveryOptions) (link.OpenResult, error) {
+				openCalled = true
+				return link.OpenResult{}, errors.New("unexpected open")
+			}
+
+			connectDone := make(chan error, 1)
+			go func() { connectDone <- test.run(runtime) }()
+			select {
+			case <-admissionReached:
+			case <-time.After(time.Second):
+				t.Fatal("connection did not reach cancellation-slot admission")
+			}
+			closeDone := make(chan error, 1)
+			go func() { closeDone <- runtime.Close() }()
+			deadline := time.Now().Add(time.Second)
+			for {
+				_, closing := runtime.closeBarrierState()
+				if closing {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("Close did not establish its barrier")
+				}
+				time.Sleep(time.Millisecond)
+			}
+			close(releaseAdmission)
+
+			select {
+			case err := <-connectDone:
+				if err == nil {
+					t.Fatal("connection admitted after Close established its barrier")
+				}
+			case <-time.After(time.Second):
+				t.Fatal("connection did not reject close-barrier admission")
+			}
+			select {
+			case err := <-closeDone:
+				if err != nil {
+					t.Fatalf("Close: %v", err)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("Close remained blocked after rejecting late connection admission")
+			}
+			if openCalled {
+				t.Fatal("late connection admission entered autoOpen")
+			}
+		})
+	}
+}
+
 func TestCloseKeepsBarrierSetUntilOpenMutexIsReleased(t *testing.T) {
 	runtime := New(Options{})
 	barrierUnlocked := make(chan struct{})

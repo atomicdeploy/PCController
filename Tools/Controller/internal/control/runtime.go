@@ -187,6 +187,7 @@ type Runtime struct {
 	connectionReadyHandler func(ports.Info, native.Hello)
 	beforeDisconnect       func(string)
 	afterCloseOpenUnlock   func()
+	beforeConnectAdmission func()
 
 	events chan Event
 
@@ -913,7 +914,19 @@ func (runtime *Runtime) EnsureConnected(ctx context.Context) error {
 }
 
 func (runtime *Runtime) ensureConnected(ctx context.Context) error {
+	if runtime.beforeConnectAdmission != nil {
+		runtime.beforeConnectAdmission()
+	}
 	runtime.mu.Lock()
+	// Connect and Reconnect perform an earlier epoch check while holding
+	// openMu, but Close can begin immediately after that check. Admission must
+	// therefore be decided in the same critical section that publishes the
+	// cancellation slot, so Close either rejects this attempt or observes and
+	// joins it.
+	if runtime.closeInProgress {
+		runtime.mu.Unlock()
+		return errors.New("serial close is in progress")
+	}
 	if len(runtime.retainedClose) != 0 {
 		reason := runtime.connectionReason
 		runtime.mu.Unlock()
