@@ -648,7 +648,10 @@ with a client operation ID. The primary commits exactly once, returns
 the same ordered action to the source and every live follower. A late title or
 lease callback is therefore unable to roll a source back. When the last lease
 leaves or expires the group is discarded, so active pages are never persisted
-as host configuration.
+as host configuration. Retrying the same operation ID is idempotent only while
+its epoch, revision, and page remain canonical. Once a newer operation advances
+the group, replaying the older operation returns an error instead of a stale
+cached page that could roll a client back.
 After an event-session reconnect a follower adds
 `navigation_catch_up=true`; the coordinator then re-sends the canonical page
 instead of treating the client's potentially stale page as new intent.
