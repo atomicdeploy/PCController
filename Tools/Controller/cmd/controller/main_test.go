@@ -954,9 +954,12 @@ func TestStandaloneUSBaspRequiresSeparateApplicationLifecycleSelector(t *testing
 func TestProgramShellWordsPreserveBackupAndEEPROMIntent(t *testing.T) {
 	backup := programShellWords(programmer.Options{
 		Method: programmer.MethodUrclock, Operation: programmer.OperationBackup,
-		OutputPath: `C:\safe backups`,
+		OutputPath: `C:\safe backups`, ProgrammerTimeout: 45 * time.Second,
 	})
-	wantBackup := []string{"program", "backup", "urclock", `C:\safe backups`}
+	wantBackup := []string{
+		"program", "backup", "urclock", `C:\safe backups`,
+		"--programmer-timeout", "45s",
+	}
 	if !reflect.DeepEqual(backup, wantBackup) {
 		t.Fatalf("backup words = %#v, want %#v", backup, wantBackup)
 	}
