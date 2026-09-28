@@ -91,6 +91,9 @@ import { settingsSetCommand } from './command-line'
 import { EventList } from './event-collection'
 import { HotkeyEditor } from './hotkey-settings-editor'
 import { PeripheralNamesEditor } from './peripheral-names-editor'
+import { CardLayoutEditor, CardLayoutFrame, type CardLayoutCopy, type LayoutCardDescriptor } from './card-layout-controls'
+import { loadCardLayout, moveCard, resetCardLayout, saveCardLayout, toggleCard } from './dashboard-layout'
+import { pointerReorderTargetChanged } from './pointer-reorder'
 import {
   normalizePWMValues,
   pwmPercent,
@@ -208,6 +211,9 @@ function eventTone(event: ControllerEvent): 'good' | 'warn' | 'bad' | 'info' {
   return 'info'
 }
 
+const dashboardCardIDs = ['telemetry', 'outputs', 'overview', 'actions', 'events'] as const
+type DashboardCardID = typeof dashboardCardIDs[number]
+
 export function DashboardView(props: SharedViewProps) {
   const { appTitle, snapshot, samples, events, locale, t, command, refresh, openDialog } = props
   const copy = (english: string, persian: string) => locale === 'fa' ? persian : english
@@ -232,6 +238,10 @@ export function DashboardView(props: SharedViewProps) {
   const freshnessNow = useFreshnessClock(snapshot.status_updated, freshnessWindow)
   const measurementFreshness = formatMeasurementFreshness(locale, snapshot.status_updated, freshnessWindow, freshnessNow)
   const [hostUI, setHostUI] = useState<HostUISettings | null>(null)
+  const [layoutEditing, setLayoutEditing] = useState(false)
+  const [layout, setLayout] = useState(() => loadCardLayout('dashboard', dashboardCardIDs))
+  const [draggedCard, setDraggedCard] = useState<DashboardCardID | null>(null)
+  const dashboardDragTarget = useRef<DashboardCardID | null>(null)
   useEffect(() => {
     if (!boardReady) {
       setHostUI(null)
@@ -250,6 +260,70 @@ export function DashboardView(props: SharedViewProps) {
     copy('User relay 5', 'رلهٔ کاربر ۵'), copy('User relay 6', 'رلهٔ کاربر ۶'),
     copy('User relay 7', 'رلهٔ کاربر ۷'), copy('User relay 8', 'رلهٔ کاربر ۸'),
   ]
+  const layoutCopy: CardLayoutCopy = {
+    move: copy('Move', 'جابجایی'),
+    collapse: copy('Collapse', 'جمع‌کردن'),
+    expand: copy('Expand', 'بازکردن'),
+    hide: copy('Hide', 'پنهان‌کردن'),
+    show: copy('Show', 'نمایش'),
+    customize: copy('Arrange', 'چیدمان'),
+    done: copy('Done', 'پایان'),
+    reset: copy('Reset layout', 'بازنشانی چیدمان'),
+    hidden: copy('Hidden cards', 'کارت‌های پنهان'),
+  }
+  const layoutCards: readonly LayoutCardDescriptor<DashboardCardID>[] = [
+    { id: 'telemetry', label: t('liveTelemetry') },
+    { id: 'outputs', label: t('outputs') },
+    { id: 'overview', label: t('status') },
+    { id: 'actions', label: t('quickActions') },
+    { id: 'events', label: t('events') },
+  ]
+  const activeLayoutCardIDs = layout.order.filter((id) => {
+    if (!boardReady) return false
+    if (id === 'telemetry') return haveMeasurements
+    if (id === 'outputs') return available.relays
+    return true
+  })
+  const updateLayout = (change: (current: typeof layout) => typeof layout) => {
+    setLayout((current) => {
+      const next = change(current)
+      saveCardLayout('dashboard', dashboardCardIDs, next)
+      return next
+    })
+  }
+  const resetLayout = () => {
+    resetCardLayout('dashboard')
+    setLayout(loadCardLayout('dashboard', dashboardCardIDs))
+  }
+  const moveCardAtPoint = (source: DashboardCardID, x: number, y: number) => {
+    const candidate = document.elementFromPoint(x, y)?.closest<HTMLElement>('[data-layout-card-id]')?.dataset.layoutCardId
+    const target = dashboardCardIDs.includes(candidate as DashboardCardID) ? candidate as DashboardCardID : undefined
+    if (!pointerReorderTargetChanged(dashboardDragTarget.current, source, target)) return
+    dashboardDragTarget.current = target
+    updateLayout((current) => moveCard(current, source, target))
+  }
+  const moveCardByKeyboard = (source: DashboardCardID, offset: -1 | 1) => updateLayout((current) => {
+    const visible = current.order.filter((id) => activeLayoutCardIDs.includes(id) && !current.hidden.includes(id))
+    const index = visible.indexOf(source)
+    const target = visible[index + offset]
+    return target ? moveCard(current, source, target) : current
+  })
+  const frame = (id: DashboardCardID, title: string, child: ReactNode) => <CardLayoutFrame
+    id={id}
+    title={title}
+    order={layout.order.indexOf(id)}
+    collapsed={layout.collapsed.includes(id)}
+    hidden={layout.hidden.includes(id)}
+    editing={layoutEditing}
+    dragging={draggedCard === id}
+    copy={layoutCopy}
+    onToggleCollapsed={() => updateLayout((current) => ({ ...current, collapsed: toggleCard(current.collapsed, id) }))}
+    onHide={() => updateLayout((current) => ({ ...current, hidden: toggleCard(current.hidden, id) }))}
+    onReorderStart={(source) => { dashboardDragTarget.current = null; setDraggedCard(source) }}
+    onReorderMove={moveCardAtPoint}
+    onReorderEnd={() => { dashboardDragTarget.current = null; setDraggedCard(null) }}
+    onKeyboardReorder={moveCardByKeyboard}
+  >{child}</CardLayoutFrame>
   return (
     <>
       <SectionTitle
@@ -263,6 +337,15 @@ export function DashboardView(props: SharedViewProps) {
             </StatusBadge>
             {!boardReady && !authenticationRequired && <Button icon={Cable} compact onClick={() => void command('reconnect', t('reconnect'))}>{t('reconnect')}</Button>}
             <Button icon={RefreshCw} compact onClick={() => void refresh()}>{t('refresh')}</Button>
+            {activeLayoutCardIDs.length > 0 && <CardLayoutEditor
+              copy={layoutCopy}
+              editing={layoutEditing}
+              cards={layoutCards.filter(({ id }) => activeLayoutCardIDs.includes(id))}
+              hidden={layout.hidden}
+              onToggleEditing={() => setLayoutEditing((editing) => !editing)}
+              onShow={(id) => updateLayout((current) => ({ ...current, hidden: current.hidden.filter((item) => item !== id) }))}
+              onReset={resetLayout}
+            />}
           </div>
         }
       />
@@ -303,7 +386,8 @@ export function DashboardView(props: SharedViewProps) {
         {invalidMeasurements.map((message) => <div className="measurement-alert" key={message}><TriangleAlert size={16} /><span>{message}</span></div>)}
       </div>}
 
-      {boardReady && haveMeasurements && <Card
+      <section className="dashboard-layout-grid">
+      {boardReady && haveMeasurements && frame('telemetry', t('liveTelemetry'), <Card
         icon={ChartNoAxesCombined}
         iconTone="violet"
         title={t('liveTelemetry')}
@@ -318,10 +402,9 @@ export function DashboardView(props: SharedViewProps) {
         <Suspense fallback={<div className="telemetry-chart__empty" role="status"><Activity size={22} /><span>{locale === 'fa' ? 'در حال آماده‌سازی نمودار…' : 'Preparing chart…'}</span></div>}>
           <TelemetryChart connected locale={locale} samples={samples} reduceMotion={props.reduceMotion} />
         </Suspense>
-      </Card>}
+      </Card>)}
 
-      <section className="dashboard-grid">
-        {boardReady && available.relays && <Card icon={ToggleRight} iconTone={activeRelayCount ? 'amber' : 'green'} title={t('outputs')} eyebrow="R1—R8" className="outputs-card" action={<StatusBadge tone={status.active_relays ? 'warn' : 'neutral'}>{status.active_relays ? `${activeRelayCount} ${copy('ACTIVE', 'فعال')}` : copy('SAFE', 'ایمن')}</StatusBadge>} menu={[
+        {boardReady && available.relays && frame('outputs', t('outputs'), <Card icon={ToggleRight} iconTone={activeRelayCount ? 'amber' : 'green'} title={t('outputs')} eyebrow="R1—R8" className="outputs-card" action={<StatusBadge tone={status.active_relays ? 'warn' : 'neutral'}>{status.active_relays ? `${activeRelayCount} ${copy('ACTIVE', 'فعال')}` : copy('SAFE', 'ایمن')}</StatusBadge>} menu={[
           { label: copy('Read controller status', 'خواندن وضعیت کنترلر'), icon: Gauge, onSelect: () => { void command('status') } },
           { label: copy('Release every output', 'آزادسازی همهٔ خروجی‌ها'), icon: Unplug, tone: 'danger', onSelect: () => openDialog({ tone: 'danger', title: t('confirmEmergencyTitle'), body: t('confirmEmergencyBody'), confirmLabel: t('emergencyOff'), action: async () => { await command('relay off'); await command('pwm off') } }) },
         ]}>
@@ -341,9 +424,9 @@ export function DashboardView(props: SharedViewProps) {
             })}
           </div>
           <div className="safety-strip"><ShieldCheck size={17} /><span>{activeRelayCount ? copy(`${activeRelayCount} outputs active · confirmation required for emergency release`, `${activeRelayCount} خروجی فعال است · آزادسازی اضطراری به تأیید نیاز دارد`) : copy('All physical outputs are released', 'همهٔ خروجی‌های فیزیکی آزاد هستند')}</span></div>
-        </Card>}
+        </Card>)}
 
-        {boardReady && <Card icon={Gauge} iconTone="green" title={t('status')} eyebrow={t('device')} className="device-card" menu={[
+        {boardReady && frame('overview', t('status'), <Card icon={Gauge} iconTone="green" title={t('status')} eyebrow={t('device')} className="device-card" menu={[
           { label: copy('Read identity', 'خواندن شناسه'), icon: Cpu, onSelect: () => { void command('hello') } },
           { label: copy('Open controller controls', 'بازکردن کنترل‌های برد'), icon: CircuitBoard, onSelect: () => { window.location.hash = '#/controls' } },
         ]}>
@@ -355,9 +438,9 @@ export function DashboardView(props: SharedViewProps) {
             <DataRow label={copy('UART CRC / framing', 'CRC / قاب‌بندی UART')} value={`${status.crc_errors} / ${status.framing_errors}`} mono tone={status.crc_errors || status.framing_errors ? 'warn' : 'good'} />
             <DataRow label={copy('Reset count', 'تعداد بازنشانی')} value={status.reset_count} mono />
           </div>
-        </Card>}
+        </Card>)}
 
-        {boardReady && <Card icon={Zap} iconTone="amber" title={t('quickActions')} eyebrow={copy('Confirmation protected', 'محافظت‌شده با تأیید')} className="actions-card">
+        {boardReady && frame('actions', t('quickActions'), <Card icon={Zap} iconTone="amber" title={t('quickActions')} eyebrow={copy('Confirmation protected', 'محافظت‌شده با تأیید')} className="actions-card">
           <div className="action-grid">
             {available.relays && <Button icon={Unplug} tone="danger" onClick={() => openDialog({
               tone: 'danger', title: t('confirmEmergencyTitle'), body: t('confirmEmergencyBody'), confirmLabel: t('emergencyOff'),
@@ -366,14 +449,14 @@ export function DashboardView(props: SharedViewProps) {
             <Button icon={Gauge} onClick={() => void command('status')}>{copy('Read status', 'خواندن وضعیت')}</Button>
             {available.statusLED && <Button icon={Lightbulb} onClick={() => void command('rgb effect play attention')}>{copy('Attention cue', 'اعلان توجه')}</Button>}
           </div>
-        </Card>}
+        </Card>)}
 
-        {boardReady && <Card icon={Activity} iconTone="violet" title={t('events')} eyebrow={events.length ? `${formatClock(locale, events[0].time)} · ${events[0].kind}` : t('eventStream')} className="activity-card" action={<span className="count-chip">{events.length}</span>} menu={[
+        {boardReady && frame('events', t('events'), <Card icon={Activity} iconTone="violet" title={t('events')} eyebrow={events.length ? `${formatClock(locale, events[0].time)} · ${events[0].kind}` : t('eventStream')} className="activity-card" action={<span className="count-chip">{events.length}</span>} menu={[
           { label: copy('Open full timeline', 'بازکردن خط زمانی کامل'), icon: Activity, onSelect: () => { window.location.hash = '#/events' } },
           { label: copy('Refresh snapshot', 'تازه‌سازی وضعیت'), icon: RefreshCw, onSelect: () => { void refresh() } },
         ]}>
           <EventList events={events} locale={locale} t={t} />
-        </Card>}
+        </Card>)}
       </section>
     </>
   )
