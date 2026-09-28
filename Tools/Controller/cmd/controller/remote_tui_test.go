@@ -13,6 +13,7 @@ import (
 	"time"
 
 	controllerapi "pccontroller.local/controller"
+	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/control"
 	"pccontroller.local/controller/internal/hostui"
 	"pccontroller.local/controller/internal/native"
@@ -601,5 +602,19 @@ func TestRemoteControlEventPreservesTUIFields(t *testing.T) {
 	if value.ID != 7 || value.Frame.Opcode != 0x81 || value.Frame.Seq != 3 ||
 		value.Source != "board" || value.Metadata["page"] != "events" || value.RFCode != 0x1234 {
 		t.Fatalf("converted event=%#v", value)
+	}
+}
+
+func TestMergeRemoteHostUIPreservesAdvertisedMeasurementTiming(t *testing.T) {
+	local := appconfig.Defaults().UI
+	merged := mergeRemoteHostUI(local, remoteUISettingsWire{
+		AppTitle: "Remote controller", StatusIntervalMS: 5000, MeasurementFreshnessMS: 5200,
+	})
+	if merged.StatusIntervalMS != 5000 || merged.MeasurementFreshnessMS != 5200 {
+		t.Fatalf("remote timing=%d/%d", merged.StatusIntervalMS, merged.MeasurementFreshnessMS)
+	}
+	legacy := mergeRemoteHostUI(local, remoteUISettingsWire{AppTitle: "Legacy controller"})
+	if legacy.StatusIntervalMS != local.StatusIntervalMS || legacy.MeasurementFreshnessMS != local.MeasurementFreshnessMS {
+		t.Fatalf("legacy timing=%d/%d", legacy.StatusIntervalMS, legacy.MeasurementFreshnessMS)
 	}
 }

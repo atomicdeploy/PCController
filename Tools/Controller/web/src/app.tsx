@@ -44,6 +44,7 @@ import { createAudioEngine, type AudioCue, type AudioEngine } from './audio-engi
 import { BoardSettingsReadGate, boardSettingsGeneration } from './board-settings-read'
 import { BootGate, BrandIcon, Button, HotkeyHelp, Icon, KeyCombo, Modal, NavButton, PageTransition, StatusBadge, ToastStack } from './components'
 import { connectStream, execute, getSnapshot, getToken, getUIConfig, rpc, setToken as storeToken } from './api'
+import type { StreamControl } from './api'
 import {
   adjacentPageHotkey,
   ignoresGlobalHotkeys,
@@ -472,6 +473,7 @@ export default function App() {
   const buzzerTimelineRef = useRef(new BuzzerPlaybackTimeline())
   const previousAudioConnection = useRef<boolean | null>(null)
   const tabChannelRef = useRef<TabChannel | null>(null)
+  const streamControlRef = useRef<StreamControl | null>(null)
   const appearanceETagRef = useRef('')
   const appearanceDesiredRef = useRef(appearance)
   const appearanceSaveChain = useRef<Promise<void>>(Promise.resolve())
@@ -515,9 +517,19 @@ export default function App() {
   const refreshHostAppearance = useCallback(async () => {
     const config = await getUIConfig()
     setUIConfig(config)
+    streamControlRef.current?.updateStatusInterval(config.status_interval_ms)
     adoptHostAppearance(config.appearance, config.appearance_etag)
     return config
   }, [adoptHostAppearance])
+
+  const adoptMeasurementTiming = useCallback((statusIntervalMS: number, measurementFreshnessMS: number) => {
+    setUIConfig((current) => current ? {
+      ...current,
+      status_interval_ms: statusIntervalMS,
+      measurement_freshness_ms: measurementFreshnessMS,
+    } : current)
+    streamControlRef.current?.updateStatusInterval(statusIntervalMS)
+  }, [])
 
   useEffect(() => {
 	const pageTitle = t(navigation.find((item) => item.id === page)?.label ?? 'dashboard')
@@ -1244,7 +1256,7 @@ export default function App() {
       signal: abort.signal,
       onError: (cause) => setStreamDetail(`Host resource check: ${cause instanceof Error ? cause.message : String(cause)}`),
     })
-    let stopStream = () => {}
+    let stopStream = Object.assign(() => {}, { updateStatusInterval: (_intervalMS: number) => undefined }) as StreamControl
     void (async () => {
       try {
         setBootTarget(42)
@@ -1403,6 +1415,7 @@ export default function App() {
             }
           },
         })
+        streamControlRef.current = stopStream
         setBootTarget(100)
       } catch (cause) {
         setStartupProbeResolved(true)
@@ -1420,7 +1433,12 @@ export default function App() {
         setBootTarget(100)
       }
     })()
-    return () => { abort.abort(); resourceCheck.dispose(); stopStream() }
+    return () => {
+      abort.abort()
+      resourceCheck.dispose()
+      if (streamControlRef.current === stopStream) streamControlRef.current = null
+      stopStream()
+    }
   }, [adoptHostAppearance, appInstanceID, applyPage, demo, navigate, navigationSession, notify, refresh, refreshHostAppearance, streamGeneration, token])
 
   const authenticationRequired = sessionAuthenticationGuidanceRequired({
@@ -1446,6 +1464,8 @@ export default function App() {
       boardState,
       tabBusSupported,
       tabPeers,
+      statusIntervalMS: uiConfig?.status_interval_ms,
+      measurementFreshnessMS: uiConfig?.measurement_freshness_ms,
     },
     relayedTerminal,
     broadcastTerminal: (entry) => { tabChannelRef.current?.publishTerminal(entry) },
@@ -1459,7 +1479,7 @@ export default function App() {
   const view = (
     <Suspense fallback={<section className="page-loading" role="status" aria-live="polite"><span className="spinner" />{appearance.locale === 'fa' ? 'در حال بارگیری…' : 'Loading page…'}</section>}>
       {page === 'settings'
-        ? <PageView {...shared} appearance={appearance} onAppearance={saveAppearance} token={token} onToken={saveToken} onAppTitle={saveAppTitle} uiConfig={uiConfig} onBuzzerPath={setBuzzerPath} navigationSync={navigationSync} navigationSyncStatus={navigationSyncStatus} onNavigationSync={setNavigationSync} />
+        ? <PageView {...shared} appearance={appearance} onAppearance={saveAppearance} token={token} onToken={saveToken} onAppTitle={saveAppTitle} uiConfig={uiConfig} onMeasurementTiming={adoptMeasurementTiming} onBuzzerPath={setBuzzerPath} navigationSync={navigationSync} navigationSyncStatus={navigationSyncStatus} onNavigationSync={setNavigationSync} />
         : <PageView {...shared} />}
     </Suspense>
   )
