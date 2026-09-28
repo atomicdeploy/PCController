@@ -13,10 +13,7 @@ import (
 )
 
 func TestUnixEndpointRoundTripPermissionsAndCleanup(t *testing.T) {
-	parent := t.TempDir()
-	if err := os.Chmod(parent, 0o700); err != nil {
-		t.Fatal(err)
-	}
+	parent := shortPrivateTempDir(t)
 	endpoint := Endpoint{Transport: TransportUnix, Address: filepath.Join(parent, "controller.sock")}
 	listener, err := Listen(endpoint, ListenOptions{RecoverStaleNative: true})
 	if err != nil {
@@ -56,10 +53,7 @@ func TestUnixEndpointRefusesUnsafeAndLivePaths(t *testing.T) {
 		t.Fatal("group-readable socket parent was accepted")
 	}
 
-	safeParent := t.TempDir()
-	if err := os.Chmod(safeParent, 0o700); err != nil {
-		t.Fatal(err)
-	}
+	safeParent := shortPrivateTempDir(t)
 	live := Endpoint{Transport: TransportUnix, Address: filepath.Join(safeParent, "live.sock")}
 	listener, err := Listen(live, ListenOptions{RecoverStaleNative: true})
 	if err != nil {
@@ -79,6 +73,22 @@ func TestUnixEndpointRefusesUnsafeAndLivePaths(t *testing.T) {
 		created.Close()
 		t.Fatal("regular file was replaced by a socket")
 	}
+}
+
+func shortPrivateTempDir(t *testing.T) string {
+	t.Helper()
+	// Darwin's sockaddr_un path is substantially shorter than Linux's. Keep
+	// the test path deliberately compact instead of inheriting t.TempDir's
+	// long test-name component.
+	directory, err := os.MkdirTemp("/tmp", "pcc-rpc-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(directory) })
+	if err := os.Chmod(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return directory
 }
 
 func echoOne(listener net.Listener, done chan<- error) {
