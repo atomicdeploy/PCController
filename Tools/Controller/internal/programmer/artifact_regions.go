@@ -24,7 +24,6 @@ import (
 type ManifestRegionInspection struct {
 	ManifestPath   string                     `json:"manifest_path"`
 	ManifestSHA256 string                     `json:"manifest_sha256"`
-	Format         string                     `json:"format"`
 	Target         ManifestInspectionTarget   `json:"target"`
 	Regions        []ManifestRegionDescriptor `json:"regions"`
 }
@@ -83,7 +82,6 @@ func InspectManifestRegions(manifestPath string) (ManifestRegionInspection, erro
 		return report, fmt.Errorf("read firmware manifest: %w", err)
 	}
 	decoder := json.NewDecoder(bufio.NewReader(bytes.NewReader(content)))
-	decoder.DisallowUnknownFields()
 	var manifest compileManifest
 	if err := decoder.Decode(&manifest); err != nil {
 		return report, fmt.Errorf("decode firmware manifest: %w", err)
@@ -95,10 +93,6 @@ func InspectManifestRegions(manifestPath string) (ManifestRegionInspection, erro
 		}
 		return report, fmt.Errorf("decode firmware manifest trailing data: %w", err)
 	}
-	if manifest.Format != firmwareManifestFormat &&
-		manifest.Format != firmwareManifestFormatV2 {
-		return report, fmt.Errorf("unsupported firmware manifest format %q", manifest.Format)
-	}
 	features, err := NormalizeFirmwareFeatures(manifest.Source.CompileFeatures)
 	if err != nil {
 		return report, fmt.Errorf("firmware manifest compile features: %w", err)
@@ -106,12 +100,6 @@ func InspectManifestRegions(manifestPath string) (ManifestRegionInspection, erro
 	canonicalFeatures := firmwareFeatureNames(features)
 	if !slices.Equal(canonicalFeatures, manifest.Source.CompileFeatures) {
 		return report, errors.New("firmware manifest compile features must be unique and sorted canonically")
-	}
-	if manifest.Format == firmwareManifestFormat && len(features) != 0 {
-		return report, errors.New("firmware manifest v1 cannot declare compile features")
-	}
-	if manifest.Format == firmwareManifestFormatV2 && len(features) == 0 {
-		return report, errors.New("firmware manifest v2 requires at least one compile feature")
 	}
 	if manifest.GeneratedUTC.IsZero() {
 		return report, errors.New("firmware manifest has no generation timestamp")
@@ -165,7 +153,7 @@ func InspectManifestRegions(manifestPath string) (ManifestRegionInspection, erro
 	}
 
 	report = ManifestRegionInspection{
-		ManifestPath: absolute, ManifestSHA256: sha256Hex(content), Format: manifest.Format,
+		ManifestPath: absolute, ManifestSHA256: sha256Hex(content),
 		Target: ManifestInspectionTarget{
 			Profile:               manifest.Target.Profile,
 			MCU:                   manifest.Target.MCU,
@@ -231,7 +219,7 @@ func InspectManifestRegions(manifestPath string) (ManifestRegionInspection, erro
 		if region.Name == "firmware-identity" {
 			haveFirmwareIdentity = true
 			if region.Start != FirmwareIdentityAddress || region.Length != FirmwareIdentityLength ||
-				region.Schema != FirmwareIdentitySchema || region.Magic != "PCI1" {
+				region.Magic != "PCID" {
 				return ManifestRegionInspection{}, errors.New("firmware-identity declaration differs from the current compact identity layout")
 			}
 			identity, readErr := application.document.Image.BytesAt(region.Start, region.Length)

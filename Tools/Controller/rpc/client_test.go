@@ -111,3 +111,35 @@ func TestClientRejectsOversizeBeforeDispatchOrDial(t *testing.T) {
 		t.Fatalf("oversize err=%v dispatched=%t", err, dispatched)
 	}
 }
+
+func TestStreamClientCancellationInterruptsResponseRead(t *testing.T) {
+	server, clientConnection := net.Pipe()
+	defer server.Close()
+	client, err := Dial(Endpoint{Transport: TransportTCP, Address: "127.0.0.1:8787"}, ClientOptions{
+		DialContext: func(context.Context, string, string) (net.Conn, error) {
+			return clientConnection, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, callErr := client.Call(ctx, Request{Method: "controller.ping"})
+		done <- callErr
+	}()
+	var request Request
+	if err := json.NewDecoder(server).Decode(&request); err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("call error=%v, want context cancellation", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("cancelled RPC call remained blocked reading a response")
+	}
+}

@@ -162,6 +162,28 @@ func TestLegacyDirectFlashCommandsAreUnavailable(t *testing.T) {
 	}
 }
 
+func TestProgramCommandPropagatesProgrammerTimeout(t *testing.T) {
+	runtime := New(Options{})
+	runtime.port = ports.Info{Name: "COM18"}
+	var got time.Duration
+	_, err := programCommand(
+		context.Background(), runtime,
+		CommandOptions{
+			ProgramExecute: func(_ context.Context, options programmer.Options, _ io.Writer) error {
+				got = options.ProgrammerTimeout
+				return nil
+			},
+		},
+		[]string{"backup", "urclock", t.TempDir(), "--programmer-timeout", "45s"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 45*time.Second {
+		t.Fatalf("programmer timeout=%s", got)
+	}
+}
+
 func TestDevelopmentReinitializeRequiresAuthenticatedLifecycle(t *testing.T) {
 	firmware := filepath.Join(t.TempDir(), "firmware.hex")
 	if err := os.WriteFile(firmware, []byte(":020000000102FB\n:00000001FF\n"), 0o600); err != nil {

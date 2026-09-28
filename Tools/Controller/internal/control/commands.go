@@ -161,9 +161,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 	)
 	runtime.setMacroRunner(macroRunner)
 	outputs := options.Outputs
-	if outputs == nil {
-		outputs = NewOutputScheduler(runtime)
-	}
+	outputs = runtime.bindOutputScheduler(outputs)
 	// Keep the runtime-owned scheduler attached when a watched configuration
 	// resolver refreshes only file-backed options. Programming capture/restore
 	// must observe the same RGB/melody owner used by the live command engine.
@@ -308,8 +306,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 					return "", err
 				}
 			} else {
-				runtime.ResumeAuto()
-				if err := runtime.EnsureConnected(requestContext); err != nil {
+				if err := runtime.Connect(requestContext); err != nil {
 					return "", err
 				}
 			}
@@ -326,11 +323,9 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 	mustRegister(shell.Command{
 		Name: "reconnect", Usage: "reconnect", Summary: "resume authenticated auto-reconnect",
 		Run: func(ctx context.Context, _ []string) (string, error) {
-			_ = runtime.Close()
-			runtime.ResumeAuto()
 			requestContext, cancel := context.WithTimeout(ctx, 8*time.Second)
 			defer cancel()
-			if err := runtime.EnsureConnected(requestContext); err != nil {
+			if err := runtime.Reconnect(requestContext, "interactive reconnect requested"); err != nil {
 				return "", err
 			}
 			return "reconnected " + runtime.Snapshot().Port.Name, nil
@@ -1230,11 +1225,10 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 
 func encodeLiveSettingsExport(settings native.Settings) (string, error) {
 	encoded, err := json.MarshalIndent(struct {
-		Format   string          `json:"format"`
 		Source   string          `json:"source"`
 		Settings native.Settings `json:"settings"`
 	}{
-		Format: "controller-mcu-settings/v1", Source: "live-opcode",
+		Source:   "live-opcode",
 		Settings: settings,
 	}, "", "  ")
 	if err != nil {
@@ -3968,15 +3962,35 @@ func programCommand(
 		programOptions.ConfirmEEPROMWrite = true
 		nextIndex++
 	}
-	if len(args) > nextIndex {
+	if len(args) > nextIndex &&
+		!strings.HasPrefix(strings.ToLower(args[nextIndex]), "--programmer-timeout") {
 		programOptions.Port = args[nextIndex]
 		nextIndex++
 	} else if operation != programmer.OperationCoreInfo &&
 		operation != programmer.OperationBurnBoot {
 		programOptions.Port = runtime.Snapshot().Port.Name
 	}
-	if len(args) != nextIndex {
-		return "", fmt.Errorf("too many program arguments")
+	for nextIndex < len(args) {
+		argument := args[nextIndex]
+		value := ""
+		switch {
+		case strings.EqualFold(argument, "--programmer-timeout"):
+			if nextIndex+1 >= len(args) {
+				return "", errors.New("--programmer-timeout requires a duration")
+			}
+			nextIndex++
+			value = args[nextIndex]
+		case strings.HasPrefix(strings.ToLower(argument), "--programmer-timeout="):
+			value = argument[len("--programmer-timeout="):]
+		default:
+			return "", fmt.Errorf("too many program arguments")
+		}
+		parsed, parseErr := time.ParseDuration(value)
+		if parseErr != nil || parsed <= 0 {
+			return "", fmt.Errorf("--programmer-timeout must be a positive duration")
+		}
+		programOptions.ProgrammerTimeout = parsed
+		nextIndex++
 	}
 	snapshot := runtime.Snapshot()
 	programOptions.ApplicationHash = snapshot.Hello.BuildHash
@@ -4633,11 +4647,17 @@ func reconnectProgrammingDevice(
 		programmingIdentity(expected),
 		programmingIdentity(connected.Port),
 	) {
-		_ = runtime.Close()
-		return fmt.Errorf(
+		mismatchErr := fmt.Errorf(
 			"authenticated device on %s does not match the original programming device",
 			expected.Name,
 		)
+		if closeErr := runtime.Close(); closeErr != nil {
+			return errors.Join(
+				mismatchErr,
+				fmt.Errorf("close mismatched programming device: %w", closeErr),
+			)
+		}
+		return mismatchErr
 	}
 	return nil
 }
