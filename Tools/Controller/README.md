@@ -1355,7 +1355,7 @@ Direct Go dependencies:
 | `github.com/coder/websocket` | 1.8.15 | ISC | firmware relay |
 | `github.com/fsnotify/fsnotify` | 1.10.1 | BSD-3-Clause | host-config file watching |
 | `github.com/go-ole/go-ole` | 1.3.0 | MIT | optional Windows system-profile adapter |
-| `go.bug.st/serial` via `DRSDavidSoft/go-serial` | `a37c04413d33` (1.8.0 base) | BSD-3-Clause | serial I/O, USB enumeration, and Windows overlapped-I/O close-before-join cancellation |
+| `go.bug.st/serial` via `DRSDavidSoft/go-serial` | `fa09c8b9a680` (1.8.0 base) | BSD-3-Clause | serial I/O, USB enumeration, and Windows overlapped-I/O cancellation before blocked issuance and close-before-join |
 | `golang.org/x/net` | 0.57.0 | BSD-3-Clause | standards-based proxy environment resolution |
 
 Complete transitive versions are locked in `go.sum`; redistributed terms are

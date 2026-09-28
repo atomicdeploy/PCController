@@ -1,5 +1,5 @@
-github.com/DRSDavidSoft/go-serial v0.0.0-20260928075641-a37c04413d33 h1:uQ6UUmAh2ukJ9vglEO4Xt4RqK7UWZ/rw4O4AB8r/U9M=
-github.com/DRSDavidSoft/go-serial v0.0.0-20260928075641-a37c04413d33/go.mod h1:d0MmS16Qt9b1m06yoYRNUXhRRTJV5Qg2S5EKqQtnayQ=
+github.com/DRSDavidSoft/go-serial v0.0.0-20260928083401-fa09c8b9a680 h1:uls49Iavo+ZAwgHKMic4M0It66deqRTLqfVObdPwmY4=
+github.com/DRSDavidSoft/go-serial v0.0.0-20260928083401-fa09c8b9a680/go.mod h1:d0MmS16Qt9b1m06yoYRNUXhRRTJV5Qg2S5EKqQtnayQ=
 github.com/atotto/clipboard v0.1.4 h1:EH0zSVneZPSuFR11BlR9YppQTVDbh5+16AmcJi4g1z4=
 github.com/atotto/clipboard v0.1.4/go.mod h1:ZY9tmq7sm5xIbd9bOK4onWV4S6X0u6GY7Vn0Yu86PYI=
 github.com/aymanbagabas/go-osc52/v2 v2.0.1 h1:HwpRHbFMcZLEVr42D4p7XBqjyuxQH5SMiErDT4WkJ2k=
