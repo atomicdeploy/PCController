@@ -400,13 +400,7 @@ func (s *Session) Close() error {
 
 func (s *Session) closeTransport() {
 	close(s.done)
-	purgeErr := purgePendingSerialIO(s.port)
-	closeErr := s.port.Close()
-	if purgeErr != nil {
-		s.closeErr = errors.Join(purgeErr, closeErr)
-		return
-	}
-	s.closeErr = closeErr
+	s.closeErr = s.port.Close()
 }
 
 func (s *Session) readLoop() {
