@@ -4,7 +4,7 @@ import {
   isMacroControllerEvent,
   macroEventNeedsSnapshot,
   prependMacroControllerEvent,
-  shouldUseLegacyMacroFallback,
+  shouldUseCommandSurfaceFallback,
 } from './macro-live'
 import type { ControllerEvent, MacroSnapshot } from './types'
 
@@ -66,10 +66,10 @@ describe('typed macro live state', () => {
     expect(prependMacroControllerEvent([timing], event(4, 'relay.state'))).toEqual([timing])
   })
 
-  it('uses legacy commands only for missing typed methods, never validation or transport failures', () => {
-    expect(shouldUseLegacyMacroFallback(new Error('method not found'))).toBe(true)
-    expect(shouldUseLegacyMacroFallback(new Error('unknown RPC method controller.macro.play'))).toBe(true)
-    expect(shouldUseLegacyMacroFallback(new Error('macro name is required'))).toBe(false)
-    expect(shouldUseLegacyMacroFallback(new Error('network connection closed'))).toBe(false)
+  it('uses the living command surface only for missing typed methods, never validation or transport failures', () => {
+    expect(shouldUseCommandSurfaceFallback(new Error('method not found'))).toBe(true)
+    expect(shouldUseCommandSurfaceFallback(new Error('unknown RPC method controller.macro.play'))).toBe(true)
+    expect(shouldUseCommandSurfaceFallback(new Error('macro name is required'))).toBe(false)
+    expect(shouldUseCommandSurfaceFallback(new Error('network connection closed'))).toBe(false)
   })
 })
