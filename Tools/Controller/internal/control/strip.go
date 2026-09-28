@@ -17,7 +17,7 @@ import (
 func stripCommandError(err error) error {
 	var remote *link.RemoteError
 	if errors.As(err, &remote) && remote.Code == native.ErrorBusy {
-		return fmt.Errorf("strip is blocked by an active or retained MCU macro; stop playback or save the recording, then run 'macro buffer clear': %w", err)
+		return fmt.Errorf("board is busy; wait for startup, or stop/save the MCU macro and run 'macro buffer clear' to release strip memory: %w", err)
 	}
 	return err
 }
