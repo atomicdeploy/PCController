@@ -40,7 +40,6 @@ void MacroRing::begin(uint8_t id, uint8_t options, uint16_t totalSteps) {
   used_ = 0;
   safeStopRequested_ = false;
   replayOffset_ = 0;
-  replayBit_ = 0;
 }
 
 bool MacroRing::append(uint16_t streamOffset, uint16_t completeStepIndex,
@@ -94,7 +93,7 @@ MacroRing::DequeueResult MacroRing::dequeueDue(uint32_t nowUs,
                                                 uint8_t payloadCapacity) {
   Report &report = status_.report;
   if (report.state == ReplayingRecording) {
-    if (payloadCapacity < 2 || payload == nullptr) {
+    if (payloadCapacity < 1 || payload == nullptr) {
       fail();
       return Malformed;
     }
@@ -103,14 +102,10 @@ MacroRing::DequeueResult MacroRing::dequeueDue(uint32_t nowUs,
       return NotDue;
     }
     command.opcode = options_;
-    command.payloadLength = 2;
-    payload[0] = replayBit_;
-    payload[1] = (peek(static_cast<uint8_t>(replayOffset_ + 4)) >> replayBit_) & 1U;
-    if (++replayBit_ == 8) {
-      replayBit_ = 0;
-      replayOffset_ = static_cast<uint8_t>(replayOffset_ + SnapshotBytes);
-      ++report.executedSteps;
-    }
+    command.payloadLength = 1;
+    payload[0] = peek(static_cast<uint8_t>(replayOffset_ + 4));
+    replayOffset_ = static_cast<uint8_t>(replayOffset_ + SnapshotBytes);
+    ++report.executedSteps;
     return Ready;
   }
   while (report.state == Playing && report.executedSteps < report.totalSteps) {
@@ -224,9 +219,11 @@ bool MacroRing::recordRelay(uint8_t mask, uint32_t nowUs) {
     used_ = static_cast<uint8_t>(used_ - SnapshotBytes);
     if (report.underruns != 255) ++report.underruns;
   }
+  uint32_t remaining = elapsed;
   for (uint8_t index = 0; index < SnapshotBytes; ++index) {
     queue_[static_cast<uint8_t>(head_ + used_) & QueueMask] =
-        index == 4 ? mask : static_cast<uint8_t>(elapsed >> (index * 8));
+        index == 4 ? mask : static_cast<uint8_t>(remaining);
+    remaining >>= 8;
     ++used_;
   }
   report.totalSteps = used_ / SnapshotBytes;
@@ -236,6 +233,7 @@ bool MacroRing::recordRelay(uint8_t mask, uint32_t nowUs) {
 }
 
 bool MacroRing::stopRecording() {
+  if (hasRecording()) return true;
   if (status_.report.state != Recording) return false;
   status_.report.state = Recorded;
   return true;
@@ -256,9 +254,9 @@ uint8_t *MacroRing::claimSharedWorkspace() {
   if (active() || hasRecording()) return nullptr;
   // The replay cursor is unused outside macro ownership. Its sentinel clears
   // macro bytes once when the strip takes over, preserving later chunk writes.
-  if (replayBit_ != 0xFF) {
+  if (replayOffset_ != 0xFF) {
     memset(queue_, 0, sizeof(queue_));
-    replayBit_ = 0xFF;
+    replayOffset_ = 0xFF;
   }
   return queue_;
 }
@@ -271,22 +269,23 @@ bool MacroRing::startRecorded(uint32_t nowUs, uint8_t relayOpcode) {
   report.executedSteps = 0;
   report.dispatchErrors = 0;
   replayOffset_ = 0;
-  replayBit_ = 0;
   options_ = relayOpcode;
   return true;
 }
 
 uint8_t MacroRing::readRecording(uint16_t offset, uint8_t *bytes,
                                 uint8_t capacity) const {
-  if (!hasRecording() || offset > used_ || offset % SnapshotBytes != 0) return 0;
+  if (!hasRecording() || offset > used_ ||
+      static_cast<uint8_t>(offset) % SnapshotBytes != 0) return 0;
   uint8_t count = static_cast<uint8_t>(used_ - offset);
   if (count > capacity) count = capacity - capacity % SnapshotBytes;
   const uint32_t first = peekU32(0);
   for (uint8_t index = 0; index < count; index += SnapshotBytes) {
     const uint8_t position = static_cast<uint8_t>(offset + index);
-    const uint32_t elapsed = peekU32(position) - first;
+    uint32_t elapsed = peekU32(position) - first;
     for (uint8_t part = 0; part < 4; ++part) {
-      bytes[index + part] = static_cast<uint8_t>(elapsed >> (part * 8));
+      bytes[index + part] = static_cast<uint8_t>(elapsed);
+      elapsed >>= 8;
     }
     bytes[index + 4] = peek(static_cast<uint8_t>(position + 4));
   }

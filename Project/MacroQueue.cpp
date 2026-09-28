@@ -76,7 +76,7 @@ bool MacroQueue::handle(const ControllerProtocol::Frame &frame, uint8_t relayMas
       if (length != 3 || !ring_.hasRecording()) break;
       const uint16_t offset = read16(payload + 1);
       if (offset > ring_.status().report.acceptedBytes ||
-          offset % ControllerCore::MacroRing::SnapshotBytes != 0) break;
+          static_cast<uint8_t>(offset) % ControllerCore::MacroRing::SnapshotBytes != 0) break;
       uint8_t *response = protocol_.framePayloadScratch();
       response[0] = static_cast<uint8_t>(ControllerEventType::Macro);
       response[1] = 0x80;

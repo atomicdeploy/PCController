@@ -35,6 +35,10 @@ bool RelayController::requestRelayForTest(uint8_t relayNumber, bool active,
   return machine_.requestRelay(relayNumber, active, now);
 }
 
+bool RelayController::requestMask(uint8_t mask, uint32_t now) {
+  return machine_.requestMask(mask, now);
+}
+
 RelaySideStatus RelayController::sideStatus(RelaySide side) const {
   return machine_.sideStatus(side);
 }

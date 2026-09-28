@@ -83,6 +83,7 @@ public:
   // R2/R4 alter enable, and R5..R8 are applied directly.
   bool requestRelayForTest(uint8_t relayNumber, bool active,
                            uint32_t now = millis());
+  bool requestMask(uint8_t mask, uint32_t now = millis());
 
   RelaySideStatus sideStatus(RelaySide side) const;
   bool sideBusy(RelaySide side) const;

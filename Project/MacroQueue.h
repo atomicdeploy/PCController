@@ -25,6 +25,9 @@ public:
   void cancel(bool keepOutputs = false);
   bool takeSafeStopRequest();
   bool active() const;
+  bool recording() const {
+    return ring_.status().report.state == ControllerCore::MacroRing::Recording;
+  }
   uint8_t *claimSharedWorkspace() { return ring_.claimSharedWorkspace(); }
 
 private:

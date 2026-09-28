@@ -113,14 +113,13 @@ private:
   uint8_t used_;
   uint8_t options_;
   bool safeStopRequested_;
-  // Recording shares queue_ with streamed playback; only two cursor bytes
+  // Recording shares queue_ with streamed playback; only one cursor byte
   // are added, never a second allocation or recording-sized RAM buffer.
   uint8_t replayOffset_;
-  uint8_t replayBit_;
 };
 
 #if defined(__AVR__)
-static_assert(sizeof(MacroRing) == 324,
+static_assert(sizeof(MacroRing) == 323,
               "portable macro ring must preserve the AVR queue footprint");
 #endif
 

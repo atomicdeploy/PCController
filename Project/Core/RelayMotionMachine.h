@@ -180,6 +180,23 @@ public:
     }
   }
 
+  bool requestMask(uint8_t mask, uint32_t now) {
+    if ((mask & 0x0FU) != 0 && !motionAllowed()) return false;
+    // General outputs share one electrical latch edge. Motion outputs still
+    // use direction/enable sequencing and the cross-side direction interlock.
+    const uint8_t generalMask = static_cast<uint8_t>((activeRelayMask_ & 0x0FU) |
+                                                   (mask & 0xF0U));
+    if (generalMask != activeRelayMask_) {
+      activeRelayMask_ = generalMask;
+      commit(now);
+    }
+    requestSide(RelaySide::A, (mask & 1U) ? RelayDirection::Reverse : RelayDirection::Forward,
+                (mask & 2U) != 0, now);
+    requestSide(RelaySide::B, (mask & 4U) ? RelayDirection::Reverse : RelayDirection::Forward,
+                (mask & 8U) != 0, now);
+    return true;
+  }
+
   RelaySideStatus sideStatus(RelaySide side) const {
     const SideState &state = sides_[sideIndex(side)];
     RelaySideStatus result = {requestedDirection(state),

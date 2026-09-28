@@ -139,7 +139,7 @@ static inline __attribute__((always_inline)) void serviceController() {
     showHostOfflineOnLcd();
     hostLcdFlags |= HOST_LCD_OFFLINE;
   }
-  if (macroPlayback.active() &&
+  if (macroPlayback.active() && !macroPlayback.recording() &&
       hostOffline) {
     macroPlayback.cancel(false);
     if (macroPlayback.takeSafeStopRequest()) {

@@ -200,15 +200,14 @@ void testRetainedReplayExactDeadlinesAndCancellation() {
       require(ring.dequeueDue(deadline - 1, command, payload, 2) == MacroRing::NotDue,
               "retained relay edge was replayed before its microsecond deadline");
     }
-    for (uint8_t bit = 0; bit < 8; ++bit) {
-      require(ring.dequeueDue(deadline, command, payload, 2) == MacroRing::Ready &&
-                  command.opcode == 0x34 && payload[0] == bit &&
-                  payload[1] == (snapshot == 1 && bit == 4 ? 1 : 0),
-              "retained replay bypassed ordinary relay opcode or changed mask");
-      ring.completeStep(true);
-    }
+    require(ring.dequeueDue(deadline, command, payload, 2) == MacroRing::Ready &&
+                command.opcode == 0x34 && command.payloadLength == 1 &&
+                payload[0] == (snapshot == 1 ? 0x10 : 0),
+            "retained replay bypassed aggregate relay opcode or changed mask");
+    ring.completeStep(true);
   }
   require(ring.hasRecording() && ring.status().report.executedSteps == 3 &&
+              ring.stopRecording() &&
               ring.startRecorded(1200, 0x34) && ring.cancel(false) &&
               ring.takeSafeStopRequest() && ring.hasRecording(),
           "replay/cancel destroyed RAM recording or omitted safe stop");
