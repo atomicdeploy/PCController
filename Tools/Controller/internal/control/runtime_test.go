@@ -545,21 +545,25 @@ func TestApplyOptionsPreservesExplicitPause(t *testing.T) {
 	runtime.mu.Lock()
 	runtime.paused = true
 	runtime.mu.Unlock()
-	openCalls := 0
+	openCalled := make(chan struct{}, 1)
 	runtime.autoOpen = func(context.Context, link.DiscoveryOptions) (link.OpenResult, error) {
-		openCalls++
+		select {
+		case openCalled <- struct{}{}:
+		default:
+		}
 		return link.OpenResult{}, errors.New("unexpected reconnect")
 	}
 
 	if !runtime.ApplyOptions(Options{BaudRate: 57600}) {
 		t.Fatal("transport option update was not applied")
 	}
-	time.Sleep(25 * time.Millisecond)
 	if snapshot := runtime.Snapshot(); !snapshot.Paused || snapshot.ConnectionState != "disconnected" {
 		t.Fatalf("option update resumed an explicitly paused runtime: %#v", snapshot)
 	}
-	if openCalls != 0 {
-		t.Fatalf("option update launched %d reconnect attempts while paused", openCalls)
+	select {
+	case <-openCalled:
+		t.Fatal("option update launched a reconnect attempt while paused")
+	case <-time.After(50 * time.Millisecond):
 	}
 }
 
