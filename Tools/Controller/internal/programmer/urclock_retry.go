@@ -64,15 +64,22 @@ func runBackupCommandWithRetryPolicy(
 		if runErr == nil {
 			return nil
 		}
-		transientPortRelease := isTransientUrclockPortReleaseFailure(
-			runErr, diagnostic.String(),
+		retryKind := retryableUrclockBackupFailure(
+			command, runErr, diagnostic.String(),
 		)
-		if method != MethodUrclock || !transientPortRelease {
+		if method != MethodUrclock || retryKind == "" {
 			return runErr
+		}
+		failure := "serial port remained busy"
+		progress := "serial handle is still being released"
+		if retryKind == "metadata-sync" {
+			failure = "metadata handshake did not synchronize"
+			progress = "metadata handshake did not synchronize after UART release"
 		}
 		if attempt >= len(delays) {
 			return fmt.Errorf(
-				"Urclock serial port remained busy after %d attempts: %w",
+				"Urclock %s after %d attempts: %w",
+				failure,
 				attempt+1,
 				runErr,
 			)
@@ -81,7 +88,8 @@ func runBackupCommandWithRetryPolicy(
 		delay := delays[attempt]
 		fmt.Fprintf(
 			output,
-			"Urclock serial handle is still being released; retrying this backup command in %s (attempt %d/%d).\n",
+			"Urclock %s; retrying this backup command in %s (attempt %d/%d).\n",
+			progress,
 			delay,
 			attempt+2,
 			len(delays)+1,
@@ -93,6 +101,29 @@ func runBackupCommandWithRetryPolicy(
 			)
 		}
 	}
+}
+
+func retryableUrclockBackupFailure(
+	command Command,
+	runErr error,
+	diagnostic string,
+) string {
+	if isTransientUrclockPortReleaseFailure(runErr, diagnostic) {
+		return "port-release"
+	}
+	if command.Stage != "metadata handshake" {
+		return ""
+	}
+	text := strings.ToLower(diagnostic)
+	if runErr != nil {
+		text += "\n" + strings.ToLower(runErr.Error())
+	}
+	if strings.Contains(text, "not in sync") &&
+		(strings.Contains(text, "programmer is not responding") ||
+			strings.Contains(text, "unable to open port")) {
+		return "metadata-sync"
+	}
+	return ""
 }
 
 func isTransientUrclockPortReleaseFailure(runErr error, diagnostic string) bool {
