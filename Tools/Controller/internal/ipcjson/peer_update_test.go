@@ -611,8 +611,8 @@ func TestAuthenticatedRemoteHTTPCommandSurfacesApplyPeerUpdateDualCapability(t *
 		request.Header.Set("Content-Type", "application/json")
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, request)
-		if response.Code != http.StatusBadRequest ||
-			!strings.Contains(response.Body.String(), "not outcome-capable") {
+		if response.Code != http.StatusForbidden ||
+			!strings.Contains(response.Body.String(), capabilityBridgeCalls) {
 			t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 		}
 	})
