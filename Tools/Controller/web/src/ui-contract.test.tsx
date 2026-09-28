@@ -34,6 +34,7 @@ function shared(): SharedViewProps {
     snapshot: emptySnapshot,
     samples: [],
     events: [],
+    macroEvents: [],
     locale: 'en',
     t: (key) => key,
     command: vi.fn(async () => ''),
@@ -126,8 +127,9 @@ describe('offline and settings UI contracts', () => {
       },
     }
     const markup = renderToStaticMarkup(<WorkbenchView {...shared()} snapshot={snapshot} />)
-    expect(markup).toContain('New draft · host · 0 steps')
-    expect(markup).toContain('Macro inspection &amp; recording')
+    expect(markup).toContain('New draft')
+    expect(markup).toContain('#4 · Uncategorized · host')
+    expect(markup).toContain('Macro library')
     expect(markup).toContain('Play selected')
   })
 

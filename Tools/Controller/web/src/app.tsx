@@ -91,8 +91,9 @@ import type {
   UIConfig,
 } from './types'
 import { peripheralAvailability } from './peripheral-availability'
-import { applyPushedOutputEvent } from './status-led-event'
+import { applyPushedOutputEvent, isPushedOutputEvent } from './status-led-event'
 import { BuzzerPlaybackTimeline, type BuzzerPath } from './buzzer-routing'
+import { isMacroControllerEvent, prependMacroControllerEvent } from './macro-live'
 import { emptySnapshot } from './types'
 import type { SharedViewProps } from './views'
 import { sessionAuthenticationGuidanceRequired } from './authentication-guidance'
@@ -432,6 +433,7 @@ export default function App() {
   const [snapshot, setSnapshot] = useState<Snapshot>(demo ? demoSnapshot() : emptySnapshot)
   const [samples, setSamples] = useState<MetricSample[]>(() => demo ? Array.from({ length: 48 }, (_, index) => sampleFrom(demoSnapshot(Date.now() - (47 - index) * 1000), Date.now() - (47 - index) * 1000)) : [])
   const [events, setEvents] = useState<ControllerEvent[]>(() => demo ? Array.from({ length: 12 }, (_, index) => demoEvent(index + 1)) : [])
+  const [macroEvents, setMacroEvents] = useState<ControllerEvent[]>([])
   const [boardSettingsReadState, setBoardSettingsReadState] = useState<BoardSettingsReadState>(demo ? 'ready' : 'idle')
   const [uiConfig, setUIConfig] = useState<UIConfig | null>(null)
   const [streamState, setStreamState] = useState<'connecting' | 'open' | 'waiting' | 'closed'>(demo ? 'open' : 'connecting')
@@ -663,6 +665,16 @@ export default function App() {
       }
       if (payload.type === 'controller-event') {
         const event = payload.event as ControllerEvent
+        if (isMacroControllerEvent(event)) {
+          setMacroEvents((current) => prependMacroControllerEvent(current, event))
+        }
+        if (isPushedOutputEvent(event)) {
+          setSnapshot((current) => {
+            const next = applyPushedOutputEvent(current, event)
+            snapshotRef.current = next
+            return next
+          })
+        }
         setEvents((current) => prependSignificantControllerEvent(current, event))
       }
     })
@@ -1260,6 +1272,7 @@ export default function App() {
         }
         if (eventHistory.status === 'fulfilled') {
           setEvents(significantControllerEvents(eventHistory.value).slice(-500).reverse())
+          setMacroEvents(eventHistory.value.filter(isMacroControllerEvent).slice(-80).reverse())
         }
         setBootTarget(92)
         if (firstSetup && value.connected && config.welcome_melody?.trim()) {
@@ -1284,7 +1297,9 @@ export default function App() {
           },
           event: (event) => {
 			const eventKind = event.kind.toLowerCase()
-			if (event.kind.toLowerCase() === 'status_led.changed' || event.kind.toLowerCase() === 'front_panel.segment') {
+            const macroEvent = isMacroControllerEvent(event)
+            if (macroEvent) setMacroEvents((current) => prependMacroControllerEvent(current, event))
+			if (isPushedOutputEvent(event)) {
 				setSnapshot((current) => {
 					const next = applyPushedOutputEvent(current, event)
 					snapshotRef.current = next
@@ -1309,9 +1324,9 @@ export default function App() {
                 audioRef.current?.playTone(frequencyHz, plan.durationMS, plan.delayMS, source)
               }
             }
-            if (isSignificantControllerEvent(event)) {
+            const significant = isSignificantControllerEvent(event)
+            if (significant) {
               setEvents((current) => prependSignificantControllerEvent(current, event))
-              tabChannelRef.current?.publishControllerEvent(event)
             }
 			const processedAction = processWebAppAction(event, appInstanceID, appActionReceipts.current)
 			if (processedAction) {
@@ -1337,6 +1352,7 @@ export default function App() {
 						cause instanceof Error ? cause.message : String(cause))
 				})
 			}
+            if (significant || isPushedOutputEvent(event) || macroEvent) tabChannelRef.current?.publishControllerEvent(event)
             if (!event.metadata?.operation_id && event.kind.toLowerCase() === 'app.page' && isFreshAppAction(event.time) &&
                 matchesAppTarget(event.metadata?.target_instance, appInstanceID, 'webui')) {
               const destination = pageFromAppAction(event.metadata?.page ?? event.metadata?.value ?? event.text)
@@ -1422,7 +1438,7 @@ export default function App() {
       : 'unavailable'
   const shared: SharedViewProps = {
     reduceMotion: appearance.reduceMotion,
-    appTitle: productTitle, snapshot, samples, events, locale: appearance.locale, t, command: runCommand, refresh, openDialog,
+    appTitle: productTitle, snapshot, samples, events, macroEvents, locale: appearance.locale, t, command: runCommand, refresh, openDialog,
     boardSettingsReadState,
     transport: {
       streamState,
