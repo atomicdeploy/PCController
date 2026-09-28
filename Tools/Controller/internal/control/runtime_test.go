@@ -9,6 +9,7 @@ import (
 
 	"go.bug.st/serial"
 
+	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/link"
 	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/ports"
@@ -543,12 +544,73 @@ func TestAuthenticatedAttachRejectsStaleHardwareScan(t *testing.T) {
 
 func TestActiveUseAtTransportLossIncludesOutputStreams(t *testing.T) {
 	runtime := New(Options{})
-	runtime.mu.Lock()
-	runtime.outputState = func() OutputStreamState { return OutputStreamState{EffectID: 42} }
-	runtime.mu.Unlock()
+	scheduler := NewOutputScheduler(runtime)
+	scheduler.mu.Lock()
+	scheduler.effect = &runningOutput{id: 42}
+	scheduler.mu.Unlock()
+	runtime.setOutputScheduler(scheduler)
 	if !runtime.activeUseAtTransportLoss() {
 		t.Fatal("active host-streamed status effect was omitted from transport-loss impact")
 	}
+}
+
+func TestTransportCloseLatchesOutputActivityBeforeStreamCleanup(t *testing.T) {
+	runtime := New(Options{Filter: ports.Filter{Port: "COM3"}})
+	port := newReconnectTestPort()
+	session := link.NewForPort("COM3", port)
+	info := ports.Info{
+		Name: "COM3", IsUSB: true, VID: "1A86", PID: "7523",
+		InstanceID: `USB\VID_1A86&PID_7523\CONTROLLER`,
+	}
+	runtime.hardwareProblemScan = func(ports.Filter) ([]ports.HardwareProblem, error) {
+		return []ports.HardwareProblem{{
+			Code: ports.HardwareProblemUSBDescriptorFailure, Severity: "error",
+			DeviceID: `USB\VID_0000&PID_0002\CONTROLLER`, ObservedAt: time.Now(),
+		}}, nil
+	}
+	runtime.attach(link.OpenResult{
+		Session: session, Port: info,
+		Hello: native.Hello{
+			Name: "PCController", Capabilities: native.CapabilityStatusEffects,
+		},
+	})
+	scheduler := runtime.EnsureOutputScheduler()
+	operation, err := scheduler.StartStatusEffect(
+		context.Background(),
+		appconfig.StatusLEDEffect{
+			Name: "live", Kind: "flash", Red: 255,
+			Brightness: 100, PeriodMS: 640, Repeats: 1,
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if scheduler.State().EffectID == 0 {
+		t.Fatal("status effect was not active before transport close")
+	}
+	if err := session.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-operation.Done:
+	case <-time.After(time.Second):
+		t.Fatal("stream did not unwind after transport close")
+	}
+	if scheduler.State().EffectID != 0 {
+		t.Fatal("stream cleanup did not clear the active effect")
+	}
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		problems := runtime.Snapshot().HardwareProblems
+		if len(problems) != 0 {
+			if problems[0].Impact != ports.HardwareImpactActiveOutcomeUnknown {
+				t.Fatalf("latched transport impact = %q", problems[0].Impact)
+			}
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("hardware problem was not published after transport close")
 }
 
 func TestReconnectDiscoveryRebindsAuthenticatedUSBIdentity(t *testing.T) {

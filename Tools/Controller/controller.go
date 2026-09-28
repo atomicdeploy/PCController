@@ -609,7 +609,7 @@ func AttachSharedRuntime(
 		runtime:      runtime,
 		runtimeClose: runtime.Close,
 		engine:       engine,
-		outputs:      control.NewOutputScheduler(runtime),
+		outputs:      runtime.EnsureOutputScheduler(),
 		events:       make(chan Event),
 		done:         make(chan struct{}),
 	}

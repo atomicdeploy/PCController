@@ -189,7 +189,8 @@ type Runtime struct {
 	hardwareProblems       []ports.HardwareProblem
 	hardwareProblemScan    func(ports.Filter) ([]ports.HardwareProblem, error)
 	hardwareProblemEpoch   uint64
-	outputState            func() OutputStreamState
+	transportLossActive    bool
+	outputScheduler        *OutputScheduler
 	deviceObserver         func(ports.Info, native.Hello)
 	connectionReadyHandler func(ports.Info, native.Hello)
 	beforeDisconnect       func(string)
@@ -391,12 +392,20 @@ func (runtime *Runtime) setMacroRunner(runner *MacroRunner) {
 
 func (runtime *Runtime) setOutputScheduler(scheduler *OutputScheduler) {
 	runtime.mu.Lock()
-	if scheduler == nil {
-		runtime.outputState = nil
-	} else {
-		runtime.outputState = scheduler.State
-	}
+	runtime.outputScheduler = scheduler
 	runtime.mu.Unlock()
+}
+
+// EnsureOutputScheduler returns the one scheduler shared by command, library,
+// IPC, and UI facades. A second unregistered scheduler would make its live
+// streams invisible to transport-loss diagnostics.
+func (runtime *Runtime) EnsureOutputScheduler() *OutputScheduler {
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	if runtime.outputScheduler == nil {
+		runtime.outputScheduler = NewOutputScheduler(runtime)
+	}
+	return runtime.outputScheduler
 }
 
 func (runtime *Runtime) SetProgramState(owner string, mode ProgramMode, reason string) (ProgramStateSnapshot, error) {
@@ -712,12 +721,36 @@ func (runtime *Runtime) activeUseAtTransportLoss() bool {
 		active = active || macros.Playback.Running || macros.Recording.Active
 	}
 	runtime.mu.RLock()
-	outputState := runtime.outputState
+	outputScheduler := runtime.outputScheduler
 	runtime.mu.RUnlock()
-	if outputState != nil {
-		streams := outputState()
+	if outputScheduler != nil {
+		streams := outputScheduler.State()
 		active = active || streams.MelodyID != 0 || streams.EffectID != 0
 	}
+	return active
+}
+
+func (runtime *Runtime) latchActiveUseBeforeTransportClose(
+	session *link.Session,
+	generation uint64,
+) {
+	active := runtime.activeUseAtTransportLoss()
+	runtime.mu.Lock()
+	if active && runtime.session == session && runtime.generation == generation {
+		runtime.transportLossActive = true
+	}
+	runtime.mu.Unlock()
+}
+
+func (runtime *Runtime) activeUseForTransportLoss(
+	session *link.Session,
+	generation uint64,
+) bool {
+	active := runtime.activeUseAtTransportLoss()
+	runtime.mu.RLock()
+	active = active || (runtime.session == session &&
+		runtime.generation == generation && runtime.transportLossActive)
+	runtime.mu.RUnlock()
 	return active
 }
 
@@ -1821,10 +1854,14 @@ func (runtime *Runtime) attachWhen(result link.OpenResult, allowed func() bool) 
 	runtime.connectionUpdated = time.Now()
 	runtime.reconnectEpoch++
 	runtime.hardwareProblemEpoch++
+	runtime.transportLossActive = false
 	runtime.portRebindAllowed = false
 	observer := runtime.deviceObserver
 	ready := runtime.connectionReadyHandler
 	runtime.mu.Unlock()
+	result.Session.SetBeforeClose(func() {
+		runtime.latchActiveUseBeforeTransportClose(result.Session, generation)
+	})
 
 	lifecycle := "connect"
 	if reconnected {
@@ -2359,7 +2396,7 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 				}
 			}
 		case <-session.Done():
-			activeAtTransportLoss := runtime.activeUseAtTransportLoss()
+			activeAtTransportLoss := runtime.activeUseForTransportLoss(session, generation)
 			runtime.mu.Lock()
 			owned := false
 			var port ports.Info

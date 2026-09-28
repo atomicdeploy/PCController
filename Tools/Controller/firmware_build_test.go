@@ -12,7 +12,17 @@ import (
 
 	"pccontroller.local/controller/internal/control"
 	"pccontroller.local/controller/internal/programmer"
+	"pccontroller.local/controller/internal/shell"
 )
+
+func TestSharedRuntimeFacadeReusesRegisteredOutputScheduler(t *testing.T) {
+	runtime := control.New(control.Options{})
+	registered := runtime.EnsureOutputScheduler()
+	client := AttachSharedRuntime(runtime, shell.New(1))
+	if client.outputs != registered {
+		t.Fatal("shared runtime facade created an unregistered output scheduler")
+	}
+}
 
 func TestTypedFirmwareBuildUsesCanonicalProjectAndCorrelatedEvents(t *testing.T) {
 	projectRoot, err := filepath.Abs(filepath.Join("..", ".."))

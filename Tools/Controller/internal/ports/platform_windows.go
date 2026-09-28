@@ -128,7 +128,7 @@ func listPlatformHardwareProblems(filter Filter) ([]HardwareProblem, error) {
 	}
 	defer devices.Close()
 
-	related := relatedRegistryInstanceIDs(filter)
+	related, relatedAmbiguous := relatedRegistryInstanceIDs(filter)
 	observedAt := time.Now()
 	var problems []HardwareProblem
 	for index := 0; ; index++ {
@@ -153,7 +153,9 @@ func listPlatformHardwareProblems(filter Filter) ([]HardwareProblem, error) {
 			continue
 		}
 		hardwareIDs := deviceRegistryStrings(devices, device, windows.SPDRP_HARDWAREID)
-		if !hardwareProblemMatches(deviceID, hardwareIDs, filter, related) {
+		if !hardwareProblemMatches(
+			deviceID, hardwareIDs, filter, related, relatedAmbiguous,
+		) {
 			continue
 		}
 		classificationIDs := append(append([]string(nil), hardwareIDs...), deviceID)
@@ -224,7 +226,7 @@ func deviceRegistryStrings(
 	return nil
 }
 
-func relatedRegistryInstanceIDs(filter Filter) []string {
+func relatedRegistryInstanceIDs(filter Filter) ([]string, bool) {
 	ports := []string{filter.Port, filter.Preferred.Port}
 	seen := make(map[string]bool)
 	var result []string
@@ -241,7 +243,7 @@ func relatedRegistryInstanceIDs(filter Filter) []string {
 			}
 		}
 	}
-	return result
+	return result, deviceIdentityHistoryAmbiguous(result)
 }
 
 // registryInstanceIDsForPort deliberately includes phantom Enum entries. A

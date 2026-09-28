@@ -65,6 +65,29 @@ func newFakePort() *fakePort {
 	return &fakePort{reads: make(chan []byte, 8), closed: make(chan struct{})}
 }
 
+func TestBeforeCloseObserverRunsBeforeRequestsSeeClosing(t *testing.T) {
+	port := newFakePort()
+	session := NewForPort("COM3", port)
+	observed := 0
+	session.SetBeforeClose(func() {
+		select {
+		case <-session.closing:
+			t.Fatal("closing was published before the pre-close observer")
+		default:
+		}
+		observed++
+	})
+	if err := session.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := session.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if observed != 1 {
+		t.Fatalf("pre-close observations = %d, want 1", observed)
+	}
+}
+
 func (port *fakePort) SetMode(*serial.Mode) error { return nil }
 func (port *fakePort) Read(dst []byte) (int, error) {
 	select {

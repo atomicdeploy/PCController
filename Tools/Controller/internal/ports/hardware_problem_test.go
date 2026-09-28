@@ -43,6 +43,7 @@ func TestHardwareProblemMatchesPhysicalInstanceAcrossDescriptorFailure(t *testin
 		[]string{`USB\DEVICE_DESCRIPTOR_FAILURE`},
 		filter,
 		related,
+		false,
 	) {
 		t.Fatal("expected the failed descriptor to match the remembered physical USB instance")
 	}
@@ -61,6 +62,7 @@ func TestHardwareProblemRejectsUnrelatedDevice(t *testing.T) {
 		[]string{`USB\DEVICE_DESCRIPTOR_FAILURE`},
 		filter,
 		nil,
+		false,
 	) {
 		t.Fatal("an unrelated failed USB device must not be blamed on the controller")
 	}
@@ -79,6 +81,7 @@ func TestHardwareProblemRejectsSameModelSiblingWhenSelectedInstanceExists(t *tes
 		[]string{`USB\VID_1A86&PID_7523`},
 		filter,
 		[]string{`USB\VID_1A86&PID_7523\OLD-COM-ASSIGNMENT`},
+		false,
 	) {
 		t.Fatal("same-model sibling overrode the selected controller instance")
 	}
@@ -91,6 +94,7 @@ func TestHardwareProblemRejectsVIDFallbackWhenCOMHistoryExists(t *testing.T) {
 		nil,
 		filter,
 		[]string{`USB\VID_1A86&PID_7523\CONTROLLER-ON-COM3`},
+		false,
 	) {
 		t.Fatal("VID/PID fallback overrode the configured COM identity history")
 	}
@@ -103,8 +107,40 @@ func TestHardwareProblemMatchesVIDPIDWhenInstanceIsUnavailable(t *testing.T) {
 		nil,
 		filter,
 		nil,
+		false,
 	) {
 		t.Fatal("expected an exact configured VID/PID match")
+	}
+}
+
+func TestHardwareProblemRejectsAmbiguousReassignedCOMHistory(t *testing.T) {
+	filter := Filter{Port: "COM3", VID: "1A86", PID: "7523"}
+	if hardwareProblemMatches(
+		`USB\VID_0000&PID_0002\OLD-PHYSICAL-PORT`,
+		[]string{`USB\DEVICE_DESCRIPTOR_FAILURE`},
+		filter,
+		[]string{
+			`USB\VID_1A86&PID_7523\OLD-PHYSICAL-PORT`,
+			`USB\VID_1A86&PID_7523\CURRENT-CONTROLLER`,
+		},
+		true,
+	) {
+		t.Fatal("ambiguous reassigned COM history blamed an unrelated device")
+	}
+}
+
+func TestDeviceIdentityHistoryAmbiguityUsesPhysicalTail(t *testing.T) {
+	if deviceIdentityHistoryAmbiguous([]string{
+		`USB\VID_1A86&PID_7523\5&1330824A&0&2`,
+		`USB\VID_0000&PID_0002\5&1330824A&0&2`,
+	}) {
+		t.Fatal("healthy and failed identities for one physical tail were ambiguous")
+	}
+	if !deviceIdentityHistoryAmbiguous([]string{
+		`USB\VID_1A86&PID_7523\OLD-CONTROLLER`,
+		`USB\VID_1A86&PID_7523\CURRENT-CONTROLLER`,
+	}) {
+		t.Fatal("reassigned COM history was not marked ambiguous")
 	}
 }
 

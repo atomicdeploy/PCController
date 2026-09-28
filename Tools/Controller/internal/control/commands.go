@@ -162,7 +162,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 	runtime.setMacroRunner(macroRunner)
 	outputs := options.Outputs
 	if outputs == nil {
-		outputs = NewOutputScheduler(runtime)
+		outputs = runtime.EnsureOutputScheduler()
 	}
 	runtime.setOutputScheduler(outputs)
 	// Keep the runtime-owned scheduler attached when a watched configuration

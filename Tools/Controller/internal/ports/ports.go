@@ -303,6 +303,7 @@ func hardwareProblemMatches(
 	hardwareIDs []string,
 	filter Filter,
 	relatedInstanceIDs []string,
+	relatedIdentityAmbiguous bool,
 ) bool {
 	strongIdentities := []string{filter.InstanceID, filter.Preferred.InstanceID}
 	haveStrongIdentity := false
@@ -318,6 +319,12 @@ func hardwareProblemMatches(
 	// Once a selected or authenticated instance exists, neither a stale COM
 	// registry assignment nor an identical sibling's VID/PID may override it.
 	if haveStrongIdentity {
+		return false
+	}
+	// A COM name can be reassigned over time. If its registry history names
+	// multiple physical instance tails, none of them is reliable enough to blame
+	// during a descriptor failure and VID/PID fallback is equally unsafe.
+	if relatedIdentityAmbiguous {
 		return false
 	}
 	for _, identity := range relatedInstanceIDs {
@@ -362,6 +369,18 @@ func deviceInstanceTail(value string) string {
 		return strings.TrimSpace(value[index+1:])
 	}
 	return ""
+}
+
+func deviceIdentityHistoryAmbiguous(instanceIDs []string) bool {
+	tails := make(map[string]bool)
+	for _, instanceID := range instanceIDs {
+		tail := strings.ToUpper(deviceInstanceTail(instanceID))
+		if tail == "" {
+			return len(instanceIDs) > 1
+		}
+		tails[tail] = true
+	}
+	return len(tails) > 1
 }
 
 func firstNonEmpty(values ...string) string {
