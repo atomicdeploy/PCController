@@ -102,7 +102,7 @@ func TestWindowsShortcutsCreateRepairAndVerifyBoth(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !sameWindowsPath(link.Target, status.Executable) || link.Arguments != "web" ||
+			if !sameWindowsPath(link.Target, status.Executable) || strings.TrimSpace(link.Arguments) != "" ||
 				!sameWindowsPath(link.Icon, status.Executable) || link.IconIndex != 0 {
 				t.Fatalf("link=%+v", link)
 			}
