@@ -34,6 +34,10 @@ func TestRESTAppActionCannotInjectCoordinatorNavigationMetadata(t *testing.T) {
 	handler := websocketMux(context.Background(), &Service{
 		Client:    controllerapi.AttachSharedRuntime(runtime, shell.New(8)),
 		AppAction: broker.Publish,
+		AppActionSubmit: func(hostui.AppAction, time.Duration) (hostui.ActionOperation, error) {
+			t.Fatal("spoof reached action coordinator")
+			return hostui.ActionOperation{}, nil
+		},
 	})
 	spoof := httptest.NewRequest(http.MethodPost, "/api/app/action", strings.NewReader(
 		`{"kind":"app.page","value":"settings","target":"tui:one","metadata":{"navigation_sync":"group","navigation_group":"default","navigation_epoch":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","navigation_revision":"99","navigation_source":"tui:attacker"}}`,

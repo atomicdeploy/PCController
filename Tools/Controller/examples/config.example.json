@@ -1046,7 +1046,7 @@
       "actions": [
         {
           "type": "board",
-          "command": "display lcd 2000 Door open"
+          "command": "display lcd --duration 2000ms Door open"
         },
         {
           "type": "emit",

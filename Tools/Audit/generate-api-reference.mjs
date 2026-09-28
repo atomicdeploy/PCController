@@ -386,21 +386,13 @@ function actionSchemas(refPrefix) {
 				operation: ref("ActionOperation"),
 			},
 		},
-		AppActionSubmitEnvelope: {
-			type: "object", required: ["accepted"], additionalProperties: false,
-			properties: {
-				accepted: { type: "boolean" },
-				operation: ref("ActionOperation"),
-			},
-			description: "Backward-compatible acceptance result. Outcome-capable actions also include the correlated operation.",
-		},
 	};
 }
 
 const openAPIActionSchemas = actionSchemas("#/components/schemas/");
 const rpcActionSchemas = actionSchemas("#/$defs/");
 const rpcActionMethodContracts = {
-	"controller.app.action": { params: "AppActionRequest", result: "AppActionSubmitEnvelope" },
+	"controller.app.action": { params: "AppActionRequest", result: "ActionOperationEnvelope" },
 	"controller.app.action.ack": { params: "ActionAck", result: "ActionOperationEnvelope" },
 	"controller.app.action.outcome": { params: "ActionOutcomeRequest", result: "ActionOperationEnvelope" },
 };
@@ -440,7 +432,7 @@ function operationFor(route, method) {
 		delete operation.responses["200"];
 		operation.responses["202"] = {
 			description: "Action frozen to its exact live target set",
-			content: { "application/json": { schema: { $ref: "#/components/schemas/AppActionSubmitEnvelope" } } },
+			content: { "application/json": { schema: { $ref: "#/components/schemas/ActionOperationEnvelope" } } },
 		};
 		operation.responses["409"] = {
 			description: "The selector resolved only to rejected targets",
