@@ -149,6 +149,7 @@ type connectionEventSignature struct {
 type Runtime struct {
 	options Options
 
+	detachMu               sync.Mutex
 	mu                     sync.RWMutex
 	session                *link.Session
 	port                   ports.Info
@@ -738,7 +739,13 @@ func (runtime *Runtime) ApplyOptions(options Options) bool {
 		)
 		return true
 	}
-	_ = runtime.detachReason(false, "connection configuration changed")
+	if err := runtime.detachReason(false, "connection configuration changed"); err != nil {
+		runtime.mu.Lock()
+		runtime.options = options
+		runtime.mu.Unlock()
+		runtime.publish("error", "connection configuration close failed: "+err.Error(), native.Frame{})
+		return true
+	}
 	runtime.mu.Lock()
 	runtime.options = options
 	runtime.paused = false
@@ -779,6 +786,9 @@ func (runtime *Runtime) Reconnect(ctx context.Context, reason string) error {
 		reason = "reconnect requested by host"
 	}
 	closeErr := runtime.detachReason(false, reason)
+	if closeErr != nil {
+		return closeErr
+	}
 	runtime.mu.Lock()
 	runtime.paused = false
 	runtime.connectionState = "reconnecting"
@@ -801,7 +811,12 @@ func (runtime *Runtime) Reconnect(ctx context.Context, reason string) error {
 func (runtime *Runtime) EnsureConnected(ctx context.Context) error {
 	runtime.mu.Lock()
 	if runtime.session != nil {
+		state := runtime.connectionState
+		reason := runtime.connectionReason
 		runtime.mu.Unlock()
+		if state == "close_failed" {
+			return fmt.Errorf("previous serial close must be retried before reconnect: %s", reason)
+		}
 		return nil
 	}
 	if runtime.paused {
@@ -852,6 +867,11 @@ func (runtime *Runtime) EnsureConnected(ctx context.Context) error {
 
 func (runtime *Runtime) Open(ctx context.Context, name string) error {
 	if link.IsNetworkEndpoint(name) {
+		if runtime.currentSession() != nil {
+			if err := runtime.detachReason(false, "port changed by host"); err != nil {
+				return fmt.Errorf("close current serial session: %w", err)
+			}
+		}
 		runtime.mu.RLock()
 		options := runtime.options
 		runtime.mu.RUnlock()
@@ -868,9 +888,6 @@ func (runtime *Runtime) Open(ctx context.Context, name string) error {
 		if err != nil {
 			return err
 		}
-		if runtime.currentSession() != nil {
-			runtime.detachReason(false, "port changed by host")
-		}
 		runtime.mu.Lock()
 		runtime.paused = false
 		runtime.mu.Unlock()
@@ -885,12 +902,24 @@ func (runtime *Runtime) Open(ctx context.Context, name string) error {
 	// not a second serial open. Secondary programmer clients use this path to
 	// confirm an explicit COM/friendly-name/VID:PID selector before delegating.
 	current := runtime.Snapshot()
+	if current.Connected && current.ConnectionState == "close_failed" {
+		return fmt.Errorf(
+			"previous serial close must be retried before opening %s: %s",
+			name,
+			current.ConnectionReason,
+		)
+	}
 	if current.Connected &&
 		len(ports.Candidates([]ports.Info{current.Port}, selector)) == 1 {
 		runtime.mu.Lock()
 		runtime.paused = false
 		runtime.mu.Unlock()
 		return nil
+	}
+	if runtime.currentSession() != nil {
+		if err := runtime.detachReason(false, "port changed by host"); err != nil {
+			return fmt.Errorf("close current serial session: %w", err)
+		}
 	}
 	all, err := ports.List()
 	if err != nil {
@@ -917,9 +946,6 @@ func (runtime *Runtime) Open(ctx context.Context, name string) error {
 	})
 	if err != nil {
 		return err
-	}
-	if runtime.currentSession() != nil {
-		runtime.detachReason(false, "port changed by host")
 	}
 	runtime.mu.Lock()
 	runtime.paused = false
@@ -1481,6 +1507,9 @@ func (runtime *Runtime) detach(pause bool) error {
 }
 
 func (runtime *Runtime) detachReason(pause bool, reason string) error {
+	runtime.detachMu.Lock()
+	defer runtime.detachMu.Unlock()
+
 	runtime.mu.RLock()
 	attached := runtime.session != nil
 	beforeDisconnect := runtime.beforeDisconnect
@@ -1496,25 +1525,56 @@ func (runtime *Runtime) detachReason(pause bool, reason string) error {
 	runtime.mu.Lock()
 	session := runtime.session
 	port := runtime.port
-	runtime.generation++
-	runtime.session = nil
-	runtime.clearPeerStateLocked()
 	runtime.paused = pause
 	runtime.reconnectEpoch++
+	runtime.portRebindAllowed = false
+	if session != nil {
+		// Invalidate the pump before asking the transport to close, but retain
+		// the session as the exclusive owner until Close confirms the OS handle
+		// is gone. A retryable CancelIoEx failure must never permit another open.
+		runtime.generation++
+		runtime.connectionState = "closing"
+		runtime.connectionReason = reason
+		runtime.connectionUpdated = time.Now()
+	}
+	runtime.mu.Unlock()
+	if session == nil {
+		runtime.mu.Lock()
+		runtime.clearPeerStateLocked()
+		runtime.connectionState = "disconnected"
+		runtime.connectionReason = reason
+		runtime.connectionUpdated = time.Now()
+		runtime.mu.Unlock()
+		return nil
+	}
+
+	if err := session.Close(); err != nil {
+		runtime.mu.Lock()
+		if runtime.session == session {
+			runtime.connectionState = "close_failed"
+			runtime.connectionReason = fmt.Sprintf("%s: %v", reason, err)
+			runtime.connectionUpdated = time.Now()
+		}
+		runtime.mu.Unlock()
+		return err
+	}
+
+	runtime.mu.Lock()
+	if runtime.session != session {
+		runtime.mu.Unlock()
+		return errors.New("serial session ownership changed while closing")
+	}
+	runtime.session = nil
+	runtime.clearPeerStateLocked()
 	runtime.connectionState = "disconnected"
 	runtime.connectionReason = reason
 	runtime.connectionUpdated = time.Now()
-	runtime.portRebindAllowed = false
 	runtime.mu.Unlock()
-	if session == nil {
-		return nil
-	}
-	err := session.Close()
 	runtime.publishConnection("disconnect", port, reason)
 	if port.IsUSB {
 		runtime.publishUSBConnection("usb.disconnected", "disconnect", port, reason, "disconnected")
 	}
-	return err
+	return nil
 }
 
 func (runtime *Runtime) pump(session *link.Session, generation uint64) {
@@ -1525,6 +1585,19 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 			if event.Err != nil {
 				disconnectReason = event.Err.Error()
 				runtime.publish("error", event.Err.Error(), native.Frame{})
+				if event.CloseFailure {
+					runtime.mu.Lock()
+					if runtime.generation == generation && runtime.session == session {
+						runtime.generation++
+						runtime.reconnectEpoch++
+						runtime.connectionState = "close_failed"
+						runtime.connectionReason = disconnectReason
+						runtime.connectionUpdated = time.Now()
+						runtime.portRebindAllowed = false
+					}
+					runtime.mu.Unlock()
+					return
+				}
 			} else {
 				runtime.observe(event.Frame)
 				kind := "rx"

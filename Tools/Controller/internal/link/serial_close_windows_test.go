@@ -25,6 +25,29 @@ type cancelOnCloseWindowsPort struct {
 	closeErr      error
 }
 
+type readFailureRetryPort struct {
+	mu            sync.Mutex
+	closeCalls    int
+	closeFailures int
+	readErr       error
+	closeErr      error
+}
+
+func (port *readFailureRetryPort) Read([]byte) (int, error)  { return 0, port.readErr }
+func (*readFailureRetryPort) Write(data []byte) (int, error) { return len(data), nil }
+func (*readFailureRetryPort) SetDTR(bool) error              { return nil }
+func (*readFailureRetryPort) SetRTS(bool) error              { return nil }
+func (port *readFailureRetryPort) Close() error {
+	port.mu.Lock()
+	defer port.mu.Unlock()
+	port.closeCalls++
+	if port.closeFailures > 0 {
+		port.closeFailures--
+		return port.closeErr
+	}
+	return nil
+}
+
 func newCancelOnCloseWindowsPort() *cancelOnCloseWindowsPort {
 	return &cancelOnCloseWindowsPort{
 		readStarted: make(chan struct{}),
@@ -131,6 +154,14 @@ func TestSessionCloseReturnsRetryableTransportErrorWithoutWaitingForReader(t *te
 		t.Fatal("failed transport close aborted the pending reader")
 	default:
 	}
+	select {
+	case <-session.Done():
+		t.Fatal("session reported terminal Done after retryable transport failure")
+	default:
+	}
+	if err := session.WriteRaw([]byte{0x01}); !errors.Is(err, ErrClosed) {
+		t.Fatalf("write while close retry is pending = %v, want ErrClosed", err)
+	}
 
 	port.mu.Lock()
 	if !port.handleOpen || port.closeCalls != 1 {
@@ -147,6 +178,11 @@ func TestSessionCloseReturnsRetryableTransportErrorWithoutWaitingForReader(t *te
 		}
 	case <-time.After(time.Second):
 		t.Fatal("retry close did not finish after transport cancellation succeeded")
+	}
+	select {
+	case <-session.Done():
+	default:
+		t.Fatal("session did not report terminal Done after successful retry")
 	}
 	if err := session.Close(); err != nil {
 		t.Fatalf("repeated close after successful retry: %v", err)
@@ -189,6 +225,51 @@ func TestSessionCloseConcurrentCallersShareSuccessfulResult(t *testing.T) {
 	defer port.mu.Unlock()
 	if port.handleOpen || port.closeCalls != 1 {
 		t.Fatalf("after concurrent close: handleOpen=%v calls=%d, want false/1", port.handleOpen, port.closeCalls)
+	}
+}
+
+func TestReadLoopPublishesRetryableTransportCloseFailure(t *testing.T) {
+	readErr := errors.New("read failed")
+	closeErr := errors.New("CancelIoEx failed")
+	port := &readFailureRetryPort{
+		closeFailures: 1,
+		readErr:       readErr,
+		closeErr:      closeErr,
+	}
+	session := newForTransport("COM3", port)
+
+	var closeFailure Event
+	deadline := time.After(time.Second)
+	for !closeFailure.CloseFailure {
+		select {
+		case event := <-session.Events():
+			if event.CloseFailure {
+				closeFailure = event
+			}
+		case <-deadline:
+			t.Fatal("read loop did not publish the retryable transport close failure")
+		}
+	}
+	if !errors.Is(closeFailure.Err, closeErr) {
+		t.Fatalf("published close failure = %v, want %v", closeFailure.Err, closeErr)
+	}
+	select {
+	case <-session.Done():
+		t.Fatal("read-loop close failure reported terminal Done")
+	default:
+	}
+	if err := session.Close(); err != nil {
+		t.Fatalf("retry close after read-loop failure: %v", err)
+	}
+	select {
+	case <-session.Done():
+	default:
+		t.Fatal("successful retry after read-loop failure did not report Done")
+	}
+	port.mu.Lock()
+	defer port.mu.Unlock()
+	if port.closeCalls != 2 {
+		t.Fatalf("transport close calls = %d, want failed read-loop attempt plus retry", port.closeCalls)
 	}
 }
 

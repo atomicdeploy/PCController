@@ -29,8 +29,9 @@ var (
 )
 
 type Event struct {
-	Frame native.Frame
-	Err   error
+	Frame        native.Frame
+	Err          error
+	CloseFailure bool
 }
 
 type Session struct {
@@ -43,13 +44,15 @@ type Session struct {
 	nextSeq   byte
 	hello     native.Hello
 
-	events chan Event
-	done   chan struct{}
+	events  chan Event
+	closing chan struct{}
+	done    chan struct{}
 
-	closeMu  sync.Mutex
-	doneOnce sync.Once
-	closed   bool
-	readDone sync.WaitGroup
+	closeMu     sync.Mutex
+	closingOnce sync.Once
+	doneOnce    sync.Once
+	closed      bool
+	readDone    sync.WaitGroup
 }
 
 type sessionPort interface {
@@ -121,6 +124,7 @@ func newForTransport(name string, port sessionPort) *Session {
 		waiters:   make(map[byte]*pendingRequest),
 		nextSeq:   1,
 		events:    make(chan Event, 256),
+		closing:   make(chan struct{}),
 		done:      make(chan struct{}),
 	}
 	session.readDone.Add(1)
@@ -211,7 +215,7 @@ func (s *Session) AuthenticateWithRetry(
 			case <-ctx.Done():
 				timer.Stop()
 				return native.Hello{}, ctx.Err()
-			case <-s.done:
+			case <-s.closing:
 				timer.Stop()
 				return native.Hello{}, ErrClosed
 			case <-timer.C:
@@ -256,7 +260,7 @@ func (s *Session) Request(
 		select {
 		case <-ctx.Done():
 			return native.Frame{}, ctx.Err()
-		case <-s.done:
+		case <-s.closing:
 			return native.Frame{}, ErrClosed
 		case response := <-waiter.channel:
 			if response.Opcode == native.OpError {
@@ -306,7 +310,7 @@ func (s *Session) acquireWrite(ctx context.Context) error {
 	case s.writeGate <- struct{}{}:
 	case <-ctx.Done():
 		return ctx.Err()
-	case <-s.done:
+	case <-s.closing:
 		return ErrClosed
 	}
 	if err := ctx.Err(); err != nil {
@@ -314,7 +318,7 @@ func (s *Session) acquireWrite(ctx context.Context) error {
 		return err
 	}
 	select {
-	case <-s.done:
+	case <-s.closing:
 		<-s.writeGate
 		return ErrClosed
 	default:
@@ -374,7 +378,7 @@ func (s *Session) PulseDTR(ctx context.Context, lowTime time.Duration) error {
 	case <-ctx.Done():
 		_ = s.port.SetDTR(false)
 		return ctx.Err()
-	case <-s.done:
+	case <-s.closing:
 		_ = s.port.SetDTR(false)
 		return ErrClosed
 	case <-timer.C:
@@ -411,11 +415,12 @@ func (s *Session) closeTransport() error {
 	if s.closed {
 		return nil
 	}
-	s.doneOnce.Do(func() { close(s.done) })
+	s.closingOnce.Do(func() { close(s.closing) })
 	if err := s.port.Close(); err != nil {
 		return err
 	}
 	s.closed = true
+	s.doneOnce.Do(func() { close(s.done) })
 	return nil
 }
 
@@ -440,15 +445,20 @@ func (s *Session) readLoop() {
 		}
 		if err != nil {
 			select {
-			case <-s.done:
+			case <-s.closing:
 			default:
 				s.publish(Event{Err: fmt.Errorf("read %s: %w", s.name, err)})
-				_ = s.closeTransport()
+				if closeErr := s.closeTransport(); closeErr != nil {
+					s.publish(Event{
+						Err:          fmt.Errorf("close %s after read failure: %w", s.name, closeErr),
+						CloseFailure: true,
+					})
+				}
 			}
 			return
 		}
 		select {
-		case <-s.done:
+		case <-s.closing:
 			return
 		default:
 		}
@@ -486,7 +496,7 @@ func (s *Session) deliver(frame native.Frame) bool {
 	select {
 	case waiter.channel <- frame:
 		return true
-	case <-s.done:
+	case <-s.closing:
 		return false
 	}
 }

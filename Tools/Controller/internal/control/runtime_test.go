@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,6 +18,58 @@ type reconnectTestPort struct {
 	closed chan struct{}
 	dtr    []bool
 }
+
+type retryableCloseTestPort struct {
+	readStarted chan struct{}
+	readAborted chan struct{}
+	startOnce   sync.Once
+	abortOnce   sync.Once
+
+	mu            sync.Mutex
+	closeCalls    int
+	closeFailures int
+	closeErr      error
+}
+
+func newRetryableCloseTestPort(closeErr error) *retryableCloseTestPort {
+	return &retryableCloseTestPort{
+		readStarted:   make(chan struct{}),
+		readAborted:   make(chan struct{}),
+		closeFailures: 1,
+		closeErr:      closeErr,
+	}
+}
+
+func (*retryableCloseTestPort) SetMode(*serial.Mode) error { return nil }
+func (port *retryableCloseTestPort) Read([]byte) (int, error) {
+	port.startOnce.Do(func() { close(port.readStarted) })
+	<-port.readAborted
+	return 0, errors.New("overlapped read aborted")
+}
+func (*retryableCloseTestPort) Write(data []byte) (int, error) { return len(data), nil }
+func (*retryableCloseTestPort) Drain() error                   { return nil }
+func (*retryableCloseTestPort) ResetInputBuffer() error        { return nil }
+func (*retryableCloseTestPort) ResetOutputBuffer() error       { return nil }
+func (*retryableCloseTestPort) SetDTR(bool) error              { return nil }
+func (*retryableCloseTestPort) SetRTS(bool) error              { return nil }
+func (*retryableCloseTestPort) GetModemStatusBits() (*serial.ModemStatusBits, error) {
+	return &serial.ModemStatusBits{}, nil
+}
+func (*retryableCloseTestPort) SetReadTimeout(time.Duration) error { return nil }
+func (port *retryableCloseTestPort) Close() error {
+	port.mu.Lock()
+	port.closeCalls++
+	if port.closeFailures > 0 {
+		port.closeFailures--
+		err := port.closeErr
+		port.mu.Unlock()
+		return err
+	}
+	port.mu.Unlock()
+	port.abortOnce.Do(func() { close(port.readAborted) })
+	return nil
+}
+func (*retryableCloseTestPort) Break(time.Duration) error { return nil }
 
 func newReconnectTestPort() *reconnectTestPort {
 	return &reconnectTestPort{closed: make(chan struct{})}
@@ -503,6 +556,96 @@ func TestCloseCancelsInflightReconnectAndReleasesTransport(t *testing.T) {
 	if snapshot := runtime.Snapshot(); snapshot.Connected || !snapshot.Paused ||
 		snapshot.ConnectionState != "disconnected" || snapshot.ConnectionReason != "closed by host" {
 		t.Fatalf("close snapshot = %#v", snapshot)
+	}
+}
+
+func TestRuntimeCloseRetainsSessionUntilRetrySucceeds(t *testing.T) {
+	cancelErr := errors.New("CancelIoEx failed")
+	port := newRetryableCloseTestPort(cancelErr)
+	session := link.NewForPort("COM3", port)
+	runtime := New(Options{})
+	runtime.mu.Lock()
+	runtime.session = session
+	runtime.port = ports.Info{Name: "COM3", IsUSB: true, VID: "1A86", PID: "7523"}
+	runtime.hello = native.Hello{Name: "PCController"}
+	runtime.connectionState = "connected"
+	runtime.generation = 1
+	runtime.mu.Unlock()
+	pumpExited := make(chan struct{})
+	go func() {
+		runtime.pump(session, 1)
+		close(pumpExited)
+	}()
+	select {
+	case <-port.readStarted:
+	case <-time.After(time.Second):
+		t.Fatal("runtime session did not start its pending read")
+	}
+
+	firstClose := make(chan error, 1)
+	go func() { firstClose <- runtime.Close() }()
+	select {
+	case err := <-firstClose:
+		if !errors.Is(err, cancelErr) {
+			t.Fatalf("first runtime close error = %v, want %v", err, cancelErr)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("runtime close waited for the pending read after cancellation failed")
+	}
+
+	runtime.mu.RLock()
+	retained := runtime.session
+	state := runtime.connectionState
+	runtime.mu.RUnlock()
+	if retained != session || state != "close_failed" {
+		t.Fatalf("failed close ownership: session=%p state=%q, want %p close_failed", retained, state, session)
+	}
+	if snapshot := runtime.Snapshot(); !snapshot.Paused {
+		t.Fatalf("failed close did not keep automatic open paused: %#v", snapshot)
+	}
+
+	openCalled := false
+	runtime.autoOpen = func(context.Context, link.DiscoveryOptions) (link.OpenResult, error) {
+		openCalled = true
+		return link.OpenResult{}, errors.New("unexpected open")
+	}
+	if err := runtime.EnsureConnected(context.Background()); err == nil {
+		t.Fatal("EnsureConnected accepted a new open while failed close retained the session")
+	}
+	if err := runtime.Open(context.Background(), "COM3"); err == nil {
+		t.Fatal("Open accepted a new transport while failed close retained the session")
+	}
+	runtime.mu.RLock()
+	epoch := runtime.reconnectEpoch
+	runtime.mu.RUnlock()
+	runtime.autoReconnect(epoch)
+	if openCalled {
+		t.Fatal("failed close allowed EnsureConnected/Open/autoReconnect to open another transport")
+	}
+
+	if err := runtime.Close(); err != nil {
+		t.Fatalf("retry runtime close: %v", err)
+	}
+	if err := runtime.Close(); err != nil {
+		t.Fatalf("repeated runtime close after success: %v", err)
+	}
+	port.mu.Lock()
+	closeCalls := port.closeCalls
+	port.mu.Unlock()
+	if closeCalls != 2 {
+		t.Fatalf("transport close calls = %d, want failed attempt plus successful retry", closeCalls)
+	}
+	if current := runtime.currentSession(); current != nil {
+		t.Fatalf("successful retry retained session %p", current)
+	}
+	if snapshot := runtime.Snapshot(); snapshot.Connected || !snapshot.Paused ||
+		snapshot.ConnectionState != "disconnected" {
+		t.Fatalf("successful retry snapshot = %#v", snapshot)
+	}
+	select {
+	case <-pumpExited:
+	case <-time.After(time.Second):
+		t.Fatal("stale pump did not exit after successful retry closed Session.Done")
 	}
 }
 
