@@ -366,6 +366,10 @@ func (coordinator *NavigationCoordinator) Commit(command NavigationCommand, live
 			operation.page != command.Page {
 			return NavigationOutcome{}, errors.New("navigation operation ID was reused with a different page")
 		}
+		if operation.outcome.Epoch != group.epoch || operation.outcome.Revision != group.revision ||
+			operation.outcome.Page != group.page {
+			return NavigationOutcome{}, errors.New("navigation operation was superseded by a newer canonical revision")
+		}
 		return operation.outcome, nil
 	}
 	changed := group.page != command.Page
@@ -533,12 +537,7 @@ func ParseNavigationUpdate(action AppAction) (NavigationUpdate, bool) {
 	revision, err := strconv.ParseUint(strings.TrimSpace(action.Metadata[NavigationRevisionKey]), 10, 64)
 	targetEpoch := strings.ToLower(strings.TrimSpace(action.Metadata[NavigationTargetEpochKey]))
 	targetRevisionText := strings.TrimSpace(action.Metadata[NavigationTargetRevisionKey])
-	hasTargetIdentity := targetEpoch != "" || targetRevisionText != ""
-	var targetRevision uint64
-	var targetErr error
-	if targetEpoch != "" || targetRevisionText != "" {
-		targetRevision, targetErr = strconv.ParseUint(targetRevisionText, 10, 64)
-	}
+	targetRevision, targetErr := strconv.ParseUint(targetRevisionText, 10, 64)
 	update := NavigationUpdate{
 		Page:   strings.ToLower(strings.TrimSpace(action.Value)),
 		Group:  strings.ToLower(strings.TrimSpace(action.Metadata[NavigationGroupKey])),
@@ -549,7 +548,7 @@ func ParseNavigationUpdate(action AppAction) (NavigationUpdate, bool) {
 	if err != nil || update.Revision == 0 || !instancePagePattern.MatchString(update.Page) ||
 		update.Page == "" || !instanceValuePattern.MatchString(update.Group) ||
 		!validNavigationEpoch(update.Epoch) || !instanceIDPattern.MatchString(update.Source) ||
-		(hasTargetIdentity && (targetErr != nil || !validNavigationEpoch(update.TargetEpoch) || update.TargetRevision == 0)) {
+		targetErr != nil || !validNavigationEpoch(update.TargetEpoch) || update.TargetRevision == 0 {
 		return NavigationUpdate{}, false
 	}
 	return update, true
@@ -563,13 +562,8 @@ type NavigationCursor struct {
 	Revision uint64
 }
 
-func (cursor *NavigationCursor) Accept(action AppAction, group string) (string, bool) {
-	return cursor.AcceptFor(action, group, "", 0)
-}
-
-// AcceptFor additionally rejects a pushed action created for an older
-// presence generation. Missing target identity remains accepted for rolling
-// compatibility with an older coordinator.
+// AcceptFor rejects a pushed action created for another or older presence
+// generation. The living contract always carries exact target identity.
 func (cursor *NavigationCursor) AcceptFor(
 	action AppAction, group, targetEpoch string, targetRevision uint64,
 ) (string, bool) {
@@ -584,8 +578,8 @@ func (cursor *NavigationCursor) AcceptFor(
 		return "", false
 	}
 	targetEpoch = strings.ToLower(strings.TrimSpace(targetEpoch))
-	if update.TargetEpoch != "" && (targetEpoch == "" || update.TargetEpoch != targetEpoch ||
-		update.TargetRevision < targetRevision) {
+	if targetEpoch == "" || targetRevision == 0 || update.TargetEpoch != targetEpoch ||
+		update.TargetRevision < targetRevision {
 		return "", false
 	}
 	cursor.Epoch, cursor.Revision = update.Epoch, update.Revision

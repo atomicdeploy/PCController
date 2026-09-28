@@ -47,6 +47,8 @@ func newHostMenuManager(
 			return config.UI.AppTitle, nil
 		case "pc.ui.status_interval_ms":
 			return strconv.Itoa(config.UI.StatusIntervalMS), nil
+		case "pc.ui.measurement_freshness_ms":
+			return strconv.Itoa(config.UI.MeasurementFreshnessMS), nil
 		case "pc.ui.mirror_prompt_to_lcd":
 			return strconv.FormatBool(config.UI.MirrorPromptToLCD), nil
 		case "pc.ui.lcd_service_enabled":
@@ -90,6 +92,15 @@ func newHostMenuManager(
 					return parseErr
 				}
 				config.UI.StatusIntervalMS = parsed
+				if config.UI.MeasurementFreshnessMS < parsed+appconfig.MeasurementFreshnessHeadroomMS {
+					config.UI.MeasurementFreshnessMS = parsed + appconfig.MeasurementFreshnessHeadroomMS
+				}
+			case "pc.ui.measurement_freshness_ms":
+				parsed, parseErr := strconv.Atoi(value)
+				if parseErr != nil {
+					return parseErr
+				}
+				config.UI.MeasurementFreshnessMS = parsed
 			case "pc.ui.mirror_prompt_to_lcd":
 				parsed, parseErr := strconv.ParseBool(value)
 				if parseErr != nil {

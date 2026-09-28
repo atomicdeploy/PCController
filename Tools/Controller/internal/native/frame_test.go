@@ -80,7 +80,7 @@ func TestDecodeRejectsCRCAndLength(t *testing.T) {
 	}
 }
 
-func TestDecodeAcceptsAdvisoryEnvelopeRevision(t *testing.T) {
+func TestDecodeAcceptsUnknownReservedEnvelopeByte(t *testing.T) {
 	encoded, err := Encode(Frame{Opcode: OpHello, Seq: 9})
 	if err != nil {
 		t.Fatal(err)
@@ -93,7 +93,22 @@ func TestDecodeAcceptsAdvisoryEnvelopeRevision(t *testing.T) {
 	raw[len(raw)-1] = CRC8(raw[:len(raw)-1])
 	decoded, err := Decode(append(COBSEncode(raw), 0))
 	if err != nil || decoded.Opcode != OpHello || decoded.Seq != 9 {
-		t.Fatalf("advisory envelope revision was rejected: frame=%#v err=%v", decoded, err)
+		t.Fatalf("unknown reserved envelope byte was rejected: frame=%#v err=%v", decoded, err)
+	}
+}
+
+func TestDecodePreservesUnknownOptionalOpcode(t *testing.T) {
+	want := Frame{Opcode: 0xFE, Seq: 17, Payload: []byte{0xA1, 0xB2, 0xC3}}
+	encoded, err := Encode(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Decode(encoded)
+	if err != nil {
+		t.Fatalf("unknown optional opcode was rejected: %v", err)
+	}
+	if got.Opcode != want.Opcode || got.Seq != want.Seq || !bytes.Equal(got.Payload, want.Payload) {
+		t.Fatalf("unknown optional opcode changed in transit: got=%#v want=%#v", got, want)
 	}
 }
 
@@ -719,8 +734,12 @@ func TestParseChangedDisplayAndBuzzerPushes(t *testing.T) {
 		t.Fatal("truncated SEGMENT_CHANGED payload was accepted")
 	}
 
-	if _, err := ParseBuzzerState([]byte{0xB8, 0x01, 0xDC, 0x00, 0}); err == nil {
-		t.Fatal("obsolete five-byte BUZZER_CHANGED payload was accepted")
+	compact, err := ParseBuzzerState([]byte{0xB8, 0x01, 0xDC, 0x00, 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if compact.Timed || compact.DeviceMicros != 0 || compact.FrequencyHz != 440 || compact.DurationMS != 220 || compact.Muted {
+		t.Fatalf("compact buzzer state=%+v", compact)
 	}
 	if _, err := ParseBuzzerState([]byte{0, 0, 0, 0, 2, 0, 0, 0, 0}); err == nil {
 		t.Fatal("invalid BUZZER_CHANGED muted flag was accepted")
@@ -731,6 +750,9 @@ func TestParseChangedDisplayAndBuzzerPushes(t *testing.T) {
 	}
 	if !timed.Timed || timed.DeviceMicros != 0x12345678 || timed.FrequencyHz != 880 || timed.DurationMS != 125 || !timed.Muted {
 		t.Fatalf("timed buzzer state=%+v", timed)
+	}
+	if _, err := ParseBuzzerState([]byte{0, 0, 0, 0, 0, 0}); err == nil {
+		t.Fatal("invalid six-byte BUZZER_CHANGED payload was accepted")
 	}
 }
 

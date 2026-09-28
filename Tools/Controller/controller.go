@@ -8,6 +8,7 @@ package controller
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -57,6 +58,7 @@ type (
 	OutputStreamState         = control.OutputStreamState
 	StatusSample              = control.StatusSample
 	TimelineEntry             = control.TimelineEntry
+	HardwareProblem           = ports.HardwareProblem
 	HistoryOptions            = control.HistoryOptions
 	RFLearnMode               = control.RFLearnMode
 	RFLearnOptions            = control.RFLearnOptions
@@ -187,38 +189,42 @@ type StatusUpdate struct {
 
 // Options configures discovery, transport, tooling, automation, and host policy.
 type Options struct {
-	Port             string                 `json:"port,omitempty"`
-	VID              string                 `json:"vid,omitempty"`
-	PID              string                 `json:"pid,omitempty"`
-	Name             string                 `json:"name,omitempty"`
-	PreferredDevice  *PortInfo              `json:"preferred_device,omitempty"`
-	BaudRate         int                    `json:"baud_rate,omitempty"`
-	StartupWait      time.Duration          `json:"startup_wait,omitempty"`
-	RequestTimeout   time.Duration          `json:"request_timeout,omitempty"`
-	HelloAttempts    int                    `json:"hello_attempts,omitempty"`
-	ResetOnReconnect bool                   `json:"reset_on_reconnect,omitempty"`
-	ProjectPath      string                 `json:"project_path,omitempty"`
-	FQBN             string                 `json:"fqbn,omitempty"`
-	FirmwareFeatures []string               `json:"firmware_features,omitempty"`
-	ToolchainCLI     string                 `json:"toolchain_cli,omitempty"`
-	Avrdude          string                 `json:"avrdude,omitempty"`
-	AvrdudeConf      string                 `json:"avrdude_conf,omitempty"`
-	Programmer       string                 `json:"programmer,omitempty"`
-	Macros           []Macro                `json:"macros,omitempty"`
-	Melodies         []Melody               `json:"melodies,omitempty"`
-	StatusEffects    []StatusLEDEffect      `json:"status_effects,omitempty"`
-	Scripts          map[string]string      `json:"scripts,omitempty"`
-	Automations      []Automation           `json:"automations,omitempty"`
-	MotionDoorPolicy string                 `json:"motion_door_policy,omitempty"`
-	LCDPresentation  LCDPresentationOptions `json:"lcd_presentation,omitempty"`
-	RF               RFConfig               `json:"rf"`
-	OSActions        OSPolicy               `json:"os_actions"`
+	Port                  string                 `json:"port,omitempty"`
+	VID                   string                 `json:"vid,omitempty"`
+	PID                   string                 `json:"pid,omitempty"`
+	Name                  string                 `json:"name,omitempty"`
+	PreferredDevice       *PortInfo              `json:"preferred_device,omitempty"`
+	BaudRate              int                    `json:"baud_rate,omitempty"`
+	StartupWait           time.Duration          `json:"startup_wait,omitempty"`
+	RequestTimeout        time.Duration          `json:"request_timeout,omitempty"`
+	HelloAttempts         int                    `json:"hello_attempts,omitempty"`
+	ResetOnReconnect      bool                   `json:"reset_on_reconnect,omitempty"`
+	ReconnectInitialDelay time.Duration          `json:"reconnect_initial_delay,omitempty"`
+	ReconnectMaximumDelay time.Duration          `json:"reconnect_maximum_delay,omitempty"`
+	ProjectPath           string                 `json:"project_path,omitempty"`
+	FQBN                  string                 `json:"fqbn,omitempty"`
+	FirmwareFeatures      []string               `json:"firmware_features,omitempty"`
+	ToolchainCLI          string                 `json:"toolchain_cli,omitempty"`
+	Avrdude               string                 `json:"avrdude,omitempty"`
+	AvrdudeConf           string                 `json:"avrdude_conf,omitempty"`
+	Programmer            string                 `json:"programmer,omitempty"`
+	Macros                []Macro                `json:"macros,omitempty"`
+	Melodies              []Melody               `json:"melodies,omitempty"`
+	StatusEffects         []StatusLEDEffect      `json:"status_effects,omitempty"`
+	Scripts               map[string]string      `json:"scripts,omitempty"`
+	Automations           []Automation           `json:"automations,omitempty"`
+	MotionDoorPolicy      string                 `json:"motion_door_policy,omitempty"`
+	LCDPresentation       LCDPresentationOptions `json:"lcd_presentation,omitempty"`
+	RF                    RFConfig               `json:"rf"`
+	OSActions             OSPolicy               `json:"os_actions"`
 }
 
-// Macro describes a host-owned, MCU-timed sequence of peripheral operations.
+// Macro describes a host-owned sequence of peripheral operations. Mode chooses
+// host-clocked alpha playback or the stricter MCU timing engine.
 type Macro struct {
 	ID                  byte        `json:"id"`
 	Name                string      `json:"name"`
+	Mode                string      `json:"mode,omitempty"`
 	Category            string      `json:"category,omitempty"`
 	Color               string      `json:"color,omitempty"`
 	Label               string      `json:"label,omitempty"`
@@ -346,28 +352,31 @@ type IlluminationState struct {
 
 // Snapshot is a point-in-time view of connection, board, and front-panel state.
 type Snapshot struct {
-	Connected         bool                 `json:"connected"`
-	Paused            bool                 `json:"paused"`
-	Port              PortInfo             `json:"port"`
-	Hello             Hello                `json:"hello"`
-	Status            Status               `json:"status"`
-	Settings          Settings             `json:"settings"`
-	HaveStatus        bool                 `json:"have_status"`
-	HaveSettings      bool                 `json:"have_settings"`
-	StatusUpdated     time.Time            `json:"status_updated,omitempty"`
-	ConnectionState   string               `json:"connection_state"`
-	ConnectionReason  string               `json:"connection_reason,omitempty"`
-	ConnectionUpdated time.Time            `json:"connection_updated,omitempty"`
-	ProgramState      ProgramStateSnapshot `json:"program_state"`
-	RFLearning        RFLearnState         `json:"rf_learning"`
-	FrontPanel        FrontPanel           `json:"front_panel"`
-	HaveFrontPanel    bool                 `json:"have_front_panel"`
-	FrontPanelUpdated time.Time            `json:"front_panel_updated,omitempty"`
-	StatusLED         StatusLEDState       `json:"status_led"`
-	HaveStatusLED     bool                 `json:"have_status_led"`
-	StatusLEDUpdated  time.Time            `json:"status_led_updated,omitempty"`
-	Illumination      IlluminationState    `json:"illumination"`
-	PortProcess       PortProcessSnapshot  `json:"port_process"`
+	Connected         bool                  `json:"connected"`
+	Paused            bool                  `json:"paused"`
+	Port              PortInfo              `json:"port"`
+	Hello             Hello                 `json:"hello"`
+	Status            Status                `json:"status"`
+	Settings          Settings              `json:"settings"`
+	HaveStatus        bool                  `json:"have_status"`
+	HaveSettings      bool                  `json:"have_settings"`
+	StatusUpdated     time.Time             `json:"status_updated,omitempty"`
+	ConnectionState   string                `json:"connection_state"`
+	ConnectionReason  string                `json:"connection_reason,omitempty"`
+	ConnectionUpdated time.Time             `json:"connection_updated,omitempty"`
+	ProgramState      ProgramStateSnapshot  `json:"program_state"`
+	RFLearning        RFLearnState          `json:"rf_learning"`
+	Macros            control.MacroSnapshot `json:"macros"`
+	HardwareProblems  []HardwareProblem     `json:"hardware_problems,omitempty"`
+	FrontPanel        FrontPanel            `json:"front_panel"`
+	HaveFrontPanel    bool                  `json:"have_front_panel"`
+	FrontPanelUpdated time.Time             `json:"front_panel_updated,omitempty"`
+	StatusLED         StatusLEDState        `json:"status_led"`
+	HaveStatusLED     bool                  `json:"have_status_led"`
+	StatusLEDUpdated  time.Time             `json:"status_led_updated,omitempty"`
+	StatusLEDRevision uint64                `json:"status_led_revision,omitempty"`
+	Illumination      IlluminationState     `json:"illumination"`
+	PortProcess       PortProcessSnapshot   `json:"port_process"`
 }
 
 // Event is the normalized event envelope shared by embedders and bridge clients.
@@ -402,6 +411,21 @@ type Event struct {
 	ResetCount  uint32            `json:"reset_count,omitempty"`
 }
 
+// FirmwareBuildRequest is the strict, typed alternative to sending a raw
+// shell command to a remote host. An empty request uses the host's configured
+// firmware feature profile.
+type FirmwareBuildRequest struct {
+	FirmwareFeatures   []string `json:"firmware_features,omitempty"`
+	NoFirmwareFeatures bool     `json:"no_firmware_features,omitempty"`
+}
+
+// FirmwareBuildResult correlates the final normalized log with the ordered
+// program.* events that WebSocket, Socket.IO, TUI, and long-poll clients see.
+type FirmwareBuildResult struct {
+	OperationID string `json:"operation_id"`
+	Output      string `json:"output"`
+}
+
 // OpcodeFrame is the raw, versionless UART exchange result. Payload is kept
 // opaque so clients can query firmware additions before the host understands
 // their schema.
@@ -430,6 +454,8 @@ type TextMessage struct {
 // Client owns one controller runtime, command engine, and host integration state.
 type Client struct {
 	runtime            *control.Runtime
+	runtimeClose       func() error
+	shutdownMu         sync.Mutex
 	engine             *shell.Engine
 	engineMu           sync.Mutex
 	optionsMu          sync.RWMutex
@@ -491,16 +517,19 @@ func New(options Options) *Client {
 			Name:      options.Name,
 			Preferred: internalPortIdentity(options.PreferredDevice),
 		},
-		BaudRate:         baud,
-		StartupWait:      options.StartupWait,
-		RequestTimeout:   options.RequestTimeout,
-		HelloAttempts:    options.HelloAttempts,
-		ResetOnReconnect: options.ResetOnReconnect,
+		BaudRate:              baud,
+		StartupWait:           options.StartupWait,
+		RequestTimeout:        options.RequestTimeout,
+		HelloAttempts:         options.HelloAttempts,
+		ResetOnReconnect:      options.ResetOnReconnect,
+		ReconnectInitialDelay: options.ReconnectInitialDelay,
+		ReconnectMaximumDelay: options.ReconnectMaximumDelay,
 	})
 	client := &Client{
-		runtime:  runtime,
-		macros:   toAppMacros(options.Macros),
-		melodies: cloneMelodies(options.Melodies),
+		runtime:      runtime,
+		runtimeClose: runtime.Close,
+		macros:       toAppMacros(options.Macros),
+		melodies:     cloneMelodies(options.Melodies),
 		statusEffects: append(
 			[]appconfig.StatusLEDEffect(nil),
 			options.StatusEffects...,
@@ -578,11 +607,12 @@ func AttachSharedRuntime(
 		panic("controller: shared command engine is nil")
 	}
 	return &Client{
-		runtime: runtime,
-		engine:  engine,
-		outputs: control.NewOutputScheduler(runtime),
-		events:  make(chan Event),
-		done:    make(chan struct{}),
+		runtime:      runtime,
+		runtimeClose: runtime.Close,
+		engine:       engine,
+		outputs:      runtime.EnsureOutputScheduler(),
+		events:       make(chan Event),
+		done:         make(chan struct{}),
 	}
 }
 
@@ -601,9 +631,11 @@ func (client *Client) ApplyHostOptions(options Options) bool {
 			Preferred: internalPortIdentity(options.PreferredDevice),
 		},
 		BaudRate: baud, StartupWait: options.StartupWait,
-		RequestTimeout:   options.RequestTimeout,
-		HelloAttempts:    options.HelloAttempts,
-		ResetOnReconnect: options.ResetOnReconnect,
+		RequestTimeout:        options.RequestTimeout,
+		HelloAttempts:         options.HelloAttempts,
+		ResetOnReconnect:      options.ResetOnReconnect,
+		ReconnectInitialDelay: options.ReconnectInitialDelay,
+		ReconnectMaximumDelay: options.ReconnectMaximumDelay,
 	})
 	client.SetMacros(options.Macros)
 	client.SetOutputDefinitions(options.Melodies, options.StatusEffects)
@@ -789,7 +821,7 @@ func toAppMacros(macros []Macro) []appconfig.Macro {
 	for index, macro := range macros {
 		result[index] = appconfig.Macro{
 			ID: macro.ID, Name: macro.Name, Category: macro.Category,
-			Color: macro.Color, Label: macro.Label, LCDMessage: macro.LCDMessage,
+			Mode: macro.Mode, Color: macro.Color, Label: macro.Label, LCDMessage: macro.LCDMessage,
 			TimingToleranceUS:   macro.TimingToleranceUS,
 			KeepOutputsOnCancel: macro.KeepOutputsOnCancel,
 			Steps:               make([]appconfig.MacroStep, len(macro.Steps)),
@@ -935,8 +967,7 @@ func normalizedMotionDoorPolicy(value string) string {
 
 // Connect resumes automatic discovery and authenticates the selected board.
 func (client *Client) Connect(ctx context.Context) error {
-	client.runtime.ResumeAuto()
-	return client.runtime.EnsureConnected(ctx)
+	return client.runtime.Connect(ctx)
 }
 
 // Open connects directly to a named serial port and authenticates the board.
@@ -979,13 +1010,19 @@ func (client *Client) PulseResetFor(
 }
 
 // Shutdown closes the serial port and releases background event forwarding.
-// A shutdown client must not be reused.
+// If closing the transport fails, Shutdown retains ownership and may be retried.
+// After a successful shutdown, the client must not be reused.
 func (client *Client) Shutdown() error {
+	client.shutdownMu.Lock()
+	defer client.shutdownMu.Unlock()
+	client.outputs.StopAll()
+	if err := client.runtimeClose(); err != nil {
+		return err
+	}
 	client.outputs.Close()
 	_ = hostos.DefaultExecutor.ReleaseAll()
-	err := client.runtime.Close()
 	client.doneOnce.Do(func() { close(client.done) })
-	return err
+	return nil
 }
 
 // Execute runs one command through the same engine exposed by every host surface.
@@ -993,6 +1030,64 @@ func (client *Client) Execute(ctx context.Context, command string) (string, erro
 	client.engineMu.Lock()
 	defer client.engineMu.Unlock()
 	return client.engine.Execute(ctx, command)
+}
+
+// BuildFirmware compiles the configured canonical project without accepting
+// an arbitrary remote filesystem path or raw compiler flags.
+func (client *Client) BuildFirmware(
+	ctx context.Context,
+	request FirmwareBuildRequest,
+) (result FirmwareBuildResult, buildErr error) {
+	operationBytes := make([]byte, 12)
+	if _, err := rand.Read(operationBytes); err != nil {
+		return result, fmt.Errorf("create firmware build operation ID: %w", err)
+	}
+	operationID := "firmware-build-" + hex.EncodeToString(operationBytes)
+	result.OperationID = operationID
+	options := client.currentCommandOptions()
+	phase := func(state string, failure error) {
+		if client.runtime == nil {
+			return
+		}
+		metadata := map[string]string{"operation_id": operationID, "operation": "compile", "method": "compile", "state": state}
+		if failure != nil {
+			metadata["error"] = failure.Error()
+		}
+		client.runtime.PublishStructuredEvent(control.Event{Kind: "program." + state, Stream: control.EventStreamActivity,
+			Text: "firmware compile " + state, Metadata: metadata})
+	}
+	phase("started", nil)
+	defer func() {
+		if buildErr != nil {
+			buildErr = errors.New(control.NormalizeProgramError(buildErr.Error(), options.ProjectPath, options.ArduinoCLI, options.ArduinoConfig))
+			phase("failed", buildErr)
+		} else {
+			phase("completed", nil)
+		}
+	}()
+	if len(request.FirmwareFeatures) != 0 && request.NoFirmwareFeatures {
+		return result, errors.New(
+			"firmware_features and no_firmware_features are mutually exclusive",
+		)
+	}
+	features, err := programmer.NormalizeFirmwareFeatures(request.FirmwareFeatures)
+	if err != nil {
+		return result, err
+	}
+	words := []string{"program", "compile", "."}
+	if request.NoFirmwareFeatures {
+		words = append(words, "--no-firmware-features")
+	} else {
+		for _, feature := range programmer.FirmwareFeatureNames(features) {
+			words = append(words, "--firmware-feature", feature)
+		}
+	}
+	output, buildErr := client.Execute(
+		control.WithProgramOperationID(ctx, operationID),
+		strings.Join(words, " "),
+	)
+	result.Output = control.NormalizeProgramOutput(output, options.ProjectPath, options.ArduinoCLI, options.ArduinoConfig)
+	return result, buildErr
 }
 
 // CommandCatalog exposes the same discoverable command contract used by the
@@ -1646,7 +1741,7 @@ func (client *Client) SetStatusRGBBase(
 	ctx context.Context,
 	red, green, blue, brightness byte,
 ) error {
-	return client.outputs.SetStatusBase(ctx, red, green, blue, brightness)
+	return client.outputs.SetStatusBase(control.WithBackgroundCommand(ctx), red, green, blue, brightness)
 }
 
 // OutputState returns active melody and status-effect operation metadata.
@@ -1840,6 +1935,11 @@ func (client *Client) MapLearnedRF(
 // Snapshot returns the latest cached connection and board state without polling.
 func (client *Client) Snapshot() Snapshot {
 	snapshot := client.runtime.Snapshot()
+	// Library snapshots belong to client queries, not the hot board-status
+	// path: copying a long take for every internal status check is unnecessary.
+	if runner := client.runtime.MacroRunner(); runner != nil {
+		snapshot.Macros = runner.Snapshot()
+	}
 	client.illuminationMu.RLock()
 	illumination := client.illumination
 	client.illuminationMu.RUnlock()
@@ -1870,12 +1970,15 @@ func (client *Client) Snapshot() Snapshot {
 		ConnectionUpdated: snapshot.ConnectionUpdated,
 		ProgramState:      snapshot.ProgramState,
 		RFLearning:        snapshot.RFLearning,
+		Macros:            snapshot.Macros,
+		HardwareProblems:  snapshot.HardwareProblems,
 		FrontPanel:        snapshot.FrontPanel,
 		HaveFrontPanel:    snapshot.HaveFrontPanel,
 		FrontPanelUpdated: snapshot.FrontPanelUpdated,
 		StatusLED:         snapshot.StatusLED,
 		HaveStatusLED:     snapshot.HaveStatusLED,
 		StatusLEDUpdated:  snapshot.StatusLEDUpdated,
+		StatusLEDRevision: snapshot.StatusLEDRevision,
 		Illumination:      illumination,
 		PortProcess:       snapshot.PortProcess,
 	}

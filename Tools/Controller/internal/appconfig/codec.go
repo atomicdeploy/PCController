@@ -138,9 +138,6 @@ func sparseConfigDocument(value Config) (map[string]any, error) {
 			return nil, errors.New("configuration root is not an object")
 		}
 	}
-	// Keep an explicit compatibility boundary even when every user value is at
-	// its default; a future loader can reject unsupported schema generations.
-	document["schema"] = value.Schema
 	return document, nil
 }
 

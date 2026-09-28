@@ -1,7 +1,6 @@
 import type {
   CommandResult,
   ControllerEvent,
-  RPCResponse,
   Snapshot,
   StatusUpdate,
   UIConfig,
@@ -12,6 +11,7 @@ const tokenKey = 'pccontroller.session-token'
 const browserTicketPrefix = 'pccontroller.ticket.'
 let nextID = 1
 let streamSocket: WebSocket | null = null
+let nextStreamGeneration = 0
 
 interface PendingSocketRPC {
   socket: WebSocket
@@ -21,6 +21,17 @@ interface PendingSocketRPC {
 }
 
 const pendingSocketRPC = new Map<number, PendingSocketRPC>()
+
+/** A JSON-RPC response error proves the server answered; transport failures use ordinary Error. */
+export class ControllerRPCError extends Error {
+  readonly code: number
+
+  constructor(code: number, message: string) {
+    super(message)
+    this.name = 'ControllerRPCError'
+    this.code = code
+  }
+}
 
 /** Returns the session-scoped bearer token used by authenticated transports. */
 export function getToken(): string {
@@ -55,7 +66,7 @@ export function responseErrorDetail(value: unknown, statusText: string, status: 
   return statusText || `HTTP ${status}`
 }
 
-async function decode<T>(response: Response): Promise<T> {
+async function responseBody(response: Response): Promise<unknown> {
   const raw = await response.text()
   let value: unknown = null
   if (raw) {
@@ -65,11 +76,47 @@ async function decode<T>(response: Response): Promise<T> {
       value = raw
     }
   }
+  return value
+}
+
+async function decode<T>(response: Response): Promise<T> {
+  const value = await responseBody(response)
   if (!response.ok) {
     const detail = responseErrorDetail(value, response.statusText, response.status)
     throw new Error(detail || `HTTP ${response.status}`)
   }
   return value as T
+}
+
+type ParsedRPCResponse<T> =
+  | { result: T; error?: never }
+  | { result?: never; error: ControllerRPCError }
+
+function parseRPCResponse<T>(value: unknown, expectedID: number): ParsedRPCResponse<T> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Controller returned an invalid JSON-RPC response')
+  }
+  const envelope = value as Record<string, unknown>
+  if (envelope.jsonrpc !== '2.0' || envelope.id !== expectedID) {
+    throw new Error('Controller returned a mismatched JSON-RPC response')
+  }
+  const hasResult = Object.prototype.hasOwnProperty.call(envelope, 'result')
+  const hasError = Object.prototype.hasOwnProperty.call(envelope, 'error')
+  if (hasResult === hasError) {
+    throw new Error('Controller returned an invalid JSON-RPC response')
+  }
+  if (hasError) {
+    const error = envelope.error
+    if (!error || typeof error !== 'object' || Array.isArray(error)) {
+      throw new Error('Controller returned an invalid JSON-RPC error')
+    }
+    const detail = error as Record<string, unknown>
+    if (!Number.isInteger(detail.code) || typeof detail.message !== 'string') {
+      throw new Error('Controller returned an invalid JSON-RPC error')
+    }
+    return { error: new ControllerRPCError(detail.code as number, detail.message) }
+  }
+  return { result: envelope.result as T }
 }
 
 /** Fetches the bootstrap UI configuration required before opening live transports. */
@@ -87,6 +134,12 @@ export async function getUIConfig(signal?: AbortSignal): Promise<UIConfig> {
       config.session_ticket_path.startsWith('//') ||
       !/^\/[A-Za-z0-9._~!$&'()*+,;=:@%/-]+$/.test(config.session_ticket_path)) {
     throw new Error('UI configuration is missing a safe session-ticket path')
+  }
+  if (!Number.isSafeInteger(config.status_interval_ms) || config.status_interval_ms < 50 || config.status_interval_ms > 60_000 ||
+      !Number.isSafeInteger(config.measurement_freshness_ms) ||
+      config.measurement_freshness_ms < config.status_interval_ms + 100 ||
+      config.measurement_freshness_ms > 120_000) {
+    throw new Error('UI configuration is missing valid live-measurement timing')
   }
   return config
 }
@@ -106,9 +159,14 @@ async function restRPC<T>(request: { jsonrpc: '2.0'; id: number; method: string;
     body: JSON.stringify(request),
     signal,
   })
-  const envelope = await decode<RPCResponse<T>>(response)
-  if (envelope.error) throw new Error(envelope.error.message)
-  return envelope.result as T
+  const value = await responseBody(response)
+  const envelope = parseRPCResponse<T>(value, request.id)
+  if (envelope.error) throw envelope.error
+  if (!response.ok) {
+    const detail = responseErrorDetail(value, response.statusText, response.status)
+    throw new Error(detail || `HTTP ${response.status}`)
+  }
+  return envelope.result
 }
 
 function rejectSocketRequests(socket: WebSocket, detail: string): void {
@@ -165,8 +223,13 @@ export function execute(command: string, signal?: AbortSignal): Promise<CommandR
 /** Receives live status, event, and transport-lifecycle notifications. */
 export interface StreamHandlers {
   status: (value: StatusUpdate) => void
-  event: (value: ControllerEvent) => void
-  state: (state: 'connecting' | 'open' | 'waiting' | 'closed', detail?: string) => void
+  event: (value: ControllerEvent, source: StreamSource) => void
+  state: (state: 'connecting' | 'open' | 'waiting' | 'closed', detail?: string, source?: StreamSource) => void
+}
+
+export interface StreamSource {
+  generation: number
+  instanceID?: string
 }
 
 interface SessionTicket {
@@ -196,6 +259,11 @@ async function websocketProtocols(config: UIConfig, signal?: AbortSignal): Promi
   return [ticket.protocol, `${browserTicketPrefix}${ticket.ticket}`]
 }
 
+export type StreamControl = (() => void) & {
+  /** Replaces only status cadence on the existing socket without restarting the app. */
+  updateStatusInterval(intervalMS: number): void
+}
+
 /** Calculates Socket.IO-style exponential reconnect delay with a hard cap. */
 export function streamRetryDelay(retry: number, random = Math.random): number {
   const exponential = 500 * 2 ** Math.min(Math.max(0, retry), 5)
@@ -203,19 +271,33 @@ export function streamRetryDelay(retry: number, random = Math.random): number {
 }
 
 /** Opens the reconnecting event stream and returns a function that closes it. */
-export function connectStream(config: UIConfig, handlers: StreamHandlers): () => void {
+export function connectStream(config: UIConfig, handlers: StreamHandlers): StreamControl {
   let socket: WebSocket | null = null
   let stopped = false
   let retry = 0
   let timer = 0
   let attempt = 0
   let ticketAbort: AbortController | null = null
+  let statusIntervalMS = config.status_interval_ms
 
-  const scheduleRetry = (detail: string) => {
+  const subscribe = (activeSocket: WebSocket, preserve = false) => {
+    const id = nextID++
+    activeSocket.send(JSON.stringify({
+      jsonrpc: '2.0',
+      id,
+      method: 'controller.subscribe',
+      params: preserve
+        ? { topics: ['status'], interval_ms: statusIntervalMS, preserve: true }
+        : { topics: ['events', 'state', 'status'], interval_ms: statusIntervalMS, after_id: 0 },
+    }))
+    return id
+  }
+
+  const scheduleRetry = (detail: string, source?: StreamSource) => {
     if (stopped) return
     retry += 1
     const delay = streamRetryDelay(retry)
-    handlers.state('waiting', detail || `retrying in ${Math.ceil(delay / 1000)}s`)
+    handlers.state('waiting', detail || `retrying in ${Math.ceil(delay / 1000)}s`, source)
     window.clearTimeout(timer)
     timer = window.setTimeout(() => { void open() }, delay)
   }
@@ -223,7 +305,8 @@ export function connectStream(config: UIConfig, handlers: StreamHandlers): () =>
   const open = async () => {
     if (stopped) return
     const currentAttempt = ++attempt
-    handlers.state('connecting')
+    const currentGeneration = ++nextStreamGeneration
+    handlers.state('connecting', undefined, { generation: currentGeneration })
     ticketAbort?.abort()
     const authorizationAbort = new AbortController()
     ticketAbort = authorizationAbort
@@ -232,7 +315,7 @@ export function connectStream(config: UIConfig, handlers: StreamHandlers): () =>
       protocols = await websocketProtocols(config, authorizationAbort.signal)
     } catch (cause) {
       if (stopped || currentAttempt !== attempt || authorizationAbort.signal.aborted) return
-      scheduleRetry(cause instanceof Error ? cause.message : String(cause))
+      scheduleRetry(cause instanceof Error ? cause.message : String(cause), { generation: currentGeneration })
       return
     } finally {
       if (ticketAbort === authorizationAbort) ticketAbort = null
@@ -244,46 +327,80 @@ export function connectStream(config: UIConfig, handlers: StreamHandlers): () =>
       const url = controllerWebSocketURL(config.websocket_path)
       activeSocket = protocols.length > 0 ? new WebSocket(url, protocols) : new WebSocket(url)
     } catch (cause) {
-      scheduleRetry(cause instanceof Error ? cause.message : String(cause))
+      if (stopped || currentAttempt !== attempt) return
+      scheduleRetry(cause instanceof Error ? cause.message : String(cause), { generation: currentGeneration })
       return
     }
     socket = activeSocket
+    const isActive = () => !stopped && currentAttempt === attempt && socket === activeSocket
+    let subscriptionID = 0
+    let sourceInstanceID = ''
+    let subscriptionAcknowledged = false
+    const pendingStateEvents: ControllerEvent[] = []
+    const source = (): StreamSource => ({
+      generation: currentGeneration,
+      ...(sourceInstanceID ? { instanceID: sourceInstanceID } : {}),
+    })
+    const deliverEvent = (event: ControllerEvent) => {
+      if (!isActive()) return
+      handlers.event(event, source())
+    }
     activeSocket.addEventListener('open', () => {
+      if (!isActive()) return
       retry = 0
       streamSocket = activeSocket
-      handlers.state('open')
-      activeSocket.send(JSON.stringify({
-        jsonrpc: '2.0',
-        id: nextID++,
-        method: 'controller.subscribe',
-		params: { topics: ['events', 'state', 'status'], interval_ms: 500, after_id: 0 },
-      }))
+      subscriptionID = subscribe(activeSocket)
     })
     activeSocket.addEventListener('message', (message) => {
+      if (!isActive()) return
       try {
         const value = JSON.parse(String(message.data)) as {
           id?: number
           method?: string
           params?: unknown
           result?: unknown
-          error?: { message?: string }
+          error?: { code?: number; message?: string }
         }
         if (typeof value.id === 'number') {
           const pending = pendingSocketRPC.get(value.id)
           if (pending && pending.socket === activeSocket) {
             pendingSocketRPC.delete(value.id)
             pending.cleanup()
-            if (value.error) pending.reject(new Error(value.error.message || 'WebSocket RPC failed'))
-            else pending.resolve(value.result)
+            try {
+              const envelope = parseRPCResponse(value, value.id)
+              if (envelope.error) pending.reject(envelope.error)
+              else pending.resolve(envelope.result)
+            } catch (cause) {
+              pending.reject(cause instanceof Error ? cause : new Error(String(cause)))
+            }
+          }
+          if (!isActive()) return
+          if (value.id === subscriptionID) {
+            if (value.error) {
+              activeSocket.close()
+              return
+            }
+            const acknowledgement = value.result as { subscribed?: boolean; instance_id?: string } | undefined
+            if (acknowledgement?.subscribed !== true) {
+              activeSocket.close()
+              return
+            }
+            sourceInstanceID = acknowledgement.instance_id?.trim() ?? ''
+            subscriptionAcknowledged = true
+            handlers.state('open', undefined, source())
+            for (const event of pendingStateEvents.splice(0)) deliverEvent(event)
           }
         }
         if (value.method === 'controller.status') handlers.status(value.params as StatusUpdate)
-		if (value.method === 'controller.event' || value.method === 'controller.state') {
-			handlers.event(value.params as ControllerEvent)
-		}
+        if (value.method === 'controller.event') deliverEvent(value.params as ControllerEvent)
+        if (value.method === 'controller.state') {
+          const event = value.params as ControllerEvent
+          if (subscriptionAcknowledged) deliverEvent(event)
+          else pendingStateEvents.push(event)
+        }
         if (value.method === 'controller.error') {
           const detail = (value.params as { error?: string } | undefined)?.error
-          handlers.state('open', detail)
+		  handlers.state(subscriptionAcknowledged ? 'open' : 'connecting', detail, source())
         }
       } catch {
         // The controller protocol is JSON-only; malformed frames are ignored and
@@ -291,20 +408,21 @@ export function connectStream(config: UIConfig, handlers: StreamHandlers): () =>
       }
     })
     activeSocket.addEventListener('close', (event) => {
+      if (!isActive()) return
       if (socket === activeSocket) socket = null
       if (streamSocket === activeSocket) streamSocket = null
       rejectSocketRequests(activeSocket, event.reason || 'WebSocket RPC connection closed')
       if (stopped) {
-        handlers.state('closed')
+        handlers.state('closed', undefined, source())
         return
       }
-      scheduleRetry(event.reason || 'WebSocket connection closed')
+      scheduleRetry(event.reason || 'WebSocket connection closed', source())
     })
-    activeSocket.addEventListener('error', () => activeSocket.close())
+    activeSocket.addEventListener('error', () => { if (isActive()) activeSocket.close() })
   }
 
   void open()
-  return () => {
+  const stop = (() => {
     stopped = true
     attempt += 1
     ticketAbort?.abort()
@@ -316,7 +434,17 @@ export function connectStream(config: UIConfig, handlers: StreamHandlers): () =>
       rejectSocketRequests(closed, 'WebSocket RPC view closed')
     }
     socket = null
+  }) as StreamControl
+  stop.updateStatusInterval = (intervalMS: number) => {
+    if (!Number.isSafeInteger(intervalMS) || intervalMS < 50 || intervalMS > 60_000) {
+      throw new RangeError('status interval must be 50..60000 ms')
+    }
+    if (statusIntervalMS === intervalMS) return
+    statusIntervalMS = intervalMS
+    const activeSocket = socket
+    if (activeSocket && activeSocket.readyState === WebSocket.OPEN) subscribe(activeSocket, true)
   }
+  return stop
 }
 
 /** Calls an authenticated HTTP endpoint owned by a configured integration. */

@@ -334,7 +334,6 @@ test('board FQBN matches the canonical toolchain policy', async () => {
 test('toolchain policy validation identifies a missing FQBN and its source', () => {
 	assert.throws(
 		() => parseToolchainPolicy(JSON.stringify({
-			format: 'pccontroller-toolchain-policy/v1',
 			fqbn: '   '
 		}), 'invalid-policy.json'),
 		error => /invalid-policy\.json/.test(error.message) &&
@@ -384,6 +383,21 @@ test('physical, injected, and RF key actions retain the immediate dispatch contr
 		radio,
 		/case RemoteActionKind::Key:[^]*?KeyEvent::Down[^]*?handleMenuAction\(remote\.actionValue, true\);/u
 	)
+})
+
+test('actuator-specific feedback is not preceded by the generic menu beep', async () => {
+	const frontPanel = await readFile(
+		new URL('../../Project/Runtime/FrontPanelRuntime.inc.h', import.meta.url),
+		'utf8'
+	)
+	assert.match(frontPanel, /void menuVisualFeedback\(bool fromRemote\)/u)
+	assert.match(frontPanel, /case MODE_USER_RELAYS:[^]*?menuVisualFeedback\(fromRemote\);/u)
+	assert.match(frontPanel, /case MODE_MOTION_CONTROL:[^]*?menuVisualFeedback\(fromRemote\);/u)
+	assert.match(
+		frontPanel,
+		/case MODE_RELAY:[^]*?if \(action == MENU_PREVIOUS \|\| action == MENU_NEXT\)[^]*?menuFeedback\(fromRemote\);[^]*?else[^]*?menuVisualFeedback\(fromRemote\);/u
+	)
+	assert.match(frontPanel, /LeafDecreaseAction::AllRelaysOff[^]*?menuVisualFeedback\(fromRemote\);/u)
 })
 
 test('production KEY dispatches first Down to motion and exits outside KEY', async () => {
@@ -516,7 +530,6 @@ test('studio validation preserves matching Controller compile identity', async (
 	await main(['manifest', '--quiet', '--no-color'], {}, root)
 	const manifestPath = join(output, 'firmware-manifest.json')
 	const controllerManifest = JSON.parse(await readFile(manifestPath, 'utf8'))
-	controllerManifest.format = 'pccontroller-avr-firmware-manifest/v2'
 	controllerManifest.generatedUtc = '2026-08-01T16:12:58Z'
 	controllerManifest.source.compileFeatures = ['eeprom-menu-labels']
 	controllerManifest.source.buildHash = '1234ABCD'
@@ -525,12 +538,11 @@ test('studio validation preserves matching Controller compile identity', async (
 	controllerManifest.stackBudget = { estimatedFreeSRAMBytes: 287 }
 	controllerManifest.patchRegions = [{
 		name: 'firmware-identity', start: 0x7E74, length: 12,
-		schema: 1, magic: 'PCI1'
+		magic: 'PCID'
 	}]
 	await writeFile(manifestPath, `${JSON.stringify(controllerManifest, null, 2)}\n`)
 	await main(['manifest', '--quiet', '--no-color'], {}, root)
 	const validated = JSON.parse(await readFile(manifestPath, 'utf8'))
-	assert.equal(validated.format, 'pccontroller-avr-firmware-manifest/v2')
 	assert.equal(validated.generatedUtc, '2026-08-01T16:12:58Z')
 	assert.deepEqual(validated.source.compileFeatures, ['eeprom-menu-labels'])
 	assert.equal(validated.source.buildHash, '1234ABCD')
@@ -543,7 +555,6 @@ test('studio validation preserves matching Controller compile identity', async (
 		'manifest', '--manifest', customManifestPath, '--quiet', '--no-color'
 	], {}, root)
 	const custom = JSON.parse(await readFile(customManifestPath, 'utf8'))
-	assert.equal(custom.format, 'pccontroller-avr-firmware-manifest/v2')
 	assert.equal(custom.generatedUtc, '2026-08-01T16:12:58Z')
 	assert.deepEqual(custom.source.compileFeatures, ['eeprom-menu-labels'])
 	assert.equal(custom.source.buildHash, '1234ABCD')

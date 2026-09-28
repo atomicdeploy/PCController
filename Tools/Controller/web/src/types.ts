@@ -165,7 +165,22 @@ export interface IlluminationState {
   updated_at?: string
 }
 
+export interface HardwareProblem {
+  code: string
+  severity: 'warning' | 'error' | string
+  impact?: string
+  os_problem_code?: number
+  device_id?: string
+  hardware_ids?: string[]
+  description?: string
+  class?: string
+  location?: string
+  location_paths?: string[]
+  observed_at: string
+}
+
 export interface Snapshot {
+	host_instance_id?: string
   connected: boolean
   paused: boolean
   port: PortInfo
@@ -181,12 +196,17 @@ export interface Snapshot {
   port_process?: PortProcessSnapshot
   program_state?: ProgramState
   rf_learning?: RFLearnState
+  macros?: MacroSnapshot
+  hardware_problems?: HardwareProblem[]
   front_panel?: FrontPanelState
   have_front_panel?: boolean
   front_panel_updated?: string
 	status_led?: StatusLEDState
 	have_status_led?: boolean
 	status_led_updated?: string
+	status_led_revision?: number
+	/** Browser-local transport generation; never sent to the controller. */
+	status_led_epoch?: number
 	illumination: IlluminationState
 }
 
@@ -217,6 +237,103 @@ export interface ControllerEvent {
   rf_protocol?: number
   rf_pulse_us?: number
   metadata?: Record<string, string>
+}
+
+export interface MacroStep {
+  at_us?: number
+  kind: string
+  target?: number
+  value?: number
+  duration_ms?: number
+  frequency_hz?: number
+  text?: string
+  destination?: string
+  code?: number
+  bits?: number
+  protocol?: number
+  pulse_us?: number
+  red?: number
+  green?: number
+  blue?: number
+  brightness?: number
+  opcode?: number
+  payload_hex?: string
+}
+
+export interface ControllerMacro {
+  id: number
+  name: string
+  mode?: string
+  category?: string
+  color?: string
+  label?: string
+  lcd_message?: string
+  timing_tolerance_us?: number
+  keep_outputs_on_cancel?: boolean
+  recording_source?: string
+  capture_dropped_steps?: number
+  capture_missing_steps?: number
+  steps?: MacroStep[] | null
+}
+
+export interface MacroPlaybackState {
+  running: boolean
+  mode?: string
+  connection_generation?: number
+  id?: number
+  name: string
+  category?: string
+  color?: string
+  step: number
+  step_count: number
+  duration_us?: number
+  started_at?: string
+  finished_at?: string
+  device_started_at_us?: number
+  accepted_bytes?: number
+  buffer_fill?: number
+  underruns?: number
+  dispatch_errors?: number
+  dropped_steps?: number
+  evidence_steps?: number
+  timing_violations?: number
+  last_timing_delta_us?: number
+  maximum_timing_error_us: number
+  timing_tolerance_us?: number
+  startup_delay_us?: number
+  faithful: boolean
+  lifecycle?: string
+  last_error?: string
+  device?: Record<string, unknown>
+}
+
+export interface MacroRecordingState {
+  active: boolean
+  mode?: string
+  id?: number
+  name: string
+  category?: string
+  color?: string
+  steps: number
+  host_steps?: number
+  panel_steps?: number
+  rf_steps?: number
+  last_at_us?: number
+  last_delta_us?: number
+  last_opcode?: number
+  last_source?: number
+  board_owned?: boolean
+  board_id?: number
+  dropped_steps?: number
+  started_at?: string
+  last_error?: string
+}
+
+export interface MacroSnapshot {
+  library: ControllerMacro[]
+  playback: MacroPlaybackState
+  recording: MacroRecordingState
+  latest_event_id?: number
 }
 
 export interface RFLearnedEntry {
@@ -258,6 +375,8 @@ export interface UIConfig {
   appearance: Appearance
   appearance_etag: string
   welcome_melody?: string
+	status_interval_ms: number
+	measurement_freshness_ms: number
 	websocket_path: string
   socket_io_path?: string
   session_ticket_path: string
@@ -282,6 +401,8 @@ export interface HostUISettings {
   welcome_melody: string
   appearance: Appearance
   appearance_etag: string
+	status_interval_ms: number
+	measurement_freshness_ms: number
   segment_scroll: SegmentScrollSettings
   peripheral_names: Record<string, string>
   peripherals: PeripheralDescriptor[]
@@ -499,6 +620,7 @@ export const emptySnapshot: Snapshot = {
   },
   have_status: false,
   have_settings: false,
+	hardware_problems: [],
 	illumination: {
 		available: false,
 		mode: 0,

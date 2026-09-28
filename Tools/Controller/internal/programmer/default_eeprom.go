@@ -51,6 +51,19 @@ func generateEEPROMIntelHex(factory native.Settings) ([]byte, error) {
 	for index := range data {
 		data[index] = 0xFF
 	}
+
+	// The compact startup region stores the four exact autonomous physical
+	// cues as {frequencyLE16,duration8}, followed by CRC-8. Firmware validates
+	// the record atomically and falls back to the same values if it is blank,
+	// corrupt, or built with EEPROM cue loading disabled.
+	audio := data[EEPROMAudioCueAddress : EEPROMAudioCueAddress+EEPROMAudioCueRecordBytes]
+	for index, cue := range [][2]uint16{{1700, 45}, {1100, 45}, {1900, 35}, {1250, 35}} {
+		offset := index * int(EEPROMAudioCueDescriptorBytes)
+		binary.LittleEndian.PutUint16(audio[offset:offset+2], cue[0])
+		audio[offset+2] = byte(cue[1])
+	}
+	audio[len(audio)-1] = avrCRC8(audio[:len(audio)-1])
+
 	settings := data[EEPROMSettingsAddress : EEPROMSettingsAddress+EEPROMSettingsRecordBytes]
 	values := settings[:EEPROMSettingsValueBytes]
 	values[0] = factory.Flags

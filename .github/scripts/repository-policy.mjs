@@ -23,6 +23,7 @@ const policyDefinitionPaths = new Set([
 // Current-product links are permitted only in maintained public entry points.
 const repositoryIdentityPaths = new Set([
   "README.md",
+  "docs/Alpha-Delivery-Ledger.md",
   "docs/CI-CD-and-Releases.md",
   "docs/Project-Checklist.md",
   "docs/Requirements-Backlog.md",

@@ -28,6 +28,22 @@ func TestGenerateDefaultEEPROMIntelHexCreatesSafeCurrentSettings(t *testing.T) {
 		inspection.MaximumAddress+1 != PCControllerEEPROMBytes {
 		t.Fatalf("default EEPROM coverage = %#v", inspection)
 	}
+	audio, err := image.BytesAt(EEPROMAudioCueAddress, EEPROMAudioCueRecordBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if audio[len(audio)-1] != avrCRC8(audio[:len(audio)-1]) {
+		t.Fatal("default autonomous audio-cue CRC does not match")
+	}
+	wantAudio := []byte{
+		0xA4, 0x06, 45, // 1700 Hz door open
+		0x4C, 0x04, 45, // 1100 Hz door closed
+		0x6C, 0x07, 35, // 1900 Hz output on
+		0xE2, 0x04, 35, // 1250 Hz output off
+	}
+	if !bytes.Equal(audio[:len(audio)-1], wantAudio) {
+		t.Fatalf("default autonomous audio cues = % X, want % X", audio[:len(audio)-1], wantAudio)
+	}
 	record, err := image.BytesAt(EEPROMSettingsAddress, EEPROMSettingsRecordBytes)
 	if err != nil {
 		t.Fatal(err)

@@ -12,7 +12,7 @@ namespace ControllerProtocol {
 namespace WireContract {
 
 constexpr uint8_t Magic = 0xA5;
-constexpr uint8_t EnvelopeRevision = 1;
+constexpr uint8_t ReservedEnvelopeByte = 1;
 constexpr uint8_t MaximumPayload = 48;
 constexpr uint8_t RawFrameOverhead = 6;
 constexpr uint8_t MaximumRawFrame = MaximumPayload + RawFrameOverhead;

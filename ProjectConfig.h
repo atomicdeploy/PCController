@@ -45,6 +45,31 @@
 #define PCCONTROLLER_ENABLE_TASK_SCHEDULER 0
 #endif
 
+// TonePlayer remains the board-wide playback engine in every profile. This
+// gate owns only unsolicited/local cue policy: door and motion/output feedback
+// can be omitted by a host-only or larger-MCU profile without removing direct
+// BUZZER commands, macro playback, or the Silent setting.
+#ifndef PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
+#define PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES 1
+#endif
+
+// The compact core-cue controller may load four frequency/duration triples
+// from the CRC-backed startup region. Disabling this keeps the exact immutable
+// fallbacks and avoids an EEPROM dependency; it does not disable local cues.
+#ifndef PCCONTROLLER_ENABLE_EEPROM_AUDIO_CUES
+#define PCCONTROLLER_ENABLE_EEPROM_AUDIO_CUES 1
+#endif
+
+#if (PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES != 0) && \
+    (PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES != 1)
+#error "PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES must be 0 or 1"
+#endif
+
+#if (PCCONTROLLER_ENABLE_EEPROM_AUDIO_CUES != 0) && \
+    (PCCONTROLLER_ENABLE_EEPROM_AUDIO_CUES != 1)
+#error "PCCONTROLLER_ENABLE_EEPROM_AUDIO_CUES must be 0 or 1"
+#endif
+
 // Rich catalog/layout presentation is host-owned. Stable page IDs and the
 // fixed EEPROM bytes remain, but the AVR does not carry duplicate directory,
 // ordering, hierarchy, or layout-protocol implementations in release builds.
