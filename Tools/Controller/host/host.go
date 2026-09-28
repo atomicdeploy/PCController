@@ -153,9 +153,6 @@ func validateOptions(options *Options) error {
 	if options == nil {
 		return errors.New("host options are required")
 	}
-	if strings.TrimSpace(options.ConfigPath) != "" && strings.TrimSpace(options.DataRoot) != "" {
-		return errors.New("ConfigPath and DataRoot are mutually exclusive")
-	}
 	if options.HTTP != nil {
 		options.HTTP.Address = strings.TrimSpace(options.HTTP.Address)
 		if options.HTTP.Address == "" {
@@ -180,6 +177,12 @@ func validateOptions(options *Options) error {
 			return fmt.Errorf("resolve PCController configuration path: %w", err)
 		}
 		options.ConfigPath = absolute
+	}
+	if options.ConfigPath != "" && options.DataRoot != "" {
+		expected := filepath.Join(options.DataRoot, "config.json")
+		if filepath.Clean(options.ConfigPath) != expected {
+			return errors.New("ConfigPath must equal DataRoot/config.json when both are set")
+		}
 	}
 	return nil
 }

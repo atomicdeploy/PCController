@@ -102,6 +102,11 @@ Requests and representative operations:
 {"operation":"host_destroy","handle":2,"timeout_ms":10000}
 ```
 
+`host_create` accepts `config_path` together with `data_root` only when it
+names the exact `data_root/config.json` file. Conflicting paths are rejected,
+so foreign consumers may state the canonical file explicitly without creating
+two configuration roots.
+
 | Operation | Behavior |
 |---|---|
 | `create` | Create a client from the full Go `Options` JSON shape and return a handle. |

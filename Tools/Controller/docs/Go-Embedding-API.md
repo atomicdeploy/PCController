@@ -87,11 +87,12 @@ that adds signal handling and endpoint reporting. Its repository-specific
 environment bootstrap is entry-point wiring; all PCController lifecycle and
 control calls use the public `host` package.
 
-`DataRoot` and `ConfigPath` are mutually exclusive. `DataRoot` places the
-living `config.json`, measurement history, and timeline under an
-application-owned directory. `Branding` applies presentation and native
-endpoint identity for the process lifetime without rewriting persistent
-configuration. `BuildInfo` is diagnostic only and never selects behavior.
+`DataRoot` places the living `config.json`, measurement history, and timeline
+under an application-owned directory. `ConfigPath` may be supplied with it
+only when it names that exact `DataRoot/config.json` file; a conflicting path
+is rejected. `Branding` applies presentation and native endpoint identity for
+the process lifetime without rewriting persistent configuration. `BuildInfo`
+is diagnostic only and never selects behavior.
 
 Set `ControllerOptions` when the embedding application already has a complete
 typed configuration. That value remains caller-owned for the Host lifetime and

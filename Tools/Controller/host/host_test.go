@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -168,6 +169,31 @@ func TestBackgroundErrorDetailsStayOnErrorsChannel(t *testing.T) {
 		}
 	default:
 		t.Fatal("detailed background error was not reported")
+	}
+}
+
+func TestDataRootAcceptsItsCanonicalConfigPath(t *testing.T) {
+	root := t.TempDir()
+	host, err := New(Options{
+		DataRoot:   root,
+		ConfigPath: filepath.Join(root, "config.json"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if host.options.ConfigPath != filepath.Join(host.options.DataRoot, "config.json") {
+		t.Fatalf("ConfigPath = %q, DataRoot = %q", host.options.ConfigPath, host.options.DataRoot)
+	}
+}
+
+func TestDataRootRejectsConflictingConfigPath(t *testing.T) {
+	root := t.TempDir()
+	_, err := New(Options{
+		DataRoot:   root,
+		ConfigPath: filepath.Join(root, "alternate.json"),
+	})
+	if err == nil || err.Error() != "ConfigPath must equal DataRoot/config.json when both are set" {
+		t.Fatalf("New error = %v", err)
 	}
 }
 
