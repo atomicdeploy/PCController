@@ -17,7 +17,7 @@ func (service *Service) LocalManifest() (Manifest, error) {
 	if err != nil {
 		return Manifest{}, err
 	}
-	result := Manifest{Format: ManifestFormat, GeneratedAt: time.Now().UTC()}
+	result := Manifest{GeneratedAt: time.Now().UTC()}
 	result.Artifacts = make([]ManifestArtifact, 0, len(listing.Artifacts))
 	for _, descriptor := range listing.Artifacts {
 		result.Artifacts = append(result.Artifacts, ManifestArtifact{
@@ -46,14 +46,10 @@ func (client *Client) DiscoverManifest(ctx context.Context, request ManifestRequ
 		effectiveManifestURL = response.Request.URL.String()
 	}
 	var manifest Manifest
-	// The format identifier defines the semantic contract. Unknown additive
-	// fields are ignored so a newer publisher can extend v1 without breaking an
-	// older host that still understands every field it needs.
+	// This is one living additive contract. Unknown fields are ignored while
+	// every known identity and integrity field used below remains validated.
 	if err := decodeJSONResponse(response, &manifest); err != nil {
 		return DiscoveryResult{}, err
-	}
-	if manifest.Format != ManifestFormat {
-		return DiscoveryResult{}, fmt.Errorf("unsupported update manifest format %q", manifest.Format)
 	}
 	base, err := url.Parse(effectiveManifestURL)
 	if err != nil {

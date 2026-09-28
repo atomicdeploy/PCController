@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadProjectEnv } from "../../Tools/Build/env.mjs";
+import { normalizeFirmwareFeatures } from "../../Tools/CommandPlan/controller-command.mjs";
 
 loadProjectEnv();
 
@@ -26,8 +27,18 @@ function checkedArtifact(manifest, role, root) {
 }
 
 export function assertFirmwareDefaults(manifest, root = repositoryRoot) {
-  if (manifest?.format !== "pccontroller-avr-firmware-manifest/v1") {
-    throw new Error("unexpected firmware manifest format");
+  if (manifest === null || typeof manifest !== "object") {
+    throw new Error("firmware manifest must be an object");
+  }
+  const declaredFeatures = manifest.source?.compileFeatures || [];
+  let features;
+  try {
+    features = normalizeFirmwareFeatures(declaredFeatures);
+  } catch (error) {
+    throw new Error(`invalid firmware manifest compile features: ${error.message}`);
+  }
+  if (JSON.stringify(features) !== JSON.stringify(declaredFeatures)) {
+    throw new Error("firmware manifest compile features must be unique and sorted canonically");
   }
   const application = checkedArtifact(manifest, "application", root);
   if (Number(application.dataBytes) <= 0) {

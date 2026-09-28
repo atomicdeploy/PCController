@@ -243,7 +243,7 @@ func TestWindowsProcessHelperUsesCanonicalExecutableAndCachesResult(t *testing.T
 			t.Fatalf("helper executable=%q port=%q", executable, port)
 		}
 		calls++
-		return []byte(`{"version":1,"port":"COM77","found":true,"owner":{"pid":321,"name":"terminal.exe","process_start_time_100ns":99}}`), nil, nil
+		return []byte(`{"port":"COM77","found":true,"owner":{"pid":321,"name":"terminal.exe","process_start_time_100ns":99}}`), nil, nil
 	}
 	for attempt := 0; attempt < 2; attempt++ {
 		owner, found, err := helper.FindOwner(context.Background(), "COM77")
@@ -291,7 +291,7 @@ func TestWindowsProcessHelperSingleflightsConcurrentFallbacks(t *testing.T) {
 		}
 		callsMu.Unlock()
 		<-release
-		return []byte(`{"version":1,"port":"COM79","found":false}`), nil, nil
+		return []byte(`{"port":"COM79","found":false}`), nil, nil
 	}
 	results := make(chan error, 2)
 	for index := 0; index < 2; index++ {

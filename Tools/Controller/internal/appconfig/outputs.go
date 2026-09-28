@@ -12,6 +12,13 @@ const (
 	MaxMelodyNotes             = 64
 	PowerDownMelodyName        = "power-down"
 	ProgrammingReadyMelodyName = "programming-ready"
+	FinishMelodyName           = "finish"
+	LostMelodyName             = "lost"
+	IncorrectBeepMelodyName    = "incorrect-beep"
+	ErrorBeepMelodyName        = "error-beep"
+	FaultBeepMelodyName        = "fault-beep"
+	SuccessCueMelodyName       = "success-cue"
+	ErrorCueMelodyName         = "error-cue"
 )
 
 // Melody is PC-side configuration. The host streams one note at a time over
@@ -28,8 +35,7 @@ type MelodyNote struct {
 }
 
 // StatusLEDEffect describes one compact MCU-owned status RGB animation. Repeats
-// zero means loop until explicitly stopped; DurationMS remains a compatibility
-// input and is converted to a bounded cycle count when Repeats is omitted.
+// zero means loop until explicitly stopped.
 type StatusLEDEffect struct {
 	Name           string `json:"name"`
 	Kind           string `json:"kind"`
@@ -42,7 +48,6 @@ type StatusLEDEffect struct {
 	Brightness     byte   `json:"brightness"`
 	MinBrightness  byte   `json:"min_brightness,omitempty"`
 	PeriodMS       int    `json:"period_ms"`
-	DurationMS     int    `json:"duration_ms,omitempty"`
 	Repeats        byte   `json:"repeats,omitempty"`
 }
 
@@ -66,7 +71,85 @@ func DefaultMelodies() []Melody {
 		},
 		DefaultPowerDownMelody(),
 		DefaultProgrammingReadyMelody(),
+		DefaultFinishMelody(),
+		DefaultLostMelody(),
+		DefaultIncorrectBeepMelody(),
+		DefaultErrorBeepMelody(),
+		DefaultFaultBeepMelody(),
+		DefaultSuccessCueMelody(),
+		DefaultErrorCueMelody(),
 	}
+}
+
+// BuiltInLegacyFeedbackMelodies is the immutable host recovery catalog. A
+// watched configuration can override any name, but deleting an override must
+// not erase a melody that was deliberately moved out of constrained AVR flash.
+func BuiltInLegacyFeedbackMelodies() []Melody {
+	return []Melody{
+		DefaultFinishMelody(),
+		DefaultLostMelody(),
+		DefaultIncorrectBeepMelody(),
+		DefaultErrorBeepMelody(),
+		DefaultFaultBeepMelody(),
+		DefaultSuccessCueMelody(),
+		DefaultErrorCueMelody(),
+	}
+}
+
+func DefaultFinishMelody() Melody {
+	return Melody{Name: FinishMelodyName, Notes: []MelodyNote{
+		{FrequencyHz: 659, DurationMS: 100},
+		{FrequencyHz: 784, DurationMS: 100},
+		{FrequencyHz: 880, DurationMS: 250},
+	}}
+}
+
+func DefaultLostMelody() Melody {
+	return Melody{Name: LostMelodyName, Notes: []MelodyNote{
+		{FrequencyHz: 392, DurationMS: 100},
+		{FrequencyHz: 330, DurationMS: 100},
+		{FrequencyHz: 262, DurationMS: 100},
+		{FrequencyHz: 196, DurationMS: 100},
+	}}
+}
+
+func DefaultIncorrectBeepMelody() Melody {
+	return Melody{Name: IncorrectBeepMelodyName, Notes: []MelodyNote{
+		{FrequencyHz: 2000, DurationMS: 100, GapMS: 100},
+		{FrequencyHz: 2000, DurationMS: 100, GapMS: 100},
+		{FrequencyHz: 2000, DurationMS: 100, GapMS: 100},
+	}}
+}
+
+func DefaultErrorBeepMelody() Melody {
+	return Melody{Name: ErrorBeepMelodyName, Notes: []MelodyNote{
+		{FrequencyHz: 2000, DurationMS: 10, GapMS: 10},
+		{FrequencyHz: 2000, DurationMS: 10, GapMS: 10},
+		{FrequencyHz: 2000, DurationMS: 10, GapMS: 10},
+		{FrequencyHz: 2000, DurationMS: 10, GapMS: 10},
+		{FrequencyHz: 2000, DurationMS: 10, GapMS: 10},
+	}}
+}
+
+func DefaultFaultBeepMelody() Melody {
+	return Melody{Name: FaultBeepMelodyName, Notes: []MelodyNote{
+		{FrequencyHz: 1000, DurationMS: 250},
+		{FrequencyHz: 500, DurationMS: 500, GapMS: 5000},
+	}}
+}
+
+func DefaultSuccessCueMelody() Melody {
+	return Melody{Name: SuccessCueMelodyName, Notes: []MelodyNote{
+		{FrequencyHz: 1047, DurationMS: 70, GapMS: 30},
+		{FrequencyHz: 1319, DurationMS: 110},
+	}}
+}
+
+func DefaultErrorCueMelody() Melody {
+	return Melody{Name: ErrorCueMelodyName, Notes: []MelodyNote{
+		{FrequencyHz: 330, DurationMS: 90, GapMS: 50},
+		{FrequencyHz: 262, DurationMS: 160},
+	}}
 }
 
 // DefaultPowerDownMelody is the deterministic short PC-streamed cue used by
@@ -101,21 +184,35 @@ func DefaultStatusLEDEffects() []StatusLEDEffect {
 			Name: "attention", Kind: "flash",
 			Red: 255, Green: 96, Blue: 0, Brightness: 220,
 			AlternateRed: 0, AlternateGreen: 0, AlternateBlue: 0,
-			PeriodMS: 700, DurationMS: 0,
+			PeriodMS: 700,
 		},
 		{
 			Name: "breathe-blue", Kind: "breathe",
 			Red: 30, Green: 120, Blue: 255,
 			Brightness: 200, MinBrightness: 8,
-			PeriodMS: 1800, DurationMS: 0,
+			PeriodMS: 1800,
 		},
 	}
 }
 
-// Effective* returns the watched configuration exactly. Defaults are written
-// when a new configuration is created; an empty list is an intentional choice.
+// EffectiveMelodies keeps the historical named feedback definitions available
+// even when an old/edited watched configuration omits them. Routing remains a
+// separate user choice, so availability does not make any melody autonomous.
 func EffectiveMelodies(config Config) []Melody {
-	return cloneMelodies(config.Melodies)
+	result := cloneMelodies(config.Melodies)
+	for _, builtIn := range BuiltInLegacyFeedbackMelodies() {
+		found := false
+		for _, configured := range result {
+			if strings.EqualFold(configured.Name, builtIn.Name) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			result = append(result, builtIn)
+		}
+	}
+	return result
 }
 
 func EffectiveStatusLEDEffects(config Config) []StatusLEDEffect {
@@ -228,12 +325,6 @@ func validateOutputDefinitions(
 		if effect.MinBrightness > effect.Brightness {
 			return fmt.Errorf(
 				"status_effects[%d].min_brightness exceeds brightness",
-				index,
-			)
-		}
-		if effect.DurationMS < 0 || effect.DurationMS > 3_600_000 {
-			return fmt.Errorf(
-				"status_effects[%d].duration_ms must be 0..3600000",
 				index,
 			)
 		}

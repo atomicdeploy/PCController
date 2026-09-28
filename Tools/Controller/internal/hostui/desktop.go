@@ -6,6 +6,8 @@ import (
 	"strings"
 )
 
+const ToastLogoFileName = "toast-logo.png"
+
 type DesktopIntegrationOptions struct {
 	AppID       string
 	DisplayName string
@@ -15,12 +17,28 @@ type DesktopIntegrationOptions struct {
 }
 
 type DesktopIntegrationStatus struct {
-	Supported     bool   `json:"supported"`
-	ProtocolReady bool   `json:"protocol_ready"`
-	ShortcutReady bool   `json:"shortcut_ready"`
-	Executable    string `json:"executable,omitempty"`
-	Shortcut      string `json:"shortcut,omitempty"`
-	LastError     string `json:"last_error,omitempty"`
+	// Shortcut/ShortcutReady describe the Start Menu entry; the actual user
+	// Desktop is reported separately. Neither field claims a taskbar pin.
+	Supported            bool     `json:"supported"`
+	ProtocolReady        bool     `json:"protocol_ready"`
+	ShortcutReady        bool     `json:"shortcut_ready"`
+	DesktopShortcutReady bool     `json:"desktop_shortcut_ready"`
+	Executable           string   `json:"executable,omitempty"`
+	Shortcut             string   `json:"shortcut,omitempty"`
+	DesktopShortcut      string   `json:"desktop_shortcut,omitempty"`
+	Skipped              []string `json:"skipped,omitempty"`
+	Logo                 string   `json:"logo,omitempty"`
+	LastError            string   `json:"last_error,omitempty"`
+}
+
+// ResolveToastLogoPath returns the stable product image installed beside the
+// exact controller executable. Install/package verification owns its digest.
+func ResolveToastLogoPath(executable string) (string, error) {
+	resolved, err := resolveDesktopExecutable(executable)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(filepath.Dir(resolved), ToastLogoFileName), nil
 }
 
 // DesktopIntegrationCleanupStatus reports only artifacts that were positively
@@ -29,13 +47,17 @@ type DesktopIntegrationStatus struct {
 // preserved because ownership could not be established; Skipped distinguishes
 // the latter case.
 type DesktopIntegrationCleanupStatus struct {
-	Supported          bool     `json:"supported"`
-	ProtocolRemoved    bool     `json:"protocol_removed"`
-	AppIdentityRemoved bool     `json:"app_identity_removed"`
-	ShortcutRemoved    bool     `json:"shortcut_removed"`
-	Shortcut           string   `json:"shortcut,omitempty"`
-	Skipped            []string `json:"skipped,omitempty"`
-	LastError          string   `json:"last_error,omitempty"`
+	// ShortcutRemoved is the Start Menu link. DesktopShortcutRemoved is the
+	// separately owned link in the user's Desktop known folder.
+	Supported              bool     `json:"supported"`
+	ProtocolRemoved        bool     `json:"protocol_removed"`
+	AppIdentityRemoved     bool     `json:"app_identity_removed"`
+	ShortcutRemoved        bool     `json:"shortcut_removed"`
+	DesktopShortcutRemoved bool     `json:"desktop_shortcut_removed"`
+	Shortcut               string   `json:"shortcut,omitempty"`
+	DesktopShortcut        string   `json:"desktop_shortcut,omitempty"`
+	Skipped                []string `json:"skipped,omitempty"`
+	LastError              string   `json:"last_error,omitempty"`
 }
 
 func EnsureDesktopIntegration(options DesktopIntegrationOptions) (DesktopIntegrationStatus, error) {

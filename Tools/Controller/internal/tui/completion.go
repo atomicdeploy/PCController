@@ -24,6 +24,7 @@ var nestedCompletions = map[string][]string{
 		"ui.tui_console.font_size",
 		"ui.appearance.audio_muted",
 		"ui.appearance.audio_volume",
+		"programming.firmware_features",
 	},
 	"config set": {
 		"ui.app_title",
@@ -40,6 +41,13 @@ var nestedCompletions = map[string][]string{
 		"ui.tui_console.rows",
 		"ui.tui_console.font_face",
 		"ui.tui_console.font_size",
+		"programming.firmware_features",
+	},
+	"config set programming.firmware_features": {
+		"default-off",
+		"eeprom-boot-opcodes",
+		"eeprom-menu-labels",
+		"eeprom-boot-opcodes,eeprom-menu-labels",
 	},
 	"silent":            {"status", "on", "off", "board", "host", "both"},
 	"silent board":      {"status", "on", "off"},

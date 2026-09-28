@@ -31,7 +31,6 @@ export const FIRMWARE_FEATURES = Object.freeze([
 ])
 const FIRMWARE_FEATURE_SET = new Set(FIRMWARE_FEATURES)
 
-const TOOLCHAIN_POLICY_FORMAT = 'pccontroller-toolchain-policy/v1'
 const TOOLCHAIN_POLICY_URL = new URL('../Controller/toolchain-profile.json', import.meta.url)
 
 export class CommandPlanError extends Error {
@@ -58,11 +57,6 @@ export function parseToolchainPolicy(contents, source = 'toolchain policy') {
 	}
 	if (!policy || typeof policy !== 'object' || Array.isArray(policy)) {
 		throw new Error(`Toolchain policy ${source} must be a JSON object`)
-	}
-	if (policy.format !== TOOLCHAIN_POLICY_FORMAT) {
-		throw new Error(
-			`Toolchain policy ${source} uses unsupported format ${JSON.stringify(policy.format)}`
-		)
 	}
 	if (typeof policy.fqbn !== 'string' || !policy.fqbn.trim()) {
 		throw new Error(`Toolchain policy ${source} requires a non-empty fqbn string`)
@@ -221,12 +215,18 @@ export function createControllerProgramCommand({
 	toolchainCLI = '',
 	toolchainConfig = '',
 	firmwareFeatures = [],
+	noFirmwareFeatures,
 	dryRun = false,
-	allowIncompleteBackup = false
+	deployment = ''
 }) {
 	const normalizedMethod = String(method || '').toLowerCase()
 	const normalizedFeatures = normalizeFirmwareFeatures(firmwareFeatures)
+	const freezeDefaultOff = noFirmwareFeatures ??
+		(normalizedMethod === 'compile' && normalizedFeatures.length === 0)
 	if (normalizedMethod === 'compile') {
+		if (freezeDefaultOff && normalizedFeatures.length !== 0) {
+			throw new CommandPlanError('--no-firmware-features cannot be combined with --firmware-feature')
+		}
 		const args = [
 			'program', '--method', 'compile',
 			'--sketch', requireValue(sketch, 'compile sketch'),
@@ -237,6 +237,7 @@ export function createControllerProgramCommand({
 		for (const feature of normalizedFeatures) {
 			args.push('--firmware-feature', feature)
 		}
+		if (freezeDefaultOff) args.push('--no-firmware-features')
 		if (dryRun) args.push('--dry-run')
 		return controllerCommand(invocation, args)
 	}
@@ -245,8 +246,8 @@ export function createControllerProgramCommand({
 			`programming method ${JSON.stringify(method)} is unsupported; use ${PROGRAMMING_METHODS.join(' or ')}`
 		)
 	}
-	if (normalizedFeatures.length !== 0) {
-		throw new CommandPlanError('--firmware-feature is only valid with compile')
+	if (normalizedFeatures.length !== 0 || freezeDefaultOff) {
+		throw new CommandPlanError('--firmware-feature and --no-firmware-features are only valid with compile')
 	}
 	const normalizedOperation = String(operation || '').toLowerCase()
 	const knownOperations = Object.values(PROGRAMMING_OPERATIONS)
@@ -274,11 +275,14 @@ export function createControllerProgramCommand({
 	if (normalizedOperation === PROGRAMMING_OPERATIONS.backup) {
 		args.push('--output', requireValue(output, 'read-flash output'))
 	}
-	if (allowIncompleteBackup) {
+	if (deployment) {
 		if (normalizedOperation !== PROGRAMMING_OPERATIONS.upload) {
-			throw new CommandPlanError('--allow-incomplete-backup is only valid with write-flash')
+			throw new CommandPlanError('--deployment is only valid with write-flash')
 		}
-		args.push('--allow-incomplete-backup')
+		if (!['production', 'development'].includes(deployment)) {
+			throw new CommandPlanError('--deployment must be production or development')
+		}
+		args.push('--deployment', deployment)
 	}
 	if (dryRun) args.push('--dry-run')
 	return controllerCommand(invocation, args)

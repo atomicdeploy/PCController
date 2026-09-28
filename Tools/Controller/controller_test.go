@@ -2,10 +2,44 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestShutdownRetainsCompletionUntilRuntimeCloseSucceeds(t *testing.T) {
+	client := New(Options{})
+	closeErr := errors.New("cancel serial I/O")
+	closeCalls := 0
+	client.runtimeClose = func() error {
+		closeCalls++
+		if closeCalls == 1 {
+			return closeErr
+		}
+		return client.runtime.Close()
+	}
+
+	if err := client.Shutdown(); !errors.Is(err, closeErr) {
+		t.Fatalf("first Shutdown error = %v, want %v", err, closeErr)
+	}
+	select {
+	case <-client.done:
+		t.Fatal("failed Shutdown signaled terminal completion")
+	default:
+	}
+	if err := client.Shutdown(); err != nil {
+		t.Fatalf("retry Shutdown: %v", err)
+	}
+	select {
+	case <-client.done:
+	default:
+		t.Fatal("successful retry did not signal terminal completion")
+	}
+	if closeCalls != 2 {
+		t.Fatalf("runtime close calls = %d, want 2", closeCalls)
+	}
+}
 
 func TestPublicOptionsExposeCanonicalFirmwareFeatureStatus(t *testing.T) {
 	client := New(Options{FirmwareFeatures: []string{

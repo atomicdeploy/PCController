@@ -24,6 +24,8 @@ import (
 	"pccontroller.local/controller/internal/discovery"
 	"pccontroller.local/controller/internal/hostui"
 	"pccontroller.local/controller/internal/ipcjson"
+	"pccontroller.local/controller/internal/lanresolver"
+	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/productidentity"
 )
 
@@ -44,7 +46,10 @@ type Status struct {
 	SegmentText              string                          `json:"segment_scroll_text,omitempty"`
 	BuzzerMirror             bool                            `json:"buzzer_mirror_active"`
 	BuzzerNativeState        string                          `json:"buzzer_native_state,omitempty"`
+	BuzzerNativeBackend      string                          `json:"buzzer_native_backend,omitempty"`
+	BuzzerNativeExecutable   string                          `json:"buzzer_native_executable,omitempty"`
 	BuzzerNativeLastError    string                          `json:"buzzer_native_last_error,omitempty"`
+	BuzzerRuntime            appconfig.BuzzerRuntimeStatus   `json:"buzzer_runtime"`
 	WebhooksActive           int                             `json:"webhooks_active"`
 	WebhookQueuePending      int                             `json:"webhook_queue_pending"`
 	WebhookDeadLetters       int                             `json:"webhook_dead_letters"`
@@ -192,31 +197,41 @@ type Manager struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	mu                 sync.RWMutex
-	closing            bool
-	digest             [sha256.Size]byte
-	advertiser         *discovery.Advertiser
-	peers              map[string]*peerState
-	status             Status
-	webhooks           *webhookDeliveryQueue
-	wait               sync.WaitGroup
-	actions            *hostui.ActionBroker
-	hotkeys            hostui.HotkeyRegistrar
-	keyboard           hostui.KeyboardRegistrar
-	keyboardLatchMu    sync.Mutex
-	keyboardLatches    map[string]keyboardLatch
-	lastPWMReconcile   time.Time
-	keyboardActuator   func(context.Context, keyboardOperation) error
-	lifecycleActuator  func(context.Context, string) error
-	notifier           hostui.Notifier
-	notificationQueue  *notificationQueue
-	warningBeep        func() error
-	runningDoorWarning bool
-	statusLED          *statusLEDArbiter
-	segmentScroll      *segmentScrollPresenter
-	buzzerJobs         chan buzzerMirrorJob
-	discoveryRefresh   chan struct{}
-	discoveryIdentity  DiscoveryHostIdentity
+	mu                  sync.RWMutex
+	closing             bool
+	digest              [sha256.Size]byte
+	advertiser          *discovery.Advertiser
+	peers               map[string]*peerState
+	status              Status
+	webhooks            *webhookDeliveryQueue
+	wait                sync.WaitGroup
+	actions             *hostui.ActionBroker
+	hotkeys             hostui.HotkeyRegistrar
+	keyboard            hostui.KeyboardRegistrar
+	keyboardLatchMu     sync.Mutex
+	keyboardLatches     map[string]keyboardLatch
+	lastPWMReconcile    time.Time
+	keyboardActuator    func(context.Context, keyboardOperation) error
+	lifecycleActuator   func(context.Context, string) error
+	notifier            hostui.Notifier
+	notificationQueue   *notificationQueue
+	warningBeep         func() error
+	runningDoorWarning  bool
+	statusLED           *statusLEDArbiter
+	segmentScroll       *segmentScrollPresenter
+	buzzerJobs          chan buzzerMirrorJob
+	buzzerPlay          func(context.Context, buzzerMirrorJob) error
+	buzzerRouteWake     chan struct{}
+	buzzerRouteMu       sync.RWMutex
+	buzzerRoutePath     string
+	buzzerRouteState    string
+	buzzerRouteError    string
+	buzzerRouteRevision uint64
+	buzzerRouteAttempts int
+	buzzerRouteSnapshot func() controller.Snapshot
+	buzzerRouteExecute  func(context.Context, bool) error
+	discoveryRefresh    chan struct{}
+	discoveryIdentity   DiscoveryHostIdentity
 }
 
 type DiscoveryHostIdentity struct {
@@ -253,7 +268,13 @@ func Start(
 		notificationQueue: newNotificationQueue(16, 3*time.Second, 500*time.Millisecond),
 		warningBeep:       hostui.WarningBeep,
 		buzzerJobs:        make(chan buzzerMirrorJob, 32),
+		buzzerRouteWake:   make(chan struct{}, 1),
 		discoveryRefresh:  make(chan struct{}, 1),
+	}
+	manager.buzzerRouteSnapshot = client.Snapshot
+	manager.buzzerRouteExecute = func(ctx context.Context, silent bool) error {
+		_, err := client.SetBoardSilent(ctx, silent)
+		return err
 	}
 	if len(identities) != 0 {
 		manager.discoveryIdentity = identities[0]
@@ -340,7 +361,7 @@ func Start(
 	// published immediately after Start returns can land between the goroutine
 	// launch and its first LatestEventID call and be skipped forever.
 	afterID := client.LatestEventID()
-	manager.wait.Add(8)
+	manager.wait.Add(9)
 	manager.webhooks.Start()
 	go func() {
 		defer manager.wait.Done()
@@ -358,6 +379,7 @@ func Start(
 	}()
 	go manager.notificationLoop()
 	go manager.buzzerMirrorLoop()
+	go manager.buzzerRouteLoop()
 	go manager.discoveryMetadataLoop()
 	return manager, nil
 }
@@ -460,6 +482,22 @@ func (manager *Manager) Status() Status {
 	}
 	result.WSClientsActive = append([]string(nil), result.WSClientsActive...)
 	result.DiscoveryProtocols = append([]string(nil), result.DiscoveryProtocols...)
+	if manager.store != nil && manager.client != nil {
+		snapshot := manager.client.Snapshot()
+		result.BuzzerRuntime = manager.store.BuzzerRuntimeState().Status(
+			snapshot.HaveSettings,
+			snapshot.Settings.Flags&native.SettingsSilent != 0,
+			result.BuzzerNativeBackend,
+			result.BuzzerNativeExecutable,
+			result.BuzzerNativeLastError,
+		)
+		manager.buzzerRouteMu.RLock()
+		if manager.buzzerRouteState != "" && manager.buzzerRoutePath == manager.store.BuzzerRuntimeState().Effective.Path {
+			result.BuzzerRuntime.BoardApplyState = manager.buzzerRouteState
+			result.BuzzerRuntime.BoardApplyError = manager.buzzerRouteError
+		}
+		manager.buzzerRouteMu.RUnlock()
+	}
 	result.DiscoveryFailures = append([]discovery.TransportFailure(nil), result.DiscoveryFailures...)
 	return result
 }
@@ -498,6 +536,9 @@ func (manager *Manager) CallBridge(
 	name string,
 	request ipcjson.Request,
 ) (ipcjson.Response, error) {
+	if err := ipcjson.ValidateBridgeRequest(request); err != nil {
+		return ipcjson.Response{}, err
+	}
 	manager.mu.RLock()
 	peer := manager.peers[strings.ToLower(strings.TrimSpace(name))]
 	manager.mu.RUnlock()
@@ -629,6 +670,7 @@ func integrationDigest(config appconfig.Config) [sha256.Size]byte {
 
 func (manager *Manager) reconcile(config appconfig.Config) error {
 	manager.client.ConfigureRFPresentation(config.RF)
+	manager.observeBuzzerRoute(config.Integrations.BuzzerMirror.Path, false)
 	manager.segmentScroll.Observe(config.UI.SegmentScroll, manager.client.Snapshot())
 	digest := integrationDigest(config)
 	manager.mu.RLock()
@@ -649,6 +691,8 @@ func (manager *Manager) reconcile(config appconfig.Config) error {
 	segmentScrollActive := manager.status.SegmentScroll
 	segmentScrollText := manager.status.SegmentText
 	buzzerNativeState := manager.status.BuzzerNativeState
+	buzzerNativeBackend := manager.status.BuzzerNativeBackend
+	buzzerNativeExecutable := manager.status.BuzzerNativeExecutable
 	buzzerNativeLastError := manager.status.BuzzerNativeLastError
 	doorWarning := manager.runningDoorWarning
 	manager.advertiser, manager.hotkeys, manager.keyboard = nil, nil, nil
@@ -668,21 +712,36 @@ func (manager *Manager) reconcile(config appconfig.Config) error {
 	}
 
 	status := Status{
-		Notifications:         config.Integrations.Notifications.Enabled,
-		BuzzerMirror:          config.Integrations.BuzzerMirror.Enabled,
-		BuzzerNativeState:     buzzerNativeState,
-		BuzzerNativeLastError: buzzerNativeLastError,
-		Desktop:               desktopStatus,
-		StatusLEDState:        statusLEDState,
-		SegmentScroll:         segmentScrollActive,
-		SegmentText:           segmentScrollText,
-		DoorWarning:           doorWarning,
+		Notifications:          config.Integrations.Notifications.Enabled,
+		BuzzerMirror:           config.Integrations.BuzzerMirror.Enabled,
+		BuzzerNativeState:      buzzerNativeState,
+		BuzzerNativeBackend:    buzzerNativeBackend,
+		BuzzerNativeExecutable: buzzerNativeExecutable,
+		BuzzerNativeLastError:  buzzerNativeLastError,
+		Desktop:                desktopStatus,
+		StatusLEDState:         statusLEDState,
+		SegmentScroll:          segmentScrollActive,
+		SegmentText:            segmentScrollText,
+		DoorWarning:            doorWarning,
 	}
 	if !config.Integrations.BuzzerMirror.Enabled || !config.Integrations.BuzzerMirror.NativeEnabled {
 		status.BuzzerNativeState = "disabled"
+		status.BuzzerNativeBackend = ""
+		status.BuzzerNativeExecutable = ""
 		status.BuzzerNativeLastError = ""
-	} else if status.BuzzerNativeState == "" || status.BuzzerNativeState == "disabled" {
-		status.BuzzerNativeState = "untested"
+	} else {
+		resolved, resolveErr := resolveNativeBuzzer(config.Integrations.BuzzerMirror)
+		if resolveErr != nil {
+			status.BuzzerNativeState = "failed"
+			status.BuzzerNativeBackend = ""
+			status.BuzzerNativeExecutable = ""
+			status.BuzzerNativeLastError = resolveErr.Error()
+		} else {
+			status.BuzzerNativeState = "ready"
+			status.BuzzerNativeBackend = resolved.Backend
+			status.BuzzerNativeExecutable = resolved.Executable
+			status.BuzzerNativeLastError = ""
+		}
 	}
 	hotkeys := hostui.NewHotkeyRegistrar()
 	var hotkeyBindings []hostui.HotkeyBinding
@@ -815,6 +874,7 @@ func (manager *Manager) reconcile(config appconfig.Config) error {
 		config.Integrations.StatusLED,
 		manager.client.Snapshot(),
 		controller.Event{Kind: "config"},
+		time.Duration(config.Connection.RequestTimeoutMS)*time.Millisecond,
 	)
 	return nil
 }
@@ -857,6 +917,13 @@ func (manager *Manager) eventLoop(afterID uint64) {
 				}
 			}
 		}
+		if event.Opcode == native.OpSettings ||
+			(event.Kind == "connection" && event.State == "connected") {
+			manager.observeBuzzerRoute(
+				manager.store.Current().Integrations.BuzzerMirror.Path,
+				event.Kind == "connection",
+			)
+		}
 		config := manager.store.Current()
 		manager.observeRunningDoor(config)
 		manager.segmentScroll.Observe(config.UI.SegmentScroll, manager.client.Snapshot())
@@ -864,6 +931,7 @@ func (manager *Manager) eventLoop(afterID uint64) {
 			config.Integrations.StatusLED,
 			manager.client.Snapshot(),
 			event,
+			time.Duration(config.Connection.RequestTimeoutMS)*time.Millisecond,
 		)
 		manager.dispatchWebhooks(config, event)
 		manager.dispatchTextMappings(config, event)
@@ -884,6 +952,9 @@ func (manager *Manager) eventLoop(afterID uint64) {
 }
 
 func bridgeEventForwardable(event controller.Event) bool {
+	if strings.TrimSpace(event.Metadata["bridge.ingress"]) != "" {
+		return false
+	}
 	kind := strings.ToLower(strings.TrimSpace(event.Kind))
 	if kind == "integration.error" || strings.HasPrefix(kind, "bridge.") ||
 		strings.HasPrefix(kind, "security.remote.") {
@@ -892,6 +963,23 @@ func bridgeEventForwardable(event controller.Event) bool {
 	return kind != "message" ||
 		(!strings.EqualFold(event.Source, "bridge") &&
 			!strings.EqualFold(event.Source, "websocket"))
+}
+
+func (manager *Manager) ingestPeerEvent(peerName string, raw json.RawMessage) bool {
+	var event controller.Event
+	if json.Unmarshal(raw, &event) != nil || strings.TrimSpace(event.Kind) == "" {
+		return false
+	}
+	// Peer subscriptions also contain events that this host previously sent.
+	// Consume those envelopes without publishing them again: guarding only the
+	// outbound queue does not stop two reciprocal subscription readers echoing.
+	if strings.TrimSpace(event.Metadata["bridge.ingress"]) != "" ||
+		strings.EqualFold(strings.TrimSpace(event.Source), "bridge") ||
+		strings.EqualFold(strings.TrimSpace(event.Source), "websocket") {
+		return true
+	}
+	manager.client.IngestBridgeEvent(peerName, event)
+	return true
 }
 
 // observeRunningDoor combines the explicit HOST-owned Running state with the
@@ -963,28 +1051,77 @@ func (manager *Manager) dispatchNotification(
 	event controller.Event,
 ) {
 	if !config.Integrations.Notifications.Enabled || manager.notifier == nil ||
-		strings.HasPrefix(event.Kind, "notification.") {
+		strings.HasPrefix(strings.ToLower(strings.TrimSpace(event.Kind)), "notification.") {
 		return
 	}
-	if event.Kind == "warning.door-open-running" &&
-		!config.Integrations.Notifications.DoorRunningToast {
+	job, ok, err := notificationJobForEvent(config, event, manager.client.Snapshot())
+	if err != nil {
+		manager.recordError("notification actions: " + err.Error())
 		return
+	}
+	if ok {
+		manager.notificationQueue.enqueue(job)
+	}
+}
+
+func notificationJobForEvent(
+	config appconfig.Config,
+	event controller.Event,
+	snapshot controller.Snapshot,
+) (notificationJob, bool, error) {
+	kind := strings.ToLower(strings.TrimSpace(event.Kind))
+	if kind == "warning.door-open-running" &&
+		!config.Integrations.Notifications.DoorRunningToast {
+		return notificationJob{}, false, nil
 	}
 	matched := false
-	for _, kind := range config.Integrations.Notifications.ImportantKinds {
-		if eventKindMatches(kind, event.Kind) {
+	for _, pattern := range config.Integrations.Notifications.ImportantKinds {
+		if eventKindMatches(pattern, kind) {
 			matched = true
 			break
 		}
 	}
 	if !matched {
-		return
+		return notificationJob{}, false, nil
 	}
-	notification, ok := hostui.NotificationForImportantEvent(hostui.ImportantEvent{
-		Kind: event.Kind, Message: event.Text, AppTitle: config.UI.AppTitle,
-	})
-	if !ok {
-		return
+	jobKey := kind
+	priority := notificationPriority(kind)
+	var notification hostui.Notification
+	if kind == "door" {
+		open, physical := directBoardDoorTransition(event)
+		if !physical {
+			return notificationJob{}, false, nil
+		}
+		// The derived Running-door event owns the one safety toast. If that
+		// presentation is disabled, retain the ordinary physical-door toast.
+		if open && runningDoorCondition(snapshot) &&
+			config.Integrations.Notifications.DoorRunningToast &&
+			configuredImportantKind(
+				config.Integrations.Notifications.ImportantKinds,
+				"warning.door-open-running",
+			) {
+			return notificationJob{}, false, nil
+		}
+		notification = hostui.NotificationForDoorTransition(
+			doorNotification(snapshot, open, false, config.UI.AppTitle),
+		)
+		if open {
+			jobKey = "door.opened"
+		} else {
+			jobKey = "door.closed"
+		}
+	} else if kind == "warning.door-open-running" {
+		notification = hostui.NotificationForDoorTransition(
+			doorNotification(snapshot, true, true, config.UI.AppTitle),
+		)
+	} else {
+		var ok bool
+		notification, ok = hostui.NotificationForImportantEvent(hostui.ImportantEvent{
+			Kind: event.Kind, Message: event.Text, AppTitle: config.UI.AppTitle,
+		})
+		if !ok {
+			return notificationJob{}, false, nil
+		}
 	}
 	if len(config.Integrations.Notifications.Actions) != 0 {
 		configured, err := configuredNotificationActions(
@@ -992,15 +1129,58 @@ func (manager *Manager) dispatchNotification(
 			config.Integrations.Notifications.Actions,
 		)
 		if err != nil {
-			manager.recordError("notification actions: " + err.Error())
-			return
+			return notificationJob{}, false, err
 		}
 		notification = configured
 	}
-	manager.notificationQueue.enqueue(notificationJob{
-		key: event.Kind, notification: notification,
-		priority: notificationPriority(event.Kind),
-	})
+	return notificationJob{
+		key: jobKey, notification: notification, priority: priority,
+	}, true, nil
+}
+
+func configuredImportantKind(patterns []string, kind string) bool {
+	for _, pattern := range patterns {
+		if eventKindMatches(pattern, kind) {
+			return true
+		}
+	}
+	return false
+}
+
+func directBoardDoorTransition(event controller.Event) (bool, bool) {
+	if !strings.EqualFold(strings.TrimSpace(event.Kind), "door") ||
+		!strings.EqualFold(strings.TrimSpace(event.Source), "board") ||
+		!strings.EqualFold(strings.TrimSpace(event.Target), "host") ||
+		!strings.EqualFold(strings.TrimSpace(event.MessageType), "event") ||
+		strings.TrimSpace(event.Metadata["bridge.ingress"]) != "" ||
+		event.Opcode != native.OpEvent || event.Device == nil ||
+		event.Device.Type != native.EventDoor {
+		return false, false
+	}
+	return event.Device.DoorOpen, true
+}
+
+func doorNotification(
+	snapshot controller.Snapshot,
+	open bool,
+	running bool,
+	appTitle string,
+) hostui.DoorNotification {
+	device := strings.TrimSpace(snapshot.Port.FriendlyName)
+	if device == "" {
+		device = strings.TrimSpace(snapshot.Port.Product)
+	}
+	if device == "" {
+		device = strings.TrimSpace(snapshot.Hello.Name)
+	}
+	programState := strings.TrimSpace(string(snapshot.ProgramState.Mode))
+	if running {
+		programState = string(controller.ProgramRunning)
+	}
+	return hostui.DoorNotification{
+		Open: open, Running: running, AppTitle: appTitle, Device: device,
+		Port: snapshot.Port.Name, ProgramState: programState,
+	}
 }
 
 func (manager *Manager) notificationLoop() {
@@ -1141,11 +1321,22 @@ func (manager *Manager) runWebSocketPeer(
 		if ctx.Err() != nil {
 			return
 		}
-		message := "WebSocket " + config.Name + ": " + err.Error()
+		detail := err.Error()
 		peer.mu.Lock()
-		peer.lastError = err.Error()
+		changed := peer.lastError != detail
+		peer.lastError = detail
 		peer.mu.Unlock()
-		manager.recordError(message)
+		if changed {
+			manager.client.EmitHostActionEvent(
+				"bridge.peer.offline",
+				fmt.Sprintf("Bridge peer %s is offline; retrying in the background", config.Name),
+				"bridge", "peer-connect",
+				map[string]string{
+					"peer": config.Name, "protocol": firstProtocol(config.Protocol),
+					"url": config.URL, "error": detail,
+				},
+			)
+		}
 		select {
 		case <-ctx.Done():
 			return
@@ -1171,6 +1362,7 @@ func (manager *Manager) webSocketPeerSession(
 	}
 	connection, _, err := websocket.Dial(ctx, config.URL, &websocket.DialOptions{
 		HTTPHeader: header,
+		HTTPClient: lanresolver.HTTPClient(),
 	})
 	if err != nil {
 		return err
@@ -1194,7 +1386,7 @@ func (manager *Manager) webSocketPeerSession(
 	defer detach()
 	topics := append([]string(nil), config.Topics...)
 	if len(topics) == 0 {
-		topics = []string{"events"}
+		topics = []string{"events", "state"}
 	}
 	if err := writeJSON(map[string]any{
 		"jsonrpc": "2.0", "id": 1, "method": "controller.subscribe",
@@ -1202,6 +1394,15 @@ func (manager *Manager) webSocketPeerSession(
 	}); err != nil {
 		return err
 	}
+	manager.client.EmitHostActionEvent(
+		"bridge.peer.connected",
+		fmt.Sprintf("Bridge peer %s connected", config.Name),
+		"bridge", "peer-connect",
+		map[string]string{
+			"peer": config.Name, "protocol": firstProtocol(config.Protocol),
+			"url": config.URL,
+		},
+	)
 	sessionContext, cancel := context.WithCancel(ctx)
 	defer cancel()
 	writeErrors := make(chan error, 1)
@@ -1265,19 +1466,20 @@ func (manager *Manager) webSocketPeerSession(
 			Error  *ipcjson.RPCError `json:"error"`
 		}
 		if json.Unmarshal(data, &responseEnvelope) == nil &&
-			len(responseEnvelope.ID) != 0 && responseEnvelope.Method == "" &&
-			(len(responseEnvelope.Result) != 0 || responseEnvelope.Error != nil) {
-			var response ipcjson.Response
-			if json.Unmarshal(data, &response) == nil {
-				_ = rpcSession.Resolve(response)
-			}
+			len(responseEnvelope.ID) != 0 && responseEnvelope.Method == "" {
+			_ = rpcSession.resolveRaw(data)
 			continue
 		}
 		var request ipcjson.Request
 		if err := json.Unmarshal(data, &request); err != nil {
 			continue
 		}
-		if request.Method == "controller.event" || request.Method == "controller.status" {
+		if request.Method == "controller.event" || request.Method == "controller.state" {
+			if manager.ingestPeerEvent(config.Name, request.Params) {
+				continue
+			}
+		}
+		if request.Method == "controller.event" || request.Method == "controller.state" || request.Method == "controller.status" {
 			_, _ = manager.client.SendTextMessage(ctx, controller.TextMessage{
 				Source: "websocket", Target: "host", Type: "remote-event",
 				Text: string(request.Params),
@@ -1320,6 +1522,7 @@ func (manager *Manager) socketIOPeerSession(
 	}
 	connection, _, err := websocket.Dial(ctx, target.String(), &websocket.DialOptions{
 		HTTPHeader: header,
+		HTTPClient: lanresolver.HTTPClient(),
 	})
 	if err != nil {
 		return err
@@ -1369,11 +1572,20 @@ func (manager *Manager) socketIOPeerSession(
 	defer detach()
 	topics := append([]string(nil), config.Topics...)
 	if len(topics) == 0 {
-		topics = []string{"events"}
+		topics = []string{"events", "state"}
 	}
 	if err := writeEvent("subscribe", map[string]any{"topics": topics}); err != nil {
 		return err
 	}
+	manager.client.EmitHostActionEvent(
+		"bridge.peer.connected",
+		fmt.Sprintf("Bridge peer %s connected", config.Name),
+		"bridge", "peer-connect",
+		map[string]string{
+			"peer": config.Name, "protocol": firstProtocol(config.Protocol),
+			"url": config.URL,
+		},
+	)
 	sessionContext, cancel := context.WithCancel(ctx)
 	defer cancel()
 	writeErrors := make(chan error, 1)
@@ -1429,11 +1641,13 @@ func (manager *Manager) socketIOPeerSession(
 		}
 		switch name {
 		case "rpc.response":
-			var response ipcjson.Response
-			if json.Unmarshal(raw, &response) == nil {
-				_ = rpcSession.Resolve(response)
+			_ = rpcSession.resolveRaw(raw)
+		case "controller.event", "controller.state":
+			if manager.ingestPeerEvent(config.Name, raw) {
+				continue
 			}
-		case "controller.event", "controller.status", "message.accepted":
+			fallthrough
+		case "controller.status", "message.accepted":
 			_, _ = manager.client.SendTextMessage(ctx, controller.TextMessage{
 				Source: "websocket", Target: "host", Type: "remote-event",
 				Text: string(raw),
@@ -1499,8 +1713,11 @@ func decodeSocketIOPacket(value string) (string, json.RawMessage, error) {
 
 func (manager *Manager) remotePeerService() ipcjson.Service {
 	return ipcjson.Service{
-		Client:     manager.client,
-		HostConfig: manager.store.Current,
+		Client:                manager.client,
+		AuthorizationDisabled: true,
+		HostConfig:            manager.store.CurrentRuntime,
+		PersistentHostConfig:  manager.store.Current,
+		SubscribeHostConfig:   manager.store.SubscribeRuntime,
 		UpdateHostConfig: func(change func(*appconfig.Config) error) error {
 			_, err := manager.store.Update(change)
 			return err

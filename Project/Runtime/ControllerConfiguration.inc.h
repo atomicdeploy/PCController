@@ -17,7 +17,7 @@
 
 // Final-application record patched only by the guarded host workflow. The Go
 // compiler places it in the last 12 bytes below the selected core bootloader.
-// "PCI1" identifies schema 1: little-endian source hash and packed timestamp.
+// "PCID" identifies the fixed little-endian source hash and packed timestamp.
 constexpr uint16_t FirmwareIdentityAddress =
     static_cast<uint16_t>(PCCONTROLLER_IDENTITY_ADDRESS);
 // FirmwareIdentityRecord occupies the guarded fixed-location patch region.
@@ -28,7 +28,7 @@ struct __attribute__((packed)) FirmwareIdentityRecord {
 };
 const FirmwareIdentityRecord firmwareIdentity
     __attribute__((section(".firmware_identity"), used)) = {
-        0x31494350UL, static_cast<uint32_t>(PCCONTROLLER_BUILD_HASH),
+        0x44494350UL, static_cast<uint32_t>(PCCONTROLLER_BUILD_HASH),
         static_cast<uint32_t>(PCCONTROLLER_BUILD_TIMESTAMP)};
 static_assert(sizeof(FirmwareIdentityRecord) == 12,
               "Firmware identity patch record changed shape");
@@ -72,8 +72,10 @@ static_assert(PAGE_COUNT == PersistentMenuPageCount,
               "Persistent menu catalog no longer matches stable page IDs");
 
 // Four-character labels are packed contiguously to avoid pointer tables in SRAM.
+#if !PCCONTROLLER_ENABLE_EEPROM_MENU_LABELS
 const char MenuLabels[] PROGMEM =
     "doorVOLTCURRtLEDtBT LItEbEEPPWM rELYKEY uPWMr5-8MOVELErn";
+#endif
 const char EditLabels[] PROGMEM =
     "L-MdL-onL-oFS-MdP-ChP-u r-Chr-onuP-CuP-uur-Cur-M";
 constexpr uint8_t EditLabelCount = 12;

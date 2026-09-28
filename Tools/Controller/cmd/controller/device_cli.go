@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -501,7 +502,6 @@ func runMonitor(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 			if err := refresh(); err != nil {
 				fmt.Fprintln(stderr, "monitor:", err)
 				if !runtime.Snapshot().Connected {
-					runtime.ResumeAuto()
 					if reconnectErr := connectWithTimeout(ctx, runtime); reconnectErr != nil {
 						continue
 					}
@@ -516,12 +516,12 @@ func runMonitor(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 func connectWithTimeout(ctx context.Context, runtime *control.Runtime) error {
 	connectContext, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	return runtime.EnsureConnected(connectContext)
+	return runtime.Connect(connectContext)
 }
 
 func runIPC(args []string, stdout, stderr io.Writer, store *appconfig.Store) error {
 	if len(args) == 0 {
-		return errors.New("usage: ipc serve|call")
+		return errors.New("usage: ipc serve|call|monitor")
 	}
 	switch strings.ToLower(args[0]) {
 	case "serve":
@@ -635,6 +635,23 @@ func runIPC(args []string, stdout, stderr io.Writer, store *appconfig.Store) err
 		localDevice := startLocalDeviceHost(ctx, client, store)
 		defer localDevice.Close()
 		actions := hostui.NewActionBroker()
+		instances := hostui.NewInstanceRegistry()
+		coordinatorID := fmt.Sprintf("ipc:%d:bridge", os.Getpid())
+		listenValue := "stdio"
+		if listener != nil {
+			listenValue = listener.Addr().String()
+		}
+		process := hostui.CurrentProcessSelf(time.Now().UTC())
+		if _, registerErr := instances.Upsert(hostui.AppInstance{
+			ID: coordinatorID, Surface: "bridge", State: "background",
+			Values: map[string]string{
+				"role": "coordinator", "version": version, "source_hash": sourceHash,
+				"listen": listenValue, "websocket_path": *websocketPath,
+			},
+			Self: &process,
+		}); registerErr != nil {
+			return fmt.Errorf("register headless coordinator instance: %w", registerErr)
+		}
 		integrations, err := hostbridge.Start(ctx, client, store, actions, hostbridge.DiscoveryHostIdentity{
 			Version: version, SourceHash: sourceHash, BuildTime: buildTime,
 		})
@@ -644,20 +661,28 @@ func runIPC(args []string, stdout, stderr io.Writer, store *appconfig.Store) err
 		defer integrations.Close()
 		service := &ipcjson.Service{
 			Client: client, WebSocketPath: *websocketPath,
-			SocketIOPath:        serverConfig.IPC.SocketIOPath,
-			WebUI:               webui.Handler(*websocketPath),
-			IntegrationProxy:    integrationProxy,
-			LocalDevice:         localDevice,
-			AuthToken:           serverConfig.IPC.AuthToken,
-			AllowedOrigins:      append([]string(nil), serverConfig.IPC.AllowedOrigins...),
-			InboundWebhooks:     serverConfig.Integrations.InboundWebhooksEnabled,
-			HostVersion:         version,
-			HostSourceHash:      sourceHash,
-			HostBuildTime:       buildTime,
-			AppAction:           actions.Publish,
-			Shutdown:            cancel,
-			LastSessionSnapshot: sessionSnapshot.read,
-			HostConfig:          store.CurrentRuntime,
+			SocketIOPath:          serverConfig.IPC.SocketIOPath,
+			WebUI:                 webui.Handler(*websocketPath),
+			IntegrationProxy:      integrationProxy,
+			LocalDevice:           localDevice,
+			AuthToken:             serverConfig.IPC.AuthToken,
+                        AuthorizationDisabled: true,
+			AllowedOrigins:        append([]string(nil), serverConfig.IPC.AllowedOrigins...),
+			InboundWebhooks:       serverConfig.Integrations.InboundWebhooksEnabled,
+			HostVersion:           version,
+			HostSourceHash:        sourceHash,
+			HostBuildTime:         buildTime,
+                        HostInstanceID:        strings.TrimSuffix(coordinatorID, ":bridge"),
+                        HostProcessID:         os.Getpid(),
+                        HostSurface:           "ipc",
+			CoordinatorInstanceID: coordinatorID,
+			AppAction:             actions.Publish,
+			AppInstances:          instances,
+                        Shutdown:              cancel,
+                        LastSessionSnapshot:   sessionSnapshot.read,
+                        HostConfig:            store.CurrentRuntime,
+                        PersistentHostConfig:  store.Current,
+                        SubscribeHostConfig:   store.SubscribeRuntime,
 			UpdateHostConfig: func(change func(*appconfig.Config) error) error {
 				_, err := store.Update(change)
 				return err
@@ -668,6 +693,12 @@ func runIPC(args []string, stdout, stderr io.Writer, store *appconfig.Store) err
 				return integrations
 			},
 			HotkeyStatus: func() any { return integrations.HotkeyStatus() },
+		}
+		if listener != nil {
+			launches := newNamedSurfaceLaunchCoordinator(
+				store, instances, actions.Publish, listener.Addr().String(),
+			)
+			service.AppLaunch = launches.Launch
 		}
 		artifactService, err := newArtifactHostService(client, store, service.Shutdown)
 		if err != nil {
@@ -693,6 +724,106 @@ func runIPC(args []string, stdout, stderr io.Writer, store *appconfig.Store) err
 			*websocketPath,
 		)
 		return ipcjson.Serve(ctx, listener, service)
+
+	case "monitor":
+		flags := flag.NewFlagSet("ipc monitor", flag.ContinueOnError)
+		flags.SetOutput(stderr)
+		address := flags.String("addr", store.Current().IPC.Listen, "IPC server address")
+		token := flags.String("token", store.CurrentRuntime().IPC.AuthToken, "IPC bearer token")
+		tokenReference := flags.String("token-ref", "", "resolve the IPC bearer token from an OS-vault or environment reference")
+		kind := flags.String("kind", "program", "event kind or kind prefix")
+		stream := flags.String("stream", "activity", "activity|state|telemetry|debug")
+		after := flags.String("after", "latest", "latest or numeric event ID")
+		wait := flags.Duration("wait", 30*time.Second, "bounded server wait per event")
+		jsonOutput := flags.Bool("json", false, "print one JSON event per line")
+		once := flags.Bool("once", false, "exit after the first matching event")
+		if err := flags.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *wait <= 0 || *wait > 24*time.Hour {
+			return errors.New("--wait must be positive and at most 24 hours")
+		}
+		if strings.TrimSpace(*tokenReference) != "" {
+			tokenWasSet := false
+			flags.Visit(func(value *flag.Flag) {
+				tokenWasSet = tokenWasSet || value.Name == "token"
+			})
+			if tokenWasSet {
+				return errors.New("--token and --token-ref are mutually exclusive")
+			}
+			resolved, err := store.ResolveSecret(*tokenReference)
+			if err != nil {
+				return fmt.Errorf("resolve IPC bearer token: %w", err)
+			}
+			*token = resolved
+		}
+		ctx, cancel := signalContext()
+		defer cancel()
+		var cursor uint64
+		if strings.EqualFold(strings.TrimSpace(*after), "latest") {
+			response, err := ipcjson.Call(ctx, *address, ipcjson.Request{
+				Method: "controller.event.latest", Auth: *token,
+			})
+			if err != nil {
+				return err
+			}
+			encoded, _ := json.Marshal(response.Result)
+			var latest struct {
+				ID uint64 `json:"id"`
+			}
+			if err := json.Unmarshal(encoded, &latest); err != nil {
+				return fmt.Errorf("decode latest event cursor: %w", err)
+			}
+			cursor = latest.ID
+		} else {
+			value, err := strconv.ParseUint(strings.TrimSpace(*after), 10, 64)
+			if err != nil {
+				return errors.New("--after must be latest or a non-negative event ID")
+			}
+			cursor = value
+		}
+		for {
+			callContext, stop := context.WithTimeout(ctx, *wait+time.Second)
+			params, _ := json.Marshal(map[string]any{
+				"after_id":   cursor,
+				"kind":       strings.TrimSpace(*kind),
+				"stream":     strings.TrimSpace(*stream),
+				"timeout_ms": int(wait.Milliseconds()),
+			})
+			response, err := ipcjson.Call(callContext, *address, ipcjson.Request{
+				Method: "controller.event.next", Params: params, Auth: *token,
+			})
+			stop()
+			if err != nil {
+				if ctx.Err() != nil {
+					return nil
+				}
+				if errors.Is(err, context.DeadlineExceeded) || strings.Contains(strings.ToLower(err.Error()), "deadline") {
+					continue
+				}
+				return err
+			}
+			encoded, err := json.Marshal(response.Result)
+			if err != nil {
+				return err
+			}
+			var event controllerapi.Event
+			if err := json.Unmarshal(encoded, &event); err != nil {
+				return fmt.Errorf("decode monitored event: %w", err)
+			}
+			if event.ID <= cursor {
+				return fmt.Errorf("event cursor did not advance: got %d after %d", event.ID, cursor)
+			}
+			cursor = event.ID
+			if *jsonOutput {
+				fmt.Fprintln(stdout, string(encoded))
+			} else {
+				fmt.Fprintln(stdout, formatMonitoredEvent(event))
+			}
+			if *once {
+				return nil
+			}
+		}
 
 	case "call":
 		flags := flag.NewFlagSet("ipc call", flag.ContinueOnError)
@@ -749,6 +880,18 @@ func runIPC(args []string, stdout, stderr io.Writer, store *appconfig.Store) err
 	default:
 		return fmt.Errorf("unknown ipc command %q", args[0])
 	}
+}
+
+func formatMonitoredEvent(event controllerapi.Event) string {
+	operationID := strings.TrimSpace(event.Metadata["operation_id"])
+	prefix := event.Time.Local().Format("15:04:05.000") + " " + event.Kind
+	if operationID != "" {
+		prefix += " [" + operationID + "]"
+	}
+	if strings.TrimSpace(event.Text) == "" {
+		return prefix
+	}
+	return prefix + " " + strings.TrimSpace(event.Text)
 }
 
 func runReset(args []string, stdout, stderr io.Writer, store *appconfig.Store) error {

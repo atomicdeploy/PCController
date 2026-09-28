@@ -8,11 +8,13 @@ package controller
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -56,6 +58,7 @@ type (
 	OutputStreamState         = control.OutputStreamState
 	StatusSample              = control.StatusSample
 	TimelineEntry             = control.TimelineEntry
+	HardwareProblem           = ports.HardwareProblem
 	HistoryOptions            = control.HistoryOptions
 	RFLearnMode               = control.RFLearnMode
 	RFLearnOptions            = control.RFLearnOptions
@@ -186,38 +189,42 @@ type StatusUpdate struct {
 
 // Options configures discovery, transport, tooling, automation, and host policy.
 type Options struct {
-	Port             string                 `json:"port,omitempty"`
-	VID              string                 `json:"vid,omitempty"`
-	PID              string                 `json:"pid,omitempty"`
-	Name             string                 `json:"name,omitempty"`
-	PreferredDevice  *PortInfo              `json:"preferred_device,omitempty"`
-	BaudRate         int                    `json:"baud_rate,omitempty"`
-	StartupWait      time.Duration          `json:"startup_wait,omitempty"`
-	RequestTimeout   time.Duration          `json:"request_timeout,omitempty"`
-	HelloAttempts    int                    `json:"hello_attempts,omitempty"`
-	ResetOnReconnect bool                   `json:"reset_on_reconnect,omitempty"`
-	ProjectPath      string                 `json:"project_path,omitempty"`
-	FQBN             string                 `json:"fqbn,omitempty"`
-	FirmwareFeatures []string               `json:"firmware_features,omitempty"`
-	ToolchainCLI     string                 `json:"toolchain_cli,omitempty"`
-	Avrdude          string                 `json:"avrdude,omitempty"`
-	AvrdudeConf      string                 `json:"avrdude_conf,omitempty"`
-	Programmer       string                 `json:"programmer,omitempty"`
-	Macros           []Macro                `json:"macros,omitempty"`
-	Melodies         []Melody               `json:"melodies,omitempty"`
-	StatusEffects    []StatusLEDEffect      `json:"status_effects,omitempty"`
-	Scripts          map[string]string      `json:"scripts,omitempty"`
-	Automations      []Automation           `json:"automations,omitempty"`
-	MotionDoorPolicy string                 `json:"motion_door_policy,omitempty"`
-	LCDPresentation  LCDPresentationOptions `json:"lcd_presentation,omitempty"`
-	RF               RFConfig               `json:"rf"`
-	OSActions        OSPolicy               `json:"os_actions"`
+	Port                  string                 `json:"port,omitempty"`
+	VID                   string                 `json:"vid,omitempty"`
+	PID                   string                 `json:"pid,omitempty"`
+	Name                  string                 `json:"name,omitempty"`
+	PreferredDevice       *PortInfo              `json:"preferred_device,omitempty"`
+	BaudRate              int                    `json:"baud_rate,omitempty"`
+	StartupWait           time.Duration          `json:"startup_wait,omitempty"`
+	RequestTimeout        time.Duration          `json:"request_timeout,omitempty"`
+	HelloAttempts         int                    `json:"hello_attempts,omitempty"`
+	ResetOnReconnect      bool                   `json:"reset_on_reconnect,omitempty"`
+	ReconnectInitialDelay time.Duration          `json:"reconnect_initial_delay,omitempty"`
+	ReconnectMaximumDelay time.Duration          `json:"reconnect_maximum_delay,omitempty"`
+	ProjectPath           string                 `json:"project_path,omitempty"`
+	FQBN                  string                 `json:"fqbn,omitempty"`
+	FirmwareFeatures      []string               `json:"firmware_features,omitempty"`
+	ToolchainCLI          string                 `json:"toolchain_cli,omitempty"`
+	Avrdude               string                 `json:"avrdude,omitempty"`
+	AvrdudeConf           string                 `json:"avrdude_conf,omitempty"`
+	Programmer            string                 `json:"programmer,omitempty"`
+	Macros                []Macro                `json:"macros,omitempty"`
+	Melodies              []Melody               `json:"melodies,omitempty"`
+	StatusEffects         []StatusLEDEffect      `json:"status_effects,omitempty"`
+	Scripts               map[string]string      `json:"scripts,omitempty"`
+	Automations           []Automation           `json:"automations,omitempty"`
+	MotionDoorPolicy      string                 `json:"motion_door_policy,omitempty"`
+	LCDPresentation       LCDPresentationOptions `json:"lcd_presentation,omitempty"`
+	RF                    RFConfig               `json:"rf"`
+	OSActions             OSPolicy               `json:"os_actions"`
 }
 
-// Macro describes a host-owned, MCU-timed sequence of peripheral operations.
+// Macro describes a host-owned sequence of peripheral operations. Mode chooses
+// host-clocked alpha playback or the stricter MCU timing engine.
 type Macro struct {
 	ID                  byte        `json:"id"`
 	Name                string      `json:"name"`
+	Mode                string      `json:"mode,omitempty"`
 	Category            string      `json:"category,omitempty"`
 	Color               string      `json:"color,omitempty"`
 	Label               string      `json:"label,omitempty"`
@@ -324,29 +331,52 @@ type PortInfo struct {
 	InstanceID   string `json:"instance_id,omitempty"`
 }
 
+// IlluminationState combines the persisted enclosure-light policy with the
+// authoritative PWM value currently applied to the dedicated channel. Values
+// ending in Brightness use the board's 0..255 settings scale; PWM values use
+// the PCA controller's native logical 0..4095 scale.
+type IlluminationState struct {
+	Available         bool      `json:"available"`
+	Mode              byte      `json:"mode"`
+	OnBrightness      byte      `json:"on_brightness"`
+	OffBrightness     byte      `json:"off_brightness"`
+	DoorOpen          bool      `json:"door_open"`
+	TargetBrightness  byte      `json:"target_brightness"`
+	TargetPWM         uint16    `json:"target_pwm"`
+	AppliedBrightness byte      `json:"applied_brightness"`
+	AppliedPWM        uint16    `json:"applied_pwm"`
+	AtTarget          bool      `json:"at_target"`
+	Persisted         bool      `json:"persisted"`
+	UpdatedAt         time.Time `json:"updated_at,omitempty"`
+}
+
 // Snapshot is a point-in-time view of connection, board, and front-panel state.
 type Snapshot struct {
-	Connected         bool                 `json:"connected"`
-	Paused            bool                 `json:"paused"`
-	Port              PortInfo             `json:"port"`
-	Hello             Hello                `json:"hello"`
-	Status            Status               `json:"status"`
-	Settings          Settings             `json:"settings"`
-	HaveStatus        bool                 `json:"have_status"`
-	HaveSettings      bool                 `json:"have_settings"`
-	StatusUpdated     time.Time            `json:"status_updated,omitempty"`
-	ConnectionState   string               `json:"connection_state"`
-	ConnectionReason  string               `json:"connection_reason,omitempty"`
-	ConnectionUpdated time.Time            `json:"connection_updated,omitempty"`
-	ProgramState      ProgramStateSnapshot `json:"program_state"`
-	RFLearning        RFLearnState         `json:"rf_learning"`
-	FrontPanel        FrontPanel           `json:"front_panel"`
-	HaveFrontPanel    bool                 `json:"have_front_panel"`
-	FrontPanelUpdated time.Time            `json:"front_panel_updated,omitempty"`
-	StatusLED         StatusLEDState       `json:"status_led"`
-	HaveStatusLED     bool                 `json:"have_status_led"`
-	StatusLEDUpdated  time.Time            `json:"status_led_updated,omitempty"`
-	PortProcess       PortProcessSnapshot  `json:"port_process"`
+	Connected         bool                  `json:"connected"`
+	Paused            bool                  `json:"paused"`
+	Port              PortInfo              `json:"port"`
+	Hello             Hello                 `json:"hello"`
+	Status            Status                `json:"status"`
+	Settings          Settings              `json:"settings"`
+	HaveStatus        bool                  `json:"have_status"`
+	HaveSettings      bool                  `json:"have_settings"`
+	StatusUpdated     time.Time             `json:"status_updated,omitempty"`
+	ConnectionState   string                `json:"connection_state"`
+	ConnectionReason  string                `json:"connection_reason,omitempty"`
+	ConnectionUpdated time.Time             `json:"connection_updated,omitempty"`
+	ProgramState      ProgramStateSnapshot  `json:"program_state"`
+	RFLearning        RFLearnState          `json:"rf_learning"`
+	Macros            control.MacroSnapshot `json:"macros"`
+	HardwareProblems  []HardwareProblem     `json:"hardware_problems,omitempty"`
+	FrontPanel        FrontPanel            `json:"front_panel"`
+	HaveFrontPanel    bool                  `json:"have_front_panel"`
+	FrontPanelUpdated time.Time             `json:"front_panel_updated,omitempty"`
+	StatusLED         StatusLEDState        `json:"status_led"`
+	HaveStatusLED     bool                  `json:"have_status_led"`
+	StatusLEDUpdated  time.Time             `json:"status_led_updated,omitempty"`
+	StatusLEDRevision uint64                `json:"status_led_revision,omitempty"`
+	Illumination      IlluminationState     `json:"illumination"`
+	PortProcess       PortProcessSnapshot   `json:"port_process"`
 }
 
 // Event is the normalized event envelope shared by embedders and bridge clients.
@@ -381,6 +411,21 @@ type Event struct {
 	ResetCount  uint32            `json:"reset_count,omitempty"`
 }
 
+// FirmwareBuildRequest is the strict, typed alternative to sending a raw
+// shell command to a remote host. An empty request uses the host's configured
+// firmware feature profile.
+type FirmwareBuildRequest struct {
+	FirmwareFeatures   []string `json:"firmware_features,omitempty"`
+	NoFirmwareFeatures bool     `json:"no_firmware_features,omitempty"`
+}
+
+// FirmwareBuildResult correlates the final normalized log with the ordered
+// program.* events that WebSocket, Socket.IO, TUI, and long-poll clients see.
+type FirmwareBuildResult struct {
+	OperationID string `json:"operation_id"`
+	Output      string `json:"output"`
+}
+
 // OpcodeFrame is the raw, versionless UART exchange result. Payload is kept
 // opaque so clients can query firmware additions before the host understands
 // their schema.
@@ -408,26 +453,47 @@ type TextMessage struct {
 
 // Client owns one controller runtime, command engine, and host integration state.
 type Client struct {
-	runtime        *control.Runtime
-	engine         *shell.Engine
-	engineMu       sync.Mutex
-	optionsMu      sync.RWMutex
-	commandOptions control.CommandOptions
-	macroMu        sync.RWMutex
-	macros         []appconfig.Macro
-	outputMu       sync.RWMutex
-	melodies       []appconfig.Melody
-	statusEffects  []appconfig.StatusLEDEffect
-	outputs        *control.OutputScheduler
-	hostMu         sync.RWMutex
-	scripts        map[string]string
-	automations    []appconfig.Automation
-	safety         appconfig.Safety
-	rfConfig       appconfig.RFConfig
-	osPolicy       hostos.Policy
-	events         chan Event
-	done           chan struct{}
-	doneOnce       sync.Once
+	runtime            *control.Runtime
+	runtimeClose       func() error
+	shutdownMu         sync.Mutex
+	engine             *shell.Engine
+	engineMu           sync.Mutex
+	optionsMu          sync.RWMutex
+	commandOptions     control.CommandOptions
+	macroMu            sync.RWMutex
+	macros             []appconfig.Macro
+	outputMu           sync.RWMutex
+	melodies           []appconfig.Melody
+	statusEffects      []appconfig.StatusLEDEffect
+	outputs            *control.OutputScheduler
+	hostMu             sync.RWMutex
+	scripts            map[string]string
+	automations        []appconfig.Automation
+	safety             appconfig.Safety
+	rfConfig           appconfig.RFConfig
+	osPolicy           hostos.Policy
+	events             chan Event
+	done               chan struct{}
+	doneOnce           sync.Once
+	statusHub          statusSubscriptionHub
+	statusFetch        func(context.Context) (Status, error)
+	illuminationMu     sync.RWMutex
+	illumination       IlluminationState
+	illuminationPollAt time.Time
+}
+
+type statusSubscriber struct {
+	interval time.Duration
+	next     time.Time
+	updates  chan StatusUpdate
+}
+
+type statusSubscriptionHub struct {
+	mu          sync.Mutex
+	subscribers map[uint64]*statusSubscriber
+	nextID      uint64
+	wake        chan struct{}
+	running     bool
 }
 
 // New creates a client that owns its serial and background-service lifecycle.
@@ -451,16 +517,19 @@ func New(options Options) *Client {
 			Name:      options.Name,
 			Preferred: internalPortIdentity(options.PreferredDevice),
 		},
-		BaudRate:         baud,
-		StartupWait:      options.StartupWait,
-		RequestTimeout:   options.RequestTimeout,
-		HelloAttempts:    options.HelloAttempts,
-		ResetOnReconnect: options.ResetOnReconnect,
+		BaudRate:              baud,
+		StartupWait:           options.StartupWait,
+		RequestTimeout:        options.RequestTimeout,
+		HelloAttempts:         options.HelloAttempts,
+		ResetOnReconnect:      options.ResetOnReconnect,
+		ReconnectInitialDelay: options.ReconnectInitialDelay,
+		ReconnectMaximumDelay: options.ReconnectMaximumDelay,
 	})
 	client := &Client{
-		runtime:  runtime,
-		macros:   toAppMacros(options.Macros),
-		melodies: cloneMelodies(options.Melodies),
+		runtime:      runtime,
+		runtimeClose: runtime.Close,
+		macros:       toAppMacros(options.Macros),
+		melodies:     cloneMelodies(options.Melodies),
 		statusEffects: append(
 			[]appconfig.StatusLEDEffect(nil),
 			options.StatusEffects...,
@@ -538,11 +607,12 @@ func AttachSharedRuntime(
 		panic("controller: shared command engine is nil")
 	}
 	return &Client{
-		runtime: runtime,
-		engine:  engine,
-		outputs: control.NewOutputScheduler(runtime),
-		events:  make(chan Event),
-		done:    make(chan struct{}),
+		runtime:      runtime,
+		runtimeClose: runtime.Close,
+		engine:       engine,
+		outputs:      runtime.EnsureOutputScheduler(),
+		events:       make(chan Event),
+		done:         make(chan struct{}),
 	}
 }
 
@@ -561,9 +631,11 @@ func (client *Client) ApplyHostOptions(options Options) bool {
 			Preferred: internalPortIdentity(options.PreferredDevice),
 		},
 		BaudRate: baud, StartupWait: options.StartupWait,
-		RequestTimeout:   options.RequestTimeout,
-		HelloAttempts:    options.HelloAttempts,
-		ResetOnReconnect: options.ResetOnReconnect,
+		RequestTimeout:        options.RequestTimeout,
+		HelloAttempts:         options.HelloAttempts,
+		ResetOnReconnect:      options.ResetOnReconnect,
+		ReconnectInitialDelay: options.ReconnectInitialDelay,
+		ReconnectMaximumDelay: options.ReconnectMaximumDelay,
 	})
 	client.SetMacros(options.Macros)
 	client.SetOutputDefinitions(options.Melodies, options.StatusEffects)
@@ -749,7 +821,7 @@ func toAppMacros(macros []Macro) []appconfig.Macro {
 	for index, macro := range macros {
 		result[index] = appconfig.Macro{
 			ID: macro.ID, Name: macro.Name, Category: macro.Category,
-			Color: macro.Color, Label: macro.Label, LCDMessage: macro.LCDMessage,
+			Mode: macro.Mode, Color: macro.Color, Label: macro.Label, LCDMessage: macro.LCDMessage,
 			TimingToleranceUS:   macro.TimingToleranceUS,
 			KeepOutputsOnCancel: macro.KeepOutputsOnCancel,
 			Steps:               make([]appconfig.MacroStep, len(macro.Steps)),
@@ -895,8 +967,7 @@ func normalizedMotionDoorPolicy(value string) string {
 
 // Connect resumes automatic discovery and authenticates the selected board.
 func (client *Client) Connect(ctx context.Context) error {
-	client.runtime.ResumeAuto()
-	return client.runtime.EnsureConnected(ctx)
+	return client.runtime.Connect(ctx)
 }
 
 // Open connects directly to a named serial port and authenticates the board.
@@ -939,13 +1010,19 @@ func (client *Client) PulseResetFor(
 }
 
 // Shutdown closes the serial port and releases background event forwarding.
-// A shutdown client must not be reused.
+// If closing the transport fails, Shutdown retains ownership and may be retried.
+// After a successful shutdown, the client must not be reused.
 func (client *Client) Shutdown() error {
+	client.shutdownMu.Lock()
+	defer client.shutdownMu.Unlock()
+	client.outputs.StopAll()
+	if err := client.runtimeClose(); err != nil {
+		return err
+	}
 	client.outputs.Close()
 	_ = hostos.DefaultExecutor.ReleaseAll()
-	err := client.runtime.Close()
 	client.doneOnce.Do(func() { close(client.done) })
-	return err
+	return nil
 }
 
 // Execute runs one command through the same engine exposed by every host surface.
@@ -953,6 +1030,64 @@ func (client *Client) Execute(ctx context.Context, command string) (string, erro
 	client.engineMu.Lock()
 	defer client.engineMu.Unlock()
 	return client.engine.Execute(ctx, command)
+}
+
+// BuildFirmware compiles the configured canonical project without accepting
+// an arbitrary remote filesystem path or raw compiler flags.
+func (client *Client) BuildFirmware(
+	ctx context.Context,
+	request FirmwareBuildRequest,
+) (result FirmwareBuildResult, buildErr error) {
+	operationBytes := make([]byte, 12)
+	if _, err := rand.Read(operationBytes); err != nil {
+		return result, fmt.Errorf("create firmware build operation ID: %w", err)
+	}
+	operationID := "firmware-build-" + hex.EncodeToString(operationBytes)
+	result.OperationID = operationID
+	options := client.currentCommandOptions()
+	phase := func(state string, failure error) {
+		if client.runtime == nil {
+			return
+		}
+		metadata := map[string]string{"operation_id": operationID, "operation": "compile", "method": "compile", "state": state}
+		if failure != nil {
+			metadata["error"] = failure.Error()
+		}
+		client.runtime.PublishStructuredEvent(control.Event{Kind: "program." + state, Stream: control.EventStreamActivity,
+			Text: "firmware compile " + state, Metadata: metadata})
+	}
+	phase("started", nil)
+	defer func() {
+		if buildErr != nil {
+			buildErr = errors.New(control.NormalizeProgramError(buildErr.Error(), options.ProjectPath, options.ArduinoCLI, options.ArduinoConfig))
+			phase("failed", buildErr)
+		} else {
+			phase("completed", nil)
+		}
+	}()
+	if len(request.FirmwareFeatures) != 0 && request.NoFirmwareFeatures {
+		return result, errors.New(
+			"firmware_features and no_firmware_features are mutually exclusive",
+		)
+	}
+	features, err := programmer.NormalizeFirmwareFeatures(request.FirmwareFeatures)
+	if err != nil {
+		return result, err
+	}
+	words := []string{"program", "compile", "."}
+	if request.NoFirmwareFeatures {
+		words = append(words, "--no-firmware-features")
+	} else {
+		for _, feature := range programmer.FirmwareFeatureNames(features) {
+			words = append(words, "--firmware-feature", feature)
+		}
+	}
+	output, buildErr := client.Execute(
+		control.WithProgramOperationID(ctx, operationID),
+		strings.Join(words, " "),
+	)
+	result.Output = control.NormalizeProgramOutput(output, options.ProjectPath, options.ArduinoCLI, options.ArduinoConfig)
+	return result, buildErr
 }
 
 // CommandCatalog exposes the same discoverable command contract used by the
@@ -991,6 +1126,12 @@ func (client *Client) Status(ctx context.Context) (Status, error) {
 	return client.runtime.RefreshStatus(ctx)
 }
 
+// SetBoardSilent applies and verifies the MCU Silent bit through the sole
+// serial-owning runtime.
+func (client *Client) SetBoardSilent(ctx context.Context, silent bool) (Settings, error) {
+	return client.runtime.SetBoardSilent(ctx, silent)
+}
+
 // SubscribeStatus polls only while the returned subscription context is
 // alive. Merely keeping the serial protocol connected never starts polling.
 func (client *Client) SubscribeStatus(
@@ -1001,36 +1142,245 @@ func (client *Client) SubscribeStatus(
 		return nil, errors.New("status subscription interval must be 50ms..1m")
 	}
 	updates := make(chan StatusUpdate, 1)
+	client.statusHub.mu.Lock()
+	if client.statusHub.subscribers == nil {
+		client.statusHub.subscribers = make(map[uint64]*statusSubscriber)
+		client.statusHub.wake = make(chan struct{}, 1)
+	}
+	client.statusHub.nextID++
+	id := client.statusHub.nextID
+	client.statusHub.subscribers[id] = &statusSubscriber{
+		interval: interval, next: time.Now(), updates: updates,
+	}
+	if !client.statusHub.running {
+		client.statusHub.running = true
+		go client.runStatusSubscriptionHub()
+	}
+	wake := client.statusHub.wake
+	client.statusHub.mu.Unlock()
+	select {
+	case wake <- struct{}{}:
+	default:
+	}
 	go func() {
-		defer close(updates)
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case at := <-ticker.C:
-				status, err := client.Status(ctx)
-				update := StatusUpdate{Time: at, Status: status}
-				if err != nil {
-					update.Error = err.Error()
-				}
-				select {
-				case updates <- update:
-				default:
-					select {
-					case <-updates:
-					default:
-					}
-					select {
-					case updates <- update:
-					default:
-					}
-				}
-			}
+		<-ctx.Done()
+		client.statusHub.mu.Lock()
+		if subscriber, ok := client.statusHub.subscribers[id]; ok {
+			delete(client.statusHub.subscribers, id)
+			close(subscriber.updates)
+		}
+		client.statusHub.mu.Unlock()
+		select {
+		case wake <- struct{}{}:
+		default:
 		}
 	}()
 	return updates, nil
+}
+
+// runStatusSubscriptionHub performs at most one physical status query at each
+// fastest requested cadence, then fans that authoritative result out according
+// to each subscriber's interval. Additional Web/TUI clients never multiply
+// serial traffic.
+func (client *Client) runStatusSubscriptionHub() {
+	for {
+		client.statusHub.mu.Lock()
+		if len(client.statusHub.subscribers) == 0 {
+			client.statusHub.running = false
+			client.statusHub.mu.Unlock()
+			return
+		}
+		now := time.Now()
+		next := now.Add(time.Minute)
+		for _, subscriber := range client.statusHub.subscribers {
+			if subscriber.next.Before(next) {
+				next = subscriber.next
+			}
+		}
+		wake := client.statusHub.wake
+		client.statusHub.mu.Unlock()
+
+		delay := time.Until(next)
+		if delay > 0 {
+			timer := time.NewTimer(delay)
+			select {
+			case <-timer.C:
+			case <-wake:
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+				continue
+			}
+		}
+
+		at := time.Now()
+		requestContext, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+		status, err := client.statusForSubscription(requestContext)
+		if err == nil {
+			client.refreshIllumination(requestContext, status)
+		}
+		cancel()
+		update := StatusUpdate{Time: at, Status: status}
+		if err != nil {
+			update.Error = err.Error()
+		}
+		client.statusHub.mu.Lock()
+		for _, subscriber := range client.statusHub.subscribers {
+			if subscriber.next.After(at) {
+				continue
+			}
+			for !subscriber.next.After(at) {
+				subscriber.next = subscriber.next.Add(subscriber.interval)
+			}
+			if err != nil {
+				backoff := at.Add(time.Second)
+				if subscriber.next.Before(backoff) {
+					subscriber.next = backoff
+				}
+			}
+			select {
+			case subscriber.updates <- update:
+			default:
+				select {
+				case <-subscriber.updates:
+				default:
+				}
+				select {
+				case subscriber.updates <- update:
+				default:
+				}
+			}
+		}
+		client.statusHub.mu.Unlock()
+	}
+}
+
+func (client *Client) statusForSubscription(ctx context.Context) (Status, error) {
+	if client.statusFetch != nil {
+		return client.statusFetch(ctx)
+	}
+	return client.Status(ctx)
+}
+
+const enclosureIlluminationPWMChannel byte = 11
+
+func illuminationPWM(brightness byte) uint16 {
+	scaled := uint32(brightness)*16 + uint32(brightness)/16
+	// Brightness is an 8-bit value, so scaled is mathematically bounded by
+	// the PCA9685 full-scale value. Keep the bound explicit at the narrowing
+	// point so callers, static analysis, and future type changes all preserve
+	// the hardware contract.
+	if scaled > 4095 {
+		return 4095
+	}
+	return uint16(scaled)
+}
+
+func illuminationBrightness(pwm uint16) byte {
+	if pwm >= 4095 {
+		return 255
+	}
+	return byte((uint32(pwm)*16 + 128) / 257)
+}
+
+func illuminationState(
+	settings Settings,
+	status Status,
+	pwm PWMValues,
+	updatedAt time.Time,
+) IlluminationState {
+	target := settings.OffBrightness
+	switch settings.LightMode {
+	case 1:
+		if status.DoorOpen {
+			target = settings.OnBrightness
+		}
+	case 2:
+		target = settings.OnBrightness
+	}
+	targetPWM := illuminationPWM(target)
+	appliedPWM := pwm.Values[enclosureIlluminationPWMChannel]
+	return IlluminationState{
+		Available:         pwm.Available && status.PWMAvailable,
+		Mode:              settings.LightMode,
+		OnBrightness:      settings.OnBrightness,
+		OffBrightness:     settings.OffBrightness,
+		DoorOpen:          status.DoorOpen,
+		TargetBrightness:  target,
+		TargetPWM:         targetPWM,
+		AppliedBrightness: illuminationBrightness(appliedPWM),
+		AppliedPWM:        appliedPWM,
+		AtTarget:          appliedPWM == targetPWM,
+		Persisted:         settings.Persisted,
+		UpdatedAt:         updatedAt,
+	}
+}
+
+func sameIlluminationState(left, right IlluminationState) bool {
+	left.UpdatedAt = time.Time{}
+	right.UpdatedAt = time.Time{}
+	return left == right
+}
+
+func (client *Client) observeIllumination(state IlluminationState) {
+	client.illuminationMu.Lock()
+	previous := client.illumination
+	changed := !sameIlluminationState(previous, state)
+	client.illumination = state
+	client.illuminationMu.Unlock()
+	if !changed || client.runtime == nil {
+		return
+	}
+	client.runtime.PublishStructuredEvent(control.Event{
+		Kind:   "illumination.changed",
+		Stream: control.EventStreamState,
+		Text: fmt.Sprintf(
+			"enclosure illumination applied %d/4095 toward %d/4095",
+			state.AppliedPWM,
+			state.TargetPWM,
+		),
+		Metadata: map[string]string{
+			"mode":               strconv.Itoa(int(state.Mode)),
+			"door_open":          strconv.FormatBool(state.DoorOpen),
+			"on_brightness":      strconv.Itoa(int(state.OnBrightness)),
+			"off_brightness":     strconv.Itoa(int(state.OffBrightness)),
+			"target_brightness":  strconv.Itoa(int(state.TargetBrightness)),
+			"target_pwm":         strconv.Itoa(int(state.TargetPWM)),
+			"applied_brightness": strconv.Itoa(int(state.AppliedBrightness)),
+			"applied_pwm":        strconv.Itoa(int(state.AppliedPWM)),
+			"at_target":          strconv.FormatBool(state.AtTarget),
+			"persisted":          strconv.FormatBool(state.Persisted),
+		},
+	})
+}
+
+func (client *Client) refreshIllumination(ctx context.Context, status Status) {
+	if client.runtime == nil {
+		return
+	}
+	snapshot := client.runtime.Snapshot()
+	if !snapshot.Connected || !snapshot.HaveSettings || !status.PWMAvailable {
+		return
+	}
+	now := time.Now()
+	client.illuminationMu.Lock()
+	if now.Before(client.illuminationPollAt) {
+		client.illuminationMu.Unlock()
+		return
+	}
+	// Ten authoritative samples per second are visually responsive for the
+	// 20 ms firmware fade while avoiding a 34-byte UART response per high-rate
+	// TUI subscriber tick.
+	client.illuminationPollAt = now.Add(100 * time.Millisecond)
+	client.illuminationMu.Unlock()
+	pwm, err := client.PWMValues(ctx)
+	if err != nil || !pwm.Available {
+		return
+	}
+	client.observeIllumination(illuminationState(snapshot.Settings, status, pwm, now))
 }
 
 // ConfigureHistory updates bounded telemetry retention and persistence policy.
@@ -1333,6 +1683,49 @@ func (client *Client) PWMValues(ctx context.Context) (PWMValues, error) {
 	return native.ParsePWMValues(frame.Payload)
 }
 
+// Illumination reads the persisted policy, live door state, and exact applied
+// enclosure PWM value through one typed host surface.
+func (client *Client) Illumination(ctx context.Context) (IlluminationState, error) {
+	settings, err := client.runtime.Settings(ctx)
+	if err != nil {
+		return IlluminationState{}, fmt.Errorf("read illumination settings: %w", err)
+	}
+	status, err := client.Status(ctx)
+	if err != nil {
+		return IlluminationState{}, fmt.Errorf("read illumination status: %w", err)
+	}
+	pwm, err := client.PWMValues(ctx)
+	if err != nil {
+		return IlluminationState{}, fmt.Errorf("read illumination PWM: %w", err)
+	}
+	if !pwm.Available || !status.PWMAvailable {
+		return IlluminationState{}, errors.New("enclosure illumination PWM is unavailable")
+	}
+	state := illuminationState(settings, status, pwm, time.Now())
+	client.observeIllumination(state)
+	return state, nil
+}
+
+// SetIllumination changes only the three enclosure-light policy fields,
+// preserves every unrelated setting, waits for EEPROM durability, and returns
+// an independently read-back live state.
+func (client *Client) SetIllumination(
+	ctx context.Context,
+	mode, onBrightness, offBrightness byte,
+) (IlluminationState, error) {
+	desired, err := client.runtime.Settings(ctx)
+	if err != nil {
+		return IlluminationState{}, fmt.Errorf("read settings before illumination write: %w", err)
+	}
+	desired.LightMode = mode
+	desired.OnBrightness = onBrightness
+	desired.OffBrightness = offBrightness
+	if _, err := client.runtime.SetSettings(ctx, desired); err != nil {
+		return IlluminationState{}, fmt.Errorf("apply illumination settings: %w", err)
+	}
+	return client.Illumination(ctx)
+}
+
 // SetStatusRGB replaces the base status color and cancels an active overlay.
 func (client *Client) SetStatusRGB(
 	ctx context.Context,
@@ -1348,7 +1741,7 @@ func (client *Client) SetStatusRGBBase(
 	ctx context.Context,
 	red, green, blue, brightness byte,
 ) error {
-	return client.outputs.SetStatusBase(ctx, red, green, blue, brightness)
+	return client.outputs.SetStatusBase(control.WithBackgroundCommand(ctx), red, green, blue, brightness)
 }
 
 // OutputState returns active melody and status-effect operation metadata.
@@ -1542,6 +1935,17 @@ func (client *Client) MapLearnedRF(
 // Snapshot returns the latest cached connection and board state without polling.
 func (client *Client) Snapshot() Snapshot {
 	snapshot := client.runtime.Snapshot()
+	// Library snapshots belong to client queries, not the hot board-status
+	// path: copying a long take for every internal status check is unnecessary.
+	if runner := client.runtime.MacroRunner(); runner != nil {
+		snapshot.Macros = runner.Snapshot()
+	}
+	client.illuminationMu.RLock()
+	illumination := client.illumination
+	client.illuminationMu.RUnlock()
+	if !snapshot.Connected || !snapshot.HaveSettings || !snapshot.HaveStatus {
+		illumination = IlluminationState{}
+	}
 	return Snapshot{
 		Connected: snapshot.Connected,
 		Paused:    snapshot.Paused,
@@ -1566,12 +1970,16 @@ func (client *Client) Snapshot() Snapshot {
 		ConnectionUpdated: snapshot.ConnectionUpdated,
 		ProgramState:      snapshot.ProgramState,
 		RFLearning:        snapshot.RFLearning,
+		Macros:            snapshot.Macros,
+		HardwareProblems:  snapshot.HardwareProblems,
 		FrontPanel:        snapshot.FrontPanel,
 		HaveFrontPanel:    snapshot.HaveFrontPanel,
 		FrontPanelUpdated: snapshot.FrontPanelUpdated,
 		StatusLED:         snapshot.StatusLED,
 		HaveStatusLED:     snapshot.HaveStatusLED,
 		StatusLEDUpdated:  snapshot.StatusLEDUpdated,
+		StatusLEDRevision: snapshot.StatusLEDRevision,
+		Illumination:      illumination,
 		PortProcess:       snapshot.PortProcess,
 	}
 }
@@ -1821,6 +2229,33 @@ func (client *Client) EmitHostActionEvent(
 		Metadata: metadata,
 	})
 	return publicEvent(event)
+}
+
+// IngestBridgeEvent republishes one authenticated peer event through the
+// local runtime without flattening its kind or metadata into a text message.
+// The ingress marker prevents bridge cycles while allowing local integrations
+// such as the optional PC buzzer mirror to react immediately.
+func (client *Client) IngestBridgeEvent(peer string, event Event) Event {
+	peer = strings.TrimSpace(peer)
+	metadata := cloneStringMap(event.Metadata)
+	if metadata == nil {
+		metadata = make(map[string]string)
+	}
+	metadata["bridge.ingress"] = peer
+	metadata["bridge.event_id"] = strconv.FormatUint(event.ID, 10)
+	if source := strings.TrimSpace(event.Source); source != "" {
+		metadata["bridge.original_source"] = source
+	}
+	forwarded := client.runtime.PublishStructuredEvent(control.Event{
+		Kind: event.Kind, Stream: event.Stream, Text: event.Text,
+		Frame:     native.Frame{Opcode: event.Opcode, Seq: event.Seq, Payload: append([]byte(nil), event.Payload...)},
+		Lifecycle: event.Lifecycle, Reason: event.Reason, State: event.State,
+		Gesture: event.Gesture, Source: "bridge", Target: event.Target,
+		MessageType: event.MessageType, Action: event.Action, Metadata: metadata,
+		RFCode: event.RFCode, RFBits: event.RFBits, RFProtocol: event.RFProtocol,
+		RFPulseUS: event.RFPulseUS, ResetCause: event.ResetCause, ResetCount: event.ResetCount,
+	})
+	return publicEvent(forwarded)
 }
 
 // SyncToolchain updates installed cores/libraries and ensures every

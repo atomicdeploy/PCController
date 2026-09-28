@@ -257,7 +257,27 @@ func (model Model) commitBoardSettingEditor() (Model, tea.Cmd, bool) {
 
 func (model Model) commitAppSettingEditor() (Model, tea.Cmd, bool) {
 	editor := model.settingEditor
+	if editor.Key == "instance.navigation" {
+		enabled := editorField(editor, "enabled") != 0
+		model.navigationSync = enabled
+		model.navigationCursor.Reset()
+		if model.setNavigationSync != nil {
+			model.setNavigationSync(enabled)
+		}
+		model.settingEditor = nil
+		model.reportInstance()
+		if enabled {
+			model.setNotice("Navigation synchronization enabled for this TUI")
+		} else {
+			model.setNotice("This TUI now navigates independently")
+		}
+		return model, nil, true
+	}
 	if descriptor, ok := peripheralDescriptorForSettingKey(editor.Key); ok {
+		if model.remote != nil && model.remote.SaveHostUI == nil {
+			model.setNotice("Remote peripheral naming is unavailable from this host")
+			return model, nil, true
+		}
 		updated, name, restored, err := model.savePeripheralName(descriptor, editor.Text)
 		if err != nil {
 			model.appendLog("error", "save peripheral name: "+err.Error())
@@ -276,6 +296,10 @@ func (model Model) commitAppSettingEditor() (Model, tea.Cmd, bool) {
 		return model.commitDiscoverySettingEditor()
 	}
 	if strings.HasPrefix(editor.Key, "led.") {
+		if model.remote != nil {
+			model.setNotice("Remote status LED host settings are unavailable; no local setting was changed")
+			return model, nil, true
+		}
 		return model.commitStatusLEDSettingEditor()
 	}
 	if editor.Key == "buzzer.path" {
@@ -287,6 +311,50 @@ func (model Model) commitAppSettingEditor() (Model, tea.Cmd, bool) {
 		}
 		model.settingEditor = nil
 		return model.dispatchLine("buzzer path " + paths[selected])
+	}
+	if strings.HasPrefix(editor.Key, "buzzer.") {
+		value := model.hostIntegrationValue
+		switch editor.Key {
+		case "buzzer.renderers":
+			value.BuzzerMirror.NativeEnabled = editorField(editor, "native") != 0
+			value.BuzzerMirror.WebAudioEnabled = editorField(editor, "web") != 0
+			if value.BuzzerMirror.NativeEnabled && strings.EqualFold(value.BuzzerMirror.Backend, "off") {
+				value.BuzzerMirror.Backend = "auto"
+			}
+			if value.BuzzerMirror.Enabled && !value.BuzzerMirror.NativeEnabled && !value.BuzzerMirror.WebAudioEnabled {
+				model.setNotice("Select at least one host buzzer renderer")
+				return model, nil, true
+			}
+		case "buzzer.backend":
+			backends := []string{"auto", "native", "external", "off"}
+			selected := editorField(editor, "backend")
+			if selected < 0 || selected >= len(backends) {
+				model.setNotice("Unknown PC speaker backend")
+				return model, nil, true
+			}
+			value.BuzzerMirror.Backend = backends[selected]
+			if value.BuzzerMirror.Backend == "off" {
+				value.BuzzerMirror.NativeEnabled = false
+			}
+		case "buzzer.executable":
+			executable := strings.TrimSpace(editor.Text)
+			if len(executable) > 1024 || strings.ContainsAny(executable, "\r\n\x00") {
+				model.setNotice("Beep executable path is invalid")
+				return model, nil, true
+			}
+			value.BuzzerMirror.Executable = executable
+		}
+		if model.saveHostIntegrations != nil {
+			if err := model.saveHostIntegrations(value); err != nil {
+				model.appendLog("error", "save PC buzzer settings: "+err.Error())
+				model.setNotice("PC buzzer setting was not saved: " + err.Error())
+				return model, nil, true
+			}
+		}
+		model.hostIntegrationValue = value
+		model.settingEditor = nil
+		model.setNotice("PC buzzer setting saved and hot-applied")
+		return model, nil, true
 	}
 	ui := model.uiValue
 	switch editor.Key {
@@ -352,6 +420,11 @@ func (model Model) commitAppSettingEditor() (Model, tea.Cmd, bool) {
 		ui.TUIConsole.FontSize = editorField(editor, "pixels")
 	case "poll.active":
 		ui.StatusIntervalMS = editorField(editor, "interval")
+		if ui.MeasurementFreshnessMS < ui.StatusIntervalMS+appconfig.MeasurementFreshnessHeadroomMS {
+			ui.MeasurementFreshnessMS = ui.StatusIntervalMS + appconfig.MeasurementFreshnessHeadroomMS
+		}
+	case "measurement.freshness":
+		ui.MeasurementFreshnessMS = editorField(editor, "window")
 	case "history.retention":
 		ui.HistoryHours = editorField(editor, "hours")
 	case "display.decimals":
@@ -381,6 +454,23 @@ func (model Model) commitAppSettingEditor() (Model, tea.Cmd, bool) {
 	}
 	ui.Appearance = appconfig.NormalizeAppearance(ui.Appearance)
 	ui.SetupComplete = true
+	if model.remote != nil && (editor.Key == "app.title" || editor.Key == "app.tagline" ||
+		editor.Key == "poll.active" || editor.Key == "measurement.freshness") {
+		if model.remote.SaveHostUI == nil {
+			model.setNotice("Remote host configuration is unavailable; no local setting was changed")
+			return model, nil, true
+		}
+		if err := model.remote.SaveHostUI(ui); err != nil {
+			model.appendLog("error", "save remote host setting: "+err.Error())
+			model.setNotice("Remote host setting was not saved: " + err.Error())
+			return model, nil, true
+		}
+		model.uiValue = ui
+		model.prefs = preferencesFromUI(ui)
+		model.settingEditor = nil
+		model.setNotice("Remote host setting saved through authenticated IPC")
+		return model, nil, true
+	}
 	if strings.HasPrefix(editor.Key, "console.") && model.applyTUIConsole != nil {
 		if err := model.applyTUIConsole(ui.TUIConsole); err != nil {
 			model.appendLog("error", "apply local console settings: "+err.Error())
@@ -399,7 +489,11 @@ func (model Model) commitAppSettingEditor() (Model, tea.Cmd, bool) {
 	model.prefs = preferencesFromUI(ui)
 	model.lcdMirror = ui.MirrorPromptToLCD
 	model.settingEditor = nil
-	model.setNotice("Host setting saved and hot-applied")
+	if model.remote != nil {
+		model.setNotice("Client TUI preference saved locally")
+	} else {
+		model.setNotice("Host setting saved and hot-applied")
+	}
 	return model, nil, true
 }
 

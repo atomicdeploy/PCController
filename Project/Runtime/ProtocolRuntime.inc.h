@@ -17,6 +17,7 @@ void sendHello(uint8_t sequence) {
       (1UL << 8) |  // persistent settings
       (1UL << 9) |  // menu remote control
       (1UL << 10) | // named temperature identities
+      (1UL << 11) | // BT Audio indicator state is wired and reported
       (1UL << 12) | // host display text and asynchronous events
       (1UL << 13) | // exact front-panel snapshot
       (1UL << 14) | // host-injected key lifecycle; Down acts immediately
@@ -215,26 +216,37 @@ void serviceStatusLedPush() {
       statusLeds.renderedRed(), statusLeds.renderedGreen(),
       statusLeds.renderedBlue(), statusLeds.brightness(),
       static_cast<uint8_t>(statusLeds.effect()), statusLeds.condition()};
-  if (memcmp(payload, lastPushedStatusLed, sizeof(payload)) == 0) {
+  const uint8_t tick = static_cast<uint8_t>(now);
+  if (memcmp(payload, lastPushedStatusLed, sizeof(payload)) == 0 ||
+      static_cast<uint8_t>(tick - lastStatusLedPushAt) < 17U) {
     return;
   }
   memcpy(lastPushedStatusLed, payload, sizeof(payload));
+  lastStatusLedPushAt = tick;
   appProtocol.send(ControllerProtocol::StatusLedChanged, 0, payload,
                    sizeof(payload));
 }
 
 #if PCCONTROLLER_ENABLE_MENU_DIRECTORY
-// Reports one built-in page's stable ID, parent category, flags, and label.
+// Reports every stable direct-selector ID. PAGE_MOTION is a non-browsable
+// compatibility alias, but stays in the complete directory so persisted
+// layout clients retain their 14-ID permutation; pageToMode() reports KEY.
 void sendMenuList(uint8_t sequence, uint8_t cursor) {
   uint8_t payload[46] = {1, PAGE_COUNT, 0xFF, 0};
   uint8_t index = 4;
   while (cursor < PAGE_COUNT && payload[3] < 7) {
     payload[index++] = cursor;
     payload[index++] = static_cast<uint8_t>(pageToMode(cursor));
+#if PCCONTROLLER_ENABLE_EEPROM_MENU_LABELS
+    EepromMenuLabels::copy(cursor,
+                           reinterpret_cast<char *>(payload + index));
+    index += 4;
+#else
     for (uint8_t character = 0; character < 4; ++character) {
       payload[index++] = pgm_read_byte(
           MenuLabels + static_cast<uint8_t>(cursor * 4U + character));
     }
+#endif
     ++cursor;
     ++payload[3];
   }
@@ -266,14 +278,18 @@ bool applyMenuLayout(const uint8_t *payload, uint8_t length, uint32_t at) {
     return false;
   }
   const uint16_t visibleMask = readU16(payload + 2);
-  const uint8_t firstVisible =
-      firstVisiblePersistentMenuPage(visibleMask, payload + 4);
-  if (firstVisible == 0xFF) {
+  if (firstVisiblePersistentMenuPage(visibleMask, payload + 4) == 0xFF) {
     return false;
   }
   ControllerSettings &settings = settingsStore.values();
   settings.visibleMenuMask = visibleMask;
   memcpy(settings.menuOrder, payload + 4, PersistentMenuOrderWireBytes);
+  settingsStore.normalizeMenuLayout();
+  const uint8_t firstVisible = firstVisiblePersistentMenuPage(
+      settings.visibleMenuMask, settings.menuOrder);
+  if (firstVisible == 0xFF) {
+    return false;
+  }
   if (!settings.menuPageVisible(settings.defaultMenuPage)) {
     settings.defaultMenuPage = firstVisible;
   }
@@ -371,15 +387,16 @@ void sendLearnedRemotes(uint8_t sequence, uint8_t cursor) {
 // tail; all other positional tails are rejected.
 bool applySettings(const uint8_t *payload, uint8_t length, uint32_t at) {
   const bool hasBoardName = length != 15;
+  const uint8_t defaultMenuPage = canonicalMenuPage(payload[10]);
   if ((hasBoardName &&
        (length < 16 || length != static_cast<uint8_t>(16 + payload[15]))) ||
       payload[0] != 3 || payload[2] > 2 || payload[5] > 7 ||
       payload[14] == 0 ||
       (payload[7] & ~OutputPersistence::AllowedMask) != 0
 #if PCCONTROLLER_MENU_VISIBILITY
-      || !settingsStore.values().menuPageVisible(payload[10])
+      || !settingsStore.values().menuPageVisible(defaultMenuPage)
 #endif
-      || payload[10] >= PAGE_COUNT
+      || defaultMenuPage >= PAGE_COUNT
       ) {
     return false;
   }
@@ -403,7 +420,7 @@ bool applySettings(const uint8_t *payload, uint8_t length, uint32_t at) {
       SettingsFlags::DoorAudioDisabled |
       SettingsFlags::RelayAudioDisabled;
   settings.streamPeriodMs = newStreamPeriod;
-  settings.defaultMenuPage = payload[10];
+  settings.defaultMenuPage = defaultMenuPage;
   settings.menuFlags = payload[11];
   settings.displayOptions = payload[12];
   settings.relayRestoreMask = payload[13];
@@ -539,12 +556,12 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
       goto acknowledged;
 
     case StatusRgb:
-      if (length < 4) {
+      if (length != 4) {
         goto badPayload;
       }
       hostLcdFlags |= HOST_STATUS_OVERRIDE;
-      statusLeds.setBrightness(payload[3]);
-      statusLeds.setCustom(payload[0], payload[1], payload[2]);
+      statusLeds.setCustom(payload[0], payload[1], payload[2], payload[3],
+                           frameNow);
       goto acknowledged;
 
     case StatusEffect:
@@ -555,18 +572,15 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
         statusLeds.cancelEffect();
         goto acknowledged;
       }
-      if (length < 12 || payload[0] == 0 || payload[0] > 4 ||
-          !statusLeds.setEffect(
-              static_cast<StatusLedEffect>(payload[0]), payload[1], payload[2],
-              payload[3], payload[4], payload[5], payload[6], payload[7],
-              payload[8], readU16(payload + 9), payload[11], frameNow)) {
+      if (length != StatusLedController::ProfilePayloadBytes ||
+          !statusLeds.setEffect(payload, frameNow)) {
         goto badPayload;
       }
       hostLcdFlags |= HOST_STATUS_OVERRIDE;
       goto acknowledged;
 
     case StatusProfileGet: {
-      if (length < 1 || payload[0] >= StatusLedController::ProfileCount) {
+      if (length != 1 || payload[0] >= StatusLedController::ProfileCount) {
         goto badPayload;
       }
       uint8_t response[2 + StatusLedController::ProfilePayloadBytes];
@@ -579,7 +593,7 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
     }
 
     case StatusProfileSet:
-      if (length < 1 + StatusLedController::ProfilePayloadBytes ||
+      if (length != 1 + StatusLedController::ProfilePayloadBytes ||
           !statusLeds.setProfile(payload[0], payload + 1, frameNow)) {
         goto badPayload;
       }

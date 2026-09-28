@@ -128,7 +128,7 @@ func TestWebhookAttemptAddsCorrelationIdempotencyAndHMACHeaders(t *testing.T) {
 			t.Fatalf("%s=%q want=%q", header, got, want)
 		}
 	}
-	wantSignature := "v1=" + webhookSignature(
+	wantSignature := "sha256=" + webhookSignature(
 		config.SigningSecret, "1785673800", "nonce-2", http.MethodPost,
 		"/hook?scope=host", "delivery-7", capturedBody,
 	)
@@ -211,22 +211,13 @@ func TestManagerDispatchUsesDurableWebhookQueue(t *testing.T) {
 		writer.WriteHeader(http.StatusNoContent)
 	}))
 	defer server.Close()
-	store, err := appconfig.Open(filepath.Join(t.TempDir(), "config.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = store.Update(func(config *appconfig.Config) error {
-		config.Integrations.Hotkeys = nil
-		config.Integrations.Notifications.Enabled = false
+	store := openHostBridgeTestStore(t, func(config *appconfig.Config) error {
 		config.Integrations.OutboundWebhooks = []appconfig.Webhook{{
 			Name: "manager", Enabled: true, EventKind: "door",
 			URL: server.URL, Method: http.MethodPost,
 		}}
 		return nil
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	runtime := control.New(control.Options{})
 	client := controller.AttachSharedRuntime(runtime, shell.New(8))
 	ctx, cancel := context.WithCancel(context.Background())
@@ -291,10 +282,25 @@ func TestWebhookQueuePersistsWithoutSecretsRecoversAndDeduplicates(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if strings.Contains(string(persisted), `"schema"`) {
+		t.Fatalf("durable queue retained a generation selector: %s", persisted)
+	}
 	for _, secret := range []string{config.URL, config.Headers["Authorization"], config.SigningSecret} {
 		if strings.Contains(string(persisted), secret) {
 			t.Fatalf("durable queue persisted target secret %q", secret)
 		}
+	}
+	var persistedFields map[string]json.RawMessage
+	if err := json.Unmarshal(persisted, &persistedFields); err != nil {
+		t.Fatal(err)
+	}
+	persistedFields["future_addition"] = json.RawMessage(`{"safe":true}`)
+	withAddition, err := json.Marshal(persistedFields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, withAddition, 0o600); err != nil {
+		t.Fatal(err)
 	}
 
 	delivered := make(chan string, 1)

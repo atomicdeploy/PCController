@@ -33,7 +33,7 @@ optional C-compatible library, and firmware WebSocket relay in one codebase.
 - Cross-platform NDJSON JSON-RPC 2.0, an unversioned living REST API, authenticated standard
   WebSocket, and bounded Engine.IO-v4/Socket.IO-over-WebSocket service; the
   first TUI/shell process owns serial and later clients route through it
-- Importable Go API and optional `c-shared` JSON ABI
+- Importable Go API, embeddable host lifecycle, and optional `c-shared` JSON ABI
 - Persistent JSON host configuration, `fsnotify` hot reload, macros,
   event-driven automations, a typed local-device contract, and loopback data-hub integration
 - A fixed, read-only Windows host-facts catalog for system, computer, firmware,
@@ -84,6 +84,12 @@ there is no fabricated release version or tag.
 `build.cmd` and `build.sh` share one Node/Controller plan. See the
 [project-owned build guide](../Build/README.md) for deterministic identity,
 bootstrap requirements, and dry-run/plan commands.
+
+Applications that need PCController in process should use the public
+[`host` lifecycle package](docs/Go-Embedding-API.md). It keeps in-process RPC,
+protected native-local IPC, and optional HTTP/WebSocket service on one
+controller owner and dispatcher. The same lifecycle is available to Pealayer
+and other non-Go consumers through the packaged C-shared JSON ABI.
 
 Windows development, deployment, discovery, and programming examples use
 the project-owned Controller executable and platform adapters for device
@@ -151,6 +157,16 @@ rejects MSYS-only targets. Use `--no-shared-library` only when intentionally
 building without the ABI. See
 [C Library API](docs/C-Library-API.md).
 
+For a focused library-only CMake/CTest workflow, configure
+`Tools/Controller` with a native compiler passed as
+`-DPCCONTROLLER_CABI_CC=...`; its `pccontroller_cabi` and
+`pccontroller_cabi_installed_smoke` targets use that compiler for both CGO and
+external C consumers, including one compiled against the CMake-staged install
+tree. The CMake project validates the Windows target/macros and rejects
+MSYS/Cygwin before invoking Go; it intentionally delegates package selection
+and provisioning to the canonical host packager. Its output is developer-only
+verification material, never a deployable host package.
+
 ## Embedded web control center
 
 Launch the full primary host lifecycle and open the same-origin app:
@@ -207,9 +223,10 @@ foreign registrations or shortcuts:
 Windows packages include `installation-package.json`, a deterministic inventory
 that binds every installable file to its size and SHA-256, the exact host
 manifest, source identity, target architecture, executable, embedded WebUI, and
-verified Win32 resources. Installation copies only inventoried files into a
-content-addressed per-user slot; it never trusts an archive filename or loose
-shadow executable.
+verified Win32 resources. Installation publishes the active package at the
+stable `%LOCALAPPDATA%\Programs\PCController\bin` directory; it never trusts an
+archive filename or loose shadow executable. `packages/<digest>` contains only
+the single verified rollback package and is never an active launch target.
 
 From an extracted, verified package:
 
@@ -225,13 +242,26 @@ desktop enable and display-name changes journal both the prior and desired
 identity before touching native artifacts, then roll forward idempotently after
 an interruption; a failed cleanup or registration retains the journal for the
 next retry. A healthy repeated install or repair is a no-op; a damaged slot is
-rebuilt from the verified package without replacing a mapped executable in
-place. One exact prior slot is retained for rollback. The per-user root carries
+rebuilt from the verified package. If the canonical executable is running, a
+hash-bound external helper waits for that exact process to exit and rolls the
+durable directory-replacement journal forward. Healthy legacy hashed-slot
+installations migrate to `bin` on the next install or repair. Unknown files in
+`bin` are copied into a transaction-specific `recovery-quarantine/installer-*`
+directory rather than kept active; files removed from the old inventory retire
+with that package. A damaged image is never promoted to rollback. One exact
+prior package is retained for rollback. The per-user root carries
 a product-and-user ownership marker, and lifecycle commands refuse a foreign or
-unmarked non-empty root.
+unmarked non-empty root. The exact canonical per-user root can be adopted only
+when it contains either a fully verified legacy `bin` package or the recognized
+real `source/PCController` repository layout; arbitrary name-only directories
+are rejected.
 
-Uninstall preserves configuration, board backups, downloaded tools, logs, and
-host state. Purging them is a separate destructive choice that requires both
+Uninstall removes only installer-owned `bin`, package, staging, state, marker,
+and lock paths. It preserves the canonical source tree, coordination evidence,
+recovery quarantine, configuration, board backups, downloaded tools, logs, and
+host state. When such canonical-root content remains, its ownership marker is
+retained so a later verified reinstall does not need to claim an unmarked tree.
+Purging user data is a separate destructive choice that requires both
 flags and the exact confirmation shown by `controller help`:
 
 ```console
@@ -341,6 +371,36 @@ controller tui --columns 144 --rows 44 --console-font "Cascadia Mono" --console-
 controller tui --console-management=false
 ```
 
+Attach the same full TUI to an authenticated primary without approaching this
+machine's serial ports:
+
+```console
+controller tui --ipc-addr cafe-pc.local:8787 --ipc-token-ref os:ipc.remote
+```
+
+Full TUIs attached to that primary synchronize their active page by default.
+Use `--sync-navigation=false` for an independent page in one process; explicit
+authenticated instance-targeted navigation remains available.
+
+The TUI treats the current board handshake and fetched state as authoritative.
+Optional rows, controls, and names do not appear until the board advertises the
+corresponding HELLO capability. A loading message appears only while an
+advertised STATUS or SETTINGS value is in flight; STATUS availability flags and
+bounded value validation then decide whether an individual measurement is safe
+to render. Synthetic preview frames explicitly inject their capabilities and
+values, so preview data cannot be mistaken for a connected board. Remote TUIs
+consume pushed live updates and use bounded snapshots only for initial state and
+reconnect convergence.
+
+When the dashboard says **DISCONNECTED**, press Enter or click the status at
+the right of the header to request an immediate authenticated reconnect. The
+local controller also retries in the background with a bounded exponential
+delay (one to thirty seconds); physical unplug/replug remains driven by device
+change notifications with a thirty-second safety retry. **CONNECTING** is shown
+only while the TUI has an active attempt. Disconnect clears peer-owned HELLO,
+STATUS, SETTINGS, front-panel, and LED values while retaining the last port
+identity used to find the same board again.
+
 The same values are persisted under `ui.tui_console` in JSON, YAML, or TOML,
 can be edited live on the TUI **HOST Settings** page, and can be changed with
 `config set ui.tui_console.columns 144` (likewise `rows`, `font_face`,
@@ -373,11 +433,19 @@ Ctrl+R    pulse DTR and RTS
 Ctrl+F    bring a diagnosed serial-port owner window to the foreground
 Ctrl+W    ask a diagnosed serial-port owner window to close gracefully
 Ctrl+T    press twice within five seconds to terminate a diagnosed owner
-Ctrl+C    exit
+q         exit when the TUI command prompt is empty and no editor/picker owns focus
+Ctrl+C    exit from any TUI state
 Up/Down  shell history
 Tab       command completion
 PgUp/Dn  scroll the event log
+D         on the Menus page, compose arbitrary segment/LCD text and timing
 ```
+
+The Menus-page display composer offers only targets confirmed by the current
+HELLO/STATUS state. It sends through the canonical `display` command, including
+speed, hold duration, repeat (`once`, `loop`, or `interval`), interval, and an
+explicit marquee switch. Text longer than the four-cell segment display
+scrolls automatically; forcing marquee also scrolls text that already fits.
 
 Automatic selection never trusts VID/PID or a friendly USB name alone. Every
 candidate must answer the native `HELLO` request with board kind `1` and the
@@ -503,7 +571,7 @@ silent board|host|both status|on|off
 display segments|lcd|both [--speed 220ms] [--duration 5s]
   [--repeat once|loop|interval] [--interval 30s] [--scroll] [--] [TEXT]
 macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|delete NAME_OR_ID
-macro record start NAME [CATEGORY [COLOR]]|record status|record save|record discard
+macro record start NAME [CATEGORY [COLOR]]|record start-mcu NAME [CATEGORY [COLOR]]|record status|record save|record discard
 macro play NAME_OR_ID|status|cancel [keep]
 automation list|run NAME
 rf send CODE BITS PROTOCOL [PULSE_US]  # protocol 1..12
@@ -575,11 +643,11 @@ after verified reconnect.
 Named melodies and status effects come from the watched PC JSON configuration.
 `melody` sends one acknowledged tone at a time and waits for its duration and
 gap before sending the next, avoiding the MCU's ten-entry tone-queue limit.
-Current firmware receives one compact descriptor for `flash`, `breathe`,
+Firmware advertising status effects receives one compact descriptor for `flash`, `breathe`,
 `cycle`, or `transition` and renders it locally. Effect and color are separate:
 every effect accepts decimal RGB or `#RGB`/`#RRGGBB`, plus independent timing,
-brightness, alternate-color, and repeat values. Older firmware uses a bounded
-host-streaming fallback. Starting a new item replaces the old item on that
+brightness, alternate-color, and repeat values. Without the advertised
+capability the request fails. Starting a new item replaces the old item on that
 output; stopping an LED effect leaves its base color at full configured
 brightness. `rgb profile` reads/writes compact EEPROM condition descriptors so
 boot, ready, fault, door, Bluetooth, and menu cues can reuse the same effect
@@ -604,7 +672,10 @@ door presentation uses a 30-second interval rather than looping continuously.
 Board `BUZZER_CHANGED` frames are always available to event subscribers. When
 `integrations.buzzer_mirror.enabled` is true, the WebUI can play the reported
 frequency/duration with Web Audio and the native host path can play it through
-the motherboard speaker. Windows can open the optional `WinRing0x64.sys`
+the motherboard speaker. Current frames also carry the MCU start clock, so
+native, bridge, and browser renderers retain note/pause cadence and trim late
+notes instead of accumulating transport or helper-startup delay. Windows can
+open the optional `WinRing0x64.sys`
 device and drive PIT channel 2 directly; Linux first uses the kernel PC-speaker
 `KIOCSOUND` interface. If native access is unavailable, the host may discover
 an external `beep` command as an optional fallback. Linux is invoked as
@@ -622,6 +693,37 @@ or Web Audio from running. Native playback is disabled independently, exposes
 one retained state/error transition instead of one log entry per note, and can
 be replaced by another platform renderer without changing the versionless
 buzzer event contract.
+
+Primary `web` and `tui` processes accept process-lifetime buzzer overrides with
+the precedence flags > environment > watched JSON configuration > packaged
+defaults:
+
+```text
+controller web --buzzer-path both --buzzer-mirror=true --buzzer-backend auto
+controller tui --buzzer-path host --buzzer-backend external --buzzer-executable /usr/local/bin/beep
+
+PCCONTROLLER_BUZZER_PATH=board|host|both|none
+PCCONTROLLER_BUZZER_MIRROR=true|false
+PCCONTROLLER_BUZZER_BACKEND=auto|native|external|off
+PCCONTROLLER_BUZZER_EXECUTABLE=/path/to/beep
+```
+
+Startup flags and environment never write the watched JSON file. An explicit
+path from flags, environment, or `integrations.buzzer_mirror.path` reconciles
+and verifies the MCU Silent bit once SETTINGS is available; an unspecified path
+never writes board EEPROM. Use `buzzer path host` to persist the choice and
+apply it immediately. `buzzer status`, `controller.integrations.status`,
+`GET /api/integrations/status`, the Web settings page, and the TUI settings page
+report the requested and effective path/backend so that distinction stays
+visible. Backend `off` disables only the PC-speaker renderer; Web Audio remains
+independently configurable.
+
+Automatic backend resolution happens at configuration time and is reused for
+each note. In particular, `auto` does not retry a failed native probe before
+every external Linux `beep` invocation. Board pushes are causal note-start
+events, so a receiver does not hold the first note while waiting to discover a
+future multi-tone sequence; the absolute source deadline bounds unavoidable
+per-process startup instead.
 
 The reusable hands-on attention sequence is `display both --duration 5s WAIT`, `melody
 play attention 0`, and `rgb effect play attention`. Acknowledgement stops both
@@ -699,6 +801,8 @@ Start cross-platform JSON-RPC IPC on loopback:
 bin\controller.exe ipc serve --port COM18
 bin\controller.exe ipc call --method controller.snapshot
 bin\controller.exe ipc call --method controller.command.execute --params "{\"command\":\"rf list\"}"
+bin\controller.exe ipc monitor --addr 192.168.100.155:8787 --token-ref os:edge/cafe-pc --kind program --after latest
+bin\controller.exe ipc call --addr 192.168.100.155:8787 --token-ref os:edge/cafe-pc --timeout 15m --method controller.firmware.build --params "{}"
 bin\controller.exe ipc call --method controller.rf.map --params "{\"id\":3,\"action\":\"key\",\"target\":\"2\",\"behavior\":\"press\"}"
 bin\controller.exe ipc call --method controller.rf.transmit --params "{\"code\":1193046,\"bits\":24,\"protocol\":1,\"pulse_us\":350,\"repeats\":1}"
 bin\controller.exe ipc call --method controller.command.execute --params "{\"command\":\"melody play notify\"}"
@@ -707,26 +811,34 @@ bin\controller.exe ipc call --method controller.app.instances
 bin\controller.exe ipc call --method controller.app.bridge
 bin\controller.exe ipc call --method controller.app.instance.get --params "{\"id\":\"webui:EXAMPLE\"}"
 bin\controller.exe ipc call --method controller.app.navigate --params "{\"page\":\"settings\",\"target\":\"webui\"}"
+bin\controller.exe app launch webui --mode ensure --page settings --idempotency-key open-settings-1
+bin\controller.exe app launch tui --mode launch --page updates --peer server --idempotency-key server-tui-1
+bin\controller.exe ipc call --method controller.app.launch --params "{\"surface\":\"tui\",\"mode\":\"ensure\",\"page\":\"updates\",\"idempotency_key\":\"ensure-updates-1\"}"
 bin\controller.exe ipc call --method controller.app.action --params "{\"kind\":\"app.title\",\"value\":\"Bench update\",\"target\":\"tui\"}"
 bin\controller.exe ipc call --method controller.app.action --params "{\"kind\":\"app.progress\",\"value\":\"normal 42\",\"target\":\"tui\"}"
 bin\controller.exe ipc call --method controller.app.action --params "{\"kind\":\"app.osc\",\"value\":\"9;4;4;73\",\"target\":\"tui\"}"
-bin\controller.exe ipc call --method controller.command.execute --params "{\"command\":\"app title auto\"}"
+bin\controller.exe ipc call --method controller.app.action --params "{\"kind\":\"app.title\",\"value\":\"Bench update\",\"target\":\"webui\",\"operation_id\":\"bench-title-1\",\"timeout_ms\":5000}"
+bin\controller.exe ipc call --method controller.app.action.outcome --params "{\"operation_id\":\"bench-title-1\"}"
 bin\controller.exe ipc call --method controller.bridge.list
 bin\controller.exe ipc call --method controller.bridge.call --params "{\"peer\":\"lab\",\"request\":{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"controller.snapshot\"}}"
+bin\controller.exe exec peer-update host cafe-pc HOST_ARTIFACT_SHA256
+bin\controller.exe ipc call --method controller.peer.update.host --params "{\"peer\":\"cafe-pc\",\"artifact_sha256\":\"HOST_ARTIFACT_SHA256\",\"authorized\":true}"
 ```
 
-Enable an authenticated edge host on a trusted LAN with explicit browser
-origins, then use a vault reference from another machine without placing the
-bearer token on its command line:
+Enable an immediate-alpha edge host on a trusted LAN with explicit browser
+origins. #148 deliberately disables application authentication and
+authorization, so these commands neither generate nor require a bearer token:
 
 ```console
 bin\controller.exe network edge-enable --origin David-PC:* --origin 192.168.100.130:*
-bin\controller.exe ipc call --addr 192.168.100.155:8787 --token-ref os:edge/cafe-pc --method controller.ping
-bin\controller.exe network peer-add --name cafe-pc --url ws://192.168.100.155:8787/ipc --secret-ref os:edge/cafe-pc
-bin\controller.exe network probe --addr 192.168.100.155:8787 --token-ref os:edge/cafe-pc --origin http://David-PC:8787
+bin\controller.exe ipc call --addr 192.168.100.155:8787 --method controller.ping
+bin\controller.exe network peer-add --name cafe-pc --url ws://192.168.100.155:8787/ipc
+bin\controller.exe ipc call --method controller.network.peers.get
+bin\controller.exe ipc call --method controller.network.peers.set --params "{\"peers\":[{\"name\":\"cafe-pc\",\"enabled\":true,\"url\":\"ws://192.168.100.155:8787/ipc\",\"protocol\":\"jsonrpc\",\"topics\":[\"events\",\"state\",\"status\"],\"forward_events\":true,\"allow_commands\":true}]}"
+bin\controller.exe network probe --addr 192.168.100.155:8787 --origin http://David-PC:8787
 bin\controller.exe network discover --protocols dns-sd,ssdp,upnp,ws-discovery,broadcast,netbios
 bin\controller.exe network list --timeout 3s
-bin\controller.exe network connect --target cafe-pc --token-ref os:edge/cafe-pc
+bin\controller.exe network connect --target cafe-pc
 bin\controller.exe network advertise --enabled=true --protocols all --broadcast-port 37889
 bin\controller.exe ipc call --method controller.discovery.scan --params "{\"protocols\":[\"dns-sd\",\"ssdp\",\"upnp\",\"ws-discovery\",\"broadcast\",\"netbios\"],\"timeout_ms\":3000}"
 ```
@@ -737,9 +849,9 @@ file. Discovery exposes one merged record per host: system hostname, persistent
 host identity/build, board firmware and serial-port identity, health and current
 voltage/current/power/temperature/door state, plus Web/API/operation/event/opcode
 endpoints. `GET /upnp/public.json` is intentionally bounded and secret-free.
-Finding a host never grants control: `ipc.allow_remote`, bearer/session
-authentication, allowed origins, and the remote capability policy remain
-separate and default to disabled remote access.
+Finding a host does not enable its listener: `ipc.allow_remote` and allowed
+origins remain explicit. Bearer/session credentials and remote capability
+policy are persisted only as dormant future-design fields during the alpha.
 
 The edge command enables the selected IPC, REST, WebSocket,
 Socket.IO, programming, and bridge capabilities. Shutdown, virtual-key, and
@@ -763,16 +875,17 @@ bounded. The important-event timeline is compacted at 8 MiB and defaults to
 500 retained events. Setting `ui.history_hours` to `0` clears and disables measurement
 retention without disabling the important-event timeline.
 
-The TCP listener rejects non-loopback addresses by default. Remote mode
-requires `ipc.allow_remote`, a token of at least 24 characters, a non-wildcard
-browser origin list, a stable `ipc.remote_principal` name, and explicit
-`ipc.remote_policy` capabilities. Its safe default permits read/event
-subscriptions only. Token possession alone does not grant board writes, reset,
-programming, shutdown, virtual keys, power actions, host-automation execution,
-or bridge calls.
+The TCP listener rejects non-loopback addresses by default. Remote mode still
+requires `ipc.allow_remote` and a non-wildcard browser origin list. The
+immediate-alpha contract in #148 disables all application auth/authZ gates;
+stored inbound tokens, principals, and `ipc.remote_policy` bits are not resolved
+or enforced until a replacement design is explicitly reactivated. An optional
+outbound peer bearer may still be resolved and sent solely so a new alpha host
+can reach and upgrade a still-authenticated older peer.
 
-HTTP and native socket clients authenticate with a Bearer or compatibility
-header. A client connecting from an unauthenticated discovery record first
+The following credential/session flow is retained as deferred design context,
+not current alpha behavior. When reactivated, HTTP and native socket clients
+would authenticate with a Bearer or compatibility header. A client connecting from an unauthenticated discovery record first
 calls `GET /api/auth/server-proof` with a fresh random nonce and verifies the
 returned address-bound HMAC locally; it sends the bearer only after proving
 that the exact reached listener knows it. This prevents a spoofed LAN
@@ -790,8 +903,22 @@ one-use ticket, never the durable token.
 
 Configured `integrations.websocket_clients` can subscribe to another primary,
 forward loop-safe typed events, and issue correlated `bridge call` requests.
-Each host still has exactly one local serial owner and the target reapplies its
-own remote policy and board safety guards.
+`controller.network.peers.get|set` exposes the same topology through any
+existing IPC/WebSocket/Socket.IO/bridge transport. Set replaces the list
+atomically and the configuration subscription hot-applies it. The schema has no
+plaintext token field: an optional `auth_token_ref` may name an existing vault
+entry for one-time compatibility with an older auth-on peer. Each host still has
+exactly one local serial owner; alpha auth policy is dormant, while board and OS
+safety guards remain active. New peers subscribe to `events`, `state`, and
+`status` by default. The `state` topic carries structured push updates such as
+`buzzer.note`; ingress provenance prevents those updates from being forwarded
+again through another bridge.
+
+Host upgrades use that same connected peer path. A verified executable is
+chunked below the RPC frame limit, validated again by the receiving artifact
+store, and passed to the receiving coordinator for graceful replacement and
+health-checked rollback. No SSH command is embedded in this path. The Updates
+page exposes the same operation for every connected command-enabled peer.
 
 Go programs can import the module-root `controller` package directly:
 
@@ -1038,6 +1165,17 @@ delegate it through IPC. Verification or identity failure retains safe outputs
 and the recovery marker; an absent optional LCD is only a presentation warning.
 Do not substitute a direct programmer invocation or another COM port.
 
+`reset lines [PORT]` also works while the primary is paused after a failed
+bootloader attempt: it opens only the remembered or explicitly selected
+physical port, pulses DTR, closes that temporary handle, and then performs the
+normal authenticated reconnect.
+
+If that exact staging HEX was lost after a failed transaction, use
+`program abandon TARGET_SHA256 ABANDON`. The target hash must exactly match the
+newest marker for the currently authenticated physical board. This path never
+reads or writes flash: it reasserts safe outputs, restores the captured EEPROM
+settings and live state, verifies them, and only then removes the marker.
+
 The direct USBasp workflow writes only the selected flash image. It does not
 invent a sibling `.eep` filename and does not use the unsafe
 dependency-backend `upload --programmer ... --input-file ...with_bootloader.hex`
@@ -1048,6 +1186,7 @@ Inside the TUI/shell, the compact equivalent is:
 ```text
 program flash ..\..\.build\firmware\PCController.ino.hex COM18
 program recover ..\..\.build\firmware\PCController.ino.hex [PORT]
+program abandon TARGET_SHA256 ABANDON
 program flash ..\..\.build\firmware\PCController.ino.with_bootloader.hex --method usbasp
 boot backup .\backups
 ```
@@ -1176,7 +1315,7 @@ programming, while a command explicitly named build/watch-only remains unable
 to open COM or ISP hardware. Provider/peer bearer tokens are transient; proxy
 variables are inherited by the Go HTTP client and its dependencies.
 
-An authenticated peer can consume `GET /api/discovery/manifest`, whose
+A connected peer can consume `GET /api/discovery/manifest`, whose
 relative artifact links point at this host's immutable SHA-256 download routes.
 The same schema can be returned through `controller.discovery.local_manifest`;
 no local filesystem path or credential is published.
@@ -1221,7 +1360,8 @@ Direct Go dependencies:
 | `github.com/coder/websocket` | 1.8.15 | ISC | firmware relay |
 | `github.com/fsnotify/fsnotify` | 1.10.1 | BSD-3-Clause | host-config file watching |
 | `github.com/go-ole/go-ole` | 1.3.0 | MIT | optional Windows system-profile adapter |
-| `go.bug.st/serial` | 1.8.0 | BSD-3-Clause | serial I/O and USB enumeration |
+| `github.com/Microsoft/go-winio` | 0.6.2 | MIT | protected Windows named-pipe RPC transport |
+| `go.bug.st/serial` via `DRSDavidSoft/go-serial` | `fa09c8b9a680` (1.8.0 base) | BSD-3-Clause | serial I/O, USB enumeration, and Windows overlapped-I/O cancellation before blocked issuance and close-before-join |
 | `golang.org/x/net` | 0.57.0 | BSD-3-Clause | standards-based proxy environment resolution |
 
 Complete transitive versions are locked in `go.sum`; redistributed terms are

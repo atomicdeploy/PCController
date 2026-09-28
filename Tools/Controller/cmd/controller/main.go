@@ -41,9 +41,10 @@ import (
 )
 
 var (
-	version    = productidentity.Version
-	sourceHash = "unknown"
-	buildTime  = "unknown"
+	version                = productidentity.Version
+	sourceHash             = "unknown"
+	buildTime              = "unknown"
+	setProcessConsoleTitle = consolewindow.SetTitle
 )
 
 func main() {
@@ -57,6 +58,7 @@ func main() {
 	// generic console-host icon. Pseudoconsole and resource-free developer
 	// builds intentionally treat this as a best-effort no-op.
 	nativeshell.ApplyConsoleIcon()
+	_, _ = setProcessConsoleTitle(productidentity.DefaultAppTitle())
 	if err := netpolicy.EnsureProcessLocalNetworkNoProxy(); err != nil {
 		fmt.Fprintln(os.Stderr, "network proxy bypass policy:", err)
 		os.Exit(1)
@@ -70,6 +72,19 @@ func main() {
 		}
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "uninstall helper:", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if installer.IsActivationHelperInvocation(os.Args[1:]) {
+		service, err := newInstallerService("")
+		if err == nil {
+			ctx, cancel := lifecycleCommandContext()
+			err = installer.RunExternalActivationHelper(ctx, os.Args[2], service)
+			cancel()
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "activation helper:", err)
 			os.Exit(1)
 		}
 		return
@@ -108,7 +123,13 @@ func main() {
 	}
 }
 
-func run(args []string, stdout, stderr io.Writer) error {
+func run(args []string, stdout, stderr io.Writer) (resultErr error) {
+	if err := drainCommandRuntimeCleanups(); err != nil {
+		return fmt.Errorf("release retained command runtime before starting: %w", err)
+	}
+	defer func() {
+		resultErr = errors.Join(resultErr, drainCommandRuntimeCleanups())
+	}()
 	cleanArgs, configPath, presentation, err := extractGlobalArguments(args)
 	if err != nil {
 		return err
@@ -122,6 +143,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 		if overrideErr := store.SetPresentationOverrides(presentation.AppName, presentation.Tagline); overrideErr != nil {
 			return overrideErr
 		}
+		applyConfiguredConsoleTitle(store.Current().UI.AppTitle)
 		runtimeConfig, runtimeErr := store.Runtime()
 		if runtimeErr != nil {
 			return runtimeErr
@@ -172,20 +194,25 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return runConfigMaintenance(args, configPath, stdout)
 	}
 	if configIndependentProgramCompile(args) {
-		// Compilation is a repository build operation. It must remain usable
-		// when a user's runtime configuration is absent, stale, or invalid and
-		// must never create or rewrite that configuration as a side effect.
+		config, configErr := offlineCompileConfig(configPath)
+		if configErr != nil {
+			return configErr
+		}
 		return runProgramWithConfig(
-			args[1:], stdout, stderr, appconfig.Defaults(),
+			args[1:], stdout, stderr, config,
 		)
 	}
 	if configIndependentToolchainCompile(args) {
+		config, configErr := offlineCompileConfig(configPath)
+		if configErr != nil {
+			return configErr
+		}
 		translated, translateErr := toolchainCLIArguments(args[1:])
 		if translateErr != nil {
 			return translateErr
 		}
 		return runProgramWithConfig(
-			translated, stdout, stderr, appconfig.Defaults(),
+			translated, stdout, stderr, config,
 		)
 	}
 	store, err := appconfig.Open(configPath)
@@ -195,6 +222,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 	if err := store.SetPresentationOverrides(presentation.AppName, presentation.Tagline); err != nil {
 		return err
 	}
+	applyConfiguredConsoleTitle(store.Current().UI.AppTitle)
 	runtimeConfig, runtimeErr := store.Runtime()
 	if runtimeErr != nil {
 		return runtimeErr
@@ -235,11 +263,30 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return runNetwork(args[1:], stdout, stderr, store)
 	case "desktop":
 		return runDesktop(args[1:], stdout, store)
+	case "app":
+		return runApp(args[1:], stdout, stderr, store)
 	case "uri", "action":
 		return runURIAction(args[1:], stdout, stderr, store)
 	default:
 		return fmt.Errorf("unknown command %q; use help", args[0])
 	}
+}
+
+// offlineCompileConfig reads the selected persistent compile policy without
+// creating a config file, resolving secrets, configuring IPC, or probing a
+// device. A genuinely absent config retains the historic default-off profile;
+// an existing invalid config fails visibly instead of silently compiling with
+// different feature selections.
+func offlineCompileConfig(path string) (appconfig.Config, error) {
+	resolved, err := appconfig.ResolvePath(path)
+	if err != nil {
+		return appconfig.Config{}, err
+	}
+	config, _, err := appconfig.Load(resolved)
+	if errors.Is(err, os.ErrNotExist) {
+		return appconfig.Defaults(), nil
+	}
+	return config, err
 }
 
 func runDesktop(
@@ -248,7 +295,7 @@ func runDesktop(
 	store *appconfig.Store,
 ) error {
 	if len(args) > 1 {
-		return errors.New("usage: desktop install|ensure|uninstall|remove")
+		return errors.New("usage: desktop install|ensure|test|uninstall|remove")
 	}
 	action := "ensure"
 	if len(args) == 1 {
@@ -263,10 +310,38 @@ func runDesktop(
 	switch action {
 	case "install", "ensure":
 		status, integrationErr = hostui.EnsureDesktopIntegration(options)
+	case "test":
+		integration, err := hostui.EnsureDesktopIntegration(options)
+		if err != nil {
+			status, integrationErr = integration, err
+			break
+		}
+		notifier := hostui.NewNotifier(hostui.NotifierOptions{
+			AppID: productidentity.StableAppID, LogoPath: integration.Logo,
+		})
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err = notifier.Notify(ctx, hostui.Notification{
+			Title:     productidentity.Title(store.Current().UI.AppTitle) + " · Notification test",
+			Body:      "The installed Windows notification logo and action route are working.",
+			LaunchURI: productidentity.ProtocolScheme + "://page/events",
+			Actions: []hostui.NotificationAction{{
+				Label: "Open events", URI: productidentity.ProtocolScheme + "://page/events",
+			}},
+		})
+		cancel()
+		notificationStatus := notifier.Status()
+		status = struct {
+			Desktop      hostui.DesktopIntegrationStatus `json:"desktop"`
+			Notification hostui.NotificationStatus       `json:"notification"`
+		}{integration, notificationStatus}
+		integrationErr = err
+		if integrationErr == nil && (!notificationStatus.Branded || notificationStatus.Backend != "winrt-toast") {
+			integrationErr = errors.New("Windows notification test did not use the branded WinRT toast backend")
+		}
 	case "uninstall", "remove":
 		status, integrationErr = hostui.RemoveDesktopIntegration(options)
 	default:
-		return errors.New("usage: desktop install|ensure|uninstall|remove")
+		return errors.New("usage: desktop install|ensure|test|uninstall|remove")
 	}
 	encoded, _ := json.MarshalIndent(status, "", "  ")
 	fmt.Fprintln(stdout, string(encoded))
@@ -337,6 +412,10 @@ func runWebWithInitialAction(
 	flags := flag.NewFlagSet("web", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	connection := addConnectionFlags(flags, store.Current().Connection)
+	buzzerOptions, err := addBuzzerRuntimeFlags(flags, store.Persistent().Integrations.BuzzerMirror)
+	if err != nil {
+		return err
+	}
 	noAuto := flags.Bool("no-auto", false, "start with automatic connection paused")
 	noOpen := flags.Bool("no-open", false, "serve the web app without opening a browser")
 	noTray := flags.Bool("no-tray", false, "serve the web app without a native system-tray menu")
@@ -347,6 +426,12 @@ func runWebWithInitialAction(
 		return errors.New("usage: controller web [--no-open] [--no-tray] [--no-auto] [connection flags]")
 	}
 	connection.captureOverrides(flags)
+	if err := buzzerOptions.captureOverrides(flags); err != nil {
+		return err
+	}
+	if err := buzzerOptions.apply(store); err != nil {
+		return err
+	}
 	claimContext, claimCancel := context.WithTimeout(context.Background(), 3*time.Second)
 	claim, existing, err := claimOrResolveHostInstance(claimContext, "web")
 	claimCancel()
@@ -403,7 +488,7 @@ func runWebWithInitialAction(
 	// prevents a notification registration write.
 	if status, desktopErr := ensureWebDesktopIntegration(store); desktopErr != nil {
 		fmt.Fprintln(stderr, "desktop notification identity:", desktopErr)
-	} else if status.Supported && (!status.ProtocolReady || !status.ShortcutReady) {
+	} else if status.Supported && (!status.ProtocolReady || !status.ShortcutReady || !status.DesktopShortcutReady) {
 		fmt.Fprintln(stderr, "desktop notification identity is incomplete")
 	}
 	runtime := newRuntime(connection, store)
@@ -514,19 +599,19 @@ func runWebWithInitialAction(
 	}
 	defer primary.Close()
 	defer runtime.Close()
+	announceWebStartup(stdout, store.Current().UI.AppTitle, appURL)
 	if !*noAuto {
 		// The Web host owns the same controller runtime as the TUI and CLI, so
 		// it must initiate the first authenticated connection itself. Reconnect
 		// also arms the bounded device watcher after an initial failure; the
 		// HTTP UI remains available meanwhile and the browser-open gate below
 		// continues to require a truthfully connected snapshot.
-		connectContext, connectCancel := context.WithTimeout(ctx, 15*time.Second)
-		connectErr := runtime.Reconnect(connectContext, "web host initial automatic connection")
-		connectCancel()
-		if connectErr != nil {
+		connectContext, stopInitialConnection := context.WithCancel(ctx)
+		defer stopInitialConnection()
+		startInitialWebConnection(connectContext, runtime.Reconnect, func(connectErr error) {
 			runtime.PublishHostEvent("connection.auto.error", "initial Web connection: "+connectErr.Error())
 			fmt.Fprintln(stderr, "auto-connect:", connectErr)
-		}
+		})
 	}
 	if initial.Kind != "" {
 		applyInitialWebAction(ctx, primary, runtime, engine, initial)
@@ -552,7 +637,6 @@ func runWebWithInitialAction(
 	}()
 	go control.RunAutomations(ctx, runtime, engine, store.Current)
 
-	fmt.Fprintln(stdout, productidentity.ServiceName(store.Current().UI.AppTitle, "web app:"), appURL)
 	if webBrowserAutoOpenAllowed(*noOpen, runtime.Snapshot().Connected) {
 		openWhenConnected()
 	} else if !*noOpen {
@@ -564,6 +648,31 @@ func runWebWithInitialAction(
 	case <-primary.QuitRequested():
 		return nil
 	}
+}
+
+func applyConfiguredConsoleTitle(configured string) {
+	_, _ = setProcessConsoleTitle(productidentity.Title(configured))
+}
+
+func announceWebStartup(output io.Writer, configured, appURL string) {
+	fmt.Fprintln(output, productidentity.ServiceName(configured, "web app:"), appURL)
+}
+
+func startInitialWebConnection(
+	ctx context.Context,
+	reconnect func(context.Context, string) error,
+	reportError func(error),
+) <-chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		connectContext, connectCancel := context.WithTimeout(ctx, 15*time.Second)
+		defer connectCancel()
+		if err := reconnect(connectContext, "web host initial automatic connection"); err != nil && reportError != nil {
+			reportError(err)
+		}
+	}()
+	return done
 }
 
 func webBrowserAutoOpenAllowed(noOpen, controllerConnected bool) bool {
@@ -728,23 +837,66 @@ func runTUIWithInitialAction(
 	flags := flag.NewFlagSet("tui", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	connection := addConnectionFlags(flags, store.Current().Connection)
+	buzzerOptions, err := addBuzzerRuntimeFlags(flags, store.Persistent().Integrations.BuzzerMirror)
+	if err != nil {
+		return err
+	}
 	consoleOptions, err := addTUIConsoleFlags(flags, store.Current().UI.TUIConsole)
 	if err != nil {
 		return err
 	}
 	noAuto := flags.Bool("no-auto", false, "start with automatic connection paused")
+	ipcAddress := flags.String("ipc-addr", "", "attach the full TUI to an existing controller IPC host:port")
+	ipcToken := flags.String("ipc-token", "", "bearer token for --ipc-addr (prefer --ipc-token-ref)")
+	ipcTokenReference := flags.String("ipc-token-ref", "", "resolve the remote IPC bearer token from an OS-vault or environment reference")
+	simpleMode := flags.Bool("simple", false, "use the minimal line-oriented IPC fallback instead of the full TUI")
+	syncNavigation := flags.Bool("sync-navigation", true, "synchronize this full TUI's active page with other TUI instances")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	connection.captureOverrides(flags)
+	if err := buzzerOptions.captureOverrides(flags); err != nil {
+		return err
+	}
+	if err := buzzerOptions.apply(store); err != nil {
+		return err
+	}
 	if err := consoleOptions.captureOverrides(flags); err != nil {
 		return err
+	}
+	ipcTokenWasSet := false
+	flags.Visit(func(value *flag.Flag) {
+		ipcTokenWasSet = ipcTokenWasSet || value.Name == "ipc-token"
+	})
+	if strings.TrimSpace(*ipcTokenReference) != "" {
+		if ipcTokenWasSet {
+			return errors.New("--ipc-token and --ipc-token-ref are mutually exclusive")
+		}
+		resolved, resolveErr := store.ResolveSecret(*ipcTokenReference)
+		if resolveErr != nil {
+			return fmt.Errorf("resolve remote IPC bearer token: %w", resolveErr)
+		}
+		*ipcToken = resolved
 	}
 	if err := applyTUIConsole(
 		consoleOptions.resolve(store.Current().UI.TUIConsole), stderr,
 		consoleOptions.haveRuntimeFlag(),
 	); err != nil {
 		return fmt.Errorf("apply local TUI console settings: %w", err)
+	}
+	if address := strings.TrimSpace(*ipcAddress); address != "" {
+		auth := *ipcToken
+		configured := currentPrimaryEndpoint()
+		if auth == "" && strings.EqualFold(address, strings.TrimSpace(configured.Listen)) {
+			auth = configured.AuthToken
+		}
+		if *simpleMode {
+			return runSecondaryConsoleAt(
+				os.Stdin, stdout, stderr, store.Current().UI.AppTitle,
+				address, auth,
+			)
+		}
+		return runRemoteTUI(address, auth, stdout, store, consoleOptions, *syncNavigation)
 	}
 	claim, havePrimary, err := preparePrimaryMode("tui")
 	if err != nil {
@@ -754,13 +906,20 @@ func runTUIWithInitialAction(
 		if initial.Kind != "" {
 			return deliverExistingAppAction(context.Background(), initial, stdout)
 		}
-		return runSecondaryConsole(os.Stdin, stdout, stderr, store.Current().UI.AppTitle)
+		if *simpleMode {
+			return runSecondaryConsole(os.Stdin, stdout, stderr, store.Current().UI.AppTitle)
+		}
+		configured := currentPrimaryEndpoint()
+		return runRemoteTUI(configured.Listen, configured.AuthToken, stdout, store, consoleOptions, *syncNavigation)
 	}
 	defer func() {
 		if claim != nil {
 			_ = claim.Close()
 		}
 	}()
+	if *simpleMode {
+		return errors.New("--simple requires an existing IPC primary; start without --simple to own the local runtime")
+	}
 	if err := selectInteractiveDevice(
 		connection,
 		os.Stdin,
@@ -830,7 +989,8 @@ func runTUIWithInitialAction(
 	primary, err := startPrimaryIPCClaimed(watchContext, runtime, engine, store, claim)
 	if errors.Is(err, errPrimaryAlreadyRunning) {
 		_ = runtime.Close()
-		return runSecondaryConsole(os.Stdin, stdout, stderr, store.Current().UI.AppTitle)
+		configured := currentPrimaryEndpoint()
+		return runRemoteTUI(configured.Listen, configured.AuthToken, stdout, store, consoleOptions, *syncNavigation)
 	}
 	if err != nil {
 		_ = runtime.Close()
@@ -839,7 +999,11 @@ func runTUIWithInitialAction(
 	claim = nil
 	defer primary.Close()
 	appActions := primary.AppActions()
-	tuiInstanceID := primary.hostInstanceID + ":tui"
+	navigationReporter, err := hostui.NewNavigationReporter(*syncNavigation, "")
+	if err != nil {
+		return fmt.Errorf("create TUI instance identity: %w", err)
+	}
+	tuiInstanceID := navigationReporter.InstanceID()
 	processStartedAt := time.Time{}
 	if primary.instanceClaim != nil {
 		processStartedAt = primary.instanceClaim.startedAt
@@ -858,9 +1022,60 @@ func runTUIWithInitialAction(
 		}
 	}()
 	go control.RunAutomations(watchContext, runtime, engine, store.Current)
+	navigationCommits := make(chan string, 1)
+	queueNavigationCommit := func(page string) {
+		page = strings.ToLower(strings.TrimSpace(page))
+		if page == "" {
+			return
+		}
+		select {
+		case navigationCommits <- page:
+			return
+		default:
+		}
+		// Keep only the latest local intent while a prior coordinator call is in
+		// flight. Bubble Tea's update loop never waits for IPC or fan-out.
+		select {
+		case <-navigationCommits:
+		default:
+		}
+		select {
+		case navigationCommits <- page:
+		default:
+		}
+	}
+	go func() {
+		for {
+			select {
+			case page := <-navigationCommits:
+				for {
+					select {
+					case latest := <-navigationCommits:
+						page = latest
+					default:
+						goto commit
+					}
+				}
+			commit:
+				_, commitErr := primary.navigationCommand(hostui.NavigationCommand{
+					Group: hostui.DefaultNavigationGroup, Source: tuiInstanceID,
+					Page: page, OperationID: navigationReporter.NextOperationID(),
+				})
+				if commitErr != nil {
+					runtime.PublishHostEvent(
+						"app.navigation.commit.rejected",
+						"navigation change was not synchronized: "+commitErr.Error(),
+					)
+				}
+			case <-watchContext.Done():
+				return
+			}
+		}
+	}()
 	program := tea.NewProgram(
 		tui.NewApplicationWithOptions(runtime, engine, tui.Options{
-			UIConfig: func() appconfig.UI { return store.Current().UI },
+			AutoConnect: !*noAuto,
+			UIConfig:    func() appconfig.UI { return store.Current().UI },
 			SaveUI: func(value appconfig.UI) error {
 				_, err := store.UpdateUI(value)
 				return err
@@ -877,10 +1092,13 @@ func runTUIWithInitialAction(
 				return nil
 			},
 			HostIntegrations: func() appconfig.Integrations {
-				return store.Current().Integrations
+				return store.Persistent().Integrations
+			},
+			BuzzerRuntime: func() appconfig.BuzzerRuntimeStatus {
+				return primary.IntegrationStatus().BuzzerRuntime
 			},
 			SaveIntegrations: func(value appconfig.Integrations) error {
-				if value.Discovery != store.Current().Integrations.Discovery {
+				if value.Discovery != store.Persistent().Integrations.Discovery {
 					ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 					var persisted appconfig.Discovery
 					err := callPrimary(ctx, "controller.discovery.config.set", value.Discovery, &persisted)
@@ -908,6 +1126,10 @@ func runTUIWithInitialAction(
 			RFApplyOrder:     rfReplace.Replace,
 			RFReplaceSupport: rfReplace.Support,
 			RFProbeReplace:   rfReplace.Probe,
+			MirrorLCD: func(line1, line2 string) error {
+				runtime.LCDPresenter().MirrorPrompt(line1, line2)
+				return nil
+			},
 			HostMenus:        hostMenus,
 			PushHostPanel:    hostPanel.Push,
 			ReleaseHostPanel: hostPanel.Release,
@@ -928,27 +1150,36 @@ func runTUIWithInitialAction(
 				}, &instances)
 				return instances, err
 			},
-			OpenNetwork: openBrowser,
-			AppActions:  appActions,
-			InstanceID:  tuiInstanceID,
+			OpenNetwork:        openBrowser,
+			AppActions:         appActions,
+			InstanceID:         tuiInstanceID,
+			NavigationSync:     *syncNavigation,
+			NavigationGroup:    hostui.DefaultNavigationGroup,
+			SetNavigationSync:  navigationReporter.SetFollow,
+			NavigationIdentity: navigationReporter.Identity,
 			WriteOSC: func(payload string) error {
 				return hostui.WriteOSC(stdout, payload)
 			},
+			AckAppAction: func(ack hostui.ActionAck) error {
+				_, ackErr := primary.actionCoordinator.Ack(ack)
+				return ackErr
+			},
 			ReportTerminal: func(page, title string) error {
 				ui := store.Current().UI
+				values := navigationReporter.NextValues()
+				values["color_mode"] = ui.Appearance.Theme
+				values["locale"] = ui.Appearance.Locale
+				values["terminal_title"] = title
+				values["terminal_osc"] = "enabled"
+				values["terminal_progress"] = "osc-9-4"
+				values[hostui.ActionCapabilitiesKey] = hostui.TUIActionCapabilities
 				_, err := primary.instances.Upsert(hostui.AppInstance{
 					ID: tuiInstanceID, Surface: "tui", Page: page, State: "active",
-					Self: &tuiSelf,
-					Values: map[string]string{
-						"color_mode":        ui.Appearance.Theme,
-						"locale":            ui.Appearance.Locale,
-						"terminal_title":    title,
-						"terminal_osc":      "enabled",
-						"terminal_progress": "osc-9-4",
-					},
+					Self: &tuiSelf, Values: values,
 				})
 				return err
 			},
+			CommitNavigation: queueNavigationCommit,
 		}),
 		tea.WithAltScreen(),
 		tea.WithMouseCellMotion(),

@@ -135,6 +135,13 @@ func TestBuildCapturesUsefulStateWithoutSecretsOrReplayableRF(t *testing.T) {
 		t.Fatal(err)
 	}
 	encoded := string(content)
+	var documentFields map[string]json.RawMessage
+	if err := json.Unmarshal(content, &documentFields); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := documentFields["schema"]; exists {
+		t.Fatalf("diagnostic document retained a generation selector: %s", encoded)
+	}
 	for _, forbidden := range []string{secret, "3735928559", "DEADBEEF", "LCDLine1", "auth_token"} {
 		if strings.Contains(encoded, forbidden) {
 			t.Fatalf("snapshot retained forbidden content %q: %s", forbidden, encoded)
@@ -142,6 +149,29 @@ func TestBuildCapturesUsefulStateWithoutSecretsOrReplayableRF(t *testing.T) {
 	}
 	if !strings.Contains(encoded, `"page":"door"`) || !strings.Contains(encoded, `"relay":"R5"`) {
 		t.Fatalf("safe event metadata was not retained: %s", encoded)
+	}
+}
+
+func TestHardwareProblemEvidenceSurvivesSafeDiagnosticSummary(t *testing.T) {
+	entries := summarizeEvents([]controller.TimelineEntry{{
+		ID: 1, Time: time.Now(), Kind: "hardware.problem", State: "error",
+		Metadata: map[string]string{
+			"problem":           "usb_descriptor_failure",
+			"os_problem_number": "43",
+			"location":          "Port 2, Hub 3",
+			"device_id":         `USB\VID_0000&PID_0002\PHYSICAL-INSTANCE`,
+		},
+	}}, 4)
+	if len(entries) != 1 {
+		t.Fatalf("hardware problem summary count=%d", len(entries))
+	}
+	metadata := entries[0].Metadata
+	for key, want := range map[string]string{
+		"problem": "usb_descriptor_failure", "os_problem_number": "43", "location": "Port 2, Hub 3",
+	} {
+		if metadata[key] != want {
+			t.Fatalf("hardware diagnostic %s=%q, want %q; all=%#v", key, metadata[key], want, metadata)
+		}
 	}
 }
 
@@ -224,7 +254,7 @@ func TestRecorderAtomicallyReplacesRollingFileAndSavesOnce(t *testing.T) {
 	}
 }
 
-func TestPartialSnapshotReportsCompletenessAndStrictRead(t *testing.T) {
+func TestPartialSnapshotReportsCompletenessAndReadSafety(t *testing.T) {
 	document := Build(&fakeSource{}, HostIdentity{Title: "Controller"}, time.Now())
 	if document.Complete || len(document.Errors) != 3 || document.Completeness.Status {
 		t.Fatalf("partial snapshot did not report explicit errors: %#v", document)
@@ -233,11 +263,11 @@ func TestPartialSnapshotReportsCompletenessAndStrictRead(t *testing.T) {
 		t.Fatal("relative snapshot destination was accepted")
 	}
 	path := filepath.Join(t.TempDir(), "last-session.json")
-	if err := os.WriteFile(path, []byte(`{"format":"pccontroller.host-diagnostic-snapshot","schema":1,"captured_at":"2026-08-02T00:00:00Z","unknown":true}`), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"format":"pccontroller.host-diagnostic-snapshot","captured_at":"2026-08-02T00:00:00Z","unknown":true}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := Read(path); err == nil {
-		t.Fatal("snapshot with an unknown field was accepted")
+		t.Fatal("snapshot without required storage safety fields was accepted")
 	}
 	unsafe := Build(&fakeSource{}, HostIdentity{Title: "Controller"}, time.Now())
 	unsafe.InterruptedWriteProven = true
@@ -250,6 +280,26 @@ func TestPartialSnapshotReportsCompletenessAndStrictRead(t *testing.T) {
 	}
 	if _, err := Read(path); err == nil || !strings.Contains(err.Error(), "recovery safety") {
 		t.Fatalf("unsafe interrupted-write claim was accepted: %v", err)
+	}
+	unsafe.InterruptedWriteProven = false
+	content, err = encode(unsafe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(content, &fields); err != nil {
+		t.Fatal(err)
+	}
+	fields["future_optional"] = json.RawMessage(`true`)
+	content, err = json.Marshal(fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Read(path); err != nil {
+		t.Fatalf("safe additive diagnostic field was rejected: %v", err)
 	}
 }
 
@@ -310,7 +360,7 @@ func TestRecorderCapturesOperationalHashesAndProvidesSafeRecoveryInput(t *testin
 		t.Fatalf("stored=%#v err=%v", stored, err)
 	}
 	document := stored.Snapshot
-	if document.Schema != Schema || !document.Completeness.Programming ||
+	if !document.Completeness.Programming ||
 		!document.Completeness.Artifacts || !document.Completeness.Recovery ||
 		document.Programming == nil || !document.Programming.Active ||
 		document.Artifacts.CurrentFirmwareSHA256 != firmwareHash ||
