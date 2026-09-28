@@ -5,10 +5,15 @@ import (
 	"fmt"
 	"os"
 
+	"pccontroller.local/controller/internal/envfile"
 	"pccontroller.local/controller/internal/tui"
 )
 
 func main() {
+	if _, err := envfile.LoadProcess(); err != nil {
+		fmt.Fprintln(os.Stderr, "environment:", err)
+		os.Exit(1)
+	}
 	pageName := flag.String("page", "dashboard", "dashboard, outputs, menus, board, app, rf, program, automate, events, or console")
 	width := flag.Int("width", 132, "render width")
 	height := flag.Int("height", 38, "render height")

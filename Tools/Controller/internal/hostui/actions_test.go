@@ -67,6 +67,31 @@ func TestActionBrokerValidatesAndDelivers(t *testing.T) {
 	}
 }
 
+func TestActionBrokerValidatesAndCopiesBoundedMetadata(t *testing.T) {
+	broker := NewActionBroker()
+	events := broker.Events()
+	metadata := map[string]string{" Navigation_Group ": " default "}
+	if err := broker.Publish(AppAction{
+		Kind: "app.page", Value: "events", Metadata: metadata,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	metadata[" Navigation_Group "] = "mutated"
+	action := <-events
+	if action.Metadata[NavigationGroupKey] != DefaultNavigationGroup {
+		t.Fatalf("metadata was not normalized/copied: %#v", action.Metadata)
+	}
+	for _, invalid := range []map[string]string{
+		{"session_token": "secret"},
+		{"bad key": "value"},
+		{"detail": "line one\nline two"},
+	} {
+		if err := broker.Publish(AppAction{Kind: "app.page", Value: "events", Metadata: invalid}); err == nil {
+			t.Fatalf("invalid metadata accepted: %#v", invalid)
+		}
+	}
+}
+
 func TestActionBrokerObserverOutlivesBoundedTUIQueue(t *testing.T) {
 	broker := NewActionBroker()
 	events := broker.Events()
@@ -114,5 +139,34 @@ func TestActionBrokerHeadlessObserverDoesNotAccumulateTUIActions(t *testing.T) {
 	}
 	if got := len(broker.events); got != 0 {
 		t.Fatalf("unsubscribed TUI queue contains %d actions", got)
+	}
+}
+
+func TestNormalizeTrackedAppActionRequiresAdvertisedCustomNamespace(t *testing.T) {
+	registry := NewInstanceRegistry()
+	if _, err := registry.Upsert(AppInstance{
+		ID: "pealayer:desktop", Surface: "pealayer", State: "active",
+		Values: map[string]string{ActionCapabilitiesKey: "pealayer.open,pealayer.play"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	action, err := NormalizeTrackedAppAction(AppAction{
+		Kind: " PEALAYER.OPEN ", Value: " movie.mp4 ", Target: "pealayer:desktop",
+	}, registry)
+	if err != nil || action.Kind != "pealayer.open" || action.Value != "movie.mp4" {
+		t.Fatalf("action=%#v err=%v", action, err)
+	}
+	if _, err := NormalizeAppAction(action); err == nil {
+		t.Fatal("custom action entered the untracked legacy validator")
+	}
+	for _, invalid := range []AppAction{
+		{Kind: "pealayer.pause", Target: "pealayer:desktop"},
+		{Kind: "app.future", Target: "pealayer:desktop"},
+		{Kind: "controller.future", Target: "pealayer:desktop"},
+		{Kind: "pealayer.open", Value: "first\nsecond", Target: "pealayer:desktop"},
+	} {
+		if _, err := NormalizeTrackedAppAction(invalid, registry); err == nil {
+			t.Fatalf("invalid custom action accepted: %#v", invalid)
+		}
 	}
 }

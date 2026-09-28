@@ -14,6 +14,124 @@ type dataColumn struct {
 	Align lipgloss.Position
 }
 
+type controlValueTone int
+
+const (
+	controlToneNeutral controlValueTone = iota
+	controlToneOn
+	controlToneOff
+	controlToneAction
+	controlToneLevel
+)
+
+type controlTableRow struct {
+	Group string
+	Name  string
+	Value string
+	Tone  controlValueTone
+}
+
+type controlTableLine struct {
+	Logical int
+	Group   string
+}
+
+func controlTableLines(rows []controlTableRow) []controlTableLine {
+	lines := make([]controlTableLine, 0, len(rows)+3)
+	for logical, row := range rows {
+		if row.Group != "" {
+			lines = append(lines, controlTableLine{Logical: -1, Group: row.Group})
+		}
+		lines = append(lines, controlTableLine{Logical: logical})
+	}
+	return lines
+}
+
+func visibleControlTableLines(rows []controlTableRow, visibleRows, cursor int) []controlTableLine {
+	lines := controlTableLines(rows)
+	if len(lines) == 0 {
+		return nil
+	}
+	selected := 0
+	for index, line := range lines {
+		if line.Logical == cursor {
+			selected = index
+			break
+		}
+	}
+	start, end := tableWindow(len(lines), visibleRows, selected)
+	return lines[start:end]
+}
+
+func controlTableLogicalAt(rows []controlTableRow, visibleRows, cursor, visibleLine int) (int, bool) {
+	lines := visibleControlTableLines(rows, visibleRows, cursor)
+	if visibleLine < 0 || visibleLine >= len(lines) || lines[visibleLine].Logical < 0 {
+		return 0, false
+	}
+	return lines[visibleLine].Logical, true
+}
+
+func renderControlTable(
+	width, visibleRows, cursor int,
+	columns []dataColumn,
+	rows []controlTableRow,
+	colorValues bool,
+) string {
+	if width < 8 {
+		width = 8
+	}
+	innerWidth := width - 2
+	if len(columns) != 2 || columns[0].Width+columns[1].Width != innerWidth {
+		return ""
+	}
+	borderStyle := lipgloss.NewStyle().Foreground(colorPanel)
+	border := func(left, fill, right string) string {
+		return borderStyle.Render(left + strings.Repeat(fill, innerWidth) + right)
+	}
+	header := alignCell(columns[0].Title, columns[0].Width, lipgloss.Center) +
+		alignCell(columns[1].Title, columns[1].Width, lipgloss.Center)
+	header = lipgloss.NewStyle().Bold(true).Foreground(colorAccent).Background(colorPanel).Render(header)
+
+	lines := []string{border("╭", "─", "╮"), borderStyle.Render("│") + header + borderStyle.Render("│")}
+	for _, line := range visibleControlTableLines(rows, visibleRows, cursor) {
+		if line.Logical < 0 {
+			label := "─ " + line.Group + " "
+			separator := label + strings.Repeat("─", max(0, innerWidth-lipgloss.Width(label)))
+			lines = append(lines, borderStyle.Render("│")+labelStyle.Render(separator)+borderStyle.Render("│"))
+			continue
+		}
+		row := rows[line.Logical]
+		selected := line.Logical == cursor
+		marker := "  "
+		if selected {
+			marker = "▸ "
+		}
+		name := alignCell(marker+row.Name, columns[0].Width, lipgloss.Left)
+		value := alignCell(row.Value, columns[1].Width, lipgloss.Left)
+		nameStyle := lipgloss.NewStyle().Foreground(colorBright)
+		valueStyle := lipgloss.NewStyle().Foreground(colorBright)
+		if colorValues {
+			switch row.Tone {
+			case controlToneOn:
+				valueStyle = valueStyle.Foreground(colorGood)
+			case controlToneOff:
+				valueStyle = valueStyle.Foreground(colorBad)
+			case controlToneAction:
+				valueStyle = valueStyle.Foreground(colorWarn)
+			case controlToneLevel:
+				valueStyle = valueStyle.Foreground(colorAccent)
+			}
+		}
+		if selected {
+			nameStyle = nameStyle.Background(colorPanel).Bold(true)
+			valueStyle = valueStyle.Background(colorPanel).Bold(true)
+		}
+		lines = append(lines, borderStyle.Render("│")+nameStyle.Render(name)+valueStyle.Render(value)+borderStyle.Render("│"))
+	}
+	lines = append(lines, border("╰", "─", "╯"))
+	return strings.Join(lines, "\n")
+}
+
 // tableWindow returns a stable viewport centered on the selected logical row.
 // Keeping the window explicit also makes mouse row mapping deterministic.
 func tableWindow(total, visible, cursor int) (start, end int) {

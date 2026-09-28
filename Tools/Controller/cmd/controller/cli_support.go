@@ -299,8 +299,8 @@ func printUsage(output io.Writer, configuredTitle ...string) {
 
 Interactive control:
   controller                         launch the Charm TUI
-  controller tui [connection flags]
-  controller web [--no-open] [--no-tray] [--no-auto] [connection flags]
+	controller tui [--ipc-addr HOST:PORT] [--ipc-token-ref REF] [--sync-navigation=false] [--simple] [connection flags]
+	controller web [--no-open] [--no-tray] [--no-auto] [connection flags]
   controller web export --output FILE.zip
   controller ports [connection flags]
   controller shell [connection flags]
@@ -311,6 +311,7 @@ Automation, monitoring and bridges:
   controller monitor [--interval 500ms] [--json] [connection flags]
   controller ipc serve [--listen 127.0.0.1:8787|--stdio] [connection flags]
   controller ipc call --method METHOD [--params JSON]
+	controller ipc monitor [--addr HOST:PORT] [--token-ref REF] [--kind program] [--after latest]
   controller ws serve --file firmware.hex [flags]
   controller ws client --url ws://host:3000/firmware [programmer flags]
 
@@ -318,18 +319,21 @@ Device, firmware and recovery:
   controller reset [connection flags]
 	controller eeprom inspect|export|import|restore [file-only backup flags]
 	controller firmware inspect|identity|patch-identity [artifact flags]
-	controller program flash HEX [PORT] [--method urclock|usbasp] [--app-device SELECTOR] [--allow-incomplete-backup] [--reinitialize-eeprom]
+	controller program flash HEX [PORT] [--method urclock|usbasp] [--app-device SELECTOR] [--deployment production|development] [--reinitialize-eeprom]
 	controller program recover HEX [PORT]  fresh readback + durable restore; never rewrites flash
+	controller program abandon TARGET_SHA256 ABANDON  restore a failed transaction when its exact staging HEX was lost; never reads/writes flash
 	controller program --operation DIAGNOSTIC [program flags]
+	controller program --method compile --sketch PROJECT [--firmware-feature NAME ...|--no-firmware-features]
   controller boot probe|info|metadata|backup|read|write|verify|start [flags]
-	controller toolchain check|update|bootstrap|lock|sync|profile|compile|core-info|install-bootloader [flags]
-	controller board initialize [--name NAME] [--uart auto|PORT|none] [--firmware HEX] [--bootloader-only]
+	controller toolchain check|update|bootstrap|lock|sync|profile|compile PROJECT [--firmware-feature NAME ...|--no-firmware-features]
+	controller board initialize [--name NAME] [--uart auto|PORT|none] [--firmware HEX] [--firmware-feature NAME ...|--no-firmware-features] [--bootloader-only]
 	controller board blank --confirm NAME [--uart auto|PORT|none]
 	controller board name [get|set NAME|clear]
 	controller driver usbasp status | ensure | install [--package DIR] | zadig [--latest] [--download-only] [--exe FILE]
 
 Host configuration and integration:
 	controller [--app-name NAME] [--tagline TEXT] COMMAND...
+	controller app launch tui|webui [--mode ensure|launch|focus] [--target INSTANCE] [--page PAGE] [--peer NAME]
 	controller config path [config|data] | open [config|data] | clear --confirm | show|validate
 	controller config secrets status|set REF (--from-env NAME|--stdin)|clear REF
 	controller network edge-enable|edge-disable|peer-add|peer-remove|probe|status
@@ -339,7 +343,7 @@ Host configuration and integration:
 	controller repair [--package DIR] [--expected-package-sha256 SHA256] [--desktop]
 	controller installation status
 	controller uninstall [--purge-data [--preview-purge | --confirm-purge {{PURGE_CONFIRMATION}}]]
-  controller desktop [install|ensure|uninstall|remove]
+  controller desktop [install|ensure|test|uninstall|remove]
   controller uri {{SCHEME}}://ACTION
   controller version
 
@@ -350,6 +354,15 @@ Connection flags:
   --pid 7523         USB PID filter
   --name CH340       name/product/manufacturer substring
   --baud 115200      UART rate
+
+Remote TUI flags:
+  --ipc-addr HOST:PORT    attach the full Charm TUI to an existing primary
+  --ipc-token-ref REF     load its bearer token from the OS vault/environment
+  --sync-navigation=false keep this full TUI's active page independent
+  --simple                explicit minimal line-oriented IPC fallback
+
+When another local primary already owns serial, the default is the full IPC
+TUI. Simple mode is never selected implicitly.
 
 Application UART and Urboot/AVRDUDE are mutually exclusive. Normal firmware
 writes first verify a complete flash + EEPROM + metadata backup, then flash,

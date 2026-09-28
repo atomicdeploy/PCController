@@ -1,0 +1,8 @@
+# <type>(<area>): concise summary
+#
+# Why this change is needed:
+#
+# Validation:
+#
+# Reference: #<issue>
+# Lines beginning with # are stripped by Git.

@@ -1,0 +1,277 @@
+package tui
+
+import (
+	"context"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/charmbracelet/bubbles/spinner"
+	tea "github.com/charmbracelet/bubbletea"
+
+	"pccontroller.local/controller/internal/control"
+	"pccontroller.local/controller/internal/native"
+	"pccontroller.local/controller/internal/shell"
+)
+
+func TestIdleSpinnerTickDoesNotScheduleRenderLoop(t *testing.T) {
+	model := RichPreviewModel(false)
+	_, command := model.Update(spinner.TickMsg{})
+	if command != nil {
+		t.Fatal("idle spinner tick scheduled another full-screen render")
+	}
+}
+
+func TestRemoteSnapshotPollingIsBackstopNotRenderLoop(t *testing.T) {
+	snapshot := RichPreviewSnapshot()
+	snapshot.Status.DoorOpen = true
+	model := Model{
+		remote:         &RemoteBackend{},
+		remoteSnapshot: snapshot,
+		page:           PageDashboard,
+		prefs:          Preferences{PollInterval: 250 * time.Millisecond},
+	}
+	if interval := model.statusInterval(); interval != time.Second {
+		t.Fatalf("remote snapshot interval=%s, want 1s push-event backstop", interval)
+	}
+
+	model.remote = nil
+	model.preview = &snapshot
+	if interval := model.statusInterval(); interval != 125*time.Millisecond {
+		t.Fatalf("local door-open interval=%s, want 125ms", interval)
+	}
+}
+
+func TestRemoteLiveRateFollowsActiveAndIdlePages(t *testing.T) {
+	rates := make([]time.Duration, 0, 2)
+	model := Model{remote: &RemoteBackend{SetLiveInterval: func(value time.Duration) {
+		rates = append(rates, value)
+	}}, page: PageDashboard}
+	model.switchPage(PageConsole)
+	model.switchPage(PageDashboard)
+	if len(rates) != 2 || rates[0] != remoteIdleLiveInterval || rates[1] != remoteActiveLiveInterval {
+		t.Fatalf("live rates=%v", rates)
+	}
+}
+
+func TestRemoteSnapshotUsesLiveRevisionWithoutFreezingConvergence(t *testing.T) {
+	base := time.Date(2026, 8, 12, 3, 4, 5, 0, time.UTC)
+	initial := RichPreviewSnapshot()
+	initial.StatusUpdated = base
+	model := Model{remote: &RemoteBackend{}, remoteSnapshot: initial}
+	live := RemoteLiveUpdate{
+		Status: initial.Status, HaveStatus: true,
+		StatusUpdated: base.Add(time.Second), StatusReceivedAt: base.Add(1100 * time.Millisecond),
+	}
+	live.Status.SupplyMV = 13_371
+	updated, _ := model.Update(remoteLiveUpdateMsg(live))
+	model = updated.(Model)
+	stale := initial
+	stale.Status.SupplyMV = 9_999
+	updated, _ = model.Update(remoteSnapshotResultMsg{
+		snapshot: stale, receivedAt: base.Add(4 * time.Second), statusSequence: 0,
+	})
+	model = updated.(Model)
+	if model.remoteSnapshot.Status.SupplyMV != 13_371 || model.remoteStatusSequence != 1 {
+		t.Fatalf("live status rolled back: %#v sequence=%d", model.remoteSnapshot.Status, model.remoteStatusSequence)
+	}
+	if got := model.statusFreshnessLabel(model.remoteSnapshot, base.Add(4*time.Second)); got == "live" {
+		t.Fatalf("rejected stale snapshot falsely renewed freshness: %q", got)
+	}
+
+	converged := initial
+	converged.Status.SupplyMV = 14_004
+	converged.StatusUpdated = base.Add(4 * time.Second)
+	updated, _ = model.Update(remoteSnapshotResultMsg{
+		snapshot: converged, receivedAt: base.Add(4100 * time.Millisecond),
+		statusSequence: model.remoteStatusSequence,
+	})
+	model = updated.(Model)
+	if model.remoteSnapshot.Status.SupplyMV != 14_004 ||
+		model.statusFreshnessLabel(model.remoteSnapshot, base.Add(4200*time.Millisecond)) != "live" {
+		t.Fatalf("snapshot convergence stayed frozen: %#v freshness=%q",
+			model.remoteSnapshot.Status,
+			model.statusFreshnessLabel(model.remoteSnapshot, base.Add(4200*time.Millisecond)))
+	}
+}
+
+func TestRemoteLEDIdenticalReplayPreservesPhaseAndIntentionalOffApplies(t *testing.T) {
+	base := time.Date(2026, 8, 12, 3, 4, 5, 0, time.UTC)
+	blue := native.StatusLEDState{Blue: 120, Brightness: 120, Condition: 255}
+	model := Model{remote: &RemoteBackend{}, remoteSnapshot: RichPreviewSnapshot()}
+	model.remoteSnapshot.StatusLED = blue
+	model.remoteSnapshot.HaveStatusLED = true
+	model.remoteSnapshot.StatusLEDUpdated = base
+
+	replay := RemoteLiveUpdate{
+		StatusLED: blue, HaveStatusLED: true,
+		StatusLEDUpdated: base.Add(time.Second), StatusLEDReceivedAt: base.Add(time.Second),
+	}
+	updated, _ := model.Update(remoteLiveUpdateMsg(replay))
+	model = updated.(Model)
+	if !model.remoteSnapshot.StatusLEDUpdated.Equal(base) {
+		t.Fatalf("identical replay reset LED phase to %s", model.remoteSnapshot.StatusLEDUpdated)
+	}
+	unknown := RichPreviewSnapshot()
+	unknown.HaveStatusLED = false
+	unknown.StatusLED = native.StatusLEDState{}
+	unknown.StatusLEDUpdated = time.Time{}
+	updated, _ = model.Update(remoteSnapshotResultMsg{
+		snapshot: unknown, receivedAt: base.Add(1500 * time.Millisecond),
+		ledSequence: model.remoteLEDSequence,
+	})
+	model = updated.(Model)
+	if !model.remoteSnapshot.HaveStatusLED || model.remoteSnapshot.StatusLED != blue {
+		t.Fatalf("unknown snapshot synthesized a blue-to-off jump: %#v", model.remoteSnapshot)
+	}
+
+	off := replay
+	off.StatusLED = native.StatusLEDState{Condition: 255}
+	off.StatusLEDUpdated = base.Add(2 * time.Second)
+	updated, _ = model.Update(remoteLiveUpdateMsg(off))
+	model = updated.(Model)
+	if model.remoteSnapshot.StatusLED != off.StatusLED ||
+		!model.remoteSnapshot.StatusLEDUpdated.Equal(off.StatusLEDUpdated) {
+		t.Fatalf("intentional off frame was hidden: %#v", model.remoteSnapshot)
+	}
+	stale := RichPreviewSnapshot()
+	stale.StatusLED = blue
+	stale.HaveStatusLED = true
+	stale.StatusLEDUpdated = base.Add(time.Second)
+	updated, _ = model.Update(remoteSnapshotResultMsg{
+		snapshot: stale, receivedAt: base.Add(3 * time.Second), ledSequence: 0,
+	})
+	model = updated.(Model)
+	if model.remoteSnapshot.StatusLED != off.StatusLED {
+		t.Fatalf("pre-event snapshot synthesized an off-to-blue jump: %#v", model.remoteSnapshot.StatusLED)
+	}
+}
+
+func TestRemoteBackendKeepsFullModelAndRelaysPortOpen(t *testing.T) {
+	localRuntime := control.New(control.Options{})
+	defer localRuntime.Close()
+
+	remoteSnapshot := RichPreviewSnapshot()
+	remoteSnapshot.Port.Name = "REMOTE-COM4"
+	remoteSnapshot.ConnectionState = "connected through IPC"
+	called := make(chan []string, 1)
+	engine := shell.New(10)
+	if err := engine.Register(shell.Command{
+		Name: "port", Usage: "port open|close", Summary: "manage the primary-owned serial port",
+		Run: func(_ context.Context, args []string) (string, error) {
+			called <- append([]string(nil), args...)
+			return "remote port request accepted", nil
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	model := NewApplicationWithOptions(localRuntime, engine, Options{
+		DisableWelcome: true,
+		Remote: &RemoteBackend{
+			Endpoint: "cafe-pc.local:8787", InitialSnapshot: remoteSnapshot,
+		},
+	})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 132, Height: 42})
+	model = updated.(Model)
+	if rendered := model.View(); !strings.Contains(rendered, "REMOTE-COM4") ||
+		!strings.Contains(rendered, "PCController") {
+		t.Fatalf("remote full TUI did not render the normal dashboard: %q", rendered)
+	}
+
+	_, command, handled := model.openPort()
+	if !handled || command == nil {
+		t.Fatal("remote port open was not routed through the full TUI command path")
+	}
+	message := command()
+	result, ok := message.(commandResultMsg)
+	if !ok || result.err != nil || result.output != "remote port request accepted" {
+		t.Fatalf("remote command result=%#v", message)
+	}
+	if args := <-called; len(args) != 1 || args[0] != "open" {
+		t.Fatalf("remote port args=%q", args)
+	}
+	if localRuntime.Snapshot().Connected {
+		t.Fatal("remote TUI opened the local serial runtime")
+	}
+}
+
+func TestRemoteSnapshotFailureIsVisibleAndRecovers(t *testing.T) {
+	model := Model{remote: &RemoteBackend{}, remoteSnapshot: RichPreviewSnapshot()}
+	updated, _ := model.Update(remoteSnapshotResultMsg{err: context.DeadlineExceeded})
+	model = updated.(Model)
+	if model.snapshot().Connected || model.snapshot().ConnectionState != "remote IPC unavailable" {
+		t.Fatalf("failed remote snapshot=%#v", model.snapshot())
+	}
+
+	recovered := RichPreviewSnapshot()
+	recovered.Port.Name = "RECOVERED-COM4"
+	updated, _ = model.Update(remoteSnapshotResultMsg{snapshot: recovered})
+	model = updated.(Model)
+	if !model.snapshot().Connected || model.snapshot().Port.Name != "RECOVERED-COM4" ||
+		model.remoteSnapshotError != "" {
+		t.Fatalf("recovered remote snapshot=%#v error=%q", model.snapshot(), model.remoteSnapshotError)
+	}
+}
+
+func TestClosedRemoteEventStreamIsTerminalAndDoesNotResubscribe(t *testing.T) {
+	events := make(chan control.Event)
+	close(events)
+	model := Model{
+		remote:         &RemoteBackend{Events: events},
+		remoteSnapshot: RichPreviewSnapshot(),
+	}
+
+	message := waitControlEvent(events)()
+	if _, ok := message.(controlEventClosedMsg); !ok {
+		t.Fatalf("closed stream message=%T; want controlEventClosedMsg", message)
+	}
+	updated, command := model.Update(message)
+	model = updated.(Model)
+	if !model.remoteEventsClosed {
+		t.Fatal("closed remote event stream was not recorded as terminal")
+	}
+	if command != nil {
+		t.Fatal("closed stream scheduled another command")
+	}
+	if len(model.logs) != 1 || !strings.Contains(model.logs[0], "event stream closed") {
+		t.Fatalf("closed stream logs=%q", model.logs)
+	}
+
+	// A duplicate terminal notification remains inert and does not grow the
+	// transcript or restart the closed-channel receive loop.
+	updated, command = model.Update(controlEventClosedMsg{})
+	model = updated.(Model)
+	if command != nil || len(model.logs) != 1 {
+		t.Fatalf("duplicate close command=%v logs=%q", command != nil, model.logs)
+	}
+}
+
+func TestRemoteModelHasNoFillerReadyLogOrHostMutationHooks(t *testing.T) {
+	runtime := control.New(control.Options{})
+	defer runtime.Close()
+	model := NewApplicationWithOptions(runtime, shell.New(10), Options{
+		DisableWelcome: true,
+		Remote: &RemoteBackend{
+			Endpoint: "cafe-pc.local:8787", InitialSnapshot: RichPreviewSnapshot(),
+		},
+	})
+	if strings.Contains(strings.Join(model.logs, "\n"), "console ready") {
+		t.Fatalf("remote transcript contains filler ready copy: %q", model.logs)
+	}
+	if model.saveHostIntegrations != nil || model.saveRF != nil {
+		t.Fatal("remote model must not silently save remote-owned settings to local config")
+	}
+
+	model.page = PageAppSettings
+	for _, row := range model.appSettingRows() {
+		if (strings.HasPrefix(row.Key, "led.") || strings.HasPrefix(row.Key, peripheralNameSettingPrefix)) && row.Editable {
+			t.Fatalf("remote-owned setting %q is misleadingly editable", row.Key)
+		}
+	}
+	before := model.rfValue.DisplayRadix
+	model.toggleRFRadix()
+	if model.rfValue.DisplayRadix != before || !strings.Contains(model.notice, "unavailable") {
+		t.Fatalf("remote RF mutation radix=%q notice=%q", model.rfValue.DisplayRadix, model.notice)
+	}
+}

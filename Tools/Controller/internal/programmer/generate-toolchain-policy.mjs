@@ -1,5 +1,8 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
+import { loadProjectEnv } from '../../../Build/env.mjs'
+
+loadProjectEnv()
 
 const policyURL = new URL('../../toolchain-profile.json', import.meta.url)
 const lockURL = new URL('../../toolchain-lock.json', import.meta.url)
@@ -12,8 +15,7 @@ const target = policy?.target
 const targetIntegers = [
   'clock_hz', 'baud', 'application_limit_bytes', 'flash_bytes', 'eeprom_bytes'
 ]
-if (policy?.format !== 'pccontroller-toolchain-policy/v1' ||
-    typeof policy.name !== 'string' || !policy.name.trim() ||
+if (typeof policy?.name !== 'string' || !policy.name.trim() ||
     typeof policy.fqbn !== 'string' || !policy.fqbn.trim() ||
     !target || typeof target !== 'object' || Array.isArray(target) ||
     typeof target.mcu !== 'string' || !target.mcu.trim() ||
@@ -22,8 +24,7 @@ if (policy?.format !== 'pccontroller-toolchain-policy/v1' ||
     target.application_limit_bytes >= target.flash_bytes) {
   throw new Error(`${fileURLToPath(policyURL)} must contain a named policy, FQBN, and valid target capacities`)
 }
-if (lock?.format !== 'pccontroller-toolchain-lock/v1' ||
-    lock?.policy_name !== policy.name || lock?.firmware?.fqbn !== policy.fqbn) {
+if (lock?.policy_name !== policy.name || lock?.firmware?.fqbn !== policy.fqbn) {
   throw new Error(`${fileURLToPath(lockURL)} must be generated from the canonical named policy and FQBN`)
 }
 
@@ -38,6 +39,7 @@ const generatedToolchainPolicyJSON = ${JSON.stringify(canonicalPolicy)}
 const generatedToolchainLockJSON = ${JSON.stringify(canonicalLock)}
 
 const (
+	generatedBoardProfile                 = ${JSON.stringify(policy.name)}
 	generatedBoardMCU                     = ${JSON.stringify(target.mcu)}
 	generatedBoardClockHz          uint32 = ${target.clock_hz}
 	generatedBoardBootloader              = ${JSON.stringify(target.bootloader)}

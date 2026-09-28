@@ -93,7 +93,7 @@ func (model Model) startRFGuidedCapture() (Model, tea.Cmd, bool) {
 		model.setNotice("Guided capture requires an authenticated controller connection")
 		return model, nil, true
 	}
-	if model.preview == nil && model.runtime.RFLearnState().Active {
+	if model.preview == nil && model.rfLearnState().Active {
 		model.rfGuidePhase = "interrupted"
 		model.setNotice("Another RF learning session is active; press Esc to cancel it explicitly")
 		return model, nil, true
@@ -242,7 +242,7 @@ func (model Model) handleRFGuidedKey(message tea.KeyMsg) (Model, tea.Cmd, bool) 
 
 	switch key {
 	case "esc":
-		wasLearning := model.preview == nil && model.runtime.RFLearnState().Active
+		wasLearning := model.preview == nil && model.rfLearnState().Active
 		model.rfGuideActive = false
 		model.rfGuidePhase = ""
 		model.rfGuideCandidate = nil

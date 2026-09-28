@@ -44,7 +44,12 @@ void UartProtocol::service() {
 bool UartProtocol::send(uint8_t opcode, uint8_t sequence,
                         const uint8_t *payload, uint8_t payloadLength) {
   const bool timedEvent = opcode == Event && payloadLength != 0;
-  const bool timed = timedEvent || opcode == Ack ||
+  // BUZZER_CHANGED is a pushed state frame rather than an EVENT envelope, but
+  // it still needs the MCU clock. Host speakers use this suffix to preserve
+  // note and pause cadence across USB/network jitter. Alpha hosts require this
+  // exact timestamped schema and must be upgraded with matching firmware.
+  const bool timedBuzzer = opcode == BuzzerChanged;
+  const bool timed = timedEvent || timedBuzzer || opcode == Ack ||
                      (opcode == ErrorResponse && sequence == 0xFE);
   if (payloadLength > static_cast<uint8_t>(MaximumPayload -
                                            (timed ? 4 : 0)) ||
@@ -53,7 +58,7 @@ bool UartProtocol::send(uint8_t opcode, uint8_t sequence,
   }
 
   raw_[0] = Magic;
-  raw_[1] = EnvelopeRevision;
+  raw_[1] = ReservedEnvelopeByte;
   raw_[2] = opcode;
   raw_[3] = sequence;
   raw_[4] = static_cast<uint8_t>(payloadLength + (timed ? 4 : 0));
@@ -102,15 +107,7 @@ uint16_t UartProtocol::responseErrors() const { return responseErrors_; }
 uint8_t *UartProtocol::framePayloadScratch() { return raw_ + 5; }
 
 uint8_t UartProtocol::crc8(const uint8_t *data, uint8_t length) {
-  uint8_t crc = 0;
-  while (length-- != 0) {
-    crc ^= *data++;
-    for (uint8_t bit = 0; bit < 8; ++bit) {
-      crc = (crc & 0x80) ? static_cast<uint8_t>((crc << 1) ^ 0x07)
-                         : static_cast<uint8_t>(crc << 1);
-    }
-  }
-  return crc;
+  return WireCodec::crc8(data, length);
 }
 
 bool UartProtocol::writeCobs(const uint8_t *input, uint8_t length) {
@@ -137,40 +134,13 @@ bool UartProtocol::writeCobs(const uint8_t *input, uint8_t length) {
   return true;
 }
 
-uint8_t UartProtocol::cobsDecode(const uint8_t *input, uint8_t length,
-                                 uint8_t *output, uint8_t capacity) {
-  uint8_t readIndex = 0;
-  uint8_t writeIndex = 0;
-  while (readIndex < length) {
-    const uint8_t code = input[readIndex++];
-    if (code == 0) {
-      return 0;
-    }
-    const uint8_t count = static_cast<uint8_t>(code - 1);
-    if (count > static_cast<uint8_t>(length - readIndex) ||
-        count > static_cast<uint8_t>(capacity - writeIndex)) {
-      return 0;
-    }
-    for (uint8_t index = 0; index < count; ++index) {
-      output[writeIndex++] = input[readIndex++];
-    }
-    if (code != 0xFF && readIndex < length) {
-      if (writeIndex >= capacity) {
-        return 0;
-      }
-      output[writeIndex++] = 0;
-    }
-  }
-  return writeIndex;
-}
-
 void UartProtocol::processEncodedFrame() {
   // COBS decode is safe in-place: after each code byte is consumed, the write
   // cursor can only trail the unread input cursor. Keeping the decoded request
   // in RX storage leaves raw_ available for nested ACK/error/response writes.
-  const uint8_t rawLength =
-      cobsDecode(receive_, receiveLength_, receive_, sizeof(receive_));
-  // The revision byte is advisory: magic, bounded shape, CRC, and each known
+  const uint8_t rawLength = WireCodec::cobsDecode(
+      receive_, receiveLength_, receive_, sizeof(receive_));
+  // The reserved byte is advisory: magic, bounded shape, CRC, and each known
   // opcode's semantic validation decide whether a frame is understandable.
   // This lets reduced/newer feature sets interoperate without build-specific
   // branches; unknown operations still receive Unsupported from the handler.

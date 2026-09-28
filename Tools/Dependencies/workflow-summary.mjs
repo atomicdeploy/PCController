@@ -3,6 +3,9 @@
 
 import { appendFileSync, existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { loadProjectEnv } from '../Build/env.mjs'
+
+loadProjectEnv()
 
 const path = resolve(process.argv[2] ?? '.build/dependencies/update-report.json')
 const report = existsSync(path)

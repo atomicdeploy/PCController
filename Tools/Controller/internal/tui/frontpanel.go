@@ -27,16 +27,15 @@ func (model Model) currentFrontPanel(snapshot control.Snapshot) FrontPanelState 
 		state = hostMenuPanelState(model.hostMenus.Snapshot())
 	} else if model.frontPanel != nil {
 		state = model.frontPanel()
-	} else if snapshot.HaveFrontPanel {
+	} else if frontPanelSnapshotAvailable(snapshot) {
 		panel := snapshot.FrontPanel
 		state = FrontPanelState{
 			RawSegments: panel.RawSegments, HasRawSegments: true,
 			Blink: panel.Blink, CategorySelector: panel.CategorySelector,
 			Brightness: panel.Brightness,
-			LCDLine1:   panel.LCDLine1, LCDLine2: panel.LCDLine2,
-			LCDBacklight: panel.LCDBacklight, MenuID: panel.MenuPage,
-			MenuName: model.menuPageByID(panel.MenuPage).Name,
-			Submode:  model.programModeName(panel.ProgramMode), PressedKeys: panel.PressedKeys,
+			MenuID:     panel.MenuPage,
+			MenuName:   model.menuPageByID(panel.MenuPage).Name,
+			Submode:    model.programModeName(panel.ProgramMode), PressedKeys: panel.PressedKeys,
 			InputSource: "FRONT_PANEL schema " + fmt.Sprint(panel.Schema), Exact: true,
 		}
 		if panel.HostCaptured {
@@ -59,32 +58,37 @@ func (model Model) currentFrontPanel(snapshot control.Snapshot) FrontPanelState 
 			PressedKeys: snapshot.Status.ActiveKeys, InputSource: "STATUS summary",
 			Exact: false,
 		}
-		if snapshot.Connected {
+		if snapshot.Connected && model.lcdDisplayAvailable(snapshot) {
 			state.LCDLine1 = page.Name
 			state.LCDLine2 = state.Submode
-		} else {
-			state.LCDLine1 = "PC offline"
-			state.LCDLine2 = "Connect USB toPC"
+		}
+		if snapshot.HaveFrontPanelSegments {
+			state.RawSegments = snapshot.FrontPanel.RawSegments
+			state.HasRawSegments = true
+			state.Brightness = snapshot.FrontPanel.Brightness
+			state.InputSource = "SEGMENT_CHANGED + STATUS summary"
 		}
 	}
-	var lcdPresentation control.LCDPresentationState
-	haveLCDPresentation := model.preview == nil && model.runtime != nil
-	if haveLCDPresentation {
-		lcdPresentation = model.runtime.LCDPresenter().State()
-	}
-	if model.preview == nil && model.runtime != nil &&
-		snapshot.Hello.Capabilities&native.CapabilityI2CTransfer != 0 {
-		if lcdPresentation.Physical {
+	lcdPresentation, haveLCDPresentation := model.currentLCDPresentation(snapshot)
+	lcdAddress, haveLCD := model.lcdDisplayState(snapshot)
+	state.HaveLCD = haveLCD
+	if haveLCD {
+		switch {
+		case haveLCDPresentation && lcdPresentation.Physical:
 			state.LCDLine1 = lcdPresentation.PhysicalLine1
 			state.LCDLine2 = lcdPresentation.PhysicalLine2
 			state.LCDBacklight = true
-			state.InputSource += fmt.Sprintf(" · LCD 0x%02X", lcdPresentation.Address)
-		} else {
-			state.LCDBacklight = false
-			state.InputSource += " · LCD not detected"
+		case frontPanelSnapshotAvailable(snapshot) && snapshot.FrontPanel.LCDAvailable:
+			state.LCDLine1 = snapshot.FrontPanel.LCDLine1
+			state.LCDLine2 = snapshot.FrontPanel.LCDLine2
+			state.LCDBacklight = snapshot.FrontPanel.LCDBacklight
+		case haveLCDPresentation && lcdPresentation.FirmwareMirror:
+			state.LCDLine1 = lcdPresentation.FirmwareLine1
+			state.LCDLine2 = lcdPresentation.FirmwareLine2
 		}
+		state.InputSource += fmt.Sprintf(" · LCD 0x%02X", lcdAddress)
 	}
-	if model.lcdMirror {
+	if model.lcdMirror && haveLCD {
 		switch {
 		case model.preview != nil:
 			line1 := model.input.Value()
@@ -98,7 +102,7 @@ func (model Model) currentFrontPanel(snapshot control.Snapshot) FrontPanelState 
 			state.LCDLine1, state.LCDLine2 = line1, line2
 		case !snapshot.Connected:
 			state.InputSource += " · USB offline; retained physical text unverified"
-		case snapshot.Hello.Capabilities&native.CapabilityI2CTransfer != 0:
+		case haveLCDPresentation && lcdPresentation.Physical:
 			// The cap16 branch above uses only the PCF8574 driver's confirmed cache.
 		case haveLCDPresentation && lcdPresentation.FirmwareMirror:
 			state.LCDLine1 = lcdPresentation.FirmwareLine1
@@ -124,12 +128,42 @@ func (model Model) currentFrontPanel(snapshot control.Snapshot) FrontPanelState 
 	return state
 }
 
+func frontPanelSnapshotAvailable(snapshot control.Snapshot) bool {
+	return snapshot.Connected && snapshot.HaveFrontPanel &&
+		snapshot.Hello.Capabilities&native.CapabilityFrontPanelSnapshot != 0
+}
+
+func (model Model) frontPanelControlsAvailable(snapshot control.Snapshot) bool {
+	return model.frontPanelKey != nil && frontPanelSnapshotAvailable(snapshot) &&
+		snapshot.Hello.Capabilities&native.CapabilityRemoteKeys != 0
+}
+
+func (model Model) lcdPromptMirrorAvailable(snapshot control.Snapshot) bool {
+	return model.mirrorLCD != nil && model.lcdDisplayAvailable(snapshot)
+}
+
+func (model Model) currentLCDPresentation(snapshot control.Snapshot) (control.LCDPresentationState, bool) {
+	if model.preview != nil && frontPanelSnapshotAvailable(snapshot) {
+		panel := snapshot.FrontPanel
+		return control.LCDPresentationState{
+			Enabled: true, Physical: panel.LCDAvailable, Address: panel.LCDAddress,
+			PhysicalLine1: panel.LCDLine1, PhysicalLine2: panel.LCDLine2,
+		}, true
+	}
+	if model.remote != nil {
+		return model.lcdPresentation, model.haveLCDPresentation
+	}
+	if model.runtime != nil {
+		return model.runtime.LCDPresenter().State(), true
+	}
+	return control.LCDPresentationState{}, false
+}
+
 func renderFrontPanel(state FrontPanelState) string {
 	segments := renderSevenSegments(
 		state.Segments, state.RawSegments, state.HasRawSegments,
 		state.DecimalMask, state.Blink,
 	)
-	lcd := renderLCD(state.LCDLine1, state.LCDLine2, state.LCDBacklight)
 	detail := fmt.Sprintf(
 		"menu %d · %s\nsubmode · %s\nbrightness %d/7 · blink %s · category %s\ninput %s · keys 0x%X",
 		state.MenuID, state.MenuName, state.Submode, state.Brightness,
@@ -144,14 +178,17 @@ func renderFrontPanel(state FrontPanelState) string {
 	if !state.Exact {
 		detail += "\n" + warnStyle.Render("approximate STATUS fallback · exact display-state opcode unavailable")
 	}
-	return lipgloss.JoinHorizontal(
-		lipgloss.Top,
-		cardStyle.Copy().Render(titleStyle.Render("4-DIGIT DISPLAY")+"\n"+segments),
-		" ",
-		cardStyle.Copy().Render(titleStyle.Render("2×16 LCD")+"\n"+lcd),
-		" ",
-		cardStyle.Copy().Render(titleStyle.Render("FRONT PANEL STATE")+"\n"+detail),
-	)
+	cards := []string{cardStyle.Copy().Render(titleStyle.Render("4-DIGIT DISPLAY") + "\n" + segments)}
+	if state.HaveLCD {
+		lcd := renderLCD(state.LCDLine1, state.LCDLine2, state.LCDBacklight)
+		cards = append(cards, cardStyle.Copy().Render(titleStyle.Render("2×16 LCD")+"\n"+lcd))
+	}
+	cards = append(cards, cardStyle.Copy().Render(titleStyle.Render("FRONT PANEL STATE")+"\n"+detail))
+	joined := cards[0]
+	for _, card := range cards[1:] {
+		joined = lipgloss.JoinHorizontal(lipgloss.Top, joined, " ", card)
+	}
+	return joined
 }
 
 func statusEffectName(effect byte) string {

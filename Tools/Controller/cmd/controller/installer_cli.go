@@ -101,6 +101,16 @@ func runInstallLifecycle(
 	} else {
 		result, err = service.Install(ctx, request)
 	}
+	if errors.Is(err, installer.ErrExternalActivationRequired) {
+		plan, helperErr := service.PrepareExternalActivation(ctx, request, action == "repair")
+		if helperErr != nil {
+			return errors.Join(err, helperErr)
+		}
+		return writeLifecycleJSON(stdout, map[string]any{
+			"action": action, "scheduled": true, "helper": plan.HelperPath,
+			"outcome": plan.OutcomePath, "data_preserved": true,
+		})
+	}
 	if err != nil {
 		return err
 	}
@@ -212,7 +222,7 @@ func (installerDesktopAdapter) Ensure(
 	if err != nil {
 		return err
 	}
-	if !status.Supported || !status.ProtocolReady || !status.ShortcutReady {
+	if !status.Supported || !status.ProtocolReady || !status.ShortcutReady || !status.DesktopShortcutReady {
 		return errors.New("native desktop integration did not become ready")
 	}
 	return nil

@@ -76,7 +76,11 @@ func peripheralDescriptorForSettingKey(key string) (appconfig.PeripheralDescript
 }
 
 func (model Model) boardSettingRows() []settingRow {
-	settings := model.snapshot().Settings
+	snapshot := model.snapshot()
+	if !snapshot.Connected || !snapshot.HaveSettings || snapshot.Hello.Capabilities&native.CapabilityPersistentSettings == 0 {
+		return nil
+	}
+	settings := snapshot.Settings
 	return []settingRow{
 		{Key: "sound.silent", Group: "BUZZER", Label: "Board silent mode", Value: boolWord(settings.Flags&native.SettingsSilent != 0, "ON", "OFF"), Editable: true},
 		{Key: "programming.lock", Group: "", Label: "Programming lock", Value: boolWord(settings.Flags&native.SettingsProgrammingMode != 0, "ACTIVE", "CLEAR")},
@@ -105,23 +109,51 @@ func (model Model) appSettingRows() []settingRow {
 	ui := model.uiValue
 	appearance := appconfig.NormalizeAppearance(ui.Appearance)
 	status := model.hostIntegrationValue.StatusLED
-	buzzerPath := tuiBuzzerPath(model.snapshot().Settings.Flags&native.SettingsSilent != 0, !model.hostIntegrationValue.BuzzerMirror.Enabled)
+	buzzer := model.hostIntegrationValue.BuzzerMirror
+	snapshot := model.snapshot()
+	bluetoothAudio := snapshot.Connected && snapshot.Hello.Capabilities&native.CapabilityBluetoothAudio != 0
+	buzzerPath := appconfig.BuzzerPathUnknown
+	if snapshot.HaveSettings {
+		buzzerPath = tuiBuzzerPath(snapshot.Settings.Flags&native.SettingsSilent != 0, !buzzer.Enabled)
+	}
+	requestedPath := buzzer.Path
+	if requestedPath == "" && snapshot.HaveSettings {
+		requestedPath = buzzerPath
+	}
+	if requestedPath == "" {
+		requestedPath = appconfig.BuzzerPathUnknown
+	}
+	buzzerRuntime := appconfig.BuzzerRuntimeStatus{RequestedPath: requestedPath, EffectivePath: buzzerPath}
+	if model.buzzerRuntime != nil {
+		buzzerRuntime = model.buzzerRuntime()
+	}
+	pathSummary := strings.ToUpper(buzzerRuntime.EffectivePath)
+	if buzzerRuntime.RequestedPath != "" && buzzerRuntime.RequestedPath != buzzerRuntime.EffectivePath {
+		pathSummary = strings.ToUpper(buzzerRuntime.RequestedPath + " → " + buzzerRuntime.EffectivePath)
+	}
 	rows := []settingRow{
 		{Key: "app.title", Group: "APPLICATION", Label: "Title", Value: model.prefs.AppTitle, Editable: true},
 		{Key: "app.tagline", Group: "", Label: "First-run tagline", Value: model.prefs.Tagline, Editable: true},
-		{Key: "buzzer.path", Group: "BUZZER", Label: "Playback path", Value: strings.ToUpper(buzzerPath), Editable: true},
+		{Key: "instance.navigation", Group: "INSTANCE", Label: "Synchronize navigation", Value: onOff(model.navigationSync), Editable: true},
+		{Key: "network.advertisement", Group: "NETWORK", Label: "Discovery advertisement", Value: discoverySummary(model.hostIntegrationValue.Discovery), Editable: true},
+		{Key: "network.instance", Group: "", Label: "Advertised instance name", Value: defaultText(model.hostIntegrationValue.Discovery.InstanceName, "system hostname / app title"), Editable: true},
+		{Key: "buzzer.path", Group: "BUZZER", Label: "Playback path", Value: pathSummary, Editable: true},
+		{Key: "buzzer.renderers", Group: "", Label: "Host renderers", Value: fmt.Sprintf("PC %s · WEB %s", onOff(buzzer.NativeEnabled), onOff(buzzer.WebAudioEnabled)), Editable: true},
+		{Key: "buzzer.backend", Group: "", Label: "PC speaker backend", Value: strings.ToUpper(defaultText(buzzerRuntime.BackendRequested, "auto") + " → " + defaultText(buzzerRuntime.BackendEffective, "unavailable")), Editable: true},
+		{Key: "buzzer.executable", Group: "", Label: "Beep executable", Value: defaultText(buzzer.Executable, "PATH lookup"), Editable: true},
 		{Key: "appearance.identity", Group: "APPEARANCE", Label: "Theme · language · direction", Value: fmt.Sprintf("%s · %s · %s", appearanceThemeLabel(appearance.Theme), appearanceLocaleLabel(appearance.Locale), strings.ToUpper(appearance.Direction)), Editable: true},
 		{Key: "appearance.accessibility", Group: "", Label: "Motion · number density", Value: fmt.Sprintf("%s · %s", boolWord(appearance.ReduceMotion, "REDUCED", "FULL"), boolWord(appearance.CompactNumbers, "COMPACT", "DETAILED")), Editable: true},
 		{Key: "appearance.audio", Group: "", Label: "Interface audio", Value: fmt.Sprintf("%s · %.0f%%", boolWord(appearance.AudioMuted, "MUTED", "ON"), appearance.AudioVolume*100), Editable: true},
 		{Key: "layout.tables", Group: "", Label: "Table layout", Value: strings.ToUpper(ui.TableLayout), Editable: true},
+		{Key: "layout.control_colors", Group: "", Label: "Control state colors", Value: onOff(ui.ControlValueColors), Editable: true},
 		{Key: "console.enabled", Group: "LOCAL CONSOLE", Label: "Manage local window", Value: onOff(ui.TUIConsole.Enabled), Editable: true},
 		{Key: "console.window", Group: "", Label: "Window columns · rows", Value: fmt.Sprintf("%d × %d", ui.TUIConsole.Columns, ui.TUIConsole.Rows), Editable: true},
 		{Key: "console.font", Group: "", Label: "Font face", Value: ui.TUIConsole.FontFace, Editable: true},
 		{Key: "console.font_size", Group: "", Label: "Font height", Value: fmt.Sprintf("%d px", ui.TUIConsole.FontSize), Editable: true},
 		{Key: "poll.active", Group: "MEASUREMENTS", Label: "Active polling", Value: model.prefs.PollInterval.String(), Editable: true},
+		{Key: "measurement.freshness", Group: "", Label: "Freshness window", Value: model.prefs.FreshnessWindow.String(), Editable: true},
 		{Key: "history.retention", Group: "", Label: "History retention", Value: model.prefs.HistoryWindow.String(), Editable: true},
 		{Key: "display.decimals", Group: "", Label: "Decimal places", Value: fmt.Sprintf("V %d  ·  A %d  ·  W %d  ·  °C %d", ui.VoltageDecimals, ui.CurrentDecimals, ui.PowerDecimals, ui.TemperatureDecimals), Editable: true},
-		{Key: "measurement.visibility", Group: "VISIBILITY", Label: "Live measurements", Value: visibleMeasurementSummary(ui), Editable: true},
 		{Key: "diagnostic.visibility", Group: "", Label: "I/O · diagnostics · graphs", Value: fmt.Sprintf("%s · %s · %s", onOff(ui.ShowIO), onOff(ui.ShowDiagnostics), onOff(ui.ShowGraphs)), Editable: true},
 		{Key: "events.limit", Group: "HISTORY", Label: "Event transcript", Value: fmt.Sprintf("%d entries", ui.EventLogLimit), Editable: true},
 		{Key: "lcd.services", Group: "LCD", Label: "Service · prompt mirror", Value: fmt.Sprintf("%s · %s", onOff(ui.LCDServiceEnabled), onOff(ui.MirrorPromptToLCD)), Editable: true},
@@ -131,15 +163,68 @@ func (model Model) appSettingRows() []settingRow {
 		{Key: "led.door_hold", Group: "", Label: "Door cue hold", Value: fmt.Sprintf("%d ms", status.DoorCueHoldMS), Editable: true},
 		{Key: "led.hot", Group: "", Label: "HOT threshold", Value: fmt.Sprintf("%.2f °C", float64(status.HotThresholdCentiC)/100), Editable: true},
 	}
+	if snapshot.Connected && snapshot.HaveSettings {
+		rows = append(rows, settingRow{Key: "buzzer.path", Group: "BUZZER", Label: "Playback path", Value: strings.ToUpper(buzzerPath), Editable: true})
+	}
+	filtered := rows[:0]
+	for _, row := range rows {
+		if row.Key == "lcd.services" && snapshot.Hello.Capabilities&native.CapabilityLCD == 0 {
+			continue
+		}
+		if strings.HasPrefix(row.Key, "led.") && snapshot.Hello.Capabilities&native.CapabilityStatusEffects == 0 {
+			continue
+		}
+		filtered = append(filtered, row)
+	}
+	rows = filtered
+	if count := model.availableMeasurementCount(); count != 0 {
+		rows = append(rows, settingRow{Key: "measurement.visibility", Group: "VISIBILITY", Label: "Live measurements", Value: model.visibleMeasurementSummary(), Editable: true})
+	}
+	for index, device := range model.networkDevices {
+		hostname, state := device.Host, "host discovered"
+		detail := make([]string, 0, 9)
+		if device.Public != nil {
+			hostname = device.Public.Hostname
+			state = boolWord(device.Public.Health.Connectable, "connectable", "advertisement only")
+			if device.Public.Host.Version != "" {
+				detail = append(detail, "host "+device.Public.Host.Version)
+			}
+			if device.Public.Board.Connected {
+				board := defaultText(device.Public.Board.Identity.Name, "board")
+				if device.Public.Board.Identity.BuildHash != "" {
+					board += "@" + device.Public.Board.Identity.BuildHash
+				}
+				detail = append(detail, board)
+				if device.Public.Board.Port.Name != "" {
+					detail = append(detail, "port "+device.Public.Board.Port.Name)
+				}
+			}
+			telemetry := device.Public.Board.Telemetry
+			if telemetry.INA219Available && validVoltageReading(telemetry.SupplyMV) && validCurrentReading(telemetry.CurrentMA) {
+				detail = append(detail, fmt.Sprintf("%.3f V · %.3f A", float64(telemetry.SupplyMV)/1000, float64(telemetry.CurrentMA)/1000))
+			}
+			if telemetry.TemperatureLEDAvailable && validTemperatureReading(telemetry.TemperatureLEDCentiC) {
+				detail = append(detail, fmt.Sprintf("T1 %.2f °C", float64(telemetry.TemperatureLEDCentiC)/100))
+			}
+			if telemetry.TemperatureBTAvailable && validTemperatureReading(telemetry.TemperatureBTAudioCentiC) {
+				detail = append(detail, fmt.Sprintf("T2 %.2f °C", float64(telemetry.TemperatureBTAudioCentiC)/100))
+			}
+		}
+		prefix := fmt.Sprintf("%s · %s · %s", hostname, strings.Join(device.Protocols, "+"), state)
+		if len(detail) != 0 {
+			prefix += " · " + strings.Join(detail, " · ")
+		}
+		rows = append(rows, settingRow{Key: fmt.Sprintf("network.device.%d", index), Group: "DISCOVERED", Label: device.Name, Value: prefix, Editable: true})
+	}
 	for _, item := range []struct {
 		key, label string
 		visual     appconfig.StatusLEDVisual
 	}{
 		{"idle", "Idle", status.Idle},
 		{"running", "Running", status.Running},
-		{"bt-connected", "BT Audio connected", status.BluetoothAudioConnected},
-		{"bt-searching", "BT Audio searching", status.BluetoothAudioSearching},
-		{"bt-off", "BT Audio powered off", status.BluetoothAudioOff},
+		{"bt-connected", "Bluetooth audio connected", status.BluetoothAudioConnected},
+		{"bt-searching", "Bluetooth audio searching", status.BluetoothAudioSearching},
+		{"bt-off", "Bluetooth audio powered off", status.BluetoothAudioOff},
 		{"rf", "RF activity", status.RFActivity},
 		{"door-opened", "Door opened", status.DoorOpened},
 		{"door-closed", "Door closed", status.DoorClosed},
@@ -147,12 +232,33 @@ func (model Model) appSettingRows() []settingRow {
 		{"running-door", "Running + door open", status.RunningDoorOpen},
 		{"offline", "PC offline", status.PCOffline},
 	} {
+		if strings.HasPrefix(item.key, "bt-") && !bluetoothAudio {
+			continue
+		}
 		rows = append(rows, settingRow{
 			Key: "led.visual." + item.key, Group: "", Label: item.label,
 			Value: visualSummary(item.visual), Editable: true,
 		})
 	}
 	rows = append(rows, model.peripheralNameSettingRows()...)
+	if model.remote != nil {
+		for index := range rows {
+			switch {
+			case strings.HasPrefix(rows[index].Key, "led."):
+				rows[index].Editable = false
+				rows[index].Value = "unavailable from remote IPC"
+			case rows[index].Key == "lcd.services":
+				rows[index].Editable = false
+				rows[index].Value = "local host service unavailable in remote mode"
+			case rows[index].Key == "app.title", rows[index].Key == "app.tagline",
+				strings.HasPrefix(rows[index].Key, peripheralNameSettingPrefix):
+				rows[index].Editable = model.remote.SaveHostUI != nil
+				if model.remote.SaveHostUI == nil {
+					rows[index].Value = "remote host configuration unavailable"
+				}
+			}
+		}
+	}
 	return rows
 }
 
@@ -161,6 +267,9 @@ func (model Model) peripheralNameSettingRows() []settingRow {
 	rows := make([]settingRow, 0, len(descriptors))
 	previousKind := ""
 	for _, descriptor := range descriptors {
+		if !model.peripheralAdvertised(descriptor) {
+			continue
+		}
 		group := ""
 		if descriptor.Kind != previousKind {
 			group = map[string]string{
@@ -181,6 +290,41 @@ func (model Model) peripheralNameSettingRows() []settingRow {
 		})
 	}
 	return rows
+}
+
+func (model Model) peripheralAdvertised(descriptor appconfig.PeripheralDescriptor) bool {
+	snapshot := model.snapshot()
+	if !snapshot.Connected {
+		return false
+	}
+	capabilities := snapshot.Hello.Capabilities
+	switch descriptor.Kind {
+	case "relay", "motion":
+		return capabilities&native.CapabilityRelayMotion != 0
+	case "pwm":
+		return snapshot.HaveStatus && capabilities&native.CapabilityPWM != 0 && snapshot.Status.PWMAvailable
+	case "display":
+		if descriptor.Key == "display.segment" {
+			return capabilities&native.CapabilitySegments != 0
+		}
+		return model.lcdDisplayAvailable(snapshot)
+	case "sensor":
+		switch descriptor.Role {
+		case "supply-voltage":
+			return snapshot.HaveStatus && capabilities&native.CapabilityINA219 != 0 && snapshot.Status.INA219Available && validVoltageReading(snapshot.Status.SupplyMV)
+		case "bus-voltage":
+			return snapshot.HaveStatus && capabilities&native.CapabilityINA219 != 0 && snapshot.Status.INA219Available && validVoltageReading(snapshot.Status.BusMV)
+		case "current":
+			return snapshot.HaveStatus && capabilities&native.CapabilityINA219 != 0 && snapshot.Status.INA219Available && validCurrentReading(snapshot.Status.CurrentMA)
+		case "power":
+			return snapshot.HaveStatus && capabilities&native.CapabilityINA219 != 0 && snapshot.Status.INA219Available && validPowerReading(snapshot.Status.PowerMW)
+		case "temperature-led":
+			return snapshot.HaveStatus && capabilities&native.CapabilityTemperatures != 0 && snapshot.Status.TLEDAvailable && validTemperatureReading(snapshot.Status.TLEDCenti)
+		case "temperature-audio":
+			return snapshot.HaveStatus && capabilities&native.CapabilityTemperatures != 0 && capabilities&native.CapabilityBluetoothAudio != 0 && snapshot.Status.TBTAvailable && validTemperatureReading(snapshot.Status.TBTCenti)
+		}
+	}
+	return false
 }
 
 func (model Model) selectedSettingRow() (settingRow, bool) {
@@ -306,12 +450,53 @@ func (model Model) buildAppSettingEditor(editor *settingEditor) {
 	case "app.tagline":
 		editor.IsText = true
 		editor.Text = ui.Tagline
+	case "instance.navigation":
+		editor.Fields = []settingEditorField{boolean("enabled", "Synchronize navigation", model.navigationSync)}
+	case "network.advertisement":
+		discovery := model.hostIntegrationValue.Discovery
+		editor.Fields = []settingEditorField{
+			boolean("dns-sd", "mDNS / DNS-SD", discovery.MDNSEnabled || discovery.DNSSDenabled),
+			boolean("ssdp", "SSDP / UPnP", discovery.SSDPEnabled || discovery.UPnPEnabled),
+			boolean("ws-discovery", "WS-Discovery", discovery.WSDiscoveryEnabled),
+			boolean("broadcast", "UDP broadcast", discovery.BroadcastEnabled),
+			boolean("netbios", "NetBIOS", discovery.NetBIOSEnabled),
+			rangeField("broadcast-port", "Broadcast port", discovery.BroadcastPort, 1024, 65535, 1, "", false),
+		}
+	case "network.instance":
+		editor.IsText = true
+		editor.Text = model.hostIntegrationValue.Discovery.InstanceName
 	case "buzzer.path":
-		path := tuiBuzzerPath(model.snapshot().Settings.Flags&native.SettingsSilent != 0, !model.hostIntegrationValue.BuzzerMirror.Enabled)
+		path := model.hostIntegrationValue.BuzzerMirror.Path
+		if path == "" && model.snapshot().HaveSettings {
+			path = tuiBuzzerPath(model.snapshot().Settings.Flags&native.SettingsSilent != 0, !model.hostIntegrationValue.BuzzerMirror.Enabled)
+		}
+		if path == "" {
+			path = appconfig.BuzzerPathNone
+		}
+		if model.buzzerRuntime != nil {
+			runtime := model.buzzerRuntime()
+			if runtime.EffectivePath != "" && runtime.EffectivePath != appconfig.BuzzerPathUnknown {
+				path = runtime.EffectivePath
+			} else if runtime.RequestedPath != "" && runtime.RequestedPath != appconfig.BuzzerPathUnknown {
+				path = runtime.RequestedPath
+			}
+		}
 		editor.Fields = []settingEditorField{{
 			Key: "path", Label: "Buzzer path", Value: map[string]int{"board": 0, "host": 1, "both": 2, "none": 3}[path],
 			Options: []settingOption{{0, "Board"}, {1, "PC host"}, {2, "Both"}, {3, "None"}},
 		}}
+	case "buzzer.renderers":
+		buzzer := model.hostIntegrationValue.BuzzerMirror
+		editor.Fields = []settingEditorField{
+			boolean("native", "PC speaker renderer", buzzer.NativeEnabled),
+			boolean("web", "Web browser renderer", buzzer.WebAudioEnabled),
+		}
+	case "buzzer.backend":
+		backend := map[string]int{"auto": 0, "native": 1, "external": 2, "off": 3}[strings.ToLower(model.hostIntegrationValue.BuzzerMirror.Backend)]
+		editor.Fields = []settingEditorField{{Key: "backend", Label: "PC speaker backend", Value: backend, Options: []settingOption{{0, "Automatic"}, {1, "Native"}, {2, "External command"}, {3, "Off"}}}}
+	case "buzzer.executable":
+		editor.IsText = true
+		editor.Text = model.hostIntegrationValue.BuzzerMirror.Executable
 	case "appearance.identity":
 		appearance := appconfig.NormalizeAppearance(ui.Appearance)
 		theme := map[string]int{"system": 0, "light": 1, "dark": 2}[appearance.Theme]
@@ -338,6 +523,8 @@ func (model Model) buildAppSettingEditor(editor *settingEditor) {
 			layout = 1
 		}
 		editor.Fields = []settingEditorField{{Key: "layout", Label: "Table layout", Value: layout, Options: []settingOption{{0, "Compact · centered"}, {1, "Expanded · full width"}}}}
+	case "layout.control_colors":
+		editor.Fields = []settingEditorField{boolean("enabled", "Color control states", ui.ControlValueColors)}
 	case "console.enabled":
 		editor.Fields = []settingEditorField{boolean("enabled", "Manage local window", ui.TUIConsole.Enabled)}
 	case "console.window":
@@ -353,7 +540,18 @@ func (model Model) buildAppSettingEditor(editor *settingEditor) {
 			rangeField("pixels", "Font height", ui.TUIConsole.FontSize, 5, 72, 1, "px", true),
 		}
 	case "poll.active":
-		editor.Fields = []settingEditorField{{Key: "interval", Label: "Polling interval", Value: ui.StatusIntervalMS, Options: intOptions([]int{100, 125, 200, 250, 500, 1000, 2000, 5000}, "ms")}}
+		editor.Fields = []settingEditorField{rangeField(
+			"interval", "Polling interval", ui.StatusIntervalMS,
+			appconfig.StatusIntervalMinMS, appconfig.StatusIntervalMaxMS,
+			1, "ms", true,
+		)}
+	case "measurement.freshness":
+		minimum := ui.StatusIntervalMS + appconfig.MeasurementFreshnessHeadroomMS
+		editor.Fields = []settingEditorField{rangeField(
+			"window", "Freshness window", ui.MeasurementFreshnessMS,
+			minimum, appconfig.MeasurementFreshnessMaxMS,
+			1, "ms", true,
+		)}
 	case "history.retention":
 		editor.Fields = []settingEditorField{{Key: "hours", Label: "Retention", Value: ui.HistoryHours, Options: intOptions([]int{1, 6, 12, 24, 48, 72, 168}, "h")}}
 	case "display.decimals":
@@ -364,13 +562,21 @@ func (model Model) buildAppSettingEditor(editor *settingEditor) {
 			rangeField("temperature", "Temperature", ui.TemperatureDecimals, 0, 2, 1, "digits", false),
 		}
 	case "measurement.visibility":
-		editor.Fields = []settingEditorField{
-			boolean("supply", "Supply voltage", ui.ShowSupplyVoltage),
-			boolean("bus", "Bus voltage", ui.ShowBusVoltage),
-			boolean("current", "Load current", ui.ShowCurrent),
-			boolean("power", "Load power", ui.ShowPower),
-			boolean("temperature-led", "Illumination temperature", ui.ShowTemperatureLED),
-			boolean("temperature-bt", "BT Audio temperature", ui.ShowTemperatureBT),
+		for _, item := range []struct {
+			descriptor appconfig.PeripheralDescriptor
+			key, label string
+			value      bool
+		}{
+			{appconfig.PeripheralDescriptor{Kind: "sensor", Role: "supply-voltage"}, "supply", "Supply voltage", ui.ShowSupplyVoltage},
+			{appconfig.PeripheralDescriptor{Kind: "sensor", Role: "bus-voltage"}, "bus", "Bus voltage", ui.ShowBusVoltage},
+			{appconfig.PeripheralDescriptor{Kind: "sensor", Role: "current"}, "current", "Load current", ui.ShowCurrent},
+			{appconfig.PeripheralDescriptor{Kind: "sensor", Role: "power"}, "power", "Load power", ui.ShowPower},
+			{appconfig.PeripheralDescriptor{Kind: "sensor", Role: "temperature-led"}, "temperature-led", "Illumination temperature", ui.ShowTemperatureLED},
+			{appconfig.PeripheralDescriptor{Kind: "sensor", Role: "temperature-audio"}, "temperature-bt", "BT Amplifier temperature", ui.ShowTemperatureBT},
+		} {
+			if model.peripheralAdvertised(item.descriptor) {
+				editor.Fields = append(editor.Fields, boolean(item.key, item.label, item.value))
+			}
 		}
 	case "diagnostic.visibility":
 		editor.Fields = []settingEditorField{
@@ -403,6 +609,36 @@ func (model Model) buildAppSettingEditor(editor *settingEditor) {
 			}
 		}
 	}
+}
+
+func discoverySummary(value appconfig.Discovery) string {
+	protocols := make([]string, 0, 5)
+	if value.MDNSEnabled || value.DNSSDenabled {
+		protocols = append(protocols, "DNS-SD")
+	}
+	if value.SSDPEnabled || value.UPnPEnabled {
+		protocols = append(protocols, "UPnP")
+	}
+	if value.WSDiscoveryEnabled {
+		protocols = append(protocols, "WSD")
+	}
+	if value.BroadcastEnabled {
+		protocols = append(protocols, "broadcast")
+	}
+	if value.NetBIOSEnabled {
+		protocols = append(protocols, "NetBIOS")
+	}
+	if len(protocols) == 0 {
+		return "DISABLED"
+	}
+	return "ENABLED · " + strings.Join(protocols, "+")
+}
+
+func defaultText(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
 }
 
 func tuiBuzzerPath(boardSilent, hostSilent bool) string {
@@ -648,14 +884,38 @@ func intOptions(values []int, unit string) []settingOption {
 	return result
 }
 
-func visibleMeasurementSummary(ui appconfig.UI) string {
-	visible := 0
-	for _, value := range []bool{ui.ShowSupplyVoltage, ui.ShowBusVoltage, ui.ShowCurrent, ui.ShowPower, ui.ShowTemperatureLED, ui.ShowTemperatureBT} {
-		if value {
+func (model Model) availableMeasurementCount() int {
+	count := 0
+	for _, role := range []string{"supply-voltage", "bus-voltage", "current", "power", "temperature-led", "temperature-audio"} {
+		if model.peripheralAdvertised(appconfig.PeripheralDescriptor{Kind: "sensor", Role: role}) {
+			count++
+		}
+	}
+	return count
+}
+
+func (model Model) visibleMeasurementSummary() string {
+	visible, available := 0, 0
+	for _, item := range []struct {
+		role    string
+		visible bool
+	}{
+		{"supply-voltage", model.uiValue.ShowSupplyVoltage},
+		{"bus-voltage", model.uiValue.ShowBusVoltage},
+		{"current", model.uiValue.ShowCurrent},
+		{"power", model.uiValue.ShowPower},
+		{"temperature-led", model.uiValue.ShowTemperatureLED},
+		{"temperature-audio", model.uiValue.ShowTemperatureBT},
+	} {
+		if !model.peripheralAdvertised(appconfig.PeripheralDescriptor{Kind: "sensor", Role: item.role}) {
+			continue
+		}
+		available++
+		if item.visible {
 			visible++
 		}
 	}
-	return fmt.Sprintf("%d of 6 visible", visible)
+	return fmt.Sprintf("%d of %d visible", visible, available)
 }
 
 func outputPersistenceSummary(flags byte) string {

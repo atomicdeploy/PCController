@@ -28,6 +28,11 @@ type HistoryOptions struct {
 
 const maximumTimelineEntries = 100_000
 
+// Timeline files are an operational journal, not an archival database. Keep
+// the on-disk representation bounded even when a noisy device emits events
+// faster than the in-memory retention window can make them useful.
+const maximumTimelineFileBytes int64 = 8 * 1024 * 1024
+
 type StatusSample struct {
 	Time   time.Time     `json:"time"`
 	Status native.Status `json:"status"`
@@ -386,7 +391,35 @@ func (runtime *Runtime) writeTimeline() {
 		if err := file.Close(); err != nil {
 			runtime.publishHistoryWriteError(err.Error())
 		}
+		if info, statErr := os.Stat(path); statErr == nil && info.Size() > maximumTimelineFileBytes {
+			if err := runtime.compactTimelineFile(path); err != nil {
+				runtime.publishHistoryWriteError(err.Error())
+			}
+		}
 	}
+}
+
+func (runtime *Runtime) compactTimelineFile(path string) error {
+	runtime.historyMu.RLock()
+	entries := append([]TimelineEntry(nil), runtime.timeline...)
+	runtime.historyMu.RUnlock()
+	temporary, err := os.CreateTemp(filepath.Dir(path), ".timeline-compact-*.jsonl")
+	if err != nil {
+		return err
+	}
+	temporaryName := temporary.Name()
+	defer os.Remove(temporaryName)
+	encoder := json.NewEncoder(temporary)
+	for _, entry := range entries {
+		if err := encoder.Encode(entry); err != nil {
+			temporary.Close()
+			return err
+		}
+	}
+	if err := temporary.Close(); err != nil {
+		return err
+	}
+	return os.Rename(temporaryName, path)
 }
 
 func (runtime *Runtime) publishHistoryWriteError(message string) {

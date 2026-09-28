@@ -23,6 +23,20 @@ export interface PortInfo {
   instance_id?: string
 }
 
+export interface PortProcessSnapshot {
+  supported: boolean
+  state: 'free' | 'owned' | 'unknown' | string
+  port?: string
+  pid?: number
+  name?: string
+  executable?: string
+  process_start_time_100ns?: number
+  window?: { handle?: number; title?: string; class?: string; visible?: boolean }
+  observed_at?: string
+  takeover_ready?: boolean
+  error?: string
+}
+
 export interface Hello {
   firmware_major?: number
   firmware_minor?: number
@@ -47,6 +61,9 @@ export interface ControllerStatus {
   temperature_led_centi_c: number
   temperature_bt_audio_centi_c: number
   flags: number
+  ina219_available: boolean
+  temperature_led_available: boolean
+  temperature_bt_audio_available: boolean
   program_running: boolean
   host_offline: boolean
   hot: boolean
@@ -133,6 +150,35 @@ export interface StatusLEDState {
   condition: number
 }
 
+export interface IlluminationState {
+  available: boolean
+  mode: number
+  on_brightness: number
+  off_brightness: number
+  door_open: boolean
+  target_brightness: number
+  target_pwm: number
+  applied_brightness: number
+  applied_pwm: number
+  at_target: boolean
+  persisted: boolean
+  updated_at?: string
+}
+
+export interface HardwareProblem {
+  code: string
+  severity: 'warning' | 'error' | string
+  impact?: string
+  os_problem_code?: number
+  device_id?: string
+  hardware_ids?: string[]
+  description?: string
+  class?: string
+  location?: string
+  location_paths?: string[]
+  observed_at: string
+}
+
 export interface Snapshot {
   connected: boolean
   paused: boolean
@@ -146,14 +192,18 @@ export interface Snapshot {
   connection_state: string
   connection_reason?: string
   connection_updated?: string
+  port_process?: PortProcessSnapshot
   program_state?: ProgramState
   rf_learning?: RFLearnState
+  macros?: MacroSnapshot
+  hardware_problems?: HardwareProblem[]
   front_panel?: FrontPanelState
   have_front_panel?: boolean
   front_panel_updated?: string
 	status_led?: StatusLEDState
 	have_status_led?: boolean
 	status_led_updated?: string
+	illumination: IlluminationState
 }
 
 export interface StatusUpdate {
@@ -185,6 +235,103 @@ export interface ControllerEvent {
   metadata?: Record<string, string>
 }
 
+export interface MacroStep {
+  at_us?: number
+  kind: string
+  target?: number
+  value?: number
+  duration_ms?: number
+  frequency_hz?: number
+  text?: string
+  destination?: string
+  code?: number
+  bits?: number
+  protocol?: number
+  pulse_us?: number
+  red?: number
+  green?: number
+  blue?: number
+  brightness?: number
+  opcode?: number
+  payload_hex?: string
+}
+
+export interface ControllerMacro {
+  id: number
+  name: string
+  mode?: string
+  category?: string
+  color?: string
+  label?: string
+  lcd_message?: string
+  timing_tolerance_us?: number
+  keep_outputs_on_cancel?: boolean
+  recording_source?: string
+  capture_dropped_steps?: number
+  capture_missing_steps?: number
+  steps?: MacroStep[] | null
+}
+
+export interface MacroPlaybackState {
+  running: boolean
+  mode?: string
+  connection_generation?: number
+  id?: number
+  name: string
+  category?: string
+  color?: string
+  step: number
+  step_count: number
+  duration_us?: number
+  started_at?: string
+  finished_at?: string
+  device_started_at_us?: number
+  accepted_bytes?: number
+  buffer_fill?: number
+  underruns?: number
+  dispatch_errors?: number
+  dropped_steps?: number
+  evidence_steps?: number
+  timing_violations?: number
+  last_timing_delta_us?: number
+  maximum_timing_error_us: number
+  timing_tolerance_us?: number
+  startup_delay_us?: number
+  faithful: boolean
+  lifecycle?: string
+  last_error?: string
+  device?: Record<string, unknown>
+}
+
+export interface MacroRecordingState {
+  active: boolean
+  mode?: string
+  id?: number
+  name: string
+  category?: string
+  color?: string
+  steps: number
+  host_steps?: number
+  panel_steps?: number
+  rf_steps?: number
+  last_at_us?: number
+  last_delta_us?: number
+  last_opcode?: number
+  last_source?: number
+  board_owned?: boolean
+  board_id?: number
+  dropped_steps?: number
+  started_at?: string
+  last_error?: string
+}
+
+export interface MacroSnapshot {
+  library: ControllerMacro[]
+  playback: MacroPlaybackState
+  recording: MacroRecordingState
+  latest_event_id?: number
+}
+
 export interface RFLearnedEntry {
   id: number
   code: number
@@ -209,12 +356,12 @@ export type BoardSettingsReadState = 'idle' | 'loading' | 'ready' | 'unavailable
 
 export interface MetricSample {
   at: number
-  supply: number
-  bus: number
-  current: number
-  power: number
-  ledTemp: number
-  btTemp: number
+  supply?: number
+  bus?: number
+  current?: number
+  power?: number
+  ledTemp?: number
+  btTemp?: number
 }
 
 export interface UIConfig {
@@ -224,6 +371,8 @@ export interface UIConfig {
   appearance: Appearance
   appearance_etag: string
   welcome_melody?: string
+	status_interval_ms: number
+	measurement_freshness_ms: number
 	websocket_path: string
   socket_io_path?: string
   session_ticket_path: string
@@ -235,6 +384,7 @@ export interface UIConfig {
 		buzzer_native_enabled: boolean
 		buzzer_web_audio: boolean
   }
+	buzzer_runtime?: BuzzerRuntimeStatus
   host_version?: string
   source_hash?: string
   build_time?: string
@@ -247,6 +397,8 @@ export interface HostUISettings {
   welcome_melody: string
   appearance: Appearance
   appearance_etag: string
+	status_interval_ms: number
+	measurement_freshness_ms: number
   segment_scroll: SegmentScrollSettings
   peripheral_names: Record<string, string>
   peripherals: PeripheralDescriptor[]
@@ -299,6 +451,36 @@ export interface LocalIntegrationSettings {
     suspend: LifecycleSafetyAction
     refresh_on_resume: boolean
   }
+  buzzer_mirror: {
+		path?: 'board' | 'host' | 'both' | 'none'
+    enabled: boolean
+    native_enabled: boolean
+    web_audio_enabled: boolean
+		backend: 'auto' | 'native' | 'external' | 'off'
+    executable?: string
+    driver_directory?: string
+  }
+	buzzer_runtime?: BuzzerRuntimeStatus
+}
+
+export interface BuzzerRuntimeStatus {
+	requested_path: 'board' | 'host' | 'both' | 'none' | 'unknown'
+	effective_path: 'board' | 'host' | 'both' | 'none' | 'unknown'
+	board_state_known: boolean
+	board_silent: boolean
+	board_change_required: boolean
+	board_apply_state: 'unspecified' | 'pending' | 'applying' | 'verified' | 'error'
+	board_apply_error?: string
+	host_mirror: boolean
+	backend_requested: 'auto' | 'native' | 'external' | 'off'
+	backend_effective: 'native' | 'external' | 'off' | 'unavailable'
+	executable_requested?: string
+	executable_effective?: string
+	backend_error?: string
+	path_overridden: boolean
+	mirror_overridden: boolean
+	backend_overridden: boolean
+	executable_overridden: boolean
 }
 
 export type LifecycleSafetyAction = 'leave' | 'stop-motion' | 'all-off'
@@ -385,6 +567,9 @@ export const emptyStatus: ControllerStatus = {
   temperature_led_centi_c: 0,
   temperature_bt_audio_centi_c: 0,
   flags: 0,
+  ina219_available: false,
+  temperature_led_available: false,
+  temperature_bt_audio_available: false,
   program_running: false,
   host_offline: false,
   hot: false,
@@ -431,6 +616,20 @@ export const emptySnapshot: Snapshot = {
   },
   have_status: false,
   have_settings: false,
+	hardware_problems: [],
+	illumination: {
+		available: false,
+		mode: 0,
+		on_brightness: 0,
+		off_brightness: 0,
+		door_open: false,
+		target_brightness: 0,
+		target_pwm: 0,
+		applied_brightness: 0,
+		applied_pwm: 0,
+		at_target: false,
+		persisted: false,
+	},
   front_panel: {
     schema: 0,
     raw_segments: [0, 0, 0, 0],

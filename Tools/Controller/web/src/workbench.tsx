@@ -37,6 +37,7 @@ import {
   Segmented,
   StatusBadge,
   TextField,
+  Toggle,
 } from './components'
 import { formatClock } from './i18n'
 import { redactSensitiveCommand, shellArgument } from './command-line'
@@ -49,7 +50,10 @@ import {
   type ConsoleToken,
 } from './console-format'
 import { AdvancedWorkbench } from './advanced-workbench'
+import { displayPresentationCommand, type DisplayRepeat, type DisplayTarget } from './display-command'
+import { peripheralAvailability } from './peripheral-availability'
 import { RFGuidedWorkflow } from './rf-guided-workflow'
+import { MacroLibraryPanel } from './macro-library'
 import type { SharedViewProps } from './views'
 
 interface TextTerminalRow {
@@ -125,8 +129,12 @@ export function WorkbenchView(props: SharedViewProps) {
   const [transcript, setTranscript] = useState<TerminalRow[]>([])
   const [consoleHelpOpen, setConsoleHelpOpen] = useState(false)
   const [busy, setBusy] = useState('')
-  const [displayTarget, setDisplayTarget] = useState<'segments' | 'lcd' | 'both'>('both')
+  const [displayTarget, setDisplayTarget] = useState<DisplayTarget>('both')
+  const [displaySpeed, setDisplaySpeed] = useState(220)
   const [displayDuration, setDisplayDuration] = useState(5000)
+  const [displayRepeat, setDisplayRepeat] = useState<DisplayRepeat>('once')
+  const [displayInterval, setDisplayInterval] = useState(30000)
+  const [displayScroll, setDisplayScroll] = useState(false)
   const [displayText, setDisplayText] = useState('READY')
   const [frequency, setFrequency] = useState(880)
   const [toneDuration, setToneDuration] = useState(120)
@@ -135,13 +143,26 @@ export function WorkbenchView(props: SharedViewProps) {
   const [green, setGreen] = useState(210)
   const [blue, setBlue] = useState(220)
   const [stripBrightness, setStripBrightness] = useState(180)
-  const [macro, setMacro] = useState('')
   const [automation, setAutomation] = useState('')
   const [hostBrightness, setHostBrightness] = useState(60)
   const latestStreamEventID = useRef(events.reduce((latest, event) => Math.max(latest, event.id), 0))
   const relayedTerminalIDs = useRef(new Set<string>())
   const consoleModel = useRef(new BrowserConsoleModel({ maxEntries: 240 }))
-  const displayTextIsValid = displayText.length <= 32 && /^[\x20-\x7e]*$/.test(displayText)
+  const displayTextLimit = displayTarget === 'segments' ? 40 : 32
+  const displayTextIsValid = displayText.length > 0 && displayText.length <= displayTextLimit && /^[\x20-\x7e]*$/.test(displayText)
+  const available = peripheralAvailability(snapshot)
+  const boardReady = transport.boardState === 'ready' && snapshot.connected && snapshot.have_status
+  const displayTargetOptions = [
+    { value: 'segments' as const, label: copy('Segments', 'سون‌سگمنت') },
+    ...(available.lcd ? [
+      { value: 'lcd' as const, label: 'LCD' },
+      { value: 'both' as const, label: copy('Both', 'هر دو') },
+    ] : []),
+  ]
+
+  useEffect(() => {
+    if (!available.lcd && displayTarget !== 'segments') setDisplayTarget('segments')
+  }, [available.lcd, displayTarget])
 
   useEffect(() => {
     const incoming = events
@@ -218,10 +239,10 @@ export function WorkbenchView(props: SharedViewProps) {
   return (
     <>
       <SectionTitle
-        eyebrow={snapshot.connected ? copy('Controller and host tools', 'ابزارهای برد و میزبان') : copy('Host tools', 'ابزارهای میزبان')}
+        eyebrow={boardReady ? copy('Controller and host tools', 'ابزارهای برد و میزبان') : copy('Host tools', 'ابزارهای میزبان')}
         title={t('workbench')}
         detail={`${transport.streamState.toUpperCase()} · ${events.length} ${copy('events', 'رویداد')} · ${transport.tabPeers + 1} ${copy('tabs', 'تب')}`}
-        action={<StatusBadge tone={snapshot.connected ? 'good' : 'warn'}>{snapshot.connected ? copy('BOARD + HOST', 'برد + میزبان') : copy('HOST ONLY', 'فقط میزبان')}</StatusBadge>}
+        action={<StatusBadge tone={boardReady ? 'good' : 'warn'}>{boardReady ? copy('BOARD + HOST', 'برد + میزبان') : copy('HOST ONLY', 'فقط میزبان')}</StatusBadge>}
       />
 
       <section className="workbench-grid">
@@ -249,24 +270,28 @@ export function WorkbenchView(props: SharedViewProps) {
           </div>
         </Card>
 
-        {snapshot.connected && <Card icon={Binary} iconTone="violet" title={copy('Displays', 'نمایشگرها')} eyebrow="TM1637 + LCD">
-          <div className="setting-group"><label>{copy('Target', 'مقصد')}</label><Segmented value={displayTarget} label={copy('Display target', 'مقصد نمایش')} options={[{ value: 'segments', label: copy('Segments', 'سون‌سگمنت') }, { value: 'lcd', label: 'LCD' }, { value: 'both', label: copy('Both', 'هر دو') }]} onChange={setDisplayTarget} /></div>
+        {boardReady && available.segments && <Card icon={Binary} iconTone="violet" title={copy('Displays', 'نمایشگرها')} eyebrow={available.lcd ? 'TM1637 + LCD' : 'TM1637'}>
+          {available.lcd && <div className="setting-group"><label>{copy('Target', 'مقصد')}</label><Segmented value={displayTarget} label={copy('Display target', 'مقصد نمایش')} options={displayTargetOptions} onChange={setDisplayTarget} /></div>}
           <TextField
-            label={copy('Bounded display text', 'متن نمایشگر، حداکثر ۳۲ نویسه')}
+            label={copy(`Display text · ${displayTextLimit} characters maximum`, `متن نمایشگر، حداکثر ${displayTextLimit} نویسه`)}
             hint={displayTextIsValid
-              ? copy('Printable ASCII only · 32 characters maximum.', 'فقط نویسه‌های قابل چاپ ASCII؛ حداکثر ۳۲ نویسه.')
+              ? copy('Printable ASCII is sent exactly, including leading and trailing spaces.', 'ASCII قابل چاپ دقیقاً با فاصله‌های ابتدا و انتها ارسال می‌شود.')
               : copy('Use printable ASCII characters only.', 'فقط از نویسه‌های قابل چاپ ASCII استفاده کنید.')}
             value={displayText}
-            maxLength={32}
+            maxLength={displayTextLimit}
             pattern="[ -~]*"
             aria-invalid={!displayTextIsValid}
             onChange={(event) => setDisplayText(event.target.value)}
           />
-          <RangeField label={copy('Override duration', 'مدت نمایش')} value={displayDuration} min={250} max={60000} step={250} unit="ms" onChange={setDisplayDuration} />
-          <div className="inline-actions"><Button tone="primary" icon={Lightbulb} disabled={!displayText.trim() || !displayTextIsValid} onClick={() => void run(`display ${displayTarget} ${displayDuration} ${shellArgument(displayText.trim())}`)}>{copy('Show text', 'نمایش متن')}</Button><Button icon={Eraser} onClick={() => void run(`display ${displayTarget} 0`)}>{copy('Clear', 'پاک‌کردن')}</Button></div>
+          {displayTarget !== 'lcd' && <RangeField label={copy('Marquee step speed', 'سرعت گام متن روان')} value={displaySpeed} min={80} max={5000} step={20} unit="ms" onChange={setDisplaySpeed} />}
+          <RangeField label={copy('Visible duration', 'مدت نمایش')} value={displayDuration} min={80} max={65520} step={20} unit="ms" onChange={setDisplayDuration} />
+          <div className="setting-group"><label>{copy('Repeat policy', 'سیاست تکرار')}</label><Segmented value={displayRepeat} label={copy('Display repeat policy', 'سیاست تکرار نمایش')} options={[{ value: 'once', label: copy('Once', 'یک‌بار') }, { value: 'loop', label: copy('Loop', 'پیوسته') }, { value: 'interval', label: copy('Interval', 'بازه‌ای') }]} onChange={setDisplayRepeat} /></div>
+          {displayRepeat === 'interval' && <RangeField label={copy('Wait between presentations', 'مکث بین نمایش‌ها')} value={displayInterval} min={1000} max={255000} step={1000} unit="ms" onChange={setDisplayInterval} />}
+          {displayTarget !== 'lcd' && <Toggle checked={displayScroll} onChange={setDisplayScroll} label={copy('Force marquee', 'اجبار متن روان')} detail={copy('Overflow scrolls automatically; enable this only to scroll text that already fits.', 'متن بلند خودکار حرکت می‌کند؛ این گزینه متن کوتاه را نیز روان می‌کند.')} />}
+          <div className="inline-actions"><Button tone="primary" icon={Lightbulb} disabled={!displayTextIsValid} onClick={() => void run(displayPresentationCommand({ target: displayTarget, text: displayText, speedMS: displaySpeed, durationMS: displayDuration, repeat: displayRepeat, intervalMS: displayInterval, scroll: displayScroll }))}>{copy('Show text', 'نمایش متن')}</Button><Button icon={Eraser} onClick={() => void run(`display ${displayTarget} 0`)}>{copy('Clear', 'پاک‌کردن')}</Button></div>
         </Card>}
 
-        {snapshot.connected && <Card icon={Lightbulb} iconTone="amber" title={copy('Addressable strip', 'نوار LED آدرس‌پذیر')} eyebrow={copy('11 pixels · status light', '۱۱ پیکسل · نور وضعیت')}>
+        {boardReady && available.statusLED && <Card icon={Lightbulb} iconTone="amber" title={copy('Addressable strip', 'نوار LED آدرس‌پذیر')} eyebrow={copy('11 pixels · status light', '۱۱ پیکسل · نور وضعیت')}>
           <RangeField label={copy('Red', 'قرمز')} value={red} min={0} max={255} onChange={setRed} />
           <RangeField label={copy('Green', 'سبز')} value={green} min={0} max={255} onChange={setGreen} />
           <RangeField label={copy('Blue', 'آبی')} value={blue} min={0} max={255} onChange={setBlue} />
@@ -274,7 +299,7 @@ export function WorkbenchView(props: SharedViewProps) {
           <div className="inline-actions"><Button tone="primary" icon={Palette} onClick={() => void run(`strip fill ${red} ${green} ${blue} ${stripBrightness}`)}>{copy('Fill strip', 'اعمال رنگ')}</Button><Button icon={Eraser} onClick={() => void run('strip clear')}>{copy('Clear', 'پاک‌کردن')}</Button></div>
         </Card>}
 
-        {snapshot.connected && <Card icon={AudioLines} iconTone="green" title={copy('Buzzer & melody', 'بیزر و ملودی')} eyebrow={copy('Timed audio', 'صدای زمان‌بندی‌شده')}>
+        {boardReady && available.buzzer && <Card icon={AudioLines} iconTone="green" title={copy('Buzzer & melody', 'بیزر و ملودی')} eyebrow={copy('Timed audio', 'صدای زمان‌بندی‌شده')}>
           <RangeField label={copy('Frequency', 'فرکانس')} value={frequency} min={20} max={20000} step={10} unit="Hz" onChange={setFrequency} />
           <RangeField label={copy('Duration', 'مدت')} value={toneDuration} min={20} max={5000} step={20} unit="ms" onChange={setToneDuration} />
           <Button icon={Volume2} onClick={() => void run(`buzzer ${frequency} ${toneDuration}`)}>{copy('Play tone', 'پخش صدا')}</Button>
@@ -282,16 +307,18 @@ export function WorkbenchView(props: SharedViewProps) {
           <div className="inline-actions"><Button icon={Play} disabled={!melody.trim()} onClick={() => void run(`melody play ${shellArgument(melody.trim())}`)}>{copy('Play', 'پخش')}</Button><Button icon={StopCircle} onClick={() => void run('melody stop')}>{copy('Stop', 'توقف')}</Button><Button icon={List} onClick={() => void run('melody list')}>{copy('List', 'فهرست')}</Button></div>
         </Card>}
 
-        <RFGuidedWorkflow snapshot={snapshot} events={events} locale={locale} openDialog={props.openDialog} />
+        {boardReady && available.rf && <RFGuidedWorkflow snapshot={snapshot} events={events} locale={locale} openDialog={props.openDialog} />}
 
-        <Card icon={Workflow} iconTone="green" title={copy('Macros & automations', 'ماکروها و خودکارسازی')} eyebrow={snapshot.connected ? copy('Controller timing · host rules', 'زمان‌بندی برد · قواعد میزبان') : copy('Host rules', 'قواعد میزبان')}>
-          {snapshot.connected && <><TextField label={copy('Macro name or ID', 'نام یا شناسه ماکرو')} value={macro} onChange={(event) => setMacro(event.target.value)} />
-          <div className="inline-actions"><Button icon={Play} disabled={!macro.trim()} onClick={() => void run(`macro play ${shellArgument(macro.trim())}`)}>{copy('Run macro', 'اجرای ماکرو')}</Button><Button icon={StopCircle} onClick={() => void run('macro cancel')}>{copy('Cancel', 'لغو')}</Button><Button icon={List} onClick={() => void run('macro list')}>{copy('List', 'فهرست')}</Button></div></>}
+        <Card className="macro-card" icon={Workflow} iconTone="green" title={copy('Macro library', 'کتابخانه ماکرو')} eyebrow={copy('Exact MCU timing · live shared state', 'زمان‌بندی دقیق MCU · وضعیت زنده مشترک')}>
+          <MacroLibraryPanel online={snapshot.connected} locale={locale} events={props.macroEvents} initialSnapshot={snapshot.macros} legacyCommand={run} />
+        </Card>
+
+        <Card icon={Bot} iconTone="violet" title={copy('Host automations', 'خودکارسازی میزبان')} eyebrow={copy('Event-driven host rules', 'قواعد رویدادمحور میزبان')}>
           <TextField label={copy('Host automation name', 'نام خودکارسازی میزبان')} value={automation} onChange={(event) => setAutomation(event.target.value)} />
           <div className="inline-actions"><Button icon={Bot} disabled={!automation.trim()} onClick={() => void run(`automation run ${shellArgument(automation.trim())}`)}>{copy('Run automation', 'اجرای خودکارسازی')}</Button><Button icon={List} onClick={() => void run('automation list')}>{copy('List', 'فهرست')}</Button></div>
         </Card>
 
-        {snapshot.connected && <Card icon={Cable} iconTone="accent" title={copy('I²C & peripherals', 'I²C و تجهیزات جانبی')} eyebrow={copy('Cooperative host lease', 'دسترسی هماهنگ میزبان')}>
+        {boardReady && <Card icon={Cable} iconTone="accent" title={copy('I²C & peripherals', 'I²C و تجهیزات جانبی')} eyebrow={copy('Cooperative host lease', 'دسترسی هماهنگ میزبان')}>
           <div className="operation-buttons"><Button icon={ScanSearch} onClick={() => void run('i2c scan')}>{copy('Scan bus', 'پویش گذرگاه')}</Button><Button icon={Unplug} onClick={() => void run('i2c release')}>{copy('Release lease', 'آزادسازی دسترسی')}</Button><Button icon={Settings2} onClick={() => void run('settings')}>{copy('Board settings', 'تنظیمات برد')}</Button><Button icon={LayoutDashboard} onClick={() => void run('menu current')}>{copy('Menu state', 'وضعیت منو')}</Button></div>
         </Card>}
 
@@ -306,7 +333,7 @@ export function WorkbenchView(props: SharedViewProps) {
         </Card>
 
         <Card icon={Cpu} iconTone="amber" title={copy('Firmware & recovery', 'میان‌افزار و بازیابی')} eyebrow={copy('Read-only first', 'ابتدا فقط خواندنی')}>
-          <div className="operation-buttons">{snapshot.connected && <><Button icon={Cpu} onClick={() => void run('hello')}>{copy('Identity', 'شناسه')}</Button><Button icon={ListRestart} onClick={() => void run('reset lines')}>{copy('Reconnect pulse', 'پالس اتصال مجدد')}</Button></>}<Button icon={MemoryStick} onClick={() => void run('toolchain profile')}>{copy('Toolchain profile', 'مشخصات زنجیره‌ابزار')}</Button><Button icon={SquareTerminal} onClick={() => setLine('boot info')}>{copy('Prepare boot info', 'آماده‌سازی اطلاعات راه‌اندازی')}</Button></div>
+          <div className="operation-buttons">{boardReady && <><Button icon={Cpu} onClick={() => void run('hello')}>{copy('Identity', 'شناسه')}</Button><Button icon={ListRestart} onClick={() => void run('reset lines')}>{copy('Reconnect pulse', 'پالس اتصال مجدد')}</Button></>}<Button icon={MemoryStick} onClick={() => void run('toolchain profile')}>{copy('Toolchain profile', 'مشخصات زنجیره‌ابزار')}</Button><Button icon={SquareTerminal} onClick={() => setLine('boot info')}>{copy('Prepare boot info', 'آماده‌سازی اطلاعات راه‌اندازی')}</Button></div>
         </Card>
       </section>
       <AdvancedWorkbench {...props} run={run} busy={busy} />

@@ -8,23 +8,23 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
 const (
 	ownerHelperArgument   = "--internal-port-owner-scan"
 	ownerDiagnoseArgument = "--internal-port-owner-diagnose"
-	ownerHelperVersion    = 1
 	maxOwnerHelperOutput  = 16 * 1024
 	maxOwnerHelperError   = 2 * 1024
+	ownerHelperLifetime   = 2 * time.Second
 )
 
 type ownerHelperResult struct {
-	Version int    `json:"version"`
-	Port    string `json:"port"`
-	Found   bool   `json:"found"`
-	Owner   *Owner `json:"owner,omitempty"`
-	Error   string `json:"error,omitempty"`
+	Port  string `json:"port"`
+	Found bool   `json:"found"`
+	Owner *Owner `json:"owner,omitempty"`
+	Error string `json:"error,omitempty"`
 }
 
 type ownerLookupFunc func(context.Context, string) (Owner, bool, error)
@@ -58,8 +58,8 @@ func runHelperInvocationWith(
 	if stdout == nil || scan == nil {
 		return errors.New("internal serial-owner helper is not initialized")
 	}
-	owner, found, scanErr := scan(ctx, port)
-	result := ownerHelperResult{Version: ownerHelperVersion, Port: port, Found: found}
+	owner, found, scanErr := boundedHelperLookup(ctx, port, scan)
+	result := ownerHelperResult{Port: port, Found: found}
 	if found && scanErr == nil {
 		owner = boundedOwner(owner)
 		result.Owner = &owner
@@ -79,6 +79,38 @@ func runHelperInvocationWith(
 	return err
 }
 
+// This worker exists only in the disposable helper invocation, never in the
+// long-running host's native scan path. Context checks cannot interrupt a
+// driver-blocked NtQueryObject call. Returning to helper main on this local
+// deadline terminates the entire helper process and releases its duplicated
+// handles, even when its parent has already exited and cannot kill it.
+func boundedHelperLookup(ctx context.Context, port string, scan ownerLookupFunc) (Owner, bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, ownerHelperLifetime)
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return Owner{}, false, err
+	}
+	type lookupResult struct {
+		owner Owner
+		found bool
+		err   error
+	}
+	result := make(chan lookupResult, 1)
+	go func() {
+		owner, found, err := scan(ctx, port)
+		result <- lookupResult{owner: owner, found: found, err: err}
+	}()
+	select {
+	case <-ctx.Done():
+		return Owner{}, false, ctx.Err()
+	case value := <-result:
+		if err := ctx.Err(); err != nil {
+			return Owner{}, false, err
+		}
+		return value.owner, value.found, value.err
+	}
+}
+
 func decodeOwnerHelperResult(port string, encoded []byte) (Owner, bool, error) {
 	if len(encoded) == 0 {
 		return Owner{}, false, errors.New("serial-owner helper returned no JSON")
@@ -87,7 +119,6 @@ func decodeOwnerHelperResult(port string, encoded []byte) (Owner, bool, error) {
 		return Owner{}, false, fmt.Errorf("serial-owner helper output exceeded %d bytes", maxOwnerHelperOutput)
 	}
 	decoder := json.NewDecoder(bytes.NewReader(encoded))
-	decoder.DisallowUnknownFields()
 	var result ownerHelperResult
 	if err := decoder.Decode(&result); err != nil {
 		return Owner{}, false, fmt.Errorf("decode serial-owner helper JSON: %w", err)
@@ -100,7 +131,7 @@ func decodeOwnerHelperResult(port string, encoded []byte) (Owner, bool, error) {
 		return Owner{}, false, fmt.Errorf("decode serial-owner helper trailer: %w", err)
 	}
 	port = normalizeHelperPort(port)
-	if result.Version != ownerHelperVersion || result.Port != port {
+	if result.Port != port {
 		return Owner{}, false, errors.New("serial-owner helper identity mismatch")
 	}
 	if result.Error != "" {

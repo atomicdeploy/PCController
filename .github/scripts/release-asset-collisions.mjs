@@ -1,6 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadProjectEnv } from "../../Tools/Build/env.mjs";
+
+loadProjectEnv();
 
 function assetName(value) {
   return path.basename(String(value));

@@ -8,17 +8,28 @@ import {
   Tooltip,
   XAxis,
   YAxis,
+  matchByDataKey,
 } from 'recharts'
 import { Segmented, StatusBadge } from './components'
+import {
+  focusedCurrentDomain,
+  focusedThermalDomain,
+  focusedVoltageDomain,
+  medianSmoothTelemetrySamples,
+  normalizeTelemetrySamples,
+  stabilizeCurrentSeries,
+} from './telemetry-filter'
 import type { Locale, MetricSample } from './types'
 
 type ChartMode = 'electrical' | 'power' | 'thermal'
 type WindowSize = '30' | '60' | 'all'
+type Smoothing = 'smoothed' | 'raw'
 
 interface TelemetryChartProps {
   connected: boolean
   locale: Locale
   samples: MetricSample[]
+  reduceMotion?: boolean
 }
 
 const modeLabels = {
@@ -31,27 +42,58 @@ function valueLabel(value: unknown): string {
   return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(2) : String(value ?? '—')
 }
 
-export function TelemetryChart({ connected, locale, samples }: TelemetryChartProps) {
+const matchTimestamp = matchByDataKey('at')
+
+export function telemetryAnimation(reduceMotion = false) {
+  return {
+    isAnimationActive: reduceMotion ? false : 'auto' as const,
+    animationBegin: 0,
+    animationDuration: 250,
+    animationEasing: 'linear' as const,
+    animationMatchBy: matchTimestamp,
+  }
+}
+
+export function TelemetryChart({ connected, locale, samples, reduceMotion = false }: TelemetryChartProps) {
+  const animation = telemetryAnimation(reduceMotion)
   const [mode, setMode] = useState<ChartMode>('electrical')
   const [windowSize, setWindowSize] = useState<WindowSize>('60')
+  const [smoothing, setSmoothing] = useState<Smoothing>('smoothed')
   const persian = locale === 'fa'
+  const normalized = useMemo(() => normalizeTelemetrySamples(samples), [samples])
   const visible = useMemo(() => {
-    const count = windowSize === 'all' ? samples.length : Number(windowSize)
+    const count = windowSize === 'all' ? normalized.length : Number(windowSize)
     const formatter = new Intl.DateTimeFormat(persian ? 'fa-IR' : 'en-US', {
       hour: '2-digit',
       minute: '2-digit',
       second: '2-digit',
     })
-    return samples.slice(-count).map((sample) => ({
+    const window = normalized.slice(-count)
+    const chartSamples = smoothing === 'smoothed'
+      ? stabilizeCurrentSeries(medianSmoothTelemetrySamples(window))
+      : window
+    return chartSamples.map((sample) => ({
       ...sample,
       timeLabel: formatter.format(sample.at),
     }))
-  }, [persian, samples, windowSize])
+  }, [normalized, persian, smoothing, windowSize])
+
+  const availableModes = useMemo(() => {
+    const modes: ChartMode[] = []
+    if (normalized.some((sample) => [sample.supply, sample.bus, sample.current].some((value) => typeof value === 'number' && Number.isFinite(value)))) modes.push('electrical')
+    if (normalized.some((sample) => typeof sample.power === 'number' && Number.isFinite(sample.power))) modes.push('power')
+    if (normalized.some((sample) => [sample.ledTemp, sample.btTemp].some((value) => typeof value === 'number' && Number.isFinite(value)))) modes.push('thermal')
+    return modes
+  }, [normalized])
+  const visibleMode = availableModes.includes(mode) ? mode : availableModes[0] ?? 'electrical'
 
   const latest = visible.at(-1)
+  const voltageDomain = useMemo(() => focusedVoltageDomain(visible), [visible])
+  const thermalDomain = useMemo(() => focusedThermalDomain(visible), [visible])
+  const currentDomain = useMemo(() => focusedCurrentDomain(visible), [visible])
   const chartLabel = persian
-    ? `نمودار ${modeLabels[mode].fa} با ${visible.length} نمونه`
-    : `${modeLabels[mode].en} chart with ${visible.length} samples`
+    ? `نمودار ${modeLabels[visibleMode].fa} با ${visible.length} نمونه`
+    : `${modeLabels[visibleMode].en} chart with ${visible.length} samples`
 
   if (!visible.length) {
     return (
@@ -66,9 +108,9 @@ export function TelemetryChart({ connected, locale, samples }: TelemetryChartPro
     <div className="telemetry-chart">
       <div className="telemetry-chart__toolbar">
         <Segmented
-          value={mode}
+          value={visibleMode}
           label={persian ? 'گروه نمودار' : 'Chart group'}
-          options={(Object.keys(modeLabels) as ChartMode[]).map((value) => ({ value, label: modeLabels[value][persian ? 'fa' : 'en'] }))}
+          options={availableModes.map((value) => ({ value, label: modeLabels[value][persian ? 'fa' : 'en'] }))}
           onChange={setMode}
         />
         <Segmented
@@ -80,6 +122,15 @@ export function TelemetryChart({ connected, locale, samples }: TelemetryChartPro
             { value: 'all', label: persian ? 'همه' : 'All' },
           ]}
           onChange={setWindowSize}
+        />
+        <Segmented
+          value={smoothing}
+          label={persian ? 'پردازش نمودار' : 'Chart processing'}
+          options={[
+            { value: 'smoothed', label: persian ? 'هموار' : 'Smoothed' },
+            { value: 'raw', label: persian ? 'خام' : 'Raw' },
+          ]}
+          onChange={setSmoothing}
         />
       </div>
 
@@ -97,8 +148,8 @@ export function TelemetryChart({ connected, locale, samples }: TelemetryChartPro
               </linearGradient>
             </defs>
             <XAxis dataKey="timeLabel" minTickGap={38} tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={{ stroke: 'var(--line-strong)' }} tickLine={false} />
-            <YAxis yAxisId="left" width={44} tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} domain={['auto', 'auto']} />
-            {mode === 'electrical' && <YAxis yAxisId="right" orientation="right" width={46} tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} domain={['auto', 'auto']} />}
+            <YAxis yAxisId="left" width={44} tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} domain={visibleMode === 'electrical' ? voltageDomain : visibleMode === 'thermal' ? thermalDomain : ['auto', 'auto']} />
+            {visibleMode === 'electrical' && <YAxis yAxisId="right" orientation="right" width={46} tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} domain={currentDomain} />}
             <Tooltip
               cursor={{ stroke: 'var(--line-strong)', strokeWidth: 1 }}
               contentStyle={{ background: 'var(--glass-strong)', border: '1px solid var(--line-strong)', borderRadius: 12, boxShadow: 'var(--shadow-tight)', color: 'var(--text)' }}
@@ -106,15 +157,15 @@ export function TelemetryChart({ connected, locale, samples }: TelemetryChartPro
               formatter={(value, name) => [valueLabel(value), String(name)]}
             />
             <Legend iconType="plainline" wrapperStyle={{ color: 'var(--text-soft)', fontSize: 10, paddingTop: 7 }} />
-            {mode === 'electrical' && <>
-              <Area yAxisId="left" type="monotone" dataKey="supply" name={persian ? 'تغذیه V' : 'Supply V'} stroke="var(--accent)" strokeWidth={2.2} fill="url(#telemetry-accent-fill)" isAnimationActive={false} />
-              <Line yAxisId="left" type="monotone" dataKey="bus" name={persian ? 'باس V' : 'Bus V'} stroke="var(--violet)" strokeWidth={1.8} dot={false} isAnimationActive={false} />
-              <Line yAxisId="right" type="monotone" dataKey="current" name={persian ? 'جریان mA' : 'Current mA'} stroke="var(--amber)" strokeWidth={1.8} dot={false} isAnimationActive={false} />
+            {visibleMode === 'electrical' && <>
+              <Area yAxisId="left" type="linear" dataKey="supply" name={persian ? 'تغذیه V' : 'Supply V'} stroke="var(--accent)" strokeWidth={2.2} fill="url(#telemetry-accent-fill)" {...animation} />
+              <Line yAxisId="left" type="linear" dataKey="bus" name={persian ? 'باس V' : 'Bus V'} stroke="var(--violet)" strokeWidth={1.8} dot={false} {...animation} />
+              <Line yAxisId="right" type="linear" dataKey="current" name={persian ? 'جریان mA' : 'Current mA'} stroke="var(--amber)" strokeWidth={1.8} dot={false} {...animation} />
             </>}
-            {mode === 'power' && <Area yAxisId="left" type="monotone" dataKey="power" name={persian ? 'توان W' : 'Power W'} stroke="var(--amber)" strokeWidth={2.2} fill="url(#telemetry-amber-fill)" isAnimationActive={false} />}
-            {mode === 'thermal' && <>
-              <Area yAxisId="left" type="monotone" dataKey="ledTemp" name={persian ? 'دمای LED °C' : 'LED °C'} stroke="var(--red)" strokeWidth={2.1} fill="url(#telemetry-amber-fill)" isAnimationActive={false} />
-              <Line yAxisId="left" type="monotone" dataKey="btTemp" name={persian ? 'دمای صدا °C' : 'Audio °C'} stroke="var(--violet)" strokeWidth={1.9} dot={false} isAnimationActive={false} />
+            {visibleMode === 'power' && <Area yAxisId="left" type="linear" dataKey="power" name={persian ? 'توان W' : 'Power W'} stroke="var(--amber)" strokeWidth={2.2} fill="url(#telemetry-amber-fill)" {...animation} />}
+            {visibleMode === 'thermal' && <>
+              <Area yAxisId="left" type="linear" dataKey="ledTemp" name={persian ? 'دمای LED °C' : 'LED °C'} stroke="var(--red)" strokeWidth={2.1} fill="url(#telemetry-amber-fill)" {...animation} />
+              <Line yAxisId="left" type="linear" dataKey="btTemp" name={persian ? 'دمای صدا °C' : 'Audio °C'} stroke="var(--violet)" strokeWidth={1.9} dot={false} {...animation} />
             </>}
           </AreaChart>
         </ResponsiveContainer>

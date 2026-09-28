@@ -3,6 +3,7 @@
 <!-- Lead with the user-visible result and link the issue or sub-issue. -->
 
 Closes #
+Relates to #
 
 ## Scope
 
@@ -10,6 +11,10 @@ Closes #
 - Windows host / TUI:
 - Protocol / simulator:
 - Documentation / tooling:
+
+## Coordination
+
+<!-- State the base used, related WIP/PRs reviewed, claimed lane, and conflict disposition. -->
 
 ## Verification
 
@@ -37,4 +42,12 @@ Closes #
 
 ## Evidence
 
-<!-- Paste concise command results, hashes, screenshots, or hardware observations. -->
+<!-- Paste concise command results, linked short commit IDs, screenshots, or hardware observations. Keep full hashes in integrity manifests/machine evidence. -->
+
+## Generated content
+
+<!-- Name the canonical generator and tracked outputs changed together, or state that none changed. -->
+
+## Handoff
+
+<!-- For WIP only: exact blocker, owner, and next command/test. Remove when complete. -->

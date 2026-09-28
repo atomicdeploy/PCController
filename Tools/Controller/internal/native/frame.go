@@ -5,13 +5,6 @@ import (
 	"fmt"
 )
 
-const (
-	Magic            byte = 0xA5
-	EnvelopeRevision byte = 0x01
-	MaxPayload       = 48
-	MaxRawFrame      = 5 + MaxPayload + 1
-)
-
 var (
 	ErrEmptyFrame      = errors.New("empty frame")
 	ErrMalformedCOBS   = errors.New("malformed COBS frame")
@@ -35,7 +28,7 @@ func Encode(frame Frame) ([]byte, error) {
 	}
 
 	raw := make([]byte, 0, 6+len(frame.Payload))
-	raw = append(raw, Magic, EnvelopeRevision, frame.Opcode, frame.Seq, byte(len(frame.Payload)))
+	raw = append(raw, Magic, ReservedEnvelopeByte, frame.Opcode, frame.Seq, byte(len(frame.Payload)))
 	raw = append(raw, frame.Payload...)
 	raw = append(raw, CRC8(raw))
 

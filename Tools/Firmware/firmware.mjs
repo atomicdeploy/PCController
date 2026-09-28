@@ -14,6 +14,7 @@ import {
 } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
+import { loadProjectEnv } from '../Build/env.mjs'
 import {
         createChalk,
         renderUnicodeBanner
@@ -28,11 +29,14 @@ import {
 	commandPlanPaths,
 	createControllerProgramCommand,
 	loadToolchainPolicy,
+	normalizeFirmwareFeatures,
 	parseToolchainPolicy,
 	programmingArtifact,
 	relativeCommandPlanPaths,
 	resolveCanonicalControllerInvocation
 } from '../CommandPlan/controller-command.mjs'
+
+loadProjectEnv()
 
 export { BOARD, EXIT, loadToolchainPolicy, parseToolchainPolicy }
 
@@ -71,8 +75,8 @@ const SOURCE_EXTENSIONS = new Set([
 ])
 const SOURCE_ROOTS = Object.freeze([
 	'PCController.ino',
-	'PCControllerLocalLib.cpp',
-	'PCControllerProject.cpp',
+	'BoardSupportSources.cpp',
+	'ControllerDomainSources.cpp',
 	'ProjectConfig.h',
 	'LocalLib',
 	'Project',
@@ -81,7 +85,6 @@ const SOURCE_ROOTS = Object.freeze([
 const DEFAULT_POLL_MS = 250
 const DEFAULT_DEBOUNCE_MS = 500
 const MINIMUM_NODE = Object.freeze({ major: 22, minor: 12 })
-
 class FirmwareToolError extends Error {
 	constructor(message, exitCode = EXIT.TOOL, options = {}) {
 		super(message, options)
@@ -124,6 +127,7 @@ function positiveInteger(value, option, { minimum = 1 } = {}) {
 }
 
 export function parseArguments(argv, env = process.env) {
+	const firmwareFeaturesEnvironment = env.PCCONTROLLER_FIRMWARE_FEATURES
 	const config = {
 		command: null,
 		port: env.PCCONTROLLER_PORT || '',
@@ -142,8 +146,16 @@ export function parseArguments(argv, env = process.env) {
 		once: false,
 		pollMs: DEFAULT_POLL_MS,
 		debounceMs: DEFAULT_DEBOUNCE_MS,
+		firmwareFeatures: firmwareFeaturesEnvironment === undefined ||
+			String(firmwareFeaturesEnvironment).trim() === ''
+			? [] : String(firmwareFeaturesEnvironment).split(','),
+		firmwareFeaturesFromEnvironment: firmwareFeaturesEnvironment !== undefined &&
+			String(firmwareFeaturesEnvironment).trim() !== '',
+		firmwareFeaturesExplicit: false,
+		noFirmwareFeatures: false,
 		help: false
 	}
+	let firmwareFeaturesExplicit = false
 	const positional = []
 	const commands = new Set([
 		'build', 'upload', 'watch', 'check', 'manifest',
@@ -218,6 +230,18 @@ export function parseArguments(argv, env = process.env) {
 				index = next
 				break
 			}
+			case '--firmware-feature': {
+				const [value, next] = optionValue(argv, index, inlineValue, name)
+				if (!firmwareFeaturesExplicit) config.firmwareFeatures = []
+				firmwareFeaturesExplicit = true
+				config.firmwareFeaturesExplicit = true
+				config.firmwareFeatures.push(value)
+				index = next
+				break
+			}
+			case '--no-firmware-features':
+				config.noFirmwareFeatures = true
+				break
 			case '--clean':
 				config.clean = true
 				break
@@ -265,6 +289,35 @@ export function parseArguments(argv, env = process.env) {
 		)
 	}
 	if (config.help) return config
+	if (config.noFirmwareFeatures && firmwareFeaturesExplicit) {
+		throw new FirmwareToolError(
+			'--no-firmware-features cannot be combined with --firmware-feature',
+			EXIT.USAGE
+		)
+	}
+	if (config.noFirmwareFeatures) config.firmwareFeatures = []
+	if (config.firmwareFeaturesExplicit) {
+		try {
+			config.firmwareFeatures = normalizeFirmwareFeatures(config.firmwareFeatures)
+		} catch (error) {
+			throw new FirmwareToolError(error.message || String(error), error.exitCode || EXIT.USAGE)
+		}
+	}
+	if ((config.firmwareFeaturesExplicit || config.noFirmwareFeatures) &&
+		!['build', 'upload', 'watch'].includes(config.command)) {
+		throw new FirmwareToolError(
+			'explicit firmware-feature selection requires build, upload, or watch',
+			EXIT.USAGE
+		)
+	}
+	if (!['build', 'upload', 'watch'].includes(config.command)) {
+		config.firmwareFeatures = []
+	}
+	try {
+		config.firmwareFeatures = normalizeFirmwareFeatures(config.firmwareFeatures)
+	} catch (error) {
+		throw new FirmwareToolError(error.message || String(error), error.exitCode || EXIT.USAGE)
+	}
 	config.method ||= 'urclock'
 	if (!PROGRAMMING_METHODS.includes(config.method)) {
 		throw new FirmwareToolError(
@@ -346,6 +399,8 @@ ${chalk.bold.yellowBright('Options')}
   --hex FILE        Override the application Intel HEX file
   --output FILE     Backup destination (backup only)
   --manifest FILE   Override manifest output
+  --firmware-feature NAME  Repeatable Controller-validated compile feature
+  --no-firmware-features   Freeze the default-off firmware profile
   --clean           Clean before building
   --verbose         Show commands and verbose compiler output
   --dry-run         Print the exact action without executing it or opening a port
@@ -409,6 +464,12 @@ function commandText(plan) {
 }
 
 export async function createBuildPlan(config, projectRoot) {
+	let firmwareFeatures
+	try {
+		firmwareFeatures = normalizeFirmwareFeatures(config.firmwareFeatures || [])
+	} catch (error) {
+		throw new FirmwareToolError(error.message || String(error), error.exitCode || EXIT.USAGE)
+	}
 	const packedTimestamp = buildTimestampEnvironment()
 	const env = { PCCONTROLLER_BUILD_TIMESTAMP: packedTimestamp }
 	const file = process.execPath
@@ -419,6 +480,8 @@ export async function createBuildPlan(config, projectRoot) {
 	]
 	if (config.clean) args.push('--clean')
 	if (config.verbose) args.push('--verbose')
+	for (const feature of firmwareFeatures) args.push('--firmware-feature', feature)
+	if (firmwareFeatures.length === 0) args.push('--no-firmware-features')
 	return { file, args, cwd: projectRoot, env }
 }
 
@@ -458,6 +521,29 @@ function plannedProgramCommand(config, projectRoot, artifactPath = '', outputPat
 }
 
 export async function createCommandPlan(config, projectRoot) {
+	const rawFirmwareFeatures = config.firmwareFeatures ?? []
+	const hasFirmwareFeatureValues = Array.isArray(rawFirmwareFeatures)
+		? rawFirmwareFeatures.length !== 0
+		: true
+	const selectionExplicit = config.firmwareFeaturesExplicit === true ||
+		config.noFirmwareFeatures === true ||
+		(hasFirmwareFeatureValues && config.firmwareFeaturesFromEnvironment !== true)
+	const firmwareBuildSelected = ['build', 'upload', 'watch'].includes(config.command)
+	if (selectionExplicit && !firmwareBuildSelected) {
+		throw new FirmwareToolError(
+			'explicit firmware-feature selection requires build, upload, or watch',
+			EXIT.USAGE
+		)
+	}
+	let firmwareFeatures
+	try {
+		firmwareFeatures = normalizeFirmwareFeatures(
+			firmwareBuildSelected ? rawFirmwareFeatures : []
+		)
+	} catch (error) {
+		throw new FirmwareToolError(error.message || String(error), error.exitCode || EXIT.USAGE)
+	}
+	config = { ...config, firmwareFeatures }
 	const absolute = commandPlanPaths(projectRoot)
 	const paths = relativeCommandPlanPaths(projectRoot)
 	const actions = []
@@ -502,7 +588,6 @@ export async function createCommandPlan(config, projectRoot) {
 	}
 
 	return {
-		format: 'pccontroller-firmware-plan/v1',
 		canonicalController: paths.controller,
 		firmwareOutput: paths.firmwareOutput,
 		target: BOARD,
@@ -879,21 +964,54 @@ async function writeManifest(config, projectRoot, artifacts, source, logger) {
 			commandPlanPaths(projectRoot).manifest,
 		projectRoot
 	)
-	let prior = null
-	try {
-		prior = JSON.parse(await fs.readFile(path, 'utf8'))
-	} catch (error) {
-		if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error
+	const canonicalPath = resolveFromProject(
+		commandPlanPaths(projectRoot).manifest,
+		projectRoot
+	)
+	const readPrior = async candidate => {
+		try {
+			return JSON.parse(await fs.readFile(candidate, 'utf8'))
+		} catch (error) {
+			if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error
+			return null
+		}
 	}
-	const identityMatches = prior?.format === 'pccontroller-avr-firmware-manifest/v1' &&
-		Array.isArray(prior.artifacts) &&
-		prior.artifacts.length === artifacts.length &&
-		artifacts.every(artifact => prior.artifacts.some(previous =>
+	const matchesArtifacts = candidate =>
+		Array.isArray(candidate?.artifacts) &&
+		candidate.artifacts.length === artifacts.length &&
+		artifacts.every(artifact => candidate.artifacts.some(previous =>
 			String(previous.path).replaceAll('\\', '/') === String(artifact.path).replaceAll('\\', '/') &&
 			String(previous.sha256).toLowerCase() === artifact.sha256.toLowerCase()
 		))
+	let prior = null
+	prior = await readPrior(path)
+	// A custom output path is a copy destination, not a second compiler identity
+	// source. Preserve the canonical Controller manifest whenever it describes
+	// these exact bytes, so feature declarations and fixed build identity are
+	// not silently downgraded while writing the requested copy.
+	if (canonicalPath !== path) {
+		const canonicalPrior = await readPrior(canonicalPath)
+		if (matchesArtifacts(canonicalPrior)) prior = canonicalPrior
+	}
+	if (prior && matchesArtifacts(prior)) {
+		let features
+		try {
+			features = normalizeFirmwareFeatures(prior.source?.compileFeatures || [])
+		} catch (error) {
+			throw new FirmwareToolError(
+				`Invalid prior manifest compile features: ${error.message}`,
+				EXIT.VALIDATION
+			)
+		}
+		if (JSON.stringify(features) !== JSON.stringify(prior.source?.compileFeatures || [])) {
+			throw new FirmwareToolError(
+				'Prior manifest compile features must be unique and sorted canonically',
+				EXIT.VALIDATION
+			)
+		}
+	}
+	const identityMatches = matchesArtifacts(prior)
 	const manifest = {
-		format: 'pccontroller-avr-firmware-manifest/v1',
 		generatedUtc: identityMatches && prior.generatedUtc
 			? prior.generatedUtc
 			: new Date().toISOString(),

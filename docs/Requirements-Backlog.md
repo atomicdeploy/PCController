@@ -4,8 +4,8 @@ This is the canonical public map from normalized project requirements to GitHub 
 
 - Repository: [atomicdeploy/PCController](https://github.com/atomicdeploy/PCController)
 - Normalized requirements: **71**
-- Open: **60**
-- Closed with current evidence: **11**
+- Open: **61**
+- Closed with current evidence: **10**
 - State policy: hardware, live-system, regression, partial-integration, and finalization work stays open until its own acceptance evidence exists.
 
 ## [#1 — Firmware architecture, flash budget, EEPROM, and reset safety](https://github.com/atomicdeploy/PCController/issues/1)
@@ -100,7 +100,7 @@ This is the canonical public map from normalized project requirements to GitHub 
 | ID | Issue | State | Requirement |
 |---|---:|:---:|---|
 | `ipc-websocket-api-suite` | [#46](https://github.com/atomicdeploy/PCController/issues/46) | 🟡 open | Provide unversioned living IPC, REST, JSON-RPC, WebSocket, and bridge APIs |
-| `network-bridge-discovery` | [#47](https://github.com/atomicdeploy/PCController/issues/47) | 🟡 open | Bridge controller hosts over the network with mDNS/SSDP discovery |
+| `network-bridge-discovery` | [#47](https://github.com/atomicdeploy/PCController/issues/47) | 🟡 open | Connect, mirror, and synchronize multiple local and remote boards |
 | `http-webhooks-socketio-messages` | [#48](https://github.com/atomicdeploy/PCController/issues/48) | 🟡 open | Add bidirectional HTTP, webhooks, WebSocket client/server, Socket.IO, and actionable messages |
 | `remote-control-security` | [#49](https://github.com/atomicdeploy/PCController/issues/49) | 🟡 open | Define security and policy gates for every remote and disruptive control path |
 | `network-artifact-import-export-sync` | [#117](https://github.com/atomicdeploy/PCController/issues/117) | 🟡 open | Serve, fetch, import, export, and synchronize controller artifacts between hosts |
@@ -119,11 +119,11 @@ This is the canonical public map from normalized project requirements to GitHub 
 
 ## [#10 — Urboot/Urclock programming, backup, patch, and restore](https://github.com/atomicdeploy/PCController/issues/10)
 
-5 open / 1 closed / 6 total
+6 open / 0 closed / 6 total
 
 | ID | Issue | State | Requirement |
 |---|---:|:---:|---|
-| `uart-urclock-programming` | [#55](https://github.com/atomicdeploy/PCController/issues/55) | ✅ closed | Use UART Urboot/Urclock as the normal programming path and verify application return |
+| `uart-urclock-programming` | [#55](https://github.com/atomicdeploy/PCController/issues/55) | 🟡 open | Use UART Urboot/Urclock as the normal programming path and verify application return |
 | `preflash-backup-dedup-restore` | [#56](https://github.com/atomicdeploy/PCController/issues/56) | 🟡 open | Require atomic flash/EEPROM backup, hash deduplication, and verified restore before writes |
 | `canonical-host-programming-entrypoint` | [#57](https://github.com/atomicdeploy/PCController/issues/57) | 🟡 open | Route every build, upload, verify, backup, and recovery through the host tool |
 | `hex-patch-settings-export` | [#58](https://github.com/atomicdeploy/PCController/issues/58) | 🟡 open | Finish guarded Intel HEX patching and separate live settings export from EEPROM parsing |

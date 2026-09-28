@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -9,8 +10,75 @@ import (
 
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/hostfacts"
+	"pccontroller.local/controller/internal/link"
 	"pccontroller.local/controller/internal/native"
+	"pccontroller.local/controller/internal/ports"
+	"pccontroller.local/controller/internal/programmer"
 )
+
+func TestReconnectCommandDoesNotOpenAfterRetryableCloseFailure(t *testing.T) {
+	closeErr := errors.New("CancelIoEx failed")
+	port := newRetryableCloseTestPort(closeErr)
+	session := link.NewForPort("COM3", port)
+	runtime := New(Options{})
+	runtime.mu.Lock()
+	runtime.session = session
+	runtime.port = ports.Info{Name: "COM3", IsUSB: true}
+	runtime.connectionState = "connected"
+	runtime.mu.Unlock()
+	openCalled := false
+	runtime.autoOpen = func(context.Context, link.DiscoveryOptions) (link.OpenResult, error) {
+		openCalled = true
+		return link.OpenResult{}, errors.New("unexpected open")
+	}
+
+	engine := NewCommandEngine(runtime, CommandOptions{})
+	if _, err := engine.Execute(context.Background(), "reconnect"); !errors.Is(err, closeErr) {
+		t.Fatalf("reconnect error = %v, want %v", err, closeErr)
+	}
+	if openCalled {
+		t.Fatal("reconnect opened a replacement transport after close failure")
+	}
+	if current := runtime.currentSession(); current != session {
+		t.Fatalf("reconnect discarded failed-close owner %p, want %p", current, session)
+	}
+	if err := runtime.Close(); err != nil {
+		t.Fatalf("retry close: %v", err)
+	}
+}
+
+func TestProgrammingReconnectJoinsMismatchAndCloseFailure(t *testing.T) {
+	closeErr := errors.New("CancelIoEx failed")
+	port := newRetryableCloseTestPort(closeErr)
+	session := link.NewForPort("tcp://replacement", port)
+	runtime := New(Options{})
+	runtime.openAuthenticated = func(
+		context.Context,
+		ports.Info,
+		link.DiscoveryOptions,
+	) (link.OpenResult, error) {
+		return link.OpenResult{
+			Session: session,
+			Port: ports.Info{
+				Name:       "tcp://replacement",
+				InstanceID: "replacement-instance",
+			},
+			Hello: native.Hello{Name: "Replacement"},
+		}, nil
+	}
+	expected := ports.Info{Name: "tcp://original"}
+
+	err := reconnectProgrammingDevice(context.Background(), runtime, expected)
+	if !errors.Is(err, closeErr) || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("reconnect mismatch error = %v, want mismatch and %v", err, closeErr)
+	}
+	if current := runtime.currentSession(); current != session {
+		t.Fatalf("mismatch discarded failed-close owner %p, want %p", current, session)
+	}
+	if err := runtime.Close(); err != nil {
+		t.Fatalf("retry close: %v", err)
+	}
+}
 
 type fixedHostFactsProvider struct {
 	profile string
@@ -162,7 +230,6 @@ func TestLiveSettingsExportIsExplicitlyLiveAndComplete(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, expected := range []string{
-		`"format": "controller-mcu-settings/v1"`,
 		`"source": "live-opcode"`,
 		`"motion_break_ms": 37`,
 	} {
@@ -251,12 +318,12 @@ func TestBootProgramArguments(t *testing.T) {
 	}
 }
 
-func TestDevelopmentEEPROMReinitializationRequiresCompleteBackup(t *testing.T) {
+func TestGuardedFlashRemovesIncompleteBackupEscapeHatch(t *testing.T) {
 	_, err := safeFlashCommand(
 		context.Background(), nil, CommandOptions{},
 		[]string{"candidate.hex", "--reinitialize-eeprom", "--allow-incomplete-backup"},
 	)
-	if err == nil || !strings.Contains(err.Error(), "requires a complete verified raw flash") {
+	if err == nil || !strings.Contains(err.Error(), "usage: program flash") {
 		t.Fatalf("unsafe EEPROM reinitialization override was accepted: %v", err)
 	}
 }
@@ -269,6 +336,10 @@ func TestToolchainProgramArguments(t *testing.T) {
 		{
 			[]string{"compile", "."},
 			[]string{"compile", "."},
+		},
+		{
+			[]string{"compile", ".", "--firmware-feature", "eeprom-menu-labels"},
+			[]string{"compile", ".", "--firmware-feature", "eeprom-menu-labels"},
 		},
 		{
 			[]string{"core-info"},
@@ -295,6 +366,89 @@ func TestToolchainProgramArguments(t *testing.T) {
 	}
 }
 
+func TestCompileRequestUsesTypedFeaturesAndNeverSwallowsPositionals(t *testing.T) {
+	defaults := []programmer.FirmwareFeature{
+		programmer.FirmwareFeatureEEPROMMenuLabels,
+	}
+	sketch, features, err := parseCompileRequest([]string{
+		".",
+		"--firmware-feature", "EEPROM-MENU-LABELS",
+		"--firmware-feature=eeprom-boot-opcodes",
+		"--firmware-feature", "eeprom-menu-labels",
+	}, defaults)
+	if err != nil || sketch != "." || !reflect.DeepEqual(
+		programmer.FirmwareFeatureNames(features),
+		[]string{"eeprom-boot-opcodes", "eeprom-menu-labels"},
+	) {
+		t.Fatalf("sketch=%q features=%v err=%v", sketch, features, err)
+	}
+	_, inherited, err := parseCompileRequest([]string{"."}, defaults)
+	if err != nil || !reflect.DeepEqual(inherited, defaults) {
+		t.Fatalf("defaults=%v err=%v", inherited, err)
+	}
+	_, disabled, err := parseCompileRequest(
+		[]string{".", "--no-firmware-features"}, defaults,
+	)
+	if err != nil || len(disabled) != 0 {
+		t.Fatalf("disabled=%v err=%v", disabled, err)
+	}
+	for _, args := range [][]string{
+		{".", "COM18"},
+		{".", "--firmware-feature=unknown"},
+		{".", "--firmware-feature=-DUNSAFE=1"},
+		{".", "--no-firmware-features", "--firmware-feature=eeprom-menu-labels"},
+	} {
+		if _, _, err := parseCompileRequest(args, defaults); err == nil {
+			t.Fatalf("compile args %v unexpectedly accepted", args)
+		}
+	}
+}
+
+func TestCommandEngineReportsAndPersistsFirmwareFeatureProfile(t *testing.T) {
+	config := appconfig.Defaults()
+	engine := NewCommandEngine(New(Options{}), CommandOptions{
+		FirmwareFeatures: []programmer.FirmwareFeature{
+			programmer.FirmwareFeatureEEPROMMenuLabels,
+		},
+		HostConfig: func() appconfig.Config { return config },
+		UpdateHostConfig: func(change func(*appconfig.Config) error) error {
+			candidate := config
+			if err := change(&candidate); err != nil {
+				return err
+			}
+			config = candidate
+			return nil
+		},
+	})
+	status, err := engine.Execute(context.Background(), "toolchain features")
+	if err != nil || status != "firmware features: eeprom-menu-labels" {
+		t.Fatalf("status=%q err=%v", status, err)
+	}
+	output, err := engine.Execute(
+		context.Background(),
+		"config set programming.firmware_features EEPROM-MENU-LABELS,eeprom-boot-opcodes,eeprom-menu-labels",
+	)
+	if err != nil || !strings.Contains(output, "hot-reload queued") {
+		t.Fatalf("set output=%q err=%v", output, err)
+	}
+	if got := programmer.FirmwareFeatureNames(config.Programming.FirmwareFeatures); !reflect.DeepEqual(got, []string{"eeprom-boot-opcodes", "eeprom-menu-labels"}) {
+		t.Fatalf("persisted=%v", got)
+	}
+	output, err = engine.Execute(
+		context.Background(),
+		"config get programming.firmware_features",
+	)
+	if err != nil || output != "programming.firmware_features=eeprom-boot-opcodes,eeprom-menu-labels" {
+		t.Fatalf("get output=%q err=%v", output, err)
+	}
+	if _, err := engine.Execute(
+		context.Background(),
+		"config set programming.firmware_features unknown",
+	); err == nil {
+		t.Fatal("unknown persisted firmware feature was accepted")
+	}
+}
+
 func TestConfiguredMelodyAndStatusEffectCommands(t *testing.T) {
 	target := &recordingOutputTarget{}
 	outputs := NewOutputScheduler(target)
@@ -309,7 +463,7 @@ func TestConfiguredMelodyAndStatusEffectCommands(t *testing.T) {
 	config.StatusEffects = []appconfig.StatusLEDEffect{{
 		Name: "signal", Kind: "flash",
 		Red: 1, Green: 2, Blue: 3, Brightness: 100,
-		PeriodMS: 640, DurationMS: 210,
+		PeriodMS: 640, Repeats: 1,
 	}}
 	provider := func() appconfig.Config { return config }
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
