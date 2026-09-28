@@ -56,6 +56,13 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING)
+  foreach(profile IN ITEMS default macro_strip)
+    add_executable(firmware_${profile}_profile_tests tests/feature_profile_test.cpp)
+    target_include_directories(firmware_${profile}_profile_tests PRIVATE ../..)
+    add_test(NAME firmware_${profile}_profile_unit COMMAND firmware_${profile}_profile_tests)
+  endforeach()
+  target_compile_definitions(firmware_macro_strip_profile_tests PRIVATE PCCONTROLLER_MACRO_STRIP_TEST=1)
+
   add_executable(firmware_strip_tests
     tests/strip_test.cpp
     ../../Project/AddressableLeds.cpp
