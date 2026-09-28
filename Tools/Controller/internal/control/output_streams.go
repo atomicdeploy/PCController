@@ -26,6 +26,10 @@ type outputCapabilityReporter interface {
 	Snapshot() Snapshot
 }
 
+type outputActivityReporter interface {
+	setOutputActivity(string, bool)
+}
+
 type StreamOperation struct {
 	ID   uint64
 	Kind string
@@ -247,6 +251,7 @@ func (scheduler *OutputScheduler) OverrideStatusEffect() bool {
 	running := scheduler.effect
 	if running != nil {
 		scheduler.effect = nil
+		scheduler.reportActivity("effect", false)
 		running.cancel()
 	}
 	scheduler.mu.Unlock()
@@ -301,6 +306,7 @@ func (scheduler *OutputScheduler) replace(
 		id: scheduler.nextID, name: name, cancel: cancel, done: done,
 	}
 	*slot = running
+	scheduler.reportActivity(kind, true)
 	scheduler.target.PublishHostEvent(
 		"output",
 		fmt.Sprintf("%s %q started (id=%d)", kind, name, running.id),
@@ -346,6 +352,7 @@ func (scheduler *OutputScheduler) finish(
 	}
 	if isCurrent {
 		*slot = nil
+		scheduler.reportActivity(kind, false)
 	}
 	scheduler.mu.Unlock()
 	if !isCurrent {
@@ -388,6 +395,12 @@ func (scheduler *OutputScheduler) finish(
 	}
 	operation.done <- err
 	close(operation.done)
+}
+
+func (scheduler *OutputScheduler) reportActivity(kind string, active bool) {
+	if reporter, ok := scheduler.target.(outputActivityReporter); ok {
+		reporter.setOutputActivity(kind, active)
+	}
 }
 
 func normalizedStreamError(err error) error {

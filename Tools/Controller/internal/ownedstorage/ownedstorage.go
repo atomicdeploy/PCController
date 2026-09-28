@@ -18,8 +18,9 @@ import (
 )
 
 const (
-	MarkerName   = ".pccontroller-data-owner.json"
-	markerFormat = "pccontroller-host-data-owner"
+	MarkerName            = ".pccontroller-data-owner.json"
+	markerFormat          = "pccontroller-host-data-owner"
+	initiallyStoredFormat = "pccontroller-host-data-owner/v1"
 )
 
 var ErrNotOwned = errors.New("host data root is not owned by this user and product")
@@ -152,11 +153,19 @@ func VerifyFor(root, owner string) error {
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
 		return fmt.Errorf("%w: marker contains trailing data", ErrNotOwned)
 	}
-	if value.Format != markerFormat || value.ProductAppID != productidentity.StableAppID ||
+	if !recognizedMarkerFormat(value.Format) || value.ProductAppID != productidentity.StableAppID ||
 		strings.TrimSpace(value.OwnerID) == "" || value.OwnerID != owner || !samePath(value.DataRoot, root) {
 		return ErrNotOwned
 	}
 	return nil
+}
+
+// recognizedMarkerFormat treats the exact marker emitted by the initial alpha
+// installer as the same product/user ownership proof. The label never selects
+// different parsing or deletion behavior; every other identity field must
+// still match the current user, product, and canonical root exactly.
+func recognizedMarkerFormat(value string) bool {
+	return value == markerFormat || value == initiallyStoredFormat
 }
 
 func samePath(left, right string) bool {

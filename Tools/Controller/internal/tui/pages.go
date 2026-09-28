@@ -98,6 +98,14 @@ func (model Model) dashboardPage(snapshot control.Snapshot) string {
 	measurementLines := []string{
 		sectionHeader(sectionWidth, "LIVE MEASUREMENTS", model.statusFreshnessLabel(snapshot, time.Now())),
 	}
+	if len(snapshot.HardwareProblems) != 0 {
+		measurementLines = append(
+			measurementLines,
+			errorStyle.Copy().Bold(true).Render(
+				truncateDisplayText("⚠ "+hardwareProblemMessage(snapshot.HardwareProblems[0]), sectionWidth),
+			),
+		)
+	}
 	if warning := model.remoteClockWarning(); warning != "" {
 		measurementLines = append(measurementLines, warnStyle.Render(truncateDisplayText(warning, sectionWidth)))
 	}

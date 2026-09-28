@@ -13,6 +13,7 @@ describe('controller event toast policy', () => {
   it('retains one-shot safety events but suppresses continuous transport traffic', () => {
     expect(shouldToastControllerEvent({ kind: 'motion.fault', source: 'host' })).toBe(true)
     expect(shouldToastControllerEvent({ kind: 'door', source: 'physical' })).toBe(true)
+		expect(shouldToastControllerEvent({ kind: 'hardware.problem', source: 'host' })).toBe(true)
     expect(shouldToastControllerEvent({ kind: 'hello.parsed', text: 'HELLO PCController' })).toBe(false)
     expect(shouldToastControllerEvent({ kind: 'status', text: 'STATUS relay=0' })).toBe(false)
     expect(shouldToastControllerEvent({ kind: 'telemetry.sample' })).toBe(false)

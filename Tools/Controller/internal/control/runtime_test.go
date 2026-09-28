@@ -9,6 +9,7 @@ import (
 
 	"go.bug.st/serial"
 
+	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/link"
 	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/ports"
@@ -17,6 +18,17 @@ import (
 type reconnectTestPort struct {
 	closed chan struct{}
 	dtr    []bool
+}
+
+type observedWritePort struct {
+	*reconnectTestPort
+	wrote     chan struct{}
+	writeOnce sync.Once
+}
+
+func (port *observedWritePort) Write(data []byte) (int, error) {
+	port.writeOnce.Do(func() { close(port.wrote) })
+	return len(data), nil
 }
 
 type retryableCloseTestPort struct {
@@ -433,6 +445,255 @@ func TestUnplugReplugLifecycleAndOneResetPermit(t *testing.T) {
 		t.Fatal("replug did not update snapshot immediately")
 	}
 	_ = runtime.Close()
+}
+
+func TestHardwareProblemPersistsUntilAuthenticatedAttach(t *testing.T) {
+	runtime := New(Options{Filter: ports.Filter{Port: "COM3"}})
+	runtime.port = ports.Info{
+		Name: "COM3", IsUSB: true, VID: "1A86", PID: "7523",
+		InstanceID: `USB\VID_1A86&PID_7523\5&1330824A&0&2`,
+	}
+	problem := ports.HardwareProblem{
+		Code:          ports.HardwareProblemUSBDescriptorFailure,
+		Severity:      "error",
+		OSProblemCode: 43,
+		DeviceID:      `USB\VID_0000&PID_0002\5&1330824A&0&2`,
+		ObservedAt:    time.Now(),
+	}
+	runtime.hardwareProblemScan = func(filter ports.Filter) ([]ports.HardwareProblem, error) {
+		if filter.Port != "COM3" || filter.Preferred.InstanceID != runtime.port.InstanceID {
+			t.Fatalf("hardware scan lost controller identity: %#v", filter)
+		}
+		return []ports.HardwareProblem{problem}, nil
+	}
+	if _, err := runtime.SetProgramState("test-player", ProgramRunning, "active playback"); err != nil {
+		t.Fatal(err)
+	}
+	runtime.refreshHardwareProblems(true)
+	snapshot := runtime.Snapshot()
+	if len(snapshot.HardwareProblems) != 1 {
+		t.Fatalf("hardware problem missing from snapshot: %#v", snapshot.HardwareProblems)
+	}
+	if snapshot.HardwareProblems[0].Impact != ports.HardwareImpactActiveOutcomeUnknown {
+		t.Fatalf("active-use impact=%q", snapshot.HardwareProblems[0].Impact)
+	}
+	event, err := runtime.WaitEvent(context.Background(), 0, "hardware.problem")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if event.Metadata["problem"] != ports.HardwareProblemUSBDescriptorFailure ||
+		event.Metadata["impact"] != ports.HardwareImpactActiveOutcomeUnknown {
+		t.Fatalf("hardware event lost semantic evidence: %#v", event)
+	}
+
+	// A device disappearing from the problem list is not proof of recovery.
+	// Only an authenticated application HELLO may clear the warning.
+	runtime.hardwareProblemScan = func(ports.Filter) ([]ports.HardwareProblem, error) { return nil, nil }
+	runtime.refreshHardwareProblems(false)
+	if len(runtime.Snapshot().HardwareProblems) != 1 {
+		t.Fatal("disconnected scan cleared the hardware problem before authentication")
+	}
+
+	port := newReconnectTestPort()
+	runtime.attach(link.OpenResult{
+		Session: link.NewForPort("COM3", port),
+		Port:    runtime.port,
+		Hello:   native.Hello{Name: "PCController"},
+	})
+	t.Cleanup(func() { _ = runtime.Close() })
+	if len(runtime.Snapshot().HardwareProblems) != 0 {
+		t.Fatal("authenticated attach did not clear the hardware problem")
+	}
+	recovered, err := runtime.WaitEvent(context.Background(), event.ID, "hardware.recovered")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recovered.Lifecycle != "recovered" || recovered.State != "healthy" {
+		t.Fatalf("unexpected recovery event: %#v", recovered)
+	}
+	_ = runtime.Close()
+}
+
+func TestAuthenticatedAttachRejectsStaleHardwareScan(t *testing.T) {
+	runtime := New(Options{Filter: ports.Filter{Port: "COM3"}})
+	runtime.port = ports.Info{
+		Name: "COM3", IsUSB: true,
+		InstanceID: `USB\VID_1A86&PID_7523\CONTROLLER`,
+	}
+	runtime.setHardwareProblems([]ports.HardwareProblem{{
+		Code: ports.HardwareProblemUSBDescriptorFailure, Severity: "error",
+		DeviceID: `USB\VID_0000&PID_0002\CONTROLLER`, ObservedAt: time.Now(),
+	}})
+	scanStarted := make(chan struct{})
+	releaseScan := make(chan struct{})
+	runtime.hardwareProblemScan = func(ports.Filter) ([]ports.HardwareProblem, error) {
+		close(scanStarted)
+		<-releaseScan
+		return []ports.HardwareProblem{{
+			Code: ports.HardwareProblemUSBDescriptorFailure, Severity: "error",
+			DeviceID: `USB\VID_0000&PID_0002\CONTROLLER`, ObservedAt: time.Now(),
+		}}, nil
+	}
+	scanDone := make(chan struct{})
+	go func() {
+		defer close(scanDone)
+		runtime.refreshHardwareProblems(false)
+	}()
+	<-scanStarted
+
+	port := newReconnectTestPort()
+	runtime.attach(link.OpenResult{
+		Session: link.NewForPort("COM3", port), Port: runtime.port,
+		Hello: native.Hello{Name: "PCController"},
+	})
+	close(releaseScan)
+	<-scanDone
+	if problems := runtime.Snapshot().HardwareProblems; len(problems) != 0 {
+		t.Fatalf("stale scan resurrected a fault after authenticated HELLO: %#v", problems)
+	}
+	_ = runtime.Close()
+}
+
+func TestActiveUseAtTransportLossIncludesOutputStreams(t *testing.T) {
+	runtime := New(Options{})
+	scheduler := NewOutputScheduler(runtime)
+	runtime.bindOutputScheduler(scheduler)
+	scheduler.reportActivity("effect", true)
+	if !runtime.activeUseAtTransportLoss() {
+		t.Fatal("active host-streamed status effect was omitted from transport-loss impact")
+	}
+}
+
+func TestTransportCloseDoesNotWaitForOutputSchedulerLock(t *testing.T) {
+	runtime := New(Options{Filter: ports.Filter{Port: "COM3"}})
+	port := &observedWritePort{
+		reconnectTestPort: newReconnectTestPort(),
+		wrote:             make(chan struct{}),
+	}
+	session := link.NewForPort("COM3", port)
+	runtime.attach(link.OpenResult{
+		Session: session,
+		Port:    ports.Info{Name: "COM3", IsUSB: true},
+		Hello:   native.Hello{Name: "PCController"},
+	})
+	scheduler := runtime.EnsureOutputScheduler()
+	commandDone := make(chan error, 1)
+	go func() {
+		commandDone <- scheduler.SetStatusBase(
+			context.Background(), 1, 2, 3, 100,
+		)
+	}()
+	select {
+	case <-port.wrote:
+	case <-time.After(time.Second):
+		t.Fatal("status command did not reach the transport")
+	}
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- session.Close() }()
+	select {
+	case err := <-closeDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("transport close waited for the output scheduler lock")
+	}
+	select {
+	case err := <-commandDone:
+		if !errors.Is(err, link.ErrClosed) {
+			t.Fatalf("status command error = %v, want closed transport", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("status command did not unwind after transport close")
+	}
+}
+
+func TestOperationStartingAfterTransportCloseSnapshotBecomesSticky(t *testing.T) {
+	runtime := New(Options{})
+	if runtime.activeUseMask.Load() != 0 || runtime.transportLossActive.Load() {
+		t.Fatal("new runtime unexpectedly reports active use")
+	}
+	// Force the ordering where pre-close has already observed an empty activity
+	// mask. The start-side handshake must still latch the operation before I/O.
+	runtime.transportClosing.Store(true)
+	runtime.setActiveUseState(activeUseStatusEffect, true)
+	runtime.setActiveUseState(activeUseStatusEffect, false)
+	if !runtime.transportLossActive.Load() || !runtime.activeUseAtTransportLoss() {
+		t.Fatal("operation starting after the close snapshot was not latched")
+	}
+}
+
+func TestDelayedActiveStartCannotResurrectStickyStateAfterAttachReset(t *testing.T) {
+	runtime := New(Options{})
+	runtime.transportClosing.Store(true)
+	runtime.transportLossActive.Store(true)
+	// This reset represents authenticated attachment winning before a start
+	// transition reaches the serialized close-state recheck.
+	runtime.resetTransportLossState()
+	runtime.latchStartingActiveUse()
+	if runtime.transportClosing.Load() || runtime.transportLossActive.Load() {
+		t.Fatal("stale active start resurrected the previous generation's close latch")
+	}
+}
+
+func TestTransportCloseLatchesOutputActivityBeforeStreamCleanup(t *testing.T) {
+	runtime := New(Options{Filter: ports.Filter{Port: "COM3"}})
+	port := newReconnectTestPort()
+	session := link.NewForPort("COM3", port)
+	info := ports.Info{
+		Name: "COM3", IsUSB: true, VID: "1A86", PID: "7523",
+		InstanceID: `USB\VID_1A86&PID_7523\CONTROLLER`,
+	}
+	runtime.hardwareProblemScan = func(ports.Filter) ([]ports.HardwareProblem, error) {
+		return []ports.HardwareProblem{{
+			Code: ports.HardwareProblemUSBDescriptorFailure, Severity: "error",
+			DeviceID: `USB\VID_0000&PID_0002\CONTROLLER`, ObservedAt: time.Now(),
+		}}, nil
+	}
+	runtime.attach(link.OpenResult{
+		Session: session, Port: info,
+		Hello: native.Hello{
+			Name: "PCController", Capabilities: native.CapabilityStatusEffects,
+		},
+	})
+	t.Cleanup(func() { _ = runtime.Close() })
+	scheduler := runtime.EnsureOutputScheduler()
+	operation, err := scheduler.StartStatusEffect(
+		context.Background(),
+		appconfig.StatusLEDEffect{
+			Name: "live", Kind: "flash", Red: 255,
+			Brightness: 100, PeriodMS: 640, Repeats: 1,
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if scheduler.State().EffectID == 0 {
+		t.Fatal("status effect was not active before transport close")
+	}
+	if err := session.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-operation.Done:
+	case <-time.After(time.Second):
+		t.Fatal("stream did not unwind after transport close")
+	}
+	if scheduler.State().EffectID != 0 {
+		t.Fatal("stream cleanup did not clear the active effect")
+	}
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		problems := runtime.Snapshot().HardwareProblems
+		if len(problems) != 0 {
+			if problems[0].Impact != ports.HardwareImpactActiveOutcomeUnknown {
+				t.Fatalf("latched transport impact = %q", problems[0].Impact)
+			}
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("hardware problem was not published after transport close")
 }
 
 func TestReconnectDiscoveryRebindsAuthenticatedUSBIdentity(t *testing.T) {

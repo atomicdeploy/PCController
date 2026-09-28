@@ -58,6 +58,7 @@ type (
 	OutputStreamState         = control.OutputStreamState
 	StatusSample              = control.StatusSample
 	TimelineEntry             = control.TimelineEntry
+	HardwareProblem           = ports.HardwareProblem
 	HistoryOptions            = control.HistoryOptions
 	RFLearnMode               = control.RFLearnMode
 	RFLearnOptions            = control.RFLearnOptions
@@ -366,6 +367,7 @@ type Snapshot struct {
 	ProgramState      ProgramStateSnapshot  `json:"program_state"`
 	RFLearning        RFLearnState          `json:"rf_learning"`
 	Macros            control.MacroSnapshot `json:"macros"`
+	HardwareProblems  []HardwareProblem     `json:"hardware_problems,omitempty"`
 	FrontPanel        FrontPanel            `json:"front_panel"`
 	HaveFrontPanel    bool                  `json:"have_front_panel"`
 	FrontPanelUpdated time.Time             `json:"front_panel_updated,omitempty"`
@@ -607,7 +609,7 @@ func AttachSharedRuntime(
 		runtime:      runtime,
 		runtimeClose: runtime.Close,
 		engine:       engine,
-		outputs:      control.NewOutputScheduler(runtime),
+		outputs:      runtime.EnsureOutputScheduler(),
 		events:       make(chan Event),
 		done:         make(chan struct{}),
 	}
@@ -1968,6 +1970,7 @@ func (client *Client) Snapshot() Snapshot {
 		ProgramState:      snapshot.ProgramState,
 		RFLearning:        snapshot.RFLearning,
 		Macros:            snapshot.Macros,
+		HardwareProblems:  snapshot.HardwareProblems,
 		FrontPanel:        snapshot.FrontPanel,
 		HaveFrontPanel:    snapshot.HaveFrontPanel,
 		FrontPanelUpdated: snapshot.FrontPanelUpdated,

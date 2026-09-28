@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"pccontroller.local/controller/internal/link"
@@ -52,7 +53,8 @@ type Snapshot struct {
 	ProgramState           ProgramStateSnapshot
 	RFLearning             RFLearnState
 	Macros                 MacroSnapshot
-	PortProcess            PortProcessSnapshot `json:"port_process"`
+	HardwareProblems       []ports.HardwareProblem `json:"hardware_problems,omitempty"`
+	PortProcess            PortProcessSnapshot     `json:"port_process"`
 }
 
 type PortProcessSnapshot struct {
@@ -185,6 +187,14 @@ type Runtime struct {
 	reconnectEpoch         uint64
 	resetIssued            bool
 	portRebindAllowed      bool
+	hardwareProblems       []ports.HardwareProblem
+	hardwareProblemScan    func(ports.Filter) ([]ports.HardwareProblem, error)
+	hardwareProblemEpoch   uint64
+	transportActivityMu    sync.Mutex
+	transportLossActive    atomic.Bool
+	transportClosing       atomic.Bool
+	activeUseMask          atomic.Uint32
+	outputScheduler        *OutputScheduler
 	deviceObserver         func(ports.Info, native.Hello)
 	connectionReadyHandler func(ports.Info, native.Hello)
 	beforeDisconnect       func(string)
@@ -250,21 +260,31 @@ const (
 	defaultReconnectMaximumDelay = 15 * time.Second
 )
 
+const (
+	activeUseProgram uint32 = 1 << iota
+	activeUseMacroPlayback
+	activeUseMacroRecording
+	activeUseMelody
+	activeUseStatusEffect
+)
+
 func New(options Options) *Runtime {
 	options = normalizedOptions(options)
 	runtime := &Runtime{
 		options: options, events: make(chan Event, 512),
-		autoOpen:           link.AutoOpen,
-		openAuthenticated:  link.OpenAuthenticated,
-		eventNotify:        make(chan struct{}),
-		connectionEvents:   make(map[string]connectionEventSignature),
-		connectionState:    "disconnected",
-		connectionUpdated:  time.Now(),
-		historyRetention:   24 * time.Hour,
-		historySampleEvery: time.Second,
-		timelineLimit:      2000,
+		autoOpen:            link.AutoOpen,
+		openAuthenticated:   link.OpenAuthenticated,
+		hardwareProblemScan: ports.ListHardwareProblems,
+		eventNotify:         make(chan struct{}),
+		connectionEvents:    make(map[string]connectionEventSignature),
+		connectionState:     "disconnected",
+		connectionUpdated:   time.Now(),
+		historyRetention:    24 * time.Hour,
+		historySampleEvery:  time.Second,
+		timelineLimit:       2000,
 	}
 	runtime.programState = NewProgramStateManager(func(state ProgramStateSnapshot) {
+		runtime.setActiveUseState(activeUseProgram, state.Mode == ProgramRunning)
 		runtime.publishEvent(Event{
 			Kind: "program.state", Lifecycle: "changed",
 			State: string(state.Mode), Reason: state.Reason,
@@ -381,6 +401,25 @@ func (runtime *Runtime) setMacroRunner(runner *MacroRunner) {
 	runtime.mu.Lock()
 	runtime.macroRunner = runner
 	runtime.mu.Unlock()
+}
+
+func (runtime *Runtime) bindOutputScheduler(scheduler *OutputScheduler) *OutputScheduler {
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	if runtime.outputScheduler == nil {
+		if scheduler == nil {
+			scheduler = NewOutputScheduler(runtime)
+		}
+		runtime.outputScheduler = scheduler
+	}
+	return runtime.outputScheduler
+}
+
+// EnsureOutputScheduler returns the one scheduler shared by command, library,
+// IPC, and UI facades. A second unregistered scheduler would make its live
+// streams invisible to transport-loss diagnostics.
+func (runtime *Runtime) EnsureOutputScheduler() *OutputScheduler {
+	return runtime.bindOutputScheduler(nil)
 }
 
 func (runtime *Runtime) SetProgramState(owner string, mode ProgramMode, reason string) (ProgramStateSnapshot, error) {
@@ -642,6 +681,7 @@ func (runtime *Runtime) Snapshot() Snapshot {
 	rfLearning := runtime.RFLearnState()
 	runtime.mu.RLock()
 	defer runtime.mu.RUnlock()
+	hardwareProblems := cloneHardwareProblems(runtime.hardwareProblems)
 	return Snapshot{
 		Connected:         runtime.session != nil,
 		Paused:            runtime.paused,
@@ -662,8 +702,203 @@ func (runtime *Runtime) Snapshot() Snapshot {
 		StatusLEDUpdated: runtime.statusLEDUpdated,
 		ProgramState:     programState,
 		RFLearning:       rfLearning,
+		HardwareProblems: hardwareProblems,
 		PortProcess:      runtime.portProcess,
 	}
+}
+
+func cloneHardwareProblems(values []ports.HardwareProblem) []ports.HardwareProblem {
+	if len(values) == 0 {
+		return nil
+	}
+	result := make([]ports.HardwareProblem, len(values))
+	copy(result, values)
+	for index := range result {
+		result[index].HardwareIDs = append([]string(nil), values[index].HardwareIDs...)
+		result[index].LocationPaths = append([]string(nil), values[index].LocationPaths...)
+	}
+	return result
+}
+
+func hardwareProblemFilter(filter ports.Filter, observed ports.Info) ports.Filter {
+	filter.Preferred = mergeObservedDeviceIdentity(filter.Preferred, observed)
+	if filter.Port == "" {
+		filter.Port = observed.Name
+	}
+	return filter
+}
+
+func (runtime *Runtime) activeUseAtTransportLoss() bool {
+	return runtime.activeUseMask.Load() != 0 || runtime.transportLossActive.Load()
+}
+
+func (runtime *Runtime) setActiveUseState(bit uint32, active bool) {
+	for {
+		current := runtime.activeUseMask.Load()
+		next := current &^ bit
+		if active {
+			next = current | bit
+		}
+		if current == next || runtime.activeUseMask.CompareAndSwap(current, next) {
+			break
+		}
+	}
+	// This is the other half of the transport-close handshake. Sequentially
+	// consistent atomics guarantee that either the pre-close observer sees the
+	// active bit, or a concurrently starting operation sees transportClosing
+	// and makes the outcome-unknown latch sticky before it can issue I/O.
+	if active {
+		runtime.latchStartingActiveUse()
+	}
+}
+
+func (runtime *Runtime) latchStartingActiveUse() {
+	runtime.transportActivityMu.Lock()
+	if runtime.transportClosing.Load() {
+		runtime.transportLossActive.Store(true)
+	}
+	runtime.transportActivityMu.Unlock()
+}
+
+func (runtime *Runtime) resetTransportLossState() {
+	runtime.transportActivityMu.Lock()
+	runtime.transportClosing.Store(false)
+	runtime.transportLossActive.Store(false)
+	runtime.transportActivityMu.Unlock()
+}
+
+func (runtime *Runtime) setOutputActivity(kind string, active bool) {
+	bit := activeUseMelody
+	if kind == "effect" {
+		bit = activeUseStatusEffect
+	}
+	runtime.setActiveUseState(bit, active)
+}
+
+func (runtime *Runtime) latchActiveUseBeforeTransportClose(
+	session *link.Session,
+	generation uint64,
+) {
+	runtime.mu.Lock()
+	if runtime.session == session && runtime.generation == generation {
+		runtime.transportActivityMu.Lock()
+		runtime.transportClosing.Store(true)
+		if runtime.activeUseAtTransportLoss() {
+			runtime.transportLossActive.Store(true)
+		}
+		runtime.transportActivityMu.Unlock()
+	}
+	runtime.mu.Unlock()
+}
+
+func (runtime *Runtime) refreshHardwareProblems(activeAtTransportLoss bool) {
+	runtime.mu.Lock()
+	scan := runtime.hardwareProblemScan
+	if scan == nil {
+		runtime.mu.Unlock()
+		return
+	}
+	runtime.hardwareProblemEpoch++
+	epoch := runtime.hardwareProblemEpoch
+	filter := hardwareProblemFilter(runtime.options.Filter, runtime.port)
+	runtime.mu.Unlock()
+
+	problems, err := scan(filter)
+	if err != nil {
+		return
+	}
+	if activeAtTransportLoss {
+		for index := range problems {
+			problems[index].Impact = ports.HardwareImpactActiveOutcomeUnknown
+		}
+	}
+	runtime.setHardwareProblemsAtEpoch(problems, epoch)
+}
+
+func (runtime *Runtime) setHardwareProblems(problems []ports.HardwareProblem) {
+	runtime.setHardwareProblemsAtEpoch(problems, 0)
+}
+
+func (runtime *Runtime) setHardwareProblemsAtEpoch(problems []ports.HardwareProblem, epoch uint64) {
+	problems = cloneHardwareProblems(problems)
+	runtime.mu.Lock()
+	if epoch != 0 && epoch != runtime.hardwareProblemEpoch {
+		runtime.mu.Unlock()
+		return
+	}
+	previous := runtime.hardwareProblems
+	// Absence from Device Manager is not recovery. Retain the last correlated
+	// fault until an authenticated application HELLO proves the transport is
+	// usable again; attachWhen performs that authoritative clear.
+	if epoch != 0 && len(problems) == 0 && len(previous) != 0 && runtime.session == nil {
+		runtime.mu.Unlock()
+		return
+	}
+	changed := !sameHardwareProblems(previous, problems)
+	runtime.hardwareProblems = problems
+	port := runtime.port
+	runtime.mu.Unlock()
+	if !changed {
+		return
+	}
+	if len(problems) == 0 {
+		if len(previous) != 0 {
+			runtime.publishEvent(Event{
+				Kind: "hardware.recovered", Lifecycle: "recovered",
+				State: "healthy", Port: port, Source: "host", Target: "app.clients",
+				Text: "controller hardware re-enumerated and authenticated",
+			})
+		}
+		return
+	}
+	for _, problem := range problems {
+		text := fmt.Sprintf(
+			"controller hardware problem detected: %s (OS problem %d)",
+			problem.Code,
+			problem.OSProblemCode,
+		)
+		if problem.Location != "" {
+			text += " at " + problem.Location
+		}
+		if problem.Impact == ports.HardwareImpactActiveOutcomeUnknown {
+			text += "; active operation outcome is unknown"
+		}
+		metadata := map[string]string{
+			"problem":           problem.Code,
+			"severity":          problem.Severity,
+			"os_problem_number": strconv.FormatUint(uint64(problem.OSProblemCode), 10),
+		}
+		if problem.DeviceID != "" {
+			metadata["device_id"] = problem.DeviceID
+		}
+		if problem.Location != "" {
+			metadata["location"] = problem.Location
+		}
+		if problem.Impact != "" {
+			metadata["impact"] = problem.Impact
+		}
+		runtime.publishEvent(Event{
+			Kind: "hardware.problem", Lifecycle: "detected",
+			State: problem.Severity, Reason: problem.Code, Port: port,
+			Source: "host", Target: "app.clients", Text: text, Metadata: metadata,
+		})
+	}
+}
+
+func sameHardwareProblems(left, right []ports.HardwareProblem) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index].Code != right[index].Code ||
+			left[index].Severity != right[index].Severity ||
+			left[index].Impact != right[index].Impact ||
+			left[index].OSProblemCode != right[index].OSProblemCode ||
+			!strings.EqualFold(left[index].DeviceID, right[index].DeviceID) {
+			return false
+		}
+	}
+	return true
 }
 
 // clearPeerStateLocked removes values whose authority ended with the serial
@@ -978,6 +1213,7 @@ func (runtime *Runtime) ensureConnected(ctx context.Context) error {
 		if result.Session != nil {
 			return runtime.retainFailedOpen(result, err)
 		}
+		runtime.refreshHardwareProblems(runtime.activeUseAtTransportLoss())
 		return err
 	}
 	attached := runtime.attachWhen(result, func() bool {
@@ -1654,10 +1890,15 @@ func (runtime *Runtime) attachWhen(result link.OpenResult, allowed func() bool) 
 	runtime.connectionReason = ""
 	runtime.connectionUpdated = time.Now()
 	runtime.reconnectEpoch++
+	runtime.hardwareProblemEpoch++
+	runtime.resetTransportLossState()
 	runtime.portRebindAllowed = false
 	observer := runtime.deviceObserver
 	ready := runtime.connectionReadyHandler
 	runtime.mu.Unlock()
+	result.Session.SetBeforeClose(func() {
+		runtime.latchActiveUseBeforeTransportClose(result.Session, generation)
+	})
 
 	lifecycle := "connect"
 	if reconnected {
@@ -1667,6 +1908,7 @@ func (runtime *Runtime) attachWhen(result link.OpenResult, allowed func() bool) 
 	// observe a rapidly disappearing transport. This prevents an older
 	// reconnecting event from landing after the new connected generation.
 	runtime.publishConnection(lifecycle, result.Port, "")
+	runtime.setHardwareProblems(nil)
 	if result.Port.IsUSB {
 		runtime.publishUSBConnection("usb.reconnected", lifecycle, result.Port, "", "connected")
 	}
@@ -2191,6 +2433,7 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 				}
 			}
 		case <-session.Done():
+			activeAtTransportLoss := runtime.activeUseAtTransportLoss()
 			runtime.mu.Lock()
 			owned := false
 			var port ports.Info
@@ -2210,6 +2453,7 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 			}
 			runtime.mu.Unlock()
 			if owned {
+				go runtime.refreshHardwareProblems(activeAtTransportLoss)
 				runtime.markRFLearningDisconnected("device disconnected")
 				if port.IsUSB {
 					runtime.publishUSBConnection(
