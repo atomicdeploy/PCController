@@ -870,7 +870,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 		},
 	})
 	mustRegister(shell.Command{
-		Name: "macro", Usage: "macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|rename NAME_OR_ID NAME|category NAME_OR_ID CATEGORY|delete NAME_OR_ID|record start|start-mcu NAME [CATEGORY [COLOR]]|record status|record save|record discard|play NAME_OR_ID|status|monitor|cancel [keep]",
+		Name: "macro", Usage: "macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|rename NAME_OR_ID NAME|category NAME_OR_ID CATEGORY|delete NAME_OR_ID|record start|start-mcu|start-board|import-board NAME [CATEGORY [COLOR]]|record status|record save|record discard|buffer clear|play NAME_OR_ID [host|mcu]|status|monitor|cancel [keep]",
 		Summary: "record and play named host or MCU-timed multi-peripheral macros",
 		Run: func(ctx context.Context, args []string) (string, error) {
 			return macroCommand(ctx, macroRunner, args)
@@ -4826,7 +4826,7 @@ func macroCommand(
 	runner *MacroRunner,
 	args []string,
 ) (string, error) {
-	const usage = "macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|rename NAME_OR_ID NEW_NAME|category NAME_OR_ID CATEGORY|delete NAME_OR_ID|record start|start-mcu NAME [CATEGORY [COLOR]]|record status|record save|record discard|play NAME_OR_ID|status|monitor|cancel [keep]"
+	const usage = "macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|rename NAME_OR_ID NEW_NAME|category NAME_OR_ID CATEGORY|delete NAME_OR_ID|record start|start-mcu|start-board|import-board NAME [CATEGORY [COLOR]]|record status|record save|record discard|buffer clear|play NAME_OR_ID [host|mcu]|status|monitor|cancel [keep]"
 	if len(args) < 1 {
 		return "", fmt.Errorf("usage: %s", usage)
 	}
@@ -4949,7 +4949,7 @@ func macroCommand(
 		return "macro deleted from HOST configuration", nil
 	case "record":
 		if len(args) < 2 {
-			return "", fmt.Errorf("usage: macro record start|start-mcu NAME [CATEGORY [COLOR]]|status|save|discard")
+			return "", fmt.Errorf("usage: macro record start|start-mcu|start-board|import-board NAME [CATEGORY [COLOR]]|status|save|discard")
 		}
 		switch strings.ToLower(args[1]) {
 		case "start", "start-mcu", "start-board", "import-board":
@@ -5014,7 +5014,7 @@ func macroCommand(
 			}
 			return fmt.Sprintf("macro %d/%s recording discarded", macro.ID, macro.Name), nil
 		default:
-			return "", fmt.Errorf("usage: macro record start|start-mcu NAME [CATEGORY [COLOR]]|status|save|discard")
+			return "", fmt.Errorf("usage: macro record start|start-mcu|start-board|import-board NAME [CATEGORY [COLOR]]|status|save|discard")
 		}
 	case "play", "run", "start":
 		if len(args) < 2 || len(args) > 3 {
