@@ -20,6 +20,17 @@ type reconnectTestPort struct {
 	dtr    []bool
 }
 
+type observedWritePort struct {
+	*reconnectTestPort
+	wrote     chan struct{}
+	writeOnce sync.Once
+}
+
+func (port *observedWritePort) Write(data []byte) (int, error) {
+	port.writeOnce.Do(func() { close(port.wrote) })
+	return len(data), nil
+}
+
 type retryableCloseTestPort struct {
 	readStarted chan struct{}
 	readAborted chan struct{}
@@ -489,6 +500,7 @@ func TestHardwareProblemPersistsUntilAuthenticatedAttach(t *testing.T) {
 		Port:    runtime.port,
 		Hello:   native.Hello{Name: "PCController"},
 	})
+	t.Cleanup(func() { _ = runtime.Close() })
 	if len(runtime.Snapshot().HardwareProblems) != 0 {
 		t.Fatal("authenticated attach did not clear the hardware problem")
 	}
@@ -545,12 +557,54 @@ func TestAuthenticatedAttachRejectsStaleHardwareScan(t *testing.T) {
 func TestActiveUseAtTransportLossIncludesOutputStreams(t *testing.T) {
 	runtime := New(Options{})
 	scheduler := NewOutputScheduler(runtime)
-	scheduler.mu.Lock()
-	scheduler.effect = &runningOutput{id: 42}
-	scheduler.mu.Unlock()
-	runtime.setOutputScheduler(scheduler)
+	runtime.bindOutputScheduler(scheduler)
+	scheduler.reportActivity("effect", true)
 	if !runtime.activeUseAtTransportLoss() {
 		t.Fatal("active host-streamed status effect was omitted from transport-loss impact")
+	}
+}
+
+func TestTransportCloseDoesNotWaitForOutputSchedulerLock(t *testing.T) {
+	runtime := New(Options{Filter: ports.Filter{Port: "COM3"}})
+	port := &observedWritePort{
+		reconnectTestPort: newReconnectTestPort(),
+		wrote:             make(chan struct{}),
+	}
+	session := link.NewForPort("COM3", port)
+	runtime.attach(link.OpenResult{
+		Session: session,
+		Port:    ports.Info{Name: "COM3", IsUSB: true},
+		Hello:   native.Hello{Name: "PCController"},
+	})
+	scheduler := runtime.EnsureOutputScheduler()
+	commandDone := make(chan error, 1)
+	go func() {
+		commandDone <- scheduler.SetStatusBase(
+			context.Background(), 1, 2, 3, 100,
+		)
+	}()
+	select {
+	case <-port.wrote:
+	case <-time.After(time.Second):
+		t.Fatal("status command did not reach the transport")
+	}
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- session.Close() }()
+	select {
+	case err := <-closeDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("transport close waited for the output scheduler lock")
+	}
+	select {
+	case err := <-commandDone:
+		if !errors.Is(err, link.ErrClosed) {
+			t.Fatalf("status command error = %v, want closed transport", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("status command did not unwind after transport close")
 	}
 }
 
@@ -574,6 +628,7 @@ func TestTransportCloseLatchesOutputActivityBeforeStreamCleanup(t *testing.T) {
 			Name: "PCController", Capabilities: native.CapabilityStatusEffects,
 		},
 	})
+	t.Cleanup(func() { _ = runtime.Close() })
 	scheduler := runtime.EnsureOutputScheduler()
 	operation, err := scheduler.StartStatusEffect(
 		context.Background(),

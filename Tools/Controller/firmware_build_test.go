@@ -12,15 +12,20 @@ import (
 
 	"pccontroller.local/controller/internal/control"
 	"pccontroller.local/controller/internal/programmer"
-	"pccontroller.local/controller/internal/shell"
 )
 
 func TestSharedRuntimeFacadeReusesRegisteredOutputScheduler(t *testing.T) {
 	runtime := control.New(control.Options{})
-	registered := runtime.EnsureOutputScheduler()
-	client := AttachSharedRuntime(runtime, shell.New(1))
+	registered := control.NewOutputScheduler(runtime)
+	engine := control.NewCommandEngine(runtime, control.CommandOptions{Outputs: registered})
+	client := AttachSharedRuntime(runtime, engine)
 	if client.outputs != registered {
 		t.Fatal("shared runtime facade created an unregistered output scheduler")
+	}
+	alternate := control.NewOutputScheduler(runtime)
+	_ = control.NewCommandEngine(runtime, control.CommandOptions{Outputs: alternate})
+	if runtime.EnsureOutputScheduler() != registered || client.outputs != registered {
+		t.Fatal("a later command engine replaced the registered output scheduler")
 	}
 }
 
