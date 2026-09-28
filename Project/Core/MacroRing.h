@@ -86,6 +86,8 @@ public:
   bool recordRelay(uint8_t mask, uint32_t nowUs);
   bool stopRecording();
   bool startRecorded(uint32_t nowUs, uint8_t relayOpcode);
+  // Raw capture-clock offsets; the host subtracts the first retained stamp
+  // after download, exactly as local replay does at scheduling time.
   uint8_t readRecording(uint16_t offset, uint8_t *bytes, uint8_t capacity) const;
   bool hasRecording() const;
   bool clearRecording();

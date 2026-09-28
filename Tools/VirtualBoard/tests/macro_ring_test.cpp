@@ -174,12 +174,12 @@ void testRecordingCircularRetentionAndRollover() {
           "bounded snapshot ring did not evict whole oldest snapshots");
   std::array<uint8_t, 125> bytes{};
   require(ring.readRecording(0, bytes.data(), 125) == 125 &&
-              read32(bytes.data()) == 0 && bytes[4] == 16 &&
-              read32(bytes.data() + 120) == 24 * 137 && bytes[124] == 40,
-          "ring wrap changed masks or normalized MCU edge deltas");
+              read32(bytes.data()) == 16 * 137 && bytes[4] == 16 &&
+              read32(bytes.data() + 120) == 40 * 137 && bytes[124] == 40,
+          "ring wrap changed masks or raw MCU edge timestamps");
   std::array<uint8_t, 44> page{};
   require(ring.readRecording(40, page.data(), 44) == 40 &&
-              read32(page.data()) == 8 * 137 && page[4] == 24 &&
+              read32(page.data()) == 24 * 137 && page[4] == 24 &&
               ring.readRecording(1, page.data(), 44) == 0,
           "paged recording read split a snapshot or misread circular position");
 }

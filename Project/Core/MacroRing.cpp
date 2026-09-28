@@ -279,15 +279,8 @@ uint8_t MacroRing::readRecording(uint16_t offset, uint8_t *bytes,
       static_cast<uint8_t>(offset) % SnapshotBytes != 0) return 0;
   uint8_t count = static_cast<uint8_t>(used_ - offset);
   if (count > capacity) count = capacity - capacity % SnapshotBytes;
-  const uint32_t first = peekU32(0);
-  for (uint8_t index = 0; index < count; index += SnapshotBytes) {
-    const uint8_t position = static_cast<uint8_t>(offset + index);
-    uint32_t elapsed = peekU32(position) - first;
-    for (uint8_t part = 0; part < 4; ++part) {
-      bytes[index + part] = static_cast<uint8_t>(elapsed);
-      elapsed >>= 8;
-    }
-    bytes[index + 4] = peek(static_cast<uint8_t>(position + 4));
+  for (uint8_t index = 0; index < count; ++index) {
+    bytes[index] = peek(static_cast<uint8_t>(offset + index));
   }
   return count;
 }
