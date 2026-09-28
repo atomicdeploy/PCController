@@ -146,7 +146,22 @@ func OpenContext(ctx context.Context, name string, baudRate int) (*Session, erro
 	if err := ctx.Err(); err != nil {
 		return newSession(name, port), fmt.Errorf("open %s canceled after serial configuration: %w", name, err)
 	}
-	_ = port.ResetInputBuffer()
+	if err := port.ResetInputBuffer(); err != nil {
+		configureErr := fmt.Errorf("configure %s input buffer: %w", name, err)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return newSession(name, port), errors.Join(
+				configureErr,
+				fmt.Errorf("open %s canceled after serial configuration: %w", name, ctxErr),
+			)
+		}
+		if closeErr := port.Close(); closeErr != nil {
+			return newSession(name, port), errors.Join(
+				configureErr,
+				fmt.Errorf("close %s after configuration failure: %w", name, closeErr),
+			)
+		}
+		return nil, configureErr
+	}
 	if err := ctx.Err(); err != nil {
 		return newSession(name, port), fmt.Errorf("open %s canceled after serial configuration: %w", name, err)
 	}

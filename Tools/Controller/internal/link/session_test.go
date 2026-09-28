@@ -317,6 +317,26 @@ func TestOpenContextCancellationDuringSerialConfigurationRetainsPort(t *testing.
 	}
 }
 
+func TestOpenContextResetInputBufferFailureClosesPort(t *testing.T) {
+	resetErr := errors.New("reset input buffer failed")
+	port := newOpenAcquisitionPort()
+	port.onResetInputBuffer = func() error { return resetErr }
+	originalOpen := openSerialPort
+	openSerialPort = func(string, *serial.Mode) (serial.Port, error) { return port, nil }
+	t.Cleanup(func() { openSerialPort = originalOpen })
+
+	session, err := OpenContext(context.Background(), "COM3", DefaultBaudRate)
+	if session != nil || !errors.Is(err, resetErr) {
+		t.Fatalf("OpenContext session=%p error=%v, want reset failure without live session", session, err)
+	}
+
+	port.closeMu.Lock()
+	defer port.closeMu.Unlock()
+	if port.closeCalls != 1 {
+		t.Fatalf("reset failure close calls = %d, want 1", port.closeCalls)
+	}
+}
+
 func TestOpenContextRejectsNilSerialPort(t *testing.T) {
 	originalOpen := openSerialPort
 	openSerialPort = func(string, *serial.Mode) (serial.Port, error) { return nil, nil }
