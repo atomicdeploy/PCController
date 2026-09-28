@@ -20,7 +20,7 @@ describe('dynamic controller favicon', () => {
     const url = controllerFaviconDataURL('offline')
     expect(url.startsWith('data:image/svg+xml,')).toBe(true)
     const svg = decodeURIComponent(url.slice(url.indexOf(',') + 1))
-    expect(svg).toContain('Controller offline')
+    expect(svg).toContain('Board offline')
     expect(svg).toContain('#8b6de0')
     expect(svg).not.toMatch(/grid|radialGradient|#00ffff|cyan|teal/i)
   })

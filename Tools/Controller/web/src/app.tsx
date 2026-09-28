@@ -32,6 +32,7 @@ import {
   PackageOpen,
   Search,
   Settings,
+  Settings2,
   Sun,
   TriangleAlert,
   Volume2,
@@ -106,6 +107,13 @@ import {
   processWebAppAction,
   type WebActionProgress,
 } from './app-actions'
+import { AppPreferencesDialog } from './app-preferences-dialog'
+import {
+  loadQuickHeaderPreferences,
+  normalizeQuickHeaderPreferences,
+  saveQuickHeaderPreferences,
+  type QuickHeaderPreferences,
+} from './quick-header-preferences'
 
 const DashboardPage = lazy(() => import('./views').then(({ DashboardView }) => ({ default: DashboardView })))
 const ControlsPage = lazy(() => import('./views').then(({ ControlsView }) => ({ default: ControlsView })))
@@ -386,13 +394,13 @@ export function controllerConnectionLabel(
   if (streamState === 'connecting') return copy('Connecting', 'در حال اتصال')
   if (streamState !== 'open') return copy('Disconnected', 'قطع ارتباط')
   if (boardState === 'loading') return copy('Synchronizing', 'در حال همگام‌سازی')
-  if (snapshot.connected) return copy('Controller connected', 'برد متصل')
+  if (snapshot.connected) return copy('Board connected', 'برد متصل')
   const controllerState = snapshot.connection_state.trim().toLowerCase()
   if (controllerState === 'paused') return copy('Paused', 'متوقف')
   if (['connecting', 'discovering', 'scanning', 'searching'].includes(controllerState)) {
     return copy('Searching', 'در حال جستجو')
   }
-  return copy('No controller', 'بدون برد')
+  return copy('No board', 'بدون برد')
 }
 
 export function isCompletedHostUpdate(event: Pick<ControllerEvent, 'kind' | 'metadata'>): boolean {
@@ -447,6 +455,8 @@ export default function App() {
   const [paletteQuery, setPaletteQuery] = useState('')
   const [paletteIndex, setPaletteIndex] = useState(0)
   const [hotkeyHelp, setHotkeyHelp] = useState(false)
+  const [appPreferencesOpen, setAppPreferencesOpen] = useState(false)
+  const [quickHeader, setQuickHeader] = useState(loadQuickHeaderPreferences)
   const [sidebarStatusMenu, setSidebarStatusMenu] = useState(false)
   const [sidebarStatusMenuPosition, setSidebarStatusMenuPosition] = useState({ left: 0, top: 0 })
   const [bootOpen, setBootOpen] = useState(demo)
@@ -505,6 +515,12 @@ export default function App() {
     applyAppearance(value)
     audioRef.current?.setVolume(value.audioVolume)
     audioRef.current?.setMuted(value.audioMuted)
+  }, [])
+
+  const saveQuickHeader = useCallback((value: QuickHeaderPreferences) => {
+    const normalized = normalizeQuickHeaderPreferences(value)
+    setQuickHeader(normalized)
+    saveQuickHeaderPreferences(normalized)
   }, [])
 
   const adoptHostAppearance = useCallback((value: Appearance, etag: string) => {
@@ -1106,7 +1122,7 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (bootOpen) return
+      if (bootOpen || appPreferencesOpen) return
       const composing = event.isComposing || event.keyCode === 229
       if (palette) {
         if (composing) return
@@ -1204,7 +1220,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [bootOpen, dialog.open, hotkeyHelp, mobileNav, navigate, page, palette, paletteIndex, paletteQuery, t, toggleAudio])
+  }, [appPreferencesOpen, bootOpen, dialog.open, hotkeyHelp, mobileNav, navigate, page, palette, paletteIndex, paletteQuery, t, toggleAudio])
 
   useEffect(() => {
     setPaletteIndex(0)
@@ -1540,8 +1556,8 @@ export default function App() {
     <MotionConfig reducedMotion={appearance.reduceMotion ? 'always' : 'user'}>
     <div
       className={`app-shell${sidebarOpen ? '' : ' is-sidebar-compact'}${bootResolved ? '' : ' is-bootstrap-pending'}`}
-      inert={!bootResolved || bootOpen || hotkeyHelp ? true : undefined}
-      aria-hidden={!bootResolved || bootOpen || hotkeyHelp ? true : undefined}
+      inert={!bootResolved || bootOpen || hotkeyHelp || appPreferencesOpen ? true : undefined}
+      aria-hidden={!bootResolved || bootOpen || hotkeyHelp || appPreferencesOpen ? true : undefined}
     >
 	  {remoteActionProgress && (
 		<div
@@ -1569,9 +1585,9 @@ export default function App() {
           aria-haspopup={snapshot.connected ? 'menu' : undefined}
           aria-expanded={snapshot.connected ? sidebarStatusMenu : undefined}
           aria-label={snapshot.connected
-            ? appearance.locale === 'fa' ? 'منوی اتصال کنترلر' : 'Controller connection menu'
-            : appearance.locale === 'fa' ? 'اتصال مجدد کنترلر' : 'Reconnect controller'}
-          title={`${snapshot.connected ? t('online') : t('offline')} · ${snapshot.port.name || snapshot.connection_state}`}
+            ? appearance.locale === 'fa' ? 'منوی اتصال برد' : 'Board connection menu'
+            : appearance.locale === 'fa' ? 'اتصال مجدد برد' : 'Reconnect board'}
+          title={`${snapshot.connected ? (appearance.locale === 'fa' ? 'برد آنلاین' : 'Board online') : (appearance.locale === 'fa' ? 'برد آفلاین' : 'Board offline')} · ${snapshot.port.name || snapshot.connection_state}`}
           onClick={() => {
             if (!snapshot.connected) {
               setSidebarStatusMenu(false)
@@ -1593,14 +1609,14 @@ export default function App() {
           }}
         >
           <span className={`status-rail status-rail--${snapshot.connected ? 'good' : 'bad'}`} aria-hidden="true" />
-          <div><strong>{snapshot.connected ? t('online') : t('offline')}</strong><small>{snapshot.port.name || snapshot.connection_state}</small></div>
+          <div><strong>{snapshot.connected ? (appearance.locale === 'fa' ? 'برد آنلاین' : 'Board online') : (appearance.locale === 'fa' ? 'برد آفلاین' : 'Board offline')}</strong><small>{snapshot.port.name || snapshot.connection_state}</small></div>
           <Cpu size={18} aria-hidden="true" />
         </button>
         {sidebarStatusMenu && typeof document !== 'undefined' && createPortal(<div
           ref={sidebarStatusMenuRef}
           className="sidebar__status-menu"
           role="menu"
-          aria-label={appearance.locale === 'fa' ? 'عملیات اتصال کنترلر' : 'Controller connection actions'}
+          aria-label={appearance.locale === 'fa' ? 'عملیات اتصال برد' : 'Board connection actions'}
           style={sidebarStatusMenuPosition}
         >
           <button type="button" role="menuitem" onClick={() => { setSidebarStatusMenu(false); void runCommand('reconnect') }}>{appearance.locale === 'fa' ? 'اتصال مجدد' : 'Reconnect'}</button>
@@ -1630,11 +1646,18 @@ export default function App() {
           {reconnectAvailable
             ? <button className="transport-reconnect" title={streamDetail || undefined} aria-label={appearance.locale === 'fa' ? 'اتصال مجدد فوری میزبان' : 'Reconnect host now'} onClick={reconnectTransport}><StatusBadge tone={transportTone}>{transportLabel}</StatusBadge></button>
             : <span title={streamDetail || undefined}><StatusBadge tone={transportTone} pulse={streamState === 'connecting'}>{transportLabel}</StatusBadge></span>}
-          <button className="topbar-icon" aria-label={t('toggleTheme')} onClick={() => saveAppearance({ ...appearance, theme: (document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark') })}>{document.documentElement.dataset.theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}</button>
-          <button className="topbar-icon" aria-label={t('switchLanguage')} onClick={() => saveAppearance({ ...appearance, locale: appearance.locale === 'en' ? 'fa' : 'en' })}><Languages size={18} /></button>
-          <button className="topbar-icon topbar-audio" aria-label={t(appearance.audioMuted ? 'enableAudio' : 'muteAudio')} aria-pressed={appearance.audioMuted} aria-keyshortcuts="M" onClick={toggleAudio}>{appearance.audioMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}</button>
-          <button className="topbar-icon topbar-hotkeys" aria-label={t('keyboardShortcuts')} aria-keyshortcuts="?" onClick={() => setHotkeyHelp(true)}><Keyboard size={18} /></button>
-          <button className="topbar-icon" aria-label={t('notifications')} onClick={() => navigate('events')}><Bell size={18} />{events.length > 0 && <i />}</button>
+          <button
+            className="topbar-icon"
+            aria-label={appearance.locale === 'fa' ? 'ترجیحات برنامه' : 'Application preferences'}
+            aria-haspopup="dialog"
+            aria-expanded={appPreferencesOpen}
+            onClick={() => setAppPreferencesOpen(true)}
+          ><Settings2 size={18} /></button>
+          {quickHeader.theme && <button className="topbar-icon" aria-label={t('toggleTheme')} onClick={() => saveAppearance({ ...appearance, theme: (document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark') })}>{document.documentElement.dataset.theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}</button>}
+          {quickHeader.language && <button className="topbar-icon" aria-label={t('switchLanguage')} onClick={() => saveAppearance({ ...appearance, locale: appearance.locale === 'en' ? 'fa' : 'en' })}><Languages size={18} /></button>}
+          {quickHeader.audio && <button className="topbar-icon topbar-audio" aria-label={t(appearance.audioMuted ? 'enableAudio' : 'muteAudio')} aria-pressed={appearance.audioMuted} aria-keyshortcuts="M" onClick={toggleAudio}>{appearance.audioMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}</button>}
+          {quickHeader.hotkeys && <button className="topbar-icon topbar-hotkeys" aria-label={t('keyboardShortcuts')} aria-keyshortcuts="?" onClick={() => setHotkeyHelp(true)}><Keyboard size={18} /></button>}
+          {quickHeader.notifications && <button className="topbar-icon" aria-label={t('notifications')} onClick={() => navigate('events')}><Bell size={18} />{events.length > 0 && <i />}</button>}
         </div>
       </header>
 
@@ -1693,6 +1716,15 @@ export default function App() {
       <Modal state={{ ...dialog, action: confirmDialog }} onClose={closeDialog} busy={dialogBusy} />
       <ToastStack messages={toasts} dismiss={(id) => setToasts((current) => current.filter((item) => item.id !== id))} />
     </div>
+    <AppPreferencesDialog
+      open={appPreferencesOpen}
+      locale={appearance.locale}
+      appearance={appearance}
+      quickHeader={quickHeader}
+      onAppearance={saveAppearance}
+      onQuickHeader={saveQuickHeader}
+      onClose={() => setAppPreferencesOpen(false)}
+    />
     <BootGate open={bootResolved && bootOpen} progress={bootProgress} locale={appearance.locale} productTitle={productTitle} productShortName={productShortName} productTagline={productTagline} onEnter={enterApp} />
     <HotkeyHelp open={hotkeyHelp} locale={appearance.locale} onClose={() => setHotkeyHelp(false)} />
     </MotionConfig>

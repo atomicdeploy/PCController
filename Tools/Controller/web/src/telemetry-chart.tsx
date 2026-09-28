@@ -99,7 +99,7 @@ export function TelemetryChart({ connected, locale, samples, reduceMotion = fals
     return (
       <div className="telemetry-chart__empty" role="status">
         <strong>{persian ? 'هنوز نمونه‌ای دریافت نشده است' : 'No telemetry samples yet'}</strong>
-        <span>{connected ? (persian ? 'در انتظار اولین وضعیت برد' : 'Waiting for the first board status') : (persian ? 'برد آفلاین است' : 'Controller offline')}</span>
+        <span>{connected ? (persian ? 'در انتظار اولین وضعیت برد' : 'Waiting for the first board status') : (persian ? 'برد آفلاین است' : 'Board offline')}</span>
       </div>
     )
   }

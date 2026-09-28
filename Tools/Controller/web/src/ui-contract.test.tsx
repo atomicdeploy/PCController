@@ -127,6 +127,15 @@ describe('offline and settings UI contracts', () => {
     expect(markup).toContain('Show text')
   })
 
+  it('renders an empty host-backed terminal combobox without a fabricated command', () => {
+    const markup = renderToStaticMarkup(<WorkbenchView {...shared()} />)
+    expect(markup).toContain('id="workbench-command"')
+    expect(markup).toContain('aria-autocomplete="list"')
+    expect(markup).toContain('aria-expanded="false"')
+    expect(markup).not.toContain('value="status"')
+    expect(markup).not.toContain('workbench-command-completion-0')
+  })
+
   it.each([null, undefined, []])('renders an empty macro draft without crashing when steps is %s', (steps) => {
     const snapshot = {
       ...emptySnapshot,
@@ -252,7 +261,8 @@ describe('offline and settings UI contracts', () => {
       t={translator('en')}
       snapshot={{ ...emptySnapshot, connection_reason: 'Serial controller is offline' }}
     />)
-    expect(markup).toContain('Controller offline — check the connection details below.')
+    expect(markup).toContain('PCController host online')
+    expect(markup).toContain('Controller board disconnected')
     expect(markup).toContain('Serial controller is offline')
     expect(markup).not.toContain('Authentication required')
     expect(markup).not.toContain('The dashboard is ready')
