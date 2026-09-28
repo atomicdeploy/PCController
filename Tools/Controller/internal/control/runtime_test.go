@@ -144,6 +144,34 @@ func TestPulseResetUsesRememberedPortBeforeAuthentication(t *testing.T) {
 	}
 }
 
+func TestStatusLEDRevisionAdvancesOnlyWhenComposedStateChanges(t *testing.T) {
+	runtime := New(Options{})
+	first := native.StatusLEDState{Red: 1, Green: 2, Blue: 3, Brightness: 4, Effect: native.StatusEffectNone, Condition: 6}
+	firstFrame := native.Frame{Opcode: native.OpStatusLEDChanged, Payload: []byte{
+		first.Red, first.Green, first.Blue, first.Brightness, first.Effect, first.Condition,
+	}}
+	if revision := runtime.observe(firstFrame); revision != 1 {
+		t.Fatalf("first revision=%d, want 1", revision)
+	}
+	if revision := runtime.observe(firstFrame); revision != 0 {
+		t.Fatalf("duplicate revision marker=%d, want 0", revision)
+	}
+	if snapshot := runtime.Snapshot(); snapshot.StatusLEDRevision != 1 {
+		t.Fatalf("duplicate advanced snapshot revision=%d, want 1", snapshot.StatusLEDRevision)
+	}
+	second := first
+	second.Blue = 9
+	if revision := runtime.observe(native.Frame{Opcode: native.OpStatusLEDChanged, Payload: []byte{
+		second.Red, second.Green, second.Blue, second.Brightness, second.Effect, second.Condition,
+	}}); revision != 2 {
+		t.Fatalf("changed revision=%d, want 2", revision)
+	}
+	snapshot := runtime.Snapshot()
+	if snapshot.StatusLED != second || snapshot.StatusLEDRevision != 2 {
+		t.Fatalf("snapshot state=%#v revision=%d, want %#v revision=2", snapshot.StatusLED, snapshot.StatusLEDRevision, second)
+	}
+}
+
 func TestPulseResetQuarantinesTemporaryCloseFailure(t *testing.T) {
 	cancelErr := errors.New("CancelIoEx failed")
 	port := newRetryableCloseTestPort(cancelErr)
