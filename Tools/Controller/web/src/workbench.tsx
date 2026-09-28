@@ -1,4 +1,4 @@
-import { type CSSProperties, type FormEvent, useEffect, useRef, useState } from 'react'
+import { type CSSProperties, type FormEvent, type ReactNode, useEffect, useRef, useState } from 'react'
 import {
   Activity,
   AudioLines,
@@ -55,6 +55,9 @@ import { displayPresentationCommand, type DisplayRepeat, type DisplayTarget } fr
 import { peripheralAvailability } from './peripheral-availability'
 import { RFGuidedWorkflow } from './rf-guided-workflow'
 import { MacroLibraryPanel } from './macro-library'
+import { CardLayoutEditor, CardLayoutFrame, type CardLayoutCopy, type LayoutCardDescriptor } from './card-layout-controls'
+import { loadCardLayout, moveCard, resetCardLayout, saveCardLayout, toggleCard } from './dashboard-layout'
+import { pointerReorderTargetChanged } from './pointer-reorder'
 import {
   normalizeCommandCatalog,
   TerminalHistory,
@@ -87,6 +90,9 @@ export function rfLearnCommand(mode: RFLearnMode, seconds: number): string {
 }
 
 let terminalRowID = 0
+
+const workbenchCardIDs = ['terminal', 'displays', 'status-lighting', 'audio', 'radio', 'macros', 'automations', 'i2c', 'host-control', 'firmware'] as const
+type WorkbenchCardID = typeof workbenchCardIDs[number]
 
 function textRow(text: string, level: TextTerminalRow['level'] = 'log', id?: string): TextTerminalRow {
   return { id: id ?? `terminal-${++terminalRowID}`, kind: 'text', text, level }
@@ -155,6 +161,10 @@ export function WorkbenchView(props: SharedViewProps) {
   const [stripBrightness, setStripBrightness] = useState(180)
   const [automation, setAutomation] = useState('')
   const [hostBrightness, setHostBrightness] = useState(60)
+  const [layoutEditing, setLayoutEditing] = useState(false)
+  const [layout, setLayout] = useState(() => loadCardLayout('workbench', workbenchCardIDs))
+  const [draggedCard, setDraggedCard] = useState<WorkbenchCardID | null>(null)
+  const workbenchDragTarget = useRef<WorkbenchCardID | null>(null)
   const latestStreamEventID = useRef(events.reduce((latest, event) => Math.max(latest, event.id), 0))
   const relayedTerminalIDs = useRef(new Set<string>())
   const consoleModel = useRef(new BrowserConsoleModel({ maxEntries: 240 }))
@@ -276,17 +286,97 @@ export function WorkbenchView(props: SharedViewProps) {
     ])
   }
 
+  const layoutCopy: CardLayoutCopy = {
+    move: copy('Move', 'جابجایی'),
+    collapse: copy('Collapse', 'جمع‌کردن'),
+    expand: copy('Expand', 'بازکردن'),
+    hide: copy('Hide', 'پنهان‌کردن'),
+    show: copy('Show', 'نمایش'),
+    customize: copy('Arrange', 'چیدمان'),
+    done: copy('Done', 'پایان'),
+    reset: copy('Reset layout', 'بازنشانی چیدمان'),
+    hidden: copy('Hidden cards', 'کارت‌های پنهان'),
+  }
+  const layoutCards: readonly LayoutCardDescriptor<WorkbenchCardID>[] = [
+    { id: 'terminal', label: copy('Bridge terminal', 'ترمینال پل') },
+    { id: 'displays', label: copy('Displays', 'نمایشگرها') },
+    { id: 'status-lighting', label: copy('Addressable strip', 'نوار LED آدرس‌پذیر') },
+    { id: 'audio', label: copy('Buzzer & melody', 'بیزر و ملودی') },
+    { id: 'radio', label: copy('Radio controls', 'کنترل‌های رادیویی') },
+    { id: 'macros', label: copy('Macro library', 'کتابخانه ماکرو') },
+    { id: 'automations', label: copy('Host automations', 'خودکارسازی میزبان') },
+    { id: 'i2c', label: copy('I²C & peripherals', 'I²C و تجهیزات جانبی') },
+    { id: 'host-control', label: copy('Host control', 'کنترل میزبان') },
+    { id: 'firmware', label: copy('Firmware & recovery', 'میان‌افزار و بازیابی') },
+  ]
+  const activeLayoutCardIDs = layout.order.filter((id) => {
+    if (id === 'displays') return boardReady && available.segments
+    if (id === 'status-lighting') return boardReady && available.statusLED
+    if (id === 'audio') return boardReady && available.buzzer
+    if (id === 'radio') return boardReady && available.rf
+    if (id === 'i2c') return boardReady
+    return true
+  })
+  const updateLayout = (change: (current: typeof layout) => typeof layout) => {
+    setLayout((current) => {
+      const next = change(current)
+      saveCardLayout('workbench', workbenchCardIDs, next)
+      return next
+    })
+  }
+  const resetLayout = () => {
+    resetCardLayout('workbench')
+    setLayout(loadCardLayout('workbench', workbenchCardIDs))
+  }
+  const moveCardAtPoint = (source: WorkbenchCardID, x: number, y: number) => {
+    const candidate = document.elementFromPoint(x, y)?.closest<HTMLElement>('[data-layout-card-id]')?.dataset.layoutCardId
+    const target = workbenchCardIDs.includes(candidate as WorkbenchCardID) ? candidate as WorkbenchCardID : undefined
+    if (!pointerReorderTargetChanged(workbenchDragTarget.current, source, target)) return
+    workbenchDragTarget.current = target
+    updateLayout((current) => moveCard(current, source, target))
+  }
+  const moveCardByKeyboard = (source: WorkbenchCardID, offset: -1 | 1) => updateLayout((current) => {
+    const visible = current.order.filter((id) => activeLayoutCardIDs.includes(id) && !current.hidden.includes(id))
+    const index = visible.indexOf(source)
+    const target = visible[index + offset]
+    return target ? moveCard(current, source, target) : current
+  })
+  const frame = (id: WorkbenchCardID, title: string, child: ReactNode) => <CardLayoutFrame
+    id={id}
+    title={title}
+    order={layout.order.indexOf(id)}
+    collapsed={layout.collapsed.includes(id)}
+    hidden={layout.hidden.includes(id)}
+    editing={layoutEditing}
+    dragging={draggedCard === id}
+    copy={layoutCopy}
+    onToggleCollapsed={() => updateLayout((current) => ({ ...current, collapsed: toggleCard(current.collapsed, id) }))}
+    onHide={() => updateLayout((current) => ({ ...current, hidden: toggleCard(current.hidden, id) }))}
+    onReorderStart={(source) => { workbenchDragTarget.current = null; setDraggedCard(source) }}
+    onReorderMove={moveCardAtPoint}
+    onReorderEnd={() => { workbenchDragTarget.current = null; setDraggedCard(null) }}
+    onKeyboardReorder={moveCardByKeyboard}
+  >{child}</CardLayoutFrame>
+
   return (
     <>
       <SectionTitle
         eyebrow={boardReady ? copy('Controller and host tools', 'ابزارهای برد و میزبان') : copy('Host tools', 'ابزارهای میزبان')}
         title={t('workbench')}
         detail={`${transport.streamState.toUpperCase()} · ${events.length} ${copy('events', 'رویداد')} · ${transport.tabPeers + 1} ${copy('tabs', 'تب')}`}
-        action={<StatusBadge tone={boardReady ? 'good' : 'warn'}>{boardReady ? copy('BOARD + HOST', 'برد + میزبان') : copy('HOST ONLY', 'فقط میزبان')}</StatusBadge>}
+        action={<div className="header-actions"><StatusBadge tone={boardReady ? 'good' : 'warn'}>{boardReady ? copy('BOARD + HOST', 'برد + میزبان') : copy('HOST ONLY', 'فقط میزبان')}</StatusBadge><CardLayoutEditor
+          copy={layoutCopy}
+          editing={layoutEditing}
+          cards={layoutCards.filter(({ id }) => activeLayoutCardIDs.includes(id))}
+          hidden={layout.hidden}
+          onToggleEditing={() => setLayoutEditing((editing) => !editing)}
+          onShow={(id) => updateLayout((current) => ({ ...current, hidden: current.hidden.filter((item) => item !== id) }))}
+          onReset={resetLayout}
+        /></div>}
       />
 
       <section className="workbench-grid">
-        <Card icon={SquareTerminal} iconTone="accent" className="workbench-terminal" title={copy('Bridge terminal', 'ترمینال پل')} eyebrow={copy('Full duplex', 'ارتباط دوطرفه')} action={<div className="terminal-transport"><StatusBadge tone={transport.streamState === 'open' ? 'good' : 'warn'}>WS {transport.streamState.toUpperCase()}</StatusBadge><StatusBadge tone={transport.tabBusSupported ? transport.tabPeers ? 'good' : 'info' : 'warn'}>TAB {transport.tabBusSupported ? transport.tabPeers + 1 : '—'}</StatusBadge><StatusBadge tone="info"><Activity size={13} /> {events.length}</StatusBadge></div>} menu={[
+        {frame('terminal', copy('Bridge terminal', 'ترمینال پل'), <Card icon={SquareTerminal} iconTone="accent" className="workbench-terminal" title={copy('Bridge terminal', 'ترمینال پل')} eyebrow={copy('Full duplex', 'ارتباط دوطرفه')} action={<div className="terminal-transport"><StatusBadge tone={transport.streamState === 'open' ? 'good' : 'warn'}>WS {transport.streamState.toUpperCase()}</StatusBadge><StatusBadge tone={transport.tabBusSupported ? transport.tabPeers ? 'good' : 'info' : 'warn'}>TAB {transport.tabBusSupported ? transport.tabPeers + 1 : '—'}</StatusBadge><StatusBadge tone="info"><Activity size={13} /> {events.length}</StatusBadge></div>} menu={[
           { label: copy('Clear terminal', 'پاک‌کردن ترمینال'), icon: ListRestart, onSelect: () => { console.clear(); setTranscript([]) } },
           { label: consoleHelpOpen ? copy('Hide console syntax', 'بستن راهنما') : copy('Show console syntax', 'نمایش راهنمای کنسول'), icon: SquareTerminal, onSelect: () => setConsoleHelpOpen((open) => !open) },
           { label: copy('Open event timeline', 'بازکردن خط زمانی'), icon: Activity, onSelect: () => { window.location.hash = '#/events' } },
@@ -367,9 +457,9 @@ export function WorkbenchView(props: SharedViewProps) {
           <div className="terminal-event-strip">
             {events.slice(0, 5).map((event) => <button key={event.id} onClick={() => inspectEvent(event)}><time>{formatClock(locale, event.time)}</time><strong>{event.kind}</strong><span>{event.text}</span></button>)}
           </div>
-        </Card>
+        </Card>)}
 
-        {boardReady && available.segments && <Card icon={Binary} iconTone="violet" title={copy('Displays', 'نمایشگرها')} eyebrow={available.lcd ? 'TM1637 + LCD' : 'TM1637'}>
+        {boardReady && available.segments && frame('displays', copy('Displays', 'نمایشگرها'), <Card icon={Binary} iconTone="violet" title={copy('Displays', 'نمایشگرها')} eyebrow={available.lcd ? 'TM1637 + LCD' : 'TM1637'}>
           {available.lcd && <div className="setting-group"><label>{copy('Target', 'مقصد')}</label><Segmented value={displayTarget} label={copy('Display target', 'مقصد نمایش')} options={displayTargetOptions} onChange={setDisplayTarget} /></div>}
           <TextField
             label={copy(`Display text · ${displayTextLimit} characters maximum`, `متن نمایشگر، حداکثر ${displayTextLimit} نویسه`)}
@@ -388,40 +478,40 @@ export function WorkbenchView(props: SharedViewProps) {
           {displayRepeat === 'interval' && <RangeField label={copy('Wait between presentations', 'مکث بین نمایش‌ها')} value={displayInterval} min={1000} max={255000} step={1000} unit="ms" onChange={setDisplayInterval} />}
           {displayTarget !== 'lcd' && <Toggle checked={displayScroll} onChange={setDisplayScroll} label={copy('Force marquee', 'اجبار متن روان')} detail={copy('Overflow scrolls automatically; enable this only to scroll text that already fits.', 'متن بلند خودکار حرکت می‌کند؛ این گزینه متن کوتاه را نیز روان می‌کند.')} />}
           <div className="inline-actions"><Button tone="primary" icon={Lightbulb} disabled={!displayTextIsValid} onClick={() => void run(displayPresentationCommand({ target: displayTarget, text: displayText, speedMS: displaySpeed, durationMS: displayDuration, repeat: displayRepeat, intervalMS: displayInterval, scroll: displayScroll }))}>{copy('Show text', 'نمایش متن')}</Button><Button icon={Eraser} onClick={() => void run(`display ${displayTarget} 0`)}>{copy('Clear', 'پاک‌کردن')}</Button></div>
-        </Card>}
+        </Card>)}
 
-        {boardReady && available.statusLED && <Card icon={Lightbulb} iconTone="amber" title={copy('Addressable strip', 'نوار LED آدرس‌پذیر')} eyebrow={copy('11 pixels · status light', '۱۱ پیکسل · نور وضعیت')}>
+        {boardReady && available.statusLED && frame('status-lighting', copy('Addressable strip', 'نوار LED آدرس‌پذیر'), <Card icon={Lightbulb} iconTone="amber" title={copy('Addressable strip', 'نوار LED آدرس‌پذیر')} eyebrow={copy('11 pixels · status light', '۱۱ پیکسل · نور وضعیت')}>
           <RangeField label={copy('Red', 'قرمز')} value={red} min={0} max={255} onChange={setRed} />
           <RangeField label={copy('Green', 'سبز')} value={green} min={0} max={255} onChange={setGreen} />
           <RangeField label={copy('Blue', 'آبی')} value={blue} min={0} max={255} onChange={setBlue} />
           <RangeField label={copy('Brightness', 'روشنایی')} value={stripBrightness} min={0} max={255} onChange={setStripBrightness} />
           <div className="inline-actions"><Button tone="primary" icon={Palette} onClick={() => void run(`strip fill ${red} ${green} ${blue} ${stripBrightness}`)}>{copy('Fill strip', 'اعمال رنگ')}</Button><Button icon={Eraser} onClick={() => void run('strip clear')}>{copy('Clear', 'پاک‌کردن')}</Button></div>
-        </Card>}
+        </Card>)}
 
-        {boardReady && available.buzzer && <Card icon={AudioLines} iconTone="green" title={copy('Buzzer & melody', 'بیزر و ملودی')} eyebrow={copy('Timed audio', 'صدای زمان‌بندی‌شده')}>
+        {boardReady && available.buzzer && frame('audio', copy('Buzzer & melody', 'بیزر و ملودی'), <Card icon={AudioLines} iconTone="green" title={copy('Buzzer & melody', 'بیزر و ملودی')} eyebrow={copy('Timed audio', 'صدای زمان‌بندی‌شده')}>
           <RangeField label={copy('Frequency', 'فرکانس')} value={frequency} min={20} max={20000} step={10} unit="Hz" onChange={setFrequency} />
           <RangeField label={copy('Duration', 'مدت')} value={toneDuration} min={20} max={5000} step={20} unit="ms" onChange={setToneDuration} />
           <Button icon={Volume2} onClick={() => void run(`buzzer ${frequency} ${toneDuration}`)}>{copy('Play tone', 'پخش صدا')}</Button>
           <TextField label={copy('Configured melody', 'ملودی ذخیره‌شده')} value={melody} spellCheck={false} onChange={(event) => setMelody(event.target.value)} />
           <div className="inline-actions"><Button icon={Play} disabled={!melody.trim()} onClick={() => void run(`melody play ${shellArgument(melody.trim())}`)}>{copy('Play', 'پخش')}</Button><Button icon={StopCircle} onClick={() => void run('melody stop')}>{copy('Stop', 'توقف')}</Button><Button icon={List} onClick={() => void run('melody list')}>{copy('List', 'فهرست')}</Button></div>
-        </Card>}
+        </Card>)}
 
-        {boardReady && available.rf && <RFGuidedWorkflow snapshot={snapshot} events={events} locale={locale} openDialog={props.openDialog} />}
+        {boardReady && available.rf && frame('radio', copy('Radio controls', 'کنترل‌های رادیویی'), <RFGuidedWorkflow snapshot={snapshot} events={events} locale={locale} openDialog={props.openDialog} />)}
 
-        <Card className="macro-card" icon={Workflow} iconTone="green" title={copy('Macro library', 'کتابخانه ماکرو')} eyebrow={copy('Exact MCU timing · live shared state', 'زمان‌بندی دقیق MCU · وضعیت زنده مشترک')}>
+        {frame('macros', copy('Macro library', 'کتابخانه ماکرو'), <Card className="macro-card" icon={Workflow} iconTone="green" title={copy('Macro library', 'کتابخانه ماکرو')} eyebrow={copy('Exact MCU timing · live shared state', 'زمان‌بندی دقیق MCU · وضعیت زنده مشترک')}>
           <MacroLibraryPanel online={snapshot.connected} locale={locale} events={props.macroEvents} initialSnapshot={snapshot.macros} commandSurface={run} />
-        </Card>
+        </Card>)}
 
-        <Card icon={Bot} iconTone="violet" title={copy('Host automations', 'خودکارسازی میزبان')} eyebrow={copy('Event-driven host rules', 'قواعد رویدادمحور میزبان')}>
+        {frame('automations', copy('Host automations', 'خودکارسازی میزبان'), <Card icon={Bot} iconTone="violet" title={copy('Host automations', 'خودکارسازی میزبان')} eyebrow={copy('Event-driven host rules', 'قواعد رویدادمحور میزبان')}>
           <TextField label={copy('Host automation name', 'نام خودکارسازی میزبان')} value={automation} onChange={(event) => setAutomation(event.target.value)} />
           <div className="inline-actions"><Button icon={Bot} disabled={!automation.trim()} onClick={() => void run(`automation run ${shellArgument(automation.trim())}`)}>{copy('Run automation', 'اجرای خودکارسازی')}</Button><Button icon={List} onClick={() => void run('automation list')}>{copy('List', 'فهرست')}</Button></div>
-        </Card>
+        </Card>)}
 
-        {boardReady && <Card icon={Cable} iconTone="accent" title={copy('I²C & peripherals', 'I²C و تجهیزات جانبی')} eyebrow={copy('Cooperative host lease', 'دسترسی هماهنگ میزبان')}>
+        {boardReady && frame('i2c', copy('I²C & peripherals', 'I²C و تجهیزات جانبی'), <Card icon={Cable} iconTone="accent" title={copy('I²C & peripherals', 'I²C و تجهیزات جانبی')} eyebrow={copy('Cooperative host lease', 'دسترسی هماهنگ میزبان')}>
           <div className="operation-buttons"><Button icon={ScanSearch} onClick={() => void run('i2c scan')}>{copy('Scan bus', 'پویش گذرگاه')}</Button><Button icon={Unplug} onClick={() => void run('i2c release')}>{copy('Release lease', 'آزادسازی دسترسی')}</Button><Button icon={Settings2} onClick={() => void run('settings')}>{copy('Board settings', 'تنظیمات برد')}</Button><Button icon={LayoutDashboard} onClick={() => void run('menu current')}>{copy('Menu state', 'وضعیت منو')}</Button></div>
-        </Card>}
+        </Card>)}
 
-        <Card icon={MonitorCog} iconTone="violet" title={copy('Host control', 'کنترل میزبان')} eyebrow={copy('Policy-gated', 'تحت کنترل سیاست‌ها')} menu={[
+        {frame('host-control', copy('Host control', 'کنترل میزبان'), <Card icon={MonitorCog} iconTone="violet" title={copy('Host control', 'کنترل میزبان')} eyebrow={copy('Policy-gated', 'تحت کنترل سیاست‌ها')} menu={[
           { label: copy('Read host status', 'خواندن وضعیت میزبان'), icon: MonitorCog, onSelect: () => { void run('os status') } },
           { label: copy('Inspect global hotkeys', 'بررسی میان‌برهای سراسری'), icon: Workflow, onSelect: () => { void run('hotkeys status') } },
           { label: copy('Inspect keyboard hook', 'بررسی اتصال صفحه‌کلید'), icon: Cpu, onSelect: () => { void run('keyboard status') } },
@@ -429,11 +519,11 @@ export function WorkbenchView(props: SharedViewProps) {
           <RangeField label={copy('Monitor brightness', 'روشنایی نمایشگر')} value={hostBrightness} min={0} max={100} unit="%" onChange={setHostBrightness} />
           <div className="inline-actions"><Button tone="primary" icon={SunMedium} onClick={() => void run(`os brightness set ${hostBrightness}`)}>{copy('Apply brightness', 'اعمال روشنایی')}</Button><Button icon={Gauge} onClick={() => void run('os status')}>{copy('Host status', 'وضعیت میزبان')}</Button><Button icon={ShieldCheck} onClick={() => void run('os policy')}>{copy('Policies', 'سیاست‌ها')}</Button></div>
           <div className="operation-buttons"><Button icon={Keyboard} onClick={() => void run('hotkeys status')}>{copy('Global hotkeys', 'میان‌برهای سراسری')}</Button><Button icon={MonitorCog} onClick={() => void run('keyboard status')}>{copy('Keyboard hook', 'اتصال صفحه‌کلید')}</Button><Button icon={Network} onClick={() => void run('bridge list')}>{copy('Remote bridges', 'پل‌های راه‌دور')}</Button></div>
-        </Card>
+        </Card>)}
 
-        <Card icon={Cpu} iconTone="amber" title={copy('Firmware & recovery', 'میان‌افزار و بازیابی')} eyebrow={copy('Read-only first', 'ابتدا فقط خواندنی')}>
+        {frame('firmware', copy('Firmware & recovery', 'میان‌افزار و بازیابی'), <Card icon={Cpu} iconTone="amber" title={copy('Firmware & recovery', 'میان‌افزار و بازیابی')} eyebrow={copy('Read-only first', 'ابتدا فقط خواندنی')}>
           <div className="operation-buttons">{boardReady && <><Button icon={Cpu} onClick={() => void run('hello')}>{copy('Identity', 'شناسه')}</Button><Button icon={ListRestart} onClick={() => void run('reset lines')}>{copy('Reconnect pulse', 'پالس اتصال مجدد')}</Button></>}<Button icon={MemoryStick} onClick={() => void run('toolchain profile')}>{copy('Toolchain profile', 'مشخصات زنجیره‌ابزار')}</Button><Button icon={SquareTerminal} onClick={() => setLine('boot info')}>{copy('Prepare boot info', 'آماده‌سازی اطلاعات راه‌اندازی')}</Button></div>
-        </Card>
+        </Card>)}
       </section>
       <AdvancedWorkbench {...props} run={run} busy={busy} />
     </>
