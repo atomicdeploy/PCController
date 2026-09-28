@@ -1290,6 +1290,11 @@ func macroStepDueUS(step appconfig.MacroStep) (uint32, error) {
 
 func compileMacroCommand(step appconfig.MacroStep) (byte, []byte, error) {
 	switch strings.ToLower(strings.TrimSpace(step.Kind)) {
+	case "relay-mask":
+		if step.Value > 255 || step.Target != 0 {
+			return 0, nil, errors.New("relay-mask requires target zero and value 0..255")
+		}
+		return native.OpRelaySet, []byte{byte(step.Value)}, nil
 	case "relay":
 		payload, err := native.RelayPayload(step.Target, step.Value != 0)
 		if step.Value > 1 {
@@ -1501,7 +1506,8 @@ func macroNeedsMotionPermission(macro appconfig.Macro) bool {
 		if err != nil {
 			continue
 		} // compilation reports validation failures first
-		if (opcode == native.OpRelaySet && len(payload) == 2 && payload[0] < 4 && payload[1] != 0) ||
+		if (opcode == native.OpRelaySet && len(payload) == 1 && payload[0]&0x0f != 0) ||
+			(opcode == native.OpRelaySet && len(payload) == 2 && payload[0] < 4 && payload[1] != 0) ||
 			(opcode == native.OpRelaySide && len(payload) == 2 && payload[1] != 0) ||
 			opcode == native.OpRelayTest || opcode == native.OpRemoteKeyGesture {
 			return true

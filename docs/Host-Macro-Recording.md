@@ -5,13 +5,17 @@
 | Named library, categories, recorded command deltas | 🖥️ Host | CLI, TUI, Web, IPC, API, WebSocket/Socket.IO command path |
 | Host scheduler and acknowledged output commands | 🖥️ Host | Default for new recordings; 100 ms alpha tolerance |
 | Firmware-timed queue | 🔌 Board | Explicit MCU-mode macros; firmware capability required |
-| Physical/RF-origin capture, exact MCU timing and offline recovery | 🔬 Acceptance pending | Issues #44 and #74 in the [canonical requirements backlog](Requirements-Backlog.md) |
+| Applied relay edges from PC/RF/front panel | 🔌 Board timestamps → 🖥️ Host library | Incoming relay events carry MCU microseconds; USB arrival does not alter recorded relay intervals |
+| Circular relay recording | 🔌 Board RAM | Latest 25 state snapshots; import to host before power loss |
 
 New host recordings capture accepted **relay, motion, PWM/MOSFET, beep,
 display/message, RF transmit and addressable-strip** commands. Automatic status
 RGB animation and stream/settings housekeeping are intentionally excluded.
-Rejected commands are not recorded. This mode records host command evidence;
-it does not claim to capture physical-key or incoming RF actions.
+Rejected commands are not recorded. Relay commands are not duplicated from
+acknowledgements: actual output-mask changes capture PC, physical-key and RF
+control through one timestamped path. Other peripheral commands use acknowledged
+command evidence. Recording an RF-controlled relay does not retransmit its RF
+input during playback.
 
 Both recorders exclude commands explicitly marked as automatic background
 presentation, including the status-policy RGB animation, safety-status frames,
@@ -21,8 +25,8 @@ opcode merely because the status engine also uses it. MCU offsets come from
 timestamped command acknowledgements, with a default tolerance of 2500 µs.
 This provenance filter does not disable the status engine or its safety cues.
 
-Times are monotonic host offsets from the first acknowledged action. They are
-not MCU execution timestamps. Playback preserves an explicit leading delay,
+Relay deltas use the MCU clock; other host-mode actions use monotonic host
+offsets. Host playback is not a hard-real-time guarantee. Playback preserves an explicit leading delay,
 then anchors its relative timeline once at the first successful acknowledgement.
 Later steps retain their recorded offsets from that boundary; a slow first ACK
 must not compress the recorded gaps. The clock is not reset after later ACKs.
@@ -54,6 +58,11 @@ one serial owner. Do not operate relays, motors or PWM loads until they are safe
 | `controller.exe exec macro rename cinema-demo cinema-ready` | Rename without changing ID or steps |
 | `controller.exe exec macro category cinema-ready cinema` | Set the category |
 | `controller.exe exec macro play cinema-ready` | Play the saved definition using its recorded mode |
+| `controller.exe exec macro play cinema-ready host` | Replay the same definition on the host scheduler |
+| `controller.exe exec macro play cinema-ready mcu` | Replay the same definition through the MCU queue |
+| `controller.exe exec macro record start-board relay-take examples green` | Start firmware circular recording; name reserved on host |
+| `controller.exe exec macro record save` | Stop board recording, download timestamps/masks and persist named profile |
+| `controller.exe exec macro buffer clear` | Release retained board RAM for strip streaming; does not delete saved profiles |
 | `controller.exe exec macro monitor` | Combined playback and recorder snapshot |
 | `controller.exe exec macro cancel` | Cancel and switch relays/PWM off; report cleanup failures |
 | `controller.exe exec macro cancel keep` | Explicit opt-in to preserve current outputs |
@@ -82,11 +91,20 @@ start. If USB disconnects or another board/session replaces it, playback fails
 instead of redirecting output commands to the replacement.
 
 Use `macro record start-mcu NAME` only for the explicit firmware-clock workflow.
-Existing definitions without `mode` retain their MCU behavior. Neither this
-guide nor a successful host playback closes the separate precise timing,
-retained circular-buffer, loaded-motion and physical-input acceptance gates.
+Definitions require an explicit mode. Board RAM and the 100-pixel strip share
+storage: stop/save recording, then explicitly clear retained RAM before strip
+streaming. Starting a new recording replaces the retained board take; saved host
+profiles remain. The circular recorder retains the latest 25 snapshots and
+reports overwritten entries rather than pretending a long take is complete.
+The first imported snapshot restores all relay states, releasing outputs before
+energizing replacements. Timings wrap safely within a 2³¹ µs recording window.
 
-## Verified bounded MCU playback
+The host must remain available to save a named profile; raw RAM survives a host
+disconnect but not a board reset. Physical/RF and loaded-motion acceptance still
+require live verification; passing native tests is not hardware proof. Live
+delivery evidence is tracked in issues #44/#390 and the linked implementation PR.
+
+## Historical bounded MCU playback (before circular-capture changes)
 
 The existing firmware-timed queue was exercised on the connected board with
 three display-only commands at 0, 500000 and 1000000 µs. All 42 encoded bytes

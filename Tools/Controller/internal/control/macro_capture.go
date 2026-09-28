@@ -46,24 +46,13 @@ func (runner *MacroRunner) UpdateProfile(reference, name, category, color string
 	return macro, err
 }
 
-// relayMaskSteps always releases outputs before energizing replacements. The
-// first snapshot restores the complete baseline, including outputs already off.
+// A complete applied mask is one scheduled command, not eight serial requests.
+// The firmware owns output interlocks and off-before-on transitions.
 func relayMaskSteps(at uint32, previous, mask byte, initial bool) []appconfig.MacroStep {
-	var steps []appconfig.MacroStep
-	for _, on := range []bool{false, true} {
-		for channel := byte(0); channel < 8; channel++ {
-			bit := byte(1 << channel)
-			if (mask&bit != 0) != on || (!initial && (mask^previous)&bit == 0) {
-				continue
-			}
-			value := uint16(0)
-			if on {
-				value = 1
-			}
-			steps = append(steps, appconfig.MacroStep{AtUS: at, Kind: "relay", Target: channel, Value: value})
-		}
+	if !initial && mask == previous {
+		return nil
 	}
-	return steps
+	return []appconfig.MacroStep{{AtUS: at, Kind: "relay-mask", Value: uint16(mask)}}
 }
 
 // Called with recordMu held. MCU output timestamps preserve relay intervals

@@ -316,10 +316,10 @@ func TestBasicHostRecorderIgnoresHousekeepingAndUsesObservedDeltas(t *testing.T)
 	if macro.Mode != macroModeHost || macro.TimingToleranceUS != defaultHostMacroToleranceUS {
 		t.Fatalf("unexpected host mode metadata: %#v", macro)
 	}
-	if len(macro.Steps) != 10 {
+	if len(macro.Steps) != 3 {
 		t.Fatalf("housekeeping was not filtered: %#v", macro.Steps)
 	}
-	want := []uint32{0, 0, 0, 0, 0, 0, 0, 0, 75000, 150000}
+	want := []uint32{0, 75000, 150000}
 	for index, step := range macro.Steps {
 		if step.AtUS != want[index] {
 			t.Fatalf("step %d offset = %d, want %d", index, step.AtUS, want[index])

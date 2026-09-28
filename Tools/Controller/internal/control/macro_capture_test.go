@@ -22,7 +22,7 @@ func TestHostCaptureUsesAppliedRelayClockNotUSBArrival(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(macro.Steps) != 9 || macro.Steps[8].AtUS != 1000 || macro.Steps[8].Target != 4 || macro.Steps[8].Value != 0 {
+	if len(macro.Steps) != 2 || macro.Steps[1].AtUS != 1000 || macro.Steps[1].Kind != "relay-mask" || macro.Steps[1].Value != 0 {
 		t.Fatalf("edge timing/duplicate: %#v", macro)
 	}
 }
@@ -37,7 +37,7 @@ func TestDecodeRelayCaptureBaselineOffBeforeOnAndExactDelta(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(steps) != 11 || steps[8].Target != 4 || steps[8].Value != 0 || steps[9].Target != 5 || steps[9].Value != 1 || steps[9].AtUS != 12345 || steps[10].AtUS != 23456 {
+	if len(steps) != 3 || steps[0].Value != 16 || steps[1].Value != 32 || steps[1].AtUS != 12345 || steps[2].Value != 0 || steps[2].AtUS != 23456 {
 		t.Fatalf("steps=%#v", steps)
 	}
 	binary.LittleEndian.PutUint32(raw[10:14], 1)
