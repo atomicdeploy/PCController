@@ -133,7 +133,7 @@ binary, checksum, or test run cannot satisfy a newer tree.
   system and semantic violet/coral/amber status palette.
 - ✅ A Web App Manifest and mobile metadata enable standalone installation in
   supporting browsers, with route shortcuts for the four primary work areas.
-- ✅ The installability worker caches only the versioned UI shell and immutable
+- ✅ The installability worker caches only the installable UI shell and immutable
   bundles. It never caches board/API, WebSocket, health, or generated
   configuration traffic, so an offline shell cannot claim the host is live.
 - ✅ Light/dark themes, Persian/English localization, RTL/LTR layout, and the

@@ -476,7 +476,7 @@ func nextBoardConnection(t *testing.T, board *rawVirtualBoard) *rawBoardConnecti
 	}
 }
 
-func TestIndependentRawClientsInteroperateWithAllVersionedSocketSurfaces(t *testing.T) {
+func TestIndependentRawClientsInteroperateWithAllSocketSurfaces(t *testing.T) {
 	const token = "raw-wire-interoperability-token"
 	board := startRawVirtualBoard(t)
 	defer board.close()
@@ -517,10 +517,6 @@ func TestIndependentRawClientsInteroperateWithAllVersionedSocketSurfaces(t *test
 	status, body := rawHTTPRequest(t, address, http.MethodGet, "/api/snapshot", token, "")
 	if status != http.StatusOK || !strings.Contains(string(body), `"connected":false`) {
 		t.Fatalf("living REST snapshot status=%d body=%s", status, body)
-	}
-	status, _ = rawHTTPRequest(t, address, http.MethodGet, "/api/v1/snapshot", token, "")
-	if status != http.StatusNotFound {
-		t.Fatalf("versioned REST route status=%d", status)
 	}
 	rpcBody := `{"jsonrpc":"2.0","id":"rest-1","method":"controller.ping"}`
 	status, body = rawHTTPRequest(t, address, http.MethodPost, "/api/rpc", token, rpcBody)

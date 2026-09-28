@@ -223,7 +223,7 @@ describe('Web IPC transport', () => {
     vi.stubGlobal('window', { setTimeout, clearTimeout })
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
       ticket: 'a'.repeat(64),
-      protocol: 'unexpected.v1',
+      protocol: 'unexpected-protocol',
       expires_at: '2026-08-02T12:00:00Z',
       expires_in_ms: 15_000,
       principal: 'remote-operator',
