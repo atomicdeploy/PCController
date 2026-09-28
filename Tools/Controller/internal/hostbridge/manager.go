@@ -1334,11 +1334,22 @@ func (manager *Manager) runWebSocketPeer(
 		if ctx.Err() != nil {
 			return
 		}
-		message := "WebSocket " + config.Name + ": " + err.Error()
+		detail := err.Error()
 		peer.mu.Lock()
-		peer.lastError = err.Error()
+		changed := peer.lastError != detail
+		peer.lastError = detail
 		peer.mu.Unlock()
-		manager.recordError(message)
+		if changed {
+			manager.client.EmitHostActionEvent(
+				"bridge.peer.offline",
+				fmt.Sprintf("Bridge peer %s is offline; retrying in the background", config.Name),
+				"bridge", "peer-connect",
+				map[string]string{
+					"peer": config.Name, "protocol": firstProtocol(config.Protocol),
+					"url": config.URL, "error": detail,
+				},
+			)
+		}
 		select {
 		case <-ctx.Done():
 			return
@@ -1396,6 +1407,15 @@ func (manager *Manager) webSocketPeerSession(
 	}); err != nil {
 		return err
 	}
+	manager.client.EmitHostActionEvent(
+		"bridge.peer.connected",
+		fmt.Sprintf("Bridge peer %s connected", config.Name),
+		"bridge", "peer-connect",
+		map[string]string{
+			"peer": config.Name, "protocol": firstProtocol(config.Protocol),
+			"url": config.URL,
+		},
+	)
 	sessionContext, cancel := context.WithCancel(ctx)
 	defer cancel()
 	writeErrors := make(chan error, 1)
@@ -1570,6 +1590,15 @@ func (manager *Manager) socketIOPeerSession(
 	if err := writeEvent("subscribe", map[string]any{"topics": topics}); err != nil {
 		return err
 	}
+	manager.client.EmitHostActionEvent(
+		"bridge.peer.connected",
+		fmt.Sprintf("Bridge peer %s connected", config.Name),
+		"bridge", "peer-connect",
+		map[string]string{
+			"peer": config.Name, "protocol": firstProtocol(config.Protocol),
+			"url": config.URL,
+		},
+	)
 	sessionContext, cancel := context.WithCancel(ctx)
 	defer cancel()
 	writeErrors := make(chan error, 1)

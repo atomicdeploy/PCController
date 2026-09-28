@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -31,6 +32,65 @@ func TestWaitForIntegrationShutdownIsBounded(t *testing.T) {
 	completed.Done()
 	if !waitForIntegrationShutdown(&completed, time.Second) {
 		t.Fatal("completed integration workers timed out")
+	}
+}
+
+func TestOfflineBridgePeerIsStateNotGlobalIntegrationFailure(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	address := listener.Addr().String()
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store := openHostBridgeTestStore(t, func(config *appconfig.Config) error {
+		config.Integrations.WebSocketClients = []appconfig.WebSocketClient{{
+			Name: "cafe-pc", Enabled: true, URL: "ws://" + address + "/ipc",
+			Protocol: "jsonrpc",
+		}}
+		return nil
+	})
+	runtime := control.New(control.Options{})
+	defer runtime.Close()
+	client := controller.AttachSharedRuntime(runtime, shell.New(8))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	before := client.LatestEventID()
+	manager, err := Start(ctx, client, store, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close()
+
+	eventContext, stopEvent := context.WithTimeout(ctx, 3*time.Second)
+	defer stopEvent()
+	event, err := client.NextEvent(eventContext, before, "bridge.peer.offline")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if event.Source != "bridge" || event.Action != "peer-connect" ||
+		event.Metadata["peer"] != "cafe-pc" || event.Metadata["protocol"] != "jsonrpc" ||
+		!strings.Contains(event.Metadata["error"], "connect") {
+		t.Fatalf("offline peer event=%#v", event)
+	}
+	peers := manager.BridgePeers()
+	if len(peers) != 1 || peers[0].Connected || peers[0].LastError == "" {
+		t.Fatalf("offline peer state=%#v", peers)
+	}
+	if status := manager.Status(); status.LastError != "" {
+		t.Fatalf("optional offline peer polluted global integration status: %#v", status)
+	}
+
+	quietContext, stopQuiet := context.WithTimeout(ctx, 1500*time.Millisecond)
+	defer stopQuiet()
+	if duplicate, duplicateErr := client.NextEvent(quietContext, event.ID, "bridge.peer.offline"); duplicateErr == nil {
+		t.Fatalf("unchanged retry emitted duplicate offline event: %#v", duplicate)
+	}
+	globalContext, stopGlobal := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer stopGlobal()
+	if global, globalErr := client.NextEvent(globalContext, before, "integration.error"); globalErr == nil {
+		t.Fatalf("optional peer outage emitted global integration failure: %#v", global)
 	}
 }
 
