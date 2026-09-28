@@ -877,11 +877,13 @@ func navigationSyncAction(epoch string, revision string, page string) hostui.App
 	return hostui.AppAction{
 		Kind: "app.page", Value: page, Source: "navigation-sync", Target: "tui:one",
 		Metadata: map[string]string{
-			hostui.NavigationSyncKey:     hostui.NavigationSyncGroupUpdate,
-			hostui.NavigationGroupKey:    hostui.DefaultNavigationGroup,
-			hostui.NavigationEpochKey:    epoch,
-			hostui.NavigationRevisionKey: revision,
-			hostui.NavigationSourceKey:   "tui:two",
+			hostui.NavigationSyncKey:           hostui.NavigationSyncGroupUpdate,
+			hostui.NavigationGroupKey:          hostui.DefaultNavigationGroup,
+			hostui.NavigationEpochKey:          epoch,
+			hostui.NavigationRevisionKey:       revision,
+			hostui.NavigationSourceKey:         "tui:two",
+			hostui.NavigationTargetEpochKey:    "11111111111111111111111111111111",
+			hostui.NavigationTargetRevisionKey: "1",
 		},
 	}
 }
@@ -891,6 +893,9 @@ func TestTUINavigationSyncRejectsReplayAndResetsOnlyOnRemoteSession(t *testing.T
 	model := NewWithOptions(control.New(control.Options{}), shell.New(10), Options{
 		Preview: &snapshot, DisableWelcome: true, InstanceID: "tui:one",
 		NavigationSync: true, NavigationGroup: hostui.DefaultNavigationGroup,
+		NavigationIdentity: func() (string, uint64) {
+			return "11111111111111111111111111111111", 1
+		},
 	})
 	firstEpoch := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	secondEpoch := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
@@ -927,6 +932,9 @@ func TestTUINavigationCommitsLocalIntentWithoutEchoingCoordinatorPage(t *testing
 		Preview: &snapshot, DisableWelcome: true, InstanceID: "tui:one",
 		NavigationSync: true, NavigationGroup: hostui.DefaultNavigationGroup,
 		CommitNavigation: func(page string) { commits = append(commits, page) },
+		NavigationIdentity: func() (string, uint64) {
+			return "11111111111111111111111111111111", 1
+		},
 	})
 	model.switchPage(PageEvents)
 	if len(commits) != 1 || commits[0] != "events" {
@@ -1069,6 +1077,9 @@ func TestRemoteRuntimeNavigationMetadataUsesSameReplayCursor(t *testing.T) {
 	model.instanceID = "tui:one"
 	model.navigationSync = true
 	model.navigationGroup = hostui.DefaultNavigationGroup
+	model.navigationIdentity = func() (string, uint64) {
+		return "11111111111111111111111111111111", 1
+	}
 	action := navigationSyncAction("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "4", "settings")
 	event := control.Event{
 		Kind: action.Kind, Source: action.Source,

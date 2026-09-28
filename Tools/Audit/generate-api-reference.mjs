@@ -386,21 +386,13 @@ function actionSchemas(refPrefix) {
 				operation: ref("ActionOperation"),
 			},
 		},
-		AppActionSubmitEnvelope: {
-			type: "object", required: ["accepted"], additionalProperties: false,
-			properties: {
-				accepted: { type: "boolean" },
-				operation: ref("ActionOperation"),
-			},
-			description: "Backward-compatible acceptance result. Outcome-capable actions also include the correlated operation.",
-		},
 	};
 }
 
 const openAPIActionSchemas = actionSchemas("#/components/schemas/");
 const rpcActionSchemas = actionSchemas("#/$defs/");
 const rpcActionMethodContracts = {
-	"controller.app.action": { params: "AppActionRequest", result: "AppActionSubmitEnvelope" },
+	"controller.app.action": { params: "AppActionRequest", result: "ActionOperationEnvelope" },
 	"controller.app.action.ack": { params: "ActionAck", result: "ActionOperationEnvelope" },
 	"controller.app.action.outcome": { params: "ActionOutcomeRequest", result: "ActionOperationEnvelope" },
 };
@@ -440,7 +432,7 @@ function operationFor(route, method) {
 		delete operation.responses["200"];
 		operation.responses["202"] = {
 			description: "Action frozen to its exact live target set",
-			content: { "application/json": { schema: { $ref: "#/components/schemas/AppActionSubmitEnvelope" } } },
+			content: { "application/json": { schema: { $ref: "#/components/schemas/ActionOperationEnvelope" } } },
 		};
 		operation.responses["409"] = {
 			description: "The selector resolved only to rejected targets",
@@ -593,7 +585,7 @@ const openapi = {
 		ServerProof: {
 			type: "object", required: ["format", "nonce", "audience", "instance_id", "proof"], additionalProperties: false,
 			properties: {
-				format: { type: "string", const: "pccontroller-server-proof/v1" },
+				format: { type: "string", const: "pccontroller-server-proof" },
 				nonce: { type: "string", description: "The caller-supplied unpadded base64url nonce." },
 				audience: { type: "string", description: "The IP:port of the exact local listener that accepted the request." },
 				instance_id: { type: "string", minLength: 1 },

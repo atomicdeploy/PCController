@@ -84,6 +84,7 @@ The fork retains the upstream BSD-3-Clause license and adds Windows
 for pending overlapped reads and writes.
 
 - MIT: `github.com/MakeNowJust/heredoc`,
+  `github.com/Microsoft/go-winio`,
   `github.com/aymanbagabas/go-osc52/v2`,
   `github.com/aymanbagabas/go-udiff`,
   `github.com/charmbracelet/bubbles`,

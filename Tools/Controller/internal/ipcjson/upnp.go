@@ -179,7 +179,7 @@ func publicInfo(service *Service, request *http.Request) discovery.PublicInfo {
 		identity = discovery.PublicIdentity{Name: snapshot.Hello.Name, Kind: snapshot.Hello.BoardKind, Capabilities: snapshot.Hello.Capabilities, BuildHash: fmt.Sprintf("%08X", snapshot.Hello.BuildHash), BuildTimestamp: snapshot.Hello.BuildStamp}
 	}
 	info := discovery.PublicInfo{
-		Schema: discovery.PublicInfoSchema, Product: "PCController", Protocol: "pccontroller",
+		Product: "PCController", Protocol: "pccontroller",
 		InstanceID: strings.TrimSpace(service.HostInstanceID), InstanceName: name, Hostname: hostname,
 		Health: discovery.PublicHealth{OK: true, Service: productidentity.ServiceName(config.UI.AppTitle, "IPC"), Connectable: config.IPC.RemoteConnectable(), Auth: "disabled-alpha"},
 		Host:   discovery.PublicHost{Version: strings.TrimSpace(service.HostVersion), SourceHash: strings.TrimSpace(service.HostSourceHash), BuildTime: strings.TrimSpace(service.HostBuildTime)},

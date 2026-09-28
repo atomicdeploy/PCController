@@ -1479,7 +1479,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AppActionSubmitEnvelope"
+                  "$ref": "#/components/schemas/ActionOperationEnvelope"
                 }
               }
             }
@@ -3826,7 +3826,7 @@
         "properties": {
           "format": {
             "type": "string",
-            "const": "pccontroller-server-proof/v1"
+            "const": "pccontroller-server-proof"
           },
           "nonce": {
             "type": "string",
@@ -4452,22 +4452,6 @@
             "$ref": "#/components/schemas/ActionOperation"
           }
         }
-      },
-      "AppActionSubmitEnvelope": {
-        "type": "object",
-        "required": [
-          "accepted"
-        ],
-        "additionalProperties": false,
-        "properties": {
-          "accepted": {
-            "type": "boolean"
-          },
-          "operation": {
-            "$ref": "#/components/schemas/ActionOperation"
-          }
-        },
-        "description": "Backward-compatible acceptance result. Outcome-capable actions also include the correlated operation."
       },
       "JSONRPCError": {
         "type": "object",

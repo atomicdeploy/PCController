@@ -37,34 +37,18 @@ import (
 	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/ports"
 	"pccontroller.local/controller/internal/productidentity"
+	publicrpc "pccontroller.local/controller/rpc"
 )
 
 const (
-	Version       = "2.0"
+	Version       = publicrpc.Version
 	DefaultListen = "127.0.0.1:8787"
-	maxMessage    = 1024 * 1024
+	maxMessage    = publicrpc.MaxMessageBytes
 )
 
-type Request struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      json.RawMessage `json:"id,omitempty"`
-	Method  string          `json:"method"`
-	Params  json.RawMessage `json:"params,omitempty"`
-	Auth    string          `json:"auth,omitempty"`
-}
-
-type Response struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      json.RawMessage `json:"id,omitempty"`
-	Result  any             `json:"result,omitempty"`
-	Error   *RPCError       `json:"error,omitempty"`
-}
-
-type RPCError struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-	Data    any    `json:"data,omitempty"`
-}
+type Request = publicrpc.Request
+type Response = publicrpc.Response
+type RPCError = publicrpc.RPCError
 
 type opcodeExchangeParams struct {
 	Opcode       *int   `json:"opcode"`
@@ -213,10 +197,6 @@ func (params rfMapParams) mapping() (controller.RFMapping, error) {
 	}
 }
 
-func (rpcError *RPCError) Error() string {
-	return rpcError.Message
-}
-
 // Access records transport provenance for authorization and message tagging.
 // Remote means a non-loopback network peer, not merely a WebSocket client.
 type Access struct {
@@ -338,13 +318,6 @@ func appActionEnvelope(operation hostui.ActionOperation) appActionOperationEnvel
 
 func appActionTracksOutcome(registry *hostui.InstanceRegistry, action hostui.AppAction) bool {
 	return hostui.TracksRegisteredAppActionOutcome(registry, action.Kind, action.Target)
-}
-
-func validateLegacyAppActionTracking(action hostui.AppAction, timeoutMS int) error {
-	if strings.TrimSpace(action.OperationID) != "" || timeoutMS != 0 {
-		return errors.New("operation_id and timeout_ms require an outcome-capable app action")
-	}
-	return nil
 }
 
 // browserUISettings is the narrow persistent host-owned subset exposed to the
@@ -920,18 +893,7 @@ func (service *Service) dispatch(
 			if command == "" {
 				err = errors.New("command is required")
 			} else if strings.HasPrefix(strings.ToLower(command), "app ") {
-				var action hostui.AppAction
-				action, err = hostui.ParseAction(command, "ipc-command")
-				if err == nil {
-					if service.AppAction == nil {
-						err = errors.New("primary app action routing is unavailable")
-					} else {
-						err = service.AppAction(action)
-						if err == nil {
-							result = map[string]string{"output": "app action accepted"}
-						}
-					}
-				}
+				err = errors.New("app actions require controller.app.action")
 			} else if strings.EqualFold(command, "quit") || strings.EqualFold(command, "exit") {
 				if service.Shutdown == nil {
 					err = errors.New("primary-process shutdown is unavailable")
@@ -1228,7 +1190,11 @@ func (service *Service) dispatch(
 				err = errors.New("navigation synchronization metadata is coordinator-owned; use controller.app.navigate")
 			} else if hostui.HasCoordinatorActionDeliveryMetadata(action.Metadata) {
 				err = errors.New("app action delivery metadata is coordinator-owned")
-			} else if service.AppActionSubmit != nil && appActionTracksOutcome(service.AppInstances, action) {
+			} else if service.AppActionSubmit == nil {
+				err = errors.New("tracked app action routing is unavailable")
+			} else if !appActionTracksOutcome(service.AppInstances, action) {
+				err = errors.New("app action is not outcome-capable or advertised by a live target")
+			} else {
 				action.Source = firstNonempty(action.Source, "ipc")
 				var timeout time.Duration
 				timeout, err = appActionTimeout(params.TimeoutMS)
@@ -1238,14 +1204,6 @@ func (service *Service) dispatch(
 					if err == nil {
 						result = appActionEnvelope(operation)
 					}
-				}
-			} else if service.AppAction == nil {
-				err = errors.New("primary app action routing is unavailable")
-			} else {
-				action.Source = firstNonempty(action.Source, "ipc")
-				if err = validateLegacyAppActionTracking(action, params.TimeoutMS); err == nil {
-					err = service.AppAction(action)
-					result = map[string]bool{"accepted": err == nil}
 				}
 			}
 		}
@@ -2429,6 +2387,62 @@ func Serve(ctx context.Context, listener net.Listener, service *Service) error {
 	}
 }
 
+// ServeRaw exposes the same JSON-RPC dispatcher over a stream-only listener.
+// Native named-pipe and Unix-domain-socket transports use this entry point so
+// they cannot accidentally inherit the TCP HTTP/WebSocket protocol sniffer.
+func ServeRaw(
+	ctx context.Context,
+	listener net.Listener,
+	service *Service,
+	accessFor func(net.Conn) Access,
+) error {
+	if listener == nil {
+		return errors.New("raw RPC listener is required")
+	}
+	if service == nil {
+		return errors.New("raw RPC service is required")
+	}
+	serverContext, cancel := context.WithCancel(ctx)
+	var wait sync.WaitGroup
+	defer func() {
+		cancel()
+		_ = listener.Close()
+		wait.Wait()
+	}()
+	go func() {
+		<-serverContext.Done()
+		_ = listener.Close()
+	}()
+	for {
+		connection, err := listener.Accept()
+		if err != nil {
+			if ctx.Err() != nil || errors.Is(err, net.ErrClosed) {
+				return nil
+			}
+			return err
+		}
+		wait.Add(1)
+		go func(connection net.Conn) {
+			defer wait.Done()
+			defer connection.Close()
+			finished := make(chan struct{})
+			defer close(finished)
+			go func() {
+				select {
+				case <-serverContext.Done():
+					_ = connection.Close()
+				case <-finished:
+				}
+			}()
+			access := Access{Transport: connection.LocalAddr().Network()}
+			if accessFor != nil {
+				access = accessFor(connection)
+			}
+			_ = serveStreams(serverContext, connection, connection, service, access)
+		}(connection)
+	}
+}
+
 func accessFromAddress(address net.Addr, transport string) Access {
 	result := Access{Remote: true, Transport: transport}
 	if address == nil {
@@ -3228,8 +3242,8 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		if service.AppActionSubmit == nil && service.AppAction == nil {
-			writeHTTPJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "primary app action routing is unavailable"})
+		if service.AppActionSubmit == nil {
+			writeHTTPJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "tracked app action routing is unavailable"})
 			return
 		}
 		var params appActionRequest
@@ -3258,34 +3272,27 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 			})
 			return
 		}
-		if service.AppActionSubmit != nil && appActionTracksOutcome(service.AppInstances, action) {
-			timeout, timeoutErr := appActionTimeout(params.TimeoutMS)
-			if timeoutErr != nil {
-				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": timeoutErr.Error()})
-				return
-			}
-			operation, submitErr := service.AppActionSubmit(action, timeout)
-			if submitErr != nil {
-				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": submitErr.Error()})
-				return
-			}
-			envelope := appActionEnvelope(operation)
-			status := http.StatusAccepted
-			if !envelope.Accepted {
-				status = http.StatusConflict
-			}
-			writeHTTPJSON(writer, status, envelope)
+		if !appActionTracksOutcome(service.AppInstances, action) {
+			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": "app action is not outcome-capable or advertised by a live target"})
 			return
 		}
-		if err := validateLegacyAppActionTracking(action, params.TimeoutMS); err != nil {
-			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		timeout, timeoutErr := appActionTimeout(params.TimeoutMS)
+		if timeoutErr != nil {
+			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": timeoutErr.Error()})
 			return
 		}
-		if err := service.AppAction(action); err != nil {
-			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		operation, submitErr := service.AppActionSubmit(action, timeout)
+		if submitErr != nil {
+			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": submitErr.Error()})
 			return
 		}
-		writeHTTPJSON(writer, http.StatusAccepted, map[string]bool{"accepted": true})
+		envelope := appActionEnvelope(operation)
+		status := http.StatusAccepted
+		if !envelope.Accepted {
+			status = http.StatusConflict
+		}
+		writeHTTPJSON(writer, status, envelope)
+		return
 	})
 	mux.HandleFunc("/api/app/action/ack", func(writer http.ResponseWriter, request *http.Request) {
 		if !authorizeHTTPRequest(writer, request, service) {
@@ -4450,17 +4457,6 @@ func streamWebSocketEventStream(
 	}
 }
 
-// streamableEventKind remains the compatibility classifier for callers that
-// have not yet received an explicit stream field.
-func streamableEventKind(kind string) bool {
-	switch strings.ToLower(strings.TrimSpace(kind)) {
-	case "", "telemetry", "rx", "tx", "front_panel.segment", "status_led.changed", "buzzer.note", "illumination.changed", "settings.changed":
-		return false
-	default:
-		return true
-	}
-}
-
 func streamWebSocketStatus(
 	ctx context.Context,
 	client *controller.Client,
@@ -4552,30 +4548,12 @@ func Call(
 	if address == "" {
 		address = DefaultListen
 	}
-	connection, err := lanresolver.Default().DialContext(ctx, "tcp", address)
-	if err != nil {
-		return Response{}, err
-	}
-	defer connection.Close()
-	if deadline, ok := ctx.Deadline(); ok {
-		_ = connection.SetDeadline(deadline)
-	}
-	request.JSONRPC = Version
-	if len(request.ID) == 0 {
-		request.ID = json.RawMessage("1")
-	}
-	if err := json.NewEncoder(connection).Encode(request); err != nil {
-		return Response{}, err
-	}
-	var response Response
-	decoder := json.NewDecoder(io.LimitReader(connection, maxMessage))
-	if err := decoder.Decode(&response); err != nil {
-		return Response{}, err
-	}
-	if response.Error != nil {
-		return response, response.Error
-	}
-	return response, nil
+	return publicrpc.Call(ctx, publicrpc.Endpoint{
+		Transport: publicrpc.TransportTCP,
+		Address:   address,
+	}, request, publicrpc.ClientOptions{
+		DialContext: lanresolver.Default().DialContext,
+	})
 }
 
 func Listen(address string) (net.Listener, error) {
@@ -4589,7 +4567,10 @@ func ListenWithRemote(address string, allowRemote bool) (net.Listener, error) {
 	if err != nil {
 		return nil, err
 	}
-	return net.Listen("tcp", address)
+	return publicrpc.Listen(publicrpc.Endpoint{
+		Transport: publicrpc.TransportTCP,
+		Address:   address,
+	}, publicrpc.ListenOptions{AllowRemote: allowRemote})
 }
 
 // validateListenAddress is deliberately side-effect free so address-policy
