@@ -39,6 +39,8 @@ type authenticationResult struct {
 	err   error
 }
 
+const authenticationTimeoutSlack = 500 * time.Millisecond
+
 var openSessionContext = OpenContext
 
 func AutoOpen(ctx context.Context, options DiscoveryOptions) (OpenResult, error) {
@@ -115,16 +117,22 @@ func OpenAuthenticated(
 	}
 
 	// Authenticate can be inside a Windows overlapped ReadFile/WriteFile after
-	// ctx is canceled. Context checks around that syscall cannot interrupt the
-	// operation; only closing the transport can. Give cancellation a concrete
-	// owner as soon as the provisional Session exists.
+	// either an individual HELLO attempt or its caller expires. Context checks
+	// around that syscall cannot interrupt the operation; only closing the
+	// transport can. Bound the complete provisional-authentication lifetime and
+	// give its cancellation a concrete owner as soon as the Session exists.
+	authContext, cancelAuthentication := context.WithTimeout(
+		ctx,
+		authenticationTimeout(options),
+	)
+	defer cancelAuthentication()
 	cancelCloseDone := make(chan error, 1)
-	stopCancelClose := context.AfterFunc(ctx, func() {
+	stopCancelClose := context.AfterFunc(authContext, func() {
 		cancelCloseDone <- session.Close()
 	})
 	authDone := make(chan authenticationResult, 1)
 	go func() {
-		hello, authErr := authenticateOpened(ctx, session, port, options)
+		hello, authErr := authenticateOpened(authContext, session, port, options)
 		authDone <- authenticationResult{hello: hello, err: authErr}
 	}()
 
@@ -134,7 +142,7 @@ func OpenAuthenticated(
 			// stop is the ownership boundary: after it succeeds, no late context
 			// callback can close a Session returned to the caller. If cancellation
 			// was already observable, reject the provisional Session explicitly.
-			if ctxErr := ctx.Err(); ctxErr != nil {
+			if ctxErr := authContext.Err(); ctxErr != nil {
 				return closeFailedAuthentication(session, port, errors.Join(auth.err, ctxErr))
 			}
 			if auth.err != nil {
@@ -146,7 +154,7 @@ func OpenAuthenticated(
 		// Cancellation already owns Close. Join it before deciding the result so
 		// a successful authentication can never race a late close callback.
 		closeErr := <-cancelCloseDone
-		cancelErr := ctx.Err()
+		cancelErr := authContext.Err()
 		if cancelErr == nil {
 			cancelErr = ErrClosed
 		}
@@ -159,7 +167,7 @@ func OpenAuthenticated(
 		}
 		return OpenResult{}, openErr
 
-	case <-ctx.Done():
+	case <-authContext.Done():
 		// AfterFunc owns the first Close attempt. A retryable failure must return
 		// the exact Session to Runtime quarantine; do not lose the handle or race
 		// another open. On successful Close, join authentication before returning
@@ -167,13 +175,31 @@ func OpenAuthenticated(
 		closeErr := <-cancelCloseDone
 		if closeErr != nil {
 			return OpenResult{Session: session, Port: port}, errors.Join(
-				ctx.Err(),
+				authContext.Err(),
 				fmt.Errorf("close %s after authentication cancellation: %w", port.Name, closeErr),
 			)
 		}
 		auth := <-authDone
-		return OpenResult{}, errors.Join(ctx.Err(), auth.err)
+		return OpenResult{}, errors.Join(authContext.Err(), auth.err)
 	}
+}
+
+func authenticationTimeout(options DiscoveryOptions) time.Duration {
+	startupWait := options.StartupWait
+	if startupWait < 0 {
+		startupWait = 0
+	}
+	requestTimeout := options.RequestTimeout
+	if requestTimeout <= 0 {
+		requestTimeout = 700 * time.Millisecond
+	}
+	attempts := options.HelloAttempts
+	if attempts < 1 {
+		attempts = 1
+	}
+	betweenAttempts := time.Duration(attempts-1) * 100 * time.Millisecond
+	return startupWait + time.Duration(attempts)*requestTimeout +
+		betweenAttempts + authenticationTimeoutSlack
 }
 
 func closeFailedAuthentication(
