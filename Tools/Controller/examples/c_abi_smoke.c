@@ -115,8 +115,10 @@ int main(void) {
            "\"method\":\"controller.ping\",\"params\":{}}",
            handle);
   response = invoke(lifecycle_request);
-  if (response == NULL ||
-      strstr(response, "\"result\":{\"ok\":true") == NULL) {
+  char *result_field =
+      response == NULL ? NULL : strstr(response, "\"result\":{");
+  if (response == NULL || result_field == NULL ||
+      strstr(result_field, "\"ok\":true") == NULL) {
     return 8;
   }
   release(response);

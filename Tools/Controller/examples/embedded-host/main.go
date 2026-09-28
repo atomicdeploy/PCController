@@ -13,9 +13,13 @@ import (
 	"time"
 
 	"pccontroller.local/controller/host"
+	"pccontroller.local/controller/internal/envfile"
 )
 
 func main() {
+	if _, err := envfile.LoadProcess(); err != nil {
+		log.Fatal("environment: ", err)
+	}
 	dataRoot := flag.String("data-root", "", "application-owned PCController data directory")
 	httpAddress := flag.String("http", "", "optional HTTP/WebSocket listen address, for example 127.0.0.1:8787")
 	noConnect := flag.Bool("no-connect", false, "start without automatic board discovery")

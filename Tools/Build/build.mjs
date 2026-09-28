@@ -1514,8 +1514,9 @@ int main(void) {
            "{\\\"operation\\\":\\\"host_call\\\",\\\"handle\\\":%llu,\\\"method\\\":\\\"controller.ping\\\",\\\"params\\\":{}}",
            handle);
   response = invoke(request);
+  char *result_field = response ? strstr(response, "\\\"result\\\":{") : NULL;
   if (!response || !strstr(response, "\\\"ok\\\":true") ||
-      !strstr(response, "\\\"result\\\":{\\\"ok\\\":true")) return 19;
+      !result_field || !strstr(result_field, "\\\"ok\\\":true")) return 19;
   release(response);
 
   snprintf(request, sizeof(request),
@@ -1585,8 +1586,9 @@ int main(void) {
            "{\\"operation\\":\\"host_call\\",\\"handle\\":%llu,\\"method\\":\\"controller.ping\\",\\"params\\":{}}",
            handle);
   response = invoke(request);
+  char *result_field = response ? strstr(response, "\\"result\\":{") : NULL;
   if (!response || !strstr(response, "\\"ok\\":true") ||
-      !strstr(response, "\\"result\\":{\\"ok\\":true")) return 19;
+      !result_field || !strstr(result_field, "\\"ok\\":true")) return 19;
   release(response);
 
   snprintf(request, sizeof(request),

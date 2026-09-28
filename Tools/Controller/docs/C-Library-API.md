@@ -94,6 +94,12 @@ Requests and representative operations:
 {"operation":"close","handle":1}
 {"operation":"destroy","handle":1}
 {"operation":"ports"}
+{"operation":"host_create","host_options":{"data_root":"APPLICATION_DATA/PCController","app_id":"embedding-application","disable_auto_connect":false,"disable_native":false,"http_address":"127.0.0.1:8787"}}
+{"operation":"host_start","handle":2}
+{"operation":"host_call","handle":2,"method":"controller.capabilities","params":{}}
+{"operation":"host_endpoints","handle":2}
+{"operation":"host_stop","handle":2,"timeout_ms":10000}
+{"operation":"host_destroy","handle":2,"timeout_ms":10000}
 ```
 
 | Operation | Behavior |
@@ -110,6 +116,12 @@ Requests and representative operations:
 | `rf_list` | Fetch every page of learned RF entries. |
 | `close` | Close and pause automatic reconnect while keeping the handle valid. |
 | `destroy` | Shut down the client and remove the handle. |
+| `host_create` | Construct an idle embeddable Host with application-owned configuration, data, branding, native IPC, integration, and optional HTTP settings. |
+| `host_start` | Claim ownership and start the canonical client, dispatcher, in-process RPC, native-local listener, and optional HTTP/WebSocket listener. |
+| `host_call` | Invoke one canonical RPC method directly in process; `method` and `params` have the same meaning as native and network calls. |
+| `host_endpoints` | Return only the native/TCP endpoints that successfully started. |
+| `host_stop` | Cancel, drain, and stop a Host while retaining its handle. |
+| `host_destroy` | Stop a Host if needed and remove its handle. |
 
 `timeout_ms` defaults to 15000 for handle operations. For `event_next`, use a
 larger timeout when an idle wait is expected. Event IDs are monotonic within
@@ -121,13 +133,24 @@ Handles are local to the process that loaded the library. Operations on one
 handle are serialized, so callers from multiple native threads cannot
 interleave native UART requests.
 
-A C-ABI handle is itself a serial owner; it does not silently attach to the
-loopback IPC primary. If the TUI/shell/IPC service already owns the board, a
-native application should call the documented JSON-RPC endpoint instead of
-creating a competing DLL handle. Conversely, an application can make its DLL
-handle the sole owner and expose its own IPC boundary. CLI `exec`, batch,
+A direct `create` client handle is itself a serial owner; it does not silently
+attach to another coordinator. Prefer a `host_create` handle for application
+embedding: it owns one canonical Host, exposes the same dispatcher in process,
+and can serve protected native-local IPC concurrently with optional
+HTTP/WebSocket. If another process already owns the Host identity or listener,
+the application must use that coordinator's advertised native endpoint or
+`:8787` rather than opening UART as an implicit fallback. CLI `exec`, batch,
 monitor, reset, shell, and programming processes automatically route through
 the standard primary process.
+
+Host handles and direct client handles share one numeric namespace but are
+different lifecycle types. Pass each handle only to operations for the type
+that created it. Calls for one handle are serialized. Keep the shared library
+loaded until process shutdown so Go runtime threads are never unloaded early.
+
+The complete Go and Pealayer lifecycle, cancellation, logging, endpoint, and
+fallback contract is in
+[Embeddable host lifecycle](Go-Embedding-API.md).
 
 Background `melody play` and `rgb effect play` operations remain active while
 their handle and the hosting process remain alive. They can be canceled through
