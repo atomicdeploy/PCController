@@ -61,7 +61,7 @@ func createWindowsShortcut(executable, shortcut, appID, displayName string) erro
 		if err := setShellLinkString(link, 20, executable, "set shortcut target"); err != nil {
 			return err
 		}
-		if err := setShellLinkString(link, 11, "web", "set shortcut arguments"); err != nil {
+		if err := setShellLinkString(link, 11, "", "clear shortcut arguments"); err != nil {
 			return err
 		}
 		if err := setShellLinkString(link, 9, filepath.Dir(executable), "set shortcut working directory"); err != nil {
@@ -83,13 +83,17 @@ func createWindowsShortcut(executable, shortcut, appID, displayName string) erro
 		if err != nil {
 			return fmt.Errorf("open shortcut persistence interface: %w", err)
 		}
-		defer releaseCOM(persist)
 		path, err := windows.UTF16PtrFromString(shortcut)
 		if err != nil {
+			releaseCOM(persist)
 			return err
 		}
 		saveErr := callCOM(persist, 6, uintptr(unsafe.Pointer(path)), 1).error("save Start-menu shortcut")
 		runtime.KeepAlive(path)
+		// IPersistFile may retain an exclusive handle to the freshly saved
+		// shortcut. Release it before SHGetPropertyStoreFromParsingName opens
+		// the same file for read/write property access.
+		releaseCOM(persist)
 		if saveErr != nil {
 			return saveErr
 		}
@@ -232,5 +236,5 @@ func shortcutOwnedBy(executable string, shortcut windowsShortcut) bool {
 		return false
 	}
 	arguments := strings.TrimSpace(shortcut.Arguments)
-	return strings.EqualFold(arguments, "web") || strings.EqualFold(arguments, "tui")
+	return arguments == "" || strings.EqualFold(arguments, "web") || strings.EqualFold(arguments, "tui")
 }

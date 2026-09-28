@@ -122,7 +122,7 @@ func TestNativeShortcutRoundTripAndOwnership(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !sameWindowsPath(link.Target, executable) || link.Arguments != "web" || !sameWindowsPath(link.Icon, executable) || link.IconIndex != 0 {
+	if !sameWindowsPath(link.Target, executable) || strings.TrimSpace(link.Arguments) != "" || !sameWindowsPath(link.Icon, executable) || link.IconIndex != 0 {
 		t.Fatalf("shortcut=%+v executable=%q", link, executable)
 	}
 	if !shortcutOwnedBy(executable, link) {

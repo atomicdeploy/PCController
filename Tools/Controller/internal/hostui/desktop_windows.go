@@ -360,9 +360,9 @@ func ensureOwnedShortcutWithPredecessor(executable, shortcut, appID, displayName
 	if err != nil {
 		return false, false, errors.Join(err, cleanupShortcutTemporary(temporaryPath))
 	}
-	if !sameWindowsPath(link.Target, executable) || link.Arguments != "web" ||
+	if !sameWindowsPath(link.Target, executable) || strings.TrimSpace(link.Arguments) != "" ||
 		!sameWindowsPath(link.Icon, executable) || link.IconIndex != 0 || identity != appID {
-		return false, false, errors.Join(errors.New("shortcut target, web launch, embedded icon or identity verification failed"), cleanupShortcutTemporary(temporaryPath))
+		return false, false, errors.Join(errors.New("shortcut target, unified launch, embedded icon or identity verification failed"), cleanupShortcutTemporary(temporaryPath))
 	}
 	// Recheck before replacing an existing file; creation failure never leaves
 	// a partial link at the user's final path.
