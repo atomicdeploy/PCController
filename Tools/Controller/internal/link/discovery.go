@@ -34,6 +34,11 @@ type OpenResult struct {
 	Hello   native.Hello
 }
 
+type authenticationResult struct {
+	hello native.Hello
+	err   error
+}
+
 var openSessionContext = OpenContext
 
 func AutoOpen(ctx context.Context, options DiscoveryOptions) (OpenResult, error) {
@@ -109,18 +114,80 @@ func OpenAuthenticated(
 		return OpenResult{}, err
 	}
 
-	hello, err := authenticateOpened(ctx, session, port, options)
-	if err != nil {
-		if closeErr := session.Close(); closeErr != nil {
+	// Authenticate can be inside a Windows overlapped ReadFile/WriteFile after
+	// ctx is canceled. Context checks around that syscall cannot interrupt the
+	// operation; only closing the transport can. Give cancellation a concrete
+	// owner as soon as the provisional Session exists.
+	cancelCloseDone := make(chan error, 1)
+	stopCancelClose := context.AfterFunc(ctx, func() {
+		cancelCloseDone <- session.Close()
+	})
+	authDone := make(chan authenticationResult, 1)
+	go func() {
+		hello, authErr := authenticateOpened(ctx, session, port, options)
+		authDone <- authenticationResult{hello: hello, err: authErr}
+	}()
+
+	select {
+	case auth := <-authDone:
+		if stopCancelClose() {
+			// stop is the ownership boundary: after it succeeds, no late context
+			// callback can close a Session returned to the caller. If cancellation
+			// was already observable, reject the provisional Session explicitly.
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return closeFailedAuthentication(session, port, errors.Join(auth.err, ctxErr))
+			}
+			if auth.err != nil {
+				return closeFailedAuthentication(session, port, auth.err)
+			}
+			return OpenResult{Session: session, Port: port, Hello: auth.hello}, nil
+		}
+
+		// Cancellation already owns Close. Join it before deciding the result so
+		// a successful authentication can never race a late close callback.
+		closeErr := <-cancelCloseDone
+		cancelErr := ctx.Err()
+		if cancelErr == nil {
+			cancelErr = ErrClosed
+		}
+		openErr := errors.Join(auth.err, cancelErr)
+		if closeErr != nil {
 			return OpenResult{Session: session, Port: port}, errors.Join(
-				err,
-				fmt.Errorf("close %s after authentication failure: %w", port.Name, closeErr),
+				openErr,
+				fmt.Errorf("close %s after authentication cancellation: %w", port.Name, closeErr),
 			)
 		}
-		return OpenResult{}, err
-	}
+		return OpenResult{}, openErr
 
-	return OpenResult{Session: session, Port: port, Hello: hello}, nil
+	case <-ctx.Done():
+		// AfterFunc owns the first Close attempt. A retryable failure must return
+		// the exact Session to Runtime quarantine; do not lose the handle or race
+		// another open. On successful Close, join authentication before returning
+		// so no provisional goroutine can publish a late successful result.
+		closeErr := <-cancelCloseDone
+		if closeErr != nil {
+			return OpenResult{Session: session, Port: port}, errors.Join(
+				ctx.Err(),
+				fmt.Errorf("close %s after authentication cancellation: %w", port.Name, closeErr),
+			)
+		}
+		auth := <-authDone
+		return OpenResult{}, errors.Join(ctx.Err(), auth.err)
+	}
+}
+
+func closeFailedAuthentication(
+	session *Session,
+	port ports.Info,
+	authErr error,
+) (OpenResult, error) {
+	if closeErr := session.Close(); closeErr != nil {
+		return OpenResult{Session: session, Port: port}, errors.Join(
+			authErr,
+			fmt.Errorf("close %s after authentication failure: %w", port.Name, closeErr),
+		)
+	}
+	return OpenResult{}, authErr
 }
 
 func authenticateOpened(
