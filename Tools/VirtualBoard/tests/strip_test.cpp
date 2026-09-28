@@ -27,7 +27,9 @@ int main() {
     chunk[1] = 100;
     require(!AddressableLeds::apply(chunk, sizeof(chunk)), "out of range pixel accepted");
     const uint8_t invalid[] = {0xFD, 0, 1, 2, 3, 4};
+    const auto beforeInvalid = storage;
     require(!AddressableLeds::apply(invalid, sizeof(invalid)), "partial RGB accepted");
+    require(storage == beforeInvalid, "invalid chunk partially changed frame");
     const uint8_t configure[] = {0xFE, 3};
     require(AddressableLeds::apply(configure, sizeof(configure)), "configure failed");
     require(AddressableLeds::count() == 3, "count changed incorrectly");

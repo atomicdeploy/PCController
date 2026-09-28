@@ -110,8 +110,21 @@ bool setPixel(uint8_t index, const RgbColor &color) {
 
 bool stagePixels(uint8_t index, const uint8_t *rgb, uint8_t length) {
   // Walk triples instead of pulling AVR integer division/modulo into dispatch.
+  uint8_t remainder = length;
+  while (remainder >= 3) remainder -= 3;
+  if (!pixels || remainder || index >= pixelCount ||
+      length > static_cast<uint16_t>(pixelCount - index) * 3) return false;
+  uint8_t *out = pixels + static_cast<uint16_t>(index) * 3;
   while (length) {
-    if (length < 3 || !setPixel(index++, RgbColor(rgb[0], rgb[1], rgb[2]))) return false;
+#if PCCONTROLLER_USE_WS2812B
+    out[0] = rgb[1];
+    out[2] = rgb[2];
+#else
+    out[0] = rgb[2];
+    out[2] = rgb[1];
+#endif
+    out[1] = rgb[0];
+    out += 3;
     rgb += 3;
     length -= 3;
   }
