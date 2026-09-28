@@ -11,10 +11,19 @@ import {
   matchByDataKey,
 } from 'recharts'
 import { Segmented, StatusBadge } from './components'
+import {
+  focusedCurrentDomain,
+  focusedThermalDomain,
+  focusedVoltageDomain,
+  medianSmoothTelemetrySamples,
+  normalizeTelemetrySamples,
+  stabilizeCurrentSeries,
+} from './telemetry-filter'
 import type { Locale, MetricSample } from './types'
 
 type ChartMode = 'electrical' | 'power' | 'thermal'
 type WindowSize = '30' | '60' | 'all'
+type Smoothing = 'smoothed' | 'raw'
 
 interface TelemetryChartProps {
   connected: boolean
@@ -49,30 +58,39 @@ export function TelemetryChart({ connected, locale, samples, reduceMotion = fals
   const animation = telemetryAnimation(reduceMotion)
   const [mode, setMode] = useState<ChartMode>('electrical')
   const [windowSize, setWindowSize] = useState<WindowSize>('60')
+  const [smoothing, setSmoothing] = useState<Smoothing>('smoothed')
   const persian = locale === 'fa'
+  const normalized = useMemo(() => normalizeTelemetrySamples(samples), [samples])
   const visible = useMemo(() => {
-    const count = windowSize === 'all' ? samples.length : Number(windowSize)
+    const count = windowSize === 'all' ? normalized.length : Number(windowSize)
     const formatter = new Intl.DateTimeFormat(persian ? 'fa-IR' : 'en-US', {
       hour: '2-digit',
       minute: '2-digit',
       second: '2-digit',
     })
-    return samples.slice(-count).map((sample) => ({
+    const window = normalized.slice(-count)
+    const chartSamples = smoothing === 'smoothed'
+      ? stabilizeCurrentSeries(medianSmoothTelemetrySamples(window))
+      : window
+    return chartSamples.map((sample) => ({
       ...sample,
       timeLabel: formatter.format(sample.at),
     }))
-  }, [persian, samples, windowSize])
+  }, [normalized, persian, smoothing, windowSize])
 
   const availableModes = useMemo(() => {
     const modes: ChartMode[] = []
-    if (samples.some((sample) => [sample.supply, sample.bus, sample.current].some((value) => typeof value === 'number' && Number.isFinite(value)))) modes.push('electrical')
-    if (samples.some((sample) => typeof sample.power === 'number' && Number.isFinite(sample.power))) modes.push('power')
-    if (samples.some((sample) => [sample.ledTemp, sample.btTemp].some((value) => typeof value === 'number' && Number.isFinite(value)))) modes.push('thermal')
+    if (normalized.some((sample) => [sample.supply, sample.bus, sample.current].some((value) => typeof value === 'number' && Number.isFinite(value)))) modes.push('electrical')
+    if (normalized.some((sample) => typeof sample.power === 'number' && Number.isFinite(sample.power))) modes.push('power')
+    if (normalized.some((sample) => [sample.ledTemp, sample.btTemp].some((value) => typeof value === 'number' && Number.isFinite(value)))) modes.push('thermal')
     return modes
-  }, [samples])
+  }, [normalized])
   const visibleMode = availableModes.includes(mode) ? mode : availableModes[0] ?? 'electrical'
 
   const latest = visible.at(-1)
+  const voltageDomain = useMemo(() => focusedVoltageDomain(visible), [visible])
+  const thermalDomain = useMemo(() => focusedThermalDomain(visible), [visible])
+  const currentDomain = useMemo(() => focusedCurrentDomain(visible), [visible])
   const chartLabel = persian
     ? `نمودار ${modeLabels[visibleMode].fa} با ${visible.length} نمونه`
     : `${modeLabels[visibleMode].en} chart with ${visible.length} samples`
@@ -105,6 +123,15 @@ export function TelemetryChart({ connected, locale, samples, reduceMotion = fals
           ]}
           onChange={setWindowSize}
         />
+        <Segmented
+          value={smoothing}
+          label={persian ? 'پردازش نمودار' : 'Chart processing'}
+          options={[
+            { value: 'smoothed', label: persian ? 'هموار' : 'Smoothed' },
+            { value: 'raw', label: persian ? 'خام' : 'Raw' },
+          ]}
+          onChange={setSmoothing}
+        />
       </div>
 
       <div className="telemetry-chart__canvas" role="img" aria-label={chartLabel}>
@@ -121,8 +148,8 @@ export function TelemetryChart({ connected, locale, samples, reduceMotion = fals
               </linearGradient>
             </defs>
             <XAxis dataKey="timeLabel" minTickGap={38} tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={{ stroke: 'var(--line-strong)' }} tickLine={false} />
-            <YAxis yAxisId="left" width={44} tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} domain={['auto', 'auto']} />
-            {visibleMode === 'electrical' && <YAxis yAxisId="right" orientation="right" width={46} tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} domain={['auto', 'auto']} />}
+            <YAxis yAxisId="left" width={44} tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} domain={visibleMode === 'electrical' ? voltageDomain : visibleMode === 'thermal' ? thermalDomain : ['auto', 'auto']} />
+            {visibleMode === 'electrical' && <YAxis yAxisId="right" orientation="right" width={46} tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} domain={currentDomain} />}
             <Tooltip
               cursor={{ stroke: 'var(--line-strong)', strokeWidth: 1 }}
               contentStyle={{ background: 'var(--glass-strong)', border: '1px solid var(--line-strong)', borderRadius: 12, boxShadow: 'var(--shadow-tight)', color: 'var(--text)' }}
