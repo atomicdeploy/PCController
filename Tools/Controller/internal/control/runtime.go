@@ -166,6 +166,8 @@ type Runtime struct {
 	statusUpdated          time.Time
 	paused                 bool
 	connecting             bool
+	connectCancel          context.CancelFunc
+	connectDone            chan struct{}
 	generation             uint64
 	connectionState        string
 	connectionReason       string
@@ -228,7 +230,10 @@ type Runtime struct {
 	connectionEvents       map[string]connectionEventSignature
 }
 
-var openResetSession = link.OpenContext
+var (
+	openResetSession = link.OpenContext
+	autoOpenSession  = link.AutoOpen
+)
 
 const (
 	programStateHeartbeatPeriod  = 2 * time.Second
@@ -809,18 +814,35 @@ func (runtime *Runtime) EnsureConnected(ctx context.Context) error {
 		return nil
 	}
 	runtime.connecting = true
+	connectContext, cancelConnect := context.WithCancel(ctx)
+	connectDone := make(chan struct{})
+	runtime.connectCancel = cancelConnect
+	runtime.connectDone = connectDone
 	options := runtime.options
 	runtime.mu.Unlock()
 
 	defer func() {
+		cancelConnect()
 		runtime.mu.Lock()
-		runtime.connecting = false
+		if runtime.connectDone == connectDone {
+			runtime.connecting = false
+			runtime.connectCancel = nil
+			runtime.connectDone = nil
+		}
 		runtime.mu.Unlock()
+		close(connectDone)
 	}()
 
-	result, err := link.AutoOpen(ctx, runtime.discoveryOptions(options))
+	result, err := autoOpenSession(connectContext, runtime.discoveryOptions(options))
 	if err != nil {
 		return err
+	}
+	runtime.mu.RLock()
+	paused := runtime.paused
+	runtime.mu.RUnlock()
+	if paused || connectContext.Err() != nil {
+		_ = result.Session.Close()
+		return errors.New("connection attempt was cancelled by host")
 	}
 	runtime.attach(result)
 	return nil
@@ -906,6 +928,21 @@ func (runtime *Runtime) Open(ctx context.Context, name string) error {
 
 func (runtime *Runtime) Close() error {
 	runtime.cancelDisplaySchedules()
+	// A reconnect attempt owns the serial handle before it becomes the active
+	// session. Pause first so it cannot attach, then cancel and join it. The
+	// close response is therefore an actual handle-release barrier rather than
+	// merely a disconnected snapshot transition.
+	runtime.mu.Lock()
+	runtime.paused = true
+	cancelConnect := runtime.connectCancel
+	connectDone := runtime.connectDone
+	runtime.mu.Unlock()
+	if cancelConnect != nil {
+		cancelConnect()
+	}
+	if connectDone != nil {
+		<-connectDone
+	}
 	return runtime.detach(true)
 }
 

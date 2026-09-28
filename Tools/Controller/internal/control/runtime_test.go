@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -452,6 +453,52 @@ func TestOpenAlreadyConnectedSelectorIsIdempotent(t *testing.T) {
 		t.Fatalf("idempotent open changed the live device: %#v", snapshot)
 	}
 	_ = runtime.Close()
+}
+
+func TestCloseCancelsInflightReconnectAndReleasesTransport(t *testing.T) {
+	previous := autoOpenSession
+	defer func() { autoOpenSession = previous }()
+
+	port := newReconnectTestPort()
+	opened := make(chan struct{})
+	var openedOnce sync.Once
+	autoOpenSession = func(ctx context.Context, _ link.DiscoveryOptions) (link.OpenResult, error) {
+		session := link.NewForPort("COM3", port)
+		openedOnce.Do(func() { close(opened) })
+		<-ctx.Done()
+		_ = session.Close()
+		return link.OpenResult{}, ctx.Err()
+	}
+
+	runtime := New(Options{})
+	connectDone := make(chan error, 1)
+	go func() { connectDone <- runtime.EnsureConnected(context.Background()) }()
+	select {
+	case <-opened:
+	case <-time.After(time.Second):
+		t.Fatal("reconnect did not acquire the transport")
+	}
+
+	if err := runtime.Close(); err != nil {
+		t.Fatalf("close failed: %v", err)
+	}
+	select {
+	case <-port.closed:
+	default:
+		t.Fatal("close returned before the reconnect transport was released")
+	}
+	select {
+	case err := <-connectDone:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("reconnect error = %v, want cancellation", err)
+		}
+	default:
+		t.Fatal("close returned before the reconnect attempt ended")
+	}
+	if snapshot := runtime.Snapshot(); snapshot.Connected || !snapshot.Paused ||
+		snapshot.ConnectionState != "disconnected" || snapshot.ConnectionReason != "closed by host" {
+		t.Fatalf("close snapshot = %#v", snapshot)
+	}
 }
 
 func TestRFReceiveInfersDownAndTimedUp(t *testing.T) {
