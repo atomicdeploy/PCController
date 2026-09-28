@@ -108,12 +108,14 @@ type remoteSnapshotWire struct {
 }
 
 type remoteUISettingsWire struct {
-	AppTitle        string                  `json:"app_title"`
-	Tagline         string                  `json:"tagline"`
-	SetupComplete   bool                    `json:"setup_complete"`
-	WelcomeMelody   string                  `json:"welcome_melody"`
-	SegmentScroll   appconfig.SegmentScroll `json:"segment_scroll"`
-	PeripheralNames map[string]string       `json:"peripheral_names"`
+	AppTitle               string                  `json:"app_title"`
+	Tagline                string                  `json:"tagline"`
+	SetupComplete          bool                    `json:"setup_complete"`
+	WelcomeMelody          string                  `json:"welcome_melody"`
+	StatusIntervalMS       int                     `json:"status_interval_ms"`
+	MeasurementFreshnessMS int                     `json:"measurement_freshness_ms"`
+	SegmentScroll          appconfig.SegmentScroll `json:"segment_scroll"`
+	PeripheralNames        map[string]string       `json:"peripheral_names"`
 }
 
 type remoteRFPresentationWire struct {
@@ -427,11 +429,13 @@ func (client *remoteTUIIPC) SaveUISettings(
 ) (remoteUISettingsWire, error) {
 	var result remoteUISettingsWire
 	err := client.call(ctx, "controller.ui.config.set", map[string]any{
-		"app_title":        value.AppTitle,
-		"tagline":          value.Tagline,
-		"setup_complete":   value.SetupComplete,
-		"segment_scroll":   value.SegmentScroll,
-		"peripheral_names": value.PeripheralNames,
+		"app_title":                value.AppTitle,
+		"tagline":                  value.Tagline,
+		"setup_complete":           value.SetupComplete,
+		"status_interval_ms":       value.StatusIntervalMS,
+		"measurement_freshness_ms": value.MeasurementFreshnessMS,
+		"segment_scroll":           value.SegmentScroll,
+		"peripheral_names":         value.PeripheralNames,
 	}, &result)
 	return result, err
 }
@@ -679,6 +683,13 @@ func mergeRemoteHostUI(local appconfig.UI, remote remoteUISettingsWire) appconfi
 	local.Tagline = remote.Tagline
 	local.SetupComplete = remote.SetupComplete
 	local.WelcomeMelody = remote.WelcomeMelody
+	if remote.StatusIntervalMS >= appconfig.StatusIntervalMinMS &&
+		remote.StatusIntervalMS <= appconfig.StatusIntervalMaxMS &&
+		remote.MeasurementFreshnessMS >= remote.StatusIntervalMS+appconfig.MeasurementFreshnessHeadroomMS &&
+		remote.MeasurementFreshnessMS <= appconfig.MeasurementFreshnessMaxMS {
+		local.StatusIntervalMS = remote.StatusIntervalMS
+		local.MeasurementFreshnessMS = remote.MeasurementFreshnessMS
+	}
 	local.SegmentScroll = remote.SegmentScroll
 	local.PeripheralNames = cloneRemoteNames(remote.PeripheralNames)
 	return local

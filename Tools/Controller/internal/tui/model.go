@@ -1639,7 +1639,7 @@ func (model Model) statusFreshnessLabel(snapshot control.Snapshot, now time.Time
 	if model.remote != nil && !model.remoteStatusReceivedAt.IsZero() {
 		updated = model.remoteStatusReceivedAt
 	}
-	return freshnessLabel(updated, now)
+	return freshnessLabel(updated, now, model.prefs.FreshnessWindow)
 }
 
 func (model Model) remoteClockWarning() string {
@@ -2130,8 +2130,11 @@ func (model Model) statusInterval() time.Duration {
 		}
 	} else {
 		interval = model.prefs.PollInterval
-		if interval < 100*time.Millisecond {
-			interval = 100 * time.Millisecond
+		if interval < time.Duration(appconfig.StatusIntervalMinMS)*time.Millisecond {
+			interval = time.Duration(appconfig.StatusIntervalMinMS) * time.Millisecond
+		}
+		if interval > time.Duration(appconfig.StatusIntervalMaxMS)*time.Millisecond {
+			interval = time.Duration(appconfig.StatusIntervalMaxMS) * time.Millisecond
 		}
 		if model.snapshot().Status.DoorOpen && interval > 125*time.Millisecond {
 			interval = 125 * time.Millisecond

@@ -101,15 +101,40 @@ export function localizeDigits(locale: Locale, value: number): string {
 }
 
 export function formatDuration(locale: Locale, milliseconds: number): string {
-  if (!Number.isFinite(milliseconds) || milliseconds <= 0) return '—'
+  if (!Number.isFinite(milliseconds) || milliseconds < 0) return '—'
   const seconds = Math.floor(milliseconds / 1000)
   const days = Math.floor(seconds / 86400)
   const hours = Math.floor((seconds % 86400) / 3600)
   const minutes = Math.floor((seconds % 3600) / 60)
-  const pieces = days > 0 ? [`${days}d`, `${hours}h`] : hours > 0 ? [`${hours}h`, `${minutes}m`] : [`${minutes}m`]
+  const remainingSeconds = seconds % 60
+  const pieces = days > 0
+    ? [`${days}d`, `${hours}h`, `${minutes}m`, `${remainingSeconds}s`]
+    : hours > 0
+      ? [`${hours}h`, `${minutes}m`, `${remainingSeconds}s`]
+      : minutes > 0
+        ? [`${minutes}m`, `${remainingSeconds}s`]
+        : [`${remainingSeconds}s`]
   const value = pieces.join(' ')
   if (locale !== 'fa') return value
-  return value.replace(/\d+/g, (digits) => localizeDigits(locale, Number(digits))).replace('d', 'ر').replace('h', 'س').replace('m', 'د')
+  return value.replace(/\d+/g, (digits) => localizeDigits(locale, Number(digits)))
+    .replace('d', 'ر').replace('h', 'س').replace('m', 'د').replace('s', 'ث')
+}
+
+export function formatMeasurementFreshness(
+  locale: Locale,
+  updated: string | number | Date | undefined,
+  freshnessMS: number,
+  now = Date.now(),
+): string {
+  if (updated === undefined) return locale === 'fa' ? 'در انتظار دستگاه' : 'Waiting for device'
+  const observed = updated instanceof Date ? updated.getTime() : typeof updated === 'number' ? updated : Date.parse(updated)
+  if (!Number.isFinite(observed)) return locale === 'fa' ? 'در انتظار دستگاه' : 'Waiting for device'
+  const ageMS = Math.max(0, now - observed)
+  if (ageMS < freshnessMS) return locale === 'fa' ? 'زنده' : 'Live'
+  const seconds = ageMS / 1000
+  const amount = seconds < 10 ? seconds.toFixed(1) : String(Math.round(seconds))
+  const localized = locale === 'fa' ? localizeDigits(locale, Number(amount)) : amount
+  return locale === 'fa' ? `${localized} ثانیه پیش` : `${localized} s ago`
 }
 
 export function formatClock(locale: Locale, value?: string | number | Date): string {
