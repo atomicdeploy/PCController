@@ -27,12 +27,8 @@ function checkedArtifact(manifest, role, root) {
 }
 
 export function assertFirmwareDefaults(manifest, root = repositoryRoot) {
-  const formats = new Set([
-    "pccontroller-avr-firmware-manifest/v1",
-    "pccontroller-avr-firmware-manifest/v2",
-  ]);
-  if (!formats.has(manifest?.format)) {
-    throw new Error("unexpected firmware manifest format");
+  if (manifest === null || typeof manifest !== "object") {
+    throw new Error("firmware manifest must be an object");
   }
   const declaredFeatures = manifest.source?.compileFeatures || [];
   let features;
@@ -43,12 +39,6 @@ export function assertFirmwareDefaults(manifest, root = repositoryRoot) {
   }
   if (JSON.stringify(features) !== JSON.stringify(declaredFeatures)) {
     throw new Error("firmware manifest compile features must be unique and sorted canonically");
-  }
-  if (manifest.format.endsWith("/v1") && features.length !== 0) {
-    throw new Error("firmware manifest v1 cannot declare compile features");
-  }
-  if (manifest.format.endsWith("/v2") && features.length === 0) {
-    throw new Error("firmware manifest v2 requires at least one compile feature");
   }
   const application = checkedArtifact(manifest, "application", root);
   if (Number(application.dataBytes) <= 0) {

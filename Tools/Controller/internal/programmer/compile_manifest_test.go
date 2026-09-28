@@ -72,8 +72,7 @@ func TestCompileManifestAtomicallyReplacesStaleMetadataFromActualArtifacts(t *te
 	if err := json.Unmarshal(content, &manifest); err != nil {
 		t.Fatal(err)
 	}
-	if manifest.Format != firmwareManifestFormatV2 ||
-		manifest.Source.BuildHash != "1234ABCD" ||
+	if manifest.Source.BuildHash != "1234ABCD" ||
 		len(manifest.Source.CompileFeatures) != 1 || manifest.Source.CompileFeatures[0] != string(FirmwareFeatureEEPROMBootOpcodes) ||
 		manifest.Source.PackedTimestamp != "35019D5D" ||
 		manifest.Source.BuildTimestamp != "260801194258" ||
@@ -242,18 +241,15 @@ func TestInspectManifestRegionsValidatesAllNamedMemoryDomains(t *testing.T) {
 	source := manifestDocument["source"].(map[string]any)
 	for _, test := range []struct {
 		name     string
-		format   string
 		features []string
 		wantErr  string
 	}{
-		{"valid v2", firmwareManifestFormatV2, []string{"eeprom-menu-labels"}, ""},
-		{"v1 feature", firmwareManifestFormat, []string{"eeprom-menu-labels"}, "v1 cannot declare"},
-		{"v2 empty", firmwareManifestFormatV2, nil, "v2 requires"},
-		{"unknown", firmwareManifestFormatV2, []string{"unknown"}, "unsupported firmware feature"},
-		{"duplicate", firmwareManifestFormatV2, []string{"eeprom-menu-labels", "eeprom-menu-labels"}, "unique and sorted"},
-		{"unsorted", firmwareManifestFormatV2, []string{"eeprom-menu-labels", "eeprom-boot-opcodes"}, "unique and sorted"},
+		{"base", nil, ""},
+		{"additive feature", []string{"eeprom-menu-labels"}, ""},
+		{"unknown", []string{"unknown"}, "unsupported firmware feature"},
+		{"duplicate", []string{"eeprom-menu-labels", "eeprom-menu-labels"}, "unique and sorted"},
+		{"unsorted", []string{"eeprom-menu-labels", "eeprom-boot-opcodes"}, "unique and sorted"},
 	} {
-		manifestDocument["format"] = test.format
 		if test.features == nil {
 			delete(source, "compileFeatures")
 		} else {
@@ -273,6 +269,20 @@ func TestInspectManifestRegionsValidatesAllNamedMemoryDomains(t *testing.T) {
 		if test.wantErr != "" && (inspectErr == nil || !strings.Contains(inspectErr.Error(), test.wantErr)) {
 			t.Fatalf("%s error=%v want %q", test.name, inspectErr, test.wantErr)
 		}
+	}
+	if err := json.Unmarshal(originalManifest, &manifestDocument); err != nil {
+		t.Fatal(err)
+	}
+	manifestDocument["safeAdditiveMetadata"] = map[string]any{"ignored": true}
+	encoded, marshalErr := json.Marshal(manifestDocument)
+	if marshalErr != nil {
+		t.Fatal(marshalErr)
+	}
+	if err := os.WriteFile(manifestPath, encoded, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, inspectErr := InspectManifestRegions(manifestPath); inspectErr != nil {
+		t.Fatalf("safe additive manifest metadata was rejected: %v", inspectErr)
 	}
 	if err := json.Unmarshal(originalManifest, &manifestDocument); err != nil {
 		t.Fatal(err)
