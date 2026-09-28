@@ -158,6 +158,7 @@ type FrontPanelState struct {
 	LCDLine1         string
 	LCDLine2         string
 	LCDBacklight     bool
+	HaveLCD          bool
 	MenuID           byte
 	MenuName         string
 	Submode          string
@@ -198,6 +199,8 @@ type RemoteBackend struct {
 	InitialSnapshot           control.Snapshot
 	InitialSnapshotReceivedAt time.Time
 	Snapshot                  func(context.Context) (control.Snapshot, error)
+	FrontPanel                func(context.Context) (native.FrontPanel, error)
+	LCDPresentation           func(context.Context) (control.LCDPresentationState, error)
 	Events                    <-chan control.Event
 	Live                      <-chan RemoteLiveUpdate
 	// SetLiveInterval switches both producer measurement demand and the bounded
