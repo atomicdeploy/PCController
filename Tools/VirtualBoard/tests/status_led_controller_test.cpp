@@ -238,7 +238,8 @@ void testExactDurationAndWrap() {
   delayed.leds.service(6300); // Three full cycles plus half a cycle.
   require(delayed.leds.renderedRed() >= 126 &&
               delayed.leds.renderedRed() <= 128,
-          "delayed multi-cycle tick lost the latest physical phase");
+          "delayed multi-cycle tick lost the latest physical phase: red=" +
+              std::to_string(delayed.leds.renderedRed()));
 }
 
 void testFallbackBrightnessIsStable() {
