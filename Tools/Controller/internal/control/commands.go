@@ -1240,11 +1240,10 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 
 func encodeLiveSettingsExport(settings native.Settings) (string, error) {
 	encoded, err := json.MarshalIndent(struct {
-		Format   string          `json:"format"`
 		Source   string          `json:"source"`
 		Settings native.Settings `json:"settings"`
 	}{
-		Format: "controller-mcu-settings/v1", Source: "live-opcode",
+		Source:   "live-opcode",
 		Settings: settings,
 	}, "", "  ")
 	if err != nil {

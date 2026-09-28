@@ -51,7 +51,6 @@ function fixture({
   add(
     "firmware-manifest.json",
     `${JSON.stringify({
-      format: "pccontroller-avr-firmware-manifest/v1",
       target: { fqbn: "MiniCore:avr:328:bootloader=uart0" },
       stackBudget: {
         estimatedPeakSramBytes: 1764,
