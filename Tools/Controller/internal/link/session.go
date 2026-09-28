@@ -47,6 +47,7 @@ type Session struct {
 	done   chan struct{}
 
 	closeOnce sync.Once
+	closeErr  error
 	readDone  sync.WaitGroup
 }
 
@@ -392,13 +393,20 @@ func (s *Session) Done() <-chan struct{} {
 }
 
 func (s *Session) Close() error {
-	var closeErr error
-	s.closeOnce.Do(func() {
-		close(s.done)
-		closeErr = s.port.Close()
-	})
+	s.closeOnce.Do(s.closeTransport)
 	s.readDone.Wait()
-	return closeErr
+	return s.closeErr
+}
+
+func (s *Session) closeTransport() {
+	close(s.done)
+	purgeErr := purgePendingSerialIO(s.port)
+	closeErr := s.port.Close()
+	if purgeErr != nil {
+		s.closeErr = errors.Join(purgeErr, closeErr)
+		return
+	}
+	s.closeErr = closeErr
 }
 
 func (s *Session) readLoop() {
@@ -425,10 +433,7 @@ func (s *Session) readLoop() {
 			case <-s.done:
 			default:
 				s.publish(Event{Err: fmt.Errorf("read %s: %w", s.name, err)})
-				s.closeOnce.Do(func() {
-					close(s.done)
-					_ = s.port.Close()
-				})
+				s.closeOnce.Do(s.closeTransport)
 			}
 			return
 		}
