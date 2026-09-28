@@ -753,7 +753,7 @@ func ParseDeviceEvent(payload []byte) (DeviceEvent, error) {
 		}
 		event.RFID = payload[1]
 	case EventMacro:
-		if len(payload) >= 2 && payload[1] == MacroQueueSchema {
+		{
 			status, err := ParseMacroStatus(payload)
 			if err != nil {
 				return DeviceEvent{}, err
@@ -762,10 +762,6 @@ func ParseDeviceEvent(payload []byte) (DeviceEvent, error) {
 			event.MacroState, event.MacroID = status.State, status.ID
 			break
 		}
-		if len(payload) < 3 {
-			return DeviceEvent{}, fmt.Errorf("macro EVENT is %d bytes, need 3", len(payload))
-		}
-		event.MacroState, event.MacroID = payload[1], payload[2]
 	case EventReset:
 		if len(payload) != 6 {
 			return DeviceEvent{}, fmt.Errorf(
@@ -804,13 +800,15 @@ func ParseDeviceEvent(payload []byte) (DeviceEvent, error) {
 		event.RFLearnTotalSeconds = payload[4]
 		event.RFLearnRemainingSeconds = payload[5]
 	case EventRelay:
-		if len(payload) != 2 {
+		if len(payload) != 6 {
 			return DeviceEvent{}, fmt.Errorf(
-				"relay EVENT is %d bytes, need exactly 2",
+				"relay EVENT is %d bytes, need exactly 6",
 				len(payload),
 			)
 		}
 		event.RelayMask = payload[1]
+		event.DeviceMicros = binary.LittleEndian.Uint32(payload[2:6])
+		event.Timed = true
 	case EventAlert:
 		if len(payload) != 3 {
 			return DeviceEvent{}, fmt.Errorf(

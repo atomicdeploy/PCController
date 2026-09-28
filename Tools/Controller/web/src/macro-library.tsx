@@ -126,13 +126,14 @@ export function MacroLibraryPanel({ online, locale, events, initialSnapshot, com
   const [name, setName] = useState('')
   const [category, setCategory] = useState('Web')
   const [color, setColor] = useState<MacroColor>('green')
-  const [boardID, setBoardID] = useState(0)
+  const [playMode, setPlayMode] = useState<'host' | 'mcu'>('mcu')
   const latestAppliedEventID = useRef(initialSnapshot?.latest_event_id ?? 0)
 
   const loadSnapshot = useCallback(async (quiet = false) => {
     if (!quiet) setBusy('controller.macro.snapshot')
     try {
-      const value = await rpc<MacroSnapshot>('controller.macro.snapshot')
+      const response = await rpc<{ macros: MacroSnapshot }>('controller.snapshot')
+      const value = response.macros
       setSnapshot(value)
       setTypedAvailable(true)
       setError('')
@@ -191,22 +192,14 @@ export function MacroLibraryPanel({ online, locale, events, initialSnapshot, com
 
   const selectMacro = (macro: ControllerMacro) => setSelectedReference(String(macro.id))
 
-  const perform = async (method: string, params: unknown, fallback: string) => {
+  const perform = async (method: string, _params: unknown, command: string) => {
     setBusy(method)
     setError('')
     try {
-      const value = await rpc<MacroSnapshot>(method, params)
-      setSnapshot(value)
-      setTypedAvailable(true)
-      latestAppliedEventID.current = Math.max(latestAppliedEventID.current, value.latest_event_id || 0)
+      await commandSurface(command)
+      await loadSnapshot(true)
     } catch (cause) {
-      if (!shouldUseCommandSurfaceFallback(cause)) {
-        setError(cause instanceof Error ? cause.message : String(cause))
-        return
-      }
-      await commandSurface(fallback)
-      const refreshed = await loadSnapshot(true)
-      if (!refreshed) setTypedAvailable(false)
+      setError(cause instanceof Error ? cause.message : String(cause))
     } finally {
       setBusy('')
     }
@@ -320,31 +313,32 @@ export function MacroLibraryPanel({ online, locale, events, initialSnapshot, com
             <Button icon={Trash2} disabled={!recording?.active || Boolean(recording.board_owned)} onClick={() => void perform(
               'controller.macro.record.stop', { save: false }, 'macro record discard',
             )}>{copy('Discard', 'دور انداختن')}</Button>
+            <Button icon={Trash2} disabled={!online || Boolean(recording?.active) || Boolean(playback?.running)} onClick={() => void perform(
+              'controller.macro.buffer.clear', {}, 'macro buffer clear',
+            )}>{copy('Release board RAM for strip', 'آزاد کردن حافظه برد برای نوار')}</Button>
           </div>
         </section>
         <section>
           <header>{copy('Board circular capture', 'ضبط حلقوی برد')}</header>
           <p>{copy('Retains front-panel/RF timing on the board, then imports and names the captured sequence on the host.', 'زمان‌بندی پنل و RF را روی برد نگه می‌دارد و سپس توالی ضبط‌شده را روی میزبان وارد و نام‌گذاری می‌کند.')}</p>
-          <div className="macro-library__board-id">
-            <TextField label={copy('Capture ID', 'شناسه ضبط')} type="number" min={0} max={255} value={boardID} onChange={(event) => setBoardID(Math.max(0, Math.min(255, Number(event.target.value) || 0)))} />
-          </div>
           <div className="macro-library__actions">
-            <Button icon={RadioTower} disabled={!online || Boolean(recording?.active)} busy={busy === 'controller.macro.board_record.start'} onClick={() => void perform(
-              'controller.macro.board_record.start', { id: boardID }, `macro record board start ${boardID}`,
+            <Button icon={RadioTower} disabled={!online || !name.trim() || Boolean(recording?.active)} busy={busy === 'controller.macro.board_record.start'} onClick={() => void perform(
+              'controller.macro.board_record.start', {}, `macro record start-board ${shellArgument(name.trim())} ${shellArgument(category.trim())} ${shellArgument(color)}`,
             )}>{copy('Start on board', 'شروع روی برد')}</Button>
             <Button icon={Save} disabled={!recording?.active || !recording.board_owned} busy={busy === 'controller.macro.board_record.stop'} onClick={() => void perform(
-              'controller.macro.board_record.stop', {}, 'macro record board stop',
+              'controller.macro.board_record.stop', {}, 'macro record save',
             )}>{copy('Stop + import', 'توقف و واردکردن')}</Button>
-            <Button tone="danger" icon={Trash2} disabled={!online || Boolean(recording?.active)} busy={busy === 'controller.macro.board_record.clear'} onClick={() => void perform(
-              'controller.macro.board_record.clear', { force: false }, 'macro record board clear',
-            )}>{copy('Clear retained', 'پاک‌کردن حافظه')}</Button>
+            <Button tone="danger" icon={Trash2} disabled={!recording?.active || !recording.board_owned} onClick={() => void perform(
+              'controller.macro.board_record.discard', {}, 'macro record discard',
+            )}>{copy('Discard', 'دور انداختن')}</Button>
           </div>
         </section>
       </div>
 
       <div className="macro-library__playback-actions">
+        <Segmented value={playMode} label={copy('Playback clock', 'ساعت اجرا')} options={[{value:'host',label:copy('Host', 'میزبان')},{value:'mcu',label:copy('MCU', 'برد')}]} onChange={setPlayMode} />
         <Button tone="primary" icon={Play} disabled={!online || !reference} busy={busy === 'controller.macro.play'} onClick={() => void perform(
-          'controller.macro.play', { reference }, `macro play ${shellArgument(reference)}`,
+          'controller.macro.play', { reference }, `macro play ${shellArgument(reference)} ${playMode}`,
         )}>{copy('Play selected', 'اجرای انتخاب‌شده')}</Button>
         <Button icon={CircleStop} disabled={!online || (typedAvailable !== false && !playback?.running)} busy={busy === 'controller.macro.cancel'} onClick={() => void perform(
           'controller.macro.cancel', { keep_outputs: false }, 'macro cancel',

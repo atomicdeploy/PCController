@@ -107,6 +107,8 @@ type Event struct {
 // MCU timestamp lets recorders preserve activation deltas without trusting
 // host USB/network arrival time.
 type CommandEvidence struct {
+	RelayEdge    bool          `json:"relay_edge,omitempty"`
+	RelayMask    byte          `json:"relay_mask,omitempty"`
 	Opcode       byte          `json:"opcode"`
 	Payload      []byte        `json:"payload,omitempty"`
 	DeviceMicros uint32        `json:"device_micros"`
@@ -2423,6 +2425,9 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 						},
 					})
 				} else if parsedDevice != nil {
+					if parsedDevice.Type == native.EventRelay {
+						runtime.publishCommandEvidence(CommandEvidence{RelayEdge: true, RelayMask: parsedDevice.RelayMask, DeviceMicros: parsedDevice.DeviceMicros, Timed: parsedDevice.Timed, ObservedAt: time.Now()})
+					}
 					deviceEvent := Event{
 						Kind: kind, Text: text, Frame: event.Frame,
 						Source: "board", Target: "host", MessageType: "event",

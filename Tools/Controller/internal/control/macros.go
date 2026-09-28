@@ -94,27 +94,36 @@ type MacroRunner struct {
 	presentOnce sync.Once
 	present     chan MacroState
 
-	recordMu      sync.RWMutex
-	recording     MacroRecordingState
-	recordMacro   appconfig.Macro
-	recordBaseUS  uint32
-	recordBaseAt  time.Time
-	recordHasBase bool
-	recordRelease func()
+	recordMu            sync.RWMutex
+	recording           MacroRecordingState
+	recordMacro         appconfig.Macro
+	recordBaseUS        uint32
+	recordBaseAt        time.Time
+	recordHasBase       bool
+	recordRelease       func()
+	recordRelayMask     byte
+	recordRelaySeen     bool
+	recordRelayOriginUS uint32
+	recordRelayOriginAt uint32
+	recordRelayClock    bool
 }
 
 // MacroRecordingState describes a HOST-owned recording session. Mode states
 // whether offsets come from host monotonic observations or MCU ACK timestamps.
 type MacroRecordingState struct {
-	Active    bool      `json:"active"`
-	ID        byte      `json:"id"`
-	Name      string    `json:"name"`
-	Mode      string    `json:"mode"`
-	Category  string    `json:"category,omitempty"`
-	Color     string    `json:"color,omitempty"`
-	Steps     int       `json:"steps"`
-	StartedAt time.Time `json:"started_at,omitempty"`
-	LastError string    `json:"last_error,omitempty"`
+	BoardOwned  bool      `json:"board_owned"`
+	LastAtUS    uint32    `json:"last_at_us"`
+	LastDeltaUS uint32    `json:"last_delta_us"`
+	Overwritten int       `json:"overwritten"`
+	Active      bool      `json:"active"`
+	ID          byte      `json:"id"`
+	Name        string    `json:"name"`
+	Mode        string    `json:"mode"`
+	Category    string    `json:"category,omitempty"`
+	Color       string    `json:"color,omitempty"`
+	Steps       int       `json:"steps"`
+	StartedAt   time.Time `json:"started_at,omitempty"`
+	LastError   string    `json:"last_error,omitempty"`
 }
 
 func NewMacroRunner(
@@ -314,6 +323,8 @@ func (runner *MacroRunner) startRecording(name, category, color, mode string) (M
 	runner.recordBaseUS = 0
 	runner.recordBaseAt = time.Time{}
 	runner.recordHasBase = false
+	runner.recordRelayClock = false
+	runner.recordRelaySeen = false
 	runner.recording = MacroRecordingState{
 		Active: true, ID: id, Name: name, Mode: mode, Category: strings.TrimSpace(category),
 		Color: color, StartedAt: time.Now(),
@@ -333,6 +344,11 @@ func (runner *MacroRunner) startRecording(name, category, color, mode string) (M
 func (runner *MacroRunner) StopRecording(save bool) (appconfig.Macro, error) {
 	runner.operationMu.Lock()
 	defer runner.operationMu.Unlock()
+	if runner.RecordingState().BoardOwned && runner.RecordingState().Active {
+		if err := runner.collectBoardRecording(context.Background(), save); err != nil {
+			return appconfig.Macro{}, err
+		}
+	}
 	runner.recordMu.Lock()
 	if !runner.recording.Active {
 		runner.recordMu.Unlock()
@@ -391,6 +407,18 @@ func (runner *MacroRunner) captureCommand(evidence CommandEvidence) {
 	if !runner.recording.Active || evidence.Source == CommandSourceBackground {
 		return
 	}
+	if evidence.RelayEdge {
+		runner.captureRelayEdge(evidence)
+		return
+	}
+	if runner.recording.BoardOwned {
+		return
+	}
+	// Relay commands are intentions, not output edges. Record the timestamped
+	// applied mask instead so PC, RF and physical controls share one path.
+	if evidence.Opcode == native.OpRelaySet || evidence.Opcode == native.OpRelaySide || evidence.Opcode == native.OpRelayAllOff {
+		return
+	}
 	if len(runner.recordMacro.Steps) >= 65535 {
 		runner.recording.LastError = "recording reached the 65535 step limit; save it before continuing"
 		return
@@ -442,6 +470,8 @@ func (runner *MacroRunner) captureCommand(evidence CommandEvidence) {
 }
 
 func (runner *MacroRunner) publishRecordedStep(step appconfig.MacroStep) {
+	runner.recording.LastDeltaUS = step.AtUS - runner.recording.LastAtUS
+	runner.recording.LastAtUS = step.AtUS
 	// PublishStructuredEvent queues delivery without invoking snapshot readers;
 	// the recorder lock preserves order between concurrent acknowledged commands.
 	runner.runtime.PublishStructuredEvent(Event{
@@ -455,6 +485,11 @@ func (runner *MacroRunner) publishRecordedStep(step appconfig.MacroStep) {
 // macros with no mode retain MCU playback; newly recorded alpha macros use the
 // host monotonic scheduler by default.
 func (runner *MacroRunner) Start(ctx context.Context, reference string) (MacroState, error) {
+	return runner.StartMode(ctx, reference, "")
+}
+
+// StartMode plays the same saved profile with either execution clock.
+func (runner *MacroRunner) StartMode(ctx context.Context, reference, modeOverride string) (MacroState, error) {
 	runner.operationMu.Lock()
 	defer runner.operationMu.Unlock()
 	if recording := runner.RecordingState(); recording.Active {
@@ -464,6 +499,13 @@ func (runner *MacroRunner) Start(ctx context.Context, reference string) (MacroSt
 	macro, err := runner.find(reference)
 	if err != nil {
 		return MacroState{}, err
+	}
+	if modeOverride != "" {
+		if modeOverride != macroModeHost && modeOverride != macroModeMCU {
+			return MacroState{}, errors.New("playback mode must be host or mcu")
+		}
+		macro.Mode = modeOverride
+		macro.TimingToleranceUS = modeTimingTolerance(modeOverride)
 	}
 	compiled, err := compileMacro(macro)
 	if err != nil {

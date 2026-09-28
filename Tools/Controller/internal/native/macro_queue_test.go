@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-func TestMacroStatusSchemaTwoRoundTripLayout(t *testing.T) {
+func TestMacroStatusRoundTripLayout(t *testing.T) {
 	payload := []byte{
-		EventMacro, MacroQueueSchema, MacroPlaying, 9,
+		EventMacro, MacroPlaying, 9,
 		7, 0, 5, 0, 64, 0,
 		42, 1, 2,
 		0x78, 0x56, 0x34, 0x12,
@@ -28,7 +28,7 @@ func TestMacroStatusSchemaTwoRoundTripLayout(t *testing.T) {
 
 func TestTimedMacroStatusEventAcceptsTimestampMarker(t *testing.T) {
 	payload := []byte{
-		EventMacro | 0x80, MacroQueueSchema, MacroCompleted, 3,
+		EventMacro | 0x80, MacroCompleted, 3,
 		4, 0, 4, 0, 32, 0,
 		0, 0, 0,
 		0x10, 0x20, 0x30, 0x40,

@@ -327,7 +327,7 @@ func TestLoadProgrammingMarkerRejectsUnrecoverableMissingPhase(t *testing.T) {
 	}
 }
 
-func TestLoadProgrammingMarkerAcceptsLegacyMacroDroppedSteps(t *testing.T) {
+func TestLoadProgrammingMarkerRejectsRetiredMacroFields(t *testing.T) {
 	directory := t.TempDir()
 	path := filepath.Join(directory, "programming-recovery-legacy-macro.json")
 	content := `{
@@ -347,13 +347,8 @@ func TestLoadProgrammingMarkerAcceptsLegacyMacroDroppedSteps(t *testing.T) {
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := loadProgrammingMarker(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if loaded.OriginalLiveState == nil || loaded.OriginalLiveState.Macro == nil ||
-		loaded.OriginalLiveState.Macro.DroppedSteps != 7 {
-		t.Fatalf("legacy macro status was not preserved: %#v", loaded.OriginalLiveState)
+	if _, err := loadProgrammingMarker(path); err == nil {
+		t.Fatal("retired macro fields were accepted")
 	}
 }
 
