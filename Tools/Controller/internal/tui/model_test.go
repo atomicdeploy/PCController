@@ -1871,6 +1871,31 @@ func TestFrontPanelRawSegmentsOverrideTextGlyphs(t *testing.T) {
 	}
 }
 
+func TestPartialSegmentUpdateOverridesStatusGlyphsWithoutFabricatingPanelState(t *testing.T) {
+	model := readyModel(t, PageMenus)
+	model.preview = nil
+	model.hostMenus = nil
+	model.frontPanel = nil
+	snapshot := control.Snapshot{
+		Connected:              true,
+		HaveStatus:             true,
+		Status:                 native.Status{MenuPage: 3, ProgramMode: 2},
+		HaveFrontPanelSegments: true,
+		FrontPanel: native.FrontPanel{
+			RawSegments: [4]byte{segA, segB, segC, segD}, Brightness: 6,
+		},
+	}
+
+	state := model.currentFrontPanel(snapshot)
+	if !state.HasRawSegments || state.RawSegments != snapshot.FrontPanel.RawSegments {
+		t.Fatalf("partial segment authority was not rendered: %#v", state)
+	}
+	if state.Exact || state.MenuID != 3 || state.Brightness != 6 ||
+		state.InputSource != "SEGMENT_CHANGED + STATUS summary" {
+		t.Fatalf("partial segment update fabricated or lost state: %#v", state)
+	}
+}
+
 func TestFrontPanelRendersPushedStatusLEDInTrueColor(t *testing.T) {
 	priorProfile := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)

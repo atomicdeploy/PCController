@@ -49,12 +49,13 @@ func (model Model) lcdDisplayState(snapshot control.Snapshot) (byte, bool) {
 		presentation.Physical && presentation.Address != 0 {
 		return presentation.Address, true
 	}
-	if frontPanelSnapshotAvailable(snapshot) && snapshot.FrontPanel.LCDAvailable &&
-		snapshot.FrontPanel.LCDAddress != 0 {
-		return snapshot.FrontPanel.LCDAddress, true
+	if frontPanelSnapshotAvailable(snapshot) {
+		if snapshot.FrontPanel.LCDAvailable && snapshot.FrontPanel.LCDAddress != 0 {
+			return snapshot.FrontPanel.LCDAddress, true
+		}
+		return 0, false
 	}
-	// Older firmware reported a nonzero address in STATUS. Current firmware
-	// intentionally reports zero and relies on the host-owned typed presenter.
+	// STATUS is only a fallback until an exact FRONT_PANEL readback is available.
 	if snapshot.HaveStatus && snapshot.Status.LCDAddress != 0 {
 		return snapshot.Status.LCDAddress, true
 	}

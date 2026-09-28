@@ -30,28 +30,29 @@ type Options struct {
 }
 
 type Snapshot struct {
-	Connected         bool
-	Paused            bool
-	Port              ports.Info
-	Hello             native.Hello
-	Status            native.Status
-	Settings          native.Settings
-	HaveStatus        bool
-	HaveSettings      bool
-	StatusUpdated     time.Time
-	ConnectionState   string
-	ConnectionReason  string
-	ConnectionUpdated time.Time
-	FrontPanel        native.FrontPanel
-	HaveFrontPanel    bool
-	FrontPanelUpdated time.Time
-	StatusLED         native.StatusLEDState
-	HaveStatusLED     bool
-	StatusLEDUpdated  time.Time
-	ProgramState      ProgramStateSnapshot
-	RFLearning        RFLearnState
-	Macros            MacroSnapshot
-	PortProcess       PortProcessSnapshot `json:"port_process"`
+	Connected              bool
+	Paused                 bool
+	Port                   ports.Info
+	Hello                  native.Hello
+	Status                 native.Status
+	Settings               native.Settings
+	HaveStatus             bool
+	HaveSettings           bool
+	StatusUpdated          time.Time
+	ConnectionState        string
+	ConnectionReason       string
+	ConnectionUpdated      time.Time
+	FrontPanel             native.FrontPanel
+	HaveFrontPanel         bool
+	HaveFrontPanelSegments bool
+	FrontPanelUpdated      time.Time
+	StatusLED              native.StatusLEDState
+	HaveStatusLED          bool
+	StatusLEDUpdated       time.Time
+	ProgramState           ProgramStateSnapshot
+	RFLearning             RFLearnState
+	Macros                 MacroSnapshot
+	PortProcess            PortProcessSnapshot `json:"port_process"`
 }
 
 type PortProcessSnapshot struct {
@@ -159,6 +160,7 @@ type Runtime struct {
 	haveSettings           bool
 	frontPanel             native.FrontPanel
 	haveFrontPanel         bool
+	haveFrontPanelSegments bool
 	frontPanelUpdated      time.Time
 	statusLED              native.StatusLEDState
 	haveStatusLED          bool
@@ -645,8 +647,9 @@ func (runtime *Runtime) Snapshot() Snapshot {
 		ConnectionReason:  runtime.connectionReason,
 		ConnectionUpdated: runtime.connectionUpdated,
 		FrontPanel:        runtime.frontPanel, HaveFrontPanel: runtime.haveFrontPanel,
-		FrontPanelUpdated: runtime.frontPanelUpdated,
-		StatusLED:         runtime.statusLED, HaveStatusLED: runtime.haveStatusLED,
+		HaveFrontPanelSegments: runtime.haveFrontPanelSegments,
+		FrontPanelUpdated:      runtime.frontPanelUpdated,
+		StatusLED:              runtime.statusLED, HaveStatusLED: runtime.haveStatusLED,
 		StatusLEDUpdated: runtime.statusLEDUpdated,
 		ProgramState:     programState,
 		RFLearning:       rfLearning,
@@ -665,6 +668,7 @@ func (runtime *Runtime) clearPeerStateLocked() {
 	runtime.statusUpdated = time.Time{}
 	runtime.frontPanel = native.FrontPanel{}
 	runtime.haveFrontPanel = false
+	runtime.haveFrontPanelSegments = false
 	runtime.frontPanelUpdated = time.Time{}
 	runtime.statusLED = native.StatusLEDState{}
 	runtime.haveStatusLED = false
@@ -1194,6 +1198,7 @@ func (runtime *Runtime) attachWhen(result link.OpenResult, allowed func() bool) 
 	runtime.haveSettings = false
 	runtime.statusUpdated = time.Time{}
 	runtime.haveFrontPanel = false
+	runtime.haveFrontPanelSegments = false
 	runtime.frontPanel = native.FrontPanel{}
 	runtime.frontPanelUpdated = time.Time{}
 	runtime.statusLED = native.StatusLEDState{}
@@ -1873,6 +1878,7 @@ func (runtime *Runtime) observe(frame native.Frame) {
 		if panel, err := native.ParseFrontPanel(frame.Payload); err == nil {
 			runtime.frontPanel = panel
 			runtime.haveFrontPanel = true
+			runtime.haveFrontPanelSegments = true
 			runtime.frontPanelUpdated = time.Now()
 		}
 	case native.OpSegmentChanged:
@@ -1880,6 +1886,7 @@ func (runtime *Runtime) observe(frame native.Frame) {
 			runtime.frontPanel.RawSegments = state.RawSegments
 			runtime.frontPanel.Brightness = state.Brightness
 			runtime.frontPanel.SegmentsActive = true
+			runtime.haveFrontPanelSegments = true
 			runtime.frontPanelUpdated = time.Now()
 		}
 	case native.OpStatusLEDChanged:

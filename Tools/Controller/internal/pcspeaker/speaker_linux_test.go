@@ -103,6 +103,7 @@ func TestLinuxNativeProbeUsesConsoleDevicesWithoutEmittingTone(t *testing.T) {
 	}()
 
 	var opened []string
+	var probed []int
 	closed := 0
 	linuxSpeakerDevices = []string{"/missing", "/console"}
 	nativeLinuxSpeakerOperations = linuxSpeakerOperations{
@@ -113,8 +114,11 @@ func TestLinuxNativeProbeUsesConsoleDevicesWithoutEmittingTone(t *testing.T) {
 			}
 			return 41, nil
 		},
-		ioctl: func(int, uint, int) error {
-			t.Fatal("native probe emitted a tone")
+		ioctl: func(fd int, request uint, value int) error {
+			if fd != 41 || request != linuxKDMKTONE || value != 0 {
+				t.Fatalf("probe ioctl fd=%d request=%#x value=%d", fd, request, value)
+			}
+			probed = append(probed, value)
 			return nil
 		},
 		close: func(fd int) error {
@@ -129,7 +133,51 @@ func TestLinuxNativeProbeUsesConsoleDevicesWithoutEmittingTone(t *testing.T) {
 	if err := probeNative(""); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(opened, []string{"/missing", "/console"}) || closed != 1 {
-		t.Fatalf("opened=%q closed=%d", opened, closed)
+	if !reflect.DeepEqual(opened, []string{"/missing", "/console"}) ||
+		!reflect.DeepEqual(probed, []int{0}) || closed != 1 {
+		t.Fatalf("opened=%q probed=%v closed=%d", opened, probed, closed)
+	}
+}
+
+func TestLinuxNativeProbeRejectsOpenDeviceWithoutKDMKTONE(t *testing.T) {
+	originalDevices := linuxSpeakerDevices
+	originalOperations := nativeLinuxSpeakerOperations
+	defer func() {
+		linuxSpeakerDevices = originalDevices
+		nativeLinuxSpeakerOperations = originalOperations
+	}()
+
+	var opened []string
+	var closed []int
+	linuxSpeakerDevices = []string{"/not-a-speaker", "/console"}
+	nativeLinuxSpeakerOperations = linuxSpeakerOperations{
+		open: func(path string, _ int, _ uint32) (int, error) {
+			opened = append(opened, path)
+			if path == "/not-a-speaker" {
+				return 11, nil
+			}
+			return 12, nil
+		},
+		ioctl: func(fd int, request uint, value int) error {
+			if request != linuxKDMKTONE || value != 0 {
+				t.Fatalf("probe request=%#x value=%d", request, value)
+			}
+			if fd == 11 {
+				return errors.New("inappropriate ioctl")
+			}
+			return nil
+		},
+		close: func(fd int) error {
+			closed = append(closed, fd)
+			return nil
+		},
+	}
+
+	if err := probeNative(""); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(opened, []string{"/not-a-speaker", "/console"}) ||
+		!reflect.DeepEqual(closed, []int{11, 12}) {
+		t.Fatalf("opened=%q closed=%v", opened, closed)
 	}
 }

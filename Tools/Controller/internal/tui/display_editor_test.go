@@ -133,6 +133,8 @@ func TestMenusPageRendersOnlyAdvertisedFetchedPanelAndDisplayControls(t *testing
 	panelWithoutLCD := fetched
 	panelWithoutLCD.FrontPanel.LCDAvailable = false
 	panelWithoutLCD.FrontPanel.LCDAddress = 0
+	panelWithoutLCD.HaveStatus = true
+	panelWithoutLCD.Status.LCDAddress = 0x27
 	rendered, _ = render(panelWithoutLCD)
 	assertAbsent(t, rendered, "2×16 LCD", "Fetched")
 

@@ -118,7 +118,17 @@ func probeNative(string) error {
 			attempts = append(attempts, fmt.Errorf("open %s: %w", device, openErr))
 			continue
 		}
-		if closeErr := nativeLinuxSpeakerOperations.close(fd); closeErr != nil {
+		probeErr := nativeLinuxSpeakerOperations.ioctl(fd, linuxKDMKTONE, 0)
+		closeErr := nativeLinuxSpeakerOperations.close(fd)
+		if probeErr != nil {
+			failure := fmt.Errorf("probe %s KDMKTONE: %w", device, probeErr)
+			if closeErr != nil {
+				failure = errors.Join(failure, fmt.Errorf("close %s: %w", device, closeErr))
+			}
+			attempts = append(attempts, failure)
+			continue
+		}
+		if closeErr != nil {
 			return fmt.Errorf("close %s: %w", device, closeErr)
 		}
 		return nil
@@ -127,5 +137,5 @@ func probeNative(string) error {
 	for _, attempt := range attempts {
 		detail = append(detail, attempt.Error())
 	}
-	return fmt.Errorf("open Linux PC speaker: %s", strings.Join(detail, "; "))
+	return fmt.Errorf("probe Linux PC speaker: %s", strings.Join(detail, "; "))
 }
