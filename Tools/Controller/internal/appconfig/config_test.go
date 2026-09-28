@@ -243,12 +243,17 @@ func TestReloadErrorReportingSuppressesOnlyIdenticalConsecutiveFailures(t *testi
 func TestMacroValidation(t *testing.T) {
 	value := Defaults()
 	value.Macros = []Macro{{
-		ID: 1, Name: "demo", Label: "dEMO",
+		ID: 1, Name: "demo", Label: "dEMO", Mode: "mcu",
 		Steps: []MacroStep{{AtUS: 0, Kind: "relay", Target: 7, Value: 1}},
 	}}
 	if err := value.Validate(); err != nil {
 		t.Fatal(err)
 	}
+	value.Macros[0].Mode = ""
+	if err := value.Validate(); err == nil {
+		t.Fatal("missing macro mode was accepted")
+	}
+	value.Macros[0].Mode = "mcu"
 	value.Macros[0].Steps[0].Target = 8
 	if err := value.Validate(); err == nil {
 		t.Fatal("expected invalid relay target")

@@ -540,8 +540,7 @@ func (model Model) openPort() (Model, tea.Cmd, bool) {
 		return model, nil, true
 	}
 	model.connectPending = true
-	model.runtime.ResumeAuto()
-	return model, connect(model.runtime), true
+	return model, connectAndResume(model.runtime), true
 }
 
 func (model Model) reconnectNow() (Model, tea.Cmd, bool) {
@@ -559,8 +558,7 @@ func (model Model) reconnectNow() (Model, tea.Cmd, bool) {
 	model.connectPending = true
 	model.connectRetryAt = time.Time{}
 	model.connectRetryDelay = 0
-	model.runtime.ResumeAuto()
-	return model, connect(model.runtime), true
+	return model, connectAndResume(model.runtime), true
 }
 
 func (model Model) closePort() (Model, tea.Cmd, bool) {
@@ -1478,6 +1476,11 @@ func (model Model) pageShortcut(key string) (Model, tea.Cmd, bool) {
 			return model, model.openHostMenuCommand(""), true
 		}
 		if key == "m" {
+			snapshot := model.snapshot()
+			if !model.lcdPromptMirrorAvailable(snapshot) {
+				model.setNotice("LCD prompt mirroring is unavailable until the connected board reports an LCD")
+				return model, nil, true
+			}
 			model.uiValue.MirrorPromptToLCD = !model.lcdMirror
 			model.lcdMirror = model.uiValue.MirrorPromptToLCD
 			if model.saveUI != nil {
@@ -1486,11 +1489,7 @@ func (model Model) pageShortcut(key string) (Model, tea.Cmd, bool) {
 					return model, nil, true
 				}
 			}
-			state := model.currentFrontPanel(model.snapshot())
-			if model.mirrorLCD == nil {
-				model.setNotice("LCD prompt mirror UI toggled; device mirror capability unavailable")
-				return model, nil, true
-			}
+			state := model.currentFrontPanel(snapshot)
 			return model, func() tea.Msg {
 				err := model.mirrorLCD(state.LCDLine1, state.LCDLine2)
 				return commandResultMsg{line: "LCD prompt mirror", err: err}
@@ -1694,7 +1693,16 @@ func (model Model) frontPanelGesture(key int, phase string) (Model, tea.Cmd, boo
 	if key < 1 || key > 4 {
 		return model, nil, true
 	}
+	if !model.frontPanelControlsAvailable(model.snapshot()) {
+		model.setNotice("Front-panel keys are unavailable until an exact panel snapshot and remote-key capability/backend are reported")
+		return model, nil, true
+	}
 	if model.hostMenus != nil && model.hostMenus.Snapshot().Active {
+		if phase == "down" {
+			phase = "press"
+		} else if phase == "up" {
+			phase = "release"
+		}
 		return model, model.hostMenuKeyCommand(key, phase), true
 	}
 	if model.frontPanelKey != nil {
@@ -1703,11 +1711,7 @@ func (model Model) frontPanelGesture(key int, phase string) (Model, tea.Cmd, boo
 			return commandResultMsg{line: fmt.Sprintf("front-panel K%d %s", key, phase), err: err}
 		}, true
 	}
-	if phase == "release" {
-		return model, nil, true
-	}
-	actions := []string{"menu prev", "menu next", "menu dec", "menu inc"}
-	return model.dispatchLine(actions[key-1])
+	return model, nil, true
 }
 
 func (model *Model) applyCompletion(reverse bool) {
@@ -1806,7 +1810,7 @@ func (model Model) handleMouse(message tea.MouseMsg) (tea.Model, tea.Cmd) {
 		geometry := model.menuInteractionGeometry()
 		row := message.Y - contentY
 		if row >= geometry.frontPanelStart && row < geometry.frontPanelEnd {
-			return model.handleFrontPanelMouse(row, message.X, "release")
+			return model.handleFrontPanelMouse(row, message.X, "up")
 		}
 		return model, nil
 	}
@@ -1958,7 +1962,7 @@ func (model Model) handleContentClick(row, x int) (tea.Model, tea.Cmd) {
 	case PageMenus:
 		geometry := model.menuInteractionGeometry()
 		if row >= geometry.frontPanelStart && row < geometry.frontPanelEnd {
-			return model.handleFrontPanelMouse(row, x, "press")
+			return model.handleFrontPanelMouse(row, x, "down")
 		}
 		index := row - geometry.entriesStart
 		if index >= 0 && index < len(model.menuConfigurationEntries()) {

@@ -21,7 +21,6 @@ import (
 )
 
 const (
-	metadataSchema            = 1
 	maximumDescriptorMetadata = 16
 	maximumMetadataKeyBytes   = 64
 	maximumMetadataValueBytes = 256
@@ -37,14 +36,12 @@ type Store struct {
 }
 
 type storedMetadata struct {
-	Schema     int        `json:"schema"`
 	Descriptor Descriptor `json:"artifact"`
 	Blob       string     `json:"blob"`
 }
 
 type currentState struct {
-	Schema int             `json:"schema"`
-	Kinds  map[Kind]string `json:"kinds"`
+	Kinds map[Kind]string `json:"kinds"`
 }
 
 func NewStore(root string) (*Store, error) {
@@ -274,10 +271,10 @@ func (store *Store) openVerified(kind Kind, digest string) (Descriptor, *os.File
 		return Descriptor{}, nil, err
 	}
 	var metadata storedMetadata
-	if err := strictJSON(content, &metadata); err != nil {
+	if err := decodeStoredJSON(content, &metadata); err != nil {
 		return Descriptor{}, nil, fmt.Errorf("decode artifact metadata: %w", err)
 	}
-	if metadata.Schema != metadataSchema || metadata.Descriptor.Kind != kind || metadata.Descriptor.SHA256 != normalized {
+	if metadata.Descriptor.Kind != kind || metadata.Descriptor.SHA256 != normalized {
 		return Descriptor{}, nil, errors.New("artifact metadata identity mismatch")
 	}
 	blob, err := store.resolveBlob(metadata.Blob)
@@ -354,17 +351,17 @@ func (store *Store) List(kind *Kind) ([]Descriptor, error) {
 }
 
 func (store *Store) SetCurrent(kind Kind, digest string) error {
-	if _, err := store.Get(kind, digest); err != nil {
+	descriptor, err := store.Get(kind, digest)
+	if err != nil {
 		return err
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	state, _ := store.loadCurrentLocked()
-	if state.Kinds == nil {
-		state.Kinds = make(map[Kind]string)
+	state, err := store.loadCurrentLocked()
+	if err != nil {
+		return err
 	}
-	state.Schema = metadataSchema
-	state.Kinds[kind] = digest
+	state.Kinds[kind] = descriptor.SHA256
 	return store.writeJSONAtomic("current.json", state)
 }
 
@@ -415,7 +412,8 @@ func (store *Store) writeMetadata(descriptor Descriptor, blob string) error {
 	}
 	if existing, readErr := root.ReadFile(path); readErr == nil {
 		var metadata storedMetadata
-		if strictJSON(existing, &metadata) == nil && metadata.Descriptor.SHA256 == descriptor.SHA256 {
+		if decodeStoredJSON(existing, &metadata) == nil && metadata.Descriptor.Kind == descriptor.Kind &&
+			metadata.Descriptor.SHA256 == descriptor.SHA256 {
 			// A content-addressed duplicate must not silently rename or redefine
 			// an existing recovery default. Bundled embedded identity wins over
 			// upload provenance; otherwise the first stored identity remains
@@ -443,7 +441,7 @@ func (store *Store) writeMetadata(descriptor Descriptor, blob string) error {
 		}
 	}
 	descriptor.LocalPath = ""
-	return store.writeJSONAtomic(path, storedMetadata{Schema: metadataSchema, Descriptor: descriptor, Blob: relative})
+	return store.writeJSONAtomic(path, storedMetadata{Descriptor: descriptor, Blob: relative})
 }
 
 func canonicalStoreKind(kind Kind) (Kind, error) {
@@ -513,20 +511,25 @@ func (store *Store) loadCurrentLocked() (currentState, error) {
 	defer root.Close()
 	content, err := root.ReadFile("current.json")
 	if errors.Is(err, os.ErrNotExist) {
-		return currentState{Schema: metadataSchema, Kinds: make(map[Kind]string)}, nil
+		return currentState{Kinds: make(map[Kind]string)}, nil
 	}
 	if err != nil {
 		return currentState{}, err
 	}
 	var state currentState
-	if err := strictJSON(content, &state); err != nil {
+	if err := decodeStoredJSON(content, &state); err != nil {
 		return currentState{}, err
 	}
-	if state.Schema != metadataSchema {
-		return currentState{}, fmt.Errorf("unsupported artifact current-state schema %d", state.Schema)
-	}
 	if state.Kinds == nil {
-		state.Kinds = make(map[Kind]string)
+		return currentState{}, errors.New("artifact current state has no kinds map")
+	}
+	for kind, digest := range state.Kinds {
+		if _, err := canonicalStoreKind(kind); err != nil {
+			return currentState{}, err
+		}
+		if normalized, err := normalizeSHA256(digest); err != nil || normalized != digest {
+			return currentState{}, errors.New("artifact current state has an invalid digest")
+		}
 	}
 	return state, nil
 }
@@ -649,16 +652,20 @@ func verifyRegularFileHandle(file *os.File, expectedHash string, expectedBytes i
 	return err
 }
 
-func strictJSON(content []byte, destination any) error {
+// decodeStoredJSON accepts additive host-owned fields while still requiring one
+// bounded JSON document. Callers validate their identity and safety fields.
+func decodeStoredJSON(content []byte, destination any) error {
+	if len(content) > 1024*1024 {
+		return errors.New("stored JSON exceeds size limit")
+	}
 	decoder := json.NewDecoder(strings.NewReader(string(content)))
-	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(destination); err != nil {
 		return err
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		if err == nil {
-			return errors.New("JSON contains trailing data")
+			return errors.New("stored JSON contains trailing data")
 		}
 		return err
 	}

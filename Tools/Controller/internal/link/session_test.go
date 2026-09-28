@@ -25,12 +25,40 @@ func currentHelloPayload(capabilities uint32) []byte {
 }
 
 type fakePort struct {
-	mu      sync.Mutex
-	reads   chan []byte
-	closed  chan struct{}
-	onWrite func([]byte)
-	dtr     []bool
-	rts     []bool
+	mu                 sync.Mutex
+	reads              chan []byte
+	closed             chan struct{}
+	onWrite            func([]byte)
+	onSetReadTimeout   func(time.Duration) error
+	onResetInputBuffer func() error
+	dtr                []bool
+	rts                []bool
+}
+
+type openAcquisitionPort struct {
+	*fakePort
+
+	closeMu       sync.Mutex
+	closeCalls    int
+	closeFailures int
+	closeErr      error
+}
+
+func newOpenAcquisitionPort() *openAcquisitionPort {
+	return &openAcquisitionPort{fakePort: newFakePort()}
+}
+
+func (port *openAcquisitionPort) Close() error {
+	port.closeMu.Lock()
+	port.closeCalls++
+	if port.closeFailures > 0 {
+		port.closeFailures--
+		err := port.closeErr
+		port.closeMu.Unlock()
+		return err
+	}
+	port.closeMu.Unlock()
+	return port.fakePort.Close()
 }
 
 func newFakePort() *fakePort {
@@ -54,8 +82,13 @@ func (port *fakePort) Write(data []byte) (int, error) {
 	}
 	return len(data), nil
 }
-func (port *fakePort) Drain() error             { return nil }
-func (port *fakePort) ResetInputBuffer() error  { return nil }
+func (port *fakePort) Drain() error { return nil }
+func (port *fakePort) ResetInputBuffer() error {
+	if port.onResetInputBuffer != nil {
+		return port.onResetInputBuffer()
+	}
+	return nil
+}
 func (port *fakePort) ResetOutputBuffer() error { return nil }
 func (port *fakePort) SetDTR(value bool) error {
 	port.mu.Lock()
@@ -72,7 +105,12 @@ func (port *fakePort) SetRTS(value bool) error {
 func (port *fakePort) GetModemStatusBits() (*serial.ModemStatusBits, error) {
 	return &serial.ModemStatusBits{}, nil
 }
-func (port *fakePort) SetReadTimeout(time.Duration) error { return nil }
+func (port *fakePort) SetReadTimeout(timeout time.Duration) error {
+	if port.onSetReadTimeout != nil {
+		return port.onSetReadTimeout(timeout)
+	}
+	return nil
+}
 func (port *fakePort) Close() error {
 	select {
 	case <-port.closed:
@@ -82,6 +120,244 @@ func (port *fakePort) Close() error {
 	return nil
 }
 func (port *fakePort) Break(time.Duration) error { return nil }
+
+func TestOpenContextCancellationRetainsPendingSerialAcquisition(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan serialOpenResult)
+	originalOpen := openSerialPort
+	openSerialPort = func(string, *serial.Mode) (serial.Port, error) {
+		close(started)
+		result := <-release
+		return result.port, result.err
+	}
+	t.Cleanup(func() { openSerialPort = originalOpen })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	type openResult struct {
+		session *Session
+		err     error
+	}
+	opened := make(chan openResult, 1)
+	go func() {
+		session, err := OpenContext(ctx, "COM3", DefaultBaudRate)
+		opened <- openResult{session: session, err: err}
+	}()
+
+	<-started
+	cancel()
+	var result openResult
+	select {
+	case result = <-opened:
+	case <-time.After(time.Second):
+		t.Fatal("OpenContext did not return after cancellation")
+	}
+	if result.session == nil || !errors.Is(result.err, context.Canceled) {
+		t.Fatalf("OpenContext session=%p error=%v, want retained acquisition owner and cancellation", result.session, result.err)
+	}
+	startedAt := time.Now()
+	if err := result.session.Close(); !errors.Is(err, ErrSerialOpenPending) {
+		t.Fatalf("Close before acquisition result = %v, want ErrSerialOpenPending", err)
+	}
+	if elapsed := time.Since(startedAt); elapsed > 100*time.Millisecond {
+		t.Fatalf("Close before acquisition result took %v, want bounded return", elapsed)
+	}
+
+	port := newOpenAcquisitionPort()
+	release <- serialOpenResult{port: port}
+	if err := awaitAcquisitionClose(result.session); err != nil {
+		t.Fatalf("close late-opened port: %v", err)
+	}
+	port.closeMu.Lock()
+	defer port.closeMu.Unlock()
+	if port.closeCalls != 1 {
+		t.Fatalf("late-opened port close calls = %d, want 1", port.closeCalls)
+	}
+}
+
+func TestPendingSerialAcquisitionRetainsLateCloseFailureForRetry(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan serialOpenResult)
+	originalOpen := openSerialPort
+	openSerialPort = func(string, *serial.Mode) (serial.Port, error) {
+		close(started)
+		result := <-release
+		return result.port, result.err
+	}
+	t.Cleanup(func() { openSerialPort = originalOpen })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	opened := make(chan *Session, 1)
+	go func() {
+		session, _ := OpenContext(ctx, "COM3", DefaultBaudRate)
+		opened <- session
+	}()
+	<-started
+	cancel()
+	session := <-opened
+	if err := session.Close(); !errors.Is(err, ErrSerialOpenPending) {
+		t.Fatalf("initial Close = %v, want ErrSerialOpenPending", err)
+	}
+
+	closeErr := errors.New("CancelIoEx failed")
+	port := newOpenAcquisitionPort()
+	port.closeFailures = 1
+	port.closeErr = closeErr
+	release <- serialOpenResult{port: port}
+	if err := awaitAcquisitionClose(session); !errors.Is(err, closeErr) {
+		t.Fatalf("first Close after late acquisition = %v, want %v", err, closeErr)
+	}
+	if err := session.Close(); err != nil {
+		t.Fatalf("retry Close after late acquisition: %v", err)
+	}
+	port.closeMu.Lock()
+	defer port.closeMu.Unlock()
+	if port.closeCalls != 2 {
+		t.Fatalf("late-opened port close calls = %d, want failed attempt plus retry", port.closeCalls)
+	}
+}
+
+func TestPendingSerialAcquisitionCompletesWhenLateOpenFails(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan serialOpenResult)
+	originalOpen := openSerialPort
+	openSerialPort = func(string, *serial.Mode) (serial.Port, error) {
+		close(started)
+		result := <-release
+		return result.port, result.err
+	}
+	t.Cleanup(func() { openSerialPort = originalOpen })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	opened := make(chan *Session, 1)
+	go func() {
+		session, _ := OpenContext(ctx, "COM3", DefaultBaudRate)
+		opened <- session
+	}()
+	<-started
+	cancel()
+	session := <-opened
+	if err := session.Close(); !errors.Is(err, ErrSerialOpenPending) {
+		t.Fatalf("initial Close = %v, want ErrSerialOpenPending", err)
+	}
+	release <- serialOpenResult{err: errors.New("device disappeared")}
+	if err := awaitAcquisitionClose(session); err != nil {
+		t.Fatalf("Close after late open error: %v", err)
+	}
+	select {
+	case <-session.Done():
+	default:
+		t.Fatal("late open error did not complete close-only session")
+	}
+}
+
+func TestOpenContextNormalSerialAcquisitionStartsSession(t *testing.T) {
+	port := newOpenAcquisitionPort()
+	originalOpen := openSerialPort
+	openSerialPort = func(string, *serial.Mode) (serial.Port, error) { return port, nil }
+	t.Cleanup(func() { openSerialPort = originalOpen })
+
+	session, err := OpenContext(context.Background(), "COM3", DefaultBaudRate)
+	if err != nil || session == nil {
+		t.Fatalf("OpenContext session=%p error=%v", session, err)
+	}
+	if err := session.Close(); err != nil {
+		t.Fatalf("Close normal acquisition: %v", err)
+	}
+	port.closeMu.Lock()
+	defer port.closeMu.Unlock()
+	if port.closeCalls != 1 {
+		t.Fatalf("normal port close calls = %d, want 1", port.closeCalls)
+	}
+}
+
+func TestOpenContextCancellationDuringSerialConfigurationRetainsPort(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	port := newOpenAcquisitionPort()
+	port.onResetInputBuffer = func() error {
+		close(started)
+		<-release
+		return nil
+	}
+	originalOpen := openSerialPort
+	openSerialPort = func(string, *serial.Mode) (serial.Port, error) { return port, nil }
+	t.Cleanup(func() { openSerialPort = originalOpen })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	type openResult struct {
+		session *Session
+		err     error
+	}
+	opened := make(chan openResult, 1)
+	go func() {
+		session, err := OpenContext(ctx, "COM3", DefaultBaudRate)
+		opened <- openResult{session: session, err: err}
+	}()
+
+	<-started
+	cancel()
+	close(release)
+
+	select {
+	case result := <-opened:
+		if result.session == nil || !errors.Is(result.err, context.Canceled) {
+			t.Fatalf("OpenContext session=%p error=%v, want retained configured port and cancellation", result.session, result.err)
+		}
+		if err := result.session.Close(); err != nil {
+			t.Fatalf("Close configured canceled session: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("OpenContext did not return after cancellation during configuration")
+	}
+
+	port.closeMu.Lock()
+	defer port.closeMu.Unlock()
+	if port.closeCalls != 1 {
+		t.Fatalf("configured canceled port close calls = %d, want 1", port.closeCalls)
+	}
+}
+
+func TestOpenContextResetInputBufferFailureClosesPort(t *testing.T) {
+	resetErr := errors.New("reset input buffer failed")
+	port := newOpenAcquisitionPort()
+	port.onResetInputBuffer = func() error { return resetErr }
+	originalOpen := openSerialPort
+	openSerialPort = func(string, *serial.Mode) (serial.Port, error) { return port, nil }
+	t.Cleanup(func() { openSerialPort = originalOpen })
+
+	session, err := OpenContext(context.Background(), "COM3", DefaultBaudRate)
+	if session != nil || !errors.Is(err, resetErr) {
+		t.Fatalf("OpenContext session=%p error=%v, want reset failure without live session", session, err)
+	}
+
+	port.closeMu.Lock()
+	defer port.closeMu.Unlock()
+	if port.closeCalls != 1 {
+		t.Fatalf("reset failure close calls = %d, want 1", port.closeCalls)
+	}
+}
+
+func TestOpenContextRejectsNilSerialPort(t *testing.T) {
+	originalOpen := openSerialPort
+	openSerialPort = func(string, *serial.Mode) (serial.Port, error) { return nil, nil }
+	t.Cleanup(func() { openSerialPort = originalOpen })
+
+	session, err := OpenContext(context.Background(), "COM3", DefaultBaudRate)
+	if session != nil || err == nil {
+		t.Fatalf("OpenContext session=%p error=%v, want explicit nil-port error", session, err)
+	}
+}
+
+func awaitAcquisitionClose(session *Session) error {
+	deadline := time.Now().Add(time.Second)
+	for {
+		err := session.Close()
+		if !errors.Is(err, ErrSerialOpenPending) || time.Now().After(deadline) {
+			return err
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
 
 func TestAuthenticateRequiresPCControllerIdentity(t *testing.T) {
 	port := newFakePort()

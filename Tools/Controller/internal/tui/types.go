@@ -158,6 +158,7 @@ type FrontPanelState struct {
 	LCDLine1         string
 	LCDLine2         string
 	LCDBacklight     bool
+	HaveLCD          bool
 	MenuID           byte
 	MenuName         string
 	Submode          string
@@ -198,6 +199,8 @@ type RemoteBackend struct {
 	InitialSnapshot           control.Snapshot
 	InitialSnapshotReceivedAt time.Time
 	Snapshot                  func(context.Context) (control.Snapshot, error)
+	FrontPanel                func(context.Context) (native.FrontPanel, error)
+	LCDPresentation           func(context.Context) (control.LCDPresentationState, error)
 	Events                    <-chan control.Event
 	Live                      <-chan RemoteLiveUpdate
 	// SetLiveInterval switches both producer measurement demand and the bounded
@@ -249,6 +252,9 @@ type Options struct {
 	AckAppAction     func(hostui.ActionAck) error
 	Remote           *RemoteBackend
 	Preview          *control.Snapshot
+	// AutoConnect starts the first bounded local connection attempt as a Tea
+	// command, after the initial frame and title can be rendered.
+	AutoConnect      bool
 	ForceWelcome     bool
 	DisableWelcome   bool
 	MarkWelcomed     func()

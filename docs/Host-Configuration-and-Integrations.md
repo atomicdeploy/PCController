@@ -395,8 +395,8 @@ LED/telemetry housekeeping, and schedules ordinary commands from the host's
 monotonic clock with a 100 ms acceptance tolerance. This is the quick
 prototyping path and works without the MCU timed-queue capability. Use
 `macro record start-mcu NAME ...` for the stricter MCU acknowledgement-clocked
-recorder and firmware queue. Existing macros whose `mode` is absent retain MCU
-semantics; the host never silently changes their executor.
+recorder and firmware queue. Every macro declares `mode: host` or `mode: mcu`;
+missing or unknown modes are rejected rather than selecting an executor.
 
 See [Host macro recording and playback](Host-Macro-Recording.md) for the
 CLI walkthrough, live Web/remote-TUI state, rename/category operations, and

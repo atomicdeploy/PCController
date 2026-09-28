@@ -320,13 +320,6 @@ func appActionTracksOutcome(registry *hostui.InstanceRegistry, action hostui.App
 	return hostui.TracksRegisteredAppActionOutcome(registry, action.Kind, action.Target)
 }
 
-func validateLegacyAppActionTracking(action hostui.AppAction, timeoutMS int) error {
-	if strings.TrimSpace(action.OperationID) != "" || timeoutMS != 0 {
-		return errors.New("operation_id and timeout_ms require an outcome-capable app action")
-	}
-	return nil
-}
-
 // browserUISettings is the narrow persistent host-owned subset exposed to the
 // browser. Board EEPROM settings remain on the independent board command path.
 type browserUISettings struct {
@@ -900,18 +893,7 @@ func (service *Service) dispatch(
 			if command == "" {
 				err = errors.New("command is required")
 			} else if strings.HasPrefix(strings.ToLower(command), "app ") {
-				var action hostui.AppAction
-				action, err = hostui.ParseAction(command, "ipc-command")
-				if err == nil {
-					if service.AppAction == nil {
-						err = errors.New("primary app action routing is unavailable")
-					} else {
-						err = service.AppAction(action)
-						if err == nil {
-							result = map[string]string{"output": "app action accepted"}
-						}
-					}
-				}
+				err = errors.New("app actions require controller.app.action")
 			} else if strings.EqualFold(command, "quit") || strings.EqualFold(command, "exit") {
 				if service.Shutdown == nil {
 					err = errors.New("primary-process shutdown is unavailable")
@@ -1208,7 +1190,11 @@ func (service *Service) dispatch(
 				err = errors.New("navigation synchronization metadata is coordinator-owned; use controller.app.navigate")
 			} else if hostui.HasCoordinatorActionDeliveryMetadata(action.Metadata) {
 				err = errors.New("app action delivery metadata is coordinator-owned")
-			} else if service.AppActionSubmit != nil && appActionTracksOutcome(service.AppInstances, action) {
+			} else if service.AppActionSubmit == nil {
+				err = errors.New("tracked app action routing is unavailable")
+			} else if !appActionTracksOutcome(service.AppInstances, action) {
+				err = errors.New("app action is not outcome-capable or advertised by a live target")
+			} else {
 				action.Source = firstNonempty(action.Source, "ipc")
 				var timeout time.Duration
 				timeout, err = appActionTimeout(params.TimeoutMS)
@@ -1218,14 +1204,6 @@ func (service *Service) dispatch(
 					if err == nil {
 						result = appActionEnvelope(operation)
 					}
-				}
-			} else if service.AppAction == nil {
-				err = errors.New("primary app action routing is unavailable")
-			} else {
-				action.Source = firstNonempty(action.Source, "ipc")
-				if err = validateLegacyAppActionTracking(action, params.TimeoutMS); err == nil {
-					err = service.AppAction(action)
-					result = map[string]bool{"accepted": err == nil}
 				}
 			}
 		}
@@ -3264,8 +3242,8 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		if service.AppActionSubmit == nil && service.AppAction == nil {
-			writeHTTPJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "primary app action routing is unavailable"})
+		if service.AppActionSubmit == nil {
+			writeHTTPJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "tracked app action routing is unavailable"})
 			return
 		}
 		var params appActionRequest
@@ -3294,34 +3272,27 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 			})
 			return
 		}
-		if service.AppActionSubmit != nil && appActionTracksOutcome(service.AppInstances, action) {
-			timeout, timeoutErr := appActionTimeout(params.TimeoutMS)
-			if timeoutErr != nil {
-				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": timeoutErr.Error()})
-				return
-			}
-			operation, submitErr := service.AppActionSubmit(action, timeout)
-			if submitErr != nil {
-				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": submitErr.Error()})
-				return
-			}
-			envelope := appActionEnvelope(operation)
-			status := http.StatusAccepted
-			if !envelope.Accepted {
-				status = http.StatusConflict
-			}
-			writeHTTPJSON(writer, status, envelope)
+		if !appActionTracksOutcome(service.AppInstances, action) {
+			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": "app action is not outcome-capable or advertised by a live target"})
 			return
 		}
-		if err := validateLegacyAppActionTracking(action, params.TimeoutMS); err != nil {
-			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		timeout, timeoutErr := appActionTimeout(params.TimeoutMS)
+		if timeoutErr != nil {
+			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": timeoutErr.Error()})
 			return
 		}
-		if err := service.AppAction(action); err != nil {
-			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		operation, submitErr := service.AppActionSubmit(action, timeout)
+		if submitErr != nil {
+			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": submitErr.Error()})
 			return
 		}
-		writeHTTPJSON(writer, http.StatusAccepted, map[string]bool{"accepted": true})
+		envelope := appActionEnvelope(operation)
+		status := http.StatusAccepted
+		if !envelope.Accepted {
+			status = http.StatusConflict
+		}
+		writeHTTPJSON(writer, status, envelope)
+		return
 	})
 	mux.HandleFunc("/api/app/action/ack", func(writer http.ResponseWriter, request *http.Request) {
 		if !authorizeHTTPRequest(writer, request, service) {
@@ -4483,17 +4454,6 @@ func streamWebSocketEventStream(
 		}); err != nil {
 			return
 		}
-	}
-}
-
-// streamableEventKind remains the compatibility classifier for callers that
-// have not yet received an explicit stream field.
-func streamableEventKind(kind string) bool {
-	switch strings.ToLower(strings.TrimSpace(kind)) {
-	case "", "telemetry", "rx", "tx", "front_panel.segment", "status_led.changed", "buzzer.note", "illumination.changed", "settings.changed":
-		return false
-	default:
-		return true
 	}
 }
 

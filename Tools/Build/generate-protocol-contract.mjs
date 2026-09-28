@@ -85,18 +85,18 @@ function validateRegistry(entries, label, fields) {
 }
 
 // validateContract rejects ambiguous registries before either public target is
-// rendered. The exact legacy extensions are guarded here instead of relying on
+// rendered. The exact physical extensions are guarded here instead of relying on
 // a reviewer to notice a hexadecimal value changing in a generated diff.
 export function validateContract(contract) {
-  if (contract === null || typeof contract !== "object" || contract.schema !== 1) {
-    throw new Error("protocol contract schema must be 1");
+  if (contract === null || typeof contract !== "object") {
+    throw new Error("protocol contract must be an object");
   }
   const envelope = contract.envelope;
   if (envelope === null || typeof envelope !== "object") {
     throw new Error("protocol contract requires an envelope object");
   }
   requireInteger(envelope.magic, "envelope.magic");
-  requireInteger(envelope.revision, "envelope.revision");
+  requireInteger(envelope.reserved, "envelope.reserved");
   requireInteger(envelope.maximumPayload, "envelope.maximumPayload", 1, 247);
   requireInteger(envelope.rawFrameOverhead, "envelope.rawFrameOverhead", 6, 16);
   requireInteger(
@@ -138,8 +138,8 @@ export function validateContract(contract) {
       throw new Error(`${name} must remain ${value}`);
     }
   }
-  if (envelope.magic !== 0xA5 || envelope.revision !== 1 || envelope.maximumPayload !== 48) {
-    throw new Error("the published native envelope must remain A5/revision-1/48-byte payload");
+  if (envelope.magic !== 0xA5 || envelope.reserved !== 1 || envelope.maximumPayload !== 48) {
+    throw new Error("the published native envelope must remain A5/reserved-1/48-byte payload");
   }
   return contract;
 }
@@ -195,7 +195,7 @@ export function renderCpp(contract) {
     "namespace WireContract {",
     "",
     `constexpr uint8_t Magic = 0x${formatHex(envelope.magic)};`,
-    `constexpr uint8_t EnvelopeRevision = ${envelope.revision};`,
+    `constexpr uint8_t ReservedEnvelopeByte = ${envelope.reserved};`,
     `constexpr uint8_t MaximumPayload = ${envelope.maximumPayload};`,
     `constexpr uint8_t RawFrameOverhead = ${envelope.rawFrameOverhead};`,
     "constexpr uint8_t MaximumRawFrame = MaximumPayload + RawFrameOverhead;",
@@ -244,7 +244,7 @@ export function renderGo(contract) {
     ...goConstBlock(
       [
         { name: "Magic", type: "byte", value: `0x${formatHex(envelope.magic)}` },
-        { name: "EnvelopeRevision", type: "byte", value: `${envelope.revision}` },
+        { name: "ReservedEnvelopeByte", type: "byte", value: `${envelope.reserved}` },
       ],
       (entry) => entry.value,
     ),

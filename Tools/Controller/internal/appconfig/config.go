@@ -226,8 +226,8 @@ type Programming struct {
 }
 
 // Macro defines a named, host-persisted sequence. Mode "host" schedules
-// ordinary commands from the controller process; mode "mcu" (and the legacy
-// empty value) streams the sequence to the firmware timing engine.
+// ordinary commands from the controller process; mode "mcu" streams the
+// sequence to the firmware timing engine. Mode is always explicit.
 type Macro struct {
 	ID                  byte        `json:"id"`
 	Name                string      `json:"name"`
@@ -713,8 +713,8 @@ func (value Config) Validate() error {
 		if len(macro.Category) > 64 || !printableASCII(macro.Category) {
 			return fmt.Errorf("macros[%d].category must be at most 64 printable ASCII bytes", index)
 		}
-		switch strings.ToLower(strings.TrimSpace(macro.Mode)) {
-		case "", "mcu", "host":
+		switch macro.Mode {
+		case "mcu", "host":
 		default:
 			return fmt.Errorf("macros[%d].mode must be host or mcu", index)
 		}

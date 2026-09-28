@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"strings"
 	"sync"
 	"time"
@@ -14,10 +13,8 @@ import (
 )
 
 const (
-	maxMelodyRepeats       = 20
-	outputRequestTimeout   = 2 * time.Second
-	minStatusStreamStep    = 50 * time.Millisecond
-	statusBreatheStepCount = 32
+	maxMelodyRepeats     = 20
+	outputRequestTimeout = 2 * time.Second
 )
 
 type outputCommander interface {
@@ -186,6 +183,10 @@ func (scheduler *OutputScheduler) StartStatusEffect(
 	}
 	if err := appconfig.ValidateStatusLEDEffect(effect); err != nil {
 		return StreamOperation{}, err
+	}
+	reporter, ok := scheduler.target.(outputCapabilityReporter)
+	if !ok || reporter.Snapshot().Hello.Capabilities&native.CapabilityStatusEffects == 0 {
+		return StreamOperation{}, errors.New("connected firmware does not advertise status effects")
 	}
 	operation, runContext, running, previousDone, err :=
 		scheduler.replace("effect", effect.Name)
@@ -429,86 +430,26 @@ func (scheduler *OutputScheduler) streamStatusEffect(
 	ctx context.Context,
 	effect appconfig.StatusLEDEffect,
 ) error {
-	if reporter, ok := scheduler.target.(outputCapabilityReporter); ok &&
-		reporter.Snapshot().Hello.Capabilities&native.CapabilityStatusEffects != 0 {
-		options, duration, err := nativeStatusEffect(effect)
-		if err != nil {
-			return err
-		}
-		payload, err := native.StatusEffectPayload(options)
-		if err != nil {
-			return err
-		}
-		if err := scheduler.send(ctx, native.OpStatusEffect, payload); err != nil {
-			return err
-		}
-		if duration == 0 {
-			<-ctx.Done()
-			return ctx.Err()
-		}
-		return waitOutput(ctx, duration)
+	reporter, ok := scheduler.target.(outputCapabilityReporter)
+	if !ok || reporter.Snapshot().Hello.Capabilities&native.CapabilityStatusEffects == 0 {
+		return errors.New("connected firmware does not advertise status effects")
 	}
-
-	// Compatibility path for older firmware. Current boards advertise the
-	// compact effect opcode and receive only one descriptor per animation.
-	started := time.Now()
-	period := time.Duration(effect.PeriodMS) * time.Millisecond
-	var step time.Duration
-	switch strings.ToLower(strings.TrimSpace(effect.Kind)) {
-	case "flash":
-		step = period / 2
-	case "breathe":
-		step = period / statusBreatheStepCount
-		if step < minStatusStreamStep {
-			step = minStatusStreamStep
-		}
-	default:
-		return fmt.Errorf("unknown status effect kind %q", effect.Kind)
+	options, duration, err := nativeStatusEffect(effect)
+	if err != nil {
+		return err
 	}
-	if step < minStatusStreamStep {
-		step = minStatusStreamStep
+	payload, err := native.StatusEffectPayload(options)
+	if err != nil {
+		return err
 	}
-
-	var priorBrightness = -1
-	for {
-		elapsed := time.Since(started)
-		if effect.DurationMS > 0 &&
-			elapsed >= time.Duration(effect.DurationMS)*time.Millisecond {
-			return nil
-		}
-		phase := math.Mod(float64(elapsed), float64(period)) / float64(period)
-		brightness := effect.MinBrightness
-		switch strings.ToLower(strings.TrimSpace(effect.Kind)) {
-		case "flash":
-			if phase < 0.5 {
-				brightness = effect.Brightness
-			}
-		case "breathe":
-			// Raised cosine starts at the minimum and has no discontinuity
-			// when the cycle wraps.
-			level := 0.5 - 0.5*math.Cos(phase*2*math.Pi)
-			span := float64(effect.Brightness - effect.MinBrightness)
-			brightness = effect.MinBrightness + byte(math.Round(level*span))
-		}
-		if int(brightness) != priorBrightness {
-			if err := scheduler.send(
-				ctx,
-				native.OpStatusRGB,
-				native.StatusRGBPayload(
-					effect.Red,
-					effect.Green,
-					effect.Blue,
-					brightness,
-				),
-			); err != nil {
-				return err
-			}
-			priorBrightness = int(brightness)
-		}
-		if err := waitOutput(ctx, step); err != nil {
-			return err
-		}
+	if err := scheduler.send(ctx, native.OpStatusEffect, payload); err != nil {
+		return err
 	}
+	if duration == 0 {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	return waitOutput(ctx, duration)
 }
 
 func nativeStatusEffect(effect appconfig.StatusLEDEffect) (
@@ -530,22 +471,10 @@ func nativeStatusEffect(effect appconfig.StatusLEDEffect) (
 		return native.StatusEffectOptions{}, 0,
 			fmt.Errorf("unknown status effect kind %q", effect.Kind)
 	}
-	repeats := effect.Repeats
 	duration := time.Duration(0)
-	if repeats != 0 {
+	if effect.Repeats != 0 {
 		duration = time.Duration(effect.PeriodMS) * time.Millisecond *
-			time.Duration(repeats)
-	} else if effect.DurationMS > 0 {
-		cycles := (effect.DurationMS + effect.PeriodMS - 1) / effect.PeriodMS
-		if cycles > 255 {
-			return native.StatusEffectOptions{}, 0,
-				fmt.Errorf("status effect duration needs %d cycles; maximum is 255", cycles)
-		}
-		repeats = byte(cycles)
-		// Wait for the same whole-cycle duration encoded for the MCU. Restoring
-		// the base color at the requested partial duration would truncate its
-		// last procedurally generated cycle.
-		duration = time.Duration(cycles*effect.PeriodMS) * time.Millisecond
+			time.Duration(effect.Repeats)
 	}
 	return native.StatusEffectOptions{
 		Kind: kind,
@@ -555,7 +484,7 @@ func nativeStatusEffect(effect appconfig.StatusLEDEffect) (
 		AlternateBlue:     effect.AlternateBlue,
 		Brightness:        effect.Brightness,
 		MinimumBrightness: effect.MinBrightness,
-		PeriodMS:          uint16(effect.PeriodMS), Repeats: repeats,
+		PeriodMS:          uint16(effect.PeriodMS), Repeats: effect.Repeats,
 	}, duration, nil
 }
 

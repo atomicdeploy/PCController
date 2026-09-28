@@ -32,7 +32,7 @@ function invariant(condition, message) {
 }
 
 function validateLock(lock) {
-  invariant(lock?.format === 'pccontroller-toolchain-lock/v1', 'unsupported canonical toolchain lock format')
+  invariant(lock && typeof lock === 'object', 'canonical toolchain lock must be an object')
   invariant(typeof lock?.firmware?.fqbn === 'string' && lock.firmware.fqbn, 'toolchain lock is missing the firmware FQBN')
   invariant(typeof lock?.firmware?.core_id === 'string' && lock.firmware.core_id, 'toolchain lock is missing the firmware core ID')
   invariant(typeof lock?.firmware?.core_version === 'string' && lock.firmware.core_version, 'toolchain lock is missing the firmware core version')

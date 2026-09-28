@@ -1479,7 +1479,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AppActionSubmitEnvelope"
+                  "$ref": "#/components/schemas/ActionOperationEnvelope"
                 }
               }
             }
@@ -4452,22 +4452,6 @@
             "$ref": "#/components/schemas/ActionOperation"
           }
         }
-      },
-      "AppActionSubmitEnvelope": {
-        "type": "object",
-        "required": [
-          "accepted"
-        ],
-        "additionalProperties": false,
-        "properties": {
-          "accepted": {
-            "type": "boolean"
-          },
-          "operation": {
-            "$ref": "#/components/schemas/ActionOperation"
-          }
-        },
-        "description": "Backward-compatible acceptance result. Outcome-capable actions also include the correlated operation."
       },
       "JSONRPCError": {
         "type": "object",

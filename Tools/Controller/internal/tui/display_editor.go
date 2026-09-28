@@ -24,11 +24,10 @@ type displayEditor struct {
 	Cursor      int
 }
 
-func displayTargetsFor(snapshot control.Snapshot) []string {
+func (model Model) displayTargetsFor(snapshot control.Snapshot) []string {
 	capabilities := snapshot.Hello.Capabilities
 	haveSegments := snapshot.Connected && capabilities&native.CapabilityScheduledSegments != 0
-	haveLCD := snapshot.Connected && snapshot.HaveStatus && snapshot.Status.LCDAddress != 0 &&
-		capabilities&native.CapabilityLCD != 0
+	haveLCD := model.lcdDisplayAvailable(snapshot)
 	result := make([]string, 0, 3)
 	if haveSegments {
 		result = append(result, "segments")
@@ -42,8 +41,34 @@ func displayTargetsFor(snapshot control.Snapshot) []string {
 	return result
 }
 
+func (model Model) lcdDisplayState(snapshot control.Snapshot) (byte, bool) {
+	if !snapshot.Connected || snapshot.Hello.Capabilities&native.CapabilityLCD == 0 {
+		return 0, false
+	}
+	if presentation, ok := model.currentLCDPresentation(snapshot); ok &&
+		presentation.Physical && presentation.Address != 0 {
+		return presentation.Address, true
+	}
+	if frontPanelSnapshotAvailable(snapshot) {
+		if snapshot.FrontPanel.LCDAvailable && snapshot.FrontPanel.LCDAddress != 0 {
+			return snapshot.FrontPanel.LCDAddress, true
+		}
+		return 0, false
+	}
+	// STATUS is only a fallback until an exact FRONT_PANEL readback is available.
+	if snapshot.HaveStatus && snapshot.Status.LCDAddress != 0 {
+		return snapshot.Status.LCDAddress, true
+	}
+	return 0, false
+}
+
+func (model Model) lcdDisplayAvailable(snapshot control.Snapshot) bool {
+	_, available := model.lcdDisplayState(snapshot)
+	return available
+}
+
 func (model Model) beginDisplayEditor() (Model, tea.Cmd, bool) {
-	targets := displayTargetsFor(model.snapshot())
+	targets := model.displayTargetsFor(model.snapshot())
 	if len(targets) == 0 {
 		model.setNotice("Display message unavailable: the connected board did not advertise LCD or scheduled segments")
 		return model, nil, true

@@ -5,6 +5,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -17,6 +19,65 @@ import (
 	"pccontroller.local/controller/internal/shell"
 	"pccontroller.local/controller/internal/tui"
 )
+
+func TestRemotePanelAndLCDMethodsUseTypedPrimaryRPCs(t *testing.T) {
+	client := &remoteTUIIPC{}
+	var methods []string
+	var keyEvents []byte
+	client.callFn = func(_ context.Context, method string, params any, target any) error {
+		methods = append(methods, method)
+		switch method {
+		case "controller.front_panel":
+			*target.(*native.FrontPanel) = native.FrontPanel{Schema: 2, MenuPage: 3}
+		case "controller.lcd.presentation.status":
+			*target.(*control.LCDPresentationState) = control.LCDPresentationState{Physical: true, Address: 0x27}
+		case "controller.lcd.prompt":
+			encoded, _ := json.Marshal(map[string]bool{"queued": true})
+			if err := json.Unmarshal(encoded, target); err != nil {
+				return err
+			}
+			values := params.(map[string]string)
+			if values["line1"] != "line one" || values["line2"] != "line two" {
+				t.Fatalf("LCD prompt params=%#v", values)
+			}
+		case "controller.opcode.send":
+			values := params.(map[string]any)
+			if values["opcode"] != native.OpRemoteKeyGesture {
+				t.Fatalf("remote-key opcode params=%#v", values)
+			}
+			payload := values["payload"].([]byte)
+			if len(payload) != 2 || payload[0] != native.MenuPrevious {
+				t.Fatalf("remote-key payload=%v", payload)
+			}
+			keyEvents = append(keyEvents, payload[1])
+		default:
+			t.Fatalf("unexpected RPC method %q", method)
+		}
+		return nil
+	}
+	panel, err := client.FrontPanel(context.Background())
+	if err != nil || panel.Schema != 2 || panel.MenuPage != 3 {
+		t.Fatalf("front panel=%#v err=%v", panel, err)
+	}
+	lcd, err := client.LCDPresentation(context.Background())
+	if err != nil || !lcd.Physical || lcd.Address != 0x27 {
+		t.Fatalf("LCD presentation=%#v err=%v", lcd, err)
+	}
+	if err := client.MirrorLCD("line one", "line two"); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.FrontPanelKey(1, "hold"); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := keyEvents, []byte{native.KeyEventDown, native.KeyEventHoldRepeat, native.KeyEventUp}; !slices.Equal(got, want) {
+		t.Fatalf("remote key lifecycle=%v, want %v", got, want)
+	}
+	want := "controller.front_panel,controller.lcd.presentation.status,controller.lcd.prompt," +
+		"controller.opcode.send,controller.opcode.send,controller.opcode.send"
+	if got := strings.Join(methods, ","); got != want {
+		t.Fatalf("RPC methods=%q, want %q", got, want)
+	}
+}
 
 func TestRemoteLiveNotificationsCoalesceAndPreserveIntentionalOff(t *testing.T) {
 	client := &remoteTUIIPC{liveRaw: make(chan tui.RemoteLiveUpdate, 1)}
