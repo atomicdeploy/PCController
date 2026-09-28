@@ -310,7 +310,7 @@ export function WorkbenchView(props: SharedViewProps) {
         {boardReady && available.rf && <RFGuidedWorkflow snapshot={snapshot} events={events} locale={locale} openDialog={props.openDialog} />}
 
         <Card className="macro-card" icon={Workflow} iconTone="green" title={copy('Macro library', 'کتابخانه ماکرو')} eyebrow={copy('Exact MCU timing · live shared state', 'زمان‌بندی دقیق MCU · وضعیت زنده مشترک')}>
-          <MacroLibraryPanel online={snapshot.connected} locale={locale} events={props.macroEvents} initialSnapshot={snapshot.macros} legacyCommand={run} />
+          <MacroLibraryPanel online={snapshot.connected} locale={locale} events={props.macroEvents} initialSnapshot={snapshot.macros} commandSurface={run} />
         </Card>
 
         <Card icon={Bot} iconTone="violet" title={copy('Host automations', 'خودکارسازی میزبان')} eyebrow={copy('Event-driven host rules', 'قواعد رویدادمحور میزبان')}>
