@@ -504,7 +504,7 @@ export function WorkbenchView(props: SharedViewProps) {
           <div className="inline-actions"><Button tone="primary" icon={Lightbulb} disabled={!displayTextIsValid} onClick={() => void run(displayPresentationCommand({ target: displayTarget, text: displayText, speedMS: displaySpeed, durationMS: displayDuration, repeat: displayRepeat, intervalMS: displayInterval, scroll: displayScroll }))}>{copy('Show text', 'نمایش متن')}</Button><Button icon={Eraser} onClick={() => void run(`display ${displayTarget} 0`)}>{copy('Clear', 'پاک‌کردن')}</Button></div>
         </Card>)}
 
-        {boardReady && available.statusLED && frame('status-lighting', copy('Addressable strip', 'نوار LED آدرس‌پذیر'), <Card icon={Lightbulb} iconTone="amber" title={copy('Addressable strip', 'نوار LED آدرس‌پذیر')} eyebrow={copy('11 pixels · status light', '۱۱ پیکسل · نور وضعیت')}>
+        {boardReady && available.statusLED && frame('status-lighting', copy('Addressable strip', 'نوار LED آدرس‌پذیر'), <Card icon={Lightbulb} iconTone="amber" title={copy('Addressable strip', 'نوار LED آدرس‌پذیر')}>
           <RangeField label={copy('Red', 'قرمز')} value={red} min={0} max={255} onChange={setRed} />
           <RangeField label={copy('Green', 'سبز')} value={green} min={0} max={255} onChange={setGreen} />
           <RangeField label={copy('Blue', 'آبی')} value={blue} min={0} max={255} onChange={setBlue} />
