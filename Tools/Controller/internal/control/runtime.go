@@ -1212,6 +1212,9 @@ func (runtime *Runtime) PulseResetFor(ctx context.Context, duration time.Duratio
 }
 
 func (runtime *Runtime) PulseResetPortFor(ctx context.Context, name string, duration time.Duration) error {
+	runtime.openMu.Lock()
+	defer runtime.openMu.Unlock()
+
 	session := runtime.currentSession()
 	snapshot := runtime.Snapshot()
 	name = strings.TrimSpace(name)
@@ -1237,11 +1240,23 @@ func (runtime *Runtime) PulseResetPortFor(ctx context.Context, name string, dura
 	runtime.mu.RUnlock()
 	temporary, err := openResetSession(ctx, name, baudRate)
 	if err != nil {
+		if temporary != nil {
+			return runtime.retainFailedOpen(link.OpenResult{
+				Session: temporary,
+				Port:    ports.Info{Name: name},
+			}, fmt.Errorf("open remembered port %s for DTR reset: %w", name, err))
+		}
 		return fmt.Errorf("open remembered port %s for DTR reset: %w", name, err)
 	}
 	runtime.publish("tx", "pulsing DTR reset before application authentication", native.Frame{})
 	pulseErr := temporary.PulseReset(ctx, duration)
 	closeErr := temporary.Close()
+	if closeErr != nil {
+		return runtime.retainFailedOpen(link.OpenResult{
+			Session: temporary,
+			Port:    ports.Info{Name: name},
+		}, errors.Join(pulseErr, fmt.Errorf("close remembered reset port %s: %w", name, closeErr)))
+	}
 	return errors.Join(pulseErr, closeErr)
 }
 
@@ -1752,6 +1767,7 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 					if runtime.generation == generation && runtime.session == session {
 						runtime.generation++
 						runtime.reconnectEpoch++
+						runtime.paused = true
 						runtime.connectionState = "close_failed"
 						runtime.connectionReason = disconnectReason
 						runtime.connectionUpdated = time.Now()

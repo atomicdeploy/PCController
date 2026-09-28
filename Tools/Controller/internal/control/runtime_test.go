@@ -31,6 +31,15 @@ type retryableCloseTestPort struct {
 	closeErr      error
 }
 
+type immediateReadFailurePort struct {
+	*retryableCloseTestPort
+	readErr error
+}
+
+func (port *immediateReadFailurePort) Read([]byte) (int, error) {
+	return 0, port.readErr
+}
+
 func newRetryableCloseTestPort(closeErr error) *retryableCloseTestPort {
 	return &retryableCloseTestPort{
 		readStarted:   make(chan struct{}),
@@ -120,6 +129,36 @@ func TestPulseResetUsesRememberedPortBeforeAuthentication(t *testing.T) {
 	}
 	if len(port.dtr) != 2 || !port.dtr[0] || port.dtr[1] {
 		t.Fatalf("unexpected DTR sequence: %v", port.dtr)
+	}
+}
+
+func TestPulseResetQuarantinesTemporaryCloseFailure(t *testing.T) {
+	cancelErr := errors.New("CancelIoEx failed")
+	port := newRetryableCloseTestPort(cancelErr)
+	session := link.NewForPort("COM4", port)
+	previous := openResetSession
+	openResetSession = func(context.Context, string, int) (*link.Session, error) {
+		return session, nil
+	}
+	defer func() { openResetSession = previous }()
+
+	runtime := New(Options{BaudRate: link.DefaultBaudRate})
+	runtime.mu.Lock()
+	runtime.paused = true
+	runtime.mu.Unlock()
+	if err := runtime.PulseResetPortFor(context.Background(), "COM4", time.Millisecond); !errors.Is(err, cancelErr) {
+		t.Fatalf("pulse reset cleanup error = %v, want %v", err, cancelErr)
+	}
+	runtime.mu.RLock()
+	retained := runtime.session
+	state := runtime.connectionState
+	paused := runtime.paused
+	runtime.mu.RUnlock()
+	if retained != session || state != "close_failed" || !paused {
+		t.Fatalf("reset cleanup owner: session=%p state=%q paused=%v, want %p/close_failed/true", retained, state, paused, session)
+	}
+	if err := runtime.Close(); err != nil {
+		t.Fatalf("retry reset cleanup: %v", err)
 	}
 }
 
@@ -706,6 +745,39 @@ func TestRuntimeCloseRetainsSessionUntilRetrySucceeds(t *testing.T) {
 	case <-pumpExited:
 	case <-time.After(time.Second):
 		t.Fatal("stale pump did not exit after successful retry closed Session.Done")
+	}
+}
+
+func TestAsyncTransportCloseFailurePausesRuntimeUntilRetry(t *testing.T) {
+	cancelErr := errors.New("CancelIoEx failed")
+	port := &immediateReadFailurePort{
+		retryableCloseTestPort: newRetryableCloseTestPort(cancelErr),
+		readErr:                errors.New("serial read failed"),
+	}
+	session := link.NewForPort("COM3", port)
+	runtime := New(Options{})
+	runtime.attach(link.OpenResult{
+		Session: session,
+		Port:    ports.Info{Name: "COM3", IsUSB: true},
+		Hello:   native.Hello{Name: "PCController"},
+	})
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		snapshot := runtime.Snapshot()
+		if snapshot.ConnectionState == "close_failed" {
+			if !snapshot.Paused || !snapshot.Connected {
+				t.Fatalf("asynchronous close failure snapshot = %#v, want paused retained ownership", snapshot)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("asynchronous close failure was not published: %#v", snapshot)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if err := runtime.Close(); err != nil {
+		t.Fatalf("retry asynchronous close: %v", err)
 	}
 }
 
