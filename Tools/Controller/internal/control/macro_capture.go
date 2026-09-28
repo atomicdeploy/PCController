@@ -12,6 +12,15 @@ import (
 	"pccontroller.local/controller/internal/native"
 )
 
+func (runtime *Runtime) beginMacroTimingWindow(bit uint32) {
+	runtime.setActiveUseState(bit, true)
+	outputs := runtime.EnsureOutputScheduler()
+	outputs.stop("strip")
+	// Drain the bounded in-flight frame before subscribing to applied edges.
+	outputs.stripMu.Lock()
+	outputs.stripMu.Unlock()
+}
+
 func (runner *MacroRunner) UpdateProfile(reference, name, category, color string) (appconfig.Macro, error) {
 	macro, err := runner.find(reference)
 	if err != nil {
@@ -153,10 +162,14 @@ func (runner *MacroRunner) ImportBoardRecording(name, category, color string) (a
 
 func (runner *MacroRunner) collectBoardRecording(ctx context.Context, save bool) error {
 	if _, err := runner.request(ctx, native.OpMacroStep, []byte{4}, native.OpACK); err != nil {
-		return err
+		status, statusErr := runner.queryBoard(ctx)
+		if save || statusErr != nil || status.Active() {
+			return err
+		}
 	}
 	if !save {
-		return nil
+		_, err := runner.request(ctx, native.OpMacroStep, []byte{7}, native.OpACK)
+		return err
 	}
 	status, err := runner.queryBoard(ctx)
 	if err != nil {

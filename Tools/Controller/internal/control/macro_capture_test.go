@@ -1,12 +1,34 @@
 package control
 
 import (
+	"context"
 	"encoding/binary"
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/native"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestHostRecordingGuardsStripClockAndRawUART(t *testing.T) {
+	config := appconfig.Defaults()
+	runner := macroTestRunner(&config, nil)
+	if _, err := runner.StartRecording("protected", "test", "green"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runner.runtime.Request(context.Background(), native.OpAddressableLED, []byte{0}); err == nil || !strings.Contains(err.Error(), "WS2811") {
+		t.Fatalf("strip guard: %v", err)
+	}
+	if err := runner.runtime.WriteRaw([]byte{0}); err == nil || !strings.Contains(err.Error(), "raw UART") {
+		t.Fatalf("raw guard: %v", err)
+	}
+	if _, err := runner.StopRecording(false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runner.runtime.Request(context.Background(), native.OpAddressableLED, []byte{0}); err == nil || !strings.Contains(err.Error(), "not connected") {
+		t.Fatalf("guard not released: %v", err)
+	}
+}
 
 func TestHostCaptureUsesAppliedRelayClockNotUSBArrival(t *testing.T) {
 	config := appconfig.Defaults()

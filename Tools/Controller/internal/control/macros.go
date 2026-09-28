@@ -316,6 +316,9 @@ func (runner *MacroRunner) startRecording(name, category, color, mode string) (M
 		runner.recordMu.Unlock()
 		return state, fmt.Errorf("macro recording %q is already active", state.Name)
 	}
+	runner.recordMu.Unlock()
+	runner.runtime.beginMacroTimingWindow(activeUseMacroRecording)
+	runner.recordMu.Lock()
 	runner.recordMacro = appconfig.Macro{
 		ID: id, Name: name, Category: strings.TrimSpace(category), Color: color,
 		Mode: mode, TimingToleranceUS: modeTimingTolerance(mode),
@@ -546,7 +549,7 @@ func (runner *MacroRunner) StartMode(ctx context.Context, reference, modeOverrid
 		Lifecycle: "buffering",
 	}
 	runner.mu.Unlock()
-	runner.runtime.setActiveUseState(activeUseMacroPlayback, true)
+	runner.runtime.beginMacroTimingWindow(activeUseMacroPlayback)
 
 	lease, _, err := runner.runtime.AcquireProgramState(
 		fmt.Sprintf("macro:%d", macro.ID),
@@ -1255,6 +1258,9 @@ func compileMacro(macro appconfig.Macro) (compiledMacro, error) {
 		opcode, payload, err := compileMacroCommand(step)
 		if err != nil {
 			return compiledMacro{}, fmt.Errorf("macro %d/%s step %d: %w", macro.ID, macro.Name, index+1, err)
+		}
+		if macro.Mode == macroModeMCU && opcode == native.OpAddressableLED {
+			return compiledMacro{}, errors.New("strip commands cannot share the MCU macro clock/workspace; use host playback for strip-only profiles")
 		}
 		record, err := native.EncodeMacroRecord(dueUS, opcode, payload)
 		if err != nil {

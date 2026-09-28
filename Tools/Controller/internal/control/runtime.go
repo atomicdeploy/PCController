@@ -1576,6 +1576,9 @@ func (runtime *Runtime) Request(
 	payload []byte,
 	expected ...byte,
 ) (native.Frame, error) {
+	if opcode == native.OpAddressableLED && runtime.activeUseMask.Load()&(activeUseMacroPlayback|activeUseMacroRecording) != 0 {
+		return native.Frame{}, errors.New("stop macro recording/playback before sending strip frames; WS2811 blocks the MCU clock interrupts")
+	}
 	session := runtime.currentSession()
 	if session == nil {
 		return native.Frame{}, errors.New("device is not connected")
@@ -1633,6 +1636,9 @@ func (runtime *Runtime) RefreshFrontPanel(ctx context.Context) (native.FrontPane
 }
 
 func (runtime *Runtime) WriteRaw(data []byte) error {
+	if runtime.activeUseMask.Load()&(activeUseMacroPlayback|activeUseMacroRecording) != 0 {
+		return errors.New("raw UART writes are unavailable during macro recording/playback")
+	}
 	session := runtime.currentSession()
 	if session == nil {
 		return errors.New("device is not connected")
