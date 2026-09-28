@@ -359,6 +359,8 @@ func (runner *MacroRunner) StopRecording(save bool) (appconfig.Macro, error) {
 		runner.recordRelease = nil
 	}
 	macro := runner.recordMacro
+	macro.Steps = append([]appconfig.MacroStep(nil), macro.Steps...)
+	sort.SliceStable(macro.Steps, func(i, j int) bool { return macro.Steps[i].AtUS < macro.Steps[j].AtUS })
 	if save && len(macro.Steps) == 0 {
 		// Keep an empty recording active: Save must never destroy the take.
 		runner.recordRelease = runner.runtime.ObserveCommands(runner.captureCommand)

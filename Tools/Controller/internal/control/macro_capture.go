@@ -81,7 +81,13 @@ func (runner *MacroRunner) captureRelayEdge(evidence CommandEvidence) {
 	if !runner.recordRelayClock {
 		runner.recordRelayOriginUS = evidence.DeviceMicros
 		runner.recordRelayOriginAt = 0
-		if !runner.recordBaseAt.IsZero() && evidence.ObservedAt.After(runner.recordBaseAt) {
+		if runner.recordMacro.Mode == macroModeMCU {
+			if !runner.recordHasBase {
+				runner.recordBaseUS = evidence.DeviceMicros
+				runner.recordHasBase = true
+			}
+			runner.recordRelayOriginUS = runner.recordBaseUS
+		} else if !runner.recordBaseAt.IsZero() && evidence.ObservedAt.After(runner.recordBaseAt) {
 			runner.recordRelayOriginAt = uint32(evidence.ObservedAt.Sub(runner.recordBaseAt) / time.Microsecond)
 		}
 		runner.recordRelayClock = true

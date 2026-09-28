@@ -528,7 +528,7 @@ func TestTemperatureAndDeviceEventSchemas(t *testing.T) {
 	if err != nil || !event.DoorOpen {
 		t.Fatalf("door event=%#v err=%v", event, err)
 	}
-	macro, err := ParseDeviceEvent([]byte{EventMacro, MacroCompleted, 7, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0})
+	macro, err := ParseDeviceEvent([]byte{EventMacro, MacroCompleted, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
 	if err != nil || macro.MacroID != 7 ||
 		macro.MacroState != MacroCompleted {
 		t.Fatalf("macro event=%#v err=%v", macro, err)
