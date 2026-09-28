@@ -16,7 +16,7 @@ import (
 
 func TestCompileMacroEncodesOrdinaryOpcodesWithExactOffsets(t *testing.T) {
 	compiled, err := compileMacro(appconfig.Macro{
-		ID: 7, Name: "demo",
+		ID: 7, Name: "demo", Mode: macroModeMCU,
 		Steps: []appconfig.MacroStep{
 			{AtUS: 0, Kind: "relay", Target: 5, Value: 1},
 			{AtUS: 1250, Kind: "pwm", Target: 2, Value: 2048},

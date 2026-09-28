@@ -68,16 +68,6 @@ func parseDisplayCommand(args []string) (DisplayRequest, error) {
 		return DisplayRequest{}, errors.New("usage: display segments|lcd|both [options] [--] [TEXT]")
 	}
 	request := DisplayRequest{Target: args[0]}
-	// Preserve the original compact form. For long segment text the historical
-	// duration value was the step speed; for static/LCD text it was the hold.
-	if len(args) >= 2 && !strings.HasPrefix(args[1], "--") {
-		if legacy, err := strconv.ParseUint(args[1], 0, 16); err == nil {
-			request.SpeedMS = int(legacy)
-			request.DurationMS = int(legacy)
-			request.Text = strings.Join(args[2:], " ")
-			return request, nil
-		}
-	}
 	for index := 1; index < len(args); index++ {
 		argument := args[index]
 		if argument == "--" {
@@ -105,7 +95,7 @@ func parseDisplayCommand(args []string) (DisplayRequest, error) {
 			if err != nil {
 				return DisplayRequest{}, fmt.Errorf("invalid display speed %q: %w", value, err)
 			}
-		case "--duration", "--duration-ms", "--hold":
+		case "--duration", "--duration-ms":
 			value, err := nextValue()
 			if err != nil {
 				return DisplayRequest{}, err
@@ -120,7 +110,7 @@ func parseDisplayCommand(args []string) (DisplayRequest, error) {
 				return DisplayRequest{}, err
 			}
 			request.Repeat = DisplayRepeat(value)
-		case "--interval", "--interval-ms", "--wait":
+		case "--interval", "--interval-ms":
 			value, err := nextValue()
 			if err != nil {
 				return DisplayRequest{}, err
@@ -129,7 +119,7 @@ func parseDisplayCommand(args []string) (DisplayRequest, error) {
 			if err != nil {
 				return DisplayRequest{}, fmt.Errorf("invalid display interval %q: %w", value, err)
 			}
-		case "--scroll", "--marquee":
+		case "--scroll":
 			if hasInline {
 				return DisplayRequest{}, fmt.Errorf("%s does not take a value", name)
 			}
@@ -2881,8 +2871,8 @@ func statusEffectCommand(
 			lines := make([]string, 0, len(effects))
 			for _, effect := range effects {
 				duration := "until-stopped"
-				if effect.DurationMS != 0 {
-					duration = fmt.Sprintf("%dms", effect.DurationMS)
+				if effect.Repeats != 0 {
+					duration = fmt.Sprintf("%dms", effect.PeriodMS*int(effect.Repeats))
 				}
 				lines = append(lines, fmt.Sprintf(
 					"%s kind=%s rgb=%d,%d,%d brightness=%d..%d period=%dms duration=%s",
@@ -4834,7 +4824,7 @@ func macroCommand(
 				"%-3d %-20s %-5s %-14s %-7s %-6d %s",
 				macro.ID,
 				macro.Name,
-				normalizedMacroMode(macro.Mode),
+				macro.Mode,
 				macro.Category,
 				normalizedMacroColor(macro.Color),
 				len(macro.Steps),
@@ -4856,7 +4846,7 @@ func macroCommand(
 		}
 		lines := []string{fmt.Sprintf(
 			"macro id=%d name=%q mode=%s category=%q color=%q label=%q steps=%d duration=%s encoded=%dB tolerance=%dus keep_on_cancel=%t",
-			macro.ID, macro.Name, normalizedMacroMode(macro.Mode), macro.Category, normalizedMacroColor(macro.Color),
+			macro.ID, macro.Name, macro.Mode, macro.Category, normalizedMacroColor(macro.Color),
 			macro.Label, len(macro.Steps), time.Duration(compiled.durationUS)*time.Microsecond,
 			len(compiled.stream), macro.TimingToleranceUS, macro.KeepOutputsOnCancel,
 		)}
@@ -4957,7 +4947,7 @@ func macroCommand(
 			if err != nil {
 				return "", err
 			}
-			return fmt.Sprintf("macro %d/%s saved with %d %s-timed steps", macro.ID, macro.Name, len(macro.Steps), normalizedMacroMode(macro.Mode)), nil
+			return fmt.Sprintf("macro %d/%s saved with %d %s-timed steps", macro.ID, macro.Name, len(macro.Steps), macro.Mode), nil
 		case "discard", "cancel":
 			if len(args) != 2 {
 				return "", fmt.Errorf("usage: macro record discard")
