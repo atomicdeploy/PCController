@@ -2279,6 +2279,14 @@ func connect(runtime *control.Runtime) tea.Cmd {
 	}
 }
 
+func connectAndResume(runtime *control.Runtime) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		return connectResultMsg{err: runtime.Connect(ctx)}
+	}
+}
+
 func refreshStatus(runtime *control.Runtime) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)

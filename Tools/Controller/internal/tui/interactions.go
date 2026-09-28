@@ -540,8 +540,7 @@ func (model Model) openPort() (Model, tea.Cmd, bool) {
 		return model, nil, true
 	}
 	model.connectPending = true
-	model.runtime.ResumeAuto()
-	return model, connect(model.runtime), true
+	return model, connectAndResume(model.runtime), true
 }
 
 func (model Model) reconnectNow() (Model, tea.Cmd, bool) {
@@ -559,8 +558,7 @@ func (model Model) reconnectNow() (Model, tea.Cmd, bool) {
 	model.connectPending = true
 	model.connectRetryAt = time.Time{}
 	model.connectRetryDelay = 0
-	model.runtime.ResumeAuto()
-	return model, connect(model.runtime), true
+	return model, connectAndResume(model.runtime), true
 }
 
 func (model Model) closePort() (Model, tea.Cmd, bool) {

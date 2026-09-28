@@ -34,6 +34,8 @@ type OpenResult struct {
 	Hello   native.Hello
 }
 
+var openSessionContext = OpenContext
+
 func AutoOpen(ctx context.Context, options DiscoveryOptions) (OpenResult, error) {
 	if options.BaudRate == 0 {
 		options.BaudRate = DefaultBaudRate
@@ -83,6 +85,12 @@ func AutoOpen(ctx context.Context, options DiscoveryOptions) (OpenResult, error)
 		if err == nil {
 			return result, nil
 		}
+		if result.Session != nil {
+			// Authentication cleanup still owns a live transport. Stop discovery
+			// so the caller can quarantine and retry this exact Session instead
+			// of racing it with another candidate.
+			return result, fmt.Errorf("%s: %w", candidate.Name, err)
+		}
 		failures = append(failures, fmt.Errorf("%s: %w", candidate.Name, err))
 	}
 	return OpenResult{}, errors.Join(failures...)
@@ -93,23 +101,25 @@ func OpenAuthenticated(
 	port ports.Info,
 	options DiscoveryOptions,
 ) (OpenResult, error) {
-	session, err := OpenContext(ctx, port.Name, options.BaudRate)
+	session, err := openSessionContext(ctx, port.Name, options.BaudRate)
 	if err != nil {
+		if session != nil {
+			return OpenResult{Session: session, Port: port}, err
+		}
 		return OpenResult{}, err
 	}
-	success := false
-	defer func() {
-		if !success {
-			_ = session.Close()
-		}
-	}()
 
 	hello, err := authenticateOpened(ctx, session, port, options)
 	if err != nil {
+		if closeErr := session.Close(); closeErr != nil {
+			return OpenResult{Session: session, Port: port}, errors.Join(
+				err,
+				fmt.Errorf("close %s after authentication failure: %w", port.Name, closeErr),
+			)
+		}
 		return OpenResult{}, err
 	}
 
-	success = true
 	return OpenResult{Session: session, Port: port, Hello: hello}, nil
 }
 

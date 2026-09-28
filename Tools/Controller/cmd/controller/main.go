@@ -121,7 +121,13 @@ func main() {
 	}
 }
 
-func run(args []string, stdout, stderr io.Writer) error {
+func run(args []string, stdout, stderr io.Writer) (resultErr error) {
+	if err := drainCommandRuntimeCleanups(); err != nil {
+		return fmt.Errorf("release retained command runtime before starting: %w", err)
+	}
+	defer func() {
+		resultErr = errors.Join(resultErr, drainCommandRuntimeCleanups())
+	}()
 	cleanArgs, configPath, presentation, err := extractGlobalArguments(args)
 	if err != nil {
 		return err

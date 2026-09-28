@@ -50,6 +50,7 @@ var (
 	clientsMu      sync.RWMutex
 	clients        = make(map[uint64]*libraryClient)
 	environmentErr error
+	shutdownClient = func(client *controller.Client) error { return client.Shutdown() }
 )
 
 func init() {
@@ -142,11 +143,13 @@ func invoke(request libraryRequest) libraryResponse {
 	case "close":
 		return response(map[string]bool{"closed": true}, entry.client.Close())
 	case "destroy":
-		err := entry.client.Shutdown()
+		if err := shutdownClient(entry.client); err != nil {
+			return response(map[string]bool{"destroyed": false}, err)
+		}
 		clientsMu.Lock()
 		delete(clients, request.Handle)
 		clientsMu.Unlock()
-		return response(map[string]bool{"destroyed": true}, err)
+		return response(map[string]bool{"destroyed": true}, nil)
 	default:
 		return libraryResponse{Error: "unknown operation " + request.Operation}
 	}
