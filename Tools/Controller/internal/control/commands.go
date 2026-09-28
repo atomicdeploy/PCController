@@ -4952,7 +4952,7 @@ func macroCommand(
 			return "", fmt.Errorf("usage: macro record start|start-mcu NAME [CATEGORY [COLOR]]|status|save|discard")
 		}
 		switch strings.ToLower(args[1]) {
-		case "start", "start-mcu", "start-board":
+		case "start", "start-mcu", "start-board", "import-board":
 			if len(args) < 3 || len(args) > 5 {
 				return "", fmt.Errorf("usage: macro record %s NAME [CATEGORY [COLOR]]", args[1])
 			}
@@ -4965,6 +4965,13 @@ func macroCommand(
 			}
 			var state MacroRecordingState
 			var err error
+			if strings.EqualFold(args[1], "import-board") {
+				macro, err := runner.ImportBoardRecording(args[2], category, color)
+				if err != nil {
+					return "", err
+				}
+				return fmt.Sprintf("imported board capture as %d/%s (%d snapshots)", macro.ID, macro.Name, len(macro.Steps)), nil
+			}
 			if strings.EqualFold(args[1], "start-board") {
 				state, err = runner.StartBoardRecording(ctx, args[2], category, color)
 			} else if strings.EqualFold(args[1], "start-mcu") {

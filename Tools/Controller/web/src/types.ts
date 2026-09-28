@@ -323,6 +323,7 @@ export interface MacroRecordingState {
   last_opcode?: number
   last_source?: number
   board_owned?: boolean
+  overwritten?: number
   board_id?: number
   dropped_steps?: number
   started_at?: string

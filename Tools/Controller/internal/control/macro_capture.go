@@ -132,6 +132,25 @@ func (runner *MacroRunner) StartBoardRecording(ctx context.Context, name, catego
 	return runner.RecordingState(), nil
 }
 
+// ImportBoardRecording recovers retained board RAM after a host restart without
+// issuing RECORD BEGIN (which would replace the retained take).
+func (runner *MacroRunner) ImportBoardRecording(name, category, color string) (appconfig.Macro, error) {
+	status, err := runner.queryBoard(context.Background())
+	if err != nil {
+		return appconfig.Macro{}, err
+	}
+	if status.State != native.MacroRecorded && status.State != native.MacroRecording {
+		return appconfig.Macro{}, errors.New("board has no retained recording")
+	}
+	if _, err := runner.startRecording(name, category, color, macroModeMCU); err != nil {
+		return appconfig.Macro{}, err
+	}
+	runner.recordMu.Lock()
+	runner.recording.BoardOwned = true
+	runner.recordMu.Unlock()
+	return runner.StopRecording(true)
+}
+
 func (runner *MacroRunner) collectBoardRecording(ctx context.Context, save bool) error {
 	if _, err := runner.request(ctx, native.OpMacroStep, []byte{4}, native.OpACK); err != nil {
 		return err

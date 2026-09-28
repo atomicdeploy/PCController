@@ -62,6 +62,7 @@ one serial owner. Do not operate relays, motors or PWM loads until they are safe
 | `controller.exe exec macro play cinema-ready mcu` | Replay the same definition through the MCU queue |
 | `controller.exe exec macro record start-board relay-take examples green` | Start firmware circular recording; name reserved on host |
 | `controller.exe exec macro record save` | Stop board recording, download timestamps/masks and persist named profile |
+| `controller.exe exec macro record import-board recovered-take examples green` | Recover retained board RAM after a host restart without replacing it |
 | `controller.exe exec macro buffer clear` | Release retained board RAM for strip streaming; does not delete saved profiles |
 | `controller.exe exec macro monitor` | Combined playback and recorder snapshot |
 | `controller.exe exec macro cancel` | Cancel and switch relays/PWM off; report cleanup failures |

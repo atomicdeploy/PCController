@@ -220,7 +220,7 @@ export function MacroLibraryPanel({ online, locale, events, initialSnapshot, com
             <strong>{recording?.active ? recording.name || `#${recording.id}` : copy('Idle', 'آماده')}</strong>
             <em>{recording?.active
               ? `${recording.board_owned ? copy('Board ring', 'حافظه حلقوی برد') : copy('Host capture', 'ضبط میزبان')} · ${recording.steps} ${copy('steps', 'گام')} · Δ ${formatMicroseconds(recording.last_delta_us, locale)}`
-              : copy('Ready for exact MCU acknowledgement deltas', 'آماده برای اختلاف زمانی دقیق تأیید MCU')}</em>
+              : recording?.name || ''}</em>
           </span>
         </div>
         <div className={playback?.running ? 'is-active' : ''}>
@@ -239,6 +239,8 @@ export function MacroLibraryPanel({ online, locale, events, initialSnapshot, com
       </div>
 
       {error && <div className="macro-library__error" role="alert">{error}</div>}
+      {recording?.last_error && <div className="macro-library__error" role="alert">{recording.last_error}</div>}
+      {!!recording?.overwritten && <div className="macro-library__error" role="status">{copy(`Ring wrapped: ${recording.overwritten} earlier snapshots overwritten. Saved profile contains the retained tail.`, `حافظه حلقوی پر شد: ${recording.overwritten} وضعیت قدیمی جایگزین شد. پروفایل شامل بخش پایانی باقی‌مانده است.`)}</div>}
       {typedAvailable === false && (
         <MacroCommandSurfaceNotice locale={locale} onList={() => void commandSurface('macro list')} />
       )}
@@ -313,24 +315,27 @@ export function MacroLibraryPanel({ online, locale, events, initialSnapshot, com
             <Button icon={Trash2} disabled={!recording?.active || Boolean(recording.board_owned)} onClick={() => void perform(
               'controller.macro.record.stop', { save: false }, 'macro record discard',
             )}>{copy('Discard', 'دور انداختن')}</Button>
-            <Button icon={Trash2} disabled={!online || Boolean(recording?.active) || Boolean(playback?.running)} onClick={() => void perform(
-              'controller.macro.buffer.clear', {}, 'macro buffer clear',
-            )}>{copy('Release board RAM for strip', 'آزاد کردن حافظه برد برای نوار')}</Button>
           </div>
         </section>
         <section>
           <header>{copy('Board circular capture', 'ضبط حلقوی برد')}</header>
-          <p>{copy('Retains front-panel/RF timing on the board, then imports and names the captured sequence on the host.', 'زمان‌بندی پنل و RF را روی برد نگه می‌دارد و سپس توالی ضبط‌شده را روی میزبان وارد و نام‌گذاری می‌کند.')}</p>
+          <p>{copy('Keeps the latest 25 relay snapshots in RAM. Save before resetting the board. Stop and release retained RAM before strip streaming.', '۲۵ وضعیت آخر رله در حافظه نگهداری می‌شود. پیش از ریست ذخیره کنید. قبل از پخش نوار، ضبط را متوقف و حافظه را آزاد کنید.')}</p>
           <div className="macro-library__actions">
             <Button icon={RadioTower} disabled={!online || !name.trim() || Boolean(recording?.active)} busy={busy === 'controller.macro.board_record.start'} onClick={() => void perform(
               'controller.macro.board_record.start', {}, `macro record start-board ${shellArgument(name.trim())} ${shellArgument(category.trim())} ${shellArgument(color)}`,
             )}>{copy('Start on board', 'شروع روی برد')}</Button>
+            <Button icon={Database} disabled={!online || !name.trim() || Boolean(recording?.active)} onClick={() => void perform(
+              'controller.macro.board_record.import', {}, `macro record import-board ${shellArgument(name.trim())} ${shellArgument(category.trim())} ${shellArgument(color)}`,
+            )}>{copy('Import retained capture', 'وارد کردن ضبط باقی‌مانده')}</Button>
             <Button icon={Save} disabled={!recording?.active || !recording.board_owned} busy={busy === 'controller.macro.board_record.stop'} onClick={() => void perform(
               'controller.macro.board_record.stop', {}, 'macro record save',
             )}>{copy('Stop + import', 'توقف و واردکردن')}</Button>
             <Button tone="danger" icon={Trash2} disabled={!recording?.active || !recording.board_owned} onClick={() => void perform(
               'controller.macro.board_record.discard', {}, 'macro record discard',
             )}>{copy('Discard', 'دور انداختن')}</Button>
+            <Button icon={Trash2} disabled={!online || Boolean(recording?.active) || Boolean(playback?.running)} onClick={() => void perform(
+              'controller.macro.buffer.clear', {}, 'macro buffer clear',
+            )}>{copy('Release board RAM for strip', 'آزاد کردن حافظه برد برای نوار')}</Button>
           </div>
         </section>
       </div>
