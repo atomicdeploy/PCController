@@ -240,7 +240,7 @@ export function MacroLibraryPanel({ online, locale, events, initialSnapshot, com
 
       {error && <div className="macro-library__error" role="alert">{error}</div>}
       {recording?.last_error && <div className="macro-library__error" role="alert">{recording.last_error}</div>}
-      {!!recording?.overwritten && <div className="macro-library__error" role="status">{copy(`Ring wrapped: ${recording.overwritten} earlier snapshots overwritten. Saved profile contains the retained tail.`, `حافظه حلقوی پر شد: ${recording.overwritten} وضعیت قدیمی جایگزین شد. پروفایل شامل بخش پایانی باقی‌مانده است.`)}</div>}
+      {!!recording?.overwritten && <div className="macro-library__error" role="status">{copy(`Ring wrapped: ${recording.overwritten} earlier snapshots overwritten. Saved profile contains the retained tail.`, `حافظه حلقوی پر شد: ${recording.overwritten} وضعیت پیشین جایگزین شد. پروفایل شامل بخش پایانی باقی‌مانده است.`)}</div>}
       {typedAvailable === false && (
         <MacroCommandSurfaceNotice locale={locale} onList={() => void commandSurface('macro list')} />
       )}
