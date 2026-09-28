@@ -121,11 +121,11 @@ func TestManifestResolutionAndPlatformAwareComparison(t *testing.T) {
 	}
 }
 
-func TestManifestIgnoresAdditiveFieldsWithinKnownFormat(t *testing.T) {
+func TestManifestIgnoresAdditiveFieldsWithinLivingFormat(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(writer, `{
-			"format":"controller-update-manifest/v1",
+			"format":"controller-update-manifest",
 			"publisher_extension":{"channel":"canary"},
 			"artifacts":[{
 				"kind":"firmware","name":"board.hex","url":"/board.hex",

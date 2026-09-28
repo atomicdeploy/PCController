@@ -11,9 +11,8 @@ import (
 )
 
 const (
-	RouteSchemaVersion uint8 = 1
-	DefaultHopLimit    uint8 = 8
-	MaximumHopLimit    uint8 = 16
+	DefaultHopLimit uint8 = 8
+	MaximumHopLimit uint8 = 16
 
 	routeIDBytes        = 16
 	maximumArguments    = 32
@@ -65,7 +64,6 @@ type Intent struct {
 // parameters. Authentication and authorization are deliberately not fields:
 // every hop must establish and evaluate them in its own transport context.
 type RouteEnvelope struct {
-	SchemaVersion    uint8               `json:"schema"`
 	RouteID          string              `json:"route_id"`
 	OperationID      string              `json:"operation_id"`
 	TraceID          string              `json:"trace_id"`
@@ -79,13 +77,23 @@ type RouteEnvelope struct {
 	Intent           Intent              `json:"intent"`
 }
 
+// UnmarshalJSON deliberately uses a tolerant alias decoder. Route envelopes
+// are a living contract: legacy generation markers and future additive fields
+// are accepted, while writers emit only the current semantic fields.
+func (route *RouteEnvelope) UnmarshalJSON(content []byte) error {
+	type livingRoute RouteEnvelope
+	var decoded livingRoute
+	if err := json.Unmarshal(content, &decoded); err != nil {
+		return err
+	}
+	*route = RouteEnvelope(decoded)
+	return nil
+}
+
 // ValidateAt validates the bounded route shape at one deterministic instant.
 // A route at its hop limit remains a valid received observation but cannot be
 // advanced to another host.
 func (route RouteEnvelope) ValidateAt(now time.Time) error {
-	if route.SchemaVersion != RouteSchemaVersion {
-		return fmt.Errorf("route schema must be %d", RouteSchemaVersion)
-	}
 	if err := validateRouteID(route.RouteID); err != nil {
 		return err
 	}

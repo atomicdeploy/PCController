@@ -34,7 +34,7 @@ const (
 	maxSessionTickets        = 256
 )
 
-const serverProofFormat = "pccontroller-server-proof/v1"
+const serverProofFormat = "pccontroller-server-proof"
 
 // ServerProof is a nonce-bound, address-bound proof returned before a LAN
 // discovery client transmits its durable bearer credential.

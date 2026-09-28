@@ -46,9 +46,9 @@ func (client *Client) DiscoverManifest(ctx context.Context, request ManifestRequ
 		effectiveManifestURL = response.Request.URL.String()
 	}
 	var manifest Manifest
-	// The format identifier defines the semantic contract. Unknown additive
-	// fields are ignored so a newer publisher can extend v1 without breaking an
-	// older host that still understands every field it needs.
+	// The format identifier defines one living semantic contract. Unknown
+	// additive fields are ignored so publishers can extend it without breaking
+	// a host that still understands every field it needs.
 	if err := decodeJSONResponse(response, &manifest); err != nil {
 		return DiscoveryResult{}, err
 	}

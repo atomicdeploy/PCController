@@ -147,6 +147,10 @@ byte-tight layout remain predictable:
 [`controller.go`](../Tools/Controller/controller.go) is its embeddable public
 API; implementation packages stay under `internal/` so every executable uses
 the same guarded runtime instead of forking behavior.
+[`rpc/`](../Tools/Controller/rpc) is the public transport-independent JSON-RPC
+client/envelope package. It supplies direct in-process calls, protected Windows
+named pipes, owner-only Unix-domain sockets, and TCP adapters without duplicating
+method semantics from the internal dispatcher.
 
 ### Executable entry points
 
@@ -201,6 +205,10 @@ as `*_test.go`.
 | `tui` | terminal pages, navigation, settings, console, and shared runtime projection |
 | `webui` | embedded production bundle handler and deterministic portable export |
 | `wsrelay` | authenticated remote WebSocket relay/bridge |
+
+Public `rpc` owns only envelopes, clients, and stream endpoint adapters.
+`internal/ipcjson` remains the single method dispatcher and HTTP/WebSocket
+surface; `ServeRaw` connects native-local streams to that same dispatcher.
 
 Platform files use Go build suffixes/tags (`*_windows.go`, `*_other.go`). Add a
 portable interface and test first, then implement each supported platform;
