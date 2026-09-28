@@ -1096,7 +1096,7 @@ final URL explicitly.
 
 When `signing_secret` is configured, the sender also sets
 `X-PCController-Timestamp`, `X-PCController-Nonce`, and
-`X-PCController-Signature`. The signature is `v1=` followed by the lowercase
+`X-PCController-Signature`. The signature is `sha256=` followed by the lowercase
 hex HMAC-SHA256 of this exact byte sequence:
 
 ```text
