@@ -197,10 +197,12 @@ func decodeRelayCapture(raw []byte) ([]appconfig.MacroStep, error) {
 	var result []appconfig.MacroStep
 	var previous byte
 	var last uint32
+	first := binary.LittleEndian.Uint32(raw[:4])
 	for offset := 0; offset < len(raw); offset += 5 {
-		at := binary.LittleEndian.Uint32(raw[offset : offset+4])
+		original := binary.LittleEndian.Uint32(raw[offset : offset+4])
+		at := original - first
 		mask := raw[offset+4]
-		if at < last || at > 0x7fffffff || (offset == 0 && at != 0) {
+		if original > 0x7fffffff || original < first || at < last || at > 0x7fffffff {
 			return nil, errors.New("invalid relay capture timing")
 		}
 		result = append(result, relayMaskSteps(at, previous, mask, offset == 0)...)

@@ -47,9 +47,17 @@ func TestDecodeRelayCaptureBaselineOffBeforeOnAndExactDelta(t *testing.T) {
 }
 
 func TestDecodeRelayCaptureRejectsMalformedChunks(t *testing.T) {
-	for _, raw := range [][]byte{nil, {0}, {1, 0, 0, 0, 0}, {0, 0, 0, 128, 0}} {
+	for _, raw := range [][]byte{nil, {0}, {0, 0, 0, 128, 0}} {
 		if _, err := decodeRelayCapture(raw); err == nil {
 			t.Fatalf("accepted %v", raw)
 		}
+	}
+}
+
+func TestDecodeOverwrittenTailStartsAtZero(t *testing.T) {
+	raw := []byte{0x10, 0x27, 0, 0, 16, 0x04, 0x29, 0, 0, 0}
+	steps, err := decodeRelayCapture(raw)
+	if err != nil || len(steps) != 2 || steps[0].AtUS != 0 || steps[1].AtUS != 500 {
+		t.Fatalf("steps=%#v err=%v", steps, err)
 	}
 }
