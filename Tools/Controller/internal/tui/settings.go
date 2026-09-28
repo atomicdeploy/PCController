@@ -306,7 +306,7 @@ func (model Model) peripheralAdvertised(descriptor appconfig.PeripheralDescripto
 		if descriptor.Key == "display.segment" {
 			return capabilities&native.CapabilitySegments != 0
 		}
-		return snapshot.HaveStatus && capabilities&native.CapabilityLCD != 0 && snapshot.Status.LCDAddress != 0
+		return model.lcdDisplayAvailable(snapshot)
 	case "sensor":
 		switch descriptor.Role {
 		case "supply-voltage":
