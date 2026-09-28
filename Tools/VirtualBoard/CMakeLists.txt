@@ -56,6 +56,13 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING)
+  add_executable(firmware_strip_tests
+    tests/strip_test.cpp
+    ../../Project/AddressableLeds.cpp
+  )
+  target_include_directories(firmware_strip_tests PRIVATE tests/arduino_mock ../..)
+  add_test(NAME firmware_strip_unit COMMAND firmware_strip_tests)
+
   # The target-neutral wire vocabulary is compiled through both its portable
   # header and the production AVR UART adapter before native targets consume
   # it. This intentionally does not link or alter VirtualBoard behavior.
