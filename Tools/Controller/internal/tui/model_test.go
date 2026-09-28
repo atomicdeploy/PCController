@@ -50,6 +50,32 @@ func TestQQuitsEveryNormalTUIPage(t *testing.T) {
 	}
 }
 
+func TestAutoConnectIsDeferredUntilAfterInitialFrame(t *testing.T) {
+	runtime := control.New(control.Options{})
+	defer runtime.Close()
+	model := NewWithOptions(runtime, shell.New(10), Options{
+		AutoConnect: true,
+		UIConfig:    func() appconfig.UI { return appconfig.Defaults().UI },
+	})
+	if !model.connectPending {
+		t.Fatal("local auto-connect was not queued")
+	}
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 132, Height: 40})
+	model = updated.(Model)
+	if rendered := ansi.Strip(model.View()); strings.TrimSpace(rendered) == "" {
+		t.Fatal("initial frame is blank while connection is pending")
+	}
+	command := model.Init()
+	if command == nil {
+		t.Fatal("initial title, render tick and connection command were not scheduled")
+	}
+	message := command()
+	batch, ok := message.(tea.BatchMsg)
+	if !ok || len(batch) < 3 {
+		t.Fatalf("initial command=%T %#v, want title, tick and deferred connection", message, message)
+	}
+}
+
 func TestQPreservesFocusedTextAndModalInput(t *testing.T) {
 	t.Run("nonempty terminal", func(t *testing.T) {
 		model := readyModel(t, PageConsole)

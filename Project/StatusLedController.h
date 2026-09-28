@@ -50,21 +50,25 @@ public:
   static constexpr uint8_t ManualCondition = 0xFF;
   // Claims PWM output plus Power/On signal and starts the boot animation.
   void begin(PwmController &pwm, uint8_t brightness,
-             uint32_t now = millis(), bool powerSignal = true);
-  // Advances breathing/easing without blocking other services.
-  void service(uint32_t now = millis());
+             uint16_t now = static_cast<uint16_t>(millis()),
+             bool powerSignal = true);
+  // Advances breathing/easing without blocking other services. Supported
+  // periods fit the modulo-16-bit clock; cooperative service runs within one
+  // wrap so duration and deadline comparisons remain exact.
+  void service(uint16_t now = static_cast<uint16_t>(millis()));
 
-  void setMode(StatusLedMode mode, uint32_t now = millis());
+  void setMode(StatusLedMode mode,
+               uint16_t now = static_cast<uint16_t>(millis()));
   StatusLedMode mode() const;
   void setBrightness(uint8_t brightness);
   uint8_t brightness() const;
-  void setCustom(uint8_t red, uint8_t green, uint8_t blue);
-  bool setEffect(StatusLedEffect effect, uint8_t red, uint8_t green,
-                 uint8_t blue, uint8_t alternateRed,
-                 uint8_t alternateGreen, uint8_t alternateBlue,
-                 uint8_t brightness, uint8_t minimumBrightness,
-                 uint16_t periodMs, uint8_t repeats,
-                 uint32_t now = millis());
+  void setCustom(uint8_t red, uint8_t green, uint8_t blue,
+                 uint8_t brightness,
+                 uint16_t now = static_cast<uint16_t>(millis()));
+  // Atomically owns a complete STATUS_EFFECT descriptor. Exact repeats retain
+  // phase; changed descriptors replace in place without an owner-release gap.
+  bool setEffect(const uint8_t *payload,
+                 uint16_t now = static_cast<uint16_t>(millis()));
   void cancelEffect();
   StatusLedEffect effect() const;
   uint8_t renderedRed() const;
@@ -73,46 +77,41 @@ public:
   uint8_t condition() const;
   bool profile(uint8_t condition, uint8_t *payload) const;
   bool setProfile(uint8_t condition, const uint8_t *payload,
-                  uint32_t now = millis());
+                  uint16_t now = static_cast<uint16_t>(millis()));
   void setPowerSignal(bool active);
   // Overlays an informational transition before smoothly restoring base state.
   void playCue(StatusLedCue cue, uint16_t durationMs,
-               uint32_t now = millis());
+               uint16_t now = static_cast<uint16_t>(millis()));
 
 private:
-  void loadProfile(uint8_t condition, uint32_t now);
+  void loadProfile(uint8_t condition, uint16_t now);
   void defaultProfile(uint8_t condition, uint8_t *payload) const;
-  void applyProfile(uint8_t condition, const uint8_t *payload, uint32_t now);
+  void applyProfile(uint8_t condition, const uint8_t *payload, uint16_t now);
+  void applyRequested(uint16_t now) __attribute__((noinline));
+  bool persistentPriorityActive() const;
   static bool validProfile(const uint8_t *payload);
   void renderColor(uint8_t red, uint8_t green, uint8_t blue, uint8_t level);
   void renderEffect();
   void finishEffect();
-  static uint8_t scale(uint8_t value, uint8_t level);
-  static uint8_t interpolate(uint8_t from, uint8_t to, uint8_t phase);
-
   // Static storage zero-initializes the singleton. Avoiding per-member dynamic
   // initializers saves both flash copy data and constructor code on ATmega328P.
   PwmController *pwm_; // Non-owning shared PWM controller.
   StatusLedMode mode_;
-  uint8_t brightness_;
-  uint8_t customRed_;
-  uint8_t customGreen_;
-  uint8_t customBlue_;
-  uint8_t alternateRed_;
-  uint8_t alternateGreen_;
-  uint8_t alternateBlue_;
-  uint8_t minimumBrightness_;
+  uint8_t fallbackBrightness_; // Stable setting, not descriptor-local.
   uint8_t effectPhase_;
-  uint8_t effectRepeats_;
   uint8_t renderedRed_;
   uint8_t renderedGreen_;
   uint8_t renderedBlue_;
   uint8_t condition_;
-  StatusLedEffect effect_;
-  uint16_t effectStepMs_;
-  uint32_t lastEffectStepAt_;
-  uint32_t cueEndsAt_; // millis() deadline; zero means no active cue.
+  uint16_t effectCycleStartedAt_;
+  uint16_t cueEndsAt_; // Modulo-millis deadline; zero means no active cue.
   StatusLedCue cue_;
+  // Current rendered descriptor; repeats may count down without changing the
+  // separately retained owner request.
+  uint8_t active_[ProfilePayloadBytes];
+  // The acknowledged manual owner survives temporary cue/safety rendering.
+  // Keeping the exact descriptor also makes idempotence byte-exact.
+  uint8_t requested_[ProfilePayloadBytes];
 };
 
 // statusLeds is the board-wide RGB state and cue compositor.

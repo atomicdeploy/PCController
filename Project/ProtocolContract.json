@@ -1,8 +1,7 @@
 {
-  "schema": 1,
   "envelope": {
     "magic": 165,
-    "revision": 1,
+    "reserved": 1,
     "maximumPayload": 48,
     "rawFrameOverhead": 6,
     "maximumEncodedFrameOverhead": 2
