@@ -104,6 +104,7 @@ type remoteSnapshotWire struct {
 	ProgramState      control.ProgramStateSnapshot `json:"program_state"`
 	RFLearning        control.RFLearnState         `json:"rf_learning"`
 	Macros            control.MacroSnapshot        `json:"macros"`
+	HardwareProblems  []ports.HardwareProblem      `json:"hardware_problems,omitempty"`
 }
 
 type remoteUISettingsWire struct {
@@ -289,6 +290,7 @@ func (client *remoteTUIIPC) Snapshot(ctx context.Context) (control.Snapshot, err
 		FrontPanelUpdated: wire.FrontPanelUpdated, StatusLED: wire.StatusLED,
 		HaveStatusLED: wire.HaveStatusLED, StatusLEDUpdated: wire.StatusLEDUpdated,
 		ProgramState: wire.ProgramState, RFLearning: wire.RFLearning, Macros: wire.Macros,
+		HardwareProblems: wire.HardwareProblems,
 	}, nil
 }
 

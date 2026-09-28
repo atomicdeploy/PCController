@@ -435,6 +435,72 @@ func TestUnplugReplugLifecycleAndOneResetPermit(t *testing.T) {
 	_ = runtime.Close()
 }
 
+func TestHardwareProblemPersistsUntilAuthenticatedAttach(t *testing.T) {
+	runtime := New(Options{Filter: ports.Filter{Port: "COM3"}})
+	runtime.port = ports.Info{
+		Name: "COM3", IsUSB: true, VID: "1A86", PID: "7523",
+		InstanceID: `USB\VID_1A86&PID_7523\5&1330824A&0&2`,
+	}
+	problem := ports.HardwareProblem{
+		Code:          ports.HardwareProblemUSBDescriptorFailure,
+		Severity:      "error",
+		OSProblemCode: 43,
+		DeviceID:      `USB\VID_0000&PID_0002\5&1330824A&0&2`,
+		ObservedAt:    time.Now(),
+	}
+	runtime.hardwareProblemScan = func(filter ports.Filter) ([]ports.HardwareProblem, error) {
+		if filter.Port != "COM3" || filter.Preferred.InstanceID != runtime.port.InstanceID {
+			t.Fatalf("hardware scan lost controller identity: %#v", filter)
+		}
+		return []ports.HardwareProblem{problem}, nil
+	}
+	if _, err := runtime.SetProgramState("test-player", ProgramRunning, "active playback"); err != nil {
+		t.Fatal(err)
+	}
+	runtime.refreshHardwareProblems()
+	snapshot := runtime.Snapshot()
+	if len(snapshot.HardwareProblems) != 1 {
+		t.Fatalf("hardware problem missing from snapshot: %#v", snapshot.HardwareProblems)
+	}
+	if snapshot.HardwareProblems[0].Impact != ports.HardwareImpactActiveOutcomeUnknown {
+		t.Fatalf("active-use impact=%q", snapshot.HardwareProblems[0].Impact)
+	}
+	event, err := runtime.WaitEvent(context.Background(), 0, "hardware.problem")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if event.Metadata["code"] != ports.HardwareProblemUSBDescriptorFailure ||
+		event.Metadata["impact"] != ports.HardwareImpactActiveOutcomeUnknown {
+		t.Fatalf("hardware event lost semantic evidence: %#v", event)
+	}
+
+	// A device disappearing from the problem list is not proof of recovery.
+	// Only an authenticated application HELLO may clear the warning.
+	runtime.hardwareProblemScan = func(ports.Filter) ([]ports.HardwareProblem, error) { return nil, nil }
+	runtime.refreshHardwareProblems()
+	if len(runtime.Snapshot().HardwareProblems) != 1 {
+		t.Fatal("disconnected scan cleared the hardware problem before authentication")
+	}
+
+	port := newReconnectTestPort()
+	runtime.attach(link.OpenResult{
+		Session: link.NewForPort("COM3", port),
+		Port:    runtime.port,
+		Hello:   native.Hello{Name: "PCController"},
+	})
+	if len(runtime.Snapshot().HardwareProblems) != 0 {
+		t.Fatal("authenticated attach did not clear the hardware problem")
+	}
+	recovered, err := runtime.WaitEvent(context.Background(), event.ID, "hardware.recovered")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recovered.Lifecycle != "recovered" || recovered.State != "healthy" {
+		t.Fatalf("unexpected recovery event: %#v", recovered)
+	}
+	_ = runtime.Close()
+}
+
 func TestReconnectDiscoveryRebindsAuthenticatedUSBIdentity(t *testing.T) {
 	runtime := New(Options{Filter: ports.Filter{Port: "COM4"}})
 	runtime.mu.Lock()

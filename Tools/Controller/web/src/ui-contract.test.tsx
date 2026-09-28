@@ -244,6 +244,49 @@ describe('offline and settings UI contracts', () => {
     expect(markup).not.toContain('The dashboard is ready')
   })
 
+  it('shows an accessible actionable hardware warning without misclassifying another device', () => {
+    const markup = renderToStaticMarkup(<DashboardView
+      {...shared()}
+      t={translator('en')}
+      snapshot={{
+        ...emptySnapshot,
+        hardware_problems: [{
+          code: 'usb_descriptor_failure',
+          severity: 'error',
+          impact: 'active_operation_outcome_unknown',
+          os_problem_code: 43,
+          device_id: 'USB\\VID_0000&PID_0002\\physical-controller-instance',
+          location: 'Port 2, Hub 3',
+          observed_at: '2026-09-28T10:00:00Z',
+        }],
+      }}
+    />)
+    expect(markup).toContain('role="alert"')
+    expect(markup).toContain('Controller USB connection failed')
+    expect(markup).toContain('Check the controller data cable, power, or try another USB port.')
+    expect(markup).toContain('active operation was interrupted')
+    expect(markup).toContain('Windows code 43 · Port 2, Hub 3')
+    expect(markup).not.toContain('physical-controller-instance')
+  })
+
+  it('renders the Persian hardware warning as native joined-script text', () => {
+    const markup = renderToStaticMarkup(<DashboardView
+      {...shared()}
+      locale="fa"
+      t={translator('fa')}
+      snapshot={{
+        ...emptySnapshot,
+        hardware_problems: [{
+          code: 'usb_descriptor_failure',
+          severity: 'error',
+          observed_at: '2026-09-28T10:00:00Z',
+        }],
+      }}
+    />)
+    expect(markup).toContain('خرابی اتصال USB کنترلر')
+    expect(markup).toContain('کابل داده، برق و درگاه USB کنترلر را بررسی کنید')
+  })
+
   it('hides unavailable peripherals and their invalid readings', () => {
     const connected = {
       ...emptySnapshot,

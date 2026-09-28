@@ -52,7 +52,8 @@ type Snapshot struct {
 	ProgramState           ProgramStateSnapshot
 	RFLearning             RFLearnState
 	Macros                 MacroSnapshot
-	PortProcess            PortProcessSnapshot `json:"port_process"`
+	HardwareProblems       []ports.HardwareProblem `json:"hardware_problems,omitempty"`
+	PortProcess            PortProcessSnapshot     `json:"port_process"`
 }
 
 type PortProcessSnapshot struct {
@@ -185,6 +186,8 @@ type Runtime struct {
 	reconnectEpoch         uint64
 	resetIssued            bool
 	portRebindAllowed      bool
+	hardwareProblems       []ports.HardwareProblem
+	hardwareProblemScan    func(ports.Filter) ([]ports.HardwareProblem, error)
 	deviceObserver         func(ports.Info, native.Hello)
 	connectionReadyHandler func(ports.Info, native.Hello)
 	beforeDisconnect       func(string)
@@ -254,15 +257,16 @@ func New(options Options) *Runtime {
 	options = normalizedOptions(options)
 	runtime := &Runtime{
 		options: options, events: make(chan Event, 512),
-		autoOpen:           link.AutoOpen,
-		openAuthenticated:  link.OpenAuthenticated,
-		eventNotify:        make(chan struct{}),
-		connectionEvents:   make(map[string]connectionEventSignature),
-		connectionState:    "disconnected",
-		connectionUpdated:  time.Now(),
-		historyRetention:   24 * time.Hour,
-		historySampleEvery: time.Second,
-		timelineLimit:      2000,
+		autoOpen:            link.AutoOpen,
+		openAuthenticated:   link.OpenAuthenticated,
+		hardwareProblemScan: ports.ListHardwareProblems,
+		eventNotify:         make(chan struct{}),
+		connectionEvents:    make(map[string]connectionEventSignature),
+		connectionState:     "disconnected",
+		connectionUpdated:   time.Now(),
+		historyRetention:    24 * time.Hour,
+		historySampleEvery:  time.Second,
+		timelineLimit:       2000,
 	}
 	runtime.programState = NewProgramStateManager(func(state ProgramStateSnapshot) {
 		runtime.publishEvent(Event{
@@ -642,6 +646,7 @@ func (runtime *Runtime) Snapshot() Snapshot {
 	rfLearning := runtime.RFLearnState()
 	runtime.mu.RLock()
 	defer runtime.mu.RUnlock()
+	hardwareProblems := cloneHardwareProblems(runtime.hardwareProblems)
 	return Snapshot{
 		Connected:         runtime.session != nil,
 		Paused:            runtime.paused,
@@ -662,8 +667,129 @@ func (runtime *Runtime) Snapshot() Snapshot {
 		StatusLEDUpdated: runtime.statusLEDUpdated,
 		ProgramState:     programState,
 		RFLearning:       rfLearning,
+		HardwareProblems: hardwareProblems,
 		PortProcess:      runtime.portProcess,
 	}
+}
+
+func cloneHardwareProblems(values []ports.HardwareProblem) []ports.HardwareProblem {
+	if len(values) == 0 {
+		return nil
+	}
+	result := make([]ports.HardwareProblem, len(values))
+	copy(result, values)
+	for index := range result {
+		result[index].HardwareIDs = append([]string(nil), values[index].HardwareIDs...)
+		result[index].LocationPaths = append([]string(nil), values[index].LocationPaths...)
+	}
+	return result
+}
+
+func (runtime *Runtime) hardwareProblemFilter() ports.Filter {
+	runtime.mu.RLock()
+	filter, observed := runtime.options.Filter, runtime.port
+	runtime.mu.RUnlock()
+	filter.Preferred = mergeObservedDeviceIdentity(filter.Preferred, observed)
+	if filter.Port == "" {
+		filter.Port = observed.Name
+	}
+	return filter
+}
+
+func (runtime *Runtime) refreshHardwareProblems() {
+	if runtime.hardwareProblemScan == nil {
+		return
+	}
+	filter := runtime.hardwareProblemFilter()
+	problems, err := runtime.hardwareProblemScan(filter)
+	if err != nil {
+		return
+	}
+	runtime.mu.RLock()
+	connected := runtime.session != nil
+	hadProblem := len(runtime.hardwareProblems) != 0
+	runtime.mu.RUnlock()
+	// Absence from Device Manager is not recovery. Retain the last correlated
+	// fault until an authenticated application HELLO proves the transport is
+	// usable again; attachWhen performs that authoritative clear.
+	if len(problems) == 0 && hadProblem && !connected {
+		return
+	}
+	active := runtime.ProgramState().Mode == ProgramRunning
+	if runner := runtime.MacroRunner(); runner != nil {
+		macros := runner.Snapshot()
+		active = active || macros.Playback.Running || macros.Recording.Active
+	}
+	if active {
+		for index := range problems {
+			problems[index].Impact = ports.HardwareImpactActiveOutcomeUnknown
+		}
+	}
+	runtime.setHardwareProblems(problems)
+}
+
+func (runtime *Runtime) setHardwareProblems(problems []ports.HardwareProblem) {
+	problems = cloneHardwareProblems(problems)
+	runtime.mu.Lock()
+	previous := runtime.hardwareProblems
+	changed := !sameHardwareProblems(previous, problems)
+	runtime.hardwareProblems = problems
+	port := runtime.port
+	runtime.mu.Unlock()
+	if !changed {
+		return
+	}
+	if len(problems) == 0 {
+		if len(previous) != 0 {
+			runtime.publishEvent(Event{
+				Kind: "hardware.recovered", Lifecycle: "recovered",
+				State: "healthy", Port: port, Source: "host", Target: "app.clients",
+				Text: "controller hardware re-enumerated and authenticated",
+			})
+		}
+		return
+	}
+	for _, problem := range problems {
+		text := "controller hardware problem detected"
+		if problem.Impact == ports.HardwareImpactActiveOutcomeUnknown {
+			text += "; active operation outcome is unknown"
+		}
+		metadata := map[string]string{
+			"code":            problem.Code,
+			"severity":        problem.Severity,
+			"os_problem_code": strconv.FormatUint(uint64(problem.OSProblemCode), 10),
+		}
+		if problem.DeviceID != "" {
+			metadata["device_id"] = problem.DeviceID
+		}
+		if problem.Location != "" {
+			metadata["location"] = problem.Location
+		}
+		if problem.Impact != "" {
+			metadata["impact"] = problem.Impact
+		}
+		runtime.publishEvent(Event{
+			Kind: "hardware.problem", Lifecycle: "detected",
+			State: problem.Severity, Reason: problem.Code, Port: port,
+			Source: "host", Target: "app.clients", Text: text, Metadata: metadata,
+		})
+	}
+}
+
+func sameHardwareProblems(left, right []ports.HardwareProblem) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index].Code != right[index].Code ||
+			left[index].Severity != right[index].Severity ||
+			left[index].Impact != right[index].Impact ||
+			left[index].OSProblemCode != right[index].OSProblemCode ||
+			!strings.EqualFold(left[index].DeviceID, right[index].DeviceID) {
+			return false
+		}
+	}
+	return true
 }
 
 // clearPeerStateLocked removes values whose authority ended with the serial
@@ -978,6 +1104,7 @@ func (runtime *Runtime) ensureConnected(ctx context.Context) error {
 		if result.Session != nil {
 			return runtime.retainFailedOpen(result, err)
 		}
+		runtime.refreshHardwareProblems()
 		return err
 	}
 	attached := runtime.attachWhen(result, func() bool {
@@ -1667,6 +1794,7 @@ func (runtime *Runtime) attachWhen(result link.OpenResult, allowed func() bool) 
 	// observe a rapidly disappearing transport. This prevents an older
 	// reconnecting event from landing after the new connected generation.
 	runtime.publishConnection(lifecycle, result.Port, "")
+	runtime.setHardwareProblems(nil)
 	if result.Port.IsUSB {
 		runtime.publishUSBConnection("usb.reconnected", lifecycle, result.Port, "", "connected")
 	}
@@ -2210,6 +2338,7 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 			}
 			runtime.mu.Unlock()
 			if owned {
+				go runtime.refreshHardwareProblems()
 				runtime.markRFLearningDisconnected("device disconnected")
 				if port.IsUSB {
 					runtime.publishUSBConnection(

@@ -1853,6 +1853,10 @@ func (model Model) header(snapshot control.Snapshot) string {
 		status = "PREVIEW"
 		style = warnStyle.Copy().Bold(true)
 		detail = "injected board · serial disabled"
+	} else if len(snapshot.HardwareProblems) != 0 {
+		status = "⚠ HARDWARE"
+		style = warnStyle.Copy().Bold(true)
+		detail = hardwareProblemMessage(snapshot.HardwareProblems[0])
 	} else if snapshot.Connected {
 		status = "CONNECTED"
 		style = lipgloss.NewStyle().Foreground(colorGood).Bold(true)
@@ -1892,6 +1896,30 @@ func (model Model) header(snapshot control.Snapshot) string {
 		gap = 1
 	}
 	return left + strings.Repeat(" ", gap) + right
+}
+
+func hardwareProblemMessage(problem ports.HardwareProblem) string {
+	var message string
+	switch problem.Code {
+	case ports.HardwareProblemUSBDescriptorFailure:
+		message = "USB descriptor failed · check controller cable, power, or USB port"
+	case ports.HardwareProblemCannotStart, ports.HardwareProblemReported:
+		message = "Controller USB device cannot start · reconnect it or use another USB port"
+	case ports.HardwareProblemDisabled:
+		message = "Controller device is disabled · enable it in Device Manager"
+	case ports.HardwareProblemDriverMissing:
+		message = "Controller driver is missing · install or repair its USB driver"
+	case ports.HardwareProblemDriverFailure:
+		message = "Controller USB driver failed · reconnect it or repair the driver"
+	case ports.HardwareProblemRemovalPending:
+		message = "Controller removal is pending · unplug and reconnect it"
+	default:
+		message = "Controller hardware failed · check its cable, power, and USB port"
+	}
+	if problem.Impact == ports.HardwareImpactActiveOutcomeUnknown {
+		message += " · ACTIVE OPERATION OUTCOME UNKNOWN"
+	}
+	return message
 }
 
 func (model Model) connectionCanReconnect(snapshot control.Snapshot) bool {

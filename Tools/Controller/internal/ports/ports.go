@@ -17,6 +17,38 @@ type Change struct {
 	Reason string
 }
 
+const (
+	HardwareProblemUSBDescriptorFailure = "usb_descriptor_failure"
+	HardwareProblemCannotStart          = "device_cannot_start"
+	HardwareProblemDisabled             = "device_disabled"
+	HardwareProblemDriverMissing        = "device_driver_missing"
+	HardwareProblemDriverFailure        = "device_driver_failure"
+	HardwareProblemReported             = "device_reported_problem"
+	HardwareProblemRemovalPending       = "device_removal_pending"
+	HardwareProblemUnknown              = "device_problem"
+
+	HardwareImpactActiveOutcomeUnknown = "active_operation_outcome_unknown"
+)
+
+// HardwareProblem is normalized operating-system evidence for a broken
+// controller transport. Code is stable and suitable for UI localization;
+// device strings remain diagnostic evidence and must not be parsed for UI
+// behavior. Problems are returned only after correlation with the configured
+// or last authenticated controller identity.
+type HardwareProblem struct {
+	Code          string    `json:"code"`
+	Severity      string    `json:"severity"`
+	Impact        string    `json:"impact,omitempty"`
+	OSProblemCode uint32    `json:"os_problem_code,omitempty"`
+	DeviceID      string    `json:"device_id,omitempty"`
+	HardwareIDs   []string  `json:"hardware_ids,omitempty"`
+	Description   string    `json:"description,omitempty"`
+	Class         string    `json:"class,omitempty"`
+	Location      string    `json:"location,omitempty"`
+	LocationPaths []string  `json:"location_paths,omitempty"`
+	ObservedAt    time.Time `json:"observed_at"`
+}
+
 type AmbiguousError struct {
 	Candidates []Info
 }
@@ -35,6 +67,14 @@ func (err *AmbiguousError) Error() string {
 // their platform implementation.
 func WatchChanges(ctx context.Context) (<-chan Change, error) {
 	return watchPlatformChanges(ctx)
+}
+
+// ListHardwareProblems asks the operating system for present device failures
+// and returns only failures tied to the selected or last authenticated
+// controller. Platforms without trustworthy device-manager evidence return an
+// empty list instead of synthesizing a fault from a serial-open error.
+func ListHardwareProblems(filter Filter) ([]HardwareProblem, error) {
+	return listPlatformHardwareProblems(filter)
 }
 
 type Info struct {
@@ -229,6 +269,89 @@ func score(port Info, filter Filter) int {
 		result++
 	}
 	return result
+}
+
+func classifyHardwareProblem(problem uint32, hardwareIDs []string) string {
+	if problem == 43 {
+		for _, id := range hardwareIDs {
+			normalized := strings.ToUpper(strings.TrimSpace(id))
+			if normalized == `USB\DEVICE_DESCRIPTOR_FAILURE` ||
+				strings.Contains(normalized, `USB\VID_0000&PID_0002`) {
+				return HardwareProblemUSBDescriptorFailure
+			}
+		}
+		return HardwareProblemReported
+	}
+	switch problem {
+	case 10:
+		return HardwareProblemCannotStart
+	case 22:
+		return HardwareProblemDisabled
+	case 28:
+		return HardwareProblemDriverMissing
+	case 31:
+		return HardwareProblemDriverFailure
+	case 47:
+		return HardwareProblemRemovalPending
+	default:
+		return HardwareProblemUnknown
+	}
+}
+
+func hardwareProblemMatches(
+	deviceID string,
+	hardwareIDs []string,
+	filter Filter,
+	relatedInstanceIDs []string,
+) bool {
+	identities := append([]string(nil), relatedInstanceIDs...)
+	identities = append(identities, filter.InstanceID, filter.Preferred.InstanceID)
+	for _, identity := range identities {
+		if sameDeviceIdentity(deviceID, identity) {
+			return true
+		}
+	}
+	vid := firstNonEmpty(filter.VID, filter.Preferred.VID)
+	pid := firstNonEmpty(filter.PID, filter.Preferred.PID)
+	if vid == "" || pid == "" {
+		return false
+	}
+	needle := "VID_" + normalizeID(vid) + "&PID_" + normalizeID(pid)
+	for _, id := range append([]string{deviceID}, hardwareIDs...) {
+		if strings.Contains(strings.ToUpper(id), needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func sameDeviceIdentity(left, right string) bool {
+	left, right = strings.TrimSpace(left), strings.TrimSpace(right)
+	if left == "" || right == "" {
+		return false
+	}
+	if strings.EqualFold(left, right) {
+		return true
+	}
+	leftTail, rightTail := deviceInstanceTail(left), deviceInstanceTail(right)
+	return leftTail != "" && rightTail != "" && strings.EqualFold(leftTail, rightTail)
+}
+
+func deviceInstanceTail(value string) string {
+	value = strings.TrimSpace(value)
+	if index := strings.LastIndex(value, `\`); index >= 0 {
+		return strings.TrimSpace(value[index+1:])
+	}
+	return ""
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 // PreferredCandidate returns a prior stable identity only when exactly one
