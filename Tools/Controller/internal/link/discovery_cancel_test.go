@@ -93,6 +93,49 @@ func TestOpenAuthenticatedCancellationClosesBlockedWrite(t *testing.T) {
 	}
 }
 
+func TestOpenAuthenticatedOverallDeadlineClosesBlockedWrite(t *testing.T) {
+	port := newBlockingAuthenticationWritePort()
+	session := NewForPort("COM3", port)
+	originalOpen := openSessionContext
+	openSessionContext = func(context.Context, string, int) (*Session, error) {
+		return session, nil
+	}
+	t.Cleanup(func() { openSessionContext = originalOpen })
+
+	started := time.Now()
+	result, err := OpenAuthenticated(context.Background(), ports.Info{Name: "COM3"}, DiscoveryOptions{
+		HelloAttempts:  1,
+		RequestTimeout: 10 * time.Millisecond,
+	})
+	if result.Session != nil || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("OpenAuthenticated result=%+v error=%v, want deadline exceeded and fully closed", result, err)
+	}
+	if elapsed := time.Since(started); elapsed > 1500*time.Millisecond {
+		t.Fatalf("OpenAuthenticated returned after %s, want bounded provisional authentication", elapsed)
+	}
+	select {
+	case <-session.Done():
+	default:
+		t.Fatal("authentication deadline returned before Session.Close completed")
+	}
+	port.closeMu.Lock()
+	defer port.closeMu.Unlock()
+	if port.closeCalls != 1 {
+		t.Fatalf("transport close calls = %d, want 1", port.closeCalls)
+	}
+}
+
+func TestAuthenticationTimeoutIncludesCompleteRetryBudget(t *testing.T) {
+	options := DiscoveryOptions{
+		StartupWait:    1200 * time.Millisecond,
+		RequestTimeout: 1200 * time.Millisecond,
+		HelloAttempts:  3,
+	}
+	if got, want := authenticationTimeout(options), 5500*time.Millisecond; got != want {
+		t.Fatalf("authentication timeout = %s, want %s", got, want)
+	}
+}
+
 func TestOpenAuthenticatedCancellationReturnsRetryableCloseOwner(t *testing.T) {
 	closeErr := errors.New("CancelIoEx failed")
 	port := newBlockingAuthenticationWritePort()
