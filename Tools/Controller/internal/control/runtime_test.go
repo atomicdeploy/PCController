@@ -458,12 +458,17 @@ func TestCloseCancelsInflightReconnectAndReleasesTransport(t *testing.T) {
 	port := newReconnectTestPort()
 	opened := make(chan struct{})
 	runtime := New(Options{})
+	observed := make(chan struct{}, 1)
+	runtime.SetDeviceObserver(func(ports.Info, native.Hello) { observed <- struct{}{} })
 	runtime.autoOpen = func(ctx context.Context, _ link.DiscoveryOptions) (link.OpenResult, error) {
 		session := link.NewForPort("COM3", port)
 		close(opened)
 		<-ctx.Done()
-		_ = session.Close()
-		return link.OpenResult{}, ctx.Err()
+		return link.OpenResult{
+			Session: session,
+			Port:    ports.Info{Name: "COM3", IsUSB: true},
+			Hello:   native.Hello{Name: "PCController"},
+		}, nil
 	}
 
 	connectDone := make(chan error, 1)
@@ -489,6 +494,11 @@ func TestCloseCancelsInflightReconnectAndReleasesTransport(t *testing.T) {
 		}
 	default:
 		t.Fatal("close returned before the reconnect attempt ended")
+	}
+	select {
+	case <-observed:
+		t.Fatal("cancelled reconnect attached and invoked the device observer")
+	default:
 	}
 	if snapshot := runtime.Snapshot(); snapshot.Connected || !snapshot.Paused ||
 		snapshot.ConnectionState != "disconnected" || snapshot.ConnectionReason != "closed by host" {

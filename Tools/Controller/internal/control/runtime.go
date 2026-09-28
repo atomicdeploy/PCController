@@ -836,17 +836,17 @@ func (runtime *Runtime) EnsureConnected(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	runtime.mu.RLock()
-	paused := runtime.paused
-	runtime.mu.RUnlock()
-	if paused || connectContext.Err() != nil {
+	attached := runtime.attachWhen(result, func() bool {
+		return !runtime.paused && runtime.connectDone == connectDone &&
+			connectContext.Err() == nil
+	})
+	if !attached {
 		_ = result.Session.Close()
 		if err := connectContext.Err(); err != nil {
 			return err
 		}
 		return errors.New("connection attempt was cancelled by host")
 	}
-	runtime.attach(result)
 	return nil
 }
 
@@ -1170,7 +1170,18 @@ func (runtime *Runtime) resetAfterOpen(_ ports.Info) bool {
 }
 
 func (runtime *Runtime) attach(result link.OpenResult) {
+	runtime.attachWhen(result, nil)
+}
+
+// attachWhen atomically validates an optional connection-attempt predicate and
+// claims its authenticated session. The predicate runs while runtime.mu is
+// held so Close cannot pause the runtime between validation and attachment.
+func (runtime *Runtime) attachWhen(result link.OpenResult, allowed func() bool) bool {
 	runtime.mu.Lock()
+	if allowed != nil && !allowed() {
+		runtime.mu.Unlock()
+		return false
+	}
 	reconnected := runtime.connectionState == "reconnecting"
 	runtime.generation++
 	generation := runtime.generation
@@ -1219,6 +1230,7 @@ func (runtime *Runtime) attach(result link.OpenResult) {
 	go runtime.syncProgramState(runtime.ProgramState(), "connected")
 	go runtime.provisionDefaultStatusProfiles(generation)
 	go runtime.programStateHeartbeat(generation)
+	return true
 }
 
 // provisionDefaultStatusProfiles installs the Go-owned factory table only
