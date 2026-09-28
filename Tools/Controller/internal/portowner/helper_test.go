@@ -33,6 +33,9 @@ func TestOwnerHelperInvocationProducesOneStrictBoundedJSONValue(t *testing.T) {
 	if output.Len() > maxOwnerHelperOutput || bytes.Count(output.Bytes(), []byte("\n")) != 1 {
 		t.Fatalf("helper output bytes=%d value=%q", output.Len(), output.String())
 	}
+	if bytes.Contains(output.Bytes(), []byte(`"version"`)) {
+		t.Fatalf("helper output retained a generation selector: %s", output.Bytes())
+	}
 	decoded, found, err := decodeOwnerHelperResult("COM7", output.Bytes())
 	if err != nil || !found || decoded.PID != 41 || len(decoded.Name) > 512 {
 		t.Fatalf("owner=%+v found=%t err=%v", decoded, found, err)
@@ -68,15 +71,21 @@ func TestOwnerHelperInvocationRejectsAnythingButExactCOMSelector(t *testing.T) {
 func TestOwnerHelperDecoderRejectsUntrustedOrAmbiguousOutput(t *testing.T) {
 	for _, encoded := range [][]byte{
 		nil,
-		[]byte(`{"version":1,"port":"COM7","found":false,"extra":true}`),
-		[]byte("{\"version\":1,\"port\":\"COM7\",\"found\":false}\n{}\n"),
-		[]byte(`{"version":1,"port":"COM8","found":false}`),
-		[]byte(`{"version":1,"port":"COM7","found":true}`),
+		[]byte("{\"port\":\"COM7\",\"found\":false}\n{}\n"),
+		[]byte(`{"port":"COM8","found":false}`),
+		[]byte(`{"port":"COM7","found":true}`),
 		bytes.Repeat([]byte("x"), maxOwnerHelperOutput+1),
 	} {
 		if _, _, err := decodeOwnerHelperResult("COM7", encoded); err == nil {
 			t.Fatalf("untrusted helper output accepted: %.80q", encoded)
 		}
+	}
+}
+
+func TestOwnerHelperDecoderAllowsAdditiveFields(t *testing.T) {
+	owner, found, err := decodeOwnerHelperResult("COM7", []byte(`{"port":"COM7","found":false,"extra":true}`))
+	if err != nil || found || owner != (Owner{}) {
+		t.Fatalf("additive helper result owner=%+v found=%t err=%v", owner, found, err)
 	}
 }
 
