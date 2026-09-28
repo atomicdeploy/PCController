@@ -166,6 +166,9 @@ type Runtime struct {
 	statusUpdated          time.Time
 	paused                 bool
 	connecting             bool
+	connectCancel          context.CancelFunc
+	connectDone            chan struct{}
+	autoOpen               func(context.Context, link.DiscoveryOptions) (link.OpenResult, error)
 	generation             uint64
 	connectionState        string
 	connectionReason       string
@@ -240,6 +243,7 @@ func New(options Options) *Runtime {
 	options = normalizedOptions(options)
 	runtime := &Runtime{
 		options: options, events: make(chan Event, 512),
+		autoOpen:           link.AutoOpen,
 		eventNotify:        make(chan struct{}),
 		connectionEvents:   make(map[string]connectionEventSignature),
 		connectionState:    "disconnected",
@@ -809,20 +813,40 @@ func (runtime *Runtime) EnsureConnected(ctx context.Context) error {
 		return nil
 	}
 	runtime.connecting = true
+	connectContext, cancelConnect := context.WithCancel(ctx)
+	connectDone := make(chan struct{})
+	runtime.connectCancel = cancelConnect
+	runtime.connectDone = connectDone
 	options := runtime.options
 	runtime.mu.Unlock()
 
 	defer func() {
+		cancelConnect()
 		runtime.mu.Lock()
-		runtime.connecting = false
+		if runtime.connectDone == connectDone {
+			runtime.connecting = false
+			runtime.connectCancel = nil
+			runtime.connectDone = nil
+		}
 		runtime.mu.Unlock()
+		close(connectDone)
 	}()
 
-	result, err := link.AutoOpen(ctx, runtime.discoveryOptions(options))
+	result, err := runtime.autoOpen(connectContext, runtime.discoveryOptions(options))
 	if err != nil {
 		return err
 	}
-	runtime.attach(result)
+	attached := runtime.attachWhen(result, func() bool {
+		return !runtime.paused && runtime.connectDone == connectDone &&
+			connectContext.Err() == nil
+	})
+	if !attached {
+		_ = result.Session.Close()
+		if err := connectContext.Err(); err != nil {
+			return err
+		}
+		return errors.New("connection attempt was cancelled by host")
+	}
 	return nil
 }
 
@@ -906,6 +930,21 @@ func (runtime *Runtime) Open(ctx context.Context, name string) error {
 
 func (runtime *Runtime) Close() error {
 	runtime.cancelDisplaySchedules()
+	// A reconnect attempt owns the serial handle before it becomes the active
+	// session. Pause first so it cannot attach, then cancel and join it. The
+	// close response is therefore an actual handle-release barrier rather than
+	// merely a disconnected snapshot transition.
+	runtime.mu.Lock()
+	runtime.paused = true
+	cancelConnect := runtime.connectCancel
+	connectDone := runtime.connectDone
+	runtime.mu.Unlock()
+	if cancelConnect != nil {
+		cancelConnect()
+	}
+	if connectDone != nil {
+		<-connectDone
+	}
 	return runtime.detach(true)
 }
 
@@ -1131,7 +1170,18 @@ func (runtime *Runtime) resetAfterOpen(_ ports.Info) bool {
 }
 
 func (runtime *Runtime) attach(result link.OpenResult) {
+	runtime.attachWhen(result, nil)
+}
+
+// attachWhen atomically validates an optional connection-attempt predicate and
+// claims its authenticated session. The predicate runs while runtime.mu is
+// held so Close cannot pause the runtime between validation and attachment.
+func (runtime *Runtime) attachWhen(result link.OpenResult, allowed func() bool) bool {
 	runtime.mu.Lock()
+	if allowed != nil && !allowed() {
+		runtime.mu.Unlock()
+		return false
+	}
 	reconnected := runtime.connectionState == "reconnecting"
 	runtime.generation++
 	generation := runtime.generation
@@ -1180,6 +1230,7 @@ func (runtime *Runtime) attach(result link.OpenResult) {
 	go runtime.syncProgramState(runtime.ProgramState(), "connected")
 	go runtime.provisionDefaultStatusProfiles(generation)
 	go runtime.programStateHeartbeat(generation)
+	return true
 }
 
 // provisionDefaultStatusProfiles installs the Go-owned factory table only
