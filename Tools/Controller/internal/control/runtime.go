@@ -190,6 +190,7 @@ type Runtime struct {
 	hardwareProblems       []ports.HardwareProblem
 	hardwareProblemScan    func(ports.Filter) ([]ports.HardwareProblem, error)
 	hardwareProblemEpoch   uint64
+	transportActivityMu    sync.Mutex
 	transportLossActive    atomic.Bool
 	transportClosing       atomic.Bool
 	activeUseMask          atomic.Uint32
@@ -746,9 +747,24 @@ func (runtime *Runtime) setActiveUseState(bit uint32, active bool) {
 	// consistent atomics guarantee that either the pre-close observer sees the
 	// active bit, or a concurrently starting operation sees transportClosing
 	// and makes the outcome-unknown latch sticky before it can issue I/O.
-	if active && runtime.transportClosing.Load() {
+	if active {
+		runtime.latchStartingActiveUse()
+	}
+}
+
+func (runtime *Runtime) latchStartingActiveUse() {
+	runtime.transportActivityMu.Lock()
+	if runtime.transportClosing.Load() {
 		runtime.transportLossActive.Store(true)
 	}
+	runtime.transportActivityMu.Unlock()
+}
+
+func (runtime *Runtime) resetTransportLossState() {
+	runtime.transportActivityMu.Lock()
+	runtime.transportClosing.Store(false)
+	runtime.transportLossActive.Store(false)
+	runtime.transportActivityMu.Unlock()
 }
 
 func (runtime *Runtime) setOutputActivity(kind string, active bool) {
@@ -765,10 +781,12 @@ func (runtime *Runtime) latchActiveUseBeforeTransportClose(
 ) {
 	runtime.mu.Lock()
 	if runtime.session == session && runtime.generation == generation {
+		runtime.transportActivityMu.Lock()
 		runtime.transportClosing.Store(true)
 		if runtime.activeUseAtTransportLoss() {
 			runtime.transportLossActive.Store(true)
 		}
+		runtime.transportActivityMu.Unlock()
 	}
 	runtime.mu.Unlock()
 }
@@ -1873,8 +1891,7 @@ func (runtime *Runtime) attachWhen(result link.OpenResult, allowed func() bool) 
 	runtime.connectionUpdated = time.Now()
 	runtime.reconnectEpoch++
 	runtime.hardwareProblemEpoch++
-	runtime.transportLossActive.Store(false)
-	runtime.transportClosing.Store(false)
+	runtime.resetTransportLossState()
 	runtime.portRebindAllowed = false
 	observer := runtime.deviceObserver
 	ready := runtime.connectionReadyHandler

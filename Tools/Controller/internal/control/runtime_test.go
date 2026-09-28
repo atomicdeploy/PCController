@@ -623,6 +623,19 @@ func TestOperationStartingAfterTransportCloseSnapshotBecomesSticky(t *testing.T)
 	}
 }
 
+func TestDelayedActiveStartCannotResurrectStickyStateAfterAttachReset(t *testing.T) {
+	runtime := New(Options{})
+	runtime.transportClosing.Store(true)
+	runtime.transportLossActive.Store(true)
+	// This reset represents authenticated attachment winning before a start
+	// transition reaches the serialized close-state recheck.
+	runtime.resetTransportLossState()
+	runtime.latchStartingActiveUse()
+	if runtime.transportClosing.Load() || runtime.transportLossActive.Load() {
+		t.Fatal("stale active start resurrected the previous generation's close latch")
+	}
+}
+
 func TestTransportCloseLatchesOutputActivityBeforeStreamCleanup(t *testing.T) {
 	runtime := New(Options{Filter: ports.Filter{Port: "COM3"}})
 	port := newReconnectTestPort()
