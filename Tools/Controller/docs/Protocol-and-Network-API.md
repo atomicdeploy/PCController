@@ -181,7 +181,39 @@ Audio. Host renderers map a present `device_micros` onto their local monotonic
 clocks; late notes are shortened or discarded instead of shifting later notes. Current
 firmware receives one compact `STATUS_EFFECT` descriptor and renders the
 animation locally; the rate-limited `STATUS_RGB` stream remains only as a
-bounded older-firmware compatibility path.
+bounded older-firmware compatibility path or an explicitly owned static
+preview.
+
+`STATUS_EFFECT` (`17`) accepts either the exact one-byte release `{0}` or this
+exact 12-byte board-owned descriptor:
+
+```text
+u8  effect              1 breathe, 2 flash, 3 cycle, 4 transition
+u8  primary_r, primary_g, primary_b
+u8  alternate_r, alternate_g, alternate_b
+u8  brightness
+u8  minimum_brightness  must be <= brightness
+u16 period_ms           little-endian, 640..60000
+u8  repeats             0 loops; 1..255 completes on the MCU
+```
+
+Byte-identical descriptors are idempotent and retain phase. A changed valid
+descriptor atomically replaces the acknowledged manual owner without first
+releasing to a native profile. Learning, Warning, Fault, Boot, and the Reset
+watchdog cue may render above that owner; the exact latest request remains
+retained and restores deterministically when the higher-priority layer clears.
+Routine menu, radio, door, Bluetooth, save, and discard cues cannot steal a
+manual owner. Release clears the retained request while preserving the last
+physical frame until native lifecycle presentation resumes.
+
+`STATUS_RGB` (`14`) is exactly four bytes (`r,g,b,brightness`) and claims a
+manual static preview. It uses the same explicit `STATUS_EFFECT {0}` release.
+`STATUS_PROFILE_GET` (`18`) is exactly one condition byte;
+`STATUS_PROFILE_SET` (`19`) is exactly one condition plus the 12-byte
+descriptor. `STATUS_LED_CHANGED` (`9E`) is the six-byte actual rendered state
+`r,g,b,brightness,effect,condition`. It is changed-only and coalesces the
+latest physical frame to at most one transmission per 17 ms; it does not
+fabricate samples during static or flash holds. Link liveness is separate.
 
 Every buzzer state from one source supersedes its preceding state. A zero-
 frequency positive-duration record is a timed pause; zero frequency and zero
@@ -193,10 +225,11 @@ explicit stop, while 1..20 remains the bounded mode. This is the reusable
 continuous `WAIT`/attention-ringtone path; it does not change the `BUZZER`
 wire payload.
 
-These effects are intentionally PC-side configuration, not firmware EEPROM
-settings. They stop producing future frames if the host is canceled or
-disconnected. A buzzer note already accepted by the MCU continues until its
-duration expires because there is no dedicated buzzer-stop opcode.
+Melody sequencing remains PC-side configuration and stops producing future
+notes if the host is canceled or disconnected. A buzzer note already accepted
+by the MCU continues until its duration expires because there is no dedicated
+buzzer-stop opcode. Status-LED effects are different: their descriptors and
+condition profiles are rendered by the board as described above.
 
 `RELAY_SIDE` sides are 0 left and 1 right; motion is 0 stop, 1 up, 2 down.
 The firmware owns safe disable-before-direction sequencing. Direct

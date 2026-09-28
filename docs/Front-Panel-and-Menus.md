@@ -351,8 +351,12 @@ fade jitter. Off and On modes select the same stored endpoints directly.
 
 The Power/On indicator is PWM channel 12 and turns on when status control
 starts. Status RGB is channels 13-15. EEPROM factory brightness is 128.
-Animated levels change by four every 20 ms, and informational transitions ease
-toward their new color instead of inserting a black or unrelated frame.
+Board-native animations use 64 exact-duration phases. Each phase advances by
+four byte levels, while remainder-aware deadlines preserve the configured
+640..60000 ms cycle instead of accumulating scheduler drift. Changed rendered
+frames are coalesced to the latest physical value at no more than 60 Hz;
+informational transitions ease toward their new color instead of inserting a
+black or unrelated frame.
 
 | Priority/state | RGB behavior |
 |---|---|
