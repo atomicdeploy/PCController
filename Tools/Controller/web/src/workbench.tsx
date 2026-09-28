@@ -53,6 +53,7 @@ import { AdvancedWorkbench } from './advanced-workbench'
 import { displayPresentationCommand, type DisplayRepeat, type DisplayTarget } from './display-command'
 import { peripheralAvailability } from './peripheral-availability'
 import { RFGuidedWorkflow } from './rf-guided-workflow'
+import { MacroLibraryPanel } from './macro-library'
 import type { SharedViewProps } from './views'
 
 interface TextTerminalRow {
@@ -142,7 +143,6 @@ export function WorkbenchView(props: SharedViewProps) {
   const [green, setGreen] = useState(210)
   const [blue, setBlue] = useState(220)
   const [stripBrightness, setStripBrightness] = useState(180)
-  const [macro, setMacro] = useState('')
   const [automation, setAutomation] = useState('')
   const [hostBrightness, setHostBrightness] = useState(60)
   const latestStreamEventID = useRef(events.reduce((latest, event) => Math.max(latest, event.id), 0))
@@ -309,9 +309,11 @@ export function WorkbenchView(props: SharedViewProps) {
 
         {boardReady && available.rf && <RFGuidedWorkflow snapshot={snapshot} events={events} locale={locale} openDialog={props.openDialog} />}
 
-        <Card icon={Workflow} iconTone="green" title={copy('Macros & automations', 'ماکروها و خودکارسازی')} eyebrow={boardReady ? copy('Controller timing · host rules', 'زمان‌بندی برد · قواعد میزبان') : copy('Host rules', 'قواعد میزبان')}>
-          {boardReady && <><TextField label={copy('Macro name or ID', 'نام یا شناسه ماکرو')} value={macro} onChange={(event) => setMacro(event.target.value)} />
-          <div className="inline-actions"><Button icon={Play} disabled={!macro.trim()} onClick={() => void run(`macro play ${shellArgument(macro.trim())}`)}>{copy('Run macro', 'اجرای ماکرو')}</Button><Button icon={StopCircle} onClick={() => void run('macro cancel')}>{copy('Cancel', 'لغو')}</Button><Button icon={List} onClick={() => void run('macro list')}>{copy('List', 'فهرست')}</Button></div></>}
+        <Card className="macro-card" icon={Workflow} iconTone="green" title={copy('Macro library', 'کتابخانه ماکرو')} eyebrow={copy('Exact MCU timing · live shared state', 'زمان‌بندی دقیق MCU · وضعیت زنده مشترک')}>
+          <MacroLibraryPanel online={snapshot.connected} locale={locale} events={props.macroEvents} initialSnapshot={snapshot.macros} legacyCommand={run} />
+        </Card>
+
+        <Card icon={Bot} iconTone="violet" title={copy('Host automations', 'خودکارسازی میزبان')} eyebrow={copy('Event-driven host rules', 'قواعد رویدادمحور میزبان')}>
           <TextField label={copy('Host automation name', 'نام خودکارسازی میزبان')} value={automation} onChange={(event) => setAutomation(event.target.value)} />
           <div className="inline-actions"><Button icon={Bot} disabled={!automation.trim()} onClick={() => void run(`automation run ${shellArgument(automation.trim())}`)}>{copy('Run automation', 'اجرای خودکارسازی')}</Button><Button icon={List} onClick={() => void run('automation list')}>{copy('List', 'فهرست')}</Button></div>
         </Card>
