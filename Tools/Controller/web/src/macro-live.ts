@@ -98,8 +98,8 @@ export function applyMacroEventToSnapshot(snapshot: MacroSnapshot, event: Contro
   return next
 }
 
-/** Legacy command parsing is allowed only when a typed method truly does not exist. */
-export function shouldUseLegacyMacroFallback(cause: unknown): boolean {
+/** The living command surface is used only when a typed method truly does not exist. */
+export function shouldUseCommandSurfaceFallback(cause: unknown): boolean {
   const detail = cause instanceof Error ? cause.message : String(cause)
   return /(?:method\s+not\s+found|unknown\s+(?:rpc\s+)?method|unsupported\s+(?:rpc\s+)?method|not\s+implemented)/i.test(detail)
 }

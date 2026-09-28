@@ -1,6 +1,7 @@
+import { readFileSync } from 'node:fs'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
-import { MacroCatalog } from './macro-library'
+import { MacroCatalog, MacroCommandSurfaceNotice } from './macro-library'
 
 describe('macro catalog DOM contract', () => {
   it('renders typed name, category, color, step count, and exact duration', () => {
@@ -25,5 +26,24 @@ describe('macro catalog DOM contract', () => {
     expect(markup).toContain('>2<')
     expect(markup).toContain('125.5 ms')
     expect(markup).toContain('aria-selected="true"')
+  })
+
+  it('presents the alpha command fallback as the living host-advertised surface', () => {
+    const english = renderToStaticMarkup(<MacroCommandSurfaceNotice locale="en" onList={vi.fn()} />)
+    const farsi = renderToStaticMarkup(<MacroCommandSurfaceNotice locale="fa" onList={vi.fn()} />)
+    expect(english).toContain('host-advertised command surface')
+    expect(farsi).toContain('رابط فرمان اعلام‌شدهٔ میزبان')
+    expect(`${english}\n${farsi}`).not.toMatch(/legacy|قدیمی/i)
+  })
+
+  it('keeps old-path terminology out of the macro source contract', () => {
+    const source = [
+      readFileSync(new URL('./macro-library.tsx', import.meta.url), 'utf8'),
+      readFileSync(new URL('./macro-live.ts', import.meta.url), 'utf8'),
+      readFileSync(new URL('./workbench.tsx', import.meta.url), 'utf8'),
+    ].join('\n')
+    expect(source).not.toMatch(/legacy|قدیمی/i)
+    expect(source).toContain('shouldUseCommandSurfaceFallback')
+    expect(source).toContain('commandSurface={run}')
   })
 })
