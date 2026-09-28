@@ -13,10 +13,7 @@ import (
 	"time"
 )
 
-const operationJournalSchema = 1
-
 type operationJournal struct {
-	Schema      int          `json:"schema"`
 	Status      UpdateStatus `json:"status"`
 	Scope       string       `json:"scope,omitempty"`
 	Fingerprint string       `json:"fingerprint,omitempty"`
@@ -80,7 +77,7 @@ func (service *Service) reserveOperation(
 		service.idempotency[lookup] = idempotencyRecord{OperationID: status.ID, Fingerprint: fingerprint}
 	}
 	service.operationMeta[status.ID] = operationJournal{
-		Schema: operationJournalSchema, Status: status, Scope: scope, Fingerprint: fingerprint,
+		Status: status, Scope: scope, Fingerprint: fingerprint,
 	}
 	service.mu.Unlock()
 	if err := service.persistOperation(status.ID); err != nil {
@@ -109,10 +106,10 @@ func (service *Service) loadOperationJournals() error {
 			return readErr
 		}
 		var journal operationJournal
-		if decodeErr := strictJSON(content, &journal); decodeErr != nil {
+		if decodeErr := decodeStoredJSON(content, &journal); decodeErr != nil {
 			return fmt.Errorf("decode operation journal %q: %w", entry.Name(), decodeErr)
 		}
-		if journal.Schema != operationJournalSchema || journal.Status.ID == "" ||
+		if journal.Status.ID == "" ||
 			entry.Name() != journal.Status.ID+".json" {
 			return fmt.Errorf("operation journal %q has an invalid identity", entry.Name())
 		}
@@ -156,7 +153,6 @@ func (service *Service) persistOperation(id string) error {
 	if !ok {
 		return os.ErrNotExist
 	}
-	journal.Schema = operationJournalSchema
 	journal.Status = status
 	return writeJSONAtomic(service.operationJournalPath(id), journal)
 }

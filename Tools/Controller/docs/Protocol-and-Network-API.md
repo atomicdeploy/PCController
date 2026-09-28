@@ -508,15 +508,30 @@ share one current file-watched policy and one audit-event path. Brightness and
 power writes are disabled by default, and a DDC/CI-unsupported display returns
 a capability error rather than falling back to an untracked shell command.
 
-The default host endpoint is `127.0.0.1:8787`. A single TCP listener
+The default network host endpoint is `127.0.0.1:8787`. Its TCP listener
 multiplexes newline-delimited JSON-RPC and HTTP by inspecting the first request
-bytes. HTTP then serves REST, standard WebSocket, and Socket.IO paths. Closing
+bytes. HTTP then serves REST, standard WebSocket, and Socket.IO paths. The
+public Go `rpc` package defines the same request, response, structured-error,
+message-bound, and caller contract for direct in-process dispatch, Windows
+named pipes, Unix-domain sockets, and TCP. Native-local listeners use raw
+newline-delimited JSON-RPC only; they never run the HTTP protocol sniffer.
+Windows pipe listeners reject remote clients and use a protected current-user
+plus LocalSystem DACL. Unix listeners require an owner-only directory, publish
+a `0600` socket, reject symlink/non-socket replacements, and recover a stale
+socket only when the caller explicitly confirms it holds the ownership lock.
+
+The reusable transport/client foundation is additive. Until the primary-host
+record and live endpoint advertisement are advanced by issue #373, the product
+primary continues to publish TCP `listen` as its automatic attachment path;
+embedders may explicitly construct and serve a native endpoint through `rpc`
+plus `ipcjson.ServeRaw`. Native-local and `:8787` network listeners are meant
+to run concurrently, not replace one another. Closing
 the serial port does not stop this service; closing the service does not erase
 MCU EEPROM or the PC configuration. JSON-RPC uses protocol `2.0`; schema
 negotiation reports JSON-RPC `2.0` only because that standards-defined marker
 is required by the wire format. Canonical REST URLs live directly under
-`/api/`. JSON-RPC and WebSocket peers remain capability- and semantics-driven so different feature sets can
-still interoperate.
+`/api/`. JSON-RPC and WebSocket peers remain capability- and semantics-driven
+so different feature sets can still interoperate.
 
 ### Immediate-alpha exposure
 
@@ -709,10 +724,9 @@ field. The client rejects an expired or malformed deadline, deduplicates the
 operation-plus-delivery receipt, and returns that delivery nonce as the
 required `delivery_id` in its acknowledgement. The coordinator accepts only a
 nonce issued for that exact operation target before its deadline, then records the client-reported
-`applied` or `rejected` result. A legacy TUI/WebUI without the new advertisement
-may still receive an action through a known delivery path, but it remains
-`queued` until acknowledgement and becomes `timeout` after the bounded
-deadline. Operation history is bounded and expires; ordinary delivery and
+`applied` or `rejected` result. An action without a live outcome-capable
+advertisement is rejected; it is not delivered through an untracked path.
+Operation history is bounded and expires; ordinary delivery and
 outcome transitions use the existing event streams and bridge fan-out, never
 polling. Successful queued/applied transitions use the state stream so they do
 not flood operator activity logs, while rejection and timeout remain visible
@@ -724,8 +738,7 @@ without rejecting the whole instance. A namespaced custom action such as
 that exact capability. Custom namespaces cannot use the reserved `app.*`,
 `controller.*`, or `command` names; values are limited to 4096 bytes and cannot
 contain NUL, CR, or LF. They always use the correlated exact-target path with a
-delivery nonce, deadline, deduplication receipt, and terminal ACK outcome; they
-never fall back to untracked legacy delivery.
+delivery nonce, deadline, deduplication receipt, and terminal ACK outcome.
 These receipts provide correlation and deduplication, **not responder
 authentication**: alpha clients share a trusted event fabric and authorization
 is disabled by policy. Transport-session identity binding remains tracked in
@@ -1124,7 +1137,7 @@ final URL explicitly.
 
 When `signing_secret` is configured, the sender also sets
 `X-PCController-Timestamp`, `X-PCController-Nonce`, and
-`X-PCController-Signature`. The signature is `v1=` followed by the lowercase
+`X-PCController-Signature`. The signature is `sha256=` followed by the lowercase
 hex HMAC-SHA256 of this exact byte sequence:
 
 ```text

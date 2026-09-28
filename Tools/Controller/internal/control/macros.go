@@ -376,8 +376,8 @@ func (runner *MacroRunner) StopRecording(save bool) (appconfig.Macro, error) {
 	lifecycle := map[bool]string{true: "saved", false: "discarded"}[save]
 	runner.runtime.PublishStructuredEvent(Event{
 		Kind: "macro.recording", Lifecycle: lifecycle, State: lifecycle,
-		Text:     fmt.Sprintf("macro recording %d/%s %s with %d %s-timed steps", macro.ID, macro.Name, lifecycle, len(macro.Steps), normalizedMacroMode(macro.Mode)),
-		Metadata: map[string]string{"macro_mode": normalizedMacroMode(macro.Mode)},
+		Text:     fmt.Sprintf("macro recording %d/%s %s with %d %s-timed steps", macro.ID, macro.Name, lifecycle, len(macro.Steps), macro.Mode),
+		Metadata: map[string]string{"macro_mode": macro.Mode},
 	})
 	return macro, nil
 }
@@ -392,7 +392,7 @@ func (runner *MacroRunner) captureCommand(evidence CommandEvidence) {
 		runner.recording.LastError = "recording reached the 65535 step limit; save it before continuing"
 		return
 	}
-	mode := normalizedMacroMode(runner.recordMacro.Mode)
+	mode := runner.recordMacro.Mode
 	if mode == macroModeHost {
 		if !hostRecordableOpcode(evidence.Opcode) {
 			return
@@ -470,7 +470,7 @@ func (runner *MacroRunner) Start(ctx context.Context, reference string) (MacroSt
 	if !snapshot.Connected {
 		return MacroState{}, errors.New("device is not connected")
 	}
-	mode := normalizedMacroMode(macro.Mode)
+	mode := macro.Mode
 	if mode == macroModeMCU && snapshot.Hello.Capabilities&native.CapabilityTimedMacroQueue == 0 {
 		return MacroState{}, errors.New("connected firmware does not advertise the MCU-timed macro queue")
 	}
@@ -1185,6 +1185,9 @@ func (runner *MacroRunner) publishLifecycle(lifecycle string, state MacroState, 
 }
 
 func compileMacro(macro appconfig.Macro) (compiledMacro, error) {
+	if macro.Mode != macroModeHost && macro.Mode != macroModeMCU {
+		return compiledMacro{}, fmt.Errorf("macro %d/%s mode must be host or mcu", macro.ID, macro.Name)
+	}
 	if len(macro.Steps) == 0 || len(macro.Steps) > 65535 {
 		return compiledMacro{}, fmt.Errorf("macro %d/%s must contain 1..65535 steps", macro.ID, macro.Name)
 	}
@@ -1206,7 +1209,7 @@ func compileMacro(macro appconfig.Macro) (compiledMacro, error) {
 		if err != nil {
 			return compiledMacro{}, fmt.Errorf("macro %d/%s step %d: %w", macro.ID, macro.Name, index+1, err)
 		}
-		if normalizedMacroMode(macro.Mode) == macroModeMCU && len(result.stream)+len(record) > 65535 {
+		if macro.Mode == macroModeMCU && len(result.stream)+len(record) > 65535 {
 			return compiledMacro{}, fmt.Errorf("macro %d/%s encoded stream exceeds 65535 bytes", macro.ID, macro.Name)
 		}
 		result.stream = append(result.stream, record...)
@@ -1331,18 +1334,15 @@ func hostRecordableOpcode(opcode byte) bool {
 	}
 }
 
-func normalizedMacroMode(mode string) string {
-	if strings.EqualFold(strings.TrimSpace(mode), macroModeHost) {
-		return macroModeHost
-	}
-	return macroModeMCU
-}
-
 func modeTimingTolerance(mode string) uint32 {
-	if normalizedMacroMode(mode) == macroModeHost {
+	switch mode {
+	case macroModeHost:
 		return defaultHostMacroToleranceUS
+	case macroModeMCU:
+		return defaultMacroTimingToleranceUS
+	default:
+		return 0
 	}
-	return defaultMacroTimingToleranceUS
 }
 
 func decodeMacroHex(value string) ([]byte, error) {

@@ -29,8 +29,6 @@ import (
 )
 
 const (
-	// SchemaVersion identifies the current host configuration schema.
-	SchemaVersion = 1
 	// DefaultWatchInterval bounds the polling fallback when file notifications
 	// are unavailable.
 	DefaultWatchInterval = 150 * time.Millisecond
@@ -39,7 +37,6 @@ const (
 // Config is the persistent host-side configuration root; it never mirrors or
 // replaces the MCU's EEPROM-owned settings.
 type Config struct {
-	Schema        int               `json:"schema"`
 	Connection    Connection        `json:"connection"`
 	UI            UI                `json:"ui"`
 	IPC           IPC               `json:"ipc"`
@@ -229,8 +226,8 @@ type Programming struct {
 }
 
 // Macro defines a named, host-persisted sequence. Mode "host" schedules
-// ordinary commands from the controller process; mode "mcu" (and the legacy
-// empty value) streams the sequence to the firmware timing engine.
+// ordinary commands from the controller process; mode "mcu" streams the
+// sequence to the firmware timing engine. Mode is always explicit.
 type Macro struct {
 	ID                  byte        `json:"id"`
 	Name                string      `json:"name"`
@@ -319,7 +316,6 @@ type RFTransmit struct {
 // Defaults returns a complete safe host configuration for a new installation.
 func Defaults() Config {
 	return Config{
-		Schema: SchemaVersion,
 		Connection: Connection{
 			VID:                "1A86",
 			PID:                "7523",
@@ -556,9 +552,6 @@ func (value Config) Validate() error {
 	if _, err := deployment.Normalize(value.Programming.Deployment); err != nil {
 		return fmt.Errorf("programming.deployment: %w", err)
 	}
-	if value.Schema != SchemaVersion {
-		return fmt.Errorf("unsupported schema %d", value.Schema)
-	}
 	if _, err := firmwarefeatures.Normalize(
 		firmwarefeatures.Names(value.Programming.FirmwareFeatures),
 	); err != nil {
@@ -720,8 +713,8 @@ func (value Config) Validate() error {
 		if len(macro.Category) > 64 || !printableASCII(macro.Category) {
 			return fmt.Errorf("macros[%d].category must be at most 64 printable ASCII bytes", index)
 		}
-		switch strings.ToLower(strings.TrimSpace(macro.Mode)) {
-		case "", "mcu", "host":
+		switch macro.Mode {
+		case "mcu", "host":
 		default:
 			return fmt.Errorf("macros[%d].mode must be host or mcu", index)
 		}

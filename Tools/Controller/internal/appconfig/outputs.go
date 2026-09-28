@@ -35,8 +35,7 @@ type MelodyNote struct {
 }
 
 // StatusLEDEffect describes one compact MCU-owned status RGB animation. Repeats
-// zero means loop until explicitly stopped; DurationMS remains a compatibility
-// input and is converted to a bounded cycle count when Repeats is omitted.
+// zero means loop until explicitly stopped.
 type StatusLEDEffect struct {
 	Name           string `json:"name"`
 	Kind           string `json:"kind"`
@@ -49,7 +48,6 @@ type StatusLEDEffect struct {
 	Brightness     byte   `json:"brightness"`
 	MinBrightness  byte   `json:"min_brightness,omitempty"`
 	PeriodMS       int    `json:"period_ms"`
-	DurationMS     int    `json:"duration_ms,omitempty"`
 	Repeats        byte   `json:"repeats,omitempty"`
 }
 
@@ -186,13 +184,13 @@ func DefaultStatusLEDEffects() []StatusLEDEffect {
 			Name: "attention", Kind: "flash",
 			Red: 255, Green: 96, Blue: 0, Brightness: 220,
 			AlternateRed: 0, AlternateGreen: 0, AlternateBlue: 0,
-			PeriodMS: 700, DurationMS: 0,
+			PeriodMS: 700,
 		},
 		{
 			Name: "breathe-blue", Kind: "breathe",
 			Red: 30, Green: 120, Blue: 255,
 			Brightness: 200, MinBrightness: 8,
-			PeriodMS: 1800, DurationMS: 0,
+			PeriodMS: 1800,
 		},
 	}
 }
@@ -327,12 +325,6 @@ func validateOutputDefinitions(
 		if effect.MinBrightness > effect.Brightness {
 			return fmt.Errorf(
 				"status_effects[%d].min_brightness exceeds brightness",
-				index,
-			)
-		}
-		if effect.DurationMS < 0 || effect.DurationMS > 3_600_000 {
-			return fmt.Errorf(
-				"status_effects[%d].duration_ms must be 0..3600000",
 				index,
 			)
 		}

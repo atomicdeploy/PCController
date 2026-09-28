@@ -19,7 +19,7 @@ import (
 
 const (
 	MarkerName   = ".pccontroller-data-owner.json"
-	markerFormat = "pccontroller-host-data-owner/v1"
+	markerFormat = "pccontroller-host-data-owner"
 )
 
 var ErrNotOwned = errors.New("host data root is not owned by this user and product")
@@ -144,7 +144,6 @@ func VerifyFor(root, owner string) error {
 		return err
 	}
 	decoder := json.NewDecoder(bytes.NewReader(content))
-	decoder.DisallowUnknownFields()
 	var value marker
 	if err := decoder.Decode(&value); err != nil {
 		return fmt.Errorf("%w: invalid marker: %v", ErrNotOwned, err)

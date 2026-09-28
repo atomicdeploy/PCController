@@ -463,7 +463,7 @@ func TestConfiguredMelodyAndStatusEffectCommands(t *testing.T) {
 	config.StatusEffects = []appconfig.StatusLEDEffect{{
 		Name: "signal", Kind: "flash",
 		Red: 1, Green: 2, Blue: 3, Brightness: 100,
-		PeriodMS: 640, DurationMS: 210,
+		PeriodMS: 640, Repeats: 1,
 	}}
 	provider := func() appconfig.Config { return config }
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
