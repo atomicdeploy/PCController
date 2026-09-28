@@ -394,13 +394,13 @@ export function controllerConnectionLabel(
   if (streamState === 'connecting') return copy('Connecting', 'در حال اتصال')
   if (streamState !== 'open') return copy('Disconnected', 'قطع ارتباط')
   if (boardState === 'loading') return copy('Synchronizing', 'در حال همگام‌سازی')
-  if (snapshot.connected) return copy('Controller connected', 'برد متصل')
+  if (snapshot.connected) return copy('Board connected', 'برد متصل')
   const controllerState = snapshot.connection_state.trim().toLowerCase()
   if (controllerState === 'paused') return copy('Paused', 'متوقف')
   if (['connecting', 'discovering', 'scanning', 'searching'].includes(controllerState)) {
     return copy('Searching', 'در حال جستجو')
   }
-  return copy('No controller', 'بدون برد')
+  return copy('No board', 'بدون برد')
 }
 
 export function isCompletedHostUpdate(event: Pick<ControllerEvent, 'kind' | 'metadata'>): boolean {
@@ -1585,9 +1585,9 @@ export default function App() {
           aria-haspopup={snapshot.connected ? 'menu' : undefined}
           aria-expanded={snapshot.connected ? sidebarStatusMenu : undefined}
           aria-label={snapshot.connected
-            ? appearance.locale === 'fa' ? 'منوی اتصال کنترلر' : 'Controller connection menu'
-            : appearance.locale === 'fa' ? 'اتصال مجدد کنترلر' : 'Reconnect controller'}
-          title={`${snapshot.connected ? t('online') : t('offline')} · ${snapshot.port.name || snapshot.connection_state}`}
+            ? appearance.locale === 'fa' ? 'منوی اتصال برد' : 'Board connection menu'
+            : appearance.locale === 'fa' ? 'اتصال مجدد برد' : 'Reconnect board'}
+          title={`${snapshot.connected ? (appearance.locale === 'fa' ? 'برد آنلاین' : 'Board online') : (appearance.locale === 'fa' ? 'برد آفلاین' : 'Board offline')} · ${snapshot.port.name || snapshot.connection_state}`}
           onClick={() => {
             if (!snapshot.connected) {
               setSidebarStatusMenu(false)
@@ -1609,14 +1609,14 @@ export default function App() {
           }}
         >
           <span className={`status-rail status-rail--${snapshot.connected ? 'good' : 'bad'}`} aria-hidden="true" />
-          <div><strong>{snapshot.connected ? t('online') : t('offline')}</strong><small>{snapshot.port.name || snapshot.connection_state}</small></div>
+          <div><strong>{snapshot.connected ? (appearance.locale === 'fa' ? 'برد آنلاین' : 'Board online') : (appearance.locale === 'fa' ? 'برد آفلاین' : 'Board offline')}</strong><small>{snapshot.port.name || snapshot.connection_state}</small></div>
           <Cpu size={18} aria-hidden="true" />
         </button>
         {sidebarStatusMenu && typeof document !== 'undefined' && createPortal(<div
           ref={sidebarStatusMenuRef}
           className="sidebar__status-menu"
           role="menu"
-          aria-label={appearance.locale === 'fa' ? 'عملیات اتصال کنترلر' : 'Controller connection actions'}
+          aria-label={appearance.locale === 'fa' ? 'عملیات اتصال برد' : 'Board connection actions'}
           style={sidebarStatusMenuPosition}
         >
           <button type="button" role="menuitem" onClick={() => { setSidebarStatusMenu(false); void runCommand('reconnect') }}>{appearance.locale === 'fa' ? 'اتصال مجدد' : 'Reconnect'}</button>
