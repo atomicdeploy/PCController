@@ -16,7 +16,7 @@ import { shellArgument } from './command-line'
 import {
   applyMacroEventToSnapshot,
   macroEventNeedsSnapshot,
-  shouldUseLegacyMacroFallback,
+  shouldUseCommandSurfaceFallback,
 } from './macro-live'
 import type { ControllerEvent, ControllerMacro, Locale, MacroSnapshot } from './types'
 
@@ -27,7 +27,7 @@ interface MacroLibraryPanelProps {
   locale: Locale
   events: ControllerEvent[]
   initialSnapshot?: MacroSnapshot
-  legacyCommand: (command: string) => Promise<string>
+  commandSurface: (command: string) => Promise<string>
 }
 
 interface MacroCatalogProps {
@@ -98,7 +98,23 @@ export function MacroCatalog({ macros, selectedReference, locale, onSelect }: Ma
   )
 }
 
-export function MacroLibraryPanel({ online, locale, events, initialSnapshot, legacyCommand }: MacroLibraryPanelProps) {
+interface MacroCommandSurfaceNoticeProps {
+  locale: Locale
+  onList: () => void
+}
+
+export function MacroCommandSurfaceNotice({ locale, onList }: MacroCommandSurfaceNoticeProps) {
+  const persian = locale === 'fa'
+  const copy = (english: string, farsi: string) => persian ? farsi : english
+  return (
+    <div className="macro-library__command-surface">
+      <span>{copy('Actions below use the host-advertised command surface.', 'عملیات زیر از رابط فرمان اعلام‌شدهٔ میزبان استفاده می‌کنند.')}</span>
+      <Button compact icon={Database} onClick={onList}>{copy('List in terminal', 'فهرست در ترمینال')}</Button>
+    </div>
+  )
+}
+
+export function MacroLibraryPanel({ online, locale, events, initialSnapshot, commandSurface }: MacroLibraryPanelProps) {
   const persian = locale === 'fa'
   const copy = (english: string, farsi: string) => persian ? farsi : english
   const [snapshot, setSnapshot] = useState<MacroSnapshot | null>(initialSnapshot ?? null)
@@ -123,9 +139,9 @@ export function MacroLibraryPanel({ online, locale, events, initialSnapshot, leg
       latestAppliedEventID.current = Math.max(latestAppliedEventID.current, value.latest_event_id || 0)
       return value
     } catch (cause) {
-      if (shouldUseLegacyMacroFallback(cause)) {
+      if (shouldUseCommandSurfaceFallback(cause)) {
         setTypedAvailable(false)
-        setError(copy('This host only provides the legacy macro command path.', 'این میزبان فقط مسیر فرمان قدیمی ماکرو را ارائه می‌دهد.'))
+        setError(copy('This host exposes macro operations through the living command surface.', 'این میزبان عملیات ماکرو را از طریق رابط فرمان زنده ارائه می‌کند.'))
         return null
       }
       setError(cause instanceof Error ? cause.message : String(cause))
@@ -184,11 +200,11 @@ export function MacroLibraryPanel({ online, locale, events, initialSnapshot, leg
       setTypedAvailable(true)
       latestAppliedEventID.current = Math.max(latestAppliedEventID.current, value.latest_event_id || 0)
     } catch (cause) {
-      if (!shouldUseLegacyMacroFallback(cause)) {
+      if (!shouldUseCommandSurfaceFallback(cause)) {
         setError(cause instanceof Error ? cause.message : String(cause))
         return
       }
-      await legacyCommand(fallback)
+      await commandSurface(fallback)
       const refreshed = await loadSnapshot(true)
       if (!refreshed) setTypedAvailable(false)
     } finally {
@@ -225,16 +241,13 @@ export function MacroLibraryPanel({ online, locale, events, initialSnapshot, leg
           </span>
         </div>
         <StatusBadge tone={typedAvailable === false ? 'warn' : typedAvailable ? 'good' : 'info'}>
-          {typedAvailable === false ? copy('LEGACY', 'قدیمی') : typedAvailable ? copy('TYPED LIVE', 'زنده ساختاریافته') : copy('CONNECTING', 'در حال اتصال')}
+          {typedAvailable === false ? copy('COMMAND SURFACE', 'رابط فرمان') : typedAvailable ? copy('TYPED LIVE', 'زنده ساختاریافته') : copy('CONNECTING', 'در حال اتصال')}
         </StatusBadge>
       </div>
 
       {error && <div className="macro-library__error" role="alert">{error}</div>}
       {typedAvailable === false && (
-        <div className="macro-library__legacy">
-          <span>{copy('Enter a macro name or ID in the Name field; actions below will use the compatible command path.', 'نام یا شناسه ماکرو را در فیلد نام وارد کنید؛ عملیات زیر از مسیر فرمان سازگار استفاده می‌کنند.')}</span>
-          <Button compact icon={Database} onClick={() => void legacyCommand('macro list')}>{copy('List in terminal', 'فهرست در ترمینال')}</Button>
-        </div>
+        <MacroCommandSurfaceNotice locale={locale} onList={() => void commandSurface('macro list')} />
       )}
 
       <div className="macro-library__workspace">
