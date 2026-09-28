@@ -301,16 +301,8 @@ func runProgramWithConfig(
 			identityPort,
 			config.Connection,
 		)
-		if identityErr != nil {
-			fmt.Fprintln(
-				stderr,
-				"backup: application identity unavailable; continuing with programmer metadata:",
-				identityErr,
-			)
-		} else {
-			options.ApplicationHash = hello.BuildHash
-			options.ApplicationIdentitySchema = hello.IdentitySchema
-			options.ApplicationPackedTimestamp = hello.BuildTimestamp
+		if err := applyApplicationIdentity(&options, hello, identityErr, stderr); err != nil {
+			return err
 		}
 	}
 	if options.Method == programmer.MethodCompile {
@@ -961,6 +953,31 @@ func programFactoryEEPROM(
 	)
 }
 
+var errApplicationIdentityCleanup = errors.New("application identity cleanup failed")
+
+func applyApplicationIdentity(
+	options *programmer.Options,
+	hello native.Hello,
+	identityErr error,
+	stderr io.Writer,
+) error {
+	if identityErr != nil {
+		if errors.Is(identityErr, errApplicationIdentityCleanup) {
+			return fmt.Errorf("release application UART after identity probe: %w", identityErr)
+		}
+		fmt.Fprintln(
+			stderr,
+			"backup: application identity unavailable; continuing with programmer metadata:",
+			identityErr,
+		)
+		return nil
+	}
+	options.ApplicationHash = hello.BuildHash
+	options.ApplicationIdentitySchema = hello.IdentitySchema
+	options.ApplicationPackedTimestamp = hello.BuildTimestamp
+	return nil
+}
+
 func readApplicationIdentityBeforeProgramming(
 	port string,
 	connection appconfig.Connection,
@@ -975,17 +992,26 @@ func readApplicationIdentityBeforeProgramming(
 	return readApplicationIdentityWithRuntime(runtime)
 }
 
-type applicationIdentityRuntime interface {
+type applicationRuntime interface {
 	EnsureConnected(context.Context) error
 	Snapshot() control.Snapshot
 	Close() error
 }
 
-func readApplicationIdentityWithRuntime(runtime applicationIdentityRuntime) (
+func readApplicationIdentityWithRuntime(runtime applicationRuntime) (
 	hello native.Hello,
 	err error,
 ) {
-	defer func() { err = errors.Join(err, runtime.Close()) }()
+	defer func() {
+		if closeErr := closeCommandRuntime(
+			runtime, runtime.Close, "close application identity runtime",
+		); closeErr != nil {
+			err = errors.Join(
+				err,
+				fmt.Errorf("%w: %w", errApplicationIdentityCleanup, closeErr),
+			)
+		}
+	}()
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
 	if err = runtime.EnsureConnected(ctx); err != nil {
@@ -1548,7 +1574,24 @@ func reconnectApplicationAfterProgramming(
 		RequestTimeout: time.Duration(connection.RequestTimeoutMS) * time.Millisecond,
 		HelloAttempts:  connection.HelloAttempts,
 	})
-	defer runtime.Close()
+	return reconnectApplicationWithRuntime(ctx, runtime, output)
+}
+
+func reconnectApplicationWithRuntime(
+	ctx context.Context,
+	runtime applicationRuntime,
+	output io.Writer,
+) (resultErr error) {
+	defer func() {
+		if closeErr := closeCommandRuntime(
+			runtime, runtime.Close, "close application reconnect runtime",
+		); closeErr != nil {
+			resultErr = errors.Join(
+				resultErr,
+				fmt.Errorf("close application reconnect runtime: %w", closeErr),
+			)
+		}
+	}()
 	reconnectContext, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
 	if err := runtime.EnsureConnected(reconnectContext); err != nil {

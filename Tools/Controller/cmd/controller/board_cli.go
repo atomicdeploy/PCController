@@ -49,13 +49,40 @@ func runBoard(args []string, stdout, stderr io.Writer, store *appconfig.Store) e
 	}
 	runtime := newRuntime(&connectionFlags{}, store)
 	bindRuntimeDevicePersistence(runtime, store)
-	defer runtime.Close()
 	ctx, cancel := signalContext()
 	defer cancel()
+	return runBoardLocally(ctx, action, runtime, args[1:], store, stdout)
+}
+
+func runBoardLocally(
+	ctx context.Context,
+	action string,
+	runtime *control.Runtime,
+	args []string,
+	store *appconfig.Store,
+	stdout io.Writer,
+) (resultErr error) {
+	defer func() {
+		if closeErr := closeOwnedBoardRuntime(runtime); closeErr != nil {
+			resultErr = errors.Join(
+				resultErr,
+				fmt.Errorf("close board command runtime: %w", closeErr),
+			)
+		}
+	}()
 	if action == "blank" {
-		return blankBoard(ctx, runtime, args[1:], store, stdout)
+		return blankBoard(ctx, runtime, args, store, stdout)
 	}
-	return initializeBoard(ctx, runtime, args[1:], store, findProjectRoot(), stdout)
+	return initializeBoard(ctx, runtime, args, store, findProjectRoot(), stdout)
+}
+
+func closeOwnedBoardRuntime(runtime *control.Runtime) error {
+	closeRuntime := closeBoardRuntime
+	return closeCommandRuntime(
+		runtime,
+		func() error { return closeRuntime(runtime) },
+		"close board command runtime",
+	)
 }
 
 func blankBoard(
@@ -114,7 +141,7 @@ func blankBoard(
 		}
 		fmt.Fprintln(output, "WARNING: proceeding without an application identity; USBasp signature and complete backup remain mandatory.")
 	}
-	if err := closeBoardRuntime(runtime); err != nil {
+	if err := closeOwnedBoardRuntime(runtime); err != nil {
 		return fmt.Errorf("release application UART before blanking: %w", err)
 	}
 
@@ -296,7 +323,7 @@ func initializeBoard(
 
 	// No authenticated application is expected yet, but close any stale UART
 	// session before ISP takes ownership of RESET and the target clock.
-	if err := closeBoardRuntime(runtime); err != nil {
+	if err := closeOwnedBoardRuntime(runtime); err != nil {
 		return fmt.Errorf("release application UART before initialization: %w", err)
 	}
 	fmt.Fprintln(output, "\n[isp] USBasp signature, complete backup, core bootloader/fuses, and post-write verification")

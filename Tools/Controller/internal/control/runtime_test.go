@@ -162,6 +162,64 @@ func TestPulseResetQuarantinesTemporaryCloseFailure(t *testing.T) {
 	}
 }
 
+func TestPulseResetRejectsCloseQuarantine(t *testing.T) {
+	tests := []struct {
+		name    string
+		install func(*Runtime, *link.Session)
+	}{
+		{
+			name: "active failed-close owner",
+			install: func(runtime *Runtime, session *link.Session) {
+				runtime.session = session
+				runtime.port = ports.Info{Name: "COM4", IsUSB: true}
+			},
+		},
+		{
+			name: "retained rejected owner",
+			install: func(runtime *Runtime, session *link.Session) {
+				runtime.retainedClose = []link.OpenResult{{
+					Session: session,
+					Port:    ports.Info{Name: "COM4", IsUSB: true},
+				}}
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			port := newReconnectTestPort()
+			session := link.NewForPort("COM4", port)
+			openCalled := false
+			previous := openResetSession
+			openResetSession = func(context.Context, string, int) (*link.Session, error) {
+				openCalled = true
+				return nil, errors.New("unexpected reset open")
+			}
+			defer func() { openResetSession = previous }()
+
+			runtime := New(Options{BaudRate: link.DefaultBaudRate})
+			runtime.mu.Lock()
+			test.install(runtime, session)
+			runtime.paused = true
+			runtime.connectionState = "close_failed"
+			runtime.connectionReason = "CancelIoEx failed"
+			runtime.mu.Unlock()
+
+			if err := runtime.PulseResetPortFor(context.Background(), "COM4", time.Millisecond); err == nil {
+				t.Fatal("PulseResetPortFor accepted a quarantined serial owner")
+			}
+			if openCalled {
+				t.Fatal("PulseResetPortFor opened a second transport during close quarantine")
+			}
+			if len(port.dtr) != 0 {
+				t.Fatalf("PulseResetPortFor toggled quarantined transport DTR: %v", port.dtr)
+			}
+			if err := runtime.Close(); err != nil {
+				t.Fatalf("release quarantined owner: %v", err)
+			}
+		})
+	}
+}
+
 func TestDoorEventUpdatesSnapshotAndWakesWaiters(t *testing.T) {
 	runtime := New(Options{})
 	after := runtime.LatestEventID()
@@ -576,6 +634,144 @@ func TestOpenAuthenticationFailurePreservesActiveSession(t *testing.T) {
 	}
 	if err := runtime.Close(); err != nil {
 		t.Fatalf("close preserved active session: %v", err)
+	}
+}
+
+func TestCloseCancelsAndJoinsDirectOpen(t *testing.T) {
+	runtime := New(Options{})
+	openStarted := make(chan struct{})
+	runtime.openAuthenticated = func(ctx context.Context, _ ports.Info, _ link.DiscoveryOptions) (link.OpenResult, error) {
+		close(openStarted)
+		<-ctx.Done()
+		return link.OpenResult{}, ctx.Err()
+	}
+
+	openDone := make(chan error, 1)
+	go func() {
+		openDone <- runtime.Open(context.Background(), "tcp://127.0.0.1:8787")
+	}()
+	select {
+	case <-openStarted:
+	case <-time.After(time.Second):
+		t.Fatal("direct Open did not begin authentication")
+	}
+
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- runtime.Close() }()
+	select {
+	case err := <-closeDone:
+		if err != nil {
+			t.Fatalf("Close while direct Open was pending: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Close did not cancel and join direct Open")
+	}
+	select {
+	case err := <-openDone:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("direct Open error = %v, want cancellation", err)
+		}
+	default:
+		t.Fatal("Close returned before direct Open authentication exited")
+	}
+}
+
+func TestCloseEpochRejectsDirectOpenSuccessAndReleasesTransport(t *testing.T) {
+	port := newReconnectTestPort()
+	session := link.NewForPort("TCP", port)
+	runtime := New(Options{})
+	openStarted := make(chan struct{})
+	observed := make(chan struct{}, 1)
+	runtime.SetDeviceObserver(func(ports.Info, native.Hello) { observed <- struct{}{} })
+	runtime.openAuthenticated = func(ctx context.Context, _ ports.Info, _ link.DiscoveryOptions) (link.OpenResult, error) {
+		close(openStarted)
+		<-ctx.Done()
+		return link.OpenResult{
+			Session: session,
+			Port:    ports.Info{Name: "tcp://127.0.0.1:8787"},
+			Hello:   native.Hello{Name: "PCController"},
+		}, nil
+	}
+
+	openDone := make(chan error, 1)
+	go func() {
+		openDone <- runtime.Open(context.Background(), "tcp://127.0.0.1:8787")
+	}()
+	select {
+	case <-openStarted:
+	case <-time.After(time.Second):
+		t.Fatal("direct Open did not begin authentication")
+	}
+	if err := runtime.Close(); err != nil {
+		t.Fatalf("Close rejected direct-open result: %v", err)
+	}
+	select {
+	case err := <-openDone:
+		if err == nil {
+			t.Fatal("direct Open reported success after Close won the epoch")
+		}
+	default:
+		t.Fatal("Close returned before direct Open rejected its result")
+	}
+	select {
+	case <-port.closed:
+	default:
+		t.Fatal("Close returned before rejected direct-open transport was released")
+	}
+	select {
+	case <-observed:
+		t.Fatal("rejected direct Open emitted a ready observer event")
+	default:
+	}
+	if snapshot := runtime.Snapshot(); snapshot.Connected || !snapshot.Paused {
+		t.Fatalf("close/direct-open race snapshot = %#v", snapshot)
+	}
+}
+
+func TestCloseDrainsRejectedDirectOpenCleanupOwner(t *testing.T) {
+	cancelErr := errors.New("CancelIoEx failed")
+	port := newRetryableCloseTestPort(cancelErr)
+	session := link.NewForPort("TCP", port)
+	runtime := New(Options{})
+	openStarted := make(chan struct{})
+	runtime.openAuthenticated = func(ctx context.Context, _ ports.Info, _ link.DiscoveryOptions) (link.OpenResult, error) {
+		close(openStarted)
+		<-ctx.Done()
+		return link.OpenResult{
+			Session: session,
+			Port:    ports.Info{Name: "tcp://127.0.0.1:8787"},
+			Hello:   native.Hello{Name: "PCController"},
+		}, nil
+	}
+
+	openDone := make(chan error, 1)
+	go func() {
+		openDone <- runtime.Open(context.Background(), "tcp://127.0.0.1:8787")
+	}()
+	select {
+	case <-openStarted:
+	case <-time.After(time.Second):
+		t.Fatal("direct Open did not begin authentication")
+	}
+	if err := runtime.Close(); err != nil {
+		t.Fatalf("Close did not retry rejected direct-open cleanup: %v", err)
+	}
+	select {
+	case err := <-openDone:
+		if !errors.Is(err, cancelErr) {
+			t.Fatalf("direct Open cleanup error = %v, want %v", err, cancelErr)
+		}
+	default:
+		t.Fatal("Close returned before rejected cleanup owner was quarantined")
+	}
+	port.mu.Lock()
+	closeCalls := port.closeCalls
+	port.mu.Unlock()
+	if closeCalls != 2 {
+		t.Fatalf("transport Close calls = %d, want rejection plus barrier retry", closeCalls)
+	}
+	if current := runtime.currentSession(); current != nil {
+		t.Fatalf("Close retained rejected direct-open owner %p", current)
 	}
 }
 

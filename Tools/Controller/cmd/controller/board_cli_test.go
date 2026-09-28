@@ -18,7 +18,14 @@ import (
 func TestBoardBlankAbortsBeforeProgrammerWhenUARTCloseFails(t *testing.T) {
 	closeErr := errors.New("cancel serial I/O")
 	previous := closeBoardRuntime
-	closeBoardRuntime = func(*control.Runtime) error { return closeErr }
+	closeCalls := 0
+	closeBoardRuntime = func(*control.Runtime) error {
+		closeCalls++
+		if closeCalls == 1 {
+			return closeErr
+		}
+		return nil
+	}
 	defer func() { closeBoardRuntime = previous }()
 	t.Setenv(programmer.HostDataDirectoryEnvironment, t.TempDir())
 	store, err := appconfig.Open(filepath.Join(t.TempDir(), "config.json"))
@@ -32,12 +39,22 @@ func TestBoardBlankAbortsBeforeProgrammerWhenUARTCloseFails(t *testing.T) {
 	if !errors.Is(err, closeErr) || !strings.Contains(err.Error(), "before blanking") {
 		t.Fatalf("blank close error = %v, want %v", err, closeErr)
 	}
+	if err := drainCommandRuntimeCleanups(); err != nil {
+		t.Fatalf("drain blank Runtime: %v", err)
+	}
 }
 
 func TestBoardInitializeAbortsBeforeProgrammerWhenUARTCloseFails(t *testing.T) {
 	closeErr := errors.New("cancel serial I/O")
 	previous := closeBoardRuntime
-	closeBoardRuntime = func(*control.Runtime) error { return closeErr }
+	closeCalls := 0
+	closeBoardRuntime = func(*control.Runtime) error {
+		closeCalls++
+		if closeCalls == 1 {
+			return closeErr
+		}
+		return nil
+	}
 	defer func() { closeBoardRuntime = previous }()
 	t.Setenv(programmer.HostDataDirectoryEnvironment, t.TempDir())
 	project := t.TempDir()
@@ -51,6 +68,56 @@ func TestBoardInitializeAbortsBeforeProgrammerWhenUARTCloseFails(t *testing.T) {
 	}, store, project, &output)
 	if !errors.Is(err, closeErr) || !strings.Contains(err.Error(), "before initialization") {
 		t.Fatalf("initialize close error = %v, want %v", err, closeErr)
+	}
+	if err := drainCommandRuntimeCleanups(); err != nil {
+		t.Fatalf("drain initialize Runtime: %v", err)
+	}
+}
+
+func TestRunBoardLocallyJoinsExplicitAndDeferredCloseFailures(t *testing.T) {
+	firstCloseErr := errors.New("first CancelIoEx failure")
+	retryCloseErr := errors.New("retry CancelIoEx failure")
+	previous := closeBoardRuntime
+	closeCalls := 0
+	closeBoardRuntime = func(*control.Runtime) error {
+		closeCalls++
+		if closeCalls == 1 {
+			return firstCloseErr
+		}
+		if closeCalls == 2 {
+			return retryCloseErr
+		}
+		return nil
+	}
+	defer func() { closeBoardRuntime = previous }()
+	t.Setenv(programmer.HostDataDirectoryEnvironment, t.TempDir())
+	store, err := appconfig.Open(filepath.Join(t.TempDir(), "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := control.New(control.Options{})
+	defer runtime.Close()
+	var output bytes.Buffer
+
+	err = runBoardLocally(
+		context.Background(), "blank", runtime,
+		[]string{"--uart", "none", "--confirm", "ERASE-BOARD"},
+		store, &output,
+	)
+	if !errors.Is(err, firstCloseErr) || !errors.Is(err, retryCloseErr) {
+		t.Fatalf("board close error = %v, want explicit and deferred failures", err)
+	}
+	if closeCalls != 2 {
+		t.Fatalf("board close calls = %d, want explicit attempt plus deferred retry", closeCalls)
+	}
+	if retainedCommandRuntimeCount() != 1 {
+		t.Fatal("repeated board close failure did not retain the Runtime owner")
+	}
+	if err := drainCommandRuntimeCleanups(); err != nil {
+		t.Fatalf("drain retained board Runtime: %v", err)
+	}
+	if closeCalls != 3 || retainedCommandRuntimeCount() != 0 {
+		t.Fatalf("drained board owner: close calls=%d retained=%d", closeCalls, retainedCommandRuntimeCount())
 	}
 }
 
