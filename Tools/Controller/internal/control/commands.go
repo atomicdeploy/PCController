@@ -68,16 +68,6 @@ func parseDisplayCommand(args []string) (DisplayRequest, error) {
 		return DisplayRequest{}, errors.New("usage: display segments|lcd|both [options] [--] [TEXT]")
 	}
 	request := DisplayRequest{Target: args[0]}
-	// Preserve the original compact form. For long segment text the historical
-	// duration value was the step speed; for static/LCD text it was the hold.
-	if len(args) >= 2 && !strings.HasPrefix(args[1], "--") {
-		if legacy, err := strconv.ParseUint(args[1], 0, 16); err == nil {
-			request.SpeedMS = int(legacy)
-			request.DurationMS = int(legacy)
-			request.Text = strings.Join(args[2:], " ")
-			return request, nil
-		}
-	}
 	for index := 1; index < len(args); index++ {
 		argument := args[index]
 		if argument == "--" {
@@ -105,7 +95,7 @@ func parseDisplayCommand(args []string) (DisplayRequest, error) {
 			if err != nil {
 				return DisplayRequest{}, fmt.Errorf("invalid display speed %q: %w", value, err)
 			}
-		case "--duration", "--duration-ms", "--hold":
+		case "--duration", "--duration-ms":
 			value, err := nextValue()
 			if err != nil {
 				return DisplayRequest{}, err
@@ -120,7 +110,7 @@ func parseDisplayCommand(args []string) (DisplayRequest, error) {
 				return DisplayRequest{}, err
 			}
 			request.Repeat = DisplayRepeat(value)
-		case "--interval", "--interval-ms", "--wait":
+		case "--interval", "--interval-ms":
 			value, err := nextValue()
 			if err != nil {
 				return DisplayRequest{}, err
@@ -129,7 +119,7 @@ func parseDisplayCommand(args []string) (DisplayRequest, error) {
 			if err != nil {
 				return DisplayRequest{}, fmt.Errorf("invalid display interval %q: %w", value, err)
 			}
-		case "--scroll", "--marquee":
+		case "--scroll":
 			if hasInline {
 				return DisplayRequest{}, fmt.Errorf("%s does not take a value", name)
 			}
@@ -171,9 +161,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 	)
 	runtime.setMacroRunner(macroRunner)
 	outputs := options.Outputs
-	if outputs == nil {
-		outputs = NewOutputScheduler(runtime)
-	}
+	outputs = runtime.bindOutputScheduler(outputs)
 	// Keep the runtime-owned scheduler attached when a watched configuration
 	// resolver refreshes only file-backed options. Programming capture/restore
 	// must observe the same RGB/melody owner used by the live command engine.
@@ -318,8 +306,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 					return "", err
 				}
 			} else {
-				runtime.ResumeAuto()
-				if err := runtime.EnsureConnected(requestContext); err != nil {
+				if err := runtime.Connect(requestContext); err != nil {
 					return "", err
 				}
 			}
@@ -336,11 +323,9 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 	mustRegister(shell.Command{
 		Name: "reconnect", Usage: "reconnect", Summary: "resume authenticated auto-reconnect",
 		Run: func(ctx context.Context, _ []string) (string, error) {
-			_ = runtime.Close()
-			runtime.ResumeAuto()
 			requestContext, cancel := context.WithTimeout(ctx, 8*time.Second)
 			defer cancel()
-			if err := runtime.EnsureConnected(requestContext); err != nil {
+			if err := runtime.Reconnect(requestContext, "interactive reconnect requested"); err != nil {
 				return "", err
 			}
 			return "reconnected " + runtime.Snapshot().Port.Name, nil
@@ -1240,11 +1225,10 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 
 func encodeLiveSettingsExport(settings native.Settings) (string, error) {
 	encoded, err := json.MarshalIndent(struct {
-		Format   string          `json:"format"`
 		Source   string          `json:"source"`
 		Settings native.Settings `json:"settings"`
 	}{
-		Format: "controller-mcu-settings/v1", Source: "live-opcode",
+		Source:   "live-opcode",
 		Settings: settings,
 	}, "", "  ")
 	if err != nil {
@@ -2885,8 +2869,8 @@ func statusEffectCommand(
 			lines := make([]string, 0, len(effects))
 			for _, effect := range effects {
 				duration := "until-stopped"
-				if effect.DurationMS != 0 {
-					duration = fmt.Sprintf("%dms", effect.DurationMS)
+				if effect.Repeats != 0 {
+					duration = fmt.Sprintf("%dms", effect.PeriodMS*int(effect.Repeats))
 				}
 				lines = append(lines, fmt.Sprintf(
 					"%s kind=%s rgb=%d,%d,%d brightness=%d..%d period=%dms duration=%s",
@@ -3978,15 +3962,35 @@ func programCommand(
 		programOptions.ConfirmEEPROMWrite = true
 		nextIndex++
 	}
-	if len(args) > nextIndex {
+	if len(args) > nextIndex &&
+		!strings.HasPrefix(strings.ToLower(args[nextIndex]), "--programmer-timeout") {
 		programOptions.Port = args[nextIndex]
 		nextIndex++
 	} else if operation != programmer.OperationCoreInfo &&
 		operation != programmer.OperationBurnBoot {
 		programOptions.Port = runtime.Snapshot().Port.Name
 	}
-	if len(args) != nextIndex {
-		return "", fmt.Errorf("too many program arguments")
+	for nextIndex < len(args) {
+		argument := args[nextIndex]
+		value := ""
+		switch {
+		case strings.EqualFold(argument, "--programmer-timeout"):
+			if nextIndex+1 >= len(args) {
+				return "", errors.New("--programmer-timeout requires a duration")
+			}
+			nextIndex++
+			value = args[nextIndex]
+		case strings.HasPrefix(strings.ToLower(argument), "--programmer-timeout="):
+			value = argument[len("--programmer-timeout="):]
+		default:
+			return "", fmt.Errorf("too many program arguments")
+		}
+		parsed, parseErr := time.ParseDuration(value)
+		if parseErr != nil || parsed <= 0 {
+			return "", fmt.Errorf("--programmer-timeout must be a positive duration")
+		}
+		programOptions.ProgrammerTimeout = parsed
+		nextIndex++
 	}
 	snapshot := runtime.Snapshot()
 	programOptions.ApplicationHash = snapshot.Hello.BuildHash
@@ -4643,11 +4647,17 @@ func reconnectProgrammingDevice(
 		programmingIdentity(expected),
 		programmingIdentity(connected.Port),
 	) {
-		_ = runtime.Close()
-		return fmt.Errorf(
+		mismatchErr := fmt.Errorf(
 			"authenticated device on %s does not match the original programming device",
 			expected.Name,
 		)
+		if closeErr := runtime.Close(); closeErr != nil {
+			return errors.Join(
+				mismatchErr,
+				fmt.Errorf("close mismatched programming device: %w", closeErr),
+			)
+		}
+		return mismatchErr
 	}
 	return nil
 }
@@ -4832,7 +4842,7 @@ func macroCommand(
 				"%-3d %-20s %-5s %-14s %-7s %-6d %s",
 				macro.ID,
 				macro.Name,
-				normalizedMacroMode(macro.Mode),
+				macro.Mode,
 				macro.Category,
 				normalizedMacroColor(macro.Color),
 				len(macro.Steps),
@@ -4854,7 +4864,7 @@ func macroCommand(
 		}
 		lines := []string{fmt.Sprintf(
 			"macro id=%d name=%q mode=%s category=%q color=%q label=%q steps=%d duration=%s encoded=%dB tolerance=%dus keep_on_cancel=%t",
-			macro.ID, macro.Name, normalizedMacroMode(macro.Mode), macro.Category, normalizedMacroColor(macro.Color),
+			macro.ID, macro.Name, macro.Mode, macro.Category, normalizedMacroColor(macro.Color),
 			macro.Label, len(macro.Steps), time.Duration(compiled.durationUS)*time.Microsecond,
 			len(compiled.stream), macro.TimingToleranceUS, macro.KeepOutputsOnCancel,
 		)}
@@ -4955,7 +4965,7 @@ func macroCommand(
 			if err != nil {
 				return "", err
 			}
-			return fmt.Sprintf("macro %d/%s saved with %d %s-timed steps", macro.ID, macro.Name, len(macro.Steps), normalizedMacroMode(macro.Mode)), nil
+			return fmt.Sprintf("macro %d/%s saved with %d %s-timed steps", macro.ID, macro.Name, len(macro.Steps), macro.Mode), nil
 		case "discard", "cancel":
 			if len(args) != 2 {
 				return "", fmt.Errorf("usage: macro record discard")

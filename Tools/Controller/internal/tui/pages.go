@@ -85,20 +85,10 @@ func (model Model) dashboardPage(snapshot control.Snapshot) string {
 	if pageWidth <= 0 {
 		pageWidth = 132
 	}
+	lcdAddress, lcdAvailable := model.lcdDisplayState(snapshot)
 	lcdStatus := ""
-	lcdAvailable := false
-	if haveStatus && capabilities&native.CapabilityLCD != 0 && status.LCDAddress != 0 {
-		lcdAvailable = true
-		lcdStatus = fmt.Sprintf("available · 0x%02X", status.LCDAddress)
-	}
-	if haveStatus && capabilities&native.CapabilityLCD != 0 &&
-		capabilities&native.CapabilityI2CTransfer != 0 && model.remote == nil && model.runtime != nil {
-		lcd := model.runtime.LCDPresenter().State()
-		lcdStatus = "not detected"
-		if lcd.Physical {
-			lcdAvailable = true
-			lcdStatus = fmt.Sprintf("available · 0x%02X", lcd.Address)
-		}
+	if lcdAvailable {
+		lcdStatus = fmt.Sprintf("available · 0x%02X", lcdAddress)
 	}
 	sectionWidth := pageWidth
 	if pageWidth >= 96 {
@@ -107,6 +97,14 @@ func (model Model) dashboardPage(snapshot control.Snapshot) string {
 	}
 	measurementLines := []string{
 		sectionHeader(sectionWidth, "LIVE MEASUREMENTS", model.statusFreshnessLabel(snapshot, time.Now())),
+	}
+	if len(snapshot.HardwareProblems) != 0 {
+		measurementLines = append(
+			measurementLines,
+			errorStyle.Copy().Bold(true).Render(
+				truncateDisplayText("⚠ "+hardwareProblemMessage(snapshot.HardwareProblems[0]), sectionWidth),
+			),
+		)
 	}
 	if warning := model.remoteClockWarning(); warning != "" {
 		measurementLines = append(measurementLines, warnStyle.Render(truncateDisplayText(warning, sectionWidth)))
@@ -329,7 +327,6 @@ func renderFrontPanelButtons() string {
 // menuPagePrefix owns both rendering and hit-test geometry so styling or
 // device-detail changes cannot silently shift mouse clicks onto another menu.
 func (model Model) menuPagePrefix(snapshot control.Snapshot) ([]string, menuPageGeometry) {
-	active := snapshot.Status.MenuPage
 	layoutState := "read-only · firmware capability 23 unavailable"
 	if model.menuLayoutStaged.Supported && model.menuLayoutStaged.Persistent {
 		layoutState = "MCU EEPROM · GET/SET + readback"
@@ -348,35 +345,54 @@ func (model Model) menuPagePrefix(snapshot control.Snapshot) ([]string, menuPage
 	if model.menuLayoutSearchEditing {
 		searchState = "✎ " + searchState
 	}
-	lines := []string{
-		sectionHeader(model.width, "DISPLAY MENU MIRROR", fmt.Sprintf("active %d · %s", active, model.menuPageByID(active).Name)),
-		renderFrontPanel(model.currentFrontPanel(snapshot)),
+	headerDetail := ""
+	if active, ok := activeMenuPage(snapshot); ok {
+		headerDetail = fmt.Sprintf("active %d · %s", active, model.menuPageByID(active).Name)
 	}
-	geometry := menuPageGeometry{frontPanelStart: lipgloss.Height(strings.Join(lines, "\n"))}
-	lines = append(lines,
-		renderFrontPanelButtons(),
-	)
-	geometry.frontPanelEnd = geometry.frontPanelStart + lipgloss.Height(renderFrontPanelButtons())
-	if displayTargetsFor(snapshot) != nil {
+	lines := []string{sectionHeader(model.width, "DISPLAY MENU MIRROR", headerDetail)}
+	if frontPanelSnapshotAvailable(snapshot) {
+		lines = append(lines, renderFrontPanel(model.currentFrontPanel(snapshot)))
+	} else if snapshot.Connected && snapshot.Hello.Capabilities&native.CapabilityFrontPanelSnapshot != 0 {
+		lines = append(lines, warnStyle.Render(model.spinnerView()+" loading advertised front-panel state…"))
+	}
+	geometry := menuPageGeometry{}
+	if model.frontPanelControlsAvailable(snapshot) {
+		buttons := renderFrontPanelButtons()
+		geometry.frontPanelStart = lipgloss.Height(strings.Join(lines, "\n"))
+		lines = append(lines, buttons)
+		geometry.frontPanelEnd = geometry.frontPanelStart + lipgloss.Height(buttons)
+	}
+	if len(model.displayTargetsFor(snapshot)) != 0 {
 		lines = append(lines, buttonGoodStyle.Render("D · Send arbitrary message"))
 	}
-	lines = append(lines,
-		renderHostMenuDirectory(model.hostMenus, model.width),
-		fmt.Sprintf("LCD prompt mirroring  %s  %s", valueStyle.Render(boolWord(model.lcdMirror, "ON", "OFF")), labelStyle.Render("M toggles · priority events temporarily override and restore")),
-		labelStyle.Render(fmt.Sprintf("Catalog: %s · Layout: %s · Host overlay: %s · Search: %s · Sort: %s", model.menuCatalogSource, layoutState, overlayState, searchState, model.menuLayoutSort)),
-	)
+	lines = append(lines, renderHostMenuDirectory(model.hostMenus, model.width, model.frontPanelControlsAvailable(snapshot)))
+	if model.lcdPromptMirrorAvailable(snapshot) {
+		lines = append(lines, fmt.Sprintf("LCD prompt mirroring  %s  %s", valueStyle.Render(boolWord(model.lcdMirror, "ON", "OFF")), labelStyle.Render("M toggles · priority events temporarily override and restore")))
+	}
+	lines = append(lines, labelStyle.Render(fmt.Sprintf("Catalog: %s · Layout: %s · Host overlay: %s · Search: %s · Sort: %s", model.menuCatalogSource, layoutState, overlayState, searchState, model.menuLayoutSort)))
 	geometry.entriesStart = lipgloss.Height(strings.Join(lines, "\n"))
 	return lines, geometry
 }
 
+func activeMenuPage(snapshot control.Snapshot) (byte, bool) {
+	if frontPanelSnapshotAvailable(snapshot) {
+		return snapshot.FrontPanel.MenuPage, true
+	}
+	if snapshot.Connected && snapshot.HaveStatus &&
+		snapshot.Hello.Capabilities&native.CapabilityMenuRemote != 0 {
+		return snapshot.Status.MenuPage, true
+	}
+	return 0, false
+}
+
 func (model Model) menusPage(snapshot control.Snapshot) string {
-	active := snapshot.Status.MenuPage
+	active, haveActive := activeMenuPage(snapshot)
 	lines, _ := model.menuPagePrefix(snapshot)
 	entries := model.menuConfigurationEntries()
 	for index, entry := range entries {
 		page := entry.Page
 		marker := "  "
-		if page.ID == active {
+		if haveActive && page.ID == active {
 			marker = "● "
 		}
 		visibility := "○ hidden"

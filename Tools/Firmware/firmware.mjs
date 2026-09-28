@@ -85,11 +85,6 @@ const SOURCE_ROOTS = Object.freeze([
 const DEFAULT_POLL_MS = 250
 const DEFAULT_DEBOUNCE_MS = 500
 const MINIMUM_NODE = Object.freeze({ major: 22, minor: 12 })
-const FIRMWARE_MANIFEST_FORMATS = Object.freeze([
-	'pccontroller-avr-firmware-manifest/v1',
-	'pccontroller-avr-firmware-manifest/v2'
-])
-
 class FirmwareToolError extends Error {
 	constructor(message, exitCode = EXIT.TOOL, options = {}) {
 		super(message, options)
@@ -593,7 +588,6 @@ export async function createCommandPlan(config, projectRoot) {
 	}
 
 	return {
-		format: 'pccontroller-firmware-plan/v1',
 		canonicalController: paths.controller,
 		firmwareOutput: paths.firmwareOutput,
 		target: BOARD,
@@ -983,8 +977,7 @@ async function writeManifest(config, projectRoot, artifacts, source, logger) {
 		}
 	}
 	const matchesArtifacts = candidate =>
-		FIRMWARE_MANIFEST_FORMATS.includes(candidate?.format) &&
-		Array.isArray(candidate.artifacts) &&
+		Array.isArray(candidate?.artifacts) &&
 		candidate.artifacts.length === artifacts.length &&
 		artifacts.every(artifact => candidate.artifacts.some(previous =>
 			String(previous.path).replaceAll('\\', '/') === String(artifact.path).replaceAll('\\', '/') &&
@@ -994,13 +987,13 @@ async function writeManifest(config, projectRoot, artifacts, source, logger) {
 	prior = await readPrior(path)
 	// A custom output path is a copy destination, not a second compiler identity
 	// source. Preserve the canonical Controller manifest whenever it describes
-	// these exact bytes, so v2 feature declarations and fixed build identity are
+	// these exact bytes, so feature declarations and fixed build identity are
 	// not silently downgraded while writing the requested copy.
 	if (canonicalPath !== path) {
 		const canonicalPrior = await readPrior(canonicalPath)
 		if (matchesArtifacts(canonicalPrior)) prior = canonicalPrior
 	}
-	if (FIRMWARE_MANIFEST_FORMATS.includes(prior?.format)) {
+	if (prior && matchesArtifacts(prior)) {
 		let features
 		try {
 			features = normalizeFirmwareFeatures(prior.source?.compileFeatures || [])
@@ -1016,22 +1009,9 @@ async function writeManifest(config, projectRoot, artifacts, source, logger) {
 				EXIT.VALIDATION
 			)
 		}
-		if (prior.format.endsWith('/v1') && features.length !== 0) {
-			throw new FirmwareToolError(
-				'Prior firmware manifest v1 cannot declare compile features',
-				EXIT.VALIDATION
-			)
-		}
-		if (prior.format.endsWith('/v2') && features.length === 0) {
-			throw new FirmwareToolError(
-				'Prior firmware manifest v2 requires at least one compile feature',
-				EXIT.VALIDATION
-			)
-		}
 	}
 	const identityMatches = matchesArtifacts(prior)
 	const manifest = {
-		format: identityMatches ? prior.format : 'pccontroller-avr-firmware-manifest/v1',
 		generatedUtc: identityMatches && prior.generatedUtc
 			? prior.generatedUtc
 			: new Date().toISOString(),

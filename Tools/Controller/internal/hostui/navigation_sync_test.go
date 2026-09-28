@@ -404,7 +404,7 @@ func TestNavigationCoordinatorOptOutDoesNotChangeExplicitTargeting(t *testing.T)
 	// no coordinator metadata and cannot enroll or advance a follower cursor.
 	explicit := AppAction{Kind: "app.page", Value: "controls", Target: optedOut.ID, Source: "ipc"}
 	var cursor NavigationCursor
-	if page, accepted := cursor.Accept(explicit, DefaultNavigationGroup); accepted || page != "" {
+	if page, accepted := cursor.AcceptFor(explicit, DefaultNavigationGroup, participantEpoch2, 1); accepted || page != "" {
 		t.Fatalf("explicit action changed sync cursor page=%q accepted=%t", page, accepted)
 	}
 	if explicit.Target != optedOut.ID || HasCoordinatorNavigationMetadata(explicit.Metadata) {
@@ -450,12 +450,13 @@ func TestNavigationCursorRejectsOutOfOrderReplayAndForeignEpoch(t *testing.T) {
 				NavigationSyncKey:  NavigationSyncGroupUpdate,
 				NavigationGroupKey: DefaultNavigationGroup,
 				NavigationEpochKey: epoch, NavigationRevisionKey: formatNavigationRevision(revision),
-				NavigationSourceKey: "tui:two",
+				NavigationSourceKey: "tui:two", NavigationTargetEpochKey: participantEpoch1,
+				NavigationTargetRevisionKey: "1",
 			},
 		}
 	}
 	var cursor NavigationCursor
-	if page, ok := cursor.Accept(newAction(groupEpoch1, 2, "events"), DefaultNavigationGroup); !ok || page != "events" {
+	if page, ok := cursor.AcceptFor(newAction(groupEpoch1, 2, "events"), DefaultNavigationGroup, participantEpoch1, 1); !ok || page != "events" {
 		t.Fatalf("fresh update page=%q accepted=%t", page, ok)
 	}
 	for _, stale := range []AppAction{
@@ -463,13 +464,27 @@ func TestNavigationCursorRejectsOutOfOrderReplayAndForeignEpoch(t *testing.T) {
 		newAction(groupEpoch1, 1, "controls"),
 		newAction(groupEpoch2, 3, "updates"),
 	} {
-		if page, ok := cursor.Accept(stale, DefaultNavigationGroup); ok || page != "" {
+		if page, ok := cursor.AcceptFor(stale, DefaultNavigationGroup, participantEpoch1, 1); ok || page != "" {
 			t.Fatalf("stale update accepted page=%q action=%#v", page, stale)
 		}
 	}
 	cursor.Reset()
-	if page, ok := cursor.Accept(newAction(groupEpoch2, 1, "updates"), DefaultNavigationGroup); !ok || page != "updates" {
+	if page, ok := cursor.AcceptFor(newAction(groupEpoch2, 1, "updates"), DefaultNavigationGroup, participantEpoch1, 1); !ok || page != "updates" {
 		t.Fatalf("post-reconnect epoch page=%q accepted=%t", page, ok)
+	}
+}
+
+func TestNavigationCursorRejectsMissingTargetPresenceIdentity(t *testing.T) {
+	action := AppAction{
+		Kind: "app.page", Value: "events", Target: "tui:one",
+		Metadata: map[string]string{
+			NavigationSyncKey: NavigationSyncGroupUpdate, NavigationGroupKey: DefaultNavigationGroup,
+			NavigationEpochKey: groupEpoch1, NavigationRevisionKey: "1", NavigationSourceKey: "tui:two",
+		},
+	}
+	var cursor NavigationCursor
+	if _, ok := cursor.AcceptFor(action, DefaultNavigationGroup, participantEpoch1, 1); ok {
+		t.Fatal("navigation update without exact target identity was accepted")
 	}
 }
 

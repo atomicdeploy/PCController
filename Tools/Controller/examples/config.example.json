@@ -1,5 +1,4 @@
 {
-  "schema": 1,
   "connection": {
     "vid": "1A86",
     "pid": "7523",
@@ -877,6 +876,7 @@
     {
       "id": 1,
       "name": "output-demo",
+      "mode": "mcu",
       "category": "lighting",
       "color": "violet",
       "label": "dEMO",
@@ -1047,7 +1047,7 @@
       "actions": [
         {
           "type": "board",
-          "command": "display lcd 2000 Door open"
+          "command": "display lcd --duration 2000ms Door open"
         },
         {
           "type": "emit",

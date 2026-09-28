@@ -9,6 +9,11 @@ describe('dynamic controller favicon', () => {
     expect(controllerFaviconState({ ...emptySnapshot, connected: true, connection_state: 'connected' })).toBe('connected')
     expect(controllerFaviconState({ ...emptySnapshot, connected: true, have_status: true, status: { ...emptySnapshot.status, hot: true } })).toBe('fault')
     expect(controllerFaviconState({ ...emptySnapshot, connection_reason: 'authentication rejected' })).toBe('fault')
+    expect(controllerFaviconState({
+      ...emptySnapshot,
+      connection_state: 'reconnecting',
+      hardware_problems: [{ code: 'usb_descriptor_failure', severity: 'error', observed_at: '2026-09-28T10:00:00Z' }],
+    })).toBe('fault')
   })
 
   it('keeps the real icon fallback and supplies a compact neutral-violet state SVG', () => {

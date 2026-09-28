@@ -8,18 +8,20 @@ import (
 )
 
 // AppActionDeliveryEvent converts a validated broker delivery into the typed
-// event consumed by WebSocket and Socket.IO clients. Built-in app actions keep
-// their legacy delivery path. A custom namespace is published only when the
-// coordinator attached the complete correlated-delivery envelope.
+// event consumed by WebSocket and Socket.IO clients. Ordinary actions require
+// the action coordinator's complete correlated-delivery envelope. Navigation
+// synchronization instead uses its own complete exact-target coordinator
+// envelope and does not manufacture action-outcome receipts.
 func AppActionDeliveryEvent(action hostui.AppAction) (control.Event, bool) {
 	kind := strings.ToLower(strings.TrimSpace(action.Kind))
 	value := strings.TrimSpace(action.Value)
-	if !strings.HasPrefix(kind, "app.") {
-		if !hostui.IsRegisteredCustomActionKind(kind) || action.OperationID == "" ||
-			action.Metadata[hostui.ActionDeliveryIDKey] == "" ||
-			action.Metadata[hostui.ActionExpiresAtKey] == "" {
-			return control.Event{}, false
-		}
+	_, navigationDelivery := hostui.ParseNavigationUpdate(action)
+	trackedDelivery := action.OperationID != "" &&
+		action.Metadata[hostui.ActionDeliveryIDKey] != "" &&
+		action.Metadata[hostui.ActionExpiresAtKey] != ""
+	if (!strings.HasPrefix(kind, "app.") && !hostui.IsRegisteredCustomActionKind(kind)) ||
+		(!trackedDelivery && !navigationDelivery) {
+		return control.Event{}, false
 	}
 	target := strings.TrimSpace(action.Target)
 	if target == "" {

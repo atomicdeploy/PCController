@@ -166,18 +166,33 @@ void testFactoryBlockReadsEveryPackedCell() {
   require(EepromMenuLabels::available(),
           "factory EEPROM label block did not validate");
   for (std::uint8_t page = 0; page < EepromLayout::MenuLabelCount; ++page) {
+    char label[EepromMenuLabels::LabelWidth] = {};
+    EepromMenuLabels::copy(page, label);
     for (std::uint8_t character = 0;
          character < EepromMenuLabels::LabelWidth; ++character) {
       const std::uint8_t index = static_cast<std::uint8_t>(
           page * EepromMenuLabels::LabelWidth + character);
       require(EepromMenuLabels::read(page, character) == kFactoryLabels[index],
               "validated EEPROM label byte changed");
+      require(label[character] == kFactoryLabels[index],
+              "bulk copy changed a validated EEPROM label byte");
     }
   }
   require(EepromMenuLabels::read(EepromLayout::MenuLabelCount, 0) == '-',
           "out-of-range page did not use a safe fallback");
   require(EepromMenuLabels::read(0, EepromMenuLabels::LabelWidth) == '-',
           "out-of-range character did not use a safe fallback");
+
+  char guarded[EepromMenuLabels::LabelWidth + 2] = {'L', 0, 0, 0, 0, 'R'};
+  EepromMenuLabels::copy(EepromLayout::MenuLabelCount, guarded + 1);
+  require(guarded[0] == 'L' &&
+              guarded[EepromMenuLabels::LabelWidth + 1] == 'R',
+          "bulk copy wrote outside its fixed four-byte destination");
+  for (std::uint8_t character = 1;
+       character <= EepromMenuLabels::LabelWidth; ++character) {
+    require(guarded[character] == '-',
+            "out-of-range bulk copy did not fill a safe fallback");
+  }
 }
 
 } // namespace

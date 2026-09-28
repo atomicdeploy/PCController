@@ -350,22 +350,6 @@
         }
       }
     },
-    "AppActionSubmitEnvelope": {
-      "type": "object",
-      "required": [
-        "accepted"
-      ],
-      "additionalProperties": false,
-      "properties": {
-        "accepted": {
-          "type": "boolean"
-        },
-        "operation": {
-          "$ref": "#/$defs/ActionOperation"
-        }
-      },
-      "description": "Backward-compatible acceptance result. Outcome-capable actions also include the correlated operation."
-    },
     "id": {
       "oneOf": [
         {
@@ -709,7 +693,7 @@
         "$ref": "#/$defs/AppActionRequest"
       },
       "result_schema": {
-        "$ref": "#/$defs/AppActionSubmitEnvelope"
+        "$ref": "#/$defs/ActionOperationEnvelope"
       }
     },
     "controller.app.action.ack": {

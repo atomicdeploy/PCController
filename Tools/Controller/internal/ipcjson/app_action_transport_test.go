@@ -16,9 +16,11 @@ import (
 	"pccontroller.local/controller/internal/shell"
 )
 
-func TestAppActionDeliveryEventRequiresTrackedEnvelopeForCustomNamespace(t *testing.T) {
+func TestAppActionDeliveryEventRequiresTrackedEnvelope(t *testing.T) {
 	for _, action := range []hostui.AppAction{
 		{Kind: "command", Value: "status"},
+		{Kind: "app.quit"},
+		{Kind: "app.quit", OperationID: "operation"},
 		{Kind: "pealayer.play"},
 		{Kind: "pealayer.play", OperationID: "operation"},
 		{
@@ -40,6 +42,32 @@ func TestAppActionDeliveryEventRequiresTrackedEnvelopeForCustomNamespace(t *test
 	if !ok || event.Kind != "pealayer.play" || event.Stream != control.EventStreamState ||
 		event.Action != "pealayer.play" || event.Metadata["operation_id"] != "operation" {
 		t.Fatalf("tracked custom event=%#v ok=%v", event, ok)
+	}
+	builtIn, ok := AppActionDeliveryEvent(hostui.AppAction{
+		Kind: "app.title", Value: "Ready", OperationID: "built-in-operation",
+		Metadata: map[string]string{
+			hostui.ActionDeliveryIDKey: "built-in-delivery",
+			hostui.ActionExpiresAtKey:  time.Now().Add(time.Second).UTC().Format(time.RFC3339Nano),
+		},
+	})
+	if !ok || builtIn.Kind != "app.title" || builtIn.Metadata["operation_id"] != "built-in-operation" {
+		t.Fatalf("tracked built-in event=%#v ok=%v", builtIn, ok)
+	}
+	navigation, ok := AppActionDeliveryEvent(hostui.AppAction{
+		Kind: "app.page", Value: "events", Source: "navigation-sync", Target: "tui:one",
+		Metadata: map[string]string{
+			hostui.NavigationSyncKey:           hostui.NavigationSyncGroupUpdate,
+			hostui.NavigationGroupKey:          hostui.DefaultNavigationGroup,
+			hostui.NavigationEpochKey:          "11111111111111111111111111111111",
+			hostui.NavigationRevisionKey:       "2",
+			hostui.NavigationSourceKey:         "tui:two",
+			hostui.NavigationTargetEpochKey:    "22222222222222222222222222222222",
+			hostui.NavigationTargetRevisionKey: "1",
+		},
+	})
+	if !ok || navigation.Kind != "app.page" || navigation.Action != "navigate" ||
+		navigation.Metadata[hostui.NavigationTargetRevisionKey] != "1" {
+		t.Fatalf("coordinator navigation event=%#v ok=%v", navigation, ok)
 	}
 }
 

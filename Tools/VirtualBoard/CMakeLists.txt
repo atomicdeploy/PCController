@@ -230,6 +230,33 @@ if(BUILD_TESTING)
   endif()
   add_test(NAME firmware_controls_unit COMMAND firmware_controls_tests)
 
+  # Compile the production AVR status LED compositor with deterministic
+  # hardware/EEPROM doubles. This is the AVR-first same-source gate; it does
+  # not alter or validate the separate VirtualBoard runtime implementation.
+  add_executable(firmware_status_led_controller_tests
+    tests/status_led_controller_test.cpp
+    ../../Project/CompactI2c.cpp
+    ../../Project/PwmController.cpp
+    ../../Project/PwmExpanderDriver.cpp
+    ../../Project/StatusLedController.cpp
+    ../../Project/UartProtocol.cpp
+  )
+  target_include_directories(firmware_status_led_controller_tests PRIVATE
+    tests/arduino_mock
+    ../..
+  )
+  set_property(TARGET firmware_status_led_controller_tests PROPERTY
+    CXX_STANDARD 17)
+  if(MSVC)
+    target_compile_options(firmware_status_led_controller_tests PRIVATE
+      /W4 /permissive-)
+  else()
+    target_compile_options(firmware_status_led_controller_tests PRIVATE
+      ${VIRTUAL_BOARD_WARNINGS})
+  endif()
+  add_test(NAME firmware_status_led_controller_unit
+    COMMAND firmware_status_led_controller_tests)
+
   # Compile the production EEPROM reset journal against a byte-accurate mock.
   # This covers corrupt/torn slots and both physical/count rollover boundaries.
   add_executable(firmware_reset_telemetry_tests

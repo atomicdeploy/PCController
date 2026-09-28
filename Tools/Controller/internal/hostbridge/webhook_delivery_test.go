@@ -128,7 +128,7 @@ func TestWebhookAttemptAddsCorrelationIdempotencyAndHMACHeaders(t *testing.T) {
 			t.Fatalf("%s=%q want=%q", header, got, want)
 		}
 	}
-	wantSignature := "v1=" + webhookSignature(
+	wantSignature := "sha256=" + webhookSignature(
 		config.SigningSecret, "1785673800", "nonce-2", http.MethodPost,
 		"/hook?scope=host", "delivery-7", capturedBody,
 	)
@@ -282,10 +282,25 @@ func TestWebhookQueuePersistsWithoutSecretsRecoversAndDeduplicates(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if strings.Contains(string(persisted), `"schema"`) {
+		t.Fatalf("durable queue retained a generation selector: %s", persisted)
+	}
 	for _, secret := range []string{config.URL, config.Headers["Authorization"], config.SigningSecret} {
 		if strings.Contains(string(persisted), secret) {
 			t.Fatalf("durable queue persisted target secret %q", secret)
 		}
+	}
+	var persistedFields map[string]json.RawMessage
+	if err := json.Unmarshal(persisted, &persistedFields); err != nil {
+		t.Fatal(err)
+	}
+	persistedFields["future_addition"] = json.RawMessage(`{"safe":true}`)
+	withAddition, err := json.Marshal(persistedFields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, withAddition, 0o600); err != nil {
+		t.Fatal(err)
 	}
 
 	delivered := make(chan string, 1)

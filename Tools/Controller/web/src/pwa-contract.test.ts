@@ -26,7 +26,9 @@ describe('PWA and touch capability contract', () => {
   })
 
   it('caches only the UI shell and refuses to cache live controller state', () => {
-    expect(worker).toContain("const shellCache = 'pccontroller-shell-v2'")
+    expect(worker).toContain("const shellCache = 'pccontroller-shell'")
+    expect(worker).toContain("const runtimeCache = 'pccontroller-runtime'")
+    expect(worker).not.toMatch(/pccontroller-(?:shell|runtime)-v\d+/)
     expect(worker).toContain("'/manifest.webmanifest'")
     expect(worker).toContain("'/theme-init.js'")
     expect(worker).toContain("pathname === '/ipc'")
