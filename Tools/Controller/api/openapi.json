@@ -1479,7 +1479,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AppActionSubmitEnvelope"
+                  "$ref": "#/components/schemas/ActionOperationEnvelope"
                 }
               }
             }
@@ -3826,7 +3826,7 @@
         "properties": {
           "format": {
             "type": "string",
-            "const": "pccontroller-server-proof/v1"
+            "const": "pccontroller-server-proof"
           },
           "nonce": {
             "type": "string",
@@ -4453,22 +4453,6 @@
           }
         }
       },
-      "AppActionSubmitEnvelope": {
-        "type": "object",
-        "required": [
-          "accepted"
-        ],
-        "additionalProperties": false,
-        "properties": {
-          "accepted": {
-            "type": "boolean"
-          },
-          "operation": {
-            "$ref": "#/components/schemas/ActionOperation"
-          }
-        },
-        "description": "Backward-compatible acceptance result. Outcome-capable actions also include the correlated operation."
-      },
       "JSONRPCError": {
         "type": "object",
         "required": [
@@ -4618,7 +4602,6 @@
   },
   "x-body-limit-bytes": 1048576,
   "x-unsupported-transports": [
-    "versioned /api/v* paths",
     "built-in TLS termination",
     "Socket.IO long-polling",
     "Socket.IO namespaces",

@@ -104,15 +104,18 @@ type remoteSnapshotWire struct {
 	ProgramState      control.ProgramStateSnapshot `json:"program_state"`
 	RFLearning        control.RFLearnState         `json:"rf_learning"`
 	Macros            control.MacroSnapshot        `json:"macros"`
+	HardwareProblems  []ports.HardwareProblem      `json:"hardware_problems,omitempty"`
 }
 
 type remoteUISettingsWire struct {
-	AppTitle        string                  `json:"app_title"`
-	Tagline         string                  `json:"tagline"`
-	SetupComplete   bool                    `json:"setup_complete"`
-	WelcomeMelody   string                  `json:"welcome_melody"`
-	SegmentScroll   appconfig.SegmentScroll `json:"segment_scroll"`
-	PeripheralNames map[string]string       `json:"peripheral_names"`
+	AppTitle               string                  `json:"app_title"`
+	Tagline                string                  `json:"tagline"`
+	SetupComplete          bool                    `json:"setup_complete"`
+	WelcomeMelody          string                  `json:"welcome_melody"`
+	StatusIntervalMS       int                     `json:"status_interval_ms"`
+	MeasurementFreshnessMS int                     `json:"measurement_freshness_ms"`
+	SegmentScroll          appconfig.SegmentScroll `json:"segment_scroll"`
+	PeripheralNames        map[string]string       `json:"peripheral_names"`
 }
 
 type remoteRFPresentationWire struct {
@@ -289,7 +292,84 @@ func (client *remoteTUIIPC) Snapshot(ctx context.Context) (control.Snapshot, err
 		FrontPanelUpdated: wire.FrontPanelUpdated, StatusLED: wire.StatusLED,
 		HaveStatusLED: wire.HaveStatusLED, StatusLEDUpdated: wire.StatusLEDUpdated,
 		ProgramState: wire.ProgramState, RFLearning: wire.RFLearning, Macros: wire.Macros,
+		HardwareProblems: wire.HardwareProblems,
 	}, nil
+}
+
+func (client *remoteTUIIPC) FrontPanel(ctx context.Context) (native.FrontPanel, error) {
+	var panel native.FrontPanel
+	err := client.call(ctx, "controller.front_panel", map[string]any{}, &panel)
+	return panel, err
+}
+
+func (client *remoteTUIIPC) LCDPresentation(ctx context.Context) (control.LCDPresentationState, error) {
+	var state control.LCDPresentationState
+	err := client.call(ctx, "controller.lcd.presentation.status", map[string]any{}, &state)
+	return state, err
+}
+
+func (client *remoteTUIIPC) MirrorLCD(line1, line2 string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	var result struct {
+		Queued bool `json:"queued"`
+	}
+	if err := client.call(ctx, "controller.lcd.prompt", map[string]string{
+		"line1": line1, "line2": line2,
+	}, &result); err != nil {
+		return err
+	}
+	if !result.Queued {
+		return errors.New("remote primary did not queue the LCD prompt")
+	}
+	return nil
+}
+
+func frontPanelGesturePayloads(key int, phase string) ([][]byte, error) {
+	if key < 1 || key > 4 {
+		return nil, fmt.Errorf("front-panel key must be 1..4")
+	}
+	events := []byte(nil)
+	switch strings.ToLower(strings.TrimSpace(phase)) {
+	case "press", "tap":
+		events = []byte{native.KeyEventDown, native.KeyEventUp}
+	case "hold":
+		events = []byte{native.KeyEventDown, native.KeyEventHoldRepeat, native.KeyEventUp}
+	case "down":
+		events = []byte{native.KeyEventDown}
+	case "release", "up":
+		events = []byte{native.KeyEventUp}
+	default:
+		return nil, fmt.Errorf("front-panel phase %q is unsupported", phase)
+	}
+	payloads := make([][]byte, 0, len(events))
+	for _, event := range events {
+		payload, err := native.RemoteKeyGesturePayload(byte(key-1), event)
+		if err != nil {
+			return nil, err
+		}
+		payloads = append(payloads, payload)
+	}
+	return payloads, nil
+}
+
+func (client *remoteTUIIPC) FrontPanelKey(key int, phase string) error {
+	payloads, err := frontPanelGesturePayloads(key, phase)
+	if err != nil {
+		return err
+	}
+	for _, payload := range payloads {
+		ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+		var result native.Frame
+		err = client.call(ctx, "controller.opcode.send", map[string]any{
+			"opcode": native.OpRemoteKeyGesture, "payload": payload,
+		}, &result)
+		cancel()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (client *remoteTUIIPC) Execute(ctx context.Context, command string) (string, error) {
@@ -349,11 +429,13 @@ func (client *remoteTUIIPC) SaveUISettings(
 ) (remoteUISettingsWire, error) {
 	var result remoteUISettingsWire
 	err := client.call(ctx, "controller.ui.config.set", map[string]any{
-		"app_title":        value.AppTitle,
-		"tagline":          value.Tagline,
-		"setup_complete":   value.SetupComplete,
-		"segment_scroll":   value.SegmentScroll,
-		"peripheral_names": value.PeripheralNames,
+		"app_title":                value.AppTitle,
+		"tagline":                  value.Tagline,
+		"setup_complete":           value.SetupComplete,
+		"status_interval_ms":       value.StatusIntervalMS,
+		"measurement_freshness_ms": value.MeasurementFreshnessMS,
+		"segment_scroll":           value.SegmentScroll,
+		"peripheral_names":         value.PeripheralNames,
 	}, &result)
 	return result, err
 }
@@ -601,6 +683,13 @@ func mergeRemoteHostUI(local appconfig.UI, remote remoteUISettingsWire) appconfi
 	local.Tagline = remote.Tagline
 	local.SetupComplete = remote.SetupComplete
 	local.WelcomeMelody = remote.WelcomeMelody
+	if remote.StatusIntervalMS >= appconfig.StatusIntervalMinMS &&
+		remote.StatusIntervalMS <= appconfig.StatusIntervalMaxMS &&
+		remote.MeasurementFreshnessMS >= remote.StatusIntervalMS+appconfig.MeasurementFreshnessHeadroomMS &&
+		remote.MeasurementFreshnessMS <= appconfig.MeasurementFreshnessMaxMS {
+		local.StatusIntervalMS = remote.StatusIntervalMS
+		local.MeasurementFreshnessMS = remote.MeasurementFreshnessMS
+	}
 	local.SegmentScroll = remote.SegmentScroll
 	local.PeripheralNames = cloneRemoteNames(remote.PeripheralNames)
 	return local
@@ -1229,11 +1318,16 @@ func runRemoteTUI(
 						Endpoint:                  strings.TrimSpace(address),
 						InitialSnapshot:           initial,
 						InitialSnapshotReceivedAt: initialReceivedAt,
-						Snapshot:                  client.Snapshot, Events: client.events,
-						Live:            client.live,
-						SetLiveInterval: client.SetLiveInterval,
-						SaveHostUI:      saveRemoteHostUI,
+						Snapshot:                  client.Snapshot,
+						FrontPanel:                client.FrontPanel,
+						LCDPresentation:           client.LCDPresentation,
+						Events:                    client.events,
+						Live:                      client.live,
+						SetLiveInterval:           client.SetLiveInterval,
+						SaveHostUI:                saveRemoteHostUI,
 					},
+					MirrorLCD:      client.MirrorLCD,
+					FrontPanelKey:  client.FrontPanelKey,
 					DisableWelcome: true,
 				}),
 				tea.WithAltScreen(),

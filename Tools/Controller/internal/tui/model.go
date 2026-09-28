@@ -42,6 +42,7 @@ type Model struct {
 	remoteClockOffset      time.Duration
 	remoteEventsClosed     bool
 	remoteLiveClosed       bool
+	remoteAuthorityEpoch   uint64
 
 	width  int
 	height int
@@ -138,6 +139,10 @@ type Model struct {
 	frontPanelPending        bool
 	frontPanelLastRefresh    time.Time
 	frontPanelKey            func(key int, phase string) error
+	lcdPresentation          control.LCDPresentationState
+	haveLCDPresentation      bool
+	lcdPresentationPending   bool
+	lcdPresentationLastFetch time.Time
 	mirrorLCD                func(line1, line2 string) error
 	lcdMirror                bool
 	previewPanel             FrontPanelState
@@ -241,7 +246,19 @@ type menuCatalogResultMsg struct {
 	catalog control.MenuCatalog
 	err     error
 }
-type frontPanelResultMsg struct{ err error }
+type frontPanelResultMsg struct {
+	panel   native.FrontPanel
+	remote  bool
+	peerKey string
+	epoch   uint64
+	err     error
+}
+type lcdPresentationResultMsg struct {
+	state   control.LCDPresentationState
+	peerKey string
+	epoch   uint64
+	err     error
+}
 type resetResultMsg struct{ err error }
 type remoteSnapshotResultMsg struct {
 	snapshot       control.Snapshot
@@ -391,9 +408,11 @@ func NewPreview(engine *shell.Engine, snapshot control.Snapshot, welcome bool) M
 	return NewWithOptions(runtime, engine, Options{
 		UIConfig: func() appconfig.UI { return ui },
 		Preview:  &snapshot, ForceWelcome: welcome, DisableWelcome: !welcome,
-		HostMenus:    menus,
-		RFFetch:      func(context.Context) ([]native.RFEntry, error) { return previewRFEntries(), nil },
-		RFApplyOrder: func(context.Context, []native.RFEntry) error { return nil },
+		HostMenus:     menus,
+		RFFetch:       func(context.Context) ([]native.RFEntry, error) { return previewRFEntries(), nil },
+		RFApplyOrder:  func(context.Context, []native.RFEntry) error { return nil },
+		FrontPanelKey: func(int, string) error { return nil },
+		MirrorLCD:     func(string, string) error { return nil },
 		RFReplaceSupport: func() control.RFReplaceSupport {
 			return control.RFReplaceSupport{Known: true, Supported: true, Reason: "advertised by preview HELLO"}
 		},
@@ -474,6 +493,11 @@ func NewWithOptions(runtime *control.Runtime, engine *shell.Engine, options Opti
 		markWelcomed: marker, debug: debug,
 		logs: nil,
 	}
+	if options.AutoConnect && options.Preview == nil && options.Remote == nil {
+		snapshot := runtime.Snapshot()
+		model.connectPending = !snapshot.Connected && !snapshot.Paused &&
+			snapshot.ConnectionState != "reconnecting"
+	}
 	if model.navigationGroup == "" {
 		model.navigationGroup = hostui.DefaultNavigationGroup
 	}
@@ -536,6 +560,9 @@ func NewWithOptions(runtime *control.Runtime, engine *shell.Engine, options Opti
 
 func (model Model) Init() tea.Cmd {
 	commands := []tea.Cmd{tick(model.statusInterval()), tea.SetWindowTitle(model.terminalTitle())}
+	if model.connectPending && model.preview == nil && model.remote == nil {
+		commands = append(commands, connect(model.runtime))
+	}
 	if model.appActions != nil {
 		commands = append(commands, waitAppAction(model.appActions))
 	}
@@ -650,7 +677,7 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if model.frontOverlayNeedsRestore && time.Now().After(model.frontOverlayUntil) {
 			model.frontOverlayNeedsRestore = false
 			model.frontOverlay1, model.frontOverlay2 = "", ""
-			if model.lcdMirror && model.mirrorLCD != nil {
+			if model.lcdMirror && model.lcdPromptMirrorAvailable(snapshot) {
 				state := model.currentFrontPanel(snapshot)
 				commands = append(commands, mirrorLCDCommand(model.mirrorLCD, state.LCDLine1, state.LCDLine2, "restore LCD prompt"))
 			}
@@ -671,6 +698,29 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				time.Since(model.rfLastRefresh) >= 2*time.Second {
 				model.rfPending = true
 				commands = append(commands, model.fetchRFEntriesCommand())
+			}
+			if snapshot.Connected && model.remote.FrontPanel != nil &&
+				snapshot.Hello.Capabilities&native.CapabilityFrontPanelSnapshot != 0 &&
+				!model.frontPanelPending &&
+				((!snapshot.HaveFrontPanel && time.Since(model.frontPanelLastRefresh) >= time.Second) ||
+					(snapshot.HaveFrontPanel && model.page == PageMenus &&
+						time.Since(model.frontPanelLastRefresh) >= 250*time.Millisecond)) {
+				model.frontPanelPending = true
+				commands = append(commands, refreshRemoteFrontPanel(
+					model.remote.FrontPanel, remoteDeviceKey(snapshot), model.remoteAuthorityEpoch,
+				))
+			}
+			lcdPageActive := model.page == PageDashboard || model.page == PageMenus || model.page == PageAppSettings
+			if snapshot.Connected && model.remote.LCDPresentation != nil &&
+				snapshot.Hello.Capabilities&native.CapabilityLCD != 0 &&
+				!model.lcdPresentationPending &&
+				((!model.haveLCDPresentation && time.Since(model.lcdPresentationLastFetch) >= time.Second) ||
+					(model.haveLCDPresentation && lcdPageActive &&
+						time.Since(model.lcdPresentationLastFetch) >= time.Second)) {
+				model.lcdPresentationPending = true
+				commands = append(commands, refreshRemoteLCDPresentation(
+					model.remote.LCDPresentation, remoteDeviceKey(snapshot), model.remoteAuthorityEpoch,
+				))
 			}
 		} else if model.preview == nil {
 			if !snapshot.Connected && !snapshot.Paused && !model.connectPending &&
@@ -800,7 +850,7 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			commands = append(commands, command)
 		}
 		model.recordTimeline(event)
-		if model.setFrontPanelEvent(event) && model.lcdMirror && model.mirrorLCD != nil {
+		if model.setFrontPanelEvent(event) && model.lcdMirror && model.lcdPromptMirrorAvailable(model.snapshot()) {
 			commands = append(commands, mirrorLCDCommand(model.mirrorLCD, model.frontOverlay1, model.frontOverlay2, "priority LCD event"))
 		}
 		if model.notifier != nil {
@@ -890,14 +940,21 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case remoteSnapshotResultMsg:
 		model.remoteSnapshotPending = false
 		if message.err != nil {
+			model.remoteAuthorityEpoch++
 			model.remoteSnapshotError = message.err.Error()
 			model.remoteSnapshot = clearDisconnectedPeerState(model.remoteSnapshot)
 			model.remoteSnapshot.ConnectionState = "remote IPC unavailable"
 			model.remoteSnapshot.ConnectionReason = message.err.Error()
 			model.remoteSnapshot.ConnectionUpdated = time.Now()
+			model.haveLCDPresentation = false
+			model.lcdPresentation = control.LCDPresentationState{}
+			model.frontPanelLastRefresh = time.Time{}
+			model.lcdPresentationLastFetch = time.Time{}
 			break
 		}
 		wasUnavailable := model.remoteSnapshotError != ""
+		previousDevice := remoteDeviceKey(model.remoteSnapshot)
+		previousConnected := model.remoteSnapshot.Connected
 		acceptStatus := message.statusSequence == model.remoteStatusSequence
 		acceptLED := message.ledSequence == model.remoteLEDSequence
 		if acceptStatus {
@@ -906,8 +963,18 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		model.remoteSnapshot = mergeRemoteSnapshot(
 			model.remoteSnapshot, message.snapshot, acceptStatus, acceptLED,
 		)
+		if previousConnected != model.remoteSnapshot.Connected ||
+			previousDevice != remoteDeviceKey(model.remoteSnapshot) {
+			model.remoteAuthorityEpoch++
+			model.haveLCDPresentation = false
+			model.lcdPresentation = control.LCDPresentationState{}
+			model.frontPanelLastRefresh = time.Time{}
+			model.lcdPresentationLastFetch = time.Time{}
+		}
 		if !model.remoteSnapshot.Connected {
 			model.remoteSnapshot = clearDisconnectedPeerState(model.remoteSnapshot)
+			model.haveLCDPresentation = false
+			model.lcdPresentation = control.LCDPresentationState{}
 		}
 		model.remoteSnapshotError = ""
 		if strings.TrimSpace(model.remoteSnapshot.ConnectionState) == "" {
@@ -1108,6 +1175,22 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		model.frontPanelLastRefresh = time.Now()
 		if message.err != nil {
 			model.appendLog("warn", "front-panel snapshot: "+message.err.Error())
+		} else if message.remote && message.epoch == model.remoteAuthorityEpoch &&
+			message.peerKey == remoteDeviceKey(model.remoteSnapshot) {
+			model.remoteSnapshot.FrontPanel = message.panel
+			model.remoteSnapshot.HaveFrontPanel = true
+			model.remoteSnapshot.FrontPanelUpdated = time.Now()
+		}
+
+	case lcdPresentationResultMsg:
+		model.lcdPresentationPending = false
+		model.lcdPresentationLastFetch = time.Now()
+		if message.err != nil {
+			model.appendLog("warn", "LCD presentation: "+message.err.Error())
+		} else if message.epoch == model.remoteAuthorityEpoch &&
+			message.peerKey == remoteDeviceKey(model.remoteSnapshot) {
+			model.lcdPresentation = message.state
+			model.haveLCDPresentation = true
 		}
 
 	case resetResultMsg:
@@ -1241,8 +1324,8 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			model.completion = nil
 			model.completionIndex = -1
 		}
-		if inputBefore != model.input.Value() && model.lcdMirror && model.mirrorLCD != nil {
-			state := model.currentFrontPanel(model.snapshot())
+		if snapshot := model.snapshot(); inputBefore != model.input.Value() && model.lcdMirror && model.lcdPromptMirrorAvailable(snapshot) {
+			state := model.currentFrontPanel(snapshot)
 			commands = append(commands, mirrorLCDCommand(model.mirrorLCD, state.LCDLine1, state.LCDLine2, "mirror LCD prompt"))
 		}
 	}
@@ -1540,12 +1623,23 @@ func clearDisconnectedPeerState(snapshot control.Snapshot) control.Snapshot {
 	return snapshot
 }
 
+func remoteDeviceKey(snapshot control.Snapshot) string {
+	if !snapshot.Connected {
+		return ""
+	}
+	return strings.Join([]string{
+		snapshot.Port.InstanceID, snapshot.Port.SerialNumber, snapshot.Port.Name,
+		fmt.Sprintf("%08x", snapshot.Hello.BuildHash),
+		fmt.Sprintf("%d", snapshot.ConnectionUpdated.UnixNano()),
+	}, "|")
+}
+
 func (model Model) statusFreshnessLabel(snapshot control.Snapshot, now time.Time) string {
 	updated := snapshot.StatusUpdated
 	if model.remote != nil && !model.remoteStatusReceivedAt.IsZero() {
 		updated = model.remoteStatusReceivedAt
 	}
-	return freshnessLabel(updated, now)
+	return freshnessLabel(updated, now, model.prefs.FreshnessWindow)
 }
 
 func (model Model) remoteClockWarning() string {
@@ -1759,6 +1853,10 @@ func (model Model) header(snapshot control.Snapshot) string {
 		status = "PREVIEW"
 		style = warnStyle.Copy().Bold(true)
 		detail = "injected board · serial disabled"
+	} else if len(snapshot.HardwareProblems) != 0 {
+		status = "⚠ HARDWARE"
+		style = warnStyle.Copy().Bold(true)
+		detail = hardwareProblemMessage(snapshot.HardwareProblems[0])
 	} else if snapshot.Connected {
 		status = "CONNECTED"
 		style = lipgloss.NewStyle().Foreground(colorGood).Bold(true)
@@ -1798,6 +1896,30 @@ func (model Model) header(snapshot control.Snapshot) string {
 		gap = 1
 	}
 	return left + strings.Repeat(" ", gap) + right
+}
+
+func hardwareProblemMessage(problem ports.HardwareProblem) string {
+	var message string
+	switch problem.Code {
+	case ports.HardwareProblemUSBDescriptorFailure:
+		message = "USB descriptor failed · check controller cable, power, or USB port"
+	case ports.HardwareProblemCannotStart, ports.HardwareProblemReported:
+		message = "Controller USB device cannot start · reconnect it or use another USB port"
+	case ports.HardwareProblemDisabled:
+		message = "Controller device is disabled · enable it in Device Manager"
+	case ports.HardwareProblemDriverMissing:
+		message = "Controller driver is missing · install or repair its USB driver"
+	case ports.HardwareProblemDriverFailure:
+		message = "Controller USB driver failed · reconnect it or repair the driver"
+	case ports.HardwareProblemRemovalPending:
+		message = "Controller removal is pending · unplug and reconnect it"
+	default:
+		message = "Controller hardware failed · check its cable, power, and USB port"
+	}
+	if problem.Impact == ports.HardwareImpactActiveOutcomeUnknown {
+		message += " · ACTIVE OPERATION OUTCOME UNKNOWN"
+	}
+	return message
 }
 
 func (model Model) connectionCanReconnect(snapshot control.Snapshot) bool {
@@ -2008,8 +2130,11 @@ func (model Model) statusInterval() time.Duration {
 		}
 	} else {
 		interval = model.prefs.PollInterval
-		if interval < 100*time.Millisecond {
-			interval = 100 * time.Millisecond
+		if interval < time.Duration(appconfig.StatusIntervalMinMS)*time.Millisecond {
+			interval = time.Duration(appconfig.StatusIntervalMinMS) * time.Millisecond
+		}
+		if interval > time.Duration(appconfig.StatusIntervalMaxMS)*time.Millisecond {
+			interval = time.Duration(appconfig.StatusIntervalMaxMS) * time.Millisecond
 		}
 		if model.snapshot().Status.DoorOpen && interval > 125*time.Millisecond {
 			interval = 125 * time.Millisecond
@@ -2279,6 +2404,14 @@ func connect(runtime *control.Runtime) tea.Cmd {
 	}
 }
 
+func connectAndResume(runtime *control.Runtime) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		return connectResultMsg{err: runtime.Connect(ctx)}
+	}
+}
+
 func refreshStatus(runtime *control.Runtime) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
@@ -2301,8 +2434,34 @@ func refreshFrontPanel(runtime *control.Runtime) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
 		defer cancel()
-		_, err := runtime.RefreshFrontPanel(ctx)
-		return frontPanelResultMsg{err: err}
+		panel, err := runtime.RefreshFrontPanel(ctx)
+		return frontPanelResultMsg{panel: panel, err: err}
+	}
+}
+
+func refreshRemoteFrontPanel(
+	fetch func(context.Context) (native.FrontPanel, error),
+	peerKey string,
+	epoch uint64,
+) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+		defer cancel()
+		panel, err := fetch(ctx)
+		return frontPanelResultMsg{panel: panel, remote: true, peerKey: peerKey, epoch: epoch, err: err}
+	}
+}
+
+func refreshRemoteLCDPresentation(
+	fetch func(context.Context) (control.LCDPresentationState, error),
+	peerKey string,
+	epoch uint64,
+) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+		defer cancel()
+		state, err := fetch(ctx)
+		return lcdPresentationResultMsg{state: state, peerKey: peerKey, epoch: epoch, err: err}
 	}
 }
 

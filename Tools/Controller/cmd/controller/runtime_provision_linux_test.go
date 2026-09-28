@@ -46,7 +46,7 @@ func TestRuntimeWebListenIsLoopbackOnly(t *testing.T) {
 	}
 }
 
-func TestTransientRuntimeListenPreservesResolvedSecretReference(t *testing.T) {
+func TestTransientRuntimeListenPreservesDormantSecretReference(t *testing.T) {
 	t.Setenv("PCC_RUNTIME_TRANSIENT_TOKEN", "abcdefghijklmnopqrstuvwxyz012345")
 	store, err := appconfig.Open(filepath.Join(t.TempDir(), "config.json"))
 	if err != nil {
@@ -64,8 +64,8 @@ func TestTransientRuntimeListenPreservesResolvedSecretReference(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resolved.IPC.AuthToken != "abcdefghijklmnopqrstuvwxyz012345" {
-		t.Fatalf("transient runtime did not resolve the configured token: token=%q", resolved.IPC.AuthToken)
+	if resolved.IPC.AuthToken != "" || resolved.IPC.AuthTokenRef != "" {
+		t.Fatalf("transient runtime activated a dormant alpha credential: token=%q ref=%q", resolved.IPC.AuthToken, resolved.IPC.AuthTokenRef)
 	}
 	persisted := store.Current()
 	if persisted.IPC.AuthToken != "" || persisted.IPC.AuthTokenRef != "env:PCC_RUNTIME_TRANSIENT_TOKEN" {
@@ -74,9 +74,12 @@ func TestTransientRuntimeListenPreservesResolvedSecretReference(t *testing.T) {
 	if resolved.IPC.Listen != "127.0.0.1:8787" {
 		t.Fatalf("transient listen=%q", resolved.IPC.Listen)
 	}
-	readiness := runtimeWindowReadinessConfig(store)
-	if readiness.IPC.Listen != "127.0.0.1:8787" || readiness.IPC.AuthToken != "abcdefghijklmnopqrstuvwxyz012345" {
-		t.Fatalf("readiness endpoint/token=%q/%q", readiness.IPC.Listen, readiness.IPC.AuthToken)
+	readiness, err := runtimeWindowReadinessConfig(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if readiness.IPC.Listen != "127.0.0.1:8787" || readiness.IPC.AuthToken != "" || readiness.IPC.AuthTokenRef != "" {
+		t.Fatalf("readiness endpoint/token/ref=%q/%q/%q", readiness.IPC.Listen, readiness.IPC.AuthToken, readiness.IPC.AuthTokenRef)
 	}
 	if store.Current().IPC.Listen != "127.0.0.1:9999" {
 		t.Fatalf("readiness override mutated saved listen: %q", store.Current().IPC.Listen)
@@ -99,7 +102,6 @@ func TestRuntimeInstallDryRunValidatesCanonicalInputsWithoutOpeningConfig(t *tes
 	}
 	digest := sha256.Sum256(content)
 	manifest := map[string]any{
-		"format": "pccontroller-host-package-manifest",
 		"target": map[string]any{"platform": runtime.GOOS, "architecture": runtime.GOARCH},
 		"identity": map[string]any{
 			"version": "1.2.3", "sourceSHA256": strings.Repeat("a", 64), "buildTime": "2026-08-09T00:00:00Z",

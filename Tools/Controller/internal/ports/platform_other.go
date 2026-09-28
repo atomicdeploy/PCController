@@ -15,6 +15,10 @@ func platformEnumerationSource() string {
 	return "go.bug.st/serial detailed enumerator with periodic platform polling"
 }
 
+func listPlatformHardwareProblems(Filter) ([]HardwareProblem, error) {
+	return nil, nil
+}
+
 func watchPlatformChanges(ctx context.Context) (<-chan Change, error) {
 	changes := make(chan Change, 1)
 	go func() {

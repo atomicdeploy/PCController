@@ -80,6 +80,13 @@ func TestValidatePackageRejectsSymlinkedVirtualBoard(t *testing.T) {
 	}
 }
 
+func TestDecodeHostManifestRejectsObsoleteContractFields(t *testing.T) {
+	_, _, err := decodeHostManifest([]byte(`{"format":"pccontroller-host-package-manifest"}`), "linux", "amd64")
+	if err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("obsolete host-manifest field was not rejected: %v", err)
+	}
+}
+
 func testHostManifest(t *testing.T, controller, platform, architecture string) HostManifest {
 	t.Helper()
 	content, err := os.ReadFile(controller)
@@ -87,7 +94,7 @@ func testHostManifest(t *testing.T, controller, platform, architecture string) H
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256(content)
-	manifest := HostManifest{Format: HostManifestFormat}
+	manifest := HostManifest{}
 	manifest.Target.Platform = platform
 	manifest.Target.Architecture = architecture
 	manifest.Identity.Version = "1.2.3"

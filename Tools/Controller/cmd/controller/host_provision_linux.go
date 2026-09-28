@@ -466,7 +466,7 @@ func provisionLinuxHost(
 	prepare := linuxHostProvisionCommand{Name: runuser, Args: prepareArguments, Dir: home}
 	prepareStep := linuxHostProvisionStep{
 		Name: "prepare target-owned Controller data", Command: formatLinuxProvisionCommand(prepare), Mutating: true,
-		Detail: "runs as the target user and adopts only the reviewed legacy toolchain/VirtualBoard layout",
+		Detail: "runs as the target user and adopts only the reviewed existing toolchain/VirtualBoard layout",
 	}
 	fmt.Fprintln(output, "\n▶", prepareStep.Name)
 	fmt.Fprintln(output, prepareStep.Command)
@@ -514,7 +514,7 @@ func runToolchainPrepareHostData(args []string, stdout, stderr io.Writer) error 
 	flags := flag.NewFlagSet("toolchain prepare-host-data", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	dataDir := flags.String("data-dir", "", "absolute target-user PCController data directory")
-	apply := flags.Bool("apply", false, "publish the ownership marker after validating the known legacy layout")
+	apply := flags.Bool("apply", false, "publish the ownership marker after validating the known existing alpha layout")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -528,7 +528,7 @@ func runToolchainPrepareHostData(args []string, stdout, stderr io.Writer) error 
 	if err != nil {
 		return err
 	}
-	if err := programmer.AdoptKnownLegacyHostDataPaths(paths); err != nil {
+	if err := programmer.AdoptKnownHostDataPaths(paths); err != nil {
 		return err
 	}
 	encoded, _ := json.Marshal(map[string]any{"data_dir": paths.DataDir, "prepared": true})

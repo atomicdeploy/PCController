@@ -21,9 +21,9 @@ void require(bool condition, const std::string &message) {
 std::vector<std::uint8_t>
 encode(std::uint8_t opcode, std::uint8_t sequence,
        const std::vector<std::uint8_t> &payload,
-       std::uint8_t revision = ControllerProtocol::EnvelopeRevision) {
+       std::uint8_t reserved = ControllerProtocol::ReservedEnvelopeByte) {
   std::vector<std::uint8_t> raw{
-      ControllerProtocol::Magic, revision, opcode,
+      ControllerProtocol::Magic, reserved, opcode,
       sequence, static_cast<std::uint8_t>(payload.size())};
   raw.insert(raw.end(), payload.begin(), payload.end());
   raw.push_back(UartProtocol::crc8(raw.data(),
@@ -65,7 +65,7 @@ void captureFrame(const Frame &frame, void *context) {
       std::equal(before.begin(), before.end(), frame.payload);
 }
 
-void testAdvisoryRevisionDoesNotBlockSemanticFrames() {
+void testUnknownReservedEnvelopeByteDoesNotBlockSemanticFrames() {
   HardwareSerial serial;
   UartProtocol protocol(serial);
   Capture capture;
@@ -77,9 +77,26 @@ void testAdvisoryRevisionDoesNotBlockSemanticFrames() {
   protocol.service();
 
   require(capture.payloads.size() == 1 && capture.payloads[0] == expected,
-          "advisory envelope revision blocked a valid semantic frame");
+          "unknown reserved envelope byte blocked a valid semantic frame");
   require(protocol.framingErrors() == 0 && protocol.crcErrors() == 0,
-          "advisory revision advanced an envelope error counter");
+          "reserved envelope byte advanced an envelope error counter");
+}
+
+void testUnknownOptionalOpcodeReachesSemanticDispatch() {
+  HardwareSerial serial;
+  UartProtocol protocol(serial);
+  Capture capture;
+  capture.protocol = &protocol;
+  protocol.begin(115200, captureFrame, &capture);
+
+  const std::vector<std::uint8_t> expected{0xA1, 0xB2, 0xC3};
+  serial.feed(encode(0xFE, 17, expected));
+  protocol.service();
+
+  require(capture.payloads.size() == 1 && capture.payloads[0] == expected,
+          "unknown optional opcode did not reach semantic dispatch");
+  require(protocol.framingErrors() == 0 && protocol.crcErrors() == 0,
+          "unknown optional opcode advanced an envelope error counter");
 }
 
 void testRepresentativeAndMaximumPayloads() {
@@ -127,7 +144,7 @@ void testInvalidFramesAreRejected() {
 
   // Decode/re-encode with the public helper shape, but an invalid envelope.
   std::vector<std::uint8_t> raw{
-      0x5A, ControllerProtocol::EnvelopeRevision,
+      0x5A, ControllerProtocol::ReservedEnvelopeByte,
       ControllerProtocol::GetStatus, 3, 0};
   raw.push_back(UartProtocol::crc8(raw.data(),
                                    static_cast<std::uint8_t>(raw.size())));
@@ -215,7 +232,8 @@ void testBuzzerPushCarriesMCUTimestamp() {
 int main() {
   try {
     testRepresentativeAndMaximumPayloads();
-    testAdvisoryRevisionDoesNotBlockSemanticFrames();
+    testUnknownReservedEnvelopeByteDoesNotBlockSemanticFrames();
+    testUnknownOptionalOpcodeReachesSemanticDispatch();
     testInvalidFramesAreRejected();
     testMacroScratchCannotCorruptSplitSerialFrame();
     testBuzzerPushCarriesMCUTimestamp();

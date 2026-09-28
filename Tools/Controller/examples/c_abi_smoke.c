@@ -79,8 +79,60 @@ int main(void) {
   puts(response);
   const int valid = strstr(response, "\"ok\":true") != NULL;
   release(response);
+  if (!valid) {
+    return 4;
+  }
+
+  char create_host[] =
+      "{\"operation\":\"host_create\",\"host_options\":{"
+      "\"config_path\":\"pccontroller-smoke-config.json\","
+      "\"app_id\":\"pccontroller.c-smoke\","
+      "\"controller_options\":{},"
+      "\"disable_auto_connect\":true,"
+      "\"disable_native\":true}}";
+  response = invoke(create_host);
+  if (response == NULL || strstr(response, "\"ok\":true") == NULL) {
+    return 5;
+  }
+  char *handle_field = strstr(response, "\"handle\":");
+  if (handle_field == NULL) {
+    return 6;
+  }
+  const unsigned long long handle = strtoull(handle_field + 9, NULL, 10);
+  release(response);
+
+  char lifecycle_request[512];
+  snprintf(lifecycle_request, sizeof(lifecycle_request),
+           "{\"operation\":\"host_start\",\"handle\":%llu}", handle);
+  response = invoke(lifecycle_request);
+  if (response == NULL || strstr(response, "\"ok\":true") == NULL) {
+    return 7;
+  }
+  release(response);
+
+  snprintf(lifecycle_request, sizeof(lifecycle_request),
+           "{\"operation\":\"host_call\",\"handle\":%llu,"
+           "\"method\":\"controller.ping\",\"params\":{}}",
+           handle);
+  response = invoke(lifecycle_request);
+  char *result_field =
+      response == NULL ? NULL : strstr(response, "\"result\":{");
+  if (response == NULL || result_field == NULL ||
+      strstr(result_field, "\"ok\":true") == NULL) {
+    return 8;
+  }
+  release(response);
+
+  snprintf(lifecycle_request, sizeof(lifecycle_request),
+           "{\"operation\":\"host_destroy\",\"handle\":%llu}", handle);
+  response = invoke(lifecycle_request);
+  if (response == NULL || strstr(response, "\"destroyed\":true") == NULL) {
+    return 9;
+  }
+  release(response);
+  remove("pccontroller-smoke-config.json");
 
   // A Go c-shared runtime is process-lifetime state. Do not FreeLibrary here;
   // normal consumers should unload it only as part of process shutdown.
-  return valid ? 0 : 4;
+  return 0;
 }

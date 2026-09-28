@@ -5,10 +5,12 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from 'react'
+import { createPortal } from 'react-dom'
 import {
   Activity,
   Bell,
@@ -31,6 +33,7 @@ import {
   Search,
   Settings,
   Sun,
+  TriangleAlert,
   Volume2,
   VolumeX,
   Wrench,
@@ -41,6 +44,7 @@ import { createAudioEngine, type AudioCue, type AudioEngine } from './audio-engi
 import { BoardSettingsReadGate, boardSettingsGeneration } from './board-settings-read'
 import { BootGate, BrandIcon, Button, HotkeyHelp, Icon, KeyCombo, Modal, NavButton, PageTransition, StatusBadge, ToastStack } from './components'
 import { connectStream, execute, getSnapshot, getToken, getUIConfig, rpc, setToken as storeToken } from './api'
+import type { StreamControl } from './api'
 import {
   adjacentPageHotkey,
   ignoresGlobalHotkeys,
@@ -59,6 +63,7 @@ import {
   prependSignificantControllerEvent,
   significantControllerEvents,
 } from './significant-events'
+import { shouldToastControllerEvent } from './event-notification-policy'
 import { createResourceReconnectCheck, embeddedResourcesMismatch, hostResourceIdentity } from './resource-version'
 import { emitStartupConsoleIntroduction } from './startup-console'
 import {
@@ -87,11 +92,13 @@ import type {
   UIConfig,
 } from './types'
 import { peripheralAvailability } from './peripheral-availability'
-import { applyPushedOutputEvent } from './status-led-event'
+import { applyPushedOutputEvent, isPushedOutputEvent } from './status-led-event'
 import { BuzzerPlaybackTimeline, type BuzzerPath } from './buzzer-routing'
+import { isMacroControllerEvent, prependMacroControllerEvent } from './macro-live'
 import { emptySnapshot } from './types'
 import type { SharedViewProps } from './views'
 import { sessionAuthenticationGuidanceRequired } from './authentication-guidance'
+import { hardwareProblemPresentation } from './hardware-problem'
 import {
   AppActionReceiptCache,
   acknowledgeWebAppAction,
@@ -427,6 +434,7 @@ export default function App() {
   const [snapshot, setSnapshot] = useState<Snapshot>(demo ? demoSnapshot() : emptySnapshot)
   const [samples, setSamples] = useState<MetricSample[]>(() => demo ? Array.from({ length: 48 }, (_, index) => sampleFrom(demoSnapshot(Date.now() - (47 - index) * 1000), Date.now() - (47 - index) * 1000)) : [])
   const [events, setEvents] = useState<ControllerEvent[]>(() => demo ? Array.from({ length: 12 }, (_, index) => demoEvent(index + 1)) : [])
+  const [macroEvents, setMacroEvents] = useState<ControllerEvent[]>([])
   const [boardSettingsReadState, setBoardSettingsReadState] = useState<BoardSettingsReadState>(demo ? 'ready' : 'idle')
   const [uiConfig, setUIConfig] = useState<UIConfig | null>(null)
   const [streamState, setStreamState] = useState<'connecting' | 'open' | 'waiting' | 'closed'>(demo ? 'open' : 'connecting')
@@ -439,6 +447,8 @@ export default function App() {
   const [paletteQuery, setPaletteQuery] = useState('')
   const [paletteIndex, setPaletteIndex] = useState(0)
   const [hotkeyHelp, setHotkeyHelp] = useState(false)
+  const [sidebarStatusMenu, setSidebarStatusMenu] = useState(false)
+  const [sidebarStatusMenuPosition, setSidebarStatusMenuPosition] = useState({ left: 0, top: 0 })
   const [bootOpen, setBootOpen] = useState(demo)
   const [bootResolved, setBootResolved] = useState(demo)
   const [bootProgress, setBootProgress] = useState(12)
@@ -463,12 +473,15 @@ export default function App() {
   const buzzerTimelineRef = useRef(new BuzzerPlaybackTimeline())
   const previousAudioConnection = useRef<boolean | null>(null)
   const tabChannelRef = useRef<TabChannel | null>(null)
+  const streamControlRef = useRef<StreamControl | null>(null)
   const appearanceETagRef = useRef('')
   const appearanceDesiredRef = useRef(appearance)
   const appearanceSaveChain = useRef<Promise<void>>(Promise.resolve())
   const refreshAfterHostRestart = useRef(false)
   const startupConsoleShown = useRef(false)
   const pageRef = useRef(page)
+  const sidebarStatusRef = useRef<HTMLButtonElement>(null)
+  const sidebarStatusMenuRef = useRef<HTMLDivElement>(null)
   const navigationSyncRef = useRef(navigationSync)
   const reportAppInstanceRef = useRef<(catchUp?: boolean) => void>(() => undefined)
   const historyNavigationRef = useRef<(page: PageID) => void>(() => undefined)
@@ -504,9 +517,19 @@ export default function App() {
   const refreshHostAppearance = useCallback(async () => {
     const config = await getUIConfig()
     setUIConfig(config)
+    streamControlRef.current?.updateStatusInterval(config.status_interval_ms)
     adoptHostAppearance(config.appearance, config.appearance_etag)
     return config
   }, [adoptHostAppearance])
+
+  const adoptMeasurementTiming = useCallback((statusIntervalMS: number, measurementFreshnessMS: number) => {
+    setUIConfig((current) => current ? {
+      ...current,
+      status_interval_ms: statusIntervalMS,
+      measurement_freshness_ms: measurementFreshnessMS,
+    } : current)
+    streamControlRef.current?.updateStatusInterval(statusIntervalMS)
+  }, [])
 
   useEffect(() => {
 	const pageTitle = t(navigation.find((item) => item.id === page)?.label ?? 'dashboard')
@@ -531,6 +554,58 @@ export default function App() {
   }, [demo, productTitle, snapshot.connected, snapshot.port.name, startupProbeResolved, streamState, uiConfig])
 
   useEffect(() => { pageRef.current = page }, [page])
+
+  const openSidebarStatusMenu = useCallback((left?: number, top?: number) => {
+    const bounds = sidebarStatusRef.current?.getBoundingClientRect()
+    setSidebarStatusMenuPosition({
+      left: left ?? (sidebarOpen ? bounds?.left ?? 10 : (bounds?.right ?? 84) + 7),
+      top: top ?? (bounds?.bottom ?? 10) + 7,
+    })
+    setSidebarStatusMenu(true)
+  }, [sidebarOpen])
+
+  useLayoutEffect(() => {
+    if (!sidebarStatusMenu || !sidebarStatusMenuRef.current) return
+    const bounds = sidebarStatusMenuRef.current.getBoundingClientRect()
+    const margin = 10
+    setSidebarStatusMenuPosition((current) => ({
+      left: Math.max(margin, Math.min(current.left, window.innerWidth - bounds.width - margin)),
+      top: Math.max(margin, Math.min(current.top, window.innerHeight - bounds.height - margin)),
+    }))
+  }, [sidebarStatusMenu])
+
+  useEffect(() => {
+    if (!sidebarStatusMenu) return
+    const outside = (event: PointerEvent | FocusEvent) => {
+      const target = event.target as Node
+      if (!sidebarStatusRef.current?.contains(target) && !sidebarStatusMenuRef.current?.contains(target)) setSidebarStatusMenu(false)
+    }
+    const key = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setSidebarStatusMenu(false)
+        sidebarStatusRef.current?.focus()
+      }
+    }
+    const close = () => setSidebarStatusMenu(false)
+    const focusFrame = window.requestAnimationFrame(() => sidebarStatusMenuRef.current?.querySelector<HTMLButtonElement>('button')?.focus())
+    window.addEventListener('pointerdown', outside)
+    window.addEventListener('focusin', outside)
+    window.addEventListener('keydown', key)
+    window.addEventListener('blur', close)
+    window.addEventListener('hashchange', close)
+    return () => {
+      window.cancelAnimationFrame(focusFrame)
+      window.removeEventListener('pointerdown', outside)
+      window.removeEventListener('focusin', outside)
+      window.removeEventListener('keydown', key)
+      window.removeEventListener('blur', close)
+      window.removeEventListener('hashchange', close)
+    }
+  }, [sidebarStatusMenu])
+
+  useEffect(() => {
+    if (!snapshot.connected) setSidebarStatusMenu(false)
+  }, [snapshot.connected])
 
   useEffect(() => {
     const engine = createAudioEngine({
@@ -602,6 +677,16 @@ export default function App() {
       }
       if (payload.type === 'controller-event') {
         const event = payload.event as ControllerEvent
+        if (isMacroControllerEvent(event)) {
+          setMacroEvents((current) => prependMacroControllerEvent(current, event))
+        }
+        if (isPushedOutputEvent(event)) {
+          setSnapshot((current) => {
+            const next = applyPushedOutputEvent(current, event)
+            snapshotRef.current = next
+            return next
+          })
+        }
         setEvents((current) => prependSignificantControllerEvent(current, event))
       }
     })
@@ -778,7 +863,7 @@ export default function App() {
     streamState,
   ])
 
-  const dispatchCommand = useCallback(async (command: string, success?: string): Promise<string> => {
+  const dispatchCommand = useCallback(async (command: string, success?: string, refreshAfter = false): Promise<string> => {
     const safeCommand = redactSensitiveCommand(command)
     tabChannelRef.current?.publishTerminal({ kind: 'command', text: `pc› ${safeCommand}`, at: Date.now() })
     if (demo) {
@@ -792,7 +877,10 @@ export default function App() {
       const output = result.output ?? ''
       tabChannelRef.current?.publishTerminal({ kind: 'output', text: output || '✓ accepted', at: Date.now() })
       notify('success', success || 'Command completed', output || safeCommand)
-      void refresh()
+      // Board and host state arrive on the pushed event stream. Refresh is
+      // reserved for explicit recovery paths so ordinary commands do not add
+      // polling latency or duplicate UART traffic.
+      if (refreshAfter) void refresh()
       return output
     } catch (cause) {
       const detail = cause instanceof Error ? cause.message : String(cause)
@@ -802,9 +890,9 @@ export default function App() {
     }
   }, [demo, notify, refresh])
 
-  const runCommand = useCallback((command: string, success?: string): Promise<string> => {
+  const runCommand = useCallback((command: string, success?: string, refreshAfter = false): Promise<string> => {
     const caution = demo ? null : commandWarning(command, appearance.locale)
-    if (!caution) return dispatchCommand(command, success)
+    if (!caution) return dispatchCommand(command, success, refreshAfter)
     return new Promise<string>((resolve, reject) => {
       let settled = false
       setDialog({
@@ -820,7 +908,7 @@ export default function App() {
         },
         action: async () => {
           try {
-            const output = await dispatchCommand(command, success)
+            const output = await dispatchCommand(command, success, refreshAfter)
             settled = true
             resolve(output)
           } catch (cause) {
@@ -1168,7 +1256,7 @@ export default function App() {
       signal: abort.signal,
       onError: (cause) => setStreamDetail(`Host resource check: ${cause instanceof Error ? cause.message : String(cause)}`),
     })
-    let stopStream = () => {}
+    let stopStream = Object.assign(() => {}, { updateStatusInterval: (_intervalMS: number) => undefined }) as StreamControl
     void (async () => {
       try {
         setBootTarget(42)
@@ -1196,6 +1284,7 @@ export default function App() {
         }
         if (eventHistory.status === 'fulfilled') {
           setEvents(significantControllerEvents(eventHistory.value).slice(-500).reverse())
+          setMacroEvents(eventHistory.value.filter(isMacroControllerEvent).slice(-80).reverse())
         }
         setBootTarget(92)
         if (firstSetup && value.connected && config.welcome_melody?.trim()) {
@@ -1220,7 +1309,9 @@ export default function App() {
           },
           event: (event) => {
 			const eventKind = event.kind.toLowerCase()
-			if (event.kind.toLowerCase() === 'status_led.changed' || event.kind.toLowerCase() === 'front_panel.segment') {
+            const macroEvent = isMacroControllerEvent(event)
+            if (macroEvent) setMacroEvents((current) => prependMacroControllerEvent(current, event))
+			if (isPushedOutputEvent(event)) {
 				setSnapshot((current) => {
 					const next = applyPushedOutputEvent(current, event)
 					snapshotRef.current = next
@@ -1245,9 +1336,9 @@ export default function App() {
                 audioRef.current?.playTone(frequencyHz, plan.durationMS, plan.delayMS, source)
               }
             }
-            if (isSignificantControllerEvent(event)) {
+            const significant = isSignificantControllerEvent(event)
+            if (significant) {
               setEvents((current) => prependSignificantControllerEvent(current, event))
-              tabChannelRef.current?.publishControllerEvent(event)
             }
 			const processedAction = processWebAppAction(event, appInstanceID, appActionReceipts.current)
 			if (processedAction) {
@@ -1273,6 +1364,7 @@ export default function App() {
 						cause instanceof Error ? cause.message : String(cause))
 				})
 			}
+            if (significant || isPushedOutputEvent(event) || macroEvent) tabChannelRef.current?.publishControllerEvent(event)
             if (!event.metadata?.operation_id && event.kind.toLowerCase() === 'app.page' && isFreshAppAction(event.time) &&
                 matchesAppTarget(event.metadata?.target_instance, appInstanceID, 'webui')) {
               const destination = pageFromAppAction(event.metadata?.page ?? event.metadata?.value ?? event.text)
@@ -1292,7 +1384,7 @@ export default function App() {
 				applyPage('updates', 'replace')
 				audioRef.current?.cue('navigation', 'forward')
 			}
-            if (/error|warning|hot|door/i.test(event.kind)) notify(eventToneForToast(event), event.kind, event.text)
+            if (shouldToastControllerEvent(event)) notify(eventToneForToast(event), event.kind, event.text)
             if (isCompletedHostUpdate(event)) {
               refreshAfterHostRestart.current = true
             }
@@ -1323,6 +1415,7 @@ export default function App() {
             }
           },
         })
+        streamControlRef.current = stopStream
         setBootTarget(100)
       } catch (cause) {
         setStartupProbeResolved(true)
@@ -1340,7 +1433,12 @@ export default function App() {
         setBootTarget(100)
       }
     })()
-    return () => { abort.abort(); resourceCheck.dispose(); stopStream() }
+    return () => {
+      abort.abort()
+      resourceCheck.dispose()
+      if (streamControlRef.current === stopStream) streamControlRef.current = null
+      stopStream()
+    }
   }, [adoptHostAppearance, appInstanceID, applyPage, demo, navigate, navigationSession, notify, refresh, refreshHostAppearance, streamGeneration, token])
 
   const authenticationRequired = sessionAuthenticationGuidanceRequired({
@@ -1358,7 +1456,7 @@ export default function App() {
       : 'unavailable'
   const shared: SharedViewProps = {
     reduceMotion: appearance.reduceMotion,
-    appTitle: productTitle, snapshot, samples, events, locale: appearance.locale, t, command: runCommand, refresh, openDialog,
+    appTitle: productTitle, snapshot, samples, events, macroEvents, locale: appearance.locale, t, command: runCommand, refresh, openDialog,
     boardSettingsReadState,
     transport: {
       streamState,
@@ -1366,16 +1464,22 @@ export default function App() {
       boardState,
       tabBusSupported,
       tabPeers,
+      statusIntervalMS: uiConfig?.status_interval_ms,
+      measurementFreshnessMS: uiConfig?.measurement_freshness_ms,
     },
     relayedTerminal,
     broadcastTerminal: (entry) => { tabChannelRef.current?.publishTerminal(entry) },
   }
 
   const PageView = pageViewFor(page)
+	const globalHardwareProblem = snapshot.hardware_problems?.[0]
+	const globalHardwareWarning = globalHardwareProblem
+		? hardwareProblemPresentation(globalHardwareProblem, appearance.locale)
+		: undefined
   const view = (
     <Suspense fallback={<section className="page-loading" role="status" aria-live="polite"><span className="spinner" />{appearance.locale === 'fa' ? 'در حال بارگیری…' : 'Loading page…'}</section>}>
       {page === 'settings'
-        ? <PageView {...shared} appearance={appearance} onAppearance={saveAppearance} token={token} onToken={saveToken} onAppTitle={saveAppTitle} uiConfig={uiConfig} onBuzzerPath={setBuzzerPath} navigationSync={navigationSync} navigationSyncStatus={navigationSyncStatus} onNavigationSync={setNavigationSync} />
+        ? <PageView {...shared} appearance={appearance} onAppearance={saveAppearance} token={token} onToken={saveToken} onAppTitle={saveAppTitle} uiConfig={uiConfig} onMeasurementTiming={adoptMeasurementTiming} onBuzzerPath={setBuzzerPath} navigationSync={navigationSync} navigationSyncStatus={navigationSyncStatus} onNavigationSync={setNavigationSync} />
         : <PageView {...shared} />}
     </Suspense>
   )
@@ -1458,11 +1562,52 @@ export default function App() {
           <button className="sidebar-toggle" aria-label={t(sidebarOpen ? 'collapseNavigation' : 'expandNavigation')} title={t(sidebarOpen ? 'collapseNavigation' : 'expandNavigation')} aria-expanded={sidebarOpen} aria-controls="primary-navigation" onClick={() => setSidebarOpen((value) => !value)}>{sidebarOpen ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}</button>
         </div>
 
-        <div className="sidebar__status" role="img" aria-label={`${snapshot.connected ? t('online') : t('offline')} · ${snapshot.port.name || snapshot.connection_state}`} title={`${snapshot.connected ? t('online') : t('offline')} · ${snapshot.port.name || snapshot.connection_state}`}>
+        <button
+          ref={sidebarStatusRef}
+          type="button"
+          className="sidebar__status"
+          aria-haspopup={snapshot.connected ? 'menu' : undefined}
+          aria-expanded={snapshot.connected ? sidebarStatusMenu : undefined}
+          aria-label={snapshot.connected
+            ? appearance.locale === 'fa' ? 'منوی اتصال کنترلر' : 'Controller connection menu'
+            : appearance.locale === 'fa' ? 'اتصال مجدد کنترلر' : 'Reconnect controller'}
+          title={`${snapshot.connected ? t('online') : t('offline')} · ${snapshot.port.name || snapshot.connection_state}`}
+          onClick={() => {
+            if (!snapshot.connected) {
+              setSidebarStatusMenu(false)
+              void runCommand('reconnect')
+              return
+            }
+            if (sidebarStatusMenu) setSidebarStatusMenu(false)
+            else openSidebarStatusMenu()
+          }}
+          onContextMenu={(event) => {
+            event.preventDefault()
+            openSidebarStatusMenu(event.clientX, event.clientY)
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+              event.preventDefault()
+              openSidebarStatusMenu()
+            }
+          }}
+        >
           <span className={`status-rail status-rail--${snapshot.connected ? 'good' : 'bad'}`} aria-hidden="true" />
           <div><strong>{snapshot.connected ? t('online') : t('offline')}</strong><small>{snapshot.port.name || snapshot.connection_state}</small></div>
-          <Cpu size={18} />
-        </div>
+          <Cpu size={18} aria-hidden="true" />
+        </button>
+        {sidebarStatusMenu && typeof document !== 'undefined' && createPortal(<div
+          ref={sidebarStatusMenuRef}
+          className="sidebar__status-menu"
+          role="menu"
+          aria-label={appearance.locale === 'fa' ? 'عملیات اتصال کنترلر' : 'Controller connection actions'}
+          style={sidebarStatusMenuPosition}
+        >
+          <button type="button" role="menuitem" onClick={() => { setSidebarStatusMenu(false); void runCommand('reconnect') }}>{appearance.locale === 'fa' ? 'اتصال مجدد' : 'Reconnect'}</button>
+          {snapshot.connected && <button type="button" role="menuitem" onClick={() => { setSidebarStatusMenu(false); void runCommand('close') }}>{appearance.locale === 'fa' ? 'بستن درگاه' : 'Close port'}</button>}
+          <button type="button" role="menuitem" onClick={() => { setSidebarStatusMenu(false); setPaletteQuery('ports'); setPaletteIndex(0); setPalette(true) }}>{appearance.locale === 'fa' ? 'انتخاب درگاه USB' : 'Choose USB port'}</button>
+          <button type="button" role="menuitem" onClick={() => { setSidebarStatusMenu(false); navigate('device') }}>{appearance.locale === 'fa' ? 'جزئیات دستگاه' : 'Device details'}</button>
+        </div>, document.body)}
 
         <nav className="sidebar__nav" id="primary-navigation">
           {(['core', 'integrations', 'system'] as const).map((group) => (
@@ -1494,6 +1639,14 @@ export default function App() {
       </header>
 
       <main className="app-main">
+		{page !== 'dashboard' && globalHardwareProblem && globalHardwareWarning && <section className={`hardware-alert app-hardware-alert is-${globalHardwareProblem.severity}`} role="alert" aria-live="assertive">
+			<div className="hardware-alert__icon"><TriangleAlert size={24} aria-hidden="true" /></div>
+			<div className="hardware-alert__copy">
+				<strong>{globalHardwareWarning.title}</strong>
+				<p>{globalHardwareWarning.guidance}</p>
+				{globalHardwareWarning.impact && <p className="hardware-alert__impact">{globalHardwareWarning.impact}</p>}
+			</div>
+		</section>}
         <PageTransition pageKey={page}>{view}</PageTransition>
       </main>
 

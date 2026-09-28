@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 import { BootGate, Card, HoldActionButton, HotkeyHelp, RangeField, TextField } from './components'
-import type { Appearance } from './types'
+import type { Appearance, UIConfig } from './types'
 import { emptySnapshot } from './types'
 import { artifactUpdateAvailable, UpdatesView } from './updates-view'
 import { translator } from './i18n'
@@ -28,12 +28,25 @@ const appearance: Appearance = {
   audioVolume: 0.35,
 }
 
+const uiConfig: UIConfig = {
+  name: 'PCController',
+  setup_complete: true,
+  appearance,
+  appearance_etag: 'a'.repeat(64),
+  status_interval_ms: 275,
+  measurement_freshness_ms: 1600,
+  websocket_path: '/ipc',
+  session_ticket_path: '/api/session/ticket',
+  auth_required: false,
+}
+
 function shared(): SharedViewProps {
   return {
     appTitle: 'PCController',
     snapshot: emptySnapshot,
     samples: [],
     events: [],
+    macroEvents: [],
     locale: 'en',
     t: (key) => key,
     command: vi.fn(async () => ''),
@@ -126,8 +139,9 @@ describe('offline and settings UI contracts', () => {
       },
     }
     const markup = renderToStaticMarkup(<WorkbenchView {...shared()} snapshot={snapshot} />)
-    expect(markup).toContain('New draft · host · 0 steps')
-    expect(markup).toContain('Macro inspection &amp; recording')
+    expect(markup).toContain('New draft')
+    expect(markup).toContain('#4 · Uncategorized · host')
+    expect(markup).toContain('Macro library')
     expect(markup).toContain('Play selected')
   })
 
@@ -244,6 +258,49 @@ describe('offline and settings UI contracts', () => {
     expect(markup).not.toContain('The dashboard is ready')
   })
 
+  it('shows an accessible actionable hardware warning without misclassifying another device', () => {
+    const markup = renderToStaticMarkup(<DashboardView
+      {...shared()}
+      t={translator('en')}
+      snapshot={{
+        ...emptySnapshot,
+        hardware_problems: [{
+          code: 'usb_descriptor_failure',
+          severity: 'error',
+          impact: 'active_operation_outcome_unknown',
+          os_problem_code: 43,
+          device_id: 'USB\\VID_0000&PID_0002\\physical-controller-instance',
+          location: 'Port 2, Hub 3',
+          observed_at: '2026-09-28T10:00:00Z',
+        }],
+      }}
+    />)
+    expect(markup).toContain('role="alert"')
+    expect(markup).toContain('Controller USB connection failed')
+    expect(markup).toContain('Check the controller data cable, power, or try another USB port.')
+    expect(markup).toContain('Communication was lost during an active operation')
+    expect(markup).toContain('Windows code 43 · Port 2, Hub 3')
+    expect(markup).not.toContain('physical-controller-instance')
+  })
+
+  it('renders the Persian hardware warning as native joined-script text', () => {
+    const markup = renderToStaticMarkup(<DashboardView
+      {...shared()}
+      locale="fa"
+      t={translator('fa')}
+      snapshot={{
+        ...emptySnapshot,
+        hardware_problems: [{
+          code: 'usb_descriptor_failure',
+          severity: 'error',
+          observed_at: '2026-09-28T10:00:00Z',
+        }],
+      }}
+    />)
+    expect(markup).toContain('خرابی اتصال USB کنترلر')
+    expect(markup).toContain('کابل داده، برق و درگاه USB کنترلر را بررسی کنید')
+  })
+
   it('hides unavailable peripherals and their invalid readings', () => {
     const connected = {
       ...emptySnapshot,
@@ -328,6 +385,25 @@ describe('offline and settings UI contracts', () => {
     expect(markup).not.toContain('Security')
     expect(markup).not.toContain('authToken')
     expect(markup).not.toContain('No session token')
+  })
+
+  it('shows only host-advertised live measurement timing', () => {
+    const markup = renderToStaticMarkup(<SettingsView
+      {...shared()}
+      appearance={appearance}
+      onAppearance={vi.fn()}
+      token=""
+      onToken={vi.fn()}
+      onAppTitle={vi.fn(async (value: string) => value)}
+      uiConfig={uiConfig}
+      onBuzzerPath={vi.fn(async () => undefined)}
+      navigationSync
+      onNavigationSync={vi.fn()}
+    />)
+    expect(markup).toContain('Live measurements')
+    expect(markup).toContain('value="275"')
+    expect(markup).toContain('value="1600"')
+    expect(markup).toContain('Apply live timing')
   })
 
   it('shows navigation synchronization state only while it is factual and actionable', () => {

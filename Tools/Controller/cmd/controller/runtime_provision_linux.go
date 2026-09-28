@@ -112,7 +112,11 @@ func runToolchainRuntimeWindowReady(args []string, stdout, stderr io.Writer, sto
 	if flags.NArg() != 0 || *deadline <= 0 || *deadline > 2*time.Minute {
 		return errors.New("usage: controller toolchain runtime-window-ready [--timeout 45s]")
 	}
-	configurePrimaryIPC(runtimeWindowReadinessConfig(store))
+	runtimeConfig, err := runtimeWindowReadinessConfig(store)
+	if err != nil {
+		return fmt.Errorf("resolve runtime readiness configuration: %w", err)
+	}
+	configurePrimaryIPC(runtimeConfig)
 	ctx, cancel := context.WithTimeout(context.Background(), *deadline)
 	defer cancel()
 	ticker := time.NewTicker(250 * time.Millisecond)
@@ -144,10 +148,13 @@ func runToolchainRuntimeWindowReady(args []string, stdout, stderr io.Writer, sto
 	}
 }
 
-func runtimeWindowReadinessConfig(store *appconfig.Store) appconfig.Config {
-	runtimeConfig := store.CurrentRuntime()
+func runtimeWindowReadinessConfig(store *appconfig.Store) (appconfig.Config, error) {
+	runtimeConfig, err := store.Runtime()
+	if err != nil {
+		return appconfig.Config{}, err
+	}
 	runtimeConfig.IPC.Listen = "127.0.0.1:8787"
-	return runtimeConfig
+	return runtimeConfig, nil
 }
 
 func boundedRuntimeText(value string) string {

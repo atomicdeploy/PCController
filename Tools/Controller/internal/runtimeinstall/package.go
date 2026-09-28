@@ -17,7 +17,6 @@ import (
 )
 
 const (
-	HostManifestFormat    = "pccontroller-host-package-manifest"
 	RuntimeManifestFormat = "pccontroller-linux-runtime-manifest"
 	DefaultRoot           = "/opt/pccontroller/runtime"
 	DefaultStageRoot      = "/var/lib/pccontroller/runtime-input"
@@ -37,16 +36,37 @@ type HostArtifact struct {
 }
 
 type HostManifest struct {
-	Format string `json:"format"`
-	Target struct {
+	GeneratedUTC string `json:"generatedUtc,omitempty"`
+	Target       struct {
 		Platform     string `json:"platform"`
 		Architecture string `json:"architecture"`
 	} `json:"target"`
 	Identity struct {
-		Version      string `json:"version"`
-		SourceSHA256 string `json:"sourceSHA256"`
-		BuildTime    string `json:"buildTime"`
+		Version                 string          `json:"version"`
+		AppName                 string          `json:"appName,omitempty"`
+		Tagline                 string          `json:"tagline,omitempty"`
+		ProductName             string          `json:"productName,omitempty"`
+		CompanyName             string          `json:"companyName,omitempty"`
+		FileDescription         string          `json:"fileDescription,omitempty"`
+		LegalCopyright          string          `json:"legalCopyright,omitempty"`
+		ExecutableName          string          `json:"executableName,omitempty"`
+		IconResources           json.RawMessage `json:"iconResources,omitempty"`
+		SourceSHA256            string          `json:"sourceSHA256"`
+		SourceFiles             int             `json:"sourceFiles,omitempty"`
+		BuildTime               string          `json:"buildTime"`
+		PackedFirmwareTimestamp string          `json:"packedFirmwareTimestamp,omitempty"`
 	} `json:"identity"`
+	Toolchains json.RawMessage `json:"toolchains,omitempty"`
+	Validation struct {
+		WindowsResources string          `json:"windowsResources,omitempty"`
+		WebUI            json.RawMessage `json:"webUI,omitempty"`
+		EmbeddedDefaults json.RawMessage `json:"embeddedDefaults,omitempty"`
+		Notices          json.RawMessage `json:"notices,omitempty"`
+		Tests            string          `json:"tests,omitempty"`
+		Vet              string          `json:"vet,omitempty"`
+		UPX              json.RawMessage `json:"upx,omitempty"`
+		SharedLibrary    string          `json:"sharedLibrary,omitempty"`
+	} `json:"validation,omitempty"`
 	Artifacts []HostArtifact `json:"artifacts"`
 }
 
@@ -230,15 +250,13 @@ func validatePackageFor(
 	}
 	var manifest HostManifest
 	decoder := json.NewDecoder(bytes.NewReader(manifestBytes))
+	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&manifest); err != nil {
 		return result, fmt.Errorf("decode host package manifest: %w", err)
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		return result, errors.New("host package manifest has trailing JSON values")
-	}
-	if manifest.Format != HostManifestFormat {
-		return result, fmt.Errorf("unsupported host package manifest format %q", manifest.Format)
 	}
 	if manifest.Target.Platform != platform || manifest.Target.Architecture != architecture {
 		return result, fmt.Errorf(
@@ -300,15 +318,13 @@ func validatePackageFor(
 func decodeHostManifest(content []byte, platform, architecture string) (HostManifest, HostArtifact, error) {
 	var manifest HostManifest
 	decoder := json.NewDecoder(bytes.NewReader(content))
+	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&manifest); err != nil {
 		return manifest, HostArtifact{}, fmt.Errorf("decode host package manifest: %w", err)
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		return manifest, HostArtifact{}, errors.New("host package manifest has trailing JSON values")
-	}
-	if manifest.Format != HostManifestFormat {
-		return manifest, HostArtifact{}, fmt.Errorf("unsupported host package manifest format %q", manifest.Format)
 	}
 	if manifest.Target.Platform != platform || manifest.Target.Architecture != architecture {
 		return manifest, HostArtifact{}, fmt.Errorf(

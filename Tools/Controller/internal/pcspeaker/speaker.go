@@ -28,7 +28,7 @@ const (
 	MaxDurationMS  = 60000
 )
 
-// Play drives PIT channel 2 and the system-speaker gate through WinRing0.
+// Play drives the native motherboard-speaker backend for the current OS.
 func Play(ctx context.Context, driverDirectory string, frequencyHz, durationMS int) error {
 	return PlayConfigured(ctx, driverDirectory, BackendAuto, "", frequencyHz, durationMS)
 }
@@ -105,7 +105,9 @@ func IsHelperInvocation(args []string) bool {
 func RunHelperInvocation(ctx context.Context, args []string, stderr io.Writer) error {
 	flags := flag.NewFlagSet("pc-speaker", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	driverDirectory := flags.String("driver-dir", "", "directory containing WinRing0x64.sys")
+	driverDirectory := flags.String(
+		"driver-dir", "", "Windows directory containing WinRing0x64.sys (ignored by other native backends)",
+	)
 	frequencyHz := flags.Int("frequency", 0, "frequency in Hz")
 	durationMS := flags.Int("duration", 0, "duration in milliseconds")
 	if err := flags.Parse(args); err != nil {

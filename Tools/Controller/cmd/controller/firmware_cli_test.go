@@ -24,7 +24,7 @@ func TestFirmwareIdentityCLIIsHardwareIndependent(t *testing.T) {
 	); err != nil {
 		t.Fatalf("identity: %v stderr=%s", err, stderr.String())
 	}
-	for _, wanted := range []string{`"magic": "PCI1"`, `"source_hash_hex": "1234ABCD"`} {
+	for _, wanted := range []string{`"magic": "PCID"`, `"source_hash_hex": "1234ABCD"`} {
 		if !strings.Contains(stdout.String(), wanted) {
 			t.Fatalf("identity output missing %s: %s", wanted, stdout.String())
 		}
@@ -66,7 +66,7 @@ func testFirmwareIdentityHex(t *testing.T, sourceHash, timestamp uint32) []byte 
 	// Reuse the public guarded patch surface by starting from a canonical
 	// fixture encoded by the package's validated Intel HEX parser.
 	data := make([]byte, programmer.FirmwareIdentityLength)
-	data[0], data[1], data[2], data[3] = 'P', 'C', 'I', '1'
+	data[0], data[1], data[2], data[3] = 'P', 'C', 'I', 'D'
 	for index, value := range []uint32{sourceHash, timestamp} {
 		offset := 4 + index*4
 		data[offset] = byte(value)

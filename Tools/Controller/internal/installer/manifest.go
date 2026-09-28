@@ -25,11 +25,9 @@ import (
 )
 
 const (
-	PackageManifestName   = "installation-package.json"
-	packageManifestFormat = "pccontroller-installation-package/v1"
-	hostManifestFormat    = "pccontroller-host-package-manifest"
-	maximumPackageFiles   = 4096
-	maximumManifestBytes  = 4 << 20
+	PackageManifestName  = "installation-package.json"
+	maximumPackageFiles  = 4096
+	maximumManifestBytes = 4 << 20
 )
 
 // PackageFile binds one installable relative path to its exact bytes. Only
@@ -50,7 +48,6 @@ type PackageTarget struct {
 // package identity. RootSHA256 hashes every identity field and ordered file
 // record, so state cannot accidentally combine files from different builds.
 type PackageManifest struct {
-	Format             string        `json:"format"`
 	ProductAppID       string        `json:"product_app_id"`
 	Version            string        `json:"version"`
 	SourceSHA256       string        `json:"source_sha256"`
@@ -64,20 +61,25 @@ type PackageManifest struct {
 }
 
 type hostPackageManifest struct {
-	Format       string `json:"format"`
 	GeneratedUTC string `json:"generatedUtc,omitempty"`
 	Target       struct {
 		Platform     string `json:"platform"`
 		Architecture string `json:"architecture"`
 	} `json:"target"`
 	Identity struct {
-		Version                 string `json:"version"`
-		AppName                 string `json:"appName"`
-		Tagline                 string `json:"tagline"`
-		SourceSHA256            string `json:"sourceSHA256"`
-		SourceFiles             int    `json:"sourceFiles"`
-		BuildTime               string `json:"buildTime"`
-		PackedFirmwareTimestamp string `json:"packedFirmwareTimestamp,omitempty"`
+		Version                 string          `json:"version"`
+		AppName                 string          `json:"appName"`
+		Tagline                 string          `json:"tagline"`
+		ProductName             string          `json:"productName,omitempty"`
+		CompanyName             string          `json:"companyName,omitempty"`
+		FileDescription         string          `json:"fileDescription,omitempty"`
+		LegalCopyright          string          `json:"legalCopyright,omitempty"`
+		ExecutableName          string          `json:"executableName,omitempty"`
+		IconResources           json.RawMessage `json:"iconResources,omitempty"`
+		SourceSHA256            string          `json:"sourceSHA256"`
+		SourceFiles             int             `json:"sourceFiles"`
+		BuildTime               string          `json:"buildTime"`
+		PackedFirmwareTimestamp string          `json:"packedFirmwareTimestamp,omitempty"`
 	} `json:"identity"`
 	Toolchains json.RawMessage `json:"toolchains,omitempty"`
 	Validation struct {
@@ -157,11 +159,11 @@ func GeneratePackageManifest(packageRoot, outputPath string, options ManifestOpt
 	}
 	executable := findHostExecutable(host)
 	if executable == "" {
-		return PackageManifest{}, errors.New("host manifest does not declare controller.exe")
+		return PackageManifest{}, errors.New("host manifest does not declare its executable")
 	}
 	manifest := PackageManifest{
-		Format: packageManifestFormat, ProductAppID: productidentity.StableAppID,
-		Version: host.Identity.Version, SourceSHA256: strings.ToLower(host.Identity.SourceSHA256),
+		ProductAppID: productidentity.StableAppID,
+		Version:      host.Identity.Version, SourceSHA256: strings.ToLower(host.Identity.SourceSHA256),
 		BuildTime:      host.Identity.BuildTime,
 		Target:         PackageTarget{Platform: platform, Architecture: architecture},
 		ExecutablePath: executable, HostManifestPath: "host-manifest.json",
@@ -272,8 +274,8 @@ func VerifyPackage(packageRoot, expectedRootSHA256 string, options ManifestOptio
 }
 
 func validatePackageManifest(manifest PackageManifest) error {
-	if manifest.Format != packageManifestFormat || manifest.ProductAppID != productidentity.StableAppID {
-		return errors.New("installation package format or product identity is unsupported")
+	if manifest.ProductAppID != productidentity.StableAppID {
+		return errors.New("installation package product identity is unsupported")
 	}
 	if manifest.Target.Platform != "windows" || strings.TrimSpace(manifest.Target.Architecture) == "" {
 		return errors.New("installation package target is invalid")
@@ -327,9 +329,6 @@ func validatePackageManifest(manifest PackageManifest) error {
 }
 
 func validateHostManifest(host hostPackageManifest) error {
-	if host.Format != hostManifestFormat {
-		return fmt.Errorf("unsupported host package manifest format %q", host.Format)
-	}
 	if normalizeHostPlatform(host.Target.Platform) != "windows" || strings.TrimSpace(host.Target.Architecture) == "" {
 		return errors.New("host package is not a Windows target")
 	}
@@ -373,8 +372,12 @@ func normalizeHostPlatform(value string) string {
 }
 
 func findHostExecutable(host hostPackageManifest) string {
+	wanted := strings.TrimSpace(host.Identity.ExecutableName)
+	if wanted == "" {
+		wanted = "controller.exe"
+	}
 	for _, artifact := range host.Artifacts {
-		if strings.EqualFold(filepath.Base(filepath.FromSlash(artifact.Path)), "controller.exe") {
+		if strings.EqualFold(filepath.Base(filepath.FromSlash(artifact.Path)), wanted) {
 			return filepath.ToSlash(filepath.Clean(filepath.FromSlash(artifact.Path)))
 		}
 	}
@@ -484,16 +487,38 @@ func verifyWindowsExecutableResources(path string, manifest PackageManifest, hos
 // verifyWindowsResourceIdentity checks the immutable PE resource strings that
 // remain inspectable when controller.exe is UPX-compressed.
 func verifyWindowsResourceIdentity(values map[string]string, manifest PackageManifest, host hostPackageManifest) error {
-	for label, value := range map[string]string{
-		"product name":      productidentity.DefaultTitle,
+	productName := strings.TrimSpace(host.Identity.ProductName)
+	if productName == "" {
+		productName = productidentity.DefaultTitle
+	}
+	originalFilename := filepath.Base(filepath.FromSlash(manifest.ExecutablePath))
+	if originalFilename == "." || originalFilename == "" {
+		originalFilename = "controller.exe"
+	}
+	required := map[string]string{
+		"product name":      productName,
 		"product version":   host.Identity.Version,
-		"original filename": "controller.exe",
+		"original filename": originalFilename,
 		"source hash":       manifest.SourceSHA256,
 		"build time":        manifest.BuildTime,
+	}
+	// Older host manifests predate customizable publisher metadata. Keep those
+	// packages installable, but when a current package declares branded values,
+	// bind every declaration to the executable's structured version resource.
+	for label, value := range map[string]string{
+		"company name":     host.Identity.CompanyName,
+		"file description": host.Identity.FileDescription,
+		"legal copyright":  host.Identity.LegalCopyright,
 	} {
+		if value != "" {
+			required[label] = value
+		}
+	}
+	for label, value := range required {
 		key := map[string]string{
 			"product name": "ProductName", "product version": "ProductVersion",
 			"original filename": "OriginalFilename", "source hash": "PrivateBuild", "build time": "SpecialBuild",
+			"company name": "CompanyName", "file description": "FileDescription", "legal copyright": "LegalCopyright",
 		}[label]
 		if values[key] != value {
 			return fmt.Errorf("Windows version resource %s does not match declared %s", key, label)

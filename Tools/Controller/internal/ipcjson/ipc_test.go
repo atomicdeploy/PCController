@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	goruntime "runtime"
 	"strings"
 	"testing"
 	"time"
@@ -335,12 +336,12 @@ func TestTypedAppActionRPCSubmitsAcknowledgesAndQueriesExactOutcome(t *testing.T
 	}
 }
 
-func TestTypedCoordinatorPreservesLegacyAppActions(t *testing.T) {
+func TestAppActionRejectsUntrackedKinds(t *testing.T) {
 	runtime := control.New(control.Options{})
 	defer runtime.Close()
 	registry := hostui.NewInstanceRegistry()
 	if _, err := registry.Upsert(hostui.AppInstance{
-		ID: "tui:legacy-actions", Surface: "tui", State: "active", LeaseSeconds: 45,
+		ID: "tui:untracked-actions", Surface: "tui", State: "active", LeaseSeconds: 45,
 		Values: map[string]string{hostui.ActionCapabilitiesKey: hostui.TUIActionCapabilities},
 	}); err != nil {
 		t.Fatal(err)
@@ -355,46 +356,39 @@ func TestTypedCoordinatorPreservesLegacyAppActions(t *testing.T) {
 	}
 
 	tests := []hostui.AppAction{
-		{Kind: "command", Value: "status", Target: "tui:legacy-actions"},
-		{Kind: "app.quit", Target: "tui:legacy-actions"},
-		{Kind: "app.port.open", Target: "tui:legacy-actions"},
-		{Kind: "app.port.close", Target: "tui:legacy-actions"},
+		{Kind: "command", Value: "status", Target: "tui:untracked-actions"},
+		{Kind: "app.quit", Target: "tui:untracked-actions"},
+		{Kind: "app.port.open", Target: "tui:untracked-actions"},
+		{Kind: "app.port.close", Target: "tui:untracked-actions"},
 	}
 	for _, action := range tests {
 		params, _ := json.Marshal(action)
 		response := service.Dispatch(context.Background(), Request{
 			Method: "controller.app.action", Params: params,
 		})
-		if response.Error != nil {
-			t.Fatalf("%s legacy response=%#v", action.Kind, response)
-		}
-		accepted, ok := response.Result.(map[string]bool)
-		if !ok || !accepted["accepted"] {
-			t.Fatalf("%s legacy result=%#v", action.Kind, response.Result)
+		if response.Error == nil || !strings.Contains(response.Error.Message, "outcome-capable") {
+			t.Fatalf("%s untracked response=%#v", action.Kind, response)
 		}
 		select {
 		case delivery := <-deliveries:
-			if delivery.Kind != action.Kind || delivery.Value != action.Value || delivery.OperationID != "" {
-				t.Fatalf("%s delivery=%#v", action.Kind, delivery)
-			}
-		case <-time.After(time.Second):
-			t.Fatalf("%s was not delivered through legacy broker", action.Kind)
+			t.Fatalf("%s untracked delivery=%#v", action.Kind, delivery)
+		default:
 		}
 	}
 
-	trackedLegacy, _ := json.Marshal(map[string]any{
-		"kind": "command", "value": "status", "target": "tui:legacy-actions",
+	trackedUnsupported, _ := json.Marshal(map[string]any{
+		"kind": "command", "value": "status", "target": "tui:untracked-actions",
 		"operation_id": "unsupported-tracking",
 	})
 	response := service.Dispatch(context.Background(), Request{
-		Method: "controller.app.action", Params: trackedLegacy,
+		Method: "controller.app.action", Params: trackedUnsupported,
 	})
 	if response.Error == nil || !strings.Contains(response.Error.Message, "outcome-capable") {
-		t.Fatalf("legacy action fabricated tracking=%#v", response)
+		t.Fatalf("unsupported action fabricated tracking=%#v", response)
 	}
 	select {
 	case delivery := <-deliveries:
-		t.Fatalf("invalid tracked legacy action was delivered: %#v", delivery)
+		t.Fatalf("invalid tracked action was delivered: %#v", delivery)
 	default:
 	}
 }
@@ -451,7 +445,7 @@ func TestTypedCustomAppActionRequiresLiveAdvertisement(t *testing.T) {
 	}
 }
 
-func TestExecuteRoutesAppPageThroughTypedActionBroker(t *testing.T) {
+func TestExecuteRejectsAppActionBypass(t *testing.T) {
 	runtime := control.New(control.Options{})
 	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
 	broker := hostui.NewActionBroker()
@@ -461,16 +455,13 @@ func TestExecuteRoutesAppPageThroughTypedActionBroker(t *testing.T) {
 	response := service.Dispatch(context.Background(), Request{
 		Method: "controller.command.execute", Params: params,
 	})
-	if response.Error != nil || !strings.Contains(fmt.Sprint(response.Result), "accepted") {
+	if response.Error == nil || !strings.Contains(response.Error.Message, "controller.app.action") {
 		t.Fatalf("execute app page response=%#v", response)
 	}
 	select {
 	case action := <-actions:
-		if action.Kind != "app.page" || action.Value != "settings" || action.Source != "ipc-command" {
-			t.Fatalf("action=%#v", action)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("controller.command.execute app page did not reach action broker")
+		t.Fatalf("app action bypass reached broker: %#v", action)
+	default:
 	}
 }
 
@@ -531,7 +522,7 @@ func TestHostFactsRPCAndRESTUseTypedReadOnlyProvider(t *testing.T) {
 		t.Fatalf("response=%#v profile=%q calls=%d", response, provider.profile, provider.calls)
 	}
 	catalog := service.Dispatch(context.Background(), Request{Method: "controller.os.facts.catalog"})
-	if catalog.Error != nil || !strings.Contains(fmt.Sprint(catalog.Result), "Win32_OperatingSystem") || provider.calls != 1 {
+	if catalog.Error != nil || !strings.Contains(fmt.Sprint(catalog.Result), "OperatingSystem") || provider.calls != 1 {
 		t.Fatalf("catalog=%#v calls=%d", catalog, provider.calls)
 	}
 	invalidParams, _ := json.Marshal(map[string]any{"profile": "system", "timeout_ms": 50})
@@ -963,9 +954,15 @@ func TestHTTPRESTAndAuthenticationShareIPCListener(t *testing.T) {
 	}
 	osStatusBody, readErr := io.ReadAll(response.Body)
 	_ = response.Body.Close()
+	expectedSerialSource := "periodic platform polling"
+	if goruntime.GOOS == "windows" {
+		expectedSerialSource = "Windows SetupAPI"
+	} else if goruntime.GOOS == "linux" {
+		expectedSerialSource = "Linux sysfs"
+	}
 	if readErr != nil || response.StatusCode != http.StatusOK ||
 		!strings.Contains(string(osStatusBody), `"serial_discovery_source"`) ||
-		!strings.Contains(string(osStatusBody), "Windows SetupAPI") {
+		!strings.Contains(string(osStatusBody), expectedSerialSource) {
 		t.Fatalf("OS status=%d body=%s err=%v", response.StatusCode, osStatusBody, readErr)
 	}
 
@@ -1181,7 +1178,7 @@ func TestRawJSONRPCAndWebSocketShareOneIPCListener(t *testing.T) {
 		path, contains string
 	}{
 		{path: "/healthz", contains: `"ok":true`},
-		{path: "/upnp/public.json", contains: `"schema":"pccontroller.public.v1"`},
+		{path: "/upnp/public.json", contains: `"product":"PCController"`},
 		{path: "/api/ui-config", contains: `"auth_required":false`},
 		{path: "/api/snapshot", contains: `"uptime_ms":0`},
 		{path: "/", contains: "data-pccontroller-shell"},
@@ -1382,31 +1379,6 @@ func TestRawJSONRPCAndWebSocketShareOneIPCListener(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("multiplexed IPC server did not stop")
-	}
-}
-
-func TestStreamableEventKindSeparatesTimelineFromStatusTraffic(t *testing.T) {
-	tests := []struct {
-		kind string
-		want bool
-	}{
-		{kind: "door", want: true},
-		{kind: "rf.received", want: true},
-		{kind: "macro.completed", want: true},
-		{kind: " telemetry ", want: false},
-		{kind: "RX", want: false},
-		{kind: "tx", want: false},
-		{kind: "front_panel.segment", want: false},
-		{kind: "status_led.changed", want: false},
-		{kind: "buzzer.note", want: false},
-		{kind: "illumination.changed", want: false},
-		{kind: "settings.changed", want: false},
-		{kind: "", want: false},
-	}
-	for _, test := range tests {
-		if got := streamableEventKind(test.kind); got != test.want {
-			t.Errorf("streamableEventKind(%q)=%v want %v", test.kind, got, test.want)
-		}
 	}
 }
 

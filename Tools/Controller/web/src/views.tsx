@@ -100,7 +100,7 @@ import {
   PWMReconciler,
   USER_PWM_CHANNELS,
 } from './pwm-authority'
-import { formatClock, formatCompact, formatDuration, formatNumber, type MessageKey } from './i18n'
+import { formatClock, formatCompact, formatDuration, formatMeasurementFreshness, formatNumber, type MessageKey } from './i18n'
 const TelemetryChart = lazy(() => import('./telemetry-chart').then((module) => ({ default: module.TelemetryChart })))
 import {
   integrationSettingsEqual,
@@ -134,6 +134,7 @@ import type {
   SegmentScrollSettings,
   UIConfig,
 } from './types'
+import { hardwareProblemPresentation } from './hardware-problem'
 import { buzzerPathFromState, type BuzzerPath } from './buzzer-routing'
 import { peripheralAvailability } from './peripheral-availability'
 
@@ -143,6 +144,7 @@ export interface SharedViewProps {
   snapshot: Snapshot
   samples: MetricSample[]
   events: ControllerEvent[]
+  macroEvents: ControllerEvent[]
   locale: Locale
   t: (key: MessageKey) => string
   command: (command: string, success?: string) => Promise<string>
@@ -154,10 +156,39 @@ export interface SharedViewProps {
     boardState: 'loading' | 'ready' | 'unavailable'
     tabBusSupported: boolean
     tabPeers: number
+    statusIntervalMS?: number
+    measurementFreshnessMS?: number
   }
   relayedTerminal: Array<TabTerminalEntry & { id: string; tabId: string }>
   broadcastTerminal: (entry: TabTerminalEntry) => void
   boardSettingsReadState: BoardSettingsReadState
+}
+
+function useFreshnessClock(updated: string | undefined, freshnessMS: number): number {
+  const [now, setNow] = useState(Date.now)
+  useEffect(() => {
+    let timer = 0
+    let stopped = false
+    const observed = updated ? Date.parse(updated) : Number.NaN
+    const schedule = () => {
+      if (stopped || !Number.isFinite(observed)) return
+      const age = Math.max(0, Date.now() - observed)
+      const delay = age < freshnessMS
+        ? Math.max(1, freshnessMS - age + 1)
+        : age < 10_000 ? 100 : 1000
+      timer = window.setTimeout(() => {
+        setNow(Date.now())
+        schedule()
+      }, delay)
+    }
+    setNow(Date.now())
+    schedule()
+    return () => {
+      stopped = true
+      window.clearTimeout(timer)
+    }
+  }, [freshnessMS, updated])
+  return now
 }
 
 function pageDetail(snapshot: Snapshot, appTitle: string, locale: Locale): string {
@@ -190,11 +221,16 @@ export function DashboardView(props: SharedViewProps) {
     available.invalidTemperatureLED ? copy('LED temperature unavailable', 'دمای LED در دسترس نیست') : '',
     available.invalidTemperatureBTAudio ? copy('BT Amplifier temperature unavailable', 'دمای آمپلی‌فایر بلوتوث در دسترس نیست') : '',
   ].filter(Boolean)
+	const hardwareProblem = snapshot.hardware_problems?.[0]
+	const hardwareWarning = hardwareProblem ? hardwareProblemPresentation(hardwareProblem, locale) : undefined
   const connectedTone = boardReady ? 'good' : snapshot.paused ? 'warn' : 'bad'
   const authenticationRequired = !boardReady && props.transport.authenticationRequired
   const hash = snapshot.hello.build_hash ? snapshot.hello.build_hash.toString(16).toUpperCase().padStart(8, '0') : '—'
   const activeRelayCount = Array.from({ length: 8 }, (_, index) => Boolean(status.active_relays & (1 << index))).filter(Boolean).length
   const configurationEventID = events.find((event) => event.kind === 'config')?.id ?? 0
+  const freshnessWindow = props.transport.measurementFreshnessMS ?? 1500
+  const freshnessNow = useFreshnessClock(snapshot.status_updated, freshnessWindow)
+  const measurementFreshness = formatMeasurementFreshness(locale, snapshot.status_updated, freshnessWindow, freshnessNow)
   const [hostUI, setHostUI] = useState<HostUISettings | null>(null)
   useEffect(() => {
     if (!boardReady) {
@@ -217,9 +253,9 @@ export function DashboardView(props: SharedViewProps) {
   return (
     <>
       <SectionTitle
-        eyebrow={boardReady ? t('liveTelemetry') : snapshot.paused ? copy('Connection paused', 'اتصال متوقف شده') : copy('Awaiting controller', 'در انتظار کنترلر')}
+        eyebrow={boardReady ? measurementFreshness : snapshot.paused ? copy('Connection paused', 'اتصال متوقف شده') : copy('Awaiting controller', 'در انتظار کنترلر')}
         title={t('dashboard')}
-        detail={authenticationRequired ? t('authenticationDashboardDetail') : boardReady ? pageDetail(snapshot, appTitle, locale) : snapshot.connection_reason || t('noHardware')}
+        detail={authenticationRequired ? t('authenticationDashboardDetail') : boardReady ? pageDetail(snapshot, appTitle, locale) : hardwareWarning?.guidance || snapshot.connection_reason || t('noHardware')}
         action={
           <div className="header-actions">
             <StatusBadge tone={connectedTone} pulse={snapshot.connection_state === 'connecting'}>
@@ -234,8 +270,8 @@ export function DashboardView(props: SharedViewProps) {
       <section className={`hero-panel${boardReady ? ' is-online' : ''}`}>
         <div className="hero-panel__identity">
           <div className="eyebrow">{boardReady ? `${copy('Controller', 'کنترلر')} · ${snapshot.connection_state}` : copy('Host connection', 'اتصال میزبان')}</div>
-          <h2>{boardReady ? snapshot.hello.name || appTitle : authenticationRequired ? t('authenticationDashboard') : props.transport.boardState === 'loading' ? copy('Loading controller state…', 'در حال بارگیری وضعیت کنترلر…') : t('noHardware')}</h2>
-          <p>{boardReady ? `USB ${snapshot.port.vid || '—'}:${snapshot.port.pid || '—'} · ${snapshot.port.name || copy('automatic port', 'درگاه خودکار')}` : authenticationRequired ? t('authenticationDashboardDetail') : snapshot.connection_reason || t('noHardware')}</p>
+          <h2>{boardReady ? snapshot.hello.name || appTitle : authenticationRequired ? t('authenticationDashboard') : hardwareWarning?.title || (props.transport.boardState === 'loading' ? copy('Loading controller state…', 'در حال بارگیری وضعیت کنترلر…') : t('noHardware'))}</h2>
+          <p>{boardReady ? `USB ${snapshot.port.vid || '—'}:${snapshot.port.pid || '—'} · ${snapshot.port.name || copy('automatic port', 'درگاه خودکار')}` : authenticationRequired ? t('authenticationDashboardDetail') : hardwareWarning?.guidance || snapshot.connection_reason || t('noHardware')}</p>
           {authenticationRequired && <Button icon={ShieldCheck} tone="primary" onClick={() => { window.location.hash = '#/settings' }}>{copy('Enter access token', 'ورود توکن دسترسی')}</Button>}
         </div>
         {boardReady && <div className="hero-panel__readout" dir="ltr">
@@ -244,11 +280,23 @@ export function DashboardView(props: SharedViewProps) {
         </div>}
       </section>
 
+      {hardwareProblem && hardwareWarning && <section className={`hardware-alert is-${hardwareProblem.severity}`} role="alert" aria-live="assertive">
+        <div className="hardware-alert__icon"><TriangleAlert size={24} aria-hidden="true" /></div>
+        <div className="hardware-alert__copy">
+          <strong>{hardwareWarning.title}</strong>
+          <p>{hardwareWarning.guidance}</p>
+          {hardwareWarning.impact && <p className="hardware-alert__impact">{hardwareWarning.impact}</p>}
+          {(hardwareProblem.os_problem_code || hardwareProblem.location) && <span dir="ltr">
+            {[hardwareProblem.os_problem_code ? `Windows code ${hardwareProblem.os_problem_code}` : '', hardwareProblem.location || ''].filter(Boolean).join(' · ')}
+          </span>}
+        </div>
+      </section>}
+
       {boardReady && haveMetricCards && <section className="metric-grid">
-        {available.ina219 && <MetricCard icon={Zap} label={peripheralName('sensor.supply-voltage', t('voltage'))} value={formatNumber(locale, status.supply_mv / 1000, 2)} unit="V" values={values(samples, 'supply')} tone="accent" detail={`${peripheralName('sensor.bus-voltage', copy('Bus voltage', 'ولتاژ باس'))} · ${formatNumber(locale, status.bus_mv / 1000, 2)} V`} />}
-        {available.ina219 && <MetricCard icon={Waves} label={peripheralName('sensor.current', t('current'))} value={formatNumber(locale, status.current_ma, 0)} unit="mA" values={values(samples, 'current')} tone="green" detail={`${peripheralName('sensor.power', copy('Load power', 'توان بار'))} · ${formatNumber(locale, status.power_mw / 1000, 2)} W`} />}
-        {available.temperatureLED && <MetricCard icon={Thermometer} label={peripheralName('sensor.temperature-led', `${t('temperature')} · LED`)} value={formatNumber(locale, status.temperature_led_centi_c / 100, 1)} unit="°C" values={values(samples, 'ledTemp')} tone="amber" />}
-        {available.temperatureBTAudio && <MetricCard icon={Thermometer} label={peripheralName('sensor.temperature-audio', copy('BT Amplifier temperature', 'دمای آمپلی‌فایر بلوتوث'))} value={formatNumber(locale, status.temperature_bt_audio_centi_c / 100, 1)} unit="°C" values={values(samples, 'btTemp')} tone="violet" />}
+        {available.ina219 && <MetricCard icon={Zap} label={peripheralName('sensor.supply-voltage', t('voltage'))} value={formatNumber(locale, status.supply_mv / 1000, 2)} unit="V" values={values(samples, 'supply')} tone="accent" scale="supply" detail={`${peripheralName('sensor.bus-voltage', copy('Bus voltage', 'ولتاژ باس'))} · ${formatNumber(locale, status.bus_mv / 1000, 2)} V`} />}
+        {available.ina219 && <MetricCard icon={Waves} label={peripheralName('sensor.current', t('current'))} value={formatNumber(locale, status.current_ma, 0)} unit="mA" values={values(samples, 'current')} tone="green" scale="current" detail={`${peripheralName('sensor.power', copy('Load power', 'توان بار'))} · ${formatNumber(locale, status.power_mw / 1000, 2)} W`} />}
+        {available.temperatureLED && <MetricCard icon={Thermometer} label={peripheralName('sensor.temperature-led', `${t('temperature')} · LED`)} value={formatNumber(locale, status.temperature_led_centi_c / 100, 1)} unit="°C" values={values(samples, 'ledTemp')} tone="amber" scale="temperature" />}
+        {available.temperatureBTAudio && <MetricCard icon={Thermometer} label={peripheralName('sensor.temperature-audio', copy('BT Amplifier temperature', 'دمای آمپلی‌فایر بلوتوث'))} value={formatNumber(locale, status.temperature_bt_audio_centi_c / 100, 1)} unit="°C" values={values(samples, 'btTemp')} tone="violet" scale="temperature" />}
       </section>}
 
       {boardReady && invalidMeasurements.length > 0 && <div className="measurement-alerts" role="status" aria-live="polite">
@@ -259,7 +307,7 @@ export function DashboardView(props: SharedViewProps) {
         icon={ChartNoAxesCombined}
         iconTone="violet"
         title={t('liveTelemetry')}
-        eyebrow={copy('REAL-TIME', 'هم‌زمان')}
+        eyebrow={measurementFreshness}
         className="telemetry-chart-card"
         action={<StatusBadge tone="good">{samples.length} {copy('samples', 'نمونه')}</StatusBadge>}
         menu={[
@@ -749,7 +797,7 @@ export function EventsView({ events, locale, t }: SharedViewProps) {
   )
 }
 
-export function SettingsView({ appTitle, snapshot, locale, t, command, appearance, onAppearance, token, onToken, onAppTitle, boardSettingsReadState, uiConfig, onBuzzerPath, transport, navigationSync, navigationSyncStatus = { state: 'idle', detail: '' }, onNavigationSync }: SharedViewProps & { appearance: Appearance; onAppearance: (value: Appearance) => void; token: string; onToken: (value: string) => void; onAppTitle: (value: string) => Promise<string>; uiConfig: UIConfig | null; onBuzzerPath: (value: BuzzerPath) => Promise<void>; navigationSync: boolean; navigationSyncStatus?: { state: 'idle' | 'pending' | 'error'; detail: string }; onNavigationSync: (value: boolean) => void }) {
+export function SettingsView({ appTitle, snapshot, locale, t, command, appearance, onAppearance, token, onToken, onAppTitle, boardSettingsReadState, uiConfig, onMeasurementTiming, onBuzzerPath, transport, navigationSync, navigationSyncStatus = { state: 'idle', detail: '' }, onNavigationSync }: SharedViewProps & { appearance: Appearance; onAppearance: (value: Appearance) => void; token: string; onToken: (value: string) => void; onAppTitle: (value: string) => Promise<string>; uiConfig: UIConfig | null; onMeasurementTiming?: (statusIntervalMS: number, measurementFreshnessMS: number) => void; onBuzzerPath: (value: BuzzerPath) => Promise<void>; navigationSync: boolean; navigationSyncStatus?: { state: 'idle' | 'pending' | 'error'; detail: string }; onNavigationSync: (value: boolean) => void }) {
   const copy = (english: string, persian: string) => locale === 'fa' ? persian : english
   const available = peripheralAvailability(snapshot)
   const validationMessage = (message: string) => locale !== 'fa' ? message : ({
@@ -804,6 +852,14 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
   const [segmentScrollBusy, setSegmentScrollBusy] = useState(true)
   const [segmentScrollNotice, setSegmentScrollNotice] = useState('')
   const [segmentScrollError, setSegmentScrollError] = useState(false)
+  const [measurementRefreshMS, setMeasurementRefreshMS] = useState(uiConfig?.status_interval_ms ?? 200)
+  const [measurementFreshnessMS, setMeasurementFreshnessMS] = useState(uiConfig?.measurement_freshness_ms ?? 1500)
+  const [savedMeasurementTiming, setSavedMeasurementTiming] = useState({
+    refresh: uiConfig?.status_interval_ms ?? 200,
+    freshness: uiConfig?.measurement_freshness_ms ?? 1500,
+  })
+  const [measurementTimingBusy, setMeasurementTimingBusy] = useState(uiConfig === null)
+  const [measurementTimingNotice, setMeasurementTimingNotice] = useState('')
   const [localIntegrations, setLocalIntegrations] = useState<LocalIntegrationSettings>({
     local_device: { enabled: false, base_url: '' },
     data_hub: { enabled: false, base_url: 'http://127.0.0.1:8080' },
@@ -874,6 +930,10 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
   }), [segmentClosedValidation.normalized, segmentOpenValidation.normalized, segmentPagesValidation.pages, segmentScroll])
   const segmentScrollValid = segmentPagesValidation.valid && segmentOpenValidation.valid && segmentClosedValidation.valid
   const segmentScrollDirty = savedSegmentScroll !== null && !segmentScrollSettingsEqual(segmentScrollDraft, savedSegmentScroll)
+  const measurementTimingValid = measurementRefreshMS >= 50 && measurementRefreshMS <= 60_000 &&
+    measurementFreshnessMS >= measurementRefreshMS + 100 && measurementFreshnessMS <= 120_000
+  const measurementTimingDirty = measurementRefreshMS !== savedMeasurementTiming.refresh ||
+    measurementFreshnessMS !== savedMeasurementTiming.freshness
   const lifecycleOptions: { value: LifecycleSafetyAction; label: string }[] = [
     { value: 'leave', label: copy('Release keys', 'رهاسازی کلیدها') },
     { value: 'stop-motion', label: copy('Stop motion', 'توقف حرکت') },
@@ -893,6 +953,16 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
 
   useEffect(() => setDraftAppTitle(appTitle), [appTitle])
   useEffect(() => setDraftToken(token), [token])
+  useEffect(() => {
+    if (!uiConfig) return
+    setMeasurementRefreshMS(uiConfig.status_interval_ms)
+    setMeasurementFreshnessMS(uiConfig.measurement_freshness_ms)
+    setSavedMeasurementTiming({
+      refresh: uiConfig.status_interval_ms,
+      freshness: uiConfig.measurement_freshness_ms,
+    })
+    setMeasurementTimingBusy(false)
+  }, [uiConfig?.measurement_freshness_ms, uiConfig?.status_interval_ms])
   useEffect(() => {
     let active = true
     void rpc<HostUISettings>('controller.ui.config.get')
@@ -1028,6 +1098,31 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
       setSegmentScrollError(true)
     } finally {
       setSegmentScrollBusy(false)
+    }
+  }
+
+  const saveMeasurementTiming = async (event: FormEvent) => {
+    event.preventDefault()
+    if (!measurementTimingValid || !measurementTimingDirty) return
+    setMeasurementTimingBusy(true)
+    setMeasurementTimingNotice('')
+    try {
+      const saved = await rpc<HostUISettings>('controller.ui.config.set', {
+        status_interval_ms: measurementRefreshMS,
+        measurement_freshness_ms: measurementFreshnessMS,
+      })
+      setMeasurementRefreshMS(saved.status_interval_ms)
+      setMeasurementFreshnessMS(saved.measurement_freshness_ms)
+      setSavedMeasurementTiming({
+        refresh: saved.status_interval_ms,
+        freshness: saved.measurement_freshness_ms,
+      })
+      onMeasurementTiming?.(saved.status_interval_ms, saved.measurement_freshness_ms)
+      setMeasurementTimingNotice(copy('Applied.', 'اعمال شد.'))
+    } catch (cause) {
+      setMeasurementTimingNotice(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setMeasurementTimingBusy(false)
     }
   }
 
@@ -1174,6 +1269,21 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
         </Card>
 
         <PeripheralNamesEditor locale={locale} />
+
+        {uiConfig && <Card icon={Gauge} iconTone="green" title={copy('Live measurements', 'اندازه‌گیری‌های زنده')} eyebrow={measurementTimingBusy ? copy('Synchronizing', 'در حال همگام‌سازی') : `${formatNumber(locale, 1000 / measurementRefreshMS, measurementRefreshMS === 200 ? 0 : 1)} ${copy('Hz', 'هرتز')}`} className="settings-card settings-card--wide">
+          <form className="segment-scroll-settings" onSubmit={(event) => void saveMeasurementTiming(event)}>
+            <RangeField label={copy('Refresh/update interval', 'فاصلهٔ تازه‌سازی/به‌روزرسانی')} value={measurementRefreshMS} min={50} max={60_000} step={50} unit="ms" onChange={(value) => { setMeasurementTimingNotice(''); setMeasurementRefreshMS(value) }} />
+            <RangeField label={copy('Freshness window', 'پنجرهٔ تازگی')} value={measurementFreshnessMS} min={measurementRefreshMS + 100} max={120_000} step={100} unit="ms" onChange={(value) => { setMeasurementTimingNotice(''); setMeasurementFreshnessMS(value) }} />
+            <div className="local-integrations-form__footer">
+              <span className={`segment-scroll-settings__notice${!measurementTimingValid ? ' is-error' : ''}`} role="status" aria-live="polite">
+                {!measurementTimingValid
+                  ? copy(`Freshness must be ${measurementRefreshMS + 100}..120000 ms.`, `تازگی باید بین ${measurementRefreshMS + 100} تا ۱۲۰۰۰۰ میلی‌ثانیه باشد.`)
+                  : measurementTimingNotice}
+              </span>
+              <Button type="submit" tone="primary" icon={ShieldCheck} busy={measurementTimingBusy} disabled={!measurementTimingDirty || !measurementTimingValid}>{copy('Apply live timing', 'اعمال زمان‌بندی زنده')}</Button>
+            </div>
+          </form>
+        </Card>}
 
         <Card icon={Binary} iconTone="accent" title={copy('HOST display scrolling', 'پیمایش نمایشگر میزبان')} eyebrow={segmentScroll.enabled ? copy('Enabled', 'فعال') : copy('Disabled', 'غیرفعال')} className="settings-card settings-card--wide">
           <form className="segment-scroll-settings" onSubmit={(event) => void saveSegmentScroll(event)}>

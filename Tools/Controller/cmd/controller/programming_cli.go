@@ -101,6 +101,10 @@ func runProgramWithConfig(
 	avrdudeConf := flags.String("avrdude-conf", config.Programming.AvrdudeConf, "avrdude.conf path")
 	usbaspBitClock := flags.Float64("usbasp-bitclock-us", 0, "force USBasp AVRDUDE -B bit-clock period in microseconds")
 	usbaspAutoSlow := flags.Bool("usbasp-auto-slow", true, "retry the first failed USBasp exchange at the conservative -B32 period")
+	programmerTimeout := flags.Duration(
+		"programmer-timeout", 0,
+		"override each AVRDUDE stage deadline (for example 45s or 5m; zero uses the operation-specific default)",
+	)
 	deploymentFlag := flags.String("deployment", "", "explicit workflow: production (backup required) or development (skip new archival backup)")
 	reinitializeEEPROM := flags.Bool(
 		"reinitialize-eeprom",
@@ -156,6 +160,7 @@ func runProgramWithConfig(
 		Avrdude: *avrdude, AvrdudeConf: *avrdudeConf,
 		ConfirmEEPROMWrite: *confirmEEPROM,
 		USBaspBitClockUS:   *usbaspBitClock, USBaspAutoSlow: *usbaspAutoSlow,
+		ProgrammerTimeout: *programmerTimeout,
 	}
 	if options.Operation == programmer.OperationChipErase {
 		return errors.New("raw chip erase is disabled; use 'controller board blank' for mandatory backup, EEPROM clearing, and full readback")
@@ -174,6 +179,9 @@ func runProgramWithConfig(
 	}
 	if options.USBaspBitClockUS < 0 {
 		return errors.New("--usbasp-bitclock-us must be zero or positive")
+	}
+	if options.ProgrammerTimeout < 0 {
+		return errors.New("--programmer-timeout must be zero or positive")
 	}
 	// A dry-run describes the dependency command without probing the machine;
 	// real execution still resolves and validates the configured executable.
@@ -301,16 +309,8 @@ func runProgramWithConfig(
 			identityPort,
 			config.Connection,
 		)
-		if identityErr != nil {
-			fmt.Fprintln(
-				stderr,
-				"backup: application identity unavailable; continuing with programmer metadata:",
-				identityErr,
-			)
-		} else {
-			options.ApplicationHash = hello.BuildHash
-			options.ApplicationIdentitySchema = hello.IdentitySchema
-			options.ApplicationPackedTimestamp = hello.BuildTimestamp
+		if err := applyApplicationIdentity(&options, hello, identityErr, stderr); err != nil {
+			return err
 		}
 	}
 	if options.Method == programmer.MethodCompile {
@@ -774,14 +774,16 @@ func guardedFlashBooleanFlag(argument string) bool {
 func guardedFlashValueFlag(argument string) bool {
 	return strings.EqualFold(argument, "--app-device") ||
 		strings.EqualFold(argument, "--deployment") ||
-		strings.EqualFold(argument, "--method")
+		strings.EqualFold(argument, "--method") ||
+		strings.EqualFold(argument, "--programmer-timeout")
 }
 
 func guardedFlashInlineValueFlag(argument string) bool {
 	lower := strings.ToLower(argument)
 	return strings.HasPrefix(lower, "--app-device=") ||
 		strings.HasPrefix(lower, "--deployment=") ||
-		strings.HasPrefix(lower, "--method=")
+		strings.HasPrefix(lower, "--method=") ||
+		strings.HasPrefix(lower, "--programmer-timeout=")
 }
 
 func executeGuardedCLIFlash(
@@ -791,7 +793,7 @@ func executeGuardedCLIFlash(
 	connection appconfig.Connection,
 	classification string, reinitializeEEPROM, appReconnect bool,
 	output io.Writer,
-) error {
+) (resultErr error) {
 	paths, err := programmer.DefaultHostDataPaths()
 	if err != nil {
 		return err
@@ -813,15 +815,14 @@ func executeGuardedCLIFlash(
 			HelloAttempts:  connection.HelloAttempts,
 		})
 		connectContext, connectCancel := context.WithTimeout(ctx, 8*time.Second)
-		connectErr := candidate.EnsureConnected(connectContext)
+		connectErr := connectGuardedFlashCandidate(connectContext, candidate)
 		connectCancel()
 		if connectErr != nil {
-			_ = candidate.Close()
-			return fmt.Errorf("prepare guarded flash application connection: %w", connectErr)
+			return connectErr
 		} else {
 			application = candidate
 			lifecycleOptions.Outputs = control.NewOutputScheduler(application)
-			defer application.Close()
+			defer joinGuardedFlashRuntimeClose(&resultErr, application)
 			var prepareErr error
 			programmingSession, prepareErr = control.PrepareProgrammingSession(
 				ctx,
@@ -833,7 +834,11 @@ func executeGuardedCLIFlash(
 			if prepareErr != nil {
 				return fmt.Errorf("prepare application programming state: %w", prepareErr)
 			}
-			if err := application.Close(); err != nil {
+			if err := closeCommandRuntime(
+				application,
+				application.Close,
+				"release guarded flash application UART before programmer",
+			); err != nil {
 				return fmt.Errorf(
 					"release application UART (settings recovery marker retained): %w", err,
 				)
@@ -853,11 +858,10 @@ func executeGuardedCLIFlash(
 			_ programmer.AutomaticPreflashResult,
 			writer io.Writer,
 		) error {
-			application.ResumeAuto()
 			reconnectContext, reconnectCancel := context.WithTimeout(
 				context.WithoutCancel(backupContext), 12*time.Second,
 			)
-			reconnectErr := application.EnsureConnected(reconnectContext)
+			reconnectErr := application.Connect(reconnectContext)
 			reconnectCancel()
 			if reconnectErr != nil {
 				return fmt.Errorf("reconnect application after untouched raw backup: %w", reconnectErr)
@@ -869,7 +873,11 @@ func executeGuardedCLIFlash(
 				armContext, application, programmingSession, lifecycleOptions, writer,
 			)
 			armCancel()
-			closeErr := application.Close()
+			closeErr := closeCommandRuntime(
+				application,
+				application.Close,
+				"release guarded flash application UART after arming programming latch",
+			)
 			if armErr != nil {
 				return errors.Join(armErr, closeErr)
 			}
@@ -932,11 +940,10 @@ func executeGuardedCLIFlash(
 	var reconnectErr error
 	var restoreErr error
 	if application != nil {
-		application.ResumeAuto()
 		reconnectContext, reconnectCancel := context.WithTimeout(
 			context.WithoutCancel(ctx), 12*time.Second,
 		)
-		reconnectErr = application.EnsureConnected(reconnectContext)
+		reconnectErr = application.Connect(reconnectContext)
 		reconnectCancel()
 		if reconnectErr != nil {
 			reconnectErr = fmt.Errorf(
@@ -982,6 +989,41 @@ func executeGuardedCLIFlash(
 	return errors.Join(flashErr, reconnectErr, restoreErr)
 }
 
+func connectGuardedFlashCandidate(
+	ctx context.Context,
+	candidate applicationRuntime,
+) error {
+	connectErr := candidate.EnsureConnected(ctx)
+	if connectErr == nil {
+		return nil
+	}
+	resultErr := fmt.Errorf("prepare guarded flash application connection: %w", connectErr)
+	if closeErr := closeCommandRuntime(
+		candidate,
+		candidate.Close,
+		"close guarded flash application candidate",
+	); closeErr != nil {
+		resultErr = errors.Join(
+			resultErr,
+			fmt.Errorf("close guarded flash application candidate: %w", closeErr),
+		)
+	}
+	return resultErr
+}
+
+func joinGuardedFlashRuntimeClose(resultErr *error, runtime applicationRuntime) {
+	if closeErr := closeCommandRuntime(
+		runtime,
+		runtime.Close,
+		"close guarded flash application runtime",
+	); closeErr != nil {
+		*resultErr = errors.Join(
+			*resultErr,
+			fmt.Errorf("close guarded flash application runtime: %w", closeErr),
+		)
+	}
+}
+
 func programFactoryEEPROM(
 	ctx context.Context,
 	paths programmer.HostDataPaths,
@@ -993,10 +1035,35 @@ func programFactoryEEPROM(
 	)
 }
 
+var errApplicationIdentityCleanup = errors.New("application identity cleanup failed")
+
+func applyApplicationIdentity(
+	options *programmer.Options,
+	hello native.Hello,
+	identityErr error,
+	stderr io.Writer,
+) error {
+	if identityErr != nil {
+		if errors.Is(identityErr, errApplicationIdentityCleanup) {
+			return fmt.Errorf("release application UART after identity probe: %w", identityErr)
+		}
+		fmt.Fprintln(
+			stderr,
+			"backup: application identity unavailable; continuing with programmer metadata:",
+			identityErr,
+		)
+		return nil
+	}
+	options.ApplicationHash = hello.BuildHash
+	options.ApplicationIdentitySchema = hello.IdentitySchema
+	options.ApplicationPackedTimestamp = hello.BuildTimestamp
+	return nil
+}
+
 func readApplicationIdentityBeforeProgramming(
 	port string,
 	connection appconfig.Connection,
-) (native.Hello, error) {
+) (hello native.Hello, err error) {
 	runtime := control.New(control.Options{
 		Filter:         ports.Filter{Port: port},
 		BaudRate:       connection.BaudRate,
@@ -1004,10 +1071,32 @@ func readApplicationIdentityBeforeProgramming(
 		RequestTimeout: time.Duration(connection.RequestTimeoutMS) * time.Millisecond,
 		HelloAttempts:  connection.HelloAttempts,
 	})
-	defer runtime.Close()
+	return readApplicationIdentityWithRuntime(runtime)
+}
+
+type applicationRuntime interface {
+	EnsureConnected(context.Context) error
+	Snapshot() control.Snapshot
+	Close() error
+}
+
+func readApplicationIdentityWithRuntime(runtime applicationRuntime) (
+	hello native.Hello,
+	err error,
+) {
+	defer func() {
+		if closeErr := closeCommandRuntime(
+			runtime, runtime.Close, "close application identity runtime",
+		); closeErr != nil {
+			err = errors.Join(
+				err,
+				fmt.Errorf("%w: %w", errApplicationIdentityCleanup, closeErr),
+			)
+		}
+	}()
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
-	if err := runtime.EnsureConnected(ctx); err != nil {
+	if err = runtime.EnsureConnected(ctx); err != nil {
 		return native.Hello{}, err
 	}
 	return runtime.Snapshot().Hello, nil
@@ -1113,6 +1202,9 @@ func programShellWords(options programmer.Options) []string {
 	}
 	if options.Port != "" {
 		words = append(words, options.Port)
+	}
+	if options.ProgrammerTimeout > 0 {
+		words = append(words, "--programmer-timeout", options.ProgrammerTimeout.String())
 	}
 	return words
 }
@@ -1585,7 +1677,24 @@ func reconnectApplicationAfterProgramming(
 		RequestTimeout: time.Duration(connection.RequestTimeoutMS) * time.Millisecond,
 		HelloAttempts:  connection.HelloAttempts,
 	})
-	defer runtime.Close()
+	return reconnectApplicationWithRuntime(ctx, runtime, output)
+}
+
+func reconnectApplicationWithRuntime(
+	ctx context.Context,
+	runtime applicationRuntime,
+	output io.Writer,
+) (resultErr error) {
+	defer func() {
+		if closeErr := closeCommandRuntime(
+			runtime, runtime.Close, "close application reconnect runtime",
+		); closeErr != nil {
+			resultErr = errors.Join(
+				resultErr,
+				fmt.Errorf("close application reconnect runtime: %w", closeErr),
+			)
+		}
+	}()
 	reconnectContext, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
 	if err := runtime.EnsureConnected(reconnectContext); err != nil {

@@ -18,6 +18,10 @@ func platformEnumerationSource() string {
 	return "go.bug.st/serial detailed enumerator backed by Linux sysfs"
 }
 
+func listPlatformHardwareProblems(Filter) ([]HardwareProblem, error) {
+	return nil, nil
+}
+
 func watchPlatformChanges(ctx context.Context) (<-chan Change, error) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
