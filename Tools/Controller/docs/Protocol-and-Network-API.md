@@ -487,9 +487,8 @@ the serial port does not stop this service; closing the service does not erase
 MCU EEPROM or the PC configuration. JSON-RPC uses protocol `2.0`; schema
 negotiation reports JSON-RPC `2.0` only because that standards-defined marker
 is required by the wire format. Canonical REST URLs live directly under
-`/api/` and use semantic route names. JSON-RPC and WebSocket peers remain
-capability- and semantics-driven so different feature sets can
-still interoperate.
+`/api/`. JSON-RPC and WebSocket peers remain capability- and semantics-driven
+so different feature sets can still interoperate.
 
 ### Immediate-alpha exposure
 
