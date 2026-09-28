@@ -58,6 +58,7 @@ import { MacroLibraryPanel } from './macro-library'
 import { CardLayoutEditor, CardLayoutFrame, type CardLayoutCopy, type LayoutCardDescriptor } from './card-layout-controls'
 import { loadCardLayout, moveCard, resetCardLayout, saveCardLayout, toggleCard } from './dashboard-layout'
 import { pointerReorderTargetChanged } from './pointer-reorder'
+import { configuredMelodyDetail, normalizeConfiguredMelodies, type ConfiguredMelody } from './melody-catalog'
 import {
   normalizeCommandCatalog,
   TerminalHistory,
@@ -154,7 +155,9 @@ export function WorkbenchView(props: SharedViewProps) {
   const [displayText, setDisplayText] = useState('READY')
   const [frequency, setFrequency] = useState(880)
   const [toneDuration, setToneDuration] = useState(120)
-  const [melody, setMelody] = useState('welcome')
+  const [melody, setMelody] = useState('')
+  const [melodies, setMelodies] = useState<ConfiguredMelody[]>([])
+  const [melodyCatalogState, setMelodyCatalogState] = useState<'loading' | 'ready' | 'error'>('loading')
   const [red, setRed] = useState(38)
   const [green, setGreen] = useState(210)
   const [blue, setBlue] = useState(220)
@@ -196,6 +199,27 @@ export function WorkbenchView(props: SharedViewProps) {
       })
       .catch(() => {
         if (!abort.signal.aborted) setCommandCatalog([])
+      })
+    return () => abort.abort()
+  }, [transport.authenticationRequired, transport.streamState])
+
+  useEffect(() => {
+    const abort = new AbortController()
+    setMelodyCatalogState('loading')
+    void rpc<unknown>('controller.melodies.list', {}, abort.signal)
+      .then((value) => {
+        if (abort.signal.aborted) return
+        const catalog = normalizeConfiguredMelodies(value)
+        setMelodies(catalog)
+        setMelody((current) => catalog.some((candidate) => candidate.name === current) ? current : '')
+        setMelodyCatalogState('ready')
+      })
+      .catch(() => {
+        if (!abort.signal.aborted) {
+          setMelodies([])
+          setMelody('')
+          setMelodyCatalogState('error')
+        }
       })
     return () => abort.abort()
   }, [transport.authenticationRequired, transport.streamState])
@@ -492,8 +516,25 @@ export function WorkbenchView(props: SharedViewProps) {
           <RangeField label={copy('Frequency', 'فرکانس')} value={frequency} min={20} max={20000} step={10} unit="Hz" onChange={setFrequency} />
           <RangeField label={copy('Duration', 'مدت')} value={toneDuration} min={20} max={5000} step={20} unit="ms" onChange={setToneDuration} />
           <Button icon={Volume2} onClick={() => void run(`buzzer ${frequency} ${toneDuration}`)}>{copy('Play tone', 'پخش صدا')}</Button>
-          <TextField label={copy('Configured melody', 'ملودی ذخیره‌شده')} value={melody} spellCheck={false} onChange={(event) => setMelody(event.target.value)} />
-          <div className="inline-actions"><Button icon={Play} disabled={!melody.trim()} onClick={() => void run(`melody play ${shellArgument(melody.trim())}`)}>{copy('Play', 'پخش')}</Button><Button icon={StopCircle} onClick={() => void run('melody stop')}>{copy('Stop', 'توقف')}</Button><Button icon={List} onClick={() => void run('melody list')}>{copy('List', 'فهرست')}</Button></div>
+          <div className="setting-group">
+            <label htmlFor="workbench-configured-melody">{copy('Configured melody', 'ملودی ذخیره‌شده')}</label>
+            <select
+              id="workbench-configured-melody"
+              value={melody}
+              disabled={melodyCatalogState !== 'ready' || melodies.length === 0}
+              onChange={(event) => setMelody(event.target.value)}
+            >
+              <option value="">{melodyCatalogState === 'loading'
+                ? copy('Loading configured melodies…', 'در حال دریافت ملودی‌ها…')
+                : melodyCatalogState === 'error'
+                  ? copy('Melody catalog unavailable', 'فهرست ملودی در دسترس نیست')
+                  : melodies.length === 0
+                    ? copy('No configured melodies', 'ملودی ذخیره‌شده‌ای وجود ندارد')
+                    : copy('Select a configured melody', 'یک ملودی ذخیره‌شده انتخاب کنید')}</option>
+              {melodies.map((candidate) => <option key={candidate.name} value={candidate.name}>{candidate.name} · {configuredMelodyDetail(candidate, locale)}</option>)}
+            </select>
+          </div>
+          <div className="inline-actions"><Button icon={Play} disabled={!melody} onClick={() => void run(`melody play ${shellArgument(melody)}`)}>{copy('Play', 'پخش')}</Button><Button icon={StopCircle} onClick={() => void run('melody stop')}>{copy('Stop', 'توقف')}</Button><Button icon={List} onClick={() => void run('melody list')}>{copy('List', 'فهرست')}</Button></div>
         </Card>)}
 
         {boardReady && available.rf && frame('radio', copy('Radio controls', 'کنترل‌های رادیویی'), <RFGuidedWorkflow snapshot={snapshot} events={events} locale={locale} openDialog={props.openDialog} />)}

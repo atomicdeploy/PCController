@@ -450,6 +450,7 @@
             "controller.lcd.presentation.status",
             "controller.lcd.priority",
             "controller.lcd.prompt",
+            "controller.melodies.list",
             "controller.menu.current",
             "controller.menu.jump",
             "controller.menu.layout.get",
@@ -1057,6 +1058,11 @@
       "capability": "board_commands",
       "summary": "lcd prompt",
       "idempotency": "non-idempotent"
+    },
+    "controller.melodies.list": {
+      "capability": "read",
+      "summary": "Return the effective configured host melody catalog.",
+      "idempotency": "safe"
     },
     "controller.menu.current": {
       "capability": "read",

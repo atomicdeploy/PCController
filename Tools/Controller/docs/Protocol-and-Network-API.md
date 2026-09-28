@@ -597,6 +597,7 @@ request error.
 | `controller.reset`, `controller.reset.lines`, `controller.port.reset` | optional `pulse_ms` | one explicit DTR-only pulse, then fresh application authentication |
 | `controller.snapshot` | `{}` | cached connection, identity, status, and settings |
 | `controller.command.catalog` | `{}` | machine-readable registered command names, aliases, usage, summary, and task group |
+| `controller.melodies.list` | `{}` | effective configured host melody catalog with validated note timing |
 | `controller.status` | `{}` | fresh board status |
 | `controller.peripherals.get` | `{}` | host-owned custom names plus the canonical 34-entry peripheral descriptor registry; requires `read` |
 | `controller.peripherals.set` | `peripheral_names` object | atomically replace custom host names and return the normalized names plus registry; requires `host_configuration` |
@@ -992,6 +993,14 @@ mirrors each valid page, title, progress, and OSC action into cursor-based
 browser event history. Browsers apply matching page actions and fresh update
 lifecycle navigation; terminal-only actions remain available to matching TUI
 instances without being interpreted by the browser.
+
+The loaded application publishes the living, unversioned `window.PCController`
+browser surface for local automation and inspection. Its `inspect()` result
+reports host transport and physical-board connection as separate facts;
+`command()`, `refresh()`, and `navigate()` use the same validated host paths as
+visible UI actions. State changes also dispatch `pccontroller:state` with the
+same non-secret snapshot. This surface is a convenience adapter, not a second
+contract or an authorization bypass.
 
 The local-integration proxy resolves only the configured short names; request
 data can never supply an upstream URL. The data hub is restricted to loopback,
