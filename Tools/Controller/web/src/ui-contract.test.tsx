@@ -264,7 +264,7 @@ describe('offline and settings UI contracts', () => {
     expect(markup).toContain('role="alert"')
     expect(markup).toContain('Controller USB connection failed')
     expect(markup).toContain('Check the controller data cable, power, or try another USB port.')
-    expect(markup).toContain('active operation was interrupted')
+    expect(markup).toContain('Communication was lost during an active operation')
     expect(markup).toContain('Windows code 43 · Port 2, Hub 3')
     expect(markup).not.toContain('physical-controller-instance')
   })

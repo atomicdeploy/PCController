@@ -180,10 +180,7 @@ func listPlatformHardwareProblems(filter Filter) ([]HardwareProblem, error) {
 		})
 	}
 	sort.SliceStable(problems, func(i, j int) bool {
-		if problems[i].Code != problems[j].Code {
-			return problems[i].Code < problems[j].Code
-		}
-		return problems[i].DeviceID < problems[j].DeviceID
+		return hardwareProblemLess(problems[i], problems[j])
 	})
 	return problems, nil
 }

@@ -457,7 +457,7 @@ func TestHardwareProblemPersistsUntilAuthenticatedAttach(t *testing.T) {
 	if _, err := runtime.SetProgramState("test-player", ProgramRunning, "active playback"); err != nil {
 		t.Fatal(err)
 	}
-	runtime.refreshHardwareProblems()
+	runtime.refreshHardwareProblems(true)
 	snapshot := runtime.Snapshot()
 	if len(snapshot.HardwareProblems) != 1 {
 		t.Fatalf("hardware problem missing from snapshot: %#v", snapshot.HardwareProblems)
@@ -469,7 +469,7 @@ func TestHardwareProblemPersistsUntilAuthenticatedAttach(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if event.Metadata["code"] != ports.HardwareProblemUSBDescriptorFailure ||
+	if event.Metadata["problem"] != ports.HardwareProblemUSBDescriptorFailure ||
 		event.Metadata["impact"] != ports.HardwareImpactActiveOutcomeUnknown {
 		t.Fatalf("hardware event lost semantic evidence: %#v", event)
 	}
@@ -477,7 +477,7 @@ func TestHardwareProblemPersistsUntilAuthenticatedAttach(t *testing.T) {
 	// A device disappearing from the problem list is not proof of recovery.
 	// Only an authenticated application HELLO may clear the warning.
 	runtime.hardwareProblemScan = func(ports.Filter) ([]ports.HardwareProblem, error) { return nil, nil }
-	runtime.refreshHardwareProblems()
+	runtime.refreshHardwareProblems(false)
 	if len(runtime.Snapshot().HardwareProblems) != 1 {
 		t.Fatal("disconnected scan cleared the hardware problem before authentication")
 	}
@@ -499,6 +499,56 @@ func TestHardwareProblemPersistsUntilAuthenticatedAttach(t *testing.T) {
 		t.Fatalf("unexpected recovery event: %#v", recovered)
 	}
 	_ = runtime.Close()
+}
+
+func TestAuthenticatedAttachRejectsStaleHardwareScan(t *testing.T) {
+	runtime := New(Options{Filter: ports.Filter{Port: "COM3"}})
+	runtime.port = ports.Info{
+		Name: "COM3", IsUSB: true,
+		InstanceID: `USB\VID_1A86&PID_7523\CONTROLLER`,
+	}
+	runtime.setHardwareProblems([]ports.HardwareProblem{{
+		Code: ports.HardwareProblemUSBDescriptorFailure, Severity: "error",
+		DeviceID: `USB\VID_0000&PID_0002\CONTROLLER`, ObservedAt: time.Now(),
+	}})
+	scanStarted := make(chan struct{})
+	releaseScan := make(chan struct{})
+	runtime.hardwareProblemScan = func(ports.Filter) ([]ports.HardwareProblem, error) {
+		close(scanStarted)
+		<-releaseScan
+		return []ports.HardwareProblem{{
+			Code: ports.HardwareProblemUSBDescriptorFailure, Severity: "error",
+			DeviceID: `USB\VID_0000&PID_0002\CONTROLLER`, ObservedAt: time.Now(),
+		}}, nil
+	}
+	scanDone := make(chan struct{})
+	go func() {
+		defer close(scanDone)
+		runtime.refreshHardwareProblems(false)
+	}()
+	<-scanStarted
+
+	port := newReconnectTestPort()
+	runtime.attach(link.OpenResult{
+		Session: link.NewForPort("COM3", port), Port: runtime.port,
+		Hello: native.Hello{Name: "PCController"},
+	})
+	close(releaseScan)
+	<-scanDone
+	if problems := runtime.Snapshot().HardwareProblems; len(problems) != 0 {
+		t.Fatalf("stale scan resurrected a fault after authenticated HELLO: %#v", problems)
+	}
+	_ = runtime.Close()
+}
+
+func TestActiveUseAtTransportLossIncludesOutputStreams(t *testing.T) {
+	runtime := New(Options{})
+	runtime.mu.Lock()
+	runtime.outputState = func() OutputStreamState { return OutputStreamState{EffectID: 42} }
+	runtime.mu.Unlock()
+	if !runtime.activeUseAtTransportLoss() {
+		t.Fatal("active host-streamed status effect was omitted from transport-loss impact")
+	}
 }
 
 func TestReconnectDiscoveryRebindsAuthenticatedUSBIdentity(t *testing.T) {

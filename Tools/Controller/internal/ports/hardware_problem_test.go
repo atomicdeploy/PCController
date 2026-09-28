@@ -66,6 +66,36 @@ func TestHardwareProblemRejectsUnrelatedDevice(t *testing.T) {
 	}
 }
 
+func TestHardwareProblemRejectsSameModelSiblingWhenSelectedInstanceExists(t *testing.T) {
+	filter := Filter{
+		VID: "1A86", PID: "7523",
+		Preferred: Identity{
+			VID: "1A86", PID: "7523",
+			InstanceID: `USB\VID_1A86&PID_7523\SELECTED-CONTROLLER`,
+		},
+	}
+	if hardwareProblemMatches(
+		`USB\VID_1A86&PID_7523\BROKEN-SIBLING`,
+		[]string{`USB\VID_1A86&PID_7523`},
+		filter,
+		[]string{`USB\VID_1A86&PID_7523\OLD-COM-ASSIGNMENT`},
+	) {
+		t.Fatal("same-model sibling overrode the selected controller instance")
+	}
+}
+
+func TestHardwareProblemRejectsVIDFallbackWhenCOMHistoryExists(t *testing.T) {
+	filter := Filter{Port: "COM3", VID: "1A86", PID: "7523"}
+	if hardwareProblemMatches(
+		`USB\VID_1A86&PID_7523\BROKEN-SIBLING`,
+		nil,
+		filter,
+		[]string{`USB\VID_1A86&PID_7523\CONTROLLER-ON-COM3`},
+	) {
+		t.Fatal("VID/PID fallback overrode the configured COM identity history")
+	}
+}
+
 func TestHardwareProblemMatchesVIDPIDWhenInstanceIsUnavailable(t *testing.T) {
 	filter := Filter{VID: "1a86", PID: "7523"}
 	if !hardwareProblemMatches(
@@ -75,5 +105,16 @@ func TestHardwareProblemMatchesVIDPIDWhenInstanceIsUnavailable(t *testing.T) {
 		nil,
 	) {
 		t.Fatal("expected an exact configured VID/PID match")
+	}
+}
+
+func TestHardwareProblemOrderingPutsErrorsBeforeWarnings(t *testing.T) {
+	errorProblem := HardwareProblem{Code: "z-error", Severity: "error"}
+	warningProblem := HardwareProblem{Code: "a-warning", Severity: "warning"}
+	if !hardwareProblemLess(errorProblem, warningProblem) {
+		t.Fatal("error did not sort ahead of warning")
+	}
+	if hardwareProblemLess(warningProblem, errorProblem) {
+		t.Fatal("warning sorted ahead of error")
 	}
 }

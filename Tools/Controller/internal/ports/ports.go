@@ -304,12 +304,31 @@ func hardwareProblemMatches(
 	filter Filter,
 	relatedInstanceIDs []string,
 ) bool {
-	identities := append([]string(nil), relatedInstanceIDs...)
-	identities = append(identities, filter.InstanceID, filter.Preferred.InstanceID)
-	for _, identity := range identities {
+	strongIdentities := []string{filter.InstanceID, filter.Preferred.InstanceID}
+	haveStrongIdentity := false
+	for _, identity := range strongIdentities {
+		if strings.TrimSpace(identity) == "" {
+			continue
+		}
+		haveStrongIdentity = true
 		if sameDeviceIdentity(deviceID, identity) {
 			return true
 		}
+	}
+	// Once a selected or authenticated instance exists, neither a stale COM
+	// registry assignment nor an identical sibling's VID/PID may override it.
+	if haveStrongIdentity {
+		return false
+	}
+	for _, identity := range relatedInstanceIDs {
+		if sameDeviceIdentity(deviceID, identity) {
+			return true
+		}
+	}
+	// Historical instances tied to a configured COM port are stronger than a
+	// generic model ID. If none matched, do not blame a same-model sibling.
+	if len(relatedInstanceIDs) != 0 {
+		return false
 	}
 	vid := firstNonEmpty(filter.VID, filter.Preferred.VID)
 	pid := firstNonEmpty(filter.PID, filter.Preferred.PID)
@@ -352,6 +371,22 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func hardwareProblemLess(left, right HardwareProblem) bool {
+	severityRank := func(value string) int {
+		if strings.EqualFold(value, "error") {
+			return 0
+		}
+		return 1
+	}
+	if leftRank, rightRank := severityRank(left.Severity), severityRank(right.Severity); leftRank != rightRank {
+		return leftRank < rightRank
+	}
+	if left.Code != right.Code {
+		return left.Code < right.Code
+	}
+	return left.DeviceID < right.DeviceID
 }
 
 // PreferredCandidate returns a prior stable identity only when exactly one

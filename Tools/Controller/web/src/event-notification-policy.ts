@@ -11,6 +11,7 @@ export function shouldToastControllerEvent(
   const text = event.text?.trim().toLowerCase() ?? ''
 
   if (/^(hello|status|telemetry|rx|tx)(?:[._-]|$)/.test(kind) || /^(hello|status)\b/.test(text)) return false
+	if (kind === 'hardware.problem') return true
   if (kind === 'message') {
     const targets = (event.target ?? '').split(',').map((value) => value.trim().toLowerCase())
     return targets.includes('all') || targets.includes('web') || targets.includes('webui')

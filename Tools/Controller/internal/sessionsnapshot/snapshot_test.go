@@ -145,6 +145,29 @@ func TestBuildCapturesUsefulStateWithoutSecretsOrReplayableRF(t *testing.T) {
 	}
 }
 
+func TestHardwareProblemEvidenceSurvivesSafeDiagnosticSummary(t *testing.T) {
+	entries := summarizeEvents([]controller.TimelineEntry{{
+		ID: 1, Time: time.Now(), Kind: "hardware.problem", State: "error",
+		Metadata: map[string]string{
+			"problem":           "usb_descriptor_failure",
+			"os_problem_number": "43",
+			"location":          "Port 2, Hub 3",
+			"device_id":         `USB\VID_0000&PID_0002\PHYSICAL-INSTANCE`,
+		},
+	}}, 4)
+	if len(entries) != 1 {
+		t.Fatalf("hardware problem summary count=%d", len(entries))
+	}
+	metadata := entries[0].Metadata
+	for key, want := range map[string]string{
+		"problem": "usb_descriptor_failure", "os_problem_number": "43", "location": "Port 2, Hub 3",
+	} {
+		if metadata[key] != want {
+			t.Fatalf("hardware diagnostic %s=%q, want %q; all=%#v", key, metadata[key], want, metadata)
+		}
+	}
+}
+
 func TestRecorderAtomicallyReplacesRollingFileAndSavesOnce(t *testing.T) {
 	directory := t.TempDir()
 	path := filepath.Join(directory, "state", "last-session.json")

@@ -548,6 +548,7 @@ kbd { padding: 3px 6px; border: 1px solid var(--line-strong); border-bottom-colo
 .hardware-alert__copy p { margin: 0; color: var(--text-soft); font-size: 11px; line-height: 1.5; }
 .hardware-alert__copy span { color: var(--text-muted); font: 500 9px var(--font-mono); }
 .hardware-alert__copy .hardware-alert__impact { color: var(--red); font-weight: 700; }
+.app-hardware-alert { margin-bottom: 14px; }
 .data-list { display: flex; flex-direction: column; }
 .data-row { min-height: 34px; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 8px 0; border-bottom: 1px solid var(--line); }
 .data-row:last-child { border-bottom: 0; }
