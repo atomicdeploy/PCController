@@ -67,24 +67,74 @@ func listenNativeEndpoint(endpoint Endpoint, options ListenOptions) (net.Listene
 	if err := validateSocketDirectory(parent); err != nil {
 		return nil, err
 	}
+	var ownership *os.File
+	if options.RecoverStaleNative {
+		ownership, err = acquireSocketOwnership(path + ".lock")
+		if err != nil {
+			return nil, err
+		}
+	}
+	releaseOwnership := func() {
+		if ownership != nil {
+			_ = syscall.Flock(int(ownership.Fd()), syscall.LOCK_UN)
+			_ = ownership.Close()
+		}
+	}
 	if err := prepareSocketPath(path, options.RecoverStaleNative); err != nil {
+		releaseOwnership()
 		return nil, err
 	}
 	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
 	if err != nil {
+		releaseOwnership()
 		return nil, err
 	}
 	if err := os.Chmod(path, 0o600); err != nil {
 		_ = listener.Close()
 		_ = os.Remove(path)
+		releaseOwnership()
 		return nil, fmt.Errorf("secure RPC socket: %w", err)
 	}
 	info, err := os.Lstat(path)
 	if err != nil {
 		_ = listener.Close()
+		releaseOwnership()
 		return nil, err
 	}
-	return &ownedUnixListener{UnixListener: listener, path: path, identity: info}, nil
+	return &ownedUnixListener{
+		UnixListener: listener, path: path, identity: info, ownership: ownership,
+	}, nil
+}
+
+func acquireSocketOwnership(path string) (*os.File, error) {
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("open RPC ownership lock: %w", err)
+	}
+	closeWithError := func(err error) (*os.File, error) {
+		_ = file.Close()
+		return nil, err
+	}
+	opened, err := file.Stat()
+	if err != nil {
+		return closeWithError(err)
+	}
+	current, err := os.Lstat(path)
+	if err != nil {
+		return closeWithError(err)
+	}
+	stat, ok := opened.Sys().(*syscall.Stat_t)
+	if !ok || !opened.Mode().IsRegular() || opened.Mode()&os.ModeSymlink != 0 ||
+		current.Mode()&os.ModeSymlink != 0 || !os.SameFile(opened, current) {
+		return closeWithError(errors.New("RPC ownership lock is not a stable regular file"))
+	}
+	if int(stat.Uid) != os.Geteuid() || opened.Mode().Perm()&0o077 != 0 {
+		return closeWithError(errors.New("RPC ownership lock must be private and owned by the current user"))
+	}
+	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		return closeWithError(fmt.Errorf("RPC native endpoint is already owned: %w", err))
+	}
+	return file, nil
 }
 
 func validateSocketDirectory(path string) error {
@@ -141,6 +191,7 @@ type ownedUnixListener struct {
 	*net.UnixListener
 	path      string
 	identity  os.FileInfo
+	ownership *os.File
 	closeOnce sync.Once
 	closeErr  error
 }
@@ -156,6 +207,13 @@ func (listener *ownedUnixListener) Close() error {
 			listener.closeErr = errors.Join(listener.closeErr, os.Remove(listener.path))
 		} else if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
 			listener.closeErr = errors.Join(listener.closeErr, statErr)
+		}
+		if listener.ownership != nil {
+			listener.closeErr = errors.Join(
+				listener.closeErr,
+				syscall.Flock(int(listener.ownership.Fd()), syscall.LOCK_UN),
+				listener.ownership.Close(),
+			)
 		}
 	})
 	return listener.closeErr

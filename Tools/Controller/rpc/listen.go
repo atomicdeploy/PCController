@@ -8,8 +8,8 @@ import (
 
 type ListenOptions struct {
 	AllowRemote bool
-	// RecoverStaleNative may remove an unresponsive Unix socket after the
-	// caller has acquired the product's exclusive ownership lock.
+	// RecoverStaleNative acquires an adjacent cross-process ownership lock and
+	// may then remove an unresponsive Unix socket after identity revalidation.
 	RecoverStaleNative bool
 }
 
