@@ -215,6 +215,14 @@ descriptor. `STATUS_LED_CHANGED` (`9E`) is the six-byte actual rendered state
 latest physical frame to at most one transmission per 17 ms; it does not
 fabricate samples during static or flash holds. Link liveness is separate.
 
+This is one living, unversioned board/host contract. It has no `/v1` route,
+`schemaVersion` field, or versioned descriptor identity. Compatible additions
+use explicit capability/feature identifiers and new optional opcodes or fields;
+readers ignore unknown optional messages while preserving strict bounds for
+safety-critical owner-changing payloads such as the exact `STATUS_EFFECT`
+descriptor above. A new behavior must not fork the protocol into parallel
+numbered contract generations.
+
 Every buzzer state from one source supersedes its preceding state. A zero-
 frequency positive-duration record is a timed pause; zero frequency and zero
 duration is an authoritative stop. Both cancel an active mirrored tone at the
