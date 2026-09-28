@@ -84,38 +84,18 @@ func createWindowsShortcut(executable, shortcut, appID, displayName string) erro
 		}
 		runtime.KeepAlive(icon)
 
-		persist, err := queryCOM(link, iidPersistFile)
+		// Configure the identity on the in-memory Shell link before saving it.
+		// Reopening the freshly saved .lnk through
+		// SHGetPropertyStoreFromParsingName can race Shell/AV inspection and leave
+		// the temporary shortcut locked. IShellLink implements IPropertyStore, so
+		// keep creation and identity persistence in one COM object lifetime.
+		store, err := queryCOM(link, iidPropertyStore)
 		if err != nil {
-			return fmt.Errorf("open shortcut persistence interface: %w", err)
+			return fmt.Errorf("open shortcut property store: %w", err)
 		}
-		path, err := windows.UTF16PtrFromString(shortcut)
-		if err != nil {
-			releaseCOM(persist)
-			return err
-		}
-		saveErr := callCOM(persist, 6, uintptr(unsafe.Pointer(path)), 1).error("save Start-menu shortcut")
-		runtime.KeepAlive(path)
-		// The Shell link object and its IPersistFile interface may retain an
-		// exclusive handle to the freshly saved shortcut. Release both before
-		// SHGetPropertyStoreFromParsingName opens the same file for read/write
-		// property access.
-		releaseCOM(persist)
-		releaseCOM(link)
-		linkOpen = false
-		if saveErr != nil {
-			return saveErr
-		}
-
-		// Some Shell builds do not expose IPropertyStore directly from
-		// IShellLink. The documented property-system entry point works against
-		// the saved .lnk on all supported desktop Windows versions.
-		store, err := shortcutPropertyStore(shortcut)
-		if err != nil {
-			return err
-		}
-		defer releaseCOM(store)
 		appIDPointer, err := windows.UTF16PtrFromString(appID)
 		if err != nil {
+			releaseCOM(store)
 			return err
 		}
 		value := propVariant{ValueType: 31} // VT_LPWSTR
@@ -127,7 +107,26 @@ func createWindowsShortcut(executable, shortcut, appID, displayName string) erro
 			setErr = callCOM(store, 7).error("commit shortcut properties")
 		}
 		runtime.KeepAlive(appIDPointer)
-		return setErr
+		releaseCOM(store)
+		if setErr != nil {
+			return setErr
+		}
+
+		persist, err := queryCOM(link, iidPersistFile)
+		if err != nil {
+			return fmt.Errorf("open shortcut persistence interface: %w", err)
+		}
+		path, err := windows.UTF16PtrFromString(shortcut)
+		if err != nil {
+			releaseCOM(persist)
+			return err
+		}
+		saveErr := callCOM(persist, 6, uintptr(unsafe.Pointer(path)), 1).error("save Start-menu shortcut")
+		runtime.KeepAlive(path)
+		releaseCOM(persist)
+		releaseCOM(link)
+		linkOpen = false
+		return saveErr
 	})
 }
 
