@@ -220,6 +220,52 @@ func TestPulseResetRejectsCloseQuarantine(t *testing.T) {
 	}
 }
 
+func TestCloseCancelsAndJoinsResetAttempt(t *testing.T) {
+	previous := openResetSession
+	resetStarted := make(chan struct{})
+	openResetSession = func(ctx context.Context, _ string, _ int) (*link.Session, error) {
+		close(resetStarted)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	defer func() { openResetSession = previous }()
+
+	runtime := New(Options{BaudRate: link.DefaultBaudRate})
+	runtime.mu.Lock()
+	runtime.paused = true
+	runtime.mu.Unlock()
+	resetDone := make(chan error, 1)
+	go func() {
+		resetDone <- runtime.PulseResetPortFor(
+			context.Background(), "COM4", time.Hour,
+		)
+	}()
+	select {
+	case <-resetStarted:
+	case <-time.After(time.Second):
+		t.Fatal("reset attempt did not enter temporary transport open")
+	}
+
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- runtime.Close() }()
+	select {
+	case err := <-closeDone:
+		if err != nil {
+			t.Fatalf("Close while reset was pending: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Close did not cancel and join reset attempt")
+	}
+	select {
+	case err := <-resetDone:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("reset error = %v, want cancellation", err)
+		}
+	default:
+		t.Fatal("Close returned before reset attempt exited")
+	}
+}
+
 func TestDoorEventUpdatesSnapshotAndWakesWaiters(t *testing.T) {
 	runtime := New(Options{})
 	after := runtime.LatestEventID()
@@ -849,6 +895,46 @@ func TestConnectRacingCloseCannotReopenAfterCloseBarrier(t *testing.T) {
 	}
 	if snapshot := runtime.Snapshot(); !snapshot.Paused || snapshot.Connected {
 		t.Fatalf("close barrier snapshot = %#v", snapshot)
+	}
+}
+
+func TestCloseKeepsBarrierSetUntilOpenMutexIsReleased(t *testing.T) {
+	runtime := New(Options{})
+	barrierUnlocked := make(chan struct{})
+	releaseClose := make(chan struct{})
+	runtime.afterCloseOpenUnlock = func() {
+		close(barrierUnlocked)
+		<-releaseClose
+	}
+	openCalled := false
+	runtime.autoOpen = func(context.Context, link.DiscoveryOptions) (link.OpenResult, error) {
+		openCalled = true
+		return link.OpenResult{}, errors.New("unexpected reopen")
+	}
+
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- runtime.Close() }()
+	select {
+	case <-barrierUnlocked:
+	case <-time.After(time.Second):
+		t.Fatal("Close did not release openMu")
+	}
+	connectDone := make(chan error, 1)
+	go func() { connectDone <- runtime.Connect(context.Background()) }()
+	select {
+	case err := <-connectDone:
+		if err == nil {
+			t.Fatal("Connect overlapping the close return boundary was accepted")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Connect overlapping the close return boundary did not fail promptly")
+	}
+	if openCalled {
+		t.Fatal("overlapping Connect opened a transport before Close returned")
+	}
+	close(releaseClose)
+	if err := <-closeDone; err != nil {
+		t.Fatalf("Close: %v", err)
 	}
 }
 

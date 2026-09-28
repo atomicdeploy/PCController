@@ -753,7 +753,7 @@ func executeGuardedCLIFlash(
 	connection appconfig.Connection,
 	classification string, reinitializeEEPROM, appReconnect bool,
 	output io.Writer,
-) error {
+) (resultErr error) {
 	paths, err := programmer.DefaultHostDataPaths()
 	if err != nil {
 		return err
@@ -775,15 +775,14 @@ func executeGuardedCLIFlash(
 			HelloAttempts:  connection.HelloAttempts,
 		})
 		connectContext, connectCancel := context.WithTimeout(ctx, 8*time.Second)
-		connectErr := candidate.EnsureConnected(connectContext)
+		connectErr := connectGuardedFlashCandidate(connectContext, candidate)
 		connectCancel()
 		if connectErr != nil {
-			_ = candidate.Close()
-			return fmt.Errorf("prepare guarded flash application connection: %w", connectErr)
+			return connectErr
 		} else {
 			application = candidate
 			lifecycleOptions.Outputs = control.NewOutputScheduler(application)
-			defer application.Close()
+			defer joinGuardedFlashRuntimeClose(&resultErr, application)
 			var prepareErr error
 			programmingSession, prepareErr = control.PrepareProgrammingSession(
 				ctx,
@@ -795,7 +794,11 @@ func executeGuardedCLIFlash(
 			if prepareErr != nil {
 				return fmt.Errorf("prepare application programming state: %w", prepareErr)
 			}
-			if err := application.Close(); err != nil {
+			if err := closeCommandRuntime(
+				application,
+				application.Close,
+				"release guarded flash application UART before programmer",
+			); err != nil {
 				return fmt.Errorf(
 					"release application UART (settings recovery marker retained): %w", err,
 				)
@@ -830,7 +833,11 @@ func executeGuardedCLIFlash(
 				armContext, application, programmingSession, lifecycleOptions, writer,
 			)
 			armCancel()
-			closeErr := application.Close()
+			closeErr := closeCommandRuntime(
+				application,
+				application.Close,
+				"release guarded flash application UART after arming programming latch",
+			)
 			if armErr != nil {
 				return errors.Join(armErr, closeErr)
 			}
@@ -940,6 +947,41 @@ func executeGuardedCLIFlash(
 		)
 	}
 	return errors.Join(flashErr, reconnectErr, restoreErr)
+}
+
+func connectGuardedFlashCandidate(
+	ctx context.Context,
+	candidate applicationRuntime,
+) error {
+	connectErr := candidate.EnsureConnected(ctx)
+	if connectErr == nil {
+		return nil
+	}
+	resultErr := fmt.Errorf("prepare guarded flash application connection: %w", connectErr)
+	if closeErr := closeCommandRuntime(
+		candidate,
+		candidate.Close,
+		"close guarded flash application candidate",
+	); closeErr != nil {
+		resultErr = errors.Join(
+			resultErr,
+			fmt.Errorf("close guarded flash application candidate: %w", closeErr),
+		)
+	}
+	return resultErr
+}
+
+func joinGuardedFlashRuntimeClose(resultErr *error, runtime applicationRuntime) {
+	if closeErr := closeCommandRuntime(
+		runtime,
+		runtime.Close,
+		"close guarded flash application runtime",
+	); closeErr != nil {
+		*resultErr = errors.Join(
+			*resultErr,
+			fmt.Errorf("close guarded flash application runtime: %w", closeErr),
+		)
+	}
 }
 
 func programFactoryEEPROM(

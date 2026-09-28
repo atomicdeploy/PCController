@@ -15,12 +15,13 @@ import (
 
 type applicationIdentityRuntimeStub struct {
 	hello       native.Hello
+	connectErr  error
 	closeErrors []error
 	closeCalls  int
 }
 
 func (runtime *applicationIdentityRuntimeStub) EnsureConnected(context.Context) error {
-	return nil
+	return runtime.connectErr
 }
 
 func (runtime *applicationIdentityRuntimeStub) Snapshot() control.Snapshot {
@@ -111,6 +112,52 @@ func TestReconnectApplicationPropagatesDeferredCloseFailure(t *testing.T) {
 	}
 	if runtime.closeCalls != 2 || retainedCommandRuntimeCount() != 0 {
 		t.Fatalf("drained reconnect owner: close calls=%d retained=%d", runtime.closeCalls, retainedCommandRuntimeCount())
+	}
+}
+
+func TestGuardedFlashCandidateRetainsOwnerWhenConnectionCleanupFails(t *testing.T) {
+	connectErr := errors.New("application HELLO failed")
+	closeErr := errors.New("CancelIoEx failed")
+	runtime := &applicationIdentityRuntimeStub{
+		connectErr:  connectErr,
+		closeErrors: []error{closeErr},
+	}
+
+	err := connectGuardedFlashCandidate(context.Background(), runtime)
+	if !errors.Is(err, connectErr) || !errors.Is(err, closeErr) {
+		t.Fatalf("guarded candidate error = %v, want connect and close failures", err)
+	}
+	if runtime.closeCalls != 1 || retainedCommandRuntimeCount() != 1 {
+		t.Fatalf("candidate quarantine: close calls=%d retained=%d", runtime.closeCalls, retainedCommandRuntimeCount())
+	}
+	if err := drainCommandRuntimeCleanups(); err != nil {
+		t.Fatalf("drain guarded candidate Runtime: %v", err)
+	}
+	if runtime.closeCalls != 2 || retainedCommandRuntimeCount() != 0 {
+		t.Fatalf("drained candidate owner: close calls=%d retained=%d", runtime.closeCalls, retainedCommandRuntimeCount())
+	}
+}
+
+func TestGuardedFlashDeferredCloseJoinsAndRetainsOwner(t *testing.T) {
+	operationErr := errors.New("programming failed")
+	closeErr := errors.New("CancelIoEx failed")
+	runtime := &applicationIdentityRuntimeStub{
+		closeErrors: []error{closeErr},
+	}
+	resultErr := operationErr
+
+	joinGuardedFlashRuntimeClose(&resultErr, runtime)
+	if !errors.Is(resultErr, operationErr) || !errors.Is(resultErr, closeErr) {
+		t.Fatalf("guarded deferred error = %v, want operation and close failures", resultErr)
+	}
+	if runtime.closeCalls != 1 || retainedCommandRuntimeCount() != 1 {
+		t.Fatalf("deferred quarantine: close calls=%d retained=%d", runtime.closeCalls, retainedCommandRuntimeCount())
+	}
+	if err := drainCommandRuntimeCleanups(); err != nil {
+		t.Fatalf("drain guarded application Runtime: %v", err)
+	}
+	if runtime.closeCalls != 2 || retainedCommandRuntimeCount() != 0 {
+		t.Fatalf("drained application owner: close calls=%d retained=%d", runtime.closeCalls, retainedCommandRuntimeCount())
 	}
 }
 

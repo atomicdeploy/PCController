@@ -186,6 +186,7 @@ type Runtime struct {
 	deviceObserver         func(ports.Info, native.Hello)
 	connectionReadyHandler func(ports.Info, native.Hello)
 	beforeDisconnect       func(string)
+	afterCloseOpenUnlock   func()
 
 	events chan Event
 
@@ -1257,10 +1258,13 @@ func (runtime *Runtime) Close() error {
 	// Joining openMu also orders non-transport selector work behind the barrier.
 	runtime.openMu.Lock()
 	err := errors.Join(runtime.detach(true), runtime.closeRetained())
+	runtime.openMu.Unlock()
+	if runtime.afterCloseOpenUnlock != nil {
+		runtime.afterCloseOpenUnlock()
+	}
 	runtime.mu.Lock()
 	runtime.closeInProgress = false
 	runtime.mu.Unlock()
-	runtime.openMu.Unlock()
 	return err
 }
 
@@ -1397,13 +1401,18 @@ func (runtime *Runtime) PulseResetPortFor(ctx context.Context, name string, dura
 	if cleanupBlocked {
 		return fmt.Errorf("previous serial close must be retried before resetting: %s", cleanupReason)
 	}
+	resetContext, _, finishReset, err := runtime.beginResetAttempt(ctx, closeEpoch)
+	if err != nil {
+		return err
+	}
+	defer finishReset()
 
 	session := runtime.currentSession()
 	snapshot := runtime.Snapshot()
 	name = strings.TrimSpace(name)
 	if session != nil && (name == "" || strings.EqualFold(name, snapshot.Port.Name)) {
 		runtime.publish("tx", "pulsing DTR reset", native.Frame{})
-		return session.PulseReset(ctx, duration)
+		return session.PulseReset(resetContext, duration)
 	}
 
 	// A failed Urclock attempt can leave the primary intentionally paused with
@@ -1421,7 +1430,7 @@ func (runtime *Runtime) PulseResetPortFor(ctx context.Context, name string, dura
 	runtime.mu.RLock()
 	baudRate := runtime.options.BaudRate
 	runtime.mu.RUnlock()
-	temporary, err := openResetSession(ctx, name, baudRate)
+	temporary, err := openResetSession(resetContext, name, baudRate)
 	if err != nil {
 		if temporary != nil {
 			return runtime.retainFailedOpen(link.OpenResult{
@@ -1432,7 +1441,7 @@ func (runtime *Runtime) PulseResetPortFor(ctx context.Context, name string, dura
 		return fmt.Errorf("open remembered port %s for DTR reset: %w", name, err)
 	}
 	runtime.publish("tx", "pulsing DTR reset before application authentication", native.Frame{})
-	pulseErr := temporary.PulseReset(ctx, duration)
+	pulseErr := temporary.PulseReset(resetContext, duration)
 	closeErr := temporary.Close()
 	if closeErr != nil {
 		return runtime.retainFailedOpen(link.OpenResult{
@@ -1441,6 +1450,45 @@ func (runtime *Runtime) PulseResetPortFor(ctx context.Context, name string, dura
 		}, errors.Join(pulseErr, fmt.Errorf("close remembered reset port %s: %w", name, closeErr)))
 	}
 	return errors.Join(pulseErr, closeErr)
+}
+
+func (runtime *Runtime) beginResetAttempt(
+	ctx context.Context,
+	closeEpoch uint64,
+) (context.Context, chan struct{}, func(), error) {
+	runtime.mu.Lock()
+	if runtime.closeInProgress || runtime.closeEpoch != closeEpoch {
+		runtime.mu.Unlock()
+		return nil, nil, nil, errors.New("serial close superseded the reset request")
+	}
+	if runtime.connectionState == "close_failed" || len(runtime.retainedClose) != 0 {
+		reason := runtime.connectionReason
+		runtime.paused = true
+		runtime.mu.Unlock()
+		return nil, nil, nil, fmt.Errorf(
+			"previous serial close must be retried before resetting: %s",
+			reason,
+		)
+	}
+	resetContext, cancelReset := context.WithCancel(ctx)
+	resetDone := make(chan struct{})
+	runtime.connecting = true
+	runtime.connectCancel = cancelReset
+	runtime.connectDone = resetDone
+	runtime.mu.Unlock()
+
+	finishReset := func() {
+		cancelReset()
+		runtime.mu.Lock()
+		if runtime.connectDone == resetDone {
+			runtime.connecting = false
+			runtime.connectCancel = nil
+			runtime.connectDone = nil
+		}
+		runtime.mu.Unlock()
+		close(resetDone)
+	}
+	return resetContext, resetDone, finishReset, nil
 }
 
 func (runtime *Runtime) RefreshStatus(ctx context.Context) (native.Status, error) {
