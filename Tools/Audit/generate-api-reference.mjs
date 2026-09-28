@@ -593,7 +593,7 @@ const openapi = {
 		ServerProof: {
 			type: "object", required: ["format", "nonce", "audience", "instance_id", "proof"], additionalProperties: false,
 			properties: {
-				format: { type: "string", const: "pccontroller-server-proof/v1" },
+				format: { type: "string", const: "pccontroller-server-proof" },
 				nonce: { type: "string", description: "The caller-supplied unpadded base64url nonce." },
 				audience: { type: "string", description: "The IP:port of the exact local listener that accepted the request." },
 				instance_id: { type: "string", minLength: 1 },

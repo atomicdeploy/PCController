@@ -11,6 +11,7 @@ import "C"
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -247,7 +248,7 @@ func invokeHost(request libraryRequest) libraryResponse {
 
 	switch request.Operation {
 	case "host_start":
-		if err := entry.host.Start(context.Background()); err != nil {
+		if err := startLibraryHost(ctx, entry.host); err != nil {
 			return response(nil, err)
 		}
 		return response(map[string]any{"endpoints": entry.host.Endpoints()}, nil)
@@ -269,6 +270,9 @@ func invokeHost(request libraryRequest) libraryResponse {
 		return response(map[string]bool{"stopped": true}, entry.host.Stop(ctx))
 	case "host_destroy":
 		err := entry.host.Stop(ctx)
+		if errors.Is(err, hostapi.ErrNotStarted) {
+			err = nil
+		}
 		hostsMu.Lock()
 		delete(hosts, request.Handle)
 		hostsMu.Unlock()
@@ -276,6 +280,39 @@ func invokeHost(request libraryRequest) libraryResponse {
 	default:
 		return libraryResponse{Error: "unknown operation " + request.Operation}
 	}
+}
+
+func startLibraryHost(operationContext context.Context, embedded *hostapi.Host) error {
+	// The Host needs a lifetime context that remains live after this operation,
+	// while timeout_ms must still cancel and roll back synchronous startup.
+	lifetimeContext, cancelLifetime := context.WithCancel(context.Background())
+	startupComplete := make(chan struct{})
+	watcherExited := make(chan struct{})
+	go func() {
+		defer close(watcherExited)
+		select {
+		case <-operationContext.Done():
+			cancelLifetime()
+		case <-startupComplete:
+		}
+	}()
+
+	err := embedded.Start(lifetimeContext)
+	close(startupComplete)
+	<-watcherExited
+	if operationErr := operationContext.Err(); operationErr != nil {
+		cancelLifetime()
+		rollbackContext, rollbackCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer rollbackCancel()
+		if stopErr := embedded.Stop(rollbackContext); stopErr != nil && !errors.Is(stopErr, hostapi.ErrNotStarted) {
+			return errors.Join(operationErr, stopErr)
+		}
+		return operationErr
+	}
+	if err != nil {
+		cancelLifetime()
+	}
+	return err
 }
 
 func getClient(handle uint64) *libraryClient {

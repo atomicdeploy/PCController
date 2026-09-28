@@ -1,6 +1,7 @@
 package host
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,14 @@ import (
 	controller "pccontroller.local/controller"
 	"pccontroller.local/controller/rpc"
 )
+
+type testLogger struct {
+	output bytes.Buffer
+}
+
+func (logger *testLogger) Printf(format string, values ...any) {
+	fmt.Fprintf(&logger.output, format, values...)
+}
 
 func TestLifecycleAndInProcessRPC(t *testing.T) {
 	host := newTestHost(t, Options{
@@ -134,6 +143,31 @@ func TestParentCancellationStopsHost(t *testing.T) {
 	case <-host.Done():
 	case <-time.After(5 * time.Second):
 		t.Fatal("host did not stop after parent cancellation")
+	}
+}
+
+func TestBackgroundErrorDetailsStayOnErrorsChannel(t *testing.T) {
+	logger := &testLogger{}
+	host := newTestHost(t, Options{
+		DataRoot:           t.TempDir(),
+		Branding:           Branding{AppID: uniqueAppID(t)},
+		ControllerOptions:  &controller.Options{},
+		DisableAutoConnect: true,
+		DisableNative:      true,
+		Logger:             logger,
+	})
+	host.report(errors.New("untrusted\r\nforged log entry"))
+	if bytes.Contains(logger.output.Bytes(), []byte("untrusted")) ||
+		bytes.Contains(logger.output.Bytes(), []byte("forged")) {
+		t.Fatalf("raw error details reached logger: %q", logger.output.String())
+	}
+	select {
+	case err := <-host.Errors():
+		if err == nil || err.Error() != "untrusted\r\nforged log entry" {
+			t.Fatalf("Errors() = %v", err)
+		}
+	default:
+		t.Fatal("detailed background error was not reported")
 	}
 }
 

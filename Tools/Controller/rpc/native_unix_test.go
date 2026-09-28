@@ -75,6 +75,34 @@ func TestUnixEndpointRefusesUnsafeAndLivePaths(t *testing.T) {
 	}
 }
 
+func TestUnixOwnershipLockSurvivesSocketPathRemoval(t *testing.T) {
+	parent := shortPrivateTempDir(t)
+	endpoint := Endpoint{Transport: TransportUnix, Address: filepath.Join(parent, "owned.sock")}
+	listener, err := Listen(endpoint, ListenOptions{RecoverStaleNative: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(endpoint.Address); err != nil {
+		listener.Close()
+		t.Fatal(err)
+	}
+	if second, err := Listen(endpoint, ListenOptions{RecoverStaleNative: true}); err == nil {
+		second.Close()
+		listener.Close()
+		t.Fatal("removed live socket path bypassed the cross-process ownership lock")
+	}
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	replacement, err := Listen(endpoint, ListenOptions{RecoverStaleNative: true})
+	if err != nil {
+		t.Fatalf("ownership lock was not released: %v", err)
+	}
+	if err := replacement.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func shortPrivateTempDir(t *testing.T) string {
 	t.Helper()
 	// Darwin's sockaddr_un path is substantially shorter than Linux's. Keep

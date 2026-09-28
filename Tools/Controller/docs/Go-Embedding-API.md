@@ -94,8 +94,10 @@ endpoint identity for the process lifetime without rewriting persistent
 configuration. `BuildInfo` is diagnostic only and never selects behavior.
 
 Set `ControllerOptions` when the embedding application already has a complete
-typed configuration. Otherwise the Host maps the watched PCController
-configuration into the canonical typed client and hot-applies valid changes.
+typed configuration. That value remains caller-owned for the Host lifetime and
+file reloads do not overwrite it; the file-backed store still supplies live RPC
+configuration. Otherwise the Host maps the watched PCController configuration
+into the canonical typed client and hot-applies valid changes.
 
 ## Pealayer and other non-Go consumers
 

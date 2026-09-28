@@ -80,8 +80,10 @@ type Options struct {
 	Logger     Logger
 
 	// ControllerOptions bypasses file-to-client mapping when the embedding
-	// application already owns a complete typed controller configuration. The
-	// file-backed store still supplies RPC configuration and hot reload.
+	// application already owns a complete typed controller configuration. That
+	// typed value remains caller-owned for this Host lifetime and is not
+	// overwritten by file reloads. The file-backed store still supplies live RPC
+	// configuration through the service callbacks.
 	ControllerOptions *controller.Options
 
 	DisableAutoConnect bool
@@ -230,7 +232,12 @@ func (host *Host) Start(parent context.Context) error {
 		}()
 	}
 	go func() {
-		<-host.ctx.Done()
+		select {
+		case <-parent.Done():
+		case <-host.ctx.Done():
+		case <-host.done:
+			return
+		}
 		stopContext, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer stopCancel()
 		_ = host.Stop(stopContext)
@@ -247,6 +254,9 @@ func (host *Host) Start(parent context.Context) error {
 }
 
 func (host *Host) start(parent context.Context) error {
+	if err := parent.Err(); err != nil {
+		return err
+	}
 	configPath := host.options.ConfigPath
 	if host.options.DataRoot != "" {
 		if err := os.MkdirAll(host.options.DataRoot, 0o700); err != nil {
@@ -258,6 +268,9 @@ func (host *Host) start(parent context.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := parent.Err(); err != nil {
+		return err
+	}
 	if err := store.SetPresentationOverrides(
 		host.options.Branding.AppName,
 		host.options.Branding.Tagline,
@@ -266,6 +279,9 @@ func (host *Host) start(parent context.Context) error {
 	}
 	runtimeConfig, err := store.Runtime()
 	if err != nil {
+		return err
+	}
+	if err := parent.Err(); err != nil {
 		return err
 	}
 	ownerKey := host.options.Branding.AppID + "\x00" + strings.ToLower(store.Path())
@@ -284,6 +300,11 @@ func (host *Host) start(parent context.Context) error {
 	}
 	client := controller.New(*controllerOptions)
 	if err := configureHistory(client, runtimeConfig, store.Path()); err != nil {
+		_ = client.Shutdown()
+		host.releaseProcessOwner()
+		return err
+	}
+	if err := parent.Err(); err != nil {
 		_ = client.Shutdown()
 		host.releaseProcessOwner()
 		return err
@@ -381,7 +402,10 @@ func (host *Host) start(parent context.Context) error {
 	host.mu.Unlock()
 
 	if host.options.EnableIntegrations {
-		manager, integrationErr := hostbridge.Start(ctx, client, store, actions, hostbridge.DiscoveryHostIdentity{
+		// Manager.Close needs a live context to release held keys and prepare
+		// device integrations safely. Its own Close controls cancellation, so do
+		// not let parent/Host cancellation preempt that shutdown sequence.
+		manager, integrationErr := hostbridge.Start(context.WithoutCancel(ctx), client, store, actions, hostbridge.DiscoveryHostIdentity{
 			InstanceID: instanceID,
 			Version:    host.options.Build.Version,
 			SourceHash: host.options.Build.SourceHash,
@@ -394,6 +418,9 @@ func (host *Host) start(parent context.Context) error {
 		host.integrations = manager
 		host.mu.Unlock()
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 
 	if !host.options.DisableNative {
 		endpoint, endpointErr := host.nativeEndpoint()
@@ -401,12 +428,15 @@ func (host *Host) start(parent context.Context) error {
 			return endpointErr
 		}
 		listener, listenErr := rpc.Listen(endpoint, rpc.ListenOptions{
-			RecoverStaleNative: false,
+			RecoverStaleNative: true,
 		})
 		if listenErr != nil {
 			return fmt.Errorf("listen on native PCController endpoint: %w", listenErr)
 		}
 		host.addEndpoint(endpoint, listener, true)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	if host.options.HTTP != nil {
 		endpoint := rpc.Endpoint{
@@ -423,6 +453,9 @@ func (host *Host) start(parent context.Context) error {
 		}
 		endpoint.Address = listener.Addr().String()
 		host.addEndpoint(endpoint, listener, false)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	return nil
 }
@@ -512,7 +545,7 @@ func (host *Host) watchConfiguration(ctx context.Context) {
 			if err := configureHistory(host.client, value, host.store.Path()); err != nil {
 				host.report(fmt.Errorf("reload PCController history configuration: %w", err))
 			}
-			host.logf("PCController configuration reloaded from %s", host.store.Path())
+			host.logf("PCController configuration reloaded")
 		},
 		func(err error) {
 			host.report(fmt.Errorf("reload PCController configuration: %w", err))
@@ -638,14 +671,14 @@ func (host *Host) Stop(ctx context.Context) error {
 		manager := host.integrations
 		client := host.client
 		host.mu.Unlock()
-		if cancel != nil {
-			cancel()
-		}
 		for _, listener := range listeners {
 			_ = listener.Close()
 		}
 		if manager != nil {
 			manager.Close()
+		}
+		if cancel != nil {
+			cancel()
 		}
 		var shutdownErr error
 		if client != nil {
@@ -714,14 +747,14 @@ func (host *Host) cleanupStartedResources() {
 	manager := host.integrations
 	client := host.client
 	host.mu.RUnlock()
-	if cancel != nil {
-		cancel()
-	}
 	for _, listener := range listeners {
 		_ = listener.Close()
 	}
 	if manager != nil {
 		manager.Close()
+	}
+	if cancel != nil {
+		cancel()
 	}
 	if client != nil {
 		_ = client.Shutdown()
@@ -734,7 +767,7 @@ func (host *Host) report(err error) {
 	if err == nil {
 		return
 	}
-	host.logf("%v", err)
+	host.logf("PCController background failure reported; read Host.Errors for details")
 	select {
 	case host.errors <- err:
 	default:
