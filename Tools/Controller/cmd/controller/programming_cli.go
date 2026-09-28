@@ -101,6 +101,10 @@ func runProgramWithConfig(
 	avrdudeConf := flags.String("avrdude-conf", config.Programming.AvrdudeConf, "avrdude.conf path")
 	usbaspBitClock := flags.Float64("usbasp-bitclock-us", 0, "force USBasp AVRDUDE -B bit-clock period in microseconds")
 	usbaspAutoSlow := flags.Bool("usbasp-auto-slow", true, "retry the first failed USBasp exchange at the conservative -B32 period")
+	programmerTimeout := flags.Duration(
+		"programmer-timeout", 0,
+		"override each AVRDUDE stage deadline (for example 45s or 5m; zero uses the operation-specific default)",
+	)
 	deploymentFlag := flags.String("deployment", "", "explicit workflow: production (backup required) or development (skip new archival backup)")
 	reinitializeEEPROM := flags.Bool(
 		"reinitialize-eeprom",
@@ -156,6 +160,7 @@ func runProgramWithConfig(
 		Avrdude: *avrdude, AvrdudeConf: *avrdudeConf,
 		ConfirmEEPROMWrite: *confirmEEPROM,
 		USBaspBitClockUS:   *usbaspBitClock, USBaspAutoSlow: *usbaspAutoSlow,
+		ProgrammerTimeout: *programmerTimeout,
 	}
 	if options.Operation == programmer.OperationChipErase {
 		return errors.New("raw chip erase is disabled; use 'controller board blank' for mandatory backup, EEPROM clearing, and full readback")
@@ -174,6 +179,9 @@ func runProgramWithConfig(
 	}
 	if options.USBaspBitClockUS < 0 {
 		return errors.New("--usbasp-bitclock-us must be zero or positive")
+	}
+	if options.ProgrammerTimeout < 0 {
+		return errors.New("--programmer-timeout must be zero or positive")
 	}
 	// A dry-run describes the dependency command without probing the machine;
 	// real execution still resolves and validates the configured executable.
@@ -736,14 +744,16 @@ func guardedFlashBooleanFlag(argument string) bool {
 func guardedFlashValueFlag(argument string) bool {
 	return strings.EqualFold(argument, "--app-device") ||
 		strings.EqualFold(argument, "--deployment") ||
-		strings.EqualFold(argument, "--method")
+		strings.EqualFold(argument, "--method") ||
+		strings.EqualFold(argument, "--programmer-timeout")
 }
 
 func guardedFlashInlineValueFlag(argument string) bool {
 	lower := strings.ToLower(argument)
 	return strings.HasPrefix(lower, "--app-device=") ||
 		strings.HasPrefix(lower, "--deployment=") ||
-		strings.HasPrefix(lower, "--method=")
+		strings.HasPrefix(lower, "--method=") ||
+		strings.HasPrefix(lower, "--programmer-timeout=")
 }
 
 func executeGuardedCLIFlash(
@@ -1162,6 +1172,9 @@ func programShellWords(options programmer.Options) []string {
 	}
 	if options.Port != "" {
 		words = append(words, options.Port)
+	}
+	if options.ProgrammerTimeout > 0 {
+		words = append(words, "--programmer-timeout", options.ProgrammerTimeout.String())
 	}
 	return words
 }

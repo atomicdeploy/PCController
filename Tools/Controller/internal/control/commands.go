@@ -3962,15 +3962,35 @@ func programCommand(
 		programOptions.ConfirmEEPROMWrite = true
 		nextIndex++
 	}
-	if len(args) > nextIndex {
+	if len(args) > nextIndex &&
+		!strings.HasPrefix(strings.ToLower(args[nextIndex]), "--programmer-timeout") {
 		programOptions.Port = args[nextIndex]
 		nextIndex++
 	} else if operation != programmer.OperationCoreInfo &&
 		operation != programmer.OperationBurnBoot {
 		programOptions.Port = runtime.Snapshot().Port.Name
 	}
-	if len(args) != nextIndex {
-		return "", fmt.Errorf("too many program arguments")
+	for nextIndex < len(args) {
+		argument := args[nextIndex]
+		value := ""
+		switch {
+		case strings.EqualFold(argument, "--programmer-timeout"):
+			if nextIndex+1 >= len(args) {
+				return "", errors.New("--programmer-timeout requires a duration")
+			}
+			nextIndex++
+			value = args[nextIndex]
+		case strings.HasPrefix(strings.ToLower(argument), "--programmer-timeout="):
+			value = argument[len("--programmer-timeout="):]
+		default:
+			return "", fmt.Errorf("too many program arguments")
+		}
+		parsed, parseErr := time.ParseDuration(value)
+		if parseErr != nil || parsed <= 0 {
+			return "", fmt.Errorf("--programmer-timeout must be a positive duration")
+		}
+		programOptions.ProgrammerTimeout = parsed
+		nextIndex++
 	}
 	snapshot := runtime.Snapshot()
 	programOptions.ApplicationHash = snapshot.Hello.BuildHash
