@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 import { BootGate, Card, HoldActionButton, HotkeyHelp, RangeField, TextField } from './components'
-import type { Appearance } from './types'
+import type { Appearance, UIConfig } from './types'
 import { emptySnapshot } from './types'
 import { artifactUpdateAvailable, UpdatesView } from './updates-view'
 import { translator } from './i18n'
@@ -26,6 +26,18 @@ const appearance: Appearance = {
   compactNumbers: false,
   audioMuted: true,
   audioVolume: 0.35,
+}
+
+const uiConfig: UIConfig = {
+  name: 'PCController',
+  setup_complete: true,
+  appearance,
+  appearance_etag: 'a'.repeat(64),
+  status_interval_ms: 275,
+  measurement_freshness_ms: 1600,
+  websocket_path: '/ipc',
+  session_ticket_path: '/api/session/ticket',
+  auth_required: false,
 }
 
 function shared(): SharedViewProps {
@@ -373,6 +385,25 @@ describe('offline and settings UI contracts', () => {
     expect(markup).not.toContain('Security')
     expect(markup).not.toContain('authToken')
     expect(markup).not.toContain('No session token')
+  })
+
+  it('shows only host-advertised live measurement timing', () => {
+    const markup = renderToStaticMarkup(<SettingsView
+      {...shared()}
+      appearance={appearance}
+      onAppearance={vi.fn()}
+      token=""
+      onToken={vi.fn()}
+      onAppTitle={vi.fn(async (value: string) => value)}
+      uiConfig={uiConfig}
+      onBuzzerPath={vi.fn(async () => undefined)}
+      navigationSync
+      onNavigationSync={vi.fn()}
+    />)
+    expect(markup).toContain('Live measurements')
+    expect(markup).toContain('value="275"')
+    expect(markup).toContain('value="1600"')
+    expect(markup).toContain('Apply live timing')
   })
 
   it('shows navigation synchronization state only while it is factual and actionable', () => {

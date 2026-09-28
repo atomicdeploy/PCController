@@ -142,6 +142,9 @@ const capabilityGroups = {
 
 const methodOverrides = {
 	"controller.ping": "Return service health and protocol identity.",
+  "controller.ui.config": "Return host-owned UI settings, including status_interval_ms and measurement_freshness_ms.",
+  "controller.ui.config.get": "Return host-owned UI settings, including status_interval_ms and measurement_freshness_ms.",
+  "controller.ui.config.set": "Atomically persist host UI fields; status_interval_ms is 50..60000 and measurement_freshness_ms is refresh+100..120000.",
   "controller.snapshot": "Return the authoritative cached controller snapshot.",
   "controller.command.execute": "Run a shared command after semantic capability classification.",
 	"controller.firmware.build": "Compile the canonical host project with reviewed feature names and publish correlated ordered program progress events.",

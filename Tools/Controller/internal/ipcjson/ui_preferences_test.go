@@ -91,6 +91,36 @@ func TestBrowserAppearanceMutationUsesHostETagDiffAndNoOpSuppression(t *testing.
 	}
 }
 
+func TestBrowserMeasurementTimingMutationPreservesIdleCadence(t *testing.T) {
+	service, config, updates := appearanceTestService(t)
+	config.UI.IdleStatusIntervalMS = 7000
+	params, _ := json.Marshal(map[string]any{
+		"status_interval_ms":       5000,
+		"measurement_freshness_ms": 5200,
+	})
+	set := service.Dispatch(context.Background(), Request{Method: "controller.ui.config.set", Params: params})
+	updated, ok := set.Result.(browserUISettings)
+	if set.Error != nil || !ok || updated.Changed == nil || !*updated.Changed {
+		t.Fatalf("updated timing=%#v error=%v", set.Result, set.Error)
+	}
+	if !reflect.DeepEqual(updated.ChangedFields, []string{"status_interval_ms", "measurement_freshness_ms"}) {
+		t.Fatalf("changed fields=%#v", updated.ChangedFields)
+	}
+	if updated.StatusIntervalMS != 5000 || updated.MeasurementFreshnessMS != 5200 ||
+		config.UI.IdleStatusIntervalMS != 7000 || *updates != 1 {
+		t.Fatalf("timing=%d/%d idle=%d updates=%d", updated.StatusIntervalMS, updated.MeasurementFreshnessMS, config.UI.IdleStatusIntervalMS, *updates)
+	}
+
+	invalid, _ := json.Marshal(map[string]any{
+		"status_interval_ms":       appconfig.StatusIntervalMinMS,
+		"measurement_freshness_ms": appconfig.StatusIntervalMinMS + appconfig.MeasurementFreshnessHeadroomMS - 1,
+	})
+	response := service.Dispatch(context.Background(), Request{Method: "controller.ui.config.set", Params: invalid})
+	if response.Error == nil || *updates != 1 || config.UI.StatusIntervalMS != 5000 {
+		t.Fatalf("invalid mutation response=%#v config=%#v updates=%d", response, config.UI, *updates)
+	}
+}
+
 func TestBrowserAppearanceRejectsStaleInvalidAndUnknownMutationsAtomically(t *testing.T) {
 	service, config, updates := appearanceTestService(t)
 	staleETag := appearanceETag(config.UI.Appearance)
@@ -134,15 +164,19 @@ func TestUIBootstrapPublishesHostAuthoritativeAppearance(t *testing.T) {
 	}
 	defer response.Body.Close()
 	var document struct {
-		Appearance     browserAppearance `json:"appearance"`
-		AppearanceETag string            `json:"appearance_etag"`
+		Appearance             browserAppearance `json:"appearance"`
+		AppearanceETag         string            `json:"appearance_etag"`
+		StatusIntervalMS       int               `json:"status_interval_ms"`
+		MeasurementFreshnessMS int               `json:"measurement_freshness_ms"`
 	}
 	if err := json.NewDecoder(response.Body).Decode(&document); err != nil {
 		t.Fatalf("decode bootstrap: %v", err)
 	}
 	if response.StatusCode != http.StatusOK || document.Appearance.Theme != "light" ||
 		document.Appearance.Locale != "fa" || document.Appearance.AudioVolume != 0.25 ||
-		document.AppearanceETag != appearanceETag(config.UI.Appearance) {
+		document.AppearanceETag != appearanceETag(config.UI.Appearance) ||
+		document.StatusIntervalMS != config.UI.StatusIntervalMS ||
+		document.MeasurementFreshnessMS != config.UI.MeasurementFreshnessMS {
 		t.Fatalf("bootstrap status=%d document=%#v", response.StatusCode, document)
 	}
 }

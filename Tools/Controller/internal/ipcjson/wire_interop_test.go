@@ -599,8 +599,15 @@ func TestIndependentRawClientsInteroperateWithAllSocketSurfaces(t *testing.T) {
 	}
 
 	_ = rawRPC(t, standard, 6, "controller.subscribe", map[string]any{
-		"topics": []string{"events"},
+		"topics": []string{"events", "status"}, "interval_ms": 100,
 	})
+	reconfigured := rawRPC(t, standard, 61, "controller.subscribe", map[string]any{
+		"topics": []string{"status"}, "interval_ms": 50, "preserve": true,
+	})
+	if !strings.Contains(string(reconfigured["result"]), `"preserve":true`) ||
+		!strings.Contains(string(reconfigured["result"]), `"interval_ms":50`) {
+		t.Fatalf("preserved status reconfiguration=%v", reconfigured)
+	}
 	if err := firstBoardConnection.send(native.Frame{
 		Opcode: native.OpEvent, Payload: []byte{native.EventDoor, 1},
 	}); err != nil {

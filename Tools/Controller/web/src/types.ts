@@ -371,6 +371,8 @@ export interface UIConfig {
   appearance: Appearance
   appearance_etag: string
   welcome_melody?: string
+	status_interval_ms: number
+	measurement_freshness_ms: number
 	websocket_path: string
   socket_io_path?: string
   session_ticket_path: string
@@ -395,6 +397,8 @@ export interface HostUISettings {
   welcome_melody: string
   appearance: Appearance
   appearance_etag: string
+	status_interval_ms: number
+	measurement_freshness_ms: number
   segment_scroll: SegmentScrollSettings
   peripheral_names: Record<string, string>
   peripherals: PeripheralDescriptor[]

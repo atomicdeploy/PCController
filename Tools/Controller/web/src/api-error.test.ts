@@ -28,6 +28,11 @@ describe('API error details', () => {
         appearance_etag: 'b'.repeat(64),
       }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
+        name: 'Controller', setup_complete: true, websocket_path: '/ipc', session_ticket_path: '/api/session/ticket', auth_required: true,
+        appearance: { theme: 'dark', locale: 'fa', direction: 'rtl', reduceMotion: true, compactNumbers: false, audioMuted: true, audioVolume: 0 },
+        appearance_etag: 'b'.repeat(64),
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
         name: 'Controller',
         setup_complete: true,
         websocket_path: '/ipc',
@@ -35,6 +40,8 @@ describe('API error details', () => {
         auth_required: true,
         appearance: { theme: 'dark', locale: 'fa', direction: 'rtl', reduceMotion: true, compactNumbers: false, audioMuted: true, audioVolume: 0 },
         appearance_etag: 'b'.repeat(64),
+        status_interval_ms: 200,
+        measurement_freshness_ms: 1500,
         reset_on_reconnect: false,
         future_capability: 'accepted',
       }), { status: 200 }))
@@ -43,6 +50,7 @@ describe('API error details', () => {
     await expect(getUIConfig()).rejects.toThrow('missing required setup_complete')
     await expect(getUIConfig()).rejects.toThrow('missing host-authoritative appearance')
     await expect(getUIConfig()).rejects.toThrow('missing a safe session-ticket path')
+    await expect(getUIConfig()).rejects.toThrow('missing valid live-measurement timing')
     await expect(getUIConfig()).resolves.toMatchObject({ setup_complete: true, future_capability: 'accepted' })
   })
 })
