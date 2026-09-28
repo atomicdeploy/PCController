@@ -19,6 +19,8 @@ import (
 	"pccontroller.local/controller/internal/programmer"
 )
 
+var closeBoardRuntime = func(runtime *control.Runtime) error { return runtime.Close() }
+
 const boardInitializeUsage = "usage: controller board initialize [--name NAME] [--uart auto|PORT|none] [--firmware HEX] [--firmware-feature NAME ...|--no-firmware-features] [--bootloader-only] [--skip-toolchain] [--portable-cli] | controller board blank --confirm NAME [--uart auto|PORT|none] | controller board name [get|set NAME|clear]"
 
 func runBoard(args []string, stdout, stderr io.Writer, store *appconfig.Store) error {
@@ -112,7 +114,9 @@ func blankBoard(
 		}
 		fmt.Fprintln(output, "WARNING: proceeding without an application identity; USBasp signature and complete backup remain mandatory.")
 	}
-	_ = runtime.Close()
+	if err := closeBoardRuntime(runtime); err != nil {
+		return fmt.Errorf("release application UART before blanking: %w", err)
+	}
 
 	paths, err := programmer.DefaultHostDataPaths()
 	if err != nil {
@@ -292,7 +296,9 @@ func initializeBoard(
 
 	// No authenticated application is expected yet, but close any stale UART
 	// session before ISP takes ownership of RESET and the target clock.
-	_ = runtime.Close()
+	if err := closeBoardRuntime(runtime); err != nil {
+		return fmt.Errorf("release application UART before initialization: %w", err)
+	}
 	fmt.Fprintln(output, "\n[isp] USBasp signature, complete backup, core bootloader/fuses, and post-write verification")
 	coreReport, err := programmer.InitializeBoardCore(ctx, programmer.BoardCoreInitializeOptions{
 		FQBN: *fqbn, Programmer: *programmerName, ArduinoCLI: cli, ArduinoConfig: cliConfig,

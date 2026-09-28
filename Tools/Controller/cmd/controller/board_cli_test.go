@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -13,6 +14,45 @@ import (
 	"pccontroller.local/controller/internal/control"
 	"pccontroller.local/controller/internal/programmer"
 )
+
+func TestBoardBlankAbortsBeforeProgrammerWhenUARTCloseFails(t *testing.T) {
+	closeErr := errors.New("cancel serial I/O")
+	previous := closeBoardRuntime
+	closeBoardRuntime = func(*control.Runtime) error { return closeErr }
+	defer func() { closeBoardRuntime = previous }()
+	t.Setenv(programmer.HostDataDirectoryEnvironment, t.TempDir())
+	store, err := appconfig.Open(filepath.Join(t.TempDir(), "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	err = blankBoard(context.Background(), control.New(control.Options{}), []string{
+		"--uart", "none", "--confirm", "ERASE-BOARD",
+	}, store, &output)
+	if !errors.Is(err, closeErr) || !strings.Contains(err.Error(), "before blanking") {
+		t.Fatalf("blank close error = %v, want %v", err, closeErr)
+	}
+}
+
+func TestBoardInitializeAbortsBeforeProgrammerWhenUARTCloseFails(t *testing.T) {
+	closeErr := errors.New("cancel serial I/O")
+	previous := closeBoardRuntime
+	closeBoardRuntime = func(*control.Runtime) error { return closeErr }
+	defer func() { closeBoardRuntime = previous }()
+	t.Setenv(programmer.HostDataDirectoryEnvironment, t.TempDir())
+	project := t.TempDir()
+	store, err := appconfig.Open(filepath.Join(t.TempDir(), "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	err = initializeBoard(context.Background(), control.New(control.Options{}), []string{
+		"--bootloader-only", "--skip-toolchain", "--cli", "not-run",
+	}, store, project, &output)
+	if !errors.Is(err, closeErr) || !strings.Contains(err.Error(), "before initialization") {
+		t.Fatalf("initialize close error = %v, want %v", err, closeErr)
+	}
+}
 
 func TestBoardBlankConfirmationRequiresExactAuthenticatedName(t *testing.T) {
 	if err := validateBoardBlankConfirmation("TEST-01", "COM4", "TEST-01"); err != nil {

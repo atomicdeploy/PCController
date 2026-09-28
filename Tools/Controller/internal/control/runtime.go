@@ -150,8 +150,11 @@ type Runtime struct {
 	options Options
 
 	openMu                 sync.Mutex
+	closeMu                sync.Mutex
 	detachMu               sync.Mutex
 	mu                     sync.RWMutex
+	closeEpoch             uint64
+	closeInProgress        bool
 	session                *link.Session
 	retainedClose          []link.OpenResult
 	port                   ports.Info
@@ -345,8 +348,7 @@ func (runtime *Runtime) refreshPortProcessWith(findOwner func(context.Context, s
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
-			runtime.ResumeAuto()
-			if err := runtime.EnsureConnected(ctx); err != nil {
+			if err := runtime.Connect(ctx); err != nil {
 				runtime.PublishHostEvent("port.takeover.failed", fmt.Sprintf("port %s takeover failed: %v", port, err))
 			} else {
 				runtime.PublishHostEvent("port.takeover.connected", fmt.Sprintf("port %s takeover connected", port))
@@ -712,6 +714,7 @@ func (runtime *Runtime) SetBeforeDisconnect(observer func(string)) {
 // no longer match, it is closed cleanly and authenticated auto-reconnect is
 // armed. It never writes controller EEPROM or any board setting.
 func (runtime *Runtime) ApplyOptions(options Options) bool {
+	closeEpoch, _ := runtime.closeBarrierState()
 	runtime.openMu.Lock()
 	defer runtime.openMu.Unlock()
 
@@ -757,10 +760,17 @@ func (runtime *Runtime) ApplyOptions(options Options) bool {
 	}
 	runtime.mu.Lock()
 	runtime.options = options
-	if wasPaused {
+	cleanupBlocked := runtime.connectionState == "close_failed" || len(runtime.retainedClose) != 0
+	closeSuperseded := runtime.closeInProgress || runtime.closeEpoch != closeEpoch
+	if wasPaused || cleanupBlocked || closeSuperseded {
 		runtime.paused = true
-		runtime.connectionState = "disconnected"
-		runtime.connectionReason = "connection configuration changed while automatic connection is paused"
+		if cleanupBlocked {
+			runtime.connectionState = "close_failed"
+			runtime.connectionReason = "previous serial close must be retried after connection configuration changed"
+		} else {
+			runtime.connectionState = "disconnected"
+			runtime.connectionReason = "connection configuration changed while automatic connection is paused"
+		}
 		runtime.connectionUpdated = time.Now()
 		runtime.reconnectEpoch++
 		runtime.resetIssued = true
@@ -797,9 +807,50 @@ func (runtime *Runtime) ApplyOptions(options Options) bool {
 }
 
 func (runtime *Runtime) ResumeAuto() {
+	epoch, closing := runtime.closeBarrierState()
+	if closing {
+		return
+	}
+	runtime.openMu.Lock()
+	defer runtime.openMu.Unlock()
 	runtime.mu.Lock()
+	if !runtime.closeInProgress && runtime.closeEpoch == epoch &&
+		runtime.connectionState != "close_failed" && len(runtime.retainedClose) == 0 {
+		runtime.paused = false
+	}
+	runtime.mu.Unlock()
+}
+
+// Connect atomically resumes automatic discovery and authenticates a board.
+// A Close that overlaps this request wins: a queued resume may not reopen the
+// transport after the close barrier has acknowledged handle release.
+func (runtime *Runtime) Connect(ctx context.Context) error {
+	epoch, closing := runtime.closeBarrierState()
+	if closing {
+		return errors.New("serial close is in progress")
+	}
+	runtime.openMu.Lock()
+	defer runtime.openMu.Unlock()
+	runtime.mu.Lock()
+	if runtime.closeInProgress || runtime.closeEpoch != epoch {
+		runtime.mu.Unlock()
+		return errors.New("serial close superseded the connection request")
+	}
+	if runtime.connectionState == "close_failed" || len(runtime.retainedClose) != 0 {
+		reason := runtime.connectionReason
+		runtime.paused = true
+		runtime.mu.Unlock()
+		return fmt.Errorf("previous serial close must be retried before reconnect: %s", reason)
+	}
 	runtime.paused = false
 	runtime.mu.Unlock()
+	return runtime.ensureConnected(ctx)
+}
+
+func (runtime *Runtime) closeBarrierState() (uint64, bool) {
+	runtime.mu.RLock()
+	defer runtime.mu.RUnlock()
+	return runtime.closeEpoch, runtime.closeInProgress
 }
 
 // Reconnect deliberately releases the application UART, publishes the full
@@ -807,11 +858,26 @@ func (runtime *Runtime) ResumeAuto() {
 // used after an acknowledged MCU reset; that expected transition must not
 // consume the physical-reappearance DTR reset policy.
 func (runtime *Runtime) Reconnect(ctx context.Context, reason string) error {
+	closeEpoch, closing := runtime.closeBarrierState()
+	if closing {
+		return errors.New("serial close is in progress")
+	}
 	runtime.openMu.Lock()
 	defer runtime.openMu.Unlock()
 
 	if strings.TrimSpace(reason) == "" {
 		reason = "reconnect requested by host"
+	}
+	runtime.mu.RLock()
+	cleanupBlocked := runtime.connectionState == "close_failed" || len(runtime.retainedClose) != 0
+	closeSuperseded := runtime.closeInProgress || runtime.closeEpoch != closeEpoch
+	cleanupReason := runtime.connectionReason
+	runtime.mu.RUnlock()
+	if closeSuperseded {
+		return errors.New("serial close superseded the reconnect request")
+	}
+	if cleanupBlocked {
+		return fmt.Errorf("previous serial close must be retried before reconnect: %s", cleanupReason)
 	}
 	closeErr := runtime.detachReason(false, reason)
 	if closeErr != nil {
@@ -953,12 +1019,20 @@ func (runtime *Runtime) retainFailedOpen(result link.OpenResult, cause error) er
 }
 
 func (runtime *Runtime) Open(ctx context.Context, name string) error {
+	closeEpoch, closing := runtime.closeBarrierState()
+	if closing {
+		return errors.New("serial close is in progress")
+	}
 	runtime.openMu.Lock()
 	defer runtime.openMu.Unlock()
 	runtime.mu.RLock()
 	cleanupBlocked := runtime.connectionState == "close_failed" || len(runtime.retainedClose) != 0
+	closeSuperseded := runtime.closeInProgress || runtime.closeEpoch != closeEpoch
 	cleanupReason := runtime.connectionReason
 	runtime.mu.RUnlock()
+	if closeSuperseded {
+		return errors.New("serial close superseded the open request")
+	}
 	if cleanupBlocked {
 		return fmt.Errorf("previous serial close must be retried before opening %s: %s", name, cleanupReason)
 	}
@@ -1073,12 +1147,16 @@ func (runtime *Runtime) attachOpened(result link.OpenResult) error {
 }
 
 func (runtime *Runtime) Close() error {
+	runtime.closeMu.Lock()
+	defer runtime.closeMu.Unlock()
 	runtime.cancelDisplaySchedules()
 	// A reconnect attempt owns the serial handle before it becomes the active
 	// session. Pause first so it cannot attach, then cancel and join it. The
 	// close response is therefore an actual handle-release barrier rather than
 	// merely a disconnected snapshot transition.
 	runtime.mu.Lock()
+	runtime.closeEpoch++
+	runtime.closeInProgress = true
 	runtime.paused = true
 	cancelConnect := runtime.connectCancel
 	connectDone := runtime.connectDone
@@ -1092,8 +1170,12 @@ func (runtime *Runtime) Close() error {
 	// A direct Open does not use connectDone. Joining openMu prevents it from
 	// attaching a newly authenticated transport after this close barrier.
 	runtime.openMu.Lock()
-	defer runtime.openMu.Unlock()
-	return errors.Join(runtime.detach(true), runtime.closeRetained())
+	err := errors.Join(runtime.detach(true), runtime.closeRetained())
+	runtime.mu.Lock()
+	runtime.closeInProgress = false
+	runtime.mu.Unlock()
+	runtime.openMu.Unlock()
+	return err
 }
 
 func (runtime *Runtime) closeRetained() error {
@@ -1212,8 +1294,18 @@ func (runtime *Runtime) PulseResetFor(ctx context.Context, duration time.Duratio
 }
 
 func (runtime *Runtime) PulseResetPortFor(ctx context.Context, name string, duration time.Duration) error {
+	closeEpoch, closing := runtime.closeBarrierState()
+	if closing {
+		return errors.New("serial close is in progress")
+	}
 	runtime.openMu.Lock()
 	defer runtime.openMu.Unlock()
+	runtime.mu.RLock()
+	closeSuperseded := runtime.closeInProgress || runtime.closeEpoch != closeEpoch
+	runtime.mu.RUnlock()
+	if closeSuperseded {
+		return errors.New("serial close superseded the reset request")
+	}
 
 	session := runtime.currentSession()
 	snapshot := runtime.Snapshot()

@@ -606,6 +606,125 @@ func TestApplyOptionsPreservesExplicitPause(t *testing.T) {
 	}
 }
 
+func TestConnectRacingCloseCannotReopenAfterCloseBarrier(t *testing.T) {
+	port := newReconnectTestPort()
+	session := link.NewForPort("COM3", port)
+	runtime := New(Options{})
+	runtime.mu.Lock()
+	runtime.session = session
+	runtime.port = ports.Info{Name: "COM3", IsUSB: true}
+	runtime.connectionState = "connected"
+	runtime.mu.Unlock()
+	disconnectStarted := make(chan struct{})
+	releaseDisconnect := make(chan struct{})
+	runtime.SetBeforeDisconnect(func(string) {
+		close(disconnectStarted)
+		<-releaseDisconnect
+	})
+	openCalled := false
+	runtime.autoOpen = func(context.Context, link.DiscoveryOptions) (link.OpenResult, error) {
+		openCalled = true
+		return link.OpenResult{}, errors.New("unexpected reopen")
+	}
+
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- runtime.Close() }()
+	select {
+	case <-disconnectStarted:
+	case <-time.After(time.Second):
+		t.Fatal("close did not reach its transport barrier")
+	}
+	connectDone := make(chan error, 1)
+	go func() { connectDone <- runtime.Connect(context.Background()) }()
+	select {
+	case err := <-connectDone:
+		if err == nil {
+			t.Fatal("connection racing Close was accepted")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("connection racing Close did not fail promptly")
+	}
+	close(releaseDisconnect)
+	if err := <-closeDone; err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if openCalled {
+		t.Fatal("connection racing Close opened a replacement transport")
+	}
+	if snapshot := runtime.Snapshot(); !snapshot.Paused || snapshot.Connected {
+		t.Fatalf("close barrier snapshot = %#v", snapshot)
+	}
+}
+
+func TestApplyOptionsPreservesRetainedCloseQuarantine(t *testing.T) {
+	port := newReconnectTestPort()
+	session := link.NewForPort("COM4", port)
+	runtime := New(Options{})
+	runtime.mu.Lock()
+	runtime.retainedClose = []link.OpenResult{{
+		Session: session,
+		Port:    ports.Info{Name: "COM4", IsUSB: true},
+	}}
+	runtime.paused = true
+	runtime.connectionState = "close_failed"
+	runtime.connectionReason = "cleanup failed"
+	runtime.mu.Unlock()
+	openCalled := make(chan struct{}, 1)
+	runtime.autoOpen = func(context.Context, link.DiscoveryOptions) (link.OpenResult, error) {
+		openCalled <- struct{}{}
+		return link.OpenResult{}, errors.New("unexpected reconnect")
+	}
+
+	runtime.ResumeAuto()
+	if !runtime.ApplyOptions(Options{BaudRate: 57600}) {
+		t.Fatal("transport option update was not applied")
+	}
+	if snapshot := runtime.Snapshot(); !snapshot.Paused || snapshot.ConnectionState != "close_failed" {
+		t.Fatalf("option update cleared retained-close quarantine: %#v", snapshot)
+	}
+	select {
+	case <-openCalled:
+		t.Fatal("option update reconnected with a retained close owner")
+	case <-time.After(50 * time.Millisecond):
+	}
+	if err := runtime.Close(); err != nil {
+		t.Fatalf("release retained owner: %v", err)
+	}
+}
+
+func TestReconnectRejectsRetainedCloseOwner(t *testing.T) {
+	port := newReconnectTestPort()
+	session := link.NewForPort("COM4", port)
+	runtime := New(Options{})
+	runtime.mu.Lock()
+	runtime.retainedClose = []link.OpenResult{{
+		Session: session,
+		Port:    ports.Info{Name: "COM4", IsUSB: true},
+	}}
+	runtime.paused = true
+	runtime.connectionState = "close_failed"
+	runtime.connectionReason = "cleanup failed"
+	runtime.mu.Unlock()
+	openCalled := false
+	runtime.autoOpen = func(context.Context, link.DiscoveryOptions) (link.OpenResult, error) {
+		openCalled = true
+		return link.OpenResult{}, errors.New("unexpected reconnect")
+	}
+
+	if err := runtime.Reconnect(context.Background(), "test reconnect"); err == nil {
+		t.Fatal("Reconnect accepted a retained close owner")
+	}
+	if openCalled {
+		t.Fatal("Reconnect opened while a retained close owner remained")
+	}
+	if snapshot := runtime.Snapshot(); !snapshot.Paused || snapshot.ConnectionState != "close_failed" {
+		t.Fatalf("Reconnect cleared retained-close quarantine: %#v", snapshot)
+	}
+	if err := runtime.Close(); err != nil {
+		t.Fatalf("release retained owner: %v", err)
+	}
+}
+
 func TestCloseCancelsInflightReconnectAndReleasesTransport(t *testing.T) {
 	port := newReconnectTestPort()
 	opened := make(chan struct{})

@@ -451,6 +451,8 @@ type TextMessage struct {
 // Client owns one controller runtime, command engine, and host integration state.
 type Client struct {
 	runtime            *control.Runtime
+	runtimeClose       func() error
+	shutdownMu         sync.Mutex
 	engine             *shell.Engine
 	engineMu           sync.Mutex
 	optionsMu          sync.RWMutex
@@ -521,9 +523,10 @@ func New(options Options) *Client {
 		ReconnectMaximumDelay: options.ReconnectMaximumDelay,
 	})
 	client := &Client{
-		runtime:  runtime,
-		macros:   toAppMacros(options.Macros),
-		melodies: cloneMelodies(options.Melodies),
+		runtime:      runtime,
+		runtimeClose: runtime.Close,
+		macros:       toAppMacros(options.Macros),
+		melodies:     cloneMelodies(options.Melodies),
 		statusEffects: append(
 			[]appconfig.StatusLEDEffect(nil),
 			options.StatusEffects...,
@@ -601,11 +604,12 @@ func AttachSharedRuntime(
 		panic("controller: shared command engine is nil")
 	}
 	return &Client{
-		runtime: runtime,
-		engine:  engine,
-		outputs: control.NewOutputScheduler(runtime),
-		events:  make(chan Event),
-		done:    make(chan struct{}),
+		runtime:      runtime,
+		runtimeClose: runtime.Close,
+		engine:       engine,
+		outputs:      control.NewOutputScheduler(runtime),
+		events:       make(chan Event),
+		done:         make(chan struct{}),
 	}
 }
 
@@ -960,8 +964,7 @@ func normalizedMotionDoorPolicy(value string) string {
 
 // Connect resumes automatic discovery and authenticates the selected board.
 func (client *Client) Connect(ctx context.Context) error {
-	client.runtime.ResumeAuto()
-	return client.runtime.EnsureConnected(ctx)
+	return client.runtime.Connect(ctx)
 }
 
 // Open connects directly to a named serial port and authenticates the board.
@@ -1004,13 +1007,19 @@ func (client *Client) PulseResetFor(
 }
 
 // Shutdown closes the serial port and releases background event forwarding.
-// A shutdown client must not be reused.
+// If closing the transport fails, Shutdown retains ownership and may be retried.
+// After a successful shutdown, the client must not be reused.
 func (client *Client) Shutdown() error {
+	client.shutdownMu.Lock()
+	defer client.shutdownMu.Unlock()
+	client.outputs.StopAll()
+	if err := client.runtimeClose(); err != nil {
+		return err
+	}
 	client.outputs.Close()
 	_ = hostos.DefaultExecutor.ReleaseAll()
-	err := client.runtime.Close()
 	client.doneOnce.Do(func() { close(client.done) })
-	return err
+	return nil
 }
 
 // Execute runs one command through the same engine exposed by every host surface.

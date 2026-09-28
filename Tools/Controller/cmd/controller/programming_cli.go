@@ -823,11 +823,10 @@ func executeGuardedCLIFlash(
 			_ programmer.AutomaticPreflashResult,
 			writer io.Writer,
 		) error {
-			application.ResumeAuto()
 			reconnectContext, reconnectCancel := context.WithTimeout(
 				context.WithoutCancel(backupContext), 12*time.Second,
 			)
-			reconnectErr := application.EnsureConnected(reconnectContext)
+			reconnectErr := application.Connect(reconnectContext)
 			reconnectCancel()
 			if reconnectErr != nil {
 				return fmt.Errorf("reconnect application after untouched raw backup: %w", reconnectErr)
@@ -902,11 +901,10 @@ func executeGuardedCLIFlash(
 	var reconnectErr error
 	var restoreErr error
 	if application != nil {
-		application.ResumeAuto()
 		reconnectContext, reconnectCancel := context.WithTimeout(
 			context.WithoutCancel(ctx), 12*time.Second,
 		)
-		reconnectErr = application.EnsureConnected(reconnectContext)
+		reconnectErr = application.Connect(reconnectContext)
 		reconnectCancel()
 		if reconnectErr != nil {
 			reconnectErr = fmt.Errorf(
@@ -966,7 +964,7 @@ func programFactoryEEPROM(
 func readApplicationIdentityBeforeProgramming(
 	port string,
 	connection appconfig.Connection,
-) (native.Hello, error) {
+) (hello native.Hello, err error) {
 	runtime := control.New(control.Options{
 		Filter:         ports.Filter{Port: port},
 		BaudRate:       connection.BaudRate,
@@ -974,10 +972,23 @@ func readApplicationIdentityBeforeProgramming(
 		RequestTimeout: time.Duration(connection.RequestTimeoutMS) * time.Millisecond,
 		HelloAttempts:  connection.HelloAttempts,
 	})
-	defer runtime.Close()
+	return readApplicationIdentityWithRuntime(runtime)
+}
+
+type applicationIdentityRuntime interface {
+	EnsureConnected(context.Context) error
+	Snapshot() control.Snapshot
+	Close() error
+}
+
+func readApplicationIdentityWithRuntime(runtime applicationIdentityRuntime) (
+	hello native.Hello,
+	err error,
+) {
+	defer func() { err = errors.Join(err, runtime.Close()) }()
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
-	if err := runtime.EnsureConnected(ctx); err != nil {
+	if err = runtime.EnsureConnected(ctx); err != nil {
 		return native.Hello{}, err
 	}
 	return runtime.Snapshot().Hello, nil
