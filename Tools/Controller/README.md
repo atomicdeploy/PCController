@@ -226,9 +226,10 @@ foreign registrations or shortcuts:
 Windows packages include `installation-package.json`, a deterministic inventory
 that binds every installable file to its size and SHA-256, the exact host
 manifest, source identity, target architecture, executable, embedded WebUI, and
-verified Win32 resources. Installation copies only inventoried files into a
-content-addressed per-user slot; it never trusts an archive filename or loose
-shadow executable.
+verified Win32 resources. Installation publishes the active package at the
+stable `%LOCALAPPDATA%\Programs\PCController\bin` directory; it never trusts an
+archive filename or loose shadow executable. `packages/<digest>` contains only
+the single verified rollback package and is never an active launch target.
 
 From an extracted, verified package:
 
@@ -244,13 +245,26 @@ desktop enable and display-name changes journal both the prior and desired
 identity before touching native artifacts, then roll forward idempotently after
 an interruption; a failed cleanup or registration retains the journal for the
 next retry. A healthy repeated install or repair is a no-op; a damaged slot is
-rebuilt from the verified package without replacing a mapped executable in
-place. One exact prior slot is retained for rollback. The per-user root carries
+rebuilt from the verified package. If the canonical executable is running, a
+hash-bound external helper waits for that exact process to exit and rolls the
+durable directory-replacement journal forward. Healthy legacy hashed-slot
+installations migrate to `bin` on the next install or repair. Unknown files in
+`bin` are copied into a transaction-specific `recovery-quarantine/installer-*`
+directory rather than kept active; files removed from the old inventory retire
+with that package. A damaged image is never promoted to rollback. One exact
+prior package is retained for rollback. The per-user root carries
 a product-and-user ownership marker, and lifecycle commands refuse a foreign or
-unmarked non-empty root.
+unmarked non-empty root. The exact canonical per-user root can be adopted only
+when it contains either a fully verified legacy `bin` package or the recognized
+real `source/PCController` repository layout; arbitrary name-only directories
+are rejected.
 
-Uninstall preserves configuration, board backups, downloaded tools, logs, and
-host state. Purging them is a separate destructive choice that requires both
+Uninstall removes only installer-owned `bin`, package, staging, state, marker,
+and lock paths. It preserves the canonical source tree, coordination evidence,
+recovery quarantine, configuration, board backups, downloaded tools, logs, and
+host state. When such canonical-root content remains, its ownership marker is
+retained so a later verified reinstall does not need to claim an unmarked tree.
+Purging user data is a separate destructive choice that requires both
 flags and the exact confirmation shown by `controller help`:
 
 ```console
