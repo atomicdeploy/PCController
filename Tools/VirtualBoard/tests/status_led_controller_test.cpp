@@ -39,7 +39,9 @@ Descriptor descriptor(StatusLedEffect effect, std::uint8_t red,
 struct Fixture {
   PwmExpanderDriver driver{PwmController::PwmI2cAddress};
   PwmController pwm{driver};
-  StatusLedController leds;
+  // Production owns a static singleton, so native fixtures must model its
+  // guaranteed zero-initialization instead of inheriting stack garbage.
+  StatusLedController leds{};
 
   explicit Fixture(std::uint8_t brightness = 100) {
     EEPROM.fill(0xFF);
