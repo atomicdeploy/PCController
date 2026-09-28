@@ -374,6 +374,7 @@ type Snapshot struct {
 	StatusLED         StatusLEDState        `json:"status_led"`
 	HaveStatusLED     bool                  `json:"have_status_led"`
 	StatusLEDUpdated  time.Time             `json:"status_led_updated,omitempty"`
+	StatusLEDRevision uint64                `json:"status_led_revision,omitempty"`
 	Illumination      IlluminationState     `json:"illumination"`
 	PortProcess       PortProcessSnapshot   `json:"port_process"`
 }
@@ -1977,6 +1978,7 @@ func (client *Client) Snapshot() Snapshot {
 		StatusLED:         snapshot.StatusLED,
 		HaveStatusLED:     snapshot.HaveStatusLED,
 		StatusLEDUpdated:  snapshot.StatusLEDUpdated,
+		StatusLEDRevision: snapshot.StatusLEDRevision,
 		Illumination:      illumination,
 		PortProcess:       snapshot.PortProcess,
 	}
