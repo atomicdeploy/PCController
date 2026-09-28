@@ -56,7 +56,12 @@ func createWindowsShortcut(executable, shortcut, appID, displayName string) erro
 		if err != nil {
 			return fmt.Errorf("create Shell link: %w", err)
 		}
-		defer releaseCOM(link)
+		linkOpen := true
+		defer func() {
+			if linkOpen {
+				releaseCOM(link)
+			}
+		}()
 
 		if err := setShellLinkString(link, 20, executable, "set shortcut target"); err != nil {
 			return err
@@ -90,10 +95,13 @@ func createWindowsShortcut(executable, shortcut, appID, displayName string) erro
 		}
 		saveErr := callCOM(persist, 6, uintptr(unsafe.Pointer(path)), 1).error("save Start-menu shortcut")
 		runtime.KeepAlive(path)
-		// IPersistFile may retain an exclusive handle to the freshly saved
-		// shortcut. Release it before SHGetPropertyStoreFromParsingName opens
-		// the same file for read/write property access.
+		// The Shell link object and its IPersistFile interface may retain an
+		// exclusive handle to the freshly saved shortcut. Release both before
+		// SHGetPropertyStoreFromParsingName opens the same file for read/write
+		// property access.
 		releaseCOM(persist)
+		releaseCOM(link)
+		linkOpen = false
 		if saveErr != nil {
 			return saveErr
 		}
