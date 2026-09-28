@@ -85,11 +85,18 @@ bool ina219Available = false;
 bool pwmAvailable = false;
 uint8_t temperatureAddressCount = 0;
 bool temperatureConversionPending = false;
+#if PCCONTROLLER_ENABLE_RF_LEARNING
 bool learningActive = false;
 uint8_t learningMode = RF_LEARN_INDEFINITE;
 uint8_t learningTotalSeconds = 0;
 uint8_t learningReportedRemaining = 0;
 uint32_t learningEndsAt = 0;
+#else
+constexpr bool learningActive = false;
+constexpr uint8_t learningMode = RF_LEARN_INDEFINITE;
+constexpr uint8_t learningTotalSeconds = 0;
+constexpr uint32_t learningEndsAt = 0;
+#endif
 
 // Active page, modal editor selection, and transient front-panel deadlines.
 uint8_t menuPage = PAGE_DOOR;

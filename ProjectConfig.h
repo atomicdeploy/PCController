@@ -1,5 +1,21 @@
 #pragma once
 
+// Explicit temporary verification profile. The ordinary source/default build
+// retains RF administration; this test image keeps learned RF execution while
+// freeing flash for the combined MCU recorder and 100-pixel strip exercise.
+#ifndef PCCONTROLLER_MACRO_STRIP_TEST
+#define PCCONTROLLER_MACRO_STRIP_TEST 0
+#endif
+#ifndef PCCONTROLLER_ENABLE_RF_LEARNING
+#define PCCONTROLLER_ENABLE_RF_LEARNING (!PCCONTROLLER_MACRO_STRIP_TEST)
+#endif
+#if (PCCONTROLLER_MACRO_STRIP_TEST != 0) && (PCCONTROLLER_MACRO_STRIP_TEST != 1)
+#error "PCCONTROLLER_MACRO_STRIP_TEST must be 0 or 1"
+#endif
+#if (PCCONTROLLER_ENABLE_RF_LEARNING != 0) && (PCCONTROLLER_ENABLE_RF_LEARNING != 1)
+#error "PCCONTROLLER_ENABLE_RF_LEARNING must be 0 or 1"
+#endif
+
 // The UART is the primary COBS/opcode application link, not a debug console.
 #ifndef PCCONTROLLER_UART_BAUD
 #define PCCONTROLLER_UART_BAUD 115200UL

@@ -17,6 +17,7 @@ void storeUserPwmValue(uint8_t channel, uint16_t value) {
 }
 
 // Returns ceil(remaining milliseconds / 1000), or zero for indefinite mode.
+#if PCCONTROLLER_ENABLE_RF_LEARNING
 uint8_t learningRemainingSeconds(uint32_t at) {
   if (learningMode != RF_LEARN_TIMER || learningEndsAt == 0 ||
       timeReached(at, learningEndsAt)) {
@@ -89,6 +90,12 @@ void serviceLearningTimer(uint32_t at) {
                          learningTotalSeconds, remaining);
   }
 }
+#else
+uint8_t learningRemainingSeconds(uint32_t) { return 0; }
+void beginLearning(uint8_t, uint8_t) {}
+void endLearning(uint8_t, int8_t) {}
+void serviceLearningTimer(uint32_t) {}
+#endif
 
 // Deactivates the output held by the current RF momentary mapping.
 void stopRemoteMomentary(uint32_t at) {
@@ -226,6 +233,7 @@ void serviceRadio() {
   lastRemoteActionCode = code;
   lastRemoteActionAt = now;
 
+#if PCCONTROLLER_ENABLE_RF_LEARNING
   if (learningActive) {
     if (repeated) {
       return;
@@ -246,6 +254,7 @@ void serviceRadio() {
     }
     return;
   }
+#endif
 
   LearnedRemote remote;
   const bool learned = learnedRemotes.find(code, bits, protocol, remote);

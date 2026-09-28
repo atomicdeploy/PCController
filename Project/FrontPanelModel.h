@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdint.h>
+#include "../ProjectConfig.h"
 
 // Physical, RF, and host keys share these stable four action IDs.
 enum MenuAction : uint8_t {
@@ -33,7 +34,9 @@ enum MenuPage : uint8_t {
 };
 
 constexpr uint8_t canonicalMenuPage(uint8_t page) {
-  return page == PAGE_MOTION ? static_cast<uint8_t>(PAGE_KEYS) : page;
+  return !PCCONTROLLER_ENABLE_RF_LEARNING && page == PAGE_RF
+             ? static_cast<uint8_t>(PAGE_DOOR)
+             : (page == PAGE_MOTION ? static_cast<uint8_t>(PAGE_KEYS) : page);
 }
 
 constexpr bool retiredMenuPageAlias(uint8_t page) {
@@ -43,7 +46,8 @@ constexpr bool retiredMenuPageAlias(uint8_t page) {
 // PAGE_MOTION remains a stable direct-navigation compatibility alias, but the
 // production directory and local browsing expose only the unified KEY page.
 constexpr bool menuPageNavigable(uint8_t page) {
-  return page < PAGE_COUNT && page != PAGE_MOTION;
+  return page < PAGE_COUNT && page != PAGE_MOTION &&
+         (PCCONTROLLER_ENABLE_RF_LEARNING || page != PAGE_RF);
 }
 
 // Top-level pages and modal editors consumed by ModeManager.

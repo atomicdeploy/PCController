@@ -10,7 +10,7 @@ void sendHello(uint8_t sequence) {
       (1UL << 1) |  // two DS18B20 sensors
       (1UL << 2) |  // 16-channel PWM
       (1UL << 3) |  // relay safety controller
-      (1UL << 4) |  // 433 MHz RX/TX, learning, and action mapping
+      (1UL << 4) |  // 433 MHz RX/TX and persisted action dispatch
       (1UL << 5) |  // TM1637
       (1UL << 6) |  // I2C LCD
       (1UL << 7) |  // addressable LEDs
@@ -21,12 +21,16 @@ void sendHello(uint8_t sequence) {
       (1UL << 12) | // host display text and asynchronous events
       (1UL << 13) | // exact front-panel snapshot
       (1UL << 14) | // host-injected key lifecycle; Down acts immediately
+#if PCCONTROLLER_ENABLE_RF_LEARNING
       (1UL << 15) | // multi/indefinite RF learning
+#endif
       (1UL << 16) | // bounded generic I2C transaction lease
 #if PCCONTROLLER_ENABLE_MENU_DIRECTORY
       (1UL << 17) | // board-authoritative paged menu directory
 #endif
+#if PCCONTROLLER_ENABLE_RF_LEARNING
       (1UL << 18) | // host-staged learned-RF record replacement (opcode 0x3F)
+#endif
       (1UL << 19) | // host-captured front-panel session (DisplayText targets 3/4)
       (1UL << 20) | // status bit 12 means buzzer queue/voice is busy
       (1UL << 21) | // EEPROM-selectable 1..255 ms motion break time
@@ -359,6 +363,7 @@ void transferI2c(uint8_t sequence, const uint8_t *request, uint8_t length,
 }
 
 // Pages EEPROM-backed learned RF entries without allocating a list in SRAM.
+#if PCCONTROLLER_ENABLE_RF_LEARNING
 void sendLearnedRemotes(uint8_t sequence, uint8_t cursor) {
   uint8_t payload[40] = {1, learnedRemotes.count(), 0xFF, 0};
   uint8_t scan = cursor;
@@ -382,6 +387,7 @@ void sendLearnedRemotes(uint8_t sequence, uint8_t cursor) {
   appProtocol.send(ControllerProtocol::RadioLearnListResponse, sequence,
                    payload, index);
 }
+#endif
 
 // Applies the canonical settings prefix plus its exact optional board-name
 // tail; all other positional tails are rejected.
@@ -659,6 +665,7 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
       }
       goto acknowledged;
 
+#if PCCONTROLLER_ENABLE_RF_LEARNING
     case RadioLearnStart:
       if (length != 2 || payload[0] > RF_LEARN_TIMER ||
           (payload[0] == RF_LEARN_INDEFINITE && payload[1] != 0) ||
@@ -703,6 +710,7 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
       goto acknowledged;
     }
 
+#endif
     case ControllerProtocol::MenuAction:
       if (length < 1 || payload[0] > MENU_INCREASE) {
         goto badPayload;
@@ -720,7 +728,8 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
       goto acknowledged;
 
     case MenuSetPage:
-      if (length < 1 || payload[0] >= PAGE_COUNT) {
+      if (length < 1 || payload[0] >= PAGE_COUNT ||
+          (!PCCONTROLLER_ENABLE_RF_LEARNING && payload[0] == PAGE_RF)) {
         goto badPayload;
       }
       if (modeManager.current() == MODE_MOTION_CONTROL) {

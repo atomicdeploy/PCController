@@ -811,7 +811,7 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
           ));
 #else
       setMenuPage(menuPage == PAGE_DOOR
-                      ? PAGE_RF
+                      ? (PCCONTROLLER_ENABLE_RF_LEARNING ? PAGE_RF : PAGE_USER_RELAYS)
                       : (menuPage == PAGE_RF ? PAGE_USER_RELAYS
                                              : menuPage - 1));
 #endif
@@ -826,7 +826,7 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
           ));
 #else
       setMenuPage(menuPage == PAGE_USER_RELAYS
-                      ? static_cast<uint8_t>(PAGE_RF)
+                      ? static_cast<uint8_t>(PCCONTROLLER_ENABLE_RF_LEARNING ? PAGE_RF : PAGE_DOOR)
                       : static_cast<uint8_t>((menuPage + 1) % PAGE_COUNT));
 #endif
       break;
@@ -871,8 +871,10 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
         modeManager.transitionTo(MODE_USER_PWM_CHANNEL_EDIT);
       } else if (menuPage == PAGE_USER_RELAYS) {
         modeManager.transitionTo(MODE_USER_RELAY_CHANNEL_EDIT);
+#if PCCONTROLLER_ENABLE_RF_LEARNING
       } else if (menuPage == PAGE_RF) {
         beginLearning(RF_LEARN_INDEFINITE, 0);
+#endif
       } else {
         display.showText(commonText(TextError));
         menuLabelEndsAt = actionNow + 650;
