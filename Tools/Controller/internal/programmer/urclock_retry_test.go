@@ -104,6 +104,43 @@ func TestGuardedBackupRetriesEEPROMReadAfterSuccessfulFlashRead(t *testing.T) {
 	}
 }
 
+func TestGuardedBackupRetriesInitialUrclockMetadataSynchronization(t *testing.T) {
+	root := t.TempDir()
+	base := newFakeAVRRunner(t)
+	metadataAttempts := 0
+	runner := CommandRunnerFunc(func(ctx context.Context, command Command, output io.Writer) error {
+		if command.Stage == "metadata handshake" {
+			metadataAttempts++
+			if metadataAttempts == 1 {
+				_, _ = io.WriteString(output, "Warning: attempt 10 of 10: not in sync\nWarning: programmer is not responding; try -x strict and/or vary -x delay=100\nError: unable to open port COM3 for programmer urclock")
+				return errors.New("exit status 1")
+			}
+		}
+		return base.Run(ctx, command, output)
+	})
+
+	directory, err := BackupWithRunner(
+		context.Background(), fakeBackupOptions(root), io.Discard, runner,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if metadataAttempts != 2 {
+		t.Fatalf("metadata attempts=%d, want one bounded retry", metadataAttempts)
+	}
+	content, err := os.ReadFile(filepath.Join(directory, "manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest BackupManifest
+	if err := json.Unmarshal(content, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Status != "complete" || len(manifest.Errors) != 0 || !manifest.MetadataAvailable {
+		t.Fatalf("metadata retry did not preserve complete backup gate: %#v", manifest)
+	}
+}
+
 func TestBackupRetryDoesNotMaskNonTransientOrNonUrclockFailures(t *testing.T) {
 	for _, test := range []struct {
 		name       string
@@ -111,6 +148,7 @@ func TestBackupRetryDoesNotMaskNonTransientOrNonUrclockFailures(t *testing.T) {
 		diagnostic string
 	}{
 		{name: "protocol", method: MethodUrclock, diagnostic: "programmer is not responding"},
+		{name: "non-metadata sync", method: MethodUrclock, diagnostic: "not in sync; programmer is not responding"},
 		{name: "unrelated permission", method: MethodUrclock, diagnostic: "cannot open output file: Access is denied"},
 		{name: "USBasp", method: MethodUSBasp, diagnostic: "Access is denied"},
 	} {

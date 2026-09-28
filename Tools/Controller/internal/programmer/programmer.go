@@ -961,7 +961,10 @@ func BackupWithRunner(
 			manifest.Errors = append(manifest.Errors, failures[len(failures)-1].Error())
 		} else {
 			fmt.Fprintln(output, command.String())
-			runErr := runner.Run(ctx, command, io.MultiWriter(output, metadataFile))
+			runErr := runBackupCommandWithPortReleaseRetry(
+				ctx, options.Method, command,
+				io.MultiWriter(output, metadataFile), runner,
+			)
 			if runErr != nil {
 				failures = append(failures, fmt.Errorf("metadata: %w", runErr))
 				manifest.Errors = append(manifest.Errors, failures[len(failures)-1].Error())
