@@ -1482,7 +1482,7 @@ int main(void) {
   unsigned long long handle = strtoull(handle_field + 9, NULL, 10);
   release(response);
 
-  char request[160];
+  char request[512];
   snprintf(request, sizeof(request),
            "{\\\"operation\\\":\\\"build-smoke-invalid\\\",\\\"handle\\\":%llu}",
            handle);
@@ -1495,6 +1495,35 @@ int main(void) {
   response = invoke(request);
   if (!response || !strstr(response, "\\\"destroyed\\\":true")) return 15;
   release(response);
+
+  char host_create[] = "{\\\"operation\\\":\\\"host_create\\\",\\\"host_options\\\":{\\\"config_path\\\":\\\"pccontroller-smoke-config.json\\\",\\\"app_id\\\":\\\"pccontroller.build-smoke\\\",\\\"controller_options\\\":{},\\\"disable_auto_connect\\\":true,\\\"disable_native\\\":true}}";
+  response = invoke(host_create);
+  if (!response || !strstr(response, "\\\"ok\\\":true")) return 16;
+  handle_field = strstr(response, "\\\"handle\\\":");
+  if (!handle_field) return 17;
+  handle = strtoull(handle_field + 9, NULL, 10);
+  release(response);
+
+  snprintf(request, sizeof(request),
+           "{\\\"operation\\\":\\\"host_start\\\",\\\"handle\\\":%llu}", handle);
+  response = invoke(request);
+  if (!response || !strstr(response, "\\\"ok\\\":true")) return 18;
+  release(response);
+
+  snprintf(request, sizeof(request),
+           "{\\\"operation\\\":\\\"host_call\\\",\\\"handle\\\":%llu,\\\"method\\\":\\\"controller.ping\\\",\\\"params\\\":{}}",
+           handle);
+  response = invoke(request);
+  if (!response || !strstr(response, "\\\"ok\\\":true") ||
+      !strstr(response, "\\\"result\\\":{\\\"ok\\\":true")) return 19;
+  release(response);
+
+  snprintf(request, sizeof(request),
+           "{\\\"operation\\\":\\\"host_destroy\\\",\\\"handle\\\":%llu}", handle);
+  response = invoke(request);
+  if (!response || !strstr(response, "\\\"destroyed\\\":true")) return 20;
+  release(response);
+  remove("pccontroller-smoke-config.json");
   // The Go shared runtime owns process-lifetime state; leave it loaded.
   return 0;
 }
@@ -1525,7 +1554,7 @@ int main(void) {
   unsigned long long handle = strtoull(handle_field + 9, NULL, 10);
   release(response);
 
-  char request[160];
+  char request[512];
   snprintf(request, sizeof(request),
            "{\\"operation\\":\\"build-smoke-invalid\\",\\"handle\\":%llu}",
            handle);
@@ -1538,6 +1567,34 @@ int main(void) {
   response = invoke(request);
   if (!response || !strstr(response, "\\"destroyed\\":true")) return 15;
   release(response);
+  char host_create[] = "{\\"operation\\":\\"host_create\\",\\"host_options\\":{\\"config_path\\":\\"pccontroller-smoke-config.json\\",\\"app_id\\":\\"pccontroller.build-smoke\\",\\"controller_options\\":{},\\"disable_auto_connect\\":true,\\"disable_native\\":true}}";
+  response = invoke(host_create);
+  if (!response || !strstr(response, "\\"ok\\":true")) return 16;
+  handle_field = strstr(response, "\\"handle\\":");
+  if (!handle_field) return 17;
+  handle = strtoull(handle_field + 9, NULL, 10);
+  release(response);
+
+  snprintf(request, sizeof(request),
+           "{\\"operation\\":\\"host_start\\",\\"handle\\":%llu}", handle);
+  response = invoke(request);
+  if (!response || !strstr(response, "\\"ok\\":true")) return 18;
+  release(response);
+
+  snprintf(request, sizeof(request),
+           "{\\"operation\\":\\"host_call\\",\\"handle\\":%llu,\\"method\\":\\"controller.ping\\",\\"params\\":{}}",
+           handle);
+  response = invoke(request);
+  if (!response || !strstr(response, "\\"ok\\":true") ||
+      !strstr(response, "\\"result\\":{\\"ok\\":true")) return 19;
+  release(response);
+
+  snprintf(request, sizeof(request),
+           "{\\"operation\\":\\"host_destroy\\",\\"handle\\":%llu}", handle);
+  response = invoke(request);
+  if (!response || !strstr(response, "\\"destroyed\\":true")) return 20;
+  release(response);
+  remove("pccontroller-smoke-config.json");
   // The Go c-shared runtime owns process-lifetime state; do not dlclose it.
   return 0;
 }
