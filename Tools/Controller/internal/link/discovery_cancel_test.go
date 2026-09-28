@@ -71,7 +71,7 @@ func TestOpenAuthenticatedCancellationClosesBlockedWrite(t *testing.T) {
 		opened <- openOutcome{result: result, err: err}
 	}()
 
-	awaitSignal(t, port.writeStarted, "blocked authentication write")
+	awaitDiscoverySignal(t, port.writeStarted, "blocked authentication write")
 	cancel()
 	select {
 	case outcome := <-opened:
@@ -119,7 +119,7 @@ func TestOpenAuthenticatedCancellationReturnsRetryableCloseOwner(t *testing.T) {
 		opened <- openOutcome{result: result, err: err}
 	}()
 
-	awaitSignal(t, port.writeStarted, "blocked authentication write")
+	awaitDiscoverySignal(t, port.writeStarted, "blocked authentication write")
 	cancel()
 	var outcome openOutcome
 	select {
@@ -255,5 +255,14 @@ func TestOpenAuthenticatedSuccessCancelRaceHasSingleOwner(t *testing.T) {
 		default:
 			t.Fatalf("iteration %d canceled result returned before Session.Close", iteration)
 		}
+	}
+}
+
+func awaitDiscoverySignal(t *testing.T, signal <-chan struct{}, description string) {
+	t.Helper()
+	select {
+	case <-signal:
+	case <-time.After(time.Second):
+		t.Fatalf("timed out waiting for %s", description)
 	}
 }
