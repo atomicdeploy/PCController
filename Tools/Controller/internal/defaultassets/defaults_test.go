@@ -20,7 +20,6 @@ func TestEmbeddedDefaultsRequireCompleteVerifiedIntelHex(t *testing.T) {
 	firmware := testIntelHex([]byte{1, 2, 3, 4})
 	eeprom := testIntelHex(make([]byte, 1024))
 	metadata := Metadata{
-		Format:   "controller-embedded-defaults/v1",
 		Firmware: testArtifact("firmware", "default-firmware.hex", firmware),
 		EEPROM:   testArtifact("eeprom", "default-eeprom.hex", eeprom),
 	}
