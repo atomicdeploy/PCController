@@ -77,6 +77,7 @@ the generated host binary; that generated directory is excluded from Git.
 The resolved module graph was audited in these license groups:
 
 - MIT: `github.com/MakeNowJust/heredoc`,
+  `github.com/Microsoft/go-winio`,
   `github.com/aymanbagabas/go-osc52/v2`,
   `github.com/aymanbagabas/go-udiff`,
   `github.com/charmbracelet/bubbles`,

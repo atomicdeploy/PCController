@@ -465,9 +465,24 @@ share one current file-watched policy and one audit-event path. Brightness and
 power writes are disabled by default, and a DDC/CI-unsupported display returns
 a capability error rather than falling back to an untracked shell command.
 
-The default host endpoint is `127.0.0.1:8787`. A single TCP listener
+The default network host endpoint is `127.0.0.1:8787`. Its TCP listener
 multiplexes newline-delimited JSON-RPC and HTTP by inspecting the first request
-bytes. HTTP then serves REST, standard WebSocket, and Socket.IO paths. Closing
+bytes. HTTP then serves REST, standard WebSocket, and Socket.IO paths. The
+public Go `rpc` package defines the same request, response, structured-error,
+message-bound, and caller contract for direct in-process dispatch, Windows
+named pipes, Unix-domain sockets, and TCP. Native-local listeners use raw
+newline-delimited JSON-RPC only; they never run the HTTP protocol sniffer.
+Windows pipe listeners reject remote clients and use a protected current-user
+plus LocalSystem DACL. Unix listeners require an owner-only directory, publish
+a `0600` socket, reject symlink/non-socket replacements, and recover a stale
+socket only when the caller explicitly confirms it holds the ownership lock.
+
+The reusable transport/client foundation is additive. Until the primary-host
+record and live endpoint advertisement are advanced by issue #373, the product
+primary continues to publish TCP `listen` as its automatic attachment path;
+embedders may explicitly construct and serve a native endpoint through `rpc`
+plus `ipcjson.ServeRaw`. Native-local and `:8787` network listeners are meant
+to run concurrently, not replace one another. Closing
 the serial port does not stop this service; closing the service does not erase
 MCU EEPROM or the PC configuration. JSON-RPC uses protocol `2.0`; schema
 negotiation reports JSON-RPC `2.0` only because that standards-defined marker

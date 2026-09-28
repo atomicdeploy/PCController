@@ -37,34 +37,18 @@ import (
 	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/ports"
 	"pccontroller.local/controller/internal/productidentity"
+	publicrpc "pccontroller.local/controller/rpc"
 )
 
 const (
-	Version       = "2.0"
+	Version       = publicrpc.Version
 	DefaultListen = "127.0.0.1:8787"
-	maxMessage    = 1024 * 1024
+	maxMessage    = publicrpc.MaxMessageBytes
 )
 
-type Request struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      json.RawMessage `json:"id,omitempty"`
-	Method  string          `json:"method"`
-	Params  json.RawMessage `json:"params,omitempty"`
-	Auth    string          `json:"auth,omitempty"`
-}
-
-type Response struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      json.RawMessage `json:"id,omitempty"`
-	Result  any             `json:"result,omitempty"`
-	Error   *RPCError       `json:"error,omitempty"`
-}
-
-type RPCError struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-	Data    any    `json:"data,omitempty"`
-}
+type Request = publicrpc.Request
+type Response = publicrpc.Response
+type RPCError = publicrpc.RPCError
 
 type opcodeExchangeParams struct {
 	Opcode       *int   `json:"opcode"`
@@ -211,10 +195,6 @@ func (params rfMapParams) mapping() (controller.RFMapping, error) {
 	default:
 		return controller.RFMapping{}, errors.New("RF action must be none, key, menu, relay, side, or pwm")
 	}
-}
-
-func (rpcError *RPCError) Error() string {
-	return rpcError.Message
 }
 
 // Access records transport provenance for authorization and message tagging.
@@ -2429,6 +2409,62 @@ func Serve(ctx context.Context, listener net.Listener, service *Service) error {
 	}
 }
 
+// ServeRaw exposes the same JSON-RPC dispatcher over a stream-only listener.
+// Native named-pipe and Unix-domain-socket transports use this entry point so
+// they cannot accidentally inherit the TCP HTTP/WebSocket protocol sniffer.
+func ServeRaw(
+	ctx context.Context,
+	listener net.Listener,
+	service *Service,
+	accessFor func(net.Conn) Access,
+) error {
+	if listener == nil {
+		return errors.New("raw RPC listener is required")
+	}
+	if service == nil {
+		return errors.New("raw RPC service is required")
+	}
+	serverContext, cancel := context.WithCancel(ctx)
+	var wait sync.WaitGroup
+	defer func() {
+		cancel()
+		_ = listener.Close()
+		wait.Wait()
+	}()
+	go func() {
+		<-serverContext.Done()
+		_ = listener.Close()
+	}()
+	for {
+		connection, err := listener.Accept()
+		if err != nil {
+			if ctx.Err() != nil || errors.Is(err, net.ErrClosed) {
+				return nil
+			}
+			return err
+		}
+		wait.Add(1)
+		go func(connection net.Conn) {
+			defer wait.Done()
+			defer connection.Close()
+			finished := make(chan struct{})
+			defer close(finished)
+			go func() {
+				select {
+				case <-serverContext.Done():
+					_ = connection.Close()
+				case <-finished:
+				}
+			}()
+			access := Access{Transport: connection.LocalAddr().Network()}
+			if accessFor != nil {
+				access = accessFor(connection)
+			}
+			_ = serveStreams(serverContext, connection, connection, service, access)
+		}(connection)
+	}
+}
+
 func accessFromAddress(address net.Addr, transport string) Access {
 	result := Access{Remote: true, Transport: transport}
 	if address == nil {
@@ -4556,30 +4592,12 @@ func Call(
 	if address == "" {
 		address = DefaultListen
 	}
-	connection, err := lanresolver.Default().DialContext(ctx, "tcp", address)
-	if err != nil {
-		return Response{}, err
-	}
-	defer connection.Close()
-	if deadline, ok := ctx.Deadline(); ok {
-		_ = connection.SetDeadline(deadline)
-	}
-	request.JSONRPC = Version
-	if len(request.ID) == 0 {
-		request.ID = json.RawMessage("1")
-	}
-	if err := json.NewEncoder(connection).Encode(request); err != nil {
-		return Response{}, err
-	}
-	var response Response
-	decoder := json.NewDecoder(io.LimitReader(connection, maxMessage))
-	if err := decoder.Decode(&response); err != nil {
-		return Response{}, err
-	}
-	if response.Error != nil {
-		return response, response.Error
-	}
-	return response, nil
+	return publicrpc.Call(ctx, publicrpc.Endpoint{
+		Transport: publicrpc.TransportTCP,
+		Address:   address,
+	}, request, publicrpc.ClientOptions{
+		DialContext: lanresolver.Default().DialContext,
+	})
 }
 
 func Listen(address string) (net.Listener, error) {
@@ -4593,7 +4611,10 @@ func ListenWithRemote(address string, allowRemote bool) (net.Listener, error) {
 	if err != nil {
 		return nil, err
 	}
-	return net.Listen("tcp", address)
+	return publicrpc.Listen(publicrpc.Endpoint{
+		Transport: publicrpc.TransportTCP,
+		Address:   address,
+	}, publicrpc.ListenOptions{AllowRemote: allowRemote})
 }
 
 // validateListenAddress is deliberately side-effect free so address-policy

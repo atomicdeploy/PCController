@@ -1341,6 +1341,7 @@ Direct Go dependencies:
 | `github.com/coder/websocket` | 1.8.15 | ISC | firmware relay |
 | `github.com/fsnotify/fsnotify` | 1.10.1 | BSD-3-Clause | host-config file watching |
 | `github.com/go-ole/go-ole` | 1.3.0 | MIT | optional Windows system-profile adapter |
+| `github.com/Microsoft/go-winio` | 0.6.2 | MIT | protected Windows named-pipe RPC transport |
 | `go.bug.st/serial` | 1.8.0 | BSD-3-Clause | serial I/O and USB enumeration |
 | `golang.org/x/net` | 0.57.0 | BSD-3-Clause | standards-based proxy environment resolution |
 
