@@ -17,11 +17,9 @@ const (
 	firmwareManifestName      = "firmware-manifest.json"
 	urbootApplicationCapacity = generatedBoardApplicationBytes
 	atmega328PEEPROMCapacity  = generatedBoardEEPROMBytes
-	firmwareManifestFormat    = "pccontroller-avr-firmware-manifest/v1"
 )
 
 type compileManifest struct {
-	Format       string                       `json:"format"`
 	GeneratedUTC time.Time                    `json:"generatedUtc"`
 	Target       compileManifestTarget        `json:"target"`
 	Source       compileManifestSource        `json:"source"`
@@ -34,7 +32,6 @@ type compileManifestPatchRegion struct {
 	Name   string                      `json:"name"`
 	Start  uint32                      `json:"start"`
 	Length uint32                      `json:"length"`
-	Schema uint8                       `json:"schema"`
 	Magic  string                      `json:"magic"`
 	Fields []compileManifestPatchField `json:"fields"`
 }
@@ -47,6 +44,7 @@ type compileManifestPatchField struct {
 }
 
 type compileManifestTarget struct {
+	Profile               string `json:"profile"`
 	FQBN                  string `json:"fqbn"`
 	MCU                   string `json:"mcu"`
 	ClockHz               uint32 `json:"clockHz"`
@@ -58,11 +56,12 @@ type compileManifestTarget struct {
 }
 
 type compileManifestSource struct {
-	SHA256          string `json:"sha256"`
-	Files           int    `json:"files"`
-	BuildHash       string `json:"buildHash"`
-	PackedTimestamp string `json:"packedTimestamp"`
-	BuildTimestamp  string `json:"buildTimestamp,omitempty"`
+	SHA256          string   `json:"sha256"`
+	Files           int      `json:"files"`
+	CompileFeatures []string `json:"compileFeatures,omitempty"`
+	BuildHash       string   `json:"buildHash"`
+	PackedTimestamp string   `json:"packedTimestamp"`
+	BuildTimestamp  string   `json:"buildTimestamp,omitempty"`
 }
 
 type compileManifestRange struct {
@@ -160,15 +159,17 @@ func writeCompileManifest(
 		buildTimestamp = decoded.Compact
 	}
 	manifest := compileManifest{
-		Format: firmwareManifestFormat, GeneratedUTC: time.Now().UTC(),
+		GeneratedUTC: time.Now().UTC(),
 		Target: compileManifestTarget{
-			FQBN: options.FQBN, MCU: generatedBoardMCU, ClockHz: generatedBoardClockHz,
+			Profile: generatedBoardProfile,
+			FQBN:    options.FQBN, MCU: generatedBoardMCU, ClockHz: generatedBoardClockHz,
 			Bootloader: generatedBoardBootloader, Baud: generatedBoardBaud,
 			ApplicationLimitBytes: urbootApplicationCapacity,
 			FlashBytes:            ATmega328PFlashSize, EEPROMBytes: atmega328PEEPROMCapacity,
 		},
 		Source: compileManifestSource{
 			SHA256: identity.SourceSHA256, Files: identity.SourceFiles,
+			CompileFeatures: firmwareFeatureNames(identity.Features),
 			BuildHash:       fmt.Sprintf("%08X", identity.SourceHash),
 			PackedTimestamp: fmt.Sprintf("%08X", identity.PackedTimestamp),
 			BuildTimestamp:  buildTimestamp,
@@ -204,8 +205,7 @@ func readFirmwareIdentityBytes(path string) ([]byte, error) {
 func firmwareIdentityManifestRegions() []compileManifestPatchRegion {
 	return []compileManifestPatchRegion{{
 		Name: "firmware-identity", Start: FirmwareIdentityAddress,
-		Length: FirmwareIdentityLength, Schema: FirmwareIdentitySchema,
-		Magic: "PCI1",
+		Length: FirmwareIdentityLength, Magic: "PCID",
 		Fields: []compileManifestPatchField{
 			{Name: "magic", Offset: 0, Length: 4, Encoding: "ascii-little-endian"},
 			{Name: "source_hash", Offset: 4, Length: 4, Encoding: "uint32-little-endian"},

@@ -52,8 +52,12 @@ func TestMenuFallbackKeepsUnknownBuildOnCurrentCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if door.ID != 0 || len(pages) != 14 {
-		t.Fatalf("unknown-build fallback door=%d pages=%d", door.ID, len(pages))
+	alias, err := ResolveMenuPageIn(pages, "motion")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if door.ID != 0 || alias.ID != menuPageMotionAlias || len(pages) != 14 {
+		t.Fatalf("unknown-build fallback door=%d alias=%#v pages=%d", door.ID, alias, len(pages))
 	}
 	if _, err := ResolveMenuPageIn(pages, "status"); err == nil {
 		t.Fatal("unknown build inherited the historical Status page")
@@ -70,8 +74,12 @@ func TestMenuDirectoryCapabilityOverridesHistoricalBuildIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if door.ID != 0 || len(pages) != 14 {
-		t.Fatalf("advertised current catalog door=%d pages=%d", door.ID, len(pages))
+	alias, err := ResolveMenuPageIn(pages, "motion")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if door.ID != 0 || alias.ID != menuPageMotionAlias || alias.Name != "Motion (KEY alias)" || len(pages) != 14 {
+		t.Fatalf("advertised current catalog door=%d alias=%#v pages=%d", door.ID, alias, len(pages))
 	}
 	if _, err := ResolveMenuPageIn(pages, "status"); err == nil {
 		t.Fatal("advertised current catalog was replaced by historical IDs")
@@ -109,7 +117,7 @@ func TestResolveMenuPageInUsesCurrentStableID(t *testing.T) {
 	}
 }
 
-func TestCurrentCatalogRemovesStandaloneBluetoothPage(t *testing.T) {
+func TestCurrentCatalogRetiresStandaloneBluetoothAndKeepsMotionSelectorAlias(t *testing.T) {
 	current := MenuPages()
 	page, err := ResolveMenuPageIn(current, "6")
 	if err != nil {
@@ -118,9 +126,16 @@ func TestCurrentCatalogRemovesStandaloneBluetoothPage(t *testing.T) {
 	if page.Key != "settings" || len(current) != 14 {
 		t.Fatalf("dense current page 6=%#v catalog=%#v", page, current)
 	}
+	alias := current[menuPageMotionAlias]
+	rf := current[len(current)-1]
+	if alias.ID != menuPageMotionAlias || alias.Key != "motion" ||
+		alias.Description != retiredMotionAliasDetails ||
+		rf.ID != 13 || rf.Key != "rf-learn" {
+		t.Fatalf("current wire catalog did not retain the ID-12 selector and RF-13 endpoint: alias=%#v rf=%#v", alias, rf)
+	}
 	for _, candidate := range current {
 		if candidate.Key == "bt-audio" {
-			t.Fatalf("current catalog still contains standalone BT page %#v", candidate)
+			t.Fatalf("current catalog still contains retired page %#v", candidate)
 		}
 	}
 }
@@ -131,12 +146,13 @@ func TestMenuLayoutRequiresPermutationAndAtLeastOneVisiblePage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if layout.VisibleMask != 0x3FFF || len(layout.Order) != 14 {
+	if layout.VisibleMask != 0x2FFF || len(layout.Order) != 14 ||
+		layout.Visible(menuPageMotionAlias) || !layout.Visible(menuPageKeys) {
 		t.Fatalf("default layout=%#v", layout)
 	}
 
 	moved, err := MoveMenuPage(pages, layout, 13, 1)
-	if err != nil || moved.Order[1] != 13 || moved.Order[13] != 12 {
+	if err != nil || moved.Order[1] != 13 || moved.Order[12] != 11 {
 		t.Fatalf("moved layout=%#v err=%v", moved, err)
 	}
 	hidden, err := SetMenuPageVisible(pages, moved, 8, false)
@@ -163,5 +179,74 @@ func TestMenuLayoutRequiresPermutationAndAtLeastOneVisiblePage(t *testing.T) {
 	extraMask.VisibleMask |= 0x8000
 	if _, err := CanonicalMenuLayout(pages, extraMask); err == nil {
 		t.Fatal("out-of-catalog visibility bit was accepted")
+	}
+}
+
+func TestUnifiedMotionAliasCanonicalizesLegacyLayoutWithoutMovingRF(t *testing.T) {
+	pages := MenuPages()
+	legacy := MenuLayout{
+		Schema:      MenuLayoutSchema,
+		VisibleMask: uint16(1<<menuPageMotionAlias) | uint16(1<<13),
+		Order:       []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13},
+	}
+	canonical, err := CanonicalMenuLayout(pages, legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if canonical.Visible(menuPageMotionAlias) || !canonical.Visible(menuPageKeys) ||
+		canonical.VisibleMask != uint16(1<<menuPageKeys)|uint16(1<<13) {
+		t.Fatalf("legacy MOVE visibility was not normalized: %#v", canonical)
+	}
+	if canonical.Order[9] != menuPageMotionAlias ||
+		canonical.Order[12] != menuPageKeys || canonical.Order[13] != 13 {
+		t.Fatalf("legacy MOVE rank conversion disturbed KEY/RF: %#v", canonical.Order)
+	}
+	ordered, err := OrderedMenuPages(pages, canonical)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var visible []byte
+	for _, page := range ordered {
+		if canonical.Visible(page.ID) {
+			visible = append(visible, page.ID)
+		}
+	}
+	if len(visible) != 2 || visible[0] != menuPageKeys || visible[1] != 13 {
+		t.Fatalf("local navigation would duplicate KEY or skip RF: %#v", visible)
+	}
+	if _, err := MoveMenuPage(pages, canonical, menuPageMotionAlias, 1); err == nil {
+		t.Fatal("retired MOVE alias was reorderable")
+	}
+	if _, err := SetMenuPageVisible(pages, canonical, menuPageMotionAlias, true); err == nil {
+		t.Fatal("retired MOVE alias was showable")
+	}
+	alias, err := ResolveMenuPageIn(pages, "motion")
+	if err != nil || alias.ID != menuPageMotionAlias {
+		t.Fatalf("direct MOVE compatibility selector=%#v err=%v", alias, err)
+	}
+}
+
+func TestHistoricalMotionPageRemainsVisibleWhenItIsNotAnAlias(t *testing.T) {
+	layout, err := DefaultMenuLayout(voltageFirstMenuPages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !layout.Visible(menuPageMotionAlias) {
+		t.Fatalf("historical real MOVE page was hidden: %#v", layout)
+	}
+}
+
+func TestMenuListModeDistinguishesRetiredMoveAliasFromHistoricalMotion(t *testing.T) {
+	alias, ok := describeLiveMenuEntry(native.MenuEntry{
+		ID: menuPageMotionAlias, Mode: unifiedKeyMotionMode, Label: "MOVE",
+	})
+	if !ok || alias.Description != retiredMotionAliasDetails {
+		t.Fatalf("unified MENU_LIST MOVE alias=%#v ok=%t", alias, ok)
+	}
+	historical, ok := describeLiveMenuEntry(native.MenuEntry{
+		ID: menuPageMotionAlias, Mode: unifiedKeyMotionMode + 3, Label: "MOVE",
+	})
+	if !ok || historical.Description != legacyMotionDetails {
+		t.Fatalf("historical MENU_LIST MOVE page=%#v ok=%t", historical, ok)
 	}
 }

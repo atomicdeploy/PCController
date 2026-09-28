@@ -28,6 +28,15 @@ func TestResolveAbsoluteCanonicalizesExistingSymlinkPrefix(t *testing.T) {
 	if err := os.Symlink(realRoot, alias); err != nil {
 		t.Fatal(err)
 	}
+	// A symlink created by UID 0 is intentionally classified as a trusted
+	// system alias when its parent and target are also root-owned. Make the
+	// fixture explicitly non-root-owned so this test exercises the intended
+	// user-controlled-link case even when CI or an administrator runs as root.
+	if os.Geteuid() == 0 {
+		if err := os.Lchown(alias, 1, -1); err != nil {
+			t.Fatalf("mark test symlink as user-owned: %v", err)
+		}
+	}
 
 	resolved, err := ResolveAbsolute(filepath.Join(alias, "missing", "data"))
 	if err != nil {

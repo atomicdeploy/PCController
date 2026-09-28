@@ -21,6 +21,9 @@ func playExternalBeep(ctx context.Context, driverDirectory, executable string, f
 	}
 	command := externalBeepCommand(ctx, path, externalBeepArguments(frequencyHz, durationMS)...)
 	if output, err := command.CombinedOutput(); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
 		detail := strings.TrimSpace(string(output))
 		if detail == "" {
 			detail = err.Error()

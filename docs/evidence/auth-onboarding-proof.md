@@ -1,43 +1,41 @@
-# Authentication onboarding proof
+# Alpha unauthenticated UI proof
 
-The dashboard first reuses any valid session token and reconnects without a
-prompt. It shows the authentication action only after the host reports that
-authentication is required and the automatic attempt has no usable token or
-was rejected.
+Issue #148 is authoritative for the immediate alpha: application
+authentication and capability authorization are disabled. Browser-origin and
+listener controls remain active, URL credentials are rejected, and optional
+outbound bearer references exist only to upgrade an older auth-on peer.
 
-## Before
+## Historical failure
 
-The previous dashboard repeated a long, vague status and offered no direct
-recovery action.
+The image below is retained only as before-state evidence. It shows the old,
+incorrect authentication onboarding UI and must not be read as current product
+guidance.
 
-![Before: verbose unauthenticated dashboard](auth-dashboard-before.png)
+![Historical before state: obsolete authentication prompt](auth-dashboard-before.png)
 
-## After
+## Source-level acceptance
 
-The deployed dashboard states the exact condition, asks for the exact value,
-and exposes one recovery action.
+The current source and regression tests require:
 
-![After: concise authentication action](auth-dashboard-after.png)
+- `GET /api/ui-config` reports `auth_required: false` in alpha.
+- IPC, HTTP RPC, WebSocket, and Socket.IO requests do not require application
+  credentials.
+- Browser requests still obey the configured Origin allowlist, and credentials
+  in URL query parameters remain rejected.
+- An unauthenticated WebUI renders no board build, uptime, status, telemetry,
+  device card, control, event, placeholder, or stale value before a connected
+  peer advertises the relevant capability and returns authoritative state.
+- A transport gap clears stale board state. Automatic bounded reconnect remains
+  enabled, and activating the disconnected indicator starts an immediate real
+  reconnect attempt.
 
-## Operator flow
+The previous `auth-dashboard-after.png` was removed because it still displayed
+**Authentication required** and therefore was not valid after-state evidence.
 
-1. Select **Enter access token**. The app opens **Settings → Security**.
-2. Obtain the access token through the controller host's approved secret-store
-   workflow. Do not paste the value into logs, issue comments, URLs, or chat.
-3. Paste it into **Session access token** and select **Apply**.
-4. The app stores the token only for the browser session, reconnects
-   automatically, and replaces the authentication card with live state.
-5. If the host rejects the token, the same password field remains available;
-   the UI does not expose or guess the confidential value.
+## Deployment evidence
 
-## Runtime evidence
-
-- The action was clicked against the deployed Linux host and navigated from
-  `#/dashboard` to `#/settings`.
-- The target view exposed the password textbox named **Session access token**
-  and the disabled-until-input **Apply** button.
-- `server:8787` is healthy. Its configured `cafe-pc` bridge reaches the peer,
-  but the peer returns HTTP 401 because the two hosts currently use different
-  secret-store tokens. Completing that final pairing requires the café token
-  through the password form; bypassing or extracting it would defeat the
-  authentication boundary this flow is meant to preserve.
+An exact-main deployed screenshot is intentionally pending. It must be captured
+after this change is merged and deployed, and must show the authoritative alpha
+state without any token prompt or unadvertised board values. Source-level tests
+and generated-contract checks are evidence for this pull request; they are not
+substitutes for that post-deployment screenshot.

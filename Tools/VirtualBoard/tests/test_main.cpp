@@ -99,19 +99,19 @@ void testProtocolRoundTrip() {
   require(decoded.frame.payload == source.payload,
           "payload changed in transit");
 
-  std::vector<std::uint8_t> advisoryRaw;
+  std::vector<std::uint8_t> reservedRaw;
   require(pccontroller::wire::cobsDecode(
-              encoded.data(), encoded.size() - 1U, advisoryRaw),
-          "could not decode advisory-revision fixture");
-  advisoryRaw[1] = 0x7F;
-  advisoryRaw.back() = pccontroller::wire::crc8(
-      advisoryRaw.data(), advisoryRaw.size() - 1U);
-  auto advisoryEncoded = pccontroller::wire::cobsEncode(
-      advisoryRaw.data(), advisoryRaw.size());
-  advisoryEncoded.push_back(0);
+              encoded.data(), encoded.size() - 1U, reservedRaw),
+          "could not decode reserved-byte fixture");
+  reservedRaw[1] = 0x7F;
+  reservedRaw.back() = pccontroller::wire::crc8(
+      reservedRaw.data(), reservedRaw.size() - 1U);
+  auto reservedEncoded = pccontroller::wire::cobsEncode(
+      reservedRaw.data(), reservedRaw.size());
+  reservedEncoded.push_back(0);
   require(static_cast<bool>(pccontroller::wire::decode(
-              advisoryEncoded.data(), advisoryEncoded.size())),
-          "advisory envelope revision was treated as a protocol version");
+              reservedEncoded.data(), reservedEncoded.size())),
+          "unknown reserved envelope byte was treated as a protocol version");
 
   pccontroller::wire::Frame maximum;
   maximum.opcode = pccontroller::wire::GetStatus;
@@ -311,8 +311,12 @@ void testBoardAndPersistence() {
     const auto *buzzerPush =
         findOpcode(pushed, pccontroller::wire::BuzzerChanged);
     require(buzzerPush != nullptr &&
-                buzzerPush->payload ==
-                    std::vector<std::uint8_t>({0xB8, 0x01, 40, 0, 0}),
+                buzzerPush->payload.size() == 9 &&
+                std::equal(buzzerPush->payload.begin(),
+                           buzzerPush->payload.begin() + 5,
+                           std::vector<std::uint8_t>(
+                               {0xB8, 0x01, 40, 0, 0})
+                               .begin()),
             "buzzer frequency and duration were not pushed to the host");
 
     response = board.handle(

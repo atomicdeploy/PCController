@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -96,6 +97,11 @@ func (model *Model) resetRFStage(entries []native.RFEntry) {
 func (model Model) fetchRFEntriesCommand() tea.Cmd {
 	fetch := model.rfFetch
 	if fetch == nil {
+		if model.remote != nil {
+			return func() tea.Msg {
+				return rfEntriesResultMsg{err: errors.New("remote RF list endpoint is unavailable")}
+			}
+		}
 		fetch = func(ctx context.Context) ([]native.RFEntry, error) {
 			cursor := byte(0)
 			var entries []native.RFEntry
@@ -268,6 +274,10 @@ func (model *Model) beginRFActionPicker() {
 }
 
 func (model *Model) beginRFNameEdit() {
+	if model.remote != nil && model.saveRF == nil {
+		model.setNotice("Remote RF presentation editing is unavailable; board RF commands remain available")
+		return
+	}
 	entry, ok := model.selectedRFEntry()
 	if !ok {
 		return
@@ -281,6 +291,10 @@ func (model *Model) beginRFNameEdit() {
 }
 
 func (model *Model) beginRFCategoryPicker() {
+	if model.remote != nil && model.saveRF == nil {
+		model.setNotice("Remote RF presentation editing is unavailable; board RF commands remain available")
+		return
+	}
 	if _, ok := model.selectedRFEntry(); !ok {
 		return
 	}
@@ -290,6 +304,10 @@ func (model *Model) beginRFCategoryPicker() {
 }
 
 func (model *Model) beginRFCategoryCreate() {
+	if model.remote != nil && model.saveRF == nil {
+		model.setNotice("Remote RF presentation editing is unavailable; board RF commands remain available")
+		return
+	}
 	model.rfCategoryPicker = false
 	model.rfEditMode = "category-name"
 	model.input.Prompt = "Category name › "
@@ -378,6 +396,10 @@ func (model *Model) updateRFMetadata(key appconfig.RFCodeKey, update func(*appco
 }
 
 func (model *Model) toggleRFRadix() {
+	if model.remote != nil && model.saveRF == nil {
+		model.setNotice("Remote RF presentation editing is unavailable; board RF commands remain available")
+		return
+	}
 	if strings.EqualFold(model.rfValue.DisplayRadix, "decimal") {
 		model.rfValue.DisplayRadix = "hex"
 	} else {
@@ -388,6 +410,10 @@ func (model *Model) toggleRFRadix() {
 
 func (model *Model) persistRFConfig(success string) {
 	if model.saveRF == nil {
+		if model.remote != nil {
+			model.setNotice("Remote RF presentation editing is unavailable; board RF commands remain available")
+			return
+		}
 		model.setNotice(success + " for this session; persistence hook unavailable")
 		return
 	}

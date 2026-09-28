@@ -16,7 +16,8 @@ body:
     id: device
     attributes:
       label: Device identity
-      placeholder: Board, COM port, VID/PID, friendly name
+      description: Use a non-private board role and public USB identity. Omit local hostname, path, serial number, or port unless essential and safe to publish.
+      placeholder: Board role, VID/PID, public friendly name
     validations:
       required: true
 

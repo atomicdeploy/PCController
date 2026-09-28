@@ -11,12 +11,20 @@
 #include "LocalLib/ModeManager.h"
 #include "LocalLib/SevenSegments.h"
 #include "LocalLib/ShiftRegisters.h"
+#if PCCONTROLLER_ENABLE_TASK_SCHEDULER
 #include "LocalLib/Tasks.h"
+#endif
 #include "LocalLib/TonePlayer.h"
 #include "Project/AddressableLeds.h"
+#if PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
+#include "Project/AudioCues.h"
+#endif
 #include "Project/BootMelody.h"
 #include "Project/ControllerEvents.h"
 #include "Project/CompactI2c.h"
+#if PCCONTROLLER_ENABLE_EEPROM_MENU_LABELS
+#include "Project/EepromMenuLabels.h"
+#endif
 #include "Project/FrontPanelModel.h"
 #include "Project/IlluminationController.h"
 #include "Project/Ina219Sensor.h"

@@ -16,10 +16,10 @@ import (
 )
 
 const (
-	// PublicInfoPath is the bounded, unauthenticated device-directory document.
-	// It contains health and identity data only; control remains authenticated.
-	PublicInfoPath   = "/upnp/public.json"
-	PublicInfoSchema = "pccontroller.public.v1"
+	// PublicInfoPath is the bounded device-directory document. During the
+	// immediate alpha, application auth/authZ is disabled; capability and live
+	// availability still determine whether board-specific keys are present.
+	PublicInfoPath = "/upnp/public.json"
 )
 
 var publicHTTPTransport = func() *http.Transport {
@@ -31,7 +31,6 @@ var publicHTTPTransport = func() *http.Transport {
 }()
 
 type PublicInfo struct {
-	Schema       string          `json:"schema"`
 	Product      string          `json:"product"`
 	Protocol     string          `json:"protocol"`
 	InstanceID   string          `json:"instance_id"`
@@ -113,6 +112,77 @@ type PublicTelemetry struct {
 	PWMValue                 uint16    `json:"pwm_value,omitempty"`
 	LCDAddress               byte      `json:"lcd_address,omitempty"`
 	ResetCount               uint32    `json:"reset_count,omitempty"`
+	INA219Present            bool      `json:"-"`
+	TemperatureLEDPresent    bool      `json:"-"`
+	TemperatureBTPresent     bool      `json:"-"`
+	RelayMotionPresent       bool      `json:"-"`
+	BluetoothAudioPresent    bool      `json:"-"`
+	RemoteKeysPresent        bool      `json:"-"`
+	MenuPresent              bool      `json:"-"`
+	PWMPresent               bool      `json:"-"`
+	LCDPresent               bool      `json:"-"`
+}
+
+// MarshalJSON omits capability-specific keys entirely until the board has
+// advertised them. Valid zero and false values remain representable once a
+// capability is present; omitempty alone cannot express that distinction.
+func (value PublicTelemetry) MarshalJSON() ([]byte, error) {
+	result := map[string]any{"available": value.Available}
+	if !value.Available {
+		return json.Marshal(result)
+	}
+	result["updated_at"] = value.UpdatedAt
+	result["uptime_ms"] = value.UptimeMS
+	result["program_mode"] = value.ProgramMode
+	result["program_running"] = value.ProgramRunning
+	result["host_offline"] = value.HostOffline
+	result["hot"] = value.Hot
+	result["reset_count"] = value.ResetCount
+	if value.INA219Present {
+		result["ina219_available"] = value.INA219Available
+		if value.INA219Available {
+			result["supply_mv"] = value.SupplyMV
+			result["bus_mv"] = value.BusMV
+			result["current_ma"] = value.CurrentMA
+			result["power_mw"] = value.PowerMW
+		}
+	}
+	if value.TemperatureLEDPresent {
+		result["temperature_led_available"] = value.TemperatureLEDAvailable
+		if value.TemperatureLEDAvailable {
+			result["temperature_led_centi_c"] = value.TemperatureLEDCentiC
+		}
+	}
+	if value.TemperatureBTPresent {
+		result["temperature_bt_audio_available"] = value.TemperatureBTAvailable
+		if value.TemperatureBTAvailable {
+			result["temperature_bt_audio_centi_c"] = value.TemperatureBTAudioCentiC
+		}
+	}
+	if value.RelayMotionPresent {
+		result["door_open"] = value.DoorOpen
+		result["active_relays"] = value.ActiveRelays
+	}
+	if value.BluetoothAudioPresent {
+		result["bluetooth_audio_state"] = value.BluetoothAudioState
+	}
+	if value.RemoteKeysPresent {
+		result["active_keys"] = value.ActiveKeys
+	}
+	if value.MenuPresent {
+		result["menu_page"] = value.MenuPage
+	}
+	if value.PWMPresent {
+		result["pwm_available"] = value.PWMAvailable
+		if value.PWMAvailable {
+			result["pwm_channel"] = value.PWMChannel
+			result["pwm_value"] = value.PWMValue
+		}
+	}
+	if value.LCDPresent && value.LCDAddress != 0 {
+		result["lcd_address"] = value.LCDAddress
+	}
+	return json.Marshal(result)
 }
 
 type PublicEndpoints struct {
@@ -143,7 +213,7 @@ type Source struct {
 }
 
 func (info PublicInfo) Valid() bool {
-	return info.Schema == PublicInfoSchema && strings.EqualFold(info.Product, "PCController") &&
+	return strings.EqualFold(info.Product, "PCController") &&
 		strings.TrimSpace(info.Hostname) != ""
 }
 
@@ -258,7 +328,7 @@ func publicInfoFromTXT(values []string) PublicInfo {
 	connectable, _ := strconv.ParseBool(items["remote.connectable"])
 	telemetryAvailable := items["board.status_at"] != "" || items["board.supply_mv"] != ""
 	return PublicInfo{
-		Schema: PublicInfoSchema, Product: "PCController", Protocol: items["protocol"],
+		Product: "PCController", Protocol: items["protocol"],
 		InstanceID: items["instance.id"], InstanceName: items["instance.name"], Hostname: items["host.hostname"],
 		Health: PublicHealth{OK: items["health"] == "ok", Service: items["service"], Connectable: connectable, Auth: items["auth"]},
 		Host:   PublicHost{Version: items["host.version"], SourceHash: items["host.source_hash"], BuildTime: items["host.build_time"]},
@@ -310,7 +380,11 @@ func pinPublicInfoEndpoints(info *PublicInfo, instance Instance) {
 	}
 	info.Endpoints.Web = pin(info.Endpoints.Web, "http", "/")
 	info.Endpoints.API = pin(info.Endpoints.API, "http", "/api/snapshot")
-	info.Endpoints.ServerProof = pin(info.Endpoints.ServerProof, "http", "/api/auth/server-proof")
+	if strings.EqualFold(strings.TrimSpace(info.Health.Auth), "disabled-alpha") || strings.EqualFold(strings.TrimSpace(info.Health.Auth), "none") {
+		info.Endpoints.ServerProof = ""
+	} else {
+		info.Endpoints.ServerProof = pin(info.Endpoints.ServerProof, "http", "/api/auth/server-proof")
+	}
 	info.Endpoints.Operations = pin(info.Endpoints.Operations, "http", "/api/rpc")
 	info.Endpoints.Commands = pin(info.Endpoints.Commands, "http", "/api/commands")
 	info.Endpoints.Events = pin(info.Endpoints.Events, "ws", "/ipc")

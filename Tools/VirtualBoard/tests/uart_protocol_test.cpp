@@ -21,9 +21,9 @@ void require(bool condition, const std::string &message) {
 std::vector<std::uint8_t>
 encode(std::uint8_t opcode, std::uint8_t sequence,
        const std::vector<std::uint8_t> &payload,
-       std::uint8_t revision = ControllerProtocol::EnvelopeRevision) {
+       std::uint8_t reserved = ControllerProtocol::ReservedEnvelopeByte) {
   std::vector<std::uint8_t> raw{
-      ControllerProtocol::Magic, revision, opcode,
+      ControllerProtocol::Magic, reserved, opcode,
       sequence, static_cast<std::uint8_t>(payload.size())};
   raw.insert(raw.end(), payload.begin(), payload.end());
   raw.push_back(UartProtocol::crc8(raw.data(),
@@ -65,7 +65,7 @@ void captureFrame(const Frame &frame, void *context) {
       std::equal(before.begin(), before.end(), frame.payload);
 }
 
-void testAdvisoryRevisionDoesNotBlockSemanticFrames() {
+void testUnknownReservedEnvelopeByteDoesNotBlockSemanticFrames() {
   HardwareSerial serial;
   UartProtocol protocol(serial);
   Capture capture;
@@ -77,9 +77,26 @@ void testAdvisoryRevisionDoesNotBlockSemanticFrames() {
   protocol.service();
 
   require(capture.payloads.size() == 1 && capture.payloads[0] == expected,
-          "advisory envelope revision blocked a valid semantic frame");
+          "unknown reserved envelope byte blocked a valid semantic frame");
   require(protocol.framingErrors() == 0 && protocol.crcErrors() == 0,
-          "advisory revision advanced an envelope error counter");
+          "reserved envelope byte advanced an envelope error counter");
+}
+
+void testUnknownOptionalOpcodeReachesSemanticDispatch() {
+  HardwareSerial serial;
+  UartProtocol protocol(serial);
+  Capture capture;
+  capture.protocol = &protocol;
+  protocol.begin(115200, captureFrame, &capture);
+
+  const std::vector<std::uint8_t> expected{0xA1, 0xB2, 0xC3};
+  serial.feed(encode(0xFE, 17, expected));
+  protocol.service();
+
+  require(capture.payloads.size() == 1 && capture.payloads[0] == expected,
+          "unknown optional opcode did not reach semantic dispatch");
+  require(protocol.framingErrors() == 0 && protocol.crcErrors() == 0,
+          "unknown optional opcode advanced an envelope error counter");
 }
 
 void testRepresentativeAndMaximumPayloads() {
@@ -127,7 +144,7 @@ void testInvalidFramesAreRejected() {
 
   // Decode/re-encode with the public helper shape, but an invalid envelope.
   std::vector<std::uint8_t> raw{
-      0x5A, ControllerProtocol::EnvelopeRevision,
+      0x5A, ControllerProtocol::ReservedEnvelopeByte,
       ControllerProtocol::GetStatus, 3, 0};
   raw.push_back(UartProtocol::crc8(raw.data(),
                                    static_cast<std::uint8_t>(raw.size())));
@@ -184,14 +201,42 @@ void testMacroScratchCannotCorruptSplitSerialFrame() {
           "macro scratch corrupted a split serial frame");
 }
 
+void testBuzzerPushCarriesMCUTimestamp() {
+  HardwareSerial serial;
+  UartProtocol protocol(serial);
+  protocol.begin(115200, nullptr);
+  arduino_mock::nowMicros = 0x12345677;
+  const std::uint8_t buzzer[] = {0x70, 0x03, 125, 0, 0};
+  require(protocol.send(ControllerProtocol::BuzzerChanged, 0, buzzer,
+                        sizeof(buzzer)),
+          "timestamped buzzer push failed");
+
+  const auto &encoded = serial.written();
+  require(encoded.size() > 1 && encoded.back() == 0,
+          "buzzer push omitted its frame delimiter");
+  std::uint8_t raw[ControllerProtocol::WireContract::MaximumRawFrame]{};
+  const auto length = ControllerProtocol::WireCodec::cobsDecode(
+      encoded.data(), static_cast<std::uint8_t>(encoded.size() - 1), raw,
+      sizeof(raw));
+  require(length == 15 && raw[2] == ControllerProtocol::BuzzerChanged &&
+              raw[4] == 9,
+          "buzzer push did not use the required nine-byte timed payload");
+  require(raw[5] == 0x70 && raw[6] == 0x03 && raw[7] == 125 &&
+              raw[8] == 0 && raw[9] == 0 && raw[10] == 0x78 &&
+              raw[11] == 0x56 && raw[12] == 0x34 && raw[13] == 0x12,
+          "buzzer push changed its state prefix or MCU timestamp suffix");
+}
+
 } // namespace
 
 int main() {
   try {
     testRepresentativeAndMaximumPayloads();
-    testAdvisoryRevisionDoesNotBlockSemanticFrames();
+    testUnknownReservedEnvelopeByteDoesNotBlockSemanticFrames();
+    testUnknownOptionalOpcodeReachesSemanticDispatch();
     testInvalidFramesAreRejected();
     testMacroScratchCannotCorruptSplitSerialFrame();
+    testBuzzerPushCarriesMCUTimestamp();
     std::cout << "firmware_uart_protocol_tests: all checks passed\n";
     return 0;
   } catch (const std::exception &error) {

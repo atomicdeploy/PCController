@@ -286,7 +286,7 @@ export function validateCodeql(source, sourceLanguages) {
       "./cmd/controller-cabi",
     ]],
     ["go-windows", [
-      "../Build/go-tests.mjs --module . --output ../../.build/tests/go",
+      "../Build/go-tests.mjs --module . --go go",
       "go run ./winres/generate_icon.go",
       "-buildmode=c-shared",
       "./cmd/controller-cabi",

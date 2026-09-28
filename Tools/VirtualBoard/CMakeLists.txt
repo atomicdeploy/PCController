@@ -126,7 +126,7 @@ if(BUILD_TESTING)
     tests/arduino_mock
     ../..
   )
-  set_property(TARGET firmware_relay_controller_adapter_tests PROPERTY CXX_STANDARD 11)
+  set_property(TARGET firmware_relay_controller_adapter_tests PROPERTY CXX_STANDARD 17)
   if(MSVC)
     target_compile_options(firmware_relay_controller_adapter_tests PRIVATE /W4 /permissive-)
   else()
@@ -155,8 +155,10 @@ if(BUILD_TESTING)
   # trace confirms that replay still reaches the ordinary protocol dispatcher.
   add_executable(firmware_macro_queue_adapter_tests
     tests/macro_queue_adapter_test.cpp
+    ../../LocalLib/ShiftRegisters.cpp
     ../../Project/Core/MacroRing.cpp
     ../../Project/MacroQueue.cpp
+    ../../Project/RelayController.cpp
     ../../Project/UartProtocol.cpp
   )
   target_include_directories(firmware_macro_queue_adapter_tests PRIVATE
@@ -207,10 +209,19 @@ if(BUILD_TESTING)
     ../../LocalLib/ShiftRegisters.cpp
     ../../LocalLib/TonePlayer.cpp
     ../../Project/RelayController.cpp
+    ../../Project/SettingsStore.cpp
+    ../../Project/UartProtocol.cpp
   )
   target_include_directories(firmware_controls_tests PRIVATE
     tests/arduino_mock
     ../..
+  )
+  # Exercise the persisted page-rank compatibility path without linking or
+  # changing the VirtualBoard runtime.
+  target_compile_definitions(firmware_controls_tests PRIVATE
+    PCCONTROLLER_MENU_VISIBILITY=1
+    PCCONTROLLER_MENU_ORDERING=1
+    PCCONTROLLER_SETTINGS_TEST_LAYOUT=1
   )
   if(MSVC)
     target_compile_options(firmware_controls_tests PRIVATE /W4 /permissive-)
@@ -218,6 +229,33 @@ if(BUILD_TESTING)
     target_compile_options(firmware_controls_tests PRIVATE ${VIRTUAL_BOARD_WARNINGS})
   endif()
   add_test(NAME firmware_controls_unit COMMAND firmware_controls_tests)
+
+  # Compile the production AVR status LED compositor with deterministic
+  # hardware/EEPROM doubles. This is the AVR-first same-source gate; it does
+  # not alter or validate the separate VirtualBoard runtime implementation.
+  add_executable(firmware_status_led_controller_tests
+    tests/status_led_controller_test.cpp
+    ../../Project/CompactI2c.cpp
+    ../../Project/PwmController.cpp
+    ../../Project/PwmExpanderDriver.cpp
+    ../../Project/StatusLedController.cpp
+    ../../Project/UartProtocol.cpp
+  )
+  target_include_directories(firmware_status_led_controller_tests PRIVATE
+    tests/arduino_mock
+    ../..
+  )
+  set_property(TARGET firmware_status_led_controller_tests PROPERTY
+    CXX_STANDARD 17)
+  if(MSVC)
+    target_compile_options(firmware_status_led_controller_tests PRIVATE
+      /W4 /permissive-)
+  else()
+    target_compile_options(firmware_status_led_controller_tests PRIVATE
+      ${VIRTUAL_BOARD_WARNINGS})
+  endif()
+  add_test(NAME firmware_status_led_controller_unit
+    COMMAND firmware_status_led_controller_tests)
 
   # Compile the production EEPROM reset journal against a byte-accurate mock.
   # This covers corrupt/torn slots and both physical/count rollover boundaries.
@@ -239,4 +277,49 @@ if(BUILD_TESTING)
     target_compile_options(firmware_reset_telemetry_tests PRIVATE ${VIRTUAL_BOARD_WARNINGS})
   endif()
   add_test(NAME firmware_reset_telemetry_unit COMMAND firmware_reset_telemetry_tests)
+
+  # Validate the compile-gated EEPROM menu-label reader against a byte-accurate
+  # 1 KiB EEPROM double. This is intentionally a production-AVR component test,
+  # not a VirtualBoard runtime behavior fork.
+  add_executable(firmware_eeprom_menu_labels_tests
+    tests/eeprom_menu_labels_test.cpp
+    ../../Project/EepromMenuLabels.cpp
+  )
+  target_include_directories(firmware_eeprom_menu_labels_tests PRIVATE
+    tests/arduino_mock
+    ../..
+  )
+  target_compile_definitions(firmware_eeprom_menu_labels_tests PRIVATE
+    PCCONTROLLER_ENABLE_EEPROM_MENU_LABELS=1
+  )
+  if(MSVC)
+    target_compile_options(firmware_eeprom_menu_labels_tests PRIVATE /W4 /permissive-)
+  else()
+    target_compile_options(firmware_eeprom_menu_labels_tests PRIVATE ${VIRTUAL_BOARD_WARNINGS})
+  endif()
+  add_test(NAME firmware_eeprom_menu_labels_unit COMMAND firmware_eeprom_menu_labels_tests)
+
+  # Compile the production Timer1 engine and compact EEPROM-backed cue policy
+  # together. This catches exact door/output tones, atomic CRC fallback,
+  # specific-cue preemption, and the global Silent electrical invariant.
+  add_executable(firmware_audio_cue_tests
+    tests/audio_cue_test.cpp
+    ../../LocalLib/TonePlayer.cpp
+    ../../Project/AudioCues.cpp
+    ../../Project/UartProtocol.cpp
+  )
+  target_include_directories(firmware_audio_cue_tests PRIVATE
+    tests/arduino_mock
+    ../..
+  )
+  target_compile_definitions(firmware_audio_cue_tests PRIVATE
+    PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES=1
+    PCCONTROLLER_ENABLE_EEPROM_AUDIO_CUES=1
+  )
+  if(MSVC)
+    target_compile_options(firmware_audio_cue_tests PRIVATE /W4 /permissive-)
+  else()
+    target_compile_options(firmware_audio_cue_tests PRIVATE ${VIRTUAL_BOARD_WARNINGS})
+  endif()
+  add_test(NAME firmware_audio_cue_unit COMMAND firmware_audio_cue_tests)
 endif()

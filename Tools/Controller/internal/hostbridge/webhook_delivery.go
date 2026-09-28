@@ -30,7 +30,6 @@ import (
 )
 
 const (
-	webhookQueueSchema          = 1
 	defaultWebhookMaxPending    = 1024
 	defaultWebhookMaxDead       = 512
 	defaultWebhookMaxCompleted  = 2048
@@ -89,7 +88,6 @@ type webhookQueueCounters struct {
 }
 
 type webhookQueueState struct {
-	Schema    int                        `json:"schema"`
 	Pending   []webhookDelivery          `json:"pending,omitempty"`
 	Dead      []webhookDelivery          `json:"dead,omitempty"`
 	Completed []webhookCompletedDelivery `json:"completed,omitempty"`
@@ -192,7 +190,6 @@ func newWebhookDeliveryQueue(options webhookQueueOptions) (*webhookDeliveryQueue
 		workers: options.Workers, inFlight: make(map[string]bool),
 		activeCancels: make(map[string]context.CancelFunc),
 		wake:          make(chan struct{}, options.Workers), done: make(chan struct{}),
-		state: webhookQueueState{Schema: webhookQueueSchema},
 	}
 	if err := queue.load(); err != nil {
 		return nil, err
@@ -720,7 +717,7 @@ func executeWebhookAttempt(
 		request.Header.Set("X-PCController-Nonce", nonce)
 		request.Header.Set(
 			"X-PCController-Signature",
-			"v1="+webhookSignature(secret, timestamp, nonce, method, request.URL.RequestURI(), delivery.ID, body),
+			"sha256="+webhookSignature(secret, timestamp, nonce, method, request.URL.RequestURI(), delivery.ID, body),
 		)
 	}
 	// A redirect target has not passed the configured webhook's URL policy and
@@ -1133,9 +1130,6 @@ func (queue *webhookDeliveryQueue) load() error {
 	if err := json.Unmarshal(encoded, &state); err != nil {
 		return fmt.Errorf("decode outbound webhook queue: %w", err)
 	}
-	if state.Schema != webhookQueueSchema {
-		return fmt.Errorf("unsupported outbound webhook queue schema %d", state.Schema)
-	}
 	if len(state.Pending) > queue.maxPending || len(state.Dead) > queue.maxDead ||
 		len(state.Completed) > queue.maxCompleted {
 		return errors.New("outbound webhook queue exceeds configured record bounds")
@@ -1168,7 +1162,6 @@ func (queue *webhookDeliveryQueue) load() error {
 }
 
 func (queue *webhookDeliveryQueue) persistLocked() error {
-	queue.state.Schema = webhookQueueSchema
 	encoded, err := json.MarshalIndent(queue.state, "", "  ")
 	if err != nil {
 		return err

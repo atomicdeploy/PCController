@@ -9,13 +9,18 @@ describe('dynamic controller favicon', () => {
     expect(controllerFaviconState({ ...emptySnapshot, connected: true, connection_state: 'connected' })).toBe('connected')
     expect(controllerFaviconState({ ...emptySnapshot, connected: true, have_status: true, status: { ...emptySnapshot.status, hot: true } })).toBe('fault')
     expect(controllerFaviconState({ ...emptySnapshot, connection_reason: 'authentication rejected' })).toBe('fault')
+    expect(controllerFaviconState({
+      ...emptySnapshot,
+      connection_state: 'reconnecting',
+      hardware_problems: [{ code: 'usb_descriptor_failure', severity: 'error', observed_at: '2026-09-28T10:00:00Z' }],
+    })).toBe('fault')
   })
 
   it('keeps the real icon fallback and supplies a compact neutral-violet state SVG', () => {
     const url = controllerFaviconDataURL('offline')
     expect(url.startsWith('data:image/svg+xml,')).toBe(true)
     const svg = decodeURIComponent(url.slice(url.indexOf(',') + 1))
-    expect(svg).toContain('Controller offline')
+    expect(svg).toContain('Board offline')
     expect(svg).toContain('#8b6de0')
     expect(svg).not.toMatch(/grid|radialGradient|#00ffff|cyan|teal/i)
   })
