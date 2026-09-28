@@ -9,7 +9,6 @@
 // ordinary protocol dispatcher path, so replay cannot bypass peripheral guards.
 class MacroQueue {
 public:
-  static constexpr uint8_t Schema = ControllerCore::MacroRing::Schema;
   static constexpr uint8_t ExecutionSequence = 0xFE;
   static constexpr uint8_t KeepOutputsOnCancel =
       ControllerCore::MacroRing::KeepOutputsOnCancel;
@@ -17,7 +16,8 @@ public:
   explicit MacroQueue(ControllerProtocol::UartProtocol &protocol);
 
   // Accepts Start/Step/Cancel protocol records into the byte-ring buffer.
-  bool handle(const ControllerProtocol::Frame &frame);
+  bool handle(const ControllerProtocol::Frame &frame, uint8_t relayMask = 0);
+  void recordRelay(uint8_t mask, uint32_t nowUs);
   // Releases one due opcode using the MCU microsecond clock for precise deltas.
   bool dequeueDue(ControllerProtocol::Frame &frame);
   // Records dispatch fidelity and advances or terminates playback.
@@ -25,6 +25,7 @@ public:
   void cancel(bool keepOutputs = false);
   bool takeSafeStopRequest();
   bool active() const;
+  uint8_t *claimSharedWorkspace() { return ring_.claimSharedWorkspace(); }
 
 private:
   void sendStatus(uint8_t opcode, uint8_t sequence);

@@ -23,16 +23,16 @@ void MacroQueue::sendStatus(uint8_t opcode, uint8_t sequence) {
                  reinterpret_cast<const uint8_t *>(&status), sizeof(status));
 }
 
-bool MacroQueue::handle(const ControllerProtocol::Frame &frame) {
+bool MacroQueue::handle(const ControllerProtocol::Frame &frame, uint8_t relayMask) {
   const uint8_t *payload = frame.payload;
   const uint8_t length = frame.payloadLength;
   if (frame.opcode == ControllerProtocol::MacroStart) {
-    // BEGIN [schema, id, cancel flags, total steps LE16]. Per-step timed
+    // BEGIN [id, cancel flags, total steps LE16]. Per-step timed
     // 0xFE ACK/error frames let the host calculate exact error without
     // duplicating tolerance/statistics code in AVR flash.
     // Duration remains host-owned because the hosted front-panel macro page
     // already has the complete library and this saves scarce AVR flash.
-    if (length < 5 || payload[0] != Schema) {
+    if (length != 4) {
       protocol_.sendError(frame.sequence, frame.opcode,
                           ControllerProtocol::BadPayload);
       return true;
@@ -42,7 +42,7 @@ bool MacroQueue::handle(const ControllerProtocol::Frame &frame) {
                           ControllerProtocol::Busy);
       return true;
     }
-    ring_.begin(payload[1], payload[2], read16(payload + 3));
+    ring_.begin(payload[0], payload[1], read16(payload + 2));
     protocol_.sendAck(frame.sequence, frame.opcode);
     sendStatus(ControllerProtocol::Event, 0);
     return true;
@@ -59,6 +59,49 @@ bool MacroQueue::handle(const ControllerProtocol::Frame &frame) {
   }
   if (frame.opcode != ControllerProtocol::MacroStep) {
     return false;
+  }
+  if (length != 0 && payload[0] >= 3) {
+    bool accepted = false;
+    switch (payload[0]) {
+    case 3: // RECORD BEGIN [3,id], including the current physical baseline.
+      if (length == 2 && !active()) {
+        ring_.beginRecording(payload[1], relayMask, micros());
+        accepted = true;
+      }
+      break;
+    case 4: // RECORD STOP retains the circular RAM contents.
+      accepted = length == 1 && ring_.stopRecording();
+      break;
+    case 5: { // READ [5,byteOffsetLE16]; response [event,0x80,offsetLE16,snapshots].
+      if (length != 3 || !ring_.hasRecording()) break;
+      const uint16_t offset = read16(payload + 1);
+      if (offset > ring_.status().report.acceptedBytes ||
+          offset % ControllerCore::MacroRing::SnapshotBytes != 0) break;
+      uint8_t *response = protocol_.framePayloadScratch();
+      response[0] = static_cast<uint8_t>(ControllerEventType::Macro);
+      response[1] = 0x80;
+      response[2] = static_cast<uint8_t>(offset);
+      response[3] = static_cast<uint8_t>(offset >> 8);
+      const uint8_t count = ring_.readRecording(offset, response + 4,
+                                                ControllerProtocol::MaximumPayload - 4);
+      protocol_.send(ControllerProtocol::MacroStatusResponse, frame.sequence,
+                     response, static_cast<uint8_t>(count + 4));
+      return true;
+    }
+    case 6: // Replay retained snapshots through ordinary safe RelaySet dispatch.
+      accepted = length == 1 && ring_.startRecorded(micros(), ControllerProtocol::RelaySet);
+      break;
+    case 7: // Explicitly release retained RAM before strip streaming may borrow it.
+      accepted = length == 1 && ring_.clearRecording();
+      break;
+    }
+    if (!accepted) {
+      protocol_.sendError(frame.sequence, frame.opcode, ControllerProtocol::BadPayload);
+    } else {
+      protocol_.sendAck(frame.sequence, frame.opcode);
+      sendStatus(ControllerProtocol::Event, 0);
+    }
+    return true;
   }
   if (length != 0 && payload[0] == 2) {
     sendStatus(ControllerProtocol::MacroStatusResponse, frame.sequence);
@@ -131,3 +174,7 @@ void MacroQueue::cancel(bool keepOutputs) {
 bool MacroQueue::takeSafeStopRequest() { return ring_.takeSafeStopRequest(); }
 
 bool MacroQueue::active() const { return ring_.active(); }
+
+void MacroQueue::recordRelay(uint8_t mask, uint32_t nowUs) {
+  ring_.recordRelay(mask, nowUs);
+}

@@ -32,18 +32,28 @@ public:
 
   uint8_t activeRelayMask() const { return registers_.activeOutputs(); }
   void commitRelayMask(uint8_t activeMask, uint32_t) {
+    if (activeMask == registers_.activeOutputs()) return;
     registers_.setActiveOutputs(activeMask);
     registers_.service();
+    // Timestamp the hardware latch, before UART or other loop services can
+    // delay notification. No intermediate reversal edge is collapsed away.
+    const uint32_t appliedAtUs = micros();
+    if (observer_) observer_(activeMask, appliedAtUs);
   }
+  void setObserver(void (*observer)(uint8_t, uint32_t)) { observer_ = observer; }
 
 private:
   ShiftRegisters &registers_;
+  void (*observer_)(uint8_t, uint32_t) = nullptr;
 };
 
 // RelayController is the thin AVR adapter for the portable motion sequencer.
 class RelayController {
 public:
   explicit RelayController(ShiftRegisters &registers);
+  void setAppliedObserver(void (*observer)(uint8_t, uint32_t)) {
+    sink_.setObserver(observer);
+  }
 
   // Forces enable relays off before clearing direction/general relays.
   void begin(uint32_t now = millis());

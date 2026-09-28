@@ -619,17 +619,38 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
       return;
 
     case AddressableLed: {
-      // [pixel 0..10, or 0xFF=fill][R][G][B][brightness].
-      if (length < 5 ||
+      uint8_t *workspace = macroPlayback.claimSharedWorkspace();
+      if (!workspace) goto badPayload;
+      AddressableLeds::bindWorkspace(workspace);
+      // 0xFE configures count; 0xFD stages RGB pixels; 0xFC commits once.
+      // ACK each chunk before transmitting another: show masks UART IRQs.
+      if (length == 2 && payload[0] == 0xFE) {
+        if (!AddressableLeds::configure(payload[1])) goto badPayload;
+        goto acknowledged;
+      }
+      if (length == 1 && payload[0] == 0xFC) {
+        AddressableLeds::show();
+        goto acknowledged;
+      }
+      if (length >= 5 && payload[0] == 0xFD) {
+        const uint8_t pixels = (length - 2) / 3;
+        if ((length - 2) % 3 || payload[1] + pixels > AddressableLeds::count()) goto badPayload;
+        for (uint8_t i = 0; i < pixels; ++i) {
+          const uint8_t offset = 2 + i * 3;
+          AddressableLeds::setPixel(payload[1] + i, RgbColor(payload[offset], payload[offset + 1], payload[offset + 2]));
+        }
+        goto acknowledged;
+      }
+      if (length != 5 ||
           (payload[0] != 0xFF &&
-           payload[0] >= AddressableLeds::PixelCount)) {
+           payload[0] >= AddressableLeds::count())) {
         goto badPayload;
       }
       const RgbColor color(payload[1], payload[2], payload[3]);
       if (payload[0] == 0xFF) {
         AddressableLeds::fill(color);
       } else {
-        AddressableLeds::buffer()[payload[0]] = color;
+        AddressableLeds::setPixel(payload[0], color);
       }
       AddressableLeds::show();
       goto acknowledged;
@@ -793,7 +814,7 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
     case MacroStart:
     case MacroCancel:
     case MacroStep:
-      macroPlayback.handle(frame);
+      macroPlayback.handle(frame, relays.activeRelayMask());
       if (macroPlayback.takeSafeStopRequest()) {
         safeStopMacroOutputs();
       }

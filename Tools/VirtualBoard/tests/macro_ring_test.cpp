@@ -22,9 +22,9 @@ MacroRing makeRing(uint8_t eventType = 6) {
   return ring;
 }
 
-void testSchemaTwoLifecycleAndRollover() {
+void testLifecycleAndRollover() {
   MacroRing ring = makeRing();
-  require(ring.status().type == 6 && ring.status().report.schema == 2 &&
+  require(ring.status().type == 6 &&
               ring.status().report.state == MacroRing::Idle,
           "schema-2 macro status envelope drifted");
 
@@ -149,15 +149,95 @@ void testCancelOptions() {
           "ordinary cancellation no longer requests the dispatcher safe-stop");
 }
 
+uint32_t read32(const uint8_t *bytes) {
+  return uint32_t(bytes[0]) | uint32_t(bytes[1]) << 8 |
+         uint32_t(bytes[2]) << 16 | uint32_t(bytes[3]) << 24;
+}
+
+void testRecordingCircularRetentionAndRollover() {
+  MacroRing ring = makeRing();
+  ring.beginRecording(42, 0x10, 0xFFFFFF00UL);
+  require(ring.active() && !ring.append(5, 1, nullptr, 0, 0),
+          "stream APPEND corrupted an active recording");
+  require(!ring.recordRelay(0x10, 0xFFFFFF10UL), "unchanged mask was recorded");
+  for (uint32_t index = 1; index <= 40; ++index) {
+    require(ring.recordRelay(static_cast<uint8_t>(index),
+                             static_cast<uint32_t>(0xFFFFFF00UL + index * 137)),
+            "applied edge was lost at micros rollover");
+  }
+  require(ring.stopRecording() && !ring.active() && ring.hasRecording(),
+          "record STOP discarded retained RAM");
+  require(ring.claimSharedWorkspace() == nullptr,
+          "strip workspace claim silently destroyed retained recording");
+  const auto &report = ring.status().report;
+  require(report.fill == 125 && report.totalSteps == 25 && report.underruns == 16,
+          "bounded snapshot ring did not evict whole oldest snapshots");
+  std::array<uint8_t, 125> bytes{};
+  require(ring.readRecording(0, bytes.data(), 125) == 125 &&
+              read32(bytes.data()) == 0 && bytes[4] == 16 &&
+              read32(bytes.data() + 120) == 24 * 137 && bytes[124] == 40,
+          "ring wrap changed masks or normalized MCU edge deltas");
+  std::array<uint8_t, 44> page{};
+  require(ring.readRecording(40, page.data(), 44) == 40 &&
+              read32(page.data()) == 8 * 137 && page[4] == 24 &&
+              ring.readRecording(1, page.data(), 44) == 0,
+          "paged recording read split a snapshot or misread circular position");
+}
+
+void testRetainedReplayExactDeadlinesAndCancellation() {
+  MacroRing ring = makeRing();
+  ring.beginRecording(9, 0, 900);
+  ring.recordRelay(0x10, 1037);
+  ring.recordRelay(0, 1642);
+  ring.stopRecording();
+  require(ring.startRecorded(0xFFFFFFA0UL, 0x34), "retained replay did not start");
+  MacroRing::Command command{};
+  uint8_t payload[2]{};
+  for (uint8_t snapshot = 0; snapshot < 3; ++snapshot) {
+    const uint32_t delta = snapshot == 0 ? 0 : snapshot == 1 ? 137 : 742;
+    const uint32_t deadline = static_cast<uint32_t>(0xFFFFFFA0UL + delta);
+    if (snapshot != 0) {
+      require(ring.dequeueDue(deadline - 1, command, payload, 2) == MacroRing::NotDue,
+              "retained relay edge was replayed before its microsecond deadline");
+    }
+    for (uint8_t bit = 0; bit < 8; ++bit) {
+      require(ring.dequeueDue(deadline, command, payload, 2) == MacroRing::Ready &&
+                  command.opcode == 0x34 && payload[0] == bit &&
+                  payload[1] == (snapshot == 1 && bit == 4 ? 1 : 0),
+              "retained replay bypassed ordinary relay opcode or changed mask");
+      ring.completeStep(true);
+    }
+  }
+  require(ring.hasRecording() && ring.status().report.executedSteps == 3 &&
+              ring.startRecorded(1200, 0x34) && ring.cancel(false) &&
+              ring.takeSafeStopRequest() && ring.hasRecording(),
+          "replay/cancel destroyed RAM recording or omitted safe stop");
+  uint8_t bytes[15]{};
+  require(ring.readRecording(0, bytes, 15) == 15 && read32(bytes + 5) == 137 &&
+              read32(bytes + 10) == 742,
+          "repeated replay changed the stored profile");
+  ring.beginRecording(1, 0, 0);
+  require(!ring.recordRelay(1, 0x80000000UL) && ring.hasRecording(),
+          "oversized recording duration silently wrapped deadline ordering");
+  require(ring.clearRecording() && ring.claimSharedWorkspace() != nullptr &&
+              !ring.hasRecording(), "explicit clear did not release shared workspace");
+  ring.claimSharedWorkspace()[299] = 0xA5;
+  ring.beginRecording(3, 0, 123);
+  require(!ring.clearRecording() && ring.claimSharedWorkspace() == nullptr,
+          "shared workspace was writable while recorder owned it");
+}
+
 } // namespace
 
 int main() {
   try {
-    testSchemaTwoLifecycleAndRollover();
+    testLifecycleAndRollover();
     testBoundedQueueAndStartGate();
     testMalformedRecordAndSafeStop();
     testOversizedHeaderCannotStarvePlayback();
     testCancelOptions();
+    testRecordingCircularRetentionAndRollover();
+    testRetainedReplayExactDeadlinesAndCancellation();
     std::cout << "firmware_macro_ring_tests: all checks passed\n";
     return 0;
   } catch (const std::exception &error) {

@@ -3,20 +3,21 @@
 #include <stdint.h>
 
 // Fixed-storage macro scheduler shared by AVR-facing adapters. It owns only
-// schema-2 queue/timing state; its caller still sends every released command
+// queue/timing state; its caller still sends every released command
 // through the ordinary dispatcher and therefore keeps peripheral safety local.
 namespace ControllerCore {
 
 class MacroRing {
 public:
-  static constexpr uint8_t Schema = 2;
   static constexpr uint8_t QueueSize = 128;
+  static constexpr uint16_t WorkspaceBytes = 300;
   static constexpr uint8_t Capacity = QueueSize - 1;
   static constexpr uint8_t QueueMask = QueueSize - 1;
   static constexpr uint8_t RecordHeaderBytes = 6;
   static constexpr uint8_t KeepOutputsOnCancel = 1U << 0;
 
-  // State is the compact schema-2 lifecycle value sent to the host.
+  static constexpr uint8_t SnapshotBytes = 5;
+  // State is the compact lifecycle value sent to the host.
   enum StateCode : uint8_t {
     Idle = 0,
     Buffering = 1,
@@ -24,11 +25,13 @@ public:
     Cancelled = 3,
     Completed = 4,
     Failed = 5,
+    Recording = 6,
+    Recorded = 7,
+    ReplayingRecording = 8,
   };
 
 #pragma pack(push, 1)
   struct Report {
-    uint8_t schema;
     uint8_t state;
     uint8_t id;
     uint16_t acceptedSteps;
@@ -48,10 +51,8 @@ public:
   };
 #pragma pack(pop)
 
-  static_assert(sizeof(Report) == 18,
-                "schema-2 macro report must remain byte stable");
-  static_assert(sizeof(StatusEvent) == 19,
-                "schema-2 macro event must remain byte stable");
+  static_assert(sizeof(Report) == 17, "macro report must remain byte stable");
+  static_assert(sizeof(StatusEvent) == 18, "macro event must remain byte stable");
 
   struct Command {
     uint8_t opcode;
@@ -81,6 +82,14 @@ public:
   bool defaultKeepOutputsOnCancel() const;
   bool takeSafeStopRequest();
   bool active() const;
+  void beginRecording(uint8_t id, uint8_t mask, uint32_t nowUs);
+  bool recordRelay(uint8_t mask, uint32_t nowUs);
+  bool stopRecording();
+  bool startRecorded(uint32_t nowUs, uint8_t relayOpcode);
+  uint8_t readRecording(uint16_t offset, uint8_t *bytes, uint8_t capacity) const;
+  bool hasRecording() const;
+  bool clearRecording();
+  uint8_t *claimSharedWorkspace();
 
   // Refreshes fill at serialization time, preserving the original report
   // semantics without mutating a second adapter-owned copy.
@@ -97,15 +106,21 @@ private:
   // UART reference. MacroQueue adds that reference before this object, keeping
   // its static SRAM footprint bounded on ATmega328P.
   StatusEvent status_;
-  uint8_t queue_[QueueSize];
+  // Macro and strip streaming are mutually exclusive. The strip borrows this
+  // workspace only after the user explicitly clears any retained recording.
+  uint8_t queue_[WorkspaceBytes];
   uint8_t head_;
   uint8_t used_;
   uint8_t options_;
   bool safeStopRequested_;
+  // Recording shares queue_ with streamed playback; only two cursor bytes
+  // are added, never a second allocation or recording-sized RAM buffer.
+  uint8_t replayOffset_;
+  uint8_t replayBit_;
 };
 
 #if defined(__AVR__)
-static_assert(sizeof(MacroRing) == 151,
+static_assert(sizeof(MacroRing) == 324,
               "portable macro ring must preserve the AVR queue footprint");
 #endif
 

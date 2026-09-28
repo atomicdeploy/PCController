@@ -55,7 +55,7 @@ public:
                   uint8_t totalSeconds, uint8_t remainingSeconds);
   void rfReceived(uint32_t code, uint8_t bits, uint8_t protocol,
                   uint16_t pulseMicros, uint8_t learnedId);
-  void relay(uint8_t activeMask);
+  void relay(uint8_t activeMask, uint32_t appliedAtUs);
   void macro(uint8_t state, uint8_t id);
   void reset(uint8_t cause, uint32_t count);
   // Emits an immediate typed transition; measurements remain in STATUS.

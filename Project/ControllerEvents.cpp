@@ -84,9 +84,11 @@ void ControllerEvents::rfReceived(uint32_t code, uint8_t bits,
   send(payload, sizeof(payload));
 }
 
-void ControllerEvents::relay(uint8_t activeMask) {
+void ControllerEvents::relay(uint8_t activeMask, uint32_t appliedAtUs) {
   const uint8_t payload[] = {
-      static_cast<uint8_t>(ControllerEventType::Relay), activeMask};
+      static_cast<uint8_t>(ControllerEventType::Relay), activeMask,
+      static_cast<uint8_t>(appliedAtUs), static_cast<uint8_t>(appliedAtUs >> 8),
+      static_cast<uint8_t>(appliedAtUs >> 16), static_cast<uint8_t>(appliedAtUs >> 24)};
   send(payload, sizeof(payload));
 }
 

@@ -3,6 +3,11 @@
 // Arduino lifecycle
 // -----------------------------------------------------------------------------
 
+void controllerRelayApplied(uint8_t mask, uint32_t appliedAtUs) {
+  macroPlayback.recordRelay(mask, appliedAtUs);
+  appEvents.relay(mask, appliedAtUs);
+}
+
 // Initializes safety first, then UI, buses, sensors, RF, and readiness events.
 static inline __attribute__((always_inline)) void initializeController() {
   // The former Wire timeout path caused reproducible live-menu resets. The
@@ -21,12 +26,14 @@ static inline __attribute__((always_inline)) void initializeController() {
   now = millis();
   const uint32_t startupNow = now;
   shiftRegisters.begin();
+  relays.setAppliedObserver(controllerRelayApplied);
   relays.begin(startupNow);
   systemInputs.begin(shiftRegisters.rawInputs(), startupNow);
   buzzer.begin();
 #if PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
   audioCues.begin();
 #endif
+  AddressableLeds::bindWorkspace(macroPlayback.claimSharedWorkspace());
   AddressableLeds::begin();
   loadIlluminationSettings();
 #if PCCONTROLLER_ENABLE_EEPROM_MENU_LABELS
@@ -205,7 +212,6 @@ static inline __attribute__((always_inline)) void serviceController() {
   relays.service(loopNow);
   const uint8_t relayMask = relays.activeRelayMask();
   if (relayMask != lastRelayMask) {
-    appEvents.relay(relayMask);
 #if PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
     if (settingsStore.values().relayAudioEnabled() &&
         ((relayMask ^ lastRelayMask) & 0xFAU) != 0) {
