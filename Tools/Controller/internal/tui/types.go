@@ -249,6 +249,9 @@ type Options struct {
 	AckAppAction     func(hostui.ActionAck) error
 	Remote           *RemoteBackend
 	Preview          *control.Snapshot
+	// AutoConnect starts the first bounded local connection attempt as a Tea
+	// command, after the initial frame and title can be rendered.
+	AutoConnect      bool
 	ForceWelcome     bool
 	DisableWelcome   bool
 	MarkWelcomed     func()
