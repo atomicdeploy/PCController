@@ -474,6 +474,11 @@ func NewWithOptions(runtime *control.Runtime, engine *shell.Engine, options Opti
 		markWelcomed: marker, debug: debug,
 		logs: nil,
 	}
+	if options.AutoConnect && options.Preview == nil && options.Remote == nil {
+		snapshot := runtime.Snapshot()
+		model.connectPending = !snapshot.Connected && !snapshot.Paused &&
+			snapshot.ConnectionState != "reconnecting"
+	}
 	if model.navigationGroup == "" {
 		model.navigationGroup = hostui.DefaultNavigationGroup
 	}
@@ -536,6 +541,9 @@ func NewWithOptions(runtime *control.Runtime, engine *shell.Engine, options Opti
 
 func (model Model) Init() tea.Cmd {
 	commands := []tea.Cmd{tick(model.statusInterval()), tea.SetWindowTitle(model.terminalTitle())}
+	if model.connectPending && model.preview == nil && model.remote == nil {
+		commands = append(commands, connect(model.runtime))
+	}
 	if model.appActions != nil {
 		commands = append(commands, waitAppAction(model.appActions))
 	}
@@ -2276,6 +2284,14 @@ func connect(runtime *control.Runtime) tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		return connectResultMsg{err: runtime.EnsureConnected(ctx)}
+	}
+}
+
+func connectAndResume(runtime *control.Runtime) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		return connectResultMsg{err: runtime.Connect(ctx)}
 	}
 }
 

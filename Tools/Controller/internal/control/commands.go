@@ -318,8 +318,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 					return "", err
 				}
 			} else {
-				runtime.ResumeAuto()
-				if err := runtime.EnsureConnected(requestContext); err != nil {
+				if err := runtime.Connect(requestContext); err != nil {
 					return "", err
 				}
 			}
@@ -336,11 +335,9 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 	mustRegister(shell.Command{
 		Name: "reconnect", Usage: "reconnect", Summary: "resume authenticated auto-reconnect",
 		Run: func(ctx context.Context, _ []string) (string, error) {
-			_ = runtime.Close()
-			runtime.ResumeAuto()
 			requestContext, cancel := context.WithTimeout(ctx, 8*time.Second)
 			defer cancel()
-			if err := runtime.EnsureConnected(requestContext); err != nil {
+			if err := runtime.Reconnect(requestContext, "interactive reconnect requested"); err != nil {
 				return "", err
 			}
 			return "reconnected " + runtime.Snapshot().Port.Name, nil
@@ -1240,11 +1237,10 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 
 func encodeLiveSettingsExport(settings native.Settings) (string, error) {
 	encoded, err := json.MarshalIndent(struct {
-		Format   string          `json:"format"`
 		Source   string          `json:"source"`
 		Settings native.Settings `json:"settings"`
 	}{
-		Format: "controller-mcu-settings/v1", Source: "live-opcode",
+		Source:   "live-opcode",
 		Settings: settings,
 	}, "", "  ")
 	if err != nil {
@@ -4643,11 +4639,17 @@ func reconnectProgrammingDevice(
 		programmingIdentity(expected),
 		programmingIdentity(connected.Port),
 	) {
-		_ = runtime.Close()
-		return fmt.Errorf(
+		mismatchErr := fmt.Errorf(
 			"authenticated device on %s does not match the original programming device",
 			expected.Name,
 		)
+		if closeErr := runtime.Close(); closeErr != nil {
+			return errors.Join(
+				mismatchErr,
+				fmt.Errorf("close mismatched programming device: %w", closeErr),
+			)
+		}
+		return mismatchErr
 	}
 	return nil
 }
