@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -27,6 +28,7 @@ const (
 	transactionName       = ".installation-transaction.json"
 	lockName              = ".installation.lock"
 	packagesDirectory     = "packages"
+	canonicalDirectory    = "bin"
 	stagingDirectory      = ".staging"
 	// PurgeConfirmation is deliberately long and distinct from uninstall.
 	// Both --purge-data and this exact value are required.
@@ -34,10 +36,11 @@ const (
 )
 
 var (
-	ErrUnsupportedPlatform       = errors.New("unsupported platform")
-	ErrOwnershipMismatch         = errors.New("installation root is not owned by this user and product")
-	ErrDesktopAdapterUnavailable = errors.New("native desktop integration adapter is unavailable")
-	ErrExternalCleanupRequired   = errors.New("uninstall must continue from a helper outside the installation root")
+	ErrUnsupportedPlatform        = errors.New("unsupported platform")
+	ErrOwnershipMismatch          = errors.New("installation root is not owned by this user and product")
+	ErrDesktopAdapterUnavailable  = errors.New("native desktop integration adapter is unavailable")
+	ErrExternalCleanupRequired    = errors.New("uninstall must continue from a helper outside the installation root")
+	ErrExternalActivationRequired = errors.New("installation activation must continue from a helper outside the canonical bin directory")
 )
 
 type DesktopTarget struct {
@@ -82,6 +85,8 @@ type transactionJournal struct {
 	Operation     string             `json:"operation"`
 	Phase         string             `json:"phase"`
 	Stage         string             `json:"stage,omitempty"`
+	Retired       string             `json:"retired,omitempty"`
+	Quarantine    string             `json:"quarantine,omitempty"`
 	NewSlot       string             `json:"new_slot,omitempty"`
 	NewSHA256     string             `json:"new_sha256,omitempty"`
 	PreviousState *InstallationState `json:"previous_state,omitempty"`
@@ -99,6 +104,9 @@ type Service struct {
 	Now               func() time.Time
 	VerifyExecutable  packageVerifier
 }
+
+var readInstallationRoot = os.ReadDir
+var canonicalInstallRootForAdoption = DefaultInstallRoot
 
 type ChangeRequest struct {
 	Root                  string
@@ -295,13 +303,22 @@ func (service *Service) activate(ctx context.Context, operation string, request 
 	if desktopManaged && service.Desktop == nil {
 		return result, ErrDesktopAdapterUnavailable
 	}
-	if exists && strings.EqualFold(previous.ActiveSHA256, manifest.RootSHA256) {
+	if exists && strings.EqualFold(previous.ActiveSHA256, manifest.RootSHA256) &&
+		strings.EqualFold(filepath.ToSlash(previous.ActiveSlot), canonicalDirectory) {
 		if verifyErr := service.verifySlot(root, previous.ActiveSlot, previous.ActiveSHA256); verifyErr == nil {
 			next := previous
 			next.DisplayName = service.DisplayName
 			next.DesktopManaged = desktopManaged
 			nameChanged := !strings.EqualFold(strings.TrimSpace(previous.DisplayName), strings.TrimSpace(next.DisplayName))
-			stateChanged := previous.DesktopManaged != desktopManaged || nameChanged
+			rollbackChanged := false
+			if next.PreviousSlot != "" {
+				if rollbackErr := service.verifySlot(root, next.PreviousSlot, next.PreviousSHA256); rollbackErr != nil {
+					next.PreviousSlot, next.PreviousSHA256 = "", ""
+					rollbackChanged = true
+					result.Warnings = append(result.Warnings, "damaged rollback package was retired: "+rollbackErr.Error())
+				}
+			}
+			stateChanged := previous.DesktopManaged != desktopManaged || nameChanged || rollbackChanged
 			desktopTransition := service.desktopTransitionRequired(root, &previous, next)
 			if stateChanged {
 				next.UpdatedAt = service.now()
@@ -346,6 +363,7 @@ func (service *Service) activate(ctx context.Context, operation string, request 
 			}
 			result.Healthy, result.DesktopManaged, result.Executable = true, desktopManaged, filepath.Join(root, filepath.FromSlash(next.Executable))
 			result.State = &next
+			result.Warnings = append(result.Warnings, prunePackageSlots(root, next)...)
 			return result, nil
 		} else if !repair {
 			result.Warnings = append(result.Warnings, "matching installed package was damaged and has been replaced from the verified source")
@@ -375,36 +393,14 @@ func (service *Service) activate(ctx context.Context, operation string, request 
 		return result, err
 	}
 
-	slotRelative := filepath.ToSlash(filepath.Join(packagesDirectory, manifest.RootSHA256))
-	slot := filepath.Join(root, filepath.FromSlash(slotRelative))
-	if err := pathguard.MkdirAll(filepath.Dir(slot), 0o700); err != nil {
-		return result, err
+	slotRelative := filepath.ToSlash(canonicalDirectory)
+	quarantine, err := service.quarantineUnknownCanonicalContent(root, id)
+	if err != nil {
+		return result, fmt.Errorf("quarantine unknown canonical content: %w", err)
 	}
-	if _, statErr := os.Lstat(slot); statErr == nil {
-		if verifyErr := service.verifySlot(root, slotRelative, manifest.RootSHA256); verifyErr == nil {
-			if err := removeOwnedSubtree(root, stage); err != nil {
-				return result, err
-			}
-		} else {
-			slotRelative = filepath.ToSlash(filepath.Join(packagesDirectory, manifest.RootSHA256+"-repair-"+id))
-			slot = filepath.Join(root, filepath.FromSlash(slotRelative))
-			if err := publishDirectory(stage, slot); err != nil {
-				return result, fmt.Errorf("publish repaired package slot: %w", err)
-			}
-		}
-	} else if errors.Is(statErr, os.ErrNotExist) {
-		if err := publishDirectory(stage, slot); err != nil {
-			return result, fmt.Errorf("publish package slot: %w", err)
-		}
-	} else {
-		return result, statErr
-	}
-	journal.Phase, journal.NewSlot, journal.UpdatedAt = "slot-ready", slotRelative, service.now()
-	if err := writeJSONAtomic(filepath.Join(root, transactionName), journal, 0o600); err != nil {
-		return result, err
-	}
-	if err := service.verifySlot(root, slotRelative, manifest.RootSHA256); err != nil {
-		return result, fmt.Errorf("verify published package slot: %w", err)
+	rollbackSlot, rollbackSHA, err := service.prepareRollback(root, previous, exists, id)
+	if err != nil {
+		return result, fmt.Errorf("prepare verified rollback: %w", err)
 	}
 
 	now := service.now()
@@ -412,22 +408,25 @@ func (service *Service) activate(ctx context.Context, operation string, request 
 		ProductAppID: productidentity.StableAppID,
 		OwnerID:      service.OwnerID, ActiveSlot: slotRelative, ActiveSHA256: manifest.RootSHA256,
 		Version: manifest.Version, SourceSHA256: manifest.SourceSHA256,
-		Executable:     filepath.ToSlash(filepath.Join(slotRelative, filepath.FromSlash(manifest.ExecutablePath))),
+		Executable:     filepath.ToSlash(filepath.Join(canonicalDirectory, filepath.FromSlash(manifest.ExecutablePath))),
 		DisplayName:    service.DisplayName,
 		DesktopManaged: desktopManaged, InstalledAt: now, UpdatedAt: now,
 	}
 	if exists {
 		next.InstalledAt = previous.InstalledAt
-		if previous.ActiveSlot != slotRelative {
-			next.PreviousSlot, next.PreviousSHA256 = previous.ActiveSlot, previous.ActiveSHA256
-		} else {
-			next.PreviousSlot, next.PreviousSHA256 = previous.PreviousSlot, previous.PreviousSHA256
-		}
+		next.PreviousSlot, next.PreviousSHA256 = rollbackSlot, rollbackSHA
 	}
 	desiredCopy := next
-	journal.DesiredState, journal.UpdatedAt = &desiredCopy, service.now()
+	journal.NewSlot, journal.DesiredState, journal.Quarantine = slotRelative, &desiredCopy, quarantine
+	journal.Phase, journal.UpdatedAt = "canonical-prepared", service.now()
 	if err := writeJSONAtomic(filepath.Join(root, transactionName), journal, 0o600); err != nil {
 		return result, fmt.Errorf("persist desired installation state: %w", err)
+	}
+	if err := service.publishCanonical(root, &journal); err != nil {
+		if errors.Is(err, ErrExternalActivationRequired) {
+			return result, err
+		}
+		return result, fmt.Errorf("publish canonical installation: %w", err)
 	}
 	if err := writeJSONAtomic(filepath.Join(root, installationStateName), next, 0o600); err != nil {
 		return result, err
@@ -513,8 +512,12 @@ func (service *Service) Uninstall(ctx context.Context, request UninstallRequest)
 	if exists && state.OwnerID != service.OwnerID {
 		return result, ErrOwnershipMismatch
 	}
+	uninstallID, err := transactionID()
+	if err != nil {
+		return result, err
+	}
 	journal := transactionJournal{
-		ID: "uninstall", Operation: "uninstall",
+		ID: uninstallID, Operation: "uninstall",
 		Phase: "uninstall-prepared", UpdatedAt: service.now(),
 	}
 	if exists {
@@ -523,6 +526,16 @@ func (service *Service) Uninstall(ctx context.Context, request UninstallRequest)
 	}
 	if err := writeJSONAtomic(filepath.Join(root, transactionName), journal, 0o600); err != nil {
 		return result, err
+	}
+	quarantine, err := service.quarantineUnknownCanonicalContent(root, uninstallID)
+	if err != nil {
+		return result, fmt.Errorf("quarantine unknown canonical content before uninstall: %w", err)
+	}
+	if quarantine != "" {
+		journal.Quarantine, journal.UpdatedAt = quarantine, service.now()
+		if err := writeJSONAtomic(filepath.Join(root, transactionName), journal, 0o600); err != nil {
+			return result, err
+		}
 	}
 	if exists && state.DesktopManaged {
 		if service.Desktop == nil {
@@ -543,25 +556,10 @@ func (service *Service) Uninstall(ctx context.Context, request UninstallRequest)
 	if pathWithin(root, service.CurrentExecutable) {
 		return result, ErrExternalCleanupRequired
 	}
-	if err := pathguard.ValidateTree(root); err != nil {
-		return result, fmt.Errorf("validate installation before detaching: %w", err)
-	}
-	tombstone := removalTombstone(root)
-	if err := pathguard.ValidateComponents(tombstone, true); err != nil {
-		return result, err
-	}
-	if err := os.Rename(root, tombstone); err != nil {
-		return result, fmt.Errorf("detach installation for removal: %w", err)
-	}
-	if err := pathguard.ValidateTree(tombstone); err != nil {
-		return result, fmt.Errorf("validate detached installation: %w", err)
-	}
-	if err := service.checkDetachedOwnership(tombstone, root); err != nil {
-		return result, fmt.Errorf("validate detached installation ownership: %w", err)
-	}
-	result.Changed = true
-	if err := removeTreeSecure(tombstone); err != nil {
-		result.Warnings = append(result.Warnings, "detached installation remains queued for cleanup: "+tombstone)
+	changed, removeErr := removeInstallerOwnedPaths(root)
+	result.Changed = changed
+	if removeErr != nil {
+		return result, removeErr
 	}
 	if request.PurgeData {
 		if err := executePurgeTargets(result.PurgeTargets, root, service.OwnerID, &result); err != nil {
@@ -569,6 +567,54 @@ func (service *Service) Uninstall(ctx context.Context, request UninstallRequest)
 		}
 	}
 	return result, nil
+}
+
+func removeInstallerOwnedPaths(root string) (bool, error) {
+	changed := false
+	for _, name := range []string{canonicalDirectory, packagesDirectory, stagingDirectory} {
+		target := filepath.Join(root, name)
+		if _, err := os.Lstat(target); errors.Is(err, os.ErrNotExist) {
+			continue
+		} else if err != nil {
+			return changed, err
+		}
+		if err := removeOwnedSubtree(root, target); err != nil {
+			return changed, fmt.Errorf("remove installer-owned %s: %w", name, err)
+		}
+		changed = true
+	}
+	for _, name := range []string{installationStateName, transactionName, lockName} {
+		target := filepath.Join(root, name)
+		if err := pathguard.ValidateComponents(target, true); err != nil {
+			return changed, err
+		}
+		if err := os.Remove(target); err == nil {
+			changed = true
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return changed, fmt.Errorf("remove installer-owned %s: %w", name, err)
+		}
+	}
+	entries, err := readInstallationRoot(root)
+	if err != nil {
+		return changed, err
+	}
+	preserved := 0
+	for _, entry := range entries {
+		if entry.Name() != ownerMarkerName {
+			preserved++
+		}
+	}
+	if preserved == 0 {
+		if err := os.Remove(filepath.Join(root, ownerMarkerName)); err == nil {
+			changed = true
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return changed, err
+		}
+		if err := os.Remove(root); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return changed, err
+		}
+	}
+	return changed, nil
 }
 
 func (service *Service) validate() error {
@@ -698,9 +744,42 @@ func (service *Service) checkOwnership(root string, create bool) error {
 		if readErr != nil {
 			return readErr
 		}
+		defaultRoot, _ := canonicalInstallRootForAdoption()
+		adoptCanonical := samePath(root, defaultRoot)
+		allowedCanonical := map[string]bool{
+			"bin": true, "source": true, "data": true, "coordination": true,
+			"recovery-quarantine": true, packagesDirectory: true, stagingDirectory: true,
+			lockName: true, installationStateName: true, transactionName: true,
+		}
+		nonLockEntries := 0
 		for _, entry := range entries {
-			if entry.Name() != lockName {
+			if entry.Name() == lockName {
+				continue
+			}
+			if !adoptCanonical || !allowedCanonical[strings.ToLower(entry.Name())] {
 				return fmt.Errorf("%w: non-empty root has no ownership marker", ErrOwnershipMismatch)
+			}
+			nonLockEntries++
+			info, infoErr := entry.Info()
+			if infoErr != nil || info.Mode()&os.ModeSymlink != 0 {
+				return fmt.Errorf("%w: canonical root contains an untrusted entry", ErrOwnershipMismatch)
+			}
+		}
+		if nonLockEntries > 0 {
+			bin := filepath.Join(root, canonicalDirectory)
+			manifestContent, manifestErr := readBoundedRegularFile(filepath.Join(bin, PackageManifestName), maximumManifestBytes)
+			if manifestErr == nil {
+				var legacy PackageManifest
+				if decodeErr := decodeStrictJSON(manifestContent, &legacy); decodeErr != nil {
+					return fmt.Errorf("%w: canonical adoption package inventory is invalid", ErrOwnershipMismatch)
+				}
+				if _, verifyErr := VerifyPackage(bin, legacy.RootSHA256, ManifestOptions{
+					Platform: service.Platform, Architecture: service.Architecture, VerifyExecutable: service.VerifyExecutable,
+				}); verifyErr != nil {
+					return fmt.Errorf("%w: canonical adoption package is not verified: %v", ErrOwnershipMismatch, verifyErr)
+				}
+			} else if sourceErr := verifyCanonicalSourceOnlyLayout(root, entries); sourceErr != nil {
+				return fmt.Errorf("%w: canonical adoption has neither a verified bin nor source layout: %v", ErrOwnershipMismatch, sourceErr)
 			}
 		}
 		marker := ownerMarker{
@@ -716,6 +795,31 @@ func (service *Service) checkOwnership(root string, create bool) error {
 		return err
 	}
 	return service.validateOwnershipMarker(content, root)
+}
+
+func verifyCanonicalSourceOnlyLayout(root string, entries []os.DirEntry) error {
+	allowed := map[string]bool{"source": true, "data": true, "coordination": true, "recovery-quarantine": true, lockName: true}
+	for _, entry := range entries {
+		if !allowed[strings.ToLower(entry.Name())] {
+			return fmt.Errorf("unexpected source-only root entry %q", entry.Name())
+		}
+	}
+	source := filepath.Join(root, "source", productidentity.ConfigDirectory)
+	if err := pathguard.ValidateComponents(source, false); err != nil {
+		return err
+	}
+	info, err := os.Lstat(source)
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return errors.New("canonical source repository is not a real directory")
+	}
+	for _, relative := range []string{"AGENTS.md", "PCController.ino", filepath.Join("Tools", "Controller", "go.mod")} {
+		path := filepath.Join(source, relative)
+		file, err := os.Lstat(path)
+		if err != nil || !file.Mode().IsRegular() || file.Mode()&os.ModeSymlink != 0 || file.Size() == 0 {
+			return fmt.Errorf("canonical source marker %s is missing or invalid", filepath.ToSlash(relative))
+		}
+	}
+	return nil
 }
 
 func (service *Service) checkDetachedOwnership(location, originalRoot string) error {
@@ -799,6 +903,188 @@ func (service *Service) verifySlot(root, relative, digest string) error {
 	return nil
 }
 
+// quarantineUnknownCanonicalContent moves no bytes in place. It copies only
+// paths absent from the old package inventory to a transaction-specific
+// recovery directory before bin is retired. Files removed by a newer package
+// are therefore retired with the old package rather than surviving in active
+// bin, while genuinely unknown operator content remains recoverable.
+func (service *Service) quarantineUnknownCanonicalContent(root, id string) (string, error) {
+	canonical := filepath.Join(root, canonicalDirectory)
+	info, err := os.Lstat(canonical)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return "", errors.New("canonical bin must be a real directory")
+	}
+	if err := pathguard.ValidateTree(canonical); err != nil {
+		return "", err
+	}
+	owned := map[string]bool{strings.ToLower(filepath.ToSlash(PackageManifestName)): true}
+	if content, readErr := readBoundedRegularFile(filepath.Join(canonical, PackageManifestName), maximumManifestBytes); readErr == nil {
+		var prior PackageManifest
+		if decodeErr := decodeStrictJSON(content, &prior); decodeErr == nil && validatePackageManifest(prior) == nil {
+			for _, entry := range prior.Files {
+				owned[strings.ToLower(filepath.ToSlash(entry.Path))] = true
+			}
+		}
+	}
+	quarantineRelative := filepath.ToSlash(filepath.Join("recovery-quarantine", "installer-"+id))
+	quarantine := filepath.Join(root, filepath.FromSlash(quarantineRelative))
+	copied := false
+	err = filepath.WalkDir(canonical, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if samePath(path, canonical) {
+			return nil
+		}
+		relative, err := filepath.Rel(canonical, path)
+		if err != nil {
+			return err
+		}
+		relative = filepath.ToSlash(relative)
+		if owned[strings.ToLower(relative)] {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		target := filepath.Join(quarantine, filepath.FromSlash(relative))
+		if entry.IsDir() {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("unknown canonical content %s is not a regular file", relative)
+		}
+		digest, bytes, err := digestFile(path)
+		if err != nil {
+			return err
+		}
+		if err := copyVerifiedFile(path, target, PackageFile{Path: relative, Bytes: bytes, SHA256: digest}); err != nil {
+			return err
+		}
+		copied = true
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	if !copied {
+		_ = removeTreeSecure(quarantine)
+		return "", nil
+	}
+	return quarantineRelative, nil
+}
+
+func (service *Service) prepareRollback(root string, previous InstallationState, exists bool, id string) (string, string, error) {
+	if !exists {
+		return "", "", nil
+	}
+	if err := service.verifySlot(root, previous.ActiveSlot, previous.ActiveSHA256); err == nil {
+		if !strings.EqualFold(filepath.ToSlash(previous.ActiveSlot), canonicalDirectory) {
+			return previous.ActiveSlot, previous.ActiveSHA256, nil
+		}
+		rollbackRelative := filepath.ToSlash(filepath.Join(packagesDirectory, previous.ActiveSHA256))
+		rollback := filepath.Join(root, filepath.FromSlash(rollbackRelative))
+		if _, statErr := os.Lstat(rollback); statErr == nil {
+			if err := service.verifySlot(root, rollbackRelative, previous.ActiveSHA256); err == nil {
+				return rollbackRelative, previous.ActiveSHA256, nil
+			}
+			rollbackRelative = filepath.ToSlash(filepath.Join(packagesDirectory, previous.ActiveSHA256+"-rollback-"+id))
+			rollback = filepath.Join(root, filepath.FromSlash(rollbackRelative))
+		} else if !errors.Is(statErr, os.ErrNotExist) {
+			return "", "", statErr
+		}
+		manifest, err := VerifyPackage(filepath.Join(root, canonicalDirectory), previous.ActiveSHA256, ManifestOptions{
+			Platform: service.Platform, Architecture: service.Architecture, VerifyExecutable: service.VerifyExecutable,
+		})
+		if err != nil {
+			return "", "", err
+		}
+		stage := filepath.Join(root, stagingDirectory, "rollback-"+id)
+		if err := service.stagePackage(filepath.Join(root, canonicalDirectory), stage, manifest); err != nil {
+			return "", "", err
+		}
+		if err := publishDirectory(stage, rollback); err != nil {
+			return "", "", err
+		}
+		return rollbackRelative, previous.ActiveSHA256, nil
+	}
+	if previous.PreviousSlot != "" {
+		if err := service.verifySlot(root, previous.PreviousSlot, previous.PreviousSHA256); err == nil {
+			return previous.PreviousSlot, previous.PreviousSHA256, nil
+		}
+	}
+	return "", "", nil
+}
+
+func (service *Service) publishCanonical(root string, journal *transactionJournal) error {
+	stage, err := inventoryEntryPath(root, journal.Stage)
+	if err != nil {
+		return err
+	}
+	canonical := filepath.Join(root, canonicalDirectory)
+	if err := service.verifySlot(root, journal.Stage, journal.NewSHA256); err != nil {
+		return fmt.Errorf("verify prepared canonical stage: %w", err)
+	}
+	if _, err := os.Lstat(canonical); err == nil && pathWithin(canonical, service.CurrentExecutable) {
+		return ErrExternalActivationRequired
+	}
+	if _, err := os.Lstat(canonical); err == nil {
+		if journal.Retired == "" {
+			journal.Retired = filepath.ToSlash(filepath.Join(stagingDirectory, "retired-"+journal.ID))
+		}
+		retired, pathErr := inventoryEntryPath(root, journal.Retired)
+		if pathErr != nil {
+			return pathErr
+		}
+		if err := removeTreeSecure(retired); err != nil {
+			return err
+		}
+		journal.Phase, journal.UpdatedAt = "canonical-retiring", service.now()
+		if err := writeJSONAtomic(filepath.Join(root, transactionName), *journal, 0o600); err != nil {
+			return err
+		}
+		if err := os.Rename(canonical, retired); err != nil {
+			return err
+		}
+		journal.Phase, journal.UpdatedAt = "canonical-retired", service.now()
+		if err := writeJSONAtomic(filepath.Join(root, transactionName), *journal, 0o600); err != nil {
+			return err
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := publishDirectory(stage, canonical); err != nil {
+		return err
+	}
+	journal.Phase, journal.UpdatedAt = "canonical-published", service.now()
+	if err := writeJSONAtomic(filepath.Join(root, transactionName), *journal, 0o600); err != nil {
+		return err
+	}
+	if err := service.verifySlot(root, canonicalDirectory, journal.NewSHA256); err != nil {
+		return fmt.Errorf("verify canonical bin: %w", err)
+	}
+	if journal.Retired != "" {
+		retired, err := inventoryEntryPath(root, journal.Retired)
+		if err != nil {
+			return err
+		}
+		if err := removeOwnedSubtree(root, retired); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (service *Service) recover(ctx context.Context, root string) error {
 	content, err := readBoundedRegularFile(filepath.Join(root, transactionName), 256<<10)
 	if errors.Is(err, os.ErrNotExist) {
@@ -870,6 +1156,70 @@ func (service *Service) recover(ctx context.Context, root string) error {
 			}
 			if err := service.reconcileDesktopTransition(ctx, root, journal.PreviousState, state); err != nil {
 				return fmt.Errorf("recover native desktop transition: %w", err)
+			}
+		}
+	case "canonical-prepared", "canonical-retiring", "canonical-retired", "canonical-published":
+		if journal.DesiredState == nil || journal.NewSlot != canonicalDirectory {
+			return errors.New("canonical installation transaction is incomplete")
+		}
+		canonical := filepath.Join(root, canonicalDirectory)
+		if journal.Phase == "canonical-retiring" {
+			if err := service.verifySlot(root, canonicalDirectory, journal.NewSHA256); err == nil {
+				journal.Phase, journal.UpdatedAt = "canonical-published", service.now()
+				if err := writeJSONAtomic(filepath.Join(root, transactionName), journal, 0o600); err != nil {
+					return err
+				}
+			}
+		}
+		if journal.Phase == "canonical-prepared" || journal.Phase == "canonical-retiring" {
+			if journal.Phase == "canonical-retiring" && journal.Retired != "" {
+				retired, pathErr := inventoryEntryPath(root, journal.Retired)
+				if pathErr != nil {
+					return pathErr
+				}
+				_, canonicalErr := os.Lstat(canonical)
+				_, retiredErr := os.Lstat(retired)
+				if errors.Is(canonicalErr, os.ErrNotExist) && retiredErr == nil {
+					journal.Phase, journal.UpdatedAt = "canonical-retired", service.now()
+					if err := writeJSONAtomic(filepath.Join(root, transactionName), journal, 0o600); err != nil {
+						return err
+					}
+				}
+			}
+		}
+		if journal.Phase == "canonical-prepared" || journal.Phase == "canonical-retiring" {
+			if err := service.publishCanonical(root, &journal); err != nil {
+				return fmt.Errorf("recover canonical publish: %w", err)
+			}
+		} else if journal.Phase == "canonical-retired" {
+			stage, pathErr := inventoryEntryPath(root, journal.Stage)
+			if pathErr != nil {
+				return pathErr
+			}
+			if _, statErr := os.Lstat(canonical); errors.Is(statErr, os.ErrNotExist) {
+				if err := publishDirectory(stage, canonical); err != nil {
+					return fmt.Errorf("recover canonical directory: %w", err)
+				}
+			} else if statErr != nil {
+				return statErr
+			}
+		}
+		if err := service.verifySlot(root, canonicalDirectory, journal.NewSHA256); err != nil {
+			return fmt.Errorf("recover canonical bin: %w", err)
+		}
+		if err := writeJSONAtomic(filepath.Join(root, installationStateName), *journal.DesiredState, 0o600); err != nil {
+			return fmt.Errorf("persist recovered canonical state: %w", err)
+		}
+		if err := service.reconcileDesktopTransition(ctx, root, journal.PreviousState, *journal.DesiredState); err != nil {
+			return fmt.Errorf("recover canonical desktop transition: %w", err)
+		}
+		if journal.Retired != "" {
+			retired, pathErr := inventoryEntryPath(root, journal.Retired)
+			if pathErr != nil {
+				return pathErr
+			}
+			if err := removeOwnedSubtree(root, retired); err != nil {
+				return err
 			}
 		}
 	case "activated":
@@ -1065,9 +1415,7 @@ func prunePackageSlots(root string, state InstallationState) []string {
 	if err != nil {
 		return []string{"unable to inspect superseded packages: " + err.Error()}
 	}
-	keep := map[string]bool{
-		filepath.Base(filepath.FromSlash(state.ActiveSlot)): true,
-	}
+	keep := map[string]bool{}
 	if state.PreviousSlot != "" {
 		keep[filepath.Base(filepath.FromSlash(state.PreviousSlot))] = true
 	}

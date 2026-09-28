@@ -14,8 +14,12 @@ import (
 )
 
 const (
-	uninstallHelperCommand = "__installation-uninstall-helper"
+	uninstallHelperCommand  = "__installation-uninstall-helper"
+	activationHelperCommand = "__installation-activation-helper"
 )
+
+var startActivationHelper = launchActivationHelper
+var scheduleActivationArtifacts = scheduleActivationCleanup
 
 type uninstallHelperPlan struct {
 	CreatedAt      time.Time        `json:"created_at"`
@@ -45,8 +49,158 @@ type uninstallOutcome struct {
 	DataPreserved bool      `json:"data_preserved"`
 }
 
+type activationHelperPlan struct {
+	CreatedAt      time.Time     `json:"created_at"`
+	ParentPID      int           `json:"parent_pid"`
+	ParentIdentity string        `json:"parent_identity"`
+	OwnerID        string        `json:"owner_id"`
+	Platform       string        `json:"platform"`
+	Architecture   string        `json:"architecture"`
+	HelperPath     string        `json:"helper_path"`
+	HelperSHA256   string        `json:"helper_sha256"`
+	PlanPath       string        `json:"plan_path"`
+	OutcomePath    string        `json:"outcome_path"`
+	Repair         bool          `json:"repair"`
+	Request        ChangeRequest `json:"request"`
+}
+
 func IsUninstallHelperInvocation(args []string) bool {
 	return len(args) == 2 && args[0] == uninstallHelperCommand && strings.TrimSpace(args[1]) != ""
+}
+
+func IsActivationHelperInvocation(args []string) bool {
+	return len(args) == 2 && args[0] == activationHelperCommand && strings.TrimSpace(args[1]) != ""
+}
+
+// PrepareExternalActivation starts a hash-bound copy of the currently verified
+// canonical host. The helper waits for the parent to exit and rolls the durable
+// canonical-directory journal forward, avoiding in-place replacement of a
+// running Windows executable.
+func (service *Service) PrepareExternalActivation(ctx context.Context, request ChangeRequest, repair bool) (ExternalUninstallPlan, error) {
+	if err := service.validate(); err != nil {
+		return ExternalUninstallPlan{}, err
+	}
+	root, err := safeInstallRoot(request.Root)
+	if err != nil {
+		return ExternalUninstallPlan{}, err
+	}
+	if !pathWithin(filepath.Join(root, canonicalDirectory), service.CurrentExecutable) {
+		return ExternalUninstallPlan{}, errors.New("external activation helper is only needed while running from canonical bin")
+	}
+	if err := service.checkOwnership(root, false); err != nil {
+		return ExternalUninstallPlan{}, err
+	}
+	state, exists, err := loadState(root)
+	if err != nil || !exists {
+		return ExternalUninstallPlan{}, errors.Join(err, errors.New("external activation requires durable installation state"))
+	}
+	if err := service.verifySlot(root, state.ActiveSlot, state.ActiveSHA256); err != nil {
+		return ExternalUninstallPlan{}, fmt.Errorf("verify running canonical package: %w", err)
+	}
+	if !samePath(service.CurrentExecutable, filepath.Join(root, filepath.FromSlash(state.Executable))) {
+		return ExternalUninstallPlan{}, errors.New("running executable is not the active canonical package")
+	}
+	id, err := transactionID()
+	if err != nil {
+		return ExternalUninstallPlan{}, err
+	}
+	directory := filepath.Join(os.TempDir(), productidentity.ConfigDirectory+"-activate-"+id)
+	if err := pathguard.ValidateComponents(directory, true); err != nil {
+		return ExternalUninstallPlan{}, err
+	}
+	if err := os.Mkdir(directory, 0o700); err != nil {
+		return ExternalUninstallPlan{}, err
+	}
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = removeTreeSecure(directory)
+		}
+	}()
+	helperPath := filepath.Join(directory, "activation-helper"+filepath.Ext(service.CurrentExecutable))
+	digest, bytes, err := digestFile(service.CurrentExecutable)
+	if err != nil {
+		return ExternalUninstallPlan{}, err
+	}
+	if err := copyVerifiedFile(service.CurrentExecutable, helperPath, PackageFile{Path: filepath.Base(helperPath), Bytes: bytes, SHA256: digest}); err != nil {
+		return ExternalUninstallPlan{}, err
+	}
+	planPath := filepath.Join(directory, "activation-plan.json")
+	outcomePath := filepath.Join(directory, "activation-outcome.json")
+	parentIdentity, err := parentProcessIdentity(os.Getpid())
+	if err != nil {
+		return ExternalUninstallPlan{}, err
+	}
+	plan := activationHelperPlan{
+		CreatedAt: service.now(), ParentPID: os.Getpid(), ParentIdentity: parentIdentity,
+		OwnerID: service.OwnerID, Platform: service.Platform, Architecture: service.Architecture,
+		HelperPath: helperPath, HelperSHA256: digest, PlanPath: planPath, OutcomePath: outcomePath,
+		Repair: repair, Request: request,
+	}
+	if err := writeJSONAtomic(planPath, plan, 0o600); err != nil {
+		return ExternalUninstallPlan{}, err
+	}
+	if err := startActivationHelper(ctx, helperPath, planPath); err != nil {
+		return ExternalUninstallPlan{}, err
+	}
+	cleanup = false
+	return ExternalUninstallPlan{HelperPath: helperPath, PlanPath: planPath, OutcomePath: outcomePath}, nil
+}
+
+func RunExternalActivationHelper(ctx context.Context, planPath string, service *Service) (resultErr error) {
+	content, err := readBoundedRegularFile(planPath, 256<<10)
+	if err != nil {
+		return err
+	}
+	var plan activationHelperPlan
+	if err := decodeStrictJSON(content, &plan); err != nil {
+		return err
+	}
+	if err := service.validate(); err != nil {
+		return err
+	}
+	if plan.ParentPID <= 0 || strings.TrimSpace(plan.ParentIdentity) == "" || plan.OwnerID != service.OwnerID ||
+		plan.Platform != service.Platform || plan.Architecture != service.Architecture || !samePath(plan.PlanPath, planPath) ||
+		service.now().Before(plan.CreatedAt.Add(-time.Minute)) || service.now().After(plan.CreatedAt.Add(15*time.Minute)) {
+		return errors.New("activation helper plan identity or lifetime is invalid")
+	}
+	planDirectory := filepath.Dir(planPath)
+	if filepath.Base(plan.OutcomePath) != "activation-outcome.json" || !samePath(filepath.Dir(plan.OutcomePath), planDirectory) ||
+		!samePath(filepath.Dir(plan.HelperPath), planDirectory) {
+		return errors.New("activation helper plan paths are not co-located")
+	}
+	if err := pathguard.ValidateComponents(plan.OutcomePath, true); err != nil {
+		return err
+	}
+	current, err := filepath.Abs(service.CurrentExecutable)
+	if err != nil || !samePath(current, plan.HelperPath) {
+		return errors.New("activation helper executable does not match its plan")
+	}
+	digest, _, err := digestFile(current)
+	if err != nil || !strings.EqualFold(digest, plan.HelperSHA256) {
+		return errors.New("activation helper executable digest differs from its plan")
+	}
+	if err := waitForParentExit(ctx, plan.ParentPID, plan.ParentIdentity, 3*time.Minute); err != nil {
+		resultErr = err
+	} else if plan.Repair {
+		_, resultErr = service.Repair(ctx, plan.Request)
+	} else {
+		_, resultErr = service.Install(ctx, plan.Request)
+	}
+	outcome := uninstallOutcome{CompletedAt: service.now(), Success: resultErr == nil, Root: plan.Request.Root, DataPreserved: true}
+	if resultErr != nil {
+		outcome.Error = resultErr.Error()
+	}
+	if err := writeJSONAtomic(plan.OutcomePath, outcome, 0o600); err != nil {
+		resultErr = errors.Join(resultErr, err)
+	}
+	if resultErr == nil {
+		_ = os.Remove(plan.PlanPath)
+		if err := scheduleActivationArtifacts(plan.OutcomePath, plan.HelperPath, filepath.Dir(plan.HelperPath)); err != nil {
+			resultErr = fmt.Errorf("schedule activation helper cleanup: %w", err)
+		}
+	}
+	return resultErr
 }
 
 // PrepareExternalUninstall copies the verified/hash-bound running host outside
