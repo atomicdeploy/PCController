@@ -747,7 +747,7 @@ func (service *Service) dispatch(
 			result = map[string]bool{"reset": err == nil}
 		}
 	case "controller.snapshot":
-		result = service.Client.Snapshot()
+		result = service.controllerSnapshot()
 	case "controller.port.process", "controller.port.owner":
 		result = service.Client.Snapshot().PortProcess
 	case "controller.session.snapshot", "controller.session.snapshot.last":
@@ -1554,6 +1554,18 @@ func (service *Service) primaryPingResult() map[string]any {
 		"coordinator_instance_id": strings.TrimSpace(service.CoordinatorInstanceID),
 		"process_id":              service.HostProcessID,
 		"surface":                 strings.TrimSpace(service.HostSurface),
+	}
+}
+
+type controllerSnapshotEnvelope struct {
+	controller.Snapshot
+	HostInstanceID string `json:"host_instance_id,omitempty"`
+}
+
+func (service *Service) controllerSnapshot() controllerSnapshotEnvelope {
+	return controllerSnapshotEnvelope{
+		Snapshot:       service.Client.Snapshot(),
+		HostInstanceID: strings.TrimSpace(service.HostInstanceID),
 	}
 }
 
@@ -2635,7 +2647,7 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 		if !authorizeHTTPCapability(writer, request, service, capabilityRead) {
 			return
 		}
-		writeHTTPJSON(writer, http.StatusOK, service.Client.Snapshot())
+		writeHTTPJSON(writer, http.StatusOK, service.controllerSnapshot())
 	})
 	mux.HandleFunc("/api/peripherals", func(writer http.ResponseWriter, request *http.Request) {
 		if !authorizeHTTPRequest(writer, request, service) {
@@ -3824,6 +3836,7 @@ func serveWebSocket(
 					"interval_ms": normalized.IntervalMS,
 					"preserve":    normalized.Preserve,
 					"latest_id":   service.Client.LatestEventID(),
+					"instance_id": strings.TrimSpace(service.HostInstanceID),
 					"principal":   access.Principal,
 				}
 			}
@@ -4000,6 +4013,7 @@ func serveSocketIO(
 					"interval_ms": normalized.IntervalMS,
 					"preserve":    normalized.Preserve,
 					"latest_id":   service.Client.LatestEventID(),
+					"instance_id": strings.TrimSpace(service.HostInstanceID),
 					"principal":   access.Principal,
 				})
 			case "unsubscribe":
