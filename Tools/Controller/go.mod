@@ -48,5 +48,6 @@ require (
 )
 
 // The upstream Windows backend does not cancel pending overlapped I/O before
-// CloseHandle. Pin the reviewed fork until bugst/go-serial#105 is resolved.
-replace go.bug.st/serial => github.com/DRSDavidSoft/go-serial v0.0.0-20260928051215-9bbf3c4c8df6
+// CloseHandle or close the device before joining completion. Pin the reviewed
+// fork until bugst/go-serial#105 is resolved.
+replace go.bug.st/serial => github.com/DRSDavidSoft/go-serial v0.0.0-20260928075641-a37c04413d33
