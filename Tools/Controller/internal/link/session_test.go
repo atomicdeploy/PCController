@@ -1,6 +1,7 @@
 package link
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -13,6 +14,22 @@ import (
 	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/ports"
 )
+
+func TestDecoderOverflowIsPublishedAsRecoverable(t *testing.T) {
+	port := newFakePort()
+	session := NewForPort("TEST", port)
+	defer session.Close()
+
+	port.reads <- append(bytes.Repeat([]byte{0x55}, native.MaxEncodedFrame), 0)
+	select {
+	case event := <-session.Events():
+		if !errors.Is(event.Err, native.ErrReceiveOverflow) || !event.Recoverable {
+			t.Fatalf("overflow event = %#v, want recoverable receive overflow", event)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("decoder overflow was not published")
+	}
+}
 
 func currentHelloPayload(capabilities uint32) []byte {
 	payload := make([]byte, 14)

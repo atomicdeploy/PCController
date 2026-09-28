@@ -41,8 +41,12 @@ type serialOpenAcquisition struct {
 }
 
 type Event struct {
-	Frame        native.Frame
-	Err          error
+	Frame native.Frame
+	Err   error
+	// Recoverable identifies a decoder anomaly that was isolated at the next
+	// frame delimiter. The transport is still usable and later frames remain
+	// authoritative; consumers must not treat this as a disconnect cause.
+	Recoverable  bool
 	CloseFailure bool
 }
 
@@ -50,11 +54,12 @@ type Session struct {
 	name string
 	port sessionPort
 
-	writeGate chan struct{}
-	stateMu   sync.RWMutex
-	waiters   map[byte]*pendingRequest
-	nextSeq   byte
-	hello     native.Hello
+	writeGate   chan struct{}
+	stateMu     sync.RWMutex
+	waiters     map[byte]*pendingRequest
+	nextSeq     byte
+	hello       native.Hello
+	terminalErr error
 
 	events  chan Event
 	closing chan struct{}
@@ -483,6 +488,15 @@ func (s *Session) Done() <-chan struct{} {
 	return s.done
 }
 
+// TerminalError returns the read failure that ended the transport. It remains
+// available after Done closes so consumers cannot lose the real disconnect
+// cause to select ordering between the buffered event and the done signal.
+func (s *Session) TerminalError() error {
+	s.stateMu.RLock()
+	defer s.stateMu.RUnlock()
+	return s.terminalErr
+}
+
 // SetBeforeClose installs a synchronous observer that runs exactly once before
 // closing is announced to pending requests. Higher layers use this boundary to
 // preserve live-operation evidence before request failures can unwind and clear
@@ -571,7 +585,7 @@ func (s *Session) readLoop() {
 		if n > 0 {
 			frames, decodeErrors := decoder.Feed(buffer[:n])
 			for _, decodeErr := range decodeErrors {
-				s.publish(Event{Err: decodeErr})
+				s.publish(Event{Err: decodeErr, Recoverable: true})
 			}
 			for _, frame := range frames {
 				s.observeHello(frame)
@@ -584,7 +598,11 @@ func (s *Session) readLoop() {
 			select {
 			case <-s.closing:
 			default:
-				s.publish(Event{Err: fmt.Errorf("read %s: %w", s.name, err)})
+				readErr := fmt.Errorf("read %s: %w", s.name, err)
+				s.stateMu.Lock()
+				s.terminalErr = readErr
+				s.stateMu.Unlock()
+				s.publish(Event{Err: readErr})
 				if closeErr := s.closeTransport(); closeErr != nil {
 					s.publish(Event{
 						Err:          fmt.Errorf("close %s after read failure: %w", s.name, closeErr),

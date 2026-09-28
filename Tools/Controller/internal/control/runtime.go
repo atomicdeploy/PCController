@@ -2253,12 +2253,18 @@ func (runtime *Runtime) detachReason(pause bool, reason string) error {
 
 func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 	disconnectReason := "transport closed"
+	terminalErrorPublished := false
 	for {
 		select {
 		case event := <-session.Events():
 			if event.Err != nil {
+				if event.Recoverable {
+					runtime.publishRecoveredFrameAnomaly(event.Err)
+					continue
+				}
 				disconnectReason = event.Err.Error()
 				runtime.publish("error", event.Err.Error(), native.Frame{})
+				terminalErrorPublished = true
 				if event.CloseFailure {
 					runtime.mu.Lock()
 					if runtime.generation == generation && runtime.session == session {
@@ -2445,6 +2451,12 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 				}
 			}
 		case <-session.Done():
+			if terminalErr := session.TerminalError(); terminalErr != nil {
+				disconnectReason = terminalErr.Error()
+				if !terminalErrorPublished {
+					runtime.publish("error", terminalErr.Error(), native.Frame{})
+				}
+			}
 			activeAtTransportLoss := runtime.activeUseAtTransportLoss()
 			runtime.mu.Lock()
 			owned := false
@@ -2482,6 +2494,21 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 			return
 		}
 	}
+}
+
+func (runtime *Runtime) publishRecoveredFrameAnomaly(err error) {
+	runtime.publishEvent(Event{
+		Kind:        "transport.frame.recovered",
+		Text:        "discarded an invalid serial frame and resynchronized at its delimiter",
+		Source:      "board",
+		Target:      "host",
+		MessageType: "event",
+		Metadata: map[string]string{
+			"error":       err.Error(),
+			"recoverable": "true",
+			"transport":   "serial",
+		},
+	})
 }
 
 func (runtime *Runtime) autoReconnect(epoch uint64) {
