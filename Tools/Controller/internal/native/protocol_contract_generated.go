@@ -4,8 +4,8 @@
 package native
 
 const (
-	Magic            byte = 0xA5
-	EnvelopeRevision byte = 1
+	Magic                byte = 0xA5
+	ReservedEnvelopeByte byte = 1
 )
 
 const (

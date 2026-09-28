@@ -163,7 +163,6 @@ func TestLiveSettingsExportIsExplicitlyLiveAndComplete(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, expected := range []string{
-		`"format": "controller-mcu-settings/v1"`,
 		`"source": "live-opcode"`,
 		`"motion_break_ms": 37`,
 	} {
