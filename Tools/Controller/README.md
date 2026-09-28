@@ -33,7 +33,7 @@ optional C-compatible library, and firmware WebSocket relay in one codebase.
 - Cross-platform NDJSON JSON-RPC 2.0, an unversioned living REST API, authenticated standard
   WebSocket, and bounded Engine.IO-v4/Socket.IO-over-WebSocket service; the
   first TUI/shell process owns serial and later clients route through it
-- Importable Go API and optional `c-shared` JSON ABI
+- Importable Go API, embeddable host lifecycle, and optional `c-shared` JSON ABI
 - Persistent JSON host configuration, `fsnotify` hot reload, macros,
   event-driven automations, a typed local-device contract, and loopback data-hub integration
 - A fixed, read-only Windows host-facts catalog for system, computer, firmware,
@@ -84,6 +84,12 @@ there is no fabricated release version or tag.
 `build.cmd` and `build.sh` share one Node/Controller plan. See the
 [project-owned build guide](../Build/README.md) for deterministic identity,
 bootstrap requirements, and dry-run/plan commands.
+
+Applications that need PCController in process should use the public
+[`host` lifecycle package](docs/Go-Embedding-API.md). It keeps in-process RPC,
+protected native-local IPC, and optional HTTP/WebSocket service on one
+controller owner and dispatcher. The same lifecycle is available to Pealayer
+and other non-Go consumers through the packaged C-shared JSON ABI.
 
 Windows development, deployment, discovery, and programming examples use
 the project-owned Controller executable and platform adapters for device
