@@ -410,7 +410,7 @@ func writeBackup(root string, now time.Time, snapshots []fileSnapshot) (string, 
 		Format  string          `json:"format"`
 		Created string          `json:"created_utc"`
 		Files   []manifestEntry `json:"files"`
-	}{Format: "pccontroller-apt-mirror-backup/v1", Created: now.Format(time.RFC3339)}
+	}{Format: "pccontroller-apt-mirror-backup", Created: now.Format(time.RFC3339)}
 	for index, snapshot := range snapshots {
 		entry := manifestEntry{
 			Path: snapshot.Path, Exists: snapshot.Exists,

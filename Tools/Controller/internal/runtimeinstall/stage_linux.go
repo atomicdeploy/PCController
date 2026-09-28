@@ -17,8 +17,10 @@ import (
 )
 
 const (
-	stageOwnerMarker = "pccontroller-linux-runtime-input/v1\n"
-	stageFormat      = "pccontroller-linux-runtime-input-stage/v1"
+	stageOwnerMarker       = "pccontroller-linux-runtime-input\n"
+	legacyStageOwnerMarker = "pccontroller-linux-runtime-input/v1\n"
+	stageFormat            = "pccontroller-linux-runtime-input-stage"
+	legacyStageFormat      = "pccontroller-linux-runtime-input-stage/v1"
 )
 
 type stageManifest struct {
@@ -246,7 +248,7 @@ func ensureStageRoot(root string) error {
 	}
 	marker := filepath.Join(root, ".pccontroller-runtime-input-root")
 	if content, err := readBoundedRegular(marker, 256); err == nil {
-		if string(content) != stageOwnerMarker {
+		if !compatibleFormat(string(content), stageOwnerMarker, legacyStageOwnerMarker) {
 			return errors.New("runtime input root ownership marker is not recognized")
 		}
 		return nil
@@ -328,7 +330,7 @@ func verifyStageDestination(directory string, validated ValidatedPackage, reposi
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		return errors.New("runtime input stage manifest has trailing JSON values")
 	}
-	if metadata.Format != stageFormat || metadata.StageID != validated.Controller.SHA256+"-"+validated.VirtualBoard.SHA256 ||
+	if !compatibleFormat(metadata.Format, stageFormat, legacyStageFormat) || metadata.StageID != validated.Controller.SHA256+"-"+validated.VirtualBoard.SHA256 ||
 		metadata.SourceRepository != repository || !strings.EqualFold(metadata.ControllerSHA256, validated.Controller.SHA256) ||
 		!strings.EqualFold(metadata.VirtualBoardSHA256, validated.VirtualBoard.SHA256) {
 		return errors.New("runtime input stage manifest does not match pinned source identities")

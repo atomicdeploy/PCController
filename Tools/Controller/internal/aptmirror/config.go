@@ -15,9 +15,15 @@ import (
 )
 
 const (
-	ConfigFormat = "pccontroller-ubuntu-apt-mirrors/v1"
-	StateFormat  = "pccontroller-ubuntu-apt-mirror-state/v1"
+	ConfigFormat       = "pccontroller-ubuntu-apt-mirrors"
+	StateFormat        = "pccontroller-ubuntu-apt-mirror-state"
+	legacyConfigFormat = "pccontroller-ubuntu-apt-mirrors/v1"
+	legacyStateFormat  = "pccontroller-ubuntu-apt-mirror-state/v1"
 )
+
+func compatibleFormat(value, current, legacy string) bool {
+	return value == current || value == legacy
+}
 
 type CandidateRole string
 
@@ -130,7 +136,7 @@ func (config Config) Suites() []string {
 }
 
 func (config Config) Validate() error {
-	if config.Format != ConfigFormat {
+	if !compatibleFormat(config.Format, ConfigFormat, legacyConfigFormat) {
 		return fmt.Errorf("unsupported APT mirror config format %q", config.Format)
 	}
 	identifier := regexp.MustCompile(`^[a-z0-9][a-z0-9.-]*$`)

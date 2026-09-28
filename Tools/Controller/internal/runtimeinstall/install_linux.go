@@ -26,7 +26,10 @@ import (
 	"pccontroller.local/controller/internal/programmer"
 )
 
-const runtimeOwnerMarker = "pccontroller-linux-runtime-root/v1\n"
+const (
+	runtimeOwnerMarker       = "pccontroller-linux-runtime-root\n"
+	legacyRuntimeOwnerMarker = "pccontroller-linux-runtime-root/v1\n"
+)
 
 var runtimeUnitNames = []string{
 	"pccontroller-virtual-board.service",
@@ -549,7 +552,7 @@ func ensureRuntimeRoot(root string) error {
 	}
 	marker := filepath.Join(root, ".pccontroller-runtime-root")
 	if content, err := readBoundedRegular(marker, 256); err == nil {
-		if string(content) != runtimeOwnerMarker {
+		if !compatibleFormat(string(content), runtimeOwnerMarker, legacyRuntimeOwnerMarker) {
 			return errors.New("runtime root ownership marker is not recognized")
 		}
 		return nil
@@ -618,7 +621,7 @@ func validateOwnedRuntimeRoot(root string) error {
 		}
 	}
 	content, err := readBoundedRegular(filepath.Join(root, ".pccontroller-runtime-root"), 256)
-	if err != nil || string(content) != runtimeOwnerMarker {
+	if err != nil || !compatibleFormat(string(content), runtimeOwnerMarker, legacyRuntimeOwnerMarker) {
 		return errors.New("refusing runtime removal without the exact Controller ownership marker")
 	}
 	return nil
@@ -953,7 +956,7 @@ func loadRuntimeManifest(path string) (RuntimeManifest, error) {
 }
 
 func validateRuntimeManifest(manifest RuntimeManifest) error {
-	if manifest.Format != RuntimeManifestFormat || manifest.ReleaseID == "" || filepath.Base(manifest.ReleaseID) != manifest.ReleaseID {
+	if !compatibleFormat(manifest.Format, RuntimeManifestFormat, legacyRuntimeManifestFormat) || manifest.ReleaseID == "" || filepath.Base(manifest.ReleaseID) != manifest.ReleaseID {
 		return errors.New("runtime manifest has an invalid release identity")
 	}
 	if manifest.Target != "linux/"+runtimeArchitecture() || manifest.TargetUser == "" || manifest.TargetUID == 0 {
