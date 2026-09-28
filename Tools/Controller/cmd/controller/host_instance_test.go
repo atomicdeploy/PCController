@@ -100,6 +100,25 @@ func TestHostInstanceRecordResolvesAuthenticatedPrimaryAtDifferentEndpoint(t *te
 	if err := claim.publish(server.listener, configured); err != nil {
 		t.Fatal(err)
 	}
+	content, err := os.ReadFile(paths.RecordPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(content), `"schema"`) {
+		t.Fatalf("host instance record retained a generation selector: %s", content)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(content, &fields); err != nil {
+		t.Fatal(err)
+	}
+	fields["future_optional"] = json.RawMessage(`{"safe":true}`)
+	content, err = json.Marshal(fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(paths.RecordPath, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	resolveContext, stopResolve := context.WithTimeout(context.Background(), 2*time.Second)
 	defer stopResolve()
@@ -113,6 +132,17 @@ func TestHostInstanceRecordResolvesAuthenticatedPrimaryAtDifferentEndpoint(t *te
 	if record.InstanceID != claim.identity.ID || record.DelegationToken != claim.identity.Token ||
 		record.DelegationToken == configured.AuthToken || record.Surface != "web" {
 		t.Fatalf("resolved record=%#v", record)
+	}
+	fields["instance_id"] = json.RawMessage(`""`)
+	content, err = json.Marshal(fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(paths.RecordPath, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readHostInstanceRecord(paths.RecordPath); err == nil {
+		t.Fatal("host record without a required instance identity was accepted")
 	}
 }
 
