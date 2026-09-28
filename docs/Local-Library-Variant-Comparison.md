@@ -49,10 +49,10 @@ The current merge selects behavior rather than copying one variant wholesale:
 | Modes | `ModeManager` keeps explicit current/previous modes and separates one-time entry work from steady service. |
 | Notes | `pitches.h` remains guarded and shared by reusable board/host melodies. |
 
-The addressable-LED layer retains a fixed 11-pixel D6 buffer with selectable
-WS2811/BRG or WS2812/GRB ordering, starts black, and exposes pixel/fill/clear/
-brightness/show primitives. Application-specific effects were not imported;
-current event effects build on this reusable layer.
+The addressable-LED layer uses a shared 300-byte workspace for 1–100 pixels on D6,
+with selectable WS2811/BRG or WS2812/GRB ordering. It starts black and supports
+pixel/fill/clear plus staged exact RGB frames. A host-owned rolling rainbow uses
+the same acknowledged frame path. See [strip streaming](STRIP-STREAMING.md).
 
 Controller-specific behavior—sensors, RF, PWM ownership, illumination, status
 RGB, relay/motion safety, EEPROM settings, reset telemetry, and the native UART

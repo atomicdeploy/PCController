@@ -33,7 +33,7 @@ power-indicator, and status-RGB state is applied.
 | 433 MHz | RX D2/INT0 on CHANGE, TX D3/INT1 pin; rc-switch 2.6.4; 70% receive tolerance; TX defaults to protocol 1, 350 us pulse, 10 repeats | Broad compatibility with the observed low-cost remote family | Lower tolerance reduces false matches; protocol/pulse can be supplied per transmit command |
 | Shift I/O | 74HC165 input and 74HC595 active-low output; 5 ms scan; first four input bits are keys; outputs start `0xFF`/off | Deterministic safe relay state and responsive keys | Electrical polarity constants must change only after a raw-input/output test |
 | Buzzer | D9/PB1/OC1A; Timer1 CTC `/8` hardware toggle; no audio-rate ISR; CRC-backed core cues at EEPROM `0..12` | Keeps exact offline door/output feedback configurable without duplicating the tone engine | Do not combine with Servo or `analogWrite()` on D9/D10 |
-| Addressable LEDs | D6/PD6, 11 pixels, 800 kHz, WS2811 BRG order, cleared at startup | Matches the installed strip without heap-heavy libraries | Set `PCCONTROLLER_USE_WS2812B=1` for a confirmed WS2812B/GRB strip |
+| Addressable LEDs | D6/PD6, 1–100 pixels (default 100), 800 kHz, WS2811 BRG order, cleared at startup | Shared 300-byte workspace, no heap allocation | `strip config COUNT`; set `PCCONTROLLER_USE_WS2812B=1` for WS2812B/GRB |
 | HOST LCD | Firmware HD44780 renderer disabled; the host scans common PCF8574 addresses `0x27` and `0x3F` and uses generic I2C transfers | Saves AVR flash while retaining richer text whenever the host is connected | An MCU LCD renderer can be restored at a measurable flash cost |
 
 ## I2C bus initialization
@@ -309,11 +309,11 @@ step of 4/255. The Go-owned factory profile makes Ready white; all nineteen
 persistent condition profiles can be changed by the host, while the AVR keeps
 only a compact blue/red safety fallback for blank or corrupt records.
 
-The addressable output is 11 pixels on D6 at 800 kHz. The installed hardware
-default is WS2811 BRG byte order. The startup frame is black/off. The current
-compact driver reports full brightness and its compatibility brightness setter
-does not scale pixels; brightness-sensitive effects should scale RGB values or
-add a tested compact scaler.
+The addressable output defaults to 100 pixels on D6 at 800 kHz, configured for
+WS2811 BRG byte order. `strip config COUNT` selects 1–100 pixels until reset.
+Startup is black/off. The host scales pixel/fill brightness once; raw frame RGB
+bytes are exact. See [strip streaming](STRIP-STREAMING.md) for commands and the
+shared-memory/interrupt limitations with MCU macro recording.
 
 ## Factory EEPROM values versus live settings
 

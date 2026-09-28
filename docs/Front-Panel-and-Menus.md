@@ -24,7 +24,7 @@ and readback.
 | 433 MHz receive | D2 / INT0 | rc-switch receive, learning, repeat handling, mapped actions, events |
 | 433 MHz transmit | D3 / INT1 | Host/protocol transmission; receiver is paused only for the send |
 | TM1637 | D13/SCK clock, D11/MOSI data | Cached four-digit local display with 20 ms service cadence |
-| Addressable LEDs | D6 | Fixed 11-pixel WS2811/WS2812-compatible sender; current profile uses WS2811/BRG order |
+| Addressable LEDs | D6 | 1–100 pixels (default 100); WS2811/BRG order |
 | I2C | A4/SDA, A5/SCL | PWM at `0x41`, INA219 at `0x40`, plus cooperative host transactions |
 
 PWM channel ownership is fixed and deliberately called **PWM**, not PCA, in
@@ -96,7 +96,7 @@ addressable LEDs, EEPROM/display, recovered I2C plus PWM/INA219, temperatures,
 | Buzzer | D9/PB1/OC1A | Timer1 CTC hardware toggle, no audio-rate ISR, ten-step queue | Output low and queue empty, then EEPROM mute (factory audible), then boot melody |
 | Relays | Eight active-low 74HC595 outputs | R1/R3 direction, R2/R4 enable, R5-R8 general | Both enable relays off first, then every relay off |
 | PWM status LEDs | PWM 12-15 | Power signal on channel 12; RGB on 13-15 | Power signal on, RGB Boot mode; EEPROM brightness factory 128 |
-| Addressable LEDs | D6/PD6 | 11 pixels, 800 kHz; current build is WS2811/BRG | Pixel buffer cleared and one all-black frame sent |
+| Addressable LEDs | D6/PD6 | 1–100 pixels, 800 kHz; WS2811/BRG | Shared workspace cleared and one all-black frame sent |
 | UART and bootloader | UART0, 115200 baud | COBS opcode protocol in the application; UART0 Urboot/urclock in boot mode | UART always enabled; host DTR reset-on-reconnect is independently off by default |
 
 ### INA219 measurement profile
@@ -399,16 +399,15 @@ Canonical sources: [TonePlayer.cpp](../LocalLib/TonePlayer.cpp),
 
 ### Addressable LED profile
 
-The separate addressable strip owns D6/PD6 and has a fixed count of 11 pixels.
-At 16 MHz the compact sender emits an 800 kHz frame with interrupts masked for
-approximately 330 us for 33 color bytes, restores interrupts, then waits 80 us
-for the latch. The current `PCCONTROLLER_USE_WS2812B=0` profile sends BRG order
-for the installed WS2811 strip; setting it to 1 builds GRB order for
-WS2812B. Startup drives D6 low, clears the 33-byte pixel buffer, and sends an
-all-black frame.
+The separate addressable strip owns D6/PD6 and defaults to 100 pixels, configurable
+from 1–100 until reset. At 16 MHz its 800 kHz sender masks interrupts for about
+30 us per pixel, restores interrupts, then waits 80 us for the latch.
+`PCCONTROLLER_USE_WS2812B=0` sends WS2811 BRG; setting it to 1 builds WS2812B GRB.
+The 300-byte frame shares storage with the MCU macro ring; active or retained
+MCU macros prevent strip use. See [strip streaming](STRIP-STREAMING.md).
 
-Brightness is deliberately host-pre-scaled: the fifth opcode byte is retained
-for wire compatibility, but this tight AVR implementation ignores it and
+Brightness is deliberately host-pre-scaled: the pixel opcode's fifth byte is
+always 255, and this tight AVR implementation ignores it and
 reports brightness 255. Keeping a second unscaled buffer or multiplying all
 pixels on the AVR would consume flash/RAM that the timed macro queue now uses.
 
@@ -952,8 +951,8 @@ protocol and host:
 
 ### Macro-queue behavior
 
-Macro schema 2 uses a 128-byte circular byte array with 127 usable bytes.
-BEGIN carries schema, macro ID, cancel flags, and total step count. Variable
+The live macro protocol uses a 128-byte circular byte array with 127 usable bytes.
+BEGIN carries macro ID, cancel flags, and total step count. Variable
 records contain a microsecond due-time offset, one
 ordinary opcode, payload length, and that opcode's native payload. APPEND
 frames carry a stream-byte offset and complete-step count and may split the
