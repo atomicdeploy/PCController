@@ -27,7 +27,8 @@ export const PROGRAMMING_OPERATIONS = Object.freeze({
 
 export const FIRMWARE_FEATURES = Object.freeze([
 	'eeprom-boot-opcodes',
-	'eeprom-menu-labels'
+	'eeprom-menu-labels',
+	'macro-strip-test'
 ])
 const FIRMWARE_FEATURE_SET = new Set(FIRMWARE_FEATURES)
 

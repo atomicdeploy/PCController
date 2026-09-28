@@ -8,6 +8,32 @@ the host. Use this guide before adding or removing firmware behavior.
 
 ## Evidence rule
 
+### Temporary macro/strip verification profile
+
+The explicitly selected `macro-strip-test` compile feature preserves the full
+source tree but omits **new RF learning administration** from its board image.
+It is temporary test firmware, not the default release profile. The full image
+must still pass its independent flash/SRAM checks before release.
+
+| Interface or behavior | `macro-strip-test` |
+|---|---|
+| Host and MCU relay recording/playback, circular buffer | Included |
+| Addressable strip configuration and pixel streaming | Included |
+| Existing learned RF receive/action dispatch and RF transmit | Included |
+| Relay/motion safety, ordinary front-panel menus, local audio | Included |
+| RF learning capture/timer, list/clear/remove/replace, LErn UI | Omitted temporarily |
+| Existing EEPROM learned records | Retained; not erased |
+
+Build explicitly with `build.cmd --firmware-only --firmware-feature macro-strip-test`.
+The equivalent project CLI is `controller program --method compile --sketch .
+--firmware-feature macro-strip-test`. Persistent configuration uses
+`programming.firmware_features`, and the environment override is
+`PCCONTROLLER_FIRMWARE_FEATURES=macro-strip-test`; explicit flags take precedence.
+The selector changes the source identity and is recorded in the firmware manifest.
+The board reports a temporary-profile build flag and clears the RF learning and
+record-replacement capability flags. Interfaces must honor those capabilities.
+Remove the selector to build the full profile again; no source recovery is needed.
+
 Never copy a flash or SRAM number from documentation into a release claim. The
 only authoritative values are those produced by the exact candidate build:
 

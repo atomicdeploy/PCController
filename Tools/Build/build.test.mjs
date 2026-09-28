@@ -13,6 +13,16 @@ test('deployment is explicit and validated by the build wrapper', () => {
 	assert.throws(() => parseArguments(['--upload', '--allow-incomplete-backup']), /unknown|unsupported/i)
 })
 
+test('temporary macro-strip profile is explicit and preserved in the build plan', () => {
+	const defaults = parseArguments(['--firmware-only'])
+	assert.deepEqual(defaults.firmwareFeatures, [])
+	const selected = parseArguments(['--firmware-only', '--firmware-feature', 'macro-strip-test'])
+	assert.deepEqual(selected.firmwareFeatures, ['macro-strip-test'])
+	const plan = createPlan(selected, resolveBuildIdentity(selected, {}), 'win32')
+	const compile = plan.actions.find(action => action.id === 'firmware-compile')
+	assert.ok(compile.command.args.includes('macro-strip-test'))
+})
+
 test('build helper executables use stable product paths, never Go temporary paths', () => {
 	const env = { LOCALAPPDATA: join(tmpdir(), 'local-app-data') }
 	assert.equal(goBuildHelperPath('generate-icon', env, 'win32'), join(env.LOCALAPPDATA, 'PCController', 'build-programs', 'generate-icon.exe'))

@@ -18,6 +18,9 @@ const (
 	// labels to the dedicated EEPROM tail region when that firmware feature is
 	// compiled into the image.
 	FirmwareFeatureEEPROMMenuLabels = firmwarefeatures.EEPROMMenuLabels
+	// FirmwareFeatureMacroStripTest is an explicitly selected temporary profile.
+	// It omits RF learning administration while retaining stored RF dispatch.
+	FirmwareFeatureMacroStripTest = firmwarefeatures.MacroStripTest
 )
 
 // NormalizeFirmwareFeatures validates, sorts, and de-duplicates named
@@ -45,6 +48,8 @@ func firmwareFeatureBuildDefines(features []FirmwareFeature) []string {
 			defines = append(defines, "-DPCCONTROLLER_ENABLE_EEPROM_BOOT_OPCODES=1")
 		case FirmwareFeatureEEPROMMenuLabels:
 			defines = append(defines, "-DPCCONTROLLER_ENABLE_EEPROM_MENU_LABELS=1")
+		case FirmwareFeatureMacroStripTest:
+			defines = append(defines, "-DPCCONTROLLER_MACRO_STRIP_TEST=1")
 		}
 	}
 	return defines

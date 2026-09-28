@@ -2395,6 +2395,15 @@ function firmwareArtifact(manifest, role) {
 
 function compileFirmware(options, identity, env, controllerPath, log) {
 	log.stage('🔧', 'Compiling AVR firmware through the Controller interface')
+	const reducedTestProfile = (options.firmwareFeatures || []).includes('macro-strip-test')
+	log.table('⚙️ Firmware profile', [{ label: 'Capability' }, { label: 'Selection' }], [
+		['Profile', reducedTestProfile ? 'macro-strip-test (temporary, explicit)' : 'Full default'],
+		['Macro recording / replay and strip streaming', 'Included'],
+		['Stored RF actions / RX / TX', 'Included'],
+		['Relay/motion safety, front panel and audio', 'Included'],
+		['RF learning / capture / timer / clear / list / replace', reducedTestProfile ? 'Omitted (source retained)' : 'Included'],
+		['Compile features', (options.firmwareFeatures || []).join(', ') || 'None selected']
+	])
 	const command = createControllerProgramCommand({
 		invocation: executionControllerInvocation(controllerPath),
 		method: 'compile',

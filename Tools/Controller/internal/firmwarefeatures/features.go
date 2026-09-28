@@ -15,6 +15,7 @@ type Feature string
 const (
 	EEPROMBootOpcodes Feature = "eeprom-boot-opcodes"
 	EEPROMMenuLabels  Feature = "eeprom-menu-labels"
+	MacroStripTest    Feature = "macro-strip-test"
 )
 
 // Normalize validates, sorts, and de-duplicates named firmware features.
@@ -25,15 +26,15 @@ func Normalize(values []string) ([]Feature, error) {
 		switch feature {
 		case "":
 			return nil, fmt.Errorf(
-				"firmware feature must not be empty; supported: %s, %s",
-				EEPROMBootOpcodes, EEPROMMenuLabels,
+				"firmware feature must not be empty; supported: %s, %s, %s",
+				EEPROMBootOpcodes, EEPROMMenuLabels, MacroStripTest,
 			)
-		case EEPROMBootOpcodes, EEPROMMenuLabels:
+		case EEPROMBootOpcodes, EEPROMMenuLabels, MacroStripTest:
 			selected[feature] = struct{}{}
 		default:
 			return nil, fmt.Errorf(
-				"unsupported firmware feature %q; supported: %s, %s",
-				value, EEPROMBootOpcodes, EEPROMMenuLabels,
+				"unsupported firmware feature %q; supported: %s, %s, %s",
+				value, EEPROMBootOpcodes, EEPROMMenuLabels, MacroStripTest,
 			)
 		}
 	}
