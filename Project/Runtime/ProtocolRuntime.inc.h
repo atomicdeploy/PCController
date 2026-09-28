@@ -216,9 +216,9 @@ void serviceStatusLedPush() {
       statusLeds.renderedRed(), statusLeds.renderedGreen(),
       statusLeds.renderedBlue(), statusLeds.brightness(),
       static_cast<uint8_t>(statusLeds.effect()), statusLeds.condition()};
-  const uint16_t tick = static_cast<uint16_t>(now);
+  const uint8_t tick = static_cast<uint8_t>(now);
   if (memcmp(payload, lastPushedStatusLed, sizeof(payload)) == 0 ||
-      static_cast<uint16_t>(tick - lastStatusLedPushAt) < 17U) {
+      static_cast<uint8_t>(tick - lastStatusLedPushAt) < 17U) {
     return;
   }
   memcpy(lastPushedStatusLed, payload, sizeof(payload));

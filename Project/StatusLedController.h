@@ -81,6 +81,7 @@ private:
   void loadProfile(uint8_t condition, uint32_t now);
   void defaultProfile(uint8_t condition, uint8_t *payload) const;
   void applyProfile(uint8_t condition, const uint8_t *payload, uint32_t now);
+  void applyRequested(uint32_t now) __attribute__((noinline));
   bool persistentPriorityActive() const;
   static bool validProfile(const uint8_t *payload);
   void renderColor(uint8_t red, uint8_t green, uint8_t blue, uint8_t level);
@@ -96,8 +97,7 @@ private:
   uint8_t renderedGreen_;
   uint8_t renderedBlue_;
   uint8_t condition_;
-  uint16_t effectPeriodMs_; // Full duration of one 64-phase cycle.
-  uint32_t effectCycleStartedAt_;
+  uint16_t effectCycleStartedAt_;
   uint32_t cueEndsAt_; // millis() deadline; zero means no active cue.
   StatusLedCue cue_;
   // Current rendered descriptor; repeats may count down without changing the

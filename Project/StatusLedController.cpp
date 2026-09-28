@@ -11,8 +11,6 @@
 namespace {
 // One cooperative cadence and the compact condition numbering shared with Go.
 constexpr uint16_t MinimumEffectPeriodMs = 640;
-constexpr uint16_t MaximumEffectPeriodMs = 60000;
-constexpr uint8_t EffectPhaseStep = 4;
 constexpr uint8_t StatusModePaletteCount = 11;
 
 } // namespace
@@ -41,9 +39,12 @@ void StatusLedController::service(uint32_t now) {
   }
 
   if (active_[0] != 0) {
-    uint32_t elapsed = static_cast<uint32_t>(now - effectCycleStartedAt_);
-    if (elapsed >= effectPeriodMs_) {
-      const uint32_t cycles = elapsed / effectPeriodMs_;
+    const uint16_t periodMs = static_cast<uint16_t>(active_[9]) |
+                              static_cast<uint16_t>(active_[10]) << 8;
+    const uint16_t tick = static_cast<uint16_t>(now);
+    uint16_t elapsed = static_cast<uint16_t>(tick - effectCycleStartedAt_);
+    if (elapsed >= periodMs) {
+      const uint8_t cycles = static_cast<uint8_t>(elapsed / periodMs);
       if (active_[11] != 0) {
         if (cycles >= active_[11]) {
           finishEffect();
@@ -51,12 +52,12 @@ void StatusLedController::service(uint32_t now) {
         }
         active_[11] = static_cast<uint8_t>(active_[11] - cycles);
       }
-      effectCycleStartedAt_ += cycles * effectPeriodMs_;
-      elapsed -= cycles * effectPeriodMs_;
+      elapsed = static_cast<uint16_t>(elapsed % periodMs);
+      effectCycleStartedAt_ = static_cast<uint16_t>(tick - elapsed);
     }
 
     const uint8_t phase = static_cast<uint8_t>(
-        (((elapsed * 64UL) + 63U) / effectPeriodMs_) * EffectPhaseStep);
+        (((static_cast<uint32_t>(elapsed) << 6) + 63U) / periodMs) << 2);
     if (phase != effectPhase_) {
       effectPhase_ = phase;
       renderEffect();
@@ -66,17 +67,17 @@ void StatusLedController::service(uint32_t now) {
 
 void StatusLedController::setMode(StatusLedMode mode, uint32_t now) {
   mode_ = mode;
-  if (persistentPriorityActive()) {
+  if (cue_ != StatusLedCue::None) {
+    if (!persistentPriorityActive()) {
+      return;
+    }
     cue_ = StatusLedCue::None;
   }
-  if (cue_ != StatusLedCue::None) {
+  if (mode == StatusLedMode::Custom && requested_[10] != 0) {
+    applyRequested(now);
     return;
   }
-  if (mode == StatusLedMode::Custom && requested_[10] != 0) {
-    applyProfile(ManualCondition, requested_, now);
-  } else {
-    loadProfile(static_cast<uint8_t>(mode), now);
-  }
+  loadProfile(static_cast<uint8_t>(mode), now);
 }
 
 StatusLedMode StatusLedController::mode() const { return mode_; }
@@ -95,17 +96,13 @@ uint8_t StatusLedController::brightness() const { return active_[7]; }
 
 void StatusLedController::setCustom(uint8_t red, uint8_t green, uint8_t blue,
                                     uint8_t brightness, uint32_t now) {
-  memset(requested_, 0, ProfilePayloadBytes);
+  requested_[0] = 0;
   requested_[1] = red;
   requested_[2] = green;
   requested_[3] = blue;
   requested_[7] = brightness;
   requested_[10] = 1; // Static-owner marker; effect-zero ignores period.
-  if (!persistentPriorityActive() && cue_ != StatusLedCue::Reset) {
-    mode_ = StatusLedMode::Custom;
-    cue_ = StatusLedCue::None;
-    applyProfile(ManualCondition, requested_, now);
-  }
+  applyRequested(now);
 }
 
 bool StatusLedController::setEffect(const uint8_t *payload, uint32_t now) {
@@ -117,12 +114,17 @@ bool StatusLedController::setEffect(const uint8_t *payload, uint32_t now) {
     return true;
   }
   memcpy(requested_, payload, ProfilePayloadBytes);
-  if (!persistentPriorityActive() && cue_ != StatusLedCue::Reset) {
-    mode_ = StatusLedMode::Custom;
-    cue_ = StatusLedCue::None;
-    applyProfile(ManualCondition, requested_, now);
-  }
+  applyRequested(now);
   return true;
+}
+
+void StatusLedController::applyRequested(uint32_t now) {
+  if (persistentPriorityActive() || cue_ == StatusLedCue::Reset) {
+    return;
+  }
+  mode_ = StatusLedMode::Custom;
+  cue_ = StatusLedCue::None;
+  applyProfile(ManualCondition, requested_, now);
 }
 
 void StatusLedController::cancelEffect() {
@@ -219,10 +221,7 @@ void StatusLedController::applyProfile(uint8_t condition,
     renderColor(active_[1], active_[2], active_[3], active_[7]);
     return;
   }
-  const uint16_t periodMs = static_cast<uint16_t>(payload[9]) |
-                            static_cast<uint16_t>(payload[10]) << 8;
-  effectPeriodMs_ = periodMs;
-  effectCycleStartedAt_ = now;
+  effectCycleStartedAt_ = static_cast<uint16_t>(now);
   renderEffect();
 }
 
@@ -240,11 +239,15 @@ bool StatusLedController::validProfile(const uint8_t *payload) {
       payload[8] > payload[7]) {
     return false;
   }
+  if (payload[0] == 0) {
+    return true;
+  }
   const uint16_t periodMs = static_cast<uint16_t>(payload[9]) |
                             static_cast<uint16_t>(payload[10]) << 8;
-  return payload[0] == 0 ||
-         (periodMs >= MinimumEffectPeriodMs &&
-          periodMs <= MaximumEffectPeriodMs);
+  if (static_cast<uint16_t>(periodMs - MinimumEffectPeriodMs) > 59360U) {
+    return false;
+  }
+  return true;
 }
 
 void StatusLedController::defaultProfile(uint8_t condition,
