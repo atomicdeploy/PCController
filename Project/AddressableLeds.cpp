@@ -138,6 +138,25 @@ bool configure(uint8_t count) {
   return true;
 }
 
+bool apply(const uint8_t *payload, uint8_t length) {
+  // Keep strip parsing outside the large protocol dispatcher, reducing AVR
+  // register spills. Acknowledgment follows show, never an intermediate pixel.
+  if (!length) return false;
+  const uint8_t selector = payload[0];
+  if (selector == 0xFE && length == 2) return configure(payload[1]);
+  if (selector == 0xFD && length >= 5) return stagePixels(payload[1], payload + 2, length - 2);
+  if (selector == 0xFC && length == 1) {
+    show();
+    return true;
+  }
+  if (length != 5) return false;
+  const RgbColor color(payload[1], payload[2], payload[3]);
+  if (selector == 0xFF) fill(color);
+  else if (!setPixel(selector, color)) return false;
+  show();
+  return true;
+}
+
 uint8_t count() { return pixelCount; }
 
 } // namespace AddressableLeds
