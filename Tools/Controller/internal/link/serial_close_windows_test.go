@@ -16,13 +16,13 @@ type cancelOnCloseWindowsPort struct {
 	readAborted chan struct{}
 	startOnce   sync.Once
 	abortOnce   sync.Once
-	closeOnce   sync.Once
 
-	mu         sync.Mutex
-	closeCalls int
-	resetCalls int
-	handleOpen bool
-	closeErr   error
+	mu            sync.Mutex
+	closeCalls    int
+	closeFailures int
+	resetCalls    int
+	handleOpen    bool
+	closeErr      error
 }
 
 func newCancelOnCloseWindowsPort() *cancelOnCloseWindowsPort {
@@ -60,16 +60,21 @@ func (*cancelOnCloseWindowsPort) GetModemStatusBits() (*serial.ModemStatusBits, 
 }
 func (*cancelOnCloseWindowsPort) SetReadTimeout(time.Duration) error { return nil }
 func (port *cancelOnCloseWindowsPort) Close() error {
-	port.closeOnce.Do(func() {
-		// Model the pinned Windows transport: Close itself cancels the pending
-		// overlapped operation before invalidating the underlying handle.
-		port.abortOnce.Do(func() { close(port.readAborted) })
-		port.mu.Lock()
-		port.closeCalls++
-		port.handleOpen = false
+	port.mu.Lock()
+	port.closeCalls++
+	if port.closeFailures > 0 {
+		port.closeFailures--
+		err := port.closeErr
 		port.mu.Unlock()
-	})
-	return port.closeErr
+		return err
+	}
+	port.handleOpen = false
+	port.mu.Unlock()
+
+	// Model the pinned Windows transport: a successful Close cancels the
+	// pending overlapped operation before invalidating the underlying handle.
+	port.abortOnce.Do(func() { close(port.readAborted) })
+	return nil
 }
 func (*cancelOnCloseWindowsPort) Break(time.Duration) error { return nil }
 
@@ -103,25 +108,87 @@ func TestSessionCloseReliesOnTransportToCancelPendingWindowsRead(t *testing.T) {
 	}
 }
 
-func TestSessionCloseRetainsTransportErrorForRepeatedCallers(t *testing.T) {
-	closeErr := errors.New("handle close failed")
+func TestSessionCloseReturnsRetryableTransportErrorWithoutWaitingForReader(t *testing.T) {
+	closeErr := errors.New("CancelIoEx failed")
 	port := newCancelOnCloseWindowsPort()
 	port.closeErr = closeErr
+	port.closeFailures = 1
 	session := NewForPort("COM3", port)
 	awaitSignal(t, port.readStarted, "pending read")
 
-	firstErr := session.Close()
-	if !errors.Is(firstErr, closeErr) {
-		t.Fatalf("close error = %v, want %v", firstErr, closeErr)
+	firstClose := make(chan error, 1)
+	go func() { firstClose <- session.Close() }()
+	select {
+	case err := <-firstClose:
+		if !errors.Is(err, closeErr) {
+			t.Fatalf("first close error = %v, want %v", err, closeErr)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("first close waited for the pending reader after transport cancellation failed")
 	}
-	if repeatedErr := session.Close(); repeatedErr != firstErr {
-		t.Fatalf("repeated close error = %v, want stored result %v", repeatedErr, firstErr)
+	select {
+	case <-port.readAborted:
+		t.Fatal("failed transport close aborted the pending reader")
+	default:
+	}
+
+	port.mu.Lock()
+	if !port.handleOpen || port.closeCalls != 1 {
+		t.Fatalf("after first close: handleOpen=%v calls=%d, want true/1", port.handleOpen, port.closeCalls)
+	}
+	port.mu.Unlock()
+
+	secondClose := make(chan error, 1)
+	go func() { secondClose <- session.Close() }()
+	select {
+	case err := <-secondClose:
+		if err != nil {
+			t.Fatalf("retry close: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("retry close did not finish after transport cancellation succeeded")
+	}
+	if err := session.Close(); err != nil {
+		t.Fatalf("repeated close after successful retry: %v", err)
 	}
 
 	port.mu.Lock()
 	defer port.mu.Unlock()
-	if port.closeCalls != 1 {
-		t.Fatalf("transport close calls = %d, want 1", port.closeCalls)
+	if port.handleOpen || port.closeCalls != 2 {
+		t.Fatalf("after retry: handleOpen=%v calls=%d, want false/2", port.handleOpen, port.closeCalls)
+	}
+}
+
+func TestSessionCloseConcurrentCallersShareSuccessfulResult(t *testing.T) {
+	port := newCancelOnCloseWindowsPort()
+	session := NewForPort("COM3", port)
+	awaitSignal(t, port.readStarted, "pending read")
+
+	const callers = 8
+	start := make(chan struct{})
+	results := make(chan error, callers)
+	for range callers {
+		go func() {
+			<-start
+			results <- session.Close()
+		}()
+	}
+	close(start)
+	for range callers {
+		select {
+		case err := <-results:
+			if err != nil {
+				t.Fatalf("concurrent close: %v", err)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("concurrent close caller did not finish")
+		}
+	}
+
+	port.mu.Lock()
+	defer port.mu.Unlock()
+	if port.handleOpen || port.closeCalls != 1 {
+		t.Fatalf("after concurrent close: handleOpen=%v calls=%d, want false/1", port.handleOpen, port.closeCalls)
 	}
 }
 

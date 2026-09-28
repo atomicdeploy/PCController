@@ -46,9 +46,10 @@ type Session struct {
 	events chan Event
 	done   chan struct{}
 
-	closeOnce sync.Once
-	closeErr  error
-	readDone  sync.WaitGroup
+	closeMu  sync.Mutex
+	doneOnce sync.Once
+	closed   bool
+	readDone sync.WaitGroup
 }
 
 type sessionPort interface {
@@ -393,14 +394,29 @@ func (s *Session) Done() <-chan struct{} {
 }
 
 func (s *Session) Close() error {
-	s.closeOnce.Do(s.closeTransport)
+	if err := s.closeTransport(); err != nil {
+		// A Windows transport may retain a live handle and pending OVERLAPPED
+		// operation when CancelIoEx itself fails. Do not wait for the reader in
+		// that retryable state: return the cancellation error promptly so a later
+		// Close can retry without abandoning ownership of the I/O resources.
+		return err
+	}
 	s.readDone.Wait()
-	return s.closeErr
+	return nil
 }
 
-func (s *Session) closeTransport() {
-	close(s.done)
-	s.closeErr = s.port.Close()
+func (s *Session) closeTransport() error {
+	s.closeMu.Lock()
+	defer s.closeMu.Unlock()
+	if s.closed {
+		return nil
+	}
+	s.doneOnce.Do(func() { close(s.done) })
+	if err := s.port.Close(); err != nil {
+		return err
+	}
+	s.closed = true
+	return nil
 }
 
 func (s *Session) readLoop() {
@@ -427,7 +443,7 @@ func (s *Session) readLoop() {
 			case <-s.done:
 			default:
 				s.publish(Event{Err: fmt.Errorf("read %s: %w", s.name, err)})
-				s.closeOnce.Do(s.closeTransport)
+				_ = s.closeTransport()
 			}
 			return
 		}

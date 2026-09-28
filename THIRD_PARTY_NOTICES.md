@@ -78,7 +78,7 @@ The resolved module graph was audited in these license groups:
 
 `go.bug.st/serial` is resolved from the public
 [`DRSDavidSoft/go-serial`](https://github.com/DRSDavidSoft/go-serial) fork at
-merge commit `bb99eaf18fe565b5ecf2bdf705b03337369ae8e6`, based on upstream 1.8.0.
+merge commit `9bbf3c4c8df65ad231e88eb705f358421166edd3`, based on upstream 1.8.0.
 The fork retains the upstream BSD-3-Clause license and adds Windows
 `CancelIoEx` lifecycle handling for pending overlapped reads and writes.
 
