@@ -50,19 +50,25 @@ public:
   static constexpr uint8_t ManualCondition = 0xFF;
   // Claims PWM output plus Power/On signal and starts the boot animation.
   void begin(PwmController &pwm, uint8_t brightness,
-             uint32_t now = millis(), bool powerSignal = true);
-  // Advances breathing/easing without blocking other services.
-  void service(uint32_t now = millis());
+             uint16_t now = static_cast<uint16_t>(millis()),
+             bool powerSignal = true);
+  // Advances breathing/easing without blocking other services. Supported
+  // periods fit the modulo-16-bit clock; cooperative service runs within one
+  // wrap so duration and deadline comparisons remain exact.
+  void service(uint16_t now = static_cast<uint16_t>(millis()));
 
-  void setMode(StatusLedMode mode, uint32_t now = millis());
+  void setMode(StatusLedMode mode,
+               uint16_t now = static_cast<uint16_t>(millis()));
   StatusLedMode mode() const;
   void setBrightness(uint8_t brightness);
   uint8_t brightness() const;
   void setCustom(uint8_t red, uint8_t green, uint8_t blue,
-                 uint8_t brightness, uint32_t now = millis());
+                 uint8_t brightness,
+                 uint16_t now = static_cast<uint16_t>(millis()));
   // Atomically owns a complete STATUS_EFFECT descriptor. Exact repeats retain
   // phase; changed descriptors replace in place without an owner-release gap.
-  bool setEffect(const uint8_t *payload, uint32_t now = millis());
+  bool setEffect(const uint8_t *payload,
+                 uint16_t now = static_cast<uint16_t>(millis()));
   void cancelEffect();
   StatusLedEffect effect() const;
   uint8_t renderedRed() const;
@@ -71,17 +77,17 @@ public:
   uint8_t condition() const;
   bool profile(uint8_t condition, uint8_t *payload) const;
   bool setProfile(uint8_t condition, const uint8_t *payload,
-                  uint32_t now = millis());
+                  uint16_t now = static_cast<uint16_t>(millis()));
   void setPowerSignal(bool active);
   // Overlays an informational transition before smoothly restoring base state.
   void playCue(StatusLedCue cue, uint16_t durationMs,
-               uint32_t now = millis());
+               uint16_t now = static_cast<uint16_t>(millis()));
 
 private:
-  void loadProfile(uint8_t condition, uint32_t now);
+  void loadProfile(uint8_t condition, uint16_t now);
   void defaultProfile(uint8_t condition, uint8_t *payload) const;
-  void applyProfile(uint8_t condition, const uint8_t *payload, uint32_t now);
-  void applyRequested(uint32_t now) __attribute__((noinline));
+  void applyProfile(uint8_t condition, const uint8_t *payload, uint16_t now);
+  void applyRequested(uint16_t now) __attribute__((noinline));
   bool persistentPriorityActive() const;
   static bool validProfile(const uint8_t *payload);
   void renderColor(uint8_t red, uint8_t green, uint8_t blue, uint8_t level);
@@ -98,7 +104,7 @@ private:
   uint8_t renderedBlue_;
   uint8_t condition_;
   uint16_t effectCycleStartedAt_;
-  uint32_t cueEndsAt_; // millis() deadline; zero means no active cue.
+  uint16_t cueEndsAt_; // Modulo-millis deadline; zero means no active cue.
   StatusLedCue cue_;
   // Current rendered descriptor; repeats may count down without changing the
   // separately retained owner request.

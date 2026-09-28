@@ -18,20 +18,20 @@ constexpr uint8_t StatusModePaletteCount = 11;
 StatusLedController statusLeds;
 
 void StatusLedController::begin(PwmController &pwm, uint8_t brightness,
-                                uint32_t now, bool powerSignal) {
+                                uint16_t now, bool powerSignal) {
   pwm_ = &pwm;
   fallbackBrightness_ = brightness;
   pwm_->setPowerSignal(powerSignal);
   setMode(StatusLedMode::Boot, now);
 }
 
-void StatusLedController::service(uint32_t now) {
+void StatusLedController::service(uint16_t now) {
   if (pwm_ == nullptr) {
     return;
   }
 
   if (cue_ != StatusLedCue::None &&
-      static_cast<int32_t>(now - cueEndsAt_) >= 0) {
+      static_cast<int16_t>(now - cueEndsAt_) >= 0) {
     cue_ = StatusLedCue::None;
     // Re-enter through the priority selector so expiry restores the retained
     // manual request rather than the persisted Custom profile.
@@ -41,7 +41,7 @@ void StatusLedController::service(uint32_t now) {
   if (active_[0] != 0) {
     const uint16_t periodMs = static_cast<uint16_t>(active_[9]) |
                               static_cast<uint16_t>(active_[10]) << 8;
-    const uint16_t tick = static_cast<uint16_t>(now);
+    const uint16_t tick = now;
     uint16_t elapsed = static_cast<uint16_t>(tick - effectCycleStartedAt_);
     if (elapsed >= periodMs) {
       const uint8_t cycles = static_cast<uint8_t>(elapsed / periodMs);
@@ -65,7 +65,7 @@ void StatusLedController::service(uint32_t now) {
   }
 }
 
-void StatusLedController::setMode(StatusLedMode mode, uint32_t now) {
+void StatusLedController::setMode(StatusLedMode mode, uint16_t now) {
   mode_ = mode;
   if (cue_ != StatusLedCue::None) {
     if (!persistentPriorityActive()) {
@@ -95,7 +95,7 @@ void StatusLedController::setBrightness(uint8_t brightness) {
 uint8_t StatusLedController::brightness() const { return active_[7]; }
 
 void StatusLedController::setCustom(uint8_t red, uint8_t green, uint8_t blue,
-                                    uint8_t brightness, uint32_t now) {
+                                    uint8_t brightness, uint16_t now) {
   requested_[0] = 0;
   requested_[1] = red;
   requested_[2] = green;
@@ -105,7 +105,7 @@ void StatusLedController::setCustom(uint8_t red, uint8_t green, uint8_t blue,
   applyRequested(now);
 }
 
-bool StatusLedController::setEffect(const uint8_t *payload, uint32_t now) {
+bool StatusLedController::setEffect(const uint8_t *payload, uint16_t now) {
   if (!validProfile(payload) || payload[0] == 0) {
     return false;
   }
@@ -118,7 +118,7 @@ bool StatusLedController::setEffect(const uint8_t *payload, uint32_t now) {
   return true;
 }
 
-void StatusLedController::applyRequested(uint32_t now) {
+void StatusLedController::applyRequested(uint16_t now) {
   if (persistentPriorityActive() || cue_ == StatusLedCue::Reset) {
     return;
   }
@@ -152,7 +152,7 @@ void StatusLedController::setPowerSignal(bool active) {
 }
 
 void StatusLedController::playCue(StatusLedCue cue, uint16_t durationMs,
-                                  uint32_t now) {
+                                  uint16_t now) {
   // Learning/Warning/Fault always dominate. Routine informational cues never
   // steal a manual owner, while Reset remains visible before watchdog reboot.
   if (persistentPriorityActive() ||
@@ -188,7 +188,7 @@ bool StatusLedController::profile(uint8_t condition, uint8_t *payload) const {
 
 bool StatusLedController::setProfile(uint8_t condition,
                                      const uint8_t *payload,
-                                     uint32_t now) {
+                                     uint16_t now) {
   if (condition >= ProfileCount || !validProfile(payload)) {
     return false;
   }
@@ -206,14 +206,14 @@ bool StatusLedController::setProfile(uint8_t condition,
   return true;
 }
 
-void StatusLedController::loadProfile(uint8_t condition, uint32_t now) {
+void StatusLedController::loadProfile(uint8_t condition, uint16_t now) {
   uint8_t payload[ProfilePayloadBytes];
   profile(condition, payload);
   applyProfile(condition, payload, now);
 }
 
 void StatusLedController::applyProfile(uint8_t condition,
-                                       const uint8_t *payload, uint32_t now) {
+                                       const uint8_t *payload, uint16_t now) {
   condition_ = condition;
   memcpy(active_, payload, ProfilePayloadBytes);
   effectPhase_ = 0;
@@ -221,7 +221,7 @@ void StatusLedController::applyProfile(uint8_t condition,
     renderColor(active_[1], active_[2], active_[3], active_[7]);
     return;
   }
-  effectCycleStartedAt_ = static_cast<uint16_t>(now);
+  effectCycleStartedAt_ = now;
   renderEffect();
 }
 

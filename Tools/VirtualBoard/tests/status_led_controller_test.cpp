@@ -172,16 +172,17 @@ void testExactDurationAndWrap() {
                                          255, 64, 32, 255, 0, period, 1);
     require(fixture.leds.setEffect(finite.data(), 10),
             "finite descriptor was rejected");
-    fixture.leds.service(static_cast<std::uint32_t>(10U + period - 1U));
+    fixture.leds.service(static_cast<std::uint16_t>(10U + period - 1U));
     require(fixture.leds.effect() == StatusLedEffect::Transition,
             "finite effect completed before configured duration");
-    fixture.leds.service(static_cast<std::uint32_t>(10U + period));
+    fixture.leds.service(static_cast<std::uint16_t>(10U + period));
     require(fixture.leds.effect() == StatusLedEffect::None &&
                 fixture.leds.renderedRed() == 255 &&
                 fixture.leds.renderedGreen() == 64 &&
                 fixture.leds.renderedBlue() == 32,
             "finite effect did not complete at its exact endpoint");
-    require(fixture.leds.setEffect(finite.data(), 100000),
+    require(fixture.leds.setEffect(
+                finite.data(), static_cast<std::uint16_t>(100000U)),
             "completed descriptor could not restart");
     require(fixture.leds.effect() == StatusLedEffect::Transition &&
                 fixture.leds.renderedRed() == 0,
@@ -240,6 +241,20 @@ void testExactDurationAndWrap() {
               delayed.leds.renderedRed() <= 128,
           "delayed multi-cycle tick lost the latest physical phase: red=" +
               std::to_string(delayed.leds.renderedRed()));
+
+  Fixture wrapped(255);
+  const Descriptor wrappedFinite = descriptor(
+      StatusLedEffect::Transition, 0, 0, 0, 255, 0, 0, 255, 0, 1280, 1);
+  constexpr std::uint16_t wrapStart = 65000;
+  require(wrapped.leds.setEffect(wrappedFinite.data(), wrapStart),
+          "wrap descriptor was rejected");
+  wrapped.leds.service(static_cast<std::uint16_t>(wrapStart + 1279U));
+  require(wrapped.leds.effect() == StatusLedEffect::Transition,
+          "modulo clock completed before the wrapped deadline");
+  wrapped.leds.service(static_cast<std::uint16_t>(wrapStart + 1280U));
+  require(wrapped.leds.effect() == StatusLedEffect::None &&
+              wrapped.leds.renderedRed() == 255,
+          "modulo clock missed the exact wrapped endpoint");
 }
 
 void testFallbackBrightnessIsStable() {
