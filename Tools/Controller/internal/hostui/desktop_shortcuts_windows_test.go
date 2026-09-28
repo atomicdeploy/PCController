@@ -4,13 +4,68 @@ package hostui
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"golang.org/x/sys/windows"
+
 	"pccontroller.local/controller/internal/productidentity"
 )
+
+func TestWindowsShortcutReplacementRetriesSharingViolationAndLeavesNoResidue(t *testing.T) {
+	status := temporaryShortcutStatus(t)
+	const appID = "Tests.Controller.Replace"
+	if err := ensureWindowsShortcuts(&status, appID, "Controller Tests"); err != nil {
+		t.Fatal(err)
+	}
+	original := moveShortcutFile
+	defer func() { moveShortcutFile = original }()
+	calls := 0
+	moveShortcutFile = func(from, to *uint16, flags uint32) error {
+		calls++
+		if calls <= 2 {
+			return windows.ERROR_SHARING_VIOLATION
+		}
+		return original(from, to, flags)
+	}
+	status.ShortcutReady, status.DesktopShortcutReady = false, false
+	if err := ensureWindowsShortcuts(&status, appID, "Controller Tests"); err != nil {
+		t.Fatal(err)
+	}
+	if calls < 4 { // two retries plus successful Start-menu and Desktop replacements.
+		t.Fatalf("sharing-violation retry count=%d", calls)
+	}
+	for _, path := range []string{status.Shortcut, status.DesktopShortcut} {
+		entries, err := os.ReadDir(filepath.Dir(path))
+		if err != nil || len(entries) != 1 {
+			t.Fatalf("temporary link residue after retry: %v err=%v", entries, err)
+		}
+	}
+}
+
+func TestWindowsShortcutReplacementFailureCleansExactTemporaryLink(t *testing.T) {
+	status := temporaryShortcutStatus(t)
+	const appID = "Tests.Controller.ReplaceFailure"
+	if err := ensureWindowsShortcuts(&status, appID, "Controller Tests"); err != nil {
+		t.Fatal(err)
+	}
+	original := replaceShortcutFile
+	defer func() { replaceShortcutFile = original }()
+	replaceShortcutFile = func(_, _ string) error { return windows.ERROR_ACCESS_DENIED }
+	status.ShortcutReady, status.DesktopShortcutReady = false, false
+	if err := ensureWindowsShortcuts(&status, appID, "Controller Tests"); err == nil || !errors.Is(err, windows.ERROR_ACCESS_DENIED) {
+		t.Fatalf("replacement failure=%v", err)
+	}
+	for _, path := range []string{status.Shortcut, status.DesktopShortcut} {
+		entries, err := os.ReadDir(filepath.Dir(path))
+		if err != nil || len(entries) != 1 || entries[0].Name() != filepath.Base(path) {
+			t.Fatalf("temporary link residue after failure: %v err=%v", entries, err)
+		}
+	}
+}
 
 func temporaryShortcutStatus(t *testing.T) DesktopIntegrationStatus {
 	t.Helper()
