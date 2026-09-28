@@ -17,6 +17,7 @@ host-owned JSON configuration are documented separately on purpose.
 | Coordinate issues, pull requests, WIP, and machine handoffs | [GitHub Collaboration and Handoffs](GitHub-Collaboration-and-Handoffs.md) |
 | Understand the physical panel | [Front Panel and Menus](Front-Panel-and-Menus.md) |
 | Configure the host, WebUI, hotkeys, notifications, or integrations | [Host Configuration and Integrations](Host-Configuration-and-Integrations.md) |
+| Record, name, monitor and play host macros across interfaces | [Host Macro Recording](Host-Macro-Recording.md) |
 | Integrate through UART, JSON-RPC, REST, WebSocket, Go, or C | [Protocol and Network API](../Tools/Controller/docs/Protocol-and-Network-API.md), [machine-readable contracts](../Tools/Controller/api/reference.html), and [C Library API](../Tools/Controller/docs/C-Library-API.md) |
 | Export or host the WebUI from a separate origin | [Portable WebUI](../Tools/Controller/docs/Portable-WebUI.md) |
 | Build, back up, program, or recover a board | [Toolchain and Safe Programming](Toolchain-and-Safe-Programming.md) |
@@ -83,6 +84,8 @@ device identity or interface settings.
 - [Virtual Board](../Tools/VirtualBoard/README.md) — hardware-free native
   simulator setup and protocol testing.
 - [Requirements Backlog](Requirements-Backlog.md) — issue-linked open work.
+- [September Delivery Checkpoint](September-Delivery-Checkpoint.md) — reconciled
+  pull requests, verification evidence, and outstanding live-delivery gates.
 - [Project Acceptance](Project-Checklist.md) — current software gates and
   hardware work that remains deliberately unclaimed.
 - [Alpha Delivery Ledger](Alpha-Delivery-Ledger.md) — time-scoped requirements,

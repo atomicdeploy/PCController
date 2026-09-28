@@ -19,8 +19,7 @@ const (
 	// PublicInfoPath is the bounded device-directory document. During the
 	// immediate alpha, application auth/authZ is disabled; capability and live
 	// availability still determine whether board-specific keys are present.
-	PublicInfoPath   = "/upnp/public.json"
-	PublicInfoSchema = "pccontroller.public.v1"
+	PublicInfoPath = "/upnp/public.json"
 )
 
 var publicHTTPTransport = func() *http.Transport {
@@ -32,7 +31,6 @@ var publicHTTPTransport = func() *http.Transport {
 }()
 
 type PublicInfo struct {
-	Schema       string          `json:"schema"`
 	Product      string          `json:"product"`
 	Protocol     string          `json:"protocol"`
 	InstanceID   string          `json:"instance_id"`
@@ -215,7 +213,7 @@ type Source struct {
 }
 
 func (info PublicInfo) Valid() bool {
-	return info.Schema == PublicInfoSchema && strings.EqualFold(info.Product, "PCController") &&
+	return strings.EqualFold(info.Product, "PCController") &&
 		strings.TrimSpace(info.Hostname) != ""
 }
 
@@ -330,7 +328,7 @@ func publicInfoFromTXT(values []string) PublicInfo {
 	connectable, _ := strconv.ParseBool(items["remote.connectable"])
 	telemetryAvailable := items["board.status_at"] != "" || items["board.supply_mv"] != ""
 	return PublicInfo{
-		Schema: PublicInfoSchema, Product: "PCController", Protocol: items["protocol"],
+		Product: "PCController", Protocol: items["protocol"],
 		InstanceID: items["instance.id"], InstanceName: items["instance.name"], Hostname: items["host.hostname"],
 		Health: PublicHealth{OK: items["health"] == "ok", Service: items["service"], Connectable: connectable, Auth: items["auth"]},
 		Host:   PublicHost{Version: items["host.version"], SourceHash: items["host.source_hash"], BuildTime: items["host.build_time"]},
@@ -382,7 +380,11 @@ func pinPublicInfoEndpoints(info *PublicInfo, instance Instance) {
 	}
 	info.Endpoints.Web = pin(info.Endpoints.Web, "http", "/")
 	info.Endpoints.API = pin(info.Endpoints.API, "http", "/api/snapshot")
-	info.Endpoints.ServerProof = pin(info.Endpoints.ServerProof, "http", "/api/auth/server-proof")
+	if strings.EqualFold(strings.TrimSpace(info.Health.Auth), "disabled-alpha") || strings.EqualFold(strings.TrimSpace(info.Health.Auth), "none") {
+		info.Endpoints.ServerProof = ""
+	} else {
+		info.Endpoints.ServerProof = pin(info.Endpoints.ServerProof, "http", "/api/auth/server-proof")
+	}
 	info.Endpoints.Operations = pin(info.Endpoints.Operations, "http", "/api/rpc")
 	info.Endpoints.Commands = pin(info.Endpoints.Commands, "http", "/api/commands")
 	info.Endpoints.Events = pin(info.Endpoints.Events, "ws", "/ipc")

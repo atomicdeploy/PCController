@@ -151,6 +151,7 @@ func (model Model) appSettingRows() []settingRow {
 		{Key: "console.font", Group: "", Label: "Font face", Value: ui.TUIConsole.FontFace, Editable: true},
 		{Key: "console.font_size", Group: "", Label: "Font height", Value: fmt.Sprintf("%d px", ui.TUIConsole.FontSize), Editable: true},
 		{Key: "poll.active", Group: "MEASUREMENTS", Label: "Active polling", Value: model.prefs.PollInterval.String(), Editable: true},
+		{Key: "measurement.freshness", Group: "", Label: "Freshness window", Value: model.prefs.FreshnessWindow.String(), Editable: true},
 		{Key: "history.retention", Group: "", Label: "History retention", Value: model.prefs.HistoryWindow.String(), Editable: true},
 		{Key: "display.decimals", Group: "", Label: "Decimal places", Value: fmt.Sprintf("V %d  ·  A %d  ·  W %d  ·  °C %d", ui.VoltageDecimals, ui.CurrentDecimals, ui.PowerDecimals, ui.TemperatureDecimals), Editable: true},
 		{Key: "diagnostic.visibility", Group: "", Label: "I/O · diagnostics · graphs", Value: fmt.Sprintf("%s · %s · %s", onOff(ui.ShowIO), onOff(ui.ShowDiagnostics), onOff(ui.ShowGraphs)), Editable: true},
@@ -306,7 +307,7 @@ func (model Model) peripheralAdvertised(descriptor appconfig.PeripheralDescripto
 		if descriptor.Key == "display.segment" {
 			return capabilities&native.CapabilitySegments != 0
 		}
-		return snapshot.HaveStatus && capabilities&native.CapabilityLCD != 0 && snapshot.Status.LCDAddress != 0
+		return model.lcdDisplayAvailable(snapshot)
 	case "sensor":
 		switch descriptor.Role {
 		case "supply-voltage":
@@ -539,7 +540,18 @@ func (model Model) buildAppSettingEditor(editor *settingEditor) {
 			rangeField("pixels", "Font height", ui.TUIConsole.FontSize, 5, 72, 1, "px", true),
 		}
 	case "poll.active":
-		editor.Fields = []settingEditorField{{Key: "interval", Label: "Polling interval", Value: ui.StatusIntervalMS, Options: intOptions([]int{100, 125, 200, 250, 500, 1000, 2000, 5000}, "ms")}}
+		editor.Fields = []settingEditorField{rangeField(
+			"interval", "Polling interval", ui.StatusIntervalMS,
+			appconfig.StatusIntervalMinMS, appconfig.StatusIntervalMaxMS,
+			1, "ms", true,
+		)}
+	case "measurement.freshness":
+		minimum := ui.StatusIntervalMS + appconfig.MeasurementFreshnessHeadroomMS
+		editor.Fields = []settingEditorField{rangeField(
+			"window", "Freshness window", ui.MeasurementFreshnessMS,
+			minimum, appconfig.MeasurementFreshnessMaxMS,
+			1, "ms", true,
+		)}
 	case "history.retention":
 		editor.Fields = []settingEditorField{{Key: "hours", Label: "Retention", Value: ui.HistoryHours, Options: intOptions([]int{1, 6, 12, 24, 48, 72, 168}, "h")}}
 	case "display.decimals":

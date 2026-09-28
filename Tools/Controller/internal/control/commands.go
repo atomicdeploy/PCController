@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"pccontroller.local/controller/internal/appconfig"
+	"pccontroller.local/controller/internal/deployment"
 	"pccontroller.local/controller/internal/discovery"
 	"pccontroller.local/controller/internal/hostfacts"
 	"pccontroller.local/controller/internal/hostos"
@@ -67,16 +68,6 @@ func parseDisplayCommand(args []string) (DisplayRequest, error) {
 		return DisplayRequest{}, errors.New("usage: display segments|lcd|both [options] [--] [TEXT]")
 	}
 	request := DisplayRequest{Target: args[0]}
-	// Preserve the original compact form. For long segment text the historical
-	// duration value was the step speed; for static/LCD text it was the hold.
-	if len(args) >= 2 && !strings.HasPrefix(args[1], "--") {
-		if legacy, err := strconv.ParseUint(args[1], 0, 16); err == nil {
-			request.SpeedMS = int(legacy)
-			request.DurationMS = int(legacy)
-			request.Text = strings.Join(args[2:], " ")
-			return request, nil
-		}
-	}
 	for index := 1; index < len(args); index++ {
 		argument := args[index]
 		if argument == "--" {
@@ -104,7 +95,7 @@ func parseDisplayCommand(args []string) (DisplayRequest, error) {
 			if err != nil {
 				return DisplayRequest{}, fmt.Errorf("invalid display speed %q: %w", value, err)
 			}
-		case "--duration", "--duration-ms", "--hold":
+		case "--duration", "--duration-ms":
 			value, err := nextValue()
 			if err != nil {
 				return DisplayRequest{}, err
@@ -119,7 +110,7 @@ func parseDisplayCommand(args []string) (DisplayRequest, error) {
 				return DisplayRequest{}, err
 			}
 			request.Repeat = DisplayRepeat(value)
-		case "--interval", "--interval-ms", "--wait":
+		case "--interval", "--interval-ms":
 			value, err := nextValue()
 			if err != nil {
 				return DisplayRequest{}, err
@@ -128,7 +119,7 @@ func parseDisplayCommand(args []string) (DisplayRequest, error) {
 			if err != nil {
 				return DisplayRequest{}, fmt.Errorf("invalid display interval %q: %w", value, err)
 			}
-		case "--scroll", "--marquee":
+		case "--scroll":
 			if hasInline {
 				return DisplayRequest{}, fmt.Errorf("%s does not take a value", name)
 			}
@@ -170,9 +161,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 	)
 	runtime.setMacroRunner(macroRunner)
 	outputs := options.Outputs
-	if outputs == nil {
-		outputs = NewOutputScheduler(runtime)
-	}
+	outputs = runtime.bindOutputScheduler(outputs)
 	// Keep the runtime-owned scheduler attached when a watched configuration
 	// resolver refreshes only file-backed options. Programming capture/restore
 	// must observe the same RGB/melody owner used by the live command engine.
@@ -317,8 +306,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 					return "", err
 				}
 			} else {
-				runtime.ResumeAuto()
-				if err := runtime.EnsureConnected(requestContext); err != nil {
+				if err := runtime.Connect(requestContext); err != nil {
 					return "", err
 				}
 			}
@@ -335,11 +323,9 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 	mustRegister(shell.Command{
 		Name: "reconnect", Usage: "reconnect", Summary: "resume authenticated auto-reconnect",
 		Run: func(ctx context.Context, _ []string) (string, error) {
-			_ = runtime.Close()
-			runtime.ResumeAuto()
 			requestContext, cancel := context.WithTimeout(ctx, 8*time.Second)
 			defer cancel()
-			if err := runtime.EnsureConnected(requestContext); err != nil {
+			if err := runtime.Reconnect(requestContext, "interactive reconnect requested"); err != nil {
 				return "", err
 			}
 			return "reconnected " + runtime.Snapshot().Port.Name, nil
@@ -875,8 +861,8 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 		},
 	})
 	mustRegister(shell.Command{
-		Name: "macro", Usage: "macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|delete NAME_OR_ID|record start NAME [CATEGORY [COLOR]]|record status|record save|record discard|play NAME_OR_ID|status|cancel [keep]",
-		Summary: "manage and play MCU-timed multi-peripheral macros",
+		Name: "macro", Usage: "macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|rename NAME_OR_ID NAME|category NAME_OR_ID CATEGORY|delete NAME_OR_ID|record start|start-mcu NAME [CATEGORY [COLOR]]|record status|record save|record discard|play NAME_OR_ID|status|monitor|cancel [keep]",
+		Summary: "record and play named host or MCU-timed multi-peripheral macros",
 		Run: func(ctx context.Context, args []string) (string, error) {
 			return macroCommand(ctx, macroRunner, args)
 		},
@@ -1227,7 +1213,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 	})
 	mustRegister(shell.Command{
 		Name:    "program",
-		Usage:   "program flash HEX [PORT] [--method urclock|usbasp] [--allow-incomplete-backup] [--reinitialize-eeprom] | program recover HEX [PORT] | program abandon TARGET_SHA256 ABANDON | program compile SKETCH [--firmware-feature NAME ...|--no-firmware-features] | program OPERATION METHOD PATH [PORT]",
+		Usage:   "program flash HEX [PORT] [--method urclock|usbasp] [--deployment production|development] [--reinitialize-eeprom] | program recover HEX [PORT] | program abandon TARGET_SHA256 ABANDON | program compile SKETCH [--firmware-feature NAME ...|--no-firmware-features] | program OPERATION METHOD PATH [PORT]",
 		Summary: "guarded backup-then-flash, or non-write programmer diagnostics",
 		Run: func(ctx context.Context, args []string) (string, error) {
 			resolved := resolveCommandOptions(options)
@@ -1239,11 +1225,10 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 
 func encodeLiveSettingsExport(settings native.Settings) (string, error) {
 	encoded, err := json.MarshalIndent(struct {
-		Format   string          `json:"format"`
 		Source   string          `json:"source"`
 		Settings native.Settings `json:"settings"`
 	}{
-		Format: "controller-mcu-settings/v1", Source: "live-opcode",
+		Source:   "live-opcode",
 		Settings: settings,
 	}, "", "  ")
 	if err != nil {
@@ -2884,8 +2869,8 @@ func statusEffectCommand(
 			lines := make([]string, 0, len(effects))
 			for _, effect := range effects {
 				duration := "until-stopped"
-				if effect.DurationMS != 0 {
-					duration = fmt.Sprintf("%dms", effect.DurationMS)
+				if effect.Repeats != 0 {
+					duration = fmt.Sprintf("%dms", effect.PeriodMS*int(effect.Repeats))
 				}
 				lines = append(lines, fmt.Sprintf(
 					"%s kind=%s rgb=%d,%d,%d brightness=%d..%d period=%dms duration=%s",
@@ -3977,15 +3962,35 @@ func programCommand(
 		programOptions.ConfirmEEPROMWrite = true
 		nextIndex++
 	}
-	if len(args) > nextIndex {
+	if len(args) > nextIndex &&
+		!strings.HasPrefix(strings.ToLower(args[nextIndex]), "--programmer-timeout") {
 		programOptions.Port = args[nextIndex]
 		nextIndex++
 	} else if operation != programmer.OperationCoreInfo &&
 		operation != programmer.OperationBurnBoot {
 		programOptions.Port = runtime.Snapshot().Port.Name
 	}
-	if len(args) != nextIndex {
-		return "", fmt.Errorf("too many program arguments")
+	for nextIndex < len(args) {
+		argument := args[nextIndex]
+		value := ""
+		switch {
+		case strings.EqualFold(argument, "--programmer-timeout"):
+			if nextIndex+1 >= len(args) {
+				return "", errors.New("--programmer-timeout requires a duration")
+			}
+			nextIndex++
+			value = args[nextIndex]
+		case strings.HasPrefix(strings.ToLower(argument), "--programmer-timeout="):
+			value = argument[len("--programmer-timeout="):]
+		default:
+			return "", fmt.Errorf("too many program arguments")
+		}
+		parsed, parseErr := time.ParseDuration(value)
+		if parseErr != nil || parsed <= 0 {
+			return "", fmt.Errorf("--programmer-timeout must be a positive duration")
+		}
+		programOptions.ProgrammerTimeout = parsed
+		nextIndex++
 	}
 	snapshot := runtime.Snapshot()
 	programOptions.ApplicationHash = snapshot.Hello.BuildHash
@@ -4028,16 +4033,32 @@ func programCommand(
 		}
 	}
 
-	var output bytes.Buffer
-	if deviceOperation {
-		fmt.Fprintln(&output, "application UART released; Urboot/AVRDUDE now has exclusive port ownership")
+	operationID := programOperationID(ctx)
+	typedOperation := operationID != ""
+	if operationID == "" {
+		operationID = nextProgramOperationID(runtime)
 	}
-	fmt.Fprintln(&output, commandDescription)
-	programErr := programmer.Execute(ctx, programOptions, &output)
+	eventWriter := newProgramEventWriter(runtime, operationID, programOptions)
+	defer eventWriter.Close()
+	if !typedOperation {
+		publishProgramPhase(runtime, "program.started", operationID, programOptions, nil)
+	}
+
+	var output boundedProgramOutput
+	programOutput := io.MultiWriter(&output, eventWriter)
+	if deviceOperation {
+		fmt.Fprintln(programOutput, "application UART released; Urboot/AVRDUDE now has exclusive port ownership")
+	}
+	fmt.Fprintln(programOutput, commandDescription)
+	execute := options.ProgramExecute
+	if execute == nil {
+		execute = programmer.Execute
+	}
+	programErr := execute(ctx, programOptions, programOutput)
 	if programErr == nil {
-		fmt.Fprintln(&output, "programmer operation completed")
+		fmt.Fprintln(programOutput, "programmer operation completed")
 	} else {
-		fmt.Fprintln(&output, "programmer operation failed:", programErr)
+		fmt.Fprintln(programOutput, "programmer operation failed:", programErr)
 	}
 	if deviceOperation && serialWasOpen {
 		reconnectContext, cancel := context.WithTimeout(
@@ -4047,22 +4068,35 @@ func programCommand(
 		defer cancel()
 		reconnectErr := reconnectProgrammingDevice(reconnectContext, runtime, snapshot.Port)
 		if reconnectErr != nil {
-			return strings.TrimSpace(output.String()), fmt.Errorf(
+			operationErr := fmt.Errorf(
 				"programmer result (%v); application HELLO reconnect failed: %w",
 				programErr,
 				reconnectErr,
 			)
+			fmt.Fprintln(programOutput, operationErr)
+			eventWriter.Close()
+			if !typedOperation {
+				publishProgramPhase(runtime, "program.failed", operationID, programOptions, operationErr)
+			}
+			return strings.TrimSpace(output.String()), operationErr
 		}
 		snapshot := runtime.Snapshot()
 		fmt.Fprintf(
-			&output,
+			programOutput,
 			"application mode restored and authenticated on %s: %s\n",
 			snapshot.Port.Name,
 			formatHello(snapshot.Hello),
 		)
 	}
+	eventWriter.Close()
 	if programErr != nil {
+		if !typedOperation {
+			publishProgramPhase(runtime, "program.failed", operationID, programOptions, programErr)
+		}
 		return strings.TrimSpace(output.String()), programErr
+	}
+	if !typedOperation {
+		publishProgramPhase(runtime, "program.completed", operationID, programOptions, nil)
 	}
 	return strings.TrimSpace(output.String()), nil
 }
@@ -4141,7 +4175,7 @@ func safeFlashCommand(
 	options CommandOptions,
 	args []string,
 ) (string, error) {
-	const usage = "usage: program flash HEX [PORT] [--method urclock|usbasp] [--allow-incomplete-backup] [--reinitialize-eeprom]"
+	const usage = "usage: program flash HEX [PORT] [--method urclock|usbasp] [--deployment production|development] [--reinitialize-eeprom]"
 	if len(args) == 0 {
 		return "", errors.New(usage)
 	}
@@ -4151,14 +4185,26 @@ func safeFlashCommand(
 	}
 	method := programmer.MethodUrclock
 	port := ""
-	allowIncomplete := false
+	explicitDeployment := ""
 	reinitializeEEPROM := false
 	for index := 1; index < len(args); index++ {
 		argument := strings.TrimSpace(args[index])
 		lower := strings.ToLower(argument)
 		switch {
-		case lower == "--allow-incomplete-backup":
-			allowIncomplete = true
+		case lower == "--deployment":
+			if index+1 >= len(args) {
+				return "", errors.New(usage)
+			}
+			index++
+			explicitDeployment = args[index]
+			if strings.TrimSpace(explicitDeployment) == "" {
+				return "", errors.New(usage)
+			}
+		case strings.HasPrefix(lower, "--deployment="):
+			explicitDeployment = strings.TrimPrefix(lower, "--deployment=")
+			if strings.TrimSpace(explicitDeployment) == "" {
+				return "", errors.New(usage)
+			}
 		case lower == "--reinitialize-eeprom":
 			reinitializeEEPROM = true
 		case lower == "--method":
@@ -4179,8 +4225,13 @@ func safeFlashCommand(
 	if method != programmer.MethodUrclock && method != programmer.MethodUSBasp {
 		return "", fmt.Errorf("guarded flash method must be urclock or usbasp, got %q", method)
 	}
-	if reinitializeEEPROM && allowIncomplete {
-		return "", errors.New("--reinitialize-eeprom requires a complete verified raw flash, EEPROM, and metadata backup; it cannot be combined with --allow-incomplete-backup")
+	configuredDeployment := ""
+	if options.HostConfig != nil {
+		configuredDeployment = options.HostConfig().Programming.Deployment
+	}
+	classification, err := deployment.Resolve(configuredDeployment, explicitDeployment)
+	if err != nil {
+		return "", err
 	}
 	if runtime == nil {
 		return "", errors.New("guarded flash requires an application runtime")
@@ -4192,6 +4243,12 @@ func safeFlashCommand(
 		return "", fmt.Errorf("inspect firmware before releasing UART: %w", err)
 	}
 	snapshot := runtime.Snapshot()
+	// This is the transaction snapshot that decides whether semantic capture
+	// runs below. A preflight snapshot taken before programmingMu may belong to
+	// a session that disconnected while this command waited for another job.
+	if classification == deployment.Development && !snapshot.Connected {
+		return "", errors.New("development upload requires an authenticated application; use board initialize for blank-device recovery")
+	}
 	if reinitializeEEPROM && !snapshot.Connected {
 		return "", errors.New("--reinitialize-eeprom requires an authenticated application connection so the post-backup Prog latch can be armed and the final settings can be verified")
 	}
@@ -4351,8 +4408,9 @@ func safeFlashCommand(
 		programmer.AutomaticPreflashOptions{
 			FirmwarePath: firmwarePath,
 			Backup:       backup, DataPaths: dataPaths,
-			AllowFlashWithoutFullBackup: allowIncomplete,
-			AfterBackup:                 afterBackup,
+			Deployment:         classification,
+			ReinitializeEEPROM: reinitializeEEPROM,
+			AfterBackup:        afterBackup,
 		},
 		runner,
 		func(flashContext context.Context, path string, writer io.Writer) error {
@@ -4589,11 +4647,17 @@ func reconnectProgrammingDevice(
 		programmingIdentity(expected),
 		programmingIdentity(connected.Port),
 	) {
-		_ = runtime.Close()
-		return fmt.Errorf(
+		mismatchErr := fmt.Errorf(
 			"authenticated device on %s does not match the original programming device",
 			expected.Name,
 		)
+		if closeErr := runtime.Close(); closeErr != nil {
+			return errors.Join(
+				mismatchErr,
+				fmt.Errorf("close mismatched programming device: %w", closeErr),
+			)
+		}
+		return mismatchErr
 	}
 	return nil
 }
@@ -4753,7 +4817,7 @@ func macroCommand(
 	runner *MacroRunner,
 	args []string,
 ) (string, error) {
-	const usage = "macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|delete NAME_OR_ID|record start|start-mcu NAME [CATEGORY [COLOR]]|record status|record save|record discard|play NAME_OR_ID|status|cancel [keep]"
+	const usage = "macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|rename NAME_OR_ID NEW_NAME|category NAME_OR_ID CATEGORY|delete NAME_OR_ID|record start|start-mcu NAME [CATEGORY [COLOR]]|record status|record save|record discard|play NAME_OR_ID|status|monitor|cancel [keep]"
 	if len(args) < 1 {
 		return "", fmt.Errorf("usage: %s", usage)
 	}
@@ -4778,7 +4842,7 @@ func macroCommand(
 				"%-3d %-20s %-5s %-14s %-7s %-6d %s",
 				macro.ID,
 				macro.Name,
-				normalizedMacroMode(macro.Mode),
+				macro.Mode,
 				macro.Category,
 				normalizedMacroColor(macro.Color),
 				len(macro.Steps),
@@ -4800,15 +4864,16 @@ func macroCommand(
 		}
 		lines := []string{fmt.Sprintf(
 			"macro id=%d name=%q mode=%s category=%q color=%q label=%q steps=%d duration=%s encoded=%dB tolerance=%dus keep_on_cancel=%t",
-			macro.ID, macro.Name, normalizedMacroMode(macro.Mode), macro.Category, normalizedMacroColor(macro.Color),
+			macro.ID, macro.Name, macro.Mode, macro.Category, normalizedMacroColor(macro.Color),
 			macro.Label, len(macro.Steps), time.Duration(compiled.durationUS)*time.Microsecond,
 			len(compiled.stream), macro.TimingToleranceUS, macro.KeepOutputsOnCancel,
 		)}
 		for index, step := range macro.Steps {
 			due, _ := macroStepDueUS(step)
 			lines = append(lines, fmt.Sprintf(
-				"%3d  +%-12s %-12s target=%d value=%d",
+				"%3d  +%-12s %-12s target=%d value=%d opcode=0x%02X payload=%X text=%q frequency=%dHz duration=%dms",
 				index+1, time.Duration(due)*time.Microsecond, step.Kind, step.Target, step.Value,
+				compiled.steps[index].opcode, compiled.steps[index].payload, step.Text, step.FrequencyHz, step.DurationMS,
 			))
 		}
 		return strings.Join(lines, "\n"), nil
@@ -4832,6 +4897,19 @@ func macroCommand(
 			return "", err
 		}
 		return fmt.Sprintf("macro %d/%s draft created; add steps in the watched host config or record a new macro", macro.ID, macro.Name), nil
+	case "rename", "category":
+		if len(args) != 3 {
+			return "", fmt.Errorf("usage: macro %s NAME_OR_ID VALUE", args[0])
+		}
+		field := "category"
+		if strings.EqualFold(args[0], "rename") {
+			field = "name"
+		}
+		macro, err := runner.UpdateMetadata(args[1], field, args[2])
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("macro %d/%s category=%q updated", macro.ID, macro.Name, macro.Category), nil
 	case "delete", "remove":
 		if len(args) != 2 {
 			return "", fmt.Errorf("usage: macro delete NAME_OR_ID")
@@ -4867,7 +4945,7 @@ func macroCommand(
 				return "", err
 			}
 			if state.Mode == macroModeHost {
-				return fmt.Sprintf("recording macro %d/%s in basic host mode; relay and motion commands use host deltas (100ms tolerance)", state.ID, state.Name), nil
+				return fmt.Sprintf("recording macro %d/%s in host mode; relay/motion, PWM, beep, display, RF and strip commands use host deltas (100ms tolerance)", state.ID, state.Name), nil
 			}
 			return fmt.Sprintf("recording macro %d/%s in MCU mode; acknowledged board commands use MCU deltas", state.ID, state.Name), nil
 		case "status":
@@ -4887,7 +4965,7 @@ func macroCommand(
 			if err != nil {
 				return "", err
 			}
-			return fmt.Sprintf("macro %d/%s saved with %d %s-timed steps", macro.ID, macro.Name, len(macro.Steps), normalizedMacroMode(macro.Mode)), nil
+			return fmt.Sprintf("macro %d/%s saved with %d %s-timed steps", macro.ID, macro.Name, len(macro.Steps), macro.Mode), nil
 		case "discard", "cancel":
 			if len(args) != 2 {
 				return "", fmt.Errorf("usage: macro record discard")
@@ -4915,6 +4993,16 @@ func macroCommand(
 			state.Mode,
 			state.StepCount,
 		), nil
+	case "monitor":
+		if len(args) != 1 {
+			return "", fmt.Errorf("usage: macro monitor")
+		}
+		state, err := macroCommand(ctx, runner, []string{"status"})
+		if err != nil {
+			return "", err
+		}
+		recording, err := macroCommand(ctx, runner, []string{"record", "status"})
+		return state + "\n" + recording, err
 	case "status":
 		if len(args) != 1 {
 			return "", fmt.Errorf("usage: macro status")
@@ -4924,7 +5012,7 @@ func macroCommand(
 			return "no macro has run in this session", nil
 		}
 		return fmt.Sprintf(
-			"macro id=%d name=%q mode=%s lifecycle=%s running=%t step=%d/%d buffer=%dB timing=%dus max=%dus violations=%d underruns=%d dispatch_errors=%d faithful=%t started=%s error=%q",
+			"macro id=%d name=%q mode=%s lifecycle=%s running=%t step=%d/%d evidence=%d/%d buffer=%dB timing=%dus max=%dus startup_delay_us=%d violations=%d underruns=%d dispatch_errors=%d faithful=%t started=%s error=%q",
 			state.ID,
 			state.Name,
 			state.Mode,
@@ -4932,9 +5020,12 @@ func macroCommand(
 			state.Running,
 			state.Step,
 			state.StepCount,
+			state.EvidenceSteps,
+			state.StepCount,
 			state.BufferFill,
 			state.LastTimingDeltaUS,
 			state.MaximumTimingErrorUS,
+			state.StartupDelayUS,
 			state.TimingViolations,
 			state.Underruns,
 			state.DispatchErrors,

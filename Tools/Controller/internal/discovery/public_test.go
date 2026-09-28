@@ -12,7 +12,7 @@ import (
 )
 
 func TestMergeInstancesDeduplicatesTransportSourcesByPublicIdentity(t *testing.T) {
-	info := &PublicInfo{Schema: PublicInfoSchema, Product: "PCController", InstanceID: "host-1", Hostname: "workshop", InstanceName: "Workshop"}
+	info := &PublicInfo{Product: "PCController", InstanceID: "host-1", Hostname: "workshop", InstanceName: "Workshop"}
 	values := []Instance{
 		{Protocol: "mdns", Name: "Workshop", Host: "workshop.local", Port: 8787, Addresses: []string{"192.0.2.5"}, Public: info, SeenAt: time.Unix(1, 0)},
 		{Protocol: "ssdp", Name: "Workshop", Host: "192.0.2.5", Port: 8787, USN: "uuid:one::service", Public: info, SeenAt: time.Unix(2, 0)},
@@ -36,7 +36,7 @@ func TestEnrichInstanceReadsBoundedPublicDocument(t *testing.T) {
 			http.NotFound(writer, request)
 			return
 		}
-		_ = json.NewEncoder(writer).Encode(PublicInfo{Schema: PublicInfoSchema, Product: "PCController", InstanceID: "test-id", InstanceName: "Test host", Hostname: "test-host"})
+		_ = json.NewEncoder(writer).Encode(PublicInfo{Product: "PCController", InstanceID: "test-id", InstanceName: "Test host", Hostname: "test-host"})
 	}))
 	defer server.Close()
 	parsed, _ := url.Parse(server.URL)
@@ -125,7 +125,7 @@ func TestPublicURLCandidatesPreferPacketSourceAddresses(t *testing.T) {
 func TestEnrichmentPinsEveryReturnedEndpointToResponder(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(writer).Encode(PublicInfo{
-			Schema: PublicInfoSchema, Product: "PCController", Hostname: "workshop",
+			Product: "PCController", Hostname: "workshop",
 			Endpoints: PublicEndpoints{
 				Web: "http://attacker.invalid/phish#view", API: "http://attacker.invalid/private",
 				ServerProof: "http://attacker.invalid/api/auth/server-proof",
@@ -170,7 +170,7 @@ func TestEnrichInstanceRejectsCrossPortRedirect(t *testing.T) {
 	targetCalled := false
 	target := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		targetCalled = true
-		_ = json.NewEncoder(writer).Encode(PublicInfo{Schema: PublicInfoSchema, Product: "PCController", Hostname: "redirected"})
+		_ = json.NewEncoder(writer).Encode(PublicInfo{Product: "PCController", Hostname: "redirected"})
 	}))
 	defer target.Close()
 	redirect := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {

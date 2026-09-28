@@ -17,7 +17,7 @@ import (
 
 func TestProgrammingFirmwareFeaturesRoundTripCanonically(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
-	content := `{"schema":1,"programming":{"firmware_features":["EEPROM-MENU-LABELS","eeprom-boot-opcodes","eeprom-menu-labels"]}}`
+	content := `{"programming":{"firmware_features":["EEPROM-MENU-LABELS","eeprom-boot-opcodes","eeprom-menu-labels"]}}`
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestProgrammingFirmwareFeaturesRoundTripCanonically(t *testing.T) {
 	if store.Current().Programming.FirmwareFeatures[0] != firmwarefeatures.EEPROMBootOpcodes {
 		t.Fatal("Current exposed the store's firmware feature slice")
 	}
-	if err := os.WriteFile(path, []byte(`{"schema":1,"programming":{"firmware_features":["unknown"]}}`), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"programming":{"firmware_features":["unknown"]}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := Load(path); err == nil || !strings.Contains(err.Error(), "unsupported firmware feature") {
@@ -243,15 +243,45 @@ func TestReloadErrorReportingSuppressesOnlyIdenticalConsecutiveFailures(t *testi
 func TestMacroValidation(t *testing.T) {
 	value := Defaults()
 	value.Macros = []Macro{{
-		ID: 1, Name: "demo", Label: "dEMO",
+		ID: 1, Name: "demo", Label: "dEMO", Mode: "mcu",
 		Steps: []MacroStep{{AtUS: 0, Kind: "relay", Target: 7, Value: 1}},
 	}}
 	if err := value.Validate(); err != nil {
 		t.Fatal(err)
 	}
+	value.Macros[0].Mode = ""
+	if err := value.Validate(); err == nil {
+		t.Fatal("missing macro mode was accepted")
+	}
+	value.Macros[0].Mode = "mcu"
 	value.Macros[0].Steps[0].Target = 8
 	if err := value.Validate(); err == nil {
 		t.Fatal("expected invalid relay target")
+	}
+}
+
+func TestLoadNormalizesOmittedMacroModeToHost(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	content := `{"macros":[{"id":1,"name":"recorded","steps":[{"kind":"relay","target":4,"value":1}]}]}`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	value, _, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := value.Macros[0].Mode; got != "host" {
+		t.Fatalf("normalized macro mode=%q, want host", got)
+	}
+	if err := Write(path, value); err != nil {
+		t.Fatal(err)
+	}
+	written, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(written), `"mode": "host"`) {
+		t.Fatalf("normalized macro mode was not persisted explicitly: %s", written)
 	}
 }
 
@@ -413,8 +443,7 @@ func TestRememberDevicePersistsPCIdentityWithoutAliasing(t *testing.T) {
 
 func TestLoadMergesNewUIDefaultsWithoutOverridingExplicitFalse(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
-	legacy := map[string]any{
-		"schema": SchemaVersion,
+	sparse := map[string]any{
 		"connection": map[string]any{
 			"baud_rate": 115200, "startup_wait_ms": 1200,
 			"request_timeout_ms": 1200, "hello_attempts": 3,
@@ -425,7 +454,7 @@ func TestLoadMergesNewUIDefaultsWithoutOverridingExplicitFalse(t *testing.T) {
 			"show_power":         false,
 		},
 	}
-	encoded, err := json.Marshal(legacy)
+	encoded, err := json.Marshal(sparse)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -685,7 +714,7 @@ func TestWritePersistsOnlyUserOverrides(t *testing.T) {
 	if err := json.Unmarshal(content, &defaultsDocument); err != nil {
 		t.Fatal(err)
 	}
-	if len(defaultsDocument) != 1 || defaultsDocument["schema"] != float64(SchemaVersion) {
+	if len(defaultsDocument) != 0 {
 		t.Fatalf("default configuration was expanded on disk: %s", content)
 	}
 
@@ -784,18 +813,18 @@ func TestFutureConfigFieldsAreIgnoredButKnownTypesRemainStrict(t *testing.T) {
 	}{
 		{
 			name: "JSON", extension: ".json",
-			compatible: `{"schema":1,"future_root":{"enabled":true},"ipc":{"future_policy":{"mode":"observe"}},"programming":{"future_toolchain_cli":"next-cli"}}`,
-			badKnown:   `{"schema":1,"connection":{"baud_rate":"fast"},"future_root":true}`,
+			compatible: `{"future_root":{"enabled":true},"ipc":{"future_policy":{"mode":"observe"}},"programming":{"future_toolchain_cli":"next-cli"}}`,
+			badKnown:   `{"connection":{"baud_rate":"fast"},"future_root":true}`,
 		},
 		{
 			name: "YAML", extension: ".yaml",
-			compatible: "schema: 1\nfuture_root:\n  enabled: true\nipc:\n  future_policy:\n    mode: observe\nprogramming:\n  future_toolchain_cli: next-cli\n",
-			badKnown:   "schema: 1\nconnection:\n  baud_rate: fast\nfuture_root: true\n",
+			compatible: "future_root:\n  enabled: true\nipc:\n  future_policy:\n    mode: observe\nprogramming:\n  future_toolchain_cli: next-cli\n",
+			badKnown:   "connection:\n  baud_rate: fast\nfuture_root: true\n",
 		},
 		{
 			name: "TOML", extension: ".toml",
-			compatible: "schema = 1\n[future_root]\nenabled = true\n[ipc.future_policy]\nmode = 'observe'\n[programming]\nfuture_toolchain_cli = 'next-cli'\n",
-			badKnown:   "schema = 1\nfuture_root = true\n[connection]\nbaud_rate = 'fast'\n",
+			compatible: "[future_root]\nenabled = true\n[ipc.future_policy]\nmode = 'observe'\n[programming]\nfuture_toolchain_cli = 'next-cli'\n",
+			badKnown:   "future_root = true\n[connection]\nbaud_rate = 'fast'\n",
 		},
 	}
 	for _, test := range tests {
@@ -808,7 +837,7 @@ func TestFutureConfigFieldsAreIgnoredButKnownTypesRemainStrict(t *testing.T) {
 			if err != nil {
 				t.Fatalf("future fields rejected: %v", err)
 			}
-			if loaded.Schema != SchemaVersion || loaded.Connection.BaudRate != Defaults().Connection.BaudRate {
+			if loaded.Connection.BaudRate != Defaults().Connection.BaudRate {
 				t.Fatalf("known/default fields changed: %#v", loaded.Connection)
 			}
 			if err := os.WriteFile(path, []byte(test.badKnown), 0o600); err != nil {

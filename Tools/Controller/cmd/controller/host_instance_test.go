@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,15 +14,17 @@ import (
 
 	"pccontroller.local/controller/internal/control"
 	"pccontroller.local/controller/internal/hostui"
-	"pccontroller.local/controller/internal/productidentity"
 	"pccontroller.local/controller/internal/shell"
 )
 
 func testHostInstancePaths(t *testing.T) hostInstancePaths {
 	t.Helper()
 	directory := t.TempDir()
+	// Darwin semaphore names are limited to 31 bytes. A full Go test name
+	// exceeded that limit even though the production identity was short.
+	identity := sha256.Sum256([]byte(t.Name() + directory))
 	return hostInstancePaths{
-		LockName: productidentity.StableAppID + ".Test." + strings.ReplaceAll(t.Name(), "/", ".") + "." + time.Now().Format("150405.000000000"),
+		LockName: fmt.Sprintf("pc-test-%x", identity[:8]),
 		LockPath: filepath.Join(directory, "host-instance.lock"),
 		RecordPath: filepath.Join(
 			directory,
@@ -96,6 +100,25 @@ func TestHostInstanceRecordResolvesAuthenticatedPrimaryAtDifferentEndpoint(t *te
 	if err := claim.publish(server.listener, configured); err != nil {
 		t.Fatal(err)
 	}
+	content, err := os.ReadFile(paths.RecordPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(content), `"schema"`) {
+		t.Fatalf("host instance record retained a generation selector: %s", content)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(content, &fields); err != nil {
+		t.Fatal(err)
+	}
+	fields["future_optional"] = json.RawMessage(`{"safe":true}`)
+	content, err = json.Marshal(fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(paths.RecordPath, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	resolveContext, stopResolve := context.WithTimeout(context.Background(), 2*time.Second)
 	defer stopResolve()
@@ -109,6 +132,17 @@ func TestHostInstanceRecordResolvesAuthenticatedPrimaryAtDifferentEndpoint(t *te
 	if record.InstanceID != claim.identity.ID || record.DelegationToken != claim.identity.Token ||
 		record.DelegationToken == configured.AuthToken || record.Surface != "web" {
 		t.Fatalf("resolved record=%#v", record)
+	}
+	fields["instance_id"] = json.RawMessage(`""`)
+	content, err = json.Marshal(fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(paths.RecordPath, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readHostInstanceRecord(paths.RecordPath); err == nil {
+		t.Fatal("host record without a required instance identity was accepted")
 	}
 }
 

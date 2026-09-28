@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 import { BootGate, Card, HoldActionButton, HotkeyHelp, RangeField, TextField } from './components'
-import type { Appearance } from './types'
+import type { Appearance, UIConfig } from './types'
 import { emptySnapshot } from './types'
 import { artifactUpdateAvailable, UpdatesView } from './updates-view'
 import { translator } from './i18n'
@@ -28,12 +28,25 @@ const appearance: Appearance = {
   audioVolume: 0.35,
 }
 
+const uiConfig: UIConfig = {
+  name: 'PCController',
+  setup_complete: true,
+  appearance,
+  appearance_etag: 'a'.repeat(64),
+  status_interval_ms: 275,
+  measurement_freshness_ms: 1600,
+  websocket_path: '/ipc',
+  session_ticket_path: '/api/session/ticket',
+  auth_required: false,
+}
+
 function shared(): SharedViewProps {
   return {
     appTitle: 'PCController',
     snapshot: emptySnapshot,
     samples: [],
     events: [],
+    macroEvents: [],
     locale: 'en',
     t: (key) => key,
     command: vi.fn(async () => ''),
@@ -47,6 +60,24 @@ function shared(): SharedViewProps {
 }
 
 describe('offline and settings UI contracts', () => {
+  it.each([true, false])('renders only the Physical LED mirror hex value in monospace (live=%s)', haveStatusLED => {
+    const snapshot = {
+      ...emptySnapshot,
+      connected: true,
+      have_status: true,
+      have_status_led: haveStatusLED,
+      hello: { ...emptySnapshot.hello, capabilities: 0xFFFFFFFF },
+      status_led: { red: 171, green: 205, blue: 239, brightness: 128, effect: 2, condition: 3 },
+    }
+    const markup = renderToStaticMarkup(<ControlsView {...shared()} snapshot={snapshot} />)
+    if (haveStatusLED) {
+      expect(markup).toContain('<span class="mono">#ABCDEF</span> · effect 2 · condition 3')
+    } else {
+      expect(markup).toContain('Awaiting pushed board state')
+      expect(markup).not.toContain('<span class="mono">#ABCDEF</span>')
+    }
+  })
+
   it('distinguishes missing or rejected credentials from ordinary authenticated transport loss', () => {
     const base = {
       hostRequiresAuthentication: true,
@@ -54,9 +85,18 @@ describe('offline and settings UI contracts', () => {
       token: 'valid-looking-token',
     }
     expect(sessionAuthenticationGuidanceRequired({ ...base, hostRequiresAuthentication: false })).toBe(false)
+    expect(sessionAuthenticationGuidanceRequired({
+      ...base,
+      hostRequiresAuthentication: false,
+      streamDetail: 'HTTP 401: authentication required',
+    })).toBe(true)
     expect(sessionAuthenticationGuidanceRequired({ ...base, streamState: 'open' })).toBe(false)
     expect(sessionAuthenticationGuidanceRequired({ ...base, token: '' })).toBe(true)
     expect(sessionAuthenticationGuidanceRequired({ ...base, streamDetail: 'HTTP 401: authentication required' })).toBe(true)
+    expect(sessionAuthenticationGuidanceRequired({
+      ...base,
+      streamDetail: 'HTTP 403: remote read capability is disabled',
+    })).toBe(false)
     expect(sessionAuthenticationGuidanceRequired({ ...base, streamDetail: 'network timeout' })).toBe(false)
   })
 
@@ -94,6 +134,33 @@ describe('offline and settings UI contracts', () => {
     expect(markup).toContain('Force marquee')
     expect(markup).toContain('Overflow scrolls automatically')
     expect(markup).toContain('Show text')
+  })
+
+  it('renders an empty host-backed terminal combobox without a fabricated command', () => {
+    const markup = renderToStaticMarkup(<WorkbenchView {...shared()} />)
+    expect(markup).toContain('id="workbench-command"')
+    expect(markup).toContain('aria-autocomplete="list"')
+    expect(markup).toContain('aria-expanded="false"')
+    expect(markup).not.toContain('value="status"')
+    expect(markup).not.toContain('workbench-command-completion-0')
+  })
+
+  it.each([null, undefined, []])('renders an empty macro draft without crashing when steps is %s', (steps) => {
+    const snapshot = {
+      ...emptySnapshot,
+      connected: true,
+      have_status: true,
+      macros: {
+        library: [{ id: 4, name: 'New draft', mode: 'host', steps }],
+        playback: { running: false, name: '', mode: 'host', step: 0, step_count: 0, faithful: false, maximum_timing_error_us: 0 },
+        recording: { active: false, name: '', mode: 'host', steps: 0 },
+      },
+    }
+    const markup = renderToStaticMarkup(<WorkbenchView {...shared()} snapshot={snapshot} />)
+    expect(markup).toContain('New draft')
+    expect(markup).toContain('#4 · Uncategorized · host')
+    expect(markup).toContain('Macro library')
+    expect(markup).toContain('Play selected')
   })
 
   it('renders only user PWM channels in the generic mixer and keeps system channels role-specific', () => {
@@ -203,10 +270,54 @@ describe('offline and settings UI contracts', () => {
       t={translator('en')}
       snapshot={{ ...emptySnapshot, connection_reason: 'Serial controller is offline' }}
     />)
-    expect(markup).toContain('Controller offline — check the connection details below.')
+    expect(markup).toContain('PCController host online')
+    expect(markup).toContain('Controller board disconnected')
     expect(markup).toContain('Serial controller is offline')
     expect(markup).not.toContain('Authentication required')
     expect(markup).not.toContain('The dashboard is ready')
+  })
+
+  it('shows an accessible actionable hardware warning without misclassifying another device', () => {
+    const markup = renderToStaticMarkup(<DashboardView
+      {...shared()}
+      t={translator('en')}
+      snapshot={{
+        ...emptySnapshot,
+        hardware_problems: [{
+          code: 'usb_descriptor_failure',
+          severity: 'error',
+          impact: 'active_operation_outcome_unknown',
+          os_problem_code: 43,
+          device_id: 'USB\\VID_0000&PID_0002\\physical-controller-instance',
+          location: 'Port 2, Hub 3',
+          observed_at: '2026-09-28T10:00:00Z',
+        }],
+      }}
+    />)
+    expect(markup).toContain('role="alert"')
+    expect(markup).toContain('Controller USB connection failed')
+    expect(markup).toContain('Check the controller data cable, power, or try another USB port.')
+    expect(markup).toContain('Communication was lost during an active operation')
+    expect(markup).toContain('Windows code 43 · Port 2, Hub 3')
+    expect(markup).not.toContain('physical-controller-instance')
+  })
+
+  it('renders the Persian hardware warning as native joined-script text', () => {
+    const markup = renderToStaticMarkup(<DashboardView
+      {...shared()}
+      locale="fa"
+      t={translator('fa')}
+      snapshot={{
+        ...emptySnapshot,
+        hardware_problems: [{
+          code: 'usb_descriptor_failure',
+          severity: 'error',
+          observed_at: '2026-09-28T10:00:00Z',
+        }],
+      }}
+    />)
+    expect(markup).toContain('خرابی اتصال USB کنترلر')
+    expect(markup).toContain('کابل داده، برق و درگاه USB کنترلر را بررسی کنید')
   })
 
   it('hides unavailable peripherals and their invalid readings', () => {
@@ -293,6 +404,25 @@ describe('offline and settings UI contracts', () => {
     expect(markup).not.toContain('Security')
     expect(markup).not.toContain('authToken')
     expect(markup).not.toContain('No session token')
+  })
+
+  it('shows only host-advertised live measurement timing', () => {
+    const markup = renderToStaticMarkup(<SettingsView
+      {...shared()}
+      appearance={appearance}
+      onAppearance={vi.fn()}
+      token=""
+      onToken={vi.fn()}
+      onAppTitle={vi.fn(async (value: string) => value)}
+      uiConfig={uiConfig}
+      onBuzzerPath={vi.fn(async () => undefined)}
+      navigationSync
+      onNavigationSync={vi.fn()}
+    />)
+    expect(markup).toContain('Live measurements')
+    expect(markup).toContain('value="275"')
+    expect(markup).toContain('value="1600"')
+    expect(markup).toContain('Apply live timing')
   })
 
   it('shows navigation synchronization state only while it is factual and actionable', () => {

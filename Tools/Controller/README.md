@@ -33,7 +33,7 @@ optional C-compatible library, and firmware WebSocket relay in one codebase.
 - Cross-platform NDJSON JSON-RPC 2.0, an unversioned living REST API, authenticated standard
   WebSocket, and bounded Engine.IO-v4/Socket.IO-over-WebSocket service; the
   first TUI/shell process owns serial and later clients route through it
-- Importable Go API and optional `c-shared` JSON ABI
+- Importable Go API, embeddable host lifecycle, and optional `c-shared` JSON ABI
 - Persistent JSON host configuration, `fsnotify` hot reload, macros,
   event-driven automations, a typed local-device contract, and loopback data-hub integration
 - A fixed, read-only Windows host-facts catalog for system, computer, firmware,
@@ -84,6 +84,12 @@ there is no fabricated release version or tag.
 `build.cmd` and `build.sh` share one Node/Controller plan. See the
 [project-owned build guide](../Build/README.md) for deterministic identity,
 bootstrap requirements, and dry-run/plan commands.
+
+Applications that need PCController in process should use the public
+[`host` lifecycle package](docs/Go-Embedding-API.md). It keeps in-process RPC,
+protected native-local IPC, and optional HTTP/WebSocket service on one
+controller owner and dispatcher. The same lifecycle is available to Pealayer
+and other non-Go consumers through the packaged C-shared JSON ABI.
 
 Windows development, deployment, discovery, and programming examples use
 the project-owned Controller executable and platform adapters for device
@@ -217,9 +223,10 @@ foreign registrations or shortcuts:
 Windows packages include `installation-package.json`, a deterministic inventory
 that binds every installable file to its size and SHA-256, the exact host
 manifest, source identity, target architecture, executable, embedded WebUI, and
-verified Win32 resources. Installation copies only inventoried files into a
-content-addressed per-user slot; it never trusts an archive filename or loose
-shadow executable.
+verified Win32 resources. Installation publishes the active package at the
+stable `%LOCALAPPDATA%\Programs\PCController\bin` directory; it never trusts an
+archive filename or loose shadow executable. `packages/<digest>` contains only
+the single verified rollback package and is never an active launch target.
 
 From an extracted, verified package:
 
@@ -235,13 +242,26 @@ desktop enable and display-name changes journal both the prior and desired
 identity before touching native artifacts, then roll forward idempotently after
 an interruption; a failed cleanup or registration retains the journal for the
 next retry. A healthy repeated install or repair is a no-op; a damaged slot is
-rebuilt from the verified package without replacing a mapped executable in
-place. One exact prior slot is retained for rollback. The per-user root carries
+rebuilt from the verified package. If the canonical executable is running, a
+hash-bound external helper waits for that exact process to exit and rolls the
+durable directory-replacement journal forward. Healthy legacy hashed-slot
+installations migrate to `bin` on the next install or repair. Unknown files in
+`bin` are copied into a transaction-specific `recovery-quarantine/installer-*`
+directory rather than kept active; files removed from the old inventory retire
+with that package. A damaged image is never promoted to rollback. One exact
+prior package is retained for rollback. The per-user root carries
 a product-and-user ownership marker, and lifecycle commands refuse a foreign or
-unmarked non-empty root.
+unmarked non-empty root. The exact canonical per-user root can be adopted only
+when it contains either a fully verified legacy `bin` package or the recognized
+real `source/PCController` repository layout; arbitrary name-only directories
+are rejected.
 
-Uninstall preserves configuration, board backups, downloaded tools, logs, and
-host state. Purging them is a separate destructive choice that requires both
+Uninstall removes only installer-owned `bin`, package, staging, state, marker,
+and lock paths. It preserves the canonical source tree, coordination evidence,
+recovery quarantine, configuration, board backups, downloaded tools, logs, and
+host state. When such canonical-root content remains, its ownership marker is
+retained so a later verified reinstall does not need to claim an unmarked tree.
+Purging user data is a separate destructive choice that requires both
 flags and the exact confirmation shown by `controller help`:
 
 ```console
@@ -623,11 +643,11 @@ after verified reconnect.
 Named melodies and status effects come from the watched PC JSON configuration.
 `melody` sends one acknowledged tone at a time and waits for its duration and
 gap before sending the next, avoiding the MCU's ten-entry tone-queue limit.
-Current firmware receives one compact descriptor for `flash`, `breathe`,
+Firmware advertising status effects receives one compact descriptor for `flash`, `breathe`,
 `cycle`, or `transition` and renders it locally. Effect and color are separate:
 every effect accepts decimal RGB or `#RGB`/`#RRGGBB`, plus independent timing,
-brightness, alternate-color, and repeat values. Older firmware uses a bounded
-host-streaming fallback. Starting a new item replaces the old item on that
+brightness, alternate-color, and repeat values. Without the advertised
+capability the request fails. Starting a new item replaces the old item on that
 output; stopping an LED effect leaves its base color at full configured
 brightness. `rgb profile` reads/writes compact EEPROM condition descriptors so
 boot, ready, fault, door, Bluetooth, and menu cues can reuse the same effect
@@ -781,6 +801,8 @@ Start cross-platform JSON-RPC IPC on loopback:
 bin\controller.exe ipc serve --port COM18
 bin\controller.exe ipc call --method controller.snapshot
 bin\controller.exe ipc call --method controller.command.execute --params "{\"command\":\"rf list\"}"
+bin\controller.exe ipc monitor --addr 192.168.100.155:8787 --token-ref os:edge/cafe-pc --kind program --after latest
+bin\controller.exe ipc call --addr 192.168.100.155:8787 --token-ref os:edge/cafe-pc --timeout 15m --method controller.firmware.build --params "{}"
 bin\controller.exe ipc call --method controller.rf.map --params "{\"id\":3,\"action\":\"key\",\"target\":\"2\",\"behavior\":\"press\"}"
 bin\controller.exe ipc call --method controller.rf.transmit --params "{\"code\":1193046,\"bits\":24,\"protocol\":1,\"pulse_us\":350,\"repeats\":1}"
 bin\controller.exe ipc call --method controller.command.execute --params "{\"command\":\"melody play notify\"}"
@@ -795,7 +817,8 @@ bin\controller.exe ipc call --method controller.app.launch --params "{\"surface\
 bin\controller.exe ipc call --method controller.app.action --params "{\"kind\":\"app.title\",\"value\":\"Bench update\",\"target\":\"tui\"}"
 bin\controller.exe ipc call --method controller.app.action --params "{\"kind\":\"app.progress\",\"value\":\"normal 42\",\"target\":\"tui\"}"
 bin\controller.exe ipc call --method controller.app.action --params "{\"kind\":\"app.osc\",\"value\":\"9;4;4;73\",\"target\":\"tui\"}"
-bin\controller.exe ipc call --method controller.command.execute --params "{\"command\":\"app title auto\"}"
+bin\controller.exe ipc call --method controller.app.action --params "{\"kind\":\"app.title\",\"value\":\"Bench update\",\"target\":\"webui\",\"operation_id\":\"bench-title-1\",\"timeout_ms\":5000}"
+bin\controller.exe ipc call --method controller.app.action.outcome --params "{\"operation_id\":\"bench-title-1\"}"
 bin\controller.exe ipc call --method controller.bridge.list
 bin\controller.exe ipc call --method controller.bridge.call --params "{\"peer\":\"lab\",\"request\":{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"controller.snapshot\"}}"
 bin\controller.exe exec peer-update host cafe-pc HOST_ARTIFACT_SHA256
@@ -1337,7 +1360,8 @@ Direct Go dependencies:
 | `github.com/coder/websocket` | 1.8.15 | ISC | firmware relay |
 | `github.com/fsnotify/fsnotify` | 1.10.1 | BSD-3-Clause | host-config file watching |
 | `github.com/go-ole/go-ole` | 1.3.0 | MIT | optional Windows system-profile adapter |
-| `go.bug.st/serial` | 1.8.0 | BSD-3-Clause | serial I/O and USB enumeration |
+| `github.com/Microsoft/go-winio` | 0.6.2 | MIT | protected Windows named-pipe RPC transport |
+| `go.bug.st/serial` via `DRSDavidSoft/go-serial` | `fa09c8b9a680` (1.8.0 base) | BSD-3-Clause | serial I/O, USB enumeration, and Windows overlapped-I/O cancellation before blocked issuance and close-before-join |
 | `golang.org/x/net` | 0.57.0 | BSD-3-Clause | standards-based proxy environment resolution |
 
 Complete transitive versions are locked in `go.sum`; redistributed terms are

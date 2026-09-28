@@ -536,6 +536,9 @@ func (manager *Manager) CallBridge(
 	name string,
 	request ipcjson.Request,
 ) (ipcjson.Response, error) {
+	if err := ipcjson.ValidateBridgeRequest(request); err != nil {
+		return ipcjson.Response{}, err
+	}
 	manager.mu.RLock()
 	peer := manager.peers[strings.ToLower(strings.TrimSpace(name))]
 	manager.mu.RUnlock()
@@ -871,6 +874,7 @@ func (manager *Manager) reconcile(config appconfig.Config) error {
 		config.Integrations.StatusLED,
 		manager.client.Snapshot(),
 		controller.Event{Kind: "config"},
+		time.Duration(config.Connection.RequestTimeoutMS)*time.Millisecond,
 	)
 	return nil
 }
@@ -927,6 +931,7 @@ func (manager *Manager) eventLoop(afterID uint64) {
 			config.Integrations.StatusLED,
 			manager.client.Snapshot(),
 			event,
+			time.Duration(config.Connection.RequestTimeoutMS)*time.Millisecond,
 		)
 		manager.dispatchWebhooks(config, event)
 		manager.dispatchTextMappings(config, event)
@@ -964,6 +969,14 @@ func (manager *Manager) ingestPeerEvent(peerName string, raw json.RawMessage) bo
 	var event controller.Event
 	if json.Unmarshal(raw, &event) != nil || strings.TrimSpace(event.Kind) == "" {
 		return false
+	}
+	// Peer subscriptions also contain events that this host previously sent.
+	// Consume those envelopes without publishing them again: guarding only the
+	// outbound queue does not stop two reciprocal subscription readers echoing.
+	if strings.TrimSpace(event.Metadata["bridge.ingress"]) != "" ||
+		strings.EqualFold(strings.TrimSpace(event.Source), "bridge") ||
+		strings.EqualFold(strings.TrimSpace(event.Source), "websocket") {
+		return true
 	}
 	manager.client.IngestBridgeEvent(peerName, event)
 	return true
@@ -1308,11 +1321,22 @@ func (manager *Manager) runWebSocketPeer(
 		if ctx.Err() != nil {
 			return
 		}
-		message := "WebSocket " + config.Name + ": " + err.Error()
+		detail := err.Error()
 		peer.mu.Lock()
-		peer.lastError = err.Error()
+		changed := peer.lastError != detail
+		peer.lastError = detail
 		peer.mu.Unlock()
-		manager.recordError(message)
+		if changed {
+			manager.client.EmitHostActionEvent(
+				"bridge.peer.offline",
+				fmt.Sprintf("Bridge peer %s is offline; retrying in the background", config.Name),
+				"bridge", "peer-connect",
+				map[string]string{
+					"peer": config.Name, "protocol": firstProtocol(config.Protocol),
+					"url": config.URL, "error": detail,
+				},
+			)
+		}
 		select {
 		case <-ctx.Done():
 			return
@@ -1362,7 +1386,7 @@ func (manager *Manager) webSocketPeerSession(
 	defer detach()
 	topics := append([]string(nil), config.Topics...)
 	if len(topics) == 0 {
-		topics = []string{"events"}
+		topics = []string{"events", "state"}
 	}
 	if err := writeJSON(map[string]any{
 		"jsonrpc": "2.0", "id": 1, "method": "controller.subscribe",
@@ -1370,6 +1394,15 @@ func (manager *Manager) webSocketPeerSession(
 	}); err != nil {
 		return err
 	}
+	manager.client.EmitHostActionEvent(
+		"bridge.peer.connected",
+		fmt.Sprintf("Bridge peer %s connected", config.Name),
+		"bridge", "peer-connect",
+		map[string]string{
+			"peer": config.Name, "protocol": firstProtocol(config.Protocol),
+			"url": config.URL,
+		},
+	)
 	sessionContext, cancel := context.WithCancel(ctx)
 	defer cancel()
 	writeErrors := make(chan error, 1)
@@ -1433,24 +1466,20 @@ func (manager *Manager) webSocketPeerSession(
 			Error  *ipcjson.RPCError `json:"error"`
 		}
 		if json.Unmarshal(data, &responseEnvelope) == nil &&
-			len(responseEnvelope.ID) != 0 && responseEnvelope.Method == "" &&
-			(len(responseEnvelope.Result) != 0 || responseEnvelope.Error != nil) {
-			var response ipcjson.Response
-			if json.Unmarshal(data, &response) == nil {
-				_ = rpcSession.Resolve(response)
-			}
+			len(responseEnvelope.ID) != 0 && responseEnvelope.Method == "" {
+			_ = rpcSession.resolveRaw(data)
 			continue
 		}
 		var request ipcjson.Request
 		if err := json.Unmarshal(data, &request); err != nil {
 			continue
 		}
-		if request.Method == "controller.event" {
+		if request.Method == "controller.event" || request.Method == "controller.state" {
 			if manager.ingestPeerEvent(config.Name, request.Params) {
 				continue
 			}
 		}
-		if request.Method == "controller.event" || request.Method == "controller.status" {
+		if request.Method == "controller.event" || request.Method == "controller.state" || request.Method == "controller.status" {
 			_, _ = manager.client.SendTextMessage(ctx, controller.TextMessage{
 				Source: "websocket", Target: "host", Type: "remote-event",
 				Text: string(request.Params),
@@ -1543,11 +1572,20 @@ func (manager *Manager) socketIOPeerSession(
 	defer detach()
 	topics := append([]string(nil), config.Topics...)
 	if len(topics) == 0 {
-		topics = []string{"events"}
+		topics = []string{"events", "state"}
 	}
 	if err := writeEvent("subscribe", map[string]any{"topics": topics}); err != nil {
 		return err
 	}
+	manager.client.EmitHostActionEvent(
+		"bridge.peer.connected",
+		fmt.Sprintf("Bridge peer %s connected", config.Name),
+		"bridge", "peer-connect",
+		map[string]string{
+			"peer": config.Name, "protocol": firstProtocol(config.Protocol),
+			"url": config.URL,
+		},
+	)
 	sessionContext, cancel := context.WithCancel(ctx)
 	defer cancel()
 	writeErrors := make(chan error, 1)
@@ -1603,11 +1641,8 @@ func (manager *Manager) socketIOPeerSession(
 		}
 		switch name {
 		case "rpc.response":
-			var response ipcjson.Response
-			if json.Unmarshal(raw, &response) == nil {
-				_ = rpcSession.Resolve(response)
-			}
-		case "controller.event":
+			_ = rpcSession.resolveRaw(raw)
+		case "controller.event", "controller.state":
 			if manager.ingestPeerEvent(config.Name, raw) {
 				continue
 			}

@@ -48,11 +48,20 @@ type MacroState struct {
 	TimingViolations     int                `json:"timing_violations"`
 	LastTimingDeltaUS    int32              `json:"last_timing_delta_us"`
 	MaximumTimingErrorUS uint32             `json:"maximum_timing_error_us"`
+	StartupDelayUS       uint32             `json:"startup_delay_us"`
 	TimingToleranceUS    uint32             `json:"timing_tolerance_us"`
 	Faithful             bool               `json:"faithful"`
 	Lifecycle            string             `json:"lifecycle,omitempty"`
 	LastError            string             `json:"last_error,omitempty"`
 	Device               native.MacroStatus `json:"device"`
+}
+
+// MacroSnapshot is shared by local and remote clients; the host remains the
+// sole owner of the persisted library and recording/playback clocks.
+type MacroSnapshot struct {
+	Library   []appconfig.Macro   `json:"library"`
+	Playback  MacroState          `json:"playback"`
+	Recording MacroRecordingState `json:"recording"`
 }
 
 type compiledMacroStep struct {
@@ -150,6 +159,54 @@ func (runner *MacroRunner) RecordingState() MacroRecordingState {
 	return runner.recording
 }
 
+func (runner *MacroRunner) Snapshot() MacroSnapshot {
+	return MacroSnapshot{Library: runner.List(), Playback: runner.State(), Recording: runner.RecordingState()}
+}
+
+func (runner *MacroRunner) UpdateMetadata(reference, field, value string) (appconfig.Macro, error) {
+	if runner.updateHostConfig == nil {
+		return appconfig.Macro{}, errors.New("macro persistence is unavailable")
+	}
+	macro, err := runner.find(reference)
+	if err != nil {
+		return macro, err
+	}
+	if state := runner.State(); state.Running && state.ID == macro.ID {
+		return macro, errors.New("cancel playback before editing the playing macro")
+	}
+	value = strings.TrimSpace(value)
+	err = runner.updateHostConfig(func(config *appconfig.Config) error {
+		for index := range config.Macros {
+			if config.Macros[index].ID != macro.ID {
+				continue
+			}
+			updated := config.Macros[index]
+			switch field {
+			case "name":
+				updated.Name = value
+			case "category":
+				updated.Category = value
+			default:
+				return errors.New("unsupported macro metadata field")
+			}
+			candidate := *config
+			candidate.Macros = append([]appconfig.Macro(nil), config.Macros...)
+			candidate.Macros[index] = updated
+			if err := candidate.Validate(); err != nil {
+				return err
+			}
+			config.Macros[index] = updated
+			macro = updated
+			return nil
+		}
+		return errors.New("macro disappeared before update")
+	})
+	if err == nil {
+		runner.runtime.PublishStructuredEvent(Event{Kind: "macro.library", Lifecycle: "updated", Text: fmt.Sprintf("macro %d/%s updated", macro.ID, macro.Name)})
+	}
+	return macro, err
+}
+
 // CreateDraft persists an empty, editable macro definition. Empty drafts are
 // listable but intentionally cannot be played until they contain a step.
 func (runner *MacroRunner) CreateDraft(id byte, name, category, color string) (appconfig.Macro, error) {
@@ -169,6 +226,9 @@ func (runner *MacroRunner) CreateDraft(id byte, name, category, color string) (a
 		config.Macros = append(config.Macros, macro)
 		return nil
 	})
+	if err == nil {
+		runner.runtime.PublishStructuredEvent(Event{Kind: "macro.library", Lifecycle: "created", Text: fmt.Sprintf("macro %d/%s created", macro.ID, macro.Name)})
+	}
 	return macro, err
 }
 
@@ -184,7 +244,7 @@ func (runner *MacroRunner) Delete(reference string) error {
 	if state.Running && state.ID == macro.ID {
 		return errors.New("cannot delete the macro currently playing")
 	}
-	return runner.updateHostConfig(func(config *appconfig.Config) error {
+	err = runner.updateHostConfig(func(config *appconfig.Config) error {
 		for index, existing := range config.Macros {
 			if existing.ID == macro.ID {
 				config.Macros = append(config.Macros[:index], config.Macros[index+1:]...)
@@ -193,6 +253,10 @@ func (runner *MacroRunner) Delete(reference string) error {
 		}
 		return fmt.Errorf("macro %q disappeared before it could be deleted", reference)
 	})
+	if err == nil {
+		runner.runtime.PublishStructuredEvent(Event{Kind: "macro.library", Lifecycle: "deleted", Text: fmt.Sprintf("macro %d/%s deleted", macro.ID, macro.Name)})
+	}
+	return err
 }
 
 func (runner *MacroRunner) StartRecording(name, category, color string) (MacroRecordingState, error) {
@@ -206,6 +270,11 @@ func (runner *MacroRunner) StartMCURecording(name, category, color string) (Macr
 }
 
 func (runner *MacroRunner) startRecording(name, category, color, mode string) (MacroRecordingState, error) {
+	runner.operationMu.Lock()
+	defer runner.operationMu.Unlock()
+	if runner.State().Running {
+		return MacroRecordingState{}, errors.New("cancel playback before starting a recording")
+	}
 	if runner.updateHostConfig == nil {
 		return MacroRecordingState{}, errors.New("macro persistence is unavailable")
 	}
@@ -252,6 +321,7 @@ func (runner *MacroRunner) startRecording(name, category, color, mode string) (M
 	runner.recordRelease = runner.runtime.ObserveCommands(runner.captureCommand)
 	state := runner.recording
 	runner.recordMu.Unlock()
+	runner.runtime.setActiveUseState(activeUseMacroRecording, true)
 	runner.runtime.PublishStructuredEvent(Event{
 		Kind: "macro.recording", Lifecycle: "started", State: "recording",
 		Text:     fmt.Sprintf("macro recording %d/%s started in %s mode", id, name, mode),
@@ -261,6 +331,8 @@ func (runner *MacroRunner) startRecording(name, category, color, mode string) (M
 }
 
 func (runner *MacroRunner) StopRecording(save bool) (appconfig.Macro, error) {
+	runner.operationMu.Lock()
+	defer runner.operationMu.Unlock()
 	runner.recordMu.Lock()
 	if !runner.recording.Active {
 		runner.recordMu.Unlock()
@@ -271,14 +343,18 @@ func (runner *MacroRunner) StopRecording(save bool) (appconfig.Macro, error) {
 		runner.recordRelease = nil
 	}
 	macro := runner.recordMacro
+	if save && len(macro.Steps) == 0 {
+		// Keep an empty recording active: Save must never destroy the take.
+		runner.recordRelease = runner.runtime.ObserveCommands(runner.captureCommand)
+		runner.recordMu.Unlock()
+		return macro, errors.New("recording is empty; run at least one board command or discard it")
+	}
 	runner.recording.Active = false
 	runner.recording.Steps = len(macro.Steps)
 	runner.recordMu.Unlock()
+	runner.runtime.setActiveUseState(activeUseMacroRecording, false)
 
 	if save {
-		if len(macro.Steps) == 0 {
-			return macro, errors.New("recording is empty; run at least one board command or discard it")
-		}
 		if err := runner.updateHostConfig(func(config *appconfig.Config) error {
 			for _, existing := range config.Macros {
 				if existing.ID == macro.ID || strings.EqualFold(existing.Name, macro.Name) {
@@ -288,14 +364,23 @@ func (runner *MacroRunner) StopRecording(save bool) (appconfig.Macro, error) {
 			config.Macros = append(config.Macros, macro)
 			return nil
 		}); err != nil {
+			runner.recordMu.Lock()
+			runner.recording.Active = true
+			runner.recording.LastError = "save failed; recording retained: " + err.Error()
+			runner.recordRelease = runner.runtime.ObserveCommands(runner.captureCommand)
+			runner.recordMu.Unlock()
+			runner.runtime.setActiveUseState(activeUseMacroRecording, true)
 			return macro, err
 		}
 	}
+	runner.recordMu.Lock()
+	runner.recording.LastError = ""
+	runner.recordMu.Unlock()
 	lifecycle := map[bool]string{true: "saved", false: "discarded"}[save]
 	runner.runtime.PublishStructuredEvent(Event{
 		Kind: "macro.recording", Lifecycle: lifecycle, State: lifecycle,
-		Text:     fmt.Sprintf("macro recording %d/%s %s with %d %s-timed steps", macro.ID, macro.Name, lifecycle, len(macro.Steps), normalizedMacroMode(macro.Mode)),
-		Metadata: map[string]string{"macro_mode": normalizedMacroMode(macro.Mode)},
+		Text:     fmt.Sprintf("macro recording %d/%s %s with %d %s-timed steps", macro.ID, macro.Name, lifecycle, len(macro.Steps), macro.Mode),
+		Metadata: map[string]string{"macro_mode": macro.Mode},
 	})
 	return macro, nil
 }
@@ -303,10 +388,14 @@ func (runner *MacroRunner) StopRecording(save bool) (appconfig.Macro, error) {
 func (runner *MacroRunner) captureCommand(evidence CommandEvidence) {
 	runner.recordMu.Lock()
 	defer runner.recordMu.Unlock()
-	if !runner.recording.Active {
+	if !runner.recording.Active || evidence.Source == CommandSourceBackground {
 		return
 	}
-	mode := normalizedMacroMode(runner.recordMacro.Mode)
+	if len(runner.recordMacro.Steps) >= 65535 {
+		runner.recording.LastError = "recording reached the 65535 step limit; save it before continuing"
+		return
+	}
+	mode := runner.recordMacro.Mode
 	if mode == macroModeHost {
 		if !hostRecordableOpcode(evidence.Opcode) {
 			return
@@ -334,6 +423,7 @@ func (runner *MacroRunner) captureCommand(evidence CommandEvidence) {
 		step.AtUS = uint32(delta / time.Microsecond)
 		runner.recordMacro.Steps = append(runner.recordMacro.Steps, step)
 		runner.recording.Steps = len(runner.recordMacro.Steps)
+		runner.publishRecordedStep(step)
 		return
 	}
 	if !runner.recordHasBase {
@@ -348,6 +438,17 @@ func (runner *MacroRunner) captureCommand(evidence CommandEvidence) {
 	step.AtUS = delta
 	runner.recordMacro.Steps = append(runner.recordMacro.Steps, step)
 	runner.recording.Steps = len(runner.recordMacro.Steps)
+	runner.publishRecordedStep(step)
+}
+
+func (runner *MacroRunner) publishRecordedStep(step appconfig.MacroStep) {
+	// PublishStructuredEvent queues delivery without invoking snapshot readers;
+	// the recorder lock preserves order between concurrent acknowledged commands.
+	runner.runtime.PublishStructuredEvent(Event{
+		Kind: "macro.recording", Lifecycle: "captured", State: "recording",
+		Text:     fmt.Sprintf("macro %d/%s recorded step %d (%s)", runner.recording.ID, runner.recording.Name, runner.recording.Steps, step.Kind),
+		Metadata: map[string]string{"macro_mode": runner.recording.Mode, "steps": strconv.Itoa(runner.recording.Steps)},
+	})
 }
 
 // Start validates a macro and selects its persisted playback engine. Legacy
@@ -372,7 +473,7 @@ func (runner *MacroRunner) Start(ctx context.Context, reference string) (MacroSt
 	if !snapshot.Connected {
 		return MacroState{}, errors.New("device is not connected")
 	}
-	mode := normalizedMacroMode(macro.Mode)
+	mode := macro.Mode
 	if mode == macroModeMCU && snapshot.Hello.Capabilities&native.CapabilityTimedMacroQueue == 0 {
 		return MacroState{}, errors.New("connected firmware does not advertise the MCU-timed macro queue")
 	}
@@ -390,7 +491,7 @@ func (runner *MacroRunner) Start(ctx context.Context, reference string) (MacroSt
 	}
 	tolerance := macro.TimingToleranceUS
 	if tolerance == 0 {
-		tolerance = defaultMacroTimingToleranceUS
+		tolerance = modeTimingTolerance(mode)
 	}
 	runner.state = MacroState{
 		Running: true, ID: macro.ID, Name: macro.Name,
@@ -401,6 +502,7 @@ func (runner *MacroRunner) Start(ctx context.Context, reference string) (MacroSt
 		Lifecycle: "buffering",
 	}
 	runner.mu.Unlock()
+	runner.runtime.setActiveUseState(activeUseMacroPlayback, true)
 
 	lease, _, err := runner.runtime.AcquireProgramState(
 		fmt.Sprintf("macro:%d", macro.ID),
@@ -422,6 +524,7 @@ func (runner *MacroRunner) Start(ctx context.Context, reference string) (MacroSt
 		return runner.State(), cause
 	}
 	if mode == macroModeHost {
+		command := boundHostMacroCommand(runner.runtime)
 		if err := runner.showMacroIdentity(ctx, compiled); err != nil {
 			runner.runtime.PublishHostEvent("macro.display", "macro identity display unavailable: "+err.Error())
 		}
@@ -435,7 +538,7 @@ func (runner *MacroRunner) Start(ctx context.Context, reference string) (MacroSt
 		state := runner.state
 		runner.mu.Unlock()
 		runner.publishLifecycle("started", state, nil)
-		go runner.playHost(playContext, done, compiled, lease)
+		go runner.playHost(playContext, done, compiled, lease, command)
 		return state, nil
 	}
 
@@ -506,6 +609,12 @@ func (runner *MacroRunner) CancelWithPolicy(ctx context.Context, keepOutputs boo
 		}
 		return nil
 	}
+	if runner.State().Mode == macroModeHost {
+		if keepOutputs {
+			return nil
+		}
+		return runner.safeStopHost()
+	}
 	return runner.cancelBoard(keepOutputs)
 }
 
@@ -545,8 +654,32 @@ func (runner *MacroRunner) play(
 	if watchdog < 15*time.Second {
 		watchdog = 15 * time.Second
 	}
-	deadline := time.Now().Add(watchdog)
+	completion := macroCompletionWindow{watchdog: watchdog, watchdogDeadline: time.Now().Add(watchdog)}
 	cancelled := false
+	consume := func(event Event) {
+		afterID = event.ID
+		if event.Frame.Seq == native.MacroExecutionSequence {
+			if observed < len(compiled.steps) {
+				actualUS, timed := native.ResponseDeviceMicros(event.Frame)
+				if timed {
+					step := compiled.steps[observed]
+					delta := int32(actualUS - (status.StartedAtUS + step.dueUS))
+					runner.recordEvidence(observed, delta, event.Frame.Opcode == native.OpACK)
+					observed++
+					status = acknowledgeMacroDeviceStatus(status, observed, step.recordLength)
+					runner.applyDeviceStatus(status)
+				}
+			}
+			return
+		}
+		if event.Frame.Opcode == native.OpEvent {
+			deviceEvent, parseErr := native.ParseDeviceEvent(event.Frame.Payload)
+			if parseErr == nil && deviceEvent.Macro != nil && deviceEvent.Macro.ID == compiled.definition.ID && deviceEvent.Macro.State != native.MacroBuffering {
+				status = mergeMacroDeviceStatus(status, *deviceEvent.Macro)
+				runner.applyDeviceStatus(status)
+			}
+		}
+	}
 	for err == nil {
 		if ctx.Err() != nil {
 			cancelled = true
@@ -559,8 +692,12 @@ func (runner *MacroRunner) play(
 			}
 			break
 		}
-		if time.Now().After(deadline) {
-			err = fmt.Errorf("macro playback exceeded its %s watchdog", watchdog)
+		if event, pending := runner.runtime.pendingMacroEvent(afterID, compiled.definition.ID); pending {
+			consume(event)
+			continue
+		}
+		if terminal, terminalErr := completion.terminal(status, observed, len(compiled.steps), time.Now()); terminal {
+			err = terminalErr
 			break
 		}
 
@@ -576,20 +713,21 @@ func (runner *MacroRunner) play(
 			runner.applyDeviceStatus(status)
 		}
 
-		if macroTerminal(status.State) {
-			if observed >= len(compiled.steps) || status.State != native.MacroCompleted {
-				break
-			}
-			// The final ACK precedes the completion event on the wire, but the
-			// session pump can publish them on adjacent scheduler turns.
-			deadline = minTime(deadline, time.Now().Add(150*time.Millisecond))
-		}
-
 		wait := macroStatusPollInterval - time.Since(lastQuery)
+		if status.State == native.MacroCompleted {
+			// Execution is finished. Wait only for evidence; another blocking
+			// query cannot supply missing per-step timestamps.
+			wait = min(macroStatusPollInterval, time.Until(completion.evidenceDeadline))
+		}
 		if wait <= 0 {
-			status, err = runner.queryBoard(ctx)
+			if status.State == native.MacroCompleted {
+				continue
+			}
+			var reported native.MacroStatus
+			reported, err = runner.queryBoard(ctx)
 			lastQuery = time.Now()
 			if err == nil {
+				status = mergeMacroDeviceStatus(status, reported)
 				runner.applyDeviceStatus(status)
 			}
 			continue
@@ -607,35 +745,7 @@ func (runner *MacroRunner) play(
 			err = waitErr
 			break
 		}
-		afterID = event.ID
-		if event.Frame.Seq == native.MacroExecutionSequence {
-			if observed < len(compiled.steps) {
-				actualUS, timed := native.ResponseDeviceMicros(event.Frame)
-				if timed {
-					step := compiled.steps[observed]
-					delta := int32(actualUS - (status.StartedAtUS + step.dueUS))
-					runner.recordEvidence(observed, delta, event.Frame.Opcode == native.OpACK)
-					if int(status.Fill) >= step.recordLength {
-						status.Fill -= byte(step.recordLength)
-					} else {
-						status.Fill = 0
-					}
-					observed++
-				}
-				status.ExecutedSteps = uint16(observed + 1)
-				runner.applyDeviceStatus(status)
-			}
-			continue
-		}
-		if event.Frame.Opcode == native.OpEvent {
-			deviceEvent, parseErr := native.ParseDeviceEvent(event.Frame.Payload)
-			if parseErr == nil && deviceEvent.Macro != nil &&
-				deviceEvent.Macro.ID == compiled.definition.ID &&
-				deviceEvent.Macro.State != native.MacroBuffering {
-				status = *deviceEvent.Macro
-				runner.applyDeviceStatus(status)
-			}
-		}
+		consume(event)
 	}
 	if ctx.Err() != nil && !cancelled {
 		cancelled = true
@@ -651,7 +761,11 @@ func (runner *MacroRunner) play(
 		}
 	}
 
-	if err != nil && !cancelled {
+	var evidenceError *macroTimingEvidenceError
+	// A completed queue has already executed its intended final output state.
+	// Missing host timestamps are a proof failure, not unfinished execution;
+	// do not issue another cancellation/output action merely to repair evidence.
+	if err != nil && !cancelled && !errors.As(err, &evidenceError) {
 		if cleanupErr := runner.cancelBoard(false); cleanupErr != nil {
 			err = errors.Join(err, fmt.Errorf("macro safe-stop cleanup: %w", cleanupErr))
 		}
@@ -664,18 +778,22 @@ func (runner *MacroRunner) playHost(
 	done chan struct{},
 	compiled compiledMacro,
 	lease *ProgramStateLease,
+	command hostMacroCommand,
 ) {
 	defer close(done)
 	defer lease.Release()
 
-	observed, err := runHostMacro(ctx, compiled, runner.runtime.Command, runner.recordEvidence)
+	observed, err := runHostMacro(ctx, compiled, command, runner.recordEvidence)
 	cancelled := ctx.Err() != nil
+	if cancelled && errors.Is(err, context.Canceled) {
+		err = nil
+	}
 	if cancelled || err != nil {
 		runner.mu.RLock()
 		keep := runner.cancelKeep
 		runner.mu.RUnlock()
 		if !keep {
-			if cleanupErr := runner.safeStopHost(); cleanupErr != nil {
+			if cleanupErr := safeStopHostWithCommand(command); cleanupErr != nil {
 				err = errors.Join(err, fmt.Errorf("macro safe-stop cleanup: %w", cleanupErr))
 			}
 		}
@@ -685,41 +803,95 @@ func (runner *MacroRunner) playHost(
 
 type hostMacroCommand func(context.Context, byte, []byte) error
 
+// Bind both playback and cleanup to one serial session. An unplug/reconnect
+// must not silently redirect a scheduled output command to a replacement board.
+func boundHostMacroCommand(runtime *Runtime) hostMacroCommand {
+	session := runtime.currentSession()
+	return func(ctx context.Context, opcode byte, payload []byte) error {
+		if session == nil || runtime.currentSession() != session {
+			return errors.New("macro board session disconnected or replaced; playback stopped")
+		}
+		frame, err := session.Request(ctx, opcode, payload, native.OpACK)
+		if err != nil {
+			return err
+		}
+		if runtime.currentSession() != session {
+			return errors.New("macro board session changed while acknowledging a step")
+		}
+		runtime.observe(frame)
+		return nil
+	}
+}
+
 func runHostMacro(
 	ctx context.Context,
 	compiled compiledMacro,
 	command hostMacroCommand,
 	observe func(int, int32, bool),
 ) (int, error) {
-	epoch := time.Now()
+	return runHostMacroWithClock(ctx, compiled, command, observe, time.Now, waitHostMacroDeadline)
+}
+
+// The recorder stores offsets relative to its first acknowledged command.
+// Anchor playback to that same boundary once, without clearing startup evidence
+// or hiding later overruns by resetting the clock after every command.
+func runHostMacroWithClock(
+	ctx context.Context,
+	compiled compiledMacro,
+	command hostMacroCommand,
+	observe func(int, int32, bool),
+	now func() time.Time,
+	waitUntil func(context.Context, time.Time) error,
+) (int, error) {
+	epoch := now()
 	for index, step := range compiled.steps {
-		due := epoch.Add(time.Duration(step.dueUS) * time.Microsecond)
-		wait := time.Until(due)
-		if wait > 0 {
-			timer := time.NewTimer(wait)
-			select {
-			case <-ctx.Done():
-				if !timer.Stop() {
-					select {
-					case <-timer.C:
-					default:
-					}
-				}
-				return index, ctx.Err()
-			case <-timer.C:
-			}
-		}
-		if err := command(ctx, step.opcode, step.payload); err != nil {
-			observe(index, hostTimingDelta(epoch, step.dueUS), false)
+		if err := ctx.Err(); err != nil {
 			return index, err
 		}
-		observe(index, hostTimingDelta(epoch, step.dueUS), true)
+		due := epoch.Add(time.Duration(step.dueUS) * time.Microsecond)
+		if err := waitUntil(ctx, due); err != nil {
+			return index, err
+		}
+		if err := ctx.Err(); err != nil {
+			return index, err
+		}
+		err := command(ctx, step.opcode, step.payload)
+		acknowledgedAt := now()
+		delta := hostTimingDeltaAt(epoch, step.dueUS, acknowledgedAt)
+		if err != nil {
+			observe(index, delta, false)
+			return index, err
+		}
+		if index == 0 {
+			// Preserve any explicit leading wait, and measure the first command
+			// against the original deadline before choosing the relative epoch.
+			epoch = acknowledgedAt.Add(-time.Duration(step.dueUS) * time.Microsecond)
+		}
+		observe(index, delta, true)
 	}
 	return len(compiled.steps), nil
 }
 
-func hostTimingDelta(epoch time.Time, dueUS uint32) int32 {
-	delta := time.Since(epoch)/time.Microsecond - time.Duration(dueUS)
+func waitHostMacroDeadline(ctx context.Context, due time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	wait := time.Until(due)
+	if wait <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func hostTimingDeltaAt(epoch time.Time, dueUS uint32, acknowledgedAt time.Time) int32 {
+	delta := acknowledgedAt.Sub(epoch)/time.Microsecond - time.Duration(dueUS)
 	if delta > time.Duration(int64(^uint32(0)>>1)) {
 		return int32(^uint32(0) >> 1)
 	}
@@ -730,10 +902,14 @@ func hostTimingDelta(epoch time.Time, dueUS uint32) int32 {
 }
 
 func (runner *MacroRunner) safeStopHost() error {
+	return safeStopHostWithCommand(runner.runtime.Command)
+}
+
+func safeStopHostWithCommand(command hostMacroCommand) error {
 	ctx, cancel := context.WithTimeout(context.Background(), macroRequestTimeout)
 	defer cancel()
-	relayErr := runner.runtime.Command(ctx, native.OpRelayAllOff, nil)
-	pwmErr := runner.runtime.Command(ctx, native.OpPWMAllOff, nil)
+	relayErr := command(ctx, native.OpRelayAllOff, nil)
+	pwmErr := command(ctx, native.OpPWMAllOff, nil)
 	return errors.Join(relayErr, pwmErr)
 }
 
@@ -840,6 +1016,7 @@ func (runner *MacroRunner) showMacroIdentity(ctx context.Context, compiled compi
 
 func (runner *MacroRunner) applyDeviceStatus(status native.MacroStatus) {
 	runner.mu.Lock()
+	runner.state.Step = max(runner.state.Step, int(status.ExecutedSteps))
 	runner.state.Device = status
 	runner.state.DeviceStartedAtUS = status.StartedAtUS
 	runner.state.AcceptedBytes = status.AcceptedBytes
@@ -851,12 +1028,18 @@ func (runner *MacroRunner) applyDeviceStatus(status native.MacroStatus) {
 
 func (runner *MacroRunner) recordEvidence(index int, delta int32, succeeded bool) {
 	runner.mu.Lock()
-	runner.state.Step = index + 1
+	if !succeeded && runner.state.DispatchErrors < 255 {
+		runner.state.DispatchErrors++
+	}
+	runner.state.Step = max(runner.state.Step, index+1)
 	runner.state.EvidenceSteps = index + 1
 	runner.state.LastTimingDeltaUS = delta
 	absolute := uint32(delta)
 	if delta < 0 {
 		absolute = uint32(-int64(delta))
+	}
+	if index == 0 && runner.state.Mode == macroModeHost {
+		runner.state.StartupDelayUS = absolute
 	}
 	if absolute > runner.state.MaximumTimingErrorUS {
 		runner.state.MaximumTimingErrorUS = absolute
@@ -876,6 +1059,7 @@ func (runner *MacroRunner) recordEvidence(index int, delta int32, succeeded bool
 		metadata["mcu_delta_us"] = strconv.FormatInt(int64(delta), 10)
 	} else {
 		metadata["host_delta_us"] = strconv.FormatInt(int64(delta), 10)
+		metadata["startup_delay_us"] = strconv.FormatUint(uint64(state.StartupDelayUS), 10)
 	}
 	runner.runtime.PublishStructuredEvent(Event{
 		Kind: "macro.step", Lifecycle: "executed", State: map[bool]string{true: "acknowledged", false: "rejected"}[succeeded],
@@ -905,11 +1089,16 @@ func (runner *MacroRunner) finishPlayback(
 	runner.state.DispatchErrors = status.DispatchErrors
 	runner.state.BufferFill = status.Fill
 	runner.state.AcceptedBytes = status.AcceptedBytes
+	runner.state.Step = max(runner.state.Step, int(status.ExecutedSteps))
 	runner.state.Faithful = err == nil && !cancelled &&
 		status.State == native.MacroCompleted &&
 		status.Underruns == 0 && status.DispatchErrors == 0 &&
 		observed == len(macro.Steps) && runner.state.TimingViolations == 0
+	var evidenceError *macroTimingEvidenceError
 	switch {
+	case err != nil && errors.As(err, &evidenceError) && status.State == native.MacroCompleted:
+		runner.state.Lifecycle = "completed"
+		runner.state.LastError = err.Error()
 	case err != nil:
 		runner.state.Lifecycle = "failed"
 		runner.state.LastError = err.Error()
@@ -928,6 +1117,7 @@ func (runner *MacroRunner) finishPlayback(
 	runner.done = nil
 	state := runner.state
 	runner.mu.Unlock()
+	runner.runtime.setActiveUseState(activeUseMacroPlayback, false)
 	runner.publishLifecycle(state.Lifecycle, state, err)
 }
 
@@ -948,7 +1138,7 @@ func (runner *MacroRunner) finishHostPlayback(
 	runner.state.Faithful = err == nil && !cancelled &&
 		observed == len(macro.Steps) && runner.state.TimingViolations == 0
 	switch {
-	case cancelled:
+	case cancelled && err == nil:
 		runner.state.Lifecycle = "cancelled"
 		runner.state.LastError = ""
 		err = nil
@@ -963,6 +1153,7 @@ func (runner *MacroRunner) finishHostPlayback(
 	runner.done = nil
 	state := runner.state
 	runner.mu.Unlock()
+	runner.runtime.setActiveUseState(activeUseMacroPlayback, false)
 	runner.publishLifecycle(state.Lifecycle, state, err)
 }
 
@@ -974,6 +1165,7 @@ func (runner *MacroRunner) failStart(macro appconfig.Macro, err error) {
 	runner.state.LastError = err.Error()
 	state := runner.state
 	runner.mu.Unlock()
+	runner.runtime.setActiveUseState(activeUseMacroPlayback, false)
 	runner.publishLifecycle("failed", state, err)
 }
 
@@ -989,16 +1181,20 @@ func (runner *MacroRunner) publishLifecycle(lifecycle string, state MacroState, 
 			"macro_mode": state.Mode,
 			"category":   state.Category, "color": state.Color,
 			"step": strconv.Itoa(state.Step), "steps": strconv.Itoa(state.StepCount),
-			"faithful":        strconv.FormatBool(state.Faithful),
-			"timing_error_us": strconv.FormatUint(uint64(state.MaximumTimingErrorUS), 10),
-			"underruns":       strconv.Itoa(int(state.Underruns)),
-			"dispatch_errors": strconv.Itoa(int(state.DispatchErrors)),
+			"faithful":         strconv.FormatBool(state.Faithful),
+			"timing_error_us":  strconv.FormatUint(uint64(state.MaximumTimingErrorUS), 10),
+			"startup_delay_us": strconv.FormatUint(uint64(state.StartupDelayUS), 10),
+			"underruns":        strconv.Itoa(int(state.Underruns)),
+			"dispatch_errors":  strconv.Itoa(int(state.DispatchErrors)),
 		},
 	})
 	runner.queueMacroPresentation(state)
 }
 
 func compileMacro(macro appconfig.Macro) (compiledMacro, error) {
+	if macro.Mode != macroModeHost && macro.Mode != macroModeMCU {
+		return compiledMacro{}, fmt.Errorf("macro %d/%s mode must be host or mcu", macro.ID, macro.Name)
+	}
 	if len(macro.Steps) == 0 || len(macro.Steps) > 65535 {
 		return compiledMacro{}, fmt.Errorf("macro %d/%s must contain 1..65535 steps", macro.ID, macro.Name)
 	}
@@ -1020,7 +1216,7 @@ func compileMacro(macro appconfig.Macro) (compiledMacro, error) {
 		if err != nil {
 			return compiledMacro{}, fmt.Errorf("macro %d/%s step %d: %w", macro.ID, macro.Name, index+1, err)
 		}
-		if len(result.stream)+len(record) > 65535 {
+		if macro.Mode == macroModeMCU && len(result.stream)+len(record) > 65535 {
 			return compiledMacro{}, fmt.Errorf("macro %d/%s encoded stream exceeds 65535 bytes", macro.ID, macro.Name)
 		}
 		result.stream = append(result.stream, record...)
@@ -1057,6 +1253,9 @@ func compileMacroCommand(step appconfig.MacroStep) (byte, []byte, error) {
 		}
 		return native.OpRelaySet, payload, err
 	case "motion", "side":
+		if step.Value > 2 {
+			return 0, nil, fmt.Errorf("motion value %d is outside 0..2", step.Value)
+		}
 		payload, err := native.RelaySidePayload(step.Target, byte(step.Value))
 		return native.OpRelaySide, payload, err
 	case "pwm", "mosfet":
@@ -1066,7 +1265,7 @@ func compileMacroCommand(step appconfig.MacroStep) (byte, []byte, error) {
 		return native.OpRelayAllOff, nil, nil
 	case "pwm-off":
 		return native.OpPWMAllOff, nil, nil
-	case "buzzer", "tone":
+	case "beep", "buzzer", "tone":
 		frequency := step.FrequencyHz
 		if frequency == 0 {
 			frequency = step.Value
@@ -1133,25 +1332,24 @@ func macroQueueableOpcode(opcode byte) bool {
 
 func hostRecordableOpcode(opcode byte) bool {
 	switch opcode {
-	case native.OpRelaySet, native.OpRelaySide, native.OpRelayAllOff:
+	case native.OpRelaySet, native.OpRelaySide, native.OpRelayAllOff,
+		native.OpPWMSet, native.OpPWMAllOff, native.OpBuzzer,
+		native.OpDisplayText, native.OpRFTx, native.OpAddressableLED:
 		return true
 	default:
 		return false
 	}
 }
 
-func normalizedMacroMode(mode string) string {
-	if strings.EqualFold(strings.TrimSpace(mode), macroModeHost) {
-		return macroModeHost
-	}
-	return macroModeMCU
-}
-
 func modeTimingTolerance(mode string) uint32 {
-	if normalizedMacroMode(mode) == macroModeHost {
+	switch mode {
+	case macroModeHost:
 		return defaultHostMacroToleranceUS
+	case macroModeMCU:
+		return defaultMacroTimingToleranceUS
+	default:
+		return 0
 	}
-	return defaultMacroTimingToleranceUS
 }
 
 func decodeMacroHex(value string) ([]byte, error) {
@@ -1194,10 +1392,18 @@ func recordedMacroStep(evidence CommandEvidence) (appconfig.MacroStep, bool) {
 		if len(payload) != 4 {
 			return step, false
 		}
-		step.Kind = "buzzer"
+		step.Kind = "beep"
 		step.FrequencyHz = binary.LittleEndian.Uint16(payload[0:2])
 		step.DurationMS = binary.LittleEndian.Uint16(payload[2:4])
 	case native.OpDisplayText:
+		if len(payload) >= 8 && payload[0] == native.DisplayScheduledSegments && int(payload[3])+8 == len(payload) {
+			// Preserve the complete scheduling contract (scroll/repeat/hold), not
+			// a lossy conversion to the legacy four-byte display header.
+			step.Kind, step.Opcode = "opcode", native.OpDisplayText
+			step.PayloadHex = strings.ToUpper(hex.EncodeToString(payload))
+			step.Text = string(payload[8:])
+			return step, true
+		}
 		if len(payload) < 4 || int(payload[3])+4 != len(payload) || payload[0] > native.DisplayBoth {
 			return step, false
 		}
@@ -1247,9 +1453,13 @@ func recordedMacroStep(evidence CommandEvidence) (appconfig.MacroStep, bool) {
 
 func macroNeedsMotionPermission(macro appconfig.Macro) bool {
 	for _, step := range macro.Steps {
-		kind := strings.ToLower(strings.TrimSpace(step.Kind))
-		if (kind == "relay" && step.Target < 4 && step.Value != 0) ||
-			((kind == "motion" || kind == "side") && step.Value != 0) {
+		opcode, payload, err := compileMacroCommand(step)
+		if err != nil {
+			continue
+		} // compilation reports validation failures first
+		if (opcode == native.OpRelaySet && len(payload) == 2 && payload[0] < 4 && payload[1] != 0) ||
+			(opcode == native.OpRelaySide && len(payload) == 2 && payload[1] != 0) ||
+			opcode == native.OpRelayTest || opcode == native.OpRemoteKeyGesture {
 			return true
 		}
 	}
@@ -1275,11 +1485,4 @@ func validMacroColor(value string) bool {
 
 func macroTerminal(state byte) bool {
 	return state == native.MacroCancelled || state == native.MacroCompleted || state == native.MacroFailed
-}
-
-func minTime(first, second time.Time) time.Time {
-	if first.Before(second) {
-		return first
-	}
-	return second
 }

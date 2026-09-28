@@ -21,6 +21,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 
+	"pccontroller.local/controller/internal/deployment"
 	"pccontroller.local/controller/internal/firmwarefeatures"
 	"pccontroller.local/controller/internal/hostos"
 	"pccontroller.local/controller/internal/productidentity"
@@ -28,17 +29,20 @@ import (
 )
 
 const (
-	// SchemaVersion identifies the current host configuration schema.
-	SchemaVersion = 1
 	// DefaultWatchInterval bounds the polling fallback when file notifications
 	// are unavailable.
 	DefaultWatchInterval = 150 * time.Millisecond
+
+	StatusIntervalMinMS            = 50
+	StatusIntervalMaxMS            = 60_000
+	DefaultMeasurementFreshnessMS  = 1500
+	MeasurementFreshnessHeadroomMS = 100
+	MeasurementFreshnessMaxMS      = 120_000
 )
 
 // Config is the persistent host-side configuration root; it never mirrors or
 // replaces the MCU's EEPROM-owned settings.
 type Config struct {
-	Schema        int               `json:"schema"`
 	Connection    Connection        `json:"connection"`
 	UI            UI                `json:"ui"`
 	IPC           IPC               `json:"ipc"`
@@ -85,39 +89,40 @@ type DeviceIdentity struct {
 
 // UI configures host presentation, measurement visibility, and display mirroring.
 type UI struct {
-	AppTitle             string            `json:"app_title"`
-	Tagline              string            `json:"tagline"`
-	Appearance           Appearance        `json:"appearance"`
-	TUIConsole           TUIConsole        `json:"tui_console"`
-	SeparatePortButtons  bool              `json:"separate_port_buttons"`
-	TableLayout          string            `json:"table_layout"`
-	ControlValueColors   bool              `json:"control_value_colors"`
-	PeripheralNames      map[string]string `json:"peripheral_names,omitempty"`
-	SetupComplete        bool              `json:"setup_complete"`
-	WelcomeMelody        string            `json:"welcome_melody"`
-	StatusIntervalMS     int               `json:"status_interval_ms"`
-	IdleStatusIntervalMS int               `json:"idle_status_interval_ms"`
-	EventLogLimit        int               `json:"event_log_limit"`
-	HistoryHours         int               `json:"history_hours"`
-	HistorySampleMS      int               `json:"history_sample_ms"`
-	VoltageDecimals      int               `json:"voltage_decimals"`
-	CurrentDecimals      int               `json:"current_decimals"`
-	PowerDecimals        int               `json:"power_decimals"`
-	TemperatureDecimals  int               `json:"temperature_decimals"`
-	ShowSupplyVoltage    bool              `json:"show_supply_voltage"`
-	ShowBusVoltage       bool              `json:"show_bus_voltage"`
-	ShowCurrent          bool              `json:"show_current"`
-	ShowPower            bool              `json:"show_power"`
-	ShowTemperatureLED   bool              `json:"show_temperature_led"`
-	ShowTemperatureBT    bool              `json:"show_temperature_bt"`
-	ShowIO               bool              `json:"show_io"`
-	ShowDiagnostics      bool              `json:"show_diagnostics"`
-	ShowGraphs           bool              `json:"show_graphs"`
-	LCDServiceEnabled    bool              `json:"lcd_service_enabled"`
-	MirrorPromptToLCD    bool              `json:"mirror_prompt_to_lcd"`
-	LCDPromptDebounceMS  int               `json:"lcd_prompt_debounce_ms"`
-	LCDPriorityHoldMS    int               `json:"lcd_priority_hold_ms"`
-	SegmentScroll        SegmentScroll     `json:"segment_scroll"`
+	AppTitle               string            `json:"app_title"`
+	Tagline                string            `json:"tagline"`
+	Appearance             Appearance        `json:"appearance"`
+	TUIConsole             TUIConsole        `json:"tui_console"`
+	SeparatePortButtons    bool              `json:"separate_port_buttons"`
+	TableLayout            string            `json:"table_layout"`
+	ControlValueColors     bool              `json:"control_value_colors"`
+	PeripheralNames        map[string]string `json:"peripheral_names,omitempty"`
+	SetupComplete          bool              `json:"setup_complete"`
+	WelcomeMelody          string            `json:"welcome_melody"`
+	StatusIntervalMS       int               `json:"status_interval_ms"`
+	MeasurementFreshnessMS int               `json:"measurement_freshness_ms"`
+	IdleStatusIntervalMS   int               `json:"idle_status_interval_ms"`
+	EventLogLimit          int               `json:"event_log_limit"`
+	HistoryHours           int               `json:"history_hours"`
+	HistorySampleMS        int               `json:"history_sample_ms"`
+	VoltageDecimals        int               `json:"voltage_decimals"`
+	CurrentDecimals        int               `json:"current_decimals"`
+	PowerDecimals          int               `json:"power_decimals"`
+	TemperatureDecimals    int               `json:"temperature_decimals"`
+	ShowSupplyVoltage      bool              `json:"show_supply_voltage"`
+	ShowBusVoltage         bool              `json:"show_bus_voltage"`
+	ShowCurrent            bool              `json:"show_current"`
+	ShowPower              bool              `json:"show_power"`
+	ShowTemperatureLED     bool              `json:"show_temperature_led"`
+	ShowTemperatureBT      bool              `json:"show_temperature_bt"`
+	ShowIO                 bool              `json:"show_io"`
+	ShowDiagnostics        bool              `json:"show_diagnostics"`
+	ShowGraphs             bool              `json:"show_graphs"`
+	LCDServiceEnabled      bool              `json:"lcd_service_enabled"`
+	MirrorPromptToLCD      bool              `json:"mirror_prompt_to_lcd"`
+	LCDPromptDebounceMS    int               `json:"lcd_prompt_debounce_ms"`
+	LCDPriorityHoldMS      int               `json:"lcd_priority_hold_ms"`
+	SegmentScroll          SegmentScroll     `json:"segment_scroll"`
 }
 
 // TUIConsole contains local classic-console presentation preferences. These
@@ -216,6 +221,7 @@ type Paths struct {
 
 // Programming selects the host toolchain and default programming transport.
 type Programming struct {
+	Deployment       string                     `json:"deployment,omitempty"`
 	Method           string                     `json:"method,omitempty"`
 	FQBN             string                     `json:"fqbn,omitempty"`
 	Programmer       string                     `json:"programmer,omitempty"`
@@ -227,8 +233,8 @@ type Programming struct {
 }
 
 // Macro defines a named, host-persisted sequence. Mode "host" schedules
-// ordinary commands from the controller process; mode "mcu" (and the legacy
-// empty value) streams the sequence to the firmware timing engine.
+// ordinary commands from the controller process; mode "mcu" streams the
+// sequence to the firmware timing engine. Mode is always explicit.
 type Macro struct {
 	ID                  byte        `json:"id"`
 	Name                string      `json:"name"`
@@ -317,7 +323,6 @@ type RFTransmit struct {
 // Defaults returns a complete safe host configuration for a new installation.
 func Defaults() Config {
 	return Config{
-		Schema: SchemaVersion,
 		Connection: Connection{
 			VID:                "1A86",
 			PID:                "7523",
@@ -335,33 +340,34 @@ func Defaults() Config {
 			Appearance: Appearance{
 				Theme: "system", Locale: "en", Direction: "auto", AudioVolume: 0.42,
 			},
-			TUIConsole:           productTUIConsoleDefaults(),
-			TableLayout:          "compact",
-			ControlValueColors:   true,
-			WelcomeMelody:        "notify",
-			StatusIntervalMS:     200,
-			IdleStatusIntervalMS: 0,
-			EventLogLimit:        500,
-			HistoryHours:         6,
-			HistorySampleMS:      1000,
-			VoltageDecimals:      2,
-			CurrentDecimals:      1,
-			PowerDecimals:        2,
-			TemperatureDecimals:  1,
-			ShowSupplyVoltage:    true,
-			ShowBusVoltage:       true,
-			ShowCurrent:          true,
-			ShowPower:            true,
-			ShowTemperatureLED:   true,
-			ShowTemperatureBT:    true,
-			ShowIO:               true,
-			ShowDiagnostics:      true,
-			ShowGraphs:           true,
-			LCDServiceEnabled:    true,
-			MirrorPromptToLCD:    false,
-			LCDPromptDebounceMS:  120,
-			LCDPriorityHoldMS:    2000,
-			SegmentScroll:        DefaultSegmentScroll(),
+			TUIConsole:             productTUIConsoleDefaults(),
+			TableLayout:            "compact",
+			ControlValueColors:     true,
+			WelcomeMelody:          "notify",
+			StatusIntervalMS:       200,
+			MeasurementFreshnessMS: DefaultMeasurementFreshnessMS,
+			IdleStatusIntervalMS:   0,
+			EventLogLimit:          500,
+			HistoryHours:           6,
+			HistorySampleMS:        1000,
+			VoltageDecimals:        2,
+			CurrentDecimals:        1,
+			PowerDecimals:          2,
+			TemperatureDecimals:    1,
+			ShowSupplyVoltage:      true,
+			ShowBusVoltage:         true,
+			ShowCurrent:            true,
+			ShowPower:              true,
+			ShowTemperatureLED:     true,
+			ShowTemperatureBT:      true,
+			ShowIO:                 true,
+			ShowDiagnostics:        true,
+			ShowGraphs:             true,
+			LCDServiceEnabled:      true,
+			MirrorPromptToLCD:      false,
+			LCDPromptDebounceMS:    120,
+			LCDPriorityHoldMS:      2000,
+			SegmentScroll:          DefaultSegmentScroll(),
 		},
 		IPC: IPC{
 			Listen:          "127.0.0.1:8787",
@@ -371,10 +377,11 @@ func Defaults() Config {
 			SocketIOPath:    "/socket.io/",
 			RemotePolicy:    DefaultRemoteAccessPolicy(),
 		},
-		Safety:    Safety{MotionDoorPolicy: "always"},
-		RF:        DefaultRFConfig(),
-		HostMenus: DefaultHostMenus(),
-		OSActions: hostos.DefaultPolicy(),
+		Programming: Programming{Deployment: deployment.Production},
+		Safety:      Safety{MotionDoorPolicy: "always"},
+		RF:          DefaultRFConfig(),
+		HostMenus:   DefaultHostMenus(),
+		OSActions:   hostos.DefaultPolicy(),
 		Integrations: Integrations{
 			Keyboard:     DefaultKeyboardControl(),
 			Lifecycle:    DefaultLifecycleSafety(),
@@ -463,6 +470,8 @@ func Load(path string) (Config, [sha256.Size]byte, error) {
 	}
 	value.RF = canonicalizeRFConfig(value.RF)
 	value.HostMenus = normalizeHostMenus(value.HostMenus)
+	normalizeMacros(value.Macros)
+	normalizeMeasurementFreshness(&value.UI)
 	if err := normalizeProgramming(&value.Programming); err != nil {
 		return Config{}, [sha256.Size]byte{}, fmt.Errorf("validate %s: programming.firmware_features: %w", path, err)
 	}
@@ -472,6 +481,17 @@ func Load(path string) (Config, [sha256.Size]byte, error) {
 		return Config{}, [sha256.Size]byte{}, fmt.Errorf("validate %s: %w", path, err)
 	}
 	return value, sha256.Sum256(content), nil
+}
+
+func normalizeMeasurementFreshness(value *UI) {
+	minimum := value.StatusIntervalMS + MeasurementFreshnessHeadroomMS
+	// Decode-over-defaults cannot distinguish a missing value across JSON,
+	// YAML, and TOML. Only migrate the exact inherited default, leaving every
+	// other invalid explicit value for Validate to reject.
+	if value.MeasurementFreshnessMS == DefaultMeasurementFreshnessMS &&
+		value.MeasurementFreshnessMS < minimum {
+		value.MeasurementFreshnessMS = minimum
+	}
 }
 
 // LoadOrCreate loads an existing configuration or writes validated defaults
@@ -495,6 +515,7 @@ func LoadOrCreate(path string) (Config, [sha256.Size]byte, error) {
 func Write(path string, value Config) error {
 	value.RF = canonicalizeRFConfig(value.RF)
 	value.HostMenus = normalizeHostMenus(value.HostMenus)
+	normalizeMacros(value.Macros)
 	if err := normalizeProgramming(&value.Programming); err != nil {
 		return fmt.Errorf("programming.firmware_features: %w", err)
 	}
@@ -548,10 +569,25 @@ func Write(path string, value Config) error {
 	return nil
 }
 
+// normalizeMacros keeps file-backed alpha configurations usable as the macro
+// execution target becomes explicit. An omitted mode can only describe the
+// host scheduler that existed before the MCU timing engine was selectable.
+// Persisting the next write makes that choice explicit instead of retaining an
+// ambiguous empty value.
+func normalizeMacros(macros []Macro) {
+	for index := range macros {
+		mode := strings.ToLower(strings.TrimSpace(macros[index].Mode))
+		if mode == "" {
+			mode = "host"
+		}
+		macros[index].Mode = mode
+	}
+}
+
 // Validate rejects unsafe, ambiguous, or unsupported host configuration values.
 func (value Config) Validate() error {
-	if value.Schema != SchemaVersion {
-		return fmt.Errorf("unsupported schema %d", value.Schema)
+	if _, err := deployment.Normalize(value.Programming.Deployment); err != nil {
+		return fmt.Errorf("programming.deployment: %w", err)
 	}
 	if _, err := firmwarefeatures.Normalize(
 		firmwarefeatures.Names(value.Programming.FirmwareFeatures),
@@ -641,8 +677,16 @@ func (value Config) Validate() error {
 	if melody := strings.TrimSpace(value.UI.WelcomeMelody); melody == "" || len(melody) > 64 {
 		return errors.New("ui.welcome_melody must contain 1..64 characters")
 	}
-	if value.UI.StatusIntervalMS < 50 || value.UI.StatusIntervalMS > 60_000 {
-		return fmt.Errorf("ui.status_interval_ms must be 50..60000")
+	if value.UI.StatusIntervalMS < StatusIntervalMinMS || value.UI.StatusIntervalMS > StatusIntervalMaxMS {
+		return fmt.Errorf("ui.status_interval_ms must be %d..%d", StatusIntervalMinMS, StatusIntervalMaxMS)
+	}
+	minimumFreshness := value.UI.StatusIntervalMS + MeasurementFreshnessHeadroomMS
+	if value.UI.MeasurementFreshnessMS < minimumFreshness || value.UI.MeasurementFreshnessMS > MeasurementFreshnessMaxMS {
+		return fmt.Errorf(
+			"ui.measurement_freshness_ms must be %d..%d for the configured status interval",
+			minimumFreshness,
+			MeasurementFreshnessMaxMS,
+		)
 	}
 	if value.UI.IdleStatusIntervalMS != 0 &&
 		(value.UI.IdleStatusIntervalMS < 100 || value.UI.IdleStatusIntervalMS > 60_000) {
@@ -714,8 +758,8 @@ func (value Config) Validate() error {
 		if len(macro.Category) > 64 || !printableASCII(macro.Category) {
 			return fmt.Errorf("macros[%d].category must be at most 64 printable ASCII bytes", index)
 		}
-		switch strings.ToLower(strings.TrimSpace(macro.Mode)) {
-		case "", "mcu", "host":
+		switch macro.Mode {
+		case "mcu", "host":
 		default:
 			return fmt.Errorf("macros[%d].mode must be host or mcu", index)
 		}
@@ -762,7 +806,7 @@ func (value Config) Validate() error {
 				if step.Target != 0 || step.Value != 0 {
 					return fmt.Errorf("macros[%d].steps[%d] all-off target/value must be zero", index, stepIndex)
 				}
-			case "buzzer", "tone":
+			case "beep", "buzzer", "tone":
 				frequency := step.FrequencyHz
 				if frequency == 0 {
 					frequency = step.Value
@@ -1002,6 +1046,11 @@ func (value Config) Validate() error {
 }
 
 func normalizeProgramming(value *Programming) error {
+	classification, err := deployment.Normalize(value.Deployment)
+	if err != nil {
+		return err
+	}
+	value.Deployment = classification
 	features, err := firmwarefeatures.Normalize(
 		firmwarefeatures.Names(value.FirmwareFeatures),
 	)
@@ -1416,13 +1465,24 @@ func (store *Store) Watch(
 	if interval <= 0 {
 		interval = DefaultWatchInterval
 	}
-	watcher, err := fsnotify.NewWatcher()
-	if err == nil {
-		err = watcher.Add(filepath.Dir(store.path))
-	}
-	if err != nil {
-		if watcher != nil {
+	var watcher *fsnotify.Watcher
+	err := retryWatchRegistration(ctx, func() error {
+		var err error
+		watcher, err = fsnotify.NewWatcher()
+		if err == nil {
+			err = watcher.Add(filepath.Dir(store.path))
+		}
+		if err != nil && watcher != nil {
+			// kqueue may have registered part of the directory before a
+			// temporary entry disappeared. Retry with an entirely fresh watch.
 			_ = watcher.Close()
+			watcher = nil
+		}
+		return err
+	})
+	if err != nil {
+		if ctx.Err() != nil {
+			return
 		}
 		if onError != nil {
 			onError(fmt.Errorf("filesystem watcher unavailable; using polling fallback: %w", err))

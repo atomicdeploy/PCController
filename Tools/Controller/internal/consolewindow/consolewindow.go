@@ -34,6 +34,8 @@ type Result struct {
 	Reason  string
 }
 
+var setTitle = setTitlePlatform
+
 // Validate rejects values that cannot be represented safely by the Win32
 // classic-console APIs or by the TUI's minimum usable layout.
 func Validate(settings Settings) error {
@@ -73,6 +75,22 @@ func Apply(settings Settings) (Result, error) {
 		return Result{Reason: reason}, nil
 	}
 	return applyPlatform(settings)
+}
+
+// SetTitle applies the configured product title to an attached console before
+// longer-running startup work begins. The TUI will continue to refine the
+// title with page and operation state once its event loop is running.
+func SetTitle(value string) (Result, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return Result{}, errors.New("console title must not be empty")
+	}
+	for _, character := range value {
+		if character < 0x20 || character == 0x7f {
+			return Result{}, errors.New("console title must contain printable characters only")
+		}
+	}
+	return setTitle(value)
 }
 
 func normalizeSettings(settings Settings) Settings {

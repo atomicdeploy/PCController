@@ -311,6 +311,7 @@ Automation, monitoring and bridges:
   controller monitor [--interval 500ms] [--json] [connection flags]
   controller ipc serve [--listen 127.0.0.1:8787|--stdio] [connection flags]
   controller ipc call --method METHOD [--params JSON]
+	controller ipc monitor [--addr HOST:PORT] [--token-ref REF] [--kind program] [--after latest]
   controller ws serve --file firmware.hex [flags]
   controller ws client --url ws://host:3000/firmware [programmer flags]
 
@@ -318,7 +319,7 @@ Device, firmware and recovery:
   controller reset [connection flags]
 	controller eeprom inspect|export|import|restore [file-only backup flags]
 	controller firmware inspect|identity|patch-identity [artifact flags]
-	controller program flash HEX [PORT] [--method urclock|usbasp] [--app-device SELECTOR] [--allow-incomplete-backup] [--reinitialize-eeprom]
+	controller program flash HEX [PORT] [--method urclock|usbasp] [--app-device SELECTOR] [--deployment production|development] [--reinitialize-eeprom]
 	controller program recover HEX [PORT]  fresh readback + durable restore; never rewrites flash
 	controller program abandon TARGET_SHA256 ABANDON  restore a failed transaction when its exact staging HEX was lost; never reads/writes flash
 	controller program --operation DIAGNOSTIC [program flags]

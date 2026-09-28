@@ -1,8 +1,10 @@
 package artifacts
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -19,8 +21,25 @@ func TestOperationJournalMarksUnsafeReplayInterrupted(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := writeJSONAtomic(filepath.Join(directory, status.ID+".json"), operationJournal{
-		Schema: operationJournalSchema, Status: status, Scope: "firmware", Fingerprint: "request-hash",
+		Status: status, Scope: "firmware", Fingerprint: "request-hash",
 	}); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(directory, status.ID+".json")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(content, &fields); err != nil {
+		t.Fatal(err)
+	}
+	fields["future_optional"] = json.RawMessage(`true`)
+	content, err = json.Marshal(fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, content, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	service, err := NewService(Options{Store: store})
@@ -35,9 +54,12 @@ func TestOperationJournalMarksUnsafeReplayInterrupted(t *testing.T) {
 	if recovered.State != "failed" || recovered.ErrorCode != "host_restarted" {
 		t.Fatalf("recovered=%#v", recovered)
 	}
-	content, err := os.ReadFile(filepath.Join(directory, status.ID+".json"))
+	content, err = os.ReadFile(path)
 	if err != nil || len(content) == 0 {
 		t.Fatalf("journal was not retained: %v", err)
+	}
+	if strings.Contains(string(content), `"schema"`) {
+		t.Fatalf("journal retained a generation selector: %s", content)
 	}
 }
 
