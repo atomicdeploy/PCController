@@ -15,11 +15,15 @@
 
 namespace {
 
-RgbColor pixels[AddressableLeds::PixelCount];
+// Wire-order storage avoids a second 300-byte frame on the AVR stack.
+uint8_t *pixels = nullptr;
+uint8_t pixelCount = AddressableLeds::PixelCount;
 
 } // namespace
 
 namespace AddressableLeds {
+
+void bindWorkspace(uint8_t *workspace) { pixels = workspace; }
 
 void begin() {
   pinMode(BoardPins::AddressableLed, OUTPUT);
@@ -31,32 +35,19 @@ void begin() {
 void clear() { fill(RgbColor()); }
 
 void show() {
+  if (!pixels) return;
 #if defined(__AVR__) && F_CPU >= 15400000UL && F_CPU <= 19000000UL
   // Fixed D6/PD6 800 kHz sender adapted from Adafruit_NeoPixel's 20-cycle
   // AVR timing loop (LGPL-3.0-or-later). Keeping the buffer here avoids the
   // generic NeoPixel heap allocation and preserves scarce AVR flash/RAM.
   static_assert(BoardPins::AddressableLed == 6,
                 "Addressable LED sender expects Arduino D6/PD6");
-  uint8_t encoded[PixelCount * 3];
-  uint8_t out = 0;
-  for (uint8_t index = 0; index < PixelCount; ++index) {
-#if PCCONTROLLER_USE_WS2812B
-    encoded[out++] = pixels[index].green;
-    encoded[out++] = pixels[index].red;
-    encoded[out++] = pixels[index].blue;
-#else
-    encoded[out++] = pixels[index].blue;
-    encoded[out++] = pixels[index].red;
-    encoded[out++] = pixels[index].green;
-#endif
-  }
-
   volatile uint8_t *port = &PORTD;
   const uint8_t pinMask = _BV(PORTD6);
   const uint8_t hi = static_cast<uint8_t>(*port | pinMask);
   const uint8_t lo = static_cast<uint8_t>(*port & ~pinMask);
-  const uint8_t *ptr = encoded;
-  uint16_t count = sizeof(encoded);
+  const uint8_t *ptr = pixels;
+  uint16_t count = static_cast<uint16_t>(pixelCount) * 3;
   uint8_t byte = *ptr++;
   uint8_t next = lo;
   uint8_t bit = 8;
@@ -98,17 +89,25 @@ void show() {
 }
 
 bool setPixel(uint8_t index, const RgbColor &color) {
-  if (index >= PixelCount) {
+  if (!pixels || index >= pixelCount) {
     return false;
   }
 
-  pixels[index] = color;
+  const uint16_t offset = static_cast<uint16_t>(index) * 3;
+#if PCCONTROLLER_USE_WS2812B
+  pixels[offset] = color.green;
+  pixels[offset + 2] = color.blue;
+#else
+  pixels[offset] = color.blue;
+  pixels[offset + 2] = color.green;
+#endif
+  pixels[offset + 1] = color.red;
   return true;
 }
 
 void fill(const RgbColor &color) {
-  for (uint8_t index = 0; index < PixelCount; ++index) {
-    pixels[index] = color;
+  for (uint8_t index = 0; index < pixelCount; ++index) {
+    setPixel(index, color);
   }
 }
 
@@ -120,8 +119,15 @@ uint8_t brightness() { return 255; }
 
 void setBrightness(uint8_t value) { brightness(value); }
 
-RgbColor *buffer() { return pixels; }
+bool configure(uint8_t count) {
+  if (count == 0 || count > PixelCount) return false;
+  clear();
+  show(); // Clear the previous tail before shortening the configured strip.
+  pixelCount = count;
+  clear();
+  return true;
+}
 
-uint8_t count() { return PixelCount; }
+uint8_t count() { return pixelCount; }
 
 } // namespace AddressableLeds

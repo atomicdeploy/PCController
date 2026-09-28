@@ -218,6 +218,9 @@ export function AdvancedWorkbench({
   )
 
   const [pixel, setPixel] = useState(0)
+  const [stripCount, setStripCount] = useState(100)
+  const [stripFPS, setStripFPS] = useState(20)
+  const [stripFrame, setStripFrame] = useState('')
   const [pixelRed, setPixelRed] = useState(32)
   const [pixelGreen, setPixelGreen] = useState(214)
   const [pixelBlue, setPixelBlue] = useState(220)
@@ -687,10 +690,22 @@ export function AdvancedWorkbench({
           icon={SlidersHorizontal}
           eyebrow="WS281X + STATUS RGB"
           title={copy('Per-pixel light & effect engine', 'نور هر پیکسل و موتور افکت')}
-          detail={copy('Address one of eleven pixels or inspect and control configured status effects.', 'یکی از یازده پیکسل را کنترل یا افکت‌های وضعیت تعریف‌شده را بررسی کنید.')}
+          detail=""
         >
+          <div className="advanced-fields">
+            <TextField label={copy('LED count', 'تعداد LED')} type="number" min={1} max={100} value={stripCount} onChange={(event) => { const count = boundedInteger(event.target.value, 100, 1, 100); setStripCount(count); setPixel((current) => Math.min(current, count - 1)) }} />
+            <TextField label={copy('Frames per second', 'فریم در ثانیه')} type="number" min={1} max={30} value={stripFPS} onChange={(event) => setStripFPS(boundedInteger(event.target.value, 20, 1, 30))} />
+          </div>
+          <div className="advanced-actions">
+            <Button disabled={!online} busy={busy === `strip config ${stripCount}`} onClick={() => void run(`strip config ${stripCount}`)}>{copy('Set LED count', 'تنظیم تعداد LED')}</Button>
+            <Button icon={Play} disabled={!online} busy={busy === `strip rainbow ${stripCount} ${stripFPS}`} onClick={() => void run(`strip rainbow ${stripCount} ${stripFPS}`)}>{copy('Rolling rainbow', 'رنگین‌کمان متحرک')}</Button>
+            <Button icon={CircleStop} onClick={() => void run('strip stop')}>{copy('Stop stream', 'توقف جریان')}</Button>
+            <Button icon={Eraser} disabled={!online} onClick={() => void run('strip clear')}>{copy('Clear strip', 'خاموش کردن نوار')}</Button>
+            <Button icon={Activity} onClick={() => void run('strip status')}>{copy('Stream status', 'وضعیت جریان')}</Button>
+          </div>
+          <TextField label={copy('RGB frame · six hex digits per LED', 'فریم RGB · شش رقم هگز برای هر LED')} value={stripFrame} dir="ltr" spellCheck={false} maxLength={600} onChange={(event) => setStripFrame(event.target.value.replace(/\s/g, ''))} action={<Button disabled={!online || !/^(?:[0-9a-fA-F]{6})+$/.test(stripFrame) || stripFrame.length !== stripCount * 6} onClick={() => void run(`strip frame ${stripFrame}`)}>{copy('Send frame', 'ارسال فریم')}</Button>} />
           <div className="advanced-fields advanced-fields--pixel">
-            <TextField label={copy('Pixel 0..10', 'پیکسل ۰ تا ۱۰')} type="number" min={0} max={10} value={pixel} onChange={(event) => setPixel(boundedInteger(event.target.value, 0, 0, 10))} />
+            <TextField label={copy(`Pixel 0..${stripCount - 1}`, `پیکسل ۰ تا ${stripCount - 1}`)} type="number" min={0} max={stripCount - 1} value={pixel} onChange={(event) => setPixel(boundedInteger(event.target.value, 0, 0, stripCount - 1))} />
             <TextField label="R" type="number" min={0} max={255} value={pixelRed} onChange={(event) => setPixelRed(boundedInteger(event.target.value, 0, 0, 255))} />
             <TextField label="G" type="number" min={0} max={255} value={pixelGreen} onChange={(event) => setPixelGreen(boundedInteger(event.target.value, 0, 0, 255))} />
             <TextField label="B" type="number" min={0} max={255} value={pixelBlue} onChange={(event) => setPixelBlue(boundedInteger(event.target.value, 0, 0, 255))} />

@@ -18,10 +18,12 @@ using CRGB = RgbColor;
 namespace AddressableLeds {
 
 // Number of addressable status pixels wired to the controller strip.
-constexpr uint8_t PixelCount = 11;
+constexpr uint8_t PixelCount = 100;
 
 // Initialize the configured strip at full brightness, clear its RAM buffer,
 // and send the cleared frame to the LEDs.
+// Shared workspace must be claimed from MacroQueue before strip operations.
+void bindWorkspace(uint8_t *workspace);
 void begin();
 
 // Buffer operations are intentionally separate from show(), so callers can
@@ -34,7 +36,7 @@ void brightness(uint8_t value);
 uint8_t brightness();
 void setBrightness(uint8_t brightness);
 
-RgbColor *buffer();
+bool configure(uint8_t count);
 uint8_t count();
 
 } // namespace AddressableLeds
