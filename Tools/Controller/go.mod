@@ -3,6 +3,7 @@ module pccontroller.local/controller
 go 1.26.5
 
 require (
+	github.com/Microsoft/go-winio v0.6.2
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
@@ -46,3 +47,8 @@ require (
 	golang.org/x/tools v0.49.0 // indirect
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 )
+
+// The upstream Windows backend does not cancel stalled/pending overlapped I/O
+// before CloseHandle or close the device before joining completion. Pin the
+// reviewed fork until bugst/go-serial#105 is resolved.
+replace go.bug.st/serial => github.com/DRSDavidSoft/go-serial v0.0.0-20260928083401-fa09c8b9a680

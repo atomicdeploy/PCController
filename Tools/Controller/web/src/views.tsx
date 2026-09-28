@@ -134,6 +134,7 @@ import type {
   SegmentScrollSettings,
   UIConfig,
 } from './types'
+import { hardwareProblemPresentation } from './hardware-problem'
 import { buzzerPathFromState, type BuzzerPath } from './buzzer-routing'
 import { peripheralAvailability } from './peripheral-availability'
 
@@ -190,6 +191,8 @@ export function DashboardView(props: SharedViewProps) {
     available.invalidTemperatureLED ? copy('LED temperature unavailable', 'دمای LED در دسترس نیست') : '',
     available.invalidTemperatureBTAudio ? copy('BT Amplifier temperature unavailable', 'دمای آمپلی‌فایر بلوتوث در دسترس نیست') : '',
   ].filter(Boolean)
+	const hardwareProblem = snapshot.hardware_problems?.[0]
+	const hardwareWarning = hardwareProblem ? hardwareProblemPresentation(hardwareProblem, locale) : undefined
   const connectedTone = boardReady ? 'good' : snapshot.paused ? 'warn' : 'bad'
   const authenticationRequired = !boardReady && props.transport.authenticationRequired
   const hash = snapshot.hello.build_hash ? snapshot.hello.build_hash.toString(16).toUpperCase().padStart(8, '0') : '—'
@@ -219,7 +222,7 @@ export function DashboardView(props: SharedViewProps) {
       <SectionTitle
         eyebrow={boardReady ? t('liveTelemetry') : snapshot.paused ? copy('Connection paused', 'اتصال متوقف شده') : copy('Awaiting controller', 'در انتظار کنترلر')}
         title={t('dashboard')}
-        detail={authenticationRequired ? t('authenticationDashboardDetail') : boardReady ? pageDetail(snapshot, appTitle, locale) : snapshot.connection_reason || t('noHardware')}
+        detail={authenticationRequired ? t('authenticationDashboardDetail') : boardReady ? pageDetail(snapshot, appTitle, locale) : hardwareWarning?.guidance || snapshot.connection_reason || t('noHardware')}
         action={
           <div className="header-actions">
             <StatusBadge tone={connectedTone} pulse={snapshot.connection_state === 'connecting'}>
@@ -234,8 +237,8 @@ export function DashboardView(props: SharedViewProps) {
       <section className={`hero-panel${boardReady ? ' is-online' : ''}`}>
         <div className="hero-panel__identity">
           <div className="eyebrow">{boardReady ? `${copy('Controller', 'کنترلر')} · ${snapshot.connection_state}` : copy('Host connection', 'اتصال میزبان')}</div>
-          <h2>{boardReady ? snapshot.hello.name || appTitle : authenticationRequired ? t('authenticationDashboard') : props.transport.boardState === 'loading' ? copy('Loading controller state…', 'در حال بارگیری وضعیت کنترلر…') : t('noHardware')}</h2>
-          <p>{boardReady ? `USB ${snapshot.port.vid || '—'}:${snapshot.port.pid || '—'} · ${snapshot.port.name || copy('automatic port', 'درگاه خودکار')}` : authenticationRequired ? t('authenticationDashboardDetail') : snapshot.connection_reason || t('noHardware')}</p>
+          <h2>{boardReady ? snapshot.hello.name || appTitle : authenticationRequired ? t('authenticationDashboard') : hardwareWarning?.title || (props.transport.boardState === 'loading' ? copy('Loading controller state…', 'در حال بارگیری وضعیت کنترلر…') : t('noHardware'))}</h2>
+          <p>{boardReady ? `USB ${snapshot.port.vid || '—'}:${snapshot.port.pid || '—'} · ${snapshot.port.name || copy('automatic port', 'درگاه خودکار')}` : authenticationRequired ? t('authenticationDashboardDetail') : hardwareWarning?.guidance || snapshot.connection_reason || t('noHardware')}</p>
           {authenticationRequired && <Button icon={ShieldCheck} tone="primary" onClick={() => { window.location.hash = '#/settings' }}>{copy('Enter access token', 'ورود توکن دسترسی')}</Button>}
         </div>
         {boardReady && <div className="hero-panel__readout" dir="ltr">
@@ -244,11 +247,23 @@ export function DashboardView(props: SharedViewProps) {
         </div>}
       </section>
 
+      {hardwareProblem && hardwareWarning && <section className={`hardware-alert is-${hardwareProblem.severity}`} role="alert" aria-live="assertive">
+        <div className="hardware-alert__icon"><TriangleAlert size={24} aria-hidden="true" /></div>
+        <div className="hardware-alert__copy">
+          <strong>{hardwareWarning.title}</strong>
+          <p>{hardwareWarning.guidance}</p>
+          {hardwareWarning.impact && <p className="hardware-alert__impact">{hardwareWarning.impact}</p>}
+          {(hardwareProblem.os_problem_code || hardwareProblem.location) && <span dir="ltr">
+            {[hardwareProblem.os_problem_code ? `Windows code ${hardwareProblem.os_problem_code}` : '', hardwareProblem.location || ''].filter(Boolean).join(' · ')}
+          </span>}
+        </div>
+      </section>}
+
       {boardReady && haveMetricCards && <section className="metric-grid">
-        {available.ina219 && <MetricCard icon={Zap} label={peripheralName('sensor.supply-voltage', t('voltage'))} value={formatNumber(locale, status.supply_mv / 1000, 2)} unit="V" values={values(samples, 'supply')} tone="accent" detail={`${peripheralName('sensor.bus-voltage', copy('Bus voltage', 'ولتاژ باس'))} · ${formatNumber(locale, status.bus_mv / 1000, 2)} V`} />}
-        {available.ina219 && <MetricCard icon={Waves} label={peripheralName('sensor.current', t('current'))} value={formatNumber(locale, status.current_ma, 0)} unit="mA" values={values(samples, 'current')} tone="green" detail={`${peripheralName('sensor.power', copy('Load power', 'توان بار'))} · ${formatNumber(locale, status.power_mw / 1000, 2)} W`} />}
-        {available.temperatureLED && <MetricCard icon={Thermometer} label={peripheralName('sensor.temperature-led', `${t('temperature')} · LED`)} value={formatNumber(locale, status.temperature_led_centi_c / 100, 1)} unit="°C" values={values(samples, 'ledTemp')} tone="amber" />}
-        {available.temperatureBTAudio && <MetricCard icon={Thermometer} label={peripheralName('sensor.temperature-audio', copy('BT Amplifier temperature', 'دمای آمپلی‌فایر بلوتوث'))} value={formatNumber(locale, status.temperature_bt_audio_centi_c / 100, 1)} unit="°C" values={values(samples, 'btTemp')} tone="violet" />}
+        {available.ina219 && <MetricCard icon={Zap} label={peripheralName('sensor.supply-voltage', t('voltage'))} value={formatNumber(locale, status.supply_mv / 1000, 2)} unit="V" values={values(samples, 'supply')} tone="accent" scale="supply" detail={`${peripheralName('sensor.bus-voltage', copy('Bus voltage', 'ولتاژ باس'))} · ${formatNumber(locale, status.bus_mv / 1000, 2)} V`} />}
+        {available.ina219 && <MetricCard icon={Waves} label={peripheralName('sensor.current', t('current'))} value={formatNumber(locale, status.current_ma, 0)} unit="mA" values={values(samples, 'current')} tone="green" scale="current" detail={`${peripheralName('sensor.power', copy('Load power', 'توان بار'))} · ${formatNumber(locale, status.power_mw / 1000, 2)} W`} />}
+        {available.temperatureLED && <MetricCard icon={Thermometer} label={peripheralName('sensor.temperature-led', `${t('temperature')} · LED`)} value={formatNumber(locale, status.temperature_led_centi_c / 100, 1)} unit="°C" values={values(samples, 'ledTemp')} tone="amber" scale="temperature" />}
+        {available.temperatureBTAudio && <MetricCard icon={Thermometer} label={peripheralName('sensor.temperature-audio', copy('BT Amplifier temperature', 'دمای آمپلی‌فایر بلوتوث'))} value={formatNumber(locale, status.temperature_bt_audio_centi_c / 100, 1)} unit="°C" values={values(samples, 'btTemp')} tone="violet" scale="temperature" />}
       </section>}
 
       {boardReady && invalidMeasurements.length > 0 && <div className="measurement-alerts" role="status" aria-live="polite">

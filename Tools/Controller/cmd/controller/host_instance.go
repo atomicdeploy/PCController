@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -17,8 +18,6 @@ import (
 
 	"pccontroller.local/controller/internal/productidentity"
 )
-
-const hostInstanceRecordSchema = 1
 
 var errHostInstanceOwned = errors.New("another per-user controller host is starting or running")
 
@@ -37,7 +36,6 @@ type hostInstanceIdentity struct {
 }
 
 type hostInstanceRecord struct {
-	Schema          int       `json:"schema"`
 	InstanceID      string    `json:"instance_id"`
 	PID             int       `json:"pid"`
 	Executable      string    `json:"executable"`
@@ -165,7 +163,6 @@ func (claim *hostInstanceClaim) publish(listener net.Listener, endpoint primaryE
 		return err
 	}
 	record := hostInstanceRecord{
-		Schema:          hostInstanceRecordSchema,
 		InstanceID:      claim.identity.ID,
 		PID:             claim.identity.PID,
 		Executable:      executable,
@@ -249,9 +246,12 @@ func readHostInstanceRecord(path string) (hostInstanceRecord, error) {
 	}
 	var record hostInstanceRecord
 	decoder := json.NewDecoder(strings.NewReader(string(content)))
-	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&record); err != nil {
 		return hostInstanceRecord{}, fmt.Errorf("decode per-user host record: %w", err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		return hostInstanceRecord{}, errors.New("per-user host record contains trailing JSON")
 	}
 	if err := validateHostInstanceRecord(record); err != nil {
 		return hostInstanceRecord{}, err
@@ -260,9 +260,6 @@ func readHostInstanceRecord(path string) (hostInstanceRecord, error) {
 }
 
 func validateHostInstanceRecord(record hostInstanceRecord) error {
-	if record.Schema != hostInstanceRecordSchema {
-		return fmt.Errorf("per-user host record schema %d is unsupported", record.Schema)
-	}
 	decodedID, err := hex.DecodeString(record.InstanceID)
 	if err != nil || len(decodedID) != 16 {
 		return errors.New("per-user host record has an invalid instance id")

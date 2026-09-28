@@ -80,7 +80,7 @@ func TestDecodeRejectsCRCAndLength(t *testing.T) {
 	}
 }
 
-func TestDecodeAcceptsAdvisoryEnvelopeRevision(t *testing.T) {
+func TestDecodeAcceptsUnknownReservedEnvelopeByte(t *testing.T) {
 	encoded, err := Encode(Frame{Opcode: OpHello, Seq: 9})
 	if err != nil {
 		t.Fatal(err)
@@ -93,7 +93,22 @@ func TestDecodeAcceptsAdvisoryEnvelopeRevision(t *testing.T) {
 	raw[len(raw)-1] = CRC8(raw[:len(raw)-1])
 	decoded, err := Decode(append(COBSEncode(raw), 0))
 	if err != nil || decoded.Opcode != OpHello || decoded.Seq != 9 {
-		t.Fatalf("advisory envelope revision was rejected: frame=%#v err=%v", decoded, err)
+		t.Fatalf("unknown reserved envelope byte was rejected: frame=%#v err=%v", decoded, err)
+	}
+}
+
+func TestDecodePreservesUnknownOptionalOpcode(t *testing.T) {
+	want := Frame{Opcode: 0xFE, Seq: 17, Payload: []byte{0xA1, 0xB2, 0xC3}}
+	encoded, err := Encode(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Decode(encoded)
+	if err != nil {
+		t.Fatalf("unknown optional opcode was rejected: %v", err)
+	}
+	if got.Opcode != want.Opcode || got.Seq != want.Seq || !bytes.Equal(got.Payload, want.Payload) {
+		t.Fatalf("unknown optional opcode changed in transit: got=%#v want=%#v", got, want)
 	}
 }
 

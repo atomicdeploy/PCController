@@ -2,7 +2,7 @@ import type { Snapshot } from './types'
 
 export type ControllerFaviconState = 'connected' | 'connecting' | 'fault' | 'offline'
 
-type FaviconSnapshot = Pick<Snapshot, 'connected' | 'connection_state' | 'connection_reason' | 'have_status'> & {
+type FaviconSnapshot = Pick<Snapshot, 'connected' | 'connection_state' | 'connection_reason' | 'have_status' | 'hardware_problems'> & {
   status: Pick<Snapshot['status'], 'hot'>
 }
 
@@ -16,7 +16,7 @@ const statePresentation: Record<ControllerFaviconState, { color: string; label: 
 export function controllerFaviconState(snapshot: FaviconSnapshot): ControllerFaviconState {
   const connectionState = snapshot.connection_state.trim().toLowerCase()
   const reason = (snapshot.connection_reason ?? '').trim().toLowerCase()
-  if ((snapshot.have_status && snapshot.status.hot) || /^(error|fault|failed|rejected)$/.test(connectionState) || /authentication|permission|protocol mismatch|unsupported firmware/.test(reason)) {
+  if ((snapshot.hardware_problems?.length ?? 0) > 0 || (snapshot.have_status && snapshot.status.hot) || /^(error|fault|failed|rejected)$/.test(connectionState) || /authentication|permission|protocol mismatch|unsupported firmware/.test(reason)) {
     return 'fault'
   }
   if (snapshot.connected) return 'connected'

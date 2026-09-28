@@ -56,7 +56,21 @@ func RichPreviewSnapshot() control.Snapshot {
 			StreamPeriodMS: 200, DefaultPage: 0, ExtendedFlags: 0xF0,
 			MotionBreakMSValue: 1,
 		},
+		FrontPanel: native.FrontPanel{
+			Schema: 2,
+			RawSegments: [4]byte{
+				segA | segC | segD | segF | segG,
+				segD | segE | segF | segG,
+				segA | segB | segC | segE | segF | segG,
+				segD | segE | segF | segG,
+			},
+			Brightness: 5, SegmentsActive: true,
+			LCDAddress: 0x27, LCDAvailable: true, LCDBacklight: true,
+			LCDLine1: "PCController", LCDLine2: "Door OPEN · R5",
+			PressedKeys: 0x01, MenuPage: 0, ProgramMode: 1,
+		},
 		HaveStatus: true, HaveSettings: true, StatusUpdated: now,
+		HaveFrontPanel: true, FrontPanelUpdated: now,
 		ConnectionState: "connected", ConnectionUpdated: now,
 	}
 }

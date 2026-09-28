@@ -19,13 +19,11 @@ import (
 )
 
 const (
-	MessageVersion = 1
 	MessageType    = "firmware"
 	DefaultMaxSize = 4 << 20
 )
 
 type FirmwareMessage struct {
-	Version      int    `json:"version"`
 	Type         string `json:"type"`
 	Name         string `json:"name"`
 	SHA256       string `json:"sha256"`
@@ -57,7 +55,6 @@ func Load(path string, maxSize int64) (FirmwareMessage, error) {
 	}
 	sum := sha256.Sum256(data)
 	return FirmwareMessage{
-		Version:      MessageVersion,
 		Type:         MessageType,
 		Name:         filepath.Base(path),
 		SHA256:       hex.EncodeToString(sum[:]),
@@ -74,12 +71,8 @@ func Decode(data []byte, maxSize int64) (FirmwareMessage, error) {
 	if err := json.Unmarshal(data, &message); err != nil {
 		return FirmwareMessage{}, fmt.Errorf("decode firmware message: %w", err)
 	}
-	if message.Version != MessageVersion || message.Type != MessageType {
-		return FirmwareMessage{}, fmt.Errorf(
-			"unsupported firmware message version=%d type=%q",
-			message.Version,
-			message.Type,
-		)
+	if message.Type != MessageType {
+		return FirmwareMessage{}, fmt.Errorf("unsupported firmware message type %q", message.Type)
 	}
 	if len(message.Data) < 1 || int64(len(message.Data)) > maxSize {
 		return FirmwareMessage{}, fmt.Errorf(

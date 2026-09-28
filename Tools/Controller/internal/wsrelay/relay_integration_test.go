@@ -38,11 +38,10 @@ func TestWebSocketClientReceivesValidatedFirmware(t *testing.T) {
 	data := []byte(":0100000001FE\n")
 	sum := sha256.Sum256(data)
 	encoded, err := Encode(FirmwareMessage{
-		Version: MessageVersion,
-		Type:    MessageType,
-		Name:    "firmware.hex",
-		SHA256:  hex.EncodeToString(sum[:]),
-		Data:    data,
+		Type:   MessageType,
+		Name:   "firmware.hex",
+		SHA256: hex.EncodeToString(sum[:]),
+		Data:   data,
 	})
 	if err != nil {
 		t.Fatal(err)

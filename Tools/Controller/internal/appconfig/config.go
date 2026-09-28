@@ -29,8 +29,6 @@ import (
 )
 
 const (
-	// SchemaVersion identifies the current host configuration schema.
-	SchemaVersion = 1
 	// DefaultWatchInterval bounds the polling fallback when file notifications
 	// are unavailable.
 	DefaultWatchInterval = 150 * time.Millisecond
@@ -39,7 +37,6 @@ const (
 // Config is the persistent host-side configuration root; it never mirrors or
 // replaces the MCU's EEPROM-owned settings.
 type Config struct {
-	Schema        int               `json:"schema"`
 	Connection    Connection        `json:"connection"`
 	UI            UI                `json:"ui"`
 	IPC           IPC               `json:"ipc"`
@@ -229,8 +226,8 @@ type Programming struct {
 }
 
 // Macro defines a named, host-persisted sequence. Mode "host" schedules
-// ordinary commands from the controller process; mode "mcu" (and the legacy
-// empty value) streams the sequence to the firmware timing engine.
+// ordinary commands from the controller process; mode "mcu" streams the
+// sequence to the firmware timing engine. Mode is always explicit.
 type Macro struct {
 	ID                  byte        `json:"id"`
 	Name                string      `json:"name"`
@@ -319,7 +316,6 @@ type RFTransmit struct {
 // Defaults returns a complete safe host configuration for a new installation.
 func Defaults() Config {
 	return Config{
-		Schema: SchemaVersion,
 		Connection: Connection{
 			VID:                "1A86",
 			PID:                "7523",
@@ -466,6 +462,7 @@ func Load(path string) (Config, [sha256.Size]byte, error) {
 	}
 	value.RF = canonicalizeRFConfig(value.RF)
 	value.HostMenus = normalizeHostMenus(value.HostMenus)
+	normalizeMacros(value.Macros)
 	if err := normalizeProgramming(&value.Programming); err != nil {
 		return Config{}, [sha256.Size]byte{}, fmt.Errorf("validate %s: programming.firmware_features: %w", path, err)
 	}
@@ -498,6 +495,7 @@ func LoadOrCreate(path string) (Config, [sha256.Size]byte, error) {
 func Write(path string, value Config) error {
 	value.RF = canonicalizeRFConfig(value.RF)
 	value.HostMenus = normalizeHostMenus(value.HostMenus)
+	normalizeMacros(value.Macros)
 	if err := normalizeProgramming(&value.Programming); err != nil {
 		return fmt.Errorf("programming.firmware_features: %w", err)
 	}
@@ -551,13 +549,25 @@ func Write(path string, value Config) error {
 	return nil
 }
 
+// normalizeMacros keeps file-backed alpha configurations usable as the macro
+// execution target becomes explicit. An omitted mode can only describe the
+// host scheduler that existed before the MCU timing engine was selectable.
+// Persisting the next write makes that choice explicit instead of retaining an
+// ambiguous empty value.
+func normalizeMacros(macros []Macro) {
+	for index := range macros {
+		mode := strings.ToLower(strings.TrimSpace(macros[index].Mode))
+		if mode == "" {
+			mode = "host"
+		}
+		macros[index].Mode = mode
+	}
+}
+
 // Validate rejects unsafe, ambiguous, or unsupported host configuration values.
 func (value Config) Validate() error {
 	if _, err := deployment.Normalize(value.Programming.Deployment); err != nil {
 		return fmt.Errorf("programming.deployment: %w", err)
-	}
-	if value.Schema != SchemaVersion {
-		return fmt.Errorf("unsupported schema %d", value.Schema)
 	}
 	if _, err := firmwarefeatures.Normalize(
 		firmwarefeatures.Names(value.Programming.FirmwareFeatures),
@@ -720,8 +730,8 @@ func (value Config) Validate() error {
 		if len(macro.Category) > 64 || !printableASCII(macro.Category) {
 			return fmt.Errorf("macros[%d].category must be at most 64 printable ASCII bytes", index)
 		}
-		switch strings.ToLower(strings.TrimSpace(macro.Mode)) {
-		case "", "mcu", "host":
+		switch macro.Mode {
+		case "mcu", "host":
 		default:
 			return fmt.Errorf("macros[%d].mode must be host or mcu", index)
 		}

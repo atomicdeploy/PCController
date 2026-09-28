@@ -17,9 +17,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "vite build",
-    "dev": "vite --host 127.0.0.1",
-    "test": "vitest run",
+    "build": "vite build --configLoader runner",
+    "dev": "vite --configLoader runner --host 127.0.0.1",
+    "test": "vitest run --configLoader runner",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -36,7 +36,7 @@
     "@vitejs/plugin-react": "^6.1.1",
     "typescript": "^7.0.2",
     "vite": "^8.3.0",
-    "vitest": "^5.0.0"
+    "vitest": "^5.0.1"
   },
   "engines": {
     "node": ">=22.12"
