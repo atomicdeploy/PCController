@@ -608,6 +608,21 @@ func TestTransportCloseDoesNotWaitForOutputSchedulerLock(t *testing.T) {
 	}
 }
 
+func TestOperationStartingAfterTransportCloseSnapshotBecomesSticky(t *testing.T) {
+	runtime := New(Options{})
+	if runtime.activeUseMask.Load() != 0 || runtime.transportLossActive.Load() {
+		t.Fatal("new runtime unexpectedly reports active use")
+	}
+	// Force the ordering where pre-close has already observed an empty activity
+	// mask. The start-side handshake must still latch the operation before I/O.
+	runtime.transportClosing.Store(true)
+	runtime.setActiveUseState(activeUseStatusEffect, true)
+	runtime.setActiveUseState(activeUseStatusEffect, false)
+	if !runtime.transportLossActive.Load() || !runtime.activeUseAtTransportLoss() {
+		t.Fatal("operation starting after the close snapshot was not latched")
+	}
+}
+
 func TestTransportCloseLatchesOutputActivityBeforeStreamCleanup(t *testing.T) {
 	runtime := New(Options{Filter: ports.Filter{Port: "COM3"}})
 	port := newReconnectTestPort()

@@ -191,6 +191,7 @@ type Runtime struct {
 	hardwareProblemScan    func(ports.Filter) ([]ports.HardwareProblem, error)
 	hardwareProblemEpoch   uint64
 	transportLossActive    atomic.Bool
+	transportClosing       atomic.Bool
 	activeUseMask          atomic.Uint32
 	outputScheduler        *OutputScheduler
 	deviceObserver         func(ports.Info, native.Hello)
@@ -738,8 +739,15 @@ func (runtime *Runtime) setActiveUseState(bit uint32, active bool) {
 			next = current | bit
 		}
 		if current == next || runtime.activeUseMask.CompareAndSwap(current, next) {
-			return
+			break
 		}
+	}
+	// This is the other half of the transport-close handshake. Sequentially
+	// consistent atomics guarantee that either the pre-close observer sees the
+	// active bit, or a concurrently starting operation sees transportClosing
+	// and makes the outcome-unknown latch sticky before it can issue I/O.
+	if active && runtime.transportClosing.Load() {
+		runtime.transportLossActive.Store(true)
 	}
 }
 
@@ -755,10 +763,12 @@ func (runtime *Runtime) latchActiveUseBeforeTransportClose(
 	session *link.Session,
 	generation uint64,
 ) {
-	active := runtime.activeUseAtTransportLoss()
 	runtime.mu.Lock()
-	if active && runtime.session == session && runtime.generation == generation {
-		runtime.transportLossActive.Store(true)
+	if runtime.session == session && runtime.generation == generation {
+		runtime.transportClosing.Store(true)
+		if runtime.activeUseAtTransportLoss() {
+			runtime.transportLossActive.Store(true)
+		}
 	}
 	runtime.mu.Unlock()
 }
@@ -1864,6 +1874,7 @@ func (runtime *Runtime) attachWhen(result link.OpenResult, allowed func() bool) 
 	runtime.reconnectEpoch++
 	runtime.hardwareProblemEpoch++
 	runtime.transportLossActive.Store(false)
+	runtime.transportClosing.Store(false)
 	runtime.portRebindAllowed = false
 	observer := runtime.deviceObserver
 	ready := runtime.connectionReadyHandler
