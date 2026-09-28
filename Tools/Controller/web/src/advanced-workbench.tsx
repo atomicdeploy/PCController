@@ -12,7 +12,6 @@ import {
   BookOpen,
   Cable,
   ChevronDown,
-  CircleDot,
   CircleStop,
   Cpu,
   Database,
@@ -27,7 +26,6 @@ import {
   LayoutDashboard,
   LayoutPanelTop,
   List,
-  ListChecks,
   ListTree,
   MemoryStick,
   MessageSquareText,
@@ -69,6 +67,7 @@ import {
 } from './components'
 import { rpc } from './api'
 import { redactSensitiveCommand, shellArgument as quoteArgument } from './command-line'
+import { SevenSegmentPreview } from './seven-segment-preview'
 import type { FrontPanelState } from './types'
 import type { SharedViewProps } from './views'
 import { peripheralAvailability } from './peripheral-availability'
@@ -185,28 +184,6 @@ export function hostMenuLabelCommand(reference: string, label: string): string |
   return `host-menu set ${quoteArgument(normalizedReference)} label ${quoteArgument(normalizedLabel)}`
 }
 
-const segmentLines = [
-  ['a', 8, 5, 28, 5], ['b', 31, 8, 31, 27], ['c', 31, 32, 31, 51],
-  ['d', 8, 54, 28, 54], ['e', 5, 32, 5, 51], ['f', 5, 8, 5, 27],
-  ['g', 8, 29.5, 28, 29.5],
-] as const
-
-function SevenSegmentPreview({ panel }: { panel?: FrontPanelState }) {
-  const raw = panel?.raw_segments ?? [0, 0, 0, 0]
-  return (
-    <div className={`live-segment-preview${panel?.segments_active ? ' is-active' : ''}`} dir="ltr" aria-label="Live four-digit display preview">
-      {raw.map((mask, index) => (
-        <svg key={index} viewBox="0 0 40 62" role="img" aria-label={`digit ${index + 1} raw 0x${mask.toString(16).padStart(2, '0')}`}>
-          {segmentLines.map(([name, x1, y1, x2, y2], bit) => (
-            <line key={name} x1={x1} y1={y1} x2={x2} y2={y2} className={(mask & (1 << bit)) !== 0 ? 'is-lit' : ''} />
-          ))}
-          <circle cx="36" cy="54" r="2.2" className={(mask & 0x80) !== 0 ? 'is-lit' : ''} />
-        </svg>
-      ))}
-    </div>
-  )
-}
-
 export function AdvancedWorkbench({
   snapshot,
   locale,
@@ -236,7 +213,9 @@ export function AdvancedWorkbench({
   const [menuOrder, setMenuOrder] = useState('status voltage current temperature')
   const [hostMenuID, setHostMenuID] = useState('')
   const [hostMenuLabel, setHostMenuLabel] = useState('')
-  const [frontPanel, setFrontPanel] = useState<FrontPanelState | undefined>(snapshot.front_panel)
+  const [frontPanel, setFrontPanel] = useState<FrontPanelState | undefined>(
+    available.segments && snapshot.have_front_panel ? snapshot.front_panel : undefined,
+  )
 
   const [pixel, setPixel] = useState(0)
   const [pixelRed, setPixelRed] = useState(32)
@@ -249,11 +228,6 @@ export function AdvancedWorkbench({
   const [rfKind, setRFKind] = useState<'none' | 'key' | 'menu' | 'relay' | 'side' | 'pwm'>('key')
   const [rfValue, setRFValue] = useState('1')
   const [rfBehavior, setRFBehavior] = useState('press')
-
-  const [macroRef, setMacroRef] = useState('')
-  const [macroName, setMacroName] = useState('')
-  const [macroCategory, setMacroCategory] = useState('Web')
-  const [macroColor, setMacroColor] = useState<'red' | 'blue' | 'violet' | 'green' | 'white'>('red')
 
   const [i2cAddress, setI2CAddress] = useState('0x27')
   const [i2cLease, setI2CLease] = useState(2)
@@ -323,8 +297,12 @@ export function AdvancedWorkbench({
   }, [messageTarget, online])
 
   useEffect(() => {
+    if (!online || !available.segments) {
+      setFrontPanel(undefined)
+      return
+    }
     if (snapshot.have_front_panel && snapshot.front_panel) setFrontPanel(snapshot.front_panel)
-  }, [snapshot.front_panel_updated, snapshot.have_front_panel, snapshot.front_panel])
+  }, [available.segments, online, snapshot.front_panel_updated, snapshot.have_front_panel, snapshot.front_panel])
 
   useEffect(() => {
     setServiceOutput(copy('No service query yet.', 'هنوز پرس‌وجوی سرویسی انجام نشده است.'))
@@ -514,12 +492,6 @@ export function AdvancedWorkbench({
   const i2cBytes = normalizeTokens(i2cWrite)
   const i2cCommand = `i2c transfer ${i2cAddress.trim() || '0x27'} ${i2cLease} ${i2cReadCount}${i2cBytes ? ` ${i2cBytes}` : ''}`
   const hostMenuLabelUpdate = hostMenuLabelCommand(hostMenuID, hostMenuLabel)
-  const macroRecordCommand = [
-    'macro record start',
-    quoteArgument(macroName.trim()),
-    ...(macroCategory.trim() ? [quoteArgument(macroCategory.trim())] : []),
-    ...(macroColor.trim() ? [quoteArgument(macroColor.trim())] : []),
-  ].join(' ')
   const messageByteLength = new TextEncoder().encode(messageText.trim()).byteLength
   const lcdMessageValid = Boolean(messageLine1 || messageLine2) &&
     messageLine1.length <= 16 && messageLine2.length <= 16 &&
@@ -643,16 +615,16 @@ export function AdvancedWorkbench({
           detail={copy('Firmware page IDs and HOST-supplied menu overlays remain separately inspectable.', 'شناسه صفحات میان‌افزار و منوهای میزبان به‌صورت مستقل قابل بررسی هستند.')}
           defaultOpen
         >
-          <div className="front-panel-live">
-            <SevenSegmentPreview panel={frontPanel} />
+          {available.segments && <div className="front-panel-live">
+            <SevenSegmentPreview panel={frontPanel} label={copy('Live physical seven-segment display', 'نمایش زندهٔ نمایشگر فیزیکی هفت‌بخشی')} />
             <div>
               <strong>{copy('Live physical display', 'نمایش زنده پنل')}</strong>
               <span>{frontPanel ? `${copy('page', 'صفحه')} ${frontPanel.menu_page} · ${copy('brightness', 'روشنایی')} ${frontPanel.brightness}/7` : copy('Awaiting exact front-panel state', 'در انتظار وضعیت دقیق پنل')}</span>
 			  <small>{copy('Changed-only board opcodes update this preview immediately; refresh is explicit.', 'اپ‌کدهای تغییرمحور برد این پیش‌نمایش را فوری به‌روز می‌کنند؛ تازه‌سازی صریح است.')}</small>
             </div>
-          </div>
+          </div>}
           <div className="advanced-actions">
-			<Button icon={RefreshCw} disabled={!online} onClick={() => void rpc<FrontPanelState>('controller.front_panel').then(setFrontPanel).catch(() => undefined)}>{copy('Refresh physical state', 'تازه‌سازی وضعیت فیزیکی')}</Button>
+			{available.segments && <Button icon={RefreshCw} disabled={!online} onClick={() => void rpc<FrontPanelState>('controller.front_panel').then(setFrontPanel).catch(() => undefined)}>{copy('Refresh physical state', 'تازه‌سازی وضعیت فیزیکی')}</Button>}
             <Button icon={BookOpen} disabled={!online} busy={busy === 'menu list'} onClick={() => void run('menu list')}>{copy('Firmware catalog', 'کاتالوگ میان‌افزار')}</Button>
             <Button icon={LayoutDashboard} disabled={!online} busy={busy === 'menu current'} onClick={() => void run('menu current')}>{copy('Current page', 'صفحه فعلی')}</Button>
             <Button icon={LayoutPanelTop} disabled={!online} busy={busy === 'menu layout'} onClick={() => void run('menu layout')}>{copy('Stored layout', 'چیدمان ذخیره‌شده')}</Button>
@@ -770,59 +742,6 @@ export function AdvancedWorkbench({
           )}
           <div className="advanced-command-inline" dir="ltr"><code>{rfMapCommand}</code></div>
           <Button icon={ShieldAlert} disabled={!rfID.trim()} onClick={() => prepare(rfMapCommand, copy('RF mappings affect physical outputs and must match the registered action schema.', 'نگاشت RF بر خروجی فیزیکی اثر می‌گذارد و باید دقیقاً با ساختار فرمان سازگار باشد.'), 'caution', true)}>{copy('Review mapping', 'بازبینی نگاشت')}</Button>
-        </AdvancedPanel>
-
-        <AdvancedPanel
-          icon={Workflow}
-          eyebrow={copy('HOST RECORDING', 'ضبط میزبان')}
-          title={copy('Macro inspection & recording', 'بررسی و ضبط ماکرو')}
-          detail={copy('Record host-issued commands with a 100 ms alpha timing tolerance. Physical-key and incoming RF recording remain a separate MCU workflow.', 'فرمان‌های میزبان را با تلورانس زمانی ۱۰۰ میلی‌ثانیه ضبط کنید. ضبط کلید فیزیکی و دریافت RF بخشی از مسیر جداگانه MCU است.')}
-        >
-          <div aria-live="polite" className="advanced-note">
-            {snapshot.macros?.recording.active
-              ? `${copy('Recording', 'در حال ضبط')}: ${snapshot.macros.recording.name} · ${snapshot.macros.recording.mode} · ${snapshot.macros.recording.steps} ${copy('steps', 'گام')}`
-              : copy('Recorder idle', 'ضبط غیرفعال')}
-            {snapshot.macros?.playback.name && <p>{snapshot.macros.playback.name} · {snapshot.macros.playback.mode} · {snapshot.macros.playback.lifecycle} · {snapshot.macros.playback.step}/{snapshot.macros.playback.step_count} · {copy('maximum timing error', 'بیشینه خطای زمان')}: {(snapshot.macros.playback.maximum_timing_error_us / 1000).toFixed(1)} ms{snapshot.macros.playback.mode === 'host' && <> · {copy('startup delay', 'تأخیر شروع')}: {((snapshot.macros.playback.startup_delay_us ?? 0) / 1000).toFixed(1)} ms</>}</p>}
-            {(snapshot.macros?.recording.last_error || snapshot.macros?.playback.last_error) && <p role="alert">{snapshot.macros?.recording.last_error || snapshot.macros?.playback.last_error}</p>}
-          </div>
-          <div className="advanced-actions">
-            <Button icon={List} busy={busy === 'macro list'} onClick={() => void run('macro list')}>{copy('List', 'فهرست')}</Button>
-            <Button icon={Play} busy={busy === 'macro status'} onClick={() => void run('macro status')}>{copy('Playback status', 'وضعیت اجرا')}</Button>
-            <Button icon={CircleDot} busy={busy === 'macro record status'} onClick={() => void run('macro record status')}>{copy('Recording status', 'وضعیت ضبط')}</Button>
-          </div>
-          <div className="advanced-fields">
-            <label className="advanced-field">{copy('Saved macro', 'ماکروی ذخیره‌شده')}
-              <select value={macroRef} onChange={(event) => setMacroRef(event.target.value)}>
-                <option value="">{copy('Choose a macro', 'انتخاب ماکرو')}</option>
-                {(snapshot.macros?.library ?? []).map((macro) => <option key={macro.id} value={String(macro.id)}>{macro.name} · {macro.mode || 'mcu'} · {macro.steps?.length ?? 0} {copy('steps', 'گام')}</option>)}
-              </select>
-            </label>
-            <Button icon={ListChecks} disabled={!macroRef} onClick={() => void run(`macro show ${macroRef}`)}>{copy('Inspect steps', 'بررسی گام‌ها')}</Button>
-            <Button icon={Play} disabled={!online || !macroRef || snapshot.macros?.recording.active || snapshot.macros?.playback.running || !snapshot.macros?.library.find((macro) => String(macro.id) === macroRef)?.steps?.length} onClick={() => prepare(`macro play ${macroRef}`, copy('Playback runs the saved physical output commands.', 'اجرا، فرمان‌های خروجی فیزیکی ذخیره‌شده را انجام می‌دهد.'), 'danger', true)}>{copy('Play selected', 'اجرای انتخاب‌شده')}</Button>
-          </div>
-          <div className="advanced-fields advanced-fields--record">
-            <TextField label={copy('New recording name', 'نام ضبط جدید')} value={macroName} dir="ltr" spellCheck={false} onChange={(event) => setMacroName(event.target.value)} />
-            <TextField label={copy('Category', 'دسته‌بندی')} value={macroCategory} dir="ltr" spellCheck={false} onChange={(event) => setMacroCategory(event.target.value)} />
-            <div className="advanced-field">
-              <label>{copy('Color', 'رنگ')}</label>
-              <Segmented value={macroColor} label={copy('Macro color', 'رنگ ماکرو')} options={[
-                { value: 'red', label: copy('Red', 'قرمز') },
-                { value: 'blue', label: copy('Blue', 'آبی') },
-                { value: 'violet', label: copy('Violet', 'بنفش') },
-                { value: 'green', label: copy('Green', 'سبز') },
-                { value: 'white', label: copy('White', 'سفید') },
-              ]} onChange={setMacroColor} />
-            </div>
-            <Button tone="primary" icon={CircleDot} disabled={!online || !macroName.trim() || snapshot.macros?.recording.active || snapshot.macros?.playback.running || (!!macroColor.trim() && !macroCategory.trim())} busy={busy === macroRecordCommand} onClick={() => void run(macroRecordCommand)}>{copy('Start recording', 'شروع ضبط')}</Button>
-          </div>
-          <div className="advanced-actions">
-            <Button icon={Save} disabled={!snapshot.macros?.recording.active} busy={busy === 'macro record save'} onClick={() => void run('macro record save')}>{copy('Save recording', 'ذخیره ضبط')}</Button>
-            <Button icon={Trash2} disabled={!snapshot.macros?.recording.active} busy={busy === 'macro record discard'} onClick={() => void run('macro record discard')}>{copy('Discard recording', 'حذف ضبط')}</Button>
-            <Button disabled={!macroRef || !macroName.trim()} onClick={() => void run(`macro rename ${macroRef} ${quoteArgument(macroName.trim())}`)}>{copy('Rename selected', 'تغییر نام انتخاب‌شده')}</Button>
-            <Button disabled={!macroRef} onClick={() => void run(`macro category ${macroRef} ${quoteArgument(macroCategory.trim())}`)}>{copy('Set selected category', 'دسته‌بندی انتخاب‌شده')}</Button>
-            <Button icon={CircleStop} disabled={!online} busy={busy === 'macro cancel'} onClick={() => void run('macro cancel')}>{copy('Cancel safely', 'لغو امن')}</Button>
-            <Button tone="danger" icon={ShieldAlert} disabled={!online} onClick={() => prepare('macro cancel keep', copy('Cancelling with keep deliberately leaves current physical outputs unchanged.', 'لغو با حفظ خروجی، وضعیت فعلی خروجی‌های فیزیکی را عمداً نگه می‌دارد.'), 'danger', true)}>{copy('Prepare cancel + keep', 'آماده‌سازی لغو با حفظ خروجی')}</Button>
-          </div>
         </AdvancedPanel>
 
         <AdvancedPanel

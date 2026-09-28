@@ -28,6 +28,20 @@ Do not invent permissions, capabilities or successful state. Preserve the projec
 
 Let state determine meaning and availability; let usability determine whether a state change alters layout. Preserve predictable action areas, focus, keyboard navigation and pointer targets. Avoid jumping toolbars, unexpected menu reordering and controls appearing under the pointer. Cover loading, empty, selected, mixed, dirty, pending, failed and recovered states where applicable. Do not conflate unknown/loading data with zero or replay a mutation to repair stale presentation.
 
+## Hardware-failure evidence
+
+Distinguish an ordinary unavailable controller from a correlated operating-system
+hardware failure. When the configured or last authenticated device has a real
+device-manager problem, TUI and Web surfaces must show a prominent warning icon,
+the stable semantic failure state, and the shortest actionable recovery step.
+Never infer a cable or driver failure only from a timeout, and never attribute an
+unrelated broken USB device to the controller.
+
+Retain the warning while the device is absent. Clear it only after the controller
+re-enumerates and completes its application handshake. If transport is lost while
+a program, recording, or macro is active, say that the operation outcome is
+unknown; do not claim that it stopped safely or completed.
+
 ## No narration
 
 Architecture, caching, synchronization contracts, API/database mechanics, fallback strategies and acceptance criteria belong in code, tests and developer documentation. Do not convert them into permanent helper text, subtitles, cards, badges, banners or tooltips.
@@ -41,5 +55,9 @@ A visible renamed filename is usually sufficient feedback. Avoid persistent succ
 Model the interaction as a state system, not a collection of accumulated controls. Apply each discovered principle across related fields, menus, toolbars, dialogs and views. Shared components must allow semantic actions and state-specific labels rather than imposing generic behavior.
 
 For UI changes, verify relevant transitions, authoritative object binding, applicable permissions, keyboard/focus behavior and stable layout. Inspect real rendered results in supported themes and narrow layouts. Documentation or a screenshot of one state alone does not prove runtime acceptance.
+
+Collapsed icon-only navigation uses square 44 px hit targets. Remove hidden labels,
+badges and chevrons from grid layout, not just visual opacity, and keep explicit
+accessible button names. Verify expanded/mobile layouts and both text directions.
 
 Shorthands: **Contextual** means truthful state-aware semantics with stable usable structure. **No narration** means no specification leakage or explanations of obvious interface mechanics.

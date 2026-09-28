@@ -31,7 +31,6 @@ export const FIRMWARE_FEATURES = Object.freeze([
 ])
 const FIRMWARE_FEATURE_SET = new Set(FIRMWARE_FEATURES)
 
-const TOOLCHAIN_POLICY_FORMAT = 'pccontroller-toolchain-policy/v1'
 const TOOLCHAIN_POLICY_URL = new URL('../Controller/toolchain-profile.json', import.meta.url)
 
 export class CommandPlanError extends Error {
@@ -58,11 +57,6 @@ export function parseToolchainPolicy(contents, source = 'toolchain policy') {
 	}
 	if (!policy || typeof policy !== 'object' || Array.isArray(policy)) {
 		throw new Error(`Toolchain policy ${source} must be a JSON object`)
-	}
-	if (policy.format !== TOOLCHAIN_POLICY_FORMAT) {
-		throw new Error(
-			`Toolchain policy ${source} uses unsupported format ${JSON.stringify(policy.format)}`
-		)
 	}
 	if (typeof policy.fqbn !== 'string' || !policy.fqbn.trim()) {
 		throw new Error(`Toolchain policy ${source} requires a non-empty fqbn string`)

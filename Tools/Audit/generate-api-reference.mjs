@@ -116,7 +116,7 @@ const capabilityGroups = {
     "controller.hotkeys.get", "controller.bridge.list", "controller.webhooks.status",
     "controller.webhooks.pending", "controller.webhooks.dead", "controller.ping", "controller.snapshot",
     "controller.session.snapshot", "controller.session.snapshot.last", "controller.status",
-    "controller.front_panel", "controller.front-panel", "controller.command.catalog",
+    "controller.front_panel", "controller.front-panel", "controller.command.catalog", "controller.melodies.list",
     "controller.program_state.get", "controller.program-state.get", "controller.temperatures",
     "controller.menu.list", "controller.menu.current", "controller.menu.layout.get",
     "controller.host_menu.state", "controller.rf.list", "controller.rf.presentation",
@@ -142,10 +142,14 @@ const capabilityGroups = {
 
 const methodOverrides = {
 	"controller.ping": "Return service health and protocol identity.",
+  "controller.ui.config": "Return host-owned UI settings, including status_interval_ms and measurement_freshness_ms.",
+  "controller.ui.config.get": "Return host-owned UI settings, including status_interval_ms and measurement_freshness_ms.",
+  "controller.ui.config.set": "Atomically persist host UI fields; status_interval_ms is 50..60000 and measurement_freshness_ms is refresh+100..120000.",
   "controller.snapshot": "Return the authoritative cached controller snapshot.",
   "controller.command.execute": "Run a shared command after semantic capability classification.",
 	"controller.firmware.build": "Compile the canonical host project with reviewed feature names and publish correlated ordered program progress events.",
   "controller.command.catalog": "Return the machine-readable shared command catalog.",
+  "controller.melodies.list": "Return the effective configured host melody catalog.",
   "controller.event.next": "Long-poll the next retained event after an event ID, optionally selecting activity, state, telemetry, or debug.",
   "controller.rf.map": "Replace one learned RF mapping and return board readback.",
   "controller.rf.transmit": "Transmit one validated RF waveform request.",
@@ -295,14 +299,20 @@ const actionIdentifierSchema = { type: "string", pattern: "^[A-Za-z0-9._:-]{1,18
 const actionSelectorSchema = { type: "string", pattern: "^(?:\\*|[A-Za-z0-9._:-]{1,180})$", default: "*" };
 const actionKindSchema = {
 	type: "string",
-	enum: ["app.page", "app.title", "app.progress", "app.osc", "app.quit", "app.port.open", "app.port.close", "command"],
+	oneOf: [
+		{ enum: ["app.page", "app.title", "app.progress", "app.osc", "app.quit", "app.port.open", "app.port.close", "command"] },
+		{
+			maxLength: 64,
+			pattern: "^(?!app\\.)(?!controller\\.)(?:[A-Za-z0-9_-]+\\.)+[A-Za-z0-9_-]+$",
+		},
+	],
 };
 
 function actionSchemas(refPrefix) {
 	const ref = (name) => ({ $ref: `${refPrefix}${name}` });
 	const actionProperties = {
 		kind: actionKindSchema,
-		value: { type: "string" },
+		value: { type: "string", maxLength: 4096, pattern: "^[^\\u0000\\r\\n]*$" },
 		source: { type: "string" },
 		target: actionSelectorSchema,
 		operation_id: actionIdentifierSchema,
@@ -380,21 +390,13 @@ function actionSchemas(refPrefix) {
 				operation: ref("ActionOperation"),
 			},
 		},
-		AppActionSubmitEnvelope: {
-			type: "object", required: ["accepted"], additionalProperties: false,
-			properties: {
-				accepted: { type: "boolean" },
-				operation: ref("ActionOperation"),
-			},
-			description: "Backward-compatible acceptance result. Outcome-capable actions also include the correlated operation.",
-		},
 	};
 }
 
 const openAPIActionSchemas = actionSchemas("#/components/schemas/");
 const rpcActionSchemas = actionSchemas("#/$defs/");
 const rpcActionMethodContracts = {
-	"controller.app.action": { params: "AppActionRequest", result: "AppActionSubmitEnvelope" },
+	"controller.app.action": { params: "AppActionRequest", result: "ActionOperationEnvelope" },
 	"controller.app.action.ack": { params: "ActionAck", result: "ActionOperationEnvelope" },
 	"controller.app.action.outcome": { params: "ActionOutcomeRequest", result: "ActionOperationEnvelope" },
 };
@@ -434,7 +436,7 @@ function operationFor(route, method) {
 		delete operation.responses["200"];
 		operation.responses["202"] = {
 			description: "Action frozen to its exact live target set",
-			content: { "application/json": { schema: { $ref: "#/components/schemas/AppActionSubmitEnvelope" } } },
+			content: { "application/json": { schema: { $ref: "#/components/schemas/ActionOperationEnvelope" } } },
 		};
 		operation.responses["409"] = {
 			description: "The selector resolved only to rejected targets",
@@ -587,7 +589,7 @@ const openapi = {
 		ServerProof: {
 			type: "object", required: ["format", "nonce", "audience", "instance_id", "proof"], additionalProperties: false,
 			properties: {
-				format: { type: "string", const: "pccontroller-server-proof/v1" },
+				format: { type: "string", const: "pccontroller-server-proof" },
 				nonce: { type: "string", description: "The caller-supplied unpadded base64url nonce." },
 				audience: { type: "string", description: "The IP:port of the exact local listener that accepted the request." },
 				instance_id: { type: "string", minLength: 1 },
@@ -691,7 +693,7 @@ const openapi = {
     },
   },
   "x-body-limit-bytes": 1048576,
-	"x-unsupported-transports": ["versioned /api/v* paths", "built-in TLS termination", "Socket.IO long-polling", "Socket.IO namespaces", "Socket.IO rooms", "binary Socket.IO attachments"],
+	"x-unsupported-transports": ["built-in TLS termination", "Socket.IO long-polling", "Socket.IO namespaces", "Socket.IO rooms", "binary Socket.IO attachments"],
 };
 
 const rpcSchema = {
@@ -827,7 +829,7 @@ const reference = `<!doctype html>
 <meta name="color-scheme" content="light dark"><title>${escapeHTML(product.referenceTitle)}</title>
 <style>:root{font-family:Inter,Segoe UI,system-ui,sans-serif;color-scheme:light dark;--bg:#f6f7fb;--panel:#fff;--text:#172033;--muted:#647087;--line:#dfe3ec;--accent:#6d4aff}@media(prefers-color-scheme:dark){:root{--bg:#11131a;--panel:#191c25;--text:#edf0f7;--muted:#a8b0c2;--line:#303543;--accent:#a995ff}}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text)}main{width:min(1180px,calc(100% - 32px));margin:auto;padding:48px 0 80px}header{display:grid;gap:12px;margin-bottom:34px}h1{font-size:clamp(2rem,5vw,4rem);letter-spacing:-.05em;margin:0}p{color:var(--muted);max-width:76ch;line-height:1.65}.pills{display:flex;flex-wrap:wrap;gap:8px}.pills a,.pills span,td span{border:1px solid var(--line);border-radius:999px;padding:6px 10px;color:var(--text);text-decoration:none;background:color-mix(in srgb,var(--panel) 88%,var(--accent) 12%)}section{margin-top:34px;background:color-mix(in srgb,var(--panel) 92%,transparent);border:1px solid var(--line);border-radius:20px;overflow:hidden;box-shadow:0 18px 55px color-mix(in srgb,var(--text) 8%,transparent)}section>div{padding:22px 24px 6px}h2{margin:0;font-size:1.25rem}table{border-collapse:collapse;width:100%;font-size:.9rem}th,td{text-align:left;padding:13px 16px;border-top:1px solid var(--line);vertical-align:top}th{color:var(--muted);font-weight:600}code{font-family:Cascadia Code,ui-monospace,monospace;color:var(--accent);overflow-wrap:anywhere}@media(max-width:720px){main{width:min(100% - 20px,1180px);padding-top:26px}section{overflow:auto}table{min-width:760px}}</style></head>
 <body><main><header><span>OFFLINE CONTRACT · LIVING API</span><h1>${escapeHTML(product.referenceHeading)}</h1><p>The primary host exposes one unversioned, safety-gated living surface across REST, JSON-RPC, WebSocket, and the bounded Socket.IO adapter. Loopback is the default; immediate-alpha application authentication and authorization are disabled under issue #148.</p><div class="pills"><a href="openapi.json">OpenAPI 3.1</a><a href="asyncapi.json">AsyncAPI 3.0</a><a href="jsonrpc.schema.json">JSON-RPC schema</a><span>${methods.length} RPC methods</span><span>${routes.reduce((count, route) => count + route.methods.length, 0)} HTTP operations</span></div></header>
-<section><div><h2>HTTP operations</h2><p>Canonical routes live directly under <code>/api/</code>; versioned aliases are rejected. JSON bodies are capped at 1 MiB.</p></div><table><thead><tr><th>Method</th><th>Path</th><th>Purpose</th><th>Capability</th></tr></thead><tbody>${routeRows}</tbody></table></section>
+<section><div><h2>HTTP operations</h2><p>Canonical routes live directly under <code>/api/</code>. JSON bodies are capped at 1 MiB.</p></div><table><thead><tr><th>Method</th><th>Path</th><th>Purpose</th><th>Capability</th></tr></thead><tbody>${routeRows}</tbody></table></section>
 <section><div><h2>JSON-RPC methods</h2><p>Standard JSON-RPC errors are preserved; host extensions use -32001 for authentication, -32003 for capability denial, and -32000 for runtime or device failures.</p></div><table><thead><tr><th>Method</th><th>Purpose</th><th>Capability</th><th>Idempotency</th></tr></thead><tbody>${methodRows}</tbody></table></section>
 <p>Contract digest <code>${digest}</code>. Generated by <code>Tools/Audit/generate-api-reference.mjs</code>.</p></main></body></html>\n`;
 outputs.set("reference.html", reference);

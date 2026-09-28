@@ -55,10 +55,26 @@ var (
 	procSetConsoleScreenBufferSize  = consoleKernel32.NewProc("SetConsoleScreenBufferSize")
 	procSetConsoleWindowInfo        = consoleKernel32.NewProc("SetConsoleWindowInfo")
 	procSetConsoleCursorPosition    = consoleKernel32.NewProc("SetConsoleCursorPosition")
+	procSetConsoleTitleW            = consoleKernel32.NewProc("SetConsoleTitleW")
 	procGetCurrentConsoleFontEx     = consoleKernel32.NewProc("GetCurrentConsoleFontEx")
 	procSetCurrentConsoleFontEx     = consoleKernel32.NewProc("SetCurrentConsoleFontEx")
 	procIsWindowVisible             = consoleUser32.NewProc("IsWindowVisible")
 )
+
+func setTitlePlatform(value string) (Result, error) {
+	title, err := windows.UTF16PtrFromString(value)
+	if err != nil {
+		return Result{}, fmt.Errorf("encode console title: %w", err)
+	}
+	result, _, callErr := procSetConsoleTitleW.Call(uintptr(unsafe.Pointer(title)))
+	if result == 0 {
+		if errors.Is(callErr, windows.ERROR_INVALID_HANDLE) {
+			return Result{Reason: "no console is attached"}, nil
+		}
+		return Result{}, windowsConsoleError("SetConsoleTitleW", callErr)
+	}
+	return Result{Applied: true}, nil
+}
 
 type windowsConsoleAPI interface {
 	font(windows.Handle) (fontInfoEx, error)

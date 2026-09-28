@@ -147,6 +147,14 @@ byte-tight layout remain predictable:
 [`controller.go`](../Tools/Controller/controller.go) is its embeddable public
 API; implementation packages stay under `internal/` so every executable uses
 the same guarded runtime instead of forking behavior.
+[`rpc/`](../Tools/Controller/rpc) is the public transport-independent JSON-RPC
+client/envelope package. It supplies direct in-process calls, protected Windows
+named pipes, owner-only Unix-domain sockets, and TCP adapters without duplicating
+method semantics from the internal dispatcher.
+[`host/`](../Tools/Controller/host) is the public in-process lifecycle owner. It
+constructs the canonical client and dispatcher, coordinates protected native
+IPC with optional HTTP/WebSocket service, and provides bounded start/stop,
+configuration, branding, logging, endpoint, event, and error contracts.
 
 ### Executable entry points
 
@@ -157,6 +165,10 @@ the same guarded runtime instead of forking behavior.
 | `cmd/default-assets/` | packaging-only generator for a complete safe-default EEPROM image |
 | `cmd/toolchain-resolver/` | isolated firmware dependency resolver; no serial/UI packages |
 | `cmd/tui-preview/` | hardware-free TUI rendering/interaction preview |
+
+[`examples/embedded-host/`](../Tools/Controller/examples/embedded-host) is the
+minimal real Go consumer. `examples/c_abi_smoke.c` validates the same Host
+lifecycle through the packaged two-function foreign-language boundary.
 
 `cmd/controller/` keeps command-family wiring in named files such as
 `board_cli.go`, `device_cli.go`, `firmware_cli.go`, `programming_cli.go`,
@@ -201,6 +213,10 @@ as `*_test.go`.
 | `tui` | terminal pages, navigation, settings, console, and shared runtime projection |
 | `webui` | embedded production bundle handler and deterministic portable export |
 | `wsrelay` | authenticated remote WebSocket relay/bridge |
+
+Public `rpc` owns only envelopes, clients, and stream endpoint adapters.
+`internal/ipcjson` remains the single method dispatcher and HTTP/WebSocket
+surface; `ServeRaw` connects native-local streams to that same dispatcher.
 
 Platform files use Go build suffixes/tags (`*_windows.go`, `*_other.go`). Add a
 portable interface and test first, then implement each supported platform;
@@ -261,9 +277,18 @@ hashed bundle directly.**
 Windows resource manifest. Generated `.syso` files are build output and must
 not be committed.
 
-## 🧪 Virtual Board
+## 🧪 Transitional VirtualBoard and OS-native firmware targets
 
-[`Tools/VirtualBoard/`](../Tools/VirtualBoard) is the hardware-free C++ model:
+[`Tools/VirtualBoard/`](../Tools/VirtualBoard) is a transitional, independently
+implemented C++ model. It is not the intended long-term architecture. Issue
+PCController issue #103 owns moving its
+valid behavior into one production firmware/core compiled for AVR and supported
+OS-native platforms, then deleting the duplicate parser, dispatcher, state
+machines, and capability model. Issue
+PCController issue #227 owns standalone,
+native-local, stream, and loadable adapters around that same firmware.
+
+Until that migration is complete, this directory contains:
 
 | Path | Responsibility |
 |---|---|
@@ -278,8 +303,9 @@ not be committed.
 | `CMakeLists.txt`, `CMakePresets.json` | portable configure/build/test definitions |
 
 `Tools/VirtualBoard/.build/` and `virtual-mcu-eeprom.bin` are local generated
-state. Delete them freely when the simulator is stopped; never commit them or
-mistake simulator success for loaded-hardware evidence.
+state. Delete them freely when the simulator is stopped; never commit them,
+extend their independent semantics, or mistake simulator success for either
+same-source OS-native firmware or loaded-hardware evidence.
 
 ## 🛠️ Build, dependency, release, and audit tooling
 

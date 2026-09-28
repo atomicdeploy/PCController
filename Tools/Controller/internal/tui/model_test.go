@@ -18,6 +18,7 @@ import (
 	"pccontroller.local/controller/internal/hostui"
 	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/portowner"
+	"pccontroller.local/controller/internal/ports"
 	"pccontroller.local/controller/internal/shell"
 )
 
@@ -46,6 +47,32 @@ func TestQQuitsEveryNormalTUIPage(t *testing.T) {
 				t.Fatalf("q changed page from %v to %v before quitting", page, updated.(Model).page)
 			}
 		})
+	}
+}
+
+func TestAutoConnectIsDeferredUntilAfterInitialFrame(t *testing.T) {
+	runtime := control.New(control.Options{})
+	defer runtime.Close()
+	model := NewWithOptions(runtime, shell.New(10), Options{
+		AutoConnect: true,
+		UIConfig:    func() appconfig.UI { return appconfig.Defaults().UI },
+	})
+	if !model.connectPending {
+		t.Fatal("local auto-connect was not queued")
+	}
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 132, Height: 40})
+	model = updated.(Model)
+	if rendered := ansi.Strip(model.View()); strings.TrimSpace(rendered) == "" {
+		t.Fatal("initial frame is blank while connection is pending")
+	}
+	command := model.Init()
+	if command == nil {
+		t.Fatal("initial title, render tick and connection command were not scheduled")
+	}
+	message := command()
+	batch, ok := message.(tea.BatchMsg)
+	if !ok || len(batch) < 3 {
+		t.Fatalf("initial command=%T %#v, want title, tick and deferred connection", message, message)
 	}
 }
 
@@ -244,6 +271,31 @@ func TestDisconnectedHeaderReconnectsByKeyboardAndMouseWithBoundedRetry(t *testi
 	}
 }
 
+func TestHardwareProblemIsActionableInHeaderAndDashboard(t *testing.T) {
+	model := New(control.New(control.Options{}), shell.New(10))
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 160, Height: 38})
+	model = updated.(Model)
+	snapshot := model.snapshot()
+	snapshot.HardwareProblems = []ports.HardwareProblem{{
+		Code:   ports.HardwareProblemUSBDescriptorFailure,
+		Impact: ports.HardwareImpactActiveOutcomeUnknown,
+	}}
+
+	header := ansi.Strip(model.header(snapshot))
+	for _, expected := range []string{
+		"⚠ HARDWARE", "USB descriptor failed", "check controller cable",
+		"ACTIVE OPERATION OUTCOME UNKNOWN",
+	} {
+		if !strings.Contains(header, expected) {
+			t.Fatalf("hardware warning header missing %q:\n%s", expected, header)
+		}
+	}
+	dashboard := ansi.Strip(model.dashboardPage(snapshot))
+	if !strings.Contains(dashboard, "⚠ USB descriptor failed") {
+		t.Fatalf("dashboard did not surface the hardware warning:\n%s", dashboard)
+	}
+}
+
 func TestDisconnectedRemoteSnapshotDropsPeerOwnedValues(t *testing.T) {
 	snapshot := RichPreviewSnapshot()
 	snapshot.Connected = false
@@ -255,6 +307,134 @@ func TestDisconnectedRemoteSnapshotDropsPeerOwnedValues(t *testing.T) {
 	}
 	if cleared.Port.Name != snapshot.Port.Name {
 		t.Fatalf("reconnect identity was discarded: got %#v, want %#v", cleared.Port, snapshot.Port)
+	}
+}
+
+func TestRemotePanelAndLCDReadbackRefreshInitiallyAndAfterReconnect(t *testing.T) {
+	snapshot := control.Snapshot{
+		Connected: true,
+		Port:      ports.Info{Name: "REMOTE-BOARD", SerialNumber: "board-1"},
+		Hello: native.Hello{BuildHash: 0x12345678, Capabilities: native.CapabilityLCD |
+			native.CapabilityI2CTransfer | native.CapabilityFrontPanelSnapshot},
+	}
+	// A cached exact panel in controller.snapshot is not proof that this new
+	// authority epoch fetched the typed panel itself.
+	snapshot.HaveFrontPanel = true
+	snapshot.FrontPanel = native.FrontPanel{Schema: 2, MenuPage: 1}
+	panelCalls, lcdCalls := 0, 0
+	backend := &RemoteBackend{
+		InitialSnapshot: snapshot,
+		FrontPanel: func(context.Context) (native.FrontPanel, error) {
+			panelCalls++
+			return native.FrontPanel{Schema: 2, MenuPage: 3, RawSegments: [4]byte{1, 2, 3, 4}}, nil
+		},
+		LCDPresentation: func(context.Context) (control.LCDPresentationState, error) {
+			lcdCalls++
+			return control.LCDPresentationState{
+				Enabled: true, Physical: true, Address: 0x27,
+				PhysicalLine1: "Remote", PhysicalLine2: "LCD",
+			}, nil
+		},
+	}
+	model := NewWithOptions(control.New(control.Options{}), shell.New(10), Options{
+		Remote: backend, MirrorLCD: func(string, string) error { return nil }, DisableWelcome: true,
+	})
+	model.page = PageDashboard
+
+	runRefreshes := func(t *testing.T, model Model) Model {
+		t.Helper()
+		updated, command := model.Update(tickMsg(time.Now()))
+		model = updated.(Model)
+		if command == nil {
+			t.Fatal("remote refresh tick returned no commands")
+		}
+		message := command()
+		batch, ok := message.(tea.BatchMsg)
+		if !ok {
+			t.Fatalf("remote refresh command=%T, want tea.BatchMsg", message)
+		}
+		for _, child := range batch {
+			if child == nil {
+				continue
+			}
+			switch result := child().(type) {
+			case frontPanelResultMsg, lcdPresentationResultMsg:
+				updated, _ = model.Update(result)
+				model = updated.(Model)
+			}
+		}
+		return model
+	}
+
+	model = runRefreshes(t, model)
+	if panelCalls != 1 || lcdCalls != 1 || !model.remoteSnapshot.HaveFrontPanel ||
+		!model.haveLCDPresentation || model.lcdPresentation.Address != 0x27 {
+		t.Fatalf("initial remote readback calls=(%d,%d) panel=%t LCD=%#v", panelCalls, lcdCalls, model.remoteSnapshot.HaveFrontPanel, model.lcdPresentation)
+	}
+
+	disconnected := snapshot
+	disconnected.Connected = false
+	updated, _ := model.Update(remoteSnapshotResultMsg{snapshot: disconnected, receivedAt: time.Now()})
+	model = updated.(Model)
+	if model.remoteSnapshot.HaveFrontPanel || model.haveLCDPresentation {
+		t.Fatalf("disconnect retained remote panel authority: panel=%t LCD=%t", model.remoteSnapshot.HaveFrontPanel, model.haveLCDPresentation)
+	}
+	updated, _ = model.Update(remoteSnapshotResultMsg{snapshot: snapshot, receivedAt: time.Now()})
+	model = updated.(Model)
+	model = runRefreshes(t, model)
+	if panelCalls != 2 || lcdCalls != 2 || !model.remoteSnapshot.HaveFrontPanel || !model.haveLCDPresentation {
+		t.Fatalf("reconnect did not refetch exact state: calls=(%d,%d) panel=%t LCD=%t", panelCalls, lcdCalls, model.remoteSnapshot.HaveFrontPanel, model.haveLCDPresentation)
+	}
+}
+
+func TestRemotePanelAndLCDReadbackRejectStaleAuthorityResults(t *testing.T) {
+	snapshot := control.Snapshot{
+		Connected:         true,
+		ConnectionUpdated: time.Unix(123, 0),
+		Port:              ports.Info{Name: "REMOTE-NEW", SerialNumber: "board-new"},
+		Hello: native.Hello{BuildHash: 0x12345678, Capabilities: native.CapabilityLCD |
+			native.CapabilityI2CTransfer | native.CapabilityFrontPanelSnapshot},
+	}
+	model := NewWithOptions(control.New(control.Options{}), shell.New(10), Options{
+		Remote: &RemoteBackend{InitialSnapshot: snapshot}, DisableWelcome: true,
+	})
+	model.remoteAuthorityEpoch = 7
+	model.frontPanelRefreshRequired = true
+	currentKey := remoteDeviceKey(snapshot)
+	stalePanel := native.FrontPanel{Schema: 2, MenuPage: 9}
+	staleLCD := control.LCDPresentationState{Physical: true, Address: 0x3F}
+
+	for _, result := range []tea.Msg{
+		frontPanelResultMsg{panel: stalePanel, remote: true, peerKey: currentKey, epoch: 6},
+		lcdPresentationResultMsg{state: staleLCD, peerKey: currentKey, epoch: 6},
+		frontPanelResultMsg{panel: stalePanel, remote: true, peerKey: "old-peer", epoch: 7},
+		lcdPresentationResultMsg{state: staleLCD, peerKey: "old-peer", epoch: 7},
+	} {
+		updated, _ := model.Update(result)
+		model = updated.(Model)
+	}
+	if model.remoteSnapshot.HaveFrontPanel || model.haveLCDPresentation {
+		t.Fatalf("stale authority result was accepted: panel=%t LCD=%t", model.remoteSnapshot.HaveFrontPanel, model.haveLCDPresentation)
+	}
+	if !model.frontPanelRefreshRequired {
+		t.Fatal("stale panel result cleared the required authoritative refresh")
+	}
+
+	updated, _ := model.Update(frontPanelResultMsg{
+		panel:  native.FrontPanel{Schema: 2, MenuPage: 3},
+		remote: true, peerKey: currentKey, epoch: 7,
+	})
+	model = updated.(Model)
+	updated, _ = model.Update(lcdPresentationResultMsg{
+		state:   control.LCDPresentationState{Physical: true, Address: 0x27},
+		peerKey: currentKey, epoch: 7,
+	})
+	model = updated.(Model)
+	if !model.remoteSnapshot.HaveFrontPanel || model.remoteSnapshot.FrontPanel.MenuPage != 3 ||
+		!model.haveLCDPresentation || model.lcdPresentation.Address != 0x27 ||
+		model.frontPanelRefreshRequired {
+		t.Fatalf("current authority result was not accepted: panel=%#v LCD=%#v refresh=%t",
+			model.remoteSnapshot.FrontPanel, model.lcdPresentation, model.frontPanelRefreshRequired)
 	}
 }
 
@@ -273,6 +453,8 @@ func TestUnavailablePeripheralsDoNotRenderInvalidDashboardValuesOrControls(t *te
 	snapshot.Status.TLEDCenti = -32768
 	snapshot.Status.TBTCenti = -32768
 	snapshot.Status.LCDAddress = 0
+	snapshot.FrontPanel.LCDAvailable = false
+	snapshot.FrontPanel.LCDAddress = 0
 
 	dashboard := model.dashboardPage(snapshot)
 	for _, unavailable := range []string{"Supply Voltage", "Load Current", "Load Power", "Temperature ·", "PWM", "I2C LCD", "-2147483648", "-32768"} {
@@ -750,11 +932,13 @@ func navigationSyncAction(epoch string, revision string, page string) hostui.App
 	return hostui.AppAction{
 		Kind: "app.page", Value: page, Source: "navigation-sync", Target: "tui:one",
 		Metadata: map[string]string{
-			hostui.NavigationSyncKey:     hostui.NavigationSyncGroupUpdate,
-			hostui.NavigationGroupKey:    hostui.DefaultNavigationGroup,
-			hostui.NavigationEpochKey:    epoch,
-			hostui.NavigationRevisionKey: revision,
-			hostui.NavigationSourceKey:   "tui:two",
+			hostui.NavigationSyncKey:           hostui.NavigationSyncGroupUpdate,
+			hostui.NavigationGroupKey:          hostui.DefaultNavigationGroup,
+			hostui.NavigationEpochKey:          epoch,
+			hostui.NavigationRevisionKey:       revision,
+			hostui.NavigationSourceKey:         "tui:two",
+			hostui.NavigationTargetEpochKey:    "11111111111111111111111111111111",
+			hostui.NavigationTargetRevisionKey: "1",
 		},
 	}
 }
@@ -764,6 +948,9 @@ func TestTUINavigationSyncRejectsReplayAndResetsOnlyOnRemoteSession(t *testing.T
 	model := NewWithOptions(control.New(control.Options{}), shell.New(10), Options{
 		Preview: &snapshot, DisableWelcome: true, InstanceID: "tui:one",
 		NavigationSync: true, NavigationGroup: hostui.DefaultNavigationGroup,
+		NavigationIdentity: func() (string, uint64) {
+			return "11111111111111111111111111111111", 1
+		},
 	})
 	firstEpoch := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	secondEpoch := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
@@ -800,6 +987,9 @@ func TestTUINavigationCommitsLocalIntentWithoutEchoingCoordinatorPage(t *testing
 		Preview: &snapshot, DisableWelcome: true, InstanceID: "tui:one",
 		NavigationSync: true, NavigationGroup: hostui.DefaultNavigationGroup,
 		CommitNavigation: func(page string) { commits = append(commits, page) },
+		NavigationIdentity: func() (string, uint64) {
+			return "11111111111111111111111111111111", 1
+		},
 	})
 	model.switchPage(PageEvents)
 	if len(commits) != 1 || commits[0] != "events" {
@@ -942,6 +1132,9 @@ func TestRemoteRuntimeNavigationMetadataUsesSameReplayCursor(t *testing.T) {
 	model.instanceID = "tui:one"
 	model.navigationSync = true
 	model.navigationGroup = hostui.DefaultNavigationGroup
+	model.navigationIdentity = func() (string, uint64) {
+		return "11111111111111111111111111111111", 1
+	}
 	action := navigationSyncAction("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "4", "settings")
 	event := control.Event{
 		Kind: action.Kind, Source: action.Source,
@@ -1725,14 +1918,11 @@ func TestDashboardMapsProgramModeToHumanSubmode(t *testing.T) {
 }
 
 func TestBorderedPageButtonsShareHorizontalRow(t *testing.T) {
-	for _, page := range []Page{PageMenus, PageRF, PageProgramming, PageAutomations} {
+	for _, page := range []Page{PageRF, PageProgramming, PageAutomations} {
 		rendered := PreviewFrame(page, 160, 44)
 		lines := strings.Split(rendered, "\n")
 		found := false
 		for _, line := range lines {
-			if page == PageMenus && strings.Contains(line, "K1 · previous") && strings.Contains(line, "K4 · increase") {
-				found = true
-			}
 			if page == PageRF && strings.Contains(line, "L Learn") && strings.Contains(line, "Refresh list") {
 				found = true
 			}
@@ -1764,7 +1954,7 @@ func TestPortPickerIsVisibleAndNeverEnumeratesInPreview(t *testing.T) {
 
 func TestFrontPanelPreviewAndOfflineLCD(t *testing.T) {
 	rendered := PreviewFrame(PageMenus, 160, 46)
-	for _, expected := range []string{"4-DIGIT DISPLAY", "2×16 LCD", "PCController", "K1 · previous", "active 0 · Door"} {
+	for _, expected := range []string{"4-DIGIT DISPLAY", "2×16 LCD", "PCController", "active 0 · Door"} {
 		if !strings.Contains(rendered, expected) {
 			t.Errorf("front panel missing %q:\n%s", expected, rendered)
 		}
@@ -1792,6 +1982,31 @@ func TestFrontPanelRawSegmentsOverrideTextGlyphs(t *testing.T) {
 	}
 	if strings.Count(rendered, "┃") != 0 {
 		t.Fatalf("text glyphs overrode raw masks:\n%s", rendered)
+	}
+}
+
+func TestPartialSegmentUpdateOverridesStatusGlyphsWithoutFabricatingPanelState(t *testing.T) {
+	model := readyModel(t, PageMenus)
+	model.preview = nil
+	model.hostMenus = nil
+	model.frontPanel = nil
+	snapshot := control.Snapshot{
+		Connected:              true,
+		HaveStatus:             true,
+		Status:                 native.Status{MenuPage: 3, ProgramMode: 2},
+		HaveFrontPanelSegments: true,
+		FrontPanel: native.FrontPanel{
+			RawSegments: [4]byte{segA, segB, segC, segD}, Brightness: 6,
+		},
+	}
+
+	state := model.currentFrontPanel(snapshot)
+	if !state.HasRawSegments || state.RawSegments != snapshot.FrontPanel.RawSegments {
+		t.Fatalf("partial segment authority was not rendered: %#v", state)
+	}
+	if state.Exact || state.MenuID != 3 || state.Brightness != 6 ||
+		state.InputSource != "SEGMENT_CHANGED + STATUS summary" {
+		t.Fatalf("partial segment update fabricated or lost state: %#v", state)
 	}
 }
 
@@ -1824,8 +2039,11 @@ func TestPreviewHeaderAndFrontPanelFit160Columns(t *testing.T) {
 		}
 	}
 	menu := PreviewFrame(PageMenus, 160, 46)
-	if !strings.Contains(menu, "K4 · increase") {
-		t.Fatalf("K4 card clipped:\n%s", menu)
+	if strings.Contains(menu, "K1 · previous") || strings.Contains(menu, "K4 · increase") {
+		t.Fatalf("unsafe remote-key lifecycle rendered without a board deadman/lease:\n%s", menu)
+	}
+	if !strings.Contains(menu, "deadman/lease not advertised") {
+		t.Fatalf("hidden remote-key controls lack a truthful reason:\n%s", menu)
 	}
 }
 
@@ -2321,7 +2539,7 @@ func logsContain(logs []string, expected string) bool {
 	return false
 }
 
-func TestFrontPanelPressAndHoldUseBackendCallback(t *testing.T) {
+func TestFrontPanelPressAndHoldStayDisabledWithoutBoardDeadmanLease(t *testing.T) {
 	var gestures []string
 	snapshot := RichPreviewSnapshot()
 	model := NewWithOptions(control.New(control.Options{}), shell.New(10), Options{
@@ -2332,16 +2550,23 @@ func TestFrontPanelPressAndHoldUseBackendCallback(t *testing.T) {
 		},
 	})
 	model.page = PageMenus
-	_, press, _ := model.frontPanelGesture(1, "press")
-	_, hold, _ := model.frontPanelGesture(1, "hold")
-	_ = press()
-	_ = hold()
-	if got := strings.Join(gestures, ","); got != "K1:press,K1:hold" {
-		t.Fatalf("front panel gestures=%q", got)
+	updated, press, handled := model.frontPanelGesture(1, "press")
+	if !handled || press != nil {
+		t.Fatalf("unsafe press was not rejected: handled=%t command=%v", handled, press)
+	}
+	updated, hold, handled := updated.frontPanelGesture(1, "hold")
+	if !handled || hold != nil {
+		t.Fatalf("unsafe hold was not rejected: handled=%t command=%v", handled, hold)
+	}
+	if len(gestures) != 0 {
+		t.Fatalf("unsafe backend received gestures=%v", gestures)
+	}
+	if !strings.Contains(updated.notice, "deadman/lease") {
+		t.Fatalf("rejected lifecycle lacks truthful reason: %q", updated.notice)
 	}
 }
 
-func TestVirtualFrontPanelPressDispatchesWithoutReleaseOrClickDelay(t *testing.T) {
+func TestRemoteFrontPanelDoesNotFallbackToActionOnlyCommands(t *testing.T) {
 	engine := shell.New(10)
 	var calls []string
 	if err := engine.Register(shell.Command{
@@ -2355,17 +2580,42 @@ func TestVirtualFrontPanelPressDispatchesWithoutReleaseOrClickDelay(t *testing.T
 	}
 	model := NewWithOptions(control.New(control.Options{}), engine, Options{DisableWelcome: true})
 	model.page = PageMenus
-	_, press, _ := model.frontPanelGesture(1, "press")
-	if press == nil {
-		t.Fatal("virtual front-panel press did not dispatch immediately")
+	model.remote = &RemoteBackend{}
+	model.remoteSnapshot = RichPreviewSnapshot()
+	updated, press, _ := model.frontPanelGesture(1, "press")
+	if press != nil || len(calls) != 0 {
+		t.Fatalf("capability-only front panel fell back to an action-only command: command=%v calls=%v", press, calls)
 	}
-	_ = press()
-	_, release, _ := model.frontPanelGesture(1, "release")
-	if release != nil {
-		t.Fatal("stateless virtual front-panel release dispatched a second action")
+	if !strings.Contains(updated.notice, "deadman/lease") {
+		t.Fatalf("missing key backend did not explain the hidden action: %q", updated.notice)
 	}
-	if got := strings.Join(calls, ","); got != "prev" {
-		t.Fatalf("virtual front-panel calls=%q, want one immediate prev", got)
+}
+
+func TestFrontPanelGestureDoesNotDispatchBeforeExactCapabilitiesArrive(t *testing.T) {
+	engine := shell.New(10)
+	calls := 0
+	if err := engine.Register(shell.Command{
+		Name: "menu", Usage: "menu ACTION", Summary: "test",
+		Run: func(context.Context, []string) (string, error) {
+			calls++
+			return "ok", nil
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	model := NewWithOptions(control.New(control.Options{}), engine, Options{DisableWelcome: true})
+	model.page = PageMenus
+	model.remote = &RemoteBackend{}
+	model.remoteSnapshot = control.Snapshot{
+		Connected: true,
+		Hello:     native.Hello{Capabilities: native.CapabilityRemoteKeys | native.CapabilityFrontPanelSnapshot},
+	}
+	updated, command, handled := model.frontPanelGesture(1, "press")
+	if !handled || command != nil || calls != 0 {
+		t.Fatalf("unfetched front-panel dispatched: handled=%t command=%v calls=%d", handled, command, calls)
+	}
+	if !strings.Contains(updated.notice, "deadman/lease") {
+		t.Fatalf("unfetched front-panel did not explain unavailable action: %q", updated.notice)
 	}
 }
 

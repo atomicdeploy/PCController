@@ -121,11 +121,10 @@ test("generates typed app action requests and per-target outcomes", () => {
 	);
 	assert.equal(
 		openapi.paths["/api/app/action"].post.responses["202"].content["application/json"].schema.$ref,
-		"#/components/schemas/AppActionSubmitEnvelope",
+		"#/components/schemas/ActionOperationEnvelope",
 	);
-	assert.deepEqual(openapi.components.schemas.AppActionSubmitEnvelope.required, ["accepted"]);
-	assert.equal(openapi.components.schemas.AppActionSubmitEnvelope.properties.operation.$ref, "#/components/schemas/ActionOperation");
 	assert.equal(openapi.components.schemas.ActionOperationEnvelope.required.includes("operation"), true);
+	assert.equal(openapi.components.schemas.AppActionSubmitEnvelope, undefined);
 	assert.equal(
 		openapi.paths["/api/app/action/ack"].post.requestBody.content["application/json"].schema.$ref,
 		"#/components/schemas/ActionAck",
@@ -149,7 +148,7 @@ test("generates typed app action requests and per-target outcomes", () => {
 	assert.equal(actionRequestRule.then.properties.params.$ref, "#/$defs/AppActionRequest");
 	assert.equal(actionRequestRule.then.required.includes("params"), true);
 	assert.equal(rpcSchema["x-methods"]["controller.app.action"].params_schema.$ref, "#/$defs/AppActionRequest");
-	assert.equal(rpcSchema["x-methods"]["controller.app.action"].result_schema.$ref, "#/$defs/AppActionSubmitEnvelope");
+	assert.equal(rpcSchema["x-methods"]["controller.app.action"].result_schema.$ref, "#/$defs/ActionOperationEnvelope");
 	assert.equal(rpcSchema["x-methods"]["controller.app.action.ack"].params_schema.$ref, "#/$defs/ActionAck");
 	assert.equal(rpcSchema["x-methods"]["controller.app.action.outcome"].result_schema.$ref, "#/$defs/ActionOperationEnvelope");
 });

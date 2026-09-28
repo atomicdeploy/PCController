@@ -19,7 +19,7 @@ Frames are COBS encoded and terminated by `0x00`. The decoded frame is:
 ```text
 offset  type          meaning
 0       u8            magic = 0xA5
-1       u8            advisory envelope revision (currently 1)
+1       u8            reserved/advisory byte (senders currently write 1)
 2       u8            opcode
 3       u8            sequence
 4       u8            payload length, 0..48
@@ -31,7 +31,9 @@ CRC uses polynomial `0x07`, initial value `0x00`, over every decoded byte
 before the CRC. Multi-byte values are little-endian.
 
 The MCU accepts a frame by canonical magic, bounded length, and CRC rather
-than requiring its advisory revision byte to equal the local build's value.
+than requiring the reserved/advisory byte to equal the local build's value.
+The byte is not a protocol generation: senders preserve the current value for
+stable physical framing, while readers tolerate unknown values.
 Known write operations validate a required semantic payload prefix and ignore
 trailing extension fields. Structurally distinct record shapes retain their
 shape byte; unknown opcodes receive `Unsupported`. This provides loose
@@ -181,7 +183,47 @@ Audio. Host renderers map a present `device_micros` onto their local monotonic
 clocks; late notes are shortened or discarded instead of shifting later notes. Current
 firmware receives one compact `STATUS_EFFECT` descriptor and renders the
 animation locally; the rate-limited `STATUS_RGB` stream remains only as a
-bounded older-firmware compatibility path.
+bounded older-firmware compatibility path or an explicitly owned static
+preview.
+
+`STATUS_EFFECT` (`17`) accepts either the exact one-byte release `{0}` or this
+exact 12-byte board-owned descriptor:
+
+```text
+u8  effect              1 breathe, 2 flash, 3 cycle, 4 transition
+u8  primary_r, primary_g, primary_b
+u8  alternate_r, alternate_g, alternate_b
+u8  brightness
+u8  minimum_brightness  must be <= brightness
+u16 period_ms           little-endian, 640..60000
+u8  repeats             0 loops; 1..255 completes on the MCU
+```
+
+Byte-identical descriptors are idempotent and retain phase. A changed valid
+descriptor atomically replaces the acknowledged manual owner without first
+releasing to a native profile. Learning, Warning, Fault, Boot, and the Reset
+watchdog cue may render above that owner; the exact latest request remains
+retained and restores deterministically when the higher-priority layer clears.
+Routine menu, radio, door, Bluetooth, save, and discard cues cannot steal a
+manual owner. Release clears the retained request while preserving the last
+physical frame until native lifecycle presentation resumes.
+
+`STATUS_RGB` (`14`) is exactly four bytes (`r,g,b,brightness`) and claims a
+manual static preview. It uses the same explicit `STATUS_EFFECT {0}` release.
+`STATUS_PROFILE_GET` (`18`) is exactly one condition byte;
+`STATUS_PROFILE_SET` (`19`) is exactly one condition plus the 12-byte
+descriptor. `STATUS_LED_CHANGED` (`9E`) is the six-byte actual rendered state
+`r,g,b,brightness,effect,condition`. It is changed-only and coalesces the
+latest physical frame to at most one transmission per 17 ms; it does not
+fabricate samples during static or flash holds. Link liveness is separate.
+
+This is one living, unversioned board/host contract. It has no numbered route,
+generation field, or version-selected descriptor identity. Compatible additions
+use explicit capability/feature identifiers and new optional opcodes or fields;
+readers ignore unknown optional messages while preserving strict bounds for
+safety-critical owner-changing payloads such as the exact `STATUS_EFFECT`
+descriptor above. A new behavior must not fork the protocol into parallel
+numbered contract generations.
 
 Every buzzer state from one source supersedes its preceding state. A zero-
 frequency positive-duration record is a timed pause; zero frequency and zero
@@ -193,10 +235,11 @@ explicit stop, while 1..20 remains the bounded mode. This is the reusable
 continuous `WAIT`/attention-ringtone path; it does not change the `BUZZER`
 wire payload.
 
-These effects are intentionally PC-side configuration, not firmware EEPROM
-settings. They stop producing future frames if the host is canceled or
-disconnected. A buzzer note already accepted by the MCU continues until its
-duration expires because there is no dedicated buzzer-stop opcode.
+Melody sequencing remains PC-side configuration and stops producing future
+notes if the host is canceled or disconnected. A buzzer note already accepted
+by the MCU continues until its duration expires because there is no dedicated
+buzzer-stop opcode. Status-LED effects are different: their descriptors and
+condition profiles are rendered by the board as described above.
 
 `RELAY_SIDE` sides are 0 left and 1 right; motion is 0 stop, 1 up, 2 down.
 The firmware owns safe disable-before-direction sequencing. Direct
@@ -465,16 +508,30 @@ share one current file-watched policy and one audit-event path. Brightness and
 power writes are disabled by default, and a DDC/CI-unsupported display returns
 a capability error rather than falling back to an untracked shell command.
 
-The default host endpoint is `127.0.0.1:8787`. A single TCP listener
+The default network host endpoint is `127.0.0.1:8787`. Its TCP listener
 multiplexes newline-delimited JSON-RPC and HTTP by inspecting the first request
-bytes. HTTP then serves REST, standard WebSocket, and Socket.IO paths. Closing
+bytes. HTTP then serves REST, standard WebSocket, and Socket.IO paths. The
+public Go `rpc` package defines the same request, response, structured-error,
+message-bound, and caller contract for direct in-process dispatch, Windows
+named pipes, Unix-domain sockets, and TCP. Native-local listeners use raw
+newline-delimited JSON-RPC only; they never run the HTTP protocol sniffer.
+Windows pipe listeners reject remote clients and use a protected current-user
+plus LocalSystem DACL. Unix listeners require an owner-only directory, publish
+a `0600` socket, reject symlink/non-socket replacements, and recover a stale
+socket only when the caller explicitly confirms it holds the ownership lock.
+
+The reusable transport/client foundation is additive. Until the primary-host
+record and live endpoint advertisement are advanced by issue #373, the product
+primary continues to publish TCP `listen` as its automatic attachment path;
+embedders may explicitly construct and serve a native endpoint through `rpc`
+plus `ipcjson.ServeRaw`. Native-local and `:8787` network listeners are meant
+to run concurrently, not replace one another. Closing
 the serial port does not stop this service; closing the service does not erase
 MCU EEPROM or the PC configuration. JSON-RPC uses protocol `2.0`; schema
 negotiation reports JSON-RPC `2.0` only because that standards-defined marker
 is required by the wire format. Canonical REST URLs live directly under
-`/api/`; product-version prefixes such as `/api/v1/` are unsupported and
-rejected. JSON-RPC and WebSocket peers remain capability- and semantics-driven so different feature sets can
-still interoperate.
+`/api/`. JSON-RPC and WebSocket peers remain capability- and semantics-driven,
+so different feature sets can still interoperate.
 
 ### Immediate-alpha exposure
 
@@ -540,6 +597,7 @@ request error.
 | `controller.reset`, `controller.reset.lines`, `controller.port.reset` | optional `pulse_ms` | one explicit DTR-only pulse, then fresh application authentication |
 | `controller.snapshot` | `{}` | cached connection, identity, status, and settings |
 | `controller.command.catalog` | `{}` | machine-readable registered command names, aliases, usage, summary, and task group |
+| `controller.melodies.list` | `{}` | effective configured host melody catalog with validated note timing |
 | `controller.status` | `{}` | fresh board status |
 | `controller.peripherals.get` | `{}` | host-owned custom names plus the canonical 34-entry peripheral descriptor registry; requires `read` |
 | `controller.peripherals.set` | `peripheral_names` object | atomically replace custom host names and return the normalized names plus registry; requires `host_configuration` |
@@ -615,7 +673,10 @@ with a client operation ID. The primary commits exactly once, returns
 the same ordered action to the source and every live follower. A late title or
 lease callback is therefore unable to roll a source back. When the last lease
 leaves or expires the group is discarded, so active pages are never persisted
-as host configuration.
+as host configuration. Retrying the same operation ID is idempotent only while
+its epoch, revision, and page remain canonical. Once a newer operation advances
+the group, replaying the older operation returns an error instead of a stale
+cached page that could roll a client back.
 After an event-session reconnect a follower adds
 `navigation_catch_up=true`; the coordinator then re-sends the canonical page
 instead of treating the client's potentially stale page as new intent.
@@ -664,17 +725,21 @@ field. The client rejects an expired or malformed deadline, deduplicates the
 operation-plus-delivery receipt, and returns that delivery nonce as the
 required `delivery_id` in its acknowledgement. The coordinator accepts only a
 nonce issued for that exact operation target before its deadline, then records the client-reported
-`applied` or `rejected` result. A legacy TUI/WebUI without the new advertisement
-may still receive an action through a known delivery path, but it remains
-`queued` until acknowledgement and becomes `timeout` after the bounded
-deadline. Operation history is bounded and expires; ordinary delivery and
+`applied` or `rejected` result. An action without a live outcome-capable
+advertisement is rejected; it is not delivered through an untracked path.
+Operation history is bounded and expires; ordinary delivery and
 outcome transitions use the existing event streams and bridge fan-out, never
 polling. Successful queued/applied transitions use the state stream so they do
 not flood operator activity logs, while rejection and timeout remain visible
 one-shot activity events.
 
 Unknown well-formed optional action capabilities remain visible in discovery
-without rejecting the whole instance; only implemented action names execute.
+without rejecting the whole instance. A namespaced custom action such as
+`pealayer.play` becomes executable only while a matched live instance advertises
+that exact capability. Custom namespaces cannot use the reserved `app.*`,
+`controller.*`, or `command` names; values are limited to 4096 bytes and cannot
+contain NUL, CR, or LF. They always use the correlated exact-target path with a
+delivery nonce, deadline, deduplication receipt, and terminal ACK outcome.
 These receipts provide correlation and deduplication, **not responder
 authentication**: alpha clients share a trusted event fabric and authorization
 is disabled by policy. Transport-session identity binding remains tracked in
@@ -929,6 +994,14 @@ browser event history. Browsers apply matching page actions and fresh update
 lifecycle navigation; terminal-only actions remain available to matching TUI
 instances without being interpreted by the browser.
 
+The loaded application publishes the living, unversioned `window.PCController`
+browser surface for local automation and inspection. Its `inspect()` result
+reports host transport and physical-board connection as separate facts;
+`command()`, `refresh()`, and `navigate()` use the same validated host paths as
+visible UI actions. State changes also dispatch `pccontroller:state` with the
+same non-secret snapshot. This surface is a convenience adapter, not a second
+contract or an authorization bypass.
+
 The local-integration proxy resolves only the configured short names; request
 data can never supply an upstream URL. The data hub is restricted to loopback,
 while the typed device manager accepts only loopback/private/link-local addresses or explicitly local names. The bridge
@@ -1073,7 +1146,7 @@ final URL explicitly.
 
 When `signing_secret` is configured, the sender also sets
 `X-PCController-Timestamp`, `X-PCController-Nonce`, and
-`X-PCController-Signature`. The signature is `v1=` followed by the lowercase
+`X-PCController-Signature`. The signature is `sha256=` followed by the lowercase
 hex HMAC-SHA256 of this exact byte sequence:
 
 ```text
@@ -1269,7 +1342,7 @@ Provider and manifest discovery use a companion, product-neutral contract:
 |---|---|---|
 | `controller.discovery.github.workflow` | `repository`, `kind`, optional `branch`, `workflow`, `platform`, `api_base_url`, build identity, `packed_timestamp`, `bearer_token` | newest successful matching run and its non-expired artifacts; metadata only |
 | `controller.discovery.github.release` | `repository`, `kind`, optional `tag`, `include_prerelease`, `platform`, `api_base_url`, `packed_timestamp`, `bearer_token` | latest stable, requested tag, or opted-in prerelease assets; reads `SHA256SUMS` when provided |
-| `controller.discovery.manifest` | `url`, optional `bearer_token` | fetch and validate a `controller-update-manifest/v1` document |
+| `controller.discovery.manifest` | `url`, optional `bearer_token` | fetch and validate the living update-manifest document |
 | `controller.discovery.local_manifest` | `{}` | publish this primary host's deduplicated inventory in the same portable manifest format |
 | `controller.discovery.check` | current artifact identity, `kind`, optional `platform`, candidate list | `same`, `newer`, `older`, `different`, or `unavailable`, using digest before packed/build time |
 | `controller.discovery.stage` | candidate, optional transient `bearer_token`, `idempotency_key` | queue proxy-aware download, digest/size verification, safe ZIP member selection, and content-store import; never programs |
@@ -1286,7 +1359,6 @@ A minimal independently hosted manifest is:
 
 ```json
 {
-  "format": "controller-update-manifest/v1",
   "generated_at": "2026-08-02T00:00:00Z",
   "artifacts": [
     {
@@ -1303,9 +1375,10 @@ A minimal independently hosted manifest is:
 }
 ```
 
-Artifact URLs may be absolute or relative to the manifest. Unknown additive
-fields are ignored within the recognized format, while required known fields,
-URLs, sizes, kinds, and digests are still validated.
+Artifact URLs may be absolute or relative to the manifest. This contract has no
+format or schema-version discriminator: unknown additive fields are ignored,
+while required known fields, URLs, sizes, kinds, and digests are still
+validated.
 
 The equivalent REST routes are:
 

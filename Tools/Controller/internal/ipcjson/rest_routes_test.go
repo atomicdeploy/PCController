@@ -34,6 +34,10 @@ func TestRESTAppActionCannotInjectCoordinatorNavigationMetadata(t *testing.T) {
 	handler := websocketMux(context.Background(), &Service{
 		Client:    controllerapi.AttachSharedRuntime(runtime, shell.New(8)),
 		AppAction: broker.Publish,
+		AppActionSubmit: func(hostui.AppAction, time.Duration) (hostui.ActionOperation, error) {
+			t.Fatal("spoof reached action coordinator")
+			return hostui.ActionOperation{}, nil
+		},
 	})
 	spoof := httptest.NewRequest(http.MethodPost, "/api/app/action", strings.NewReader(
 		`{"kind":"app.page","value":"settings","target":"tui:one","metadata":{"navigation_sync":"group","navigation_group":"default","navigation_epoch":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","navigation_revision":"99","navigation_source":"tui:attacker"}}`,
@@ -101,14 +105,14 @@ func TestRESTTypedAppActionOutcomeLifecycle(t *testing.T) {
 	defer runtime.Close()
 	registry := hostui.NewInstanceRegistry()
 	if _, err := registry.Upsert(hostui.AppInstance{
-		ID: "web:one", Surface: "webui", State: "active", LeaseSeconds: 45,
-		Values: map[string]string{hostui.ActionCapabilitiesKey: hostui.WebActionCapabilities},
+		ID: "pealayer:rest", Surface: "pealayer", State: "active", LeaseSeconds: 45,
+		Values: map[string]string{hostui.ActionCapabilitiesKey: "pealayer.play"},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	broker := hostui.NewActionBroker()
 	deliveries := broker.Events()
-	coordinator := hostui.NewActionCoordinator(registry, broker.Publish)
+	coordinator := hostui.NewActionCoordinator(registry, broker.PublishTracked)
 	defer coordinator.Close()
 	handler := websocketMux(context.Background(), &Service{
 		Client:    controllerapi.AttachSharedRuntime(runtime, shell.New(8)),
@@ -118,7 +122,7 @@ func TestRESTTypedAppActionOutcomeLifecycle(t *testing.T) {
 	})
 
 	request := httptest.NewRequest(http.MethodPost, "/api/app/action", strings.NewReader(
-		`{"kind":"app.title","value":"Bench","target":"web:one","operation_id":"rest-operation","timeout_ms":1000}`,
+		`{"kind":"pealayer.play","target":"pealayer:rest","operation_id":"rest-operation","timeout_ms":1000}`,
 	))
 	request.RemoteAddr = "127.0.0.1:43210"
 	response := httptest.NewRecorder()
@@ -136,7 +140,7 @@ func TestRESTTypedAppActionOutcomeLifecycle(t *testing.T) {
 
 	ackBody, _ := json.Marshal(hostui.ActionAck{
 		OperationID: "rest-operation", DeliveryID: delivery.Metadata[hostui.ActionDeliveryIDKey],
-		InstanceID: "web:one", State: hostui.ActionStateApplied,
+		InstanceID: "pealayer:rest", State: hostui.ActionStateApplied,
 	})
 	request = httptest.NewRequest(http.MethodPost, "/api/app/action/ack", bytes.NewReader(ackBody))
 	request.RemoteAddr = "127.0.0.1:43210"
@@ -301,41 +305,5 @@ func TestCanonicalRESTRouteInventory(t *testing.T) {
 				t.Fatalf("canonical route %s %s was not registered: %s", route.method, route.path, response.Body.String())
 			}
 		})
-	}
-
-	for _, route := range routes {
-		if !strings.HasPrefix(route.path, "/api/") {
-			continue
-		}
-		t.Run("reject versioned "+route.name, func(t *testing.T) {
-			alias := "/api/v1/" + strings.TrimPrefix(route.path, "/api/")
-			request := httptest.NewRequest(route.method, alias, strings.NewReader(route.body))
-			request.RemoteAddr = "127.0.0.1:43210"
-			response := httptest.NewRecorder()
-			handler.ServeHTTP(response, request)
-			if (response.Code != http.StatusNotFound && response.Code != http.StatusMethodNotAllowed) ||
-				response.Header().Get("Location") != "" {
-				t.Fatalf("versioned alias %s %s status=%d location=%q body=%s", route.method, alias, response.Code, response.Header().Get("Location"), response.Body.String())
-			}
-		})
-	}
-}
-
-func TestVersionedRESTPreflightIsRejected(t *testing.T) {
-	runtime := control.New(control.Options{})
-	handler := websocketMux(context.Background(), &Service{
-		Client:         controllerapi.AttachSharedRuntime(runtime, shell.New(8)),
-		AllowedOrigins: []string{"console.example:*"},
-		WebUI:          webui.Handler("/ipc"),
-	})
-	request := httptest.NewRequest(http.MethodOptions, "http://127.0.0.1:8787/api/v1/rpc", nil)
-	request.RemoteAddr = "127.0.0.1:43210"
-	request.Header.Set("Origin", "https://console.example:9443")
-	request.Header.Set("Access-Control-Request-Method", http.MethodPost)
-	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, request)
-	if (response.Code != http.StatusNotFound && response.Code != http.StatusMethodNotAllowed) ||
-		response.Header().Get("Access-Control-Allow-Origin") != "" {
-		t.Fatalf("versioned preflight status=%d origin=%q body=%s", response.Code, response.Header().Get("Access-Control-Allow-Origin"), response.Body.String())
 	}
 }

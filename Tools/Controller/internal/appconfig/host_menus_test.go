@@ -8,7 +8,7 @@ import (
 
 func TestUnpublishedStatusGestureIsRejected(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "controller.json")
-	if err := os.WriteFile(path, []byte(`{"schema":1,"host_menus":{"request_gesture":"status-hold-k4"}}`), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"host_menus":{"request_gesture":"status-hold-k4"}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := Load(path); err == nil {

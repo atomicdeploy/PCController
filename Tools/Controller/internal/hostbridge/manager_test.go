@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -35,14 +35,67 @@ func TestWaitForIntegrationShutdownIsBounded(t *testing.T) {
 	}
 }
 
-func TestEnabledTextMappingExecutesAllowlistedCommandOnly(t *testing.T) {
-	store, err := appconfig.Open(filepath.Join(t.TempDir(), "config.json"))
+func TestOfflineBridgePeerIsStateNotGlobalIntegrationFailure(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = store.Update(func(config *appconfig.Config) error {
-		config.Integrations.Hotkeys = nil
-		config.Integrations.Notifications.Enabled = false
+	address := listener.Addr().String()
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store := openHostBridgeTestStore(t, func(config *appconfig.Config) error {
+		config.Integrations.WebSocketClients = []appconfig.WebSocketClient{{
+			Name: "cafe-pc", Enabled: true, URL: "ws://" + address + "/ipc",
+			Protocol: "jsonrpc",
+		}}
+		return nil
+	})
+	runtime := control.New(control.Options{})
+	defer runtime.Close()
+	client := controller.AttachSharedRuntime(runtime, shell.New(8))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	before := client.LatestEventID()
+	manager, err := Start(ctx, client, store, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close()
+
+	eventContext, stopEvent := context.WithTimeout(ctx, 3*time.Second)
+	defer stopEvent()
+	event, err := client.NextEvent(eventContext, before, "bridge.peer.offline")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if event.Source != "bridge" || event.Action != "peer-connect" ||
+		event.Metadata["peer"] != "cafe-pc" || event.Metadata["protocol"] != "jsonrpc" ||
+		!strings.Contains(event.Metadata["error"], "connect") {
+		t.Fatalf("offline peer event=%#v", event)
+	}
+	peers := manager.BridgePeers()
+	if len(peers) != 1 || peers[0].Connected || peers[0].LastError == "" {
+		t.Fatalf("offline peer state=%#v", peers)
+	}
+	if status := manager.Status(); status.LastError != "" {
+		t.Fatalf("optional offline peer polluted global integration status: %#v", status)
+	}
+
+	quietContext, stopQuiet := context.WithTimeout(ctx, 1500*time.Millisecond)
+	defer stopQuiet()
+	if duplicate, duplicateErr := client.NextEvent(quietContext, event.ID, "bridge.peer.offline"); duplicateErr == nil {
+		t.Fatalf("unchanged retry emitted duplicate offline event: %#v", duplicate)
+	}
+	globalContext, stopGlobal := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer stopGlobal()
+	if global, globalErr := client.NextEvent(globalContext, before, "integration.error"); globalErr == nil {
+		t.Fatalf("optional peer outage emitted global integration failure: %#v", global)
+	}
+}
+
+func TestEnabledTextMappingExecutesAllowlistedCommandOnly(t *testing.T) {
+	store := openHostBridgeTestStore(t, func(config *appconfig.Config) error {
 		config.Integrations.TextMappings = []appconfig.TextMapping{{
 			Name: "trusted-door", Enabled: true,
 			Source: "ipc", Target: "host", Type: "door-command",
@@ -50,9 +103,6 @@ func TestEnabledTextMappingExecutesAllowlistedCommandOnly(t *testing.T) {
 		}}
 		return nil
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	runtime := control.New(control.Options{})
 	engine := shell.New(8)
 	called := make(chan struct{}, 1)
@@ -307,13 +357,7 @@ func TestOutboundBridgeCanCallRemoteJSONRPCService(t *testing.T) {
 	}))
 	defer remote.Close()
 
-	store, err := appconfig.Open(filepath.Join(t.TempDir(), "config.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = store.Update(func(config *appconfig.Config) error {
-		config.Integrations.Hotkeys = nil
-		config.Integrations.Notifications.Enabled = false
+	store := openHostBridgeTestStore(t, func(config *appconfig.Config) error {
 		config.Integrations.WebSocketClients = []appconfig.WebSocketClient{{
 			Name: "remote-lab", Enabled: true,
 			URL:      strings.Replace(remote.URL, "http://", "ws://", 1),
@@ -322,9 +366,6 @@ func TestOutboundBridgeCanCallRemoteJSONRPCService(t *testing.T) {
 		}}
 		return nil
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	runtime := control.New(control.Options{})
 	client := controller.AttachSharedRuntime(runtime, shell.New(8))
 	ctx, cancel := context.WithCancel(context.Background())

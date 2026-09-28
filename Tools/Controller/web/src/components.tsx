@@ -27,6 +27,8 @@ import {
 } from 'lucide-react'
 import type { DialogState, ToastMessage } from './types'
 import { HoldActionSession } from './hold-action'
+import { sparklinePoints, type SparklineScale } from './sparkline-scale'
+import { primaryShortcutModifier } from './client-platform'
 
 function interfaceCopy(english: string, persian: string): string {
   return typeof document !== 'undefined' && document.documentElement.lang.toLowerCase().startsWith('fa') ? persian : english
@@ -401,22 +403,17 @@ export function Sparkline({
   values,
   tone = 'accent',
   label,
+  scale = 'auto',
 }: {
   values: number[]
   tone?: 'accent' | 'green' | 'amber' | 'violet'
   label: string
+  scale?: SparklineScale
 }) {
   const id = useId().replace(/:/g, '')
   const width = 300
   const height = 92
-  const data = values.length > 1 ? values : [0, 0]
-  const minimum = Math.min(...data)
-  const maximum = Math.max(...data)
-  const span = Math.max(1, maximum - minimum)
-  const points = data.map((value, index) => ({
-    x: (index / Math.max(1, data.length - 1)) * width,
-    y: height - 8 - ((value - minimum) / span) * (height - 20),
-  }))
+  const points = sparklinePoints(values, scale, width, height)
   const line = points.map((point, index) => `${index === 0 ? 'M' : 'L'}${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(' ')
   const area = `${line} L${width},${height} L0,${height} Z`
   return (
@@ -462,6 +459,7 @@ export function MetricCard({
   values,
   tone,
   detail,
+  scale = 'auto',
 }: {
   icon: LucideIcon
   label: string
@@ -470,6 +468,7 @@ export function MetricCard({
   values: number[]
   tone: 'accent' | 'green' | 'amber' | 'violet'
   detail?: string
+  scale?: SparklineScale
 }) {
   return (
     <article className={`metric metric--${tone}`}>
@@ -481,7 +480,7 @@ export function MetricCard({
         <strong>{value}</strong><span>{unit}</span>
       </div>
       {detail && <div className="metric__detail">{detail}</div>}
-      <Sparkline values={values} tone={tone} label={interfaceCopy(`${label} trend`, `روند ${label}`)} />
+      <Sparkline values={values} tone={tone} scale={scale} label={interfaceCopy(`${label} trend`, `روند ${label}`)} />
     </article>
   )
 }
@@ -675,7 +674,7 @@ export function DataRow({ label, value, mono, tone }: { label: ReactNode; value:
 
 export function NavButton({ icon, label, active, badge, onClick }: { icon: LucideIcon; label: string; active?: boolean; badge?: string; onClick: () => void }) {
   return (
-    <button className={`nav-button${active ? ' is-active' : ''}`} onClick={onClick} aria-current={active ? 'page' : undefined}>
+    <button className={`nav-button${active ? ' is-active' : ''}`} onClick={onClick} aria-label={label} aria-current={active ? 'page' : undefined}>
       <span className="nav-button__icon"><Icon icon={icon} size={20} /></span>
       <span className="nav-button__label">{label}</span>
       {badge && <span className="nav-button__badge">{badge}</span>}
@@ -803,21 +802,22 @@ export function BootGate({
 
 export function HotkeyHelp({ open, locale, onClose }: { open: boolean; locale: 'en' | 'fa'; onClose: () => void }) {
   const title = locale === 'fa' ? 'میانبرهای مرکز کنترل' : 'Control center shortcuts'
+  const modifier = primaryShortcutModifier()
   const shortcuts: Array<{ keys: Array<string | string[]>; separator?: string; detail: string }> = locale === 'fa'
     ? [
-        { keys: [['Ctrl', '⌘'], 'K'], detail: 'فرمان‌ها و صفحه‌ها' },
+        { keys: [modifier, 'K'], detail: 'فرمان‌ها و صفحه‌ها' },
         { keys: ['Alt', '1…8'], detail: 'رفتن مستقیم به صفحه' },
         { keys: ['G', ['D', 'C', 'B', 'V', 'W', 'E', 'S']], separator: 'سپس', detail: 'رفتن به داشبورد، کنترلر، میزکار تجهیزات، دستگاه، فضای داده، رویدادها یا تنظیمات' },
-        { keys: [['Ctrl', '⌘'], 'Shift', ['←', '→']], detail: 'صفحهٔ کناری در جهت دیداری' },
+        { keys: [modifier, 'Shift', ['←', '→']], detail: 'صفحهٔ کناری در جهت دیداری' },
         { keys: ['?'], detail: 'نمایش یا بستن این راهنما' },
         { keys: ['M'], detail: 'قطع یا وصل نشانه‌های صوتی' },
         { keys: ['Esc'], detail: 'بستن لایهٔ فعال' },
       ]
     : [
-        { keys: [['Ctrl', '⌘'], 'K'], detail: 'Commands and pages' },
+        { keys: [modifier, 'K'], detail: 'Commands and pages' },
         { keys: ['Alt', '1…8'], detail: 'Open a page directly' },
         { keys: ['G', ['D', 'C', 'B', 'V', 'W', 'E', 'S']], separator: 'then', detail: 'Go to dashboard, controls, peripheral workbench, device, data workspace, events, or settings' },
-        { keys: [['Ctrl', '⌘'], 'Shift', ['←', '→']], detail: 'Adjacent page in the visual direction' },
+        { keys: [modifier, 'Shift', ['←', '→']], detail: 'Adjacent page in the visual direction' },
         { keys: ['?'], detail: 'Show or close this guide' },
         { keys: ['M'], detail: 'Mute or enable interaction cues' },
         { keys: ['Esc'], detail: 'Close the active layer' },

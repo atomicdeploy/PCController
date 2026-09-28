@@ -16,6 +16,61 @@ import (
 	"pccontroller.local/controller/internal/shell"
 )
 
+func TestAppActionDeliveryEventRequiresTrackedEnvelope(t *testing.T) {
+	for _, action := range []hostui.AppAction{
+		{Kind: "command", Value: "status"},
+		{Kind: "app.quit"},
+		{Kind: "app.quit", OperationID: "operation"},
+		{Kind: "pealayer.play"},
+		{Kind: "pealayer.play", OperationID: "operation"},
+		{
+			Kind: "pealayer.play", OperationID: "operation",
+			Metadata: map[string]string{hostui.ActionDeliveryIDKey: "delivery"},
+		},
+	} {
+		if event, ok := AppActionDeliveryEvent(action); ok {
+			t.Fatalf("untracked action produced event: %#v", event)
+		}
+	}
+	event, ok := AppActionDeliveryEvent(hostui.AppAction{
+		Kind: "pealayer.play", OperationID: "operation", Target: "pealayer:desktop",
+		Metadata: map[string]string{
+			hostui.ActionDeliveryIDKey: "delivery",
+			hostui.ActionExpiresAtKey:  time.Now().Add(time.Second).UTC().Format(time.RFC3339Nano),
+		},
+	})
+	if !ok || event.Kind != "pealayer.play" || event.Stream != control.EventStreamState ||
+		event.Action != "pealayer.play" || event.Metadata["operation_id"] != "operation" {
+		t.Fatalf("tracked custom event=%#v ok=%v", event, ok)
+	}
+	builtIn, ok := AppActionDeliveryEvent(hostui.AppAction{
+		Kind: "app.title", Value: "Ready", OperationID: "built-in-operation",
+		Metadata: map[string]string{
+			hostui.ActionDeliveryIDKey: "built-in-delivery",
+			hostui.ActionExpiresAtKey:  time.Now().Add(time.Second).UTC().Format(time.RFC3339Nano),
+		},
+	})
+	if !ok || builtIn.Kind != "app.title" || builtIn.Metadata["operation_id"] != "built-in-operation" {
+		t.Fatalf("tracked built-in event=%#v ok=%v", builtIn, ok)
+	}
+	navigation, ok := AppActionDeliveryEvent(hostui.AppAction{
+		Kind: "app.page", Value: "events", Source: "navigation-sync", Target: "tui:one",
+		Metadata: map[string]string{
+			hostui.NavigationSyncKey:           hostui.NavigationSyncGroupUpdate,
+			hostui.NavigationGroupKey:          hostui.DefaultNavigationGroup,
+			hostui.NavigationEpochKey:          "11111111111111111111111111111111",
+			hostui.NavigationRevisionKey:       "2",
+			hostui.NavigationSourceKey:         "tui:two",
+			hostui.NavigationTargetEpochKey:    "22222222222222222222222222222222",
+			hostui.NavigationTargetRevisionKey: "1",
+		},
+	})
+	if !ok || navigation.Kind != "app.page" || navigation.Action != "navigate" ||
+		navigation.Metadata[hostui.NavigationTargetRevisionKey] != "1" {
+		t.Fatalf("coordinator navigation event=%#v ok=%v", navigation, ok)
+	}
+}
+
 func TestTypedAppActionPushAckOutcomeAcrossBrowserTransports(t *testing.T) {
 	for _, transport := range []string{"websocket", "socket_io"} {
 		t.Run(transport, func(t *testing.T) {
@@ -24,29 +79,20 @@ func TestTypedAppActionPushAckOutcomeAcrossBrowserTransports(t *testing.T) {
 			client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
 			defer client.Shutdown()
 			registry := hostui.NewInstanceRegistry()
-			instanceID := "web:transport-" + transport
+			instanceID := "pealayer:transport-" + transport
 			if _, err := registry.Upsert(hostui.AppInstance{
-				ID: instanceID, Surface: "webui", State: "active", LeaseSeconds: 45,
-				Values: map[string]string{hostui.ActionCapabilitiesKey: hostui.WebActionCapabilities},
+				ID: instanceID, Surface: "pealayer", State: "active", LeaseSeconds: 45,
+				Values: map[string]string{hostui.ActionCapabilitiesKey: "pealayer.play"},
 			}); err != nil {
 				t.Fatal(err)
 			}
 			broker := hostui.NewActionBroker()
-			coordinator := hostui.NewActionCoordinator(registry, broker.Publish)
+			coordinator := hostui.NewActionCoordinator(registry, broker.PublishTracked)
 			defer coordinator.Close()
 			broker.SetObserver(func(action hostui.AppAction) {
-				metadata := map[string]string{
-					"target_instance": action.Target,
-					"value":           action.Value,
-					"operation_id":    action.OperationID,
+				if event, ok := AppActionDeliveryEvent(action); ok {
+					runtime.PublishStructuredEvent(event)
 				}
-				for key, value := range action.Metadata {
-					metadata[key] = value
-				}
-				runtime.PublishStructuredEvent(control.Event{
-					Kind: action.Kind, Stream: control.EventStreamState,
-					Source: action.Source, Target: "app.clients", Metadata: metadata,
-				})
 			})
 			coordinator.SetObserver(func(change hostui.ActionOutcomeChange) {
 				runtime.PublishStructuredEvent(control.Event{
@@ -124,14 +170,14 @@ func TestTypedAppActionPushAckOutcomeAcrossBrowserTransports(t *testing.T) {
 			}
 
 			operation, err := coordinator.Submit(hostui.AppAction{
-				Kind: "app.title", Value: "Transport proof", Target: instanceID,
+				Kind: "pealayer.play", Target: instanceID,
 				OperationID: "transport-" + transport,
 			}, 2*time.Second)
 			if err != nil {
 				t.Fatal(err)
 			}
 			var pushed control.Event
-			for pushed.Kind != "app.title" {
+			for pushed.Kind != "pealayer.play" {
 				payload := read("pushed app action")
 				if transport == "socket_io" {
 					packet := string(payload)
@@ -159,7 +205,8 @@ func TestTypedAppActionPushAckOutcomeAcrossBrowserTransports(t *testing.T) {
 			if pushed.Metadata["operation_id"] != operation.OperationID ||
 				pushed.Metadata[hostui.ActionDeliveryIDKey] == "" ||
 				pushed.Metadata[hostui.ActionExpiresAtKey] == "" ||
-				pushed.Metadata["target_instance"] != instanceID {
+				pushed.Metadata["target_instance"] != instanceID ||
+				pushed.Action != "pealayer.play" {
 				t.Fatalf("pushed event=%#v", pushed)
 			}
 			ack := hostui.ActionAck{
