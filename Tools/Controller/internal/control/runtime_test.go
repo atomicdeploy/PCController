@@ -408,6 +408,40 @@ func TestDisconnectedRuntimeDropsPeerOwnedSnapshotValues(t *testing.T) {
 	}
 }
 
+func TestSegmentChangedDoesNotPromotePartialStateToExactFrontPanel(t *testing.T) {
+	runtime := New(Options{})
+	runtime.observe(native.Frame{
+		Opcode:  native.OpSegmentChanged,
+		Payload: []byte{0x11, 0x22, 0x33, 0x44, 5},
+	})
+	snapshot := runtime.Snapshot()
+	if snapshot.HaveFrontPanel {
+		t.Fatal("five-byte segment update was promoted to an exact full-panel snapshot")
+	}
+	if snapshot.FrontPanel.RawSegments != ([4]byte{0x11, 0x22, 0x33, 0x44}) ||
+		snapshot.FrontPanel.Brightness != 5 || !snapshot.FrontPanel.SegmentsActive {
+		t.Fatalf("partial segment fields were not retained: %#v", snapshot.FrontPanel)
+	}
+
+	runtime.mu.Lock()
+	runtime.frontPanel = native.FrontPanel{Schema: 2, MenuPage: 3, ProgramMode: 7}
+	runtime.haveFrontPanel = true
+	runtime.mu.Unlock()
+	runtime.observe(native.Frame{
+		Opcode:  native.OpSegmentChanged,
+		Payload: []byte{0x01, 0x02, 0x03, 0x04, 6},
+	})
+	snapshot = runtime.Snapshot()
+	if !snapshot.HaveFrontPanel || snapshot.FrontPanel.MenuPage != 3 ||
+		snapshot.FrontPanel.ProgramMode != 7 {
+		t.Fatalf("segment update invalidated or fabricated exact fields: %#v", snapshot)
+	}
+	if snapshot.FrontPanel.RawSegments != ([4]byte{0x01, 0x02, 0x03, 0x04}) ||
+		snapshot.FrontPanel.Brightness != 6 {
+		t.Fatalf("exact snapshot did not absorb changed segment fields: %#v", snapshot.FrontPanel)
+	}
+}
+
 func TestRememberedPreferredDeviceChangeDoesNotDropLiveConnection(t *testing.T) {
 	runtime := New(Options{})
 	port := newReconnectTestPort()

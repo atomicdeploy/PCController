@@ -1877,13 +1877,9 @@ func (runtime *Runtime) observe(frame native.Frame) {
 		}
 	case native.OpSegmentChanged:
 		if state, err := native.ParseSegmentState(frame.Payload); err == nil {
-			if runtime.frontPanel.Schema == 0 {
-				runtime.frontPanel.Schema = 2
-			}
 			runtime.frontPanel.RawSegments = state.RawSegments
 			runtime.frontPanel.Brightness = state.Brightness
 			runtime.frontPanel.SegmentsActive = true
-			runtime.haveFrontPanel = true
 			runtime.frontPanelUpdated = time.Now()
 		}
 	case native.OpStatusLEDChanged:
