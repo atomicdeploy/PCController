@@ -72,7 +72,18 @@ func (runner *MacroRunner) captureRelayEdge(evidence CommandEvidence) {
 		return
 	}
 	if runner.recording.BoardOwned {
-		runner.recording.Steps++
+		if !runner.recordHasBase {
+			runner.recordBaseUS = evidence.DeviceMicros
+			runner.recordHasBase = true
+		}
+		at := evidence.DeviceMicros - runner.recordBaseUS
+		runner.recording.LastDeltaUS = at - runner.recording.LastAtUS
+		runner.recording.LastAtUS = at
+		if runner.recording.Steps < 25 {
+			runner.recording.Steps++
+		} else if runner.recording.Overwritten < 255 {
+			runner.recording.Overwritten++
+		}
 		runner.runtime.PublishStructuredEvent(Event{Kind: "macro.recording", Lifecycle: "captured", Text: "board relay edge captured"})
 		return
 	}
@@ -137,6 +148,14 @@ func (runner *MacroRunner) StartBoardRecording(ctx context.Context, name, catego
 		runner.recordMu.Unlock()
 		_, _ = runner.StopRecording(false)
 		return MacroRecordingState{}, err
+	}
+	if status, statusErr := runner.queryBoard(ctx); statusErr == nil {
+		runner.recordMu.Lock()
+		runner.recordBaseUS = status.StartedAtUS
+		runner.recordHasBase = true
+		runner.recording.Steps = int(status.TotalSteps)
+		runner.recording.Overwritten = int(status.Underruns)
+		runner.recordMu.Unlock()
 	}
 	return runner.RecordingState(), nil
 }
