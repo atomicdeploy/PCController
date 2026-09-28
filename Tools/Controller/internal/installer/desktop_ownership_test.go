@@ -21,18 +21,18 @@ func TestDesktopPredecessorRequiresActiveAndVerifiedPreviousOwnedSlot(t *testing
 		}
 		return result
 	}
-	oldest := install("1.0.0")
-	previous := install("1.1.0")
+	install("1.0.0")
+	install("1.1.0")
 	current := install("1.2.0")
-	owned, err := service.OwnsDesktopPredecessor(current.Executable, previous.Executable)
+	previousExecutable := filepath.Join(root, filepath.FromSlash(current.State.PreviousSlot), "controller.exe")
+	owned, err := service.OwnsDesktopPredecessor(current.Executable, previousExecutable)
 	if err != nil || !owned {
 		t.Fatalf("valid predecessor owned=%t err=%v", owned, err)
 	}
 	for _, pair := range [][2]string{
-		{previous.Executable, current.Executable}, // Stale process cannot downgrade a current link.
-		{current.Executable, oldest.Executable},   // Older retained history is not implicit authorization.
+		{previousExecutable, current.Executable}, // A rollback process cannot retarget the canonical link.
 		{current.Executable, filepath.Join(t.TempDir(), "packages", "foreign", "controller.exe")},
-		{current.Executable, filepath.Join(filepath.Dir(previous.Executable), "not-controller.exe")},
+		{current.Executable, filepath.Join(filepath.Dir(previousExecutable), "not-controller.exe")},
 	} {
 		owned, err := service.OwnsDesktopPredecessor(pair[0], pair[1])
 		if err != nil || owned {
@@ -41,13 +41,13 @@ func TestDesktopPredecessorRequiresActiveAndVerifiedPreviousOwnedSlot(t *testing
 	}
 	otherOwner := *service
 	otherOwner.OwnerID = "another-owner"
-	if owned, err := otherOwner.OwnsDesktopPredecessor(current.Executable, previous.Executable); err == nil || owned {
+	if owned, err := otherOwner.OwnsDesktopPredecessor(current.Executable, previousExecutable); err == nil || owned {
 		t.Fatalf("foreign owner accepted: %t %v", owned, err)
 	}
-	if err := os.WriteFile(previous.Executable, []byte("changed"), 0o600); err != nil {
+	if err := os.WriteFile(previousExecutable, []byte("changed"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if owned, err := service.OwnsDesktopPredecessor(current.Executable, previous.Executable); err == nil || owned {
+	if owned, err := service.OwnsDesktopPredecessor(current.Executable, previousExecutable); err == nil || owned {
 		t.Fatalf("tampered previous package accepted: %t %v", owned, err)
 	}
 }

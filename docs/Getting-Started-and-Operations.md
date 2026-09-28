@@ -206,7 +206,7 @@ Where the browser offers installation, add the WebUI to the desktop or home
 screen for a standalone, native-feeling window. The installed manifest includes
 shortcuts to Overview, Workbench, Activity, and Settings. Installation does not
 make the controller available without its host: the service worker caches only
-the versioned UI shell and never controller/API traffic, so an offline shell
+the installable UI shell and never controller/API traffic, so an offline shell
 cannot be mistaken for a live board connection.
 
 ### Terminal UI
