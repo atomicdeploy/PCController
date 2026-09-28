@@ -215,6 +215,20 @@ func TestParseStackUsageRejectsMalformedDiagnostic(t *testing.T) {
 	}
 }
 
+func TestStackBudgetRFResponseOmissionRequiresExplicitTestProfile(t *testing.T) {
+	fixture := strings.Replace(completeAVRListingFixture(), "sendLearnedRemotes():\n", "", 1)
+	listing := parseListingFixture(t, fixture)
+	if _, err := estimateFirmwareStackBudget(listing, 1500); err == nil || !strings.Contains(err.Error(), "learned remotes") {
+		t.Fatalf("default profile accepted missing RF response: %v", err)
+	}
+	if _, err := estimateFirmwareStackBudget(listing, 1500, FirmwareFeatureMacroStripTest); err != nil {
+		t.Fatalf("explicit RF omission rejected: %v", err)
+	}
+	if _, err := estimateFirmwareStackBudget(listing, 1950, FirmwareFeatureMacroStripTest); err == nil {
+		t.Fatal("test profile bypassed SRAM safety margin")
+	}
+}
+
 func TestPrintFirmwareStackBudgetShowsFinalEvidence(t *testing.T) {
 	report, err := estimateFirmwareStackBudget(parseListingFixture(t, completeAVRListingFixture()), 1800)
 	if err != nil {

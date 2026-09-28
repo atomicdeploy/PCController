@@ -167,7 +167,7 @@ func inspectFirmwareStackBudget(identity CompileIdentity) (compileManifestStackB
 	if closeErr != nil {
 		return compileManifestStackBudget{}, fmt.Errorf("close final AVR listing: %w", closeErr)
 	}
-	report, err := estimateFirmwareStackBudget(listing, staticBytes)
+	report, err := estimateFirmwareStackBudget(listing, staticBytes, identity.Features...)
 	if err != nil {
 		return report, err
 	}
@@ -180,8 +180,8 @@ func inspectFirmwareStackBudget(identity CompileIdentity) (compileManifestStackB
 	return report, nil
 }
 
-func estimateFirmwareStackBudget(listing *avrListing, staticBytes uint32) (compileManifestStackBudget, error) {
-	serial, selectedBranch, serialActive, err := buildSerialStackPath(listing)
+func estimateFirmwareStackBudget(listing *avrListing, staticBytes uint32, features ...FirmwareFeature) (compileManifestStackBudget, error) {
+	serial, selectedBranch, serialActive, err := buildSerialStackPath(listing, features...)
 	if err != nil {
 		return compileManifestStackBudget{}, fmt.Errorf("serial response path: %w", err)
 	}
@@ -236,7 +236,7 @@ func estimateFirmwareStackBudget(listing *avrListing, staticBytes uint32) (compi
 	return report, nil
 }
 
-func buildSerialStackPath(listing *avrListing) ([]compileManifestStackStage, string, int, error) {
+func buildSerialStackPath(listing *avrListing, features ...FirmwareFeature) ([]compileManifestStackStage, string, int, error) {
 	mainStage, err := requiredListingStage(listing, listingFunctionSpec{Name: "Arduino main", Match: "main", Exact: true})
 	if err != nil {
 		return nil, "", 0, err
@@ -323,6 +323,15 @@ func buildSerialStackPath(listing *avrListing) ([]compileManifestStackStage, str
 	selectedBytes := uint32(0)
 	selectedActive := 0
 	for _, branch := range responseBranches {
+		// Only the explicit test profile may omit RF administration. Still
+		// analyze this branch if present; default builds must provide evidence.
+		if branch.Name == "learned remotes" {
+			for _, feature := range features {
+				if feature == FirmwareFeatureMacroStripTest {
+					branch.Optional = true
+				}
+			}
+		}
 		if branch.Optional && !responseBranchPresent(listing, handlerStage.Function, branch) {
 			continue
 		}
