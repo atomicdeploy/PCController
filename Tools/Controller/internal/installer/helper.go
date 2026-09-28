@@ -15,12 +15,9 @@ import (
 
 const (
 	uninstallHelperCommand = "__installation-uninstall-helper"
-	uninstallPlanFormat    = "pccontroller-uninstall-helper/v1"
-	uninstallOutcomeFormat = "pccontroller-uninstall-outcome/v1"
 )
 
 type uninstallHelperPlan struct {
-	Format         string           `json:"format"`
 	CreatedAt      time.Time        `json:"created_at"`
 	ParentPID      int              `json:"parent_pid"`
 	ParentIdentity string           `json:"parent_identity"`
@@ -41,7 +38,6 @@ type ExternalUninstallPlan struct {
 }
 
 type uninstallOutcome struct {
-	Format        string    `json:"format"`
 	CompletedAt   time.Time `json:"completed_at"`
 	Success       bool      `json:"success"`
 	Error         string    `json:"error,omitempty"`
@@ -139,7 +135,7 @@ func (service *Service) PrepareExternalUninstall(ctx context.Context, request Un
 		return ExternalUninstallPlan{}, fmt.Errorf("bind uninstall helper to parent identity: %w", err)
 	}
 	plan := uninstallHelperPlan{
-		Format: uninstallPlanFormat, CreatedAt: service.now(), ParentPID: os.Getpid(),
+		CreatedAt: service.now(), ParentPID: os.Getpid(),
 		ParentIdentity: parentIdentity,
 		OwnerID:        service.OwnerID, Platform: service.Platform, Architecture: service.Architecture,
 		HelperPath: helperPath, HelperSHA256: digest, PlanPath: planPath,
@@ -171,7 +167,7 @@ func RunExternalUninstallHelper(ctx context.Context, planPath string, service *S
 		return err
 	}
 	now := service.now()
-	if plan.Format != uninstallPlanFormat || plan.ParentPID <= 0 || strings.TrimSpace(plan.ParentIdentity) == "" || plan.OwnerID != service.OwnerID || plan.Platform != service.Platform || plan.Architecture != service.Architecture || !samePath(plan.PlanPath, planPath) || now.Before(plan.CreatedAt.Add(-time.Minute)) || now.After(plan.CreatedAt.Add(15*time.Minute)) {
+	if plan.ParentPID <= 0 || strings.TrimSpace(plan.ParentIdentity) == "" || plan.OwnerID != service.OwnerID || plan.Platform != service.Platform || plan.Architecture != service.Architecture || !samePath(plan.PlanPath, planPath) || now.Before(plan.CreatedAt.Add(-time.Minute)) || now.After(plan.CreatedAt.Add(15*time.Minute)) {
 		return errors.New("uninstall helper plan identity or lifetime is invalid")
 	}
 	planDirectory := filepath.Dir(planPath)
@@ -195,7 +191,7 @@ func RunExternalUninstallHelper(ctx context.Context, planPath string, service *S
 		resultErr = err
 	}
 	outcome := uninstallOutcome{
-		Format: uninstallOutcomeFormat, CompletedAt: service.now(), Success: resultErr == nil,
+		CompletedAt: service.now(), Success: resultErr == nil,
 		Root: plan.Request.Root, DataPreserved: !plan.Request.PurgeData,
 	}
 	if resultErr != nil {

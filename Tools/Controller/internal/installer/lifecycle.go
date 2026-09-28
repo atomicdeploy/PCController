@@ -22,15 +22,12 @@ import (
 )
 
 const (
-	ownerMarkerName         = "installation-owner.json"
-	installationStateName   = "installation-state.json"
-	transactionName         = ".installation-transaction.json"
-	lockName                = ".installation.lock"
-	packagesDirectory       = "packages"
-	stagingDirectory        = ".staging"
-	ownerMarkerFormat       = "pccontroller-installation-owner/v1"
-	installationStateFormat = "pccontroller-installation-state/v1"
-	transactionFormat       = "pccontroller-installation-transaction/v1"
+	ownerMarkerName       = "installation-owner.json"
+	installationStateName = "installation-state.json"
+	transactionName       = ".installation-transaction.json"
+	lockName              = ".installation.lock"
+	packagesDirectory     = "packages"
+	stagingDirectory      = ".staging"
 	// PurgeConfirmation is deliberately long and distinct from uninstall.
 	// Both --purge-data and this exact value are required.
 	PurgeConfirmation = "PURGE-PC-CONTROLLER-USER-DATA"
@@ -58,7 +55,6 @@ type DesktopIntegrator interface {
 }
 
 type ownerMarker struct {
-	Format       string    `json:"format"`
 	ProductAppID string    `json:"product_app_id"`
 	OwnerID      string    `json:"owner_id"`
 	InstallRoot  string    `json:"install_root"`
@@ -66,7 +62,6 @@ type ownerMarker struct {
 }
 
 type InstallationState struct {
-	Format         string    `json:"format"`
 	ProductAppID   string    `json:"product_app_id"`
 	OwnerID        string    `json:"owner_id"`
 	ActiveSlot     string    `json:"active_slot"`
@@ -83,7 +78,6 @@ type InstallationState struct {
 }
 
 type transactionJournal struct {
-	Format        string             `json:"format"`
 	ID            string             `json:"id"`
 	Operation     string             `json:"operation"`
 	Phase         string             `json:"phase"`
@@ -319,7 +313,7 @@ func (service *Service) activate(ctx context.Context, operation string, request 
 				}
 				previousCopy, desiredCopy := previous, next
 				journal := transactionJournal{
-					Format: transactionFormat, ID: id, Operation: operation, Phase: "presentation",
+					ID: id, Operation: operation, Phase: "presentation",
 					NewSlot: next.ActiveSlot, NewSHA256: next.ActiveSHA256,
 					PreviousState: &previousCopy, DesiredState: &desiredCopy, UpdatedAt: service.now(),
 				}
@@ -364,7 +358,7 @@ func (service *Service) activate(ctx context.Context, operation string, request 
 	}
 	stageRelative := filepath.ToSlash(filepath.Join(stagingDirectory, id))
 	journal := transactionJournal{
-		Format: transactionFormat, ID: id, Operation: operation, Phase: "staging",
+		ID: id, Operation: operation, Phase: "staging",
 		Stage: stageRelative, NewSHA256: manifest.RootSHA256, UpdatedAt: service.now(),
 	}
 	if exists {
@@ -415,8 +409,8 @@ func (service *Service) activate(ctx context.Context, operation string, request 
 
 	now := service.now()
 	next := InstallationState{
-		Format: installationStateFormat, ProductAppID: productidentity.StableAppID,
-		OwnerID: service.OwnerID, ActiveSlot: slotRelative, ActiveSHA256: manifest.RootSHA256,
+		ProductAppID: productidentity.StableAppID,
+		OwnerID:      service.OwnerID, ActiveSlot: slotRelative, ActiveSHA256: manifest.RootSHA256,
 		Version: manifest.Version, SourceSHA256: manifest.SourceSHA256,
 		Executable:     filepath.ToSlash(filepath.Join(slotRelative, filepath.FromSlash(manifest.ExecutablePath))),
 		DisplayName:    service.DisplayName,
@@ -520,7 +514,7 @@ func (service *Service) Uninstall(ctx context.Context, request UninstallRequest)
 		return result, ErrOwnershipMismatch
 	}
 	journal := transactionJournal{
-		Format: transactionFormat, ID: "uninstall", Operation: "uninstall",
+		ID: "uninstall", Operation: "uninstall",
 		Phase: "uninstall-prepared", UpdatedAt: service.now(),
 	}
 	if exists {
@@ -710,8 +704,8 @@ func (service *Service) checkOwnership(root string, create bool) error {
 			}
 		}
 		marker := ownerMarker{
-			Format: ownerMarkerFormat, ProductAppID: productidentity.StableAppID,
-			OwnerID: service.OwnerID, InstallRoot: root, CreatedAt: service.now(),
+			ProductAppID: productidentity.StableAppID,
+			OwnerID:      service.OwnerID, InstallRoot: root, CreatedAt: service.now(),
 		}
 		return writeJSONAtomic(path, marker, 0o600)
 	}
@@ -747,7 +741,7 @@ func (service *Service) validateOwnershipMarker(content []byte, expectedRoot str
 	if err := decodeStrictJSON(content, &marker); err != nil {
 		return fmt.Errorf("%w: invalid ownership marker: %v", ErrOwnershipMismatch, err)
 	}
-	if marker.Format != ownerMarkerFormat || marker.ProductAppID != productidentity.StableAppID || marker.OwnerID != service.OwnerID || !samePath(marker.InstallRoot, expectedRoot) {
+	if marker.ProductAppID != productidentity.StableAppID || marker.OwnerID != service.OwnerID || !samePath(marker.InstallRoot, expectedRoot) {
 		return ErrOwnershipMismatch
 	}
 	return nil
@@ -814,7 +808,7 @@ func (service *Service) recover(ctx context.Context, root string) error {
 		return err
 	}
 	var journal transactionJournal
-	if err := decodeStrictJSON(content, &journal); err != nil || journal.Format != transactionFormat {
+	if err := decodeStrictJSON(content, &journal); err != nil {
 		return fmt.Errorf("installation recovery journal is invalid: %w", err)
 	}
 	for _, candidate := range []struct {
@@ -961,7 +955,7 @@ func loadState(root string) (InstallationState, bool, error) {
 }
 
 func validateInstallationState(state InstallationState) error {
-	if state.Format != installationStateFormat || state.ProductAppID != productidentity.StableAppID || strings.TrimSpace(state.OwnerID) == "" {
+	if state.ProductAppID != productidentity.StableAppID || strings.TrimSpace(state.OwnerID) == "" {
 		return errors.New("installation state identity is invalid")
 	}
 	if strings.TrimSpace(state.DisplayName) == "" {

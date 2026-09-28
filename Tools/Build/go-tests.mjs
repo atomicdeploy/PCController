@@ -307,7 +307,6 @@ export function main(argv = process.argv.slice(2), env = process.env) {
 			run(item.binary, ['-test.count=1', ...(options.run ? ['-test.run', options.run] : [])], { cwd: item.directory, env })
 		}
 		writeJSON(cachePath, {
-			format: 'pccontroller-stable-go-test-cache/v1',
 			sourceSHA256: identity.sha256,
 			goVersion: identity.goVersion,
 			sourceFiles: identity.files,
