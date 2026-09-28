@@ -28,7 +28,7 @@ func Encode(frame Frame) ([]byte, error) {
 	}
 
 	raw := make([]byte, 0, 6+len(frame.Payload))
-	raw = append(raw, Magic, EnvelopeRevision, frame.Opcode, frame.Seq, byte(len(frame.Payload)))
+	raw = append(raw, Magic, ReservedEnvelopeByte, frame.Opcode, frame.Seq, byte(len(frame.Payload)))
 	raw = append(raw, frame.Payload...)
 	raw = append(raw, CRC8(raw))
 

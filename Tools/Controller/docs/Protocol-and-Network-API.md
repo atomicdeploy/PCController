@@ -19,7 +19,7 @@ Frames are COBS encoded and terminated by `0x00`. The decoded frame is:
 ```text
 offset  type          meaning
 0       u8            magic = 0xA5
-1       u8            advisory envelope revision (currently 1)
+1       u8            reserved/advisory byte (senders currently write 1)
 2       u8            opcode
 3       u8            sequence
 4       u8            payload length, 0..48
@@ -31,7 +31,9 @@ CRC uses polynomial `0x07`, initial value `0x00`, over every decoded byte
 before the CRC. Multi-byte values are little-endian.
 
 The MCU accepts a frame by canonical magic, bounded length, and CRC rather
-than requiring its advisory revision byte to equal the local build's value.
+than requiring the reserved/advisory byte to equal the local build's value.
+The byte is not a protocol generation: senders preserve the current value for
+stable physical framing, while readers tolerate unknown values.
 Known write operations validate a required semantic payload prefix and ignore
 trailing extension fields. Structurally distinct record shapes retain their
 shape byte; unknown opcodes receive `Unsupported`. This provides loose
@@ -215,8 +217,8 @@ descriptor. `STATUS_LED_CHANGED` (`9E`) is the six-byte actual rendered state
 latest physical frame to at most one transmission per 17 ms; it does not
 fabricate samples during static or flash holds. Link liveness is separate.
 
-This is one living, unversioned board/host contract. It has no `/v1` route,
-`schemaVersion` field, or versioned descriptor identity. Compatible additions
+This is one living, unversioned board/host contract. It has no numbered route,
+generation field, or version-selected descriptor identity. Compatible additions
 use explicit capability/feature identifiers and new optional opcodes or fields;
 readers ignore unknown optional messages while preserving strict bounds for
 safety-critical owner-changing payloads such as the exact `STATUS_EFFECT`

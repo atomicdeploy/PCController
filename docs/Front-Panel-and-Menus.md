@@ -435,7 +435,7 @@ authored value; the exact toolchain lock retains only its generated copy.
 
 UART0 is always enabled at 115200 baud and is the primary application link,
 not a debug-text console. Application frames use zero-delimited COBS, magic
-`0xA5`, an advisory envelope-revision byte, CRC-8, sequence IDs, opcodes, and a maximum 48-byte
+`0xA5`, a reserved/advisory byte (currently written as `1`), CRC-8, sequence IDs, opcodes, and a maximum 48-byte
 payload. Timed events and ACKs append the MCU `micros()` timestamp so the host
 can distinguish device execution time from USB/network arrival time. Firmware
 starts UART and emits an early `HELLO` before slower peripheral initialization,

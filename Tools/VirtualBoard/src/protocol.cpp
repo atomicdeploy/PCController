@@ -81,7 +81,7 @@ std::vector<std::uint8_t> encode(const Frame &frame) {
   std::vector<std::uint8_t> raw;
   raw.reserve(frame.payload.size() + kRawOverhead);
   raw.push_back(kMagic);
-  raw.push_back(kEnvelopeRevision);
+  raw.push_back(kReservedEnvelopeByte);
   raw.push_back(frame.opcode);
   raw.push_back(frame.sequence);
   raw.push_back(static_cast<std::uint8_t>(frame.payload.size()));
