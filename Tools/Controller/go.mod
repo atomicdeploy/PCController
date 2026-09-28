@@ -47,3 +47,8 @@ require (
 	golang.org/x/tools v0.49.0 // indirect
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 )
+
+// The upstream Windows backend does not cancel stalled/pending overlapped I/O
+// before CloseHandle or close the device before joining completion. Pin the
+// reviewed fork until bugst/go-serial#105 is resolved.
+replace go.bug.st/serial => github.com/DRSDavidSoft/go-serial v0.0.0-20260928083401-fa09c8b9a680

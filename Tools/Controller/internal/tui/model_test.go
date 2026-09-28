@@ -18,6 +18,7 @@ import (
 	"pccontroller.local/controller/internal/hostui"
 	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/portowner"
+	"pccontroller.local/controller/internal/ports"
 	"pccontroller.local/controller/internal/shell"
 )
 
@@ -46,6 +47,32 @@ func TestQQuitsEveryNormalTUIPage(t *testing.T) {
 				t.Fatalf("q changed page from %v to %v before quitting", page, updated.(Model).page)
 			}
 		})
+	}
+}
+
+func TestAutoConnectIsDeferredUntilAfterInitialFrame(t *testing.T) {
+	runtime := control.New(control.Options{})
+	defer runtime.Close()
+	model := NewWithOptions(runtime, shell.New(10), Options{
+		AutoConnect: true,
+		UIConfig:    func() appconfig.UI { return appconfig.Defaults().UI },
+	})
+	if !model.connectPending {
+		t.Fatal("local auto-connect was not queued")
+	}
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 132, Height: 40})
+	model = updated.(Model)
+	if rendered := ansi.Strip(model.View()); strings.TrimSpace(rendered) == "" {
+		t.Fatal("initial frame is blank while connection is pending")
+	}
+	command := model.Init()
+	if command == nil {
+		t.Fatal("initial title, render tick and connection command were not scheduled")
+	}
+	message := command()
+	batch, ok := message.(tea.BatchMsg)
+	if !ok || len(batch) < 3 {
+		t.Fatalf("initial command=%T %#v, want title, tick and deferred connection", message, message)
 	}
 }
 
@@ -258,6 +285,79 @@ func TestDisconnectedRemoteSnapshotDropsPeerOwnedValues(t *testing.T) {
 	}
 }
 
+func TestRemotePanelAndLCDReadbackRefreshInitiallyAndAfterReconnect(t *testing.T) {
+	snapshot := control.Snapshot{
+		Connected: true,
+		Port:      ports.Info{Name: "REMOTE-BOARD", SerialNumber: "board-1"},
+		Hello: native.Hello{BuildHash: 0x12345678, Capabilities: native.CapabilityLCD |
+			native.CapabilityI2CTransfer | native.CapabilityFrontPanelSnapshot},
+	}
+	panelCalls, lcdCalls := 0, 0
+	backend := &RemoteBackend{
+		InitialSnapshot: snapshot,
+		FrontPanel: func(context.Context) (native.FrontPanel, error) {
+			panelCalls++
+			return native.FrontPanel{Schema: 2, MenuPage: 3, RawSegments: [4]byte{1, 2, 3, 4}}, nil
+		},
+		LCDPresentation: func(context.Context) (control.LCDPresentationState, error) {
+			lcdCalls++
+			return control.LCDPresentationState{
+				Enabled: true, Physical: true, Address: 0x27,
+				PhysicalLine1: "Remote", PhysicalLine2: "LCD",
+			}, nil
+		},
+	}
+	model := NewWithOptions(control.New(control.Options{}), shell.New(10), Options{
+		Remote: backend, MirrorLCD: func(string, string) error { return nil }, DisableWelcome: true,
+	})
+	model.page = PageMenus
+
+	runRefreshes := func(t *testing.T, model Model) Model {
+		t.Helper()
+		updated, command := model.Update(tickMsg(time.Now()))
+		model = updated.(Model)
+		if command == nil {
+			t.Fatal("remote refresh tick returned no commands")
+		}
+		message := command()
+		batch, ok := message.(tea.BatchMsg)
+		if !ok {
+			t.Fatalf("remote refresh command=%T, want tea.BatchMsg", message)
+		}
+		for _, child := range batch {
+			if child == nil {
+				continue
+			}
+			switch result := child().(type) {
+			case frontPanelResultMsg, lcdPresentationResultMsg:
+				updated, _ = model.Update(result)
+				model = updated.(Model)
+			}
+		}
+		return model
+	}
+
+	model = runRefreshes(t, model)
+	if panelCalls != 1 || lcdCalls != 1 || !model.remoteSnapshot.HaveFrontPanel ||
+		!model.haveLCDPresentation || model.lcdPresentation.Address != 0x27 {
+		t.Fatalf("initial remote readback calls=(%d,%d) panel=%t LCD=%#v", panelCalls, lcdCalls, model.remoteSnapshot.HaveFrontPanel, model.lcdPresentation)
+	}
+
+	disconnected := snapshot
+	disconnected.Connected = false
+	updated, _ := model.Update(remoteSnapshotResultMsg{snapshot: disconnected, receivedAt: time.Now()})
+	model = updated.(Model)
+	if model.remoteSnapshot.HaveFrontPanel || model.haveLCDPresentation {
+		t.Fatalf("disconnect retained remote panel authority: panel=%t LCD=%t", model.remoteSnapshot.HaveFrontPanel, model.haveLCDPresentation)
+	}
+	updated, _ = model.Update(remoteSnapshotResultMsg{snapshot: snapshot, receivedAt: time.Now()})
+	model = updated.(Model)
+	model = runRefreshes(t, model)
+	if panelCalls != 2 || lcdCalls != 2 || !model.remoteSnapshot.HaveFrontPanel || !model.haveLCDPresentation {
+		t.Fatalf("reconnect did not refetch exact state: calls=(%d,%d) panel=%t LCD=%t", panelCalls, lcdCalls, model.remoteSnapshot.HaveFrontPanel, model.haveLCDPresentation)
+	}
+}
+
 func TestUnavailablePeripheralsDoNotRenderInvalidDashboardValuesOrControls(t *testing.T) {
 	model := readyModel(t, PageDashboard)
 	snapshot := RichPreviewSnapshot()
@@ -273,6 +373,8 @@ func TestUnavailablePeripheralsDoNotRenderInvalidDashboardValuesOrControls(t *te
 	snapshot.Status.TLEDCenti = -32768
 	snapshot.Status.TBTCenti = -32768
 	snapshot.Status.LCDAddress = 0
+	snapshot.FrontPanel.LCDAvailable = false
+	snapshot.FrontPanel.LCDAddress = 0
 
 	dashboard := model.dashboardPage(snapshot)
 	for _, unavailable := range []string{"Supply Voltage", "Load Current", "Load Power", "Temperature ·", "PWM", "I2C LCD", "-2147483648", "-32768"} {
@@ -1775,7 +1877,7 @@ func TestPortPickerIsVisibleAndNeverEnumeratesInPreview(t *testing.T) {
 
 func TestFrontPanelPreviewAndOfflineLCD(t *testing.T) {
 	rendered := PreviewFrame(PageMenus, 160, 46)
-	for _, expected := range []string{"4-DIGIT DISPLAY", "2×16 LCD", "PCController", "K1 · previous", "active 0 · Door"} {
+	for _, expected := range []string{"4-DIGIT DISPLAY", "2×16 LCD", "PCController", "active 0 · Door"} {
 		if !strings.Contains(rendered, expected) {
 			t.Errorf("front panel missing %q:\n%s", expected, rendered)
 		}
@@ -1803,6 +1905,31 @@ func TestFrontPanelRawSegmentsOverrideTextGlyphs(t *testing.T) {
 	}
 	if strings.Count(rendered, "┃") != 0 {
 		t.Fatalf("text glyphs overrode raw masks:\n%s", rendered)
+	}
+}
+
+func TestPartialSegmentUpdateOverridesStatusGlyphsWithoutFabricatingPanelState(t *testing.T) {
+	model := readyModel(t, PageMenus)
+	model.preview = nil
+	model.hostMenus = nil
+	model.frontPanel = nil
+	snapshot := control.Snapshot{
+		Connected:              true,
+		HaveStatus:             true,
+		Status:                 native.Status{MenuPage: 3, ProgramMode: 2},
+		HaveFrontPanelSegments: true,
+		FrontPanel: native.FrontPanel{
+			RawSegments: [4]byte{segA, segB, segC, segD}, Brightness: 6,
+		},
+	}
+
+	state := model.currentFrontPanel(snapshot)
+	if !state.HasRawSegments || state.RawSegments != snapshot.FrontPanel.RawSegments {
+		t.Fatalf("partial segment authority was not rendered: %#v", state)
+	}
+	if state.Exact || state.MenuID != 3 || state.Brightness != 6 ||
+		state.InputSource != "SEGMENT_CHANGED + STATUS summary" {
+		t.Fatalf("partial segment update fabricated or lost state: %#v", state)
 	}
 }
 
@@ -2352,7 +2479,7 @@ func TestFrontPanelPressAndHoldUseBackendCallback(t *testing.T) {
 	}
 }
 
-func TestVirtualFrontPanelPressDispatchesWithoutReleaseOrClickDelay(t *testing.T) {
+func TestRemoteFrontPanelDoesNotFallbackToActionOnlyCommands(t *testing.T) {
 	engine := shell.New(10)
 	var calls []string
 	if err := engine.Register(shell.Command{
@@ -2366,17 +2493,42 @@ func TestVirtualFrontPanelPressDispatchesWithoutReleaseOrClickDelay(t *testing.T
 	}
 	model := NewWithOptions(control.New(control.Options{}), engine, Options{DisableWelcome: true})
 	model.page = PageMenus
-	_, press, _ := model.frontPanelGesture(1, "press")
-	if press == nil {
-		t.Fatal("virtual front-panel press did not dispatch immediately")
+	model.remote = &RemoteBackend{}
+	model.remoteSnapshot = RichPreviewSnapshot()
+	updated, press, _ := model.frontPanelGesture(1, "press")
+	if press != nil || len(calls) != 0 {
+		t.Fatalf("capability-only front panel fell back to an action-only command: command=%v calls=%v", press, calls)
 	}
-	_ = press()
-	_, release, _ := model.frontPanelGesture(1, "release")
-	if release != nil {
-		t.Fatal("stateless virtual front-panel release dispatched a second action")
+	if !strings.Contains(updated.notice, "remote-key capability") {
+		t.Fatalf("missing key backend did not explain the hidden action: %q", updated.notice)
 	}
-	if got := strings.Join(calls, ","); got != "prev" {
-		t.Fatalf("virtual front-panel calls=%q, want one immediate prev", got)
+}
+
+func TestFrontPanelGestureDoesNotDispatchBeforeExactCapabilitiesArrive(t *testing.T) {
+	engine := shell.New(10)
+	calls := 0
+	if err := engine.Register(shell.Command{
+		Name: "menu", Usage: "menu ACTION", Summary: "test",
+		Run: func(context.Context, []string) (string, error) {
+			calls++
+			return "ok", nil
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	model := NewWithOptions(control.New(control.Options{}), engine, Options{DisableWelcome: true})
+	model.page = PageMenus
+	model.remote = &RemoteBackend{}
+	model.remoteSnapshot = control.Snapshot{
+		Connected: true,
+		Hello:     native.Hello{Capabilities: native.CapabilityRemoteKeys | native.CapabilityFrontPanelSnapshot},
+	}
+	updated, command, handled := model.frontPanelGesture(1, "press")
+	if !handled || command != nil || calls != 0 {
+		t.Fatalf("unfetched front-panel dispatched: handled=%t command=%v calls=%d", handled, command, calls)
+	}
+	if !strings.Contains(updated.notice, "exact panel snapshot") {
+		t.Fatalf("unfetched front-panel did not explain unavailable action: %q", updated.notice)
 	}
 }
 

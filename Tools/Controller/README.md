@@ -1355,7 +1355,7 @@ Direct Go dependencies:
 | `github.com/fsnotify/fsnotify` | 1.10.1 | BSD-3-Clause | host-config file watching |
 | `github.com/go-ole/go-ole` | 1.3.0 | MIT | optional Windows system-profile adapter |
 | `github.com/Microsoft/go-winio` | 0.6.2 | MIT | protected Windows named-pipe RPC transport |
-| `go.bug.st/serial` | 1.8.0 | BSD-3-Clause | serial I/O and USB enumeration |
+| `go.bug.st/serial` via `DRSDavidSoft/go-serial` | `fa09c8b9a680` (1.8.0 base) | BSD-3-Clause | serial I/O, USB enumeration, and Windows overlapped-I/O cancellation before blocked issuance and close-before-join |
 | `golang.org/x/net` | 0.57.0 | BSD-3-Clause | standards-based proxy environment resolution |
 
 Complete transitive versions are locked in `go.sum`; redistributed terms are

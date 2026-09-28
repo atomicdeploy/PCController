@@ -11,15 +11,13 @@ const (
 	// therefore move both the linker section and guarded patch region together.
 	FirmwareIdentityAddress uint32 = urbootApplicationCapacity - FirmwareIdentityLength
 	FirmwareIdentityLength  uint32 = 12
-	FirmwareIdentityMagic   uint32 = 0x31494350
-	FirmwareIdentitySchema  uint8  = 1
+	FirmwareIdentityMagic   uint32 = 0x44494350
 )
 
 // FirmwareIdentity describes the immutable build identity embedded in flash.
 type FirmwareIdentity struct {
 	Address         uint32 `json:"address"`
 	Length          uint32 `json:"length"`
-	Schema          uint8  `json:"schema"`
 	Magic           string `json:"magic"`
 	SourceHash      uint32 `json:"source_hash"`
 	SourceHashHex   string `json:"source_hash_hex"`
@@ -51,7 +49,7 @@ func inspectFirmwareIdentityImage(image *IntelHexImage) (FirmwareIdentity, error
 	}
 	result := FirmwareIdentity{
 		Address: FirmwareIdentityAddress, Length: FirmwareIdentityLength,
-		Schema: FirmwareIdentitySchema, Magic: "PCI1",
+		Magic:           "PCID",
 		SourceHash:      binary.LittleEndian.Uint32(bytes[4:8]),
 		PackedTimestamp: binary.LittleEndian.Uint32(bytes[8:12]),
 	}
@@ -78,7 +76,7 @@ func PatchFirmwareIdentity(
 		return IntelHexPatchResult{}, fmt.Errorf("read firmware identity for patch: %w", err)
 	}
 	if binary.LittleEndian.Uint32(current[0:4]) != FirmwareIdentityMagic {
-		return IntelHexPatchResult{}, fmt.Errorf("firmware identity patch rejected: PCI1 magic is absent")
+		return IntelHexPatchResult{}, fmt.Errorf("firmware identity patch rejected: PCID magic is absent")
 	}
 	replacement := append([]byte(nil), current...)
 	binary.LittleEndian.PutUint32(replacement[4:8], sourceHash)
