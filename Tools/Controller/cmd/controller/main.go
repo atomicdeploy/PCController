@@ -74,6 +74,19 @@ func main() {
 		}
 		return
 	}
+	if installer.IsActivationHelperInvocation(os.Args[1:]) {
+		service, err := newInstallerService("")
+		if err == nil {
+			ctx, cancel := lifecycleCommandContext()
+			err = installer.RunExternalActivationHelper(ctx, os.Args[2], service)
+			cancel()
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "activation helper:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if pcspeaker.IsHelperInvocation(os.Args[1:]) {
 		if err := pcspeaker.RunHelperInvocation(context.Background(), os.Args[2:], os.Stderr); err != nil {
 			fmt.Fprintln(os.Stderr, "pc-speaker helper:", err)

@@ -12,9 +12,6 @@ import (
 	"pccontroller.local/controller/internal/artifacts"
 )
 
-// ManifestFormat identifies the living remote update-manifest contract.
-const ManifestFormat = "controller-update-manifest"
-
 // Candidate preserves the source metadata needed to compare and stage one
 // immutable update without smuggling authentication secrets into inventories.
 type Candidate struct {
@@ -85,7 +82,6 @@ type ManifestRequest struct {
 
 // Manifest is the portable inventory document accepted by release discovery.
 type Manifest struct {
-	Format      string             `json:"format"`
 	GeneratedAt time.Time          `json:"generated_at,omitempty"`
 	Artifacts   []ManifestArtifact `json:"artifacts"`
 }

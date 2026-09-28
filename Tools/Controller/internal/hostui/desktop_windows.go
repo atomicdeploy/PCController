@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
@@ -219,6 +220,9 @@ func shortcutPathInDirectory(directory, displayName string) (string, error) {
 
 type shortcutPredecessorCheck func(executable, candidate string) (bool, error)
 
+var replaceShortcutFile = replaceShortcutFileWindows
+var moveShortcutFile = windows.MoveFileEx
+
 func managedShortcutPredecessor(executable, candidate string) (bool, error) {
 	service, err := installer.NewService()
 	if err != nil {
@@ -342,38 +346,73 @@ func ensureOwnedShortcutWithPredecessor(executable, shortcut, appID, displayName
 		return false, false, err
 	}
 	temporaryPath := temporary.Name()
-	defer os.Remove(temporaryPath)
 	if err := temporary.Close(); err != nil {
-		return false, false, err
+		return false, false, errors.Join(err, cleanupShortcutTemporary(temporaryPath))
 	}
 	if err := createWindowsShortcut(executable, temporaryPath, appID, displayName); err != nil {
-		return false, false, err
+		return false, false, errors.Join(err, cleanupShortcutTemporary(temporaryPath))
 	}
 	link, err := inspectWindowsShortcut(temporaryPath)
 	if err != nil {
-		return false, false, err
+		return false, false, errors.Join(err, cleanupShortcutTemporary(temporaryPath))
 	}
 	identity, err := shortcutAppUserModelID(temporaryPath)
 	if err != nil {
-		return false, false, err
+		return false, false, errors.Join(err, cleanupShortcutTemporary(temporaryPath))
 	}
 	if !sameWindowsPath(link.Target, executable) || link.Arguments != "web" ||
 		!sameWindowsPath(link.Icon, executable) || link.IconIndex != 0 || identity != appID {
-		return false, false, errors.New("shortcut target, web launch, embedded icon or identity verification failed")
+		return false, false, errors.Join(errors.New("shortcut target, web launch, embedded icon or identity verification failed"), cleanupShortcutTemporary(temporaryPath))
 	}
 	// Recheck before replacing an existing file; creation failure never leaves
 	// a partial link at the user's final path.
 	exists, owned, err = shortcutOwnershipWithPredecessor(executable, shortcut, appID, predecessor)
 	if err != nil {
-		return false, false, err
+		return false, false, errors.Join(err, cleanupShortcutTemporary(temporaryPath))
 	}
 	if exists && !owned {
-		return false, true, nil
+		return false, true, cleanupShortcutTemporary(temporaryPath)
 	}
-	if err := os.Rename(temporaryPath, shortcut); err != nil {
-		return false, false, err
+	if err := replaceShortcutFile(temporaryPath, shortcut); err != nil {
+		return false, false, errors.Join(err, cleanupShortcutTemporary(temporaryPath))
+	}
+	if _, err := os.Lstat(temporaryPath); !isNotExist(err) {
+		return false, false, fmt.Errorf("temporary shortcut remains after replacement: %w", err)
 	}
 	return true, false, nil
+}
+
+func replaceShortcutFileWindows(source, destination string) error {
+	from, err := windows.UTF16PtrFromString(source)
+	if err != nil {
+		return err
+	}
+	to, err := windows.UTF16PtrFromString(destination)
+	if err != nil {
+		return err
+	}
+	const attempts = 8
+	for attempt := 0; attempt < attempts; attempt++ {
+		err = moveShortcutFile(from, to, windows.MOVEFILE_REPLACE_EXISTING|windows.MOVEFILE_WRITE_THROUGH)
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, windows.ERROR_SHARING_VIOLATION) || attempt == attempts-1 {
+			return fmt.Errorf("replace owned shortcut: %w", err)
+		}
+		time.Sleep(time.Duration(attempt+1) * 25 * time.Millisecond)
+	}
+	return errors.New("replace owned shortcut exhausted retries")
+}
+
+func cleanupShortcutTemporary(path string) error {
+	if err := os.Remove(path); err != nil && !isNotExist(err) {
+		return fmt.Errorf("remove temporary shortcut %s: %w", filepath.Base(path), err)
+	}
+	if _, err := os.Lstat(path); !isNotExist(err) {
+		return fmt.Errorf("temporary shortcut %s remains after cleanup: %w", filepath.Base(path), err)
+	}
+	return nil
 }
 
 func isWindowsReparsePoint(info os.FileInfo) bool {
