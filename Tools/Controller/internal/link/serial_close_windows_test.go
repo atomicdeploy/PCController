@@ -3,12 +3,15 @@
 package link
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"testing"
 	"time"
 
 	"go.bug.st/serial"
+
+	"pccontroller.local/controller/internal/ports"
 )
 
 type cancelOnCloseWindowsPort struct {
@@ -23,6 +26,7 @@ type cancelOnCloseWindowsPort struct {
 	resetCalls    int
 	handleOpen    bool
 	closeErr      error
+	configureErr  error
 }
 
 type readFailureRetryPort struct {
@@ -81,7 +85,9 @@ func (*cancelOnCloseWindowsPort) SetRTS(bool) error { return nil }
 func (*cancelOnCloseWindowsPort) GetModemStatusBits() (*serial.ModemStatusBits, error) {
 	return &serial.ModemStatusBits{}, nil
 }
-func (*cancelOnCloseWindowsPort) SetReadTimeout(time.Duration) error { return nil }
+func (port *cancelOnCloseWindowsPort) SetReadTimeout(time.Duration) error {
+	return port.configureErr
+}
 func (port *cancelOnCloseWindowsPort) Close() error {
 	port.mu.Lock()
 	port.closeCalls++
@@ -270,6 +276,60 @@ func TestReadLoopPublishesRetryableTransportCloseFailure(t *testing.T) {
 	defer port.mu.Unlock()
 	if port.closeCalls != 2 {
 		t.Fatalf("transport close calls = %d, want failed read-loop attempt plus retry", port.closeCalls)
+	}
+}
+
+func TestOpenContextReturnsCloseOwnerWhenConfigurationCleanupFails(t *testing.T) {
+	configureErr := errors.New("configure failed")
+	closeErr := errors.New("CancelIoEx failed")
+	port := newCancelOnCloseWindowsPort()
+	port.configureErr = configureErr
+	port.closeErr = closeErr
+	port.closeFailures = 1
+	originalOpen := openSerialPort
+	openSerialPort = func(string, *serial.Mode) (serial.Port, error) { return port, nil }
+	defer func() { openSerialPort = originalOpen }()
+
+	session, err := OpenContext(context.Background(), "COM3", DefaultBaudRate)
+	if session == nil || !errors.Is(err, configureErr) || !errors.Is(err, closeErr) {
+		t.Fatalf("OpenContext session=%p error=%v, want retained owner and joined errors", session, err)
+	}
+	if retryErr := session.Close(); retryErr != nil {
+		t.Fatalf("retry configuration cleanup: %v", retryErr)
+	}
+	port.mu.Lock()
+	defer port.mu.Unlock()
+	if port.handleOpen || port.closeCalls != 2 {
+		t.Fatalf("configuration cleanup: handleOpen=%v calls=%d, want false/2", port.handleOpen, port.closeCalls)
+	}
+}
+
+func TestOpenAuthenticatedReturnsSessionWhenAuthenticationCleanupFails(t *testing.T) {
+	closeErr := errors.New("CancelIoEx failed")
+	port := newCancelOnCloseWindowsPort()
+	port.closeErr = closeErr
+	port.closeFailures = 1
+	session := NewForPort("COM3", port)
+	originalOpen := openSessionContext
+	openSessionContext = func(context.Context, string, int) (*Session, error) {
+		return session, nil
+	}
+	defer func() { openSessionContext = originalOpen }()
+
+	result, err := OpenAuthenticated(context.Background(), ports.Info{Name: "COM3"}, DiscoveryOptions{
+		HelloAttempts:  1,
+		RequestTimeout: 10 * time.Millisecond,
+	})
+	if result.Session != session || !errors.Is(err, closeErr) {
+		t.Fatalf("OpenAuthenticated session=%p error=%v, want retained %p and close error", result.Session, err, session)
+	}
+	if retryErr := result.Session.Close(); retryErr != nil {
+		t.Fatalf("retry authentication cleanup: %v", retryErr)
+	}
+	port.mu.Lock()
+	defer port.mu.Unlock()
+	if port.handleOpen || port.closeCalls != 2 {
+		t.Fatalf("authentication cleanup: handleOpen=%v calls=%d, want false/2", port.handleOpen, port.closeCalls)
 	}
 }
 

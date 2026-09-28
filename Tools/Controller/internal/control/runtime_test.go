@@ -649,6 +649,175 @@ func TestRuntimeCloseRetainsSessionUntilRetrySucceeds(t *testing.T) {
 	}
 }
 
+func TestEnsureConnectedQuarantinesAuthenticationCleanupOwner(t *testing.T) {
+	cancelErr := errors.New("CancelIoEx failed")
+	authErr := errors.New("HELLO timed out")
+	port := newRetryableCloseTestPort(cancelErr)
+	session := link.NewForPort("COM3", port)
+	select {
+	case <-port.readStarted:
+	case <-time.After(time.Second):
+		t.Fatal("pending authentication read did not start")
+	}
+	if err := session.Close(); !errors.Is(err, cancelErr) {
+		t.Fatalf("synthetic authentication cleanup error = %v, want %v", err, cancelErr)
+	}
+
+	runtime := New(Options{})
+	openCalls := 0
+	runtime.autoOpen = func(context.Context, link.DiscoveryOptions) (link.OpenResult, error) {
+		openCalls++
+		return link.OpenResult{
+			Session: session,
+			Port:    ports.Info{Name: "COM3", IsUSB: true},
+		}, errors.Join(authErr, cancelErr)
+	}
+	if err := runtime.EnsureConnected(context.Background()); !errors.Is(err, authErr) || !errors.Is(err, cancelErr) {
+		t.Fatalf("EnsureConnected error = %v, want authentication and cleanup errors", err)
+	}
+	runtime.mu.RLock()
+	retained := runtime.session
+	state := runtime.connectionState
+	runtime.mu.RUnlock()
+	if retained != session || state != "close_failed" {
+		t.Fatalf("authentication quarantine: session=%p state=%q, want %p close_failed", retained, state, session)
+	}
+	if err := runtime.EnsureConnected(context.Background()); err == nil {
+		t.Fatal("quarantined authentication cleanup allowed another connection")
+	}
+	if openCalls != 1 {
+		t.Fatalf("auto-open calls = %d, want 1 while cleanup owner is quarantined", openCalls)
+	}
+	if err := runtime.Close(); err != nil {
+		t.Fatalf("release authentication cleanup quarantine: %v", err)
+	}
+	if runtime.currentSession() != nil {
+		t.Fatal("authentication cleanup quarantine retained after successful retry")
+	}
+}
+
+func TestEnsureConnectedQuarantinesRejectedAttachCleanupOwner(t *testing.T) {
+	cancelErr := errors.New("CancelIoEx failed")
+	port := newRetryableCloseTestPort(cancelErr)
+	session := link.NewForPort("COM3", port)
+	opened := make(chan struct{})
+	runtime := New(Options{})
+	runtime.autoOpen = func(ctx context.Context, _ link.DiscoveryOptions) (link.OpenResult, error) {
+		close(opened)
+		<-ctx.Done()
+		return link.OpenResult{
+			Session: session,
+			Port:    ports.Info{Name: "COM3", IsUSB: true},
+			Hello:   native.Hello{Name: "PCController"},
+		}, nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	connected := make(chan error, 1)
+	go func() { connected <- runtime.EnsureConnected(ctx) }()
+	select {
+	case <-opened:
+	case <-time.After(time.Second):
+		t.Fatal("connection attempt did not open its transport")
+	}
+	cancel()
+	select {
+	case err := <-connected:
+		if !errors.Is(err, context.Canceled) || !errors.Is(err, cancelErr) {
+			t.Fatalf("rejected attach error = %v, want cancellation and cleanup errors", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("cancelled connection attempt did not return")
+	}
+	runtime.mu.RLock()
+	retained := runtime.session
+	state := runtime.connectionState
+	runtime.mu.RUnlock()
+	if retained != session || state != "close_failed" {
+		t.Fatalf("rejected attach quarantine: session=%p state=%q, want %p close_failed", retained, state, session)
+	}
+	if err := runtime.Close(); err != nil {
+		t.Fatalf("release rejected attach quarantine: %v", err)
+	}
+	if runtime.currentSession() != nil {
+		t.Fatal("rejected attach quarantine retained after successful retry")
+	}
+}
+
+func TestRuntimeCloseDrainsEveryRetainedCleanupOwner(t *testing.T) {
+	cancelErr := errors.New("CancelIoEx failed")
+	activePort := newRetryableCloseTestPort(cancelErr)
+	activePort.closeFailures = 0
+	activeSession := link.NewForPort("COM3", activePort)
+	retainedPort := newRetryableCloseTestPort(cancelErr)
+	retainedSession := link.NewForPort("COM4", retainedPort)
+	for name, started := range map[string]<-chan struct{}{
+		"active": activePort.readStarted, "retained": retainedPort.readStarted,
+	} {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatalf("%s cleanup owner did not start its pending read", name)
+		}
+	}
+
+	runtime := New(Options{})
+	runtime.mu.Lock()
+	runtime.session = activeSession
+	runtime.port = ports.Info{Name: "COM3", IsUSB: true}
+	runtime.connectionState = "connected"
+	runtime.mu.Unlock()
+	ownershipErr := errors.New("concurrent authentication cleanup failed")
+	if err := runtime.retainFailedOpen(link.OpenResult{
+		Session: retainedSession,
+		Port:    ports.Info{Name: "COM4", IsUSB: true},
+	}, ownershipErr); !errors.Is(err, ownershipErr) {
+		t.Fatalf("retain cleanup owner error = %v, want %v", err, ownershipErr)
+	}
+	runtime.mu.RLock()
+	owned := runtime.session
+	retainedCount := len(runtime.retainedClose)
+	runtime.mu.RUnlock()
+	if owned != activeSession || retainedCount != 1 {
+		t.Fatalf("ownership after quarantine: active=%p retained=%d, want %p/1", owned, retainedCount, activeSession)
+	}
+
+	if err := runtime.Close(); !errors.Is(err, cancelErr) {
+		t.Fatalf("first close error = %v, want retained cancellation error", err)
+	}
+	runtime.mu.RLock()
+	owned = runtime.session
+	retainedCount = len(runtime.retainedClose)
+	state := runtime.connectionState
+	runtime.mu.RUnlock()
+	if owned != nil || retainedCount != 1 || state != "close_failed" {
+		t.Fatalf("first close ownership: active=%p retained=%d state=%q, want nil/1/close_failed", owned, retainedCount, state)
+	}
+	if err := runtime.Open(context.Background(), "tcp://127.0.0.1:8787"); err == nil {
+		t.Fatal("Open accepted a new transport while a cleanup owner remained")
+	}
+
+	if err := runtime.Close(); err != nil {
+		t.Fatalf("retry retained cleanup: %v", err)
+	}
+	runtime.mu.RLock()
+	retainedCount = len(runtime.retainedClose)
+	state = runtime.connectionState
+	runtime.mu.RUnlock()
+	if retainedCount != 0 || state != "disconnected" {
+		t.Fatalf("successful drain: retained=%d state=%q, want 0/disconnected", retainedCount, state)
+	}
+	activePort.mu.Lock()
+	activeCalls := activePort.closeCalls
+	activePort.mu.Unlock()
+	retainedPort.mu.Lock()
+	retainedCalls := retainedPort.closeCalls
+	retainedPort.mu.Unlock()
+	if activeCalls != 1 || retainedCalls != 2 {
+		t.Fatalf("close calls: active=%d retained=%d, want 1/2", activeCalls, retainedCalls)
+	}
+}
+
 func TestRFReceiveInfersDownAndTimedUp(t *testing.T) {
 	runtime := New(Options{})
 	after := runtime.LatestEventID()

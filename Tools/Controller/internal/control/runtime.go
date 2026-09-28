@@ -149,9 +149,11 @@ type connectionEventSignature struct {
 type Runtime struct {
 	options Options
 
+	openMu                 sync.Mutex
 	detachMu               sync.Mutex
 	mu                     sync.RWMutex
 	session                *link.Session
+	retainedClose          []link.OpenResult
 	port                   ports.Info
 	hello                  native.Hello
 	status                 native.Status
@@ -809,7 +811,18 @@ func (runtime *Runtime) Reconnect(ctx context.Context, reason string) error {
 }
 
 func (runtime *Runtime) EnsureConnected(ctx context.Context) error {
+	// Serialise every open/authenticate/attach sequence. In particular, a
+	// failed cleanup owner must be installed before another sequence can create
+	// a second transport which targets the same OS device.
+	runtime.openMu.Lock()
+	defer runtime.openMu.Unlock()
+
 	runtime.mu.Lock()
+	if len(runtime.retainedClose) != 0 {
+		reason := runtime.connectionReason
+		runtime.mu.Unlock()
+		return fmt.Errorf("previous serial close must be retried before reconnect: %s", reason)
+	}
 	if runtime.session != nil {
 		state := runtime.connectionState
 		reason := runtime.connectionReason
@@ -849,6 +862,9 @@ func (runtime *Runtime) EnsureConnected(ctx context.Context) error {
 
 	result, err := runtime.autoOpen(connectContext, runtime.discoveryOptions(options))
 	if err != nil {
+		if result.Session != nil {
+			return runtime.retainFailedOpen(result, err)
+		}
 		return err
 	}
 	attached := runtime.attachWhen(result, func() bool {
@@ -856,16 +872,68 @@ func (runtime *Runtime) EnsureConnected(ctx context.Context) error {
 			connectContext.Err() == nil
 	})
 	if !attached {
-		_ = result.Session.Close()
+		cleanupReason := errors.New("connection attempt was cancelled by host")
 		if err := connectContext.Err(); err != nil {
-			return err
+			cleanupReason = err
 		}
-		return errors.New("connection attempt was cancelled by host")
+		if closeErr := result.Session.Close(); closeErr != nil {
+			return runtime.retainFailedOpen(result, errors.Join(
+				cleanupReason,
+				fmt.Errorf("close rejected connection %s: %w", result.Port.Name, closeErr),
+			))
+		}
+		return cleanupReason
 	}
 	return nil
 }
 
+func (runtime *Runtime) retainFailedOpen(result link.OpenResult, cause error) error {
+	if result.Session == nil {
+		return cause
+	}
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	if runtime.session == nil || runtime.session == result.Session {
+		runtime.session = result.Session
+		runtime.port = result.Port
+	} else {
+		// openMu makes this an exceptional defensive path, but ownership must
+		// remain lossless even if a future caller introduces another attachment
+		// source. Runtime.Close drains every retained transport before reporting
+		// success.
+		alreadyRetained := false
+		for _, retained := range runtime.retainedClose {
+			if retained.Session == result.Session {
+				alreadyRetained = true
+				break
+			}
+		}
+		if !alreadyRetained {
+			runtime.retainedClose = append(runtime.retainedClose, result)
+		}
+	}
+	runtime.generation++
+	runtime.reconnectEpoch++
+	runtime.clearPeerStateLocked()
+	runtime.paused = true
+	runtime.connectionState = "close_failed"
+	runtime.connectionReason = cause.Error()
+	runtime.connectionUpdated = time.Now()
+	runtime.portRebindAllowed = false
+	return cause
+}
+
 func (runtime *Runtime) Open(ctx context.Context, name string) error {
+	runtime.openMu.Lock()
+	defer runtime.openMu.Unlock()
+	runtime.mu.RLock()
+	cleanupBlocked := runtime.connectionState == "close_failed" || len(runtime.retainedClose) != 0
+	cleanupReason := runtime.connectionReason
+	runtime.mu.RUnlock()
+	if cleanupBlocked {
+		return fmt.Errorf("previous serial close must be retried before opening %s: %s", name, cleanupReason)
+	}
+
 	if link.IsNetworkEndpoint(name) {
 		if runtime.currentSession() != nil {
 			if err := runtime.detachReason(false, "port changed by host"); err != nil {
@@ -886,13 +954,15 @@ func (runtime *Runtime) Open(ctx context.Context, name string) error {
 			},
 		)
 		if err != nil {
+			if result.Session != nil {
+				return runtime.retainFailedOpen(result, err)
+			}
 			return err
 		}
 		runtime.mu.Lock()
 		runtime.paused = false
 		runtime.mu.Unlock()
-		runtime.attach(result)
-		return nil
+		return runtime.attachOpened(result)
 	}
 	selector, err := ports.ParseSelector(name)
 	if err != nil {
@@ -945,13 +1015,29 @@ func (runtime *Runtime) Open(ctx context.Context, name string) error {
 		ResetAfterOpen: runtime.resetAfterOpen,
 	})
 	if err != nil {
+		if result.Session != nil {
+			return runtime.retainFailedOpen(result, err)
+		}
 		return err
 	}
 	runtime.mu.Lock()
 	runtime.paused = false
 	runtime.mu.Unlock()
-	runtime.attach(result)
-	return nil
+	return runtime.attachOpened(result)
+}
+
+func (runtime *Runtime) attachOpened(result link.OpenResult) error {
+	if runtime.attachWhen(result, nil) {
+		return nil
+	}
+	reason := errors.New("authenticated connection could not claim runtime ownership")
+	if err := result.Session.Close(); err != nil {
+		return runtime.retainFailedOpen(result, errors.Join(
+			reason,
+			fmt.Errorf("close unclaimed connection %s: %w", result.Port.Name, err),
+		))
+	}
+	return reason
 }
 
 func (runtime *Runtime) Close() error {
@@ -971,7 +1057,48 @@ func (runtime *Runtime) Close() error {
 	if connectDone != nil {
 		<-connectDone
 	}
-	return runtime.detach(true)
+	// A direct Open does not use connectDone. Joining openMu prevents it from
+	// attaching a newly authenticated transport after this close barrier.
+	runtime.openMu.Lock()
+	defer runtime.openMu.Unlock()
+	return errors.Join(runtime.detach(true), runtime.closeRetained())
+}
+
+func (runtime *Runtime) closeRetained() error {
+	runtime.detachMu.Lock()
+	defer runtime.detachMu.Unlock()
+
+	runtime.mu.RLock()
+	retained := append([]link.OpenResult(nil), runtime.retainedClose...)
+	runtime.mu.RUnlock()
+	var closeErr error
+	for _, result := range retained {
+		if result.Session == nil {
+			continue
+		}
+		if err := result.Session.Close(); err != nil {
+			closeErr = errors.Join(closeErr, fmt.Errorf("close retained session %s: %w", result.Port.Name, err))
+			continue
+		}
+		runtime.mu.Lock()
+		for index, pending := range runtime.retainedClose {
+			if pending.Session == result.Session {
+				runtime.retainedClose = append(runtime.retainedClose[:index], runtime.retainedClose[index+1:]...)
+				break
+			}
+		}
+		runtime.mu.Unlock()
+	}
+	if closeErr != nil {
+		runtime.mu.Lock()
+		runtime.paused = true
+		runtime.connectionState = "close_failed"
+		runtime.connectionReason = closeErr.Error()
+		runtime.connectionUpdated = time.Now()
+		runtime.portRebindAllowed = false
+		runtime.mu.Unlock()
+	}
+	return closeErr
 }
 
 func (runtime *Runtime) Request(
@@ -1195,8 +1322,8 @@ func (runtime *Runtime) resetAfterOpen(_ ports.Info) bool {
 	return true
 }
 
-func (runtime *Runtime) attach(result link.OpenResult) {
-	runtime.attachWhen(result, nil)
+func (runtime *Runtime) attach(result link.OpenResult) bool {
+	return runtime.attachWhen(result, nil)
 }
 
 // attachWhen atomically validates an optional connection-attempt predicate and
@@ -1204,7 +1331,9 @@ func (runtime *Runtime) attach(result link.OpenResult) {
 // held so Close cannot pause the runtime between validation and attachment.
 func (runtime *Runtime) attachWhen(result link.OpenResult, allowed func() bool) bool {
 	runtime.mu.Lock()
-	if allowed != nil && !allowed() {
+	if (allowed != nil && !allowed()) ||
+		(runtime.session != nil && runtime.session != result.Session) ||
+		len(runtime.retainedClose) != 0 {
 		runtime.mu.Unlock()
 		return false
 	}

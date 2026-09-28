@@ -28,6 +28,8 @@ var (
 	ErrControlLinesUnsupported = errors.New("transport does not support DTR/RTS")
 )
 
+var openSerialPort = serial.Open
+
 type Event struct {
 	Frame        native.Frame
 	Err          error
@@ -83,13 +85,21 @@ func OpenContext(ctx context.Context, name string, baudRate int) (*Session, erro
 	if baudRate == 0 {
 		baudRate = DefaultBaudRate
 	}
-	port, err := serial.Open(name, serialMode(baudRate))
+	port, err := openSerialPort(name, serialMode(baudRate))
 	if err != nil {
 		return nil, portowner.EnrichOpenError(ctx, name, err)
 	}
 	if err := port.SetReadTimeout(DefaultReadTimeout); err != nil {
-		_ = port.Close()
-		return nil, fmt.Errorf("configure %s: %w", name, err)
+		configureErr := fmt.Errorf("configure %s: %w", name, err)
+		if closeErr := port.Close(); closeErr != nil {
+			// Return a close-only Session together with the error so the caller
+			// retains ownership and can retry cleanup without opening a new port.
+			return newSession(name, port), errors.Join(
+				configureErr,
+				fmt.Errorf("close %s after configuration failure: %w", name, closeErr),
+			)
+		}
+		return nil, configureErr
 	}
 	_ = port.ResetInputBuffer()
 
@@ -117,7 +127,14 @@ func NewForPort(name string, port serial.Port) *Session {
 }
 
 func newForTransport(name string, port sessionPort) *Session {
-	session := &Session{
+	session := newSession(name, port)
+	session.readDone.Add(1)
+	go session.readLoop()
+	return session
+}
+
+func newSession(name string, port sessionPort) *Session {
+	return &Session{
 		name:      name,
 		port:      port,
 		writeGate: make(chan struct{}, 1),
@@ -127,9 +144,6 @@ func newForTransport(name string, port sessionPort) *Session {
 		closing:   make(chan struct{}),
 		done:      make(chan struct{}),
 	}
-	session.readDone.Add(1)
-	go session.readLoop()
-	return session
 }
 
 func IsNetworkEndpoint(name string) bool {
