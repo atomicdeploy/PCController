@@ -168,6 +168,7 @@ type Runtime struct {
 	connecting             bool
 	connectCancel          context.CancelFunc
 	connectDone            chan struct{}
+	autoOpen               func(context.Context, link.DiscoveryOptions) (link.OpenResult, error)
 	generation             uint64
 	connectionState        string
 	connectionReason       string
@@ -230,10 +231,7 @@ type Runtime struct {
 	connectionEvents       map[string]connectionEventSignature
 }
 
-var (
-	openResetSession = link.OpenContext
-	autoOpenSession  = link.AutoOpen
-)
+var openResetSession = link.OpenContext
 
 const (
 	programStateHeartbeatPeriod  = 2 * time.Second
@@ -245,6 +243,7 @@ func New(options Options) *Runtime {
 	options = normalizedOptions(options)
 	runtime := &Runtime{
 		options: options, events: make(chan Event, 512),
+		autoOpen:           link.AutoOpen,
 		eventNotify:        make(chan struct{}),
 		connectionEvents:   make(map[string]connectionEventSignature),
 		connectionState:    "disconnected",
@@ -833,7 +832,7 @@ func (runtime *Runtime) EnsureConnected(ctx context.Context) error {
 		close(connectDone)
 	}()
 
-	result, err := autoOpenSession(connectContext, runtime.discoveryOptions(options))
+	result, err := runtime.autoOpen(connectContext, runtime.discoveryOptions(options))
 	if err != nil {
 		return err
 	}
@@ -842,6 +841,9 @@ func (runtime *Runtime) EnsureConnected(ctx context.Context) error {
 	runtime.mu.RUnlock()
 	if paused || connectContext.Err() != nil {
 		_ = result.Session.Close()
+		if err := connectContext.Err(); err != nil {
+			return err
+		}
 		return errors.New("connection attempt was cancelled by host")
 	}
 	runtime.attach(result)

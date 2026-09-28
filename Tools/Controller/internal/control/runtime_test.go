@@ -3,7 +3,6 @@ package control
 import (
 	"context"
 	"errors"
-	"sync"
 	"testing"
 	"time"
 
@@ -456,21 +455,17 @@ func TestOpenAlreadyConnectedSelectorIsIdempotent(t *testing.T) {
 }
 
 func TestCloseCancelsInflightReconnectAndReleasesTransport(t *testing.T) {
-	previous := autoOpenSession
-	defer func() { autoOpenSession = previous }()
-
 	port := newReconnectTestPort()
 	opened := make(chan struct{})
-	var openedOnce sync.Once
-	autoOpenSession = func(ctx context.Context, _ link.DiscoveryOptions) (link.OpenResult, error) {
+	runtime := New(Options{})
+	runtime.autoOpen = func(ctx context.Context, _ link.DiscoveryOptions) (link.OpenResult, error) {
 		session := link.NewForPort("COM3", port)
-		openedOnce.Do(func() { close(opened) })
+		close(opened)
 		<-ctx.Done()
 		_ = session.Close()
 		return link.OpenResult{}, ctx.Err()
 	}
 
-	runtime := New(Options{})
 	connectDone := make(chan error, 1)
 	go func() { connectDone <- runtime.EnsureConnected(context.Background()) }()
 	select {
