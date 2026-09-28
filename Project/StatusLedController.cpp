@@ -22,7 +22,6 @@ StatusLedController statusLeds;
 void StatusLedController::begin(PwmController &pwm, uint8_t brightness,
                                 uint32_t now, bool powerSignal) {
   pwm_ = &pwm;
-  brightness_ = brightness;
   fallbackBrightness_ = brightness;
   pwm_->setPowerSignal(powerSignal);
   setMode(StatusLedMode::Boot, now);
@@ -41,34 +40,24 @@ void StatusLedController::service(uint32_t now) {
     setMode(mode_, now);
   }
 
-  if (effect_ != StatusLedEffect::None) {
+  if (active_[0] != 0) {
     uint32_t elapsed = static_cast<uint32_t>(now - effectCycleStartedAt_);
-    bool cycleAdvanced = false;
     if (elapsed >= effectPeriodMs_) {
       const uint32_t cycles = elapsed / effectPeriodMs_;
-      if (effectRepeats_ != 0 && cycles >= effectRepeats_) {
-        finishEffect();
-        return;
-      }
-      if (effectRepeats_ != 0) {
-        effectRepeats_ = static_cast<uint8_t>(effectRepeats_ - cycles);
+      if (active_[11] != 0) {
+        if (cycles >= active_[11]) {
+          finishEffect();
+          return;
+        }
+        active_[11] = static_cast<uint8_t>(active_[11] - cycles);
       }
       effectCycleStartedAt_ += cycles * effectPeriodMs_;
       elapsed -= cycles * effectPeriodMs_;
-      effectPhase_ = 0;
-      cycleAdvanced = true;
     }
 
-    uint8_t step = static_cast<uint8_t>(effectPhase_ >> 2);
-    while (step < 63U) {
-      const uint8_t next = static_cast<uint8_t>(step + 1U);
-      if (elapsed < StatusLedMath::phaseDeadline(effectPeriodMs_, next)) {
-        break;
-      }
-      step = next;
-    }
-    const uint8_t phase = static_cast<uint8_t>(step * EffectPhaseStep);
-    if (phase != effectPhase_ || cycleAdvanced) {
+    const uint8_t phase = static_cast<uint8_t>(
+        (((elapsed * 64UL) + 63U) / effectPeriodMs_) * EffectPhaseStep);
+    if (phase != effectPhase_) {
       effectPhase_ = phase;
       renderEffect();
     }
@@ -93,16 +82,16 @@ void StatusLedController::setMode(StatusLedMode mode, uint32_t now) {
 StatusLedMode StatusLedController::mode() const { return mode_; }
 
 void StatusLedController::setBrightness(uint8_t brightness) {
-  brightness_ = brightness;
   fallbackBrightness_ = brightness;
-  if (effect_ != StatusLedEffect::None) {
+  active_[7] = brightness;
+  if (active_[0] != 0) {
     renderEffect();
   } else {
-    renderColor(customRed_, customGreen_, customBlue_, brightness_);
+    renderColor(active_[1], active_[2], active_[3], active_[7]);
   }
 }
 
-uint8_t StatusLedController::brightness() const { return brightness_; }
+uint8_t StatusLedController::brightness() const { return active_[7]; }
 
 void StatusLedController::setCustom(uint8_t red, uint8_t green, uint8_t blue,
                                     uint8_t brightness, uint32_t now) {
@@ -139,13 +128,15 @@ bool StatusLedController::setEffect(const uint8_t *payload, uint32_t now) {
 void StatusLedController::cancelEffect() {
   requested_[10] = 0;
   if (condition_ == ManualCondition) {
-    effect_ = StatusLedEffect::None;
+    active_[0] = 0;
   }
   // The lifecycle clears Custom on its next pass. Preserve the last rendered
   // frame until then so release cannot flash a persisted fallback profile.
 }
 
-StatusLedEffect StatusLedController::effect() const { return effect_; }
+StatusLedEffect StatusLedController::effect() const {
+  return static_cast<StatusLedEffect>(active_[0]);
+}
 
 uint8_t StatusLedController::renderedRed() const { return renderedRed_; }
 uint8_t StatusLedController::renderedGreen() const { return renderedGreen_; }
@@ -162,12 +153,8 @@ void StatusLedController::playCue(StatusLedCue cue, uint16_t durationMs,
                                   uint32_t now) {
   // Learning/Warning/Fault always dominate. Routine informational cues never
   // steal a manual owner, while Reset remains visible before watchdog reboot.
-  const uint8_t mode = static_cast<uint8_t>(mode_);
-  if (mode == static_cast<uint8_t>(StatusLedMode::Boot) ||
-      static_cast<uint8_t>(mode -
-                           static_cast<uint8_t>(StatusLedMode::Learning)) <
-          3U ||
-      (mode == static_cast<uint8_t>(StatusLedMode::Custom) &&
+  if (persistentPriorityActive() ||
+      (mode_ == StatusLedMode::Custom &&
        cue != StatusLedCue::Reset)) {
     return;
   }
@@ -226,19 +213,10 @@ void StatusLedController::loadProfile(uint8_t condition, uint32_t now) {
 void StatusLedController::applyProfile(uint8_t condition,
                                        const uint8_t *payload, uint32_t now) {
   condition_ = condition;
-  customRed_ = payload[1];
-  customGreen_ = payload[2];
-  customBlue_ = payload[3];
-  alternateRed_ = payload[4];
-  alternateGreen_ = payload[5];
-  alternateBlue_ = payload[6];
-  brightness_ = payload[7];
-  minimumBrightness_ = payload[8];
-  effect_ = static_cast<StatusLedEffect>(payload[0]);
-  effectRepeats_ = payload[11];
+  memcpy(active_, payload, ProfilePayloadBytes);
   effectPhase_ = 0;
-  if (effect_ == StatusLedEffect::None) {
-    renderColor(customRed_, customGreen_, customBlue_, brightness_);
+  if (active_[0] == 0) {
+    renderColor(active_[1], active_[2], active_[3], active_[7]);
     return;
   }
   const uint16_t periodMs = static_cast<uint16_t>(payload[9]) |
@@ -299,47 +277,45 @@ void StatusLedController::renderColor(uint8_t red, uint8_t green,
 }
 
 void StatusLedController::renderEffect() {
-  uint8_t red = customRed_;
-  uint8_t green = customGreen_;
-  uint8_t blue = customBlue_;
-  uint8_t level = brightness_;
+  uint8_t red = active_[1];
+  uint8_t green = active_[2];
+  uint8_t blue = active_[3];
+  uint8_t level = active_[7];
   const uint8_t triangle = effectPhase_ < 128U
                                ? static_cast<uint8_t>(effectPhase_ << 1)
                                : static_cast<uint8_t>((255U - effectPhase_) << 1);
-  if (effect_ == StatusLedEffect::Flash) {
+  if (active_[0] == static_cast<uint8_t>(StatusLedEffect::Flash)) {
     if (effectPhase_ >= 128U) {
-      red = alternateRed_;
-      green = alternateGreen_;
-      blue = alternateBlue_;
+      red = active_[4];
+      green = active_[5];
+      blue = active_[6];
     }
-  } else if (effect_ == StatusLedEffect::Breathe) {
+  } else if (active_[0] == static_cast<uint8_t>(StatusLedEffect::Breathe)) {
     level = static_cast<uint8_t>(
-        minimumBrightness_ +
+        active_[8] +
         StatusLedMath::scale(
-            static_cast<uint8_t>(brightness_ - minimumBrightness_), triangle));
-  } else if (effect_ == StatusLedEffect::Transition) {
-    red = StatusLedMath::interpolate(customRed_, alternateRed_, effectPhase_);
-    green =
-        StatusLedMath::interpolate(customGreen_, alternateGreen_, effectPhase_);
-    blue =
-        StatusLedMath::interpolate(customBlue_, alternateBlue_, effectPhase_);
-  } else if (effect_ == StatusLedEffect::Cycle) {
-    red = StatusLedMath::interpolate(customRed_, alternateRed_, triangle);
-    green = StatusLedMath::interpolate(customGreen_, alternateGreen_, triangle);
-    blue = StatusLedMath::interpolate(customBlue_, alternateBlue_, triangle);
+            static_cast<uint8_t>(active_[7] - active_[8]), triangle));
+  } else if (active_[0] ==
+             static_cast<uint8_t>(StatusLedEffect::Transition)) {
+    red = StatusLedMath::interpolate(active_[1], active_[4], effectPhase_);
+    green = StatusLedMath::interpolate(active_[2], active_[5], effectPhase_);
+    blue = StatusLedMath::interpolate(active_[3], active_[6], effectPhase_);
+  } else if (active_[0] == static_cast<uint8_t>(StatusLedEffect::Cycle)) {
+    red = StatusLedMath::interpolate(active_[1], active_[4], triangle);
+    green = StatusLedMath::interpolate(active_[2], active_[5], triangle);
+    blue = StatusLedMath::interpolate(active_[3], active_[6], triangle);
   }
   renderColor(red, green, blue, level);
 }
 
 void StatusLedController::finishEffect() {
-  const bool transition = effect_ == StatusLedEffect::Transition;
-  effect_ = StatusLedEffect::None;
+  const bool transition =
+      active_[0] == static_cast<uint8_t>(StatusLedEffect::Transition);
+  active_[0] = 0;
   if (transition) {
-    customRed_ = alternateRed_;
-    customGreen_ = alternateGreen_;
-    customBlue_ = alternateBlue_;
+    memcpy(active_ + 1, active_ + 4, 3);
   }
-  renderColor(customRed_, customGreen_, customBlue_, brightness_);
+  renderColor(active_[1], active_[2], active_[3], active_[7]);
   if (condition_ == ManualCondition) {
     requested_[0] = 0;
     if (transition) {

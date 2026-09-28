@@ -36,7 +36,6 @@ type Artifact struct {
 
 // Metadata is generated from the validated firmware build manifest.
 type Metadata struct {
-	Format       string   `json:"format"`
 	GeneratedUTC string   `json:"generated_utc"`
 	Firmware     Artifact `json:"firmware"`
 	EEPROM       Artifact `json:"eeprom"`
@@ -65,9 +64,6 @@ func loadFS(files fs.FS) (Bundle, error) {
 	var metadata Metadata
 	if err := json.Unmarshal(raw, &metadata); err != nil {
 		return Bundle{}, fmt.Errorf("decode embedded default metadata: %w", err)
-	}
-	if metadata.Format != "controller-embedded-defaults/v1" {
-		return Bundle{}, fmt.Errorf("unsupported embedded default metadata format %q", metadata.Format)
 	}
 	firmware, err := loadArtifact(files, metadata.Firmware, "firmware")
 	if err != nil {

@@ -90,26 +90,19 @@ private:
   // initializers saves both flash copy data and constructor code on ATmega328P.
   PwmController *pwm_; // Non-owning shared PWM controller.
   StatusLedMode mode_;
-  uint8_t brightness_;
   uint8_t fallbackBrightness_; // Stable setting, not descriptor-local.
-  uint8_t customRed_;
-  uint8_t customGreen_;
-  uint8_t customBlue_;
-  uint8_t alternateRed_;
-  uint8_t alternateGreen_;
-  uint8_t alternateBlue_;
-  uint8_t minimumBrightness_;
   uint8_t effectPhase_;
-  uint8_t effectRepeats_;
   uint8_t renderedRed_;
   uint8_t renderedGreen_;
   uint8_t renderedBlue_;
   uint8_t condition_;
-  StatusLedEffect effect_;
   uint16_t effectPeriodMs_; // Full duration of one 64-phase cycle.
   uint32_t effectCycleStartedAt_;
   uint32_t cueEndsAt_; // millis() deadline; zero means no active cue.
   StatusLedCue cue_;
+  // Current rendered descriptor; repeats may count down without changing the
+  // separately retained owner request.
+  uint8_t active_[ProfilePayloadBytes];
   // The acknowledged manual owner survives temporary cue/safety rendering.
   // Keeping the exact descriptor also makes idempotence byte-exact.
   uint8_t requested_[ProfilePayloadBytes];

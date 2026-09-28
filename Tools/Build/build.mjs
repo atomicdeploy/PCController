@@ -83,10 +83,6 @@ const STALE_HOST_OUTPUTS = [
 	join(HOST_ROOT, 'controller')
 ]
 const HOST_MANIFEST_FORMAT = 'pccontroller-host-package-manifest/v1'
-const FIRMWARE_MANIFEST_FORMATS = Object.freeze([
-	'pccontroller-avr-firmware-manifest/v1',
-	'pccontroller-avr-firmware-manifest/v2'
-])
 const WINDOWS_GNU_PACKAGE_ID = 'BrechtSanders.WinLibs.POSIX.UCRT'
 const MINIMUM_NODE = [22, 12, 0]
 const MINIMUM_WEB_NODE = [22, 12, 0]
@@ -1791,7 +1787,6 @@ export function stageEmbeddedDefaults(manifest, identity) {
 		data_bytes: Number(eeprom.dataBytes), source_path: String(eeprom.path || '')
 	}
 	const metadata = {
-		format: 'controller-embedded-defaults/v1',
 		generated_utc: identity.hostBuildTime,
 		firmware: firmwareRecord,
 		eeprom: eepromRecord
@@ -2008,9 +2003,6 @@ function readFirmwareManifest() {
 	try { manifest = JSON.parse(readFileSync(path, 'utf8')) } catch (error) {
 		throw new BuildError(`decode firmware manifest: ${error.message}`)
 	}
-	if (!FIRMWARE_MANIFEST_FORMATS.includes(manifest.format)) {
-		throw new BuildError(`unexpected firmware manifest format: ${manifest.format}`)
-	}
 	let features
 	try {
 		features = normalizeFirmwareFeatures(manifest.source?.compileFeatures || [])
@@ -2019,12 +2011,6 @@ function readFirmwareManifest() {
 	}
 	if (JSON.stringify(features) !== JSON.stringify(manifest.source?.compileFeatures || [])) {
 		throw new BuildError('firmware manifest compile features must be unique and sorted canonically')
-	}
-	if (manifest.format.endsWith('/v1') && features.length !== 0) {
-		throw new BuildError('firmware manifest v1 cannot declare compile features')
-	}
-	if (manifest.format.endsWith('/v2') && features.length === 0) {
-		throw new BuildError('firmware manifest v2 requires at least one compile feature')
 	}
 	if (!Array.isArray(manifest.artifacts) || !manifest.artifacts.some(artifact => artifact.role === 'application')) {
 		throw new BuildError('firmware manifest has no canonical application artifact')

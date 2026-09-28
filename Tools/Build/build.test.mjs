@@ -700,7 +700,7 @@ test('firmware plan publishes the same target, artifacts, and explicit USBasp ro
 	})
 	assert.equal(result.status, 0, result.stderr || result.stdout)
 	const plan = JSON.parse(result.stdout)
-	assert.equal(plan.format, 'pccontroller-firmware-plan/v1')
+	assert.equal(Object.hasOwn(plan, 'format'), false)
 	assert.deepEqual(plan.target, BOARD)
 	assert.equal(plan.artifacts.application, '.build/firmware/PCController.ino.hex')
 	assert.equal(plan.artifacts.completeFlash, '.build/firmware/PCController.ino.with_bootloader.hex')
