@@ -44,7 +44,7 @@ func directProgrammingProgress(ctx context.Context, runtime *Runtime, kind strin
 			metadata["error_code"] = "programming_failed"
 			if errors.Is(failure, programmer.ErrToolchainUnavailable) {
 				metadata["error_code"] = "toolchain_unavailable"
-				metadata["bootloader_outcome"] = "not-attempted"
+				metadata["bootloader_outcome"] = "not_attempted"
 			}
 		}
 		runtime.PublishStructuredEvent(Event{Kind: "update." + state, Stream: EventStreamActivity, Text: progress.Detail, Metadata: metadata})
