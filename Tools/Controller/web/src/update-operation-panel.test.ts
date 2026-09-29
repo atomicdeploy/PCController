@@ -24,6 +24,7 @@ describe('update operation presentation', () => {
     expect(html).toContain(detail)
     expect(html).toContain('Last stage')
     expect(html).toContain('role="alert"')
+    expect(html).toContain('dir="auto"')
     expect(html).not.toContain('role="progressbar"')
   })
 })

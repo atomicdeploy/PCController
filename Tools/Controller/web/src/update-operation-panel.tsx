@@ -66,7 +66,7 @@ export function UpdateOperationPanel({ status, locale }: { status: UpdateStatus;
       <div><span>{percent === null ? copy('Waiting for this stage', 'در انتظار این مرحله') : copy('Current stage', 'مرحله جاری')}</span><strong>{percent === null ? '…' : `${percent}%`}</strong></div>
       <div key={stage} className={`update-progress${percent === null ? ' is-indeterminate' : ''}`} role="progressbar" aria-label={stageLabel} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent ?? undefined} aria-valuetext={percent === null ? copy('In progress; duration unknown', 'در حال اجرا؛ زمان نامشخص') : undefined}><i style={percent === null ? undefined : { width: `${percent}%` }} /></div>
     </div>}
-    {status.detail && <div className="update-operation__detail" role={failed ? 'alert' : undefined}>{status.detail}</div>}
+    {status.detail && <div className="update-operation__detail" dir="auto" role={failed ? 'alert' : undefined}>{status.detail}</div>}
     <dl className="update-operation__facts">
       {failed && stageLabel && <div><dt>{copy('Last stage', 'آخرین مرحله')}</dt><dd>{stageLabel}</dd></div>}
       {status.programming_method && status.programming_method !== 'none' && <div><dt>{copy('Connection', 'اتصال')}</dt><dd>{status.programming_method === 'urclock' ? 'UART / Urclock' : 'USBasp / ISP'}</dd></div>}
@@ -74,9 +74,9 @@ export function UpdateOperationPanel({ status, locale }: { status: UpdateStatus;
       {status.updated_at && <div><dt>{copy('Last activity', 'آخرین فعالیت')}</dt><dd>{new Date(status.updated_at).toLocaleTimeString(locale)}</dd></div>}
     </dl>
     <details className="update-operation__diagnostics"><summary><TerminalSquare size={16} />{copy('Technical details', 'جزئیات فنی')}</summary><dl>
-      <div><dt>{copy('Operation', 'عملیات')}</dt><dd><code>{status.id}</code></dd></div>
-      {status.error_code && <div><dt>{copy('Error', 'خطا')}</dt><dd><code>{status.error_code}</code></dd></div>}
-      {status.artifact_sha256 && <div><dt>SHA-256</dt><dd><code>{status.artifact_sha256}</code></dd></div>}
+      <div><dt>{copy('Operation', 'عملیات')}</dt><dd><bdi><code>{status.id}</code></bdi></dd></div>
+      {status.error_code && <div><dt>{copy('Error', 'خطا')}</dt><dd><bdi><code>{status.error_code}</code></bdi></dd></div>}
+      {status.artifact_sha256 && <div><dt>SHA-256</dt><dd><bdi><code>{status.artifact_sha256}</code></bdi></dd></div>}
     </dl></details>
   </section>
 }
