@@ -15,6 +15,15 @@ build.cmd --firmware-only --clean --no-color
 firmware.cmd build
 ```
 
+The named `eeprom-boot-opcodes` profile activates a living, schema-free EEPROM
+record in bytes 13..31, after the autonomous audio-cue record and before board
+settings. It accepts only bounded `BUZZER` and `STATUS_RGB` entries, validates
+the complete record and final commit marker before dispatching anything, and
+reuses the ordinary firmware dispatcher without pretending the frames came
+from a host. To satisfy the exact ATmega328P flash gate, the profile retains
+all local door/output cues through their immutable fallbacks while disabling
+only optional EEPROM-based cue customization.
+
 The first command runs the repository build pipeline and validates the packaged
 Intel HEX/EEPROM pair. The second opens the firmware-studio build surface. Add
 `--plan-json` or `--dry-run` to inspect its canonical plan without starting a

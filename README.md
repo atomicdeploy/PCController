@@ -125,6 +125,10 @@ with repeated `--firmware-feature eeprom-menu-labels` /
 `programming.firmware_features` configuration is overridden by the
 comma-separated `PCCONTROLLER_FIRMWARE_FEATURES` environment value; an explicit
 CLI selection overrides both. Unknown names and raw compiler flags are rejected.
+The `eeprom-boot-opcodes` profile keeps local door/output cues but uses their
+immutable defaults instead of loading cue parameters from EEPROM; that frees
+the flash required by the validated boot-script executor without overlapping
+the cue record.
 
 Build and test the Virtual Board through the same project-owned build plan:
 
