@@ -82,6 +82,57 @@ func TestRemoteTUIAttachFailureJoinsOwnershipProbeError(t *testing.T) {
 	}
 }
 
+func TestAttachedRemoteTUIYieldsToLocalOwnershipWhenPrimaryStops(t *testing.T) {
+	want := &hostInstanceClaim{}
+	calls := 0
+	claim, err := runRemoteTUIWithLocalFailover(
+		func(ctx context.Context) error {
+			<-ctx.Done()
+			return ctx.Err()
+		},
+		func(surface string) (*hostInstanceClaim, bool, error) {
+			if surface != "tui" {
+				t.Fatalf("surface=%q", surface)
+			}
+			calls++
+			if calls == 1 {
+				return nil, true, nil
+			}
+			return want, false, nil
+		},
+	)
+	if err != nil || claim != want {
+		t.Fatalf("claim=%p err=%v, want claim=%p", claim, err, want)
+	}
+	if calls < 2 {
+		t.Fatalf("ownership probes=%d, want at least 2", calls)
+	}
+}
+
+func TestAttachedRemoteTUIKeepsAttachErrorWhilePrimaryStillOwnsRuntime(t *testing.T) {
+	attachErr := errors.New("remote attach rejected")
+	claim, err := runRemoteTUIWithLocalFailover(
+		func(context.Context) error { return attachErr },
+		func(string) (*hostInstanceClaim, bool, error) { return nil, true, nil },
+	)
+	if claim != nil || !errors.Is(err, attachErr) {
+		t.Fatalf("claim=%p err=%v", claim, err)
+	}
+}
+
+func TestAttachedRemoteTUICleanExitDoesNotClaimRuntime(t *testing.T) {
+	claim, err := runRemoteTUIWithLocalFailover(
+		func(context.Context) error { return nil },
+		func(string) (*hostInstanceClaim, bool, error) {
+			t.Fatal("ownership should not be probed after a clean immediate exit")
+			return nil, false, nil
+		},
+	)
+	if claim != nil || err != nil {
+		t.Fatalf("claim=%p err=%v", claim, err)
+	}
+}
+
 func TestCompileOnlyCommandLoadsConfiguredFeaturesWithoutRuntimeStartup(t *testing.T) {
 	if value, present := os.LookupEnv(firmwareFeaturesEnvironment); present {
 		t.Cleanup(func() { _ = os.Setenv(firmwareFeaturesEnvironment, value) })
