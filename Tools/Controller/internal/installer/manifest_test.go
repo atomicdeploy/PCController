@@ -34,6 +34,48 @@ func TestVersionResourceIdentityRequiresExactStructuredFields(t *testing.T) {
 	}
 }
 
+func TestBrandedVersionResourceIdentityRequiresDeclaredMetadata(t *testing.T) {
+	const built = "2026-08-12T13:55:51Z"
+	source := strings.Repeat("a", 64)
+	manifest := PackageManifest{
+		SourceSHA256:   source,
+		BuildTime:      built,
+		ExecutablePath: "workshop-host.exe",
+	}
+	host := hostPackageManifest{}
+	host.Identity.Version = "1.2.3"
+	host.Identity.ProductName = "Workshop Control Suite"
+	host.Identity.CompanyName = "Example Devices LLC"
+	host.Identity.FileDescription = "Workshop controller host"
+	host.Identity.LegalCopyright = "Copyright 2026 Example Devices LLC"
+	values := map[string]string{
+		"ProductName":      host.Identity.ProductName,
+		"ProductVersion":   host.Identity.Version,
+		"OriginalFilename": manifest.ExecutablePath,
+		"PrivateBuild":     source,
+		"SpecialBuild":     built,
+		"CompanyName":      host.Identity.CompanyName,
+		"FileDescription":  host.Identity.FileDescription,
+		"LegalCopyright":   host.Identity.LegalCopyright,
+	}
+	if err := verifyWindowsResourceIdentity(values, manifest, host); err != nil {
+		t.Fatalf("verify branded version identity: %v", err)
+	}
+
+	for key, label := range map[string]string{
+		"CompanyName":     "company name",
+		"FileDescription": "file description",
+		"LegalCopyright":  "legal copyright",
+	} {
+		original := values[key]
+		values[key] = "tampered"
+		if err := verifyWindowsResourceIdentity(values, manifest, host); err == nil || !strings.Contains(err.Error(), label) {
+			t.Fatalf("tampered %s error = %v, want declared metadata failure", key, err)
+		}
+		values[key] = original
+	}
+}
+
 func TestVersionResourceParserRejectsDuplicateVersionPayload(t *testing.T) {
 	content := minimalResourcePE("1.2.3", strings.Repeat("a", 64), "2026-08-12T13:55:51Z", "")
 	location, err := parsePEResourceLocation(content)

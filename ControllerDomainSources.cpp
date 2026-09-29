@@ -1,0 +1,25 @@
+// Project-layer implementation aggregator for the root-level Project folder.
+#include "ProjectConfig.h"
+
+#include "Project/AddressableLeds.cpp"
+#if PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
+#include "Project/AudioCues.cpp"
+#endif
+#include "Project/BootMelody.cpp"
+#include "Project/CompactI2c.cpp"
+#include "Project/ControllerEvents.cpp"
+#include "Project/Core/MacroRing.cpp"
+#include "Project/EepromMenuLabels.cpp"
+#include "Project/IlluminationController.cpp"
+#include "Project/Ina219Sensor.cpp"
+#include "Project/MacroQueue.cpp"
+#include "Project/PwmController.cpp"
+#include "Project/PwmExpanderDriver.cpp"
+#include "Project/RelayController.cpp"
+#include "Project/RemoteLearningStore.cpp"
+#include "Project/ResetTelemetry.cpp"
+#include "Project/SafeResetController.cpp"
+#include "Project/SettingsStore.cpp"
+#include "Project/StatusLedController.cpp"
+#include "Project/SystemInputs.cpp"
+#include "Project/UartProtocol.cpp"

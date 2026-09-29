@@ -12,10 +12,15 @@ import (
 	"os/signal"
 	"syscall"
 
+	"pccontroller.local/controller/internal/envfile"
 	"pccontroller.local/controller/internal/programmer"
 )
 
 func main() {
+	if _, err := envfile.LoadProcess(); err != nil {
+		fmt.Fprintln(os.Stderr, "environment:", err)
+		os.Exit(1)
+	}
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "toolchain-resolver:", err)
 		os.Exit(1)

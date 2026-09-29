@@ -172,3 +172,23 @@ jobs:
           "$ARTIFACT_DIGEST"
           Tools/Controller/toolchain-lock.json
           "${{ steps.package.outputs.package-root }}"
+
+      # Keep every shipped opt-in firmware profile inside the same immutable
+      # flash/identity, SRAM, manifest, EEPROM, and Intel HEX gates as the
+      # default-off artifact. This validation deliberately runs after the
+      # default package is uploaded so it cannot replace the release artifact.
+      - name: "🧩 Build and validate EEPROM menu-label profile"
+        run: >-
+          ./build.sh
+          --firmware-only
+          --clean
+          --version "$PCCONTROLLER_VERSION"
+          --firmware-feature eeprom-menu-labels
+
+      - name: "💾 Assert the feature-profile EEPROM and manifest contract"
+        run: >-
+          node .github/scripts/assert-firmware-defaults.mjs
+          .build/firmware/firmware-manifest.json
+
+      - name: "🔎 Recheck feature-profile records and boundaries"
+        run: ./firmware.sh check

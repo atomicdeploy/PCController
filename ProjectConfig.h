@@ -38,6 +38,38 @@
 #define PCCONTROLLER_ENABLE_I2C_LCD 0
 #endif
 
+// Optional cooperative callback scheduler. No production task is registered
+// on the ATmega328P profile, so keeping the engine off recovers its dormant
+// object/code while preserving a build gate for larger-MCU profiles.
+#ifndef PCCONTROLLER_ENABLE_TASK_SCHEDULER
+#define PCCONTROLLER_ENABLE_TASK_SCHEDULER 0
+#endif
+
+// TonePlayer remains the board-wide playback engine in every profile. This
+// gate owns only unsolicited/local cue policy: door and motion/output feedback
+// can be omitted by a host-only or larger-MCU profile without removing direct
+// BUZZER commands, macro playback, or the Silent setting.
+#ifndef PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
+#define PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES 1
+#endif
+
+// The compact core-cue controller may load four frequency/duration triples
+// from the CRC-backed startup region. Disabling this keeps the exact immutable
+// fallbacks and avoids an EEPROM dependency; it does not disable local cues.
+#ifndef PCCONTROLLER_ENABLE_EEPROM_AUDIO_CUES
+#define PCCONTROLLER_ENABLE_EEPROM_AUDIO_CUES 1
+#endif
+
+#if (PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES != 0) && \
+    (PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES != 1)
+#error "PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES must be 0 or 1"
+#endif
+
+#if (PCCONTROLLER_ENABLE_EEPROM_AUDIO_CUES != 0) && \
+    (PCCONTROLLER_ENABLE_EEPROM_AUDIO_CUES != 1)
+#error "PCCONTROLLER_ENABLE_EEPROM_AUDIO_CUES must be 0 or 1"
+#endif
+
 // Rich catalog/layout presentation is host-owned. Stable page IDs and the
 // fixed EEPROM bytes remain, but the AVR does not carry duplicate directory,
 // ordering, hierarchy, or layout-protocol implementations in release builds.
@@ -47,6 +79,13 @@
 
 #ifndef PCCONTROLLER_MENU_LAYOUT_STORAGE
 #define PCCONTROLLER_MENU_LAYOUT_STORAGE 1
+#endif
+
+// Keep the fixed 4-character front-panel menu labels in the factory EEPROM
+// image instead of program flash. The feature is deliberately opt-in because
+// an unprovisioned/corrupt EEPROM must fall back to the built-in labels.
+#ifndef PCCONTROLLER_ENABLE_EEPROM_MENU_LABELS
+#define PCCONTROLLER_ENABLE_EEPROM_MENU_LABELS 0
 #endif
 
 // AVR-owned persistent front-panel catalog. Stable page IDs remain protocol

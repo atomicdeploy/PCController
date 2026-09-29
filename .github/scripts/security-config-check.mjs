@@ -1,6 +1,9 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { loadProjectEnv } from "../../Tools/Build/env.mjs";
+
+loadProjectEnv();
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const defaultRoot = resolve(scriptDirectory, "..", "..");
@@ -283,7 +286,7 @@ export function validateCodeql(source, sourceLanguages) {
       "./cmd/controller-cabi",
     ]],
     ["go-windows", [
-      "../Build/go-tests.mjs --module . --output ../../.build/tests/go",
+      "../Build/go-tests.mjs --module . --go go",
       "go run ./winres/generate_icon.go",
       "-buildmode=c-shared",
       "./cmd/controller-cabi",
@@ -296,7 +299,8 @@ export function validateCodeql(source, sourceLanguages) {
     ["cpp-windows", [
       "-S Tools/VirtualBoard",
       "cmake --build .build/codeql-virtual-board",
-      "Tools\\Controller\\examples\\c_abi_smoke.c",
+      "-S Tools\\Controller",
+      "pccontroller_cabi_installed_smoke",
     ]],
   ]);
   const initIndex = source.indexOf("github/codeql-action/init@");

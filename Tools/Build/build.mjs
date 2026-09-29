@@ -6,6 +6,7 @@
 
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
+import { inflateSync } from 'node:zlib'
 import {
 	chmodSync,
 	copyFileSync,
@@ -23,6 +24,7 @@ import {
 } from 'node:fs'
 import { basename, delimiter, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { loadProjectEnv } from './env.mjs'
 import { createChalk, renderUnicodeBanner, renderUnicodeTable } from './presentation.mjs'
 import { PRODUCT_METADATA, resolveProductTitle } from './product-metadata.mjs'
 import {
@@ -33,10 +35,13 @@ import {
 	commandPlanPaths,
 	controllerCommand as createControllerCommand,
 	createControllerProgramCommand,
+	normalizeFirmwareFeatures,
 	programmingArtifact,
 	relativeCommandPlanPaths,
 	sourceControllerInvocation
 } from '../CommandPlan/controller-command.mjs'
+
+loadProjectEnv()
 
 export { resolveProductTitle } from './product-metadata.mjs'
 
@@ -45,15 +50,24 @@ export const PROJECT_ROOT = resolve(dirname(SCRIPT), '..', '..')
 const HOST_ROOT = join(PROJECT_ROOT, 'Tools', 'Controller')
 const WEB_ROOT = join(HOST_ROOT, 'web')
 const WEB_DIST = join(HOST_ROOT, 'internal', 'webui', 'dist')
+const VIRTUAL_BOARD_ROOT = join(PROJECT_ROOT, 'Tools', 'VirtualBoard')
+const VIRTUAL_BOARD_BUILD_ROOT = join(VIRTUAL_BOARD_ROOT, '.build')
+const VIRTUAL_BOARD_PRESETS = Object.freeze(['debug', 'release', 'relwithdebinfo'])
 const WEB_LOCK = join(WEB_ROOT, 'package-lock.json')
 const BUILD_ROOT = join(PROJECT_ROOT, '.build')
 const COMMAND_PATHS = commandPlanPaths(PROJECT_ROOT)
 const FIRMWARE_OUTPUT = COMMAND_PATHS.firmwareOutput
 const PACKAGE_ROOT = join(BUILD_ROOT, 'package')
-const STABLE_GO_TEST_ROOT = join(BUILD_ROOT, 'tests', 'go')
+// Windows Firewall keys application rules by executable path. Keep local test
+// programs at one product-owned, worktree-independent path so branch/worktree
+// changes cannot manufacture a stream of new application identities.
+const STABLE_GO_TEST_ROOT = process.platform === 'win32' && process.env.LOCALAPPDATA
+	? join(process.env.LOCALAPPDATA, 'PCController', 'test-programs', 'go')
+	: join(BUILD_ROOT, 'tests', 'go')
 const STABLE_GO_TEST_RUNNER = join(PROJECT_ROOT, 'Tools', 'Build', 'go-tests.mjs')
 const TOOLCHAIN_POLICY_GENERATOR = join(HOST_ROOT, 'internal', 'programmer', 'generate-toolchain-policy.mjs')
 const PRODUCT_IDENTITY_GENERATOR = join(HOST_ROOT, 'internal', 'productidentity', 'generate.mjs')
+const WINRES_TEMPLATE = join(HOST_ROOT, 'winres', 'winres.json')
 const DEFAULT_ASSET_ROOT = join(HOST_ROOT, 'internal', 'defaultassets', 'assets')
 const DEFAULT_FIRMWARE = join(DEFAULT_ASSET_ROOT, 'default-firmware.hex')
 const DEFAULT_EEPROM = join(DEFAULT_ASSET_ROOT, 'default-eeprom.hex')
@@ -70,8 +84,6 @@ const STALE_HOST_OUTPUTS = [
 	join(HOST_ROOT, 'controller.exe'),
 	join(HOST_ROOT, 'controller')
 ]
-const HOST_MANIFEST_FORMAT = 'pccontroller-host-package-manifest/v1'
-const FIRMWARE_MANIFEST_FORMAT = 'pccontroller-avr-firmware-manifest/v1'
 const WINDOWS_GNU_PACKAGE_ID = 'BrechtSanders.WinLibs.POSIX.UCRT'
 const MINIMUM_NODE = [22, 12, 0]
 const MINIMUM_WEB_NODE = [22, 12, 0]
@@ -152,6 +164,9 @@ function buildInstant(options, env, now = new Date()) {
 }
 
 export function resolveBuildIdentity(options, env = process.env, now = new Date()) {
+	const branding = loadBrandingManifest(options.branding)
+	const template = JSON.parse(readFileSync(WINRES_TEMPLATE, 'utf8'))
+	const defaults = template.RT_VERSION?.['#1']?.['0409']?.info?.['0409'] || {}
 	const instant = buildInstant(options, env, now)
 	const packed = normalizeHexTimestamp(
 		options.buildTimestamp || env.PCCONTROLLER_BUILD_TIMESTAMP || packBuildTimestamp(instant)
@@ -161,19 +176,52 @@ export function resolveBuildIdentity(options, env = process.env, now = new Date(
 		throw new BuildError('version may contain only letters, digits, dot, underscore, plus, and hyphen', 2)
 	}
 	const appName = normalizeBuildPresentation(
-		options.appName !== undefined ? options.appName : environmentValue(env, 'PCCONTROLLER_BUILD_APP_NAME') ||
-			environmentValue(env, 'APP_TITLE') || PRODUCT_METADATA.productName,
+		options.appName !== undefined ? options.appName : branding.applicationName || environmentValue(env, 'PCCONTROLLER_BUILD_APP_NAME') ||
+			environmentValue(env, 'APP_NAME') || environmentValue(env, 'APP_TITLE') || PRODUCT_METADATA.productName,
 		'build application name', 64
 	)
 	const tagline = normalizeBuildPresentation(
-		options.tagline !== undefined ? options.tagline : environmentValue(env, 'PCCONTROLLER_BUILD_TAGLINE') ||
+		options.tagline !== undefined ? options.tagline : branding.tagline || environmentValue(env, 'PCCONTROLLER_BUILD_TAGLINE') ||
 			environmentValue(env, 'APP_TAGLINE') || PRODUCT_METADATA.productFirstRunTagline,
 		'build first-run tagline', 96
 	)
+	const productName = normalizeBuildPresentation(
+		options.productName !== undefined ? options.productName : branding.productName ||
+			environmentValue(env, 'PCCONTROLLER_BUILD_PRODUCT_NAME') || appName,
+		'build product name', 64
+	)
+	const companyName = normalizeBuildPresentation(
+		options.companyName !== undefined ? options.companyName : branding.companyName ||
+			environmentValue(env, 'PCCONTROLLER_BUILD_COMPANY_NAME') || defaults.CompanyName,
+		'build company name', 96
+	)
+	const fileDescription = normalizeBuildPresentation(
+		options.fileDescription !== undefined ? options.fileDescription : branding.fileDescription ||
+			environmentValue(env, 'PCCONTROLLER_BUILD_FILE_DESCRIPTION') || defaults.FileDescription,
+		'build file description', 128
+	)
+	const legalCopyright = normalizeOptionalBuildPresentation(
+		options.legalCopyright !== undefined ? options.legalCopyright : branding.legalCopyright ||
+			environmentValue(env, 'PCCONTROLLER_BUILD_COPYRIGHT') || defaults.LegalCopyright || '',
+		'build copyright', 192
+	)
+	const executableName = normalizeExecutableName(
+		options.executableName !== undefined ? options.executableName : branding.executableName ||
+			environmentValue(env, 'PCCONTROLLER_BUILD_EXECUTABLE_NAME') || 'controller'
+	)
+	const iconResources = resolveIconResources(options, branding, env)
 	return {
 		version,
 		appName,
 		tagline,
+		productName,
+		companyName,
+		fileDescription,
+		legalCopyright,
+		executableName,
+		iconResources,
+		toastIcon: resolveBrandAsset(options.toastIcon ?? branding.toastIcon ?? environmentValue(env, 'PCCONTROLLER_BUILD_TOAST_ICON'), branding.directory, 'toast icon', 'png'),
+		brandingSource: branding.path,
 		hostBuildTime: instant.toISOString().replace('.000Z', 'Z'),
 		packedTimestamp: packed,
 		env: {
@@ -189,10 +237,201 @@ export function resolveBuildIdentity(options, env = process.env, now = new Date(
 	}
 }
 
+function normalizeOptionalBuildPresentation(value, label, maximum) {
+	const text = String(value ?? '').trim()
+	if (!text) return ''
+	return normalizeBuildPresentation(text, label, maximum)
+}
+
+function normalizeExecutableName(value) {
+	const text = String(value ?? '').trim()
+	if (!/^[A-Za-z0-9][A-Za-z0-9._ -]{0,63}$/.test(text) || /[. ]$/.test(text) || /\.exe$/i.test(text)) {
+		throw new BuildError('build executable name must be a safe extension-free file name of 1..64 characters', 2)
+	}
+	if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(text)) {
+		throw new BuildError('build executable name is reserved by Windows', 2)
+	}
+	return text
+}
+
+function loadBrandingManifest(path) {
+	if (!path) return { directory: '', path: '', windowsIcons: {} }
+	const absolute = resolve(String(path))
+	let value
+	try { value = JSON.parse(readFileSync(absolute, 'utf8')) } catch (error) {
+		throw new BuildError(`read branding manifest ${absolute}: ${error.message}`, 2)
+	}
+	if (!value || typeof value !== 'object' || Array.isArray(value)) throw new BuildError('branding manifest must be a JSON object', 2)
+	if (value.windowsIcons !== undefined && (!value.windowsIcons || Array.isArray(value.windowsIcons) || typeof value.windowsIcons !== 'object')) {
+		throw new BuildError('branding manifest windowsIcons must be an object', 2)
+	}
+	return { ...value, directory: dirname(absolute), path: absolute, windowsIcons: value.windowsIcons || {} }
+}
+
+function resolveBrandAsset(path, directory, label, extension) {
+	if (!path) return ''
+	const absolute = resolve(directory || PROJECT_ROOT, String(path))
+	if (extname(absolute).toLowerCase() !== `.${extension}`) throw new BuildError(`${label} must be a .${extension} file`, 2)
+	let content
+	try { content = readFileSync(absolute) } catch (error) { throw new BuildError(`read ${label} ${absolute}: ${error.message}`, 2) }
+	if (extension === 'ico') inspectICO(content, label)
+	if (extension === 'png') inspectPNG(content, label)
+	return absolute
+}
+
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+
+function crc32(content) {
+	let crc = 0xffffffff
+	for (const byte of content) {
+		crc ^= byte
+		for (let bit = 0; bit < 8; bit += 1) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1))
+	}
+	return (crc ^ 0xffffffff) >>> 0
+}
+
+export function inspectPNG(content, label = 'image') {
+	if (!Buffer.isBuffer(content) || content.length < 45 || !content.subarray(0, 8).equals(PNG_SIGNATURE)) {
+		throw new BuildError(`${label} is not a PNG image`, 2)
+	}
+	let offset = 8
+	let header = null
+	let ended = false
+	const compressed = []
+	while (offset < content.length) {
+		if (offset + 12 > content.length) throw new BuildError(`${label} has a truncated PNG chunk`, 2)
+		const bytes = content.readUInt32BE(offset)
+		const end = offset + 12 + bytes
+		if (bytes > 64 << 20 || end > content.length) throw new BuildError(`${label} has an invalid PNG chunk length`, 2)
+		const type = content.toString('ascii', offset + 4, offset + 8)
+		const payload = content.subarray(offset + 8, offset + 8 + bytes)
+		const expectedCRC = content.readUInt32BE(offset + 8 + bytes)
+		if (crc32(content.subarray(offset + 4, offset + 8 + bytes)) !== expectedCRC) {
+			throw new BuildError(`${label} has an invalid PNG ${type} CRC`, 2)
+		}
+		if (header === null && type !== 'IHDR') throw new BuildError(`${label} PNG does not start with IHDR`, 2)
+		if (type === 'IHDR') {
+			if (header !== null || bytes !== 13) throw new BuildError(`${label} has an invalid PNG IHDR`, 2)
+			const width = payload.readUInt32BE(0)
+			const height = payload.readUInt32BE(4)
+			const bitDepth = payload[8]
+			const colorType = payload[9]
+			const validDepths = { 0: [1, 2, 4, 8, 16], 2: [8, 16], 3: [1, 2, 4, 8], 4: [8, 16], 6: [8, 16] }
+			if (width < 1 || height < 1 || width > 16384 || height > 16384 ||
+				!validDepths[colorType]?.includes(bitDepth) || payload[10] !== 0 || payload[11] !== 0 || ![0, 1].includes(payload[12])) {
+				throw new BuildError(`${label} has unsupported PNG image parameters`, 2)
+			}
+			header = { width, height, bitDepth, colorType, interlace: payload[12] }
+		} else if (type === 'IDAT') compressed.push(payload)
+		else if (type === 'IEND') {
+			if (bytes !== 0 || ended) throw new BuildError(`${label} has an invalid PNG IEND`, 2)
+			ended = true
+			if (end !== content.length) throw new BuildError(`${label} has data after PNG IEND`, 2)
+		}
+		offset = end
+	}
+	if (!header || !ended || compressed.length === 0) throw new BuildError(`${label} PNG is missing image data`, 2)
+	try {
+		const decoded = inflateSync(Buffer.concat(compressed), { maxOutputLength: 256 << 20 })
+		const channels = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 }[header.colorType]
+		const passes = header.interlace === 0
+			? [[0, 0, 1, 1]]
+			: [[0, 0, 8, 8], [4, 0, 8, 8], [0, 4, 4, 8], [2, 0, 4, 4], [0, 2, 2, 4], [1, 0, 2, 2], [0, 1, 1, 2]]
+		let decodedOffset = 0
+		for (const [startX, startY, stepX, stepY] of passes) {
+			const passWidth = header.width > startX ? Math.ceil((header.width - startX) / stepX) : 0
+			const passHeight = header.height > startY ? Math.ceil((header.height - startY) / stepY) : 0
+			if (passWidth === 0 || passHeight === 0) continue
+			const rowBytes = Math.ceil(passWidth * channels * header.bitDepth / 8)
+			for (let row = 0; row < passHeight; row += 1) {
+				if (decodedOffset >= decoded.length || decoded[decodedOffset] > 4) throw new Error('invalid PNG scanline filter')
+				decodedOffset += 1 + rowBytes
+			}
+		}
+		if (decodedOffset !== decoded.length) throw new Error('unexpected PNG scanline payload length')
+	} catch (error) {
+		throw new BuildError(`${label} has an invalid PNG image payload: ${error.message}`, 2)
+	}
+	return Object.freeze(header)
+}
+
+export function inspectICO(content, label = 'icon') {
+	if (!Buffer.isBuffer(content) || content.length < 22 || content.readUInt16LE(0) !== 0 || content.readUInt16LE(2) !== 1) {
+		throw new BuildError(`${label} is not a Windows ICO`, 2)
+	}
+	const count = content.readUInt16LE(4)
+	if (count < 1 || 6 + count * 16 > content.length) throw new BuildError(`${label} has an invalid ICO directory`, 2)
+	const sizes = []
+	const ranges = []
+	for (let index = 0; index < count; index += 1) {
+		const entry = 6 + index * 16
+		const width = content[entry] || 256
+		const height = content[entry + 1] || 256
+		const bytes = content.readUInt32LE(entry + 8)
+		const offset = content.readUInt32LE(entry + 12)
+		if (width !== height || bytes === 0 || offset < 6 + count * 16 || offset + bytes > content.length) {
+			throw new BuildError(`${label} has an invalid ICO image entry`, 2)
+		}
+		if (ranges.some(range => offset < range.end && offset + bytes > range.start)) {
+			throw new BuildError(`${label} has overlapping ICO image entries`, 2)
+		}
+		ranges.push({ start: offset, end: offset + bytes })
+		const image = content.subarray(offset, offset + bytes)
+		if (image.subarray(0, 8).equals(PNG_SIGNATURE)) {
+			const png = inspectPNG(image, `${label} ${width}x${height}`)
+			if (png.width !== width || png.height !== height) throw new BuildError(`${label} ICO directory dimensions differ from its PNG payload`, 2)
+		} else {
+			if (image.length < 40) throw new BuildError(`${label} has an invalid ICO bitmap payload`, 2)
+			const headerBytes = image.readUInt32LE(0)
+			const bitmapWidth = Math.abs(image.readInt32LE(4))
+			const bitmapHeight = Math.abs(image.readInt32LE(8))
+			const planes = image.readUInt16LE(12)
+			const bitDepth = image.readUInt16LE(14)
+			const compression = image.readUInt32LE(16)
+			const colorsUsed = image.readUInt32LE(32)
+			const paletteEntries = bitDepth <= 8 ? (colorsUsed || (1 << bitDepth)) : colorsUsed
+			const xorStride = Math.ceil(width * bitDepth / 32) * 4
+			const pixelBytes = headerBytes + paletteEntries * 4 + xorStride * height
+			if (![40, 52, 56, 108, 124].includes(headerBytes) || headerBytes > image.length || bitmapWidth !== width ||
+				bitmapHeight !== height * 2 || planes !== 1 || ![1, 4, 8, 16, 24, 32].includes(bitDepth) ||
+				![0, 3, 6].includes(compression) || pixelBytes > image.length) {
+				throw new BuildError(`${label} has an invalid ICO bitmap payload`, 2)
+			}
+		}
+		sizes.push(width)
+	}
+	return Object.freeze({ count, sizes: Object.freeze(sizes) })
+}
+
+function resolveIconResources(options, branding, env) {
+	const resources = { ...branding.windowsIcons }
+	if (options.icon !== undefined) resources.APP = options.icon
+	else if (!resources.APP) {
+		const applicationIcon = environmentValue(env, 'PCCONTROLLER_BUILD_ICON')
+		if (applicationIcon) resources.APP = applicationIcon
+	}
+	for (const entry of options.iconResources || []) {
+		const separator = entry.indexOf('=')
+		if (separator <= 0) throw new BuildError('--resource-icon requires NAME=PATH', 2)
+		resources[entry.slice(0, separator)] = entry.slice(separator + 1)
+	}
+	const resolved = {}
+	for (const [rawName, path] of Object.entries(resources)) {
+		const name = String(rawName).trim().toUpperCase()
+		if (!/^[A-Z][A-Z0-9_]{0,63}$/.test(name)) throw new BuildError(`invalid Win32 icon resource name ${JSON.stringify(rawName)}`, 2)
+		resolved[name] = resolveBrandAsset(path, branding.directory, `Win32 icon resource ${name}`, 'ico')
+	}
+	return Object.freeze(resolved)
+}
+
 export function parseArguments(argv, env = process.env) {
+	const firmwareFeaturesEnvironment = environmentValue(env, 'PCCONTROLLER_FIRMWARE_FEATURES')
 	const options = {
 		firmware: true,
 		host: true,
+		virtualBoard: false,
+		virtualBoardPreset: 'release',
+		virtualBoardPresetSet: false,
 		selection: '',
 		clean: false,
 		cleanOnly: false,
@@ -213,7 +452,7 @@ export function parseArguments(argv, env = process.env) {
 		method: 'urclock',
 		device: env.PCCONTROLLER_DEVICE || env.PCCONTROLLER_PORT || '',
 		programmer: env.PCCONTROLLER_PROGRAMMER || '',
-		allowIncompleteBackup: false,
+		deployment: '',
 		installBootloader: false,
 		toolchainSync: false,
 		toolchainCLI: environmentValue(env, 'PCCONTROLLER_TOOLCHAIN_CLI'),
@@ -221,10 +460,25 @@ export function parseArguments(argv, env = process.env) {
 		version: '',
 		appName: undefined,
 		tagline: undefined,
+		branding: '',
+		productName: undefined,
+		companyName: undefined,
+		fileDescription: undefined,
+		legalCopyright: undefined,
+		executableName: undefined,
+		icon: undefined,
+		iconResources: [],
+		toastIcon: undefined,
 		buildTime: '',
-		buildTimestamp: ''
+		buildTimestamp: '',
+		firmwareFeatures: String(firmwareFeaturesEnvironment).trim() === ''
+			? [] : String(firmwareFeaturesEnvironment).split(','),
+		firmwareFeaturesFromEnvironment: String(firmwareFeaturesEnvironment).trim() !== '',
+		firmwareFeaturesExplicit: false,
+		noFirmwareFeatures: false
 	}
 	let substantive = false
+	let firmwareFeaturesExplicit = false
 	for (let index = 0; index < argv.length; index += 1) {
 		const argument = argv[index]
 		const equals = argument.indexOf('=')
@@ -233,13 +487,26 @@ export function parseArguments(argv, env = process.env) {
 		switch (name.toLowerCase()) {
 			case '--help':
 			case '-h': options.help = true; break
-			case '--all': substantive = true; options.selection = 'all'; options.firmware = true; options.host = true; break
+			case '--all':
+				if (options.selection === 'virtual-board') throw new BuildError('choose either --virtual-board-only or --all', 2)
+				substantive = true; options.selection = 'all'; options.firmware = true; options.host = true; break
 			case '--firmware-only':
-				if (options.selection === 'host') throw new BuildError('choose either --firmware-only or --host-only', 2)
+				if (options.selection === 'host' || options.selection === 'virtual-board') throw new BuildError('choose either --firmware-only, --host-only, or --virtual-board-only', 2)
 				substantive = true; options.selection = 'firmware'; options.firmware = true; options.host = false; break
 			case '--host-only':
-				if (options.selection === 'firmware') throw new BuildError('choose either --firmware-only or --host-only', 2)
+				if (options.selection === 'firmware' || options.selection === 'virtual-board') throw new BuildError('choose either --firmware-only, --host-only, or --virtual-board-only', 2)
 				substantive = true; options.selection = 'host'; options.firmware = false; options.host = true; break
+			case '--virtual-board':
+				substantive = true; options.virtualBoard = true; break
+			case '--virtual-board-only':
+				if (options.selection === 'firmware' || options.selection === 'host' || options.selection === 'all') {
+					throw new BuildError('choose either --firmware-only, --host-only, or --virtual-board-only', 2)
+				}
+				substantive = true; options.selection = 'virtual-board'; options.firmware = false; options.host = false; options.virtualBoard = true; break
+			case '--virtual-board-preset': {
+				const [value, next] = valueAfter(argv, index, inline, name)
+				options.virtualBoardPreset = value.toLowerCase(); options.virtualBoardPresetSet = true; index = next; break
+			}
 			case '--clean': options.clean = true; break
 			case '--skip-tests': options.tests = false; options.vet = false; break
 			case '--retest': options.retest = true; break
@@ -255,7 +522,11 @@ export function parseArguments(argv, env = process.env) {
 			case '--dry-run': options.dryRun = true; break
 			case '--plan-json': options.planJSON = true; options.noColor = true; break
 			case '--upload': options.upload = true; substantive = true; break
-			case '--allow-incomplete-backup': options.allowIncompleteBackup = true; break
+			case '--deployment': {
+				const [value, next] = valueAfter(argv, index, inline, name)
+				if (!['production', 'development'].includes(value)) throw new BuildError('--deployment must be production or development', 2)
+				options.deployment = value; index = next; break
+			}
 			case '--install-bootloader': options.installBootloader = true; substantive = true; break
 			case '--toolchain-sync': options.toolchainSync = true; options.host = true; substantive = true; break
 			case '--method': {
@@ -292,6 +563,42 @@ export function parseArguments(argv, env = process.env) {
 				const [value, next] = valueAfter(argv, index, inline, name)
 				options.tagline = value; index = next; break
 			}
+			case '--branding': {
+				const [value, next] = valueAfter(argv, index, inline, name)
+				options.branding = value; index = next; break
+			}
+			case '--product-name': {
+				const [value, next] = valueAfter(argv, index, inline, name)
+				options.productName = value; index = next; break
+			}
+			case '--company-name': {
+				const [value, next] = valueAfter(argv, index, inline, name)
+				options.companyName = value; index = next; break
+			}
+			case '--file-description': {
+				const [value, next] = valueAfter(argv, index, inline, name)
+				options.fileDescription = value; index = next; break
+			}
+			case '--copyright': {
+				const [value, next] = valueAfter(argv, index, inline, name)
+				options.legalCopyright = value; index = next; break
+			}
+			case '--executable-name': {
+				const [value, next] = valueAfter(argv, index, inline, name)
+				options.executableName = value; index = next; break
+			}
+			case '--icon': {
+				const [value, next] = valueAfter(argv, index, inline, name)
+				options.icon = value; index = next; break
+			}
+			case '--resource-icon': {
+				const [value, next] = valueAfter(argv, index, inline, name)
+				options.iconResources.push(value); index = next; break
+			}
+			case '--toast-icon': {
+				const [value, next] = valueAfter(argv, index, inline, name)
+				options.toastIcon = value; index = next; break
+			}
 			case '--build-time': {
 				const [value, next] = valueAfter(argv, index, inline, name)
 				options.buildTime = value; index = next; break
@@ -300,10 +607,35 @@ export function parseArguments(argv, env = process.env) {
 				const [value, next] = valueAfter(argv, index, inline, name)
 				options.buildTimestamp = value; index = next; break
 			}
+			case '--firmware-feature': {
+				const [value, next] = valueAfter(argv, index, inline, name)
+				if (!firmwareFeaturesExplicit) options.firmwareFeatures = []
+				firmwareFeaturesExplicit = true
+				options.firmwareFeaturesExplicit = true
+				options.firmwareFeatures.push(value); index = next; break
+			}
+			case '--no-firmware-features': options.noFirmwareFeatures = true; break
 			default: throw new BuildError(`unknown option: ${argument}`, 2)
 		}
 	}
 	if (options.help) return options
+	if (options.noFirmwareFeatures && firmwareFeaturesExplicit) {
+		throw new BuildError('--no-firmware-features cannot be combined with --firmware-feature', 2)
+	}
+	if (options.noFirmwareFeatures) options.firmwareFeatures = []
+	if (options.firmwareFeaturesExplicit) {
+		try {
+			options.firmwareFeatures = normalizeFirmwareFeatures(options.firmwareFeatures)
+		} catch (error) {
+			throw new BuildError(error.message || String(error), error.exitCode || 2)
+		}
+	}
+	if (!VIRTUAL_BOARD_PRESETS.includes(options.virtualBoardPreset)) {
+		throw new BuildError(`--virtual-board-preset must be one of ${VIRTUAL_BOARD_PRESETS.join(', ')}`, 2)
+	}
+	if (options.virtualBoardPresetSet && !options.virtualBoard) {
+		throw new BuildError('--virtual-board-preset requires --virtual-board or --virtual-board-only', 2)
+	}
 	if (!PROGRAMMING_METHODS.includes(options.method)) {
 		throw new BuildError('--method must be urclock or usbasp; direct dependency upload is intentionally disabled', 2)
 	}
@@ -330,6 +662,16 @@ export function parseArguments(argv, env = process.env) {
 		throw new BuildError('--toolchain-config requires firmware compilation', 2)
 	}
 	options.cleanOnly = options.clean && !substantive
+	if ((options.firmwareFeaturesExplicit || options.noFirmwareFeatures) &&
+		(!options.firmware || options.cleanOnly)) {
+		throw new BuildError('explicit firmware-feature selection requires firmware compilation', 2)
+	}
+	if (!options.firmware || options.cleanOnly) options.firmwareFeatures = []
+	try {
+		options.firmwareFeatures = normalizeFirmwareFeatures(options.firmwareFeatures)
+	} catch (error) {
+		throw new BuildError(error.message || String(error), error.exitCode || 2)
+	}
 	return options
 }
 
@@ -338,6 +680,28 @@ function commandAction(id, stage, file, args, cwd, hardware = false) {
 }
 
 export function createPlan(options, identity, platform = process.platform) {
+	const rawFirmwareFeatures = options.firmwareFeatures ?? []
+	const hasFirmwareFeatureValues = Array.isArray(rawFirmwareFeatures)
+		? rawFirmwareFeatures.length !== 0
+		: true
+	const selectionExplicit = options.firmwareFeaturesExplicit === true ||
+		options.noFirmwareFeatures === true ||
+		(hasFirmwareFeatureValues && options.firmwareFeaturesFromEnvironment !== true)
+	const firmwareCompilationSelected = options.firmware && !options.cleanOnly
+	if (selectionExplicit && !firmwareCompilationSelected) {
+		throw new BuildError('explicit firmware-feature selection requires firmware compilation', 2)
+	}
+	let firmwareFeatures
+	try {
+		firmwareFeatures = normalizeFirmwareFeatures(
+			firmwareCompilationSelected ? rawFirmwareFeatures : []
+		)
+	} catch (error) {
+		throw new BuildError(error.message || String(error), error.exitCode || 2)
+	}
+	if (options.noFirmwareFeatures && firmwareFeatures.length !== 0) {
+		throw new BuildError('--no-firmware-features cannot be combined with --firmware-feature', 2)
+	}
 	const actions = []
 	if (options.clean) actions.push({
 		id: 'clean',
@@ -367,7 +731,9 @@ export function createPlan(options, identity, platform = process.platform) {
 			sketch: PROJECT_ROOT,
 			outputDir: FIRMWARE_OUTPUT,
 			toolchainCLI: options.toolchainCLI,
-			toolchainConfig: options.toolchainConfig
+			toolchainConfig: options.toolchainConfig,
+			firmwareFeatures,
+			noFirmwareFeatures: firmwareFeatures.length === 0
 		})
 		actions.push(commandAction(
 			'firmware-compile',
@@ -425,15 +791,16 @@ export function createPlan(options, identity, platform = process.platform) {
 			PROJECT_ROOT
 		))
 		if (options.vet) actions.push(commandAction('go-vet', 'Run Go vet', 'go', ['vet', './...'], HOST_ROOT))
-		actions.push(commandAction('host-build', 'Build controller host', 'go', ['build', '-buildvcs=false', '-trimpath', '-ldflags', `<identity ${identity.version} ${identity.hostBuildTime}>`, '-o', '<staging>/controller', './cmd/controller'], HOST_ROOT))
+		const plannedExecutable = `<staging>/${platformExecutableName(identity, platform)}`
+		actions.push(commandAction('host-build', 'Build controller host', 'go', ['build', '-buildvcs=false', '-trimpath', '-ldflags', `<identity ${identity.version} ${identity.hostBuildTime}>`, '-o', plannedExecutable, './cmd/controller'], HOST_ROOT))
 		if (platform === 'win32' && options.resources) actions.push(commandAction('winres', 'Apply Win32 resources', 'go-winres', [
-			'patch', '--in', 'winres/winres.json', '--delete', '--no-backup',
+			'patch', '--in', '<staging>/winres-identity.json', '--delete', '--no-backup',
 			'--product-version', identity.version, '--file-version', identity.version,
-			'<staging>/controller.exe'
+			plannedExecutable
 		], HOST_ROOT))
 		if (platform === 'win32' && options.upx) {
-			actions.push(commandAction('upx-pack', 'Compress controller host', 'upx', ['--best', '--lzma', '<staging>/controller.exe'], HOST_ROOT))
-			actions.push(commandAction('upx-test', 'Test compressed controller host', 'upx', ['-t', '<staging>/controller.exe'], HOST_ROOT))
+			actions.push(commandAction('upx-pack', 'Compress controller host', 'upx', ['--best', '--lzma', plannedExecutable], HOST_ROOT))
+			actions.push(commandAction('upx-test', 'Test compressed controller host', 'upx', ['-t', plannedExecutable], HOST_ROOT))
 		}
 		if (options.sharedLibrary) actions.push(commandAction('c-abi', 'Build and smoke-test C ABI', 'go', [
 			'build', '-buildvcs=false', '-trimpath', '-tags', 'controllerlib',
@@ -448,6 +815,23 @@ export function createPlan(options, identity, platform = process.platform) {
 			hardware: false
 		})
 		actions.push({ id: 'host-publish', stage: 'Publish canonical host package', hardware: false })
+	}
+	if (!options.cleanOnly && options.virtualBoard) {
+		actions.push(commandAction(
+			'virtual-board-configure',
+			`Configure the native virtual board with the ${options.virtualBoardPreset} CMake preset`,
+			'cmake', ['--preset', options.virtualBoardPreset], VIRTUAL_BOARD_ROOT
+		))
+		actions.push(commandAction(
+			'virtual-board-build',
+			'Build the native virtual board through its project-owned CMake preset',
+			'cmake', ['--build', '--preset', options.virtualBoardPreset, '--parallel'], VIRTUAL_BOARD_ROOT
+		))
+		if (options.tests) actions.push(commandAction(
+			'virtual-board-test',
+			'Run virtual-board CTest through its project-owned CMake preset',
+			'ctest', ['--preset', options.virtualBoardPreset], VIRTUAL_BOARD_ROOT
+		))
 	}
 	if (!options.cleanOnly && options.installBootloader) {
 		const command = createControllerProgramCommand({
@@ -468,13 +852,12 @@ export function createPlan(options, identity, platform = process.platform) {
 			appDevice: options.device,
 			programmer: options.programmer,
 			hex: programmingArtifact(paths, options.method),
-			allowIncompleteBackup: options.allowIncompleteBackup
+			deployment: options.deployment
 		})
 		actions.push(commandAction('program', `Explicit ${options.method} programming through Controller`, command.file, command.args, command.cwd, true))
 	}
 	const paths = relativeCommandPlanPaths(PROJECT_ROOT, platform)
 	return {
-		format: 'pccontroller-build-plan/v1',
 		canonicalController: paths.controller,
 		firmwareOutput: paths.firmwareOutput,
 		target: BOARD,
@@ -506,6 +889,9 @@ Safe build options:
   --all                     Build/package host and compile firmware (default)
   --firmware-only           Compile firmware through current Controller source
   --host-only               Test, vet, resource-stamp, package, UPX-test host
+  --virtual-board           Add native virtual-board configure/build/test
+  --virtual-board-only      Build/test only the native virtual board
+  --virtual-board-preset P  CMake preset: debug, release (default), relwithdebinfo
   --clean                   Remove generated output; alone, then stop
   --skip-tests              Explicitly skip Go tests and vet
   --retest                  Re-run unchanged stable Go test binaries
@@ -517,8 +903,19 @@ Safe build options:
   --version VALUE           Host version identity (default: product metadata)
   --app-name TEXT           Embed the default host/WebUI application name
   --tagline TEXT            Embed the default first-run host/WebUI tagline
+  --branding FILE           Shared unversioned branding JSON (also for Pealayer)
+  --product-name TEXT       Win32 ProductName (default: application name)
+  --company-name TEXT       Win32 CompanyName
+  --file-description TEXT   Win32 FileDescription
+  --copyright TEXT          Win32 LegalCopyright
+  --executable-name NAME    Extension-free packaged executable file name
+  --icon FILE.ico           Override the APP multi-resolution icon resource
+  --resource-icon NAME=ICO  Repeatable named Win32 icon resource override
+  --toast-icon FILE.png     Override the packaged Windows toast logo
   --build-time ISO          Freeze host build time for reproducible packaging
   --build-timestamp HEX     Freeze packed firmware timestamp
+  --firmware-feature NAME  Repeatable Controller-validated compile feature
+  --no-firmware-features   Freeze the default-off firmware profile
   --toolchain-sync          Explicitly synchronize firmware dependencies
   --toolchain-cli PATH      Dependency CLI override (compile or sync)
   --toolchain-config PATH   Dependency CLI config override (compile)
@@ -536,7 +933,7 @@ Explicit programming only:
   --install-bootloader --method usbasp
                              Explicitly provision Urboot/fuses through ISP
   --programmer ID           Optional ISP backend-ID override
-  --allow-incomplete-backup Advanced logged override; never the default
+  --deployment production|development  Explicit upload backup workflow
 
 No programming action is implied by a normal build. Direct dependency upload
 is disabled: Controller owns compile, backup, validation, programming, verify,
@@ -768,11 +1165,7 @@ function buildWebUI(options, env, log, expectedAppName) {
 		verbose: options.verbose
 	})
 	log.stage('🎨', 'Regenerating the canonical native and browser product mark')
-	run(go, ['run', './winres/generate_icon.go', './winres/icon.png', './winres/icon.ico'], {
-		cwd: HOST_ROOT,
-		env,
-		verbose: options.verbose
-	})
+	runGoBuildHelper(go, 'generate-icon', './winres/generate_icon.go', ['./winres/icon.png', './winres/icon.ico'], env, options)
 	copyFileSync(join(HOST_ROOT, 'winres', 'icon.ico'), join(WEB_ROOT, 'public', 'favicon.ico'))
 	const inputsBefore = directoryIdentity(WEB_ROOT, true)
 	log.stage('🔒', 'Installing locked web dependencies')
@@ -960,8 +1353,12 @@ export function removeGeneratedWinResources(controllerSource = join(HOST_ROOT, '
 }
 
 export function generatedCleanTargets(options) {
-	if (options.firmware && !options.host && !options.cleanOnly) return [FIRMWARE_OUTPUT]
-	return [BUILD_ROOT, CANONICAL_HOST_OUTPUT, ...STALE_HOST_OUTPUTS, DEFAULT_FIRMWARE, DEFAULT_EEPROM, DEFAULT_METADATA]
+	let targets
+	if (options.firmware && !options.host && !options.cleanOnly) targets = [FIRMWARE_OUTPUT]
+	else if (!options.firmware && !options.host && options.virtualBoard) targets = []
+	else targets = [BUILD_ROOT, CANONICAL_HOST_OUTPUT, ...STALE_HOST_OUTPUTS, DEFAULT_FIRMWARE, DEFAULT_EEPROM, DEFAULT_METADATA]
+	if (options.virtualBoard) targets.push(VIRTUAL_BOARD_BUILD_ROOT)
+	return targets
 }
 
 function cleanGenerated(log, options) {
@@ -1234,6 +1631,21 @@ export function windowsCompilerProvisionArguments(env, goArch, packageVersion = 
 	return args
 }
 
+export function goBuildHelperPath(name, env = process.env, platform = process.platform) {
+	if (!['generate-icon', 'default-assets'].includes(name)) throw new BuildError('unknown build helper')
+	const root = platform === 'win32'
+		? join(env.LOCALAPPDATA || join(env.USERPROFILE || PROJECT_ROOT, 'AppData', 'Local'), 'PCController', 'build-programs')
+		: join(BUILD_ROOT, 'helpers')
+	return join(root, name + (platform === 'win32' ? '.exe' : ''))
+}
+
+function runGoBuildHelper(go, name, source, args, env, options) {
+	const executable = goBuildHelperPath(name, env)
+	mkdirSync(dirname(executable), { recursive: true })
+	run(go, ['build', '-buildvcs=false', '-o', executable, source], { cwd: HOST_ROOT, env, verbose: options.verbose })
+	run(executable, args, { cwd: HOST_ROOT, env, verbose: options.verbose })
+}
+
 function provisionWindowsCCompiler(env, goArch, options) {
 	if (goArch !== 'amd64') {
 		throw new BuildError(`automatic native Windows C compiler provisioning does not support GOARCH=${goArch}; set CC explicitly`)
@@ -1344,7 +1756,7 @@ int main(void) {
   unsigned long long handle = strtoull(handle_field + 9, NULL, 10);
   release(response);
 
-  char request[160];
+  char request[512];
   snprintf(request, sizeof(request),
            "{\\\"operation\\\":\\\"build-smoke-invalid\\\",\\\"handle\\\":%llu}",
            handle);
@@ -1357,6 +1769,36 @@ int main(void) {
   response = invoke(request);
   if (!response || !strstr(response, "\\\"destroyed\\\":true")) return 15;
   release(response);
+
+  char host_create[] = "{\\\"operation\\\":\\\"host_create\\\",\\\"host_options\\\":{\\\"config_path\\\":\\\"pccontroller-smoke-config.json\\\",\\\"app_id\\\":\\\"pccontroller.build-smoke\\\",\\\"controller_options\\\":{},\\\"disable_auto_connect\\\":true,\\\"disable_native\\\":true}}";
+  response = invoke(host_create);
+  if (!response || !strstr(response, "\\\"ok\\\":true")) return 16;
+  handle_field = strstr(response, "\\\"handle\\\":");
+  if (!handle_field) return 17;
+  handle = strtoull(handle_field + 9, NULL, 10);
+  release(response);
+
+  snprintf(request, sizeof(request),
+           "{\\\"operation\\\":\\\"host_start\\\",\\\"handle\\\":%llu}", handle);
+  response = invoke(request);
+  if (!response || !strstr(response, "\\\"ok\\\":true")) return 18;
+  release(response);
+
+  snprintf(request, sizeof(request),
+           "{\\\"operation\\\":\\\"host_call\\\",\\\"handle\\\":%llu,\\\"method\\\":\\\"controller.ping\\\",\\\"params\\\":{}}",
+           handle);
+  response = invoke(request);
+  char *result_field = response ? strstr(response, "\\\"result\\\":{") : NULL;
+  if (!response || !strstr(response, "\\\"ok\\\":true") ||
+      !result_field || !strstr(result_field, "\\\"ok\\\":true")) return 19;
+  release(response);
+
+  snprintf(request, sizeof(request),
+           "{\\\"operation\\\":\\\"host_destroy\\\",\\\"handle\\\":%llu}", handle);
+  response = invoke(request);
+  if (!response || !strstr(response, "\\\"destroyed\\\":true")) return 20;
+  release(response);
+  remove("pccontroller-smoke-config.json");
   // The Go shared runtime owns process-lifetime state; leave it loaded.
   return 0;
 }
@@ -1387,7 +1829,7 @@ int main(void) {
   unsigned long long handle = strtoull(handle_field + 9, NULL, 10);
   release(response);
 
-  char request[160];
+  char request[512];
   snprintf(request, sizeof(request),
            "{\\"operation\\":\\"build-smoke-invalid\\",\\"handle\\":%llu}",
            handle);
@@ -1400,6 +1842,35 @@ int main(void) {
   response = invoke(request);
   if (!response || !strstr(response, "\\"destroyed\\":true")) return 15;
   release(response);
+  char host_create[] = "{\\"operation\\":\\"host_create\\",\\"host_options\\":{\\"config_path\\":\\"pccontroller-smoke-config.json\\",\\"app_id\\":\\"pccontroller.build-smoke\\",\\"controller_options\\":{},\\"disable_auto_connect\\":true,\\"disable_native\\":true}}";
+  response = invoke(host_create);
+  if (!response || !strstr(response, "\\"ok\\":true")) return 16;
+  handle_field = strstr(response, "\\"handle\\":");
+  if (!handle_field) return 17;
+  handle = strtoull(handle_field + 9, NULL, 10);
+  release(response);
+
+  snprintf(request, sizeof(request),
+           "{\\"operation\\":\\"host_start\\",\\"handle\\":%llu}", handle);
+  response = invoke(request);
+  if (!response || !strstr(response, "\\"ok\\":true")) return 18;
+  release(response);
+
+  snprintf(request, sizeof(request),
+           "{\\"operation\\":\\"host_call\\",\\"handle\\":%llu,\\"method\\":\\"controller.ping\\",\\"params\\":{}}",
+           handle);
+  response = invoke(request);
+  char *result_field = response ? strstr(response, "\\"result\\":{") : NULL;
+  if (!response || !strstr(response, "\\"ok\\":true") ||
+      !result_field || !strstr(result_field, "\\"ok\\":true")) return 19;
+  release(response);
+
+  snprintf(request, sizeof(request),
+           "{\\"operation\\":\\"host_destroy\\",\\"handle\\":%llu}", handle);
+  response = invoke(request);
+  if (!response || !strstr(response, "\\"destroyed\\":true")) return 20;
+  release(response);
+  remove("pccontroller-smoke-config.json");
   // The Go c-shared runtime owns process-lifetime state; do not dlclose it.
   return 0;
 }
@@ -1474,8 +1945,8 @@ function peSectionNames(path) {
 	return names
 }
 
-function createWinresIdentityConfig(stage, identity, sourceSHA256) {
-	const source = join(HOST_ROOT, 'winres', 'winres.json')
+export function createWinresIdentityConfig(stage, identity, sourceSHA256) {
+	const source = WINRES_TEMPLATE
 	const config = JSON.parse(readFileSync(source, 'utf8'))
 	const info = config.RT_VERSION?.['#1']?.['0409']?.info?.['0409']
 	if (!info) throw new BuildError('winres configuration has no version-info string table')
@@ -1483,6 +1954,18 @@ function createWinresIdentityConfig(stage, identity, sourceSHA256) {
 	// inventory to the exact host source and build rather than raw Go strings.
 	info.PrivateBuild = sourceSHA256
 	info.SpecialBuild = identity.hostBuildTime
+	info.ProductName = identity.productName
+	info.CompanyName = identity.companyName
+	info.FileDescription = identity.fileDescription
+	info.OriginalFilename = `${identity.executableName}.exe`
+	if (identity.legalCopyright) info.LegalCopyright = identity.legalCopyright
+	else delete info.LegalCopyright
+	const manifest = config.RT_MANIFEST?.['#1']?.['0409']
+	if (!manifest) throw new BuildError('winres configuration has no application manifest')
+	manifest.description = identity.fileDescription
+	for (const [name, iconPath] of Object.entries(identity.iconResources || {})) {
+		config.RT_GROUP_ICON[name] = { '0000': iconPath }
+	}
 	for (const group of Object.values(config.RT_GROUP_ICON || {})) {
 		for (const [name, iconPath] of Object.entries(group)) {
 			if (typeof iconPath === 'string') group[name] = relative(stage, resolve(dirname(source), iconPath))
@@ -1496,11 +1979,14 @@ function createWinresIdentityConfig(stage, identity, sourceSHA256) {
 function verifyWindowsResources(executable, identity, sourceSHA256) {
 	if (!peSectionNames(executable).includes('.rsrc')) throw new BuildError('controller.exe does not contain a Win32 .rsrc section')
 	const binary = readFileSync(executable)
-	const resources = JSON.parse(readFileSync(join(HOST_ROOT, 'winres', 'winres.json'), 'utf8'))
-	const info = resources.RT_VERSION?.['#1']?.['0409']?.info?.['0409'] || {}
-	for (const value of [info.ProductName, info.CompanyName, identity.version, sourceSHA256, identity.hostBuildTime].filter(Boolean)) {
+	for (const value of [identity.productName, identity.companyName, identity.fileDescription, identity.legalCopyright,
+		`${identity.executableName}.exe`, identity.version, sourceSHA256, identity.hostBuildTime].filter(Boolean)) {
 		if (binary.indexOf(Buffer.from(value, 'utf16le')) < 0) throw new BuildError(`controller.exe resource data is missing ${value}`)
 	}
+}
+
+function platformExecutableName(identity, platform = process.platform) {
+	return `${identity.executableName}${platform === 'win32' ? '.exe' : ''}`
 }
 
 function atomicWriteJSON(path, value) {
@@ -1653,7 +2139,6 @@ export function stageEmbeddedDefaults(manifest, identity) {
 		data_bytes: Number(eeprom.dataBytes), source_path: String(eeprom.path || '')
 	}
 	const metadata = {
-		format: 'controller-embedded-defaults/v1',
 		generated_utc: identity.hostBuildTime,
 		firmware: firmwareRecord,
 		eeprom: eepromRecord
@@ -1718,7 +2203,7 @@ function buildHost(options, identity, env, log, embeddedDefaults = { enabled: fa
 	} else if (process.platform === 'win32') log.warning('Win32 resource regeneration was explicitly skipped.')
 
 	const before = hostSourceIdentity()
-	const executableName = process.platform === 'win32' ? 'controller.exe' : 'controller'
+	const executableName = platformExecutableName(identity)
 	const executable = join(stage, executableName)
 	const presentationFlags = presentationLinkerFlags(identity)
 	const ldflags = `-s -w -X main.version=${identity.version} -X main.sourceHash=${before.sha256} -X main.buildTime=${identity.hostBuildTime} ${presentationFlags}`
@@ -1770,7 +2255,7 @@ function buildHost(options, identity, env, log, embeddedDefaults = { enabled: fa
 
 	let upx = { enabled: false, tested: false, version: '' }
 	if (process.platform === 'win32' && options.upx) {
-		log.stage('📦', 'Compressing and testing controller.exe with UPX')
+		log.stage('📦', `Compressing and testing ${executableName} with UPX`)
 		const upxPath = requireTool('upx', env)
 		const version = run(upxPath, ['--version'], { env, capture: true }).stdout.split(/\r?\n/)[0].trim()
 		run(upxPath, ['--best', '--lzma', executable], { cwd: stage, env, verbose: options.verbose })
@@ -1791,15 +2276,28 @@ function buildHost(options, identity, env, log, embeddedDefaults = { enabled: fa
 
 	log.stage('📜', 'Collecting project and dependency notices')
 	const notices = collectModuleNotices(go, stage, goEnv, options)
-	const artifacts = [executable, ...shared.paths].map(path => artifactRecord(path, stage))
+	let toastLogo = ''
+	if (process.platform === 'win32') {
+		toastLogo = join(stage, 'toast-logo.png')
+		copyFileSync(identity.toastIcon || join(HOST_ROOT, 'winres', 'icon.png'), toastLogo)
+	}
+	const artifacts = [executable, ...(toastLogo ? [toastLogo] : []), ...shared.paths].map(path => artifactRecord(path, stage))
 	const manifest = {
-		format: HOST_MANIFEST_FORMAT,
 		generatedUtc: identity.hostBuildTime,
 		target: { platform: process.platform, architecture: goArch },
 		identity: {
 			version: identity.version,
 			appName: identity.appName,
 			tagline: identity.tagline,
+			productName: identity.productName,
+			companyName: identity.companyName,
+			fileDescription: identity.fileDescription,
+			legalCopyright: identity.legalCopyright,
+			executableName,
+			iconResources: Object.fromEntries(Object.entries(identity.iconResources || {}).map(([name, path]) => {
+				const ico = inspectICO(readFileSync(path), `Win32 icon resource ${name}`)
+				return [name, { sha256: sha256File(path), sizes: ico.sizes }]
+			})),
 			sourceSHA256: before.sha256,
 			sourceFiles: before.files,
 			buildTime: identity.hostBuildTime,
@@ -1865,7 +2363,15 @@ function readFirmwareManifest() {
 	try { manifest = JSON.parse(readFileSync(path, 'utf8')) } catch (error) {
 		throw new BuildError(`decode firmware manifest: ${error.message}`)
 	}
-	if (manifest.format !== FIRMWARE_MANIFEST_FORMAT) throw new BuildError(`unexpected firmware manifest format: ${manifest.format}`)
+	let features
+	try {
+		features = normalizeFirmwareFeatures(manifest.source?.compileFeatures || [])
+	} catch (error) {
+		throw new BuildError(`invalid firmware manifest compile features: ${error.message}`)
+	}
+	if (JSON.stringify(features) !== JSON.stringify(manifest.source?.compileFeatures || [])) {
+		throw new BuildError('firmware manifest compile features must be unique and sorted canonically')
+	}
 	if (!Array.isArray(manifest.artifacts) || !manifest.artifacts.some(artifact => artifact.role === 'application')) {
 		throw new BuildError('firmware manifest has no canonical application artifact')
 	}
@@ -1890,18 +2396,24 @@ function compileFirmware(options, identity, env, controllerPath, log) {
 		sketch: PROJECT_ROOT,
 		outputDir: FIRMWARE_OUTPUT,
 		toolchainCLI: options.toolchainCLI,
-		toolchainConfig: options.toolchainConfig
+		toolchainConfig: options.toolchainConfig,
+		firmwareFeatures: options.firmwareFeatures,
+		noFirmwareFeatures: (options.firmwareFeatures || []).length === 0
 	})
 	run(command.file, command.args, { cwd: command.cwd, env, verbose: options.verbose })
 	log.stage('💾', 'Generating and validating the complete safe default EEPROM image')
 	const go = requireTool('go', env)
-	run(go, [
-		'run', '-buildvcs=false', './cmd/default-assets', '--output', SAFE_DEFAULT_EEPROM
-	], { cwd: HOST_ROOT, env, verbose: options.verbose })
+	runGoBuildHelper(go, 'default-assets', './cmd/default-assets', ['--output', SAFE_DEFAULT_EEPROM], env, options)
 	run(process.execPath, [FIRMWARE_TOOL, 'manifest', '--quiet', '--no-color'], {
 		cwd: PROJECT_ROOT, env, verbose: options.verbose
 	})
 	const manifest = readFirmwareManifest()
+	if (JSON.stringify(manifest.source?.compileFeatures || []) !==
+		JSON.stringify(options.firmwareFeatures || [])) {
+		throw new BuildError(
+			'firmware manifest compile features differ from the frozen build plan'
+		)
+	}
 	if (String(manifest.source?.packedTimestamp).toUpperCase() !== identity.packedTimestamp) {
 		throw new BuildError('firmware manifest packed timestamp differs from the frozen build plan')
 	}
@@ -1951,6 +2463,20 @@ function compileFirmware(options, identity, env, controllerPath, log) {
 	return manifest
 }
 
+function buildVirtualBoard(options, env, log) {
+	const cmake = requireTool('cmake', env)
+	const ctest = requireTool('ctest', env)
+	const preset = options.virtualBoardPreset
+	log.stage('🧪', `Configuring native virtual board (${preset})`)
+	run(cmake, ['--preset', preset], { cwd: VIRTUAL_BOARD_ROOT, env, verbose: options.verbose })
+	log.stage('🔨', 'Building native virtual board through CMake')
+	run(cmake, ['--build', '--preset', preset, '--parallel'], { cwd: VIRTUAL_BOARD_ROOT, env, verbose: options.verbose })
+	if (options.tests) {
+		log.stage('🧪', 'Running virtual-board CTest')
+		run(ctest, ['--preset', preset], { cwd: VIRTUAL_BOARD_ROOT, env, verbose: options.verbose })
+	} else log.warning('Virtual-board CTest was explicitly skipped.')
+}
+
 function syncToolchain(options, env, controllerPath, log) {
 	log.stage('🌐', 'Synchronizing firmware indexes, cores, and libraries through Controller')
 	const args = ['toolchain', 'sync']
@@ -1984,7 +2510,7 @@ function executeProgramming(options, env, controllerPath, manifest, log) {
 		appDevice: options.device,
 		programmer: options.programmer,
 		hex: artifact.absolutePath,
-		allowIncompleteBackup: options.allowIncompleteBackup
+		deployment: options.deployment
 	})
 	run(command.file, command.args, { cwd: command.cwd, env, verbose: options.verbose })
 }
@@ -2045,6 +2571,7 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
 		if (!embeddedDefaults.enabled) log.warning(`Embedded board defaults disabled: ${embeddedDefaults.reason}`)
 		controllerPath = buildHost(options, identity, refreshed, log, embeddedDefaults)
 	}
+	if (options.virtualBoard) buildVirtualBoard(options, refreshed, log)
 	if (options.installBootloader || options.upload) executeProgramming(options, refreshed, controllerPath, manifest, log)
 	log.success(`All selected operations completed in ${((Date.now() - started) / 1000).toFixed(1)}s.`)
 	return 0

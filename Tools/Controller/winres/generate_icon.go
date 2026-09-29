@@ -16,6 +16,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"pccontroller.local/controller/internal/envfile"
 )
 
 var (
@@ -256,6 +258,10 @@ func writeICO(path string, source *image.RGBA) error {
 }
 
 func main() {
+	if _, err := envfile.LoadProcess(); err != nil {
+		fmt.Fprintln(os.Stderr, "environment:", err)
+		os.Exit(1)
+	}
 	if len(os.Args) < 2 || len(os.Args) > 3 {
 		fmt.Fprintln(os.Stderr, "usage: go run generate_icon.go OUTPUT.png [OUTPUT.ico]")
 		os.Exit(2)

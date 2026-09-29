@@ -22,7 +22,22 @@ const (
 
 // HELLO capability bits are the authoritative guard for optional operations.
 const (
+	CapabilityINA219             uint32 = 1 << 0
+	CapabilityTemperatures       uint32 = 1 << 1
+	CapabilityPWM                uint32 = 1 << 2
+	CapabilityRelayMotion        uint32 = 1 << 3
+	CapabilityRF                 uint32 = 1 << 4
+	CapabilitySegments           uint32 = 1 << 5
+	CapabilityLCD                uint32 = 1 << 6
+	CapabilityAddressableLED     uint32 = 1 << 7
+	CapabilityPersistentSettings uint32 = 1 << 8
+	CapabilityMenuRemote         uint32 = 1 << 9
+	CapabilityNamedTemperatures  uint32 = 1 << 10
+	CapabilityBluetoothAudio     uint32 = 1 << 11
+	CapabilityHostDisplayEvents  uint32 = 1 << 12
 	CapabilityFrontPanelSnapshot uint32 = 1 << 13
+	CapabilityRemoteKeys         uint32 = 1 << 14
+	CapabilityExtendedRFLearning uint32 = 1 << 15
 	CapabilityI2CTransfer        uint32 = 1 << 16
 	CapabilityMenuDirectory      uint32 = 1 << 17
 	CapabilityRFLearnReplace     uint32 = 1 << 18
@@ -119,16 +134,6 @@ func BuzzerBusy(hello Hello, status Status) (busy bool, known bool) {
 	return status.Flags&StatusBuzzerBusy != 0, true
 }
 
-// Device error codes mirror ControllerProtocol::Error.
-const (
-	ErrorBadEnvelope byte = iota + 1
-	ErrorUnsupported
-	ErrorBadPayload
-	ErrorHardwareUnavailable
-	ErrorBusy
-	ErrorUnsafe
-)
-
 const (
 	TemperatureEntryPayloadSize = 11
 	temperatureMaximumEntries   = (MaxPayload - 2) / TemperatureEntryPayloadSize
@@ -174,23 +179,30 @@ func ParseSegmentState(payload []byte) (SegmentState, error) {
 // BuzzerState describes the tone most recently started by firmware. Duration
 // lets every host surface stop its local mirror without a second board event.
 type BuzzerState struct {
-	FrequencyHz uint16 `json:"frequency_hz"`
-	DurationMS  uint16 `json:"duration_ms"`
-	Muted       bool   `json:"muted"`
+	FrequencyHz  uint16 `json:"frequency_hz"`
+	DurationMS   uint16 `json:"duration_ms"`
+	Muted        bool   `json:"muted"`
+	DeviceMicros uint32 `json:"device_micros,omitempty"`
+	Timed        bool   `json:"timed,omitempty"`
 }
 
 func ParseBuzzerState(payload []byte) (BuzzerState, error) {
-	if len(payload) != 5 {
-		return BuzzerState{}, fmt.Errorf("BUZZER_CHANGED payload is %d bytes, need exactly 5", len(payload))
+	if len(payload) != 5 && len(payload) != 9 {
+		return BuzzerState{}, fmt.Errorf("BUZZER_CHANGED payload is %d bytes, need 5 or 9", len(payload))
 	}
 	if payload[4] > 1 {
 		return BuzzerState{}, fmt.Errorf("BUZZER_CHANGED muted flag is %d, need 0 or 1", payload[4])
 	}
-	return BuzzerState{
+	state := BuzzerState{
 		FrequencyHz: binary.LittleEndian.Uint16(payload[:2]),
 		DurationMS:  binary.LittleEndian.Uint16(payload[2:4]),
 		Muted:       payload[4] != 0,
-	}, nil
+	}
+	if len(payload) == 9 {
+		state.DeviceMicros = binary.LittleEndian.Uint32(payload[5:9])
+		state.Timed = true
+	}
+	return state, nil
 }
 
 // StatusLEDState is the changed-only physical RGB result pushed after the MCU
@@ -331,22 +343,28 @@ type Hello struct {
 	BuildHash      uint32 `json:"build_hash"`
 	BuildTimestamp uint32 `json:"build_timestamp_packed,omitempty"`
 	BuildStamp     string `json:"build_timestamp,omitempty"`
+	FeatureProfile byte   `json:"feature_profile,omitempty"`
+	BuildFeatures  byte   `json:"build_features,omitempty"`
 }
 
 func ParseHello(payload []byte) (Hello, error) {
-	if len(payload) != 14 {
-		return Hello{}, fmt.Errorf("HELLO payload is %d bytes, need exactly 14", len(payload))
+	if len(payload) != 14 && len(payload) != 16 {
+		return Hello{}, fmt.Errorf("HELLO payload is %d bytes, need 14 or 16", len(payload))
 	}
-	if payload[0] != IdentitySchemaCompact {
+	if payload[0] != IdentitySchemaCompact && !(len(payload) == 16 && payload[0] == 4) {
 		return Hello{}, fmt.Errorf("unsupported HELLO identity schema %d", payload[0])
 	}
 	hello := Hello{
 		BoardKind:      payload[1],
 		Capabilities:   binary.LittleEndian.Uint32(payload[2:6]),
 		Name:           "PCController",
-		IdentitySchema: IdentitySchemaCompact,
+		IdentitySchema: payload[0],
 		BuildHash:      binary.LittleEndian.Uint32(payload[6:10]),
 		BuildTimestamp: binary.LittleEndian.Uint32(payload[10:14]),
+	}
+	if len(payload) == 16 {
+		hello.FeatureProfile = payload[14]
+		hello.BuildFeatures = payload[15]
 	}
 	stamp, err := FormatBuildTimestamp(hello.BuildTimestamp)
 	if err != nil {
@@ -459,6 +477,21 @@ func (status Status) ReadableUptime() string {
 	return status.UptimeDuration().String()
 }
 
+// Measurement validity is part of the snapshot contract: availability bits
+// advertise hardware, while only bounded values may be presented as readings.
+func (status Status) INA219ValuesValid() bool {
+	return status.SupplyMV >= 0 && status.SupplyMV <= 100_000 &&
+		status.BusMV >= 0 && status.BusMV <= 100_000 &&
+		status.CurrentMA >= -100_000 && status.CurrentMA <= 100_000 &&
+		status.PowerMW >= -10_000_000 && status.PowerMW <= 10_000_000
+}
+
+func validTemperatureCenti(value int16) bool { return value >= -5_500 && value <= 12_500 }
+
+func (status Status) TLEDValueValid() bool { return validTemperatureCenti(status.TLEDCenti) }
+
+func (status Status) TBTValueValid() bool { return validTemperatureCenti(status.TBTCenti) }
+
 // MarshalJSON keeps uptime_ms as the stable machine value and adds a derived
 // human-readable value to every snapshot, history, REST, RPC, and scripting
 // JSON surface. The derived field never enters the compact UART payload.
@@ -495,10 +528,10 @@ func (status *Status) UnmarshalJSON(data []byte) error {
 // adding bytes to every telemetry frame while preventing invalid sentinel
 // readings from being presented as real measurements.
 func (status *Status) applyAvailability() {
-	status.INA219Available = status.Flags&StatusINA219Available != 0
+	status.INA219Available = status.Flags&StatusINA219Available != 0 && status.INA219ValuesValid()
 	status.PWMAvailable = status.Flags&StatusPWMAvailable != 0
-	status.TLEDAvailable = status.Flags&StatusTLEDAvailable != 0
-	status.TBTAvailable = status.Flags&StatusTBTAvailable != 0
+	status.TLEDAvailable = status.Flags&StatusTLEDAvailable != 0 && status.TLEDValueValid()
+	status.TBTAvailable = status.Flags&StatusTBTAvailable != 0 && status.TBTValueValid()
 }
 
 func ParseStatus(payload []byte) (Status, error) {

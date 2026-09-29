@@ -476,7 +476,7 @@ func nextBoardConnection(t *testing.T, board *rawVirtualBoard) *rawBoardConnecti
 	}
 }
 
-func TestIndependentRawClientsInteroperateWithAllVersionedSocketSurfaces(t *testing.T) {
+func TestIndependentRawClientsInteroperateWithAllSocketSurfaces(t *testing.T) {
 	const token = "raw-wire-interoperability-token"
 	board := startRawVirtualBoard(t)
 	defer board.close()
@@ -488,7 +488,8 @@ func TestIndependentRawClientsInteroperateWithAllVersionedSocketSurfaces(t *test
 	shutdown := make(chan struct{}, 1)
 	service := &ipcjson.Service{
 		Client: client, AuthToken: token,
-		WebSocketPath: "/ipc", SocketIOPath: "/socket.io/",
+		HostInstanceID: "primary-wire-test",
+		WebSocketPath:  "/ipc", SocketIOPath: "/socket.io/",
 		Shutdown: func() { shutdown <- struct{}{} },
 	}
 	listener, err := ipcjson.Listen("127.0.0.1:0")
@@ -515,17 +516,14 @@ func TestIndependentRawClientsInteroperateWithAllVersionedSocketSurfaces(t *test
 		t.Fatalf("unauthenticated WebSocket upgrade status=%d", status)
 	}
 	status, body := rawHTTPRequest(t, address, http.MethodGet, "/api/snapshot", token, "")
-	if status != http.StatusOK || !strings.Contains(string(body), `"connected":false`) {
+	if status != http.StatusOK || !strings.Contains(string(body), `"connected":false`) ||
+		!strings.Contains(string(body), `"host_instance_id":"primary-wire-test"`) {
 		t.Fatalf("living REST snapshot status=%d body=%s", status, body)
-	}
-	status, _ = rawHTTPRequest(t, address, http.MethodGet, "/api/v1/snapshot", token, "")
-	if status != http.StatusNotFound {
-		t.Fatalf("versioned REST route status=%d", status)
 	}
 	rpcBody := `{"jsonrpc":"2.0","id":"rest-1","method":"controller.ping"}`
 	status, body = rawHTTPRequest(t, address, http.MethodPost, "/api/rpc", token, rpcBody)
 	if status != http.StatusOK || !strings.Contains(string(body), `"id":"rest-1"`) ||
-		!strings.Contains(string(body), `"ok":true`) || strings.Contains(string(body), `api_version`) {
+		!strings.Contains(string(body), `"ok":true`) {
 		t.Fatalf("REST JSON-RPC status=%d body=%s", status, body)
 	}
 
@@ -553,7 +551,7 @@ func TestIndependentRawClientsInteroperateWithAllVersionedSocketSurfaces(t *test
 	standard := dialRawWebSocket(t, address, "/ipc", token)
 	defer standard.close()
 	ping := rawRPC(t, standard, 1, "controller.ping", nil)
-	if !strings.Contains(string(ping["result"]), `"ok":true`) || strings.Contains(string(ping["result"]), `api_version`) {
+	if !strings.Contains(string(ping["result"]), `"ok":true`) {
 		t.Fatalf("standard WebSocket ping=%s", ping["result"])
 	}
 	if err = standard.writeText(`{"jsonrpc":"1.0","id":100,"method":"controller.ping"}`); err != nil {
@@ -579,7 +577,8 @@ func TestIndependentRawClientsInteroperateWithAllVersionedSocketSurfaces(t *test
 	subscribed := rawRPC(t, standard, 3, "controller.subscribe", map[string]any{
 		"topics": []string{"status"}, "interval_ms": 50,
 	})
-	if !strings.Contains(string(subscribed["result"]), `"subscribed":true`) {
+	if !strings.Contains(string(subscribed["result"]), `"subscribed":true`) ||
+		!strings.Contains(string(subscribed["result"]), `"instance_id":"primary-wire-test"`) {
 		t.Fatalf("status subscribe response=%v", subscribed)
 	}
 	statusUpdate := readRawNotification(t, standard, "controller.status")
@@ -598,13 +597,21 @@ func TestIndependentRawClientsInteroperateWithAllVersionedSocketSurfaces(t *test
 	}
 	snapshot := rawRPC(t, standard, 5, "controller.snapshot", nil)
 	if !strings.Contains(string(snapshot["result"]), `"connected":true`) ||
-		!strings.Contains(string(snapshot["result"]), `"paused":false`) {
+		!strings.Contains(string(snapshot["result"]), `"paused":false`) ||
+		!strings.Contains(string(snapshot["result"]), `"host_instance_id":"primary-wire-test"`) {
 		t.Fatalf("subscription cancellation changed serial lifecycle: %s", snapshot["result"])
 	}
 
 	_ = rawRPC(t, standard, 6, "controller.subscribe", map[string]any{
-		"topics": []string{"events"},
+		"topics": []string{"events", "status"}, "interval_ms": 100,
 	})
+	reconfigured := rawRPC(t, standard, 61, "controller.subscribe", map[string]any{
+		"topics": []string{"status"}, "interval_ms": 50, "preserve": true,
+	})
+	if !strings.Contains(string(reconfigured["result"]), `"preserve":true`) ||
+		!strings.Contains(string(reconfigured["result"]), `"interval_ms":50`) {
+		t.Fatalf("preserved status reconfiguration=%v", reconfigured)
+	}
 	if err := firstBoardConnection.send(native.Frame{
 		Opcode: native.OpEvent, Payload: []byte{native.EventDoor, 1},
 	}); err != nil {
@@ -681,7 +688,7 @@ func TestIndependentRawClientsInteroperateWithAllVersionedSocketSurfaces(t *test
 	}
 	socketResponse := readRawSocketIOEvent(t, socketIO, "rpc.response")
 	if !strings.Contains(string(socketResponse), `"id":201`) ||
-		!strings.Contains(string(socketResponse), `"ok":true`) || strings.Contains(string(socketResponse), `api_version`) {
+		!strings.Contains(string(socketResponse), `"ok":true`) {
 		t.Fatalf("Socket.IO RPC response=%s", socketResponse)
 	}
 	if err = socketIO.writeText(`42["message",{"source":"client","target":"host","type":"notice","text":"raw Socket.IO"}]`); err != nil {

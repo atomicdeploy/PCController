@@ -11,7 +11,6 @@ import (
 
 type fileHostInstanceLock struct {
 	file *os.File
-	path string
 }
 
 func platformHostInstanceUserKey() (string, error) {
@@ -33,20 +32,17 @@ func platformTryHostInstanceLock(
 		}
 		return nil, false, err
 	}
-	return &fileHostInstanceLock{file: file, path: path}, true, nil
+	return &fileHostInstanceLock{file: file}, true, nil
 }
 
 func (lock *fileHostInstanceLock) Close() error {
 	if lock == nil {
 		return nil
 	}
-	var err error
-	if lock.file != nil {
-		err = errors.Join(
-			unix.Flock(int(lock.file.Fd()), unix.LOCK_UN),
-			lock.file.Close(),
-		)
-		lock.file = nil
+	if lock.file == nil {
+		return nil
 	}
-	return errors.Join(err, os.Remove(lock.path))
+	err := lock.file.Close()
+	lock.file = nil
+	return err
 }

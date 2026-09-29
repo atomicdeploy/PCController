@@ -86,12 +86,15 @@ type primaryIPC struct {
 	integrations          atomic.Pointer[hostbridge.Manager]
 	localDevice           *localDeviceHost
 	actions               *hostui.ActionBroker
+	actionCoordinator     *hostui.ActionCoordinator
 	instances             *hostui.InstanceRegistry
 	artifacts             *artifacts.Service
+	ipc                   *ipcjson.Service
 	releaseDiscovery      io.Closer
 	instanceClaim         *hostInstanceClaim
 	hostInstanceID        string
 	coordinatorInstanceID string
+	navigationCommand     func(hostui.NavigationCommand) (hostui.NavigationOutcome, error)
 }
 
 type primaryExecutor struct{}
@@ -143,7 +146,9 @@ func startPrimaryIPCClaimed(
 		_ = claim.Close()
 		return nil, err
 	}
-	manager, err := hostbridge.Start(parent, server.client, store, server.actions)
+	manager, err := hostbridge.Start(parent, server.client, store, server.actions, hostbridge.DiscoveryHostIdentity{
+		InstanceID: claim.identity.ID, Version: version, SourceHash: sourceHash, BuildTime: buildTime,
+	})
 	if err != nil {
 		_ = server.Close()
 		_ = claim.Close()
@@ -187,6 +192,42 @@ func startPrimaryIPCClaimed(
 		_ = server.Close()
 		_ = claim.Close()
 		return nil, fmt.Errorf("register bridge command: %w", err)
+	}
+	if err := engine.Register(shell.Command{
+		Name: "peer-update", Usage: "peer-update host PEER ARTIFACT_SHA256 [IDEMPOTENCY_KEY]",
+		Summary: "transfer a verified host artifact and ask the peer coordinator to upgrade",
+		Run: func(ctx context.Context, args []string) (string, error) {
+			if (len(args) != 3 && len(args) != 4) || !strings.EqualFold(args[0], "host") {
+				return "", errors.New("usage: peer-update host PEER ARTIFACT_SHA256 [IDEMPOTENCY_KEY]")
+			}
+			idempotencyKey := ""
+			if len(args) == 4 {
+				idempotencyKey = args[3]
+			} else {
+				intentID, err := newHostInstanceID()
+				if err != nil {
+					return "", fmt.Errorf("generate peer-update intent: %w", err)
+				}
+				idempotencyKey = "peer-host-" + intentID
+			}
+			params, _ := json.Marshal(map[string]any{
+				"peer": args[1], "artifact_sha256": args[2], "authorized": true,
+				"idempotency_key": idempotencyKey,
+			})
+			response := server.ipc.Dispatch(ctx, ipcjson.Request{
+				JSONRPC: ipcjson.Version, Method: "controller.peer.update.host", Params: params,
+			})
+			if response.Error != nil {
+				return "", fmt.Errorf("%w; retry identity: %s (peer-update host %s %s %s)", response.Error, idempotencyKey, args[1], args[2], idempotencyKey)
+			}
+			encoded, err := json.MarshalIndent(response.Result, "", "  ")
+			return string(encoded), err
+		},
+	}); err != nil {
+		manager.Close()
+		_ = server.Close()
+		_ = claim.Close()
+		return nil, fmt.Errorf("register peer update command: %w", err)
 	}
 	if err := engine.Register(shell.Command{
 		Name: "webhook",
@@ -277,6 +318,11 @@ func startPrimaryIPCAtWithIdentity(
 	}
 	server.actions = hostui.NewActionBroker()
 	server.instances = hostui.NewInstanceRegistry()
+	server.actionCoordinator = hostui.NewActionCoordinator(server.instances, server.actions.PublishTracked)
+	server.actionCoordinator.SetObserver(func(change hostui.ActionOutcomeChange) {
+		runtime.PublishStructuredEvent(appActionOutcomeEvent(change))
+	})
+	navigation := hostui.NewNavigationCoordinator()
 	server.instances.SetObserver(func(change hostui.InstanceChange) {
 		runtime.PublishStructuredEvent(control.Event{
 			Kind: "app.instance.changed", Text: change.Kind + " app instance " + change.Instance.ID,
@@ -287,12 +333,33 @@ func startPrimaryIPCAtWithIdentity(
 				"state": change.Instance.State,
 			},
 		})
+		for _, action := range navigation.Observe(change, server.instances.List()) {
+			if publishErr := server.actions.Publish(action); publishErr != nil {
+				runtime.PublishHostEvent(
+					"app.navigation.sync.error",
+					"navigation synchronization delivery failed: "+publishErr.Error(),
+				)
+			}
+		}
 	})
 	server.actions.SetObserver(func(action hostui.AppAction) {
-		if event, ok := browserAppActionEvent(action); ok {
+		if event, ok := ipcjson.AppActionDeliveryEvent(action); ok {
 			runtime.PublishStructuredEvent(event)
 		}
 	})
+	commitNavigation := func(command hostui.NavigationCommand) (hostui.NavigationOutcome, error) {
+		outcome, commitErr := navigation.Commit(command, server.instances.List())
+		if commitErr != nil {
+			return hostui.NavigationOutcome{}, commitErr
+		}
+		for _, action := range outcome.Actions {
+			if publishErr := server.actions.Publish(action); publishErr != nil {
+				return hostui.NavigationOutcome{}, publishErr
+			}
+		}
+		return outcome, nil
+	}
+	server.navigationCommand = commitNavigation
 	if strings.TrimSpace(identity.ID) != "" {
 		server.coordinatorInstanceID = identity.ID + ":bridge"
 		process := hostui.CurrentProcessSelf(identity.StartedAt)
@@ -323,6 +390,7 @@ func startPrimaryIPCAtWithIdentity(
 		SocketIOPath:          endpoint.SocketIOPath,
 		WebUI:                 webui.Handler(endpoint.WebSocketPath),
 		AuthToken:             endpoint.AuthToken,
+		AuthorizationDisabled: true,
 		AllowedOrigins:        append([]string(nil), endpoint.AllowedOrigins...),
 		InboundWebhooks:       endpoint.InboundWebhooks,
 		HostVersion:           version,
@@ -334,6 +402,10 @@ func startPrimaryIPCAtWithIdentity(
 		HostSurface:           identity.Surface,
 		CoordinatorInstanceID: server.coordinatorInstanceID,
 		AppAction:             server.actions.Publish,
+		NavigationCommand:     commitNavigation,
+		AppActionSubmit:       server.actionCoordinator.Submit,
+		AppActionAck:          server.actionCoordinator.Ack,
+		AppActionOutcome:      server.actionCoordinator.Outcome,
 		AppInstances:          server.instances,
 		Shutdown: func() {
 			server.quitOnce.Do(func() { close(server.quit) })
@@ -372,8 +444,13 @@ func startPrimaryIPCAtWithIdentity(
 			return ipcjson.Response{}, errors.New("host bridge manager is unavailable")
 		},
 	}
+	server.ipc = service
 	if len(stores) > 0 && stores[0] != nil {
 		store := stores[0]
+		launches := newNamedSurfaceLaunchCoordinator(
+			store, server.instances, server.actions.Publish, listener.Addr().String(),
+		)
+		service.AppLaunch = launches.Launch
 		server.sessionSnapshot = newHostSessionRecorder(sharedClient, store)
 		service.LastSessionSnapshot = server.sessionSnapshot.read
 		proxy, proxyErr := newIntegrationProxy(store)
@@ -386,6 +463,11 @@ func startPrimaryIPCAtWithIdentity(
 		server.localDevice = startLocalDeviceHost(ctx, sharedClient, store)
 		service.LocalDevice = server.localDevice
 		service.HostConfig = store.CurrentRuntime
+		service.PersistentHostConfig = store.Persistent
+		service.SubscribeHostConfig = store.SubscribeRuntime
+		service.BuzzerRuntimeStatus = func() appconfig.BuzzerRuntimeStatus {
+			return server.IntegrationStatus().BuzzerRuntime
+		}
 		service.UpdateHostConfig = func(change func(*appconfig.Config) error) error {
 			_, err := store.Update(change)
 			return err
@@ -418,38 +500,30 @@ func startPrimaryIPCAtWithIdentity(
 	return server, nil
 }
 
-func browserAppActionEvent(action hostui.AppAction) (control.Event, bool) {
-	kind := strings.ToLower(strings.TrimSpace(action.Kind))
-	value := strings.TrimSpace(action.Value)
-	if !strings.HasPrefix(kind, "app.") {
-		return control.Event{}, false
-	}
-	target := strings.TrimSpace(action.Target)
-	if target == "" {
-		target = "*"
-	}
-	verb := strings.TrimPrefix(kind, "app.")
-	text := verb
-	if value != "" {
-		text += " " + value
+func appActionOutcomeEvent(change hostui.ActionOutcomeChange) control.Event {
+	stream := control.EventStreamState
+	if change.State == hostui.ActionStateRejected || change.State == hostui.ActionStateTimeout {
+		stream = control.EventStreamActivity
 	}
 	metadata := map[string]string{
-		"value": value, "target_instance": target,
+		"operation_id": change.OperationID,
+		"kind":         change.Kind,
+		"instance_id":  change.InstanceID,
+		"surface":      change.Surface,
+		"state":        change.State,
 	}
-	actionName := verb
-	if kind == "app.page" {
-		metadata["page"] = value
-		actionName = "navigate"
-		text = "Open page " + value
+	if change.Reason != "" {
+		metadata["reason"] = change.Reason
+	}
+	text := change.Kind + " " + change.State
+	if change.InstanceID != "" {
+		text += " on " + change.InstanceID
 	}
 	return control.Event{
-		Kind:     kind,
-		Text:     text,
-		Source:   action.Source,
-		Target:   "app.clients",
-		Action:   actionName,
-		Metadata: metadata,
-	}, true
+		Kind: "app.action.outcome", Stream: stream, Text: text,
+		Source: "host", Target: "app.clients", MessageType: "state",
+		Action: "outcome", Metadata: metadata,
+	}
 }
 
 func (server *primaryIPC) QuitRequested() <-chan struct{} {
@@ -552,6 +626,9 @@ func (server *primaryIPC) close() error {
 	}
 	if server.artifacts != nil {
 		server.artifacts.Close()
+	}
+	if server.actionCoordinator != nil {
+		server.actionCoordinator.Close()
 	}
 	server.cancel()
 	_ = server.listener.Close()
@@ -665,12 +742,25 @@ func executeThroughPrimaryAt(
 	ctx context.Context,
 	address, command string,
 ) (string, error) {
+	auth := ""
+	configured := currentPrimaryEndpoint()
+	if strings.EqualFold(strings.TrimSpace(address), strings.TrimSpace(configured.Listen)) {
+		auth = configured.AuthToken
+	}
+	return executeThroughPrimaryAtAuthenticated(ctx, address, auth, command)
+}
+
+func executeThroughPrimaryAtAuthenticated(
+	ctx context.Context,
+	address, auth, command string,
+) (string, error) {
 	var result struct {
 		Output string `json:"output"`
 	}
-	err := callPrimaryAt(
+	err := callPrimaryAtAuthenticated(
 		ctx,
 		address,
+		auth,
 		"controller.command.execute",
 		map[string]string{"command": command},
 		&result,
@@ -687,6 +777,18 @@ func runSecondaryConsole(
 	stdout, stderr io.Writer,
 	configuredTitle string,
 ) error {
+	configured := currentPrimaryEndpoint()
+	return runSecondaryConsoleAt(
+		input, stdout, stderr, configuredTitle,
+		configured.Listen, configured.AuthToken,
+	)
+}
+
+func runSecondaryConsoleAt(
+	input io.Reader,
+	stdout, stderr io.Writer,
+	configuredTitle, address, auth string,
+) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -698,11 +800,11 @@ func runSecondaryConsole(
 	}
 	writeLine(
 		stdout,
-		productidentity.ServiceName(configuredTitle, "secondary console (IPC).")+
-			" The primary process retains exclusive serial ownership.",
+		"\x1b[2m"+productidentity.ServiceName(configuredTitle, "secondary console (IPC).")+
+			" The primary process retains exclusive serial ownership.\x1b[0m",
 	)
 	hostRestart := make(chan struct{}, 1)
-	go streamPrimaryEvents(ctx, stdout, &outputMu, hostRestart)
+	go streamPrimaryEventsAt(ctx, stdout, &outputMu, hostRestart, address, auth)
 
 	scanner := bufio.NewScanner(input)
 	scanner.Buffer(make([]byte, 1024), 64*1024)
@@ -720,7 +822,7 @@ func runSecondaryConsole(
 	}()
 	for {
 		outputMu.Lock()
-		fmt.Fprint(stdout, "pc[ipc]> ")
+		fmt.Fprint(stdout, "\x1b[38;5;81m\x1b[1mpc\x1b[0m\x1b[2m[ipc]\x1b[0m\x1b[38;5;245m> \x1b[0m")
 		outputMu.Unlock()
 		var scanned string
 		select {
@@ -743,7 +845,7 @@ func runSecondaryConsole(
 			ctx,
 			10*time.Minute,
 		)
-		output, err := executeThroughPrimary(requestContext, line)
+		output, err := executeThroughPrimaryAtAuthenticated(requestContext, address, auth, line)
 		requestCancel()
 		if output != "" {
 			writeLine(stdout, output)
@@ -761,12 +863,25 @@ func streamPrimaryEvents(
 	outputMu *sync.Mutex,
 	hostRestart chan<- struct{},
 ) {
+	configured := currentPrimaryEndpoint()
+	streamPrimaryEventsAt(ctx, output, outputMu, hostRestart, configured.Listen, configured.AuthToken)
+}
+
+func streamPrimaryEventsAt(
+	ctx context.Context,
+	output io.Writer,
+	outputMu *sync.Mutex,
+	hostRestart chan<- struct{},
+	address, auth string,
+) {
 	var latest struct {
 		ID uint64 `json:"id"`
 	}
 	probeContext, cancel := context.WithTimeout(ctx, time.Second)
-	err := callPrimary(
+	err := callPrimaryAtAuthenticated(
 		probeContext,
+		address,
+		auth,
 		"controller.event.latest",
 		map[string]any{},
 		&latest,
@@ -782,8 +897,10 @@ func streamPrimaryEvents(
 			3*time.Second,
 		)
 		var event controllerapi.Event
-		err := callPrimary(
+		err := callPrimaryAtAuthenticated(
 			requestContext,
+			address,
+			auth,
 			"controller.event.next",
 			map[string]any{
 				"after_id":   cursor,

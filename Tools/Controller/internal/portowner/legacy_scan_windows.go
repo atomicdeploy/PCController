@@ -47,8 +47,8 @@ type legacySystemHandleEntry struct {
 }
 
 // scanLegacyNativeOwner runs only in the disposable canonical helper process.
-// The parent enforces its lifetime, so a driver-blocked object-name query cannot
-// strand a worker or poison later diagnostics in the long-running controller.
+// Both child invocation and parent command enforce its lifetime, so even an
+// orphaned driver-blocked query returns to helper main for whole-process exit.
 func scanLegacyNativeOwner(ctx context.Context, port string) (Owner, bool, error) {
 	if !isCOMPort(port) {
 		return Owner{}, false, errors.New("native serial-owner scan requires an exact COM number")

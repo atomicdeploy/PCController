@@ -93,6 +93,19 @@ func TestLCDPhysicalErrorReportsOnlyStateChanges(t *testing.T) {
 	if presenter.ReportPhysicalError("LCD", missing) {
 		t.Fatal("identical missing-LCD state was repeatedly reported")
 	}
+	if presenter.ReportPhysicalError("LCD home", context.DeadlineExceeded) {
+		t.Fatal("changed error text generated another outage notification")
+	}
+	presenter.clearConnectionState()
+	if presenter.ReportPhysicalError("LCD", missing) {
+		t.Fatal("USB reconnect rearmed an undetected LCD")
+	}
+	if err := presenter.Configure(LCDPresentationOptions{Enabled: false}); err != nil {
+		t.Fatal(err)
+	}
+	if presenter.ReportPhysicalError("LCD", missing) {
+		t.Fatal("disabling an absent LCD rearmed its notification")
+	}
 	if !presenter.ReportPhysicalError("LCD", nil) {
 		t.Fatal("successful recovery did not clear the error state")
 	}

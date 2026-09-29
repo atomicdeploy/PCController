@@ -19,7 +19,7 @@ documentation.
 | You want to change… | Start here | Keep in sync |
 |---|---|---|
 | MCU behavior, safety, menus, keys, RF, sensors, or outputs | [`PCController.ino`](../PCController.ino), [`Project/`](../Project), [`LocalLib/`](../LocalLib) | Native protocol mirrors, Virtual Board behavior, hardware docs, firmware build |
-| Board/host wire frames or opcodes | [`Project/UartProtocol.h`](../Project/UartProtocol.h), [`Tools/Controller/internal/native/`](../Tools/Controller/internal/native), [`Tools/VirtualBoard/include/virtual_board/protocol.hpp`](../Tools/VirtualBoard/include/virtual_board/protocol.hpp) | API contracts, golden tests, capability matrix; these are currently cross-language mirrors and must be reviewed together |
+| Board/host wire frames or opcodes | [`Project/ProtocolContract.h`](../Project/ProtocolContract.h), [`Project/UartProtocol.h`](../Project/UartProtocol.h), [`Tools/Controller/internal/native/`](../Tools/Controller/internal/native) | The AVR-owned fixed-width C++ vocabulary is canonical; Go and VirtualBoard mirrors remain migration work under #125 and must be checked against it before a wire change |
 | Public Go API | [`Tools/Controller/controller.go`](../Tools/Controller/controller.go) | `controller_test.go`, C ABI, protocol/API docs |
 | CLI, startup, primary ownership, programming commands | [`Tools/Controller/cmd/controller/`](../Tools/Controller/cmd/controller) | Go tests beside the changed file, user docs, command help |
 | TUI | [`Tools/Controller/internal/tui/`](../Tools/Controller/internal/tui) | Shared control dispatcher, capability matrix, TUI tests |
@@ -64,7 +64,7 @@ PCController/
 ├─ LICENSES/                license texts used by REUSE/third-party notices
 ├─ LocalLib/                compact reusable AVR drivers and primitives
 ├─ Project/                 controller-specific firmware domains
-│  └─ Firmware/             single-translation-unit runtime fragments
+│  └─ Runtime/              single-translation-unit runtime fragments
 ├─ Tools/
 │  ├─ Audit/                API, Wiki, prompt/issue traceability helpers
 │  ├─ Bootloader/           reproducible Urboot customization
@@ -75,8 +75,8 @@ PCController/
 │  ├─ Firmware/             firmware build/check/watch/upload orchestrator
 │  └─ VirtualBoard/         C++ board simulator and protocol tests
 ├─ PCController.ino         Arduino sketch entry and firmware composition
-├─ PCControllerProject.cpp  includes Project implementations exactly once
-├─ PCControllerLocalLib.cpp includes LocalLib implementations exactly once
+├─ ControllerDomainSources.cpp aggregates Project implementations exactly once
+├─ BoardSupportSources.cpp  aggregates LocalLib implementations exactly once
 ├─ ProjectConfig.h          compile-time firmware feature/electrical switches
 ├─ build.cmd / build.sh     portable whole-product launcher pair
 ├─ firmware.cmd / .sh       portable firmware-tool launcher pair
@@ -97,11 +97,11 @@ that is excluded by `.gitignore`.
 | Path | Responsibility | Edit rule |
 |---|---|---|
 | [`PCController.ino`](../PCController.ino) | Includes firmware domains and exposes only `setup()`/`loop()` | Edit lifecycle composition here; keep domain logic in its owning file |
-| [`PCControllerProject.cpp`](../PCControllerProject.cpp) | Aggregates `Project/*.cpp` because Arduino does not compile arbitrary nested source automatically | Add each new Project implementation exactly once |
-| [`PCControllerLocalLib.cpp`](../PCControllerLocalLib.cpp) | Aggregates `LocalLib/*.cpp` | Add each new LocalLib implementation exactly once |
+| [`ControllerDomainSources.cpp`](../ControllerDomainSources.cpp) | Aggregates `Project/*.cpp` because Arduino does not compile arbitrary nested source automatically | Add each new Project implementation exactly once |
+| [`BoardSupportSources.cpp`](../BoardSupportSources.cpp) | Aggregates `LocalLib/*.cpp` | Add each new LocalLib implementation exactly once |
 | [`ProjectConfig.h`](../ProjectConfig.h) | UART rate and hardware/feature compile switches | Change only with memory, electrical, and profile evidence |
 
-The files under [`Project/Firmware/`](../Project/Firmware) are deliberately
+The files under [`Project/Runtime/`](../Project/Runtime) are deliberately
 included into the sketch's one translation unit so AVR LTO, stack use, and
 byte-tight layout remain predictable:
 
@@ -125,19 +125,19 @@ byte-tight layout remain predictable:
 | `SevenSegments.*`, `I2cLcd.*` | TM1637 and optional LCD presentation primitives |
 | `ShiftRegisters.*` | 74HC165/74HC595-style input/output transport |
 | `DallasTemperatureBus.*` | bounded DS18B20/OneWire access |
-| `TonePlayer.*`, `pitches.h` | non-blocking notes/melodies and pitch constants |
+| `TonePlayer.*`, `pitches.h` | non-blocking Timer1 playback engine and pitch constants |
 
 ### `Project/`: controller-specific domains
 
 | File family | Responsibility |
 |---|---|
-| `UartProtocol.*`, `ControllerEvents.*` | native frame constants, payloads, replies, and device events |
+| `ProtocolContract.h`, `UartProtocol.*`, `ControllerEvents.*` | portable wire vocabulary; AVR framing, payloads, replies, and device events |
 | `EepromLayout.h`, `SettingsStore.*`, `RemoteLearningStore.*` | EEPROM layout, validated settings, RF records, and migrations |
-| `RelayController.*`, `MotionDoorPolicy.h`, `SafeResetController.*` | relay interlocks, motion/door decisions, safe reset behavior |
+| `RelayController.*`, `Core/MotionPolicy.h`, `MotionDoorPolicy.h`, `SafeResetController.*` | relay interlocks, shared persisted motion/door decision contract, AVR compatibility facade, safe reset behavior |
 | `PwmController.*`, `PwmExpanderDriver.*` | logical PWM ownership and optional PCA9685 transport |
 | `AddressableLeds.*`, `IlluminationController.*`, `StatusLedController.*` | strip, enclosure light, and status/effect rendering |
 | `CompactI2c.*`, `Ina219Sensor.*`, `SystemInputs.*`, `TemperatureRoles.h` | shared bus recovery, optional sensors, panel inputs, temperature roles |
-| `FrontPanelModel.h`, `BootMelody.*`, `FeedbackMelodies.*` | front-panel state and board-owned audible feedback |
+| `FrontPanelModel.h`, `BootMelody.*`, `AudioCues.*` | front-panel state, welcome sequence, and compact EEPROM-backed autonomous cue policy |
 | `MacroQueue.*`, `TransitionMath.h` | deterministic timed operations and bounded transitions |
 | `ResetTelemetry.*` | reset-cause/boot-count persistence and reporting |
 
@@ -147,6 +147,14 @@ byte-tight layout remain predictable:
 [`controller.go`](../Tools/Controller/controller.go) is its embeddable public
 API; implementation packages stay under `internal/` so every executable uses
 the same guarded runtime instead of forking behavior.
+[`rpc/`](../Tools/Controller/rpc) is the public transport-independent JSON-RPC
+client/envelope package. It supplies direct in-process calls, protected Windows
+named pipes, owner-only Unix-domain sockets, and TCP adapters without duplicating
+method semantics from the internal dispatcher.
+[`host/`](../Tools/Controller/host) is the public in-process lifecycle owner. It
+constructs the canonical client and dispatcher, coordinates protected native
+IPC with optional HTTP/WebSocket service, and provides bounded start/stop,
+configuration, branding, logging, endpoint, event, and error contracts.
 
 ### Executable entry points
 
@@ -157,6 +165,10 @@ the same guarded runtime instead of forking behavior.
 | `cmd/default-assets/` | packaging-only generator for a complete safe-default EEPROM image |
 | `cmd/toolchain-resolver/` | isolated firmware dependency resolver; no serial/UI packages |
 | `cmd/tui-preview/` | hardware-free TUI rendering/interaction preview |
+
+[`examples/embedded-host/`](../Tools/Controller/examples/embedded-host) is the
+minimal real Go consumer. `examples/c_abi_smoke.c` validates the same Host
+lifecycle through the packaged two-function foreign-language boundary.
 
 `cmd/controller/` keeps command-family wiring in named files such as
 `board_cli.go`, `device_cli.go`, `firmware_cli.go`, `programming_cli.go`,
@@ -201,6 +213,10 @@ as `*_test.go`.
 | `tui` | terminal pages, navigation, settings, console, and shared runtime projection |
 | `webui` | embedded production bundle handler and deterministic portable export |
 | `wsrelay` | authenticated remote WebSocket relay/bridge |
+
+Public `rpc` owns only envelopes, clients, and stream endpoint adapters.
+`internal/ipcjson` remains the single method dispatcher and HTTP/WebSocket
+surface; `ServeRaw` connects native-local streams to that same dispatcher.
 
 Platform files use Go build suffixes/tags (`*_windows.go`, `*_other.go`). Add a
 portable interface and test first, then implement each supported platform;
@@ -261,9 +277,18 @@ hashed bundle directly.**
 Windows resource manifest. Generated `.syso` files are build output and must
 not be committed.
 
-## 🧪 Virtual Board
+## 🧪 Transitional VirtualBoard and OS-native firmware targets
 
-[`Tools/VirtualBoard/`](../Tools/VirtualBoard) is the hardware-free C++ model:
+[`Tools/VirtualBoard/`](../Tools/VirtualBoard) is a transitional, independently
+implemented C++ model. It is not the intended long-term architecture. Issue
+PCController issue #103 owns moving its
+valid behavior into one production firmware/core compiled for AVR and supported
+OS-native platforms, then deleting the duplicate parser, dispatcher, state
+machines, and capability model. Issue
+PCController issue #227 owns standalone,
+native-local, stream, and loadable adapters around that same firmware.
+
+Until that migration is complete, this directory contains:
 
 | Path | Responsibility |
 |---|---|
@@ -278,8 +303,9 @@ not be committed.
 | `CMakeLists.txt`, `CMakePresets.json` | portable configure/build/test definitions |
 
 `Tools/VirtualBoard/.build/` and `virtual-mcu-eeprom.bin` are local generated
-state. Delete them freely when the simulator is stopped; never commit them or
-mistake simulator success for loaded-hardware evidence.
+state. Delete them freely when the simulator is stopped; never commit them,
+extend their independent semantics, or mistake simulator success for either
+same-source OS-native firmware or loaded-hardware evidence.
 
 ## 🛠️ Build, dependency, release, and audit tooling
 
@@ -446,7 +472,7 @@ Arduino compile scratch data defaults under the platform user cache at
 | Change | Minimum hardware-free checks |
 |---|---|
 | Markdown/docs/Wiki publisher | `node .github/scripts/repository-check.mjs`; `node Tools/Audit/publish-wiki.mjs --preview` |
-| Go host/internal package | from `Tools/Controller`: `go test ./...` and `go vet ./...` |
+| Go host/internal package | from the repository root: `node Tools/Build/go-tests.mjs`; then from `Tools/Controller`: `go vet ./...` |
 | WebUI | from `Tools/Controller/web`: `npm ci`, `npm run typecheck`, `npm test`, `npm run build` |
 | Firmware | `firmware.cmd build` and `firmware.cmd check` (or POSIX equivalents) |
 | Virtual Board | CMake `release` configure/build plus `ctest --preset release` |
