@@ -425,7 +425,7 @@ test('production KEY dispatches first Down to motion and exits outside KEY', asy
 	assert.match(frontPanel, /menuPage == PAGE_RF \? PAGE_USER_RELAYS/u)
 	assert.match(
 		frontPanel,
-		/menuPage == PAGE_USER_RELAYS[^]*?\? static_cast<uint8_t>\(PAGE_RF\)/u
+		/menuPage == PAGE_USER_RELAYS[^]*?PCCONTROLLER_ENABLE_RF_LEARNING \? PAGE_RF : PAGE_DOOR/u
 	)
 	assert.match(model, /page < PAGE_COUNT && page != PAGE_MOTION/u)
 	assert.match(protocol, /\{1, PAGE_COUNT, 0xFF, 0\}/u)
@@ -448,7 +448,7 @@ test('retired MOVE remains a direct KEY alias, never a persisted second page', a
 	assert.match(frontPanel, /menuPage == PAGE_RF \? PAGE_USER_RELAYS/u)
 	assert.match(
 		frontPanel,
-		/menuPage == PAGE_USER_RELAYS[^]*?\? static_cast<uint8_t>\(PAGE_RF\)/u
+		/menuPage == PAGE_USER_RELAYS[^]*?PCCONTROLLER_ENABLE_RF_LEARNING \? PAGE_RF : PAGE_DOOR/u
 	)
 	assert.match(
 		frontPanel,
