@@ -55,7 +55,7 @@ var avrdudePercent = regexp.MustCompile(`\|\s*([0-9]{1,3})%`)
 // AVRDUDE's non-TTY renderer emits one # per two percent and explicitly
 // disables buffering for GUI consumers. A PTY is not required. Its TTY
 // renderer instead rewrites complete bars using CR; both formats are handled.
-// https://github.com/avrdudes/avrdude/blob/v8.0/src/term.c#L2908-L2942
+// See the AVRDUDE progress protocol citation in THIRD_PARTY_NOTICES.md.
 type progressOutput struct {
 	mu       sync.Mutex
 	ctx      context.Context

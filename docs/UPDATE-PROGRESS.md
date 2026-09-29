@@ -35,7 +35,7 @@ successful whole update: verification, reconnect and restoration may still fail.
 ConPTY is unnecessary for this supported output protocol. Linking libavrdude is
 not required and is not part of this implementation.
 
-Sources: [AVRDUDE 8.0 progress implementation](https://github.com/avrdudes/avrdude/blob/v8.0/src/term.c#L2908-L2942),
+Sources: [AVRDUDE 8.0 progress implementation attribution](../THIRD_PARTY_NOTICES.md#avrdude-progress-protocol),
 [official output documentation](https://avrdudes.github.io/avrdude/8.0/avrdude_7.html).
 
 ## Toolchain preflight
