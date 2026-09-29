@@ -218,10 +218,12 @@ function ControllerUnavailable({
   state,
   locale,
   action,
+  showTitle = true,
 }: {
   state: ControllerUnavailableState
   locale: Locale
   action?: ReactNode
+  showTitle?: boolean
 }) {
   const copy = (english: string, persian: string) => locale === 'fa' ? persian : english
   const connecting = state === 'connecting'
@@ -242,7 +244,7 @@ function ControllerUnavailable({
       </div> : <span className="controller-unavailable__icon" aria-hidden="true">
         {state === 'transport-offline' ? <WifiOff size={28} /> : <Cable size={28} />}
       </span>}
-      <strong>{title}</strong>
+      {showTitle && <strong>{title}</strong>}
       {action && <div className="controller-unavailable__action">{action}</div>}
     </div>
   )
@@ -279,6 +281,10 @@ export function DashboardView(props: SharedViewProps) {
   const boardUnavailableDetail = transportUnavailable ? undefined : hardwareWarning?.guidance || snapshot.connection_reason || t('noHardware')
   const boardStatusLabel = boardReady
     ? t('online')
+    : transportConnecting
+      ? copy('Connecting', 'در حال اتصال')
+      : transportUnavailable
+        ? copy('Offline', 'آفلاین')
     : boardLoading
       ? copy('Searching for board', 'در حال جستجوی برد')
       : snapshot.paused
@@ -687,6 +693,7 @@ export function ControlsView(props: SharedViewProps) {
           <ControllerUnavailable
             state={unavailableState}
             locale={locale}
+            showTitle={false}
             action={!connecting && !transportOffline
               ? <Button tone="primary" icon={Cable} onClick={() => void command('reconnect')}>{t('reconnect')}</Button>
               : undefined}
