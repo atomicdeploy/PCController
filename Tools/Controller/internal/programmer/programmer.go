@@ -845,6 +845,15 @@ func BackupWithRunner(
 	if err := ValidateBackup(options); err != nil {
 		return "", err
 	}
+	// Resolve once, before any read. Every backup step must use the same
+	// configured CLI/data directory and AVRDUDE pair.
+	executable, configuration, resolveErr := FindAvrdudeWithCLIConfig(
+		options.Avrdude, options.AvrdudeConf, options.ArduinoCLI, options.ArduinoConfig,
+	)
+	if resolveErr != nil {
+		return "", resolveErr
+	}
+	options.Avrdude, options.AvrdudeConf = executable, configuration
 	root := strings.TrimSpace(options.OutputPath)
 	if options.MCU == "" {
 		options.MCU = generatedBoardMCU
@@ -1219,8 +1228,9 @@ func Run(ctx context.Context, command Command, output io.Writer) error {
 	}
 	defer cancel()
 	process := exec.CommandContext(runContext, command.Name, command.Args...)
-	process.Stdout = output
-	process.Stderr = output
+	stream := &progressOutput{ctx: ctx, output: output, stage: commandStage(command)}
+	process.Stdout = stream
+	process.Stderr = stream
 	process.Stdin = nil
 	process.WaitDelay = programmerWaitDelay
 	processTree, err := prepareProgrammerProcessTree(process)
@@ -1231,6 +1241,7 @@ func Run(ctx context.Context, command Command, output io.Writer) error {
 	process.Cancel = func() error {
 		return processTree.Terminate(process.Process)
 	}
+	ReportProgress(ctx, Progress{Stage: commandStage(command), Percent: -1})
 	if err := process.Start(); err != nil {
 		return fmt.Errorf("%s failed: %w", command.String(), err)
 	}
@@ -1406,6 +1417,10 @@ func FindAvrdudeWithCLIConfig(
 	arduinoCLI,
 	arduinoConfig string,
 ) (string, string, error) {
+	return findAvrdudeWithContext(context.Background(), executable, configuration, arduinoCLI, arduinoConfig)
+}
+
+func findAvrdudeWithContext(ctx context.Context, executable, configuration, arduinoCLI, arduinoConfig string) (string, string, error) {
 	if executable != "" {
 		if configuration == "" {
 			configuration = inferAvrdudeConf(executable)
@@ -1426,40 +1441,52 @@ func FindAvrdudeWithCLIConfig(
 	}
 	cli, err := findExecutable(arduinoCLI, "arduino-cli")
 	if err == nil {
-		queryContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		queryContext, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 		command := exec.CommandContext(queryContext, cli, toolchainCLIArguments(
 			cli, arduinoConfig, "config", "get", "directories.data",
 		)...)
+		command.WaitDelay = time.Second
 		output, commandErr := command.Output()
 		if commandErr == nil {
-			dataDirectory := strings.Trim(strings.TrimSpace(string(output)), `"`)
-			pattern := filepath.Join(
-				dataDirectory,
-				"packages", "MiniCore", "tools", "avrdude", "*", "bin",
-				executableName("avrdude"),
-			)
-			matches, _ := filepath.Glob(pattern)
-			sort.Slice(matches, func(left, right int) bool {
-				return compareLooseVersion(
-					avrdudeVersion(matches[left]),
-					avrdudeVersion(matches[right]),
-				) > 0
-			})
-			for _, candidate := range matches {
-				candidateConfiguration := configuration
-				if candidateConfiguration == "" {
-					candidateConfiguration = inferAvrdudeConf(candidate)
-				}
-				if candidateConfiguration != "" {
-					return candidate, candidateConfiguration, nil
-				}
+			dataDirectory := strings.Trim(strings.TrimSpace(strings.TrimPrefix(string(output), "\uFEFF")), `"`)
+			if candidate, conf := findInstalledAvrdude(dataDirectory, configuration); candidate != "" {
+				return candidate, conf, nil
 			}
+		} else if arduinoCLI != "" || arduinoConfig != "" {
+			return "", "", fmt.Errorf("query configured Arduino CLI data directory (CLI %q, config %q): %w", cli, arduinoConfig, commandErr)
 		}
 	}
 	return "", "", errors.New(
-		"avrdude not found via PATH or the Arduino CLI MiniCore data directory; configure explicit executable and avrdude.conf paths",
+		"avrdude not found via PATH or the configured Arduino CLI data directory; configure programming.toolchain_cli and programming.toolchain_config or explicit avrdude and avrdude_conf paths",
 	)
+}
+
+func findInstalledAvrdude(dataDirectory, configuration string) (string, string) {
+	// Core packages may reuse Arduino's AVRDUDE instead of owning a MiniCore
+	// copy. Search the selected data directory, never a different installation.
+	if strings.TrimSpace(dataDirectory) == "" {
+		return "", ""
+	}
+	pattern := filepath.Join(dataDirectory, "packages", "*", "tools", "avrdude", "*", "bin", executableName("avrdude"))
+	matches, _ := filepath.Glob(pattern)
+	sort.Slice(matches, func(left, right int) bool {
+		comparison := compareLooseVersion(avrdudeVersion(matches[left]), avrdudeVersion(matches[right]))
+		if comparison == 0 {
+			return matches[left] < matches[right]
+		}
+		return comparison > 0
+	})
+	for _, candidate := range matches {
+		conf := configuration
+		if conf == "" {
+			conf = inferAvrdudeConf(candidate)
+		}
+		if conf != "" {
+			return candidate, conf
+		}
+	}
+	return "", ""
 }
 
 func avrdudeVersion(executable string) string {

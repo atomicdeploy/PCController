@@ -1193,6 +1193,7 @@ func runTUIWithInitialAction(
 	}()
 	_, err = program.Run()
 	_ = hostui.WriteOSC(stdout, "9;4;0;0")
+	_ = hostui.ClearUpdateTaskbarProgress()
 	_ = primary.Close()
 	_ = runtime.Close()
 	return err
