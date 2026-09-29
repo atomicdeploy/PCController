@@ -436,7 +436,6 @@ func (service *Service) startUpdate(operationKind string, request UpdateRequest)
 	executionArtifact := cloneDescriptor(artifact)
 	responseArtifact := publicDescriptor(artifact)
 	decorateDescriptor(&responseArtifact)
-	service.updateBytes(status.ID, 0, artifact.Bytes)
 	go service.runTransaction(status.ID, func(ctx context.Context, progress ProgressFunc) (string, error) {
 		var updateErr error
 		switch operationKind {
@@ -451,7 +450,7 @@ func (service *Service) startUpdate(operationKind string, request UpdateRequest)
 				updateErr = service.store.SetCurrent(KindFlashBackup, executionArtifact.SHA256)
 			}
 		case "eeprom":
-			progress("backing-up", 20, "capturing flash and EEPROM before EEPROM restore")
+			progress("backing-up", -1, "capturing flash and EEPROM before EEPROM restore")
 			captured, captureErr := service.executor.Capture(ctx, CaptureRequest{
 				Authorized: true, Components: []string{"flash", "eeprom"},
 				Method: request.Method, Port: request.Port,
@@ -468,9 +467,6 @@ func (service *Service) startUpdate(operationKind string, request UpdateRequest)
 			}
 		case "host":
 			updateErr = service.executor.StageHostUpdate(ctx, executionArtifact, request, progress)
-		}
-		if updateErr == nil {
-			service.updateBytes(status.ID, executionArtifact.Bytes, executionArtifact.Bytes)
 		}
 		return executionArtifact.SHA256, updateErr
 	})
@@ -665,6 +661,7 @@ func (service *Service) run(id string, operation func(context.Context, ProgressF
 	}
 	status.State = "completed"
 	status.ProgressPercent = 100
+	status.ProgressKnown = true
 	status.Detail = "operation completed"
 	if status.ProgrammingMethod == ProgrammingMethodUrclock {
 		status.BootloaderOutcome = BootloaderSucceeded
@@ -711,7 +708,13 @@ func (service *Service) updateStatus(id, state string, percent int, detail, erro
 	}
 	if state != "" {
 		status.State = state
+		if !terminalOperationState(state) && status.Stage != state {
+			status.Stage = state
+			status.StageStartedAt = time.Now().UTC()
+		}
 	}
+	status.ProgressKnown = percent >= 0
+	status.ProgressPercent = 0
 	if percent >= 0 {
 		if percent > 100 {
 			percent = 100
@@ -746,6 +749,16 @@ func (service *Service) publishStatus(status UpdateStatus) {
 	metadata := map[string]string{
 		"operation_id": status.ID, "kind": status.Kind, "state": status.State,
 		"progress_percent": strconv.Itoa(status.ProgressPercent),
+		"progress_known":   strconv.FormatBool(status.ProgressKnown),
+		"stage":            status.Stage,
+		"detail":           status.Detail,
+		"started_at":       status.StartedAt.Format(time.RFC3339Nano),
+		"stage_started_at": status.StageStartedAt.Format(time.RFC3339Nano),
+		"updated_at":       status.UpdatedAt.Format(time.RFC3339Nano),
+	}
+	if status.BytesTotal > 0 {
+		metadata["bytes_done"] = strconv.FormatInt(status.BytesDone, 10)
+		metadata["bytes_total"] = strconv.FormatInt(status.BytesTotal, 10)
 	}
 	if status.ArtifactSHA256 != "" {
 		metadata["sha256"] = status.ArtifactSHA256
@@ -855,6 +868,7 @@ func (service *Service) failOperation(id string, err error) {
 		return
 	}
 	status.State = "failed"
+	status.ProgressKnown = false
 	status.Detail = err.Error()
 	status.ErrorCode = "operation_failed"
 	var failure *ExecutionFailure

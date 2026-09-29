@@ -94,6 +94,7 @@ func AutomaticBackupThenFlash(
 		result.BackupSkipped = true
 		result.Warnings = append(result.Warnings, "explicit development deployment: no new archival backup; existing backups retained")
 	} else {
+		ReportProgress(ctx, Progress{Stage: "backup", Percent: -1, Detail: "Backing up current firmware and EEPROM"})
 		paths := options.DataPaths
 		if strings.TrimSpace(backupOptions.OutputPath) == "" {
 			if strings.TrimSpace(paths.DataDir) == "" {
