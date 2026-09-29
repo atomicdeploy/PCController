@@ -1917,10 +1917,21 @@ func (runtime *Runtime) discoveryOptions(options Options) link.DiscoveryOptions 
 	return link.DiscoveryOptions{
 		Filter: filter, BaudRate: options.BaudRate,
 		StartupWait: options.StartupWait, RequestTimeout: options.RequestTimeout,
-		HelloAttempts:   options.HelloAttempts,
-		ResetAfterOpen:  runtime.resetAfterOpen,
-		AllowPortRebind: allowPortRebind,
+		HelloAttempts:     options.HelloAttempts,
+		ResetAfterOpen:    runtime.resetAfterOpen,
+		AllowPortRebind:   allowPortRebind,
+		CandidateSelected: runtime.observeConnectionCandidate,
 	}
+}
+
+func (runtime *Runtime) observeConnectionCandidate(candidate ports.Info) {
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	if !runtime.connecting || runtime.session != nil {
+		return
+	}
+	runtime.connectionCandidate = candidate
+	runtime.publishEvent(runtime.connectionProgressEventLocked("attempting"))
 }
 
 func mergeObservedDeviceIdentity(

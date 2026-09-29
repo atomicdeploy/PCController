@@ -948,6 +948,32 @@ func TestReconnectSnapshotPublishesMeasuredAttemptAndBackoff(t *testing.T) {
 	}
 }
 
+func TestEnsureConnectedPublishesEnumeratedCandidateDuringAttempt(t *testing.T) {
+	runtime := New(Options{})
+	candidate := ports.Info{
+		Name: "COM3", FriendlyName: "USB-SERIAL CH340", VID: "1A86", PID: "7523",
+	}
+	runtime.autoOpen = func(_ context.Context, options link.DiscoveryOptions) (link.OpenResult, error) {
+		if options.CandidateSelected == nil {
+			t.Fatal("candidate observer was not supplied to discovery")
+		}
+		options.CandidateSelected(candidate)
+		snapshot := runtime.Snapshot()
+		if snapshot.ConnectionPhase != "attempting" || snapshot.ConnectionCandidate != candidate {
+			t.Fatalf("candidate snapshot during attempt = %#v, want %#v", snapshot, candidate)
+		}
+		return link.OpenResult{Port: candidate}, errors.New("application HELLO timed out")
+	}
+
+	if err := runtime.EnsureConnected(context.Background()); err == nil {
+		t.Fatal("synthetic failed connection unexpectedly succeeded")
+	}
+	snapshot := runtime.Snapshot()
+	if snapshot.ConnectionCandidate != candidate {
+		t.Fatalf("candidate after failed attempt = %#v, want %#v", snapshot.ConnectionCandidate, candidate)
+	}
+}
+
 func TestHotResetPolicyChangeDoesNotDropLiveConnection(t *testing.T) {
 	runtime := New(Options{})
 	port := newReconnectTestPort()

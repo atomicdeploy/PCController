@@ -26,6 +26,10 @@ type DiscoveryOptions struct {
 	// strict, while reconnect may replace a stale COM number with one unique
 	// matching USB identity.
 	AllowPortRebind bool
+	// CandidateSelected reports the exact enumerated device immediately before
+	// its transport is opened. UIs can therefore show what is being attempted
+	// without parsing an eventual error or waiting for authentication to fail.
+	CandidateSelected func(ports.Info)
 }
 
 type OpenResult struct {
@@ -89,6 +93,9 @@ func AutoOpen(ctx context.Context, options DiscoveryOptions) (OpenResult, error)
 	var failures []error
 	var lastResult OpenResult
 	for _, candidate := range candidates {
+		if options.CandidateSelected != nil {
+			options.CandidateSelected(candidate)
+		}
 		result, err := OpenAuthenticated(ctx, candidate, options)
 		lastResult = result
 		if lastResult.Port.Name == "" {
