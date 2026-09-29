@@ -59,6 +59,20 @@ func TestPublicOptionsExposeCanonicalFirmwareFeatureStatus(t *testing.T) {
 	}
 }
 
+func TestToolchainConfigurationSurvivesPublicFacadeUpdates(t *testing.T) {
+	client := New(Options{ToolchainCLI: "cli", ToolchainConfig: "managed.yaml", Avrdude: "avr", AvrdudeConf: "avr.conf"})
+	defer client.Shutdown()
+	options := client.currentCommandOptions()
+	if options.ArduinoConfig != "managed.yaml" || options.ArduinoCLI != "cli" || options.Avrdude != "avr" || options.AvrdudeConf != "avr.conf" {
+		t.Fatalf("initial programming paths lost: %#v", options)
+	}
+	client.ApplyHostOptions(Options{ToolchainCLI: "updated-cli", ToolchainConfig: "updated.yaml", Avrdude: "updated-avr", AvrdudeConf: "updated.conf"})
+	options = client.currentCommandOptions()
+	if options.ArduinoConfig != "updated.yaml" || options.ArduinoCLI != "updated-cli" || options.Avrdude != "updated-avr" || options.AvrdudeConf != "updated.conf" {
+		t.Fatalf("updated programming paths lost: %#v", options)
+	}
+}
+
 func TestPublicRFValidationWithoutDevice(t *testing.T) {
 	client := New(Options{})
 	defer client.Shutdown()

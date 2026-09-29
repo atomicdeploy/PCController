@@ -140,7 +140,7 @@ func TestPreviewFramesCoverEveryDomainPage(t *testing.T) {
 		PageBoardSettings: "BOARD EEPROM SETTINGS",
 		PageAppSettings:   "HOST SETTINGS",
 		PageRF:            "433 MHz RF",
-		PageProgramming:   "PROGRAMMING",
+		PageProgramming:   "FIRMWARE",
 		PageAutomations:   "AUTOMATIONS & MACROS",
 		PageEvents:        "24-HOUR HISTORY",
 		PageConsole:       "CONSOLE",
@@ -674,7 +674,7 @@ func TestDashboardAndProgrammingExposeLiveStateAndGuardedActions(t *testing.T) {
 		t.Fatalf("polished uptime missing:\n%s", dashboard)
 	}
 	programming := PreviewFrame(PageProgramming, 160, 46)
-	for _, expected := range []string{"U Flash", "Application protocol", "Current firmware", "5DF10D05"} {
+	for _, expected := range []string{"U Flash", "Board connected", "Firmware build", "5DF10D05"} {
 		if !strings.Contains(programming, expected) {
 			t.Errorf("programming page missing %q:\n%s", expected, programming)
 		}
@@ -1392,24 +1392,24 @@ func runTeaCommandTree(command tea.Cmd) []tea.Msg {
 	return []tea.Msg{message}
 }
 
-func TestUpdateEventsOpenProgrammingPageAndTrackVisibleProgress(t *testing.T) {
+func TestUpdateEventsPreserveNavigationAndTrackMeasuredStage(t *testing.T) {
 	model := readyModel(t, PageDashboard)
 	model.writeOSC = func(string) error { return nil }
 	updated, command := model.Update(runtimeEventMsg(control.Event{
 		Kind: "update.programming", Text: "verified write in progress", Time: time.Now(),
 		Metadata: map[string]string{
-			"operation_id": "op-test", "kind": "firmware", "state": "programming", "progress_percent": "40",
+			"operation_id": "op-test", "kind": "firmware", "state": "programming", "stage": "writing", "progress_known": "true", "progress_percent": "40",
 		},
 	}))
 	model = updated.(Model)
-	if model.page != PageProgramming || model.update.Progress != 40 || model.update.OperationID != "op-test" {
+	if model.page != PageDashboard || model.update.Progress != 40 || model.update.OperationID != "op-test" {
 		t.Fatalf("update presentation page=%v state=%#v", model.page, model.update)
 	}
 	if command == nil {
 		t.Fatal("update event did not emit terminal presentation commands")
 	}
 	rendered := ansi.Strip(model.programmingPage(model.snapshot()))
-	for _, expected := range []string{"op-test", "PROGRAMMING", "40%", "verified write in progress"} {
+	for _, expected := range []string{"op-test", "WRITING", "40%", "verified write in progress"} {
 		if !strings.Contains(rendered, expected) {
 			t.Fatalf("programming page missing %q:\n%s", expected, rendered)
 		}
@@ -1926,7 +1926,7 @@ func TestBorderedPageButtonsShareHorizontalRow(t *testing.T) {
 			if page == PageRF && strings.Contains(line, "L Learn") && strings.Contains(line, "Refresh list") {
 				found = true
 			}
-			if page == PageProgramming && strings.Contains(line, "Urclock probe") && strings.Contains(line, "Metadata") {
+			if page == PageProgramming && strings.Contains(line, "U Flash") && strings.Contains(line, "B Backup") {
 				found = true
 			}
 			if page == PageAutomations && strings.Contains(line, "N New") && strings.Contains(line, "P Play") {
