@@ -38,7 +38,10 @@ func FirmwareFeatureNames(features []FirmwareFeature) []string {
 }
 
 func firmwareFeatureBuildDefines(features []FirmwareFeature) []string {
-	defines := make([]string, 0, len(features)*2)
+	// Do not multiply an untrusted slice length to guess capacity: the
+	// multiplication can overflow before make sees it. The feature set is tiny,
+	// and append's checked growth is both safe and immaterial here.
+	defines := make([]string, 0, len(features))
 	for _, feature := range features {
 		switch feature {
 		case FirmwareFeatureEEPROMBootOpcodes:
