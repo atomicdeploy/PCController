@@ -31,6 +31,22 @@ test('build helper executables use stable product paths, never Go temporary path
 	assert.throws(() => goBuildHelperPath('../unsafe', env, 'win32'), /unknown build helper/)
 })
 
+test('VirtualBoard shell build preserves native Windows compiler discovery and test discovery', async () => {
+	const script = await readFile(join(PROJECT_ROOT, 'Tools', 'VirtualBoard', 'build.sh'), 'utf8')
+	assert.match(script, /cmake_compiler_args=\(\)/)
+	assert.match(
+		script,
+		/if \[\[ -n "\$\{MSYSTEM:-\}" \]\]; then[\s\S]*?Do not pass Git Bash's virtual path through to native CMake\.[\s\S]*?\n    :\nelse/
+	)
+	assert.doesNotMatch(
+		script,
+		/if \[\[ -n "\$\{MSYSTEM:-\}" \]\]; then[\s\S]*?compiler_path=\$cxx[\s\S]*?\nelse/
+	)
+	assert.match(script, /cmake --preset "\$preset" -S "\$source_root" "\$\{cmake_compiler_args\[@\]\}"/)
+	assert.match(script, /ctest --preset "\$preset" --no-tests=error/)
+	assert.doesNotMatch(script, /ctest[^\n]*--test-dir "\$source_root"/)
+})
+
 import {
 	BuildError,
 	goBuildHelperPath,
