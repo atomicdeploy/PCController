@@ -42,7 +42,14 @@ constexpr uint8_t Ds18b20Family = 0x28;
 
 } // namespace
 
-DallasTemperatureBus::DallasTemperatureBus(uint8_t pin) : pin_(pin) {}
+DallasTemperatureBus::DallasTemperatureBus(uint8_t pin)
+    : pin_(pin), bitMask_(0), outputRegister_(nullptr), modeRegister_(nullptr),
+      inputRegister_(nullptr), addresses_{}, addressCount_(0) {}
+
+void DallasTemperatureBus::begin(uint8_t pin) {
+  pin_ = pin;
+  begin();
+}
 
 void DallasTemperatureBus::begin() {
   const uint8_t port = digitalPinToPort(pin_);

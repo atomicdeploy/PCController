@@ -50,7 +50,7 @@ static_assert(sizeof(TelemetryPayload) == ControllerProtocol::MaximumPayload,
 PwmExpanderDriver pwmDriver(BoardPins::PwmAddress);
 PwmController pwm;
 Ina219Sensor ina219(BoardPins::Ina219Address);
-DallasTemperatureBus temperatureBus(BoardPins::OneWireData);
+DallasTemperatureBus temperatureBus;
 Ds18b20Address temperatureAddresses[2];
 RCSwitch radio;
 RelayController relays;

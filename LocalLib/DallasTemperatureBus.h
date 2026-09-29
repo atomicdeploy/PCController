@@ -18,9 +18,11 @@ public:
   // Sentinel returned by getTempCentiC() when reset, address, or CRC fails.
   static constexpr int16_t DisconnectedCentiC = INT16_MIN;
 
+  DallasTemperatureBus() = default;
   explicit DallasTemperatureBus(uint8_t pin);
 
   // Enumerates and caches at most two valid DS18B20 ROM addresses.
+  void begin(uint8_t pin);
   void begin();
   // Returns the number of cached sensors (zero through two).
   uint8_t getDeviceCount() const;
@@ -55,10 +57,10 @@ private:
   bool sample() const;
 
   uint8_t pin_;
-  uint8_t bitMask_ = 0;
-  volatile uint8_t *outputRegister_ = nullptr;
-  volatile uint8_t *modeRegister_ = nullptr;
-  volatile uint8_t *inputRegister_ = nullptr;
-  uint8_t addresses_[2][8]{};
-  uint8_t addressCount_ = 0;
+  uint8_t bitMask_;
+  volatile uint8_t *outputRegister_;
+  volatile uint8_t *modeRegister_;
+  volatile uint8_t *inputRegister_;
+  uint8_t addresses_[2][8];
+  uint8_t addressCount_;
 };

@@ -85,7 +85,7 @@ static inline __attribute__((always_inline)) void initializeController() {
   appProtocol.service();
   wdt_reset();
 
-  temperatureBus.begin();
+  temperatureBus.begin(BoardPins::OneWireData);
   discoverTemperatureSensors();
   requestTemperatures(startupNow);
   appProtocol.service();
