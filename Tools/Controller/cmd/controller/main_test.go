@@ -42,6 +42,46 @@ func TestMessageDisconnectedAllowanceMatchesDeliveryTargets(t *testing.T) {
 	}
 }
 
+func TestRemoteTUIAttachFailureTakesOwnershipWhenPrimaryDisappears(t *testing.T) {
+	attachErr := errors.New("remote primary stopped")
+	want := &hostInstanceClaim{}
+	got, err := recoverTUIPrimaryAfterAttachFailure(
+		attachErr,
+		func(surface string) (*hostInstanceClaim, bool, error) {
+			if surface != "tui" {
+				t.Fatalf("surface=%q", surface)
+			}
+			return want, false, nil
+		},
+	)
+	if err != nil || got != want {
+		t.Fatalf("claim=%p err=%v, want claim=%p", got, err, want)
+	}
+}
+
+func TestRemoteTUIAttachFailurePreservesErrorWhenPrimaryStillOwnsRuntime(t *testing.T) {
+	attachErr := errors.New("remote attach rejected")
+	claim, err := recoverTUIPrimaryAfterAttachFailure(
+		attachErr,
+		func(string) (*hostInstanceClaim, bool, error) { return nil, true, nil },
+	)
+	if claim != nil || !errors.Is(err, attachErr) {
+		t.Fatalf("claim=%p err=%v", claim, err)
+	}
+}
+
+func TestRemoteTUIAttachFailureJoinsOwnershipProbeError(t *testing.T) {
+	attachErr := errors.New("remote attach failed")
+	probeErr := errors.New("ownership probe failed")
+	claim, err := recoverTUIPrimaryAfterAttachFailure(
+		attachErr,
+		func(string) (*hostInstanceClaim, bool, error) { return nil, false, probeErr },
+	)
+	if claim != nil || !errors.Is(err, attachErr) || !errors.Is(err, probeErr) {
+		t.Fatalf("claim=%p err=%v", claim, err)
+	}
+}
+
 func TestCompileOnlyCommandLoadsConfiguredFeaturesWithoutRuntimeStartup(t *testing.T) {
 	if value, present := os.LookupEnv(firmwareFeaturesEnvironment); present {
 		t.Cleanup(func() { _ = os.Setenv(firmwareFeaturesEnvironment, value) })

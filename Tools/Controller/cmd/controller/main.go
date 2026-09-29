@@ -421,6 +421,29 @@ func preparePrimaryMode(surface string) (*hostInstanceClaim, bool, error) {
 	return claim, existing != nil, err
 }
 
+func recoverTUIPrimaryAfterAttachFailure(
+	attachErr error,
+	retry func(string) (*hostInstanceClaim, bool, error),
+) (*hostInstanceClaim, error) {
+	claim, havePrimary, err := retry("tui")
+	if err != nil {
+		return nil, errors.Join(
+			attachErr,
+			fmt.Errorf("recheck local controller ownership after remote TUI failure: %w", err),
+		)
+	}
+	if havePrimary {
+		return nil, attachErr
+	}
+	if claim == nil {
+		return nil, errors.Join(
+			attachErr,
+			errors.New("local controller ownership became available without a claim"),
+		)
+	}
+	return claim, nil
+}
+
 func runWeb(args []string, stdout, stderr io.Writer, store *appconfig.Store) error {
 	return runWebWithInitialAction(args, stdout, stderr, store, hostui.AppAction{})
 }
@@ -978,7 +1001,17 @@ func runTUIWithInitialAction(
 			return runSecondaryConsole(os.Stdin, stdout, stderr, store.Current().UI.AppTitle)
 		}
 		configured := currentPrimaryEndpoint()
-		return runRemoteTUI(configured.Listen, configured.AuthToken, stdout, store, consoleOptions, *syncNavigation)
+		remoteErr := runRemoteTUI(
+			configured.Listen, configured.AuthToken, stdout, store, consoleOptions, *syncNavigation,
+		)
+		if remoteErr == nil {
+			return nil
+		}
+		claim, err = recoverTUIPrimaryAfterAttachFailure(remoteErr, preparePrimaryMode)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(stderr, "primary controller host disappeared; continuing as the local TUI owner")
 	}
 	defer func() {
 		if claim != nil {
