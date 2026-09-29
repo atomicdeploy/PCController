@@ -23,6 +23,25 @@ import (
 	"pccontroller.local/controller/internal/programmer"
 )
 
+func TestMessageDisconnectedAllowanceMatchesDeliveryTargets(t *testing.T) {
+	tests := []struct {
+		command string
+		want    bool
+	}{
+		{command: "message webui operator.notice ready", want: true},
+		{command: "message surface:desktop,webui operator.notice ready", want: true},
+		{command: "message all operator.notice ready", want: true},
+		{command: "message lcd operator.notice ready", want: false},
+		{command: "message webui,board operator.notice ready", want: false},
+		{command: "status", want: false},
+	}
+	for _, test := range tests {
+		if got := commandAllowsDisconnected(test.command); got != test.want {
+			t.Errorf("commandAllowsDisconnected(%q) = %t, want %t", test.command, got, test.want)
+		}
+	}
+}
+
 func TestCompileOnlyCommandLoadsConfiguredFeaturesWithoutRuntimeStartup(t *testing.T) {
 	if value, present := os.LookupEnv(firmwareFeaturesEnvironment); present {
 		t.Cleanup(func() { _ = os.Setenv(firmwareFeaturesEnvironment, value) })

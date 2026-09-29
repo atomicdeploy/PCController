@@ -212,7 +212,18 @@ func runExec(args []string, stdout, stderr io.Writer, store *appconfig.Store) er
 
 func commandAllowsDisconnected(command string) bool {
 	words := strings.Fields(strings.ToLower(strings.TrimSpace(command)))
-	return len(words) >= 2 && words[0] == "board" && words[1] == "initialize"
+	if len(words) >= 2 && words[0] == "board" && words[1] == "initialize" {
+		return true
+	}
+	if len(words) < 2 || words[0] != "message" {
+		return false
+	}
+	for _, target := range strings.Split(words[1], ",") {
+		if target == "board" || target == "lcd" {
+			return false
+		}
+	}
+	return true
 }
 
 func runBatch(args []string, stdout, stderr io.Writer, store *appconfig.Store) error {
@@ -666,23 +677,23 @@ func runIPC(args []string, stdout, stderr io.Writer, store *appconfig.Store) err
 			IntegrationProxy:      integrationProxy,
 			LocalDevice:           localDevice,
 			AuthToken:             serverConfig.IPC.AuthToken,
-                        AuthorizationDisabled: true,
+			AuthorizationDisabled: true,
 			AllowedOrigins:        append([]string(nil), serverConfig.IPC.AllowedOrigins...),
 			InboundWebhooks:       serverConfig.Integrations.InboundWebhooksEnabled,
 			HostVersion:           version,
 			HostSourceHash:        sourceHash,
 			HostBuildTime:         buildTime,
-                        HostInstanceID:        strings.TrimSuffix(coordinatorID, ":bridge"),
-                        HostProcessID:         os.Getpid(),
-                        HostSurface:           "ipc",
+			HostInstanceID:        strings.TrimSuffix(coordinatorID, ":bridge"),
+			HostProcessID:         os.Getpid(),
+			HostSurface:           "ipc",
 			CoordinatorInstanceID: coordinatorID,
 			AppAction:             actions.Publish,
 			AppInstances:          instances,
-                        Shutdown:              cancel,
-                        LastSessionSnapshot:   sessionSnapshot.read,
-                        HostConfig:            store.CurrentRuntime,
-                        PersistentHostConfig:  store.Current,
-                        SubscribeHostConfig:   store.SubscribeRuntime,
+			Shutdown:              cancel,
+			LastSessionSnapshot:   sessionSnapshot.read,
+			HostConfig:            store.CurrentRuntime,
+			PersistentHostConfig:  store.Current,
+			SubscribeHostConfig:   store.SubscribeRuntime,
 			UpdateHostConfig: func(change func(*appconfig.Config) error) error {
 				_, err := store.Update(change)
 				return err

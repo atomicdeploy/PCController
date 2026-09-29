@@ -12,6 +12,49 @@ without a documentation server. Repository validation regenerates the
 contracts logically and rejects drift from the actual RPC dispatcher or REST
 route families.
 
+## Typed host notification envelope
+
+`controller.message.send` and `POST /api/messages` use the same bounded host
+envelope and publish a normal `message` event through IPC, WebSocket,
+Socket.IO, bridge, TUI, WebUI, and native-host listeners. It does not alter the
+firmware protocol or open a serial connection for host-only deliveries.
+
+```json
+{
+  "source": "ipc",
+  "targets": ["native", "web", "tui"],
+  "type": "operator.notice",
+  "text": "Commissioning is ready",
+  "severity": "warning",
+  "correlation": "commission-42",
+  "delivery": "async",
+  "action": "app.page:events"
+}
+```
+
+`targets` is the one canonical ordered request shape. Each entry is a bounded
+receiver capability, surface, or exact-instance selector learned from live
+endpoint/application advertisement; the host deliberately does not keep a
+closed product/surface list. Duplicate selectors are removed in order. `lcd`
+and `board` explicitly require a connected board that advertises LCD delivery.
+`all` delivers to the board LCD only when that capability is live and otherwise
+continues to the currently attached host receivers. Severity is one of `debug`,
+`info`, `success`, `warning`, or `error`; delivery is `sync` (completed) or
+`async` (accepted). Correlation and action are descriptive event fields in this
+slice—actions are never implicitly executed.
+
+The minimal CLI spelling is:
+
+```console
+controller message native,web,tui operator.notice "Commissioning is ready"
+```
+
+It permits disconnected operation only for selectors whose delivery does not
+require the board; explicit `board` or `lcd` delivery connects first and fails
+clearly when LCD delivery is unavailable. Native/Web/TUI action adapters, delivery expiry,
+deduplication, and generalized board-operation migration continue under #164,
+#165, and #166.
+
 ## Framing
 
 Frames are COBS encoded and terminated by `0x00`. The decoded frame is:
@@ -1518,7 +1561,7 @@ one schema:
 ```json
 {
   "source": "client",
-  "target": "lcd",
+  "targets": ["lcd"],
   "type": "operator.notice",
   "text": "Service required",
   "line1": "SERVICE",
@@ -1528,11 +1571,14 @@ one schema:
 ```
 
 Allowed sources are `client`, `server`, `bridge`, `board`, `lcd`, `host`,
-`ipc`, `rest`, `webhook`, `websocket`, and `socket_io`. Targets are `client`, `server`, `bridge`,
-`board`, `lcd`, `host`, and `all`. `type` contains 1..32 lowercase letters,
-digits, dot, dash, or underscore. Text/action lengths are bounded. A board/LCD
-target is converted to two printable 16-byte rows and sent through
-`DISPLAY_TEXT`; every accepted message is also a source-tagged host event.
+`ipc`, `rest`, `webhook`, `websocket`, and `socket_io`. `targets` contains
+bounded capability, surface, or exact-instance selectors; it is the only
+request shape and is not constrained to a hardcoded product list. `type`
+contains 1..32 lowercase letters, digits, dot, dash, or underscore. Text/action
+lengths are bounded. Explicit `board`/`lcd` delivery requires a live board LCD;
+`all` adds the LCD only when that capability is live. Successful board delivery
+uses the ordinary display presenter before the source-tagged host event is
+published.
 
 Network ingress does not trust a payload's claimed source. Raw IPC is tagged
 `ipc`, REST is `rest`, standard WebSocket is `websocket`, Socket.IO is
@@ -1547,6 +1593,12 @@ deliberately enabled host `text_mappings` rule can match source, target, type,
 and text content and then submit a fixed configured command. This separation
 prevents received text from becoming shell input and retains authentication,
 logging, motion policy, and board safety.
+
+The Web presentation retains severity, correlation, and optional action text.
+Correlated or actionable notices remain visible until dismissed, but action
+text is rendered as context rather than a command control. Exact-target UI
+work uses the separately validated `controller.app.action` coordinator, and
+remote commands use the authenticated execute method.
 
 ## Host configuration and USB lifecycle
 

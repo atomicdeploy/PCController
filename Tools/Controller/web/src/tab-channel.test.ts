@@ -133,6 +133,10 @@ describe('tab channel', () => {
       kind: 'door',
       text: 'opened',
       state: 'open',
+      targets: ['surface:desktop', 'webui'],
+      severity: 'warning',
+      correlation: 'door-9',
+      delivery: 'async',
       metadata: { zone: 'front' },
     })).toBeTruthy()
 
@@ -151,7 +155,14 @@ describe('tab channel', () => {
     })
     expect(received[1].payload).toMatchObject({ type: 'appearance', etag: 'a'.repeat(64) })
     expect(received[3].payload).toMatchObject({
-      event: { id: 9, metadata: { zone: 'front' } },
+      event: {
+        id: 9,
+        targets: ['surface:desktop', 'webui'],
+        severity: 'warning',
+        correlation: 'door-9',
+        delivery: 'async',
+        metadata: { zone: 'front' },
+      },
     })
 
     now += 1

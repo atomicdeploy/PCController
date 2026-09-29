@@ -126,7 +126,7 @@ func TestEnabledTextMappingExecutesAllowlistedCommandOnly(t *testing.T) {
 		manager.Close()
 	}()
 	_, err = client.SendTextMessage(ctx, controller.TextMessage{
-		Source: "ipc", Target: "host", Type: "door-command",
+		Source: "ipc", Targets: []string{"host"}, Type: "door-command",
 		Text: "door open", Action: "this descriptive text is never executed",
 	})
 	if err != nil {

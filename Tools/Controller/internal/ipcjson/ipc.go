@@ -3647,7 +3647,7 @@ func serveInboundWebhook(
 		return
 	}
 	message := controller.TextMessage{
-		Source: "webhook", Target: "host",
+		Source: "webhook", Targets: []string{"host"},
 		Type: "http." + strings.ToLower(request.Method),
 		Text: truncateText(strings.TrimSpace(string(body)), 4096), Metadata: make(map[string]string),
 	}
@@ -3669,7 +3669,7 @@ func serveInboundWebhook(
 		name   string
 		target *string
 	}{
-		{"source", &message.Source}, {"target", &message.Target},
+		{"source", &message.Source},
 		{"type", &message.Type}, {"text", &message.Text},
 		{"action", &message.Action}, {"line1", &message.Line1},
 		{"line2", &message.Line2},
@@ -3677,6 +3677,9 @@ func serveInboundWebhook(
 		if value := query.Get(field.name); value != "" {
 			*field.target = value
 		}
+	}
+	if targets := query["targets"]; len(targets) != 0 {
+		message.Targets = append([]string(nil), targets...)
 	}
 	message.Metadata["http.method"] = request.Method
 	message.Metadata["http.path"] = request.URL.Path
@@ -3690,8 +3693,8 @@ func serveInboundWebhook(
 	if strings.TrimSpace(message.Source) == "" {
 		message.Source = "webhook"
 	}
-	if strings.TrimSpace(message.Target) == "" {
-		message.Target = "host"
+	if len(message.Targets) == 0 {
+		message.Targets = []string{"host"}
 	}
 	if strings.TrimSpace(message.Type) == "" {
 		message.Type = "http." + strings.ToLower(request.Method)
