@@ -53,6 +53,10 @@
     { "cpp": "HostMenuContent", "go": "OpHostMenuContent", "value": 67, "wireName": "HOST_MENU_CONTENT" },
     { "cpp": "HostMenuStateGet", "go": "OpHostMenuStateGet", "value": 68, "wireName": "HOST_MENU_STATE_GET" },
     { "cpp": "ProgramState", "go": "OpProgramState", "value": 69, "wireName": "PROGRAM_STATE" },
+    { "cpp": "AutomationList", "go": "OpAutomationList", "value": 70, "wireName": "AUTOMATION_LIST" },
+    { "cpp": "AutomationPut", "go": "OpAutomationPut", "value": 71, "wireName": "AUTOMATION_PUT" },
+    { "cpp": "AutomationRemove", "go": "OpAutomationRemove", "value": 72, "wireName": "AUTOMATION_REMOVE" },
+    { "cpp": "AutomationClear", "go": "OpAutomationClear", "value": 73, "wireName": "AUTOMATION_CLEAR" },
 
     { "cpp": "Ack", "go": "OpACK", "value": 128, "wireName": "ACK" },
     { "cpp": "HelloResponse", "go": "OpHelloResp", "value": 129, "wireName": "HELLO" },
@@ -73,7 +77,9 @@
     { "cpp": "BuzzerChanged", "go": "OpBuzzerChanged", "value": 157, "wireName": "BUZZER_CHANGED" },
     { "cpp": "StatusLedChanged", "go": "OpStatusLEDChanged", "value": 158, "wireName": "STATUS_LED_CHANGED" },
     { "cpp": "StatusProfileResponse", "go": "OpStatusProfile", "value": 159, "wireName": "STATUS_PROFILE" },
-    { "cpp": "Event", "go": "OpEvent", "value": 160, "wireName": "EVENT" }
+    { "cpp": "Event", "go": "OpEvent", "value": 160, "wireName": "EVENT" },
+    { "cpp": "AutomationListResponse", "go": "OpAutomationListResp", "value": 161, "wireName": "AUTOMATION_LIST" },
+    { "cpp": "AutomationRecordResponse", "go": "OpAutomationRecord", "value": 162, "wireName": "AUTOMATION_RECORD" }
   ],
   "reservedOpcodes": [
     { "value": 19, "note": "No PWM mode or auto-demo state is implemented." },

@@ -1,4 +1,5 @@
 #include "StatusLedController.h"
+#include "../ProjectConfig.h"
 
 #include <EEPROM.h>
 #include <string.h>
@@ -170,6 +171,10 @@ bool StatusLedController::profile(uint8_t condition, uint8_t *payload) const {
   if (condition >= ProfileCount || payload == nullptr) {
     return false;
   }
+#if PCCONTROLLER_ENABLE_BOARD_AUTOMATIONS
+  defaultProfile(condition, payload);
+  return false;
+#else
   const int address = EepromLayout::StatusProfileAddress +
                       condition * EepromLayout::StatusProfileRecordBytes;
   for (uint8_t index = 0; index < ProfilePayloadBytes; ++index) {
@@ -184,6 +189,7 @@ bool StatusLedController::profile(uint8_t condition, uint8_t *payload) const {
     defaultProfile(condition, payload);
   }
   return stored;
+#endif
 }
 
 bool StatusLedController::setProfile(uint8_t condition,
@@ -192,6 +198,10 @@ bool StatusLedController::setProfile(uint8_t condition,
   if (condition >= ProfileCount || !validProfile(payload)) {
     return false;
   }
+#if PCCONTROLLER_ENABLE_BOARD_AUTOMATIONS
+  (void)now;
+  return false;
+#else
   const int address = EepromLayout::StatusProfileAddress +
                       condition * EepromLayout::StatusProfileRecordBytes;
   for (uint8_t index = 0; index < ProfilePayloadBytes; ++index) {
@@ -204,6 +214,7 @@ bool StatusLedController::setProfile(uint8_t condition,
     applyProfile(condition, payload, now);
   }
   return true;
+#endif
 }
 
 void StatusLedController::loadProfile(uint8_t condition, uint16_t now) {

@@ -20,6 +20,13 @@ enum class ControllerEventType : uint8_t {
   // Host-routed page navigation: [type, target, ASCII page...]. Target is
   // 0=all, 1=WebUI, 2=TUI. Firmware may emit it without knowing host UI APIs.
   AppNavigation = 12,
+  Automation = 13,
+};
+
+enum class ControllerAutomationState : uint8_t {
+  Executed = 1,
+  Rejected = 2,
+  HostMacroRequested = 3,
 };
 
 // ControllerAlertKind classifies board-generated warning notifications.
@@ -60,6 +67,10 @@ public:
   void reset(uint8_t cause, uint32_t count);
   // Emits an immediate typed transition; measurements remain in STATUS.
   void alert(ControllerAlertKind kind, bool active);
+#if PCCONTROLLER_ENABLE_BOARD_AUTOMATIONS
+  void automation(ControllerAutomationState state, uint8_t recordId,
+                  uint8_t actionKind, uint8_t actionTarget);
+#endif
 
 private:
   // Prepends the event type and sends it as an unsolicited native Event frame.

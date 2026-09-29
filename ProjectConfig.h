@@ -136,6 +136,19 @@
 #error "PCCONTROLLER_ENABLE_EEPROM_BOOT_OPCODES must be 0 or 1"
 #endif
 
+// The complete board-owned automation core is retained and native-tested, but
+// the current accepted ATmega328P image has only 136 application bytes free.
+// Enabling this implementation currently exceeds the immutable 0x7DF4
+// application ceiling; keep it off until an explicit product choice frees
+// flash or selects a larger MCU. Host/offline tooling remains available.
+#ifndef PCCONTROLLER_ENABLE_BOARD_AUTOMATIONS
+#define PCCONTROLLER_ENABLE_BOARD_AUTOMATIONS 0
+#endif
+
+#if PCCONTROLLER_ENABLE_BOARD_AUTOMATIONS && PCCONTROLLER_ENABLE_EEPROM_MENU_LABELS
+#error "Board automations and EEPROM menu labels cannot share the constrained ATmega328P tail"
+#endif
+
 #if PCCONTROLLER_MENU_ORDERING && !PCCONTROLLER_MENU_VISIBILITY
 #error "Menu ordering requires persistent visibility"
 #endif
