@@ -162,6 +162,21 @@ func TestRESTTypedAppActionOutcomeLifecycle(t *testing.T) {
 // TestCanonicalRESTRouteInventory exercises every implemented REST group through
 // the real top-level multiplexer. A missing registration therefore fails here
 // before a browser client, peer, or updater can silently drift from the server.
+func TestVersionedCoreAPIRoutesAreRejected(t *testing.T) {
+	service := &Service{HostConfig: func() appconfig.Config { return appconfig.Defaults() }}
+	handler := websocketMux(context.Background(), service)
+	for _, path := range []string{"/api/v1", "/api/v1/rpc", "/api/v1/snapshot", "/api/v1/peripherals"} {
+		t.Run(path, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, path, nil)
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != http.StatusNotFound {
+				t.Fatalf("versioned route %s status=%d body=%s", path, response.Code, response.Body.String())
+			}
+		})
+	}
+}
+
 func TestCanonicalRESTRouteInventory(t *testing.T) {
 	store, err := artifacts.NewStore(t.TempDir())
 	if err != nil {

@@ -222,7 +222,7 @@ export function execute(command: string, signal?: AbortSignal): Promise<CommandR
 
 /** Receives live status, event, and transport-lifecycle notifications. */
 export interface StreamHandlers {
-  status: (value: StatusUpdate) => void
+  status: (value: StatusUpdate, source: StreamSource) => void
   event: (value: ControllerEvent, source: StreamSource) => void
   state: (state: 'connecting' | 'open' | 'waiting' | 'closed', detail?: string, source?: StreamSource) => void
 }
@@ -391,7 +391,7 @@ export function connectStream(config: UIConfig, handlers: StreamHandlers): Strea
             for (const event of pendingStateEvents.splice(0)) deliverEvent(event)
           }
         }
-        if (value.method === 'controller.status') handlers.status(value.params as StatusUpdate)
+        if (value.method === 'controller.status') handlers.status(value.params as StatusUpdate, source())
         if (value.method === 'controller.event') deliverEvent(value.params as ControllerEvent)
         if (value.method === 'controller.state') {
           const event = value.params as ControllerEvent

@@ -305,6 +305,7 @@ Interactive control:
   controller ports [connection flags]
   controller shell [connection flags]
   controller exec [connection flags] COMMAND...
+  controller buzzer --frequency HZ --duration MS [connection flags]
 
 Automation, monitoring and bridges:
   controller batch --file SCRIPT [connection flags]

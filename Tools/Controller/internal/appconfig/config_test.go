@@ -849,3 +849,43 @@ func TestFutureConfigFieldsAreIgnoredButKnownTypesRemainStrict(t *testing.T) {
 		})
 	}
 }
+
+func TestControlDescriptorsAreOrderedResolvedAndExcludeSystemChannels(t *testing.T) {
+	controls := ControlDescriptors(map[string]string{
+		"relay.5":  "Bench lamp",
+		"motion.b": "Right lift",
+		"pwm.10":   "Fan",
+		"pwm.11":   "Must remain excluded",
+	})
+	if len(controls) != 21 {
+		t.Fatalf("controls=%d, want 21", len(controls))
+	}
+	wants := []ControlDescriptor{
+		{Key: "relay.1", Kind: "relay", Order: 1, Name: "Side A Direction", Control: "relay"},
+		{Key: "relay.5", Kind: "relay", Order: 5, Name: "Bench lamp", Control: "relay"},
+		{Key: "motion.a", Kind: "side", Order: 1, Name: "Side A motion", Control: "motion"},
+		{Key: "motion.b", Kind: "side", Order: 2, Name: "Right lift", Control: "motion"},
+		{Key: "pwm.0", Kind: "mosfet", Order: 0, Name: "MOSFET 1", Control: "pwm-user"},
+		{Key: "pwm.10", Kind: "mosfet", Order: 10, Name: "Fan", Control: "pwm-user"},
+	}
+	for _, want := range wants {
+		found := false
+		for _, got := range controls {
+			if got.Key == want.Key {
+				found = true
+				if got != want {
+					t.Fatalf("control %s=%+v, want %+v", want.Key, got, want)
+				}
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("control %s missing from %+v", want.Key, controls)
+		}
+	}
+	if controls[0].Key != "relay.1" || controls[7].Key != "relay.8" ||
+		controls[8].Key != "motion.a" || controls[9].Key != "motion.b" ||
+		controls[10].Key != "pwm.0" || controls[20].Key != "pwm.10" {
+		t.Fatalf("control order=%+v", controls)
+	}
+}

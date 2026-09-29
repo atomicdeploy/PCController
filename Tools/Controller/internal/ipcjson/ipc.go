@@ -334,6 +334,7 @@ type browserUISettings struct {
 	SegmentScroll          appconfig.SegmentScroll          `json:"segment_scroll"`
 	PeripheralNames        map[string]string                `json:"peripheral_names"`
 	Peripherals            []appconfig.PeripheralDescriptor `json:"peripherals"`
+	Controls               []appconfig.ControlDescriptor    `json:"controls"`
 	Changed                *bool                            `json:"changed,omitempty"`
 	ChangedFields          []string                         `json:"changed_fields,omitempty"`
 	Before                 map[string]any                   `json:"before,omitempty"`
@@ -343,6 +344,7 @@ type browserUISettings struct {
 type peripheralSettings struct {
 	Names       map[string]string                `json:"peripheral_names"`
 	Peripherals []appconfig.PeripheralDescriptor `json:"peripherals"`
+	Controls    []appconfig.ControlDescriptor    `json:"controls"`
 }
 
 // networkPeerConfig is the versionless bridge topology contract. Deliberately
@@ -1651,6 +1653,7 @@ func (service *Service) browserUISettings() browserUISettings {
 		SegmentScroll:          ui.SegmentScroll,
 		PeripheralNames:        clonePeripheralNames(ui.PeripheralNames),
 		Peripherals:            appconfig.PeripheralDescriptors(),
+		Controls:               appconfig.ControlDescriptors(ui.PeripheralNames),
 	}
 }
 
@@ -1682,9 +1685,11 @@ func normalizePeripheralNames(names map[string]string) (map[string]string, error
 }
 
 func (service *Service) peripheralSettings() peripheralSettings {
+	names := service.hostConfig().UI.PeripheralNames
 	return peripheralSettings{
-		Names:       clonePeripheralNames(service.hostConfig().UI.PeripheralNames),
+		Names:       clonePeripheralNames(names),
 		Peripherals: appconfig.PeripheralDescriptors(),
+		Controls:    appconfig.ControlDescriptors(names),
 	}
 }
 
@@ -3495,6 +3500,10 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 		mux.Handle("/", service.WebUI)
 	}
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/api/v1" || strings.HasPrefix(request.URL.Path, "/api/v1/") {
+			http.NotFound(writer, request)
+			return
+		}
 		if serveBrowserCORS(writer, request, service, webSocketPath) {
 			return
 		}

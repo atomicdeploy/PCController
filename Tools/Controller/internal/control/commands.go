@@ -539,7 +539,8 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 				if err := settings.SetMotionBreakMS(uint16(milliseconds)); err != nil {
 					return "", err
 				}
-				if err := storeSettings(ctx, runtime, settings); err != nil {
+				settings, err = storeSettingsLive(ctx, runtime, settings)
+				if err != nil {
 					return "", err
 				}
 				return formatSettings(settings), nil
@@ -571,7 +572,8 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 				if err := settings.SetMotionDoorPolicy(policy); err != nil {
 					return "", err
 				}
-				if err := storeSettings(ctx, runtime, settings); err != nil {
+				settings, err = storeSettingsLive(ctx, runtime, settings)
+				if err != nil {
 					return "", err
 				}
 				return formatSettings(settings), nil
@@ -597,7 +599,8 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 					return "", err
 				}
 				settings.MotionExitHoldSeconds = holdSeconds
-				if err := storeSettings(ctx, runtime, settings); err != nil {
+				settings, err = storeSettingsLive(ctx, runtime, settings)
+				if err != nil {
 					return "", err
 				}
 				return formatSettings(settings), nil
@@ -624,7 +627,8 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 				default:
 					return "", fmt.Errorf("buzzer cue group must be door or relay")
 				}
-				if err := storeSettings(ctx, runtime, settings); err != nil {
+				settings, err = storeSettingsLive(ctx, runtime, settings)
+				if err != nil {
 					return "", err
 				}
 				return formatSettings(settings), nil
@@ -661,7 +665,8 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 				if err := settings.SetCurrentDecimals(current); err != nil {
 					return "", err
 				}
-				if err := storeSettings(ctx, runtime, settings); err != nil {
+				settings, err = storeSettingsLive(ctx, runtime, settings)
+				if err != nil {
 					return "", err
 				}
 				return formatSettings(settings), nil
@@ -681,7 +686,8 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 				if err := settings.SetStatusColor(color); err != nil {
 					return "", err
 				}
-				if err := storeSettings(ctx, runtime, settings); err != nil {
+				settings, err = storeSettingsLive(ctx, runtime, settings)
+				if err != nil {
 					return "", err
 				}
 				return formatSettings(settings), nil
@@ -694,7 +700,8 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 				if err != nil {
 					return "", err
 				}
-				if err := storeSettings(ctx, runtime, settings); err != nil {
+				settings, err = storeSettingsLive(ctx, runtime, settings)
+				if err != nil {
 					return "", err
 				}
 				return formatSettings(settings), nil
@@ -835,6 +842,15 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 				)
 			}
 			outputs.StopMelody()
+			if values[0] != 0 {
+				settings, err := querySettings(ctx, runtime)
+				if err != nil {
+					return "", err
+				}
+				if settings.Flags&native.SettingsSilent != 0 {
+					return "buzzer suppressed: board is silent", nil
+				}
+			}
 			if err := command(ctx, runtime, native.OpBuzzer, native.BuzzerPayload(uint16(values[0]), uint16(values[1]))); err != nil {
 				return "", err
 			}
@@ -2538,13 +2554,15 @@ func silentCommand(
 	if (settings.Flags&native.SettingsSilent != 0) == beforeSilent {
 		return fmt.Sprintf("silent=%t board_silent=%t already applied", beforeSilent, beforeSilent), nil
 	}
-	if err := storeSettings(ctx, runtime, settings); err != nil {
+	settings, err = storeSettingsLive(ctx, runtime, settings)
+	if err != nil {
 		return "", err
 	}
 	return fmt.Sprintf(
-		"silent=%t board_silent=%t saved to board EEPROM and applied live",
+		"silent=%t board_silent=%t applied_live=true persisted=%t",
 		settings.Flags&native.SettingsSilent != 0,
 		settings.Flags&native.SettingsSilent != 0,
+		settings.Persisted,
 	), nil
 }
 
@@ -2611,8 +2629,16 @@ func storeSettings(
 	runtime *Runtime,
 	settings native.Settings,
 ) error {
-	_, err := runtime.SetSettings(ctx, settings)
+	_, err := storeSettingsLive(ctx, runtime, settings)
 	return err
+}
+
+func storeSettingsLive(
+	ctx context.Context,
+	runtime *Runtime,
+	settings native.Settings,
+) (native.Settings, error) {
+	return runtime.SetSettings(ctx, settings)
 }
 
 func settingsFromSetArgs(args []string) (native.Settings, error) {
@@ -4914,7 +4940,7 @@ func formatSettings(settings native.Settings) string {
 			"output_persistence=0x%02X relay_restore_mask=0x%02X stream=%dms default_page=%d save_last=%t "+
 			"status_color=%d voltage_decimals=%d current_decimals=%d "+
 			"motion_door=%s motion_break=%dms motion_exit_hold=%ds "+
-			"door_audio=%t relay_audio=%t programming_latch=%t extended=0x%02X",
+			"door_audio=%t relay_audio=%t programming_latch=%t persisted=%t extended=0x%02X",
 		settings.Flags,
 		settings.LightMode,
 		settings.OnBrightness,
@@ -4936,6 +4962,7 @@ func formatSettings(settings native.Settings) string {
 		settings.DoorAudioEnabled(),
 		settings.RelayAudioEnabled(),
 		settings.Flags&native.SettingsProgrammingMode != 0,
+		settings.Persisted,
 		settings.ExtendedFlags,
 	)
 }
