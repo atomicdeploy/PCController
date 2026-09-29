@@ -5,7 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"slices"
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -24,7 +24,6 @@ import (
 func TestRemotePanelAndLCDMethodsUseTypedPrimaryRPCs(t *testing.T) {
 	client := &remoteTUIIPC{}
 	var methods []string
-	var keyEvents []byte
 	client.callFn = func(_ context.Context, method string, params any, target any) error {
 		methods = append(methods, method)
 		switch method {
@@ -41,16 +40,6 @@ func TestRemotePanelAndLCDMethodsUseTypedPrimaryRPCs(t *testing.T) {
 			if values["line1"] != "line one" || values["line2"] != "line two" {
 				t.Fatalf("LCD prompt params=%#v", values)
 			}
-		case "controller.opcode.send":
-			values := params.(map[string]any)
-			if values["opcode"] != native.OpRemoteKeyGesture {
-				t.Fatalf("remote-key opcode params=%#v", values)
-			}
-			payload := values["payload"].([]byte)
-			if len(payload) != 2 || payload[0] != native.MenuPrevious {
-				t.Fatalf("remote-key payload=%v", payload)
-			}
-			keyEvents = append(keyEvents, payload[1])
 		default:
 			t.Fatalf("unexpected RPC method %q", method)
 		}
@@ -67,14 +56,7 @@ func TestRemotePanelAndLCDMethodsUseTypedPrimaryRPCs(t *testing.T) {
 	if err := client.MirrorLCD("line one", "line two"); err != nil {
 		t.Fatal(err)
 	}
-	if err := client.FrontPanelKey(1, "hold"); err != nil {
-		t.Fatal(err)
-	}
-	if got, want := keyEvents, []byte{native.KeyEventDown, native.KeyEventHoldRepeat, native.KeyEventUp}; !slices.Equal(got, want) {
-		t.Fatalf("remote key lifecycle=%v, want %v", got, want)
-	}
-	want := "controller.front_panel,controller.lcd.presentation.status,controller.lcd.prompt," +
-		"controller.opcode.send,controller.opcode.send,controller.opcode.send"
+	want := "controller.front_panel,controller.lcd.presentation.status,controller.lcd.prompt"
 	if got := strings.Join(methods, ","); got != want {
 		t.Fatalf("RPC methods=%q, want %q", got, want)
 	}
@@ -101,6 +83,42 @@ func TestRemoteLiveNotificationsCoalesceAndPreserveIntentionalOff(t *testing.T) 
 	if !update.HaveStatus || update.Status.SupplyMV != 12_345 || !update.HaveStatusLED ||
 		update.StatusLED != (native.StatusLEDState{Condition: 255}) {
 		t.Fatalf("coalesced update=%#v payload=%s", update, base64.StdEncoding.EncodeToString([]byte{0, 0, 0, 0, 0, 255}))
+	}
+}
+
+func TestRemoteLiveCoalescerPreservesSourceOrderAndMissingEpochMarker(t *testing.T) {
+	client := &remoteTUIIPC{liveRaw: make(chan tui.RemoteLiveUpdate, 1)}
+	peak := native.StatusLEDState{Blue: 145, Brightness: 145, Effect: native.StatusEffectBreathe}
+	baseline := tui.RemoteLiveUpdate{
+		StatusLED: peak, HaveStatusLED: true, StatusLEDOrderKnown: true,
+		StatusLEDEpoch: 2, StatusLEDRevision: 10,
+	}
+	client.publishLive(baseline)
+	delayed := baseline
+	delayed.StatusLED.Blue = 18
+	delayed.StatusLEDRevision = 9
+	client.publishLive(delayed)
+	got := <-client.liveRaw
+	if got.StatusLED != peak || got.StatusLEDEpoch != 2 || got.StatusLEDRevision != 10 {
+		t.Fatalf("delayed frame replaced newer queued baseline: %#v", got)
+	}
+
+	oldPrimary := tui.RemoteLiveUpdate{
+		StatusLED: peak, HaveStatusLED: true, StatusLEDOrderKnown: true,
+		StatusLEDEpoch: 1, StatusLEDRevision: 100,
+	}
+	client.publishLive(oldPrimary)
+	client.publishLive(tui.RemoteLiveUpdate{
+		StatusLEDOrderKnown: true, StatusLEDEpoch: 2,
+	})
+	delayedOldPrimary := oldPrimary
+	delayedOldPrimary.StatusLED.Blue = 18
+	delayedOldPrimary.StatusLEDRevision = 101
+	client.publishLive(delayedOldPrimary)
+	got = <-client.liveRaw
+	if !got.HaveStatusLED || got.StatusLED != peak || !got.StatusLEDOrderKnown ||
+		got.StatusLEDEpoch != 2 || got.StatusLEDRevision != 0 {
+		t.Fatalf("missing new-primary marker lost visual/order authority: %#v", got)
 	}
 }
 
@@ -184,6 +202,7 @@ func TestRemoteStateStreamRejectsOutOfOrderFramesButKeepsTrueOff(t *testing.T) {
 		event, _ := json.Marshal(controllerapi.Event{
 			ID: id, Time: time.Unix(int64(id), 0), Kind: "status_led.changed",
 			Opcode: native.OpStatusLEDChanged, Payload: payload,
+			Metadata: map[string]string{"revision": fmt.Sprint(id)},
 		})
 		message, _ := json.Marshal(remoteLiveMessage{Method: "controller.state", Params: event})
 		return message
@@ -222,17 +241,22 @@ func TestRemoteStateCursorPersistsAcrossSessionsAndIsSentOnSubscribe(t *testing.
 }
 
 func TestRemoteStateCursorResetsOnPrimaryEpochChange(t *testing.T) {
-	client := &remoteTUIIPC{liveStateCursor: 500, liveRequestedAfter: 500}
-	if reset := client.acceptLiveAcknowledgement(2); !reset {
+	client := &remoteTUIIPC{
+		liveStateCursor: 2, liveRequestedAfter: 2,
+		liveEpoch: 1, liveInstanceID: "primary-a",
+		liveSessionEpoch: 1, liveSessionInstanceID: "primary-a",
+	}
+	if reset := client.acceptLiveAcknowledgement(10, "primary-b"); !reset {
 		t.Fatal("primary event epoch reset was not detected")
 	}
-	if client.liveStateCursor != 2 || client.liveRequestedAfter != 2 {
+	if client.liveStateCursor != 10 || client.liveRequestedAfter != 10 ||
+		client.liveEpoch != 2 || client.liveSessionEpoch != 2 {
 		t.Fatalf("reset cursor=%d requested=%d", client.liveStateCursor, client.liveRequestedAfter)
 	}
-	if !client.advanceLiveStateCursor(3) {
+	if !client.advanceLiveStateCursor(11) {
 		t.Fatal("new primary epoch state was rejected by the old cursor")
 	}
-	if reset := client.acceptLiveAcknowledgement(4); reset {
+	if reset := client.acceptLiveAcknowledgement(12, "primary-b"); reset {
 		t.Fatal("monotonic same-epoch acknowledgement triggered a reset")
 	}
 }
@@ -247,6 +271,8 @@ func TestRemoteEpochResetPublishesAuthoritativeBaselineBeforeNewFrames(t *testin
 	client := &remoteTUIIPC{
 		ctx: ctx, liveRaw: make(chan tui.RemoteLiveUpdate, 1),
 		liveStateCursor: 500, liveRequestedAfter: 500,
+		liveEpoch: 1, liveInstanceID: "primary-a",
+		liveSessionEpoch: 1, liveSessionInstanceID: "primary-a",
 	}
 	client.callFn = func(_ context.Context, method string, _ any, target any) error {
 		if method != "controller.snapshot" {
@@ -260,20 +286,59 @@ func TestRemoteEpochResetPublishesAuthoritativeBaselineBeforeNewFrames(t *testin
 		wire.StatusLED = authoritative.StatusLED
 		wire.HaveStatusLED = authoritative.HaveStatusLED
 		wire.StatusLEDUpdated = authoritative.StatusLEDUpdated
+		wire.StatusLEDRevision = 1
+		wire.HostInstanceID = "primary-b"
 		return nil
 	}
-	reset, err := client.consumeLiveEpochReset(2)
+	reset, err := client.consumeLiveEpochReset(2, "primary-b")
 	if err != nil || !reset {
 		t.Fatalf("reset=%t err=%v", reset, err)
 	}
 	baseline := <-client.liveRaw
 	if !baseline.HaveStatus || baseline.Status.SupplyMV != 13_002 ||
-		!baseline.HaveStatusLED || baseline.StatusLED != authoritative.StatusLED {
+		!baseline.HaveStatusLED || baseline.StatusLED != authoritative.StatusLED ||
+		baseline.StatusLEDEpoch != 2 || baseline.StatusLEDRevision != 1 {
 		t.Fatalf("authoritative restart baseline=%#v", baseline)
 	}
 	_, afterID := client.nextLiveRequest()
 	if afterID != 2 || !client.advanceLiveStateCursor(3) {
 		t.Fatalf("next after_id=%d cursor=%d", afterID, client.liveStateCursor)
+	}
+}
+
+func TestRemoteStateBeforeAcknowledgementWaitsForSourceIdentity(t *testing.T) {
+	client := &remoteTUIIPC{
+		liveRaw:         make(chan tui.RemoteLiveUpdate, 1),
+		liveStateCursor: 10, liveRequestedAfter: 10,
+		liveEpoch: 1, liveInstanceID: "primary-a",
+		liveSessionEpoch: 1, liveSessionInstanceID: "primary-a",
+	}
+	event, _ := json.Marshal(controllerapi.Event{
+		ID: 11, Time: time.Unix(11, 0), Kind: "status_led.changed",
+		Opcode: native.OpStatusLEDChanged, Payload: []byte{0, 0, 8, 145, 1, 9},
+		Metadata: map[string]string{"revision": "1"},
+	})
+	message, _ := json.Marshal(remoteLiveMessage{Method: "controller.state", Params: event})
+	var pending [][]byte
+	acknowledged, err := client.consumeOrBufferLiveMessage(message, 1, false, &pending)
+	if err != nil || acknowledged || len(pending) != 1 || client.liveStateCursor != 10 {
+		t.Fatalf("pre-ack frame was not quarantined: ack=%t err=%v pending=%d cursor=%d",
+			acknowledged, err, len(pending), client.liveStateCursor)
+	}
+	select {
+	case update := <-client.liveRaw:
+		t.Fatalf("pre-ack frame leaked under the previous identity: %#v", update)
+	default:
+	}
+	if !client.acceptLiveAcknowledgement(10, "primary-b") {
+		t.Fatal("primary restart was not adopted from the acknowledgement")
+	}
+	if _, err := client.consumeLiveMessage(pending[0], 0); err != nil {
+		t.Fatal(err)
+	}
+	update := <-client.liveRaw
+	if update.StatusLEDEpoch != 2 || update.StatusLEDRevision != 1 || update.StatusLED.Blue != 8 {
+		t.Fatalf("buffered frame was not replayed under primary B: %#v", update)
 	}
 }
 
@@ -301,6 +366,32 @@ func TestRemoteTUISnapshotRetainsMacroLifecycle(t *testing.T) {
 	}
 	if snapshot.Macros.Playback.Name != "remote take" || snapshot.Macros.Playback.Step != 2 || snapshot.Macros.Recording.Steps != 7 {
 		t.Fatal(snapshot.Macros)
+	}
+}
+
+func TestRemoteTUISnapshotRetriesConflictingPrimaryIdentity(t *testing.T) {
+	client := &remoteTUIIPC{liveEpoch: 2, liveInstanceID: "primary-b"}
+	calls := 0
+	client.callFn = func(_ context.Context, method string, _ any, target any) error {
+		if method != "controller.snapshot" {
+			return errors.New("unexpected method")
+		}
+		calls++
+		wire := target.(*remoteSnapshotWire)
+		wire.HostInstanceID = "primary-a"
+		wire.StatusLEDRevision = 99
+		if calls == 2 {
+			wire.HostInstanceID = "primary-b"
+			wire.StatusLEDRevision = 3
+		}
+		return nil
+	}
+	snapshot, err := client.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 || snapshot.StatusLEDEpoch != 2 || snapshot.StatusLEDRevision != 3 {
+		t.Fatalf("calls=%d snapshot=%#v", calls, snapshot)
 	}
 }
 

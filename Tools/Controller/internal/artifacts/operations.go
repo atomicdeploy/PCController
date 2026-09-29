@@ -56,6 +56,7 @@ func (service *Service) reserveOperation(
 	}
 	status := UpdateStatus{
 		ID: newOperationID(), Kind: kind, State: "queued", ProgressPercent: 0,
+		Stage: "queued", StageStartedAt: now,
 		StartedAt: now, UpdatedAt: now, ArtifactSHA256: strings.ToLower(strings.TrimSpace(digest)),
 		Detail: detail, IdempotencyKey: key, ProgrammingMethod: method,
 		BootloaderOutcome: BootloaderNotAttempted,
@@ -115,6 +116,7 @@ func (service *Service) loadOperationJournals() error {
 		}
 		if !terminalOperationState(journal.Status.State) {
 			journal.Status.State = "failed"
+			journal.Status.ProgressKnown = false
 			journal.Status.ErrorCode = "host_restarted"
 			journal.Status.Detail = "operation was interrupted by host restart; no hardware write was replayed"
 			journal.Status.UpdatedAt = time.Now().UTC()

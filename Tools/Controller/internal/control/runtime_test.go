@@ -1,6 +1,7 @@
 package control
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"sync"
@@ -46,6 +47,71 @@ type retryableCloseTestPort struct {
 type immediateReadFailurePort struct {
 	*retryableCloseTestPort
 	readErr error
+}
+
+type overflowThenFailurePort struct {
+	*reconnectTestPort
+	reads int
+}
+
+func (port *overflowThenFailurePort) Read(destination []byte) (int, error) {
+	if port.reads == 0 {
+		port.reads++
+		stream := append(bytes.Repeat([]byte{0x55}, native.MaxEncodedFrame), 0)
+		return copy(destination, stream), nil
+	}
+	return 0, errors.New("USB cable removed")
+}
+
+func TestRecoveredFrameAnomalyStaysDiagnostic(t *testing.T) {
+	runtime := New(Options{})
+	runtime.publishRecoveredFrameAnomaly(native.ErrReceiveOverflow)
+
+	var event Event
+	select {
+	case event = <-runtime.Events():
+	case <-time.After(time.Second):
+		t.Fatal("recovered-frame diagnostic was not published")
+	}
+	if event.Kind != "transport.frame.recovered" || event.Source != "board" ||
+		event.Target != "host" || event.Metadata["recoverable"] != "true" ||
+		event.Metadata["error"] != native.ErrReceiveOverflow.Error() {
+		t.Fatalf("recovered-frame event = %#v", event)
+	}
+	if event.Kind == "error" {
+		t.Fatal("self-healed decoder anomaly was promoted to a fatal error")
+	}
+}
+
+func TestRecoveredFrameAnomalyDoesNotReplaceTransportFailure(t *testing.T) {
+	port := &overflowThenFailurePort{reconnectTestPort: newReconnectTestPort()}
+	session := link.NewForPort("TEST", port)
+	runtime := New(Options{})
+	runtime.mu.Lock()
+	runtime.session = session
+	runtime.port = ports.Info{Name: "TEST", IsUSB: true}
+	runtime.hello = native.Hello{Name: "PCController"}
+	runtime.connectionState = "connected"
+	runtime.generation = 1
+	// Prevent the synthetic transport loss from starting a real discovery pass.
+	runtime.paused = true
+	runtime.mu.Unlock()
+
+	go runtime.pump(session, 1)
+	deadline := time.Now().Add(time.Second)
+	for {
+		snapshot := runtime.Snapshot()
+		if snapshot.ConnectionState == "reconnecting" {
+			if snapshot.ConnectionReason != "read TEST: USB cable removed" {
+				t.Fatalf("disconnect reason = %q", snapshot.ConnectionReason)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("runtime did not observe transport failure: %#v", snapshot)
+		}
+		time.Sleep(time.Millisecond)
+	}
 }
 
 func (port *immediateReadFailurePort) Read([]byte) (int, error) {
@@ -141,6 +207,34 @@ func TestPulseResetUsesRememberedPortBeforeAuthentication(t *testing.T) {
 	}
 	if len(port.dtr) != 2 || !port.dtr[0] || port.dtr[1] {
 		t.Fatalf("unexpected DTR sequence: %v", port.dtr)
+	}
+}
+
+func TestStatusLEDRevisionAdvancesOnlyWhenComposedStateChanges(t *testing.T) {
+	runtime := New(Options{})
+	first := native.StatusLEDState{Red: 1, Green: 2, Blue: 3, Brightness: 4, Effect: native.StatusEffectNone, Condition: 6}
+	firstFrame := native.Frame{Opcode: native.OpStatusLEDChanged, Payload: []byte{
+		first.Red, first.Green, first.Blue, first.Brightness, first.Effect, first.Condition,
+	}}
+	if revision := runtime.observe(firstFrame); revision != 1 {
+		t.Fatalf("first revision=%d, want 1", revision)
+	}
+	if revision := runtime.observe(firstFrame); revision != 0 {
+		t.Fatalf("duplicate revision marker=%d, want 0", revision)
+	}
+	if snapshot := runtime.Snapshot(); snapshot.StatusLEDRevision != 1 {
+		t.Fatalf("duplicate advanced snapshot revision=%d, want 1", snapshot.StatusLEDRevision)
+	}
+	second := first
+	second.Blue = 9
+	if revision := runtime.observe(native.Frame{Opcode: native.OpStatusLEDChanged, Payload: []byte{
+		second.Red, second.Green, second.Blue, second.Brightness, second.Effect, second.Condition,
+	}}); revision != 2 {
+		t.Fatalf("changed revision=%d, want 2", revision)
+	}
+	snapshot := runtime.Snapshot()
+	if snapshot.StatusLED != second || snapshot.StatusLEDRevision != 2 {
+		t.Fatalf("snapshot state=%#v revision=%d, want %#v revision=2", snapshot.StatusLED, snapshot.StatusLEDRevision, second)
 	}
 }
 

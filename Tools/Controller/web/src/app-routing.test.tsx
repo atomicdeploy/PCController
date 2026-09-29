@@ -93,7 +93,7 @@ describe('transport truth', () => {
       'unavailable',
       'en',
     )
-    expect(label).toBe('No controller')
+    expect(label).toBe('No board')
     expect(label).not.toBe('Host ready')
   })
 

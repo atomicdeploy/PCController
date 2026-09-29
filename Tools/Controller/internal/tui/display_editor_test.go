@@ -90,7 +90,7 @@ func TestMenusPageRendersOnlyAdvertisedFetchedPanelAndDisplayControls(t *testing
 	lines, _ := hostModel.menuPagePrefix(unknown)
 	hostRendered := ansi.Strip(strings.Join(lines, "\n"))
 	assertAbsent(t, hostRendered, "K1/K2 navigate", "K3/K4 adjust")
-	if !strings.Contains(hostRendered, "waiting for exact panel and RemoteKeys readback") {
+	if !strings.Contains(hostRendered, "deadman/lease not advertised") {
 		t.Fatalf("active host menu did not explain unavailable key controls:\n%s", hostRendered)
 	}
 
@@ -127,8 +127,9 @@ func TestMenusPageRendersOnlyAdvertisedFetchedPanelAndDisplayControls(t *testing
 
 	fetched.Hello.Capabilities |= native.CapabilityRemoteKeys
 	rendered, geometry = render(fetched)
-	if !strings.Contains(rendered, "K1 · previous") || geometry.frontPanelEnd <= geometry.frontPanelStart {
-		t.Fatalf("advertised exact remote-key panel missing controls: geometry=%#v\n%s", geometry, rendered)
+	assertAbsent(t, rendered, "K1 · previous", "K4 · increase")
+	if geometry.frontPanelStart != geometry.frontPanelEnd {
+		t.Fatalf("unsafe remote-key lifecycle retained hit target: geometry=%#v\n%s", geometry, rendered)
 	}
 	panelWithoutLCD := fetched
 	panelWithoutLCD.FrontPanel.LCDAvailable = false
@@ -180,6 +181,33 @@ func TestMenusPageRendersOnlyAdvertisedFetchedPanelAndDisplayControls(t *testing
 		if !strings.Contains(rendered, expected) {
 			t.Fatalf("typed remote LCD readback missing %q:\n%s", expected, rendered)
 		}
+	}
+
+	remoteModel.remoteSnapshot.Hello.Capabilities &^= native.CapabilityI2CTransfer
+	lines, _ = remoteModel.menuPagePrefix(remoteModel.remoteSnapshot)
+	rendered = ansi.Strip(strings.Join(lines, "\n"))
+	assertAbsent(t, rendered, "D · Send arbitrary message", "LCD prompt mirroring", "2×16 LCD")
+
+	panelLCD := control.Snapshot{
+		Connected: true,
+		Hello: native.Hello{Capabilities: native.CapabilityLCD |
+			native.CapabilityFrontPanelSnapshot},
+		HaveFrontPanel: true,
+		FrontPanel: native.FrontPanel{
+			Schema: 2, LCDAvailable: true, LCDAddress: 0x27,
+			LCDLine1: "Exact panel", LCDLine2: "readback", LCDBacklight: true,
+		},
+	}
+	remoteModel.remoteSnapshot = panelLCD
+	remoteModel.lcdPresentation = control.LCDPresentationState{
+		Physical: true, Address: 0x3F,
+		PhysicalLine1: "Stale presenter", PhysicalLine2: "must not win",
+	}
+	panelState := remoteModel.currentFrontPanel(panelLCD)
+	if strings.TrimSpace(panelState.LCDLine1) != "Exact panel" ||
+		strings.TrimSpace(panelState.LCDLine2) != "readback" ||
+		!strings.Contains(panelState.InputSource, "LCD 0x27") {
+		t.Fatalf("cap16-absent stale presenter overrode exact panel LCD: %#v", panelState)
 	}
 
 	disconnected := RichPreviewSnapshot()

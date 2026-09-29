@@ -1650,6 +1650,15 @@ func TestCommandCatalogAndProgramStateReachRPCAndREST(t *testing.T) {
 		!catalogContains(descriptors, "program") {
 		t.Fatalf("RPC command catalog=%#v", catalog.Result)
 	}
+	melodies := service.Dispatch(context.Background(), Request{
+		Method: "controller.melodies.list",
+	})
+	if melodies.Error != nil {
+		t.Fatal(melodies.Error)
+	}
+	if _, ok := melodies.Result.([]controllerapi.Melody); !ok {
+		t.Fatalf("RPC melody catalog=%#v", melodies.Result)
+	}
 	executeParams, _ := json.Marshal(map[string]string{"command": "help strip"})
 	executed := service.Dispatch(context.Background(), Request{
 		Method: "controller.command.execute", Params: executeParams,

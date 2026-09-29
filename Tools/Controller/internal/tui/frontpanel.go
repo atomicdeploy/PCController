@@ -71,10 +71,12 @@ func (model Model) currentFrontPanel(snapshot control.Snapshot) FrontPanelState 
 	}
 	lcdPresentation, haveLCDPresentation := model.currentLCDPresentation(snapshot)
 	lcdAddress, haveLCD := model.lcdDisplayState(snapshot)
+	havePhysicalLCDPresentation := snapshot.Hello.Capabilities&native.CapabilityI2CTransfer != 0 &&
+		haveLCDPresentation && lcdPresentation.Physical
 	state.HaveLCD = haveLCD
 	if haveLCD {
 		switch {
-		case haveLCDPresentation && lcdPresentation.Physical:
+		case havePhysicalLCDPresentation:
 			state.LCDLine1 = lcdPresentation.PhysicalLine1
 			state.LCDLine2 = lcdPresentation.PhysicalLine2
 			state.LCDBacklight = true
@@ -102,7 +104,7 @@ func (model Model) currentFrontPanel(snapshot control.Snapshot) FrontPanelState 
 			state.LCDLine1, state.LCDLine2 = line1, line2
 		case !snapshot.Connected:
 			state.InputSource += " · USB offline; retained physical text unverified"
-		case haveLCDPresentation && lcdPresentation.Physical:
+		case havePhysicalLCDPresentation:
 			// The cap16 branch above uses only the PCF8574 driver's confirmed cache.
 		case haveLCDPresentation && lcdPresentation.FirmwareMirror:
 			state.LCDLine1 = lcdPresentation.FirmwareLine1
@@ -135,7 +137,18 @@ func frontPanelSnapshotAvailable(snapshot control.Snapshot) bool {
 
 func (model Model) frontPanelControlsAvailable(snapshot control.Snapshot) bool {
 	return model.frontPanelKey != nil && frontPanelSnapshotAvailable(snapshot) &&
-		snapshot.Hello.Capabilities&native.CapabilityRemoteKeys != 0
+		snapshot.Hello.Capabilities&native.CapabilityRemoteKeys != 0 &&
+		remoteKeyLifecycleLeaseAdvertised(snapshot)
+}
+
+func remoteKeyLifecycleLeaseAdvertised(snapshot control.Snapshot) bool {
+	_ = snapshot
+	// RemoteKeys only promises injected Down/Hold/Up delivery. The current
+	// HELLO contract does not advertise a board-side lease/deadman that expires
+	// a lost Down after process, IPC, or UART failure. Never infer that safety
+	// property from RemoteKeys; keep K1-K4 hidden until a future explicit
+	// capability can be checked here.
+	return false
 }
 
 func (model Model) lcdPromptMirrorAvailable(snapshot control.Snapshot) bool {

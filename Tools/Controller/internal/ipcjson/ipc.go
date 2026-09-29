@@ -747,7 +747,7 @@ func (service *Service) dispatch(
 			result = map[string]bool{"reset": err == nil}
 		}
 	case "controller.snapshot":
-		result = service.Client.Snapshot()
+		result = service.controllerSnapshot()
 	case "controller.port.process", "controller.port.owner":
 		result = service.Client.Snapshot().PortProcess
 	case "controller.session.snapshot", "controller.session.snapshot.last":
@@ -760,6 +760,8 @@ func (service *Service) dispatch(
 		result, err = service.Client.RefreshFrontPanel(ctx)
 	case "controller.command.catalog":
 		result = service.Client.CommandCatalog()
+	case "controller.melodies.list":
+		result = service.Client.ConfiguredMelodies()
 	case "controller.program_state.get", "controller.program-state.get":
 		result = service.Client.ProgramState()
 	case "controller.program_state.set", "controller.program-state.set":
@@ -1555,6 +1557,18 @@ func (service *Service) primaryPingResult() map[string]any {
 	}
 }
 
+type controllerSnapshotEnvelope struct {
+	controller.Snapshot
+	HostInstanceID string `json:"host_instance_id,omitempty"`
+}
+
+func (service *Service) controllerSnapshot() controllerSnapshotEnvelope {
+	return controllerSnapshotEnvelope{
+		Snapshot:       service.Client.Snapshot(),
+		HostInstanceID: strings.TrimSpace(service.HostInstanceID),
+	}
+}
+
 func (service *Service) hostConfig() appconfig.Config {
 	if service.HostConfig != nil {
 		return service.HostConfig()
@@ -2092,7 +2106,7 @@ func requestCapability(method string, params json.RawMessage) string {
 	case "controller.ping", "controller.snapshot", "controller.port.process", "controller.port.owner", "controller.session.snapshot",
 		"controller.session.snapshot.last", "controller.status",
 		"controller.front_panel", "controller.front-panel",
-		"controller.command.catalog", "controller.program_state.get", "controller.program-state.get",
+		"controller.command.catalog", "controller.melodies.list", "controller.program_state.get", "controller.program-state.get",
 		"controller.temperatures", "controller.menu.list", "controller.menu.current",
 		"controller.menu.layout.get", "controller.host_menu.state",
 		"controller.rf.list", "controller.rf.presentation",
@@ -2633,7 +2647,7 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 		if !authorizeHTTPCapability(writer, request, service, capabilityRead) {
 			return
 		}
-		writeHTTPJSON(writer, http.StatusOK, service.Client.Snapshot())
+		writeHTTPJSON(writer, http.StatusOK, service.controllerSnapshot())
 	})
 	mux.HandleFunc("/api/peripherals", func(writer http.ResponseWriter, request *http.Request) {
 		if !authorizeHTTPRequest(writer, request, service) {
@@ -3822,6 +3836,7 @@ func serveWebSocket(
 					"interval_ms": normalized.IntervalMS,
 					"preserve":    normalized.Preserve,
 					"latest_id":   service.Client.LatestEventID(),
+					"instance_id": strings.TrimSpace(service.HostInstanceID),
 					"principal":   access.Principal,
 				}
 			}
@@ -3998,6 +4013,7 @@ func serveSocketIO(
 					"interval_ms": normalized.IntervalMS,
 					"preserve":    normalized.Preserve,
 					"latest_id":   service.Client.LatestEventID(),
+					"instance_id": strings.TrimSpace(service.HostInstanceID),
 					"principal":   access.Principal,
 				})
 			case "unsubscribe":

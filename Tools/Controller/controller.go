@@ -205,6 +205,7 @@ type Options struct {
 	FQBN                  string                 `json:"fqbn,omitempty"`
 	FirmwareFeatures      []string               `json:"firmware_features,omitempty"`
 	ToolchainCLI          string                 `json:"toolchain_cli,omitempty"`
+	ToolchainConfig       string                 `json:"toolchain_config,omitempty"`
 	Avrdude               string                 `json:"avrdude,omitempty"`
 	AvrdudeConf           string                 `json:"avrdude_conf,omitempty"`
 	Programmer            string                 `json:"programmer,omitempty"`
@@ -374,6 +375,7 @@ type Snapshot struct {
 	StatusLED         StatusLEDState        `json:"status_led"`
 	HaveStatusLED     bool                  `json:"have_status_led"`
 	StatusLEDUpdated  time.Time             `json:"status_led_updated,omitempty"`
+	StatusLEDRevision uint64                `json:"status_led_revision,omitempty"`
 	Illumination      IlluminationState     `json:"illumination"`
 	PortProcess       PortProcessSnapshot   `json:"port_process"`
 }
@@ -551,6 +553,7 @@ func New(options Options) *Client {
 		FirmwareFeatures:      firmwareFeatures,
 		FirmwareFeaturesError: firmwareFeaturesErr,
 		ArduinoCLI:            options.ToolchainCLI,
+		ArduinoConfig:         options.ToolchainConfig,
 		Avrdude:               options.Avrdude,
 		AvrdudeConf:           options.AvrdudeConf,
 		Programmer:            options.Programmer,
@@ -565,6 +568,7 @@ func New(options Options) *Client {
 		FirmwareFeaturesError: firmwareFeaturesErr,
 		Macros:                client.currentMacros,
 		ArduinoCLI:            options.ToolchainCLI,
+		ArduinoConfig:         options.ToolchainConfig,
 		Avrdude:               options.Avrdude,
 		AvrdudeConf:           options.AvrdudeConf,
 		Programmer:            options.Programmer,
@@ -661,6 +665,7 @@ func (client *Client) ApplyHostOptions(options Options) bool {
 		FirmwareFeatures:      firmwareFeatures,
 		FirmwareFeaturesError: firmwareFeaturesErr,
 		ArduinoCLI:            options.ToolchainCLI, Avrdude: options.Avrdude,
+		ArduinoConfig:    options.ToolchainConfig,
 		AvrdudeConf:      options.AvrdudeConf,
 		Programmer:       options.Programmer,
 		HostConfig:       client.currentHostConfig,
@@ -1977,6 +1982,7 @@ func (client *Client) Snapshot() Snapshot {
 		StatusLED:         snapshot.StatusLED,
 		HaveStatusLED:     snapshot.HaveStatusLED,
 		StatusLEDUpdated:  snapshot.StatusLEDUpdated,
+		StatusLEDRevision: snapshot.StatusLEDRevision,
 		Illumination:      illumination,
 		PortProcess:       snapshot.PortProcess,
 	}

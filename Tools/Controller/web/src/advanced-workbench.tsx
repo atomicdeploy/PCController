@@ -67,6 +67,7 @@ import {
 } from './components'
 import { rpc } from './api'
 import { redactSensitiveCommand, shellArgument as quoteArgument } from './command-line'
+import { SevenSegmentPreview } from './seven-segment-preview'
 import type { FrontPanelState } from './types'
 import type { SharedViewProps } from './views'
 import { peripheralAvailability } from './peripheral-availability'
@@ -183,28 +184,6 @@ export function hostMenuLabelCommand(reference: string, label: string): string |
   return `host-menu set ${quoteArgument(normalizedReference)} label ${quoteArgument(normalizedLabel)}`
 }
 
-const segmentLines = [
-  ['a', 8, 5, 28, 5], ['b', 31, 8, 31, 27], ['c', 31, 32, 31, 51],
-  ['d', 8, 54, 28, 54], ['e', 5, 32, 5, 51], ['f', 5, 8, 5, 27],
-  ['g', 8, 29.5, 28, 29.5],
-] as const
-
-function SevenSegmentPreview({ panel }: { panel?: FrontPanelState }) {
-  const raw = panel?.raw_segments ?? [0, 0, 0, 0]
-  return (
-    <div className={`live-segment-preview${panel?.segments_active ? ' is-active' : ''}`} dir="ltr" aria-label="Live four-digit display preview">
-      {raw.map((mask, index) => (
-        <svg key={index} viewBox="0 0 40 62" role="img" aria-label={`digit ${index + 1} raw 0x${mask.toString(16).padStart(2, '0')}`}>
-          {segmentLines.map(([name, x1, y1, x2, y2], bit) => (
-            <line key={name} x1={x1} y1={y1} x2={x2} y2={y2} className={(mask & (1 << bit)) !== 0 ? 'is-lit' : ''} />
-          ))}
-          <circle cx="36" cy="54" r="2.2" className={(mask & 0x80) !== 0 ? 'is-lit' : ''} />
-        </svg>
-      ))}
-    </div>
-  )
-}
-
 export function AdvancedWorkbench({
   snapshot,
   locale,
@@ -234,7 +213,9 @@ export function AdvancedWorkbench({
   const [menuOrder, setMenuOrder] = useState('status voltage current temperature')
   const [hostMenuID, setHostMenuID] = useState('')
   const [hostMenuLabel, setHostMenuLabel] = useState('')
-  const [frontPanel, setFrontPanel] = useState<FrontPanelState | undefined>(snapshot.front_panel)
+  const [frontPanel, setFrontPanel] = useState<FrontPanelState | undefined>(
+    available.segments && snapshot.have_front_panel ? snapshot.front_panel : undefined,
+  )
 
   const [pixel, setPixel] = useState(0)
   const [pixelRed, setPixelRed] = useState(32)
@@ -316,8 +297,12 @@ export function AdvancedWorkbench({
   }, [messageTarget, online])
 
   useEffect(() => {
+    if (!online || !available.segments) {
+      setFrontPanel(undefined)
+      return
+    }
     if (snapshot.have_front_panel && snapshot.front_panel) setFrontPanel(snapshot.front_panel)
-  }, [snapshot.front_panel_updated, snapshot.have_front_panel, snapshot.front_panel])
+  }, [available.segments, online, snapshot.front_panel_updated, snapshot.have_front_panel, snapshot.front_panel])
 
   useEffect(() => {
     setServiceOutput(copy('No service query yet.', 'هنوز پرس‌وجوی سرویسی انجام نشده است.'))
@@ -630,16 +615,16 @@ export function AdvancedWorkbench({
           detail={copy('Firmware page IDs and HOST-supplied menu overlays remain separately inspectable.', 'شناسه صفحات میان‌افزار و منوهای میزبان به‌صورت مستقل قابل بررسی هستند.')}
           defaultOpen
         >
-          <div className="front-panel-live">
-            <SevenSegmentPreview panel={frontPanel} />
+          {available.segments && <div className="front-panel-live">
+            <SevenSegmentPreview panel={frontPanel} label={copy('Live physical seven-segment display', 'نمایش زندهٔ نمایشگر فیزیکی هفت‌بخشی')} />
             <div>
               <strong>{copy('Live physical display', 'نمایش زنده پنل')}</strong>
               <span>{frontPanel ? `${copy('page', 'صفحه')} ${frontPanel.menu_page} · ${copy('brightness', 'روشنایی')} ${frontPanel.brightness}/7` : copy('Awaiting exact front-panel state', 'در انتظار وضعیت دقیق پنل')}</span>
 			  <small>{copy('Changed-only board opcodes update this preview immediately; refresh is explicit.', 'اپ‌کدهای تغییرمحور برد این پیش‌نمایش را فوری به‌روز می‌کنند؛ تازه‌سازی صریح است.')}</small>
             </div>
-          </div>
+          </div>}
           <div className="advanced-actions">
-			<Button icon={RefreshCw} disabled={!online} onClick={() => void rpc<FrontPanelState>('controller.front_panel').then(setFrontPanel).catch(() => undefined)}>{copy('Refresh physical state', 'تازه‌سازی وضعیت فیزیکی')}</Button>
+			{available.segments && <Button icon={RefreshCw} disabled={!online} onClick={() => void rpc<FrontPanelState>('controller.front_panel').then(setFrontPanel).catch(() => undefined)}>{copy('Refresh physical state', 'تازه‌سازی وضعیت فیزیکی')}</Button>}
             <Button icon={BookOpen} disabled={!online} busy={busy === 'menu list'} onClick={() => void run('menu list')}>{copy('Firmware catalog', 'کاتالوگ میان‌افزار')}</Button>
             <Button icon={LayoutDashboard} disabled={!online} busy={busy === 'menu current'} onClick={() => void run('menu current')}>{copy('Current page', 'صفحه فعلی')}</Button>
             <Button icon={LayoutPanelTop} disabled={!online} busy={busy === 'menu layout'} onClick={() => void run('menu layout')}>{copy('Stored layout', 'چیدمان ذخیره‌شده')}</Button>
