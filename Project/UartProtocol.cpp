@@ -94,8 +94,7 @@ bool UartProtocol::send(uint8_t opcode, uint8_t sequence,
 }
 
 bool UartProtocol::sendAck(uint8_t sequence, uint8_t requestOpcode) {
-  const uint8_t payload[] = {requestOpcode, NoError};
-  return send(Ack, sequence, payload, sizeof(payload));
+  return sendResult(Ack, sequence, requestOpcode, NoError);
 }
 
 bool UartProtocol::sendError(uint8_t sequence, uint8_t requestOpcode,
@@ -103,8 +102,13 @@ bool UartProtocol::sendError(uint8_t sequence, uint8_t requestOpcode,
   if (responseErrors_ != UINT16_MAX) {
     ++responseErrors_;
   }
+  return sendResult(ErrorResponse, sequence, requestOpcode, error);
+}
+
+bool UartProtocol::sendResult(uint8_t opcode, uint8_t sequence,
+                              uint8_t requestOpcode, Error error) {
   const uint8_t payload[] = {requestOpcode, static_cast<uint8_t>(error)};
-  return send(ErrorResponse, sequence, payload, sizeof(payload));
+  return send(opcode, sequence, payload, sizeof(payload));
 }
 
 uint16_t UartProtocol::framingErrors() const { return framingErrors_; }

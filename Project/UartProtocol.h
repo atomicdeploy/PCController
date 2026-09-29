@@ -59,6 +59,9 @@ private:
 
   bool writeCobs(const uint8_t *input, uint8_t length);
   void processEncodedFrame();
+  __attribute__((noinline)) bool sendResult(uint8_t opcode, uint8_t sequence,
+                                            uint8_t requestOpcode,
+                                            Error error);
 
   HardwareSerial *serial_;
   FrameHandler handler_;

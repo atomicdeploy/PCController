@@ -340,20 +340,14 @@ void adjustIlluminationMode(bool increase, uint32_t at) {
 }
 
 // Tests the currently selected R1..R8 relay against the live output mask.
-bool selectedRelayActive() {
-  return (relays.activeRelayMask() & _BV(relayMenuIndex)) != 0;
+__attribute__((noinline)) bool selectedRelayActive(uint8_t index) {
+  return (relays.activeRelayMask() & _BV(index)) != 0;
 }
 
 // Applies the selected R1..R8 test relay through safety sequencing.
 void setSelectedRelay(bool active, uint32_t at) {
   relays.requestRelayForTest(static_cast<uint8_t>(relayMenuIndex + 1), active,
                              at);
-}
-
-// Tests the selected general-purpose relay R5..R8.
-bool selectedUserRelayActive() {
-  return (relays.activeRelayMask() &
-          _BV(static_cast<uint8_t>(userRelayMenuIndex + 4))) != 0;
 }
 
 // Applies the selected general-purpose relay R5..R8.
@@ -706,7 +700,9 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       } else if (action == MENU_DECREASE) {
         setSelectedUserRelay(false, actionNow);
       } else if (userRelayBehavior == 0) {
-        setSelectedUserRelay(!selectedUserRelayActive(), actionNow);
+        setSelectedUserRelay(
+            !selectedRelayActive(static_cast<uint8_t>(userRelayMenuIndex + 4)),
+            actionNow);
       } else {
         setSelectedUserRelay(true, actionNow);
       }
@@ -1030,15 +1026,14 @@ void showPwmChannel() {
 }
 
 // Alternates timer total/remaining while indefinite learning keeps LErn.
-void showLearningProgress(uint32_t) {
+void showLearningProgress(uint32_t at) {
   if (learningTotalSeconds == 0) {
     display.showText(commonText(TextLearn));
     return;
   }
-  const uint8_t remainingSeconds = learningRemainingSeconds();
-  const bool remaining =
-      ((learningTotalSeconds - remainingSeconds) & 1U) != 0;
-  uint8_t seconds = remaining ? remainingSeconds : learningTotalSeconds;
+  const bool remaining = ((at / 1000UL) & 1U) != 0;
+  uint8_t seconds = remaining ? learningRemainingSeconds()
+                              : learningTotalSeconds;
   const bool hundreds = seconds >= 100;
   if (hundreds) {
     seconds = static_cast<uint8_t>(seconds - 100);
@@ -1240,7 +1235,8 @@ void serviceDisplay(uint32_t at) {
       };
       display.showText(relayLabel);
     } else {
-      display.showText(commonText(selectedRelayActive() ? TextOn : TextOff));
+      display.showText(
+          commonText(selectedRelayActive(relayMenuIndex) ? TextOn : TextOff));
     }
     return;
   }
@@ -1326,7 +1322,8 @@ void serviceDisplay(uint32_t at) {
       display.showInteger(static_cast<int32_t>(relayMenuIndex + 1));
       return;
     case MODE_RELAY_VALUE_EDIT:
-      display.showText(commonText(selectedRelayActive() ? TextOn : TextOff));
+      display.showText(
+          commonText(selectedRelayActive(relayMenuIndex) ? TextOn : TextOff));
       return;
     case MODE_USER_PWM_CHANNEL_EDIT:
       display.showInteger(static_cast<int32_t>(userPwmMenuIndex + 1));
@@ -1344,7 +1341,10 @@ void serviceDisplay(uint32_t at) {
       return;
     case MODE_USER_RELAY_CONTROL:
       display.showText(
-          commonText(selectedUserRelayActive() ? TextOn : TextOff));
+          commonText(selectedRelayActive(
+                         static_cast<uint8_t>(userRelayMenuIndex + 4))
+                         ? TextOn
+                         : TextOff));
       return;
     case MODE_MOTION_CONTROL:
       display.showInteger(relays.activeRelayMask());

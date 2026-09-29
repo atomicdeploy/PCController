@@ -116,8 +116,8 @@ var responseBranches = []responseBranchSpec{
 	{Name: "menu layout", Optional: true, Stages: []listingFunctionSpec{{Name: "menu-layout response", Match: "sendMenuLayout(", InlineLabel: "sendMenuLayout"}}},
 	{Name: "I2C transfer", Stages: []listingFunctionSpec{{Name: "I2C transfer response", Match: "transferI2c(", InlineLabel: "transferI2c"}}},
 	{Name: "learned remotes", Stages: []listingFunctionSpec{{Name: "learned-remotes response", Match: "sendLearnedRemotes(", InlineLabel: "sendLearnedRemotes"}}},
-	{Name: "ACK", Stages: []listingFunctionSpec{{Name: "ACK response", Match: "ControllerProtocol::UartProtocol::sendAck("}}},
-	{Name: "error", Stages: []listingFunctionSpec{{Name: "error response", Match: "ControllerProtocol::UartProtocol::sendError("}}},
+	{Name: "ACK", Stages: []listingFunctionSpec{{Name: "ACK response", Match: "ControllerProtocol::UartProtocol::sendResult("}}},
+	{Name: "error", Stages: []listingFunctionSpec{{Name: "error response", Match: "ControllerProtocol::UartProtocol::sendResult("}}},
 	{Name: "event", Stages: []listingFunctionSpec{{Name: "event response", Match: "ControllerEvents::send("}}},
 	{Name: "macro status", Stages: []listingFunctionSpec{
 		{Name: "macro opcode", Match: "MacroQueue::handle(", InlineLabel: "handle"},
@@ -125,11 +125,11 @@ var responseBranches = []responseBranchSpec{
 	}},
 	{Name: "macro ACK", Stages: []listingFunctionSpec{
 		{Name: "macro opcode", Match: "MacroQueue::handle(", InlineLabel: "handle"},
-		{Name: "macro ACK response", Match: "ControllerProtocol::UartProtocol::sendAck("},
+		{Name: "macro ACK response", Match: "ControllerProtocol::UartProtocol::sendResult("},
 	}},
 	{Name: "macro error", Stages: []listingFunctionSpec{
 		{Name: "macro opcode", Match: "MacroQueue::handle(", InlineLabel: "handle"},
-		{Name: "macro error response", Match: "ControllerProtocol::UartProtocol::sendError("},
+		{Name: "macro error response", Match: "ControllerProtocol::UartProtocol::sendResult("},
 	}},
 }
 
