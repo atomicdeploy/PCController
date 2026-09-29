@@ -75,7 +75,8 @@ func TestOpenAuthenticatedCancellationClosesBlockedWrite(t *testing.T) {
 	cancel()
 	select {
 	case outcome := <-opened:
-		if outcome.result.Session != nil || !errors.Is(outcome.err, context.Canceled) {
+		if outcome.result.Session != nil || outcome.result.Port.Name != "COM3" ||
+			!errors.Is(outcome.err, context.Canceled) {
 			t.Fatalf("OpenAuthenticated result=%+v error=%v, want canceled and fully closed", outcome.result, outcome.err)
 		}
 	case <-time.After(time.Second):
@@ -107,7 +108,8 @@ func TestOpenAuthenticatedOverallDeadlineClosesBlockedWrite(t *testing.T) {
 		HelloAttempts:  1,
 		RequestTimeout: 10 * time.Millisecond,
 	})
-	if result.Session != nil || !errors.Is(err, context.DeadlineExceeded) {
+	if result.Session != nil || result.Port.Name != "COM3" ||
+		!errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("OpenAuthenticated result=%+v error=%v, want deadline exceeded and fully closed", result, err)
 	}
 	if elapsed := time.Since(started); elapsed > 1500*time.Millisecond {

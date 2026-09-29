@@ -87,8 +87,13 @@ func AutoOpen(ctx context.Context, options DiscoveryOptions) (OpenResult, error)
 	}
 
 	var failures []error
+	var lastResult OpenResult
 	for _, candidate := range candidates {
 		result, err := OpenAuthenticated(ctx, candidate, options)
+		lastResult = result
+		if lastResult.Port.Name == "" {
+			lastResult.Port = candidate
+		}
 		if err == nil {
 			return result, nil
 		}
@@ -100,7 +105,7 @@ func AutoOpen(ctx context.Context, options DiscoveryOptions) (OpenResult, error)
 		}
 		failures = append(failures, fmt.Errorf("%s: %w", candidate.Name, err))
 	}
-	return OpenResult{}, errors.Join(failures...)
+	return lastResult, errors.Join(failures...)
 }
 
 func OpenAuthenticated(
@@ -113,7 +118,7 @@ func OpenAuthenticated(
 		if session != nil {
 			return OpenResult{Session: session, Port: port}, err
 		}
-		return OpenResult{}, err
+		return OpenResult{Port: port}, err
 	}
 
 	// Authenticate can be inside a Windows overlapped ReadFile/WriteFile after
@@ -165,7 +170,7 @@ func OpenAuthenticated(
 				fmt.Errorf("close %s after authentication cancellation: %w", port.Name, closeErr),
 			)
 		}
-		return OpenResult{}, openErr
+		return OpenResult{Port: port}, openErr
 
 	case <-authContext.Done():
 		// AfterFunc owns the first Close attempt. A retryable failure must return
@@ -180,7 +185,7 @@ func OpenAuthenticated(
 			)
 		}
 		auth := <-authDone
-		return OpenResult{}, errors.Join(authContext.Err(), auth.err)
+		return OpenResult{Port: port}, errors.Join(authContext.Err(), auth.err)
 	}
 }
 
@@ -213,7 +218,7 @@ func closeFailedAuthentication(
 			fmt.Errorf("close %s after authentication failure: %w", port.Name, closeErr),
 		)
 	}
-	return OpenResult{}, authErr
+	return OpenResult{Port: port}, authErr
 }
 
 func authenticateOpened(
