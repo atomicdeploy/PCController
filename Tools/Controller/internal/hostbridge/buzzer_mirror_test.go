@@ -41,7 +41,10 @@ func TestAuthenticatedPeerBuzzerEventStaysStructuredAndLoopSafe(t *testing.T) {
 	after := runtime.LatestEventID()
 	raw, _ := json.Marshal(controller.Event{
 		ID: 41, Kind: "buzzer.note", Stream: "state", Source: "board",
-		Metadata: map[string]string{"frequency_hz": "880", "duration_ms": "125"},
+		Metadata: map[string]string{
+			"frequency_hz": "880", "duration_ms": "125",
+			"device_micros": "1000", "connection_generation": "7",
+		},
 	})
 	if !manager.ingestPeerEvent("cafe-pc", raw) {
 		t.Fatal("valid peer event was not accepted")
@@ -62,8 +65,25 @@ func TestAuthenticatedPeerBuzzerEventStaysStructuredAndLoopSafe(t *testing.T) {
 	}
 	config := appconfig.DefaultBuzzerMirror()
 	config.Enabled, config.NativeEnabled = true, true
-	if job, ok := buzzerMirrorJobFor(config, controller.Event{Kind: event.Kind, Metadata: event.Metadata}); !ok || job.frequencyHz != 880 || job.durationMS != 125 {
+	if job, ok := buzzerMirrorJobFor(config, controller.Event{Kind: event.Kind, Metadata: event.Metadata}); !ok ||
+		job.frequencyHz != 880 || job.durationMS != 125 || !job.timed ||
+		!job.haveGeneration || job.generation != 7 {
 		t.Fatalf("mirrored job=%+v ok=%t", job, ok)
+	}
+}
+
+func TestBuzzerMirrorJobIgnoresMalformedOptionalGeneration(t *testing.T) {
+	config := appconfig.DefaultBuzzerMirror()
+	config.Enabled, config.NativeEnabled = true, true
+	job, ok := buzzerMirrorJobFor(config, controller.Event{
+		Kind: "buzzer.note",
+		Metadata: map[string]string{
+			"frequency_hz": "880", "duration_ms": "125",
+			"device_micros": "1000", "connection_generation": "not-a-number",
+		},
+	})
+	if !ok || !job.timed || job.haveGeneration {
+		t.Fatalf("optional malformed generation rejected the note: job=%+v ok=%t", job, ok)
 	}
 }
 
@@ -141,6 +161,50 @@ func TestBuzzerPlaybackTimelineReanchorsAfterDeviceRestart(t *testing.T) {
 	}, base.Add(time.Second))
 	if !restarted.start.Equal(base.Add(time.Second)) {
 		t.Fatalf("restart did not re-anchor to observation: %+v", restarted)
+	}
+}
+
+func TestBuzzerPlaybackTimelineReanchorsSmallForwardCounterAfterGenerationChange(t *testing.T) {
+	timeline := newBuzzerPlaybackTimeline()
+	base := time.Unix(1700000000, 0)
+	_ = timeline.plan(buzzerMirrorJob{
+		durationMS: 100, deviceMicros: 1_000, timed: true,
+		generation: 1, haveGeneration: true,
+		observedAt: base, source: "board-a",
+	}, base)
+	restarted := timeline.plan(buzzerMirrorJob{
+		durationMS: 100, deviceMicros: 2_000, timed: true,
+		generation: 2, haveGeneration: true,
+		observedAt: base.Add(time.Second), source: "board-a",
+	}, base.Add(time.Second))
+	if !restarted.start.Equal(base.Add(time.Second)) ||
+		!restarted.end.Equal(base.Add(1100*time.Millisecond)) {
+		t.Fatalf("generation change did not re-anchor to observation: %+v", restarted)
+	}
+}
+
+func TestBuzzerPlaybackTimelineBoundsMissingGenerationAndFutureSkew(t *testing.T) {
+	timeline := newBuzzerPlaybackTimeline()
+	base := time.Unix(1700000000, 0)
+	_ = timeline.plan(buzzerMirrorJob{
+		durationMS: 100, deviceMicros: 1_000, timed: true,
+		observedAt: base, source: "peer-without-generation",
+	}, base)
+	restarted := timeline.plan(buzzerMirrorJob{
+		durationMS: 100, deviceMicros: 2_000, timed: true,
+		observedAt: base.Add(time.Second), source: "peer-without-generation",
+	}, base.Add(time.Second))
+	if !restarted.start.Equal(base.Add(time.Second)) {
+		t.Fatalf("missing-generation restart did not re-anchor: %+v", restarted)
+	}
+
+	jumped := timeline.plan(buzzerMirrorJob{
+		durationMS: 100, deviceMicros: 240_002_000, timed: true,
+		observedAt: base.Add(1100 * time.Millisecond), source: "peer-without-generation",
+	}, base.Add(1100*time.Millisecond))
+	if !jumped.start.Equal(base.Add(1100*time.Millisecond)) ||
+		!jumped.end.Equal(base.Add(1200*time.Millisecond)) {
+		t.Fatalf("future timestamp jump was scheduled away from observation: %+v", jumped)
 	}
 }
 

@@ -45,6 +45,7 @@ type Snapshot struct {
 	ConnectionUpdated      time.Time
 	ConnectionPhase        string
 	ConnectionAttempt      uint64
+	ConnectionGeneration   uint64
 	ConnectionAttemptStart time.Time
 	ConnectionNextRetry    time.Time
 	ConnectionRetryDelay   time.Duration
@@ -738,6 +739,7 @@ func (runtime *Runtime) Snapshot() Snapshot {
 		ConnectionUpdated:      runtime.connectionUpdated,
 		ConnectionPhase:        runtime.connectionPhaseLocked(),
 		ConnectionAttempt:      runtime.connectionAttempt,
+		ConnectionGeneration:   runtime.generation,
 		ConnectionAttemptStart: runtime.connectionAttemptStart,
 		ConnectionNextRetry:    runtime.connectionNextRetry,
 		ConnectionRetryDelay:   runtime.connectionRetryDelay,
@@ -2381,6 +2383,19 @@ func (runtime *Runtime) detachReason(pause bool, reason string) error {
 	return nil
 }
 
+func buzzerEventMetadata(state native.BuzzerState, generation uint64) map[string]string {
+	metadata := map[string]string{
+		"frequency_hz":          strconv.Itoa(int(state.FrequencyHz)),
+		"duration_ms":           strconv.Itoa(int(state.DurationMS)),
+		"muted":                 strconv.FormatBool(state.Muted),
+		"connection_generation": strconv.FormatUint(generation, 10),
+	}
+	if state.Timed {
+		metadata["device_micros"] = strconv.FormatUint(uint64(state.DeviceMicros), 10)
+	}
+	return metadata
+}
+
 func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 	disconnectReason := "transport closed"
 	terminalErrorPublished := false
@@ -2524,18 +2539,10 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 						},
 					})
 				} else if parsedBuzzer != nil {
-					metadata := map[string]string{
-						"frequency_hz": strconv.Itoa(int(parsedBuzzer.FrequencyHz)),
-						"duration_ms":  strconv.Itoa(int(parsedBuzzer.DurationMS)),
-						"muted":        strconv.FormatBool(parsedBuzzer.Muted),
-					}
-					if parsedBuzzer.Timed {
-						metadata["device_micros"] = strconv.FormatUint(uint64(parsedBuzzer.DeviceMicros), 10)
-					}
 					runtime.publishEvent(Event{
 						Kind: kind, Text: text, Frame: event.Frame,
 						Source: "board", Target: "host", MessageType: "event",
-						Metadata: metadata,
+						Metadata: buzzerEventMetadata(*parsedBuzzer, generation),
 					})
 				} else if parsedStatusLED != nil {
 					runtime.publishEvent(Event{

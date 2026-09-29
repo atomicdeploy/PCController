@@ -367,6 +367,7 @@ type Snapshot struct {
 	ConnectionUpdated        time.Time             `json:"connection_updated,omitempty"`
 	ConnectionPhase          string                `json:"connection_phase"`
 	ConnectionAttempt        uint64                `json:"connection_attempt,omitempty"`
+	ConnectionGeneration     uint64                `json:"connection_generation,omitempty"`
 	ConnectionAttemptStarted time.Time             `json:"connection_attempt_started,omitempty"`
 	ConnectionNextRetry      time.Time             `json:"connection_next_retry,omitempty"`
 	ConnectionRetryDelayMS   int64                 `json:"connection_retry_delay_ms,omitempty"`
@@ -382,6 +383,7 @@ type Snapshot struct {
 	HaveStatusLED            bool                  `json:"have_status_led"`
 	StatusLEDUpdated         time.Time             `json:"status_led_updated,omitempty"`
 	StatusLEDRevision        uint64                `json:"status_led_revision,omitempty"`
+	Outputs                  OutputStreamState     `json:"outputs"`
 	Illumination             IlluminationState     `json:"illumination"`
 	PortProcess              PortProcessSnapshot   `json:"port_process"`
 }
@@ -1008,7 +1010,10 @@ func (client *Client) SetDeviceObserver(
 // Close stops active output streams and intentionally closes the serial port.
 func (client *Client) Close() error {
 	client.outputs.StopAll()
-	return client.runtime.Close()
+	releaseContext, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, releaseErr := client.outputs.ReleaseStatusEffect(releaseContext)
+	return errors.Join(releaseErr, client.runtime.Close())
 }
 
 // PulseResetFor briefly asserts the adapter reset lines, then reauthenticates
@@ -1033,10 +1038,18 @@ func (client *Client) Shutdown() error {
 	client.shutdownMu.Lock()
 	defer client.shutdownMu.Unlock()
 	client.outputs.StopAll()
+	releaseContext, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	_, releaseErr := client.outputs.ReleaseStatusEffect(releaseContext)
+	cancel()
+	if releaseErr != nil {
+		return fmt.Errorf("release status LED ownership before shutdown: %w", releaseErr)
+	}
 	if err := client.runtimeClose(); err != nil {
 		return err
 	}
-	client.outputs.Close()
+	if err := client.outputs.Close(); err != nil {
+		return fmt.Errorf("close output scheduler: %w", err)
+	}
 	_ = hostos.DefaultExecutor.ReleaseAll()
 	client.doneOnce.Do(func() { close(client.done) })
 	return nil
@@ -1748,8 +1761,7 @@ func (client *Client) SetStatusRGB(
 	ctx context.Context,
 	red, green, blue, brightness byte,
 ) error {
-	client.outputs.OverrideStatusEffect()
-	return client.outputs.SetStatusBase(ctx, red, green, blue, brightness)
+	return client.outputs.ReplaceStatusRGB(ctx, red, green, blue, brightness)
 }
 
 // SetStatusRGBBase updates the host state-policy color without canceling a
@@ -1759,6 +1771,12 @@ func (client *Client) SetStatusRGBBase(
 	red, green, blue, brightness byte,
 ) error {
 	return client.outputs.SetStatusBase(control.WithBackgroundCommand(ctx), red, green, blue, brightness)
+}
+
+// ClearStatusRGBBase clears cached host fallback policy without altering an
+// explicit board preview/effect or emitting a wire command.
+func (client *Client) ClearStatusRGBBase() {
+	client.outputs.ClearStatusBase()
 }
 
 // OutputState returns active melody and status-effect operation metadata.
@@ -1852,6 +1870,12 @@ func (client *Client) StartConfiguredStatusLEDEffect(
 // StopStatusLEDEffect cancels the active host-defined LED overlay.
 func (client *Client) StopStatusLEDEffect() bool {
 	return client.outputs.StopStatusEffect()
+}
+
+// ReleaseStatusLEDEffect reconciles board ownership, including after a host
+// reconnect where no local retained owner record survived.
+func (client *Client) ReleaseStatusLEDEffect(ctx context.Context) error {
+	return client.outputs.ReconcileStatusEffect(ctx)
 }
 
 // TransmitRF sends a validated 433 MHz code one or more times.
@@ -1987,6 +2011,7 @@ func (client *Client) Snapshot() Snapshot {
 		ConnectionUpdated:        snapshot.ConnectionUpdated,
 		ConnectionPhase:          snapshot.ConnectionPhase,
 		ConnectionAttempt:        snapshot.ConnectionAttempt,
+		ConnectionGeneration:     snapshot.ConnectionGeneration,
 		ConnectionAttemptStarted: snapshot.ConnectionAttemptStart,
 		ConnectionNextRetry:      snapshot.ConnectionNextRetry,
 		ConnectionRetryDelayMS:   snapshot.ConnectionRetryDelay.Milliseconds(),
@@ -2011,6 +2036,7 @@ func (client *Client) Snapshot() Snapshot {
 		HaveStatusLED:     snapshot.HaveStatusLED,
 		StatusLEDUpdated:  snapshot.StatusLEDUpdated,
 		StatusLEDRevision: snapshot.StatusLEDRevision,
+		Outputs:           client.outputs.State(),
 		Illumination:      illumination,
 		PortProcess:       snapshot.PortProcess,
 	}

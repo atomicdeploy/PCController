@@ -8,6 +8,7 @@ import (
 	controller "pccontroller.local/controller"
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/control"
+	"pccontroller.local/controller/internal/native"
 )
 
 func TestStatusLEDStatePriority(t *testing.T) {
@@ -178,6 +179,23 @@ func TestStatusLEDPrepareDisconnectIsBackground(t *testing.T) {
 	}
 }
 
+func TestStatusLEDPrepareDisconnectDefersNativeLifecycleToBoard(t *testing.T) {
+	target := &statusLEDTargetRecorder{
+		output: controller.OutputStreamState{StatusOwner: "board-effect"},
+	}
+	arbiter := newStatusLEDArbiter(context.Background(), target, nil, nil)
+	arbiter.snapshot = controller.Snapshot{
+		Connected: true,
+		Hello:     controller.Hello{Capabilities: native.CapabilityStatusEffects | native.CapabilityStatusProfiles},
+	}
+	if err := arbiter.PrepareDisconnect(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if target.direct != 0 || target.base != 0 || target.cleared != 1 || target.released != 1 {
+		t.Fatalf("native lifecycle disconnect stole board ownership: %#v", target)
+	}
+}
+
 func assertStatusLEDState(
 	t *testing.T,
 	policy appconfig.StatusLEDPolicy,
@@ -195,9 +213,12 @@ func assertStatusLEDState(
 }
 
 type statusLEDTargetRecorder struct {
-	base    int
-	direct  int
-	sources []control.CommandSource
+	base     int
+	direct   int
+	cleared  int
+	released int
+	output   controller.OutputStreamState
+	sources  []control.CommandSource
 }
 
 func (target *statusLEDTargetRecorder) SetStatusRGBBase(
@@ -215,5 +236,18 @@ func (target *statusLEDTargetRecorder) SetStatusRGB(
 ) error {
 	target.direct++
 	target.sources = append(target.sources, control.CommandSourceFromContext(ctx))
+	return nil
+}
+
+func (target *statusLEDTargetRecorder) ClearStatusRGBBase() {
+	target.cleared++
+}
+
+func (target *statusLEDTargetRecorder) OutputState() controller.OutputStreamState {
+	return target.output
+}
+
+func (target *statusLEDTargetRecorder) ReleaseStatusLEDEffect(context.Context) error {
+	target.released++
 	return nil
 }

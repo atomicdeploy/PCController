@@ -10,6 +10,7 @@ import (
 	controller "pccontroller.local/controller"
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/control"
+	"pccontroller.local/controller/internal/native"
 )
 
 const (
@@ -35,6 +36,12 @@ type statusLEDTarget interface {
 	SetStatusRGB(context.Context, byte, byte, byte, byte) error
 }
 
+type statusLEDLifecycleTarget interface {
+	ClearStatusRGBBase()
+	OutputState() controller.OutputStreamState
+	ReleaseStatusLEDEffect(context.Context) error
+}
+
 // statusLEDArbiter owns only the host policy layer. Explicit streamed effects
 // remain scheduler overlays, while firmware retains Boot/HOT/Fault/offline
 // fallbacks if the PC or serial link is unavailable.
@@ -50,6 +57,7 @@ type statusLEDArbiter struct {
 	snapshot       controller.Snapshot
 	rfUntil        time.Time
 	macroActive    bool
+	wasEnabled     bool
 	doorKnown      bool
 	doorOpen       bool
 	doorCueOpen    bool
@@ -66,6 +74,7 @@ func newStatusLEDArbiter(
 	return &statusLEDArbiter{
 		ctx: ctx, target: target, onState: onState, onError: onError,
 		policy: appconfig.DefaultStatusLEDPolicy(), wake: make(chan struct{}, 1),
+		wasEnabled: true,
 	}
 }
 
@@ -82,6 +91,12 @@ func (arbiter *statusLEDArbiter) Observe(
 	arbiter.policy = policy
 	arbiter.snapshot = snapshot
 	arbiter.requestTimeout = requestTimeout
+	if !policy.Enabled {
+		arbiter.rfUntil = time.Time{}
+		arbiter.macroActive = false
+		arbiter.doorKnown = false
+		arbiter.doorCueUntil = time.Time{}
+	}
 	if snapshot.Connected && snapshot.HaveStatus {
 		changed := arbiter.doorKnown && arbiter.doorOpen != snapshot.Status.DoorOpen
 		if changed || event.Kind == "door" {
@@ -115,16 +130,56 @@ func (arbiter *statusLEDArbiter) Observe(
 	}
 }
 
-// PrepareDisconnect makes a planned loss immediately visible. Unexpected USB
-// loss is covered by the MCU's independently timed red offline fallback.
+// PrepareDisconnect releases explicit native ownership. Boards advertising the
+// complete profiles contract own their offline presentation; other boards get
+// one deterministic host fallback frame while transport is still available.
 func (arbiter *statusLEDArbiter) PrepareDisconnect(ctx context.Context) error {
 	arbiter.mu.Lock()
-	visual := arbiter.policy.PCOffline
+	policy, snapshot := arbiter.policy, arbiter.snapshot
+	arbiter.resetConnectionStateLocked()
 	arbiter.mu.Unlock()
-	frame := statusLEDVisualFrame(visual, 0)
+	clearStatusRGBBase(arbiter.target)
+	if nativeStatusLEDLifecycle(snapshot) {
+		return arbiter.releaseExplicitNativeOwner(ctx)
+	}
+	frame := statusLEDVisualFrame(policy.PCOffline, 0)
 	return arbiter.target.SetStatusRGB(
 		control.WithBackgroundCommand(ctx), frame.red, frame.green, frame.blue, frame.brightness,
 	)
+}
+
+func (arbiter *statusLEDArbiter) resetConnectionStateLocked() {
+	arbiter.snapshot = controller.Snapshot{}
+	arbiter.rfUntil = time.Time{}
+	arbiter.macroActive = false
+	arbiter.doorKnown = false
+	arbiter.doorOpen = false
+	arbiter.doorCueOpen = false
+	arbiter.doorCueUntil = time.Time{}
+}
+
+func (arbiter *statusLEDArbiter) releaseExplicitNativeOwner(ctx context.Context) error {
+	target, ok := arbiter.target.(statusLEDLifecycleTarget)
+	if !ok {
+		return nil
+	}
+	switch target.OutputState().StatusOwner {
+	case "board-preview", "board-effect":
+		return target.ReleaseStatusLEDEffect(ctx)
+	default:
+		return nil
+	}
+}
+
+func clearStatusRGBBase(target statusLEDTarget) {
+	if lifecycle, ok := target.(statusLEDLifecycleTarget); ok {
+		lifecycle.ClearStatusRGBBase()
+	}
+}
+
+func nativeStatusLEDLifecycle(snapshot controller.Snapshot) bool {
+	want := uint32(native.CapabilityStatusEffects | native.CapabilityStatusProfiles)
+	return snapshot.Connected && snapshot.Hello.Capabilities&want == want
 }
 
 func (arbiter *statusLEDArbiter) Run() {
@@ -133,7 +188,7 @@ func (arbiter *statusLEDArbiter) Run() {
 	var state string
 	var stateStarted, transitionStarted time.Time
 	var current, transitionFrom, lastSent statusLEDFrame
-	var haveCurrent, haveLastSent, suppressed bool
+	var haveCurrent, haveLastSent, suppressed, nativeOwned, wasConnected bool
 	var macroOverlayPreempted bool
 	var lastErrorAt time.Time
 
@@ -151,6 +206,21 @@ func (arbiter *statusLEDArbiter) Run() {
 		now := time.Now()
 		policy, snapshot, rfUntil, doorCueUntil, doorCueOpen, macroActive, requestTimeout :=
 			arbiter.currentObservation()
+		boardOwned := nativeStatusLEDLifecycle(snapshot)
+		if snapshot.Connected != wasConnected {
+			wasConnected = snapshot.Connected
+			haveCurrent = false
+			haveLastSent = false
+			suppressed = true
+			clearStatusRGBBase(arbiter.target)
+		}
+		if boardOwned != nativeOwned {
+			nativeOwned = boardOwned
+			haveCurrent = false
+			haveLastSent = false
+			suppressed = true
+			clearStatusRGBBase(arbiter.target)
+		}
 		nextState, visual := selectStatusLEDState(
 			policy, snapshot, rfUntil, doorCueUntil, doorCueOpen, now,
 		)
@@ -169,6 +239,23 @@ func (arbiter *statusLEDArbiter) Run() {
 			if arbiter.onState != nil {
 				arbiter.onState(state)
 			}
+		}
+
+		if !policy.Enabled {
+			if arbiter.wasEnabled {
+				clearStatusRGBBase(arbiter.target)
+			}
+			arbiter.wasEnabled = false
+			haveCurrent = false
+			haveLastSent = false
+			suppressed = true
+			resetStatusLEDTimer(timer, policy.StepMS)
+			continue
+		}
+		arbiter.wasEnabled = true
+		if boardOwned {
+			resetStatusLEDTimer(timer, policy.StepMS)
+			continue
 		}
 
 		if !connected {

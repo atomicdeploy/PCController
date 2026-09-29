@@ -1085,18 +1085,20 @@ func printableText(value string) bool {
 
 // Store owns the current validated host configuration and its subscribers.
 type Store struct {
-	path               string
-	mu                 sync.RWMutex
-	value              Config
-	runtimeValue       Config
-	digest             [sha256.Size]byte
-	subscribers        map[uint64]chan Config
-	runtimeSubscribers map[uint64]chan Config
-	nextSubscriber     uint64
-	secrets            *secretstore.Resolver
-	appTitleOverride   string
-	taglineOverride    string
-	buzzerOverride     BuzzerRuntimeOverrides
+	path                         string
+	mu                           sync.RWMutex
+	value                        Config
+	runtimeValue                 Config
+	digest                       [sha256.Size]byte
+	subscribers                  map[uint64]chan Config
+	runtimeSubscribers           map[uint64]chan Config
+	nextSubscriber               uint64
+	secrets                      *secretstore.Resolver
+	appTitleOverride             string
+	taglineOverride              string
+	buzzerOverride               BuzzerRuntimeOverrides
+	statusIntervalOverride       int
+	measurementFreshnessOverride int
 }
 
 // Open resolves and loads a persistent configuration store, creating defaults
@@ -1163,6 +1165,33 @@ func (store *Store) SetPresentationOverrides(appTitle, tagline string) error {
 	store.notifyLocked(store.value)
 	store.notifyRuntimeLocked()
 	return nil
+}
+
+// SetMeasurementTimingOverrides applies process-lifetime live-measurement
+// timing without writing it back to the watched configuration file. Zero leaves
+// the corresponding persistent setting authoritative.
+func (store *Store) SetMeasurementTimingOverrides(statusIntervalMS, freshnessMS int) error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	candidate := clone(store.value)
+	applyMeasurementTimingOverrides(&candidate, statusIntervalMS, freshnessMS)
+	if err := candidate.Validate(); err != nil {
+		return fmt.Errorf("measurement timing override: %w", err)
+	}
+	store.statusIntervalOverride = statusIntervalMS
+	store.measurementFreshnessOverride = freshnessMS
+	store.notifyLocked(store.value)
+	store.notifyRuntimeLocked()
+	return nil
+}
+
+func applyMeasurementTimingOverrides(value *Config, statusIntervalMS, freshnessMS int) {
+	if statusIntervalMS != 0 {
+		value.UI.StatusIntervalMS = statusIntervalMS
+	}
+	if freshnessMS != 0 {
+		value.UI.MeasurementFreshnessMS = freshnessMS
+	}
 }
 
 // SetBuzzerRuntimeOverrides applies flags/environment choices for this process
@@ -1233,6 +1262,9 @@ func (store *Store) effectiveLocked() Config {
 		value.UI.Tagline = store.taglineOverride
 	}
 	applyBuzzerRuntimeOverrides(&value, store.buzzerOverride)
+	applyMeasurementTimingOverrides(
+		&value, store.statusIntervalOverride, store.measurementFreshnessOverride,
+	)
 	return value
 }
 
@@ -1321,6 +1353,9 @@ func (store *Store) notifyLocked(value Config) {
 		value.UI.Tagline = store.taglineOverride
 	}
 	applyBuzzerRuntimeOverrides(&value, store.buzzerOverride)
+	applyMeasurementTimingOverrides(
+		&value, store.statusIntervalOverride, store.measurementFreshnessOverride,
+	)
 	for _, subscriber := range store.subscribers {
 		copyValue := clone(value)
 		select {
@@ -1374,6 +1409,9 @@ func (store *Store) runtimeLocked() Config {
 		runtime.UI.Tagline = store.taglineOverride
 	}
 	applyBuzzerRuntimeOverrides(&runtime, store.buzzerOverride)
+	applyMeasurementTimingOverrides(
+		&runtime, store.statusIntervalOverride, store.measurementFreshnessOverride,
+	)
 	return runtime
 }
 

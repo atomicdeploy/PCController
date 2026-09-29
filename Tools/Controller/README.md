@@ -418,6 +418,13 @@ can be edited live on the TUI **HOST Settings** page, and can be changed with
 `PCCONTROLLER_TUI_ROWS`, `PCCONTROLLER_TUI_FONT`, and
 `PCCONTROLLER_TUI_FONT_SIZE`.
 
+Live measurements use the same validated timing policy in the TUI, Web UI,
+IPC, and embedded library. Configure `ui.status_interval_ms` and
+`ui.measurement_freshness_ms` persistently, or use the process-only
+`PCCONTROLLER_UI_STATUS_INTERVAL_MS` and
+`PCCONTROLLER_UI_MEASUREMENT_FRESHNESS_MS` environment overrides. Environment
+values are validated with the same bounds and are never written back to disk.
+
 Precedence is runtime flags, environment, watched config, build defaults, then
 the packaged defaults above. The package defaults are also declared as
 `productTUIConsole*` fields in `web/package.json`. Product builds may replace
