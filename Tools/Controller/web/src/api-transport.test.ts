@@ -84,13 +84,18 @@ describe('Web IPC transport', () => {
     const fetchSpy = vi.fn()
     vi.stubGlobal('fetch', fetchSpy)
 
-    const events: Array<{ kind: string; stream?: string }> = []
+    const events: Array<{ value: { kind: string; stream?: string }; generation: number; instanceID?: string }> = []
+    const states: Array<{ state: string; generation?: number; instanceID?: string }> = []
     const stop = connectStream({
       name: 'PCController', setup_complete: false, websocket_path: '/ipc', session_ticket_path: '/api/session/ticket', auth_required: false,
       appearance: { theme: 'system', locale: 'en', direction: 'auto', reduceMotion: false, compactNumbers: false, audioMuted: false, audioVolume: 0.42 },
       appearance_etag: 'a'.repeat(64),
       status_interval_ms: 200, measurement_freshness_ms: 1500,
-    }, { status: () => undefined, event: (value) => events.push(value), state: () => undefined })
+    }, {
+      status: () => undefined,
+      event: (value, source) => events.push({ value, ...source }),
+      state: (state, _detail, source) => states.push({ state, ...source }),
+    })
     await new Promise((resolve) => setTimeout(resolve, 0))
 
     await expect(rpc<{ output: string }>('controller.command.execute', { command: 'status' })).resolves.toEqual({ output: 'ws-ok' })
@@ -111,7 +116,19 @@ describe('Web IPC transport', () => {
       method: 'controller.state',
       params: { id: 7, kind: 'status_led.changed', stream: 'state', text: '#12AB34', time: '2026-08-03T00:00:00Z' },
     })
-    expect(events).toEqual([{ id: 7, kind: 'status_led.changed', stream: 'state', text: '#12AB34', time: '2026-08-03T00:00:00Z' }])
+    expect(events).toEqual([])
+    expect(states.some((value) => value.state === 'open')).toBe(false)
+    const subscription = JSON.parse(sockets[0].sent[0]) as { id: number }
+    sockets[0].pushMessage({
+      jsonrpc: '2.0', id: subscription.id,
+      result: { subscribed: true, latest_id: 7, instance_id: 'primary-web-test' },
+    })
+    expect(states.at(-1)).toMatchObject({ state: 'open', instanceID: 'primary-web-test' })
+    expect(events).toEqual([{
+      value: { id: 7, kind: 'status_led.changed', stream: 'state', text: '#12AB34', time: '2026-08-03T00:00:00Z' },
+      generation: expect.any(Number),
+      instanceID: 'primary-web-test',
+    }])
     stop()
     // Late frames from a closed/replaced connection must not update the UI.
     sockets[0].pushMessage({ jsonrpc: '2.0', method: 'controller.state', params: { kind: 'stale' } })

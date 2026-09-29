@@ -18,6 +18,7 @@ describe('controller event toast policy', () => {
     expect(shouldToastControllerEvent({ kind: 'hello.parsed', text: 'HELLO PCController' })).toBe(false)
     expect(shouldToastControllerEvent({ kind: 'status', text: 'STATUS relay=0' })).toBe(false)
     expect(shouldToastControllerEvent({ kind: 'telemetry.sample' })).toBe(false)
+    expect(shouldToastControllerEvent({ kind: 'transport.frame.recovered', source: 'board' })).toBe(false)
   })
 
   it('presents only messages explicitly targeted to this Web capability, surface, or instance', () => {

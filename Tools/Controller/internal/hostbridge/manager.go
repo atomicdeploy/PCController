@@ -215,6 +215,7 @@ type Manager struct {
 	lifecycleActuator   func(context.Context, string) error
 	notifier            hostui.Notifier
 	notificationQueue   *notificationQueue
+	updateNotifications hostui.UpdateNotificationTracker
 	warningBeep         func() error
 	runningDoorWarning  bool
 	statusLED           *statusLEDArbiter
@@ -1052,6 +1053,17 @@ func (manager *Manager) dispatchNotification(
 ) {
 	if !config.Integrations.Notifications.Enabled || manager.notifier == nil ||
 		strings.HasPrefix(strings.ToLower(strings.TrimSpace(event.Kind)), "notification.") {
+		return
+	}
+	if strings.HasPrefix(strings.ToLower(event.Kind), "update.") {
+		value := hostui.ParseUpdateProgress(event.Kind, event.Text, event.Metadata, event.Time)
+		if notification, ok := manager.updateNotifications.Next(value); ok {
+			priority := 1
+			if value.State == "failed" {
+				priority = 2
+			}
+			manager.notificationQueue.enqueue(notificationJob{key: notification.ID, notification: notification, priority: priority})
+		}
 		return
 	}
 	job, ok, err := notificationJobForEvent(config, event, manager.client.Snapshot())

@@ -50,11 +50,16 @@ type Snapshot struct {
 	StatusLED              native.StatusLEDState
 	HaveStatusLED          bool
 	StatusLEDUpdated       time.Time
-	ProgramState           ProgramStateSnapshot
-	RFLearning             RFLearnState
-	Macros                 MacroSnapshot
-	HardwareProblems       []ports.HardwareProblem `json:"hardware_problems,omitempty"`
-	PortProcess            PortProcessSnapshot     `json:"port_process"`
+	// StatusLEDEpoch is assigned by remote consumers. The primary runtime keeps
+	// it zero and exposes StatusLEDRevision as the monotonic order within this
+	// host process.
+	StatusLEDEpoch    uint64
+	StatusLEDRevision uint64
+	ProgramState      ProgramStateSnapshot
+	RFLearning        RFLearnState
+	Macros            MacroSnapshot
+	HardwareProblems  []ports.HardwareProblem `json:"hardware_problems,omitempty"`
+	PortProcess       PortProcessSnapshot     `json:"port_process"`
 }
 
 type PortProcessSnapshot struct {
@@ -194,6 +199,7 @@ type Runtime struct {
 	statusLED              native.StatusLEDState
 	haveStatusLED          bool
 	statusLEDUpdated       time.Time
+	statusLEDRevision      uint64
 	statusUpdated          time.Time
 	paused                 bool
 	connecting             bool
@@ -720,7 +726,7 @@ func (runtime *Runtime) Snapshot() Snapshot {
 		HaveFrontPanelSegments: runtime.haveFrontPanelSegments,
 		FrontPanelUpdated:      runtime.frontPanelUpdated,
 		StatusLED:              runtime.statusLED, HaveStatusLED: runtime.haveStatusLED,
-		StatusLEDUpdated: runtime.statusLEDUpdated,
+		StatusLEDUpdated: runtime.statusLEDUpdated, StatusLEDRevision: runtime.statusLEDRevision,
 		ProgramState:     programState,
 		RFLearning:       rfLearning,
 		HardwareProblems: hardwareProblems,
@@ -2268,12 +2274,18 @@ func (runtime *Runtime) detachReason(pause bool, reason string) error {
 
 func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 	disconnectReason := "transport closed"
+	terminalErrorPublished := false
 	for {
 		select {
 		case event := <-session.Events():
 			if event.Err != nil {
+				if event.Recoverable {
+					runtime.publishRecoveredFrameAnomaly(event.Err)
+					continue
+				}
 				disconnectReason = event.Err.Error()
 				runtime.publish("error", event.Err.Error(), native.Frame{})
+				terminalErrorPublished = true
 				if event.CloseFailure {
 					runtime.mu.Lock()
 					if runtime.generation == generation && runtime.session == session {
@@ -2289,7 +2301,7 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 					return
 				}
 			} else {
-				runtime.observe(event.Frame)
+				statusLEDRevision := runtime.observe(event.Frame)
 				kind := "rx"
 				text := fmt.Sprintf(
 					"%s seq=%d payload=% X",
@@ -2342,6 +2354,11 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 					}
 				} else if event.Frame.Opcode == native.OpStatusLEDChanged {
 					if state, err := native.ParseStatusLEDState(event.Frame.Payload); err == nil {
+						if statusLEDRevision == 0 {
+							// Repeated compositor frames carry no new state. Keep the
+							// snapshot watermark stable and do not amplify them over IPC.
+							continue
+						}
 						kind = "status_led.changed"
 						text = fmt.Sprintf("status LED changed to #%02X%02X%02X", state.Red, state.Green, state.Blue)
 						parsedStatusLED = &state
@@ -2423,6 +2440,7 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 							"brightness": strconv.Itoa(int(parsedStatusLED.Brightness)),
 							"effect":     strconv.Itoa(int(parsedStatusLED.Effect)),
 							"condition":  strconv.Itoa(int(parsedStatusLED.Condition)),
+							"revision":   strconv.FormatUint(statusLEDRevision, 10),
 						},
 					})
 				} else if parsedDevice != nil {
@@ -2454,6 +2472,12 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 				}
 			}
 		case <-session.Done():
+			if terminalErr := session.TerminalError(); terminalErr != nil {
+				disconnectReason = terminalErr.Error()
+				if !terminalErrorPublished {
+					runtime.publish("error", terminalErr.Error(), native.Frame{})
+				}
+			}
 			activeAtTransportLoss := runtime.activeUseAtTransportLoss()
 			runtime.mu.Lock()
 			owned := false
@@ -2491,6 +2515,21 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 			return
 		}
 	}
+}
+
+func (runtime *Runtime) publishRecoveredFrameAnomaly(err error) {
+	runtime.publishEvent(Event{
+		Kind:        "transport.frame.recovered",
+		Text:        "discarded an invalid serial frame and resynchronized at its delimiter",
+		Source:      "board",
+		Target:      "host",
+		MessageType: "event",
+		Metadata: map[string]string{
+			"error":       err.Error(),
+			"recoverable": "true",
+			"transport":   "serial",
+		},
+	})
 }
 
 func (runtime *Runtime) autoReconnect(epoch uint64) {
@@ -2617,7 +2656,7 @@ func (runtime *Runtime) publishReconnectFailure(epoch uint64, reason string) boo
 	return true
 }
 
-func (runtime *Runtime) observe(frame native.Frame) {
+func (runtime *Runtime) observe(frame native.Frame) uint64 {
 	runtime.mu.Lock()
 	defer runtime.mu.Unlock()
 	switch frame.Opcode {
@@ -2651,9 +2690,14 @@ func (runtime *Runtime) observe(frame native.Frame) {
 		}
 	case native.OpStatusLEDChanged:
 		if state, err := native.ParseStatusLEDState(frame.Payload); err == nil {
+			if runtime.haveStatusLED && runtime.statusLED == state {
+				return 0
+			}
 			runtime.statusLED = state
 			runtime.haveStatusLED = true
 			runtime.statusLEDUpdated = time.Now()
+			runtime.statusLEDRevision++
+			return runtime.statusLEDRevision
 		}
 	case native.OpEvent:
 		if event, err := native.ParseDeviceEvent(frame.Payload); err == nil {
@@ -2682,6 +2726,7 @@ func (runtime *Runtime) observe(frame native.Frame) {
 			}
 		}
 	}
+	return 0
 }
 
 func describeDeviceEvent(event native.DeviceEvent) (string, string) {

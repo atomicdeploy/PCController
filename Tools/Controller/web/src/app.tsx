@@ -44,7 +44,7 @@ import { AnimatePresence, MotionConfig, motion } from 'motion/react'
 import { createAudioEngine, type AudioCue, type AudioEngine } from './audio-engine'
 import { BoardSettingsReadGate, boardSettingsGeneration } from './board-settings-read'
 import { BootGate, BrandIcon, Button, HotkeyHelp, Icon, KeyCombo, Modal, NavButton, PageTransition, StatusBadge, ToastStack } from './components'
-import { connectStream, execute, getSnapshot, getToken, getUIConfig, rpc, setToken as storeToken } from './api'
+import { connectStream, execute, getSnapshot, getToken, getUIConfig, rpc, setToken as storeToken, type StreamSource } from './api'
 import type { StreamControl } from './api'
 import {
   adjacentPageHotkey,
@@ -93,7 +93,7 @@ import type {
   UIConfig,
 } from './types'
 import { peripheralAvailability } from './peripheral-availability'
-import { applyPushedOutputEvent, isPushedOutputEvent } from './status-led-event'
+import { advanceStatusLEDSource, applyPushedOutputEvent, isPushedOutputEvent, mergeStatusLEDSnapshot, statusLEDSnapshotMatchesSource, statusLEDSourceUnchanged } from './status-led-event'
 import { BuzzerPlaybackTimeline, type BuzzerPath } from './buzzer-routing'
 import { isMacroControllerEvent, prependMacroControllerEvent } from './macro-live'
 import { emptySnapshot } from './types'
@@ -501,6 +501,8 @@ export default function App() {
   const boardSettingsReadGate = useRef(new BoardSettingsReadGate())
   const boardSettingsRequestGeneration = useRef('')
   const snapshotRef = useRef(snapshot)
+  const ledTransportEpoch = useRef(0)
+  const ledTransportInstanceID = useRef('')
   const appActionReceipts = useRef(new AppActionReceiptCache())
   const t = useMemo(() => translator(appearance.locale), [appearance.locale])
   const productTitle = effectiveProductTitle(uiConfig?.name, __PRODUCT_NAME__)
@@ -841,11 +843,20 @@ export default function App() {
       return
     }
     try {
+      const started = { epoch: ledTransportEpoch.current, instanceID: ledTransportInstanceID.current }
       const value = await getSnapshot()
+      const currentSource = { epoch: ledTransportEpoch.current, instanceID: ledTransportInstanceID.current }
+      if (!statusLEDSourceUnchanged(started, currentSource)) return
+      if (!statusLEDSnapshotMatchesSource(value, started)) return
       const previous = snapshotRef.current
-      snapshotRef.current = value
-      setSnapshot(value)
-      setSamples((current) => metricSamplesAfterSnapshot(current, previous, value))
+      const next = mergeStatusLEDSnapshot(previous, value, {
+        epoch: started.epoch,
+        instanceID: value.host_instance_id,
+        authoritativeInstanceID: started.instanceID,
+      })
+      snapshotRef.current = next
+      setSnapshot(next)
+      setSamples((current) => metricSamplesAfterSnapshot(current, previous, next))
     } catch (cause) {
       notify('warning', 'Snapshot unavailable', cause instanceof Error ? cause.message : String(cause))
     }
@@ -1362,13 +1373,23 @@ export default function App() {
             setSnapshot(next)
             setSamples((current) => metricSamplesAfterSnapshot(current, previous, next, new Date(update.time).getTime()))
           },
-          event: (event) => {
+          event: (event, source: StreamSource) => {
+			const adoptedSource = advanceStatusLEDSource(
+				{ epoch: ledTransportEpoch.current, instanceID: ledTransportInstanceID.current },
+				{ epoch: source.generation, instanceID: source.instanceID },
+			)
+			if (!adoptedSource) return
+			ledTransportEpoch.current = adoptedSource.epoch
+			ledTransportInstanceID.current = adoptedSource.instanceID ?? ''
 			const eventKind = event.kind.toLowerCase()
             const macroEvent = isMacroControllerEvent(event)
             if (macroEvent) setMacroEvents((current) => prependMacroControllerEvent(current, event))
 			if (isPushedOutputEvent(event)) {
 				setSnapshot((current) => {
-					const next = applyPushedOutputEvent(current, event)
+					const next = applyPushedOutputEvent(current, event, {
+						epoch: source.generation,
+						instanceID: source.instanceID,
+					})
 					snapshotRef.current = next
 					return next
 				})
@@ -1450,7 +1471,16 @@ export default function App() {
             if (/config/i.test(event.kind)) void refreshHostAppearance().catch(() => undefined)
             if (/device|connection|settings|illumination|^macro/i.test(event.kind)) void refresh()
           },
-          state: (state, detail) => {
+          state: (state, detail, source) => {
+            if (source?.generation) {
+              const adoptedSource = advanceStatusLEDSource(
+                { epoch: ledTransportEpoch.current, instanceID: ledTransportInstanceID.current },
+                { epoch: source.generation, instanceID: source.instanceID },
+              )
+              if (!adoptedSource) return
+              ledTransportEpoch.current = adoptedSource.epoch
+              ledTransportInstanceID.current = adoptedSource.instanceID ?? ''
+            }
             resourceCheck.state(state)
             setStreamState(state)
             setStreamDetail(detail ?? '')

@@ -489,7 +489,8 @@ func TestIndependentRawClientsInteroperateWithAllSocketSurfaces(t *testing.T) {
 	shutdown := make(chan struct{}, 1)
 	service := &ipcjson.Service{
 		Client: client, AuthToken: token,
-		WebSocketPath: "/ipc", SocketIOPath: "/socket.io/",
+		HostInstanceID: "primary-wire-test",
+		WebSocketPath:  "/ipc", SocketIOPath: "/socket.io/",
 		Shutdown: func() { shutdown <- struct{}{} },
 	}
 	listener, err := ipcjson.Listen("127.0.0.1:0")
@@ -516,7 +517,8 @@ func TestIndependentRawClientsInteroperateWithAllSocketSurfaces(t *testing.T) {
 		t.Fatalf("unauthenticated WebSocket upgrade status=%d", status)
 	}
 	status, body := rawHTTPRequest(t, address, http.MethodGet, "/api/snapshot", token, "")
-	if status != http.StatusOK || !strings.Contains(string(body), `"connected":false`) {
+	if status != http.StatusOK || !strings.Contains(string(body), `"connected":false`) ||
+		!strings.Contains(string(body), `"host_instance_id":"primary-wire-test"`) {
 		t.Fatalf("living REST snapshot status=%d body=%s", status, body)
 	}
 	rpcBody := `{"jsonrpc":"2.0","id":"rest-1","method":"controller.ping"}`
@@ -576,7 +578,8 @@ func TestIndependentRawClientsInteroperateWithAllSocketSurfaces(t *testing.T) {
 	subscribed := rawRPC(t, standard, 3, "controller.subscribe", map[string]any{
 		"topics": []string{"status"}, "interval_ms": 50,
 	})
-	if !strings.Contains(string(subscribed["result"]), `"subscribed":true`) {
+	if !strings.Contains(string(subscribed["result"]), `"subscribed":true`) ||
+		!strings.Contains(string(subscribed["result"]), `"instance_id":"primary-wire-test"`) {
 		t.Fatalf("status subscribe response=%v", subscribed)
 	}
 	statusUpdate := readRawNotification(t, standard, "controller.status")
@@ -595,7 +598,8 @@ func TestIndependentRawClientsInteroperateWithAllSocketSurfaces(t *testing.T) {
 	}
 	snapshot := rawRPC(t, standard, 5, "controller.snapshot", nil)
 	if !strings.Contains(string(snapshot["result"]), `"connected":true`) ||
-		!strings.Contains(string(snapshot["result"]), `"paused":false`) {
+		!strings.Contains(string(snapshot["result"]), `"paused":false`) ||
+		!strings.Contains(string(snapshot["result"]), `"host_instance_id":"primary-wire-test"`) {
 		t.Fatalf("subscription cancellation changed serial lifecycle: %s", snapshot["result"])
 	}
 
