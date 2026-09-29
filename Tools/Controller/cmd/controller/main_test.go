@@ -777,18 +777,28 @@ func TestWatchedHostMenusAcrossFormatsRoutePreviewAndRelease(t *testing.T) {
 			})
 
 			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
 			updates := store.Subscribe(ctx)
 			<-updates // The manager was constructed from this initial snapshot.
+			updatesDone := make(chan struct{})
 			go func() {
+				defer close(updatesDone)
 				for value := range updates {
 					manager.UpdateConfig(value.HostMenus)
 				}
 			}()
 			watchErrors := make(chan error, 4)
-			go store.Watch(ctx, 10*time.Millisecond, nil, func(watchErr error) {
-				watchErrors <- watchErr
-			})
+			watchDone := make(chan struct{})
+			go func() {
+				defer close(watchDone)
+				store.Watch(ctx, 10*time.Millisecond, nil, func(watchErr error) {
+					watchErrors <- watchErr
+				})
+			}()
+			defer func() {
+				cancel()
+				<-updatesDone
+				<-watchDone
+			}()
 
 			// An external atomic file edit exercises fsnotify, format decoding,
 			// Store.Reload, the subscription, Manager.UpdateConfig, and the same
