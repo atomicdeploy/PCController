@@ -58,6 +58,12 @@ func TestAlphaNetworkConfigurationDoesNotRequireOrGenerateCredentials(t *testing
 	if !configured.IPC.AllowRemote || configured.IPC.AuthToken != "" || configured.IPC.AuthTokenRef != "" {
 		t.Fatalf("alpha edge config=%#v", configured.IPC)
 	}
+	origins := strings.Join(configured.IPC.AllowedOrigins, ",")
+	for _, required := range []string{"localhost:*", "127.0.0.1:*", "[::1]:*", "controller.local:*"} {
+		if !strings.Contains(origins, required) {
+			t.Fatalf("explicit edge origins lost required local origin %q: %q", required, origins)
+		}
+	}
 	if !bytes.Contains(output.Bytes(), []byte("alpha authentication disabled")) {
 		t.Fatalf("edge output=%q", output.String())
 	}
@@ -103,6 +109,13 @@ func TestDefaultEdgeOriginsPermitThisHostWithoutWildcardHostTrust(t *testing.T) 
 	origins = strings.Join(defaultEdgeOrigins("192.0.2.20", "server"), ",")
 	if !strings.Contains(origins, "192.0.2.20:*") {
 		t.Fatalf("concrete listen origin missing: %q", origins)
+	}
+}
+
+func TestRequiredLoopbackOriginsAreStableAndDeduplicated(t *testing.T) {
+	origins := withRequiredLoopbackOrigins(stringListFlag{"127.0.0.1:*", "CONTROLLER.LOCAL:*"})
+	if got, want := strings.Join(origins, ","), "localhost:*,127.0.0.1:*,[::1]:*,CONTROLLER.LOCAL:*"; got != want {
+		t.Fatalf("required origins=%q want %q", got, want)
 	}
 }
 

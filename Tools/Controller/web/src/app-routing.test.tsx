@@ -13,6 +13,7 @@ import {
   shouldOpenSetup,
 	shouldNavigateToUpdates,
   snapshotAfterTransportLoss,
+  transportFallbackPollInterval,
   transportReconnectAvailable,
 } from './app'
 import { pageOrder } from './hotkeys'
@@ -40,7 +41,7 @@ describe('web page routing', () => {
 })
 
 describe('transport truth', () => {
-  it('invalidates a previously connected snapshot as soon as the host stream is lost', () => {
+  it('preserves authoritative board truth while only the host event stream recovers', () => {
     const connected = {
       ...emptySnapshot,
       connected: true,
@@ -48,13 +49,15 @@ describe('transport truth', () => {
       connection_reason: '',
     }
     const waiting = snapshotAfterTransportLoss(connected, 'waiting', 'retrying')
-    expect(waiting.connected).toBe(false)
-    expect(waiting.connection_state).toBe('disconnected')
-    expect(waiting.connection_reason).toBe('retrying')
-    expect(waiting.have_status).toBe(false)
-    expect(waiting.hello).toEqual({})
-    expect(waiting.status).toEqual(emptySnapshot.status)
-    expect(snapshotAfterTransportLoss(connected, 'connecting').connected).toBe(false)
+    expect(waiting).toEqual(connected)
+    expect(snapshotAfterTransportLoss(connected, 'connecting')).toEqual(connected)
+  })
+
+  it('polls REST quietly at a bounded rate while the event stream reconnects', () => {
+    expect(transportFallbackPollInterval()).toBe(1000)
+    expect(transportFallbackPollInterval(50)).toBe(750)
+    expect(transportFallbackPollInterval(275)).toBe(1100)
+    expect(transportFallbackPollInterval(60_000)).toBe(5000)
   })
 
   it('replaces telemetry with the newly advertised peer identity after reconnect', () => {
@@ -95,6 +98,12 @@ describe('transport truth', () => {
     )
     expect(label).toBe('No board')
     expect(label).not.toBe('Host ready')
+    expect(controllerConnectionLabel(
+      { connected: true, connection_state: 'connected' },
+      'waiting',
+      'unavailable',
+      'en',
+    )).toBe('Reconnecting')
   })
 
   it('refreshes embedded resources only after a completed host replacement', () => {

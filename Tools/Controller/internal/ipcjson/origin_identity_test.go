@@ -25,3 +25,22 @@ func TestOriginIdentityCannotBeAssertedByHostHeader(t *testing.T) {
 		t.Fatal("implicit standard port rejected")
 	}
 }
+
+func TestLoopbackControlCenterOriginSurvivesNarrowLANConfiguration(t *testing.T) {
+	request := httptest.NewRequest("GET", "http://127.0.0.1:8787/ipc", nil)
+	for _, origin := range []string{
+		"http://localhost:8787",
+		"http://127.0.0.1:8787",
+		"http://127.0.0.2:8787",
+		"http://[::1]:8787",
+	} {
+		request.Header.Set("Origin", origin)
+		if !httpOriginAllowed(request, []string{"cafe-pc.local:*"}) {
+			t.Fatalf("loopback control-center origin rejected: %s", origin)
+		}
+	}
+	request.Header.Set("Origin", "https://hostile.example")
+	if httpOriginAllowed(request, []string{"cafe-pc.local:*"}) {
+		t.Fatal("unconfigured remote origin accepted")
+	}
+}

@@ -1229,6 +1229,7 @@ func runTUIWithInitialAction(
 			}
 		}
 	}()
+	tui.ConfigureInteractiveColorProfile()
 	program := tea.NewProgram(
 		tui.NewApplicationWithOptions(runtime, engine, tui.Options{
 			AutoConnect: !*noAuto,

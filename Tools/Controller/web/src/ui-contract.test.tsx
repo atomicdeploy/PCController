@@ -124,8 +124,9 @@ describe('offline and settings UI contracts', () => {
       snapshot={{ ...emptySnapshot, connection_reason: 'Controller offline — check the connection details below.' }}
       transport={{ ...shared().transport, streamState: 'waiting', boardState: 'unavailable' }}
     />)
-    expect(offline).toContain('Controller offline')
-    expect(offline).toContain('lucide-wifi-off')
+    expect(offline).toContain('Reconnecting…')
+    expect(offline).toContain('connection-fuji')
+    expect(offline).not.toContain('Controller offline')
     expect(offline).not.toContain('check the connection details below')
 
     const connecting = renderToStaticMarkup(<ControlsView

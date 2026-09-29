@@ -1422,6 +1422,7 @@ func runRemoteTUIContext(
 			}
 			dummyRuntime := control.New(control.Options{})
 			defer dummyRuntime.Close()
+			tui.ConfigureInteractiveColorProfile()
 			program := tea.NewProgram(
 				tui.NewApplicationWithOptions(dummyRuntime, engine, tui.Options{
 					// Appearance and terminal preferences belong to this client and
