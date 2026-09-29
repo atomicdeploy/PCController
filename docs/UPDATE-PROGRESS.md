@@ -7,7 +7,7 @@ consumes the same operation status and pushed `update.*` events.
 | Signal | Meaning |
 | --- | --- |
 | `state` | Current activity, or terminal `completed` / `failed` / `cancelled` |
-| `stage` | Current stage; retained on failure to identify where it stopped |
+| `stage` | Last observed stage, which may include reconnect/cleanup after an earlier error; the full diagnostic identifies the failure |
 | `progress_known` | Whether the current stage has a measured denominator |
 | `progress_percent` | Percentage of that stage, meaningful only when known |
 | `started_at`, `stage_started_at`, `updated_at` | Real operation, stage, and latest activity timestamps |

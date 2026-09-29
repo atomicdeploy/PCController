@@ -22,7 +22,7 @@ describe('update operation presentation', () => {
     const detail = 'AVRDUDE executable was not found at the configured location. Check programming.avrdude.'
     const html = renderToStaticMarkup(createElement(UpdateOperationPanel, { status: { ...sample, state: 'failed', stage: 'preflight', detail }, locale: 'en' }))
     expect(html).toContain(detail)
-    expect(html).toContain('Stopped during')
+    expect(html).toContain('Last stage')
     expect(html).toContain('role="alert"')
     expect(html).not.toContain('role="progressbar"')
   })

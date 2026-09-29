@@ -68,7 +68,7 @@ export function UpdateOperationPanel({ status, locale }: { status: UpdateStatus;
     </div>}
     {status.detail && <div className="update-operation__detail" role={failed ? 'alert' : undefined}>{status.detail}</div>}
     <dl className="update-operation__facts">
-      {failed && stageLabel && <div><dt>{copy('Stopped during', 'مرحله توقف')}</dt><dd>{stageLabel}</dd></div>}
+      {failed && stageLabel && <div><dt>{copy('Last stage', 'آخرین مرحله')}</dt><dd>{stageLabel}</dd></div>}
       {status.programming_method && status.programming_method !== 'none' && <div><dt>{copy('Connection', 'اتصال')}</dt><dd>{status.programming_method === 'urclock' ? 'UART / Urclock' : 'USBasp / ISP'}</dd></div>}
       {!!status.bytes_total && <div><dt>{copy('Transferred', 'انتقال داده')}</dt><dd><bdi>{status.bytes_done ?? 0} / {status.bytes_total} B</bdi></dd></div>}
       {status.updated_at && <div><dt>{copy('Last activity', 'آخرین فعالیت')}</dt><dd>{new Date(status.updated_at).toLocaleTimeString(locale)}</dd></div>}

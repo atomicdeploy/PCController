@@ -145,7 +145,7 @@ export function peerUpdateStatusFromEvent(
   }
 }
 
-export function UpdatesView({ snapshot, events, locale, openDialog }: SharedViewProps) {
+export function UpdatesView({ appTitle, snapshot, events, locale, openDialog }: SharedViewProps) {
   const copy = (english: string, persian: string) => locale === 'fa' ? persian : english
   const [manifest, setManifest] = useState<ArtifactManifest | null>(null)
   const [artifacts, setArtifacts] = useState<ArtifactDescriptor[]>([])
