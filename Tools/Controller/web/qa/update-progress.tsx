@@ -1,5 +1,5 @@
 // Isolated visual QA only. No controller transport, mutation or hardware access.
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { UpdateOperationPanel } from '../src/update-operation-panel'
 import type { UpdateStatus } from '../src/updates-api'
@@ -9,6 +9,7 @@ function Preview() {
   const [locale, setLocale] = useState<'en' | 'fa'>('en')
   const [theme, setTheme] = useState('dark')
   const [state, setState] = useState('failed')
+  useEffect(() => { document.documentElement.dataset.theme = theme }, [theme])
   const operation: UpdateStatus = { id: 'visual-fixture', kind: 'firmware', state: state as UpdateStatus['state'],
     stage: state === 'failed' ? 'preflight' : state === 'writing' ? 'flash write:writing' : 'reconnect',
     progress_percent: 42, progress_known: state === 'writing', programming_method: 'urclock',
