@@ -16,12 +16,13 @@ describe('dynamic controller favicon', () => {
     })).toBe('fault')
   })
 
-  it('keeps the real icon fallback and supplies a compact neutral-violet state SVG', () => {
+  it('keeps the canonical product mark and adds state only as a compact dot', () => {
     const url = controllerFaviconDataURL('offline')
     expect(url.startsWith('data:image/svg+xml,')).toBe(true)
     const svg = decodeURIComponent(url.slice(url.indexOf(',') + 1))
     expect(svg).toContain('Board offline')
-    expect(svg).toContain('#8b6de0')
-    expect(svg).not.toMatch(/grid|radialGradient|#00ffff|cyan|teal/i)
+    expect(svg).toContain('linearGradient id="mark"')
+    expect(svg).toContain('<circle cx="51" cy="51"')
+    expect(svg).not.toContain('M18 17h18')
   })
 })

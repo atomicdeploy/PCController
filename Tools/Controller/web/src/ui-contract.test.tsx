@@ -110,10 +110,31 @@ describe('offline and settings UI contracts', () => {
 
   it('does not render controller-only controls while disconnected', () => {
     const markup = renderToStaticMarkup(<ControlsView {...shared()} />)
-    expect(markup).toContain('Controller controls are unavailable')
+    expect(markup).toContain('Board offline')
+    expect(markup).not.toContain('to reveal its controls')
     expect(markup).not.toContain('PWM matrix')
     expect(markup).not.toContain('Relays &amp; motion')
     expect(markup).not.toContain('Status lighting')
+  })
+
+  it('renders concise transport states without connection narration', () => {
+    const offline = renderToStaticMarkup(<DashboardView
+      {...shared()}
+      t={translator('en')}
+      snapshot={{ ...emptySnapshot, connection_reason: 'Controller offline — check the connection details below.' }}
+      transport={{ ...shared().transport, streamState: 'waiting', boardState: 'unavailable' }}
+    />)
+    expect(offline).toContain('Controller offline')
+    expect(offline).toContain('lucide-wifi-off')
+    expect(offline).not.toContain('check the connection details below')
+
+    const connecting = renderToStaticMarkup(<ControlsView
+      {...shared()}
+      transport={{ ...shared().transport, streamState: 'connecting', boardState: 'loading' }}
+    />)
+    expect(connecting).toContain('Connecting…')
+    expect(connecting).toContain('connection-fuji')
+    expect(connecting).not.toContain('to reveal its controls')
   })
 
   it('exposes the complete display presentation policy on a connected controller', () => {
@@ -528,7 +549,8 @@ describe('offline and settings UI contracts', () => {
       navigationSync
       onNavigationSync={vi.fn()}
     />)
-    expect(controls).toContain('کنترل‌های برد در دسترس نیست')
+    expect(controls).toContain('برد آفلاین')
+    expect(controls).not.toContain('برای نمایش کنترل‌ها')
     expect(settings).toContain('هویت میزبان رایانه')
     expect(settings).toContain('سرویس‌ها و چرخهٔ میزبان')
     expect(settings).toContain('ایمنی نشست و توان')
