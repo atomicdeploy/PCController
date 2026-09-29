@@ -190,6 +190,11 @@ func TestPrimaryCapturedFlashRestoreRejectsOtherArtifactKinds(t *testing.T) {
 }
 
 func TestProgrammingFailureTranslatesBootloaderErrorsToTypedTelemetry(t *testing.T) {
+	preflight := programmingExecutionFailure("urclock", &programmer.PreflightError{Err: errors.New("AVRDUDE missing")})
+	var preflightFailure *artifacts.ExecutionFailure
+	if !errors.As(preflight, &preflightFailure) || preflightFailure.BootloaderOutcome != artifacts.BootloaderNotAttempted || preflightFailure.Code != "toolchain_unavailable" || preflightFailure.ISPFallbackSuggested {
+		t.Fatalf("preflight must not imply a bootloader attempt or suggest ISP: %#v", preflight)
+	}
 	value := programmingExecutionFailure("urclock", errors.New("programmer is not responding"))
 	var failure *artifacts.ExecutionFailure
 	if !errors.As(value, &failure) {

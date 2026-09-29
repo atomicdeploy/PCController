@@ -29,6 +29,12 @@ const stageLabels: Record<string, [string, string]> = {
   verifying: ['Verifying memory', 'تأیید حافظه'], reconnecting: ['Reconnecting board', 'اتصال دوباره برد'],
   restoring: ['Restoring settings', 'بازیابی تنظیمات'], downloading: ['Downloading artifact', 'دریافت فایل'],
   staging: ['Preparing host replacement', 'آماده‌سازی جایگزین میزبان'], staged: ['Host replacement ready', 'جایگزین میزبان آماده است'],
+  prepare: ['Preparing board', 'آماده‌سازی برد'], settings: ['Reading settings', 'خواندن تنظیمات'],
+  release: ['Releasing serial port', 'آزاد کردن درگاه سریال'], backup: ['Saving board backup', 'ذخیره پشتیبان برد'],
+  flash: ['Programming board', 'پروگرام برد'], reconnect: ['Reconnecting board', 'اتصال دوباره برد'],
+  restore: ['Restoring settings', 'بازیابی تنظیمات'],
+  'flash read': ['Reading flash', 'خواندن فلش'], 'EEPROM read': ['Reading EEPROM', 'خواندن EEPROM'],
+  'flash write': ['Writing flash', 'نوشتن فلش'], 'flash verification': ['Verifying flash', 'تأیید فلش'],
 }
 
 /** Current measured stage, not an artificial whole-update progress estimate. */
@@ -45,7 +51,8 @@ export function UpdateOperationPanel({ status, locale }: { status: UpdateStatus;
   const elapsed = updateElapsed(status, now)
   const failed = status.state === 'failed' || status.state === 'cancelled'
   const stage = status.stage || (running ? status.state : '')
-  const stageLabel = stageLabels[stage]?.[locale === 'fa' ? 1 : 0] || stage.replaceAll('-', ' ')
+  const stageName = stage.split(':')[0]
+  const stageLabel = stageLabels[stageName]?.[locale === 'fa' ? 1 : 0] || stageName.replaceAll('-', ' ')
   const title = failed ? copy('Update stopped', 'به‌روزرسانی متوقف شد')
     : running ? stageLabel : copy('Operation complete', 'عملیات کامل شد')
   const Icon = failed ? AlertTriangle : running ? LoaderCircle : CheckCircle2

@@ -389,6 +389,10 @@ func programmingExecutionFailure(method string, cause error) error {
 		return nil
 	}
 	typedMethod := artifacts.ProgrammingMethod(method)
+	if errors.Is(cause, programmer.ErrToolchainUnavailable) {
+		return artifacts.NewExecutionFailure(typedMethod, artifacts.BootloaderNotAttempted,
+			"toolchain_unavailable", false, cause)
+	}
 	if typedMethod != artifacts.ProgrammingMethodUrclock {
 		return artifacts.NewExecutionFailure(
 			typedMethod, artifacts.BootloaderNotAttempted,
