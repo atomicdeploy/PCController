@@ -61,11 +61,11 @@ var queryCatalog = map[string]querySpec{
 	"computer": {
 		QueryDescriptor: QueryDescriptor{
 			Profile: "computer", Class: "Win32_ComputerSystem",
-			Description: "computer manufacturer, model, memory, and processor topology",
-			Columns:     []string{"Manufacturer", "Model", "SystemType", "TotalPhysicalMemory", "NumberOfLogicalProcessors"},
+			Description: "host name, computer manufacturer, model, memory, and processor topology",
+			Columns:     []string{"Name", "DNSHostName", "Manufacturer", "Model", "SystemType", "TotalPhysicalMemory", "NumberOfLogicalProcessors"},
 			MaxRows:     1,
 		},
-		wql: "SELECT Manufacturer, Model, SystemType, TotalPhysicalMemory, NumberOfLogicalProcessors FROM Win32_ComputerSystem",
+		wql: "SELECT Name, DNSHostName, Manufacturer, Model, SystemType, TotalPhysicalMemory, NumberOfLogicalProcessors FROM Win32_ComputerSystem",
 	},
 	"firmware": {
 		QueryDescriptor: QueryDescriptor{

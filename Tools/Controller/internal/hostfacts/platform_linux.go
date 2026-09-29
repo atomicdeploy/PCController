@@ -75,7 +75,10 @@ func linuxComputerFacts() (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	hostname, _ := os.Hostname()
 	return map[string]any{
+		"Name":                      hostname,
+		"DNSHostName":               hostname,
 		"Manufacturer":              readLinuxFact("/sys/devices/virtual/dmi/id/sys_vendor"),
 		"Model":                     readLinuxFact("/sys/devices/virtual/dmi/id/product_name"),
 		"SystemType":                runtime.GOARCH,
