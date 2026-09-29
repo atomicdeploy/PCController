@@ -511,7 +511,7 @@ func runWebWithInitialAction(
 			fmt.Fprintln(stdout, "controller offline; browser not opened")
 			return nil
 		}
-		return openBrowser(appURL)
+		return openAuthenticatedBrowser(appURL, store)
 	}
 	appURL, err = webURLForAppAction(appURL, initial)
 	if err != nil {
@@ -581,7 +581,7 @@ func runWebWithInitialAction(
 				return
 			}
 			browserOpenOnce.Do(func() {
-				if openErr := openBrowser(appURL); openErr != nil {
+				if openErr := openAuthenticatedBrowser(appURL, store); openErr != nil {
 					fmt.Fprintln(stderr, "open browser:", openErr)
 				}
 			})

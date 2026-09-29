@@ -280,11 +280,18 @@ func TestRuntimeUnitProxyBypassAndReadinessArgv(t *testing.T) {
 		`ExecStartPre="/usr/bin/curl" --noproxy "*"`,
 		`http://127.0.0.1:8787/healthz`,
 		`toolchain runtime-window-ready --timeout 45s`,
-		`--noerrdialogs --disable-session-crashed-bubble`,
+		`Type=notify`,
+		`NotifyAccess=main`,
+		`TimeoutStartSec=2min`,
+		`toolchain runtime-window-open --browser "/usr/bin/chromium" --url http://127.0.0.1:8787/`,
+		`--profile %h/.local/share/pccontroller/chrome-profile`,
 	} {
 		if !strings.Contains(unit, required) {
 			t.Fatalf("window unit omitted %q:\n%s", required, unit)
 		}
+	}
+	if strings.Contains(unit, `ExecStart="/usr/bin/chromium"`) {
+		t.Fatalf("window unit bypasses the managed controller lifecycle:\n%s", unit)
 	}
 	controller := runtimeUnits(DefaultRoot, "/usr/bin/chromium", "/usr/bin/curl")["pccontroller-controller.service"]
 	if !strings.Contains(controller, ` web --listen 127.0.0.1:8787`) {
@@ -578,7 +585,7 @@ func TestFirstInstallStopFailurePreservesPublishedFilesAndReportsCleanup(t *test
 	}
 }
 
-func TestActivationRechecksBothListenersAndChromeMainExecutable(t *testing.T) {
+func TestActivationRechecksBothListenersAndManagedWindowExecutable(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("target-user integration test runs as a non-root account")
 	}
@@ -614,12 +621,13 @@ func TestActivationRechecksBothListenersAndChromeMainExecutable(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	expectedBrowser, err := filepath.EvalSymlinks("/bin/sh")
+	expectedController := filepath.Join(root, "current", "bin", "controller")
+	resolvedController, err := filepath.EvalSymlinks(expectedController)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if windowExecutable != expectedBrowser {
-		t.Fatalf("Chrome MainPID expected executable=%q want=%q", windowExecutable, expectedBrowser)
+	if windowExecutable != resolvedController {
+		t.Fatalf("managed window MainPID expected executable=%q want=%q", windowExecutable, resolvedController)
 	}
 	if strings.Join(listeners, ",") != "127.0.0.1:8765,127.0.0.1:8765,127.0.0.1:8787" {
 		t.Fatalf("listener verification sequence=%v", listeners)
