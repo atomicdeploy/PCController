@@ -63,6 +63,35 @@ func TestCapturedFlashRestoreRPCRequiresProgrammingCapability(t *testing.T) {
 	}
 }
 
+func TestArtifactHTTPAlphaAuthorizationHonorsRemoteExposure(t *testing.T) {
+	artifactService, client := newIPCArtifactService(t)
+	config := appconfig.Defaults()
+	config.IPC.AllowRemote = true
+	service := &Service{
+		Client: client, Artifacts: artifactService, AuthorizationDisabled: true,
+		HostConfig: func() appconfig.Config { return config },
+	}
+	handler := websocketMux(context.Background(), service)
+	request := func() *http.Request {
+		value := httptest.NewRequest(http.MethodGet, "http://controller.example/api/artifacts/manifest", nil)
+		value.RemoteAddr = "198.51.100.10:43100"
+		return value
+	}
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request())
+	if response.Code != http.StatusOK || response.Header().Get("X-PCController-Authentication") != "disabled-alpha" {
+		t.Fatalf("credentialless alpha artifact status=%d headers=%v body=%s", response.Code, response.Header(), response.Body.String())
+	}
+
+	config.IPC.AllowRemote = false
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request())
+	if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "remote network access is disabled") {
+		t.Fatalf("disabled remote artifact status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestArtifactHTTPRequiresRemoteAuthenticationAndProgrammingPolicy(t *testing.T) {
 	artifactService, client := newIPCArtifactService(t)
 	config := appconfig.Defaults()
