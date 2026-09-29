@@ -242,12 +242,18 @@ func (device runtimeProgrammingDevice) RampPWMToZero(
 	if state.PWM == nil {
 		return errors.New("captured PWM state is unavailable")
 	}
+	var releaseErr error
 	if device.options.Outputs != nil {
 		device.options.Outputs.StopMelody()
-		device.options.Outputs.OverrideStatusEffect()
+		if err := device.options.Outputs.ReconcileStatusEffect(ctx); err != nil {
+			releaseErr = fmt.Errorf(
+				"release status LED ownership before programming safe-off: %w",
+				err,
+			)
+		}
 	}
 	if !state.PWM.Available {
-		return nil
+		return releaseErr
 	}
 	for step := programmingRampSteps - 1; step >= 0; step-- {
 		for channel, original := range state.PWM.Values {
@@ -269,7 +275,10 @@ func (device runtimeProgrammingDevice) RampPWMToZero(
 			}
 		}
 	}
-	return command(ctx, device.runtime, native.OpPWMAllOff, nil)
+	return errors.Join(
+		releaseErr,
+		command(ctx, device.runtime, native.OpPWMAllOff, nil),
+	)
 }
 
 func (device runtimeProgrammingDevice) SetProgrammingCue(ctx context.Context) error {

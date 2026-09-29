@@ -144,6 +144,9 @@ func run(args []string, stdout, stderr io.Writer) (resultErr error) {
 		if overrideErr := store.SetPresentationOverrides(presentation.AppName, presentation.Tagline); overrideErr != nil {
 			return overrideErr
 		}
+		if overrideErr := applyMeasurementTimingEnvironment(store); overrideErr != nil {
+			return overrideErr
+		}
 		applyConfiguredConsoleTitle(store.Current().UI.AppTitle)
 		runtimeConfig, runtimeErr := store.Runtime()
 		if runtimeErr != nil {
@@ -243,6 +246,9 @@ func run(args []string, stdout, stderr io.Writer) (resultErr error) {
 		return err
 	}
 	if err := store.SetPresentationOverrides(presentation.AppName, presentation.Tagline); err != nil {
+		return err
+	}
+	if err := applyMeasurementTimingEnvironment(store); err != nil {
 		return err
 	}
 	applyConfiguredConsoleTitle(store.Current().UI.AppTitle)

@@ -20,6 +20,12 @@
 - Exercise real LAN discovery only with the named packaged
   `Tools/Controller/bin/controller.exe`; unit tests should use loopback or
   side-effect-free wire parsing.
+- Treat `main` as the sole durable branch. Temporary branches must describe a
+  cohesive topic with short semantic names (for example `fix/status-ownership`),
+  never dates, ticket numbers, machine names, actor/agent names, or random
+  suffixes. Finish, test, merge, and delete them promptly; do not delete any
+  branch until its unique commits and dirty work are represented on GitHub and
+  proven merged or deliberately superseded on the corresponding PR/issue.
 
 ## Digitalogic interface design
 

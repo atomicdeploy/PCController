@@ -23,15 +23,21 @@ type recordingOutputTarget struct {
 	commands        []recordedOutputCommand
 	events          []string
 	failAt          int
+	failCommands    map[int]error
 	ackDelay        time.Duration
 	noStatusEffects bool
+	capabilities    uint32
 }
 
 func (target *recordingOutputTarget) Snapshot() Snapshot {
 	if target.noStatusEffects {
 		return Snapshot{}
 	}
-	return Snapshot{Hello: native.Hello{Capabilities: native.CapabilityStatusEffects}}
+	capabilities := target.capabilities
+	if capabilities == 0 {
+		capabilities = native.CapabilityStatusEffects
+	}
+	return Snapshot{Hello: native.Hello{Capabilities: capabilities}}
 }
 
 func (target *recordingOutputTarget) Command(
@@ -63,6 +69,9 @@ func (target *recordingOutputTarget) Command(
 	if target.failAt != 0 && commandCount >= target.failAt {
 		return errors.New("USB disconnected")
 	}
+	if err := target.failCommands[commandCount]; err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -76,6 +85,148 @@ func (target *recordingOutputTarget) snapshot() []recordedOutputCommand {
 	target.mu.Lock()
 	defer target.mu.Unlock()
 	return append([]recordedOutputCommand(nil), target.commands...)
+}
+
+func TestNativeProfileStatusBaseDoesNotStealBoardOwnership(t *testing.T) {
+	target := &recordingOutputTarget{
+		capabilities: native.CapabilityStatusEffects | native.CapabilityStatusProfiles,
+	}
+	scheduler := NewOutputScheduler(target)
+	defer scheduler.Close()
+	if err := scheduler.SetStatusBase(context.Background(), 10, 20, 30, 120); err != nil {
+		t.Fatal(err)
+	}
+	if commands := target.snapshot(); len(commands) != 0 {
+		t.Fatalf("native lifecycle base streamed STATUS_RGB: %#v", commands)
+	}
+	state := scheduler.State()
+	if !state.HaveStatusBase || state.StatusOwner != "native-lifecycle" {
+		t.Fatalf("native lifecycle owner state=%#v", state)
+	}
+	scheduler.ClearStatusBase()
+	state = scheduler.State()
+	if state.HaveStatusBase || state.StatusOwner != "native-lifecycle" ||
+		len(target.snapshot()) != 0 {
+		t.Fatalf("clearing fallback changed native ownership: %#v", state)
+	}
+}
+
+func TestSuccessfulSteadyRGBReplacementTracksReleasablePreview(t *testing.T) {
+	target := &recordingOutputTarget{}
+	scheduler := NewOutputScheduler(target)
+	defer scheduler.Close()
+	scheduler.mu.Lock()
+	scheduler.retainedEffect = &retainedOutput{id: 91, name: "terminal"}
+	scheduler.mu.Unlock()
+
+	if err := scheduler.ReplaceStatusRGB(context.Background(), 7, 8, 9, 100); err != nil {
+		t.Fatal(err)
+	}
+	state := scheduler.State()
+	if state.EffectID == 0 || !state.EffectRetained || state.StatusOwner != "board-preview" {
+		t.Fatalf("successful RGB replacement did not track preview owner: %#v", state)
+	}
+	if !scheduler.StopStatusEffect() {
+		t.Fatal("acknowledged RGB preview was not releasable")
+	}
+	commands := target.snapshot()
+	if len(commands) != 2 || commands[0].opcode != native.OpStatusRGB ||
+		commands[1].opcode != native.OpStatusEffect ||
+		string(commands[1].payload) != string(native.StatusEffectReleasePayload()) {
+		t.Fatalf("RGB preview lifecycle commands=%#v", commands)
+	}
+}
+
+func TestFailedRetainedReleaseStaysPendingUntilRetryACK(t *testing.T) {
+	target := &recordingOutputTarget{
+		failCommands: map[int]error{1: errors.New("release ACK lost")},
+	}
+	scheduler := NewOutputScheduler(target)
+	defer scheduler.Close()
+	scheduler.mu.Lock()
+	scheduler.retainedEffect = &retainedOutput{id: 61, name: "terminal"}
+	scheduler.mu.Unlock()
+
+	if !scheduler.StopStatusEffect() {
+		t.Fatal("retained release was not attempted")
+	}
+	state := scheduler.State()
+	if state.EffectID != 61 || !state.EffectRetained || !state.EffectReleasePending {
+		t.Fatalf("failed release did not remain retryable: %#v", state)
+	}
+	if !scheduler.StopStatusEffect() || scheduler.StopStatusEffect() {
+		t.Fatal("release retry did not clear exactly once")
+	}
+	commands := target.snapshot()
+	if len(commands) != 2 {
+		t.Fatalf("release attempts=%d, want failed attempt plus retry", len(commands))
+	}
+}
+
+func TestNativeStatusEffectACKFailureReleasesPossibleOwner(t *testing.T) {
+	target := &recordingOutputTarget{
+		failCommands: map[int]error{1: errors.New("USB disconnected")},
+	}
+	scheduler := NewOutputScheduler(target)
+	defer scheduler.Close()
+	operation, err := scheduler.StartStatusEffect(
+		context.Background(),
+		appconfig.StatusLEDEffect{
+			Name: "lost-ack", Kind: "breathe", Red: 30, Green: 40, Blue: 200,
+			Brightness: 180, MinBrightness: 20, PeriodMS: 640,
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-operation.Done:
+		if err == nil || err.Error() != "USB disconnected" {
+			t.Fatalf("descriptor error=%v, want USB disconnected", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("failed descriptor did not finish")
+	}
+	commands := target.snapshot()
+	if len(commands) != 2 || commands[0].opcode != native.OpStatusEffect ||
+		commands[1].opcode != native.OpStatusEffect ||
+		string(commands[1].payload) != string(native.StatusEffectReleasePayload()) {
+		t.Fatalf("failed descriptor did not receive release: %#v", commands)
+	}
+	if scheduler.StatusEffectActive() {
+		t.Fatalf("failed descriptor retained ownership: %#v", scheduler.State())
+	}
+}
+
+func TestConcurrentStopsReleaseRetainedNativeOwnerExactlyOnce(t *testing.T) {
+	target := &recordingOutputTarget{}
+	scheduler := NewOutputScheduler(target)
+	defer scheduler.Close()
+	scheduler.mu.Lock()
+	scheduler.retainedEffect = &retainedOutput{id: 9, name: "terminal"}
+	scheduler.mu.Unlock()
+
+	const callers = 16
+	var wait sync.WaitGroup
+	results := make(chan bool, callers)
+	wait.Add(callers)
+	for range callers {
+		go func() {
+			defer wait.Done()
+			results <- scheduler.StopStatusEffect()
+		}()
+	}
+	wait.Wait()
+	close(results)
+	successes := 0
+	for stopped := range results {
+		if stopped {
+			successes++
+		}
+	}
+	if successes != 1 || len(target.snapshot()) != 1 {
+		t.Fatalf("successful stops=%d commands=%#v", successes, target.snapshot())
+	}
 }
 
 func TestMelodyStreamingWaitsBetweenAcknowledgedNotes(t *testing.T) {
@@ -234,7 +385,7 @@ func TestMelodyZeroRepeatsUntilExplicitStop(t *testing.T) {
 	}
 }
 
-func TestBreatheEffectUsesOneDescriptorAndRestoresSteadyBase(t *testing.T) {
+func TestBreatheEffectUsesOneDescriptorAndRetainsBoardEndpoint(t *testing.T) {
 	target := &recordingOutputTarget{}
 	scheduler := NewOutputScheduler(target)
 	defer scheduler.Close()
@@ -259,14 +410,12 @@ func TestBreatheEffectUsesOneDescriptorAndRestoresSteadyBase(t *testing.T) {
 		t.Fatal("effect did not complete")
 	}
 	commands := target.snapshot()
-	if len(commands) != 2 || commands[0].opcode != native.OpStatusEffect {
-		t.Fatalf("effect did not use one native descriptor and restore: %#v", commands)
+	if len(commands) != 1 || commands[0].opcode != native.OpStatusEffect {
+		t.Fatalf("effect did not use exactly one native descriptor: %#v", commands)
 	}
-	last := commands[len(commands)-1]
-	if last.opcode != native.OpStatusRGB ||
-		len(last.payload) != 4 ||
-		last.payload[3] != 100 {
-		t.Fatalf("final steady frame=% X", last.payload)
+	state := scheduler.State()
+	if !state.EffectRetained || state.EffectID != operation.ID {
+		t.Fatalf("settled native endpoint was not retained: %#v", state)
 	}
 }
 
@@ -285,7 +434,7 @@ func TestStatusEffectRequiresAdvertisedFirmwareCapability(t *testing.T) {
 	}
 }
 
-func TestStatusEffectRestoresNewestPolicyBase(t *testing.T) {
+func TestFiniteStatusEffectRetainsBoardEndpointUntilReleased(t *testing.T) {
 	target := &recordingOutputTarget{}
 	scheduler := NewOutputScheduler(target)
 	defer scheduler.Close()
@@ -318,20 +467,25 @@ func TestStatusEffectRestoresNewestPolicyBase(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("effect did not complete")
 	}
-	if scheduler.StatusEffectActive() {
-		t.Fatal("effect lane remained active after completion")
+	state := scheduler.State()
+	if !scheduler.StatusEffectActive() || !state.EffectRetained ||
+		state.EffectID != operation.ID || state.EffectName != "overlay" {
+		t.Fatalf("finite board endpoint was not retained: %#v", state)
 	}
 	commands := target.snapshot()
-	last := commands[len(commands)-1]
-	want := native.StatusRGBPayload(7, 8, 9, 100)
-	if string(last.payload) != string(want) {
-		t.Fatalf("latest policy base was not restored: got=% X want=% X", last.payload, want)
-	}
-	if last.source != CommandSourceBackground {
-		t.Fatalf("automatic policy restore lacks capture provenance: %#v", last)
+	if len(commands) != 2 || commands[1].opcode != native.OpStatusEffect {
+		t.Fatalf("finite effect emitted a host RGB snap: %#v", commands)
 	}
 	if commands[0].source != "" {
 		t.Fatal("explicit base write was incorrectly classified as background")
+	}
+	if !scheduler.StopStatusEffect() {
+		t.Fatal("retained finite endpoint could not be released")
+	}
+	commands = target.snapshot()
+	if len(commands) != 3 || commands[2].opcode != native.OpStatusEffect ||
+		string(commands[2].payload) != string(native.StatusEffectReleasePayload()) {
+		t.Fatalf("retained endpoint release commands=%#v", commands)
 	}
 }
 
@@ -385,15 +539,8 @@ func TestSteadyRGBOverrideCannotBeUndoneByCanceledEffectCleanup(t *testing.T) {
 	if len(target.snapshot()) == 0 {
 		t.Fatal("effect did not emit its first frame")
 	}
-	if !scheduler.OverrideStatusEffect() {
-		t.Fatal("effect was not canceled for override")
-	}
 	steady := native.StatusRGBPayload(9, 8, 7, 6)
-	if err := target.Command(
-		context.Background(),
-		native.OpStatusRGB,
-		steady,
-	); err != nil {
+	if err := scheduler.ReplaceStatusRGB(context.Background(), 9, 8, 7, 6); err != nil {
 		t.Fatal(err)
 	}
 	select {

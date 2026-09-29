@@ -1289,12 +1289,23 @@ application-UART close, guarded toolchain/Urclock run, and fresh `HELLO`
 recovery as local programming.
 
 Subscribed peer events and state remain structured. In particular, an
-unsolicited `buzzer.note` retains its frequency, duration, and optional
-MCU-clock metadata so an independently enabled host renderer can reconstruct
-its source timeline. The receiver stamps `bridge.ingress` and never forwards
+unsolicited `buzzer.note` retains its frequency, duration, MCU-clock metadata
+when available, and `connection_generation`. Renderers preserve short cadence
+inside one generation, but re-anchor after a reconnect or when the derived
+timestamp moves more than 250 ms from local receipt time; a peer's wall clock
+can therefore neither delay nor accelerate playback. The receiver stamps
+`bridge.ingress` and never forwards
 an ingressed event again; this gives server-to-edge mirroring exactly once
 without polling or bridge cycles. Both JSON-RPC and Socket.IO peers must
 include `state` in their configured topics.
+
+`snapshot.outputs` exposes the live output ownership contract. Native profile
+boards remain `native-lifecycle` until an explicit effect or steady preview is
+ACKed. Completed native effects are retained as `board-effect`; steady previews
+are retained as `board-preview`; failed releases remain
+`effect_release_pending` and can be retried. Programming, planned disconnect,
+and shutdown reconcile ownership with one compact status-effect release instead
+of streaming a host RGB fallback over board-owned safety/offline profiles.
 
 ## Artifact distribution and remote updates
 

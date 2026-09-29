@@ -762,8 +762,9 @@ func TestTransportCloseLatchesOutputActivityBeforeStreamCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if scheduler.State().EffectID == 0 {
-		t.Fatal("status effect was not active before transport close")
+	state := scheduler.State()
+	if state.EffectID == 0 && state.EffectPendingID == 0 {
+		t.Fatalf("status effect was not active or pending before transport close: %#v", state)
 	}
 	if err := session.Close(); err != nil {
 		t.Fatal(err)
@@ -773,8 +774,9 @@ func TestTransportCloseLatchesOutputActivityBeforeStreamCleanup(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("stream did not unwind after transport close")
 	}
-	if scheduler.State().EffectID != 0 {
-		t.Fatal("stream cleanup did not clear the active effect")
+	state = scheduler.State()
+	if state.EffectID != 0 && (!state.EffectRetained || !state.EffectReleasePending) {
+		t.Fatalf("transport loss left a non-retryable native owner: %#v", state)
 	}
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
@@ -2057,6 +2059,26 @@ func TestEventStreamClassification(t *testing.T) {
 		if got := EventStreamForKind(kind); got != expected {
 			t.Errorf("EventStreamForKind(%q)=%q want %q", kind, got, expected)
 		}
+	}
+}
+
+func TestBuzzerEventMetadataCarriesConnectionGeneration(t *testing.T) {
+	timed := buzzerEventMetadata(native.BuzzerState{
+		FrequencyHz: 880, DurationMS: 125, Muted: true,
+		DeviceMicros: 0x12345678, Timed: true,
+	}, 42)
+	if timed["frequency_hz"] != "880" || timed["duration_ms"] != "125" ||
+		timed["muted"] != "true" || timed["device_micros"] != "305419896" ||
+		timed["connection_generation"] != "42" {
+		t.Fatalf("timed buzzer metadata=%#v", timed)
+	}
+
+	untimed := buzzerEventMetadata(native.BuzzerState{
+		FrequencyHz: 440, DurationMS: 40,
+	}, 43)
+	if _, exists := untimed["device_micros"]; exists ||
+		untimed["connection_generation"] != "43" {
+		t.Fatalf("untimed buzzer metadata=%#v", untimed)
 	}
 }
 
