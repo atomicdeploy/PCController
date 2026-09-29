@@ -59,9 +59,17 @@ command -v "$cxx" >/dev/null || { printf '%s is required in PATH\n' "$cxx" >&2; 
 triplet=$("$cxx" -dumpmachine)
 compiler_display=$(command -v "$cxx")
 compiler_path=$compiler_display
-if [[ "$triplet" == *msys* ]] && command -v cygpath >/dev/null; then
-    [[ -x "${compiler_path}.exe" ]] && compiler_path="${compiler_path}.exe"
-    compiler_path=$(cygpath -m "$compiler_path")
+cmake_compiler_args=()
+if [[ -n "${MSYSTEM:-}" ]]; then
+    # The preset already selects the GNU compiler from the native Windows PATH.
+    # Do not pass Git Bash's virtual path through to native CMake.
+    :
+else
+    if [[ "$triplet" == *msys* ]] && command -v cygpath >/dev/null; then
+        [[ -x "${compiler_path}.exe" ]] && compiler_path="${compiler_path}.exe"
+        compiler_path=$(cygpath -m "$compiler_path")
+    fi
+    cmake_compiler_args+=("-DCMAKE_CXX_COMPILER=${compiler_path}")
 fi
 
 cyan=$'\033[36m'
@@ -82,15 +90,16 @@ if ((clean)) && [[ -d "$build_root" ]]; then
 fi
 
 printf '%s⚙️  Configuring CMake%s\n' "$cyan" "$reset"
-cmake --preset "$preset" -S "$source_root" \
-    "-DCMAKE_CXX_COMPILER=${compiler_path}"
+cmake --preset "$preset" -S "$source_root" "${cmake_compiler_args[@]}"
 
 printf '%s🔨 Building C++17 virtual hardware%s\n' "$cyan" "$reset"
 cmake --build --preset "$preset" --parallel
 
 if ((skip_tests == 0)); then
     printf '%s🧪 Running protocol and EEPROM tests%s\n' "$cyan" "$reset"
-    ctest --preset "$preset" --test-dir "$source_root"
+    # The test preset already points at the matching generated build tree.
+    # Overriding it with the source directory makes CTest discover zero tests.
+    ctest --preset "$preset" --no-tests=error
 fi
 
 printf '%s✅ Virtual board build passed.%s\n' "$green" "$reset"
