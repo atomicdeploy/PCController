@@ -147,6 +147,11 @@ func TestProgrammerCommandHelper(t *testing.T) {
 	}
 	arguments := os.Args[separator+1:]
 	switch arguments[0] {
+	case "progress-hang":
+		fmt.Fprint(os.Stderr, "Reading | ###")
+		for {
+			time.Sleep(time.Hour)
+		}
 	case "hang":
 		for {
 			time.Sleep(time.Hour)

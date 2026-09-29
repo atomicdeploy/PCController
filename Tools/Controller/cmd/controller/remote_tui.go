@@ -1446,6 +1446,7 @@ func runRemoteTUI(
 			)
 			_, runErr := program.Run()
 			_ = hostui.WriteOSC(stdout, "9;4;0;0")
+			_ = hostui.ClearUpdateTaskbarProgress()
 			return runErr
 		}
 	}

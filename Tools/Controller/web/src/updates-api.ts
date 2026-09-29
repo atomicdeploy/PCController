@@ -18,6 +18,13 @@ export type UpdateState =
   | 'staging'
   | 'staged'
   | 'verifying'
+  | 'preflight'
+  | 'writing'
+  | 'reconnecting'
+  | 'restoring'
+  | 'preparing'
+  | 'erasing'
+  | 'cancelled'
   | 'completed'
   | 'failed'
 
@@ -47,6 +54,9 @@ export interface UpdateStatus {
   kind: UpdateOperationKind
   state: UpdateState
   progress_percent: number
+  progress_known?: boolean
+  stage?: string
+  stage_started_at?: string
   bytes_done?: number
   bytes_total?: number
   started_at?: string
