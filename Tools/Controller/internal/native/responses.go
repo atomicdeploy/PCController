@@ -10,15 +10,23 @@ import (
 )
 
 const (
-	BoardKindPCController byte = 1
-	SettingsShape         byte = 3
-	IdentitySchemaCompact byte = 3
-	RFEntriesSchema       byte = 1
-	MenuListSchema        byte = 1
-	TemperatureSchema     byte = 1
-	StatusPayloadSize          = 48
-	RFEntryPayloadSize         = 12
+	BoardKindPCController       byte = 1
+	SettingsShape               byte = 3
+	IdentitySchemaCompact       byte = 3
+	RFEntriesSchema             byte = 1
+	MenuListSchema              byte = 1
+	TemperatureSchema           byte = 1
+	StatusPayloadSize                = 48
+	RFEntryPayloadSize               = 12
+	AutomationSchema            byte = 1
+	AutomationRecordPayloadSize      = 12
+	AutomationCapacity               = 11
 )
+
+// BuildFeatures extends the saturated 32-bit capability word for optional
+// alpha firmware profiles. A board advertises this bit only when the compact
+// EEPROM automation engine is actually compiled into that image.
+const BuildFeatureBoardAutomation byte = 1 << 5
 
 // HELLO capability bits are the authoritative guard for optional operations.
 const (
@@ -296,6 +304,13 @@ const (
 	EventRelay
 	EventAlert
 	EventAppNavigation
+	EventAutomation
+)
+
+const (
+	AutomationExecuted byte = iota + 1
+	AutomationRejected
+	AutomationHostMacroRequested
 )
 
 const (
@@ -345,6 +360,10 @@ type Hello struct {
 	BuildStamp     string `json:"build_timestamp,omitempty"`
 	FeatureProfile byte   `json:"feature_profile,omitempty"`
 	BuildFeatures  byte   `json:"build_features,omitempty"`
+}
+
+func (hello Hello) SupportsBoardAutomation() bool {
+	return hello.BuildFeatures&BuildFeatureBoardAutomation != 0
 }
 
 func ParseHello(payload []byte) (Hello, error) {
@@ -691,6 +710,10 @@ type DeviceEvent struct {
 	AlertActive             bool         `json:"alert_active,omitempty"`
 	AppTarget               string       `json:"app_target,omitempty"`
 	AppPage                 string       `json:"app_page,omitempty"`
+	AutomationState         byte         `json:"automation_state,omitempty"`
+	AutomationRecordID      byte         `json:"automation_record_id,omitempty"`
+	AutomationActionKind    byte         `json:"automation_action_kind,omitempty"`
+	AutomationActionTarget  byte         `json:"automation_action_target,omitempty"`
 	DeviceMicros            uint32       `json:"device_micros,omitempty"`
 	Timed                   bool         `json:"timed,omitempty"`
 	Macro                   *MacroStatus `json:"macro,omitempty"`
@@ -820,6 +843,19 @@ func ParseDeviceEvent(payload []byte) (DeviceEvent, error) {
 			return DeviceEvent{}, fmt.Errorf("invalid alert EVENT fields: % X", payload)
 		}
 		event.AlertKind, event.AlertActive = payload[1], payload[2] != 0
+	case EventAutomation:
+		if len(payload) != 5 {
+			return DeviceEvent{}, fmt.Errorf(
+				"automation EVENT is %d bytes, need exactly 5", len(payload),
+			)
+		}
+		if payload[1] < AutomationExecuted || payload[1] > AutomationHostMacroRequested ||
+			payload[2] >= AutomationCapacity || payload[3] < AutomationActionSafeStop ||
+			payload[3] > AutomationActionHostMacroRequest {
+			return DeviceEvent{}, fmt.Errorf("invalid automation EVENT fields: % X", payload)
+		}
+		event.AutomationState, event.AutomationRecordID = payload[1], payload[2]
+		event.AutomationActionKind, event.AutomationActionTarget = payload[3], payload[4]
 	case EventAppNavigation:
 		if len(payload) < 3 {
 			return DeviceEvent{}, fmt.Errorf(

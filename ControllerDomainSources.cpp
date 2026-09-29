@@ -2,6 +2,9 @@
 #include "ProjectConfig.h"
 
 #include "Project/AddressableLeds.cpp"
+#if PCCONTROLLER_ENABLE_BOARD_AUTOMATIONS
+#include "Project/AutomationStore.cpp"
+#endif
 #if PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
 #include "Project/AudioCues.cpp"
 #endif

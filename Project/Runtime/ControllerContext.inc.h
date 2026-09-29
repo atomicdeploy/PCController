@@ -47,6 +47,9 @@ static_assert(sizeof(TelemetryPayload) == ControllerProtocol::MaximumPayload,
               "Native telemetry wire layout changed");
 
 // Long-lived hardware drivers and protocol-domain coordinators.
+#if PCCONTROLLER_ENABLE_BOARD_AUTOMATIONS
+bool executeAutomationAction(const AutomationRecord &record, void *);
+#endif
 PwmExpanderDriver pwmDriver(BoardPins::PwmAddress);
 PwmController pwm;
 Ina219Sensor ina219(BoardPins::Ina219Address);
@@ -57,6 +60,10 @@ RelayController relays;
 ControllerProtocol::UartProtocol appProtocol;
 ControllerEvents appEvents(appProtocol);
 MacroQueue macroPlayback(appProtocol);
+#if PCCONTROLLER_ENABLE_BOARD_AUTOMATIONS
+AutomationExecutor automationExecutor(boardAutomations,
+                                      executeAutomationAction);
+#endif
 
 // Front-panel key order intentionally matches MenuAction IDs 0..3.
 Key menuKeys[4];
@@ -138,6 +145,9 @@ uint32_t lastRemoteActionAt = 0;
 uint32_t lastRemoteActionCode = 0;
 uint8_t lastRelayMask = 0;
 bool firmwareReady = false;
+#if PCCONTROLLER_ENABLE_BOARD_AUTOMATIONS
+bool hostWasUnavailable = true;
+#endif
 uint8_t lastPushedSegments[4] = {};
 uint8_t lastPushedSegmentBrightness = 0;
 uint8_t lastPushedBuzzerRevision = 0;
