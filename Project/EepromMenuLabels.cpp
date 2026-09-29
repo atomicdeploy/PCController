@@ -13,6 +13,10 @@ namespace {
 
 bool labelsAvailable = false;
 
+// The 7-segment renderer accepts these printable ASCII bytes. A per-cell check
+// keeps a checksum collision from rendering erased/control EEPROM bytes.
+bool printable(uint8_t value) { return value >= ' ' && value <= '~'; }
+
 } // namespace
 
 void begin() {
@@ -41,6 +45,16 @@ void copy(uint8_t page, char output[LabelWidth]) {
                                       offset + character);
     output[character] = printable(value) ? static_cast<char>(value) : '-';
   }
+}
+
+char read(uint8_t page, uint8_t character) {
+  if (!labelsAvailable || page >= EepromLayout::MenuLabelCount ||
+      character >= LabelWidth) {
+    return '-';
+  }
+  const uint8_t value = EEPROM.read(EepromLayout::MenuLabelsAddress +
+                                    static_cast<uint8_t>((page << 2) + character));
+  return printable(value) ? static_cast<char>(value) : '-';
 }
 
 } // namespace EepromMenuLabels
