@@ -369,18 +369,15 @@ void sendLearnedRemotes(uint8_t sequence, uint8_t cursor) {
   uint8_t scan = cursor;
   uint8_t index = 4;
   LearnedRemote remote;
-  while (scan < RemoteLearningStore::Capacity && payload[3] < 3) {
+  while (scan < RemoteLearningStore::Capacity) {
     if (learnedRemotes.get(scan, remote)) {
+      if (payload[3] == 3) {
+        payload[2] = scan;
+        break;
+      }
       memcpy(payload + index, &remote, sizeof(remote));
       index = static_cast<uint8_t>(index + sizeof(remote));
       ++payload[3];
-    }
-    ++scan;
-  }
-  while (scan < RemoteLearningStore::Capacity) {
-    if (learnedRemotes.get(scan, remote)) {
-      payload[2] = scan;
-      break;
     }
     ++scan;
   }
@@ -690,12 +687,11 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame,
       goto acknowledged;
 
     case RadioLearnCancel:
-      endLearning(1, 0);
-      goto acknowledged;
-
     case RadioLearnClear:
-      endLearning(1, 0);
-      learnedRemotes.clear();
+      endLearning(1);
+      if (frame.opcode == RadioLearnClear) {
+        learnedRemotes.clear();
+      }
       goto acknowledged;
 
     case RadioLearnList:
@@ -876,7 +872,7 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame,
       if (length < 1 || payload[0] > 1) {
         goto badPayload;
       }
-      endLearning(1, 0);
+      endLearning(1);
       stopRemoteMomentary(frameNow);
       buzzer.stop();
       safeReset.request(relays, pwm, statusLeds, frameNow);

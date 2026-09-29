@@ -191,7 +191,7 @@ constexpr uint8_t HOST_PANEL_CAPTURED = 1U << 4;
 void handleMenuAction(uint8_t action, bool fromRemote = false);
 void setMenuPage(uint8_t page);
 void sendTelemetry(uint8_t sequence);
-void endLearning(uint8_t state, int8_t feedback);
+void endLearning(uint8_t state);
 void programService(uint32_t at);
 void serviceSystemInputs(uint32_t at);
 void serviceIlluminationSettings(uint32_t at);

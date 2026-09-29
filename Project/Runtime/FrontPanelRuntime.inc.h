@@ -491,7 +491,7 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
 
   if (learningActive) {
     if (action == MENU_DECREASE) {
-      endLearning(1, 0);
+      endLearning(1);
     }
     menuFeedback(fromRemote);
     return;
@@ -1071,7 +1071,7 @@ void showLearningProgress(uint32_t at) {
     return;
   }
   const bool remaining = ((at / 1000UL) & 1U) != 0;
-  const uint8_t seconds = remaining ? learningRemainingSeconds(at)
+  const uint8_t seconds = remaining ? learningRemainingSeconds()
                                     : learningTotalSeconds;
   char text[5] = {
       remaining ? 'r' : 't',

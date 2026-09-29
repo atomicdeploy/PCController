@@ -20,23 +20,12 @@ void storeUserPwmValue(uint8_t channel, uint16_t value) {
 // indefinite mode. The service path advances at most one second per pass, so a
 // delayed loop catches up without a 32-bit division or an event burst.
 #if PCCONTROLLER_ENABLE_RF_LEARNING
-uint8_t learningRemainingSeconds(uint32_t) {
+uint8_t learningRemainingSeconds() {
   return learningMode == RF_LEARN_TIMER ? learningReportedRemaining : 0;
 }
 
 // Starts the default indefinite/multi mode or the explicit bounded timer mode.
 void beginLearning(uint8_t mode, uint8_t timeoutSeconds) {
-  if (mode == RF_LEARN_TIMER) {
-    if (timeoutSeconds == 0) {
-      timeoutSeconds = DEFAULT_LEARNING_SECONDS;
-    } else if (timeoutSeconds > MAX_LEARNING_SECONDS) {
-      timeoutSeconds = MAX_LEARNING_SECONDS;
-    }
-  } else {
-    mode = RF_LEARN_INDEFINITE;
-    timeoutSeconds = 0;
-  }
-
   buzzer.stop();
   const ProgramMode currentMode = modeManager.current();
   if (currentMode <= MODE_RF) {
@@ -48,28 +37,24 @@ void beginLearning(uint8_t mode, uint8_t timeoutSeconds) {
   learningMode = mode;
   learningTotalSeconds = timeoutSeconds;
   learningReportedRemaining = timeoutSeconds;
-  learningNextSecondAt = mode == RF_LEARN_TIMER ? now + 1000UL : 0;
+  learningNextSecondAt = now + 1000UL;
   modeManager.transitionTo(MODE_RF_LEARNING);
   appEvents.rfLearning(3, learnedRemotes.count(), learningMode,
                        learningTotalSeconds, learningReportedRemaining);
 }
 
 // Ends learning, restores its prior page, emits state, and plays final feedback.
-void endLearning(uint8_t state, int8_t feedback) {
+void endLearning(uint8_t state) {
   if (!learningActive) {
     return;
   }
-  const uint8_t remaining = learningRemainingSeconds(now);
+  const uint8_t remaining = learningRemainingSeconds();
   learningActive = false;
-  learningNextSecondAt = 0;
   if (modeManager.current() == MODE_RF_LEARNING) {
     modeManager.transitionTo(modeBeforeLearning);
   }
   appEvents.rfLearning(state, learnedRemotes.count(), learningMode,
                        learningTotalSeconds, remaining);
-  // Rich completion/error melodies are host-owned; state remains explicit so
-  // connected clients can select and route the named melody consistently.
-  (void)feedback;
 }
 
 // Emits one MCU-timed timer update per changed second and closes at zero.
@@ -81,20 +66,18 @@ void serviceLearningTimer(uint32_t at) {
     return;
   }
   learningNextSecondAt += 1000UL;
-  if (learningReportedRemaining != 0) {
-    --learningReportedRemaining;
-  }
+  --learningReportedRemaining;
   if (learningReportedRemaining == 0) {
-    endLearning(0, 1);
+    endLearning(0);
   } else {
     appEvents.rfLearning(4, learnedRemotes.count(), learningMode,
                          learningTotalSeconds, learningReportedRemaining);
   }
 }
 #else
-uint8_t learningRemainingSeconds(uint32_t) { return 0; }
+uint8_t learningRemainingSeconds() { return 0; }
 void beginLearning(uint8_t, uint8_t) {}
-void endLearning(uint8_t, int8_t) {}
+void endLearning(uint8_t) {}
 void serviceLearningTimer(uint32_t) {}
 #endif
 
@@ -249,9 +232,9 @@ void serviceRadio() {
                          learned ? learnedId : 0xFF);
     statusLeds.playCue(StatusLedCue::Radio, 320, now);
     if (!learned) {
-      endLearning(2, -1);
+      endLearning(2);
     } else if (learnedRemotes.count() >= RemoteLearningStore::Capacity) {
-      endLearning(2, 1);
+      endLearning(2);
     }
     return;
   }
