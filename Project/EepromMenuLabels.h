@@ -24,8 +24,4 @@ bool available();
 // corrupt, out-of-range, or non-printable cells become dashes without a cache.
 void copy(uint8_t page, char output[LabelWidth]);
 
-// Returns one display-safe label byte or '-' when the block is unavailable or
-// the requested cell lies outside the fixed board menu catalog.
-char read(uint8_t page, uint8_t character);
-
 } // namespace EepromMenuLabels

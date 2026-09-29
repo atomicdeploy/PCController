@@ -56,10 +56,12 @@ void testErasedAndCorruptBlocksFallBackSafely() {
   EepromMenuLabels::begin();
   require(!EepromMenuLabels::available(),
           "erased EEPROM label block must not become available");
+  char label[EepromMenuLabels::LabelWidth];
+  EepromMenuLabels::copy(0, label);
   for (std::uint8_t character = 0; character < EepromMenuLabels::LabelWidth;
        ++character) {
-    require(EepromMenuLabels::read(0, character) == '-',
-            "erased EEPROM label byte did not use a safe fallback");
+    require(label[character] == '-',
+            "erased EEPROM labels did not use a safe fallback");
   }
 
 	writeFactoryLabels();
@@ -67,8 +69,19 @@ void testErasedAndCorruptBlocksFallBackSafely() {
   EepromMenuLabels::begin();
   require(!EepromMenuLabels::available(),
           "checksum-corrupt EEPROM label block must not become available");
-  require(EepromMenuLabels::read(3, 0) == '-',
-          "corrupt EEPROM label byte did not use a safe fallback");
+  EepromMenuLabels::copy(3, label);
+  require(label[0] == '-', "corrupt EEPROM labels did not use a safe fallback");
+
+  writeFactoryLabels();
+  const std::uint8_t originalChecksum =
+      EEPROM.read(EepromLayout::MenuLabelsChecksumAddress);
+  EEPROM.update(EepromLayout::MenuLabelsAddress + 1, '\x01');
+  EEPROM.update(EepromLayout::MenuLabelsChecksumAddress,
+                static_cast<std::uint8_t>(originalChecksum ^
+                                          kFactoryLabels[1] ^ '\x01'));
+  EepromMenuLabels::begin();
+  require(!EepromMenuLabels::available(),
+          "non-printable EEPROM label block must not become available");
 }
 
 void testVersionedRecordAndTornWriteStayUnavailable() {
