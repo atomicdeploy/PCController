@@ -36,6 +36,7 @@ func controllerOptionsFromConfig(
 		FQBN:                  config.Programming.FQBN,
 		FirmwareFeatures:      features,
 		ToolchainCLI:          config.Programming.ToolchainCLI,
+		ToolchainConfig:       config.Programming.ToolchainConfig,
 		Avrdude:               config.Programming.Avrdude,
 		AvrdudeConf:           config.Programming.AvrdudeConf,
 		Programmer:            config.Programming.Programmer,
