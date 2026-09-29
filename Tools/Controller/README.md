@@ -638,6 +638,12 @@ commands remain available under every policy. The firmware's
 direction/enable break-before-make sequencer remains authoritative at the
 relay layer.
 
+R5-R8 are directly latched general outputs. Their shared CLI, HTTP, IPC, and Go
+library mutation path does not treat the board ACK alone as applied state: it
+immediately requests STATUS, updates the shared snapshot, and returns success
+only when the authoritative `active_relays` bit matches the request. A missing
+or contradictory readback is an error even if the mutation was acknowledged.
+
 Learned RF records are deliberately prevented from mapping directly to
 R1-R4. Use `rf map ID side left|right up|down|stop`; that firmware path is
 reed-gated and retains the direction/enable interlock. Direct learned mappings

@@ -3507,17 +3507,15 @@ func relayCommand(
 				return "", err
 			}
 		}
-		payload, err := native.RelayPayload(byte(number-1), active)
-		if err != nil {
-			return "", err
-		}
 		if active && number <= 4 && !alreadyCheckedDoor {
 			if err := requireMotionAllowed(ctx, runtime, configProvider); err != nil {
 				return "", err
 			}
 		}
+		requestContext, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
 		return fmt.Sprintf("relay R%d %s", number, onOff(active)),
-			command(ctx, runtime, native.OpRelaySet, payload)
+			runtime.SetRelay(requestContext, byte(number-1), active)
 	}
 	return "", fmt.Errorf("usage: relay N on|off|toggle | relay side left|right stop|up|down | relay off | relay test [MS]")
 }
