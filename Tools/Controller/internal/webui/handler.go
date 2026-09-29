@@ -354,6 +354,12 @@ func contentType(name string) string {
 }
 
 func fingerprintedAsset(name string) bool {
+	// Only the build's asset directory carries content fingerprints. Stable
+	// public bootstraps (e.g. ui-recovery.js) must revalidate, even when their
+	// descriptive suffix happens to resemble a hash.
+	if !strings.HasPrefix(name, "assets/") {
+		return false
+	}
 	base := path.Base(name)
 	stem := strings.TrimSuffix(base, path.Ext(base))
 	separator := strings.LastIndexAny(stem, "-.")
