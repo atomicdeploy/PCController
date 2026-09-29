@@ -19,7 +19,6 @@ import {
   RefreshCw,
   RotateCcw,
   Server,
-  ShieldCheck,
   UploadCloud,
   Usb,
 } from 'lucide-react'
@@ -27,6 +26,7 @@ import { Button, Card, DataRow, EmptyState, SectionTitle, StatusBadge, TextField
 import { formatClock } from './i18n'
 import { ReleaseDiscovery } from './release-discovery'
 import type { SharedViewProps } from './views'
+import { UpdateOperationPanel, updateIsRunning, measuredUpdateProgress } from './update-operation-panel'
 import {
   adoptPeerHostUpdateIntent,
   captureDeviceArtifacts,
@@ -34,7 +34,6 @@ import {
   downloadArtifact,
   fetchRemoteArtifact,
   getArtifactManifest,
-  getUpdateStatus,
   listBridgePeers,
   listArtifacts,
   sha256File,
@@ -67,28 +66,25 @@ function shortHash(value: string | undefined): string {
   return value ? value.slice(0, 12).toUpperCase() : '—'
 }
 
-function operationTone(state: UpdateStatus['state'] | undefined): 'neutral' | 'info' | 'good' | 'warn' | 'bad' {
-  if (!state) return 'neutral'
-  if (state === 'completed' || state === 'downloaded') return 'good'
-  if (state === 'failed') return 'bad'
-  if (state === 'verifying') return 'warn'
-  return 'info'
-}
-
-const activeUpdateStates = new Set<UpdateStatus['state']>([
-  'queued',
-  'downloading',
-  'reading',
-  'backing-up',
-  'programming',
-  'staging',
-  'verifying',
-])
-
 /** Progress is meaningful only while an operation can still advance. */
 export function activeUpdateProgress(status: UpdateStatus | null | undefined): number | null {
-  if (!status || !activeUpdateStates.has(status.state)) return null
-  return Math.max(0, Math.min(100, status.progress_percent))
+  return measuredUpdateProgress(status)
+}
+
+export function updateStatusFromEvent(event: Pick<SharedViewProps['events'][number], 'kind' | 'source' | 'metadata' | 'text'>): UpdateStatus | null {
+  const meta = event.metadata
+  if (!localUpdateEvent(event) || !meta?.operation_id || !meta.kind || !meta.state) return null
+  return {
+    id: meta.operation_id, kind: meta.kind as UpdateStatus['kind'], state: meta.state as UpdateStatus['state'],
+    stage: meta.stage, detail: meta.detail ?? event.text, error_code: meta.error_code,
+    progress_known: meta.progress_known === 'true', progress_percent: Number(meta.progress_percent),
+    started_at: meta.started_at, updated_at: meta.updated_at, stage_started_at: meta.stage_started_at,
+    artifact_sha256: meta.sha256, programming_method: meta.programming_method as UpdateStatus['programming_method'],
+    bootloader_outcome: meta.bootloader_outcome as UpdateStatus['bootloader_outcome'],
+    isp_fallback_suggested: meta.isp_fallback_suggested === 'true',
+    bytes_done: meta.bytes_done ? Number(meta.bytes_done) : undefined,
+    bytes_total: meta.bytes_total ? Number(meta.bytes_total) : undefined,
+  }
 }
 
 function artifactLabel(kind: ArtifactKind, locale: SharedViewProps['locale']): string {
@@ -149,7 +145,7 @@ export function peerUpdateStatusFromEvent(
   }
 }
 
-export function UpdatesView({ appTitle, snapshot, events, locale, openDialog }: SharedViewProps) {
+export function UpdatesView({ snapshot, events, locale, openDialog }: SharedViewProps) {
   const copy = (english: string, persian: string) => locale === 'fa' ? persian : english
   const [manifest, setManifest] = useState<ArtifactManifest | null>(null)
   const [artifacts, setArtifacts] = useState<ArtifactDescriptor[]>([])
@@ -233,8 +229,11 @@ export function UpdatesView({ appTitle, snapshot, events, locale, openDialog }: 
     terminalVerified: false,
   } : null)
   useEffect(() => {
-    if (!lastUpdateEvent || !manifest?.enabled) return
-    void getUpdateStatus().then(setStatus).then(() => load()).catch(() => undefined)
+    if (!lastUpdateEvent) return
+    const pushed = updateStatusFromEvent(lastUpdateEvent)
+    if (!pushed) return
+    setStatus((current) => current?.updated_at && pushed.updated_at && Date.parse(current.updated_at) > Date.parse(pushed.updated_at) ? current : pushed)
+    if (!updateIsRunning(pushed)) void load()
   }, [lastUpdateEvent?.id, lastUpdateEvent?.time]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const selected = artifacts.find((item) => item.sha256 === selectedSHA)
@@ -244,8 +243,6 @@ export function UpdatesView({ appTitle, snapshot, events, locale, openDialog }: 
       : selected?.kind === 'flash-backup' ? manifest?.current.flash_readback : manifest?.current.firmware
   const comparison = compareBuildIdentity(currentForSelected, selected)
   const bootloaderUnavailable = status?.isp_fallback_suggested === true
-  const activeProgress = activeUpdateProgress(status)
-  const running = activeProgress !== null
 
   const acceptUploadFile = async (file: File | null) => {
     setUploadFile(file)
@@ -397,26 +394,9 @@ export function UpdatesView({ appTitle, snapshot, events, locale, openDialog }: 
       <SectionTitle
         eyebrow={copy('Verified host updates', 'به‌روزرسانی تأییدشدهٔ میزبان')}
         title={copy('Firmware & updates', 'میان‌افزار و به‌روزرسانی')}
-        detail={copy(`The primary ${appTitle} instance stages, hashes, backs up, programs and verifies. A browser or remote peer never writes the MCU directly.`, `نمونهٔ اصلی ${appTitle} فایل را آماده و هش می‌کند، پشتیبان می‌گیرد، پروگرام و تأیید می‌کند. مرورگر یا همتای راه‌دور هرگز مستقیم روی ریزکنترل‌گر نمی‌نویسد.`)}
-        action={<div className="header-actions"><StatusBadge tone={manifest?.enabled ? 'good' : 'warn'}>{manifest?.enabled ? copy('SERVICE READY', 'سرویس آماده') : copy('DISABLED', 'غیرفعال')}</StatusBadge><Button compact icon={RefreshCw} busy={busy === 'refresh'} onClick={() => void load()}>{copy('Refresh', 'تازه‌سازی')}</Button></div>}
       />
 
-      <section className="updates-hero">
-        <div className="updates-hero__identity"><ShieldCheck /><div><span>{copy('Update permissions', 'مجوزهای به‌روزرسانی')}</span><strong>{copy('Primary host · explicit grant', 'میزبان اصلی · مجوز صریح')}</strong><p>{copy('Download and staging are safe preparation. Programming, EEPROM restore, ISP use, and self-replacement each require a separate confirmation.', 'دانلود و آماده‌سازی، مراحل مقدماتی امن هستند. پروگرام، بازیابی EEPROM، استفاده از ISP و جایگزینی خود برنامه هرکدام تأییدی جداگانه می‌خواهند.')}</p></div></div>
-        {status && <div className="updates-hero__state">
-          <StatusBadge tone={operationTone(status.state)} pulse={running}>{status.state.toUpperCase()}</StatusBadge>
-          {activeProgress !== null && <strong>{activeProgress.toFixed(0)}%</strong>}
-          {status.detail && <span>{status.detail}</span>}
-        </div>}
-        {activeProgress !== null && <div className="update-progress" role="progressbar" aria-label={copy('Update progress', 'پیشرفت به‌روزرسانی')} aria-valuemin={0} aria-valuemax={100} aria-valuenow={activeProgress}><i style={{ width: `${activeProgress}%` }} /></div>}
-        <div className="updates-hero__metrics">
-          <DataRow label={copy('Transfer', 'انتقال')} value={status?.bytes_total ? `${formatBytes(status.bytes_done)} / ${formatBytes(status.bytes_total)}` : '—'} mono />
-          <DataRow label={copy('Artifact', 'خروجی ساخت')} value={shortHash(status?.artifact_sha256)} mono />
-          <DataRow label={copy('Updated', 'آخرین تغییر')} value={formatClock(locale, status?.updated_at)} />
-          <DataRow label={copy('Programming path', 'مسیر پروگرام')} value={status?.programming_method || copy('none', 'هیچ‌کدام')} mono />
-          <DataRow label={copy('Bootloader outcome', 'نتیجهٔ بوت‌لودر')} value={status?.bootloader_outcome || copy('not attempted', 'تلاش نشده')} tone={bootloaderUnavailable ? 'bad' : status?.bootloader_outcome === 'succeeded' ? 'good' : undefined} />
-        </div>
-      </section>
+      {status && <UpdateOperationPanel status={status} locale={locale} />}
 
       {notice && <div className={`update-notice${/failed|error|could not|expected/i.test(notice) ? ' is-error' : ''}`}><CheckCircle2 size={17} /><span>{notice}</span></div>}
 

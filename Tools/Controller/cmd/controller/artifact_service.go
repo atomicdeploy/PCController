@@ -162,7 +162,8 @@ func (executor *primaryArtifactExecutor) Capture(
 		}
 		words = append(words, port)
 	}
-	progress("reading", 25, "releasing UART and reading flash, EEPROM, and bootloader metadata")
+	ctx = artifactProgrammingContext(ctx, progress)
+	progress("preflight", -1, "checking readback tools and target")
 	output, err := executor.client.Execute(ctx, shell.Join(words))
 	if err != nil {
 		return nil, programmingExecutionFailure(method, err)
@@ -183,7 +184,7 @@ func (executor *primaryArtifactExecutor) Capture(
 		}
 		packed = uint32(parsed)
 	}
-	progress("verifying", 80, "verified flash and EEPROM readback hashes")
+	progress("verifying", -1, "checking flash and EEPROM readback hashes")
 	result := make([]artifacts.CapturedFile, 0, 2)
 	if flash, ok := validated.Files["flash"]; ok {
 		result = append(result, artifacts.CapturedFile{
@@ -236,11 +237,11 @@ func (executor *primaryArtifactExecutor) ProgramFirmware(
 	if request.ReinitializeEEPROM {
 		words = append(words, "--reinitialize-eeprom")
 	}
-	progress("programming", 40, "guarded backup-then-flash transaction started")
+	ctx = artifactProgrammingContext(ctx, progress)
+	progress("preflight", -1, "checking programming tools and target")
 	if _, err := executor.executeCommand(ctx, shell.Join(words)); err != nil {
 		return programmingExecutionFailure(method, err)
 	}
-	progress("verifying", 95, "firmware write verified and application HELLO restored")
 	return nil
 }
 
@@ -276,11 +277,11 @@ func (executor *primaryArtifactExecutor) RestoreFlash(
 		}
 		words = append(words, port)
 	}
-	progress("backing-up", 20, "capturing flash, EEPROM, and metadata before captured-flash restore")
+	ctx = artifactProgrammingContext(ctx, progress)
+	progress("preflight", -1, "checking captured-flash restore tools and target")
 	if _, err := executor.executeCommand(ctx, shell.Join(words)); err != nil {
 		return programmingExecutionFailure(method, err)
 	}
-	progress("verifying", 95, "captured flash verified; application HELLO reconnected and lifecycle restored")
 	return nil
 }
 
@@ -309,12 +310,20 @@ func (executor *primaryArtifactExecutor) ProgramEEPROM(
 		}
 		words = append(words, port)
 	}
-	progress("programming", 70, "writing EEPROM after verified flash and EEPROM backup")
+	ctx = artifactProgrammingContext(ctx, progress)
+	progress("preflight", -1, "checking EEPROM restore tools and target")
 	if _, err := executor.client.Execute(ctx, shell.Join(words)); err != nil {
 		return programmingExecutionFailure(method, err)
 	}
-	progress("verifying", 95, "EEPROM write completed and application HELLO restored")
 	return nil
+}
+
+func artifactProgrammingContext(ctx artifacts.Context, progress artifacts.ProgressFunc) context.Context {
+	return programmer.WithProgress(ctx, func(update programmer.Progress) {
+		if progress != nil {
+			progress(update.Stage, update.Percent, update.Detail)
+		}
+	})
 }
 
 func (executor *primaryArtifactExecutor) StageHostUpdate(
@@ -327,11 +336,11 @@ func (executor *primaryArtifactExecutor) StageHostUpdate(
 	if err != nil {
 		return err
 	}
-	progress("staging", 55, "verifying and staging host replacement")
+	progress("staging", -1, "verifying and staging host replacement")
 	if _, err := artifacts.PrepareSelfUpdate(ctx, current, artifact.LocalPath, artifact.SHA256, nil); err != nil {
 		return err
 	}
-	progress("staged", 95, "host replacement staged; primary will restart")
+	progress("staged", -1, "host replacement staged; primary will restart")
 	executor.scheduleHostUpdateShutdown(500*time.Millisecond, 12*time.Second)
 	return nil
 }

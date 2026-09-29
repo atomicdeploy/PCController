@@ -87,7 +87,7 @@ func (downloader *Downloader) Fetch(
 		httpRequest.Header.Set("Authorization", "Bearer "+token)
 	}
 	if progress != nil {
-		progress("downloading", 10, "requesting remote artifact")
+		progress("downloading", -1, "requesting remote artifact")
 	}
 	response, err := downloader.client.Do(httpRequest)
 	if err != nil {
@@ -126,10 +126,12 @@ func (downloader *Downloader) Fetch(
 	if name == "" {
 		name = responseFilename(response, effectiveURL, kind)
 	}
-	if progress != nil {
-		progress("downloading", 35, "validating and content-addressing remote artifact")
+	total := response.ContentLength
+	if total <= 0 {
+		total = request.Bytes
 	}
-	descriptor, err := store.Put(response.Body, PutOptions{
+	input := &downloadProgressReader{Reader: response.Body, total: total, progress: progress, lastPercent: -2}
+	descriptor, err := store.Put(input, PutOptions{
 		Kind: kind, Name: name, Source: "remote:" + parsed.Host,
 		ExpectedSHA256: firstNonEmpty(request.SHA256, responseHash), ExpectedBytes: request.Bytes,
 		BuildHash: request.BuildHash, BuildTimestamp: request.BuildTimestamp,
@@ -142,6 +144,33 @@ func (downloader *Downloader) Fetch(
 		progress("downloaded", 100, "remote artifact verified")
 	}
 	return descriptor, nil
+}
+
+// Content-Length (or the caller's verified expected size) is the only denominator.
+// A chunked response without either stays indeterminate until verification finishes.
+type downloadProgressReader struct {
+	io.Reader
+	total, done int64
+	lastPercent int
+	progress    ProgressFunc
+}
+
+func (reader *downloadProgressReader) Read(buffer []byte) (int, error) {
+	n, err := reader.Reader.Read(buffer)
+	reader.done += int64(n)
+	percent := -1
+	if reader.total > 0 {
+		percent = int(min(100, reader.done*100/reader.total))
+	}
+	if reader.progress != nil && percent != reader.lastPercent {
+		reader.lastPercent = percent
+		detail := fmt.Sprintf("received %d bytes", reader.done)
+		if reader.total > 0 {
+			detail = fmt.Sprintf("received %d of %d bytes", reader.done, reader.total)
+		}
+		reader.progress("downloading", percent, detail)
+	}
+	return n, err
 }
 
 func responseFilename(response *http.Response, source *url.URL, kind Kind) string {
