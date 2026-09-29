@@ -61,12 +61,12 @@ func runNetwork(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 		if err != nil || strings.TrimSpace(host) == "" {
 			return errors.New("--listen must be a concrete host:port address")
 		}
+		hostname, _ := os.Hostname()
 		if len(origins) == 0 {
-			origins = append(origins, "localhost:*", "127.0.0.1:*", "[::1]:*")
+			origins = defaultEdgeOrigins(host, hostname)
 		}
 		if *instance == "" {
-			*instance, _ = os.Hostname()
-			*instance = boundedDiscoveryInstanceName(*instance)
+			*instance = boundedDiscoveryInstanceName(hostname)
 		}
 		_, err = store.Update(func(config *appconfig.Config) error {
 			config.IPC.Listen = *listen
@@ -387,6 +387,29 @@ func boundedDiscoveryInstanceName(value string) string {
 		return "PCController"
 	}
 	return value
+}
+
+func defaultEdgeOrigins(listenHost, hostname string) stringListFlag {
+	result := stringListFlag{"localhost:*", "127.0.0.1:*", "[::1]:*"}
+	appendHost := func(value string) {
+		value = strings.Trim(strings.TrimSpace(value), "[]")
+		if value == "" || strings.ContainsAny(value, "*?") {
+			return
+		}
+		if parsed := net.ParseIP(value); parsed != nil && parsed.IsUnspecified() {
+			return
+		}
+		pattern := net.JoinHostPort(value, "*")
+		for _, existing := range result {
+			if strings.EqualFold(existing, pattern) {
+				return
+			}
+		}
+		result = append(result, pattern)
+	}
+	appendHost(hostname)
+	appendHost(listenHost)
+	return result
 }
 
 func optionsTimeoutMilliseconds(value time.Duration) int64 {
