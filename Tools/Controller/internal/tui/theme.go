@@ -1,6 +1,18 @@
 package tui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
+)
+
+// ConfigureInteractiveColorProfile makes the full-screen TUI responsible for
+// its own colour capability. Launchers used for captured build logs commonly
+// export NO_COLOR=1 and TERM=dumb; those ambient values must not turn an
+// explicitly interactive PCController session monochrome. The simple,
+// line-oriented console does not call this function and remains plain text.
+func ConfigureInteractiveColorProfile() {
+	lipgloss.SetColorProfile(termenv.TrueColor)
+}
 
 var (
 	colorAccent  = lipgloss.Color("#7DCFFF")

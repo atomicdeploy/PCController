@@ -347,15 +347,18 @@ export function commandWarning(command: string, locale: Appearance['locale']): C
 
 export function snapshotAfterTransportLoss(
   current: Snapshot,
-  state: 'connecting' | 'waiting' | 'closed',
-  detail = '',
+  _state: 'connecting' | 'waiting' | 'closed',
+  _detail = '',
 ): Snapshot {
-  return {
-    ...emptySnapshot,
-    paused: current.paused,
-    connection_state: current.paused ? 'paused' : state === 'connecting' ? 'connecting' : 'disconnected',
-    connection_reason: detail || (state === 'connecting' ? 'Re-establishing the host event stream' : 'Host event stream unavailable'),
-  }
+  // The WebSocket reports the browser-to-host event stream. It is not
+  // evidence that the host lost its serial board, so preserve the last
+  // authoritative snapshot until REST or a recovered stream replaces it.
+  return { ...current }
+}
+
+export function transportFallbackPollInterval(statusIntervalMS?: number): number {
+  if (typeof statusIntervalMS !== 'number' || !Number.isFinite(statusIntervalMS)) return 1000
+  return Math.min(5000, Math.max(750, Math.round(statusIntervalMS * 4)))
 }
 
 export function controllerConnectionLabel(
@@ -366,7 +369,7 @@ export function controllerConnectionLabel(
 ): string {
   const copy = (english: string, persian: string) => locale === 'fa' ? persian : english
   if (streamState === 'connecting') return copy('Connecting', 'در حال اتصال')
-  if (streamState !== 'open') return copy('Disconnected', 'قطع ارتباط')
+  if (streamState !== 'open') return copy('Reconnecting', 'در حال اتصال دوباره')
   if (boardState === 'loading') return copy('Synchronizing', 'در حال همگام‌سازی')
   if (snapshot.connected) return copy('Board connected', 'برد متصل')
   const controllerState = snapshot.connection_state.trim().toLowerCase()
@@ -1474,8 +1477,6 @@ export default function App() {
                 snapshotRef.current = next
                 return next
               })
-              setSamples([])
-              setEvents([])
             }
           },
         })
@@ -1492,8 +1493,6 @@ export default function App() {
           snapshotRef.current = next
           return next
         })
-        setSamples([])
-        setEvents([])
         setBootTarget(100)
       }
     })()
@@ -1505,6 +1504,30 @@ export default function App() {
       stopStream()
     }
   }, [adoptHostAppearance, appInstanceID, applyPage, demo, enqueueToast, navigate, navigationSession, notify, refresh, refreshHostAppearance, streamGeneration, token])
+
+  useEffect(() => {
+    if (demo || !startupProbeResolved || streamState === 'open') return
+    let active = true
+    const poll = async () => {
+      try {
+        const value = await getSnapshot()
+        if (!active) return
+        const previous = snapshotRef.current
+        snapshotRef.current = value
+        setSnapshot(value)
+        setSamples((current) => metricSamplesAfterSnapshot(current, previous, value))
+      } catch {
+        // Event-stream recovery owns user-visible transport state. This quiet
+        // REST fallback only keeps authoritative board truth current.
+      }
+    }
+    void poll()
+    const timer = window.setInterval(poll, transportFallbackPollInterval(uiConfig?.status_interval_ms))
+    return () => {
+      active = false
+      window.clearInterval(timer)
+    }
+  }, [demo, startupProbeResolved, streamState, uiConfig?.status_interval_ms])
 
   const authenticationRequired = sessionAuthenticationGuidanceRequired({
     hostRequiresAuthentication: uiConfig?.auth_required === true,

@@ -67,7 +67,6 @@ import {
   Usb,
   Volume2,
   Waves,
-  WifiOff,
   Zap,
 } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
@@ -228,11 +227,11 @@ function ControllerUnavailable({
   showTitle?: boolean
 }) {
   const copy = (english: string, persian: string) => locale === 'fa' ? persian : english
-  const connecting = state === 'connecting'
-  const title = connecting
-    ? copy('Connecting…', 'در حال اتصال…')
-    : state === 'transport-offline'
-      ? copy('Controller offline', 'کنترلر آفلاین')
+  const connecting = state === 'connecting' || state === 'transport-offline'
+  const title = state === 'transport-offline'
+    ? copy('Reconnecting…', 'در حال اتصال دوباره…')
+    : state === 'connecting'
+      ? copy('Connecting…', 'در حال اتصال…')
       : copy('Board offline', 'برد آفلاین')
 
   return (
@@ -244,7 +243,7 @@ function ControllerUnavailable({
         <span className="connection-fuji__snow" />
         <span className="connection-fuji__trace" />
       </div> : <span className="controller-unavailable__icon" aria-hidden="true">
-        {state === 'transport-offline' ? <WifiOff size={28} /> : <Cable size={28} />}
+        <Cable size={28} />
       </span>}
       {showTitle && <strong>{title}</strong>}
       {action && <div className="controller-unavailable__action">{action}</div>}
@@ -324,7 +323,7 @@ export function DashboardView(props: SharedViewProps) {
   const boardConnection = connectionPresentation(snapshot, locale)
   const connectedTone = boardReady ? 'good' : transportConnecting ? 'info' : boardConnection.tone
   const boardUnavailableTitle = transportUnavailable
-    ? transportConnecting ? copy('Connecting…', 'در حال اتصال…') : copy('Controller offline', 'کنترلر آفلاین')
+    ? transportConnecting ? copy('Connecting…', 'در حال اتصال…') : copy('Reconnecting…', 'در حال اتصال دوباره…')
     : hardwareWarning?.title || (boardLoading
     ? copy('Discovering controller board…', 'در حال جستجوی برد کنترلر…')
     : boardConnection.title)
@@ -334,7 +333,7 @@ export function DashboardView(props: SharedViewProps) {
     : transportConnecting
       ? copy('Connecting', 'در حال اتصال')
       : transportUnavailable
-        ? copy('Offline', 'آفلاین')
+        ? copy('Reconnecting', 'در حال اتصال دوباره')
     : boardLoading
       ? copy('Searching for board', 'در حال جستجوی برد')
       : boardConnection.title
@@ -730,13 +729,13 @@ export function ControlsView(props: SharedViewProps) {
     const unavailableTitle = connecting
       ? copy('Connecting…', 'در حال اتصال…')
       : transportOffline
-        ? copy('Controller offline', 'کنترلر آفلاین')
+        ? copy('Reconnecting…', 'در حال اتصال دوباره…')
         : boardConnection.title
     return (
       <>
         <SectionTitle eyebrow={copy('Controller board controls', 'کنترل‌های برد')} title={t('controls')} detail={transportOffline ? undefined : snapshot.connection_reason} />
         <Card
-          icon={connecting ? Radio : transportOffline ? WifiOff : Cable}
+          icon={transportOffline ? Radio : Cable}
           iconTone="amber"
           title={unavailableTitle}
           eyebrow={connecting ? copy('Reconnecting', 'اتصال دوباره') : copy('Connection', 'اتصال')}
