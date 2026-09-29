@@ -345,11 +345,19 @@ func (model Model) handleKey(message tea.KeyMsg) (Model, tea.Cmd, bool) {
 			model.historyMove(-1)
 			return model, nil, true
 		}
+		if model.page == PageProgramming {
+			model.update.Scroll = max(0, model.update.Scroll-1)
+			return model, nil, true
+		}
 		model.moveCursor(-1)
 		return model, nil, true
 	case "down":
 		if !inputEmpty || model.page == PageConsole {
 			model.historyMove(1)
+			return model, nil, true
+		}
+		if model.page == PageProgramming {
+			model.update.Scroll = min(model.update.Scroll+1, max(0, len(model.programmingContent(model.snapshot()))-max(3, model.contentHeight())+1))
 			return model, nil, true
 		}
 		model.moveCursor(1)
@@ -1694,7 +1702,7 @@ func (model Model) frontPanelGesture(key int, phase string) (Model, tea.Cmd, boo
 		return model, nil, true
 	}
 	if !model.frontPanelControlsAvailable(model.snapshot()) {
-		model.setNotice("Front-panel keys are unavailable until an exact panel snapshot and remote-key capability/backend are reported")
+		model.setNotice("Front-panel keys are unavailable until the board advertises a bounded remote-key deadman/lease")
 		return model, nil, true
 	}
 	if model.hostMenus != nil && model.hostMenus.Snapshot().Active {

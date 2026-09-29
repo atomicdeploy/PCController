@@ -3701,6 +3701,7 @@
               "controller.lcd.presentation.status",
               "controller.lcd.priority",
               "controller.lcd.prompt",
+              "controller.melodies.list",
               "controller.menu.current",
               "controller.menu.jump",
               "controller.menu.layout.get",

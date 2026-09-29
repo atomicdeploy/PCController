@@ -32,6 +32,7 @@ import {
   PackageOpen,
   Search,
   Settings,
+  Settings2,
   Sun,
   TriangleAlert,
   Volume2,
@@ -43,7 +44,7 @@ import { AnimatePresence, MotionConfig, motion } from 'motion/react'
 import { createAudioEngine, type AudioCue, type AudioEngine } from './audio-engine'
 import { BoardSettingsReadGate, boardSettingsGeneration } from './board-settings-read'
 import { BootGate, BrandIcon, Button, HotkeyHelp, Icon, KeyCombo, Modal, NavButton, PageTransition, StatusBadge, ToastStack } from './components'
-import { connectStream, execute, getSnapshot, getToken, getUIConfig, rpc, setToken as storeToken } from './api'
+import { connectStream, execute, getSnapshot, getToken, getUIConfig, rpc, setToken as storeToken, type StreamSource } from './api'
 import type { StreamControl } from './api'
 import {
   adjacentPageHotkey,
@@ -92,7 +93,7 @@ import type {
   UIConfig,
 } from './types'
 import { peripheralAvailability } from './peripheral-availability'
-import { applyPushedOutputEvent, isPushedOutputEvent } from './status-led-event'
+import { advanceStatusLEDSource, applyPushedOutputEvent, isPushedOutputEvent, mergeStatusLEDSnapshot, statusLEDSnapshotMatchesSource, statusLEDSourceUnchanged } from './status-led-event'
 import { BuzzerPlaybackTimeline, type BuzzerPath } from './buzzer-routing'
 import { isMacroControllerEvent, prependMacroControllerEvent } from './macro-live'
 import { emptySnapshot } from './types'
@@ -106,6 +107,15 @@ import {
   processWebAppAction,
   type WebActionProgress,
 } from './app-actions'
+import { AppPreferencesDialog } from './app-preferences-dialog'
+import { primaryShortcutARIA, primaryShortcutModifier } from './client-platform'
+import { publishBrowserController, publishBrowserControllerState } from './browser-controller'
+import {
+  loadQuickHeaderPreferences,
+  normalizeQuickHeaderPreferences,
+  saveQuickHeaderPreferences,
+  type QuickHeaderPreferences,
+} from './quick-header-preferences'
 
 const DashboardPage = lazy(() => import('./views').then(({ DashboardView }) => ({ default: DashboardView })))
 const ControlsPage = lazy(() => import('./views').then(({ ControlsView }) => ({ default: ControlsView })))
@@ -386,13 +396,13 @@ export function controllerConnectionLabel(
   if (streamState === 'connecting') return copy('Connecting', 'در حال اتصال')
   if (streamState !== 'open') return copy('Disconnected', 'قطع ارتباط')
   if (boardState === 'loading') return copy('Synchronizing', 'در حال همگام‌سازی')
-  if (snapshot.connected) return copy('Controller connected', 'برد متصل')
+  if (snapshot.connected) return copy('Board connected', 'برد متصل')
   const controllerState = snapshot.connection_state.trim().toLowerCase()
   if (controllerState === 'paused') return copy('Paused', 'متوقف')
   if (['connecting', 'discovering', 'scanning', 'searching'].includes(controllerState)) {
     return copy('Searching', 'در حال جستجو')
   }
-  return copy('No controller', 'بدون برد')
+  return copy('No board', 'بدون برد')
 }
 
 export function isCompletedHostUpdate(event: Pick<ControllerEvent, 'kind' | 'metadata'>): boolean {
@@ -447,6 +457,8 @@ export default function App() {
   const [paletteQuery, setPaletteQuery] = useState('')
   const [paletteIndex, setPaletteIndex] = useState(0)
   const [hotkeyHelp, setHotkeyHelp] = useState(false)
+  const [appPreferencesOpen, setAppPreferencesOpen] = useState(false)
+  const [quickHeader, setQuickHeader] = useState(loadQuickHeaderPreferences)
   const [sidebarStatusMenu, setSidebarStatusMenu] = useState(false)
   const [sidebarStatusMenuPosition, setSidebarStatusMenuPosition] = useState({ left: 0, top: 0 })
   const [bootOpen, setBootOpen] = useState(demo)
@@ -488,6 +500,8 @@ export default function App() {
   const boardSettingsReadGate = useRef(new BoardSettingsReadGate())
   const boardSettingsRequestGeneration = useRef('')
   const snapshotRef = useRef(snapshot)
+  const ledTransportEpoch = useRef(0)
+  const ledTransportInstanceID = useRef('')
   const appActionReceipts = useRef(new AppActionReceiptCache())
   const t = useMemo(() => translator(appearance.locale), [appearance.locale])
   const productTitle = effectiveProductTitle(uiConfig?.name, __PRODUCT_NAME__)
@@ -505,6 +519,12 @@ export default function App() {
     applyAppearance(value)
     audioRef.current?.setVolume(value.audioVolume)
     audioRef.current?.setMuted(value.audioMuted)
+  }, [])
+
+  const saveQuickHeader = useCallback((value: QuickHeaderPreferences) => {
+    const normalized = normalizeQuickHeaderPreferences(value)
+    setQuickHeader(normalized)
+    saveQuickHeaderPreferences(normalized)
   }, [])
 
   const adoptHostAppearance = useCallback((value: Appearance, etag: string) => {
@@ -815,11 +835,20 @@ export default function App() {
       return
     }
     try {
+      const started = { epoch: ledTransportEpoch.current, instanceID: ledTransportInstanceID.current }
       const value = await getSnapshot()
+      const currentSource = { epoch: ledTransportEpoch.current, instanceID: ledTransportInstanceID.current }
+      if (!statusLEDSourceUnchanged(started, currentSource)) return
+      if (!statusLEDSnapshotMatchesSource(value, started)) return
       const previous = snapshotRef.current
-      snapshotRef.current = value
-      setSnapshot(value)
-      setSamples((current) => metricSamplesAfterSnapshot(current, previous, value))
+      const next = mergeStatusLEDSnapshot(previous, value, {
+        epoch: started.epoch,
+        instanceID: value.host_instance_id,
+        authoritativeInstanceID: started.instanceID,
+      })
+      snapshotRef.current = next
+      setSnapshot(next)
+      setSamples((current) => metricSamplesAfterSnapshot(current, previous, next))
     } catch (cause) {
       notify('warning', 'Snapshot unavailable', cause instanceof Error ? cause.message : String(cause))
     }
@@ -973,6 +1002,35 @@ export default function App() {
       })
   }, [appInstanceID, appearance.locale, applyPage, demo, navigationSession, navigationSync, startupProbeResolved])
 
+  const browserControllerState = useMemo(() => ({
+    title: productTitle,
+    hostVersion: uiConfig?.host_version || '',
+    page,
+    hostOnline: !demo && streamState === 'open',
+    boardConnected: !demo && snapshot.connected,
+    port: snapshot.port.name || '',
+    transport: streamState,
+    eventCount: events.length,
+  }), [demo, events.length, page, productTitle, snapshot.connected, snapshot.port.name, streamState, uiConfig?.host_version])
+
+  useEffect(() => publishBrowserController({
+    api: 'PCController.browser',
+    inspect: () => browserControllerState,
+    command: (value) => {
+      const command = value.trim()
+      if (!command) return Promise.reject(new Error('PCController.command requires a non-empty command'))
+      return runCommand(command)
+    },
+    refresh,
+    navigate: (value) => {
+      const destination = navigation.find((candidate) => candidate.id === value)?.id
+      if (!destination) throw new Error(`Unknown PCController page: ${value}`)
+      navigate(destination)
+    },
+  }), [browserControllerState, navigate, refresh, runCommand])
+
+  useEffect(() => { publishBrowserControllerState(browserControllerState) }, [browserControllerState])
+
   useEffect(() => {
     historyNavigationRef.current = (value) => navigate(value, 'none')
     return () => { historyNavigationRef.current = () => undefined }
@@ -1106,7 +1164,7 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (bootOpen) return
+      if (bootOpen || appPreferencesOpen) return
       const composing = event.isComposing || event.keyCode === 229
       if (palette) {
         if (composing) return
@@ -1204,7 +1262,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [bootOpen, dialog.open, hotkeyHelp, mobileNav, navigate, page, palette, paletteIndex, paletteQuery, t, toggleAudio])
+  }, [appPreferencesOpen, bootOpen, dialog.open, hotkeyHelp, mobileNav, navigate, page, palette, paletteIndex, paletteQuery, t, toggleAudio])
 
   useEffect(() => {
     setPaletteIndex(0)
@@ -1307,13 +1365,23 @@ export default function App() {
             setSnapshot(next)
             setSamples((current) => metricSamplesAfterSnapshot(current, previous, next, new Date(update.time).getTime()))
           },
-          event: (event) => {
+          event: (event, source: StreamSource) => {
+			const adoptedSource = advanceStatusLEDSource(
+				{ epoch: ledTransportEpoch.current, instanceID: ledTransportInstanceID.current },
+				{ epoch: source.generation, instanceID: source.instanceID },
+			)
+			if (!adoptedSource) return
+			ledTransportEpoch.current = adoptedSource.epoch
+			ledTransportInstanceID.current = adoptedSource.instanceID ?? ''
 			const eventKind = event.kind.toLowerCase()
             const macroEvent = isMacroControllerEvent(event)
             if (macroEvent) setMacroEvents((current) => prependMacroControllerEvent(current, event))
 			if (isPushedOutputEvent(event)) {
 				setSnapshot((current) => {
-					const next = applyPushedOutputEvent(current, event)
+					const next = applyPushedOutputEvent(current, event, {
+						epoch: source.generation,
+						instanceID: source.instanceID,
+					})
 					snapshotRef.current = next
 					return next
 				})
@@ -1391,7 +1459,16 @@ export default function App() {
             if (/config/i.test(event.kind)) void refreshHostAppearance().catch(() => undefined)
             if (/device|connection|settings|illumination|^macro/i.test(event.kind)) void refresh()
           },
-          state: (state, detail) => {
+          state: (state, detail, source) => {
+            if (source?.generation) {
+              const adoptedSource = advanceStatusLEDSource(
+                { epoch: ledTransportEpoch.current, instanceID: ledTransportInstanceID.current },
+                { epoch: source.generation, instanceID: source.instanceID },
+              )
+              if (!adoptedSource) return
+              ledTransportEpoch.current = adoptedSource.epoch
+              ledTransportInstanceID.current = adoptedSource.instanceID ?? ''
+            }
             resourceCheck.state(state)
             setStreamState(state)
             setStreamDetail(detail ?? '')
@@ -1540,8 +1617,8 @@ export default function App() {
     <MotionConfig reducedMotion={appearance.reduceMotion ? 'always' : 'user'}>
     <div
       className={`app-shell${sidebarOpen ? '' : ' is-sidebar-compact'}${bootResolved ? '' : ' is-bootstrap-pending'}`}
-      inert={!bootResolved || bootOpen || hotkeyHelp ? true : undefined}
-      aria-hidden={!bootResolved || bootOpen || hotkeyHelp ? true : undefined}
+      inert={!bootResolved || bootOpen || hotkeyHelp || appPreferencesOpen ? true : undefined}
+      aria-hidden={!bootResolved || bootOpen || hotkeyHelp || appPreferencesOpen ? true : undefined}
     >
 	  {remoteActionProgress && (
 		<div
@@ -1569,9 +1646,9 @@ export default function App() {
           aria-haspopup={snapshot.connected ? 'menu' : undefined}
           aria-expanded={snapshot.connected ? sidebarStatusMenu : undefined}
           aria-label={snapshot.connected
-            ? appearance.locale === 'fa' ? 'منوی اتصال کنترلر' : 'Controller connection menu'
-            : appearance.locale === 'fa' ? 'اتصال مجدد کنترلر' : 'Reconnect controller'}
-          title={`${snapshot.connected ? t('online') : t('offline')} · ${snapshot.port.name || snapshot.connection_state}`}
+            ? appearance.locale === 'fa' ? 'منوی اتصال برد' : 'Board connection menu'
+            : appearance.locale === 'fa' ? 'اتصال مجدد برد' : 'Reconnect board'}
+          title={`${snapshot.connected ? (appearance.locale === 'fa' ? 'برد آنلاین' : 'Board online') : (appearance.locale === 'fa' ? 'برد آفلاین' : 'Board offline')} · ${snapshot.port.name || snapshot.connection_state}`}
           onClick={() => {
             if (!snapshot.connected) {
               setSidebarStatusMenu(false)
@@ -1593,14 +1670,14 @@ export default function App() {
           }}
         >
           <span className={`status-rail status-rail--${snapshot.connected ? 'good' : 'bad'}`} aria-hidden="true" />
-          <div><strong>{snapshot.connected ? t('online') : t('offline')}</strong><small>{snapshot.port.name || snapshot.connection_state}</small></div>
+          <div><strong>{snapshot.connected ? (appearance.locale === 'fa' ? 'برد آنلاین' : 'Board online') : (appearance.locale === 'fa' ? 'برد آفلاین' : 'Board offline')}</strong><small>{snapshot.port.name || snapshot.connection_state}</small></div>
           <Cpu size={18} aria-hidden="true" />
         </button>
         {sidebarStatusMenu && typeof document !== 'undefined' && createPortal(<div
           ref={sidebarStatusMenuRef}
           className="sidebar__status-menu"
           role="menu"
-          aria-label={appearance.locale === 'fa' ? 'عملیات اتصال کنترلر' : 'Controller connection actions'}
+          aria-label={appearance.locale === 'fa' ? 'عملیات اتصال برد' : 'Board connection actions'}
           style={sidebarStatusMenuPosition}
         >
           <button type="button" role="menuitem" onClick={() => { setSidebarStatusMenu(false); void runCommand('reconnect') }}>{appearance.locale === 'fa' ? 'اتصال مجدد' : 'Reconnect'}</button>
@@ -1624,17 +1701,24 @@ export default function App() {
       <header className="topbar">
         <button className="mobile-menu" aria-label={t('openNavigation')} onClick={() => setMobileNav(true)}><Menu size={20} /></button>
         <div className="breadcrumbs"><span>{productShortName}</span><i>/</i><strong>{t(current.label)}</strong></div>
-        <button className="command-trigger" aria-keyshortcuts="Control+K Meta+K" onClick={() => { setPaletteIndex(0); setPalette(true) }}><Search size={16} /><span>{t('searchCommands')}</span><KeyCombo keys={[["Ctrl", "⌘"], "K"]} /></button>
+        <button className="command-trigger" aria-keyshortcuts={primaryShortcutARIA()} onClick={() => { setPaletteIndex(0); setPalette(true) }}><Search size={16} /><span>{t('searchCommands')}</span><KeyCombo keys={[primaryShortcutModifier(), "K"]} /></button>
         <div className="topbar__actions">
           {demo && <StatusBadge tone="warn">{t('demoMode')}</StatusBadge>}
           {reconnectAvailable
             ? <button className="transport-reconnect" title={streamDetail || undefined} aria-label={appearance.locale === 'fa' ? 'اتصال مجدد فوری میزبان' : 'Reconnect host now'} onClick={reconnectTransport}><StatusBadge tone={transportTone}>{transportLabel}</StatusBadge></button>
             : <span title={streamDetail || undefined}><StatusBadge tone={transportTone} pulse={streamState === 'connecting'}>{transportLabel}</StatusBadge></span>}
-          <button className="topbar-icon" aria-label={t('toggleTheme')} onClick={() => saveAppearance({ ...appearance, theme: (document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark') })}>{document.documentElement.dataset.theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}</button>
-          <button className="topbar-icon" aria-label={t('switchLanguage')} onClick={() => saveAppearance({ ...appearance, locale: appearance.locale === 'en' ? 'fa' : 'en' })}><Languages size={18} /></button>
-          <button className="topbar-icon topbar-audio" aria-label={t(appearance.audioMuted ? 'enableAudio' : 'muteAudio')} aria-pressed={appearance.audioMuted} aria-keyshortcuts="M" onClick={toggleAudio}>{appearance.audioMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}</button>
-          <button className="topbar-icon topbar-hotkeys" aria-label={t('keyboardShortcuts')} aria-keyshortcuts="?" onClick={() => setHotkeyHelp(true)}><Keyboard size={18} /></button>
-          <button className="topbar-icon" aria-label={t('notifications')} onClick={() => navigate('events')}><Bell size={18} />{events.length > 0 && <i />}</button>
+          <button
+            className="topbar-icon"
+            aria-label={appearance.locale === 'fa' ? 'ترجیحات برنامه' : 'Application preferences'}
+            aria-haspopup="dialog"
+            aria-expanded={appPreferencesOpen}
+            onClick={() => setAppPreferencesOpen(true)}
+          ><Settings2 size={18} /></button>
+          {quickHeader.theme && <button className="topbar-icon" aria-label={t('toggleTheme')} onClick={() => saveAppearance({ ...appearance, theme: (document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark') })}>{document.documentElement.dataset.theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}</button>}
+          {quickHeader.language && <button className="topbar-icon" aria-label={t('switchLanguage')} onClick={() => saveAppearance({ ...appearance, locale: appearance.locale === 'en' ? 'fa' : 'en' })}><Languages size={18} /></button>}
+          {quickHeader.audio && <button className="topbar-icon topbar-audio" aria-label={t(appearance.audioMuted ? 'enableAudio' : 'muteAudio')} aria-pressed={appearance.audioMuted} aria-keyshortcuts="M" onClick={toggleAudio}>{appearance.audioMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}</button>}
+          {quickHeader.hotkeys && <button className="topbar-icon topbar-hotkeys" aria-label={t('keyboardShortcuts')} aria-keyshortcuts="?" onClick={() => setHotkeyHelp(true)}><Keyboard size={18} /></button>}
+          {quickHeader.notifications && <button className="topbar-icon" aria-label={t('notifications')} onClick={() => navigate('events')}><Bell size={18} />{events.length > 0 && <i />}</button>}
         </div>
       </header>
 
@@ -1693,6 +1777,15 @@ export default function App() {
       <Modal state={{ ...dialog, action: confirmDialog }} onClose={closeDialog} busy={dialogBusy} />
       <ToastStack messages={toasts} dismiss={(id) => setToasts((current) => current.filter((item) => item.id !== id))} />
     </div>
+    <AppPreferencesDialog
+      open={appPreferencesOpen}
+      locale={appearance.locale}
+      appearance={appearance}
+      quickHeader={quickHeader}
+      onAppearance={saveAppearance}
+      onQuickHeader={saveQuickHeader}
+      onClose={() => setAppPreferencesOpen(false)}
+    />
     <BootGate open={bootResolved && bootOpen} progress={bootProgress} locale={appearance.locale} productTitle={productTitle} productShortName={productShortName} productTagline={productTagline} onEnter={enterApp} />
     <HotkeyHelp open={hotkeyHelp} locale={appearance.locale} onClose={() => setHotkeyHelp(false)} />
     </MotionConfig>

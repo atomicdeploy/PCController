@@ -1375,6 +1375,7 @@ func storeAndVerifyProgrammingSettings(
 	options ProgrammingLifecycleOptions,
 	operation string,
 ) error {
+	programmer.ReportProgress(ctx, programmer.Progress{Stage: "settings", Percent: -1, Detail: "Writing and verifying board settings"})
 	if err := device.StoreSettings(ctx, expected); err != nil {
 		return fmt.Errorf("%s (recovery marker retained): %w", operation, err)
 	}
