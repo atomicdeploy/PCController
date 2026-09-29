@@ -426,6 +426,17 @@ describe('offline and settings UI contracts', () => {
       terminalVerified: false,
     })
     expect(peerUpdateStatusFromEvent({ kind: 'update.queued', text: 'local' })).toBeNull()
+
+		expect(peerUpdateStatusFromEvent({
+			kind: 'peer-update.completed',
+			text: 'peer restarted and acknowledged active SHA',
+			metadata: {
+				peer: 'peer-host', state: 'completed', progress_percent: '100',
+				operation_id: 'source-intent', remote_operation_id: 'remote-host-7',
+				terminal_verified: 'true', active_sha256: 'a'.repeat(64),
+				sha256: 'a'.repeat(64), idempotency_key: 'intent:shared',
+			},
+		})).toMatchObject({ state: 'completed', progressPercent: 100, terminalVerified: true })
   })
 
   it('presents an uncertain peer outcome as retryable rather than failed', () => {

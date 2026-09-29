@@ -84,3 +84,28 @@ func TestUpdateNotificationTitlesDescribeActualOperation(t *testing.T) {
 		}
 	}
 }
+
+func TestPeerHostUpdateMilestonesProduceBoundedToasts(t *testing.T) {
+	tracker := UpdateNotificationTracker{}
+	for _, test := range []struct {
+		state, title, severity string
+	}{
+		{"queued", "Sending host update to peer", "info"},
+		{"artifact-verified", "Peer verified host update", "info"},
+		{"reconnecting", "Peer host is restarting", "info"},
+		{"completed", "Host update complete", "success"},
+		{"outcome-uncertain", "Host update outcome uncertain", "warning"},
+	} {
+		value := UpdateProgress{
+			OperationID: "peer-operation", Kind: "host", State: test.state,
+			Stage: test.state, Detail: "peer update detail",
+		}
+		notification, ok := tracker.Next(value)
+		if !ok || notification.Title != test.title || notification.Severity != test.severity {
+			t.Fatalf("state=%s notification=%+v ok=%t", test.state, notification, ok)
+		}
+		if _, repeated := tracker.Next(value); repeated {
+			t.Fatalf("state=%s repeated a peer update toast", test.state)
+		}
+	}
+}

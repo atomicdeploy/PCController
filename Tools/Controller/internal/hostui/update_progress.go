@@ -79,12 +79,20 @@ func (tracker *UpdateNotificationTracker) Next(value UpdateProgress) (Notificati
 	switch value.State {
 	case "failed":
 		title, severity, stage = operation+" failed", "error", "failed"
+	case "outcome-uncertain":
+		title, severity, stage = operation+" outcome uncertain", "warning", "outcome-uncertain"
 	case "completed":
 		title, severity, stage = operation+" complete", "success", "completed"
 	case "cancelled":
 		title, severity, stage = operation+" cancelled", "warning", "cancelled"
 	default:
 		switch {
+		case stage == "queued" && value.Kind == "host":
+			title, stage = "Sending host update to peer", "peer-send"
+		case stage == "artifact-verified" && value.Kind == "host":
+			title, stage = "Peer verified host update", "peer-verified"
+		case stage == "reconnecting" && value.Kind == "host":
+			title, stage = "Peer host is restarting", "peer-restarting"
 		case stage == "backup", stage == "backing-up":
 			title, stage = "Saving board backup", "backup"
 		case strings.Contains(stage, "verif"):

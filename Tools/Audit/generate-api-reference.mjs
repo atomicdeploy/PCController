@@ -165,7 +165,7 @@ const methodOverrides = {
   "controller.artifact.upload.chunk": "Append one ordered bounded chunk to a peer artifact transfer.",
   "controller.artifact.upload.finish": "Revalidate and publish a completed peer artifact transfer.",
   "controller.artifact.upload.abort": "Abort and remove an incomplete peer artifact transfer.",
-  "controller.peer.update.host": "Transfer a verified executable using a caller-generated idempotency_key; report remote queued/staged acceptance, not terminal replacement health. Retry uncertain outcomes with the same key.",
+  "controller.peer.update.host": "Transfer a verified executable using a caller-generated idempotency_key, wait through the peer restart, and verify its exact active SHA-256 acknowledgement. Retry uncertain outcomes with the same key.",
   "controller.webhooks.status": "Return bounded outbound queue and dead-letter counters.",
   "controller.webhooks.pending": "List bounded non-secret pending outbound deliveries.",
   "controller.webhooks.dead": "List bounded non-secret dead-letter deliveries.",

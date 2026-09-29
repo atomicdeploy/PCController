@@ -48,6 +48,7 @@ func TestPeerHostUpdateTransfersVerifiedArtifactThenQueuesRemoteCoordinator(t *t
 	var received int64
 	updateCalled := false
 	updateIdempotencyKey := ""
+	manifestProbes := 0
 	service := &Service{Client: client, Artifacts: artifactService}
 	service.BridgeCall = func(_ context.Context, peer string, request Request) (Response, error) {
 		if peer != "edge" {
@@ -100,6 +101,20 @@ func TestPeerHostUpdateTransfersVerifiedArtifactThenQueuesRemoteCoordinator(t *t
 				ID: "remote-update", Kind: "host", State: "queued",
 				ArtifactSHA256: descriptor.SHA256, IdempotencyKey: idempotencyKey,
 			}}
+		case "controller.artifact.manifest":
+			manifestProbes++
+			if manifestProbes == 1 {
+				old := descriptor
+				old.SHA256 = strings.Repeat("0", 64)
+				response.Result = artifacts.Manifest{Current: artifacts.CurrentArtifacts{Host: &old}}
+				break
+			}
+			if manifestProbes == 2 {
+				return Response{}, errors.New("peer restarting")
+			}
+			response.Result = artifacts.Manifest{
+				Current: artifacts.CurrentArtifacts{Host: &descriptor},
+			}
 		case "controller.artifact.upload.abort":
 			t.Fatal("successful transfer was aborted")
 		default:
@@ -107,6 +122,7 @@ func TestPeerHostUpdateTransfersVerifiedArtifactThenQueuesRemoteCoordinator(t *t
 		}
 		return response, nil
 	}
+	eventCursor := client.LatestEventID()
 	result, err := service.updatePeerHost(context.Background(), peerHostUpdateRequest{
 		Peer: "edge", ArtifactSHA256: descriptor.SHA256, Authorized: true,
 		IdempotencyKey: idempotencyKey,
@@ -120,8 +136,20 @@ func TestPeerHostUpdateTransfersVerifiedArtifactThenQueuesRemoteCoordinator(t *t
 	}
 	if !updateCalled || updateIdempotencyKey != expectedKey || result.Peer != "edge" ||
 		result.Artifact.SHA256 != descriptor.SHA256 || result.Operation.ID != "remote-update" ||
-		result.Stage != "remote-queued" || result.TerminalVerified {
+		result.Stage != "completed" || !result.TerminalVerified || result.Operation.State != "completed" || manifestProbes != 3 {
 		t.Fatalf("result=%#v updateCalled=%t", result, updateCalled)
+	}
+	completedContext, cancelCompleted := context.WithTimeout(context.Background(), time.Second)
+	defer cancelCompleted()
+	completed, err := client.NextEvent(completedContext, eventCursor, "peer-update.completed")
+	if err != nil {
+		t.Fatalf("wait for terminal peer update event: %v", err)
+	}
+	if completed.Metadata["terminal_verified"] != "true" ||
+		completed.Metadata["active_sha256"] != descriptor.SHA256 ||
+		completed.Metadata["progress_known"] != "true" ||
+		completed.Metadata["progress_percent"] != "100" {
+		t.Fatalf("completed event=%#v", completed)
 	}
 }
 
@@ -193,6 +221,10 @@ func TestPeerHostUpdateRetainsIntentWhenTargetAcceptsThenBridgeCloses(t *testing
 				ID: "remote-update", Kind: "host", State: "queued",
 				ArtifactSHA256: descriptor.SHA256, IdempotencyKey: value.IdempotencyKey,
 			}}
+		case "controller.artifact.manifest":
+			response.Result = artifacts.Manifest{
+				Current: artifacts.CurrentArtifacts{Host: &descriptor},
+			}
 		default:
 			t.Fatalf("unexpected method=%q", request.Method)
 		}

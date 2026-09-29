@@ -1055,7 +1055,8 @@ func (manager *Manager) dispatchNotification(
 		strings.HasPrefix(strings.ToLower(strings.TrimSpace(event.Kind)), "notification.") {
 		return
 	}
-	if strings.HasPrefix(strings.ToLower(event.Kind), "update.") {
+	eventKind := strings.ToLower(event.Kind)
+	if strings.HasPrefix(eventKind, "update.") || strings.HasPrefix(eventKind, "peer-update.") {
 		value := hostui.ParseUpdateProgress(event.Kind, event.Text, event.Metadata, event.Time)
 		if notification, ok := manager.updateNotifications.Next(value); ok {
 			priority := 1

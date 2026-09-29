@@ -389,7 +389,8 @@ export function shouldNavigateToUpdates(
   currentPage: PageID,
   now = Date.now(),
 ): boolean {
-  return currentPage !== 'updates' && event.kind.toLowerCase().startsWith('update.') &&
+  const kind = event.kind.toLowerCase()
+  return currentPage !== 'updates' && (kind.startsWith('update.') || kind.startsWith('peer-update.')) &&
     isFreshAppAction(event.time, now)
 }
 

@@ -122,8 +122,8 @@ export interface PeerHostUpdateResult {
   peer: string
   artifact: ArtifactDescriptor
   operation: UpdateStatus
-  stage: 'remote-queued' | 'remote-staged'
-  terminal_verified: false
+  stage: 'remote-queued' | 'remote-staged' | 'completed'
+  terminal_verified: boolean
 }
 
 /** Remote download request with optional integrity and idempotency constraints. */
@@ -292,7 +292,7 @@ export function settlePeerHostUpdateIntent(peer: string, artifactSHA256: string,
   clearPeerHostUpdateIntent(peer, artifactSHA256, idempotencyKey.trim())
 }
 
-/** Transfers a verified executable and returns only the peer's queued/staged acceptance. */
+/** Transfers a verified executable and returns after restart health and the active SHA are acknowledged. */
 export async function startPeerHostUpdate(peer: string, artifactSHA256: string, signal?: AbortSignal): Promise<PeerHostUpdateResult> {
   const digest = artifactSHA256.trim().toLowerCase()
   const idempotencyKey = peerHostUpdateIdempotencyKey(peer, digest)
