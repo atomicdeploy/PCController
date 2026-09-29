@@ -112,16 +112,12 @@ private:
   // workspace only after the user explicitly clears any retained recording.
   uint8_t queue_[WorkspaceBytes];
   uint8_t head_;
-  uint8_t used_;
   uint8_t options_;
   bool safeStopRequested_;
-  // Recording shares queue_ with streamed playback; only one cursor byte
-  // are added, never a second allocation or recording-sized RAM buffer.
-  uint8_t replayOffset_;
 };
 
 #if defined(__AVR__)
-static_assert(sizeof(MacroRing) == 323,
+static_assert(sizeof(MacroRing) == 321,
               "portable macro ring must preserve the AVR queue footprint");
 #endif
 

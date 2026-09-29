@@ -183,7 +183,7 @@ func Build(options Options) (Command, error) {
 			"build.extra_flags=-DPCCONTROLLER_BUILD_HASH=0x%08XUL "+
 				"-DPCCONTROLLER_BUILD_TIMESTAMP=0x%08XUL "+
 				"-DPCCONTROLLER_IDENTITY_ADDRESS=0x%XUL -mcall-prologues "+
-				"-fmerge-all-constants -fno-split-wide-types -fno-tree-scev-cprop "+
+				"-fmerge-all-constants -fno-tree-scev-cprop "+
 				"-fipa-pta -fstack-usage",
 			options.FirmwareSourceHash,
 			options.FirmwareBuildTimestamp,

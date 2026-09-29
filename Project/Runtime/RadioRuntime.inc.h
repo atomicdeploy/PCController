@@ -16,14 +16,12 @@ void storeUserPwmValue(uint8_t channel, uint16_t value) {
   }
 }
 
-// Returns ceil(remaining milliseconds / 1000), or zero for indefinite mode.
+// Returns the timer countdown maintained by serviceLearningTimer(), or zero for
+// indefinite mode. The service path advances at most one second per pass, so a
+// delayed loop catches up without a 32-bit division or an event burst.
 #if PCCONTROLLER_ENABLE_RF_LEARNING
-uint8_t learningRemainingSeconds(uint32_t at) {
-  if (learningMode != RF_LEARN_TIMER || learningEndsAt == 0 ||
-      timeReached(at, learningEndsAt)) {
-    return 0;
-  }
-  return static_cast<uint8_t>((learningEndsAt - at + 999UL) / 1000UL);
+uint8_t learningRemainingSeconds(uint32_t) {
+  return learningMode == RF_LEARN_TIMER ? learningReportedRemaining : 0;
 }
 
 // Starts the default indefinite/multi mode or the explicit bounded timer mode.
@@ -50,9 +48,7 @@ void beginLearning(uint8_t mode, uint8_t timeoutSeconds) {
   learningMode = mode;
   learningTotalSeconds = timeoutSeconds;
   learningReportedRemaining = timeoutSeconds;
-  learningEndsAt = mode == RF_LEARN_TIMER
-                       ? now + static_cast<uint32_t>(timeoutSeconds) * 1000UL
-                       : 0;
+  learningNextSecondAt = mode == RF_LEARN_TIMER ? now + 1000UL : 0;
   modeManager.transitionTo(MODE_RF_LEARNING);
   appEvents.rfLearning(3, learnedRemotes.count(), learningMode,
                        learningTotalSeconds, learningReportedRemaining);
@@ -65,7 +61,7 @@ void endLearning(uint8_t state, int8_t feedback) {
   }
   const uint8_t remaining = learningRemainingSeconds(now);
   learningActive = false;
-  learningEndsAt = 0;
+  learningNextSecondAt = 0;
   if (modeManager.current() == MODE_RF_LEARNING) {
     modeManager.transitionTo(modeBeforeLearning);
   }
@@ -81,13 +77,18 @@ void serviceLearningTimer(uint32_t at) {
   if (!learningActive || learningMode != RF_LEARN_TIMER) {
     return;
   }
-  const uint8_t remaining = learningRemainingSeconds(at);
-  if (remaining == 0) {
+  if (!timeReached(at, learningNextSecondAt)) {
+    return;
+  }
+  learningNextSecondAt += 1000UL;
+  if (learningReportedRemaining != 0) {
+    --learningReportedRemaining;
+  }
+  if (learningReportedRemaining == 0) {
     endLearning(0, 1);
-  } else if (remaining != learningReportedRemaining) {
-    learningReportedRemaining = remaining;
+  } else {
     appEvents.rfLearning(4, learnedRemotes.count(), learningMode,
-                         learningTotalSeconds, remaining);
+                         learningTotalSeconds, learningReportedRemaining);
   }
 }
 #else

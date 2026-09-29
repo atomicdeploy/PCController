@@ -85,12 +85,12 @@ bool learningActive = false;
 uint8_t learningMode = RF_LEARN_INDEFINITE;
 uint8_t learningTotalSeconds = 0;
 uint8_t learningReportedRemaining = 0;
-uint32_t learningEndsAt = 0;
+uint32_t learningNextSecondAt = 0;
 #else
 constexpr bool learningActive = false;
 constexpr uint8_t learningMode = RF_LEARN_INDEFINITE;
 constexpr uint8_t learningTotalSeconds = 0;
-constexpr uint32_t learningEndsAt = 0;
+constexpr uint32_t learningNextSecondAt = 0;
 #endif
 
 // Active page, modal editor selection, and transient front-panel deadlines.
