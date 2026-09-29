@@ -140,7 +140,7 @@ func TestPreviewFramesCoverEveryDomainPage(t *testing.T) {
 		PageBoardSettings: "BOARD EEPROM SETTINGS",
 		PageAppSettings:   "HOST SETTINGS",
 		PageRF:            "433 MHz RF",
-		PageProgramming:   "PROGRAMMING",
+		PageProgramming:   "FIRMWARE",
 		PageAutomations:   "AUTOMATIONS & MACROS",
 		PageEvents:        "24-HOUR HISTORY",
 		PageConsole:       "CONSOLE",
@@ -674,7 +674,7 @@ func TestDashboardAndProgrammingExposeLiveStateAndGuardedActions(t *testing.T) {
 		t.Fatalf("polished uptime missing:\n%s", dashboard)
 	}
 	programming := PreviewFrame(PageProgramming, 160, 46)
-	for _, expected := range []string{"U Flash", "Application protocol", "Current firmware", "5DF10D05"} {
+	for _, expected := range []string{"U Flash", "Board connected", "Firmware build", "5DF10D05"} {
 		if !strings.Contains(programming, expected) {
 			t.Errorf("programming page missing %q:\n%s", expected, programming)
 		}
@@ -1926,7 +1926,7 @@ func TestBorderedPageButtonsShareHorizontalRow(t *testing.T) {
 			if page == PageRF && strings.Contains(line, "L Learn") && strings.Contains(line, "Refresh list") {
 				found = true
 			}
-			if page == PageProgramming && strings.Contains(line, "Urclock probe") && strings.Contains(line, "Metadata") {
+			if page == PageProgramming && strings.Contains(line, "U Flash") && strings.Contains(line, "B Backup") {
 				found = true
 			}
 			if page == PageAutomations && strings.Contains(line, "N New") && strings.Contains(line, "P Play") {

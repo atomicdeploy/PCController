@@ -191,7 +191,7 @@ func (model Model) updateProgressLines() []string {
 	}
 	heading := strings.ToUpper(stage)
 	if state == "failed" {
-		heading = "FAILED AT " + strings.ToUpper(stage)
+		heading = "UPDATE FAILED"
 	}
 	if state == "completed" {
 		heading = "UPDATE COMPLETE"
@@ -200,6 +200,9 @@ func (model Model) updateProgressLines() []string {
 		heading = "UPDATE CANCELLED"
 	}
 	lines := []string{lipgloss.NewStyle().Bold(true).Foreground(color).Render(symbol + "  " + heading)}
+	if state == "failed" {
+		lines = append(lines, labelStyle.Render("Last stage: "+stage))
+	}
 	if active && model.update.ProgressKnown {
 		barWidth := max(12, width-10)
 		filled := progress * barWidth / 100

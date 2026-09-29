@@ -58,3 +58,29 @@ func TestUpdateNotificationsCoalesceMeasuredTicksAndMinorStages(t *testing.T) {
 		t.Fatal("new operation failure suppressed")
 	}
 }
+
+func TestUpdateNotificationTitlesDescribeActualOperation(t *testing.T) {
+	for _, test := range []struct{ kind, label string }{
+		{"firmware", "Firmware update"},
+		{"device-capture", "Board readback"},
+		{"firmware-build", "Firmware build"},
+		{"eeprom", "EEPROM update"},
+		{"host", "Host update"},
+		{"", "Operation"},
+		{"future-operation", "Operation"},
+	} {
+		for _, state := range []string{"completed", "failed", "cancelled", "programming"} {
+			t.Run(test.kind+"/"+state, func(t *testing.T) {
+				tracker := UpdateNotificationTracker{}
+				value := UpdateProgress{OperationID: "operation", Kind: test.kind, State: state, Stage: "flash write:verifying", Detail: "Original error detail"}
+				notification, ok := tracker.Next(value)
+				if !ok || !strings.HasPrefix(notification.Title, test.label) {
+					t.Fatalf("incorrect operation identity: %+v", notification)
+				}
+				if state == "failed" && (!strings.Contains(notification.Body, "Last stage:") || strings.Contains(notification.Body, "Failed at") || !strings.Contains(notification.Body, value.Detail)) {
+					t.Fatalf("failure misattributed to last cleanup stage or detail lost: %+v", notification)
+				}
+			})
+		}
+	}
+}

@@ -54,7 +54,7 @@ func TestUnknownStageAndFailedResultNeverRetainMeasuredPercentage(t *testing.T) 
 	}
 	model.update = updatePresentation{State: "failed", Stage: "reconnecting", Progress: 40, ProgressKnown: true, Detail: "The application handshake timed out. Check the USB connection and retry.", ErrorCode: "handshake-timeout"}
 	view := strings.Join(model.updateProgressLines(), "\n")
-	if strings.Contains(view, "%") || !strings.Contains(view, "FAILED AT RECONNECTING") || !strings.Contains(view, "handshake-timeout") {
+	if strings.Contains(view, "%") || strings.Contains(view, "FAILED AT") || !strings.Contains(view, "UPDATE FAILED") || !strings.Contains(view, "Last stage: reconnecting") || !strings.Contains(view, "handshake-timeout") {
 		t.Fatalf("failed result lost stage or retained busy: %s", view)
 	}
 }

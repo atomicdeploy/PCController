@@ -74,22 +74,23 @@ func (tracker *UpdateNotificationTracker) Next(value UpdateProgress) (Notificati
 		return Notification{}, false
 	}
 	stage := value.Stage
+	operation := updateOperationLabel(value.Kind)
 	title, severity := "", "info"
 	switch value.State {
 	case "failed":
-		title, severity, stage = "Firmware update failed", "error", "failed"
+		title, severity, stage = operation+" failed", "error", "failed"
 	case "completed":
-		title, severity, stage = "Firmware update complete", "success", "completed"
+		title, severity, stage = operation+" complete", "success", "completed"
 	case "cancelled":
-		title, severity, stage = "Firmware update cancelled", "warning", "cancelled"
+		title, severity, stage = operation+" cancelled", "warning", "cancelled"
 	default:
 		switch {
 		case stage == "backup", stage == "backing-up":
 			title, stage = "Saving board backup", "backup"
 		case strings.Contains(stage, "verif"):
-			title, stage = "Verifying board firmware", "verify"
+			title, stage = operation+": verifying", "verify"
 		case stage == "flash", strings.Contains(stage, "writing"), strings.Contains(stage, "flash write"):
-			title, stage = "Writing board firmware", "flash"
+			title, stage = operation+": writing", "flash"
 		default:
 			return Notification{}, false
 		}
@@ -111,17 +112,30 @@ func (tracker *UpdateNotificationTracker) Next(value UpdateProgress) (Notificati
 	tracker.order = append(tracker.order, key)
 	body := value.Detail
 	if value.State == "failed" && value.Stage != "" {
-		body = "Failed at " + strings.ReplaceAll(value.Stage, "-", " ") + ". " + body
+		body = "Last stage: " + strings.ReplaceAll(value.Stage, "-", " ") + ". " + body
 	}
 	if len([]rune(body)) > 4000 {
 		body = string([]rune(body)[:3999]) + "…"
 	}
-	if value.Kind == "host" {
-		title = strings.ReplaceAll(title, "Firmware", "Host")
-		title = strings.ReplaceAll(title, "firmware", "host")
-	}
 	uri := productidentity.ProtocolScheme + "://page/updates"
 	return Notification{ID: key, Title: title, Body: body, Severity: severity, LaunchURI: uri, Actions: []NotificationAction{{Label: "View update", URI: uri}}}, true
+}
+
+func updateOperationLabel(kind string) string {
+	switch kind {
+	case "firmware":
+		return "Firmware update"
+	case "device-capture":
+		return "Board readback"
+	case "firmware-build":
+		return "Firmware build"
+	case "eeprom":
+		return "EEPROM update"
+	case "host":
+		return "Host update"
+	default:
+		return "Operation"
+	}
 }
 
 var updateTaskbarOrder struct {
