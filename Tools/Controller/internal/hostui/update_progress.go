@@ -120,7 +120,7 @@ func (tracker *UpdateNotificationTracker) Next(value UpdateProgress) (Notificati
 		title = strings.ReplaceAll(title, "Firmware", "Host")
 		title = strings.ReplaceAll(title, "firmware", "host")
 	}
-	uri := productidentity.ProtocolScheme + "://page/programming"
+	uri := productidentity.ProtocolScheme + "://page/updates"
 	return Notification{ID: key, Title: title, Body: body, Severity: severity, LaunchURI: uri, Actions: []NotificationAction{{Label: "View update", URI: uri}}}, true
 }
 

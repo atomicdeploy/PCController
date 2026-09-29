@@ -47,6 +47,9 @@ func TestUpdateNotificationsCoalesceMeasuredTicksAndMinorStages(t *testing.T) {
 	if !ok || !strings.Contains(notification.Body, "reconnect") || notification.Severity != "error" {
 		t.Fatalf("missing actionable failure: %+v", notification)
 	}
+	if !strings.HasSuffix(notification.LaunchURI, "/updates") {
+		t.Fatalf("notification targets an unknown page: %s", notification.LaunchURI)
+	}
 	if _, ok := tracker.Next(value); ok {
 		t.Fatal("failure repeated")
 	}
