@@ -3858,6 +3858,29 @@ func programCommand(
 	options CommandOptions,
 	args []string,
 ) (string, error) {
+	kind := "firmware"
+	if len(args) > 0 {
+		switch args[0] {
+		case "backup", "read-flash", "read-eeprom", "metadata", "probe":
+			kind = "device-capture"
+		case "write-eeprom":
+			kind = "eeprom"
+		case "compile":
+			kind = "firmware-build"
+		}
+	}
+	ctx, complete := directProgrammingProgress(ctx, runtime, kind)
+	output, err := programCommandRun(ctx, runtime, options, args)
+	complete(err)
+	return output, err
+}
+
+func programCommandRun(
+	ctx context.Context,
+	runtime *Runtime,
+	options CommandOptions,
+	args []string,
+) (string, error) {
 	if len(args) != 0 && strings.EqualFold(args[0], "flash") {
 		return safeFlashCommand(ctx, runtime, options, args[1:])
 	}
@@ -4006,6 +4029,13 @@ func programCommand(
 	if operation == programmer.OperationBackup {
 		if err := programmer.ValidateBackup(programOptions); err != nil {
 			return "", err
+		}
+	}
+	if (method == programmer.MethodUrclock || method == programmer.MethodUSBasp || method == programmer.MethodAvrdude) && options.ProgramExecute == nil {
+		var preflightErr error
+		programOptions, preflightErr = programmer.PreflightProgrammer(ctx, programOptions)
+		if preflightErr != nil {
+			return "", fmt.Errorf("programming preflight: %w", preflightErr)
 		}
 	}
 	commandDescription := fmt.Sprintf(
@@ -4304,6 +4334,16 @@ func safeFlashCommand(
 		ApplicationHash:           snapshot.Hello.BuildHash,
 		ApplicationIdentitySchema: snapshot.Hello.IdentitySchema,
 	}
+	// Validate tools before semantic capture, muting, Prog latch or UART release.
+	// Injected runners own their virtual executable namespace (unit tests and
+	// embedders); the production subprocess runner validates real paths here.
+	programmer.ReportProgress(ctx, programmer.Progress{Stage: "preflight", Percent: -1})
+	if options.ProgramRunner == nil && options.ProgramExecute == nil {
+		backup, err = programmer.PreflightProgrammer(ctx, backup)
+		if err != nil {
+			return "", fmt.Errorf("programming preflight: %w", err)
+		}
+	}
 	writeOptions := backup
 	writeOptions.Operation = programmer.OperationWriteFlash
 	writeOptions.HexPath = firmwarePath
@@ -4317,6 +4357,7 @@ func safeFlashCommand(
 	var programmingSession *ProgrammingSession
 	var prepareOutput bytes.Buffer
 	if serialWasOpen {
+		programmer.ReportProgress(ctx, programmer.Progress{Stage: "prepare", Percent: -1, Detail: "Capturing board settings"})
 		programmingSession, err = findRetryableProgrammingSession(
 			dataPaths,
 			programmingIdentity(snapshot.Port),
@@ -4354,6 +4395,7 @@ func safeFlashCommand(
 				)
 			}
 		}
+		programmer.ReportProgress(ctx, programmer.Progress{Stage: "release", Percent: -1, Detail: "Releasing application port"})
 		if err := runtime.Close(); err != nil {
 			return strings.TrimSpace(prepareOutput.String()), fmt.Errorf(
 				"release application UART (settings recovery marker retained): %w", err,
@@ -4414,6 +4456,7 @@ func safeFlashCommand(
 		},
 		runner,
 		func(flashContext context.Context, path string, writer io.Writer) error {
+			programmer.ReportProgress(flashContext, programmer.Progress{Stage: "flash", Percent: -1, Detail: "Programming firmware"})
 			writeOptions.HexPath = path
 			return execute(flashContext, writeOptions, writer)
 		},
@@ -4459,10 +4502,12 @@ func safeFlashCommand(
 	var reconnectErr error
 	var restoreErr error
 	if serialWasOpen {
+		programmer.ReportProgress(ctx, programmer.Progress{Stage: "reconnect", Percent: -1, Detail: "Authenticating updated board"})
 		reconnectContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 12*time.Second)
 		reconnectErr = reconnectProgrammingDevice(reconnectContext, runtime, snapshot.Port)
 		cancel()
 		if reconnectErr == nil && verifiedProgram {
+			programmer.ReportProgress(ctx, programmer.Progress{Stage: "restore", Percent: -1, Detail: "Restoring and verifying settings"})
 			restoreContext, restoreCancel := context.WithTimeout(context.WithoutCancel(ctx), 8*time.Second)
 			restoreErr = RestoreProgrammingSession(
 				restoreContext, runtime, programmingSession,
