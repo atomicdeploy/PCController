@@ -563,6 +563,27 @@ kbd { padding: 3px 6px; border: 1px solid var(--line-strong); border-bottom-colo
 .empty-state__icon { width: 50px; height: 50px; display: grid; place-items: center; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--surface-muted); color: var(--text-muted); }
 .empty-state strong { font-size: 12px; }.empty-state p { max-width: 420px; margin: 5px 0 0; color: var(--text-muted); font-size: 10px; line-height: 1.5; }
 
+.controller-unavailable { min-height: 150px; display: grid; place-content: center; justify-items: center; gap: 12px; padding: 20px; text-align: center; }
+.controller-unavailable > strong { color: var(--text); font-size: 14px; font-weight: 650; letter-spacing: -.015em; }
+.controller-unavailable__icon { width: 64px; height: 64px; display: grid; place-items: center; border: 1px solid color-mix(in srgb, var(--red) 30%, var(--line)); border-radius: 18px; background: color-mix(in srgb, var(--red) 8%, var(--surface-muted)); color: var(--red); box-shadow: inset 0 1px rgba(255, 255, 255, .04), 0 14px 36px rgb(0 0 0 / .12); }
+.controller-unavailable.is-board-offline .controller-unavailable__icon { border-color: color-mix(in srgb, var(--amber) 30%, var(--line)); background: color-mix(in srgb, var(--amber) 8%, var(--surface-muted)); color: var(--amber); }
+.controller-unavailable__action { margin-top: 2px; }
+.hero-panel .controller-unavailable { min-height: 105px; place-content: center start; justify-items: start; padding: 0; text-align: start; }
+.hero-panel .controller-unavailable__icon { width: 58px; height: 58px; }
+
+.connection-fuji { position: relative; width: 144px; height: 76px; overflow: hidden; filter: drop-shadow(0 16px 28px rgb(0 0 0 / .2)); }
+.connection-fuji > span { position: absolute; pointer-events: none; }
+.connection-fuji__sun { top: 5px; inset-inline-end: 20px; width: 22px; height: 22px; border-radius: 50%; background: color-mix(in srgb, var(--red) 82%, white); box-shadow: 0 0 0 7px color-mix(in srgb, var(--red) 9%, transparent); animation: connection-sun 2.8s ease-in-out infinite; }
+.connection-fuji__rear { inset: 24px 4px 0; background: color-mix(in srgb, var(--text-muted) 20%, transparent); clip-path: polygon(0 100%, 22% 62%, 36% 74%, 54% 27%, 72% 75%, 83% 62%, 100% 100%); }
+.connection-fuji__face { inset: 7px 20px 0; background: linear-gradient(138deg, color-mix(in srgb, var(--violet) 44%, var(--surface-muted)), color-mix(in srgb, var(--text-muted) 28%, var(--surface)) 52%, var(--surface-muted) 53%); clip-path: polygon(7% 100%, 50% 6%, 93% 100%); animation: connection-mountain 1.15s var(--ease-out) both; }
+.connection-fuji__snow { inset: 7px 20px 0; background: linear-gradient(135deg, var(--text), color-mix(in srgb, var(--text) 60%, var(--violet))); clip-path: polygon(35% 40%, 50% 6%, 65% 40%, 59% 35%, 55% 44%, 50% 34%, 45% 44%, 41% 35%); animation: connection-snow .9s var(--ease-out) .18s both; }
+.connection-fuji__trace { inset: 7px 20px 0; background: linear-gradient(90deg, transparent, var(--accent) 48%, var(--text) 51%, transparent); clip-path: polygon(7% 100%, 49.4% 6%, 50.6% 6%, 93% 100%, 91.8% 100%, 50% 9%, 8.2% 100%); opacity: .7; animation: connection-trace 1.8s ease-in-out infinite; }
+
+@keyframes connection-sun { 50% { opacity: .55; transform: scale(.88); } }
+@keyframes connection-mountain { from { opacity: 0; clip-path: polygon(50% 100%, 50% 100%, 50% 100%); filter: blur(8px); } }
+@keyframes connection-snow { from { opacity: 0; transform: translateY(5px); } }
+@keyframes connection-trace { 50% { opacity: .2; filter: brightness(1.8) drop-shadow(0 0 5px var(--accent)); } }
+
 .control-layout { display: grid; grid-template-columns: 1.1fr .9fr; gap: 14px; align-items: start; }
 .workbench-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 14px; align-items: stretch; }
 .workbench-grid > .card-layout-frame { grid-column: span 4; min-width: 0; height: 100%; }
