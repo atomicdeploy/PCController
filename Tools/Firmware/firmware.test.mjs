@@ -471,6 +471,20 @@ test('unused cooperative task engine remains an explicit larger-MCU gate', async
 	assert.match(lifecycle, /#if PCCONTROLLER_ENABLE_TASK_SCHEDULER\s+taskManager\.update\(loopNow\);/u)
 })
 
+test('due macro dispatch stays ahead of ordinary host traffic', async () => {
+	const lifecycle = await readFile(
+		new URL('../../Project/Runtime/LifecycleRuntime.inc.h', import.meta.url),
+		'utf8'
+	)
+	const service = lifecycle.slice(lifecycle.indexOf('void serviceController()'))
+	const dispatch = service.indexOf('macroPlayback.dequeueDue(queuedMacroFrame)')
+	const hostTraffic = service.indexOf('appProtocol.service()')
+	assert.notEqual(dispatch, -1)
+	assert.notEqual(hostTraffic, -1)
+	assert.ok(dispatch < hostTraffic, 'host traffic must not delay an already-due MCU macro step')
+	assert.match(service, /if \(macroPlayback\.dequeueDue\(queuedMacroFrame\)\)/u)
+})
+
 test('firmware runtime owns one shared ordinary-service clock snapshot', async () => {
         const runtimeFiles = [
                 'ControllerContext.inc.h',

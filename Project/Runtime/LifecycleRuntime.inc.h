@@ -124,21 +124,28 @@ __attribute__((noinline)) void serviceController() {
   const bool i2cReserved = i2cLeaseActive(loopNow);
   wdt_reset();
 
+  // Dispatch one due macro step before accepting ordinary host traffic. This
+  // keeps a continuous presentation/strip stream from turning an MCU-timed
+  // macro delta into serial-backlog latency while retaining one-frame fairness
+  // for UART, physical keys, radio, and the other cooperative domains.
+  if (!settingsStore.values().programmingMode()) {
+    ControllerProtocol::Frame queuedMacroFrame;
+    if (macroPlayback.dequeueDue(queuedMacroFrame)) {
+      const uint16_t errors = appProtocol.responseErrors();
+      handleProtocolFrame(queuedMacroFrame, nullptr);
+      macroPlayback.completeStep(errors == appProtocol.responseErrors());
+      wdt_reset();
+    }
+    if (macroPlayback.takeSafeStopRequest()) {
+      safeStopMacroOutputs();
+    }
+  }
+
   appProtocol.service();
   if (settingsStore.values().programmingMode()) {
     return;
   }
   serviceRadio();
-  ControllerProtocol::Frame queuedMacroFrame;
-  while (macroPlayback.dequeueDue(queuedMacroFrame)) {
-    const uint16_t errors = appProtocol.responseErrors();
-    handleProtocolFrame(queuedMacroFrame, nullptr);
-    macroPlayback.completeStep(errors == appProtocol.responseErrors());
-    wdt_reset();
-  }
-  if (macroPlayback.takeSafeStopRequest()) {
-    safeStopMacroOutputs();
-  }
   const bool hostOffline = hostUnavailable();
   if (hostOffline && (hostLcdFlags & HOST_LCD_OFFLINE) == 0) {
     if ((hostLcdFlags & HOST_PANEL_CAPTURED) != 0) {
