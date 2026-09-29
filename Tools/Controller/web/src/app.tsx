@@ -332,7 +332,7 @@ function demoSnapshot(now = Date.now()): Snapshot {
 
 function demoEvent(id: number): ControllerEvent {
   const definitions = [
-    ['device.state', 'Authenticated controller identity on COM18', 'host'],
+    ['device.state', 'Controller identity on COM18', 'host'],
     ['door', 'Door input returned to closed', 'physical'],
     ['macro.completed', 'Ambient evening macro completed faithfully', 'host'],
     ['rf.received', 'Remote #3 · living-room toggle', 'rf'],
