@@ -60,12 +60,7 @@ ControllerEvents appEvents(appProtocol);
 MacroQueue macroPlayback(appProtocol);
 
 // Front-panel key order intentionally matches MenuAction IDs 0..3.
-Key menuKeys[] = {
-    Key(BoardPins::KeyPrevious),
-    Key(BoardPins::KeyNext),
-    Key(BoardPins::KeyDecrease),
-    Key(BoardPins::KeyIncrease),
-};
+Key menuKeys[4];
 
 SensorState sensors;
 RadioState radioState;

@@ -1,9 +1,21 @@
 #include "Keys.h"
 #include "ShiftRegisters.h"
 
-Key::Key(uint8_t bit)
-    : bit_(bit), initialized_(false), rawState_(false), stableState_(false),
-      holdActive_(false), clickPending_(false) {}
+Key::Key(uint8_t bit) { begin(bit); }
+
+void Key::begin(uint8_t bit) {
+  bit_ = bit;
+  rawChangedAt_ = 0;
+  lastRepeatAt_ = 0;
+  pendingClickAt_ = 0;
+  initialized_ = false;
+  rawState_ = false;
+  stableState_ = false;
+  holdActive_ = false;
+  clickPending_ = false;
+  eventCallback_ = nullptr;
+  eventContext_ = nullptr;
+}
 
 void Key::update(uint32_t now) {
   const uint16_t tick = static_cast<uint16_t>(now);

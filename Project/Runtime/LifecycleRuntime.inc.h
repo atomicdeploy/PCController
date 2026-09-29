@@ -49,8 +49,9 @@ static inline __attribute__((always_inline)) void initializeController() {
                     : settings.displayClosedBrightness());
   display.showText(commonText(programming ? TextProgram : TextBoot));
 
-  for (Key &key : menuKeys) {
-    key.setEventCallback(keyGesture);
+  for (uint8_t index = 0; index < 4; ++index) {
+    menuKeys[index].begin(index);
+    menuKeys[index].setEventCallback(keyGesture);
   }
   appProtocol.service();
   wdt_reset();
