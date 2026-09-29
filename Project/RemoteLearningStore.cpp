@@ -48,14 +48,8 @@ bool RemoteLearningStore::get(uint8_t id, LearnedRemote &remote) const {
   if (!readRecord(id, record)) {
     return false;
   }
-  remote = {id,
-            record.code,
-            record.bits,
-            record.protocol,
-            record.pulseMicros,
-            record.actionKind,
-            record.actionValue,
-            record.behavior};
+  remote.id = id;
+  memcpy(&remote.code, &record, sizeof(remote) - 1);
   return true;
 }
 
@@ -134,14 +128,8 @@ bool RemoteLearningStore::replace(const LearnedRemote &remote) {
                     static_cast<RemoteBehavior>(remote.behavior))) {
     return false;
   }
-  Record record = {remote.code,
-                   remote.bits,
-                   remote.protocol,
-                   remote.pulseMicros,
-                   remote.actionKind,
-                   remote.actionValue,
-                   remote.behavior,
-                   0};
+  Record record;
+  memcpy(&record, &remote.code, sizeof(remote) - 1);
   writeRecord(remote.id, record);
   return true;
 }
