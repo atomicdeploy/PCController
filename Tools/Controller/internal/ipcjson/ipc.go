@@ -4212,6 +4212,16 @@ func httpOriginAllowed(request *http.Request, allowedPatterns []string) bool {
 			originPort = "80"
 		}
 	}
+	// The embedded control center is deliberately served on loopback by
+	// default. A LAN allow-list must never make that same-origin local surface
+	// reject its own WebSocket/API requests, even when an older or explicitly
+	// narrowed configuration omitted the default loopback patterns.
+	if originName == "localhost" {
+		return true
+	}
+	if originIP := net.ParseIP(originName); originIP != nil && originIP.IsLoopback() {
+		return true
+	}
 	if len(allowedPatterns) == 0 {
 		allowedPatterns = []string{"localhost:*", "127.0.0.1:*", "[::1]:*"}
 	}

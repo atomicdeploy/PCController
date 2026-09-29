@@ -64,6 +64,8 @@ func runNetwork(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 		hostname, _ := os.Hostname()
 		if len(origins) == 0 {
 			origins = defaultEdgeOrigins(host, hostname)
+		} else {
+			origins = withRequiredLoopbackOrigins(origins)
 		}
 		if *instance == "" {
 			*instance = boundedDiscoveryInstanceName(hostname)
@@ -390,7 +392,7 @@ func boundedDiscoveryInstanceName(value string) string {
 }
 
 func defaultEdgeOrigins(listenHost, hostname string) stringListFlag {
-	result := stringListFlag{"localhost:*", "127.0.0.1:*", "[::1]:*"}
+	result := withRequiredLoopbackOrigins(nil)
 	appendHost := func(value string) {
 		value = strings.Trim(strings.TrimSpace(value), "[]")
 		if value == "" || strings.ContainsAny(value, "*?") {
@@ -409,6 +411,27 @@ func defaultEdgeOrigins(listenHost, hostname string) stringListFlag {
 	}
 	appendHost(hostname)
 	appendHost(listenHost)
+	return result
+}
+
+func withRequiredLoopbackOrigins(configured stringListFlag) stringListFlag {
+	result := stringListFlag{"localhost:*", "127.0.0.1:*", "[::1]:*"}
+	for _, pattern := range configured {
+		pattern = strings.TrimSpace(pattern)
+		if pattern == "" {
+			continue
+		}
+		duplicate := false
+		for _, existing := range result {
+			if strings.EqualFold(existing, pattern) {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			result = append(result, pattern)
+		}
+	}
 	return result
 }
 
