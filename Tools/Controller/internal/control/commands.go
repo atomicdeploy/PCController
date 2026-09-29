@@ -841,14 +841,16 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 					"buzzer frequency must be 0 or 20..20000 Hz",
 				)
 			}
-			settings, err := querySettings(ctx, runtime)
-			if err != nil {
-				return "", err
-			}
-			if settings.Flags&native.SettingsSilent != 0 {
-				return "buzzer suppressed: board is silent", nil
-			}
 			outputs.StopMelody()
+			if values[0] != 0 {
+				settings, err := querySettings(ctx, runtime)
+				if err != nil {
+					return "", err
+				}
+				if settings.Flags&native.SettingsSilent != 0 {
+					return "buzzer suppressed: board is silent", nil
+				}
+			}
 			if err := command(ctx, runtime, native.OpBuzzer, native.BuzzerPayload(uint16(values[0]), uint16(values[1]))); err != nil {
 				return "", err
 			}

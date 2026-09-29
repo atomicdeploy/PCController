@@ -21,11 +21,12 @@ import (
 )
 
 type buzzerSettingsWirePort struct {
-	settings native.Settings
-	reads    chan []byte
-	writes   chan native.Frame
-	closed   chan struct{}
-	once     sync.Once
+	settings    native.Settings
+	settingsErr error
+	reads       chan []byte
+	writes      chan native.Frame
+	closed      chan struct{}
+	once        sync.Once
 }
 
 func newBuzzerSettingsWirePort(settings native.Settings) *buzzerSettingsWirePort {
@@ -54,6 +55,9 @@ func (port *buzzerSettingsWirePort) Write(data []byte) (int, error) {
 	port.writes <- frame
 	response := native.Frame{Seq: frame.Seq}
 	if frame.Opcode == native.OpGetSettings {
+		if port.settingsErr != nil {
+			return 0, port.settingsErr
+		}
 		response.Opcode = native.OpSettings
 		response.Payload, err = port.settings.Payload()
 		response.Payload = append(response.Payload, 1)
@@ -113,6 +117,38 @@ func TestBuzzerSuppressesOpcodeWhenConfirmedBoardSettingsAreSilent(t *testing.T)
 	select {
 	case frame := <-port.writes:
 		t.Fatalf("silent board received opcode 0x%02X after preflight", frame.Opcode)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestBuzzerStopSkipsSilentPreflightAndEmitsStopWhenSettingsAreUnavailable(t *testing.T) {
+	settings := native.DefaultSettings()
+	settings.Flags |= native.SettingsSilent
+	port := newBuzzerSettingsWirePort(settings)
+	port.settingsErr = errors.New("settings unavailable")
+	session := link.NewForPort("BUZZER-STOP", port)
+	runtime := New(Options{RequestTimeout: time.Second})
+	runtime.mu.Lock()
+	runtime.session = session
+	runtime.connectionState = "connected"
+	runtime.mu.Unlock()
+	t.Cleanup(func() { _ = runtime.Close() })
+
+	output, err := NewCommandEngine(runtime, CommandOptions{}).Execute(context.Background(), "buzzer 0 125")
+	if err != nil || output != "buzzer command accepted" {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+	select {
+	case frame := <-port.writes:
+		if frame.Opcode != native.OpBuzzer || string(frame.Payload) != string(native.BuzzerPayload(0, 125)) {
+			t.Fatalf("stop frame=%#v, want OpBuzzer frequency=0 duration=125", frame)
+		}
+	default:
+		t.Fatal("buzzer stop opcode was not sent")
+	}
+	select {
+	case frame := <-port.writes:
+		t.Fatalf("stop emitted unexpected additional opcode 0x%02X", frame.Opcode)
 	case <-time.After(50 * time.Millisecond):
 	}
 }

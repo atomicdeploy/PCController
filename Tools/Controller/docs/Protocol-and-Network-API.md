@@ -980,9 +980,11 @@ not misrepresented as generic output controls.
 
 For a one-shot board tone, `controller buzzer --frequency 440 --duration 125`
 is the typed top-level spelling of `controller exec buzzer 440 125`. Both use
-the same primary/local command engine. The engine reads board settings before
-sending the opcode and returns `buzzer suppressed: board is silent` without a
-write when firmware-owned silent mode is active.
+the same primary/local command engine. For a nonzero tone, the engine stops any
+host melody, reads board settings, and returns `buzzer suppressed: board is
+silent` without a write when firmware-owned silent mode is active. Frequency
+zero remains the authoritative stop command: it stops host melody output and
+emits the board stop opcode without depending on settings availability.
 
 Settings mutations return confirmed readback from the runtime durability loop.
 Formatted settings include the authoritative `persisted` value; an accepted
