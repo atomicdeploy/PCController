@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -14,6 +15,37 @@ import (
 	"pccontroller.local/controller/internal/ports"
 	"pccontroller.local/controller/internal/programmer"
 )
+
+func TestMissingProgrammerPreflightDoesNotTouchAuthenticatedBoard(t *testing.T) {
+	root := t.TempDir()
+	firmware := filepath.Join(root, "firmware.hex")
+	if err := os.WriteFile(firmware, []byte(":020000000102FB\n:00000001FF\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	paths, err := programmer.HostDataPathsFor(filepath.Join(root, "data"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	controller := New(Options{})
+	// A sentinel, never-started session: any attempted board request or close
+	// before tool validation is a test failure, rather than real hardware I/O.
+	session := &link.Session{}
+	controller.session = session
+	controller.port = ports.Info{Name: "COM18"}
+	_, err = safeFlashCommand(context.Background(), controller, CommandOptions{
+		ProgramDataPaths: paths, Avrdude: filepath.Join(root, "missing-avrdude.exe"), AvrdudeConf: filepath.Join(root, "missing.conf"),
+	}, []string{firmware})
+	if !errors.Is(err, programmer.ErrToolchainUnavailable) {
+		t.Fatalf("preflight error=%v", err)
+	}
+	if controller.session != session || controller.paused {
+		t.Fatal("preflight released or changed board connection")
+	}
+	controller.session = nil
+	if err := controller.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestDevelopmentUploadDisconnectWhileWaitingForProgrammingLock(t *testing.T) {
 	for _, method := range []string{"urclock", "usbasp"} {

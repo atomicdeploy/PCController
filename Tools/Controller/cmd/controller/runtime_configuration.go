@@ -478,6 +478,7 @@ func apiOptions(
 		Melodies:              config.Melodies,
 		StatusEffects:         config.StatusEffects,
 		ToolchainCLI:          config.Programming.ToolchainCLI,
+		ToolchainConfig:       config.Programming.ToolchainConfig,
 		Avrdude:               config.Programming.Avrdude,
 		AvrdudeConf:           config.Programming.AvrdudeConf,
 		Programmer:            configuredProgrammer(config),
