@@ -905,11 +905,72 @@ func TestConnectionTransitionsAreChangedOnlyAndRejectStaleFailures(t *testing.T)
 	runtime.connectionReason = ""
 	runtime.session = &link.Session{}
 	runtime.mu.Unlock()
-	if runtime.publishReconnectFailure(8, "old COM4 scan failed") {
+	if runtime.publishReconnectFailure(8, "old COM4 scan failed", time.Second) {
 		t.Fatal("stale reconnect epoch published after connection")
 	}
 	if got := runtime.LatestEventID(); got != afterTransitions {
 		t.Fatalf("stale reconnect event advanced event ID to %d", got)
+	}
+}
+
+func TestReconnectSnapshotPublishesMeasuredAttemptAndBackoff(t *testing.T) {
+	runtime := New(Options{})
+	runtime.mu.Lock()
+	runtime.reconnectEpoch = 12
+	runtime.connectionState = "reconnecting"
+	runtime.connectionAttempt = 4
+	runtime.connectionAttemptStart = time.Now().Add(-2 * time.Second)
+	runtime.connectionCandidate = ports.Info{Name: "COM3", FriendlyName: "USB-SERIAL CH340"}
+	runtime.mu.Unlock()
+
+	if !runtime.publishReconnectFailure(12, "application HELLO timed out", 8*time.Second) {
+		t.Fatal("current reconnect failure was not published")
+	}
+	snapshot := runtime.Snapshot()
+	if snapshot.ConnectionPhase != "waiting_retry" || snapshot.ConnectionAttempt != 4 ||
+		snapshot.ConnectionCandidate.Name != "COM3" || snapshot.ConnectionRetryDelay != 8*time.Second {
+		t.Fatalf("unexpected reconnect progress snapshot: %#v", snapshot)
+	}
+	remaining := time.Until(snapshot.ConnectionNextRetry)
+	if remaining < 7*time.Second || remaining > 8*time.Second {
+		t.Fatalf("next retry remaining=%s, want approximately 8s", remaining)
+	}
+	runtime.eventMu.Lock()
+	events := append([]Event(nil), runtime.eventLog...)
+	runtime.eventMu.Unlock()
+	if len(events) < 2 {
+		t.Fatalf("reconnect failure events=%#v, want lifecycle and progress", events)
+	}
+	progress := events[len(events)-1]
+	if progress.Kind != "connection.progress" || progress.Stream != EventStreamState ||
+		progress.Metadata["attempt"] != "4" || progress.Metadata["retry_delay_ms"] != "8000" {
+		t.Fatalf("unexpected reconnect progress event: %#v", progress)
+	}
+}
+
+func TestEnsureConnectedPublishesEnumeratedCandidateDuringAttempt(t *testing.T) {
+	runtime := New(Options{})
+	candidate := ports.Info{
+		Name: "COM3", FriendlyName: "USB-SERIAL CH340", VID: "1A86", PID: "7523",
+	}
+	runtime.autoOpen = func(_ context.Context, options link.DiscoveryOptions) (link.OpenResult, error) {
+		if options.CandidateSelected == nil {
+			t.Fatal("candidate observer was not supplied to discovery")
+		}
+		options.CandidateSelected(candidate)
+		snapshot := runtime.Snapshot()
+		if snapshot.ConnectionPhase != "attempting" || snapshot.ConnectionCandidate != candidate {
+			t.Fatalf("candidate snapshot during attempt = %#v, want %#v", snapshot, candidate)
+		}
+		return link.OpenResult{Port: candidate}, errors.New("application HELLO timed out")
+	}
+
+	if err := runtime.EnsureConnected(context.Background()); err == nil {
+		t.Fatal("synthetic failed connection unexpectedly succeeded")
+	}
+	snapshot := runtime.Snapshot()
+	if snapshot.ConnectionCandidate != candidate {
+		t.Fatalf("candidate after failed attempt = %#v, want %#v", snapshot.ConnectionCandidate, candidate)
 	}
 }
 

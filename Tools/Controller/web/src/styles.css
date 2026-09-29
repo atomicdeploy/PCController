@@ -245,6 +245,9 @@ p { color: var(--text-soft); }
 .status-rail { width: 3px; height: 28px; border-radius: 2px; }
 .status-rail--good { background: var(--green); box-shadow: 0 0 14px color-mix(in srgb, var(--green) 60%, transparent); }
 .status-rail--bad { background: var(--red); box-shadow: 0 0 14px color-mix(in srgb, var(--red) 45%, transparent); }
+.status-rail--warn { background: var(--amber); box-shadow: 0 0 14px color-mix(in srgb, var(--amber) 52%, transparent); }
+.status-rail--info { background: var(--accent); box-shadow: 0 0 14px color-mix(in srgb, var(--accent) 52%, transparent); }
+.status-rail--neutral { background: var(--text-muted); box-shadow: none; }
 
 .sidebar__nav { flex: 1; min-height: 0; padding: 4px 12px 20px; overflow: auto; }
 .nav-group { display: flex; flex-direction: column; gap: 3px; margin-top: 18px; }
@@ -570,6 +573,28 @@ kbd { padding: 3px 6px; border: 1px solid var(--line-strong); border-bottom-colo
 .controller-unavailable__action { margin-top: 2px; }
 .hero-panel .controller-unavailable { min-height: 105px; place-content: center start; justify-items: start; padding: 0; text-align: start; }
 .hero-panel .controller-unavailable__icon { width: 58px; height: 58px; }
+
+.connection-state { --connection-color: var(--amber); display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 14px; width: 100%; padding: 16px; border: 1px solid color-mix(in srgb, var(--connection-color) 35%, var(--line)); border-radius: 18px; background: linear-gradient(135deg, color-mix(in srgb, var(--connection-color) 13%, var(--surface)), color-mix(in srgb, var(--surface-muted) 90%, transparent)); box-shadow: inset 0 1px rgb(255 255 255 / .045), 0 18px 48px rgb(0 0 0 / .12); overflow: hidden; position: relative; }
+.connection-state::before { content: ''; position: absolute; inset: 0 auto 0 0; width: 4px; background: linear-gradient(180deg, color-mix(in srgb, var(--connection-color) 72%, white), var(--connection-color)); }
+[dir="rtl"] .connection-state::before { inset: 0 0 0 auto; }
+.connection-state--good { --connection-color: var(--green); }
+.connection-state--info { --connection-color: var(--accent); }
+.connection-state--warn { --connection-color: var(--amber); }
+.connection-state--bad { --connection-color: var(--red); }
+.connection-state--neutral { --connection-color: var(--text-muted); }
+.connection-state__icon { width: 54px; height: 54px; display: grid; place-items: center; border-radius: 16px; color: var(--connection-color); background: color-mix(in srgb, var(--connection-color) 13%, var(--surface)); border: 1px solid color-mix(in srgb, var(--connection-color) 30%, var(--line)); box-shadow: 0 12px 30px color-mix(in srgb, var(--connection-color) 15%, transparent); }
+.connection-state.is-attempting .connection-state__icon { animation: connection-icon-pulse 1.15s ease-in-out infinite; }
+.connection-state__body { min-width: 0; }
+.connection-state__heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.connection-state__heading strong { color: var(--text); font-size: 15px; letter-spacing: -.015em; }
+.connection-state__attempt { padding: 3px 8px; border: 1px solid color-mix(in srgb, var(--connection-color) 32%, var(--line)); border-radius: 999px; color: var(--connection-color); background: color-mix(in srgb, var(--connection-color) 8%, transparent); font-size: 11px; font-weight: 750; text-transform: uppercase; letter-spacing: .04em; }
+.connection-state__body > p { margin: 5px 0 0; color: var(--text-muted); line-height: 1.55; overflow-wrap: anywhere; }
+.connection-state__facts { display: flex; align-items: center; flex-wrap: wrap; gap: 7px 14px; margin-top: 9px; color: color-mix(in srgb, var(--text) 70%, var(--text-muted)); font-size: 12px; }
+.connection-state__facts span { display: inline-flex; align-items: center; gap: 5px; }
+.connection-state__facts svg { color: var(--connection-color); }
+.hero-panel .connection-state { min-width: min(680px, 78vw); }
+@keyframes connection-icon-pulse { 0%, 100% { transform: scale(1); box-shadow: 0 12px 30px color-mix(in srgb, var(--connection-color) 13%, transparent); } 50% { transform: scale(1.045); box-shadow: 0 14px 36px color-mix(in srgb, var(--connection-color) 28%, transparent); } }
+@media (max-width: 700px) { .connection-state { grid-template-columns: auto minmax(0, 1fr); } .connection-state > .button { grid-column: 1 / -1; width: 100%; } .hero-panel .connection-state { min-width: 0; } }
 
 .connection-fuji { position: relative; width: 144px; height: 76px; overflow: hidden; filter: drop-shadow(0 16px 28px rgb(0 0 0 / .2)); }
 .connection-fuji > span { position: absolute; pointer-events: none; }

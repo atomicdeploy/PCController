@@ -390,12 +390,15 @@ The action keys are:
 Playback reads the same `MacroRunner` instance used by shell, IPC, and API
 commands. Newly recorded macros use the basic `host` mode: it records
 relay on/off, side-motion, PWM/MOSFET, beep, display/message, RF transmit,
-addressable-strip and all-off acknowledgements, ignores status
+addressable-strip acknowledgements and applied relay-mask edges, ignores status
 LED/telemetry housekeeping, and schedules ordinary commands from the host's
 monotonic clock with a 100 ms acceptance tolerance. This is the quick
 prototyping path and works without the MCU timed-queue capability. Use
 `macro record start-mcu NAME ...` for the stricter MCU acknowledgement-clocked
-recorder and firmware queue. Every macro declares `mode: host` or `mode: mcu`;
+recorder and firmware queue. `macro record start-board NAME` retains the latest
+25 relay-state snapshots in MCU RAM; `macro record save` imports a named profile.
+`macro play NAME host|mcu` chooses an executor without rewriting that profile.
+Every macro declares `mode: host` or `mode: mcu`;
 missing or unknown modes are rejected rather than selecting an executor.
 
 See [Host macro recording and playback](Host-Macro-Recording.md) for the

@@ -215,6 +215,20 @@ func TestParseStackUsageRejectsMalformedDiagnostic(t *testing.T) {
 	}
 }
 
+func TestStackBudgetRFResponseOmissionRequiresExplicitTestProfile(t *testing.T) {
+	fixture := strings.Replace(completeAVRListingFixture(), "sendLearnedRemotes():\n", "", 1)
+	listing := parseListingFixture(t, fixture)
+	if _, err := estimateFirmwareStackBudget(listing, 1500); err == nil || !strings.Contains(err.Error(), "learned remotes") {
+		t.Fatalf("default profile accepted missing RF response: %v", err)
+	}
+	if _, err := estimateFirmwareStackBudget(listing, 1500, FirmwareFeatureMacroStripTest); err != nil {
+		t.Fatalf("explicit RF omission rejected: %v", err)
+	}
+	if _, err := estimateFirmwareStackBudget(listing, 1950, FirmwareFeatureMacroStripTest); err == nil {
+		t.Fatal("test profile bypassed SRAM safety margin")
+	}
+}
+
 func TestPrintFirmwareStackBudgetShowsFinalEvidence(t *testing.T) {
 	report, err := estimateFirmwareStackBudget(parseListingFixture(t, completeAVRListingFixture()), 1800)
 	if err != nil {
@@ -295,8 +309,8 @@ sendLearnedRemotes():
 handle():
     120c:  0e 94 80 0b  call 0x1700 ; 0x1700 <sendHello(unsigned char)>
     1210:  0e 94 00 0c  call 0x1800 ; 0x1800 <sendTelemetry(unsigned char)>
-    1214:  0e 94 80 0c  call 0x1900 ; 0x1900 <ControllerProtocol::UartProtocol::sendAck(unsigned char, unsigned char)>
-    1218:  0e 94 00 0d  call 0x1a00 ; 0x1a00 <ControllerProtocol::UartProtocol::sendError(unsigned char, unsigned char, Error)>
+    1214:  0e 94 80 0c  call 0x1900 ; 0x1900 <ControllerProtocol::UartProtocol::sendResult(unsigned char, unsigned char, unsigned char, Error)>
+    1218:  0e 94 80 0c  call 0x1900 ; 0x1900 <ControllerProtocol::UartProtocol::sendResult(unsigned char, unsigned char, unsigned char, Error)>
     121c:  0e 94 80 0d  call 0x1b00 ; 0x1b00 <ControllerEvents::send(unsigned char const*, unsigned char)>
     1220:  0e 94 00 0e  call 0x1c00 ; 0x1c00 <MacroQueue::sendStatus(unsigned char, unsigned char)>
     1224:  0e 94 80 09  call 0x1300 ; 0x1300 <Uart::send(unsigned char)>
@@ -334,11 +348,11 @@ writeCobs():
     180e:  cd bf        out 0x3d, r28
     1810:  0e 94 80 09  call 0x1300 ; 0x1300 <Uart::send(unsigned char)>
 
-00001900 <ControllerProtocol::UartProtocol::sendAck(unsigned char, unsigned char)>:
+00001900 <ControllerProtocol::UartProtocol::sendResult(unsigned char, unsigned char, unsigned char, Error)>:
     1900:  0f 93        push r16
     1902:  cf 93        push r28
     1904:  df 93        push r29
-    1906:  00 d0        rcall .+0 ; 0x1908 <ControllerProtocol::UartProtocol::sendAck(unsigned char, unsigned char)+0x8>
+    1906:  00 d0        rcall .+0 ; 0x1908 <ControllerProtocol::UartProtocol::sendResult(unsigned char, unsigned char, unsigned char, Error)+0x8>
     1908:  0e 94 80 09  call 0x1300 ; 0x1300 <Uart::send(unsigned char)>
 
 00001a00 <ControllerProtocol::UartProtocol::sendError(unsigned char, unsigned char, Error)>:

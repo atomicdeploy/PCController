@@ -743,16 +743,25 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 	})
 	mustRegister(shell.Command{
 		Name:    "strip",
-		Usage:   "strip pixel N R G B [BRIGHTNESS] | fill R G B [BRIGHTNESS] | clear",
-		Summary: "control the 11-pixel WS2811/WS2812 status strip",
+		Usage:   "strip config COUNT | frame RGBHEX | rainbow [COUNT [FPS]] | stop | status | pixel N R G B [BRIGHTNESS] | fill R G B [BRIGHTNESS] | clear",
+		Summary: "stream exact RGB frames or a rolling rainbow to 1..100 addressable LEDs",
 		Run: func(ctx context.Context, args []string) (string, error) {
+			if len(args) > 0 {
+				switch strings.ToLower(args[0]) {
+				case "config", "frame", "rainbow", "stop", "status":
+					return stripStreamCommand(ctx, outputs, args)
+				}
+			}
+			outputs.stop("strip")
+			outputs.stripMu.Lock()
+			defer outputs.stripMu.Unlock()
 			if len(args) == 1 && strings.EqualFold(args[0], "clear") {
 				payload, _ := native.AddressableLEDPayload(
 					native.AddressableLEDFill,
 					0, 0, 0, 0,
 				)
 				if err := command(ctx, runtime, native.OpAddressableLED, payload); err != nil {
-					return "", err
+					return "", stripCommandError(err)
 				}
 				return "addressable LED strip cleared", nil
 			}
@@ -809,7 +818,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 				return "", err
 			}
 			if err := command(ctx, runtime, native.OpAddressableLED, payload); err != nil {
-				return "", err
+				return "", stripCommandError(err)
 			}
 			if pixel == native.AddressableLEDFill {
 				return fmt.Sprintf(
@@ -902,7 +911,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 		},
 	})
 	mustRegister(shell.Command{
-		Name: "macro", Usage: "macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|rename NAME_OR_ID NAME|category NAME_OR_ID CATEGORY|delete NAME_OR_ID|record start|start-mcu NAME [CATEGORY [COLOR]]|record status|record save|record discard|play NAME_OR_ID|status|monitor|cancel [keep]",
+		Name: "macro", Usage: "macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|rename NAME_OR_ID NAME|category NAME_OR_ID CATEGORY|delete NAME_OR_ID|record start|start-mcu|start-board|import-board NAME [CATEGORY [COLOR]]|record status|record save|record discard|buffer clear|play NAME_OR_ID [host|mcu]|status|monitor|cancel [keep]",
 		Summary: "record and play named host or MCU-timed multi-peripheral macros",
 		Run: func(ctx context.Context, args []string) (string, error) {
 			return macroCommand(ctx, macroRunner, args)
@@ -5031,11 +5040,31 @@ func macroCommand(
 	runner *MacroRunner,
 	args []string,
 ) (string, error) {
-	const usage = "macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|rename NAME_OR_ID NEW_NAME|category NAME_OR_ID CATEGORY|delete NAME_OR_ID|record start|start-mcu NAME [CATEGORY [COLOR]]|record status|record save|record discard|play NAME_OR_ID|status|monitor|cancel [keep]"
+	const usage = "macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|rename NAME_OR_ID NEW_NAME|category NAME_OR_ID CATEGORY|delete NAME_OR_ID|record start|start-mcu|start-board|import-board NAME [CATEGORY [COLOR]]|record status|record save|record discard|buffer clear|play NAME_OR_ID [host|mcu]|status|monitor|cancel [keep]"
 	if len(args) < 1 {
 		return "", fmt.Errorf("usage: %s", usage)
 	}
 	switch strings.ToLower(args[0]) {
+	case "buffer":
+		if len(args) != 2 || args[1] != "clear" {
+			return "", fmt.Errorf("usage: macro buffer clear")
+		}
+		if runner.State().Running || runner.RecordingState().Active {
+			return "", fmt.Errorf("stop recording/playback before clearing retained capture")
+		}
+		if _, err := runner.request(ctx, native.OpMacroStep, []byte{7}, native.OpACK); err != nil {
+			return "", err
+		}
+		return "board capture cleared; saved host profiles retained", nil
+	case "update":
+		if len(args) != 5 {
+			return "", fmt.Errorf("usage: macro update NAME_OR_ID NAME CATEGORY COLOR")
+		}
+		macro, err := runner.UpdateProfile(args[1], args[2], args[3], args[4])
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("macro %d/%s updated", macro.ID, macro.Name), nil
 	case "list":
 		if len(args) != 1 {
 			return "", fmt.Errorf("usage: macro list")
@@ -5134,10 +5163,10 @@ func macroCommand(
 		return "macro deleted from HOST configuration", nil
 	case "record":
 		if len(args) < 2 {
-			return "", fmt.Errorf("usage: macro record start|start-mcu NAME [CATEGORY [COLOR]]|status|save|discard")
+			return "", fmt.Errorf("usage: macro record start|start-mcu|start-board|import-board NAME [CATEGORY [COLOR]]|status|save|discard")
 		}
 		switch strings.ToLower(args[1]) {
-		case "start", "start-mcu":
+		case "start", "start-mcu", "start-board", "import-board":
 			if len(args) < 3 || len(args) > 5 {
 				return "", fmt.Errorf("usage: macro record %s NAME [CATEGORY [COLOR]]", args[1])
 			}
@@ -5150,7 +5179,16 @@ func macroCommand(
 			}
 			var state MacroRecordingState
 			var err error
-			if strings.EqualFold(args[1], "start-mcu") {
+			if strings.EqualFold(args[1], "import-board") {
+				macro, err := runner.ImportBoardRecording(args[2], category, color)
+				if err != nil {
+					return "", err
+				}
+				return fmt.Sprintf("imported board capture as %d/%s (%d snapshots)", macro.ID, macro.Name, len(macro.Steps)), nil
+			}
+			if strings.EqualFold(args[1], "start-board") {
+				state, err = runner.StartBoardRecording(ctx, args[2], category, color)
+			} else if strings.EqualFold(args[1], "start-mcu") {
 				state, err = runner.StartMCURecording(args[2], category, color)
 			} else {
 				state, err = runner.StartRecording(args[2], category, color)
@@ -5190,13 +5228,17 @@ func macroCommand(
 			}
 			return fmt.Sprintf("macro %d/%s recording discarded", macro.ID, macro.Name), nil
 		default:
-			return "", fmt.Errorf("usage: macro record start|start-mcu NAME [CATEGORY [COLOR]]|status|save|discard")
+			return "", fmt.Errorf("usage: macro record start|start-mcu|start-board|import-board NAME [CATEGORY [COLOR]]|status|save|discard")
 		}
 	case "play", "run", "start":
-		if len(args) != 2 {
-			return "", fmt.Errorf("usage: macro play NAME_OR_ID")
+		if len(args) < 2 || len(args) > 3 {
+			return "", fmt.Errorf("usage: macro play NAME_OR_ID [host|mcu]")
 		}
-		state, err := runner.Start(ctx, args[1])
+		mode := ""
+		if len(args) == 3 {
+			mode = strings.ToLower(args[2])
+		}
+		state, err := runner.StartMode(ctx, args[1], mode)
 		if err != nil {
 			return "", err
 		}

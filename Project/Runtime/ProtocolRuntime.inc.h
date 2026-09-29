@@ -10,7 +10,7 @@ void sendHello(uint8_t sequence) {
       (1UL << 1) |  // two DS18B20 sensors
       (1UL << 2) |  // 16-channel PWM
       (1UL << 3) |  // relay safety controller
-      (1UL << 4) |  // 433 MHz RX/TX, learning, and action mapping
+      (1UL << 4) |  // 433 MHz RX/TX and persisted action dispatch
       (1UL << 5) |  // TM1637
       (1UL << 6) |  // I2C LCD
       (1UL << 7) |  // addressable LEDs
@@ -21,12 +21,16 @@ void sendHello(uint8_t sequence) {
       (1UL << 12) | // host display text and asynchronous events
       (1UL << 13) | // exact front-panel snapshot
       (1UL << 14) | // host-injected key lifecycle; Down acts immediately
+#if PCCONTROLLER_ENABLE_RF_LEARNING
       (1UL << 15) | // multi/indefinite RF learning
+#endif
       (1UL << 16) | // bounded generic I2C transaction lease
 #if PCCONTROLLER_ENABLE_MENU_DIRECTORY
       (1UL << 17) | // board-authoritative paged menu directory
 #endif
+#if PCCONTROLLER_ENABLE_RF_LEARNING
       (1UL << 18) | // host-staged learned-RF record replacement (opcode 0x3F)
+#endif
       (1UL << 19) | // host-captured front-panel session (DisplayText targets 3/4)
       (1UL << 20) | // status bit 12 means buzzer queue/voice is busy
       (1UL << 21) | // EEPROM-selectable 1..255 ms motion break time
@@ -359,29 +363,31 @@ void transferI2c(uint8_t sequence, const uint8_t *request, uint8_t length,
 }
 
 // Pages EEPROM-backed learned RF entries without allocating a list in SRAM.
+#if PCCONTROLLER_ENABLE_RF_LEARNING
 void sendLearnedRemotes(uint8_t sequence, uint8_t cursor) {
-  uint8_t payload[40] = {1, learnedRemotes.count(), 0xFF, 0};
+  uint8_t payload[40];
+  payload[0] = 1;
+  payload[1] = learnedRemotes.count();
+  payload[2] = 0xFF;
+  payload[3] = 0;
   uint8_t scan = cursor;
   uint8_t index = 4;
-  LearnedRemote remote;
-  while (scan < RemoteLearningStore::Capacity && payload[3] < 3) {
-    if (learnedRemotes.get(scan, remote)) {
-      memcpy(payload + index, &remote, sizeof(remote));
-      index = static_cast<uint8_t>(index + sizeof(remote));
-      ++payload[3];
-    }
-    ++scan;
-  }
   while (scan < RemoteLearningStore::Capacity) {
-    if (learnedRemotes.get(scan, remote)) {
-      payload[2] = scan;
-      break;
+    if (learnedRemotes.getWire(scan, payload[3] < 3 ? payload + index
+                                                    : nullptr)) {
+      if (payload[3] == 3) {
+        payload[2] = scan;
+        break;
+      }
+      index = static_cast<uint8_t>(index + sizeof(LearnedRemote));
+      ++payload[3];
     }
     ++scan;
   }
   appProtocol.send(ControllerProtocol::RadioLearnListResponse, sequence,
                    payload, index);
 }
+#endif
 
 // Applies the canonical settings prefix plus its exact optional board-name
 // tail; all other positional tails are rejected.
@@ -632,17 +638,33 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame,
       return;
 
     case AddressableLed: {
-      // [pixel 0..10, or 0xFF=fill][R][G][B][brightness].
-      if (length < 5 ||
+      uint8_t *workspace = macroPlayback.claimSharedWorkspace();
+      if (!workspace) goto busy;
+      AddressableLeds::bindWorkspace(workspace);
+      // 0xFE configures count; 0xFD stages RGB pixels; 0xFC commits once.
+      // ACK each chunk before transmitting another: show masks UART IRQs.
+      if (length == 2 && payload[0] == 0xFE) {
+        if (!AddressableLeds::configure(payload[1])) goto badPayload;
+        goto acknowledged;
+      }
+      if (length == 1 && payload[0] == 0xFC) {
+        AddressableLeds::show();
+        goto acknowledged;
+      }
+      if (length >= 5 && payload[0] == 0xFD) {
+        if (!AddressableLeds::stagePixels(payload[1], payload + 2, length - 2)) goto badPayload;
+        goto acknowledged;
+      }
+      if (length != 5 ||
           (payload[0] != 0xFF &&
-           payload[0] >= AddressableLeds::PixelCount)) {
+           payload[0] >= AddressableLeds::count())) {
         goto badPayload;
       }
       const RgbColor color(payload[1], payload[2], payload[3]);
       if (payload[0] == 0xFF) {
         AddressableLeds::fill(color);
       } else {
-        AddressableLeds::buffer()[payload[0]] = color;
+        AddressableLeds::setPixel(payload[0], color);
       }
       AddressableLeds::show();
       goto acknowledged;
@@ -656,23 +678,22 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame,
       }
       goto acknowledged;
 
+#if PCCONTROLLER_ENABLE_RF_LEARNING
     case RadioLearnStart:
       if (length != 2 || payload[0] > RF_LEARN_TIMER ||
-          (payload[0] == RF_LEARN_INDEFINITE && payload[1] != 0) ||
-          (payload[0] == RF_LEARN_TIMER &&
-           (payload[1] == 0 || payload[1] > MAX_LEARNING_SECONDS))) {
+          payload[1] > MAX_LEARNING_SECONDS ||
+          payload[0] == static_cast<uint8_t>(payload[1] == 0)) {
         goto badPayload;
       }
       beginLearning(payload[0], payload[1]);
       goto acknowledged;
 
     case RadioLearnCancel:
-      endLearning(1, 0);
-      goto acknowledged;
-
     case RadioLearnClear:
-      endLearning(1, 0);
-      learnedRemotes.clear();
+      endLearning(1);
+      if (frame.opcode == RadioLearnClear) {
+        learnedRemotes.clear();
+      }
       goto acknowledged;
 
     case RadioLearnList:
@@ -700,6 +721,7 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame,
       goto acknowledged;
     }
 
+#endif
     case ControllerProtocol::MenuAction:
       if (length < 1 || payload[0] > MENU_INCREASE) {
         goto badPayload;
@@ -717,7 +739,8 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame,
       goto acknowledged;
 
     case MenuSetPage:
-      if (length < 1 || payload[0] >= PAGE_COUNT) {
+      if (length < 1 || payload[0] >= PAGE_COUNT ||
+          (!PCCONTROLLER_ENABLE_RF_LEARNING && payload[0] == PAGE_RF)) {
         goto badPayload;
       }
       if (modeManager.current() == MODE_MOTION_CONTROL) {
@@ -806,13 +829,17 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame,
     case MacroStart:
     case MacroCancel:
     case MacroStep:
-      macroPlayback.handle(frame);
+      macroPlayback.handle(frame, relays.activeRelayMask());
       if (macroPlayback.takeSafeStopRequest()) {
         safeStopMacroOutputs();
       }
       return;
 
     case RelaySet:
+      if (length == 1) {
+        if (!relays.requestMask(payload[0], frameNow)) goto unsafe;
+        goto acknowledged;
+      }
       if (length < 2 || payload[0] > 7 || payload[1] > 1) {
         goto badPayload;
       }
@@ -847,7 +874,7 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame,
       if (length < 1 || payload[0] > 1) {
         goto badPayload;
       }
-      endLearning(1, 0);
+      endLearning(1);
       stopRemoteMomentary(frameNow);
       buzzer.stop();
       safeReset.request(relays, pwm, statusLeds, frameNow);

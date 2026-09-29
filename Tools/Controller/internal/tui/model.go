@@ -1930,9 +1930,8 @@ func (model *Model) setFrontPanelEvent(event control.Event) bool {
 }
 
 func (model Model) header(snapshot control.Snapshot) string {
-	status := "DISCONNECTED"
+	status, detail, phase := tuiConnectionPresentation(snapshot, model.connectPending, time.Now())
 	style := errorStyle
-	detail := "Enter or click to reconnect · background retry armed"
 	if model.preview != nil {
 		status = "PREVIEW"
 		style = warnStyle.Copy().Bold(true)
@@ -1953,16 +1952,11 @@ func (model Model) header(snapshot control.Snapshot) string {
 		} else {
 			detail = snapshot.Port.Name + " · " + snapshot.Hello.Name
 		}
-	} else if snapshot.Paused {
-		status = "CLOSED"
-		detail = "auto-reconnect paused"
-	} else if model.connectPending {
-		status = model.spinnerView() + " CONNECTING"
+	} else if phase == "attempting" {
+		status = model.spinnerView() + " " + status
 		style = warnStyle
-		detail = strings.TrimSpace(snapshot.Port.Name + " · " + snapshot.ConnectionReason)
-		if detail == "" {
-			detail = "authenticated device discovery"
-		}
+	} else if phase == "waiting_retry" || phase == "queued" || phase == "paused" {
+		style = warnStyle
 	}
 	left := titleStyle.Render("◆ " + model.prefs.AppTitle)
 	statusRendered := style.Render(status)
@@ -1980,6 +1974,85 @@ func (model Model) header(snapshot control.Snapshot) string {
 		gap = 1
 	}
 	return left + strings.Repeat(" ", gap) + right
+}
+
+func tuiConnectionPresentation(
+	snapshot control.Snapshot,
+	pending bool,
+	now time.Time,
+) (string, string, string) {
+	phase := strings.TrimSpace(snapshot.ConnectionPhase)
+	if snapshot.Connected {
+		phase = "connected"
+	} else if pending && phase != "attempting" {
+		phase = "attempting"
+	} else if phase == "" {
+		switch {
+		case snapshot.Paused:
+			phase = "paused"
+		case snapshot.ConnectionState == "reconnecting" || snapshot.ConnectionState == "connecting":
+			phase = "queued"
+		default:
+			phase = "disconnected"
+		}
+	}
+	candidate := snapshot.ConnectionCandidate.Label()
+	if strings.TrimSpace(snapshot.ConnectionCandidate.Name) == "" {
+		candidate = snapshot.Port.Label()
+	}
+	if strings.TrimSpace(snapshot.Port.Name) == "" &&
+		strings.TrimSpace(snapshot.ConnectionCandidate.Name) == "" {
+		candidate = ""
+	}
+	parts := make([]string, 0, 4)
+	if candidate != "" {
+		parts = append(parts, candidate)
+	}
+	if snapshot.ConnectionAttempt != 0 {
+		parts = append(parts, fmt.Sprintf("attempt %d", snapshot.ConnectionAttempt))
+	}
+	status := "DISCONNECTED"
+	switch phase {
+	case "connected":
+		status = "CONNECTED"
+	case "attempting":
+		status = "CONNECTING"
+		if !snapshot.ConnectionAttemptStart.IsZero() {
+			parts = append(parts, "elapsed "+formatConnectionDuration(now.Sub(snapshot.ConnectionAttemptStart)))
+		}
+	case "waiting_retry":
+		status = "RETRY SCHEDULED"
+		if !snapshot.ConnectionNextRetry.IsZero() {
+			remaining := snapshot.ConnectionNextRetry.Sub(now)
+			if remaining < 0 {
+				remaining = 0
+			}
+			parts = append(parts, "next attempt in "+formatConnectionDuration(remaining))
+		}
+	case "queued":
+		status = "RECONNECT QUEUED"
+	case "paused":
+		status = "CLOSED"
+	case "blocked":
+		status = "SERIAL BLOCKED"
+	}
+	if reason := strings.TrimSpace(snapshot.ConnectionReason); reason != "" {
+		parts = append(parts, reason)
+	}
+	if len(parts) == 0 {
+		parts = append(parts, "Enter or click to start a bounded connection attempt")
+	}
+	return status, strings.Join(parts, " · "), phase
+}
+
+func formatConnectionDuration(value time.Duration) string {
+	if value < 0 {
+		value = 0
+	}
+	if value < 10*time.Second {
+		return fmt.Sprintf("%.1fs", value.Seconds())
+	}
+	return fmt.Sprintf("%.0fs", value.Seconds())
 }
 
 func hardwareProblemMessage(problem ports.HardwareProblem) string {
@@ -2007,7 +2080,8 @@ func hardwareProblemMessage(problem ports.HardwareProblem) string {
 }
 
 func (model Model) connectionCanReconnect(snapshot control.Snapshot) bool {
-	return model.preview == nil && !snapshot.Connected && !snapshot.Paused && !model.connectPending
+	return model.preview == nil && !snapshot.Connected && !snapshot.Paused &&
+		!model.connectPending && snapshot.ConnectionPhase != "attempting"
 }
 
 type actionBarItem struct {

@@ -16,28 +16,23 @@ void storeUserPwmValue(uint8_t channel, uint16_t value) {
   }
 }
 
-// Returns ceil(remaining milliseconds / 1000), or zero for indefinite mode.
-uint8_t learningRemainingSeconds(uint32_t at) {
-  if (learningMode != RF_LEARN_TIMER || learningEndsAt == 0 ||
-      timeReached(at, learningEndsAt)) {
-    return 0;
-  }
-  return static_cast<uint8_t>((learningEndsAt - at + 999UL) / 1000UL);
+// Returns the timer countdown maintained by serviceLearningTimer(), or zero for
+// indefinite mode. The service path advances at most one second per pass, so a
+// delayed loop catches up without a 32-bit division or an event burst.
+#if PCCONTROLLER_ENABLE_RF_LEARNING
+uint8_t learningRemainingSeconds() {
+  return learningTotalSeconds == 0 ? 0 : learningReportedRemaining;
+}
+
+__attribute__((noinline)) void reportLearning(uint8_t state) {
+  appEvents.rfLearning(state, learnedRemotes.count(),
+                       learningTotalSeconds == 0 ? RF_LEARN_INDEFINITE
+                                                 : RF_LEARN_TIMER,
+                       learningTotalSeconds, learningReportedRemaining);
 }
 
 // Starts the default indefinite/multi mode or the explicit bounded timer mode.
-void beginLearning(uint8_t mode, uint8_t timeoutSeconds) {
-  if (mode == RF_LEARN_TIMER) {
-    if (timeoutSeconds == 0) {
-      timeoutSeconds = DEFAULT_LEARNING_SECONDS;
-    } else if (timeoutSeconds > MAX_LEARNING_SECONDS) {
-      timeoutSeconds = MAX_LEARNING_SECONDS;
-    }
-  } else {
-    mode = RF_LEARN_INDEFINITE;
-    timeoutSeconds = 0;
-  }
-
+void beginLearning(uint8_t, uint8_t timeoutSeconds) {
   buzzer.stop();
   const ProgramMode currentMode = modeManager.current();
   if (currentMode <= MODE_RF) {
@@ -46,49 +41,47 @@ void beginLearning(uint8_t mode, uint8_t timeoutSeconds) {
     modeBeforeLearning = MODE_RF;
   }
   learningActive = true;
-  learningMode = mode;
   learningTotalSeconds = timeoutSeconds;
   learningReportedRemaining = timeoutSeconds;
-  learningEndsAt = mode == RF_LEARN_TIMER
-                       ? now + static_cast<uint32_t>(timeoutSeconds) * 1000UL
-                       : 0;
+  learningLastSecondAt = static_cast<uint16_t>(now);
   modeManager.transitionTo(MODE_RF_LEARNING);
-  appEvents.rfLearning(3, learnedRemotes.count(), learningMode,
-                       learningTotalSeconds, learningReportedRemaining);
+  reportLearning(3);
 }
 
 // Ends learning, restores its prior page, emits state, and plays final feedback.
-void endLearning(uint8_t state, int8_t feedback) {
+void endLearning(uint8_t state) {
   if (!learningActive) {
     return;
   }
-  const uint8_t remaining = learningRemainingSeconds(now);
   learningActive = false;
-  learningEndsAt = 0;
   if (modeManager.current() == MODE_RF_LEARNING) {
     modeManager.transitionTo(modeBeforeLearning);
   }
-  appEvents.rfLearning(state, learnedRemotes.count(), learningMode,
-                       learningTotalSeconds, remaining);
-  // Rich completion/error melodies are host-owned; state remains explicit so
-  // connected clients can select and route the named melody consistently.
-  (void)feedback;
+  reportLearning(state);
 }
 
 // Emits one MCU-timed timer update per changed second and closes at zero.
 void serviceLearningTimer(uint32_t at) {
-  if (!learningActive || learningMode != RF_LEARN_TIMER) {
+  if (!learningActive || learningTotalSeconds == 0) {
     return;
   }
-  const uint8_t remaining = learningRemainingSeconds(at);
-  if (remaining == 0) {
-    endLearning(0, 1);
-  } else if (remaining != learningReportedRemaining) {
-    learningReportedRemaining = remaining;
-    appEvents.rfLearning(4, learnedRemotes.count(), learningMode,
-                         learningTotalSeconds, remaining);
+  if (static_cast<uint16_t>(at - learningLastSecondAt) < 1000U) {
+    return;
+  }
+  learningLastSecondAt = static_cast<uint16_t>(learningLastSecondAt + 1000U);
+  --learningReportedRemaining;
+  if (learningReportedRemaining == 0) {
+    endLearning(0);
+  } else {
+    reportLearning(4);
   }
 }
+#else
+uint8_t learningRemainingSeconds() { return 0; }
+void beginLearning(uint8_t, uint8_t) {}
+void endLearning(uint8_t) {}
+void serviceLearningTimer(uint32_t) {}
+#endif
 
 // Deactivates the output held by the current RF momentary mapping.
 void stopRemoteMomentary(uint32_t at) {
@@ -201,15 +194,15 @@ void executeLearnedRemote(const LearnedRemote &remote, uint32_t at) {
 
 // Consumes one RC-switch frame, emits it immediately, then learns or executes it.
 void serviceRadio() {
-  if (!radioReceiver.available()) {
+  if (!radio.available()) {
     return;
   }
 
-  const uint32_t code = radioReceiver.getReceivedValue();
-  const uint8_t bits = radioReceiver.getReceivedBitlength();
-  const uint8_t protocol = radioReceiver.getReceivedProtocol();
-  const uint16_t pulseLength = radioReceiver.getReceivedDelay();
-  radioReceiver.resetAvailable();
+  const uint32_t code = radio.getReceivedValue();
+  const uint8_t bits = radio.getReceivedBitlength();
+  const uint8_t protocol = radio.getReceivedProtocol();
+  const uint16_t pulseLength = radio.getReceivedDelay();
+  radio.resetAvailable();
 
   if (code == 0 || bits == 0) {
     return;
@@ -226,32 +219,45 @@ void serviceRadio() {
   lastRemoteActionCode = code;
   lastRemoteActionAt = now;
 
-  if (learningActive) {
+  LearnedRemote remote;
+  bool learned;
+#if PCCONTROLLER_ENABLE_RF_LEARNING
+  const bool wasLearning = learningActive;
+  if (wasLearning) {
     if (repeated) {
       return;
     }
-    uint8_t learnedId = 0;
-    const bool learned =
-        learnedRemotes.learn(code, bits, protocol, pulseLength, learnedId);
+    remote.id = 0;
+    learned =
+        learnedRemotes.learn(code, bits, protocol, pulseLength, remote.id);
     if (learned) {
-      appEvents.rfLearned(learnedId);
+      appEvents.rfLearned(remote.id);
     }
-    appEvents.rfReceived(code, bits, protocol, pulseLength,
-                         learned ? learnedId : 0xFF);
-    statusLeds.playCue(StatusLedCue::Radio, 320, now);
+  } else
+#endif
+  {
+    learned = learnedRemotes.find(code, bits, protocol, remote);
+  }
+
+  appEvents.rfReceived(code, bits, protocol, pulseLength,
+                       learned ? remote.id : 0xFF);
+  statusLeds.playCue(StatusLedCue::Radio,
+#if PCCONTROLLER_ENABLE_RF_LEARNING
+                     wasLearning ? 320 : 240,
+#else
+                     240,
+#endif
+                     now);
+#if PCCONTROLLER_ENABLE_RF_LEARNING
+  if (wasLearning) {
     if (!learned) {
-      endLearning(2, -1);
+      endLearning(2);
     } else if (learnedRemotes.count() >= RemoteLearningStore::Capacity) {
-      endLearning(2, 1);
+      endLearning(2);
     }
     return;
   }
-
-  LearnedRemote remote;
-  const bool learned = learnedRemotes.find(code, bits, protocol, remote);
-  appEvents.rfReceived(code, bits, protocol, pulseLength,
-                       learned ? remote.id : 0xFF);
-  statusLeds.playCue(StatusLedCue::Radio, 240, now);
+#endif
   if (learned) {
     const RemoteBehavior behavior =
         static_cast<RemoteBehavior>(remote.behavior);
@@ -273,12 +279,12 @@ bool transmitRadio(uint32_t code, uint8_t bits, uint8_t protocol,
     return false;
   }
 
-  radioReceiver.disableReceive();
-  radioTransmitter.setProtocol(protocol);
+  radio.disableReceive();
+  radio.setProtocol(protocol);
   if (pulseLength != 0) {
-    radioTransmitter.setPulseLength(pulseLength);
+    radio.setPulseLength(pulseLength);
   }
-  radioTransmitter.send(code, bits);
-  radioReceiver.enableReceive(digitalPinToInterrupt(BoardPins::RcReceive));
+  radio.send(code, bits);
+  radio.enableReceive(digitalPinToInterrupt(BoardPins::RcReceive));
   return true;
 }

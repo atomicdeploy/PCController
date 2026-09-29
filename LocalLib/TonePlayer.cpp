@@ -7,9 +7,17 @@ static_assert(BoardPins::Buzzer == PIN_PB1,
 static_assert(F_CPU == 16000000UL,
               "TonePlayer's compact Timer1 divider assumes the 16 MHz profile");
 
-TonePlayer buzzer(BoardPins::Buzzer);
+TonePlayer buzzer;
 
-TonePlayer::TonePlayer(uint8_t pin) : pin_(pin) {}
+TonePlayer::TonePlayer(uint8_t pin)
+    : pin_(pin), head_(0), tail_(0), count_(0), stepEndsAt_(0),
+      stepActive_(false), muted_(false), revision_(0),
+      activeFrequencyHz_(0), activeDurationMs_(0) {}
+
+void TonePlayer::begin(uint8_t pin) {
+  pin_ = pin;
+  begin();
+}
 
 void TonePlayer::begin() {
   pinMode(pin_, OUTPUT);

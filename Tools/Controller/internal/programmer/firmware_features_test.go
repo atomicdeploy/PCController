@@ -122,3 +122,28 @@ func firmwareFeatureCompileFixture(t *testing.T) string {
 	}
 	return root
 }
+
+func TestTemporaryMacroStripProfileIsExplicitAndIdentityBound(t *testing.T) {
+	features, err := NormalizeFirmwareFeatures([]string{" macro-strip-test "})
+	if err != nil || len(features) != 1 || features[0] != FirmwareFeatureMacroStripTest {
+		t.Fatalf("features=%v err=%v", features, err)
+	}
+	if got := strings.Join(firmwareFeatureBuildDefines(features), " "); got != "-DPCCONTROLLER_MACRO_STRIP_TEST=1" {
+		t.Fatalf("unexpected profile defines: %q", got)
+	}
+	if len(firmwareFeatureBuildDefines(nil)) != 0 {
+		t.Fatal("temporary profile leaked into default build")
+	}
+	root := firmwareFeatureCompileFixture(t)
+	baseline, err := firmwareCompileInputHash(root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile, err := firmwareCompileInputHash(root, features)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if baseline == profile {
+		t.Fatal("temporary profile must have a distinct firmware identity")
+	}
+}

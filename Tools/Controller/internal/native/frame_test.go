@@ -222,7 +222,7 @@ func TestPayloadBuildersValidateRanges(t *testing.T) {
 		!bytes.Equal(payload, []byte{10, 64, 32, 127, 255}) {
 		t.Fatalf("unexpected addressable LED payload % X err=%v", payload, err)
 	}
-	if _, err := AddressableLEDPayload(11, 1, 2, 3, 4); err == nil {
+	if _, err := AddressableLEDPayload(100, 1, 2, 3, 4); err == nil {
 		t.Fatal("expected addressable LED pixel validation error")
 	}
 }
@@ -528,9 +528,9 @@ func TestTemperatureAndDeviceEventSchemas(t *testing.T) {
 	if err != nil || !event.DoorOpen {
 		t.Fatalf("door event=%#v err=%v", event, err)
 	}
-	macro, err := ParseDeviceEvent([]byte{EventMacro, MacroEventCompleted, 7})
+	macro, err := ParseDeviceEvent([]byte{EventMacro, MacroCompleted, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
 	if err != nil || macro.MacroID != 7 ||
-		macro.MacroState != MacroEventCompleted {
+		macro.MacroState != MacroCompleted {
 		t.Fatalf("macro event=%#v err=%v", macro, err)
 	}
 	key, err := ParseDeviceEvent([]byte{
@@ -583,7 +583,7 @@ func TestTemperatureAndDeviceEventSchemas(t *testing.T) {
 	}); err == nil {
 		t.Fatal("RF learning remaining time above total was accepted")
 	}
-	relay, err := ParseDeviceEvent([]byte{EventRelay, 0xA5})
+	relay, err := ParseDeviceEvent([]byte{EventRelay, 0xA5, 0x78, 0x56, 0x34, 0x12})
 	if err != nil || relay.RelayMask != 0xA5 {
 		t.Fatalf("relay event=%#v err=%v", relay, err)
 	}

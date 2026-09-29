@@ -56,14 +56,25 @@ public:
       RelayBreakBeforeDirectionMs;
   static constexpr uint8_t DirectionInterlockMs = RelayDirectionInterlockMs;
 
-  explicit RelayMotionMachine(Sink &sink) : sink_(sink) {}
+  RelayMotionMachine() = default;
+  explicit RelayMotionMachine(Sink &sink)
+      : sink_(&sink), sides_{}, nextDirectionChangeAt_(0),
+        activeRelayMask_(0),
+        breakBeforeDirectionMs_(BreakBeforeDirectionMs),
+        flags_(FlagMotionAllowed) {}
+
+  void bind(Sink &sink) {
+    sink_ = &sink;
+    breakBeforeDirectionMs_ = BreakBeforeDirectionMs;
+    flags_ = FlagMotionAllowed;
+  }
 
   // Start from a two-frame all-off state so power always drops before direction.
   void begin(uint32_t now) { allOff(now); }
 
   // Force both enables low, commit that frame, then clear every relay output.
   void allOff(uint32_t now) {
-    activeRelayMask_ = sink_.activeRelayMask();
+    activeRelayMask_ = sink_->activeRelayMask();
     activeRelayMask_ = static_cast<uint8_t>(activeRelayMask_ &
                                              ~RelayOutputs::EnableMask);
     commit(now);
@@ -180,6 +191,23 @@ public:
     }
   }
 
+  bool requestMask(uint8_t mask, uint32_t now) {
+    if ((mask & 0x0FU) != 0 && !motionAllowed()) return false;
+    // General outputs share one electrical latch edge. Motion outputs still
+    // use direction/enable sequencing and the cross-side direction interlock.
+    const uint8_t generalMask = static_cast<uint8_t>((activeRelayMask_ & 0x0FU) |
+                                                   (mask & 0xF0U));
+    if (generalMask != activeRelayMask_) {
+      activeRelayMask_ = generalMask;
+      commit(now);
+    }
+    requestSide(RelaySide::A, (mask & 1U) ? RelayDirection::Reverse : RelayDirection::Forward,
+                (mask & 2U) != 0, now);
+    requestSide(RelaySide::B, (mask & 4U) ? RelayDirection::Reverse : RelayDirection::Forward,
+                (mask & 8U) != 0, now);
+    return true;
+  }
+
   RelaySideStatus sideStatus(RelaySide side) const {
     const SideState &state = sides_[sideIndex(side)];
     RelaySideStatus result = {requestedDirection(state),
@@ -202,8 +230,8 @@ public:
 private:
   // Each side is exactly one packed flag byte plus its rollover-safe deadline.
   struct SideState {
-    uint8_t flags = 0;
-    uint32_t phaseDeadline = 0;
+    uint8_t flags;
+    uint32_t phaseDeadline;
   };
 
   enum : uint8_t {
@@ -321,7 +349,7 @@ private:
     }
   }
 
-  void commit(uint32_t now) { sink_.commitRelayMask(activeRelayMask_, now); }
+  void commit(uint32_t now) { sink_->commitRelayMask(activeRelayMask_, now); }
 
   bool serviceSide(RelaySide side, uint32_t now,
                    bool directionChangedThisService) {
@@ -369,12 +397,12 @@ private:
     return directionChangedThisService;
   }
 
-  Sink &sink_;
+  Sink *sink_;
   SideState sides_[2];
-  uint32_t nextDirectionChangeAt_ = 0;
-  uint8_t activeRelayMask_ = 0;
-  uint8_t breakBeforeDirectionMs_ = BreakBeforeDirectionMs;
-  uint8_t flags_ = FlagMotionAllowed;
+  uint32_t nextDirectionChangeAt_;
+  uint8_t activeRelayMask_;
+  uint8_t breakBeforeDirectionMs_;
+  uint8_t flags_;
 };
 
 } // namespace ControllerCore

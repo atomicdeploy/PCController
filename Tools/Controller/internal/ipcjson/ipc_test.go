@@ -1663,7 +1663,10 @@ func TestCommandCatalogAndProgramStateReachRPCAndREST(t *testing.T) {
 	executed := service.Dispatch(context.Background(), Request{
 		Method: "controller.command.execute", Params: executeParams,
 	})
-	if executed.Error != nil || !strings.Contains(fmt.Sprint(executed.Result), "strip pixel") {
+	executedText := fmt.Sprint(executed.Result)
+	if executed.Error != nil ||
+		!strings.Contains(executedText, "frame RGBHEX") ||
+		!strings.Contains(executedText, "pixel N R G B") {
 		t.Fatalf("command.execute=%#v", executed)
 	}
 	featureParams, _ := json.Marshal(map[string]string{"command": "toolchain features"})

@@ -94,27 +94,36 @@ type MacroRunner struct {
 	presentOnce sync.Once
 	present     chan MacroState
 
-	recordMu      sync.RWMutex
-	recording     MacroRecordingState
-	recordMacro   appconfig.Macro
-	recordBaseUS  uint32
-	recordBaseAt  time.Time
-	recordHasBase bool
-	recordRelease func()
+	recordMu            sync.RWMutex
+	recording           MacroRecordingState
+	recordMacro         appconfig.Macro
+	recordBaseUS        uint32
+	recordBaseAt        time.Time
+	recordHasBase       bool
+	recordRelease       func()
+	recordRelayMask     byte
+	recordRelaySeen     bool
+	recordRelayOriginUS uint32
+	recordRelayOriginAt uint32
+	recordRelayClock    bool
 }
 
 // MacroRecordingState describes a HOST-owned recording session. Mode states
 // whether offsets come from host monotonic observations or MCU ACK timestamps.
 type MacroRecordingState struct {
-	Active    bool      `json:"active"`
-	ID        byte      `json:"id"`
-	Name      string    `json:"name"`
-	Mode      string    `json:"mode"`
-	Category  string    `json:"category,omitempty"`
-	Color     string    `json:"color,omitempty"`
-	Steps     int       `json:"steps"`
-	StartedAt time.Time `json:"started_at,omitempty"`
-	LastError string    `json:"last_error,omitempty"`
+	BoardOwned  bool      `json:"board_owned"`
+	LastAtUS    uint32    `json:"last_at_us"`
+	LastDeltaUS uint32    `json:"last_delta_us"`
+	Overwritten int       `json:"overwritten"`
+	Active      bool      `json:"active"`
+	ID          byte      `json:"id"`
+	Name        string    `json:"name"`
+	Mode        string    `json:"mode"`
+	Category    string    `json:"category,omitempty"`
+	Color       string    `json:"color,omitempty"`
+	Steps       int       `json:"steps"`
+	StartedAt   time.Time `json:"started_at,omitempty"`
+	LastError   string    `json:"last_error,omitempty"`
 }
 
 func NewMacroRunner(
@@ -307,6 +316,9 @@ func (runner *MacroRunner) startRecording(name, category, color, mode string) (M
 		runner.recordMu.Unlock()
 		return state, fmt.Errorf("macro recording %q is already active", state.Name)
 	}
+	runner.recordMu.Unlock()
+	runner.runtime.beginMacroTimingWindow(activeUseMacroRecording)
+	runner.recordMu.Lock()
 	runner.recordMacro = appconfig.Macro{
 		ID: id, Name: name, Category: strings.TrimSpace(category), Color: color,
 		Mode: mode, TimingToleranceUS: modeTimingTolerance(mode),
@@ -314,6 +326,8 @@ func (runner *MacroRunner) startRecording(name, category, color, mode string) (M
 	runner.recordBaseUS = 0
 	runner.recordBaseAt = time.Time{}
 	runner.recordHasBase = false
+	runner.recordRelayClock = false
+	runner.recordRelaySeen = false
 	runner.recording = MacroRecordingState{
 		Active: true, ID: id, Name: name, Mode: mode, Category: strings.TrimSpace(category),
 		Color: color, StartedAt: time.Now(),
@@ -333,6 +347,11 @@ func (runner *MacroRunner) startRecording(name, category, color, mode string) (M
 func (runner *MacroRunner) StopRecording(save bool) (appconfig.Macro, error) {
 	runner.operationMu.Lock()
 	defer runner.operationMu.Unlock()
+	if runner.RecordingState().BoardOwned && runner.RecordingState().Active {
+		if err := runner.collectBoardRecording(context.Background(), save); err != nil {
+			return appconfig.Macro{}, err
+		}
+	}
 	runner.recordMu.Lock()
 	if !runner.recording.Active {
 		runner.recordMu.Unlock()
@@ -343,6 +362,8 @@ func (runner *MacroRunner) StopRecording(save bool) (appconfig.Macro, error) {
 		runner.recordRelease = nil
 	}
 	macro := runner.recordMacro
+	macro.Steps = append([]appconfig.MacroStep(nil), macro.Steps...)
+	sort.SliceStable(macro.Steps, func(i, j int) bool { return macro.Steps[i].AtUS < macro.Steps[j].AtUS })
 	if save && len(macro.Steps) == 0 {
 		// Keep an empty recording active: Save must never destroy the take.
 		runner.recordRelease = runner.runtime.ObserveCommands(runner.captureCommand)
@@ -389,6 +410,18 @@ func (runner *MacroRunner) captureCommand(evidence CommandEvidence) {
 	runner.recordMu.Lock()
 	defer runner.recordMu.Unlock()
 	if !runner.recording.Active || evidence.Source == CommandSourceBackground {
+		return
+	}
+	if evidence.RelayEdge {
+		runner.captureRelayEdge(evidence)
+		return
+	}
+	if runner.recording.BoardOwned {
+		return
+	}
+	// Relay commands are intentions, not output edges. Record the timestamped
+	// applied mask instead so PC, RF and physical controls share one path.
+	if evidence.Opcode == native.OpRelaySet || evidence.Opcode == native.OpRelaySide || evidence.Opcode == native.OpRelayAllOff {
 		return
 	}
 	if len(runner.recordMacro.Steps) >= 65535 {
@@ -442,6 +475,8 @@ func (runner *MacroRunner) captureCommand(evidence CommandEvidence) {
 }
 
 func (runner *MacroRunner) publishRecordedStep(step appconfig.MacroStep) {
+	runner.recording.LastDeltaUS = step.AtUS - runner.recording.LastAtUS
+	runner.recording.LastAtUS = step.AtUS
 	// PublishStructuredEvent queues delivery without invoking snapshot readers;
 	// the recorder lock preserves order between concurrent acknowledged commands.
 	runner.runtime.PublishStructuredEvent(Event{
@@ -455,6 +490,11 @@ func (runner *MacroRunner) publishRecordedStep(step appconfig.MacroStep) {
 // macros with no mode retain MCU playback; newly recorded alpha macros use the
 // host monotonic scheduler by default.
 func (runner *MacroRunner) Start(ctx context.Context, reference string) (MacroState, error) {
+	return runner.StartMode(ctx, reference, "")
+}
+
+// StartMode plays the same saved profile with either execution clock.
+func (runner *MacroRunner) StartMode(ctx context.Context, reference, modeOverride string) (MacroState, error) {
 	runner.operationMu.Lock()
 	defer runner.operationMu.Unlock()
 	if recording := runner.RecordingState(); recording.Active {
@@ -464,6 +504,13 @@ func (runner *MacroRunner) Start(ctx context.Context, reference string) (MacroSt
 	macro, err := runner.find(reference)
 	if err != nil {
 		return MacroState{}, err
+	}
+	if modeOverride != "" {
+		if modeOverride != macroModeHost && modeOverride != macroModeMCU {
+			return MacroState{}, errors.New("playback mode must be host or mcu")
+		}
+		macro.Mode = modeOverride
+		macro.TimingToleranceUS = modeTimingTolerance(modeOverride)
 	}
 	compiled, err := compileMacro(macro)
 	if err != nil {
@@ -502,7 +549,7 @@ func (runner *MacroRunner) Start(ctx context.Context, reference string) (MacroSt
 		Lifecycle: "buffering",
 	}
 	runner.mu.Unlock()
-	runner.runtime.setActiveUseState(activeUseMacroPlayback, true)
+	runner.runtime.beginMacroTimingWindow(activeUseMacroPlayback)
 
 	lease, _, err := runner.runtime.AcquireProgramState(
 		fmt.Sprintf("macro:%d", macro.ID),
@@ -1212,6 +1259,9 @@ func compileMacro(macro appconfig.Macro) (compiledMacro, error) {
 		if err != nil {
 			return compiledMacro{}, fmt.Errorf("macro %d/%s step %d: %w", macro.ID, macro.Name, index+1, err)
 		}
+		if macro.Mode == macroModeMCU && opcode == native.OpAddressableLED {
+			return compiledMacro{}, errors.New("strip commands cannot share the MCU macro clock/workspace; use host playback for strip-only profiles")
+		}
 		record, err := native.EncodeMacroRecord(dueUS, opcode, payload)
 		if err != nil {
 			return compiledMacro{}, fmt.Errorf("macro %d/%s step %d: %w", macro.ID, macro.Name, index+1, err)
@@ -1246,6 +1296,11 @@ func macroStepDueUS(step appconfig.MacroStep) (uint32, error) {
 
 func compileMacroCommand(step appconfig.MacroStep) (byte, []byte, error) {
 	switch strings.ToLower(strings.TrimSpace(step.Kind)) {
+	case "relay-mask":
+		if step.Value > 255 || step.Target != 0 {
+			return 0, nil, errors.New("relay-mask requires target zero and value 0..255")
+		}
+		return native.OpRelaySet, []byte{byte(step.Value)}, nil
 	case "relay":
 		payload, err := native.RelayPayload(step.Target, step.Value != 0)
 		if step.Value > 1 {
@@ -1457,7 +1512,8 @@ func macroNeedsMotionPermission(macro appconfig.Macro) bool {
 		if err != nil {
 			continue
 		} // compilation reports validation failures first
-		if (opcode == native.OpRelaySet && len(payload) == 2 && payload[0] < 4 && payload[1] != 0) ||
+		if (opcode == native.OpRelaySet && len(payload) == 1 && payload[0]&0x0f != 0) ||
+			(opcode == native.OpRelaySet && len(payload) == 2 && payload[0] < 4 && payload[1] != 0) ||
 			(opcode == native.OpRelaySide && len(payload) == 2 && payload[1] != 0) ||
 			opcode == native.OpRelayTest || opcode == native.OpRemoteKeyGesture {
 			return true

@@ -353,31 +353,37 @@ type IlluminationState struct {
 
 // Snapshot is a point-in-time view of connection, board, and front-panel state.
 type Snapshot struct {
-	Connected         bool                  `json:"connected"`
-	Paused            bool                  `json:"paused"`
-	Port              PortInfo              `json:"port"`
-	Hello             Hello                 `json:"hello"`
-	Status            Status                `json:"status"`
-	Settings          Settings              `json:"settings"`
-	HaveStatus        bool                  `json:"have_status"`
-	HaveSettings      bool                  `json:"have_settings"`
-	StatusUpdated     time.Time             `json:"status_updated,omitempty"`
-	ConnectionState   string                `json:"connection_state"`
-	ConnectionReason  string                `json:"connection_reason,omitempty"`
-	ConnectionUpdated time.Time             `json:"connection_updated,omitempty"`
-	ProgramState      ProgramStateSnapshot  `json:"program_state"`
-	RFLearning        RFLearnState          `json:"rf_learning"`
-	Macros            control.MacroSnapshot `json:"macros"`
-	HardwareProblems  []HardwareProblem     `json:"hardware_problems,omitempty"`
-	FrontPanel        FrontPanel            `json:"front_panel"`
-	HaveFrontPanel    bool                  `json:"have_front_panel"`
-	FrontPanelUpdated time.Time             `json:"front_panel_updated,omitempty"`
-	StatusLED         StatusLEDState        `json:"status_led"`
-	HaveStatusLED     bool                  `json:"have_status_led"`
-	StatusLEDUpdated  time.Time             `json:"status_led_updated,omitempty"`
-	StatusLEDRevision uint64                `json:"status_led_revision,omitempty"`
-	Illumination      IlluminationState     `json:"illumination"`
-	PortProcess       PortProcessSnapshot   `json:"port_process"`
+	Connected                bool                  `json:"connected"`
+	Paused                   bool                  `json:"paused"`
+	Port                     PortInfo              `json:"port"`
+	Hello                    Hello                 `json:"hello"`
+	Status                   Status                `json:"status"`
+	Settings                 Settings              `json:"settings"`
+	HaveStatus               bool                  `json:"have_status"`
+	HaveSettings             bool                  `json:"have_settings"`
+	StatusUpdated            time.Time             `json:"status_updated,omitempty"`
+	ConnectionState          string                `json:"connection_state"`
+	ConnectionReason         string                `json:"connection_reason,omitempty"`
+	ConnectionUpdated        time.Time             `json:"connection_updated,omitempty"`
+	ConnectionPhase          string                `json:"connection_phase"`
+	ConnectionAttempt        uint64                `json:"connection_attempt,omitempty"`
+	ConnectionAttemptStarted time.Time             `json:"connection_attempt_started,omitempty"`
+	ConnectionNextRetry      time.Time             `json:"connection_next_retry,omitempty"`
+	ConnectionRetryDelayMS   int64                 `json:"connection_retry_delay_ms,omitempty"`
+	ConnectionCandidate      PortInfo              `json:"connection_candidate"`
+	ProgramState             ProgramStateSnapshot  `json:"program_state"`
+	RFLearning               RFLearnState          `json:"rf_learning"`
+	Macros                   control.MacroSnapshot `json:"macros"`
+	HardwareProblems         []HardwareProblem     `json:"hardware_problems,omitempty"`
+	FrontPanel               FrontPanel            `json:"front_panel"`
+	HaveFrontPanel           bool                  `json:"have_front_panel"`
+	FrontPanelUpdated        time.Time             `json:"front_panel_updated,omitempty"`
+	StatusLED                StatusLEDState        `json:"status_led"`
+	HaveStatusLED            bool                  `json:"have_status_led"`
+	StatusLEDUpdated         time.Time             `json:"status_led_updated,omitempty"`
+	StatusLEDRevision        uint64                `json:"status_led_revision,omitempty"`
+	Illumination             IlluminationState     `json:"illumination"`
+	PortProcess              PortProcessSnapshot   `json:"port_process"`
 }
 
 // Event is the normalized event envelope shared by embedders and bridge clients.
@@ -1970,15 +1976,30 @@ func (client *Client) Snapshot() Snapshot {
 			FriendlyName: snapshot.Port.FriendlyName,
 			InstanceID:   snapshot.Port.InstanceID,
 		},
-		Hello:             snapshot.Hello,
-		Status:            snapshot.Status,
-		Settings:          snapshot.Settings,
-		HaveStatus:        snapshot.HaveStatus,
-		HaveSettings:      snapshot.HaveSettings,
-		StatusUpdated:     snapshot.StatusUpdated,
-		ConnectionState:   snapshot.ConnectionState,
-		ConnectionReason:  snapshot.ConnectionReason,
-		ConnectionUpdated: snapshot.ConnectionUpdated,
+		Hello:                    snapshot.Hello,
+		Status:                   snapshot.Status,
+		Settings:                 snapshot.Settings,
+		HaveStatus:               snapshot.HaveStatus,
+		HaveSettings:             snapshot.HaveSettings,
+		StatusUpdated:            snapshot.StatusUpdated,
+		ConnectionState:          snapshot.ConnectionState,
+		ConnectionReason:         snapshot.ConnectionReason,
+		ConnectionUpdated:        snapshot.ConnectionUpdated,
+		ConnectionPhase:          snapshot.ConnectionPhase,
+		ConnectionAttempt:        snapshot.ConnectionAttempt,
+		ConnectionAttemptStarted: snapshot.ConnectionAttemptStart,
+		ConnectionNextRetry:      snapshot.ConnectionNextRetry,
+		ConnectionRetryDelayMS:   snapshot.ConnectionRetryDelay.Milliseconds(),
+		ConnectionCandidate: PortInfo{
+			Name:         snapshot.ConnectionCandidate.Name,
+			VID:          snapshot.ConnectionCandidate.VID,
+			PID:          snapshot.ConnectionCandidate.PID,
+			Product:      snapshot.ConnectionCandidate.Product,
+			Manufacturer: snapshot.ConnectionCandidate.Manufacturer,
+			SerialNumber: snapshot.ConnectionCandidate.SerialNumber,
+			FriendlyName: snapshot.ConnectionCandidate.FriendlyName,
+			InstanceID:   snapshot.ConnectionCandidate.InstanceID,
+		},
 		ProgramState:      snapshot.ProgramState,
 		RFLearning:        snapshot.RFLearning,
 		Macros:            snapshot.Macros,

@@ -42,6 +42,8 @@ type OutputStreamState struct {
 	MelodyName     string  `json:"melody_name,omitempty"`
 	EffectID       uint64  `json:"effect_id,omitempty"`
 	EffectName     string  `json:"effect_name,omitempty"`
+	StripID        uint64  `json:"strip_id,omitempty"`
+	StripName      string  `json:"strip_name,omitempty"`
 	StatusBase     [4]byte `json:"status_base"`
 	HaveStatusBase bool    `json:"have_status_base"`
 }
@@ -67,6 +69,8 @@ type OutputScheduler struct {
 	closed         bool
 	melody         *runningOutput
 	effect         *runningOutput
+	strip          *runningOutput
+	stripMu        sync.Mutex
 	statusBase     [4]byte
 	haveStatusBase bool
 }
@@ -90,6 +94,9 @@ func (scheduler *OutputScheduler) Close() {
 	if scheduler.effect != nil {
 		scheduler.effect.cancel()
 	}
+	if scheduler.strip != nil {
+		scheduler.strip.cancel()
+	}
 	scheduler.mu.Unlock()
 }
 
@@ -106,6 +113,10 @@ func (scheduler *OutputScheduler) State() OutputStreamState {
 		state.EffectName = scheduler.effect.name
 	}
 	state.StatusBase = scheduler.statusBase
+	if scheduler.strip != nil {
+		state.StripID = scheduler.strip.id
+		state.StripName = scheduler.strip.name
+	}
 	state.HaveStatusBase = scheduler.haveStatusBase
 	return state
 }
@@ -272,6 +283,7 @@ func (scheduler *OutputScheduler) OverrideStatusEffect() bool {
 func (scheduler *OutputScheduler) StopAll() {
 	scheduler.StopMelody()
 	scheduler.StopStatusEffect()
+	scheduler.stop("strip")
 }
 
 func (scheduler *OutputScheduler) replace(
@@ -293,6 +305,9 @@ func (scheduler *OutputScheduler) replace(
 	slot := &scheduler.melody
 	if kind == "effect" {
 		slot = &scheduler.effect
+	}
+	if kind == "strip" {
+		slot = &scheduler.strip
 	}
 	var previousDone <-chan error
 	if *slot != nil {
@@ -323,6 +338,9 @@ func (scheduler *OutputScheduler) stop(kind string) bool {
 	if kind == "effect" {
 		slot = scheduler.effect
 	}
+	if kind == "strip" {
+		slot = scheduler.strip
+	}
 	if slot == nil {
 		return false
 	}
@@ -340,6 +358,9 @@ func (scheduler *OutputScheduler) finish(
 	slot := &scheduler.melody
 	if kind == "effect" {
 		slot = &scheduler.effect
+	}
+	if kind == "strip" {
+		slot = &scheduler.strip
 	}
 	isCurrent := *slot == operation
 	// Never let an older canceled animation overwrite the first frame of its

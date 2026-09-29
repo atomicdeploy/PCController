@@ -56,6 +56,20 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING)
+  foreach(profile IN ITEMS default macro_strip)
+    add_executable(firmware_${profile}_profile_tests tests/feature_profile_test.cpp)
+    target_include_directories(firmware_${profile}_profile_tests PRIVATE ../..)
+    add_test(NAME firmware_${profile}_profile_unit COMMAND firmware_${profile}_profile_tests)
+  endforeach()
+  target_compile_definitions(firmware_macro_strip_profile_tests PRIVATE PCCONTROLLER_MACRO_STRIP_TEST=1)
+
+  add_executable(firmware_strip_tests
+    tests/strip_test.cpp
+    ../../Project/AddressableLeds.cpp
+  )
+  target_include_directories(firmware_strip_tests PRIVATE tests/arduino_mock ../..)
+  add_test(NAME firmware_strip_unit COMMAND firmware_strip_tests)
+
   # The target-neutral wire vocabulary is compiled through both its portable
   # header and the production AVR UART adapter before native targets consume
   # it. This intentionally does not link or alter VirtualBoard behavior.

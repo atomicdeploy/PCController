@@ -567,6 +567,10 @@ rgb profile set CONDITION EFFECT COLOR [effect options]
 strip pixel N R G B [BRIGHTNESS]
 strip fill R G B [BRIGHTNESS]
 strip clear
+strip config 100                    # 1..100 addressable pixels; default restored at board reset
+strip frame FF000000FF000000FF      # three exact RGB pixels; configure 3 first
+strip rainbow 100 20                # background rolling rainbow, acknowledged frames
+strip stop|status
 buzzer FREQUENCY_HZ DURATION_MS
 buzzer status
 buzzer path board|host|both|none

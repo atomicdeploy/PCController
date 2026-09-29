@@ -48,24 +48,18 @@ static_assert(sizeof(TelemetryPayload) == ControllerProtocol::MaximumPayload,
 
 // Long-lived hardware drivers and protocol-domain coordinators.
 PwmExpanderDriver pwmDriver(BoardPins::PwmAddress);
-PwmController pwm(pwmDriver);
+PwmController pwm;
 Ina219Sensor ina219(BoardPins::Ina219Address);
-DallasTemperatureBus temperatureBus(BoardPins::OneWireData);
+DallasTemperatureBus temperatureBus;
 Ds18b20Address temperatureAddresses[2];
-RCSwitch radioReceiver;
-RCSwitch radioTransmitter;
-RelayController relays(shiftRegisters);
-ControllerProtocol::UartProtocol appProtocol(Serial);
+RCSwitch radio;
+RelayController relays;
+ControllerProtocol::UartProtocol appProtocol;
 ControllerEvents appEvents(appProtocol);
 MacroQueue macroPlayback(appProtocol);
 
 // Front-panel key order intentionally matches MenuAction IDs 0..3.
-Key menuKeys[] = {
-    Key(BoardPins::KeyPrevious),
-    Key(BoardPins::KeyNext),
-    Key(BoardPins::KeyDecrease),
-    Key(BoardPins::KeyIncrease),
-};
+Key menuKeys[4];
 
 SensorState sensors;
 RadioState radioState;
@@ -85,11 +79,16 @@ bool ina219Available = false;
 bool pwmAvailable = false;
 uint8_t temperatureAddressCount = 0;
 bool temperatureConversionPending = false;
+#if PCCONTROLLER_ENABLE_RF_LEARNING
 bool learningActive = false;
-uint8_t learningMode = RF_LEARN_INDEFINITE;
 uint8_t learningTotalSeconds = 0;
 uint8_t learningReportedRemaining = 0;
-uint32_t learningEndsAt = 0;
+uint16_t learningLastSecondAt = 0;
+#else
+constexpr bool learningActive = false;
+constexpr uint8_t learningTotalSeconds = 0;
+constexpr uint16_t learningLastSecondAt = 0;
+#endif
 
 // Active page, modal editor selection, and transient front-panel deadlines.
 uint8_t menuPage = PAGE_DOOR;
@@ -189,7 +188,7 @@ constexpr uint8_t HOST_PANEL_CAPTURED = 1U << 4;
 void handleMenuAction(uint8_t action, bool fromRemote = false);
 void setMenuPage(uint8_t page);
 void sendTelemetry(uint8_t sequence);
-void endLearning(uint8_t state, int8_t feedback);
+void endLearning(uint8_t state);
 void programService(uint32_t at);
 void serviceSystemInputs(uint32_t at);
 void serviceIlluminationSettings(uint32_t at);

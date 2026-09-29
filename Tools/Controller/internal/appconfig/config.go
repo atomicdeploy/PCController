@@ -790,6 +790,10 @@ func (value Config) Validate() error {
 			}
 			previous = due
 			switch strings.ToLower(step.Kind) {
+			case "relay-mask":
+				if step.Target != 0 || step.Value > 255 {
+					return fmt.Errorf("macros[%d].steps[%d] relay-mask requires target zero and value 0..255", index, stepIndex)
+				}
 			case "relay":
 				if step.Target > 7 || step.Value > 1 {
 					return fmt.Errorf("macros[%d].steps[%d] relay requires target 0..7 and value 0..1", index, stepIndex)

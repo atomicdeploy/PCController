@@ -193,6 +193,12 @@ export interface Snapshot {
   connection_state: string
   connection_reason?: string
   connection_updated?: string
+  connection_phase?: 'connected' | 'blocked' | 'paused' | 'attempting' | 'waiting_retry' | 'queued' | 'disconnected'
+  connection_attempt?: number
+  connection_attempt_started?: string
+  connection_next_retry?: string
+  connection_retry_delay_ms?: number
+  connection_candidate?: PortInfo
   port_process?: PortProcessSnapshot
   program_state?: ProgramState
   rf_learning?: RFLearnState
@@ -327,6 +333,7 @@ export interface MacroRecordingState {
   last_opcode?: number
   last_source?: number
   board_owned?: boolean
+  overwritten?: number
   board_id?: number
   dropped_steps?: number
   started_at?: string

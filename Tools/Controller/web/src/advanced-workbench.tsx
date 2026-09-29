@@ -58,6 +58,7 @@ import {
 } from 'lucide-react'
 import {
   Button,
+  DataRow,
   Icon,
   RangeField,
   Segmented,
@@ -71,6 +72,7 @@ import { SevenSegmentPreview } from './seven-segment-preview'
 import type { FrontPanelState } from './types'
 import type { SharedViewProps } from './views'
 import { peripheralAvailability } from './peripheral-availability'
+import { connectionPresentation } from './connection-presentation'
 
 interface AdvancedWorkbenchProps extends SharedViewProps {
   run: (command: string) => Promise<string>
@@ -236,6 +238,9 @@ export function AdvancedWorkbench({
   )
 
   const [pixel, setPixel] = useState(0)
+  const [stripCount, setStripCount] = useState(100)
+  const [stripFPS, setStripFPS] = useState(20)
+  const [stripFrame, setStripFrame] = useState('')
   const [pixelRed, setPixelRed] = useState(32)
   const [pixelGreen, setPixelGreen] = useState(214)
   const [pixelBlue, setPixelBlue] = useState(220)
@@ -515,6 +520,7 @@ export function AdvancedWorkbench({
     messageLine1.length <= 16 && messageLine2.length <= 16 &&
     /^[\x20-\x7e]*$/.test(messageLine1) && /^[\x20-\x7e]*$/.test(messageLine2)
   const messageNeedsBoard = messageTarget === 'lcd'
+  const connection = connectionPresentation(snapshot, locale)
   const reviewBlocked = !review.command || boardBusy || reviewBusy ||
     (review.needsDevice && !online) ||
     (review.risk === 'danger' && dangerArm.trim().toUpperCase() !== 'RUN')
@@ -542,8 +548,8 @@ export function AdvancedWorkbench({
           title={copy('Connection, stream & program state', 'اتصال، جریان وضعیت و حالت برنامه')}
           detail={copy('Port discovery, authenticated open/reconnect, telemetry cadence and shared run state.', 'کشف درگاه، اتصال امن، آهنگ تله‌متری و حالت اجرای مشترک.')}
           defaultOpen
-          status={online ? snapshot.port.name || copy('connected', 'متصل') : copy('offline', 'آفلاین')}
-          tone={online ? 'good' : 'warn'}
+          status={online ? snapshot.port.name || copy('connected', 'متصل') : connection.title}
+          tone={online ? 'good' : connection.tone === 'bad' ? 'bad' : 'warn'}
         >
           <div className="advanced-actions">
             <Button icon={ListTree} busy={busy === 'ports'} onClick={() => void run('ports')}>{copy('List ports', 'فهرست درگاه‌ها')}</Button>
@@ -559,11 +565,18 @@ export function AdvancedWorkbench({
               onChange={(event) => setPort(event.target.value)}
               action={<>
                 <Button tone="primary" icon={Plug} busy={busy === serialOpen} onClick={() => void run(serialOpen)}>{copy('Open', 'اتصال')}</Button>
-                <Button icon={RefreshCw} busy={busy === 'reconnect'} onClick={() => void run('reconnect')}>{copy('Reconnect', 'اتصال مجدد')}</Button>
+                <Button icon={RefreshCw} busy={busy === 'reconnect' || connection.animated} disabled={connection.retryDisabled} onClick={() => void run('reconnect')}>{online ? copy('Reconnect', 'اتصال مجدد') : connection.action}</Button>
                 {online && <Button icon={Unplug} busy={busy === 'close'} onClick={() => void run('close')}>{copy('Close & pause', 'بستن و توقف')}</Button>}
               </>}
             />
           </div>
+          {!online && <div className="data-list connection-details">
+            <DataRow label={copy('Phase', 'مرحله')} value={connection.title} tone={connection.tone === 'bad' ? 'bad' : connection.tone === 'warn' ? 'warn' : undefined} />
+            {connection.candidate && <DataRow label={copy('Candidate', 'گزینه')} value={connection.candidate} mono />}
+            {connection.attempt && <DataRow label={copy('Attempt', 'تلاش')} value={connection.attempt} />}
+            {connection.timing && <DataRow label={copy('Timing', 'زمان‌بندی')} value={connection.timing} />}
+            {connection.detail && <DataRow label={copy('Detail', 'جزئیات')} value={connection.detail} />}
+          </div>}
           {online && <div className="advanced-control-row">
             <Toggle
               checked={streamEnabled}
@@ -705,10 +718,22 @@ export function AdvancedWorkbench({
           icon={SlidersHorizontal}
           eyebrow="WS281X + STATUS RGB"
           title={copy('Per-pixel light & effect engine', 'نور هر پیکسل و موتور افکت')}
-          detail={copy('Address one of eleven pixels or inspect and control configured status effects.', 'یکی از یازده پیکسل را کنترل یا افکت‌های وضعیت تعریف‌شده را بررسی کنید.')}
+          detail=""
         >
+          <div className="advanced-fields">
+            <TextField label={copy('LED count', 'تعداد LED')} type="number" min={1} max={100} value={stripCount} onChange={(event) => { const count = boundedInteger(event.target.value, 100, 1, 100); setStripCount(count); setPixel((current) => Math.min(current, count - 1)) }} />
+            <TextField label={copy('Frames per second', 'فریم در ثانیه')} type="number" min={1} max={30} value={stripFPS} onChange={(event) => setStripFPS(boundedInteger(event.target.value, 20, 1, 30))} />
+          </div>
+          <div className="advanced-actions">
+            <Button disabled={!online} busy={busy === `strip config ${stripCount}`} onClick={() => void run(`strip config ${stripCount}`)}>{copy('Set LED count', 'تنظیم تعداد LED')}</Button>
+            <Button icon={Play} disabled={!online} busy={busy === `strip rainbow ${stripCount} ${stripFPS}`} onClick={() => void run(`strip rainbow ${stripCount} ${stripFPS}`)}>{copy('Rolling rainbow', 'رنگین‌کمان متحرک')}</Button>
+            <Button icon={CircleStop} onClick={() => void run('strip stop')}>{copy('Stop stream', 'توقف جریان')}</Button>
+            <Button icon={Eraser} disabled={!online} onClick={() => void run('strip clear')}>{copy('Clear strip', 'خاموش کردن نوار')}</Button>
+            <Button icon={Activity} onClick={() => void run('strip status')}>{copy('Stream status', 'وضعیت جریان')}</Button>
+          </div>
+          <TextField label={copy('RGB frame · six hex digits per LED', 'فریم RGB · شش رقم هگز برای هر LED')} value={stripFrame} dir="ltr" spellCheck={false} maxLength={600} onChange={(event) => setStripFrame(event.target.value.replace(/\s/g, ''))} action={<Button disabled={!online || !/^(?:[0-9a-fA-F]{6})+$/.test(stripFrame) || stripFrame.length !== stripCount * 6} onClick={() => void run(`strip frame ${stripFrame}`)}>{copy('Send frame', 'ارسال فریم')}</Button>} />
           <div className="advanced-fields advanced-fields--pixel">
-            <TextField label={copy('Pixel 0..10', 'پیکسل ۰ تا ۱۰')} type="number" min={0} max={10} value={pixel} onChange={(event) => setPixel(boundedInteger(event.target.value, 0, 0, 10))} />
+            <TextField label={copy(`Pixel 0..${stripCount - 1}`, `پیکسل ۰ تا ${stripCount - 1}`)} type="number" min={0} max={stripCount - 1} value={pixel} onChange={(event) => setPixel(boundedInteger(event.target.value, 0, 0, stripCount - 1))} />
             <TextField label="R" type="number" min={0} max={255} value={pixelRed} onChange={(event) => setPixelRed(boundedInteger(event.target.value, 0, 0, 255))} />
             <TextField label="G" type="number" min={0} max={255} value={pixelGreen} onChange={(event) => setPixelGreen(boundedInteger(event.target.value, 0, 0, 255))} />
             <TextField label="B" type="number" min={0} max={255} value={pixelBlue} onChange={(event) => setPixelBlue(boundedInteger(event.target.value, 0, 0, 255))} />

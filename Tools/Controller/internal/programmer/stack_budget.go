@@ -116,8 +116,8 @@ var responseBranches = []responseBranchSpec{
 	{Name: "menu layout", Optional: true, Stages: []listingFunctionSpec{{Name: "menu-layout response", Match: "sendMenuLayout(", InlineLabel: "sendMenuLayout"}}},
 	{Name: "I2C transfer", Stages: []listingFunctionSpec{{Name: "I2C transfer response", Match: "transferI2c(", InlineLabel: "transferI2c"}}},
 	{Name: "learned remotes", Stages: []listingFunctionSpec{{Name: "learned-remotes response", Match: "sendLearnedRemotes(", InlineLabel: "sendLearnedRemotes"}}},
-	{Name: "ACK", Stages: []listingFunctionSpec{{Name: "ACK response", Match: "ControllerProtocol::UartProtocol::sendAck("}}},
-	{Name: "error", Stages: []listingFunctionSpec{{Name: "error response", Match: "ControllerProtocol::UartProtocol::sendError("}}},
+	{Name: "ACK", Stages: []listingFunctionSpec{{Name: "ACK response", Match: "ControllerProtocol::UartProtocol::sendResult("}}},
+	{Name: "error", Stages: []listingFunctionSpec{{Name: "error response", Match: "ControllerProtocol::UartProtocol::sendResult("}}},
 	{Name: "event", Stages: []listingFunctionSpec{{Name: "event response", Match: "ControllerEvents::send("}}},
 	{Name: "macro status", Stages: []listingFunctionSpec{
 		{Name: "macro opcode", Match: "MacroQueue::handle(", InlineLabel: "handle"},
@@ -125,11 +125,11 @@ var responseBranches = []responseBranchSpec{
 	}},
 	{Name: "macro ACK", Stages: []listingFunctionSpec{
 		{Name: "macro opcode", Match: "MacroQueue::handle(", InlineLabel: "handle"},
-		{Name: "macro ACK response", Match: "ControllerProtocol::UartProtocol::sendAck("},
+		{Name: "macro ACK response", Match: "ControllerProtocol::UartProtocol::sendResult("},
 	}},
 	{Name: "macro error", Stages: []listingFunctionSpec{
 		{Name: "macro opcode", Match: "MacroQueue::handle(", InlineLabel: "handle"},
-		{Name: "macro error response", Match: "ControllerProtocol::UartProtocol::sendError("},
+		{Name: "macro error response", Match: "ControllerProtocol::UartProtocol::sendResult("},
 	}},
 }
 
@@ -167,7 +167,7 @@ func inspectFirmwareStackBudget(identity CompileIdentity) (compileManifestStackB
 	if closeErr != nil {
 		return compileManifestStackBudget{}, fmt.Errorf("close final AVR listing: %w", closeErr)
 	}
-	report, err := estimateFirmwareStackBudget(listing, staticBytes)
+	report, err := estimateFirmwareStackBudget(listing, staticBytes, identity.Features...)
 	if err != nil {
 		return report, err
 	}
@@ -180,8 +180,8 @@ func inspectFirmwareStackBudget(identity CompileIdentity) (compileManifestStackB
 	return report, nil
 }
 
-func estimateFirmwareStackBudget(listing *avrListing, staticBytes uint32) (compileManifestStackBudget, error) {
-	serial, selectedBranch, serialActive, err := buildSerialStackPath(listing)
+func estimateFirmwareStackBudget(listing *avrListing, staticBytes uint32, features ...FirmwareFeature) (compileManifestStackBudget, error) {
+	serial, selectedBranch, serialActive, err := buildSerialStackPath(listing, features...)
 	if err != nil {
 		return compileManifestStackBudget{}, fmt.Errorf("serial response path: %w", err)
 	}
@@ -236,7 +236,7 @@ func estimateFirmwareStackBudget(listing *avrListing, staticBytes uint32) (compi
 	return report, nil
 }
 
-func buildSerialStackPath(listing *avrListing) ([]compileManifestStackStage, string, int, error) {
+func buildSerialStackPath(listing *avrListing, features ...FirmwareFeature) ([]compileManifestStackStage, string, int, error) {
 	mainStage, err := requiredListingStage(listing, listingFunctionSpec{Name: "Arduino main", Match: "main", Exact: true})
 	if err != nil {
 		return nil, "", 0, err
@@ -323,6 +323,15 @@ func buildSerialStackPath(listing *avrListing) ([]compileManifestStackStage, str
 	selectedBytes := uint32(0)
 	selectedActive := 0
 	for _, branch := range responseBranches {
+		// Only the explicit test profile may omit RF administration. Still
+		// analyze this branch if present; default builds must provide evidence.
+		if branch.Name == "learned remotes" {
+			for _, feature := range features {
+				if feature == FirmwareFeatureMacroStripTest {
+					branch.Optional = true
+				}
+			}
+		}
 		if branch.Optional && !responseBranchPresent(listing, handlerStage.Function, branch) {
 			continue
 		}

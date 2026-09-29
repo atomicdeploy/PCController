@@ -236,7 +236,7 @@ func TestDisconnectedHeaderReconnectsByKeyboardAndMouseWithBoundedRetry(t *testi
 
 	keyboard := newModel()
 	rendered := ansi.Strip(keyboard.header(keyboard.snapshot()))
-	for _, expected := range []string{"DISCONNECTED", "Enter or click to reconnect", "background retry armed"} {
+	for _, expected := range []string{"DISCONNECTED", "Enter or click to start a bounded connection attempt"} {
 		if !strings.Contains(rendered, expected) {
 			t.Fatalf("disconnected header missing %q:\n%s", expected, rendered)
 		}
@@ -268,6 +268,35 @@ func TestDisconnectedHeaderReconnectsByKeyboardAndMouseWithBoundedRetry(t *testi
 	}
 	if !mouse.connectRetryAt.After(time.Now()) {
 		t.Fatalf("failed attempt did not schedule a future background retry: %s", mouse.connectRetryAt)
+	}
+}
+
+func TestConnectionHeaderDistinguishesAttemptFromBackoff(t *testing.T) {
+	model := New(control.New(control.Options{}), shell.New(10))
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 180, Height: 38})
+	model = updated.(Model)
+	now := time.Now()
+	snapshot := model.snapshot()
+	snapshot.ConnectionPhase = "attempting"
+	snapshot.ConnectionAttempt = 7
+	snapshot.ConnectionAttemptStart = now.Add(-2300 * time.Millisecond)
+	snapshot.ConnectionCandidate = ports.Info{Name: "COM3", FriendlyName: "USB-SERIAL CH340"}
+
+	attempting := ansi.Strip(model.header(snapshot))
+	for _, expected := range []string{"CONNECTING", "USB-SERIAL CH340", "attempt 7", "elapsed"} {
+		if !strings.Contains(attempting, expected) {
+			t.Fatalf("attempt header missing %q:\n%s", expected, attempting)
+		}
+	}
+
+	snapshot.ConnectionPhase = "waiting_retry"
+	snapshot.ConnectionNextRetry = now.Add(8 * time.Second)
+	snapshot.ConnectionReason = "application HELLO timed out"
+	waiting := ansi.Strip(model.header(snapshot))
+	for _, expected := range []string{"RETRY SCHEDULED", "next attempt in", "HELLO timed out"} {
+		if !strings.Contains(waiting, expected) {
+			t.Fatalf("retry header missing %q:\n%s", expected, waiting)
+		}
 	}
 }
 

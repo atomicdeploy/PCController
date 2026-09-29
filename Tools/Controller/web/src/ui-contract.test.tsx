@@ -110,7 +110,7 @@ describe('offline and settings UI contracts', () => {
 
   it('does not render controller-only controls while disconnected', () => {
     const markup = renderToStaticMarkup(<ControlsView {...shared()} />)
-    expect(markup).toContain('Board offline')
+    expect(markup).toContain('Controller board disconnected')
     expect(markup).not.toContain('to reveal its controls')
     expect(markup).not.toContain('PWM matrix')
     expect(markup).not.toContain('Relays &amp; motion')
@@ -598,7 +598,7 @@ describe('offline and settings UI contracts', () => {
       navigationSync
       onNavigationSync={vi.fn()}
     />)
-    expect(controls).toContain('برد آفلاین')
+    expect(controls).toContain('برد کنترلر قطع است')
     expect(controls).not.toContain('برای نمایش کنترل‌ها')
     expect(settings).toContain('هویت میزبان رایانه')
     expect(settings).toContain('سرویس‌ها و چرخهٔ میزبان')

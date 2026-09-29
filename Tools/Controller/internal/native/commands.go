@@ -75,7 +75,7 @@ const (
 
 const (
 	AddressableLEDFill     byte = 0xFF
-	AddressableLEDMaxPixel byte = 10
+	AddressableLEDMaxPixel byte = 99
 )
 
 const (
@@ -292,10 +292,10 @@ func AddressableLEDPayload(pixel, red, green, blue, brightness byte) ([]byte, er
 			AddressableLEDMaxPixel,
 		)
 	}
-	// Schema-2 hosts pre-scale once when setting the pixel. This preserves
+	// Hosts pre-scale once when setting the pixel. This preserves
 	// brightness behavior while removing a per-refresh scaler from AVR flash.
 	scale := func(value byte) byte {
-		return byte((uint16(value) * uint16(brightness+1)) >> 8)
+		return byte((uint16(value) * (uint16(brightness) + 1)) >> 8)
 	}
 	return []byte{pixel, scale(red), scale(green), scale(blue), 0xFF}, nil
 }

@@ -425,7 +425,7 @@ test('production KEY dispatches first Down to motion and exits outside KEY', asy
 	assert.match(frontPanel, /menuPage == PAGE_RF \? PAGE_USER_RELAYS/u)
 	assert.match(
 		frontPanel,
-		/menuPage == PAGE_USER_RELAYS[^]*?\? static_cast<uint8_t>\(PAGE_RF\)/u
+		/menuPage == PAGE_USER_RELAYS[^]*?PCCONTROLLER_ENABLE_RF_LEARNING \? PAGE_RF : PAGE_DOOR/u
 	)
 	assert.match(model, /page < PAGE_COUNT && page != PAGE_MOTION/u)
 	assert.match(protocol, /\{1, PAGE_COUNT, 0xFF, 0\}/u)
@@ -448,7 +448,7 @@ test('retired MOVE remains a direct KEY alias, never a persisted second page', a
 	assert.match(frontPanel, /menuPage == PAGE_RF \? PAGE_USER_RELAYS/u)
 	assert.match(
 		frontPanel,
-		/menuPage == PAGE_USER_RELAYS[^]*?\? static_cast<uint8_t>\(PAGE_RF\)/u
+		/menuPage == PAGE_USER_RELAYS[^]*?PCCONTROLLER_ENABLE_RF_LEARNING \? PAGE_RF : PAGE_DOOR/u
 	)
 	assert.match(
 		frontPanel,
@@ -514,6 +514,25 @@ test('firmware runtime owns one shared ordinary-service clock snapshot', async (
                 /handleMenuAction[^]*?\{[^]*?now = millis\(\);\s*const uint32_t actionNow = now;/u
         )
         assert.match(sources[3], /const uint32_t releaseNow = now;/u)
+})
+
+test('full AVR profile keeps live features while compacting static runtime state', async () => {
+	const [config, context, lifecycle, radio, frontPanel] = await Promise.all([
+		readFile(new URL('../../ProjectConfig.h', import.meta.url), 'utf8'),
+		readFile(new URL('../../Project/Runtime/ControllerContext.inc.h', import.meta.url), 'utf8'),
+		readFile(new URL('../../Project/Runtime/LifecycleRuntime.inc.h', import.meta.url), 'utf8'),
+		readFile(new URL('../../Project/Runtime/RadioRuntime.inc.h', import.meta.url), 'utf8'),
+		readFile(new URL('../../Project/Runtime/FrontPanelRuntime.inc.h', import.meta.url), 'utf8')
+	])
+	assert.match(config, /#define PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES 1/u)
+	assert.match(config, /#define PCCONTROLLER_ENABLE_EEPROM_AUDIO_CUES 0/u)
+	assert.equal(context.match(/RCSwitch radio;/gu)?.length, 1)
+	assert.doesNotMatch(context, /radio(?:Receiver|Transmitter)/u)
+	assert.match(lifecycle, /radio\.enableTransmit\(BoardPins::RcTransmit\)/u)
+	assert.match(lifecycle, /radio\.enableReceive\(digitalPinToInterrupt\(BoardPins::RcReceive\)\)/u)
+	assert.match(radio, /radio\.disableReceive\(\)[^]*?radio\.send\(code, bits\)[^]*?radio\.enableReceive/u)
+	assert.match(frontPanel, /static const uint8_t PreviousMode\[\] PROGMEM/u)
+	assert.match(frontPanel, /static const uint8_t NextMode\[\] PROGMEM/u)
 })
 
 test('studio validation preserves matching Controller compile identity', async () => {

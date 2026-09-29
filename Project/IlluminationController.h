@@ -32,13 +32,15 @@ public:
 
 private:
   // Brightness fields are 0..255 and are expanded by PwmController.
-  IlluminationMode mode_ = IlluminationMode::Auto;
-  uint8_t onBrightness_ = 128;
-  uint8_t offBrightness_ = 0;
-  uint8_t currentBrightness_ = 0;
-  uint32_t lastFadeAt_ = 0;
-  PwmController *pwm_ = nullptr;
-  bool initialized_ = false;
+  // Startup settings overwrite these zero-initialized fields before begin().
+  // This keeps the whole static controller in BSS instead of flash-backed data.
+  IlluminationMode mode_;
+  uint8_t onBrightness_;
+  uint8_t offBrightness_;
+  uint8_t currentBrightness_;
+  uint32_t lastFadeAt_;
+  PwmController *pwm_;
+  bool initialized_;
 };
 
 // illumination is the single enclosure-light transition controller.

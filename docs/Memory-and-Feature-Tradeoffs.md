@@ -8,6 +8,32 @@ the host. Use this guide before adding or removing firmware behavior.
 
 ## Evidence rule
 
+### Temporary macro/strip verification profile
+
+The explicitly selected `macro-strip-test` compile feature preserves the full
+source tree but omits **new RF learning administration** from its board image.
+It is temporary test firmware, not the default release profile. The full image
+must still pass its independent flash/SRAM checks before release.
+
+| Interface or behavior | `macro-strip-test` |
+|---|---|
+| Host and MCU relay recording/playback, circular buffer | Included |
+| Addressable strip configuration and pixel streaming | Included |
+| Existing learned RF receive/action dispatch and RF transmit | Included |
+| Relay/motion safety, ordinary front-panel menus, local audio | Included |
+| RF learning capture/timer, list/clear/remove/replace, LErn UI | Omitted temporarily |
+| Existing EEPROM learned records | Retained; not erased |
+
+Build explicitly with `build.cmd --firmware-only --firmware-feature macro-strip-test`.
+The equivalent project CLI is `controller program --method compile --sketch .
+--firmware-feature macro-strip-test`. Persistent configuration uses
+`programming.firmware_features`, and the environment override is
+`PCCONTROLLER_FIRMWARE_FEATURES=macro-strip-test`; explicit flags take precedence.
+The selector changes the source identity and is recorded in the firmware manifest.
+The board reports a temporary-profile build flag and clears the RF learning and
+record-replacement capability flags. Interfaces must honor those capabilities.
+Remove the selector to build the full profile again; no source recovery is needed.
+
 Never copy a flash or SRAM number from documentation into a release claim. The
 only authoritative values are those produced by the exact candidate build:
 
@@ -120,7 +146,7 @@ removal saving. The current ELF nevertheless gives useful, reproducible bounds:
 | Menu visibility/order fields | 9 SRAM and 9 EEPROM bytes | Exact difference between the current 31-byte settings record and the 22-byte no-layout record |
 | Operator board name | 9 SRAM and 9 EEPROM bytes | One length byte plus eight printable ASCII bytes inside the current profile's CRC-backed settings record |
 | MCU macro playback object | 157 static-SRAM bytes | Exact object allocation; flash dispatcher paths are shared |
-| Addressable-pixel buffer | 33 static-SRAM bytes | Exact 11-pixel RGB buffer |
+| Addressable-pixel buffer (historical measurement above) | 33 static-SRAM bytes | Replaced by the current shared 300-byte strip/macro workspace; rerun target measurements for current totals |
 | rc-switch receive timings | 134 static-SRAM bytes | Exact pulse-timing array, before receiver/transmitter state |
 
 Only a clean feature-on/feature-off build can convert these envelopes into a
@@ -244,7 +270,7 @@ build, and ranges must not be added to a release manifest as measured bytes.
 | Voltage/current/tLED/tBT render pages only | 160-320 | Approximately 0 | Sensors, HOT handling, and telemetry remain, but measurements cannot be read from the four-digit display while the host is absent. |
 | Persistent visibility, order, hierarchy, and layout protocol | 500-850 | Exactly 9 static bytes | Loses EEPROM show/hide and reordering, four nested categories, and host `MENU_LAYOUT` read/write. Stable dense pages could still exist in fixed order. The named current lower-bound envelope is 370 flash bytes. |
 | Board `MenuList` directory | 80-180 | Approximately 0 | The host must hard-code local IDs/modes/labels and can silently drift from the firmware. Not recommended. |
-| Addressable D6 strip | 200-350 | Exactly 33 bytes | Loses all 11 WS2811/WS2812 pixels, fill/per-pixel commands, and future strip effects. Current `show()` alone is 158 linked bytes, so 158 is a lower bound, not the net saving. |
+| Addressable D6 strip (historical estimate) | 200-350 | Former separate buffer: 33 bytes | Current 100-pixel frame shares 300 bytes with macros, so savings now require an isolated rebuild. Removing strip loses frame streaming, rainbow, fill/per-pixel controls. |
 | Smooth status RGB animations/cues, retaining static status colors | 200-420 | 3-10 bytes | Loses eased door/BT/RF/menu/save/discard/reset transitions and breathing/flashing distinctions. Hard warning indications can remain. |
 | Buzzer and melodies | 300-550 | About 50 bytes | Loses boot health melody, key feedback, door/relay/save/discard/error cues, host-streamed tones, and the purpose of Silent mode. |
 | MCU macro timing queue | 500-900 | Exactly 157 bytes for the playback object | Loses board-clock scheduling, USB-jitter buffering, precise execution deltas, queue/fidelity metrics, synchronized cancellation, and host-loss safe-stop. |

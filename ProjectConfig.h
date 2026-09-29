@@ -1,11 +1,27 @@
 #pragma once
 
+// Explicit temporary verification profile. The ordinary source/default build
+// retains RF administration; this test image keeps learned RF execution while
+// freeing flash for the combined MCU recorder and 100-pixel strip exercise.
+#ifndef PCCONTROLLER_MACRO_STRIP_TEST
+#define PCCONTROLLER_MACRO_STRIP_TEST 0
+#endif
+#ifndef PCCONTROLLER_ENABLE_RF_LEARNING
+#define PCCONTROLLER_ENABLE_RF_LEARNING (!PCCONTROLLER_MACRO_STRIP_TEST)
+#endif
+#if (PCCONTROLLER_MACRO_STRIP_TEST != 0) && (PCCONTROLLER_MACRO_STRIP_TEST != 1)
+#error "PCCONTROLLER_MACRO_STRIP_TEST must be 0 or 1"
+#endif
+#if (PCCONTROLLER_ENABLE_RF_LEARNING != 0) && (PCCONTROLLER_ENABLE_RF_LEARNING != 1)
+#error "PCCONTROLLER_ENABLE_RF_LEARNING must be 0 or 1"
+#endif
+
 // The UART is the primary COBS/opcode application link, not a debug console.
 #ifndef PCCONTROLLER_UART_BAUD
 #define PCCONTROLLER_UART_BAUD 115200UL
 #endif
 
-// The configured board uses 11 WS2811 pixels in BRG order on D6. Set this to 1
+// The configured board uses up to 100 WS2811 pixels in BRG order on D6. Set this to 1
 // for a WS2812B/GRB strip when the final hardware is confirmed.
 #ifndef PCCONTROLLER_USE_WS2812B
 #define PCCONTROLLER_USE_WS2812B 0
@@ -57,7 +73,7 @@
 // from the CRC-backed startup region. Disabling this keeps the exact immutable
 // fallbacks and avoids an EEPROM dependency; it does not disable local cues.
 #ifndef PCCONTROLLER_ENABLE_EEPROM_AUDIO_CUES
-#define PCCONTROLLER_ENABLE_EEPROM_AUDIO_CUES 1
+#define PCCONTROLLER_ENABLE_EEPROM_AUDIO_CUES 0
 #endif
 
 #if (PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES != 0) && \

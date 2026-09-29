@@ -79,12 +79,12 @@ func TestHostRecordingMixedOutputsRoundTripsNamedPlayback(t *testing.T) {
 	text, _ := native.DisplayTextPayload(native.DisplaySegments, 100, "TEST")
 	scheduled, _ := native.ScheduledSegmentPayload(native.ScheduledSegmentOptions{SpeedMS: 220, HoldMS: 500, ForceScroll: true}, "SCROLL")
 	inputs := []CommandEvidence{
-		{Opcode: native.OpRelaySet, Payload: []byte{5, 1}},
+		{Opcode: native.OpPWMSet, Payload: []byte{5, 1, 0}},
 		{Opcode: native.OpPWMSet, Payload: []byte{2, 0, 8}},
 		{Opcode: native.OpBuzzer, Payload: native.BuzzerPayload(880, 25)},
 		{Opcode: native.OpDisplayText, Payload: text},
 		{Opcode: native.OpDisplayText, Payload: scheduled},
-		{Opcode: native.OpRelayAllOff},
+		{Opcode: native.OpPWMAllOff},
 		{Opcode: native.OpPWMAllOff},
 	}
 	base := time.Now()
@@ -146,7 +146,7 @@ func TestMacroSaveFailureAndEmptySaveRetainTake(t *testing.T) {
 	if _, err := runner.StopRecording(true); err == nil || !runner.RecordingState().Active {
 		t.Fatal("empty save discarded active take")
 	}
-	runner.runtime.publishCommandEvidence(CommandEvidence{Opcode: native.OpRelayAllOff})
+	runner.runtime.publishCommandEvidence(CommandEvidence{Opcode: native.OpPWMAllOff})
 	saveErr = errors.New("disk unavailable")
 	if _, err := runner.StopRecording(true); err == nil || !runner.RecordingState().Active {
 		t.Fatal("failed save discarded take")
@@ -243,7 +243,7 @@ func TestMacroRecorderUsesWrappingMCUAcknowledgementDeltas(t *testing.T) {
 		t.Fatal(err)
 	}
 	runner.captureCommand(CommandEvidence{
-		Opcode: native.OpRelaySet, Payload: []byte{5, 1},
+		Opcode: native.OpPWMSet, Payload: []byte{5, 1, 0},
 		DeviceMicros: 0xFFFFFF00, Timed: true,
 	})
 	runner.captureCommand(CommandEvidence{
@@ -299,15 +299,15 @@ func TestBasicHostRecorderIgnoresHousekeepingAndUsesObservedDeltas(t *testing.T)
 		DeviceMicros: 200, Timed: true, ObservedAt: base.Add(10 * time.Millisecond),
 	})
 	runner.captureCommand(CommandEvidence{
-		Opcode: native.OpRelaySet, Payload: []byte{5, 1},
+		RelayEdge: true, RelayMask: 0, Timed: true, DeviceMicros: 1000,
 		ObservedAt: base.Add(25 * time.Millisecond),
 	})
 	runner.captureCommand(CommandEvidence{
-		Opcode: native.OpRelaySide, Payload: []byte{0, 0},
+		RelayEdge: true, RelayMask: 32, Timed: true, DeviceMicros: 76000,
 		ObservedAt: base.Add(100 * time.Millisecond),
 	})
 	runner.captureCommand(CommandEvidence{
-		Opcode: native.OpRelayAllOff, ObservedAt: base.Add(175 * time.Millisecond),
+		RelayEdge: true, RelayMask: 0, Timed: true, DeviceMicros: 151000, ObservedAt: base.Add(175 * time.Millisecond),
 	})
 	macro, err := runner.StopRecording(true)
 	if err != nil {

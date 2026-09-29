@@ -27,23 +27,40 @@ using RelaySideStatus = ControllerCore::RelaySideStatus;
 // ShiftRegisterRelaySink is the AVR-only output adapter for the shared core.
 class ShiftRegisterRelaySink {
 public:
+  ShiftRegisterRelaySink() = default;
   explicit ShiftRegisterRelaySink(ShiftRegisters &registers)
-      : registers_(registers) {}
+      : registers_(&registers), observer_(nullptr) {}
 
-  uint8_t activeRelayMask() const { return registers_.activeOutputs(); }
+  void bind(ShiftRegisters &registers) { registers_ = &registers; }
+
+  uint8_t activeRelayMask() const { return registers_->activeOutputs(); }
   void commitRelayMask(uint8_t activeMask, uint32_t) {
-    registers_.setActiveOutputs(activeMask);
-    registers_.service();
+    if (activeMask == registers_->activeOutputs()) return;
+    registers_->setActiveOutputs(activeMask);
+    registers_->service();
+    // Timestamp the hardware latch, before UART or other loop services can
+    // delay notification. No intermediate reversal edge is collapsed away.
+    const uint32_t appliedAtUs = micros();
+    if (observer_) observer_(activeMask, appliedAtUs);
   }
+  void setObserver(void (*observer)(uint8_t, uint32_t)) { observer_ = observer; }
 
 private:
-  ShiftRegisters &registers_;
+  ShiftRegisters *registers_;
+  void (*observer_)(uint8_t, uint32_t);
 };
 
 // RelayController is the thin AVR adapter for the portable motion sequencer.
 class RelayController {
 public:
+  RelayController() = default;
   explicit RelayController(ShiftRegisters &registers);
+  void begin(ShiftRegisters &registers,
+             void (*observer)(uint8_t, uint32_t),
+             uint32_t now = millis());
+  void setAppliedObserver(void (*observer)(uint8_t, uint32_t)) {
+    sink_.setObserver(observer);
+  }
 
   // Forces enable relays off before clearing direction/general relays.
   void begin(uint32_t now = millis());
@@ -73,6 +90,7 @@ public:
   // R2/R4 alter enable, and R5..R8 are applied directly.
   bool requestRelayForTest(uint8_t relayNumber, bool active,
                            uint32_t now = millis());
+  bool requestMask(uint8_t mask, uint32_t now = millis());
 
   RelaySideStatus sideStatus(RelaySide side) const;
   bool sideBusy(RelaySide side) const;

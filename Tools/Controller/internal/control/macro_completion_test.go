@@ -12,7 +12,7 @@ import (
 )
 
 func completedMacroStatus() native.MacroStatus {
-	return native.MacroStatus{Schema: native.MacroQueueSchema, ID: 5, State: native.MacroCompleted, AcceptedSteps: 3, ExecutedSteps: 3, TotalSteps: 3, AcceptedBytes: 42, StartedAtUS: 12345}
+	return native.MacroStatus{ID: 5, State: native.MacroCompleted, AcceptedSteps: 3, ExecutedSteps: 3, TotalSteps: 3, AcceptedBytes: 42, StartedAtUS: 12345}
 }
 
 func TestMCUCompletionPrioritizesFullEvidenceOverElapsedGrace(t *testing.T) {

@@ -47,6 +47,7 @@ var nestedCompletions = map[string][]string{
 		"default-off",
 		"eeprom-boot-opcodes",
 		"eeprom-menu-labels",
+		"macro-strip-test",
 		"eeprom-boot-opcodes,eeprom-menu-labels",
 	},
 	"silent":            {"status", "on", "off", "board", "host", "both"},

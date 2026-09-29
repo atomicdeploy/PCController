@@ -3,6 +3,15 @@
 RelayController::RelayController(ShiftRegisters &registers)
     : sink_(registers), machine_(sink_) {}
 
+void RelayController::begin(ShiftRegisters &registers,
+                            void (*observer)(uint8_t, uint32_t),
+                            uint32_t now) {
+  sink_.bind(registers);
+  sink_.setObserver(observer);
+  machine_.bind(sink_);
+  machine_.begin(now);
+}
+
 void RelayController::begin(uint32_t now) { machine_.begin(now); }
 
 void RelayController::allOff(uint32_t now) { machine_.allOff(now); }
@@ -33,6 +42,10 @@ bool RelayController::generalActive(uint8_t generalIndex) const {
 bool RelayController::requestRelayForTest(uint8_t relayNumber, bool active,
                                           uint32_t now) {
   return machine_.requestRelay(relayNumber, active, now);
+}
+
+bool RelayController::requestMask(uint8_t mask, uint32_t now) {
+  return machine_.requestMask(mask, now);
 }
 
 RelaySideStatus RelayController::sideStatus(RelaySide side) const {

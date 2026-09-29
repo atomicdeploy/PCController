@@ -37,7 +37,13 @@ using KeyEventCallback =
 // Key classifies active-low samples into click, double-click, and hold events.
 class Key {
 public:
+  // Static firmware storage is zero-filled before setup. The trivial default
+  // constructor lets the four-key array avoid duplicating that reset in the
+  // AVR global-constructor path; begin() establishes its live bit identity.
+  Key() = default;
   explicit Key(uint8_t bit);
+
+  void begin(uint8_t bit);
 
   void update(uint32_t now = millis());
 
@@ -61,14 +67,14 @@ private:
   uint8_t bit_;
   // All gesture intervals are far below 65.536 seconds, so 16-bit millisecond
   // timestamps preserve rollover safety while saving scarce ATmega328P SRAM.
-  uint16_t rawChangedAt_ = 0;
-  uint16_t lastRepeatAt_ = 0;
-  uint16_t pendingClickAt_ = 0;
+  uint16_t rawChangedAt_;
+  uint16_t lastRepeatAt_;
+  uint16_t pendingClickAt_;
   uint8_t initialized_ : 1;
   uint8_t rawState_ : 1;
   uint8_t stableState_ : 1;
   uint8_t holdActive_ : 1;
   uint8_t clickPending_ : 1;
-  KeyEventCallback eventCallback_ = nullptr;
-  void *eventContext_ = nullptr;
+  KeyEventCallback eventCallback_;
+  void *eventContext_;
 };
