@@ -31,6 +31,7 @@ const stockUpstream = join(out, `stock-${manifest.stockFixture.upstream.tag}`);
 const activeUpstream = join(out, `active-${manifest.activeUpstream.tag}`);
 const patched = join(out, `patched-${manifest.activeUpstream.tag}`);
 const bootstrap = process.argv.includes("--bootstrap");
+const bootloaderOnly = process.argv.includes("--bootloader-only");
 const exe = process.platform === "win32" ? ".exe" : "";
 const flashBytes = 32768;
 const flashWords = flashBytes / 2;
@@ -472,7 +473,7 @@ const legacyLedConflict = measureLegacyLedConflict();
 let applicationBytes = null;
 let mergedImage = null;
 const firmwareManifestPath = join(repo, ".build", "firmware", "firmware-manifest.json");
-if (existsSync(firmwareManifestPath)) {
+if (!bootloaderOnly && existsSync(firmwareManifestPath)) {
   const firmwareManifest = JSON.parse(readFileSync(firmwareManifestPath, "utf8"));
   const applicationArtifact = firmwareManifest.artifacts?.find((item) =>
     item.role === "application" && /PCController\.ino\.hex$/i.test(item.path ?? ""));
@@ -648,6 +649,7 @@ const result = {
     rjmpwpOpcode: `0x${customRjmp.toString(16)}`,
     rjmpwpDecodedTarget: `0x${decodedTarget.toString(16)}`,
     applicationMaximumBytes,
+    applicationValidation: bootloaderOnly ? "bootloader-only" : "current-firmware-if-present",
     currentApplicationBytes: applicationBytes,
     currentApplicationFreeBytes: applicationBytes === null ? null : applicationMaximumBytes - applicationBytes,
     retainedFeatureCode: "weU-jPrac",
@@ -669,6 +671,7 @@ const result = {
 writeFileSync(join(out, "build-manifest.json"), `${JSON.stringify(result, null, 2)}\n`);
 console.log(`Stock MiniCore images: exact textual HEX and decoded-byte match`);
 console.log(`Urboot-Custom ${manifest.activeUpstream.tag} (${result.custom.backend} backend): ${bytes.size}/${customAllocatedBytes} meaningful bytes, SHA256 ${result.custom.hexSha256}`);
-console.log(`Application ceiling: ${applicationMaximumBytes} bytes; current application: ${applicationBytes ?? "not built"}`);
+const applicationStatus = bootloaderOnly ? "not selected (bootloader-only validation)" : (applicationBytes ?? "not built");
+console.log(`Application ceiling: ${applicationMaximumBytes} bytes; current application: ${applicationStatus}`);
 if (mergedImage) console.log(`ISP merged image: structurally ready, SHA256 ${mergedImage.hexSha256}`);
 console.log(`Artifacts: ${out}`);

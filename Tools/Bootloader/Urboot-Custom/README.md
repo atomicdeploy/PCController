@@ -91,6 +91,15 @@ toolchain-cache directory follows `productConfigDirectory` in the canonical
 product package metadata, so a product rename does not leave a hidden literal
 in this builder.
 
+Add `--bootloader-only` when validating the optional 512-byte custom profile
+without selecting a matching application profile. This still reproduces the
+stock fixtures, applies and verifies the current custom patch, builds every
+size alternative, and records all bootloader hashes. It deliberately does not
+merge a firmware artifact built for MiniCore's selected 384-byte boot region.
+Without this switch, an existing canonical firmware manifest is validated and
+a merged ISP image is produced only when its address range fits the custom
+profile.
+
 Downloads inherit the current proxy environment. The configured route is tried
 first; where enabled, a failed source fetch is retried directly in a child
 process without altering the parent or machine environment. Proxy credentials

@@ -18,6 +18,7 @@ import {
   parseWingetCompilerManifest,
   run,
   sameSubstantive,
+  stableGoHelperPath,
   stableParts,
   synchronizeNpmLockHashes,
   validateHostSourcePolicy,
@@ -76,6 +77,36 @@ test('Windows command-script runner fixes the Node spawnSync EINVAL regression',
   } finally {
     rmSync(directory, { recursive: true, force: true })
   }
+})
+
+test('dependency resolver helpers use executable stable paths instead of Go temporary programs', () => {
+  const environment = { LOCALAPPDATA: 'C:\\Users\\Builder\\AppData\\Local' }
+  assert.equal(
+    stableGoHelperPath('toolchain-resolver', environment, 'win32'),
+    join(environment.LOCALAPPDATA, 'PCController', 'build-programs', 'toolchain-resolver.exe'),
+  )
+  assert.equal(
+    stableGoHelperPath('controller-tool', environment, 'win32'),
+    join(environment.LOCALAPPDATA, 'PCController', 'build-programs', 'controller-tool.exe'),
+  )
+  assert.throws(() => stableGoHelperPath('other', environment, 'win32'), /unknown stable Go helper/u)
+  const updater = readFileSync(join(repo, 'Tools', 'Dependencies', 'update.mjs'), 'utf8')
+  const resolverFunctions = updater.slice(
+    updater.indexOf('function resolvedToolchain'),
+    updater.indexOf('function parseTrailingJSONObject'),
+  )
+  assert.doesNotMatch(resolverFunctions, /\['run'/u)
+  assert.match(resolverFunctions, /buildStableGoHelper\('toolchain-resolver'/u)
+  assert.match(resolverFunctions, /buildStableGoHelper\('controller-tool'/u)
+  assert.match(updater, /process\.env\.CXX = selected\.cxx/u)
+  assert.match(updater, /virtualConfigureArguments\.push\('-G', 'Ninja'/u)
+  assert.match(updater, /process\.env\.CXX\.replaceAll\('\\\\', '\/'\)/u)
+  assert.match(updater, /`-DCMAKE_CXX_COMPILER=\$\{cmakeCxxCompiler\}`/u)
+  const compilerSelector = readFileSync(
+    join(repo, 'Tools', 'Dependencies', 'select-windows-compiler.mjs'), 'utf8',
+  )
+  assert.match(compilerSelector, /CXX=\$\{selectedCxx\}/u)
+  assert.match(compilerSelector, /JSON\.stringify\(\{ cc: selected, cxx: selectedCxx \}\)/u)
 })
 
 test('captured command failures retain child diagnostics for structured reports', () => {
@@ -281,7 +312,16 @@ test('scheduled updater validates every required candidate gate before PR creati
     'Go tests from stable paths', 'Web tests',
     'windowsResources', 'upx', 'function resolveToolchain(mode, directRetry)',
     'select-windows-compiler.mjs', 'generate-toolchain-policy.mjs',
+    "run(bootBuild, ['--bootloader-only']", 'application_limit_bytes',
   ]) assert.ok(updater.includes(expected), `updater missing ${expected}`)
+  const bootloaderBuilder = readFileSync(
+    join(repo, 'Tools', 'Bootloader', 'Urboot-Custom', 'build.mjs'), 'utf8',
+  )
+  assert.match(bootloaderBuilder, /process\.argv\.includes\("--bootloader-only"\)/u)
+  assert.match(bootloaderBuilder, /if \(!bootloaderOnly && existsSync\(firmwareManifestPath\)\)/u)
+  assert.match(updater, /application\?\.capacityBytes !== selectedApplicationMaximumBytes/u)
+  assert.match(updater, /application\.endAddress >= selectedApplicationMaximumBytes/u)
+  assert.match(updater, /bootManifest\?\.mergedImage !== null/u)
   assert.ok(
     updater.indexOf("step('Clean generated build outputs'") < updater.indexOf('installResolvedHostTools(hostTools'),
     'managed host tools must be provisioned after the root clean step',
