@@ -597,22 +597,56 @@ func (model Model) rfPage() string {
 	return model.scrollSelection(lines, 9)
 }
 
-func (model Model) programmingPage(snapshot control.Snapshot) string {
-	firstButtons := lipgloss.JoinHorizontal(lipgloss.Top, buttonGoodStyle.Render("I Initialize board"), " ", buttonStyle.Render("P Urclock probe"), " ", buttonStyle.Render("M Metadata"), " ", buttonStyle.Render("B Backup"))
-	secondButtons := lipgloss.JoinHorizontal(lipgloss.Top, buttonStyle.Render("R Reboot"), " ", buttonStyle.Render("D DTR/RTS reset"), " ", buttonGoodStyle.Render("U Flash"))
-	thirdButtons := lipgloss.JoinHorizontal(lipgloss.Top, buttonStyle.Render("Z USBasp driver"), " ", buttonStyle.Render("X Blank…"))
+func (model Model) programmingContent(snapshot control.Snapshot) []string {
 	lines := []string{
-		sectionHeader(model.width, "PROGRAMMING", boolWord(snapshot.Connected, "application protocol connected", "application protocol disconnected")),
-		firstButtons,
-		secondButtons,
-		thirdButtons,
-		"",
-		kv("Application protocol", boolWord(snapshot.Connected, "authenticated and available", "not connected")),
-		kv("Current firmware", firmwareIdentity(snapshot)),
-		"",
+		sectionHeader(model.width, "FIRMWARE", boolWord(snapshot.Connected, "Board connected", "Board disconnected")),
 	}
 	lines = append(lines, model.updateProgressLines()...)
-	return strings.Join(lines, "\n")
+	if model.update.State != "" {
+		lines = append(lines, "")
+	}
+	if snapshot.Hello.Name != "" {
+		lines = append(lines, kv("Board", snapshot.Hello.Name))
+	}
+	if snapshot.Port.Name != "" {
+		lines = append(lines, kv("Port", snapshot.Port.Name))
+	}
+	if snapshot.Hello.BuildHash != 0 {
+		lines = append(lines, kv("Firmware build", fmt.Sprintf("%08X", snapshot.Hello.BuildHash)))
+	}
+	if snapshot.Hello.BuildStamp != "" {
+		lines = append(lines, kv("Built", snapshot.Hello.BuildStamp))
+	}
+	lines = append(lines, "")
+	buttons := []string{buttonGoodStyle.Render("U Flash"), buttonStyle.Render("B Backup"), buttonStyle.Render("R Reboot"), buttonStyle.Render("D Reset"), buttonStyle.Render("M Identity"), buttonStyle.Render("P Probe bootloader"), buttonStyle.Render("I Initialize"), buttonStyle.Render("Z USBasp driver"), buttonBadStyle.Render("X Blank…")}
+	row := ""
+	for _, button := range buttons {
+		if row != "" && lipgloss.Width(row)+1+lipgloss.Width(button) > max(24, model.width-4) {
+			lines = append(lines, row)
+			row = ""
+		}
+		if row == "" {
+			row = button
+		} else {
+			row = lipgloss.JoinHorizontal(lipgloss.Top, row, " ", button)
+		}
+	}
+	if row != "" {
+		lines = append(lines, row)
+	}
+	return strings.Split(strings.Join(lines, "\n"), "\n")
+}
+
+func (model Model) programmingPage(snapshot control.Snapshot) string {
+	lines := model.programmingContent(snapshot)
+	height := max(3, model.contentHeight())
+	if len(lines) <= height {
+		return strings.Join(lines, "\n")
+	}
+	start := max(0, min(model.update.Scroll, len(lines)-height+1))
+	visible := append([]string(nil), lines[start:start+height-1]...)
+	visible = append(visible, labelStyle.Render(fmt.Sprintf("↑ ↓  Scroll · %d–%d of %d", start+1, start+height-1, len(lines))))
+	return strings.Join(visible, "\n")
 }
 
 func (model Model) integrationStatusLines() []string {
