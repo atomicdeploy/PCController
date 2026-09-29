@@ -4402,11 +4402,11 @@ func safeFlashCommand(
 			)
 		}
 	}
-	var output bytes.Buffer
+	var output boundedProgramOutput
 	if serialWasOpen {
-		output.Write(prepareOutput.Bytes())
-		if output.Len() != 0 && !strings.HasSuffix(output.String(), "\n") {
-			output.WriteByte('\n')
+		_, _ = output.Write(prepareOutput.Bytes())
+		if prepareOutput.Len() != 0 && !strings.HasSuffix(prepareOutput.String(), "\n") {
+			_, _ = output.Write([]byte{'\n'})
 		}
 	}
 	fmt.Fprintln(&output, "application UART released; guarded programmer transaction has exclusive ownership")
