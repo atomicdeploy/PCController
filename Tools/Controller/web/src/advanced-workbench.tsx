@@ -727,6 +727,9 @@ export function AdvancedWorkbench({
           <div className="advanced-actions">
             <Button disabled={!online} busy={busy === `strip config ${stripCount}`} onClick={() => void run(`strip config ${stripCount}`)}>{copy('Set LED count', 'تنظیم تعداد LED')}</Button>
             <Button icon={Play} disabled={!online} busy={busy === `strip rainbow ${stripCount} ${stripFPS}`} onClick={() => void run(`strip rainbow ${stripCount} ${stripFPS}`)}>{copy('Rolling rainbow', 'رنگین‌کمان متحرک')}</Button>
+            <Button icon={Sparkles} disabled={!online} busy={busy === `strip effect play police ${stripCount} ${stripFPS}`} onClick={() => void run(`strip effect play police ${stripCount} ${stripFPS}`)}>{copy('Police red / blue', 'پلیسی قرمز / آبی')}</Button>
+            <Button icon={Sparkles} disabled={!online} busy={busy === `strip effect play white-thunder ${stripCount} ${stripFPS}`} onClick={() => void run(`strip effect play white-thunder ${stripCount} ${stripFPS}`)}>{copy('White thunder', 'رعد سفید')}</Button>
+            <Button icon={Sparkles} disabled={!online} busy={busy === `strip effect play converging-red ${stripCount} ${stripFPS}`} onClick={() => void run(`strip effect play converging-red ${stripCount} ${stripFPS}`)}>{copy('Converging red dots', 'نقطه‌های قرمز همگرا')}</Button>
             <Button icon={CircleStop} onClick={() => void run('strip stop')}>{copy('Stop stream', 'توقف جریان')}</Button>
             <Button icon={Eraser} disabled={!online} onClick={() => void run('strip clear')}>{copy('Clear strip', 'خاموش کردن نوار')}</Button>
             <Button icon={Activity} onClick={() => void run('strip status')}>{copy('Stream status', 'وضعیت جریان')}</Button>

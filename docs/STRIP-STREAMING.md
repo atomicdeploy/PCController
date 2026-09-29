@@ -10,6 +10,10 @@ For a GRB WS2812B strip, compile with `PCCONTROLLER_USE_WS2812B=1`.
 | --- | --- |
 | `strip config 100` | Configure and clear 100 pixels |
 | `strip rainbow 100 20` | Start a host-owned rolling rainbow, up to 20 frames/s |
+| `strip effect list` | Return the discoverable host-rendered effect catalog as JSON |
+| `strip effect play police 100 20` | Alternate red and blue emergency-light sweeps |
+| `strip effect play white-thunder 100 30` | Play a deterministic white lightning strike and decay |
+| `strip effect play converging-red 100 30` | Move two fading red dots from the ends toward the center |
 | `strip status` | Report the active host stream |
 | `strip stop` | Cancel streaming and keep the final displayed frame |
 | `strip clear` | Stop streaming and turn every configured pixel off |
@@ -24,6 +28,12 @@ RGB frame text has six hex digits per configured pixel in red/green/blue order.
 Brightness 255 preserves each RGB byte exactly; lower single-pixel/fill brightness
 is scaled once on the host. Raw `strip frame` bytes are never scaled.
 
+The named effects are rendered from elapsed monotonic time on the host, so slow
+ACKs skip obsolete frames instead of making the animation drift. `thunder` and
+`lightning` are accepted aliases for `white-thunder`; `converge` and `red-dots`
+are accepted aliases for `converging-red`. The canonical IDs returned by
+`strip effect list` are the durable names other applications should advertise.
+
 Frames are sent as acknowledged staging chunks of at most 15 RGB pixels, followed
 by one show command. A failed chunk aborts transmission without showing a partial
 frame. The scheduler serializes complete frames, replaces old streams, observes
@@ -33,7 +43,10 @@ clears the previous tail. Frame length must not exceed the configured count.
 
 ## AVR timing and storage limits
 
-The 100-pixel wire buffer is 300 bytes. It shares storage with the MCU macro ring;
+The 100-pixel wire buffer is 300 bytes and the most recently committed frame is
+already RAM-resident. Storing multiple animation frames is not practical on a
+2 KiB ATmega328P; PCController therefore retains compact effect state on the host
+and streams rendered frames. The buffer shares storage with the MCU macro ring;
 retained MCU recordings must be saved/exported and cleared before strip use.
 Strip transmission is rejected while a precise MCU recording or playback is
 active. This protects the macro timeline and retained recording rather than

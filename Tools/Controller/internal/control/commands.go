@@ -743,7 +743,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 	})
 	mustRegister(shell.Command{
 		Name:    "strip",
-		Usage:   "strip config COUNT | frame RGBHEX | rainbow [COUNT [FPS]] | stop | status | pixel N R G B [BRIGHTNESS] | fill R G B [BRIGHTNESS] | clear",
+		Usage:   "strip config COUNT | frame RGBHEX | rainbow [COUNT [FPS]] | effect list | effect play NAME [COUNT [FPS]] | stop | status | pixel N R G B [BRIGHTNESS] | fill R G B [BRIGHTNESS] | clear",
 		Summary: "stream exact RGB frames or a rolling rainbow to 1..100 addressable LEDs",
 		Run: func(ctx context.Context, args []string) (string, error) {
 			if len(args) > 0 {
