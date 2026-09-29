@@ -1084,6 +1084,7 @@ type Store struct {
 	path               string
 	mu                 sync.RWMutex
 	value              Config
+	runtimeValue       Config
 	digest             [sha256.Size]byte
 	subscribers        map[uint64]chan Config
 	runtimeSubscribers map[uint64]chan Config
@@ -1109,14 +1110,15 @@ func openWithSecrets(path string, secrets *secretstore.Resolver) (*Store, error)
 	if err != nil {
 		return nil, err
 	}
+	runtimeValue, err := resolveConfigSecrets(value, secrets)
+	if err != nil {
+		return nil, fmt.Errorf("resolve configuration secrets: %w", err)
+	}
 	store := &Store{
-		path: resolved, value: clone(value), digest: digest,
+		path: resolved, value: clone(value), runtimeValue: clone(runtimeValue), digest: digest,
 		subscribers:        make(map[uint64]chan Config),
 		runtimeSubscribers: make(map[uint64]chan Config),
 		secrets:            secrets,
-	}
-	if _, err := store.Runtime(); err != nil {
-		return nil, fmt.Errorf("resolve configuration secrets: %w", err)
 	}
 	return store, nil
 }
@@ -1155,7 +1157,7 @@ func (store *Store) SetPresentationOverrides(appTitle, tagline string) error {
 	store.appTitleOverride = appTitle
 	store.taglineOverride = tagline
 	store.notifyLocked(store.value)
-	store.notifyRuntimeLocked(store.value)
+	store.notifyRuntimeLocked()
 	return nil
 }
 
@@ -1186,7 +1188,7 @@ func (store *Store) SetBuzzerRuntimeOverrides(override BuzzerRuntimeOverrides) e
 	}
 	store.buzzerOverride = override
 	store.notifyLocked(store.value)
-	store.notifyRuntimeLocked(store.value)
+	store.notifyRuntimeLocked()
 	return nil
 }
 
@@ -1252,10 +1254,12 @@ func (store *Store) Update(change func(*Config) error) (Config, error) {
 	if err != nil {
 		return clone(store.value), err
 	}
-	store.value = clone(loaded)
-	store.digest = digest
-	store.notifyLocked(loaded)
-	store.notifyRuntimeLocked(loaded)
+	runtimeValue, err := resolveConfigSecrets(loaded, store.secrets)
+	if err != nil {
+		store.commitLocked(loaded, digest, failClosedRuntime(loaded))
+		return store.effectiveLocked(), fmt.Errorf("resolve persisted configuration secrets: %w", err)
+	}
+	store.commitLocked(loaded, digest, runtimeValue)
 	return store.effectiveLocked(), nil
 }
 
@@ -1330,18 +1334,8 @@ func (store *Store) notifyLocked(value Config) {
 	}
 }
 
-func (store *Store) notifyRuntimeLocked(value Config) {
-	if store.appTitleOverride != "" {
-		value.UI.AppTitle = store.appTitleOverride
-	}
-	if store.taglineOverride != "" {
-		value.UI.Tagline = store.taglineOverride
-	}
-	applyBuzzerRuntimeOverrides(&value, store.buzzerOverride)
-	runtime, err := resolveConfigSecrets(value, store.secrets)
-	if err != nil {
-		runtime = failClosedRuntime(value)
-	}
+func (store *Store) notifyRuntimeLocked() {
+	runtime := store.runtimeLocked()
 	for _, subscriber := range store.runtimeSubscribers {
 		copyValue := clone(runtime)
 		select {
@@ -1359,12 +1353,23 @@ func (store *Store) notifyRuntimeLocked(value Config) {
 	}
 }
 
+func (store *Store) commitLocked(value Config, digest [sha256.Size]byte, runtimeValue Config) {
+	store.value = clone(value)
+	store.runtimeValue = clone(runtimeValue)
+	store.digest = digest
+	store.notifyLocked(value)
+	store.notifyRuntimeLocked()
+}
+
 func (store *Store) runtimeLocked() Config {
-	effective := store.effectiveLocked()
-	runtime, err := resolveConfigSecrets(effective, store.secrets)
-	if err != nil {
-		return failClosedRuntime(effective)
+	runtime := clone(store.runtimeValue)
+	if store.appTitleOverride != "" {
+		runtime.UI.AppTitle = store.appTitleOverride
 	}
+	if store.taglineOverride != "" {
+		runtime.UI.Tagline = store.taglineOverride
+	}
+	applyBuzzerRuntimeOverrides(&runtime, store.buzzerOverride)
 	return runtime
 }
 
@@ -1423,10 +1428,12 @@ func (store *Store) RememberDevice(identity DeviceIdentity) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	store.value = clone(loaded)
-	store.digest = digest
-	store.notifyLocked(loaded)
-	store.notifyRuntimeLocked(loaded)
+	runtimeValue, err := resolveConfigSecrets(loaded, store.secrets)
+	if err != nil {
+		store.commitLocked(loaded, digest, failClosedRuntime(loaded))
+		return true, fmt.Errorf("resolve persisted configuration secrets: %w", err)
+	}
+	store.commitLocked(loaded, digest, runtimeValue)
 	return true, nil
 }
 
@@ -1444,13 +1451,11 @@ func (store *Store) Reload() (Config, bool, error) {
 	if digest == store.digest {
 		return store.effectiveLocked(), false, nil
 	}
-	if _, err := resolveConfigSecrets(value, store.secrets); err != nil {
+	runtimeValue, err := resolveConfigSecrets(value, store.secrets)
+	if err != nil {
 		return Config{}, false, fmt.Errorf("resolve configuration secrets: %w", err)
 	}
-	store.value = clone(value)
-	store.digest = digest
-	store.notifyLocked(value)
-	store.notifyRuntimeLocked(value)
+	store.commitLocked(value, digest, runtimeValue)
 	return store.effectiveLocked(), true, nil
 }
 
