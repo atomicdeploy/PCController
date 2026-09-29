@@ -171,29 +171,13 @@ export function applyPushedOutputEvent(
   if (led) return applyStatusLEDEvent(snapshot, event, source)
   const segment = segmentStateFromEvent(event)
   if (!segment) return snapshot
-  const current: FrontPanelState = snapshot.front_panel ?? {
-    schema: 2,
-    raw_segments: [0, 0, 0, 0],
-    brightness: 0,
-    blink: false,
-    segments_active: true,
-    category_selector: false,
-    lcd_address: 0,
-    lcd_available: false,
-    lcd_backlight: false,
-    lcd_line_1: '',
-    lcd_line_2: '',
-    pressed_keys: 0,
-    menu_page: 0,
-    program_mode: 0,
-    host_captured: false,
-    host_state: 0,
-    host_editable_value: 0,
-  }
+  // SEGMENT_CHANGED carries only four raw digits and brightness. It may
+  // refresh those fields inside a previously fetched exact snapshot, but it
+  // must never synthesize menu/LCD/key authority from zero values.
+  if (!snapshot.have_front_panel || !snapshot.front_panel) return snapshot
   return {
     ...snapshot,
-    front_panel: { ...current, ...segment, segments_active: true },
-    have_front_panel: true,
+    front_panel: { ...snapshot.front_panel, ...segment, segments_active: true },
     front_panel_updated: event.time,
   }
 }
