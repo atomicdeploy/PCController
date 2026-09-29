@@ -103,15 +103,19 @@ The equivalent POSIX commands are:
 - `--report FILE` writes the structured JSON result used by CI.
 - `--no-direct-retry` enforces proxy-only network access.
 
-For a firmware-only policy check, the isolated resolver avoids importing the
+The updater compiles the isolated firmware resolver without importing the
 serial, IPC, TUI, and integration packages:
 
 ```cmd
-cd Tools\Controller
-go run .\cmd\toolchain-resolver check --include-canary --require-current
+update-dependencies.cmd --check --require-current
 ```
 
-That command also performs no device I/O.
+That command performs no device I/O. Its Go resolver and Controller helper are
+compiled to stable, product-owned executable paths before use. On Windows they
+live below `%LOCALAPPDATA%\<productConfigDirectory>\build-programs`; the updater
+never executes a program from Go's temporary build directory. This remains
+compatible with the machine-level no-execute guard on `GOTMPDIR` and avoids
+randomized executable identities.
 
 ## Proxy inheritance
 
@@ -146,7 +150,8 @@ areas still work together:
   build-system tests;
 - regeneration of the runtime Go policy after candidate lock/hash changes;
 - exact firmware toolchain bootstrap and firmware compile;
-- firmware size at or below the 32,256-byte Urboot-Custom application ceiling;
+- selected firmware size and address range within the selected MiniCore
+  profile's declared application ceiling;
 - active Urboot source hashes, clean diff application, exact `u8.0` stock
   fixture hashes, and a custom image within 512 bytes;
 - stable-path Go tests, vetting, host build, Win32 resources, and UPX packaging;
@@ -205,7 +210,15 @@ known-broken PR. The issue is closed after a later candidate passes. Dependabot
 separately maintains stable GitHub Actions, Go modules, and the two npm lock
 domains.
 
-Before opening a dependency PR, the workflow generates
+Before opening a dependency PR, the workflow validates the selected MiniCore
+firmware against that profile's declared application limit. Urboot-Custom is a
+separately selectable 512-byte profile, so dependency maintenance validates
+its pinned sources, patch, image, hashes, metadata, and size in explicit
+bootloader-only mode; it never pretends that the selected 384-byte-profile
+application can be merged into that different flash layout. A merged ISP image
+remains a separate profile-selection gate.
+
+The workflow then generates
 `.build/dependencies/dependency-pr-plan.json` and `dependency-pr.md` from the
 same report that passed validation. This makes the PR description repeatable
 and prevents a hand-maintained body from drifting away from the tested
@@ -217,10 +230,10 @@ network failure, case-insensitive proxy inheritance, and the single bounded
 direct fallback. Full candidate validation covers the integrated build matrix.
 
 The workflow definition, local resolver checks, and source-level tests have
-been validated in this workspace. A real scheduled/manual GitHub Actions run
-has **not yet been observed**, so hosted-run success, artifact publication, PR
-creation, and blocked-issue lifecycle remain CI acceptance items rather than
-claimed live results.
+been validated in this workspace. Scheduled GitHub Actions runs have exercised
+artifact publication and the blocked-issue lifecycle. A successful hosted
+candidate run, dependency PR creation, and automatic issue closure remain the
+final live acceptance path whenever stable updates are available.
 
 ## Review rules
 

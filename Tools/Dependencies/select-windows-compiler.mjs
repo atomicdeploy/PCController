@@ -92,6 +92,12 @@ function main() {
     selected = selectLockedCompiler()
   }
   invariant(selected, `locked Windows C compiler ${compiler.compiler_version} / ${compiler.target} was not discoverable after provisioning`)
+  const selectedCxx = selected.replace(/gcc\.exe$/iu, 'g++.exe')
+  invariant(selectedCxx !== selected && existsSync(selectedCxx),
+    `locked Windows C++ compiler beside ${selected} is missing`)
+  const cxxIdentity = probe(selectedCxx)
+  invariant(cxxIdentity?.version === compiler.compiler_version && cxxIdentity.target === compiler.target,
+    `locked Windows C++ compiler identity does not match ${compiler.compiler_version} / ${compiler.target}`)
 
   const githubPath = environmentValue('GITHUB_PATH')
   const githubEnv = environmentValue('GITHUB_ENV')
@@ -99,12 +105,13 @@ function main() {
     'GitHub Actions compiler exports require both GITHUB_PATH and GITHUB_ENV')
   if (githubPath && githubEnv) {
     appendFileSync(githubPath, `${dirname(selected)}\n`)
-    appendFileSync(githubEnv, `CC=${selected}\n`)
+    appendFileSync(githubEnv, `CC=${selected}\nCXX=${selectedCxx}\n`)
   }
   process.stdout.write(`Selected locked Windows C compiler: ${selected}\n`)
   const version = spawnSync(selected, ['--version'], { encoding: 'utf8', windowsHide: true })
   invariant(version.status === 0, 'the selected compiler failed its final version check')
   process.stdout.write(version.stdout)
+  process.stdout.write(`${JSON.stringify({ cc: selected, cxx: selectedCxx })}\n`)
 }
 
 try {

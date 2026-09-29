@@ -15,7 +15,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { arch, platform } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { delimiter, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { loadProjectEnv } from '../Build/env.mjs'
@@ -692,17 +692,42 @@ function resolveHostTools(directRetry) {
   return resolved
 }
 
+function stableGoHelperPath(name, environment = process.env, targetPlatform = platform()) {
+  if (!['controller-tool', 'toolchain-resolver'].includes(name)) {
+    throw new Error(`unknown stable Go helper ${name}`)
+  }
+  if (targetPlatform === 'win32') {
+    const localAppData = String(environment.LOCALAPPDATA ?? '').trim()
+    if (!localAppData) throw new Error('LOCALAPPDATA is required for stable Go helper paths on Windows')
+    const productDirectory = String(PRODUCT_METADATA.productConfigDirectory ?? '').trim()
+    if (!productDirectory) throw new Error('productConfigDirectory is required for stable Go helper paths')
+    return join(localAppData, productDirectory, 'build-programs', `${name}.exe`)
+  }
+  return join(repo, '.build', 'helpers', name)
+}
+
+function buildStableGoHelper(name, source, environment) {
+  const executable = stableGoHelperPath(name)
+  mkdirSync(dirname(executable), { recursive: true })
+  run('go', ['build', '-buildvcs=false', '-trimpath', '-o', executable, source], {
+    cwd: controller, capture: true, env: environment,
+  })
+  return executable
+}
+
 function resolvedToolchain(action, extra = [], capture = true) {
-  return run('go', ['run', './cmd/toolchain-resolver', action,
-    '--policy', toolchainPolicyPath, '--lock', toolchainLockPath, ...extra], {
-    cwd: controller, capture, env: githubEnvironment(),
+  const environment = githubEnvironment()
+  const executable = buildStableGoHelper('toolchain-resolver', './cmd/toolchain-resolver', environment)
+  return run(executable, [action, '--policy', toolchainPolicyPath, '--lock', toolchainLockPath, ...extra], {
+    cwd: controller, capture, env: environment,
   })
 }
 
 function controllerToolchain(action, extra = [], capture = true) {
-  return run('go', ['run', './cmd/controller', 'toolchain', action,
-    '--policy', toolchainPolicyPath, '--lock', toolchainLockPath, ...extra], {
-    cwd: controller, capture, env: githubEnvironment(),
+  const environment = githubEnvironment()
+  const executable = buildStableGoHelper('controller-tool', './cmd/controller', environment)
+  return run(executable, ['toolchain', action, '--policy', toolchainPolicyPath, '--lock', toolchainLockPath, ...extra], {
+    cwd: controller, capture, env: environment,
   })
 }
 
@@ -867,7 +892,17 @@ function findNamed(root, wanted) {
 function installResolvedHostTools(lock, directRetry) {
   validateHostToolsLock(lock)
   if (platform() === 'win32') {
-    run(process.execPath, [join(here, 'select-windows-compiler.mjs')], { capture: false })
+    const selection = run(process.execPath, [join(here, 'select-windows-compiler.mjs')])
+    process.stdout.write(selection.stdout)
+    const selected = parseTrailingJSONObject(selection.stdout, 'Windows compiler selection')
+    for (const field of ['cc', 'cxx']) {
+      if (typeof selected[field] !== 'string' || !existsSync(selected[field])) {
+        throw new Error(`Windows compiler selection has no usable ${field}`)
+      }
+    }
+    process.env.CC = selected.cc
+    process.env.CXX = selected.cxx
+    process.env.PATH = `${dirname(selected.cc)}${delimiter}${process.env.PATH ?? ''}`
   }
   const goBin = join(buildReportDir, 'tools', 'go', 'bin')
   mkdirSync(goBin, { recursive: true })
@@ -958,20 +993,46 @@ function validateEverything(hostTools, directRetry) {
   const bootBuild = platform() === 'win32'
     ? join(repo, 'Tools', 'Bootloader', 'Urboot-Custom', 'build.cmd')
     : join(repo, 'Tools', 'Bootloader', 'Urboot-Custom', 'build.sh')
-  step('Urboot-Custom active patch/build', () => run(bootBuild, [], { capture: false }))
+  // The selected MiniCore firmware profile reserves a 384-byte stock Urboot
+  // region. Urboot-Custom is a separately selectable 512-byte profile, so its
+  // source/patch/image validation must not try to merge the selected firmware
+  // artifact into a different flash layout.
+  step('Urboot-Custom active patch/build', () => run(bootBuild, ['--bootloader-only'], { capture: false }))
   const virtualBuild = join(repo, '.build', 'virtual-board-dependency-update')
-  step('VirtualBoard configure', () => run('cmake', ['-S', join(repo, 'Tools', 'VirtualBoard'), '-B', virtualBuild, '-DBUILD_TESTING=ON'], { capture: false }))
+  const virtualConfigureArguments = [
+    '-S', join(repo, 'Tools', 'VirtualBoard'),
+    '-B', virtualBuild,
+    '-DBUILD_TESTING=ON',
+    '-DCMAKE_BUILD_TYPE=Release',
+  ]
+  if (platform() === 'win32') {
+    if (!process.env.CXX) throw new Error('VirtualBoard validation requires the selected locked Windows C++ compiler')
+    const cmakeCxxCompiler = process.env.CXX.replaceAll('\\', '/')
+    virtualConfigureArguments.push('-G', 'Ninja', `-DCMAKE_CXX_COMPILER=${cmakeCxxCompiler}`)
+  }
+  step('VirtualBoard configure', () => run('cmake', virtualConfigureArguments, { capture: false }))
   step('VirtualBoard build', () => run('cmake', ['--build', virtualBuild, '--config', 'Release'], { capture: false }))
   step('VirtualBoard tests', () => run('ctest', ['--test-dir', virtualBuild, '-C', 'Release', '--output-on-failure'], { capture: false }))
 
   const firmwareManifest = readJSON(join(repo, '.build', 'firmware', 'firmware-manifest.json'))
-  const applicationBytes = firmwareManifest?.artifacts?.find((artifact) => artifact.role === 'application')?.dataBytes
-  if (!Number.isInteger(applicationBytes) || applicationBytes > 32256) {
-    throw new Error(`firmware application ${applicationBytes ?? '<missing>'} exceeds Urboot-Custom ceiling 32256`)
+  const application = firmwareManifest?.artifacts?.find((artifact) => artifact.role === 'application')
+  const applicationBytes = application?.dataBytes
+  const selectedApplicationMaximumBytes = readJSON(toolchainPolicyPath)?.target?.application_limit_bytes
+  if (!Number.isInteger(selectedApplicationMaximumBytes) || selectedApplicationMaximumBytes <= 0) {
+    throw new Error('selected firmware profile has no valid application_limit_bytes')
+  }
+  if (!Number.isInteger(applicationBytes) || applicationBytes > selectedApplicationMaximumBytes ||
+      application?.capacityBytes !== selectedApplicationMaximumBytes ||
+      !Number.isInteger(application?.endAddress) || application.endAddress >= selectedApplicationMaximumBytes) {
+    throw new Error(
+      `firmware application ${applicationBytes ?? '<missing>'} does not fit selected profile ceiling ${selectedApplicationMaximumBytes}`,
+    )
   }
   const bootManifest = readJSON(join(repo, '.build', 'bootloader', 'urboot-custom', 'build-manifest.json'))
   if (bootManifest?.activeUpstream?.tag !== readJSON(toolchainLockPath).bootloader.tag ||
-      bootManifest?.custom?.meaningfulBytes > 512 || bootManifest?.custom?.applicationMaximumBytes !== 32256) {
+      bootManifest?.custom?.meaningfulBytes > 512 || bootManifest?.custom?.applicationMaximumBytes !== 32256 ||
+      bootManifest?.custom?.applicationValidation !== 'bootloader-only' ||
+      bootManifest?.custom?.currentApplicationBytes !== null || bootManifest?.mergedImage !== null) {
     throw new Error('Urboot-Custom manifest does not match the resolved stable source or 512-byte/32256-byte ceilings')
   }
   let hostManifest = null
@@ -983,9 +1044,9 @@ function validateEverything(hostTools, directRetry) {
     }
   }
   validations.push({
-    name: 'Memory ceilings', status: 'passed',
+    name: 'Selected firmware and optional Urboot-Custom ceilings', status: 'passed',
     firmware_application_bytes: applicationBytes,
-    application_maximum_bytes: 32256,
+    application_maximum_bytes: selectedApplicationMaximumBytes,
     urboot_custom_bytes: bootManifest.custom.meaningfulBytes,
     urboot_custom_allocated_bytes: 512,
   })
@@ -1128,6 +1189,7 @@ export {
   compareVersions,
   parseWingetCompilerManifest,
   sameSubstantive,
+  stableGoHelperPath,
   stableParts,
   synchronizeNpmLockHashes,
   run,
