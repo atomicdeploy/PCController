@@ -1599,16 +1599,12 @@ func (client *Client) SetRelay(
 	if relayNumber < 1 || relayNumber > 8 {
 		return fmt.Errorf("relay number %d is outside R1..R8", relayNumber)
 	}
-	payload, err := native.RelayPayload(relayNumber-1, active)
-	if err != nil {
-		return err
-	}
 	if active && relayNumber <= 4 {
 		if err := client.requireMotionAllowed(ctx); err != nil {
 			return err
 		}
 	}
-	return client.runtime.Command(ctx, native.OpRelaySet, payload)
+	return client.runtime.SetRelay(ctx, relayNumber-1, active)
 }
 
 // SetMotionSide requests interlocked Up, Down, or Stop for side 1 or 2.
@@ -1658,11 +1654,7 @@ func (client *Client) ToggleRelay(
 			return false, err
 		}
 	}
-	payload, err := native.RelayPayload(relayNumber-1, active)
-	if err != nil {
-		return false, err
-	}
-	if err := client.runtime.Command(ctx, native.OpRelaySet, payload); err != nil {
+	if err := client.runtime.SetRelay(ctx, relayNumber-1, active); err != nil {
 		return false, err
 	}
 	return active, nil

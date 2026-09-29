@@ -1736,6 +1736,48 @@ func (runtime *Runtime) Command(
 	return nil
 }
 
+// SetRelay applies one relay mutation and, for the directly latched general
+// outputs R5..R8, requires an authoritative STATUS readback before returning
+// success. The board emits a changed-only relay event as well, but that event
+// may arrive after the ACK. Relying on it alone leaves HTTP, IPC, library, and
+// UI callers briefly observing the previous relay mask after a successful
+// command response.
+//
+// R1..R4 remain ACK-based because their direction/enable changes may be
+// deliberately deferred by the break-before-make motion sequencer.
+func (runtime *Runtime) SetRelay(ctx context.Context, index byte, active bool) error {
+	payload, err := native.RelayPayload(index, active)
+	if err != nil {
+		return err
+	}
+	if err := runtime.Command(ctx, native.OpRelaySet, payload); err != nil {
+		return err
+	}
+	if index < 4 {
+		return nil
+	}
+	status, err := runtime.RefreshStatus(ctx)
+	if err != nil {
+		return fmt.Errorf(
+			"confirm acknowledged relay R%d %s: %w",
+			index+1,
+			onOff(active),
+			err,
+		)
+	}
+	bit := byte(1 << index)
+	readbackActive := status.ActiveRelays&bit != 0
+	if readbackActive != active {
+		return fmt.Errorf(
+			"relay R%d command was acknowledged but STATUS readback mask 0x%02X reports it %s",
+			index+1,
+			status.ActiveRelays,
+			onOff(readbackActive),
+		)
+	}
+	return nil
+}
+
 func acknowledgedCommandEvidence(ctx context.Context, opcode byte, payload []byte, frame native.Frame) CommandEvidence {
 	deviceMicros, timed := native.ResponseDeviceMicros(frame)
 	return CommandEvidence{

@@ -101,6 +101,14 @@ prevents an asynchronous or stale frame from satisfying an unrelated
 in-flight request even if a malformed firmware build reuses the same nonzero
 sequence.
 
+ACK confirms command acceptance, not necessarily the state later exposed to
+clients. The shared mutation path for directly latched general relays R5-R8
+therefore follows `RELAY_SET` ACK with a correlated `GET_STATUS` request and
+reports success only when the returned `activeRelays` bit matches. That STATUS
+response refreshes the shared snapshot before CLI, HTTP, IPC, or Go-library
+callers receive success. R1-R4 retain sequencer-aware ACK semantics because a
+safe break-before-make transition may intentionally defer their applied state.
+
 ## Identity
 
 Automatic port detection must send `HELLO` and accept only a valid `HELLO`
