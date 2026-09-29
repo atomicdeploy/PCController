@@ -1066,7 +1066,7 @@ void showPwmChannel() {
 
 // Alternates timer total/remaining while indefinite learning keeps LErn.
 void showLearningProgress(uint32_t at) {
-  if (learningMode != RF_LEARN_TIMER) {
+  if (learningTotalSeconds == 0) {
     display.showText(commonText(TextLearn));
     return;
   }
