@@ -748,7 +748,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 		Run: func(ctx context.Context, args []string) (string, error) {
 			if len(args) > 0 {
 				switch strings.ToLower(args[0]) {
-				case "config", "frame", "rainbow", "stop", "status":
+				case "config", "frame", "rainbow", "effect", "stop", "status":
 					return stripStreamCommand(ctx, outputs, args)
 				}
 			}
