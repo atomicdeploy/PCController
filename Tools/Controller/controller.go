@@ -399,8 +399,12 @@ type Event struct {
 	Gesture     string            `json:"gesture,omitempty"`
 	Source      string            `json:"source,omitempty"`
 	Target      string            `json:"target,omitempty"`
+	Targets     []string          `json:"targets,omitempty"`
 	MessageType string            `json:"message_type,omitempty"`
 	Action      string            `json:"action,omitempty"`
+	Severity    string            `json:"severity,omitempty"`
+	Correlation string            `json:"correlation,omitempty"`
+	Delivery    string            `json:"delivery,omitempty"`
 	Metadata    map[string]string `json:"metadata,omitempty"`
 	SourceID    *byte             `json:"source_id,omitempty"`
 	RFID        *byte             `json:"rf_id,omitempty"`
@@ -442,14 +446,17 @@ type OpcodeFrame struct {
 // bridge, and LCD presentation. Action is descriptive; it is never executed
 // implicitly. Remote command execution uses the authenticated execute method.
 type TextMessage struct {
-	Source   string            `json:"source"`
-	Target   string            `json:"target"`
-	Type     string            `json:"type"`
-	Text     string            `json:"text"`
-	Line1    string            `json:"line1,omitempty"`
-	Line2    string            `json:"line2,omitempty"`
-	Action   string            `json:"action,omitempty"`
-	Metadata map[string]string `json:"metadata,omitempty"`
+	Source      string            `json:"source"`
+	Targets     []string          `json:"targets"`
+	Type        string            `json:"type"`
+	Text        string            `json:"text"`
+	Line1       string            `json:"line1,omitempty"`
+	Line2       string            `json:"line2,omitempty"`
+	Action      string            `json:"action,omitempty"`
+	Severity    string            `json:"severity,omitempty"`
+	Correlation string            `json:"correlation,omitempty"`
+	Delivery    string            `json:"delivery,omitempty"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
 }
 
 // Client owns one controller runtime, command engine, and host integration state.
@@ -2111,15 +2118,29 @@ func (client *Client) SendTextMessage(
 	message TextMessage,
 ) (Event, error) {
 	message.Source = strings.ToLower(strings.TrimSpace(message.Source))
-	message.Target = strings.ToLower(strings.TrimSpace(message.Target))
 	message.Type = strings.ToLower(strings.TrimSpace(message.Type))
 	message.Text = strings.TrimSpace(message.Text)
 	message.Action = strings.TrimSpace(message.Action)
+	message.Severity = strings.ToLower(strings.TrimSpace(message.Severity))
+	message.Correlation = strings.TrimSpace(message.Correlation)
+	message.Delivery = strings.ToLower(strings.TrimSpace(message.Delivery))
 	if !oneOf(message.Source, "client", "server", "bridge", "board", "lcd", "host", "ipc", "rest", "webhook", "websocket", "socket_io") {
 		return Event{}, fmt.Errorf("unsupported message source %q", message.Source)
 	}
-	if !oneOf(message.Target, "client", "server", "bridge", "board", "lcd", "host", "all") {
-		return Event{}, fmt.Errorf("unsupported message target %q", message.Target)
+	if message.Severity == "" {
+		message.Severity = "info"
+	}
+	if !oneOf(message.Severity, "debug", "info", "success", "warning", "error") {
+		return Event{}, fmt.Errorf("unsupported message severity %q", message.Severity)
+	}
+	if message.Delivery == "" {
+		message.Delivery = "sync"
+	}
+	if !oneOf(message.Delivery, "sync", "async") {
+		return Event{}, fmt.Errorf("unsupported message delivery %q", message.Delivery)
+	}
+	if len(message.Correlation) > 96 {
+		return Event{}, errors.New("message correlation exceeds 96 characters")
 	}
 	if message.Type == "" || len(message.Type) > 32 {
 		return Event{}, errors.New("message type must contain 1..32 characters")
@@ -2145,29 +2166,16 @@ func (client *Client) SendTextMessage(
 			return Event{}, errors.New("message metadata keys/values exceed limits")
 		}
 	}
-	if message.Target == "lcd" || message.Target == "board" {
-		line1, line2 := message.Line1, message.Line2
-		if line1 == "" && line2 == "" {
-			line1, line2 = splitLCDText(message.Text)
-		}
-		payload, err := native.DisplayTextPayload(
-			native.DisplayLCD,
-			0,
-			lcdASCII(line1)+lcdASCII(line2),
-		)
-		if err != nil {
-			return Event{}, err
-		}
-		if err := client.runtime.Command(ctx, native.OpDisplayText, payload); err != nil {
-			return Event{}, err
-		}
-	}
-	event := client.runtime.PublishStructuredEvent(control.Event{
-		Kind: "message", Text: message.Text,
-		Source: message.Source, Target: message.Target,
-		MessageType: message.Type, Action: message.Action,
+	event, err := control.SendMessage(ctx, client.runtime, control.Message{
+		Source: message.Source, Targets: message.Targets,
+		MessageType: message.Type, Text: message.Text,
+		Line1: message.Line1, Line2: message.Line2, Action: message.Action,
+		Severity: message.Severity, Correlation: message.Correlation, Delivery: message.Delivery,
 		Metadata: message.Metadata,
 	})
+	if err != nil {
+		return Event{}, err
+	}
 	return publicEvent(event), nil
 }
 
@@ -2506,7 +2514,8 @@ func publicEvent(event control.Event) Event {
 		},
 		Reason: event.Reason, State: event.State,
 		Gesture: event.Gesture, Source: event.Source,
-		Target: event.Target, MessageType: event.MessageType, Action: event.Action,
+		Target: event.Target, Targets: append([]string(nil), event.Targets...), MessageType: event.MessageType, Action: event.Action,
+		Severity: event.Severity, Correlation: event.Correlation, Delivery: event.Delivery,
 		Metadata: cloneStringMap(event.Metadata),
 		RFCode:   event.RFCode, RFBits: event.RFBits,
 		RFProtocol: event.RFProtocol, RFPulseUS: event.RFPulseUS,

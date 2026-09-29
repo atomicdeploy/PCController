@@ -420,7 +420,7 @@ func TestOutboundWebSocketClientsInteroperateWithRawRFC6455Servers(t *testing.T)
 
 		cursor = client.LatestEventID()
 		messagePacket, _ := json.Marshal([]any{"message", controller.TextMessage{
-			Source: "client", Target: "host", Type: "actionable.notice",
+			Source: "client", Targets: []string{"host"}, Type: "actionable.notice",
 			Text: "open events", Action: "app.page:events",
 		}})
 		peer.writeText(t, "42"+string(messagePacket))

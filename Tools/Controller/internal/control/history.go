@@ -50,8 +50,12 @@ type TimelineEntry struct {
 	Gesture     string            `json:"gesture,omitempty"`
 	Source      string            `json:"source,omitempty"`
 	Target      string            `json:"target,omitempty"`
+	Targets     []string          `json:"targets,omitempty"`
 	MessageType string            `json:"message_type,omitempty"`
 	Action      string            `json:"action,omitempty"`
+	Severity    string            `json:"severity,omitempty"`
+	Correlation string            `json:"correlation,omitempty"`
+	Delivery    string            `json:"delivery,omitempty"`
 	Metadata    map[string]string `json:"metadata,omitempty"`
 	RFCode      uint32            `json:"rf_code,omitempty"`
 	RFBits      byte              `json:"rf_bits,omitempty"`
@@ -273,7 +277,9 @@ func (runtime *Runtime) recordTimeline(event Event) {
 		ID: event.ID, Time: event.Time, Kind: event.Kind, Text: event.Text,
 		Lifecycle: event.Lifecycle, State: event.State, Reason: event.Reason,
 		Port: event.Port.Name, Gesture: event.Gesture, Source: event.Source,
-		Target: event.Target, MessageType: event.MessageType, Action: event.Action,
+		Target: event.Target, Targets: append([]string(nil), event.Targets...),
+		MessageType: event.MessageType, Action: event.Action,
+		Severity: event.Severity, Correlation: event.Correlation, Delivery: event.Delivery,
 		Metadata: cloneStringValues(event.Metadata),
 		RFCode:   event.RFCode, RFBits: event.RFBits,
 		RFProtocol: event.RFProtocol, RFPulseUS: event.RFPulseUS,

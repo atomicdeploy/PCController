@@ -227,8 +227,12 @@ export interface ControllerEvent {
   reason?: string
   source?: string
   target?: string
+  targets?: string[]
   message_type?: string
   action?: string
+  severity?: string
+  correlation?: string
+  delivery?: string
   gesture?: string
   key?: number
   rf_id?: number
@@ -550,6 +554,11 @@ export interface ToastMessage {
   tone: 'info' | 'success' | 'warning' | 'danger'
   title: string
   detail?: string
+  messageEventID?: number
+  correlation?: string
+  action?: string
+  actionLabel?: string
+  persistent?: boolean
 }
 
 export interface DialogState {

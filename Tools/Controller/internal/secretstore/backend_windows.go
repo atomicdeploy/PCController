@@ -15,6 +15,7 @@ const (
 	credentialTypeGeneric         = 1
 	credentialPersistLocalMachine = 2
 	errorNotFound                 = syscall.Errno(1168)
+	errorNoSuchLogonSession       = syscall.Errno(1312)
 )
 
 var (
@@ -43,6 +44,20 @@ type nativeCredential struct {
 
 type windowsBackend struct {
 	namespace string
+}
+
+func mapCredentialCallError(operation string, result uintptr, callErr error, notFound bool) error {
+	if result != 0 {
+		return nil
+	}
+	if notFound && errors.Is(callErr, errorNotFound) {
+		return ErrNotFound
+	}
+	return fmt.Errorf("%s: %w", operation, callErr)
+}
+
+func credentialManagerUnavailableForLogon(err error) bool {
+	return errors.Is(err, errorNoSuchLogonSession)
 }
 
 func newPlatformBackend(namespace string) Backend {
@@ -80,11 +95,8 @@ func (backend *windowsBackend) Get(name string) (string, error) {
 		uintptr(unsafe.Pointer(targetUTF16)), credentialTypeGeneric, 0,
 		uintptr(unsafe.Pointer(&credential)),
 	)
-	if result == 0 {
-		if errors.Is(callErr, errorNotFound) {
-			return "", ErrNotFound
-		}
-		return "", fmt.Errorf("CredReadW: %w", callErr)
+	if err := mapCredentialCallError("CredReadW", result, callErr, true); err != nil {
+		return "", err
 	}
 	defer procCredFree.Call(uintptr(unsafe.Pointer(credential)))
 	if credential == nil || credential.CredentialBlobSize == 0 || credential.CredentialBlob == nil {
@@ -113,10 +125,7 @@ func (backend *windowsBackend) Set(name, value string) error {
 		Persist: credentialPersistLocalMachine,
 	}
 	result, _, callErr := procCredWriteW.Call(uintptr(unsafe.Pointer(&credential)), 0)
-	if result == 0 {
-		return fmt.Errorf("CredWriteW: %w", callErr)
-	}
-	return nil
+	return mapCredentialCallError("CredWriteW", result, callErr, false)
 }
 
 func (backend *windowsBackend) Delete(name string) error {
@@ -131,11 +140,5 @@ func (backend *windowsBackend) Delete(name string) error {
 	result, _, callErr := procCredDeleteW.Call(
 		uintptr(unsafe.Pointer(targetUTF16)), credentialTypeGeneric, 0,
 	)
-	if result == 0 {
-		if errors.Is(callErr, errorNotFound) {
-			return ErrNotFound
-		}
-		return fmt.Errorf("CredDeleteW: %w", callErr)
-	}
-	return nil
+	return mapCredentialCallError("CredDeleteW", result, callErr, true)
 }

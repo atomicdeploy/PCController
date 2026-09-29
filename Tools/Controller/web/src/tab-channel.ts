@@ -55,8 +55,8 @@ export interface TerminalPayload {
 export type SharedControllerEvent = Pick<ControllerEvent, 'id' | 'time' | 'kind' | 'text'> &
   Partial<Pick<
     ControllerEvent,
-    'state' | 'lifecycle' | 'reason' | 'source' | 'target' | 'message_type' |
-    'action' | 'gesture' | 'key' | 'rf_id' | 'rf_code' | 'rf_bits' | 'rf_protocol' |
+    'state' | 'lifecycle' | 'reason' | 'source' | 'target' | 'targets' | 'message_type' |
+    'action' | 'severity' | 'correlation' | 'delivery' | 'gesture' | 'key' | 'rf_id' | 'rf_code' | 'rf_bits' | 'rf_protocol' |
     'metadata'
   >>
 
@@ -319,12 +319,23 @@ function sanitizeControllerEvent(raw: RecordValue): ControllerEventPayload | nul
   const text = safeText(event.text, maximumEventTextBytes, true)
   if (id === null || id === undefined || time === null || kind === null || text === null) return null
 
-  const optionalTextKeys = ['state', 'lifecycle', 'reason', 'source', 'target', 'message_type', 'action', 'gesture'] as const
+  const optionalTextKeys = ['state', 'lifecycle', 'reason', 'source', 'target', 'message_type', 'action', 'severity', 'correlation', 'delivery', 'gesture'] as const
   const optionalTexts: Partial<Record<(typeof optionalTextKeys)[number], string>> = {}
   for (const key of optionalTextKeys) {
     const value = safeOptionalText(event[key], key === 'reason' ? 1024 : 256)
     if (value === null) return null
     if (value !== undefined) optionalTexts[key] = value
+  }
+
+  let targets: string[] | undefined
+  if (event.targets !== undefined) {
+    if (!Array.isArray(event.targets) || event.targets.length > 32) return null
+    targets = []
+    for (const target of event.targets) {
+      const safeTarget = safeText(target, 180)
+      if (safeTarget === null) return null
+      targets.push(safeTarget)
+    }
   }
 
   const optionalIntegerKeys = ['key', 'rf_id', 'rf_code', 'rf_bits', 'rf_protocol'] as const
@@ -347,6 +358,7 @@ function sanitizeControllerEvent(raw: RecordValue): ControllerEventPayload | nul
       text,
       ...optionalTexts,
       ...optionalIntegers,
+      ...(targets === undefined ? {} : { targets }),
       ...(metadata === undefined ? {} : { metadata }),
     },
   }

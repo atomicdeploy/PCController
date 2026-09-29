@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build !windows && !linux
 
 package ports
 
@@ -9,6 +9,10 @@ import (
 
 func enrichPlatform(values []Info) []Info {
 	return values
+}
+
+func platformEnumerationSource() string {
+	return "go.bug.st/serial detailed enumerator with periodic platform polling"
 }
 
 func listPlatformHardwareProblems(Filter) ([]HardwareProblem, error) {

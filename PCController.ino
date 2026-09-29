@@ -20,6 +20,9 @@
 #include "Project/AudioCues.h"
 #endif
 #include "Project/BootMelody.h"
+#if PCCONTROLLER_ENABLE_EEPROM_BOOT_OPCODES
+#include "Project/BootOpcodeSequence.h"
+#endif
 #include "Project/ControllerEvents.h"
 #include "Project/CompactI2c.h"
 #if PCCONTROLLER_ENABLE_EEPROM_MENU_LABELS

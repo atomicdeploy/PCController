@@ -211,7 +211,10 @@ type EventSummary struct {
 	State      string            `json:"state,omitempty"`
 	Source     string            `json:"source,omitempty"`
 	Target     string            `json:"target,omitempty"`
+	Targets    []string          `json:"targets,omitempty"`
 	Action     string            `json:"action,omitempty"`
+	Severity   string            `json:"severity,omitempty"`
+	Delivery   string            `json:"delivery,omitempty"`
 	Metadata   map[string]string `json:"metadata,omitempty"`
 	ResetCause byte              `json:"reset_cause,omitempty"`
 	ResetCount uint32            `json:"reset_count,omitempty"`
@@ -795,7 +798,9 @@ func summarizeEvents(entries []controller.TimelineEntry, limit int) []EventSumma
 			ID: entry.ID, Time: entry.Time, Kind: bounded(entry.Kind, 64),
 			Lifecycle: bounded(entry.Lifecycle, 64), State: bounded(entry.State, 64),
 			Source: bounded(entry.Source, 64), Target: bounded(entry.Target, 64),
-			Action: bounded(entry.Action, 64), Metadata: safeMetadata(entry.Metadata),
+			Targets: boundedList(entry.Targets, 32, 180),
+			Action:  bounded(entry.Action, 64), Severity: bounded(entry.Severity, 32),
+			Delivery: bounded(entry.Delivery, 32), Metadata: safeMetadata(entry.Metadata),
 			ResetCause: entry.ResetCause, ResetCount: entry.ResetCount,
 			RFObserved: entry.RFCode != 0, RFBits: entry.RFBits,
 			RFProtocol: entry.RFProtocol, RFPulseUS: entry.RFPulseUS,
@@ -905,6 +910,19 @@ func bounded(value string, maximum int) string {
 		return value
 	}
 	return value[:maximum]
+}
+
+func boundedList(values []string, maximumEntries, maximumLength int) []string {
+	if len(values) > maximumEntries {
+		values = values[:maximumEntries]
+	}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if boundedValue := bounded(value, maximumLength); boundedValue != "" {
+			result = append(result, boundedValue)
+		}
+	}
+	return result
 }
 
 func sha256Hex(content []byte) string {

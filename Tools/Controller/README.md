@@ -150,6 +150,15 @@ Real multicast/broadcast acceptance runs through the named packaged
 `controller.exe`, never a test process. The Windows test suite skips its live
 LAN broadcast case unless `PCCONTROLLER_TEST_LAN=1` is explicitly set.
 
+The Windows suite also exercises a real per-user Credential Manager
+write/read/delete round trip. If `CredWriteW` reports
+`ERROR_NO_SUCH_LOGON_SESSION` (1312), as it can under an authenticated
+non-interactive SSH logon without a usable vault, only that OS integration case
+is skipped with an exact diagnostic. Pure tests continue to cover validation
+and native error mapping, and every access, authentication, malformed-input, or
+unexpected error still fails. Runtime behavior is unchanged and never falls
+back to plaintext storage.
+
 The default root package also builds `pccontroller.dll` and its generated C
 header. That target needs `CGO_ENABLED=1` and a native MinGW-w64 compiler
 matching `go env GOARCH` on `PATH` (or an explicit compatible `CC`); the build

@@ -90,6 +90,8 @@ func isAccessDenied(cause error) bool {
 		errors.Is(cause, windows.ERROR_SHARING_VIOLATION)
 }
 
+func isLocalSerialTarget(value string) bool { return isCOMPort(value) }
+
 func (enumerator nativeEnumerator) FindOwner(ctx context.Context, port string) (Owner, bool, error) {
 	if err := ctx.Err(); err != nil {
 		return Owner{}, false, err
