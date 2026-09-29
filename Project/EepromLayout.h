@@ -11,6 +11,12 @@ namespace EepromLayout {
 constexpr int AudioCueAddress = 0;
 constexpr uint8_t AudioCueBytes = 13;
 constexpr int AudioCueEnd = AudioCueAddress + AudioCueBytes;
+// The remaining startup-parameter bytes hold a compact boot script. Its
+// record is [magic,used,crc] at 13..15, up to 15 data bytes at 16..30, and a
+// commit marker at 31. It coexists with audio cues and is read-only to
+// ordinary firmware runtime.
+constexpr int BootOpcodeAddress = AudioCueEnd;
+constexpr uint8_t BootOpcodeBytes = 19;
 constexpr int SettingsAddress = 32;
 constexpr uint8_t SettingsValueBytes = 40;
 constexpr uint8_t SettingsRecordBytes = SettingsValueBytes + 1;
@@ -38,7 +44,7 @@ constexpr int StatusProfileEnd =
 
 // Optional host-provisioned, packed 4-character front-panel labels occupy the
 // final EEPROM bytes. Their CRC header uses the explicit free gap after
-// settings and before the RF header: boot opcodes own 0..31, settings own
+// settings and before the RF header: startup records own 0..31, settings own
 // 32..72, and neither the RF nor status-profile regions overlap it.
 constexpr int MenuLabelsHeaderAddress = SettingsEnd;
 // The commit byte is a format marker as well as the final write. Seeding
@@ -64,6 +70,8 @@ static_assert(MenuLabelsHeaderEnd <= RemoteHeaderAddress,
               "menu-label header overlaps RF records");
 static_assert(RemoteEnd <= ResetJournalAddress,
               "RF records overlap reset journal");
+static_assert(BootOpcodeAddress + BootOpcodeBytes <= SettingsAddress,
+              "boot opcodes overlap settings");
 static_assert(ResetJournalEnd <= E2END + 1,
               "EEPROM layout exceeds ATmega328P EEPROM");
 static_assert(StatusProfileEnd <= E2END + 1,

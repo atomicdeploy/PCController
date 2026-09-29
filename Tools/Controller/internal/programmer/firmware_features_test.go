@@ -105,6 +105,7 @@ func TestFirmwareFeaturesAreIdentityBoundAndBecomeOnlyKnownDefines(t *testing.T)
 	}
 	for _, define := range []string{
 		"-DPCCONTROLLER_ENABLE_EEPROM_BOOT_OPCODES=1",
+		"-DPCCONTROLLER_ENABLE_EEPROM_AUDIO_CUES=0",
 		"-DPCCONTROLLER_ENABLE_EEPROM_MENU_LABELS=1",
 	} {
 		if got := strings.Join(enabledCommand.Args, " "); !strings.Contains(got, define) {

@@ -17,7 +17,18 @@ const (
 	DefaultVisibleMenuMask         = uint16((1<<DefaultPersistentMenuPageCount)-1) &^ (uint16(1) << DefaultMenuPageMotionAlias)
 	defaultEEPROMCompileArtifact   = "safe-default-eeprom.hex"
 	defaultEEPROMMenuLabels        = "doorVOLTCURRtLEDtBT LItEbEEPPWM rELYKEY uPWMr5-8MOVELErn"
+	bootOpcodeMagic                = byte(0xB0)
 )
+
+// factoryBootOpcodeData is a compact two-note welcome cue. The canonical
+// audio-cue record owns bytes 0..12, so the boot-script lane uses the remaining
+// 19 startup bytes and deliberately avoids an overlapping historical layout.
+var factoryBootOpcodeData = [...]byte{
+	native.OpBuzzer,
+	0x08, 0x04, 70, 0, // 1032 Hz for 70 ms
+	native.OpBuzzer,
+	0x60, 0x09, 120, 0, // 2400 Hz for 120 ms
+}
 
 type EEPROMProgramOperation func(context.Context, Options, io.Writer) error
 
@@ -64,6 +75,9 @@ func generateEEPROMIntelHex(factory native.Settings) ([]byte, error) {
 	}
 	audio[len(audio)-1] = avrCRC8(audio[:len(audio)-1])
 
+	if err := writeFactoryBootOpcodeSequence(data); err != nil {
+		return nil, err
+	}
 	settings := data[EEPROMSettingsAddress : EEPROMSettingsAddress+EEPROMSettingsRecordBytes]
 	values := settings[:EEPROMSettingsValueBytes]
 	values[0] = factory.Flags
@@ -131,6 +145,34 @@ func generateEEPROMIntelHex(factory native.Settings) ([]byte, error) {
 		image.data[uint32(address)] = value
 	}
 	return image.Canonical()
+}
+
+// writeFactoryBootOpcodeSequence writes the compact record after the audio
+// cue lane and before settings.
+// The CRC excludes its own byte and includes only the declared used data, so
+// an interrupted or future partially-written record is ignored by AVR.
+func writeFactoryBootOpcodeSequence(data []byte) error {
+	if uint32(len(factoryBootOpcodeData)) > EEPROMBootOpcodeDataBytes {
+		return fmt.Errorf("factory boot opcode data is %d bytes, maximum %d",
+			len(factoryBootOpcodeData), EEPROMBootOpcodeDataBytes)
+	}
+	end := EEPROMBootOpcodeAddress + EEPROMBootOpcodeBytes
+	if end > uint32(len(data)) {
+		return fmt.Errorf("boot opcode EEPROM slot 0x%04X..0x%04X exceeds image",
+			EEPROMBootOpcodeAddress, end-1)
+	}
+	record := data[EEPROMBootOpcodeAddress:end]
+	record[0] = bootOpcodeMagic
+	record[1] = byte(len(factoryBootOpcodeData))
+	copy(record[EEPROMBootOpcodeDataOffset:], factoryBootOpcodeData[:])
+	checksumInput := make([]byte, 2+len(factoryBootOpcodeData))
+	copy(checksumInput[:2], record[:2])
+	copy(checksumInput[2:], factoryBootOpcodeData[:])
+	// A live EEPROM writer clears the commit byte, writes metadata/data, then
+	// commits the record's final byte.
+	record[2] = avrCRC8(checksumInput)
+	record[EEPROMBootOpcodeCommitOffset] = 0xA7
+	return nil
 }
 
 // WriteDefaultEEPROMIntelHex publishes a user-requested factory image without

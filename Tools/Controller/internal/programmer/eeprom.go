@@ -14,7 +14,13 @@ const (
 	EEPROMAudioCueCount            byte   = 4
 	EEPROMAudioCueDescriptorBytes  uint32 = 3
 	EEPROMAudioCueRecordBytes      uint32 = uint32(EEPROMAudioCueCount)*EEPROMAudioCueDescriptorBytes + 1
-	EEPROMSettingsAddress          uint32 = 32
+	EEPROMBootOpcodeAddress        uint32 = EEPROMAudioCueAddress + EEPROMAudioCueRecordBytes
+	EEPROMBootOpcodeBytes          uint32 = 19
+	EEPROMBootOpcodeMetadataBytes  uint32 = 3
+	EEPROMBootOpcodeDataOffset     uint32 = EEPROMBootOpcodeMetadataBytes
+	EEPROMBootOpcodeCommitOffset   uint32 = EEPROMBootOpcodeBytes - 1
+	EEPROMBootOpcodeDataBytes      uint32 = EEPROMBootOpcodeCommitOffset - EEPROMBootOpcodeDataOffset
+	EEPROMSettingsAddress          uint32 = EEPROMBootOpcodeAddress + EEPROMBootOpcodeBytes
 	EEPROMSettingsValueBytes       uint32 = 40
 	EEPROMSettingsRecordBytes      uint32 = EEPROMSettingsValueBytes + 1
 	EEPROMMenuLabelsHeaderAddress  uint32 = EEPROMSettingsAddress + EEPROMSettingsRecordBytes

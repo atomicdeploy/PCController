@@ -38,11 +38,14 @@ func FirmwareFeatureNames(features []FirmwareFeature) []string {
 }
 
 func firmwareFeatureBuildDefines(features []FirmwareFeature) []string {
-	defines := make([]string, 0, len(features))
+	defines := make([]string, 0, len(features)*2)
 	for _, feature := range features {
 		switch feature {
 		case FirmwareFeatureEEPROMBootOpcodes:
-			defines = append(defines, "-DPCCONTROLLER_ENABLE_EEPROM_BOOT_OPCODES=1")
+			defines = append(defines,
+				"-DPCCONTROLLER_ENABLE_EEPROM_BOOT_OPCODES=1",
+				"-DPCCONTROLLER_ENABLE_EEPROM_AUDIO_CUES=0",
+			)
 		case FirmwareFeatureEEPROMMenuLabels:
 			defines = append(defines, "-DPCCONTROLLER_ENABLE_EEPROM_MENU_LABELS=1")
 		}
