@@ -1313,7 +1313,20 @@ func runRemoteTUI(
 	consoleOptions *tuiConsoleOptions,
 	syncNavigation bool,
 ) error {
-	ctx, cancel := context.WithCancel(context.Background())
+	return runRemoteTUIContext(
+		context.Background(), address, auth, stdout, store, consoleOptions, syncNavigation,
+	)
+}
+
+func runRemoteTUIContext(
+	parent context.Context,
+	address, auth string,
+	stdout io.Writer,
+	store *appconfig.Store,
+	consoleOptions *tuiConsoleOptions,
+	syncNavigation bool,
+) error {
+	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	client := newRemoteTUIIPC(ctx, address, auth)
 	defer client.Close()
@@ -1445,6 +1458,7 @@ func runRemoteTUI(
 				}),
 				tea.WithAltScreen(),
 				tea.WithMouseCellMotion(),
+				tea.WithContext(ctx),
 			)
 			_, runErr := program.Run()
 			_ = hostui.WriteOSC(stdout, "9;4;0;0")
