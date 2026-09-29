@@ -1,6 +1,7 @@
 package hostui
 
 import (
+	"errors"
 	"pccontroller.local/controller/internal/productidentity"
 	"strconv"
 	"strings"
@@ -133,6 +134,12 @@ var updateTaskbarOrder struct {
 // Serialize COM updates and discard delayed older events so completion cannot
 // be overwritten by an earlier percentage callback from the UI event loop.
 func SetUpdateTaskbarProgress(value UpdateProgress) error {
+	return PresentUpdateProgress(value, nil)
+}
+
+// PresentUpdateProgress orders terminal OSC and native Windows presentation as
+// one update, so an older asynchronous percentage cannot resurrect a busy bar.
+func PresentUpdateProgress(value UpdateProgress, writeOSC func(string) error) error {
 	updateTaskbarOrder.Lock()
 	defer updateTaskbarOrder.Unlock()
 	if !value.UpdatedAt.IsZero() && value.UpdatedAt.Before(updateTaskbarOrder.latest) {
@@ -143,6 +150,25 @@ func SetUpdateTaskbarProgress(value UpdateProgress) error {
 	if updateTaskbarOrder.have && updateTaskbarOrder.previous == progress {
 		return nil
 	}
-	updateTaskbarOrder.previous, updateTaskbarOrder.have = progress, true
-	return SetTaskbarProgress(progress)
+	payload, err := progress.OSCPayload()
+	if err != nil {
+		return err
+	}
+	var outputErr error
+	if writeOSC != nil {
+		outputErr = writeOSC(payload)
+	}
+	err = errors.Join(outputErr, SetTaskbarProgress(progress))
+	if err == nil {
+		updateTaskbarOrder.previous, updateTaskbarOrder.have = progress, true
+	}
+	return err
+}
+
+func ClearUpdateTaskbarProgress() error {
+	updateTaskbarOrder.Lock()
+	defer updateTaskbarOrder.Unlock()
+	updateTaskbarOrder.latest = time.Now()
+	updateTaskbarOrder.previous, updateTaskbarOrder.have = TerminalProgress{}, true
+	return SetTaskbarProgress(TerminalProgress{})
 }

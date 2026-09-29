@@ -145,13 +145,9 @@ func (model *Model) observeUpdateEvent(event control.Event) tea.Cmd {
 	if strings.EqualFold(state, "idle") {
 		model.update = updatePresentation{}
 		model.terminalTitleDirty = true
-		payload, payloadErr := (hostui.TerminalProgress{State: 0, Percent: 0}).OSCPayload()
-		if payloadErr != nil {
-			return func() tea.Msg { return terminalOSCResultMsg{kind: "update progress", err: payloadErr} }
+		return func() tea.Msg {
+			return terminalOSCResultMsg{kind: "update progress", err: hostui.PresentUpdateProgress(value, model.writeOSC)}
 		}
-		return tea.Batch(terminalOSCCommand(model.writeOSC, payload, "update progress", nil), func() tea.Msg {
-			return terminalOSCResultMsg{kind: "Windows taskbar progress", err: hostui.SetUpdateTaskbarProgress(value)}
-		})
 	}
 	scroll := 0
 	if model.update.OperationID == value.OperationID {
@@ -164,14 +160,9 @@ func (model *Model) observeUpdateEvent(event control.Event) tea.Cmd {
 		Scroll: scroll,
 	}
 	model.terminalTitleDirty = true
-	progress := value.Terminal()
-	payload, payloadErr := progress.OSCPayload()
-	if payloadErr != nil {
-		return func() tea.Msg { return terminalOSCResultMsg{kind: "update progress", err: payloadErr} }
+	return func() tea.Msg {
+		return terminalOSCResultMsg{kind: "update progress", err: hostui.PresentUpdateProgress(value, model.writeOSC)}
 	}
-	return tea.Batch(terminalOSCCommand(model.writeOSC, payload, "update progress", nil), func() tea.Msg {
-		return terminalOSCResultMsg{kind: "Windows taskbar progress", err: hostui.SetUpdateTaskbarProgress(value)}
-	})
 }
 
 func (model Model) updateProgressLines() []string {
