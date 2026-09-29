@@ -62,6 +62,13 @@ their sources into this repository:
 | Arduino AVR core / Wire / EEPROM | MiniCore-bundled | LGPL-2.1-or-later |
 | Urboot/urclock, AVRDUDE, Arduino CLI, AVR-GCC | externally installed tools | Their respective upstream licenses; not redistributed here |
 
+### AVRDUDE progress protocol
+
+The programmer progress reader interoperates with AVRDUDE's documented output;
+it does not incorporate or link AVRDUDE source. The behavior was checked against
+[AVRDUDE 8.0 `term.c`](https://github.com/avrdudes/avrdude/blob/v8.0/src/term.c#L2908-L2942):
+non-terminal output is unbuffered and emits one `#` per two percentage points.
+
 Generated `.hex`, `.eep`, `.elf`, merged bootloader images, listings, and
 toolchain caches are deliberately excluded from Git. Anyone distributing a
 firmware binary must also comply with the licenses of the exact core,
