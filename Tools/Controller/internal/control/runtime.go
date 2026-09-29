@@ -43,6 +43,12 @@ type Snapshot struct {
 	ConnectionState        string
 	ConnectionReason       string
 	ConnectionUpdated      time.Time
+	ConnectionPhase        string
+	ConnectionAttempt      uint64
+	ConnectionAttemptStart time.Time
+	ConnectionNextRetry    time.Time
+	ConnectionRetryDelay   time.Duration
+	ConnectionCandidate    ports.Info
 	FrontPanel             native.FrontPanel
 	HaveFrontPanel         bool
 	HaveFrontPanelSegments bool
@@ -213,6 +219,11 @@ type Runtime struct {
 	connectionState        string
 	connectionReason       string
 	connectionUpdated      time.Time
+	connectionAttempt      uint64
+	connectionAttemptStart time.Time
+	connectionNextRetry    time.Time
+	connectionRetryDelay   time.Duration
+	connectionCandidate    ports.Info
 	reconnectEpoch         uint64
 	resetIssued            bool
 	portRebindAllowed      bool
@@ -713,19 +724,25 @@ func (runtime *Runtime) Snapshot() Snapshot {
 	defer runtime.mu.RUnlock()
 	hardwareProblems := cloneHardwareProblems(runtime.hardwareProblems)
 	return Snapshot{
-		Connected:         runtime.session != nil,
-		Paused:            runtime.paused,
-		Port:              runtime.port,
-		Hello:             runtime.hello,
-		Status:            runtime.status,
-		Settings:          runtime.settings,
-		HaveStatus:        runtime.haveStatus,
-		HaveSettings:      runtime.haveSettings,
-		StatusUpdated:     runtime.statusUpdated,
-		ConnectionState:   runtime.connectionState,
-		ConnectionReason:  runtime.connectionReason,
-		ConnectionUpdated: runtime.connectionUpdated,
-		FrontPanel:        runtime.frontPanel, HaveFrontPanel: runtime.haveFrontPanel,
+		Connected:              runtime.session != nil,
+		Paused:                 runtime.paused,
+		Port:                   runtime.port,
+		Hello:                  runtime.hello,
+		Status:                 runtime.status,
+		Settings:               runtime.settings,
+		HaveStatus:             runtime.haveStatus,
+		HaveSettings:           runtime.haveSettings,
+		StatusUpdated:          runtime.statusUpdated,
+		ConnectionState:        runtime.connectionState,
+		ConnectionReason:       runtime.connectionReason,
+		ConnectionUpdated:      runtime.connectionUpdated,
+		ConnectionPhase:        runtime.connectionPhaseLocked(),
+		ConnectionAttempt:      runtime.connectionAttempt,
+		ConnectionAttemptStart: runtime.connectionAttemptStart,
+		ConnectionNextRetry:    runtime.connectionNextRetry,
+		ConnectionRetryDelay:   runtime.connectionRetryDelay,
+		ConnectionCandidate:    runtime.connectionCandidate,
+		FrontPanel:             runtime.frontPanel, HaveFrontPanel: runtime.haveFrontPanel,
 		HaveFrontPanelSegments: runtime.haveFrontPanelSegments,
 		FrontPanelUpdated:      runtime.frontPanelUpdated,
 		StatusLED:              runtime.statusLED, HaveStatusLED: runtime.haveStatusLED,
@@ -735,6 +752,31 @@ func (runtime *Runtime) Snapshot() Snapshot {
 		HardwareProblems: hardwareProblems,
 		PortProcess:      runtime.portProcess,
 	}
+}
+
+// connectionPhaseLocked derives the operator-facing phase from runtime-owned
+// facts. It deliberately does not parse error strings or infer progress in a
+// client, so every interface reports the same connection truth.
+func (runtime *Runtime) connectionPhaseLocked() string {
+	if runtime.session != nil {
+		return "connected"
+	}
+	if runtime.connectionState == "close_failed" || len(runtime.retainedClose) != 0 {
+		return "blocked"
+	}
+	if runtime.paused {
+		return "paused"
+	}
+	if runtime.connecting {
+		return "attempting"
+	}
+	if runtime.connectionState == "reconnecting" {
+		if !runtime.connectionNextRetry.IsZero() {
+			return "waiting_retry"
+		}
+		return "queued"
+	}
+	return "disconnected"
 }
 
 func cloneHardwareProblems(values []ports.HardwareProblem) []ports.HardwareProblem {
@@ -1061,6 +1103,10 @@ func (runtime *Runtime) ApplyOptions(options Options) bool {
 	runtime.connectionState = "reconnecting"
 	runtime.connectionReason = "connection configuration changed"
 	runtime.connectionUpdated = time.Now()
+	runtime.connectionAttemptStart = time.Time{}
+	runtime.connectionNextRetry = time.Time{}
+	runtime.connectionRetryDelay = 0
+	runtime.connectionCandidate = runtime.port
 	runtime.reconnectEpoch++
 	epoch := runtime.reconnectEpoch
 	runtime.resetIssued = true // A configuration reload is not a USB reappearance.
@@ -1162,6 +1208,10 @@ func (runtime *Runtime) Reconnect(ctx context.Context, reason string) error {
 	runtime.connectionState = "reconnecting"
 	runtime.connectionReason = reason
 	runtime.connectionUpdated = time.Now()
+	runtime.connectionAttemptStart = time.Time{}
+	runtime.connectionNextRetry = time.Time{}
+	runtime.connectionRetryDelay = 0
+	runtime.connectionCandidate = runtime.port
 	runtime.reconnectEpoch++
 	epoch := runtime.reconnectEpoch
 	runtime.resetIssued = true
@@ -1222,11 +1272,17 @@ func (runtime *Runtime) ensureConnected(ctx context.Context) error {
 		return nil
 	}
 	runtime.connecting = true
+	runtime.connectionAttempt++
+	runtime.connectionAttemptStart = time.Now()
+	runtime.connectionNextRetry = time.Time{}
+	runtime.connectionRetryDelay = 0
+	runtime.connectionCandidate = ports.Info{}
 	connectContext, cancelConnect := context.WithCancel(ctx)
 	connectDone := make(chan struct{})
 	runtime.connectCancel = cancelConnect
 	runtime.connectDone = connectDone
 	options := runtime.options
+	runtime.publishEvent(runtime.connectionProgressEventLocked("attempting"))
 	runtime.mu.Unlock()
 
 	defer func() {
@@ -1242,6 +1298,11 @@ func (runtime *Runtime) ensureConnected(ctx context.Context) error {
 	}()
 
 	result, err := runtime.autoOpen(connectContext, runtime.discoveryOptions(options))
+	if result.Port.Name != "" {
+		runtime.mu.Lock()
+		runtime.connectionCandidate = result.Port
+		runtime.mu.Unlock()
+	}
 	if err != nil {
 		if result.Session != nil {
 			return runtime.retainFailedOpen(result, err)
@@ -1343,6 +1404,11 @@ func (runtime *Runtime) Open(ctx context.Context, name string) error {
 				ResetAfterOpen: runtime.resetAfterOpen,
 			},
 		)
+		if result.Port.Name != "" {
+			runtime.mu.Lock()
+			runtime.connectionCandidate = result.Port
+			runtime.mu.Unlock()
+		}
 		if err != nil {
 			if result.Session != nil {
 				return runtime.retainFailedOpen(result, err)
@@ -1407,6 +1473,12 @@ func (runtime *Runtime) Open(ctx context.Context, name string) error {
 		HelloAttempts:  options.HelloAttempts,
 		ResetAfterOpen: runtime.resetAfterOpen,
 	})
+	runtime.mu.Lock()
+	runtime.connectionCandidate = candidates[0]
+	if result.Port.Name != "" {
+		runtime.connectionCandidate = result.Port
+	}
+	runtime.mu.Unlock()
 	if err != nil {
 		if result.Session != nil {
 			return runtime.retainFailedOpen(result, err)
@@ -1445,8 +1517,14 @@ func (runtime *Runtime) beginOpenAttempt(
 	openContext, cancelOpen := context.WithCancel(ctx)
 	openDone := make(chan struct{})
 	runtime.connecting = true
+	runtime.connectionAttempt++
+	runtime.connectionAttemptStart = time.Now()
+	runtime.connectionNextRetry = time.Time{}
+	runtime.connectionRetryDelay = 0
+	runtime.connectionCandidate = ports.Info{Name: name}
 	runtime.connectCancel = cancelOpen
 	runtime.connectDone = openDone
+	runtime.publishEvent(runtime.connectionProgressEventLocked("attempting"))
 	runtime.mu.Unlock()
 
 	finishOpen := func() {
@@ -1928,6 +2006,10 @@ func (runtime *Runtime) attachWhen(result link.OpenResult, allowed func() bool) 
 	runtime.connectionState = "connected"
 	runtime.connectionReason = ""
 	runtime.connectionUpdated = time.Now()
+	runtime.connectionAttemptStart = time.Time{}
+	runtime.connectionNextRetry = time.Time{}
+	runtime.connectionRetryDelay = 0
+	runtime.connectionCandidate = result.Port
 	runtime.reconnectEpoch++
 	runtime.hardwareProblemEpoch++
 	runtime.resetTransportLossState()
@@ -2234,6 +2316,10 @@ func (runtime *Runtime) detachReason(pause bool, reason string) error {
 	runtime.paused = pause
 	runtime.reconnectEpoch++
 	runtime.portRebindAllowed = false
+	runtime.connectionAttemptStart = time.Time{}
+	runtime.connectionNextRetry = time.Time{}
+	runtime.connectionRetryDelay = 0
+	runtime.connectionCandidate = port
 	if session != nil {
 		// Invalidate the pump before asking the transport to close, but retain
 		// the session as the exclusive owner until Close confirms the OS handle
@@ -2506,6 +2592,10 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 				runtime.connectionState = "reconnecting"
 				runtime.connectionReason = disconnectReason
 				runtime.connectionUpdated = time.Now()
+				runtime.connectionAttemptStart = time.Time{}
+				runtime.connectionNextRetry = time.Time{}
+				runtime.connectionRetryDelay = 0
+				runtime.connectionCandidate = port
 				runtime.reconnectEpoch++
 				epoch = runtime.reconnectEpoch
 				runtime.resetIssued = false
@@ -2595,14 +2685,14 @@ func (runtime *Runtime) autoReconnect(epoch uint64) {
 			if err == nil && runtime.Snapshot().Connected {
 				return
 			}
-			if err != nil {
-				runtime.publishReconnectFailure(epoch, err.Error())
-			}
 			delay = nextReconnectDelay(
 				delay,
 				options.ReconnectInitialDelay,
 				options.ReconnectMaximumDelay,
 			)
+			if err != nil {
+				runtime.publishReconnectFailure(epoch, err.Error(), delay)
+			}
 			retryTimer.Reset(delay)
 			retry = retryTimer.C
 		}
@@ -2656,18 +2746,30 @@ func nextReconnectDelay(current, initial, maximum time.Duration) time.Duration {
 // publishReconnectFailure updates and emits one failure only while its epoch
 // still owns the reconnecting state. Keeping the runtime lock through event
 // publication prevents a stale failure from landing after a successful attach.
-func (runtime *Runtime) publishReconnectFailure(epoch uint64, reason string) bool {
+func (runtime *Runtime) publishReconnectFailure(
+	epoch uint64,
+	reason string,
+	delay time.Duration,
+) bool {
 	runtime.mu.Lock()
-	defer runtime.mu.Unlock()
 	if runtime.reconnectEpoch != epoch ||
 		runtime.connectionState != "reconnecting" ||
-		runtime.paused || runtime.session != nil ||
-		runtime.connectionReason == reason {
+		runtime.paused || runtime.session != nil {
+		runtime.mu.Unlock()
 		return false
 	}
 	runtime.connectionReason = reason
 	runtime.connectionUpdated = time.Now()
-	runtime.publishConnection("reconnecting", runtime.port, reason)
+	runtime.connectionRetryDelay = delay
+	runtime.connectionNextRetry = runtime.connectionUpdated.Add(delay)
+	port := runtime.connectionCandidate
+	if port.Name == "" {
+		port = runtime.port
+	}
+	progress := runtime.connectionProgressEventLocked("waiting_retry")
+	runtime.publishConnection("reconnecting", port, reason)
+	runtime.publishEvent(progress)
+	runtime.mu.Unlock()
 	return true
 }
 
@@ -3054,6 +3156,33 @@ func (runtime *Runtime) publishConnection(lifecycle string, port ports.Info, rea
 	return runtime.publishConnectionEvent(
 		"connection", lifecycle, port, reason, state,
 	)
+}
+
+func (runtime *Runtime) connectionProgressEventLocked(phase string) Event {
+	candidate := runtime.connectionCandidate
+	metadata := map[string]string{
+		"phase":   phase,
+		"attempt": strconv.FormatUint(runtime.connectionAttempt, 10),
+	}
+	if candidate.Name != "" {
+		metadata["port"] = candidate.Name
+	}
+	if !runtime.connectionAttemptStart.IsZero() {
+		metadata["attempt_started_at"] = runtime.connectionAttemptStart.Format(time.RFC3339Nano)
+	}
+	if !runtime.connectionNextRetry.IsZero() {
+		metadata["next_retry_at"] = runtime.connectionNextRetry.Format(time.RFC3339Nano)
+	}
+	if runtime.connectionRetryDelay > 0 {
+		metadata["retry_delay_ms"] = strconv.FormatInt(runtime.connectionRetryDelay.Milliseconds(), 10)
+	}
+	return Event{
+		Kind: "connection.progress", Stream: EventStreamState,
+		Lifecycle: phase, State: runtime.connectionState,
+		Port: candidate, Reason: runtime.connectionReason,
+		Source: "host", Target: "app.clients", Metadata: metadata,
+		Text: "connection " + strings.ReplaceAll(phase, "_", " "),
+	}
 }
 
 func (runtime *Runtime) publishUSBConnection(

@@ -213,7 +213,9 @@ Connection labels and available actions follow the authenticated runtime state:
 | Runtime state | What the user sees |
 |---|---|
 | Host ready, board offline | Host-only settings and diagnostics remain available; device controls and tray page links are unavailable, and the UI never claims `Live`. |
-| Discovering or authenticating | A connecting/reconnecting state with its current reason; commands remain guarded until native `HELLO` succeeds. |
+| Actively discovering/authenticating | An animated, bounded attempt with its real candidate, attempt number, and elapsed time; duplicate attempts are disabled until it settles. |
+| Waiting after a failed attempt | A static warning with the complete last error and exact next automatic retry; Try now remains available. |
+| Closed or cleanup-blocked | Paused and unreleased serial-handle states are explicit and never presented as an active connection attempt. |
 | Controller connected | `Live` appears only after authentication, full-duplex events start, and device workbench actions become available. |
 | Programming or recovering | Conflicting controls are guarded while backup, write/verify, reconnect, and restoration progress is reported. |
 

@@ -14,11 +14,21 @@ reported as unavailable without exposing the numeric sentinel. On stream loss,
 the WebUI clears board identity, status, telemetry samples, and event history;
 it does not relabel stale content as last-known state.
 
-Automatic reconnect is enabled by default. Each real attempt is identified as
-`connecting`; failed attempts wait with exponential jittered backoff capped at
-12 seconds. The top-bar `DISCONNECTED` state is a control: activating it cancels
-the pending wait and starts an immediate attempt. Both paths keep board values
-cleared until a fresh open stream supplies authoritative status.
+Automatic reconnect is enabled by default. The shared snapshot exposes the
+runtime-owned `connection_phase`, monotonically increasing
+`connection_attempt`, attempt start time, actual candidate port, configured
+retry delay, and exact next-retry time. Interfaces must distinguish a bounded
+`attempting` phase from `waiting_retry`; only the former animates. The default
+exponential retry cap is 15 seconds and remains configurable. Activating Try
+now during backoff starts an immediate attempt, while an active attempt disables
+duplicate submission. Both paths keep board values cleared until a fresh native
+`HELLO` and STATUS provide authoritative state.
+
+`paused`, `blocked`, `queued`, `disconnected`, and `connected` are separate
+phases. Clients must display the host-supplied reason without parsing it to
+invent state or timing. `connection.progress` is a push-only state-stream event,
+so every WebUI and TUI instance updates immediately without adding polling or
+filling the human activity feed.
 
 Optional board features use HELLO capability bits as their presence contract.
 STATUS bits 0..3 further describe per-sample INA219, PWM, and temperature

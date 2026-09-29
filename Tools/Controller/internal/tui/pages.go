@@ -95,6 +95,64 @@ func (model Model) dashboardPage(snapshot control.Snapshot) string {
 		outerCardWidth := (pageWidth - 1) / 2
 		sectionWidth = outerCardWidth - cardStyle.GetHorizontalFrameSize()
 	}
+	if !snapshot.Connected {
+		connectionStatus, connectionDetail, phase := tuiConnectionPresentation(snapshot, model.connectPending, time.Now())
+		connectionLines := []string{
+			sectionHeader(sectionWidth, "BOARD CONNECTION", strings.ReplaceAll(phase, "_", " ")),
+			warnStyle.Copy().Bold(true).Render(connectionStatus),
+		}
+		candidate := ""
+		if snapshot.ConnectionCandidate.Name != "" {
+			candidate = snapshot.ConnectionCandidate.Label()
+		} else if snapshot.Port.Name != "" {
+			candidate = snapshot.Port.Label()
+		}
+		if candidate != "" {
+			connectionLines = append(connectionLines, kvCard(sectionWidth, 18, "Candidate", candidate))
+		}
+		if snapshot.ConnectionAttempt != 0 {
+			connectionLines = append(connectionLines, kvCard(sectionWidth, 18, "Attempt", fmt.Sprintf("%d", snapshot.ConnectionAttempt)))
+		}
+		if !snapshot.ConnectionAttemptStart.IsZero() && phase == "attempting" {
+			connectionLines = append(connectionLines, kvCard(sectionWidth, 18, "Elapsed", formatConnectionDuration(time.Since(snapshot.ConnectionAttemptStart))))
+		}
+		if !snapshot.ConnectionNextRetry.IsZero() && phase == "waiting_retry" {
+			remaining := time.Until(snapshot.ConnectionNextRetry)
+			if remaining < 0 {
+				remaining = 0
+			}
+			connectionLines = append(connectionLines, kvCard(sectionWidth, 18, "Next retry", formatConnectionDuration(remaining)))
+		}
+		connectionLines = append(connectionLines, kvCard(sectionWidth, 18, "Last result", connectionDetail))
+		if len(snapshot.HardwareProblems) != 0 {
+			connectionLines = append(connectionLines, errorStyle.Render(kvCard(sectionWidth, 18, "Hardware", "⚠ "+hardwareProblemMessage(snapshot.HardwareProblems[0]))))
+		}
+
+		actionLines := []string{
+			sectionHeader(sectionWidth, "RECOVERY", "bounded and event-driven"),
+			kvCard(sectionWidth, 20, "Enter / click", "start an immediate authenticated attempt"),
+			kvCard(sectionWidth, 20, "Automatic retry", func() string {
+				if phase == "paused" {
+					return "paused by operator"
+				}
+				if phase == "attempting" {
+					return "attempt active; duplicate requests are disabled"
+				}
+				if !snapshot.ConnectionNextRetry.IsZero() {
+					return snapshot.ConnectionNextRetry.Format(time.RFC3339)
+				}
+				return "armed"
+			}()),
+			kvCard(sectionWidth, 20, "Last failure", strings.TrimSpace(snapshot.ConnectionReason)),
+		}
+		if pageWidth < 96 {
+			return strings.Join(connectionLines, "\n") + "\n\n" + strings.Join(actionLines, "\n")
+		}
+		cardRenderWidth := sectionWidth + cardStyle.GetHorizontalPadding()
+		left := cardStyle.Copy().Width(cardRenderWidth).Render(strings.Join(connectionLines, "\n"))
+		right := cardStyle.Copy().Width(cardRenderWidth).Render(strings.Join(actionLines, "\n"))
+		return lipgloss.JoinHorizontal(lipgloss.Top, left, " ", right)
+	}
 	measurementLines := []string{
 		sectionHeader(sectionWidth, "LIVE MEASUREMENTS", model.statusFreshnessLabel(snapshot, time.Now())),
 	}

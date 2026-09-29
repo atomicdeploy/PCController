@@ -57,6 +57,7 @@ import {
 } from './hotkeys'
 import { formatClock, localizeDigits, translator, type MessageKey } from './i18n'
 import { redactSensitiveCommand, shellArgument } from './command-line'
+import { connectionPresentation } from './connection-presentation'
 import { effectiveProductTitle, productMark } from './product-identity'
 import { controllerFaviconState, updateRuntimeFavicon } from './state-favicon'
 import {
@@ -1572,6 +1573,7 @@ export default function App() {
         ? 'neutral'
         : 'warn'
   const transportLabel = controllerConnectionLabel(snapshot, streamState, boardState, appearance.locale)
+  const boardConnection = connectionPresentation(snapshot, appearance.locale)
   const quickCommands = snapshot.connected
     ? [
         ['status', `${snapshot.port.name || (appearance.locale === 'fa' ? 'کنترلر' : 'Controller')} · ${snapshot.status_updated ? formatClock(appearance.locale, snapshot.status_updated) : t('online')}`],
@@ -1629,15 +1631,17 @@ export default function App() {
           ref={sidebarStatusRef}
           type="button"
           className="sidebar__status"
-          aria-haspopup={snapshot.connected ? 'menu' : undefined}
-          aria-expanded={snapshot.connected ? sidebarStatusMenu : undefined}
+          aria-haspopup="menu"
+          aria-expanded={sidebarStatusMenu}
+          aria-disabled={!snapshot.connected && boardConnection.retryDisabled}
           aria-label={snapshot.connected
             ? appearance.locale === 'fa' ? 'منوی اتصال برد' : 'Board connection menu'
             : appearance.locale === 'fa' ? 'اتصال مجدد برد' : 'Reconnect board'}
-          title={`${snapshot.connected ? (appearance.locale === 'fa' ? 'برد آنلاین' : 'Board online') : (appearance.locale === 'fa' ? 'برد آفلاین' : 'Board offline')} · ${snapshot.port.name || snapshot.connection_state}`}
+          title={`${snapshot.connected ? (appearance.locale === 'fa' ? 'برد آنلاین' : 'Board online') : boardConnection.title} · ${boardConnection.candidate || snapshot.connection_state}`}
           onClick={() => {
             if (!snapshot.connected) {
               setSidebarStatusMenu(false)
+              if (boardConnection.retryDisabled) return
               void runCommand('reconnect')
               return
             }
@@ -1655,8 +1659,8 @@ export default function App() {
             }
           }}
         >
-          <span className={`status-rail status-rail--${snapshot.connected ? 'good' : 'bad'}`} aria-hidden="true" />
-          <div><strong>{snapshot.connected ? (appearance.locale === 'fa' ? 'برد آنلاین' : 'Board online') : (appearance.locale === 'fa' ? 'برد آفلاین' : 'Board offline')}</strong><small>{snapshot.port.name || snapshot.connection_state}</small></div>
+          <span className={`status-rail status-rail--${snapshot.connected ? 'good' : boardConnection.tone}`} aria-hidden="true" />
+          <div><strong>{snapshot.connected ? (appearance.locale === 'fa' ? 'برد آنلاین' : 'Board online') : boardConnection.title}</strong><small>{snapshot.connected ? snapshot.port.name : boardConnection.timing || boardConnection.candidate || snapshot.connection_state}</small></div>
           <Cpu size={18} aria-hidden="true" />
         </button>
         {sidebarStatusMenu && typeof document !== 'undefined' && createPortal(<div
@@ -1666,7 +1670,7 @@ export default function App() {
           aria-label={appearance.locale === 'fa' ? 'عملیات اتصال برد' : 'Board connection actions'}
           style={sidebarStatusMenuPosition}
         >
-          <button type="button" role="menuitem" onClick={() => { setSidebarStatusMenu(false); void runCommand('reconnect') }}>{appearance.locale === 'fa' ? 'اتصال مجدد' : 'Reconnect'}</button>
+          <button type="button" role="menuitem" disabled={!snapshot.connected && boardConnection.retryDisabled} onClick={() => { setSidebarStatusMenu(false); void runCommand('reconnect') }}>{snapshot.connected ? (appearance.locale === 'fa' ? 'اتصال مجدد' : 'Reconnect') : boardConnection.action}</button>
           {snapshot.connected && <button type="button" role="menuitem" onClick={() => { setSidebarStatusMenu(false); void runCommand('close') }}>{appearance.locale === 'fa' ? 'بستن درگاه' : 'Close port'}</button>}
           <button type="button" role="menuitem" onClick={() => { setSidebarStatusMenu(false); setPaletteQuery('ports'); setPaletteIndex(0); setPalette(true) }}>{appearance.locale === 'fa' ? 'انتخاب درگاه USB' : 'Choose USB port'}</button>
           <button type="button" role="menuitem" onClick={() => { setSidebarStatusMenu(false); navigate('device') }}>{appearance.locale === 'fa' ? 'جزئیات دستگاه' : 'Device details'}</button>

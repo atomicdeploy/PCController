@@ -58,6 +58,7 @@ import {
 } from 'lucide-react'
 import {
   Button,
+  DataRow,
   Icon,
   RangeField,
   Segmented,
@@ -71,6 +72,7 @@ import { SevenSegmentPreview } from './seven-segment-preview'
 import type { FrontPanelState } from './types'
 import type { SharedViewProps } from './views'
 import { peripheralAvailability } from './peripheral-availability'
+import { connectionPresentation } from './connection-presentation'
 
 interface AdvancedWorkbenchProps extends SharedViewProps {
   run: (command: string) => Promise<string>
@@ -518,6 +520,7 @@ export function AdvancedWorkbench({
     messageLine1.length <= 16 && messageLine2.length <= 16 &&
     /^[\x20-\x7e]*$/.test(messageLine1) && /^[\x20-\x7e]*$/.test(messageLine2)
   const messageNeedsBoard = messageTarget === 'lcd'
+  const connection = connectionPresentation(snapshot, locale)
   const reviewBlocked = !review.command || boardBusy || reviewBusy ||
     (review.needsDevice && !online) ||
     (review.risk === 'danger' && dangerArm.trim().toUpperCase() !== 'RUN')
@@ -545,8 +548,8 @@ export function AdvancedWorkbench({
           title={copy('Connection, stream & program state', 'اتصال، جریان وضعیت و حالت برنامه')}
           detail={copy('Port discovery, authenticated open/reconnect, telemetry cadence and shared run state.', 'کشف درگاه، اتصال امن، آهنگ تله‌متری و حالت اجرای مشترک.')}
           defaultOpen
-          status={online ? snapshot.port.name || copy('connected', 'متصل') : copy('offline', 'آفلاین')}
-          tone={online ? 'good' : 'warn'}
+          status={online ? snapshot.port.name || copy('connected', 'متصل') : connection.title}
+          tone={online ? 'good' : connection.tone === 'bad' ? 'bad' : 'warn'}
         >
           <div className="advanced-actions">
             <Button icon={ListTree} busy={busy === 'ports'} onClick={() => void run('ports')}>{copy('List ports', 'فهرست درگاه‌ها')}</Button>
@@ -562,11 +565,18 @@ export function AdvancedWorkbench({
               onChange={(event) => setPort(event.target.value)}
               action={<>
                 <Button tone="primary" icon={Plug} busy={busy === serialOpen} onClick={() => void run(serialOpen)}>{copy('Open', 'اتصال')}</Button>
-                <Button icon={RefreshCw} busy={busy === 'reconnect'} onClick={() => void run('reconnect')}>{copy('Reconnect', 'اتصال مجدد')}</Button>
+                <Button icon={RefreshCw} busy={busy === 'reconnect' || connection.animated} disabled={connection.retryDisabled} onClick={() => void run('reconnect')}>{online ? copy('Reconnect', 'اتصال مجدد') : connection.action}</Button>
                 {online && <Button icon={Unplug} busy={busy === 'close'} onClick={() => void run('close')}>{copy('Close & pause', 'بستن و توقف')}</Button>}
               </>}
             />
           </div>
+          {!online && <div className="data-list connection-details">
+            <DataRow label={copy('Phase', 'مرحله')} value={connection.title} tone={connection.tone === 'bad' ? 'bad' : connection.tone === 'warn' ? 'warn' : undefined} />
+            {connection.candidate && <DataRow label={copy('Candidate', 'گزینه')} value={connection.candidate} mono />}
+            {connection.attempt && <DataRow label={copy('Attempt', 'تلاش')} value={connection.attempt} />}
+            {connection.timing && <DataRow label={copy('Timing', 'زمان‌بندی')} value={connection.timing} />}
+            {connection.detail && <DataRow label={copy('Detail', 'جزئیات')} value={connection.detail} />}
+          </div>}
           {online && <div className="advanced-control-row">
             <Toggle
               checked={streamEnabled}

@@ -89,6 +89,7 @@ import {
 } from './components'
 import { execute, rpc } from './api'
 import { settingsSetCommand } from './command-line'
+import { connectionPresentation } from './connection-presentation'
 import { EventList } from './event-collection'
 import { HotkeyEditor } from './hotkey-settings-editor'
 import { PeripheralNamesEditor } from './peripheral-names-editor'
@@ -251,6 +252,53 @@ function ControllerUnavailable({
   )
 }
 
+function BoardConnectionState({
+  snapshot,
+  locale,
+  reconnect,
+}: {
+  snapshot: Snapshot
+  locale: Locale
+  reconnect: () => void
+}) {
+  const [now, setNow] = useState(Date.now)
+  useEffect(() => {
+    if (snapshot.connection_phase !== 'attempting' && snapshot.connection_phase !== 'waiting_retry') return
+    const timer = window.setInterval(() => setNow(Date.now()), 250)
+    return () => window.clearInterval(timer)
+  }, [snapshot.connection_phase, snapshot.connection_attempt_started, snapshot.connection_next_retry])
+  const presentation = connectionPresentation(snapshot, locale, now)
+  const icon = presentation.phase === 'blocked'
+    ? <AlertOctagon size={30} />
+    : presentation.phase === 'paused'
+      ? <Unplug size={30} />
+      : presentation.phase === 'waiting_retry'
+        ? <TimerReset size={30} />
+        : <PlugZap size={30} />
+  return <div className={`connection-state connection-state--${presentation.tone} is-${presentation.phase}`} role="status" aria-live="polite">
+    <div className="connection-state__icon" aria-hidden="true">{icon}</div>
+    <div className="connection-state__body">
+      <div className="connection-state__heading">
+        <strong>{presentation.title}</strong>
+        {presentation.attempt && <span className="connection-state__attempt">{presentation.attempt}</span>}
+      </div>
+      <p>{presentation.detail}</p>
+      <div className="connection-state__facts">
+        {presentation.candidate && <span><Usb size={15} />{presentation.candidate}</span>}
+        {presentation.timing && <span><TimerReset size={15} />{presentation.timing}</span>}
+      </div>
+    </div>
+    <Button
+      compact
+      tone={presentation.phase === 'blocked' ? 'danger' : 'primary'}
+      icon={presentation.animated ? RefreshCw : PlugZap}
+      busy={presentation.animated}
+      disabled={presentation.retryDisabled}
+      onClick={reconnect}
+    >{presentation.action}</Button>
+  </div>
+}
+
 const dashboardCardIDs = ['telemetry', 'outputs', 'overview', 'actions', 'events'] as const
 type DashboardCardID = typeof dashboardCardIDs[number]
 
@@ -273,12 +321,13 @@ export function DashboardView(props: SharedViewProps) {
   const boardLoading = props.transport.boardState === 'loading'
   const transportConnecting = !authenticationRequired && props.transport.streamState === 'connecting'
   const transportUnavailable = !authenticationRequired && props.transport.streamState !== 'open'
-  const connectedTone = boardReady ? 'good' : transportConnecting ? 'info' : snapshot.paused ? 'warn' : 'bad'
+  const boardConnection = connectionPresentation(snapshot, locale)
+  const connectedTone = boardReady ? 'good' : transportConnecting ? 'info' : boardConnection.tone
   const boardUnavailableTitle = transportUnavailable
     ? transportConnecting ? copy('Connecting…', 'در حال اتصال…') : copy('Controller offline', 'کنترلر آفلاین')
     : hardwareWarning?.title || (boardLoading
     ? copy('Discovering controller board…', 'در حال جستجوی برد کنترلر…')
-    : copy('Controller board disconnected', 'برد کنترلر قطع است'))
+    : boardConnection.title)
   const boardUnavailableDetail = transportUnavailable ? undefined : hardwareWarning?.guidance || snapshot.connection_reason || t('noHardware')
   const boardStatusLabel = boardReady
     ? t('online')
@@ -288,9 +337,7 @@ export function DashboardView(props: SharedViewProps) {
         ? copy('Offline', 'آفلاین')
     : boardLoading
       ? copy('Searching for board', 'در حال جستجوی برد')
-      : snapshot.paused
-        ? copy('Board paused', 'اتصال برد متوقف')
-        : copy('Board offline', 'برد آفلاین')
+      : boardConnection.title
   const hash = snapshot.hello.build_hash ? snapshot.hello.build_hash.toString(16).toUpperCase().padStart(8, '0') : '—'
   const activeRelayCount = Array.from({ length: 8 }, (_, index) => Boolean(status.active_relays & (1 << index))).filter(Boolean).length
   const configurationEventID = events.find((event) => event.kind === 'config')?.id ?? 0
@@ -395,7 +442,7 @@ export function DashboardView(props: SharedViewProps) {
             <StatusBadge tone={connectedTone} pulse={transportConnecting || snapshot.connection_state === 'connecting'}>
               {boardStatusLabel}
             </StatusBadge>
-            {!boardReady && !authenticationRequired && !transportUnavailable && <Button icon={Cable} compact onClick={() => void command('reconnect', t('reconnect'))}>{t('reconnect')}</Button>}
+            {!boardReady && !authenticationRequired && !transportUnavailable && <Button icon={PlugZap} compact busy={boardConnection.animated} disabled={boardConnection.retryDisabled} onClick={() => void command('reconnect', boardConnection.action)}>{boardConnection.action}</Button>}
             <Button icon={RefreshCw} compact onClick={() => void refresh()}>{t('refresh')}</Button>
             {activeLayoutCardIDs.length > 0 && <CardLayoutEditor
               copy={layoutCopy}
@@ -415,6 +462,8 @@ export function DashboardView(props: SharedViewProps) {
           {!transportUnavailable && <div className="eyebrow">{boardReady ? `${copy('Controller board', 'برد کنترلر')} · ${snapshot.connection_state}` : copy('PCController host · online', 'میزبان PCController · آنلاین')}</div>}
           {transportUnavailable && !authenticationRequired
             ? <ControllerUnavailable state={transportConnecting ? 'connecting' : 'transport-offline'} locale={locale} />
+            : !boardReady && !authenticationRequired && !hardwareProblem
+              ? <BoardConnectionState snapshot={snapshot} locale={locale} reconnect={() => void command('reconnect', boardConnection.action)} />
             : <>
               <h2>{boardReady ? snapshot.hello.name || appTitle : authenticationRequired ? t('authenticationDashboard') : boardUnavailableTitle}</h2>
               {(boardReady || authenticationRequired || boardUnavailableDetail) && <p>{boardReady ? `USB ${snapshot.port.vid || '—'}:${snapshot.port.pid || '—'} · ${snapshot.port.name || copy('automatic port', 'درگاه خودکار')}` : authenticationRequired ? t('authenticationDashboardDetail') : boardUnavailableDetail}</p>}
@@ -677,11 +726,12 @@ export function ControlsView(props: SharedViewProps) {
     const connecting = props.transport.streamState === 'connecting'
     const transportOffline = props.transport.streamState !== 'open'
     const unavailableState: ControllerUnavailableState = connecting ? 'connecting' : transportOffline ? 'transport-offline' : 'board-offline'
+    const boardConnection = connectionPresentation(snapshot, locale)
     const unavailableTitle = connecting
       ? copy('Connecting…', 'در حال اتصال…')
       : transportOffline
         ? copy('Controller offline', 'کنترلر آفلاین')
-        : copy('Board offline', 'برد آفلاین')
+        : boardConnection.title
     return (
       <>
         <SectionTitle eyebrow={copy('Controller board controls', 'کنترل‌های برد')} title={t('controls')} detail={transportOffline ? undefined : snapshot.connection_reason} />
@@ -691,14 +741,9 @@ export function ControlsView(props: SharedViewProps) {
           title={unavailableTitle}
           eyebrow={connecting ? copy('Reconnecting', 'اتصال دوباره') : copy('Connection', 'اتصال')}
         >
-          <ControllerUnavailable
-            state={unavailableState}
-            locale={locale}
-            showTitle={false}
-            action={!connecting && !transportOffline
-              ? <Button tone="primary" icon={Cable} onClick={() => void command('reconnect')}>{t('reconnect')}</Button>
-              : undefined}
-          />
+          {transportOffline
+            ? <ControllerUnavailable state={unavailableState} locale={locale} showTitle={false} />
+            : <BoardConnectionState snapshot={snapshot} locale={locale} reconnect={() => void command('reconnect', boardConnection.action)} />}
         </Card>
       </>
     )
