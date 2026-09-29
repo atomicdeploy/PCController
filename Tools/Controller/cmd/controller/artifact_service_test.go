@@ -12,6 +12,7 @@ import (
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/artifacts"
 	"pccontroller.local/controller/internal/defaultassets"
+	"pccontroller.local/controller/internal/programmer"
 )
 
 func TestHostUpdateShutdownHasBoundedForceExitFallback(t *testing.T) {
@@ -87,8 +88,10 @@ func TestPrimaryArtifactServiceRegistersHostAndOptionalDefaultsWithoutHardware(t
 
 func TestPrimaryFirmwareUpdatePropagatesDevelopmentEEPROMReinitialization(t *testing.T) {
 	var command string
-	executor := &primaryArtifactExecutor{execute: func(_ context.Context, value string) (string, error) {
+	executor := &primaryArtifactExecutor{execute: func(ctx context.Context, value string) (string, error) {
 		command = value
+		programmer.ReportProgress(ctx, programmer.Progress{Stage: "writing", Percent: 42, Detail: "writing flash"})
+		programmer.ReportProgress(ctx, programmer.Progress{Stage: "reconnecting", Percent: -1, Detail: "waiting for HELLO"})
 		return "guarded firmware flash completed", nil
 	}}
 	var states []string
@@ -107,7 +110,7 @@ func TestPrimaryFirmwareUpdatePropagatesDevelopmentEEPROMReinitialization(t *tes
 		!strings.Contains(command, "COM18") {
 		t.Fatalf("command=%q", command)
 	}
-	if strings.Join(states, ",") != "programming,verifying" {
+	if strings.Join(states, ",") != "preflight,writing,reconnecting" {
 		t.Fatalf("states=%v", states)
 	}
 }
@@ -165,7 +168,7 @@ func TestPrimaryCapturedFlashRestoreUsesGuardedTransactionAndExplicitISPFallback
 			if gotPort := strings.Contains(command, "COM18"); gotPort != test.wantPort {
 				t.Fatalf("command=%q contains port=%t want %t", command, gotPort, test.wantPort)
 			}
-			if strings.Join(states, ",") != "backing-up,verifying" {
+			if strings.Join(states, ",") != "preflight" {
 				t.Fatalf("states=%v", states)
 			}
 		})
@@ -187,6 +190,11 @@ func TestPrimaryCapturedFlashRestoreRejectsOtherArtifactKinds(t *testing.T) {
 }
 
 func TestProgrammingFailureTranslatesBootloaderErrorsToTypedTelemetry(t *testing.T) {
+	preflight := programmingExecutionFailure("urclock", &programmer.PreflightError{Err: errors.New("AVRDUDE missing")})
+	var preflightFailure *artifacts.ExecutionFailure
+	if !errors.As(preflight, &preflightFailure) || preflightFailure.BootloaderOutcome != artifacts.BootloaderNotAttempted || preflightFailure.Code != "toolchain_unavailable" || preflightFailure.ISPFallbackSuggested {
+		t.Fatalf("preflight must not imply a bootloader attempt or suggest ISP: %#v", preflight)
+	}
 	value := programmingExecutionFailure("urclock", errors.New("programmer is not responding"))
 	var failure *artifacts.ExecutionFailure
 	if !errors.As(value, &failure) {

@@ -2,23 +2,28 @@ package tui
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"pccontroller.local/controller/internal/control"
 	"pccontroller.local/controller/internal/hostui"
 )
 
 type updatePresentation struct {
-	OperationID string
-	Kind        string
-	State       string
-	Detail      string
-	Progress    int
-	UpdatedAt   time.Time
+	OperationID   string
+	Kind          string
+	State         string
+	Detail        string
+	Progress      int
+	ProgressKnown bool
+	Stage         string
+	ErrorCode     string
+	StartedAt     time.Time
+	Scroll        int
+	UpdatedAt     time.Time
 }
 
 type terminalOSCResultMsg struct {
@@ -51,11 +56,14 @@ func (model Model) terminalTitle() string {
 	if base == "" {
 		base = "PCController"
 	}
-	if model.update.State != "" && model.update.State != "completed" && model.update.State != "idle" {
+	if (hostui.UpdateProgress{State: model.update.State}).Active() || model.update.State == "failed" || model.update.State == "cancelled" {
 		if model.update.State == "failed" || model.update.State == "cancelled" {
 			return fmt.Sprintf("%s — Update %s — %s", base, strings.ToUpper(model.update.State), pageDefinitions[model.page].Short)
 		}
-		return fmt.Sprintf("%s — Update %d%% — %s", base, model.update.Progress, pageDefinitions[model.page].Short)
+		if model.update.ProgressKnown {
+			return fmt.Sprintf("%s — %s %d%% — %s", base, model.update.Stage, model.update.Progress, pageDefinitions[model.page].Short)
+		}
+		return fmt.Sprintf("%s — %s — %s", base, model.update.Stage, pageDefinitions[model.page].Short)
 	}
 	return fmt.Sprintf("%s — %s", base, pageDefinitions[model.page].Short)
 }
@@ -132,77 +140,94 @@ func (model *Model) observeUpdateEvent(event control.Event) tea.Cmd {
 	if !strings.HasPrefix(strings.ToLower(event.Kind), "update.") {
 		return nil
 	}
-	progress, err := strconv.Atoi(event.Metadata["progress_percent"])
-	if err != nil {
-		progress = model.update.Progress
-	}
-	if progress < 0 {
-		progress = 0
-	} else if progress > 100 {
-		progress = 100
-	}
-	state := strings.TrimSpace(event.Metadata["state"])
-	if state == "" {
-		state = strings.TrimPrefix(strings.ToLower(event.Kind), "update.")
-	}
+	value := hostui.ParseUpdateProgress(event.Kind, event.Text, event.Metadata, event.Time)
+	state := value.State
 	if strings.EqualFold(state, "idle") {
 		model.update = updatePresentation{}
 		model.terminalTitleDirty = true
-		payload, payloadErr := (hostui.TerminalProgress{State: 0, Percent: 0}).OSCPayload()
-		if payloadErr != nil {
-			return func() tea.Msg { return terminalOSCResultMsg{kind: "update progress", err: payloadErr} }
+		return func() tea.Msg {
+			return terminalOSCResultMsg{kind: "update progress", err: hostui.PresentUpdateProgress(value, model.writeOSC)}
 		}
-		return terminalOSCCommand(model.writeOSC, payload, "update progress", nil)
+	}
+	scroll := 0
+	if model.update.OperationID == value.OperationID {
+		scroll = model.update.Scroll
 	}
 	model.update = updatePresentation{
-		OperationID: event.Metadata["operation_id"], Kind: event.Metadata["kind"],
-		State: state, Detail: event.Text, Progress: progress, UpdatedAt: event.Time,
-	}
-	if model.page != PageProgramming {
-		model.switchPage(PageProgramming)
+		OperationID: value.OperationID, Kind: value.Kind,
+		State: state, Detail: value.Detail, Progress: value.Percent, ProgressKnown: value.Known,
+		Stage: value.Stage, ErrorCode: value.ErrorCode, StartedAt: value.StartedAt, UpdatedAt: value.UpdatedAt,
+		Scroll: scroll,
 	}
 	model.terminalTitleDirty = true
-
-	terminalState := 1
-	switch state {
-	case "completed", "downloaded":
-		terminalState = 0
-	case "failed", "cancelled":
-		terminalState = 2
-	case "queued":
-		terminalState = 3
-	case "verifying":
-		terminalState = 4
+	return func() tea.Msg {
+		return terminalOSCResultMsg{kind: "update progress", err: hostui.PresentUpdateProgress(value, model.writeOSC)}
 	}
-	payload, payloadErr := (hostui.TerminalProgress{State: terminalState, Percent: progress}).OSCPayload()
-	if payloadErr != nil {
-		return func() tea.Msg { return terminalOSCResultMsg{kind: "update progress", err: payloadErr} }
-	}
-	return terminalOSCCommand(model.writeOSC, payload, "update progress", nil)
 }
 
 func (model Model) updateProgressLines() []string {
 	if model.update.State == "" || strings.EqualFold(model.update.State, "idle") {
 		return nil
 	}
-	width := 36
+	width := max(24, min(76, model.width-8))
 	progress := max(0, min(100, model.update.Progress))
-	filled := progress * width / 100
-	bar := strings.Repeat("━", filled) + strings.Repeat("─", width-filled)
-	identity := strings.TrimSpace(model.update.Kind)
-	if model.update.OperationID != "" {
-		identity += " · " + model.update.OperationID
+	state, stage := model.update.State, strings.ReplaceAll(model.update.Stage, "-", " ")
+	if stage == "" {
+		stage = strings.ReplaceAll(state, "-", " ")
 	}
-	lines := []string{
-		kv("Update operation", strings.Trim(identity, " ·")),
-		kv("Update state", strings.ToUpper(model.update.State)),
+	color, symbol := colorAccent, model.spinnerView()
+	active := (hostui.UpdateProgress{State: state}).Active()
+	switch state {
+	case "failed":
+		color, symbol = colorBad, "✕"
+	case "completed":
+		color, symbol = colorGood, "✓"
+	case "cancelled":
+		color, symbol = colorWarn, "■"
+	default:
+		if !active {
+			symbol = "✓"
+		}
 	}
-	switch strings.ToLower(model.update.State) {
-	case "queued", "downloading", "reading", "backing-up", "programming", "staging", "verifying":
-		lines = append(lines, kv("Update progress", fmt.Sprintf("%s %3d%%", bar, progress)))
+	heading := strings.ToUpper(stage)
+	if state == "failed" {
+		heading = "UPDATE FAILED"
+	}
+	if state == "completed" {
+		heading = "UPDATE COMPLETE"
+	}
+	if state == "cancelled" {
+		heading = "UPDATE CANCELLED"
+	}
+	lines := []string{lipgloss.NewStyle().Bold(true).Foreground(color).Render(symbol + "  " + heading)}
+	if state == "failed" {
+		lines = append(lines, labelStyle.Render("Last stage: "+stage))
+	}
+	if active && model.update.ProgressKnown {
+		barWidth := max(12, width-10)
+		filled := progress * barWidth / 100
+		bar := lipgloss.NewStyle().Foreground(color).Render(strings.Repeat("━", filled)) + labelStyle.Render(strings.Repeat("─", barWidth-filled))
+		lines = append(lines, fmt.Sprintf("%s  %3d%%", bar, progress), labelStyle.Render("Current stage"))
+	}
+	if !model.update.StartedAt.IsZero() {
+		end := model.update.UpdatedAt
+		if active {
+			end = time.Now()
+		}
+		if end.Before(model.update.StartedAt) {
+			end = model.update.StartedAt
+		}
+		lines = append(lines, labelStyle.Render("Elapsed "+end.Sub(model.update.StartedAt).Round(time.Second).String()))
 	}
 	if model.update.Detail != "" {
-		lines = append(lines, kv("Update detail", model.update.Detail))
+		lines = append(lines, "", lipgloss.NewStyle().Width(width-4).Render(model.update.Detail))
 	}
-	return lines
+	if model.update.ErrorCode != "" {
+		lines = append(lines, errorStyle.Render("Error: "+model.update.ErrorCode))
+	}
+	if model.update.OperationID != "" {
+		lines = append(lines, "", labelStyle.Render("Operation "+model.update.OperationID))
+	}
+	panel := cardStyle.Copy().BorderForeground(color).Width(width).Render(strings.Join(lines, "\n"))
+	return strings.Split(panel, "\n")
 }
