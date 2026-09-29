@@ -1,9 +1,11 @@
 package artifacts
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"io"
 	"os"
 	"os/exec"
@@ -71,6 +73,35 @@ func TestPrepareSelfUpdateStagesVerifiedArtifactAndUsesInjectedLauncher(t *testi
 	if journal.State != "prepared" || journal.WorkingDirectory != directory ||
 		!reflect.DeepEqual(journal.Arguments, arguments) {
 		t.Fatalf("journal=%#v", journal)
+	}
+	journalContent, err := os.ReadFile(plan.JournalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(journalContent, []byte(`"schema"`)) {
+		t.Fatalf("self-update journal retained a generation selector: %s", journalContent)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(journalContent, &fields); err != nil {
+		t.Fatal(err)
+	}
+	fields["future_optional"] = json.RawMessage(`true`)
+	journalContent, err = json.Marshal(fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(plan.JournalPath, journalContent, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadSelfUpdateJournal(plan.JournalPath); err != nil {
+		t.Fatalf("safe additive journal field was rejected: %v", err)
+	}
+	journal.JournalPath = ""
+	if err := writeJSONAtomic(plan.JournalPath, journal); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadSelfUpdateJournal(plan.JournalPath); err == nil {
+		t.Fatal("self-update journal without its path identity was accepted")
 	}
 }
 

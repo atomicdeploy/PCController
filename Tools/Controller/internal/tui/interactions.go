@@ -211,6 +211,15 @@ func (model Model) handleKey(message tea.KeyMsg) (Model, tea.Cmd, bool) {
 			return updated, command, true
 		}
 	}
+	// q is the conventional fast exit while the TUI itself owns the keyboard.
+	// Focused editors, searches, and pickers keep ownership so entering a literal
+	// q or operating a modal can never close the application unexpectedly.
+	if key == "q" && inputEmpty && !model.modalOwnsKeyboard() {
+		if model.preview == nil && model.remote == nil {
+			_ = model.runtime.Close()
+		}
+		return model, tea.Quit, true
+	}
 	if model.portPicker {
 		switch key {
 		case "esc", "ctrl+p":
@@ -388,6 +397,19 @@ func (model Model) handleKey(message tea.KeyMsg) (Model, tea.Cmd, bool) {
 	return model, nil, false
 }
 
+func (model Model) modalOwnsKeyboard() bool {
+	return model.settingEditor != nil ||
+		model.displayEditor != nil ||
+		model.renameTarget != "" ||
+		model.macroSearchEditing ||
+		model.menuLayoutSearchEditing ||
+		model.rfActionPicker ||
+		model.rfCategoryPicker ||
+		model.rfEditMode != "" ||
+		model.rfGuideActive ||
+		model.portPicker
+}
+
 func (model Model) showPortPicker() (Model, tea.Cmd, bool) {
 	model.portPicker = true
 	model.portCursor = 0
@@ -518,8 +540,7 @@ func (model Model) openPort() (Model, tea.Cmd, bool) {
 		return model, nil, true
 	}
 	model.connectPending = true
-	model.runtime.ResumeAuto()
-	return model, connect(model.runtime), true
+	return model, connectAndResume(model.runtime), true
 }
 
 func (model Model) reconnectNow() (Model, tea.Cmd, bool) {
@@ -537,8 +558,7 @@ func (model Model) reconnectNow() (Model, tea.Cmd, bool) {
 	model.connectPending = true
 	model.connectRetryAt = time.Time{}
 	model.connectRetryDelay = 0
-	model.runtime.ResumeAuto()
-	return model, connect(model.runtime), true
+	return model, connectAndResume(model.runtime), true
 }
 
 func (model Model) closePort() (Model, tea.Cmd, bool) {
@@ -612,6 +632,7 @@ func (model *Model) switchPage(page Page) {
 		page += pageCount
 	}
 	page %= pageCount
+	changed := model.page != page
 	model.page = page
 	model.cursor = 0
 	model.pageOffset = 0
@@ -629,6 +650,19 @@ func (model *Model) switchPage(page Page) {
 	if model.remote != nil && model.remote.SetLiveInterval != nil {
 		model.remote.SetLiveInterval(model.remoteLiveInterval())
 	}
+	if changed && model.navigationSync && model.commitNavigation != nil &&
+		!model.suppressNavigationCommit {
+		model.commitNavigation(pageInstanceName(page))
+	}
+}
+
+// applySynchronizedPage renders a coordinator-owned page without echoing it
+// back as a fresh intent. Presence/title reporting still runs normally.
+func (model *Model) applySynchronizedPage(page Page) {
+	previous := model.suppressNavigationCommit
+	model.suppressNavigationCommit = true
+	model.switchPage(page)
+	model.suppressNavigationCommit = previous
 }
 
 func pageInstanceName(page Page) string {

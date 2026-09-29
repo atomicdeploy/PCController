@@ -1,12 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   TAB_CHANNEL_PROTOCOL,
-  TAB_CHANNEL_VERSION,
   createTabChannel,
   type BroadcastChannelPort,
   type TabChannelEnvelope,
   type TabChannelIDKind,
 } from './tab-channel'
+import { applyPushedOutputEvent } from './status-led-event'
+import { applyMacroEventToSnapshot } from './macro-live'
+import { emptySnapshot } from './types'
+import type { ControllerEvent, MacroSnapshot, Snapshot } from './types'
 
 class FakeBroadcastChannel implements BroadcastChannelPort {
   static rooms = new Map<string, Set<FakeBroadcastChannel>>()
@@ -67,6 +70,14 @@ function sequenceFactory(prefix: string) {
   return (kind: TabChannelIDKind) => `${prefix}-${kind}-${++sequence}`
 }
 
+function emptyMacroSnapshot(): MacroSnapshot {
+  return {
+    library: [], latest_event_id: 0,
+    recording: { active: false, id: 0, name: '', steps: 0, host_steps: 0, panel_steps: 0, rf_steps: 0, last_at_us: 0, last_delta_us: 0, last_opcode: 0, last_source: 0 },
+    playback: { running: false, id: 0, name: '', step: 0, step_count: 0, duration_us: 0, accepted_bytes: 0, buffer_fill: 0, underruns: 0, dispatch_errors: 0, dropped_steps: 0, evidence_steps: 0, timing_violations: 0, last_timing_delta_us: 0, maximum_timing_error_us: 0, timing_tolerance_us: 2500, faithful: false },
+  }
+}
+
 function baseEnvelope(
   channel: ReturnType<typeof createTabChannel>,
   now: number,
@@ -74,7 +85,6 @@ function baseEnvelope(
 ): TabChannelEnvelope {
   return {
     protocol: TAB_CHANNEL_PROTOCOL,
-    version: TAB_CHANNEL_VERSION,
     origin: channel.origin,
     messageId: 'remote-message-0001',
     tabId: 'tab:remote-identity:1',
@@ -88,7 +98,7 @@ function baseEnvelope(
 describe('tab channel', () => {
   beforeEach(() => FakeBroadcastChannel.reset())
 
-  it('scopes its versioned transport to origin and gives every tab a distinct identity', () => {
+  it('scopes its living transport to origin and gives every tab a distinct identity', () => {
     const fixedFactory = () => 'fixed-identity'
     const first = createTabChannel({ origin: 'HTTPS://CONTROL.EXAMPLE/', BroadcastChannel: FakeBroadcastChannel, idFactory: fixedFactory })
     const second = createTabChannel({ origin: 'https://control.example', BroadcastChannel: FakeBroadcastChannel, idFactory: fixedFactory })
@@ -97,7 +107,8 @@ describe('tab channel', () => {
     expect(first.supported).toBe(true)
     expect(first.origin).toBe('https://control.example')
     expect(first.channelName).toBe(second.channelName)
-    expect(first.channelName).toContain(`:v${TAB_CHANNEL_VERSION}:`)
+    expect(first.channelName.startsWith(`${TAB_CHANNEL_PROTOCOL}:`)).toBe(true)
+    expect(first.channelName).not.toMatch(/:v\d+:/)
     expect(isolated.channelName).not.toBe(first.channelName)
     expect(first.tabId).not.toBe(second.tabId)
 
@@ -131,7 +142,6 @@ describe('tab channel', () => {
     ])
     expect(received[0]).toMatchObject({
       protocol: TAB_CHANNEL_PROTOCOL,
-      version: TAB_CHANNEL_VERSION,
       origin: 'https://control.example',
       tabId: sender.tabId,
     })
@@ -147,6 +157,88 @@ describe('tab channel', () => {
     now += 1
     sender.close()
     receiver.close()
+  })
+
+  it('keeps two Web tabs on the same pushed seven-segment frame without refresh polling', () => {
+    const first = createTabChannel({ origin: 'https://control.example', BroadcastChannel: FakeBroadcastChannel, idFactory: sequenceFactory('first') })
+    const second = createTabChannel({ origin: 'https://control.example', BroadcastChannel: FakeBroadcastChannel, idFactory: sequenceFactory('second') })
+    const exactSnapshot: Snapshot = {
+      ...emptySnapshot,
+      have_front_panel: true,
+      front_panel: {
+        schema: 2,
+        raw_segments: [0, 0, 0, 0],
+        brightness: 3,
+        blink: false,
+        segments_active: true,
+        category_selector: false,
+        lcd_address: 0x27,
+        lcd_available: true,
+        lcd_backlight: true,
+        lcd_line_1: 'exact',
+        lcd_line_2: 'readback',
+        pressed_keys: 0,
+        menu_page: 1,
+        program_mode: 7,
+        host_captured: false,
+        host_state: 0,
+        host_editable_value: 0,
+      },
+    }
+    const frame: ControllerEvent = {
+      id: 44,
+      time: '2026-08-12T10:00:00.000Z',
+      kind: 'front_panel.segment',
+      stream: 'state',
+      text: 'changed',
+      metadata: { raw_segments: '6D3F546E', brightness: '7' },
+    }
+    let firstSnapshot: Snapshot = applyPushedOutputEvent(exactSnapshot, frame)
+    let secondSnapshot: Snapshot = exactSnapshot
+    second.subscribe(({ payload }) => {
+      if (payload.type === 'controller-event') secondSnapshot = applyPushedOutputEvent(secondSnapshot, payload.event as ControllerEvent)
+    })
+
+    first.publishControllerEvent(frame)
+
+    expect(firstSnapshot.front_panel?.raw_segments).toEqual([0x6d, 0x3f, 0x54, 0x6e])
+    expect(secondSnapshot.front_panel?.raw_segments).toEqual(firstSnapshot.front_panel?.raw_segments)
+    expect(firstSnapshot.front_panel?.lcd_line_1).toBe('exact')
+    expect(secondSnapshot.front_panel?.menu_page).toBe(1)
+    expect(firstSnapshot.front_panel_updated).toBe(frame.time)
+    expect(secondSnapshot.front_panel_updated).toBe(frame.time)
+    first.close()
+    second.close()
+  })
+
+  it('keeps two Web clients on the same exact macro recording delta without a manual refresh', () => {
+    const first = createTabChannel({ origin: 'https://control.example', BroadcastChannel: FakeBroadcastChannel, idFactory: sequenceFactory('macro-first') })
+    const second = createTabChannel({ origin: 'https://control.example', BroadcastChannel: FakeBroadcastChannel, idFactory: sequenceFactory('macro-second') })
+    const evidence: ControllerEvent = {
+      id: 57,
+      time: '2026-08-12T10:01:00.000Z',
+      kind: 'macro.recording.step',
+      stream: 'state',
+      lifecycle: 'captured',
+      state: 'recording',
+      text: 'captured exact MCU delta',
+      metadata: { macro_id: '12', macro_name: 'Relay cadence', step: '4', at_us: '91250', delta_us: '7500', opcode: '0x31', source: '1' },
+    }
+    let firstState = applyMacroEventToSnapshot(emptyMacroSnapshot(), evidence)
+    let secondState = emptyMacroSnapshot()
+    second.subscribe(({ payload }) => {
+      if (payload.type === 'controller-event') {
+        secondState = applyMacroEventToSnapshot(secondState, payload.event as ControllerEvent)
+      }
+    })
+
+    first.publishControllerEvent(evidence)
+
+    expect(firstState.recording).toMatchObject({ id: 12, name: 'Relay cadence', steps: 4, last_at_us: 91250, last_delta_us: 7500 })
+    expect(secondState.recording).toEqual(firstState.recording)
+    expect(secondState.latest_event_id).toBe(57)
+    first.close()
+    second.close()
   })
 
   it('rejects secrets, unknown fields, invalid values, and oversized content before posting', () => {
@@ -196,7 +288,7 @@ describe('tab channel', () => {
     receiver.close()
   })
 
-  it('ignores self, expired, future, wrong-origin, wrong-version, malformed, and duplicate envelopes', () => {
+  it('accepts additive fields but ignores self, expired, future, wrong-origin, malformed, and duplicate envelopes', () => {
     let now = 50_000
     const channel = createTabChannel({ origin: 'https://control.example', BroadcastChannel: FakeBroadcastChannel, now: () => now, idFactory: sequenceFactory('local') })
     const listener = vi.fn()
@@ -206,17 +298,25 @@ describe('tab channel', () => {
     FakeBroadcastChannel.inject(channel.channelName, baseEnvelope(channel, now, { expiresAt: now, messageId: 'expired-message-0001' }))
     FakeBroadcastChannel.inject(channel.channelName, baseEnvelope(channel, now, { sentAt: now + 300_001, expiresAt: now + 300_002, messageId: 'future-message-0001' }))
     FakeBroadcastChannel.inject(channel.channelName, baseEnvelope(channel, now, { origin: 'https://other.example', messageId: 'origin-message-0001' }))
-    FakeBroadcastChannel.inject(channel.channelName, { ...baseEnvelope(channel, now), version: 99, messageId: 'version-message-0001' })
     FakeBroadcastChannel.inject(channel.channelName, { hello: 'world' })
+
+    FakeBroadcastChannel.inject(channel.channelName, {
+      ...baseEnvelope(channel, now, { messageId: 'additive-message-0001' }),
+      futureEnvelopeField: true,
+      payload: { type: 'presence', state: 'active', page: 'dashboard', futurePayloadField: 'ignored' },
+    })
+    expect(listener).toHaveBeenCalledTimes(1)
+    expect(listener.mock.calls[0]?.[0]).not.toHaveProperty('futureEnvelopeField')
+    expect(listener.mock.calls[0]?.[0].payload).not.toHaveProperty('futurePayloadField')
 
     const valid = baseEnvelope(channel, now, { messageId: 'dedupe-message-0001' })
     FakeBroadcastChannel.inject(channel.channelName, valid)
     FakeBroadcastChannel.inject(channel.channelName, valid)
-    expect(listener).toHaveBeenCalledTimes(1)
+    expect(listener).toHaveBeenCalledTimes(2)
 
     now += 2_000
     FakeBroadcastChannel.inject(channel.channelName, baseEnvelope(channel, now, { messageId: 'fresh-message-0001' }))
-    expect(listener).toHaveBeenCalledTimes(2)
+    expect(listener).toHaveBeenCalledTimes(3)
     channel.close()
   })
 

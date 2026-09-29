@@ -26,11 +26,6 @@ import (
 	"pccontroller.local/controller/internal/netpolicy"
 )
 
-const (
-	ToolchainPolicyFormat = "pccontroller-toolchain-policy/v1"
-	ToolchainLockFormat   = "pccontroller-toolchain-lock/v1"
-)
-
 // ToolchainConstraint selects the newest stable release that is not older than
 // MinimumVersion. Exact versions and hashes belong in the generated lock file.
 type ToolchainConstraint struct {
@@ -102,7 +97,6 @@ type ToolchainTargetPolicy struct {
 // ToolchainPolicy is the latest-compatible, source-controlled dependency
 // policy. Resolution produces an exact, hash-bearing ToolchainLock.
 type ToolchainPolicy struct {
-	Format       string                    `json:"format"`
 	Name         string                    `json:"name"`
 	FQBN         string                    `json:"fqbn"`
 	Target       ToolchainTargetPolicy     `json:"target"`
@@ -148,7 +142,6 @@ type ResolvedGo struct {
 // ToolchainLock is generated from ToolchainPolicy. It is suitable for exact
 // bootstrap, reproducible rollback, and dependency-review diffs.
 type ToolchainLock struct {
-	Format     string                     `json:"format"`
 	PolicyName string                     `json:"policy_name"`
 	ResolvedAt string                     `json:"resolved_at_utc"`
 	Firmware   ToolchainProfile           `json:"firmware"`
@@ -232,9 +225,6 @@ func LoadToolchainPolicy(path string) (ToolchainPolicy, error) {
 }
 
 func (policy ToolchainPolicy) Validate() error {
-	if policy.Format != ToolchainPolicyFormat {
-		return fmt.Errorf("unsupported toolchain policy format %q", policy.Format)
-	}
 	if strings.TrimSpace(policy.Name) == "" || strings.TrimSpace(policy.FQBN) == "" {
 		return errors.New("toolchain policy requires name and FQBN")
 	}
@@ -298,8 +288,8 @@ func LoadToolchainLock(path string) (ToolchainLock, error) {
 }
 
 func (lock ToolchainLock) Validate() error {
-	if lock.Format != ToolchainLockFormat || lock.PolicyName == "" || lock.ResolvedAt == "" {
-		return errors.New("toolchain lock format, policy name, or resolution time is missing")
+	if lock.PolicyName == "" || lock.ResolvedAt == "" {
+		return errors.New("toolchain lock policy name or resolution time is missing")
 	}
 	if _, err := time.Parse(time.RFC3339, lock.ResolvedAt); err != nil {
 		return fmt.Errorf("invalid toolchain lock resolution time: %w", err)
@@ -388,7 +378,7 @@ func ResolveToolchainPolicy(ctx context.Context, policy ToolchainPolicy, options
 	resolvedGo.GoModSHA256, _ = fileSHA256(filepath.Join(moduleDir, "go.mod"))
 	resolvedGo.GoSumSHA256, _ = fileSHA256(filepath.Join(moduleDir, "go.sum"))
 	lock := ToolchainLock{
-		Format: ToolchainLockFormat, PolicyName: policy.Name,
+		PolicyName: policy.Name,
 		ResolvedAt: now().UTC().Format(time.RFC3339),
 		Firmware: ToolchainProfile{
 			Name: policy.Name, FQBN: policy.FQBN,

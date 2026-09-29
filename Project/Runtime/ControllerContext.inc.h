@@ -102,10 +102,8 @@ uint8_t userPwmMenuIndex = 0;
 uint8_t userRelayMenuIndex = 0;
 uint8_t userRelayBehavior = 0;
 uint8_t settingsMenuItem = 0;
-uint8_t identifiedKey = 0;
 uint32_t menuLabelEndsAt = 0;
 uint32_t modeEnteredAt = 0;
-uint32_t identifiedKeyEndsAt = 0;
 uint32_t motionExitStartedAt = 0;
 uint32_t flashMessageEndsAt = 0;
 // Presentation visibility/order is configured independently over UART and is
@@ -145,6 +143,7 @@ uint8_t lastPushedSegments[4] = {};
 uint8_t lastPushedSegmentBrightness = 0;
 uint8_t lastPushedBuzzerRevision = 0;
 uint8_t lastPushedStatusLed[6] = {};
+uint8_t lastStatusLedPushAt = 0;
 
 // Host-captured panel text, LCD fallback metadata, and cooperative I2C lease.
 bool hostSegmentTextActive = false;

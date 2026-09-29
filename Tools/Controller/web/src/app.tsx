@@ -5,10 +5,12 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from 'react'
+import { createPortal } from 'react-dom'
 import {
   Activity,
   Bell,
@@ -30,7 +32,9 @@ import {
   PackageOpen,
   Search,
   Settings,
+  Settings2,
   Sun,
+  TriangleAlert,
   Volume2,
   VolumeX,
   Wrench,
@@ -39,8 +43,9 @@ import {
 import { AnimatePresence, MotionConfig, motion } from 'motion/react'
 import { createAudioEngine, type AudioCue, type AudioEngine } from './audio-engine'
 import { BoardSettingsReadGate, boardSettingsGeneration } from './board-settings-read'
-import { BootGate, Button, HotkeyHelp, Icon, KeyCombo, Modal, NavButton, PageTransition, StatusBadge, ToastStack } from './components'
-import { connectStream, execute, getSnapshot, getToken, getUIConfig, rpc, setToken as storeToken } from './api'
+import { BootGate, BrandIcon, Button, HotkeyHelp, Icon, KeyCombo, Modal, NavButton, PageTransition, StatusBadge, ToastStack } from './components'
+import { connectStream, execute, getSnapshot, getToken, getUIConfig, rpc, setToken as storeToken, type StreamSource } from './api'
+import type { StreamControl } from './api'
 import {
   adjacentPageHotkey,
   ignoresGlobalHotkeys,
@@ -59,7 +64,8 @@ import {
   prependSignificantControllerEvent,
   significantControllerEvents,
 } from './significant-events'
-import { embeddedResourcesMismatch, hostResourceIdentity } from './resource-version'
+import { shouldToastControllerEvent } from './event-notification-policy'
+import { createResourceReconnectCheck, embeddedResourcesMismatch, hostResourceIdentity } from './resource-version'
 import { emitStartupConsoleIntroduction } from './startup-console'
 import {
   createTabChannel,
@@ -68,6 +74,12 @@ import {
 } from './tab-channel'
 import { controllerChannelOrigin } from './transport-config'
 import { matchesAppTarget } from './instance-routing'
+import {
+  loadNavigationSync,
+  NavigationSession,
+  type NavigationOutcome,
+  saveNavigationSync,
+} from './navigation-sync'
 import type {
   Appearance,
   BoardSettingsReadState,
@@ -81,11 +93,29 @@ import type {
   UIConfig,
 } from './types'
 import { peripheralAvailability } from './peripheral-availability'
-import { applyPushedOutputEvent } from './status-led-event'
-import type { BuzzerPath } from './buzzer-routing'
+import { advanceStatusLEDSource, applyPushedOutputEvent, isPushedOutputEvent, mergeStatusLEDSnapshot, statusLEDSnapshotMatchesSource, statusLEDSourceUnchanged } from './status-led-event'
+import { BuzzerPlaybackTimeline, type BuzzerPath } from './buzzer-routing'
+import { isMacroControllerEvent, prependMacroControllerEvent } from './macro-live'
 import { emptySnapshot } from './types'
 import type { SharedViewProps } from './views'
 import { sessionAuthenticationGuidanceRequired } from './authentication-guidance'
+import { hardwareProblemPresentation } from './hardware-problem'
+import {
+  AppActionReceiptCache,
+  acknowledgeWebAppAction,
+  applyExactTargetWebActionEffect,
+  processWebAppAction,
+  type WebActionProgress,
+} from './app-actions'
+import { AppPreferencesDialog } from './app-preferences-dialog'
+import { primaryShortcutARIA, primaryShortcutModifier } from './client-platform'
+import { publishBrowserController, publishBrowserControllerState } from './browser-controller'
+import {
+  loadQuickHeaderPreferences,
+  normalizeQuickHeaderPreferences,
+  saveQuickHeaderPreferences,
+  type QuickHeaderPreferences,
+} from './quick-header-preferences'
 
 const DashboardPage = lazy(() => import('./views').then(({ DashboardView }) => ({ default: DashboardView })))
 const ControlsPage = lazy(() => import('./views').then(({ ControlsView }) => ({ default: ControlsView })))
@@ -366,13 +396,13 @@ export function controllerConnectionLabel(
   if (streamState === 'connecting') return copy('Connecting', 'در حال اتصال')
   if (streamState !== 'open') return copy('Disconnected', 'قطع ارتباط')
   if (boardState === 'loading') return copy('Synchronizing', 'در حال همگام‌سازی')
-  if (snapshot.connected) return copy('Controller connected', 'برد متصل')
+  if (snapshot.connected) return copy('Board connected', 'برد متصل')
   const controllerState = snapshot.connection_state.trim().toLowerCase()
   if (controllerState === 'paused') return copy('Paused', 'متوقف')
   if (['connecting', 'discovering', 'scanning', 'searching'].includes(controllerState)) {
     return copy('Searching', 'در حال جستجو')
   }
-  return copy('No controller', 'بدون برد')
+  return copy('No board', 'بدون برد')
 }
 
 export function isCompletedHostUpdate(event: Pick<ControllerEvent, 'kind' | 'metadata'>): boolean {
@@ -414,6 +444,7 @@ export default function App() {
   const [snapshot, setSnapshot] = useState<Snapshot>(demo ? demoSnapshot() : emptySnapshot)
   const [samples, setSamples] = useState<MetricSample[]>(() => demo ? Array.from({ length: 48 }, (_, index) => sampleFrom(demoSnapshot(Date.now() - (47 - index) * 1000), Date.now() - (47 - index) * 1000)) : [])
   const [events, setEvents] = useState<ControllerEvent[]>(() => demo ? Array.from({ length: 12 }, (_, index) => demoEvent(index + 1)) : [])
+  const [macroEvents, setMacroEvents] = useState<ControllerEvent[]>([])
   const [boardSettingsReadState, setBoardSettingsReadState] = useState<BoardSettingsReadState>(demo ? 'ready' : 'idle')
   const [uiConfig, setUIConfig] = useState<UIConfig | null>(null)
   const [streamState, setStreamState] = useState<'connecting' | 'open' | 'waiting' | 'closed'>(demo ? 'open' : 'connecting')
@@ -426,6 +457,10 @@ export default function App() {
   const [paletteQuery, setPaletteQuery] = useState('')
   const [paletteIndex, setPaletteIndex] = useState(0)
   const [hotkeyHelp, setHotkeyHelp] = useState(false)
+  const [appPreferencesOpen, setAppPreferencesOpen] = useState(false)
+  const [quickHeader, setQuickHeader] = useState(loadQuickHeaderPreferences)
+  const [sidebarStatusMenu, setSidebarStatusMenu] = useState(false)
+  const [sidebarStatusMenuPosition, setSidebarStatusMenuPosition] = useState({ left: 0, top: 0 })
   const [bootOpen, setBootOpen] = useState(demo)
   const [bootResolved, setBootResolved] = useState(demo)
   const [bootProgress, setBootProgress] = useState(12)
@@ -435,21 +470,39 @@ export default function App() {
   const [tabBusSupported, setTabBusSupported] = useState(false)
   const [tabPeers, setTabPeers] = useState(0)
   const [appInstanceID, setAppInstanceID] = useState('')
+  const [navigationSync, setNavigationSyncEnabled] = useState(loadNavigationSync)
+  const [navigationSyncStatus, setNavigationSyncStatus] = useState<{
+    state: 'idle' | 'pending' | 'error'
+    detail: string
+  }>({ state: 'idle', detail: '' })
+  const [navigationSession] = useState(() => new NavigationSession())
+	const [remoteTitleOverride, setRemoteTitleOverride] = useState<string | null>(null)
+	const [remoteActionProgress, setRemoteActionProgress] = useState<WebActionProgress | null>(null)
   const [relayedTerminal, setRelayedTerminal] = useState<RelayedTerminalEntry[]>([])
   const toastID = useRef(0)
   const goChordUntil = useRef(0)
   const audioRef = useRef<AudioEngine | null>(null)
+  const buzzerTimelineRef = useRef(new BuzzerPlaybackTimeline())
   const previousAudioConnection = useRef<boolean | null>(null)
   const tabChannelRef = useRef<TabChannel | null>(null)
+  const streamControlRef = useRef<StreamControl | null>(null)
   const appearanceETagRef = useRef('')
   const appearanceDesiredRef = useRef(appearance)
   const appearanceSaveChain = useRef<Promise<void>>(Promise.resolve())
   const refreshAfterHostRestart = useRef(false)
   const startupConsoleShown = useRef(false)
   const pageRef = useRef(page)
+  const sidebarStatusRef = useRef<HTMLButtonElement>(null)
+  const sidebarStatusMenuRef = useRef<HTMLDivElement>(null)
+  const navigationSyncRef = useRef(navigationSync)
+  const reportAppInstanceRef = useRef<(catchUp?: boolean) => void>(() => undefined)
+  const historyNavigationRef = useRef<(page: PageID) => void>(() => undefined)
   const boardSettingsReadGate = useRef(new BoardSettingsReadGate())
   const boardSettingsRequestGeneration = useRef('')
   const snapshotRef = useRef(snapshot)
+  const ledTransportEpoch = useRef(0)
+  const ledTransportInstanceID = useRef('')
+  const appActionReceipts = useRef(new AppActionReceiptCache())
   const t = useMemo(() => translator(appearance.locale), [appearance.locale])
   const productTitle = effectiveProductTitle(uiConfig?.name, __PRODUCT_NAME__)
   const productShortName = productMark(productTitle, __PRODUCT_SHORT_NAME__)
@@ -458,6 +511,7 @@ export default function App() {
     ? appearance.locale === 'fa' ? 'rtl' : 'ltr'
     : appearance.direction
   const drawerClosedOffset = resolvedDirection === 'rtl' ? '18px' : '-18px'
+  navigationSyncRef.current = navigationSync
 
   const applyLocalAppearance = useCallback((value: Appearance) => {
     setAppearance(value)
@@ -465,6 +519,12 @@ export default function App() {
     applyAppearance(value)
     audioRef.current?.setVolume(value.audioVolume)
     audioRef.current?.setMuted(value.audioMuted)
+  }, [])
+
+  const saveQuickHeader = useCallback((value: QuickHeaderPreferences) => {
+    const normalized = normalizeQuickHeaderPreferences(value)
+    setQuickHeader(normalized)
+    saveQuickHeaderPreferences(normalized)
   }, [])
 
   const adoptHostAppearance = useCallback((value: Appearance, etag: string) => {
@@ -477,14 +537,24 @@ export default function App() {
   const refreshHostAppearance = useCallback(async () => {
     const config = await getUIConfig()
     setUIConfig(config)
+    streamControlRef.current?.updateStatusInterval(config.status_interval_ms)
     adoptHostAppearance(config.appearance, config.appearance_etag)
     return config
   }, [adoptHostAppearance])
 
+  const adoptMeasurementTiming = useCallback((statusIntervalMS: number, measurementFreshnessMS: number) => {
+    setUIConfig((current) => current ? {
+      ...current,
+      status_interval_ms: statusIntervalMS,
+      measurement_freshness_ms: measurementFreshnessMS,
+    } : current)
+    streamControlRef.current?.updateStatusInterval(statusIntervalMS)
+  }, [])
+
   useEffect(() => {
 	const pageTitle = t(navigation.find((item) => item.id === page)?.label ?? 'dashboard')
-	document.title = `${productTitle} — ${pageTitle}`
-	}, [page, productTitle, t])
+	document.title = remoteTitleOverride ?? `${productTitle} — ${pageTitle}`
+	}, [page, productTitle, remoteTitleOverride, t])
 
   useEffect(() => {
     updateRuntimeFavicon(demo ? 'offline' : controllerFaviconState(snapshot))
@@ -504,6 +574,58 @@ export default function App() {
   }, [demo, productTitle, snapshot.connected, snapshot.port.name, startupProbeResolved, streamState, uiConfig])
 
   useEffect(() => { pageRef.current = page }, [page])
+
+  const openSidebarStatusMenu = useCallback((left?: number, top?: number) => {
+    const bounds = sidebarStatusRef.current?.getBoundingClientRect()
+    setSidebarStatusMenuPosition({
+      left: left ?? (sidebarOpen ? bounds?.left ?? 10 : (bounds?.right ?? 84) + 7),
+      top: top ?? (bounds?.bottom ?? 10) + 7,
+    })
+    setSidebarStatusMenu(true)
+  }, [sidebarOpen])
+
+  useLayoutEffect(() => {
+    if (!sidebarStatusMenu || !sidebarStatusMenuRef.current) return
+    const bounds = sidebarStatusMenuRef.current.getBoundingClientRect()
+    const margin = 10
+    setSidebarStatusMenuPosition((current) => ({
+      left: Math.max(margin, Math.min(current.left, window.innerWidth - bounds.width - margin)),
+      top: Math.max(margin, Math.min(current.top, window.innerHeight - bounds.height - margin)),
+    }))
+  }, [sidebarStatusMenu])
+
+  useEffect(() => {
+    if (!sidebarStatusMenu) return
+    const outside = (event: PointerEvent | FocusEvent) => {
+      const target = event.target as Node
+      if (!sidebarStatusRef.current?.contains(target) && !sidebarStatusMenuRef.current?.contains(target)) setSidebarStatusMenu(false)
+    }
+    const key = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setSidebarStatusMenu(false)
+        sidebarStatusRef.current?.focus()
+      }
+    }
+    const close = () => setSidebarStatusMenu(false)
+    const focusFrame = window.requestAnimationFrame(() => sidebarStatusMenuRef.current?.querySelector<HTMLButtonElement>('button')?.focus())
+    window.addEventListener('pointerdown', outside)
+    window.addEventListener('focusin', outside)
+    window.addEventListener('keydown', key)
+    window.addEventListener('blur', close)
+    window.addEventListener('hashchange', close)
+    return () => {
+      window.cancelAnimationFrame(focusFrame)
+      window.removeEventListener('pointerdown', outside)
+      window.removeEventListener('focusin', outside)
+      window.removeEventListener('keydown', key)
+      window.removeEventListener('blur', close)
+      window.removeEventListener('hashchange', close)
+    }
+  }, [sidebarStatusMenu])
+
+  useEffect(() => {
+    if (!snapshot.connected) setSidebarStatusMenu(false)
+  }, [snapshot.connected])
 
   useEffect(() => {
     const engine = createAudioEngine({
@@ -575,6 +697,16 @@ export default function App() {
       }
       if (payload.type === 'controller-event') {
         const event = payload.event as ControllerEvent
+        if (isMacroControllerEvent(event)) {
+          setMacroEvents((current) => prependMacroControllerEvent(current, event))
+        }
+        if (isPushedOutputEvent(event)) {
+          setSnapshot((current) => {
+            const next = applyPushedOutputEvent(current, event)
+            snapshotRef.current = next
+            return next
+          })
+        }
         setEvents((current) => prependSignificantControllerEvent(current, event))
       }
     })
@@ -594,30 +726,51 @@ export default function App() {
     }
   }, [refreshHostAppearance])
 
+  const reportAppInstance = useCallback((state = document.hidden ? 'hidden' : 'active', catchUp = false) => {
+    if (demo || !startupProbeResolved || !appInstanceID) return Promise.resolve()
+    return rpc('controller.app.instance.report', {
+      id: appInstanceID,
+      surface: 'webui',
+      page: pageRef.current,
+      state,
+      lease_seconds: 45,
+      self: {
+        kind: 'browser',
+        vars: {
+          origin: window.location.origin,
+          platform: navigator.platform || 'unknown',
+          language: navigator.language || 'unknown',
+          user_agent: navigator.userAgent,
+        },
+      },
+      values: {
+        color_mode: appearance.theme,
+        locale: appearance.locale,
+        direction: resolvedDirection,
+		app_actions: 'app.page,app.progress,app.title',
+        ...navigationSession.nextValues(navigationSync, catchUp),
+      },
+    })
+  }, [appInstanceID, appearance.locale, appearance.theme, demo, navigationSession, navigationSync, resolvedDirection, startupProbeResolved])
+
+  reportAppInstanceRef.current = (catchUp = false) => {
+    if (catchUp && navigationSyncRef.current) {
+      setNavigationSyncStatus({ state: 'pending', detail: '' })
+    }
+    void reportAppInstance(undefined, catchUp).catch((cause) => {
+      if (catchUp && navigationSyncRef.current) {
+        setNavigationSyncStatus({
+          state: 'error',
+          detail: cause instanceof Error ? cause.message : String(cause),
+        })
+      }
+    })
+  }
+
   useEffect(() => {
     if (demo || !startupProbeResolved || !appInstanceID) return
     const report = (state = document.hidden ? 'hidden' : 'active') => {
-      void rpc('controller.app.instance.report', {
-        id: appInstanceID,
-        surface: 'webui',
-        page,
-        state,
-        lease_seconds: 45,
-        self: {
-          kind: 'browser',
-          vars: {
-            origin: window.location.origin,
-            platform: navigator.platform || 'unknown',
-            language: navigator.language || 'unknown',
-            user_agent: navigator.userAgent,
-          },
-        },
-        values: {
-          color_mode: appearance.theme,
-          locale: appearance.locale,
-          direction: resolvedDirection,
-        },
-      }).catch(() => undefined)
+      void reportAppInstance(state).catch(() => undefined)
     }
     const onVisibility = () => report()
     report()
@@ -629,7 +782,7 @@ export default function App() {
       document.removeEventListener('visibilitychange', onVisibility)
       window.clearInterval(leaseRefresh)
     }
-  }, [appInstanceID, appearance.locale, appearance.theme, demo, page, resolvedDirection, startupProbeResolved, token])
+  }, [appInstanceID, demo, reportAppInstance, startupProbeResolved, token])
 
   useEffect(() => () => {
     if (!appInstanceID) return
@@ -682,11 +835,20 @@ export default function App() {
       return
     }
     try {
+      const started = { epoch: ledTransportEpoch.current, instanceID: ledTransportInstanceID.current }
       const value = await getSnapshot()
+      const currentSource = { epoch: ledTransportEpoch.current, instanceID: ledTransportInstanceID.current }
+      if (!statusLEDSourceUnchanged(started, currentSource)) return
+      if (!statusLEDSnapshotMatchesSource(value, started)) return
       const previous = snapshotRef.current
-      snapshotRef.current = value
-      setSnapshot(value)
-      setSamples((current) => metricSamplesAfterSnapshot(current, previous, value))
+      const next = mergeStatusLEDSnapshot(previous, value, {
+        epoch: started.epoch,
+        instanceID: value.host_instance_id,
+        authoritativeInstanceID: started.instanceID,
+      })
+      snapshotRef.current = next
+      setSnapshot(next)
+      setSamples((current) => metricSamplesAfterSnapshot(current, previous, next))
     } catch (cause) {
       notify('warning', 'Snapshot unavailable', cause instanceof Error ? cause.message : String(cause))
     }
@@ -730,7 +892,7 @@ export default function App() {
     streamState,
   ])
 
-  const dispatchCommand = useCallback(async (command: string, success?: string): Promise<string> => {
+  const dispatchCommand = useCallback(async (command: string, success?: string, refreshAfter = false): Promise<string> => {
     const safeCommand = redactSensitiveCommand(command)
     tabChannelRef.current?.publishTerminal({ kind: 'command', text: `pc› ${safeCommand}`, at: Date.now() })
     if (demo) {
@@ -744,7 +906,10 @@ export default function App() {
       const output = result.output ?? ''
       tabChannelRef.current?.publishTerminal({ kind: 'output', text: output || '✓ accepted', at: Date.now() })
       notify('success', success || 'Command completed', output || safeCommand)
-      void refresh()
+      // Board and host state arrive on the pushed event stream. Refresh is
+      // reserved for explicit recovery paths so ordinary commands do not add
+      // polling latency or duplicate UART traffic.
+      if (refreshAfter) void refresh()
       return output
     } catch (cause) {
       const detail = cause instanceof Error ? cause.message : String(cause)
@@ -754,9 +919,9 @@ export default function App() {
     }
   }, [demo, notify, refresh])
 
-  const runCommand = useCallback((command: string, success?: string): Promise<string> => {
+  const runCommand = useCallback((command: string, success?: string, refreshAfter = false): Promise<string> => {
     const caution = demo ? null : commandWarning(command, appearance.locale)
-    if (!caution) return dispatchCommand(command, success)
+    if (!caution) return dispatchCommand(command, success, refreshAfter)
     return new Promise<string>((resolve, reject) => {
       let settled = false
       setDialog({
@@ -772,7 +937,7 @@ export default function App() {
         },
         action: async () => {
           try {
-            const output = await dispatchCommand(command, success)
+            const output = await dispatchCommand(command, success, refreshAfter)
             settled = true
             resolve(output)
           } catch (cause) {
@@ -789,17 +954,94 @@ export default function App() {
     setDialog({ ...value, open: true })
   }, [])
 
-  const navigate = useCallback((value: PageID) => {
+  const applyPage = useCallback((value: PageID, historyMode: 'push' | 'replace' | 'none' = 'push') => {
+    const changed = pageRef.current !== value
     const nextHash = canonicalPageHash(value)
-    if (pageRef.current !== value || location.hash !== nextHash) {
+    if (historyMode === 'push' && (pageRef.current !== value || location.hash !== nextHash)) {
       history.pushState({ page: value }, '', canonicalPageURL(value))
+    } else if (historyMode === 'replace' && (pageRef.current !== value || location.hash !== nextHash)) {
+      history.replaceState({ page: value }, '', canonicalPageURL(value))
     }
     pageRef.current = value
     setPage(value)
     setMobileNav(false)
     tabChannelRef.current?.publishPresence(document.hidden ? 'hidden' : 'active', value)
+    if (changed) reportAppInstanceRef.current()
     document.querySelector('.app-main')?.scrollTo({ top: 0, behavior: appearance.reduceMotion ? 'auto' : 'smooth' })
   }, [appearance.reduceMotion])
+
+  const navigate = useCallback((value: PageID, historyMode: 'push' | 'none' = 'push') => {
+    applyPage(value, historyMode)
+    if (demo || !navigationSync || !startupProbeResolved || !appInstanceID) return
+    setNavigationSyncStatus({ state: 'pending', detail: '' })
+    let command
+    try {
+      command = navigationSession.nextCommit(appInstanceID, value)
+    } catch (cause) {
+      setNavigationSyncStatus({
+        state: 'error',
+        detail: cause instanceof Error ? cause.message : String(cause),
+      })
+      return
+    }
+    void rpc<NavigationOutcome>('controller.app.navigation.commit', command)
+      .then((outcome) => {
+        const settled = navigationSession.settle(outcome, command.operation_id)
+        if (settled) {
+          applyPage(settled, 'replace')
+          setNavigationSyncStatus({ state: 'idle', detail: '' })
+        }
+        else throw new Error(appearance.locale === 'fa' ? 'پاسخ هماهنگ‌کننده با درخواست فعلی مطابقت ندارد.' : 'The coordinator response did not match this request.')
+      })
+      .catch((cause) => {
+        reportAppInstanceRef.current(true)
+        setNavigationSyncStatus({
+          state: 'error',
+          detail: cause instanceof Error ? cause.message : String(cause),
+        })
+      })
+  }, [appInstanceID, appearance.locale, applyPage, demo, navigationSession, navigationSync, startupProbeResolved])
+
+  const browserControllerState = useMemo(() => ({
+    title: productTitle,
+    hostVersion: uiConfig?.host_version || '',
+    page,
+    hostOnline: !demo && streamState === 'open',
+    boardConnected: !demo && snapshot.connected,
+    port: snapshot.port.name || '',
+    transport: streamState,
+    eventCount: events.length,
+  }), [demo, events.length, page, productTitle, snapshot.connected, snapshot.port.name, streamState, uiConfig?.host_version])
+
+  useEffect(() => publishBrowserController({
+    api: 'PCController.browser',
+    inspect: () => browserControllerState,
+    command: (value) => {
+      const command = value.trim()
+      if (!command) return Promise.reject(new Error('PCController.command requires a non-empty command'))
+      return runCommand(command)
+    },
+    refresh,
+    navigate: (value) => {
+      const destination = navigation.find((candidate) => candidate.id === value)?.id
+      if (!destination) throw new Error(`Unknown PCController page: ${value}`)
+      navigate(destination)
+    },
+  }), [browserControllerState, navigate, refresh, runCommand])
+
+  useEffect(() => { publishBrowserControllerState(browserControllerState) }, [browserControllerState])
+
+  useEffect(() => {
+    historyNavigationRef.current = (value) => navigate(value, 'none')
+    return () => { historyNavigationRef.current = () => undefined }
+  }, [navigate])
+
+  const setNavigationSync = useCallback((value: boolean) => {
+    saveNavigationSync(value)
+    navigationSession.resetCoordinator()
+    setNavigationSyncStatus(value ? { state: 'pending', detail: '' } : { state: 'idle', detail: '' })
+    setNavigationSyncEnabled(value)
+  }, [navigationSession])
 
   const saveAppearance = useCallback((value: Appearance) => {
     const safeValue = normalizeAppearance(value, appearanceDesiredRef.current)
@@ -910,9 +1152,7 @@ export default function App() {
     }
     const syncFromHistory = () => {
       const next = pageFromLocation()
-      pageRef.current = next
-      setPage(next)
-      setMobileNav(false)
+      historyNavigationRef.current(next)
     }
     window.addEventListener('hashchange', syncFromHistory)
     window.addEventListener('popstate', syncFromHistory)
@@ -924,7 +1164,7 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (bootOpen) return
+      if (bootOpen || appPreferencesOpen) return
       const composing = event.isComposing || event.keyCode === 229
       if (palette) {
         if (composing) return
@@ -1022,7 +1262,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [bootOpen, dialog.open, hotkeyHelp, mobileNav, navigate, page, palette, paletteIndex, paletteQuery, t, toggleAudio])
+  }, [appPreferencesOpen, bootOpen, dialog.open, hotkeyHelp, mobileNav, navigate, page, palette, paletteIndex, paletteQuery, t, toggleAudio])
 
   useEffect(() => {
     setPaletteIndex(0)
@@ -1070,7 +1310,11 @@ export default function App() {
       return () => window.clearInterval(timer)
     }
     const abort = new AbortController()
-    let stopStream = () => {}
+    const resourceCheck = createResourceReconnectCheck(getUIConfig, reloadForResourceMismatch, {
+      signal: abort.signal,
+      onError: (cause) => setStreamDetail(`Host resource check: ${cause instanceof Error ? cause.message : String(cause)}`),
+    })
+    let stopStream = Object.assign(() => {}, { updateStatusInterval: (_intervalMS: number) => undefined }) as StreamControl
     void (async () => {
       try {
         setBootTarget(42)
@@ -1098,6 +1342,7 @@ export default function App() {
         }
         if (eventHistory.status === 'fulfilled') {
           setEvents(significantControllerEvents(eventHistory.value).slice(-500).reverse())
+          setMacroEvents(eventHistory.value.filter(isMacroControllerEvent).slice(-80).reverse())
         }
         setBootTarget(92)
         if (firstSetup && value.connected && config.welcome_melody?.trim()) {
@@ -1120,47 +1365,116 @@ export default function App() {
             setSnapshot(next)
             setSamples((current) => metricSamplesAfterSnapshot(current, previous, next, new Date(update.time).getTime()))
           },
-          event: (event) => {
+          event: (event, source: StreamSource) => {
+			const adoptedSource = advanceStatusLEDSource(
+				{ epoch: ledTransportEpoch.current, instanceID: ledTransportInstanceID.current },
+				{ epoch: source.generation, instanceID: source.instanceID },
+			)
+			if (!adoptedSource) return
+			ledTransportEpoch.current = adoptedSource.epoch
+			ledTransportInstanceID.current = adoptedSource.instanceID ?? ''
 			const eventKind = event.kind.toLowerCase()
-			if (event.kind.toLowerCase() === 'status_led.changed' || event.kind.toLowerCase() === 'front_panel.segment') {
+            const macroEvent = isMacroControllerEvent(event)
+            if (macroEvent) setMacroEvents((current) => prependMacroControllerEvent(current, event))
+			if (isPushedOutputEvent(event)) {
 				setSnapshot((current) => {
-					const next = applyPushedOutputEvent(current, event)
+					const next = applyPushedOutputEvent(current, event, {
+						epoch: source.generation,
+						instanceID: source.instanceID,
+					})
 					snapshotRef.current = next
 					return next
 				})
 			}
-						if (config.integrations?.buzzer_web_audio && event.kind.toLowerCase() === 'buzzer.note') {
-							const frequencyHz = Number(event.metadata?.frequency_hz)
-							const durationMS = Number(event.metadata?.duration_ms)
-							audioRef.current?.playTone(frequencyHz, durationMS)
-						}
-            if (isSignificantControllerEvent(event)) {
-              setEvents((current) => prependSignificantControllerEvent(current, event))
-              tabChannelRef.current?.publishControllerEvent(event)
+            if (config.integrations?.buzzer_web_audio && eventKind === 'buzzer.note') {
+              const frequencyHz = Number(event.metadata?.frequency_hz)
+              const durationMS = Number(event.metadata?.duration_ms)
+              const rawDeviceMicros = event.metadata?.device_micros
+              const deviceMicros = rawDeviceMicros === undefined ? undefined : Number(rawDeviceMicros)
+              const source = event.metadata?.['bridge.ingress']
+                ? `bridge:${event.metadata['bridge.ingress']}`
+                : 'local-board'
+              const plan = buzzerTimelineRef.current.plan({
+                source, frequencyHz, durationMS, deviceMicros,
+              }, performance.now())
+              if (plan?.stop) {
+                audioRef.current?.stopTone(source, plan.delayMS)
+              } else if (plan?.audible) {
+                audioRef.current?.stopTone(source, plan.delayMS)
+                audioRef.current?.playTone(frequencyHz, plan.durationMS, plan.delayMS, source)
+              }
             }
-            if (event.kind.toLowerCase() === 'app.page' && isFreshAppAction(event.time) &&
+            const significant = isSignificantControllerEvent(event)
+            if (significant) {
+              setEvents((current) => prependSignificantControllerEvent(current, event))
+            }
+			const processedAction = processWebAppAction(event, appInstanceID, appActionReceipts.current)
+			if (processedAction) {
+				const { acknowledgement } = processedAction
+				if (!processedAction.duplicate) {
+					const { effect } = processedAction
+					applyExactTargetWebActionEffect(effect, {
+						replacePage: (page) => {
+							applyPage(page, 'replace')
+							audioRef.current?.cue('navigation', 'forward')
+						},
+						setTitle: setRemoteTitleOverride,
+						setProgress: setRemoteActionProgress,
+					})
+				}
+				void acknowledgeWebAppAction(
+					acknowledgement,
+					(value) => rpc('controller.app.action.ack', value),
+				).catch((cause) => {
+					const locale = appearanceDesiredRef.current.locale
+					notify('warning',
+						locale === 'fa' ? 'تأیید فرمان ارسال نشد' : 'Action not confirmed',
+						cause instanceof Error ? cause.message : String(cause))
+				})
+			}
+            if (significant || isPushedOutputEvent(event) || macroEvent) tabChannelRef.current?.publishControllerEvent(event)
+            if (!event.metadata?.operation_id && event.kind.toLowerCase() === 'app.page' && isFreshAppAction(event.time) &&
                 matchesAppTarget(event.metadata?.target_instance, appInstanceID, 'webui')) {
               const destination = pageFromAppAction(event.metadata?.page ?? event.metadata?.value ?? event.text)
               if (destination) {
-                navigate(destination)
-                audioRef.current?.cue('navigation', 'forward')
+                const groupUpdate = event.metadata?.navigation_sync?.toLowerCase() === 'group'
+                const accepted = groupUpdate
+                  ? navigationSyncRef.current ? navigationSession.acceptAction(event.metadata, destination) : null
+                  : destination
+                if (accepted) {
+                  applyPage(accepted, 'replace')
+                  if (groupUpdate) setNavigationSyncStatus({ state: 'idle', detail: '' })
+                  audioRef.current?.cue('navigation', 'forward')
+                }
               }
             }
 			if (shouldNavigateToUpdates(event, pageRef.current)) {
-				navigate('updates')
+				applyPage('updates', 'replace')
 				audioRef.current?.cue('navigation', 'forward')
 			}
-            if (/error|warning|hot|door/i.test(event.kind)) notify(eventToneForToast(event), event.kind, event.text)
+            if (shouldToastControllerEvent(event)) notify(eventToneForToast(event), event.kind, event.text)
             if (isCompletedHostUpdate(event)) {
               refreshAfterHostRestart.current = true
             }
             if (/config/i.test(event.kind)) void refreshHostAppearance().catch(() => undefined)
-            if (/device|connection|settings/i.test(event.kind)) void refresh()
+            if (/device|connection|settings|illumination|^macro/i.test(event.kind)) void refresh()
           },
-          state: (state, detail) => {
+          state: (state, detail, source) => {
+            if (source?.generation) {
+              const adoptedSource = advanceStatusLEDSource(
+                { epoch: ledTransportEpoch.current, instanceID: ledTransportInstanceID.current },
+                { epoch: source.generation, instanceID: source.instanceID },
+              )
+              if (!adoptedSource) return
+              ledTransportEpoch.current = adoptedSource.epoch
+              ledTransportInstanceID.current = adoptedSource.instanceID ?? ''
+            }
+            resourceCheck.state(state)
             setStreamState(state)
             setStreamDetail(detail ?? '')
             if (state === 'open') {
+              navigationSession.resetCoordinator()
+              reportAppInstanceRef.current(true)
               if (refreshAfterHostRestart.current) {
                 refreshAfterHostRestart.current = false
                 window.location.reload()
@@ -1178,6 +1492,7 @@ export default function App() {
             }
           },
         })
+        streamControlRef.current = stopStream
         setBootTarget(100)
       } catch (cause) {
         setStartupProbeResolved(true)
@@ -1195,8 +1510,13 @@ export default function App() {
         setBootTarget(100)
       }
     })()
-    return () => { abort.abort(); stopStream() }
-  }, [adoptHostAppearance, appInstanceID, demo, navigate, notify, refresh, refreshHostAppearance, streamGeneration, token])
+    return () => {
+      abort.abort()
+      resourceCheck.dispose()
+      if (streamControlRef.current === stopStream) streamControlRef.current = null
+      stopStream()
+    }
+  }, [adoptHostAppearance, appInstanceID, applyPage, demo, navigate, navigationSession, notify, refresh, refreshHostAppearance, streamGeneration, token])
 
   const authenticationRequired = sessionAuthenticationGuidanceRequired({
     hostRequiresAuthentication: uiConfig?.auth_required === true,
@@ -1212,7 +1532,8 @@ export default function App() {
       ? 'loading'
       : 'unavailable'
   const shared: SharedViewProps = {
-    appTitle: productTitle, snapshot, samples, events, locale: appearance.locale, t, command: runCommand, refresh, openDialog,
+    reduceMotion: appearance.reduceMotion,
+    appTitle: productTitle, snapshot, samples, events, macroEvents, locale: appearance.locale, t, command: runCommand, refresh, openDialog,
     boardSettingsReadState,
     transport: {
       streamState,
@@ -1220,16 +1541,22 @@ export default function App() {
       boardState,
       tabBusSupported,
       tabPeers,
+      statusIntervalMS: uiConfig?.status_interval_ms,
+      measurementFreshnessMS: uiConfig?.measurement_freshness_ms,
     },
     relayedTerminal,
     broadcastTerminal: (entry) => { tabChannelRef.current?.publishTerminal(entry) },
   }
 
   const PageView = pageViewFor(page)
+	const globalHardwareProblem = snapshot.hardware_problems?.[0]
+	const globalHardwareWarning = globalHardwareProblem
+		? hardwareProblemPresentation(globalHardwareProblem, appearance.locale)
+		: undefined
   const view = (
     <Suspense fallback={<section className="page-loading" role="status" aria-live="polite"><span className="spinner" />{appearance.locale === 'fa' ? 'در حال بارگیری…' : 'Loading page…'}</section>}>
       {page === 'settings'
-        ? <PageView {...shared} appearance={appearance} onAppearance={saveAppearance} token={token} onToken={saveToken} onAppTitle={saveAppTitle} uiConfig={uiConfig} onBuzzerPath={setBuzzerPath} />
+        ? <PageView {...shared} appearance={appearance} onAppearance={saveAppearance} token={token} onToken={saveToken} onAppTitle={saveAppTitle} uiConfig={uiConfig} onMeasurementTiming={adoptMeasurementTiming} onBuzzerPath={setBuzzerPath} navigationSync={navigationSync} navigationSyncStatus={navigationSyncStatus} onNavigationSync={setNavigationSync} />
         : <PageView {...shared} />}
     </Suspense>
   )
@@ -1290,23 +1617,76 @@ export default function App() {
     <MotionConfig reducedMotion={appearance.reduceMotion ? 'always' : 'user'}>
     <div
       className={`app-shell${sidebarOpen ? '' : ' is-sidebar-compact'}${bootResolved ? '' : ' is-bootstrap-pending'}`}
-      inert={!bootResolved || bootOpen || hotkeyHelp ? true : undefined}
-      aria-hidden={!bootResolved || bootOpen || hotkeyHelp ? true : undefined}
+      inert={!bootResolved || bootOpen || hotkeyHelp || appPreferencesOpen ? true : undefined}
+      aria-hidden={!bootResolved || bootOpen || hotkeyHelp || appPreferencesOpen ? true : undefined}
     >
+	  {remoteActionProgress && (
+		<div
+		  className={`app-action-progress app-action-progress--${remoteActionProgress.state}`}
+		  role="progressbar"
+		  aria-label={appearance.locale === 'fa' ? 'پیشرفت فرمان راه دور' : 'Remote action progress'}
+		  aria-valuemin={0}
+		  aria-valuemax={100}
+		  aria-valuenow={remoteActionProgress.percent}
+		>
+		  <span style={remoteActionProgress.percent === undefined ? undefined : { width: `${remoteActionProgress.percent}%` }} />
+		</div>
+	  )}
       <aside className="sidebar" aria-label={t('primaryNavigation')}>
         <div className="brand">
-          <a className="brand__mark" href="#/dashboard" aria-label={`${productTitle} ${t('dashboardLink')}`}><span aria-hidden="true">{productShortName}</span><i /><i /></a>
+          <a className="brand__mark" href="#/dashboard" aria-label={`${productTitle} ${t('dashboardLink')}`}><BrandIcon fallback={productShortName} /></a>
           <a className="brand__copy" href="#/dashboard"><strong>{productTitle}</strong><span>{productTagline}</span></a>
-          <button className="sidebar-toggle" aria-label={t(sidebarOpen ? 'collapseNavigation' : 'expandNavigation')} onClick={() => setSidebarOpen((value) => !value)}>{sidebarOpen ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}</button>
+          <button className="sidebar-toggle" aria-label={t(sidebarOpen ? 'collapseNavigation' : 'expandNavigation')} title={t(sidebarOpen ? 'collapseNavigation' : 'expandNavigation')} aria-expanded={sidebarOpen} aria-controls="primary-navigation" onClick={() => setSidebarOpen((value) => !value)}>{sidebarOpen ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}</button>
         </div>
 
-        <div className="sidebar__status">
+        <button
+          ref={sidebarStatusRef}
+          type="button"
+          className="sidebar__status"
+          aria-haspopup={snapshot.connected ? 'menu' : undefined}
+          aria-expanded={snapshot.connected ? sidebarStatusMenu : undefined}
+          aria-label={snapshot.connected
+            ? appearance.locale === 'fa' ? 'منوی اتصال برد' : 'Board connection menu'
+            : appearance.locale === 'fa' ? 'اتصال مجدد برد' : 'Reconnect board'}
+          title={`${snapshot.connected ? (appearance.locale === 'fa' ? 'برد آنلاین' : 'Board online') : (appearance.locale === 'fa' ? 'برد آفلاین' : 'Board offline')} · ${snapshot.port.name || snapshot.connection_state}`}
+          onClick={() => {
+            if (!snapshot.connected) {
+              setSidebarStatusMenu(false)
+              void runCommand('reconnect')
+              return
+            }
+            if (sidebarStatusMenu) setSidebarStatusMenu(false)
+            else openSidebarStatusMenu()
+          }}
+          onContextMenu={(event) => {
+            event.preventDefault()
+            openSidebarStatusMenu(event.clientX, event.clientY)
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+              event.preventDefault()
+              openSidebarStatusMenu()
+            }
+          }}
+        >
           <span className={`status-rail status-rail--${snapshot.connected ? 'good' : 'bad'}`} aria-hidden="true" />
-          <div><strong>{snapshot.connected ? t('online') : t('offline')}</strong><small>{snapshot.port.name || snapshot.connection_state}</small></div>
-          <Cpu size={18} />
-        </div>
+          <div><strong>{snapshot.connected ? (appearance.locale === 'fa' ? 'برد آنلاین' : 'Board online') : (appearance.locale === 'fa' ? 'برد آفلاین' : 'Board offline')}</strong><small>{snapshot.port.name || snapshot.connection_state}</small></div>
+          <Cpu size={18} aria-hidden="true" />
+        </button>
+        {sidebarStatusMenu && typeof document !== 'undefined' && createPortal(<div
+          ref={sidebarStatusMenuRef}
+          className="sidebar__status-menu"
+          role="menu"
+          aria-label={appearance.locale === 'fa' ? 'عملیات اتصال برد' : 'Board connection actions'}
+          style={sidebarStatusMenuPosition}
+        >
+          <button type="button" role="menuitem" onClick={() => { setSidebarStatusMenu(false); void runCommand('reconnect') }}>{appearance.locale === 'fa' ? 'اتصال مجدد' : 'Reconnect'}</button>
+          {snapshot.connected && <button type="button" role="menuitem" onClick={() => { setSidebarStatusMenu(false); void runCommand('close') }}>{appearance.locale === 'fa' ? 'بستن درگاه' : 'Close port'}</button>}
+          <button type="button" role="menuitem" onClick={() => { setSidebarStatusMenu(false); setPaletteQuery('ports'); setPaletteIndex(0); setPalette(true) }}>{appearance.locale === 'fa' ? 'انتخاب درگاه USB' : 'Choose USB port'}</button>
+          <button type="button" role="menuitem" onClick={() => { setSidebarStatusMenu(false); navigate('device') }}>{appearance.locale === 'fa' ? 'جزئیات دستگاه' : 'Device details'}</button>
+        </div>, document.body)}
 
-        <nav className="sidebar__nav">
+        <nav className="sidebar__nav" id="primary-navigation">
           {(['core', 'integrations', 'system'] as const).map((group) => (
             <div className="nav-group" key={group}>
               <span className="nav-group__label">{t(group === 'core' ? 'system' : group === 'integrations' ? 'integrations' : 'operations').toUpperCase()}</span>
@@ -1321,21 +1701,36 @@ export default function App() {
       <header className="topbar">
         <button className="mobile-menu" aria-label={t('openNavigation')} onClick={() => setMobileNav(true)}><Menu size={20} /></button>
         <div className="breadcrumbs"><span>{productShortName}</span><i>/</i><strong>{t(current.label)}</strong></div>
-        <button className="command-trigger" aria-keyshortcuts="Control+K Meta+K" onClick={() => { setPaletteIndex(0); setPalette(true) }}><Search size={16} /><span>{t('searchCommands')}</span><KeyCombo keys={[["Ctrl", "⌘"], "K"]} /></button>
+        <button className="command-trigger" aria-keyshortcuts={primaryShortcutARIA()} onClick={() => { setPaletteIndex(0); setPalette(true) }}><Search size={16} /><span>{t('searchCommands')}</span><KeyCombo keys={[primaryShortcutModifier(), "K"]} /></button>
         <div className="topbar__actions">
           {demo && <StatusBadge tone="warn">{t('demoMode')}</StatusBadge>}
           {reconnectAvailable
             ? <button className="transport-reconnect" title={streamDetail || undefined} aria-label={appearance.locale === 'fa' ? 'اتصال مجدد فوری میزبان' : 'Reconnect host now'} onClick={reconnectTransport}><StatusBadge tone={transportTone}>{transportLabel}</StatusBadge></button>
             : <span title={streamDetail || undefined}><StatusBadge tone={transportTone} pulse={streamState === 'connecting'}>{transportLabel}</StatusBadge></span>}
-          <button className="topbar-icon" aria-label={t('toggleTheme')} onClick={() => saveAppearance({ ...appearance, theme: (document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark') })}>{document.documentElement.dataset.theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}</button>
-          <button className="topbar-icon" aria-label={t('switchLanguage')} onClick={() => saveAppearance({ ...appearance, locale: appearance.locale === 'en' ? 'fa' : 'en' })}><Languages size={18} /></button>
-          <button className="topbar-icon topbar-audio" aria-label={t(appearance.audioMuted ? 'enableAudio' : 'muteAudio')} aria-pressed={appearance.audioMuted} aria-keyshortcuts="M" onClick={toggleAudio}>{appearance.audioMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}</button>
-          <button className="topbar-icon topbar-hotkeys" aria-label={t('keyboardShortcuts')} aria-keyshortcuts="?" onClick={() => setHotkeyHelp(true)}><Keyboard size={18} /></button>
-          <button className="topbar-icon" aria-label={t('notifications')} onClick={() => navigate('events')}><Bell size={18} />{events.length > 0 && <i />}</button>
+          <button
+            className="topbar-icon"
+            aria-label={appearance.locale === 'fa' ? 'ترجیحات برنامه' : 'Application preferences'}
+            aria-haspopup="dialog"
+            aria-expanded={appPreferencesOpen}
+            onClick={() => setAppPreferencesOpen(true)}
+          ><Settings2 size={18} /></button>
+          {quickHeader.theme && <button className="topbar-icon" aria-label={t('toggleTheme')} onClick={() => saveAppearance({ ...appearance, theme: (document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark') })}>{document.documentElement.dataset.theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}</button>}
+          {quickHeader.language && <button className="topbar-icon" aria-label={t('switchLanguage')} onClick={() => saveAppearance({ ...appearance, locale: appearance.locale === 'en' ? 'fa' : 'en' })}><Languages size={18} /></button>}
+          {quickHeader.audio && <button className="topbar-icon topbar-audio" aria-label={t(appearance.audioMuted ? 'enableAudio' : 'muteAudio')} aria-pressed={appearance.audioMuted} aria-keyshortcuts="M" onClick={toggleAudio}>{appearance.audioMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}</button>}
+          {quickHeader.hotkeys && <button className="topbar-icon topbar-hotkeys" aria-label={t('keyboardShortcuts')} aria-keyshortcuts="?" onClick={() => setHotkeyHelp(true)}><Keyboard size={18} /></button>}
+          {quickHeader.notifications && <button className="topbar-icon" aria-label={t('notifications')} onClick={() => navigate('events')}><Bell size={18} />{events.length > 0 && <i />}</button>}
         </div>
       </header>
 
       <main className="app-main">
+		{page !== 'dashboard' && globalHardwareProblem && globalHardwareWarning && <section className={`hardware-alert app-hardware-alert is-${globalHardwareProblem.severity}`} role="alert" aria-live="assertive">
+			<div className="hardware-alert__icon"><TriangleAlert size={24} aria-hidden="true" /></div>
+			<div className="hardware-alert__copy">
+				<strong>{globalHardwareWarning.title}</strong>
+				<p>{globalHardwareWarning.guidance}</p>
+				{globalHardwareWarning.impact && <p className="hardware-alert__impact">{globalHardwareWarning.impact}</p>}
+			</div>
+		</section>}
         <PageTransition pageKey={page}>{view}</PageTransition>
       </main>
 
@@ -1354,7 +1749,7 @@ export default function App() {
               exit={{ x: drawerClosedOffset, opacity: 0 }}
               transition={{ duration: .32, ease: [0.22, 1, 0.36, 1] }}
             >
-              <header><div className="brand__mark"><span>{productShortName}</span><i /><i /></div><strong>{productTitle}</strong><button type="button" aria-label={t('closeNavigation')} onClick={() => setMobileNav(false)}><X size={19} /></button></header>
+              <header><div className="brand__mark"><BrandIcon fallback={productShortName} /></div><strong>{productTitle}</strong><button type="button" aria-label={t('closeNavigation')} onClick={() => setMobileNav(false)}><X size={19} /></button></header>
               {navigation.map((item) => <NavButton key={item.id} icon={item.icon} label={t(item.label)} active={page === item.id} onClick={() => navigate(item.id)} />)}
             </motion.aside>
           </motion.div>
@@ -1382,6 +1777,15 @@ export default function App() {
       <Modal state={{ ...dialog, action: confirmDialog }} onClose={closeDialog} busy={dialogBusy} />
       <ToastStack messages={toasts} dismiss={(id) => setToasts((current) => current.filter((item) => item.id !== id))} />
     </div>
+    <AppPreferencesDialog
+      open={appPreferencesOpen}
+      locale={appearance.locale}
+      appearance={appearance}
+      quickHeader={quickHeader}
+      onAppearance={saveAppearance}
+      onQuickHeader={saveQuickHeader}
+      onClose={() => setAppPreferencesOpen(false)}
+    />
     <BootGate open={bootResolved && bootOpen} progress={bootProgress} locale={appearance.locale} productTitle={productTitle} productShortName={productShortName} productTagline={productTagline} onEnter={enterApp} />
     <HotkeyHelp open={hotkeyHelp} locale={appearance.locale} onClose={() => setHotkeyHelp(false)} />
     </MotionConfig>

@@ -578,7 +578,7 @@ const R = [
       'Allow open, close, reconnect, reset, quit, programming, and every ordinary controller command.',
       'Expose one correlated Monitor Off operation and outcome stream across local IPC, JSON-RPC, REST, WebSocket, bridge forwarding, TUI/WebUI clients, board-originated requests, and authenticated peer instances without bypassing the shared host action and policy dispatcher.',
       'Keep typed canonical operations distinct from the opaque #184 escape hatch: an old bridge forwards bounded unknown opcode IDs/payloads and subscriptions without requiring a new registry, product API version, or feature-specific decoder.',
-    ], 'Removal of /api/v1, product api_version fields, and versioned WebSocket product labels is in progress. JSON-RPC 2.0 remains as a standards-required wire marker. The same pass repairs dispatcher concurrency and extends typed display/buzzer events across every transport. A transport-parity Monitor Off operation and outcome stream remain unimplemented.'),
+    ], 'Removal of product-owned URL generations, version-selector fields, and numbered WebSocket product labels is in progress. JSON-RPC 2.0 remains as a standards-required wire marker. The same pass repairs dispatcher concurrency and extends typed display/buzzer events across every transport. A transport-parity Monitor Off operation and outcome stream remain unimplemented.'),
   requirement('network-bridge-discovery', 8, 'Connect, mirror, and synchronize multiple local and remote boards', 'open',
     ['🖥️ host', '🔌 protocol-api', '🛡️ safety', '🧪 testing', '🌐 networking', '🔒 security', '⚡ priority: high', '💡 enhancement'], 'IPC, WebSocket, USB lifecycle, and primary ownership', [
       'Introduce a role-neutral board-session registry so one primary may own multiple local serial boards and authenticated remote bridge-backed boards while retaining exactly one owner per physical device.',
@@ -1368,6 +1368,12 @@ const PR_ORIGINAL_REQUESTS = {
   267: [PROMPT_EXCERPTS.stuckUpdate, PROMPT_EXCERPTS.programmingEntrypoint],
   268: [PROMPT_EXCERPTS.displaysAudio, PROMPT_EXCERPTS.buzzerFallback, PROMPT_EXCERPTS.linuxParity, PROMPT_EXCERPTS.externalBeepFallback],
   269: [PROMPT_EXCERPTS.authDefer, PROMPT_EXCERPTS.permissionAvailability, PROMPT_EXCERPTS.alphaEdgeReplacement, PROMPT_EXCERPTS.peerUpdateHardening],
+  270: [PROMPT_EXCERPTS.serviceTray, PROMPT_EXCERPTS.instanceCoordination, PROMPT_EXCERPTS.fullRemoteTui],
+  271: [PROMPT_EXCERPTS.keyLatency, PROMPT_EXCERPTS.hardwareFrontPanel],
+  272: [PROMPT_EXCERPTS.peerUpdateHardening, PROMPT_EXCERPTS.artifactSync, PROMPT_EXCERPTS.stuckUpdate],
+  273: [PROMPT_EXCERPTS.instanceCoordination, PROMPT_EXCERPTS.fullDuplexTracking, PROMPT_EXCERPTS.fullRemoteTui, PROMPT_EXCERPTS.webUi],
+  274: [PROMPT_EXCERPTS.instanceCoordination, PROMPT_EXCERPTS.fullDuplexTracking, PROMPT_EXCERPTS.messagingFabric, PROMPT_EXCERPTS.webUi],
+  275: [PROMPT_EXCERPTS.programmingEntrypoint, PROMPT_EXCERPTS.fullDuplexTracking, PROMPT_EXCERPTS.staticHints, PROMPT_EXCERPTS.tuiPages],
 };
 
 const TRACE_START = '<!-- prompt-provenance:v1 -->';

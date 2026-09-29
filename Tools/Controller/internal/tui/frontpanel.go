@@ -62,6 +62,12 @@ func (model Model) currentFrontPanel(snapshot control.Snapshot) FrontPanelState 
 			state.LCDLine1 = page.Name
 			state.LCDLine2 = state.Submode
 		}
+		if snapshot.HaveFrontPanelSegments {
+			state.RawSegments = snapshot.FrontPanel.RawSegments
+			state.HasRawSegments = true
+			state.Brightness = snapshot.FrontPanel.Brightness
+			state.InputSource = "SEGMENT_CHANGED + STATUS summary"
+		}
 	}
 	lcdPresentation, haveLCDPresentation := model.currentLCDPresentation(snapshot)
 	lcdAddress, haveLCD := model.lcdDisplayState(snapshot)

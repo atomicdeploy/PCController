@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -38,6 +39,8 @@ type remoteTUIIPC struct {
 	retry   time.Duration
 
 	events                chan control.Event
+	eventsMu              sync.RWMutex
+	eventsClosed          bool
 	live                  chan tui.RemoteLiveUpdate
 	liveRaw               chan tui.RemoteLiveUpdate
 	liveRates             chan time.Duration
@@ -59,6 +62,10 @@ type remoteTUIIPC struct {
 	liveRequestID         uint64
 	liveStateCursor       uint64
 	liveRequestedAfter    uint64
+	liveEpoch             uint64
+	liveInstanceID        string
+	liveSessionEpoch      uint64
+	liveSessionInstanceID string
 }
 
 const remoteTUIInstanceLeaseSeconds = 45
@@ -81,6 +88,7 @@ type remotePortWire struct {
 }
 
 type remoteSnapshotWire struct {
+	HostInstanceID    string                       `json:"host_instance_id,omitempty"`
 	Connected         bool                         `json:"connected"`
 	Paused            bool                         `json:"paused"`
 	Port              remotePortWire               `json:"port"`
@@ -99,17 +107,22 @@ type remoteSnapshotWire struct {
 	StatusLED         native.StatusLEDState        `json:"status_led"`
 	HaveStatusLED     bool                         `json:"have_status_led"`
 	StatusLEDUpdated  time.Time                    `json:"status_led_updated,omitempty"`
+	StatusLEDRevision uint64                       `json:"status_led_revision,omitempty"`
 	ProgramState      control.ProgramStateSnapshot `json:"program_state"`
 	RFLearning        control.RFLearnState         `json:"rf_learning"`
+	Macros            control.MacroSnapshot        `json:"macros"`
+	HardwareProblems  []ports.HardwareProblem      `json:"hardware_problems,omitempty"`
 }
 
 type remoteUISettingsWire struct {
-	AppTitle        string                  `json:"app_title"`
-	Tagline         string                  `json:"tagline"`
-	SetupComplete   bool                    `json:"setup_complete"`
-	WelcomeMelody   string                  `json:"welcome_melody"`
-	SegmentScroll   appconfig.SegmentScroll `json:"segment_scroll"`
-	PeripheralNames map[string]string       `json:"peripheral_names"`
+	AppTitle               string                  `json:"app_title"`
+	Tagline                string                  `json:"tagline"`
+	SetupComplete          bool                    `json:"setup_complete"`
+	WelcomeMelody          string                  `json:"welcome_melody"`
+	StatusIntervalMS       int                     `json:"status_interval_ms"`
+	MeasurementFreshnessMS int                     `json:"measurement_freshness_ms"`
+	SegmentScroll          appconfig.SegmentScroll `json:"segment_scroll"`
+	PeripheralNames        map[string]string       `json:"peripheral_names"`
 }
 
 type remoteRFPresentationWire struct {
@@ -227,10 +240,23 @@ func (client *remoteTUIIPC) nextLiveRequest() (uint64, uint64) {
 	return client.liveRequestID, client.liveStateCursor
 }
 
-func (client *remoteTUIIPC) acceptLiveAcknowledgement(latestID uint64) bool {
+func (client *remoteTUIIPC) acceptLiveAcknowledgement(latestID uint64, instanceID string) bool {
 	client.liveMu.Lock()
 	defer client.liveMu.Unlock()
-	if latestID < client.liveRequestedAfter {
+	previousEpoch := client.ensureLiveEpochLocked()
+	client.adoptLiveInstanceLocked(instanceID)
+	sourceChanged := client.liveEpoch != previousEpoch
+	instanceReset := client.liveSessionInstanceID != "" && instanceID != "" &&
+		instanceID != client.liveSessionInstanceID
+	cursorReset := latestID < client.liveRequestedAfter
+	if cursorReset && !sourceChanged {
+		// Compatibility fallback for a primary that predates process identities.
+		client.liveEpoch++
+	}
+	reset := sourceChanged || instanceReset || cursorReset
+	client.liveSessionInstanceID = instanceID
+	client.liveSessionEpoch = client.liveEpoch
+	if reset {
 		// The primary restarted and its event epoch reset. Adopt the new retained
 		// cursor; the caller refreshes one authoritative snapshot before accepting
 		// subsequent state frames from this epoch.
@@ -239,6 +265,40 @@ func (client *remoteTUIIPC) acceptLiveAcknowledgement(latestID uint64) bool {
 		return true
 	}
 	return false
+}
+
+func (client *remoteTUIIPC) adoptLiveInstanceLocked(instanceID string) uint64 {
+	client.ensureLiveEpochLocked()
+	instanceID = strings.TrimSpace(instanceID)
+	if instanceID != "" && client.liveInstanceID != instanceID {
+		if client.liveInstanceID != "" {
+			client.liveEpoch++
+		}
+		client.liveInstanceID = instanceID
+	}
+	return client.liveEpoch
+}
+
+func (client *remoteTUIIPC) ensureLiveEpochLocked() uint64 {
+	if client.liveEpoch == 0 {
+		client.liveEpoch = 1
+	}
+	return client.liveEpoch
+}
+
+func (client *remoteTUIIPC) liveSourceMarker() (uint64, string) {
+	client.liveMu.Lock()
+	defer client.liveMu.Unlock()
+	return client.ensureLiveEpochLocked(), client.liveInstanceID
+}
+
+func (client *remoteTUIIPC) currentLiveSessionEpoch() uint64 {
+	client.liveMu.Lock()
+	defer client.liveMu.Unlock()
+	if client.liveSessionEpoch != 0 {
+		return client.liveSessionEpoch
+	}
+	return client.adoptLiveInstanceLocked("")
 }
 
 func (client *remoteTUIIPC) advanceLiveStateCursor(id uint64) bool {
@@ -266,27 +326,49 @@ func (client *remoteTUIIPC) call(
 }
 
 func (client *remoteTUIIPC) Snapshot(ctx context.Context) (control.Snapshot, error) {
-	var wire remoteSnapshotWire
-	if err := client.call(ctx, "controller.snapshot", map[string]any{}, &wire); err != nil {
-		return control.Snapshot{}, err
+	for {
+		startEpoch, startInstanceID := client.liveSourceMarker()
+		var wire remoteSnapshotWire
+		if err := client.call(ctx, "controller.snapshot", map[string]any{}, &wire); err != nil {
+			return control.Snapshot{}, err
+		}
+		responseInstanceID := strings.TrimSpace(wire.HostInstanceID)
+		client.liveMu.Lock()
+		currentEpoch := client.ensureLiveEpochLocked()
+		currentInstanceID := client.liveInstanceID
+		changedDuringCall := currentEpoch != startEpoch || currentInstanceID != startInstanceID
+		identityConflict := responseInstanceID != "" && currentInstanceID != "" &&
+			responseInstanceID != currentInstanceID
+		staleResponse := identityConflict || (changedDuringCall && responseInstanceID == "")
+		if staleResponse {
+			client.liveMu.Unlock()
+			if err := ctx.Err(); err != nil {
+				return control.Snapshot{}, err
+			}
+			continue
+		}
+		epoch := client.adoptLiveInstanceLocked(responseInstanceID)
+		client.liveMu.Unlock()
+		return control.Snapshot{
+			Connected: wire.Connected, Paused: wire.Paused,
+			Port: ports.Info{
+				Name: wire.Port.Name, IsUSB: wire.Port.VID != "" || wire.Port.PID != "",
+				VID: wire.Port.VID, PID: wire.Port.PID, Product: wire.Port.Product,
+				Manufacturer: wire.Port.Manufacturer, SerialNumber: wire.Port.SerialNumber,
+				FriendlyName: wire.Port.FriendlyName, InstanceID: wire.Port.InstanceID,
+			},
+			Hello: wire.Hello, Status: wire.Status, Settings: native.Settings(wire.Settings),
+			HaveStatus: wire.HaveStatus, HaveSettings: wire.HaveSettings,
+			StatusUpdated: wire.StatusUpdated, ConnectionState: wire.ConnectionState,
+			ConnectionReason: wire.ConnectionReason, ConnectionUpdated: wire.ConnectionUpdated,
+			FrontPanel: wire.FrontPanel, HaveFrontPanel: wire.HaveFrontPanel,
+			FrontPanelUpdated: wire.FrontPanelUpdated, StatusLED: wire.StatusLED,
+			HaveStatusLED: wire.HaveStatusLED, StatusLEDUpdated: wire.StatusLEDUpdated,
+			StatusLEDEpoch: epoch, StatusLEDRevision: wire.StatusLEDRevision,
+			ProgramState: wire.ProgramState, RFLearning: wire.RFLearning, Macros: wire.Macros,
+			HardwareProblems: wire.HardwareProblems,
+		}, nil
 	}
-	return control.Snapshot{
-		Connected: wire.Connected, Paused: wire.Paused,
-		Port: ports.Info{
-			Name: wire.Port.Name, IsUSB: wire.Port.VID != "" || wire.Port.PID != "",
-			VID: wire.Port.VID, PID: wire.Port.PID, Product: wire.Port.Product,
-			Manufacturer: wire.Port.Manufacturer, SerialNumber: wire.Port.SerialNumber,
-			FriendlyName: wire.Port.FriendlyName, InstanceID: wire.Port.InstanceID,
-		},
-		Hello: wire.Hello, Status: wire.Status, Settings: native.Settings(wire.Settings),
-		HaveStatus: wire.HaveStatus, HaveSettings: wire.HaveSettings,
-		StatusUpdated: wire.StatusUpdated, ConnectionState: wire.ConnectionState,
-		ConnectionReason: wire.ConnectionReason, ConnectionUpdated: wire.ConnectionUpdated,
-		FrontPanel: wire.FrontPanel, HaveFrontPanel: wire.HaveFrontPanel,
-		FrontPanelUpdated: wire.FrontPanelUpdated, StatusLED: wire.StatusLED,
-		HaveStatusLED: wire.HaveStatusLED, StatusLEDUpdated: wire.StatusLEDUpdated,
-		ProgramState: wire.ProgramState, RFLearning: wire.RFLearning,
-	}, nil
 }
 
 func (client *remoteTUIIPC) FrontPanel(ctx context.Context) (native.FrontPanel, error) {
@@ -375,11 +457,13 @@ func (client *remoteTUIIPC) SaveUISettings(
 ) (remoteUISettingsWire, error) {
 	var result remoteUISettingsWire
 	err := client.call(ctx, "controller.ui.config.set", map[string]any{
-		"app_title":        value.AppTitle,
-		"tagline":          value.Tagline,
-		"setup_complete":   value.SetupComplete,
-		"segment_scroll":   value.SegmentScroll,
-		"peripheral_names": value.PeripheralNames,
+		"app_title":                value.AppTitle,
+		"tagline":                  value.Tagline,
+		"setup_complete":           value.SetupComplete,
+		"status_interval_ms":       value.StatusIntervalMS,
+		"measurement_freshness_ms": value.MeasurementFreshnessMS,
+		"segment_scroll":           value.SegmentScroll,
+		"peripheral_names":         value.PeripheralNames,
 	}, &result)
 	return result, err
 }
@@ -399,10 +483,25 @@ func (client *remoteTUIIPC) ReportInstance(
 	return result, err
 }
 
+func (client *remoteTUIIPC) CommitNavigation(
+	ctx context.Context, command hostui.NavigationCommand,
+) (hostui.NavigationOutcome, error) {
+	var result hostui.NavigationOutcome
+	err := client.call(ctx, "controller.app.navigation.commit", command, &result)
+	return result, err
+}
+
 func (client *remoteTUIIPC) RemoveInstance(ctx context.Context, id string) error {
 	return client.call(
 		ctx, "controller.app.instance.remove", map[string]string{"id": id}, nil,
 	)
+}
+
+func (client *remoteTUIIPC) AckAppAction(ctx context.Context, ack hostui.ActionAck) error {
+	var result struct {
+		Accepted bool `json:"accepted"`
+	}
+	return client.call(ctx, "controller.app.action.ack", ack, &result)
 }
 
 type remoteTUIInstanceLease struct {
@@ -411,14 +510,17 @@ type remoteTUIInstanceLease struct {
 	self     hostui.InstanceSelf
 	refresh  time.Duration
 
-	mu       sync.Mutex
-	reportMu sync.Mutex
-	page     string
-	title    string
-	have     bool
-	stop     chan struct{}
-	done     chan struct{}
-	once     sync.Once
+	mu         sync.Mutex
+	reportMu   sync.Mutex
+	page       string
+	title      string
+	have       bool
+	queued     chan struct{}
+	commit     chan struct{}
+	commitPage string
+	stop       chan struct{}
+	done       chan struct{}
+	once       sync.Once
 }
 
 func newRemoteTUIInstanceLease(
@@ -431,7 +533,8 @@ func newRemoteTUIInstanceLease(
 	}
 	lease := &remoteTUIInstanceLease{
 		client: client, reporter: reporter, self: hostui.CurrentProcessSelf(time.Now()),
-		refresh: refresh, stop: make(chan struct{}), done: make(chan struct{}),
+		refresh: refresh, queued: make(chan struct{}, 1), commit: make(chan struct{}, 1),
+		stop: make(chan struct{}), done: make(chan struct{}),
 	}
 	go lease.run()
 	return lease
@@ -447,6 +550,89 @@ func (lease *remoteTUIInstanceLease) Update(page, title string) error {
 	lease.have = true
 	lease.mu.Unlock()
 	return lease.report(false)
+}
+
+// QueueUpdate is the non-blocking UI path. Rapid title/page redraws coalesce
+// to the latest presence values while one bounded report is already in flight.
+func (lease *remoteTUIInstanceLease) QueueUpdate(page, title string) {
+	if lease == nil || lease.client == nil || lease.reporter == nil {
+		return
+	}
+	lease.mu.Lock()
+	lease.page = strings.ToLower(strings.TrimSpace(page))
+	lease.title = strings.TrimSpace(title)
+	lease.have = true
+	lease.mu.Unlock()
+	select {
+	case lease.queued <- struct{}{}:
+	default:
+	}
+}
+
+func (lease *remoteTUIInstanceLease) flushUpdate() {
+	if err := lease.report(false); err != nil {
+		lease.client.publishActivity("app.instance.report.failed", err.Error())
+	}
+}
+
+// QueueNavigation submits local intent separately from presence reporting.
+// Coordinator-applied pages deliberately call only QueueUpdate, preventing
+// an acknowledgement from becoming a new command loop.
+func (lease *remoteTUIInstanceLease) QueueNavigation(page string) {
+	if lease == nil || lease.client == nil || lease.reporter == nil {
+		return
+	}
+	page = strings.ToLower(strings.TrimSpace(page))
+	if page == "" {
+		return
+	}
+	lease.mu.Lock()
+	lease.commitPage = page
+	lease.page = page
+	lease.have = true
+	lease.mu.Unlock()
+	select {
+	case lease.commit <- struct{}{}:
+	default:
+	}
+}
+
+func (lease *remoteTUIInstanceLease) flushNavigation() {
+	lease.mu.Lock()
+	page := lease.commitPage
+	lease.mu.Unlock()
+	if page == "" {
+		return
+	}
+	// Ensure the coordinator has current follower membership before accepting
+	// the intent, including an immediate key press after process startup.
+	if err := lease.report(false); err != nil {
+		lease.client.publishActivity("app.instance.report.failed", err.Error())
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	outcome, err := lease.client.CommitNavigation(ctx, hostui.NavigationCommand{
+		Group: hostui.DefaultNavigationGroup, Source: lease.reporter.InstanceID(), Page: page,
+		OperationID: lease.reporter.NextOperationID(),
+	})
+	cancel()
+	if err != nil {
+		lease.client.publishActivity("app.navigation.commit.rejected", err.Error())
+		return
+	}
+	settledPage := strings.ToLower(strings.TrimSpace(outcome.Page))
+	if settledPage == "" {
+		lease.client.publishActivity(
+			"app.navigation.commit.rejected",
+			"navigation coordinator returned an empty page",
+		)
+		return
+	}
+	lease.mu.Lock()
+	if lease.commitPage == page {
+		lease.page = settledPage
+	}
+	lease.mu.Unlock()
 }
 
 func (lease *remoteTUIInstanceLease) report(catchUp bool) error {
@@ -468,6 +654,7 @@ func (lease *remoteTUIInstanceLease) report(catchUp bool) error {
 	values["terminal_title"] = title
 	values["terminal_osc"] = "enabled"
 	values["terminal_progress"] = "osc-9-4"
+	values[hostui.ActionCapabilitiesKey] = hostui.TUIActionCapabilities
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	_, err := lease.client.ReportInstance(ctx, hostui.AppInstance{
@@ -483,6 +670,10 @@ func (lease *remoteTUIInstanceLease) run() {
 	defer ticker.Stop()
 	for {
 		select {
+		case <-lease.queued:
+			lease.flushUpdate()
+		case <-lease.commit:
+			lease.flushNavigation()
 		case <-ticker.C:
 			_ = lease.report(false)
 		case <-lease.client.sessions:
@@ -520,6 +711,13 @@ func mergeRemoteHostUI(local appconfig.UI, remote remoteUISettingsWire) appconfi
 	local.Tagline = remote.Tagline
 	local.SetupComplete = remote.SetupComplete
 	local.WelcomeMelody = remote.WelcomeMelody
+	if remote.StatusIntervalMS >= appconfig.StatusIntervalMinMS &&
+		remote.StatusIntervalMS <= appconfig.StatusIntervalMaxMS &&
+		remote.MeasurementFreshnessMS >= remote.StatusIntervalMS+appconfig.MeasurementFreshnessHeadroomMS &&
+		remote.MeasurementFreshnessMS <= appconfig.MeasurementFreshnessMaxMS {
+		local.StatusIntervalMS = remote.StatusIntervalMS
+		local.MeasurementFreshnessMS = remote.MeasurementFreshnessMS
+	}
 	local.SegmentScroll = remote.SegmentScroll
 	local.PeripheralNames = cloneRemoteNames(remote.PeripheralNames)
 	return local
@@ -527,7 +725,7 @@ func mergeRemoteHostUI(local appconfig.UI, remote remoteUISettingsWire) appconfi
 
 func (client *remoteTUIIPC) pollEvents(ctx context.Context) {
 	defer close(client.done)
-	defer close(client.events)
+	defer client.closeEvents()
 	var cursor uint64
 	haveCursor := false
 	connectedOnce := false
@@ -606,6 +804,42 @@ func (client *remoteTUIIPC) pollEvents(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		}
+	}
+}
+
+func (client *remoteTUIIPC) closeEvents() {
+	if client == nil || client.events == nil {
+		return
+	}
+	client.eventsMu.Lock()
+	defer client.eventsMu.Unlock()
+	if client.eventsClosed {
+		return
+	}
+	client.eventsClosed = true
+	close(client.events)
+}
+
+func (client *remoteTUIIPC) publishActivity(kind, detail string) {
+	if client == nil || client.events == nil {
+		return
+	}
+	client.eventsMu.RLock()
+	defer client.eventsMu.RUnlock()
+	if client.eventsClosed {
+		return
+	}
+	event := control.Event{
+		Time: time.Now(), Kind: strings.TrimSpace(kind), Stream: "activity",
+		Text: strings.TrimSpace(detail), Source: "remote-ipc", Target: "tui",
+	}
+	if client.ctx == nil {
+		client.events <- event
+		return
+	}
+	select {
+	case client.events <- event:
+	case <-client.ctx.Done():
 	}
 }
 
@@ -712,6 +946,8 @@ func (client *remoteTUIIPC) liveSession(ctx context.Context) error {
 	ackTimer := time.NewTimer(3 * time.Second)
 	defer ackTimer.Stop()
 	acknowledgement := ackTimer.C
+	subscriptionAcknowledged := false
+	var pendingStateMessages [][]byte
 
 	reads := make(chan remoteLiveRead, 1)
 	go func() {
@@ -748,13 +984,16 @@ func (client *remoteTUIIPC) liveSession(ctx context.Context) error {
 			}
 			ackTimer.Reset(3 * time.Second)
 			acknowledgement = ackTimer.C
+			subscriptionAcknowledged = false
 		case <-acknowledgement:
 			return errors.New("remote live subscription acknowledgement timed out")
 		case read := <-reads:
 			if read.err != nil {
 				return read.err
 			}
-			acknowledged, err := client.consumeLiveMessage(read.data, pendingRequestID)
+			acknowledged, err := client.consumeOrBufferLiveMessage(
+				read.data, pendingRequestID, subscriptionAcknowledged, &pendingStateMessages,
+			)
 			if err != nil {
 				return err
 			}
@@ -766,19 +1005,25 @@ func (client *remoteTUIIPC) liveSession(ctx context.Context) error {
 					}
 				}
 				acknowledgement = nil
-				client.publishLive(tui.RemoteLiveUpdate{
-					ConnectionChange: true, Connected: true,
-				})
 				var response struct {
 					Result struct {
-						LatestID uint64 `json:"latest_id"`
+						LatestID   uint64 `json:"latest_id"`
+						InstanceID string `json:"instance_id"`
 					} `json:"result"`
 				}
 				if json.Unmarshal(read.data, &response) == nil {
-					reset, resetErr := client.consumeLiveEpochReset(response.Result.LatestID)
+					reset, resetErr := client.consumeLiveEpochReset(
+						response.Result.LatestID, response.Result.InstanceID,
+					)
 					if resetErr != nil {
 						return resetErr
 					}
+					for _, pending := range pendingStateMessages {
+						if _, replayErr := client.consumeLiveMessage(pending, 0); replayErr != nil {
+							return replayErr
+						}
+					}
+					pendingStateMessages = pendingStateMessages[:0]
 					if reset {
 						pendingRequestID, err = writeSubscription(currentInterval)
 						if err != nil {
@@ -786,11 +1031,35 @@ func (client *remoteTUIIPC) liveSession(ctx context.Context) error {
 						}
 						ackTimer.Reset(3 * time.Second)
 						acknowledgement = ackTimer.C
+						subscriptionAcknowledged = false
+						continue
 					}
 				}
+				subscriptionAcknowledged = true
+				client.publishLive(tui.RemoteLiveUpdate{
+					ConnectionChange: true, Connected: true,
+				})
 			}
 		}
 	}
+}
+
+func (client *remoteTUIIPC) consumeOrBufferLiveMessage(
+	data []byte,
+	pendingRequestID uint64,
+	subscriptionAcknowledged bool,
+	pendingStateMessages *[][]byte,
+) (bool, error) {
+	if !subscriptionAcknowledged {
+		var message remoteLiveMessage
+		if json.Unmarshal(data, &message) == nil && message.Method == "controller.state" {
+			if pendingStateMessages != nil {
+				*pendingStateMessages = append(*pendingStateMessages, append([]byte(nil), data...))
+			}
+			return false, nil
+		}
+	}
+	return client.consumeLiveMessage(data, pendingRequestID)
 }
 
 func (client *remoteTUIIPC) consumeLiveMessage(data []byte, pendingRequestID uint64) (bool, error) {
@@ -813,6 +1082,7 @@ func (client *remoteTUIIPC) consumeLiveMessage(data []byte, pendingRequestID uin
 		var acknowledgement struct {
 			Subscribed bool   `json:"subscribed"`
 			LatestID   uint64 `json:"latest_id"`
+			InstanceID string `json:"instance_id"`
 		}
 		if json.Unmarshal(envelope.Result, &acknowledgement) != nil || !acknowledgement.Subscribed {
 			return false, errors.New("remote live subscription was not acknowledged")
@@ -860,17 +1130,20 @@ func (client *remoteTUIIPC) consumeLiveMessage(data []byte, pendingRequestID uin
 		if err != nil {
 			return false, nil
 		}
+		revision, _ := strconv.ParseUint(event.Metadata["revision"], 10, 64)
 		client.publishLive(tui.RemoteLiveUpdate{
 			StatusLED: state, HaveStatusLED: true,
 			StatusLEDUpdated: event.Time, StatusLEDReceivedAt: now,
-			ConnectionChange: true, Connected: true,
+			StatusLEDOrderKnown: true, StatusLEDEpoch: client.currentLiveSessionEpoch(),
+			StatusLEDRevision: revision,
+			ConnectionChange:  true, Connected: true,
 		})
 	}
 	return false, nil
 }
 
-func (client *remoteTUIIPC) consumeLiveEpochReset(latestID uint64) (bool, error) {
-	if !client.acceptLiveAcknowledgement(latestID) {
+func (client *remoteTUIIPC) consumeLiveEpochReset(latestID uint64, instanceID string) (bool, error) {
+	if !client.acceptLiveAcknowledgement(latestID, instanceID) {
 		return false, nil
 	}
 	requestContext, cancel := context.WithTimeout(client.ctx, 3*time.Second)
@@ -885,7 +1158,9 @@ func (client *remoteTUIIPC) consumeLiveEpochReset(latestID uint64) (bool, error)
 		StatusUpdated: snapshot.StatusUpdated, StatusReceivedAt: now,
 		StatusLED: snapshot.StatusLED, HaveStatusLED: snapshot.HaveStatusLED,
 		StatusLEDUpdated: snapshot.StatusLEDUpdated, StatusLEDReceivedAt: now,
-		ConnectionChange: true, Connected: true,
+		StatusLEDOrderKnown: true, StatusLEDEpoch: snapshot.StatusLEDEpoch,
+		StatusLEDRevision: snapshot.StatusLEDRevision,
+		ConnectionChange:  true, Connected: true,
 	})
 	return true, nil
 }
@@ -918,17 +1193,60 @@ func mergeRemoteLiveUpdate(pending *tui.RemoteLiveUpdate, update tui.RemoteLiveU
 		pending.StatusUpdated = update.StatusUpdated
 		pending.StatusReceivedAt = update.StatusReceivedAt
 	}
-	if update.HaveStatusLED {
-		pending.StatusLED = update.StatusLED
-		pending.HaveStatusLED = true
-		pending.StatusLEDUpdated = update.StatusLEDUpdated
-		pending.StatusLEDReceivedAt = update.StatusLEDReceivedAt
+	if update.HaveStatusLED || update.StatusLEDOrderKnown {
+		acceptLED := true
+		if pending.HaveStatusLED || pending.StatusLEDOrderKnown {
+			acceptLED = compareRemoteLEDOrder(
+				pending.StatusLEDEpoch, pending.StatusLEDRevision,
+				update.StatusLEDEpoch, update.StatusLEDRevision,
+			) >= 0
+		}
+		if acceptLED {
+			if update.HaveStatusLED {
+				pending.StatusLED = update.StatusLED
+				pending.HaveStatusLED = true
+				pending.StatusLEDUpdated = update.StatusLEDUpdated
+				pending.StatusLEDReceivedAt = update.StatusLEDReceivedAt
+			}
+			pending.StatusLEDOrderKnown = update.StatusLEDOrderKnown
+			pending.StatusLEDEpoch = update.StatusLEDEpoch
+			pending.StatusLEDRevision = update.StatusLEDRevision
+		}
 	}
 	if update.ConnectionChange {
 		pending.ConnectionChange = true
 		pending.Connected = update.Connected
 		pending.Error = update.Error
 	}
+}
+
+// compareRemoteLEDOrder returns -1 for older/equal, 0 when neither source has
+// an ordering marker, and 1 for a provably newer source frame. Keeping this
+// check in the capacity-one transport coalescer prevents a delayed WebSocket
+// frame from replacing a newer restart baseline before the model can see it.
+func compareRemoteLEDOrder(currentEpoch, currentRevision, incomingEpoch, incomingRevision uint64) int {
+	if currentEpoch == 0 && incomingEpoch == 0 {
+		if currentRevision == 0 && incomingRevision == 0 {
+			return 0
+		}
+		if incomingRevision > currentRevision {
+			return 1
+		}
+		return -1
+	}
+	if currentEpoch == 0 || incomingEpoch > currentEpoch {
+		return 1
+	}
+	if incomingEpoch == 0 || incomingEpoch < currentEpoch {
+		return -1
+	}
+	if currentRevision == 0 && incomingRevision == 0 {
+		return 0
+	}
+	if incomingRevision > currentRevision {
+		return 1
+	}
+	return -1
 }
 
 func (client *remoteTUIIPC) notifySession() {
@@ -1095,11 +1413,19 @@ func runRemoteTUI(
 					Integrations: func() hostui.IntegrationStatus {
 						return remoteTUIIntegrationStatus(address)
 					},
-					InstanceID:      navigationReporter.InstanceID(),
-					NavigationSync:  syncNavigation,
-					NavigationGroup: hostui.DefaultNavigationGroup,
-					ReportTerminal:  instanceLease.Update,
-					WriteOSC:        func(payload string) error { return hostui.WriteOSC(stdout, payload) },
+					InstanceID:          navigationReporter.InstanceID(),
+					NavigationSync:      syncNavigation,
+					NavigationGroup:     hostui.DefaultNavigationGroup,
+					SetNavigationSync:   navigationReporter.SetFollow,
+					NavigationIdentity:  navigationReporter.Identity,
+					ReportTerminalAsync: instanceLease.QueueUpdate,
+					CommitNavigation:    instanceLease.QueueNavigation,
+					WriteOSC:            func(payload string) error { return hostui.WriteOSC(stdout, payload) },
+					AckAppAction: func(ack hostui.ActionAck) error {
+						ackContext, ackCancel := context.WithTimeout(ctx, 3*time.Second)
+						defer ackCancel()
+						return client.AckAppAction(ackContext, ack)
+					},
 					Remote: &tui.RemoteBackend{
 						Endpoint:                  strings.TrimSpace(address),
 						InitialSnapshot:           initial,

@@ -161,10 +161,16 @@ func TestPrimaryAppPagePreservesTUIDeliveryAndFansOutRuntimeEvent(t *testing.T) 
 	defer server.Close()
 
 	actions := server.AppActions()
-	afterID := runtime.LatestEventID()
-	if err := server.actions.Publish(hostui.AppAction{
-		Kind: "app.page", Value: "events", Source: "global-hotkey", Target: "webui",
+	if _, err := server.instances.Upsert(hostui.AppInstance{
+		ID: "webui", Surface: "webui", State: "active", LeaseSeconds: 45,
+		Values: map[string]string{hostui.ActionCapabilitiesKey: hostui.WebActionCapabilities},
 	}); err != nil {
+		t.Fatal(err)
+	}
+	afterID := runtime.LatestEventID()
+	if _, err := server.actionCoordinator.Submit(hostui.AppAction{
+		Kind: "app.page", Value: "events", Source: "global-hotkey", Target: "webui",
+	}, time.Second); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -197,17 +203,17 @@ func TestPrimaryAppPagePreservesTUIDeliveryAndFansOutRuntimeEvent(t *testing.T) 
 	// A subscribed TUI queue remains bounded without interrupting the
 	// observer-backed browser event stream.
 	for index := 0; index < cap(actions); index++ {
-		if err := server.actions.Publish(hostui.AppAction{
-			Kind: "app.page", Value: "events", Source: "global-hotkey",
-		}); err != nil {
+		if _, err := server.actionCoordinator.Submit(hostui.AppAction{
+			Kind: "app.page", Value: "events", Source: "global-hotkey", Target: "webui",
+		}, time.Second); err != nil {
 			t.Fatalf("fill TUI queue at %d: %v", index, err)
 		}
 	}
 	overflowCursor := runtime.LatestEventID()
-	if err := server.actions.Publish(hostui.AppAction{
-		Kind: "app.page", Value: "settings", Source: "global-hotkey",
-	}); err == nil {
-		t.Fatal("expected the full TUI queue to report an error")
+	if _, err := server.actionCoordinator.Submit(hostui.AppAction{
+		Kind: "app.page", Value: "settings", Source: "global-hotkey", Target: "webui",
+	}, time.Second); err != nil {
+		t.Fatalf("observer-backed delivery failed with a full TUI queue: %v", err)
 	}
 	overflowEvent, err := runtime.WaitEvent(waitContext, overflowCursor, "app.page")
 	if err != nil {
@@ -218,7 +224,7 @@ func TestPrimaryAppPagePreservesTUIDeliveryAndFansOutRuntimeEvent(t *testing.T) 
 	}
 }
 
-func TestPrimaryCoordinatesThreeTUIInstancePagesAndMirrorsMetadata(t *testing.T) {
+func TestPrimaryCoordinatesTUIAndWebUIInstancePagesAndMirrorsMetadata(t *testing.T) {
 	runtime := control.New(control.Options{})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -228,9 +234,9 @@ func TestPrimaryCoordinatesThreeTUIInstancePagesAndMirrorsMetadata(t *testing.T)
 	}
 	defer server.Close()
 	actions := server.AppActions()
-	makeInstance := func(id, epoch, page, revision string) hostui.AppInstance {
+	makeInstance := func(id, surface, epoch, page, revision string) hostui.AppInstance {
 		return hostui.AppInstance{
-			ID: id, Surface: "tui", Page: page, State: "active", LeaseSeconds: 45,
+			ID: id, Surface: surface, Page: page, State: "active", LeaseSeconds: 45,
 			Values: map[string]string{
 				hostui.NavigationSyncKey:  hostui.NavigationSyncFollow,
 				hostui.NavigationGroupKey: hostui.DefaultNavigationGroup,
@@ -238,9 +244,9 @@ func TestPrimaryCoordinatesThreeTUIInstancePagesAndMirrorsMetadata(t *testing.T)
 			},
 		}
 	}
-	one := makeInstance("tui:one", "11111111111111111111111111111111", "dashboard", "1")
-	two := makeInstance("tui:two", "22222222222222222222222222222222", "controls", "1")
-	three := makeInstance("tui:three", "33333333333333333333333333333333", "settings", "1")
+	one := makeInstance("tui:one", "tui", "11111111111111111111111111111111", "dashboard", "1")
+	two := makeInstance("tab:web:one", "webui", "22222222222222222222222222222222", "controls", "1")
+	three := makeInstance("tui:three", "tui", "33333333333333333333333333333333", "settings", "1")
 	if _, err := server.instances.Upsert(one); err != nil {
 		t.Fatal(err)
 	}
@@ -259,14 +265,15 @@ func TestPrimaryCoordinatesThreeTUIInstancePagesAndMirrorsMetadata(t *testing.T)
 	}
 
 	afterID := runtime.LatestEventID()
-	one.Page, one.Values[hostui.NavigationRevisionKey] = "events", "2"
-	if _, err := server.instances.Upsert(one); err != nil {
-		t.Fatal(err)
+	outcome, err := server.navigationCommand(hostui.NavigationCommand{Group: hostui.DefaultNavigationGroup, Source: one.ID, Page: "events", OperationID: "test-op-1"})
+	if err != nil || outcome.Revision != 2 || outcome.Page != "events" || len(outcome.Actions) != 3 {
+		t.Fatalf("coordinator outcome=%#v err=%v", outcome, err)
 	}
-	for _, wantTarget := range []string{three.ID, two.ID} {
+	for _, wantTarget := range []string{two.ID, one.ID, three.ID} {
 		if action := <-actions; action.Target != wantTarget || action.Value != "events" ||
 			action.Metadata[hostui.NavigationSourceKey] != one.ID ||
-			action.Metadata[hostui.NavigationRevisionKey] != "2" {
+			action.Metadata[hostui.NavigationRevisionKey] != "2" ||
+			action.Metadata[hostui.NavigationOperationKey] != "test-op-1" {
 			t.Fatalf("fanout action target=%q action=%#v", wantTarget, action)
 		}
 	}
@@ -294,10 +301,16 @@ func TestTerminalAppActionFansOutWithoutInterpretingOSC(t *testing.T) {
 	}
 	defer server.Close()
 	_ = server.AppActions()
-	afterID := runtime.LatestEventID()
-	if err := server.actions.Publish(hostui.AppAction{
-		Kind: "app.progress", Value: "normal 42", Source: "ipc", Target: "tui",
+	if _, err := server.instances.Upsert(hostui.AppInstance{
+		ID: "tui", Surface: "tui", State: "active", LeaseSeconds: 45,
+		Values: map[string]string{hostui.ActionCapabilitiesKey: hostui.TUIActionCapabilities},
 	}); err != nil {
+		t.Fatal(err)
+	}
+	afterID := runtime.LatestEventID()
+	if _, err := server.actionCoordinator.Submit(hostui.AppAction{
+		Kind: "app.progress", Value: "normal 42", Source: "ipc", Target: "tui",
+	}, time.Second); err != nil {
 		t.Fatal(err)
 	}
 	waitContext, stop := context.WithTimeout(context.Background(), time.Second)
@@ -309,5 +322,59 @@ func TestTerminalAppActionFansOutWithoutInterpretingOSC(t *testing.T) {
 	if event.Action != "progress" || event.Metadata["value"] != "normal 42" ||
 		event.Metadata["target_instance"] != "tui" {
 		t.Fatalf("terminal app event=%#v", event)
+	}
+}
+
+func TestPrimaryPublishesTypedAppActionTargetOutcomesWithoutSuccessLogSpam(t *testing.T) {
+	runtime := control.New(control.Options{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	server, err := startPrimaryIPCAt(ctx, "127.0.0.1:0", runtime, shell.New(4))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+	if _, err := server.instances.Upsert(hostui.AppInstance{
+		ID: "tui:outcome", Surface: "tui", State: "active", LeaseSeconds: 45,
+		Values: map[string]string{hostui.ActionCapabilitiesKey: hostui.TUIActionCapabilities},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	afterID := runtime.LatestEventID()
+	actions := server.AppActions()
+	operation, err := server.actionCoordinator.Submit(hostui.AppAction{
+		Kind: "app.title", Value: "Bench", Target: "tui:outcome",
+	}, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var delivery hostui.AppAction
+	select {
+	case delivery = <-actions:
+	case <-time.After(time.Second):
+		t.Fatal("typed app action delivery was not queued")
+	}
+	waitContext, stop := context.WithTimeout(context.Background(), time.Second)
+	defer stop()
+	queued, err := runtime.WaitEvent(waitContext, afterID, "app.action.outcome")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if queued.Stream != control.EventStreamState || queued.Metadata["state"] != hostui.ActionStateQueued ||
+		queued.Metadata["operation_id"] != operation.OperationID || queued.Metadata["instance_id"] != "tui:outcome" {
+		t.Fatalf("queued outcome=%#v", queued)
+	}
+	if _, err := server.actionCoordinator.Ack(hostui.ActionAck{
+		OperationID: operation.OperationID, DeliveryID: delivery.Metadata[hostui.ActionDeliveryIDKey],
+		InstanceID: "tui:outcome", State: hostui.ActionStateApplied,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	applied, err := runtime.WaitEvent(waitContext, queued.ID, "app.action.outcome")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if applied.Stream != control.EventStreamState || applied.Metadata["state"] != hostui.ActionStateApplied {
+		t.Fatalf("applied outcome=%#v", applied)
 	}
 }

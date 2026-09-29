@@ -1,6 +1,6 @@
 /* PCController PWA shell worker. Live board state is always network-only. */
-const shellCache = 'pccontroller-shell-v2'
-const runtimeCache = 'pccontroller-runtime-v2'
+const shellCache = 'pccontroller-shell'
+const runtimeCache = 'pccontroller-runtime'
 const shell = [
   '/',
   '/index.html',
@@ -51,7 +51,7 @@ async function navigation(request) {
   }
 }
 
-async function versionedAsset(request) {
+async function cachedAsset(request) {
   const cached = await caches.match(request)
   if (cached) return cached
   return cacheResponse(runtimeCache, request, await fetch(request))
@@ -87,6 +87,6 @@ self.addEventListener('fetch', (event) => {
   }
   if (url.pathname.startsWith('/assets/') || request.destination === 'style' ||
       request.destination === 'script' || request.destination === 'font' || request.destination === 'image') {
-    event.respondWith(versionedAsset(request))
+    event.respondWith(cachedAsset(request))
   }
 })

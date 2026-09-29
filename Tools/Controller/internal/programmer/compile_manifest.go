@@ -17,12 +17,9 @@ const (
 	firmwareManifestName      = "firmware-manifest.json"
 	urbootApplicationCapacity = generatedBoardApplicationBytes
 	atmega328PEEPROMCapacity  = generatedBoardEEPROMBytes
-	firmwareManifestFormat    = "pccontroller-avr-firmware-manifest/v1"
-	firmwareManifestFormatV2  = "pccontroller-avr-firmware-manifest/v2"
 )
 
 type compileManifest struct {
-	Format       string                       `json:"format"`
 	GeneratedUTC time.Time                    `json:"generatedUtc"`
 	Target       compileManifestTarget        `json:"target"`
 	Source       compileManifestSource        `json:"source"`
@@ -35,7 +32,6 @@ type compileManifestPatchRegion struct {
 	Name   string                      `json:"name"`
 	Start  uint32                      `json:"start"`
 	Length uint32                      `json:"length"`
-	Schema uint8                       `json:"schema"`
 	Magic  string                      `json:"magic"`
 	Fields []compileManifestPatchField `json:"fields"`
 }
@@ -162,12 +158,8 @@ func writeCompileManifest(
 	if decoded, decodeErr := DecodeFirmwareTimestamp(identity.PackedTimestamp); decodeErr == nil {
 		buildTimestamp = decoded.Compact
 	}
-	manifestFormat := firmwareManifestFormat
-	if len(identity.Features) != 0 {
-		manifestFormat = firmwareManifestFormatV2
-	}
 	manifest := compileManifest{
-		Format: manifestFormat, GeneratedUTC: time.Now().UTC(),
+		GeneratedUTC: time.Now().UTC(),
 		Target: compileManifestTarget{
 			Profile: generatedBoardProfile,
 			FQBN:    options.FQBN, MCU: generatedBoardMCU, ClockHz: generatedBoardClockHz,
@@ -213,8 +205,7 @@ func readFirmwareIdentityBytes(path string) ([]byte, error) {
 func firmwareIdentityManifestRegions() []compileManifestPatchRegion {
 	return []compileManifestPatchRegion{{
 		Name: "firmware-identity", Start: FirmwareIdentityAddress,
-		Length: FirmwareIdentityLength, Schema: FirmwareIdentitySchema,
-		Magic: "PCI1",
+		Length: FirmwareIdentityLength, Magic: "PCID",
 		Fields: []compileManifestPatchField{
 			{Name: "magic", Offset: 0, Length: 4, Encoding: "ascii-little-endian"},
 			{Name: "source_hash", Offset: 4, Length: 4, Encoding: "uint32-little-endian"},

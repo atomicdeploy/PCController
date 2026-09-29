@@ -79,6 +79,7 @@ import {
   Icon,
   MetricCard,
   RangeField,
+  RelayToggle,
   SectionTitle,
   Segmented,
   StatusBadge,
@@ -90,6 +91,9 @@ import { settingsSetCommand } from './command-line'
 import { EventList } from './event-collection'
 import { HotkeyEditor } from './hotkey-settings-editor'
 import { PeripheralNamesEditor } from './peripheral-names-editor'
+import { CardLayoutEditor, CardLayoutFrame, type CardLayoutCopy, type LayoutCardDescriptor } from './card-layout-controls'
+import { loadCardLayout, moveCard, resetCardLayout, saveCardLayout, toggleCard } from './dashboard-layout'
+import { pointerReorderTargetChanged } from './pointer-reorder'
 import {
   normalizePWMValues,
   pwmPercent,
@@ -99,7 +103,7 @@ import {
   PWMReconciler,
   USER_PWM_CHANNELS,
 } from './pwm-authority'
-import { formatClock, formatCompact, formatDuration, formatNumber, type MessageKey } from './i18n'
+import { formatClock, formatCompact, formatDuration, formatMeasurementFreshness, formatNumber, type MessageKey } from './i18n'
 const TelemetryChart = lazy(() => import('./telemetry-chart').then((module) => ({ default: module.TelemetryChart })))
 import {
   integrationSettingsEqual,
@@ -122,6 +126,7 @@ import type {
   ControllerEvent,
   DialogState,
   HostUISettings,
+  IlluminationState,
   LifecycleSafetyAction,
   LocalIntegrationSettings,
   Locale,
@@ -132,14 +137,17 @@ import type {
   SegmentScrollSettings,
   UIConfig,
 } from './types'
+import { hardwareProblemPresentation } from './hardware-problem'
 import { buzzerPathFromState, type BuzzerPath } from './buzzer-routing'
 import { peripheralAvailability } from './peripheral-availability'
 
 export interface SharedViewProps {
+  reduceMotion?: boolean
   appTitle: string
   snapshot: Snapshot
   samples: MetricSample[]
   events: ControllerEvent[]
+  macroEvents: ControllerEvent[]
   locale: Locale
   t: (key: MessageKey) => string
   command: (command: string, success?: string) => Promise<string>
@@ -151,10 +159,39 @@ export interface SharedViewProps {
     boardState: 'loading' | 'ready' | 'unavailable'
     tabBusSupported: boolean
     tabPeers: number
+    statusIntervalMS?: number
+    measurementFreshnessMS?: number
   }
   relayedTerminal: Array<TabTerminalEntry & { id: string; tabId: string }>
   broadcastTerminal: (entry: TabTerminalEntry) => void
   boardSettingsReadState: BoardSettingsReadState
+}
+
+function useFreshnessClock(updated: string | undefined, freshnessMS: number): number {
+  const [now, setNow] = useState(Date.now)
+  useEffect(() => {
+    let timer = 0
+    let stopped = false
+    const observed = updated ? Date.parse(updated) : Number.NaN
+    const schedule = () => {
+      if (stopped || !Number.isFinite(observed)) return
+      const age = Math.max(0, Date.now() - observed)
+      const delay = age < freshnessMS
+        ? Math.max(1, freshnessMS - age + 1)
+        : age < 10_000 ? 100 : 1000
+      timer = window.setTimeout(() => {
+        setNow(Date.now())
+        schedule()
+      }, delay)
+    }
+    setNow(Date.now())
+    schedule()
+    return () => {
+      stopped = true
+      window.clearTimeout(timer)
+    }
+  }, [freshnessMS, updated])
+  return now
 }
 
 function pageDetail(snapshot: Snapshot, appTitle: string, locale: Locale): string {
@@ -174,6 +211,9 @@ function eventTone(event: ControllerEvent): 'good' | 'warn' | 'bad' | 'info' {
   return 'info'
 }
 
+const dashboardCardIDs = ['telemetry', 'outputs', 'overview', 'actions', 'events'] as const
+type DashboardCardID = typeof dashboardCardIDs[number]
+
 export function DashboardView(props: SharedViewProps) {
   const { appTitle, snapshot, samples, events, locale, t, command, refresh, openDialog } = props
   const copy = (english: string, persian: string) => locale === 'fa' ? persian : english
@@ -181,18 +221,39 @@ export function DashboardView(props: SharedViewProps) {
   const boardReady = props.transport.boardState === 'ready' && snapshot.connected && snapshot.have_status
   const available = peripheralAvailability(snapshot)
   const haveMeasurements = available.ina219 || available.temperatureLED || available.temperatureBTAudio
-  const haveMetricCards = haveMeasurements || available.pwm
+  const haveMetricCards = haveMeasurements
   const invalidMeasurements = [
     available.invalidINA219 ? copy('Power measurements unavailable', 'اندازه‌گیری‌های توان در دسترس نیست') : '',
     available.invalidTemperatureLED ? copy('LED temperature unavailable', 'دمای LED در دسترس نیست') : '',
-    available.invalidTemperatureBTAudio ? copy('Buzzer temperature unavailable', 'دمای بیزر در دسترس نیست') : '',
+    available.invalidTemperatureBTAudio ? copy('BT Amplifier temperature unavailable', 'دمای آمپلی‌فایر بلوتوث در دسترس نیست') : '',
   ].filter(Boolean)
+	const hardwareProblem = snapshot.hardware_problems?.[0]
+	const hardwareWarning = hardwareProblem ? hardwareProblemPresentation(hardwareProblem, locale) : undefined
   const connectedTone = boardReady ? 'good' : snapshot.paused ? 'warn' : 'bad'
   const authenticationRequired = !boardReady && props.transport.authenticationRequired
+  const boardLoading = props.transport.boardState === 'loading'
+  const boardUnavailableTitle = hardwareWarning?.title || (boardLoading
+    ? copy('Discovering controller board…', 'در حال جستجوی برد کنترلر…')
+    : copy('Controller board disconnected', 'برد کنترلر قطع است'))
+  const boardUnavailableDetail = hardwareWarning?.guidance || snapshot.connection_reason || t('noHardware')
+  const boardStatusLabel = boardReady
+    ? t('online')
+    : boardLoading
+      ? copy('Searching for board', 'در حال جستجوی برد')
+      : snapshot.paused
+        ? copy('Board paused', 'اتصال برد متوقف')
+        : copy('Board offline', 'برد آفلاین')
   const hash = snapshot.hello.build_hash ? snapshot.hello.build_hash.toString(16).toUpperCase().padStart(8, '0') : '—'
   const activeRelayCount = Array.from({ length: 8 }, (_, index) => Boolean(status.active_relays & (1 << index))).filter(Boolean).length
   const configurationEventID = events.find((event) => event.kind === 'config')?.id ?? 0
+  const freshnessWindow = props.transport.measurementFreshnessMS ?? 1500
+  const freshnessNow = useFreshnessClock(snapshot.status_updated, freshnessWindow)
+  const measurementFreshness = formatMeasurementFreshness(locale, snapshot.status_updated, freshnessWindow, freshnessNow)
   const [hostUI, setHostUI] = useState<HostUISettings | null>(null)
+  const [layoutEditing, setLayoutEditing] = useState(false)
+  const [layout, setLayout] = useState(() => loadCardLayout('dashboard', dashboardCardIDs))
+  const [draggedCard, setDraggedCard] = useState<DashboardCardID | null>(null)
+  const dashboardDragTarget = useRef<DashboardCardID | null>(null)
   useEffect(() => {
     if (!boardReady) {
       setHostUI(null)
@@ -211,28 +272,101 @@ export function DashboardView(props: SharedViewProps) {
     copy('User relay 5', 'رلهٔ کاربر ۵'), copy('User relay 6', 'رلهٔ کاربر ۶'),
     copy('User relay 7', 'رلهٔ کاربر ۷'), copy('User relay 8', 'رلهٔ کاربر ۸'),
   ]
+  const layoutCopy: CardLayoutCopy = {
+    move: copy('Move', 'جابجایی'),
+    collapse: copy('Collapse', 'جمع‌کردن'),
+    expand: copy('Expand', 'بازکردن'),
+    hide: copy('Hide', 'پنهان‌کردن'),
+    show: copy('Show', 'نمایش'),
+    customize: copy('Arrange', 'چیدمان'),
+    done: copy('Done', 'پایان'),
+    reset: copy('Reset layout', 'بازنشانی چیدمان'),
+    hidden: copy('Hidden cards', 'کارت‌های پنهان'),
+  }
+  const layoutCards: readonly LayoutCardDescriptor<DashboardCardID>[] = [
+    { id: 'telemetry', label: t('liveTelemetry') },
+    { id: 'outputs', label: t('outputs') },
+    { id: 'overview', label: t('status') },
+    { id: 'actions', label: t('quickActions') },
+    { id: 'events', label: t('events') },
+  ]
+  const activeLayoutCardIDs = layout.order.filter((id) => {
+    if (!boardReady) return false
+    if (id === 'telemetry') return haveMeasurements
+    if (id === 'outputs') return available.relays
+    return true
+  })
+  const updateLayout = (change: (current: typeof layout) => typeof layout) => {
+    setLayout((current) => {
+      const next = change(current)
+      saveCardLayout('dashboard', dashboardCardIDs, next)
+      return next
+    })
+  }
+  const resetLayout = () => {
+    resetCardLayout('dashboard')
+    setLayout(loadCardLayout('dashboard', dashboardCardIDs))
+  }
+  const moveCardAtPoint = (source: DashboardCardID, x: number, y: number) => {
+    const candidate = document.elementFromPoint(x, y)?.closest<HTMLElement>('[data-layout-card-id]')?.dataset.layoutCardId
+    const target = dashboardCardIDs.includes(candidate as DashboardCardID) ? candidate as DashboardCardID : undefined
+    if (!pointerReorderTargetChanged(dashboardDragTarget.current, source, target)) return
+    dashboardDragTarget.current = target
+    updateLayout((current) => moveCard(current, source, target))
+  }
+  const moveCardByKeyboard = (source: DashboardCardID, offset: -1 | 1) => updateLayout((current) => {
+    const visible = current.order.filter((id) => activeLayoutCardIDs.includes(id) && !current.hidden.includes(id))
+    const index = visible.indexOf(source)
+    const target = visible[index + offset]
+    return target ? moveCard(current, source, target) : current
+  })
+  const frame = (id: DashboardCardID, title: string, child: ReactNode) => <CardLayoutFrame
+    id={id}
+    title={title}
+    order={layout.order.indexOf(id)}
+    collapsed={layout.collapsed.includes(id)}
+    hidden={layout.hidden.includes(id)}
+    editing={layoutEditing}
+    dragging={draggedCard === id}
+    copy={layoutCopy}
+    onToggleCollapsed={() => updateLayout((current) => ({ ...current, collapsed: toggleCard(current.collapsed, id) }))}
+    onHide={() => updateLayout((current) => ({ ...current, hidden: toggleCard(current.hidden, id) }))}
+    onReorderStart={(source) => { dashboardDragTarget.current = null; setDraggedCard(source) }}
+    onReorderMove={moveCardAtPoint}
+    onReorderEnd={() => { dashboardDragTarget.current = null; setDraggedCard(null) }}
+    onKeyboardReorder={moveCardByKeyboard}
+  >{child}</CardLayoutFrame>
   return (
     <>
       <SectionTitle
-        eyebrow={boardReady ? t('liveTelemetry') : snapshot.paused ? copy('Connection paused', 'اتصال متوقف شده') : copy('Awaiting controller', 'در انتظار کنترلر')}
+        eyebrow={boardReady ? measurementFreshness : snapshot.paused ? copy('Board connection paused', 'اتصال برد متوقف شده') : boardLoading ? copy('Discovering board', 'در حال جستجوی برد') : copy('PCController host online', 'میزبان PCController آنلاین است')}
         title={t('dashboard')}
-        detail={authenticationRequired ? t('authenticationDashboardDetail') : boardReady ? pageDetail(snapshot, appTitle, locale) : snapshot.connection_reason || t('noHardware')}
+        detail={authenticationRequired ? t('authenticationDashboardDetail') : boardReady ? pageDetail(snapshot, appTitle, locale) : boardUnavailableDetail}
         action={
           <div className="header-actions">
             <StatusBadge tone={connectedTone} pulse={snapshot.connection_state === 'connecting'}>
-              {boardReady ? t('online') : props.transport.boardState === 'loading' ? t('connecting') : t('offline')}
+              {boardStatusLabel}
             </StatusBadge>
             {!boardReady && !authenticationRequired && <Button icon={Cable} compact onClick={() => void command('reconnect', t('reconnect'))}>{t('reconnect')}</Button>}
             <Button icon={RefreshCw} compact onClick={() => void refresh()}>{t('refresh')}</Button>
+            {activeLayoutCardIDs.length > 0 && <CardLayoutEditor
+              copy={layoutCopy}
+              editing={layoutEditing}
+              cards={layoutCards.filter(({ id }) => activeLayoutCardIDs.includes(id))}
+              hidden={layout.hidden}
+              onToggleEditing={() => setLayoutEditing((editing) => !editing)}
+              onShow={(id) => updateLayout((current) => ({ ...current, hidden: current.hidden.filter((item) => item !== id) }))}
+              onReset={resetLayout}
+            />}
           </div>
         }
       />
 
       <section className={`hero-panel${boardReady ? ' is-online' : ''}`}>
         <div className="hero-panel__identity">
-          <div className="eyebrow">{boardReady ? `${copy('Controller', 'کنترلر')} · ${snapshot.connection_state}` : copy('Host connection', 'اتصال میزبان')}</div>
-          <h2>{boardReady ? snapshot.hello.name || appTitle : authenticationRequired ? t('authenticationDashboard') : props.transport.boardState === 'loading' ? copy('Loading controller state…', 'در حال بارگیری وضعیت کنترلر…') : t('noHardware')}</h2>
-          <p>{boardReady ? `USB ${snapshot.port.vid || '—'}:${snapshot.port.pid || '—'} · ${snapshot.port.name || copy('automatic port', 'درگاه خودکار')}` : authenticationRequired ? t('authenticationDashboardDetail') : snapshot.connection_reason || t('noHardware')}</p>
+          <div className="eyebrow">{boardReady ? `${copy('Controller board', 'برد کنترلر')} · ${snapshot.connection_state}` : copy('PCController host · online', 'میزبان PCController · آنلاین')}</div>
+          <h2>{boardReady ? snapshot.hello.name || appTitle : authenticationRequired ? t('authenticationDashboard') : boardUnavailableTitle}</h2>
+          <p>{boardReady ? `USB ${snapshot.port.vid || '—'}:${snapshot.port.pid || '—'} · ${snapshot.port.name || copy('automatic port', 'درگاه خودکار')}` : authenticationRequired ? t('authenticationDashboardDetail') : boardUnavailableDetail}</p>
           {authenticationRequired && <Button icon={ShieldCheck} tone="primary" onClick={() => { window.location.hash = '#/settings' }}>{copy('Enter access token', 'ورود توکن دسترسی')}</Button>}
         </div>
         {boardReady && <div className="hero-panel__readout" dir="ltr">
@@ -241,23 +375,35 @@ export function DashboardView(props: SharedViewProps) {
         </div>}
       </section>
 
+      {hardwareProblem && hardwareWarning && <section className={`hardware-alert is-${hardwareProblem.severity}`} role="alert" aria-live="assertive">
+        <div className="hardware-alert__icon"><TriangleAlert size={24} aria-hidden="true" /></div>
+        <div className="hardware-alert__copy">
+          <strong>{hardwareWarning.title}</strong>
+          <p>{hardwareWarning.guidance}</p>
+          {hardwareWarning.impact && <p className="hardware-alert__impact">{hardwareWarning.impact}</p>}
+          {(hardwareProblem.os_problem_code || hardwareProblem.location) && <span dir="ltr">
+            {[hardwareProblem.os_problem_code ? `Windows code ${hardwareProblem.os_problem_code}` : '', hardwareProblem.location || ''].filter(Boolean).join(' · ')}
+          </span>}
+        </div>
+      </section>}
+
       {boardReady && haveMetricCards && <section className="metric-grid">
-        {available.ina219 && <MetricCard icon={Zap} label={peripheralName('sensor.supply-voltage', t('voltage'))} value={formatNumber(locale, status.supply_mv / 1000, 2)} unit="V" values={values(samples, 'supply')} tone="accent" detail={`${peripheralName('sensor.bus-voltage', copy('Bus voltage', 'ولتاژ باس'))} · ${formatNumber(locale, status.bus_mv / 1000, 2)} V`} />}
-        {available.ina219 && <MetricCard icon={Waves} label={peripheralName('sensor.current', t('current'))} value={formatNumber(locale, status.current_ma, 0)} unit="mA" values={values(samples, 'current')} tone="green" detail={`${peripheralName('sensor.power', copy('Load power', 'توان بار'))} · ${formatNumber(locale, status.power_mw / 1000, 2)} W`} />}
-        {available.temperatureLED && <MetricCard icon={Thermometer} label={peripheralName('sensor.temperature-led', `${t('temperature')} · LED`)} value={formatNumber(locale, status.temperature_led_centi_c / 100, 1)} unit="°C" values={values(samples, 'ledTemp')} tone="amber" />}
-        {available.temperatureBTAudio && <MetricCard icon={Thermometer} label={peripheralName('sensor.temperature-audio', copy('Buzzer temperature', 'دمای بیزر'))} value={formatNumber(locale, status.temperature_bt_audio_centi_c / 100, 1)} unit="°C" values={values(samples, 'btTemp')} tone="violet" />}
-        {available.pwm && <MetricCard icon={PlugZap} label="PWM" value={formatNumber(locale, status.pwm_value * 100 / 4095, 1)} unit="%" values={[]} tone="violet" detail={`${copy('CH', 'کانال')} ${status.pwm_channel + 1} · ${copy('ready', 'آماده')}`} />}
+        {available.ina219 && <MetricCard icon={Zap} label={peripheralName('sensor.supply-voltage', t('voltage'))} value={formatNumber(locale, status.supply_mv / 1000, 2)} unit="V" values={values(samples, 'supply')} tone="accent" scale="supply" detail={`${peripheralName('sensor.bus-voltage', copy('Bus voltage', 'ولتاژ باس'))} · ${formatNumber(locale, status.bus_mv / 1000, 2)} V`} />}
+        {available.ina219 && <MetricCard icon={Waves} label={peripheralName('sensor.current', t('current'))} value={formatNumber(locale, status.current_ma, 0)} unit="mA" values={values(samples, 'current')} tone="green" scale="current" detail={`${peripheralName('sensor.power', copy('Load power', 'توان بار'))} · ${formatNumber(locale, status.power_mw / 1000, 2)} W`} />}
+        {available.temperatureLED && <MetricCard icon={Thermometer} label={peripheralName('sensor.temperature-led', `${t('temperature')} · LED`)} value={formatNumber(locale, status.temperature_led_centi_c / 100, 1)} unit="°C" values={values(samples, 'ledTemp')} tone="amber" scale="temperature" />}
+        {available.temperatureBTAudio && <MetricCard icon={Thermometer} label={peripheralName('sensor.temperature-audio', copy('BT Amplifier temperature', 'دمای آمپلی‌فایر بلوتوث'))} value={formatNumber(locale, status.temperature_bt_audio_centi_c / 100, 1)} unit="°C" values={values(samples, 'btTemp')} tone="violet" scale="temperature" />}
       </section>}
 
       {boardReady && invalidMeasurements.length > 0 && <div className="measurement-alerts" role="status" aria-live="polite">
         {invalidMeasurements.map((message) => <div className="measurement-alert" key={message}><TriangleAlert size={16} /><span>{message}</span></div>)}
       </div>}
 
-      {boardReady && haveMeasurements && <Card
+      <section className="dashboard-layout-grid">
+      {boardReady && haveMeasurements && frame('telemetry', t('liveTelemetry'), <Card
         icon={ChartNoAxesCombined}
         iconTone="violet"
         title={t('liveTelemetry')}
-        eyebrow={copy('REAL-TIME', 'هم‌زمان')}
+        eyebrow={measurementFreshness}
         className="telemetry-chart-card"
         action={<StatusBadge tone="good">{samples.length} {copy('samples', 'نمونه')}</StatusBadge>}
         menu={[
@@ -266,12 +412,11 @@ export function DashboardView(props: SharedViewProps) {
         ]}
       >
         <Suspense fallback={<div className="telemetry-chart__empty" role="status"><Activity size={22} /><span>{locale === 'fa' ? 'در حال آماده‌سازی نمودار…' : 'Preparing chart…'}</span></div>}>
-          <TelemetryChart connected locale={locale} samples={samples} />
+          <TelemetryChart connected locale={locale} samples={samples} reduceMotion={props.reduceMotion} />
         </Suspense>
-      </Card>}
+      </Card>)}
 
-      <section className="dashboard-grid">
-        {boardReady && available.relays && <Card icon={ToggleRight} iconTone={activeRelayCount ? 'amber' : 'green'} title={t('outputs')} eyebrow="R1—R8" className="outputs-card" action={<StatusBadge tone={status.active_relays ? 'warn' : 'neutral'}>{status.active_relays ? `${activeRelayCount} ${copy('ACTIVE', 'فعال')}` : copy('SAFE', 'ایمن')}</StatusBadge>} menu={[
+        {boardReady && available.relays && frame('outputs', t('outputs'), <Card icon={ToggleRight} iconTone={activeRelayCount ? 'amber' : 'green'} title={t('outputs')} eyebrow="R1—R8" className="outputs-card" action={<StatusBadge tone={status.active_relays ? 'warn' : 'neutral'}>{status.active_relays ? `${activeRelayCount} ${copy('ACTIVE', 'فعال')}` : copy('SAFE', 'ایمن')}</StatusBadge>} menu={[
           { label: copy('Read controller status', 'خواندن وضعیت کنترلر'), icon: Gauge, onSelect: () => { void command('status') } },
           { label: copy('Release every output', 'آزادسازی همهٔ خروجی‌ها'), icon: Unplug, tone: 'danger', onSelect: () => openDialog({ tone: 'danger', title: t('confirmEmergencyTitle'), body: t('confirmEmergencyBody'), confirmLabel: t('emergencyOff'), action: async () => { await command('relay off'); await command('pwm off') } }) },
         ]}>
@@ -291,9 +436,9 @@ export function DashboardView(props: SharedViewProps) {
             })}
           </div>
           <div className="safety-strip"><ShieldCheck size={17} /><span>{activeRelayCount ? copy(`${activeRelayCount} outputs active · confirmation required for emergency release`, `${activeRelayCount} خروجی فعال است · آزادسازی اضطراری به تأیید نیاز دارد`) : copy('All physical outputs are released', 'همهٔ خروجی‌های فیزیکی آزاد هستند')}</span></div>
-        </Card>}
+        </Card>)}
 
-        {boardReady && <Card icon={Gauge} iconTone="green" title={t('status')} eyebrow={t('device')} className="device-card" menu={[
+        {boardReady && frame('overview', t('status'), <Card icon={Gauge} iconTone="green" title={t('status')} eyebrow={t('device')} className="device-card" menu={[
           { label: copy('Read identity', 'خواندن شناسه'), icon: Cpu, onSelect: () => { void command('hello') } },
           { label: copy('Open controller controls', 'بازکردن کنترل‌های برد'), icon: CircuitBoard, onSelect: () => { window.location.hash = '#/controls' } },
         ]}>
@@ -305,9 +450,9 @@ export function DashboardView(props: SharedViewProps) {
             <DataRow label={copy('UART CRC / framing', 'CRC / قاب‌بندی UART')} value={`${status.crc_errors} / ${status.framing_errors}`} mono tone={status.crc_errors || status.framing_errors ? 'warn' : 'good'} />
             <DataRow label={copy('Reset count', 'تعداد بازنشانی')} value={status.reset_count} mono />
           </div>
-        </Card>}
+        </Card>)}
 
-        {boardReady && <Card icon={Zap} iconTone="amber" title={t('quickActions')} eyebrow={copy('Confirmation protected', 'محافظت‌شده با تأیید')} className="actions-card">
+        {boardReady && frame('actions', t('quickActions'), <Card icon={Zap} iconTone="amber" title={t('quickActions')} eyebrow={copy('Confirmation protected', 'محافظت‌شده با تأیید')} className="actions-card">
           <div className="action-grid">
             {available.relays && <Button icon={Unplug} tone="danger" onClick={() => openDialog({
               tone: 'danger', title: t('confirmEmergencyTitle'), body: t('confirmEmergencyBody'), confirmLabel: t('emergencyOff'),
@@ -316,14 +461,14 @@ export function DashboardView(props: SharedViewProps) {
             <Button icon={Gauge} onClick={() => void command('status')}>{copy('Read status', 'خواندن وضعیت')}</Button>
             {available.statusLED && <Button icon={Lightbulb} onClick={() => void command('rgb effect play attention')}>{copy('Attention cue', 'اعلان توجه')}</Button>}
           </div>
-        </Card>}
+        </Card>)}
 
-        {boardReady && <Card icon={Activity} iconTone="violet" title={t('events')} eyebrow={events.length ? `${formatClock(locale, events[0].time)} · ${events[0].kind}` : t('eventStream')} className="activity-card" action={<span className="count-chip">{events.length}</span>} menu={[
+        {boardReady && frame('events', t('events'), <Card icon={Activity} iconTone="violet" title={t('events')} eyebrow={events.length ? `${formatClock(locale, events[0].time)} · ${events[0].kind}` : t('eventStream')} className="activity-card" action={<span className="count-chip">{events.length}</span>} menu={[
           { label: copy('Open full timeline', 'بازکردن خط زمانی کامل'), icon: Activity, onSelect: () => { window.location.hash = '#/events' } },
           { label: copy('Refresh snapshot', 'تازه‌سازی وضعیت'), icon: RefreshCw, onSelect: () => { void refresh() } },
         ]}>
           <EventList events={events} locale={locale} t={t} />
-        </Card>}
+        </Card>)}
       </section>
     </>
   )
@@ -479,7 +624,7 @@ export function ControlsView(props: SharedViewProps) {
   if (!boardReady) {
     return (
       <>
-        <SectionTitle eyebrow={copy('Controller controls', 'کنترل‌های برد')} title={t('controls')} detail={snapshot.connection_reason || copy('Controller offline', 'کنترلر آفلاین است')} />
+        <SectionTitle eyebrow={copy('Controller board controls', 'کنترل‌های برد')} title={t('controls')} detail={snapshot.connection_reason || copy('Board offline; the PCController host remains available', 'برد آفلاین است؛ میزبان PCController همچنان در دسترس است')} />
         <Card icon={CircuitBoard} iconTone="amber" title={props.transport.boardState === 'loading' ? copy('Loading controller controls', 'در حال بارگیری کنترل‌های برد') : copy('Controller controls are unavailable', 'کنترل‌های برد در دسترس نیست')} eyebrow={copy('Host connection', 'اتصال میزبان')}>
           <EmptyState
             icon={Cable}
@@ -504,7 +649,7 @@ export function ControlsView(props: SharedViewProps) {
               const active = Boolean(snapshot.status.active_relays & (1 << index))
               return (
                 <article key={index} className={`relay-switch${active ? ' is-active' : ''}`}>
-                  <span>R{index + 1}</span><i aria-hidden="true"><b /></i><small>{peripheralName(`relay.${index + 1}`, relayDefaults[index])}</small>
+                  <span>R{index + 1}</span><RelayToggle active={active} disabled={!snapshot.connected} label={copy(`Toggle relay ${index + 1}`, `تغییر وضعیت رله ${index + 1}`)} onToggle={() => void command(`relay ${index + 1} ${active ? 'off' : 'on'}`)} /><small>{peripheralName(`relay.${index + 1}`, relayDefaults[index])}</small>
                   <div className="relay-switch__actions"><Button compact disabled={active} onClick={() => void command(`relay ${index + 1} on`)}>{t('on')}</Button><Button compact disabled={!active} onClick={() => void command(`relay ${index + 1} off`)}>{t('off')}</Button></div>
                 </article>
               )
@@ -558,7 +703,7 @@ export function ControlsView(props: SharedViewProps) {
 			</div>
 			<div className="status-led-live" style={{ '--preview': liveHex } as React.CSSProperties}>
 				<i aria-hidden="true" />
-				<div><strong>{copy('Physical LED mirror', 'بازتاب LED فیزیکی')}</strong><small dir="ltr">{liveLED ? `${liveHex} · effect ${liveLED.effect} · condition ${liveLED.condition}` : copy('Awaiting pushed board state', 'در انتظار وضعیت ارسالی برد')}</small></div>
+				<div><strong>{copy('Physical LED mirror', 'بازتاب LED فیزیکی')}</strong><small dir="ltr">{liveLED ? <><span className="mono">{liveHex}</span>{` · effect ${liveLED.effect} · condition ${liveLED.condition}`}</> : copy('Awaiting pushed board state', 'در انتظار وضعیت ارسالی برد')}</small></div>
 			</div>
 		  </div>
           <label className="native-color-field">
@@ -747,7 +892,7 @@ export function EventsView({ events, locale, t }: SharedViewProps) {
   )
 }
 
-export function SettingsView({ appTitle, snapshot, locale, t, command, appearance, onAppearance, token, onToken, onAppTitle, boardSettingsReadState, uiConfig, onBuzzerPath, transport }: SharedViewProps & { appearance: Appearance; onAppearance: (value: Appearance) => void; token: string; onToken: (value: string) => void; onAppTitle: (value: string) => Promise<string>; uiConfig: UIConfig | null; onBuzzerPath: (value: BuzzerPath) => Promise<void> }) {
+export function SettingsView({ appTitle, snapshot, locale, t, command, appearance, onAppearance, token, onToken, onAppTitle, boardSettingsReadState, uiConfig, onMeasurementTiming, onBuzzerPath, transport, navigationSync, navigationSyncStatus = { state: 'idle', detail: '' }, onNavigationSync }: SharedViewProps & { appearance: Appearance; onAppearance: (value: Appearance) => void; token: string; onToken: (value: string) => void; onAppTitle: (value: string) => Promise<string>; uiConfig: UIConfig | null; onMeasurementTiming?: (statusIntervalMS: number, measurementFreshnessMS: number) => void; onBuzzerPath: (value: BuzzerPath) => Promise<void>; navigationSync: boolean; navigationSyncStatus?: { state: 'idle' | 'pending' | 'error'; detail: string }; onNavigationSync: (value: boolean) => void }) {
   const copy = (english: string, persian: string) => locale === 'fa' ? persian : english
   const available = peripheralAvailability(snapshot)
   const validationMessage = (message: string) => locale !== 'fa' ? message : ({
@@ -782,6 +927,13 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
   const [streamPeriod, setStreamPeriod] = useState(snapshot.settings.stream_period_ms || 200)
   const [outputPersistence, setOutputPersistence] = useState(snapshot.settings.output_persistence)
   const [relayRestoreMask, setRelayRestoreMask] = useState(snapshot.settings.relay_restore_mask)
+  const [illuminationMode, setIlluminationMode] = useState(String(snapshot.settings.light_mode))
+  const [illuminationOn, setIlluminationOn] = useState(snapshot.settings.on_brightness)
+  const [illuminationOff, setIlluminationOff] = useState(snapshot.settings.off_brightness)
+  const [illuminationLive, setIlluminationLive] = useState<IlluminationState>(snapshot.illumination)
+  const [illuminationBusy, setIlluminationBusy] = useState(false)
+  const [illuminationNotice, setIlluminationNotice] = useState('')
+  const [illuminationError, setIlluminationError] = useState(false)
   const [segmentScroll, setSegmentScroll] = useState<SegmentScrollSettings>({
     enabled: true,
     pages: ['door'],
@@ -795,6 +947,14 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
   const [segmentScrollBusy, setSegmentScrollBusy] = useState(true)
   const [segmentScrollNotice, setSegmentScrollNotice] = useState('')
   const [segmentScrollError, setSegmentScrollError] = useState(false)
+  const [measurementRefreshMS, setMeasurementRefreshMS] = useState(uiConfig?.status_interval_ms ?? 200)
+  const [measurementFreshnessMS, setMeasurementFreshnessMS] = useState(uiConfig?.measurement_freshness_ms ?? 1500)
+  const [savedMeasurementTiming, setSavedMeasurementTiming] = useState({
+    refresh: uiConfig?.status_interval_ms ?? 200,
+    freshness: uiConfig?.measurement_freshness_ms ?? 1500,
+  })
+  const [measurementTimingBusy, setMeasurementTimingBusy] = useState(uiConfig === null)
+  const [measurementTimingNotice, setMeasurementTimingNotice] = useState('')
   const [localIntegrations, setLocalIntegrations] = useState<LocalIntegrationSettings>({
     local_device: { enabled: false, base_url: '' },
     data_hub: { enabled: false, base_url: 'http://127.0.0.1:8080' },
@@ -810,18 +970,26 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
   const [integrationsBusy, setIntegrationsBusy] = useState(true)
   const [integrationsLoaded, setIntegrationsLoaded] = useState(false)
   const [integrationsNotice, setIntegrationsNotice] = useState('')
+	const [buzzerRuntime, setBuzzerRuntime] = useState<LocalIntegrationSettings['buzzer_runtime']>(uiConfig?.buzzer_runtime)
   const updateAppearance = <K extends keyof Appearance>(key: K, value: Appearance[K]) => onAppearance({ ...appearance, [key]: value })
   const titleValidation = useMemo(() => validateAppTitle(draftAppTitle), [draftAppTitle])
   const normalizedToken = useMemo(() => normalizeSessionToken(draftToken), [draftToken])
-	const boardSilent = (snapshot.settings.flags & 0x01) !== 0
-	const hostSilent = !(uiConfig?.integrations?.buzzer_host_enabled ?? false)
-	const buzzerPath = buzzerPathFromState(boardSilent, hostSilent)
+	const boardStateKnown = snapshot.connected && snapshot.have_settings
+	const boardSilent = boardStateKnown && (snapshot.settings.flags & 0x01) !== 0
+	const effectiveBuzzerRuntime = buzzerRuntime ?? uiConfig?.buzzer_runtime
+	const hostSilent = effectiveBuzzerRuntime ? !effectiveBuzzerRuntime.host_mirror : !(uiConfig?.integrations?.buzzer_host_enabled ?? false)
+	const fallbackBuzzerPath = boardStateKnown ? buzzerPathFromState(boardSilent, hostSilent) : null
+	const buzzerPath = effectiveBuzzerRuntime?.effective_path && effectiveBuzzerRuntime.effective_path !== 'unknown'
+		? effectiveBuzzerRuntime.effective_path
+		: fallbackBuzzerPath
 	const applyBuzzerPath = async (value: BuzzerPath) => {
 		setBuzzerPathBusy(true)
 		setBuzzerPathNotice('')
 		try {
 			await onBuzzerPath(value)
-			setBuzzerPathNotice(copy('Applied immediately to board and host.', 'فوراً روی برد و میزبان اعمال شد.'))
+			const status = await rpc<{ buzzer_runtime: LocalIntegrationSettings['buzzer_runtime'] }>('controller.integrations.status')
+			setBuzzerRuntime(status.buzzer_runtime)
+			setBuzzerPathNotice(copy('Applied and verified.', 'اعمال و تأیید شد.'))
 		} catch (cause) {
 			setBuzzerPathNotice(cause instanceof Error ? cause.message : String(cause))
 		} finally {
@@ -857,6 +1025,10 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
   }), [segmentClosedValidation.normalized, segmentOpenValidation.normalized, segmentPagesValidation.pages, segmentScroll])
   const segmentScrollValid = segmentPagesValidation.valid && segmentOpenValidation.valid && segmentClosedValidation.valid
   const segmentScrollDirty = savedSegmentScroll !== null && !segmentScrollSettingsEqual(segmentScrollDraft, savedSegmentScroll)
+  const measurementTimingValid = measurementRefreshMS >= 50 && measurementRefreshMS <= 60_000 &&
+    measurementFreshnessMS >= measurementRefreshMS + 100 && measurementFreshnessMS <= 120_000
+  const measurementTimingDirty = measurementRefreshMS !== savedMeasurementTiming.refresh ||
+    measurementFreshnessMS !== savedMeasurementTiming.freshness
   const lifecycleOptions: { value: LifecycleSafetyAction; label: string }[] = [
     { value: 'leave', label: copy('Release keys', 'رهاسازی کلیدها') },
     { value: 'stop-motion', label: copy('Stop motion', 'توقف حرکت') },
@@ -876,6 +1048,16 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
 
   useEffect(() => setDraftAppTitle(appTitle), [appTitle])
   useEffect(() => setDraftToken(token), [token])
+  useEffect(() => {
+    if (!uiConfig) return
+    setMeasurementRefreshMS(uiConfig.status_interval_ms)
+    setMeasurementFreshnessMS(uiConfig.measurement_freshness_ms)
+    setSavedMeasurementTiming({
+      refresh: uiConfig.status_interval_ms,
+      freshness: uiConfig.measurement_freshness_ms,
+    })
+    setMeasurementTimingBusy(false)
+  }, [uiConfig?.measurement_freshness_ms, uiConfig?.status_interval_ms])
   useEffect(() => {
     let active = true
     void rpc<HostUISettings>('controller.ui.config.get')
@@ -903,6 +1085,9 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
     return () => { active = false }
   }, [])
   useEffect(() => {
+	setIlluminationMode(String(snapshot.settings.light_mode))
+	setIlluminationOn(snapshot.settings.on_brightness)
+	setIlluminationOff(snapshot.settings.off_brightness)
     setDisplayBrightness(snapshot.settings.display_brightness)
     setDisplayClosedBrightness(snapshot.settings.display_closed_brightness)
     setMotionExitHoldSeconds(snapshot.settings.motion_exit_hold_seconds || 2)
@@ -911,6 +1096,9 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
     setOutputPersistence(snapshot.settings.output_persistence)
     setRelayRestoreMask(snapshot.settings.relay_restore_mask)
   }, [
+	snapshot.settings.light_mode,
+	snapshot.settings.on_brightness,
+	snapshot.settings.off_brightness,
     snapshot.settings.display_brightness,
     snapshot.settings.display_closed_brightness,
     snapshot.settings.motion_exit_hold_seconds,
@@ -919,6 +1107,44 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
     snapshot.settings.output_persistence,
     snapshot.settings.relay_restore_mask,
   ])
+
+  useEffect(() => {
+	setIlluminationLive(snapshot.illumination)
+  }, [snapshot.illumination])
+
+  useEffect(() => {
+	if (!snapshot.connected || !snapshot.have_settings || !available.pwm) return
+	const abort = new AbortController()
+	void rpc<IlluminationState>('controller.illumination.get', {}, abort.signal)
+		.then((state) => { if (!abort.signal.aborted) setIlluminationLive(state) })
+		.catch((cause) => {
+			if (!abort.signal.aborted) {
+				setIlluminationNotice(cause instanceof Error ? cause.message : String(cause))
+				setIlluminationError(true)
+			}
+		})
+	return () => abort.abort()
+  }, [snapshot.connected, snapshot.have_settings, available.pwm])
+
+  const saveIllumination = async () => {
+	setIlluminationBusy(true)
+	setIlluminationNotice('')
+	setIlluminationError(false)
+	try {
+		const state = await rpc<IlluminationState>('controller.illumination.set', {
+			mode: Number(illuminationMode),
+			on_brightness: illuminationOn,
+			off_brightness: illuminationOff,
+		})
+		setIlluminationLive(state)
+		setIlluminationNotice(copy('Applied live and verified durable in EEPROM.', 'به‌صورت زنده اعمال و ماندگاری آن در EEPROM تأیید شد.'))
+	} catch (cause) {
+		setIlluminationNotice(cause instanceof Error ? cause.message : String(cause))
+		setIlluminationError(true)
+	} finally {
+		setIlluminationBusy(false)
+	}
+  }
 
   const setPersistenceBit = (bit: number, enabled: boolean) => {
     setOutputPersistence((current) => enabled ? current | bit : current & ~bit)
@@ -970,6 +1196,31 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
     }
   }
 
+  const saveMeasurementTiming = async (event: FormEvent) => {
+    event.preventDefault()
+    if (!measurementTimingValid || !measurementTimingDirty) return
+    setMeasurementTimingBusy(true)
+    setMeasurementTimingNotice('')
+    try {
+      const saved = await rpc<HostUISettings>('controller.ui.config.set', {
+        status_interval_ms: measurementRefreshMS,
+        measurement_freshness_ms: measurementFreshnessMS,
+      })
+      setMeasurementRefreshMS(saved.status_interval_ms)
+      setMeasurementFreshnessMS(saved.measurement_freshness_ms)
+      setSavedMeasurementTiming({
+        refresh: saved.status_interval_ms,
+        freshness: saved.measurement_freshness_ms,
+      })
+      onMeasurementTiming?.(saved.status_interval_ms, saved.measurement_freshness_ms)
+      setMeasurementTimingNotice(copy('Applied.', 'اعمال شد.'))
+    } catch (cause) {
+      setMeasurementTimingNotice(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setMeasurementTimingBusy(false)
+    }
+  }
+
   const saveAppTitle = async (event: FormEvent) => {
     event.preventDefault()
     setTitleBusy(true)
@@ -1003,7 +1254,9 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
           buzzer_mirror: value.buzzer_mirror ?? {
             enabled: false, native_enabled: false, web_audio_enabled: true, backend: 'auto', executable: '', driver_directory: '',
           },
+			buzzer_runtime: value.buzzer_runtime,
         }
+		setBuzzerRuntime(value.buzzer_runtime)
         setLocalIntegrations(normalized)
         setSavedIntegrations(normalized)
         setIntegrationsLoaded(true)
@@ -1041,7 +1294,9 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
         data_hub: { ...saved.data_hub, base_url: normalizeRootURLInput(saved.data_hub.base_url ?? '') },
         lifecycle_safety: saved.lifecycle_safety,
         buzzer_mirror: saved.buzzer_mirror,
+		buzzer_runtime: saved.buzzer_runtime,
       }
+		setBuzzerRuntime(saved.buzzer_runtime)
       setLocalIntegrations(canonical)
       setSavedIntegrations(canonical)
       setIntegrationsNotice('Saved')
@@ -1110,6 +1365,21 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
 
         <PeripheralNamesEditor locale={locale} />
 
+        {uiConfig && <Card icon={Gauge} iconTone="green" title={copy('Live measurements', 'اندازه‌گیری‌های زنده')} eyebrow={measurementTimingBusy ? copy('Synchronizing', 'در حال همگام‌سازی') : `${formatNumber(locale, 1000 / measurementRefreshMS, measurementRefreshMS === 200 ? 0 : 1)} ${copy('Hz', 'هرتز')}`} className="settings-card settings-card--wide">
+          <form className="segment-scroll-settings" onSubmit={(event) => void saveMeasurementTiming(event)}>
+            <RangeField label={copy('Refresh/update interval', 'فاصلهٔ تازه‌سازی/به‌روزرسانی')} value={measurementRefreshMS} min={50} max={60_000} step={50} unit="ms" onChange={(value) => { setMeasurementTimingNotice(''); setMeasurementRefreshMS(value) }} />
+            <RangeField label={copy('Freshness window', 'پنجرهٔ تازگی')} value={measurementFreshnessMS} min={measurementRefreshMS + 100} max={120_000} step={100} unit="ms" onChange={(value) => { setMeasurementTimingNotice(''); setMeasurementFreshnessMS(value) }} />
+            <div className="local-integrations-form__footer">
+              <span className={`segment-scroll-settings__notice${!measurementTimingValid ? ' is-error' : ''}`} role="status" aria-live="polite">
+                {!measurementTimingValid
+                  ? copy(`Freshness must be ${measurementRefreshMS + 100}..120000 ms.`, `تازگی باید بین ${measurementRefreshMS + 100} تا ۱۲۰۰۰۰ میلی‌ثانیه باشد.`)
+                  : measurementTimingNotice}
+              </span>
+              <Button type="submit" tone="primary" icon={ShieldCheck} busy={measurementTimingBusy} disabled={!measurementTimingDirty || !measurementTimingValid}>{copy('Apply live timing', 'اعمال زمان‌بندی زنده')}</Button>
+            </div>
+          </form>
+        </Card>}
+
         <Card icon={Binary} iconTone="accent" title={copy('HOST display scrolling', 'پیمایش نمایشگر میزبان')} eyebrow={segmentScroll.enabled ? copy('Enabled', 'فعال') : copy('Disabled', 'غیرفعال')} className="settings-card settings-card--wide">
           <form className="segment-scroll-settings" onSubmit={(event) => void saveSegmentScroll(event)}>
             <Toggle checked={segmentScroll.enabled} onChange={(enabled) => updateSegmentScroll((value) => ({ ...value, enabled }))} label={copy('Supply scrolling text to selected pages', 'ارسال متن پیمایشی به صفحات انتخابی')} detail={copy('The board keeps OPEN/CLSD as its offline fallback; warnings, edits, programming, and other critical overlays remain higher priority.', 'برد در حالت آفلاین OPEN/CLSD را نمایش می‌دهد و هشدارها و لایه‌های مهم اولویت بالاتری دارند.')} />
@@ -1159,10 +1429,10 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
           </form>
         </Card>
 
-		<Card icon={Volume2} iconTone="green" title={copy('Buzzer routing', 'مسیر بیزر')} eyebrow={buzzerPath.toUpperCase()} className="settings-card settings-card--wide">
+		<Card icon={Volume2} iconTone="green" title={copy('Buzzer routing', 'مسیر بیزر')} eyebrow={(buzzerPath ?? copy('Pending', 'در انتظار')).toUpperCase()} className="settings-card settings-card--wide">
 			<div className="setting-group">
 				<label>{copy('Playback path', 'مسیر پخش')}</label>
-				<Segmented value={buzzerPath} label={copy('Buzzer playback path', 'مسیر پخش بیزر')} options={[
+				<Segmented value={buzzerPath ?? effectiveBuzzerRuntime?.requested_path ?? localIntegrations.buzzer_mirror.path ?? 'none'} label={copy('Buzzer playback path', 'مسیر پخش بیزر')} options={[
 					{ value: 'board', label: copy('Board', 'برد') },
 					{ value: 'host', label: copy('PC', 'رایانه') },
 					{ value: 'both', label: copy('Both', 'هر دو') },
@@ -1170,16 +1440,20 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
 				]} onChange={(value) => void applyBuzzerPath(value as BuzzerPath)} />
 			</div>
 			<div className="settings-inline-status">
-				<StatusBadge tone={boardSilent ? 'neutral' : 'good'}>{copy(`Board ${boardSilent ? 'silent' : 'active'}`, `برد ${boardSilent ? 'بی‌صدا' : 'فعال'}`)}</StatusBadge>
+				{boardStateKnown
+					? <StatusBadge tone={boardSilent ? 'neutral' : 'good'}>{copy(`Board ${boardSilent ? 'silent' : 'active'}`, `برد ${boardSilent ? 'بی‌صدا' : 'فعال'}`)}</StatusBadge>
+					: <StatusBadge tone="neutral">{copy('Board state unavailable', 'وضعیت برد در دسترس نیست')}</StatusBadge>}
 				<StatusBadge tone={hostSilent ? 'neutral' : 'good'}>{copy(`PC ${hostSilent ? 'silent' : 'active'}`, `رایانه ${hostSilent ? 'بی‌صدا' : 'فعال'}`)}</StatusBadge>
 				{buzzerPathBusy && <StatusBadge tone="warn">{copy('Applying…', 'در حال اعمال…')}</StatusBadge>}
+				{effectiveBuzzerRuntime?.requested_path && effectiveBuzzerRuntime.requested_path !== 'unknown' && effectiveBuzzerRuntime.requested_path !== effectiveBuzzerRuntime.effective_path && <StatusBadge tone={effectiveBuzzerRuntime.board_apply_state === 'error' ? 'warn' : 'neutral'}>{`${effectiveBuzzerRuntime.requested_path} · ${effectiveBuzzerRuntime.board_apply_state}`}</StatusBadge>}
+				{effectiveBuzzerRuntime && <StatusBadge tone={effectiveBuzzerRuntime.backend_error ? 'warn' : 'neutral'}>{`${effectiveBuzzerRuntime.backend_requested} → ${effectiveBuzzerRuntime.backend_effective}`}</StatusBadge>}
 			</div>
-			<Toggle checked={localIntegrations.buzzer_mirror.enabled} onChange={(enabled) => { setIntegrationsNotice(''); setLocalIntegrations((current) => ({ ...current, buzzer_mirror: { ...current.buzzer_mirror, enabled } })) }} label={copy('Mirror board beeps on this host', 'بازپخش بوق‌های برد روی این میزبان')} detail={copy('Applies to this instance and synchronizes through the shared host configuration.', 'روی این نمونه اعمال می‌شود و از تنظیمات مشترک میزبان همگام می‌ماند.')} />
+			<Toggle checked={localIntegrations.buzzer_mirror.enabled} onChange={(enabled) => { setIntegrationsNotice(''); setLocalIntegrations((current) => { const path = current.buzzer_mirror.path; const boardSilent = path === 'host' || path === 'none'; return { ...current, buzzer_mirror: { ...current.buzzer_mirror, enabled, path: path ? buzzerPathFromState(boardSilent, !enabled) : path } } }) }} label={copy('Mirror board beeps on this host', 'بازپخش بوق‌های برد روی این میزبان')} />
 			{localIntegrations.buzzer_mirror.enabled && <>
-				<Toggle checked={localIntegrations.buzzer_mirror.native_enabled} onChange={(native_enabled) => { setIntegrationsNotice(''); setLocalIntegrations((current) => ({ ...current, buzzer_mirror: { ...current.buzzer_mirror, native_enabled } })) }} label={copy('PC speaker renderer', 'پخش‌کنندهٔ بلندگوی رایانه')} detail={copy('Uses the selected native or external beep backend.', 'از پشتیبان بوق بومی یا خارجی انتخاب‌شده استفاده می‌کند.')} />
-				<Toggle checked={localIntegrations.buzzer_mirror.web_audio_enabled} onChange={(web_audio_enabled) => { setIntegrationsNotice(''); setLocalIntegrations((current) => ({ ...current, buzzer_mirror: { ...current.buzzer_mirror, web_audio_enabled } })) }} label={copy('Web browser renderer', 'پخش‌کنندهٔ مرورگر وب')} detail={copy('Lets each connected WebUI render the pushed note with WebAudio.', 'هر WebUI متصل می‌تواند نت دریافتی را با WebAudio پخش کند.')} />
-				<div className="setting-group"><label>{copy('PC speaker backend', 'پشتیبان بلندگوی رایانه')}</label><Segmented value={localIntegrations.buzzer_mirror.backend} label={copy('PC speaker backend', 'پشتیبان بلندگوی رایانه')} options={[{ value: 'auto', label: copy('Auto', 'خودکار') }, { value: 'native', label: copy('Native', 'بومی') }, { value: 'external', label: copy('Command', 'فرمان') }]} onChange={(backend) => { setIntegrationsNotice(''); setLocalIntegrations((current) => ({ ...current, buzzer_mirror: { ...current.buzzer_mirror, backend: backend as 'auto' | 'native' | 'external' } })) }} /></div>
-				{localIntegrations.buzzer_mirror.backend !== 'native' && <TextField label={copy('Beep executable (optional)', 'فایل اجرایی بوق (اختیاری)')} dir="ltr" spellCheck={false} value={localIntegrations.buzzer_mirror.executable ?? ''} placeholder={copy('Blank uses beep from PATH', 'خالی: استفاده از beep در PATH')} onChange={(event) => { setIntegrationsNotice(''); setLocalIntegrations((current) => ({ ...current, buzzer_mirror: { ...current.buzzer_mirror, executable: event.currentTarget.value } })) }} />}
+				<Toggle checked={localIntegrations.buzzer_mirror.native_enabled} onChange={(native_enabled) => { setIntegrationsNotice(''); setLocalIntegrations((current) => ({ ...current, buzzer_mirror: { ...current.buzzer_mirror, native_enabled, backend: native_enabled && current.buzzer_mirror.backend === 'off' ? 'auto' : current.buzzer_mirror.backend } })) }} label={copy('PC speaker renderer', 'پخش‌کنندهٔ بلندگوی رایانه')} />
+				<Toggle checked={localIntegrations.buzzer_mirror.web_audio_enabled} onChange={(web_audio_enabled) => { setIntegrationsNotice(''); setLocalIntegrations((current) => ({ ...current, buzzer_mirror: { ...current.buzzer_mirror, web_audio_enabled } })) }} label={copy('Web browser renderer', 'پخش‌کنندهٔ مرورگر وب')} />
+				<div className="setting-group"><label>{copy('PC speaker backend', 'پشتیبان بلندگوی رایانه')}</label><Segmented value={localIntegrations.buzzer_mirror.backend} label={copy('PC speaker backend', 'پشتیبان بلندگوی رایانه')} options={[{ value: 'auto', label: copy('Auto', 'خودکار') }, { value: 'native', label: copy('Native', 'بومی') }, { value: 'external', label: copy('Command', 'فرمان') }, { value: 'off', label: copy('Off', 'خاموش') }]} onChange={(backend) => { setIntegrationsNotice(''); setLocalIntegrations((current) => ({ ...current, buzzer_mirror: { ...current.buzzer_mirror, backend: backend as 'auto' | 'native' | 'external' | 'off', native_enabled: backend === 'off' ? false : current.buzzer_mirror.native_enabled } })) }} /></div>
+				{localIntegrations.buzzer_mirror.backend !== 'native' && localIntegrations.buzzer_mirror.backend !== 'off' && <TextField label={copy('Beep executable (optional)', 'فایل اجرایی بوق (اختیاری)')} dir="ltr" spellCheck={false} value={localIntegrations.buzzer_mirror.executable ?? ''} placeholder={copy('Blank uses beep from PATH', 'خالی: استفاده از beep در PATH')} onChange={(event) => { setIntegrationsNotice(''); setLocalIntegrations((current) => ({ ...current, buzzer_mirror: { ...current.buzzer_mirror, executable: event.currentTarget.value } })) }} />}
 			</>}
 			<div className="inline-actions"><Button icon={ShieldCheck} tone="primary" busy={integrationsBusy} disabled={!integrationsDirty} onClick={() => void persistLocalIntegrations()}>{copy('Save PC buzzer settings', 'ذخیرهٔ تنظیمات بیزر رایانه')}</Button></div>
 			{buzzerPathNotice && <p className="settings-action-feedback" role="status">{buzzerPathNotice}</p>}
@@ -1194,6 +1468,16 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
           <div className="setting-group"><label>{t('direction')}</label><Segmented value={appearance.direction} label={t('direction')} options={[{ value: 'auto', label: t('auto') }, { value: 'ltr', label: t('leftToRight') }, { value: 'rtl', label: t('rightToLeft') }]} onChange={(value) => updateAppearance('direction', value)} /></div>
           <Toggle checked={appearance.reduceMotion} onChange={(value) => updateAppearance('reduceMotion', value)} label={t('reduceMotion')} detail={appearance.reduceMotion ? copy('Nonessential motion is off.', 'حرکت‌های غیرضروری خاموش‌اند.') : copy('Smooth interface transitions are on.', 'گذارهای نرم رابط فعال‌اند.')} />
           <Toggle checked={appearance.compactNumbers} onChange={(value) => updateAppearance('compactNumbers', value)} label={t('compactNumbers')} detail={appearance.compactNumbers ? copy('Large values use compact notation.', 'مقادیر بزرگ به‌صورت فشرده نمایش داده می‌شوند.') : copy('Large values use full notation.', 'مقادیر بزرگ به‌صورت کامل نمایش داده می‌شوند.')} />
+          <Toggle
+            checked={navigationSync}
+            onChange={onNavigationSync}
+            label={copy('Sync this tab with other instances', 'همگام‌سازی این زبانه با نمونه‌های دیگر')}
+            detail={navigationSyncStatus.state === 'pending'
+              ? <span role="status">{copy('Synchronizing…', 'در حال همگام‌سازی…')}</span>
+              : navigationSyncStatus.state === 'error'
+                ? <span role="alert">{navigationSyncStatus.detail}</span>
+                : undefined}
+          />
           <Toggle checked={!appearance.audioMuted} onChange={(value) => updateAppearance('audioMuted', !value)} label={<span className="setting-icon-label"><Volume2 size={16} />{copy('Interaction audio', 'صدای تعامل')}</span>} detail={appearance.audioMuted ? copy('Audio cues are off.', 'نشانه‌های صوتی خاموش‌اند.') : copy(`Audio cues are at ${Math.round(appearance.audioVolume * 100)}%.`, `بلندی نشانه‌های صوتی ${Math.round(appearance.audioVolume * 100)}٪ است.`)} />
           {!appearance.audioMuted && <RangeField label={copy('Cue volume', 'بلندی نشانه‌ها')} value={Math.round(appearance.audioVolume * 100)} min={0} max={100} unit="%" onChange={(value) => updateAppearance('audioVolume', value / 100)} />}
           {!appearance.audioMuted && <Button icon={Volume2} onClick={() => window.dispatchEvent(new Event('pccontroller:test-feedback'))}>{copy('Test notification', 'آزمایش اعلان')}</Button>}
@@ -1214,6 +1498,33 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
             action={<Button tone="primary" icon={ShieldCheck} disabled={!tokenDirty} onClick={() => { onToken(normalizedToken); setDraftToken(normalizedToken) }}>{t('apply')}</Button>}
           />
         </Card>}
+
+        {boardReady && available.settings && <Card icon={Lightbulb} iconTone="amber" title={copy('Enclosure illumination', 'روشنایی محفظه')} eyebrow={illuminationLive.available ? illuminationLive.at_target ? copy('Applied · at target', 'اعمال‌شده · در مقدار هدف') : copy('Transitioning to target', 'در حال گذار به مقدار هدف') : copy('Waiting for live PWM state', 'در انتظار وضعیت زندهٔ PWM')} className="settings-card settings-card--wide illumination-settings-card">
+		{!snapshot.have_settings ? <EmptyState
+			icon={Lightbulb}
+			title={copy('Reading illumination policy', 'در حال خواندن سیاست روشنایی')}
+			detail={copy('The controls appear only after the board returns authoritative EEPROM settings.', 'کنترل‌ها پس از دریافت تنظیمات معتبر EEPROM از برد نمایش داده می‌شوند.')}
+		/> : <>
+			<div className="illumination-state-grid" aria-label={copy('Live enclosure illumination state', 'وضعیت زندهٔ روشنایی محفظه')}>
+				<DataRow label={copy('Policy', 'سیاست')} value={[copy('Off', 'خاموش'), copy('Auto', 'خودکار'), copy('On', 'روشن')][illuminationLive.mode] ?? String(illuminationLive.mode)} />
+				<DataRow label={copy('Door input', 'ورودی درب')} value={illuminationLive.door_open ? copy('Open', 'باز') : copy('Closed', 'بسته')} tone={illuminationLive.door_open ? 'warn' : 'good'} />
+				<DataRow label={copy('Selected target', 'مقدار هدف انتخاب‌شده')} value={`${illuminationLive.target_brightness}/255 · ${illuminationLive.target_pwm}/4095`} mono />
+				<DataRow label={copy('Applied channel 11', 'مقدار اعمال‌شدهٔ کانال ۱۱')} value={illuminationLive.available ? `${illuminationLive.applied_brightness}/255 · ${illuminationLive.applied_pwm}/4095` : copy('Unavailable', 'در دسترس نیست')} tone={illuminationLive.available ? illuminationLive.at_target ? 'good' : 'warn' : undefined} mono />
+				<DataRow label={copy('EEPROM durability', 'ماندگاری EEPROM')} value={illuminationLive.persisted ? copy('Verified', 'تأییدشده') : copy('Not confirmed', 'تأییدنشده')} tone={illuminationLive.persisted ? 'good' : 'warn'} />
+			</div>
+			<div className="setting-group"><label>{copy('Operating mode', 'حالت عملکرد')}</label><Segmented value={illuminationMode} label={copy('Enclosure illumination mode', 'حالت روشنایی محفظه')} options={[
+				{ value: '0', label: copy('Off', 'خاموش') },
+				{ value: '1', label: copy('Auto · door', 'خودکار · درب') },
+				{ value: '2', label: copy('On', 'روشن') },
+			]} onChange={(value) => { setIlluminationNotice(''); setIlluminationMode(value) }} /></div>
+			<RangeField label={copy('Door-open / On brightness', 'روشنایی درب باز / حالت روشن')} value={illuminationOn} min={0} max={255} onChange={(value) => { setIlluminationNotice(''); setIlluminationOn(value) }} />
+			<RangeField label={copy('Door-closed / Off brightness', 'روشنایی درب بسته / حالت خاموش')} value={illuminationOff} min={0} max={255} onChange={(value) => { setIlluminationNotice(''); setIlluminationOff(value) }} />
+			<div className="illumination-settings-card__footer">
+				<p className={illuminationError ? 'settings-action-feedback text-bad' : 'settings-action-feedback'} role={illuminationError ? 'alert' : 'status'}>{illuminationNotice || copy('Only these three illumination fields change; every unrelated board setting is preserved.', 'فقط همین سه فیلد روشنایی تغییر می‌کنند و همهٔ تنظیمات نامرتبط برد حفظ می‌شوند.')}</p>
+				<Button tone="primary" icon={Lightbulb} busy={illuminationBusy} disabled={!available.pwm || !illuminationLive.available} onClick={() => void saveIllumination()}>{copy('Apply illumination', 'اعمال روشنایی')}</Button>
+			</div>
+		</>}
+		</Card>}
 
         {boardReady && available.settings && <Card icon={CircuitBoard} iconTone="amber" title={copy('Board EEPROM settings', 'تنظیمات EEPROM برد')} eyebrow={snapshot.have_settings ? copy('Live draft · explicit write', 'پیش‌نویس زنده · نوشتن صریح') : boardSettingsReadState === 'loading' ? copy('Reading board settings', 'در حال خواندن تنظیمات برد') : copy('Settings unavailable', 'تنظیمات در دسترس نیست')} className="settings-card">
           {!snapshot.have_settings ? <EmptyState
@@ -1251,7 +1562,7 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
           </>}
         </Card>}
 
-        {boardReady && <Card icon={Usb} iconTone="green" title={t('connection')} eyebrow={copy('Controller connected', 'کنترلر متصل است')} className="settings-card">
+        {boardReady && <Card icon={Usb} iconTone="green" title={t('connection')} eyebrow={copy('Controller board connected', 'برد کنترلر متصل است')} className="settings-card">
           <div className="data-list"><DataRow label={copy('State', 'وضعیت')} value={snapshot.connection_state} tone="good" /><DataRow label={copy('Port', 'درگاه')} value={snapshot.port.name || copy('automatic', 'خودکار')} mono /><DataRow label="VID:PID" value={`${snapshot.port.vid || '—'}:${snapshot.port.pid || '—'}`} mono /><DataRow label={copy('Serial', 'سریال')} value={snapshot.port.serial_number || '—'} mono /><DataRow label={copy('Baud', 'نرخ باد')} value="115200 8N1" mono /></div>
           {snapshot.port_process && <div className="data-list"><DataRow label={copy('Port process', 'پردازش درگاه')} value={snapshot.port_process.state} tone={snapshot.port_process.state === 'free' ? 'good' : snapshot.port_process.state === 'owned' ? 'warn' : undefined} /><DataRow label={copy('Owner', 'مالک')} value={snapshot.port_process.pid ? `${snapshot.port_process.name || 'unknown'} · PID ${snapshot.port_process.pid}` : (snapshot.port_process.error || '—')} mono />{snapshot.port_process.executable && <DataRow label={copy('Executable', 'فایل اجرا')} value={snapshot.port_process.executable} mono />}<DataRow label={copy('Takeover', 'واگذاری')} value={snapshot.port_process.takeover_ready ? copy('armed when free', 'با آزادشدن آماده') : copy('not armed', 'مسلح نیست')} /></div>}
           <div className="inline-actions"><Button icon={Unplug} onClick={() => void command('close')}>{copy('Pause controller', 'توقف کنترلر')}</Button>

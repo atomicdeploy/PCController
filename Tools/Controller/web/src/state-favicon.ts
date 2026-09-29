@@ -2,21 +2,21 @@ import type { Snapshot } from './types'
 
 export type ControllerFaviconState = 'connected' | 'connecting' | 'fault' | 'offline'
 
-type FaviconSnapshot = Pick<Snapshot, 'connected' | 'connection_state' | 'connection_reason' | 'have_status'> & {
+type FaviconSnapshot = Pick<Snapshot, 'connected' | 'connection_state' | 'connection_reason' | 'have_status' | 'hardware_problems'> & {
   status: Pick<Snapshot['status'], 'hot'>
 }
 
 const statePresentation: Record<ControllerFaviconState, { color: string; label: string; glyph: string }> = {
-  connected: { color: '#43a86f', label: 'Controller connected', glyph: '<path d="m46.5 50 3 3 6-7"/>' },
+  connected: { color: '#43a86f', label: 'Board connected', glyph: '<path d="m46.5 50 3 3 6-7"/>' },
   connecting: { color: '#d19345', label: 'Controller reconnecting', glyph: '<path d="M47 50h1m3 0h1m3 0h1"/>' },
   fault: { color: '#d96369', label: 'Controller alert', glyph: '<path d="M51.5 46v6m0 3v.2"/>' },
-  offline: { color: '#77717f', label: 'Controller offline', glyph: '<path d="M47 51h9"/>' },
+  offline: { color: '#77717f', label: 'Board offline', glyph: '<path d="M47 51h9"/>' },
 }
 
 export function controllerFaviconState(snapshot: FaviconSnapshot): ControllerFaviconState {
   const connectionState = snapshot.connection_state.trim().toLowerCase()
   const reason = (snapshot.connection_reason ?? '').trim().toLowerCase()
-  if ((snapshot.have_status && snapshot.status.hot) || /^(error|fault|failed|rejected)$/.test(connectionState) || /authentication|permission|protocol mismatch|unsupported firmware/.test(reason)) {
+  if ((snapshot.hardware_problems?.length ?? 0) > 0 || (snapshot.have_status && snapshot.status.hot) || /^(error|fault|failed|rejected)$/.test(connectionState) || /authentication|permission|protocol mismatch|unsupported firmware/.test(reason)) {
     return 'fault'
   }
   if (snapshot.connected) return 'connected'

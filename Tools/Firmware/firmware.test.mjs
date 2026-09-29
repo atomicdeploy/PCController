@@ -334,7 +334,6 @@ test('board FQBN matches the canonical toolchain policy', async () => {
 test('toolchain policy validation identifies a missing FQBN and its source', () => {
 	assert.throws(
 		() => parseToolchainPolicy(JSON.stringify({
-			format: 'pccontroller-toolchain-policy/v1',
 			fqbn: '   '
 		}), 'invalid-policy.json'),
 		error => /invalid-policy\.json/.test(error.message) &&
@@ -384,6 +383,92 @@ test('physical, injected, and RF key actions retain the immediate dispatch contr
 		radio,
 		/case RemoteActionKind::Key:[^]*?KeyEvent::Down[^]*?handleMenuAction\(remote\.actionValue, true\);/u
 	)
+})
+
+test('actuator-specific feedback is not preceded by the generic menu beep', async () => {
+	const frontPanel = await readFile(
+		new URL('../../Project/Runtime/FrontPanelRuntime.inc.h', import.meta.url),
+		'utf8'
+	)
+	assert.match(frontPanel, /void menuVisualFeedback\(bool fromRemote\)/u)
+	assert.match(frontPanel, /case MODE_USER_RELAYS:[^]*?menuVisualFeedback\(fromRemote\);/u)
+	assert.match(frontPanel, /case MODE_MOTION_CONTROL:[^]*?menuVisualFeedback\(fromRemote\);/u)
+	assert.match(
+		frontPanel,
+		/case MODE_RELAY:[^]*?if \(action == MENU_PREVIOUS \|\| action == MENU_NEXT\)[^]*?menuFeedback\(fromRemote\);[^]*?else[^]*?menuVisualFeedback\(fromRemote\);/u
+	)
+	assert.match(frontPanel, /LeafDecreaseAction::AllRelaysOff[^]*?menuVisualFeedback\(fromRemote\);/u)
+})
+
+test('production KEY dispatches first Down to motion and exits outside KEY', async () => {
+	const frontPanel = await readFile(
+		new URL('../../Project/Runtime/FrontPanelRuntime.inc.h', import.meta.url),
+		'utf8'
+	)
+	const model = await readFile(
+		new URL('../../Project/FrontPanelModel.h', import.meta.url),
+		'utf8'
+	)
+	const protocol = await readFile(
+		new URL('../../Project/Runtime/ProtocolRuntime.inc.h', import.meta.url),
+		'utf8'
+	)
+	assert.match(frontPanel, /const bool momentary = mode == MODE_KEYS \|\| mode == MODE_MOTION_CONTROL/u)
+	assert.match(frontPanel, /if \(modeManager\.current\(\) == MODE_KEYS\)[^]*?relays\.allOff\(actionNow\);[^]*?modeManager\.transitionTo\(MODE_MOTION_CONTROL\);/u)
+	assert.match(frontPanel, /mode == MODE_MOTION_CONTROL && event == KeyEvent::Down[^]*?shiftRegisters\.inputActive\(bit \^ 1U\)/u)
+	assert.match(
+		frontPanel,
+		/case MODE_MOTION_CONTROL:\s*if \(!relays\.motionAllowed\(\)\) \{\s*relays\.allOff\(at\);\s*modeManager\.transitionTo\(MODE_DOOR\);/u
+	)
+	assert.match(frontPanel, /!menuPageNavigable\(candidate\)/u)
+	assert.match(frontPanel, /menuPageNavigable\(page\)[^]*?menuCategory\(page\) == category/u)
+	assert.match(frontPanel, /menuPage == PAGE_RF \? PAGE_USER_RELAYS/u)
+	assert.match(
+		frontPanel,
+		/menuPage == PAGE_USER_RELAYS[^]*?\? static_cast<uint8_t>\(PAGE_RF\)/u
+	)
+	assert.match(model, /page < PAGE_COUNT && page != PAGE_MOTION/u)
+	assert.match(protocol, /\{1, PAGE_COUNT, 0xFF, 0\}/u)
+	assert.match(protocol, /pageToMode\(cursor\)/u)
+	assert.doesNotMatch(frontPanel, /case MODE_MOTION_CONTROL:\s*relays\.allOff\(at\);/u)
+})
+
+test('retired MOVE remains a direct KEY alias, never a persisted second page', async () => {
+	const [model, settings, frontPanel, protocol, defaults] = await Promise.all([
+		readFile(new URL('../../Project/FrontPanelModel.h', import.meta.url), 'utf8'),
+		readFile(new URL('../../Project/SettingsStore.h', import.meta.url), 'utf8'),
+		readFile(new URL('../../Project/Runtime/FrontPanelRuntime.inc.h', import.meta.url), 'utf8'),
+		readFile(new URL('../../Project/Runtime/ProtocolRuntime.inc.h', import.meta.url), 'utf8'),
+		readFile(new URL('../Controller/internal/programmer/default_eeprom.go', import.meta.url), 'utf8')
+	])
+	assert.match(model, /canonicalMenuPage\(uint8_t page\)[^]*?PAGE_MOTION[^]*?PAGE_KEYS/u)
+	assert.match(settings, /!retiredMenuPageAlias\(page\)/u)
+	assert.match(settings, /normalizeMenuLayout\(\)/u)
+	assert.match(frontPanel, /pageToMode\(uint8_t page\)[^]*?canonicalMenuPage\(page\)/u)
+	assert.match(frontPanel, /menuPage == PAGE_RF \? PAGE_USER_RELAYS/u)
+	assert.match(
+		frontPanel,
+		/menuPage == PAGE_USER_RELAYS[^]*?\? static_cast<uint8_t>\(PAGE_RF\)/u
+	)
+	assert.match(
+		frontPanel,
+		/case MODE_MOTION_CONTROL:\s*if \(!relays\.motionAllowed\(\)\) \{\s*relays\.allOff\(at\);\s*modeManager\.transitionTo\(MODE_DOOR\);/u
+	)
+	assert.match(protocol, /settingsStore\.normalizeMenuLayout\(\);/u)
+	assert.match(protocol, /const uint8_t defaultMenuPage = canonicalMenuPage\(payload\[10\]\);/u)
+	assert.match(defaults, /DefaultMenuPageMotionAlias\s*=\s*12/u)
+})
+
+test('unused cooperative task engine remains an explicit larger-MCU gate', async () => {
+	const config = await readFile(
+		new URL('../../ProjectConfig.h', import.meta.url), 'utf8'
+	)
+	const lifecycle = await readFile(
+		new URL('../../Project/Runtime/LifecycleRuntime.inc.h', import.meta.url),
+		'utf8'
+	)
+	assert.match(config, /#define PCCONTROLLER_ENABLE_TASK_SCHEDULER 0/u)
+	assert.match(lifecycle, /#if PCCONTROLLER_ENABLE_TASK_SCHEDULER\s+taskManager\.update\(loopNow\);/u)
 })
 
 test('firmware runtime owns one shared ordinary-service clock snapshot', async () => {
@@ -445,7 +530,6 @@ test('studio validation preserves matching Controller compile identity', async (
 	await main(['manifest', '--quiet', '--no-color'], {}, root)
 	const manifestPath = join(output, 'firmware-manifest.json')
 	const controllerManifest = JSON.parse(await readFile(manifestPath, 'utf8'))
-	controllerManifest.format = 'pccontroller-avr-firmware-manifest/v2'
 	controllerManifest.generatedUtc = '2026-08-01T16:12:58Z'
 	controllerManifest.source.compileFeatures = ['eeprom-menu-labels']
 	controllerManifest.source.buildHash = '1234ABCD'
@@ -454,12 +538,11 @@ test('studio validation preserves matching Controller compile identity', async (
 	controllerManifest.stackBudget = { estimatedFreeSRAMBytes: 287 }
 	controllerManifest.patchRegions = [{
 		name: 'firmware-identity', start: 0x7E74, length: 12,
-		schema: 1, magic: 'PCI1'
+		magic: 'PCID'
 	}]
 	await writeFile(manifestPath, `${JSON.stringify(controllerManifest, null, 2)}\n`)
 	await main(['manifest', '--quiet', '--no-color'], {}, root)
 	const validated = JSON.parse(await readFile(manifestPath, 'utf8'))
-	assert.equal(validated.format, 'pccontroller-avr-firmware-manifest/v2')
 	assert.equal(validated.generatedUtc, '2026-08-01T16:12:58Z')
 	assert.deepEqual(validated.source.compileFeatures, ['eeprom-menu-labels'])
 	assert.equal(validated.source.buildHash, '1234ABCD')
@@ -472,7 +555,6 @@ test('studio validation preserves matching Controller compile identity', async (
 		'manifest', '--manifest', customManifestPath, '--quiet', '--no-color'
 	], {}, root)
 	const custom = JSON.parse(await readFile(customManifestPath, 'utf8'))
-	assert.equal(custom.format, 'pccontroller-avr-firmware-manifest/v2')
 	assert.equal(custom.generatedUtc, '2026-08-01T16:12:58Z')
 	assert.deepEqual(custom.source.compileFeatures, ['eeprom-menu-labels'])
 	assert.equal(custom.source.buildHash, '1234ABCD')

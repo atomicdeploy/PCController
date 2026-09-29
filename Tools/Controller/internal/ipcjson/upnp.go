@@ -179,7 +179,7 @@ func publicInfo(service *Service, request *http.Request) discovery.PublicInfo {
 		identity = discovery.PublicIdentity{Name: snapshot.Hello.Name, Kind: snapshot.Hello.BoardKind, Capabilities: snapshot.Hello.Capabilities, BuildHash: fmt.Sprintf("%08X", snapshot.Hello.BuildHash), BuildTimestamp: snapshot.Hello.BuildStamp}
 	}
 	info := discovery.PublicInfo{
-		Schema: discovery.PublicInfoSchema, Product: "PCController", Protocol: "pccontroller",
+		Product: "PCController", Protocol: "pccontroller",
 		InstanceID: strings.TrimSpace(service.HostInstanceID), InstanceName: name, Hostname: hostname,
 		Health: discovery.PublicHealth{OK: true, Service: productidentity.ServiceName(config.UI.AppTitle, "IPC"), Connectable: config.IPC.RemoteConnectable(), Auth: "disabled-alpha"},
 		Host:   discovery.PublicHost{Version: strings.TrimSpace(service.HostVersion), SourceHash: strings.TrimSpace(service.HostSourceHash), BuildTime: strings.TrimSpace(service.HostBuildTime)},
@@ -189,7 +189,7 @@ func publicInfo(service *Service, request *http.Request) discovery.PublicInfo {
 			Port:     discovery.PublicPort{Name: snapshot.Port.Name, VID: snapshot.Port.VID, PID: snapshot.Port.PID, Product: snapshot.Port.Product, Manufacturer: snapshot.Port.Manufacturer, SerialNumber: snapshot.Port.SerialNumber, FriendlyName: snapshot.Port.FriendlyName, InstanceID: snapshot.Port.InstanceID},
 		},
 		Endpoints: discovery.PublicEndpoints{
-			Web: httpBase + "/", API: httpBase + "/api/snapshot", ServerProof: httpBase + ServerProofPath, Operations: httpBase + "/api/rpc", Commands: httpBase + "/api/commands", Events: wsBase + config.IPC.WebSocketPath, Opcodes: httpBase + "/api/opcode", WebSocket: wsBase + config.IPC.WebSocketPath, SocketIO: wsBase + config.IPC.SocketIOPath, PublicInfo: httpBase + discovery.PublicInfoPath,
+			Web: httpBase + "/", API: httpBase + "/api/snapshot", Operations: httpBase + "/api/rpc", Commands: httpBase + "/api/commands", Events: wsBase + config.IPC.WebSocketPath, Opcodes: httpBase + "/api/opcode", WebSocket: wsBase + config.IPC.WebSocketPath, SocketIO: wsBase + config.IPC.SocketIOPath, PublicInfo: httpBase + discovery.PublicInfoPath,
 		},
 		Discovery: discovery.PublicDiscovery{Enabled: len(protocols) != 0, Protocols: protocols, BroadcastPort: broadcastPort},
 		UpdatedAt: time.Now().UTC(),

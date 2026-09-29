@@ -257,6 +257,22 @@ func (model Model) commitBoardSettingEditor() (Model, tea.Cmd, bool) {
 
 func (model Model) commitAppSettingEditor() (Model, tea.Cmd, bool) {
 	editor := model.settingEditor
+	if editor.Key == "instance.navigation" {
+		enabled := editorField(editor, "enabled") != 0
+		model.navigationSync = enabled
+		model.navigationCursor.Reset()
+		if model.setNavigationSync != nil {
+			model.setNavigationSync(enabled)
+		}
+		model.settingEditor = nil
+		model.reportInstance()
+		if enabled {
+			model.setNotice("Navigation synchronization enabled for this TUI")
+		} else {
+			model.setNotice("This TUI now navigates independently")
+		}
+		return model, nil, true
+	}
 	if descriptor, ok := peripheralDescriptorForSettingKey(editor.Key); ok {
 		if model.remote != nil && model.remote.SaveHostUI == nil {
 			model.setNotice("Remote peripheral naming is unavailable from this host")
@@ -302,18 +318,24 @@ func (model Model) commitAppSettingEditor() (Model, tea.Cmd, bool) {
 		case "buzzer.renderers":
 			value.BuzzerMirror.NativeEnabled = editorField(editor, "native") != 0
 			value.BuzzerMirror.WebAudioEnabled = editorField(editor, "web") != 0
+			if value.BuzzerMirror.NativeEnabled && strings.EqualFold(value.BuzzerMirror.Backend, "off") {
+				value.BuzzerMirror.Backend = "auto"
+			}
 			if value.BuzzerMirror.Enabled && !value.BuzzerMirror.NativeEnabled && !value.BuzzerMirror.WebAudioEnabled {
 				model.setNotice("Select at least one host buzzer renderer")
 				return model, nil, true
 			}
 		case "buzzer.backend":
-			backends := []string{"auto", "native", "external"}
+			backends := []string{"auto", "native", "external", "off"}
 			selected := editorField(editor, "backend")
 			if selected < 0 || selected >= len(backends) {
 				model.setNotice("Unknown PC speaker backend")
 				return model, nil, true
 			}
 			value.BuzzerMirror.Backend = backends[selected]
+			if value.BuzzerMirror.Backend == "off" {
+				value.BuzzerMirror.NativeEnabled = false
+			}
 		case "buzzer.executable":
 			executable := strings.TrimSpace(editor.Text)
 			if len(executable) > 1024 || strings.ContainsAny(executable, "\r\n\x00") {
@@ -398,6 +420,11 @@ func (model Model) commitAppSettingEditor() (Model, tea.Cmd, bool) {
 		ui.TUIConsole.FontSize = editorField(editor, "pixels")
 	case "poll.active":
 		ui.StatusIntervalMS = editorField(editor, "interval")
+		if ui.MeasurementFreshnessMS < ui.StatusIntervalMS+appconfig.MeasurementFreshnessHeadroomMS {
+			ui.MeasurementFreshnessMS = ui.StatusIntervalMS + appconfig.MeasurementFreshnessHeadroomMS
+		}
+	case "measurement.freshness":
+		ui.MeasurementFreshnessMS = editorField(editor, "window")
 	case "history.retention":
 		ui.HistoryHours = editorField(editor, "hours")
 	case "display.decimals":
@@ -427,7 +454,8 @@ func (model Model) commitAppSettingEditor() (Model, tea.Cmd, bool) {
 	}
 	ui.Appearance = appconfig.NormalizeAppearance(ui.Appearance)
 	ui.SetupComplete = true
-	if model.remote != nil && (editor.Key == "app.title" || editor.Key == "app.tagline") {
+	if model.remote != nil && (editor.Key == "app.title" || editor.Key == "app.tagline" ||
+		editor.Key == "poll.active" || editor.Key == "measurement.freshness") {
 		if model.remote.SaveHostUI == nil {
 			model.setNotice("Remote host configuration is unavailable; no local setting was changed")
 			return model, nil, true

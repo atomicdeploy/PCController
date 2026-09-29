@@ -15,13 +15,23 @@ type recordedOutputCommand struct {
 	at      time.Time
 	opcode  byte
 	payload []byte
+	source  CommandSource
 }
 
 type recordingOutputTarget struct {
-	mu       sync.Mutex
-	commands []recordedOutputCommand
-	events   []string
-	failAt   int
+	mu              sync.Mutex
+	commands        []recordedOutputCommand
+	events          []string
+	failAt          int
+	ackDelay        time.Duration
+	noStatusEffects bool
+}
+
+func (target *recordingOutputTarget) Snapshot() Snapshot {
+	if target.noStatusEffects {
+		return Snapshot{}
+	}
+	return Snapshot{Hello: native.Hello{Capabilities: native.CapabilityStatusEffects}}
 }
 
 func (target *recordingOutputTarget) Command(
@@ -33,12 +43,24 @@ func (target *recordingOutputTarget) Command(
 		return err
 	}
 	target.mu.Lock()
-	defer target.mu.Unlock()
 	target.commands = append(target.commands, recordedOutputCommand{
 		at: time.Now(), opcode: opcode,
 		payload: append([]byte(nil), payload...),
+		source:  CommandSourceFromContext(ctx),
 	})
-	if target.failAt != 0 && len(target.commands) >= target.failAt {
+	commandCount := len(target.commands)
+	delay := target.ackDelay
+	target.mu.Unlock()
+	if delay > 0 {
+		timer := time.NewTimer(delay)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	if target.failAt != 0 && commandCount >= target.failAt {
 		return errors.New("USB disconnected")
 	}
 	return nil
@@ -92,6 +114,42 @@ func TestMelodyStreamingWaitsBetweenAcknowledgedNotes(t *testing.T) {
 	}
 	if spacing := commands[1].at.Sub(commands[0].at); spacing < 20*time.Millisecond {
 		t.Fatalf("notes streamed too quickly: %v", spacing)
+	}
+}
+
+func TestMelodyStreamingDoesNotAddAcknowledgementLatencyToEveryNote(t *testing.T) {
+	target := &recordingOutputTarget{ackDelay: 40 * time.Millisecond}
+	scheduler := NewOutputScheduler(target)
+	defer scheduler.Close()
+	operation, err := scheduler.StartMelody(
+		context.Background(),
+		appconfig.Melody{
+			Name: "paced",
+			Notes: []appconfig.MelodyNote{
+				{FrequencyHz: 440, DurationMS: 60, GapMS: 10},
+				{FrequencyHz: 660, DurationMS: 10},
+			},
+		},
+		1,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-operation.Done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("melody did not complete")
+	}
+	commands := target.snapshot()
+	if len(commands) != 2 {
+		t.Fatalf("commands=%d, want 2", len(commands))
+	}
+	spacing := commands[1].at.Sub(commands[0].at)
+	if spacing < 60*time.Millisecond || spacing > 90*time.Millisecond {
+		t.Fatalf("ACK latency changed the 70ms source cadence: %v", spacing)
 	}
 }
 
@@ -176,7 +234,7 @@ func TestMelodyZeroRepeatsUntilExplicitStop(t *testing.T) {
 	}
 }
 
-func TestBreatheEffectIsRateLimitedAndRestoresSteadyBase(t *testing.T) {
+func TestBreatheEffectUsesOneDescriptorAndRestoresSteadyBase(t *testing.T) {
 	target := &recordingOutputTarget{}
 	scheduler := NewOutputScheduler(target)
 	defer scheduler.Close()
@@ -186,7 +244,7 @@ func TestBreatheEffectIsRateLimitedAndRestoresSteadyBase(t *testing.T) {
 			Name: "test", Kind: "breathe",
 			Red: 10, Green: 20, Blue: 30,
 			Brightness: 100, MinBrightness: 10,
-			PeriodMS: 640, DurationMS: 220,
+			PeriodMS: 640, Repeats: 1,
 		},
 	)
 	if err != nil {
@@ -201,8 +259,8 @@ func TestBreatheEffectIsRateLimitedAndRestoresSteadyBase(t *testing.T) {
 		t.Fatal("effect did not complete")
 	}
 	commands := target.snapshot()
-	if len(commands) < 4 || len(commands) > 7 {
-		t.Fatalf("rate-limited effect emitted %d commands", len(commands))
+	if len(commands) != 2 || commands[0].opcode != native.OpStatusEffect {
+		t.Fatalf("effect did not use one native descriptor and restore: %#v", commands)
 	}
 	last := commands[len(commands)-1]
 	if last.opcode != native.OpStatusRGB ||
@@ -210,10 +268,20 @@ func TestBreatheEffectIsRateLimitedAndRestoresSteadyBase(t *testing.T) {
 		last.payload[3] != 100 {
 		t.Fatalf("final steady frame=% X", last.payload)
 	}
-	for index := 1; index < len(commands)-1; index++ {
-		if spacing := commands[index].at.Sub(commands[index-1].at); spacing < 45*time.Millisecond {
-			t.Fatalf("frames %d/%d are too close: %v", index-1, index, spacing)
-		}
+}
+
+func TestStatusEffectRequiresAdvertisedFirmwareCapability(t *testing.T) {
+	target := &recordingOutputTarget{noStatusEffects: true}
+	scheduler := NewOutputScheduler(target)
+	defer scheduler.Close()
+	_, err := scheduler.StartStatusEffect(context.Background(), appconfig.StatusLEDEffect{
+		Name: "pulse", Kind: "flash", Brightness: 100, PeriodMS: 640, Repeats: 1,
+	})
+	if err == nil || err.Error() != "connected firmware does not advertise status effects" {
+		t.Fatalf("missing capability error=%v", err)
+	}
+	if commands := target.snapshot(); len(commands) != 0 {
+		t.Fatalf("unsupported effect sent commands: %#v", commands)
 	}
 }
 
@@ -230,7 +298,7 @@ func TestStatusEffectRestoresNewestPolicyBase(t *testing.T) {
 			Name: "overlay", Kind: "breathe",
 			Red: 90, Green: 20, Blue: 200,
 			Brightness: 180, MinBrightness: 10,
-			PeriodMS: 640, DurationMS: 220,
+			PeriodMS: 640, Repeats: 1,
 		},
 	)
 	if err != nil {
@@ -258,6 +326,12 @@ func TestStatusEffectRestoresNewestPolicyBase(t *testing.T) {
 	want := native.StatusRGBPayload(7, 8, 9, 100)
 	if string(last.payload) != string(want) {
 		t.Fatalf("latest policy base was not restored: got=% X want=% X", last.payload, want)
+	}
+	if last.source != CommandSourceBackground {
+		t.Fatalf("automatic policy restore lacks capture provenance: %#v", last)
+	}
+	if commands[0].source != "" {
+		t.Fatal("explicit base write was incorrectly classified as background")
 	}
 }
 

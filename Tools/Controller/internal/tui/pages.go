@@ -52,7 +52,6 @@ func (model Model) pageView(snapshot control.Snapshot) string {
 func (model Model) portPickerPage(snapshot control.Snapshot) string {
 	lines := []string{
 		sectionHeader(model.width, "SELECT SERIAL DEVICE", "↑/↓ select · Enter open · Esc cancel"),
-		labelStyle.Render("Friendly name, COM ID, VID/PID and serial identity are shown; authentication still verifies HELLO before use."),
 	}
 	if model.portLoading {
 		lines = append(lines, warnStyle.Render(model.spinnerView()+" querying Windows serial devices…"))
@@ -99,6 +98,14 @@ func (model Model) dashboardPage(snapshot control.Snapshot) string {
 	measurementLines := []string{
 		sectionHeader(sectionWidth, "LIVE MEASUREMENTS", model.statusFreshnessLabel(snapshot, time.Now())),
 	}
+	if len(snapshot.HardwareProblems) != 0 {
+		measurementLines = append(
+			measurementLines,
+			errorStyle.Copy().Bold(true).Render(
+				truncateDisplayText("⚠ "+hardwareProblemMessage(snapshot.HardwareProblems[0]), sectionWidth),
+			),
+		)
+	}
 	if warning := model.remoteClockWarning(); warning != "" {
 		measurementLines = append(measurementLines, warnStyle.Render(truncateDisplayText(warning, sectionWidth)))
 	}
@@ -129,7 +136,7 @@ func (model Model) dashboardPage(snapshot control.Snapshot) string {
 	if haveStatus && capabilities&native.CapabilityTemperatures != 0 &&
 		capabilities&native.CapabilityBluetoothAudio != 0 && status.TBTAvailable &&
 		validTemperatureReading(status.TBTCenti) && model.prefs.Visible["temperature_bt"] {
-		measurementLines = append(measurementLines, kvCard(sectionWidth, 33, model.peripheralName("sensor.temperature-audio", "Temperature · BT Audio"), formatTemperature(status.TBTCenti, model.prefs.TemperatureDecimals)))
+		measurementLines = append(measurementLines, kvCard(sectionWidth, 33, model.peripheralName("sensor.temperature-audio", "BT Amplifier temperature"), formatTemperature(status.TBTCenti, model.prefs.TemperatureDecimals)))
 	}
 
 	stateTitle := ""
@@ -595,17 +602,13 @@ func (model Model) programmingPage(snapshot control.Snapshot) string {
 	secondButtons := lipgloss.JoinHorizontal(lipgloss.Top, buttonStyle.Render("R Reboot"), " ", buttonStyle.Render("D DTR/RTS reset"), " ", buttonGoodStyle.Render("U Flash"))
 	thirdButtons := lipgloss.JoinHorizontal(lipgloss.Top, buttonStyle.Render("Z USBasp driver"), " ", buttonStyle.Render("X Blank…"))
 	lines := []string{
-		sectionHeader(model.width, "PROGRAMMING", "application opcodes and bootloader operations are mutually exclusive"),
+		sectionHeader(model.width, "PROGRAMMING", boolWord(snapshot.Connected, "application protocol connected", "application protocol disconnected")),
 		firstButtons,
 		secondButtons,
 		thirdButtons,
 		"",
 		kv("Application protocol", boolWord(snapshot.Connected, "authenticated and available", "not connected")),
-		kv("Boot protocol", "Urboot/Urclock via the installed MiniCore AVRDUDE backend"),
 		kv("Current firmware", firmwareIdentity(snapshot)),
-		kv("Normal flash gate", "inspect HEX → backup flash + EEPROM + metadata → verify manifest → flash → HELLO"),
-		kv("Backup storage", "content-addressed SHA-256 blobs; identical firmware is never duplicated"),
-		kv("Blank-board flow", "toolchain → ISP signature/backup → core bootloader/fuses → optional UART flash/health"),
 		"",
 	}
 	lines = append(lines, model.updateProgressLines()...)

@@ -16,6 +16,7 @@ import (
 
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/artifacts"
+	"pccontroller.local/controller/internal/consolewindow"
 	"pccontroller.local/controller/internal/hostmenu"
 	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/productidentity"
@@ -462,6 +463,72 @@ func TestHelpAndVersion(t *testing.T) {
 	}
 }
 
+func TestInitialWebConnectionCannotBlockHostStartup(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	started := make(chan struct{})
+	done := startInitialWebConnection(ctx, func(connectContext context.Context, reason string) error {
+		if reason != "web host initial automatic connection" {
+			t.Errorf("reason=%q", reason)
+		}
+		close(started)
+		<-connectContext.Done()
+		return connectContext.Err()
+	}, func(error) {})
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("background connection did not start")
+	}
+	select {
+	case <-done:
+		t.Fatal("blocked connection unexpectedly completed")
+	default:
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("background connection did not honor cancellation")
+	}
+}
+
+func TestConfiguredConsoleTitleAndWebAnnouncementUseProductName(t *testing.T) {
+	original := setProcessConsoleTitle
+	t.Cleanup(func() { setProcessConsoleTitle = original })
+	var title string
+	setProcessConsoleTitle = func(value string) (consolewindow.Result, error) {
+		title = value
+		return consolewindow.Result{Applied: true}, nil
+	}
+	applyConfiguredConsoleTitle("Workshop Controller")
+	if title != "Workshop Controller" {
+		t.Fatalf("console title=%q", title)
+	}
+	var output bytes.Buffer
+	announceWebStartup(&output, "Workshop Controller", "http://127.0.0.1:8787/")
+	if got := output.String(); !strings.Contains(got, "Workshop Controller web app: http://127.0.0.1:8787/") {
+		t.Fatalf("startup output=%q", got)
+	}
+}
+
+func TestInitialWebConnectionReportsFailure(t *testing.T) {
+	want := errors.New("serial unavailable")
+	reported := make(chan error, 1)
+	done := startInitialWebConnection(context.Background(), func(context.Context, string) error {
+		return want
+	}, func(err error) { reported <- err })
+	<-done
+	select {
+	case got := <-reported:
+		if !errors.Is(got, want) {
+			t.Fatalf("reported error=%v", got)
+		}
+	default:
+		t.Fatal("connection failure was not reported")
+	}
+}
+
 func TestPersistedProductTitleAppearsInHelpAndVersion(t *testing.T) {
 	t.Setenv("APP_NAME", "")
 	path := filepath.Join(t.TempDir(), "config.json")
@@ -772,7 +839,7 @@ func TestBootAndToolchainCLIArguments(t *testing.T) {
 
 func TestNormalizeGuardedFlashCLIArguments(t *testing.T) {
 	got, err := normalizeProgramCLIArgs([]string{
-		"flash", "firmware image.hex", "COM18", "--allow-incomplete-backup",
+		"flash", "firmware image.hex", "COM18", "--deployment", "development",
 		"--reinitialize-eeprom",
 	})
 	if err != nil {
@@ -780,7 +847,7 @@ func TestNormalizeGuardedFlashCLIArguments(t *testing.T) {
 	}
 	want := []string{
 		"--operation", "write-flash", "--method", "urclock",
-		"--hex", "firmware image.hex", "--allow-incomplete-backup",
+		"--hex", "firmware image.hex", "--deployment", "development",
 		"--reinitialize-eeprom", "--port", "COM18",
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -800,7 +867,7 @@ func TestNormalizeGuardedFlashCLIArguments(t *testing.T) {
 		t.Fatalf("prefixed USBasp normalized=%#v want=%#v err=%v", prefixedUSBasp, usb, err)
 	}
 	before, err := normalizeProgramCLIArgs([]string{
-		"--allow-incomplete-backup", "--app-reconnect=false", "flash",
+		"--deployment=development", "--app-reconnect=false", "flash",
 		"firmware.hex", "--dry-run", "COM18",
 	})
 	if err != nil {
@@ -808,7 +875,7 @@ func TestNormalizeGuardedFlashCLIArguments(t *testing.T) {
 	}
 	wantBefore := []string{
 		"--operation", "write-flash", "--method", "urclock", "--hex", "firmware.hex",
-		"--allow-incomplete-backup", "--app-reconnect=false", "--dry-run", "--port", "COM18",
+		"--deployment=development", "--app-reconnect=false", "--dry-run", "--port", "COM18",
 	}
 	if !reflect.DeepEqual(before, wantBefore) {
 		t.Fatalf("flags-before normalized=%#v want=%#v", before, wantBefore)
@@ -820,13 +887,13 @@ func TestNormalizeGuardedFlashCLIArguments(t *testing.T) {
 	}
 }
 
-func TestProgramCLIRejectsEEPROMReinitializationWithoutCompleteBackup(t *testing.T) {
+func TestProgramCLIRemovesIncompleteBackupEscapeHatch(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	err := runProgramWithConfig([]string{
 		"flash", "candidate.hex", "COM18",
 		"--reinitialize-eeprom", "--allow-incomplete-backup",
 	}, &stdout, &stderr, appconfig.Defaults())
-	if err == nil || !strings.Contains(err.Error(), "requires a complete verified raw flash") {
+	if err == nil || !strings.Contains(err.Error(), "unknown guarded flash flag") {
 		t.Fatalf("unsafe development EEPROM reinitialization was accepted: %v", err)
 	}
 }
@@ -878,21 +945,21 @@ func TestStandaloneUSBaspRequiresSeparateApplicationLifecycleSelector(t *testing
 
 	stdout.Reset()
 	stderr.Reset()
-	withOverride := append(append([]string(nil), base...), "--allow-incomplete-backup")
-	if err := runProgram(withOverride, &stdout, &stderr, store); err != nil {
-		t.Fatalf("explicit recovery override rejected: %v", err)
-	}
-	if !strings.Contains(stderr.String(), "application lifecycle skipped") {
-		t.Fatalf("override warning missing: stdout=%s stderr=%s", stdout.String(), stderr.String())
+	withDevelopment := append(append([]string(nil), base...), "--deployment", "development")
+	if err := runProgram(withDevelopment, &stdout, &stderr, store); err == nil || !strings.Contains(err.Error(), "--app-device") {
+		t.Fatalf("development classification bypassed application lifecycle: %v", err)
 	}
 }
 
 func TestProgramShellWordsPreserveBackupAndEEPROMIntent(t *testing.T) {
 	backup := programShellWords(programmer.Options{
 		Method: programmer.MethodUrclock, Operation: programmer.OperationBackup,
-		OutputPath: `C:\safe backups`,
+		OutputPath: `C:\safe backups`, ProgrammerTimeout: 45 * time.Second,
 	})
-	wantBackup := []string{"program", "backup", "urclock", `C:\safe backups`}
+	wantBackup := []string{
+		"program", "backup", "urclock", `C:\safe backups`,
+		"--programmer-timeout", "45s",
+	}
 	if !reflect.DeepEqual(backup, wantBackup) {
 		t.Fatalf("backup words = %#v, want %#v", backup, wantBackup)
 	}
@@ -975,7 +1042,7 @@ func TestSecondaryFirmwareDelegatesToPrimaryOperationAndFollowsProgress(t *testi
 		case "controller.update.firmware":
 			request := params.(artifacts.UpdateRequest)
 			if !request.Authorized || request.Method != "urclock" ||
-				!request.AllowIncompleteBackup || !request.ReinitializeEEPROM ||
+				request.Deployment != "development" || !request.ReinitializeEEPROM ||
 				request.IdempotencyKey == "" ||
 				request.ArtifactSHA256 != document.SourceSHA256 {
 				t.Fatalf("update request=%+v", request)
@@ -1003,7 +1070,7 @@ func TestSecondaryFirmwareDelegatesToPrimaryOperationAndFollowsProgress(t *testi
 	}
 	var output bytes.Buffer
 	if err := delegatePrimaryFirmwareUpdate(
-		context.Background(), firmware, "urclock", "", true, true, &output, call,
+		context.Background(), firmware, "urclock", "", "development", true, &output, call,
 	); err != nil {
 		t.Fatal(err)
 	}

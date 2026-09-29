@@ -22,7 +22,7 @@ window.addEventListener('pagehide', removeImmediateTouchActivation, { once: true
 // accessible application surface; it covers the network/module-start interval.
 window.requestAnimationFrame(() => document.getElementById('startup-preloader')?.remove())
 
-// The worker caches only the versioned UI shell. Live controller/API traffic
+// The worker caches only the installable UI shell. Live controller/API traffic
 // remains network-only so a PWA never pretends an offline board is connected.
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {

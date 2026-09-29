@@ -86,6 +86,7 @@ type primaryIPC struct {
 	integrations          atomic.Pointer[hostbridge.Manager]
 	localDevice           *localDeviceHost
 	actions               *hostui.ActionBroker
+	actionCoordinator     *hostui.ActionCoordinator
 	instances             *hostui.InstanceRegistry
 	artifacts             *artifacts.Service
 	ipc                   *ipcjson.Service
@@ -93,6 +94,7 @@ type primaryIPC struct {
 	instanceClaim         *hostInstanceClaim
 	hostInstanceID        string
 	coordinatorInstanceID string
+	navigationCommand     func(hostui.NavigationCommand) (hostui.NavigationOutcome, error)
 }
 
 type primaryExecutor struct{}
@@ -192,20 +194,31 @@ func startPrimaryIPCClaimed(
 		return nil, fmt.Errorf("register bridge command: %w", err)
 	}
 	if err := engine.Register(shell.Command{
-		Name: "peer-update", Usage: "peer-update host PEER ARTIFACT_SHA256",
+		Name: "peer-update", Usage: "peer-update host PEER ARTIFACT_SHA256 [IDEMPOTENCY_KEY]",
 		Summary: "transfer a verified host artifact and ask the peer coordinator to upgrade",
 		Run: func(ctx context.Context, args []string) (string, error) {
-			if len(args) != 3 || !strings.EqualFold(args[0], "host") {
-				return "", errors.New("usage: peer-update host PEER ARTIFACT_SHA256")
+			if (len(args) != 3 && len(args) != 4) || !strings.EqualFold(args[0], "host") {
+				return "", errors.New("usage: peer-update host PEER ARTIFACT_SHA256 [IDEMPOTENCY_KEY]")
+			}
+			idempotencyKey := ""
+			if len(args) == 4 {
+				idempotencyKey = args[3]
+			} else {
+				intentID, err := newHostInstanceID()
+				if err != nil {
+					return "", fmt.Errorf("generate peer-update intent: %w", err)
+				}
+				idempotencyKey = "peer-host-" + intentID
 			}
 			params, _ := json.Marshal(map[string]any{
 				"peer": args[1], "artifact_sha256": args[2], "authorized": true,
+				"idempotency_key": idempotencyKey,
 			})
 			response := server.ipc.Dispatch(ctx, ipcjson.Request{
 				JSONRPC: ipcjson.Version, Method: "controller.peer.update.host", Params: params,
 			})
 			if response.Error != nil {
-				return "", response.Error
+				return "", fmt.Errorf("%w; retry identity: %s (peer-update host %s %s %s)", response.Error, idempotencyKey, args[1], args[2], idempotencyKey)
 			}
 			encoded, err := json.MarshalIndent(response.Result, "", "  ")
 			return string(encoded), err
@@ -305,6 +318,10 @@ func startPrimaryIPCAtWithIdentity(
 	}
 	server.actions = hostui.NewActionBroker()
 	server.instances = hostui.NewInstanceRegistry()
+	server.actionCoordinator = hostui.NewActionCoordinator(server.instances, server.actions.PublishTracked)
+	server.actionCoordinator.SetObserver(func(change hostui.ActionOutcomeChange) {
+		runtime.PublishStructuredEvent(appActionOutcomeEvent(change))
+	})
 	navigation := hostui.NewNavigationCoordinator()
 	server.instances.SetObserver(func(change hostui.InstanceChange) {
 		runtime.PublishStructuredEvent(control.Event{
@@ -326,10 +343,23 @@ func startPrimaryIPCAtWithIdentity(
 		}
 	})
 	server.actions.SetObserver(func(action hostui.AppAction) {
-		if event, ok := browserAppActionEvent(action); ok {
+		if event, ok := ipcjson.AppActionDeliveryEvent(action); ok {
 			runtime.PublishStructuredEvent(event)
 		}
 	})
+	commitNavigation := func(command hostui.NavigationCommand) (hostui.NavigationOutcome, error) {
+		outcome, commitErr := navigation.Commit(command, server.instances.List())
+		if commitErr != nil {
+			return hostui.NavigationOutcome{}, commitErr
+		}
+		for _, action := range outcome.Actions {
+			if publishErr := server.actions.Publish(action); publishErr != nil {
+				return hostui.NavigationOutcome{}, publishErr
+			}
+		}
+		return outcome, nil
+	}
+	server.navigationCommand = commitNavigation
 	if strings.TrimSpace(identity.ID) != "" {
 		server.coordinatorInstanceID = identity.ID + ":bridge"
 		process := hostui.CurrentProcessSelf(identity.StartedAt)
@@ -372,6 +402,10 @@ func startPrimaryIPCAtWithIdentity(
 		HostSurface:           identity.Surface,
 		CoordinatorInstanceID: server.coordinatorInstanceID,
 		AppAction:             server.actions.Publish,
+		NavigationCommand:     commitNavigation,
+		AppActionSubmit:       server.actionCoordinator.Submit,
+		AppActionAck:          server.actionCoordinator.Ack,
+		AppActionOutcome:      server.actionCoordinator.Outcome,
 		AppInstances:          server.instances,
 		Shutdown: func() {
 			server.quitOnce.Do(func() { close(server.quit) })
@@ -429,8 +463,11 @@ func startPrimaryIPCAtWithIdentity(
 		server.localDevice = startLocalDeviceHost(ctx, sharedClient, store)
 		service.LocalDevice = server.localDevice
 		service.HostConfig = store.CurrentRuntime
-		service.PersistentHostConfig = store.Current
+		service.PersistentHostConfig = store.Persistent
 		service.SubscribeHostConfig = store.SubscribeRuntime
+		service.BuzzerRuntimeStatus = func() appconfig.BuzzerRuntimeStatus {
+			return server.IntegrationStatus().BuzzerRuntime
+		}
 		service.UpdateHostConfig = func(change func(*appconfig.Config) error) error {
 			_, err := store.Update(change)
 			return err
@@ -463,41 +500,30 @@ func startPrimaryIPCAtWithIdentity(
 	return server, nil
 }
 
-func browserAppActionEvent(action hostui.AppAction) (control.Event, bool) {
-	kind := strings.ToLower(strings.TrimSpace(action.Kind))
-	value := strings.TrimSpace(action.Value)
-	if !strings.HasPrefix(kind, "app.") {
-		return control.Event{}, false
+func appActionOutcomeEvent(change hostui.ActionOutcomeChange) control.Event {
+	stream := control.EventStreamState
+	if change.State == hostui.ActionStateRejected || change.State == hostui.ActionStateTimeout {
+		stream = control.EventStreamActivity
 	}
-	target := strings.TrimSpace(action.Target)
-	if target == "" {
-		target = "*"
+	metadata := map[string]string{
+		"operation_id": change.OperationID,
+		"kind":         change.Kind,
+		"instance_id":  change.InstanceID,
+		"surface":      change.Surface,
+		"state":        change.State,
 	}
-	verb := strings.TrimPrefix(kind, "app.")
-	text := verb
-	if value != "" {
-		text += " " + value
+	if change.Reason != "" {
+		metadata["reason"] = change.Reason
 	}
-	metadata := make(map[string]string, len(action.Metadata)+3)
-	for key, item := range action.Metadata {
-		metadata[key] = item
-	}
-	metadata["value"] = value
-	metadata["target_instance"] = target
-	actionName := verb
-	if kind == "app.page" {
-		metadata["page"] = value
-		actionName = "navigate"
-		text = "Open page " + value
+	text := change.Kind + " " + change.State
+	if change.InstanceID != "" {
+		text += " on " + change.InstanceID
 	}
 	return control.Event{
-		Kind:     kind,
-		Text:     text,
-		Source:   action.Source,
-		Target:   "app.clients",
-		Action:   actionName,
-		Metadata: metadata,
-	}, true
+		Kind: "app.action.outcome", Stream: stream, Text: text,
+		Source: "host", Target: "app.clients", MessageType: "state",
+		Action: "outcome", Metadata: metadata,
+	}
 }
 
 func (server *primaryIPC) QuitRequested() <-chan struct{} {
@@ -600,6 +626,9 @@ func (server *primaryIPC) close() error {
 	}
 	if server.artifacts != nil {
 		server.artifacts.Close()
+	}
+	if server.actionCoordinator != nil {
+		server.actionCoordinator.Close()
 	}
 	server.cancel()
 	_ = server.listener.Close()

@@ -261,6 +261,12 @@ func TestAlphaBridgeIngressCannotPivotThroughAnotherPeer(t *testing.T) {
 		{"command peer update", "controller.command.execute", `{"command":"peer-update host third aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`},
 		{"app command bridge call", "controller.app.action", `{"kind":"command","value":"bridge call third controller.snapshot"}`},
 		{"app command peer update", "controller.app.action", `{"kind":"command","value":"peer-update host third aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`},
+		{"persist peer topology", "controller.network.peers.set", `{"peers":[]}`},
+		{"persist integrations", "controller.integrations.local.set", `{}`},
+		{"persist hotkey commands", "controller.hotkeys.set", `{}`},
+		{"persist host menu commands", "controller.host_menu.directory.replace", `{}`},
+		{"wrapped config mutation", "controller.command.execute", `{"command":"config set integrations {}"}`},
+		{"quoted wrapped config mutation", "controller.command.execute", `{"command":"\"config\" set integrations {}"}`},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
