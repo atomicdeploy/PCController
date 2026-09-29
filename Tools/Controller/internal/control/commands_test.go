@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	goruntime "runtime"
 	"strings"
 	"testing"
 	"time"
@@ -703,7 +704,13 @@ func TestOSCommandsExposeStatusPolicyAndDenyExecutionByDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"host=", "os=", "Windows SetupAPI", "DIGCF_PRESENT"} {
+	expectedStatus := []string{"host=", "os=", "serial="}
+	if goruntime.GOOS == "windows" {
+		expectedStatus = append(expectedStatus, "Windows SetupAPI", "DIGCF_PRESENT")
+	} else if goruntime.GOOS == "linux" {
+		expectedStatus = append(expectedStatus, "Linux sysfs")
+	}
+	for _, expected := range expectedStatus {
 		if !strings.Contains(status, expected) {
 			t.Fatalf("OS status missing %q: %s", expected, status)
 		}
