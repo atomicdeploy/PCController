@@ -96,8 +96,18 @@ static inline __attribute__((always_inline)) void initializeController() {
   radioReceiver.setReceiveTolerance(70);
   radioReceiver.enableReceive(digitalPinToInterrupt(BoardPins::RcReceive));
 
+  // EEPROM boot records are deliberately deferred until every relay/PWM/
+  // safety policy and radio initialization above has completed. They reuse the
+  // normal opcode dispatcher and cannot contain any output/motion/reset/I2C
+  // operation outside BootOpcodeSequence's fixed safe whitelist.
   if (!programming) {
+#if PCCONTROLLER_ENABLE_EEPROM_BOOT_OPCODES
+    firmwareReady = true;
+    BootOpcodeSequence::dispatch(appProtocol, handleProtocolFrame,
+                                 BootOpcodeSequence::executionContext());
+#else
     playBootMelody();
+#endif
   }
   firmwareReady = true;
   appEvents.reset(resetTelemetry.cause(), resetTelemetry.count());

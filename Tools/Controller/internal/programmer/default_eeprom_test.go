@@ -44,6 +44,21 @@ func TestGenerateDefaultEEPROMIntelHexCreatesSafeCurrentSettings(t *testing.T) {
 	if !bytes.Equal(audio[:len(audio)-1], wantAudio) {
 		t.Fatalf("default autonomous audio cues = % X, want % X", audio[:len(audio)-1], wantAudio)
 	}
+
+	boot, err := image.BytesAt(EEPROMBootOpcodeAddress, EEPROMBootOpcodeBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if boot[0] != bootOpcodeMagic || int(boot[1]) != len(factoryBootOpcodeData) ||
+		boot[EEPROMBootOpcodeCommitOffset] != 0xA7 {
+		t.Fatalf("factory boot opcode metadata = % X", boot[:EEPROMBootOpcodeMetadataBytes])
+	}
+	checksumInput := append(append([]byte(nil), boot[:2]...),
+		boot[int(EEPROMBootOpcodeDataOffset):int(EEPROMBootOpcodeDataOffset)+int(boot[1])]...)
+	if boot[2] != avrCRC8(checksumInput) ||
+		!bytes.Equal(boot[int(EEPROMBootOpcodeDataOffset):int(EEPROMBootOpcodeDataOffset)+int(boot[1])], factoryBootOpcodeData[:]) {
+		t.Fatalf("factory boot opcode record = % X", boot)
+	}
 	record, err := image.BytesAt(EEPROMSettingsAddress, EEPROMSettingsRecordBytes)
 	if err != nil {
 		t.Fatal(err)

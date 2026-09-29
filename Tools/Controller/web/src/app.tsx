@@ -92,7 +92,13 @@ import type {
   ToastMessage,
   UIConfig,
 } from './types'
-import { peripheralAvailability } from './peripheral-availability'
+import {
+  applyStatusFrameBatch,
+  controllerSnapshotIdentity,
+  metricSamplesAfterSnapshot,
+  sampleFrom,
+  StatusFrameBatcher,
+} from './status-frame-batcher'
 import { advanceStatusLEDSource, applyPushedOutputEvent, isPushedOutputEvent, mergeStatusLEDSnapshot, statusLEDSnapshotMatchesSource, statusLEDSourceUnchanged } from './status-led-event'
 import { BuzzerPlaybackTimeline, type BuzzerPath } from './buzzer-routing'
 import { isMacroControllerEvent, prependMacroControllerEvent } from './macro-live'
@@ -116,6 +122,7 @@ import {
   saveQuickHeaderPreferences,
   type QuickHeaderPreferences,
 } from './quick-header-preferences'
+import { messageToast } from './message-presentation'
 
 const DashboardPage = lazy(() => import('./views').then(({ DashboardView }) => ({ default: DashboardView })))
 const ControlsPage = lazy(() => import('./views').then(({ ControlsView }) => ({ default: ControlsView })))
@@ -243,43 +250,7 @@ function pageFromLocation(): PageID {
   return pageFromHash(location.hash)
 }
 
-function sampleFrom(snapshot: Snapshot, at = Date.now()): MetricSample {
-  const status = snapshot.status
-  const available = peripheralAvailability(snapshot)
-  return {
-    at,
-    ...(available.ina219 ? {
-      supply: status.supply_mv / 1000,
-      bus: status.bus_mv / 1000,
-      current: status.current_ma,
-      power: status.power_mw / 1000,
-    } : {}),
-    ...(available.temperatureLED ? { ledTemp: status.temperature_led_centi_c / 100 } : {}),
-    ...(available.temperatureBTAudio ? { btTemp: status.temperature_bt_audio_centi_c / 100 } : {}),
-  }
-}
-
-export function controllerSnapshotIdentity(snapshot: Snapshot): string {
-  if (!snapshot.connected) return ''
-  return JSON.stringify([
-    snapshot.port.instance_id || '', snapshot.port.serial_number || '', snapshot.port.name || '',
-    snapshot.hello.board_kind ?? null, snapshot.hello.name || '',
-    snapshot.hello.build_hash ?? null, snapshot.hello.build_timestamp || '',
-    snapshot.hello.capabilities ?? null,
-  ])
-}
-
-export function metricSamplesAfterSnapshot(
-  current: MetricSample[],
-  previous: Snapshot,
-  next: Snapshot,
-  at = Date.now(),
-): MetricSample[] {
-  if (!next.connected || !next.have_status) return []
-  const sample = sampleFrom(next, at)
-  if (controllerSnapshotIdentity(previous) !== controllerSnapshotIdentity(next)) return [sample]
-  return [...current.slice(-71), sample]
-}
+export { controllerSnapshotIdentity, metricSamplesAfterSnapshot } from './status-frame-batcher'
 
 function samplesFromHistory(history: HistorySample[], hello: Snapshot['hello']): MetricSample[] {
   return history
@@ -331,7 +302,7 @@ function demoSnapshot(now = Date.now()): Snapshot {
 
 function demoEvent(id: number): ControllerEvent {
   const definitions = [
-    ['device.state', 'Authenticated controller identity on COM18', 'host'],
+    ['device.state', 'Controller identity on COM18', 'host'],
     ['door', 'Door input returned to closed', 'physical'],
     ['macro.completed', 'Ambient evening macro completed faithfully', 'host'],
     ['rf.received', 'Remote #3 · living-room toggle', 'rf'],
@@ -805,15 +776,22 @@ export default function App() {
     return () => window.clearInterval(timer)
   }, [bootProgress, bootTarget])
 
-  const notify = useCallback((tone: ToastMessage['tone'], title: string, detail?: string) => {
+  const enqueueToast = useCallback((message: Omit<ToastMessage, 'id'>) => {
     toastID.current += 1
     const id = toastID.current
-    setToasts((current) => [...current.slice(-3), { id, tone, title, detail }])
-    if (tone === 'danger') audioRef.current?.cue('error')
-    if (tone === 'warning') audioRef.current?.cue('warning')
-    if (tone === 'success') audioRef.current?.cue('success')
-    window.setTimeout(() => setToasts((current) => current.filter((item) => item.id !== id)), 5200)
+    setToasts((current) => [...current.slice(-3), { id, ...message }])
+    if (message.tone === 'danger') audioRef.current?.cue('error')
+    if (message.tone === 'warning') audioRef.current?.cue('warning')
+    if (message.tone === 'success') audioRef.current?.cue('success')
+    if (!message.persistent) {
+      window.setTimeout(() => setToasts((current) => current.filter((item) => item.id !== id)), 5200)
+    }
+    return id
   }, [])
+
+  const notify = useCallback((tone: ToastMessage['tone'], title: string, detail?: string) => {
+    enqueueToast({ tone, title, detail })
+  }, [enqueueToast])
 
   useEffect(() => {
     const testFeedback = () => {
@@ -1315,6 +1293,7 @@ export default function App() {
       onError: (cause) => setStreamDetail(`Host resource check: ${cause instanceof Error ? cause.message : String(cause)}`),
     })
     let stopStream = Object.assign(() => {}, { updateStatusInterval: (_intervalMS: number) => undefined }) as StreamControl
+    let statusFrames: StatusFrameBatcher | null = null
     void (async () => {
       try {
         setBootTarget(42)
@@ -1352,18 +1331,18 @@ export default function App() {
             setStreamDetail(`Welcome melody unavailable: ${cause instanceof Error ? cause.message : String(cause)}`)
           }
         }
-        stopStream = connectStream(config, {
-          status: (update) => {
-            if (update.error) { setStreamDetail(update.error); return }
-            // A successful sample supersedes any transient controller error.
-            // Keeping the old detail made the live badge expose stale offline
-            // text through its tooltip after the transport had recovered.
-            setStreamDetail('')
+        statusFrames = new StatusFrameBatcher((updates) => {
             const previous = snapshotRef.current
-            const next = { ...previous, connected: true, have_status: true, status: update.status, status_updated: update.time }
-            snapshotRef.current = next
-            setSnapshot(next)
-            setSamples((current) => metricSamplesAfterSnapshot(current, previous, next, new Date(update.time).getTime()))
+            const result = applyStatusFrameBatch(previous, [], updates)
+            setStreamDetail(result.detail)
+            if (result.applied === 0) return
+            snapshotRef.current = result.snapshot
+            setSnapshot(result.snapshot)
+            setSamples((current) => applyStatusFrameBatch(previous, current, updates).samples)
+        })
+        stopStream = connectStream(config, {
+          status: (update, source) => {
+            statusFrames?.enqueue(source.generation, update)
           },
           event: (event, source: StreamSource) => {
 			const adoptedSource = advanceStatusLEDSource(
@@ -1452,7 +1431,11 @@ export default function App() {
 				applyPage('updates', 'replace')
 				audioRef.current?.cue('navigation', 'forward')
 			}
-            if (shouldToastControllerEvent(event)) notify(eventToneForToast(event), event.kind, event.text)
+            if (shouldToastControllerEvent(event, appInstanceID)) {
+              const targetedMessage = messageToast(event, appearanceDesiredRef.current.locale)
+              if (targetedMessage) enqueueToast(targetedMessage)
+              else notify(eventToneForToast(event), event.kind, event.text)
+            }
             if (isCompletedHostUpdate(event)) {
               refreshAfterHostRestart.current = true
             }
@@ -1461,6 +1444,7 @@ export default function App() {
           },
           state: (state, detail, source) => {
             if (source?.generation) {
+              if (!statusFrames?.adoptGeneration(source.generation)) return
               const adoptedSource = advanceStatusLEDSource(
                 { epoch: ledTransportEpoch.current, instanceID: ledTransportInstanceID.current },
                 { epoch: source.generation, instanceID: source.instanceID },
@@ -1482,6 +1466,7 @@ export default function App() {
               }
               void refresh()
             } else {
+              if (source?.generation) statusFrames?.cancelPending(source.generation)
               setSnapshot((current) => {
                 const next = snapshotAfterTransportLoss(current, state, detail)
                 snapshotRef.current = next
@@ -1513,10 +1498,11 @@ export default function App() {
     return () => {
       abort.abort()
       resourceCheck.dispose()
+      statusFrames?.dispose()
       if (streamControlRef.current === stopStream) streamControlRef.current = null
       stopStream()
     }
-  }, [adoptHostAppearance, appInstanceID, applyPage, demo, navigate, navigationSession, notify, refresh, refreshHostAppearance, streamGeneration, token])
+  }, [adoptHostAppearance, appInstanceID, applyPage, demo, enqueueToast, navigate, navigationSession, notify, refresh, refreshHostAppearance, streamGeneration, token])
 
   const authenticationRequired = sessionAuthenticationGuidanceRequired({
     hostRequiresAuthentication: uiConfig?.auth_required === true,

@@ -23,6 +23,65 @@ import (
 	"pccontroller.local/controller/internal/programmer"
 )
 
+func TestMessageDisconnectedAllowanceMatchesDeliveryTargets(t *testing.T) {
+	tests := []struct {
+		command string
+		want    bool
+	}{
+		{command: "message webui operator.notice ready", want: true},
+		{command: "message surface:desktop,webui operator.notice ready", want: true},
+		{command: "message all operator.notice ready", want: true},
+		{command: "message lcd operator.notice ready", want: false},
+		{command: "message webui,board operator.notice ready", want: false},
+		{command: "status", want: false},
+	}
+	for _, test := range tests {
+		if got := commandAllowsDisconnected(test.command); got != test.want {
+			t.Errorf("commandAllowsDisconnected(%q) = %t, want %t", test.command, got, test.want)
+		}
+	}
+}
+
+func TestRemoteTUIAttachFailureTakesOwnershipWhenPrimaryDisappears(t *testing.T) {
+	attachErr := errors.New("remote primary stopped")
+	want := &hostInstanceClaim{}
+	got, err := recoverTUIPrimaryAfterAttachFailure(
+		attachErr,
+		func(surface string) (*hostInstanceClaim, bool, error) {
+			if surface != "tui" {
+				t.Fatalf("surface=%q", surface)
+			}
+			return want, false, nil
+		},
+	)
+	if err != nil || got != want {
+		t.Fatalf("claim=%p err=%v, want claim=%p", got, err, want)
+	}
+}
+
+func TestRemoteTUIAttachFailurePreservesErrorWhenPrimaryStillOwnsRuntime(t *testing.T) {
+	attachErr := errors.New("remote attach rejected")
+	claim, err := recoverTUIPrimaryAfterAttachFailure(
+		attachErr,
+		func(string) (*hostInstanceClaim, bool, error) { return nil, true, nil },
+	)
+	if claim != nil || !errors.Is(err, attachErr) {
+		t.Fatalf("claim=%p err=%v", claim, err)
+	}
+}
+
+func TestRemoteTUIAttachFailureJoinsOwnershipProbeError(t *testing.T) {
+	attachErr := errors.New("remote attach failed")
+	probeErr := errors.New("ownership probe failed")
+	claim, err := recoverTUIPrimaryAfterAttachFailure(
+		attachErr,
+		func(string) (*hostInstanceClaim, bool, error) { return nil, false, probeErr },
+	)
+	if claim != nil || !errors.Is(err, attachErr) || !errors.Is(err, probeErr) {
+		t.Fatalf("claim=%p err=%v", claim, err)
+	}
+}
+
 func TestCompileOnlyCommandLoadsConfiguredFeaturesWithoutRuntimeStartup(t *testing.T) {
 	if value, present := os.LookupEnv(firmwareFeaturesEnvironment); present {
 		t.Cleanup(func() { _ = os.Setenv(firmwareFeaturesEnvironment, value) })
@@ -125,6 +184,47 @@ func TestCompileOnlyCommandDoesNotCreateMissingSelectedConfig(t *testing.T) {
 	}
 	if _, statErr := os.Stat(path); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("compile created missing config: %v", statErr)
+	}
+}
+
+func TestToolchainCompileAliasReusesManagedTargetUserConfiguration(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	managedRoot := filepath.Join(t.TempDir(), "managed-toolchain")
+	managedCLI := filepath.Join(managedRoot, "arduino-cli")
+	managedConfig := filepath.Join(managedRoot, "firmware-cli.yaml")
+	if err := os.MkdirAll(managedRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(managedCLI, []byte("managed target-user CLI"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(managedConfig, []byte("directories: {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := appconfig.Open(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Update(func(config *appconfig.Config) error {
+		config.Programming.ToolchainCLI = managedCLI
+		config.Programming.ToolchainConfig = managedConfig
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	err = run([]string{
+		"--config", configPath,
+		"toolchain", "compile", findProjectRoot(),
+		"--output-dir", t.TempDir(), "--dry-run",
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("managed target-user compile plan failed: %v\nstderr: %s", err, stderr.String())
+	}
+	for _, expected := range []string{managedCLI, managedConfig} {
+		if !strings.Contains(stdout.String(), expected) {
+			t.Fatalf("compile alias did not reuse managed path %q:\n%s", expected, stdout.String())
+		}
 	}
 }
 

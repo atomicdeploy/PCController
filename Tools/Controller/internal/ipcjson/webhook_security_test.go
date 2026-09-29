@@ -22,7 +22,7 @@ func TestInboundWebhookDropsCredentialBoundariesAndCallerProvenance(t *testing.T
 		Client: client, AuthToken: bearer, InboundWebhooks: true,
 	})
 	body := `{
-		"source":"client","target":"host","type":"audit.notice","text":"safe payload",
+		"source":"client","targets":["host"],"type":"audit.notice","text":"safe payload",
 		"metadata":{
 			"business_id":"order-42",
 			"access_token":"body-token",

@@ -80,7 +80,8 @@ self.addEventListener('fetch', (event) => {
   const request = event.request
   if (request.method !== 'GET') return
   const url = new URL(request.url)
-  if (!sameOrigin(url) || isLiveControllerPath(url.pathname) || url.pathname === '/service-worker.js') return
+  if (!sameOrigin(url) || isLiveControllerPath(url.pathname) ||
+      url.pathname === '/service-worker.js' || url.pathname === '/ui-recovery.js') return
   if (request.mode === 'navigate') {
     event.respondWith(navigation(request))
     return

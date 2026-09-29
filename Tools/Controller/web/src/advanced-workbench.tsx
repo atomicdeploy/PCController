@@ -184,6 +184,24 @@ export function hostMenuLabelCommand(reference: string, label: string): string |
   return `host-menu set ${quoteArgument(normalizedReference)} label ${quoteArgument(normalizedLabel)}`
 }
 
+export function advancedMessageRequest(
+  target: 'host' | 'lcd',
+  type: string,
+  primaryText: string,
+  secondaryLine = '',
+) {
+  if (target === 'lcd') {
+    return {
+      targets: [target],
+      type,
+      text: `${primaryText}\n${secondaryLine}`,
+      line1: primaryText,
+      line2: secondaryLine,
+    }
+  }
+  return { targets: [target], type, text: primaryText }
+}
+
 export function AdvancedWorkbench({
   snapshot,
   locale,
@@ -400,18 +418,18 @@ export function AdvancedWorkbench({
     if (!type) return
     if (messageTarget === 'lcd') {
       if (!lcdMessageValid) return
-      void performRPC('message', () => rpc('controller.message.send', {
-        target: 'lcd',
-        type,
-        text: `${messageLine1}\n${messageLine2}`,
-        line1: messageLine1,
-        line2: messageLine2,
-      }))
+      void performRPC('message', () => rpc(
+        'controller.message.send',
+        advancedMessageRequest('lcd', type, messageLine1, messageLine2),
+      ))
       return
     }
     const text = messageText.trim()
     if (!text || messageByteLength > 4096) return
-    void performRPC('message', () => rpc('controller.message.send', { target: 'host', type, text }))
+    void performRPC('message', () => rpc(
+      'controller.message.send',
+      advancedMessageRequest('host', type, text),
+    ))
   }
 
   const queryHistory = (kind: 'status' | 'timeline') => {

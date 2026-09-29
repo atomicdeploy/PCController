@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	gort "runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -215,6 +216,28 @@ func run(args []string, stdout, stderr io.Writer) (resultErr error) {
 			translated, stdout, stderr, config,
 		)
 	}
+	if configIndependentToolchainHostProvision(args) {
+		// Fresh-host provisioning must not open or create root's runtime
+		// configuration before it switches to the explicitly selected account.
+		return runToolchainHostProvision(args[2:], stdout, stderr)
+	}
+	if configIndependentToolchainMirrorRefresh(args) {
+		// The system timer must refresh mirrors even when no target account has
+		// a runtime/device configuration yet.
+		return runToolchainMirrorRefresh(args[2:], stdout, stderr)
+	}
+	if configIndependentToolchainMirrorInstall(args) {
+		return runToolchainMirrorInstall(args[2:], stdout, stderr)
+	}
+	if configIndependentToolchainRuntime(args) {
+		// Runtime publication, status, rollback, and removal operate only on
+		// explicit package/system paths. They must remain usable when no target
+		// account has a valid device configuration yet.
+		if strings.EqualFold(args[1], "prepare-host-data") {
+			return runToolchainPrepareHostData(args[2:], stdout, stderr)
+		}
+		return runToolchainRuntime(args[1], args[2:], stdout, stderr)
+	}
 	store, err := appconfig.Open(configPath)
 	if err != nil {
 		return err
@@ -239,6 +262,10 @@ func run(args []string, stdout, stderr io.Writer) (resultErr error) {
 		return runShell(args[1:], stdout, stderr, store)
 	case "exec":
 		return runExec(args[1:], stdout, stderr, store)
+	case "buzzer":
+		return runBuzzer(args[1:], stdout, stderr, store)
+	case "message":
+		return runExec(append([]string{"message"}, args[1:]...), stdout, stderr, store)
 	case "batch", "script":
 		return runBatch(args[1:], stdout, stderr, store)
 	case "monitor":
@@ -304,6 +331,7 @@ func runDesktop(
 	options := hostui.DesktopIntegrationOptions{
 		AppID:       productidentity.StableAppID,
 		DisplayName: productidentity.Title(store.Current().UI.AppTitle),
+		Executable:  strings.TrimSpace(os.Getenv("PCCONTROLLER_DESKTOP_EXECUTABLE")),
 	}
 	var status any
 	var integrationErr error
@@ -393,6 +421,29 @@ func preparePrimaryMode(surface string) (*hostInstanceClaim, bool, error) {
 	return claim, existing != nil, err
 }
 
+func recoverTUIPrimaryAfterAttachFailure(
+	attachErr error,
+	retry func(string) (*hostInstanceClaim, bool, error),
+) (*hostInstanceClaim, error) {
+	claim, havePrimary, err := retry("tui")
+	if err != nil {
+		return nil, errors.Join(
+			attachErr,
+			fmt.Errorf("recheck local controller ownership after remote TUI failure: %w", err),
+		)
+	}
+	if havePrimary {
+		return nil, attachErr
+	}
+	if claim == nil {
+		return nil, errors.Join(
+			attachErr,
+			errors.New("local controller ownership became available without a claim"),
+		)
+	}
+	return claim, nil
+}
+
 func runWeb(args []string, stdout, stderr io.Writer, store *appconfig.Store) error {
 	return runWebWithInitialAction(args, stdout, stderr, store, hostui.AppAction{})
 }
@@ -419,11 +470,12 @@ func runWebWithInitialAction(
 	noAuto := flags.Bool("no-auto", false, "start with automatic connection paused")
 	noOpen := flags.Bool("no-open", false, "serve the web app without opening a browser")
 	noTray := flags.Bool("no-tray", false, "serve the web app without a native system-tray menu")
+	listen := flags.String("listen", "", "transient loopback IPC/WebUI listen address (does not change saved config)")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	if flags.NArg() != 0 {
-		return errors.New("usage: controller web [--no-open] [--no-tray] [--no-auto] [connection flags]")
+		return errors.New("usage: controller web [--listen 127.0.0.1:8787] [--no-open] [--no-tray] [--no-auto] [connection flags]")
 	}
 	connection.captureOverrides(flags)
 	if err := buzzerOptions.captureOverrides(flags); err != nil {
@@ -431,6 +483,16 @@ func runWebWithInitialAction(
 	}
 	if err := buzzerOptions.apply(store); err != nil {
 		return err
+	}
+	if strings.TrimSpace(*listen) != "" {
+		runtimeConfig, err := transientWebRuntimeConfig(store, *listen)
+		if err != nil {
+			return err
+		}
+		// This process-only endpoint supports a pinned loopback WebUI without
+		// rewriting the target user's saved network policy. Authentication and
+		// every other runtime setting remain config-owned.
+		configurePrimaryIPC(runtimeConfig)
 	}
 	claimContext, claimCancel := context.WithTimeout(context.Background(), 3*time.Second)
 	claim, existing, err := claimOrResolveHostInstance(claimContext, "web")
@@ -443,7 +505,7 @@ func runWebWithInitialAction(
 			_ = claim.Close()
 		}
 	}()
-	appURL, err := browserURL(store.Current().IPC.Listen)
+	appURL, err := browserURL(currentPrimaryEndpoint().Listen)
 	if err != nil {
 		return err
 	}
@@ -472,7 +534,7 @@ func runWebWithInitialAction(
 			fmt.Fprintln(stdout, "controller offline; browser not opened")
 			return nil
 		}
-		return openBrowser(appURL)
+		return openAuthenticatedBrowser(appURL, store)
 	}
 	appURL, err = webURLForAppAction(appURL, initial)
 	if err != nil {
@@ -542,7 +604,7 @@ func runWebWithInitialAction(
 				return
 			}
 			browserOpenOnce.Do(func() {
-				if openErr := openBrowser(appURL); openErr != nil {
+				if openErr := openAuthenticatedBrowser(appURL, store); openErr != nil {
 					fmt.Fprintln(stderr, "open browser:", openErr)
 				}
 			})
@@ -648,6 +710,35 @@ func runWebWithInitialAction(
 	case <-primary.QuitRequested():
 		return nil
 	}
+}
+
+func transientWebRuntimeConfig(store *appconfig.Store, listen string) (appconfig.Config, error) {
+	normalized, err := loopbackWebListen(listen)
+	if err != nil {
+		return appconfig.Config{}, err
+	}
+	runtimeConfig, err := store.Runtime()
+	if err != nil {
+		return appconfig.Config{}, err
+	}
+	runtimeConfig.IPC.Listen = normalized
+	return runtimeConfig, nil
+}
+
+func loopbackWebListen(value string) (string, error) {
+	host, port, err := net.SplitHostPort(strings.TrimSpace(value))
+	if err != nil {
+		return "", fmt.Errorf("--listen must be a loopback host:port address: %w", err)
+	}
+	parsedPort, err := strconv.ParseUint(port, 10, 16)
+	if err != nil || parsedPort == 0 {
+		return "", errors.New("--listen port must be in 1..65535")
+	}
+	ip := net.ParseIP(strings.Trim(host, "[]"))
+	if !strings.EqualFold(host, "localhost") && (ip == nil || !ip.IsLoopback()) {
+		return "", errors.New("--listen is intentionally restricted to a loopback address")
+	}
+	return net.JoinHostPort(host, strconv.FormatUint(parsedPort, 10)), nil
 }
 
 func applyConfiguredConsoleTitle(configured string) {
@@ -910,7 +1001,17 @@ func runTUIWithInitialAction(
 			return runSecondaryConsole(os.Stdin, stdout, stderr, store.Current().UI.AppTitle)
 		}
 		configured := currentPrimaryEndpoint()
-		return runRemoteTUI(configured.Listen, configured.AuthToken, stdout, store, consoleOptions, *syncNavigation)
+		remoteErr := runRemoteTUI(
+			configured.Listen, configured.AuthToken, stdout, store, consoleOptions, *syncNavigation,
+		)
+		if remoteErr == nil {
+			return nil
+		}
+		claim, err = recoverTUIPrimaryAfterAttachFailure(remoteErr, preparePrimaryMode)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(stderr, "primary controller host disappeared; continuing as the local TUI owner")
 	}
 	defer func() {
 		if claim != nil {

@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	goruntime "runtime"
 	"strings"
 	"testing"
 	"time"
@@ -521,7 +522,7 @@ func TestHostFactsRPCAndRESTUseTypedReadOnlyProvider(t *testing.T) {
 		t.Fatalf("response=%#v profile=%q calls=%d", response, provider.profile, provider.calls)
 	}
 	catalog := service.Dispatch(context.Background(), Request{Method: "controller.os.facts.catalog"})
-	if catalog.Error != nil || !strings.Contains(fmt.Sprint(catalog.Result), "Win32_OperatingSystem") || provider.calls != 1 {
+	if catalog.Error != nil || !strings.Contains(fmt.Sprint(catalog.Result), "OperatingSystem") || provider.calls != 1 {
 		t.Fatalf("catalog=%#v calls=%d", catalog, provider.calls)
 	}
 	invalidParams, _ := json.Marshal(map[string]any{"profile": "system", "timeout_ms": 50})
@@ -953,9 +954,15 @@ func TestHTTPRESTAndAuthenticationShareIPCListener(t *testing.T) {
 	}
 	osStatusBody, readErr := io.ReadAll(response.Body)
 	_ = response.Body.Close()
+	expectedSerialSource := "periodic platform polling"
+	if goruntime.GOOS == "windows" {
+		expectedSerialSource = "Windows SetupAPI"
+	} else if goruntime.GOOS == "linux" {
+		expectedSerialSource = "Linux sysfs"
+	}
 	if readErr != nil || response.StatusCode != http.StatusOK ||
 		!strings.Contains(string(osStatusBody), `"serial_discovery_source"`) ||
-		!strings.Contains(string(osStatusBody), "Windows SetupAPI") {
+		!strings.Contains(string(osStatusBody), expectedSerialSource) {
 		t.Fatalf("OS status=%d body=%s err=%v", response.StatusCode, osStatusBody, readErr)
 	}
 
@@ -1504,7 +1511,7 @@ func TestRemoteCapabilityPolicyAndMessageProvenance(t *testing.T) {
 	}
 
 	messageParams, _ := json.Marshal(controllerapi.TextMessage{
-		Source: "board", Target: "host", Type: "operator.notice", Text: "hello",
+		Source: "board", Targets: []string{"host"}, Type: "operator.notice", Text: "hello",
 	})
 	denied := service.DispatchRemote(context.Background(), Request{
 		Method: "controller.message.send", Params: messageParams,
@@ -1761,6 +1768,9 @@ func TestGenericCommandRemoteCapabilitiesDistinguishReadsFromMutations(t *testin
 		{"os status", capabilityRead},
 		{"os facts serial", capabilityRead},
 		{"os key F13", capabilityVirtualKeys},
+		{"open", capabilityConnection},
+		{"close", capabilityConnection},
+		{"reconnect", capabilityConnection},
 		{"program flash image.hex", capabilityProgramming},
 		{"toolchain profile", capabilityRead},
 		{"toolchain sync", capabilityProgramming},
@@ -1770,6 +1780,20 @@ func TestGenericCommandRemoteCapabilitiesDistinguishReadsFromMutations(t *testin
 	for _, test := range tests {
 		if got := commandCapability(test.command); got != test.want {
 			t.Errorf("commandCapability(%q)=%q want %q", test.command, got, test.want)
+		}
+	}
+}
+
+func TestConnectionRPCMethodsRequireConnectionCapability(t *testing.T) {
+	for _, method := range []string{
+		"controller.connect",
+		"controller.open",
+		"controller.port.open",
+		"controller.close",
+		"controller.port.close",
+	} {
+		if got := requestCapability(method, nil); got != capabilityConnection {
+			t.Errorf("requestCapability(%q)=%q, want %q", method, got, capabilityConnection)
 		}
 	}
 }

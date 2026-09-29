@@ -67,3 +67,65 @@ func TestReleaseDiscoveryRPCAndRemotePolicy(t *testing.T) {
 		t.Fatalf("remote stage status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 }
+
+func TestReleaseHTTPAlphaAuthorizationHonorsRemoteExposure(t *testing.T) {
+	artifactService, client := newIPCArtifactService(t)
+	manifestServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(writer).Encode(map[string]any{
+			"artifacts": []map[string]any{{
+				"kind": "firmware", "name": "board.hex",
+				"url": "/board.hex", "packed_timestamp": 1234,
+			}},
+		})
+	}))
+	defer manifestServer.Close()
+	discovery, err := releaseplane.NewService(releaseplane.NewTrustedClient(manifestServer.Client()), artifactService, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = discovery.Close() })
+	config := appconfig.Defaults()
+	config.IPC.AllowRemote = true
+	service := &Service{
+		Client: client, Artifacts: artifactService, ReleaseDiscovery: discovery,
+		AuthorizationDisabled: true,
+		HostConfig:            func() appconfig.Config { return config },
+	}
+	handler := websocketMux(context.Background(), service)
+	request := func(path, body string) *http.Request {
+		value := httptest.NewRequest(
+			http.MethodPost,
+			"http://controller.example"+path,
+			strings.NewReader(body),
+		)
+		value.RemoteAddr = "198.51.100.10:43100"
+		return value
+	}
+	manifestRequest := func() *http.Request {
+		return request("/api/discovery/manifest", `{"url":"`+manifestServer.URL+`/manifest.json"}`)
+	}
+	stageRequest := func() *http.Request {
+		return request(
+			"/api/discovery/stage",
+			`{"candidate":{"source":"manifest","kind":"firmware","name":"board.hex","url":"`+manifestServer.URL+`/board.hex"}}`,
+		)
+	}
+
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, manifestRequest())
+	if recorder.Code != http.StatusOK || recorder.Header().Get("X-PCController-Authentication") != "disabled-alpha" {
+		t.Fatalf("credentialless alpha release status=%d headers=%v body=%s", recorder.Code, recorder.Header(), recorder.Body.String())
+	}
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, stageRequest())
+	if recorder.Code != http.StatusAccepted || recorder.Header().Get("X-PCController-Authentication") != "disabled-alpha" {
+		t.Fatalf("credentialless alpha stage status=%d headers=%v body=%s", recorder.Code, recorder.Header(), recorder.Body.String())
+	}
+
+	config.IPC.AllowRemote = false
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, stageRequest())
+	if recorder.Code != http.StatusForbidden || !strings.Contains(recorder.Body.String(), "remote network access is disabled") {
+		t.Fatalf("disabled remote release stage status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}

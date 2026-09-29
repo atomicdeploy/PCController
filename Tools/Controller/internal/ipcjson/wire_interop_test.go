@@ -446,6 +446,7 @@ func (board *rawVirtualBoard) acceptLoop() {
 					response.Payload = make([]byte, 14)
 					response.Payload[0] = native.IdentitySchemaCompact
 					response.Payload[1] = native.BoardKindPCController
+					binary.LittleEndian.PutUint32(response.Payload[2:6], native.CapabilityLCD)
 					binary.LittleEndian.PutUint32(response.Payload[6:10], 0xA1B2C3D4)
 				case native.OpGetStatus:
 					count := board.statusCount.Add(1)
@@ -630,7 +631,7 @@ func TestIndependentRawClientsInteroperateWithAllSocketSurfaces(t *testing.T) {
 		t.Fatalf("network reset did not return a correlated transport error: %v", reset)
 	}
 	message := rawRPC(t, standard, 8, "controller.message.send", map[string]any{
-		"source": "client", "target": "host", "type": "actionable.notice",
+		"source": "client", "targets": []string{"host"}, "type": "actionable.notice",
 		"text": "show diagnostics", "action": "app.page:events",
 	})
 	if len(message["error"]) != 0 ||
@@ -638,6 +639,14 @@ func TestIndependentRawClientsInteroperateWithAllSocketSurfaces(t *testing.T) {
 		!strings.Contains(string(message["result"]), `"claimed_source":"client"`) ||
 		!strings.Contains(string(message["result"]), `"action":"app.page:events"`) {
 		t.Fatalf("typed actionable message=%v", message)
+	}
+	lcdMessage := rawRPC(t, standard, 81, "controller.message.send", map[string]any{
+		"source": "client", "targets": []string{"lcd"}, "type": "operator.notice",
+		"text": "board delivery",
+	})
+	if len(lcdMessage["error"]) != 0 ||
+		!strings.Contains(string(lcdMessage["result"]), `"targets":["lcd"]`) {
+		t.Fatalf("typed LCD message=%v", lcdMessage)
 	}
 
 	closed := rawRPC(t, standard, 9, "controller.close", nil)
@@ -691,7 +700,7 @@ func TestIndependentRawClientsInteroperateWithAllSocketSurfaces(t *testing.T) {
 		!strings.Contains(string(socketResponse), `"ok":true`) {
 		t.Fatalf("Socket.IO RPC response=%s", socketResponse)
 	}
-	if err = socketIO.writeText(`42["message",{"source":"client","target":"host","type":"notice","text":"raw Socket.IO"}]`); err != nil {
+	if err = socketIO.writeText(`42["message",{"source":"client","targets":["host"],"type":"notice","text":"raw Socket.IO"}]`); err != nil {
 		t.Fatal(err)
 	}
 	accepted := readRawSocketIOEvent(t, socketIO, "message.accepted")

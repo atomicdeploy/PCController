@@ -85,6 +85,7 @@ describe('Web IPC transport', () => {
     vi.stubGlobal('fetch', fetchSpy)
 
     const events: Array<{ value: { kind: string; stream?: string }; generation: number; instanceID?: string }> = []
+    const statuses: Array<{ generation: number; instanceID?: string }> = []
     const states: Array<{ state: string; generation?: number; instanceID?: string }> = []
     const stop = connectStream({
       name: 'PCController', setup_complete: false, websocket_path: '/ipc', session_ticket_path: '/api/session/ticket', auth_required: false,
@@ -92,7 +93,7 @@ describe('Web IPC transport', () => {
       appearance_etag: 'a'.repeat(64),
       status_interval_ms: 200, measurement_freshness_ms: 1500,
     }, {
-      status: () => undefined,
+      status: (_value, source) => statuses.push(source),
       event: (value, source) => events.push({ value, ...source }),
       state: (state, _detail, source) => states.push({ state, ...source }),
     })
@@ -129,6 +130,10 @@ describe('Web IPC transport', () => {
       generation: expect.any(Number),
       instanceID: 'primary-web-test',
     }])
+    sockets[0].pushMessage({
+      jsonrpc: '2.0', method: 'controller.status', params: { time: '2026-08-03T00:00:01Z', status: {} },
+    })
+    expect(statuses).toEqual([{ generation: expect.any(Number), instanceID: 'primary-web-test' }])
     stop()
     // Late frames from a closed/replaced connection must not update the UI.
     sockets[0].pushMessage({ jsonrpc: '2.0', method: 'controller.state', params: { kind: 'stale' } })

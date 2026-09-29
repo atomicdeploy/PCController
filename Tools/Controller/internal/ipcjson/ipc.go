@@ -334,6 +334,7 @@ type browserUISettings struct {
 	SegmentScroll          appconfig.SegmentScroll          `json:"segment_scroll"`
 	PeripheralNames        map[string]string                `json:"peripheral_names"`
 	Peripherals            []appconfig.PeripheralDescriptor `json:"peripherals"`
+	Controls               []appconfig.ControlDescriptor    `json:"controls"`
 	Changed                *bool                            `json:"changed,omitempty"`
 	ChangedFields          []string                         `json:"changed_fields,omitempty"`
 	Before                 map[string]any                   `json:"before,omitempty"`
@@ -343,6 +344,7 @@ type browserUISettings struct {
 type peripheralSettings struct {
 	Names       map[string]string                `json:"peripheral_names"`
 	Peripherals []appconfig.PeripheralDescriptor `json:"peripherals"`
+	Controls    []appconfig.ControlDescriptor    `json:"controls"`
 }
 
 // networkPeerConfig is the versionless bridge topology contract. Deliberately
@@ -1651,6 +1653,7 @@ func (service *Service) browserUISettings() browserUISettings {
 		SegmentScroll:          ui.SegmentScroll,
 		PeripheralNames:        clonePeripheralNames(ui.PeripheralNames),
 		Peripherals:            appconfig.PeripheralDescriptors(),
+		Controls:               appconfig.ControlDescriptors(ui.PeripheralNames),
 	}
 }
 
@@ -1682,9 +1685,11 @@ func normalizePeripheralNames(names map[string]string) (map[string]string, error
 }
 
 func (service *Service) peripheralSettings() peripheralSettings {
+	names := service.hostConfig().UI.PeripheralNames
 	return peripheralSettings{
-		Names:       clonePeripheralNames(service.hostConfig().UI.PeripheralNames),
+		Names:       clonePeripheralNames(names),
 		Peripherals: appconfig.PeripheralDescriptors(),
+		Controls:    appconfig.ControlDescriptors(names),
 	}
 }
 
@@ -3495,6 +3500,10 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 		mux.Handle("/", service.WebUI)
 	}
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/api/v1" || strings.HasPrefix(request.URL.Path, "/api/v1/") {
+			http.NotFound(writer, request)
+			return
+		}
 		if serveBrowserCORS(writer, request, service, webSocketPath) {
 			return
 		}
@@ -3647,7 +3656,7 @@ func serveInboundWebhook(
 		return
 	}
 	message := controller.TextMessage{
-		Source: "webhook", Target: "host",
+		Source: "webhook", Targets: []string{"host"},
 		Type: "http." + strings.ToLower(request.Method),
 		Text: truncateText(strings.TrimSpace(string(body)), 4096), Metadata: make(map[string]string),
 	}
@@ -3669,7 +3678,7 @@ func serveInboundWebhook(
 		name   string
 		target *string
 	}{
-		{"source", &message.Source}, {"target", &message.Target},
+		{"source", &message.Source},
 		{"type", &message.Type}, {"text", &message.Text},
 		{"action", &message.Action}, {"line1", &message.Line1},
 		{"line2", &message.Line2},
@@ -3677,6 +3686,9 @@ func serveInboundWebhook(
 		if value := query.Get(field.name); value != "" {
 			*field.target = value
 		}
+	}
+	if targets := query["targets"]; len(targets) != 0 {
+		message.Targets = append([]string(nil), targets...)
 	}
 	message.Metadata["http.method"] = request.Method
 	message.Metadata["http.path"] = request.URL.Path
@@ -3690,8 +3702,8 @@ func serveInboundWebhook(
 	if strings.TrimSpace(message.Source) == "" {
 		message.Source = "webhook"
 	}
-	if strings.TrimSpace(message.Target) == "" {
-		message.Target = "host"
+	if len(message.Targets) == 0 {
+		message.Targets = []string{"host"}
 	}
 	if strings.TrimSpace(message.Type) == "" {
 		message.Type = "http." + strings.ToLower(request.Method)

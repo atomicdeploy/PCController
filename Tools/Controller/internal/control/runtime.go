@@ -90,8 +90,12 @@ type Event struct {
 	Gesture     string
 	Source      string
 	Target      string
+	Targets     []string
 	MessageType string
 	Action      string
+	Severity    string
+	Correlation string
+	Delivery    string
 	Metadata    map[string]string
 	RFCode      uint32
 	RFBits      byte
@@ -101,6 +105,23 @@ type Event struct {
 	HaveRFID    bool
 	ResetCause  byte
 	ResetCount  uint32
+}
+
+// Message is the living, transport-neutral notification request. Targets are
+// capability selectors advertised by receivers; board, lcd, and all have
+// host-owned delivery semantics in addition to the normal event stream.
+type Message struct {
+	Source      string
+	Targets     []string
+	MessageType string
+	Text        string
+	Line1       string
+	Line2       string
+	Action      string
+	Severity    string
+	Correlation string
+	Delivery    string
+	Metadata    map[string]string
 }
 
 // CommandEvidence is emitted only after the board acknowledges a command. Its

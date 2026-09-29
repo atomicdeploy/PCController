@@ -90,6 +90,22 @@ func TestBoundedDiscoveryInstanceName(t *testing.T) {
 	}
 }
 
+func TestDefaultEdgeOriginsPermitThisHostWithoutWildcardHostTrust(t *testing.T) {
+	origins := strings.Join(defaultEdgeOrigins("0.0.0.0", "server"), ",")
+	if !strings.Contains(origins, "server:*") || strings.Contains(origins, "0.0.0.0:*") || strings.Contains(origins, "*.*") {
+		t.Fatalf("default edge origins=%q", origins)
+	}
+	for _, unspecified := range []string{"::", "[::]", "*"} {
+		if got := strings.Join(defaultEdgeOrigins(unspecified, "server"), ","); strings.Contains(got, unspecified+":*") || strings.Contains(got, "*:*") {
+			t.Fatalf("unspecified listen host %q trusted in %q", unspecified, got)
+		}
+	}
+	origins = strings.Join(defaultEdgeOrigins("192.0.2.20", "server"), ",")
+	if !strings.Contains(origins, "192.0.2.20:*") {
+		t.Fatalf("concrete listen origin missing: %q", origins)
+	}
+}
+
 func TestNetworkAdvertiseCanNarrowAndDisableDefaultProtocols(t *testing.T) {
 	previous := currentPrimaryEndpoint()
 	defer primaryEndpoint.Store(previous)

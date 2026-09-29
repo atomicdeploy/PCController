@@ -133,6 +133,10 @@ describe('tab channel', () => {
       kind: 'door',
       text: 'opened',
       state: 'open',
+      targets: ['surface:desktop', 'webui'],
+      severity: 'warning',
+      correlation: 'door-9',
+      delivery: 'async',
       metadata: { zone: 'front' },
     })).toBeTruthy()
 
@@ -151,7 +155,14 @@ describe('tab channel', () => {
     })
     expect(received[1].payload).toMatchObject({ type: 'appearance', etag: 'a'.repeat(64) })
     expect(received[3].payload).toMatchObject({
-      event: { id: 9, metadata: { zone: 'front' } },
+      event: {
+        id: 9,
+        targets: ['surface:desktop', 'webui'],
+        severity: 'warning',
+        correlation: 'door-9',
+        delivery: 'async',
+        metadata: { zone: 'front' },
+      },
     })
 
     now += 1
@@ -162,6 +173,29 @@ describe('tab channel', () => {
   it('keeps two Web tabs on the same pushed seven-segment frame without refresh polling', () => {
     const first = createTabChannel({ origin: 'https://control.example', BroadcastChannel: FakeBroadcastChannel, idFactory: sequenceFactory('first') })
     const second = createTabChannel({ origin: 'https://control.example', BroadcastChannel: FakeBroadcastChannel, idFactory: sequenceFactory('second') })
+    const exactSnapshot: Snapshot = {
+      ...emptySnapshot,
+      have_front_panel: true,
+      front_panel: {
+        schema: 2,
+        raw_segments: [0, 0, 0, 0],
+        brightness: 3,
+        blink: false,
+        segments_active: true,
+        category_selector: false,
+        lcd_address: 0x27,
+        lcd_available: true,
+        lcd_backlight: true,
+        lcd_line_1: 'exact',
+        lcd_line_2: 'readback',
+        pressed_keys: 0,
+        menu_page: 1,
+        program_mode: 7,
+        host_captured: false,
+        host_state: 0,
+        host_editable_value: 0,
+      },
+    }
     const frame: ControllerEvent = {
       id: 44,
       time: '2026-08-12T10:00:00.000Z',
@@ -170,8 +204,8 @@ describe('tab channel', () => {
       text: 'changed',
       metadata: { raw_segments: '6D3F546E', brightness: '7' },
     }
-    let firstSnapshot: Snapshot = applyPushedOutputEvent(emptySnapshot, frame)
-    let secondSnapshot: Snapshot = emptySnapshot
+    let firstSnapshot: Snapshot = applyPushedOutputEvent(exactSnapshot, frame)
+    let secondSnapshot: Snapshot = exactSnapshot
     second.subscribe(({ payload }) => {
       if (payload.type === 'controller-event') secondSnapshot = applyPushedOutputEvent(secondSnapshot, payload.event as ControllerEvent)
     })
@@ -180,6 +214,8 @@ describe('tab channel', () => {
 
     expect(firstSnapshot.front_panel?.raw_segments).toEqual([0x6d, 0x3f, 0x54, 0x6e])
     expect(secondSnapshot.front_panel?.raw_segments).toEqual(firstSnapshot.front_panel?.raw_segments)
+    expect(firstSnapshot.front_panel?.lcd_line_1).toBe('exact')
+    expect(secondSnapshot.front_panel?.menu_page).toBe(1)
     expect(firstSnapshot.front_panel_updated).toBe(frame.time)
     expect(secondSnapshot.front_panel_updated).toBe(frame.time)
     first.close()

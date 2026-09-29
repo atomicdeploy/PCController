@@ -227,8 +227,12 @@ export interface ControllerEvent {
   reason?: string
   source?: string
   target?: string
+  targets?: string[]
   message_type?: string
   action?: string
+  severity?: string
+  correlation?: string
+  delivery?: string
   gesture?: string
   key?: number
   rf_id?: number
@@ -407,6 +411,7 @@ export interface HostUISettings {
   segment_scroll: SegmentScrollSettings
   peripheral_names: Record<string, string>
   peripherals: PeripheralDescriptor[]
+  controls: ControlDescriptor[]
   changed?: boolean
   changed_fields?: string[]
   before?: Record<string, unknown>
@@ -422,9 +427,18 @@ export interface PeripheralDescriptor {
   control: 'relay' | 'motion' | 'pwm-user' | 'role-specific' | 'read-only'
 }
 
+export interface ControlDescriptor {
+  key: string
+  kind: 'relay' | 'side' | 'mosfet'
+  order: number
+  name: string
+  control: 'relay' | 'motion' | 'pwm-user'
+}
+
 export interface PeripheralSettings {
   peripheral_names: Record<string, string>
   peripherals: PeripheralDescriptor[]
+  controls: ControlDescriptor[]
 }
 
 export interface PWMValues {
@@ -551,6 +565,11 @@ export interface ToastMessage {
   tone: 'info' | 'success' | 'warning' | 'danger'
   title: string
   detail?: string
+  messageEventID?: number
+  correlation?: string
+  action?: string
+  actionLabel?: string
+  persistent?: boolean
 }
 
 export interface DialogState {

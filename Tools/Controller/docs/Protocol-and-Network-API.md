@@ -12,6 +12,49 @@ without a documentation server. Repository validation regenerates the
 contracts logically and rejects drift from the actual RPC dispatcher or REST
 route families.
 
+## Typed host notification envelope
+
+`controller.message.send` and `POST /api/messages` use the same bounded host
+envelope and publish a normal `message` event through IPC, WebSocket,
+Socket.IO, bridge, TUI, WebUI, and native-host listeners. It does not alter the
+firmware protocol or open a serial connection for host-only deliveries.
+
+```json
+{
+  "source": "ipc",
+  "targets": ["native", "web", "tui"],
+  "type": "operator.notice",
+  "text": "Commissioning is ready",
+  "severity": "warning",
+  "correlation": "commission-42",
+  "delivery": "async",
+  "action": "app.page:events"
+}
+```
+
+`targets` is the one canonical ordered request shape. Each entry is a bounded
+receiver capability, surface, or exact-instance selector learned from live
+endpoint/application advertisement; the host deliberately does not keep a
+closed product/surface list. Duplicate selectors are removed in order. `lcd`
+and `board` explicitly require a connected board that advertises LCD delivery.
+`all` delivers to the board LCD only when that capability is live and otherwise
+continues to the currently attached host receivers. Severity is one of `debug`,
+`info`, `success`, `warning`, or `error`; delivery is `sync` (completed) or
+`async` (accepted). Correlation and action are descriptive event fields in this
+slice—actions are never implicitly executed.
+
+The minimal CLI spelling is:
+
+```console
+controller message native,web,tui operator.notice "Commissioning is ready"
+```
+
+It permits disconnected operation only for selectors whose delivery does not
+require the board; explicit `board` or `lcd` delivery connects first and fails
+clearly when LCD delivery is unavailable. Native/Web/TUI action adapters, delivery expiry,
+deduplication, and generalized board-operation migration continue under #164,
+#165, and #166.
+
 ## Framing
 
 Frames are COBS encoded and terminated by `0x00`. The decoded frame is:
@@ -599,8 +642,8 @@ request error.
 | `controller.command.catalog` | `{}` | machine-readable registered command names, aliases, usage, summary, and task group |
 | `controller.melodies.list` | `{}` | effective configured host melody catalog with validated note timing |
 | `controller.status` | `{}` | fresh board status |
-| `controller.peripherals.get` | `{}` | host-owned custom names plus the canonical 34-entry peripheral descriptor registry; requires `read` |
-| `controller.peripherals.set` | `peripheral_names` object | atomically replace custom host names and return the normalized names plus registry; requires `host_configuration` |
+| `controller.peripherals.get` | `{}` | host-owned custom names, the canonical 34-entry peripheral registry, and the resolved ordered 21-entry control registry; requires `read` |
+| `controller.peripherals.set` | `peripheral_names` object | atomically replace custom host names and return normalized names plus both registries; requires `host_configuration` |
 | `controller.pwm.values` | `{}` | authoritative board availability, selected channel, and all sixteen logical values; requires `read` |
 | `controller.illumination.get` | `{}` | persisted Off/Auto/On policy, on/off brightness, live door-selected target, and exact applied enclosure PWM channel 11; requires `read` |
 | `controller.illumination.set` | `{ "mode": 0..2, "on_brightness": 0..255, "off_brightness": 0..255 }` | preserves every unrelated board setting, applies live, waits for durable EEPROM readback, and returns the authoritative illumination state; requires `board_commands` |
@@ -833,7 +876,7 @@ All JSON endpoints share the IPC listener:
 | `GET /api/ui-config` | unauthenticated non-secret browser bootstrap contract |
 | `POST /api/rpc` | one JSON-RPC request |
 | `GET /api/snapshot` | cached controller snapshot |
-| `GET /api/peripherals` | custom names and the canonical 34-entry descriptor registry; `read` capability |
+| `GET /api/peripherals` | custom names, the canonical 34-entry peripheral registry, and the resolved ordered 21-entry control registry; `read` capability |
 | `PUT /api/peripherals` | replace custom names from `peripheral_names`; `host_configuration` capability |
 | `GET /api/pwm` | authoritative availability, selected channel, and all sixteen values; `read` capability |
 | `PUT /api/pwm` | write `channel` (`0..15`) and `value` (`0..4095`), then return all sixteen values; `board_commands` capability |
@@ -877,6 +920,9 @@ All JSON endpoints share the IPC listener:
 | `/api/integrations/device/*` | always fails closed; device operations require typed RPC |
 | `POST /ipc` | JSON-RPC compatibility on the configured WebSocket path |
 
+Core routes are versionless. `/api/v1` and every `/api/v1/...` path are
+explicitly rejected rather than aliased to the living `/api/...` contract.
+
 All data/API routes except `/healthz` and the non-secret `/api/ui-config`
 bootstrap apply host authentication. Bodies are limited to
 1 MiB. Unsupported methods are rejected, and the inbound webhook path is `404`
@@ -906,6 +952,15 @@ routed path—not the raw `RequestURI` or query string.
       "default_name": "User Relay 5",
       "control": "relay"
     }
+  ],
+  "controls": [
+    {
+      "key": "relay.5",
+      "kind": "relay",
+      "order": 5,
+      "name": "Workbench lamp",
+      "control": "relay"
+    }
   ]
 }
 ```
@@ -916,6 +971,24 @@ presentation names in `ui.peripheral_names`, not device settings. Set methods
 trim keys and names, reject invalid input atomically, and treat a blank name as
 a request to remove that override so the descriptor's `default_name` becomes
 visible again. No peripheral-name operation reads or writes MCU EEPROM.
+
+The ordered `controls` projection contains exactly 21 directly controllable
+entries in canonical order: relay 1..8, Side A/B, then MOSFET/PWM 0..10. Its
+`name` is already resolved from the configured host name or canonical default.
+System-owned PWM 11..15, displays, and sensors remain in `peripherals` and are
+not misrepresented as generic output controls.
+
+For a one-shot board tone, `controller buzzer --frequency 440 --duration 125`
+is the typed top-level spelling of `controller exec buzzer 440 125`. Both use
+the same primary/local command engine. For a nonzero tone, the engine stops any
+host melody, reads board settings, and returns `buzzer suppressed: board is
+silent` without a write when firmware-owned silent mode is active. Frequency
+zero remains the authoritative stop command: it stops host melody output and
+emits the board stop opcode without depending on settings availability.
+
+Settings mutations return confirmed readback from the runtime durability loop.
+Formatted settings include the authoritative `persisted` value; an accepted
+write is not reported as durable until readback matches and persistence is set.
 
 All PWM read and mutation methods return the native `PWM_VALUES` JSON shape:
 
@@ -1518,7 +1591,7 @@ one schema:
 ```json
 {
   "source": "client",
-  "target": "lcd",
+  "targets": ["lcd"],
   "type": "operator.notice",
   "text": "Service required",
   "line1": "SERVICE",
@@ -1528,11 +1601,14 @@ one schema:
 ```
 
 Allowed sources are `client`, `server`, `bridge`, `board`, `lcd`, `host`,
-`ipc`, `rest`, `webhook`, `websocket`, and `socket_io`. Targets are `client`, `server`, `bridge`,
-`board`, `lcd`, `host`, and `all`. `type` contains 1..32 lowercase letters,
-digits, dot, dash, or underscore. Text/action lengths are bounded. A board/LCD
-target is converted to two printable 16-byte rows and sent through
-`DISPLAY_TEXT`; every accepted message is also a source-tagged host event.
+`ipc`, `rest`, `webhook`, `websocket`, and `socket_io`. `targets` contains
+bounded capability, surface, or exact-instance selectors; it is the only
+request shape and is not constrained to a hardcoded product list. `type`
+contains 1..32 lowercase letters, digits, dot, dash, or underscore. Text/action
+lengths are bounded. Explicit `board`/`lcd` delivery requires a live board LCD;
+`all` adds the LCD only when that capability is live. Successful board delivery
+uses the ordinary display presenter before the source-tagged host event is
+published.
 
 Network ingress does not trust a payload's claimed source. Raw IPC is tagged
 `ipc`, REST is `rest`, standard WebSocket is `websocket`, Socket.IO is
@@ -1547,6 +1623,12 @@ deliberately enabled host `text_mappings` rule can match source, target, type,
 and text content and then submit a fixed configured command. This separation
 prevents received text from becoming shell input and retains authentication,
 logging, motion policy, and board safety.
+
+The Web presentation retains severity, correlation, and optional action text.
+Correlated or actionable notices remain visible until dismissed, but action
+text is rendered as context rather than a command control. Exact-target UI
+work uses the separately validated `controller.app.action` coordinator, and
+remote commands use the authenticated execute method.
 
 ## Host configuration and USB lifecycle
 

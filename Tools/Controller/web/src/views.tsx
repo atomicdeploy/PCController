@@ -141,6 +141,7 @@ import type {
 import { hardwareProblemPresentation } from './hardware-problem'
 import { buzzerPathFromState, type BuzzerPath } from './buzzer-routing'
 import { peripheralAvailability } from './peripheral-availability'
+import { resolvedControlName } from './control-descriptors'
 
 export interface SharedViewProps {
   reduceMotion?: boolean
@@ -197,7 +198,7 @@ function useFreshnessClock(updated: string | undefined, freshnessMS: number): nu
 
 function pageDetail(snapshot: Snapshot, appTitle: string, locale: Locale): string {
   if (snapshot.connected) return snapshot.port.friendly_name || snapshot.port.product || snapshot.port.name || appTitle
-  return snapshot.connection_reason || (locale === 'fa' ? 'در انتظار کنترلر معتبر' : 'Waiting for an authenticated controller')
+  return snapshot.connection_reason || (locale === 'fa' ? 'در انتظار اتصال کنترلر' : 'Waiting for a controller connection')
 }
 
 function values(samples: MetricSample[], field: keyof Omit<MetricSample, 'at'>): number[] {
@@ -312,7 +313,7 @@ export function DashboardView(props: SharedViewProps) {
       .catch(() => { if (active) setHostUI(null) })
     return () => { active = false }
   }, [boardReady, configurationEventID])
-  const peripheralName = (key: string, fallback: string) => hostUI?.peripheral_names?.[key]?.trim() || fallback
+  const peripheralName = (key: string, fallback: string) => resolvedControlName(hostUI?.controls, key, hostUI?.peripheral_names?.[key]?.trim() || fallback)
   const relayDefaults = [
     copy('Side A direction', 'جهت سمت A'), copy('Side A output', 'خروجی سمت A'),
     copy('Side B direction', 'جهت سمت B'), copy('Side B output', 'خروجی سمت B'),
@@ -652,7 +653,7 @@ export function ControlsView(props: SharedViewProps) {
     copy('User relay 5', 'رلهٔ کاربر ۵'), copy('User relay 6', 'رلهٔ کاربر ۶'),
     copy('User relay 7', 'رلهٔ کاربر ۷'), copy('User relay 8', 'رلهٔ کاربر ۸'),
   ]
-  const peripheralName = (key: string, fallback: string) => hostUI?.peripheral_names?.[key]?.trim() || fallback
+  const peripheralName = (key: string, fallback: string) => resolvedControlName(hostUI?.controls, key, hostUI?.peripheral_names?.[key]?.trim() || fallback)
   const pwmName = (channel: number) => peripheralName(`pwm.${channel}`, pwmDefaults[channel])
   const setPWMPercent = (channel: number, percent: number, immediate = false) => {
     pwmSchedulerRef.current?.schedule(channel, pwmValue(percent), immediate)
