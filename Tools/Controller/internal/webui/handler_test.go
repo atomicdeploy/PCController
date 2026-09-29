@@ -33,6 +33,7 @@ func testHandler(t *testing.T, additionalReserved ...string) http.Handler {
 		"assets/plain.js":           {Data: []byte("export {}\n"), ModTime: modified},
 		"manifest.webmanifest":      {Data: []byte(`{"name":"PCController"}`), ModTime: modified},
 		"service-worker.js":         {Data: []byte("self.addEventListener('fetch', () => {})\n"), ModTime: modified},
+		"ui-recovery.js":            {Data: []byte("// stable bootstrap\n"), ModTime: modified},
 	}
 	handler, err := NewHandler(files, additionalReserved...)
 	if err != nil {
@@ -284,6 +285,7 @@ func TestMIMEAndCachePolicies(t *testing.T) {
 		{path: "/assets/plain.js", contentType: "text/javascript; charset=utf-8", cache: "no-cache"},
 		{path: "/manifest.webmanifest", contentType: "application/manifest+json", cache: "no-cache"},
 		{path: "/service-worker.js", contentType: "text/javascript; charset=utf-8", cache: "no-cache"},
+		{path: "/ui-recovery.js", contentType: "text/javascript; charset=utf-8", cache: "no-cache"},
 	}
 	for _, test := range tests {
 		t.Run(test.path, func(t *testing.T) {
