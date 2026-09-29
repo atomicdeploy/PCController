@@ -444,6 +444,52 @@ func recoverTUIPrimaryAfterAttachFailure(
 	return claim, nil
 }
 
+func runRemoteTUIWithLocalFailover(
+	run func(context.Context) error,
+	retry func(string) (*hostInstanceClaim, bool, error),
+) (*hostInstanceClaim, error) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	claims := make(chan *hostInstanceClaim, 1)
+	watchDone := make(chan struct{})
+	go func() {
+		defer close(watchDone)
+		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				claim, havePrimary, err := retry("tui")
+				if err != nil || havePrimary || claim == nil {
+					if claim != nil {
+						_ = claim.Close()
+					}
+					continue
+				}
+				claims <- claim
+				cancel()
+				return
+			}
+		}
+	}()
+
+	attachErr := run(ctx)
+	cancel()
+	<-watchDone
+	select {
+	case claim := <-claims:
+		return claim, nil
+	default:
+	}
+	if attachErr == nil {
+		return nil, nil
+	}
+	return recoverTUIPrimaryAfterAttachFailure(attachErr, retry)
+}
+
 func runWeb(args []string, stdout, stderr io.Writer, store *appconfig.Store) error {
 	return runWebWithInitialAction(args, stdout, stderr, store, hostui.AppAction{})
 }
@@ -1001,13 +1047,17 @@ func runTUIWithInitialAction(
 			return runSecondaryConsole(os.Stdin, stdout, stderr, store.Current().UI.AppTitle)
 		}
 		configured := currentPrimaryEndpoint()
-		remoteErr := runRemoteTUI(
-			configured.Listen, configured.AuthToken, stdout, store, consoleOptions, *syncNavigation,
+		claim, err = runRemoteTUIWithLocalFailover(
+			func(ctx context.Context) error {
+				return runRemoteTUIContext(
+					ctx, configured.Listen, configured.AuthToken, stdout, store, consoleOptions, *syncNavigation,
+				)
+			},
+			preparePrimaryMode,
 		)
-		if remoteErr == nil {
+		if err == nil && claim == nil {
 			return nil
 		}
-		claim, err = recoverTUIPrimaryAfterAttachFailure(remoteErr, preparePrimaryMode)
 		if err != nil {
 			return err
 		}
