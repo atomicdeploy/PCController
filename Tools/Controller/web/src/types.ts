@@ -403,6 +403,7 @@ export interface UIConfig {
   host_version?: string
   source_hash?: string
   build_time?: string
+  web_resource_path?: string
 }
 
 export interface HostUISettings {

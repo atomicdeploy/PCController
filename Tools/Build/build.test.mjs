@@ -31,6 +31,14 @@ test('build helper executables use stable product paths, never Go temporary path
 	assert.throws(() => goBuildHelperPath('../unsafe', env, 'win32'), /unknown build helper/)
 })
 
+test('tracked Web assets are independent of per-package build time', async () => {
+	const viteConfig = await readFile(join(PROJECT_ROOT, 'Tools', 'Controller', 'web', 'vite.config.ts'), 'utf8')
+	const resourceContract = await readFile(join(PROJECT_ROOT, 'Tools', 'Controller', 'web', 'src', 'resource-version.ts'), 'utf8')
+	assert.doesNotMatch(viteConfig, /PCCONTROLLER_HOST_BUILD_TIME|__HOST_BUILD_TIME__/)
+	assert.match(resourceContract, /web_resource_path/)
+	assert.match(resourceContract, /script\[type="module"\]\[src\*="\/assets\/app-"\]/)
+})
+
 test('VirtualBoard shell build preserves native Windows compiler discovery and test discovery', async () => {
 	const script = await readFile(join(PROJECT_ROOT, 'Tools', 'VirtualBoard', 'build.sh'), 'utf8')
 	assert.match(script, /cmake_compiler_args=\(\)/)

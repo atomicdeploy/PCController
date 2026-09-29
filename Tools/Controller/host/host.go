@@ -333,6 +333,7 @@ func (host *Host) start(parent context.Context) error {
 		HostVersion:           host.options.Build.Version,
 		HostSourceHash:        host.options.Build.SourceHash,
 		HostBuildTime:         host.options.Build.BuildTime,
+		WebResourcePath:       webui.EntryResourcePath(),
 		HostInstanceID:        instanceID,
 		HostProcessID:         os.Getpid(),
 		HostSurface:           "embedded",

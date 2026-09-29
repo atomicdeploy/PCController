@@ -769,7 +769,8 @@ func TestUIConfigIsUnauthenticatedAndReportsActiveBrowserContract(t *testing.T) 
 	service := &Service{
 		Client: client, WebSocketPath: "/control", SocketIOPath: "/engine.io/",
 		HostVersion: "1.2.3", HostSourceHash: "0123456789abcdef", HostBuildTime: "2026-08-02T00:00:00Z",
-		HostConfig: func() appconfig.Config { return config },
+		WebResourcePath: "/assets/app-current.js",
+		HostConfig:      func() appconfig.Config { return config },
 	}
 	server := httptest.NewServer(websocketMux(context.Background(), service))
 	defer server.Close()
@@ -789,6 +790,7 @@ func TestUIConfigIsUnauthenticatedAndReportsActiveBrowserContract(t *testing.T) 
 		HostVersion   string `json:"host_version"`
 		SourceHash    string `json:"source_hash"`
 		BuildTime     string `json:"build_time"`
+		WebResource   string `json:"web_resource_path"`
 	}
 	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
 		t.Fatal(err)
@@ -797,7 +799,7 @@ func TestUIConfigIsUnauthenticatedAndReportsActiveBrowserContract(t *testing.T) 
 		result.WebSocketPath != "/control" ||
 		result.SocketIOPath != "/engine.io/" || result.TicketPath != SessionTicketPath || result.ProofPath != ServerProofPath || !result.AuthRequired ||
 		result.HostVersion != "1.2.3" || result.SourceHash != "0123456789abcdef" ||
-		result.BuildTime != "2026-08-02T00:00:00Z" {
+		result.BuildTime != "2026-08-02T00:00:00Z" || result.WebResource != "/assets/app-current.js" {
 		t.Fatalf("UI config status=%d result=%+v", response.StatusCode, result)
 	}
 

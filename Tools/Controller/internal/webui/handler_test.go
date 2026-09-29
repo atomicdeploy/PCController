@@ -86,6 +86,17 @@ func TestEmbeddedHandlerServesUsefulAppShell(t *testing.T) {
 	}
 }
 
+func TestEmbeddedEntryResourcePathNamesTheServedApplication(t *testing.T) {
+	resource := EntryResourcePath()
+	if !regexp.MustCompile(`^/assets/app-[A-Za-z0-9_-]+\.js$`).MatchString(resource) {
+		t.Fatalf("entry resource path=%q", resource)
+	}
+	response := request(t, Handler(), http.MethodGet, resource, nil)
+	if response.Code != http.StatusOK {
+		t.Fatalf("entry resource status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestStaleFingerprintedEntryAssetsRedirectToCurrentBundle(t *testing.T) {
 	handler := testHandler(t)
 	tests := []struct {
