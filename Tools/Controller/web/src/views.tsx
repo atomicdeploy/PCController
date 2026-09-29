@@ -198,7 +198,7 @@ function useFreshnessClock(updated: string | undefined, freshnessMS: number): nu
 
 function pageDetail(snapshot: Snapshot, appTitle: string, locale: Locale): string {
   if (snapshot.connected) return snapshot.port.friendly_name || snapshot.port.product || snapshot.port.name || appTitle
-  return snapshot.connection_reason || (locale === 'fa' ? 'در انتظار کنترلر معتبر' : 'Waiting for an authenticated controller')
+  return snapshot.connection_reason || (locale === 'fa' ? 'در انتظار اتصال کنترلر' : 'Waiting for a controller connection')
 }
 
 function values(samples: MetricSample[], field: keyof Omit<MetricSample, 'at'>): number[] {
