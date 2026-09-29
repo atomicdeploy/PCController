@@ -247,6 +247,7 @@ type Service struct {
 	HostVersion           string
 	HostSourceHash        string
 	HostBuildTime         string
+	WebResourcePath       string
 	HostInstanceID        string
 	HostInstanceToken     string
 	HostProcessID         int
@@ -2623,6 +2624,7 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 			"host_version":             strings.TrimSpace(service.HostVersion),
 			"source_hash":              strings.TrimSpace(service.HostSourceHash),
 			"build_time":               strings.TrimSpace(service.HostBuildTime),
+			"web_resource_path":        strings.TrimSpace(service.WebResourcePath),
 			"setup_complete":           config.UI.SetupComplete,
 			"welcome_melody":           config.UI.WelcomeMelody,
 			"status_interval_ms":       settings.StatusIntervalMS,

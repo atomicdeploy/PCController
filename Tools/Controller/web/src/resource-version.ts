@@ -2,7 +2,7 @@ import type { UIConfig } from './types'
 
 export interface EmbeddedResourceIdentity {
   hostVersion: string
-  buildTime: string
+  resourcePath: string
 }
 
 function normalize(value: unknown): string {
@@ -10,27 +10,33 @@ function normalize(value: unknown): string {
 }
 
 export function embeddedResourceIdentity(): EmbeddedResourceIdentity {
-  return { hostVersion: __HOST_VERSION__, buildTime: __HOST_BUILD_TIME__ }
+  const entry = typeof document === 'undefined'
+    ? null
+    : document.querySelector<HTMLScriptElement>('script[type="module"][src*="/assets/app-"]')
+  let resourcePath = ''
+  if (entry?.src) {
+    try { resourcePath = new URL(entry.src, document.baseURI).pathname } catch { /* incomplete development URL */ }
+  }
+  return { hostVersion: __HOST_VERSION__, resourcePath }
 }
 
-export function hostResourceIdentity(config: Pick<UIConfig, 'host_version' | 'build_time'>): string {
-  return `${normalize(config.host_version)}|${normalize(config.build_time)}`
+export function hostResourceIdentity(config: Pick<UIConfig, 'host_version' | 'web_resource_path'>): string {
+  return `${normalize(config.host_version)}|${normalize(config.web_resource_path)}`
 }
 
 export function embeddedResourcesMismatch(
-  config: Pick<UIConfig, 'host_version' | 'build_time'>,
+  config: Pick<UIConfig, 'host_version' | 'web_resource_path'>,
   embedded: EmbeddedResourceIdentity = embeddedResourceIdentity(),
 ): boolean {
   const hostVersion = normalize(config.host_version)
-  const hostBuildTime = normalize(config.build_time)
+  const hostResourcePath = normalize(config.web_resource_path)
   const embeddedVersion = normalize(embedded.hostVersion)
-  const embeddedBuildTime = normalize(embedded.buildTime)
-  if (!hostVersion || !hostBuildTime || !embeddedVersion || !embeddedBuildTime) return false
-  if (hostBuildTime === 'unknown' || embeddedBuildTime === 'unknown') return false
-  return hostVersion !== embeddedVersion || hostBuildTime !== embeddedBuildTime
+  const embeddedResourcePath = normalize(embedded.resourcePath)
+  if (!hostVersion || !hostResourcePath || !embeddedVersion || !embeddedResourcePath) return false
+  return hostVersion !== embeddedVersion || hostResourcePath !== embeddedResourcePath
 }
 
-type ResourceConfig = Pick<UIConfig, 'host_version' | 'build_time'>
+type ResourceConfig = Pick<UIConfig, 'host_version' | 'web_resource_path'>
 
 /** Recheck the serving host after every transport attachment, including an
  * external install that did not emit an update-completed event to this tab. */

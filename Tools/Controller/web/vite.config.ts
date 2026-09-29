@@ -50,7 +50,6 @@ export default defineConfig(() => {
   if (!/^[a-z][a-z0-9+.-]*$/.test(productProtocol)) throw new Error('package.json.productProtocol must be a valid URI scheme')
   const productDescription = metadata(packageMetadata.description, 'description')
 	const hostVersion = metadata(packageMetadata.version, 'version')
-	const hostBuildTime = String(process.env.PCCONTROLLER_HOST_BUILD_TIME || 'unknown').trim() || 'unknown'
 	const productManifest = `${JSON.stringify({
 		...sourceManifest,
 		name: productName,
@@ -81,7 +80,6 @@ export default defineConfig(() => {
     __PRODUCT_TAGLINE__: JSON.stringify(productTagline),
     __PRODUCT_PROTOCOL__: JSON.stringify(productProtocol),
 		__HOST_VERSION__: JSON.stringify(hostVersion),
-		__HOST_BUILD_TIME__: JSON.stringify(hostBuildTime),
   },
   base: '/',
   // Managed worktrees may share node_modules with the canonical checkout.

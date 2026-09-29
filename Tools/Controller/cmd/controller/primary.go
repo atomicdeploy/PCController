@@ -432,6 +432,7 @@ func startPrimaryIPCAtWithIdentity(
 		HostVersion:           version,
 		HostSourceHash:        sourceHash,
 		HostBuildTime:         buildTime,
+		WebResourcePath:       webui.EntryResourcePath(),
 		HostInstanceID:        identity.ID,
 		HostInstanceToken:     identity.Token,
 		HostProcessID:         identity.PID,

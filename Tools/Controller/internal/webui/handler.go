@@ -30,6 +30,7 @@ var defaultReservedPrefixes = []string{
 var embeddedFiles embed.FS
 
 var embeddedHandler = mustEmbeddedHandler()
+var embeddedEntryResourcePath = mustEmbeddedEntryResourcePath()
 
 type assetMetadata struct {
 	etag    string
@@ -52,6 +53,38 @@ func Handler(additionalReservedPrefixes ...string) http.Handler {
 		return embeddedHandler
 	}
 	return mustEmbeddedHandler(additionalReservedPrefixes...)
+}
+
+// EntryResourcePath identifies the exact immutable JavaScript entry embedded
+// in this process. Browser tabs compare it with their loaded module URL after
+// reconnecting, so same-version host replacement stays safe without compiling
+// a per-build timestamp into otherwise reproducible Web assets.
+func EntryResourcePath() string { return embeddedEntryResourcePath }
+
+func mustEmbeddedEntryResourcePath() string {
+	root, err := fs.Sub(embeddedFiles, "dist")
+	if err != nil {
+		panic("open embedded web UI: " + err.Error())
+	}
+	assets, err := indexAssets(root)
+	if err != nil {
+		panic("index embedded web UI: " + err.Error())
+	}
+	entry := ""
+	for name := range assets {
+		base := path.Base(name)
+		if path.Dir(name) != "assets" || !strings.HasPrefix(base, "app-") || path.Ext(base) != ".js" {
+			continue
+		}
+		if entry != "" {
+			panic("embedded web UI contains multiple entry scripts")
+		}
+		entry = "/" + name
+	}
+	if entry == "" {
+		panic("embedded web UI contains no entry script")
+	}
+	return entry
 }
 
 // NewHandler creates a handler over an immutable filesystem rooted at the web

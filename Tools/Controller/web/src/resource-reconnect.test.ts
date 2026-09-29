@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createResourceReconnectCheck, embeddedResourcesMismatch } from './resource-version'
 
-const original = { host_version: 'release-a', build_time: '2026-09-10T01:00:00Z' }
-const updated = { host_version: 'release-b', build_time: '2026-09-10T02:00:00Z' }
-const embedded = { hostVersion: original.host_version, buildTime: original.build_time }
+const original = { host_version: 'release-a', web_resource_path: '/assets/app-original.js' }
+const updated = { host_version: 'release-b', web_resource_path: '/assets/app-updated.js' }
+const embedded = { hostVersion: original.host_version, resourcePath: original.web_resource_path }
 const settle = async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve() }
 
 beforeEach(() => vi.useFakeTimers())

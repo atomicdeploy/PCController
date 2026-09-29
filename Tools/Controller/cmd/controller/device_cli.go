@@ -689,6 +689,7 @@ func runIPC(args []string, stdout, stderr io.Writer, store *appconfig.Store) err
 			HostVersion:           version,
 			HostSourceHash:        sourceHash,
 			HostBuildTime:         buildTime,
+			WebResourcePath:       webui.EntryResourcePath(),
 			HostInstanceID:        strings.TrimSuffix(coordinatorID, ":bridge"),
 			HostProcessID:         os.Getpid(),
 			HostSurface:           "ipc",
