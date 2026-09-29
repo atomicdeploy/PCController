@@ -1392,24 +1392,24 @@ func runTeaCommandTree(command tea.Cmd) []tea.Msg {
 	return []tea.Msg{message}
 }
 
-func TestUpdateEventsOpenProgrammingPageAndTrackVisibleProgress(t *testing.T) {
+func TestUpdateEventsPreserveNavigationAndTrackMeasuredStage(t *testing.T) {
 	model := readyModel(t, PageDashboard)
 	model.writeOSC = func(string) error { return nil }
 	updated, command := model.Update(runtimeEventMsg(control.Event{
 		Kind: "update.programming", Text: "verified write in progress", Time: time.Now(),
 		Metadata: map[string]string{
-			"operation_id": "op-test", "kind": "firmware", "state": "programming", "progress_percent": "40",
+			"operation_id": "op-test", "kind": "firmware", "state": "programming", "stage": "writing", "progress_known": "true", "progress_percent": "40",
 		},
 	}))
 	model = updated.(Model)
-	if model.page != PageProgramming || model.update.Progress != 40 || model.update.OperationID != "op-test" {
+	if model.page != PageDashboard || model.update.Progress != 40 || model.update.OperationID != "op-test" {
 		t.Fatalf("update presentation page=%v state=%#v", model.page, model.update)
 	}
 	if command == nil {
 		t.Fatal("update event did not emit terminal presentation commands")
 	}
 	rendered := ansi.Strip(model.programmingPage(model.snapshot()))
-	for _, expected := range []string{"op-test", "PROGRAMMING", "40%", "verified write in progress"} {
+	for _, expected := range []string{"op-test", "WRITING", "40%", "verified write in progress"} {
 		if !strings.Contains(rendered, expected) {
 			t.Fatalf("programming page missing %q:\n%s", expected, rendered)
 		}
