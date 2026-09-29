@@ -1,6 +1,6 @@
 {
   "policy_name": "controllerboardmini-atmega328p",
-  "resolved_at_utc": "2026-08-02T04:57:17Z",
+  "resolved_at_utc": "2026-09-29T19:24:39.169Z",
   "firmware": {
     "name": "controllerboardmini-atmega328p",
     "fqbn": "MiniCore:avr:328:bootloader=uart0,eeprom=keep,baudrate=115200,variant=modelP,BOD=2v7,LTO=Os_flto,clock=16MHz_external",
@@ -56,7 +56,7 @@
       ]
     },
     "core_id": "MiniCore:avr",
-    "core_version": "3.1.2",
+    "core_version": "3.1.3",
     "libraries": [
       {
         "name": "Adafruit PWM Servo Driver Library",
@@ -89,8 +89,8 @@
     ]
   },
   "core_source": {
-    "url": "https://MCUdude.github.io/MiniCore/MiniCore-3.1.2.tar.bz2",
-    "sha256": "2aa8523aa24eb20f8277d90480286399c67a59b05164ac3bad81716a0c6490b3"
+    "url": "https://MCUdude.github.io/MiniCore/MiniCore-3.1.3.tar.bz2",
+    "sha256": "385387b09f451e0e6bd45f3852e4c47e070643167be336a742c1a1d2a4c70935"
   },
   "libraries": [
     {
@@ -138,8 +138,8 @@
     "tree_hash": "45f53abdb3c6164df0ff853232ba58b62fa1409b"
   },
   "go": {
-    "version": "1.26.5",
-    "go_mod_sha256": "7f8ceeaf1475bcca76a9375e623f162bef30d9f8fbb78520c5125de5e94e8661",
-    "go_sum_sha256": "804f6bb55cf6d3034eec5789e43d455141496ee8dada4b492d56ea5cd18b21be"
+    "version": "1.27.1",
+    "go_mod_sha256": "ef3c3a5de887cd17b928ce4b77f2a2353056cd8ef1113a8a4fd3e50cb6146975",
+    "go_sum_sha256": "61be14b4b4d0418c57dc9333ecf4190b8e0537873502f3fa8e37cfffc0c6ae73"
   }
 }
