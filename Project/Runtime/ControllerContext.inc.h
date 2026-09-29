@@ -48,14 +48,13 @@ static_assert(sizeof(TelemetryPayload) == ControllerProtocol::MaximumPayload,
 
 // Long-lived hardware drivers and protocol-domain coordinators.
 PwmExpanderDriver pwmDriver(BoardPins::PwmAddress);
-PwmController pwm(pwmDriver);
+PwmController pwm;
 Ina219Sensor ina219(BoardPins::Ina219Address);
 DallasTemperatureBus temperatureBus(BoardPins::OneWireData);
 Ds18b20Address temperatureAddresses[2];
-RCSwitch radioReceiver;
-RCSwitch radioTransmitter;
-RelayController relays(shiftRegisters);
-ControllerProtocol::UartProtocol appProtocol(Serial);
+RCSwitch radio;
+RelayController relays;
+ControllerProtocol::UartProtocol appProtocol;
 ControllerEvents appEvents(appProtocol);
 MacroQueue macroPlayback(appProtocol);
 

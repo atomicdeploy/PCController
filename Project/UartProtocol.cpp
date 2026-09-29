@@ -4,19 +4,28 @@
 
 namespace ControllerProtocol {
 
-UartProtocol::UartProtocol(HardwareSerial &serial) : serial_(serial) {}
+UartProtocol::UartProtocol(HardwareSerial &serial)
+    : serial_(&serial), handler_(nullptr), context_(nullptr),
+      receiveLength_(0), dropping_(false), framingErrors_(0), crcErrors_(0),
+      responseErrors_(0) {}
+
+void UartProtocol::begin(HardwareSerial &serial, uint32_t baud,
+                         FrameHandler handler, void *context) {
+  serial_ = &serial;
+  begin(baud, handler, context);
+}
 
 void UartProtocol::begin(uint32_t baud, FrameHandler handler, void *context) {
   handler_ = handler;
   context_ = context;
   receiveLength_ = 0;
   dropping_ = false;
-  serial_.begin(baud);
+  serial_->begin(baud);
 }
 
 void UartProtocol::service() {
-  while (serial_.available() > 0) {
-    const uint8_t value = static_cast<uint8_t>(serial_.read());
+  while (serial_->available() > 0) {
+    const uint8_t value = static_cast<uint8_t>(serial_->read());
     if (value == 0) {
       if (!dropping_ && receiveLength_ != 0) {
         processEncodedFrame();
@@ -80,7 +89,7 @@ bool UartProtocol::send(uint8_t opcode, uint8_t sequence,
   if (!writeCobs(raw_, rawLength)) {
     return false;
   }
-  serial_.write(static_cast<uint8_t>(0));
+  serial_->write(static_cast<uint8_t>(0));
   return true;
 }
 
@@ -120,9 +129,9 @@ bool UartProtocol::writeCobs(const uint8_t *input, uint8_t length) {
       ++readIndex;
     }
     const uint8_t blockLength = static_cast<uint8_t>(readIndex - blockStart);
-    if (serial_.write(static_cast<uint8_t>(blockLength + 1)) != 1 ||
+    if (serial_->write(static_cast<uint8_t>(blockLength + 1)) != 1 ||
         (blockLength != 0 &&
-         serial_.write(input + blockStart, blockLength) != blockLength)) {
+         serial_->write(input + blockStart, blockLength) != blockLength)) {
       return false;
     }
     if (readIndex < length) {

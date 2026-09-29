@@ -516,6 +516,25 @@ test('firmware runtime owns one shared ordinary-service clock snapshot', async (
         assert.match(sources[3], /const uint32_t releaseNow = now;/u)
 })
 
+test('full AVR profile keeps live features while compacting static runtime state', async () => {
+	const [config, context, lifecycle, radio, frontPanel] = await Promise.all([
+		readFile(new URL('../../ProjectConfig.h', import.meta.url), 'utf8'),
+		readFile(new URL('../../Project/Runtime/ControllerContext.inc.h', import.meta.url), 'utf8'),
+		readFile(new URL('../../Project/Runtime/LifecycleRuntime.inc.h', import.meta.url), 'utf8'),
+		readFile(new URL('../../Project/Runtime/RadioRuntime.inc.h', import.meta.url), 'utf8'),
+		readFile(new URL('../../Project/Runtime/FrontPanelRuntime.inc.h', import.meta.url), 'utf8')
+	])
+	assert.match(config, /#define PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES 1/u)
+	assert.match(config, /#define PCCONTROLLER_ENABLE_EEPROM_AUDIO_CUES 0/u)
+	assert.equal(context.match(/RCSwitch radio;/gu)?.length, 1)
+	assert.doesNotMatch(context, /radio(?:Receiver|Transmitter)/u)
+	assert.match(lifecycle, /radio\.enableTransmit\(BoardPins::RcTransmit\)/u)
+	assert.match(lifecycle, /radio\.enableReceive\(digitalPinToInterrupt\(BoardPins::RcReceive\)\)/u)
+	assert.match(radio, /radio\.disableReceive\(\)[^]*?radio\.send\(code, bits\)[^]*?radio\.enableReceive/u)
+	assert.match(frontPanel, /static const uint8_t PreviousMode\[\] PROGMEM/u)
+	assert.match(frontPanel, /static const uint8_t NextMode\[\] PROGMEM/u)
+})
+
 test('studio validation preserves matching Controller compile identity', async () => {
 	const root = await mkdtemp(join(tmpdir(), 'pccontroller-manifest-identity-'))
 	const output = join(root, '.build', 'firmware')

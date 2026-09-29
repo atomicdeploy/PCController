@@ -539,41 +539,54 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
     modeManager.transitionTo(MODE_MOTION_CONTROL);
   }
 
+  // The ordinary two-field editors share identical Previous/Next behavior.
+  // Keep their destinations in flash and leave only value adjustment in the
+  // per-mode switch below. SOUND and USER RELAY CONTROL remain specialized.
+  if (action == MENU_PREVIOUS || action == MENU_NEXT) {
+    static const uint8_t PreviousMode[] PROGMEM = {
+        MODE_SAVE_PROMPT, MODE_ILLUMINATION_MODE_EDIT,
+        MODE_ILLUMINATION_ON_EDIT, MODE_UNDEFINED,
+        MODE_SAVE_PROMPT, MODE_PWM_CHANNEL_EDIT,
+        MODE_RELAY, MODE_RELAY_CHANNEL_EDIT,
+        MODE_SAVE_PROMPT, MODE_USER_PWM_CHANNEL_EDIT,
+        MODE_USER_RELAYS, MODE_USER_RELAY_CHANNEL_EDIT,
+    };
+    static const uint8_t NextMode[] PROGMEM = {
+        MODE_ILLUMINATION_ON_EDIT, MODE_ILLUMINATION_OFF_EDIT,
+        MODE_SAVE_PROMPT, MODE_UNDEFINED,
+        MODE_PWM_VALUE_EDIT, MODE_SAVE_PROMPT,
+        MODE_RELAY_VALUE_EDIT, MODE_RELAY,
+        MODE_USER_PWM_VALUE_EDIT, MODE_SAVE_PROMPT,
+        MODE_USER_RELAY_BEHAVIOR_EDIT, MODE_USER_RELAY_CONTROL,
+    };
+    const uint8_t editor = static_cast<uint8_t>(modeManager.current()) -
+                           static_cast<uint8_t>(MODE_ILLUMINATION_MODE_EDIT);
+    if (editor < sizeof(PreviousMode) && editor != 3) {
+      const uint8_t destination = pgm_read_byte(
+          (action == MENU_PREVIOUS ? PreviousMode : NextMode) + editor);
+      modeManager.transitionTo(static_cast<ProgramMode>(destination));
+      menuFeedback(fromRemote);
+      return;
+    }
+  }
+
   switch (modeManager.current()) {
     case MODE_ILLUMINATION_MODE_EDIT:
-      if (action == MENU_PREVIOUS) {
-        modeManager.transitionTo(MODE_SAVE_PROMPT);
-      } else if (action == MENU_NEXT) {
-        modeManager.transitionTo(MODE_ILLUMINATION_ON_EDIT);
-      } else {
-        adjustIlluminationMode(action == MENU_INCREASE, actionNow);
-      }
+      adjustIlluminationMode(action == MENU_INCREASE, actionNow);
       menuFeedback(fromRemote);
       return;
 
     case MODE_ILLUMINATION_ON_EDIT:
-      if (action == MENU_PREVIOUS) {
-        modeManager.transitionTo(MODE_ILLUMINATION_MODE_EDIT);
-      } else if (action == MENU_NEXT) {
-        modeManager.transitionTo(MODE_ILLUMINATION_OFF_EDIT);
-      } else {
-        illumination.setOnBrightness(adjustedBrightness(
-            illumination.onBrightness(), action == MENU_INCREASE));
-        markIlluminationSettingsChanged(actionNow);
-      }
+      illumination.setOnBrightness(adjustedBrightness(
+          illumination.onBrightness(), action == MENU_INCREASE));
+      markIlluminationSettingsChanged(actionNow);
       menuFeedback(fromRemote);
       return;
 
     case MODE_ILLUMINATION_OFF_EDIT:
-      if (action == MENU_PREVIOUS) {
-        modeManager.transitionTo(MODE_ILLUMINATION_ON_EDIT);
-      } else if (action == MENU_NEXT) {
-        modeManager.transitionTo(MODE_SAVE_PROMPT);
-      } else {
-        illumination.setOffBrightness(adjustedBrightness(
-            illumination.offBrightness(), action == MENU_INCREASE));
-        markIlluminationSettingsChanged(actionNow);
-      }
+      illumination.setOffBrightness(adjustedBrightness(
+          illumination.offBrightness(), action == MENU_INCREASE));
+      markIlluminationSettingsChanged(actionNow);
       menuFeedback(fromRemote);
       return;
 
@@ -634,35 +647,18 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       return;
 
     case MODE_PWM_CHANNEL_EDIT:
-      if (action == MENU_PREVIOUS) {
-        modeManager.transitionTo(MODE_SAVE_PROMPT);
-      } else if (action == MENU_NEXT) {
-        modeManager.transitionTo(MODE_PWM_VALUE_EDIT);
-      } else {
-        pwm.adjustChannel(action == MENU_INCREASE ? 1 : -1, actionNow);
-      }
+      pwm.adjustChannel(action == MENU_INCREASE ? 1 : -1, actionNow);
       menuFeedback(fromRemote);
       return;
 
     case MODE_PWM_VALUE_EDIT:
-      if (action == MENU_PREVIOUS) {
-        modeManager.transitionTo(MODE_PWM_CHANNEL_EDIT);
-      } else if (action == MENU_NEXT) {
-        modeManager.transitionTo(MODE_SAVE_PROMPT);
-      } else {
-        pwm.adjustValue(action == MENU_INCREASE ? PWM_MENU_STEP
-                                                    : -PWM_MENU_STEP,
-                            actionNow);
-      }
+      pwm.adjustValue(action == MENU_INCREASE ? PWM_MENU_STEP : -PWM_MENU_STEP,
+                      actionNow);
       menuFeedback(fromRemote);
       return;
 
     case MODE_USER_PWM_CHANNEL_EDIT:
-      if (action == MENU_PREVIOUS) {
-        modeManager.transitionTo(MODE_SAVE_PROMPT);
-      } else if (action == MENU_NEXT) {
-        modeManager.transitionTo(MODE_USER_PWM_VALUE_EDIT);
-      } else if (action == MENU_INCREASE) {
+      if (action == MENU_INCREASE) {
         userPwmMenuIndex = static_cast<uint8_t>(
             (userPwmMenuIndex + 1) % 8);
       } else {
@@ -675,26 +671,15 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       return;
 
     case MODE_USER_PWM_VALUE_EDIT: {
-      if (action == MENU_PREVIOUS) {
-        modeManager.transitionTo(MODE_USER_PWM_CHANNEL_EDIT);
-      } else if (action == MENU_NEXT) {
-        modeManager.transitionTo(MODE_SAVE_PROMPT);
-      } else {
-        uint8_t &value =
-            settingsStore.values().userPwm[userPwmMenuIndex];
-        value = adjustedBrightness(value, action == MENU_INCREASE);
-        pwm.setLogical(userPwmMenuIndex, userPwm12(value));
-      }
+      uint8_t &value = settingsStore.values().userPwm[userPwmMenuIndex];
+      value = adjustedBrightness(value, action == MENU_INCREASE);
+      pwm.setLogical(userPwmMenuIndex, userPwm12(value));
       menuFeedback(fromRemote);
       return;
     }
 
     case MODE_USER_RELAY_CHANNEL_EDIT:
-      if (action == MENU_PREVIOUS) {
-        modeManager.transitionTo(MODE_USER_RELAYS);
-      } else if (action == MENU_NEXT) {
-        modeManager.transitionTo(MODE_USER_RELAY_BEHAVIOR_EDIT);
-      } else if (action == MENU_INCREASE) {
+      if (action == MENU_INCREASE) {
         userRelayMenuIndex =
             static_cast<uint8_t>((userRelayMenuIndex + 1) % 4);
       } else {
@@ -707,13 +692,7 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       return;
 
     case MODE_USER_RELAY_BEHAVIOR_EDIT:
-      if (action == MENU_PREVIOUS) {
-        modeManager.transitionTo(MODE_USER_RELAY_CHANNEL_EDIT);
-      } else if (action == MENU_NEXT) {
-        modeManager.transitionTo(MODE_USER_RELAY_CONTROL);
-      } else {
-        userRelayBehavior = action == MENU_INCREASE ? 1 : 0;
-      }
+      userRelayBehavior = action == MENU_INCREASE ? 1 : 0;
       menuFeedback(fromRemote);
       return;
 
@@ -767,11 +746,7 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       return;
 
     case MODE_RELAY_CHANNEL_EDIT:
-      if (action == MENU_PREVIOUS) {
-        modeManager.transitionTo(MODE_RELAY);
-      } else if (action == MENU_NEXT) {
-        modeManager.transitionTo(MODE_RELAY_VALUE_EDIT);
-      } else if (action == MENU_INCREASE) {
+      if (action == MENU_INCREASE) {
         relayMenuIndex = static_cast<uint8_t>((relayMenuIndex + 1) % 8);
       } else {
         relayMenuIndex =
@@ -781,18 +756,8 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       return;
 
     case MODE_RELAY_VALUE_EDIT:
-      if (action == MENU_PREVIOUS) {
-        modeManager.transitionTo(MODE_RELAY_CHANNEL_EDIT);
-      } else if (action == MENU_NEXT) {
-        modeManager.transitionTo(MODE_RELAY);
-      } else {
-        setSelectedRelay(action == MENU_INCREASE, actionNow);
-      }
-      if (action == MENU_PREVIOUS || action == MENU_NEXT) {
-        menuFeedback(fromRemote);
-      } else {
-        menuVisualFeedback(fromRemote);
-      }
+      setSelectedRelay(action == MENU_INCREASE, actionNow);
+      menuVisualFeedback(fromRemote);
       return;
 
     default:
@@ -1065,19 +1030,29 @@ void showPwmChannel() {
 }
 
 // Alternates timer total/remaining while indefinite learning keeps LErn.
-void showLearningProgress(uint32_t at) {
+void showLearningProgress(uint32_t) {
   if (learningTotalSeconds == 0) {
     display.showText(commonText(TextLearn));
     return;
   }
-  const bool remaining = ((at / 1000UL) & 1U) != 0;
-  const uint8_t seconds = remaining ? learningRemainingSeconds()
-                                    : learningTotalSeconds;
+  const uint8_t remainingSeconds = learningRemainingSeconds();
+  const bool remaining =
+      ((learningTotalSeconds - remainingSeconds) & 1U) != 0;
+  uint8_t seconds = remaining ? remainingSeconds : learningTotalSeconds;
+  const bool hundreds = seconds >= 100;
+  if (hundreds) {
+    seconds = static_cast<uint8_t>(seconds - 100);
+  }
+  uint8_t tens = 0;
+  while (seconds >= 10) {
+    seconds = static_cast<uint8_t>(seconds - 10);
+    ++tens;
+  }
   char text[5] = {
       remaining ? 'r' : 't',
-      static_cast<char>(seconds >= 100 ? '0' + seconds / 100 : ' '),
-      static_cast<char>(seconds >= 10 ? '0' + (seconds / 10) % 10 : ' '),
-      static_cast<char>('0' + seconds % 10),
+      static_cast<char>(hundreds ? '1' : ' '),
+      static_cast<char>(hundreds || tens != 0 ? '0' + tens : ' '),
+      static_cast<char>('0' + seconds),
       '\0',
   };
   display.showText(text);

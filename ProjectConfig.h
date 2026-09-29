@@ -73,7 +73,7 @@
 // from the CRC-backed startup region. Disabling this keeps the exact immutable
 // fallbacks and avoids an EEPROM dependency; it does not disable local cues.
 #ifndef PCCONTROLLER_ENABLE_EEPROM_AUDIO_CUES
-#define PCCONTROLLER_ENABLE_EEPROM_AUDIO_CUES 1
+#define PCCONTROLLER_ENABLE_EEPROM_AUDIO_CUES 0
 #endif
 
 #if (PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES != 0) && \

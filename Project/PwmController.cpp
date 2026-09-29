@@ -12,7 +12,13 @@ bool channelInMask(uint16_t mask, uint8_t channel) {
 } // namespace
 
 PwmController::PwmController(PwmExpanderDriver &driver)
-    : driver_(driver) {}
+    : driver_(&driver) {}
+
+void PwmController::begin(PwmExpanderDriver &driver, bool available,
+                          uint32_t now) {
+  driver_ = &driver;
+  begin(available, now);
+}
 
 void PwmController::begin(bool available, uint32_t now) {
   (void)now;
@@ -255,7 +261,7 @@ bool PwmController::writeLogical(uint8_t channel, uint16_t value, bool force) {
   }
 #endif
 
-  if (driver_.setPWM(channel, on, off) == 0) {
+  if (driver_->setPWM(channel, on, off) == 0) {
     cachedValues_[channel] = value;
     cacheValidMask_ |= _BV(channel);
     if (channel == channel_) {

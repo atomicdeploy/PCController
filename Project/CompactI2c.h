@@ -40,12 +40,14 @@ private:
   void resetPeripheral();
 #endif
 
-  uint8_t error_ = 0;
-  uint8_t rxLength_ = 0;
-  uint8_t rxIndex_ = 0;
-  uint8_t rx_[BufferSize]{};
-  uint16_t timeoutMicros_ = 25000;
-  bool resetOnTimeout_ = true;
+  uint8_t error_;
+  uint8_t rxLength_;
+  uint8_t rxIndex_;
+  uint8_t rx_[BufferSize];
+  // Lifecycle setup installs the 25 ms reset policy before the first accepted
+  // I2C command; zero defaults keep the static buffer entirely in BSS.
+  uint16_t timeoutMicros_;
+  bool resetOnTimeout_;
 };
 
 // i2cBus is the single board-wide bounded TWI master.

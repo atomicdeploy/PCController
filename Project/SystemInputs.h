@@ -34,12 +34,12 @@ public:
 private:
   // One input's raw sample, debounced state, pending edge, and timestamps.
   struct DebouncedInput {
-    bool sample = false;
-    bool stable = false;
-    bool initialized = false;
-    bool changedPending = false;
-    uint32_t sampleChangedAt = 0;
-    uint32_t stableChangedAt = 0;
+    bool sample;
+    bool stable;
+    bool initialized;
+    bool changedPending;
+    uint32_t sampleChangedAt;
+    uint32_t stableChangedAt;
   };
 
   static bool updateInput(DebouncedInput &input, bool sample, uint32_t now);
@@ -47,12 +47,14 @@ private:
 
   DebouncedInput door_;
   DebouncedInput bluetooth_;
-  uint8_t rawInputs_ = 0xFF; // Active-low 74HC165 physical representation.
-  bool bluetoothHasTransitioned_ = false;
-  bool bluetoothBlinkObserved_ = false;
-  uint32_t lastBluetoothTransitionAt_ = 0;
-  uint32_t lastBluetoothOnMs_ = 0;
-  uint32_t lastBluetoothOffMs_ = 0;
+  // begin() seeds the real active-low sample before any consumer runs. Keeping
+  // the static object all-zero avoids copying its entire state from flash.
+  uint8_t rawInputs_;
+  bool bluetoothHasTransitioned_;
+  bool bluetoothBlinkObserved_;
+  uint32_t lastBluetoothTransitionAt_;
+  uint32_t lastBluetoothOnMs_;
+  uint32_t lastBluetoothOffMs_;
 };
 
 // systemInputs is the single debounced door and BT Audio input service.

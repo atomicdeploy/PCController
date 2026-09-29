@@ -27,8 +27,11 @@ using FrameHandler = void (*)(const Frame &frame, void *context);
 // UartProtocol incrementally decodes COBS frames and owns bounded RX/TX scratch.
 class UartProtocol {
 public:
+  UartProtocol() = default;
   explicit UartProtocol(HardwareSerial &serial);
 
+  void begin(HardwareSerial &serial, uint32_t baud, FrameHandler handler,
+             void *context = nullptr);
   void begin(uint32_t baud, FrameHandler handler, void *context = nullptr);
   void service();
 
@@ -57,19 +60,19 @@ private:
   bool writeCobs(const uint8_t *input, uint8_t length);
   void processEncodedFrame();
 
-  HardwareSerial &serial_;
-  FrameHandler handler_ = nullptr;
-  void *context_ = nullptr;
+  HardwareSerial *serial_;
+  FrameHandler handler_;
+  void *context_;
   // TX and RX remain separate so a serial handler may respond without
   // invalidating its zero-copy request view. RX is decoded in-place; TX also
   // stages synchronous MCU-timed macro requests before their response reuses it.
   uint8_t raw_[MaximumRaw];
   uint8_t receive_[MaximumEncoded];
-  uint8_t receiveLength_ = 0;
-  bool dropping_ = false;
-  uint16_t framingErrors_ = 0;
-  uint16_t crcErrors_ = 0;
-  uint16_t responseErrors_ = 0;
+  uint8_t receiveLength_;
+  bool dropping_;
+  uint16_t framingErrors_;
+  uint16_t crcErrors_;
+  uint16_t responseErrors_;
 };
 
 } // namespace ControllerProtocol

@@ -15,7 +15,7 @@ static inline __attribute__((always_inline)) void initializeController() {
   wdt_enable(WDTO_2S);
   wdt_reset();
   now = millis();
-  appProtocol.begin(PCCONTROLLER_UART_BAUD, handleProtocolFrame);
+  appProtocol.begin(Serial, PCCONTROLLER_UART_BAUD, handleProtocolFrame);
   resetTelemetry.begin();
   // Announce as soon as UART0 is ready. Opening a USB serial adapter often
   // resets the MCU; serving HELLO during initialization prevents the host's
@@ -26,10 +26,9 @@ static inline __attribute__((always_inline)) void initializeController() {
   now = millis();
   const uint32_t startupNow = now;
   shiftRegisters.begin();
-  relays.setAppliedObserver(controllerRelayApplied);
-  relays.begin(startupNow);
+  relays.begin(shiftRegisters, controllerRelayApplied, startupNow);
   systemInputs.begin(shiftRegisters.rawInputs(), startupNow);
-  buzzer.begin();
+  buzzer.begin(BoardPins::Buzzer);
 #if PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
   audioCues.begin();
 #endif
@@ -71,7 +70,7 @@ static inline __attribute__((always_inline)) void initializeController() {
 
     ina219Available = ina219.begin();
   }
-  pwm.begin(pwmAvailable, startupNow);
+  pwm.begin(pwmDriver, pwmAvailable, startupNow);
   if (programming) {
     // A durable programming latch must not briefly restore an On/Auto light
     // between PWM initialization and the normal all-off latch enforcement.
@@ -93,9 +92,9 @@ static inline __attribute__((always_inline)) void initializeController() {
   wdt_reset();
 
   learnedRemotes.begin();
-  radioTransmitter.enableTransmit(BoardPins::RcTransmit);
-  radioReceiver.setReceiveTolerance(70);
-  radioReceiver.enableReceive(digitalPinToInterrupt(BoardPins::RcReceive));
+  radio.enableTransmit(BoardPins::RcTransmit);
+  radio.setReceiveTolerance(70);
+  radio.enableReceive(digitalPinToInterrupt(BoardPins::RcReceive));
 
   // EEPROM boot records are deliberately deferred until every relay/PWM/
   // safety policy and radio initialization above has completed. They reuse the
@@ -117,7 +116,7 @@ static inline __attribute__((always_inline)) void initializeController() {
 }
 
 // Advances every cooperative domain without blocking UART or safety deadlines.
-static inline __attribute__((always_inline)) void serviceController() {
+__attribute__((noinline)) void serviceController() {
   now = millis();
   // Keep the shared snapshot in registers across driver calls. Re-reading the
   // file-scope value grows this byte-tight AVR image past its identity boundary.

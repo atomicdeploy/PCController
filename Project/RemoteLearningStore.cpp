@@ -53,6 +53,18 @@ bool RemoteLearningStore::get(uint8_t id, LearnedRemote &remote) const {
   return true;
 }
 
+bool RemoteLearningStore::getWire(uint8_t id, uint8_t *wire) const {
+  Record record;
+  if (!readRecord(id, record)) {
+    return false;
+  }
+  if (wire != nullptr) {
+    wire[0] = id;
+    memcpy(wire + 1, &record, sizeof(LearnedRemote) - 1);
+  }
+  return true;
+}
+
 bool RemoteLearningStore::find(uint32_t code, uint8_t bits,
                                uint8_t protocol,
                                LearnedRemote &remote) const {

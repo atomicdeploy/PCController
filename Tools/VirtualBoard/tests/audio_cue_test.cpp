@@ -4,6 +4,7 @@
 
 #include "LocalLib/TonePlayer.h"
 #include "Project/AudioCues.h"
+#include "LocalLib/BoardPins.h"
 #include "Project/EepromLayout.h"
 #include "Project/UartProtocol.h"
 
@@ -28,7 +29,7 @@ std::uint16_t timerTop(std::uint16_t frequencyHz) {
 void start(AudioCue cue, std::uint32_t now) {
   buzzer.stop();
   buzzer.setMuted(false);
-  buzzer.begin();
+  buzzer.begin(BoardPins::Buzzer);
   audioCues.begin();
   audioCues.play(cue);
   buzzer.update(now);
@@ -107,7 +108,7 @@ void testValidEEPROMOverridesAndInvalidDescriptorRejectsWholeRecord() {
 
 void testSpecificCuePreemptsGenericAndSilentSuppressesHardware() {
   EEPROM.fill(0xFF);
-  buzzer.begin();
+  buzzer.begin(BoardPins::Buzzer);
   buzzer.setMuted(false);
   buzzer.beep(40, 2000);
   audioCues.begin();

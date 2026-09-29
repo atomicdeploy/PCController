@@ -46,8 +46,11 @@ enum class PwmChannelRole : uint8_t {
 // FULL_ON/FULL_OFF details if a later board revision inverts the stages.
 class PwmController {
 public:
+  PwmController() = default;
   explicit PwmController(PwmExpanderDriver &driver);
 
+  void begin(PwmExpanderDriver &driver, bool available,
+             uint32_t now = millis());
   void begin(bool available, uint32_t now = millis());
 
   // Front-panel commissioning controls.
@@ -97,7 +100,7 @@ private:
   void tripUnavailable();
   static uint16_t from8Bit(uint8_t value);
 
-  PwmExpanderDriver &driver_;
+  PwmExpanderDriver *driver_ = nullptr;
   uint16_t cachedValues_[PwmChannels::Count] = {};
   uint16_t cacheValidMask_ = 0;
   uint8_t channel_ = 0;

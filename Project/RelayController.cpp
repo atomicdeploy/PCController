@@ -3,6 +3,15 @@
 RelayController::RelayController(ShiftRegisters &registers)
     : sink_(registers), machine_(sink_) {}
 
+void RelayController::begin(ShiftRegisters &registers,
+                            void (*observer)(uint8_t, uint32_t),
+                            uint32_t now) {
+  sink_.bind(registers);
+  sink_.setObserver(observer);
+  machine_.bind(sink_);
+  machine_.begin(now);
+}
+
 void RelayController::begin(uint32_t now) { machine_.begin(now); }
 
 void RelayController::allOff(uint32_t now) { machine_.allOff(now); }

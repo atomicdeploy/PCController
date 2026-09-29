@@ -46,6 +46,7 @@ public:
   void begin();
   uint8_t count() const;
   bool get(uint8_t id, LearnedRemote &remote) const;
+  bool getWire(uint8_t id, uint8_t *wire) const;
   bool find(uint32_t code, uint8_t bits, uint8_t protocol,
             LearnedRemote &remote) const;
 

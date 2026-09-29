@@ -3,8 +3,8 @@
 
 static_assert(PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES == 1,
               "temporary recorder profile must preserve local audio");
-static_assert(PCCONTROLLER_ENABLE_EEPROM_AUDIO_CUES == 1,
-              "temporary recorder profile must preserve stored cues");
+static_assert(PCCONTROLLER_ENABLE_EEPROM_AUDIO_CUES == 0,
+              "constrained profile keeps host-owned cues out of AVR flash");
 static_assert(menuPageNavigable(PAGE_RELAY) && menuPageNavigable(PAGE_KEYS) &&
                   menuPageNavigable(PAGE_ILLUMINATION) && menuPageNavigable(PAGE_SOUND),
               "required front-panel controls disappeared");

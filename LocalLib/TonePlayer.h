@@ -8,11 +8,13 @@
 // TonePlayer queues nonblocking tones on the board's Timer1 buzzer output.
 class TonePlayer {
 public:
+  TonePlayer() = default;
   // ATmega328P implementation owns Timer1 and the PB1/OC1A pin. It uses
   // hardware compare toggling (no audio-rate ISR); do not combine it with
   // Servo or analogWrite() on D9/D10.
   explicit TonePlayer(uint8_t pin);
 
+  void begin(uint8_t pin);
   void begin();
   bool enqueue(uint16_t frequencyHz, uint16_t durationMs);
   bool pause(uint16_t durationMs);
@@ -42,15 +44,15 @@ private:
 
   uint8_t pin_;
   ToneStep queue_[MAX_TONES];
-  uint8_t head_ = 0;
-  uint8_t tail_ = 0;
-  uint8_t count_ = 0;
-  uint32_t stepEndsAt_ = 0;
-  bool stepActive_ = false;
-  bool muted_ = false;
-  uint8_t revision_ = 0;
-  uint16_t activeFrequencyHz_ = 0;
-  uint16_t activeDurationMs_ = 0;
+  uint8_t head_;
+  uint8_t tail_;
+  uint8_t count_;
+  uint32_t stepEndsAt_;
+  bool stepActive_;
+  bool muted_;
+  uint8_t revision_;
+  uint16_t activeFrequencyHz_;
+  uint16_t activeDurationMs_;
 };
 
 // buzzer is the single board-wide feedback player.

@@ -365,18 +365,21 @@ void transferI2c(uint8_t sequence, const uint8_t *request, uint8_t length,
 // Pages EEPROM-backed learned RF entries without allocating a list in SRAM.
 #if PCCONTROLLER_ENABLE_RF_LEARNING
 void sendLearnedRemotes(uint8_t sequence, uint8_t cursor) {
-  uint8_t payload[40] = {1, learnedRemotes.count(), 0xFF, 0};
+  uint8_t payload[40];
+  payload[0] = 1;
+  payload[1] = learnedRemotes.count();
+  payload[2] = 0xFF;
+  payload[3] = 0;
   uint8_t scan = cursor;
   uint8_t index = 4;
-  LearnedRemote remote;
   while (scan < RemoteLearningStore::Capacity) {
-    if (learnedRemotes.get(scan, remote)) {
+    if (learnedRemotes.getWire(scan, payload[3] < 3 ? payload + index
+                                                    : nullptr)) {
       if (payload[3] == 3) {
         payload[2] = scan;
         break;
       }
-      memcpy(payload + index, &remote, sizeof(remote));
-      index = static_cast<uint8_t>(index + sizeof(remote));
+      index = static_cast<uint8_t>(index + sizeof(LearnedRemote));
       ++payload[3];
     }
     ++scan;
@@ -678,9 +681,8 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame,
 #if PCCONTROLLER_ENABLE_RF_LEARNING
     case RadioLearnStart:
       if (length != 2 || payload[0] > RF_LEARN_TIMER ||
-          (payload[0] == RF_LEARN_INDEFINITE && payload[1] != 0) ||
-          (payload[0] == RF_LEARN_TIMER &&
-           (payload[1] == 0 || payload[1] > MAX_LEARNING_SECONDS))) {
+          payload[1] > MAX_LEARNING_SECONDS ||
+          payload[0] == static_cast<uint8_t>(payload[1] == 0)) {
         goto badPayload;
       }
       beginLearning(payload[0], payload[1]);
