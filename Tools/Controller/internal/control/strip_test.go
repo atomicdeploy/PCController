@@ -135,3 +135,13 @@ func TestStripEffectCommandListsAndStarts(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestStripEffectCommandRoutesThroughPublicCommandEngine(t *testing.T) {
+	runtime := New(Options{})
+	t.Cleanup(func() { _ = runtime.Close() })
+	engine := NewCommandEngine(runtime, CommandOptions{})
+	list, err := engine.Execute(context.Background(), "strip effect list")
+	if err != nil || !strings.Contains(list, "white-thunder") {
+		t.Fatalf("public strip effect route: %q, %v", list, err)
+	}
+}
