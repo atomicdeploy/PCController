@@ -84,11 +84,26 @@ func TestArtifactHTTPAlphaAuthorizationHonorsRemoteExposure(t *testing.T) {
 		t.Fatalf("credentialless alpha artifact status=%d headers=%v body=%s", response.Code, response.Header(), response.Body.String())
 	}
 
+	uploadRequest := func() *http.Request {
+		value := httptest.NewRequest(
+			http.MethodPost,
+			"http://controller.example/api/artifacts/upload?kind=firmware&name=alpha.hex",
+			strings.NewReader(":00000001FF\n"),
+		)
+		value.RemoteAddr = "198.51.100.10:43100"
+		return value
+	}
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, uploadRequest())
+	if response.Code != http.StatusCreated || response.Header().Get("X-PCController-Authentication") != "disabled-alpha" {
+		t.Fatalf("credentialless alpha upload status=%d headers=%v body=%s", response.Code, response.Header(), response.Body.String())
+	}
+
 	config.IPC.AllowRemote = false
 	response = httptest.NewRecorder()
-	handler.ServeHTTP(response, request())
+	handler.ServeHTTP(response, uploadRequest())
 	if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "remote network access is disabled") {
-		t.Fatalf("disabled remote artifact status=%d body=%s", response.Code, response.Body.String())
+		t.Fatalf("disabled remote artifact upload status=%d body=%s", response.Code, response.Body.String())
 	}
 }
 

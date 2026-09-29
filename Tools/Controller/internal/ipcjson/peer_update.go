@@ -15,7 +15,8 @@ import (
 	"pccontroller.local/controller/internal/artifacts"
 )
 
-const rpcErrorOutcomeUncertain = -32004
+// ErrorCodeOutcomeUncertain means a caller must retry with the same idempotency key.
+const ErrorCodeOutcomeUncertain = -32004
 
 type peerHostUpdateRequest struct {
 	Peer           string `json:"peer"`
@@ -60,7 +61,7 @@ func (service *Service) updatePeerHost(ctx context.Context, request peerHostUpda
 			detail := err.Error()
 			metadata := map[string]string(nil)
 			var rpcError *RPCError
-			if errors.As(err, &rpcError) && rpcError.Code == rpcErrorOutcomeUncertain {
+			if errors.As(err, &rpcError) && rpcError.Code == ErrorCodeOutcomeUncertain {
 				state = "outcome-uncertain"
 				detail = rpcError.Message
 				metadata = map[string]string{
@@ -236,7 +237,7 @@ func peerOutcomeUncertain(detail string) *RPCError {
 	if detail != "" {
 		message += ": " + detail
 	}
-	return &RPCError{Code: rpcErrorOutcomeUncertain, Message: message}
+	return &RPCError{Code: ErrorCodeOutcomeUncertain, Message: message}
 }
 
 func (service *Service) callPeer(ctx context.Context, peer, method string, params, target any) error {

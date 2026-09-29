@@ -207,7 +207,7 @@ func TestPeerHostUpdateRetainsIntentWhenTargetAcceptsThenBridgeCloses(t *testing
 		t.Fatal("accept-then-disconnect unexpectedly succeeded")
 	} else {
 		var rpcError *RPCError
-		if !errors.As(err, &rpcError) || rpcError.Code != rpcErrorOutcomeUncertain {
+		if !errors.As(err, &rpcError) || rpcError.Code != ErrorCodeOutcomeUncertain {
 			t.Fatalf("uncertain outcome err=%v rpc=%#v", err, rpcError)
 		}
 		if !strings.Contains(rpcError.Message, "retry with the same idempotency key") {
