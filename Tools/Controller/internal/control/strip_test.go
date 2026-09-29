@@ -71,3 +71,67 @@ func TestStripRainbowStopsWithoutMoreFrames(t *testing.T) {
 		t.Fatal("rainbow never committed a frame")
 	}
 }
+
+func TestStripEffectCatalogAndAliases(t *testing.T) {
+	for _, id := range []string{"police", "white-thunder", "thunder", "lightning", "converging-red", "converge", "red-dots"} {
+		definition, renderer, ok := stripEffectByID(id)
+		if !ok || definition.ID == "" || renderer == nil {
+			t.Fatalf("missing effect %q", id)
+		}
+	}
+	if _, _, ok := stripEffectByID("unknown"); ok {
+		t.Fatal("unknown effect was accepted")
+	}
+}
+
+func TestStripPoliceFrameAlternatesRedAndBlue(t *testing.T) {
+	first := stripPoliceFrame(4, 0)
+	if first[0] != 255 || first[2] != 0 || first[6] != 0 || first[8] != 255 {
+		t.Fatalf("unexpected first police frame: %v", first)
+	}
+	second := stripPoliceFrame(4, 400*time.Millisecond)
+	if second[0] != 0 || second[2] != 255 || second[6] != 255 || second[8] != 0 {
+		t.Fatalf("unexpected swapped police frame: %v", second)
+	}
+}
+
+func TestStripWhiteThunderFrameEnvelope(t *testing.T) {
+	peak := stripWhiteThunderFrame(2, 0)
+	if len(peak) != 6 || peak[0] != 255 || peak[1] != 255 || peak[2] != 255 {
+		t.Fatalf("unexpected thunder peak: %v", peak)
+	}
+	dark := stripWhiteThunderFrame(2, 500*time.Millisecond)
+	for _, channel := range dark {
+		if channel != 0 {
+			t.Fatalf("thunder should be dark between strikes: %v", dark)
+		}
+	}
+}
+
+func TestStripConvergingRedFrameMovesTowardCenter(t *testing.T) {
+	start := stripConvergingRedFrame(10, 0)
+	if start[0] != 255 || start[27] != 255 || start[12] != 0 {
+		t.Fatalf("unexpected converging start: %v", start)
+	}
+	middle := stripConvergingRedFrame(10, 1900*time.Millisecond)
+	if middle[12] == 0 || middle[15] == 0 {
+		t.Fatalf("dots did not reach center: %v", middle)
+	}
+}
+
+func TestStripEffectCommandListsAndStarts(t *testing.T) {
+	target := &recordingOutputTarget{}
+	outputs := NewOutputScheduler(target)
+	defer outputs.Close()
+	list, err := stripStreamCommand(context.Background(), outputs, []string{"effect", "list"})
+	if err != nil || !strings.Contains(list, "converging-red") {
+		t.Fatalf("effect list: %q, %v", list, err)
+	}
+	started, err := stripStreamCommand(context.Background(), outputs, []string{"effect", "play", "police", "8", "20"})
+	if err != nil || !strings.Contains(started, "strip effect police started") {
+		t.Fatalf("effect start: %q, %v", started, err)
+	}
+	if _, err := stripStreamCommand(context.Background(), outputs, []string{"stop"}); err != nil {
+		t.Fatal(err)
+	}
+}
