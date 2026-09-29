@@ -17,6 +17,17 @@ type PeripheralDescriptor struct {
 	Control     string `json:"control"`
 }
 
+// ControlDescriptor is the compact, ordered cross-surface contract for one
+// operator-controllable board channel. The canonical key remains suitable for
+// commands and persisted names while Kind supplies the operator vocabulary.
+type ControlDescriptor struct {
+	Key     string `json:"key"`
+	Kind    string `json:"kind"`
+	Order   int    `json:"order"`
+	Name    string `json:"name"`
+	Control string `json:"control"`
+}
+
 var corePeripheralDescriptors = buildPeripheralDescriptors()
 
 func buildPeripheralDescriptors() []PeripheralDescriptor {
@@ -103,4 +114,37 @@ func PeripheralDefaultName(key string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// ControlDescriptors resolves configured host names over the canonical
+// peripheral registry. Only directly operator-controlled relay, Side, and
+// MOSFET channels are included; sensors and system-owned PWM channels remain
+// available through the full peripheral catalog.
+func ControlDescriptors(names map[string]string) []ControlDescriptor {
+	controls := make([]ControlDescriptor, 0, 21)
+	for _, descriptor := range corePeripheralDescriptors {
+		kind := ""
+		switch descriptor.Kind {
+		case "relay":
+			kind = "relay"
+		case "motion":
+			kind = "side"
+		case "pwm":
+			if descriptor.Index <= 10 {
+				kind = "mosfet"
+			}
+		}
+		if kind == "" {
+			continue
+		}
+		name := descriptor.DefaultName
+		if configured := names[descriptor.Key]; configured != "" {
+			name = configured
+		}
+		controls = append(controls, ControlDescriptor{
+			Key: descriptor.Key, Kind: kind, Order: descriptor.Index,
+			Name: name, Control: descriptor.Control,
+		})
+	}
+	return controls
 }

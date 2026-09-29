@@ -1768,6 +1768,9 @@ func TestGenericCommandRemoteCapabilitiesDistinguishReadsFromMutations(t *testin
 		{"os status", capabilityRead},
 		{"os facts serial", capabilityRead},
 		{"os key F13", capabilityVirtualKeys},
+		{"open", capabilityConnection},
+		{"close", capabilityConnection},
+		{"reconnect", capabilityConnection},
 		{"program flash image.hex", capabilityProgramming},
 		{"toolchain profile", capabilityRead},
 		{"toolchain sync", capabilityProgramming},
@@ -1777,6 +1780,20 @@ func TestGenericCommandRemoteCapabilitiesDistinguishReadsFromMutations(t *testin
 	for _, test := range tests {
 		if got := commandCapability(test.command); got != test.want {
 			t.Errorf("commandCapability(%q)=%q want %q", test.command, got, test.want)
+		}
+	}
+}
+
+func TestConnectionRPCMethodsRequireConnectionCapability(t *testing.T) {
+	for _, method := range []string{
+		"controller.connect",
+		"controller.open",
+		"controller.port.open",
+		"controller.close",
+		"controller.port.close",
+	} {
+		if got := requestCapability(method, nil); got != capabilityConnection {
+			t.Errorf("requestCapability(%q)=%q, want %q", method, got, capabilityConnection)
 		}
 	}
 }

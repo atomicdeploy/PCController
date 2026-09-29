@@ -145,6 +145,12 @@ func runExec(args []string, stdout, stderr io.Writer, store *appconfig.Store) er
 		return errors.New("exec requires a controller shell command")
 	}
 	commandText := joinControllerCommand(flags.Args())
+	return runExecCommand(connection, commandText, stdout, store)
+}
+
+// runExecCommand owns the single local/primary routing path used by typed CLI
+// commands and exec, keeping connection and capability behavior identical.
+func runExecCommand(connection *connectionFlags, commandText string, stdout io.Writer, store *appconfig.Store) error {
 	claim, havePrimary, err := preparePrimaryMode("exec")
 	if err != nil {
 		return err

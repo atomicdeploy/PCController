@@ -642,8 +642,8 @@ request error.
 | `controller.command.catalog` | `{}` | machine-readable registered command names, aliases, usage, summary, and task group |
 | `controller.melodies.list` | `{}` | effective configured host melody catalog with validated note timing |
 | `controller.status` | `{}` | fresh board status |
-| `controller.peripherals.get` | `{}` | host-owned custom names plus the canonical 34-entry peripheral descriptor registry; requires `read` |
-| `controller.peripherals.set` | `peripheral_names` object | atomically replace custom host names and return the normalized names plus registry; requires `host_configuration` |
+| `controller.peripherals.get` | `{}` | host-owned custom names, the canonical 34-entry peripheral registry, and the resolved ordered 21-entry control registry; requires `read` |
+| `controller.peripherals.set` | `peripheral_names` object | atomically replace custom host names and return normalized names plus both registries; requires `host_configuration` |
 | `controller.pwm.values` | `{}` | authoritative board availability, selected channel, and all sixteen logical values; requires `read` |
 | `controller.illumination.get` | `{}` | persisted Off/Auto/On policy, on/off brightness, live door-selected target, and exact applied enclosure PWM channel 11; requires `read` |
 | `controller.illumination.set` | `{ "mode": 0..2, "on_brightness": 0..255, "off_brightness": 0..255 }` | preserves every unrelated board setting, applies live, waits for durable EEPROM readback, and returns the authoritative illumination state; requires `board_commands` |
@@ -876,7 +876,7 @@ All JSON endpoints share the IPC listener:
 | `GET /api/ui-config` | unauthenticated non-secret browser bootstrap contract |
 | `POST /api/rpc` | one JSON-RPC request |
 | `GET /api/snapshot` | cached controller snapshot |
-| `GET /api/peripherals` | custom names and the canonical 34-entry descriptor registry; `read` capability |
+| `GET /api/peripherals` | custom names, the canonical 34-entry peripheral registry, and the resolved ordered 21-entry control registry; `read` capability |
 | `PUT /api/peripherals` | replace custom names from `peripheral_names`; `host_configuration` capability |
 | `GET /api/pwm` | authoritative availability, selected channel, and all sixteen values; `read` capability |
 | `PUT /api/pwm` | write `channel` (`0..15`) and `value` (`0..4095`), then return all sixteen values; `board_commands` capability |
@@ -920,6 +920,9 @@ All JSON endpoints share the IPC listener:
 | `/api/integrations/device/*` | always fails closed; device operations require typed RPC |
 | `POST /ipc` | JSON-RPC compatibility on the configured WebSocket path |
 
+Core routes are versionless. `/api/v1` and every `/api/v1/...` path are
+explicitly rejected rather than aliased to the living `/api/...` contract.
+
 All data/API routes except `/healthz` and the non-secret `/api/ui-config`
 bootstrap apply host authentication. Bodies are limited to
 1 MiB. Unsupported methods are rejected, and the inbound webhook path is `404`
@@ -949,6 +952,15 @@ routed path—not the raw `RequestURI` or query string.
       "default_name": "User Relay 5",
       "control": "relay"
     }
+  ],
+  "controls": [
+    {
+      "key": "relay.5",
+      "kind": "relay",
+      "order": 5,
+      "name": "Workbench lamp",
+      "control": "relay"
+    }
   ]
 }
 ```
@@ -959,6 +971,22 @@ presentation names in `ui.peripheral_names`, not device settings. Set methods
 trim keys and names, reject invalid input atomically, and treat a blank name as
 a request to remove that override so the descriptor's `default_name` becomes
 visible again. No peripheral-name operation reads or writes MCU EEPROM.
+
+The ordered `controls` projection contains exactly 21 directly controllable
+entries in canonical order: relay 1..8, Side A/B, then MOSFET/PWM 0..10. Its
+`name` is already resolved from the configured host name or canonical default.
+System-owned PWM 11..15, displays, and sensors remain in `peripherals` and are
+not misrepresented as generic output controls.
+
+For a one-shot board tone, `controller buzzer --frequency 440 --duration 125`
+is the typed top-level spelling of `controller exec buzzer 440 125`. Both use
+the same primary/local command engine. The engine reads board settings before
+sending the opcode and returns `buzzer suppressed: board is silent` without a
+write when firmware-owned silent mode is active.
+
+Settings mutations return confirmed readback from the runtime durability loop.
+Formatted settings include the authoritative `persisted` value; an accepted
+write is not reported as durable until readback matches and persistence is set.
 
 All PWM read and mutation methods return the native `PWM_VALUES` JSON shape:
 
