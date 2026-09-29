@@ -18,8 +18,9 @@ import (
 	"pccontroller.local/controller/internal/secretstore"
 )
 
-// Integrations contains PC-host integrations only. None of these values is
-// mirrored into MCU EEPROM.
+// Integrations contains host integration policy. BuzzerMirror.Path is the one
+// explicit exception that may reconcile the MCU Silent bit through the owning
+// runtime; no other integration value is mirrored into EEPROM.
 type Integrations struct {
 	Hotkeys                []Hotkey          `json:"hotkeys,omitempty"`
 	Keyboard               KeyboardControl   `json:"keyboard_control"`
@@ -39,15 +40,19 @@ type Integrations struct {
 // BuzzerMirror controls optional host playback of board-generated tones. The
 // board event is always forwarded; these switches affect presentation only.
 type BuzzerMirror struct {
+	Path            string `json:"path,omitempty"`
 	Enabled         bool   `json:"enabled"`
 	NativeEnabled   bool   `json:"native_enabled"`
 	WebAudioEnabled bool   `json:"web_audio_enabled"`
+	Backend         string `json:"backend"`
+	Executable      string `json:"executable,omitempty"`
 	DriverDirectory string `json:"driver_directory"`
 }
 
 func DefaultBuzzerMirror() BuzzerMirror {
 	return BuzzerMirror{
 		WebAudioEnabled: true,
+		Backend:         "auto",
 	}
 }
 
@@ -200,9 +205,46 @@ type NotificationAction struct {
 }
 
 type Discovery struct {
-	MDNSEnabled  bool   `json:"mdns_enabled"`
-	SSDPEnabled  bool   `json:"ssdp_enabled"`
-	InstanceName string `json:"instance_name,omitempty"`
+	MDNSEnabled        bool   `json:"mdns_enabled"`
+	DNSSDenabled       bool   `json:"dns_sd_enabled"`
+	SSDPEnabled        bool   `json:"ssdp_enabled"`
+	UPnPEnabled        bool   `json:"upnp_enabled"`
+	WSDiscoveryEnabled bool   `json:"ws_discovery_enabled"`
+	BroadcastEnabled   bool   `json:"broadcast_enabled"`
+	NetBIOSEnabled     bool   `json:"netbios_enabled"`
+	BroadcastPort      int    `json:"broadcast_port,omitempty"`
+	InstanceName       string `json:"instance_name,omitempty"`
+}
+
+// DefaultDiscovery keeps bounded public advertisement and active discovery
+// available on first run. It does not enable remote control or weaken IPC auth.
+func DefaultDiscovery() Discovery {
+	return Discovery{
+		MDNSEnabled: true, DNSSDenabled: true, SSDPEnabled: true, UPnPEnabled: true,
+		WSDiscoveryEnabled: true, BroadcastEnabled: true, NetBIOSEnabled: true,
+		BroadcastPort: 37889,
+	}
+}
+
+// RemoteConnectable reports whether the configured IPC listener is actually
+// reachable beyond loopback. Advertisement remains independent from remote
+// control, but consumers need this exact distinction before offering Connect.
+func (value IPC) RemoteConnectable() bool {
+	if !value.AllowRemote {
+		return false
+	}
+	host, _, err := net.SplitHostPort(strings.TrimSpace(value.Listen))
+	if err != nil {
+		return false
+	}
+	host = strings.Trim(host, "[]")
+	if strings.EqualFold(host, "localhost") {
+		return false
+	}
+	if parsed := net.ParseIP(host); parsed != nil {
+		return !parsed.IsLoopback()
+	}
+	return host != ""
 }
 
 type Webhook struct {
@@ -298,9 +340,9 @@ func (value Config) validateIntegrations() error {
 	if len(value.Integrations.Discovery.InstanceName) > 63 {
 		return fmt.Errorf("integrations.discovery.instance_name must be at most 63 characters")
 	}
-	if (value.Integrations.Discovery.MDNSEnabled ||
-		value.Integrations.Discovery.SSDPEnabled) && !value.IPC.AllowRemote {
-		return fmt.Errorf("network discovery requires ipc.allow_remote and authenticated remote access")
+	discovery := value.Integrations.Discovery
+	if discovery.BroadcastPort != 0 && (discovery.BroadcastPort < 1024 || discovery.BroadcastPort > 65535) {
+		return fmt.Errorf("integrations.discovery.broadcast_port must be 1024..65535")
 	}
 	names := make(map[string]bool)
 	if len(value.Integrations.OutboundWebhooks) > 64 {
@@ -426,26 +468,18 @@ func (value Config) validateIntegrations() error {
 		); err != nil {
 			return err
 		}
-		if peer.AllowCommands && !secretConfigured(peer.AuthToken, peer.AuthTokenRef) {
-			return fmt.Errorf("integrations.websocket_clients[%d] allowing commands requires auth_token", index)
-		}
-		host := strings.Trim(parsed.Hostname(), "[]")
-		loopback := strings.EqualFold(host, "localhost")
-		if address := net.ParseIP(host); address != nil {
-			loopback = address.IsLoopback()
-		}
-		if peer.ForwardEvents && !loopback && !secretConfigured(peer.AuthToken, peer.AuthTokenRef) {
-			return fmt.Errorf("integrations.websocket_clients[%d] forwarding events remotely requires auth_token", index)
-		}
+		// Authentication is deliberately dormant in the immediate alpha (#148).
+		// Keep optional credentials valid for the deferred session design, but do
+		// not make a peer credential a prerequisite for commands or event fan-out.
 		topics := make(map[string]bool)
 		for topicIndex, topic := range peer.Topics {
 			topic = strings.ToLower(strings.TrimSpace(topic))
 			if topic == "telemetry" {
 				topic = "status"
 			}
-			if topic != "events" && topic != "status" {
+			if topic != "events" && topic != "state" && topic != "status" {
 				return fmt.Errorf(
-					"integrations.websocket_clients[%d].topics[%d] must be events or status",
+					"integrations.websocket_clients[%d].topics[%d] must be events, state, or status",
 					index, topicIndex,
 				)
 			}
@@ -470,6 +504,29 @@ func (value Config) validateIntegrations() error {
 }
 
 func validateBuzzerMirror(value BuzzerMirror) error {
+	path, err := NormalizeBuzzerPath(value.Path)
+	if err != nil {
+		return fmt.Errorf("integrations.buzzer_mirror.path: %w", err)
+	}
+	if path != "" {
+		_, hostEnabled := buzzerPathParts(path)
+		if hostEnabled != value.Enabled {
+			return fmt.Errorf("integrations.buzzer_mirror.path and enabled must select the same host route")
+		}
+	}
+	backend := strings.ToLower(strings.TrimSpace(value.Backend))
+	if backend == "" {
+		backend = "auto"
+	}
+	if backend != "auto" && backend != "native" && backend != "external" && backend != "off" {
+		return fmt.Errorf("integrations.buzzer_mirror.backend must be auto, native, external, or off")
+	}
+	if backend == "off" && value.NativeEnabled {
+		return fmt.Errorf("integrations.buzzer_mirror.native_enabled must be false when backend is off")
+	}
+	if strings.ContainsAny(value.Executable, "\r\n\x00") {
+		return fmt.Errorf("integrations.buzzer_mirror.executable is invalid")
+	}
 	if value.Enabled && !value.NativeEnabled && !value.WebAudioEnabled {
 		return fmt.Errorf("integrations.buzzer_mirror enables the host buzzer path but selects no native or WebAudio output")
 	}
@@ -477,9 +534,6 @@ func validateBuzzerMirror(value BuzzerMirror) error {
 		len(value.DriverDirectory) > 1024 ||
 		strings.ContainsAny(value.DriverDirectory, "\r\n\"") {
 		return fmt.Errorf("integrations.buzzer_mirror.driver_directory is invalid")
-	}
-	if value.NativeEnabled && value.DriverDirectory == "" {
-		return fmt.Errorf("integrations.buzzer_mirror.driver_directory is required when native playback is enabled")
 	}
 	return nil
 }
@@ -659,12 +713,9 @@ func validateIPC(value IPC) error {
 	if err := validateSecretChoice("ipc.auth_token", value.AuthToken, value.AuthTokenRef); err != nil {
 		return err
 	}
-	if value.AllowRemote && !secretConfigured(value.AuthToken, value.AuthTokenRef) {
-		return fmt.Errorf("ipc.auth_token or ipc.auth_token_ref is required when remote access is enabled")
-	}
-	if value.AllowRemote && value.AuthTokenRef == "" && len(strings.TrimSpace(value.AuthToken)) < 24 {
-		return fmt.Errorf("ipc.auth_token must contain at least 24 characters when remote access is enabled")
-	}
+	// The complete login/session model is explicitly deferred by #148. Remote
+	// exposure still requires allow_remote and an exact Origin allow-list, while
+	// optional credentials and policy bits remain stored but dormant.
 	if len(value.AuthToken) > 512 || !printableText(value.AuthToken) {
 		return fmt.Errorf("ipc.auth_token must be at most 512 printable characters")
 	}
@@ -677,11 +728,8 @@ func validateIPC(value IPC) error {
 		return fmt.Errorf("ipc.allowed_origins is required when remote access is enabled")
 	}
 	for index, origin := range value.AllowedOrigins {
-		if strings.TrimSpace(origin) == "" || strings.ContainsAny(origin, "\r\n") {
-			return fmt.Errorf("ipc.allowed_origins[%d] is invalid", index)
-		}
-		if value.AllowRemote && strings.TrimSpace(origin) == "*" {
-			return fmt.Errorf("ipc.allowed_origins[%d] cannot allow every origin", index)
+		if err := validateAllowedOriginPattern(origin); err != nil {
+			return fmt.Errorf("ipc.allowed_origins[%d] is invalid: %w", index, err)
 		}
 	}
 	for name, path := range map[string]string{

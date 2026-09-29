@@ -10,8 +10,11 @@ import {
 } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadProjectEnv } from "../../Tools/Build/env.mjs";
 import { PRODUCT_METADATA } from "../../Tools/Build/product-metadata.mjs";
 import { repositoryWebUrl, resolveRepository } from "./repository-context.mjs";
+
+loadProjectEnv();
 
 import { usageProgress as progress } from "./usage-progress.mjs";
 

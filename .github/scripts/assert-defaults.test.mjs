@@ -17,7 +17,6 @@ test("firmware defaults require an exact application and 1 KiB EEPROM pair", asy
   await writeFile(join(root, "out", "application.hex"), "application");
   await writeFile(join(root, "out", "eeprom.hex"), "eeprom");
   const manifest = {
-    format: "pccontroller-avr-firmware-manifest/v1",
     artifacts: [
       {
         role: "application", path: "out/application.hex", dataBytes: 12,
@@ -30,6 +29,17 @@ test("firmware defaults require an exact application and 1 KiB EEPROM pair", asy
     ],
   };
   assert.equal(assertFirmwareDefaults(manifest, root).eeprom.dataBytes, 1024);
+	assert.equal(assertFirmwareDefaults({
+		...manifest,
+		source: { compileFeatures: ["eeprom-menu-labels"] },
+	}, root).application.dataBytes, 12);
+	for (const [name, invalid, expected] of [
+		["unknown", { ...manifest, source: { compileFeatures: ["unknown"] } }, /unsupported firmware feature/u],
+		["duplicate", { ...manifest, source: { compileFeatures: ["eeprom-menu-labels", "eeprom-menu-labels"] } }, /unique and sorted/u],
+		["unsorted", { ...manifest, source: { compileFeatures: ["eeprom-menu-labels", "eeprom-boot-opcodes"] } }, /unique and sorted/u],
+	]) {
+		assert.throws(() => assertFirmwareDefaults(invalid, root), expected, name);
+	}
   assert.throws(
     () => assertFirmwareDefaults({
       ...manifest,
@@ -42,7 +52,6 @@ test("firmware defaults require an exact application and 1 KiB EEPROM pair", asy
 
 test("host defaults report firmware and EEPROM independently enabled", () => {
   const manifest = {
-    format: "pccontroller-host-package-manifest/v1",
     validation: {
       embeddedDefaults: {
         enabled: true,

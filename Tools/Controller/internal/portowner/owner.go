@@ -63,6 +63,11 @@ type Enumerator interface {
 	FindOwner(context.Context, string) (Owner, bool, error)
 }
 
+// FindOwner returns the best available live process identity for a serial port.
+func FindOwner(ctx context.Context, port string) (Owner, bool, error) {
+	return systemEnumerator().FindOwner(ctx, port)
+}
+
 // Actions are intentionally operator-driven owner-window/process operations.
 type Actions interface {
 	BringToForeground(context.Context, Owner) error

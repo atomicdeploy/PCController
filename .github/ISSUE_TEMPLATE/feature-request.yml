@@ -53,6 +53,12 @@ body:
       label: Compatibility and resource tradeoffs
       description: Note EEPROM migration, flash/SRAM cost, protocol compatibility, timing, safety, or licensing concerns.
 
+  - type: textarea
+    id: coordination
+    attributes:
+      label: Coordination and request provenance
+      description: Link related issues/PRs, note claimed WIP or dependencies, and preserve only a short publication-safe request excerpt or normalized requirement. Never paste private transcripts.
+
   - type: checkboxes
     id: checks
     attributes:

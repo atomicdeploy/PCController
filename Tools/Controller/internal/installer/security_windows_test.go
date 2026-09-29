@@ -69,7 +69,7 @@ func TestWindowsRecoveryPruneAndPurgeRejectJunctions(t *testing.T) {
 		}
 		createJunction(t, staging, external)
 		journal := transactionJournal{
-			Format: transactionFormat, ID: "junction", Operation: "repair", Phase: "staging",
+			ID: "junction", Operation: "repair", Phase: "staging",
 			Stage: filepath.ToSlash(filepath.Join(stagingDirectory, "abandoned")), UpdatedAt: time.Now().UTC(),
 		}
 		if err := writeJSONAtomic(filepath.Join(root, transactionName), journal, 0o600); err != nil {

@@ -10,9 +10,17 @@ import (
 
 const (
 	PCControllerEEPROMBytes        uint32 = generatedBoardEEPROMBytes
+	EEPROMAudioCueAddress          uint32 = 0
+	EEPROMAudioCueCount            byte   = 4
+	EEPROMAudioCueDescriptorBytes  uint32 = 3
+	EEPROMAudioCueRecordBytes      uint32 = uint32(EEPROMAudioCueCount)*EEPROMAudioCueDescriptorBytes + 1
 	EEPROMSettingsAddress          uint32 = 32
 	EEPROMSettingsValueBytes       uint32 = 40
 	EEPROMSettingsRecordBytes      uint32 = EEPROMSettingsValueBytes + 1
+	EEPROMMenuLabelsHeaderAddress  uint32 = EEPROMSettingsAddress + EEPROMSettingsRecordBytes
+	EEPROMMenuLabelsCRCAddress     uint32 = EEPROMMenuLabelsHeaderAddress
+	EEPROMMenuLabelsHeaderEnd      uint32 = EEPROMMenuLabelsCRCAddress + 1
+	EEPROMMenuLabelsFormatMarker   byte   = 0xA1
 	EEPROMRemoteHeaderAddress      uint32 = 80
 	EEPROMRemoteEntriesAddress     uint32 = 84
 	EEPROMRemoteRecordSize         byte   = 12
@@ -25,6 +33,12 @@ const (
 	EEPROMStatusProfileCount       byte   = 19
 	EEPROMStatusProfileBytes       uint32 = 12
 	EEPROMStatusProfileRecordBytes uint32 = EEPROMStatusProfileBytes + 1
+	EEPROMMenuLabelsAddress        uint32 = EEPROMStatusProfileAddress + uint32(EEPROMStatusProfileCount)*EEPROMStatusProfileRecordBytes
+	EEPROMMenuLabelCount           byte   = 14
+	EEPROMMenuLabelWidth           uint32 = 4
+	EEPROMMenuLabelBytes           uint32 = uint32(EEPROMMenuLabelCount) * EEPROMMenuLabelWidth
+	EEPROMMenuLabelsCommitAddress  uint32 = EEPROMMenuLabelsAddress + EEPROMMenuLabelBytes
+	EEPROMMenuLabelsEnd            uint32 = EEPROMMenuLabelsCommitAddress + 1
 )
 
 type OfflineEEPROMDecode struct {
@@ -452,13 +466,18 @@ func decodeDecimalBits(value byte) byte {
 func avrCRC8(data []byte) byte {
 	var crc byte
 	for _, value := range data {
-		crc ^= value
-		for bit := 0; bit < 8; bit++ {
-			if crc&0x80 != 0 {
-				crc = crc<<1 ^ 0x07
-			} else {
-				crc <<= 1
-			}
+		crc = avrCRC8Update(crc, value)
+	}
+	return crc
+}
+
+func avrCRC8Update(crc, value byte) byte {
+	crc ^= value
+	for bit := 0; bit < 8; bit++ {
+		if crc&0x80 != 0 {
+			crc = crc<<1 ^ 0x07
+		} else {
+			crc <<= 1
 		}
 	}
 	return crc

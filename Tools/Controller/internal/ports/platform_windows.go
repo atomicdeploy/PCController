@@ -5,6 +5,7 @@ package ports
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 	"unsafe"
@@ -111,6 +112,183 @@ func enrichPlatform(values []Info) []Info {
 		}
 	}
 	return values
+}
+
+func listPlatformHardwareProblems(filter Filter) ([]HardwareProblem, error) {
+	devices, err := windows.SetupDiGetClassDevsEx(
+		nil,
+		"",
+		0,
+		windows.DIGCF_PRESENT|windows.DIGCF_ALLCLASSES,
+		0,
+		"",
+	)
+	if err != nil {
+		return nil, fmt.Errorf("enumerate Windows device problems: %w", err)
+	}
+	defer devices.Close()
+
+	related, relatedAmbiguous := relatedRegistryInstanceIDs(filter)
+	observedAt := time.Now()
+	var problems []HardwareProblem
+	for index := 0; ; index++ {
+		device, enumErr := devices.EnumDeviceInfo(index)
+		if enumErr == windows.ERROR_NO_MORE_ITEMS {
+			break
+		}
+		if enumErr != nil {
+			return nil, fmt.Errorf("enumerate Windows device problem %d: %w", index, enumErr)
+		}
+		var status, problemNumber uint32
+		if statusErr := windows.CM_Get_DevNode_Status(
+			&status,
+			&problemNumber,
+			device.DevInst,
+			0,
+		); statusErr != nil || problemNumber == 0 || status&windows.DN_HAS_PROBLEM == 0 {
+			continue
+		}
+		deviceID, idErr := windows.SetupDiGetDeviceInstanceId(devices, device)
+		if idErr != nil {
+			continue
+		}
+		hardwareIDs := deviceRegistryStrings(devices, device, windows.SPDRP_HARDWAREID)
+		if !hardwareProblemMatches(
+			deviceID, hardwareIDs, filter, related, relatedAmbiguous,
+		) {
+			continue
+		}
+		classificationIDs := append(append([]string(nil), hardwareIDs...), deviceID)
+		code := classifyHardwareProblem(problemNumber, classificationIDs)
+		severity := "error"
+		if code == HardwareProblemDisabled || code == HardwareProblemRemovalPending {
+			severity = "warning"
+		}
+		description := deviceRegistryString(devices, device, windows.SPDRP_FRIENDLYNAME)
+		if description == "" {
+			description = deviceRegistryString(devices, device, windows.SPDRP_DEVICEDESC)
+		}
+		problems = append(problems, HardwareProblem{
+			Code:          code,
+			Severity:      severity,
+			OSProblemCode: problemNumber,
+			DeviceID:      deviceID,
+			HardwareIDs:   hardwareIDs,
+			Description:   description,
+			Class:         deviceRegistryString(devices, device, windows.SPDRP_CLASS),
+			Location:      deviceRegistryString(devices, device, windows.SPDRP_LOCATION_INFORMATION),
+			LocationPaths: deviceRegistryStrings(devices, device, windows.SPDRP_LOCATION_PATHS),
+			ObservedAt:    observedAt,
+		})
+	}
+	sort.SliceStable(problems, func(i, j int) bool {
+		return hardwareProblemLess(problems[i], problems[j])
+	})
+	return problems, nil
+}
+
+func deviceRegistryString(
+	devices windows.DevInfo,
+	device *windows.DevInfoData,
+	property windows.SPDRP,
+) string {
+	value, err := windows.SetupDiGetDeviceRegistryProperty(devices, device, property)
+	if err != nil {
+		return ""
+	}
+	text, _ := value.(string)
+	return strings.TrimSpace(text)
+}
+
+func deviceRegistryStrings(
+	devices windows.DevInfo,
+	device *windows.DevInfoData,
+	property windows.SPDRP,
+) []string {
+	value, err := windows.SetupDiGetDeviceRegistryProperty(devices, device, property)
+	if err != nil {
+		return nil
+	}
+	switch typed := value.(type) {
+	case []string:
+		result := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if item = strings.TrimSpace(item); item != "" {
+				result = append(result, item)
+			}
+		}
+		return result
+	case string:
+		if typed = strings.TrimSpace(typed); typed != "" {
+			return []string{typed}
+		}
+	}
+	return nil
+}
+
+func relatedRegistryInstanceIDs(filter Filter) ([]string, bool) {
+	ports := []string{filter.Port, filter.Preferred.Port}
+	seen := make(map[string]bool)
+	var result []string
+	for _, port := range ports {
+		port = strings.TrimSpace(port)
+		if port == "" {
+			continue
+		}
+		for _, instanceID := range registryInstanceIDsForPort(port) {
+			key := strings.ToUpper(instanceID)
+			if !seen[key] {
+				seen[key] = true
+				result = append(result, instanceID)
+			}
+		}
+	}
+	return result, deviceIdentityHistoryAmbiguous(result)
+}
+
+// registryInstanceIDsForPort deliberately includes phantom Enum entries. A
+// failed USB descriptor cannot expose its former COM name, so the physical
+// instance suffix of the remembered port is the trustworthy correlation link.
+func registryInstanceIDsForPort(port string) []string {
+	usb, err := registry.OpenKey(
+		registry.LOCAL_MACHINE,
+		`SYSTEM\CurrentControlSet\Enum\USB`,
+		registry.READ,
+	)
+	if err != nil {
+		return nil
+	}
+	defer usb.Close()
+	hardwareIDs, err := usb.ReadSubKeyNames(-1)
+	if err != nil {
+		return nil
+	}
+	var result []string
+	for _, hardwareID := range hardwareIDs {
+		device, openErr := registry.OpenKey(usb, hardwareID, registry.READ)
+		if openErr != nil {
+			continue
+		}
+		instances, _ := device.ReadSubKeyNames(-1)
+		for _, instance := range instances {
+			instanceKey, instanceErr := registry.OpenKey(device, instance, registry.READ)
+			if instanceErr != nil {
+				continue
+			}
+			parameters, parametersErr := registry.OpenKey(instanceKey, "Device Parameters", registry.READ)
+			instanceKey.Close()
+			if parametersErr != nil {
+				continue
+			}
+			portName, _, valueErr := parameters.GetStringValue("PortName")
+			parameters.Close()
+			if valueErr == nil && strings.EqualFold(strings.TrimSpace(portName), port) {
+				result = append(result, `USB\`+hardwareID+`\`+instance)
+			}
+		}
+		device.Close()
+	}
+	return result
 }
 
 // deviceInstancePresent asks Configuration Manager for the devnode using

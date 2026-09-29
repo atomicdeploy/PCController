@@ -24,30 +24,56 @@ const (
 
 var (
 	ErrClosed                  = errors.New("serial session is closed")
+	ErrSerialOpenPending       = errors.New("serial port acquisition is still pending")
 	ErrSequenceExhaust         = errors.New("all request sequence numbers are in use")
 	ErrControlLinesUnsupported = errors.New("transport does not support DTR/RTS")
 )
 
+var openSerialPort = serial.Open
+
+type serialOpenResult struct {
+	port serial.Port
+	err  error
+}
+
+type serialOpenAcquisition struct {
+	result chan serialOpenResult
+}
+
 type Event struct {
 	Frame native.Frame
 	Err   error
+	// Recoverable identifies a decoder anomaly that was isolated at the next
+	// frame delimiter. The transport is still usable and later frames remain
+	// authoritative; consumers must not treat this as a disconnect cause.
+	Recoverable  bool
+	CloseFailure bool
 }
 
 type Session struct {
 	name string
 	port sessionPort
 
-	writeMu sync.Mutex
-	stateMu sync.RWMutex
-	waiters map[byte]*pendingRequest
-	nextSeq byte
-	hello   native.Hello
+	writeGate   chan struct{}
+	stateMu     sync.RWMutex
+	waiters     map[byte]*pendingRequest
+	nextSeq     byte
+	hello       native.Hello
+	terminalErr error
 
-	events chan Event
-	done   chan struct{}
+	events  chan Event
+	closing chan struct{}
+	done    chan struct{}
 
-	closeOnce sync.Once
-	readDone  sync.WaitGroup
+	closeMu     sync.Mutex
+	observerMu  sync.Mutex
+	beforeClose func()
+	closeSeen   bool
+	closingOnce sync.Once
+	doneOnce    sync.Once
+	closed      bool
+	readDone    sync.WaitGroup
+	pendingOpen *serialOpenAcquisition
 }
 
 type sessionPort interface {
@@ -78,15 +104,75 @@ func OpenContext(ctx context.Context, name string, baudRate int) (*Session, erro
 	if baudRate == 0 {
 		baudRate = DefaultBaudRate
 	}
-	port, err := serial.Open(name, serialMode(baudRate))
+	acquisition := &serialOpenAcquisition{result: make(chan serialOpenResult, 1)}
+	go func() {
+		port, err := openSerialPort(name, serialMode(baudRate))
+		acquisition.result <- serialOpenResult{port: port, err: err}
+	}()
+
+	var result serialOpenResult
+	select {
+	case result = <-acquisition.result:
+	case <-ctx.Done():
+		// serial.Open has no cancellation API. Return the acquisition itself as
+		// a close-only Session so a late handle can never become unowned. Close
+		// reports ErrSerialOpenPending until the open call completes, then closes
+		// (and, when needed, retries) that exact port.
+		return newPendingOpenSession(name, acquisition), fmt.Errorf(
+			"open %s canceled while serial acquisition is pending: %w",
+			name,
+			ctx.Err(),
+		)
+	}
+	port, err := result.port, result.err
 	if err != nil {
+		if port != nil {
+			// Preserve even a nonstandard non-nil-on-error result. The caller can
+			// quarantine this close-only owner and retry release deterministically.
+			return newSession(name, port), portowner.EnrichOpenError(ctx, name, err)
+		}
 		return nil, portowner.EnrichOpenError(ctx, name, err)
 	}
-	if err := port.SetReadTimeout(DefaultReadTimeout); err != nil {
-		_ = port.Close()
-		return nil, fmt.Errorf("configure %s: %w", name, err)
+	if port == nil {
+		return nil, fmt.Errorf("open %s returned no serial port", name)
 	}
-	_ = port.ResetInputBuffer()
+	if err := ctx.Err(); err != nil {
+		return newSession(name, port), fmt.Errorf("open %s canceled after serial acquisition: %w", name, err)
+	}
+	if err := port.SetReadTimeout(DefaultReadTimeout); err != nil {
+		configureErr := fmt.Errorf("configure %s: %w", name, err)
+		if closeErr := port.Close(); closeErr != nil {
+			// Return a close-only Session together with the error so the caller
+			// retains ownership and can retry cleanup without opening a new port.
+			return newSession(name, port), errors.Join(
+				configureErr,
+				fmt.Errorf("close %s after configuration failure: %w", name, closeErr),
+			)
+		}
+		return nil, configureErr
+	}
+	if err := ctx.Err(); err != nil {
+		return newSession(name, port), fmt.Errorf("open %s canceled after serial configuration: %w", name, err)
+	}
+	if err := port.ResetInputBuffer(); err != nil {
+		configureErr := fmt.Errorf("configure %s input buffer: %w", name, err)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return newSession(name, port), errors.Join(
+				configureErr,
+				fmt.Errorf("open %s canceled after serial configuration: %w", name, ctxErr),
+			)
+		}
+		if closeErr := port.Close(); closeErr != nil {
+			return newSession(name, port), errors.Join(
+				configureErr,
+				fmt.Errorf("close %s after configuration failure: %w", name, closeErr),
+			)
+		}
+		return nil, configureErr
+	}
+	if err := ctx.Err(); err != nil {
+		return newSession(name, port), fmt.Errorf("open %s canceled after serial configuration: %w", name, err)
+	}
 
 	session := NewForPort(name, port)
 	return session, nil
@@ -112,16 +198,28 @@ func NewForPort(name string, port serial.Port) *Session {
 }
 
 func newForTransport(name string, port sessionPort) *Session {
-	session := &Session{
-		name:    name,
-		port:    port,
-		waiters: make(map[byte]*pendingRequest),
-		nextSeq: 1,
-		events:  make(chan Event, 256),
-		done:    make(chan struct{}),
-	}
+	session := newSession(name, port)
 	session.readDone.Add(1)
 	go session.readLoop()
+	return session
+}
+
+func newSession(name string, port sessionPort) *Session {
+	return &Session{
+		name:      name,
+		port:      port,
+		writeGate: make(chan struct{}, 1),
+		waiters:   make(map[byte]*pendingRequest),
+		nextSeq:   1,
+		events:    make(chan Event, 256),
+		closing:   make(chan struct{}),
+		done:      make(chan struct{}),
+	}
+}
+
+func newPendingOpenSession(name string, acquisition *serialOpenAcquisition) *Session {
+	session := newSession(name, nil)
+	session.pendingOpen = acquisition
 	return session
 }
 
@@ -208,7 +306,7 @@ func (s *Session) AuthenticateWithRetry(
 			case <-ctx.Done():
 				timer.Stop()
 				return native.Hello{}, ctx.Err()
-			case <-s.done:
+			case <-s.closing:
 				timer.Stop()
 				return native.Hello{}, ErrClosed
 			case <-timer.C:
@@ -228,17 +326,24 @@ func (s *Session) Request(
 	payload []byte,
 	expected ...byte,
 ) (native.Frame, error) {
+	if err := ctx.Err(); err != nil {
+		return native.Frame{}, err
+	}
 	sequence, waiter, err := s.reserveSequence(opcode, expected)
 	if err != nil {
 		return native.Frame{}, err
 	}
 	defer s.releaseSequence(sequence, waiter)
 
-	if err := s.WriteFrame(native.Frame{
+	encoded, err := native.Encode(native.Frame{
 		Opcode:  opcode,
 		Seq:     sequence,
 		Payload: append([]byte(nil), payload...),
-	}); err != nil {
+	})
+	if err != nil {
+		return native.Frame{}, err
+	}
+	if err := s.writeRawContext(ctx, encoded); err != nil {
 		return native.Frame{}, err
 	}
 
@@ -246,7 +351,7 @@ func (s *Session) Request(
 		select {
 		case <-ctx.Done():
 			return native.Frame{}, ctx.Err()
-		case <-s.done:
+		case <-s.closing:
 			return native.Frame{}, ErrClosed
 		case response := <-waiter.channel:
 			if response.Opcode == native.OpError {
@@ -281,13 +386,42 @@ func (s *Session) WriteFrame(frame native.Frame) error {
 }
 
 func (s *Session) WriteRaw(data []byte) error {
+	return s.writeRawContext(context.Background(), data)
+}
+
+// All writers, including raw access and DTR, share this gate. A request that
+// expires while queued must never issue its stale mutation after the prior
+// writer finishes. Once port.Write begins its transport result remains final;
+// cancellation cannot safely retract bytes already given to the OS.
+func (s *Session) acquireWrite(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	select {
-	case <-s.done:
+	case s.writeGate <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-s.closing:
+		return ErrClosed
+	}
+	if err := ctx.Err(); err != nil {
+		<-s.writeGate
+		return err
+	}
+	select {
+	case <-s.closing:
+		<-s.writeGate
 		return ErrClosed
 	default:
 	}
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
+	return nil
+}
+
+func (s *Session) writeRawContext(ctx context.Context, data []byte) error {
+	if err := s.acquireWrite(ctx); err != nil {
+		return err
+	}
+	defer func() { <-s.writeGate }()
 	written, err := s.port.Write(data)
 	if err != nil {
 		return fmt.Errorf("write %s: %w", s.name, err)
@@ -322,8 +456,10 @@ func (s *Session) PulseDTR(ctx context.Context, lowTime time.Duration) error {
 	if lowTime <= 0 {
 		lowTime = 120 * time.Millisecond
 	}
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
+	if err := s.acquireWrite(ctx); err != nil {
+		return err
+	}
+	defer func() { <-s.writeGate }()
 	if err := s.port.SetDTR(true); err != nil {
 		return fmt.Errorf("assert DTR: %w", err)
 	}
@@ -333,7 +469,7 @@ func (s *Session) PulseDTR(ctx context.Context, lowTime time.Duration) error {
 	case <-ctx.Done():
 		_ = s.port.SetDTR(false)
 		return ctx.Err()
-	case <-s.done:
+	case <-s.closing:
 		_ = s.port.SetDTR(false)
 		return ErrClosed
 	case <-timer.C:
@@ -352,14 +488,91 @@ func (s *Session) Done() <-chan struct{} {
 	return s.done
 }
 
+// TerminalError returns the read failure that ended the transport. It remains
+// available after Done closes so consumers cannot lose the real disconnect
+// cause to select ordering between the buffered event and the done signal.
+func (s *Session) TerminalError() error {
+	s.stateMu.RLock()
+	defer s.stateMu.RUnlock()
+	return s.terminalErr
+}
+
+// SetBeforeClose installs a synchronous observer that runs exactly once before
+// closing is announced to pending requests. Higher layers use this boundary to
+// preserve live-operation evidence before request failures can unwind and clear
+// their state. Installing the observer after closing has begun invokes it
+// immediately, which keeps attachment races conservative and lossless.
+func (s *Session) SetBeforeClose(observer func()) {
+	if observer == nil {
+		return
+	}
+	s.observerMu.Lock()
+	if !s.closeSeen {
+		s.beforeClose = observer
+		s.observerMu.Unlock()
+		return
+	}
+	s.observerMu.Unlock()
+	observer()
+}
+
+func (s *Session) notifyBeforeClose() {
+	s.observerMu.Lock()
+	if s.closeSeen {
+		s.observerMu.Unlock()
+		return
+	}
+	s.closeSeen = true
+	observer := s.beforeClose
+	s.beforeClose = nil
+	s.observerMu.Unlock()
+	if observer != nil {
+		observer()
+	}
+}
+
 func (s *Session) Close() error {
-	var closeErr error
-	s.closeOnce.Do(func() {
-		close(s.done)
-		closeErr = s.port.Close()
-	})
+	if err := s.closeTransport(); err != nil {
+		// A Windows transport may retain a live handle and pending OVERLAPPED
+		// operation when CancelIoEx itself fails. Do not wait for the reader in
+		// that retryable state: return the cancellation error promptly so a later
+		// Close can retry without abandoning ownership of the I/O resources.
+		return err
+	}
 	s.readDone.Wait()
-	return closeErr
+	return nil
+}
+
+func (s *Session) closeTransport() error {
+	s.closeMu.Lock()
+	defer s.closeMu.Unlock()
+	if s.closed {
+		return nil
+	}
+	s.notifyBeforeClose()
+	s.closingOnce.Do(func() { close(s.closing) })
+	if s.pendingOpen != nil {
+		select {
+		case result := <-s.pendingOpen.result:
+			s.pendingOpen = nil
+			if result.port == nil {
+				// The acquisition produced no handle, so cleanup is complete. The
+				// original OpenContext error remains the caller-facing open failure.
+				s.closed = true
+				s.doneOnce.Do(func() { close(s.done) })
+				return nil
+			}
+			s.port = result.port
+		default:
+			return ErrSerialOpenPending
+		}
+	}
+	if err := s.port.Close(); err != nil {
+		return err
+	}
+	s.closed = true
+	s.doneOnce.Do(func() { close(s.done) })
+	return nil
 }
 
 func (s *Session) readLoop() {
@@ -372,7 +585,7 @@ func (s *Session) readLoop() {
 		if n > 0 {
 			frames, decodeErrors := decoder.Feed(buffer[:n])
 			for _, decodeErr := range decodeErrors {
-				s.publish(Event{Err: decodeErr})
+				s.publish(Event{Err: decodeErr, Recoverable: true})
 			}
 			for _, frame := range frames {
 				s.observeHello(frame)
@@ -383,18 +596,24 @@ func (s *Session) readLoop() {
 		}
 		if err != nil {
 			select {
-			case <-s.done:
+			case <-s.closing:
 			default:
-				s.publish(Event{Err: fmt.Errorf("read %s: %w", s.name, err)})
-				s.closeOnce.Do(func() {
-					close(s.done)
-					_ = s.port.Close()
-				})
+				readErr := fmt.Errorf("read %s: %w", s.name, err)
+				s.stateMu.Lock()
+				s.terminalErr = readErr
+				s.stateMu.Unlock()
+				s.publish(Event{Err: readErr})
+				if closeErr := s.closeTransport(); closeErr != nil {
+					s.publish(Event{
+						Err:          fmt.Errorf("close %s after read failure: %w", s.name, closeErr),
+						CloseFailure: true,
+					})
+				}
 			}
 			return
 		}
 		select {
-		case <-s.done:
+		case <-s.closing:
 			return
 		default:
 		}
@@ -432,7 +651,7 @@ func (s *Session) deliver(frame native.Frame) bool {
 	select {
 	case waiter.channel <- frame:
 		return true
-	case <-s.done:
+	case <-s.closing:
 		return false
 	}
 }

@@ -47,6 +47,28 @@ func TestDisabledManagementIsHarmless(t *testing.T) {
 	}
 }
 
+func TestSetTitleRejectsEmptyAndControlCharacters(t *testing.T) {
+	for _, value := range []string{"", "   ", "PCController\nwrong"} {
+		if _, err := SetTitle(value); err == nil {
+			t.Fatalf("SetTitle(%q) accepted an invalid title", value)
+		}
+	}
+}
+
+func TestSetTitleNormalizesAndDispatchesConfiguredTitle(t *testing.T) {
+	original := setTitle
+	t.Cleanup(func() { setTitle = original })
+	var received string
+	setTitle = func(value string) (Result, error) {
+		received = value
+		return Result{Applied: true}, nil
+	}
+	result, err := SetTitle("  Workshop Controller  ")
+	if err != nil || !result.Applied || received != "Workshop Controller" {
+		t.Fatalf("result=%#v received=%q err=%v", result, received, err)
+	}
+}
+
 func TestApplyNormalizesFontFaceBeforePlatformDispatch(t *testing.T) {
 	settings := normalizeSettings(Settings{Enabled: true, Columns: 132, Rows: 40, FontFace: strings.Repeat(" ", 40) + "Consolas", FontSize: 18})
 	if err := Validate(settings); err != nil {

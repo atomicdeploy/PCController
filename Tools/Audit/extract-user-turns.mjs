@@ -7,6 +7,9 @@
 import { createReadStream, promises as fs } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { resolve } from 'node:path';
+import { loadProjectEnv } from '../Build/env.mjs';
+
+loadProjectEnv();
 
 function usage() {
   return [

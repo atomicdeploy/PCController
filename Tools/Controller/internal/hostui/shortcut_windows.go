@@ -44,6 +44,8 @@ type propVariant struct {
 type windowsShortcut struct {
 	Target    string
 	Arguments string
+	Icon      string
+	IconIndex int32
 }
 
 func createWindowsShortcut(executable, shortcut, appID, displayName string) error {
@@ -54,12 +56,17 @@ func createWindowsShortcut(executable, shortcut, appID, displayName string) erro
 		if err != nil {
 			return fmt.Errorf("create Shell link: %w", err)
 		}
-		defer releaseCOM(link)
+		linkOpen := true
+		defer func() {
+			if linkOpen {
+				releaseCOM(link)
+			}
+		}()
 
 		if err := setShellLinkString(link, 20, executable, "set shortcut target"); err != nil {
 			return err
 		}
-		if err := setShellLinkString(link, 11, "web", "set shortcut arguments"); err != nil {
+		if err := setShellLinkString(link, 11, "", "clear shortcut arguments"); err != nil {
 			return err
 		}
 		if err := setShellLinkString(link, 9, filepath.Dir(executable), "set shortcut working directory"); err != nil {
@@ -77,31 +84,18 @@ func createWindowsShortcut(executable, shortcut, appID, displayName string) erro
 		}
 		runtime.KeepAlive(icon)
 
-		persist, err := queryCOM(link, iidPersistFile)
+		// Configure the identity on the in-memory Shell link before saving it.
+		// Reopening the freshly saved .lnk through
+		// SHGetPropertyStoreFromParsingName can race Shell/AV inspection and leave
+		// the temporary shortcut locked. IShellLink implements IPropertyStore, so
+		// keep creation and identity persistence in one COM object lifetime.
+		store, err := queryCOM(link, iidPropertyStore)
 		if err != nil {
-			return fmt.Errorf("open shortcut persistence interface: %w", err)
+			return fmt.Errorf("open shortcut property store: %w", err)
 		}
-		defer releaseCOM(persist)
-		path, err := windows.UTF16PtrFromString(shortcut)
-		if err != nil {
-			return err
-		}
-		saveErr := callCOM(persist, 6, uintptr(unsafe.Pointer(path)), 1).error("save Start-menu shortcut")
-		runtime.KeepAlive(path)
-		if saveErr != nil {
-			return saveErr
-		}
-
-		// Some Shell builds do not expose IPropertyStore directly from
-		// IShellLink. The documented property-system entry point works against
-		// the saved .lnk on all supported desktop Windows versions.
-		store, err := shortcutPropertyStore(shortcut)
-		if err != nil {
-			return err
-		}
-		defer releaseCOM(store)
 		appIDPointer, err := windows.UTF16PtrFromString(appID)
 		if err != nil {
+			releaseCOM(store)
 			return err
 		}
 		value := propVariant{ValueType: 31} // VT_LPWSTR
@@ -113,7 +107,26 @@ func createWindowsShortcut(executable, shortcut, appID, displayName string) erro
 			setErr = callCOM(store, 7).error("commit shortcut properties")
 		}
 		runtime.KeepAlive(appIDPointer)
-		return setErr
+		releaseCOM(store)
+		if setErr != nil {
+			return setErr
+		}
+
+		persist, err := queryCOM(link, iidPersistFile)
+		if err != nil {
+			return fmt.Errorf("open shortcut persistence interface: %w", err)
+		}
+		path, err := windows.UTF16PtrFromString(shortcut)
+		if err != nil {
+			releaseCOM(persist)
+			return err
+		}
+		saveErr := callCOM(persist, 6, uintptr(unsafe.Pointer(path)), 1).error("save Start-menu shortcut")
+		runtime.KeepAlive(path)
+		releaseCOM(persist)
+		releaseCOM(link)
+		linkOpen = false
+		return saveErr
 	})
 }
 
@@ -205,6 +218,11 @@ func inspectWindowsShortcut(shortcut string) (windowsShortcut, error) {
 		}
 		result.Target = windows.UTF16ToString(target)
 		result.Arguments = windows.UTF16ToString(arguments)
+		icon := make([]uint16, windows.MAX_PATH)
+		if err := callCOM(link, 16, uintptr(unsafe.Pointer(&icon[0])), uintptr(len(icon)), uintptr(unsafe.Pointer(&result.IconIndex))).error("read shortcut icon"); err != nil {
+			return err
+		}
+		result.Icon = windows.UTF16ToString(icon)
 		return nil
 	})
 	return result, err
@@ -225,5 +243,5 @@ func shortcutOwnedBy(executable string, shortcut windowsShortcut) bool {
 		return false
 	}
 	arguments := strings.TrimSpace(shortcut.Arguments)
-	return strings.EqualFold(arguments, "web") || strings.EqualFold(arguments, "tui")
+	return arguments == "" || strings.EqualFold(arguments, "web") || strings.EqualFold(arguments, "tui")
 }

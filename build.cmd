@@ -11,22 +11,17 @@ if errorlevel 1 (
     exit /b 1
 )
 
-for /f "usebackq delims=" %%I in (`node.exe -p "require('./Tools/Controller/web/package.json').productName"`) do set "PRODUCT_NAME=%%I"
+for /f "usebackq delims=" %%I in (`node.exe "%~dp0Tools\Build\env-bootstrap.mjs" title`) do set "PRODUCT_NAME=%%I"
 if not defined PRODUCT_NAME set "PRODUCT_NAME=Controller"
-title %PRODUCT_NAME% project-owned build and packaging
+title "%PRODUCT_NAME% project-owned build and packaging"
 
 if not exist "%~dp0Tools\Build\node_modules\chalk\package.json" goto :install_build_dependencies
 if not exist "%~dp0Tools\Build\node_modules\cli-table3\package.json" goto :install_build_dependencies
 goto :run_build
 
 :install_build_dependencies
-where.exe npm.cmd >nul 2>nul
-if errorlevel 1 (
-    echo [ERROR] npm was not found in PATH; it is required to install the locked build UI dependencies.
-    exit /b 1
-)
 echo [SETUP] Installing locked build UI dependencies...
-call npm.cmd --prefix "%~dp0Tools\Build" ci --ignore-scripts --no-audit --no-fund
+node.exe "%~dp0Tools\Build\env-bootstrap.mjs" install-build-dependencies
 if errorlevel 1 exit /b 1
 
 :run_build

@@ -12,7 +12,6 @@ import {
   BookOpen,
   Cable,
   ChevronDown,
-  CircleDot,
   CircleStop,
   Cpu,
   Database,
@@ -27,7 +26,6 @@ import {
   LayoutDashboard,
   LayoutPanelTop,
   List,
-  ListChecks,
   ListTree,
   MemoryStick,
   MessageSquareText,
@@ -69,6 +67,7 @@ import {
 } from './components'
 import { rpc } from './api'
 import { redactSensitiveCommand, shellArgument as quoteArgument } from './command-line'
+import { SevenSegmentPreview } from './seven-segment-preview'
 import type { FrontPanelState } from './types'
 import type { SharedViewProps } from './views'
 import { peripheralAvailability } from './peripheral-availability'
@@ -76,6 +75,42 @@ import { peripheralAvailability } from './peripheral-availability'
 interface AdvancedWorkbenchProps extends SharedViewProps {
   run: (command: string) => Promise<string>
   busy: string
+}
+
+interface DiscoveredDevice {
+  protocol: string
+  protocols?: string[]
+  name: string
+  host: string
+  port: number
+  public_url?: string
+  public?: {
+    instance_id: string
+    instance_name: string
+    hostname: string
+    health: { ok: boolean; connectable: boolean; auth: string }
+    host: { version?: string; source_hash?: string; build_time?: string }
+    board: {
+      connected: boolean
+      connection_state: string
+      identity: { name?: string; build_hash?: string; build_timestamp?: string }
+      port: { name?: string; product?: string; vid?: string; pid?: string }
+      telemetry: { available: boolean; ina219_available: boolean; temperature_led_available: boolean; temperature_bt_audio_available: boolean; supply_mv?: number; current_ma?: number; power_mw?: number; temperature_led_centi_c?: number; temperature_bt_audio_centi_c?: number; door_open: boolean }
+    }
+    endpoints: { web: string; operations: string; websocket: string; socket_io: string }
+  }
+}
+
+interface DiscoveryConfig {
+  mdns_enabled: boolean
+  dns_sd_enabled: boolean
+  ssdp_enabled: boolean
+  upnp_enabled: boolean
+  ws_discovery_enabled: boolean
+  broadcast_enabled: boolean
+  netbios_enabled: boolean
+  broadcast_port: number
+  instance_name: string
 }
 
 type ReviewRisk = 'normal' | 'caution' | 'danger'
@@ -149,38 +184,17 @@ export function hostMenuLabelCommand(reference: string, label: string): string |
   return `host-menu set ${quoteArgument(normalizedReference)} label ${quoteArgument(normalizedLabel)}`
 }
 
-const segmentLines = [
-  ['a', 8, 5, 28, 5], ['b', 31, 8, 31, 27], ['c', 31, 32, 31, 51],
-  ['d', 8, 54, 28, 54], ['e', 5, 32, 5, 51], ['f', 5, 8, 5, 27],
-  ['g', 8, 29.5, 28, 29.5],
-] as const
-
-function SevenSegmentPreview({ panel }: { panel?: FrontPanelState }) {
-  const raw = panel?.raw_segments ?? [0, 0, 0, 0]
-  return (
-    <div className={`live-segment-preview${panel?.segments_active ? ' is-active' : ''}`} dir="ltr" aria-label="Live four-digit display preview">
-      {raw.map((mask, index) => (
-        <svg key={index} viewBox="0 0 40 62" role="img" aria-label={`digit ${index + 1} raw 0x${mask.toString(16).padStart(2, '0')}`}>
-          {segmentLines.map(([name, x1, y1, x2, y2], bit) => (
-            <line key={name} x1={x1} y1={y1} x2={x2} y2={y2} className={(mask & (1 << bit)) !== 0 ? 'is-lit' : ''} />
-          ))}
-          <circle cx="36" cy="54" r="2.2" className={(mask & 0x80) !== 0 ? 'is-lit' : ''} />
-        </svg>
-      ))}
-    </div>
-  )
-}
-
 export function AdvancedWorkbench({
   snapshot,
   locale,
   run,
   busy,
+  transport,
 }: AdvancedWorkbenchProps) {
   const available = peripheralAvailability(snapshot)
   const isPersian = locale === 'fa'
   const copy = (english: string, persian: string) => isPersian ? persian : english
-  const online = snapshot.connected
+  const online = transport.boardState === 'ready' && snapshot.connected && snapshot.have_status
   const boardBusy = busy.length > 0
 
   const [port, setPort] = useState('')
@@ -199,7 +213,9 @@ export function AdvancedWorkbench({
   const [menuOrder, setMenuOrder] = useState('status voltage current temperature')
   const [hostMenuID, setHostMenuID] = useState('')
   const [hostMenuLabel, setHostMenuLabel] = useState('')
-  const [frontPanel, setFrontPanel] = useState<FrontPanelState | undefined>(snapshot.front_panel)
+  const [frontPanel, setFrontPanel] = useState<FrontPanelState | undefined>(
+    available.segments && snapshot.have_front_panel ? snapshot.front_panel : undefined,
+  )
 
   const [pixel, setPixel] = useState(0)
   const [pixelRed, setPixelRed] = useState(32)
@@ -212,11 +228,6 @@ export function AdvancedWorkbench({
   const [rfKind, setRFKind] = useState<'none' | 'key' | 'menu' | 'relay' | 'side' | 'pwm'>('key')
   const [rfValue, setRFValue] = useState('1')
   const [rfBehavior, setRFBehavior] = useState('press')
-
-  const [macroRef, setMacroRef] = useState('')
-  const [macroName, setMacroName] = useState('')
-  const [macroCategory, setMacroCategory] = useState('Web')
-  const [macroColor, setMacroColor] = useState<'red' | 'blue' | 'violet' | 'green' | 'white'>('red')
 
   const [i2cAddress, setI2CAddress] = useState('0x27')
   const [i2cLease, setI2CLease] = useState(2)
@@ -235,7 +246,13 @@ export function AdvancedWorkbench({
   const [messageLine2, setMessageLine2] = useState('')
   const [discoverMDNS, setDiscoverMDNS] = useState(true)
   const [discoverSSDP, setDiscoverSSDP] = useState(true)
+  const [discoverWS, setDiscoverWS] = useState(true)
+  const [discoverBroadcast, setDiscoverBroadcast] = useState(true)
+  const [discoverNetBIOS, setDiscoverNetBIOS] = useState(true)
   const [discoverTimeout, setDiscoverTimeout] = useState(1500)
+  const [discoveryInstanceName, setDiscoveryInstanceName] = useState('')
+  const [discoveryBroadcastPort, setDiscoveryBroadcastPort] = useState(37889)
+  const [networkDevices, setNetworkDevices] = useState<DiscoveredDevice[]>([])
   const [historyMinutes, setHistoryMinutes] = useState(60)
   const [historyLimit, setHistoryLimit] = useState(100)
   const [serviceOutput, setServiceOutput] = useState(copy('No service query yet.', 'هنوز پرس‌وجوی سرویسی انجام نشده است.'))
@@ -280,12 +297,34 @@ export function AdvancedWorkbench({
   }, [messageTarget, online])
 
   useEffect(() => {
+    if (!online || !available.segments) {
+      setFrontPanel(undefined)
+      return
+    }
     if (snapshot.have_front_panel && snapshot.front_panel) setFrontPanel(snapshot.front_panel)
-  }, [snapshot.front_panel_updated, snapshot.have_front_panel, snapshot.front_panel])
+  }, [available.segments, online, snapshot.front_panel_updated, snapshot.have_front_panel, snapshot.front_panel])
 
   useEffect(() => {
     setServiceOutput(copy('No service query yet.', 'هنوز پرس‌وجوی سرویسی انجام نشده است.'))
   }, [locale])
+
+  useEffect(() => {
+    let active = true
+    void rpc<DiscoveryConfig>('controller.discovery.config.get').then((value) => {
+      if (!active) return
+      setDiscoverMDNS(value.mdns_enabled || value.dns_sd_enabled)
+      setDiscoverSSDP(value.ssdp_enabled || value.upnp_enabled)
+      setDiscoverWS(value.ws_discovery_enabled)
+      setDiscoverBroadcast(value.broadcast_enabled)
+      setDiscoverNetBIOS(value.netbios_enabled)
+      setDiscoveryBroadcastPort(value.broadcast_port || 37889)
+      setDiscoveryInstanceName(value.instance_name || '')
+    }).catch(() => {
+      // Keep the documented default-on values when an older/unavailable host
+      // cannot return the persistent discovery contract.
+    })
+    return () => { active = false }
+  }, [])
 
   const rfMapCommand = useMemo(() => {
     const id = rfID.trim() || '1'
@@ -379,6 +418,60 @@ export function AdvancedWorkbench({
     void performRPC(`history-${kind}`, () => rpc(method, params))
   }
 
+  const discoverNetworkDevices = async () => {
+    setServiceBusy('discovery')
+    try {
+      const value = await rpc<DiscoveredDevice[]>('controller.discovery.scan', {
+        timeout_ms: discoverTimeout,
+        mdns: discoverMDNS,
+        dns_sd: discoverMDNS,
+        ssdp: discoverSSDP,
+        upnp: discoverSSDP,
+        ws_discovery: discoverWS,
+        broadcast: discoverBroadcast,
+        netbios: discoverNetBIOS,
+      })
+      setNetworkDevices(value)
+      setServiceOutput(JSON.stringify(value, null, 2))
+    } catch (cause) {
+      const detail = cause instanceof Error ? cause.message : String(cause)
+      setServiceOutput(`! ${detail}`)
+    } finally {
+      setServiceBusy('')
+    }
+  }
+
+  const saveDiscoveryAdvertisement = () => {
+    void performRPC('discovery-config', async () => {
+      const value = await rpc<DiscoveryConfig>('controller.discovery.config.set', {
+        mdns_enabled: discoverMDNS,
+        dns_sd_enabled: discoverMDNS,
+        ssdp_enabled: discoverSSDP,
+        upnp_enabled: discoverSSDP,
+        ws_discovery_enabled: discoverWS,
+        broadcast_enabled: discoverBroadcast,
+        netbios_enabled: discoverNetBIOS,
+        broadcast_port: discoveryBroadcastPort,
+        instance_name: discoveryInstanceName.trim(),
+      })
+      setDiscoveryInstanceName(value.instance_name || '')
+      setDiscoveryBroadcastPort(value.broadcast_port || 37889)
+      return value
+    })
+  }
+
+  const connectDiscoveredDevice = (device: DiscoveredDevice) => {
+    const candidate = device.public?.endpoints.web || `http://${device.host}:${device.port}/`
+    try {
+      const endpoint = new URL(candidate)
+      if (endpoint.protocol !== 'http:' && endpoint.protocol !== 'https:') throw new Error('unsupported endpoint protocol')
+      window.location.assign(endpoint.href)
+    } catch (cause) {
+      const detail = cause instanceof Error ? cause.message : String(cause)
+      setServiceOutput(`! Cannot connect to ${device.name}: ${detail}`)
+    }
+  }
+
   const setRFDefaults = (kind: typeof rfKind) => {
     setRFKind(kind)
     switch (kind) {
@@ -399,12 +492,6 @@ export function AdvancedWorkbench({
   const i2cBytes = normalizeTokens(i2cWrite)
   const i2cCommand = `i2c transfer ${i2cAddress.trim() || '0x27'} ${i2cLease} ${i2cReadCount}${i2cBytes ? ` ${i2cBytes}` : ''}`
   const hostMenuLabelUpdate = hostMenuLabelCommand(hostMenuID, hostMenuLabel)
-  const macroRecordCommand = [
-    'macro record start',
-    quoteArgument(macroName.trim()),
-    ...(macroCategory.trim() ? [quoteArgument(macroCategory.trim())] : []),
-    ...(macroColor.trim() ? [quoteArgument(macroColor.trim())] : []),
-  ].join(' ')
   const messageByteLength = new TextEncoder().encode(messageText.trim()).byteLength
   const lcdMessageValid = Boolean(messageLine1 || messageLine2) &&
     messageLine1.length <= 16 && messageLine2.length <= 16 &&
@@ -528,16 +615,16 @@ export function AdvancedWorkbench({
           detail={copy('Firmware page IDs and HOST-supplied menu overlays remain separately inspectable.', 'شناسه صفحات میان‌افزار و منوهای میزبان به‌صورت مستقل قابل بررسی هستند.')}
           defaultOpen
         >
-          <div className="front-panel-live">
-            <SevenSegmentPreview panel={frontPanel} />
+          {available.segments && <div className="front-panel-live">
+            <SevenSegmentPreview panel={frontPanel} label={copy('Live physical seven-segment display', 'نمایش زندهٔ نمایشگر فیزیکی هفت‌بخشی')} />
             <div>
               <strong>{copy('Live physical display', 'نمایش زنده پنل')}</strong>
               <span>{frontPanel ? `${copy('page', 'صفحه')} ${frontPanel.menu_page} · ${copy('brightness', 'روشنایی')} ${frontPanel.brightness}/7` : copy('Awaiting exact front-panel state', 'در انتظار وضعیت دقیق پنل')}</span>
 			  <small>{copy('Changed-only board opcodes update this preview immediately; refresh is explicit.', 'اپ‌کدهای تغییرمحور برد این پیش‌نمایش را فوری به‌روز می‌کنند؛ تازه‌سازی صریح است.')}</small>
             </div>
-          </div>
+          </div>}
           <div className="advanced-actions">
-			<Button icon={RefreshCw} disabled={!online} onClick={() => void rpc<FrontPanelState>('controller.front_panel').then(setFrontPanel).catch(() => undefined)}>{copy('Refresh physical state', 'تازه‌سازی وضعیت فیزیکی')}</Button>
+			{available.segments && <Button icon={RefreshCw} disabled={!online} onClick={() => void rpc<FrontPanelState>('controller.front_panel').then(setFrontPanel).catch(() => undefined)}>{copy('Refresh physical state', 'تازه‌سازی وضعیت فیزیکی')}</Button>}
             <Button icon={BookOpen} disabled={!online} busy={busy === 'menu list'} onClick={() => void run('menu list')}>{copy('Firmware catalog', 'کاتالوگ میان‌افزار')}</Button>
             <Button icon={LayoutDashboard} disabled={!online} busy={busy === 'menu current'} onClick={() => void run('menu current')}>{copy('Current page', 'صفحه فعلی')}</Button>
             <Button icon={LayoutPanelTop} disabled={!online} busy={busy === 'menu layout'} onClick={() => void run('menu layout')}>{copy('Stored layout', 'چیدمان ذخیره‌شده')}</Button>
@@ -556,7 +643,7 @@ export function AdvancedWorkbench({
               <Button key={key} compact disabled={!online} busy={busy === `host-menu key ${key} press`} onClick={() => void run(`host-menu key ${key} press`)}>{copy(`${key} · ${label}`, `${key} · ${label}`)}</Button>
             ))}
           </div>
-          <p className="advanced-note advanced-note--safe">{copy('The Macro front-panel page lists the file-watched library, records MCU acknowledgement deltas, shows playback progress, and offers safe cancel or guarded keep-output cancel.', 'صفحه ماکروی پنل، فهرست تحت پایش فایل، ضبط زمان‌بندی MCU، پیشرفت اجرا و لغو امن یا لغو با حفظ خروجی را ارائه می‌کند.')}</p>
+          <p className="advanced-note advanced-note--safe">{copy('The Macro front-panel page uses the shared host library, records host command timing by default, shows playback progress, and offers safe cancel or guarded keep-output cancel.', 'صفحه ماکروی پنل از کتابخانه مشترک میزبان استفاده می‌کند، زمان فرمان‌های میزبان را ضبط می‌کند و پیشرفت اجرا و لغو امن را نشان می‌دهد.')}</p>
           <div className="advanced-fields">
             <TextField
               label={copy('Firmware page ID or key', 'شناسه یا کلید صفحه میان‌افزار')}
@@ -655,50 +742,6 @@ export function AdvancedWorkbench({
           )}
           <div className="advanced-command-inline" dir="ltr"><code>{rfMapCommand}</code></div>
           <Button icon={ShieldAlert} disabled={!rfID.trim()} onClick={() => prepare(rfMapCommand, copy('RF mappings affect physical outputs and must match the registered action schema.', 'نگاشت RF بر خروجی فیزیکی اثر می‌گذارد و باید دقیقاً با ساختار فرمان سازگار باشد.'), 'caution', true)}>{copy('Review mapping', 'بازبینی نگاشت')}</Button>
-        </AdvancedPanel>
-
-        <AdvancedPanel
-          icon={Workflow}
-          eyebrow={copy('MCU-TIMED', 'زمان‌بندی‌شده روی MCU')}
-          title={copy('Macro inspection & recording', 'بررسی و ضبط ماکرو')}
-          detail={copy('Inspect compiled timing, record acknowledged board commands, then save or discard deliberately.', 'زمان‌بندی کامپایل‌شده را ببینید، فرمان‌های تأییدشده برد را ضبط و آگاهانه ذخیره یا دور بریزید.')}
-        >
-          <div className="advanced-actions">
-            <Button icon={List} busy={busy === 'macro list'} onClick={() => void run('macro list')}>{copy('List', 'فهرست')}</Button>
-            <Button icon={Play} busy={busy === 'macro status'} onClick={() => void run('macro status')}>{copy('Playback status', 'وضعیت اجرا')}</Button>
-            <Button icon={CircleDot} busy={busy === 'macro record status'} onClick={() => void run('macro record status')}>{copy('Recording status', 'وضعیت ضبط')}</Button>
-          </div>
-          <div className="advanced-fields">
-            <TextField
-              label={copy('Macro name or ID', 'نام یا شناسه ماکرو')}
-              value={macroRef}
-              dir="ltr"
-              spellCheck={false}
-              onChange={(event) => setMacroRef(event.target.value)}
-              action={<Button icon={ListChecks} disabled={!macroRef.trim()} busy={busy === `macro show ${quoteArgument(macroRef.trim())}`} onClick={() => void run(`macro show ${quoteArgument(macroRef.trim())}`)}>{copy('Inspect exact steps', 'بررسی گام‌های دقیق')}</Button>}
-            />
-          </div>
-          <div className="advanced-fields advanced-fields--record">
-            <TextField label={copy('New recording name', 'نام ضبط جدید')} value={macroName} dir="ltr" spellCheck={false} onChange={(event) => setMacroName(event.target.value)} />
-            <TextField label={copy('Category', 'دسته‌بندی')} value={macroCategory} dir="ltr" spellCheck={false} onChange={(event) => setMacroCategory(event.target.value)} />
-            <div className="advanced-field">
-              <label>{copy('Color', 'رنگ')}</label>
-              <Segmented value={macroColor} label={copy('Macro color', 'رنگ ماکرو')} options={[
-                { value: 'red', label: copy('Red', 'قرمز') },
-                { value: 'blue', label: copy('Blue', 'آبی') },
-                { value: 'violet', label: copy('Violet', 'بنفش') },
-                { value: 'green', label: copy('Green', 'سبز') },
-                { value: 'white', label: copy('White', 'سفید') },
-              ]} onChange={setMacroColor} />
-            </div>
-            <Button tone="primary" icon={CircleDot} disabled={!online || !macroName.trim() || (!!macroColor.trim() && !macroCategory.trim())} busy={busy === macroRecordCommand} onClick={() => void run(macroRecordCommand)}>{copy('Start recording', 'شروع ضبط')}</Button>
-          </div>
-          <div className="advanced-actions">
-            <Button icon={Save} busy={busy === 'macro record save'} onClick={() => void run('macro record save')}>{copy('Save recording', 'ذخیره ضبط')}</Button>
-            <Button icon={Trash2} busy={busy === 'macro record discard'} onClick={() => void run('macro record discard')}>{copy('Discard recording', 'حذف ضبط')}</Button>
-            <Button icon={CircleStop} disabled={!online} busy={busy === 'macro cancel'} onClick={() => void run('macro cancel')}>{copy('Cancel safely', 'لغو امن')}</Button>
-            <Button tone="danger" icon={ShieldAlert} disabled={!online} onClick={() => prepare('macro cancel keep', copy('Cancelling with keep deliberately leaves current physical outputs unchanged.', 'لغو با حفظ خروجی، وضعیت فعلی خروجی‌های فیزیکی را عمداً نگه می‌دارد.'), 'danger', true)}>{copy('Prepare cancel + keep', 'آماده‌سازی لغو با حفظ خروجی')}</Button>
-          </div>
         </AdvancedPanel>
 
         <AdvancedPanel
@@ -807,11 +850,41 @@ export function AdvancedWorkbench({
           </form>
           <div className="advanced-divider" />
           <div className="advanced-toggle-stack advanced-toggle-stack--compact">
-            <Toggle checked={discoverMDNS} onChange={setDiscoverMDNS} label="mDNS" />
-            <Toggle checked={discoverSSDP} onChange={setDiscoverSSDP} label="SSDP" />
+            <Toggle checked={discoverMDNS} onChange={setDiscoverMDNS} label="mDNS / DNS-SD" />
+            <Toggle checked={discoverSSDP} onChange={setDiscoverSSDP} label="SSDP / UPnP + SOAP" />
+            <Toggle checked={discoverWS} onChange={setDiscoverWS} label="WS-Discovery" />
+            <Toggle checked={discoverBroadcast} onChange={setDiscoverBroadcast} label="UDP broadcast" />
+            <Toggle checked={discoverNetBIOS} onChange={setDiscoverNetBIOS} label="NetBIOS" />
           </div>
+          <div className="advanced-fields advanced-fields--split">
+            <TextField label={copy('Advertised instance name', 'نام تبلیغ‌شده نمونه')} hint={copy('Blank uses the configured app title', 'خالی یعنی عنوان برنامه')} value={discoveryInstanceName} maxLength={63} onChange={(event) => setDiscoveryInstanceName(event.target.value)} />
+            <TextField label={copy('UDP broadcast port', 'درگاه پخش UDP')} type="number" min={1024} max={65535} value={discoveryBroadcastPort} onChange={(event) => setDiscoveryBroadcastPort(boundedInteger(event.target.value, 37889, 1024, 65535))} />
+          </div>
+          <Button icon={Save} busy={serviceBusy === 'discovery-config'} onClick={saveDiscoveryAdvertisement}>{copy('Save advertisement settings', 'ذخیره تنظیمات معرفی')}</Button>
+          <p className="advanced-note advanced-note--safe">{copy('Advertisement is enabled by default and publishes only bounded public identity, health and telemetry. Remote commands still require an authenticated, remotely enabled IPC policy.', 'معرفی شبکه به‌طور پیش‌فرض فعال است و فقط هویت، سلامت و تله‌متری عمومی محدود را منتشر می‌کند. فرمان‌های راه‌دور همچنان به IPC فعال و احراز هویت‌شده نیاز دارند.')}</p>
           <RangeField label={copy('Discovery timeout', 'مهلت کشف')} value={discoverTimeout} min={100} max={5000} step={100} unit="ms" onChange={setDiscoverTimeout} />
-          <Button icon={ScanSearch} busy={serviceBusy === 'discovery'} disabled={!discoverMDNS && !discoverSSDP} onClick={() => void performRPC('discovery', () => rpc('controller.discovery.scan', { timeout_ms: discoverTimeout, mdns: discoverMDNS, ssdp: discoverSSDP }))}>{copy('Discover trusted hosts', 'کشف میزبان‌ها')}</Button>
+          <Button icon={ScanSearch} busy={serviceBusy === 'discovery'} disabled={!discoverMDNS && !discoverSSDP && !discoverWS && !discoverBroadcast && !discoverNetBIOS} onClick={() => void discoverNetworkDevices()}>{copy('Discover network hosts', 'کشف میزبان‌های شبکه')}</Button>
+          {networkDevices.length > 0 && <div className="network-device-directory" aria-live="polite">
+            {networkDevices.map((device) => {
+              const info = device.public
+              const telemetry = info?.board.telemetry
+              const telemetryParts: string[] = []
+              if (telemetry?.ina219_available) {
+                telemetryParts.push(`${((telemetry.supply_mv ?? 0) / 1000).toFixed(2)} V`)
+                telemetryParts.push(`${(telemetry.current_ma ?? 0).toFixed(0)} mA`)
+              }
+              if (telemetry?.temperature_led_available) telemetryParts.push(`${((telemetry.temperature_led_centi_c ?? 0) / 100).toFixed(1)} °C LED`)
+              if (telemetry?.temperature_bt_audio_available) telemetryParts.push(`${((telemetry.temperature_bt_audio_centi_c ?? 0) / 100).toFixed(1)} °C BT`)
+              if (telemetry?.available) telemetryParts.push(telemetry.door_open ? copy('door open', 'درب باز') : copy('door closed', 'درب بسته'))
+              return <article className="network-device" key={info?.instance_id || `${device.host}:${device.port}`}>
+                <div><strong>{info?.instance_name || device.name}</strong><small>{info?.hostname || device.host}:{device.port} · {(device.protocols || [device.protocol]).join(' + ')}</small></div>
+                <StatusBadge tone={info?.health.ok ? (info.health.connectable ? 'good' : 'warn') : 'bad'}>{info?.health.connectable ? copy('CONNECTABLE', 'قابل اتصال') : copy('DISCOVERABLE', 'قابل کشف')}</StatusBadge>
+                <p>{info?.board.connected ? `${info.board.identity.name || 'PCController'} · ${info.board.identity.build_hash || 'firmware'} · ${info.board.port.name || info.board.port.product || 'serial'}` : copy('Host online · board disconnected', 'میزبان آنلاین · برد قطع است')}</p>
+                {telemetryParts.length > 0 && <p>{telemetryParts.join(' · ')}</p>}
+                <Button tone="primary" icon={Plug} disabled={!info?.health.connectable} onClick={() => connectDiscoveredDevice(device)}>{copy('Connect to host', 'اتصال به میزبان')}</Button>
+              </article>
+            })}
+          </div>}
           <div className="advanced-divider" />
           <div className="advanced-fields advanced-fields--history">
             <TextField label={copy('Look back · minutes', 'بازه گذشته · دقیقه')} type="number" min={1} max={43200} value={historyMinutes} onChange={(event) => setHistoryMinutes(boundedInteger(event.target.value, 60, 1, 43200))} />

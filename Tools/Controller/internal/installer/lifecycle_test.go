@@ -37,7 +37,7 @@ func (desktop *fakeDesktop) RemoveOwned(_ context.Context, target DesktopTarget)
 
 func TestPackageInventoryBindsHostExecutableAndResources(t *testing.T) {
 	packageRoot, manifest := writeTestPackage(t, "1.2.3", "first")
-	if manifest.Format != packageManifestFormat || manifest.Target.Platform != "windows" || manifest.Target.Architecture != "amd64" {
+	if manifest.Target.Platform != "windows" || manifest.Target.Architecture != "amd64" {
 		t.Fatalf("manifest identity=%#v", manifest)
 	}
 	if manifest.ExecutablePath != "controller.exe" || len(manifest.Files) != 3 {
@@ -55,6 +55,46 @@ func TestPackageInventoryBindsHostExecutableAndResources(t *testing.T) {
 	}
 	if _, err := VerifyPackage(packageRoot, manifest.RootSHA256, ManifestOptions{Platform: "windows", Architecture: "amd64"}); err == nil {
 		t.Fatal("tampered executable was accepted")
+	}
+}
+
+func TestPackageInventoryAcceptsDeclaredBrandedExecutable(t *testing.T) {
+	root := t.TempDir()
+	const executableName = "workshop-host.exe"
+	const productName = "Workshop Control Suite"
+	const version = "2.4.6"
+	const buildTime = "2026-08-02T12:34:56Z"
+	executablePath := filepath.Join(root, executableName)
+	if err := os.WriteFile(executablePath, minimalBrandedResourcePE(version, testSourceSHA, buildTime, productName, executableName, "brand"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	executableSHA, executableBytes, err := digestFile(executablePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	host := map[string]any{
+		"target": map[string]any{"platform": "windows", "architecture": "amd64"},
+		"identity": map[string]any{
+			"version": version, "appName": "Workshop Console", "productName": productName,
+			"executableName": executableName, "tagline": "test package", "sourceSHA256": testSourceSHA,
+			"sourceFiles": 1, "buildTime": buildTime,
+		},
+		"validation": map[string]any{"windowsResources": "verified", "webUI": map[string]any{"status": "passed"}},
+		"artifacts":  []map[string]any{{"path": executableName, "bytes": executableBytes, "sha256": executableSHA}},
+	}
+	content, err := json.MarshalIndent(host, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "host-manifest.json"), append(content, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := GeneratePackageManifest(root, filepath.Join(root, PackageManifestName), ManifestOptions{Platform: "windows", Architecture: "amd64"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.ExecutablePath != executableName {
+		t.Fatalf("branded executable=%q", manifest.ExecutablePath)
 	}
 }
 
@@ -95,10 +135,10 @@ func TestInstallUpdateAndRepairAreAtomicAndIdempotent(t *testing.T) {
 	if err != nil || !updated.Changed || updated.State.PreviousSHA256 != manifestOne.RootSHA256 {
 		t.Fatalf("update=%#v err=%v", updated, err)
 	}
-	if samePath(updated.Executable, first.Executable) {
-		t.Fatal("content-addressed update replaced a mapped executable in place")
+	if !samePath(updated.Executable, first.Executable) || updated.State.ActiveSlot != canonicalDirectory || updated.State.Executable != "bin/controller.exe" {
+		t.Fatalf("canonical executable path drifted: first=%s updated=%#v", first.Executable, updated.State)
 	}
-	if _, err := os.Stat(filepath.Dir(first.Executable)); err != nil {
+	if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(updated.State.PreviousSlot))); err != nil {
 		t.Fatalf("rollback package was not retained: %v", err)
 	}
 
@@ -109,7 +149,7 @@ func TestInstallUpdateAndRepairAreAtomicAndIdempotent(t *testing.T) {
 		Root: root, PackageRoot: packageTwo,
 		ExpectedPackageSHA256: manifestTwo.RootSHA256,
 	})
-	if err != nil || !repaired.Changed || !repaired.Healthy || samePath(repaired.Executable, updated.Executable) {
+	if err != nil || !repaired.Changed || !repaired.Healthy || !samePath(repaired.Executable, updated.Executable) {
 		t.Fatalf("repair=%#v err=%v", repaired, err)
 	}
 	status, err := service.Status(ctx, root)
@@ -118,6 +158,332 @@ func TestInstallUpdateAndRepairAreAtomicAndIdempotent(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, transactionName)); !os.IsNotExist(err) {
 		t.Fatalf("committed transaction journal remains: %v", err)
+	}
+}
+
+func TestCanonicalBinQuarantinesUnknownContentRetiresRemovedFilesAndKeepsOneRollback(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "installation")
+	service := testService(t, nil)
+	install := func(version string, obsolete bool) LifecycleResult {
+		t.Helper()
+		packageRoot, manifest := writeTestPackage(t, version, version)
+		if obsolete {
+			if err := os.WriteFile(filepath.Join(packageRoot, "obsolete.dll"), []byte("old package"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var err error
+			manifest, err = GeneratePackageManifest(packageRoot, filepath.Join(packageRoot, PackageManifestName), ManifestOptions{Platform: "windows", Architecture: "amd64"})
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		result, err := service.Install(context.Background(), ChangeRequest{Root: root, PackageRoot: packageRoot, ExpectedPackageSHA256: manifest.RootSHA256})
+		if err != nil || result.State == nil {
+			t.Fatalf("install %s=%#v err=%v", version, result, err)
+		}
+		return result
+	}
+	first := install("1.0.0", true)
+	unknown := filepath.Join(root, canonicalDirectory, "operator-notes.txt")
+	if err := os.WriteFile(unknown, []byte("preserve me"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	second := install("2.0.0", false)
+	third := install("3.0.0", false)
+	if first.Executable != second.Executable || second.Executable != third.Executable || third.State.ActiveSlot != canonicalDirectory {
+		t.Fatalf("canonical path drifted: %#v %#v %#v", first.State, second.State, third.State)
+	}
+	if _, err := os.Stat(unknown); !os.IsNotExist(err) {
+		t.Fatalf("unknown content remained active: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, canonicalDirectory, "obsolete.dll")); !os.IsNotExist(err) {
+		t.Fatalf("removed package file remained active: %v", err)
+	}
+	quarantines, err := filepath.Glob(filepath.Join(root, "recovery-quarantine", "installer-*", "operator-notes.txt"))
+	if err != nil || len(quarantines) != 1 {
+		t.Fatalf("unknown content quarantine=%v err=%v", quarantines, err)
+	}
+	content, err := os.ReadFile(quarantines[0])
+	if err != nil || string(content) != "preserve me" {
+		t.Fatalf("quarantined content=%q err=%v", content, err)
+	}
+	entries, err := os.ReadDir(filepath.Join(root, packagesDirectory))
+	if err != nil || len(entries) != 1 || entries[0].Name() != third.State.PreviousSHA256 {
+		t.Fatalf("rollback set=%v state=%#v err=%v", entries, third.State, err)
+	}
+}
+
+func TestHealthyNoOpPrunesSupersededAndDropsDamagedRollback(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "installation")
+	service := testService(t, nil)
+	one, _ := writeTestPackage(t, "1.0.0", "one")
+	if _, err := service.Install(context.Background(), ChangeRequest{Root: root, PackageRoot: one}); err != nil {
+		t.Fatal(err)
+	}
+	two, manifestTwo := writeTestPackage(t, "2.0.0", "two")
+	updated, err := service.Install(context.Background(), ChangeRequest{Root: root, PackageRoot: two})
+	if err != nil || updated.State == nil || updated.State.PreviousSlot == "" {
+		t.Fatalf("update=%#v err=%v", updated, err)
+	}
+	extra := filepath.Join(root, packagesDirectory, "superseded")
+	if err := os.MkdirAll(extra, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(extra, "stale.exe"), []byte("stale"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rollbackExecutable := filepath.Join(root, filepath.FromSlash(updated.State.PreviousSlot), "controller.exe")
+	if err := os.WriteFile(rollbackExecutable, []byte("damaged"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	noop, err := service.Install(context.Background(), ChangeRequest{Root: root, PackageRoot: two, ExpectedPackageSHA256: manifestTwo.RootSHA256})
+	if err != nil || !noop.Healthy || !noop.Changed || noop.State.PreviousSlot != "" || noop.State.PreviousSHA256 != "" {
+		t.Fatalf("no-op reconciliation=%#v err=%v", noop, err)
+	}
+	entries, err := os.ReadDir(filepath.Join(root, packagesDirectory))
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("superseded packages remain: %v err=%v", entries, err)
+	}
+}
+
+func TestHealthyLegacyHashedActiveMigratesToCanonicalBin(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "installation")
+	service := testService(t, nil)
+	packageRoot, manifest := writeTestPackage(t, "1.0.0", "legacy")
+	installed, err := service.Install(context.Background(), ChangeRequest{Root: root, PackageRoot: packageRoot})
+	if err != nil || installed.State == nil {
+		t.Fatal(err)
+	}
+	legacyRelative := filepath.ToSlash(filepath.Join(packagesDirectory, manifest.RootSHA256))
+	legacy := filepath.Join(root, filepath.FromSlash(legacyRelative))
+	if err := os.MkdirAll(filepath.Dir(legacy), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(root, canonicalDirectory), legacy); err != nil {
+		t.Fatal(err)
+	}
+	state := *installed.State
+	state.ActiveSlot = legacyRelative
+	state.Executable = filepath.ToSlash(filepath.Join(legacyRelative, "controller.exe"))
+	state.PreviousSlot, state.PreviousSHA256 = "", ""
+	if err := writeJSONAtomic(filepath.Join(root, installationStateName), state, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	migrated, err := service.Install(context.Background(), ChangeRequest{Root: root, PackageRoot: packageRoot})
+	if err != nil || migrated.State == nil || migrated.State.ActiveSlot != canonicalDirectory || migrated.State.Executable != "bin/controller.exe" {
+		t.Fatalf("legacy migration=%#v err=%v", migrated, err)
+	}
+	if migrated.State.PreviousSlot != legacyRelative || migrated.State.PreviousSHA256 != manifest.RootSHA256 {
+		t.Fatalf("legacy rollback identity was not retained: %#v", migrated.State)
+	}
+}
+
+func TestCanonicalSourceOnlyRootAdoptsAndSurvivesUninstall(t *testing.T) {
+	root := filepath.Join(t.TempDir(), productidentity.ConfigDirectory)
+	source := filepath.Join(root, "source", productidentity.ConfigDirectory)
+	for relative, content := range map[string]string{
+		"AGENTS.md": "repository rules", "PCController.ino": "void setup() {}",
+		filepath.Join("Tools", "Controller", "go.mod"): "module pccontroller.local/controller",
+	} {
+		path := filepath.Join(source, relative)
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	original := canonicalInstallRootForAdoption
+	defer func() { canonicalInstallRootForAdoption = original }()
+	canonicalInstallRootForAdoption = func() (string, error) { return root, nil }
+	packageRoot, _ := writeTestPackage(t, "1.0.0", "source-only")
+	service := testService(t, nil)
+	installed, err := service.Install(context.Background(), ChangeRequest{Root: root, PackageRoot: packageRoot})
+	if err != nil || !installed.Healthy {
+		t.Fatalf("source-only adoption=%#v err=%v", installed, err)
+	}
+	if _, err := service.Uninstall(context.Background(), UninstallRequest{Root: root}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(source, "AGENTS.md")); err != nil {
+		t.Fatalf("uninstall removed canonical source: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ownerMarkerName)); err != nil {
+		t.Fatalf("uninstall removed retained-root ownership: %v", err)
+	}
+}
+
+func TestCanonicalRunningHostSchedulesVerifiedExternalActivationHelper(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "installation")
+	service := testService(t, nil)
+	packageRoot, _ := writeTestPackage(t, "1.0.0", "helper")
+	installed, err := service.Install(context.Background(), ChangeRequest{Root: root, PackageRoot: packageRoot})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.CurrentExecutable = installed.Executable
+	original := startActivationHelper
+	defer func() { startActivationHelper = original }()
+	var launchedHelper, launchedPlan string
+	startActivationHelper = func(_ context.Context, helper, plan string) error {
+		launchedHelper, launchedPlan = helper, plan
+		return nil
+	}
+	plan, err := service.PrepareExternalActivation(context.Background(), ChangeRequest{Root: root, PackageRoot: packageRoot}, true)
+	if err != nil || launchedHelper != plan.HelperPath || launchedPlan != plan.PlanPath {
+		t.Fatalf("external activation plan=%#v helper=%q/%q err=%v", plan, launchedHelper, launchedPlan, err)
+	}
+	if _, err := os.Stat(plan.HelperPath); err != nil {
+		t.Fatalf("verified helper copy missing: %v", err)
+	}
+	if err := removeTreeSecure(filepath.Dir(plan.HelperPath)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRunningCanonicalInstallStopsBeforeDirectoryRename(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "installation")
+	service := testService(t, nil)
+	oldPackage, oldManifest := writeTestPackage(t, "1.0.0", "running-old")
+	installed, err := service.Install(context.Background(), ChangeRequest{Root: root, PackageRoot: oldPackage})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.CurrentExecutable = installed.Executable
+	newPackage, _ := writeTestPackage(t, "2.0.0", "running-new")
+	if _, err := service.Install(context.Background(), ChangeRequest{Root: root, PackageRoot: newPackage}); !errors.Is(err, ErrExternalActivationRequired) {
+		t.Fatalf("running canonical install error=%v", err)
+	}
+	if err := service.verifySlot(root, canonicalDirectory, oldManifest.RootSHA256); err != nil {
+		t.Fatalf("canonical bin changed before helper: %v", err)
+	}
+	retired, err := filepath.Glob(filepath.Join(root, stagingDirectory, "retired-*"))
+	if err != nil || len(retired) != 0 {
+		t.Fatalf("canonical directory was retired before helper: %v err=%v", retired, err)
+	}
+}
+
+func TestExternalActivationHelperRejectsTamperedCopy(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "installation")
+	service := testService(t, nil)
+	packageRoot, _ := writeTestPackage(t, "1.0.0", "helper-tamper")
+	installed, err := service.Install(context.Background(), ChangeRequest{Root: root, PackageRoot: packageRoot})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.CurrentExecutable = installed.Executable
+	original := startActivationHelper
+	defer func() { startActivationHelper = original }()
+	startActivationHelper = func(_ context.Context, _, _ string) error { return nil }
+	plan, err := service.PrepareExternalActivation(context.Background(), ChangeRequest{Root: root, PackageRoot: packageRoot}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(plan.HelperPath, []byte("tampered"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	helperService := *service
+	helperService.CurrentExecutable = plan.HelperPath
+	if err := RunExternalActivationHelper(context.Background(), plan.PlanPath, &helperService); err == nil || !strings.Contains(err.Error(), "digest") {
+		t.Fatalf("tampered activation helper error=%v", err)
+	}
+	if err := removeTreeSecure(filepath.Dir(plan.HelperPath)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSuccessfulActivationSchedulesOutcomeHelperAndDirectoryCleanup(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "installation")
+	service := testService(t, nil)
+	packageRoot, _ := writeTestPackage(t, "1.0.0", "helper-cleanup")
+	installed, err := service.Install(context.Background(), ChangeRequest{Root: root, PackageRoot: packageRoot})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.CurrentExecutable = installed.Executable
+	originalStart, originalCleanup := startActivationHelper, scheduleActivationArtifacts
+	defer func() { startActivationHelper, scheduleActivationArtifacts = originalStart, originalCleanup }()
+	startActivationHelper = func(_ context.Context, _, _ string) error { return nil }
+	plan, err := service.PrepareExternalActivation(context.Background(), ChangeRequest{Root: root, PackageRoot: packageRoot}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := readBoundedRegularFile(plan.PlanPath, 256<<10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var helperPlan activationHelperPlan
+	if err := decodeStrictJSON(content, &helperPlan); err != nil {
+		t.Fatal(err)
+	}
+	helperPlan.ParentPID, helperPlan.ParentIdentity = 2147483647, "nonexistent-test-process"
+	if err := writeJSONAtomic(plan.PlanPath, helperPlan, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var scheduled []string
+	scheduleActivationArtifacts = func(outcome, helper, directory string) error {
+		if _, err := os.Stat(outcome); err != nil {
+			return err
+		}
+		scheduled = []string{outcome, helper, directory}
+		return nil
+	}
+	helperService := *service
+	helperService.CurrentExecutable = plan.HelperPath
+	if err := RunExternalActivationHelper(context.Background(), plan.PlanPath, &helperService); err != nil {
+		t.Fatal(err)
+	}
+	expected := []string{plan.OutcomePath, plan.HelperPath, filepath.Dir(plan.HelperPath)}
+	if !reflect.DeepEqual(scheduled, expected) {
+		t.Fatalf("scheduled cleanup=%v expected=%v", scheduled, expected)
+	}
+	if _, err := os.Stat(plan.PlanPath); !os.IsNotExist(err) {
+		t.Fatalf("successful helper retained plan: %v", err)
+	}
+	if err := removeTreeSecure(filepath.Dir(plan.HelperPath)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCanonicalRetiringJournalRecoversBothRenameBoundaries(t *testing.T) {
+	for _, renamed := range []bool{false, true} {
+		t.Run(map[bool]string{false: "before-rename", true: "after-rename"}[renamed], func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), "installation")
+			service := testService(t, nil)
+			oldPackage, _ := writeTestPackage(t, "1.0.0", "old")
+			installed, err := service.Install(context.Background(), ChangeRequest{Root: root, PackageRoot: oldPackage})
+			if err != nil {
+				t.Fatal(err)
+			}
+			newPackage, manifest := writeTestPackage(t, "2.0.0", "new")
+			stageRelative := filepath.ToSlash(filepath.Join(stagingDirectory, "crash-stage"))
+			stage := filepath.Join(root, filepath.FromSlash(stageRelative))
+			if err := service.stagePackage(newPackage, stage, manifest); err != nil {
+				t.Fatal(err)
+			}
+			next := *installed.State
+			next.ActiveSHA256, next.Version, next.SourceSHA256 = manifest.RootSHA256, manifest.Version, manifest.SourceSHA256
+			next.PreviousSlot = filepath.ToSlash(filepath.Join(packagesDirectory, installed.State.ActiveSHA256))
+			next.PreviousSHA256 = installed.State.ActiveSHA256
+			journal := transactionJournal{
+				ID: "crash", Operation: "install", Phase: "canonical-retiring",
+				Stage: stageRelative, Retired: filepath.ToSlash(filepath.Join(stagingDirectory, "retired-crash")),
+				NewSlot: canonicalDirectory, NewSHA256: manifest.RootSHA256, PreviousState: installed.State, DesiredState: &next,
+				UpdatedAt: time.Now().UTC(),
+			}
+			if renamed {
+				if err := os.Rename(filepath.Join(root, canonicalDirectory), filepath.Join(root, filepath.FromSlash(journal.Retired))); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := writeJSONAtomic(filepath.Join(root, transactionName), journal, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			status, err := service.Status(context.Background(), root)
+			if err != nil || !status.Healthy || status.State == nil || status.State.ActiveSlot != canonicalDirectory || status.State.ActiveSHA256 != manifest.RootSHA256 {
+				t.Fatalf("recovered status=%#v err=%v", status, err)
+			}
+		})
 	}
 }
 
@@ -149,6 +515,27 @@ func TestMatchingInstallPersistsNewDesktopIntegration(t *testing.T) {
 	}
 }
 
+func TestMatchingInstallDoesNotClaimHealthyWhenDesktopRepairFails(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "installation")
+	packageRoot, manifest := writeTestPackage(t, "1.0.0", "one")
+	desktop := &fakeDesktop{}
+	service := testService(t, desktop)
+	request := ChangeRequest{Root: root, PackageRoot: packageRoot, ExpectedPackageSHA256: manifest.RootSHA256, ConfigureDesktop: true}
+	if _, err := service.Install(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+	desktop.ensureErr = errors.New("Desktop link is not owned; existing link preserved")
+	result, err := service.Install(context.Background(), request)
+	if err == nil || result.Healthy || len(desktop.ensure) != 2 {
+		t.Fatalf("false desktop repair success: %+v err=%v calls=%d", result, err, len(desktop.ensure))
+	}
+	desktop.ensureErr = nil
+	result, err = service.Install(context.Background(), request)
+	if err != nil || !result.Healthy || !result.DesktopManaged || len(desktop.ensure) != 3 {
+		t.Fatalf("desktop repair did not recover: %+v err=%v", result, err)
+	}
+}
+
 func TestDesktopFailureRetainsJournalAndRollsForwardOnRetry(t *testing.T) {
 	ctx := context.Background()
 	root := filepath.Join(t.TempDir(), "installation")
@@ -163,8 +550,8 @@ func TestDesktopFailureRetainsJournalAndRollsForwardOnRetry(t *testing.T) {
 	if _, err := service.Install(ctx, ChangeRequest{Root: root, PackageRoot: packageTwo}); err == nil {
 		t.Fatal("desktop activation failure was ignored")
 	}
-	if len(desktop.remove) != 1 {
-		t.Fatalf("prior desktop activation was not cleaned up: %#v", desktop.remove)
+	if len(desktop.remove) != 0 {
+		t.Fatalf("stable canonical desktop target was unnecessarily removed: %#v", desktop.remove)
 	}
 	if _, err := os.Stat(filepath.Join(root, transactionName)); err != nil {
 		t.Fatalf("failed desktop activation did not retain its journal: %v", err)
@@ -183,7 +570,7 @@ func TestDesktopFailureRetainsJournalAndRollsForwardOnRetry(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, transactionName)); !os.IsNotExist(err) {
 		t.Fatalf("successful recovery retained its journal: %v", err)
 	}
-	if len(desktop.remove) != 3 || len(desktop.ensure) != 4 {
+	if len(desktop.remove) != 0 || len(desktop.ensure) != 4 {
 		t.Fatalf("desktop transition was not retried idempotently: %#v", desktop)
 	}
 }
@@ -206,7 +593,7 @@ func TestRecoveryCompletesDesktopActivationAfterStateCommit(t *testing.T) {
 	desktop.ensure = nil
 	desired := *installed.State
 	journal := transactionJournal{
-		Format: transactionFormat, ID: "state-committed", Operation: "install",
+		ID: "state-committed", Operation: "install",
 		Phase: "slot-ready", NewSlot: installed.State.ActiveSlot,
 		NewSHA256: installed.State.ActiveSHA256, DesiredState: &desired, UpdatedAt: time.Now().UTC(),
 	}
@@ -238,7 +625,7 @@ func TestRecoveryVerifiesSlotBeforeDesktopActivation(t *testing.T) {
 			desktop.ensure = nil
 			desired := *installed.State
 			journal := transactionJournal{
-				Format: transactionFormat, ID: "corrupt-recovery", Operation: "install",
+				ID: "corrupt-recovery", Operation: "install",
 				Phase: phase, NewSlot: installed.State.ActiveSlot,
 				NewSHA256: installed.State.ActiveSHA256, DesiredState: &desired, UpdatedAt: time.Now().UTC(),
 			}
@@ -299,7 +686,7 @@ func TestPresentationJournalRecoversEnableAndRenameCrashBoundaries(t *testing.T)
 				}
 			}
 			journal := transactionJournal{
-				Format: transactionFormat, ID: test.name, Operation: "install", Phase: "presentation",
+				ID: test.name, Operation: "install", Phase: "presentation",
 				NewSlot: desired.ActiveSlot, NewSHA256: desired.ActiveSHA256,
 				PreviousState: &previous, DesiredState: &desired, UpdatedAt: time.Now().UTC(),
 			}
@@ -356,7 +743,7 @@ func TestPackageRenameRecoveryCleansPriorIdentityAndRetainsFailures(t *testing.T
 			}
 			desired := *updated.State
 			journal := transactionJournal{
-				Format: transactionFormat, ID: test.name, Operation: "install", Phase: test.phase,
+				ID: test.name, Operation: "install", Phase: test.phase,
 				NewSlot: desired.ActiveSlot, NewSHA256: desired.ActiveSHA256,
 				PreviousState: &previous, DesiredState: &desired, UpdatedAt: time.Now().UTC(),
 			}
@@ -405,7 +792,7 @@ func TestInterruptedUninstallRollsBackToRetryableState(t *testing.T) {
 			desktop.ensure = nil
 			stateCopy := *installed.State
 			journal := transactionJournal{
-				Format: transactionFormat, ID: "uninstall", Operation: "uninstall",
+				ID: "uninstall", Operation: "uninstall",
 				Phase: phase, PreviousState: &stateCopy, UpdatedAt: time.Now().UTC(),
 			}
 			if err := writeJSONAtomic(filepath.Join(root, transactionName), journal, 0o600); err != nil {
@@ -434,7 +821,7 @@ func TestDetachedUninstallTombstoneIsRecovered(t *testing.T) {
 		t.Fatal(err)
 	}
 	journal := transactionJournal{
-		Format: transactionFormat, ID: "uninstall", Operation: "uninstall",
+		ID: "uninstall", Operation: "uninstall",
 		Phase: "uninstalling", UpdatedAt: time.Now().UTC(),
 	}
 	if err := writeJSONAtomic(filepath.Join(root, transactionName), journal, 0o600); err != nil {
@@ -540,7 +927,7 @@ func TestOwnershipChecksAndInterruptedStagingRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	journal := transactionJournal{
-		Format: transactionFormat, ID: "abandoned", Operation: "repair",
+		ID: "abandoned", Operation: "repair",
 		Phase: "staging", Stage: filepath.ToSlash(filepath.Join(stagingDirectory, "abandoned")), UpdatedAt: time.Now().UTC(),
 	}
 	if err := writeJSONAtomic(filepath.Join(root, transactionName), journal, 0o600); err != nil {
@@ -561,6 +948,13 @@ func TestUninstallPreservesDataUnlessSeparatelyConfirmed(t *testing.T) {
 	packageRoot, _ := writeTestPackage(t, "1.0.0", "one")
 	service := testService(t, nil)
 	if _, err := service.Install(ctx, ChangeRequest{Root: root, PackageRoot: packageRoot}); err != nil {
+		t.Fatal(err)
+	}
+	preservedSource := filepath.Join(root, "source", "PCController", "README.md")
+	if err := os.MkdirAll(filepath.Dir(preservedSource), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(preservedSource, []byte("canonical source"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	data := filepath.Join(t.TempDir(), "custom", "controller-data")
@@ -593,6 +987,18 @@ func TestUninstallPreservesDataUnlessSeparatelyConfirmed(t *testing.T) {
 	}
 	if _, err := os.Stat(config); err != nil {
 		t.Fatalf("default uninstall removed configuration: %v", err)
+	}
+	if content, err := os.ReadFile(preservedSource); err != nil || string(content) != "canonical source" {
+		t.Fatalf("uninstall removed canonical source: %q %v", content, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, canonicalDirectory)); !os.IsNotExist(err) {
+		t.Fatalf("uninstall retained installer-owned bin: %v", err)
+	}
+	if reinstalled, err := service.Install(ctx, ChangeRequest{Root: root, PackageRoot: packageRoot}); err != nil || !reinstalled.Healthy {
+		t.Fatalf("reinstall beside preserved source=%#v err=%v", reinstalled, err)
+	}
+	if content, err := os.ReadFile(preservedSource); err != nil || string(content) != "canonical source" {
+		t.Fatalf("reinstall changed preserved source: %q %v", content, err)
 	}
 
 	root = filepath.Join(t.TempDir(), "installation")
@@ -632,6 +1038,46 @@ func TestUninstallPreservesDataUnlessSeparatelyConfirmed(t *testing.T) {
 	}
 	if _, err := os.Stat(sibling); err != nil {
 		t.Fatalf("confirmed purge removed a repository sibling: %v", err)
+	}
+}
+
+func TestDirectUninstallQuarantinesUnknownBinContent(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "installation")
+	packageRoot, _ := writeTestPackage(t, "1.0.0", "uninstall-quarantine")
+	service := testService(t, nil)
+	if _, err := service.Install(context.Background(), ChangeRequest{Root: root, PackageRoot: packageRoot}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, canonicalDirectory, "operator.dll"), []byte("unknown"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Uninstall(context.Background(), UninstallRequest{Root: root}); err != nil {
+		t.Fatal(err)
+	}
+	matches, err := filepath.Glob(filepath.Join(root, "recovery-quarantine", "installer-*", "operator.dll"))
+	if err != nil || len(matches) != 1 {
+		t.Fatalf("uninstall quarantine=%v err=%v", matches, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, canonicalDirectory)); !os.IsNotExist(err) {
+		t.Fatalf("uninstall retained active bin: %v", err)
+	}
+}
+
+func TestUninstallMetadataReadFailureRetainsOwnershipMarker(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "installation")
+	packageRoot, _ := writeTestPackage(t, "1.0.0", "uninstall-metadata")
+	service := testService(t, nil)
+	if _, err := service.Install(context.Background(), ChangeRequest{Root: root, PackageRoot: packageRoot}); err != nil {
+		t.Fatal(err)
+	}
+	original := readInstallationRoot
+	defer func() { readInstallationRoot = original }()
+	readInstallationRoot = func(string) ([]os.DirEntry, error) { return nil, errors.New("injected metadata failure") }
+	if _, err := service.Uninstall(context.Background(), UninstallRequest{Root: root}); err == nil || !strings.Contains(err.Error(), "injected metadata failure") {
+		t.Fatalf("metadata failure error=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ownerMarkerName)); err != nil {
+		t.Fatalf("metadata failure removed ownership marker: %v", err)
 	}
 }
 
@@ -721,7 +1167,6 @@ func writeTestPackage(t *testing.T, version, marker string) (string, PackageMani
 		t.Fatal(err)
 	}
 	host := map[string]any{
-		"format": hostManifestFormat,
 		"target": map[string]any{"platform": "windows", "architecture": "amd64"},
 		"identity": map[string]any{
 			"version": version, "appName": productidentity.DefaultTitle,
@@ -752,11 +1197,16 @@ func writeTestPackage(t *testing.T, version, marker string) (string, PackageMani
 }
 
 func minimalResourcePE(version, sourceSHA, buildTime, marker string) []byte {
+	return minimalBrandedResourcePE(version, sourceSHA, buildTime, productidentity.DefaultTitle, "controller.exe", marker)
+}
+
+func minimalBrandedResourcePE(version, sourceSHA, buildTime, productName, executableName, marker string) []byte {
 	const peOffset = 64
 	const optionalBytes = 240
 	const sectionTable = peOffset + 24 + optionalBytes
 	const resourceOffset = 512
-	content := make([]byte, 2048)
+	resourceSize := 4096
+	content := make([]byte, resourceOffset+resourceSize+len(marker))
 	content[0], content[1] = 'M', 'Z'
 	binary.LittleEndian.PutUint32(content[0x3c:0x40], peOffset)
 	copy(content[peOffset:], "PE\x00\x00")
@@ -767,16 +1217,63 @@ func minimalResourcePE(version, sourceSHA, buildTime, marker string) []byte {
 	binary.LittleEndian.PutUint16(content[peOffset+24:peOffset+26], 0x020b)
 	header := content[sectionTable : sectionTable+40]
 	copy(header[:8], ".rsrc")
-	binary.LittleEndian.PutUint32(header[16:20], uint32(len(content)-resourceOffset))
+	binary.LittleEndian.PutUint32(header[8:12], uint32(resourceSize))
+	binary.LittleEndian.PutUint32(header[12:16], 0x1000)
+	binary.LittleEndian.PutUint32(header[16:20], uint32(resourceSize))
 	binary.LittleEndian.PutUint32(header[20:24], resourceOffset)
-	resource := content[resourceOffset:]
-	offset := 0
-	for _, value := range [][]byte{
-		utf16Bytes(productidentity.DefaultTitle), utf16Bytes(version), utf16Bytes("controller.exe"),
-		[]byte(sourceSHA), []byte(version), []byte(buildTime), []byte(marker),
-	} {
-		copy(resource[offset:], value)
-		offset += len(value) + 8
+	resource := content[resourceOffset : resourceOffset+resourceSize]
+	// IMAGE_RESOURCE_DIRECTORY tree: numeric RT_VERSION (16), name ID 1,
+	// language 0409, then one data entry. The payload is real VS_VERSIONINFO.
+	binary.LittleEndian.PutUint16(resource[14:16], 1)
+	binary.LittleEndian.PutUint32(resource[16:20], imageResourceTypeVersion)
+	binary.LittleEndian.PutUint32(resource[20:24], resourceDirectoryFlag|0x18)
+	binary.LittleEndian.PutUint16(resource[0x18+14:0x18+16], 1)
+	binary.LittleEndian.PutUint32(resource[0x18+16:0x18+20], 1)
+	binary.LittleEndian.PutUint32(resource[0x18+20:0x18+24], resourceDirectoryFlag|0x30)
+	binary.LittleEndian.PutUint16(resource[0x30+14:0x30+16], 1)
+	binary.LittleEndian.PutUint32(resource[0x30+16:0x30+20], 0x0409)
+	binary.LittleEndian.PutUint32(resource[0x30+20:0x30+24], 0x48)
+	payload := versionInfoPayload(version, sourceSHA, buildTime, productName, executableName)
+	binary.LittleEndian.PutUint32(resource[0x48:0x4c], 0x1000+0x100)
+	binary.LittleEndian.PutUint32(resource[0x4c:0x50], uint32(len(payload)))
+	copy(resource[0x100:], payload)
+	copy(content[resourceOffset+resourceSize:], marker)
+	return content
+}
+
+func versionInfoPayload(version, sourceSHA, buildTime, productName, executableName string) []byte {
+	table := versionContainer("040904B0", versionString("ProductName", productName), versionString("ProductVersion", version),
+		versionString("OriginalFilename", executableName), versionString("PrivateBuild", sourceSHA), versionString("SpecialBuild", buildTime))
+	strings := versionContainer("StringFileInfo", table)
+	fixed := make([]byte, 52)
+	return versionBlockBytes("VS_VERSION_INFO", 0, fixed, strings)
+}
+
+func versionContainer(key string, children ...[]byte) []byte {
+	return versionBlockBytes(key, 1, nil, children...)
+}
+
+func versionString(key, value string) []byte {
+	return versionBlockBytes(key, 1, append(utf16Bytes(value), 0, 0))
+}
+
+func versionBlockBytes(key string, typeCode uint16, value []byte, children ...[]byte) []byte {
+	content := make([]byte, 6)
+	valueLength := len(value)
+	if typeCode == 1 {
+		valueLength /= 2
 	}
+	binary.LittleEndian.PutUint16(content[2:4], uint16(valueLength))
+	binary.LittleEndian.PutUint16(content[4:6], typeCode)
+	content = append(content, utf16Bytes(key)...)
+	content = append(content, 0, 0)
+	content = append(content, make([]byte, align4(len(content))-len(content))...)
+	content = append(content, value...)
+	content = append(content, make([]byte, align4(len(content))-len(content))...)
+	for _, child := range children {
+		content = append(content, child...)
+		content = append(content, make([]byte, align4(len(content))-len(content))...)
+	}
+	binary.LittleEndian.PutUint16(content[0:2], uint16(len(content)))
 	return content
 }
