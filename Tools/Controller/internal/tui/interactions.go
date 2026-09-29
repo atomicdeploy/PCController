@@ -345,11 +345,19 @@ func (model Model) handleKey(message tea.KeyMsg) (Model, tea.Cmd, bool) {
 			model.historyMove(-1)
 			return model, nil, true
 		}
+		if model.page == PageProgramming {
+			model.update.Scroll = max(0, model.update.Scroll-1)
+			return model, nil, true
+		}
 		model.moveCursor(-1)
 		return model, nil, true
 	case "down":
 		if !inputEmpty || model.page == PageConsole {
 			model.historyMove(1)
+			return model, nil, true
+		}
+		if model.page == PageProgramming {
+			model.update.Scroll = min(model.update.Scroll+1, max(0, len(model.programmingContent(model.snapshot()))-max(3, model.contentHeight())+1))
 			return model, nil, true
 		}
 		model.moveCursor(1)

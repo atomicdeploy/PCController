@@ -245,10 +245,14 @@ const (
 // UpdateStatus is the durable progress snapshot exposed over local and remote
 // controller transports.
 type UpdateStatus struct {
-	ID                   string            `json:"id"`
-	Kind                 string            `json:"kind"`
-	State                string            `json:"state"`
-	ProgressPercent      int               `json:"progress_percent"`
+	ID              string `json:"id"`
+	Kind            string `json:"kind"`
+	State           string `json:"state"`
+	ProgressPercent int    `json:"progress_percent"`
+	// Percent describes the current stage, never an estimated whole transaction.
+	ProgressKnown        bool              `json:"progress_known"`
+	Stage                string            `json:"stage,omitempty"`
+	StageStartedAt       time.Time         `json:"stage_started_at,omitempty"`
 	BytesDone            int64             `json:"bytes_done,omitempty"`
 	BytesTotal           int64             `json:"bytes_total,omitempty"`
 	StartedAt            time.Time         `json:"started_at,omitempty"`
@@ -317,7 +321,8 @@ type CapturedFile struct {
 	PackedTimestamp uint32
 }
 
-// ProgressFunc publishes operation state, percentage, and human-readable detail.
+// ProgressFunc publishes a measured stage percentage and human-readable detail.
+// A negative percentage means the stage has no measurable denominator.
 type ProgressFunc func(state string, percent int, detail string)
 
 // Executor is implemented by the primary host. Tests use a fake, and secondary
