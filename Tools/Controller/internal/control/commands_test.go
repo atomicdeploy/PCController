@@ -6,8 +6,11 @@ import (
 	"reflect"
 	goruntime "runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"go.bug.st/serial"
 
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/hostfacts"
@@ -16,6 +19,139 @@ import (
 	"pccontroller.local/controller/internal/ports"
 	"pccontroller.local/controller/internal/programmer"
 )
+
+type buzzerSettingsWirePort struct {
+	settings    native.Settings
+	settingsErr error
+	reads       chan []byte
+	writes      chan native.Frame
+	closed      chan struct{}
+	once        sync.Once
+}
+
+func newBuzzerSettingsWirePort(settings native.Settings) *buzzerSettingsWirePort {
+	return &buzzerSettingsWirePort{
+		settings: settings,
+		reads:    make(chan []byte, 4),
+		writes:   make(chan native.Frame, 4),
+		closed:   make(chan struct{}),
+	}
+}
+
+func (*buzzerSettingsWirePort) SetMode(*serial.Mode) error { return nil }
+func (port *buzzerSettingsWirePort) Read(data []byte) (int, error) {
+	select {
+	case encoded := <-port.reads:
+		return copy(data, encoded), nil
+	case <-port.closed:
+		return 0, errors.New("closed")
+	}
+}
+func (port *buzzerSettingsWirePort) Write(data []byte) (int, error) {
+	frame, err := native.Decode(data)
+	if err != nil {
+		return 0, err
+	}
+	port.writes <- frame
+	response := native.Frame{Seq: frame.Seq}
+	if frame.Opcode == native.OpGetSettings {
+		if port.settingsErr != nil {
+			return 0, port.settingsErr
+		}
+		response.Opcode = native.OpSettings
+		response.Payload, err = port.settings.Payload()
+		response.Payload = append(response.Payload, 1)
+	} else {
+		response.Opcode = native.OpACK
+		response.Payload = []byte{frame.Opcode, 0}
+	}
+	if err != nil {
+		return 0, err
+	}
+	encoded, err := native.Encode(response)
+	if err != nil {
+		return 0, err
+	}
+	port.reads <- encoded
+	return len(data), nil
+}
+func (*buzzerSettingsWirePort) Drain() error             { return nil }
+func (*buzzerSettingsWirePort) ResetInputBuffer() error  { return nil }
+func (*buzzerSettingsWirePort) ResetOutputBuffer() error { return nil }
+func (*buzzerSettingsWirePort) SetDTR(bool) error        { return nil }
+func (*buzzerSettingsWirePort) SetRTS(bool) error        { return nil }
+func (*buzzerSettingsWirePort) GetModemStatusBits() (*serial.ModemStatusBits, error) {
+	return &serial.ModemStatusBits{}, nil
+}
+func (*buzzerSettingsWirePort) SetReadTimeout(time.Duration) error { return nil }
+func (port *buzzerSettingsWirePort) Close() error {
+	port.once.Do(func() { close(port.closed) })
+	return nil
+}
+func (*buzzerSettingsWirePort) Break(time.Duration) error { return nil }
+
+func TestBuzzerSuppressesOpcodeWhenConfirmedBoardSettingsAreSilent(t *testing.T) {
+	settings := native.DefaultSettings()
+	settings.Flags |= native.SettingsSilent
+	port := newBuzzerSettingsWirePort(settings)
+	session := link.NewForPort("BUZZER-SETTINGS", port)
+	runtime := New(Options{RequestTimeout: time.Second})
+	runtime.mu.Lock()
+	runtime.session = session
+	runtime.connectionState = "connected"
+	runtime.mu.Unlock()
+	t.Cleanup(func() { _ = runtime.Close() })
+
+	output, err := NewCommandEngine(runtime, CommandOptions{}).Execute(context.Background(), "buzzer 440 125")
+	if err != nil || output != "buzzer suppressed: board is silent" {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+	select {
+	case frame := <-port.writes:
+		if frame.Opcode != native.OpGetSettings {
+			t.Fatalf("first opcode=0x%02X, want GET_SETTINGS", frame.Opcode)
+		}
+	default:
+		t.Fatal("GET_SETTINGS preflight was not sent")
+	}
+	select {
+	case frame := <-port.writes:
+		t.Fatalf("silent board received opcode 0x%02X after preflight", frame.Opcode)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestBuzzerStopSkipsSilentPreflightAndEmitsStopWhenSettingsAreUnavailable(t *testing.T) {
+	settings := native.DefaultSettings()
+	settings.Flags |= native.SettingsSilent
+	port := newBuzzerSettingsWirePort(settings)
+	port.settingsErr = errors.New("settings unavailable")
+	session := link.NewForPort("BUZZER-STOP", port)
+	runtime := New(Options{RequestTimeout: time.Second})
+	runtime.mu.Lock()
+	runtime.session = session
+	runtime.connectionState = "connected"
+	runtime.mu.Unlock()
+	t.Cleanup(func() { _ = runtime.Close() })
+
+	output, err := NewCommandEngine(runtime, CommandOptions{}).Execute(context.Background(), "buzzer 0 125")
+	if err != nil || output != "buzzer command accepted" {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+	select {
+	case frame := <-port.writes:
+		if frame.Opcode != native.OpBuzzer || string(frame.Payload) != string(native.BuzzerPayload(0, 125)) {
+			t.Fatalf("stop frame=%#v, want OpBuzzer frequency=0 duration=125", frame)
+		}
+	default:
+		t.Fatal("buzzer stop opcode was not sent")
+	}
+	select {
+	case frame := <-port.writes:
+		t.Fatalf("stop emitted unexpected additional opcode 0x%02X", frame.Opcode)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
 
 func TestReconnectCommandDoesNotOpenAfterRetryableCloseFailure(t *testing.T) {
 	closeErr := errors.New("CancelIoEx failed")
@@ -191,6 +327,7 @@ func TestFormatSettingsIncludesDecodedExtendedFields(t *testing.T) {
 		OutputPersistence:     native.OutputPersistUserPWM,
 		RelayRestoreMask:      0xF0,
 		MotionBreakMSValue:    37,
+		Persisted:             true,
 	}
 	if err := settings.SetStatusColor(4); err != nil {
 		t.Fatal(err)
@@ -211,6 +348,7 @@ func TestFormatSettingsIncludesDecodedExtendedFields(t *testing.T) {
 		"motion_exit_hold=9s",
 		"motion_break=37ms",
 		"programming_latch=false",
+		"persisted=true",
 		"output_persistence=0x04",
 		"relay_restore_mask=0xF0",
 		"extended=0x99",
