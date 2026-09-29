@@ -6,16 +6,33 @@ import { tmpdir } from 'node:os'
 import { delimiter, join, resolve, sep } from 'node:path'
 import test from 'node:test'
 
+test('deployment is explicit and validated by the build wrapper', () => {
+	assert.equal(parseArguments(['--upload', '--port', 'COM18', '--deployment', 'development']).deployment, 'development')
+	assert.equal(parseArguments(['--upload', '--port', 'COM18', '--deployment=production']).deployment, 'production')
+	assert.throws(() => parseArguments(['--upload', '--deployment', 'skip-all']), /production or development/)
+	assert.throws(() => parseArguments(['--upload', '--allow-incomplete-backup']), /unknown|unsupported/i)
+})
+
+test('build helper executables use stable product paths, never Go temporary paths', () => {
+	const env = { LOCALAPPDATA: join(tmpdir(), 'local-app-data') }
+	assert.equal(goBuildHelperPath('generate-icon', env, 'win32'), join(env.LOCALAPPDATA, 'PCController', 'build-programs', 'generate-icon.exe'))
+	assert.equal(goBuildHelperPath('default-assets', env, 'win32'), join(env.LOCALAPPDATA, 'PCController', 'build-programs', 'default-assets.exe'))
+	assert.throws(() => goBuildHelperPath('../unsafe', env, 'win32'), /unknown build helper/)
+})
+
 import {
 	BuildError,
+	goBuildHelperPath,
 	PROJECT_ROOT,
 	assertGeneratedPath,
 	collectWebNotices,
 	compilerManifestIdentity,
+	createWinresIdentityConfig,
         createPlan,
         generatedCleanTargets,
         hostSourceIdentity,
 	installPackage,
+	inspectICO,
 	isNativeWindowsGNUCompiler,
 	packBuildTimestamp,
 	parseArguments,
@@ -182,7 +199,8 @@ test('Go test executables use deterministic project-owned names', () => {
 		stableTestBinaryName(importPath, 'win32'),
 		stableTestBinaryName(importPath, 'win32')
 	)
-	assert.match(stableTestBinaryName(importPath, 'win32'), /^github\.com_atomicdeploy_pccontroller_internal_ipc-[0-9a-f]{10}\.test\.exe$/)
+	assert.match(stableTestBinaryName(importPath, 'win32'), /^pccontroller-tests-github\.com_atomicdeploy_pccontroller_internal_ipc-[0-9a-f]{10}\.exe$/)
+	assert.doesNotMatch(stableTestBinaryName(importPath, 'win32'), /\.test\.exe$/i)
 	assert.doesNotMatch(stableTestBinaryName(importPath, 'win32'), /AppData|Temp/i)
 })
 
@@ -210,6 +228,22 @@ test('stable Go test identity includes embedded web assets', async t => {
 	const after = goTestSourceIdentity(root, 'go version go1.26.5 windows/amd64')
 	assert.notEqual(after.sha256, before.sha256)
 	assert.equal(after.files, before.files)
+})
+
+test('stable Go test identity includes embedded defaults and build environment', async t => {
+	const root = await mkdtemp(join(tmpdir(), 'controller-go-default-identity-'))
+	t.after(() => rm(root, { recursive: true, force: true }))
+	const assets = join(root, 'internal', 'defaultassets', 'assets')
+	await mkdir(assets, { recursive: true })
+	await writeFile(join(root, 'go.mod'), 'module example.invalid/controller\n\ngo 1.26\n')
+	await writeFile(join(root, 'main_test.go'), 'package controller\n')
+	await writeFile(join(assets, 'default.hex'), ':00000001FF\n')
+	const before = goTestSourceIdentity(root, 'go version go1.26.5 windows/amd64', { CGO_ENABLED: '0' })
+	await writeFile(join(assets, 'default.hex'), ':0100000000FF\n')
+	const afterAsset = goTestSourceIdentity(root, 'go version go1.26.5 windows/amd64', { CGO_ENABLED: '0' })
+	const afterEnvironment = goTestSourceIdentity(root, 'go version go1.26.5 windows/amd64', { CGO_ENABLED: '1' })
+	assert.notEqual(afterAsset.sha256, before.sha256)
+	assert.notEqual(afterEnvironment.sha256, afterAsset.sha256)
 })
 
 test('package publishing tolerates a shell holding the canonical directory', async t => {
@@ -393,8 +427,46 @@ test('safe default builds both targets without touching hardware', () => {
 	const options = parseArguments([], {})
 	assert.equal(options.host, true)
 	assert.equal(options.firmware, true)
+	assert.equal(options.virtualBoard, false)
 	assert.equal(options.upload, false)
 	assert.equal(options.installBootloader, false)
+})
+
+test('virtual-board-only delegates to the existing CMake presets without hardware', () => {
+	const options = parseArguments(['--virtual-board-only', '--virtual-board-preset', 'debug'], {})
+	assert.equal(options.host, false)
+	assert.equal(options.firmware, false)
+	assert.equal(options.virtualBoard, true)
+	assert.equal(options.virtualBoardPreset, 'debug')
+	const plan = createPlan(options, resolveBuildIdentity(options, {}), 'win32')
+	assert.deepEqual(plan.actions.map(action => action.id), [
+		'virtual-board-configure', 'virtual-board-build', 'virtual-board-test'
+	])
+	assert.deepEqual(plan.actions.map(action => action.command.args), [
+		['--preset', 'debug'],
+		['--build', '--preset', 'debug', '--parallel'],
+		['--preset', 'debug']
+	])
+	assert.ok(plan.actions.every(action => action.hardware === false))
+	assert.ok(plan.actions.every(action => action.command.cwd.replaceAll('\\', '/').endsWith('Tools/VirtualBoard')))
+})
+
+test('virtual-board selection validates CMake presets and keeps focused cleanup contained', () => {
+	assert.throws(
+		() => parseArguments(['--virtual-board-only', '--virtual-board-preset', 'fast'], {}),
+		error => error instanceof BuildError && /virtual-board-preset/.test(error.message)
+	)
+	assert.throws(
+		() => parseArguments(['--virtual-board-preset', 'debug'], {}),
+		error => error instanceof BuildError && /requires --virtual-board/.test(error.message)
+	)
+	assert.throws(
+		() => parseArguments(['--host-only', '--virtual-board-only'], {}),
+		error => error instanceof BuildError && /choose either/.test(error.message)
+	)
+	const options = parseArguments(['--virtual-board-only', '--clean'], {})
+	const targets = generatedCleanTargets(options).map(path => path.replaceAll('\\', '/'))
+	assert.deepEqual(targets, [join(PROJECT_ROOT, 'Tools', 'VirtualBoard', '.build').replaceAll('\\', '/')])
 })
 
 test('host plan reproducibly builds the web application before Go embedding', () => {
@@ -486,9 +558,10 @@ test('build plan and execution share exact Controller programming argv construct
 		compile.args[compile.args.indexOf('--output-dir') + 1],
 		commandPlanPaths(PROJECT_ROOT).firmwareOutput
 	)
-	assert.deepEqual(compile.args.slice(-4), [
+	assert.deepEqual(compile.args.slice(-5), [
 		'--toolchain-cli', 'C:\\portable\\arduino-cli.exe',
-		'--toolchain-config', 'C:\\portable\\firmware-cli.yaml'
+		'--toolchain-config', 'C:\\portable\\firmware-cli.yaml',
+		'--no-firmware-features'
 	])
 
 	const packaged = canonicalControllerInvocation(PROJECT_ROOT, 'win32')
@@ -499,13 +572,13 @@ test('build plan and execution share exact Controller programming argv construct
 		appDevice: 'DO_NOT_OPEN',
 		programmer: 'atmelice_isp',
 		hex: commandPlanPaths(PROJECT_ROOT).completeFlash,
-		allowIncompleteBackup: true
+		deployment: 'development'
 	})
 	assert.deepEqual(usbasp.args.slice(0, 8), [
 		'program', '--method', 'usbasp', '--app-device', 'DO_NOT_OPEN',
 		'--programmer', 'atmelice_isp', '--operation'
 	])
-	assert.equal(usbasp.args.at(-1), '--allow-incomplete-backup')
+	assert.deepEqual(usbasp.args.slice(-2), ['--deployment', 'development'])
 	assert.throws(
 		() => createControllerProgramCommand({
 			invocation: packaged,
@@ -514,6 +587,106 @@ test('build plan and execution share exact Controller programming argv construct
 			hex: 'firmware.hex'
 		}),
 		/serial device is required/
+	)
+})
+
+test('build forwards only named firmware features to the Controller compiler', () => {
+	const options = parseArguments([
+		'--firmware-only',
+		'--firmware-feature', 'EEPROM-MENU-LABELS',
+		'--firmware-feature=eeprom-boot-opcodes',
+		'--firmware-feature', 'eeprom-menu-labels'
+	], {})
+	assert.deepEqual(options.firmwareFeatures, [
+		'eeprom-boot-opcodes', 'eeprom-menu-labels'
+	])
+	const command = createPlan(options, resolveBuildIdentity(options, {}), 'win32')
+		.actions.find(action => action.id === 'firmware-compile').command.args
+	assert.deepEqual(command.filter((value, index) => command[index - 1] === '--firmware-feature'), [
+		'eeprom-boot-opcodes', 'eeprom-menu-labels'
+	])
+	assert.ok(!command.includes('--no-firmware-features'))
+	const environment = {
+		PCCONTROLLER_FIRMWARE_FEATURES: 'eeprom-menu-labels'
+	}
+	const fromEnvironment = parseArguments(['--firmware-only'], environment)
+	assert.deepEqual(fromEnvironment.firmwareFeatures, ['eeprom-menu-labels'])
+	const environmentCommand = createPlan(
+		fromEnvironment, resolveBuildIdentity(fromEnvironment, {}), 'win32'
+	).actions.find(action => action.id === 'firmware-compile').command.args
+	assert.equal(environmentCommand.at(-2), '--firmware-feature')
+	assert.equal(environmentCommand.at(-1), 'eeprom-menu-labels')
+	const replaced = parseArguments([
+		'--firmware-only', '--firmware-feature', 'eeprom-boot-opcodes'
+	], environment)
+	assert.deepEqual(replaced.firmwareFeatures, ['eeprom-boot-opcodes'])
+	const defaultOff = parseArguments([
+		'--firmware-only', '--no-firmware-features'
+	], environment)
+	assert.deepEqual(defaultOff.firmwareFeatures, [])
+	assert.ok(createPlan(
+		defaultOff, resolveBuildIdentity(defaultOff, {}), 'win32'
+	).actions.find(action => action.id === 'firmware-compile').command.args.includes('--no-firmware-features'))
+	for (const malformed of ['eeprom-menu-labels,', 'eeprom-menu-labels,,eeprom-boot-opcodes']) {
+		assert.throws(
+			() => parseArguments(['--firmware-only'], { PCCONTROLLER_FIRMWARE_FEATURES: malformed }),
+			/firmware feature must not be empty|invalid named firmware feature/
+		)
+	}
+	assert.throws(
+		() => createControllerProgramCommand({
+			invocation: sourceControllerInvocation(PROJECT_ROOT), method: 'compile',
+			sketch: PROJECT_ROOT, outputDir: commandPlanPaths(PROJECT_ROOT).firmwareOutput,
+			firmwareFeatures: ['-DUNSAFE=1']
+		}),
+		/invalid named firmware feature/
+	)
+	assert.throws(
+		() => parseArguments([
+			'--firmware-only', '--firmware-feature', 'unknown'
+		], {}),
+		error => error.exitCode === 2 && /unsupported firmware feature/.test(error.message)
+	)
+	for (const selection of [['--host-only'], ['--virtual-board-only'], ['--clean']]) {
+		const inherited = parseArguments(selection, environment)
+		assert.deepEqual(inherited.firmwareFeatures, [], `${selection} ignored environment selection`)
+		assert.deepEqual(
+			parseArguments(selection, { PCCONTROLLER_FIRMWARE_FEATURES: 'unknown' }).firmwareFeatures,
+			[],
+			`${selection} ignored invalid environment selection`
+		)
+		assert.throws(
+			() => parseArguments([
+				...selection, '--firmware-feature', 'eeprom-menu-labels'
+			], {}),
+			error => error.exitCode === 2 && /requires firmware compilation/.test(error.message)
+		)
+		assert.throws(
+			() => parseArguments([...selection, '--no-firmware-features'], environment),
+			error => error.exitCode === 2 && /requires firmware compilation/.test(error.message)
+		)
+	}
+	const inheritedHostOnly = parseArguments(['--host-only'], {})
+	inheritedHostOnly.firmwareFeatures = ['unknown']
+	inheritedHostOnly.firmwareFeaturesFromEnvironment = true
+	const inheritedHostPlan = createPlan(
+		inheritedHostOnly, resolveBuildIdentity(inheritedHostOnly, {}), 'win32'
+	)
+	assert.equal(
+		inheritedHostPlan.actions.some(action => action.id === 'firmware-compile'),
+		false,
+		'direct host-only plans ignore invalid inherited firmware defaults'
+	)
+	assert.throws(
+		() => createControllerProgramCommand({
+			invocation: canonicalControllerInvocation(PROJECT_ROOT, 'win32'),
+			method: 'urclock',
+			operation: PROGRAMMING_OPERATIONS.upload,
+			device: 'DO_NOT_OPEN',
+			hex: 'firmware.hex',
+			firmwareFeatures: ['eeprom-menu-labels']
+		}),
+		/only valid with compile/
 	)
 })
 
@@ -529,7 +702,7 @@ test('firmware plan publishes the same target, artifacts, and explicit USBasp ro
 	})
 	assert.equal(result.status, 0, result.stderr || result.stdout)
 	const plan = JSON.parse(result.stdout)
-	assert.equal(plan.format, 'pccontroller-firmware-plan/v1')
+	assert.equal(Object.hasOwn(plan, 'format'), false)
 	assert.deepEqual(plan.target, BOARD)
 	assert.equal(plan.artifacts.application, '.build/firmware/PCController.ino.hex')
 	assert.equal(plan.artifacts.completeFlash, '.build/firmware/PCController.ino.with_bootloader.hex')
@@ -634,6 +807,16 @@ test('root wrappers contain no PowerShell policy or invocation', async () => {
 	assert.doesNotMatch(firmwareSource, /powershell|pwsh|build\.ps1|arduino-cli[^\n]*upload/i)
 })
 
+test('root Makefile delegates only to canonical safe build entry points', async () => {
+	const source = await readFile(join(PROJECT_ROOT, 'Makefile'), 'utf8')
+	assert.match(source, /cmd\.exe \/d \/c call build\.cmd/u)
+	assert.match(source, /\.\/build\.sh/u)
+	assert.match(source, /^virtual-board:/mu)
+	assert.match(source, /^virtual-board-relwithdebinfo:/mu)
+	assert.match(source, /--virtual-board-only/u)
+	assert.doesNotMatch(source, /--upload|--install-bootloader|powershell|pwsh/i)
+})
+
 test('all public launchers advertise the shared Node runtime floor', async () => {
 	const launchers = new Map()
 	for (const name of ['build.cmd', 'build.sh', 'firmware.cmd', 'firmware.sh']) {
@@ -642,9 +825,8 @@ test('all public launchers advertise the shared Node runtime floor', async () =>
 		assert.match(source, /Node\.js 22\.12 or newer/, `${name} has a divergent Node requirement`)
 		assert.match(source, /Install Node\.js, then run this command again\./)
 	}
-	const npmFailure = 'npm was not found in PATH; it is required to install the locked build UI dependencies.'
-	assert.ok(launchers.get('build.cmd').includes(npmFailure))
-	assert.ok(launchers.get('build.sh').includes(npmFailure))
+	assert.match(launchers.get('build.cmd'), /env-bootstrap\.mjs" install-build-dependencies/)
+	assert.match(launchers.get('build.sh'), /env-bootstrap\.mjs" install-build-dependencies/)
 	const firmwareSource = await readFile(
 		join(PROJECT_ROOT, 'Tools', 'Firmware', 'firmware.mjs'),
 		'utf8'
@@ -759,6 +941,7 @@ test('build presentation switches override environment and package defaults', ()
 	const identity = resolveBuildIdentity(options, {
 		PCCONTROLLER_BUILD_APP_NAME: 'Environment Controller',
 		PCCONTROLLER_BUILD_TAGLINE: 'Environment line',
+		APP_NAME: 'Runtime build title',
 		APP_TITLE: 'Legacy build title',
 		APP_TAGLINE: 'Runtime/build line'
 	})
@@ -782,6 +965,15 @@ test('build presentation switches override environment and package defaults', ()
 		hostBuildTime: identity.hostBuildTime,
 		packedTimestamp: identity.packedTimestamp
 	})
+})
+
+test('APP_NAME configures both canonical build and runtime presentation', () => {
+	const identity = resolveBuildIdentity(parseArguments(['--host-only'], {}), {
+		APP_NAME: 'Shared Environment Controller',
+		APP_TITLE: 'Legacy Controller'
+	})
+	assert.equal(identity.appName, 'Shared Environment Controller')
+	assert.equal(resolveProductTitle(identity.env), 'Shared Environment Controller')
 })
 
 test('build presentation environment is case-insensitive and validated', () => {
@@ -830,6 +1022,109 @@ test('build presentation environment is case-insensitive and validated', () => {
 	)
 })
 
+test('shared branding manifest drives metadata, output name, and multiple multi-resolution icons', async () => {
+	const root = await mkdtemp(join(tmpdir(), 'pccontroller-branding-'))
+	try {
+		const icon = join(PROJECT_ROOT, 'Tools', 'Controller', 'winres', 'icon.ico')
+		const manifestIcon = join(PROJECT_ROOT, 'Tools', 'Controller', 'winres', 'icon-paused.ico')
+		const environmentIcon = join(PROJECT_ROOT, 'Tools', 'Controller', 'winres', 'icon-connected.ico')
+		const toast = join(PROJECT_ROOT, 'Tools', 'Controller', 'winres', 'icon.png')
+		const branding = join(root, 'brand.json')
+		await writeFile(branding, `${JSON.stringify({
+			applicationName: 'Workshop Console',
+			tagline: 'One workshop. Every controller.',
+			productName: 'Workshop Control Suite',
+			companyName: 'Example Devices LLC',
+			fileDescription: 'Workshop controller host',
+			legalCopyright: 'Copyright 2026 Example Devices LLC',
+			executableName: 'workshop-host',
+			toastIcon: toast,
+			windowsIcons: { APP: manifestIcon, WORKSHOP: icon }
+		}, null, 2)}\n`)
+		const options = parseArguments(['--host-only', '--branding', branding], {
+			PCCONTROLLER_BUILD_ICON: environmentIcon
+		})
+		const identity = resolveBuildIdentity(options, {
+			PCCONTROLLER_BUILD_ICON: environmentIcon
+		}, new Date('2026-08-01T16:12:58Z'))
+		assert.equal(identity.appName, 'Workshop Console')
+		assert.equal(identity.productName, 'Workshop Control Suite')
+		assert.equal(identity.companyName, 'Example Devices LLC')
+		assert.equal(identity.executableName, 'workshop-host')
+		assert.deepEqual(Object.keys(identity.iconResources), ['APP', 'WORKSHOP'])
+		assert.equal(identity.iconResources.APP, manifestIcon, 'branding manifest must take precedence over environment')
+		const explicit = resolveBuildIdentity(
+			parseArguments(['--branding', branding, '--icon', icon], { PCCONTROLLER_BUILD_ICON: environmentIcon }),
+			{ PCCONTROLLER_BUILD_ICON: environmentIcon }
+		)
+		assert.equal(explicit.iconResources.APP, icon, 'explicit flag must take precedence over branding manifest')
+		assert.equal(inspectICO(await readFile(icon)).count, 7)
+		const configPath = createWinresIdentityConfig(root, identity, 'a'.repeat(64))
+		const resources = JSON.parse(await readFile(configPath, 'utf8'))
+		const info = resources.RT_VERSION['#1']['0409'].info['0409']
+		assert.equal(info.ProductName, 'Workshop Control Suite')
+		assert.equal(info.CompanyName, 'Example Devices LLC')
+		assert.equal(info.FileDescription, 'Workshop controller host')
+		assert.equal(info.LegalCopyright, 'Copyright 2026 Example Devices LLC')
+		assert.equal(info.OriginalFilename, 'workshop-host.exe')
+		assert.equal(resources.RT_MANIFEST['#1']['0409'].description, 'Workshop controller host')
+		assert.ok(resources.RT_GROUP_ICON.APP['0000'].includes('icon-paused.ico'))
+		assert.ok(resources.RT_GROUP_ICON.WORKSHOP['0000'].includes('icon.ico'))
+		const plan = createPlan(options, identity, 'win32')
+		assert.match(JSON.stringify(plan.actions), /<staging>\/workshop-host\.exe/)
+	} finally {
+		await rm(root, { recursive: true, force: true })
+	}
+})
+
+test('branding inputs reject unsafe names and malformed icon assets', async () => {
+	assert.throws(() => resolveBuildIdentity(parseArguments(['--executable-name', '../escape'], {}), {}), /safe extension-free/)
+	const root = await mkdtemp(join(tmpdir(), 'pccontroller-branding-invalid-'))
+	try {
+		const icon = join(root, 'bad.ico')
+		await writeFile(icon, 'not-an-icon')
+		assert.throws(() => resolveBuildIdentity(parseArguments(['--icon', icon], {}), {}), /not a Windows ICO/)
+
+		const malformedICO = join(root, 'bad-payload.ico')
+		const icoBytes = Buffer.alloc(62)
+		icoBytes.writeUInt16LE(1, 2)
+		icoBytes.writeUInt16LE(1, 4)
+		icoBytes[6] = 16
+		icoBytes[7] = 16
+		icoBytes.writeUInt32LE(40, 14)
+		icoBytes.writeUInt32LE(22, 18)
+		icoBytes.writeUInt32LE(40, 22)
+		icoBytes.writeInt32LE(16, 26)
+		icoBytes.writeInt32LE(32, 30)
+		icoBytes.writeUInt16LE(1, 34)
+		icoBytes.writeUInt16LE(32, 36)
+		await writeFile(malformedICO, icoBytes)
+		assert.throws(
+			() => resolveBuildIdentity(parseArguments(['--icon', malformedICO], {}), {}),
+			/invalid ICO bitmap payload/
+		)
+
+		const signatureOnlyPNG = join(root, 'signature-only.png')
+		await writeFile(signatureOnlyPNG, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+		assert.throws(
+			() => resolveBuildIdentity(parseArguments(['--toast-icon', signatureOnlyPNG], {}), {}),
+			/not a PNG image/
+		)
+
+		const corruptPNG = join(root, 'bad-crc.png')
+		const corruptBytes = Buffer.from(await readFile(join(PROJECT_ROOT, 'Tools', 'Controller', 'winres', 'icon.png')))
+		corruptBytes[corruptBytes.length - 1] ^= 0xff
+		await writeFile(corruptPNG, corruptBytes)
+		assert.throws(
+			() => resolveBuildIdentity(parseArguments(['--toast-icon', corruptPNG], {}), {}),
+			/invalid PNG .* CRC/
+		)
+		assert.throws(() => resolveBuildIdentity(parseArguments(['--resource-icon', 'bad'], {}), {}), /NAME=PATH/)
+	} finally {
+		await rm(root, { recursive: true, force: true })
+	}
+})
+
 test('Windows resources are patched after link and before UPX', () => {
 	const options = parseArguments([
 		'--host-only', '--build-time', '2026-08-01T16:12:58Z',
@@ -842,7 +1137,7 @@ test('Windows resources are patched after link and before UPX', () => {
 	assert.ok(buildIndex >= 0 && buildIndex < resourceIndex)
 	assert.ok(resourceIndex < upxIndex)
 	assert.deepEqual(plan.actions[resourceIndex].command.args, [
-		'patch', '--in', 'winres/winres.json', '--delete', '--no-backup',
+		'patch', '--in', '<staging>/winres-identity.json', '--delete', '--no-backup',
 		'--product-version', PRODUCT_METADATA.version, '--file-version', PRODUCT_METADATA.version,
 		'<staging>/controller.exe'
 	])
@@ -858,6 +1153,13 @@ test('Windows installation inventory follows the final packed host manifest', ()
 	assert.ok(ids.indexOf('installation-inventory') < ids.indexOf('host-publish'))
 	const linux = createPlan(options, resolveBuildIdentity(options, {}), 'linux')
 	assert.equal(linux.actions.some(action => action.id === 'installation-inventory'), false)
+})
+
+test('Windows package carries the hash-bound toast logo before inventory generation', async () => {
+	const source = await readFile(join(PROJECT_ROOT, 'Tools', 'Build', 'build.mjs'), 'utf8')
+	assert.match(source, /copyFileSync\(identity\.toastIcon \|\| join\(HOST_ROOT, 'winres', 'icon\.png'\), toastLogo\)/)
+	assert.match(source, /\[executable, \.\.\.\(toastLogo \? \[toastLogo\] : \[\]\), \.\.\.shared\.paths\]/)
+	assert.ok(source.indexOf("toastLogo = join(stage, 'toast-logo.png')") < source.indexOf("'installation-package.json'"))
 })
 
 test('Win32 resource configuration retains icon, manifest, and version data', async () => {
@@ -919,7 +1221,7 @@ test('browser ICO is the exact seven-size native executable icon', async () => {
 	)
 	assert.match(
 		buildSource,
-		/generate_icon\.go', '\.\/winres\/icon\.png', '\.\/winres\/icon\.ico'/u
+		/generate_icon\.go', \['\.\/winres\/icon\.png', '\.\/winres\/icon\.ico'\]/u
 	)
 	assert.match(
 		buildSource,
@@ -1071,6 +1373,10 @@ test('Windows C ABI smoke uses a valid handle and destroys it', () => {
 	assert.match(source, /strtoull\(handle_field/)
 	assert.ok(source.includes('{\\"operation\\":\\"build-smoke-invalid\\",\\"handle\\":%llu}'))
 	assert.ok(source.includes('{\\"operation\\":\\"destroy\\",\\"handle\\":%llu}'))
+	assert.ok(source.includes('{\\"operation\\":\\"host_create\\"'))
+	assert.ok(source.includes('{\\"operation\\":\\"host_start\\",\\"handle\\":%llu}'))
+	assert.ok(source.includes('\\"method\\":\\"controller.ping\\"'))
+	assert.ok(source.includes('{\\"operation\\":\\"host_destroy\\",\\"handle\\":%llu}'))
 	assert.doesNotMatch(source, /FreeLibrary\(module\)/)
 })
 
@@ -1080,6 +1386,10 @@ test('Unix C ABI smoke uses a valid handle and keeps the Go runtime loaded', () 
 	assert.ok(source.includes('{\\"operation\\":\\"create\\"}'))
 	assert.match(source, /strtoull\(handle_field/)
 	assert.ok(source.includes('{\\"operation\\":\\"destroy\\",\\"handle\\":%llu}'))
+	assert.ok(source.includes('{\\"operation\\":\\"host_create\\"'))
+	assert.ok(source.includes('{\\"operation\\":\\"host_start\\",\\"handle\\":%llu}'))
+	assert.ok(source.includes('\\"method\\":\\"controller.ping\\"'))
+	assert.ok(source.includes('{\\"operation\\":\\"host_destroy\\",\\"handle\\":%llu}'))
 	assert.doesNotMatch(source, /dlclose\(module\)/)
 })
 

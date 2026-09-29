@@ -8,9 +8,12 @@
   "start_url": "/#/dashboard",
   "scope": "/",
   "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "browser"],
   "orientation": "any",
   "background_color": "#0b0a0e",
-  "theme_color": "#6845bf",
+  "theme_color": "#0b0a0e",
+  "prefer_related_applications": false,
+  "launch_handler": { "client_mode": "navigate-new" },
   "categories": ["utilities", "productivity"],
   "icons": [
     { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" },

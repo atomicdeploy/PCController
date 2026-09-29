@@ -56,6 +56,123 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING)
+  # The target-neutral wire vocabulary is compiled through both its portable
+  # header and the production AVR UART adapter before native targets consume
+  # it. This intentionally does not link or alter VirtualBoard behavior.
+  add_executable(firmware_protocol_contract_tests
+    tests/protocol_contract_test.cpp
+  )
+  target_include_directories(firmware_protocol_contract_tests PRIVATE ../..)
+  set_property(TARGET firmware_protocol_contract_tests PROPERTY CXX_STANDARD 11)
+  if(MSVC)
+    target_compile_options(firmware_protocol_contract_tests PRIVATE /W4 /permissive-)
+  else()
+    target_compile_options(firmware_protocol_contract_tests PRIVATE ${VIRTUAL_BOARD_WARNINGS})
+  endif()
+  add_test(NAME firmware_protocol_contract_unit COMMAND firmware_protocol_contract_tests)
+
+  # Fixed-buffer codec vectors compile the same portable C++11 implementation
+  # used by the AVR UART adapter, without changing VirtualBoard runtime code.
+  add_executable(firmware_protocol_codec_tests
+    tests/protocol_codec_test.cpp
+  )
+  target_include_directories(firmware_protocol_codec_tests PRIVATE ../..)
+  set_property(TARGET firmware_protocol_codec_tests PROPERTY CXX_STANDARD 11)
+  if(MSVC)
+    target_compile_options(firmware_protocol_codec_tests PRIVATE /W4 /permissive-)
+  else()
+    target_compile_options(firmware_protocol_codec_tests PRIVATE ${VIRTUAL_BOARD_WARNINGS})
+  endif()
+  add_test(NAME firmware_protocol_codec_unit COMMAND firmware_protocol_codec_tests)
+
+  # Compile the persisted four-mode safety predicate as target-neutral C++11
+  # before either AVR or VirtualBoard adapters consume the common contract.
+  add_executable(firmware_motion_policy_contract_tests
+    tests/motion_policy_contract_test.cpp
+  )
+  target_include_directories(firmware_motion_policy_contract_tests PRIVATE ../..)
+  set_property(TARGET firmware_motion_policy_contract_tests PROPERTY CXX_STANDARD 11)
+  if(MSVC)
+    target_compile_options(firmware_motion_policy_contract_tests PRIVATE /W4 /permissive-)
+  else()
+    target_compile_options(firmware_motion_policy_contract_tests PRIVATE ${VIRTUAL_BOARD_WARNINGS})
+  endif()
+  add_test(NAME firmware_motion_policy_contract_unit
+    COMMAND firmware_motion_policy_contract_tests)
+
+  # Exercise the target-neutral relay state machine with a deterministic sink
+  # before the AVR adapter or a future VirtualBoard adapter consumes it.
+  add_executable(firmware_relay_motion_machine_tests
+    tests/relay_motion_machine_test.cpp
+  )
+  target_include_directories(firmware_relay_motion_machine_tests PRIVATE ../..)
+  set_property(TARGET firmware_relay_motion_machine_tests PROPERTY CXX_STANDARD 11)
+  if(MSVC)
+    target_compile_options(firmware_relay_motion_machine_tests PRIVATE /W4 /permissive-)
+  else()
+    target_compile_options(firmware_relay_motion_machine_tests PRIVATE ${VIRTUAL_BOARD_WARNINGS})
+  endif()
+  add_test(NAME firmware_relay_motion_machine_unit
+    COMMAND firmware_relay_motion_machine_tests)
+
+  # Compare the production ShiftRegisters/RelayController adapter against the
+  # same portable trace so AVR-only glue cannot drift from the safety core.
+  add_executable(firmware_relay_controller_adapter_tests
+    tests/relay_controller_adapter_test.cpp
+    ../../LocalLib/ShiftRegisters.cpp
+    ../../Project/RelayController.cpp
+  )
+  target_include_directories(firmware_relay_controller_adapter_tests PRIVATE
+    tests/arduino_mock
+    ../..
+  )
+  set_property(TARGET firmware_relay_controller_adapter_tests PROPERTY CXX_STANDARD 17)
+  if(MSVC)
+    target_compile_options(firmware_relay_controller_adapter_tests PRIVATE /W4 /permissive-)
+  else()
+    target_compile_options(firmware_relay_controller_adapter_tests PRIVATE ${VIRTUAL_BOARD_WARNINGS})
+  endif()
+  add_test(NAME firmware_relay_controller_adapter_unit
+    COMMAND firmware_relay_controller_adapter_tests)
+
+  # The scheduler remains target-neutral: this C++11 trace suite compiles the
+  # same bounded macro ring that the AVR/UART adapter uses, without linking or
+  # altering the VirtualBoard runtime implementation.
+  add_executable(firmware_macro_ring_tests
+    tests/macro_ring_test.cpp
+    ../../Project/Core/MacroRing.cpp
+  )
+  target_include_directories(firmware_macro_ring_tests PRIVATE ../..)
+  set_property(TARGET firmware_macro_ring_tests PROPERTY CXX_STANDARD 11)
+  if(MSVC)
+    target_compile_options(firmware_macro_ring_tests PRIVATE /W4 /permissive-)
+  else()
+    target_compile_options(firmware_macro_ring_tests PRIVATE ${VIRTUAL_BOARD_WARNINGS})
+  endif()
+  add_test(NAME firmware_macro_ring_unit COMMAND firmware_macro_ring_tests)
+
+  # Compile the production UART adapter against the native serial double. Its
+  # trace confirms that replay still reaches the ordinary protocol dispatcher.
+  add_executable(firmware_macro_queue_adapter_tests
+    tests/macro_queue_adapter_test.cpp
+    ../../LocalLib/ShiftRegisters.cpp
+    ../../Project/Core/MacroRing.cpp
+    ../../Project/MacroQueue.cpp
+    ../../Project/RelayController.cpp
+    ../../Project/UartProtocol.cpp
+  )
+  target_include_directories(firmware_macro_queue_adapter_tests PRIVATE
+    tests/arduino_mock
+    ../..
+  )
+  if(MSVC)
+    target_compile_options(firmware_macro_queue_adapter_tests PRIVATE /W4 /permissive-)
+  else()
+    target_compile_options(firmware_macro_queue_adapter_tests PRIVATE ${VIRTUAL_BOARD_WARNINGS})
+  endif()
+  add_test(NAME firmware_macro_queue_adapter_unit
+           COMMAND firmware_macro_queue_adapter_tests)
+
   add_executable(virtual_board_tests tests/test_main.cpp)
   target_link_libraries(virtual_board_tests PRIVATE virtual_board_core)
   if(MSVC)
@@ -92,10 +209,19 @@ if(BUILD_TESTING)
     ../../LocalLib/ShiftRegisters.cpp
     ../../LocalLib/TonePlayer.cpp
     ../../Project/RelayController.cpp
+    ../../Project/SettingsStore.cpp
+    ../../Project/UartProtocol.cpp
   )
   target_include_directories(firmware_controls_tests PRIVATE
     tests/arduino_mock
     ../..
+  )
+  # Exercise the persisted page-rank compatibility path without linking or
+  # changing the VirtualBoard runtime.
+  target_compile_definitions(firmware_controls_tests PRIVATE
+    PCCONTROLLER_MENU_VISIBILITY=1
+    PCCONTROLLER_MENU_ORDERING=1
+    PCCONTROLLER_SETTINGS_TEST_LAYOUT=1
   )
   if(MSVC)
     target_compile_options(firmware_controls_tests PRIVATE /W4 /permissive-)
@@ -103,6 +229,33 @@ if(BUILD_TESTING)
     target_compile_options(firmware_controls_tests PRIVATE ${VIRTUAL_BOARD_WARNINGS})
   endif()
   add_test(NAME firmware_controls_unit COMMAND firmware_controls_tests)
+
+  # Compile the production AVR status LED compositor with deterministic
+  # hardware/EEPROM doubles. This is the AVR-first same-source gate; it does
+  # not alter or validate the separate VirtualBoard runtime implementation.
+  add_executable(firmware_status_led_controller_tests
+    tests/status_led_controller_test.cpp
+    ../../Project/CompactI2c.cpp
+    ../../Project/PwmController.cpp
+    ../../Project/PwmExpanderDriver.cpp
+    ../../Project/StatusLedController.cpp
+    ../../Project/UartProtocol.cpp
+  )
+  target_include_directories(firmware_status_led_controller_tests PRIVATE
+    tests/arduino_mock
+    ../..
+  )
+  set_property(TARGET firmware_status_led_controller_tests PROPERTY
+    CXX_STANDARD 17)
+  if(MSVC)
+    target_compile_options(firmware_status_led_controller_tests PRIVATE
+      /W4 /permissive-)
+  else()
+    target_compile_options(firmware_status_led_controller_tests PRIVATE
+      ${VIRTUAL_BOARD_WARNINGS})
+  endif()
+  add_test(NAME firmware_status_led_controller_unit
+    COMMAND firmware_status_led_controller_tests)
 
   # Compile the production EEPROM reset journal against a byte-accurate mock.
   # This covers corrupt/torn slots and both physical/count rollover boundaries.
@@ -124,4 +277,49 @@ if(BUILD_TESTING)
     target_compile_options(firmware_reset_telemetry_tests PRIVATE ${VIRTUAL_BOARD_WARNINGS})
   endif()
   add_test(NAME firmware_reset_telemetry_unit COMMAND firmware_reset_telemetry_tests)
+
+  # Validate the compile-gated EEPROM menu-label reader against a byte-accurate
+  # 1 KiB EEPROM double. This is intentionally a production-AVR component test,
+  # not a VirtualBoard runtime behavior fork.
+  add_executable(firmware_eeprom_menu_labels_tests
+    tests/eeprom_menu_labels_test.cpp
+    ../../Project/EepromMenuLabels.cpp
+  )
+  target_include_directories(firmware_eeprom_menu_labels_tests PRIVATE
+    tests/arduino_mock
+    ../..
+  )
+  target_compile_definitions(firmware_eeprom_menu_labels_tests PRIVATE
+    PCCONTROLLER_ENABLE_EEPROM_MENU_LABELS=1
+  )
+  if(MSVC)
+    target_compile_options(firmware_eeprom_menu_labels_tests PRIVATE /W4 /permissive-)
+  else()
+    target_compile_options(firmware_eeprom_menu_labels_tests PRIVATE ${VIRTUAL_BOARD_WARNINGS})
+  endif()
+  add_test(NAME firmware_eeprom_menu_labels_unit COMMAND firmware_eeprom_menu_labels_tests)
+
+  # Compile the production Timer1 engine and compact EEPROM-backed cue policy
+  # together. This catches exact door/output tones, atomic CRC fallback,
+  # specific-cue preemption, and the global Silent electrical invariant.
+  add_executable(firmware_audio_cue_tests
+    tests/audio_cue_test.cpp
+    ../../LocalLib/TonePlayer.cpp
+    ../../Project/AudioCues.cpp
+    ../../Project/UartProtocol.cpp
+  )
+  target_include_directories(firmware_audio_cue_tests PRIVATE
+    tests/arduino_mock
+    ../..
+  )
+  target_compile_definitions(firmware_audio_cue_tests PRIVATE
+    PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES=1
+    PCCONTROLLER_ENABLE_EEPROM_AUDIO_CUES=1
+  )
+  if(MSVC)
+    target_compile_options(firmware_audio_cue_tests PRIVATE /W4 /permissive-)
+  else()
+    target_compile_options(firmware_audio_cue_tests PRIVATE ${VIRTUAL_BOARD_WARNINGS})
+  endif()
+  add_test(NAME firmware_audio_cue_unit COMMAND firmware_audio_cue_tests)
 endif()

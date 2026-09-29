@@ -112,7 +112,7 @@ func TestPrimaryFirmwareUpdatePropagatesDevelopmentEEPROMReinitialization(t *tes
 	}
 }
 
-func TestPrimaryFirmwareUpdateRejectsReinitializationWithoutMandatoryBackup(t *testing.T) {
+func TestPrimaryFirmwareUpdateRejectsInvalidDeployment(t *testing.T) {
 	called := false
 	executor := &primaryArtifactExecutor{execute: func(_ context.Context, _ string) (string, error) {
 		called = true
@@ -122,9 +122,9 @@ func TestPrimaryFirmwareUpdateRejectsReinitializationWithoutMandatoryBackup(t *t
 		Kind: artifacts.KindFirmware, LocalPath: "candidate.hex",
 	}, artifacts.UpdateRequest{
 		Method: "urclock", Port: "COM18", ReinitializeEEPROM: true,
-		AllowIncompleteBackup: true,
+		Deployment: "skip-everything",
 	}, func(string, int, string) {})
-	if err == nil || !strings.Contains(err.Error(), "requires a complete verified raw backup") || called {
+	if err == nil || !strings.Contains(err.Error(), "deployment must be") || called {
 		t.Fatalf("err=%v called=%t", err, called)
 	}
 }

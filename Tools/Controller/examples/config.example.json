@@ -1,5 +1,4 @@
 {
-  "schema": 1,
   "connection": {
     "vid": "1A86",
     "pid": "7523",
@@ -30,6 +29,7 @@
     "setup_complete": false,
     "welcome_melody": "notify",
     "status_interval_ms": 250,
+    "measurement_freshness_ms": 1500,
     "idle_status_interval_ms": 0,
     "event_log_limit": 500,
     "history_hours": 24,
@@ -534,8 +534,14 @@
       }
     },
     "discovery": {
-      "mdns_enabled": false,
-      "ssdp_enabled": false
+      "mdns_enabled": true,
+      "dns_sd_enabled": true,
+      "ssdp_enabled": true,
+      "upnp_enabled": true,
+      "ws_discovery_enabled": true,
+      "broadcast_enabled": true,
+      "netbios_enabled": true,
+      "broadcast_port": 37889
     },
     "inbound_webhooks_enabled": false,
     "local_device": {
@@ -871,6 +877,7 @@
     {
       "id": 1,
       "name": "output-demo",
+      "mode": "mcu",
       "category": "lighting",
       "color": "violet",
       "label": "dEMO",
@@ -1041,7 +1048,7 @@
       "actions": [
         {
           "type": "board",
-          "command": "display lcd 2000 Door open"
+          "command": "display lcd --duration 2000ms Door open"
         },
         {
           "type": "emit",

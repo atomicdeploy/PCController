@@ -34,7 +34,7 @@ func TestFirmwareIdentityInspectAndGuardedPatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if inspected.Magic != "PCI1" || inspected.SourceHashHex != "11223344" ||
+	if inspected.Magic != "PCID" || inspected.SourceHashHex != "11223344" ||
 		inspected.TimestampHex != "35019D5D" || inspected.BuildTimestamp != "260801194258" {
 		t.Fatalf("identity=%#v", inspected)
 	}

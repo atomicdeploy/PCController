@@ -2,9 +2,11 @@ package ipcjson
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -13,6 +15,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 )
@@ -21,12 +24,88 @@ const (
 	// SessionTicketPath exchanges a header credential for a one-use browser
 	// WebSocket credential. Durable credentials are never put in a URL.
 	SessionTicketPath = "/api/session/ticket"
+	// ServerProofPath proves that a directly reached LAN endpoint knows the
+	// configured bearer before a discovery client transmits that bearer.
+	ServerProofPath = "/api/auth/server-proof"
 
 	browserWebSocketProtocol = "pccontroller"
 	browserTicketPrefix      = "pccontroller.ticket."
 	sessionTicketLifetime    = 15 * time.Second
 	maxSessionTickets        = 256
 )
+
+const serverProofFormat = "pccontroller-server-proof"
+
+// ServerProof is a nonce-bound, address-bound proof returned before a LAN
+// discovery client transmits its durable bearer credential.
+type ServerProof struct {
+	Format     string `json:"format"`
+	Nonce      string `json:"nonce"`
+	Audience   string `json:"audience"`
+	InstanceID string `json:"instance_id"`
+	Proof      string `json:"proof"`
+}
+
+// VerifyServerProof authenticates a bounded proof with the caller-held bearer.
+func VerifyServerProof(token string, value ServerProof) bool {
+	provided, err := base64.RawURLEncoding.DecodeString(value.Proof)
+	if err != nil || len(provided) != sha256.Size || value.Format != serverProofFormat {
+		return false
+	}
+	expected := serverProofMAC(token, value.Nonce, value.Audience, value.InstanceID)
+	return hmac.Equal(expected, provided)
+}
+
+func serverProofMAC(token, nonce, audience, instanceID string) []byte {
+	mac := hmac.New(sha256.New, []byte(token))
+	_, _ = io.WriteString(mac, serverProofFormat+"\n"+nonce+"\n"+audience+"\n"+instanceID)
+	return mac.Sum(nil)
+}
+
+func serveServerProof(writer http.ResponseWriter, request *http.Request, service *Service) {
+	if request.Method != http.MethodGet {
+		writer.Header().Set("Allow", http.MethodGet)
+		http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if service.authorizationDisabled() {
+		writeHTTPJSON(writer, http.StatusConflict, map[string]string{"error": "application authentication is disabled in the immediate alpha"})
+		return
+	}
+	token := strings.TrimSpace(service.currentAuthToken())
+	if !serverProofTokenEligible(token) {
+		writeHTTPJSON(writer, http.StatusConflict, map[string]string{"error": "server proof requires a 24-byte-or-stronger random base64url bearer"})
+		return
+	}
+	nonce := strings.TrimSpace(request.Header.Get("X-PCController-Nonce"))
+	rawNonce, err := base64.RawURLEncoding.DecodeString(nonce)
+	if err != nil || len(rawNonce) < 16 || len(rawNonce) > 64 {
+		writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": "X-PCController-Nonce must be 16..64 random bytes in base64url form"})
+		return
+	}
+	local, ok := request.Context().Value(http.LocalAddrContextKey).(net.Addr)
+	if !ok || local == nil || strings.TrimSpace(local.String()) == "" {
+		writeHTTPJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "local endpoint binding is unavailable"})
+		return
+	}
+	audience := local.String()
+	instanceID := strings.TrimSpace(service.HostInstanceID)
+	if instanceID == "" {
+		instanceID, _ = os.Hostname()
+		instanceID = strings.ToLower(strings.TrimSpace(instanceID))
+	}
+	value := ServerProof{
+		Format: serverProofFormat, Nonce: nonce, Audience: audience, InstanceID: instanceID,
+	}
+	value.Proof = base64.RawURLEncoding.EncodeToString(serverProofMAC(token, nonce, audience, instanceID))
+	writer.Header().Set("Cache-Control", "no-store")
+	writeHTTPJSON(writer, http.StatusOK, value)
+}
+
+func serverProofTokenEligible(token string) bool {
+	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(token))
+	return err == nil && len(raw) >= 24
+}
 
 type authenticatedAccessKey struct{}
 
@@ -92,6 +171,16 @@ func (service *Service) currentRemotePrincipal() string {
 
 func (service *Service) authenticateAccess(access Access, token, mechanism string) (Access, bool) {
 	access = service.normalizeAccess(access)
+	if service.authorizationDisabled() {
+		access.authenticated = true
+		access.Authentication = "disabled-alpha"
+		if access.Remote {
+			access.Principal = service.currentRemotePrincipal()
+		} else {
+			access.Principal = "local-operator"
+		}
+		return access, true
+	}
 	provided := strings.TrimSpace(token)
 	expected := strings.TrimSpace(service.currentAuthToken())
 	delegation := strings.TrimSpace(service.HostInstanceToken)
@@ -353,8 +442,6 @@ func (service *Service) authorizeHTTPRequest(writer http.ResponseWriter, request
 		base = accessFromAddress(stringAddress(request.RemoteAddr), "rest")
 	}
 	base = service.normalizeAccess(base)
-
-	credential, mechanism, headerPresent, credentialErr := headerCredential(request)
 	if request != nil && request.URL != nil &&
 		(request.URL.Query().Has("access_token") || request.URL.Query().Has("ticket")) {
 		writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{
@@ -362,6 +449,28 @@ func (service *Service) authorizeHTTPRequest(writer http.ResponseWriter, request
 		})
 		return false
 	}
+	// Application auth/authZ is dormant in the alpha, but browser Origin
+	// isolation and URL-secret rejection are exposure/hygiene checks and remain
+	// active. Missing Origin is valid for native clients.
+	if !httpOriginAllowed(request, service.currentAllowedOrigins()) {
+		writeHTTPJSON(writer, http.StatusForbidden, map[string]string{"error": "request origin is not allowed"})
+		return false
+	}
+	if base.Remote && !service.hostConfig().IPC.AllowRemote {
+		service.auditAccess(base, request.Method+" "+request.URL.Path, "remote-network", false)
+		writeHTTPJSON(writer, http.StatusForbidden, map[string]string{"error": "remote network access is disabled"})
+		return false
+	}
+	if service.authorizationDisabled() {
+		base, _ = service.authenticateAccess(base, "", "disabled-alpha")
+		requestWithAccess := request.WithContext(context.WithValue(request.Context(), authenticatedAccessKey{}, base))
+		*request = *requestWithAccess
+		writer.Header().Set("X-PCController-Principal", base.Principal)
+		writer.Header().Set("X-PCController-Authentication", base.Authentication)
+		return true
+	}
+
+	credential, mechanism, headerPresent, credentialErr := headerCredential(request)
 	if credentialErr != nil {
 		service.auditAccess(Access{Remote: base.Remote, Transport: base.Transport, Principal: "unauthenticated", Authentication: mechanism}, request.Method+" "+request.URL.Path, "authentication", false)
 		writeHTTPJSON(writer, http.StatusUnauthorized, map[string]string{"error": credentialErr.Error()})
@@ -374,11 +483,6 @@ func (service *Service) authorizeHTTPRequest(writer http.ResponseWriter, request
 		})
 		return false
 	}
-	if !httpOriginAllowed(request, service.currentAllowedOrigins()) {
-		writeHTTPJSON(writer, http.StatusForbidden, map[string]string{"error": "request origin is not allowed"})
-		return false
-	}
-
 	transport := websocketTransport(request, service)
 	ticket, _, ticketSyntaxOK := requestedSessionTicket(request)
 	hasTicket := ticket != "" || strings.Contains(request.Header.Get("Sec-WebSocket-Protocol"), browserTicketPrefix)
@@ -427,6 +531,10 @@ func serveSessionTicket(writer http.ResponseWriter, request *http.Request, servi
 	if request.Method != http.MethodPost {
 		writer.Header().Set("Allow", http.MethodPost)
 		http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if service.authorizationDisabled() {
+		writeHTTPJSON(writer, http.StatusConflict, map[string]string{"error": "application authentication is disabled in the immediate alpha"})
 		return
 	}
 	if !authorizeHTTPRequest(writer, request, service) {
