@@ -137,7 +137,8 @@ func retryAppActionAcknowledgement(ack hostui.ActionAck, attempt int) tea.Cmd {
 }
 
 func (model *Model) observeUpdateEvent(event control.Event) tea.Cmd {
-	if !strings.HasPrefix(strings.ToLower(event.Kind), "update.") {
+	kind := strings.ToLower(event.Kind)
+	if !strings.HasPrefix(kind, "update.") && !strings.HasPrefix(kind, "peer-update.") {
 		return nil
 	}
 	value := hostui.ParseUpdateProgress(event.Kind, event.Text, event.Metadata, event.Time)

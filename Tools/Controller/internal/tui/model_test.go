@@ -1448,6 +1448,33 @@ func TestUpdateEventsPreserveNavigationAndTrackMeasuredStage(t *testing.T) {
 	}
 }
 
+func TestPeerUpdateEventsShareTUIProgressPresentation(t *testing.T) {
+	model := readyModel(t, PageDashboard)
+	model.writeOSC = func(string) error { return nil }
+	updated, command := model.Update(runtimeEventMsg(control.Event{
+		Kind: "peer-update.reconnecting", Text: "peer process is restarting", Time: time.Now(),
+		Metadata: map[string]string{
+			"operation_id": "peer-op", "peer": "cafe-pc", "kind": "host",
+			"state": "reconnecting", "stage": "reconnecting",
+			"progress_known": "true", "progress_percent": "95",
+		},
+	}))
+	model = updated.(Model)
+	if model.page != PageDashboard || model.update.OperationID != "peer-op" ||
+		model.update.Kind != "host" || model.update.Progress != 95 || model.update.State != "reconnecting" {
+		t.Fatalf("peer update presentation page=%v state=%#v", model.page, model.update)
+	}
+	if command == nil {
+		t.Fatal("peer update event did not emit terminal presentation commands")
+	}
+	rendered := ansi.Strip(model.programmingPage(model.snapshot()))
+	for _, expected := range []string{"peer-op", "RECONNECTING", "95%", "peer process is restarting"} {
+		if !strings.Contains(rendered, expected) {
+			t.Fatalf("programming page missing %q:\n%s", expected, rendered)
+		}
+	}
+}
+
 func TestIdleUpdatePresentationAndDefaultFooterStayQuiet(t *testing.T) {
 	model := readyModel(t, PageProgramming)
 	rendered := ansi.Strip(model.programmingPage(model.snapshot()))

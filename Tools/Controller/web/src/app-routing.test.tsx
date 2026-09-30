@@ -117,6 +117,7 @@ describe('transport truth', () => {
 		expect(shouldNavigateToUpdates({ kind: 'update.programming', time: '2026-08-03T00:00:09.000Z' }, 'dashboard', now)).toBe(true)
 		expect(shouldNavigateToUpdates({ kind: 'update.programming', time: '2026-08-03T00:00:09.000Z' }, 'updates', now)).toBe(false)
 		expect(shouldNavigateToUpdates({ kind: 'update.completed', time: '2026-08-02T23:59:00.000Z' }, 'dashboard', now)).toBe(false)
+		expect(shouldNavigateToUpdates({ kind: 'peer-update.reconnecting', time: '2026-08-03T00:00:09.000Z' }, 'dashboard', now)).toBe(true)
 		expect(shouldNavigateToUpdates({ kind: 'status', time: '2026-08-03T00:00:09.000Z' }, 'dashboard', now)).toBe(false)
 	})
 

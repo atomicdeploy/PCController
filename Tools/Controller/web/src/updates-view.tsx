@@ -119,7 +119,7 @@ export interface PeerUpdatePresentation {
   artifactSHA256: string
   idempotencyKey: string
   retrySameIntent: boolean
-  terminalVerified: false
+  terminalVerified: boolean
 }
 
 /** Converts the pushed peer-update activity stream into a separate shared UI status. */
@@ -141,7 +141,7 @@ export function peerUpdateStatusFromEvent(
     artifactSHA256: event.metadata?.sha256?.trim().toLowerCase() ?? '',
     idempotencyKey: event.metadata?.idempotency_key?.trim() ?? '',
     retrySameIntent: event.metadata?.retry_same_idempotency_key === 'true',
-    terminalVerified: false,
+    terminalVerified: event.metadata?.terminal_verified === 'true',
   }
 }
 
@@ -209,7 +209,7 @@ export function UpdatesView({ appTitle, snapshot, events, locale, openDialog }: 
       )
       return
     }
-    if (pushedPeerStatus.state === 'failed' || pushedPeerStatus.state === 'remote-queued' || pushedPeerStatus.state === 'remote-staged') {
+    if (pushedPeerStatus.state === 'failed' || pushedPeerStatus.state === 'completed') {
       settlePeerHostUpdateIntent(
         pushedPeerStatus.peer,
         pushedPeerStatus.artifactSHA256,
@@ -226,7 +226,7 @@ export function UpdatesView({ appTitle, snapshot, events, locale, openDialog }: 
     artifactSHA256: peerStatus.artifact.sha256,
     idempotencyKey: peerStatus.operation.idempotency_key ?? '',
     retrySameIntent: false,
-    terminalVerified: false,
+    terminalVerified: peerStatus.terminal_verified,
   } : null)
   useEffect(() => {
     if (!lastUpdateEvent) return
@@ -342,14 +342,14 @@ export function UpdatesView({ appTitle, snapshot, events, locale, openDialog }: 
     openDialog({
       tone: 'danger',
       title: copy(`Upgrade ${peer.name}?`, `به‌روزرسانی ${peer.name}؟`),
-      body: `${artifact.name}\nSHA-256 ${artifact.sha256}\n\n${copy('The primary instance will transfer the verified executable over its configured bridge and ask the remote coordinator to stage its journaled replacement. This action confirms only remote queued/staged acceptance; process restart, candidate health, rollback outcome, reconnect, and active SHA remain pending.', 'نمونهٔ اصلی فایل اجرایی تأییدشده را از پل معتبر منتقل می‌کند و از هماهنگ‌کنندهٔ راه‌دور می‌خواهد جایگزینی ثبت‌شده را آماده کند. این عمل فقط پذیرش در صف یا آماده‌سازی راه‌دور را تأیید می‌کند؛ راه‌اندازی مجدد، سلامت نامزد، نتیجهٔ عقب‌گرد، اتصال دوباره و SHA فعال همچنان در انتظار می‌مانند.')}`,
+      body: `${artifact.name}\nSHA-256 ${artifact.sha256}\n\n${copy('The primary instance will transfer the verified executable over its configured bridge, ask the remote coordinator to perform its journaled replacement, wait through restart, and verify the peer acknowledges this exact active SHA.', 'نمونهٔ اصلی فایل اجرایی تأییدشده را از پل معتبر منتقل می‌کند، از هماهنگ‌کنندهٔ راه‌دور می‌خواهد جایگزینی ثبت‌شده را انجام دهد، در طول راه‌اندازی مجدد منتظر می‌ماند و تأیید می‌کند که همتا همین SHA فعال دقیق را اعلام می‌کند.')}`,
       confirmLabel: copy('Authorize peer upgrade', 'اجازهٔ به‌روزرسانی همتا'),
       action: async () => {
         setBusy('peer-update')
         try {
           const result = await startPeerHostUpdate(peer.name, artifact.sha256)
           setPeerStatus(result)
-          setNotice(copy(`${peer.name} reported ${result.stage.replace('-', ' ')} for ${result.operation.id}; terminal replacement health is not yet verified.`, `${peer.name} وضعیت ${result.stage} را برای ${result.operation.id} گزارش کرد؛ سلامت نهایی جایگزینی هنوز تأیید نشده است.`))
+          setNotice(copy(`${peer.name} restarted and acknowledged ${result.artifact.sha256.slice(0, 12)} as its active host executable.`, `${peer.name} دوباره راه‌اندازی شد و ${result.artifact.sha256.slice(0, 12)} را به‌عنوان فایل اجرایی فعال میزبان تأیید کرد.`))
         } catch (cause) { setNotice(cause instanceof Error ? cause.message : String(cause)) }
         finally { setBusy('') }
       },
@@ -440,8 +440,8 @@ export function UpdatesView({ appTitle, snapshot, events, locale, openDialog }: 
         />
 
         <Card icon={Server} iconTone="accent" title={copy('Update a configured peer', 'به‌روزرسانی همتای معتبر')} eyebrow={copy('Bridge-native · verified · coordinated', 'پل بومی · تأییدشده · هماهنگ')} action={<StatusBadge tone={peers.some((peer) => peer.connected) ? 'good' : 'warn'}>{peers.filter((peer) => peer.connected).length} {copy('CONNECTED', 'متصل')}</StatusBadge>}>
-          <p className="card-copy">{copy('Transfer the selected verified host executable over the existing configured bridge, then ask that peer coordinator to queue or stage its replacement. Terminal restart health, rollback, reconnect, and active SHA are a separate acceptance gate. No SSH command or shared filesystem is used.', 'فایل اجرایی تأییدشدهٔ میزبان را از همان پل معتبر منتقل می‌کند و سپس از هماهنگ‌کنندهٔ همتا می‌خواهد جایگزینی را در صف بگذارد یا آماده کند. سلامت نهایی راه‌اندازی مجدد، عقب‌گرد، اتصال دوباره و SHA فعال یک معیار پذیرش جداگانه است. هیچ فرمان SSH یا فایل مشترکی استفاده نمی‌شود.')}</p>
-          {displayedPeerStatus && <div className="data-list"><DataRow label={copy(`Shared peer progress · ${displayedPeerStatus.peer}`, `پیشرفت مشترک همتا · ${displayedPeerStatus.peer}`)} value={displayedPeerStatus.state === 'remote-staged' ? copy('Remote staged', 'آماده‌شده در راه‌دور') : displayedPeerStatus.state === 'remote-queued' ? copy('Remote queued', 'در صف راه‌دور') : displayedPeerStatus.state === 'outcome-uncertain' ? copy('Outcome uncertain — retry this update', 'نتیجه نامشخص است — همین به‌روزرسانی را دوباره امتحان کنید') : displayedPeerStatus.state === 'failed' ? copy('Peer attempt failed', 'تلاش همتا ناموفق بود') : `${displayedPeerStatus.state.replaceAll('-', ' ')} · ${Math.round(displayedPeerStatus.progressPercent)}%`} tone={displayedPeerStatus.state === 'failed' ? 'bad' : 'warn'} /><DataRow label={copy('Peer operation', 'عملیات همتا')} value={displayedPeerStatus.operationID} mono /><DataRow label={copy('Terminal replacement', 'جایگزینی نهایی')} value={copy('Pending health, reconnect & active SHA', 'در انتظار سلامت، اتصال دوباره و SHA فعال')} tone="warn" /></div>}
+          <p className="card-copy">{copy('Transfer the selected verified host executable over the configured bridge, perform the peer’s recoverable replacement, and wait for restart health plus an exact active-SHA acknowledgement. No SSH command or shared filesystem is used.', 'فایل اجرایی تأییدشدهٔ میزبان را از پل پیکربندی‌شده منتقل می‌کند، جایگزینی قابل‌بازیابی همتا را انجام می‌دهد و تا سلامت راه‌اندازی مجدد و تأیید دقیق SHA فعال منتظر می‌ماند. هیچ فرمان SSH یا فایل مشترکی استفاده نمی‌شود.')}</p>
+          {displayedPeerStatus && <div className="data-list"><DataRow label={copy(`Shared peer progress · ${displayedPeerStatus.peer}`, `پیشرفت مشترک همتا · ${displayedPeerStatus.peer}`)} value={displayedPeerStatus.state === 'completed' ? copy('Restarted and active SHA verified', 'راه‌اندازی مجدد و SHA فعال تأیید شد') : displayedPeerStatus.state === 'remote-staged' ? copy('Remote staged', 'آماده‌شده در راه‌دور') : displayedPeerStatus.state === 'remote-queued' ? copy('Remote queued', 'در صف راه‌دور') : displayedPeerStatus.state === 'outcome-uncertain' ? copy('Outcome uncertain — retry this update', 'نتیجه نامشخص است — همین به‌روزرسانی را دوباره امتحان کنید') : displayedPeerStatus.state === 'failed' ? copy('Peer attempt failed', 'تلاش همتا ناموفق بود') : `${displayedPeerStatus.state.replaceAll('-', ' ')} · ${Math.round(displayedPeerStatus.progressPercent)}%`} tone={displayedPeerStatus.state === 'completed' && displayedPeerStatus.terminalVerified ? 'good' : displayedPeerStatus.state === 'failed' ? 'bad' : 'warn'} /><DataRow label={copy('Peer operation', 'عملیات همتا')} value={displayedPeerStatus.operationID} mono /><DataRow label={copy('Terminal replacement', 'جایگزینی نهایی')} value={displayedPeerStatus.terminalVerified ? copy('Acknowledged · active SHA matches', 'تأیید شد · SHA فعال مطابقت دارد') : copy('Waiting for health, reconnect & active SHA', 'در انتظار سلامت، اتصال دوباره و SHA فعال')} tone={displayedPeerStatus.terminalVerified ? 'good' : 'warn'} /></div>}
           {peers.length ? <div className="data-list">{peers.map((peer) => <div key={peer.name}><DataRow label={peer.name} value={peer.connected ? copy('Connected', 'متصل') : peer.last_error || copy('Disconnected', 'قطع')} tone={peer.connected ? 'good' : 'bad'} /><div className="inline-actions"><Button icon={RotateCcw} tone="primary" disabled={!peer.connected || !peer.allow_commands || selected?.kind !== 'host-executable' || busy === 'peer-update'} busy={busy === 'peer-update'} onClick={() => selected && void confirmPeerUpdate(peer, selected)}>{copy('Review peer host update', 'بازبینی به‌روزرسانی میزبان همتا')}</Button></div></div>)}</div> : <EmptyState icon={Server} title={copy('No bridge peers configured', 'هیچ همتای پلی پیکربندی نشده')} detail={copy('Add a peer in integration settings; connected peers appear here immediately.', 'یک همتای معتبر را در تنظیمات یکپارچه‌سازی بیفزایید؛ همتایان متصل فوراً اینجا ظاهر می‌شوند.')} />}
         </Card>
 

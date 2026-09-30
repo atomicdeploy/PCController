@@ -12,6 +12,7 @@ export function shouldToastControllerEvent(
   const text = event.text?.trim().toLowerCase() ?? ''
 
   if (/^(hello|status|telemetry|rx|tx)(?:[._-]|$)/.test(kind) || /^(hello|status)\b/.test(text)) return false
+	if (/^peer-update\.(queued|artifact-verified|reconnecting|health-checking|completed|failed|outcome-uncertain)$/.test(kind)) return true
 	if (kind === 'hardware.problem') return true
   if (kind === 'message') {
     const instance = instanceID.trim().toLowerCase()

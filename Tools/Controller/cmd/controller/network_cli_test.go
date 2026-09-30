@@ -45,6 +45,35 @@ func TestNetworkPeerAddUsesSecretReferenceAndCanBeRemoved(t *testing.T) {
 	}
 }
 
+func TestNetworkFirewallEnsureUsesCanonicalPlatformProvisioner(t *testing.T) {
+	original := ensureCanonicalNetworkFirewall
+	defer func() { ensureCanonicalNetworkFirewall = original }()
+	called := false
+	ensureCanonicalNetworkFirewall = func(context.Context) (networkFirewallReport, error) {
+		called = true
+		return networkFirewallReport{
+			Executable:   `C:\Program Files\PCController\bin\controller.exe`,
+			RemovedRules: true,
+			CanonicalRules: []networkFirewallRule{{
+				Name: "PCController canonical TCP", Direction: "in",
+				Action: "allow", Profile: "private", Protocol: "TCP",
+			}},
+		}, nil
+	}
+	store, err := appconfig.Open(filepath.Join(t.TempDir(), "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	if err := runNetwork([]string{"firewall-ensure"}, &output, &output, store); err != nil {
+		t.Fatal(err)
+	}
+	if !called || !strings.Contains(output.String(), "PCController canonical TCP") ||
+		!strings.Contains(output.String(), `controller.exe`) {
+		t.Fatalf("called=%t output=%q", called, output.String())
+	}
+}
+
 func TestAlphaNetworkConfigurationDoesNotRequireOrGenerateCredentials(t *testing.T) {
 	store, err := appconfig.Open(filepath.Join(t.TempDir(), "config.json"))
 	if err != nil {

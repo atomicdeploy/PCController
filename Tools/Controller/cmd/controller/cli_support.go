@@ -345,9 +345,10 @@ Host configuration and integration:
 	controller app launch tui|webui [--mode ensure|launch|focus] [--target INSTANCE] [--page PAGE] [--peer NAME]
 	controller config path [config|data] | open [config|data] | clear --confirm | show|validate
 	controller config secrets status|set REF (--from-env NAME|--stdin)|clear REF
-	controller network edge-enable|edge-disable|peer-add|peer-remove|probe|status
+	controller network edge-enable|edge-disable|peer-add|peer-remove|probe|firewall-ensure|status
 	controller --open-user-data | --open-config-dir | --clear-settings
 	controller package inventory --directory DIR [--output FILE]
+	controller update host FILE [--expected-sha256 SHA256] [--idempotency-key KEY]
 	controller install [--package DIR] [--expected-package-sha256 SHA256] [--desktop]
 	controller repair [--package DIR] [--expected-package-sha256 SHA256] [--desktop]
 	controller installation status

@@ -349,16 +349,19 @@ func (executor *primaryArtifactExecutor) scheduleHostUpdateShutdown(gracefulDela
 	if executor == nil || executor.shutdown == nil {
 		return
 	}
+	// Arm the watchdog independently. Shutdown closes transports and runtime
+	// resources and can itself block behind a terminal input read; the old
+	// implementation started the force timer only after Shutdown returned,
+	// allowing a live image to prevent its own prepared replacement forever.
+	if executor.forceExit != nil {
+		go func() {
+			time.Sleep(forceDelay)
+			executor.forceExit(0)
+		}()
+	}
 	go func() {
 		time.Sleep(gracefulDelay)
 		executor.shutdown()
-		// A terminal UI can remain blocked in an OS input read after IPC,
-		// serial, and integrations are closed. The verified external helper
-		// owns rollback now, so bound how long the outgoing image can delay it.
-		if executor.forceExit != nil {
-			time.Sleep(forceDelay)
-			executor.forceExit(0)
-		}
 	}()
 }
 

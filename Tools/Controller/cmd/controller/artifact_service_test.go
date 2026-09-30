@@ -38,6 +38,25 @@ func TestHostUpdateShutdownHasBoundedForceExitFallback(t *testing.T) {
 	}
 }
 
+func TestHostUpdateForceExitDoesNotWaitForBlockedGracefulShutdown(t *testing.T) {
+	release := make(chan struct{})
+	forced := make(chan int, 1)
+	executor := &primaryArtifactExecutor{
+		shutdown:  func() { <-release },
+		forceExit: func(code int) { forced <- code },
+	}
+	executor.scheduleHostUpdateShutdown(time.Millisecond, 5*time.Millisecond)
+	select {
+	case code := <-forced:
+		if code != 0 {
+			t.Fatalf("force-exit code=%d", code)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("blocked graceful shutdown prevented bounded force exit")
+	}
+	close(release)
+}
+
 func TestBackupManifestPathUsesValidatedAbsoluteResult(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "operations", "manifest.json")
 	output := "program output\nBackup complete; manifest: " + path + "\nprogrammer operation completed"

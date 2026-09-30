@@ -1190,7 +1190,7 @@
     },
     "controller.peer.update.host": {
       "capability": "programming",
-      "summary": "Transfer a verified executable using a caller-generated idempotency_key; report remote queued/staged acceptance, not terminal replacement health. Retry uncertain outcomes with the same key.",
+      "summary": "Transfer a verified executable using a caller-generated idempotency_key, wait through the peer restart, and verify its exact active SHA-256 acknowledgement. Retry uncertain outcomes with the same key.",
       "idempotency": "non-idempotent"
     },
     "controller.peripherals": {

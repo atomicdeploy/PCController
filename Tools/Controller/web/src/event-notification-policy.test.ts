@@ -21,6 +21,16 @@ describe('controller event toast policy', () => {
     expect(shouldToastControllerEvent({ kind: 'transport.frame.recovered', source: 'board' })).toBe(false)
   })
 
+  it('toasts bounded peer deployment milestones without toasting every transfer tick', () => {
+    expect(shouldToastControllerEvent({ kind: 'peer-update.queued', source: 'bridge' })).toBe(true)
+    expect(shouldToastControllerEvent({ kind: 'peer-update.transferring', source: 'bridge' })).toBe(false)
+    expect(shouldToastControllerEvent({ kind: 'peer-update.artifact-verified', source: 'bridge' })).toBe(true)
+    expect(shouldToastControllerEvent({ kind: 'peer-update.reconnecting', source: 'bridge' })).toBe(true)
+    expect(shouldToastControllerEvent({ kind: 'peer-update.health-checking', source: 'bridge' })).toBe(true)
+    expect(shouldToastControllerEvent({ kind: 'peer-update.completed', source: 'bridge' })).toBe(true)
+    expect(shouldToastControllerEvent({ kind: 'peer-update.outcome-uncertain', source: 'bridge' })).toBe(true)
+  })
+
   it('presents only messages explicitly targeted to this Web capability, surface, or instance', () => {
     expect(shouldToastControllerEvent({ kind: 'message', targets: ['surface:webui'] })).toBe(true)
     expect(shouldToastControllerEvent({ kind: 'message', targets: ['surface:desktop', 'all'] })).toBe(true)

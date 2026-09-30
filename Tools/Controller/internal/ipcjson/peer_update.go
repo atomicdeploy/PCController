@@ -18,6 +18,14 @@ import (
 // ErrorCodeOutcomeUncertain means a caller must retry with the same idempotency key.
 const ErrorCodeOutcomeUncertain = -32004
 
+const (
+	peerHostVerificationTimeout = 60 * time.Second
+	peerHostVerificationPoll    = 500 * time.Millisecond
+	peerHostProbeTimeout        = 3 * time.Second
+)
+
+var peerHostStableVerificationWindow = 12 * time.Second
+
 type peerHostUpdateRequest struct {
 	Peer           string `json:"peer"`
 	ArtifactSHA256 string `json:"artifact_sha256"`
@@ -155,17 +163,98 @@ func (service *Service) updatePeerHost(ctx context.Context, request peerHostUpda
 	}
 	service.emitPeerUpdate(
 		operationID, peer, idempotencyKey, descriptor, stage, 90,
-		"peer coordinator accepted remote staging; replacement health remains pending",
+		"peer coordinator accepted remote staging; waiting for restart and active SHA acknowledgement",
 		map[string]string{
 			"remote_operation_id": update.Operation.ID,
 			"terminal_verified":   "false",
 		},
 	)
+	if err = service.verifyPeerHostReplacement(ctx, operationID, peer, idempotencyKey, descriptor, update.Operation.ID); err != nil {
+		return result, err
+	}
+	update.Operation.State = "completed"
+	update.Operation.ProgressPercent = 100
+	update.Operation.Detail = "peer restarted and acknowledged the exact active host executable SHA-256"
+	update.Operation.UpdatedAt = time.Now().UTC()
 	result = peerHostUpdateResult{
 		Peer: peer, Artifact: *uploaded.Artifact, Operation: update.Operation,
-		Stage: stage, TerminalVerified: false,
+		Stage: "completed", TerminalVerified: true,
 	}
 	return result, nil
+}
+
+func (service *Service) verifyPeerHostReplacement(
+	ctx context.Context,
+	operationID, peer, idempotencyKey string,
+	descriptor artifacts.Descriptor,
+	remoteOperationID string,
+) error {
+	verifyContext, cancel := context.WithTimeout(ctx, peerHostVerificationTimeout)
+	defer cancel()
+
+	reconnecting := false
+	var candidateObservedAt time.Time
+	healthChecking := false
+	for {
+		probeContext, probeCancel := context.WithTimeout(verifyContext, peerHostProbeTimeout)
+		var manifest artifacts.Manifest
+		probeErr := service.callPeer(probeContext, peer, "controller.artifact.manifest", struct{}{}, &manifest)
+		probeCancel()
+		if probeErr == nil {
+			if manifest.Current.Host != nil && strings.EqualFold(manifest.Current.Host.SHA256, descriptor.SHA256) {
+				if candidateObservedAt.IsZero() {
+					candidateObservedAt = time.Now()
+				}
+				if !healthChecking && peerHostStableVerificationWindow > 0 {
+					healthChecking = true
+					service.emitPeerUpdate(
+						operationID, peer, idempotencyKey, descriptor, "health-checking", 98,
+						"peer candidate is running; waiting for the self-update health commit",
+						map[string]string{
+							"remote_operation_id": remoteOperationID,
+							"active_sha256":       manifest.Current.Host.SHA256,
+							"terminal_verified":   "false",
+						},
+					)
+				}
+				if peerHostStableVerificationWindow <= 0 || time.Since(candidateObservedAt) >= peerHostStableVerificationWindow {
+					service.emitPeerUpdate(
+						operationID, peer, idempotencyKey, descriptor, "completed", 100,
+						"peer restarted and acknowledged the exact active host executable SHA-256 after health commit",
+						map[string]string{
+							"remote_operation_id": remoteOperationID,
+							"active_sha256":       manifest.Current.Host.SHA256,
+							"terminal_verified":   "true",
+						},
+					)
+					return nil
+				}
+			} else {
+				candidateObservedAt = time.Time{}
+				healthChecking = false
+			}
+		} else {
+			candidateObservedAt = time.Time{}
+			healthChecking = false
+			if !reconnecting {
+				reconnecting = true
+				service.emitPeerUpdate(
+					operationID, peer, idempotencyKey, descriptor, "reconnecting", 95,
+					"peer process is restarting; waiting for the bridge and active SHA acknowledgement",
+					map[string]string{
+						"remote_operation_id": remoteOperationID,
+						"terminal_verified":   "false",
+					},
+				)
+			}
+		}
+
+		select {
+		case <-verifyContext.Done():
+			return peerOutcomeUncertain("peer did not acknowledge the requested active host executable SHA-256 after restart")
+		case <-time.After(peerHostVerificationPoll):
+		}
+	}
 }
 
 func peerHostIdempotencyKey(provided string) (string, error) {
@@ -282,9 +371,10 @@ func (service *Service) emitPeerUpdate(
 	metadata := map[string]string{
 		"operation_id": operationID, "peer": peer, "kind": "host",
 		"idempotency_key": idempotencyKey,
-		"state":           state, "progress_percent": strconv.Itoa(percent),
+		"state":           state, "stage": state,
+		"progress_known": "true", "progress_percent": strconv.Itoa(percent),
 		"sha256": descriptor.SHA256, "bytes_total": strconv.FormatInt(descriptor.Bytes, 10),
-		"timestamp": time.Now().UTC().Format(time.RFC3339Nano),
+		"updated_at": time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	if len(extra) != 0 {
 		for key, value := range extra[0] {

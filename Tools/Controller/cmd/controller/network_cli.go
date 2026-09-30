@@ -28,9 +28,20 @@ import (
 
 func runNetwork(args []string, stdout, stderr io.Writer, store *appconfig.Store) error {
 	if len(args) == 0 {
-		return errors.New("usage: controller network advertise|discover|list|connect|probe|edge-enable|edge-disable|peer-add|peer-remove|status")
+		return errors.New("usage: controller network advertise|discover|list|connect|probe|edge-enable|edge-disable|peer-add|peer-remove|firewall-ensure|status")
 	}
 	switch strings.ToLower(args[0]) {
+	case "firewall-ensure":
+		if len(args) != 1 {
+			return errors.New("usage: controller network firewall-ensure")
+		}
+		report, err := ensureCanonicalNetworkFirewall(context.Background())
+		if err != nil {
+			return err
+		}
+		encoded, _ := json.MarshalIndent(report, "", "  ")
+		fmt.Fprintln(stdout, string(encoded))
+		return nil
 	case "status":
 		if len(args) != 1 {
 			return errors.New("usage: controller network status")
@@ -375,7 +386,7 @@ func runNetwork(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 		fmt.Fprintln(stdout, "LAN edge mode disabled; IPC returned to loopback defaults.")
 		return nil
 	default:
-		return errors.New("usage: controller network advertise|discover|list|connect|probe|edge-enable|edge-disable|peer-add|peer-remove|status")
+		return errors.New("usage: controller network advertise|discover|list|connect|probe|edge-enable|edge-disable|peer-add|peer-remove|firewall-ensure|status")
 	}
 }
 
