@@ -327,18 +327,69 @@ func TestDisconnectedDashboardUsesOneConciseConnectionCard(t *testing.T) {
 	dashboard := ansi.Strip(model.dashboardPage(snapshot))
 	for _, expected := range []string{
 		"BOARD CONNECTION", "RETRY SCHEDULED", "COM3 · USB-SERIAL CH340",
-		"Retry", "Reason", "no serial ports match the configured filters",
+		"Attempt", "29", "Retry", "Last failure", "no serial ports match the configured filters",
+		"Enter / click to retry now", "P change device",
 	} {
 		if !strings.Contains(dashboard, expected) {
 			t.Fatalf("disconnected dashboard missing %q:\n%s", expected, dashboard)
 		}
 	}
 	for _, duplicate := range []string{
-		"RECOVERY", "Last result", "Last failure", "Automatic retry", "Attempt",
+		"RECOVERY", "Last result", "Automatic retry",
 		"VID:1A86", "PID:7523", "INSTANCE:", "No port owned",
 	} {
 		if strings.Contains(dashboard, duplicate) {
 			t.Fatalf("disconnected dashboard retained duplicate detail %q:\n%s", duplicate, dashboard)
+		}
+	}
+}
+
+func TestDisconnectedDashboardKeepsActionableContextWithoutRuntimeDiagnostics(t *testing.T) {
+	model := New(control.New(control.Options{}), shell.New(10))
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 160, Height: 38})
+	model = updated.(Model)
+
+	dashboard := ansi.Strip(model.dashboardPage(model.snapshot()))
+	for _, expected := range []string{
+		"BOARD CONNECTION", "DISCONNECTED", "Device", "No serial device selected",
+		"Next", "Enter / click to connect", "P choose device",
+	} {
+		if !strings.Contains(dashboard, expected) {
+			t.Fatalf("disconnected dashboard missing %q:\n%s", expected, dashboard)
+		}
+	}
+	if strings.Count(dashboard, "DISCONNECTED") != 1 {
+		t.Fatalf("connection state was duplicated:\n%s", dashboard)
+	}
+}
+
+func TestDisconnectedDashboardExplainsEveryRecoveryPhase(t *testing.T) {
+	model := New(control.New(control.Options{}), shell.New(10))
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 160, Height: 38})
+	model = updated.(Model)
+	now := time.Now()
+
+	tests := []struct {
+		phase string
+		want  []string
+	}{
+		{"attempting", []string{"CONNECTING", "Waiting for board response"}},
+		{"waiting_retry", []string{"RETRY SCHEDULED", "retry now"}},
+		{"queued", []string{"RECONNECT QUEUED", "Connection worker queued"}},
+		{"paused", []string{"CLOSED", "connect", "choose device"}},
+		{"blocked", []string{"SERIAL BLOCKED", "owning process", "another device"}},
+	}
+	for _, test := range tests {
+		snapshot := model.snapshot()
+		snapshot.ConnectionPhase = test.phase
+		snapshot.ConnectionAttempt = 3
+		snapshot.ConnectionAttemptStart = now.Add(-time.Second)
+		snapshot.ConnectionNextRetry = now.Add(time.Second)
+		rendered := ansi.Strip(model.dashboardPage(snapshot))
+		for _, expected := range test.want {
+			if !strings.Contains(rendered, expected) {
+				t.Fatalf("phase %s missing %q:\n%s", test.phase, expected, rendered)
+			}
 		}
 	}
 }

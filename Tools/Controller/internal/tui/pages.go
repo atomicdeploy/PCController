@@ -102,12 +102,16 @@ func (model Model) dashboardPage(snapshot control.Snapshot) string {
 			connectionWidth = 1
 		}
 		connectionLines := []string{
-			sectionHeader(connectionWidth, "BOARD CONNECTION", strings.ReplaceAll(phase, "_", " ")),
-			warnStyle.Copy().Bold(true).Render(connectionStatus),
+			sectionHeader(connectionWidth, "BOARD CONNECTION", connectionStatus),
 		}
 		candidate := compactConnectionCandidate(snapshot)
 		if candidate != "" {
 			connectionLines = append(connectionLines, kvCard(connectionWidth, 14, "Device", candidate))
+		} else {
+			connectionLines = append(connectionLines, kvCard(connectionWidth, 14, "Device", connectionDeviceSummary(model)))
+		}
+		if snapshot.ConnectionAttempt != 0 {
+			connectionLines = append(connectionLines, kvCard(connectionWidth, 14, "Attempt", fmt.Sprintf("%d", snapshot.ConnectionAttempt)))
 		}
 		if !snapshot.ConnectionAttemptStart.IsZero() && phase == "attempting" {
 			connectionLines = append(connectionLines, kvCard(connectionWidth, 14, "Elapsed", formatConnectionDuration(time.Since(snapshot.ConnectionAttemptStart))))
@@ -120,11 +124,16 @@ func (model Model) dashboardPage(snapshot control.Snapshot) string {
 			connectionLines = append(connectionLines, kvCard(connectionWidth, 14, "Retry", "in "+formatConnectionDuration(remaining)))
 		}
 		if reason := strings.TrimSpace(snapshot.ConnectionReason); reason != "" {
-			connectionLines = append(connectionLines, kvCard(connectionWidth, 14, "Reason", reason))
+			label := "Reason"
+			if phase == "waiting_retry" {
+				label = "Last failure"
+			}
+			connectionLines = append(connectionLines, kvCard(connectionWidth, 14, label, reason))
 		}
 		if len(snapshot.HardwareProblems) != 0 {
 			connectionLines = append(connectionLines, errorStyle.Render(kvCard(connectionWidth, 14, "Hardware", "⚠ "+hardwareProblemMessage(snapshot.HardwareProblems[0]))))
 		}
+		connectionLines = append(connectionLines, kvCard(connectionWidth, 14, "Next", connectionRecoveryAction(phase)))
 		return cardStyle.Copy().Width(connectionWidth).Render(strings.Join(connectionLines, "\n"))
 	}
 	measurementLines := []string{
@@ -226,6 +235,40 @@ func (model Model) dashboardPage(snapshot control.Snapshot) string {
 	left := cardStyle.Copy().Width(cardRenderWidth).Render(strings.Join(measurementLines, "\n"))
 	right := cardStyle.Copy().Width(cardRenderWidth).Render(strings.Join(stateLines, "\n"))
 	return lipgloss.JoinHorizontal(lipgloss.Top, left, " ", right)
+}
+
+func connectionDeviceSummary(model Model) string {
+	if model.portLoading {
+		return "Scanning serial devices…"
+	}
+	if count := len(model.portCandidates); count != 0 {
+		return fmt.Sprintf("%d serial device%s available · P to choose", count, pluralSuffix(count))
+	}
+	return "No serial device selected"
+}
+
+func connectionRecoveryAction(phase string) string {
+	switch phase {
+	case "attempting":
+		return "Waiting for board response"
+	case "waiting_retry":
+		return "Enter / click to retry now · P change device"
+	case "queued":
+		return "Connection worker queued · Enter to retry now"
+	case "paused":
+		return "Enter / click to connect · P choose device"
+	case "blocked":
+		return "Close the owning process or choose another device"
+	default:
+		return "Enter / click to connect · P choose device"
+	}
+}
+
+func pluralSuffix(count int) string {
+	if count == 1 {
+		return ""
+	}
+	return "s"
 }
 
 func portProcessSummary(process control.PortProcessSnapshot) string {
