@@ -401,6 +401,8 @@
             "controller.artifact.upload.begin",
             "controller.artifact.upload.chunk",
             "controller.artifact.upload.finish",
+            "controller.audio.cues",
+            "controller.audio.play",
             "controller.board_automation.clear",
             "controller.board_automation.list",
             "controller.board_automation.put",
@@ -820,6 +822,16 @@
     "controller.artifact.upload.finish": {
       "capability": "programming",
       "summary": "Revalidate and publish a completed peer artifact transfer.",
+      "idempotency": "non-idempotent"
+    },
+    "controller.audio.cues": {
+      "capability": "read",
+      "summary": "Return the receiving host's declared local sound-effect intent vocabulary.",
+      "idempotency": "safe"
+    },
+    "controller.audio.play": {
+      "capability": "integrations",
+      "summary": "Play one validated sound-effect intent on the receiving host while honoring its mute and volume policy.",
       "idempotency": "non-idempotent"
     },
     "controller.board_automation.clear": {

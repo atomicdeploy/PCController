@@ -102,12 +102,14 @@ const capabilityGroups = {
   power_actions: ["controller.os.power"],
   bridge_calls: ["controller.bridge.call", "controller.discovery.connect"],
   integrations: [
+		"controller.audio.play",
     "controller.device.status", "controller.device.action", "controller.device.inspect",
     "controller.integrations.local.get", "controller.integrations.local.set",
     "controller.webhooks.replay", "controller.webhooks.clear",
 		"controller.discovery.config.set",
   ],
   read: [
+		"controller.audio.cues",
     "controller.artifact.manifest", "controller.artifact.list", "controller.update.status",
     "controller.discovery.github.workflow", "controller.discovery.github.release",
     "controller.discovery.manifest", "controller.discovery.local_manifest", "controller.discovery.check",
@@ -146,6 +148,8 @@ const capabilityGroups = {
 };
 
 const methodOverrides = {
+	"controller.audio.cues": "Return the receiving host's declared local sound-effect intent vocabulary.",
+	"controller.audio.play": "Play one validated sound-effect intent on the receiving host while honoring its mute and volume policy.",
 	"controller.ping": "Return service health and protocol identity.",
   "controller.ui.config": "Return host-owned UI settings, including status_interval_ms and measurement_freshness_ms.",
   "controller.ui.config.get": "Return host-owned UI settings, including status_interval_ms and measurement_freshness_ms.",
@@ -206,6 +210,7 @@ const methodOverrides = {
 
 const nonIdempotentMethods = new Set([
   "controller.reset.lines", "controller.reset", "controller.port.reset", "controller.command.execute",
+	"controller.audio.play",
 	"controller.firmware.build",
   "controller.rf.learn.start", "controller.rf.transmit", "controller.lcd.prompt", "controller.lcd.priority",
   "controller.board_automation.put",
