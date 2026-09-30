@@ -1148,9 +1148,16 @@ func notificationJobForEvent(
 		}
 		notification = configured
 	}
+	audioCue := criticalAudioCue(kind)
+	// The dedicated door-running beep is emitted by observeRunningDoor. Do not
+	// layer the notification cue over it when both presentation paths are on.
+	if kind == "warning.door-open-running" &&
+		config.Integrations.Notifications.DoorRunningBeep {
+		audioCue = ""
+	}
 	return notificationJob{
 		key: jobKey, notification: notification, priority: priority,
-		audioCue: criticalAudioCue(kind),
+		audioCue: audioCue,
 	}, true, nil
 }
 
