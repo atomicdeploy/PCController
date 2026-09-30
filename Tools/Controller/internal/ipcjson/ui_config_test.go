@@ -227,6 +227,7 @@ func TestPeripheralCatalogUsesExplicitBoardProfileWithoutLegacyMotionAliases(t *
 func TestSemanticActionDispatchUsesTheAdvertisedProfileCatalog(t *testing.T) {
 	_, cinemaControls := appconfig.ProfileDescriptors(
 		appconfig.BoardModeCinemaSeatMotion,
+		false,
 		nil,
 		nil,
 	)
@@ -239,9 +240,21 @@ func TestSemanticActionDispatchUsesTheAdvertisedProfileCatalog(t *testing.T) {
 	if control, action, ok := advertisedSemanticAction(cinemaControls, "relay.1.on"); ok {
 		t.Fatalf("seat-internal relay unexpectedly executable: control=%+v action=%+v", control, action)
 	}
+	_, rawCinemaControls := appconfig.ProfileDescriptors(
+		appconfig.BoardModeCinemaSeatMotion,
+		true,
+		nil,
+		nil,
+	)
+	for _, actionID := range []string{"seat.a.up", "seat.b.stop", "relay.1.on", "relay.4.off"} {
+		if _, _, ok := advertisedSemanticAction(rawCinemaControls, actionID); !ok {
+			t.Fatalf("raw cinema action %q was not executable", actionID)
+		}
+	}
 
 	_, relayControls := appconfig.ProfileDescriptors(
 		appconfig.BoardModeOrdinaryRelays,
+		false,
 		nil,
 		nil,
 	)

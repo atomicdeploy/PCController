@@ -1,6 +1,9 @@
 package appconfig
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func TestResolveBoardIdentityPrefersProvisionedSerial(t *testing.T) {
 	identity := ResolveBoardIdentity(" BOARD-42 ", `USB\VID_1A86&PID_7523\PATH`, "COM18")
@@ -18,7 +21,7 @@ func TestProfileDescriptorsAdvertiseOnlyConfiguredWiring(t *testing.T) {
 	presentation := map[string]PeripheralPresentation{
 		"seat.a": {Name: "Left seats", Icon: "seat", Group: "auditorium"},
 	}
-	_, cinema := ProfileDescriptors(BoardModeCinemaSeatMotion, legacy, presentation)
+	_, cinema := ProfileDescriptors(BoardModeCinemaSeatMotion, false, legacy, presentation)
 	if len(cinema) != 17 {
 		t.Fatalf("cinema controls=%d, want 17", len(cinema))
 	}
@@ -38,11 +41,29 @@ func TestProfileDescriptorsAdvertiseOnlyConfiguredWiring(t *testing.T) {
 		t.Fatalf("cinema controls=%+v", cinema)
 	}
 
-	_, ordinary := ProfileDescriptors(BoardModeOrdinaryRelays, legacy, nil)
+	_, rawCinema := ProfileDescriptors(BoardModeCinemaSeatMotion, true, legacy, presentation)
+	if len(rawCinema) != 21 {
+		t.Fatalf("raw cinema controls=%d, want 21", len(rawCinema))
+	}
+	for relay := 1; relay <= 4; relay++ {
+		key := fmt.Sprintf("relay.%d", relay)
+		found := false
+		for _, control := range rawCinema {
+			if control.Key == key {
+				found = control.Kind == "relay" && control.Control == "seat-internal" && len(control.Actions) == 2
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("raw cinema control %s missing from %+v", key, rawCinema)
+		}
+	}
+
+	_, ordinary := ProfileDescriptors(BoardModeOrdinaryRelays, false, legacy, nil)
 	if len(ordinary) != 19 || ordinary[0].Key != "relay.1" || len(ordinary[0].Actions) != 2 || ordinary[0].Actions[0].ID != "relay.1.on" {
 		t.Fatalf("ordinary controls=%+v", ordinary)
 	}
-	_, unconfigured := ProfileDescriptors(BoardModeUnconfigured, legacy, nil)
+	_, unconfigured := ProfileDescriptors(BoardModeUnconfigured, false, legacy, nil)
 	if len(unconfigured) != 15 {
 		t.Fatalf("unconfigured controls=%d, want 15", len(unconfigured))
 	}
@@ -65,6 +86,11 @@ func TestBoardProfileValidationAndRevision(t *testing.T) {
 	second := BoardProfileRevision("serial:board-42", profile, config.UI.PeripheralNames)
 	if first == second || len(first) != 24 || len(second) != 24 {
 		t.Fatalf("revisions first=%q second=%q", first, second)
+	}
+	profile.ExposeRawRelays = true
+	third := BoardProfileRevision("serial:board-42", profile, config.UI.PeripheralNames)
+	if second == third || len(third) != 24 {
+		t.Fatalf("raw-relay revision second=%q third=%q", second, third)
 	}
 	profile.Mode = "unknown"
 	config.BoardProfiles["serial:board-42"] = profile

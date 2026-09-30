@@ -12,14 +12,15 @@ import (
 )
 
 type boardProfileDescriptor struct {
-	Key            string `json:"key,omitempty"`
-	BoardIdentity  string `json:"board_identity,omitempty"`
-	IdentitySource string `json:"identity_source"`
-	IdentityStable bool   `json:"identity_stable"`
-	Mode           string `json:"mode"`
-	Configured     bool   `json:"configured"`
-	Attached       bool   `json:"attached"`
-	Revision       string `json:"revision"`
+	Key             string `json:"key,omitempty"`
+	BoardIdentity   string `json:"board_identity,omitempty"`
+	IdentitySource  string `json:"identity_source"`
+	IdentityStable  bool   `json:"identity_stable"`
+	Mode            string `json:"mode"`
+	ExposeRawRelays bool   `json:"expose_raw_relays"`
+	Configured      bool   `json:"configured"`
+	Attached        bool   `json:"attached"`
+	Revision        string `json:"revision"`
 }
 
 type presentationUpdateResult struct {
@@ -45,14 +46,14 @@ func (service *Service) activeBoardProfile() (boardProfileDescriptor, appconfig.
 	profile.Mode = mode
 	descriptor := boardProfileDescriptor{
 		Key: profile.Key, BoardIdentity: identity.Value, IdentitySource: identity.Source,
-		IdentityStable: identity.Stable, Mode: mode, Configured: configured,
+		IdentityStable: identity.Stable, Mode: mode, ExposeRawRelays: profile.ExposeRawRelays, Configured: configured,
 		Attached: snapshot.Connected && identity.Value != "",
 	}
 	descriptor.Revision = appconfig.BoardProfileRevision(identity.Value, profile, config.UI.PeripheralNames)
 	return descriptor, profile
 }
 
-func (service *Service) updateActiveBoardProfile(key, mode, expectedRevision string) (boardProfileDescriptor, error) {
+func (service *Service) updateActiveBoardProfile(key, mode string, exposeRawRelays *bool, expectedRevision string) (boardProfileDescriptor, error) {
 	if service.UpdateHostConfig == nil {
 		return boardProfileDescriptor{}, errors.New("persistent host configuration is unavailable")
 	}
@@ -72,6 +73,9 @@ func (service *Service) updateActiveBoardProfile(key, mode, expectedRevision str
 			return &RPCError{Code: -32000, Message: "board profile changed; refresh controller.peripherals.get and retry"}
 		}
 		profile.Key, profile.Mode = key, mode
+		if exposeRawRelays != nil {
+			profile.ExposeRawRelays = *exposeRawRelays
+		}
 		config.BoardProfiles[current.BoardIdentity] = profile
 		return nil
 	})
@@ -79,7 +83,7 @@ func (service *Service) updateActiveBoardProfile(key, mode, expectedRevision str
 		return boardProfileDescriptor{}, err
 	}
 	updated, _ := service.activeBoardProfile()
-	service.publishPeripheralChange(updated, []string{"board_profile"}, []string{"key", "mode"})
+	service.publishPeripheralChange(updated, []string{"board_profile"}, []string{"key", "mode", "expose_raw_relays"})
 	return updated, nil
 }
 

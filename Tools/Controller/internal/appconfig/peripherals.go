@@ -164,10 +164,10 @@ func ControlDescriptors(names map[string]string) []ControlDescriptor {
 	return controls
 }
 
-// ProfileDescriptors resolves the active board wiring without pretending that
-// R1..R4 are simultaneously independent relays and cinema-seat actuators.
-// Existing catalog helpers remain unchanged for older local surfaces.
-func ProfileDescriptors(mode string, legacyNames map[string]string, presentation map[string]PeripheralPresentation) ([]PeripheralDescriptor, []ControlDescriptor) {
+// ProfileDescriptors resolves the active board wiring. Cinema profiles expose
+// semantic seat controls and may also expose their underlying R1..R4 channels
+// when an operator explicitly enables diagnostic/raw control for that board.
+func ProfileDescriptors(mode string, exposeRawRelays bool, legacyNames map[string]string, presentation map[string]PeripheralPresentation) ([]PeripheralDescriptor, []ControlDescriptor) {
 	mode = NormalizeBoardMode(mode)
 	peripherals := make([]PeripheralDescriptor, 0, len(corePeripheralDescriptors))
 	controls := make([]ControlDescriptor, 0, 21)
@@ -218,12 +218,12 @@ func ProfileDescriptors(mode string, legacyNames map[string]string, presentation
 				case BoardModeOrdinaryRelays:
 					descriptor.Role, descriptor.Control = "user-output", "relay"
 				case BoardModeCinemaSeatMotion:
-					descriptor.Control = "seat-internal"
+					descriptor.Role, descriptor.Control = "seat-output", "seat-internal"
 				default:
 					descriptor.Control = "unavailable"
 				}
 			}
-			if descriptor.Index > 4 || mode == BoardModeOrdinaryRelays {
+			if descriptor.Index > 4 || mode == BoardModeOrdinaryRelays || mode == BoardModeCinemaSeatMotion && exposeRawRelays {
 				actions := []ActionDescriptor{
 					{ID: fmt.Sprintf("relay.%d.on", descriptor.Index), Verb: "on", Name: "On"},
 					{ID: fmt.Sprintf("relay.%d.off", descriptor.Index), Verb: "off", Name: "Off"},

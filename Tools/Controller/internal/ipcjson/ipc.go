@@ -701,12 +701,13 @@ func (service *Service) dispatch(
 		var params struct {
 			Key              string `json:"key"`
 			Mode             string `json:"mode"`
+			ExposeRawRelays  *bool  `json:"expose_raw_relays,omitempty"`
 			ExpectedRevision string `json:"expected_revision,omitempty"`
 		}
 		if err = decodeStrictParams(request.Params, &params); err != nil {
 			err = &RPCError{Code: -32602, Message: err.Error()}
 		} else {
-			result, err = service.updateActiveBoardProfile(params.Key, params.Mode, params.ExpectedRevision)
+			result, err = service.updateActiveBoardProfile(params.Key, params.Mode, params.ExposeRawRelays, params.ExpectedRevision)
 		}
 	case "controller.peripheral.presentation.update":
 		var params struct {
@@ -1750,7 +1751,7 @@ func (service *Service) peripheralSettings() peripheralSettings {
 	config := service.hostConfig()
 	names := config.UI.PeripheralNames
 	profileDescriptor, profile := service.activeBoardProfile()
-	peripherals, controls := appconfig.ProfileDescriptors(profileDescriptor.Mode, names, profile.Presentation)
+	peripherals, controls := appconfig.ProfileDescriptors(profileDescriptor.Mode, profile.ExposeRawRelays, names, profile.Presentation)
 	stripEffects := service.Client.Snapshot().StripEffects
 	return peripheralSettings{
 		Names: clonePeripheralNames(names), BoardProfile: profileDescriptor,
