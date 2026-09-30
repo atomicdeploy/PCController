@@ -20,9 +20,10 @@ const (
 // BoardProfile is host-owned because the same controller PCB can be wired for
 // unrelated installations. It never changes firmware EEPROM implicitly.
 type BoardProfile struct {
-	Key          string                            `json:"key"`
-	Mode         string                            `json:"mode"`
-	Presentation map[string]PeripheralPresentation `json:"presentation,omitempty"`
+	Key             string                            `json:"key"`
+	Mode            string                            `json:"mode"`
+	ExposeRawRelays bool                              `json:"expose_raw_relays,omitempty"`
+	Presentation    map[string]PeripheralPresentation `json:"presentation,omitempty"`
 }
 
 // PeripheralPresentation is mutable operator vocabulary attached to a stable

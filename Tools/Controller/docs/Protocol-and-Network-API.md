@@ -653,7 +653,7 @@ request error.
 | `controller.peripherals.get` | `{}` | active board profile, resolved peripheral registry, and only the controls/actions valid for that configured wiring; requires `read` |
 | `controller.peripherals.set` | `peripheral_names` object | atomically replace custom host names and return normalized names plus both registries; requires `host_configuration` |
 | `controller.board_profile.get` | `{}` | physical identity source/stability, attachment/configuration truth, wiring mode, and opaque revision; requires `read` |
-| `controller.board_profile.update` | `key`, `mode`, optional `expected_revision` | bind the attached board identity to `ordinary-relays` or `cinema-seat-motion`; requires `host_configuration` |
+| `controller.board_profile.update` | `key`, `mode`, optional `expose_raw_relays`, optional `expected_revision` | bind the attached board identity to `ordinary-relays` or `cinema-seat-motion`; cinema profiles may advertise both semantic seat controls and raw R1-R4 controls; requires `host_configuration` |
 | `controller.peripheral.presentation.update` | `key`, one or more of `name`/`icon`/`group`, optional `expected_revision` | update one advertised descriptor and return it with the new profile revision; requires `host_configuration` |
 | `controller.action.invoke` | `action_id` | invoke one action actually advertised by the attached profile and return after the board ACK; requires `board_commands` |
 | `controller.pwm.values` | `{}` | authoritative board availability, selected channel, and all sixteen logical values; requires `read` |

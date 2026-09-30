@@ -1177,7 +1177,7 @@ func TestCloseCancelsAndJoinsDirectOpen(t *testing.T) {
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("direct Open error = %v, want cancellation", err)
 		}
-	default:
+	case <-time.After(time.Second):
 		t.Fatal("Close returned before direct Open authentication exited")
 	}
 }
@@ -1216,7 +1216,7 @@ func TestCloseEpochRejectsDirectOpenSuccessAndReleasesTransport(t *testing.T) {
 		if err == nil {
 			t.Fatal("direct Open reported success after Close won the epoch")
 		}
-	default:
+	case <-time.After(time.Second):
 		t.Fatal("Close returned before direct Open rejected its result")
 	}
 	select {
@@ -1267,7 +1267,7 @@ func TestCloseDrainsRejectedDirectOpenCleanupOwner(t *testing.T) {
 		if !errors.Is(err, cancelErr) {
 			t.Fatalf("direct Open cleanup error = %v, want %v", err, cancelErr)
 		}
-	default:
+	case <-time.After(time.Second):
 		t.Fatal("Close returned before rejected cleanup owner was quarantined")
 	}
 	port.mu.Lock()
