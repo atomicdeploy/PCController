@@ -236,7 +236,7 @@ func TestDisconnectedHeaderReconnectsByKeyboardAndMouseWithBoundedRetry(t *testi
 
 	keyboard := newModel()
 	rendered := ansi.Strip(keyboard.header(keyboard.snapshot()))
-	for _, expected := range []string{"DISCONNECTED", "Enter or click to start a bounded connection attempt"} {
+	for _, expected := range []string{"DISCONNECTED", "Enter or click to connect"} {
 		if !strings.Contains(rendered, expected) {
 			t.Fatalf("disconnected header missing %q:\n%s", expected, rendered)
 		}
@@ -283,9 +283,14 @@ func TestConnectionHeaderDistinguishesAttemptFromBackoff(t *testing.T) {
 	snapshot.ConnectionCandidate = ports.Info{Name: "COM3", FriendlyName: "USB-SERIAL CH340"}
 
 	attempting := ansi.Strip(model.header(snapshot))
-	for _, expected := range []string{"CONNECTING", "USB-SERIAL CH340", "attempt 7", "elapsed"} {
+	for _, expected := range []string{"CONNECTING", "elapsed"} {
 		if !strings.Contains(attempting, expected) {
 			t.Fatalf("attempt header missing %q:\n%s", expected, attempting)
+		}
+	}
+	for _, duplicate := range []string{"USB-SERIAL CH340", "attempt 7"} {
+		if strings.Contains(attempting, duplicate) {
+			t.Fatalf("attempt header repeated diagnostic detail %q:\n%s", duplicate, attempting)
 		}
 	}
 
@@ -293,9 +298,47 @@ func TestConnectionHeaderDistinguishesAttemptFromBackoff(t *testing.T) {
 	snapshot.ConnectionNextRetry = now.Add(8 * time.Second)
 	snapshot.ConnectionReason = "application HELLO timed out"
 	waiting := ansi.Strip(model.header(snapshot))
-	for _, expected := range []string{"RETRY SCHEDULED", "next attempt in", "HELLO timed out"} {
+	for _, expected := range []string{"RETRY SCHEDULED", "retry in"} {
 		if !strings.Contains(waiting, expected) {
 			t.Fatalf("retry header missing %q:\n%s", expected, waiting)
+		}
+	}
+	for _, duplicate := range []string{"USB-SERIAL CH340", "attempt 7", "HELLO timed out"} {
+		if strings.Contains(waiting, duplicate) {
+			t.Fatalf("retry header repeated dashboard detail %q:\n%s", duplicate, waiting)
+		}
+	}
+}
+
+func TestDisconnectedDashboardUsesOneConciseConnectionCard(t *testing.T) {
+	model := New(control.New(control.Options{}), shell.New(10))
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 160, Height: 38})
+	model = updated.(Model)
+	snapshot := model.snapshot()
+	snapshot.ConnectionPhase = "waiting_retry"
+	snapshot.ConnectionAttempt = 29
+	snapshot.ConnectionNextRetry = time.Now().Add(1100 * time.Millisecond)
+	snapshot.ConnectionReason = "no serial ports match the configured filters"
+	snapshot.ConnectionCandidate = ports.Info{
+		Name: "COM3", FriendlyName: "USB-SERIAL CH340", VID: "1A86", PID: "7523",
+		InstanceID: `USB\VID_1A86&PID_7523\5&1330824a&0&2`,
+	}
+
+	dashboard := ansi.Strip(model.dashboardPage(snapshot))
+	for _, expected := range []string{
+		"BOARD CONNECTION", "RETRY SCHEDULED", "COM3 · USB-SERIAL CH340",
+		"Retry", "Reason", "no serial ports match the configured filters",
+	} {
+		if !strings.Contains(dashboard, expected) {
+			t.Fatalf("disconnected dashboard missing %q:\n%s", expected, dashboard)
+		}
+	}
+	for _, duplicate := range []string{
+		"RECOVERY", "Last result", "Last failure", "Automatic retry", "Attempt",
+		"VID:1A86", "PID:7523", "INSTANCE:", "No port owned",
+	} {
+		if strings.Contains(dashboard, duplicate) {
+			t.Fatalf("disconnected dashboard retained duplicate detail %q:\n%s", duplicate, dashboard)
 		}
 	}
 }
