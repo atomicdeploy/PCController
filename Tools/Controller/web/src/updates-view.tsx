@@ -23,6 +23,7 @@ import {
   Usb,
 } from 'lucide-react'
 import { Button, Card, DataRow, EmptyState, SectionTitle, StatusBadge, TextField } from './components'
+import { formatByteProgress, formatBytes } from './byte-format'
 import { formatClock } from './i18n'
 import { ReleaseDiscovery } from './release-discovery'
 import type { SharedViewProps } from './views'
@@ -54,13 +55,6 @@ import {
 } from './updates-api'
 
 const artifactKinds: ArtifactKind[] = ['firmware', 'eeprom', 'flash-backup', 'host-executable']
-
-function formatBytes(value: number | undefined): string {
-  if (!Number.isFinite(value) || !value) return '0 B'
-  const units = ['B', 'KiB', 'MiB', 'GiB']
-  const exponent = Math.min(units.length - 1, Math.floor(Math.log(value) / Math.log(1024)))
-  return `${(value / 1024 ** exponent).toFixed(exponent === 0 ? 0 : value >= 10 * 1024 ** exponent ? 1 : 2)} ${units[exponent]}`
-}
 
 function shortHash(value: string | undefined): string {
   return value ? value.slice(0, 12).toUpperCase() : '—'
@@ -115,6 +109,9 @@ export interface PeerUpdatePresentation {
   state: string
   operationID: string
   progressPercent: number
+  progressKnown: boolean
+  bytesDone?: number
+  bytesTotal?: number
   detail: string
   artifactSHA256: string
   idempotencyKey: string
@@ -137,6 +134,9 @@ export function peerUpdateStatusFromEvent(
     state,
     operationID: event.metadata?.remote_operation_id?.trim() || event.metadata?.operation_id?.trim() || '—',
     progressPercent: Number.isFinite(progress) ? Math.min(100, Math.max(0, progress)) : 0,
+    progressKnown: event.metadata?.progress_known === 'true' && Number.isFinite(progress),
+    bytesDone: event.metadata?.bytes_done ? Number(event.metadata.bytes_done) : undefined,
+    bytesTotal: event.metadata?.bytes_total ? Number(event.metadata.bytes_total) : undefined,
     detail: event.text,
     artifactSHA256: event.metadata?.sha256?.trim().toLowerCase() ?? '',
     idempotencyKey: event.metadata?.idempotency_key?.trim() ?? '',
@@ -222,6 +222,9 @@ export function UpdatesView({ appTitle, snapshot, events, locale, openDialog }: 
     state: peerStatus.stage,
     operationID: peerStatus.operation.id,
     progressPercent: peerStatus.operation.progress_percent,
+    progressKnown: peerStatus.operation.progress_known === true,
+    bytesDone: peerStatus.operation.bytes_done,
+    bytesTotal: peerStatus.operation.bytes_total,
     detail: peerStatus.operation.detail ?? '',
     artifactSHA256: peerStatus.artifact.sha256,
     idempotencyKey: peerStatus.operation.idempotency_key ?? '',
@@ -268,13 +271,40 @@ export function UpdatesView({ appTitle, snapshot, events, locale, openDialog }: 
   const stageUpload = async () => {
     if (!uploadFile || !uploadDigest) return
     setBusy('upload')
+    const operationID = `browser-upload-${uploadDigest.slice(0, 16)}`
+    const startedAt = new Date().toISOString()
     try {
-      const result = await uploadArtifact(uploadFile, uploadKind, uploadDigest)
+      const result = await uploadArtifact(uploadFile, uploadKind, uploadDigest, undefined, (done, total) => {
+        const progress = total > 0 ? Math.max(0, Math.min(100, Math.round(done * 100 / total))) : 0
+        const value: UpdateStatus = {
+          id: operationID, kind: 'artifact-upload', state: 'uploading', stage: 'uploading',
+          progress_known: total > 0, progress_percent: progress,
+          bytes_done: done, bytes_total: total,
+          detail: copy('Sending selected artifact to this host', 'ارسال فایل انتخاب‌شده به این میزبان'),
+          started_at: startedAt, updated_at: new Date().toISOString(),
+        }
+        setStatus(value)
+        window.dispatchEvent(new CustomEvent('pccontroller:update-transfer-progress', { detail: value }))
+      })
       const staged = operationFrom(result, setStatus)
+      window.dispatchEvent(new CustomEvent('pccontroller:update-transfer-progress', { detail: {
+        id: operationID, kind: 'artifact-upload', state: 'completed', stage: 'completed',
+        progress_known: true, progress_percent: 100, bytes_done: uploadFile.size, bytes_total: uploadFile.size,
+        detail: copy('Artifact upload completed and was verified', 'ارسال فایل کامل و تأیید شد'),
+        started_at: startedAt, updated_at: new Date().toISOString(),
+      } satisfies UpdateStatus }))
       setNotice(copy(`${uploadFile.name} was verified and staged. Nothing has been programmed.`, `${uploadFile.name} تأیید و آماده شد. هیچ چیزی پروگرام نشده است.`))
       await load()
       if (staged) setSelectedSHA(staged.sha256)
-    } catch (cause) { setNotice(cause instanceof Error ? cause.message : String(cause)) }
+    } catch (cause) {
+      const detail = cause instanceof Error ? cause.message : String(cause)
+      window.dispatchEvent(new CustomEvent('pccontroller:update-transfer-progress', { detail: {
+        id: operationID, kind: 'artifact-upload', state: 'failed', stage: 'uploading',
+        progress_known: false, progress_percent: 0, bytes_done: 0, bytes_total: uploadFile.size,
+        detail, started_at: startedAt, updated_at: new Date().toISOString(),
+      } satisfies UpdateStatus }))
+      setNotice(detail)
+    }
     finally { setBusy('') }
   }
 
@@ -379,6 +409,27 @@ export function UpdatesView({ appTitle, snapshot, events, locale, openDialog }: 
     })
   }
 
+  const downloadToBrowser = async (artifact: ArtifactDescriptor) => {
+    const operationID = `browser-download-${artifact.sha256.slice(0, 16)}`
+    const startedAt = new Date().toISOString()
+    const publish = (state: UpdateStatus['state'], done: number, total: number, detail: string) => {
+      const progress = total > 0 ? Math.max(0, Math.min(100, Math.round(done * 100 / total))) : 0
+      window.dispatchEvent(new CustomEvent('pccontroller:update-transfer-progress', { detail: {
+        id: operationID, kind: 'artifact-fetch', state, stage: state === 'completed' ? 'completed' : 'downloading',
+        progress_known: total > 0, progress_percent: progress, bytes_done: done, bytes_total: total,
+        detail, started_at: startedAt, updated_at: new Date().toISOString(),
+      } satisfies UpdateStatus }))
+    }
+    try {
+      await downloadArtifact(artifact, undefined, (done, total) => publish('downloading', done, total, copy('Downloading verified artifact to this browser', 'دریافت فایل تأییدشده در این مرورگر')))
+      publish('completed', artifact.bytes, artifact.bytes, copy('Artifact download completed', 'دریافت فایل کامل شد'))
+    } catch (cause) {
+      const detail = cause instanceof Error ? cause.message : String(cause)
+      publish('failed', 0, artifact.bytes, detail)
+      setNotice(detail)
+    }
+  }
+
   if (serviceError) return (
     <>
       <SectionTitle eyebrow={copy('Verified host updates', 'به‌روزرسانی تأییدشدهٔ میزبان')} title={copy('Firmware & updates', 'میان‌افزار و به‌روزرسانی')} detail={copy('Remote update is performed by the primary host over the board programming link; it is not MCU-native OTA.', 'به‌روزرسانی راه‌دور توسط میزبان اصلی و از مسیر پروگرام برد انجام می‌شود؛ این فرایند OTA بومی ریزکنترل‌گر نیست.')} />
@@ -441,7 +492,7 @@ export function UpdatesView({ appTitle, snapshot, events, locale, openDialog }: 
 
         <Card icon={Server} iconTone="accent" title={copy('Update a configured peer', 'به‌روزرسانی همتای معتبر')} eyebrow={copy('Bridge-native · verified · coordinated', 'پل بومی · تأییدشده · هماهنگ')} action={<StatusBadge tone={peers.some((peer) => peer.connected) ? 'good' : 'warn'}>{peers.filter((peer) => peer.connected).length} {copy('CONNECTED', 'متصل')}</StatusBadge>}>
           <p className="card-copy">{copy('Transfer the selected verified host executable over the configured bridge, perform the peer’s recoverable replacement, and wait for restart health plus an exact active-SHA acknowledgement. No SSH command or shared filesystem is used.', 'فایل اجرایی تأییدشدهٔ میزبان را از پل پیکربندی‌شده منتقل می‌کند، جایگزینی قابل‌بازیابی همتا را انجام می‌دهد و تا سلامت راه‌اندازی مجدد و تأیید دقیق SHA فعال منتظر می‌ماند. هیچ فرمان SSH یا فایل مشترکی استفاده نمی‌شود.')}</p>
-          {displayedPeerStatus && <div className="data-list"><DataRow label={copy(`Shared peer progress · ${displayedPeerStatus.peer}`, `پیشرفت مشترک همتا · ${displayedPeerStatus.peer}`)} value={displayedPeerStatus.state === 'completed' ? copy('Restarted and active SHA verified', 'راه‌اندازی مجدد و SHA فعال تأیید شد') : displayedPeerStatus.state === 'remote-staged' ? copy('Remote staged', 'آماده‌شده در راه‌دور') : displayedPeerStatus.state === 'remote-queued' ? copy('Remote queued', 'در صف راه‌دور') : displayedPeerStatus.state === 'outcome-uncertain' ? copy('Outcome uncertain — retry this update', 'نتیجه نامشخص است — همین به‌روزرسانی را دوباره امتحان کنید') : displayedPeerStatus.state === 'failed' ? copy('Peer attempt failed', 'تلاش همتا ناموفق بود') : `${displayedPeerStatus.state.replaceAll('-', ' ')} · ${Math.round(displayedPeerStatus.progressPercent)}%`} tone={displayedPeerStatus.state === 'completed' && displayedPeerStatus.terminalVerified ? 'good' : displayedPeerStatus.state === 'failed' ? 'bad' : 'warn'} /><DataRow label={copy('Peer operation', 'عملیات همتا')} value={displayedPeerStatus.operationID} mono /><DataRow label={copy('Terminal replacement', 'جایگزینی نهایی')} value={displayedPeerStatus.terminalVerified ? copy('Acknowledged · active SHA matches', 'تأیید شد · SHA فعال مطابقت دارد') : copy('Waiting for health, reconnect & active SHA', 'در انتظار سلامت، اتصال دوباره و SHA فعال')} tone={displayedPeerStatus.terminalVerified ? 'good' : 'warn'} /></div>}
+          {displayedPeerStatus && <><div className="data-list"><DataRow label={copy(`Shared peer progress · ${displayedPeerStatus.peer}`, `پیشرفت مشترک همتا · ${displayedPeerStatus.peer}`)} value={displayedPeerStatus.state === 'completed' ? copy('Restarted and active SHA verified', 'راه‌اندازی مجدد و SHA فعال تأیید شد') : displayedPeerStatus.state === 'remote-staged' ? copy('Remote staged', 'آماده‌شده در راه‌دور') : displayedPeerStatus.state === 'remote-queued' ? copy('Remote queued', 'در صف راه‌دور') : displayedPeerStatus.state === 'outcome-uncertain' ? copy('Outcome uncertain — retry this update', 'نتیجه نامشخص است — همین به‌روزرسانی را دوباره امتحان کنید') : displayedPeerStatus.state === 'failed' ? copy('Peer attempt failed', 'تلاش همتا ناموفق بود') : displayedPeerStatus.progressKnown ? `${displayedPeerStatus.state.replaceAll('-', ' ')} · ${Math.round(displayedPeerStatus.progressPercent)}%` : displayedPeerStatus.state.replaceAll('-', ' ')} tone={displayedPeerStatus.state === 'completed' && displayedPeerStatus.terminalVerified ? 'good' : displayedPeerStatus.state === 'failed' ? 'bad' : 'warn'} /><DataRow label={copy('Transferred', 'انتقال داده')} value={displayedPeerStatus.bytesTotal ? formatByteProgress(displayedPeerStatus.bytesDone ?? 0, displayedPeerStatus.bytesTotal) : copy('Not measured for this stage', 'برای این مرحله اندازه‌گیری نشده')} mono /><DataRow label={copy('Peer operation', 'عملیات همتا')} value={displayedPeerStatus.operationID} mono /><DataRow label={copy('Terminal replacement', 'جایگزینی نهایی')} value={displayedPeerStatus.terminalVerified ? copy('Acknowledged · active SHA matches', 'تأیید شد · SHA فعال مطابقت دارد') : copy('Waiting for health, reconnect & active SHA', 'در انتظار سلامت، اتصال دوباره و SHA فعال')} tone={displayedPeerStatus.terminalVerified ? 'good' : 'warn'} /></div><div className={`update-progress${displayedPeerStatus.progressKnown ? '' : ' is-indeterminate'}`} role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={displayedPeerStatus.progressKnown ? displayedPeerStatus.progressPercent : undefined} aria-valuetext={displayedPeerStatus.bytesTotal ? formatByteProgress(displayedPeerStatus.bytesDone ?? 0, displayedPeerStatus.bytesTotal) : displayedPeerStatus.detail}><i style={displayedPeerStatus.progressKnown ? { width: `${displayedPeerStatus.progressPercent}%` } : undefined} /></div></>}
           {peers.length ? <div className="data-list">{peers.map((peer) => <div key={peer.name}><DataRow label={peer.name} value={peer.connected ? copy('Connected', 'متصل') : peer.last_error || copy('Disconnected', 'قطع')} tone={peer.connected ? 'good' : 'bad'} /><div className="inline-actions"><Button icon={RotateCcw} tone="primary" disabled={!peer.connected || !peer.allow_commands || selected?.kind !== 'host-executable' || busy === 'peer-update'} busy={busy === 'peer-update'} onClick={() => selected && void confirmPeerUpdate(peer, selected)}>{copy('Review peer host update', 'بازبینی به‌روزرسانی میزبان همتا')}</Button></div></div>)}</div> : <EmptyState icon={Server} title={copy('No bridge peers configured', 'هیچ همتای پلی پیکربندی نشده')} detail={copy('Add a peer in integration settings; connected peers appear here immediately.', 'یک همتای معتبر را در تنظیمات یکپارچه‌سازی بیفزایید؛ همتایان متصل فوراً اینجا ظاهر می‌شوند.')} />}
         </Card>
 
@@ -470,7 +521,7 @@ export function UpdatesView({ appTitle, snapshot, events, locale, openDialog }: 
               const active = selectedSHA === artifact.sha256
               const provenance = artifact.metadata
               const providerDetail = provenance?.repository || (provenance?.workflow_run_id ? `${copy('run', 'اجرا')} ${provenance.workflow_run_id}` : provenance?.release_id ? `${copy('release', 'انتشار')} ${provenance.release_id}` : '')
-              return <tr key={`${artifact.kind}-${artifact.sha256}`} className={active ? 'is-selected' : ''}><td><input type="radio" name="artifact" checked={active} aria-label={copy(`Select ${artifact.name}`, `انتخاب ${artifact.name}`)} onChange={() => setSelectedSHA(artifact.sha256)} /></td><td><strong>{artifact.name}</strong><span>{artifactLabel(artifact.kind, locale)}{artifact.embedded ? copy(' · embedded', ' · تعبیه‌شده') : ''}{artifact.current ? copy(' · current', ' · فعلی') : ''}</span></td><td><strong>{provenance?.provider || artifact.source}</strong>{providerDetail && <span>{providerDetail}</span>}</td><td className="mono"><strong>{artifact.build_hash || shortHash(artifact.sha256)}</strong><span>{artifact.build_timestamp || artifact.sha256}</span></td><td className="mono">{formatBytes(artifact.bytes)}</td><td>{formatClock(locale, artifact.created_at)}</td><td><Button compact icon={Download} onClick={() => void downloadArtifact(artifact).catch((cause) => setNotice(cause instanceof Error ? cause.message : String(cause)))}>{copy('Download', 'دانلود')}</Button></td></tr>
+              return <tr key={`${artifact.kind}-${artifact.sha256}`} className={active ? 'is-selected' : ''}><td><input type="radio" name="artifact" checked={active} aria-label={copy(`Select ${artifact.name}`, `انتخاب ${artifact.name}`)} onChange={() => setSelectedSHA(artifact.sha256)} /></td><td><strong>{artifact.name}</strong><span>{artifactLabel(artifact.kind, locale)}{artifact.embedded ? copy(' · embedded', ' · تعبیه‌شده') : ''}{artifact.current ? copy(' · current', ' · فعلی') : ''}</span></td><td><strong>{provenance?.provider || artifact.source}</strong>{providerDetail && <span>{providerDetail}</span>}</td><td className="mono"><strong>{artifact.build_hash || shortHash(artifact.sha256)}</strong><span>{artifact.build_timestamp || artifact.sha256}</span></td><td className="mono">{formatBytes(artifact.bytes)}</td><td>{formatClock(locale, artifact.created_at)}</td><td><Button compact icon={Download} onClick={() => void downloadToBrowser(artifact)}>{copy('Download', 'دانلود')}</Button></td></tr>
             })}</tbody></table></div>
           ) : <EmptyState icon={FileArchive} title={copy('No verified artifacts yet', 'هنوز خروجی تأییدشده‌ای وجود ندارد')} detail={copy('Stage a local or remote image, or capture the connected board.', 'یک تصویر محلی یا راه‌دور آماده کنید یا از برد متصل نسخه بگیرید.')} />}
           {selected && <div className="artifact-selection"><div><span>{copy('SELECTED', 'انتخاب‌شده')} / {artifactLabel(selected.kind, locale).toUpperCase()}</span><strong>{selected.name}</strong><code>{selected.sha256}</code></div><StatusBadge tone={comparison === 'same' ? 'good' : comparison === 'newer' ? 'info' : comparison === 'older' ? 'warn' : 'neutral'}>{comparison === 'same' ? copy('SAME', 'یکسان') : comparison === 'newer' ? copy('NEWER', 'جدیدتر') : comparison === 'older' ? copy('OLDER', 'قدیمی‌تر') : copy('UNKNOWN', 'نامشخص')}</StatusBadge>{artifactUpdateAvailable(snapshot.connected, selected.kind) && <Button icon={selected.kind === 'host-executable' ? RotateCcw : selected.kind === 'flash-backup' ? ArchiveRestore : Gauge} tone="primary" disabled={busy === 'update'} onClick={() => confirmUpdate(selected)}>{selected.kind === 'host-executable' ? copy('Review host self-update', 'بازبینی به‌روزرسانی میزبان') : selected.kind === 'eeprom' ? copy('Review EEPROM restore', 'بازبینی بازیابی EEPROM') : selected.kind === 'flash-backup' ? copy('Review flash restore', 'بازبینی بازیابی فلش') : copy('Review board programming', 'بازبینی پروگرام برد')}</Button>}</div>}

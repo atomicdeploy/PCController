@@ -300,7 +300,9 @@ func (service *Service) StartFetch(request FetchRequest) (OperationResult, error
 		service.updateBytes(status.ID, 0, request.Bytes)
 	}
 	go service.run(status.ID, func(ctx context.Context, progress ProgressFunc) (string, error) {
-		descriptor, err := service.downloader.Fetch(ctx, service.store, request, progress)
+		descriptor, err := service.downloader.Fetch(ctx, service.store, request, progress, func(done, total int64) {
+			service.updateBytes(status.ID, done, total)
+		})
 		if err != nil {
 			return "", err
 		}

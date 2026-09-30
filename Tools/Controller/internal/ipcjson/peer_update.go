@@ -62,7 +62,7 @@ func (service *Service) updatePeerHost(ctx context.Context, request peerHostUpda
 	}
 	defer file.Close()
 	operationID := peerHostOperationID(peer, descriptor.SHA256, idempotencyKey)
-	service.emitPeerUpdate(operationID, peer, idempotencyKey, descriptor, "queued", 0, "peer host update queued")
+	service.emitPeerUpdate(operationID, peer, idempotencyKey, descriptor, "queued", -1, "peer host update queued", map[string]string{"bytes_done": "0"})
 	defer func() {
 		if err != nil {
 			state := "failed"
@@ -77,7 +77,7 @@ func (service *Service) updatePeerHost(ctx context.Context, request peerHostUpda
 					"terminal_verified":          "false",
 				}
 			}
-			service.emitPeerUpdate(operationID, peer, idempotencyKey, descriptor, state, 0, detail, metadata)
+			service.emitPeerUpdate(operationID, peer, idempotencyKey, descriptor, state, -1, detail, metadata)
 		}
 	}()
 
@@ -135,10 +135,10 @@ func (service *Service) updatePeerHost(ctx context.Context, request peerHostUpda
 			)
 		}
 		offset = expectedOffset
-		percent := int(offset * 80 / descriptor.Bytes)
+		percent := int(offset * 100 / descriptor.Bytes)
 		if percent/10 != lastPercent/10 {
 			lastPercent = percent
-			service.emitPeerUpdate(operationID, peer, idempotencyKey, descriptor, "transferring", percent, "transferring verified host artifact to peer")
+			service.emitPeerUpdate(operationID, peer, idempotencyKey, descriptor, "transferring", percent, "transferring verified host artifact to peer", map[string]string{"bytes_done": strconv.FormatInt(offset, 10)})
 		}
 	}
 	var uploaded artifacts.OperationResult
@@ -149,7 +149,7 @@ func (service *Service) updatePeerHost(ctx context.Context, request peerHostUpda
 	if err = validatePeerUploadResult(uploaded, descriptor); err != nil {
 		return result, err
 	}
-	service.emitPeerUpdate(operationID, peer, idempotencyKey, descriptor, "artifact-verified", 85, "peer verified the transferred host artifact")
+	service.emitPeerUpdate(operationID, peer, idempotencyKey, descriptor, "artifact-verified", 100, "peer verified the transferred host artifact", map[string]string{"bytes_done": strconv.FormatInt(descriptor.Bytes, 10)})
 	var update artifacts.OperationResult
 	if err = service.callPeer(ctx, peer, "controller.update.host", artifacts.UpdateRequest{
 		ArtifactSHA256: descriptor.SHA256, Authorized: true,
@@ -162,7 +162,7 @@ func (service *Service) updatePeerHost(ctx context.Context, request peerHostUpda
 		return result, stageErr
 	}
 	service.emitPeerUpdate(
-		operationID, peer, idempotencyKey, descriptor, stage, 90,
+		operationID, peer, idempotencyKey, descriptor, stage, -1,
 		"peer coordinator accepted remote staging; waiting for restart and active SHA acknowledgement",
 		map[string]string{
 			"remote_operation_id": update.Operation.ID,
@@ -208,7 +208,7 @@ func (service *Service) verifyPeerHostReplacement(
 				if !healthChecking && peerHostStableVerificationWindow > 0 {
 					healthChecking = true
 					service.emitPeerUpdate(
-						operationID, peer, idempotencyKey, descriptor, "health-checking", 98,
+						operationID, peer, idempotencyKey, descriptor, "health-checking", -1,
 						"peer candidate is running; waiting for the self-update health commit",
 						map[string]string{
 							"remote_operation_id": remoteOperationID,
@@ -239,7 +239,7 @@ func (service *Service) verifyPeerHostReplacement(
 			if !reconnecting {
 				reconnecting = true
 				service.emitPeerUpdate(
-					operationID, peer, idempotencyKey, descriptor, "reconnecting", 95,
+					operationID, peer, idempotencyKey, descriptor, "reconnecting", -1,
 					"peer process is restarting; waiting for the bridge and active SHA acknowledgement",
 					map[string]string{
 						"remote_operation_id": remoteOperationID,
@@ -368,13 +368,24 @@ func (service *Service) emitPeerUpdate(
 	if service.Client == nil {
 		return
 	}
+	known := percent >= 0
+	if percent < 0 {
+		percent = 0
+	}
+	if percent > 100 {
+		percent = 100
+	}
 	metadata := map[string]string{
 		"operation_id": operationID, "peer": peer, "kind": "host",
 		"idempotency_key": idempotencyKey,
 		"state":           state, "stage": state,
-		"progress_known": "true", "progress_percent": strconv.Itoa(percent),
+		"progress_known": strconv.FormatBool(known), "progress_percent": strconv.Itoa(percent),
 		"sha256": descriptor.SHA256, "bytes_total": strconv.FormatInt(descriptor.Bytes, 10),
 		"updated_at": time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	switch state {
+	case "artifact-verified", "remote-queued", "remote-staged", "reconnecting", "health-checking", "completed":
+		metadata["bytes_done"] = strconv.FormatInt(descriptor.Bytes, 10)
 	}
 	if len(extra) != 0 {
 		for key, value := range extra[0] {

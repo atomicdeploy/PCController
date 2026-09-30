@@ -857,7 +857,7 @@ export function localDeviceReconnectAvailable(snapshot: Pick<LocalDeviceSnapshot
 
 export function LocalDeviceView({ locale, t }: SharedViewProps) {
   const copy = (english: string, persian: string) => locale === 'fa' ? persian : english
-  const [snapshot, setSnapshot] = useState<LocalDeviceSnapshot>({ power: 'UNKNOWN', phase: 'idle' })
+  const [snapshot, setSnapshot] = useState<LocalDeviceSnapshot>({ power: 'unknown', phase: 'idle' })
   const [busy, setBusy] = useState('')
   const [message, setMessage] = useState('')
   const [inspection, setInspection] = useState<unknown>(null)
@@ -899,12 +899,13 @@ export function LocalDeviceView({ locale, t }: SharedViewProps) {
     finally { setBusy('') }
   }
 
-  const powered = snapshot.power === 'ON'
+  const normalizedPower = snapshot.power?.toUpperCase()
+  const powered = normalizedPower === 'ON'
   const controlsAvailable = localDeviceControlsAvailable(snapshot)
   const reconnectAvailable = localDeviceReconnectAvailable(snapshot)
   const unavailableTitle = snapshot.configured === false
     ? (locale === 'fa' ? 'یکپارچه‌سازی وسیله غیرفعال است' : 'Local device integration is disabled')
-    : snapshot.websocket_online
+    : snapshot.events_online
       ? (locale === 'fa' ? 'مسیر فرمان HTTP در دسترس نیست' : 'HTTP command transport is unavailable')
       : snapshot.configured
         ? (locale === 'fa' ? 'وسیلهٔ محلی در دسترس نیست' : 'Local companion is unreachable')
@@ -921,13 +922,13 @@ export function LocalDeviceView({ locale, t }: SharedViewProps) {
   ]
   return (
     <>
-      <SectionTitle eyebrow={`${copy('Local companion', 'وسیلهٔ محلی')} · ${snapshot.phase || 'idle'}`} title={t('device')} detail={snapshot.base_url || copy('Typed local-network companion through the primary host', 'وسیلهٔ شبکهٔ محلی با قرارداد مشخص، از طریق میزبان اصلی')} action={<StatusBadge tone={snapshot.websocket_online ? 'good' : snapshot.http_reachable ? 'warn' : 'bad'} pulse={snapshot.phase === 'connecting'}>{snapshot.websocket_online ? copy('EVENT STREAM', 'جریان رویداد') : snapshot.http_reachable ? 'HTTP' : t('offline')}</StatusBadge>} />
+      <SectionTitle eyebrow={`${copy('Local companion', 'وسیلهٔ محلی')} · ${snapshot.phase || 'idle'}`} title={snapshot.name || t('device')} detail={snapshot.base_url || copy('Typed local-network companion through the primary host', 'وسیلهٔ شبکهٔ محلی با قرارداد مشخص، از طریق میزبان اصلی')} action={<StatusBadge tone={snapshot.events_online ? 'good' : snapshot.http_reachable ? 'warn' : 'bad'} pulse={snapshot.phase === 'connecting'}>{snapshot.events_online ? copy('EVENT STREAM', 'جریان رویداد') : snapshot.http_reachable ? 'HTTP' : t('offline')}</StatusBadge>} />
       <section className="device-layout">
         <Card
           icon={Cpu}
           iconTone={powered ? 'green' : 'amber'}
           title={copy('Local device', 'وسیلهٔ محلی')}
-          eyebrow={snapshot.websocket_online ? copy('Events connected', 'رویدادها متصل‌اند') : snapshot.http_reachable ? copy('HTTP reachable', 'HTTP در دسترس') : copy('Unavailable', 'دردسترس نیست')}
+          eyebrow={snapshot.events_online ? copy('Events connected', 'رویدادها متصل‌اند') : snapshot.http_reachable ? copy('HTTP reachable', 'HTTP در دسترس') : copy('Unavailable', 'دردسترس نیست')}
           className={`device-stage${powered ? ' is-on' : ''}`}
           menu={deviceMenu}
         >
@@ -935,13 +936,13 @@ export function LocalDeviceView({ locale, t }: SharedViewProps) {
             <div className="device-overview__mark"><Cpu size={38} /><span aria-hidden="true" /></div>
             <div className="device-overview__copy">
               <span>{snapshot.base_url || copy('Host-mediated local connection', 'اتصال محلی با میانجی‌گری میزبان')}</span>
-              <strong>{powered ? copy('Device is powered on', 'وسیله روشن است') : snapshot.power === 'OFF' ? copy('Device is powered off', 'وسیله خاموش است') : copy('Power state is unknown', 'وضعیت توان نامشخص است')}</strong>
+              <strong>{powered ? copy('Device is powered on', 'وسیله روشن است') : normalizedPower === 'OFF' ? copy('Device is powered off', 'وسیله خاموش است') : copy('Power state is unknown', 'وضعیت توان نامشخص است')}</strong>
               <small>{snapshot.last_event || snapshot.last_error || (snapshot.phase ? `${copy('Phase', 'مرحله')}: ${snapshot.phase}` : copy('No device event received', 'رویدادی از وسیله دریافت نشده است'))}</small>
             </div>
           </div>
           <div className="device-facts">
             <div><span>{t('status')}</span><strong>{snapshot.power ?? t('unknown')}</strong></div>
-            <div><span>{copy('Transport', 'رسانهٔ ارتباطی')}</span><strong>{snapshot.websocket_online ? copy('Events', 'رویدادها') : snapshot.http_reachable ? 'HTTP' : t('offline')}</strong></div>
+            <div><span>{copy('Transport', 'رسانهٔ ارتباطی')}</span><strong>{snapshot.events_online ? copy('Events', 'رویدادها') : snapshot.http_reachable ? 'HTTP' : t('offline')}</strong></div>
             <div><span>{copy('Updated', 'آخرین تغییر')}</span><strong>{snapshot.updated_at ? formatClock(locale, snapshot.updated_at) : '—'}</strong></div>
           </div>
           {controlsAvailable
@@ -979,8 +980,8 @@ export function LocalDeviceView({ locale, t }: SharedViewProps) {
             {inspection !== null && <pre className="diagnostic-output" dir="ltr">{JSON.stringify(inspection, null, 2)}</pre>}
           </Card>}
 
-          <Card icon={HeartPulse} iconTone={snapshot.websocket_online ? 'green' : 'amber'} title={copy('Connection health', 'سلامت اتصال')} eyebrow={snapshot.websocket_online ? copy('Event stream connected', 'جریان رویداد متصل است') : snapshot.http_reachable ? copy('HTTP reachable', 'HTTP در دسترس') : copy('Unavailable', 'دردسترس نیست')} action={<Button icon={RefreshCw} compact onClick={() => void load()}>{locale === 'fa' ? 'تازه‌سازی' : 'Refresh'}</Button>}>
-            <div className="data-list"><DataRow label={copy('Phase', 'مرحله')} value={snapshot.phase || 'idle'} /><DataRow label="HTTP" value={snapshot.http_reachable ? t('online') : t('offline')} tone={snapshot.http_reachable ? 'good' : 'bad'} /><DataRow label={copy('Event stream', 'جریان رویداد')} value={snapshot.websocket_online ? t('online') : t('offline')} tone={snapshot.websocket_online ? 'good' : 'warn'} /><DataRow label={copy('Last event', 'آخرین رویداد')} value={snapshot.last_event || '—'} /><DataRow label={copy('Capabilities', 'قابلیت‌ها')} value={snapshot.capabilities?.join(', ') || '—'} /></div>
+          <Card icon={HeartPulse} iconTone={snapshot.events_online ? 'green' : 'amber'} title={copy('Connection health', 'سلامت اتصال')} eyebrow={snapshot.events_online ? copy('Event stream connected', 'جریان رویداد متصل است') : snapshot.http_reachable ? copy('HTTP reachable', 'HTTP در دسترس') : copy('Unavailable', 'دردسترس نیست')} action={<Button icon={RefreshCw} compact onClick={() => void load()}>{locale === 'fa' ? 'تازه‌سازی' : 'Refresh'}</Button>}>
+            <div className="data-list"><DataRow label={copy('Phase', 'مرحله')} value={snapshot.phase || 'idle'} /><DataRow label="HTTP" value={snapshot.http_reachable ? t('online') : t('offline')} tone={snapshot.http_reachable ? 'good' : 'bad'} /><DataRow label={copy('Event stream', 'جریان رویداد')} value={snapshot.events_online ? t('online') : t('offline')} tone={snapshot.events_online ? 'good' : 'warn'} /><DataRow label={copy('Last event', 'آخرین رویداد')} value={snapshot.last_event || '—'} /><DataRow label={copy('Identity', 'هویت')} value={[snapshot.name, snapshot.model, snapshot.firmware].filter(Boolean).join(' · ') || '—'} /><DataRow label={copy('Device ID', 'شناسهٔ وسیله')} value={snapshot.device_id || '—'} mono /></div>
           </Card>
         </div>
       </section>

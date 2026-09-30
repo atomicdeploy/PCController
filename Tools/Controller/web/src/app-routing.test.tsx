@@ -11,6 +11,7 @@ import {
   pageFromHash,
   pageViewFor,
   shouldOpenSetup,
+	shouldResetPageScroll,
 	shouldNavigateToUpdates,
   snapshotAfterTransportLoss,
   transportFallbackPollInterval,
@@ -37,6 +38,11 @@ describe('web page routing', () => {
     expect(pageFromHash('')).toBe('dashboard')
     expect(canonicalPageHash('events')).toBe('#/events')
     expect(canonicalPageURL('events', '/control', '?demo=1')).toBe('/control?demo=1#/events')
+  })
+
+  it('resets scroll only when navigation changes the visible page', () => {
+    expect(shouldResetPageScroll('device', 'device')).toBe(false)
+    expect(shouldResetPageScroll('device', 'updates')).toBe(true)
   })
 })
 

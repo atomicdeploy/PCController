@@ -62,6 +62,55 @@ func TestPeerUploadRequiresOrderedChunksAndRevalidatesArtifact(t *testing.T) {
 	}
 }
 
+func TestPeerUploadPublishesTruthfulReceiverByteProgress(t *testing.T) {
+	store := newTestStore(t)
+	type observedEvent struct {
+		kind string
+		meta map[string]string
+	}
+	events := make([]observedEvent, 0)
+	service, err := NewService(Options{Store: store, Events: func(kind, _ string, metadata map[string]string) {
+		copy := make(map[string]string, len(metadata))
+		for key, value := range metadata {
+			copy[key] = value
+		}
+		events = append(events, observedEvent{kind: kind, meta: copy})
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+	data := []byte(validIntelHEX)
+	digest := sha256.Sum256(data)
+	begin, err := service.BeginPeerUpload(PeerUploadBeginRequest{
+		Kind: KindFirmware, Name: "peer.hex", SHA256: hex.EncodeToString(digest[:]), Bytes: int64(len(data)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.AppendPeerUpload(PeerUploadChunkRequest{TransferID: begin.TransferID, Data: data}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.FinishPeerUpload(PeerUploadFinishRequest{TransferID: begin.TransferID}); err != nil {
+		t.Fatal(err)
+	}
+	foundReceiving, foundCompleted := false, false
+	for _, event := range events {
+		if event.meta["operation_id"] != begin.TransferID || event.meta["kind"] != "peer-artifact-upload" {
+			continue
+		}
+		if event.kind == "update.receiving" && event.meta["bytes_done"] == event.meta["bytes_total"] && event.meta["progress_percent"] == "100" {
+			foundReceiving = true
+		}
+		if event.kind == "update.completed" && event.meta["bytes_done"] == event.meta["bytes_total"] {
+			foundCompleted = true
+		}
+	}
+	if !foundReceiving || !foundCompleted {
+		t.Fatalf("receiver progress missing: receiving=%t completed=%t events=%+v", foundReceiving, foundCompleted, events)
+	}
+}
+
 func TestPeerUploadAbortRemovesPartialFile(t *testing.T) {
 	store := newTestStore(t)
 	service, err := NewService(Options{Store: store})

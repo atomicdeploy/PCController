@@ -556,14 +556,19 @@ export interface CommandResult {
 
 export interface LocalDeviceSnapshot {
   configured?: boolean
-  power?: 'ON' | 'OFF' | 'UNKNOWN'
+  power?: 'ON' | 'OFF' | 'UNKNOWN' | 'on' | 'off' | 'unknown'
   phase?: string
   http_reachable?: boolean
-  websocket_online?: boolean
+  events_online?: boolean
+  have_capabilities?: boolean
+  device_id?: string
+  name?: string
+  model?: string
+  firmware?: string
+  configuration_version?: number
   updated_at?: string
   last_error?: string
   last_event?: string
-  capabilities?: string[]
   base_url?: string
 }
 
@@ -577,6 +582,12 @@ export interface ToastMessage {
   action?: string
   actionLabel?: string
   persistent?: boolean
+  updateOperationID?: string
+  progressKnown?: boolean
+  progressPercent?: number
+  progressLabel?: string
+  bytesDone?: number
+  bytesTotal?: number
 }
 
 export interface DialogState {

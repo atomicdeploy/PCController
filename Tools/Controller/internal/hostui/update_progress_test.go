@@ -7,6 +7,13 @@ import (
 )
 
 func TestUpdateProgressRequiresExplicitMeasuredPercentage(t *testing.T) {
+	parsed := ParseUpdateProgress("update.receiving", "receiving", map[string]string{
+		"progress_known": "true", "progress_percent": "40",
+		"bytes_done": "2567782", "bytes_total": "6419456",
+	}, time.Now())
+	if parsed.BytesDone != 2567782 || parsed.BytesTotal != 6419456 {
+		t.Fatalf("byte counters=%+v", parsed)
+	}
 	for _, known := range []string{"", "false", "true"} {
 		value := ParseUpdateProgress("update.programming", "preparing", map[string]string{"stage": "flash write:writing", "progress_known": known, "progress_percent": "40"}, time.Now())
 		want := 3

@@ -13,6 +13,7 @@ type UpdateProgress struct {
 	OperationID, Kind, State, Stage, Detail, ErrorCode string
 	Known                                              bool
 	Percent                                            int
+	BytesDone, BytesTotal                              int64
 	StartedAt, UpdatedAt                               time.Time
 }
 
@@ -30,6 +31,8 @@ func ParseUpdateProgress(kind, text string, metadata map[string]string, at time.
 	var err error
 	value.Percent, err = strconv.Atoi(metadata["progress_percent"])
 	value.Known = err == nil && metadata["progress_known"] == "true" && value.Percent >= 0 && value.Percent <= 100
+	value.BytesDone, _ = strconv.ParseInt(metadata["bytes_done"], 10, 64)
+	value.BytesTotal, _ = strconv.ParseInt(metadata["bytes_total"], 10, 64)
 	if parsed, err := time.Parse(time.RFC3339Nano, metadata["started_at"]); err == nil {
 		value.StartedAt = parsed
 	}

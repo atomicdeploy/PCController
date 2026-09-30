@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -23,6 +24,7 @@ type peerUpload struct {
 	path      string
 	options   PutOptions
 	received  int64
+	started   time.Time
 	updated   time.Time
 	finishing bool
 }
@@ -72,7 +74,7 @@ func (service *Service) BeginPeerUpload(request PeerUploadBeginRequest) (PeerUpl
 		return PeerUploadBeginResult{}, err
 	}
 	id := newOperationID()
-	upload := &peerUpload{file: file, path: file.Name(), updated: now, options: PutOptions{
+	upload := &peerUpload{file: file, path: file.Name(), started: now, updated: now, options: PutOptions{
 		Kind: request.Kind, Name: request.Name, Source: "authenticated-peer",
 		ExpectedSHA256: digest, ExpectedBytes: request.Bytes,
 		BuildHash: request.BuildHash, BuildTimestamp: request.BuildTimestamp,
@@ -92,6 +94,7 @@ func (service *Service) BeginPeerUpload(request PeerUploadBeginRequest) (PeerUpl
 	reservationActive = false
 	service.mu.Unlock()
 	service.peerUploadOps.Done()
+	service.publishPeerUploadProgress(id, upload, "receiving", "receiving verified host artifact from peer")
 	return PeerUploadBeginResult{TransferID: id, ChunkBytes: PeerUploadChunkBytes}, nil
 }
 
@@ -136,39 +139,50 @@ func (service *Service) AppendPeerUpload(request PeerUploadChunkRequest) (PeerUp
 		return PeerUploadChunkResult{}, fmt.Errorf("peer upload chunk must be 1..%d bytes", PeerUploadChunkBytes)
 	}
 	service.mu.Lock()
-	defer service.mu.Unlock()
 	if service.peerUploadsClosed {
+		service.mu.Unlock()
 		return PeerUploadChunkResult{}, errors.New("artifact service is closed")
 	}
 	upload := service.peerUploads[id]
 	if upload == nil {
+		service.mu.Unlock()
 		return PeerUploadChunkResult{}, os.ErrNotExist
 	}
 	if peerUploadExpired(upload, time.Now()) {
 		delete(service.peerUploads, id)
+		service.mu.Unlock()
 		_ = upload.file.Close()
 		_ = os.Remove(upload.path)
+		service.publishPeerUploadProgress(id, upload, "failed", "peer artifact transfer expired")
 		return PeerUploadChunkResult{}, errors.New("peer artifact transfer expired")
 	}
 	if upload.finishing {
+		service.mu.Unlock()
 		return PeerUploadChunkResult{}, errors.New("peer artifact transfer is finishing")
 	}
 	if request.Offset != upload.received {
+		service.mu.Unlock()
 		return PeerUploadChunkResult{}, fmt.Errorf("peer upload offset is %d; expected %d", request.Offset, upload.received)
 	}
 	if upload.received+int64(len(request.Data)) > upload.options.ExpectedBytes {
+		service.mu.Unlock()
 		return PeerUploadChunkResult{}, errors.New("peer upload exceeds declared size")
 	}
 	written, err := upload.file.WriteAt(request.Data, request.Offset)
 	if err != nil {
+		service.mu.Unlock()
 		return PeerUploadChunkResult{}, fmt.Errorf("write peer upload: %w", err)
 	}
 	if written != len(request.Data) {
+		service.mu.Unlock()
 		return PeerUploadChunkResult{}, io.ErrShortWrite
 	}
 	upload.received += int64(written)
 	upload.updated = time.Now()
-	return PeerUploadChunkResult{TransferID: id, NextOffset: upload.received, BytesTotal: upload.options.ExpectedBytes}, nil
+	result := PeerUploadChunkResult{TransferID: id, NextOffset: upload.received, BytesTotal: upload.options.ExpectedBytes}
+	service.mu.Unlock()
+	service.publishPeerUploadProgress(id, upload, "receiving", "receiving verified host artifact from peer")
+	return result, nil
 }
 
 func (service *Service) FinishPeerUpload(request PeerUploadFinishRequest) (OperationResult, error) {
@@ -222,10 +236,18 @@ func (service *Service) FinishPeerUpload(request PeerUploadFinishRequest) (Opera
 	}
 	file, err := os.Open(upload.path)
 	if err != nil {
+		service.publishPeerUploadProgress(id, upload, "failed", err.Error())
 		return OperationResult{}, err
 	}
 	defer file.Close()
-	return service.UploadOperation(file, upload.options)
+	service.publishPeerUploadProgress(id, upload, "verifying", "verifying received host artifact")
+	result, err := service.UploadOperation(file, upload.options)
+	if err != nil {
+		service.publishPeerUploadProgress(id, upload, "failed", err.Error())
+		return OperationResult{}, err
+	}
+	service.publishPeerUploadProgress(id, upload, "completed", "received and verified host artifact")
+	return result, nil
 }
 
 func (service *Service) AbortPeerUpload(request PeerUploadFinishRequest) error {
@@ -246,7 +268,41 @@ func (service *Service) AbortPeerUpload(request PeerUploadFinishRequest) error {
 	}
 	delete(service.peerUploads, id)
 	service.mu.Unlock()
+	service.publishPeerUploadProgress(id, upload, "cancelled", "incoming peer artifact transfer cancelled")
 	return errors.Join(upload.file.Close(), os.Remove(upload.path))
+}
+
+func (service *Service) publishPeerUploadProgress(id string, upload *peerUpload, state, detail string) {
+	if upload == nil {
+		return
+	}
+	service.mu.RLock()
+	total := upload.options.ExpectedBytes
+	done := upload.received
+	started := upload.started
+	service.mu.RUnlock()
+	percent := 0
+	known := total > 0
+	if known {
+		percent = int(done * 100 / total)
+		if percent > 100 {
+			percent = 100
+		}
+	}
+	metadata := map[string]string{
+		"operation_id":     id,
+		"kind":             "peer-artifact-upload",
+		"state":            state,
+		"stage":            state,
+		"detail":           detail,
+		"progress_known":   strconv.FormatBool(known),
+		"progress_percent": strconv.Itoa(percent),
+		"bytes_done":       strconv.FormatInt(done, 10),
+		"bytes_total":      strconv.FormatInt(total, 10),
+		"started_at":       started.UTC().Format(time.RFC3339Nano),
+		"updated_at":       time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	service.emit("update."+state, detail, metadata)
 }
 
 func peerUploadExpired(upload *peerUpload, now time.Time) bool {

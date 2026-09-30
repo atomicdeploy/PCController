@@ -954,6 +954,10 @@ export function ToastStack({ messages, dismiss }: { messages: ToastMessage[]; di
             <div className="toast__body">
               <strong>{message.title}</strong>
               {message.detail && <p>{message.detail}</p>}
+              {message.updateOperationID && <div className={`toast__progress${message.progressKnown ? '' : ' is-indeterminate'}`}>
+                <div><span>{interfaceCopy('Transfer', 'انتقال')}</span><bdi title={message.bytesTotal ? `${message.bytesDone ?? 0} / ${message.bytesTotal} bytes` : undefined}>{message.progressLabel}</bdi></div>
+                <div className={`update-progress${message.progressKnown ? '' : ' is-indeterminate'}`} role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={message.progressKnown ? message.progressPercent : undefined} aria-valuetext={message.progressLabel}><i style={message.progressKnown ? { width: `${message.progressPercent ?? 0}%` } : undefined} /></div>
+              </div>}
               {message.correlation && (
                 <code className="toast__correlation">
                   <span>{interfaceCopy('Reference', 'شناسه')}</span>

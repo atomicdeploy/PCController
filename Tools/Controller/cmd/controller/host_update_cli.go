@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"pccontroller.local/controller/internal/artifacts"
+	"pccontroller.local/controller/internal/hostui"
 )
 
 const maximumHostUpdateBytes = 256 << 20
@@ -128,7 +129,7 @@ func delegatePrimaryHostUpdate(
 				return errors.New("primary returned an invalid host transfer acknowledgement")
 			}
 			if output != nil {
-				fmt.Fprintf(output, "transmitted %d/%d bytes\n", offset, info.Size())
+				fmt.Fprintf(output, "transmitted %s\n", hostui.FormatByteProgress(offset, info.Size()))
 			}
 		}
 		if errors.Is(readErr, io.EOF) {

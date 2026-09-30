@@ -57,6 +57,7 @@ func (downloader *Downloader) Fetch(
 	store *Store,
 	request FetchRequest,
 	progress ProgressFunc,
+	byteProgress ...func(done, total int64),
 ) (Descriptor, error) {
 	if downloader == nil {
 		return Descriptor{}, errors.New("artifact downloader is unavailable")
@@ -130,7 +131,11 @@ func (downloader *Downloader) Fetch(
 	if total <= 0 {
 		total = request.Bytes
 	}
-	input := &downloadProgressReader{Reader: response.Body, total: total, progress: progress, lastPercent: -2}
+	var observeBytes func(done, total int64)
+	if len(byteProgress) > 0 {
+		observeBytes = byteProgress[0]
+	}
+	input := &downloadProgressReader{Reader: response.Body, total: total, progress: progress, byteProgress: observeBytes, lastPercent: -2}
 	descriptor, err := store.Put(input, PutOptions{
 		Kind: kind, Name: name, Source: "remote:" + parsed.Host,
 		ExpectedSHA256: firstNonEmpty(request.SHA256, responseHash), ExpectedBytes: request.Bytes,
@@ -150,9 +155,11 @@ func (downloader *Downloader) Fetch(
 // A chunked response without either stays indeterminate until verification finishes.
 type downloadProgressReader struct {
 	io.Reader
-	total, done int64
-	lastPercent int
-	progress    ProgressFunc
+	total, done       int64
+	lastReportedBytes int64
+	lastPercent       int
+	progress          ProgressFunc
+	byteProgress      func(done, total int64)
 }
 
 func (reader *downloadProgressReader) Read(buffer []byte) (int, error) {
@@ -162,13 +169,19 @@ func (reader *downloadProgressReader) Read(buffer []byte) (int, error) {
 	if reader.total > 0 {
 		percent = int(min(100, reader.done*100/reader.total))
 	}
-	if reader.progress != nil && percent != reader.lastPercent {
+	report := percent != reader.lastPercent
+	if reader.total <= 0 && n > 0 && reader.done-reader.lastReportedBytes >= 256<<10 {
+		report = true
+	}
+	if report {
 		reader.lastPercent = percent
-		detail := fmt.Sprintf("received %d bytes", reader.done)
-		if reader.total > 0 {
-			detail = fmt.Sprintf("received %d of %d bytes", reader.done, reader.total)
+		reader.lastReportedBytes = reader.done
+		if reader.byteProgress != nil {
+			reader.byteProgress(reader.done, reader.total)
 		}
-		reader.progress("downloading", percent, detail)
+		if reader.progress != nil {
+			reader.progress("downloading", percent, "receiving remote artifact")
+		}
 	}
 	return n, err
 }

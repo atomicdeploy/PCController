@@ -6,10 +6,11 @@ export type ArtifactKind = 'firmware' | 'eeprom' | 'flash-backup' | 'host-execut
 /** Explicit programming transports exposed to update clients. */
 export type ProgrammerMethod = 'urclock' | 'usbasp'
 /** Operations represented by the shared update-progress contract. */
-export type UpdateOperationKind = 'artifact-upload' | 'artifact-fetch' | 'device-capture' | 'firmware' | 'flash-restore' | 'eeprom' | 'host'
+export type UpdateOperationKind = 'artifact-upload' | 'peer-artifact-upload' | 'artifact-fetch' | 'device-capture' | 'firmware' | 'flash-restore' | 'eeprom' | 'host'
 /** Lifecycle states emitted by artifact and programming operations. */
 export type UpdateState =
   | 'queued'
+  | 'uploading'
   | 'downloading'
   | 'downloaded'
   | 'reading'
@@ -327,6 +328,7 @@ export async function uploadArtifact(
   kind: ArtifactKind,
   sha256: string,
   signal?: AbortSignal,
+  onProgress?: (done: number, total: number) => void,
 ): Promise<ArtifactOperationResult> {
   const url = new URL(controllerHTTPURL('/api/artifacts/upload'), location.href)
   url.searchParams.set('kind', kind)
@@ -335,6 +337,32 @@ export async function uploadArtifact(
   url.searchParams.set('bytes', String(file.size))
   const body = new FormData()
   body.set('artifact', file, file.name)
+  if (onProgress && typeof XMLHttpRequest !== 'undefined') {
+    return new Promise<ArtifactOperationResult>((resolve, reject) => {
+      const request = new XMLHttpRequest()
+      const abort = () => request.abort()
+      request.open('POST', url.toString())
+      for (const [name, value] of Object.entries(authorizationHeaders())) request.setRequestHeader(name, value)
+      request.upload.onprogress = (event) => onProgress(event.loaded, event.lengthComputable ? event.total : file.size)
+      request.onerror = () => reject(new Error('Artifact upload transport failed'))
+      request.onabort = () => reject(new DOMException('Artifact upload was cancelled', 'AbortError'))
+      request.onload = () => {
+        signal?.removeEventListener('abort', abort)
+        let value: unknown = null
+        try { value = request.responseText ? JSON.parse(request.responseText) : null }
+        catch { value = request.responseText }
+        if (request.status < 200 || request.status >= 300) {
+          reject(new Error(responseErrorDetail(value, request.statusText, request.status)))
+          return
+        }
+        onProgress(file.size, file.size)
+        resolve(value as ArtifactOperationResult)
+      }
+      signal?.addEventListener('abort', abort, { once: true })
+      if (signal?.aborted) abort()
+      else request.send(body)
+    })
+  }
   const response = await fetch(url.toString(), {
     method: 'POST',
     headers: authorizationHeaders(),
@@ -345,15 +373,49 @@ export async function uploadArtifact(
 }
 
 /** Downloads one immutable artifact using its verified content identity. */
-export async function downloadArtifact(artifact: ArtifactDescriptor, signal?: AbortSignal): Promise<void> {
+export async function downloadArtifact(
+  artifact: ArtifactDescriptor,
+  signal?: AbortSignal,
+  onProgress?: (done: number, total: number) => void,
+): Promise<void> {
   const url = controllerHTTPURL(`/api/artifacts/${encodeURIComponent(artifact.kind)}/${encodeURIComponent(artifact.sha256)}`)
+  if (onProgress && typeof XMLHttpRequest !== 'undefined') {
+    const blob = await new Promise<Blob>((resolve, reject) => {
+      const request = new XMLHttpRequest()
+      const abort = () => request.abort()
+      request.open('GET', url)
+      request.responseType = 'blob'
+      for (const [name, value] of Object.entries(authorizationHeaders())) request.setRequestHeader(name, value)
+      request.onprogress = (event) => onProgress(event.loaded, event.lengthComputable ? event.total : artifact.bytes)
+      request.onerror = () => reject(new Error('Artifact download transport failed'))
+      request.onabort = () => reject(new DOMException('Artifact download was cancelled', 'AbortError'))
+      request.onload = () => {
+        signal?.removeEventListener('abort', abort)
+        if (request.status < 200 || request.status >= 300) {
+          reject(new Error(request.statusText || `HTTP ${request.status}`))
+          return
+        }
+        onProgress(artifact.bytes, artifact.bytes)
+        resolve(request.response as Blob)
+      }
+      signal?.addEventListener('abort', abort, { once: true })
+      if (signal?.aborted) abort()
+      else request.send()
+    })
+    saveArtifactBlob(blob, artifact.name)
+    return
+  }
   const response = await fetch(url, { headers: authorizationHeaders(), signal })
   if (!response.ok) await decode(response)
   const blob = await response.blob()
+  saveArtifactBlob(blob, artifact.name)
+}
+
+function saveArtifactBlob(blob: Blob, name: string): void {
   const objectURL = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = objectURL
-  link.download = artifact.name
+  link.download = name
   link.rel = 'noopener'
   document.body.append(link)
   link.click()
