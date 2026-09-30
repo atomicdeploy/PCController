@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -93,5 +94,13 @@ func TestHostUpdateRequestRemainsJSONSerializable(t *testing.T) {
 	_, err := json.Marshal(artifacts.PeerUploadChunkRequest{TransferID: "transfer", Data: []byte("data")})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRunHostUpdateAcceptsDocumentedFileBeforeFlags(t *testing.T) {
+	var stderr strings.Builder
+	err := runHostUpdate([]string{"host", "missing.exe", "--expected-sha256", strings.Repeat("a", 64)}, io.Discard, &stderr)
+	if err == nil || !strings.Contains(err.Error(), "open host update candidate") {
+		t.Fatalf("err=%v stderr=%q", err, stderr.String())
 	}
 }

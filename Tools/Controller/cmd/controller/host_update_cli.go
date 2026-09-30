@@ -33,7 +33,15 @@ func runHostUpdate(args []string, stdout, stderr io.Writer) error {
 	flags.SetOutput(stderr)
 	expected := flags.String("expected-sha256", "", "expected candidate executable SHA-256")
 	idempotencyKey := flags.String("idempotency-key", "", "stable retry key for this update intent")
-	if err := flags.Parse(args[1:]); err != nil {
+	parseArgs := append([]string(nil), args[1:]...)
+	// The public syntax puts FILE first. Go's flag package stops at the first
+	// positional argument, so move that one value behind its flags while also
+	// continuing to accept conventional flags-first invocations.
+	if len(parseArgs) > 1 && !strings.HasPrefix(parseArgs[0], "-") {
+		candidate := parseArgs[0]
+		parseArgs = append(parseArgs[1:], candidate)
+	}
+	if err := flags.Parse(parseArgs); err != nil {
 		return err
 	}
 	if flags.NArg() != 1 {
