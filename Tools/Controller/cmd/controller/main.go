@@ -46,6 +46,7 @@ var (
 	sourceHash             = "unknown"
 	buildTime              = "unknown"
 	setProcessConsoleTitle = consolewindow.SetTitle
+	runHostUpdateCommand   = runHostUpdate
 )
 
 func main() {
@@ -186,8 +187,6 @@ func run(args []string, stdout, stderr io.Writer) (resultErr error) {
 			strings.ToLower(args[0]), args[1:], stdout, stderr,
 			configuredProductTitle(configPath, presentation.AppName),
 		)
-	case "update":
-		return runHostUpdate(args[1:], stdout, stderr)
 	case "installation":
 		return runInstallationStatus(args[1:], stdout, stderr)
 	case "uninstall":
@@ -260,6 +259,12 @@ func run(args []string, stdout, stderr io.Writer) (resultErr error) {
 	}
 	configurePrimaryIPC(runtimeConfig)
 	switch strings.ToLower(args[0]) {
+	case "update":
+		// A host update is a local-primary operation. Dispatch it only after
+		// loading the selected configuration and applying its IPC endpoint;
+		// otherwise the process-wide default (127.0.0.1:8787) can target an
+		// unrelated listener or forwarded neighbour instead of this machine.
+		return runHostUpdateCommand(args[1:], stdout, stderr)
 	case "tui":
 		return runTUI(args[1:], stdout, stderr, store)
 	case "web":
