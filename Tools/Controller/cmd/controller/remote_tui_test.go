@@ -17,6 +17,7 @@ import (
 	"pccontroller.local/controller/internal/control"
 	"pccontroller.local/controller/internal/hostui"
 	"pccontroller.local/controller/internal/native"
+	"pccontroller.local/controller/internal/ports"
 	"pccontroller.local/controller/internal/shell"
 	"pccontroller.local/controller/internal/tui"
 )
@@ -27,6 +28,13 @@ func TestRemotePanelAndLCDMethodsUseTypedPrimaryRPCs(t *testing.T) {
 	client.callFn = func(_ context.Context, method string, params any, target any) error {
 		methods = append(methods, method)
 		switch method {
+		case "controller.ports":
+			encoded, _ := json.Marshal([]remotePortWire{{
+				Name: "COM3", FriendlyName: "USB-SERIAL CH340", VID: "1A86", PID: "7523",
+			}})
+			if err := json.Unmarshal(encoded, target); err != nil {
+				return err
+			}
 		case "controller.front_panel":
 			*target.(*native.FrontPanel) = native.FrontPanel{Schema: 2, MenuPage: 3}
 		case "controller.lcd.presentation.status":
@@ -45,6 +53,12 @@ func TestRemotePanelAndLCDMethodsUseTypedPrimaryRPCs(t *testing.T) {
 		}
 		return nil
 	}
+	serialPorts, err := client.Ports(context.Background())
+	if err != nil || len(serialPorts) != 1 || serialPorts[0] != (ports.Info{
+		Name: "COM3", IsUSB: true, FriendlyName: "USB-SERIAL CH340", VID: "1A86", PID: "7523",
+	}) {
+		t.Fatalf("ports=%#v err=%v", serialPorts, err)
+	}
 	panel, err := client.FrontPanel(context.Background())
 	if err != nil || panel.Schema != 2 || panel.MenuPage != 3 {
 		t.Fatalf("front panel=%#v err=%v", panel, err)
@@ -56,7 +70,7 @@ func TestRemotePanelAndLCDMethodsUseTypedPrimaryRPCs(t *testing.T) {
 	if err := client.MirrorLCD("line one", "line two"); err != nil {
 		t.Fatal(err)
 	}
-	want := "controller.front_panel,controller.lcd.presentation.status,controller.lcd.prompt"
+	want := "controller.ports,controller.front_panel,controller.lcd.presentation.status,controller.lcd.prompt"
 	if got := strings.Join(methods, ","); got != want {
 		t.Fatalf("RPC methods=%q, want %q", got, want)
 	}

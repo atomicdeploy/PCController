@@ -2271,6 +2271,15 @@ func listPorts() tea.Cmd {
 	}
 }
 
+func listRemotePorts(fetch func(context.Context) ([]ports.Info, error)) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		values, err := fetch(ctx)
+		return portsResultMsg{values: values, err: err}
+	}
+}
+
 func mirrorLCDCommand(callback func(string, string) error, line1, line2, label string) tea.Cmd {
 	return func() tea.Msg {
 		return commandResultMsg{line: label, err: callback(padCells(line1, 16), padCells(line2, 16))}
