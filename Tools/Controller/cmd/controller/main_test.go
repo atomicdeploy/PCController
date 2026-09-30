@@ -699,6 +699,41 @@ func TestPersistedProductTitleAppearsInHelpAndVersion(t *testing.T) {
 	}
 }
 
+func TestHostUpdateUsesConfiguredPrimaryEndpoint(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	value := appconfig.Defaults()
+	value.IPC.Listen = "127.0.0.1:19787"
+	if err := appconfig.Write(path, value); err != nil {
+		t.Fatal(err)
+	}
+
+	previousEndpoint := currentPrimaryEndpoint()
+	previousCommand := runHostUpdateCommand
+	defer func() {
+		primaryEndpoint.Store(previousEndpoint)
+		runHostUpdateCommand = previousCommand
+	}()
+
+	called := false
+	runHostUpdateCommand = func(args []string, stdout, stderr io.Writer) error {
+		called = true
+		if got := currentPrimaryEndpoint().Listen; got != value.IPC.Listen {
+			t.Fatalf("host update endpoint=%q, want configured %q", got, value.IPC.Listen)
+		}
+		if !reflect.DeepEqual(args, []string{"host", "candidate.exe"}) {
+			t.Fatalf("host update args=%v", args)
+		}
+		return nil
+	}
+
+	if err := run([]string{"--config", path, "update", "host", "candidate.exe"}, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if !called {
+		t.Fatal("configured host update command was not dispatched")
+	}
+}
+
 func TestApplicationNamePrecedenceIsConfigThenEnvironmentThenFlag(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	value := appconfig.Defaults()
