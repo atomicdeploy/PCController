@@ -1,6 +1,7 @@
 import { type FormEvent, useEffect, useMemo, useState } from 'react'
 import { Box, CheckCircle2, CloudDownload, GitBranch, LoaderCircle, PackageSearch, RefreshCw, ShieldCheck } from 'lucide-react'
 import { Button, Card, DataRow, EmptyState, StatusBadge, TextField } from './components'
+import { formatBytes } from './byte-format'
 import type { SharedViewProps } from './views'
 import {
   checkReleaseCandidate,
@@ -43,14 +44,6 @@ function currentArtifact(manifest: ArtifactManifest | null, kind: ArtifactKind) 
 }
 
 function shortHash(value: string | undefined, unpublished: string): string { return value ? value.slice(0, 12).toUpperCase() : unpublished }
-
-function bytes(value: number | undefined, unknown: string): string {
-  if (value === undefined) return unknown
-  if (value === 0) return '0 B'
-  if (value < 1024) return `${value} B`
-  if (value < 1024 ** 2) return `${(value / 1024).toFixed(1)} KiB`
-  return `${(value / 1024 ** 2).toFixed(2)} MiB`
-}
 
 export function ReleaseDiscovery({ manifest, events, locale, openDialog, onArtifactsChanged }: ReleaseDiscoveryProps) {
   const copy = (english: string, persian: string) => locale === 'fa' ? persian : english
@@ -184,7 +177,7 @@ export function ReleaseDiscovery({ manifest, events, locale, openDialog, onArtif
       {notice && <div className={`update-notice${/failed|error|invalid|mismatch/i.test(notice) ? ' is-error' : ''}`}><CheckCircle2 size={17} /><span>{notice}</span></div>}
 
       {discovery?.candidates.length ? <div className="release-candidates">
-        {discovery.candidates.map((candidate) => <label key={candidate.id} className={candidate.id === selectedID ? 'is-selected' : ''}><input type="radio" name="release-candidate" checked={candidate.id === selectedID} onChange={() => setSelectedID(candidate.id)} /><span><strong>{candidate.name}</strong><small>{candidate.release_tag ? `${copy('release', 'انتشار')} ${candidate.release_tag}` : candidate.workflow_run_id ? `${copy('run', 'اجرا')} ${candidate.workflow_run_id}` : candidate.source} · {candidate.platform || copy('platform-neutral', 'مستقل از پلتفرم')}</small></span><code>{shortHash(candidate.archive_sha256 || candidate.sha256, copy('UNPUBLISHED', 'منتشرنشده'))}</code><em>{bytes(candidate.archive_bytes || candidate.bytes, copy('unknown', 'نامشخص'))}</em></label>)}
+        {discovery.candidates.map((candidate) => <label key={candidate.id} className={candidate.id === selectedID ? 'is-selected' : ''}><input type="radio" name="release-candidate" checked={candidate.id === selectedID} onChange={() => setSelectedID(candidate.id)} /><span><strong>{candidate.name}</strong><small>{candidate.release_tag ? `${copy('release', 'انتشار')} ${candidate.release_tag}` : candidate.workflow_run_id ? `${copy('run', 'اجرا')} ${candidate.workflow_run_id}` : candidate.source} · {candidate.platform || copy('platform-neutral', 'مستقل از پلتفرم')}</small></span><code>{shortHash(candidate.archive_sha256 || candidate.sha256, copy('UNPUBLISHED', 'منتشرنشده'))}</code><em>{formatBytes(candidate.archive_bytes || candidate.bytes, copy('unknown', 'نامشخص'))}</em></label>)}
       </div> : !busy && discovery && <EmptyState icon={Box} title={copy('No matching candidates', 'گزینهٔ منطبقی پیدا نشد')} detail={copy('Adjust artifact kind, platform, release tag, branch, or workflow name.', 'نوع خروجی، پلتفرم، برچسب انتشار، شاخه یا نام گردش‌کار را تغییر دهید.')} />}
 
       {selected && <div className="release-selection">
@@ -193,7 +186,7 @@ export function ReleaseDiscovery({ manifest, events, locale, openDialog, onArtif
         <Button tone="primary" icon={CloudDownload} busy={busy === 'stage'} onClick={() => beginStage(selected)}>{copy('Review verified staging', 'بازبینی آماده‌سازی تأییدشده')}</Button>
       </div>}
 
-      {operation && <div className="release-operation"><div><LoaderCircle className={operation.state === 'queued' || operation.state === 'downloading' ? 'spin' : ''} /><strong>{operation.error || operation.detail || operation.state}</strong><span>{bytes(operation.bytes_done, copy('unknown', 'نامشخص'))} / {bytes(operation.bytes_total, copy('unknown', 'نامشخص'))}</span></div><div className="update-progress"><i style={{ width: `${Math.max(0, Math.min(100, operation.progress_percent))}%` }} /></div><Button compact icon={RefreshCw} onClick={() => void getReleaseStageStatus(operation.id).then(acceptStageStatus).catch((cause) => setNotice(cause instanceof Error ? cause.message : String(cause)))}>{copy('Refresh operation', 'تازه‌سازی عملیات')}</Button>{operation.artifact && <p><ShieldCheck /> {copy('Staged as', 'آماده‌شده با شناسه')} <code>{operation.artifact.sha256}</code>؛ {copy('board programming remains a separate action.', 'پروگرام برد همچنان عملی جداگانه است.')}</p>}</div>}
+      {operation && <div className="release-operation"><div><LoaderCircle className={operation.state === 'queued' || operation.state === 'downloading' ? 'spin' : ''} /><strong>{operation.error || operation.detail || operation.state}</strong><span>{formatBytes(operation.bytes_done, copy('unknown', 'نامشخص'))} / {formatBytes(operation.bytes_total, copy('unknown', 'نامشخص'))}</span></div><div className="update-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.max(0, Math.min(100, operation.progress_percent))}><i style={{ width: `${Math.max(0, Math.min(100, operation.progress_percent))}%` }} /></div><Button compact icon={RefreshCw} onClick={() => void getReleaseStageStatus(operation.id).then(acceptStageStatus).catch((cause) => setNotice(cause instanceof Error ? cause.message : String(cause)))}>{copy('Refresh operation', 'تازه‌سازی عملیات')}</Button>{operation.artifact && <p><ShieldCheck /> {copy('Staged as', 'آماده‌شده با شناسه')} <code>{operation.artifact.sha256}</code>؛ {copy('board programming remains a separate action.', 'پروگرام برد همچنان عملی جداگانه است.')}</p>}</div>}
     </Card>
   )
 }

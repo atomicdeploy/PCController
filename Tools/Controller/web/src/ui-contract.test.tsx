@@ -413,13 +413,15 @@ describe('offline and settings UI contracts', () => {
       kind: 'peer-update.remote-staged',
       text: 'remote staging accepted',
       metadata: {
-        peer: 'peer-host', state: 'remote-staged', progress_percent: '90',
+        peer: 'peer-host', state: 'remote-staged', progress_known: 'false', progress_percent: '0',
+        bytes_done: '6419456', bytes_total: '6419456',
         operation_id: 'source-intent', remote_operation_id: 'remote-host-7',
         terminal_verified: 'false', sha256: 'a'.repeat(64),
         idempotency_key: 'intent:shared',
       },
     })).toEqual({
-      peer: 'peer-host', state: 'remote-staged', progressPercent: 90,
+      peer: 'peer-host', state: 'remote-staged', progressPercent: 0, progressKnown: false,
+      bytesDone: 6419456, bytesTotal: 6419456,
       operationID: 'remote-host-7', detail: 'remote staging accepted',
       artifactSHA256: 'a'.repeat(64), idempotencyKey: 'intent:shared',
       retrySameIntent: false,
@@ -431,7 +433,7 @@ describe('offline and settings UI contracts', () => {
 			kind: 'peer-update.completed',
 			text: 'peer restarted and acknowledged active SHA',
 			metadata: {
-				peer: 'peer-host', state: 'completed', progress_percent: '100',
+				peer: 'peer-host', state: 'completed', progress_known: 'true', progress_percent: '100',
 				operation_id: 'source-intent', remote_operation_id: 'remote-host-7',
 				terminal_verified: 'true', active_sha256: 'a'.repeat(64),
 				sha256: 'a'.repeat(64), idempotency_key: 'intent:shared',

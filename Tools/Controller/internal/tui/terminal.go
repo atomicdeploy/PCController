@@ -19,6 +19,8 @@ type updatePresentation struct {
 	Detail        string
 	Progress      int
 	ProgressKnown bool
+	BytesDone     int64
+	BytesTotal    int64
 	Stage         string
 	ErrorCode     string
 	StartedAt     time.Time
@@ -157,6 +159,7 @@ func (model *Model) observeUpdateEvent(event control.Event) tea.Cmd {
 	model.update = updatePresentation{
 		OperationID: value.OperationID, Kind: value.Kind,
 		State: state, Detail: value.Detail, Progress: value.Percent, ProgressKnown: value.Known,
+		BytesDone: value.BytesDone, BytesTotal: value.BytesTotal,
 		Stage: value.Stage, ErrorCode: value.ErrorCode, StartedAt: value.StartedAt, UpdatedAt: value.UpdatedAt,
 		Scroll: scroll,
 	}
@@ -209,6 +212,9 @@ func (model Model) updateProgressLines() []string {
 		filled := progress * barWidth / 100
 		bar := lipgloss.NewStyle().Foreground(color).Render(strings.Repeat("━", filled)) + labelStyle.Render(strings.Repeat("─", barWidth-filled))
 		lines = append(lines, fmt.Sprintf("%s  %3d%%", bar, progress), labelStyle.Render("Current stage"))
+	}
+	if model.update.BytesTotal > 0 {
+		lines = append(lines, labelStyle.Render("Transferred ")+valueStyle.Render(hostui.FormatByteProgress(model.update.BytesDone, model.update.BytesTotal)))
 	}
 	if !model.update.StartedAt.IsZero() {
 		end := model.update.UpdatedAt

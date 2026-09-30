@@ -124,6 +124,8 @@ import {
   type QuickHeaderPreferences,
 } from './quick-header-preferences'
 import { messageToast } from './message-presentation'
+import { updateToastFromEvent } from './update-toast'
+import type { UpdateStatus } from './updates-api'
 
 const DashboardPage = lazy(() => import('./views').then(({ DashboardView }) => ({ default: DashboardView })))
 const ControlsPage = lazy(() => import('./views').then(({ ControlsView }) => ({ default: ControlsView })))
@@ -245,6 +247,10 @@ export function canonicalPageHash(page: PageID): string {
 
 export function canonicalPageURL(page: PageID, pathname = location.pathname, search = location.search): string {
   return `${pathname}${search}${canonicalPageHash(page)}`
+}
+
+export function shouldResetPageScroll(current: PageID, next: PageID): boolean {
+  return current !== next
 }
 
 function pageFromLocation(): PageID {
@@ -456,6 +462,7 @@ export default function App() {
 	const [remoteActionProgress, setRemoteActionProgress] = useState<WebActionProgress | null>(null)
   const [relayedTerminal, setRelayedTerminal] = useState<RelayedTerminalEntry[]>([])
   const toastID = useRef(0)
+  const updateToastIDs = useRef(new Map<string, number>())
   const goChordUntil = useRef(0)
   const audioRef = useRef<AudioEngine | null>(null)
   const buzzerTimelineRef = useRef(new BuzzerPlaybackTimeline())
@@ -798,6 +805,51 @@ export default function App() {
     enqueueToast({ tone, title, detail })
   }, [enqueueToast])
 
+  const presentUpdateToast = useCallback((event: ControllerEvent): boolean => {
+    const message = updateToastFromEvent(event, appearanceDesiredRef.current.locale)
+    if (!message?.updateOperationID) return false
+    const operationID = message.updateOperationID
+    let id = updateToastIDs.current.get(operationID)
+    if (id === undefined) {
+      toastID.current += 1
+      id = toastID.current
+      updateToastIDs.current.set(operationID, id)
+    }
+    const next = { id, ...message }
+    setToasts((current) => {
+      const index = current.findIndex((item) => item.updateOperationID === operationID)
+      if (index < 0) return [...current.slice(-3), next]
+      return current.map((item, itemIndex) => itemIndex === index ? next : item)
+    })
+    if (!message.persistent) {
+      updateToastIDs.current.delete(operationID)
+      window.setTimeout(() => setToasts((current) => current.filter((item) => item.id !== id)), 5200)
+    }
+    return true
+  }, [])
+
+  useEffect(() => {
+    const presentBrowserTransfer = (event: Event) => {
+      const status = (event as CustomEvent<UpdateStatus>).detail
+      if (!status?.id || !status.state) return
+      const metadata: Record<string, string> = {
+        operation_id: status.id,
+        kind: status.kind,
+        state: status.state,
+        stage: status.stage || status.state,
+        detail: status.detail || '',
+        progress_known: String(status.progress_known === true),
+        progress_percent: String(status.progress_percent ?? 0),
+        updated_at: status.updated_at || new Date().toISOString(),
+      }
+      if (status.bytes_done !== undefined) metadata.bytes_done = String(status.bytes_done)
+      if (status.bytes_total !== undefined) metadata.bytes_total = String(status.bytes_total)
+      presentUpdateToast({ id: 0, time: metadata.updated_at, kind: `update.${status.state}`, text: status.detail || '', metadata })
+    }
+    window.addEventListener('pccontroller:update-transfer-progress', presentBrowserTransfer)
+    return () => window.removeEventListener('pccontroller:update-transfer-progress', presentBrowserTransfer)
+  }, [presentUpdateToast])
+
   useEffect(() => {
     const testFeedback = () => {
       const engine = audioRef.current
@@ -938,7 +990,7 @@ export default function App() {
   }, [])
 
   const applyPage = useCallback((value: PageID, historyMode: 'push' | 'replace' | 'none' = 'push') => {
-    const changed = pageRef.current !== value
+    const changed = shouldResetPageScroll(pageRef.current, value)
     const nextHash = canonicalPageHash(value)
     if (historyMode === 'push' && (pageRef.current !== value || location.hash !== nextHash)) {
       history.pushState({ page: value }, '', canonicalPageURL(value))
@@ -950,7 +1002,7 @@ export default function App() {
     setMobileNav(false)
     tabChannelRef.current?.publishPresence(document.hidden ? 'hidden' : 'active', value)
     if (changed) reportAppInstanceRef.current()
-    document.querySelector('.app-main')?.scrollTo({ top: 0, behavior: appearance.reduceMotion ? 'auto' : 'smooth' })
+    if (changed) document.querySelector('.app-main')?.scrollTo({ top: 0, behavior: appearance.reduceMotion ? 'auto' : 'smooth' })
   }, [appearance.reduceMotion])
 
   const navigate = useCallback((value: PageID, historyMode: 'push' | 'none' = 'push') => {
@@ -1437,7 +1489,8 @@ export default function App() {
 				applyPage('updates', 'replace')
 				audioRef.current?.cue('navigation', 'forward')
 			}
-            if (shouldToastControllerEvent(event, appInstanceID)) {
+            const updateToastPresented = presentUpdateToast(event)
+            if (!updateToastPresented && shouldToastControllerEvent(event, appInstanceID)) {
               const targetedMessage = messageToast(event, appearanceDesiredRef.current.locale)
               if (targetedMessage) enqueueToast(targetedMessage)
               else notify(eventToneForToast(event), event.kind, event.text)
@@ -1504,7 +1557,7 @@ export default function App() {
       if (streamControlRef.current === stopStream) streamControlRef.current = null
       stopStream()
     }
-  }, [adoptHostAppearance, appInstanceID, applyPage, demo, enqueueToast, navigate, navigationSession, notify, refresh, refreshHostAppearance, streamGeneration, token])
+  }, [adoptHostAppearance, appInstanceID, applyPage, demo, enqueueToast, navigate, navigationSession, notify, presentUpdateToast, refresh, refreshHostAppearance, streamGeneration, token])
 
   useEffect(() => {
     if (demo || !startupProbeResolved || streamState === 'open') return

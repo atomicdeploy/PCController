@@ -27,6 +27,18 @@ func TestUpdateProgressBarOnlyWhileActive(t *testing.T) {
 	}
 }
 
+func TestUpdateProgressShowsHumanReadableTransferredBytes(t *testing.T) {
+	model := Model{width: 72}
+	model.update = updatePresentation{
+		State: "receiving", Stage: "receiving", Progress: 100, ProgressKnown: true,
+		BytesDone: 6419456, BytesTotal: 6419456,
+	}
+	view := strings.Join(model.updateProgressLines(), "\n")
+	if !strings.Contains(view, "6.12 MiB / 6.12 MiB") || strings.Contains(view, "6419456") {
+		t.Fatalf("progress bytes are not human readable: %s", view)
+	}
+}
+
 func TestProgrammingViewWrapsAndScrollsFailureDetails(t *testing.T) {
 	model := readyModel(t, PageProgramming)
 	model.width, model.height = 54, 20

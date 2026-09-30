@@ -142,6 +142,15 @@ func TestPeerHostUpdateTransfersVerifiedArtifactThenQueuesRemoteCoordinator(t *t
 		result.Stage != "completed" || !result.TerminalVerified || result.Operation.State != "completed" || manifestProbes != 3 {
 		t.Fatalf("result=%#v updateCalled=%t", result, updateCalled)
 	}
+	transferContext, cancelTransfer := context.WithTimeout(context.Background(), time.Second)
+	defer cancelTransfer()
+	transferring, err := client.NextEvent(transferContext, eventCursor, "peer-update.transferring")
+	if err != nil {
+		t.Fatalf("wait for measured transfer event: %v", err)
+	}
+	if transferring.Metadata["bytes_done"] == "" || transferring.Metadata["bytes_total"] != strconv.FormatInt(descriptor.Bytes, 10) {
+		t.Fatalf("transfer byte telemetry=%#v", transferring.Metadata)
+	}
 	completedContext, cancelCompleted := context.WithTimeout(context.Background(), time.Second)
 	defer cancelCompleted()
 	completed, err := client.NextEvent(completedContext, eventCursor, "peer-update.completed")
@@ -151,7 +160,9 @@ func TestPeerHostUpdateTransfersVerifiedArtifactThenQueuesRemoteCoordinator(t *t
 	if completed.Metadata["terminal_verified"] != "true" ||
 		completed.Metadata["active_sha256"] != descriptor.SHA256 ||
 		completed.Metadata["progress_known"] != "true" ||
-		completed.Metadata["progress_percent"] != "100" {
+		completed.Metadata["progress_percent"] != "100" ||
+		completed.Metadata["bytes_done"] != strconv.FormatInt(descriptor.Bytes, 10) ||
+		completed.Metadata["bytes_total"] != strconv.FormatInt(descriptor.Bytes, 10) {
 		t.Fatalf("completed event=%#v", completed)
 	}
 }

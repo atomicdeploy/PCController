@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { AlertTriangle, CheckCircle2, Clock3, LoaderCircle, TerminalSquare } from 'lucide-react'
 import type { UpdateStatus } from './updates-api'
+import { formatByteProgress } from './byte-format'
 
 const terminalStates = new Set(['completed', 'failed', 'cancelled', 'downloaded', 'staged'])
 
@@ -23,6 +24,7 @@ export function updateElapsed(status: UpdateStatus, now: number): string | null 
 
 const stageLabels: Record<string, [string, string]> = {
   queued: ['Queued', 'در صف'], preflight: ['Checking tools & target', 'بررسی ابزارها و مقصد'],
+  uploading: ['Uploading artifact', 'ارسال فایل'], receiving: ['Receiving artifact', 'دریافت فایل'],
   preparing: ['Preparing board', 'آماده‌سازی برد'], 'backing-up': ['Saving board settings', 'ذخیره تنظیمات برد'],
   reading: ['Reading memory', 'خواندن حافظه'], writing: ['Writing memory', 'نوشتن حافظه'],
   programming: ['Programming board', 'پروگرام برد'], erasing: ['Erasing memory', 'پاک کردن حافظه'],
@@ -70,7 +72,7 @@ export function UpdateOperationPanel({ status, locale }: { status: UpdateStatus;
     <dl className="update-operation__facts">
       {failed && stageLabel && <div><dt>{copy('Last stage', 'آخرین مرحله')}</dt><dd>{stageLabel}</dd></div>}
       {status.programming_method && status.programming_method !== 'none' && <div><dt>{copy('Connection', 'اتصال')}</dt><dd>{status.programming_method === 'urclock' ? 'UART / Urclock' : 'USBasp / ISP'}</dd></div>}
-      {!!status.bytes_total && <div><dt>{copy('Transferred', 'انتقال داده')}</dt><dd><bdi>{status.bytes_done ?? 0} / {status.bytes_total} B</bdi></dd></div>}
+      {!!status.bytes_total && <div><dt>{copy('Transferred', 'انتقال داده')}</dt><dd><bdi title={`${status.bytes_done ?? 0} / ${status.bytes_total} bytes`}>{formatByteProgress(status.bytes_done ?? 0, status.bytes_total)}</bdi></dd></div>}
       {status.updated_at && <div><dt>{copy('Last activity', 'آخرین فعالیت')}</dt><dd>{new Date(status.updated_at).toLocaleTimeString(locale)}</dd></div>}
     </dl>
     <details className="update-operation__diagnostics"><summary><TerminalSquare size={16} />{copy('Technical details', 'جزئیات فنی')}</summary><dl>
