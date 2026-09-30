@@ -437,70 +437,79 @@ func preparePrimaryMode(surface string) (*hostInstanceClaim, bool, error) {
 func recoverTUIPrimaryAfterAttachFailure(
 	attachErr error,
 	retry func(string) (*hostInstanceClaim, bool, error),
-) (*hostInstanceClaim, error) {
+) (*hostInstanceClaim, bool, error) {
 	claim, havePrimary, err := retry("tui")
 	if err != nil {
-		return nil, errors.Join(
+		return nil, false, errors.Join(
 			attachErr,
 			fmt.Errorf("recheck local controller ownership after remote TUI failure: %w", err),
 		)
 	}
 	if havePrimary {
-		return nil, attachErr
+		return nil, true, attachErr
 	}
 	if claim == nil {
-		return nil, errors.Join(
+		return nil, false, errors.Join(
 			attachErr,
 			errors.New("local controller ownership became available without a claim"),
 		)
 	}
-	return claim, nil
+	return claim, false, nil
 }
 
 func runRemoteTUIWithLocalFailover(
 	run func(context.Context) error,
 	retry func(string) (*hostInstanceClaim, bool, error),
 ) (*hostInstanceClaim, error) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	claims := make(chan *hostInstanceClaim, 1)
-	watchDone := make(chan struct{})
-	go func() {
-		defer close(watchDone)
-		ticker := time.NewTicker(500 * time.Millisecond)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				claim, havePrimary, err := retry("tui")
-				if err != nil || havePrimary || claim == nil {
-					if claim != nil {
-						_ = claim.Close()
+	for {
+		ctx, cancel := context.WithCancel(context.Background())
+		claims := make(chan *hostInstanceClaim, 1)
+		watchDone := make(chan struct{})
+		go func() {
+			defer close(watchDone)
+			ticker := time.NewTicker(500 * time.Millisecond)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					claim, havePrimary, err := retry("tui")
+					if err != nil || havePrimary || claim == nil {
+						if claim != nil {
+							_ = claim.Close()
+						}
+						continue
 					}
-					continue
+					claims <- claim
+					cancel()
+					return
 				}
-				claims <- claim
-				cancel()
-				return
 			}
-		}
-	}()
+		}()
 
-	attachErr := run(ctx)
-	cancel()
-	<-watchDone
-	select {
-	case claim := <-claims:
-		return claim, nil
-	default:
+		attachErr := run(ctx)
+		cancel()
+		<-watchDone
+		select {
+		case claim := <-claims:
+			return claim, nil
+		default:
+		}
+		if attachErr == nil {
+			return nil, nil
+		}
+		claim, havePrimary, err := recoverTUIPrimaryAfterAttachFailure(attachErr, retry)
+		if claim != nil || err == nil || !havePrimary {
+			return claim, err
+		}
+
+		// Native updates replace the primary process in place. The remote TUI's
+		// stream is expected to close during that small window; when the new
+		// primary already owns the runtime, reattach instead of terminating the
+		// user's terminal with tea.ErrProgramKilled (0xffffffff on Windows).
+		time.Sleep(250 * time.Millisecond)
 	}
-	if attachErr == nil {
-		return nil, nil
-	}
-	return recoverTUIPrimaryAfterAttachFailure(attachErr, retry)
 }
 
 func runWeb(args []string, stdout, stderr io.Writer, store *appconfig.Store) error {

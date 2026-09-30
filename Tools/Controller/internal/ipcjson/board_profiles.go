@@ -169,9 +169,14 @@ func (service *Service) invokeSemanticAction(ctx context.Context, actionID strin
 		return nil, errors.New("the attached board has no configured control profile")
 	}
 	actionID = strings.ToLower(strings.TrimSpace(actionID))
-	controlKey := ""
+	control, action, advertised := advertisedSemanticAction(service.peripheralSettings().Controls, actionID)
+	if !advertised {
+		return nil, fmt.Errorf("action %q is not advertised by board profile %q", actionID, profile.Key)
+	}
+	controlKey := control.Key
 	var err error
-	if profile.Mode == appconfig.BoardModeCinemaSeatMotion {
+	switch control.Kind {
+	case "seat":
 		actions := map[string]struct {
 			side   byte
 			motion controller.RelayMotion
@@ -179,14 +184,13 @@ func (service *Service) invokeSemanticAction(ctx context.Context, actionID strin
 			"seat.a.up": {1, controller.RelayMotionUp}, "seat.a.down": {1, controller.RelayMotionDown}, "seat.a.stop": {1, controller.RelayMotionStop},
 			"seat.b.up": {2, controller.RelayMotionUp}, "seat.b.down": {2, controller.RelayMotionDown}, "seat.b.stop": {2, controller.RelayMotionStop},
 		}
-		action, exists := actions[actionID]
+		mapped, exists := actions[action.ID]
 		if !exists {
 			return nil, fmt.Errorf("action %q is not advertised by board profile %q", actionID, profile.Key)
 		}
-		controlKey = strings.Join(strings.Split(actionID, ".")[:2], ".")
-		err = service.Client.SetMotionSide(ctx, action.side, action.motion)
-	} else if profile.Mode == appconfig.BoardModeOrdinaryRelays {
-		parts := strings.Split(actionID, ".")
+		err = service.Client.SetMotionSide(ctx, mapped.side, mapped.motion)
+	case "relay":
+		parts := strings.Split(action.ID, ".")
 		if len(parts) != 3 || parts[0] != "relay" || parts[2] != "on" && parts[2] != "off" {
 			return nil, fmt.Errorf("action %q is not advertised by board profile %q", actionID, profile.Key)
 		}
@@ -194,13 +198,28 @@ func (service *Service) invokeSemanticAction(ctx context.Context, actionID strin
 		if parseErr != nil || number < 1 || number > 8 {
 			return nil, fmt.Errorf("action %q is not advertised by board profile %q", actionID, profile.Key)
 		}
-		controlKey = strings.Join(parts[:2], ".")
 		err = service.Client.SetRelay(ctx, byte(number), parts[2] == "on")
-	} else {
-		return nil, errors.New("the attached board profile does not advertise actions")
+	default:
+		return nil, fmt.Errorf("action %q is not executable by control %q", actionID, control.Key)
 	}
 	if err != nil {
 		return nil, err
 	}
 	return map[string]any{"accepted": true, "action_id": actionID, "control_key": controlKey, "board_profile": profile}, nil
+}
+
+// advertisedSemanticAction resolves execution from the same catalog returned
+// by controller.peripherals.get. Keeping advertisement and dispatch on one
+// source of truth prevents a profile from rendering a valid control that the
+// invocation path then rejects (for example R5-R8 in cinema-seat mode).
+func advertisedSemanticAction(controls []appconfig.ControlDescriptor, actionID string) (appconfig.ControlDescriptor, appconfig.ActionDescriptor, bool) {
+	actionID = strings.ToLower(strings.TrimSpace(actionID))
+	for _, control := range controls {
+		for _, action := range control.Actions {
+			if strings.ToLower(strings.TrimSpace(action.ID)) == actionID {
+				return control, action, true
+			}
+		}
+	}
+	return appconfig.ControlDescriptor{}, appconfig.ActionDescriptor{}, false
 }

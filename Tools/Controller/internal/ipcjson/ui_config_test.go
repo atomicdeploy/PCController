@@ -224,6 +224,34 @@ func TestPeripheralCatalogUsesExplicitBoardProfileWithoutLegacyMotionAliases(t *
 	}
 }
 
+func TestSemanticActionDispatchUsesTheAdvertisedProfileCatalog(t *testing.T) {
+	_, cinemaControls := appconfig.ProfileDescriptors(
+		appconfig.BoardModeCinemaSeatMotion,
+		nil,
+		nil,
+	)
+	for _, actionID := range []string{"seat.a.up", "seat.b.stop", "relay.5.on", "relay.8.off"} {
+		control, action, ok := advertisedSemanticAction(cinemaControls, actionID)
+		if !ok || action.ID != actionID || control.Key == "" {
+			t.Fatalf("advertised action %q was not executable: control=%+v action=%+v ok=%t", actionID, control, action, ok)
+		}
+	}
+	if control, action, ok := advertisedSemanticAction(cinemaControls, "relay.1.on"); ok {
+		t.Fatalf("seat-internal relay unexpectedly executable: control=%+v action=%+v", control, action)
+	}
+
+	_, relayControls := appconfig.ProfileDescriptors(
+		appconfig.BoardModeOrdinaryRelays,
+		nil,
+		nil,
+	)
+	for _, actionID := range []string{"relay.1.on", "relay.8.off"} {
+		if _, _, ok := advertisedSemanticAction(relayControls, actionID); !ok {
+			t.Fatalf("ordinary-relay action %q was not executable", actionID)
+		}
+	}
+}
+
 func TestPeripheralSettingsCarriesTypedStripEffectDescriptors(t *testing.T) {
 	settings := peripheralSettings{StripEffects: control.SupportedStripEffectDescriptors(true, native.CapabilityAddressableLED)}
 	encoded, err := json.Marshal(settings)
