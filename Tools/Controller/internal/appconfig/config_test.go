@@ -873,7 +873,9 @@ func TestControlDescriptorsAreOrderedResolvedAndExcludeSystemChannels(t *testing
 		for _, got := range controls {
 			if got.Key == want.Key {
 				found = true
-				if got != want {
+				if got.Key != want.Key || got.Kind != want.Kind || got.Order != want.Order ||
+					got.Name != want.Name || got.Icon != want.Icon || got.Group != want.Group ||
+					got.Control != want.Control || len(got.Actions) != 0 {
 					t.Fatalf("control %s=%+v, want %+v", want.Key, got, want)
 				}
 				break

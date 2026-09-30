@@ -57,11 +57,59 @@ func (runner *MacroRunner) UpdateProfile(reference, name, category, color string
 
 // A complete applied mask is one scheduled command, not eight serial requests.
 // The firmware owns output interlocks and off-before-on transitions.
-func relayMaskSteps(at uint32, previous, mask byte, initial bool) []appconfig.MacroStep {
+func relayMaskSteps(at uint32, previous, mask byte, initial bool, profileMode string) []appconfig.MacroStep {
 	if !initial && mask == previous {
 		return nil
 	}
-	return []appconfig.MacroStep{{AtUS: at, Kind: "relay-mask", Value: uint16(mask)}}
+	return []appconfig.MacroStep{{
+		AtUS: at, Kind: "relay-mask", Value: uint16(mask),
+		ActionIDs: relaySemanticActions(previous, mask, initial, profileMode),
+	}}
+}
+
+func relaySemanticActions(previous, mask byte, initial bool, profileMode string) []string {
+	changed := previous ^ mask
+	if initial {
+		changed = 0xff
+	}
+	var result []string
+	switch appconfig.NormalizeBoardMode(profileMode) {
+	case appconfig.BoardModeCinemaSeatMotion:
+		for side, bits := range [][2]byte{{0, 1}, {2, 3}} {
+			directionBit, enableBit := bits[0], bits[1]
+			if changed&(1<<directionBit|1<<enableBit) == 0 {
+				continue
+			}
+			name := []string{"seat.a.", "seat.b."}[side]
+			if mask&(1<<enableBit) == 0 {
+				result = append(result, name+"stop")
+			} else if mask&(1<<directionBit) == 0 {
+				result = append(result, name+"up")
+			} else {
+				result = append(result, name+"down")
+			}
+		}
+		for relay := byte(4); relay < 8; relay++ {
+			if changed&(1<<relay) != 0 {
+				state := "off"
+				if mask&(1<<relay) != 0 {
+					state = "on"
+				}
+				result = append(result, fmt.Sprintf("relay.%d.%s", relay+1, state))
+			}
+		}
+	case appconfig.BoardModeOrdinaryRelays:
+		for relay := byte(0); relay < 8; relay++ {
+			if changed&(1<<relay) != 0 {
+				state := "off"
+				if mask&(1<<relay) != 0 {
+					state = "on"
+				}
+				result = append(result, fmt.Sprintf("relay.%d.%s", relay+1, state))
+			}
+		}
+	}
+	return result
 }
 
 // Called with recordMu held. MCU output timestamps preserve relay intervals
@@ -114,7 +162,7 @@ func (runner *MacroRunner) captureRelayEdge(evidence CommandEvidence) {
 	if runner.recordBaseAt.IsZero() {
 		runner.recordBaseAt = evidence.ObservedAt
 	}
-	steps := relayMaskSteps(at, runner.recordRelayMask, evidence.RelayMask, !runner.recordRelaySeen)
+	steps := relayMaskSteps(at, runner.recordRelayMask, evidence.RelayMask, !runner.recordRelaySeen, runner.recordMacro.BoardProfileMode)
 	if len(runner.recordMacro.Steps)+len(steps) > 65535 {
 		runner.recording.LastError = "recording reached the step limit"
 		return
@@ -210,7 +258,7 @@ func (runner *MacroRunner) collectBoardRecording(ctx context.Context, save bool)
 		}
 		raw = append(raw, p[4:]...)
 	}
-	steps, err := decodeRelayCapture(raw)
+	steps, err := decodeRelayCapture(raw, runner.recordMacro.BoardProfileMode)
 	if err != nil {
 		return err
 	}
@@ -222,7 +270,7 @@ func (runner *MacroRunner) collectBoardRecording(ctx context.Context, save bool)
 	return nil
 }
 
-func decodeRelayCapture(raw []byte) ([]appconfig.MacroStep, error) {
+func decodeRelayCapture(raw []byte, profileMode ...string) ([]appconfig.MacroStep, error) {
 	if len(raw) == 0 || len(raw)%5 != 0 {
 		return nil, errors.New("invalid relay capture length")
 	}
@@ -230,6 +278,10 @@ func decodeRelayCapture(raw []byte) ([]appconfig.MacroStep, error) {
 	var previous byte
 	var last uint32
 	first := binary.LittleEndian.Uint32(raw[:4])
+	mode := ""
+	if len(profileMode) != 0 {
+		mode = profileMode[0]
+	}
 	for offset := 0; offset < len(raw); offset += 5 {
 		original := binary.LittleEndian.Uint32(raw[offset : offset+4])
 		at := original - first
@@ -237,7 +289,7 @@ func decodeRelayCapture(raw []byte) ([]appconfig.MacroStep, error) {
 		if original > 0x7fffffff || original < first || at < last || at > 0x7fffffff {
 			return nil, errors.New("invalid relay capture timing")
 		}
-		result = append(result, relayMaskSteps(at, previous, mask, offset == 0)...)
+		result = append(result, relayMaskSteps(at, previous, mask, offset == 0, mode)...)
 		previous, last = mask, at
 	}
 	return result, nil

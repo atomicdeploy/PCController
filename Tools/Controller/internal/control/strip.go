@@ -14,17 +14,34 @@ import (
 	"pccontroller.local/controller/internal/native"
 )
 
-type stripEffectDefinition struct {
+type StripEffectDescriptor struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	DefaultFPS  int    `json:"default_fps"`
+	MinPixels   int    `json:"min_pixels"`
+	MaxPixels   int    `json:"max_pixels"`
+	MinFPS      int    `json:"min_fps"`
+	MaxFPS      int    `json:"max_fps"`
 }
 
-var stripEffectCatalog = []stripEffectDefinition{
-	{ID: "police", Name: "Police", Description: "Alternating red and blue emergency-light sweep", DefaultFPS: 20},
-	{ID: "white-thunder", Name: "White thunder", Description: "A sharp white lightning strike with secondary flashes and decay", DefaultFPS: 30},
-	{ID: "converging-red", Name: "Converging red dots", Description: "Two fading red dots travel from both ends to the center", DefaultFPS: 30},
+type stripEffectDefinition = StripEffectDescriptor
+
+var stripEffectCatalog = []StripEffectDescriptor{
+	{ID: "police", Name: "Police", Description: "Alternating red and blue emergency-light sweep", DefaultFPS: 20, MinPixels: 1, MaxPixels: native.StripMaximumPixels, MinFPS: 1, MaxFPS: 30},
+	{ID: "white-thunder", Name: "White thunder", Description: "A sharp white lightning strike with secondary flashes and decay", DefaultFPS: 30, MinPixels: 1, MaxPixels: native.StripMaximumPixels, MinFPS: 1, MaxFPS: 30},
+	{ID: "converging-red", Name: "Converging red dots", Description: "Two fading red dots travel from both ends to the center", DefaultFPS: 30, MinPixels: 1, MaxPixels: native.StripMaximumPixels, MinFPS: 1, MaxFPS: 30},
+}
+
+func StripEffectDescriptors() []StripEffectDescriptor {
+	return append([]StripEffectDescriptor(nil), stripEffectCatalog...)
+}
+
+func SupportedStripEffectDescriptors(connected bool, capabilities uint32) []StripEffectDescriptor {
+	if !connected || capabilities&native.CapabilityAddressableLED == 0 {
+		return nil
+	}
+	return StripEffectDescriptors()
 }
 
 type stripEffectRenderer func(count int, elapsed time.Duration) []byte

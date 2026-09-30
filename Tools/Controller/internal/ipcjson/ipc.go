@@ -29,6 +29,7 @@ import (
 	controller "pccontroller.local/controller"
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/artifacts"
+	"pccontroller.local/controller/internal/control"
 	"pccontroller.local/controller/internal/discovery"
 	"pccontroller.local/controller/internal/hostfacts"
 	"pccontroller.local/controller/internal/hostos"
@@ -343,9 +344,11 @@ type browserUISettings struct {
 }
 
 type peripheralSettings struct {
-	Names       map[string]string                `json:"peripheral_names"`
-	Peripherals []appconfig.PeripheralDescriptor `json:"peripherals"`
-	Controls    []appconfig.ControlDescriptor    `json:"controls"`
+	Names        map[string]string                `json:"peripheral_names"`
+	BoardProfile boardProfileDescriptor           `json:"board_profile"`
+	Peripherals  []appconfig.PeripheralDescriptor `json:"peripherals"`
+	Controls     []appconfig.ControlDescriptor    `json:"controls"`
+	StripEffects []control.StripEffectDescriptor  `json:"strip_effects,omitempty"`
 }
 
 // networkPeerConfig is the versionless bridge topology contract. Deliberately
@@ -692,6 +695,35 @@ func (service *Service) dispatch(
 		result = service.browserUISettings()
 	case "controller.peripherals", "controller.peripherals.get":
 		result = service.peripheralSettings()
+	case "controller.board_profile.get":
+		result, _ = service.activeBoardProfile()
+	case "controller.board_profile.update":
+		var params struct {
+			Key              string `json:"key"`
+			Mode             string `json:"mode"`
+			ExpectedRevision string `json:"expected_revision,omitempty"`
+		}
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			result, err = service.updateActiveBoardProfile(params.Key, params.Mode, params.ExpectedRevision)
+		}
+	case "controller.peripheral.presentation.update":
+		var params struct {
+			Key              string  `json:"key"`
+			Name             *string `json:"name,omitempty"`
+			Icon             *string `json:"icon,omitempty"`
+			Group            *string `json:"group,omitempty"`
+			ExpectedRevision string  `json:"expected_revision,omitempty"`
+		}
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			result, err = service.updatePeripheralPresentation(params.Key, params.Name, params.Icon, params.Group, params.ExpectedRevision)
+		}
+	case "controller.action.invoke":
+		var params struct {
+			ActionID string `json:"action_id"`
+		}
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			result, err = service.invokeSemanticAction(ctx, params.ActionID)
+		}
 	case "controller.peripherals.set":
 		var params struct {
 			PeripheralNames map[string]string `json:"peripheral_names"`
@@ -1707,11 +1739,14 @@ func normalizePeripheralNames(names map[string]string) (map[string]string, error
 }
 
 func (service *Service) peripheralSettings() peripheralSettings {
-	names := service.hostConfig().UI.PeripheralNames
+	config := service.hostConfig()
+	names := config.UI.PeripheralNames
+	profileDescriptor, profile := service.activeBoardProfile()
+	peripherals, controls := appconfig.ProfileDescriptors(profileDescriptor.Mode, names, profile.Presentation)
+	stripEffects := service.Client.Snapshot().StripEffects
 	return peripheralSettings{
-		Names:       clonePeripheralNames(names),
-		Peripherals: appconfig.PeripheralDescriptors(),
-		Controls:    appconfig.ControlDescriptors(names),
+		Names: clonePeripheralNames(names), BoardProfile: profileDescriptor,
+		Peripherals: peripherals, Controls: controls, StripEffects: stripEffects,
 	}
 }
 
@@ -1728,10 +1763,15 @@ func (service *Service) setPeripheralNames(names map[string]string) error {
 	if err := candidate.Validate(); err != nil {
 		return err
 	}
-	return service.UpdateHostConfig(func(value *appconfig.Config) error {
+	err = service.UpdateHostConfig(func(value *appconfig.Config) error {
 		value.UI.PeripheralNames = clonePeripheralNames(normalized)
 		return nil
 	})
+	if err == nil {
+		profile, _ := service.activeBoardProfile()
+		service.publishPeripheralChange(profile, []string{"*"}, []string{"name"})
+	}
+	return err
 }
 
 func (service *Service) hostFacts() hostfacts.Provider {
@@ -2077,11 +2117,11 @@ func requestCapability(method string, params json.RawMessage) string {
 	case "controller.message.send":
 		return capabilityMessages
 	case "controller.display.send", "controller.opcode.send",
-		"controller.opcode.exchange", "controller.opcode.request":
+		"controller.opcode.exchange", "controller.opcode.request", "controller.action.invoke":
 		return capabilityBoard
 	case "controller.host_menu.config", "controller.host_menu.config.get",
 		"controller.ui.config", "controller.ui.config.get",
-		"controller.peripherals", "controller.peripherals.get",
+		"controller.peripherals", "controller.peripherals.get", "controller.board_profile.get",
 		"controller.os.policy", "controller.os.facts.catalog",
 		"controller.host.facts.catalog", "controller.hotkeys.get",
 		"controller.bridge.list", "controller.network.peers.get",
@@ -2092,7 +2132,8 @@ func requestCapability(method string, params json.RawMessage) string {
 		return capabilityRead
 	case "controller.host_menu.configure", "controller.host_menu.config.set",
 		"controller.ui.config.set",
-		"controller.peripherals.set",
+		"controller.peripherals.set", "controller.board_profile.update",
+		"controller.peripheral.presentation.update",
 		"controller.hotkeys.set",
 		"controller.os.configure", "controller.lcd.presentation.configure",
 		"controller.app.page", "controller.app.navigate", "controller.app.action.ack", "controller.app.launch",

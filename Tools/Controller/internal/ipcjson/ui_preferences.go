@@ -224,6 +224,13 @@ func (service *Service) updateBrowserUISettings(raw json.RawMessage) (any, error
 		return nil, err
 	}
 	fields, beforeValues, afterValues = browserUIConfigDiff(appliedBefore, appliedAfter)
+	for _, field := range fields {
+		if field == "peripheral_names" {
+			profile, _ := service.activeBoardProfile()
+			service.publishPeripheralChange(profile, []string{"*"}, []string{"name"})
+			break
+		}
+	}
 	changed := true
 	result := service.browserUISettings()
 	result.Changed, result.ChangedFields = &changed, fields
