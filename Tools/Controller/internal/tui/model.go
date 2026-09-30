@@ -1996,53 +1996,58 @@ func tuiConnectionPresentation(
 			phase = "disconnected"
 		}
 	}
-	candidate := snapshot.ConnectionCandidate.Label()
-	if strings.TrimSpace(snapshot.ConnectionCandidate.Name) == "" {
-		candidate = snapshot.Port.Label()
-	}
-	if strings.TrimSpace(snapshot.Port.Name) == "" &&
-		strings.TrimSpace(snapshot.ConnectionCandidate.Name) == "" {
-		candidate = ""
-	}
-	parts := make([]string, 0, 4)
-	if candidate != "" {
-		parts = append(parts, candidate)
-	}
-	if snapshot.ConnectionAttempt != 0 {
-		parts = append(parts, fmt.Sprintf("attempt %d", snapshot.ConnectionAttempt))
-	}
 	status := "DISCONNECTED"
+	detail := "Enter or click to connect"
 	switch phase {
 	case "connected":
 		status = "CONNECTED"
+		detail = ""
 	case "attempting":
 		status = "CONNECTING"
+		detail = "authenticated connection in progress"
 		if !snapshot.ConnectionAttemptStart.IsZero() {
-			parts = append(parts, "elapsed "+formatConnectionDuration(now.Sub(snapshot.ConnectionAttemptStart)))
+			detail = "elapsed " + formatConnectionDuration(now.Sub(snapshot.ConnectionAttemptStart))
 		}
 	case "waiting_retry":
 		status = "RETRY SCHEDULED"
+		detail = "automatic retry armed"
 		if !snapshot.ConnectionNextRetry.IsZero() {
 			remaining := snapshot.ConnectionNextRetry.Sub(now)
 			if remaining < 0 {
 				remaining = 0
 			}
-			parts = append(parts, "next attempt in "+formatConnectionDuration(remaining))
+			detail = "retry in " + formatConnectionDuration(remaining)
 		}
 	case "queued":
 		status = "RECONNECT QUEUED"
+		detail = "waiting for connection worker"
 	case "paused":
 		status = "CLOSED"
+		detail = "automatic retry paused"
 	case "blocked":
 		status = "SERIAL BLOCKED"
+		detail = "another process owns the port"
 	}
-	if reason := strings.TrimSpace(snapshot.ConnectionReason); reason != "" {
-		parts = append(parts, reason)
+	return status, detail, phase
+}
+
+func compactConnectionCandidate(snapshot control.Snapshot) string {
+	candidate := snapshot.ConnectionCandidate
+	if strings.TrimSpace(candidate.Name) == "" {
+		candidate = snapshot.Port
 	}
-	if len(parts) == 0 {
-		parts = append(parts, "Enter or click to start a bounded connection attempt")
+	name := strings.TrimSpace(candidate.Name)
+	friendly := strings.TrimSpace(candidate.FriendlyName)
+	if friendly == "" {
+		friendly = strings.TrimSpace(candidate.Product)
 	}
-	return status, strings.Join(parts, " · "), phase
+	if name == "" {
+		return friendly
+	}
+	if friendly == "" || strings.EqualFold(name, friendly) {
+		return name
+	}
+	return name + " · " + friendly
 }
 
 func formatConnectionDuration(value time.Duration) string {
@@ -2132,7 +2137,7 @@ func (model Model) actionBar(snapshot control.Snapshot) string {
 	for _, item := range items {
 		buttons = append(buttons, item.render())
 	}
-	connectionText := "No port owned"
+	connectionText := ""
 	connectionStyle := labelStyle
 	if snapshot.Connected {
 		connectionText = snapshot.Port.Name
@@ -2151,6 +2156,9 @@ func (model Model) actionBar(snapshot control.Snapshot) string {
 		connectionStyle = errorStyle
 	}
 	controls := lipgloss.JoinHorizontal(lipgloss.Center, intersperseStrings(buttons, " ")...)
+	if connectionText == "" {
+		return controls
+	}
 	available := model.width - lipgloss.Width(controls) - 3
 	connectionText = truncateText(connectionText, available)
 	return lipgloss.JoinHorizontal(lipgloss.Center, controls, "   ", connectionStyle.Render(connectionText))
