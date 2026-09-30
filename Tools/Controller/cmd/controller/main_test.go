@@ -45,7 +45,7 @@ func TestMessageDisconnectedAllowanceMatchesDeliveryTargets(t *testing.T) {
 func TestRemoteTUIAttachFailureTakesOwnershipWhenPrimaryDisappears(t *testing.T) {
 	attachErr := errors.New("remote primary stopped")
 	want := &hostInstanceClaim{}
-	got, err := recoverTUIPrimaryAfterAttachFailure(
+	got, havePrimary, err := recoverTUIPrimaryAfterAttachFailure(
 		attachErr,
 		func(surface string) (*hostInstanceClaim, bool, error) {
 			if surface != "tui" {
@@ -54,31 +54,31 @@ func TestRemoteTUIAttachFailureTakesOwnershipWhenPrimaryDisappears(t *testing.T)
 			return want, false, nil
 		},
 	)
-	if err != nil || got != want {
-		t.Fatalf("claim=%p err=%v, want claim=%p", got, err, want)
+	if err != nil || havePrimary || got != want {
+		t.Fatalf("claim=%p havePrimary=%t err=%v, want claim=%p", got, havePrimary, err, want)
 	}
 }
 
 func TestRemoteTUIAttachFailurePreservesErrorWhenPrimaryStillOwnsRuntime(t *testing.T) {
 	attachErr := errors.New("remote attach rejected")
-	claim, err := recoverTUIPrimaryAfterAttachFailure(
+	claim, havePrimary, err := recoverTUIPrimaryAfterAttachFailure(
 		attachErr,
 		func(string) (*hostInstanceClaim, bool, error) { return nil, true, nil },
 	)
-	if claim != nil || !errors.Is(err, attachErr) {
-		t.Fatalf("claim=%p err=%v", claim, err)
+	if claim != nil || !havePrimary || !errors.Is(err, attachErr) {
+		t.Fatalf("claim=%p havePrimary=%t err=%v", claim, havePrimary, err)
 	}
 }
 
 func TestRemoteTUIAttachFailureJoinsOwnershipProbeError(t *testing.T) {
 	attachErr := errors.New("remote attach failed")
 	probeErr := errors.New("ownership probe failed")
-	claim, err := recoverTUIPrimaryAfterAttachFailure(
+	claim, havePrimary, err := recoverTUIPrimaryAfterAttachFailure(
 		attachErr,
 		func(string) (*hostInstanceClaim, bool, error) { return nil, false, probeErr },
 	)
-	if claim != nil || !errors.Is(err, attachErr) || !errors.Is(err, probeErr) {
-		t.Fatalf("claim=%p err=%v", claim, err)
+	if claim != nil || havePrimary || !errors.Is(err, attachErr) || !errors.Is(err, probeErr) {
+		t.Fatalf("claim=%p havePrimary=%t err=%v", claim, havePrimary, err)
 	}
 }
 
@@ -109,14 +109,21 @@ func TestAttachedRemoteTUIYieldsToLocalOwnershipWhenPrimaryStops(t *testing.T) {
 	}
 }
 
-func TestAttachedRemoteTUIKeepsAttachErrorWhilePrimaryStillOwnsRuntime(t *testing.T) {
+func TestAttachedRemoteTUIReattachesWhenReplacementPrimaryOwnsRuntime(t *testing.T) {
 	attachErr := errors.New("remote attach rejected")
+	runs := 0
 	claim, err := runRemoteTUIWithLocalFailover(
-		func(context.Context) error { return attachErr },
+		func(context.Context) error {
+			runs++
+			if runs == 1 {
+				return attachErr
+			}
+			return nil
+		},
 		func(string) (*hostInstanceClaim, bool, error) { return nil, true, nil },
 	)
-	if claim != nil || !errors.Is(err, attachErr) {
-		t.Fatalf("claim=%p err=%v", claim, err)
+	if claim != nil || err != nil || runs != 2 {
+		t.Fatalf("claim=%p err=%v runs=%d", claim, err, runs)
 	}
 }
 
