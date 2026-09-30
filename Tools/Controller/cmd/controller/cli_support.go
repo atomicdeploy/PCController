@@ -348,6 +348,7 @@ Host configuration and integration:
 	controller network edge-enable|edge-disable|peer-add|peer-remove|probe|firewall-ensure|status
 	controller --open-user-data | --open-config-dir | --clear-settings
 	controller package inventory --directory DIR [--output FILE]
+	controller update host FILE [--expected-sha256 SHA256] [--idempotency-key KEY]
 	controller install [--package DIR] [--expected-package-sha256 SHA256] [--desktop]
 	controller repair [--package DIR] [--expected-package-sha256 SHA256] [--desktop]
 	controller installation status

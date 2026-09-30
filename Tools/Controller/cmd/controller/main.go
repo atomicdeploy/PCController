@@ -186,6 +186,8 @@ func run(args []string, stdout, stderr io.Writer) (resultErr error) {
 			strings.ToLower(args[0]), args[1:], stdout, stderr,
 			configuredProductTitle(configPath, presentation.AppName),
 		)
+	case "update":
+		return runHostUpdate(args[1:], stdout, stderr)
 	case "installation":
 		return runInstallationStatus(args[1:], stdout, stderr)
 	case "uninstall":
