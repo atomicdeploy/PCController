@@ -49,6 +49,39 @@ func TestListenRejectsNonLoopback(t *testing.T) {
 	}
 }
 
+func TestHostAudioRPCListsCuesAndHonorsMute(t *testing.T) {
+	runtime := control.New(control.Options{})
+	defer runtime.Close()
+	config := appconfig.Defaults()
+	config.UI.Appearance.AudioMuted = true
+	service := Service{
+		Client:     controllerapi.AttachSharedRuntime(runtime, shell.New(8)),
+		HostConfig: func() appconfig.Config { return config },
+	}
+	listed := service.Dispatch(context.Background(), Request{Method: "controller.audio.cues"})
+	if listed.Error != nil {
+		t.Fatal(listed.Error)
+	}
+	values, ok := listed.Result.(map[string]any)
+	if !ok || len(values["cues"].([]string)) == 0 {
+		t.Fatalf("audio cues=%#v", listed.Result)
+	}
+	params, _ := json.Marshal(map[string]string{"cue": "warning"})
+	played := service.Dispatch(context.Background(), Request{Method: "controller.audio.play", Params: params})
+	if played.Error != nil {
+		t.Fatal(played.Error)
+	}
+	result, ok := played.Result.(map[string]any)
+	if !ok || result["played"] != false || result["muted"] != true {
+		t.Fatalf("audio result=%#v", played.Result)
+	}
+	invalid, _ := json.Marshal(map[string]string{"cue": "unknown"})
+	rejected := service.Dispatch(context.Background(), Request{Method: "controller.audio.play", Params: invalid})
+	if rejected.Error == nil || rejected.Error.Code != -32602 {
+		t.Fatalf("invalid audio response=%#v", rejected)
+	}
+}
+
 func TestAppPageRPCPublishesValidatedTUIAction(t *testing.T) {
 	runtime := control.New(control.Options{})
 	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))

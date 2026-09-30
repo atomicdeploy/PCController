@@ -776,6 +776,38 @@ func (service *Service) dispatch(
 	case "controller.close", "controller.port.close":
 		err = service.Client.Close()
 		result = map[string]bool{"closed": err == nil}
+	case "controller.audio.cues":
+		cues := hostui.AudioCueNames()
+		values := make([]string, len(cues))
+		for index, cue := range cues {
+			values[index] = string(cue)
+		}
+		result = map[string]any{"cues": values}
+	case "controller.audio.play":
+		var params struct {
+			Cue string `json:"cue"`
+		}
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			cue := hostui.AudioCue(strings.ToLower(strings.TrimSpace(params.Cue)))
+			if !cue.Valid() {
+				err = &RPCError{Code: -32602, Message: "cue must be one of the declared controller.audio.cues values"}
+			} else {
+				muted := false
+				volume := float64(1)
+				if service.HostConfig != nil {
+					appearance := service.HostConfig().UI.Appearance
+					muted, volume = appearance.AudioMuted, appearance.AudioVolume
+				}
+				played := !muted && volume > 0
+				if played {
+					err = hostui.PlayAudioCue(cue)
+				}
+				result = map[string]any{
+					"cue": cue, "played": played && err == nil,
+					"muted": muted || volume <= 0, "volume": volume,
+				}
+			}
+		}
 	case "controller.reset.lines", "controller.reset", "controller.port.reset":
 		var params struct {
 			PulseMS int `json:"pulse_ms"`
@@ -2119,6 +2151,10 @@ func requestCapability(method string, params json.RawMessage) string {
 	case "controller.connect", "controller.open", "controller.port.open",
 		"controller.close", "controller.port.close":
 		return capabilityConnection
+	case "controller.audio.cues":
+		return capabilityRead
+	case "controller.audio.play":
+		return capabilityIntegrations
 	case "controller.reset.lines", "controller.reset", "controller.port.reset":
 		return capabilityReset
 	case "controller.quit", "controller.exit":
@@ -2214,6 +2250,11 @@ func commandCapability(command string) string {
 	switch words[0] {
 	case "help", "?", "ports", "hello", "status", "st", "temp", "temperature":
 		return capabilityRead
+	case "audio":
+		if len(words) == 2 && words[1] == "list" {
+			return capabilityRead
+		}
+		return capabilityIntegrations
 	case "event":
 		return capabilityEvents
 	case "settings":

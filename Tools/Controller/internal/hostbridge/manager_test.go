@@ -253,7 +253,7 @@ func TestDoorNotificationJobsKeepTransitionsDistinctAndAvoidRunningDuplicate(t *
 	}, snapshot)
 	if err != nil || !ok || warning.key != "warning.door-open-running" ||
 		warning.notification.Title != "PCController · Door open during operation" ||
-		len(warning.notification.Actions) != 2 {
+		len(warning.notification.Actions) != 2 || warning.audioCue != hostui.AudioCueWarning {
 		t.Fatalf("running warning job=%#v ok=%t err=%v", warning, ok, err)
 	}
 
@@ -261,6 +261,20 @@ func TestDoorNotificationJobsKeepTransitionsDistinctAndAvoidRunningDuplicate(t *
 	fallback, ok, err := notificationJobForEvent(config, physicalDoorEvent(true), snapshot)
 	if err != nil || !ok || fallback.key != "door.opened" {
 		t.Fatalf("disabled warning fallback=%#v ok=%t err=%v", fallback, ok, err)
+	}
+}
+
+func TestCriticalAudioCueExcludesRoutineMotionAndConnectionRetries(t *testing.T) {
+	for kind, want := range map[string]hostui.AudioCue{
+		"motion.fault":              hostui.AudioCueError,
+		"temperature.hot":           hostui.AudioCueWarning,
+		"warning.door-open-running": hostui.AudioCueWarning,
+		"motion.changed":            "",
+		"connection.retry":          "",
+	} {
+		if got := criticalAudioCue(kind); got != want {
+			t.Errorf("criticalAudioCue(%q)=%q want %q", kind, got, want)
+		}
 	}
 }
 
