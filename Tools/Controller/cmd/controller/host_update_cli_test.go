@@ -15,6 +15,9 @@ import (
 )
 
 func TestDelegatePrimaryHostUpdateStreamsAndVerifiesRestartedDigest(t *testing.T) {
+	previousWindow := hostUpdateStableVerificationWindow
+	hostUpdateStableVerificationWindow = 0
+	defer func() { hostUpdateStableVerificationWindow = previousWindow }()
 	content := []byte("verified-host-candidate")
 	digestValue := sha256.Sum256(content)
 	digest := hex.EncodeToString(digestValue[:])
