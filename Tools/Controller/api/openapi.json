@@ -3630,6 +3630,7 @@
           "method": {
             "type": "string",
             "enum": [
+              "controller.action.invoke",
               "controller.app.action",
               "controller.app.action.ack",
               "controller.app.action.outcome",
@@ -3655,6 +3656,8 @@
               "controller.board_automation.list",
               "controller.board_automation.put",
               "controller.board_automation.remove",
+              "controller.board_profile.get",
+              "controller.board_profile.update",
               "controller.bridge.call",
               "controller.bridge.list",
               "controller.close",
@@ -3727,6 +3730,7 @@
               "controller.os.power",
               "controller.os.status",
               "controller.peer.update.host",
+              "controller.peripheral.presentation.update",
               "controller.peripherals",
               "controller.peripherals.get",
               "controller.peripherals.set",
