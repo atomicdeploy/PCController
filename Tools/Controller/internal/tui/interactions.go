@@ -422,12 +422,25 @@ func (model Model) showPortPicker() (Model, tea.Cmd, bool) {
 	model.portPicker = true
 	model.portCursor = 0
 	model.portError = ""
-	if model.preview != nil || model.remote != nil {
-		model.portCandidates = []ports.Info{model.snapshot().Port}
+	if model.preview != nil {
+		current := model.snapshot().Port
+		if strings.TrimSpace(current.Name) == "" {
+			model.portCandidates = nil
+		} else {
+			model.portCandidates = []ports.Info{current}
+		}
 		model.portLoading = false
 		return model, nil, true
 	}
 	model.portLoading = true
+	if model.remote != nil {
+		if model.remote.Ports == nil {
+			model.portLoading = false
+			model.portError = "The connected controller host does not expose serial-device discovery."
+			return model, nil, true
+		}
+		return model, listRemotePorts(model.remote.Ports), true
+	}
 	return model, listPorts(), true
 }
 

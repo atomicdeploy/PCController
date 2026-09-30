@@ -130,6 +130,40 @@ func TestPortPickerOmitsRedundantAuthenticationHint(t *testing.T) {
 	if !strings.Contains(rendered, "SELECT SERIAL DEVICE") {
 		t.Fatalf("port picker lost its actionable heading:\n%s", rendered)
 	}
+	if !strings.Contains(rendered, "Connection") || !strings.Contains(rendered, "Target") {
+		t.Fatalf("port picker lost concise connection context:\n%s", rendered)
+	}
+}
+
+func TestPortPickerDoesNotMarkEmptyIdentityCurrent(t *testing.T) {
+	model := readyModel(t, PageDashboard)
+	model.portCandidates = []ports.Info{{}}
+	model.remoteSnapshot = control.Snapshot{}
+	model.preview = nil
+	model.remote = &RemoteBackend{}
+	rendered := ansi.Strip(model.portPickerPage(model.snapshot()))
+	if strings.Contains(rendered, "CURRENT") {
+		t.Fatalf("empty serial identity was marked current:\n%s", rendered)
+	}
+}
+
+func TestRemotePortPickerFetchesAuthoritativeHostInventory(t *testing.T) {
+	model := readyModel(t, PageDashboard)
+	model.preview = nil
+	model.remoteSnapshot = control.Snapshot{}
+	model.remote = &RemoteBackend{Ports: func(context.Context) ([]ports.Info, error) {
+		return []ports.Info{{
+			Name: "COM3", FriendlyName: "USB-SERIAL CH340", VID: "1A86", PID: "7523",
+		}}, nil
+	}}
+	updated, command, handled := model.showPortPicker()
+	if !handled || command == nil || !updated.portLoading {
+		t.Fatalf("remote picker handled=%v loading=%v command=%v", handled, updated.portLoading, command != nil)
+	}
+	message, ok := command().(portsResultMsg)
+	if !ok || message.err != nil || len(message.values) != 1 || message.values[0].Name != "COM3" {
+		t.Fatalf("remote picker result=%T %#v", message, message)
+	}
 }
 
 func TestPreviewFramesCoverEveryDomainPage(t *testing.T) {

@@ -50,8 +50,20 @@ func (model Model) pageView(snapshot control.Snapshot) string {
 }
 
 func (model Model) portPickerPage(snapshot control.Snapshot) string {
+	status, detail, _ := tuiConnectionPresentation(snapshot, model.connectPending, time.Now())
+	connection := status
+	if detail != "" {
+		connection += " · " + detail
+	}
 	lines := []string{
 		sectionHeader(model.width, "SELECT SERIAL DEVICE", "↑/↓ select · Enter open · Esc cancel"),
+		kvCard(model.width, 12, "Connection", connection),
+	}
+	if target := compactConnectionCandidate(snapshot); target != "" {
+		lines = append(lines, kvCard(model.width, 12, "Target", target))
+	}
+	if reason := strings.TrimSpace(snapshot.ConnectionReason); reason != "" && !snapshot.Connected {
+		lines = append(lines, kvCard(model.width, 12, "Last failure", reason))
 	}
 	if model.portLoading {
 		lines = append(lines, warnStyle.Render(model.spinnerView()+" querying Windows serial devices…"))
@@ -64,7 +76,8 @@ func (model Model) portPickerPage(snapshot control.Snapshot) string {
 	}
 	for index, candidate := range model.portCandidates {
 		line := candidate.Label()
-		if candidate.Name == snapshot.Port.Name {
+		if strings.TrimSpace(candidate.Name) != "" &&
+			strings.EqualFold(strings.TrimSpace(candidate.Name), strings.TrimSpace(snapshot.Port.Name)) {
 			line += "  · CURRENT"
 		}
 		if index == model.portCursor {

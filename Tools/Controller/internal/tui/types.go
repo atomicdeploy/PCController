@@ -12,6 +12,7 @@ import (
 	"pccontroller.local/controller/internal/hostui"
 	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/portowner"
+	"pccontroller.local/controller/internal/ports"
 	"pccontroller.local/controller/internal/productidentity"
 )
 
@@ -208,6 +209,7 @@ type RemoteBackend struct {
 	InitialSnapshot           control.Snapshot
 	InitialSnapshotReceivedAt time.Time
 	Snapshot                  func(context.Context) (control.Snapshot, error)
+	Ports                     func(context.Context) ([]ports.Info, error)
 	FrontPanel                func(context.Context) (native.FrontPanel, error)
 	LCDPresentation           func(context.Context) (control.LCDPresentationState, error)
 	Events                    <-chan control.Event
