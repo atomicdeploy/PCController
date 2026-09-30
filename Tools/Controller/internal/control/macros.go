@@ -126,19 +126,21 @@ type MacroRunner struct {
 // MacroRecordingState describes a HOST-owned recording session. Mode states
 // whether offsets come from host monotonic observations or MCU ACK timestamps.
 type MacroRecordingState struct {
-	BoardOwned  bool      `json:"board_owned"`
-	LastAtUS    uint32    `json:"last_at_us"`
-	LastDeltaUS uint32    `json:"last_delta_us"`
-	Overwritten int       `json:"overwritten"`
-	Active      bool      `json:"active"`
-	ID          byte      `json:"id"`
-	Name        string    `json:"name"`
-	Mode        string    `json:"mode"`
-	Category    string    `json:"category,omitempty"`
-	Color       string    `json:"color,omitempty"`
-	Steps       int       `json:"steps"`
-	StartedAt   time.Time `json:"started_at,omitempty"`
-	LastError   string    `json:"last_error,omitempty"`
+	BoardOwned       bool      `json:"board_owned"`
+	LastAtUS         uint32    `json:"last_at_us"`
+	LastDeltaUS      uint32    `json:"last_delta_us"`
+	Overwritten      int       `json:"overwritten"`
+	Active           bool      `json:"active"`
+	ID               byte      `json:"id"`
+	Name             string    `json:"name"`
+	Mode             string    `json:"mode"`
+	Category         string    `json:"category,omitempty"`
+	Color            string    `json:"color,omitempty"`
+	BoardProfileKey  string    `json:"board_profile_key,omitempty"`
+	BoardProfileMode string    `json:"board_profile_mode,omitempty"`
+	Steps            int       `json:"steps"`
+	StartedAt        time.Time `json:"started_at,omitempty"`
+	LastError        string    `json:"last_error,omitempty"`
 }
 
 func NewMacroRunner(
@@ -160,12 +162,39 @@ func NewMacroRunner(
 	}
 }
 
+func (runner *MacroRunner) activeBoardProfile() (string, string) {
+	if runner.hostConfig == nil {
+		return "", ""
+	}
+	config := runner.hostConfig()
+	port := runner.runtime.Snapshot().Port
+	serialNumber, instanceID, portName := port.SerialNumber, port.InstanceID, port.Name
+	if strings.TrimSpace(serialNumber) == "" && strings.TrimSpace(instanceID) == "" && strings.TrimSpace(portName) == "" && config.Connection.LastDevice != nil {
+		serialNumber = config.Connection.LastDevice.SerialNumber
+		instanceID = config.Connection.LastDevice.InstanceID
+		portName = config.Connection.LastDevice.Port
+	}
+	identity := appconfig.ResolveBoardIdentity(serialNumber, instanceID, portName)
+	profile, exists := config.BoardProfiles[identity.Value]
+	if !exists {
+		return "", ""
+	}
+	mode := appconfig.NormalizeBoardMode(profile.Mode)
+	if mode == appconfig.BoardModeUnconfigured {
+		return "", ""
+	}
+	return profile.Key, mode
+}
+
 func (runner *MacroRunner) List() []appconfig.Macro {
 	source := runner.library()
 	result := make([]appconfig.Macro, len(source))
 	for index, macro := range source {
 		result[index] = macro
 		result[index].Steps = append([]appconfig.MacroStep(nil), macro.Steps...)
+		for stepIndex := range result[index].Steps {
+			result[index].Steps[stepIndex].ActionIDs = append([]string(nil), macro.Steps[stepIndex].ActionIDs...)
+		}
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
 	return result
@@ -333,10 +362,12 @@ func (runner *MacroRunner) startRecording(name, category, color, mode string) (M
 	}
 	runner.recordMu.Unlock()
 	runner.runtime.beginMacroTimingWindow(activeUseMacroRecording)
+	profileKey, profileMode := runner.activeBoardProfile()
 	runner.recordMu.Lock()
 	runner.recordMacro = appconfig.Macro{
 		ID: id, Name: name, Category: strings.TrimSpace(category), Color: color,
 		Mode: mode, TimingToleranceUS: modeTimingTolerance(mode),
+		BoardProfileKey: profileKey, BoardProfileMode: profileMode,
 	}
 	runner.recordBaseUS = 0
 	runner.recordBaseAt = time.Time{}
@@ -345,7 +376,7 @@ func (runner *MacroRunner) startRecording(name, category, color, mode string) (M
 	runner.recordRelaySeen = false
 	runner.recording = MacroRecordingState{
 		Active: true, ID: id, Name: name, Mode: mode, Category: strings.TrimSpace(category),
-		Color: color, StartedAt: time.Now(),
+		Color: color, BoardProfileKey: profileKey, BoardProfileMode: profileMode, StartedAt: time.Now(),
 	}
 	runner.recordRelease = runner.runtime.ObserveCommands(runner.captureCommand)
 	state := runner.recording
@@ -378,6 +409,9 @@ func (runner *MacroRunner) StopRecording(save bool) (appconfig.Macro, error) {
 	}
 	macro := runner.recordMacro
 	macro.Steps = append([]appconfig.MacroStep(nil), macro.Steps...)
+	for stepIndex := range macro.Steps {
+		macro.Steps[stepIndex].ActionIDs = append([]string(nil), macro.Steps[stepIndex].ActionIDs...)
+	}
 	sort.SliceStable(macro.Steps, func(i, j int) bool { return macro.Steps[i].AtUS < macro.Steps[j].AtUS })
 	if save && len(macro.Steps) == 0 {
 		// Keep an empty recording active: Save must never destroy the take.
@@ -534,6 +568,15 @@ func (runner *MacroRunner) StartMode(ctx context.Context, reference, modeOverrid
 	snapshot := runner.runtime.Snapshot()
 	if !snapshot.Connected {
 		return MacroState{}, errors.New("device is not connected")
+	}
+	if macro.BoardProfileKey != "" {
+		profileKey, profileMode := runner.activeBoardProfile()
+		if profileKey != macro.BoardProfileKey || profileMode != macro.BoardProfileMode {
+			return MacroState{}, fmt.Errorf(
+				"macro %q is bound to board profile %s/%s; attached profile is %s/%s",
+				macro.Name, macro.BoardProfileKey, macro.BoardProfileMode, profileKey, profileMode,
+			)
+		}
 	}
 	mode := macro.Mode
 	if mode == macroModeMCU && snapshot.Hello.Capabilities&native.CapabilityTimedMacroQueue == 0 {

@@ -1,6 +1,9 @@
 package appconfig
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 const MaxPeripheralNames = 96
 
@@ -14,18 +17,30 @@ type PeripheralDescriptor struct {
 	Role        string `json:"role"`
 	Index       int    `json:"index"`
 	DefaultName string `json:"default_name"`
+	Name        string `json:"name,omitempty"`
+	Icon        string `json:"icon,omitempty"`
+	Group       string `json:"group,omitempty"`
 	Control     string `json:"control"`
+}
+
+type ActionDescriptor struct {
+	ID   string `json:"id"`
+	Verb string `json:"verb"`
+	Name string `json:"name"`
 }
 
 // ControlDescriptor is the compact, ordered cross-surface contract for one
 // operator-controllable board channel. The canonical key remains suitable for
 // commands and persisted names while Kind supplies the operator vocabulary.
 type ControlDescriptor struct {
-	Key     string `json:"key"`
-	Kind    string `json:"kind"`
-	Order   int    `json:"order"`
-	Name    string `json:"name"`
-	Control string `json:"control"`
+	Key     string             `json:"key"`
+	Kind    string             `json:"kind"`
+	Order   int                `json:"order"`
+	Name    string             `json:"name"`
+	Icon    string             `json:"icon,omitempty"`
+	Group   string             `json:"group,omitempty"`
+	Control string             `json:"control"`
+	Actions []ActionDescriptor `json:"actions,omitempty"`
 }
 
 var corePeripheralDescriptors = buildPeripheralDescriptors()
@@ -147,4 +162,98 @@ func ControlDescriptors(names map[string]string) []ControlDescriptor {
 		})
 	}
 	return controls
+}
+
+// ProfileDescriptors resolves the active board wiring without pretending that
+// R1..R4 are simultaneously independent relays and cinema-seat actuators.
+// Existing catalog helpers remain unchanged for older local surfaces.
+func ProfileDescriptors(mode string, legacyNames map[string]string, presentation map[string]PeripheralPresentation) ([]PeripheralDescriptor, []ControlDescriptor) {
+	mode = NormalizeBoardMode(mode)
+	peripherals := make([]PeripheralDescriptor, 0, len(corePeripheralDescriptors))
+	controls := make([]ControlDescriptor, 0, 21)
+	addControl := func(descriptor PeripheralDescriptor, kind string, actions []ActionDescriptor) {
+		resolved := resolvePresentation(descriptor.Key, descriptor.DefaultName, legacyNames, presentation)
+		descriptor.Name, descriptor.Icon, descriptor.Group = resolved.Name, resolved.Icon, resolved.Group
+		peripherals = append(peripherals, descriptor)
+		controls = append(controls, ControlDescriptor{
+			Key: descriptor.Key, Kind: kind, Order: descriptor.Index,
+			Name: descriptor.Name, Icon: descriptor.Icon, Group: descriptor.Group,
+			Control: descriptor.Control, Actions: actions,
+		})
+	}
+	for _, descriptor := range corePeripheralDescriptors {
+		if descriptor.Kind == "motion" {
+			if mode == BoardModeCinemaSeatMotion {
+				side := []string{"a", "b"}[descriptor.Index-1]
+				key := "seat." + side
+				seat := PeripheralDescriptor{
+					Key: key, Kind: "seat", Role: "cinema-seat-motion", Index: descriptor.Index,
+					DefaultName: fmt.Sprintf("Seat %s", strings.ToUpper(side)), Control: "seat",
+				}
+				legacy := make(map[string]string, len(legacyNames)+1)
+				for itemKey, value := range legacyNames {
+					legacy[itemKey] = value
+				}
+				if _, exists := legacy[key]; !exists {
+					legacy[key] = legacyNames["motion."+side]
+				}
+				actions := []ActionDescriptor{
+					{ID: key + ".up", Verb: "up", Name: "Up"},
+					{ID: key + ".down", Verb: "down", Name: "Down"},
+					{ID: key + ".stop", Verb: "stop", Name: "Stop"},
+				}
+				resolved := resolvePresentation(key, seat.DefaultName, legacy, presentation)
+				seat.Name, seat.Icon, seat.Group = resolved.Name, resolved.Icon, resolved.Group
+				peripherals = append(peripherals, seat)
+				controls = append(controls, ControlDescriptor{
+					Key: key, Kind: "seat", Order: descriptor.Index, Name: seat.Name,
+					Icon: seat.Icon, Group: seat.Group, Control: "seat", Actions: actions,
+				})
+			}
+			continue
+		}
+		if descriptor.Kind == "relay" {
+			if descriptor.Index <= 4 {
+				switch mode {
+				case BoardModeOrdinaryRelays:
+					descriptor.Role, descriptor.Control = "user-output", "relay"
+				case BoardModeCinemaSeatMotion:
+					descriptor.Control = "seat-internal"
+				default:
+					descriptor.Control = "unavailable"
+				}
+			}
+			if descriptor.Index > 4 || mode == BoardModeOrdinaryRelays {
+				actions := []ActionDescriptor{
+					{ID: fmt.Sprintf("relay.%d.on", descriptor.Index), Verb: "on", Name: "On"},
+					{ID: fmt.Sprintf("relay.%d.off", descriptor.Index), Verb: "off", Name: "Off"},
+				}
+				addControl(descriptor, "relay", actions)
+			} else {
+				resolved := resolvePresentation(descriptor.Key, descriptor.DefaultName, legacyNames, presentation)
+				descriptor.Name, descriptor.Icon, descriptor.Group = resolved.Name, resolved.Icon, resolved.Group
+				peripherals = append(peripherals, descriptor)
+			}
+			continue
+		}
+		if descriptor.Kind == "pwm" && descriptor.Index <= 10 {
+			addControl(descriptor, "mosfet", nil)
+			continue
+		}
+		resolved := resolvePresentation(descriptor.Key, descriptor.DefaultName, legacyNames, presentation)
+		descriptor.Name, descriptor.Icon, descriptor.Group = resolved.Name, resolved.Icon, resolved.Group
+		peripherals = append(peripherals, descriptor)
+	}
+	return peripherals, controls
+}
+
+func resolvePresentation(key, defaultName string, legacyNames map[string]string, presentation map[string]PeripheralPresentation) PeripheralPresentation {
+	result := presentation[key]
+	if result.Name == "" {
+		result.Name = legacyNames[key]
+	}
+	if result.Name == "" {
+		result.Name = defaultName
+	}
+	return result
 }
