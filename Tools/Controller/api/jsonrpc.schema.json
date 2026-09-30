@@ -379,6 +379,7 @@
         },
         "method": {
           "enum": [
+            "controller.action.invoke",
             "controller.app.action",
             "controller.app.action.ack",
             "controller.app.action.outcome",
@@ -404,6 +405,8 @@
             "controller.board_automation.list",
             "controller.board_automation.put",
             "controller.board_automation.remove",
+            "controller.board_profile.get",
+            "controller.board_profile.update",
             "controller.bridge.call",
             "controller.bridge.list",
             "controller.close",
@@ -476,6 +479,7 @@
             "controller.os.power",
             "controller.os.status",
             "controller.peer.update.host",
+            "controller.peripheral.presentation.update",
             "controller.peripherals",
             "controller.peripherals.get",
             "controller.peripherals.set",
@@ -690,6 +694,11 @@
     }
   },
   "x-methods": {
+    "controller.action.invoke": {
+      "capability": "board_commands",
+      "summary": "Invoke one stable action ID advertised by the attached board profile and wait for the board acknowledgement.",
+      "idempotency": "non-idempotent"
+    },
     "controller.app.action": {
       "capability": "dynamic",
       "summary": "Freeze a validated action to exact live targets and return its correlated per-target delivery operation.",
@@ -831,6 +840,16 @@
     "controller.board_automation.remove": {
       "capability": "board_commands",
       "summary": "Remove one board automation and verify its absence.",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.board_profile.get": {
+      "capability": "read",
+      "summary": "Return the attached board identity, configured wiring mode, and opaque profile revision.",
+      "idempotency": "safe"
+    },
+    "controller.board_profile.update": {
+      "capability": "host_configuration",
+      "summary": "Bind the attached physical board identity to one explicit host-owned wiring profile.",
       "idempotency": "idempotent-with-authoritative-readback"
     },
     "controller.bridge.call": {
@@ -1192,6 +1211,11 @@
       "capability": "programming",
       "summary": "Transfer a verified executable using a caller-generated idempotency_key, wait through the peer restart, and verify its exact active SHA-256 acknowledgement. Retry uncertain outcomes with the same key.",
       "idempotency": "non-idempotent"
+    },
+    "controller.peripheral.presentation.update": {
+      "capability": "host_configuration",
+      "summary": "Update one advertised peripheral name, icon, or group using optional optimistic concurrency.",
+      "idempotency": "idempotent-with-authoritative-readback"
     },
     "controller.peripherals": {
       "capability": "read",

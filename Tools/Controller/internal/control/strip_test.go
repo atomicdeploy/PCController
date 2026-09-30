@@ -92,6 +92,32 @@ func TestStripEffectCatalogAndAliases(t *testing.T) {
 	}
 }
 
+func TestTypedStripEffectCatalogIsLiveCapabilityGated(t *testing.T) {
+	if got := SupportedStripEffectDescriptors(false, native.CapabilityAddressableLED); len(got) != 0 {
+		t.Fatalf("disconnected catalog=%+v", got)
+	}
+	if got := SupportedStripEffectDescriptors(true, 0); len(got) != 0 {
+		t.Fatalf("unsupported catalog=%+v", got)
+	}
+	catalog := SupportedStripEffectDescriptors(true, native.CapabilityAddressableLED)
+	if len(catalog) != 3 {
+		t.Fatalf("catalog=%+v", catalog)
+	}
+	want := []string{"police", "white-thunder", "converging-red"}
+	for index, descriptor := range catalog {
+		if descriptor.ID != want[index] || descriptor.Name == "" || descriptor.Description == "" ||
+			descriptor.DefaultFPS < descriptor.MinFPS || descriptor.DefaultFPS > descriptor.MaxFPS ||
+			descriptor.MinPixels != 1 || descriptor.MaxPixels != native.StripMaximumPixels ||
+			descriptor.MinFPS != 1 || descriptor.MaxFPS != 30 {
+			t.Fatalf("descriptor[%d]=%+v", index, descriptor)
+		}
+	}
+	catalog[0].Name = "mutated"
+	if StripEffectDescriptors()[0].Name != "Police" {
+		t.Fatal("catalog caller mutated the canonical descriptors")
+	}
+}
+
 func TestStripPoliceFrameAlternatesRedAndBlue(t *testing.T) {
 	first := stripPoliceFrame(4, 0)
 	if first[0] != 255 || first[2] != 0 || first[6] != 0 || first[8] != 255 {

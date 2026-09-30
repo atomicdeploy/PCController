@@ -269,29 +269,32 @@ type Macro struct {
 	LCDMessage          string      `json:"lcd_message,omitempty"`
 	TimingToleranceUS   uint32      `json:"timing_tolerance_us,omitempty"`
 	KeepOutputsOnCancel bool        `json:"keep_outputs_on_cancel,omitempty"`
+	BoardProfileKey     string      `json:"board_profile_key,omitempty"`
+	BoardProfileMode    string      `json:"board_profile_mode,omitempty"`
 	Steps               []MacroStep `json:"steps"`
 }
 
 // MacroStep describes one timestamped operation within a Macro.
 type MacroStep struct {
-	AtUS        uint32 `json:"at_us,omitempty"`
-	Kind        string `json:"kind"`
-	Target      byte   `json:"target,omitempty"`
-	Value       uint16 `json:"value,omitempty"`
-	DurationMS  uint16 `json:"duration_ms,omitempty"`
-	FrequencyHz uint16 `json:"frequency_hz,omitempty"`
-	Text        string `json:"text,omitempty"`
-	Destination string `json:"destination,omitempty"`
-	Code        uint32 `json:"code,omitempty"`
-	Bits        byte   `json:"bits,omitempty"`
-	Protocol    byte   `json:"protocol,omitempty"`
-	PulseUS     uint16 `json:"pulse_us,omitempty"`
-	Red         byte   `json:"red,omitempty"`
-	Green       byte   `json:"green,omitempty"`
-	Blue        byte   `json:"blue,omitempty"`
-	Brightness  byte   `json:"brightness,omitempty"`
-	Opcode      byte   `json:"opcode,omitempty"`
-	PayloadHex  string `json:"payload_hex,omitempty"`
+	AtUS        uint32   `json:"at_us,omitempty"`
+	Kind        string   `json:"kind"`
+	Target      byte     `json:"target,omitempty"`
+	Value       uint16   `json:"value,omitempty"`
+	DurationMS  uint16   `json:"duration_ms,omitempty"`
+	FrequencyHz uint16   `json:"frequency_hz,omitempty"`
+	Text        string   `json:"text,omitempty"`
+	Destination string   `json:"destination,omitempty"`
+	Code        uint32   `json:"code,omitempty"`
+	Bits        byte     `json:"bits,omitempty"`
+	Protocol    byte     `json:"protocol,omitempty"`
+	PulseUS     uint16   `json:"pulse_us,omitempty"`
+	Red         byte     `json:"red,omitempty"`
+	Green       byte     `json:"green,omitempty"`
+	Blue        byte     `json:"blue,omitempty"`
+	Brightness  byte     `json:"brightness,omitempty"`
+	Opcode      byte     `json:"opcode,omitempty"`
+	PayloadHex  string   `json:"payload_hex,omitempty"`
+	ActionIDs   []string `json:"action_ids,omitempty"`
 }
 
 // Automation maps an event match to one or more host-side actions.
@@ -390,39 +393,40 @@ type IlluminationState struct {
 
 // Snapshot is a point-in-time view of connection, board, and front-panel state.
 type Snapshot struct {
-	Connected                bool                  `json:"connected"`
-	Paused                   bool                  `json:"paused"`
-	Port                     PortInfo              `json:"port"`
-	Hello                    Hello                 `json:"hello"`
-	Status                   Status                `json:"status"`
-	Settings                 Settings              `json:"settings"`
-	HaveStatus               bool                  `json:"have_status"`
-	HaveSettings             bool                  `json:"have_settings"`
-	StatusUpdated            time.Time             `json:"status_updated,omitempty"`
-	ConnectionState          string                `json:"connection_state"`
-	ConnectionReason         string                `json:"connection_reason,omitempty"`
-	ConnectionUpdated        time.Time             `json:"connection_updated,omitempty"`
-	ConnectionPhase          string                `json:"connection_phase"`
-	ConnectionAttempt        uint64                `json:"connection_attempt,omitempty"`
-	ConnectionGeneration     uint64                `json:"connection_generation,omitempty"`
-	ConnectionAttemptStarted time.Time             `json:"connection_attempt_started,omitempty"`
-	ConnectionNextRetry      time.Time             `json:"connection_next_retry,omitempty"`
-	ConnectionRetryDelayMS   int64                 `json:"connection_retry_delay_ms,omitempty"`
-	ConnectionCandidate      PortInfo              `json:"connection_candidate"`
-	ProgramState             ProgramStateSnapshot  `json:"program_state"`
-	RFLearning               RFLearnState          `json:"rf_learning"`
-	Macros                   control.MacroSnapshot `json:"macros"`
-	HardwareProblems         []HardwareProblem     `json:"hardware_problems,omitempty"`
-	FrontPanel               FrontPanel            `json:"front_panel"`
-	HaveFrontPanel           bool                  `json:"have_front_panel"`
-	FrontPanelUpdated        time.Time             `json:"front_panel_updated,omitempty"`
-	StatusLED                StatusLEDState        `json:"status_led"`
-	HaveStatusLED            bool                  `json:"have_status_led"`
-	StatusLEDUpdated         time.Time             `json:"status_led_updated,omitempty"`
-	StatusLEDRevision        uint64                `json:"status_led_revision,omitempty"`
-	Outputs                  OutputStreamState     `json:"outputs"`
-	Illumination             IlluminationState     `json:"illumination"`
-	PortProcess              PortProcessSnapshot   `json:"port_process"`
+	Connected                bool                            `json:"connected"`
+	Paused                   bool                            `json:"paused"`
+	Port                     PortInfo                        `json:"port"`
+	Hello                    Hello                           `json:"hello"`
+	Status                   Status                          `json:"status"`
+	Settings                 Settings                        `json:"settings"`
+	HaveStatus               bool                            `json:"have_status"`
+	HaveSettings             bool                            `json:"have_settings"`
+	StatusUpdated            time.Time                       `json:"status_updated,omitempty"`
+	ConnectionState          string                          `json:"connection_state"`
+	ConnectionReason         string                          `json:"connection_reason,omitempty"`
+	ConnectionUpdated        time.Time                       `json:"connection_updated,omitempty"`
+	ConnectionPhase          string                          `json:"connection_phase"`
+	ConnectionAttempt        uint64                          `json:"connection_attempt,omitempty"`
+	ConnectionGeneration     uint64                          `json:"connection_generation,omitempty"`
+	ConnectionAttemptStarted time.Time                       `json:"connection_attempt_started,omitempty"`
+	ConnectionNextRetry      time.Time                       `json:"connection_next_retry,omitempty"`
+	ConnectionRetryDelayMS   int64                           `json:"connection_retry_delay_ms,omitempty"`
+	ConnectionCandidate      PortInfo                        `json:"connection_candidate"`
+	ProgramState             ProgramStateSnapshot            `json:"program_state"`
+	RFLearning               RFLearnState                    `json:"rf_learning"`
+	Macros                   control.MacroSnapshot           `json:"macros"`
+	HardwareProblems         []HardwareProblem               `json:"hardware_problems,omitempty"`
+	FrontPanel               FrontPanel                      `json:"front_panel"`
+	HaveFrontPanel           bool                            `json:"have_front_panel"`
+	FrontPanelUpdated        time.Time                       `json:"front_panel_updated,omitempty"`
+	StatusLED                StatusLEDState                  `json:"status_led"`
+	HaveStatusLED            bool                            `json:"have_status_led"`
+	StatusLEDUpdated         time.Time                       `json:"status_led_updated,omitempty"`
+	StatusLEDRevision        uint64                          `json:"status_led_revision,omitempty"`
+	Outputs                  OutputStreamState               `json:"outputs"`
+	StripEffects             []control.StripEffectDescriptor `json:"strip_effects,omitempty"`
+	Illumination             IlluminationState               `json:"illumination"`
+	PortProcess              PortProcessSnapshot             `json:"port_process"`
 }
 
 // Event is the normalized event envelope shared by embedders and bridge clients.
@@ -868,6 +872,9 @@ func cloneAppMacros(source []appconfig.Macro) []appconfig.Macro {
 	for index, macro := range source {
 		result[index] = macro
 		result[index].Steps = append([]appconfig.MacroStep(nil), macro.Steps...)
+		for stepIndex := range result[index].Steps {
+			result[index].Steps[stepIndex].ActionIDs = append([]string(nil), macro.Steps[stepIndex].ActionIDs...)
+		}
 	}
 	return result
 }
@@ -880,6 +887,8 @@ func toAppMacros(macros []Macro) []appconfig.Macro {
 			Mode: macro.Mode, Color: macro.Color, Label: macro.Label, LCDMessage: macro.LCDMessage,
 			TimingToleranceUS:   macro.TimingToleranceUS,
 			KeepOutputsOnCancel: macro.KeepOutputsOnCancel,
+			BoardProfileKey:     macro.BoardProfileKey,
+			BoardProfileMode:    macro.BoardProfileMode,
 			Steps:               make([]appconfig.MacroStep, len(macro.Steps)),
 		}
 		for stepIndex, step := range macro.Steps {
@@ -892,6 +901,7 @@ func toAppMacros(macros []Macro) []appconfig.Macro {
 				PulseUS: step.PulseUS, Red: step.Red, Green: step.Green,
 				Blue: step.Blue, Brightness: step.Brightness,
 				Opcode: step.Opcode, PayloadHex: step.PayloadHex,
+				ActionIDs: append([]string(nil), step.ActionIDs...),
 			}
 		}
 	}
@@ -2035,6 +2045,7 @@ func (client *Client) Snapshot() Snapshot {
 	if !snapshot.Connected || !snapshot.HaveSettings || !snapshot.HaveStatus {
 		illumination = IlluminationState{}
 	}
+	stripEffects := control.SupportedStripEffectDescriptors(snapshot.Connected, snapshot.Hello.Capabilities)
 	return Snapshot{
 		Connected: snapshot.Connected,
 		Paused:    snapshot.Paused,
@@ -2085,6 +2096,7 @@ func (client *Client) Snapshot() Snapshot {
 		StatusLEDUpdated:  snapshot.StatusLEDUpdated,
 		StatusLEDRevision: snapshot.StatusLEDRevision,
 		Outputs:           client.outputs.State(),
+		StripEffects:      stripEffects,
 		Illumination:      illumination,
 		PortProcess:       snapshot.PortProcess,
 	}

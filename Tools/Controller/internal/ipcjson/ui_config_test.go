@@ -11,6 +11,7 @@ import (
 	controllerapi "pccontroller.local/controller"
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/control"
+	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/shell"
 )
 
@@ -118,10 +119,10 @@ func TestPeripheralNamesRPCNormalizesPersistsAndNeverTouchesBoardSettings(t *tes
 	if _, exists := updated.Names["pwm.0"]; exists {
 		t.Fatalf("blank custom name was not restored to default: %#v", updated.Names)
 	}
-	if len(updated.Peripherals) != 34 || len(updated.Controls) != 21 || config.Connection.ResetOnReconnect {
+	if len(updated.Peripherals) != 32 || len(updated.Controls) != 15 || updated.BoardProfile.Mode != appconfig.BoardModeUnconfigured || config.Connection.ResetOnReconnect {
 		t.Fatalf("peripheral update descriptors=%d controls=%d reset-on-reconnect=%t", len(updated.Peripherals), len(updated.Controls), config.Connection.ResetOnReconnect)
 	}
-	if got := updated.Controls[4]; got.Key != "relay.5" || got.Kind != "relay" || got.Order != 5 || got.Name != "Bench lamp" {
+	if got := updated.Controls[0]; got.Key != "relay.5" || got.Kind != "relay" || got.Order != 5 || got.Name != "Bench lamp" {
 		t.Fatalf("relay control contract=%+v", got)
 	}
 
@@ -156,24 +157,113 @@ func TestPeripheralNamesRESTUsesTheSameTypedContract(t *testing.T) {
 	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
 		t.Fatal(err)
 	}
-	if response.StatusCode != http.StatusOK || result.Names["display.lcd"] != "Cabinet LCD" || len(result.Peripherals) != 34 || len(result.Controls) != 21 {
+	if response.StatusCode != http.StatusOK || result.Names["display.lcd"] != "Cabinet LCD" || len(result.Peripherals) != 32 || len(result.Controls) != 15 || result.BoardProfile.Configured {
 		t.Fatalf("REST peripheral response status=%d result=%+v", response.StatusCode, result)
 	}
 }
 
 func TestPeripheralAndPWMCapabilitiesSeparateReadConfigurationAndBoardWrites(t *testing.T) {
 	checks := map[string]string{
-		"controller.peripherals.get":  capabilityRead,
-		"controller.peripherals.set":  capabilityHostConfig,
-		"controller.pwm.values":       capabilityRead,
-		"controller.pwm.set":          capabilityBoard,
-		"controller.pwm.off":          capabilityBoard,
-		"controller.illumination.get": capabilityRead,
-		"controller.illumination.set": capabilityBoard,
+		"controller.peripherals.get":                capabilityRead,
+		"controller.peripherals.set":                capabilityHostConfig,
+		"controller.board_profile.get":              capabilityRead,
+		"controller.board_profile.update":           capabilityHostConfig,
+		"controller.peripheral.presentation.update": capabilityHostConfig,
+		"controller.action.invoke":                  capabilityBoard,
+		"controller.pwm.values":                     capabilityRead,
+		"controller.pwm.set":                        capabilityBoard,
+		"controller.pwm.off":                        capabilityBoard,
+		"controller.illumination.get":               capabilityRead,
+		"controller.illumination.set":               capabilityBoard,
 	}
 	for method, want := range checks {
 		if got := requestCapability(method, nil); got != want {
 			t.Fatalf("%s capability=%q, want %q", method, got, want)
+		}
+	}
+}
+
+func TestPeripheralCatalogUsesExplicitBoardProfileWithoutLegacyMotionAliases(t *testing.T) {
+	service, config := browserUIConfigTestService(t)
+	config.Connection.LastDevice = &appconfig.DeviceIdentity{Port: "COM18", SerialNumber: "BOARD-42"}
+	config.BoardProfiles = map[string]appconfig.BoardProfile{
+		"serial:board-42": {
+			Key: "cafe-cinema", Mode: appconfig.BoardModeCinemaSeatMotion,
+			Presentation: map[string]appconfig.PeripheralPresentation{
+				"seat.a": {Name: "Left bank", Icon: "seat", Group: "auditorium"},
+			},
+		},
+	}
+	response := service.Dispatch(context.Background(), Request{Method: "controller.peripherals.get"})
+	settings, ok := response.Result.(peripheralSettings)
+	if response.Error != nil || !ok {
+		t.Fatalf("result=%#v error=%v", response.Result, response.Error)
+	}
+	if !settings.BoardProfile.Configured || settings.BoardProfile.Attached || settings.BoardProfile.Key != "cafe-cinema" ||
+		settings.BoardProfile.BoardIdentity != "serial:board-42" || settings.BoardProfile.Mode != appconfig.BoardModeCinemaSeatMotion || len(settings.Controls) != 17 {
+		t.Fatalf("profile=%+v controls=%d", settings.BoardProfile, len(settings.Controls))
+	}
+	seenSeat := false
+	for _, control := range settings.Controls {
+		if control.Key == "motion.a" || control.Key == "motion.b" || control.Key == "relay.1" {
+			t.Fatalf("catalog advertised ambiguous legacy control %+v", control)
+		}
+		if control.Key == "seat.a" {
+			seenSeat = control.Name == "Left bank" && control.Icon == "seat" && control.Group == "auditorium" &&
+				len(control.Actions) == 3 && control.Actions[2].ID == "seat.a.stop"
+		}
+	}
+	if !seenSeat {
+		t.Fatalf("seat.a missing from %+v", settings.Controls)
+	}
+
+	params, _ := json.Marshal(map[string]any{"key": "cafe-cinema", "mode": appconfig.BoardModeCinemaSeatMotion})
+	rejected := service.Dispatch(context.Background(), Request{Method: "controller.board_profile.update", Params: params})
+	if rejected.Error == nil || !strings.Contains(rejected.Error.Message, "attached") {
+		t.Fatalf("unattached update=%+v", rejected)
+	}
+}
+
+func TestPeripheralSettingsCarriesTypedStripEffectDescriptors(t *testing.T) {
+	settings := peripheralSettings{StripEffects: control.SupportedStripEffectDescriptors(true, native.CapabilityAddressableLED)}
+	encoded, err := json.Marshal(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded struct {
+		StripEffects []struct {
+			ID          string `json:"id"`
+			Name        string `json:"name"`
+			Description string `json:"description"`
+			DefaultFPS  int    `json:"default_fps"`
+			MinPixels   int    `json:"min_pixels"`
+			MaxPixels   int    `json:"max_pixels"`
+			MinFPS      int    `json:"min_fps"`
+			MaxFPS      int    `json:"max_fps"`
+		} `json:"strip_effects"`
+	}
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if len(decoded.StripEffects) != 3 || decoded.StripEffects[0].ID != "police" ||
+		decoded.StripEffects[1].ID != "white-thunder" || decoded.StripEffects[2].ID != "converging-red" ||
+		decoded.StripEffects[0].Name == "" || decoded.StripEffects[0].Description == "" ||
+		decoded.StripEffects[0].DefaultFPS != 20 || decoded.StripEffects[0].MinPixels != 1 ||
+		decoded.StripEffects[0].MaxPixels != native.StripMaximumPixels || decoded.StripEffects[0].MinFPS != 1 || decoded.StripEffects[0].MaxFPS != 30 {
+		t.Fatalf("strip effects=%+v json=%s", decoded.StripEffects, encoded)
+	}
+}
+
+func TestSemanticProfileRPCRejectsMalformedParamsAsInvalidParams(t *testing.T) {
+	service, _ := browserUIConfigTestService(t)
+	for _, request := range []Request{
+		{Method: "controller.board_profile.update", Params: json.RawMessage(`{"key":"cafe","mode":"cinema-seat-motion","unknown":true}`)},
+		{Method: "controller.peripheral.presentation.update", Params: json.RawMessage(`{"key":"seat.a","unknown":true}`)},
+		{Method: "controller.action.invoke", Params: json.RawMessage(`{"action_id":""}`)},
+	} {
+		response := service.Dispatch(context.Background(), request)
+		if response.Error == nil || response.Error.Code != -32602 {
+			t.Fatalf("%s response=%+v", request.Method, response)
 		}
 	}
 }

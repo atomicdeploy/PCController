@@ -43,21 +43,22 @@ const (
 // Config is the persistent host-side configuration root; it never mirrors or
 // replaces the MCU's EEPROM-owned settings.
 type Config struct {
-	Connection    Connection        `json:"connection"`
-	UI            UI                `json:"ui"`
-	IPC           IPC               `json:"ipc"`
-	Integrations  Integrations      `json:"integrations"`
-	Safety        Safety            `json:"safety"`
-	RF            RFConfig          `json:"rf"`
-	HostMenus     HostMenuConfig    `json:"host_menus"`
-	OSActions     hostos.Policy     `json:"os_actions"`
-	Paths         Paths             `json:"paths"`
-	Programming   Programming       `json:"programming"`
-	Scripts       map[string]string `json:"scripts,omitempty"`
-	Macros        []Macro           `json:"macros,omitempty"`
-	Melodies      []Melody          `json:"melodies,omitempty"`
-	StatusEffects []StatusLEDEffect `json:"status_effects,omitempty"`
-	Automations   []Automation      `json:"automations,omitempty"`
+	Connection    Connection              `json:"connection"`
+	UI            UI                      `json:"ui"`
+	IPC           IPC                     `json:"ipc"`
+	Integrations  Integrations            `json:"integrations"`
+	Safety        Safety                  `json:"safety"`
+	RF            RFConfig                `json:"rf"`
+	HostMenus     HostMenuConfig          `json:"host_menus"`
+	OSActions     hostos.Policy           `json:"os_actions"`
+	Paths         Paths                   `json:"paths"`
+	Programming   Programming             `json:"programming"`
+	Scripts       map[string]string       `json:"scripts,omitempty"`
+	BoardProfiles map[string]BoardProfile `json:"board_profiles,omitempty"`
+	Macros        []Macro                 `json:"macros,omitempty"`
+	Melodies      []Melody                `json:"melodies,omitempty"`
+	StatusEffects []StatusLEDEffect       `json:"status_effects,omitempty"`
+	Automations   []Automation            `json:"automations,omitempty"`
 }
 
 // Connection configures serial discovery, handshake timing, and reconnect behavior.
@@ -245,6 +246,8 @@ type Macro struct {
 	LCDMessage          string      `json:"lcd_message,omitempty"`
 	TimingToleranceUS   uint32      `json:"timing_tolerance_us,omitempty"`
 	KeepOutputsOnCancel bool        `json:"keep_outputs_on_cancel,omitempty"`
+	BoardProfileKey     string      `json:"board_profile_key,omitempty"`
+	BoardProfileMode    string      `json:"board_profile_mode,omitempty"`
 	Steps               []MacroStep `json:"steps"`
 }
 
@@ -270,6 +273,10 @@ type MacroStep struct {
 	Brightness  byte   `json:"brightness,omitempty"`
 	Opcode      byte   `json:"opcode,omitempty"`
 	PayloadHex  string `json:"payload_hex,omitempty"`
+	// ActionIDs preserves the semantic meaning observed alongside the exact
+	// applied relay mask. Playback continues to use the mask so old and new
+	// firmware remain byte-for-byte faithful.
+	ActionIDs []string `json:"action_ids,omitempty"`
 }
 
 // Automation binds matching host or board events to ordered host-side actions.
@@ -674,6 +681,9 @@ func (value Config) Validate() error {
 			return fmt.Errorf("ui.peripheral_names[%q] must be 1..64 printable characters", key)
 		}
 	}
+	if err := value.validateBoardProfiles(); err != nil {
+		return err
+	}
 	if melody := strings.TrimSpace(value.UI.WelcomeMelody); melody == "" || len(melody) > 64 {
 		return errors.New("ui.welcome_melody must contain 1..64 characters")
 	}
@@ -755,6 +765,19 @@ func (value Config) Validate() error {
 		if len(macro.Name) > 64 || !printableASCII(macro.Name) {
 			return fmt.Errorf("macros[%d].name must be at most 64 printable ASCII bytes", index)
 		}
+		if macro.BoardProfileKey != "" && (len(macro.BoardProfileKey) > 64 || !profileToken(macro.BoardProfileKey)) {
+			return fmt.Errorf("macros[%d].board_profile_key must use 1..64 lower-case letters, digits, dot, dash, or underscore", index)
+		}
+		if macro.BoardProfileMode != "" {
+			switch NormalizeBoardMode(macro.BoardProfileMode) {
+			case BoardModeOrdinaryRelays, BoardModeCinemaSeatMotion:
+			default:
+				return fmt.Errorf("macros[%d].board_profile_mode must be ordinary-relays or cinema-seat-motion", index)
+			}
+		}
+		if (macro.BoardProfileKey == "") != (macro.BoardProfileMode == "") {
+			return fmt.Errorf("macros[%d] board_profile_key and board_profile_mode must be set together", index)
+		}
 		if len(macro.Category) > 64 || !printableASCII(macro.Category) {
 			return fmt.Errorf("macros[%d].category must be at most 64 printable ASCII bytes", index)
 		}
@@ -789,6 +812,14 @@ func (value Config) Validate() error {
 				return fmt.Errorf("macros[%d].steps[%d] offset must be ordered within 0..2147483647 us", index, stepIndex)
 			}
 			previous = due
+			if len(step.ActionIDs) > 8 {
+				return fmt.Errorf("macros[%d].steps[%d].action_ids may contain at most 8 entries", index, stepIndex)
+			}
+			for actionIndex, actionID := range step.ActionIDs {
+				if len(actionID) > 64 || !profileToken(actionID) {
+					return fmt.Errorf("macros[%d].steps[%d].action_ids[%d] is invalid", index, stepIndex, actionIndex)
+				}
+			}
 			switch strings.ToLower(step.Kind) {
 			case "relay-mask":
 				if step.Target != 0 || step.Value > 255 {
@@ -1671,10 +1702,16 @@ func clone(value Config) Config {
 	for name, path := range value.Scripts {
 		copyValue.Scripts[name] = path
 	}
+	copyValue.BoardProfiles = cloneBoardProfiles(value.BoardProfiles)
 	copyValue.Macros = make([]Macro, len(value.Macros))
 	for index, macro := range value.Macros {
 		copyValue.Macros[index] = macro
 		copyValue.Macros[index].Steps = append([]MacroStep(nil), macro.Steps...)
+		for stepIndex := range copyValue.Macros[index].Steps {
+			copyValue.Macros[index].Steps[stepIndex].ActionIDs = append(
+				[]string(nil), macro.Steps[stepIndex].ActionIDs...,
+			)
+		}
 	}
 	copyValue.Melodies = cloneMelodies(value.Melodies)
 	copyValue.StatusEffects = append(
