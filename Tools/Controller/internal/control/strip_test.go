@@ -18,6 +18,14 @@ func TestStripRetainedMacroErrorExplainsRecovery(t *testing.T) {
 	}
 }
 
+func TestStripStagedProtocolErrorExplainsFirmwareDrift(t *testing.T) {
+	original := &link.RemoteError{RequestOpcode: native.OpAddressableLED, Code: native.ErrorBadPayload}
+	err := stripCommandError(original)
+	if !errors.Is(err, original) || !strings.Contains(err.Error(), "update the board firmware") {
+		t.Fatalf("missing firmware-drift recovery: %v", err)
+	}
+}
+
 func TestStripActivityDoesNotClearOtherOutputLanes(t *testing.T) {
 	runtime := New(Options{})
 	runtime.setOutputActivity("melody", true)

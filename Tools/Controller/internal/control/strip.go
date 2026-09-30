@@ -31,8 +31,13 @@ type stripEffectRenderer func(count int, elapsed time.Duration) []byte
 
 func stripCommandError(err error) error {
 	var remote *link.RemoteError
-	if errors.As(err, &remote) && remote.Code == native.ErrorBusy {
-		return fmt.Errorf("board is busy; wait for startup, or stop/save the MCU macro and run 'macro buffer clear' to release strip memory: %w", err)
+	if errors.As(err, &remote) {
+		switch remote.Code {
+		case native.ErrorBusy:
+			return fmt.Errorf("board is busy; wait for startup, or stop/save the MCU macro and run 'macro buffer clear' to release strip memory: %w", err)
+		case native.ErrorBadPayload:
+			return fmt.Errorf("connected firmware rejected staged strip streaming; update the board firmware before using strip config, frame, rainbow, or effects: %w", err)
+		}
 	}
 	return err
 }
