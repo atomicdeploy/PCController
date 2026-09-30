@@ -1,6 +1,7 @@
 package hostui
 
 import (
+	"net/url"
 	"testing"
 	"time"
 )
@@ -61,5 +62,31 @@ func TestInstanceRegistryRejectsCredentialLikeValues(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("credential-like instance value was accepted")
+	}
+}
+
+func TestInstanceRegistryPreservesPealayerUnifiedControlEndpoints(t *testing.T) {
+	registry := NewInstanceRegistry()
+	instance, err := registry.Upsert(AppInstance{
+		ID: "pealayer:desktop", Surface: "pealayer", State: "active",
+		Self: &InstanceSelf{Kind: "native", Vars: map[string]string{
+			"rpc":       "http://127.0.0.1:8080/api/rpc",
+			"websocket": "ws://127.0.0.1:8080/ws",
+			"ipc":       "http://127.0.0.1:8080/api/ipc",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if instance.Self == nil {
+		t.Fatal("Pealayer process metadata was discarded")
+	}
+	for name, expectedPath := range map[string]string{
+		"rpc": "/api/rpc", "websocket": "/ws", "ipc": "/api/ipc",
+	} {
+		endpoint, parseErr := url.Parse(instance.Self.Vars[name])
+		if parseErr != nil || endpoint.Host != "127.0.0.1:8080" || endpoint.Path != expectedPath {
+			t.Fatalf("%s endpoint=%q parseErr=%v", name, instance.Self.Vars[name], parseErr)
+		}
 	}
 }

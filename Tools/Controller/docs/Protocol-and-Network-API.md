@@ -801,6 +801,14 @@ is disabled by policy. Transport-session identity binding remains tracked in
 #108 and must be implemented with the future auth work, not inferred from a
 delivery nonce visible to event subscribers.
 
+Pealayer publishes its local automation routes in the instance `self.vars`
+map. `rpc`, `websocket`, and `ipc` are full URLs whose authority is the same
+Pealayer control listener; their canonical paths are `/api/rpc`, `/ws`, and
+`/api/ipc`. PCController preserves these advertised URLs for diagnostics and
+must not synthesize protocol-specific ports or fall back to historical split
+listeners. Application-action delivery still travels over the authenticated
+PCController connection and does not make PCController a proxy for those URLs.
+
 RF learning has two mutually exclusive modes. An omitted mode or
 `{"mode":"indefinite"}` keeps accepting codes until cancellation. A bounded
 session uses `{"mode":"timer","timeout_ms":30000}` and continues accepting
