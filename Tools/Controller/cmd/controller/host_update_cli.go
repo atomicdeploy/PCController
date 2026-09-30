@@ -20,6 +20,7 @@ import (
 const maximumHostUpdateBytes = 256 << 20
 
 var hostUpdatePollInterval = 500 * time.Millisecond
+var hostUpdateStableVerificationWindow = 12 * time.Second
 
 // runHostUpdate routes a candidate through the already-running primary's
 // bounded artifact transport. The primary owns activation, shutdown, restart,
@@ -169,14 +170,25 @@ func waitForPrimaryHostDigest(
 ) error {
 	ticker := time.NewTicker(hostUpdatePollInterval)
 	defer ticker.Stop()
+	var candidateObservedAt time.Time
 	for {
 		var manifest artifacts.Manifest
 		if err := call(ctx, "controller.artifact.manifest", map[string]any{}, &manifest); err == nil &&
 			manifest.Current.Host != nil && strings.EqualFold(manifest.Current.Host.SHA256, digest) {
-			if output != nil {
-				fmt.Fprintf(output, "host update acknowledged after restart: operation=%s sha256=%s terminal_verified=true\n", operationID, digest)
+			if candidateObservedAt.IsZero() {
+				candidateObservedAt = time.Now()
+				if output != nil && hostUpdateStableVerificationWindow > 0 {
+					fmt.Fprintln(output, "candidate is running; waiting for the self-update health commit")
+				}
 			}
-			return nil
+			if hostUpdateStableVerificationWindow <= 0 || time.Since(candidateObservedAt) >= hostUpdateStableVerificationWindow {
+				if output != nil {
+					fmt.Fprintf(output, "host update acknowledged after restart: operation=%s sha256=%s terminal_verified=true\n", operationID, digest)
+				}
+				return nil
+			}
+		} else {
+			candidateObservedAt = time.Time{}
 		}
 		select {
 		case <-ctx.Done():

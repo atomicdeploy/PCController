@@ -93,6 +93,8 @@ func (tracker *UpdateNotificationTracker) Next(value UpdateProgress) (Notificati
 			title, stage = "Peer verified host update", "peer-verified"
 		case stage == "reconnecting" && value.Kind == "host":
 			title, stage = "Peer host is restarting", "peer-restarting"
+		case stage == "health-checking" && value.Kind == "host":
+			title, stage = "Peer host update is health-checking", "peer-health-check"
 		case stage == "backup", stage == "backing-up":
 			title, stage = "Saving board backup", "backup"
 		case strings.Contains(stage, "verif"):

@@ -22,6 +22,9 @@ import (
 )
 
 func TestPeerHostUpdateTransfersVerifiedArtifactThenQueuesRemoteCoordinator(t *testing.T) {
+	previousWindow := peerHostStableVerificationWindow
+	peerHostStableVerificationWindow = 0
+	defer func() { peerHostStableVerificationWindow = previousWindow }()
 	path, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -154,6 +157,9 @@ func TestPeerHostUpdateTransfersVerifiedArtifactThenQueuesRemoteCoordinator(t *t
 }
 
 func TestPeerHostUpdateRetainsIntentWhenTargetAcceptsThenBridgeCloses(t *testing.T) {
+	previousWindow := peerHostStableVerificationWindow
+	peerHostStableVerificationWindow = 0
+	defer func() { peerHostStableVerificationWindow = previousWindow }()
 	path, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)

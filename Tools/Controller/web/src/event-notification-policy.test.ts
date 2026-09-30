@@ -26,6 +26,7 @@ describe('controller event toast policy', () => {
     expect(shouldToastControllerEvent({ kind: 'peer-update.transferring', source: 'bridge' })).toBe(false)
     expect(shouldToastControllerEvent({ kind: 'peer-update.artifact-verified', source: 'bridge' })).toBe(true)
     expect(shouldToastControllerEvent({ kind: 'peer-update.reconnecting', source: 'bridge' })).toBe(true)
+    expect(shouldToastControllerEvent({ kind: 'peer-update.health-checking', source: 'bridge' })).toBe(true)
     expect(shouldToastControllerEvent({ kind: 'peer-update.completed', source: 'bridge' })).toBe(true)
     expect(shouldToastControllerEvent({ kind: 'peer-update.outcome-uncertain', source: 'bridge' })).toBe(true)
   })

@@ -24,6 +24,8 @@ const (
 	peerHostProbeTimeout        = 3 * time.Second
 )
 
+var peerHostStableVerificationWindow = 12 * time.Second
+
 type peerHostUpdateRequest struct {
 	Peer           string `json:"peer"`
 	ArtifactSHA256 string `json:"artifact_sha256"`
@@ -191,6 +193,8 @@ func (service *Service) verifyPeerHostReplacement(
 	defer cancel()
 
 	reconnecting := false
+	var candidateObservedAt time.Time
+	healthChecking := false
 	for {
 		probeContext, probeCancel := context.WithTimeout(verifyContext, peerHostProbeTimeout)
 		var manifest artifacts.Manifest
@@ -198,27 +202,51 @@ func (service *Service) verifyPeerHostReplacement(
 		probeCancel()
 		if probeErr == nil {
 			if manifest.Current.Host != nil && strings.EqualFold(manifest.Current.Host.SHA256, descriptor.SHA256) {
+				if candidateObservedAt.IsZero() {
+					candidateObservedAt = time.Now()
+				}
+				if !healthChecking && peerHostStableVerificationWindow > 0 {
+					healthChecking = true
+					service.emitPeerUpdate(
+						operationID, peer, idempotencyKey, descriptor, "health-checking", 98,
+						"peer candidate is running; waiting for the self-update health commit",
+						map[string]string{
+							"remote_operation_id": remoteOperationID,
+							"active_sha256":       manifest.Current.Host.SHA256,
+							"terminal_verified":   "false",
+						},
+					)
+				}
+				if peerHostStableVerificationWindow <= 0 || time.Since(candidateObservedAt) >= peerHostStableVerificationWindow {
+					service.emitPeerUpdate(
+						operationID, peer, idempotencyKey, descriptor, "completed", 100,
+						"peer restarted and acknowledged the exact active host executable SHA-256 after health commit",
+						map[string]string{
+							"remote_operation_id": remoteOperationID,
+							"active_sha256":       manifest.Current.Host.SHA256,
+							"terminal_verified":   "true",
+						},
+					)
+					return nil
+				}
+			} else {
+				candidateObservedAt = time.Time{}
+				healthChecking = false
+			}
+		} else {
+			candidateObservedAt = time.Time{}
+			healthChecking = false
+			if !reconnecting {
+				reconnecting = true
 				service.emitPeerUpdate(
-					operationID, peer, idempotencyKey, descriptor, "completed", 100,
-					"peer restarted and acknowledged the exact active host executable SHA-256",
+					operationID, peer, idempotencyKey, descriptor, "reconnecting", 95,
+					"peer process is restarting; waiting for the bridge and active SHA acknowledgement",
 					map[string]string{
 						"remote_operation_id": remoteOperationID,
-						"active_sha256":       manifest.Current.Host.SHA256,
-						"terminal_verified":   "true",
+						"terminal_verified":   "false",
 					},
 				)
-				return nil
 			}
-		} else if !reconnecting {
-			reconnecting = true
-			service.emitPeerUpdate(
-				operationID, peer, idempotencyKey, descriptor, "reconnecting", 95,
-				"peer process is restarting; waiting for the bridge and active SHA acknowledgement",
-				map[string]string{
-					"remote_operation_id": remoteOperationID,
-					"terminal_verified":   "false",
-				},
-			)
 		}
 
 		select {

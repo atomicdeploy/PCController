@@ -93,6 +93,7 @@ func TestPeerHostUpdateMilestonesProduceBoundedToasts(t *testing.T) {
 		{"queued", "Sending host update to peer", "info"},
 		{"artifact-verified", "Peer verified host update", "info"},
 		{"reconnecting", "Peer host is restarting", "info"},
+		{"health-checking", "Peer host update is health-checking", "info"},
 		{"completed", "Host update complete", "success"},
 		{"outcome-uncertain", "Host update outcome uncertain", "warning"},
 	} {
