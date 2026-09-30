@@ -3652,6 +3652,8 @@
               "controller.artifact.upload.begin",
               "controller.artifact.upload.chunk",
               "controller.artifact.upload.finish",
+              "controller.audio.cues",
+              "controller.audio.play",
               "controller.board_automation.clear",
               "controller.board_automation.list",
               "controller.board_automation.put",

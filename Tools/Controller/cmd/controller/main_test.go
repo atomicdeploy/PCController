@@ -33,6 +33,8 @@ func TestMessageDisconnectedAllowanceMatchesDeliveryTargets(t *testing.T) {
 		{command: "message all operator.notice ready", want: true},
 		{command: "message lcd operator.notice ready", want: false},
 		{command: "message webui,board operator.notice ready", want: false},
+		{command: "audio list", want: true},
+		{command: "audio play warning", want: true},
 		{command: "status", want: false},
 	}
 	for _, test := range tests {

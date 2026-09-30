@@ -19,6 +19,7 @@ import (
 	"pccontroller.local/controller/internal/discovery"
 	"pccontroller.local/controller/internal/hostfacts"
 	"pccontroller.local/controller/internal/hostos"
+	"pccontroller.local/controller/internal/hostui"
 	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/ports"
 	"pccontroller.local/controller/internal/programmer"
@@ -175,6 +176,38 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 		Name: "clear", Usage: "clear", Summary: "clear the interactive console",
 		Run: func(context.Context, []string) (string, error) {
 			return "\x1b[2J\x1b[H", nil
+		},
+	})
+	mustRegister(shell.Command{
+		Name: "audio", Usage: "audio list | audio play CUE",
+		Summary: "list or play a headless local host sound effect",
+		Run: func(_ context.Context, args []string) (string, error) {
+			if len(args) == 1 && strings.EqualFold(args[0], "list") {
+				cues := hostui.AudioCueNames()
+				names := make([]string, len(cues))
+				for index, cue := range cues {
+					names[index] = string(cue)
+				}
+				return strings.Join(names, "\n"), nil
+			}
+			if len(args) != 2 || !strings.EqualFold(args[0], "play") {
+				return "", errors.New("usage: audio list | audio play CUE")
+			}
+			cue := hostui.AudioCue(strings.ToLower(strings.TrimSpace(args[1])))
+			if !cue.Valid() {
+				return "", fmt.Errorf("unsupported host audio cue %q; use audio list", args[1])
+			}
+			if options.HostConfig != nil {
+				appearance := options.HostConfig().UI.Appearance
+				if appearance.AudioMuted || appearance.AudioVolume <= 0 {
+					return fmt.Sprintf("host audio %s not played: interaction audio is muted", cue), nil
+				}
+			}
+			if err := hostui.PlayAudioCue(cue); err != nil {
+				return "", err
+			}
+			runtime.PublishHostEvent("host.audio.played", "local host audio cue played: "+string(cue))
+			return fmt.Sprintf("played local host audio cue %s", cue), nil
 		},
 	})
 	mustRegister(shell.Command{

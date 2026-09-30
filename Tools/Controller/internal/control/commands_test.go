@@ -20,6 +20,26 @@ import (
 	"pccontroller.local/controller/internal/programmer"
 )
 
+func TestHostAudioCommandListsCuesAndHonorsMute(t *testing.T) {
+	runtime := New(Options{})
+	defer runtime.Close()
+	config := appconfig.Defaults()
+	config.UI.Appearance.AudioMuted = true
+	engine := NewCommandEngine(runtime, CommandOptions{HostConfig: func() appconfig.Config { return config }})
+
+	listed, err := engine.Execute(context.Background(), "audio list")
+	if err != nil || !strings.Contains(listed, "warning") || !strings.Contains(listed, "error") {
+		t.Fatalf("audio list=%q err=%v", listed, err)
+	}
+	played, err := engine.Execute(context.Background(), "audio play warning")
+	if err != nil || !strings.Contains(played, "not played") || !strings.Contains(played, "muted") {
+		t.Fatalf("muted audio=%q err=%v", played, err)
+	}
+	if _, err := engine.Execute(context.Background(), "audio play unknown"); err == nil {
+		t.Fatal("unknown audio cue was accepted")
+	}
+}
+
 type buzzerSettingsWirePort struct {
 	settings    native.Settings
 	settingsErr error

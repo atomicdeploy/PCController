@@ -1060,10 +1060,12 @@ func (manager *Manager) dispatchNotification(
 		value := hostui.ParseUpdateProgress(event.Kind, event.Text, event.Metadata, event.Time)
 		if notification, ok := manager.updateNotifications.Next(value); ok {
 			priority := 1
+			cue := hostui.AudioCue("")
 			if value.State == "failed" {
 				priority = 2
+				cue = hostui.AudioCueError
 			}
-			manager.notificationQueue.enqueue(notificationJob{key: notification.ID, notification: notification, priority: priority})
+			manager.notificationQueue.enqueue(notificationJob{key: notification.ID, notification: notification, priority: priority, audioCue: cue})
 		}
 		return
 	}
@@ -1146,9 +1148,29 @@ func notificationJobForEvent(
 		}
 		notification = configured
 	}
+	audioCue := criticalAudioCue(kind)
+	// The dedicated door-running beep is emitted by observeRunningDoor. Do not
+	// layer the notification cue over it when both presentation paths are on.
+	if kind == "warning.door-open-running" &&
+		config.Integrations.Notifications.DoorRunningBeep {
+		audioCue = ""
+	}
 	return notificationJob{
 		key: jobKey, notification: notification, priority: priority,
+		audioCue: audioCue,
 	}, true, nil
+}
+
+func criticalAudioCue(kind string) hostui.AudioCue {
+	kind = strings.ToLower(strings.TrimSpace(kind))
+	switch {
+	case kind == "warning.door-open-running", strings.Contains(kind, "hot"):
+		return hostui.AudioCueWarning
+	case kind == "error", strings.Contains(kind, "fault"):
+		return hostui.AudioCueError
+	default:
+		return ""
+	}
 }
 
 func configuredImportantKind(patterns []string, kind string) bool {
@@ -1204,11 +1226,16 @@ func (manager *Manager) notificationLoop() {
 			return
 		}
 		ctx, cancel := context.WithTimeout(manager.ctx, 10*time.Second)
+		var audioErr error
+		appearance := manager.store.CurrentRuntime().UI.Appearance
+		if job.audioCue.Valid() && !appearance.AudioMuted && appearance.AudioVolume > 0 {
+			audioErr = hostui.PlayAudioCue(job.audioCue)
+		}
 		err := manager.notifier.Notify(ctx, job.notification)
 		cancel()
 		manager.notificationQueue.complete(job.key)
-		if err != nil && manager.ctx.Err() == nil {
-			manager.recordError("notification: " + err.Error())
+		if combined := errors.Join(audioErr, err); combined != nil && manager.ctx.Err() == nil {
+			manager.recordError("critical alert: " + combined.Error())
 		}
 	}
 }

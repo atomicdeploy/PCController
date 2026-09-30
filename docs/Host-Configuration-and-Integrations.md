@@ -289,6 +289,36 @@ it is not a configured runtime transport. Native playback is disabled by
 default and is never required for the bridge, update path, board buzzer, or Web
 Audio renderer.
 
+### Headless host sound effects and critical alerts
+
+Host sound effects are separate from the board buzzer. They remain available
+when no board is connected and when `controller.exe web --no-open` owns the
+primary runtime. The stable cue vocabulary is discoverable rather than copied
+into clients:
+
+```text
+controller audio list
+controller audio play warning
+controller ipc call --method controller.audio.cues
+controller ipc call --method controller.audio.play --params '{"cue":"error"}'
+```
+
+The command dispatcher makes `audio list` and `audio play CUE` available to the
+TUI console, CLI/exec, REST command endpoint, WebSocket, Socket.IO, scripts,
+automations, and permitted bridge peers. Typed clients may call
+`controller.audio.cues` and `controller.audio.play` directly. The result
+reports the cue, whether it was actually played, and the effective mute and
+volume state. A receiving host plays its own local audio; this path never
+implicitly redirects to the MCU buzzer.
+
+High-signal fault, over-temperature, door-open-during-operation, and failed
+update notifications pair their native toast with a Windows system warning or
+error cue. The existing bounded notification queue coalesces duplicates before
+both outputs, so ordinary reconnect polling, telemetry, and motion state changes
+stay silent. `ui.appearance.audio_muted` or a zero
+`ui.appearance.audio_volume` disables host playback without suppressing the
+toast or event.
+
 ## Embedded web control center
 
 `controller.exe web` is a complete primary operating mode. It does not launch

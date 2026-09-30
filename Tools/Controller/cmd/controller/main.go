@@ -279,6 +279,8 @@ func run(args []string, stdout, stderr io.Writer) (resultErr error) {
 		return runBuzzer(args[1:], stdout, stderr, store)
 	case "message":
 		return runExec(append([]string{"message"}, args[1:]...), stdout, stderr, store)
+	case "audio":
+		return runExec(append([]string{"audio"}, args[1:]...), stdout, stderr, store)
 	case "batch", "script":
 		return runBatch(args[1:], stdout, stderr, store)
 	case "monitor":

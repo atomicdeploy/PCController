@@ -218,6 +218,9 @@ func runExecCommand(connection *connectionFlags, commandText string, stdout io.W
 
 func commandAllowsDisconnected(command string) bool {
 	words := strings.Fields(strings.ToLower(strings.TrimSpace(command)))
+	if len(words) >= 2 && words[0] == "audio" && (words[1] == "list" || words[1] == "play") {
+		return true
+	}
 	if len(words) >= 2 && words[0] == "board" && words[1] == "initialize" {
 		return true
 	}

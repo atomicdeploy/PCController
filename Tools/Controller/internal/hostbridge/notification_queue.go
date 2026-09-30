@@ -13,6 +13,7 @@ type notificationJob struct {
 	key          string
 	notification hostui.Notification
 	priority     int
+	audioCue     hostui.AudioCue
 }
 
 type notificationQueueStats struct {
