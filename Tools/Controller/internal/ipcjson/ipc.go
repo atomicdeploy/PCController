@@ -703,7 +703,9 @@ func (service *Service) dispatch(
 			Mode             string `json:"mode"`
 			ExpectedRevision string `json:"expected_revision,omitempty"`
 		}
-		if err = decodeStrictParams(request.Params, &params); err == nil {
+		if err = decodeStrictParams(request.Params, &params); err != nil {
+			err = &RPCError{Code: -32602, Message: err.Error()}
+		} else {
 			result, err = service.updateActiveBoardProfile(params.Key, params.Mode, params.ExpectedRevision)
 		}
 	case "controller.peripheral.presentation.update":
@@ -714,14 +716,20 @@ func (service *Service) dispatch(
 			Group            *string `json:"group,omitempty"`
 			ExpectedRevision string  `json:"expected_revision,omitempty"`
 		}
-		if err = decodeStrictParams(request.Params, &params); err == nil {
+		if err = decodeStrictParams(request.Params, &params); err != nil {
+			err = &RPCError{Code: -32602, Message: err.Error()}
+		} else {
 			result, err = service.updatePeripheralPresentation(params.Key, params.Name, params.Icon, params.Group, params.ExpectedRevision)
 		}
 	case "controller.action.invoke":
 		var params struct {
 			ActionID string `json:"action_id"`
 		}
-		if err = decodeStrictParams(request.Params, &params); err == nil {
+		if err = decodeStrictParams(request.Params, &params); err != nil {
+			err = &RPCError{Code: -32602, Message: err.Error()}
+		} else if strings.TrimSpace(params.ActionID) == "" {
+			err = &RPCError{Code: -32602, Message: "action_id is required"}
+		} else {
 			result, err = service.invokeSemanticAction(ctx, params.ActionID)
 		}
 	case "controller.peripherals.set":

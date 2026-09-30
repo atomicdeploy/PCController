@@ -254,6 +254,20 @@ func TestPeripheralSettingsCarriesTypedStripEffectDescriptors(t *testing.T) {
 	}
 }
 
+func TestSemanticProfileRPCRejectsMalformedParamsAsInvalidParams(t *testing.T) {
+	service, _ := browserUIConfigTestService(t)
+	for _, request := range []Request{
+		{Method: "controller.board_profile.update", Params: json.RawMessage(`{"key":"cafe","mode":"cinema-seat-motion","unknown":true}`)},
+		{Method: "controller.peripheral.presentation.update", Params: json.RawMessage(`{"key":"seat.a","unknown":true}`)},
+		{Method: "controller.action.invoke", Params: json.RawMessage(`{"action_id":""}`)},
+	} {
+		response := service.Dispatch(context.Background(), request)
+		if response.Error == nil || response.Error.Code != -32602 {
+			t.Fatalf("%s response=%+v", request.Method, response)
+		}
+	}
+}
+
 func TestBootstrapUIConfigReportsPersistentFirstRunState(t *testing.T) {
 	service, _ := browserUIConfigTestService(t)
 	server := httptest.NewServer(websocketMux(context.Background(), service))
