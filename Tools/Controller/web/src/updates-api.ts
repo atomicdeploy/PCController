@@ -340,10 +340,14 @@ export async function uploadArtifact(
   if (onProgress && typeof XMLHttpRequest !== 'undefined') {
     return new Promise<ArtifactOperationResult>((resolve, reject) => {
       const request = new XMLHttpRequest()
+      let reportedTotal = file.size
       const abort = () => request.abort()
       request.open('POST', url.toString())
       for (const [name, value] of Object.entries(authorizationHeaders())) request.setRequestHeader(name, value)
-      request.upload.onprogress = (event) => onProgress(event.loaded, event.lengthComputable ? event.total : file.size)
+      request.upload.onprogress = (event) => {
+        reportedTotal = event.lengthComputable && event.total > 0 ? event.total : reportedTotal
+        onProgress(event.loaded, reportedTotal)
+      }
       request.onerror = () => reject(new Error('Artifact upload transport failed'))
       request.onabort = () => reject(new DOMException('Artifact upload was cancelled', 'AbortError'))
       request.onload = () => {
@@ -355,7 +359,7 @@ export async function uploadArtifact(
           reject(new Error(responseErrorDetail(value, request.statusText, request.status)))
           return
         }
-        onProgress(file.size, file.size)
+        onProgress(reportedTotal, reportedTotal)
         resolve(value as ArtifactOperationResult)
       }
       signal?.addEventListener('abort', abort, { once: true })

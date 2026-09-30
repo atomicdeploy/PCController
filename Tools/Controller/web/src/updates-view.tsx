@@ -273,8 +273,12 @@ export function UpdatesView({ appTitle, snapshot, events, locale, openDialog }: 
     setBusy('upload')
     const operationID = `browser-upload-${uploadDigest.slice(0, 16)}`
     const startedAt = new Date().toISOString()
+    let transferDone = 0
+    let transferTotal = uploadFile.size
     try {
       const result = await uploadArtifact(uploadFile, uploadKind, uploadDigest, undefined, (done, total) => {
+        transferDone = done
+        transferTotal = total
         const progress = total > 0 ? Math.max(0, Math.min(100, Math.round(done * 100 / total))) : 0
         const value: UpdateStatus = {
           id: operationID, kind: 'artifact-upload', state: 'uploading', stage: 'uploading',
@@ -289,7 +293,7 @@ export function UpdatesView({ appTitle, snapshot, events, locale, openDialog }: 
       const staged = operationFrom(result, setStatus)
       window.dispatchEvent(new CustomEvent('pccontroller:update-transfer-progress', { detail: {
         id: operationID, kind: 'artifact-upload', state: 'completed', stage: 'completed',
-        progress_known: true, progress_percent: 100, bytes_done: uploadFile.size, bytes_total: uploadFile.size,
+        progress_known: transferTotal > 0, progress_percent: 100, bytes_done: transferTotal, bytes_total: transferTotal,
         detail: copy('Artifact upload completed and was verified', 'ارسال فایل کامل و تأیید شد'),
         started_at: startedAt, updated_at: new Date().toISOString(),
       } satisfies UpdateStatus }))
@@ -300,7 +304,8 @@ export function UpdatesView({ appTitle, snapshot, events, locale, openDialog }: 
       const detail = cause instanceof Error ? cause.message : String(cause)
       window.dispatchEvent(new CustomEvent('pccontroller:update-transfer-progress', { detail: {
         id: operationID, kind: 'artifact-upload', state: 'failed', stage: 'uploading',
-        progress_known: false, progress_percent: 0, bytes_done: 0, bytes_total: uploadFile.size,
+        progress_known: transferTotal > 0, progress_percent: transferTotal > 0 ? Math.max(0, Math.min(100, Math.round(transferDone * 100 / transferTotal))) : 0,
+        bytes_done: transferDone, bytes_total: transferTotal,
         detail, started_at: startedAt, updated_at: new Date().toISOString(),
       } satisfies UpdateStatus }))
       setNotice(detail)
@@ -412,7 +417,11 @@ export function UpdatesView({ appTitle, snapshot, events, locale, openDialog }: 
   const downloadToBrowser = async (artifact: ArtifactDescriptor) => {
     const operationID = `browser-download-${artifact.sha256.slice(0, 16)}`
     const startedAt = new Date().toISOString()
+    let transferDone = 0
+    let transferTotal = artifact.bytes
     const publish = (state: UpdateStatus['state'], done: number, total: number, detail: string) => {
+      transferDone = done
+      transferTotal = total
       const progress = total > 0 ? Math.max(0, Math.min(100, Math.round(done * 100 / total))) : 0
       window.dispatchEvent(new CustomEvent('pccontroller:update-transfer-progress', { detail: {
         id: operationID, kind: 'artifact-fetch', state, stage: state === 'completed' ? 'completed' : 'downloading',
@@ -425,7 +434,7 @@ export function UpdatesView({ appTitle, snapshot, events, locale, openDialog }: 
       publish('completed', artifact.bytes, artifact.bytes, copy('Artifact download completed', 'دریافت فایل کامل شد'))
     } catch (cause) {
       const detail = cause instanceof Error ? cause.message : String(cause)
-      publish('failed', 0, artifact.bytes, detail)
+      publish('failed', transferDone, transferTotal, detail)
       setNotice(detail)
     }
   }
