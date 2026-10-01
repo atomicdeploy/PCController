@@ -42,6 +42,7 @@ import {
   ListRestart,
   MemoryStick,
   MessageSquareText,
+  MonitorSmartphone,
   Moon,
   MoreHorizontal,
   Network,
@@ -168,6 +169,17 @@ export interface SharedViewProps {
   relayedTerminal: Array<TabTerminalEntry & { id: string; tabId: string }>
   broadcastTerminal: (entry: TabTerminalEntry) => void
   boardSettingsReadState: BoardSettingsReadState
+}
+
+export interface AppInstanceSummary {
+  id: string
+  surface: string
+  page?: string
+  state?: string
+  updated_at?: string
+  expires_at?: string
+  values?: Record<string, string>
+  self?: { kind?: string; pid?: number; vars?: Record<string, string> }
 }
 
 function useFreshnessClock(updated: string | undefined, freshnessMS: number): number {
@@ -1011,7 +1023,7 @@ export function EventsView({ events, locale, t }: SharedViewProps) {
   )
 }
 
-export function SettingsView({ appTitle, snapshot, locale, t, command, appearance, onAppearance, token, onToken, onAppTitle, boardSettingsReadState, uiConfig, onMeasurementTiming, onBuzzerPath, transport, navigationSync, navigationSyncStatus = { state: 'idle', detail: '' }, onNavigationSync }: SharedViewProps & { appearance: Appearance; onAppearance: (value: Appearance) => void; token: string; onToken: (value: string) => void; onAppTitle: (value: string) => Promise<string>; uiConfig: UIConfig | null; onMeasurementTiming?: (statusIntervalMS: number, measurementFreshnessMS: number) => void; onBuzzerPath: (value: BuzzerPath) => Promise<void>; navigationSync: boolean; navigationSyncStatus?: { state: 'idle' | 'pending' | 'error'; detail: string }; onNavigationSync: (value: boolean) => void }) {
+export function SettingsView({ appTitle, snapshot, locale, t, command, appearance, onAppearance, token, onToken, onAppTitle, boardSettingsReadState, uiConfig, onMeasurementTiming, onBuzzerPath, transport, navigationSync, navigationSyncStatus = { state: 'idle', detail: '' }, onNavigationSync, appInstances = [] }: SharedViewProps & { appearance: Appearance; onAppearance: (value: Appearance) => void; token: string; onToken: (value: string) => void; onAppTitle: (value: string) => Promise<string>; uiConfig: UIConfig | null; onMeasurementTiming?: (statusIntervalMS: number, measurementFreshnessMS: number) => void; onBuzzerPath: (value: BuzzerPath) => Promise<void>; navigationSync: boolean; navigationSyncStatus?: { state: 'idle' | 'pending' | 'error'; detail: string }; onNavigationSync: (value: boolean) => void; appInstances?: AppInstanceSummary[] }) {
   const copy = (english: string, persian: string) => locale === 'fa' ? persian : english
   const available = peripheralAvailability(snapshot)
   const validationMessage = (message: string) => locale !== 'fa' ? message : ({
@@ -1506,6 +1518,39 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
               action={<Button type="submit" tone="primary" icon={ShieldCheck} busy={titleBusy} disabled={!titleDirty || !titleValidation.valid}>{copy('Save', 'ذخیره')}</Button>}
             />
           </form>
+        </Card>
+
+        <Card icon={MonitorSmartphone} iconTone="green" title={copy('Connected applications', 'برنامه‌های متصل')} eyebrow={`${appInstances.length} ${copy('live', 'فعال')}`} className="settings-card settings-card--wide">
+          {appInstances.length === 0 ? <EmptyState icon={MonitorSmartphone} title={copy('No connected applications', 'برنامهٔ متصلی وجود ندارد')} detail={copy('Live clients appear here after they advertise their controls.', 'کلاینت‌های زنده پس از معرفی کنترل‌های خود اینجا ظاهر می‌شوند.')} /> : (
+            <div className="connected-apps-list">
+              {appInstances.map((instance) => {
+                const actions = (instance.values?.app_actions ?? '').split(',').map((value) => value.trim()).filter(Boolean)
+                const pealayer = instance.surface.toLowerCase() === 'pealayer'
+                const pid = instance.self?.pid ?? instance.self?.vars?.pid
+                const endpoint = instance.self?.vars?.web_ui ?? instance.self?.vars?.websocket ?? instance.self?.vars?.rpc
+                return <article key={instance.id} className="connected-app">
+                  <div className="connected-app__identity">
+                    <StatusBadge tone={instance.state === 'active' ? 'good' : 'neutral'}>{instance.state || copy('present', 'حاضر')}</StatusBadge>
+                    <div><strong>{instance.surface}</strong><span>{instance.id}</span></div>
+                  </div>
+                  <div className="connected-app__facts">
+                    {instance.page && <span>{copy('Page', 'صفحه')}: {instance.page}</span>}
+                    {instance.self?.kind && <span>{instance.self.kind}{pid ? ` · PID ${pid}` : ''}</span>}
+                    <span>{actions.length} {copy('controls', 'کنترل')}</span>
+                    {endpoint && <span title={endpoint}>{endpoint}</span>}
+                  </div>
+                  <div className="connected-app__capabilities" aria-label={copy('Advertised controls', 'کنترل‌های معرفی‌شده')}>
+                    {actions.slice(0, 5).map((action) => <code key={action}>{action.replace(/^pealayer\./, '')}</code>)}
+                    {actions.length > 5 && <span title={actions.slice(5).join(', ')}>+{actions.length - 5}</span>}
+                  </div>
+                  {pealayer && <div className="connected-app__actions">
+                    {actions.includes('pealayer.play') && <Button icon={Power} onClick={() => void rpc('controller.app.action', { kind: 'pealayer.play', target: instance.id })}>{copy('Play', 'پخش')}</Button>}
+                    {actions.includes('pealayer.pause') && <Button icon={CirclePower} onClick={() => void rpc('controller.app.action', { kind: 'pealayer.pause', target: instance.id })}>{copy('Pause', 'مکث')}</Button>}
+                  </div>}
+                </article>
+              })}
+            </div>
+          )}
         </Card>
 
         <PeripheralNamesEditor locale={locale} />

@@ -245,6 +245,7 @@ type Options struct {
 	Integrations       func() hostui.IntegrationStatus
 	Notifier           hostui.Notifier
 	AppActions         <-chan hostui.AppAction
+	AppInstances       func() []hostui.AppInstance
 	InstanceID         string
 	NavigationSync     bool
 	NavigationGroup    string

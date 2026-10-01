@@ -104,7 +104,7 @@ import { advanceStatusLEDSource, applyPushedOutputEvent, isPushedOutputEvent, me
 import { BuzzerPlaybackTimeline, type BuzzerPath } from './buzzer-routing'
 import { isMacroControllerEvent, prependMacroControllerEvent } from './macro-live'
 import { emptySnapshot } from './types'
-import type { SharedViewProps } from './views'
+import type { AppInstanceSummary, SharedViewProps } from './views'
 import { sessionAuthenticationGuidanceRequired } from './authentication-guidance'
 import { hardwareProblemPresentation } from './hardware-problem'
 import {
@@ -452,6 +452,7 @@ export default function App() {
   const [tabBusSupported, setTabBusSupported] = useState(false)
   const [tabPeers, setTabPeers] = useState(0)
   const [appInstanceID, setAppInstanceID] = useState('')
+  const [appInstances, setAppInstances] = useState<AppInstanceSummary[]>([])
   const [navigationSync, setNavigationSyncEnabled] = useState(loadNavigationSync)
   const [navigationSyncStatus, setNavigationSyncStatus] = useState<{
     state: 'idle' | 'pending' | 'error'
@@ -774,6 +775,17 @@ export default function App() {
       state: 'leaving', lease_seconds: 45,
     }).catch(() => undefined)
   }, [appInstanceID])
+
+  useEffect(() => {
+    if (demo || !startupProbeResolved) return
+    let active = true
+    const refreshInstances = () => rpc<AppInstanceSummary[]>('controller.app.instances')
+      .then((instances) => { if (active) setAppInstances(instances) })
+      .catch(() => { if (active) setAppInstances([]) })
+    void refreshInstances()
+    const timer = window.setInterval(refreshInstances, 30_000)
+    return () => { active = false; window.clearInterval(timer) }
+  }, [demo, startupProbeResolved, token])
 
   useEffect(() => {
     if (bootProgress >= bootTarget) return
@@ -1401,7 +1413,7 @@ export default function App() {
           status: (update, source) => {
             statusFrames?.enqueue(source.generation, update)
           },
-          event: (event, source: StreamSource) => {
+			event: (event, source: StreamSource) => {
 			const adoptedSource = advanceStatusLEDSource(
 				{ epoch: ledTransportEpoch.current, instanceID: ledTransportInstanceID.current },
 				{ epoch: source.generation, instanceID: source.instanceID },
@@ -1410,6 +1422,11 @@ export default function App() {
 			ledTransportEpoch.current = adoptedSource.epoch
 			ledTransportInstanceID.current = adoptedSource.instanceID ?? ''
 			const eventKind = event.kind.toLowerCase()
+            if (eventKind === 'app.instance.changed') {
+              void rpc<AppInstanceSummary[]>('controller.app.instances')
+                .then(setAppInstances)
+                .catch(() => undefined)
+            }
             const macroEvent = isMacroControllerEvent(event)
             if (macroEvent) setMacroEvents((current) => prependMacroControllerEvent(current, event))
 			if (isPushedOutputEvent(event)) {
@@ -1621,7 +1638,7 @@ export default function App() {
   const view = (
     <Suspense fallback={<section className="page-loading" role="status" aria-live="polite"><span className="spinner" />{appearance.locale === 'fa' ? 'در حال بارگیری…' : 'Loading page…'}</section>}>
       {page === 'settings'
-        ? <PageView {...shared} appearance={appearance} onAppearance={saveAppearance} token={token} onToken={saveToken} onAppTitle={saveAppTitle} uiConfig={uiConfig} onMeasurementTiming={adoptMeasurementTiming} onBuzzerPath={setBuzzerPath} navigationSync={navigationSync} navigationSyncStatus={navigationSyncStatus} onNavigationSync={setNavigationSync} />
+        ? <PageView {...shared} appearance={appearance} onAppearance={saveAppearance} token={token} onToken={saveToken} onAppTitle={saveAppTitle} uiConfig={uiConfig} onMeasurementTiming={adoptMeasurementTiming} onBuzzerPath={setBuzzerPath} navigationSync={navigationSync} navigationSyncStatus={navigationSyncStatus} onNavigationSync={setNavigationSync} appInstances={appInstances} />
         : <PageView {...shared} />}
     </Suspense>
   )

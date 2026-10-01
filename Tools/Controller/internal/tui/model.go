@@ -162,6 +162,7 @@ type Model struct {
 	networkDiscoveryError    string
 	notifier                 hostui.Notifier
 	appActions               <-chan hostui.AppAction
+	appInstances             func() []hostui.AppInstance
 	instanceID               string
 	navigationSync           bool
 	setNavigationSync        func(bool)
@@ -481,7 +482,7 @@ func NewWithOptions(runtime *control.Runtime, engine *shell.Engine, options Opti
 		mirrorLCD: options.MirrorLCD, lcdMirror: uiValue.MirrorPromptToLCD,
 		integrations: options.Integrations, notifier: options.Notifier,
 		networkDiscovery: options.NetworkDiscovery, openNetwork: options.OpenNetwork,
-		appActions: options.AppActions, instanceID: options.InstanceID,
+		appActions: options.AppActions, appInstances: options.AppInstances, instanceID: options.InstanceID,
 		navigationSync:     options.NavigationSync,
 		setNavigationSync:  options.SetNavigationSync,
 		navigationIdentity: options.NavigationIdentity,
