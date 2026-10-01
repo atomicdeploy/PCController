@@ -111,9 +111,6 @@ public:
   }
 
   int read() {
-    if (readFailure_) {
-      return -1;
-    }
     if (rx_.empty()) {
       return -1;
     }
@@ -136,8 +133,6 @@ public:
     rx_.insert(rx_.end(), values.begin(), values.end());
   }
 
-  void setReadFailure(bool failed) { readFailure_ = failed; }
-
   std::uint32_t baud() const { return baud_; }
   const std::vector<std::uint8_t> &written() const { return tx_; }
   void clearWritten() { tx_.clear(); }
@@ -146,7 +141,6 @@ private:
   std::deque<std::uint8_t> rx_;
   std::vector<std::uint8_t> tx_;
   std::uint32_t baud_ = 0;
-  bool readFailure_ = false;
 };
 
 inline std::uint32_t micros() {

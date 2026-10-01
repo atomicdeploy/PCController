@@ -28,16 +28,8 @@ void UartProtocol::service() {
   // during this pass wait for the next loop, so a noisy/floating adapter can
   // never starve autonomous services. HardwareSerial's AVR ring is <256 bytes.
   uint8_t pending = static_cast<uint8_t>(serial_->available());
-  while (pending != 0) {
-    const int readValue = serial_->read();
-    // HardwareSerial::available() and read() are not one atomic operation.
-    // A removed/failing USB bridge may report buffered input and then return
-    // no byte. Do not turn -1 into 0xFF or spin while autonomous work starves.
-    if (readValue < 0) {
-      return;
-    }
-    --pending;
-    const uint8_t value = static_cast<uint8_t>(readValue);
+  while (pending-- != 0) {
+    const uint8_t value = static_cast<uint8_t>(serial_->read());
     if (value == 0) {
       if (!dropping_ && receiveLength_ != 0) {
         processEncodedFrame();

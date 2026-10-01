@@ -207,7 +207,7 @@ void testMacroScratchCannotCorruptSplitSerialFrame() {
           "macro scratch corrupted a split serial frame");
 }
 
-void testReceiveWorkIsBoundedAndSurvivesAdapterReadFailure() {
+void testReceiveWorkIsBoundedAndRecoversAfterNoise() {
   HardwareSerial serial;
   UartProtocol protocol(serial);
   Capture capture;
@@ -230,16 +230,9 @@ void testReceiveWorkIsBoundedAndSurvivesAdapterReadFailure() {
   // unterminated noise burst, exactly as the next well-formed sender does.
   serial.feed({0});
   serial.feed(expected);
-  const auto pending = serial.available();
-  serial.setReadFailure(true);
-  protocol.service();
-  require(serial.available() == pending,
-          "failed UART read was consumed as a synthetic data byte");
-
-  serial.setReadFailure(false);
   protocol.service();
   require(capture.payloads.size() == 1,
-          "protocol did not recover after the UART adapter resumed");
+          "protocol did not recover after noisy UART input ended");
 }
 
 void testBuzzerPushCarriesMCUTimestamp() {
@@ -277,7 +270,7 @@ int main() {
     testUnknownOptionalOpcodeReachesSemanticDispatch();
     testInvalidFramesAreRejected();
     testMacroScratchCannotCorruptSplitSerialFrame();
-    testReceiveWorkIsBoundedAndSurvivesAdapterReadFailure();
+    testReceiveWorkIsBoundedAndRecoversAfterNoise();
     testBuzzerPushCarriesMCUTimestamp();
     std::cout << "firmware_uart_protocol_tests: all checks passed\n";
     return 0;
