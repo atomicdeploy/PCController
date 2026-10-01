@@ -2126,10 +2126,15 @@ func (client *Client) Snapshot() Snapshot {
 			FriendlyName: snapshot.ConnectionCandidate.FriendlyName,
 			InstanceID:   snapshot.ConnectionCandidate.InstanceID,
 		},
-		ProgramState:      snapshot.ProgramState,
-		RFLearning:        snapshot.RFLearning,
-		Macros:            snapshot.Macros,
-		Effects:           control.EffectCatalog(snapshot.Macros.Library, client.currentStripEffects()),
+		ProgramState: snapshot.ProgramState,
+		RFLearning:   snapshot.RFLearning,
+		Macros:       snapshot.Macros,
+		// The runtime owns the live host configuration used by command execution
+		// and by the macro runner.  Reuse its canonical catalog here so the public
+		// snapshot cannot drift from `effect list` when a persisted configuration
+		// omits strip_effects and therefore receives the first-run defaults through
+		// the runtime's effective configuration path.
+		Effects:           snapshot.Effects,
 		HardwareProblems:  snapshot.HardwareProblems,
 		FrontPanel:        snapshot.FrontPanel,
 		HaveFrontPanel:    snapshot.HaveFrontPanel,

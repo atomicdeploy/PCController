@@ -6,7 +6,28 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"pccontroller.local/controller/internal/appconfig"
+	"pccontroller.local/controller/internal/control"
 )
+
+func TestSharedFacadeSnapshotUsesRuntimeEffectCatalog(t *testing.T) {
+	runtime := control.New(control.Options{})
+	config := appconfig.Defaults()
+	engine := control.NewCommandEngine(runtime, control.CommandOptions{
+		HostConfig: func() appconfig.Config { return config },
+	})
+	client := AttachSharedRuntime(runtime, engine)
+	defer client.Shutdown()
+
+	snapshot := client.Snapshot()
+	if len(snapshot.Effects) != len(config.StripEffects) {
+		t.Fatalf("snapshot effects=%d, want runtime catalog=%d", len(snapshot.Effects), len(config.StripEffects))
+	}
+	if len(snapshot.Effects) == 0 || snapshot.Effects[0].Reference != "strip:police" {
+		t.Fatalf("snapshot effects did not preserve runtime catalog: %#v", snapshot.Effects)
+	}
+}
 
 func TestShutdownRetainsCompletionUntilRuntimeCloseSucceeds(t *testing.T) {
 	client := New(Options{})
