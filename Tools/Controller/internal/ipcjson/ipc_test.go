@@ -82,6 +82,20 @@ func TestHostAudioRPCListsCuesAndHonorsMute(t *testing.T) {
 	}
 }
 
+func TestIlluminationOverrideRequiresExplicitValue(t *testing.T) {
+	runtime := control.New(control.Options{})
+	defer runtime.Close()
+	service := Service{Client: controllerapi.AttachSharedRuntime(runtime, shell.New(8))}
+	for _, params := range []json.RawMessage{nil, json.RawMessage(`{}`)} {
+		response := service.Dispatch(context.Background(), Request{
+			Method: "controller.illumination.override", Params: params,
+		})
+		if response.Error == nil || response.Error.Code != -32602 {
+			t.Fatalf("params=%s response=%+v, want -32602", params, response)
+		}
+	}
+}
+
 func TestAppPageRPCPublishesValidatedTUIAction(t *testing.T) {
 	runtime := control.New(control.Options{})
 	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))

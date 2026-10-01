@@ -136,7 +136,7 @@ const capabilityGroups = {
   board_commands: [
     "controller.program_state.set", "controller.program-state.set", "controller.menu.layout.set",
     "controller.host_menu.directory.replace", "controller.host_menu.content.push", "controller.menu.jump",
-    "controller.menu.page", "controller.pwm.set", "controller.pwm.off", "controller.illumination.set", "controller.rf.learn.start",
+	"controller.menu.page", "controller.pwm.set", "controller.pwm.off", "controller.illumination.set", "controller.illumination.override", "controller.rf.learn.start",
     "controller.rf.learn.cancel", "controller.rf.map", "controller.rf.remove", "controller.rf.clear",
     "controller.rf.transmit", "controller.board_automation.put",
     "controller.board_automation.remove", "controller.board_automation.clear",
@@ -203,7 +203,8 @@ const methodOverrides = {
   "controller.integrations.status": "Return requested and effective buzzer routing and playback state.",
 	"controller.network.peers.get": "Return persistent peer topology with secret references and no plaintext credentials.",
 	"controller.network.peers.set": "Replace and hot-apply peer topology; events, state, and status topics are accepted, and only optional secret references may carry compatibility credentials.",
-	"controller.illumination.get": "Read persisted enclosure-light policy, live door-selected target, and exact applied channel-11 PWM.",
+	"controller.illumination.get": "Read persisted enclosure-light policy, live door-selected target, and exact applied MOSFET channel-12 PWM.",
+	"controller.illumination.override": "Temporarily apply exact 0..4095 PWM to MOSFET channel 12 without changing or taking ownership from the enclosure-light policy, then return authoritative readback.",
 	"controller.illumination.set": "Change only mode/on/off illumination fields, verify EEPROM durability, and return authoritative live state.",
   "controller.unsubscribe": "Remove this WebSocket connection's active subscriptions.",
 };

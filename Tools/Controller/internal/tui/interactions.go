@@ -281,7 +281,7 @@ func (model Model) handleKey(message tea.KeyMsg) (Model, tea.Cmd, bool) {
 	case "ctrl+x":
 		return model.closePort()
 	case "ctrl+r":
-		return model.dispatchLine("reset app")
+		return model.dispatchLine("reset lines")
 	case "~", "`":
 		model.toggleTerminal()
 		return model, nil, true
@@ -363,14 +363,14 @@ func (model Model) handleKey(message tea.KeyMsg) (Model, tea.Cmd, bool) {
 		model.moveCursor(1)
 		return model, nil, true
 	case "home":
-		if inputEmpty && model.page == PageOutputs && model.cursor >= 15 && model.cursor <= 25 {
+		if inputEmpty && model.page == PageOutputs && model.cursor >= 15 && model.cursor <= 26 {
 			return model.setSelectedPWM(0)
 		}
 		if inputEmpty && model.page == PageMenus {
 			return model.moveSelectedMenuToRank(0)
 		}
 	case "end":
-		if inputEmpty && model.page == PageOutputs && model.cursor >= 15 && model.cursor <= 25 {
+		if inputEmpty && model.page == PageOutputs && model.cursor >= 15 && model.cursor <= 26 {
 			return model.setSelectedPWM(4095)
 		}
 		if inputEmpty && model.page == PageMenus {
@@ -422,12 +422,25 @@ func (model Model) showPortPicker() (Model, tea.Cmd, bool) {
 	model.portPicker = true
 	model.portCursor = 0
 	model.portError = ""
-	if model.preview != nil || model.remote != nil {
-		model.portCandidates = []ports.Info{model.snapshot().Port}
+	if model.preview != nil {
+		current := model.snapshot().Port
+		if strings.TrimSpace(current.Name) == "" {
+			model.portCandidates = nil
+		} else {
+			model.portCandidates = []ports.Info{current}
+		}
 		model.portLoading = false
 		return model, nil, true
 	}
 	model.portLoading = true
+	if model.remote != nil {
+		if model.remote.Ports == nil {
+			model.portLoading = false
+			model.portError = "The connected controller host does not expose serial-device discovery."
+			return model, nil, true
+		}
+		return model, listRemotePorts(model.remote.Ports), true
+	}
 	return model, listPorts(), true
 }
 
@@ -462,9 +475,13 @@ func (model Model) dispatchLine(line string) (Model, tea.Cmd, bool) {
 	model.historyPos = -1
 	model.historyBuf = ""
 	model.updateInputPlaceholder()
-	if strings.EqualFold(line, "reset app") {
+	if strings.EqualFold(line, "reset app") || strings.EqualFold(line, "reset lines") {
 		model.rebootPending = true
-		model.setNotice("Rebooting controller…")
+		if strings.EqualFold(line, "reset lines") {
+			model.setNotice("Pulsing DTR hardware reset…")
+		} else {
+			model.setNotice("Rebooting controller application…")
+		}
 	}
 	if model.remote != nil {
 		return model, execute(model.engine, line), true
@@ -766,7 +783,7 @@ func (model Model) activateSelection() (Model, tea.Cmd, bool) {
 func (model Model) adjustSelection(delta int) (Model, tea.Cmd, bool) {
 	switch model.page {
 	case PageOutputs:
-		if model.cursor >= 15 && model.cursor <= 25 {
+		if model.cursor >= 15 && model.cursor <= 26 {
 			channel := model.cursor - 15
 			value := int(model.pwmValues[channel]) + delta*64
 			if value < 0 {
@@ -806,7 +823,7 @@ func (model Model) activateOutput() (Model, tea.Cmd, bool) {
 			"relay side right up", "relay side right stop", "relay side right down",
 		}
 		return model.dispatchLine(commands[model.cursor-9])
-	case model.cursor >= 15 && model.cursor <= 25:
+	case model.cursor >= 15 && model.cursor <= 26:
 		value := model.pwmValues[model.cursor-15]
 		if value == 0 {
 			value = 2048
@@ -814,7 +831,7 @@ func (model Model) activateOutput() (Model, tea.Cmd, bool) {
 			value = 0
 		}
 		return model.setSelectedPWM(value)
-	case model.cursor == 26:
+	case model.cursor == 27:
 		return model.dispatchLine("pwm off")
 	}
 	return model, nil, true
@@ -972,7 +989,7 @@ func (model Model) savePeripheralName(descriptor appconfig.PeripheralDescriptor,
 
 func (model Model) setSelectedPWM(value uint16) (Model, tea.Cmd, bool) {
 	channel := model.cursor - 15
-	if channel < 0 || channel > 10 {
+	if channel < 0 || channel > 11 {
 		return model, nil, true
 	}
 	// Preview mode simulates the board; live mode remains board-authoritative and
@@ -980,6 +997,13 @@ func (model Model) setSelectedPWM(value uint16) (Model, tea.Cmd, bool) {
 	if model.preview != nil {
 		model.pwmValues[channel] = value
 		model.havePWMValues = true
+	}
+	if channel == 11 && model.preview == nil {
+		if model.overrideIllumination == nil {
+			model.setNotice("Semantic enclosure override is unavailable on this controller")
+			return model, nil, true
+		}
+		return model, overrideIllumination(model.overrideIllumination, value), true
 	}
 	return model.dispatchLine(fmt.Sprintf("pwm set %d %d", channel, value))
 }
@@ -1887,7 +1911,7 @@ func (model Model) handleActionBarClick(x int) (tea.Model, tea.Cmd) {
 				updated, command, _ := model.closePort()
 				return updated, command
 			case "reboot":
-				updated, command, _ := model.dispatchLine("reset app")
+				updated, command, _ := model.dispatchLine("reset lines")
 				return updated, command
 			case "refresh":
 				updated, command, _ := model.dispatchLine("status")
@@ -1953,7 +1977,7 @@ func (model Model) handleContentClick(row, x int) (tea.Model, tea.Cmd) {
 		index, ok := controlTableLogicalAt(rows, tableBodyRows(model.contentHeight()), model.cursor, row-3)
 		if ok {
 			model.cursor = index
-			if index >= 15 && index <= 25 {
+			if index >= 15 && index <= 26 {
 				tableStart := max(0, (model.width-tableWidth)/2)
 				levelWidth := max(8, columns[1].Width-7)
 				sliderStart := tableStart + 1 + columns[0].Width + 1
@@ -2060,7 +2084,7 @@ func (model Model) handleContentClick(row, x int) (tea.Model, tea.Cmd) {
 }
 
 func (model Model) setOutputPWMFromX(index, x int) (tea.Model, tea.Cmd) {
-	if index < 15 || index > 25 {
+	if index < 15 || index > 26 {
 		return model, nil
 	}
 	tableWidth := model.presentationTableWidth(118)

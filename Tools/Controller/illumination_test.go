@@ -1,8 +1,12 @@
 package controller
 
 import (
+	"context"
+	"fmt"
 	"testing"
 	"time"
+
+	"pccontroller.local/controller/internal/control"
 )
 
 func TestIlluminationPWMIsBoundedAndMonotonic(t *testing.T) {
@@ -57,5 +61,48 @@ func TestIlluminationStateChangeIgnoresObservationTimestamp(t *testing.T) {
 	right.AppliedPWM++
 	if sameIlluminationState(left, right) {
 		t.Fatal("applied PWM changes must publish a state event")
+	}
+}
+
+func TestOverrideIlluminationUsesReservedChannelReadbackAndPreservesPolicy(t *testing.T) {
+	runtime := control.New(control.Options{})
+	defer runtime.Close()
+	client := &Client{runtime: runtime}
+	settings := Settings{LightMode: 1, OnBrightness: 180, OffBrightness: 12, Persisted: true}
+	original := settings
+	var applied uint16
+	for _, requested := range []uint16{0, 4095} {
+		state, err := client.overrideIllumination(
+			context.Background(), requested,
+			func(_ context.Context, channel byte, value uint16) error {
+				if channel != enclosureIlluminationPWMChannel {
+					t.Fatalf("override channel=%d, want %d", channel, enclosureIlluminationPWMChannel)
+				}
+				applied = value
+				return nil
+			},
+			func(context.Context) (IlluminationState, error) {
+				return IlluminationState{
+					Available: true, Mode: settings.LightMode,
+					OnBrightness: settings.OnBrightness, OffBrightness: settings.OffBrightness,
+					TargetBrightness: settings.OffBrightness, TargetPWM: illuminationPWM(settings.OffBrightness),
+					AppliedPWM: applied, AppliedBrightness: illuminationBrightness(applied), Persisted: settings.Persisted,
+				}, nil
+			},
+		)
+		if err != nil || state.AppliedPWM != requested {
+			t.Fatalf("override %d state=%+v err=%v", requested, state, err)
+		}
+		if settings != original {
+			t.Fatalf("override changed policy settings: got %+v want %+v", settings, original)
+		}
+		select {
+		case event := <-runtime.Events():
+			if event.Kind != "illumination.changed" || event.Metadata["applied_pwm"] != fmt.Sprint(requested) {
+				t.Fatalf("override event=%+v", event)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("override did not publish illumination.changed")
+		}
 	}
 }

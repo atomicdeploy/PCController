@@ -127,6 +127,7 @@ type Model struct {
 	pwmDragSet               bool
 	pwmPending               bool
 	lastPWMRefresh           time.Time
+	overrideIllumination     func(context.Context, uint16) (uint16, error)
 	portPicker               bool
 	portLoading              bool
 	portCandidates           []ports.Info
@@ -235,6 +236,11 @@ type commandResultMsg struct {
 	line   string
 	output string
 	err    error
+}
+type illuminationOverrideResultMsg struct {
+	requested uint16
+	applied   uint16
+	err       error
 }
 type connectResultMsg struct{ err error }
 type ownerActionResultMsg struct {
@@ -488,9 +494,10 @@ func NewWithOptions(runtime *control.Runtime, engine *shell.Engine, options Opti
 		hostMenus:      options.HostMenus, pushHostPanel: options.PushHostPanel,
 		releaseHostPanel: options.ReleaseHostPanel,
 		prefs:            prefs, preview: options.Preview, welcome: welcome,
-		pwmDragChannel:   -1,
-		portOwnerActions: ownerActions,
-		welcomeStarted:   welcomeStarted, welcomeDeadline: welcomeStarted.Add(30 * time.Second),
+		pwmDragChannel:       -1,
+		overrideIllumination: options.OverrideIllumination,
+		portOwnerActions:     ownerActions,
+		welcomeStarted:       welcomeStarted, welcomeDeadline: welcomeStarted.Add(30 * time.Second),
 		welcomePhase: "Waiting for USB and application HELLO", welcomeMelody: options.WelcomeMelody,
 		markWelcomed: marker, debug: debug,
 		logs: nil,
@@ -1015,7 +1022,8 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if normalizedLine == "reconnect" {
 			model.connectPending = false
 		}
-		if strings.EqualFold(strings.TrimSpace(message.line), "reset app") {
+		if strings.EqualFold(strings.TrimSpace(message.line), "reset app") ||
+			strings.EqualFold(strings.TrimSpace(message.line), "reset lines") {
 			model.rebootPending = false
 		}
 
@@ -1108,6 +1116,21 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			model.rfPending = true
 			commands = append(commands, model.fetchRFEntriesCommand())
 		}
+
+	case illuminationOverrideResultMsg:
+		if message.err != nil {
+			model.appendResult("illumination override", "", message.err)
+			model.setNotice("Enclosure override failed: " + message.err.Error())
+			break
+		}
+		model.pwmValues[11] = message.applied
+		model.havePWMValues = true
+		model.lastPWMRefresh = time.Now()
+		model.appendResult(
+			fmt.Sprintf("illumination override %d", message.requested),
+			fmt.Sprintf("applied and verified %d/4095; enclosure policy remains owner", message.applied), nil,
+		)
+		model.setNotice(fmt.Sprintf("Enclosure manual override verified at %d/4095 · policy remains owner", message.applied))
 
 	case terminalOSCResultMsg:
 		if message.err != nil {
@@ -1446,9 +1469,14 @@ func (model Model) applyAppAction(action hostui.AppAction) (Model, []tea.Cmd, bo
 	case "app.port.close":
 		commands = append(commands, execute(model.engine, "port close"))
 	case "command":
-		if strings.EqualFold(strings.TrimSpace(action.Value), "reset app") {
+		if strings.EqualFold(strings.TrimSpace(action.Value), "reset app") ||
+			strings.EqualFold(strings.TrimSpace(action.Value), "reset lines") {
 			model.rebootPending = true
-			model.setNotice("Rebooting controller…")
+			if strings.EqualFold(strings.TrimSpace(action.Value), "reset lines") {
+				model.setNotice("Pulsing DTR hardware reset…")
+			} else {
+				model.setNotice("Rebooting controller application…")
+			}
 		}
 		commands = append(commands, execute(model.engine, action.Value))
 	default:
@@ -2111,10 +2139,10 @@ func (model Model) actionBarItems(snapshot control.Snapshot) []actionBarItem {
 	} else {
 		items = append(items, actionBarItem{label: "O Open", action: "open", style: buttonGoodStyle})
 	}
-	rebootLabel := "R Reboot"
+	rebootLabel := "^R HW Reset"
 	rebootAction := "reboot"
 	if model.rebootPending {
-		rebootLabel = model.spinnerView() + " Rebooting"
+		rebootLabel = model.spinnerView() + " Resetting"
 		rebootAction = ""
 	}
 	items = append(items,
@@ -2267,6 +2295,15 @@ func (model Model) pageNeedsStatus() bool {
 func listPorts() tea.Cmd {
 	return func() tea.Msg {
 		values, err := ports.List()
+		return portsResultMsg{values: values, err: err}
+	}
+}
+
+func listRemotePorts(fetch func(context.Context) ([]ports.Info, error)) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		values, err := fetch(ctx)
 		return portsResultMsg{values: values, err: err}
 	}
 }
@@ -2645,5 +2682,17 @@ func execute(engine *shell.Engine, line string) tea.Cmd {
 		defer cancel()
 		output, err := engine.Execute(ctx, line)
 		return commandResultMsg{line: line, output: output, err: err}
+	}
+}
+
+func overrideIllumination(
+	callback func(context.Context, uint16) (uint16, error),
+	value uint16,
+) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		applied, err := callback(ctx, value)
+		return illuminationOverrideResultMsg{requested: value, applied: applied, err: err}
 	}
 }

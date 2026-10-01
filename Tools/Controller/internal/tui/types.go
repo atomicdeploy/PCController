@@ -12,6 +12,7 @@ import (
 	"pccontroller.local/controller/internal/hostui"
 	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/portowner"
+	"pccontroller.local/controller/internal/ports"
 	"pccontroller.local/controller/internal/productidentity"
 )
 
@@ -208,6 +209,7 @@ type RemoteBackend struct {
 	InitialSnapshot           control.Snapshot
 	InitialSnapshotReceivedAt time.Time
 	Snapshot                  func(context.Context) (control.Snapshot, error)
+	Ports                     func(context.Context) ([]ports.Info, error)
 	FrontPanel                func(context.Context) (native.FrontPanel, error)
 	LCDPresentation           func(context.Context) (control.LCDPresentationState, error)
 	Events                    <-chan control.Event
@@ -263,13 +265,14 @@ type Options struct {
 	Preview          *control.Snapshot
 	// AutoConnect starts the first bounded local connection attempt as a Tea
 	// command, after the initial frame and title can be rendered.
-	AutoConnect      bool
-	ForceWelcome     bool
-	DisableWelcome   bool
-	MarkWelcomed     func()
-	WelcomeMelody    func(context.Context) error
-	PortOwnerActions portowner.Actions
-	NetworkDiscovery func(context.Context) ([]discovery.Instance, error)
-	OpenNetwork      func(string) error
-	Debug            bool
+	AutoConnect          bool
+	ForceWelcome         bool
+	DisableWelcome       bool
+	MarkWelcomed         func()
+	WelcomeMelody        func(context.Context) error
+	PortOwnerActions     portowner.Actions
+	NetworkDiscovery     func(context.Context) ([]discovery.Instance, error)
+	OpenNetwork          func(string) error
+	OverrideIllumination func(context.Context, uint16) (uint16, error)
+	Debug                bool
 }

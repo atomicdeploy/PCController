@@ -592,9 +592,10 @@ kbd { padding: 3px 6px; border: 1px solid var(--line-strong); border-bottom-colo
 .connection-state__facts { display: flex; align-items: center; flex-wrap: wrap; gap: 7px 14px; margin-top: 9px; color: color-mix(in srgb, var(--text) 70%, var(--text-muted)); font-size: 12px; }
 .connection-state__facts span { display: inline-flex; align-items: center; gap: 5px; }
 .connection-state__facts svg { color: var(--connection-color); }
+.connection-state__actions { display: grid; gap: 8px; min-width: max-content; }
 .hero-panel .connection-state { min-width: min(680px, 78vw); }
 @keyframes connection-icon-pulse { 0%, 100% { transform: scale(1); box-shadow: 0 12px 30px color-mix(in srgb, var(--connection-color) 13%, transparent); } 50% { transform: scale(1.045); box-shadow: 0 14px 36px color-mix(in srgb, var(--connection-color) 28%, transparent); } }
-@media (max-width: 700px) { .connection-state { grid-template-columns: auto minmax(0, 1fr); } .connection-state > .button { grid-column: 1 / -1; width: 100%; } .hero-panel .connection-state { min-width: 0; } }
+@media (max-width: 700px) { .connection-state { grid-template-columns: auto minmax(0, 1fr); } .connection-state__actions { grid-column: 1 / -1; width: 100%; } .connection-state__actions .button { width: 100%; } .hero-panel .connection-state { min-width: 0; } }
 
 .connection-fuji { position: relative; width: 144px; height: 76px; overflow: hidden; filter: drop-shadow(0 16px 28px rgb(0 0 0 / .2)); }
 .connection-fuji > span { position: absolute; pointer-events: none; }

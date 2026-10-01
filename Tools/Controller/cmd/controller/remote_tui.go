@@ -392,6 +392,23 @@ func (client *remoteTUIIPC) Snapshot(ctx context.Context) (control.Snapshot, err
 	}
 }
 
+func (client *remoteTUIIPC) Ports(ctx context.Context) ([]ports.Info, error) {
+	var wire []remotePortWire
+	if err := client.call(ctx, "controller.ports", map[string]any{}, &wire); err != nil {
+		return nil, err
+	}
+	result := make([]ports.Info, 0, len(wire))
+	for _, port := range wire {
+		result = append(result, ports.Info{
+			Name: port.Name, IsUSB: port.VID != "" || port.PID != "",
+			VID: port.VID, PID: port.PID, Product: port.Product,
+			Manufacturer: port.Manufacturer, SerialNumber: port.SerialNumber,
+			FriendlyName: port.FriendlyName, InstanceID: port.InstanceID,
+		})
+	}
+	return result, nil
+}
+
 func (client *remoteTUIIPC) FrontPanel(ctx context.Context) (native.FrontPanel, error) {
 	var panel native.FrontPanel
 	err := client.call(ctx, "controller.front_panel", map[string]any{}, &panel)
@@ -402,6 +419,12 @@ func (client *remoteTUIIPC) LCDPresentation(ctx context.Context) (control.LCDPre
 	var state control.LCDPresentationState
 	err := client.call(ctx, "controller.lcd.presentation.status", map[string]any{}, &state)
 	return state, err
+}
+
+func (client *remoteTUIIPC) OverrideIllumination(ctx context.Context, value uint16) (uint16, error) {
+	var state controllerapi.IlluminationState
+	err := client.call(ctx, "controller.illumination.override", map[string]uint16{"value": value}, &state)
+	return state.AppliedPWM, err
 }
 
 func (client *remoteTUIIPC) MirrorLCD(line1, line2 string) error {
@@ -1445,8 +1468,9 @@ func runRemoteTUIContext(
 						}
 						return nil
 					},
-					RFConfig: func() appconfig.RFConfig { return remoteRF },
-					RFFetch:  client.RFEntries,
+					RFConfig:             func() appconfig.RFConfig { return remoteRF },
+					RFFetch:              client.RFEntries,
+					OverrideIllumination: client.OverrideIllumination,
 					Integrations: func() hostui.IntegrationStatus {
 						return remoteTUIIntegrationStatus(address)
 					},
@@ -1468,6 +1492,7 @@ func runRemoteTUIContext(
 						InitialSnapshot:           initial,
 						InitialSnapshotReceivedAt: initialReceivedAt,
 						Snapshot:                  client.Snapshot,
+						Ports:                     client.Ports,
 						FrontPanel:                client.FrontPanel,
 						LCDPresentation:           client.LCDPresentation,
 						Events:                    client.events,

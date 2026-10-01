@@ -130,6 +130,40 @@ func TestPortPickerOmitsRedundantAuthenticationHint(t *testing.T) {
 	if !strings.Contains(rendered, "SELECT SERIAL DEVICE") {
 		t.Fatalf("port picker lost its actionable heading:\n%s", rendered)
 	}
+	if !strings.Contains(rendered, "Connection") || !strings.Contains(rendered, "Target") {
+		t.Fatalf("port picker lost concise connection context:\n%s", rendered)
+	}
+}
+
+func TestPortPickerDoesNotMarkEmptyIdentityCurrent(t *testing.T) {
+	model := readyModel(t, PageDashboard)
+	model.portCandidates = []ports.Info{{}}
+	model.remoteSnapshot = control.Snapshot{}
+	model.preview = nil
+	model.remote = &RemoteBackend{}
+	rendered := ansi.Strip(model.portPickerPage(model.snapshot()))
+	if strings.Contains(rendered, "CURRENT") {
+		t.Fatalf("empty serial identity was marked current:\n%s", rendered)
+	}
+}
+
+func TestRemotePortPickerFetchesAuthoritativeHostInventory(t *testing.T) {
+	model := readyModel(t, PageDashboard)
+	model.preview = nil
+	model.remoteSnapshot = control.Snapshot{}
+	model.remote = &RemoteBackend{Ports: func(context.Context) ([]ports.Info, error) {
+		return []ports.Info{{
+			Name: "COM3", FriendlyName: "USB-SERIAL CH340", VID: "1A86", PID: "7523",
+		}}, nil
+	}}
+	updated, command, handled := model.showPortPicker()
+	if !handled || command == nil || !updated.portLoading {
+		t.Fatalf("remote picker handled=%v loading=%v command=%v", handled, updated.portLoading, command != nil)
+	}
+	message, ok := command().(portsResultMsg)
+	if !ok || message.err != nil || len(message.values) != 1 || message.values[0].Name != "COM3" {
+		t.Fatalf("remote picker result=%T %#v", message, message)
+	}
 }
 
 func TestPreviewFramesCoverEveryDomainPage(t *testing.T) {
@@ -827,6 +861,26 @@ func TestHostedMenuPreviewAndLivePWMRemainBoardAuthoritative(t *testing.T) {
 	if !outputCommandNeedsReadback("pwm set 0 2048") || outputCommandNeedsReadback("pwm get") {
 		t.Fatal("PWM readback trigger is incorrect")
 	}
+
+	called := false
+	model.cursor = 26
+	model.overrideIllumination = func(_ context.Context, value uint16) (uint16, error) {
+		called = true
+		if value != 3072 {
+			t.Fatalf("override value=%d, want 3072", value)
+		}
+		return 3068, nil
+	}
+	updated, command, _ := model.setSelectedPWM(3072)
+	if command == nil {
+		t.Fatal("semantic enclosure override did not return a command")
+	}
+	message := command()
+	updatedModel, _ := updated.Update(message)
+	updated = updatedModel.(Model)
+	if !called || updated.pwmValues[11] != 3068 {
+		t.Fatalf("semantic enclosure override called=%t applied=%d", called, updated.pwmValues[11])
+	}
 }
 
 func TestNestedTabAndRightArrowCompletion(t *testing.T) {
@@ -961,14 +1015,14 @@ func TestControlPageAndTerminalVisibilityFollowNavigationContract(t *testing.T) 
 	}
 }
 
-func TestActionBarDefaultsToOnePortToggleAndShowsRebootProgress(t *testing.T) {
+func TestActionBarDefaultsToOnePortToggleAndShowsHardwareResetProgress(t *testing.T) {
 	model := readyModel(t, PageDashboard)
 	plain := ansi.Strip(model.actionBar(model.snapshot()))
 	if strings.Contains(plain, "O Open") || !strings.Contains(plain, "X Close") {
 		t.Fatalf("connected default action bar did not use one Close toggle: %q", plain)
 	}
-	if strings.Contains(model.actionBar(model.snapshot()), buttonBadStyle.Render("R Reboot")) {
-		t.Fatal("reboot action is permanently danger-colored")
+	if !strings.Contains(plain, "^R HW Reset") || strings.Contains(model.actionBar(model.snapshot()), buttonBadStyle.Render("^R HW Reset")) {
+		t.Fatal("hardware reset action is missing or permanently danger-colored")
 	}
 
 	model.uiValue.SeparatePortButtons = true
@@ -978,14 +1032,25 @@ func TestActionBarDefaultsToOnePortToggleAndShowsRebootProgress(t *testing.T) {
 	}
 
 	model.uiValue.SeparatePortButtons = false
-	updated, command, _ := model.dispatchLine("reset app")
+	updated, command, _ := model.dispatchLine("reset lines")
 	model = updated
-	if command == nil || !model.rebootPending || !strings.Contains(ansi.Strip(model.actionBar(model.snapshot())), "Rebooting") {
-		t.Fatal("reboot did not enter visible in-transit state")
+	if command == nil || !model.rebootPending || !strings.Contains(ansi.Strip(model.actionBar(model.snapshot())), "Resetting") {
+		t.Fatal("hardware reset did not enter visible in-transit state")
 	}
 	updatedModel, _ := model.Update(command())
 	if updatedModel.(Model).rebootPending {
 		t.Fatal("reboot progress did not clear after command completion")
+	}
+}
+
+func TestControlRUsesHardwareResetPath(t *testing.T) {
+	model := readyModel(t, PageDashboard)
+	updated, command, handled := model.handleKey(tea.KeyMsg{Type: tea.KeyCtrlR})
+	if !handled || command == nil {
+		t.Fatal("Ctrl+R did not dispatch a reset command")
+	}
+	if !updated.rebootPending || !strings.Contains(updated.notice, "DTR hardware reset") {
+		t.Fatalf("Ctrl+R did not select the DTR reset path: pending=%v notice=%q", updated.rebootPending, updated.notice)
 	}
 }
 
@@ -1628,7 +1693,7 @@ func TestControlTableUsesMappedGroupSeparatorsAndStableHeaders(t *testing.T) {
 	model := readyModel(t, PageOutputs)
 	model.height = 42
 	plain := ansi.Strip(model.outputsPage(model.snapshot()))
-	for _, expected := range []string{"CONTROL", "STATUS", "─ RELAYS", "─ MOTION", "─ PWM", "CH 10 · User PWM 11"} {
+	for _, expected := range []string{"CONTROL", "STATUS", "─ RELAYS", "─ MOTION", "─ PWM", "CH 10 · User PWM 11", "─ LIGHTING"} {
 		if !strings.Contains(plain, expected) {
 			t.Errorf("control table missing %q:\n%s", expected, plain)
 		}
@@ -1641,6 +1706,9 @@ func TestControlTableUsesMappedGroupSeparatorsAndStableHeaders(t *testing.T) {
 
 	columns := outputTableColumns(model.presentationTableWidth(118))
 	rows := model.controlTableRows(model.snapshot(), max(8, columns[1].Width-7))
+	if len(rows) <= 26 || !strings.Contains(rows[26].Name, "CH 12 · Enclosure illumination · manual override") || !strings.Contains(rows[26].Value, "/4095") {
+		t.Fatalf("enclosure override row missing exact live value: %#v", rows)
+	}
 	visible := visibleControlTableLines(rows, tableBodyRows(model.contentHeight()), model.cursor)
 	findLine := func(logical int, group string) int {
 		t.Helper()

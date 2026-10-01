@@ -104,7 +104,11 @@ class HardwareSerial {
 public:
   void begin(std::uint32_t baud) { baud_ = baud; }
 
-  int available() const { return static_cast<int>(rx_.size()); }
+  int available() const {
+    // Match the ATmega328P HardwareSerial ring: at most 63 bytes can be
+    // pending in its 64-byte buffer at one time.
+    return static_cast<int>(rx_.size() > 63 ? 63 : rx_.size());
+  }
 
   int read() {
     if (rx_.empty()) {

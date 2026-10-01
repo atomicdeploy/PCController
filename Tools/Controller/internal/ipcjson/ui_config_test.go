@@ -174,6 +174,7 @@ func TestPeripheralAndPWMCapabilitiesSeparateReadConfigurationAndBoardWrites(t *
 		"controller.pwm.set":                        capabilityBoard,
 		"controller.pwm.off":                        capabilityBoard,
 		"controller.illumination.get":               capabilityRead,
+		"controller.illumination.override":          capabilityBoard,
 		"controller.illumination.set":               capabilityBoard,
 	}
 	for method, want := range checks {

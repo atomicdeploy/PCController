@@ -448,6 +448,9 @@ type Snapshot struct {
 	ConnectionNextRetry      time.Time                       `json:"connection_next_retry,omitempty"`
 	ConnectionRetryDelayMS   int64                           `json:"connection_retry_delay_ms,omitempty"`
 	ConnectionCandidate      PortInfo                        `json:"connection_candidate"`
+	ResetLinesAvailable      bool                            `json:"reset_lines_available"`
+	ResetLinesPort           PortInfo                        `json:"reset_lines_port"`
+	ResetLinesReason         string                          `json:"reset_lines_reason,omitempty"`
 	ProgramState             ProgramStateSnapshot            `json:"program_state"`
 	RFLearning               RFLearnState                    `json:"rf_learning"`
 	Macros                   control.MacroSnapshot           `json:"macros"`
@@ -1874,6 +1877,38 @@ func (client *Client) SetIllumination(
 	return client.Illumination(ctx)
 }
 
+// OverrideIllumination applies an exact raw value to the dedicated enclosure
+// MOSFET output and returns an authoritative readback. It deliberately leaves
+// the persisted Off/Auto/On policy untouched: the enclosure-light controller
+// remains the owner and may reassert its selected target on the next policy
+// transition.
+func (client *Client) OverrideIllumination(
+	ctx context.Context,
+	value uint16,
+) (IlluminationState, error) {
+	return client.overrideIllumination(ctx, value, client.SetPWMChannel, client.Illumination)
+}
+
+func (client *Client) overrideIllumination(
+	ctx context.Context,
+	value uint16,
+	set func(context.Context, byte, uint16) error,
+	read func(context.Context) (IlluminationState, error),
+) (IlluminationState, error) {
+	if value > 4095 {
+		return IlluminationState{}, fmt.Errorf("enclosure illumination PWM must be 0..4095")
+	}
+	if err := set(ctx, enclosureIlluminationPWMChannel, value); err != nil {
+		return IlluminationState{}, fmt.Errorf("apply enclosure illumination override: %w", err)
+	}
+	state, err := read(ctx)
+	if err != nil {
+		return IlluminationState{}, err
+	}
+	client.observeIllumination(state)
+	return state, nil
+}
+
 // SetStatusRGB replaces the base status color and cancels an active overlay.
 func (client *Client) SetStatusRGB(
 	ctx context.Context,
@@ -2110,9 +2145,12 @@ func (client *Client) MapLearnedRF(
 	)
 }
 
-// Snapshot returns the latest cached connection and board state without polling.
+// Snapshot returns cached board state without polling firmware. When no
+// transport candidate is cached, serial-reset capability discovery may perform
+// one throttled host-side device enumeration.
 func (client *Client) Snapshot() Snapshot {
 	snapshot := client.runtime.Snapshot()
+	resetLinesAvailable, resetLinesPort, resetLinesReason := client.runtime.ResetLinesCapability()
 	// Library snapshots belong to client queries, not the hot board-status
 	// path: copying a long take for every internal status check is unnecessary.
 	if runner := client.runtime.MacroRunner(); runner != nil {
@@ -2163,14 +2201,25 @@ func (client *Client) Snapshot() Snapshot {
 			FriendlyName: snapshot.ConnectionCandidate.FriendlyName,
 			InstanceID:   snapshot.ConnectionCandidate.InstanceID,
 		},
-		ProgramState: snapshot.ProgramState,
-		RFLearning:   snapshot.RFLearning,
-		Macros:       snapshot.Macros,
+		ResetLinesAvailable: resetLinesAvailable,
+		ResetLinesPort: PortInfo{
+			Name:         resetLinesPort.Name,
+			VID:          resetLinesPort.VID,
+			PID:          resetLinesPort.PID,
+			Product:      resetLinesPort.Product,
+			Manufacturer: resetLinesPort.Manufacturer,
+			SerialNumber: resetLinesPort.SerialNumber,
+			FriendlyName: resetLinesPort.FriendlyName,
+			InstanceID:   resetLinesPort.InstanceID,
+		},
+		ResetLinesReason: resetLinesReason,
+		ProgramState:     snapshot.ProgramState,
+		RFLearning:       snapshot.RFLearning,
+		Macros:           snapshot.Macros,
 		// The runtime owns the live host configuration used by command execution
-		// and by the macro runner.  Reuse its canonical catalog here so the public
-		// snapshot cannot drift from `effect list` when a persisted configuration
-		// omits strip_effects and therefore receives the first-run defaults through
-		// the runtime's effective configuration path.
+		// and by the effect runner. Reuse its canonical catalog here so the public
+		// snapshot cannot drift from `effect list` when a new installation receives
+		// the editable JSON seed catalog through the effective configuration path.
 		Effects:           snapshot.Effects,
 		HardwareProblems:  snapshot.HardwareProblems,
 		FrontPanel:        snapshot.FrontPanel,

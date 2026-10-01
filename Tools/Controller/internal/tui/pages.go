@@ -50,8 +50,20 @@ func (model Model) pageView(snapshot control.Snapshot) string {
 }
 
 func (model Model) portPickerPage(snapshot control.Snapshot) string {
+	status, detail, _ := tuiConnectionPresentation(snapshot, model.connectPending, time.Now())
+	connection := status
+	if detail != "" {
+		connection += " · " + detail
+	}
 	lines := []string{
 		sectionHeader(model.width, "SELECT SERIAL DEVICE", "↑/↓ select · Enter open · Esc cancel"),
+		kvCard(model.width, 12, "Connection", connection),
+	}
+	if target := compactConnectionCandidate(snapshot); target != "" {
+		lines = append(lines, kvCard(model.width, 12, "Target", target))
+	}
+	if reason := strings.TrimSpace(snapshot.ConnectionReason); reason != "" && !snapshot.Connected {
+		lines = append(lines, kvCard(model.width, 12, "Last failure", reason))
 	}
 	if model.portLoading {
 		lines = append(lines, warnStyle.Render(model.spinnerView()+" querying Windows serial devices…"))
@@ -64,7 +76,8 @@ func (model Model) portPickerPage(snapshot control.Snapshot) string {
 	}
 	for index, candidate := range model.portCandidates {
 		line := candidate.Label()
-		if candidate.Name == snapshot.Port.Name {
+		if strings.TrimSpace(candidate.Name) != "" &&
+			strings.EqualFold(strings.TrimSpace(candidate.Name), strings.TrimSpace(snapshot.Port.Name)) {
 			line += "  · CURRENT"
 		}
 		if index == model.portCursor {
@@ -376,6 +389,22 @@ func (model Model) controlTableRows(snapshot control.Snapshot, levelWidth int) [
 				Value: sliderPercentPlain(percent, levelWidth) + fmt.Sprintf(" %3d%%", percent), Tone: controlToneLevel,
 			})
 		}
+		value := uint16(0)
+		if model.havePWMValues {
+			value = model.pwmValues[11]
+		} else if status.PWMChannel == 11 {
+			value = status.PWMValue
+		}
+		percent := int(value) * 100 / 4095
+		targetBrightness := snapshot.Settings.OffBrightness
+		if snapshot.Settings.LightMode == 2 || (snapshot.Settings.LightMode == 1 && status.DoorOpen) {
+			targetBrightness = snapshot.Settings.OnBrightness
+		}
+		target := uint16(targetBrightness)*16 + uint16(targetBrightness)/16
+		rows = append(rows, controlTableRow{
+			Group: "LIGHTING", Name: "CH 12 · Enclosure illumination · manual override",
+			Value: sliderPercentPlain(percent, levelWidth) + fmt.Sprintf(" %3d%% · applied %d/4095 · policy %d/4095", percent, value, target), Tone: controlToneLevel,
+		})
 		rows = append(rows, controlTableRow{Name: "All user PWM", Value: "Set 0%", Tone: controlToneAction})
 	}
 	return rows

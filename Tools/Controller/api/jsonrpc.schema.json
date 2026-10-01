@@ -451,6 +451,7 @@
             "controller.hotkeys.get",
             "controller.hotkeys.set",
             "controller.illumination.get",
+            "controller.illumination.override",
             "controller.illumination.set",
             "controller.integrations.local.get",
             "controller.integrations.local.set",
@@ -1071,8 +1072,13 @@
     },
     "controller.illumination.get": {
       "capability": "read",
-      "summary": "Read persisted enclosure-light policy, live door-selected target, and exact applied channel-11 PWM.",
+      "summary": "Read persisted enclosure-light policy, live door-selected target, and exact applied MOSFET channel-12 PWM.",
       "idempotency": "safe"
+    },
+    "controller.illumination.override": {
+      "capability": "board_commands",
+      "summary": "Temporarily apply exact 0..4095 PWM to MOSFET channel 12 without changing or taking ownership from the enclosure-light policy, then return authoritative readback.",
+      "idempotency": "idempotent-with-authoritative-readback"
     },
     "controller.illumination.set": {
       "capability": "board_commands",

@@ -57,7 +57,7 @@ import {
 } from './hotkeys'
 import { formatClock, localizeDigits, translator, type MessageKey } from './i18n'
 import { redactSensitiveCommand, shellArgument } from './command-line'
-import { connectionPresentation } from './connection-presentation'
+import { connectionPresentation, hardwareResetAvailable } from './connection-presentation'
 import { effectiveProductTitle, productMark } from './product-identity'
 import { controllerFaviconState, updateRuntimeFavicon } from './state-favicon'
 import {
@@ -1652,6 +1652,7 @@ export default function App() {
         : 'warn'
   const transportLabel = controllerConnectionLabel(snapshot, streamState, boardState, appearance.locale)
   const boardConnection = connectionPresentation(snapshot, appearance.locale)
+  const canHardwareReset = hardwareResetAvailable(snapshot)
   const quickCommands = snapshot.connected
     ? [
         ['status', `${snapshot.port.name || (appearance.locale === 'fa' ? 'کنترلر' : 'Controller')} · ${snapshot.status_updated ? formatClock(appearance.locale, snapshot.status_updated) : t('online')}`],
@@ -1749,6 +1750,7 @@ export default function App() {
           style={sidebarStatusMenuPosition}
         >
           <button type="button" role="menuitem" disabled={!snapshot.connected && boardConnection.retryDisabled} onClick={() => { setSidebarStatusMenu(false); void runCommand('reconnect') }}>{snapshot.connected ? (appearance.locale === 'fa' ? 'اتصال مجدد' : 'Reconnect') : boardConnection.action}</button>
+          {canHardwareReset && <button type="button" role="menuitem" onClick={() => { setSidebarStatusMenu(false); void runCommand('reset lines') }}>{appearance.locale === 'fa' ? 'بازنشانی سخت‌افزاری (DTR)' : 'Hardware reset (DTR)'}</button>}
           {snapshot.connected && <button type="button" role="menuitem" onClick={() => { setSidebarStatusMenu(false); void runCommand('close') }}>{appearance.locale === 'fa' ? 'بستن درگاه' : 'Close port'}</button>}
           <button type="button" role="menuitem" onClick={() => { setSidebarStatusMenu(false); setPaletteQuery('ports'); setPaletteIndex(0); setPalette(true) }}>{appearance.locale === 'fa' ? 'انتخاب درگاه USB' : 'Choose USB port'}</button>
           <button type="button" role="menuitem" onClick={() => { setSidebarStatusMenu(false); navigate('device') }}>{appearance.locale === 'fa' ? 'جزئیات دستگاه' : 'Device details'}</button>

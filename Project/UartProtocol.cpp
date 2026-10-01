@@ -24,7 +24,11 @@ void UartProtocol::begin(uint32_t baud, FrameHandler handler, void *context) {
 }
 
 void UartProtocol::service() {
-  while (serial_->available() > 0) {
+  // Drain only the AVR UART ring occupancy observed on entry. Bytes arriving
+  // during this pass wait for the next loop, so a noisy/floating adapter can
+  // never starve autonomous services. HardwareSerial's AVR ring is <256 bytes.
+  uint8_t pending = static_cast<uint8_t>(serial_->available());
+  while (pending-- != 0) {
     const uint8_t value = static_cast<uint8_t>(serial_->read());
     if (value == 0) {
       if (!dropping_ && receiveLength_ != 0) {
