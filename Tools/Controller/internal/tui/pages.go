@@ -389,6 +389,22 @@ func (model Model) controlTableRows(snapshot control.Snapshot, levelWidth int) [
 				Value: sliderPercentPlain(percent, levelWidth) + fmt.Sprintf(" %3d%%", percent), Tone: controlToneLevel,
 			})
 		}
+		value := uint16(0)
+		if model.havePWMValues {
+			value = model.pwmValues[11]
+		} else if status.PWMChannel == 11 {
+			value = status.PWMValue
+		}
+		percent := int(value) * 100 / 4095
+		targetBrightness := snapshot.Settings.OffBrightness
+		if snapshot.Settings.LightMode == 2 || (snapshot.Settings.LightMode == 1 && status.DoorOpen) {
+			targetBrightness = snapshot.Settings.OnBrightness
+		}
+		target := uint16(targetBrightness)*16 + uint16(targetBrightness)/16
+		rows = append(rows, controlTableRow{
+			Group: "LIGHTING", Name: "CH 12 · Enclosure illumination · manual override",
+			Value: sliderPercentPlain(percent, levelWidth) + fmt.Sprintf(" %3d%% · applied %d/4095 · policy %d/4095", percent, value, target), Tone: controlToneLevel,
+		})
 		rows = append(rows, controlTableRow{Name: "All user PWM", Value: "Set 0%", Tone: controlToneAction})
 	}
 	return rows

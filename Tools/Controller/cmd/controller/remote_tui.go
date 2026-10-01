@@ -420,6 +420,12 @@ func (client *remoteTUIIPC) LCDPresentation(ctx context.Context) (control.LCDPre
 	return state, err
 }
 
+func (client *remoteTUIIPC) OverrideIllumination(ctx context.Context, value uint16) (uint16, error) {
+	var state controllerapi.IlluminationState
+	err := client.call(ctx, "controller.illumination.override", map[string]uint16{"value": value}, &state)
+	return state.AppliedPWM, err
+}
+
 func (client *remoteTUIIPC) MirrorLCD(line1, line2 string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -1461,8 +1467,9 @@ func runRemoteTUIContext(
 						}
 						return nil
 					},
-					RFConfig: func() appconfig.RFConfig { return remoteRF },
-					RFFetch:  client.RFEntries,
+					RFConfig:             func() appconfig.RFConfig { return remoteRF },
+					RFFetch:              client.RFEntries,
+					OverrideIllumination: client.OverrideIllumination,
 					Integrations: func() hostui.IntegrationStatus {
 						return remoteTUIIntegrationStatus(address)
 					},

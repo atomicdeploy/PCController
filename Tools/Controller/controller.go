@@ -1795,6 +1795,38 @@ func (client *Client) SetIllumination(
 	return client.Illumination(ctx)
 }
 
+// OverrideIllumination applies an exact raw value to the dedicated enclosure
+// MOSFET output and returns an authoritative readback. It deliberately leaves
+// the persisted Off/Auto/On policy untouched: the enclosure-light controller
+// remains the owner and may reassert its selected target on the next policy
+// transition.
+func (client *Client) OverrideIllumination(
+	ctx context.Context,
+	value uint16,
+) (IlluminationState, error) {
+	return client.overrideIllumination(ctx, value, client.SetPWMChannel, client.Illumination)
+}
+
+func (client *Client) overrideIllumination(
+	ctx context.Context,
+	value uint16,
+	set func(context.Context, byte, uint16) error,
+	read func(context.Context) (IlluminationState, error),
+) (IlluminationState, error) {
+	if value > 4095 {
+		return IlluminationState{}, fmt.Errorf("enclosure illumination PWM must be 0..4095")
+	}
+	if err := set(ctx, enclosureIlluminationPWMChannel, value); err != nil {
+		return IlluminationState{}, fmt.Errorf("apply enclosure illumination override: %w", err)
+	}
+	state, err := read(ctx)
+	if err != nil {
+		return IlluminationState{}, err
+	}
+	client.observeIllumination(state)
+	return state, nil
+}
+
 // SetStatusRGB replaces the base status color and cancels an active overlay.
 func (client *Client) SetStatusRGB(
 	ctx context.Context,

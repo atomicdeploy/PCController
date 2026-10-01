@@ -861,6 +861,26 @@ func TestHostedMenuPreviewAndLivePWMRemainBoardAuthoritative(t *testing.T) {
 	if !outputCommandNeedsReadback("pwm set 0 2048") || outputCommandNeedsReadback("pwm get") {
 		t.Fatal("PWM readback trigger is incorrect")
 	}
+
+	called := false
+	model.cursor = 26
+	model.overrideIllumination = func(_ context.Context, value uint16) (uint16, error) {
+		called = true
+		if value != 3072 {
+			t.Fatalf("override value=%d, want 3072", value)
+		}
+		return 3068, nil
+	}
+	updated, command, _ := model.setSelectedPWM(3072)
+	if command == nil {
+		t.Fatal("semantic enclosure override did not return a command")
+	}
+	message := command()
+	updatedModel, _ := updated.Update(message)
+	updated = updatedModel.(Model)
+	if !called || updated.pwmValues[11] != 3068 {
+		t.Fatalf("semantic enclosure override called=%t applied=%d", called, updated.pwmValues[11])
+	}
 }
 
 func TestNestedTabAndRightArrowCompletion(t *testing.T) {
@@ -1662,7 +1682,7 @@ func TestControlTableUsesMappedGroupSeparatorsAndStableHeaders(t *testing.T) {
 	model := readyModel(t, PageOutputs)
 	model.height = 42
 	plain := ansi.Strip(model.outputsPage(model.snapshot()))
-	for _, expected := range []string{"CONTROL", "STATUS", "─ RELAYS", "─ MOTION", "─ PWM", "CH 10 · User PWM 11"} {
+	for _, expected := range []string{"CONTROL", "STATUS", "─ RELAYS", "─ MOTION", "─ PWM", "CH 10 · User PWM 11", "─ LIGHTING"} {
 		if !strings.Contains(plain, expected) {
 			t.Errorf("control table missing %q:\n%s", expected, plain)
 		}
@@ -1675,6 +1695,9 @@ func TestControlTableUsesMappedGroupSeparatorsAndStableHeaders(t *testing.T) {
 
 	columns := outputTableColumns(model.presentationTableWidth(118))
 	rows := model.controlTableRows(model.snapshot(), max(8, columns[1].Width-7))
+	if len(rows) <= 26 || !strings.Contains(rows[26].Name, "CH 12 · Enclosure illumination · manual override") || !strings.Contains(rows[26].Value, "/4095") {
+		t.Fatalf("enclosure override row missing exact live value: %#v", rows)
+	}
 	visible := visibleControlTableLines(rows, tableBodyRows(model.contentHeight()), model.cursor)
 	findLine := func(logical int, group string) int {
 		t.Helper()

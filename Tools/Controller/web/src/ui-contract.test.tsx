@@ -591,9 +591,11 @@ describe('offline and settings UI contracts', () => {
 	expect(markup).toContain('Auto · door')
 	expect(markup).toContain('Door-open / On brightness')
 	expect(markup).toContain('Door-closed / Off brightness')
-	expect(markup).toContain('Applied channel 11')
+	expect(markup).toContain('Applied MOSFET channel 12')
 	expect(markup).toContain('2570/4095')
-	expect(markup).toContain('Apply illumination')
+	expect(markup).toContain('Manual raw override · MOSFET channel 12')
+	expect(markup).toContain('Apply manual override')
+	expect(markup).toContain('Apply policy')
   })
 
   it('renders offline controls and settings copy in Persian', () => {

@@ -1326,7 +1326,11 @@ func runTUIWithInitialAction(
 				}, &instances)
 				return instances, err
 			},
-			OpenNetwork:        openBrowser,
+			OpenNetwork: openBrowser,
+			OverrideIllumination: func(ctx context.Context, value uint16) (uint16, error) {
+				state, overrideErr := primary.client.OverrideIllumination(ctx, value)
+				return state.AppliedPWM, overrideErr
+			},
 			AppActions:         appActions,
 			InstanceID:         tuiInstanceID,
 			NavigationSync:     *syncNavigation,
