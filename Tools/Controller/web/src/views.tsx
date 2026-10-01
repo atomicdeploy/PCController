@@ -39,6 +39,7 @@ import {
   Languages,
   Lightbulb,
   ListFilter,
+  ListRestart,
   MemoryStick,
   MessageSquareText,
   Moon,
@@ -88,7 +89,7 @@ import {
 } from './components'
 import { execute, rpc } from './api'
 import { settingsSetCommand } from './command-line'
-import { connectionPresentation } from './connection-presentation'
+import { connectionPresentation, hardwareResetAvailable } from './connection-presentation'
 import { EventList } from './event-collection'
 import { HotkeyEditor } from './hotkey-settings-editor'
 import { PeripheralNamesEditor } from './peripheral-names-editor'
@@ -255,11 +256,14 @@ function BoardConnectionState({
   snapshot,
   locale,
   reconnect,
+  hardwareReset,
 }: {
   snapshot: Snapshot
   locale: Locale
   reconnect: () => void
+  hardwareReset?: () => void
 }) {
+  const copy = (english: string, persian: string) => locale === 'fa' ? persian : english
   const [now, setNow] = useState(Date.now)
   useEffect(() => {
     if (snapshot.connection_phase !== 'attempting' && snapshot.connection_phase !== 'waiting_retry') return
@@ -287,14 +291,17 @@ function BoardConnectionState({
         {presentation.timing && <span><TimerReset size={15} />{presentation.timing}</span>}
       </div>
     </div>
-    <Button
-      compact
-      tone={presentation.phase === 'blocked' ? 'danger' : 'primary'}
-      icon={presentation.animated ? RefreshCw : PlugZap}
-      busy={presentation.animated}
-      disabled={presentation.retryDisabled}
-      onClick={reconnect}
-    >{presentation.action}</Button>
+    <div className="connection-state__actions">
+      {hardwareReset && <Button compact icon={ListRestart} onClick={hardwareReset}>{copy('Hardware reset', 'بازنشانی سخت‌افزاری')}</Button>}
+      <Button
+        compact
+        tone={presentation.phase === 'blocked' ? 'danger' : 'primary'}
+        icon={presentation.animated ? RefreshCw : PlugZap}
+        busy={presentation.animated}
+        disabled={presentation.retryDisabled}
+        onClick={reconnect}
+      >{presentation.action}</Button>
+    </div>
   </div>
 }
 
@@ -462,7 +469,7 @@ export function DashboardView(props: SharedViewProps) {
           {transportUnavailable && !authenticationRequired
             ? <ControllerUnavailable state={transportConnecting ? 'connecting' : 'transport-offline'} locale={locale} />
             : !boardReady && !authenticationRequired && !hardwareProblem
-              ? <BoardConnectionState snapshot={snapshot} locale={locale} reconnect={() => void command('reconnect', boardConnection.action)} />
+              ? <BoardConnectionState snapshot={snapshot} locale={locale} reconnect={() => void command('reconnect', boardConnection.action)} hardwareReset={hardwareResetAvailable(snapshot) ? () => void command('reset lines', copy('Hardware reset sent', 'بازنشانی سخت‌افزاری ارسال شد')) : undefined} />
             : <>
               <h2>{boardReady ? snapshot.hello.name || appTitle : authenticationRequired ? t('authenticationDashboard') : boardUnavailableTitle}</h2>
               {(boardReady || authenticationRequired || boardUnavailableDetail) && <p>{boardReady ? `USB ${snapshot.port.vid || '—'}:${snapshot.port.pid || '—'} · ${snapshot.port.name || copy('automatic port', 'درگاه خودکار')}` : authenticationRequired ? t('authenticationDashboardDetail') : boardUnavailableDetail}</p>}
@@ -742,7 +749,7 @@ export function ControlsView(props: SharedViewProps) {
         >
           {transportOffline
             ? <ControllerUnavailable state={unavailableState} locale={locale} showTitle={false} />
-            : <BoardConnectionState snapshot={snapshot} locale={locale} reconnect={() => void command('reconnect', boardConnection.action)} />}
+            : <BoardConnectionState snapshot={snapshot} locale={locale} reconnect={() => void command('reconnect', boardConnection.action)} hardwareReset={hardwareResetAvailable(snapshot) ? () => void command('reset lines', copy('Hardware reset sent', 'بازنشانی سخت‌افزاری ارسال شد')) : undefined} />}
         </Card>
       </>
     )

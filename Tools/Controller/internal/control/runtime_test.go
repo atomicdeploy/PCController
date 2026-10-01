@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -201,12 +202,77 @@ func TestPulseResetUsesRememberedPortBeforeAuthentication(t *testing.T) {
 	runtime := New(Options{BaudRate: link.DefaultBaudRate})
 	runtime.mu.Lock()
 	runtime.paused = true
+	runtime.connectionCandidate = ports.Info{
+		Name: "COM4", FriendlyName: "USB-SERIAL CH340", IsUSB: true,
+	}
 	runtime.mu.Unlock()
-	if err := runtime.PulseResetPortFor(context.Background(), "COM4", time.Millisecond); err != nil {
+	after := runtime.LatestEventID()
+	if err := runtime.PulseResetPortFor(context.Background(), "", time.Millisecond); err != nil {
 		t.Fatal(err)
 	}
 	if len(port.dtr) != 2 || !port.dtr[0] || port.dtr[1] {
 		t.Fatalf("unexpected DTR sequence: %v", port.dtr)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	event, err := runtime.WaitEvent(ctx, after, "reset.lines")
+	if err != nil || event.Lifecycle != "started" || event.Port.Name != "COM4" {
+		t.Fatalf("reset lifecycle event=%#v err=%v", event, err)
+	}
+}
+
+func TestPulseResetEnumeratesOnlyUnambiguousCandidate(t *testing.T) {
+	previousList := listResetPorts
+	previousOpen := openResetSession
+	defer func() {
+		listResetPorts = previousList
+		openResetSession = previousOpen
+	}()
+
+	opened := ""
+	openResetSession = func(_ context.Context, name string, _ int) (*link.Session, error) {
+		opened = name
+		return link.NewForPort(name, newReconnectTestPort()), nil
+	}
+	runtime := New(Options{BaudRate: link.DefaultBaudRate, Filter: ports.Filter{
+		VID: "1A86", PID: "7523",
+	}})
+	runtime.mu.Lock()
+	runtime.paused = true
+	runtime.mu.Unlock()
+
+	listResetPorts = func() ([]ports.Info, error) {
+		return []ports.Info{{Name: "COM7", VID: "1A86", PID: "7523", IsUSB: true}}, nil
+	}
+	if err := runtime.PulseResetFor(context.Background(), time.Millisecond); err != nil {
+		t.Fatalf("unique candidate reset: %v", err)
+	}
+	if opened != "COM7" || runtime.Snapshot().ConnectionCandidate.Name != "COM7" {
+		t.Fatalf("opened=%q candidate=%#v", opened, runtime.Snapshot().ConnectionCandidate)
+	}
+
+	opened = ""
+	runtime.mu.Lock()
+	runtime.connectionCandidate = ports.Info{}
+	runtime.mu.Unlock()
+	listResetPorts = func() ([]ports.Info, error) {
+		return []ports.Info{
+			{Name: "COM7", VID: "1A86", PID: "7523", IsUSB: true},
+			{Name: "COM8", VID: "1A86", PID: "7523", IsUSB: true},
+		}, nil
+	}
+	var ambiguous *ports.AmbiguousError
+	if err := runtime.PulseResetFor(context.Background(), time.Millisecond); !errors.As(err, &ambiguous) {
+		t.Fatalf("ambiguous reset error=%v", err)
+	}
+	if opened != "" {
+		t.Fatalf("ambiguous reset opened %q", opened)
+	}
+
+	listResetPorts = func() ([]ports.Info, error) { return nil, nil }
+	if err := runtime.PulseResetFor(context.Background(), time.Millisecond); err == nil ||
+		!strings.Contains(err.Error(), "uniquely matching serial port") {
+		t.Fatalf("missing-device reset error=%v", err)
 	}
 }
 

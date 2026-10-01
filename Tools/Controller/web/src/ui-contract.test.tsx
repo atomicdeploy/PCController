@@ -117,6 +117,20 @@ describe('offline and settings UI contracts', () => {
     expect(markup).not.toContain('Status lighting')
   })
 
+  it('keeps DTR hardware reset visible for an enumerated board before firmware authentication', () => {
+    const snapshot = {
+      ...emptySnapshot,
+      connected: false,
+      connection_phase: 'waiting_retry' as const,
+      connection_candidate: { name: 'COM3', friendly_name: 'USB-SERIAL CH340' },
+    }
+    const transport = { ...shared().transport, streamState: 'open' as const, boardState: 'unavailable' as const }
+    const controls = renderToStaticMarkup(<ControlsView {...shared()} snapshot={snapshot} transport={transport} />)
+    const workbench = renderToStaticMarkup(<WorkbenchView {...shared()} snapshot={snapshot} transport={transport} />)
+    expect(controls).toContain('Hardware reset')
+    expect(workbench).toContain('Hardware reset (DTR)')
+  })
+
   it('renders concise transport states without connection narration', () => {
     const offline = renderToStaticMarkup(<DashboardView
       {...shared()}

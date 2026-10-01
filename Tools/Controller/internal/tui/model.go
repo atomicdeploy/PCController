@@ -1022,7 +1022,8 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if normalizedLine == "reconnect" {
 			model.connectPending = false
 		}
-		if strings.EqualFold(strings.TrimSpace(message.line), "reset app") {
+		if strings.EqualFold(strings.TrimSpace(message.line), "reset app") ||
+			strings.EqualFold(strings.TrimSpace(message.line), "reset lines") {
 			model.rebootPending = false
 		}
 
@@ -1468,9 +1469,14 @@ func (model Model) applyAppAction(action hostui.AppAction) (Model, []tea.Cmd, bo
 	case "app.port.close":
 		commands = append(commands, execute(model.engine, "port close"))
 	case "command":
-		if strings.EqualFold(strings.TrimSpace(action.Value), "reset app") {
+		if strings.EqualFold(strings.TrimSpace(action.Value), "reset app") ||
+			strings.EqualFold(strings.TrimSpace(action.Value), "reset lines") {
 			model.rebootPending = true
-			model.setNotice("Rebooting controller…")
+			if strings.EqualFold(strings.TrimSpace(action.Value), "reset lines") {
+				model.setNotice("Pulsing DTR hardware reset…")
+			} else {
+				model.setNotice("Rebooting controller application…")
+			}
 		}
 		commands = append(commands, execute(model.engine, action.Value))
 	default:
@@ -2133,10 +2139,10 @@ func (model Model) actionBarItems(snapshot control.Snapshot) []actionBarItem {
 	} else {
 		items = append(items, actionBarItem{label: "O Open", action: "open", style: buttonGoodStyle})
 	}
-	rebootLabel := "R Reboot"
+	rebootLabel := "^R HW Reset"
 	rebootAction := "reboot"
 	if model.rebootPending {
-		rebootLabel = model.spinnerView() + " Rebooting"
+		rebootLabel = model.spinnerView() + " Resetting"
 		rebootAction = ""
 	}
 	items = append(items,

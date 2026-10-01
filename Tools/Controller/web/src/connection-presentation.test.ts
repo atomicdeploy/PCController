@@ -1,8 +1,17 @@
 import { describe, expect, it } from 'vitest'
-import { connectionPresentation } from './connection-presentation'
+import { connectionPresentation, hardwareResetAvailable } from './connection-presentation'
 import { emptySnapshot } from './types'
 
 describe('connectionPresentation', () => {
+  it('allows a hardware reset for an enumerated candidate before firmware authentication', () => {
+    expect(hardwareResetAvailable({
+      ...emptySnapshot,
+      connected: false,
+      connection_candidate: { name: 'COM3', friendly_name: 'USB-SERIAL CH340' },
+    })).toBe(true)
+    expect(hardwareResetAvailable({ ...emptySnapshot, connected: false })).toBe(false)
+  })
+
   it('distinguishes an active bounded attempt from retry backoff', () => {
     const now = Date.parse('2026-09-29T09:00:05Z')
     const attempting = connectionPresentation({

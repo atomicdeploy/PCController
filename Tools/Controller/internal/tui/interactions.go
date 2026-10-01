@@ -281,7 +281,7 @@ func (model Model) handleKey(message tea.KeyMsg) (Model, tea.Cmd, bool) {
 	case "ctrl+x":
 		return model.closePort()
 	case "ctrl+r":
-		return model.dispatchLine("reset app")
+		return model.dispatchLine("reset lines")
 	case "~", "`":
 		model.toggleTerminal()
 		return model, nil, true
@@ -475,9 +475,13 @@ func (model Model) dispatchLine(line string) (Model, tea.Cmd, bool) {
 	model.historyPos = -1
 	model.historyBuf = ""
 	model.updateInputPlaceholder()
-	if strings.EqualFold(line, "reset app") {
+	if strings.EqualFold(line, "reset app") || strings.EqualFold(line, "reset lines") {
 		model.rebootPending = true
-		model.setNotice("Rebooting controller…")
+		if strings.EqualFold(line, "reset lines") {
+			model.setNotice("Pulsing DTR hardware reset…")
+		} else {
+			model.setNotice("Rebooting controller application…")
+		}
 	}
 	if model.remote != nil {
 		return model, execute(model.engine, line), true
@@ -1907,7 +1911,7 @@ func (model Model) handleActionBarClick(x int) (tea.Model, tea.Cmd) {
 				updated, command, _ := model.closePort()
 				return updated, command
 			case "reboot":
-				updated, command, _ := model.dispatchLine("reset app")
+				updated, command, _ := model.dispatchLine("reset lines")
 				return updated, command
 			case "refresh":
 				updated, command, _ := model.dispatchLine("status")
