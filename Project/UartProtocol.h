@@ -52,9 +52,6 @@ public:
   static uint8_t crc8(const uint8_t *data, uint8_t length);
 
 private:
-  // Never let a noisy, floating, or disappearing USB/UART adapter monopolize
-  // the firmware loop. Large frames remain incremental across service calls.
-  static constexpr uint8_t ReceiveByteBudget = 32;
   static constexpr uint8_t RawOverhead = WireContract::RawFrameOverhead;
   static constexpr uint8_t MaximumRaw = WireContract::MaximumRawFrame;
   static constexpr uint8_t MaximumEncoded =
