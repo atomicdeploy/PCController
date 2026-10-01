@@ -389,6 +389,17 @@ func (model Model) controlTableRows(snapshot control.Snapshot, levelWidth int) [
 				Value: sliderPercentPlain(percent, levelWidth) + fmt.Sprintf(" %3d%%", percent), Tone: controlToneLevel,
 			})
 		}
+		value := uint16(0)
+		if model.havePWMValues {
+			value = model.pwmValues[11]
+		} else if status.PWMChannel == 11 {
+			value = status.PWMValue
+		}
+		percent := int(value) * 100 / 4095
+		rows = append(rows, controlTableRow{
+			Group: "LIGHTING", Name: "CH 12 · Enclosure illumination · manual override",
+			Value: sliderPercentPlain(percent, levelWidth) + fmt.Sprintf(" %3d%% · %d/4095", percent, value), Tone: controlToneLevel,
+		})
 		rows = append(rows, controlTableRow{Name: "All user PWM", Value: "Set 0%", Tone: controlToneAction})
 	}
 	return rows

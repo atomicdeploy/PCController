@@ -880,6 +880,17 @@ func (service *Service) dispatch(
 				result, err = service.Client.SetIllumination(ctx, byte(params.Mode), byte(params.OnBrightness), byte(params.OffBrightness))
 			}
 		}
+	case "controller.illumination.override":
+		var params struct {
+			Value int `json:"value"`
+		}
+		if err = decodeParams(request.Params, &params); err == nil {
+			if params.Value < 0 || params.Value > 4095 {
+				err = &RPCError{Code: -32602, Message: "value must be 0..4095"}
+			} else {
+				result, err = service.Client.OverrideIllumination(ctx, uint16(params.Value))
+			}
+		}
 	case "controller.pwm.set":
 		var params struct {
 			Channel int `json:"channel"`

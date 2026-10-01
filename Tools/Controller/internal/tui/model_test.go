@@ -1662,7 +1662,7 @@ func TestControlTableUsesMappedGroupSeparatorsAndStableHeaders(t *testing.T) {
 	model := readyModel(t, PageOutputs)
 	model.height = 42
 	plain := ansi.Strip(model.outputsPage(model.snapshot()))
-	for _, expected := range []string{"CONTROL", "STATUS", "─ RELAYS", "─ MOTION", "─ PWM", "CH 10 · User PWM 11"} {
+	for _, expected := range []string{"CONTROL", "STATUS", "─ RELAYS", "─ MOTION", "─ PWM", "CH 10 · User PWM 11", "─ LIGHTING", "CH 12 · Enclosure illumination · manual override"} {
 		if !strings.Contains(plain, expected) {
 			t.Errorf("control table missing %q:\n%s", expected, plain)
 		}

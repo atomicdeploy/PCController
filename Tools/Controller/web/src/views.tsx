@@ -1043,6 +1043,7 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
   const [illuminationOn, setIlluminationOn] = useState(snapshot.settings.on_brightness)
   const [illuminationOff, setIlluminationOff] = useState(snapshot.settings.off_brightness)
   const [illuminationLive, setIlluminationLive] = useState<IlluminationState>(snapshot.illumination)
+	const [illuminationOverridePWM, setIlluminationOverridePWM] = useState(snapshot.illumination.applied_pwm)
   const [illuminationBusy, setIlluminationBusy] = useState(false)
   const [illuminationNotice, setIlluminationNotice] = useState('')
   const [illuminationError, setIlluminationError] = useState(false)
@@ -1223,6 +1224,9 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
   useEffect(() => {
 	setIlluminationLive(snapshot.illumination)
   }, [snapshot.illumination])
+	useEffect(() => {
+		setIlluminationOverridePWM(snapshot.illumination.applied_pwm)
+	}, [snapshot.illumination.applied_pwm])
 
   useEffect(() => {
 	if (!snapshot.connected || !snapshot.have_settings || !available.pwm) return
@@ -1257,6 +1261,28 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
 		setIlluminationBusy(false)
 	}
   }
+
+	const overrideIllumination = async () => {
+		setIlluminationBusy(true)
+		setIlluminationNotice('')
+		setIlluminationError(false)
+		try {
+			const state = await rpc<IlluminationState>('controller.illumination.override', {
+				value: illuminationOverridePWM,
+			})
+			setIlluminationLive(state)
+			setIlluminationOverridePWM(state.applied_pwm)
+			setIlluminationNotice(copy(
+				'Manual value applied and verified. The enclosure-lighting policy remains the owner.',
+				'مقدار دستی اعمال و تأیید شد. سیاست روشنایی محفظه همچنان مالک است.',
+			))
+		} catch (cause) {
+			setIlluminationNotice(cause instanceof Error ? cause.message : String(cause))
+			setIlluminationError(true)
+		} finally {
+			setIlluminationBusy(false)
+		}
+	}
 
   const setPersistenceBit = (bit: number, enabled: boolean) => {
     setOutputPersistence((current) => enabled ? current | bit : current & ~bit)
@@ -1621,7 +1647,7 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
 				<DataRow label={copy('Policy', 'سیاست')} value={[copy('Off', 'خاموش'), copy('Auto', 'خودکار'), copy('On', 'روشن')][illuminationLive.mode] ?? String(illuminationLive.mode)} />
 				<DataRow label={copy('Door input', 'ورودی درب')} value={illuminationLive.door_open ? copy('Open', 'باز') : copy('Closed', 'بسته')} tone={illuminationLive.door_open ? 'warn' : 'good'} />
 				<DataRow label={copy('Selected target', 'مقدار هدف انتخاب‌شده')} value={`${illuminationLive.target_brightness}/255 · ${illuminationLive.target_pwm}/4095`} mono />
-				<DataRow label={copy('Applied channel 11', 'مقدار اعمال‌شدهٔ کانال ۱۱')} value={illuminationLive.available ? `${illuminationLive.applied_brightness}/255 · ${illuminationLive.applied_pwm}/4095` : copy('Unavailable', 'در دسترس نیست')} tone={illuminationLive.available ? illuminationLive.at_target ? 'good' : 'warn' : undefined} mono />
+				<DataRow label={copy('Applied MOSFET channel 12', 'مقدار اعمال‌شدهٔ کانال ۱۲ ماسفت')} value={illuminationLive.available ? `${illuminationLive.applied_brightness}/255 · ${illuminationLive.applied_pwm}/4095` : copy('Unavailable', 'در دسترس نیست')} tone={illuminationLive.available ? illuminationLive.at_target ? 'good' : 'warn' : undefined} mono />
 				<DataRow label={copy('EEPROM durability', 'ماندگاری EEPROM')} value={illuminationLive.persisted ? copy('Verified', 'تأییدشده') : copy('Not confirmed', 'تأییدنشده')} tone={illuminationLive.persisted ? 'good' : 'warn'} />
 			</div>
 			<div className="setting-group"><label>{copy('Operating mode', 'حالت عملکرد')}</label><Segmented value={illuminationMode} label={copy('Enclosure illumination mode', 'حالت روشنایی محفظه')} options={[
@@ -1631,9 +1657,13 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
 			]} onChange={(value) => { setIlluminationNotice(''); setIlluminationMode(value) }} /></div>
 			<RangeField label={copy('Door-open / On brightness', 'روشنایی درب باز / حالت روشن')} value={illuminationOn} min={0} max={255} onChange={(value) => { setIlluminationNotice(''); setIlluminationOn(value) }} />
 			<RangeField label={copy('Door-closed / Off brightness', 'روشنایی درب بسته / حالت خاموش')} value={illuminationOff} min={0} max={255} onChange={(value) => { setIlluminationNotice(''); setIlluminationOff(value) }} />
+			<RangeField label={copy('Manual raw override · MOSFET channel 12', 'کنترل دستی خام · کانال ۱۲ ماسفت')} value={illuminationOverridePWM} min={0} max={4095} onChange={(value) => { setIlluminationNotice(''); setIlluminationOverridePWM(value) }} />
 			<div className="illumination-settings-card__footer">
-				<p className={illuminationError ? 'settings-action-feedback text-bad' : 'settings-action-feedback'} role={illuminationError ? 'alert' : 'status'}>{illuminationNotice || copy('Only these three illumination fields change; every unrelated board setting is preserved.', 'فقط همین سه فیلد روشنایی تغییر می‌کنند و همهٔ تنظیمات نامرتبط برد حفظ می‌شوند.')}</p>
-				<Button tone="primary" icon={Lightbulb} busy={illuminationBusy} disabled={!available.pwm || !illuminationLive.available} onClick={() => void saveIllumination()}>{copy('Apply illumination', 'اعمال روشنایی')}</Button>
+				<p className={illuminationError ? 'settings-action-feedback text-bad' : 'settings-action-feedback'} role={illuminationError ? 'alert' : 'status'}>{illuminationNotice || copy('Manual adjustment is temporary: policy ownership and EEPROM settings remain unchanged and may reapply the selected target.', 'تنظیم دستی موقت است: مالکیت سیاست و تنظیمات EEPROM تغییر نمی‌کند و ممکن است مقدار هدف دوباره اعمال شود.')}</p>
+				<div className="inline-actions">
+					<Button icon={SlidersHorizontal} busy={illuminationBusy} disabled={!available.pwm || !illuminationLive.available} onClick={() => void overrideIllumination()}>{copy('Apply manual override', 'اعمال کنترل دستی')}</Button>
+					<Button tone="primary" icon={Lightbulb} busy={illuminationBusy} disabled={!available.pwm || !illuminationLive.available} onClick={() => void saveIllumination()}>{copy('Apply policy', 'اعمال سیاست')}</Button>
+				</div>
 			</div>
 		</>}
 		</Card>}

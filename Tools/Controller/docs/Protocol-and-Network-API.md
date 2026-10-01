@@ -657,8 +657,9 @@ request error.
 | `controller.peripheral.presentation.update` | `key`, one or more of `name`/`icon`/`group`, optional `expected_revision` | update one advertised descriptor and return it with the new profile revision; requires `host_configuration` |
 | `controller.action.invoke` | `action_id` | invoke one action actually advertised by the attached profile and return after the board ACK; requires `board_commands` |
 | `controller.pwm.values` | `{}` | authoritative board availability, selected channel, and all sixteen logical values; requires `read` |
-| `controller.illumination.get` | `{}` | persisted Off/Auto/On policy, on/off brightness, live door-selected target, and exact applied enclosure PWM channel 11; requires `read` |
+| `controller.illumination.get` | `{}` | persisted Off/Auto/On policy, on/off brightness, live door-selected target, and exact applied enclosure MOSFET channel 12 (internal index 11); requires `read` |
 | `controller.illumination.set` | `{ "mode": 0..2, "on_brightness": 0..255, "off_brightness": 0..255 }` | preserves every unrelated board setting, applies live, waits for durable EEPROM readback, and returns the authoritative illumination state; requires `board_commands` |
+| `controller.illumination.override` | `{ "value": 0..4095 }` | applies a temporary exact raw value to enclosure MOSFET channel 12 and returns authoritative readback; policy/EEPROM ownership remains unchanged and may reassert its target on the next policy event; requires `board_commands` |
 | `controller.pwm.set` | `channel` (`0..15`), `value` (`0..4095`) | write one channel, read back, and return the complete authoritative sixteen-channel snapshot; requires `board_commands` |
 | `controller.pwm.off` | `{}` | clear every PWM channel, read back, and return the complete authoritative snapshot; requires `board_commands` |
 | `controller.temperatures` | optional `rescan` | named temperatures and ROM identities |

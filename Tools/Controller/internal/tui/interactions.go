@@ -363,14 +363,14 @@ func (model Model) handleKey(message tea.KeyMsg) (Model, tea.Cmd, bool) {
 		model.moveCursor(1)
 		return model, nil, true
 	case "home":
-		if inputEmpty && model.page == PageOutputs && model.cursor >= 15 && model.cursor <= 25 {
+		if inputEmpty && model.page == PageOutputs && model.cursor >= 15 && model.cursor <= 26 {
 			return model.setSelectedPWM(0)
 		}
 		if inputEmpty && model.page == PageMenus {
 			return model.moveSelectedMenuToRank(0)
 		}
 	case "end":
-		if inputEmpty && model.page == PageOutputs && model.cursor >= 15 && model.cursor <= 25 {
+		if inputEmpty && model.page == PageOutputs && model.cursor >= 15 && model.cursor <= 26 {
 			return model.setSelectedPWM(4095)
 		}
 		if inputEmpty && model.page == PageMenus {
@@ -779,7 +779,7 @@ func (model Model) activateSelection() (Model, tea.Cmd, bool) {
 func (model Model) adjustSelection(delta int) (Model, tea.Cmd, bool) {
 	switch model.page {
 	case PageOutputs:
-		if model.cursor >= 15 && model.cursor <= 25 {
+		if model.cursor >= 15 && model.cursor <= 26 {
 			channel := model.cursor - 15
 			value := int(model.pwmValues[channel]) + delta*64
 			if value < 0 {
@@ -819,7 +819,7 @@ func (model Model) activateOutput() (Model, tea.Cmd, bool) {
 			"relay side right up", "relay side right stop", "relay side right down",
 		}
 		return model.dispatchLine(commands[model.cursor-9])
-	case model.cursor >= 15 && model.cursor <= 25:
+	case model.cursor >= 15 && model.cursor <= 26:
 		value := model.pwmValues[model.cursor-15]
 		if value == 0 {
 			value = 2048
@@ -827,7 +827,7 @@ func (model Model) activateOutput() (Model, tea.Cmd, bool) {
 			value = 0
 		}
 		return model.setSelectedPWM(value)
-	case model.cursor == 26:
+	case model.cursor == 27:
 		return model.dispatchLine("pwm off")
 	}
 	return model, nil, true
@@ -985,7 +985,7 @@ func (model Model) savePeripheralName(descriptor appconfig.PeripheralDescriptor,
 
 func (model Model) setSelectedPWM(value uint16) (Model, tea.Cmd, bool) {
 	channel := model.cursor - 15
-	if channel < 0 || channel > 10 {
+	if channel < 0 || channel > 11 {
 		return model, nil, true
 	}
 	// Preview mode simulates the board; live mode remains board-authoritative and
@@ -1966,7 +1966,7 @@ func (model Model) handleContentClick(row, x int) (tea.Model, tea.Cmd) {
 		index, ok := controlTableLogicalAt(rows, tableBodyRows(model.contentHeight()), model.cursor, row-3)
 		if ok {
 			model.cursor = index
-			if index >= 15 && index <= 25 {
+			if index >= 15 && index <= 26 {
 				tableStart := max(0, (model.width-tableWidth)/2)
 				levelWidth := max(8, columns[1].Width-7)
 				sliderStart := tableStart + 1 + columns[0].Width + 1
@@ -2073,7 +2073,7 @@ func (model Model) handleContentClick(row, x int) (tea.Model, tea.Cmd) {
 }
 
 func (model Model) setOutputPWMFromX(index, x int) (tea.Model, tea.Cmd) {
-	if index < 15 || index > 25 {
+	if index < 15 || index > 26 {
 		return model, nil
 	}
 	tableWidth := model.presentationTableWidth(118)
