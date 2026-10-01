@@ -856,7 +856,7 @@ func TestHostedMenuPreviewAndLivePWMRemainBoardAuthoritative(t *testing.T) {
 	model := New(control.New(control.Options{}), shell.New(10))
 	model.page, model.cursor = PageOutputs, 15
 	model.pwmValues[0] = 123
-	updated, _, _ := model.setSelectedPWM(2048)
+	updated, _, _ := model.setPWMChannel(0, 2048)
 	if updated.pwmValues[0] != 123 {
 		t.Fatalf("live PWM changed optimistically to %d", updated.pwmValues[0])
 	}
@@ -873,7 +873,7 @@ func TestHostedMenuPreviewAndLivePWMRemainBoardAuthoritative(t *testing.T) {
 		}
 		return 3068, nil
 	}
-	updated, command, _ := model.setSelectedPWM(3072)
+	updated, command, _ := model.setPWMChannel(11, 3072)
 	if command == nil {
 		t.Fatal("semantic enclosure override did not return a command")
 	}
@@ -1050,6 +1050,17 @@ func TestActionBarUsesFirmwareRebootWhenAuthenticatedAndHardwareResetOffline(t *
 	if !strings.Contains(plain, "^R HW Reset") || strings.Contains(plain, "^R Reboot") {
 		t.Fatalf("offline action bar did not retain recovery reset: %q", plain)
 	}
+	updated, _, _ = model.dispatchLine("reset lines")
+	if plain = ansi.Strip(updated.actionBar(updated.snapshot())); !strings.Contains(plain, "HW Resetting") {
+		t.Fatalf("hardware reset progress used an ambiguous label: %q", plain)
+	}
+	model.preview.Connected = true
+	model.preview.ConnectionState = "close_failed"
+	model.preview.ConnectionPhase = "blocked"
+	plain = ansi.Strip(model.actionBar(model.snapshot()))
+	if !strings.Contains(plain, "Close blocked") || strings.Contains(plain, "^R Reboot") {
+		t.Fatalf("cleanup-blocked connection advertised an unsafe reboot path: %q", plain)
+	}
 }
 
 func TestControlRUsesContextualResetPath(t *testing.T) {
@@ -1065,6 +1076,13 @@ func TestControlRUsesContextualResetPath(t *testing.T) {
 	updated, command, handled = model.handleKey(tea.KeyMsg{Type: tea.KeyCtrlR})
 	if !handled || command == nil || !strings.Contains(updated.notice, "DTR hardware reset") {
 		t.Fatalf("offline Ctrl+R did not select DTR recovery: handled=%v command=%v notice=%q", handled, command, updated.notice)
+	}
+	model.preview.Connected = true
+	model.preview.ConnectionState = "close_failed"
+	model.preview.ConnectionPhase = "blocked"
+	updated, command, handled = model.handleKey(tea.KeyMsg{Type: tea.KeyCtrlR})
+	if !handled || command != nil || !strings.Contains(updated.notice, "ownership") {
+		t.Fatalf("cleanup-blocked Ctrl+R was not safely disabled: command=%v notice=%q", command, updated.notice)
 	}
 }
 
@@ -1777,6 +1795,52 @@ func TestControlTableExposesCapabilityGatedWS2811Surface(t *testing.T) {
 	model.preview.Hello.Capabilities &^= native.CapabilityAddressableLED
 	if rendered := ansi.Strip(model.outputsPage(model.snapshot())); strings.Contains(rendered, "WS2811 STRIP") {
 		t.Fatalf("strip controls ignored live capability gate:\n%s", rendered)
+	}
+}
+
+func TestControlTableExposesWS2811WithoutRelayStatusAndAvoidsPWMCursorRouting(t *testing.T) {
+	model := readyModel(t, PageOutputs)
+	model.preview.Hello.Capabilities = native.CapabilityAddressableLED
+	model.preview.HaveStatus = false
+	rows := model.controlTableRows(model.snapshot(), 8)
+	if len(rows) == 0 || rows[0].Group != "WS2811 STRIP" {
+		t.Fatalf("addressable-only board did not expose strip controls: %#v", rows)
+	}
+	for index, row := range rows {
+		if row.Name == "Police" {
+			model.cursor = index
+			updated, command, _ := model.adjustSelection(1)
+			if command != nil || updated.pwmValues != model.pwmValues {
+				t.Fatalf("strip action row leaked into PWM adjustment: command=%v", command)
+			}
+			updated, command, _ = model.beginPeripheralRename()
+			if command != nil || updated.renameTarget != "" {
+				t.Fatal("strip action row leaked into peripheral rename")
+			}
+			return
+		}
+	}
+	t.Fatal("addressable-only controls omitted Police effect")
+}
+
+func TestControlTableDisablesStripMutationsWhileMacroWorkspaceIsBusy(t *testing.T) {
+	model := readyModel(t, PageOutputs)
+	model.previewMacroRecording.Active = true
+	rows := model.controlTableRows(model.snapshot(), 8)
+	for _, row := range rows {
+		if row.Kind != "strip" {
+			continue
+		}
+		switch row.Name {
+		case "Stop stream", "Stream status":
+			if row.Action == "" {
+				t.Fatalf("host-only %q action was disabled", row.Name)
+			}
+		default:
+			if row.Action != "" || row.Adjust != "" || !strings.Contains(row.Value, "macro") {
+				t.Fatalf("busy strip mutation remained active: %#v", row)
+			}
+		}
 	}
 }
 

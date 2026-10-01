@@ -76,6 +76,7 @@ type Model struct {
 	connectRetryAt           time.Time
 	connectRetryDelay        time.Duration
 	rebootPending            bool
+	rebootKind               string
 	statusPending            bool
 	uiConfig                 func() appconfig.UI
 	saveUI                   func(appconfig.UI) error
@@ -1028,6 +1029,7 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if strings.EqualFold(strings.TrimSpace(message.line), "reset app") ||
 			strings.EqualFold(strings.TrimSpace(message.line), "reset lines") {
 			model.rebootPending = false
+			model.rebootKind = ""
 		}
 
 		if errors.Is(message.err, shell.ErrExit) {
@@ -1476,8 +1478,10 @@ func (model Model) applyAppAction(action hostui.AppAction) (Model, []tea.Cmd, bo
 			strings.EqualFold(strings.TrimSpace(action.Value), "reset lines") {
 			model.rebootPending = true
 			if strings.EqualFold(strings.TrimSpace(action.Value), "reset lines") {
+				model.rebootKind = "hardware"
 				model.setNotice("Pulsing DTR hardware reset…")
 			} else {
+				model.rebootKind = "firmware"
 				model.setNotice("Rebooting controller application…")
 			}
 		}
@@ -2144,12 +2148,18 @@ func (model Model) actionBarItems(snapshot control.Snapshot) []actionBarItem {
 	}
 	rebootLabel := "^R HW Reset"
 	rebootAction := "hardware-reset"
-	if snapshot.Connected {
+	if firmwareRebootAvailable(snapshot) {
 		rebootLabel = "^R Reboot"
 		rebootAction = "firmware-reboot"
+	} else if snapshot.ConnectionState == "close_failed" || snapshot.ConnectionPhase == "blocked" {
+		rebootLabel = "^R Close blocked"
+		rebootAction = ""
 	}
 	if model.rebootPending {
 		rebootLabel = model.spinnerView() + " Rebooting"
+		if model.rebootKind == "hardware" {
+			rebootLabel = model.spinnerView() + " HW Resetting"
+		}
 		rebootAction = ""
 	}
 	items = append(items,
@@ -2164,6 +2174,11 @@ func (model Model) actionBarItems(snapshot control.Snapshot) []actionBarItem {
 		)
 	}
 	return items
+}
+
+func firmwareRebootAvailable(snapshot control.Snapshot) bool {
+	return snapshot.Connected && snapshot.Hello.IsPCController() &&
+		snapshot.ConnectionState != "close_failed" && snapshot.ConnectionPhase != "blocked"
 }
 
 func (model Model) actionBar(snapshot control.Snapshot) string {
