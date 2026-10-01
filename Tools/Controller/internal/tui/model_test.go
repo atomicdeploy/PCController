@@ -1662,7 +1662,7 @@ func TestControlTableUsesMappedGroupSeparatorsAndStableHeaders(t *testing.T) {
 	model := readyModel(t, PageOutputs)
 	model.height = 42
 	plain := ansi.Strip(model.outputsPage(model.snapshot()))
-	for _, expected := range []string{"CONTROL", "STATUS", "─ RELAYS", "─ MOTION", "─ PWM", "CH 10 · User PWM 11", "─ LIGHTING", "CH 12 · Enclosure illumination · manual override"} {
+	for _, expected := range []string{"CONTROL", "STATUS", "─ RELAYS", "─ MOTION", "─ PWM", "CH 10 · User PWM 11", "─ LIGHTING"} {
 		if !strings.Contains(plain, expected) {
 			t.Errorf("control table missing %q:\n%s", expected, plain)
 		}
@@ -1675,6 +1675,9 @@ func TestControlTableUsesMappedGroupSeparatorsAndStableHeaders(t *testing.T) {
 
 	columns := outputTableColumns(model.presentationTableWidth(118))
 	rows := model.controlTableRows(model.snapshot(), max(8, columns[1].Width-7))
+	if len(rows) <= 26 || !strings.Contains(rows[26].Name, "CH 12 · Enclosure illumination · manual override") || !strings.Contains(rows[26].Value, "/4095") {
+		t.Fatalf("enclosure override row missing exact live value: %#v", rows)
+	}
 	visible := visibleControlTableLines(rows, tableBodyRows(model.contentHeight()), model.cursor)
 	findLine := func(logical int, group string) int {
 		t.Helper()
