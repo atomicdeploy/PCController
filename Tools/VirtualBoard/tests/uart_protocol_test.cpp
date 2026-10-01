@@ -54,6 +54,12 @@ struct Capture {
   bool nestedResponseKeptViewStable = true;
 };
 
+void serviceUntilIdle(UartProtocol &protocol, HardwareSerial &serial) {
+  while (serial.available() > 0) {
+    protocol.service();
+  }
+}
+
 void captureFrame(const Frame &frame, void *context) {
   auto &capture = *static_cast<Capture *>(context);
   const std::vector<std::uint8_t> before(frame.payload,
@@ -114,7 +120,7 @@ void testRepresentativeAndMaximumPayloads() {
   }
   serial.feed(encode(ControllerProtocol::DisplayText, 7, zeros));
   serial.feed(encode(ControllerProtocol::GetStatus, 8, maximum));
-  protocol.service();
+  serviceUntilIdle(protocol, serial);
 
   require(capture.payloads.size() == 2, "valid frames were not dispatched");
   require(capture.payloads[0] == zeros,
@@ -166,7 +172,7 @@ void testInvalidFramesAreRejected() {
   malformed.push_back(0);
   serial.feed(malformed);
 
-  protocol.service();
+  serviceUntilIdle(protocol, serial);
   require(capture.payloads.empty(), "invalid frame reached the handler");
   require(protocol.framingErrors() == 2,
           "malformed COBS/envelope framing errors were not counted");
@@ -199,6 +205,34 @@ void testMacroScratchCannotCorruptSplitSerialFrame() {
   protocol.service();
   require(capture.payloads.size() == 1 && capture.payloads[0] == expected,
           "macro scratch corrupted a split serial frame");
+}
+
+void testReceiveWorkIsBoundedAndRecoversAfterNoise() {
+  HardwareSerial serial;
+  UartProtocol protocol(serial);
+  Capture capture;
+  capture.protocol = &protocol;
+  protocol.begin(115200, captureFrame, &capture);
+
+  // Model a floating/noisy RX line. One service pass must yield while unread
+  // data remains so the rest of the firmware loop can keep making progress.
+  serial.feed(std::vector<std::uint8_t>(96, 0x55));
+  protocol.service();
+  require(serial.available() > 0,
+          "UART service monopolized the firmware loop under sustained input");
+
+  while (serial.available() > 0) {
+    protocol.service();
+  }
+
+  const auto expected = encode(ControllerProtocol::GetStatus, 23, {});
+  // The delimiter lets the parser resynchronize after the intentionally
+  // unterminated noise burst, exactly as the next well-formed sender does.
+  serial.feed({0});
+  serial.feed(expected);
+  protocol.service();
+  require(capture.payloads.size() == 1,
+          "protocol did not recover after noisy UART input ended");
 }
 
 void testBuzzerPushCarriesMCUTimestamp() {
@@ -236,6 +270,7 @@ int main() {
     testUnknownOptionalOpcodeReachesSemanticDispatch();
     testInvalidFramesAreRejected();
     testMacroScratchCannotCorruptSplitSerialFrame();
+    testReceiveWorkIsBoundedAndRecoversAfterNoise();
     testBuzzerPushCarriesMCUTimestamp();
     std::cout << "firmware_uart_protocol_tests: all checks passed\n";
     return 0;
