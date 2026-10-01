@@ -24,8 +24,17 @@ void UartProtocol::begin(uint32_t baud, FrameHandler handler, void *context) {
 }
 
 void UartProtocol::service() {
-  while (serial_->available() > 0) {
-    const uint8_t value = static_cast<uint8_t>(serial_->read());
+  uint8_t processed = 0;
+  while (processed < ReceiveByteBudget && serial_->available() > 0) {
+    const int readValue = serial_->read();
+    // HardwareSerial::available() and read() are not one atomic operation.
+    // A removed/failing USB bridge may report buffered input and then return
+    // no byte. Do not turn -1 into 0xFF or spin while autonomous work starves.
+    if (readValue < 0) {
+      break;
+    }
+    ++processed;
+    const uint8_t value = static_cast<uint8_t>(readValue);
     if (value == 0) {
       if (!dropping_ && receiveLength_ != 0) {
         processEncodedFrame();
