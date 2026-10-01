@@ -123,6 +123,8 @@ describe('offline and settings UI contracts', () => {
       connected: false,
       connection_phase: 'waiting_retry' as const,
       connection_candidate: { name: 'COM3', friendly_name: 'USB-SERIAL CH340' },
+      reset_lines_available: true,
+      reset_lines_port: { name: 'COM3', friendly_name: 'USB-SERIAL CH340' },
     }
     const transport = { ...shared().transport, streamState: 'open' as const, boardState: 'unavailable' as const }
     const controls = renderToStaticMarkup(<ControlsView {...shared()} snapshot={snapshot} transport={transport} />)

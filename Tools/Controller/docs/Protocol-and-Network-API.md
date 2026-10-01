@@ -646,7 +646,7 @@ request error.
 | `controller.connect`, `controller.open`, `controller.port.open` | optional `port` | resume discovery or open the requested transport, then authenticate `HELLO` |
 | `controller.close`, `controller.port.close` | `{}` | close UART and pause automatic reconnect |
 | `controller.reset`, `controller.reset.lines`, `controller.port.reset` | optional `pulse_ms` | one explicit DTR-only pulse on the connected port, pre-authentication connection candidate, or unique configured-filter match; reset lifecycle is broadcast, then fresh application authentication begins |
-| `controller.snapshot` | `{}` | cached connection, identity, status, and settings |
+| `controller.snapshot` | `{}` | cached connection, identity, status, and settings plus backend-derived `reset_lines_available`, `reset_lines_port`, and any `reset_lines_reason` |
 | `controller.command.catalog` | `{}` | machine-readable registered command names, aliases, usage, summary, and task group |
 | `controller.melodies.list` | `{}` | effective configured host melody catalog with validated note timing |
 | `controller.status` | `{}` | fresh board status |

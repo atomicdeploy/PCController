@@ -5,11 +5,9 @@ import { emptySnapshot } from './types'
 describe('connectionPresentation', () => {
   it('allows a hardware reset for an enumerated candidate before firmware authentication', () => {
     expect(hardwareResetAvailable({
-      ...emptySnapshot,
-      connected: false,
-      connection_candidate: { name: 'COM3', friendly_name: 'USB-SERIAL CH340' },
+      reset_lines_available: true,
     })).toBe(true)
-    expect(hardwareResetAvailable({ ...emptySnapshot, connected: false })).toBe(false)
+    expect(hardwareResetAvailable({ reset_lines_available: false })).toBe(false)
   })
 
   it('distinguishes an active bounded attempt from retry backoff', () => {

@@ -15,8 +15,8 @@ export interface ConnectionPresentation {
   animated: boolean
 }
 
-export function hardwareResetAvailable(snapshot: Pick<Snapshot, 'connected' | 'port' | 'connection_candidate'>): boolean {
-  return snapshot.connected || Boolean(snapshot.port?.name?.trim() || snapshot.connection_candidate?.name?.trim())
+export function hardwareResetAvailable(snapshot: Pick<Snapshot, 'reset_lines_available'>): boolean {
+  return snapshot.reset_lines_available === true
 }
 
 function parsedTime(value?: string): number | undefined {

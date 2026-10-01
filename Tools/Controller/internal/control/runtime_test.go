@@ -244,16 +244,23 @@ func TestPulseResetEnumeratesOnlyUnambiguousCandidate(t *testing.T) {
 	listResetPorts = func() ([]ports.Info, error) {
 		return []ports.Info{{Name: "COM7", VID: "1A86", PID: "7523", IsUSB: true}}, nil
 	}
+	available, resetPort, reason := runtime.ResetLinesCapability()
+	if !available || resetPort.Name != "COM7" || reason != "" {
+		t.Fatalf("reset capability available=%v port=%#v reason=%q", available, resetPort, reason)
+	}
 	if err := runtime.PulseResetFor(context.Background(), time.Millisecond); err != nil {
 		t.Fatalf("unique candidate reset: %v", err)
 	}
-	if opened != "COM7" || runtime.Snapshot().ConnectionCandidate.Name != "COM7" {
-		t.Fatalf("opened=%q candidate=%#v", opened, runtime.Snapshot().ConnectionCandidate)
+	if opened != "COM7" {
+		t.Fatalf("opened=%q", opened)
 	}
 
 	opened = ""
 	runtime.mu.Lock()
 	runtime.connectionCandidate = ports.Info{}
+	runtime.resetLinesChecked = time.Time{}
+	runtime.resetLinesAvailable = false
+	runtime.resetLinesPort = ports.Info{}
 	runtime.mu.Unlock()
 	listResetPorts = func() ([]ports.Info, error) {
 		return []ports.Info{
@@ -269,10 +276,53 @@ func TestPulseResetEnumeratesOnlyUnambiguousCandidate(t *testing.T) {
 		t.Fatalf("ambiguous reset opened %q", opened)
 	}
 
+	runtime.mu.Lock()
+	runtime.resetLinesChecked = time.Time{}
+	runtime.resetLinesAvailable = false
+	runtime.resetLinesPort = ports.Info{}
+	runtime.mu.Unlock()
 	listResetPorts = func() ([]ports.Info, error) { return nil, nil }
 	if err := runtime.PulseResetFor(context.Background(), time.Millisecond); err == nil ||
 		!strings.Contains(err.Error(), "uniquely matching serial port") {
 		t.Fatalf("missing-device reset error=%v", err)
+	}
+
+	runtime.mu.Lock()
+	runtime.port = ports.Info{Name: "tcp://virtual-board:3000"}
+	runtime.mu.Unlock()
+	available, resetPort, reason = runtime.ResetLinesCapability()
+	if available || resetPort.Name != "tcp://virtual-board:3000" ||
+		reason != link.ErrControlLinesUnsupported.Error() {
+		t.Fatalf("network reset capability available=%v port=%#v reason=%q", available, resetPort, reason)
+	}
+}
+
+func TestPulseResetPublishesTerminalFailureWhenTemporaryOpenFails(t *testing.T) {
+	previousOpen := openResetSession
+	defer func() { openResetSession = previousOpen }()
+	openResetSession = func(context.Context, string, int) (*link.Session, error) {
+		return nil, errors.New("access denied")
+	}
+	runtime := New(Options{BaudRate: link.DefaultBaudRate})
+	runtime.mu.Lock()
+	runtime.paused = true
+	runtime.connectionCandidate = ports.Info{Name: "COM4", IsUSB: true}
+	runtime.mu.Unlock()
+
+	after := runtime.LatestEventID()
+	err := runtime.PulseResetPortFor(context.Background(), "", time.Millisecond)
+	if err == nil || !strings.Contains(err.Error(), "access denied") {
+		t.Fatalf("reset open error=%v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	started, waitErr := runtime.WaitEvent(ctx, after, "reset.lines")
+	if waitErr != nil || started.Lifecycle != "started" {
+		t.Fatalf("started event=%#v err=%v", started, waitErr)
+	}
+	failed, waitErr := runtime.WaitEvent(ctx, started.ID, "reset.lines")
+	if waitErr != nil || failed.Lifecycle != "failed" || !strings.Contains(failed.Reason, "access denied") {
+		t.Fatalf("failed event=%#v err=%v", failed, waitErr)
 	}
 }
 

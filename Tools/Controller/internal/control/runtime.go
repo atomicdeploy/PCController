@@ -225,6 +225,11 @@ type Runtime struct {
 	connectionNextRetry    time.Time
 	connectionRetryDelay   time.Duration
 	connectionCandidate    ports.Info
+	resetLinesMu           sync.Mutex
+	resetLinesChecked      time.Time
+	resetLinesAvailable    bool
+	resetLinesPort         ports.Info
+	resetLinesReason       string
 	reconnectEpoch         uint64
 	resetIssued            bool
 	portRebindAllowed      bool
@@ -757,6 +762,85 @@ func (runtime *Runtime) Snapshot() Snapshot {
 		HardwareProblems: hardwareProblems,
 		PortProcess:      runtime.portProcess,
 	}
+}
+
+// ResetLinesCapability returns the backend-selected physical reset target.
+// It performs a throttled enumeration only when no connected, remembered, or
+// discovery candidate exists, so presentation clients do not infer transport
+// capabilities from strings and hot board snapshots remain polling-free.
+func (runtime *Runtime) ResetLinesCapability() (bool, ports.Info, string) {
+	runtime.refreshResetLinesCapability()
+	runtime.mu.RLock()
+	defer runtime.mu.RUnlock()
+	return runtime.resetLinesAvailable, runtime.resetLinesPort, runtime.resetLinesReason
+}
+
+func (runtime *Runtime) refreshResetLinesCapability() {
+	runtime.resetLinesMu.Lock()
+	defer runtime.resetLinesMu.Unlock()
+	now := time.Now()
+	runtime.mu.RLock()
+	connected := runtime.session != nil
+	port := runtime.port
+	candidate := runtime.connectionCandidate
+	filter := runtime.options.Filter
+	checked := runtime.resetLinesChecked
+	runtime.mu.RUnlock()
+
+	selected := candidate
+	if connected || strings.TrimSpace(port.Name) != "" {
+		selected = port
+	}
+	if name := strings.TrimSpace(selected.Name); name != "" {
+		available := !link.IsNetworkEndpoint(name)
+		reason := ""
+		if !available {
+			reason = link.ErrControlLinesUnsupported.Error()
+		}
+		runtime.mu.Lock()
+		runtime.resetLinesChecked = now
+		runtime.resetLinesAvailable = available
+		runtime.resetLinesPort = selected
+		runtime.resetLinesReason = reason
+		runtime.mu.Unlock()
+		return
+	}
+	if !checked.IsZero() && now.Sub(checked) < time.Second {
+		return
+	}
+
+	all, err := listResetPorts()
+	available := false
+	reason := ""
+	selected = ports.Info{}
+	if err != nil {
+		reason = fmt.Sprintf("enumerate serial devices for DTR reset: %v", err)
+	} else {
+		candidates := ports.Candidates(all, filter)
+		switch len(candidates) {
+		case 0:
+			reason = "no serial port matches the configured filters"
+		case 1:
+			selected = candidates[0]
+			available = !link.IsNetworkEndpoint(selected.Name)
+			if !available {
+				reason = link.ErrControlLinesUnsupported.Error()
+			}
+		default:
+			reason = "multiple serial ports match; select one before hardware reset"
+		}
+	}
+	runtime.mu.Lock()
+	// Do not overwrite a transport or discovery candidate that appeared while
+	// the bounded enumeration was in progress.
+	if runtime.session == nil && strings.TrimSpace(runtime.port.Name) == "" &&
+		strings.TrimSpace(runtime.connectionCandidate.Name) == "" {
+		runtime.resetLinesChecked = now
+		runtime.resetLinesAvailable = available
+		runtime.resetLinesPort = selected
+		runtime.resetLinesReason = reason
+	}
+	runtime.mu.Unlock()
 }
 
 // connectionPhaseLocked derives the operator-facing phase from runtime-owned
@@ -1876,6 +1960,10 @@ func (runtime *Runtime) PulseResetPortFor(ctx context.Context, name string, dura
 	if name == "" {
 		name = strings.TrimSpace(snapshot.ConnectionCandidate.Name)
 	}
+	resetAvailable, resetPort, _ := runtime.ResetLinesCapability()
+	if name == "" && resetAvailable {
+		name = strings.TrimSpace(resetPort.Name)
+	}
 	if name == "" {
 		runtime.mu.RLock()
 		filter := runtime.options.Filter
@@ -1903,24 +1991,29 @@ func (runtime *Runtime) PulseResetPortFor(ctx context.Context, name string, dura
 	if link.IsNetworkEndpoint(name) {
 		return link.ErrControlLinesUnsupported
 	}
+	port := snapshot.ConnectionCandidate
+	if resetPort.Name != "" && strings.EqualFold(resetPort.Name, name) {
+		port = resetPort
+	}
+	if port.Name == "" || !strings.EqualFold(port.Name, name) {
+		port = ports.Info{Name: name}
+	}
+	runtime.publishResetLifecycle("started", port, duration, nil)
 	runtime.mu.RLock()
 	baudRate := runtime.options.BaudRate
 	runtime.mu.RUnlock()
 	temporary, err := openResetSession(resetContext, name, baudRate)
 	if err != nil {
+		openErr := fmt.Errorf("open remembered port %s for DTR reset: %w", name, err)
+		runtime.publishResetLifecycle("failed", port, duration, openErr)
 		if temporary != nil {
 			return runtime.retainFailedOpen(link.OpenResult{
 				Session: temporary,
 				Port:    ports.Info{Name: name},
-			}, fmt.Errorf("open remembered port %s for DTR reset: %w", name, err))
+			}, openErr)
 		}
-		return fmt.Errorf("open remembered port %s for DTR reset: %w", name, err)
+		return openErr
 	}
-	port := snapshot.ConnectionCandidate
-	if port.Name == "" || !strings.EqualFold(port.Name, name) {
-		port = ports.Info{Name: name}
-	}
-	runtime.publishResetLifecycle("started", port, duration, nil)
 	runtime.publish("tx", "pulsing DTR reset before application authentication", native.Frame{})
 	pulseErr := temporary.PulseReset(resetContext, duration)
 	closeErr := temporary.Close()
