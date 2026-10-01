@@ -1954,7 +1954,7 @@ kbd { padding: 3px 6px; border: 1px solid var(--line-strong); border-bottom-colo
 
 /* Typed macro library: one shared, event-driven surface for catalog metadata,
    exact MCU timing evidence, host recording, and retained board capture. */
-.workbench-grid > .macro-card { grid-column: 1 / -1; }
+.workbench-grid > [data-layout-card-id="macros"] { grid-column: 1 / -1; }
 .macro-library { min-width: 0; display: grid; gap: 13px; }
 .macro-library__monitor {
   display: grid;

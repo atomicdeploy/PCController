@@ -46,4 +46,10 @@ describe('macro catalog DOM contract', () => {
     expect(source).toContain('shouldUseCommandSurfaceFallback')
     expect(source).toContain('commandSurface={run}')
   })
+
+  it('gives the framed effect library the full workbench width', () => {
+    const styles = readFileSync(new URL('./styles.css', import.meta.url), 'utf8')
+    expect(styles).toContain('.workbench-grid > [data-layout-card-id="macros"] { grid-column: 1 / -1; }')
+    expect(styles).not.toContain('.workbench-grid > .macro-card { grid-column: 1 / -1; }')
+  })
 })
