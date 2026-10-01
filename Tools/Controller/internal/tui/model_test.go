@@ -861,6 +861,26 @@ func TestHostedMenuPreviewAndLivePWMRemainBoardAuthoritative(t *testing.T) {
 	if !outputCommandNeedsReadback("pwm set 0 2048") || outputCommandNeedsReadback("pwm get") {
 		t.Fatal("PWM readback trigger is incorrect")
 	}
+
+	called := false
+	model.cursor = 26
+	model.overrideIllumination = func(_ context.Context, value uint16) (uint16, error) {
+		called = true
+		if value != 3072 {
+			t.Fatalf("override value=%d, want 3072", value)
+		}
+		return 3068, nil
+	}
+	updated, command, _ := model.setSelectedPWM(3072)
+	if command == nil {
+		t.Fatal("semantic enclosure override did not return a command")
+	}
+	message := command()
+	updatedModel, _ := updated.Update(message)
+	updated = updatedModel.(Model)
+	if !called || updated.pwmValues[11] != 3068 {
+		t.Fatalf("semantic enclosure override called=%t applied=%d", called, updated.pwmValues[11])
+	}
 }
 
 func TestNestedTabAndRightArrowCompletion(t *testing.T) {

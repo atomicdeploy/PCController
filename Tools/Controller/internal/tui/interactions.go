@@ -994,6 +994,13 @@ func (model Model) setSelectedPWM(value uint16) (Model, tea.Cmd, bool) {
 		model.pwmValues[channel] = value
 		model.havePWMValues = true
 	}
+	if channel == 11 && model.preview == nil {
+		if model.overrideIllumination == nil {
+			model.setNotice("Semantic enclosure override is unavailable on this controller")
+			return model, nil, true
+		}
+		return model, overrideIllumination(model.overrideIllumination, value), true
+	}
 	return model.dispatchLine(fmt.Sprintf("pwm set %d %d", channel, value))
 }
 

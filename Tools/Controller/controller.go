@@ -1804,13 +1804,27 @@ func (client *Client) OverrideIllumination(
 	ctx context.Context,
 	value uint16,
 ) (IlluminationState, error) {
+	return client.overrideIllumination(ctx, value, client.SetPWMChannel, client.Illumination)
+}
+
+func (client *Client) overrideIllumination(
+	ctx context.Context,
+	value uint16,
+	set func(context.Context, byte, uint16) error,
+	read func(context.Context) (IlluminationState, error),
+) (IlluminationState, error) {
 	if value > 4095 {
 		return IlluminationState{}, fmt.Errorf("enclosure illumination PWM must be 0..4095")
 	}
-	if err := client.SetPWMChannel(ctx, enclosureIlluminationPWMChannel, value); err != nil {
+	if err := set(ctx, enclosureIlluminationPWMChannel, value); err != nil {
 		return IlluminationState{}, fmt.Errorf("apply enclosure illumination override: %w", err)
 	}
-	return client.Illumination(ctx)
+	state, err := read(ctx)
+	if err != nil {
+		return IlluminationState{}, err
+	}
+	client.observeIllumination(state)
+	return state, nil
 }
 
 // SetStatusRGB replaces the base status color and cancels an active overlay.

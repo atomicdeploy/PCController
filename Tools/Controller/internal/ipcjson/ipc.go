@@ -882,13 +882,13 @@ func (service *Service) dispatch(
 		}
 	case "controller.illumination.override":
 		var params struct {
-			Value int `json:"value"`
+			Value *int `json:"value"`
 		}
 		if err = decodeParams(request.Params, &params); err == nil {
-			if params.Value < 0 || params.Value > 4095 {
+			if params.Value == nil || *params.Value < 0 || *params.Value > 4095 {
 				err = &RPCError{Code: -32602, Message: "value must be 0..4095"}
 			} else {
-				result, err = service.Client.OverrideIllumination(ctx, uint16(params.Value))
+				result, err = service.Client.OverrideIllumination(ctx, uint16(*params.Value))
 			}
 		}
 	case "controller.pwm.set":
