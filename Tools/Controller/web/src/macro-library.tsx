@@ -17,7 +17,6 @@ import { shellArgument } from './command-line'
 import {
   applyMacroEventToSnapshot,
   macroEventNeedsSnapshot,
-  shouldUseCommandSurfaceFallback,
 } from './macro-live'
 import type { ControllerEvent, ControllerMacro, Locale, MacroSnapshot, StripEffectDescriptor } from './types'
 
@@ -100,27 +99,11 @@ export function MacroCatalog({ macros, selectedReference, locale, onSelect }: Ma
   )
 }
 
-interface MacroCommandSurfaceNoticeProps {
-  locale: Locale
-  onList: () => void
-}
-
-export function MacroCommandSurfaceNotice({ locale, onList }: MacroCommandSurfaceNoticeProps) {
-  const persian = locale === 'fa'
-  const copy = (english: string, farsi: string) => persian ? farsi : english
-  return (
-    <div className="macro-library__command-surface">
-      <span>{copy('Actions below use the host-advertised command surface.', 'عملیات زیر از رابط فرمان اعلام‌شدهٔ میزبان استفاده می‌کنند.')}</span>
-      <Button compact icon={Database} onClick={onList}>{copy('List in terminal', 'فهرست در ترمینال')}</Button>
-    </div>
-  )
-}
-
 export function MacroLibraryPanel({ online, locale, events, initialSnapshot, stripEffects = [], commandSurface }: MacroLibraryPanelProps) {
   const persian = locale === 'fa'
   const copy = (english: string, farsi: string) => persian ? farsi : english
   const [snapshot, setSnapshot] = useState<MacroSnapshot | null>(initialSnapshot ?? null)
-  const [typedAvailable, setTypedAvailable] = useState<boolean | null>(initialSnapshot ? true : null)
+  const [snapshotState, setSnapshotState] = useState<'loading' | 'ready' | 'error'>(initialSnapshot ? 'ready' : 'loading')
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [selectedReference, setSelectedReference] = useState('')
@@ -139,16 +122,12 @@ export function MacroLibraryPanel({ online, locale, events, initialSnapshot, str
       const response = await rpc<{ macros: MacroSnapshot }>('controller.snapshot')
       const value = response.macros
       setSnapshot(value)
-      setTypedAvailable(true)
+      setSnapshotState('ready')
       setError('')
       latestAppliedEventID.current = Math.max(latestAppliedEventID.current, value.latest_event_id || 0)
       return value
     } catch (cause) {
-      if (shouldUseCommandSurfaceFallback(cause)) {
-        setTypedAvailable(false)
-        setError(copy('This host exposes effect operations through the living command surface.', 'این میزبان عملیات جلوه را از طریق رابط فرمان زنده ارائه می‌کند.'))
-        return null
-      }
+      setSnapshotState('error')
       setError(cause instanceof Error ? cause.message : String(cause))
       return null
     } finally {
@@ -249,18 +228,14 @@ export function MacroLibraryPanel({ online, locale, events, initialSnapshot, str
               : copy('No playback in this session', 'هنوز اجرایی در این نشست انجام نشده')}</em>
           </span>
         </div>
-        <StatusBadge tone={typedAvailable === false ? 'warn' : typedAvailable ? 'good' : 'info'}>
-          {typedAvailable === false ? copy('COMMAND SURFACE', 'رابط فرمان') : typedAvailable ? copy('TYPED LIVE', 'زنده ساختاریافته') : copy('CONNECTING', 'در حال اتصال')}
+        <StatusBadge tone={snapshotState === 'error' ? 'warn' : snapshotState === 'ready' ? 'good' : 'info'}>
+          {snapshotState === 'error' ? copy('UNAVAILABLE', 'در دسترس نیست') : snapshotState === 'ready' ? copy('LIVE', 'زنده') : copy('LOADING', 'در حال بارگذاری')}
         </StatusBadge>
       </div>
 
       {error && <div className="macro-library__error" role="alert">{error}</div>}
       {recording?.last_error && <div className="macro-library__error" role="alert">{recording.last_error}</div>}
       {!!recording?.overwritten && <div className="macro-library__error" role="status">{copy(`Ring wrapped: ${recording.overwritten} earlier snapshots overwritten. Saved profile contains the retained tail.`, `حافظه حلقوی پر شد: ${recording.overwritten} وضعیت پیشین جایگزین شد. پروفایل شامل بخش پایانی باقی‌مانده است.`)}</div>}
-      {typedAvailable === false && (
-        <MacroCommandSurfaceNotice locale={locale} onList={() => void commandSurface('effect list')} />
-      )}
-
       <div className="macro-library__workspace">
         <section>
           <header><span><Database size={15} /> {copy('Library', 'کتابخانه')}</span><small>{snapshot?.library.length ?? 0}</small></header>
@@ -292,10 +267,10 @@ export function MacroLibraryPanel({ online, locale, events, initialSnapshot, str
             {selected && <Button icon={Save} disabled={!name.trim()} busy={busy === 'controller.macro.update'} onClick={() => void perform(
               'controller.macro.update',
               { reference, name: name.trim(), category: category.trim(), color },
-              `effect update sequence:${shellArgument(reference)} ${shellArgument(name.trim())} ${shellArgument(category.trim())} ${shellArgument(color)}`,
+              `effect update ${shellArgument(reference)} ${shellArgument(name.trim())} ${shellArgument(category.trim())} ${shellArgument(color)}`,
             )}>{copy('Save metadata', 'ذخیره مشخصات')}</Button>}
             {selected && <Button tone="danger" icon={Trash2} busy={busy === 'controller.macro.delete'} onClick={() => void perform(
-              'controller.macro.delete', { reference }, `effect delete sequence:${shellArgument(reference)}`,
+              'controller.effect.delete', { reference }, `effect delete ${shellArgument(reference)}`,
             )}>{copy('Delete', 'حذف')}</Button>}
             {selected && <Button tone="ghost" onClick={() => { setSelectedReference(''); setName(''); setCategory('Web'); setColor('green') }}>{copy('New', 'جدید')}</Button>}
           </div>
@@ -303,18 +278,19 @@ export function MacroLibraryPanel({ online, locale, events, initialSnapshot, str
       </div>
 
       <section className="macro-library__strip-effects">
-        <header><span><Sparkles size={15} /> {copy('Host-rendered lighting effects', 'جلوه‌های نورپردازی میزبان')}</span><small>{stripEffects.length}</small></header>
+        <header><span><Sparkles size={15} /> {copy('Lighting effects', 'جلوه‌های نورپردازی')}</span><small>{stripEffects.length}</small></header>
         <div className="macro-library__workspace">
           <div className="macro-library__catalog" role="listbox" aria-label={copy('Lighting effects', 'جلوه‌های نورپردازی')}>
             {stripEffects.map((effect) => (
               <button key={effect.id} type="button" role="option" aria-selected={effect.id === selectedStripID}
                 className={effect.id === selectedStripID ? 'is-selected' : ''} onClick={() => setSelectedStripID(effect.id)}>
+                <span className="macro-library__color is-violet" aria-hidden="true" />
                 <span className="macro-library__identity"><strong>{effect.name}</strong><small>{effect.category || copy('Uncategorized', 'بدون دسته')} · {effect.engine}</small></span>
                 <span className="macro-library__measure"><strong>{effect.default_fps}</strong><small>FPS</small></span>
                 <span className="macro-library__measure"><strong>{effect.default_pixels}</strong><small>{copy('LEDs', 'LED')}</small></span>
               </button>
             ))}
-            {!stripEffects.length && <div className="macro-library__empty">{copy('The connected board does not advertise addressable-light effects.', 'برد متصل جلوهٔ نور آدرس‌پذیر اعلام نمی‌کند.')}</div>}
+            {!stripEffects.length && <div className="macro-library__empty">{copy('No lighting effects.', 'جلوهٔ نورپردازی وجود ندارد.')}</div>}
           </div>
           <div className="macro-library__editor">
             <header><span><ListChecks size={15} /> {stripDraft?.id ? copy('Effect properties', 'ویژگی‌های جلوه') : copy('New lighting effect', 'جلوه نور جدید')}</span></header>
@@ -328,24 +304,24 @@ export function MacroLibraryPanel({ online, locale, events, initialSnapshot, str
                 <TextField label={copy('Duration (ms)', 'مدت (میلی‌ثانیه)')} type="number" min={100} max={3600000} value={stripDraft.default_duration_ms} onChange={(event) => setStripDraft({ ...stripDraft, default_duration_ms: Number(event.target.value) })} />
                 <TextField label={copy('LED count', 'تعداد LED')} type="number" min={1} max={100} value={stripDraft.default_pixels} onChange={(event) => setStripDraft({ ...stripDraft, default_pixels: Number(event.target.value) })} />
               </div>
-              <Segmented value={stripDraft.pattern} label={copy('Renderer', 'رندرکننده')} options={[
-                { value: 'police', label: copy('Police', 'پلیسی') },
-                { value: 'white-thunder', label: copy('White thunder', 'رعد سفید') },
-                { value: 'converging-red', label: copy('Converging red', 'قرمز همگرا') },
-              ]} onChange={(pattern) => setStripDraft({ ...stripDraft, pattern })} />
+              <Segmented value={stripDraft.program.primitive} label={copy('Program', 'برنامه')} options={[
+                { value: 'alternating-zones', label: copy('Alternating zones', 'ناحیه‌های متناوب') },
+                { value: 'envelope', label: copy('Brightness envelope', 'پوش شدت نور') },
+                { value: 'converging-points', label: copy('Converging points', 'نقاط همگرا') },
+              ]} onChange={(primitive) => setStripDraft({ ...stripDraft, program: { ...stripDraft.program, primitive } })} />
               <div className="macro-library__actions">
-                <Button tone="primary" icon={Play} disabled={!online || !selectedStrip} onClick={() => void perform('controller.effect.play', {}, `effect play strip:${shellArgument(stripDraft.id)}`)}>{copy('Run', 'اجرا')}</Button>
+                <Button tone="primary" icon={Play} disabled={!online || !selectedStrip} onClick={() => void perform('controller.effect.play', {}, `effect play ${shellArgument(stripDraft.id)}`)}>{copy('Run', 'اجرا')}</Button>
                 {selectedStrip ? <Button icon={Save} disabled={!stripDraft.name.trim()} onClick={() => void perform(
                   'controller.effect.update', {},
-                  `effect update strip:${shellArgument(stripDraft.id)} ${shellArgument(stripDraft.name.trim())} ${shellArgument((stripDraft.category || '').trim())} ${shellArgument((stripDraft.description || '').trim() || '-')} ${shellArgument(stripDraft.pattern)} ${stripDraft.default_fps} ${stripDraft.default_duration_ms} ${stripDraft.default_pixels}`,
+                  `effect update ${shellArgument(stripDraft.id)} ${shellArgument(stripDraft.name.trim())} ${shellArgument((stripDraft.category || '').trim())} ${shellArgument((stripDraft.description || '').trim() || '-')} ${shellArgument(stripDraft.program.primitive)} ${stripDraft.default_fps} ${stripDraft.default_duration_ms} ${stripDraft.default_pixels}`,
                 )}>{copy('Save to PCController', 'ذخیره در PCController')}</Button> : <Button icon={Plus} disabled={!stripDraft.id.trim() || !stripDraft.name.trim()} onClick={() => void perform(
                   'controller.effect.create', {},
-                  `effect create strip ${shellArgument(stripDraft.id.trim())} ${shellArgument(stripDraft.name.trim())} ${shellArgument(stripDraft.pattern)} ${shellArgument((stripDraft.category || '').trim())} ${stripDraft.default_fps} ${stripDraft.default_duration_ms} ${stripDraft.default_pixels}`,
+                  `effect create strip ${shellArgument(stripDraft.id.trim())} ${shellArgument(stripDraft.name.trim())} ${shellArgument(stripDraft.program.primitive)} ${shellArgument((stripDraft.category || '').trim())} ${stripDraft.default_fps} ${stripDraft.default_duration_ms} ${stripDraft.default_pixels}`,
                 )}>{copy('Create in PCController', 'ساخت در PCController')}</Button>}
-                {selectedStrip && <Button tone="danger" icon={Trash2} onClick={() => void perform('controller.effect.delete', {}, `effect delete strip:${shellArgument(stripDraft.id)}`)}>{copy('Delete', 'حذف')}</Button>}
+                {selectedStrip && <Button tone="danger" icon={Trash2} onClick={() => void perform('controller.effect.delete', {}, `effect delete ${shellArgument(stripDraft.id)}`)}>{copy('Delete', 'حذف')}</Button>}
                 <Button tone="ghost" onClick={() => {
                   setSelectedStripID('')
-                  setStripDraft({ id: '', name: '', category: 'Lighting', description: '', pattern: 'police', engine: 'host-stream', editable: true, default_fps: 20, default_duration_ms: 5000, default_pixels: 100, min_pixels: 1, max_pixels: 100, min_fps: 1, max_fps: 30 })
+                  setStripDraft({ id: '', name: '', category: 'Lighting', description: '', program: { primitive: 'alternating-zones', primary: { red: 255, green: 0, blue: 0 }, secondary: { red: 0, green: 0, blue: 255 }, period_ms: 800, step_ms: 100, swap_after_steps: 4, dim_intensity: 36 }, engine: 'host-stream', editable: true, default_fps: 20, default_duration_ms: 5000, default_pixels: 100, min_pixels: 1, max_pixels: 100, min_fps: 1, max_fps: 30 })
                 }}>{copy('New', 'جدید')}</Button>
               </div>
             </>}
@@ -369,7 +345,6 @@ export function MacroLibraryPanel({ online, locale, events, initialSnapshot, str
       <div className="macro-library__control-grid">
         <section>
           <header>{copy('Host recording', 'ضبط میزبان')}</header>
-          <p>{copy('Relay, motion, MOSFET, buzzer, display, RF, and front-panel actions are captured through the shared opcode path.', 'رله، حرکت، ماسفت، بیزر، نمایشگر، RF و پنل از مسیر مشترک opcode ضبط می‌شوند.')}</p>
           <div className="macro-library__actions">
             <Button tone="primary" icon={CircleDot} disabled={!online || !name.trim() || Boolean(recording?.active)} busy={busy === 'controller.macro.record.start'} onClick={() => void perform(
               'controller.macro.record.start',
@@ -410,12 +385,12 @@ export function MacroLibraryPanel({ online, locale, events, initialSnapshot, str
       <div className="macro-library__playback-actions">
         <Segmented value={playMode} label={copy('Playback clock', 'ساعت اجرا')} options={[{value:'host',label:copy('Host', 'میزبان')},{value:'mcu',label:copy('MCU', 'برد')}]} onChange={setPlayMode} />
         <Button tone="primary" icon={Play} disabled={!online || !reference} busy={busy === 'controller.macro.play'} onClick={() => void perform(
-          'controller.macro.play', { reference }, `effect play sequence:${shellArgument(reference)} ${playMode}`,
+          'controller.effect.play', { reference }, `effect play ${shellArgument(reference)} ${playMode}`,
         )}>{copy('Play selected', 'اجرای انتخاب‌شده')}</Button>
-        <Button icon={CircleStop} disabled={!online || (typedAvailable !== false && !playback?.running)} busy={busy === 'controller.macro.cancel'} onClick={() => void perform(
+        <Button icon={CircleStop} disabled={!online || !playback?.running} busy={busy === 'controller.macro.cancel'} onClick={() => void perform(
           'controller.macro.cancel', { keep_outputs: false }, 'effect cancel',
         )}>{copy('Cancel + turn outputs off', 'لغو و خاموش‌کردن خروجی‌ها')}</Button>
-        <Button tone="danger" icon={CircleStop} disabled={!online || (typedAvailable !== false && !playback?.running)} onClick={() => void perform(
+        <Button tone="danger" icon={CircleStop} disabled={!online || !playback?.running} onClick={() => void perform(
           'controller.macro.cancel', { keep_outputs: true }, 'effect cancel keep',
         )}>{copy('Cancel, keep outputs', 'لغو با حفظ خروجی‌ها')}</Button>
       </div>

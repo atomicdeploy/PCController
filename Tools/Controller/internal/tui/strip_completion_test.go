@@ -7,25 +7,16 @@ import (
 	"pccontroller.local/controller/internal/shell"
 )
 
-func TestStripEffectCompletion(t *testing.T) {
+func TestUnifiedEffectCompletion(t *testing.T) {
 	engine := shell.New(10)
 	tests := []struct {
 		name string
 		line string
 		want []string
 	}{
-		{name: "effect command", line: "strip e", want: []string{"strip effect"}},
-		{name: "effect actions", line: "strip effect ", want: []string{"strip effect list", "strip effect play"}},
-		{name: "effect name prefix", line: "strip effect play w", want: []string{"strip effect play white-thunder"}},
-		{
-			name: "canonical effect names",
-			line: "strip effect play ",
-			want: []string{
-				"strip effect play converging-red",
-				"strip effect play police",
-				"strip effect play white-thunder",
-			},
-		},
+		{name: "effect actions", line: "effect ", want: []string{"effect cancel", "effect category", "effect create", "effect delete", "effect export", "effect import", "effect inspect", "effect list", "effect play", "effect program", "effect record", "effect rename", "effect status", "effect stop", "effect update"}},
+		{name: "effect names are live data", line: "effect play ", want: nil},
+		{name: "split strip effect command is absent", line: "strip e", want: nil},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

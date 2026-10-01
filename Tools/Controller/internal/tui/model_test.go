@@ -2468,7 +2468,7 @@ func TestAutomationPageShowsHostPlatformAndBridgeStatus(t *testing.T) {
 func TestAutomationPageProvidesCompleteMacroWorkspace(t *testing.T) {
 	rendered := PreviewFrame(PageAutomations, 160, 46)
 	for _, expected := range []string{
-		"EFFECTS & TRIGGERS", "TIMED SEQUENCES", "HOST-RENDERED LIGHTING", "output-demo", "door-notify", "PLAYBACK",
+		"EFFECTS & TRIGGERS", "TIMED EFFECTS", "LIGHTING EFFECTS", "output-demo", "door-notify", "PLAYBACK",
 		"Elapsed / Duration", "buffer 42/127 B", "accepted 95 B",
 		"last +267 µs", "faithful pending", "RECORDING",
 		"N New", "R Record", "C Cancel off", "K Cancel keep",
@@ -2550,7 +2550,7 @@ func TestAutomationSearchAndKeyboardLifecycle(t *testing.T) {
 
 	updated, command := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
 	model = updated.(Model)
-	if command == nil || !logsContain(model.logs, "effect play sequence:2") {
+	if command == nil || !logsContain(model.logs, "effect play 2") {
 		t.Fatalf("play did not dispatch selected filtered macro: logs=%#v", model.logs)
 	}
 
@@ -2578,7 +2578,7 @@ func TestAutomationDeleteRequiresTwoExplicitPresses(t *testing.T) {
 	}
 	updated, command = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
 	model = updated.(Model)
-	if command == nil || model.macroDeleteArmed || !logsContain(model.logs, "effect delete sequence:1") {
+	if command == nil || model.macroDeleteArmed || !logsContain(model.logs, "effect delete 1") {
 		t.Fatalf("second delete press did not dispatch: armed=%v logs=%#v", model.macroDeleteArmed, model.logs)
 	}
 }
@@ -2608,7 +2608,7 @@ func TestAutomationLifecycleButtonsDispatchEveryRecorderAndCancelPolicy(t *testi
 		{key: "d", command: "effect record discard", recording: true},
 		{key: "c", command: "effect cancel", playing: true},
 		{key: "k", command: "effect cancel keep", playing: true},
-		{key: "i", command: "effect inspect sequence:1"},
+		{key: "i", command: "effect inspect 1"},
 		{key: "o", command: "effect status"},
 		{key: "a", command: "automation list"},
 		{key: "m", command: "effect list"},
@@ -2631,8 +2631,8 @@ func TestAutomationMetadataShortcutsPrepareSelectedMacroCommands(t *testing.T) {
 		key  string
 		want string
 	}{
-		{key: "u", want: "effect rename sequence:1 "},
-		{key: "g", want: "effect category sequence:1 "},
+		{key: "u", want: "effect rename 1 "},
+		{key: "g", want: "effect category 1 "},
 	} {
 		t.Run(test.key, func(t *testing.T) {
 			model := readyModel(t, PageAutomations)

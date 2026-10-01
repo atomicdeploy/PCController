@@ -1,0 +1,56 @@
+[
+  {
+    "id": "police",
+    "name": "Police red / blue",
+    "category": "Lighting",
+    "description": "Alternating red and blue emergency-light sweep",
+    "program": {
+      "primitive": "alternating-zones",
+      "primary": { "red": 255, "green": 0, "blue": 0 },
+      "secondary": { "red": 0, "green": 0, "blue": 255 },
+      "period_ms": 800,
+      "step_ms": 100,
+      "swap_after_steps": 4,
+      "dim_intensity": 36
+    },
+    "default_fps": 20,
+    "default_duration_ms": 5000,
+    "default_pixels": 100
+  },
+  {
+    "id": "white-thunder",
+    "name": "White thunder",
+    "category": "Lighting",
+    "description": "Sharp white lightning strike with secondary flashes and decay",
+    "program": {
+      "primitive": "envelope",
+      "primary": { "red": 255, "green": 255, "blue": 255 },
+      "period_ms": 1600,
+      "envelope": [
+        { "at_ms": 0, "intensity": 255 },
+        { "at_ms": 45, "intensity": 24 },
+        { "at_ms": 90, "intensity": 220 },
+        { "at_ms": 145, "intensity": 52 },
+        { "at_ms": 220, "intensity": 150 },
+        { "at_ms": 360, "intensity": 0 }
+      ]
+    },
+    "default_fps": 30,
+    "default_duration_ms": 3500,
+    "default_pixels": 100
+  },
+  {
+    "id": "converging-red",
+    "name": "Converging red dots",
+    "category": "Lighting",
+    "description": "Two fading red dots travel from both ends to the center",
+    "program": {
+      "primitive": "converging-points",
+      "primary": { "red": 255, "green": 0, "blue": 0 },
+      "period_ms": 2000
+    },
+    "default_fps": 30,
+    "default_duration_ms": 5000,
+    "default_pixels": 100
+  }
+]

@@ -2,9 +2,13 @@ package control
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -27,9 +31,17 @@ type EffectDescriptor struct {
 	DurationMS    int                    `json:"duration_ms"`
 	DefaultFPS    int                    `json:"default_fps,omitempty"`
 	DefaultPixels int                    `json:"default_pixels,omitempty"`
-	Pattern       string                 `json:"pattern,omitempty"`
+	Program       appconfig.StripProgram `json:"program,omitempty"`
 	Steps         []appconfig.MacroStep  `json:"steps,omitempty"`
 	Properties    map[string]interface{} `json:"properties,omitempty"`
+}
+
+// effectDocument is the portable PCController-owned effect library format.
+// It deliberately has no protocol/schema version: alpha installations use the
+// living contract and import validates every definition before changing the
+// active library.
+type effectDocument struct {
+	Effects []EffectDescriptor `json:"effects"`
 }
 
 func EffectCatalog(macros []appconfig.Macro, strips []appconfig.StripEffect) []EffectDescriptor {
@@ -40,7 +52,7 @@ func EffectCatalog(macros []appconfig.Macro, strips []appconfig.StripEffect) []E
 			duration = int(macro.Steps[len(macro.Steps)-1].AtUS / 1000)
 		}
 		result = append(result, EffectDescriptor{
-			Reference: "sequence:" + strconv.Itoa(int(macro.ID)), ID: strconv.Itoa(int(macro.ID)),
+			Reference: "effect:" + strconv.Itoa(int(macro.ID)), ID: strconv.Itoa(int(macro.ID)),
 			Name: macro.Name, Category: macro.Category, Kind: "sequence", Engine: macro.Mode,
 			Editable: true, DurationMS: duration, Steps: append([]appconfig.MacroStep(nil), macro.Steps...),
 			Properties: map[string]interface{}{
@@ -53,11 +65,11 @@ func EffectCatalog(macros []appconfig.Macro, strips []appconfig.StripEffect) []E
 	}
 	for _, effect := range strips {
 		result = append(result, EffectDescriptor{
-			Reference: "strip:" + effect.ID, ID: effect.ID, Name: effect.Name,
+			Reference: "effect:" + effect.ID, ID: effect.ID, Name: effect.Name,
 			Category: effect.Category, Description: effect.Description,
 			Kind: "strip-stream", Engine: "host", Editable: true,
 			DurationMS: effect.DefaultDurationMS, DefaultFPS: effect.DefaultFPS,
-			DefaultPixels: effect.DefaultPixels, Pattern: effect.Pattern,
+			DefaultPixels: effect.DefaultPixels, Program: effect.Program,
 		})
 	}
 	return result
@@ -71,6 +83,257 @@ func splitEffectReference(reference string) (string, string) {
 	return strings.ToLower(strings.TrimSpace(kind)), strings.TrimSpace(id)
 }
 
+func findEffect(catalog []EffectDescriptor, reference string) (EffectDescriptor, error) {
+	kind, id := splitEffectReference(reference)
+	if kind != "" && kind != "effect" {
+		return EffectDescriptor{}, fmt.Errorf("effect reference %q must use effect:ID or ID", reference)
+	}
+	for _, effect := range catalog {
+		if strings.EqualFold(effect.ID, id) || strings.EqualFold(effect.Name, id) || strings.EqualFold(effect.Reference, "effect:"+id) {
+			return effect, nil
+		}
+	}
+	return EffectDescriptor{}, fmt.Errorf("effect %q is not configured", reference)
+}
+
+func ensureEffectIdentityAvailable(catalog []EffectDescriptor, exceptReference, id, name string) error {
+	for _, current := range catalog {
+		if exceptReference != "" && strings.EqualFold(current.Reference, exceptReference) {
+			continue
+		}
+		if strings.EqualFold(current.ID, strings.TrimSpace(id)) {
+			return fmt.Errorf("effect id %q already exists", id)
+		}
+		if strings.EqualFold(current.Name, strings.TrimSpace(name)) {
+			return fmt.Errorf("effect name %q already exists", name)
+		}
+	}
+	return nil
+}
+
+func effectPropertyString(effect EffectDescriptor, key, fallback string) string {
+	if value, ok := effect.Properties[key].(string); ok {
+		return value
+	}
+	return fallback
+}
+
+func effectPropertyUint32(effect EffectDescriptor, key string) uint32 {
+	switch value := effect.Properties[key].(type) {
+	case float64:
+		if value >= 0 && value <= float64(^uint32(0)) {
+			return uint32(value)
+		}
+	case json.Number:
+		parsed, _ := strconv.ParseUint(string(value), 10, 32)
+		return uint32(parsed)
+	}
+	return 0
+}
+
+func effectPropertyBool(effect EffectDescriptor, key string) bool {
+	value, _ := effect.Properties[key].(bool)
+	return value
+}
+
+func stripProgramTemplate(primitive string) (appconfig.StripProgram, error) {
+	switch strings.ToLower(strings.TrimSpace(primitive)) {
+	case "alternating-zones":
+		return appconfig.StripProgram{Primitive: "alternating-zones", Primary: appconfig.StripColor{Red: 255}, Secondary: appconfig.StripColor{Blue: 255}, PeriodMS: 800, StepMS: 100, SwapAfterSteps: 4, DimIntensity: 36}, nil
+	case "envelope":
+		return appconfig.StripProgram{Primitive: "envelope", Primary: appconfig.StripColor{Red: 255, Green: 255, Blue: 255}, PeriodMS: 1600, Envelope: []appconfig.StripEnvelopePoint{{AtMS: 0, Intensity: 255}, {AtMS: 45, Intensity: 24}, {AtMS: 90, Intensity: 220}, {AtMS: 145, Intensity: 52}, {AtMS: 220, Intensity: 150}, {AtMS: 360, Intensity: 0}}}, nil
+	case "converging-points":
+		return appconfig.StripProgram{Primitive: "converging-points", Primary: appconfig.StripColor{Red: 255}, PeriodMS: 2000}, nil
+	default:
+		return appconfig.StripProgram{}, fmt.Errorf("strip program primitive %q is unsupported", primitive)
+	}
+}
+
+func decodeEffectDocument(path string) (effectDocument, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return effectDocument{}, fmt.Errorf("read effect library: %w", err)
+	}
+	var document effectDocument
+	decoder := json.NewDecoder(strings.NewReader(string(content)))
+	decoder.UseNumber()
+	if err := decoder.Decode(&document); err != nil {
+		return effectDocument{}, fmt.Errorf("parse effect library: %w", err)
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return effectDocument{}, errors.New("parse effect library trailing data: multiple JSON values are not allowed")
+		}
+		return effectDocument{}, fmt.Errorf("parse effect library trailing data: %w", err)
+	}
+	if len(document.Effects) == 0 {
+		return effectDocument{}, errors.New("effect library contains no effects")
+	}
+	return document, nil
+}
+
+func writeEffectDocument(path string, document effectDocument) error {
+	content, err := json.MarshalIndent(document, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode effect library: %w", err)
+	}
+	content = append(content, '\n')
+	directory := filepath.Dir(path)
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		return fmt.Errorf("create effect library directory: %w", err)
+	}
+	temporary, err := os.CreateTemp(directory, ".effects-*.json")
+	if err != nil {
+		return fmt.Errorf("create temporary effect library: %w", err)
+	}
+	temporaryPath := temporary.Name()
+	keep := false
+	defer func() {
+		_ = temporary.Close()
+		if !keep {
+			_ = os.Remove(temporaryPath)
+		}
+	}()
+	if err := temporary.Chmod(0o600); err != nil {
+		return fmt.Errorf("protect effect library: %w", err)
+	}
+	if _, err := temporary.Write(content); err != nil {
+		return fmt.Errorf("write effect library: %w", err)
+	}
+	if err := temporary.Sync(); err != nil {
+		return fmt.Errorf("flush effect library: %w", err)
+	}
+	if err := temporary.Close(); err != nil {
+		return fmt.Errorf("close effect library: %w", err)
+	}
+	var previousPath string
+	if _, err := os.Stat(path); err == nil {
+		previous, err := os.CreateTemp(directory, ".effects-previous-*.json")
+		if err != nil {
+			return fmt.Errorf("prepare effect library replacement: %w", err)
+		}
+		previousPath = previous.Name()
+		if err := previous.Close(); err != nil {
+			_ = os.Remove(previousPath)
+			return fmt.Errorf("prepare effect library replacement: %w", err)
+		}
+		if err := os.Remove(previousPath); err != nil {
+			return fmt.Errorf("prepare effect library replacement: %w", err)
+		}
+		if err := os.Rename(path, previousPath); err != nil {
+			return fmt.Errorf("stage existing effect library: %w", err)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("inspect existing effect library: %w", err)
+	}
+	if err := os.Rename(temporaryPath, path); err != nil {
+		if previousPath != "" {
+			if restoreErr := os.Rename(previousPath, path); restoreErr != nil {
+				return fmt.Errorf("publish effect library: %w (restore previous library: %v)", err, restoreErr)
+			}
+		}
+		return fmt.Errorf("publish effect library: %w", err)
+	}
+	keep = true
+	if previousPath != "" {
+		if err := os.Remove(previousPath); err != nil {
+			return fmt.Errorf("remove replaced effect library: %w", err)
+		}
+	}
+	return nil
+}
+
+func importEffectDocument(document effectDocument, replace bool, updateHostConfig func(func(*appconfig.Config) error) error) error {
+	if updateHostConfig == nil {
+		return errors.New("effect persistence is unavailable")
+	}
+	return updateHostConfig(func(config *appconfig.Config) error {
+		macros := append([]appconfig.Macro(nil), config.Macros...)
+		strips := append([]appconfig.StripEffect(nil), config.StripEffects...)
+		if replace {
+			macros = nil
+			strips = nil
+		}
+		seen := make(map[string]struct{}, len(document.Effects))
+		for _, effect := range document.Effects {
+			id := strings.TrimSpace(effect.ID)
+			if id == "" || strings.TrimSpace(effect.Name) == "" {
+				return errors.New("every imported effect requires a stable id and name")
+			}
+			key := strings.ToLower(id)
+			if _, exists := seen[key]; exists {
+				return fmt.Errorf("effect id %q is duplicated in the imported library", id)
+			}
+			seen[key] = struct{}{}
+			switch strings.ToLower(strings.TrimSpace(effect.Kind)) {
+			case "sequence":
+				parsedID, err := strconv.ParseUint(id, 10, 8)
+				if err != nil {
+					return fmt.Errorf("sequence effect id %q must be 0..255: %w", id, err)
+				}
+				macro := appconfig.Macro{
+					ID: byte(parsedID), Name: effect.Name, Mode: effect.Engine, Category: effect.Category,
+					Color:               effectPropertyString(effect, "color", "green"),
+					Label:               effectPropertyString(effect, "label", ""),
+					LCDMessage:          effectPropertyString(effect, "lcd_message", ""),
+					TimingToleranceUS:   effectPropertyUint32(effect, "timing_tolerance_us"),
+					KeepOutputsOnCancel: effectPropertyBool(effect, "keep_outputs_on_cancel"),
+					BoardProfileKey:     effectPropertyString(effect, "board_profile_key", ""),
+					BoardProfileMode:    effectPropertyString(effect, "board_profile_mode", ""),
+					Steps:               append([]appconfig.MacroStep(nil), effect.Steps...),
+				}
+				if macro.Mode == "" {
+					macro.Mode = "host"
+				}
+				replaced := false
+				for index := range macros {
+					if macros[index].ID == macro.ID {
+						macros[index], replaced = macro, true
+						break
+					}
+				}
+				if !replaced {
+					macros = append(macros, macro)
+				}
+			case "strip-stream":
+				strip := appconfig.StripEffect{
+					ID: id, Name: effect.Name, Category: effect.Category, Description: effect.Description,
+					Program: effect.Program, DefaultFPS: effect.DefaultFPS,
+					DefaultDurationMS: effect.DurationMS, DefaultPixels: effect.DefaultPixels,
+				}
+				replaced := false
+				for index := range strips {
+					if strings.EqualFold(strips[index].ID, strip.ID) {
+						strips[index], replaced = strip, true
+						break
+					}
+				}
+				if !replaced {
+					strips = append(strips, strip)
+				}
+			default:
+				return fmt.Errorf("effect %q has unsupported kind %q", id, effect.Kind)
+			}
+		}
+		ids := make(map[string]struct{}, len(macros)+len(strips))
+		names := make(map[string]struct{}, len(macros)+len(strips))
+		for _, effect := range EffectCatalog(macros, strips) {
+			idKey := strings.ToLower(strings.TrimSpace(effect.ID))
+			if _, exists := ids[idKey]; exists {
+				return fmt.Errorf("effect id %q is used more than once", effect.ID)
+			}
+			ids[idKey] = struct{}{}
+			nameKey := strings.ToLower(strings.TrimSpace(effect.Name))
+			if _, exists := names[nameKey]; exists {
+				return fmt.Errorf("effect name %q is used more than once", effect.Name)
+			}
+			names[nameKey] = struct{}{}
+		}
+		config.Macros, config.StripEffects = macros, strips
+		return nil
+	})
+}
+
 func effectCommand(
 	ctx context.Context,
 	runner *MacroRunner,
@@ -79,7 +342,7 @@ func effectCommand(
 	updateHostConfig func(func(*appconfig.Config) error) error,
 	args []string,
 ) (string, error) {
-	const usage = "effect list|inspect REF|play REF [host|mcu|COUNT [FPS]]|stop REF|create sequence ID NAME [CATEGORY [COLOR]]|create strip ID NAME PATTERN [CATEGORY [FPS [DURATION_MS [PIXELS]]]]|update sequence:ID NAME CATEGORY COLOR|update strip:ID NAME CATEGORY DESCRIPTION PATTERN FPS DURATION_MS PIXELS|rename REF NAME|category REF CATEGORY|delete REF|record ...|status|cancel [keep]"
+	const usage = "effect list|inspect ID|play ID [host|mcu|COUNT [FPS]]|stop ID|create sequence ID NAME [CATEGORY [COLOR]]|create strip ID NAME PRIMITIVE [CATEGORY [FPS [DURATION_MS [PIXELS]]]]|update ID ...|program ID JSON_HEX|rename ID NAME|category ID CATEGORY|delete ID|export [PATH]|import PATH [merge|replace]|record ...|status|cancel [keep]"
 	if len(args) == 0 {
 		return "", fmt.Errorf("usage: %s", usage)
 	}
@@ -99,82 +362,98 @@ func effectCommand(
 		if len(args) != 2 {
 			return "", fmt.Errorf("usage: effect inspect REF")
 		}
-		kind, id := splitEffectReference(args[1])
-		for _, effect := range catalog {
-			if (kind == "" && (strings.EqualFold(effect.ID, id) || strings.EqualFold(effect.Name, id))) ||
-				strings.EqualFold(effect.Reference, kind+":"+id) {
-				encoded, err := json.Marshal(effect)
-				return string(encoded), err
-			}
+		effect, err := findEffect(catalog, args[1])
+		if err != nil {
+			return "", err
 		}
-		return "", fmt.Errorf("effect %q is not configured", args[1])
+		encoded, err := json.Marshal(effect)
+		return string(encoded), err
 	case "play", "run":
 		if len(args) < 2 || len(args) > 4 {
 			return "", fmt.Errorf("usage: effect play REF [host|mcu|COUNT [FPS]]")
 		}
-		kind, id := splitEffectReference(args[1])
-		if kind == "sequence" || kind == "macro" {
-			return macroCommand(ctx, runner, append([]string{"play", id}, args[2:]...))
+		effect, err := findEffect(catalog, args[1])
+		if err != nil {
+			return "", err
 		}
-		if kind == "strip" {
-			return stripStreamCommand(ctx, outputs, append([]string{"effect", "play", id}, args[2:]...), config.StripEffects)
+		if effect.Kind == "sequence" {
+			return macroCommand(ctx, runner, append([]string{"play", effect.ID}, args[2:]...))
 		}
-		if _, err := runner.find(id); err == nil {
-			return macroCommand(ctx, runner, append([]string{"play", id}, args[2:]...))
-		}
-		return stripStreamCommand(ctx, outputs, append([]string{"effect", "play", id}, args[2:]...), config.StripEffects)
+		return playStripProgramCommand(ctx, outputs, effect.ID, args[2:], config.StripEffects)
 	case "stop":
-		if len(args) != 2 {
-			return "", errors.New("usage: effect stop REF")
+		if len(args) == 1 {
+			stripMessage, stripErr := stripStreamCommand(ctx, outputs, []string{"stop"}, config.StripEffects)
+			if runner.State().Running {
+				if err := runner.Cancel(ctx); err != nil {
+					return "", err
+				}
+			}
+			return stripMessage, stripErr
 		}
-		kind, _ := splitEffectReference(args[1])
-		switch kind {
-		case "strip":
+		if len(args) != 2 {
+			return "", errors.New("usage: effect stop [ID]")
+		}
+		effect, err := findEffect(catalog, args[1])
+		if err != nil {
+			return "", err
+		}
+		switch effect.Kind {
+		case "strip-stream":
 			return stripStreamCommand(ctx, outputs, []string{"stop"}, config.StripEffects)
-		case "sequence", "macro":
+		case "sequence":
 			return macroCommand(ctx, runner, []string{"cancel"})
 		default:
-			return "", fmt.Errorf("effect stop requires a sequence: or strip: reference")
+			return "", fmt.Errorf("effect %q cannot be stopped", args[1])
 		}
 	case "create":
 		if len(args) < 2 {
 			return "", fmt.Errorf("usage: %s", usage)
 		}
 		switch strings.ToLower(args[1]) {
-		case "sequence", "macro":
+		case "sequence":
+			if len(args) < 4 {
+				return "", errors.New("usage: effect create sequence ID NAME [CATEGORY [COLOR]]")
+			}
+			if err := ensureEffectIdentityAvailable(catalog, "", args[2], args[3]); err != nil {
+				return "", err
+			}
 			return macroCommand(ctx, runner, append([]string{"create"}, args[2:]...))
 		case "strip":
 			if len(args) < 5 || len(args) > 9 {
-				return "", fmt.Errorf("usage: effect create strip ID NAME PATTERN [CATEGORY [FPS [DURATION_MS [PIXELS]]]]")
+				return "", fmt.Errorf("usage: effect create strip ID NAME PRIMITIVE [CATEGORY [FPS [DURATION_MS [PIXELS]]]]")
 			}
-			effect := appconfig.StripEffect{ID: args[2], Name: args[3], Pattern: args[4], Category: "Lighting", DefaultFPS: 20, DefaultDurationMS: 5000, DefaultPixels: 100}
-			var err error
+			program, err := stripProgramTemplate(args[4])
+			if err != nil {
+				return "", err
+			}
+			effect := appconfig.StripEffect{ID: args[2], Name: args[3], Program: program, Category: "Lighting", DefaultFPS: 20, DefaultDurationMS: 5000, DefaultPixels: 100}
+			var parseErr error
 			if len(args) > 5 {
 				effect.Category = args[5]
 			}
 			if len(args) > 6 {
-				effect.DefaultFPS, err = strconv.Atoi(args[6])
-				if err != nil {
-					return "", fmt.Errorf("FPS: %w", err)
+				effect.DefaultFPS, parseErr = strconv.Atoi(args[6])
+				if parseErr != nil {
+					return "", fmt.Errorf("FPS: %w", parseErr)
 				}
 			}
 			if len(args) > 7 {
-				effect.DefaultDurationMS, err = strconv.Atoi(args[7])
-				if err != nil {
-					return "", fmt.Errorf("duration: %w", err)
+				effect.DefaultDurationMS, parseErr = strconv.Atoi(args[7])
+				if parseErr != nil {
+					return "", fmt.Errorf("duration: %w", parseErr)
 				}
 			}
 			if len(args) > 8 {
-				effect.DefaultPixels, err = strconv.Atoi(args[8])
-				if err != nil {
-					return "", fmt.Errorf("pixels: %w", err)
+				effect.DefaultPixels, parseErr = strconv.Atoi(args[8])
+				if parseErr != nil {
+					return "", fmt.Errorf("pixels: %w", parseErr)
 				}
 			}
 			if updateHostConfig == nil {
 				return "", errors.New("effect persistence is unavailable")
 			}
 			if err := updateHostConfig(func(config *appconfig.Config) error {
-				for _, current := range config.StripEffects {
+				for _, current := range EffectCatalog(config.Macros, config.StripEffects) {
 					if strings.EqualFold(current.ID, effect.ID) || strings.EqualFold(current.Name, effect.Name) {
 						return fmt.Errorf("effect %q already exists", effect.ID)
 					}
@@ -184,7 +463,51 @@ func effectCommand(
 			}); err != nil {
 				return "", err
 			}
-			return fmt.Sprintf("effect strip:%s created", effect.ID), nil
+			return fmt.Sprintf("effect effect:%s created", effect.ID), nil
+		case "strip-json":
+			if len(args) != 10 {
+				return "", errors.New("usage: effect create strip-json ID NAME CATEGORY DESCRIPTION PROGRAM_HEX FPS DURATION_MS PIXELS")
+			}
+			programJSON, err := hex.DecodeString(args[6])
+			if err != nil {
+				return "", fmt.Errorf("decode strip program: %w", err)
+			}
+			var program appconfig.StripProgram
+			if err := json.Unmarshal(programJSON, &program); err != nil {
+				return "", fmt.Errorf("parse strip program: %w", err)
+			}
+			fps, err := strconv.Atoi(args[7])
+			if err != nil {
+				return "", fmt.Errorf("FPS: %w", err)
+			}
+			duration, err := strconv.Atoi(args[8])
+			if err != nil {
+				return "", fmt.Errorf("duration: %w", err)
+			}
+			pixels, err := strconv.Atoi(args[9])
+			if err != nil {
+				return "", fmt.Errorf("pixels: %w", err)
+			}
+			description := args[5]
+			if description == "-" {
+				description = ""
+			}
+			effect := appconfig.StripEffect{ID: args[2], Name: args[3], Category: args[4], Description: description, Program: program, DefaultFPS: fps, DefaultDurationMS: duration, DefaultPixels: pixels}
+			if updateHostConfig == nil {
+				return "", errors.New("effect persistence is unavailable")
+			}
+			if err := updateHostConfig(func(config *appconfig.Config) error {
+				for _, current := range EffectCatalog(config.Macros, config.StripEffects) {
+					if strings.EqualFold(current.ID, effect.ID) || strings.EqualFold(current.Name, effect.Name) {
+						return fmt.Errorf("effect %q already exists", effect.ID)
+					}
+				}
+				config.StripEffects = append(config.StripEffects, effect)
+				return nil
+			}); err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("effect effect:%s created", effect.ID), nil
 		default:
 			return "", fmt.Errorf("effect kind %q is unknown", args[1])
 		}
@@ -192,18 +515,28 @@ func effectCommand(
 		if len(args) < 2 {
 			return "", fmt.Errorf("usage: %s", usage)
 		}
-		kind, id := splitEffectReference(args[1])
-		if kind == "sequence" || kind == "macro" {
+		effect, findErr := findEffect(catalog, args[1])
+		if findErr != nil {
+			return "", findErr
+		}
+		id := effect.ID
+		if effect.Kind == "sequence" {
 			if len(args) != 5 {
-				return "", errors.New("usage: effect update sequence:ID NAME CATEGORY COLOR")
+				return "", errors.New("usage: effect update ID NAME CATEGORY COLOR")
+			}
+			if err := ensureEffectIdentityAvailable(catalog, effect.Reference, effect.ID, args[2]); err != nil {
+				return "", err
 			}
 			return macroCommand(ctx, runner, []string{"update", id, args[2], args[3], args[4]})
 		}
 		if len(args) != 9 {
-			return "", fmt.Errorf("usage: effect update strip:ID NAME CATEGORY DESCRIPTION PATTERN FPS DURATION_MS PIXELS")
+			return "", fmt.Errorf("usage: effect update ID NAME CATEGORY DESCRIPTION PRIMITIVE FPS DURATION_MS PIXELS")
 		}
-		if kind != "strip" {
-			return "", errors.New("effect update requires a sequence: or strip: reference")
+		if effect.Kind != "strip-stream" {
+			return "", errors.New("effect update requires a timed sequence or strip program")
+		}
+		if err := ensureEffectIdentityAvailable(catalog, effect.Reference, effect.ID, args[2]); err != nil {
+			return "", err
 		}
 		fps, err := strconv.Atoi(args[6])
 		if err != nil {
@@ -227,39 +560,101 @@ func effectCommand(
 					if description == "-" {
 						description = ""
 					}
-					config.StripEffects[index].Name, config.StripEffects[index].Category, config.StripEffects[index].Description, config.StripEffects[index].Pattern = args[2], args[3], description, args[5]
+					program := config.StripEffects[index].Program
+					if !strings.EqualFold(program.Primitive, args[5]) {
+						var err error
+						program, err = stripProgramTemplate(args[5])
+						if err != nil {
+							return err
+						}
+					}
+					config.StripEffects[index].Name, config.StripEffects[index].Category, config.StripEffects[index].Description, config.StripEffects[index].Program = args[2], args[3], description, program
 					config.StripEffects[index].DefaultFPS, config.StripEffects[index].DefaultDurationMS, config.StripEffects[index].DefaultPixels = fps, duration, pixels
 					return nil
 				}
 			}
-			return fmt.Errorf("effect strip:%s is not configured", id)
+			return fmt.Errorf("effect %s is not configured", id)
 		}); err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("effect strip:%s updated", id), nil
-	case "rename", "category":
-		if len(args) != 3 {
-			return "", fmt.Errorf("usage: effect %s REF VALUE", args[0])
+		return fmt.Sprintf("effect effect:%s updated", id), nil
+	case "update-json":
+		if len(args) != 9 {
+			return "", errors.New("usage: effect update-json ID NAME CATEGORY DESCRIPTION PROGRAM_HEX FPS DURATION_MS PIXELS")
 		}
-		kind, id := splitEffectReference(args[1])
-		if kind == "sequence" || kind == "macro" || kind == "" {
-			command := strings.ToLower(args[0])
-			if _, err := runner.find(id); err == nil {
-				return macroCommand(ctx, runner, []string{command, id, args[2]})
-			}
-			if kind != "" {
-				return "", fmt.Errorf("effect %q is not configured", args[1])
-			}
+		effect, err := findEffect(catalog, args[1])
+		if err != nil {
+			return "", err
 		}
-		if kind != "strip" && kind != "" {
-			return "", fmt.Errorf("effect kind %q is unknown", kind)
+		if effect.Kind != "strip-stream" {
+			return "", errors.New("only lighting effects have a strip program")
+		}
+		if err := ensureEffectIdentityAvailable(catalog, effect.Reference, effect.ID, args[2]); err != nil {
+			return "", err
+		}
+		programJSON, err := hex.DecodeString(args[5])
+		if err != nil {
+			return "", fmt.Errorf("decode strip program: %w", err)
+		}
+		var program appconfig.StripProgram
+		if err := json.Unmarshal(programJSON, &program); err != nil {
+			return "", fmt.Errorf("parse strip program: %w", err)
+		}
+		fps, err := strconv.Atoi(args[6])
+		if err != nil {
+			return "", fmt.Errorf("FPS: %w", err)
+		}
+		duration, err := strconv.Atoi(args[7])
+		if err != nil {
+			return "", fmt.Errorf("duration: %w", err)
+		}
+		pixels, err := strconv.Atoi(args[8])
+		if err != nil {
+			return "", fmt.Errorf("pixels: %w", err)
+		}
+		description := args[4]
+		if description == "-" {
+			description = ""
 		}
 		if updateHostConfig == nil {
 			return "", errors.New("effect persistence is unavailable")
 		}
 		if err := updateHostConfig(func(config *appconfig.Config) error {
 			for index := range config.StripEffects {
-				if strings.EqualFold(config.StripEffects[index].ID, id) || (kind == "" && strings.EqualFold(config.StripEffects[index].Name, id)) {
+				if strings.EqualFold(config.StripEffects[index].ID, effect.ID) {
+					config.StripEffects[index].Name, config.StripEffects[index].Category, config.StripEffects[index].Description = args[2], args[3], description
+					config.StripEffects[index].Program, config.StripEffects[index].DefaultFPS = program, fps
+					config.StripEffects[index].DefaultDurationMS, config.StripEffects[index].DefaultPixels = duration, pixels
+					return nil
+				}
+			}
+			return fmt.Errorf("effect %q is not configured", args[1])
+		}); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("effect %s updated", effect.Reference), nil
+	case "rename", "category":
+		if len(args) != 3 {
+			return "", fmt.Errorf("usage: effect %s REF VALUE", args[0])
+		}
+		effect, err := findEffect(catalog, args[1])
+		if err != nil {
+			return "", err
+		}
+		if strings.EqualFold(args[0], "rename") {
+			if err := ensureEffectIdentityAvailable(catalog, effect.Reference, effect.ID, args[2]); err != nil {
+				return "", err
+			}
+		}
+		if effect.Kind == "sequence" {
+			return macroCommand(ctx, runner, []string{strings.ToLower(args[0]), effect.ID, args[2]})
+		}
+		if updateHostConfig == nil {
+			return "", errors.New("effect persistence is unavailable")
+		}
+		if err := updateHostConfig(func(config *appconfig.Config) error {
+			for index := range config.StripEffects {
+				if strings.EqualFold(config.StripEffects[index].ID, effect.ID) {
 					if strings.EqualFold(args[0], "rename") {
 						config.StripEffects[index].Name = args[2]
 					} else {
@@ -273,26 +668,57 @@ func effectCommand(
 			return "", err
 		}
 		return fmt.Sprintf("effect %s updated", args[1]), nil
-	case "delete", "remove":
-		if len(args) != 2 {
-			return "", errors.New("usage: effect delete REF")
+	case "program":
+		if len(args) != 3 {
+			return "", errors.New("usage: effect program ID JSON_HEX")
 		}
-		kind, id := splitEffectReference(args[1])
-		if kind == "sequence" || kind == "macro" || kind == "" {
-			_, findErr := runner.find(id)
-			if findErr == nil {
-				return macroCommand(ctx, runner, []string{"delete", id})
-			}
-			if kind != "" {
-				return "", findErr
-			}
+		effect, err := findEffect(catalog, args[1])
+		if err != nil {
+			return "", err
+		}
+		if effect.Kind != "strip-stream" {
+			return "", errors.New("only lighting effects have a strip program")
+		}
+		encoded, err := hex.DecodeString(args[2])
+		if err != nil {
+			return "", fmt.Errorf("decode strip program: %w", err)
+		}
+		var program appconfig.StripProgram
+		if err := json.Unmarshal(encoded, &program); err != nil {
+			return "", fmt.Errorf("parse strip program: %w", err)
 		}
 		if updateHostConfig == nil {
 			return "", errors.New("effect persistence is unavailable")
 		}
 		if err := updateHostConfig(func(config *appconfig.Config) error {
-			for index, effect := range config.StripEffects {
-				if strings.EqualFold(effect.ID, id) || (kind == "" && strings.EqualFold(effect.Name, id)) {
+			for index := range config.StripEffects {
+				if strings.EqualFold(config.StripEffects[index].ID, effect.ID) {
+					config.StripEffects[index].Program = program
+					return nil
+				}
+			}
+			return fmt.Errorf("effect %q is not configured", args[1])
+		}); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("effect %s program updated", effect.Reference), nil
+	case "delete", "remove":
+		if len(args) != 2 {
+			return "", errors.New("usage: effect delete REF")
+		}
+		effect, err := findEffect(catalog, args[1])
+		if err != nil {
+			return "", err
+		}
+		if effect.Kind == "sequence" {
+			return macroCommand(ctx, runner, []string{"delete", effect.ID})
+		}
+		if updateHostConfig == nil {
+			return "", errors.New("effect persistence is unavailable")
+		}
+		if err := updateHostConfig(func(config *appconfig.Config) error {
+			for index, configuredEffect := range config.StripEffects {
+				if strings.EqualFold(configuredEffect.ID, effect.ID) {
 					config.StripEffects = append(config.StripEffects[:index], config.StripEffects[index+1:]...)
 					return nil
 				}
@@ -302,6 +728,49 @@ func effectCommand(
 			return "", err
 		}
 		return fmt.Sprintf("effect %s deleted", args[1]), nil
+	case "export":
+		if len(args) > 2 {
+			return "", errors.New("usage: effect export [PATH]")
+		}
+		document := effectDocument{Effects: catalog}
+		if len(args) == 1 {
+			encoded, err := json.MarshalIndent(document, "", "  ")
+			return string(encoded), err
+		}
+		path, err := filepath.Abs(args[1])
+		if err != nil {
+			return "", fmt.Errorf("resolve effect library path: %w", err)
+		}
+		if err := writeEffectDocument(path, document); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("exported %d effects to %s", len(catalog), path), nil
+	case "import":
+		if len(args) < 2 || len(args) > 3 {
+			return "", errors.New("usage: effect import PATH [merge|replace]")
+		}
+		replace := false
+		if len(args) == 3 {
+			switch strings.ToLower(args[2]) {
+			case "merge":
+			case "replace":
+				replace = true
+			default:
+				return "", errors.New("effect import mode must be merge or replace")
+			}
+		}
+		path, err := filepath.Abs(args[1])
+		if err != nil {
+			return "", fmt.Errorf("resolve effect library path: %w", err)
+		}
+		document, err := decodeEffectDocument(path)
+		if err != nil {
+			return "", err
+		}
+		if err := importEffectDocument(document, replace, updateHostConfig); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("imported %d effects from %s (%s)", len(document.Effects), path, map[bool]string{true: "replace", false: "merge"}[replace]), nil
 	case "record", "status", "cancel", "buffer":
 		return macroCommand(ctx, runner, args)
 	default:

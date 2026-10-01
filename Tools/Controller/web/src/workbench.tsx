@@ -539,20 +539,20 @@ export function WorkbenchView(props: SharedViewProps) {
 
         {boardReady && available.rf && frame('radio', copy('Radio controls', 'کنترل‌های رادیویی'), <RFGuidedWorkflow snapshot={snapshot} events={events} locale={locale} openDialog={props.openDialog} />)}
 
-        {frame('macros', copy('Effect library', 'کتابخانه جلوه‌ها'), <Card className="macro-card" icon={Workflow} iconTone="green" title={copy('Effect library', 'کتابخانه جلوه‌ها')} eyebrow={copy('Recorded sequences · host lighting streams · one live PCController catalog', 'دنباله‌های ضبط‌شده · پخش نور میزبان · یک فهرست زنده PCController')}>
+        {frame('macros', copy('Effect library', 'کتابخانه جلوه‌ها'), <Card className="macro-card" icon={Workflow} iconTone="green" title={copy('Effect library', 'کتابخانه جلوه‌ها')}>
           <MacroLibraryPanel
             online={snapshot.connected}
             locale={locale}
             events={props.macroEvents}
             initialSnapshot={snapshot.macros}
             stripEffects={(snapshot.effects ?? [])
-              .filter((effect) => effect.kind === 'strip-stream')
+              .filter((effect) => effect.kind === 'strip-stream' && Boolean(effect.program))
               .map((effect) => ({
                 id: effect.id,
                 name: effect.name,
                 category: effect.category,
                 description: effect.description,
-                pattern: effect.pattern ?? effect.id,
+                program: effect.program!,
                 engine: effect.engine,
                 editable: effect.editable,
                 default_fps: effect.default_fps ?? 20,
@@ -562,7 +562,7 @@ export function WorkbenchView(props: SharedViewProps) {
                 max_pixels: 100,
                 min_fps: 1,
                 max_fps: 30,
-              })) ?? snapshot.strip_effects}
+              }))}
             commandSurface={run}
           />
         </Card>)}

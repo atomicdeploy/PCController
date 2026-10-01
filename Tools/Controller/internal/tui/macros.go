@@ -69,13 +69,13 @@ func (model Model) automationsPage() string {
 	if model.macroSearchEditing {
 		search = "✎ " + search + "▏"
 	}
-	searchLine := labelStyle.Render("/ search · Ctrl+U clear · ↑/↓ select · Enter/P play · source is watched HOST configuration") + "  " + valueStyle.Render(search)
+	searchLine := labelStyle.Render("/ search · Ctrl+U clear · ↑/↓ select · Enter/P play") + "  " + valueStyle.Render(search)
 	if model.macroDeleteArmed {
 		searchLine = errorStyle.Copy().Bold(true).Render("DELETE ARMED · press X again to delete effect " + model.macroDeleteReference + " · any other action cancels")
 	}
 
 	lines := []string{
-		sectionHeader(model.width, "EFFECTS & TRIGGERS", "one PC-owned library · host streams or timed host/MCU sequences"),
+		sectionHeader(model.width, "EFFECTS & TRIGGERS", ""),
 		renderMacroButtonRow(macroPrimaryButtons),
 		renderMacroButtonRow(macroSecondaryButtons),
 		ansi.Truncate(searchLine, model.width, "…"),
@@ -88,7 +88,7 @@ func (model Model) automationsPage() string {
 		sectionHeader(model.width, "RECORDING", boolWord(recording.Active, "ACTIVE · "+strings.ToUpper(recording.Mode)+" clock", "idle")),
 		model.macroKV("Recorder", macroRecordingSummary(recording, time.Now())),
 		ansi.Truncate(macroRecordingHelp(recording), model.width, "…"),
-		sectionHeader(model.width, "TIMED SEQUENCES", fmt.Sprintf("%d of %d match · ID-sorted · PCController-owned", len(filtered), len(allMacros))),
+		sectionHeader(model.width, "TIMED EFFECTS", fmt.Sprintf("%d of %d", len(filtered), len(allMacros))),
 		macroTableHeader(model.width),
 	}
 
@@ -107,12 +107,12 @@ func (model Model) automationsPage() string {
 	}
 
 	lighting := model.stripEffectCatalog()
-	lines = append(lines, sectionHeader(model.width, "HOST-RENDERED LIGHTING", fmt.Sprintf("%d definitions · editable PCController data", len(lighting))))
+	lines = append(lines, sectionHeader(model.width, "LIGHTING EFFECTS", fmt.Sprintf("%d", len(lighting))))
 	if len(lighting) == 0 {
 		lines = append(lines, warnStyle.Render("  No lighting definitions are stored. Press L to create one."))
 	} else {
 		for _, effect := range lighting[:min(3, len(lighting))] {
-			lines = append(lines, ansi.Truncate(fmt.Sprintf("  %-22s %-18s %2d fps · %3d LEDs · %s", effect.Name, effect.Reference, effect.DefaultFPS, effect.DefaultPixels, effect.Pattern), model.width, "…"))
+			lines = append(lines, ansi.Truncate(fmt.Sprintf("  %-22s %-18s %2d fps · %3d LEDs · %s", effect.Name, effect.Reference, effect.DefaultFPS, effect.DefaultPixels, effect.Program.Primitive), model.width, "…"))
 		}
 	}
 
@@ -306,7 +306,7 @@ func (model Model) macroShortcut(key string) (Model, tea.Cmd, bool) {
 		model.input.SetValue("effect create strip ")
 		model.input.CursorEnd()
 		model.revealTerminal()
-		model.setNotice("Complete ID NAME RENDERER [CATEGORY [FPS [DURATION_MS [PIXELS]]]]; renderers: police, white-thunder, converging-red")
+		model.setNotice("Complete ID NAME PROGRAM [CATEGORY [FPS [DURATION_MS [PIXELS]]]]")
 		return model, nil, true
 	case "r":
 		if recording := model.macroRecordingState(); recording.Active {
@@ -350,14 +350,14 @@ func (model Model) macroShortcut(key string) (Model, tea.Cmd, bool) {
 			model.setNotice("No recorded effect selected")
 			return model, nil, true
 		}
-		return model.dispatchLine(fmt.Sprintf("effect inspect sequence:%d", macro.ID))
+		return model.dispatchLine(fmt.Sprintf("effect inspect %d", macro.ID))
 	case "u":
 		macro, ok := model.selectedMacro()
 		if !ok {
 			model.setNotice("No recorded effect selected")
 			return model, nil, true
 		}
-		model.input.SetValue(fmt.Sprintf("effect rename sequence:%d ", macro.ID))
+		model.input.SetValue(fmt.Sprintf("effect rename %d ", macro.ID))
 		model.input.CursorEnd()
 		model.revealTerminal()
 		model.setNotice("Complete the new printable ASCII effect name")
@@ -368,7 +368,7 @@ func (model Model) macroShortcut(key string) (Model, tea.Cmd, bool) {
 			model.setNotice("No recorded effect selected")
 			return model, nil, true
 		}
-		model.input.SetValue(fmt.Sprintf("effect category sequence:%d ", macro.ID))
+		model.input.SetValue(fmt.Sprintf("effect category %d ", macro.ID))
 		model.input.CursorEnd()
 		model.revealTerminal()
 		model.setNotice("Complete the category (up to 64 printable ASCII bytes)")
@@ -391,7 +391,7 @@ func (model Model) playSelectedMacro() (Model, tea.Cmd, bool) {
 		model.setNotice(fmt.Sprintf("Effect %d/%s is an empty draft; record or add steps before playback", macro.ID, macro.Name))
 		return model, nil, true
 	}
-	return model.dispatchLine(fmt.Sprintf("effect play sequence:%d", macro.ID))
+	return model.dispatchLine(fmt.Sprintf("effect play %d", macro.ID))
 }
 
 func (model Model) deleteSelectedMacro() (Model, tea.Cmd, bool) {
@@ -409,7 +409,7 @@ func (model Model) deleteSelectedMacro() (Model, tea.Cmd, bool) {
 	}
 	model.macroDeleteArmed = false
 	model.macroDeleteReference = ""
-	return model.dispatchLine(fmt.Sprintf("effect delete sequence:%d", macro.ID))
+	return model.dispatchLine(fmt.Sprintf("effect delete %d", macro.ID))
 }
 
 func (model Model) nextMacroID() byte {

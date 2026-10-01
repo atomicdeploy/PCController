@@ -354,7 +354,7 @@ export interface StripEffectDescriptor {
   name: string
   category?: string
   description?: string
-  pattern: 'police' | 'white-thunder' | 'converging-red' | string
+  program: StripProgram
   engine: 'host-stream' | string
   editable: boolean
   default_fps: number
@@ -364,6 +364,18 @@ export interface StripEffectDescriptor {
   max_pixels: number
   min_fps: number
   max_fps: number
+}
+
+export interface StripProgram {
+  primitive: 'alternating-zones' | 'envelope' | 'converging-points' | string
+  primary: { red: number; green: number; blue: number }
+  secondary?: { red: number; green: number; blue: number }
+  period_ms: number
+  step_ms?: number
+  swap_after_steps?: number
+  dim_intensity?: number
+  tail_pixels?: number
+  envelope?: Array<{ at_ms: number; intensity: number }>
 }
 
 export interface EffectDescriptor {
@@ -378,7 +390,7 @@ export interface EffectDescriptor {
   duration_ms: number
   default_fps?: number
   default_pixels?: number
-  pattern?: string
+  program?: StripProgram
 }
 
 export interface RFLearnedEntry {

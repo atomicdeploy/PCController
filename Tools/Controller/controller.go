@@ -298,16 +298,39 @@ type MacroStep struct {
 	ActionIDs   []string `json:"action_ids,omitempty"`
 }
 
-// StripEffect is a PCController-owned, user-editable host renderer definition.
+// StripEffect is a PCController-owned, user-editable declarative light program.
 type StripEffect struct {
-	ID                string `json:"id"`
-	Name              string `json:"name"`
-	Category          string `json:"category,omitempty"`
-	Description       string `json:"description,omitempty"`
-	Pattern           string `json:"pattern"`
-	DefaultFPS        int    `json:"default_fps"`
-	DefaultDurationMS int    `json:"default_duration_ms"`
-	DefaultPixels     int    `json:"default_pixels,omitempty"`
+	ID                string       `json:"id"`
+	Name              string       `json:"name"`
+	Category          string       `json:"category,omitempty"`
+	Description       string       `json:"description,omitempty"`
+	Program           StripProgram `json:"program"`
+	DefaultFPS        int          `json:"default_fps"`
+	DefaultDurationMS int          `json:"default_duration_ms"`
+	DefaultPixels     int          `json:"default_pixels,omitempty"`
+}
+
+type StripColor struct {
+	Red   byte `json:"red"`
+	Green byte `json:"green"`
+	Blue  byte `json:"blue"`
+}
+
+type StripEnvelopePoint struct {
+	AtMS      int  `json:"at_ms"`
+	Intensity byte `json:"intensity"`
+}
+
+type StripProgram struct {
+	Primitive      string               `json:"primitive"`
+	Primary        StripColor           `json:"primary"`
+	Secondary      StripColor           `json:"secondary,omitempty"`
+	PeriodMS       int                  `json:"period_ms"`
+	StepMS         int                  `json:"step_ms,omitempty"`
+	SwapAfterSteps int                  `json:"swap_after_steps,omitempty"`
+	DimIntensity   byte                 `json:"dim_intensity,omitempty"`
+	TailPixels     int                  `json:"tail_pixels,omitempty"`
+	Envelope       []StripEnvelopePoint `json:"envelope,omitempty"`
 }
 
 // Automation maps an event match to one or more host-side actions.
@@ -895,12 +918,26 @@ func toAppStripEffects(source []StripEffect) []appconfig.StripEffect {
 	for index, effect := range source {
 		result[index] = appconfig.StripEffect{
 			ID: effect.ID, Name: effect.Name, Category: effect.Category,
-			Description: effect.Description, Pattern: effect.Pattern,
+			Description: effect.Description, Program: toAppStripProgram(effect.Program),
 			DefaultFPS: effect.DefaultFPS, DefaultDurationMS: effect.DefaultDurationMS,
 			DefaultPixels: effect.DefaultPixels,
 		}
 	}
 	return result
+}
+
+func toAppStripProgram(source StripProgram) appconfig.StripProgram {
+	envelope := make([]appconfig.StripEnvelopePoint, len(source.Envelope))
+	for index, point := range source.Envelope {
+		envelope[index] = appconfig.StripEnvelopePoint{AtMS: point.AtMS, Intensity: point.Intensity}
+	}
+	return appconfig.StripProgram{
+		Primitive: source.Primitive,
+		Primary:   appconfig.StripColor{Red: source.Primary.Red, Green: source.Primary.Green, Blue: source.Primary.Blue},
+		Secondary: appconfig.StripColor{Red: source.Secondary.Red, Green: source.Secondary.Green, Blue: source.Secondary.Blue},
+		PeriodMS:  source.PeriodMS, StepMS: source.StepMS, SwapAfterSteps: source.SwapAfterSteps,
+		DimIntensity: source.DimIntensity, TailPixels: source.TailPixels, Envelope: envelope,
+	}
 }
 
 func (client *Client) currentMacros() []appconfig.Macro {

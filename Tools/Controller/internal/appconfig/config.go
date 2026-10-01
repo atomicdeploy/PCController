@@ -6,7 +6,9 @@ package appconfig
 import (
 	"context"
 	"crypto/sha256"
+	_ "embed"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -280,32 +282,61 @@ type MacroStep struct {
 	ActionIDs []string `json:"action_ids,omitempty"`
 }
 
-// StripEffect is a host-owned addressable-light effect definition. Pattern
-// selects a renderer implemented by the host while every mutable property is
-// kept in the same watched PCController configuration as recorded effects.
-// Pealayer and other clients consume this catalog; they never keep a second
-// local effect library.
+// StripEffect is a host-owned addressable-light effect definition. Program is
+// declarative user data; the streaming engine only evaluates generic
+// primitives and never embeds named effects. Pealayer and other clients
+// consume this catalog; they never keep a second local effect library.
 type StripEffect struct {
-	ID                string `json:"id"`
-	Name              string `json:"name"`
-	Category          string `json:"category,omitempty"`
-	Description       string `json:"description,omitempty"`
-	Pattern           string `json:"pattern"`
-	DefaultFPS        int    `json:"default_fps"`
-	DefaultDurationMS int    `json:"default_duration_ms"`
-	DefaultPixels     int    `json:"default_pixels,omitempty"`
+	ID                string       `json:"id"`
+	Name              string       `json:"name"`
+	Category          string       `json:"category,omitempty"`
+	Description       string       `json:"description,omitempty"`
+	Program           StripProgram `json:"program"`
+	DefaultFPS        int          `json:"default_fps"`
+	DefaultDurationMS int          `json:"default_duration_ms"`
+	DefaultPixels     int          `json:"default_pixels,omitempty"`
 }
 
-// DefaultStripEffects are real, immediately runnable first-install
-// definitions for the three requested cinema lighting patterns. They live in
-// PCController's host configuration and can be renamed, duplicated, edited,
-// or deleted like any other effect.
+// StripColor is an RGB value stored in a declarative strip program.
+type StripColor struct {
+	Red   byte `json:"red"`
+	Green byte `json:"green"`
+	Blue  byte `json:"blue"`
+}
+
+// StripEnvelopePoint is one brightness keyframe in a repeating envelope.
+type StripEnvelopePoint struct {
+	AtMS      int  `json:"at_ms"`
+	Intensity byte `json:"intensity"`
+}
+
+// StripProgram contains parameters for reusable rendering primitives. Effect
+// names and cinema-specific meaning live entirely in configuration data.
+type StripProgram struct {
+	Primitive      string               `json:"primitive"`
+	Primary        StripColor           `json:"primary"`
+	Secondary      StripColor           `json:"secondary,omitempty"`
+	PeriodMS       int                  `json:"period_ms"`
+	StepMS         int                  `json:"step_ms,omitempty"`
+	SwapAfterSteps int                  `json:"swap_after_steps,omitempty"`
+	DimIntensity   byte                 `json:"dim_intensity,omitempty"`
+	TailPixels     int                  `json:"tail_pixels,omitempty"`
+	Envelope       []StripEnvelopePoint `json:"envelope,omitempty"`
+}
+
+//go:embed assets/default-effects.json
+var defaultEffectsJSON []byte
+
+// DefaultStripEffects loads the editable first-install seed catalog. Named
+// effects are data, not renderer branches or Go configuration literals. A new
+// installation copies these values into its ordinary watched configuration;
+// after that they can be renamed, duplicated, edited, exported, or deleted.
 func DefaultStripEffects() []StripEffect {
-	return []StripEffect{
-		{ID: "police", Name: "Police red / blue", Category: "Lighting", Description: "Alternating red and blue emergency-light sweep", Pattern: "police", DefaultFPS: 20, DefaultDurationMS: 5000, DefaultPixels: 100},
-		{ID: "white-thunder", Name: "White thunder", Category: "Lighting", Description: "Sharp white lightning strike with secondary flashes and decay", Pattern: "white-thunder", DefaultFPS: 30, DefaultDurationMS: 3500, DefaultPixels: 100},
-		{ID: "converging-red", Name: "Converging red dots", Category: "Lighting", Description: "Two fading red dots travel from both ends to the center", Pattern: "converging-red", DefaultFPS: 30, DefaultDurationMS: 5000, DefaultPixels: 100},
+	var effects []StripEffect
+	if err := json.Unmarshal(defaultEffectsJSON, &effects); err != nil {
+		panic(fmt.Sprintf("decode embedded default effect catalog: %v", err))
 	}
+	return effects
 }
 
 // Automation binds matching host or board events to ordered host-side actions.
@@ -927,10 +958,32 @@ func (value Config) Validate() error {
 		if len(effect.Category) > 64 || !printableASCII(effect.Category) || len(effect.Description) > 256 || !printableASCII(effect.Description) {
 			return fmt.Errorf("strip_effects[%d] category/description must be printable ASCII within 64/256 bytes", index)
 		}
-		switch strings.ToLower(strings.TrimSpace(effect.Pattern)) {
-		case "police", "white-thunder", "converging-red":
+		program := effect.Program
+		if program.PeriodMS < 50 || program.PeriodMS > 3_600_000 {
+			return fmt.Errorf("strip_effects[%d].program.period_ms must be 50..3600000", index)
+		}
+		switch strings.ToLower(strings.TrimSpace(program.Primitive)) {
+		case "alternating-zones":
+			if program.StepMS < 10 || program.StepMS > program.PeriodMS || program.SwapAfterSteps < 1 || program.SwapAfterSteps > 1024 {
+				return fmt.Errorf("strip_effects[%d] alternating-zones requires step_ms 10..period_ms and swap_after_steps 1..1024", index)
+			}
+		case "envelope":
+			if len(program.Envelope) < 2 || len(program.Envelope) > 256 {
+				return fmt.Errorf("strip_effects[%d] envelope requires 2..256 points", index)
+			}
+			previous := -1
+			for pointIndex, point := range program.Envelope {
+				if point.AtMS <= previous || point.AtMS >= program.PeriodMS {
+					return fmt.Errorf("strip_effects[%d].program.envelope[%d].at_ms must increase and remain below period_ms", index, pointIndex)
+				}
+				previous = point.AtMS
+			}
+		case "converging-points":
+			if program.TailPixels < 0 || program.TailPixels > 100 {
+				return fmt.Errorf("strip_effects[%d].program.tail_pixels must be 0..100", index)
+			}
 		default:
-			return fmt.Errorf("strip_effects[%d].pattern must be police, white-thunder, or converging-red", index)
+			return fmt.Errorf("strip_effects[%d].program.primitive is unsupported", index)
 		}
 		if effect.DefaultFPS < 1 || effect.DefaultFPS > 30 {
 			return fmt.Errorf("strip_effects[%d].default_fps must be 1..30", index)
