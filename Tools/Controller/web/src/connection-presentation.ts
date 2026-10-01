@@ -15,6 +15,10 @@ export interface ConnectionPresentation {
   animated: boolean
 }
 
+export function hardwareResetAvailable(snapshot: Pick<Snapshot, 'reset_lines_available'>): boolean {
+  return snapshot.reset_lines_available === true
+}
+
 function parsedTime(value?: string): number | undefined {
   if (!value) return undefined
   const parsed = Date.parse(value)

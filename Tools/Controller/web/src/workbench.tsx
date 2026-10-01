@@ -53,6 +53,7 @@ import {
 import { AdvancedWorkbench } from './advanced-workbench'
 import { displayPresentationCommand, type DisplayRepeat, type DisplayTarget } from './display-command'
 import { peripheralAvailability } from './peripheral-availability'
+import { hardwareResetAvailable } from './connection-presentation'
 import { RFGuidedWorkflow } from './rf-guided-workflow'
 import { MacroLibraryPanel } from './macro-library'
 import { CardLayoutEditor, CardLayoutFrame, type CardLayoutCopy, type LayoutCardDescriptor } from './card-layout-controls'
@@ -176,6 +177,7 @@ export function WorkbenchView(props: SharedViewProps) {
   const displayTextIsValid = displayText.length > 0 && displayText.length <= displayTextLimit && /^[\x20-\x7e]*$/.test(displayText)
   const available = peripheralAvailability(snapshot)
   const boardReady = transport.boardState === 'ready' && snapshot.connected && snapshot.have_status
+  const canHardwareReset = hardwareResetAvailable(snapshot)
   const completionItems = terminalCompletions(line, commandCatalog)
   const activeCompletionIndex = Math.min(completionIndex, Math.max(0, completionItems.length - 1))
   const displayTargetOptions = [
@@ -563,7 +565,7 @@ export function WorkbenchView(props: SharedViewProps) {
         </Card>)}
 
         {frame('firmware', copy('Firmware & recovery', 'میان‌افزار و بازیابی'), <Card icon={Cpu} iconTone="amber" title={copy('Firmware & recovery', 'میان‌افزار و بازیابی')} eyebrow={copy('Read-only first', 'ابتدا فقط خواندنی')}>
-          <div className="operation-buttons">{boardReady && <><Button icon={Cpu} onClick={() => void run('hello')}>{copy('Identity', 'شناسه')}</Button><Button icon={ListRestart} onClick={() => void run('reset lines')}>{copy('Reconnect pulse', 'پالس اتصال مجدد')}</Button></>}<Button icon={MemoryStick} onClick={() => void run('toolchain profile')}>{copy('Toolchain profile', 'مشخصات زنجیره‌ابزار')}</Button><Button icon={SquareTerminal} onClick={() => setLine('boot info')}>{copy('Prepare boot info', 'آماده‌سازی اطلاعات راه‌اندازی')}</Button></div>
+          <div className="operation-buttons">{boardReady && <Button icon={Cpu} onClick={() => void run('hello')}>{copy('Identity', 'شناسه')}</Button>}{canHardwareReset && <Button icon={ListRestart} onClick={() => void run('reset lines')}>{copy('Hardware reset (DTR)', 'بازنشانی سخت‌افزاری (DTR)')}</Button>}<Button icon={MemoryStick} onClick={() => void run('toolchain profile')}>{copy('Toolchain profile', 'مشخصات زنجیره‌ابزار')}</Button><Button icon={SquareTerminal} onClick={() => setLine('boot info')}>{copy('Prepare boot info', 'آماده‌سازی اطلاعات راه‌اندازی')}</Button></div>
         </Card>)}
       </section>
       <AdvancedWorkbench {...props} run={run} busy={busy} />
