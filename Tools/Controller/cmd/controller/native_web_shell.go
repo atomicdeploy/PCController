@@ -22,7 +22,7 @@ var startNativeShell = startNativeWebShell
 // an explicit headless opt-out.
 func startPrimaryNativeShell(
 	ctx context.Context,
-	stop context.CancelFunc,
+	stop func(),
 	appURL string,
 	runtime *control.Runtime,
 	store *appconfig.Store,
@@ -37,7 +37,7 @@ func startPrimaryNativeShell(
 
 func startNativeWebShell(
 	ctx context.Context,
-	stop context.CancelFunc,
+	stop func(),
 	appURL string,
 	runtime *control.Runtime,
 	store *appconfig.Store,

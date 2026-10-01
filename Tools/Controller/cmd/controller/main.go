@@ -1179,7 +1179,7 @@ func runTUIWithInitialAction(
 		return err
 	}
 	nativeShell, shellErr := startPrimaryNativeShell(
-		watchContext, stopWatching, appURL, runtime, store, primary, *noTray,
+		watchContext, primary.RequestQuit, appURL, runtime, store, primary, *noTray,
 	)
 	if shellErr != nil {
 		fmt.Fprintln(stderr, "native TUI shell:", shellErr)
@@ -1386,7 +1386,6 @@ func runTUIWithInitialAction(
 		case <-primary.QuitRequested():
 			program.Quit()
 		case <-watchContext.Done():
-			program.Quit()
 		}
 	}()
 	_, err = program.Run()

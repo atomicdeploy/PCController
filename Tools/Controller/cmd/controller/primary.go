@@ -572,6 +572,13 @@ func (server *primaryIPC) QuitRequested() <-chan struct{} {
 	return server.quit
 }
 
+func (server *primaryIPC) RequestQuit() {
+	if server == nil {
+		return
+	}
+	server.quitOnce.Do(func() { close(server.quit) })
+}
+
 func (server *primaryIPC) AppActions() <-chan hostui.AppAction {
 	if server == nil || server.actions == nil {
 		return nil
