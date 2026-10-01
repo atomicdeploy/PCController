@@ -782,7 +782,11 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 			if len(args) > 0 {
 				switch strings.ToLower(args[0]) {
 				case "config", "frame", "rainbow", "effect", "stop", "status":
-					return stripStreamCommand(ctx, outputs, args)
+					definitions := appconfig.DefaultStripEffects()
+					if options.HostConfig != nil {
+						definitions = options.HostConfig().StripEffects
+					}
+					return stripStreamCommand(ctx, outputs, args, definitions)
 				}
 			}
 			outputs.stop("strip")
@@ -945,9 +949,17 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 	})
 	mustRegister(shell.Command{
 		Name: "macro", Usage: "macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|rename NAME_OR_ID NAME|category NAME_OR_ID CATEGORY|delete NAME_OR_ID|record start|start-mcu|start-board|import-board NAME [CATEGORY [COLOR]]|record status|record save|record discard|buffer clear|play NAME_OR_ID [host|mcu]|status|monitor|cancel [keep]",
-		Summary: "record and play named host or MCU-timed multi-peripheral macros",
+		Summary: "compatibility name for recorded effects and timed sequences",
 		Run: func(ctx context.Context, args []string) (string, error) {
 			return macroCommand(ctx, macroRunner, args)
+		},
+	})
+	mustRegister(shell.Command{
+		Name:    "effect",
+		Usage:   "effect list|inspect REF|play REF|create|update|rename|category|delete|record|status|cancel",
+		Summary: "discover, design, record, edit and run PCController-owned effects",
+		Run: func(ctx context.Context, args []string) (string, error) {
+			return effectCommand(ctx, macroRunner, outputs, options.HostConfig, options.UpdateHostConfig, args)
 		},
 	})
 	mustRegister(shell.Command{

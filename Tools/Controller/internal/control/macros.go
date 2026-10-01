@@ -216,6 +216,17 @@ func (runner *MacroRunner) Snapshot() MacroSnapshot {
 	return MacroSnapshot{Library: runner.List(), Playback: runner.State(), Recording: runner.RecordingState()}
 }
 
+// EffectCatalog returns the one PCController-owned library exposed to every
+// interface. Recorded sequences and rendered strip streams retain their
+// distinct engines, but share discovery, stable references, and commands.
+func (runner *MacroRunner) EffectCatalog() []EffectDescriptor {
+	config := appconfig.Defaults()
+	if runner.hostConfig != nil {
+		config = runner.hostConfig()
+	}
+	return EffectCatalog(runner.List(), config.StripEffects)
+}
+
 func (runner *MacroRunner) UpdateMetadata(reference, field, value string) (appconfig.Macro, error) {
 	if runner.updateHostConfig == nil {
 		return appconfig.Macro{}, errors.New("macro persistence is unavailable")

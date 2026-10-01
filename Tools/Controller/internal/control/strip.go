@@ -10,31 +10,46 @@ import (
 	"strings"
 	"time"
 
+	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/link"
 	"pccontroller.local/controller/internal/native"
 )
 
 type StripEffectDescriptor struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	DefaultFPS  int    `json:"default_fps"`
-	MinPixels   int    `json:"min_pixels"`
-	MaxPixels   int    `json:"max_pixels"`
-	MinFPS      int    `json:"min_fps"`
-	MaxFPS      int    `json:"max_fps"`
+	ID                string `json:"id"`
+	Name              string `json:"name"`
+	Category          string `json:"category,omitempty"`
+	Description       string `json:"description"`
+	Pattern           string `json:"pattern"`
+	Engine            string `json:"engine"`
+	Editable          bool   `json:"editable"`
+	DefaultFPS        int    `json:"default_fps"`
+	DefaultDurationMS int    `json:"default_duration_ms"`
+	DefaultPixels     int    `json:"default_pixels"`
+	MinPixels         int    `json:"min_pixels"`
+	MaxPixels         int    `json:"max_pixels"`
+	MinFPS            int    `json:"min_fps"`
+	MaxFPS            int    `json:"max_fps"`
 }
 
 type stripEffectDefinition = StripEffectDescriptor
 
-var stripEffectCatalog = []StripEffectDescriptor{
-	{ID: "police", Name: "Police", Description: "Alternating red and blue emergency-light sweep", DefaultFPS: 20, MinPixels: 1, MaxPixels: native.StripMaximumPixels, MinFPS: 1, MaxFPS: 30},
-	{ID: "white-thunder", Name: "White thunder", Description: "A sharp white lightning strike with secondary flashes and decay", DefaultFPS: 30, MinPixels: 1, MaxPixels: native.StripMaximumPixels, MinFPS: 1, MaxFPS: 30},
-	{ID: "converging-red", Name: "Converging red dots", Description: "Two fading red dots travel from both ends to the center", DefaultFPS: 30, MinPixels: 1, MaxPixels: native.StripMaximumPixels, MinFPS: 1, MaxFPS: 30},
+func configuredStripEffectDescriptors(definitions []appconfig.StripEffect) []StripEffectDescriptor {
+	result := make([]StripEffectDescriptor, 0, len(definitions))
+	for _, definition := range definitions {
+		result = append(result, StripEffectDescriptor{
+			ID: definition.ID, Name: definition.Name, Category: definition.Category,
+			Description: definition.Description, Pattern: definition.Pattern,
+			Engine: "host-stream", Editable: true, DefaultFPS: definition.DefaultFPS,
+			DefaultDurationMS: definition.DefaultDurationMS, DefaultPixels: definition.DefaultPixels,
+			MinPixels: 1, MaxPixels: native.StripMaximumPixels, MinFPS: 1, MaxFPS: 30,
+		})
+	}
+	return result
 }
 
 func StripEffectDescriptors() []StripEffectDescriptor {
-	return append([]StripEffectDescriptor(nil), stripEffectCatalog...)
+	return configuredStripEffectDescriptors(appconfig.DefaultStripEffects())
 }
 
 func SupportedStripEffectDescriptors(connected bool, capabilities uint32) []StripEffectDescriptor {
@@ -42,6 +57,13 @@ func SupportedStripEffectDescriptors(connected bool, capabilities uint32) []Stri
 		return nil
 	}
 	return StripEffectDescriptors()
+}
+
+func SupportedConfiguredStripEffectDescriptors(connected bool, capabilities uint32, definitions []appconfig.StripEffect) []StripEffectDescriptor {
+	if !connected || capabilities&native.CapabilityAddressableLED == 0 {
+		return nil
+	}
+	return configuredStripEffectDescriptors(definitions)
 }
 
 type stripEffectRenderer func(count int, elapsed time.Duration) []byte
@@ -63,7 +85,11 @@ func (outputs *OutputScheduler) sendStrip(ctx context.Context, payload []byte) e
 	return stripCommandError(outputs.send(ctx, native.OpAddressableLED, payload))
 }
 
-func stripStreamCommand(ctx context.Context, outputs *OutputScheduler, args []string) (string, error) {
+func stripStreamCommand(ctx context.Context, outputs *OutputScheduler, args []string, configured ...[]appconfig.StripEffect) (string, error) {
+	definitions := appconfig.DefaultStripEffects()
+	if len(configured) != 0 {
+		definitions = configured[0]
+	}
 	if len(args) == 0 {
 		return "", fmt.Errorf("usage: strip config COUNT | frame RGBHEX | rainbow [COUNT [FPS]] | effect list | effect play NAME [COUNT [FPS]] | stop | status")
 	}
@@ -166,17 +192,17 @@ func stripStreamCommand(ctx context.Context, outputs *OutputScheduler, args []st
 		return fmt.Sprintf("strip rainbow started (id=%d)", operation.ID), nil
 	case "effect":
 		if len(args) == 2 && strings.EqualFold(args[1], "list") {
-			data, err := json.Marshal(stripEffectCatalog)
+			data, err := json.Marshal(configuredStripEffectDescriptors(definitions))
 			return string(data), err
 		}
 		if len(args) < 3 || len(args) > 5 || !strings.EqualFold(args[1], "play") {
 			break
 		}
-		definition, renderer, ok := stripEffectByID(args[2])
+		definition, renderer, ok := stripEffectByID(args[2], definitions)
 		if !ok {
 			return "", fmt.Errorf("unknown strip effect %q; run 'strip effect list'", args[2])
 		}
-		count, fps := 100, definition.DefaultFPS
+		count, fps := definition.DefaultPixels, definition.DefaultFPS
 		var err error
 		if len(args) > 3 {
 			count, err = strconv.Atoi(args[3])
@@ -199,17 +225,33 @@ func stripStreamCommand(ctx context.Context, outputs *OutputScheduler, args []st
 	return "", fmt.Errorf("usage: strip config COUNT | frame RGBHEX | rainbow [COUNT [FPS]] | effect list | effect play NAME [COUNT [FPS]] | stop | status")
 }
 
-func stripEffectByID(id string) (stripEffectDefinition, stripEffectRenderer, bool) {
-	switch strings.ToLower(strings.TrimSpace(id)) {
-	case "police":
-		return stripEffectCatalog[0], stripPoliceFrame, true
-	case "white-thunder", "thunder", "lightning":
-		return stripEffectCatalog[1], stripWhiteThunderFrame, true
-	case "converging-red", "converge", "red-dots":
-		return stripEffectCatalog[2], stripConvergingRedFrame, true
-	default:
-		return stripEffectDefinition{}, nil, false
+func stripEffectByID(id string, configured ...[]appconfig.StripEffect) (stripEffectDefinition, stripEffectRenderer, bool) {
+	definitions := appconfig.DefaultStripEffects()
+	if len(configured) != 0 {
+		definitions = configured[0]
 	}
+	lookupID := strings.ToLower(strings.TrimSpace(id))
+	switch lookupID {
+	case "thunder", "lightning":
+		lookupID = "white-thunder"
+	case "converge", "red-dots":
+		lookupID = "converging-red"
+	}
+	for _, candidate := range definitions {
+		if !strings.EqualFold(strings.TrimSpace(candidate.ID), lookupID) {
+			continue
+		}
+		descriptor := configuredStripEffectDescriptors([]appconfig.StripEffect{candidate})[0]
+		switch strings.ToLower(strings.TrimSpace(candidate.Pattern)) {
+		case "police":
+			return descriptor, stripPoliceFrame, true
+		case "white-thunder":
+			return descriptor, stripWhiteThunderFrame, true
+		case "converging-red":
+			return descriptor, stripConvergingRedFrame, true
+		}
+	}
+	return stripEffectDefinition{}, nil, false
 }
 
 func (outputs *OutputScheduler) startStripEffect(ctx context.Context, definition stripEffectDefinition, renderer stripEffectRenderer, count, fps int) (StreamOperation, error) {

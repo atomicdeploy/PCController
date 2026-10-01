@@ -113,7 +113,7 @@ func TestTypedStripEffectCatalogIsLiveCapabilityGated(t *testing.T) {
 		}
 	}
 	catalog[0].Name = "mutated"
-	if StripEffectDescriptors()[0].Name != "Police" {
+	if StripEffectDescriptors()[0].Name != "Police red / blue" {
 		t.Fatal("catalog caller mutated the canonical descriptors")
 	}
 }

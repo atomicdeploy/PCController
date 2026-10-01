@@ -56,6 +56,7 @@ type Config struct {
 	Scripts       map[string]string       `json:"scripts,omitempty"`
 	BoardProfiles map[string]BoardProfile `json:"board_profiles,omitempty"`
 	Macros        []Macro                 `json:"macros,omitempty"`
+	StripEffects  []StripEffect           `json:"strip_effects,omitempty"`
 	Melodies      []Melody                `json:"melodies,omitempty"`
 	StatusEffects []StatusLEDEffect       `json:"status_effects,omitempty"`
 	Automations   []Automation            `json:"automations,omitempty"`
@@ -279,6 +280,34 @@ type MacroStep struct {
 	ActionIDs []string `json:"action_ids,omitempty"`
 }
 
+// StripEffect is a host-owned addressable-light effect definition. Pattern
+// selects a renderer implemented by the host while every mutable property is
+// kept in the same watched PCController configuration as recorded effects.
+// Pealayer and other clients consume this catalog; they never keep a second
+// local effect library.
+type StripEffect struct {
+	ID                string `json:"id"`
+	Name              string `json:"name"`
+	Category          string `json:"category,omitempty"`
+	Description       string `json:"description,omitempty"`
+	Pattern           string `json:"pattern"`
+	DefaultFPS        int    `json:"default_fps"`
+	DefaultDurationMS int    `json:"default_duration_ms"`
+	DefaultPixels     int    `json:"default_pixels,omitempty"`
+}
+
+// DefaultStripEffects are real, immediately runnable first-install
+// definitions for the three requested cinema lighting patterns. They live in
+// PCController's host configuration and can be renamed, duplicated, edited,
+// or deleted like any other effect.
+func DefaultStripEffects() []StripEffect {
+	return []StripEffect{
+		{ID: "police", Name: "Police red / blue", Category: "Lighting", Description: "Alternating red and blue emergency-light sweep", Pattern: "police", DefaultFPS: 20, DefaultDurationMS: 5000, DefaultPixels: 100},
+		{ID: "white-thunder", Name: "White thunder", Category: "Lighting", Description: "Sharp white lightning strike with secondary flashes and decay", Pattern: "white-thunder", DefaultFPS: 30, DefaultDurationMS: 3500, DefaultPixels: 100},
+		{ID: "converging-red", Name: "Converging red dots", Category: "Lighting", Description: "Two fading red dots travel from both ends to the center", Pattern: "converging-red", DefaultFPS: 30, DefaultDurationMS: 5000, DefaultPixels: 100},
+	}
+}
+
 // Automation binds matching host or board events to ordered host-side actions.
 type Automation struct {
 	Name       string             `json:"name"`
@@ -420,6 +449,7 @@ func Defaults() Config {
 		},
 		Scripts:       map[string]string{},
 		Macros:        []Macro{},
+		StripEffects:  DefaultStripEffects(),
 		Melodies:      DefaultMelodies(),
 		StatusEffects: DefaultStatusLEDEffects(),
 	}
@@ -873,6 +903,43 @@ func (value Config) Validate() error {
 			default:
 				return fmt.Errorf("macros[%d].steps[%d].kind %q is unknown", index, stepIndex, step.Kind)
 			}
+		}
+	}
+	stripIDs := make(map[string]bool)
+	stripNames := make(map[string]bool)
+	for index, effect := range value.StripEffects {
+		id := strings.ToLower(strings.TrimSpace(effect.ID))
+		if id == "" || len(id) > 64 || !profileToken(id) {
+			return fmt.Errorf("strip_effects[%d].id must use 1..64 lower-case letters, digits, dot, dash, or underscore", index)
+		}
+		if stripIDs[id] {
+			return fmt.Errorf("strip_effects[%d].id %q is duplicated", index, effect.ID)
+		}
+		stripIDs[id] = true
+		name := strings.ToLower(strings.TrimSpace(effect.Name))
+		if name == "" || len(effect.Name) > 64 || !printableASCII(effect.Name) {
+			return fmt.Errorf("strip_effects[%d].name must be 1..64 printable ASCII bytes", index)
+		}
+		if stripNames[name] {
+			return fmt.Errorf("strip_effects[%d].name %q is duplicated", index, effect.Name)
+		}
+		stripNames[name] = true
+		if len(effect.Category) > 64 || !printableASCII(effect.Category) || len(effect.Description) > 256 || !printableASCII(effect.Description) {
+			return fmt.Errorf("strip_effects[%d] category/description must be printable ASCII within 64/256 bytes", index)
+		}
+		switch strings.ToLower(strings.TrimSpace(effect.Pattern)) {
+		case "police", "white-thunder", "converging-red":
+		default:
+			return fmt.Errorf("strip_effects[%d].pattern must be police, white-thunder, or converging-red", index)
+		}
+		if effect.DefaultFPS < 1 || effect.DefaultFPS > 30 {
+			return fmt.Errorf("strip_effects[%d].default_fps must be 1..30", index)
+		}
+		if effect.DefaultDurationMS < 100 || effect.DefaultDurationMS > 3_600_000 {
+			return fmt.Errorf("strip_effects[%d].default_duration_ms must be 100..3600000", index)
+		}
+		if effect.DefaultPixels < 1 || effect.DefaultPixels > 100 {
+			return fmt.Errorf("strip_effects[%d].default_pixels must be 1..100", index)
 		}
 	}
 	if err := validateOutputDefinitions(value.Melodies, value.StatusEffects); err != nil {

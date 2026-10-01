@@ -65,6 +65,7 @@ type Snapshot struct {
 	ProgramState      ProgramStateSnapshot
 	RFLearning        RFLearnState
 	Macros            MacroSnapshot
+	Effects           []EffectDescriptor
 	HardwareProblems  []ports.HardwareProblem `json:"hardware_problems,omitempty"`
 	PortProcess       PortProcessSnapshot     `json:"port_process"`
 }
@@ -724,7 +725,7 @@ func (runtime *Runtime) Snapshot() Snapshot {
 	runtime.mu.RLock()
 	defer runtime.mu.RUnlock()
 	hardwareProblems := cloneHardwareProblems(runtime.hardwareProblems)
-	return Snapshot{
+	snapshot := Snapshot{
 		Connected:              runtime.session != nil,
 		Paused:                 runtime.paused,
 		Port:                   runtime.port,
@@ -754,6 +755,10 @@ func (runtime *Runtime) Snapshot() Snapshot {
 		HardwareProblems: hardwareProblems,
 		PortProcess:      runtime.portProcess,
 	}
+	if runtime.macroRunner != nil {
+		snapshot.Effects = runtime.macroRunner.EffectCatalog()
+	}
+	return snapshot
 }
 
 // connectionPhaseLocked derives the operator-facing phase from runtime-owned

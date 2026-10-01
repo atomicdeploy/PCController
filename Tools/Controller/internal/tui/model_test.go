@@ -141,7 +141,7 @@ func TestPreviewFramesCoverEveryDomainPage(t *testing.T) {
 		PageAppSettings:   "HOST SETTINGS",
 		PageRF:            "433 MHz RF",
 		PageProgramming:   "FIRMWARE",
-		PageAutomations:   "AUTOMATIONS & MACROS",
+		PageAutomations:   "EFFECTS & TRIGGERS",
 		PageEvents:        "24-HOUR HISTORY",
 		PageConsole:       "CONSOLE",
 	}
@@ -2468,7 +2468,7 @@ func TestAutomationPageShowsHostPlatformAndBridgeStatus(t *testing.T) {
 func TestAutomationPageProvidesCompleteMacroWorkspace(t *testing.T) {
 	rendered := PreviewFrame(PageAutomations, 160, 46)
 	for _, expected := range []string{
-		"MACRO LIBRARY", "output-demo", "door-notify", "PLAYBACK",
+		"EFFECTS & TRIGGERS", "TIMED SEQUENCES", "HOST-RENDERED LIGHTING", "output-demo", "door-notify", "PLAYBACK",
 		"Elapsed / Duration", "buffer 42/127 B", "accepted 95 B",
 		"last +267 µs", "faithful pending", "RECORDING",
 		"N New", "R Record", "C Cancel off", "K Cancel keep",
@@ -2550,7 +2550,7 @@ func TestAutomationSearchAndKeyboardLifecycle(t *testing.T) {
 
 	updated, command := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
 	model = updated.(Model)
-	if command == nil || !logsContain(model.logs, "macro play 2") {
+	if command == nil || !logsContain(model.logs, "effect play sequence:2") {
 		t.Fatalf("play did not dispatch selected filtered macro: logs=%#v", model.logs)
 	}
 
@@ -2558,13 +2558,13 @@ func TestAutomationSearchAndKeyboardLifecycle(t *testing.T) {
 	model.cursor = 0
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
 	model = updated.(Model)
-	if got := model.input.Value(); got != "macro create 0 " {
+	if got := model.input.Value(); got != "effect create sequence 0 " {
 		t.Fatalf("new macro prompt=%q", got)
 	}
 	model.input.SetValue("")
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
 	model = updated.(Model)
-	if got := model.input.Value(); got != "macro record start " {
+	if got := model.input.Value(); got != "effect record start " {
 		t.Fatalf("record prompt=%q", got)
 	}
 }
@@ -2578,7 +2578,7 @@ func TestAutomationDeleteRequiresTwoExplicitPresses(t *testing.T) {
 	}
 	updated, command = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
 	model = updated.(Model)
-	if command == nil || model.macroDeleteArmed || !logsContain(model.logs, "macro delete 1") {
+	if command == nil || model.macroDeleteArmed || !logsContain(model.logs, "effect delete sequence:1") {
 		t.Fatalf("second delete press did not dispatch: armed=%v logs=%#v", model.macroDeleteArmed, model.logs)
 	}
 }
@@ -2604,14 +2604,14 @@ func TestAutomationLifecycleButtonsDispatchEveryRecorderAndCancelPolicy(t *testi
 		recording bool
 		playing   bool
 	}{
-		{key: "s", command: "macro record save", recording: true},
-		{key: "d", command: "macro record discard", recording: true},
-		{key: "c", command: "macro cancel", playing: true},
-		{key: "k", command: "macro cancel keep", playing: true},
-		{key: "i", command: "macro show 1"},
-		{key: "o", command: "macro monitor"},
+		{key: "s", command: "effect record save", recording: true},
+		{key: "d", command: "effect record discard", recording: true},
+		{key: "c", command: "effect cancel", playing: true},
+		{key: "k", command: "effect cancel keep", playing: true},
+		{key: "i", command: "effect inspect sequence:1"},
+		{key: "o", command: "effect status"},
 		{key: "a", command: "automation list"},
-		{key: "m", command: "macro list"},
+		{key: "m", command: "effect list"},
 	}
 	for _, test := range tests {
 		t.Run(test.key, func(t *testing.T) {
@@ -2631,8 +2631,8 @@ func TestAutomationMetadataShortcutsPrepareSelectedMacroCommands(t *testing.T) {
 		key  string
 		want string
 	}{
-		{key: "u", want: "macro rename 1 "},
-		{key: "g", want: "macro category 1 "},
+		{key: "u", want: "effect rename sequence:1 "},
+		{key: "g", want: "effect category sequence:1 "},
 	} {
 		t.Run(test.key, func(t *testing.T) {
 			model := readyModel(t, PageAutomations)
@@ -2646,10 +2646,12 @@ func TestAutomationMetadataShortcutsPrepareSelectedMacroCommands(t *testing.T) {
 
 func TestAutomationMouseButtonsAndLibrarySelection(t *testing.T) {
 	model := readyModel(t, PageAutomations)
-	recordX := lipgloss.Width(buttonStyle.Render("N New")) + 1
+	recordX := lipgloss.Width(buttonStyle.Render("M Catalog")) + 1 +
+		lipgloss.Width(buttonStyle.Render("N New")) + 1 +
+		lipgloss.Width(buttonStyle.Render("L New light")) + 1
 	updated, command := model.handleContentClick(1, recordX)
 	model = updated.(Model)
-	if command != nil || model.input.Value() != "macro record start " {
+	if command != nil || model.input.Value() != "effect record start " {
 		t.Fatalf("record mouse action command=%v input=%q", command, model.input.Value())
 	}
 	model.input.SetValue("")

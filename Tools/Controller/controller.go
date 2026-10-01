@@ -247,6 +247,7 @@ type Options struct {
 	AvrdudeConf           string                 `json:"avrdude_conf,omitempty"`
 	Programmer            string                 `json:"programmer,omitempty"`
 	Macros                []Macro                `json:"macros,omitempty"`
+	StripEffects          []StripEffect          `json:"strip_effects,omitempty"`
 	Melodies              []Melody               `json:"melodies,omitempty"`
 	StatusEffects         []StatusLEDEffect      `json:"status_effects,omitempty"`
 	Scripts               map[string]string      `json:"scripts,omitempty"`
@@ -295,6 +296,18 @@ type MacroStep struct {
 	Opcode      byte     `json:"opcode,omitempty"`
 	PayloadHex  string   `json:"payload_hex,omitempty"`
 	ActionIDs   []string `json:"action_ids,omitempty"`
+}
+
+// StripEffect is a PCController-owned, user-editable host renderer definition.
+type StripEffect struct {
+	ID                string `json:"id"`
+	Name              string `json:"name"`
+	Category          string `json:"category,omitempty"`
+	Description       string `json:"description,omitempty"`
+	Pattern           string `json:"pattern"`
+	DefaultFPS        int    `json:"default_fps"`
+	DefaultDurationMS int    `json:"default_duration_ms"`
+	DefaultPixels     int    `json:"default_pixels,omitempty"`
 }
 
 // Automation maps an event match to one or more host-side actions.
@@ -415,6 +428,7 @@ type Snapshot struct {
 	ProgramState             ProgramStateSnapshot            `json:"program_state"`
 	RFLearning               RFLearnState                    `json:"rf_learning"`
 	Macros                   control.MacroSnapshot           `json:"macros"`
+	Effects                  []control.EffectDescriptor      `json:"effects"`
 	HardwareProblems         []HardwareProblem               `json:"hardware_problems,omitempty"`
 	FrontPanel               FrontPanel                      `json:"front_panel"`
 	HaveFrontPanel           bool                            `json:"have_front_panel"`
@@ -522,6 +536,7 @@ type Client struct {
 	outputMu           sync.RWMutex
 	melodies           []appconfig.Melody
 	statusEffects      []appconfig.StatusLEDEffect
+	stripEffects       []appconfig.StripEffect
 	outputs            *control.OutputScheduler
 	hostMu             sync.RWMutex
 	scripts            map[string]string
@@ -591,8 +606,9 @@ func New(options Options) *Client {
 			[]appconfig.StatusLEDEffect(nil),
 			options.StatusEffects...,
 		),
-		scripts:     cloneStringMap(options.Scripts),
-		automations: toAppAutomations(options.Automations),
+		stripEffects: toAppStripEffects(options.StripEffects),
+		scripts:      cloneStringMap(options.Scripts),
+		automations:  toAppAutomations(options.Automations),
 		safety: appconfig.Safety{
 			MotionDoorPolicy: normalizedMotionDoorPolicy(options.MotionDoorPolicy),
 		},
@@ -775,6 +791,7 @@ func (client *Client) currentHostConfig() appconfig.Config {
 		client.currentCommandOptions().FirmwareFeatures...,
 	)
 	config.Macros = client.currentMacros()
+	config.StripEffects = client.currentStripEffects()
 	config.Scripts = scripts
 	config.Automations = automations
 	config.Melodies = client.currentMelodies()
@@ -802,6 +819,9 @@ func (client *Client) updateHostConfig(
 	client.macroMu.Lock()
 	client.macros = cloneAppMacros(config.Macros)
 	client.macroMu.Unlock()
+	client.outputMu.Lock()
+	client.stripEffects = append([]appconfig.StripEffect(nil), config.StripEffects...)
+	client.outputMu.Unlock()
 	client.hostMu.Lock()
 	client.scripts = cloneStringMap(config.Scripts)
 	client.automations = cloneAppAutomations(config.Automations)
@@ -859,6 +879,28 @@ func (client *Client) currentStatusEffects() []appconfig.StatusLEDEffect {
 		[]appconfig.StatusLEDEffect(nil),
 		client.statusEffects...,
 	)
+}
+
+func (client *Client) currentStripEffects() []appconfig.StripEffect {
+	client.outputMu.RLock()
+	defer client.outputMu.RUnlock()
+	return append([]appconfig.StripEffect(nil), client.stripEffects...)
+}
+
+func toAppStripEffects(source []StripEffect) []appconfig.StripEffect {
+	if source == nil {
+		return appconfig.DefaultStripEffects()
+	}
+	result := make([]appconfig.StripEffect, len(source))
+	for index, effect := range source {
+		result[index] = appconfig.StripEffect{
+			ID: effect.ID, Name: effect.Name, Category: effect.Category,
+			Description: effect.Description, Pattern: effect.Pattern,
+			DefaultFPS: effect.DefaultFPS, DefaultDurationMS: effect.DefaultDurationMS,
+			DefaultPixels: effect.DefaultPixels,
+		}
+	}
+	return result
 }
 
 func (client *Client) currentMacros() []appconfig.Macro {
@@ -2045,7 +2087,7 @@ func (client *Client) Snapshot() Snapshot {
 	if !snapshot.Connected || !snapshot.HaveSettings || !snapshot.HaveStatus {
 		illumination = IlluminationState{}
 	}
-	stripEffects := control.SupportedStripEffectDescriptors(snapshot.Connected, snapshot.Hello.Capabilities)
+	stripEffects := control.SupportedConfiguredStripEffectDescriptors(snapshot.Connected, snapshot.Hello.Capabilities, client.currentStripEffects())
 	return Snapshot{
 		Connected: snapshot.Connected,
 		Paused:    snapshot.Paused,
@@ -2087,6 +2129,7 @@ func (client *Client) Snapshot() Snapshot {
 		ProgramState:      snapshot.ProgramState,
 		RFLearning:        snapshot.RFLearning,
 		Macros:            snapshot.Macros,
+		Effects:           control.EffectCatalog(snapshot.Macros.Library, client.currentStripEffects()),
 		HardwareProblems:  snapshot.HardwareProblems,
 		FrontPanel:        snapshot.FrontPanel,
 		HaveFrontPanel:    snapshot.HaveFrontPanel,

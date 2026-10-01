@@ -203,6 +203,8 @@ export interface Snapshot {
   program_state?: ProgramState
   rf_learning?: RFLearnState
   macros?: MacroSnapshot
+  effects?: EffectDescriptor[]
+  strip_effects?: StripEffectDescriptor[]
   hardware_problems?: HardwareProblem[]
   front_panel?: FrontPanelState
   have_front_panel?: boolean
@@ -345,6 +347,38 @@ export interface MacroSnapshot {
   playback: MacroPlaybackState
   recording: MacroRecordingState
   latest_event_id?: number
+}
+
+export interface StripEffectDescriptor {
+  id: string
+  name: string
+  category?: string
+  description?: string
+  pattern: 'police' | 'white-thunder' | 'converging-red' | string
+  engine: 'host-stream' | string
+  editable: boolean
+  default_fps: number
+  default_duration_ms: number
+  default_pixels: number
+  min_pixels: number
+  max_pixels: number
+  min_fps: number
+  max_fps: number
+}
+
+export interface EffectDescriptor {
+  reference: string
+  id: string
+  name: string
+  category?: string
+  description?: string
+  kind: 'sequence' | 'strip-stream' | string
+  engine: string
+  editable: boolean
+  duration_ms: number
+  default_fps?: number
+  default_pixels?: number
+  pattern?: string
 }
 
 export interface RFLearnedEntry {

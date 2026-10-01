@@ -1,5 +1,41 @@
 # Host macro recording and playback
 
+> **Interface name:** PCController now presents these as **effects** everywhere.
+> A recorded multi-peripheral sequence and a host-rendered lighting stream are
+> entries in the same PCController-owned library. `macro` remains the internal
+> firmware queue noun; clients should use the `effect` command surface below.
+
+## One authoritative effect library
+
+Definitions live in PCController's watched host configuration. Pealayer stores
+only stable timeline references (`sequence:ID` or `strip:ID`), so changing a
+name, category, renderer, duration, frame rate, or pixel count is discovered by
+the Web UI, TUI, CLI/IPC, and every connected Pealayer without copying a second
+library.
+
+| Task | Canonical command |
+|---|---|
+| List the complete library | `controller.exe exec effect list` |
+| Inspect all properties | `controller.exe exec effect inspect sequence:4` or `effect inspect strip:police` |
+| Create an editable timed sequence | `controller.exe exec effect create sequence 4 seat-rise Motion violet` |
+| Start full host capture | `controller.exe exec effect record start seat-take Motion violet` |
+| Start bounded board-RAM capture | `controller.exe exec effect record start-board seat-take Motion violet` |
+| Save/import the recording | `controller.exe exec effect record save` |
+| Play on its configured engine | `controller.exe exec effect play sequence:4` |
+| Transfer a sequence to the MCU clock | `controller.exe exec effect play sequence:4 mcu` |
+| Create a lighting definition | `controller.exe exec effect create strip police "Police red blue" police Lighting 20 5000 100` |
+| Edit lighting properties | `controller.exe exec effect update strip:police "Police red blue" Lighting "Alternating red and blue" police 20 5000 100` |
+| Stream lighting now | `controller.exe exec effect play strip:police` |
+| Stop only that lighting stream | `controller.exe exec effect stop strip:police` |
+| Rename or regroup either kind | `controller.exe exec effect rename sequence:4 "Seat rise"`; `effect category strip:police Cinema` |
+| Delete either kind | `controller.exe exec effect delete sequence:4` or `effect delete strip:police` |
+
+The renderer names `police`, `white-thunder`, and `converging-red` identify
+implemented frame generators, not fixed library entries. Users may add, edit,
+rename, regroup, or remove definitions that use them. Frames remain host/RAM
+resident and are streamed to the board, saving AVR flash and making the library
+immediately editable.
+
 | Capability | Owner | Availability |
 |---|---|---|
 | Named library, categories, recorded command deltas | 🖥️ Host | CLI, TUI, Web, IPC, API, WebSocket/Socket.IO command path |

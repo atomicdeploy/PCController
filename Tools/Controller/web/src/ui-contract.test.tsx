@@ -181,7 +181,7 @@ describe('offline and settings UI contracts', () => {
     const markup = renderToStaticMarkup(<WorkbenchView {...shared()} snapshot={snapshot} />)
     expect(markup).toContain('New draft')
     expect(markup).toContain('#4 · Uncategorized · host')
-    expect(markup).toContain('Macro library')
+    expect(markup).toContain('Effect library')
     expect(markup).toContain('Play selected')
   })
 
