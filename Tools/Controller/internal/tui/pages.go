@@ -320,9 +320,11 @@ func (model Model) outputsPage(snapshot control.Snapshot) string {
 	columns := outputTableColumns(tableWidth)
 	rows := model.controlTableRows(snapshot, max(8, columns[1].Width-7))
 	tableView := renderControlTable(tableWidth, tableBodyRows(model.contentHeight()), model.cursor, columns, rows, model.uiValue.ControlValueColors)
-	parts := []string{
-		sectionHeader(model.width, "CONTROL", "↑/↓ select · ←/→ adjust · Home/End limits · Enter activate · F2 rename"),
+	detail := "↑/↓ select · ←/→ adjust · Home/End limits · Enter activate · F2 rename"
+	if snapshot.Connected && snapshot.Hello.Capabilities&native.CapabilityAddressableLED != 0 {
+		detail += " · WS2811 available below"
 	}
+	parts := []string{sectionHeader(model.width, "CONTROL", detail)}
 	if snapshot.Connected && snapshot.Hello.Capabilities&native.CapabilityRelayMotion != 0 && !snapshot.HaveStatus {
 		parts = append(parts, warnStyle.Render(model.spinner.View()+" loading advertised relay and motion state…"))
 	}
@@ -407,7 +409,42 @@ func (model Model) controlTableRows(snapshot control.Snapshot, levelWidth int) [
 		})
 		rows = append(rows, controlTableRow{Name: "All user PWM", Value: "Set 0%", Tone: controlToneAction})
 	}
+	if snapshot.Connected && snapshot.Hello.Capabilities&native.CapabilityAddressableLED != 0 {
+		pixels, fps := model.stripConfiguration()
+		color := stripColorPresets[model.stripColorIndex()]
+		rows = append(rows,
+			controlTableRow{Group: "WS2811 STRIP", Name: "Pixel count", Value: fmt.Sprintf("%d · ←/→ adjust · Enter configure", pixels), Tone: controlToneLevel, Action: fmt.Sprintf("strip config %d", pixels), Adjust: "strip-count"},
+			controlTableRow{Name: "Rainbow", Value: fmt.Sprintf("%d px @ %d FPS · Enter start", pixels, fps), Tone: controlToneAction, Action: fmt.Sprintf("strip rainbow %d %d", pixels, fps), Adjust: "strip-fps"},
+			controlTableRow{Name: "Fill color", Value: fmt.Sprintf("#%02X%02X%02X · ←/→ color · Enter apply", color[0], color[1], color[2]), Tone: controlToneLevel, Action: fmt.Sprintf("strip fill %d %d %d", color[0], color[1], color[2]), Adjust: "strip-color"},
+			controlTableRow{Name: "Police", Value: "Enter start", Tone: controlToneAction, Action: fmt.Sprintf("strip effect play police %d %d", pixels, fps)},
+			controlTableRow{Name: "White thunder", Value: "Enter start", Tone: controlToneAction, Action: fmt.Sprintf("strip effect play white-thunder %d %d", pixels, fps)},
+			controlTableRow{Name: "Converging red", Value: "Enter start", Tone: controlToneAction, Action: fmt.Sprintf("strip effect play converging-red %d %d", pixels, fps)},
+			controlTableRow{Name: "Clear strip", Value: "Enter clear", Tone: controlToneAction, Action: "strip clear"},
+			controlTableRow{Name: "Stop stream", Value: "Enter stop", Tone: controlToneAction, Action: "strip stop"},
+			controlTableRow{Name: "Stream status", Value: "Enter inspect", Tone: controlToneAction, Action: "strip status"},
+		)
+	}
 	return rows
+}
+
+var stripColorPresets = [][3]byte{{255, 255, 255}, {255, 0, 0}, {0, 255, 0}, {0, 0, 255}, {255, 128, 0}, {128, 0, 255}, {0, 255, 255}}
+
+func (model Model) stripConfiguration() (int, int) {
+	pixels, fps := model.stripPixels, model.stripFPS
+	if pixels < 1 || pixels > native.StripMaximumPixels {
+		pixels = native.StripMaximumPixels
+	}
+	if fps < 1 || fps > 30 {
+		fps = 30
+	}
+	return pixels, fps
+}
+
+func (model Model) stripColorIndex() int {
+	if model.stripColor < 0 || model.stripColor >= len(stripColorPresets) {
+		return 0
+	}
+	return model.stripColor
 }
 
 type menuPageGeometry struct {

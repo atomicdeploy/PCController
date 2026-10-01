@@ -126,6 +126,9 @@ type Model struct {
 	pwmDragValue             uint16
 	pwmDragSet               bool
 	pwmPending               bool
+	stripPixels              int
+	stripFPS                 int
+	stripColor               int
 	lastPWMRefresh           time.Time
 	overrideIllumination     func(context.Context, uint16) (uint16, error)
 	portPicker               bool
@@ -2140,9 +2143,13 @@ func (model Model) actionBarItems(snapshot control.Snapshot) []actionBarItem {
 		items = append(items, actionBarItem{label: "O Open", action: "open", style: buttonGoodStyle})
 	}
 	rebootLabel := "^R HW Reset"
-	rebootAction := "reboot"
+	rebootAction := "hardware-reset"
+	if snapshot.Connected {
+		rebootLabel = "^R Reboot"
+		rebootAction = "firmware-reboot"
+	}
 	if model.rebootPending {
-		rebootLabel = model.spinnerView() + " Resetting"
+		rebootLabel = model.spinnerView() + " Rebooting"
 		rebootAction = ""
 	}
 	items = append(items,

@@ -281,6 +281,9 @@ func (model Model) handleKey(message tea.KeyMsg) (Model, tea.Cmd, bool) {
 	case "ctrl+x":
 		return model.closePort()
 	case "ctrl+r":
+		if model.snapshot().Connected {
+			return model.dispatchLine("reset app")
+		}
 		return model.dispatchLine("reset lines")
 	case "~", "`":
 		model.toggleTerminal()
@@ -783,6 +786,19 @@ func (model Model) activateSelection() (Model, tea.Cmd, bool) {
 func (model Model) adjustSelection(delta int) (Model, tea.Cmd, bool) {
 	switch model.page {
 	case PageOutputs:
+		if row, ok := model.selectedOutputRow(); ok && row.Adjust != "" {
+			switch row.Adjust {
+			case "strip-count":
+				pixels, _ := model.stripConfiguration()
+				model.stripPixels = wrapInt(pixels-1, delta, native.StripMaximumPixels) + 1
+			case "strip-fps":
+				_, fps := model.stripConfiguration()
+				model.stripFPS = wrapInt(fps-1, delta, 30) + 1
+			case "strip-color":
+				model.stripColor = wrapInt(model.stripColorIndex(), delta, len(stripColorPresets))
+			}
+			return model, nil, true
+		}
 		if model.cursor >= 15 && model.cursor <= 26 {
 			channel := model.cursor - 15
 			value := int(model.pwmValues[channel]) + delta*64
@@ -812,6 +828,9 @@ func (model Model) adjustSelection(delta int) (Model, tea.Cmd, bool) {
 }
 
 func (model Model) activateOutput() (Model, tea.Cmd, bool) {
+	if row, ok := model.selectedOutputRow(); ok && row.Action != "" {
+		return model.dispatchLine(row.Action)
+	}
 	switch {
 	case model.cursor >= 0 && model.cursor <= 7:
 		return model.dispatchLine(fmt.Sprintf("relay %d toggle", model.cursor+1))
@@ -835,6 +854,14 @@ func (model Model) activateOutput() (Model, tea.Cmd, bool) {
 		return model.dispatchLine("pwm off")
 	}
 	return model, nil, true
+}
+
+func (model Model) selectedOutputRow() (controlTableRow, bool) {
+	rows := model.controlTableRows(model.snapshot(), 8)
+	if model.cursor < 0 || model.cursor >= len(rows) {
+		return controlTableRow{}, false
+	}
+	return rows[model.cursor], true
 }
 
 func outputPeripheralDescriptor(cursor int) (appconfig.PeripheralDescriptor, bool) {
@@ -1910,7 +1937,10 @@ func (model Model) handleActionBarClick(x int) (tea.Model, tea.Cmd) {
 			case "close":
 				updated, command, _ := model.closePort()
 				return updated, command
-			case "reboot":
+			case "firmware-reboot":
+				updated, command, _ := model.dispatchLine("reset app")
+				return updated, command
+			case "hardware-reset":
 				updated, command, _ := model.dispatchLine("reset lines")
 				return updated, command
 			case "refresh":
