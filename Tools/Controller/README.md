@@ -1191,10 +1191,14 @@ delegate it through IPC. Verification or identity failure retains safe outputs
 and the recovery marker; an absent optional LCD is only a presentation warning.
 Do not substitute a direct programmer invocation or another COM port.
 
-`reset lines [PORT]` also works while the primary is paused after a failed
-bootloader attempt: it opens only the remembered or explicitly selected
-physical port, pulses DTR, closes that temporary handle, and then performs the
-normal authenticated reconnect.
+`reset lines [PORT]` also works before application authentication and while the
+primary is paused after a failed bootloader attempt. It uses the explicitly
+selected port, the currently enumerated connection candidate, or exactly one
+port matching the configured filters; ambiguous devices require a selection.
+The host opens only that physical port, pulses DTR, closes the temporary handle,
+publishes reset lifecycle events to every client, and then performs the normal
+authenticated reconnect. The TUI `Ctrl+R`/hardware-reset action and Web UI
+connection/Workbench actions use this same path.
 
 If that exact staging HEX was lost after a failed transaction, use
 `program abandon TARGET_SHA256 ABANDON`. The target hash must exactly match the

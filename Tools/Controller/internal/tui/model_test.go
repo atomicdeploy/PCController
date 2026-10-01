@@ -1015,14 +1015,14 @@ func TestControlPageAndTerminalVisibilityFollowNavigationContract(t *testing.T) 
 	}
 }
 
-func TestActionBarDefaultsToOnePortToggleAndShowsRebootProgress(t *testing.T) {
+func TestActionBarDefaultsToOnePortToggleAndShowsHardwareResetProgress(t *testing.T) {
 	model := readyModel(t, PageDashboard)
 	plain := ansi.Strip(model.actionBar(model.snapshot()))
 	if strings.Contains(plain, "O Open") || !strings.Contains(plain, "X Close") {
 		t.Fatalf("connected default action bar did not use one Close toggle: %q", plain)
 	}
-	if strings.Contains(model.actionBar(model.snapshot()), buttonBadStyle.Render("R Reboot")) {
-		t.Fatal("reboot action is permanently danger-colored")
+	if !strings.Contains(plain, "^R HW Reset") || strings.Contains(model.actionBar(model.snapshot()), buttonBadStyle.Render("^R HW Reset")) {
+		t.Fatal("hardware reset action is missing or permanently danger-colored")
 	}
 
 	model.uiValue.SeparatePortButtons = true
@@ -1032,14 +1032,25 @@ func TestActionBarDefaultsToOnePortToggleAndShowsRebootProgress(t *testing.T) {
 	}
 
 	model.uiValue.SeparatePortButtons = false
-	updated, command, _ := model.dispatchLine("reset app")
+	updated, command, _ := model.dispatchLine("reset lines")
 	model = updated
-	if command == nil || !model.rebootPending || !strings.Contains(ansi.Strip(model.actionBar(model.snapshot())), "Rebooting") {
-		t.Fatal("reboot did not enter visible in-transit state")
+	if command == nil || !model.rebootPending || !strings.Contains(ansi.Strip(model.actionBar(model.snapshot())), "Resetting") {
+		t.Fatal("hardware reset did not enter visible in-transit state")
 	}
 	updatedModel, _ := model.Update(command())
 	if updatedModel.(Model).rebootPending {
 		t.Fatal("reboot progress did not clear after command completion")
+	}
+}
+
+func TestControlRUsesHardwareResetPath(t *testing.T) {
+	model := readyModel(t, PageDashboard)
+	updated, command, handled := model.handleKey(tea.KeyMsg{Type: tea.KeyCtrlR})
+	if !handled || command == nil {
+		t.Fatal("Ctrl+R did not dispatch a reset command")
+	}
+	if !updated.rebootPending || !strings.Contains(updated.notice, "DTR hardware reset") {
+		t.Fatalf("Ctrl+R did not select the DTR reset path: pending=%v notice=%q", updated.rebootPending, updated.notice)
 	}
 }
 

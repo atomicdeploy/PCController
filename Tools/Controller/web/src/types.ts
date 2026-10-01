@@ -199,6 +199,9 @@ export interface Snapshot {
   connection_next_retry?: string
   connection_retry_delay_ms?: number
   connection_candidate?: PortInfo
+  reset_lines_available?: boolean
+  reset_lines_port?: PortInfo
+  reset_lines_reason?: string
   port_process?: PortProcessSnapshot
   program_state?: ProgramState
   rf_learning?: RFLearnState

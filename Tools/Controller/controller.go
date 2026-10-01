@@ -412,6 +412,9 @@ type Snapshot struct {
 	ConnectionNextRetry      time.Time                       `json:"connection_next_retry,omitempty"`
 	ConnectionRetryDelayMS   int64                           `json:"connection_retry_delay_ms,omitempty"`
 	ConnectionCandidate      PortInfo                        `json:"connection_candidate"`
+	ResetLinesAvailable      bool                            `json:"reset_lines_available"`
+	ResetLinesPort           PortInfo                        `json:"reset_lines_port"`
+	ResetLinesReason         string                          `json:"reset_lines_reason,omitempty"`
 	ProgramState             ProgramStateSnapshot            `json:"program_state"`
 	RFLearning               RFLearnState                    `json:"rf_learning"`
 	Macros                   control.MacroSnapshot           `json:"macros"`
@@ -2063,9 +2066,12 @@ func (client *Client) MapLearnedRF(
 	)
 }
 
-// Snapshot returns the latest cached connection and board state without polling.
+// Snapshot returns cached board state without polling firmware. When no
+// transport candidate is cached, serial-reset capability discovery may perform
+// one throttled host-side device enumeration.
 func (client *Client) Snapshot() Snapshot {
 	snapshot := client.runtime.Snapshot()
+	resetLinesAvailable, resetLinesPort, resetLinesReason := client.runtime.ResetLinesCapability()
 	// Library snapshots belong to client queries, not the hot board-status
 	// path: copying a long take for every internal status check is unnecessary.
 	if runner := client.runtime.MacroRunner(); runner != nil {
@@ -2116,6 +2122,18 @@ func (client *Client) Snapshot() Snapshot {
 			FriendlyName: snapshot.ConnectionCandidate.FriendlyName,
 			InstanceID:   snapshot.ConnectionCandidate.InstanceID,
 		},
+		ResetLinesAvailable: resetLinesAvailable,
+		ResetLinesPort: PortInfo{
+			Name:         resetLinesPort.Name,
+			VID:          resetLinesPort.VID,
+			PID:          resetLinesPort.PID,
+			Product:      resetLinesPort.Product,
+			Manufacturer: resetLinesPort.Manufacturer,
+			SerialNumber: resetLinesPort.SerialNumber,
+			FriendlyName: resetLinesPort.FriendlyName,
+			InstanceID:   resetLinesPort.InstanceID,
+		},
+		ResetLinesReason:  resetLinesReason,
 		ProgramState:      snapshot.ProgramState,
 		RFLearning:        snapshot.RFLearning,
 		Macros:            snapshot.Macros,
