@@ -748,17 +748,15 @@ func runWebWithInitialAction(
 	if initial.Kind != "" {
 		applyInitialWebAction(ctx, primary, runtime, engine, initial)
 	}
-	if !*noTray {
-		nativeShell, shellErr := startNativeWebShell(ctx, cancel, appURL, runtime, store, primary)
-		if shellErr != nil {
-			fmt.Fprintln(stderr, "native web shell:", shellErr)
-		} else {
-			defer func() {
-				if closeErr := nativeShell.Close(); closeErr != nil {
-					fmt.Fprintln(stderr, "close native web shell:", closeErr)
-				}
-			}()
-		}
+	nativeShell, shellErr := startPrimaryNativeShell(ctx, cancel, appURL, runtime, store, primary, *noTray)
+	if shellErr != nil {
+		fmt.Fprintln(stderr, "native web shell:", shellErr)
+	} else if nativeShell != nil {
+		defer func() {
+			if closeErr := nativeShell.Close(); closeErr != nil {
+				fmt.Fprintln(stderr, "close native web shell:", closeErr)
+			}
+		}()
 	}
 	primaryReadyOnce.Do(func() { close(primaryReady) })
 	go watchConfiguration(ctx, store, runtime, connection)
@@ -1007,6 +1005,7 @@ func runTUIWithInitialAction(
 		return err
 	}
 	noAuto := flags.Bool("no-auto", false, "start with automatic connection paused")
+	noTray := flags.Bool("no-tray", false, "run the local primary without a native system-tray menu")
 	ipcAddress := flags.String("ipc-addr", "", "attach the full TUI to an existing controller IPC host:port")
 	ipcToken := flags.String("ipc-token", "", "bearer token for --ipc-addr (prefer --ipc-token-ref)")
 	ipcTokenReference := flags.String("ipc-token-ref", "", "resolve the remote IPC bearer token from an OS-vault or environment reference")
@@ -1173,6 +1172,24 @@ func runTUIWithInitialAction(
 	}
 	claim = nil
 	defer primary.Close()
+	appURL, err := browserURL(currentPrimaryEndpoint().Listen)
+	if err != nil {
+		_ = primary.Close()
+		_ = runtime.Close()
+		return err
+	}
+	nativeShell, shellErr := startPrimaryNativeShell(
+		watchContext, stopWatching, appURL, runtime, store, primary, *noTray,
+	)
+	if shellErr != nil {
+		fmt.Fprintln(stderr, "native TUI shell:", shellErr)
+	} else if nativeShell != nil {
+		defer func() {
+			if closeErr := nativeShell.Close(); closeErr != nil {
+				fmt.Fprintln(stderr, "close native TUI shell:", closeErr)
+			}
+		}()
+	}
 	appActions := primary.AppActions()
 	navigationReporter, err := hostui.NewNavigationReporter(*syncNavigation, "")
 	if err != nil {
@@ -1369,6 +1386,7 @@ func runTUIWithInitialAction(
 		case <-primary.QuitRequested():
 			program.Quit()
 		case <-watchContext.Done():
+			program.Quit()
 		}
 	}()
 	_, err = program.Run()

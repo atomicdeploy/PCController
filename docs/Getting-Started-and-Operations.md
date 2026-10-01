@@ -99,8 +99,10 @@ Use `--no-open` when another application will navigate to the WebUI:
 Tools\Controller\bin\controller.exe web --no-open --port COM18
 ```
 
-On Windows, a primary-owning web process also provides a native tray menu by
-default. Add `--no-tray` when that shell is not wanted. Its connection label is
+On Windows, every local interactive primary (the default/TUI launch or explicit
+`web` mode) provides one native tray menu by default. A secondary TUI attaches
+to the existing owner and never creates a duplicate. Add `--no-tray` to an
+explicit `tui` or `web` command when that shell is not wanted. Its connection label is
 derived from authenticated serial state, page links appear only while a board
 is connected, and both automatic launch and tray actions refuse to open a page
 while offline. Connect/Reconnect and Exit remain available in either state.
@@ -112,8 +114,8 @@ its `appLogoOverride`; Windows is never asked to silently render a text-only
 product toast. `desktop test` sends a branded, actionable end-to-end
 diagnostic. `desktop uninstall` removes only entries whose ownership still
 matches that executable and AppUserModelID. Both launch links target the
-packaged `.exe` with `web` arguments and use icon index zero from that same
-executable, never a separate `.ico` file. The Desktop location comes from the
+packaged `.exe` without feature-suppressing arguments and use icon index zero
+from that same executable, never a separate `.ico` file. The Desktop location comes from the
 Windows per-user known folder, including a redirected Desktop.
 
 `shortcut_ready`/`shortcut` describe the Start Menu entry;

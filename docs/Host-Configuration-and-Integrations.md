@@ -328,14 +328,16 @@ automations, host menus, global hotkeys, notifications, integration managers,
 and the same guarded command dispatcher. `--no-open` keeps that process and
 HTTP service running without opening a browser.
 
-On Windows, that primary-owning process starts a native tray menu unless
-`--no-tray` is supplied. It shows authoritative connected, reconnecting,
+On Windows, every local interactive primary starts one native tray menu unless
+an explicit `tui` or `web` command supplies `--no-tray`. The default flag-free
+launch is the primary TUI plus this tray; attached secondary TUIs do not create
+duplicates. It shows authoritative connected, reconnecting,
 paused, or offline state. Dashboard, Controls, Workbench, Updates, and Settings
 links are present only for an authenticated controller; Connect/Reconnect and
 Exit remain available otherwise. State is checked again at dispatch, so a
 disconnect while the menu is open cannot launch a stale page.
 
-This is currently an in-process web-primary tray, not a Windows service. The
+This is currently an in-process interactive-primary tray, not a Windows service. The
 tracked service split keeps a privileged, headless, session-independent serial
 owner separate from an unelevated per-user tray client. That client will attach
 through local IPC, launch or foreground Win32, TUI, or WebUI

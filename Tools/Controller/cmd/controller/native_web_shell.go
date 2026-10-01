@@ -14,6 +14,27 @@ import (
 	"pccontroller.local/controller/internal/productidentity"
 )
 
+var startNativeShell = startNativeWebShell
+
+// startPrimaryNativeShell is the single lifecycle gate for every interactive
+// local primary. Keeping default/TUI and explicit web mode on this path avoids
+// silently losing the tray when command dispatch changes while still allowing
+// an explicit headless opt-out.
+func startPrimaryNativeShell(
+	ctx context.Context,
+	stop context.CancelFunc,
+	appURL string,
+	runtime *control.Runtime,
+	store *appconfig.Store,
+	primary *primaryIPC,
+	disabled bool,
+) (nativeshell.Shell, error) {
+	if disabled {
+		return nil, nil
+	}
+	return startNativeShell(ctx, stop, appURL, runtime, store, primary)
+}
+
 func startNativeWebShell(
 	ctx context.Context,
 	stop context.CancelFunc,

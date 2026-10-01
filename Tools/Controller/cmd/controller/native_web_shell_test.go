@@ -1,10 +1,46 @@
 package main
 
 import (
+	"context"
 	"testing"
 
+	"pccontroller.local/controller/internal/appconfig"
+	"pccontroller.local/controller/internal/control"
 	"pccontroller.local/controller/internal/nativeshell"
 )
+
+type testNativeShell struct{ closed bool }
+
+func (shell *testNativeShell) Close() error {
+	shell.closed = true
+	return nil
+}
+
+func TestPrimaryNativeShellOwnsDefaultTrayAndHonorsExplicitOptOut(t *testing.T) {
+	original := startNativeShell
+	t.Cleanup(func() { startNativeShell = original })
+
+	called := 0
+	want := &testNativeShell{}
+	startNativeShell = func(
+		context.Context, context.CancelFunc, string,
+		*control.Runtime, *appconfig.Store, *primaryIPC,
+	) (nativeshell.Shell, error) {
+		called++
+		return want, nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	got, err := startPrimaryNativeShell(ctx, cancel, "http://127.0.0.1:8787/", nil, nil, nil, false)
+	if err != nil || got != want || called != 1 {
+		t.Fatalf("enabled primary shell=(%v,%v), calls=%d", got, err, called)
+	}
+	got, err = startPrimaryNativeShell(ctx, cancel, "", nil, nil, nil, true)
+	if err != nil || got != nil || called != 1 {
+		t.Fatalf("disabled primary shell=(%v,%v), calls=%d", got, err, called)
+	}
+}
 
 func TestNativeWebPageURL(t *testing.T) {
 	got, err := nativeWebPageURL("http://127.0.0.1:8787/", " Settings ")

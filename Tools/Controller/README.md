@@ -204,8 +204,9 @@ pushes status, board events, host events, and global page actions. Those event
 lines are interleaved in the bounded terminal transcript and remain available
 in the filterable Activity page.
 
-On Windows, a primary-owning `web` process also provides a native tray menu by
-default; `--no-tray` disables it. Its tooltip and status row use the
+On Windows, the local interactive primary (default/TUI or explicit `web`) also
+provides one native tray menu by default; an explicit `--no-tray` disables it.
+Attached secondary TUIs do not create duplicates. Its tooltip and status row use the
 authenticated controller state, not merely an open HTTP/WebSocket listener.
 Dashboard, Controls, Workbench, Updates, and Settings actions exist only while
 the board is connected. Connect/Reconnect and Exit remain available while
