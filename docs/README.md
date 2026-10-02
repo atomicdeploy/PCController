@@ -23,6 +23,7 @@ host-owned JSON configuration are documented separately on purpose.
 | Build, back up, program, or recover a board | [Toolchain and Safe Programming](Toolchain-and-Safe-Programming.md) |
 | Understand measured update stages and diagnose a stopped update | [Firmware Update Progress](UPDATE-PROGRESS.md) |
 | Check wiring and electrical assumptions | [Hardware Initialization and Tuning](Hardware-Initialization-and-Tuning.md) |
+| Understand board autonomy, host extensions, and persistent-data ownership | [Firmware Autonomy and Storage](Firmware-Autonomy-and-Storage.md) |
 | Verify what each UI/API can reach | [Control-Surface Capability Matrix](../Tools/Controller/docs/Control-Surface-Capability-Matrix.md) |
 | Review current acceptance boundaries | [Project Acceptance](Project-Checklist.md) |
 
@@ -77,6 +78,8 @@ device identity or interface settings.
   dependencies and recoverable programming lifecycle.
 - [Memory and Feature Tradeoffs](Memory-and-Feature-Tradeoffs.md) — current AVR
   resource constraints and deliberate host/firmware ownership choices.
+- [Firmware Autonomy and Storage](Firmware-Autonomy-and-Storage.md) — the living
+  board/host execution boundary, storage map, and alpha contract policy.
 - [Local Library Variant Comparison](Local-Library-Variant-Comparison.md) —
   privacy-safe comparison of the three reviewed helper variants and the parts
   retained, improved, or deliberately excluded.
