@@ -760,6 +760,28 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 		},
 	})
 	mustRegister(shell.Command{
+		Name: "estop", Usage: "estop status|on|off",
+		Summary: "lock or release all effect, motion, relay, and PWM admission",
+		Run: func(ctx context.Context, args []string) (string, error) {
+			if len(args) == 0 || len(args) == 1 && strings.EqualFold(args[0], "status") {
+				state := runtime.EmergencyStop()
+				return fmt.Sprintf("E-STOP active=%t revision=%d source=%s reason=%s changed=%s", state.Active, state.Revision, state.Source, state.Reason, state.ChangedAt.Format(time.RFC3339Nano)), nil
+			}
+			if len(args) != 1 || !strings.EqualFold(args[0], "on") && !strings.EqualFold(args[0], "off") {
+				return "", errors.New("usage: estop status|on|off")
+			}
+			active := strings.EqualFold(args[0], "on")
+			state, err := runtime.SetEmergencyStop(ctx, active, "shell", "operator command")
+			if err != nil {
+				return "", err
+			}
+			if state.Active {
+				return "E-STOP engaged; effects and motion are locked", nil
+			}
+			return "E-STOP released; stopped work remains stopped", nil
+		},
+	})
+	mustRegister(shell.Command{
 		Name: "pwm", Usage: "pwm get|off|set CHANNEL VALUE",
 		Summary: "query/control logical PWM output values",
 		Run: func(ctx context.Context, args []string) (string, error) {

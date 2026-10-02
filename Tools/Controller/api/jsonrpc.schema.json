@@ -431,6 +431,8 @@
             "controller.discovery.stage",
             "controller.discovery.status",
             "controller.display.send",
+            "controller.estop.get",
+            "controller.estop.set",
             "controller.event.latest",
             "controller.event.next",
             "controller.exit",
@@ -974,6 +976,16 @@
       "capability": "board_commands",
       "summary": "display send",
       "idempotency": "non-idempotent"
+    },
+    "controller.estop.get": {
+      "capability": "read",
+      "summary": "Return the authoritative PCController-wide effect and motion interlock state.",
+      "idempotency": "safe"
+    },
+    "controller.estop.set": {
+      "capability": "board_commands",
+      "summary": "Engage or release the PCController-wide effect and motion interlock; release never resumes cancelled work.",
+      "idempotency": "idempotent-with-authoritative-readback"
     },
     "controller.event.latest": {
       "capability": "events",

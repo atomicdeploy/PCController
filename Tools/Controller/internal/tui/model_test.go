@@ -203,6 +203,36 @@ func TestDashboardUsesExpandedNamesAndAdaptiveUnits(t *testing.T) {
 	}
 }
 
+func TestDashboardEmergencyStopIsVisibleAndKeyboardToggleIsAvailable(t *testing.T) {
+	model := readyModel(t, PageDashboard)
+	snapshot := RichPreviewSnapshot()
+	snapshot.EmergencyStop = control.EmergencyStopState{
+		Active: true, Revision: 4, Source: "pealayer", Reason: "operator request",
+	}
+	model.preview = &snapshot
+	rendered := ansi.Strip(model.dashboardPage(snapshot))
+	for _, expected := range []string{"E-STOP LOCKED", "effects and motion blocked", "pealayer", "operator request"} {
+		if !strings.Contains(rendered, expected) {
+			t.Fatalf("latched dashboard missing %q:\n%s", expected, rendered)
+		}
+	}
+	_, command, handled := model.pageShortcut("e")
+	if !handled || command == nil {
+		t.Fatal("E did not dispatch E-STOP release while latched")
+	}
+
+	snapshot.EmergencyStop = control.EmergencyStopState{}
+	model.preview = &snapshot
+	rendered = ansi.Strip(model.dashboardPage(snapshot))
+	if !strings.Contains(rendered, "Engage E-STOP") || strings.Contains(rendered, "E-STOP LOCKED") {
+		t.Fatalf("released dashboard rendered the wrong E-STOP action:\n%s", rendered)
+	}
+	_, command, handled = model.pageShortcut("e")
+	if !handled || command == nil {
+		t.Fatal("E did not dispatch E-STOP engage while released")
+	}
+}
+
 func TestDashboardWaitsOnlyForAdvertisedStateAndNeverRendersDefaultValues(t *testing.T) {
 	model := readyModel(t, PageDashboard)
 	snapshot := control.Snapshot{Connected: true, Hello: native.Hello{

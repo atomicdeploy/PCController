@@ -96,6 +96,35 @@ func TestIlluminationOverrideRequiresExplicitValue(t *testing.T) {
 	}
 }
 
+func TestEmergencyStopRPCReportsAuthoritativeLatchAndExplicitRelease(t *testing.T) {
+	runtime := control.New(control.Options{})
+	defer runtime.Close()
+	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	service := Service{Client: client}
+
+	if _, err := client.SetEmergencyStop(context.Background(), true, "test-suite", "admission gate"); err == nil {
+		t.Fatal("disconnected board unexpectedly accepted terminal-state reassertion")
+	}
+	get := service.Dispatch(context.Background(), Request{Method: "controller.estop.get"})
+	if get.Error != nil {
+		t.Fatal(get.Error)
+	}
+	latched, ok := get.Result.(control.EmergencyStopState)
+	if !ok || !latched.Active || latched.Source != "test-suite" || latched.Reason != "admission gate" {
+		t.Fatalf("controller.estop.get result=%T %#v", get.Result, get.Result)
+	}
+
+	params := json.RawMessage(`{"active":false,"source":"operator","reason":"reset"}`)
+	released := service.Dispatch(context.Background(), Request{Method: "controller.estop.set", Params: params})
+	if released.Error != nil {
+		t.Fatal(released.Error)
+	}
+	state, ok := released.Result.(control.EmergencyStopState)
+	if !ok || state.Active || state.Revision != latched.Revision+1 {
+		t.Fatalf("controller.estop.set release result=%T %#v", released.Result, released.Result)
+	}
+}
+
 func TestAppPageRPCPublishesValidatedTUIAction(t *testing.T) {
 	runtime := control.New(control.Options{})
 	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))

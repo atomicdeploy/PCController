@@ -546,6 +546,7 @@ export function DashboardView(props: SharedViewProps) {
                 <button
                   key={index}
                   className={`output-cell${active ? ' is-active' : ''}`}
+                  disabled={Boolean(snapshot.emergency_stop?.active && !active)}
                   onClick={() => void command(`relay ${index + 1} ${active ? 'off' : 'on'}`, copy(`R${index + 1} ${active ? 'off' : 'on'}`, `رلهٔ ${index + 1} ${active ? 'خاموش' : 'روشن'} شد`))}
                   aria-pressed={active}
                 >
@@ -573,10 +574,9 @@ export function DashboardView(props: SharedViewProps) {
 
         {boardReady && frame('actions', t('quickActions'), <Card icon={Zap} iconTone="amber" title={t('quickActions')} eyebrow={copy('Confirmation protected', 'محافظت‌شده با تأیید')} className="actions-card">
           <div className="action-grid">
-            {available.relays && <Button icon={Unplug} tone="danger" onClick={() => openDialog({
-              tone: 'danger', title: t('confirmEmergencyTitle'), body: t('confirmEmergencyBody'), confirmLabel: t('emergencyOff'),
-              action: async () => { await command('relay off', t('emergencyOff')); await command('pwm off') },
-            })}>{t('emergencyOff')}</Button>}
+            <Button icon={AlertOctagon} tone="danger" onClick={() => void command(`estop ${snapshot.emergency_stop?.active ? 'off' : 'on'}`)}>
+              {snapshot.emergency_stop?.active ? copy('Release E-STOP', 'آزادسازی توقف اضطراری') : copy('Engage E-STOP', 'فعال‌سازی توقف اضطراری')}
+            </Button>
             <Button icon={Gauge} onClick={() => void command('status')}>{copy('Read status', 'خواندن وضعیت')}</Button>
             {available.statusLED && <Button icon={Lightbulb} onClick={() => void command('rgb effect play attention')}>{copy('Attention cue', 'اعلان توجه')}</Button>}
           </div>
@@ -598,6 +598,7 @@ export function ControlsView(props: SharedViewProps) {
   const copy = (english: string, persian: string) => locale === 'fa' ? persian : english
   const boardReady = props.transport.boardState === 'ready' && snapshot.connected && snapshot.have_status
   const available = peripheralAvailability(snapshot)
+  const emergencyStopActive = Boolean(snapshot.emergency_stop?.active)
   const initialPWM = () => Array.from({ length: 16 }, (_, index) => index === snapshot.status.pwm_channel ? snapshot.status.pwm_value : 0)
   const [pwmReported, setPWMReported] = useState<number[]>(initialPWM)
   const [pwmDraft, setPWMDraft] = useState<number[]>(initialPWM)
@@ -769,6 +770,15 @@ export function ControlsView(props: SharedViewProps) {
   return (
     <>
       <SectionTitle eyebrow={copy('Connected controller', 'کنترلر متصل')} title={t('controls')} detail={pageDetail(snapshot, props.appTitle, locale)} />
+      <div className={`safety-strip controller-estop${emergencyStopActive ? ' is-danger' : ''}`} role="status" aria-live="assertive">
+        <AlertOctagon size={17} />
+        <span>{emergencyStopActive
+          ? copy('E-STOP locked · effects, motion, relay-on, and PWM output are blocked', 'توقف اضطراری قفل است · افکت‌ها، حرکت، روشن‌کردن رله و خروجی PWM مسدود هستند')
+          : copy('E-STOP ready', 'توقف اضطراری آماده است')}</span>
+        <Button compact tone="danger" onClick={() => void command(`estop ${emergencyStopActive ? 'off' : 'on'}`)}>
+          {emergencyStopActive ? copy('Release', 'آزادسازی') : copy('Engage', 'فعال‌سازی')}
+        </Button>
+      </div>
       <section className="control-layout">
         {available.relays && <Card icon={CircuitBoard} iconTone={snapshot.status.active_relays ? 'amber' : 'green'} eyebrow={copy('Eight protected outputs', 'هشت خروجی محافظت‌شده')} title={copy('Relays & motion', 'رله‌ها و حرکت')} className="relay-control-card" action={<StatusBadge tone={snapshot.status.active_relays ? 'warn' : 'good'}>{snapshot.status.active_relays ? copy('ENERGIZED', 'برقدار') : copy('RELEASED', 'آزاد')}</StatusBadge>} menu={[
           { label: copy('Refresh output state', 'تازه‌سازی وضعیت خروجی‌ها'), icon: RefreshCw, onSelect: () => { void command('status') } },
@@ -779,8 +789,8 @@ export function ControlsView(props: SharedViewProps) {
               const active = Boolean(snapshot.status.active_relays & (1 << index))
               return (
                 <article key={index} className={`relay-switch${active ? ' is-active' : ''}`}>
-                  <span>R{index + 1}</span><RelayToggle active={active} disabled={!snapshot.connected} label={copy(`Toggle relay ${index + 1}`, `تغییر وضعیت رله ${index + 1}`)} onToggle={() => void command(`relay ${index + 1} ${active ? 'off' : 'on'}`)} /><small>{peripheralName(`relay.${index + 1}`, relayDefaults[index])}</small>
-                  <div className="relay-switch__actions"><Button compact disabled={active} onClick={() => void command(`relay ${index + 1} on`)}>{t('on')}</Button><Button compact disabled={!active} onClick={() => void command(`relay ${index + 1} off`)}>{t('off')}</Button></div>
+                  <span>R{index + 1}</span><RelayToggle active={active} disabled={!snapshot.connected || emergencyStopActive && !active} label={copy(`Toggle relay ${index + 1}`, `تغییر وضعیت رله ${index + 1}`)} onToggle={() => void command(`relay ${index + 1} ${active ? 'off' : 'on'}`)} /><small>{peripheralName(`relay.${index + 1}`, relayDefaults[index])}</small>
+                  <div className="relay-switch__actions"><Button compact disabled={active || emergencyStopActive} onClick={() => void command(`relay ${index + 1} on`)}>{t('on')}</Button><Button compact disabled={!active} onClick={() => void command(`relay ${index + 1} off`)}>{t('off')}</Button></div>
                 </article>
               )
             })}
@@ -789,9 +799,9 @@ export function ControlsView(props: SharedViewProps) {
             {(['left', 'right'] as const).map((side) => (
               <div key={side} className="motion-side">
                 <strong>{side === 'left' ? peripheralName('motion.a', copy('Side A motion', 'حرکت سمت A')) : peripheralName('motion.b', copy('Side B motion', 'حرکت سمت B'))}</strong>
-                <HoldActionButton compact onHoldStart={() => command(`relay side ${side} up`)} onHoldStop={() => command(`relay side ${side} stop`)}>{copy('Hold Up', 'بالا نگه‌دار')}</HoldActionButton>
+                <HoldActionButton compact disabled={emergencyStopActive} onHoldStart={() => command(`relay side ${side} up`)} onHoldStop={() => command(`relay side ${side} stop`)}>{copy('Hold Up', 'بالا نگه‌دار')}</HoldActionButton>
                 <Button compact onClick={() => void command(`relay side ${side} stop`)}>{copy('Stop', 'توقف')}</Button>
-                <HoldActionButton compact onHoldStart={() => command(`relay side ${side} down`)} onHoldStop={() => command(`relay side ${side} stop`)}>{copy('Hold Down', 'پایین نگه‌دار')}</HoldActionButton>
+                <HoldActionButton compact disabled={emergencyStopActive} onHoldStart={() => command(`relay side ${side} down`)} onHoldStop={() => command(`relay side ${side} stop`)}>{copy('Hold Down', 'پایین نگه‌دار')}</HoldActionButton>
               </div>
             ))}
           </div>
@@ -809,8 +819,8 @@ export function ControlsView(props: SharedViewProps) {
                 <div><strong>{name}</strong><small>{pending
                   ? copy(`Board ${reported} · draft ${draft}`, `برد ${reported} · پیش‌نویس ${draft}`)
                   : copy(`Board reported ${reported} / 4095`, `گزارش برد ${reported} از ۴۰۹۵`)}</small></div>
-                <RangeField label={copy(`${name} duty`, `دیوتی ${name}`)} value={pwmPercent(draft)} min={0} max={100} unit="%" disabled={!pwmLoaded || pwmAllBusy} onChange={(percent) => setPWMPercent(channel, percent)} />
-                <div className="pwm-mixer__actions"><Button compact disabled={!pwmLoaded || pwmAllBusy || draft === 0} onClick={() => setPWMPercent(channel, 0, true)}>{t('off')}</Button><Button compact disabled={!pwmLoaded || pwmAllBusy || draft === 4095} onClick={() => setPWMPercent(channel, 100, true)}>{copy('FULL', 'کامل')}</Button></div>
+                <RangeField label={copy(`${name} duty`, `دیوتی ${name}`)} value={pwmPercent(draft)} min={0} max={100} unit="%" disabled={!pwmLoaded || pwmAllBusy || emergencyStopActive} onChange={(percent) => setPWMPercent(channel, percent)} />
+                <div className="pwm-mixer__actions"><Button compact disabled={!pwmLoaded || pwmAllBusy || draft === 0} onClick={() => setPWMPercent(channel, 0, true)}>{t('off')}</Button><Button compact disabled={!pwmLoaded || pwmAllBusy || draft === 4095 || emergencyStopActive} onClick={() => setPWMPercent(channel, 100, true)}>{copy('FULL', 'کامل')}</Button></div>
               </div>
             })}
           </div>

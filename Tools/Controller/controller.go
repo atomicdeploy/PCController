@@ -108,6 +108,7 @@ type (
 	ProgramStateOwner         = control.ProgramStateOwner
 	ProgramStateSnapshot      = control.ProgramStateSnapshot
 	ProgramStateLease         = control.ProgramStateLease
+	EmergencyStopState        = control.EmergencyStopState
 	PortProcessSnapshot       = control.PortProcessSnapshot
 	DiscoveryInstance         = discovery.Instance
 	DiscoveryOptions          = discovery.Options
@@ -452,6 +453,7 @@ type Snapshot struct {
 	ResetLinesPort           PortInfo                        `json:"reset_lines_port"`
 	ResetLinesReason         string                          `json:"reset_lines_reason,omitempty"`
 	ProgramState             ProgramStateSnapshot            `json:"program_state"`
+	EmergencyStop            EmergencyStopState              `json:"emergency_stop"`
 	RFLearning               RFLearnState                    `json:"rf_learning"`
 	Macros                   control.MacroSnapshot           `json:"macros"`
 	Effects                  []control.EffectDescriptor      `json:"effects"`
@@ -1802,6 +1804,17 @@ func (client *Client) AllRelaysOff(ctx context.Context) error {
 	return client.runtime.Command(ctx, native.OpRelayAllOff, nil)
 }
 
+// EmergencyStop returns the host-authoritative motion/effect interlock state.
+func (client *Client) EmergencyStop() EmergencyStopState {
+	return client.runtime.EmergencyStop()
+}
+
+// SetEmergencyStop engages or releases the PCController-wide command latch.
+// Releasing it never resumes cancelled effects or motion automatically.
+func (client *Client) SetEmergencyStop(ctx context.Context, active bool, source, reason string) (EmergencyStopState, error) {
+	return client.runtime.SetEmergencyStop(ctx, active, source, reason)
+}
+
 // SetPWMChannel controls a native logical PWM channel 0..15 at 0..4095.
 func (client *Client) SetPWMChannel(
 	ctx context.Context,
@@ -2214,6 +2227,7 @@ func (client *Client) Snapshot() Snapshot {
 		},
 		ResetLinesReason: resetLinesReason,
 		ProgramState:     snapshot.ProgramState,
+		EmergencyStop:    snapshot.EmergencyStop,
 		RFLearning:       snapshot.RFLearning,
 		Macros:           snapshot.Macros,
 		// The runtime owns the live host configuration used by command execution

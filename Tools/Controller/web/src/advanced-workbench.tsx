@@ -826,9 +826,22 @@ export function AdvancedWorkbench({
             <Button icon={ListTree} busy={busy === 'keyboard list'} onClick={() => void run('keyboard list')}>{copy('Binding catalog', 'فهرست نگاشت‌ها')}</Button>
             <Button icon={Keyboard} onClick={() => prepare('keyboard enable', copy('Enabling the global hook activates the configured bindings; review them first with Keyboard list.', 'فعال‌سازی هوک سراسری، نگاشت‌های پیکربندی‌شده را فعال می‌کند؛ ابتدا فهرست صفحه‌کلید را بازبینی کنید.'), 'caution')}>{copy('Review enable', 'بازبینی فعال‌سازی')}</Button>
             <Button icon={KeyboardOff} busy={busy === 'keyboard disable'} onClick={() => void run('keyboard disable')}>{copy('Disable & release', 'غیرفعال و آزادسازی')}</Button>
-            <Button tone="danger" icon={CircleStop} busy={busy === 'keyboard stop'} onClick={() => void run('keyboard stop')}>{copy('Emergency output release', 'آزادسازی اضطراری خروجی‌ها')}</Button>
+            <Button
+              tone="danger"
+              icon={CircleStop}
+              busy={busy === `estop ${snapshot.emergency_stop?.active ? 'off' : 'on'}`}
+              onClick={() => void run(`estop ${snapshot.emergency_stop?.active ? 'off' : 'on'}`)}
+            >
+              {snapshot.emergency_stop?.active
+                ? copy('Release E-STOP', 'آزادسازی توقف اضطراری')
+                : copy('Engage E-STOP', 'فعال‌سازی توقف اضطراری')}
+            </Button>
           </div>
-          <p className="advanced-note advanced-note--safe">{copy('The stop command releases keyboard-held and latched outputs without shutting down the host.', 'فرمان توقف، خروجی‌های نگه‌داشته‌شده توسط صفحه‌کلید را بدون خاموش‌کردن میزبان آزاد می‌کند.')}</p>
+          <p className="advanced-note advanced-note--safe">
+            {snapshot.emergency_stop?.active
+              ? copy('Locked: effects, seat motion, relay tests, relay-on, and PWM output commands are rejected by PCController.', 'قفل است: افکت‌ها، حرکت صندلی، آزمایش رله، روشن‌کردن رله و فرمان‌های PWM توسط PCController رد می‌شوند.')
+              : copy('Ready. Engaging E-STOP cancels effect playback and locks every motion/output command at PCController.', 'آماده است. توقف اضطراری پخش افکت را لغو و همه فرمان‌های حرکت و خروجی را در PCController قفل می‌کند.')}
+          </p>
         </AdvancedPanel></>}
 
         <AdvancedPanel

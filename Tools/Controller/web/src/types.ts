@@ -179,6 +179,14 @@ export interface HardwareProblem {
   observed_at: string
 }
 
+export interface EmergencyStopState {
+  active: boolean
+  revision: number
+  source?: string
+  reason?: string
+  changed_at?: string
+}
+
 export interface Snapshot {
 	host_instance_id?: string
   connected: boolean
@@ -204,6 +212,7 @@ export interface Snapshot {
   reset_lines_reason?: string
   port_process?: PortProcessSnapshot
   program_state?: ProgramState
+  emergency_stop?: EmergencyStopState
   rf_learning?: RFLearnState
   macros?: MacroSnapshot
   effects?: EffectDescriptor[]
@@ -707,6 +716,7 @@ export const emptySnapshot: Snapshot = {
   },
   have_status: false,
   have_settings: false,
+	emergency_stop: { active: false, revision: 0 },
 	hardware_problems: [],
 	illumination: {
 		available: false,

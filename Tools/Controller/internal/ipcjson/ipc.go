@@ -826,6 +826,20 @@ func (service *Service) dispatch(
 		}
 	case "controller.snapshot":
 		result = service.controllerSnapshot()
+	case "controller.estop.get":
+		result = service.Client.EmergencyStop()
+	case "controller.estop.set":
+		var params struct {
+			Active bool   `json:"active"`
+			Source string `json:"source,omitempty"`
+			Reason string `json:"reason,omitempty"`
+		}
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			if strings.TrimSpace(params.Source) == "" {
+				params.Source = access.Principal
+			}
+			result, err = service.Client.SetEmergencyStop(ctx, params.Active, params.Source, params.Reason)
+		}
 	case "controller.port.process", "controller.port.owner":
 		result = service.Client.Snapshot().PortProcess
 	case "controller.session.snapshot", "controller.session.snapshot.last":
@@ -2179,6 +2193,8 @@ func requestCapability(method string, params json.RawMessage) string {
 	case "controller.display.send", "controller.opcode.send",
 		"controller.opcode.exchange", "controller.opcode.request", "controller.action.invoke":
 		return capabilityBoard
+	case "controller.estop.set":
+		return capabilityBoard
 	case "controller.host_menu.config", "controller.host_menu.config.get",
 		"controller.ui.config", "controller.ui.config.get",
 		"controller.peripherals", "controller.peripherals.get", "controller.board_profile.get",
@@ -2231,7 +2247,7 @@ func requestCapability(method string, params json.RawMessage) string {
 			}
 		}
 		return capabilityHostConfig
-	case "controller.ping", "controller.snapshot", "controller.port.process", "controller.port.owner", "controller.session.snapshot",
+	case "controller.ping", "controller.snapshot", "controller.estop.get", "controller.port.process", "controller.port.owner", "controller.session.snapshot",
 		"controller.session.snapshot.last", "controller.status",
 		"controller.front_panel", "controller.front-panel",
 		"controller.command.catalog", "controller.melodies.list", "controller.program_state.get", "controller.program-state.get",
@@ -2279,6 +2295,11 @@ func commandCapability(command string) string {
 		return capabilityBoard
 	case "program-state", "run-state":
 		if len(words) == 1 || (len(words) == 2 && words[1] == "status") {
+			return capabilityRead
+		}
+		return capabilityBoard
+	case "estop":
+		if len(words) == 1 || len(words) == 2 && words[1] == "status" {
 			return capabilityRead
 		}
 		return capabilityBoard
@@ -2787,6 +2808,46 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 			return
 		}
 		writeHTTPJSON(writer, http.StatusOK, service.controllerSnapshot())
+	})
+	mux.HandleFunc("/api/estop", func(writer http.ResponseWriter, request *http.Request) {
+		if !authorizeHTTPRequest(writer, request, service) {
+			return
+		}
+		if request.Method == http.MethodGet {
+			if !authorizeHTTPCapability(writer, request, service, capabilityRead) {
+				return
+			}
+			writeHTTPJSON(writer, http.StatusOK, service.Client.EmergencyStop())
+			return
+		}
+		if request.Method != http.MethodPut && request.Method != http.MethodPost {
+			writer.Header().Set("Allow", http.MethodGet+", "+http.MethodPut+", "+http.MethodPost)
+			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !authorizeHTTPCapability(writer, request, service, capabilityBoard) {
+			return
+		}
+		var params struct {
+			Active bool   `json:"active"`
+			Source string `json:"source,omitempty"`
+			Reason string `json:"reason,omitempty"`
+		}
+		decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, maxMessage))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&params); err != nil {
+			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		if strings.TrimSpace(params.Source) == "" {
+			params.Source = "rest"
+		}
+		state, err := service.Client.SetEmergencyStop(request.Context(), params.Active, params.Source, params.Reason)
+		if err != nil {
+			writeHTTPJSON(writer, http.StatusConflict, map[string]any{"error": err.Error(), "emergency_stop": state})
+			return
+		}
+		writeHTTPJSON(writer, http.StatusOK, state)
 	})
 	mux.HandleFunc("/api/peripherals", func(writer http.ResponseWriter, request *http.Request) {
 		if !authorizeHTTPRequest(writer, request, service) {

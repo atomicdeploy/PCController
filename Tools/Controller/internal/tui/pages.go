@@ -117,6 +117,14 @@ func (model Model) dashboardPage(snapshot control.Snapshot) string {
 		connectionLines := []string{
 			sectionHeader(connectionWidth, "BOARD CONNECTION", connectionStatus),
 		}
+		if snapshot.EmergencyStop.Active {
+			connectionLines = append(connectionLines,
+				buttonBadStyle.Copy().Bold(true).Render("E · E-STOP LOCKED · release"),
+				kvCard(connectionWidth, 14, "Interlock", emergencyStopSummary(snapshot.EmergencyStop)),
+			)
+		} else {
+			connectionLines = append(connectionLines, buttonBadStyle.Render("E · Engage E-STOP"))
+		}
 		candidate := compactConnectionCandidate(snapshot)
 		if candidate != "" {
 			connectionLines = append(connectionLines, kvCard(connectionWidth, 14, "Device", candidate))
@@ -198,6 +206,14 @@ func (model Model) dashboardPage(snapshot control.Snapshot) string {
 		stateTitle = model.menuPageByID(status.MenuPage).Name
 	}
 	stateLines := []string{sectionHeader(sectionWidth, "BOARD STATE", stateTitle)}
+	if snapshot.EmergencyStop.Active {
+		stateLines = append(stateLines,
+			buttonBadStyle.Copy().Bold(true).Render("E · E-STOP LOCKED · release"),
+			errorStyle.Render(kvCard(sectionWidth, 22, "Interlock", emergencyStopSummary(snapshot.EmergencyStop))),
+		)
+	} else {
+		stateLines = append(stateLines, buttonBadStyle.Render("E · Engage E-STOP"))
+	}
 	if haveStatus && capabilities&native.CapabilityProgramState != 0 {
 		stateLines = append(stateLines,
 			lipgloss.JoinHorizontal(lipgloss.Top, buttonStyle.Render("I · Idle"), " ", buttonGoodStyle.Render("R · Running")),
@@ -248,6 +264,17 @@ func (model Model) dashboardPage(snapshot control.Snapshot) string {
 	left := cardStyle.Copy().Width(cardRenderWidth).Render(strings.Join(measurementLines, "\n"))
 	right := cardStyle.Copy().Width(cardRenderWidth).Render(strings.Join(stateLines, "\n"))
 	return lipgloss.JoinHorizontal(lipgloss.Top, left, " ", right)
+}
+
+func emergencyStopSummary(state control.EmergencyStopState) string {
+	parts := []string{"effects and motion blocked"}
+	if source := strings.TrimSpace(state.Source); source != "" {
+		parts = append(parts, "source "+source)
+	}
+	if reason := strings.TrimSpace(state.Reason); reason != "" {
+		parts = append(parts, reason)
+	}
+	return strings.Join(parts, " · ")
 }
 
 func connectionDeviceSummary(model Model) string {

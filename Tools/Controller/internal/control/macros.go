@@ -336,6 +336,9 @@ func (runner *MacroRunner) StartMCURecording(name, category, color string) (Macr
 func (runner *MacroRunner) startRecording(name, category, color, mode string) (MacroRecordingState, error) {
 	runner.operationMu.Lock()
 	defer runner.operationMu.Unlock()
+	if runner.runtime.emergencyStop.Load() {
+		return MacroRecordingState{}, ErrEmergencyStopActive
+	}
 	if runner.State().Running {
 		return MacroRecordingState{}, errors.New("cancel playback before starting a recording")
 	}
@@ -557,6 +560,9 @@ func (runner *MacroRunner) Start(ctx context.Context, reference string) (MacroSt
 func (runner *MacroRunner) StartMode(ctx context.Context, reference, modeOverride string) (MacroState, error) {
 	runner.operationMu.Lock()
 	defer runner.operationMu.Unlock()
+	if runner.runtime.emergencyStop.Load() {
+		return MacroState{}, ErrEmergencyStopActive
+	}
 	if recording := runner.RecordingState(); recording.Active {
 		return MacroState{}, fmt.Errorf("macro recording %d/%s is active; save or discard it before playback", recording.ID, recording.Name)
 	}

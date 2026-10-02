@@ -66,6 +66,7 @@ type Snapshot struct {
 	RFLearning        RFLearnState
 	Macros            MacroSnapshot
 	Effects           []EffectDescriptor
+	EmergencyStop     EmergencyStopState      `json:"emergency_stop"`
 	HardwareProblems  []ports.HardwareProblem `json:"hardware_problems,omitempty"`
 	PortProcess       PortProcessSnapshot     `json:"port_process"`
 }
@@ -285,6 +286,10 @@ type Runtime struct {
 	programStateSentRevision   uint64
 	programStateSentMode       ProgramMode
 	macroRunner                *MacroRunner
+	emergencyStop              atomic.Bool
+	emergencyStopOperationMu   sync.Mutex
+	emergencyStopStateMu       sync.RWMutex
+	emergencyStopState         EmergencyStopState
 	displayMu                  sync.Mutex
 	lcdMessageCancel           context.CancelFunc
 
@@ -333,6 +338,9 @@ func New(options Options) *Runtime {
 		historyRetention:    24 * time.Hour,
 		historySampleEvery:  time.Second,
 		timelineLimit:       2000,
+		emergencyStopState: EmergencyStopState{
+			ChangedAt: time.Now(),
+		},
 	}
 	runtime.programState = NewProgramStateManager(func(state ProgramStateSnapshot) {
 		runtime.setActiveUseState(activeUseProgram, state.Mode == ProgramRunning)
@@ -474,10 +482,16 @@ func (runtime *Runtime) EnsureOutputScheduler() *OutputScheduler {
 }
 
 func (runtime *Runtime) SetProgramState(owner string, mode ProgramMode, reason string) (ProgramStateSnapshot, error) {
+	if mode == ProgramRunning && runtime.emergencyStop.Load() {
+		return runtime.ProgramState(), ErrEmergencyStopActive
+	}
 	return runtime.programState.Set(owner, mode, reason)
 }
 
 func (runtime *Runtime) AcquireProgramState(owner, reason string) (*ProgramStateLease, ProgramStateSnapshot, error) {
+	if runtime.emergencyStop.Load() {
+		return nil, runtime.ProgramState(), ErrEmergencyStopActive
+	}
 	return runtime.programState.Acquire(owner, reason)
 }
 
@@ -730,6 +744,7 @@ func eventKindMatches(requested, actual string) bool {
 func (runtime *Runtime) Snapshot() Snapshot {
 	programState := runtime.ProgramState()
 	rfLearning := runtime.RFLearnState()
+	emergencyStop := runtime.EmergencyStop()
 	runtime.mu.RLock()
 	defer runtime.mu.RUnlock()
 	hardwareProblems := cloneHardwareProblems(runtime.hardwareProblems)
@@ -760,6 +775,7 @@ func (runtime *Runtime) Snapshot() Snapshot {
 		StatusLEDUpdated: runtime.statusLEDUpdated, StatusLEDRevision: runtime.statusLEDRevision,
 		ProgramState:     programState,
 		RFLearning:       rfLearning,
+		EmergencyStop:    emergencyStop,
 		HardwareProblems: hardwareProblems,
 		PortProcess:      runtime.portProcess,
 	}
@@ -1785,6 +1801,9 @@ func (runtime *Runtime) requestAtGeneration(
 	payload []byte,
 	expected ...byte,
 ) (native.Frame, error) {
+	if err := runtime.rejectEmergencyStopCommand(opcode, payload); err != nil {
+		return native.Frame{}, err
+	}
 	if opcode == native.OpAddressableLED && runtime.activeUseMask.Load()&(activeUseMacroPlayback|activeUseMacroRecording) != 0 {
 		return native.Frame{}, errors.New("stop macro recording/playback before sending strip frames; WS2811 blocks the MCU clock interrupts")
 	}
@@ -1902,6 +1921,9 @@ func (runtime *Runtime) RefreshFrontPanel(ctx context.Context) (native.FrontPane
 }
 
 func (runtime *Runtime) WriteRaw(data []byte) error {
+	if runtime.emergencyStop.Load() {
+		return ErrEmergencyStopActive
+	}
 	if runtime.activeUseMask.Load()&(activeUseMacroPlayback|activeUseMacroRecording) != 0 {
 		return errors.New("raw UART writes are unavailable during macro recording/playback")
 	}
@@ -2293,6 +2315,9 @@ func (runtime *Runtime) attachWhen(result link.OpenResult, allowed func() bool) 
 		go ready(result.Port, result.Hello)
 	}
 	go runtime.pump(result.Session, generation)
+	if runtime.emergencyStop.Load() {
+		go runtime.reassertEmergencyStop()
+	}
 	go runtime.syncProgramState(runtime.ProgramState(), "connected")
 	go runtime.provisionDefaultStatusProfiles(generation)
 	go runtime.programStateHeartbeat(generation)
