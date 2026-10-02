@@ -188,6 +188,9 @@ try {
 // the exception file- and value-specific so docs and all other source remain
 // subject to the normal external-repository privacy gate.
 const reviewedRepositoryFixtures = new Map([
+  ["docs/recovery/motion-macro-checkpoints-20260824/0001-checkpoint-preserve-interrupted-motion-macro-integra.patch", new Set([
+    ["https://github", ".com/atomicdeploy/PCController"].join(""),
+  ])],
   ["Tools/Controller/README.md", new Set([
     ["https://github", ".com/atomicdeploy/PCController"].join(""),
   ])],
