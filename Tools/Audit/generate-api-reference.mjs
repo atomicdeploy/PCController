@@ -157,7 +157,7 @@ const methodOverrides = {
   "controller.snapshot": "Return the authoritative cached controller snapshot.",
 	"controller.board_profile.get": "Return the attached board identity, configured wiring mode, and opaque profile revision.",
 	"controller.board_profile.update": "Bind the attached physical board identity to one explicit host-owned wiring profile.",
-	"controller.peripheral.presentation.update": "Update one advertised peripheral name, icon, or group using optional optimistic concurrency.",
+	"controller.peripheral.presentation.update": "Update one advertised peripheral name, icon, group, visibility, or lock using optional optimistic concurrency.",
 	"controller.action.invoke": "Invoke one stable action ID advertised by the attached board profile and wait for the board acknowledgement.",
   "controller.command.execute": "Run a shared command after semantic capability classification.",
 	"controller.firmware.build": "Compile the canonical host project with reviewed feature names and publish correlated ordered program progress events.",
