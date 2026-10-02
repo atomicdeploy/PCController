@@ -34,3 +34,27 @@ any implementation.
 To reconstruct either original commit for analysis, create an isolated worktree
 at its recorded parent and apply the corresponding patch with `git am --3way`.
 Do not apply these patches over a dirty checkout.
+
+## Additional orphaned commit histories
+
+Three older sandbox-owned worktrees retained useful commit histories that were
+uploaded to GitHub by object ID but no longer had a live remote branch or pull
+request. The Git bundles in `commit-bundles/` preserve their exact commit
+objects and original branch tips without importing the old histories into
+current `main`.
+
+| Bundle | Tip | Prerequisite | Commits | SHA-256 |
+|---|---|---|---:|---|
+| `firmware-macro-priority-9265933.bundle` | `92659332caffecfe1d2e328399f3004f489601a8` | complete history | 7 | `3DF51C488468393F0CA22E1D38047192AFD83C8E5A1BA7D8C57D7EB0A856AD15` |
+| `macro-host-resume-cc1eb8d.bundle` | `cc1eb8dc64030d24156de839bece7d3a31112c66` | `1895bee5f9a8bc9e68864e00d10c18d77fb5dca8` | 12 | `A5D604CE77AB82543451921E5649A6A80121F431B84E496A38CE4BC64E5CA6CE` |
+| `autonomy-storage-docs-f859392.bundle` | `f859392421c546acdb44d9b7824d7af3c6b63c31` | `87b2c17a70e35910f67857477d7d3653b17c334d` | 2 | `20FA572EE4C38C83E0CD5C6A2BBCC2BC84376E06B1C49EE52FBCA84CECC5DC73` |
+
+Each bundle passes `git bundle verify`. All commits in the three preserved
+ranges were scanned for strong credential markers, embedded authenticated RTSP
+URLs, private-key headers, and private Windows user paths before publication;
+no matches were found.
+
+For a prerequisite bundle, fetch its prerequisite from this repository before
+fetching the bundle tip. The firmware bundle records a complete standalone
+history. Review all recovered work against current requirements before porting
+it; these bundles are evidence and handoff artifacts, not merge candidates.
