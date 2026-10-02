@@ -715,12 +715,14 @@ func (service *Service) dispatch(
 			Name             *string `json:"name,omitempty"`
 			Icon             *string `json:"icon,omitempty"`
 			Group            *string `json:"group,omitempty"`
+			Hidden           *bool   `json:"hidden,omitempty"`
+			Locked           *bool   `json:"locked,omitempty"`
 			ExpectedRevision string  `json:"expected_revision,omitempty"`
 		}
 		if err = decodeStrictParams(request.Params, &params); err != nil {
 			err = &RPCError{Code: -32602, Message: err.Error()}
 		} else {
-			result, err = service.updatePeripheralPresentation(params.Key, params.Name, params.Icon, params.Group, params.ExpectedRevision)
+			result, err = service.updatePeripheralPresentation(params.Key, params.Name, params.Icon, params.Group, params.Hidden, params.Locked, params.ExpectedRevision)
 		}
 	case "controller.action.invoke":
 		var params struct {
@@ -899,8 +901,10 @@ func (service *Service) dispatch(
 		if err = decodeParams(request.Params, &params); err == nil {
 			if params.Channel < 0 || params.Channel > 15 || params.Value < 0 || params.Value > 4095 {
 				err = &RPCError{Code: -32602, Message: "channel must be 0..15 and value must be 0..4095"}
-			} else if err = service.Client.SetPWMChannel(ctx, byte(params.Channel), uint16(params.Value)); err == nil {
-				result, err = service.Client.PWMValues(ctx)
+			} else if err = service.rejectLockedPeripheral(fmt.Sprintf("pwm.%d", params.Channel)); err == nil {
+				if err = service.Client.SetPWMChannel(ctx, byte(params.Channel), uint16(params.Value)); err == nil {
+					result, err = service.Client.PWMValues(ctx)
+				}
 			}
 		}
 	case "controller.pwm.off":
@@ -995,7 +999,7 @@ func (service *Service) dispatch(
 						service.Shutdown()
 					}()
 				}
-			} else {
+			} else if err = service.rejectLockedCommand(command); err == nil {
 				var output string
 				service.commandMu.Lock()
 				output, err = service.Client.Execute(ctx, command)
@@ -3154,6 +3158,10 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 		encoded, _ := json.Marshal(params)
 		if err := service.authorizeAccess(access, "controller.command.execute", encoded); err != nil {
 			writeHTTPJSON(writer, http.StatusForbidden, map[string]string{"error": err.Error()})
+			return
+		}
+		if err := service.rejectLockedCommand(params.Command); err != nil {
+			writeHTTPJSON(writer, http.StatusConflict, map[string]string{"error": err.Error()})
 			return
 		}
 		output, err := service.Client.Execute(request.Context(), params.Command)

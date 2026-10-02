@@ -1232,7 +1232,7 @@
     },
     "controller.peripheral.presentation.update": {
       "capability": "host_configuration",
-      "summary": "Update one advertised peripheral name, icon, or group using optional optimistic concurrency.",
+      "summary": "Update one advertised peripheral name, icon, group, visibility, or lock using optional optimistic concurrency.",
       "idempotency": "idempotent-with-authoritative-readback"
     },
     "controller.peripherals": {

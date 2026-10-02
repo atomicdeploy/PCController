@@ -19,7 +19,7 @@ func TestResolveBoardIdentityPrefersProvisionedSerial(t *testing.T) {
 func TestProfileDescriptorsAdvertiseOnlyConfiguredWiring(t *testing.T) {
 	legacy := map[string]string{"motion.a": "Left legacy", "relay.5": "Lamp"}
 	presentation := map[string]PeripheralPresentation{
-		"seat.a": {Name: "Left seats", Icon: "seat", Group: "auditorium"},
+		"seat.a": {Name: "Left seats", Icon: "seat", Group: "auditorium", Hidden: true, Locked: true},
 	}
 	_, cinema := ProfileDescriptors(BoardModeCinemaSeatMotion, false, legacy, presentation)
 	if len(cinema) != 17 {
@@ -30,6 +30,7 @@ func TestProfileDescriptorsAdvertiseOnlyConfiguredWiring(t *testing.T) {
 		switch control.Key {
 		case "seat.a":
 			seenSeat = control.Name == "Left seats" && control.Icon == "seat" && control.Group == "auditorium" &&
+				control.Hidden && control.Locked &&
 				len(control.Actions) == 3 && control.Actions[0].ID == "seat.a.up"
 		case "motion.a":
 			seenLegacy = true
@@ -87,10 +88,15 @@ func TestBoardProfileValidationAndRevision(t *testing.T) {
 	if first == second || len(first) != 24 || len(second) != 24 {
 		t.Fatalf("revisions first=%q second=%q", first, second)
 	}
+	profile.Presentation["seat.a"] = PeripheralPresentation{Name: "VIP left", Hidden: true, Locked: true}
+	presentationRevision := BoardProfileRevision("serial:board-42", profile, config.UI.PeripheralNames)
+	if second == presentationRevision || len(presentationRevision) != 24 {
+		t.Fatalf("presentation revision second=%q updated=%q", second, presentationRevision)
+	}
 	profile.ExposeRawRelays = true
 	third := BoardProfileRevision("serial:board-42", profile, config.UI.PeripheralNames)
-	if second == third || len(third) != 24 {
-		t.Fatalf("raw-relay revision second=%q third=%q", second, third)
+	if presentationRevision == third || len(third) != 24 {
+		t.Fatalf("raw-relay revision presentation=%q third=%q", presentationRevision, third)
 	}
 	profile.Mode = "unknown"
 	config.BoardProfiles["serial:board-42"] = profile

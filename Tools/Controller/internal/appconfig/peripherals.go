@@ -20,6 +20,8 @@ type PeripheralDescriptor struct {
 	Name        string `json:"name,omitempty"`
 	Icon        string `json:"icon,omitempty"`
 	Group       string `json:"group,omitempty"`
+	Hidden      bool   `json:"hidden,omitempty"`
+	Locked      bool   `json:"locked,omitempty"`
 	Control     string `json:"control"`
 }
 
@@ -39,6 +41,8 @@ type ControlDescriptor struct {
 	Name    string             `json:"name"`
 	Icon    string             `json:"icon,omitempty"`
 	Group   string             `json:"group,omitempty"`
+	Hidden  bool               `json:"hidden,omitempty"`
+	Locked  bool               `json:"locked,omitempty"`
 	Control string             `json:"control"`
 	Actions []ActionDescriptor `json:"actions,omitempty"`
 }
@@ -174,10 +178,12 @@ func ProfileDescriptors(mode string, exposeRawRelays bool, legacyNames map[strin
 	addControl := func(descriptor PeripheralDescriptor, kind string, actions []ActionDescriptor) {
 		resolved := resolvePresentation(descriptor.Key, descriptor.DefaultName, legacyNames, presentation)
 		descriptor.Name, descriptor.Icon, descriptor.Group = resolved.Name, resolved.Icon, resolved.Group
+		descriptor.Hidden, descriptor.Locked = resolved.Hidden, resolved.Locked
 		peripherals = append(peripherals, descriptor)
 		controls = append(controls, ControlDescriptor{
 			Key: descriptor.Key, Kind: kind, Order: descriptor.Index,
 			Name: descriptor.Name, Icon: descriptor.Icon, Group: descriptor.Group,
+			Hidden: descriptor.Hidden, Locked: descriptor.Locked,
 			Control: descriptor.Control, Actions: actions,
 		})
 	}
@@ -204,10 +210,12 @@ func ProfileDescriptors(mode string, exposeRawRelays bool, legacyNames map[strin
 				}
 				resolved := resolvePresentation(key, seat.DefaultName, legacy, presentation)
 				seat.Name, seat.Icon, seat.Group = resolved.Name, resolved.Icon, resolved.Group
+				seat.Hidden, seat.Locked = resolved.Hidden, resolved.Locked
 				peripherals = append(peripherals, seat)
 				controls = append(controls, ControlDescriptor{
 					Key: key, Kind: "seat", Order: descriptor.Index, Name: seat.Name,
-					Icon: seat.Icon, Group: seat.Group, Control: "seat", Actions: actions,
+					Icon: seat.Icon, Group: seat.Group, Hidden: seat.Hidden, Locked: seat.Locked,
+					Control: "seat", Actions: actions,
 				})
 			}
 			continue
@@ -232,6 +240,7 @@ func ProfileDescriptors(mode string, exposeRawRelays bool, legacyNames map[strin
 			} else {
 				resolved := resolvePresentation(descriptor.Key, descriptor.DefaultName, legacyNames, presentation)
 				descriptor.Name, descriptor.Icon, descriptor.Group = resolved.Name, resolved.Icon, resolved.Group
+				descriptor.Hidden, descriptor.Locked = resolved.Hidden, resolved.Locked
 				peripherals = append(peripherals, descriptor)
 			}
 			continue
@@ -242,6 +251,7 @@ func ProfileDescriptors(mode string, exposeRawRelays bool, legacyNames map[strin
 		}
 		resolved := resolvePresentation(descriptor.Key, descriptor.DefaultName, legacyNames, presentation)
 		descriptor.Name, descriptor.Icon, descriptor.Group = resolved.Name, resolved.Icon, resolved.Group
+		descriptor.Hidden, descriptor.Locked = resolved.Hidden, resolved.Locked
 		peripherals = append(peripherals, descriptor)
 	}
 	return peripherals, controls

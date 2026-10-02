@@ -191,7 +191,7 @@ func TestPeripheralCatalogUsesExplicitBoardProfileWithoutLegacyMotionAliases(t *
 		"serial:board-42": {
 			Key: "cafe-cinema", Mode: appconfig.BoardModeCinemaSeatMotion,
 			Presentation: map[string]appconfig.PeripheralPresentation{
-				"seat.a": {Name: "Left bank", Icon: "seat", Group: "auditorium"},
+				"seat.a": {Name: "Left bank", Icon: "seat", Group: "auditorium", Hidden: true, Locked: true},
 			},
 		},
 	}
@@ -211,6 +211,7 @@ func TestPeripheralCatalogUsesExplicitBoardProfileWithoutLegacyMotionAliases(t *
 		}
 		if control.Key == "seat.a" {
 			seenSeat = control.Name == "Left bank" && control.Icon == "seat" && control.Group == "auditorium" &&
+				control.Hidden && control.Locked &&
 				len(control.Actions) == 3 && control.Actions[2].ID == "seat.a.stop"
 		}
 	}
@@ -222,6 +223,39 @@ func TestPeripheralCatalogUsesExplicitBoardProfileWithoutLegacyMotionAliases(t *
 	rejected := service.Dispatch(context.Background(), Request{Method: "controller.board_profile.update", Params: params})
 	if rejected.Error == nil || !strings.Contains(rejected.Error.Message, "attached") {
 		t.Fatalf("unattached update=%+v", rejected)
+	}
+}
+
+func TestPeripheralLockTargetsStableRelayAndSeatKeys(t *testing.T) {
+	service, config := browserUIConfigTestService(t)
+	config.Connection.LastDevice = &appconfig.DeviceIdentity{Port: "COM18", SerialNumber: "BOARD-42"}
+	config.BoardProfiles = map[string]appconfig.BoardProfile{
+		"serial:board-42": {
+			Key: "cafe-cinema", Mode: appconfig.BoardModeCinemaSeatMotion,
+			Presentation: map[string]appconfig.PeripheralPresentation{
+				"seat.a":  {Locked: true},
+				"relay.5": {Locked: true},
+				"pwm.0":   {Locked: true},
+			},
+		},
+	}
+	for command, want := range map[string]string{
+		"relay 5 on":         "relay.5",
+		"relay side left up": "seat.a",
+		"relay side b stop":  "seat.b",
+		"status":             "",
+	} {
+		if got := peripheralKeyForCommand(command); got != want {
+			t.Fatalf("command %q key=%q, want %q", command, got, want)
+		}
+	}
+	for _, key := range []string{"seat.a", "relay.5", "pwm.0"} {
+		if err := service.rejectLockedPeripheral(key); err == nil {
+			t.Fatalf("locked peripheral %q was accepted", key)
+		}
+	}
+	if err := service.rejectLockedPeripheral("relay.6"); err != nil {
+		t.Fatalf("unlocked peripheral rejected: %v", err)
 	}
 }
 

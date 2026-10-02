@@ -29,9 +29,11 @@ type BoardProfile struct {
 // PeripheralPresentation is mutable operator vocabulary attached to a stable
 // peripheral/control key. Empty optional fields mean no override.
 type PeripheralPresentation struct {
-	Name  string `json:"name,omitempty"`
-	Icon  string `json:"icon,omitempty"`
-	Group string `json:"group,omitempty"`
+	Name   string `json:"name,omitempty"`
+	Icon   string `json:"icon,omitempty"`
+	Group  string `json:"group,omitempty"`
+	Hidden bool   `json:"hidden,omitempty"`
+	Locked bool   `json:"locked,omitempty"`
 }
 
 // BoardIdentity describes the strongest currently available physical-device

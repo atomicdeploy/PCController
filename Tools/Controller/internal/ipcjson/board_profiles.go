@@ -87,7 +87,7 @@ func (service *Service) updateActiveBoardProfile(key, mode string, exposeRawRela
 	return updated, nil
 }
 
-func (service *Service) updatePeripheralPresentation(key string, name, icon, group *string, expectedRevision string) (presentationUpdateResult, error) {
+func (service *Service) updatePeripheralPresentation(key string, name, icon, group *string, hidden, locked *bool, expectedRevision string) (presentationUpdateResult, error) {
 	if service.UpdateHostConfig == nil {
 		return presentationUpdateResult{}, errors.New("persistent host configuration is unavailable")
 	}
@@ -96,8 +96,8 @@ func (service *Service) updatePeripheralPresentation(key string, name, icon, gro
 		return presentationUpdateResult{}, errors.New("configure the attached board profile before changing presentation")
 	}
 	key = strings.TrimSpace(key)
-	if key == "" || name == nil && icon == nil && group == nil {
-		return presentationUpdateResult{}, &RPCError{Code: -32602, Message: "key and at least one of name, icon, or group are required"}
+	if key == "" || name == nil && icon == nil && group == nil && hidden == nil && locked == nil {
+		return presentationUpdateResult{}, &RPCError{Code: -32602, Message: "key and at least one of name, icon, group, hidden, or locked are required"}
 	}
 	known := false
 	for _, peripheral := range service.peripheralSettings().Peripherals {
@@ -109,7 +109,7 @@ func (service *Service) updatePeripheralPresentation(key string, name, icon, gro
 	if !known {
 		return presentationUpdateResult{}, &RPCError{Code: -32602, Message: fmt.Sprintf("peripheral key %q is not advertised by the active profile", key)}
 	}
-	changedFields := make([]string, 0, 3)
+	changedFields := make([]string, 0, 5)
 	err := service.UpdateHostConfig(func(config *appconfig.Config) error {
 		profile := config.BoardProfiles[current.BoardIdentity]
 		profile.Mode = appconfig.NormalizeBoardMode(profile.Mode)
@@ -132,6 +132,14 @@ func (service *Service) updatePeripheralPresentation(key string, name, icon, gro
 			presentation.Group = strings.TrimSpace(*group)
 			changedFields = append(changedFields, "group")
 		}
+		if hidden != nil {
+			presentation.Hidden = *hidden
+			changedFields = append(changedFields, "hidden")
+		}
+		if locked != nil {
+			presentation.Locked = *locked
+			changedFields = append(changedFields, "locked")
+		}
 		if presentation == (appconfig.PeripheralPresentation{}) {
 			delete(profile.Presentation, key)
 		} else {
@@ -151,6 +159,54 @@ func (service *Service) updatePeripheralPresentation(key string, name, icon, gro
 		}
 	}
 	return presentationUpdateResult{}, errors.New("updated peripheral disappeared from the active profile")
+}
+
+func (service *Service) peripheralLocked(key string) bool {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return false
+	}
+	for _, control := range service.peripheralSettings().Controls {
+		if control.Key == key {
+			return control.Locked
+		}
+	}
+	return false
+}
+
+func (service *Service) rejectLockedPeripheral(key string) error {
+	if service.peripheralLocked(key) {
+		return fmt.Errorf("peripheral %q is locked by the active board profile", key)
+	}
+	return nil
+}
+
+func peripheralKeyForCommand(command string) string {
+	words := strings.Fields(strings.ToLower(strings.TrimSpace(command)))
+	if len(words) < 3 || words[0] != "relay" {
+		return ""
+	}
+	if words[1] == "side" && len(words) >= 4 {
+		switch words[2] {
+		case "a", "left", "1":
+			return "seat.a"
+		case "b", "right", "2":
+			return "seat.b"
+		}
+		return ""
+	}
+	relay, err := strconv.Atoi(words[1])
+	if err != nil || relay < 1 || relay > 8 {
+		return ""
+	}
+	return fmt.Sprintf("relay.%d", relay)
+}
+
+func (service *Service) rejectLockedCommand(command string) error {
+	if key := peripheralKeyForCommand(command); key != "" {
+		return service.rejectLockedPeripheral(key)
+	}
+	return nil
 }
 
 func (service *Service) publishPeripheralChange(profile boardProfileDescriptor, changedKeys, changedFields []string) {
@@ -176,6 +232,9 @@ func (service *Service) invokeSemanticAction(ctx context.Context, actionID strin
 	control, action, advertised := advertisedSemanticAction(service.peripheralSettings().Controls, actionID)
 	if !advertised {
 		return nil, fmt.Errorf("action %q is not advertised by board profile %q", actionID, profile.Key)
+	}
+	if control.Locked {
+		return nil, fmt.Errorf("peripheral %q is locked by board profile %q", control.Key, profile.Key)
 	}
 	controlKey := control.Key
 	var err error
