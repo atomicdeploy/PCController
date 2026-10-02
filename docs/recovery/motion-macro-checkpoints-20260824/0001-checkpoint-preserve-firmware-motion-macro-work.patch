@@ -1,0 +1,1925 @@
+From 3caedc92f20a8b1544583c643365fa826bcb93ad Mon Sep 17 00:00:00 2001
+From: Atomic Deploy <atomicdeploy@gmail.com>
+Date: Mon, 24 Aug 2026 21:16:36 +0330
+Subject: [PATCH] checkpoint: preserve firmware motion macro work
+
+---
+ PCController.ino                              |   6 +
+ PCControllerLocalLib.cpp                      |   2 +
+ PCControllerProject.cpp                       |   4 +
+ Project/ControllerEvents.h                    |  29 +---
+ Project/Firmware/ControllerContext.inc.h      |  28 ++++
+ Project/Firmware/ControllerUtilities.inc.h    |   5 +
+ Project/Firmware/FrontPanelRuntime.inc.h      |  93 ++++++++---
+ Project/Firmware/LifecycleRuntime.inc.h       |  18 ++-
+ Project/Firmware/ProtocolRuntime.inc.h        |  91 ++++++++++-
+ Project/Firmware/RadioRuntime.inc.h           |  18 ++-
+ Project/Firmware/SensorRuntime.inc.h          |   6 +
+ Project/FrontPanelModel.h                     |  58 ++++++-
+ Project/IlluminationController.cpp            |   5 +
+ Project/IlluminationController.h              |  32 ++++
+ Project/MacroAction.h                         |  16 +-
+ .../{MacroActions.def => MacroActions.inc.h}  |   5 +-
+ Project/MacroQueue.cpp                        |  99 +++++++++---
+ Project/MacroQueue.h                          |  33 +++-
+ Project/ProtocolContract.h                    |  42 +++++
+ Project/PwmController.cpp                     |   4 +
+ Project/PwmController.h                       |  40 +++++
+ Project/StatusLedController.cpp               |   5 +
+ Project/StatusLedController.h                 |  35 +++++
+ Project/UartProtocol.h                        |   2 -
+ ProjectConfig.h                               |  32 ++++
+ .../Controller/internal/programmer/compile.go |   2 +-
+ .../internal/programmer/programmer_test.go    |   6 +-
+ .../tests/firmware_controls_test.cpp          |  13 ++
+ .../tests/firmware_macro_queue_test.cpp       | 148 ++++++++++++++++--
+ 29 files changed, 765 insertions(+), 112 deletions(-)
+ rename Project/{MacroActions.def => MacroActions.inc.h} (77%)
+
+diff --git a/PCController.ino b/PCController.ino
+index 3bdc4dc1..2782a03c 100644
+--- a/PCController.ino
++++ b/PCController.ino
+@@ -6,7 +6,9 @@
+ #include <RCSwitch.h>
+ 
+ #include "LocalLib/BoardPins.h"
++#if PCCONTROLLER_ENABLE_DS18B20
+ #include "LocalLib/DallasTemperatureBus.h"
++#endif
+ #include "LocalLib/Keys.h"
+ #include "LocalLib/ModeManager.h"
+ #include "LocalLib/SevenSegments.h"
+@@ -19,10 +21,14 @@
+ #include "Project/CompactI2c.h"
+ #include "Project/FrontPanelModel.h"
+ #include "Project/IlluminationController.h"
++#if PCCONTROLLER_ENABLE_INA219
+ #include "Project/Ina219Sensor.h"
++#endif
+ #include "Project/MacroQueue.h"
+ #include "Project/PwmController.h"
++#if PCCONTROLLER_ENABLE_PCA9685
+ #include "Project/PwmExpanderDriver.h"
++#endif
+ #include "Project/RelayController.h"
+ #include "Project/RemoteLearningStore.h"
+ #include "Project/ResetTelemetry.h"
+diff --git a/PCControllerLocalLib.cpp b/PCControllerLocalLib.cpp
+index e4d63cbf..1412b538 100644
+--- a/PCControllerLocalLib.cpp
++++ b/PCControllerLocalLib.cpp
+@@ -1,6 +1,8 @@
+ // Arduino compiles root translation units but not arbitrary root subfolders.
+ // Keep the LocalLib domain layout while building each implementation once.
++#if PCCONTROLLER_ENABLE_DS18B20
+ #include "LocalLib/DallasTemperatureBus.cpp"
++#endif
+ #include "LocalLib/I2cLcd.cpp"
+ #include "LocalLib/Keys.cpp"
+ #include "LocalLib/SevenSegments.cpp"
+diff --git a/PCControllerProject.cpp b/PCControllerProject.cpp
+index 1e64cf85..24544daf 100644
+--- a/PCControllerProject.cpp
++++ b/PCControllerProject.cpp
+@@ -5,10 +5,14 @@
+ #include "Project/ControllerEvents.cpp"
+ #include "Project/FeedbackMelodies.cpp"
+ #include "Project/IlluminationController.cpp"
++#if PCCONTROLLER_ENABLE_INA219
+ #include "Project/Ina219Sensor.cpp"
++#endif
+ #include "Project/MacroQueue.cpp"
++#if PCCONTROLLER_ENABLE_PCA9685
+ #include "Project/PwmController.cpp"
+ #include "Project/PwmExpanderDriver.cpp"
++#endif
+ #include "Project/RelayController.cpp"
+ #include "Project/RemoteLearningStore.cpp"
+ #include "Project/ResetTelemetry.cpp"
+diff --git a/Project/ControllerEvents.h b/Project/ControllerEvents.h
+index f11d6504..4959becb 100644
+--- a/Project/ControllerEvents.h
++++ b/Project/ControllerEvents.h
+@@ -5,26 +5,8 @@
+ #include "MacroAction.h"
+ #include "UartProtocol.h"
+ 
+-// ControllerEventType identifies one asynchronous native event payload shape.
+-enum class ControllerEventType : uint8_t {
+-  Key = 1,
+-  Door = 2,
+-  Bluetooth = 3,
+-  PwmChannel = 4,
+-  RfLearned = 5,
+-  Macro = 6,
+-  Fault = 7,
+-  RfReceived = 8,
+-  RfLearning = 9,
+-  Relay = 10,
+-  Alert = 11,
+-  // Host-routed page navigation: [type, target, ASCII page...]. Target is
+-  // 0=all, 1=WebUI, 2=TUI. Firmware may emit it without knowing host UI APIs.
+-  AppNavigation = 12,
+-  // Accepted ordinary opcode evidence. UartProtocol appends the exact MCU
+-  // timestamp: [type, source, opcode, length, payload..., micros LE32].
+-  Action = 13,
+-};
++using ControllerEventType = ControllerProtocol::EventType;
++using InputEventSource = ControllerProtocol::InputEventSource;
+ 
+ // ControllerAlertKind classifies board-generated warning notifications.
+ enum class ControllerAlertKind : uint8_t {
+@@ -32,13 +14,6 @@ enum class ControllerAlertKind : uint8_t {
+   Hot = 2,
+ };
+ 
+-// InputEventSource records whether a gesture originated physically, by RF, or by host.
+-enum class InputEventSource : uint8_t {
+-  Physical = 0,
+-  Radio = 1,
+-  Host = 2,
+-};
+-
+ // Owns the compact asynchronous event wire format. Keeping event encoding in
+ // one domain prevents menu, RF, sensor, and macro code from drifting apart.
+ class ControllerEvents {
+diff --git a/Project/Firmware/ControllerContext.inc.h b/Project/Firmware/ControllerContext.inc.h
+index 7be7bca8..764682e8 100644
+--- a/Project/Firmware/ControllerContext.inc.h
++++ b/Project/Firmware/ControllerContext.inc.h
+@@ -47,11 +47,19 @@ static_assert(sizeof(TelemetryPayload) == ControllerProtocol::MaximumPayload,
+               "Native telemetry wire layout changed");
+ 
+ // Long-lived hardware drivers and protocol-domain coordinators.
++#if PCCONTROLLER_ENABLE_PCA9685
+ PwmExpanderDriver pwmDriver(BoardPins::PwmAddress);
+ PwmController pwm(pwmDriver);
++#else
++PwmController pwm;
++#endif
++#if PCCONTROLLER_ENABLE_INA219
+ Ina219Sensor ina219(BoardPins::Ina219Address);
++#endif
++#if PCCONTROLLER_ENABLE_DS18B20
+ DallasTemperatureBus temperatureBus(BoardPins::OneWireData);
+ Ds18b20Address temperatureAddresses[2];
++#endif
+ RCSwitch radioReceiver;
+ RCSwitch radioTransmitter;
+ RelayController relays(shiftRegisters);
+@@ -81,10 +89,22 @@ int16_t smoothTemperature(int16_t filtered, int16_t sample) {
+ }
+ 
+ // Peripheral availability, asynchronous conversion, and RF-learning state.
++#if PCCONTROLLER_ENABLE_INA219
+ bool ina219Available = false;
++#else
++constexpr bool ina219Available = false;
++#endif
++#if PCCONTROLLER_ENABLE_PCA9685
+ bool pwmAvailable = false;
++#else
++constexpr bool pwmAvailable = false;
++#endif
++#if PCCONTROLLER_ENABLE_DS18B20
+ uint8_t temperatureAddressCount = 0;
+ bool temperatureConversionPending = false;
++#else
++constexpr uint8_t temperatureAddressCount = 0;
++#endif
+ bool learningActive = false;
+ uint8_t learningMode = RF_LEARN_INDEFINITE;
+ uint8_t learningTotalSeconds = 0;
+@@ -115,6 +135,7 @@ uint8_t motionPressedMask = 0;
+ uint32_t flashMessageEndsAt = 0;
+ #if PCCONTROLLER_ENABLE_MACRO_CAPTURE
+ uint8_t nextLocalMacroId = 1;
++bool suppressLocalMacroClassification = false;
+ #endif
+ // Presentation visibility/order is configured independently over UART and is
+ // not rolled back by a local edit. The late display-options byte is captured
+@@ -137,8 +158,12 @@ uint16_t streamPeriodMs = 0;
+ // Cooperative task timestamps; each service owns one cadence/deadline.
+ uint32_t lastShiftPollAt = 0;
+ uint32_t lastDisplayRefreshAt = 0;
++#if PCCONTROLLER_ENABLE_INA219
+ uint32_t lastIna219SampleAt = 0;
++#endif
++#if PCCONTROLLER_ENABLE_DS18B20
+ uint32_t lastTemperatureRequestAt = 0;
++#endif
+ uint32_t lastTelemetryAt = 0;
+ 
+ // RF momentary actions expire locally even if repeats or the host disappear.
+@@ -196,6 +221,9 @@ constexpr uint8_t HOST_PANEL_CAPTURED = 1U << 4;
+ 
+ // Cross-domain entry points required before their ordered implementation fragments.
+ void handleMenuAction(uint8_t action, bool fromRemote = false);
++void applyKeyGesture(uint8_t bit, KeyEvent event,
++                     InputEventSource source = InputEventSource::Physical,
++                     bool emitEvidence = true);
+ void setMenuPage(uint8_t page);
+ void sendTelemetry(uint8_t sequence);
+ void endLearning(uint8_t state, int8_t feedback);
+diff --git a/Project/Firmware/ControllerUtilities.inc.h b/Project/Firmware/ControllerUtilities.inc.h
+index 836fb208..6021a242 100644
+--- a/Project/Firmware/ControllerUtilities.inc.h
++++ b/Project/Firmware/ControllerUtilities.inc.h
+@@ -161,6 +161,7 @@ uint32_t readU32(const uint8_t *buffer) {
+ void safeStopMacroOutputs() {
+   relays.allOff(now);
+   pwm.clearMask(PwmChannels::UserTestMask);
++  buzzer.stop();
+   hostLcdFlags &= static_cast<uint8_t>(~HOST_STATUS_OVERRIDE);
+   statusLeds.cancelEffect();
+ }
+@@ -174,8 +175,12 @@ bool hostUnavailable() {
+ 
+ // Collapses both named temperature channels into the safety warning state.
+ bool temperatureHot() {
++#if PCCONTROLLER_ENABLE_DS18B20
+   return sensors.temperatureCentiC[0] >= HOT_TEMPERATURE_CENTI_C ||
+          sensors.temperatureCentiC[1] >= HOT_TEMPERATURE_CENTI_C;
++#else
++  return false;
++#endif
+ }
+ 
+ // Composes the compact availability/activity bitmap used by StatusResponse.
+diff --git a/Project/Firmware/FrontPanelRuntime.inc.h b/Project/Firmware/FrontPanelRuntime.inc.h
+index 24a2ca8d..00e9ea14 100644
+--- a/Project/Firmware/FrontPanelRuntime.inc.h
++++ b/Project/Firmware/FrontPanelRuntime.inc.h
+@@ -160,6 +160,12 @@ void moveMenuCategory(bool forward, uint32_t at) {
+ // Activates a stable page and optionally persists it as the boot default.
+ void setMenuPage(uint8_t page) {
+   menuPage = canonicalFrontPanelPage(page);
++  if (!frontPanelPageCompiled(menuPage)) {
++    menuPage = PAGE_MOTION;
++  }
++#if PCCONTROLLER_ENABLE_MACRO_CAPTURE
++  suppressLocalMacroClassification = false;
++#endif
+ #if PCCONTROLLER_MENU_HIERARCHY
+   menuTreeState = menuCategory(menuPage);
+ #endif
+@@ -507,6 +513,20 @@ bool handleMotionPanelAction(uint8_t action, bool fromRemote,
+   return accepted;
+ }
+ 
++#if PCCONTROLLER_ENABLE_MACRO_CAPTURE && \
++    !PCCONTROLLER_UNIFIED_PAGE_IDENTIFIES_KEYS
++void beginLocalMacroCapture() {
++  const uint8_t id = nextLocalMacroId;
++  if (!macroPlayback.beginCapture(id, micros())) {
++    return;
++  }
++  ++nextLocalMacroId;
++  if (nextLocalMacroId == 0) {
++    nextLocalMacroId = 1;
++  }
++}
++#endif
++
+ // Dispatches physical, RF, or host navigation through the modal menu state machine.
+ void handleMenuAction(uint8_t action, bool fromRemote) {
+   if (action > MENU_INCREASE) {
+@@ -569,23 +589,13 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
+       identifiedKeyEndsAt = actionNow + 900;
+ #else
+     } else if (intent == UnifiedInputIntent::Macro) {
+-#if PCCONTROLLER_ENABLE_MACRO_CAPTURE
+-      if (macroPlayback.recording()) {
+-        macroPlayback.finishCapture();
+-      } else if (macroPlayback.captured()) {
+-        macroPlayback.playCapture(micros());
+-      } else {
+-        const uint8_t id = nextLocalMacroId++;
+-        if (nextLocalMacroId == 0) {
+-          nextLocalMacroId = 1;
+-        }
+-        macroPlayback.beginCapture(id, micros());
+-      }
+-#endif
++      // Local capture lifecycle is handled from the physical classified key
++      // path below. RF/host MenuAction K3 is intentionally a no-op here.
+     } else if (relays.motionAllowed()) {
+       modeManager.transitionTo(MODE_MOTION_CONTROL);
+     } else {
+       buzzer.error();
++    }
+ #endif
+     menuFeedback(fromRemote);
+     return;
+@@ -892,9 +902,37 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
+ // safety path in protocol dispatch. Primary actions run on Down; Click remains
+ // deferred classification only and must never sit on the control path.
+ void applyKeyGesture(uint8_t bit, KeyEvent event,
+-                     InputEventSource source = InputEventSource::Physical,
+-                     bool emitEvidence = true) {
++                     InputEventSource source, bool emitEvidence) {
+   const ProgramMode mode = modeManager.current();
++#if PCCONTROLLER_ENABLE_MACRO_CAPTURE && \
++    !PCCONTROLLER_UNIFIED_PAGE_IDENTIFIES_KEYS
++  if (source == InputEventSource::Physical && mode == MODE_MOTION &&
++      bit == BoardPins::KeyDecrease) {
++    const UnifiedMacroGesture gesture = unifiedMacroGesture(
++        event, macroPlayback.captured(), suppressLocalMacroClassification);
++    switch (gesture) {
++      case UnifiedMacroGesture::ImmediateCapture:
++        suppressLocalMacroClassification = true;
++        if (macroPlayback.recording()) {
++          macroPlayback.finishCapture();
++        } else {
++          beginLocalMacroCapture();
++        }
++        return;
++      case UnifiedMacroGesture::Replay:
++        macroPlayback.playCapture(micros());
++        return;
++      case UnifiedMacroGesture::ReplaceCapture:
++        beginLocalMacroCapture();
++        return;
++      case UnifiedMacroGesture::SuppressClassification:
++        suppressLocalMacroClassification = false;
++        return;
++      case UnifiedMacroGesture::None:
++        return;
++    }
++  }
++#endif
+   const bool momentary = mode == MODE_MOTION_CONTROL ||
+                          (mode == MODE_USER_RELAY_CONTROL &&
+                           userRelayBehavior && bit == BoardPins::KeyIncrease);
+@@ -950,7 +988,8 @@ void applyKeyGesture(uint8_t bit, KeyEvent event,
+       }
+     }
+   } else if (keyEventRunsPrimaryAction(event) &&
+-             (event != KeyEvent::HoldRepeat || mode != MODE_KEYS)) {
++             (event != KeyEvent::HoldRepeat ||
++              (mode != MODE_KEYS && mode != MODE_MOTION))) {
+ #if PCCONTROLLER_ENABLE_MACRO_CAPTURE
+     const bool recordingBefore = macroPlayback.recording();
+ #endif
+@@ -1002,14 +1041,28 @@ void serviceMotionExit(uint32_t at) {
+     motionExitStartedAt = 0;
+     return;
+   }
+-  if (motionControl) {
+-    relays.allOff(at);
+-  }
+   if (motionExitStartedAt == 0xFFFFFFFFUL) {
+     return;
+   }
+   if (motionExitStartedAt == 0) {
+-    motionExitStartedAt = at;
++    for (uint8_t side = 0; side < 2; ++side) {
++      const ::RelaySide relaySide = static_cast<::RelaySide>(side);
++      const RelaySideStatus status = relays.sideStatus(relaySide);
++      if (!status.requestedEnabled && !status.appliedEnabled &&
++          status.phase == RelaySequencePhase::Idle) {
++        continue;
++      }
++      relays.stopSide(relaySide, at);
++      const uint8_t payload[] = {side, 0};
++      acceptedAction(InputEventSource::Physical,
++                     ControllerProtocol::RelaySide, payload,
++                     sizeof(payload));
++    }
++    relays.allOff(at);
++    acceptedAction(InputEventSource::Physical,
++                   ControllerProtocol::RelayAllOff, nullptr, 0);
++    motionPressedMask = 0;
++    motionExitStartedAt = at == 0 ? 1 : at;
+   } else if (static_cast<uint32_t>(at - motionExitStartedAt) >=
+              static_cast<uint16_t>(
+                  settingsStore.values().motionExitHoldSeconds()) * 1000U) {
+diff --git a/Project/Firmware/LifecycleRuntime.inc.h b/Project/Firmware/LifecycleRuntime.inc.h
+index 6d5508b6..0e53a3a5 100644
+--- a/Project/Firmware/LifecycleRuntime.inc.h
++++ b/Project/Firmware/LifecycleRuntime.inc.h
+@@ -28,7 +28,10 @@ static inline __attribute__((always_inline)) void initializeController() {
+   loadIlluminationSettings();
+   const ControllerSettings &settings = settingsStore.values();
+   const bool programming = settings.programmingMode();
+-  menuPage = settings.defaultMenuPage;
++  menuPage = canonicalFrontPanelPage(settings.defaultMenuPage);
++  if (!frontPanelPageCompiled(menuPage)) {
++    menuPage = PAGE_MOTION;
++  }
+   buzzer.setMuted(BuildForcesSilent || settings.silent() || programming);
+   streamPeriodMs = settings.streamPeriodMs;
+   display.begin(programming || systemInputs.doorOpen()
+@@ -47,6 +50,7 @@ static inline __attribute__((always_inline)) void initializeController() {
+     i2cBus.begin();
+     // Reset the TWI peripheral if any state remains blocked for 25 ms.
+     i2cBus.setWireTimeout(25000UL, true);
++#if PCCONTROLLER_ENABLE_PCA9685
+     pwmAvailable = pwmDriver.begin();
+     if (pwmAvailable) {
+       pwmAvailable =
+@@ -54,9 +58,12 @@ static inline __attribute__((always_inline)) void initializeController() {
+               static_cast<uint16_t>(BoardPins::PwmFrequencyHz)) &&
+           normalizePwmMode2();
+     }
+-
++#endif
++#if PCCONTROLLER_ENABLE_INA219
+     ina219Available = ina219.begin();
++#endif
+   }
++#if PCCONTROLLER_ENABLE_PCA9685
+   pwm.begin(pwmAvailable, startupNow);
+   if (programming) {
+     // A durable programming latch must not briefly restore an On/Auto light
+@@ -67,14 +74,17 @@ static inline __attribute__((always_inline)) void initializeController() {
+   illumination.begin(pwm, systemInputs.doorOpen(), startupNow);
+   statusLeds.begin(pwm, programming ? 0 : settings.statusBrightness, startupNow,
+                    !programming);
++#endif
+   applyStoredSettings(startupNow);
+   restoreStoredOutputs(startupNow);
+   appProtocol.service();
+   wdt_reset();
+ 
++#if PCCONTROLLER_ENABLE_DS18B20
+   temperatureBus.begin();
+   discoverTemperatureSensors();
+   requestTemperatures(startupNow);
++#endif
+   appProtocol.service();
+   wdt_reset();
+ 
+@@ -135,10 +145,14 @@ static inline __attribute__((always_inline)) void serviceController() {
+   }
+   serviceShiftRegisterAndKeys(loopNow);
+   serviceRemoteMomentary(loopNow);
++#if PCCONTROLLER_ENABLE_DS18B20
+   serviceTemperatures(loopNow);
++#endif
++#if PCCONTROLLER_ENABLE_INA219
+   if (!i2cReserved) {
+     sampleIna219(loopNow);
+   }
++#endif
+   programService(loopNow);
+ 
+   // Edge state suppresses duplicate events while a cadence allows repeated
+diff --git a/Project/Firmware/ProtocolRuntime.inc.h b/Project/Firmware/ProtocolRuntime.inc.h
+index 82db4687..46a01ef4 100644
+--- a/Project/Firmware/ProtocolRuntime.inc.h
++++ b/Project/Firmware/ProtocolRuntime.inc.h
+@@ -6,17 +6,30 @@
+ // Reports build identity, record shape, and independently testable capabilities.
+ void sendHello(uint8_t sequence) {
+   constexpr uint32_t capabilities =
++#if PCCONTROLLER_ENABLE_INA219
+       (1UL << 0) |  // INA219
++#endif
++#if PCCONTROLLER_ENABLE_DS18B20
+       (1UL << 1) |  // two DS18B20 sensors
++#endif
++#if PCCONTROLLER_ENABLE_PCA9685
+       (1UL << 2) |  // 16-channel PWM
++#endif
+       (1UL << 3) |  // relay safety controller
+       (1UL << 4) |  // 433 MHz RX/TX, learning, and action mapping
+       (1UL << 5) |  // TM1637
+-      (1UL << 6) |  // I2C LCD
++#if PCCONTROLLER_ENABLE_I2C_LCD
++      (1UL << 6) |  // MCU-rendered I2C LCD
++#endif
+       (1UL << 7) |  // addressable LEDs
+       (1UL << 8) |  // persistent settings
+       (1UL << 9) |  // menu remote control
++#if PCCONTROLLER_ENABLE_DS18B20
+       (1UL << 10) | // named temperature identities
++#endif
++#if PCCONTROLLER_ENABLE_MACRO_CAPTURE
++      (1UL << 11) | // board-local bounded capture/replay/export
++#endif
+       (1UL << 12) | // host display text and asynchronous events
+       (1UL << 13) | // exact front-panel snapshot
+       (1UL << 14) | // host-injected key lifecycle; Down acts immediately
+@@ -29,7 +42,7 @@ void sendHello(uint8_t sequence) {
+       (1UL << 19) | // host-captured front-panel session (DisplayText targets 3/4)
+       (1UL << 20) | // status bit 12 means buzzer queue/voice is busy
+       (1UL << 21) | // EEPROM-selectable 1..255 ms motion break time
+-      (1UL << 22) | // MCU-timed events/ACKs and queued macro schema 2
++      (1UL << 22) | // MCU-timed events/ACKs and queued macro schema 3
+ #if PCCONTROLLER_MENU_LAYOUT_PROTOCOL
+       (1UL << 23) | // persistent visible-mask and stable-ID rank permutation
+ #endif
+@@ -37,21 +50,50 @@ void sendHello(uint8_t sequence) {
+       (1UL << 25) | // scheduled segment once/loop/interval presentation
+       (1UL << 26) | // unsolicited changed-only TM1637 state frames
+       (1UL << 27) | // unsolicited buzzer frequency/duration frames
++#if PCCONTROLLER_ENABLE_PCA9685
+       (1UL << 28) | // MCU-owned procedural status LED effects
+       (1UL << 29) | // unsolicited rendered status LED state frames
+       (1UL << 30) | // EEPROM-resident condition status profiles
++#endif
+       (1UL << 31) | // checksum-backed operator board name (up to 8 ASCII chars)
+       0;
+-  // HelloPayload is the fixed build identity and capability response.
++  constexpr uint8_t featureProfile =
++#if PCCONTROLLER_UNIFIED_PAGE_IDENTIFIES_KEYS
++      ControllerProtocol::KeyDiagnosticProfile;
++#elif PCCONTROLLER_ENABLE_INA219 && PCCONTROLLER_ENABLE_DS18B20 && \
++    PCCONTROLLER_ENABLE_PCA9685 && PCCONTROLLER_ENABLE_I2C_LCD
++      ControllerProtocol::FullPeripheralProfile;
++#elif !PCCONTROLLER_ENABLE_INA219 && !PCCONTROLLER_ENABLE_DS18B20 && \
++    !PCCONTROLLER_ENABLE_PCA9685 && !PCCONTROLLER_ENABLE_I2C_LCD
++      ControllerProtocol::MotionMacroProfile;
++#else
++      ControllerProtocol::CustomFeatureProfile;
++#endif
++  constexpr uint8_t buildFlags =
++      (PCCONTROLLER_ENABLE_MACRO_CAPTURE
++           ? ControllerProtocol::LocalMacroCapture
++           : 0) |
++      (PCCONTROLLER_UNIFIED_PAGE_IDENTIFIES_KEYS
++           ? ControllerProtocol::UnifiedPageIdentifiesKeys
++           : 0) |
++      (PCCONTROLLER_FORCE_SILENT ? ControllerProtocol::ForceSilent : 0) |
++      (PCCONTROLLER_BLANK_EEPROM_SILENT
++           ? ControllerProtocol::BlankEepromSilent
++           : 0);
++  // Schema 4 preserves the prior identity prefix and appends explicit profile
++  // truth so a host never guesses compile-time behavior from runtime absence.
+   struct __attribute__((packed)) HelloPayload {
+     uint8_t schema;
+     uint8_t boardKind;
+     uint32_t capabilities;
+     uint32_t buildHash;
+     uint32_t buildTimestamp;
+-  } payload = {3, 1, capabilities,
++    uint8_t featureProfile;
++    uint8_t buildFlags;
++  } payload = {4, 1, capabilities,
+                pgm_read_dword(&firmwareIdentity.sourceHash),
+-               pgm_read_dword(&firmwareIdentity.packedTimestamp)};
++               pgm_read_dword(&firmwareIdentity.packedTimestamp),
++               featureProfile, buildFlags};
+   appProtocol.send(ControllerProtocol::HelloResponse, sequence,
+                    reinterpret_cast<const uint8_t *>(&payload),
+                    sizeof(payload));
+@@ -108,6 +150,7 @@ void sendSettings(uint8_t sequence) {
+ }
+ 
+ // Reports all logical PWM values plus controller availability and selection.
++#if PCCONTROLLER_ENABLE_PCA9685
+ void sendPwmValues(uint8_t sequence) {
+   uint8_t payload[34];
+   uint8_t index = 0;
+@@ -119,8 +162,10 @@ void sendPwmValues(uint8_t sequence) {
+   appProtocol.send(ControllerProtocol::PwmValuesResponse, sequence, payload,
+                    index);
+ }
++#endif
+ 
+ // Pages detected DS18B20 ROM identities, roles, and current readings.
++#if PCCONTROLLER_ENABLE_DS18B20
+ void sendTemperatureList(uint8_t sequence) {
+   uint8_t payload[24] = {1, temperatureAddressCount};
+   uint8_t index = 2;
+@@ -135,6 +180,7 @@ void sendTemperatureList(uint8_t sequence) {
+   appProtocol.send(ControllerProtocol::TemperatureListResponse, sequence,
+                    payload, index);
+ }
++#endif
+ 
+ // Mirrors physical/host panel segments, keys, LCD metadata, and macro progress.
+ void sendFrontPanel(uint8_t sequence) {
+@@ -471,8 +517,12 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
+       goto acknowledged;
+ 
+     case TemperatureList:
++#if !PCCONTROLLER_ENABLE_DS18B20
++      goto hardwareUnavailable;
++#else
+       sendTemperatureList(frame.sequence);
+       return;
++#endif
+ 
+     case FrontPanelGet:
+       sendFrontPanel(frame.sequence);
+@@ -519,6 +569,9 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
+       goto acknowledged;
+ 
+     case PwmSet: {
++#if !PCCONTROLLER_ENABLE_PCA9685
++      goto hardwareUnavailable;
++#else
+       const uint16_t value = length >= 3 ? readU16(payload + 1) : 0;
+       if (length < 3 || payload[0] >= PwmChannels::Count || value > 4095) {
+         goto badPayload;
+@@ -530,15 +583,23 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
+         storeUserPwmValue(payload[0], value);
+       }
+       goto acknowledged;
++#endif
+     }
+ 
+     case PwmAllOff:
++#if !PCCONTROLLER_ENABLE_PCA9685
++      goto hardwareUnavailable;
++#else
+       if (!pwm.tryAllOff()) {
+         goto hardwareUnavailable;
+       }
+       goto acknowledged;
++#endif
+ 
+     case StatusRgb:
++#if !PCCONTROLLER_ENABLE_PCA9685
++      goto hardwareUnavailable;
++#else
+       if (length < 4) {
+         goto badPayload;
+       }
+@@ -546,8 +607,12 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
+       statusLeds.setBrightness(payload[3]);
+       statusLeds.setCustom(payload[0], payload[1], payload[2]);
+       goto acknowledged;
++#endif
+ 
+     case StatusEffect:
++#if !PCCONTROLLER_ENABLE_PCA9685
++      goto hardwareUnavailable;
++#else
+       // [kind][RGB A][RGB B][brightness][minimum brightness][period u16]
+       // [repeats]. Repeats zero loops; 1..255 are MCU-counted cycles.
+       if (length == 1 && payload[0] == 0) {
+@@ -564,8 +629,12 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
+       }
+       hostLcdFlags |= HOST_STATUS_OVERRIDE;
+       goto acknowledged;
++#endif
+ 
+     case StatusProfileGet: {
++#if !PCCONTROLLER_ENABLE_PCA9685
++      goto hardwareUnavailable;
++#else
+       if (length < 1 || payload[0] >= StatusLedController::ProfileCount) {
+         goto badPayload;
+       }
+@@ -576,14 +645,19 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
+       appProtocol.send(ControllerProtocol::StatusProfileResponse,
+                        frame.sequence, response, sizeof(response));
+       return;
++#endif
+     }
+ 
+     case StatusProfileSet:
++#if !PCCONTROLLER_ENABLE_PCA9685
++      goto hardwareUnavailable;
++#else
+       if (length < 1 + StatusLedController::ProfilePayloadBytes ||
+           !statusLeds.setProfile(payload[0], payload + 1, frameNow)) {
+         goto badPayload;
+       }
+       goto acknowledged;
++#endif
+ 
+     case ProgramState:
+       // Only the semantic one-byte prefix is required; future appended state
+@@ -601,8 +675,12 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
+       goto acknowledged;
+ 
+     case PwmGet:
++#if !PCCONTROLLER_ENABLE_PCA9685
++      goto hardwareUnavailable;
++#else
+       sendPwmValues(frame.sequence);
+       return;
++#endif
+ 
+     case AddressableLed: {
+       // [pixel 0..10, or 0xFF=fill][R][G][B][brightness].
+@@ -692,7 +770,8 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
+       goto acknowledged;
+ 
+     case MenuSetPage:
+-      if (length < 1 || payload[0] >= PAGE_COUNT) {
++      if (length < 1 || payload[0] >= PAGE_COUNT ||
++          !frontPanelPageCompiled(canonicalFrontPanelPage(payload[0]))) {
+         goto badPayload;
+       }
+       if (modeManager.current() == MODE_MOTION_CONTROL) {
+diff --git a/Project/Firmware/RadioRuntime.inc.h b/Project/Firmware/RadioRuntime.inc.h
+index 7412e7a3..7999de7a 100644
+--- a/Project/Firmware/RadioRuntime.inc.h
++++ b/Project/Firmware/RadioRuntime.inc.h
+@@ -113,6 +113,7 @@ void stopRemoteMomentary(uint32_t at) {
+       break;
+     }
+     case RemoteActionKind::Pwm: {
++#if PCCONTROLLER_ENABLE_PCA9685
+       pwm.setChannel(remoteMomentaryValue, at);
+       pwm.setValue(0, at);
+       storeUserPwmValue(remoteMomentaryValue, 0);
+@@ -121,6 +122,7 @@ void stopRemoteMomentary(uint32_t at) {
+         acceptedAction(InputEventSource::Radio, ControllerProtocol::PwmSet,
+                        payload, sizeof(payload));
+       }
++#endif
+       break;
+     }
+     default:
+@@ -157,15 +159,15 @@ void executeLearnedRemote(const LearnedRemote &remote, uint32_t at) {
+       appEvents.key(remote.actionValue,
+                     static_cast<uint8_t>(KeyEvent::Down),
+                     InputEventSource::Radio, remote.id);
+-      handleMenuAction(remote.actionValue, true);
+-      {
+-        const uint8_t payload[] = {remote.actionValue};
+-        acceptedAction(InputEventSource::Radio,
+-                       ControllerProtocol::MenuAction, payload,
+-                       sizeof(payload));
+-      }
++      applyKeyGesture(remote.actionValue, KeyEvent::Down,
++                      InputEventSource::Radio, true);
+       return;
+     case RemoteActionKind::Menu:
++      if (modeManager.current() == MODE_MOTION_CONTROL) {
++        applyKeyGesture(remote.actionValue, KeyEvent::Down,
++                        InputEventSource::Radio, true);
++        return;
++      }
+       handleMenuAction(remote.actionValue, true);
+       {
+         const uint8_t payload[] = {remote.actionValue};
+@@ -228,6 +230,7 @@ void executeLearnedRemote(const LearnedRemote &remote, uint32_t at) {
+       }
+       return;
+     case RemoteActionKind::Pwm: {
++#if PCCONTROLLER_ENABLE_PCA9685
+       pwm.setChannel(remote.actionValue, at);
+       const bool active = pwm.logicalValue(remote.actionValue) != 0;
+       const uint16_t value = behavior == RemoteBehavior::Momentary
+@@ -247,6 +250,7 @@ void executeLearnedRemote(const LearnedRemote &remote, uint32_t at) {
+         remoteMomentaryValue = remote.actionValue;
+         remoteMomentaryEndsAt = at + 350;
+       }
++#endif
+       return;
+     }
+     case RemoteActionKind::None:
+diff --git a/Project/Firmware/SensorRuntime.inc.h b/Project/Firmware/SensorRuntime.inc.h
+index 6286f52e..0f995429 100644
+--- a/Project/Firmware/SensorRuntime.inc.h
++++ b/Project/Firmware/SensorRuntime.inc.h
+@@ -47,6 +47,7 @@ bool prepareI2cBus() {
+ }
+ 
+ // Restores the active-high/low MODE2 contract after PWM startup.
++#if PCCONTROLLER_ENABLE_PCA9685
+ bool normalizePwmMode2() {
+   constexpr uint8_t expectedMode2 = PwmController::recommendedMode2();
+   constexpr uint8_t PwmMode2Register = 0x01;
+@@ -56,8 +57,10 @@ bool normalizePwmMode2() {
+   i2cBus.write(expectedMode2);
+   return i2cBus.endTransmission() == 0;
+ }
++#endif
+ 
+ // Low-pass a completed INA219 sample in-place without another history buffer.
++#if PCCONTROLLER_ENABLE_INA219
+ __attribute__((noinline)) int32_t
+ smoothInaValue(int32_t previous, int32_t sample, bool currentOrPower) {
+   if (previous == INVALID_I32) {
+@@ -92,8 +95,10 @@ void sampleIna219(uint32_t at) {
+                                      index >= 2);
+   }
+ }
++#endif
+ 
+ // Gives DS18B20 probes a deterministic ROM order before role assignment.
++#if PCCONTROLLER_ENABLE_DS18B20
+ void sortTemperatureAddresses() {
+   if (temperatureAddressCount < 2 ||
+       memcmp(temperatureAddresses[0], temperatureAddresses[1], 8) <= 0) {
+@@ -193,3 +198,4 @@ void serviceTemperatures(uint32_t at) {
+     requestTemperatures(at);
+   }
+ }
++#endif
+diff --git a/Project/FrontPanelModel.h b/Project/FrontPanelModel.h
+index 2685267c..3179b925 100644
+--- a/Project/FrontPanelModel.h
++++ b/Project/FrontPanelModel.h
+@@ -2,6 +2,9 @@
+ 
+ #include <stdint.h>
+ 
++#include "../LocalLib/Keys.h"
++#include "../ProjectConfig.h"
++
+ // Physical, RF, and host keys share these stable four action IDs.
+ enum MenuAction : uint8_t {
+   MENU_PREVIOUS = 0,
+@@ -37,7 +40,26 @@ constexpr uint8_t canonicalFrontPanelPage(uint8_t page) {
+ }
+ 
+ constexpr bool frontPanelPageCompiled(uint8_t page) {
+-  return page < PAGE_COUNT && page != PAGE_KEYS;
++  if (page >= PAGE_COUNT || page == PAGE_KEYS) {
++    return false;
++  }
++#if !PCCONTROLLER_ENABLE_INA219
++  if (page == PAGE_VOLTAGE || page == PAGE_CURRENT) {
++    return false;
++  }
++#endif
++#if !PCCONTROLLER_ENABLE_DS18B20
++  if (page == PAGE_TLED || page == PAGE_TBT) {
++    return false;
++  }
++#endif
++#if !PCCONTROLLER_ENABLE_PCA9685
++  if (page == PAGE_ILLUMINATION || page == PAGE_PWM ||
++      page == PAGE_USER_PWM) {
++    return false;
++  }
++#endif
++  return true;
+ }
+ 
+ // Top-level pages and modal editors consumed by ModeManager.
+@@ -115,6 +137,40 @@ constexpr UnifiedInputIntent unifiedInputIntent(MenuAction action,
+                                  : UnifiedInputIntent::Motion;
+ }
+ 
++// The local macro key is immediate while starting/stopping capture. Once data
++// exists it deliberately becomes a classified key: Click replays and the
++// one-shot HoldStart replaces the old capture without first playing outputs.
++enum class UnifiedMacroGesture : uint8_t {
++  None,
++  ImmediateCapture,
++  Replay,
++  ReplaceCapture,
++  SuppressClassification,
++};
++
++constexpr UnifiedMacroGesture unifiedMacroGesture(KeyEvent event,
++                                                   bool hasCapture,
++                                                   bool suppressClassification) {
++  if (event == KeyEvent::Down && !hasCapture) {
++    return UnifiedMacroGesture::ImmediateCapture;
++  }
++  const bool classified = event == KeyEvent::Click ||
++                          event == KeyEvent::DoubleClick ||
++                          event == KeyEvent::HoldStart;
++  if (classified && suppressClassification) {
++    return UnifiedMacroGesture::SuppressClassification;
++  }
++  if (!hasCapture) {
++    return UnifiedMacroGesture::None;
++  }
++  if (event == KeyEvent::Click || event == KeyEvent::DoubleClick) {
++    return UnifiedMacroGesture::Replay;
++  }
++  return event == KeyEvent::HoldStart
++             ? UnifiedMacroGesture::ReplaceCapture
++             : UnifiedMacroGesture::None;
++}
++
+ // One immutable mapping is consumed by physical, injected, and native tests.
+ struct MotionKeyBinding {
+   uint8_t side;
+diff --git a/Project/IlluminationController.cpp b/Project/IlluminationController.cpp
+index c34ff11b..d4c34032 100644
+--- a/Project/IlluminationController.cpp
++++ b/Project/IlluminationController.cpp
+@@ -1,5 +1,7 @@
+ #include "IlluminationController.h"
+ 
++#if PCCONTROLLER_ENABLE_PCA9685
++
+ #include "PwmController.h"
+ #include "TransitionMath.h"
+ 
+@@ -98,3 +100,6 @@ IlluminationController::targetBrightness(bool doorOpen) const {
+   }
+   return offBrightness_;
+ }
++#else
++IlluminationController illumination;
++#endif
+diff --git a/Project/IlluminationController.h b/Project/IlluminationController.h
+index 54f6bd45..8d7256a7 100644
+--- a/Project/IlluminationController.h
++++ b/Project/IlluminationController.h
+@@ -2,6 +2,8 @@
+ 
+ #include <Arduino.h>
+ 
++#include "../ProjectConfig.h"
++
+ class PwmController;
+ 
+ // IlluminationMode selects forced-off, forced-on, or door-driven brightness.
+@@ -12,6 +14,7 @@ enum class IlluminationMode : uint8_t {
+ };
+ 
+ // Drives enclosure PWM toward Off/Auto/On targets with a nonblocking fade.
++#if PCCONTROLLER_ENABLE_PCA9685
+ class IlluminationController {
+ public:
+   // Starts from the electrically observed door target without a startup jump.
+@@ -40,6 +43,35 @@ private:
+   PwmController *pwm_ = nullptr;
+   bool initialized_ = false;
+ };
++#else
++class IlluminationController {
++public:
++  void begin(PwmController &, bool doorOpen, uint32_t = millis()) {
++    currentBrightness_ = targetBrightness(doorOpen);
++  }
++  void service(bool, bool, uint32_t = millis()) {}
++  void setMode(IlluminationMode mode) { mode_ = mode; }
++  IlluminationMode mode() const { return mode_; }
++  void setOnBrightness(uint8_t value) { onBrightness_ = value; }
++  void setOffBrightness(uint8_t value) { offBrightness_ = value; }
++  uint8_t onBrightness() const { return onBrightness_; }
++  uint8_t offBrightness() const { return offBrightness_; }
++  uint8_t currentBrightness() const { return currentBrightness_; }
++  uint8_t targetBrightness(bool doorOpen) const {
++    return mode_ == IlluminationMode::On
++               ? onBrightness_
++               : (mode_ == IlluminationMode::Auto && doorOpen
++                      ? onBrightness_
++                      : offBrightness_);
++  }
++
++private:
++  IlluminationMode mode_ = IlluminationMode::Auto;
++  uint8_t onBrightness_ = 128;
++  uint8_t offBrightness_ = 0;
++  uint8_t currentBrightness_ = 0;
++};
++#endif
+ 
+ // illumination is the single enclosure-light transition controller.
+ extern IlluminationController illumination;
+diff --git a/Project/MacroAction.h b/Project/MacroAction.h
+index ee271e50..a4b3e9fa 100644
+--- a/Project/MacroAction.h
++++ b/Project/MacroAction.h
+@@ -22,7 +22,7 @@ constexpr uint8_t payloadLength(uint8_t opcode) {
+ #define PCCONTROLLER_MACRO_ACTION(name, captureLength)                       \
+     case name:                                                               \
+       return captureLength;
+-#include "MacroActions.def"
++#include "MacroActions.inc.h"
+ #undef PCCONTROLLER_MACRO_ACTION
+     default:
+       return 0xFF;
+@@ -33,7 +33,7 @@ constexpr bool playbackAllowed(uint8_t opcode) {
+   using namespace ControllerProtocol;
+   switch (opcode) {
+ #define PCCONTROLLER_MACRO_ACTION(name, captureLength) case name:
+-#include "MacroActions.def"
++#include "MacroActions.inc.h"
+ #undef PCCONTROLLER_MACRO_ACTION
+       return true;
+     default:
+@@ -41,6 +41,18 @@ constexpr bool playbackAllowed(uint8_t opcode) {
+   }
+ }
+ 
++// Fixed-shape actions must use their exact canonical payload on raw playback.
++// Variable-shape rows remain bounded by the native frame and are validated by
++// the ordinary opcode dispatcher immediately before touching hardware.
++constexpr bool validPlaybackPayload(uint8_t opcode, uint8_t payloadBytes) {
++  if (!playbackAllowed(opcode) ||
++      payloadBytes > ControllerProtocol::MaximumPayload) {
++    return false;
++  }
++  const uint8_t fixed = payloadLength(opcode);
++  return fixed == 0xFF || payloadBytes == fixed;
++}
++
+ constexpr bool recordable(uint8_t opcode, uint8_t availablePayload) {
+   const uint8_t required = payloadLength(opcode);
+   return required != 0xFF && availablePayload >= required &&
+diff --git a/Project/MacroActions.def b/Project/MacroActions.inc.h
+similarity index 77%
+rename from Project/MacroActions.def
+rename to Project/MacroActions.inc.h
+index 7e93172f..b4b517ba 100644
+--- a/Project/MacroActions.def
++++ b/Project/MacroActions.inc.h
+@@ -1,8 +1,9 @@
+ // name, fixed board-capture payload length (0xFF = playback-only/variable)
+ //
+ // This file is deliberately an X-macro/data source without include guards.
+-// C++, VirtualBoard, and the Go contract generator consume these exact rows so
+-// the raw macro allow-list cannot drift among execution surfaces.
++// Its header extension makes Arduino copy it into the compiled sketch. C++,
++// VirtualBoard, and the Go contract generator consume these exact rows so the
++// raw macro allow-list cannot drift among execution surfaces.
+ PCCONTROLLER_MACRO_ACTION(Buzzer, 4)
+ PCCONTROLLER_MACRO_ACTION(PwmSet, 3)
+ PCCONTROLLER_MACRO_ACTION(PwmAllOff, 0)
+diff --git a/Project/MacroQueue.cpp b/Project/MacroQueue.cpp
+index fce39dcb..a65389fd 100644
+--- a/Project/MacroQueue.cpp
++++ b/Project/MacroQueue.cpp
+@@ -34,24 +34,33 @@ bool MacroQueue::recordReady() const {
+   return used_ >= 6 && used_ >= static_cast<uint8_t>(6 + peek(5));
+ }
+ 
+-bool MacroQueue::bufferedRecordsValid() const {
++uint32_t read32(const uint8_t *value) {
++  return static_cast<uint32_t>(value[0]) |
++         static_cast<uint32_t>(value[1]) << 8 |
++         static_cast<uint32_t>(value[2]) << 16 |
++         static_cast<uint32_t>(value[3]) << 24;
++}
++
++bool MacroQueue::bufferedRecordsValid(uint16_t completeSteps) const {
+   uint16_t offset = 0;
++  uint16_t countedSteps = wire_.report.executedSteps;
+   while (static_cast<uint16_t>(used_) - offset >=
+          MacroAction::RecordHeaderBytes) {
+     const uint8_t opcode = peek(static_cast<uint8_t>(offset + 4U));
+     const uint8_t payloadLength = peek(static_cast<uint8_t>(offset + 5U));
+-    if (!MacroAction::playbackAllowed(opcode) ||
+-        payloadLength > ControllerProtocol::MaximumPayload) {
++    if (!MacroAction::validPlaybackPayload(opcode, payloadLength) ||
++        peekU32(static_cast<uint8_t>(offset)) > 0x7FFFFFFFUL) {
+       return false;
+     }
+     const uint16_t recordLength =
+         MacroAction::RecordHeaderBytes + payloadLength;
+     if (static_cast<uint16_t>(used_) - offset < recordLength) {
+-      return true; // a valid header with a split payload tail
++      break; // a valid header with a split payload tail
+     }
++    ++countedSteps;
+     offset += recordLength;
+   }
+-  return true;
++  return countedSteps == completeSteps;
+ }
+ 
+ void MacroQueue::appendByte(uint8_t value) {
+@@ -64,7 +73,9 @@ void MacroQueue::preserveCaptureSnapshot() {
+   capturedHead_ = head_;
+   capturedUsed_ = used_;
+   capturedSteps_ = retainedSteps_;
+-  capturedData_ = retainedSteps_ != 0;
++  // Even an empty recording is a terminal, recoverable lifecycle. This lets a
++  // connected host finalize/discard it instead of remaining Recording forever.
++  capturedData_ = true;
+ }
+ 
+ void MacroQueue::restoreCaptureSnapshot() {
+@@ -132,7 +143,7 @@ bool MacroQueue::handle(const ControllerProtocol::Frame &frame) {
+     // duplicating tolerance/statistics code in AVR flash.
+     // Duration remains host-owned because the hosted front-panel macro page
+     // already has the complete library and this saves scarce AVR flash.
+-    if (length < 5 || payload[0] != Schema) {
++    if (length < 5 || payload[0] != Schema || read16(payload + 3) == 0) {
+       protocol_.sendError(frame.sequence, frame.opcode,
+                           ControllerProtocol::BadPayload);
+       return true;
+@@ -184,6 +195,42 @@ bool MacroQueue::handle(const ControllerProtocol::Frame &frame) {
+     sendCaptureChunk(frame.sequence, offset);
+     return true;
+   }
++  // ACK_EXPORT [4, id, capture-start micros LE32]. Retained data remains
++  // replayable/fetchable; the terminal state prevents duplicate import after
++  // reconnect or a host process restart.
++  if (length == 6 && payload[0] == 4) {
++    if (!captured() || payload[1] != report.id ||
++        read32(payload + 2) != report.startedAtUs) {
++      protocol_.sendError(frame.sequence, frame.opcode,
++                          ControllerProtocol::BadPayload);
++      return true;
++    }
++    options_ |= CaptureExportAcknowledged;
++    report.state = Exported;
++    protocol_.sendAck(frame.sequence, frame.opcode);
++    sendStatus(ControllerProtocol::Event, 0);
++    return true;
++  }
++  // CLEAR_CAPTURE [5, id, capture-start micros LE32] is an explicit user
++  // action, not part of import. It requests a safe output stop before deleting
++  // the identity-guarded retained ring.
++  if (length == 6 && payload[0] == 5) {
++    if (!captured() || payload[1] != report.id ||
++        read32(payload + 2) != report.startedAtUs) {
++      protocol_.sendError(frame.sequence, frame.opcode,
++                          ControllerProtocol::BadPayload);
++      return true;
++    }
++    head_ = used_ = capturedHead_ = capturedUsed_ = 0;
++    retainedSteps_ = capturedSteps_ = 0;
++    capturedData_ = capturePlayback_ = false;
++    options_ = 0;
++    safeStopRequested_ = true;
++    report.state = Idle;
++    protocol_.sendAck(frame.sequence, frame.opcode);
++    sendStatus(ControllerProtocol::Event, 0);
++    return true;
++  }
+ #endif
+   if (length != 0 && payload[0] == 2) {
+     sendStatus(ControllerProtocol::MacroStatusResponse, frame.sequence);
+@@ -208,7 +255,7 @@ bool MacroQueue::handle(const ControllerProtocol::Frame &frame) {
+   }
+ 
+   // APPEND [0][stream offset LE16][complete step index LE16][bytes...].
+-  if (length < 6 || payload[0] != 0 || !active() ||
++  if (length < 6 || payload[0] != 0 || !hostDependent() ||
+       read16(payload + 1) != report.acceptedBytes ||
+       read16(payload + 3) < report.acceptedSteps ||
+       read16(payload + 3) > report.totalSteps ||
+@@ -221,7 +268,7 @@ bool MacroQueue::handle(const ControllerProtocol::Frame &frame) {
+   for (uint8_t index = 5; index < length; ++index) {
+     appendByte(payload[index]);
+   }
+-  if (!bufferedRecordsValid()) {
++  if (!bufferedRecordsValid(read16(payload + 3))) {
+     fail();
+     protocol_.sendError(frame.sequence, frame.opcode,
+                         ControllerProtocol::BadPayload);
+@@ -245,19 +292,13 @@ bool MacroQueue::dequeueDue(ControllerProtocol::Frame &frame) {
+       return false;
+     }
+     const uint8_t payloadLength = peek(5);
+-    if (payloadLength > ControllerProtocol::MaximumPayload ||
+-        !MacroAction::playbackAllowed(peek(4))) {
++    if (!MacroAction::validPlaybackPayload(peek(4), payloadLength)) {
+       ++report.dispatchErrors;
+       fail();
+       return false;
+     }
+     const uint32_t actual = micros();
+     uint32_t due = peekU32(0);
+-#if PCCONTROLLER_ENABLE_MACRO_CAPTURE
+-    if (capturePlayback_) {
+-      due -= capturePlaybackOffsetUs_;
+-    }
+-#endif
+     const int32_t error =
+         static_cast<int32_t>(actual - (startedAtUs_ + due));
+     if (error < 0) {
+@@ -296,6 +337,12 @@ void MacroQueue::completeStep(bool succeeded) {
+     ++report.dispatchErrors;
+   }
+   if (report.executedSteps == report.totalSteps) {
++    const bool exportedCapture =
++#if PCCONTROLLER_ENABLE_MACRO_CAPTURE
++        capturePlayback_ && (options_ & CaptureExportAcknowledged) != 0;
++#else
++        false;
++#endif
+     report.state = used_ == 0 && report.dispatchErrors == 0 ? Completed
+                                                             : Failed;
+     safeStopRequested_ = report.state == Failed;
+@@ -311,6 +358,11 @@ void MacroQueue::completeStep(bool succeeded) {
+     head_ = used_ = 0;
+ #endif
+     sendStatus(ControllerProtocol::Event, 0);
++#if PCCONTROLLER_ENABLE_MACRO_CAPTURE
++    if (exportedCapture && capturedData_) {
++      report.state = Exported;
++    }
++#endif
+   }
+ }
+ 
+@@ -348,7 +400,12 @@ bool MacroQueue::active() const {
+ }
+ 
+ bool MacroQueue::hostDependent() const {
+-  return wire_.report.state == Buffering || wire_.report.state == Playing;
++  return wire_.report.state == Buffering ||
++         (wire_.report.state == Playing
++#if PCCONTROLLER_ENABLE_MACRO_CAPTURE
++          && !capturePlayback_
++#endif
++         );
+ }
+ 
+ #if PCCONTROLLER_ENABLE_MACRO_CAPTURE
+@@ -365,7 +422,6 @@ bool MacroQueue::beginCapture(uint8_t id, uint32_t atUs) {
+   startedAtUs_ = atUs;
+   head_ = used_ = 0;
+   retainedSteps_ = 0;
+-  capturePlaybackOffsetUs_ = 0;
+   capturePlayback_ = false;
+   capturedData_ = false;
+   options_ = 0;
+@@ -385,8 +441,10 @@ bool MacroQueue::captureAction(uint8_t opcode, const uint8_t *payload,
+   }
+   const uint8_t recordLength =
+       static_cast<uint8_t>(MacroAction::RecordHeaderBytes + payloadLength);
++  const uint32_t due = atUs - startedAtUs_;
+   Report &report = wire_.report;
+-  if (static_cast<uint16_t>(used_) + recordLength > QueueCapacity) {
++  if (due > 0x7FFFFFFFUL ||
++      static_cast<uint16_t>(used_) + recordLength > QueueCapacity) {
+     // Never overwrite an unconsumed record. The exact retained prefix remains
+     // downloadable/playable; a connected host still receives this action's
+     // separate timestamped evidence and can preserve the complete sequence.
+@@ -400,7 +458,6 @@ bool MacroQueue::captureAction(uint8_t opcode, const uint8_t *payload,
+     return false;
+   }
+ 
+-  const uint32_t due = atUs - startedAtUs_;
+   appendByte(static_cast<uint8_t>(due));
+   appendByte(static_cast<uint8_t>(due >> 8));
+   appendByte(static_cast<uint8_t>(due >> 16));
+@@ -442,8 +499,6 @@ bool MacroQueue::playCapture(uint32_t atUs) {
+   report.underruns = 0;
+   report.totalSteps = retainedSteps_;
+   startedAtUs_ = atUs;
+-  report.startedAtUs = atUs;
+-  capturePlaybackOffsetUs_ = peekU32(0);
+   capturePlayback_ = true;
+   safeStopRequested_ = false;
+   sendStatus(ControllerProtocol::Event, 0);
+diff --git a/Project/MacroQueue.h b/Project/MacroQueue.h
+index bed7ca5b..a77a86ac 100644
+--- a/Project/MacroQueue.h
++++ b/Project/MacroQueue.h
+@@ -6,6 +6,16 @@
+ #include "MacroAction.h"
+ #include "UartProtocol.h"
+ 
++#if defined(_MSC_VER)
++#define PCCONTROLLER_PACK_PUSH __pragma(pack(push, 1))
++#define PCCONTROLLER_PACK_POP __pragma(pack(pop))
++#define PCCONTROLLER_PACKED
++#else
++#define PCCONTROLLER_PACK_PUSH
++#define PCCONTROLLER_PACK_POP
++#define PCCONTROLLER_PACKED __attribute__((packed))
++#endif
++
+ // Buffers ordinary protocol commands against USB/network jitter and releases
+ // them from the AVR microsecond clock without duplicating peripheral guards.
+ class MacroQueue {
+@@ -13,6 +23,7 @@ public:
+   static constexpr uint8_t Schema = 3;
+   static constexpr uint8_t ExecutionSequence = 0xFE;
+   static constexpr uint8_t KeepOutputsOnCancel = 1U << 0;
++  static constexpr uint8_t CaptureExportAcknowledged = 1U << 7;
+   static constexpr uint8_t QueueSize = 128;
+   static constexpr uint8_t QueueCapacity = QueueSize - 1U;
+ 
+@@ -26,6 +37,7 @@ public:
+     Failed = 5,
+     Recording = 6,
+     Captured = 7,
++    Exported = 8,
+   };
+ 
+   explicit MacroQueue(ControllerProtocol::UartProtocol &protocol);
+@@ -58,8 +70,10 @@ public:
+ private:
+   static constexpr uint8_t QueueMask = QueueSize - 1;
+ 
+-  // Report is the synchronous macro status response payload.
+-  struct __attribute__((packed)) Report {
++  // Report is the synchronous macro status response payload. Keep the packing
++  // portable because this shared core is compiled by AVR-GCC and MSVC.
++  PCCONTROLLER_PACK_PUSH
++  struct PCCONTROLLER_PACKED Report {
+     uint8_t schema;
+     uint8_t state;
+     uint8_t id;
+@@ -75,15 +89,21 @@ private:
+   };
+ 
+   // EventReport records MCU timing fidelity for one dispatched step.
+-  struct __attribute__((packed)) EventReport {
++  struct PCCONTROLLER_PACKED EventReport {
+     uint8_t type;
+     Report report;
+   } wire_;
++  PCCONTROLLER_PACK_POP
++
++  static_assert(sizeof(Report) == 20,
++                "macro report wire shape changed unexpectedly");
++  static_assert(sizeof(EventReport) == 21,
++                "macro event wire shape changed unexpectedly");
+ 
+   uint8_t peek(uint8_t offset) const;
+   uint32_t peekU32(uint8_t offset) const;
+   bool recordReady() const;
+-  bool bufferedRecordsValid() const;
++  bool bufferedRecordsValid(uint16_t completeSteps) const;
+   void appendByte(uint8_t value);
+ #if PCCONTROLLER_ENABLE_MACRO_CAPTURE
+   void sendCaptureChunk(uint8_t sequence, uint16_t offset);
+@@ -102,7 +122,6 @@ private:
+   bool safeStopRequested_ = false;
+ #if PCCONTROLLER_ENABLE_MACRO_CAPTURE
+   uint16_t retainedSteps_ = 0;
+-  uint32_t capturePlaybackOffsetUs_ = 0;
+   uint8_t capturedHead_ = 0;
+   uint8_t capturedUsed_ = 0;
+   uint16_t capturedSteps_ = 0;
+@@ -119,3 +138,7 @@ static_assert(MacroQueue::QueueSize >=
+               "macro byte ring must retain at least two maximum actions");
+ static_assert(MacroQueue::QueueCapacity < 0x80U,
+               "macro used/head arithmetic requires a seven-bit capacity");
++
++#undef PCCONTROLLER_PACKED
++#undef PCCONTROLLER_PACK_POP
++#undef PCCONTROLLER_PACK_PUSH
+diff --git a/Project/ProtocolContract.h b/Project/ProtocolContract.h
+index bd6863f8..a10cf9b7 100644
+--- a/Project/ProtocolContract.h
++++ b/Project/ProtocolContract.h
+@@ -4,6 +4,8 @@
+ 
+ namespace ControllerProtocol {
+ 
++constexpr uint8_t MaximumPayload = 48;
++
+ // Opcode is the platform-neutral native request, response, and event registry.
+ // AVR transport and VirtualBoard/shared policy code include this one contract.
+ enum Opcode : uint8_t {
+@@ -86,4 +88,44 @@ enum Error : uint8_t {
+   Unsafe = 6,
+ };
+ 
++// EventType is the byte at the beginning of an asynchronous Event payload.
++// It lives beside Opcode so the AVR, VirtualBoard, and host generators consume
++// one platform-neutral registry instead of maintaining parallel definitions.
++enum class EventType : uint8_t {
++  Key = 1,
++  Door = 2,
++  Bluetooth = 3,
++  PwmChannel = 4,
++  RfLearned = 5,
++  Macro = 6,
++  Fault = 7,
++  RfReceived = 8,
++  RfLearning = 9,
++  Relay = 10,
++  Alert = 11,
++  AppNavigation = 12,
++  Action = 13,
++};
++
++// InputEventSource identifies the origin of accepted action evidence.
++enum class InputEventSource : uint8_t {
++  Physical = 0,
++  Radio = 1,
++  Host = 2,
++};
++
++enum FeatureProfile : uint8_t {
++  FullPeripheralProfile = 0,
++  MotionMacroProfile = 1,
++  KeyDiagnosticProfile = 2,
++  CustomFeatureProfile = 3,
++};
++
++enum BuildFeatureFlag : uint8_t {
++  LocalMacroCapture = 1U << 0,
++  UnifiedPageIdentifiesKeys = 1U << 1,
++  ForceSilent = 1U << 2,
++  BlankEepromSilent = 1U << 3,
++};
++
+ } // namespace ControllerProtocol
+diff --git a/Project/PwmController.cpp b/Project/PwmController.cpp
+index 91b164a2..2745bdcc 100644
+--- a/Project/PwmController.cpp
++++ b/Project/PwmController.cpp
+@@ -1,5 +1,7 @@
+ #include "PwmController.h"
+ 
++#if PCCONTROLLER_ENABLE_PCA9685
++
+ namespace {
+ 
+ // Repeated transport failures mark the shared PWM expander unavailable.
+@@ -289,3 +291,5 @@ uint16_t PwmController::from8Bit(uint8_t value) {
+   return static_cast<uint16_t>(static_cast<uint16_t>(value) * 16U +
+                                value / 16U);
+ }
++
++#endif // PCCONTROLLER_ENABLE_PCA9685
+diff --git a/Project/PwmController.h b/Project/PwmController.h
+index 17c4812c..01600740 100644
+--- a/Project/PwmController.h
++++ b/Project/PwmController.h
+@@ -4,7 +4,11 @@
+ 
+ #include "../LocalLib/BoardPins.h"
+ #include "../ProjectConfig.h"
++#if PCCONTROLLER_ENABLE_PCA9685
+ #include "PwmExpanderDriver.h"
++#else
++class PwmExpanderDriver;
++#endif
+ 
+ #ifndef PCCONTROLLER_PWM_ACTIVE_LOW
+ #define PCCONTROLLER_PWM_ACTIVE_LOW 0
+@@ -44,6 +48,7 @@ enum class PwmChannelRole : uint8_t {
+ // Logical values always use 0 = electrically inactive and 4095 = fully
+ // active. The optional polarity mapping keeps callers independent of register
+ // FULL_ON/FULL_OFF details if a later board revision inverts the stages.
++#if PCCONTROLLER_ENABLE_PCA9685
+ class PwmController {
+ public:
+   explicit PwmController(PwmExpanderDriver &driver);
+@@ -106,6 +111,41 @@ private:
+   uint8_t consecutiveWriteErrors_ = 0;
+   bool available_ = false;
+ };
++#else
++// API-compatible zero-cost facade for profiles without a PCA9685. Callers
++// keep one controller contract while result-bearing operations truthfully fail.
++class PwmController {
++public:
++  PwmController() = default;
++  explicit PwmController(PwmExpanderDriver &) {}
++  void begin(bool, uint32_t = millis()) {}
++  void setChannel(uint8_t, uint32_t = millis()) {}
++  void adjustChannel(int8_t, uint32_t = millis()) {}
++  uint8_t channel() const { return 0; }
++  void setValue(uint16_t, uint32_t = millis()) {}
++  void adjustValue(int16_t, uint32_t = millis()) {}
++  uint16_t value() const { return 0; }
++  bool available() const { return false; }
++  uint8_t errorCount() const { return 0; }
++  bool tryAllOff() { return false; }
++  bool clearMask(uint16_t) { return false; }
++  bool stopUserOutputs() { return false; }
++  bool setLogical(uint8_t, uint16_t) { return false; }
++  uint16_t logicalValue(uint8_t) const { return 0; }
++  bool cacheValid(uint8_t) const { return false; }
++  PwmChannelRole role(uint8_t) const { return PwmChannelRole::Invalid; }
++  bool setUserLight(uint8_t, uint16_t) { return false; }
++  bool setUserPwm(uint8_t, uint16_t) { return false; }
++  bool setEnclosureIllumination(uint16_t) { return false; }
++  bool setPowerSignal(bool) { return false; }
++  bool setStatusRgb12(uint16_t, uint16_t, uint16_t) { return false; }
++  bool setStatusRgb8(uint8_t, uint8_t, uint8_t) { return false; }
++  static constexpr uint8_t PwmI2cAddress = 0x41;
++  static constexpr uint8_t CurrentSensorI2cAddress = 0x40;
++  static constexpr float PwmFrequencyHz = 1000.0F;
++  static constexpr uint8_t recommendedMode2() { return 0x04; }
++};
++#endif
+ 
+ static_assert(BoardPins::PwmAddress == PwmController::PwmI2cAddress,
+               "PWM driver must use I2C address 0x41");
+diff --git a/Project/StatusLedController.cpp b/Project/StatusLedController.cpp
+index 39de5db8..7d7abe61 100644
+--- a/Project/StatusLedController.cpp
++++ b/Project/StatusLedController.cpp
+@@ -1,5 +1,7 @@
+ #include "StatusLedController.h"
+ 
++#if PCCONTROLLER_ENABLE_PCA9685
++
+ #include <EEPROM.h>
+ #include <string.h>
+ 
+@@ -310,3 +312,6 @@ uint8_t StatusLedController::scale(uint8_t value, uint8_t level) {
+       (static_cast<uint16_t>(value) * (static_cast<uint16_t>(level) + 1U)) >>
+       8);
+ }
++#else
++StatusLedController statusLeds;
++#endif
+diff --git a/Project/StatusLedController.h b/Project/StatusLedController.h
+index f4eddabb..07199f60 100644
+--- a/Project/StatusLedController.h
++++ b/Project/StatusLedController.h
+@@ -2,6 +2,8 @@
+ 
+ #include <Arduino.h>
+ 
++#include "../ProjectConfig.h"
++
+ class PwmController;
+ 
+ // StatusLedMode selects the persistent operational RGB presentation.
+@@ -43,6 +45,7 @@ enum class StatusLedEffect : uint8_t {
+ };
+ 
+ // Composes base state and transient cues onto PWM RGB channels 13..15.
++#if PCCONTROLLER_ENABLE_PCA9685
+ class StatusLedController {
+ public:
+   static constexpr uint8_t ProfileCount = 19;
+@@ -114,6 +117,38 @@ private:
+   uint32_t cueEndsAt_; // millis() deadline; zero means no active cue.
+   StatusLedCue cue_;
+ };
++#else
++class StatusLedController {
++public:
++  static constexpr uint8_t ProfileCount = 19;
++  static constexpr uint8_t ProfilePayloadBytes = 12;
++  static constexpr uint8_t ManualCondition = 0xFF;
++  void begin(PwmController &, uint8_t, uint32_t = millis(), bool = true) {}
++  void service(uint32_t = millis()) {}
++  void setMode(StatusLedMode, uint32_t = millis()) {}
++  StatusLedMode mode() const { return StatusLedMode::Off; }
++  void setBrightness(uint8_t) {}
++  uint8_t brightness() const { return 0; }
++  void setCustom(uint8_t, uint8_t, uint8_t) {}
++  bool setEffect(StatusLedEffect, uint8_t, uint8_t, uint8_t, uint8_t,
++                 uint8_t, uint8_t, uint8_t, uint8_t, uint16_t, uint8_t,
++                 uint32_t = millis()) {
++    return false;
++  }
++  void cancelEffect() {}
++  StatusLedEffect effect() const { return StatusLedEffect::None; }
++  uint8_t renderedRed() const { return 0; }
++  uint8_t renderedGreen() const { return 0; }
++  uint8_t renderedBlue() const { return 0; }
++  uint8_t condition() const { return 0; }
++  bool profile(uint8_t, uint8_t *) const { return false; }
++  bool setProfile(uint8_t, const uint8_t *, uint32_t = millis()) {
++    return false;
++  }
++  void setPowerSignal(bool) {}
++  void playCue(StatusLedCue, uint16_t, uint32_t = millis()) {}
++};
++#endif
+ 
+ // statusLeds is the board-wide RGB state and cue compositor.
+ extern StatusLedController statusLeds;
+diff --git a/Project/UartProtocol.h b/Project/UartProtocol.h
+index 6e140496..2c8247c5 100644
+--- a/Project/UartProtocol.h
++++ b/Project/UartProtocol.h
+@@ -12,8 +12,6 @@ constexpr uint8_t Magic = 0xA5;
+ // magic/length/CRC shape and opcode payload semantics instead of rejecting an
+ // otherwise understandable peer solely because this byte differs.
+ constexpr uint8_t EnvelopeRevision = 1;
+-constexpr uint8_t MaximumPayload = 48;
+-
+ // Frame is a validated zero-copy view of one decoded native packet.
+ struct Frame {
+   uint8_t opcode;
+diff --git a/ProjectConfig.h b/ProjectConfig.h
+index 419a4975..4c336aec 100644
+--- a/ProjectConfig.h
++++ b/ProjectConfig.h
+@@ -38,6 +38,23 @@
+ #define PCCONTROLLER_ENABLE_I2C_LCD 0
+ #endif
+ 
++// The current motion/macro boards intentionally omit these optional I2C and
++// OneWire modules. Keeping them as independent build features lets a later
++// full-peripheral FQBN/profile restore the exact drivers without source edits,
++// while the default deployment image spends its 328P flash on input latency,
++// relay/RF safety, and timed macro capture.
++#ifndef PCCONTROLLER_ENABLE_INA219
++#define PCCONTROLLER_ENABLE_INA219 0
++#endif
++
++#ifndef PCCONTROLLER_ENABLE_DS18B20
++#define PCCONTROLLER_ENABLE_DS18B20 0
++#endif
++
++#ifndef PCCONTROLLER_ENABLE_PCA9685
++#define PCCONTROLLER_ENABLE_PCA9685 0
++#endif
++
+ // The production front panel has one input/output page. In the normal build it
+ // is the four-key motion surface (Side A up/down, Side B up/down). A diagnostic
+ // image may compile the same page as a key identifier without adding a second
+@@ -83,6 +100,21 @@
+ #error "PCCONTROLLER_BLANK_EEPROM_SILENT must be 0 or 1"
+ #endif
+ 
++#if (PCCONTROLLER_ENABLE_INA219 != 0) && \
++    (PCCONTROLLER_ENABLE_INA219 != 1)
++#error "PCCONTROLLER_ENABLE_INA219 must be 0 or 1"
++#endif
++
++#if (PCCONTROLLER_ENABLE_DS18B20 != 0) && \
++    (PCCONTROLLER_ENABLE_DS18B20 != 1)
++#error "PCCONTROLLER_ENABLE_DS18B20 must be 0 or 1"
++#endif
++
++#if (PCCONTROLLER_ENABLE_PCA9685 != 0) && \
++    (PCCONTROLLER_ENABLE_PCA9685 != 1)
++#error "PCCONTROLLER_ENABLE_PCA9685 must be 0 or 1"
++#endif
++
+ // Rich catalog/layout presentation is host-owned. Stable page IDs and the
+ // fixed EEPROM bytes remain, but the AVR does not carry duplicate directory,
+ // ordering, hierarchy, or layout-protocol implementations in release builds.
+diff --git a/Tools/Controller/internal/programmer/compile.go b/Tools/Controller/internal/programmer/compile.go
+index 73040e30..408c9ef8 100644
+--- a/Tools/Controller/internal/programmer/compile.go
++++ b/Tools/Controller/internal/programmer/compile.go
+@@ -319,7 +319,7 @@ func firmwareTopLevelSourceFiles(root string) ([]string, error) {
+ 
+ func firmwareSourceExtension(extension string) bool {
+ 	switch strings.ToLower(extension) {
+-	case ".ino", ".h", ".hpp", ".c", ".cpp", ".def":
++	case ".ino", ".h", ".hpp", ".c", ".cpp":
+ 		return true
+ 	default:
+ 		return false
+diff --git a/Tools/Controller/internal/programmer/programmer_test.go b/Tools/Controller/internal/programmer/programmer_test.go
+index 0aa20d94..23bff796 100644
+--- a/Tools/Controller/internal/programmer/programmer_test.go
++++ b/Tools/Controller/internal/programmer/programmer_test.go
+@@ -157,7 +157,7 @@ func TestCompilePlanMatchesManifestAndStagesOnlyCuratedRoots(t *testing.T) {
+ 		t.Fatal(err)
+ 	}
+ 	manifest := fmt.Sprintf(
+-		"LocalLib/value.cpp:%X\nMenuLogic.cpp:%X\nPCController.ino:%X\nProject/Firmware/Domain.inc.h:%X\nProject/MacroActions.def:%X\nProjectConfig.h:%X\n",
++		"LocalLib/value.cpp:%X\nMenuLogic.cpp:%X\nPCController.ino:%X\nProject/Firmware/Domain.inc.h:%X\nProject/MacroActions.inc.h:%X\nProjectConfig.h:%X\n",
+ 		sha256.Sum256([]byte("int value = 1;\n")),
+ 		sha256.Sum256([]byte("void menuLogic() {}\n")),
+ 		sha256.Sum256([]byte("void setup() {}\nvoid loop() {}\n")),
+@@ -187,7 +187,7 @@ func TestCompilePlanMatchesManifestAndStagesOnlyCuratedRoots(t *testing.T) {
+ 		"PCController.ino", "ProjectConfig.h", "MenuLogic.cpp",
+ 		filepath.Join("LocalLib", "value.cpp"),
+ 		filepath.Join("Project", "Firmware", "Domain.inc.h"),
+-		filepath.Join("Project", "MacroActions.def"),
++		filepath.Join("Project", "MacroActions.inc.h"),
+ 	} {
+ 		if _, err := os.Stat(filepath.Join(staged.SketchPath, relative)); err != nil {
+ 			t.Fatalf("missing staged source %s: %v", relative, err)
+@@ -222,7 +222,7 @@ func firmwareCompileFixture(t *testing.T) string {
+ 		"MenuLogic.cpp":                        "void menuLogic() {}\n",
+ 		filepath.Join("LocalLib", "value.cpp"): "int value = 1;\n",
+ 		filepath.Join("Project", "Firmware", "Domain.inc.h"): "void firmwareDomain() {}\n",
+-		filepath.Join("Project", "MacroActions.def"):         "PCCONTROLLER_MACRO_ACTION(Buzzer, 4)\n",
++		filepath.Join("Project", "MacroActions.inc.h"):       "PCCONTROLLER_MACRO_ACTION(Buzzer, 4)\n",
+ 		filepath.Join(".cache", "poison.cpp"):                "#error must not be staged\n",
+ 	}
+ 	for name, content := range files {
+diff --git a/Tools/VirtualBoard/tests/firmware_controls_test.cpp b/Tools/VirtualBoard/tests/firmware_controls_test.cpp
+index 094040fa..0405c8c3 100644
+--- a/Tools/VirtualBoard/tests/firmware_controls_test.cpp
++++ b/Tools/VirtualBoard/tests/firmware_controls_test.cpp
+@@ -449,6 +449,19 @@ void testFrontPanelLeafDecreaseDispatch() {
+               unifiedInputIntent(MENU_INCREASE, false) ==
+                   UnifiedInputIntent::Motion,
+           "normal unified page no longer exposes macro/motion actions");
++  require(unifiedMacroGesture(KeyEvent::Down, false, false) ==
++                  UnifiedMacroGesture::ImmediateCapture &&
++              unifiedMacroGesture(KeyEvent::HoldRepeat, false, false) ==
++                  UnifiedMacroGesture::None &&
++              unifiedMacroGesture(KeyEvent::Down, true, false) ==
++                  UnifiedMacroGesture::None &&
++              unifiedMacroGesture(KeyEvent::Click, true, false) ==
++                  UnifiedMacroGesture::Replay &&
++              unifiedMacroGesture(KeyEvent::HoldStart, true, false) ==
++                  UnifiedMacroGesture::ReplaceCapture &&
++              unifiedMacroGesture(KeyEvent::Click, true, true) ==
++                  UnifiedMacroGesture::SuppressClassification,
++          "unified macro key lost one-shot replay/replace classification");
+ 
+   const MotionKeyBinding expectedMotion[] = {
+       {0, false}, {0, true}, {1, false}, {1, true}};
+diff --git a/Tools/VirtualBoard/tests/firmware_macro_queue_test.cpp b/Tools/VirtualBoard/tests/firmware_macro_queue_test.cpp
+index aadb8bd4..3cedd790 100644
+--- a/Tools/VirtualBoard/tests/firmware_macro_queue_test.cpp
++++ b/Tools/VirtualBoard/tests/firmware_macro_queue_test.cpp
+@@ -30,6 +30,8 @@ void testSharedActionRegistry() {
+   require(!MacroAction::macroQueueableOpcode(Reset) &&
+               !MacroAction::macroQueueableOpcode(MacroStart) &&
+               MacroAction::playbackAllowed(StatusEffect) &&
++              MacroAction::validPlaybackPayload(RelaySide, 2) &&
++              !MacroAction::validPlaybackPayload(RelaySide, 1) &&
+               !MacroAction::recordable(StatusEffect, 48) &&
+               !MacroAction::recordable(Buzzer, 3),
+           "control-plane or truncated action entered the macro allow-list");
+@@ -52,12 +54,13 @@ void testBoardCaptureAndExactPlayback() {
+               queue.captured(),
+           "board capture did not retain two exact ordinary actions");
+ 
+-  require(queue.playCapture(5000), "captured macro did not enter playback");
++  require(queue.playCapture(5000) && !queue.hostDependent(),
++          "local capture playback incorrectly depends on a live host");
+   ControllerProtocol::Frame frame{};
+-  arduino_mock::nowMicros = 4998;
++  arduino_mock::nowMicros = 5098;
+   require(!queue.dequeueDue(frame),
+           "rebased first captured action ran before its playback epoch");
+-  arduino_mock::nowMicros = 4999;
++  arduino_mock::nowMicros = 5099;
+   require(queue.dequeueDue(frame) &&
+               frame.opcode == ControllerProtocol::RelaySide &&
+               frame.payloadLength == sizeof(side) && frame.payload[0] == 1 &&
+@@ -65,10 +68,10 @@ void testBoardCaptureAndExactPlayback() {
+           "first captured ordinary opcode/payload changed during playback");
+   queue.completeStep(true);
+ 
+-  arduino_mock::nowMicros = 5248;
++  arduino_mock::nowMicros = 5348;
+   require(!queue.dequeueDue(frame),
+           "second captured action ran before its exact 250 us delta");
+-  arduino_mock::nowMicros = 5249;
++  arduino_mock::nowMicros = 5349;
+   require(queue.dequeueDue(frame) &&
+               frame.opcode == ControllerProtocol::Buzzer &&
+               frame.payloadLength == sizeof(buzzer),
+@@ -80,12 +83,12 @@ void testBoardCaptureAndExactPlayback() {
+ 
+   require(queue.playCapture(7000),
+           "captured macro could not replay a second time offline");
+-  arduino_mock::nowMicros = 6999;
++  arduino_mock::nowMicros = 7099;
+   require(queue.dequeueDue(frame) &&
+               frame.opcode == ControllerProtocol::RelaySide,
+           "second replay changed the first retained action");
+   queue.completeStep(true);
+-  arduino_mock::nowMicros = 7249;
++  arduino_mock::nowMicros = 7349;
+   require(queue.dequeueDue(frame) &&
+               frame.opcode == ControllerProtocol::Buzzer,
+           "second replay changed the exact retained timing");
+@@ -145,6 +148,80 @@ void testHostileRawStreamIsRejected() {
+                 queue.takeSafeStopRequest(),
+             "hostile raw macro opcode survived firmware validation");
+   }
++
++  HardwareSerial serial;
++  ControllerProtocol::UartProtocol protocol(serial);
++  MacroQueue malformed(protocol);
++  const std::uint8_t start[] = {MacroQueue::Schema, 1, 0, 1, 0};
++  const ControllerProtocol::Frame startFrame{
++      ControllerProtocol::MacroStart, 1, sizeof(start), start};
++  require(malformed.handle(startFrame),
++          "malformed-length fixture could not start");
++  const std::uint8_t shortSide[] = {
++      0, 0, 0, 1, 0, 0, 0, 0, 0, ControllerProtocol::RelaySide, 1, 0};
++  const ControllerProtocol::Frame shortSideFrame{
++      ControllerProtocol::MacroStep, 2, sizeof(shortSide), shortSide};
++  require(malformed.handle(shortSideFrame) && !malformed.active() &&
++              malformed.takeSafeStopRequest(),
++          "wrong-length RelaySide raw record survived APPEND validation");
++}
++
++void testLifecycleAndStreamingStateValidation() {
++  HardwareSerial serial;
++  ControllerProtocol::UartProtocol protocol(serial);
++  MacroQueue queue(protocol);
++
++  const std::uint8_t emptyStart[] = {MacroQueue::Schema, 1, 0, 0, 0};
++  const ControllerProtocol::Frame emptyStartFrame{
++      ControllerProtocol::MacroStart, 1, sizeof(emptyStart), emptyStart};
++  require(queue.handle(emptyStartFrame) && !queue.active(),
++          "zero-step host macro entered an infinite Playing path");
++
++  require(queue.beginCapture(2, 10),
++          "recording-state APPEND fixture could not start");
++  const std::uint8_t appendDuringCapture[] = {
++      0, 0, 0, 1, 0, 0, 0, 0, 0, ControllerProtocol::RelayAllOff, 0};
++  const ControllerProtocol::Frame appendDuringCaptureFrame{
++      ControllerProtocol::MacroStep, 2, sizeof(appendDuringCapture),
++      appendDuringCapture};
++  require(queue.handle(appendDuringCaptureFrame) && queue.recording() &&
++              queue.retainedSteps() == 0,
++          "host APPEND mutated the board-owned Recording ring");
++  const std::uint8_t side[] = {0, 1};
++  require(queue.captureAction(ControllerProtocol::RelaySide, side,
++                              sizeof(side), 20) &&
++              queue.finishCapture(),
++          "rejected host fragment damaged the local capture lifecycle");
++
++  MacroQueue empty(protocol);
++  require(empty.beginCapture(3, 0) && empty.finishCapture() &&
++              empty.captured() && !empty.active() &&
++              empty.beginCapture(4, 1),
++          "empty capture did not publish a replaceable terminal state");
++  require(!empty.captureAction(ControllerProtocol::RelayAllOff, nullptr, 0,
++                               0x80000001UL) &&
++              empty.captured(),
++          "capture accepted a due time outside the signed scheduler window");
++
++  for (const bool badCount : {false, true}) {
++    MacroQueue streamed(protocol);
++    const std::uint8_t start[] = {MacroQueue::Schema, 5, 0, 2, 0};
++    const ControllerProtocol::Frame startFrame{
++        ControllerProtocol::MacroStart, 3, sizeof(start), start};
++    require(streamed.handle(startFrame), "stream validation could not start");
++    std::uint8_t append[] = {
++        0, 0, 0, static_cast<std::uint8_t>(badCount ? 2 : 1), 0,
++        0, 0, 0, 0, ControllerProtocol::RelayAllOff, 0};
++    if (!badCount) {
++      append[8] = 0x80; // due=0x80000000, outside signed window
++    }
++    const ControllerProtocol::Frame appendFrame{
++        ControllerProtocol::MacroStep, 4, sizeof(append), append};
++    require(streamed.handle(appendFrame) && !streamed.active() &&
++                streamed.takeSafeStopRequest(),
++            badCount ? "forged complete-step count survived APPEND validation"
++                     : "out-of-window raw due time survived APPEND validation");
++  }
+ }
+ 
+ void testFrontPanelMotionCapturesSemanticSideActions() {
+@@ -166,13 +243,13 @@ void testFrontPanelMotionCapturesSemanticSideActions() {
+               queue.finishCapture() && queue.playCapture(1000),
+           "front-panel A up/down did not enter semantic capture");
+   ControllerProtocol::Frame frame{};
+-  arduino_mock::nowMicros = 999;
++  arduino_mock::nowMicros = 1009;
+   require(queue.dequeueDue(frame) &&
+               frame.opcode == ControllerProtocol::RelaySide &&
+               frame.payload[0] == 0 && frame.payload[1] == 1,
+           "front-panel A-up replay depends on menu/key mode");
+   queue.completeStep(true);
+-  arduino_mock::nowMicros = 1049;
++  arduino_mock::nowMicros = 1059;
+   require(queue.dequeueDue(frame) &&
+               frame.opcode == ControllerProtocol::RelaySide &&
+               frame.payload[0] == 0 && frame.payload[1] == 2,
+@@ -192,21 +269,66 @@ void testCaptureClockRollover() {
+               queue.finishCapture() && queue.playCapture(1000),
+           "rollover capture fixture could not start");
+   ControllerProtocol::Frame frame{};
+-  arduino_mock::nowMicros = 999;
++  arduino_mock::nowMicros = 1007;
+   require(queue.dequeueDue(frame) &&
+               frame.opcode == ControllerProtocol::RelayAllOff,
+           "first rollover action was not rebased to playback start");
+   queue.completeStep(true);
+-  arduino_mock::nowMicros = 1038;
++  arduino_mock::nowMicros = 1046;
+   require(!queue.dequeueDue(frame),
+           "rollover delta fired one microsecond early");
+-  arduino_mock::nowMicros = 1039;
++  arduino_mock::nowMicros = 1047;
+   require(queue.dequeueDue(frame) &&
+               frame.opcode == ControllerProtocol::PwmAllOff,
+           "uint32 rollover changed the exact 40 us action delta");
+   queue.completeStep(true);
+ }
+ 
++void testCapturePersistenceAcknowledgementIsIdentityGuarded() {
++  HardwareSerial serial;
++  ControllerProtocol::UartProtocol protocol(serial);
++  MacroQueue queue(protocol);
++  require(queue.beginCapture(7, 100),
++          "capture ACK fixture could not start");
++  const std::uint8_t side[] = {1, 1};
++  require(queue.captureAction(ControllerProtocol::RelaySide, side,
++                              sizeof(side), 120) &&
++              queue.finishCapture(),
++          "capture ACK fixture could not seal");
++
++  std::uint8_t clear[] = {4, 7, 99, 0, 0, 0};
++  ControllerProtocol::Frame clearFrame{
++      ControllerProtocol::MacroStep, 8, sizeof(clear), clear};
++  require(queue.handle(clearFrame) && queue.captured(),
++          "stale capture ACK cleared a retained recording");
++  clear[2] = 100;
++  require(queue.handle(clearFrame) && queue.captured() &&
++              queue.playCapture(1000),
++          "matching export ACK destroyed board-local replay data");
++  ControllerProtocol::Frame replay{};
++  arduino_mock::nowMicros = 1019;
++  require(queue.dequeueDue(replay),
++          "export-acknowledged capture could not replay");
++  queue.completeStep(true);
++  require(queue.captured(),
++          "export state was lost after local replay");
++
++  clear[0] = 5;
++  require(queue.handle(clearFrame) && !queue.captured() &&
++              queue.takeSafeStopRequest(),
++          "explicit identity-guarded clear retained capture/outputs");
++
++  require(queue.beginCapture(7, 200) &&
++              queue.captureAction(ControllerProtocol::RelaySide, side,
++                                  sizeof(side), 220) &&
++              queue.finishCapture(),
++          "ID-reuse capture fixture could not seal");
++  clear[0] = 4;
++  clear[2] = 100;
++  require(queue.handle(clearFrame) && queue.captured(),
++          "old ID/start ACK deleted a newer reused-ID capture");
++}
++
+ } // namespace
+ 
+ int main() {
+@@ -215,7 +337,9 @@ int main() {
+     testBoardCaptureAndExactPlayback();
+     testCaptureNeverOverwrites();
+     testCaptureClockRollover();
++    testCapturePersistenceAcknowledgementIsIdentityGuarded();
+     testHostileRawStreamIsRejected();
++    testLifecycleAndStreamingStateValidation();
+     testFrontPanelMotionCapturesSemanticSideActions();
+     std::cout << "firmware_macro_queue_tests: all checks passed\n";
+     return 0;
