@@ -347,9 +347,11 @@ func (model Model) outputsPage(snapshot control.Snapshot) string {
 	columns := outputTableColumns(tableWidth)
 	rows := model.controlTableRows(snapshot, max(8, columns[1].Width-7))
 	tableView := renderControlTable(tableWidth, tableBodyRows(model.contentHeight()), model.cursor, columns, rows, model.uiValue.ControlValueColors)
-	parts := []string{
-		sectionHeader(model.width, "CONTROL", "↑/↓ select · ←/→ adjust · Home/End limits · Enter activate · F2 rename"),
+	detail := "↑/↓ select · ←/→ adjust · Home/End limits · Enter activate · F2 rename"
+	if snapshot.Connected && snapshot.Hello.Capabilities&native.CapabilityAddressableLED != 0 {
+		detail += " · WS2811 available below"
 	}
+	parts := []string{sectionHeader(model.width, "CONTROL", detail)}
 	if snapshot.Connected && snapshot.Hello.Capabilities&native.CapabilityRelayMotion != 0 && !snapshot.HaveStatus {
 		parts = append(parts, warnStyle.Render(model.spinner.View()+" loading advertised relay and motion state…"))
 	}
@@ -362,39 +364,41 @@ func (model Model) outputsPage(snapshot control.Snapshot) string {
 func (model Model) controlTableRows(snapshot control.Snapshot, levelWidth int) []controlTableRow {
 	status := snapshot.Status
 	rows := make([]controlTableRow, 0, 27)
-	if !snapshot.Connected || !snapshot.HaveStatus || snapshot.Hello.Capabilities&native.CapabilityRelayMotion == 0 {
+	if !snapshot.Connected {
 		return rows
 	}
-	for index := 0; index < 8; index++ {
-		key := fmt.Sprintf("relay.%d", index+1)
-		fallback, _ := appconfig.PeripheralDefaultName(key)
-		label := fmt.Sprintf("R%d · %s", index+1, model.peripheralName(key, fallback))
-		on := status.ActiveRelays&(1<<index) != 0
-		state := "○ OFF"
-		tone := controlToneOff
-		if on {
-			state = "● ON"
-			tone = controlToneOn
+	if snapshot.HaveStatus && snapshot.Hello.Capabilities&native.CapabilityRelayMotion != 0 {
+		for index := 0; index < 8; index++ {
+			key := fmt.Sprintf("relay.%d", index+1)
+			fallback, _ := appconfig.PeripheralDefaultName(key)
+			label := fmt.Sprintf("R%d · %s", index+1, model.peripheralName(key, fallback))
+			on := status.ActiveRelays&(1<<index) != 0
+			state := "○ OFF"
+			tone := controlToneOff
+			if on {
+				state = "● ON"
+				tone = controlToneOn
+			}
+			group := ""
+			if index == 0 {
+				group = "RELAYS"
+			}
+			rows = append(rows, controlTableRow{Group: group, Name: label, Value: state, Tone: tone, Action: fmt.Sprintf("relay %d toggle", index+1), Kind: "relay", Index: index, PeripheralKey: key})
 		}
-		group := ""
-		if index == 0 {
-			group = "RELAYS"
-		}
-		rows = append(rows, controlTableRow{Group: group, Name: label, Value: state, Tone: tone})
+		rows = append(rows, controlTableRow{Name: "All relays", Value: "Turn OFF", Tone: controlToneAction, Action: "relay off", Kind: "relay-all"})
+		motionAFallback, _ := appconfig.PeripheralDefaultName("motion.a")
+		motionBFallback, _ := appconfig.PeripheralDefaultName("motion.b")
+		motionA := model.peripheralName("motion.a", motionAFallback)
+		motionB := model.peripheralName("motion.b", motionBFallback)
+		rows = append(rows,
+			controlTableRow{Group: "MOTION", Name: motionA + " · UP", Value: "Run", Tone: controlToneAction, Action: "relay side left up", Kind: "motion", PeripheralKey: "motion.a"},
+			controlTableRow{Name: motionA + " · STOP", Value: "Stop", Tone: controlToneAction, Action: "relay side left stop", Kind: "motion", PeripheralKey: "motion.a"},
+			controlTableRow{Name: motionA + " · DOWN", Value: "Run", Tone: controlToneAction, Action: "relay side left down", Kind: "motion", PeripheralKey: "motion.a"},
+			controlTableRow{Name: motionB + " · UP", Value: "Run", Tone: controlToneAction, Action: "relay side right up", Kind: "motion", PeripheralKey: "motion.b"},
+			controlTableRow{Name: motionB + " · STOP", Value: "Stop", Tone: controlToneAction, Action: "relay side right stop", Kind: "motion", PeripheralKey: "motion.b"},
+			controlTableRow{Name: motionB + " · DOWN", Value: "Run", Tone: controlToneAction, Action: "relay side right down", Kind: "motion", PeripheralKey: "motion.b"},
+		)
 	}
-	rows = append(rows, controlTableRow{Name: "All relays", Value: "Turn OFF", Tone: controlToneAction})
-	motionAFallback, _ := appconfig.PeripheralDefaultName("motion.a")
-	motionBFallback, _ := appconfig.PeripheralDefaultName("motion.b")
-	motionA := model.peripheralName("motion.a", motionAFallback)
-	motionB := model.peripheralName("motion.b", motionBFallback)
-	rows = append(rows,
-		controlTableRow{Group: "MOTION", Name: motionA + " · UP", Value: "Run", Tone: controlToneAction},
-		controlTableRow{Name: motionA + " · STOP", Value: "Stop", Tone: controlToneAction},
-		controlTableRow{Name: motionA + " · DOWN", Value: "Run", Tone: controlToneAction},
-		controlTableRow{Name: motionB + " · UP", Value: "Run", Tone: controlToneAction},
-		controlTableRow{Name: motionB + " · STOP", Value: "Stop", Tone: controlToneAction},
-		controlTableRow{Name: motionB + " · DOWN", Value: "Run", Tone: controlToneAction},
-	)
 	if snapshot.HaveStatus && snapshot.Hello.Capabilities&native.CapabilityPWM != 0 && status.PWMAvailable {
 		for channel := 0; channel <= 10; channel++ {
 			value := uint16(0)
@@ -414,6 +418,7 @@ func (model Model) controlTableRows(snapshot control.Snapshot, levelWidth int) [
 			rows = append(rows, controlTableRow{
 				Group: group, Name: fmt.Sprintf("CH %02d · %s", channel, name),
 				Value: sliderPercentPlain(percent, levelWidth) + fmt.Sprintf(" %3d%%", percent), Tone: controlToneLevel,
+				Kind: "pwm", Index: channel, PeripheralKey: key,
 			})
 		}
 		value := uint16(0)
@@ -431,10 +436,57 @@ func (model Model) controlTableRows(snapshot control.Snapshot, levelWidth int) [
 		rows = append(rows, controlTableRow{
 			Group: "LIGHTING", Name: "CH 12 · Enclosure illumination · manual override",
 			Value: sliderPercentPlain(percent, levelWidth) + fmt.Sprintf(" %3d%% · applied %d/4095 · policy %d/4095", percent, value, target), Tone: controlToneLevel,
+			Kind: "pwm", Index: 11, PeripheralKey: "pwm.11",
 		})
-		rows = append(rows, controlTableRow{Name: "All user PWM", Value: "Set 0%", Tone: controlToneAction})
+		rows = append(rows, controlTableRow{Name: "All user PWM", Value: "Set 0%", Tone: controlToneAction, Action: "pwm off", Kind: "pwm-all"})
+	}
+	if snapshot.Connected && snapshot.Hello.Capabilities&native.CapabilityAddressableLED != 0 {
+		pixels, fps := model.stripConfiguration()
+		color := stripColorPresets[model.stripColorIndex()]
+		busy := model.macroState().Running || model.macroRecordingState().Active
+		busyValue := "Unavailable while macro recording/playback owns MCU workspace"
+		mutation := func(row controlTableRow) controlTableRow {
+			if busy {
+				row.Action = ""
+				row.Adjust = ""
+				row.Value = busyValue
+				row.Tone = controlToneNeutral
+			}
+			return row
+		}
+		rows = append(rows,
+			mutation(controlTableRow{Group: "WS2811 STRIP", Name: "Pixel count", Value: fmt.Sprintf("%d · ←/→ adjust · Enter configure", pixels), Tone: controlToneLevel, Action: fmt.Sprintf("strip config %d", pixels), Adjust: "strip-count", Kind: "strip"}),
+			mutation(controlTableRow{Name: "Rainbow", Value: fmt.Sprintf("%d px @ %d FPS · Enter start", pixels, fps), Tone: controlToneAction, Action: fmt.Sprintf("strip rainbow %d %d", pixels, fps), Adjust: "strip-fps", Kind: "strip"}),
+			mutation(controlTableRow{Name: "Fill color", Value: fmt.Sprintf("#%02X%02X%02X · ←/→ color · Enter apply", color[0], color[1], color[2]), Tone: controlToneLevel, Action: fmt.Sprintf("strip fill %d %d %d", color[0], color[1], color[2]), Adjust: "strip-color", Kind: "strip"}),
+			mutation(controlTableRow{Name: "Police", Value: "Enter start", Tone: controlToneAction, Action: fmt.Sprintf("strip effect play police %d %d", pixels, fps), Kind: "strip"}),
+			mutation(controlTableRow{Name: "White thunder", Value: "Enter start", Tone: controlToneAction, Action: fmt.Sprintf("strip effect play white-thunder %d %d", pixels, fps), Kind: "strip"}),
+			mutation(controlTableRow{Name: "Converging red", Value: "Enter start", Tone: controlToneAction, Action: fmt.Sprintf("strip effect play converging-red %d %d", pixels, fps), Kind: "strip"}),
+			mutation(controlTableRow{Name: "Clear strip", Value: "Enter clear", Tone: controlToneAction, Action: "strip clear", Kind: "strip"}),
+			controlTableRow{Name: "Stop stream", Value: "Enter stop", Tone: controlToneAction, Action: "strip stop", Kind: "strip"},
+			controlTableRow{Name: "Stream status", Value: "Enter inspect", Tone: controlToneAction, Action: "strip status", Kind: "strip"},
+		)
 	}
 	return rows
+}
+
+var stripColorPresets = [][3]byte{{255, 255, 255}, {255, 0, 0}, {0, 255, 0}, {0, 0, 255}, {255, 128, 0}, {128, 0, 255}, {0, 255, 255}}
+
+func (model Model) stripConfiguration() (int, int) {
+	pixels, fps := model.stripPixels, model.stripFPS
+	if pixels < 1 || pixels > native.StripMaximumPixels {
+		pixels = native.StripMaximumPixels
+	}
+	if fps < 1 || fps > 30 {
+		fps = 30
+	}
+	return pixels, fps
+}
+
+func (model Model) stripColorIndex() int {
+	if model.stripColor < 0 || model.stripColor >= len(stripColorPresets) {
+		return 0
+	}
+	return model.stripColor
 }
 
 type menuPageGeometry struct {

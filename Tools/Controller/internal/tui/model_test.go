@@ -649,8 +649,10 @@ func TestUnavailablePeripheralsDoNotRenderInvalidDashboardValuesOrControls(t *te
 			t.Fatalf("dashboard rendered unavailable peripheral %q:\n%s", unavailable, dashboard)
 		}
 	}
-	if rows := model.controlTableRows(snapshot, 16); len(rows) != 15 {
-		t.Fatalf("control table retained PCA/PWM rows: got %d rows, want 15", len(rows))
+	for _, row := range model.controlTableRows(snapshot, 16) {
+		if strings.HasPrefix(row.Name, "CH ") || row.Name == "All user PWM" {
+			t.Fatalf("control table retained unavailable PCA/PWM row: %#v", row)
+		}
 	}
 }
 
@@ -884,7 +886,7 @@ func TestHostedMenuPreviewAndLivePWMRemainBoardAuthoritative(t *testing.T) {
 	model := New(control.New(control.Options{}), shell.New(10))
 	model.page, model.cursor = PageOutputs, 15
 	model.pwmValues[0] = 123
-	updated, _, _ := model.setSelectedPWM(2048)
+	updated, _, _ := model.setPWMChannel(0, 2048)
 	if updated.pwmValues[0] != 123 {
 		t.Fatalf("live PWM changed optimistically to %d", updated.pwmValues[0])
 	}
@@ -901,7 +903,7 @@ func TestHostedMenuPreviewAndLivePWMRemainBoardAuthoritative(t *testing.T) {
 		}
 		return 3068, nil
 	}
-	updated, command, _ := model.setSelectedPWM(3072)
+	updated, command, _ := model.setPWMChannel(11, 3072)
 	if command == nil {
 		t.Fatal("semantic enclosure override did not return a command")
 	}
@@ -1045,14 +1047,14 @@ func TestControlPageAndTerminalVisibilityFollowNavigationContract(t *testing.T) 
 	}
 }
 
-func TestActionBarDefaultsToOnePortToggleAndShowsHardwareResetProgress(t *testing.T) {
+func TestActionBarUsesFirmwareRebootWhenAuthenticatedAndHardwareResetOffline(t *testing.T) {
 	model := readyModel(t, PageDashboard)
 	plain := ansi.Strip(model.actionBar(model.snapshot()))
 	if strings.Contains(plain, "O Open") || !strings.Contains(plain, "X Close") {
 		t.Fatalf("connected default action bar did not use one Close toggle: %q", plain)
 	}
-	if !strings.Contains(plain, "^R HW Reset") || strings.Contains(model.actionBar(model.snapshot()), buttonBadStyle.Render("^R HW Reset")) {
-		t.Fatal("hardware reset action is missing or permanently danger-colored")
+	if !strings.Contains(plain, "^R Reboot") || strings.Contains(plain, "HW Reset") {
+		t.Fatalf("authenticated action bar did not select firmware reboot: %q", plain)
 	}
 
 	model.uiValue.SeparatePortButtons = true
@@ -1062,25 +1064,55 @@ func TestActionBarDefaultsToOnePortToggleAndShowsHardwareResetProgress(t *testin
 	}
 
 	model.uiValue.SeparatePortButtons = false
-	updated, command, _ := model.dispatchLine("reset lines")
+	updated, command, _ := model.dispatchLine("reset app")
 	model = updated
-	if command == nil || !model.rebootPending || !strings.Contains(ansi.Strip(model.actionBar(model.snapshot())), "Resetting") {
-		t.Fatal("hardware reset did not enter visible in-transit state")
+	if command == nil || !model.rebootPending || !strings.Contains(ansi.Strip(model.actionBar(model.snapshot())), "Rebooting") {
+		t.Fatal("firmware reboot did not enter visible in-transit state")
 	}
 	updatedModel, _ := model.Update(command())
 	if updatedModel.(Model).rebootPending {
 		t.Fatal("reboot progress did not clear after command completion")
 	}
+
+	model = updatedModel.(Model)
+	model.preview.Connected = false
+	plain = ansi.Strip(model.actionBar(model.snapshot()))
+	if !strings.Contains(plain, "^R HW Reset") || strings.Contains(plain, "^R Reboot") {
+		t.Fatalf("offline action bar did not retain recovery reset: %q", plain)
+	}
+	updated, _, _ = model.dispatchLine("reset lines")
+	if plain = ansi.Strip(updated.actionBar(updated.snapshot())); !strings.Contains(plain, "HW Resetting") {
+		t.Fatalf("hardware reset progress used an ambiguous label: %q", plain)
+	}
+	model.preview.Connected = true
+	model.preview.ConnectionState = "close_failed"
+	model.preview.ConnectionPhase = "blocked"
+	plain = ansi.Strip(model.actionBar(model.snapshot()))
+	if !strings.Contains(plain, "Close blocked") || strings.Contains(plain, "^R Reboot") {
+		t.Fatalf("cleanup-blocked connection advertised an unsafe reboot path: %q", plain)
+	}
 }
 
-func TestControlRUsesHardwareResetPath(t *testing.T) {
+func TestControlRUsesContextualResetPath(t *testing.T) {
 	model := readyModel(t, PageDashboard)
 	updated, command, handled := model.handleKey(tea.KeyMsg{Type: tea.KeyCtrlR})
 	if !handled || command == nil {
 		t.Fatal("Ctrl+R did not dispatch a reset command")
 	}
-	if !updated.rebootPending || !strings.Contains(updated.notice, "DTR hardware reset") {
-		t.Fatalf("Ctrl+R did not select the DTR reset path: pending=%v notice=%q", updated.rebootPending, updated.notice)
+	if !updated.rebootPending || !strings.Contains(updated.notice, "Rebooting controller application") {
+		t.Fatalf("connected Ctrl+R did not select firmware reboot: pending=%v notice=%q", updated.rebootPending, updated.notice)
+	}
+	model.preview.Connected = false
+	updated, command, handled = model.handleKey(tea.KeyMsg{Type: tea.KeyCtrlR})
+	if !handled || command == nil || !strings.Contains(updated.notice, "DTR hardware reset") {
+		t.Fatalf("offline Ctrl+R did not select DTR recovery: handled=%v command=%v notice=%q", handled, command, updated.notice)
+	}
+	model.preview.Connected = true
+	model.preview.ConnectionState = "close_failed"
+	model.preview.ConnectionPhase = "blocked"
+	updated, command, handled = model.handleKey(tea.KeyMsg{Type: tea.KeyCtrlR})
+	if !handled || command != nil || !strings.Contains(updated.notice, "ownership") {
+		t.Fatalf("cleanup-blocked Ctrl+R was not safely disabled: command=%v notice=%q", command, updated.notice)
 	}
 }
 
@@ -1762,6 +1794,83 @@ func TestControlTableUsesMappedGroupSeparatorsAndStableHeaders(t *testing.T) {
 	updated, _ = model.handleContentClick(3+motion, 10)
 	if got := updated.(Model).cursor; got != 9 {
 		t.Fatalf("first motion row selected logical %d, want 9", got)
+	}
+}
+
+func TestControlTableExposesCapabilityGatedWS2811Surface(t *testing.T) {
+	model := readyModel(t, PageOutputs)
+	rows := model.controlTableRows(model.snapshot(), 8)
+	joined := ""
+	for _, row := range rows {
+		joined += row.Group + " " + row.Name + " " + row.Value + "\n"
+	}
+	for _, expected := range []string{"WS2811 STRIP", "Pixel count", "Rainbow", "Fill color", "Police", "White thunder", "Converging red", "Stop stream"} {
+		if !strings.Contains(joined, expected) {
+			t.Fatalf("WS2811 control surface missing %q:\n%s", expected, joined)
+		}
+	}
+	if plain := ansi.Strip(model.outputsPage(model.snapshot())); !strings.Contains(plain, "WS2811 available below") {
+		t.Fatalf("WS2811 availability is not discoverable in the initial viewport:\n%s", plain)
+	}
+	for index, row := range rows {
+		if row.Adjust == "strip-count" {
+			model.cursor = index
+			updated, _, _ := model.adjustSelection(-1)
+			if pixels, _ := updated.stripConfiguration(); pixels != native.StripMaximumPixels-1 {
+				t.Fatalf("strip count adjustment=%d", pixels)
+			}
+			break
+		}
+	}
+	model.preview.Hello.Capabilities &^= native.CapabilityAddressableLED
+	if rendered := ansi.Strip(model.outputsPage(model.snapshot())); strings.Contains(rendered, "WS2811 STRIP") {
+		t.Fatalf("strip controls ignored live capability gate:\n%s", rendered)
+	}
+}
+
+func TestControlTableExposesWS2811WithoutRelayStatusAndAvoidsPWMCursorRouting(t *testing.T) {
+	model := readyModel(t, PageOutputs)
+	model.preview.Hello.Capabilities = native.CapabilityAddressableLED
+	model.preview.HaveStatus = false
+	rows := model.controlTableRows(model.snapshot(), 8)
+	if len(rows) == 0 || rows[0].Group != "WS2811 STRIP" {
+		t.Fatalf("addressable-only board did not expose strip controls: %#v", rows)
+	}
+	for index, row := range rows {
+		if row.Name == "Police" {
+			model.cursor = index
+			updated, command, _ := model.adjustSelection(1)
+			if command != nil || updated.pwmValues != model.pwmValues {
+				t.Fatalf("strip action row leaked into PWM adjustment: command=%v", command)
+			}
+			updated, command, _ = model.beginPeripheralRename()
+			if command != nil || updated.renameTarget != "" {
+				t.Fatal("strip action row leaked into peripheral rename")
+			}
+			return
+		}
+	}
+	t.Fatal("addressable-only controls omitted Police effect")
+}
+
+func TestControlTableDisablesStripMutationsWhileMacroWorkspaceIsBusy(t *testing.T) {
+	model := readyModel(t, PageOutputs)
+	model.previewMacroRecording.Active = true
+	rows := model.controlTableRows(model.snapshot(), 8)
+	for _, row := range rows {
+		if row.Kind != "strip" {
+			continue
+		}
+		switch row.Name {
+		case "Stop stream", "Stream status":
+			if row.Action == "" {
+				t.Fatalf("host-only %q action was disabled", row.Name)
+			}
+		default:
+			if row.Action != "" || row.Adjust != "" || !strings.Contains(row.Value, "macro") {
+				t.Fatalf("busy strip mutation remained active: %#v", row)
+			}
+		}
 	}
 }
 

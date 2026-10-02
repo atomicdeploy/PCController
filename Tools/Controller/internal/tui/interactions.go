@@ -281,6 +281,13 @@ func (model Model) handleKey(message tea.KeyMsg) (Model, tea.Cmd, bool) {
 	case "ctrl+x":
 		return model.closePort()
 	case "ctrl+r":
+		if firmwareRebootAvailable(model.snapshot()) {
+			return model.dispatchLine("reset app")
+		}
+		if snapshot := model.snapshot(); snapshot.ConnectionState == "close_failed" || snapshot.ConnectionPhase == "blocked" {
+			model.setNotice("Hardware reset unavailable until retained serial ownership is cleaned up")
+			return model, nil, true
+		}
 		return model.dispatchLine("reset lines")
 	case "~", "`":
 		model.toggleTerminal()
@@ -363,15 +370,19 @@ func (model Model) handleKey(message tea.KeyMsg) (Model, tea.Cmd, bool) {
 		model.moveCursor(1)
 		return model, nil, true
 	case "home":
-		if inputEmpty && model.page == PageOutputs && model.cursor >= 15 && model.cursor <= 26 {
-			return model.setSelectedPWM(0)
+		if inputEmpty && model.page == PageOutputs {
+			if row, ok := model.selectedOutputRow(); ok && row.Kind == "pwm" {
+				return model.setPWMChannel(row.Index, 0)
+			}
 		}
 		if inputEmpty && model.page == PageMenus {
 			return model.moveSelectedMenuToRank(0)
 		}
 	case "end":
-		if inputEmpty && model.page == PageOutputs && model.cursor >= 15 && model.cursor <= 26 {
-			return model.setSelectedPWM(4095)
+		if inputEmpty && model.page == PageOutputs {
+			if row, ok := model.selectedOutputRow(); ok && row.Kind == "pwm" {
+				return model.setPWMChannel(row.Index, 4095)
+			}
 		}
 		if inputEmpty && model.page == PageMenus {
 			return model.moveSelectedMenuToRank(len(model.activeMenuPages()) - 1)
@@ -478,8 +489,10 @@ func (model Model) dispatchLine(line string) (Model, tea.Cmd, bool) {
 	if strings.EqualFold(line, "reset app") || strings.EqualFold(line, "reset lines") {
 		model.rebootPending = true
 		if strings.EqualFold(line, "reset lines") {
+			model.rebootKind = "hardware"
 			model.setNotice("Pulsing DTR hardware reset…")
 		} else {
+			model.rebootKind = "firmware"
 			model.setNotice("Rebooting controller application…")
 		}
 	}
@@ -783,8 +796,21 @@ func (model Model) activateSelection() (Model, tea.Cmd, bool) {
 func (model Model) adjustSelection(delta int) (Model, tea.Cmd, bool) {
 	switch model.page {
 	case PageOutputs:
-		if model.cursor >= 15 && model.cursor <= 26 {
-			channel := model.cursor - 15
+		if row, ok := model.selectedOutputRow(); ok && row.Adjust != "" {
+			switch row.Adjust {
+			case "strip-count":
+				pixels, _ := model.stripConfiguration()
+				model.stripPixels = wrapInt(pixels-1, delta, native.StripMaximumPixels) + 1
+			case "strip-fps":
+				_, fps := model.stripConfiguration()
+				model.stripFPS = wrapInt(fps-1, delta, 30) + 1
+			case "strip-color":
+				model.stripColor = wrapInt(model.stripColorIndex(), delta, len(stripColorPresets))
+			}
+			return model, nil, true
+		}
+		if row, ok := model.selectedOutputRow(); ok && row.Kind == "pwm" {
+			channel := row.Index
 			value := int(model.pwmValues[channel]) + delta*64
 			if value < 0 {
 				value = 4095
@@ -792,7 +818,7 @@ func (model Model) adjustSelection(delta int) (Model, tea.Cmd, bool) {
 			if value > 4095 {
 				value = 0
 			}
-			return model.setSelectedPWM(uint16(value))
+			return model.setPWMChannel(channel, uint16(value))
 		}
 	case PageMenus:
 		entry, ok := model.selectedMenuConfiguration()
@@ -812,57 +838,29 @@ func (model Model) adjustSelection(delta int) (Model, tea.Cmd, bool) {
 }
 
 func (model Model) activateOutput() (Model, tea.Cmd, bool) {
-	switch {
-	case model.cursor >= 0 && model.cursor <= 7:
-		return model.dispatchLine(fmt.Sprintf("relay %d toggle", model.cursor+1))
-	case model.cursor == 8:
-		return model.dispatchLine("relay off")
-	case model.cursor >= 9 && model.cursor <= 14:
-		commands := []string{
-			"relay side left up", "relay side left stop", "relay side left down",
-			"relay side right up", "relay side right stop", "relay side right down",
+	if row, ok := model.selectedOutputRow(); ok {
+		if row.Action != "" {
+			return model.dispatchLine(row.Action)
 		}
-		return model.dispatchLine(commands[model.cursor-9])
-	case model.cursor >= 15 && model.cursor <= 26:
-		value := model.pwmValues[model.cursor-15]
-		if value == 0 {
-			value = 2048
-		} else {
-			value = 0
+		if row.Kind == "pwm" {
+			value := model.pwmValues[row.Index]
+			if value == 0 {
+				value = 2048
+			} else {
+				value = 0
+			}
+			return model.setPWMChannel(row.Index, value)
 		}
-		return model.setSelectedPWM(value)
-	case model.cursor == 27:
-		return model.dispatchLine("pwm off")
 	}
 	return model, nil, true
 }
 
-func outputPeripheralDescriptor(cursor int) (appconfig.PeripheralDescriptor, bool) {
-	rows := make([]appconfig.PeripheralDescriptor, 0, 27)
-	descriptors := appconfig.PeripheralDescriptors()
-	for _, descriptor := range descriptors {
-		if descriptor.Kind == "relay" {
-			rows = append(rows, descriptor)
-		}
+func (model Model) selectedOutputRow() (controlTableRow, bool) {
+	rows := model.controlTableRows(model.snapshot(), 8)
+	if model.cursor < 0 || model.cursor >= len(rows) {
+		return controlTableRow{}, false
 	}
-	rows = append(rows, appconfig.PeripheralDescriptor{}) // All relays.
-	for _, descriptor := range descriptors {
-		if descriptor.Kind == "motion" {
-			for range 3 { // Up, stop, and down share one presentation name.
-				rows = append(rows, descriptor)
-			}
-		}
-	}
-	for _, descriptor := range descriptors {
-		if descriptor.Control == "pwm-user" {
-			rows = append(rows, descriptor)
-		}
-	}
-	rows = append(rows, appconfig.PeripheralDescriptor{}) // All user PWM.
-	if cursor < 0 || cursor >= len(rows) || rows[cursor].Key == "" {
-		return appconfig.PeripheralDescriptor{}, false
-	}
-	return rows[cursor], true
+	return rows[model.cursor], true
 }
 
 func (model Model) peripheralName(key, fallback string) string {
@@ -873,9 +871,19 @@ func (model Model) peripheralName(key, fallback string) string {
 }
 
 func (model Model) beginPeripheralRename() (Model, tea.Cmd, bool) {
-	descriptor, ok := outputPeripheralDescriptor(model.cursor)
-	if !ok {
+	row, ok := model.selectedOutputRow()
+	if !ok || row.PeripheralKey == "" {
 		model.setNotice("Select a relay, motion side, or PWM channel before renaming")
+		return model, nil, true
+	}
+	var descriptor appconfig.PeripheralDescriptor
+	for _, candidate := range appconfig.PeripheralDescriptors() {
+		if candidate.Key == row.PeripheralKey {
+			descriptor, ok = candidate, true
+			break
+		}
+	}
+	if !ok {
 		return model, nil, true
 	}
 	return model.beginPeripheralRenameDescriptor(descriptor)
@@ -988,7 +996,14 @@ func (model Model) savePeripheralName(descriptor appconfig.PeripheralDescriptor,
 }
 
 func (model Model) setSelectedPWM(value uint16) (Model, tea.Cmd, bool) {
-	channel := model.cursor - 15
+	row, ok := model.selectedOutputRow()
+	if !ok || row.Kind != "pwm" {
+		return model, nil, true
+	}
+	return model.setPWMChannel(row.Index, value)
+}
+
+func (model Model) setPWMChannel(channel int, value uint16) (Model, tea.Cmd, bool) {
 	if channel < 0 || channel > 11 {
 		return model, nil, true
 	}
@@ -1839,7 +1854,7 @@ func (model Model) handleMouse(message tea.MouseMsg) (tea.Model, tea.Cmd) {
 			return model, nil
 		}
 		if message.Action == tea.MouseActionMotion && message.Button == tea.MouseButtonLeft && model.pwmDragChannel >= 0 {
-			return model.setOutputPWMFromX(15+model.pwmDragChannel, message.X)
+			return model.setOutputPWMFromX(model.cursor, message.X)
 		}
 	}
 	if message.Action == tea.MouseActionRelease && model.page == PageMenus && !model.portPicker {
@@ -1915,7 +1930,10 @@ func (model Model) handleActionBarClick(x int) (tea.Model, tea.Cmd) {
 			case "close":
 				updated, command, _ := model.closePort()
 				return updated, command
-			case "reboot":
+			case "firmware-reboot":
+				updated, command, _ := model.dispatchLine("reset app")
+				return updated, command
+			case "hardware-reset":
 				updated, command, _ := model.dispatchLine("reset lines")
 				return updated, command
 			case "refresh":
@@ -1982,14 +2000,14 @@ func (model Model) handleContentClick(row, x int) (tea.Model, tea.Cmd) {
 		index, ok := controlTableLogicalAt(rows, tableBodyRows(model.contentHeight()), model.cursor, row-3)
 		if ok {
 			model.cursor = index
-			if index >= 15 && index <= 26 {
+			if selected := rows[index]; selected.Kind == "pwm" {
 				tableStart := max(0, (model.width-tableWidth)/2)
 				levelWidth := max(8, columns[1].Width-7)
 				sliderStart := tableStart + 1 + columns[0].Width + 1
 				if x < sliderStart-1 || x > sliderStart+levelWidth {
 					return model, nil
 				}
-				model.pwmDragChannel = index - 15
+				model.pwmDragChannel = selected.Index
 				model.pwmDragSet = false
 				return model.setOutputPWMFromX(index, x)
 			}
@@ -2089,9 +2107,11 @@ func (model Model) handleContentClick(row, x int) (tea.Model, tea.Cmd) {
 }
 
 func (model Model) setOutputPWMFromX(index, x int) (tea.Model, tea.Cmd) {
-	if index < 15 || index > 26 {
+	rows := model.controlTableRows(model.snapshot(), 8)
+	if index < 0 || index >= len(rows) || rows[index].Kind != "pwm" {
 		return model, nil
 	}
+	channel := rows[index].Index
 	tableWidth := model.presentationTableWidth(118)
 	columns := outputTableColumns(tableWidth)
 	tableStart := max(0, (model.width-tableWidth)/2)
@@ -2101,13 +2121,13 @@ func (model Model) setOutputPWMFromX(index, x int) (tea.Model, tea.Cmd) {
 	percent = min(100, max(0, percent))
 	value := uint16(percent * 4095 / 100)
 	model.cursor = index
-	model.pwmDragChannel = index - 15
+	model.pwmDragChannel = channel
 	if model.pwmDragSet && model.pwmDragValue == value {
 		return model, nil
 	}
 	model.pwmDragValue = value
 	model.pwmDragSet = true
-	updated, command, _ := model.setSelectedPWM(value)
+	updated, command, _ := model.setPWMChannel(channel, value)
 	return updated, command
 }
 

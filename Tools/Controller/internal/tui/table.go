@@ -25,10 +25,15 @@ const (
 )
 
 type controlTableRow struct {
-	Group string
-	Name  string
-	Value string
-	Tone  controlValueTone
+	Group         string
+	Name          string
+	Value         string
+	Tone          controlValueTone
+	Action        string
+	Adjust        string
+	Kind          string
+	Index         int
+	PeripheralKey string
 }
 
 type controlTableLine struct {
