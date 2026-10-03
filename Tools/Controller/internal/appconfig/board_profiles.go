@@ -33,6 +33,7 @@ type PeripheralPresentation struct {
 	Icon   string `json:"icon,omitempty"`
 	Color  string `json:"color,omitempty"`
 	Group  string `json:"group,omitempty"`
+	Order  *int   `json:"order,omitempty"`
 	Hidden bool   `json:"hidden,omitempty"`
 	Locked bool   `json:"locked,omitempty"`
 }
@@ -100,6 +101,9 @@ func (value Config) validateBoardProfiles() error {
 			}
 			if color := strings.TrimSpace(presentation.Color); color != "" && !validPresentationColor(color) {
 				return fmt.Errorf("board_profiles[%q].presentation[%q].color must be #RRGGBB", identity, controlKey)
+			}
+			if presentation.Order != nil && (*presentation.Order < 0 || *presentation.Order >= MaxPeripheralNames) {
+				return fmt.Errorf("board_profiles[%q].presentation[%q].order must be in 0..%d", identity, controlKey, MaxPeripheralNames-1)
 			}
 		}
 	}

@@ -158,7 +158,7 @@ const methodOverrides = {
   "controller.snapshot": "Return the authoritative cached controller snapshot.",
 	"controller.board_profile.get": "Return the attached board identity, configured wiring mode, and opaque profile revision.",
 	"controller.board_profile.update": "Bind the attached physical board identity to one explicit host-owned wiring profile.",
-	"controller.peripheral.presentation.update": "Update one advertised peripheral name, icon, group, visibility, or lock using optional optimistic concurrency.",
+	"controller.peripheral.presentation.update": "Update one advertised peripheral name, icon, group, kind-local order, visibility, or lock using optional optimistic concurrency.",
 	"controller.action.invoke": "Invoke one stable action ID advertised by the attached board profile and wait for the board acknowledgement.",
 	"controller.estop.get": "Return the authoritative PCController-wide effect and motion interlock state.",
 	"controller.estop.set": "Engage or release the PCController-wide effect and motion interlock; release never resumes cancelled work.",

@@ -245,11 +245,34 @@ func TestPresentationUpdateResultCarriesTheAuthoritativeControl(t *testing.T) {
 	}
 	if result.BoardProfile.Revision != "next-revision" || result.Peripheral.Name != "Aisle lamp" ||
 		result.Control == nil || result.Control.Key != "relay.5" || result.Control.Icon != "lightbulb" ||
-		len(result.Control.Actions) != 1 || result.Control.Actions[0].ID != "relay.5.on" {
+		len(result.Control.Actions) != 1 || result.Control.Actions[0].ID != "relay.5.on" || len(result.Controls) != 1 {
 		t.Fatalf("presentation update result=%+v", result)
 	}
 	if _, err := presentationResult(settings, "relay.6"); err == nil {
 		t.Fatal("missing updated peripheral was accepted")
+	}
+}
+
+func TestPresentationReorderPersistsACompleteKindLocalPermutation(t *testing.T) {
+	profile := appconfig.BoardProfile{Mode: appconfig.BoardModeOrdinaryRelays}
+	changed, err := reorderPeripheralPresentation(&profile, nil, "relay.7", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changed) != 8 || changed[0] != "relay.7" {
+		t.Fatalf("changed relay keys=%v", changed)
+	}
+	for rank, key := range changed {
+		presentation, ok := profile.Presentation[key]
+		if !ok || presentation.Order == nil || *presentation.Order != rank {
+			t.Fatalf("%s presentation=%+v, want order %d", key, presentation, rank)
+		}
+	}
+	if _, err := reorderPeripheralPresentation(&profile, nil, "relay.8", 8); err == nil {
+		t.Fatal("out-of-range relay order was accepted")
+	}
+	if _, err := reorderPeripheralPresentation(&profile, nil, "display.segment", 0); err == nil {
+		t.Fatal("read-only peripheral was accepted as an ordered control")
 	}
 }
 

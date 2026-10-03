@@ -22,6 +22,7 @@ type PeripheralDescriptor struct {
 	Icon        string `json:"icon,omitempty"`
 	Color       string `json:"color,omitempty"`
 	Group       string `json:"group,omitempty"`
+	Order       *int   `json:"order,omitempty"`
 	Hidden      bool   `json:"hidden,omitempty"`
 	Locked      bool   `json:"locked,omitempty"`
 	Control     string `json:"control"`
@@ -178,11 +179,15 @@ func ProfileDescriptors(mode string, exposeRawRelays bool, legacyNames map[strin
 	controls := make([]ControlDescriptor, 0, 26)
 	addControl := func(descriptor PeripheralDescriptor, kind string, actions []ActionDescriptor) {
 		resolved := resolvePresentation(descriptor.Key, descriptor.DefaultName, legacyNames, presentation)
-		descriptor.Name, descriptor.Icon, descriptor.Color, descriptor.Group = resolved.Name, resolved.Icon, resolved.Color, resolved.Group
+		descriptor.Name, descriptor.Icon, descriptor.Color, descriptor.Group, descriptor.Order = resolved.Name, resolved.Icon, resolved.Color, resolved.Group, resolved.Order
 		descriptor.Hidden, descriptor.Locked = resolved.Hidden, resolved.Locked
+		order := descriptor.Index
+		if resolved.Order != nil {
+			order = *resolved.Order
+		}
 		peripherals = append(peripherals, descriptor)
 		controls = append(controls, ControlDescriptor{
-			Key: descriptor.Key, Kind: kind, Order: descriptor.Index,
+			Key: descriptor.Key, Kind: kind, Order: order,
 			Name: descriptor.Name, Icon: descriptor.Icon, Color: descriptor.Color, Group: descriptor.Group,
 			Hidden: descriptor.Hidden, Locked: descriptor.Locked,
 			Control: descriptor.Control, Actions: actions,
@@ -210,11 +215,15 @@ func ProfileDescriptors(mode string, exposeRawRelays bool, legacyNames map[strin
 					{ID: key + ".stop", Verb: "stop", Name: "Stop"},
 				}
 				resolved := resolvePresentation(key, seat.DefaultName, legacy, presentation)
-				seat.Name, seat.Icon, seat.Color, seat.Group = resolved.Name, resolved.Icon, resolved.Color, resolved.Group
+				seat.Name, seat.Icon, seat.Color, seat.Group, seat.Order = resolved.Name, resolved.Icon, resolved.Color, resolved.Group, resolved.Order
 				seat.Hidden, seat.Locked = resolved.Hidden, resolved.Locked
+				order := descriptor.Index
+				if resolved.Order != nil {
+					order = *resolved.Order
+				}
 				peripherals = append(peripherals, seat)
 				controls = append(controls, ControlDescriptor{
-					Key: key, Kind: "seat", Order: descriptor.Index, Name: seat.Name,
+					Key: key, Kind: "seat", Order: order, Name: seat.Name,
 					Icon: seat.Icon, Color: seat.Color, Group: seat.Group, Hidden: seat.Hidden, Locked: seat.Locked,
 					Control: "seat", Actions: actions,
 				})
@@ -240,7 +249,7 @@ func ProfileDescriptors(mode string, exposeRawRelays bool, legacyNames map[strin
 				addControl(descriptor, "relay", actions)
 			} else {
 				resolved := resolvePresentation(descriptor.Key, descriptor.DefaultName, legacyNames, presentation)
-				descriptor.Name, descriptor.Icon, descriptor.Color, descriptor.Group = resolved.Name, resolved.Icon, resolved.Color, resolved.Group
+				descriptor.Name, descriptor.Icon, descriptor.Color, descriptor.Group, descriptor.Order = resolved.Name, resolved.Icon, resolved.Color, resolved.Group, resolved.Order
 				descriptor.Hidden, descriptor.Locked = resolved.Hidden, resolved.Locked
 				peripherals = append(peripherals, descriptor)
 			}
@@ -251,7 +260,7 @@ func ProfileDescriptors(mode string, exposeRawRelays bool, legacyNames map[strin
 			continue
 		}
 		resolved := resolvePresentation(descriptor.Key, descriptor.DefaultName, legacyNames, presentation)
-		descriptor.Name, descriptor.Icon, descriptor.Color, descriptor.Group = resolved.Name, resolved.Icon, resolved.Color, resolved.Group
+		descriptor.Name, descriptor.Icon, descriptor.Color, descriptor.Group, descriptor.Order = resolved.Name, resolved.Icon, resolved.Color, resolved.Group, resolved.Order
 		descriptor.Hidden, descriptor.Locked = resolved.Hidden, resolved.Locked
 		peripherals = append(peripherals, descriptor)
 	}

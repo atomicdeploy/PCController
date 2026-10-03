@@ -70,6 +70,23 @@ func TestProfileDescriptorsAdvertiseOnlyConfiguredWiring(t *testing.T) {
 	}
 }
 
+func TestProfileDescriptorsExposePersistentPresentationOrder(t *testing.T) {
+	first, zero, second := 1, 0, 2
+	presentation := map[string]PeripheralPresentation{
+		"relay.5": {Order: &first},
+		"relay.6": {Order: &zero},
+		"relay.7": {Order: &second},
+	}
+	_, controls := ProfileDescriptors(BoardModeOrdinaryRelays, false, nil, presentation)
+	orders := map[string]int{}
+	for _, control := range controls {
+		orders[control.Key] = control.Order
+	}
+	if orders["relay.5"] != 1 || orders["relay.6"] != 0 || orders["relay.7"] != 2 {
+		t.Fatalf("presentation order was not advertised: %#v", orders)
+	}
+}
+
 func TestBoardProfileValidationAndRevision(t *testing.T) {
 	config := Defaults()
 	config.BoardProfiles = map[string]BoardProfile{
@@ -108,5 +125,11 @@ func TestBoardProfileValidationAndRevision(t *testing.T) {
 	config.BoardProfiles["serial:board-42"] = profile
 	if err := config.Validate(); err == nil {
 		t.Fatal("invalid presentation color accepted")
+	}
+	invalidOrder := MaxPeripheralNames
+	profile.Presentation["seat.a"] = PeripheralPresentation{Order: &invalidOrder}
+	config.BoardProfiles["serial:board-42"] = profile
+	if err := config.Validate(); err == nil {
+		t.Fatal("invalid presentation order accepted")
 	}
 }
