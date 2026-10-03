@@ -103,6 +103,48 @@ func TestEffectLibraryExportsAndImportsLivingEffectsJSON(t *testing.T) {
 	}
 }
 
+func TestEffectAndGroupPresentationRemainPCControllerOwned(t *testing.T) {
+	runtime := New(Options{})
+	t.Cleanup(func() { _ = runtime.Close() })
+	config := appconfig.Defaults()
+	engine := NewCommandEngine(runtime, CommandOptions{
+		Macros:     func() []appconfig.Macro { return config.Macros },
+		HostConfig: func() appconfig.Config { return config },
+		UpdateHostConfig: func(change func(*appconfig.Config) error) error {
+			candidate := config
+			if err := change(&candidate); err != nil {
+				return err
+			}
+			if err := candidate.Validate(); err != nil {
+				return err
+			}
+			config = candidate
+			return nil
+		},
+	})
+	if _, err := engine.Execute(context.Background(), "effect create sequence 9 Seat-rise Motion green seat"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.Execute(context.Background(), "effect category police Motion"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.Execute(context.Background(), "effect icon police lightbulb"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.Execute(context.Background(), "effect group update Motion Cinema car"); err != nil {
+		t.Fatal(err)
+	}
+	if config.Macros[0].Category != "Cinema" || config.Macros[0].Icon != "seat" ||
+		config.StripEffects[0].Category != "Cinema" || config.StripEffects[0].Icon != "lightbulb" ||
+		config.EffectGroups["Cinema"].Icon != "car" {
+		t.Fatalf("presentation was not persisted: macros=%+v strips=%+v groups=%+v", config.Macros, config.StripEffects, config.EffectGroups)
+	}
+	listed, err := engine.Execute(context.Background(), "effect list")
+	if err != nil || !strings.Contains(listed, `"icon":"seat"`) || !strings.Contains(listed, `"group_icon":"car"`) {
+		t.Fatalf("effect list=%q err=%v", listed, err)
+	}
+}
+
 func TestEffectDocumentRejectsTrailingJSON(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "effects.json")
 	if err := os.WriteFile(path, []byte(`{"effects":[{"id":"1","name":"One","kind":"sequence"}]} {}`), 0o600); err != nil {

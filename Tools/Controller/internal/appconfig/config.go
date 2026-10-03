@@ -59,6 +59,7 @@ type Config struct {
 	BoardProfiles map[string]BoardProfile `json:"board_profiles,omitempty"`
 	Macros        []Macro                 `json:"macros,omitempty"`
 	StripEffects  []StripEffect           `json:"strip_effects,omitempty"`
+	EffectGroups  map[string]EffectGroup  `json:"effect_groups,omitempty"`
 	Melodies      []Melody                `json:"melodies,omitempty"`
 	StatusEffects []StatusLEDEffect       `json:"status_effects,omitempty"`
 	Automations   []Automation            `json:"automations,omitempty"`
@@ -244,6 +245,7 @@ type Macro struct {
 	Name                string      `json:"name"`
 	Mode                string      `json:"mode,omitempty"`
 	Category            string      `json:"category,omitempty"`
+	Icon                string      `json:"icon,omitempty"`
 	Color               string      `json:"color,omitempty"`
 	Label               string      `json:"label,omitempty"`
 	LCDMessage          string      `json:"lcd_message,omitempty"`
@@ -290,11 +292,19 @@ type StripEffect struct {
 	ID                string       `json:"id"`
 	Name              string       `json:"name"`
 	Category          string       `json:"category,omitempty"`
+	Icon              string       `json:"icon,omitempty"`
 	Description       string       `json:"description,omitempty"`
 	Program           StripProgram `json:"program"`
 	DefaultFPS        int          `json:"default_fps"`
 	DefaultDurationMS int          `json:"default_duration_ms"`
 	DefaultPixels     int          `json:"default_pixels,omitempty"`
+}
+
+// EffectGroup is PCController-owned presentation metadata for a category.
+// Category membership remains on each effect so effects.json stays portable;
+// this record gives every consumer one durable custom parent icon.
+type EffectGroup struct {
+	Icon string `json:"icon,omitempty"`
 }
 
 // StripColor is an RGB value stored in a declarative strip program.
@@ -842,6 +852,9 @@ func (value Config) Validate() error {
 		if len(macro.Category) > 64 || !printableASCII(macro.Category) {
 			return fmt.Errorf("macros[%d].category must be at most 64 printable ASCII bytes", index)
 		}
+		if len(macro.Icon) > 64 || !printableASCII(macro.Icon) {
+			return fmt.Errorf("macros[%d].icon must be at most 64 printable ASCII bytes", index)
+		}
 		switch macro.Mode {
 		case "mcu", "host":
 		default:
@@ -958,6 +971,9 @@ func (value Config) Validate() error {
 		if len(effect.Category) > 64 || !printableASCII(effect.Category) || len(effect.Description) > 256 || !printableASCII(effect.Description) {
 			return fmt.Errorf("strip_effects[%d] category/description must be printable ASCII within 64/256 bytes", index)
 		}
+		if len(effect.Icon) > 64 || !printableASCII(effect.Icon) {
+			return fmt.Errorf("strip_effects[%d].icon must be at most 64 printable ASCII bytes", index)
+		}
 		program := effect.Program
 		if program.PeriodMS < 50 || program.PeriodMS > 3_600_000 {
 			return fmt.Errorf("strip_effects[%d].program.period_ms must be 50..3600000", index)
@@ -993,6 +1009,14 @@ func (value Config) Validate() error {
 		}
 		if effect.DefaultPixels < 1 || effect.DefaultPixels > 100 {
 			return fmt.Errorf("strip_effects[%d].default_pixels must be 1..100", index)
+		}
+	}
+	for category, group := range value.EffectGroups {
+		if category == "" || len(category) > 64 || !printableASCII(category) {
+			return fmt.Errorf("effect_groups category must be 1..64 printable ASCII bytes")
+		}
+		if len(group.Icon) > 64 || !printableASCII(group.Icon) {
+			return fmt.Errorf("effect_groups[%q].icon must be at most 64 printable ASCII bytes", category)
 		}
 	}
 	if err := validateOutputDefinitions(value.Melodies, value.StatusEffects); err != nil {

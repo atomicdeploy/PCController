@@ -24,6 +24,8 @@ type EffectDescriptor struct {
 	ID            string                 `json:"id"`
 	Name          string                 `json:"name"`
 	Category      string                 `json:"category,omitempty"`
+	Icon          string                 `json:"icon,omitempty"`
+	GroupIcon     string                 `json:"group_icon,omitempty"`
 	Description   string                 `json:"description,omitempty"`
 	Kind          string                 `json:"kind"`
 	Engine        string                 `json:"engine"`
@@ -45,7 +47,19 @@ type effectDocument struct {
 }
 
 func EffectCatalog(macros []appconfig.Macro, strips []appconfig.StripEffect) []EffectDescriptor {
+	return EffectCatalogWithGroups(macros, strips, nil)
+}
+
+func EffectCatalogWithGroups(macros []appconfig.Macro, strips []appconfig.StripEffect, groups map[string]appconfig.EffectGroup) []EffectDescriptor {
 	result := make([]EffectDescriptor, 0, len(macros)+len(strips))
+	groupIcon := func(category string) string {
+		for name, group := range groups {
+			if strings.EqualFold(strings.TrimSpace(name), strings.TrimSpace(category)) {
+				return group.Icon
+			}
+		}
+		return ""
+	}
 	for _, macro := range macros {
 		duration := 0
 		if len(macro.Steps) != 0 {
@@ -53,7 +67,7 @@ func EffectCatalog(macros []appconfig.Macro, strips []appconfig.StripEffect) []E
 		}
 		result = append(result, EffectDescriptor{
 			Reference: "effect:" + strconv.Itoa(int(macro.ID)), ID: strconv.Itoa(int(macro.ID)),
-			Name: macro.Name, Category: macro.Category, Kind: "sequence", Engine: macro.Mode,
+			Name: macro.Name, Category: macro.Category, Icon: macro.Icon, GroupIcon: groupIcon(macro.Category), Kind: "sequence", Engine: macro.Mode,
 			Editable: true, DurationMS: duration, Steps: append([]appconfig.MacroStep(nil), macro.Steps...),
 			Properties: map[string]interface{}{
 				"color": macro.Color, "label": macro.Label, "lcd_message": macro.LCDMessage,
@@ -66,7 +80,7 @@ func EffectCatalog(macros []appconfig.Macro, strips []appconfig.StripEffect) []E
 	for _, effect := range strips {
 		result = append(result, EffectDescriptor{
 			Reference: "effect:" + effect.ID, ID: effect.ID, Name: effect.Name,
-			Category: effect.Category, Description: effect.Description,
+			Category: effect.Category, Icon: effect.Icon, GroupIcon: groupIcon(effect.Category), Description: effect.Description,
 			Kind: "strip-stream", Engine: "host", Editable: true,
 			DurationMS: effect.DefaultDurationMS, DefaultFPS: effect.DefaultFPS,
 			DefaultPixels: effect.DefaultPixels, Program: effect.Program,
@@ -134,6 +148,29 @@ func effectPropertyUint32(effect EffectDescriptor, key string) uint32 {
 func effectPropertyBool(effect EffectDescriptor, key string) bool {
 	value, _ := effect.Properties[key].(bool)
 	return value
+}
+
+func setEffectIcon(config *appconfig.Config, effect EffectDescriptor, icon string) error {
+	icon = strings.TrimSpace(icon)
+	if icon == "-" {
+		icon = ""
+	}
+	if effect.Kind == "sequence" {
+		for index := range config.Macros {
+			if strconv.Itoa(int(config.Macros[index].ID)) == effect.ID {
+				config.Macros[index].Icon = icon
+				return nil
+			}
+		}
+	} else {
+		for index := range config.StripEffects {
+			if strings.EqualFold(config.StripEffects[index].ID, effect.ID) {
+				config.StripEffects[index].Icon = icon
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("effect %q is not configured", effect.Reference)
 }
 
 func stripProgramTemplate(primitive string) (appconfig.StripProgram, error) {
@@ -273,6 +310,7 @@ func importEffectDocument(document effectDocument, replace bool, updateHostConfi
 				}
 				macro := appconfig.Macro{
 					ID: byte(parsedID), Name: effect.Name, Mode: effect.Engine, Category: effect.Category,
+					Icon:                effect.Icon,
 					Color:               effectPropertyString(effect, "color", "green"),
 					Label:               effectPropertyString(effect, "label", ""),
 					LCDMessage:          effectPropertyString(effect, "lcd_message", ""),
@@ -298,6 +336,7 @@ func importEffectDocument(document effectDocument, replace bool, updateHostConfi
 			case "strip-stream":
 				strip := appconfig.StripEffect{
 					ID: id, Name: effect.Name, Category: effect.Category, Description: effect.Description,
+					Icon:    effect.Icon,
 					Program: effect.Program, DefaultFPS: effect.DefaultFPS,
 					DefaultDurationMS: effect.DurationMS, DefaultPixels: effect.DefaultPixels,
 				}
@@ -329,7 +368,23 @@ func importEffectDocument(document effectDocument, replace bool, updateHostConfi
 			}
 			names[nameKey] = struct{}{}
 		}
+		groups := make(map[string]appconfig.EffectGroup)
+		for _, effect := range document.Effects {
+			if strings.TrimSpace(effect.Category) != "" && strings.TrimSpace(effect.GroupIcon) != "" {
+				groups[effect.Category] = appconfig.EffectGroup{Icon: effect.GroupIcon}
+			}
+		}
 		config.Macros, config.StripEffects = macros, strips
+		if replace {
+			config.EffectGroups = groups
+		} else {
+			if config.EffectGroups == nil {
+				config.EffectGroups = make(map[string]appconfig.EffectGroup)
+			}
+			for category, group := range groups {
+				config.EffectGroups[category] = group
+			}
+		}
 		return nil
 	})
 }
@@ -342,7 +397,7 @@ func effectCommand(
 	updateHostConfig func(func(*appconfig.Config) error) error,
 	args []string,
 ) (string, error) {
-	const usage = "effect list|inspect ID|play ID [host|mcu|COUNT [FPS]]|stop ID|create sequence ID NAME [CATEGORY [COLOR]]|create strip ID NAME PRIMITIVE [CATEGORY [FPS [DURATION_MS [PIXELS]]]]|update ID ...|program ID JSON_HEX|rename ID NAME|category ID CATEGORY|delete ID|export [PATH]|import PATH [merge|replace]|record ...|status|cancel [keep]"
+	const usage = "effect list|inspect ID|play ID [host|mcu|COUNT [FPS]]|stop ID|create|update|rename|category|icon|group update|delete|export|import|record|status|cancel"
 	if len(args) == 0 {
 		return "", fmt.Errorf("usage: %s", usage)
 	}
@@ -350,7 +405,7 @@ func effectCommand(
 	if hostConfig != nil {
 		config = hostConfig()
 	}
-	catalog := EffectCatalog(runner.List(), config.StripEffects)
+	catalog := EffectCatalogWithGroups(runner.List(), config.StripEffects, config.EffectGroups)
 	switch strings.ToLower(args[0]) {
 	case "list", "catalog":
 		if len(args) != 1 {
@@ -411,13 +466,25 @@ func effectCommand(
 		}
 		switch strings.ToLower(args[1]) {
 		case "sequence":
-			if len(args) < 4 {
-				return "", errors.New("usage: effect create sequence ID NAME [CATEGORY [COLOR]]")
+			if len(args) < 4 || len(args) > 7 {
+				return "", errors.New("usage: effect create sequence ID NAME [CATEGORY [COLOR [ICON]]]")
 			}
 			if err := ensureEffectIdentityAvailable(catalog, "", args[2], args[3]); err != nil {
 				return "", err
 			}
-			return macroCommand(ctx, runner, append([]string{"create"}, args[2:]...))
+			macroArgs := append([]string{"create"}, args[2:min(len(args), 6)]...)
+			message, err := macroCommand(ctx, runner, macroArgs)
+			if err != nil || len(args) < 7 {
+				return message, err
+			}
+			created, err := findEffect(EffectCatalogWithGroups(runner.List(), config.StripEffects, config.EffectGroups), args[2])
+			if err != nil {
+				return "", err
+			}
+			if err := updateHostConfig(func(config *appconfig.Config) error { return setEffectIcon(config, created, args[6]) }); err != nil {
+				return "", err
+			}
+			return message, nil
 		case "strip":
 			if len(args) < 5 || len(args) > 9 {
 				return "", fmt.Errorf("usage: effect create strip ID NAME PRIMITIVE [CATEGORY [FPS [DURATION_MS [PIXELS]]]]")
@@ -465,8 +532,8 @@ func effectCommand(
 			}
 			return fmt.Sprintf("effect effect:%s created", effect.ID), nil
 		case "strip-json":
-			if len(args) != 10 {
-				return "", errors.New("usage: effect create strip-json ID NAME CATEGORY DESCRIPTION PROGRAM_HEX FPS DURATION_MS PIXELS")
+			if len(args) != 10 && len(args) != 11 {
+				return "", errors.New("usage: effect create strip-json ID NAME CATEGORY DESCRIPTION PROGRAM_HEX FPS DURATION_MS PIXELS [ICON]")
 			}
 			programJSON, err := hex.DecodeString(args[6])
 			if err != nil {
@@ -492,7 +559,11 @@ func effectCommand(
 			if description == "-" {
 				description = ""
 			}
-			effect := appconfig.StripEffect{ID: args[2], Name: args[3], Category: args[4], Description: description, Program: program, DefaultFPS: fps, DefaultDurationMS: duration, DefaultPixels: pixels}
+			icon := ""
+			if len(args) == 11 && args[10] != "-" {
+				icon = args[10]
+			}
+			effect := appconfig.StripEffect{ID: args[2], Name: args[3], Category: args[4], Icon: icon, Description: description, Program: program, DefaultFPS: fps, DefaultDurationMS: duration, DefaultPixels: pixels}
 			if updateHostConfig == nil {
 				return "", errors.New("effect persistence is unavailable")
 			}
@@ -521,13 +592,20 @@ func effectCommand(
 		}
 		id := effect.ID
 		if effect.Kind == "sequence" {
-			if len(args) != 5 {
-				return "", errors.New("usage: effect update ID NAME CATEGORY COLOR")
+			if len(args) != 5 && len(args) != 6 {
+				return "", errors.New("usage: effect update ID NAME CATEGORY COLOR [ICON]")
 			}
 			if err := ensureEffectIdentityAvailable(catalog, effect.Reference, effect.ID, args[2]); err != nil {
 				return "", err
 			}
-			return macroCommand(ctx, runner, []string{"update", id, args[2], args[3], args[4]})
+			message, err := macroCommand(ctx, runner, []string{"update", id, args[2], args[3], args[4]})
+			if err != nil || len(args) != 6 {
+				return message, err
+			}
+			if err := updateHostConfig(func(config *appconfig.Config) error { return setEffectIcon(config, effect, args[5]) }); err != nil {
+				return "", err
+			}
+			return message, nil
 		}
 		if len(args) != 9 {
 			return "", fmt.Errorf("usage: effect update ID NAME CATEGORY DESCRIPTION PRIMITIVE FPS DURATION_MS PIXELS")
@@ -579,8 +657,8 @@ func effectCommand(
 		}
 		return fmt.Sprintf("effect effect:%s updated", id), nil
 	case "update-json":
-		if len(args) != 9 {
-			return "", errors.New("usage: effect update-json ID NAME CATEGORY DESCRIPTION PROGRAM_HEX FPS DURATION_MS PIXELS")
+		if len(args) != 9 && len(args) != 10 {
+			return "", errors.New("usage: effect update-json ID NAME CATEGORY DESCRIPTION PROGRAM_HEX FPS DURATION_MS PIXELS [ICON]")
 		}
 		effect, err := findEffect(catalog, args[1])
 		if err != nil {
@@ -632,7 +710,78 @@ func effectCommand(
 		}); err != nil {
 			return "", err
 		}
+		if len(args) == 10 {
+			if err := updateHostConfig(func(config *appconfig.Config) error { return setEffectIcon(config, effect, args[9]) }); err != nil {
+				return "", err
+			}
+		}
 		return fmt.Sprintf("effect %s updated", effect.Reference), nil
+	case "icon":
+		if len(args) != 3 {
+			return "", errors.New("usage: effect icon REF ICON_OR_DASH")
+		}
+		effect, err := findEffect(catalog, args[1])
+		if err != nil {
+			return "", err
+		}
+		icon := strings.TrimSpace(args[2])
+		if icon == "-" {
+			icon = ""
+		}
+		if updateHostConfig == nil {
+			return "", errors.New("effect persistence is unavailable")
+		}
+		if err := updateHostConfig(func(config *appconfig.Config) error { return setEffectIcon(config, effect, icon) }); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("effect %s icon updated", effect.Reference), nil
+	case "group":
+		if len(args) != 5 || !strings.EqualFold(args[1], "update") {
+			return "", errors.New("usage: effect group update CURRENT_CATEGORY NEW_CATEGORY ICON_OR_DASH")
+		}
+		current, next, icon := strings.TrimSpace(args[2]), strings.TrimSpace(args[3]), strings.TrimSpace(args[4])
+		if current == "" || next == "" {
+			return "", errors.New("effect group categories must not be blank")
+		}
+		if icon == "-" {
+			icon = ""
+		}
+		if updateHostConfig == nil {
+			return "", errors.New("effect persistence is unavailable")
+		}
+		changed := 0
+		if err := updateHostConfig(func(config *appconfig.Config) error {
+			for index := range config.Macros {
+				if strings.EqualFold(strings.TrimSpace(config.Macros[index].Category), current) {
+					config.Macros[index].Category = next
+					changed++
+				}
+			}
+			for index := range config.StripEffects {
+				if strings.EqualFold(strings.TrimSpace(config.StripEffects[index].Category), current) {
+					config.StripEffects[index].Category = next
+					changed++
+				}
+			}
+			if changed == 0 {
+				return fmt.Errorf("effect group %q is not configured", current)
+			}
+			if config.EffectGroups == nil {
+				config.EffectGroups = make(map[string]appconfig.EffectGroup)
+			}
+			for category := range config.EffectGroups {
+				if strings.EqualFold(strings.TrimSpace(category), current) {
+					delete(config.EffectGroups, category)
+				}
+			}
+			if icon != "" {
+				config.EffectGroups[next] = appconfig.EffectGroup{Icon: icon}
+			}
+			return nil
+		}); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("effect group %q updated as %q (%d effects)", current, next, changed), nil
 	case "rename", "category":
 		if len(args) != 3 {
 			return "", fmt.Errorf("usage: effect %s REF VALUE", args[0])

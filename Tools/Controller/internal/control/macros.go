@@ -224,7 +224,7 @@ func (runner *MacroRunner) EffectCatalog() []EffectDescriptor {
 	if runner.hostConfig != nil {
 		config = runner.hostConfig()
 	}
-	return EffectCatalog(runner.List(), config.StripEffects)
+	return EffectCatalogWithGroups(runner.List(), config.StripEffects, config.EffectGroups)
 }
 
 func (runner *MacroRunner) UpdateMetadata(reference, field, value string) (appconfig.Macro, error) {
