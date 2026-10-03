@@ -26,6 +26,28 @@ type boardProfileDescriptor struct {
 type presentationUpdateResult struct {
 	BoardProfile boardProfileDescriptor         `json:"board_profile"`
 	Peripheral   appconfig.PeripheralDescriptor `json:"peripheral"`
+	Control      *appconfig.ControlDescriptor   `json:"control,omitempty"`
+}
+
+func presentationResult(settings peripheralSettings, key string) (presentationUpdateResult, error) {
+	var matchedControl *appconfig.ControlDescriptor
+	for index := range settings.Controls {
+		if settings.Controls[index].Key == key {
+			control := settings.Controls[index]
+			matchedControl = &control
+			break
+		}
+	}
+	for _, peripheral := range settings.Peripherals {
+		if peripheral.Key == key {
+			return presentationUpdateResult{
+				BoardProfile: settings.BoardProfile,
+				Peripheral:   peripheral,
+				Control:      matchedControl,
+			}, nil
+		}
+	}
+	return presentationUpdateResult{}, errors.New("updated peripheral disappeared from the active profile")
 }
 
 func (service *Service) activeBoardProfile() (boardProfileDescriptor, appconfig.BoardProfile) {
@@ -157,12 +179,7 @@ func (service *Service) updatePeripheralPresentation(key string, name, icon, col
 	}
 	settings := service.peripheralSettings()
 	service.publishPeripheralChange(settings.BoardProfile, []string{key}, changedFields)
-	for _, peripheral := range settings.Peripherals {
-		if peripheral.Key == key {
-			return presentationUpdateResult{BoardProfile: settings.BoardProfile, Peripheral: peripheral}, nil
-		}
-	}
-	return presentationUpdateResult{}, errors.New("updated peripheral disappeared from the active profile")
+	return presentationResult(settings, key)
 }
 
 func (service *Service) peripheralLocked(key string) bool {

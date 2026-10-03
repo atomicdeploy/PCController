@@ -226,6 +226,33 @@ func TestPeripheralCatalogUsesExplicitBoardProfileWithoutLegacyMotionAliases(t *
 	}
 }
 
+func TestPresentationUpdateResultCarriesTheAuthoritativeControl(t *testing.T) {
+	settings := peripheralSettings{
+		BoardProfile: boardProfileDescriptor{Key: "cafe-cinema", Revision: "next-revision"},
+		Peripherals: []appconfig.PeripheralDescriptor{{
+			Key: "relay.5", Kind: "relay", Index: 5, DefaultName: "User Relay 5",
+			Name: "Aisle lamp", Icon: "lightbulb", Color: "#38D27A", Control: "relay",
+		}},
+		Controls: []appconfig.ControlDescriptor{{
+			Key: "relay.5", Kind: "relay", Order: 5, Name: "Aisle lamp",
+			Icon: "lightbulb", Color: "#38D27A", Control: "relay",
+			Actions: []appconfig.ActionDescriptor{{ID: "relay.5.on", Verb: "on", Name: "On"}},
+		}},
+	}
+	result, err := presentationResult(settings, "relay.5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.BoardProfile.Revision != "next-revision" || result.Peripheral.Name != "Aisle lamp" ||
+		result.Control == nil || result.Control.Key != "relay.5" || result.Control.Icon != "lightbulb" ||
+		len(result.Control.Actions) != 1 || result.Control.Actions[0].ID != "relay.5.on" {
+		t.Fatalf("presentation update result=%+v", result)
+	}
+	if _, err := presentationResult(settings, "relay.6"); err == nil {
+		t.Fatal("missing updated peripheral was accepted")
+	}
+}
+
 func TestPeripheralLockTargetsStableRelayAndSeatKeys(t *testing.T) {
 	service, config := browserUIConfigTestService(t)
 	config.Connection.LastDevice = &appconfig.DeviceIdentity{Port: "COM18", SerialNumber: "BOARD-42"}
