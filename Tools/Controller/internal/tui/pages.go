@@ -458,9 +458,14 @@ func (model Model) controlTableRows(snapshot control.Snapshot, levelWidth int) [
 			mutation(controlTableRow{Group: "WS2811 STRIP", Name: "Pixel count", Value: fmt.Sprintf("%d · ←/→ adjust · Enter configure", pixels), Tone: controlToneLevel, Action: fmt.Sprintf("strip config %d", pixels), Adjust: "strip-count", Kind: "strip"}),
 			mutation(controlTableRow{Name: "Rainbow", Value: fmt.Sprintf("%d px @ %d FPS · Enter start", pixels, fps), Tone: controlToneAction, Action: fmt.Sprintf("strip rainbow %d %d", pixels, fps), Adjust: "strip-fps", Kind: "strip"}),
 			mutation(controlTableRow{Name: "Fill color", Value: fmt.Sprintf("#%02X%02X%02X · ←/→ color · Enter apply", color[0], color[1], color[2]), Tone: controlToneLevel, Action: fmt.Sprintf("strip fill %d %d %d", color[0], color[1], color[2]), Adjust: "strip-color", Kind: "strip"}),
-			mutation(controlTableRow{Name: "Police", Value: "Enter start", Tone: controlToneAction, Action: fmt.Sprintf("strip effect play police %d %d", pixels, fps), Kind: "strip"}),
-			mutation(controlTableRow{Name: "White thunder", Value: "Enter start", Tone: controlToneAction, Action: fmt.Sprintf("strip effect play white-thunder %d %d", pixels, fps), Kind: "strip"}),
-			mutation(controlTableRow{Name: "Converging red", Value: "Enter start", Tone: controlToneAction, Action: fmt.Sprintf("strip effect play converging-red %d %d", pixels, fps), Kind: "strip"}),
+		)
+		for _, effect := range model.stripEffectCatalog() {
+			rows = append(rows, mutation(controlTableRow{
+				Name: effect.Name, Value: fmt.Sprintf("%s · %d px @ %d FPS · Enter start", effect.Reference, pixels, fps),
+				Tone: controlToneAction, Action: fmt.Sprintf("effect play %s %d %d", effect.Reference, pixels, fps), Kind: "strip",
+			}))
+		}
+		rows = append(rows,
 			mutation(controlTableRow{Name: "Clear strip", Value: "Enter clear", Tone: controlToneAction, Action: "strip clear", Kind: "strip"}),
 			controlTableRow{Name: "Stop stream", Value: "Enter stop", Tone: controlToneAction, Action: "strip stop", Kind: "strip"},
 			controlTableRow{Name: "Stream status", Value: "Enter inspect", Tone: controlToneAction, Action: "strip status", Kind: "strip"},

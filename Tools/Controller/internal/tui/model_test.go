@@ -1799,6 +1799,11 @@ func TestControlTableUsesMappedGroupSeparatorsAndStableHeaders(t *testing.T) {
 
 func TestControlTableExposesCapabilityGatedWS2811Surface(t *testing.T) {
 	model := readyModel(t, PageOutputs)
+	model.preview.Effects = []control.EffectDescriptor{
+		{Reference: "effect:police", Name: "Police", Kind: "strip-stream"},
+		{Reference: "effect:white-thunder", Name: "White thunder", Kind: "strip-stream"},
+		{Reference: "effect:converging-red", Name: "Converging red", Kind: "strip-stream"},
+	}
 	rows := model.controlTableRows(model.snapshot(), 8)
 	joined := ""
 	for _, row := range rows {
@@ -1826,12 +1831,26 @@ func TestControlTableExposesCapabilityGatedWS2811Surface(t *testing.T) {
 	if rendered := ansi.Strip(model.outputsPage(model.snapshot())); strings.Contains(rendered, "WS2811 STRIP") {
 		t.Fatalf("strip controls ignored live capability gate:\n%s", rendered)
 	}
+	model.preview.Hello.Capabilities |= native.CapabilityAddressableLED
+	model.preview.Effects = nil
+	joined = ""
+	for _, row := range model.controlTableRows(model.snapshot(), 8) {
+		joined += row.Name + "\n"
+	}
+	for _, absent := range []string{"Police", "White thunder", "Converging red"} {
+		if strings.Contains(joined, absent) {
+			t.Fatalf("empty effect catalog invented %q:\n%s", absent, joined)
+		}
+	}
 }
 
 func TestControlTableExposesWS2811WithoutRelayStatusAndAvoidsPWMCursorRouting(t *testing.T) {
 	model := readyModel(t, PageOutputs)
 	model.preview.Hello.Capabilities = native.CapabilityAddressableLED
 	model.preview.HaveStatus = false
+	model.preview.Effects = []control.EffectDescriptor{
+		{Reference: "effect:police", Name: "Police", Kind: "strip-stream"},
+	}
 	rows := model.controlTableRows(model.snapshot(), 8)
 	if len(rows) == 0 || rows[0].Group != "WS2811 STRIP" {
 		t.Fatalf("addressable-only board did not expose strip controls: %#v", rows)
