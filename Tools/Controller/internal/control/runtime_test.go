@@ -2171,6 +2171,7 @@ func TestEventStreamClassification(t *testing.T) {
 		"door": EventStreamActivity, "telemetry": EventStreamTelemetry,
 		"rx": EventStreamDebug, "front_panel.segment": EventStreamState,
 		"status_led.changed": EventStreamState, "buzzer.note": EventStreamState,
+		"pwm.changed":          EventStreamState,
 		"illumination.changed": EventStreamState, "settings.changed": EventStreamState,
 		"sensor.sample": EventStreamTelemetry, "animation.frame": EventStreamState,
 	}

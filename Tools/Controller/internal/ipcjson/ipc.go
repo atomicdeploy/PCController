@@ -951,6 +951,28 @@ func (service *Service) dispatch(
 		if err = service.Client.AllPWMOff(ctx); err == nil {
 			result, err = service.Client.PWMValues(ctx)
 		}
+	case "controller.status_led.set":
+		var params struct {
+			Red        int `json:"red"`
+			Green      int `json:"green"`
+			Blue       int `json:"blue"`
+			Brightness int `json:"brightness"`
+		}
+		if err = decodeParams(request.Params, &params); err == nil {
+			if params.Red < 0 || params.Red > 255 || params.Green < 0 || params.Green > 255 || params.Blue < 0 || params.Blue > 255 || params.Brightness < 0 || params.Brightness > 255 {
+				err = &RPCError{Code: -32602, Message: "red, green, blue, and brightness must be 0..255"}
+			} else {
+				err = service.Client.SetStatusRGB(ctx, byte(params.Red), byte(params.Green), byte(params.Blue), byte(params.Brightness))
+				if err == nil {
+					result = map[string]any{"active": true, "red": params.Red, "green": params.Green, "blue": params.Blue, "brightness": params.Brightness}
+				}
+			}
+		}
+	case "controller.status_led.release":
+		err = service.Client.ReleaseStatusLEDEffect(ctx)
+		if err == nil {
+			result = map[string]any{"active": false}
+		}
 	case "controller.temperatures":
 		var params struct {
 			Rescan bool `json:"rescan,omitempty"`

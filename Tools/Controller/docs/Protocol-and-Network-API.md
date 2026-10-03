@@ -660,8 +660,10 @@ request error.
 | `controller.illumination.get` | `{}` | persisted Off/Auto/On policy, on/off brightness, live door-selected target, and exact applied enclosure MOSFET channel 12 (internal index 11); requires `read` |
 | `controller.illumination.set` | `{ "mode": 0..2, "on_brightness": 0..255, "off_brightness": 0..255 }` | preserves every unrelated board setting, applies live, waits for durable EEPROM readback, and returns the authoritative illumination state; requires `board_commands` |
 | `controller.illumination.override` | `{ "value": 0..4095 }` | applies a temporary exact raw value to enclosure MOSFET channel 12 and returns authoritative readback; policy/EEPROM ownership remains unchanged and may reassert its target on the next policy event; requires `board_commands` |
-| `controller.pwm.set` | `channel` (`0..15`), `value` (`0..4095`) | write one channel, read back, and return the complete authoritative sixteen-channel snapshot; requires `board_commands` |
-| `controller.pwm.off` | `{}` | clear every PWM channel, read back, and return the complete authoritative snapshot; requires `board_commands` |
+| `controller.pwm.set` | `channel` (`0..15`), `value` (`0..4095`) | write one channel, read back, return the complete authoritative sixteen-channel snapshot, and publish `pwm.changed` to every state subscriber; requires `board_commands` |
+| `controller.pwm.off` | `{}` | clear every PWM channel, read back, return the complete authoritative snapshot, and publish `pwm.changed`; requires `board_commands` |
+| `controller.status_led.set` | `red`, `green`, `blue`, `brightness` (`0..255`) | apply an explicit steady status-light override through the shared output scheduler; requires `board_commands` |
+| `controller.status_led.release` | `{}` | release the explicit status-light override back to the board/state policy; requires `board_commands` |
 | `controller.temperatures` | optional `rescan` | named temperatures and ROM identities |
 | `controller.menu.list`, `controller.menu.current` | `{}` | live board catalog when advertised, otherwise the canonical capability-limited manifest |
 | `controller.menu.jump`, `controller.menu.page` | `page` ID or name | select a board menu page |

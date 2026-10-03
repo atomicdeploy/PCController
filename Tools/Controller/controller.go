@@ -1847,7 +1847,32 @@ func (client *Client) PWMValues(ctx context.Context) (PWMValues, error) {
 	if err != nil {
 		return PWMValues{}, err
 	}
-	return native.ParsePWMValues(frame.Payload)
+	values, err := native.ParsePWMValues(frame.Payload)
+	if err != nil {
+		return PWMValues{}, err
+	}
+	client.PublishPWMValues(values)
+	return values, nil
+}
+
+// PublishPWMValues broadcasts one authoritative all-channel PWM readback to
+// every subscribed UI/client. PWMValues calls it after parsing the board frame;
+// embedders that already hold an equivalent board readback may also publish it
+// without issuing another serial transaction.
+func (client *Client) PublishPWMValues(values PWMValues) {
+	metadata := map[string]string{
+		"available":        strconv.FormatBool(values.Available),
+		"selected_channel": strconv.Itoa(int(values.SelectedChannel)),
+	}
+	for channel, value := range values.Values {
+		metadata[fmt.Sprintf("pwm.%d", channel)] = strconv.Itoa(int(value))
+	}
+	client.runtime.PublishStructuredEvent(control.Event{
+		Kind:     "pwm.changed",
+		Stream:   control.EventStreamState,
+		Text:     "PWM outputs updated",
+		Metadata: metadata,
+	})
 }
 
 // Illumination reads the persisted policy, live door state, and exact applied

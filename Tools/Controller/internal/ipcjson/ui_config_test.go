@@ -173,6 +173,8 @@ func TestPeripheralAndPWMCapabilitiesSeparateReadConfigurationAndBoardWrites(t *
 		"controller.pwm.values":                     capabilityRead,
 		"controller.pwm.set":                        capabilityBoard,
 		"controller.pwm.off":                        capabilityBoard,
+		"controller.status_led.set":                 capabilityBoard,
+		"controller.status_led.release":             capabilityBoard,
 		"controller.illumination.get":               capabilityRead,
 		"controller.illumination.override":          capabilityBoard,
 		"controller.illumination.set":               capabilityBoard,

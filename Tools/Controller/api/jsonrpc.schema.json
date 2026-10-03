@@ -502,6 +502,8 @@
             "controller.pwm.off",
             "controller.pwm.set",
             "controller.pwm.values",
+            "controller.status_led.release",
+            "controller.status_led.set",
             "controller.quit",
             "controller.reset",
             "controller.reset.lines",
@@ -1331,6 +1333,16 @@
       "capability": "read",
       "summary": "pwm values",
       "idempotency": "safe"
+    },
+    "controller.status_led.release": {
+      "capability": "board_commands",
+      "summary": "release status LED override",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.status_led.set": {
+      "capability": "board_commands",
+      "summary": "set status LED override",
+      "idempotency": "idempotent-with-authoritative-readback"
     },
     "controller.quit": {
       "capability": "shutdown",

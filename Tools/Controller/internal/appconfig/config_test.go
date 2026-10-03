@@ -144,6 +144,9 @@ func TestPeripheralRegistryCoversEveryCoreRoleAndNamingCapacity(t *testing.T) {
 		}
 		seen[descriptor.Key] = true
 		counts[descriptor.Kind]++
+		if strings.HasPrefix(descriptor.Role, "status-") && !descriptor.Hidden {
+			t.Fatalf("status RGB channel %q must be hidden by default", descriptor.Key)
+		}
 	}
 	for kind, want := range map[string]int{
 		"relay": 8, "motion": 2, "pwm": 16, "display": 2, "sensor": 6,

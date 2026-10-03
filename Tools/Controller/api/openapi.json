@@ -3879,6 +3879,8 @@
               "controller.pwm.off",
               "controller.pwm.set",
               "controller.pwm.values",
+              "controller.status_led.release",
+              "controller.status_led.set",
               "controller.quit",
               "controller.reset",
               "controller.reset.lines",

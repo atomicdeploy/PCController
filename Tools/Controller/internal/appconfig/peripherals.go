@@ -101,6 +101,7 @@ func buildPeripheralDescriptors() []PeripheralDescriptor {
 		descriptors = append(descriptors, PeripheralDescriptor{
 			Key: fmt.Sprintf("pwm.%d", index), Kind: "pwm", Role: pwmRoles[index],
 			Index: index, DefaultName: name, Control: control,
+			Hidden: strings.HasPrefix(pwmRoles[index], "status-"),
 		})
 	}
 	for index, display := range []struct{ key, role, name string }{
@@ -168,7 +169,7 @@ func ControlDescriptors(names map[string]string) []ControlDescriptor {
 		}
 		controls = append(controls, ControlDescriptor{
 			Key: descriptor.Key, Kind: kind, Order: descriptor.Index,
-			Name: name, Control: descriptor.Control,
+			Name: name, Hidden: descriptor.Hidden, Control: descriptor.Control,
 		})
 	}
 	return controls
@@ -183,6 +184,9 @@ func ProfileDescriptors(mode string, exposeRawRelays bool, legacyNames map[strin
 	controls := make([]ControlDescriptor, 0, 26)
 	addControl := func(descriptor PeripheralDescriptor, kind string, actions []ActionDescriptor) {
 		resolved := resolvePresentation(descriptor.Key, descriptor.DefaultName, legacyNames, presentation)
+		if _, explicitlyConfigured := presentation[descriptor.Key]; !explicitlyConfigured {
+			resolved.Hidden = descriptor.Hidden
+		}
 		descriptor.Name, descriptor.Icon, descriptor.Color, descriptor.UpColor, descriptor.DownColor, descriptor.Group, descriptor.Order = resolved.Name, resolved.Icon, resolved.Color, resolved.UpColor, resolved.DownColor, resolved.Group, resolved.Order
 		descriptor.Hidden, descriptor.Locked = resolved.Hidden, resolved.Locked
 		order := descriptor.Index
