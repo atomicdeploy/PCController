@@ -49,7 +49,10 @@ func DefaultStatusProfiles(brightness byte) [StatusProfileCount]StatusEffectOpti
 		StatusConditionFault:              effect(StatusEffectFlash, 255, 0, 0, 0, 0, 0, 640),
 		StatusConditionCustom:             static(0, 0, 0),
 		StatusConditionBluetoothConnected: static(16, 72, 255),
-		StatusConditionBluetoothOff:       effect(StatusEffectCycle, 0, 255, 80, 255, 0, 0, 2000),
+		// Bluetooth being disabled is an informational state, not a fault. Keep
+		// the healthy green accent steady so a normally PC-connected controller
+		// does not look as though it is repeatedly disconnecting or alarming.
+		StatusConditionBluetoothOff:       static(0, 255, 80),
 		StatusConditionBluetoothWaiting:   effect(StatusEffectBreathe, 16, 72, 255, 0, 0, 0, 1600),
 		StatusConditionRunning:            static(255, 144, 0),
 		StatusConditionDoorOpen:           static(255, 120, 12),
