@@ -82,7 +82,7 @@ export function MacroCatalog({ macros, selectedReference, locale, onSelect }: Ma
             <span className={`macro-library__color is-${normalizedColor(macro.color)}`} aria-hidden="true" />
             <span className="macro-library__identity">
               <strong>{macro.name}</strong>
-              <small>#{macro.id} · {macro.category || (persian ? 'بدون دسته' : 'Uncategorized')} · {macro.mode || 'mcu'}</small>
+              <small>#{macro.id} · {macro.category || (persian ? 'بدون دسته' : 'Uncategorized')} · {macro.mode || 'auto'}</small>
             </span>
             <span className="macro-library__measure">
               <strong>{(macro.steps?.length ?? 0).toLocaleString(locale)}</strong>
@@ -111,7 +111,7 @@ export function MacroLibraryPanel({ online, locale, events, initialSnapshot, str
   const [name, setName] = useState('')
   const [category, setCategory] = useState('Web')
   const [color, setColor] = useState<MacroColor>('green')
-  const [playMode, setPlayMode] = useState<'host' | 'mcu'>('mcu')
+  const [playMode, setPlayMode] = useState<'auto' | 'host' | 'mcu'>('auto')
   const [selectedStripID, setSelectedStripID] = useState('')
   const [stripDraft, setStripDraft] = useState<StripEffectDescriptor | null>(null)
   const latestAppliedEventID = useRef(initialSnapshot?.latest_event_id ?? 0)
@@ -214,7 +214,7 @@ export function MacroLibraryPanel({ online, locale, events, initialSnapshot, str
             <small>{copy('RECORDING', 'ضبط')}</small>
             <strong>{recording?.active ? recording.name || `#${recording.id}` : copy('Idle', 'آماده')}</strong>
             <em>{recording?.active
-              ? `${recording.board_owned ? copy('Board ring', 'حافظه حلقوی برد') : copy('Host capture', 'ضبط میزبان')} · ${recording.steps} ${copy('steps', 'گام')} · Δ ${formatMicroseconds(recording.last_delta_us, locale)}`
+              ? `${recording.device_retained ? copy('Device-retained take', 'برداشت نگه‌داری‌شده در دستگاه') : copy('Live capture', 'ضبط زنده')} · ${recording.steps} ${copy('steps', 'گام')} · Δ ${formatMicroseconds(recording.last_delta_us, locale)}`
               : recording?.name || ''}</em>
           </span>
         </div>
@@ -224,7 +224,7 @@ export function MacroLibraryPanel({ online, locale, events, initialSnapshot, str
             <small>{copy('PLAYBACK', 'اجرا')}</small>
             <strong>{playback?.name || copy('Idle', 'آماده')}</strong>
             <em>{playback?.name
-              ? `${playback.lifecycle || 'idle'} · ${playback.step}/${playback.step_count} · Δ ${formatMicroseconds(playback.last_timing_delta_us, locale)}`
+              ? `${playback.lifecycle || 'idle'} · ${playback.policy || 'auto'} → ${playback.mode || 'pending'} · ${playback.step}/${playback.step_count} · Δ ${formatMicroseconds(playback.last_timing_delta_us, locale)}`
               : copy('No playback in this session', 'هنوز اجرایی در این نشست انجام نشده')}</em>
           </span>
         </div>
@@ -351,28 +351,28 @@ export function MacroLibraryPanel({ online, locale, events, initialSnapshot, str
               { name: name.trim(), category: category.trim(), color },
               `effect record start ${shellArgument(name.trim())} ${shellArgument(category.trim())} ${shellArgument(color)}`,
             )}>{copy('Start', 'شروع')}</Button>
-            <Button icon={Save} disabled={!recording?.active || Boolean(recording.board_owned)} busy={busy === 'controller.macro.record.stop'} onClick={() => void perform(
+            <Button icon={Save} disabled={!recording?.active || Boolean(recording.device_retained)} busy={busy === 'controller.macro.record.stop'} onClick={() => void perform(
               'controller.macro.record.stop', { save: true }, 'effect record save',
             )}>{copy('Stop + save', 'توقف و ذخیره')}</Button>
-            <Button icon={Trash2} disabled={!recording?.active || Boolean(recording.board_owned)} onClick={() => void perform(
+            <Button icon={Trash2} disabled={!recording?.active || Boolean(recording.device_retained)} onClick={() => void perform(
               'controller.macro.record.stop', { save: false }, 'effect record discard',
             )}>{copy('Discard', 'دور انداختن')}</Button>
           </div>
         </section>
         <section>
-          <header>{copy('Board circular capture', 'ضبط حلقوی برد')}</header>
+          <header>{copy('Device-retained recording', 'ضبط نگه‌داری‌شده در دستگاه')}</header>
           <p>{copy('Keeps the latest 25 relay snapshots in RAM. Save before resetting the board. Stop and release retained RAM before strip streaming.', '۲۵ وضعیت آخر رله در حافظه نگهداری می‌شود. پیش از ریست ذخیره کنید. قبل از پخش نوار، ضبط را متوقف و حافظه را آزاد کنید.')}</p>
           <div className="macro-library__actions">
             <Button icon={RadioTower} disabled={!online || !name.trim() || Boolean(recording?.active)} busy={busy === 'controller.macro.board_record.start'} onClick={() => void perform(
               'controller.macro.board_record.start', {}, `effect record start-board ${shellArgument(name.trim())} ${shellArgument(category.trim())} ${shellArgument(color)}`,
-            )}>{copy('Start on board', 'شروع روی برد')}</Button>
+            )}>{copy('Start retained take', 'شروع برداشت نگه‌داری‌شده')}</Button>
             <Button icon={Database} disabled={!online || !name.trim() || Boolean(recording?.active)} onClick={() => void perform(
               'controller.macro.board_record.import', {}, `effect record import-board ${shellArgument(name.trim())} ${shellArgument(category.trim())} ${shellArgument(color)}`,
             )}>{copy('Import retained capture', 'وارد کردن ضبط باقی‌مانده')}</Button>
-            <Button icon={Save} disabled={!recording?.active || !recording.board_owned} busy={busy === 'controller.macro.board_record.stop'} onClick={() => void perform(
+            <Button icon={Save} disabled={!recording?.active || !recording.device_retained} busy={busy === 'controller.macro.board_record.stop'} onClick={() => void perform(
               'controller.macro.board_record.stop', {}, 'effect record save',
             )}>{copy('Stop + import', 'توقف و واردکردن')}</Button>
-            <Button tone="danger" icon={Trash2} disabled={!recording?.active || !recording.board_owned} onClick={() => void perform(
+            <Button tone="danger" icon={Trash2} disabled={!recording?.active || !recording.device_retained} onClick={() => void perform(
               'controller.macro.board_record.discard', {}, 'effect record discard',
             )}>{copy('Discard', 'دور انداختن')}</Button>
             <Button icon={Trash2} disabled={!online || Boolean(recording?.active) || Boolean(playback?.running)} onClick={() => void perform(
@@ -383,7 +383,7 @@ export function MacroLibraryPanel({ online, locale, events, initialSnapshot, str
       </div>
 
       <div className="macro-library__playback-actions">
-        <Segmented value={playMode} label={copy('Playback clock', 'ساعت اجرا')} options={[{value:'host',label:copy('Host', 'میزبان')},{value:'mcu',label:copy('MCU', 'برد')}]} onChange={setPlayMode} />
+        <Segmented value={playMode} label={copy('Execution', 'اجرا')} options={[{value:'auto',label:copy('Automatic', 'خودکار')},{value:'host',label:copy('Host (forced)', 'میزبان (اجباری)')},{value:'mcu',label:copy('Device (forced)', 'دستگاه (اجباری)')}]} onChange={setPlayMode} />
         <Button tone="primary" icon={Play} disabled={!online || !reference} busy={busy === 'controller.macro.play'} onClick={() => void perform(
           'controller.effect.play', { reference }, `effect play ${shellArgument(reference)} ${playMode}`,
         )}>{copy('Play selected', 'اجرای انتخاب‌شده')}</Button>

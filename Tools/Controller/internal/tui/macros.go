@@ -489,7 +489,11 @@ func macroProgressBar(current, total, width int) string {
 }
 
 func macroTimingSummary(state control.MacroState) string {
-	text := fmt.Sprintf("last %s · max %s · tolerance %s · violations %d",
+	execution := state.Mode
+	if state.Policy != "" {
+		execution = state.Policy + " → " + state.Mode
+	}
+	text := fmt.Sprintf("%s · last %s · max %s · tolerance %s · violations %d", execution,
 		formatSignedMicros(state.LastTimingDeltaUS), formatMicros(state.MaximumTimingErrorUS),
 		formatMicros(state.TimingToleranceUS), state.TimingViolations)
 	if state.Mode == "host" {
@@ -530,12 +534,12 @@ func macroRecordingHelp(state control.MacroRecordingState) string {
 		return errorStyle.Render("Recorder error: " + state.LastError)
 	}
 	if state.Active {
-		if state.Mode == "host" {
-			return warnStyle.Render("Operate relay/motion, PWM, beep or display controls; housekeeping is ignored. S saves, D discards.")
+		if state.DeviceRetained {
+			return warnStyle.Render("Device-retained take captures bounded relay snapshots. S imports it into the effect library; D discards it.")
 		}
-		return warnStyle.Render("MCU mode records acknowledged queueable commands. S saves, D discards.")
+		return warnStyle.Render("Operate relay/motion, PWM, beep, display, RF or LED controls; housekeeping is ignored. S saves, D discards.")
 	}
-	return labelStyle.Render("R starts a basic host recording (100 ms tolerance); CLI start-mcu selects precise MCU capture. N creates a draft.")
+	return labelStyle.Render("R starts an adaptive live recording; playback chooses the most precise compatible clock. N creates a draft.")
 }
 
 func macroTableHeader(width int) string {

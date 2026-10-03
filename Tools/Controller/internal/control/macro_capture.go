@@ -119,7 +119,7 @@ func (runner *MacroRunner) captureRelayEdge(evidence CommandEvidence) {
 		runner.recording.LastError = "relay edge has no MCU timestamp"
 		return
 	}
-	if runner.recording.BoardOwned {
+	if runner.recording.DeviceRetained {
 		if !runner.recordHasBase {
 			runner.recordBaseUS = evidence.DeviceMicros
 			runner.recordHasBase = true
@@ -187,12 +187,12 @@ func (runner *MacroRunner) StartBoardRecording(ctx context.Context, name, catego
 		return state, err
 	}
 	runner.recordMu.Lock()
-	runner.recording.BoardOwned = true
+	runner.recording.DeviceRetained = true
 	runner.recordMu.Unlock()
 	_, err = runner.request(ctx, native.OpMacroStep, []byte{3, state.ID}, native.OpACK)
 	if err != nil {
 		runner.recordMu.Lock()
-		runner.recording.BoardOwned = false
+		runner.recording.DeviceRetained = false
 		runner.recordMu.Unlock()
 		_, _ = runner.StopRecording(false)
 		return MacroRecordingState{}, err
@@ -222,7 +222,7 @@ func (runner *MacroRunner) ImportBoardRecording(name, category, color string) (a
 		return appconfig.Macro{}, err
 	}
 	runner.recordMu.Lock()
-	runner.recording.BoardOwned = true
+	runner.recording.DeviceRetained = true
 	runner.recordMu.Unlock()
 	return runner.StopRecording(true)
 }

@@ -49,6 +49,23 @@ func TestCompileMacroEncodesOrdinaryOpcodesWithExactOffsets(t *testing.T) {
 	}
 }
 
+func TestAdaptiveEffectExecutionChoosesMostPreciseCompatibleClock(t *testing.T) {
+	sequence := appconfig.Macro{
+		ID: 7, Name: "seat", Mode: macroModeAuto,
+		Steps: []appconfig.MacroStep{{Kind: "relay", Target: 5, Value: 1}},
+	}
+	if got := resolveMacroMode(sequence, 0); got != macroModeHost {
+		t.Fatalf("without timed queue mode=%q, want host", got)
+	}
+	if got := resolveMacroMode(sequence, native.CapabilityTimedMacroQueue); got != macroModeMCU {
+		t.Fatalf("with timed queue mode=%q, want mcu", got)
+	}
+	sequence.Steps = append(sequence.Steps, appconfig.MacroStep{Kind: "addressable", Target: 1, Red: 255})
+	if got := resolveMacroMode(sequence, native.CapabilityTimedMacroQueue); got != macroModeHost {
+		t.Fatalf("shared strip workspace mode=%q, want host", got)
+	}
+}
+
 func macroTestRunner(config *appconfig.Config, saveError *error) *MacroRunner {
 	runtime := New(Options{})
 	runner := NewMacroRunner(runtime, func() []appconfig.Macro { return config.Macros }, func() appconfig.Config { return *config }, func(change func(*appconfig.Config) error) error {
@@ -114,7 +131,9 @@ func TestHostRecordingMixedOutputsRoundTripsNamedPlayback(t *testing.T) {
 	if text, err := macroCommand(context.Background(), runner, []string{"monitor"}); err != nil || !strings.Contains(text, "steps=7") {
 		t.Fatalf("monitor=%s err=%v", text, err)
 	}
-	compiled, err := compileMacro(config.Macros[0])
+	hostDefinition := config.Macros[0]
+	hostDefinition.Mode = macroModeHost
+	compiled, err := compileMacro(hostDefinition)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,8 +305,8 @@ func TestBasicHostRecorderIgnoresHousekeepingAndUsesObservedDeltas(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state.Mode != macroModeHost {
-		t.Fatalf("default recorder mode = %q, want host", state.Mode)
+	if state.Mode != macroModeAuto {
+		t.Fatalf("default recorder policy = %q, want auto", state.Mode)
 	}
 	base := time.Now()
 	runner.captureCommand(CommandEvidence{
@@ -313,8 +332,8 @@ func TestBasicHostRecorderIgnoresHousekeepingAndUsesObservedDeltas(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if macro.Mode != macroModeHost || macro.TimingToleranceUS != defaultHostMacroToleranceUS {
-		t.Fatalf("unexpected host mode metadata: %#v", macro)
+	if macro.Mode != macroModeAuto || macro.TimingToleranceUS != 0 {
+		t.Fatalf("unexpected adaptive policy metadata: %#v", macro)
 	}
 	if len(macro.Steps) != 3 {
 		t.Fatalf("housekeeping was not filtered: %#v", macro.Steps)

@@ -17,7 +17,7 @@ host-owned JSON configuration are documented separately on purpose.
 | Coordinate issues, pull requests, WIP, and machine handoffs | [GitHub Collaboration and Handoffs](GitHub-Collaboration-and-Handoffs.md) |
 | Understand the physical panel | [Front Panel and Menus](Front-Panel-and-Menus.md) |
 | Configure the host, WebUI, hotkeys, notifications, or integrations | [Host Configuration and Integrations](Host-Configuration-and-Integrations.md) |
-| Record, name, monitor and play host macros across interfaces | [Host Macro Recording](Host-Macro-Recording.md) |
+| Record, edit, schedule and play effects across every peripheral | [Unified Effects System](Effects-System.md) |
 | Integrate through UART, JSON-RPC, REST, WebSocket, Go, or C | [Protocol and Network API](../Tools/Controller/docs/Protocol-and-Network-API.md), [machine-readable contracts](../Tools/Controller/api/reference.html), and [C Library API](../Tools/Controller/docs/C-Library-API.md) |
 | Export or host the WebUI from a separate origin | [Portable WebUI](../Tools/Controller/docs/Portable-WebUI.md) |
 | Build, back up, program, or recover a board | [Toolchain and Safe Programming](Toolchain-and-Safe-Programming.md) |
@@ -52,6 +52,9 @@ host-owned JSON configuration are documented separately on purpose.
 10. [GitHub Collaboration and Handoffs](GitHub-Collaboration-and-Handoffs.md)
     — source-of-truth, lane ownership, WIP checkpoint, issue/PR, privacy,
     generated-artifact, merge, and resumable-handoff rules.
+11. [Unified Effects System](Effects-System.md) — the one catalog, adaptive
+    execution plan, authoring workflow, peripheral lanes, delivery gaps, and
+    physical acceptance gates shared with Pealayer.
 
 ## 🔐 Runtime ownership
 
@@ -59,6 +62,7 @@ host-owned JSON configuration are documented separately on purpose.
 |---|---|
 | Board behavior | MCU EEPROM owns board settings, learned RF records and mappings, and reset telemetry; richer automations remain host-owned. |
 | Host behavior | The host configuration owns device-selection preferences, UI/network settings, hotkeys, notifications, webhooks, history, scripts, and host automation. |
+| Effects | PCController owns one persistent catalog; host and device RAM hold only volatile run plans or a bounded retained recording take. |
 
 Changing host configuration does not rewrite MCU EEPROM unless an explicit
 board command is issued. Erasing board EEPROM does not remove the host's saved

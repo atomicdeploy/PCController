@@ -321,7 +321,7 @@ func importEffectDocument(document effectDocument, replace bool, updateHostConfi
 					Steps:               append([]appconfig.MacroStep(nil), effect.Steps...),
 				}
 				if macro.Mode == "" {
-					macro.Mode = "host"
+					macro.Mode = "auto"
 				}
 				replaced := false
 				for index := range macros {
@@ -397,7 +397,7 @@ func effectCommand(
 	updateHostConfig func(func(*appconfig.Config) error) error,
 	args []string,
 ) (string, error) {
-	const usage = "effect list|inspect ID|play ID [host|mcu|COUNT [FPS]]|stop ID|create|update|upsert-json|rename|category|icon|group update|delete|export|import|record|status|cancel"
+	const usage = "effect list|inspect ID|play ID [auto|host|mcu|COUNT [FPS]]|stop ID|create|update|upsert-json|rename|category|icon|group update|delete|export|import|record|status|cancel"
 	if len(args) == 0 {
 		return "", fmt.Errorf("usage: %s", usage)
 	}
@@ -425,7 +425,7 @@ func effectCommand(
 		return string(encoded), err
 	case "play", "run":
 		if len(args) < 2 || len(args) > 4 {
-			return "", fmt.Errorf("usage: effect play REF [host|mcu|COUNT [FPS]]")
+			return "", fmt.Errorf("usage: effect play REF [auto|host|mcu|COUNT [FPS]]")
 		}
 		effect, err := findEffect(catalog, args[1])
 		if err != nil {

@@ -303,6 +303,7 @@ export interface ControllerMacro {
 export interface MacroPlaybackState {
   running: boolean
   mode?: string
+  policy?: string
   connection_generation?: number
   id?: number
   name: string
@@ -346,7 +347,7 @@ export interface MacroRecordingState {
   last_delta_us?: number
   last_opcode?: number
   last_source?: number
-  board_owned?: boolean
+  device_retained?: boolean
   overwritten?: number
   board_id?: number
   dropped_steps?: number

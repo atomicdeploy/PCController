@@ -237,9 +237,12 @@ type Programming struct {
 	AvrdudeConf      string                     `json:"avrdude_conf,omitempty"`
 }
 
-// Macro defines a named, host-persisted sequence. Mode "host" schedules
-// ordinary commands from the controller process; mode "mcu" streams the
-// sequence to the firmware timing engine. Mode is always explicit.
+// Macro defines a named, host-persisted effect sequence. Mode is an execution
+// policy, not an ownership or storage location: "auto" selects the most
+// precise executor supported by the connected board and the sequence,
+// "host" forces the controller's monotonic scheduler, and "mcu" forces the
+// firmware timing queue. The durable definition always remains owned by
+// PCController; either executor only receives a volatile run plan.
 type Macro struct {
 	ID                  byte        `json:"id"`
 	Name                string      `json:"name"`
@@ -647,16 +650,14 @@ func Write(path string, value Config) error {
 	return nil
 }
 
-// normalizeMacros keeps file-backed alpha configurations usable as the macro
-// execution target becomes explicit. An omitted mode can only describe the
-// host scheduler that existed before the MCU timing engine was selectable.
-// Persisting the next write makes that choice explicit instead of retaining an
-// ambiguous empty value.
+// normalizeMacros makes the living alpha contract explicit. An omitted policy
+// means adaptive execution; it does not imply that the effect is board-owned
+// or host-owned.
 func normalizeMacros(macros []Macro) {
 	for index := range macros {
 		mode := strings.ToLower(strings.TrimSpace(macros[index].Mode))
 		if mode == "" {
-			mode = "host"
+			mode = "auto"
 		}
 		macros[index].Mode = mode
 	}
@@ -856,9 +857,9 @@ func (value Config) Validate() error {
 			return fmt.Errorf("macros[%d].icon must be at most 64 printable ASCII bytes", index)
 		}
 		switch macro.Mode {
-		case "mcu", "host":
+		case "auto", "mcu", "host":
 		default:
-			return fmt.Errorf("macros[%d].mode must be host or mcu", index)
+			return fmt.Errorf("macros[%d].mode must be auto, host, or mcu", index)
 		}
 		switch strings.ToLower(strings.TrimSpace(macro.Color)) {
 		case "", "red", "blue", "purple", "violet", "green", "white":

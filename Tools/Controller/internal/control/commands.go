@@ -5269,10 +5269,14 @@ func macroCommand(
 			if err != nil {
 				return "", err
 			}
-			if state.Mode == macroModeHost {
-				return fmt.Sprintf("recording macro %d/%s in host mode; relay/motion, PWM, beep, display, RF and strip commands use host deltas (100ms tolerance)", state.ID, state.Name), nil
+			switch state.Mode {
+			case macroModeHost:
+				return fmt.Sprintf("recording effect %d/%s with the host clock; acknowledged peripheral actions use host deltas", state.ID, state.Name), nil
+			case macroModeMCU:
+				return fmt.Sprintf("recording effect %d/%s with the device clock; acknowledged board actions use device deltas", state.ID, state.Name), nil
+			default:
+				return fmt.Sprintf("recording effect %d/%s adaptively; saving keeps one PCController definition and playback selects the most precise compatible clock", state.ID, state.Name), nil
 			}
-			return fmt.Sprintf("recording macro %d/%s in MCU mode; acknowledged board commands use MCU deltas", state.ID, state.Name), nil
 		case "status":
 			if len(args) != 2 {
 				return "", fmt.Errorf("usage: macro record status")
@@ -5281,7 +5285,7 @@ func macroCommand(
 			if !state.Active && state.Name == "" {
 				return "no macro has been recorded in this session", nil
 			}
-			return fmt.Sprintf("macro recording active=%t id=%d name=%q mode=%s category=%q color=%q steps=%d started=%s error=%q", state.Active, state.ID, state.Name, state.Mode, state.Category, state.Color, state.Steps, state.StartedAt.Format(time.RFC3339), state.LastError), nil
+			return fmt.Sprintf("effect recording active=%t id=%d name=%q policy=%s device_retained=%t category=%q color=%q steps=%d started=%s error=%q", state.Active, state.ID, state.Name, state.Mode, state.DeviceRetained, state.Category, state.Color, state.Steps, state.StartedAt.Format(time.RFC3339), state.LastError), nil
 		case "save", "stop":
 			if len(args) != 2 {
 				return "", fmt.Errorf("usage: macro record save")
@@ -5290,7 +5294,7 @@ func macroCommand(
 			if err != nil {
 				return "", err
 			}
-			return fmt.Sprintf("macro %d/%s saved with %d %s-timed steps", macro.ID, macro.Name, len(macro.Steps), macro.Mode), nil
+			return fmt.Sprintf("effect %d/%s saved with %d steps and %s execution policy", macro.ID, macro.Name, len(macro.Steps), macro.Mode), nil
 		case "discard", "cancel":
 			if len(args) != 2 {
 				return "", fmt.Errorf("usage: macro record discard")
@@ -5299,13 +5303,13 @@ func macroCommand(
 			if err != nil {
 				return "", err
 			}
-			return fmt.Sprintf("macro %d/%s recording discarded", macro.ID, macro.Name), nil
+			return fmt.Sprintf("effect %d/%s recording discarded", macro.ID, macro.Name), nil
 		default:
 			return "", fmt.Errorf("usage: macro record start|start-mcu|start-board|import-board NAME [CATEGORY [COLOR]]|status|save|discard")
 		}
 	case "play", "run", "start":
 		if len(args) < 2 || len(args) > 3 {
-			return "", fmt.Errorf("usage: macro play NAME_OR_ID [host|mcu]")
+			return "", fmt.Errorf("usage: macro play NAME_OR_ID [auto|host|mcu]")
 		}
 		mode := ""
 		if len(args) == 3 {
@@ -5316,9 +5320,10 @@ func macroCommand(
 			return "", err
 		}
 		return fmt.Sprintf(
-			"macro %d/%s started in %s mode with %d steps",
+			"effect %d/%s started with %s policy resolved to %s clock with %d steps",
 			state.ID,
 			state.Name,
+			state.Policy,
 			state.Mode,
 			state.StepCount,
 		), nil
@@ -5341,9 +5346,10 @@ func macroCommand(
 			return "no macro has run in this session", nil
 		}
 		return fmt.Sprintf(
-			"macro id=%d name=%q mode=%s lifecycle=%s running=%t step=%d/%d evidence=%d/%d buffer=%dB timing=%dus max=%dus startup_delay_us=%d violations=%d underruns=%d dispatch_errors=%d faithful=%t started=%s error=%q",
+			"effect id=%d name=%q policy=%s clock=%s lifecycle=%s running=%t step=%d/%d evidence=%d/%d buffer=%dB timing=%dus max=%dus startup_delay_us=%d violations=%d underruns=%d dispatch_errors=%d faithful=%t started=%s error=%q",
 			state.ID,
 			state.Name,
+			state.Policy,
 			state.Mode,
 			state.Lifecycle,
 			state.Running,
