@@ -850,15 +850,15 @@ func TestFutureConfigFieldsAreIgnoredButKnownTypesRemainStrict(t *testing.T) {
 	}
 }
 
-func TestControlDescriptorsAreOrderedResolvedAndExcludeSystemChannels(t *testing.T) {
+func TestControlDescriptorsAreOrderedResolvedAndIncludeRoleSpecificChannels(t *testing.T) {
 	controls := ControlDescriptors(map[string]string{
 		"relay.5":  "Bench lamp",
 		"motion.b": "Right lift",
 		"pwm.10":   "Fan",
-		"pwm.11":   "Must remain excluded",
+		"pwm.11":   "Enclosure lighting",
 	})
-	if len(controls) != 21 {
-		t.Fatalf("controls=%d, want 21", len(controls))
+	if len(controls) != 26 {
+		t.Fatalf("controls=%d, want 26", len(controls))
 	}
 	wants := []ControlDescriptor{
 		{Key: "relay.1", Kind: "relay", Order: 1, Name: "Side A Direction", Control: "relay"},
@@ -867,6 +867,7 @@ func TestControlDescriptorsAreOrderedResolvedAndExcludeSystemChannels(t *testing
 		{Key: "motion.b", Kind: "side", Order: 2, Name: "Right lift", Control: "motion"},
 		{Key: "pwm.0", Kind: "mosfet", Order: 0, Name: "MOSFET 1", Control: "pwm-user"},
 		{Key: "pwm.10", Kind: "mosfet", Order: 10, Name: "Fan", Control: "pwm-user"},
+		{Key: "pwm.11", Kind: "mosfet", Order: 11, Name: "Enclosure lighting", Control: "role-specific"},
 	}
 	for _, want := range wants {
 		found := false

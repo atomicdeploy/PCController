@@ -19,17 +19,17 @@ func TestResolveBoardIdentityPrefersProvisionedSerial(t *testing.T) {
 func TestProfileDescriptorsAdvertiseOnlyConfiguredWiring(t *testing.T) {
 	legacy := map[string]string{"motion.a": "Left legacy", "relay.5": "Lamp"}
 	presentation := map[string]PeripheralPresentation{
-		"seat.a": {Name: "Left seats", Icon: "seat", Group: "auditorium", Hidden: true, Locked: true},
+		"seat.a": {Name: "Left seats", Icon: "seat", Color: "#A142F4", Group: "auditorium", Hidden: true, Locked: true},
 	}
 	_, cinema := ProfileDescriptors(BoardModeCinemaSeatMotion, false, legacy, presentation)
-	if len(cinema) != 17 {
-		t.Fatalf("cinema controls=%d, want 17", len(cinema))
+	if len(cinema) != 22 {
+		t.Fatalf("cinema controls=%d, want 22", len(cinema))
 	}
 	seenSeat, seenLegacy, seenRelayOne := false, false, false
 	for _, control := range cinema {
 		switch control.Key {
 		case "seat.a":
-			seenSeat = control.Name == "Left seats" && control.Icon == "seat" && control.Group == "auditorium" &&
+			seenSeat = control.Name == "Left seats" && control.Icon == "seat" && control.Color == "#A142F4" && control.Group == "auditorium" &&
 				control.Hidden && control.Locked &&
 				len(control.Actions) == 3 && control.Actions[0].ID == "seat.a.up"
 		case "motion.a":
@@ -43,8 +43,8 @@ func TestProfileDescriptorsAdvertiseOnlyConfiguredWiring(t *testing.T) {
 	}
 
 	_, rawCinema := ProfileDescriptors(BoardModeCinemaSeatMotion, true, legacy, presentation)
-	if len(rawCinema) != 21 {
-		t.Fatalf("raw cinema controls=%d, want 21", len(rawCinema))
+	if len(rawCinema) != 26 {
+		t.Fatalf("raw cinema controls=%d, want 26", len(rawCinema))
 	}
 	for relay := 1; relay <= 4; relay++ {
 		key := fmt.Sprintf("relay.%d", relay)
@@ -61,12 +61,12 @@ func TestProfileDescriptorsAdvertiseOnlyConfiguredWiring(t *testing.T) {
 	}
 
 	_, ordinary := ProfileDescriptors(BoardModeOrdinaryRelays, false, legacy, nil)
-	if len(ordinary) != 19 || ordinary[0].Key != "relay.1" || len(ordinary[0].Actions) != 2 || ordinary[0].Actions[0].ID != "relay.1.on" {
+	if len(ordinary) != 24 || ordinary[0].Key != "relay.1" || len(ordinary[0].Actions) != 2 || ordinary[0].Actions[0].ID != "relay.1.on" {
 		t.Fatalf("ordinary controls=%+v", ordinary)
 	}
 	_, unconfigured := ProfileDescriptors(BoardModeUnconfigured, false, legacy, nil)
-	if len(unconfigured) != 15 {
-		t.Fatalf("unconfigured controls=%d, want 15", len(unconfigured))
+	if len(unconfigured) != 20 {
+		t.Fatalf("unconfigured controls=%d, want 20", len(unconfigured))
 	}
 }
 
@@ -102,5 +102,11 @@ func TestBoardProfileValidationAndRevision(t *testing.T) {
 	config.BoardProfiles["serial:board-42"] = profile
 	if err := config.Validate(); err == nil {
 		t.Fatal("invalid board mode accepted")
+	}
+	profile.Mode = BoardModeCinemaSeatMotion
+	profile.Presentation["seat.a"] = PeripheralPresentation{Color: "purple"}
+	config.BoardProfiles["serial:board-42"] = profile
+	if err := config.Validate(); err == nil {
+		t.Fatal("invalid presentation color accepted")
 	}
 }

@@ -714,6 +714,7 @@ func (service *Service) dispatch(
 			Key              string  `json:"key"`
 			Name             *string `json:"name,omitempty"`
 			Icon             *string `json:"icon,omitempty"`
+			Color            *string `json:"color,omitempty"`
 			Group            *string `json:"group,omitempty"`
 			Hidden           *bool   `json:"hidden,omitempty"`
 			Locked           *bool   `json:"locked,omitempty"`
@@ -722,7 +723,7 @@ func (service *Service) dispatch(
 		if err = decodeStrictParams(request.Params, &params); err != nil {
 			err = &RPCError{Code: -32602, Message: err.Error()}
 		} else {
-			result, err = service.updatePeripheralPresentation(params.Key, params.Name, params.Icon, params.Group, params.Hidden, params.Locked, params.ExpectedRevision)
+			result, err = service.updatePeripheralPresentation(params.Key, params.Name, params.Icon, params.Color, params.Group, params.Hidden, params.Locked, params.ExpectedRevision)
 		}
 	case "controller.action.invoke":
 		var params struct {

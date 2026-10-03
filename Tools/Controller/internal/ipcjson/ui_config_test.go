@@ -50,7 +50,7 @@ func TestBrowserUIConfigRPCPersistsOnlyRequestedHostFields(t *testing.T) {
 	if get.Error != nil || !ok || initial.AppTitle != "Workshop Controller" || initial.SetupComplete {
 		t.Fatalf("initial UI config=%#v error=%v", get.Result, get.Error)
 	}
-	if initial.PeripheralNames["relay.5"] != "Workbench lamp" || len(initial.Peripherals) != 34 || len(initial.Controls) != 21 {
+	if initial.PeripheralNames["relay.5"] != "Workbench lamp" || len(initial.Peripherals) != 34 || len(initial.Controls) != 26 {
 		t.Fatalf("initial peripheral contract names=%#v descriptors=%d controls=%d", initial.PeripheralNames, len(initial.Peripherals), len(initial.Controls))
 	}
 	if !initial.SegmentScroll.Enabled || len(initial.SegmentScroll.Pages) != 1 || initial.SegmentScroll.Pages[0] != "door" {
@@ -119,7 +119,7 @@ func TestPeripheralNamesRPCNormalizesPersistsAndNeverTouchesBoardSettings(t *tes
 	if _, exists := updated.Names["pwm.0"]; exists {
 		t.Fatalf("blank custom name was not restored to default: %#v", updated.Names)
 	}
-	if len(updated.Peripherals) != 32 || len(updated.Controls) != 15 || updated.BoardProfile.Mode != appconfig.BoardModeUnconfigured || config.Connection.ResetOnReconnect {
+	if len(updated.Peripherals) != 32 || len(updated.Controls) != 20 || updated.BoardProfile.Mode != appconfig.BoardModeUnconfigured || config.Connection.ResetOnReconnect {
 		t.Fatalf("peripheral update descriptors=%d controls=%d reset-on-reconnect=%t", len(updated.Peripherals), len(updated.Controls), config.Connection.ResetOnReconnect)
 	}
 	if got := updated.Controls[0]; got.Key != "relay.5" || got.Kind != "relay" || got.Order != 5 || got.Name != "Bench lamp" {
@@ -157,7 +157,7 @@ func TestPeripheralNamesRESTUsesTheSameTypedContract(t *testing.T) {
 	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
 		t.Fatal(err)
 	}
-	if response.StatusCode != http.StatusOK || result.Names["display.lcd"] != "Cabinet LCD" || len(result.Peripherals) != 32 || len(result.Controls) != 15 || result.BoardProfile.Configured {
+	if response.StatusCode != http.StatusOK || result.Names["display.lcd"] != "Cabinet LCD" || len(result.Peripherals) != 32 || len(result.Controls) != 20 || result.BoardProfile.Configured {
 		t.Fatalf("REST peripheral response status=%d result=%+v", response.StatusCode, result)
 	}
 }
@@ -191,7 +191,7 @@ func TestPeripheralCatalogUsesExplicitBoardProfileWithoutLegacyMotionAliases(t *
 		"serial:board-42": {
 			Key: "cafe-cinema", Mode: appconfig.BoardModeCinemaSeatMotion,
 			Presentation: map[string]appconfig.PeripheralPresentation{
-				"seat.a": {Name: "Left bank", Icon: "seat", Group: "auditorium", Hidden: true, Locked: true},
+				"seat.a": {Name: "Left bank", Icon: "seat", Color: "#38D27A", Group: "auditorium", Hidden: true, Locked: true},
 			},
 		},
 	}
@@ -201,7 +201,7 @@ func TestPeripheralCatalogUsesExplicitBoardProfileWithoutLegacyMotionAliases(t *
 		t.Fatalf("result=%#v error=%v", response.Result, response.Error)
 	}
 	if !settings.BoardProfile.Configured || settings.BoardProfile.Attached || settings.BoardProfile.Key != "cafe-cinema" ||
-		settings.BoardProfile.BoardIdentity != "serial:board-42" || settings.BoardProfile.Mode != appconfig.BoardModeCinemaSeatMotion || len(settings.Controls) != 17 {
+		settings.BoardProfile.BoardIdentity != "serial:board-42" || settings.BoardProfile.Mode != appconfig.BoardModeCinemaSeatMotion || len(settings.Controls) != 22 {
 		t.Fatalf("profile=%+v controls=%d", settings.BoardProfile, len(settings.Controls))
 	}
 	seenSeat := false
@@ -210,7 +210,7 @@ func TestPeripheralCatalogUsesExplicitBoardProfileWithoutLegacyMotionAliases(t *
 			t.Fatalf("catalog advertised ambiguous legacy control %+v", control)
 		}
 		if control.Key == "seat.a" {
-			seenSeat = control.Name == "Left bank" && control.Icon == "seat" && control.Group == "auditorium" &&
+			seenSeat = control.Name == "Left bank" && control.Icon == "seat" && control.Color == "#38D27A" && control.Group == "auditorium" &&
 				control.Hidden && control.Locked &&
 				len(control.Actions) == 3 && control.Actions[2].ID == "seat.a.stop"
 		}

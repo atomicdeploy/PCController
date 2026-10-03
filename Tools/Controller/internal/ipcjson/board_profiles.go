@@ -87,7 +87,7 @@ func (service *Service) updateActiveBoardProfile(key, mode string, exposeRawRela
 	return updated, nil
 }
 
-func (service *Service) updatePeripheralPresentation(key string, name, icon, group *string, hidden, locked *bool, expectedRevision string) (presentationUpdateResult, error) {
+func (service *Service) updatePeripheralPresentation(key string, name, icon, color, group *string, hidden, locked *bool, expectedRevision string) (presentationUpdateResult, error) {
 	if service.UpdateHostConfig == nil {
 		return presentationUpdateResult{}, errors.New("persistent host configuration is unavailable")
 	}
@@ -96,8 +96,8 @@ func (service *Service) updatePeripheralPresentation(key string, name, icon, gro
 		return presentationUpdateResult{}, errors.New("configure the attached board profile before changing presentation")
 	}
 	key = strings.TrimSpace(key)
-	if key == "" || name == nil && icon == nil && group == nil && hidden == nil && locked == nil {
-		return presentationUpdateResult{}, &RPCError{Code: -32602, Message: "key and at least one of name, icon, group, hidden, or locked are required"}
+	if key == "" || name == nil && icon == nil && color == nil && group == nil && hidden == nil && locked == nil {
+		return presentationUpdateResult{}, &RPCError{Code: -32602, Message: "key and at least one of name, icon, color, group, hidden, or locked are required"}
 	}
 	known := false
 	for _, peripheral := range service.peripheralSettings().Peripherals {
@@ -109,7 +109,7 @@ func (service *Service) updatePeripheralPresentation(key string, name, icon, gro
 	if !known {
 		return presentationUpdateResult{}, &RPCError{Code: -32602, Message: fmt.Sprintf("peripheral key %q is not advertised by the active profile", key)}
 	}
-	changedFields := make([]string, 0, 5)
+	changedFields := make([]string, 0, 6)
 	err := service.UpdateHostConfig(func(config *appconfig.Config) error {
 		profile := config.BoardProfiles[current.BoardIdentity]
 		profile.Mode = appconfig.NormalizeBoardMode(profile.Mode)
@@ -127,6 +127,10 @@ func (service *Service) updatePeripheralPresentation(key string, name, icon, gro
 		if icon != nil {
 			presentation.Icon = strings.TrimSpace(*icon)
 			changedFields = append(changedFields, "icon")
+		}
+		if color != nil {
+			presentation.Color = strings.ToUpper(strings.TrimSpace(*color))
+			changedFields = append(changedFields, "color")
 		}
 		if group != nil {
 			presentation.Group = strings.TrimSpace(*group)
