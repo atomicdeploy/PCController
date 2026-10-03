@@ -35,6 +35,8 @@ type Snapshot struct {
 	Paused                 bool
 	Port                   ports.Info
 	Hello                  native.Hello
+	BoardName              native.BoardName
+	HaveBoardName          bool
 	Status                 native.Status
 	Settings               native.Settings
 	HaveStatus             bool
@@ -201,8 +203,10 @@ type Runtime struct {
 	hello                  native.Hello
 	status                 native.Status
 	settings               native.Settings
+	boardName              native.BoardName
 	haveStatus             bool
 	haveSettings           bool
+	haveBoardName          bool
 	frontPanel             native.FrontPanel
 	haveFrontPanel         bool
 	haveFrontPanelSegments bool
@@ -753,6 +757,8 @@ func (runtime *Runtime) Snapshot() Snapshot {
 		Paused:                 runtime.paused,
 		Port:                   runtime.port,
 		Hello:                  runtime.hello,
+		BoardName:              runtime.boardName,
+		HaveBoardName:          runtime.haveBoardName,
 		Status:                 runtime.status,
 		Settings:               runtime.settings,
 		HaveStatus:             runtime.haveStatus,
@@ -1092,8 +1098,10 @@ func (runtime *Runtime) clearPeerStateLocked() {
 	runtime.hello = native.Hello{}
 	runtime.status = native.Status{}
 	runtime.settings = native.Settings{}
+	runtime.boardName = native.BoardName{}
 	runtime.haveStatus = false
 	runtime.haveSettings = false
+	runtime.haveBoardName = false
 	runtime.statusUpdated = time.Time{}
 	runtime.frontPanel = native.FrontPanel{}
 	runtime.haveFrontPanel = false
@@ -2267,8 +2275,10 @@ func (runtime *Runtime) attachWhen(result link.OpenResult, allowed func() bool) 
 	runtime.hello = result.Hello
 	runtime.status = native.Status{}
 	runtime.settings = native.Settings{}
+	runtime.boardName = native.BoardName{}
 	runtime.haveStatus = false
 	runtime.haveSettings = false
+	runtime.haveBoardName = false
 	runtime.statusUpdated = time.Time{}
 	runtime.haveFrontPanel = false
 	runtime.haveFrontPanelSegments = false
@@ -3087,6 +3097,13 @@ func (runtime *Runtime) observeLocked(frame native.Frame) uint64 {
 		if settings, err := native.ParseSettings(frame.Payload); err == nil {
 			runtime.settings = settings
 			runtime.haveSettings = true
+		}
+		if name, err := native.ParseBoardNameFromSettings(frame.Payload); err == nil {
+			runtime.boardName = name
+			runtime.haveBoardName = true
+		} else {
+			runtime.boardName = native.BoardName{}
+			runtime.haveBoardName = false
 		}
 	case native.OpFrontPanel:
 		if panel, err := native.ParseFrontPanel(frame.Payload); err == nil {

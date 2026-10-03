@@ -9,7 +9,20 @@ import (
 
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/control"
+	"pccontroller.local/controller/internal/ports"
 )
+
+func TestPublicPortInfoPublishesCrossPlatformDisplayIdentity(t *testing.T) {
+	info := publicPortInfo(ports.Info{
+		Name: "COM4", FriendlyName: "USB-SERIAL CH340", Product: "USB Serial",
+		Manufacturer: "QinHeng", VID: "1A86", PID: "7523",
+		SerialNumber: "BOARD-1", InstanceID: `USB\VID_1A86&PID_7523\BOARD-1`,
+	})
+	if info.DisplayName != "USB-SERIAL CH340" || info.Name != "COM4" ||
+		info.Manufacturer != "QinHeng" || info.SerialNumber != "BOARD-1" {
+		t.Fatalf("public port identity lost OS metadata: %#v", info)
+	}
+}
 
 func TestSharedFacadeSnapshotUsesRuntimeEffectCatalog(t *testing.T) {
 	runtime := control.New(control.Options{})

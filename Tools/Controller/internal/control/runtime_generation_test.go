@@ -39,3 +39,22 @@ func TestObserveAtGenerationRejectsReplacementState(t *testing.T) {
 		t.Fatal("stale settings became live replacement-board state")
 	}
 }
+
+func TestSettingsObservationPublishesPersistedBoardName(t *testing.T) {
+	runtime := New(Options{})
+	settings := native.DefaultSettings()
+	setPayload, err := native.SettingsWithBoardNamePayload(settings, "CAFE-01")
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := append([]byte{}, setPayload[:15]...)
+	response = append(response, 1, 1, byte(len("CAFE-01")))
+	response = append(response, "CAFE-01"...)
+	runtime.observe(native.Frame{Opcode: native.OpSettings, Payload: response})
+
+	snapshot := runtime.Snapshot()
+	if !snapshot.HaveSettings || !snapshot.HaveBoardName ||
+		snapshot.BoardName.Name != "CAFE-01" || !snapshot.BoardName.Persisted {
+		t.Fatalf("settings observation did not publish board name: %#v", snapshot)
+	}
+}

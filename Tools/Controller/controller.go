@@ -400,6 +400,7 @@ type RFEntryView struct {
 // PortInfo identifies one serial candidate with stable USB metadata when available.
 type PortInfo struct {
 	Name         string `json:"name"`
+	DisplayName  string `json:"display_name,omitempty"`
 	VID          string `json:"vid,omitempty"`
 	PID          string `json:"pid,omitempty"`
 	Product      string `json:"product,omitempty"`
@@ -434,6 +435,8 @@ type Snapshot struct {
 	Paused                   bool                            `json:"paused"`
 	Port                     PortInfo                        `json:"port"`
 	Hello                    Hello                           `json:"hello"`
+	BoardName                BoardName                       `json:"board_name"`
+	HaveBoardName            bool                            `json:"have_board_name"`
 	Status                   Status                          `json:"status"`
 	Settings                 Settings                        `json:"settings"`
 	HaveStatus               bool                            `json:"have_status"`
@@ -2181,6 +2184,7 @@ func (client *Client) Snapshot() Snapshot {
 		Paused:    snapshot.Paused,
 		Port: PortInfo{
 			Name:         snapshot.Port.Name,
+			DisplayName:  firstNonempty(snapshot.Port.FriendlyName, snapshot.Port.Product, snapshot.Port.Name),
 			VID:          snapshot.Port.VID,
 			PID:          snapshot.Port.PID,
 			Product:      snapshot.Port.Product,
@@ -2190,6 +2194,8 @@ func (client *Client) Snapshot() Snapshot {
 			InstanceID:   snapshot.Port.InstanceID,
 		},
 		Hello:                    snapshot.Hello,
+		BoardName:                snapshot.BoardName,
+		HaveBoardName:            snapshot.HaveBoardName,
 		Status:                   snapshot.Status,
 		Settings:                 snapshot.Settings,
 		HaveStatus:               snapshot.HaveStatus,
@@ -2206,6 +2212,7 @@ func (client *Client) Snapshot() Snapshot {
 		ConnectionRetryDelayMS:   snapshot.ConnectionRetryDelay.Milliseconds(),
 		ConnectionCandidate: PortInfo{
 			Name:         snapshot.ConnectionCandidate.Name,
+			DisplayName:  firstNonempty(snapshot.ConnectionCandidate.FriendlyName, snapshot.ConnectionCandidate.Product, snapshot.ConnectionCandidate.Name),
 			VID:          snapshot.ConnectionCandidate.VID,
 			PID:          snapshot.ConnectionCandidate.PID,
 			Product:      snapshot.ConnectionCandidate.Product,
@@ -2217,6 +2224,7 @@ func (client *Client) Snapshot() Snapshot {
 		ResetLinesAvailable: resetLinesAvailable,
 		ResetLinesPort: PortInfo{
 			Name:         resetLinesPort.Name,
+			DisplayName:  firstNonempty(resetLinesPort.FriendlyName, resetLinesPort.Product, resetLinesPort.Name),
 			VID:          resetLinesPort.VID,
 			PID:          resetLinesPort.PID,
 			Product:      resetLinesPort.Product,
@@ -2706,6 +2714,7 @@ func ListPorts() ([]PortInfo, error) {
 	for _, port := range list {
 		result = append(result, PortInfo{
 			Name:         port.Name,
+			DisplayName:  firstNonempty(port.FriendlyName, port.Product, port.Name),
 			VID:          port.VID,
 			PID:          port.PID,
 			Product:      port.Product,
@@ -2721,7 +2730,8 @@ func ListPorts() ([]PortInfo, error) {
 func publicPortInfo(info ports.Info) PortInfo {
 	return PortInfo{
 		Name: info.Name, VID: info.VID, PID: info.PID,
-		Product: info.Product, Manufacturer: info.Manufacturer,
+		DisplayName: firstNonempty(info.FriendlyName, info.Product, info.Name),
+		Product:     info.Product, Manufacturer: info.Manufacturer,
 		SerialNumber: info.SerialNumber,
 		FriendlyName: info.FriendlyName,
 		InstanceID:   info.InstanceID,
