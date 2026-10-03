@@ -9,8 +9,9 @@ const MaxPeripheralNames = 96
 
 // PeripheralDescriptor is the host-owned presentation contract for one board
 // peripheral. Names are stored in the PC configuration; this catalog never
-// mutates board EEPROM or implies that a system-owned channel is directly
-// writable through a generic control.
+// mutates board EEPROM. The Control field distinguishes general user outputs
+// from role-specific channels so clients can apply a visibility policy without
+// losing access to the underlying hardware.
 type PeripheralDescriptor struct {
 	Key         string `json:"key"`
 	Kind        string `json:"kind"`
@@ -19,7 +20,11 @@ type PeripheralDescriptor struct {
 	DefaultName string `json:"default_name"`
 	Name        string `json:"name,omitempty"`
 	Icon        string `json:"icon,omitempty"`
+	Color       string `json:"color,omitempty"`
 	Group       string `json:"group,omitempty"`
+	Order       *int   `json:"order,omitempty"`
+	Hidden      bool   `json:"hidden,omitempty"`
+	Locked      bool   `json:"locked,omitempty"`
 	Control     string `json:"control"`
 }
 
@@ -38,7 +43,10 @@ type ControlDescriptor struct {
 	Order   int                `json:"order"`
 	Name    string             `json:"name"`
 	Icon    string             `json:"icon,omitempty"`
+	Color   string             `json:"color,omitempty"`
 	Group   string             `json:"group,omitempty"`
+	Hidden  bool               `json:"hidden,omitempty"`
+	Locked  bool               `json:"locked,omitempty"`
 	Control string             `json:"control"`
 	Actions []ActionDescriptor `json:"actions,omitempty"`
 }
@@ -132,11 +140,11 @@ func PeripheralDefaultName(key string) (string, bool) {
 }
 
 // ControlDescriptors resolves configured host names over the canonical
-// peripheral registry. Only directly operator-controlled relay, Side, and
-// MOSFET channels are included; sensors and system-owned PWM channels remain
-// available through the full peripheral catalog.
+// peripheral registry. Every relay, motion side, and PWM channel is included;
+// Control tells clients which channels are general user outputs and which are
+// role-specific diagnostic/raw controls.
 func ControlDescriptors(names map[string]string) []ControlDescriptor {
-	controls := make([]ControlDescriptor, 0, 21)
+	controls := make([]ControlDescriptor, 0, 26)
 	for _, descriptor := range corePeripheralDescriptors {
 		kind := ""
 		switch descriptor.Kind {
@@ -145,9 +153,7 @@ func ControlDescriptors(names map[string]string) []ControlDescriptor {
 		case "motion":
 			kind = "side"
 		case "pwm":
-			if descriptor.Index <= 10 {
-				kind = "mosfet"
-			}
+			kind = "mosfet"
 		}
 		if kind == "" {
 			continue
@@ -170,14 +176,20 @@ func ControlDescriptors(names map[string]string) []ControlDescriptor {
 func ProfileDescriptors(mode string, exposeRawRelays bool, legacyNames map[string]string, presentation map[string]PeripheralPresentation) ([]PeripheralDescriptor, []ControlDescriptor) {
 	mode = NormalizeBoardMode(mode)
 	peripherals := make([]PeripheralDescriptor, 0, len(corePeripheralDescriptors))
-	controls := make([]ControlDescriptor, 0, 21)
+	controls := make([]ControlDescriptor, 0, 26)
 	addControl := func(descriptor PeripheralDescriptor, kind string, actions []ActionDescriptor) {
 		resolved := resolvePresentation(descriptor.Key, descriptor.DefaultName, legacyNames, presentation)
-		descriptor.Name, descriptor.Icon, descriptor.Group = resolved.Name, resolved.Icon, resolved.Group
+		descriptor.Name, descriptor.Icon, descriptor.Color, descriptor.Group, descriptor.Order = resolved.Name, resolved.Icon, resolved.Color, resolved.Group, resolved.Order
+		descriptor.Hidden, descriptor.Locked = resolved.Hidden, resolved.Locked
+		order := descriptor.Index
+		if resolved.Order != nil {
+			order = *resolved.Order
+		}
 		peripherals = append(peripherals, descriptor)
 		controls = append(controls, ControlDescriptor{
-			Key: descriptor.Key, Kind: kind, Order: descriptor.Index,
-			Name: descriptor.Name, Icon: descriptor.Icon, Group: descriptor.Group,
+			Key: descriptor.Key, Kind: kind, Order: order,
+			Name: descriptor.Name, Icon: descriptor.Icon, Color: descriptor.Color, Group: descriptor.Group,
+			Hidden: descriptor.Hidden, Locked: descriptor.Locked,
 			Control: descriptor.Control, Actions: actions,
 		})
 	}
@@ -203,11 +215,17 @@ func ProfileDescriptors(mode string, exposeRawRelays bool, legacyNames map[strin
 					{ID: key + ".stop", Verb: "stop", Name: "Stop"},
 				}
 				resolved := resolvePresentation(key, seat.DefaultName, legacy, presentation)
-				seat.Name, seat.Icon, seat.Group = resolved.Name, resolved.Icon, resolved.Group
+				seat.Name, seat.Icon, seat.Color, seat.Group, seat.Order = resolved.Name, resolved.Icon, resolved.Color, resolved.Group, resolved.Order
+				seat.Hidden, seat.Locked = resolved.Hidden, resolved.Locked
+				order := descriptor.Index
+				if resolved.Order != nil {
+					order = *resolved.Order
+				}
 				peripherals = append(peripherals, seat)
 				controls = append(controls, ControlDescriptor{
-					Key: key, Kind: "seat", Order: descriptor.Index, Name: seat.Name,
-					Icon: seat.Icon, Group: seat.Group, Control: "seat", Actions: actions,
+					Key: key, Kind: "seat", Order: order, Name: seat.Name,
+					Icon: seat.Icon, Color: seat.Color, Group: seat.Group, Hidden: seat.Hidden, Locked: seat.Locked,
+					Control: "seat", Actions: actions,
 				})
 			}
 			continue
@@ -231,17 +249,19 @@ func ProfileDescriptors(mode string, exposeRawRelays bool, legacyNames map[strin
 				addControl(descriptor, "relay", actions)
 			} else {
 				resolved := resolvePresentation(descriptor.Key, descriptor.DefaultName, legacyNames, presentation)
-				descriptor.Name, descriptor.Icon, descriptor.Group = resolved.Name, resolved.Icon, resolved.Group
+				descriptor.Name, descriptor.Icon, descriptor.Color, descriptor.Group, descriptor.Order = resolved.Name, resolved.Icon, resolved.Color, resolved.Group, resolved.Order
+				descriptor.Hidden, descriptor.Locked = resolved.Hidden, resolved.Locked
 				peripherals = append(peripherals, descriptor)
 			}
 			continue
 		}
-		if descriptor.Kind == "pwm" && descriptor.Index <= 10 {
+		if descriptor.Kind == "pwm" {
 			addControl(descriptor, "mosfet", nil)
 			continue
 		}
 		resolved := resolvePresentation(descriptor.Key, descriptor.DefaultName, legacyNames, presentation)
-		descriptor.Name, descriptor.Icon, descriptor.Group = resolved.Name, resolved.Icon, resolved.Group
+		descriptor.Name, descriptor.Icon, descriptor.Color, descriptor.Group, descriptor.Order = resolved.Name, resolved.Icon, resolved.Color, resolved.Group, resolved.Order
+		descriptor.Hidden, descriptor.Locked = resolved.Hidden, resolved.Locked
 		peripherals = append(peripherals, descriptor)
 	}
 	return peripherals, controls

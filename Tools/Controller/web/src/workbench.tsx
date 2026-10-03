@@ -329,7 +329,7 @@ export function WorkbenchView(props: SharedViewProps) {
     { id: 'status-lighting', label: copy('Addressable strip', 'نوار LED آدرس‌پذیر') },
     { id: 'audio', label: copy('Buzzer & melody', 'بیزر و ملودی') },
     { id: 'radio', label: copy('Radio controls', 'کنترل‌های رادیویی') },
-    { id: 'macros', label: copy('Macro library', 'کتابخانه ماکرو') },
+    { id: 'macros', label: copy('Effect library', 'کتابخانه جلوه‌ها') },
     { id: 'automations', label: copy('Host automations', 'خودکارسازی میزبان') },
     { id: 'i2c', label: copy('I²C & peripherals', 'I²C و تجهیزات جانبی') },
     { id: 'host-control', label: copy('Host control', 'کنترل میزبان') },
@@ -541,8 +541,32 @@ export function WorkbenchView(props: SharedViewProps) {
 
         {boardReady && available.rf && frame('radio', copy('Radio controls', 'کنترل‌های رادیویی'), <RFGuidedWorkflow snapshot={snapshot} events={events} locale={locale} openDialog={props.openDialog} />)}
 
-        {frame('macros', copy('Macro library', 'کتابخانه ماکرو'), <Card className="macro-card" icon={Workflow} iconTone="green" title={copy('Macro library', 'کتابخانه ماکرو')} eyebrow={copy('Exact MCU timing · live shared state', 'زمان‌بندی دقیق MCU · وضعیت زنده مشترک')}>
-          <MacroLibraryPanel online={snapshot.connected} locale={locale} events={props.macroEvents} initialSnapshot={snapshot.macros} commandSurface={run} />
+        {frame('macros', copy('Effect library', 'کتابخانه جلوه‌ها'), <Card className="macro-card" icon={Workflow} iconTone="green" title={copy('Effect library', 'کتابخانه جلوه‌ها')}>
+          <MacroLibraryPanel
+            online={snapshot.connected}
+            locale={locale}
+            events={props.macroEvents}
+            initialSnapshot={snapshot.macros}
+            stripEffects={(snapshot.effects ?? [])
+              .filter((effect) => effect.kind === 'strip-stream' && Boolean(effect.program))
+              .map((effect) => ({
+                id: effect.id,
+                name: effect.name,
+                category: effect.category,
+                description: effect.description,
+                program: effect.program!,
+                engine: effect.engine,
+                editable: effect.editable,
+                default_fps: effect.default_fps ?? 20,
+                default_duration_ms: effect.duration_ms || 5_000,
+                default_pixels: effect.default_pixels ?? 100,
+                min_pixels: 1,
+                max_pixels: 100,
+                min_fps: 1,
+                max_fps: 30,
+              }))}
+            commandSurface={run}
+          />
         </Card>)}
 
         {frame('automations', copy('Host automations', 'خودکارسازی میزبان'), <Card icon={Bot} iconTone="violet" title={copy('Host automations', 'خودکارسازی میزبان')} eyebrow={copy('Event-driven host rules', 'قواعد رویدادمحور میزبان')}>

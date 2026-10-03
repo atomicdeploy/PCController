@@ -46,7 +46,7 @@ var pageDefinitions = [...]pageDefinition{
 	{"5", "App", "HOST Settings"},
 	{"6", "RF", "433 MHz Learn & Mapping"},
 	{"7", "Program", "Programming & Urboot/Urclock"},
-	{"8", "Automate", "Automations & Macros"},
+	{"8", "Effects", "Effects & Triggers"},
 	{"9", "Events", "History, Graphs & Timeline"},
 	{"0", "Console", "Command Console"},
 }
@@ -245,6 +245,7 @@ type Options struct {
 	Integrations       func() hostui.IntegrationStatus
 	Notifier           hostui.Notifier
 	AppActions         <-chan hostui.AppAction
+	AppInstances       func() []hostui.AppInstance
 	InstanceID         string
 	NavigationSync     bool
 	NavigationGroup    string

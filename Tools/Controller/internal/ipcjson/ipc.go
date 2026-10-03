@@ -348,7 +348,29 @@ type peripheralSettings struct {
 	BoardProfile boardProfileDescriptor           `json:"board_profile"`
 	Peripherals  []appconfig.PeripheralDescriptor `json:"peripherals"`
 	Controls     []appconfig.ControlDescriptor    `json:"controls"`
+	Strip        *stripControlDescriptor          `json:"strip,omitempty"`
 	StripEffects []control.StripEffectDescriptor  `json:"strip_effects,omitempty"`
+}
+
+type stripControlDescriptor struct {
+	MinimumPixels int      `json:"minimum_pixels"`
+	MaximumPixels int      `json:"maximum_pixels"`
+	DefaultPixels int      `json:"default_pixels"`
+	MinimumFPS    int      `json:"minimum_fps"`
+	MaximumFPS    int      `json:"maximum_fps"`
+	DefaultFPS    int      `json:"default_fps"`
+	Modes         []string `json:"modes"`
+}
+
+func advertisedStripControl(connected bool, capabilities uint32) *stripControlDescriptor {
+	if !connected || capabilities&native.CapabilityAddressableLED == 0 {
+		return nil
+	}
+	return &stripControlDescriptor{
+		MinimumPixels: 1, MaximumPixels: native.StripMaximumPixels, DefaultPixels: native.StripMaximumPixels,
+		MinimumFPS: 1, MaximumFPS: 30, DefaultFPS: 20,
+		Modes: []string{"solid", "pixel", "frame", "rainbow", "effect"},
+	}
 }
 
 // networkPeerConfig is the versionless bridge topology contract. Deliberately
@@ -714,13 +736,17 @@ func (service *Service) dispatch(
 			Key              string  `json:"key"`
 			Name             *string `json:"name,omitempty"`
 			Icon             *string `json:"icon,omitempty"`
+			Color            *string `json:"color,omitempty"`
 			Group            *string `json:"group,omitempty"`
+			Order            *int    `json:"order,omitempty"`
+			Hidden           *bool   `json:"hidden,omitempty"`
+			Locked           *bool   `json:"locked,omitempty"`
 			ExpectedRevision string  `json:"expected_revision,omitempty"`
 		}
 		if err = decodeStrictParams(request.Params, &params); err != nil {
 			err = &RPCError{Code: -32602, Message: err.Error()}
 		} else {
-			result, err = service.updatePeripheralPresentation(params.Key, params.Name, params.Icon, params.Group, params.ExpectedRevision)
+			result, err = service.updatePeripheralPresentation(params.Key, params.Name, params.Icon, params.Color, params.Group, params.Order, params.Hidden, params.Locked, params.ExpectedRevision)
 		}
 	case "controller.action.invoke":
 		var params struct {
@@ -824,6 +850,20 @@ func (service *Service) dispatch(
 		}
 	case "controller.snapshot":
 		result = service.controllerSnapshot()
+	case "controller.estop.get":
+		result = service.Client.EmergencyStop()
+	case "controller.estop.set":
+		var params struct {
+			Active bool   `json:"active"`
+			Source string `json:"source,omitempty"`
+			Reason string `json:"reason,omitempty"`
+		}
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			if strings.TrimSpace(params.Source) == "" {
+				params.Source = access.Principal
+			}
+			result, err = service.Client.SetEmergencyStop(ctx, params.Active, params.Source, params.Reason)
+		}
 	case "controller.port.process", "controller.port.owner":
 		result = service.Client.Snapshot().PortProcess
 	case "controller.session.snapshot", "controller.session.snapshot.last":
@@ -899,8 +939,10 @@ func (service *Service) dispatch(
 		if err = decodeParams(request.Params, &params); err == nil {
 			if params.Channel < 0 || params.Channel > 15 || params.Value < 0 || params.Value > 4095 {
 				err = &RPCError{Code: -32602, Message: "channel must be 0..15 and value must be 0..4095"}
-			} else if err = service.Client.SetPWMChannel(ctx, byte(params.Channel), uint16(params.Value)); err == nil {
-				result, err = service.Client.PWMValues(ctx)
+			} else if err = service.rejectLockedPeripheral(fmt.Sprintf("pwm.%d", params.Channel)); err == nil {
+				if err = service.Client.SetPWMChannel(ctx, byte(params.Channel), uint16(params.Value)); err == nil {
+					result, err = service.Client.PWMValues(ctx)
+				}
 			}
 		}
 	case "controller.pwm.off":
@@ -995,7 +1037,7 @@ func (service *Service) dispatch(
 						service.Shutdown()
 					}()
 				}
-			} else {
+			} else if err = service.rejectLockedCommand(command); err == nil {
 				var output string
 				service.commandMu.Lock()
 				output, err = service.Client.Execute(ctx, command)
@@ -1795,10 +1837,12 @@ func (service *Service) peripheralSettings() peripheralSettings {
 	names := config.UI.PeripheralNames
 	profileDescriptor, profile := service.activeBoardProfile()
 	peripherals, controls := appconfig.ProfileDescriptors(profileDescriptor.Mode, profile.ExposeRawRelays, names, profile.Presentation)
-	stripEffects := service.Client.Snapshot().StripEffects
+	snapshot := service.Client.Snapshot()
+	stripEffects := snapshot.StripEffects
 	return peripheralSettings{
 		Names: clonePeripheralNames(names), BoardProfile: profileDescriptor,
-		Peripherals: peripherals, Controls: controls, StripEffects: stripEffects,
+		Peripherals: peripherals, Controls: controls,
+		Strip: advertisedStripControl(snapshot.Connected, snapshot.Hello.Capabilities), StripEffects: stripEffects,
 	}
 }
 
@@ -2175,6 +2219,8 @@ func requestCapability(method string, params json.RawMessage) string {
 	case "controller.display.send", "controller.opcode.send",
 		"controller.opcode.exchange", "controller.opcode.request", "controller.action.invoke":
 		return capabilityBoard
+	case "controller.estop.set":
+		return capabilityBoard
 	case "controller.host_menu.config", "controller.host_menu.config.get",
 		"controller.ui.config", "controller.ui.config.get",
 		"controller.peripherals", "controller.peripherals.get", "controller.board_profile.get",
@@ -2227,7 +2273,7 @@ func requestCapability(method string, params json.RawMessage) string {
 			}
 		}
 		return capabilityHostConfig
-	case "controller.ping", "controller.snapshot", "controller.port.process", "controller.port.owner", "controller.session.snapshot",
+	case "controller.ping", "controller.snapshot", "controller.estop.get", "controller.port.process", "controller.port.owner", "controller.session.snapshot",
 		"controller.session.snapshot.last", "controller.status",
 		"controller.front_panel", "controller.front-panel",
 		"controller.command.catalog", "controller.melodies.list", "controller.program_state.get", "controller.program-state.get",
@@ -2275,6 +2321,11 @@ func commandCapability(command string) string {
 		return capabilityBoard
 	case "program-state", "run-state":
 		if len(words) == 1 || (len(words) == 2 && words[1] == "status") {
+			return capabilityRead
+		}
+		return capabilityBoard
+	case "estop":
+		if len(words) == 1 || len(words) == 2 && words[1] == "status" {
 			return capabilityRead
 		}
 		return capabilityBoard
@@ -2784,6 +2835,46 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 		}
 		writeHTTPJSON(writer, http.StatusOK, service.controllerSnapshot())
 	})
+	mux.HandleFunc("/api/estop", func(writer http.ResponseWriter, request *http.Request) {
+		if !authorizeHTTPRequest(writer, request, service) {
+			return
+		}
+		if request.Method == http.MethodGet {
+			if !authorizeHTTPCapability(writer, request, service, capabilityRead) {
+				return
+			}
+			writeHTTPJSON(writer, http.StatusOK, service.Client.EmergencyStop())
+			return
+		}
+		if request.Method != http.MethodPut && request.Method != http.MethodPost {
+			writer.Header().Set("Allow", http.MethodGet+", "+http.MethodPut+", "+http.MethodPost)
+			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !authorizeHTTPCapability(writer, request, service, capabilityBoard) {
+			return
+		}
+		var params struct {
+			Active bool   `json:"active"`
+			Source string `json:"source,omitempty"`
+			Reason string `json:"reason,omitempty"`
+		}
+		decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, maxMessage))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&params); err != nil {
+			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		if strings.TrimSpace(params.Source) == "" {
+			params.Source = "rest"
+		}
+		state, err := service.Client.SetEmergencyStop(request.Context(), params.Active, params.Source, params.Reason)
+		if err != nil {
+			writeHTTPJSON(writer, http.StatusConflict, map[string]any{"error": err.Error(), "emergency_stop": state})
+			return
+		}
+		writeHTTPJSON(writer, http.StatusOK, state)
+	})
 	mux.HandleFunc("/api/peripherals", func(writer http.ResponseWriter, request *http.Request) {
 		if !authorizeHTTPRequest(writer, request, service) {
 			return
@@ -3154,6 +3245,10 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 		encoded, _ := json.Marshal(params)
 		if err := service.authorizeAccess(access, "controller.command.execute", encoded); err != nil {
 			writeHTTPJSON(writer, http.StatusForbidden, map[string]string{"error": err.Error()})
+			return
+		}
+		if err := service.rejectLockedCommand(params.Command); err != nil {
+			writeHTTPJSON(writer, http.StatusConflict, map[string]string{"error": err.Error()})
 			return
 		}
 		output, err := service.Client.Execute(request.Context(), params.Command)

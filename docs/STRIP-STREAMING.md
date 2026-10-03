@@ -10,10 +10,11 @@ For a GRB WS2812B strip, compile with `PCCONTROLLER_USE_WS2812B=1`.
 | --- | --- |
 | `strip config 100` | Configure and clear 100 pixels |
 | `strip rainbow 100 20` | Start a host-owned rolling rainbow, up to 20 frames/s |
-| `strip effect list` | Return the discoverable host-rendered effect catalog as JSON |
-| `strip effect play police 100 20` | Alternate red and blue emergency-light sweeps |
-| `strip effect play white-thunder 100 30` | Play a deterministic white lightning strike and decay |
-| `strip effect play converging-red 100 30` | Move two fading red dots from the ends toward the center |
+| `effect list` | Return the unified PCController effect catalog as JSON |
+| `effect play police 100 20` | Play a configured lighting effect with optional pixel count and frame rate |
+| `effect inspect police` | Inspect the complete editable effect definition |
+| `effect export effects.json` | Export sequences and lighting definitions together |
+| `effect import effects.json merge` | Validate and merge a living effect catalog |
 | `strip status` | Report the active host stream |
 | `strip stop` | Cancel streaming and keep the final displayed frame |
 | `strip clear` | Stop streaming and turn every configured pixel off |
@@ -28,11 +29,11 @@ RGB frame text has six hex digits per configured pixel in red/green/blue order.
 Brightness 255 preserves each RGB byte exactly; lower single-pixel/fill brightness
 is scaled once on the host. Raw `strip frame` bytes are never scaled.
 
-The named effects are rendered from elapsed monotonic time on the host, so slow
-ACKs skip obsolete frames instead of making the animation drift. `thunder` and
-`lightning` are accepted aliases for `white-thunder`; `converge` and `red-dots`
-are accepted aliases for `converging-red`. The canonical IDs returned by
-`strip effect list` are the durable names other applications should advertise.
+Lighting programs are rendered from elapsed monotonic time on the host, so slow
+ACKs skip obsolete frames instead of making the animation drift. Named effects
+are editable PCController catalog data; the renderer only evaluates generic
+program primitives. The IDs returned by `effect list` are the references other
+applications use.
 
 Frames are sent as acknowledged staging chunks of at most 15 RGB pixels, followed
 by one show command. A failed chunk aborts transmission without showing a partial

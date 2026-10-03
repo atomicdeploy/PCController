@@ -533,6 +533,9 @@ func (scheduler *OutputScheduler) replace(
 	<-chan error,
 	error,
 ) {
+	if scheduler.targetSnapshot().EmergencyStop.Active {
+		return StreamOperation{}, nil, nil, nil, ErrEmergencyStopActive
+	}
 	scheduler.mu.Lock()
 	defer scheduler.mu.Unlock()
 	if scheduler.closed {

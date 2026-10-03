@@ -90,7 +90,7 @@ export function PeripheralNamesEditor({ locale }: PeripheralNamesEditorProps) {
       setCatalog(result.peripherals ?? catalog)
       setSaved(canonical)
       setDraft(canonical)
-      setNotice(copy('Names saved and propagated to host, IPC, bridge, TUI, and Web surfaces.', 'نام‌ها ذخیره شدند و در میزبان، IPC، پل، TUI و وب اعمال شدند.'))
+      setNotice(copy('Names saved.', 'نام‌ها ذخیره شدند.'))
     } catch (cause) {
       setNotice(cause instanceof Error ? cause.message : String(cause))
       setError(true)

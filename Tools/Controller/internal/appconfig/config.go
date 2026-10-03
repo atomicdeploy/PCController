@@ -6,7 +6,9 @@ package appconfig
 import (
 	"context"
 	"crypto/sha256"
+	_ "embed"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -56,6 +58,8 @@ type Config struct {
 	Scripts       map[string]string       `json:"scripts,omitempty"`
 	BoardProfiles map[string]BoardProfile `json:"board_profiles,omitempty"`
 	Macros        []Macro                 `json:"macros,omitempty"`
+	StripEffects  []StripEffect           `json:"strip_effects,omitempty"`
+	EffectGroups  map[string]EffectGroup  `json:"effect_groups,omitempty"`
 	Melodies      []Melody                `json:"melodies,omitempty"`
 	StatusEffects []StatusLEDEffect       `json:"status_effects,omitempty"`
 	Automations   []Automation            `json:"automations,omitempty"`
@@ -233,14 +237,18 @@ type Programming struct {
 	AvrdudeConf      string                     `json:"avrdude_conf,omitempty"`
 }
 
-// Macro defines a named, host-persisted sequence. Mode "host" schedules
-// ordinary commands from the controller process; mode "mcu" streams the
-// sequence to the firmware timing engine. Mode is always explicit.
+// Macro defines a named, host-persisted effect sequence. Mode is an execution
+// policy, not an ownership or storage location: "auto" selects the most
+// precise executor supported by the connected board and the sequence,
+// "host" forces the controller's monotonic scheduler, and "mcu" forces the
+// firmware timing queue. The durable definition always remains owned by
+// PCController; either executor only receives a volatile run plan.
 type Macro struct {
 	ID                  byte        `json:"id"`
 	Name                string      `json:"name"`
 	Mode                string      `json:"mode,omitempty"`
 	Category            string      `json:"category,omitempty"`
+	Icon                string      `json:"icon,omitempty"`
 	Color               string      `json:"color,omitempty"`
 	Label               string      `json:"label,omitempty"`
 	LCDMessage          string      `json:"lcd_message,omitempty"`
@@ -277,6 +285,71 @@ type MacroStep struct {
 	// applied relay mask. Playback continues to use the mask so old and new
 	// firmware remain byte-for-byte faithful.
 	ActionIDs []string `json:"action_ids,omitempty"`
+}
+
+// StripEffect is a host-owned addressable-light effect definition. Program is
+// declarative user data; the streaming engine only evaluates generic
+// primitives and never embeds named effects. Pealayer and other clients
+// consume this catalog; they never keep a second local effect library.
+type StripEffect struct {
+	ID                string       `json:"id"`
+	Name              string       `json:"name"`
+	Category          string       `json:"category,omitempty"`
+	Icon              string       `json:"icon,omitempty"`
+	Description       string       `json:"description,omitempty"`
+	Program           StripProgram `json:"program"`
+	DefaultFPS        int          `json:"default_fps"`
+	DefaultDurationMS int          `json:"default_duration_ms"`
+	DefaultPixels     int          `json:"default_pixels,omitempty"`
+}
+
+// EffectGroup is PCController-owned presentation metadata for a category.
+// Category membership remains on each effect so effects.json stays portable;
+// this record gives every consumer one durable custom parent icon.
+type EffectGroup struct {
+	Icon string `json:"icon,omitempty"`
+}
+
+// StripColor is an RGB value stored in a declarative strip program.
+type StripColor struct {
+	Red   byte `json:"red"`
+	Green byte `json:"green"`
+	Blue  byte `json:"blue"`
+}
+
+// StripEnvelopePoint is one brightness keyframe in a repeating envelope.
+type StripEnvelopePoint struct {
+	AtMS      int  `json:"at_ms"`
+	Intensity byte `json:"intensity"`
+}
+
+// StripProgram contains parameters for reusable rendering primitives. Effect
+// names and cinema-specific meaning live entirely in configuration data.
+type StripProgram struct {
+	Primitive      string               `json:"primitive"`
+	Primary        StripColor           `json:"primary"`
+	Secondary      StripColor           `json:"secondary,omitempty"`
+	PeriodMS       int                  `json:"period_ms"`
+	StepMS         int                  `json:"step_ms,omitempty"`
+	SwapAfterSteps int                  `json:"swap_after_steps,omitempty"`
+	DimIntensity   byte                 `json:"dim_intensity,omitempty"`
+	TailPixels     int                  `json:"tail_pixels,omitempty"`
+	Envelope       []StripEnvelopePoint `json:"envelope,omitempty"`
+}
+
+//go:embed assets/default-effects.json
+var defaultEffectsJSON []byte
+
+// DefaultStripEffects loads the editable first-install seed catalog. Named
+// effects are data, not renderer branches or Go configuration literals. A new
+// installation copies these values into its ordinary watched configuration;
+// after that they can be renamed, duplicated, edited, exported, or deleted.
+func DefaultStripEffects() []StripEffect {
+	var effects []StripEffect
+	if err := json.Unmarshal(defaultEffectsJSON, &effects); err != nil {
+		panic(fmt.Sprintf("decode embedded default effect catalog: %v", err))
+	}
+	return effects
 }
 
 // Automation binds matching host or board events to ordered host-side actions.
@@ -420,6 +493,7 @@ func Defaults() Config {
 		},
 		Scripts:       map[string]string{},
 		Macros:        []Macro{},
+		StripEffects:  DefaultStripEffects(),
 		Melodies:      DefaultMelodies(),
 		StatusEffects: DefaultStatusLEDEffects(),
 	}
@@ -576,16 +650,14 @@ func Write(path string, value Config) error {
 	return nil
 }
 
-// normalizeMacros keeps file-backed alpha configurations usable as the macro
-// execution target becomes explicit. An omitted mode can only describe the
-// host scheduler that existed before the MCU timing engine was selectable.
-// Persisting the next write makes that choice explicit instead of retaining an
-// ambiguous empty value.
+// normalizeMacros makes the living alpha contract explicit. An omitted policy
+// means adaptive execution; it does not imply that the effect is board-owned
+// or host-owned.
 func normalizeMacros(macros []Macro) {
 	for index := range macros {
 		mode := strings.ToLower(strings.TrimSpace(macros[index].Mode))
 		if mode == "" {
-			mode = "host"
+			mode = "auto"
 		}
 		macros[index].Mode = mode
 	}
@@ -781,10 +853,13 @@ func (value Config) Validate() error {
 		if len(macro.Category) > 64 || !printableASCII(macro.Category) {
 			return fmt.Errorf("macros[%d].category must be at most 64 printable ASCII bytes", index)
 		}
+		if len(macro.Icon) > 64 || !printableASCII(macro.Icon) {
+			return fmt.Errorf("macros[%d].icon must be at most 64 printable ASCII bytes", index)
+		}
 		switch macro.Mode {
-		case "mcu", "host":
+		case "auto", "mcu", "host":
 		default:
-			return fmt.Errorf("macros[%d].mode must be host or mcu", index)
+			return fmt.Errorf("macros[%d].mode must be auto, host, or mcu", index)
 		}
 		switch strings.ToLower(strings.TrimSpace(macro.Color)) {
 		case "", "red", "blue", "purple", "violet", "green", "white":
@@ -873,6 +948,76 @@ func (value Config) Validate() error {
 			default:
 				return fmt.Errorf("macros[%d].steps[%d].kind %q is unknown", index, stepIndex, step.Kind)
 			}
+		}
+	}
+	stripIDs := make(map[string]bool)
+	stripNames := make(map[string]bool)
+	for index, effect := range value.StripEffects {
+		id := strings.ToLower(strings.TrimSpace(effect.ID))
+		if id == "" || len(id) > 64 || !profileToken(id) {
+			return fmt.Errorf("strip_effects[%d].id must use 1..64 lower-case letters, digits, dot, dash, or underscore", index)
+		}
+		if stripIDs[id] {
+			return fmt.Errorf("strip_effects[%d].id %q is duplicated", index, effect.ID)
+		}
+		stripIDs[id] = true
+		name := strings.ToLower(strings.TrimSpace(effect.Name))
+		if name == "" || len(effect.Name) > 64 || !printableASCII(effect.Name) {
+			return fmt.Errorf("strip_effects[%d].name must be 1..64 printable ASCII bytes", index)
+		}
+		if stripNames[name] {
+			return fmt.Errorf("strip_effects[%d].name %q is duplicated", index, effect.Name)
+		}
+		stripNames[name] = true
+		if len(effect.Category) > 64 || !printableASCII(effect.Category) || len(effect.Description) > 256 || !printableASCII(effect.Description) {
+			return fmt.Errorf("strip_effects[%d] category/description must be printable ASCII within 64/256 bytes", index)
+		}
+		if len(effect.Icon) > 64 || !printableASCII(effect.Icon) {
+			return fmt.Errorf("strip_effects[%d].icon must be at most 64 printable ASCII bytes", index)
+		}
+		program := effect.Program
+		if program.PeriodMS < 50 || program.PeriodMS > 3_600_000 {
+			return fmt.Errorf("strip_effects[%d].program.period_ms must be 50..3600000", index)
+		}
+		switch strings.ToLower(strings.TrimSpace(program.Primitive)) {
+		case "alternating-zones":
+			if program.StepMS < 10 || program.StepMS > program.PeriodMS || program.SwapAfterSteps < 1 || program.SwapAfterSteps > 1024 {
+				return fmt.Errorf("strip_effects[%d] alternating-zones requires step_ms 10..period_ms and swap_after_steps 1..1024", index)
+			}
+		case "envelope":
+			if len(program.Envelope) < 2 || len(program.Envelope) > 256 {
+				return fmt.Errorf("strip_effects[%d] envelope requires 2..256 points", index)
+			}
+			previous := -1
+			for pointIndex, point := range program.Envelope {
+				if point.AtMS <= previous || point.AtMS >= program.PeriodMS {
+					return fmt.Errorf("strip_effects[%d].program.envelope[%d].at_ms must increase and remain below period_ms", index, pointIndex)
+				}
+				previous = point.AtMS
+			}
+		case "converging-points":
+			if program.TailPixels < 0 || program.TailPixels > 100 {
+				return fmt.Errorf("strip_effects[%d].program.tail_pixels must be 0..100", index)
+			}
+		default:
+			return fmt.Errorf("strip_effects[%d].program.primitive is unsupported", index)
+		}
+		if effect.DefaultFPS < 1 || effect.DefaultFPS > 30 {
+			return fmt.Errorf("strip_effects[%d].default_fps must be 1..30", index)
+		}
+		if effect.DefaultDurationMS < 100 || effect.DefaultDurationMS > 3_600_000 {
+			return fmt.Errorf("strip_effects[%d].default_duration_ms must be 100..3600000", index)
+		}
+		if effect.DefaultPixels < 1 || effect.DefaultPixels > 100 {
+			return fmt.Errorf("strip_effects[%d].default_pixels must be 1..100", index)
+		}
+	}
+	for category, group := range value.EffectGroups {
+		if category == "" || len(category) > 64 || !printableASCII(category) {
+			return fmt.Errorf("effect_groups category must be 1..64 printable ASCII bytes")
+		}
+		if len(group.Icon) > 64 || !printableASCII(group.Icon) {
+			return fmt.Errorf("effect_groups[%q].icon must be at most 64 printable ASCII bytes", category)
 		}
 	}
 	if err := validateOutputDefinitions(value.Melodies, value.StatusEffects); err != nil {

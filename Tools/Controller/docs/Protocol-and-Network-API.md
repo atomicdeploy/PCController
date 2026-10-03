@@ -654,7 +654,7 @@ request error.
 | `controller.peripherals.set` | `peripheral_names` object | atomically replace custom host names and return normalized names plus both registries; requires `host_configuration` |
 | `controller.board_profile.get` | `{}` | physical identity source/stability, attachment/configuration truth, wiring mode, and opaque revision; requires `read` |
 | `controller.board_profile.update` | `key`, `mode`, optional `expose_raw_relays`, optional `expected_revision` | bind the attached board identity to `ordinary-relays` or `cinema-seat-motion`; cinema profiles may advertise both semantic seat controls and raw R1-R4 controls; requires `host_configuration` |
-| `controller.peripheral.presentation.update` | `key`, one or more of `name`/`icon`/`group`, optional `expected_revision` | update one advertised descriptor and return it with the new profile revision; requires `host_configuration` |
+| `controller.peripheral.presentation.update` | `key`, one or more of `name`/`icon`/`group`/`hidden`/`locked`, optional `expected_revision` | update one advertised descriptor and return it with the new profile revision; requires `host_configuration` |
 | `controller.action.invoke` | `action_id` | invoke one action actually advertised by the attached profile and return after the board ACK; requires `board_commands` |
 | `controller.pwm.values` | `{}` | authoritative board availability, selected channel, and all sixteen logical values; requires `read` |
 | `controller.illumination.get` | `{}` | persisted Off/Auto/On policy, on/off brightness, live door-selected target, and exact applied enclosure MOSFET channel 12 (internal index 11); requires `read` |
@@ -998,16 +998,28 @@ routed path—not the raw `RequestURI` or query string.
       ]
     }
   ],
-  "strip_effects": [
+  "effects": [
     {
+      "reference": "effect:police",
       "id": "police",
-      "name": "Police",
+      "name": "Police red / blue",
+      "category": "Lighting",
       "description": "Alternating red and blue emergency-light sweep",
+      "kind": "strip-stream",
+      "engine": "host",
+      "editable": true,
+      "duration_ms": 5000,
       "default_fps": 20,
-      "min_pixels": 1,
-      "max_pixels": 100,
-      "min_fps": 1,
-      "max_fps": 30
+      "default_pixels": 100,
+      "program": {
+        "primitive": "alternating-zones",
+        "primary": {"red": 255, "green": 0, "blue": 0},
+        "secondary": {"red": 0, "green": 0, "blue": 255},
+        "period_ms": 800,
+        "step_ms": 100,
+        "swap_after_steps": 4,
+        "dim_intensity": 36
+      }
     }
   ]
 }
@@ -1028,24 +1040,28 @@ remain ordinary relays in both modes; MOSFET/PWM 0..10 remain directly
 controllable, while system-owned PWM 11..15, displays, and sensors remain
 descriptive peripherals.
 
-`name`, `icon`, and `group` are mutable presentation stored in the PC profile;
-the descriptor `key` and action IDs remain stable. Supplying an empty field to
-`controller.peripheral.presentation.update` clears that override. Callers may
-send the opaque `expected_revision`; a stale revision is rejected with
-`-32000`. Successful profile/presentation changes publish a state-stream
+`name`, `icon`, `group`, `hidden`, and `locked` are mutable presentation policy
+stored in the PC profile; the descriptor `key` and action IDs remain stable.
+Supplying an empty text field to `controller.peripheral.presentation.update`
+clears that text override. `hidden` is a discoverable consumer presentation
+preference: the descriptor remains in the catalog so a UI can reveal it again.
+`locked` is enforced by PCController for semantic actions, relay commands, and
+PWM writes as well as advertised to consumers. Callers may send the opaque
+`expected_revision`; a stale revision is rejected with `-32000`. Successful
+profile/presentation changes publish a state-stream
 `controller.state` event whose `params.kind` is `peripherals.changed`; clients
 then refresh the full catalog. Legacy whole-map `peripheral_names` remains a
 compatibility fallback and also advances the revision. No presentation method
 reads or writes MCU EEPROM.
 
-`strip_effects` is a typed host-rendered effect catalog and is omitted unless
-the board is currently connected and its authenticated HELLO advertises the
-addressable-strip streaming capability. The stable IDs are `police`,
-`white-thunder`, and `converging-red`; every descriptor includes its display
-name, concise description, default frame rate, and accepted pixel/FPS bounds.
-The same gated list is present in `controller.snapshot`. A consumer must parse
-the returned catalog before offering an effect and must not infer availability
-from a stale config or the presence of the generic command string.
+`effects` is the unified, editable PCController-owned catalog. Lighting entries
+are included only while the board is connected and its authenticated HELLO
+advertises addressable-strip streaming; timed sequences use the same array.
+Each lighting descriptor includes the complete declarative program, display
+metadata, default duration, frame rate, and pixel count. Named starter entries
+are first-install data, not protocol constants. A consumer must parse the live
+catalog before offering an effect and must not infer availability from stale
+configuration or a generic command string.
 
 For a one-shot board tone, `controller buzzer --frequency 440 --duration 125`
 is the typed top-level spelling of `controller exec buzzer 440 125`. Both use

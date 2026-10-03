@@ -1320,6 +1320,11 @@ func (model Model) pageShortcut(key string) (Model, tea.Cmd, bool) {
 	switch model.page {
 	case PageDashboard:
 		switch key {
+		case "e":
+			if model.snapshot().EmergencyStop.Active {
+				return model.dispatchLine("estop off")
+			}
+			return model.dispatchLine("estop on")
 		case "i":
 			return model.dispatchLine("program-state set tui idle")
 		case "r":

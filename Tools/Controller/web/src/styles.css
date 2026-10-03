@@ -541,6 +541,10 @@ kbd { padding: 3px 6px; border: 1px solid var(--line-strong); border-bottom-colo
 .output-cell.is-active i::after { width: 100%; background: var(--green); box-shadow: 0 0 8px var(--green); }
 .safety-strip { display: flex; align-items: center; gap: 8px; margin-top: 13px; padding-top: 12px; border-top: 1px solid var(--line); color: var(--green); }
 .safety-strip span { color: var(--text-muted); font-size: 10px; }
+.controller-estop { margin: 0 0 16px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.controller-estop span { flex: 1; font-size: 12px; }
+.controller-estop.is-danger { border-color: color-mix(in srgb, var(--red) 55%, var(--line)); color: var(--red); background: color-mix(in srgb, var(--red) 8%, var(--surface)); }
+.controller-estop.is-danger span { color: var(--text); }
 .measurement-alerts { display: flex; flex-wrap: wrap; gap: 8px; }
 .measurement-alert { display: inline-flex; align-items: center; gap: 7px; padding: 8px 10px; border: 1px solid color-mix(in srgb, var(--amber) 35%, transparent); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--amber) 8%, transparent); color: var(--amber); font-size: 10px; }
 .hardware-alert { display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; border: 1px solid color-mix(in srgb, var(--red) 52%, transparent); border-radius: var(--radius); background: color-mix(in srgb, var(--red) 10%, var(--surface)); box-shadow: inset 3px 0 0 var(--red); }
@@ -1955,7 +1959,7 @@ kbd { padding: 3px 6px; border: 1px solid var(--line-strong); border-bottom-colo
 
 /* Typed macro library: one shared, event-driven surface for catalog metadata,
    exact MCU timing evidence, host recording, and retained board capture. */
-.workbench-grid > .macro-card { grid-column: 1 / -1; }
+.workbench-grid > [data-layout-card-id="macros"] { grid-column: 1 / -1; }
 .macro-library { min-width: 0; display: grid; gap: 13px; }
 .macro-library__monitor {
   display: grid;
@@ -2087,4 +2091,19 @@ kbd { padding: 3px 6px; border: 1px solid var(--line-strong); border-bottom-colo
   .macro-library__events > div { grid-template-columns: 68px minmax(110px, .7fr) minmax(130px, 1fr); }
   .macro-library__events code { grid-column: 2 / -1; }
   .macro-library__actions .button, .macro-library__playback-actions .button { flex: 1 1 145px; justify-content: center; }
+}
+.connected-apps-list { display: grid; gap: 10px; }
+.connected-app { min-width: 0; padding: 12px; display: grid; grid-template-columns: minmax(190px, 1fr) minmax(180px, auto); align-items: center; gap: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-muted); }
+.connected-app__identity { min-width: 0; display: flex; align-items: center; gap: 10px; }
+.connected-app__identity > div { min-width: 0; display: grid; gap: 2px; }
+.connected-app__identity strong { color: var(--text); text-transform: capitalize; }
+.connected-app__identity span { overflow: hidden; color: var(--text-muted); font: 11px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.connected-app__facts { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px 10px; color: var(--text-muted); font-size: 12px; }
+.connected-app__facts span[title] { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.connected-app__capabilities { grid-column: 1 / -1; min-width: 0; display: flex; flex-wrap: wrap; gap: 5px; }
+.connected-app__capabilities code, .connected-app__capabilities span { padding: 3px 7px; border: 1px solid var(--line); border-radius: 999px; color: var(--text-muted); background: var(--surface); font: 10px var(--font-mono); }
+.connected-app__actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 6px; }
+@media (max-width: 760px) {
+  .connected-app { grid-template-columns: 1fr; }
+  .connected-app__facts { justify-content: flex-start; }
 }

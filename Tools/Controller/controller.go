@@ -108,6 +108,7 @@ type (
 	ProgramStateOwner         = control.ProgramStateOwner
 	ProgramStateSnapshot      = control.ProgramStateSnapshot
 	ProgramStateLease         = control.ProgramStateLease
+	EmergencyStopState        = control.EmergencyStopState
 	PortProcessSnapshot       = control.PortProcessSnapshot
 	DiscoveryInstance         = discovery.Instance
 	DiscoveryOptions          = discovery.Options
@@ -247,6 +248,7 @@ type Options struct {
 	AvrdudeConf           string                 `json:"avrdude_conf,omitempty"`
 	Programmer            string                 `json:"programmer,omitempty"`
 	Macros                []Macro                `json:"macros,omitempty"`
+	StripEffects          []StripEffect          `json:"strip_effects,omitempty"`
 	Melodies              []Melody               `json:"melodies,omitempty"`
 	StatusEffects         []StatusLEDEffect      `json:"status_effects,omitempty"`
 	Scripts               map[string]string      `json:"scripts,omitempty"`
@@ -295,6 +297,41 @@ type MacroStep struct {
 	Opcode      byte     `json:"opcode,omitempty"`
 	PayloadHex  string   `json:"payload_hex,omitempty"`
 	ActionIDs   []string `json:"action_ids,omitempty"`
+}
+
+// StripEffect is a PCController-owned, user-editable declarative light program.
+type StripEffect struct {
+	ID                string       `json:"id"`
+	Name              string       `json:"name"`
+	Category          string       `json:"category,omitempty"`
+	Description       string       `json:"description,omitempty"`
+	Program           StripProgram `json:"program"`
+	DefaultFPS        int          `json:"default_fps"`
+	DefaultDurationMS int          `json:"default_duration_ms"`
+	DefaultPixels     int          `json:"default_pixels,omitempty"`
+}
+
+type StripColor struct {
+	Red   byte `json:"red"`
+	Green byte `json:"green"`
+	Blue  byte `json:"blue"`
+}
+
+type StripEnvelopePoint struct {
+	AtMS      int  `json:"at_ms"`
+	Intensity byte `json:"intensity"`
+}
+
+type StripProgram struct {
+	Primitive      string               `json:"primitive"`
+	Primary        StripColor           `json:"primary"`
+	Secondary      StripColor           `json:"secondary,omitempty"`
+	PeriodMS       int                  `json:"period_ms"`
+	StepMS         int                  `json:"step_ms,omitempty"`
+	SwapAfterSteps int                  `json:"swap_after_steps,omitempty"`
+	DimIntensity   byte                 `json:"dim_intensity,omitempty"`
+	TailPixels     int                  `json:"tail_pixels,omitempty"`
+	Envelope       []StripEnvelopePoint `json:"envelope,omitempty"`
 }
 
 // Automation maps an event match to one or more host-side actions.
@@ -363,6 +400,7 @@ type RFEntryView struct {
 // PortInfo identifies one serial candidate with stable USB metadata when available.
 type PortInfo struct {
 	Name         string `json:"name"`
+	DisplayName  string `json:"display_name,omitempty"`
 	VID          string `json:"vid,omitempty"`
 	PID          string `json:"pid,omitempty"`
 	Product      string `json:"product,omitempty"`
@@ -397,6 +435,8 @@ type Snapshot struct {
 	Paused                   bool                            `json:"paused"`
 	Port                     PortInfo                        `json:"port"`
 	Hello                    Hello                           `json:"hello"`
+	BoardName                BoardName                       `json:"board_name"`
+	HaveBoardName            bool                            `json:"have_board_name"`
 	Status                   Status                          `json:"status"`
 	Settings                 Settings                        `json:"settings"`
 	HaveStatus               bool                            `json:"have_status"`
@@ -416,8 +456,10 @@ type Snapshot struct {
 	ResetLinesPort           PortInfo                        `json:"reset_lines_port"`
 	ResetLinesReason         string                          `json:"reset_lines_reason,omitempty"`
 	ProgramState             ProgramStateSnapshot            `json:"program_state"`
+	EmergencyStop            EmergencyStopState              `json:"emergency_stop"`
 	RFLearning               RFLearnState                    `json:"rf_learning"`
 	Macros                   control.MacroSnapshot           `json:"macros"`
+	Effects                  []control.EffectDescriptor      `json:"effects"`
 	HardwareProblems         []HardwareProblem               `json:"hardware_problems,omitempty"`
 	FrontPanel               FrontPanel                      `json:"front_panel"`
 	HaveFrontPanel           bool                            `json:"have_front_panel"`
@@ -525,6 +567,7 @@ type Client struct {
 	outputMu           sync.RWMutex
 	melodies           []appconfig.Melody
 	statusEffects      []appconfig.StatusLEDEffect
+	stripEffects       []appconfig.StripEffect
 	outputs            *control.OutputScheduler
 	hostMu             sync.RWMutex
 	scripts            map[string]string
@@ -594,8 +637,9 @@ func New(options Options) *Client {
 			[]appconfig.StatusLEDEffect(nil),
 			options.StatusEffects...,
 		),
-		scripts:     cloneStringMap(options.Scripts),
-		automations: toAppAutomations(options.Automations),
+		stripEffects: toAppStripEffects(options.StripEffects),
+		scripts:      cloneStringMap(options.Scripts),
+		automations:  toAppAutomations(options.Automations),
 		safety: appconfig.Safety{
 			MotionDoorPolicy: normalizedMotionDoorPolicy(options.MotionDoorPolicy),
 		},
@@ -778,6 +822,7 @@ func (client *Client) currentHostConfig() appconfig.Config {
 		client.currentCommandOptions().FirmwareFeatures...,
 	)
 	config.Macros = client.currentMacros()
+	config.StripEffects = client.currentStripEffects()
 	config.Scripts = scripts
 	config.Automations = automations
 	config.Melodies = client.currentMelodies()
@@ -805,6 +850,9 @@ func (client *Client) updateHostConfig(
 	client.macroMu.Lock()
 	client.macros = cloneAppMacros(config.Macros)
 	client.macroMu.Unlock()
+	client.outputMu.Lock()
+	client.stripEffects = append([]appconfig.StripEffect(nil), config.StripEffects...)
+	client.outputMu.Unlock()
 	client.hostMu.Lock()
 	client.scripts = cloneStringMap(config.Scripts)
 	client.automations = cloneAppAutomations(config.Automations)
@@ -862,6 +910,42 @@ func (client *Client) currentStatusEffects() []appconfig.StatusLEDEffect {
 		[]appconfig.StatusLEDEffect(nil),
 		client.statusEffects...,
 	)
+}
+
+func (client *Client) currentStripEffects() []appconfig.StripEffect {
+	client.outputMu.RLock()
+	defer client.outputMu.RUnlock()
+	return append([]appconfig.StripEffect(nil), client.stripEffects...)
+}
+
+func toAppStripEffects(source []StripEffect) []appconfig.StripEffect {
+	if source == nil {
+		return appconfig.DefaultStripEffects()
+	}
+	result := make([]appconfig.StripEffect, len(source))
+	for index, effect := range source {
+		result[index] = appconfig.StripEffect{
+			ID: effect.ID, Name: effect.Name, Category: effect.Category,
+			Description: effect.Description, Program: toAppStripProgram(effect.Program),
+			DefaultFPS: effect.DefaultFPS, DefaultDurationMS: effect.DefaultDurationMS,
+			DefaultPixels: effect.DefaultPixels,
+		}
+	}
+	return result
+}
+
+func toAppStripProgram(source StripProgram) appconfig.StripProgram {
+	envelope := make([]appconfig.StripEnvelopePoint, len(source.Envelope))
+	for index, point := range source.Envelope {
+		envelope[index] = appconfig.StripEnvelopePoint{AtMS: point.AtMS, Intensity: point.Intensity}
+	}
+	return appconfig.StripProgram{
+		Primitive: source.Primitive,
+		Primary:   appconfig.StripColor{Red: source.Primary.Red, Green: source.Primary.Green, Blue: source.Primary.Blue},
+		Secondary: appconfig.StripColor{Red: source.Secondary.Red, Green: source.Secondary.Green, Blue: source.Secondary.Blue},
+		PeriodMS:  source.PeriodMS, StepMS: source.StepMS, SwapAfterSteps: source.SwapAfterSteps,
+		DimIntensity: source.DimIntensity, TailPixels: source.TailPixels, Envelope: envelope,
+	}
 }
 
 func (client *Client) currentMacros() []appconfig.Macro {
@@ -1723,6 +1807,17 @@ func (client *Client) AllRelaysOff(ctx context.Context) error {
 	return client.runtime.Command(ctx, native.OpRelayAllOff, nil)
 }
 
+// EmergencyStop returns the host-authoritative motion/effect interlock state.
+func (client *Client) EmergencyStop() EmergencyStopState {
+	return client.runtime.EmergencyStop()
+}
+
+// SetEmergencyStop engages or releases the PCController-wide command latch.
+// Releasing it never resumes cancelled effects or motion automatically.
+func (client *Client) SetEmergencyStop(ctx context.Context, active bool, source, reason string) (EmergencyStopState, error) {
+	return client.runtime.SetEmergencyStop(ctx, active, source, reason)
+}
+
 // SetPWMChannel controls a native logical PWM channel 0..15 at 0..4095.
 func (client *Client) SetPWMChannel(
 	ctx context.Context,
@@ -2083,12 +2178,13 @@ func (client *Client) Snapshot() Snapshot {
 	if !snapshot.Connected || !snapshot.HaveSettings || !snapshot.HaveStatus {
 		illumination = IlluminationState{}
 	}
-	stripEffects := control.SupportedStripEffectDescriptors(snapshot.Connected, snapshot.Hello.Capabilities)
+	stripEffects := control.SupportedConfiguredStripEffectDescriptors(snapshot.Connected, snapshot.Hello.Capabilities, client.currentStripEffects())
 	return Snapshot{
 		Connected: snapshot.Connected,
 		Paused:    snapshot.Paused,
 		Port: PortInfo{
 			Name:         snapshot.Port.Name,
+			DisplayName:  firstNonempty(snapshot.Port.FriendlyName, snapshot.Port.Product, snapshot.Port.Name),
 			VID:          snapshot.Port.VID,
 			PID:          snapshot.Port.PID,
 			Product:      snapshot.Port.Product,
@@ -2098,6 +2194,8 @@ func (client *Client) Snapshot() Snapshot {
 			InstanceID:   snapshot.Port.InstanceID,
 		},
 		Hello:                    snapshot.Hello,
+		BoardName:                snapshot.BoardName,
+		HaveBoardName:            snapshot.HaveBoardName,
 		Status:                   snapshot.Status,
 		Settings:                 snapshot.Settings,
 		HaveStatus:               snapshot.HaveStatus,
@@ -2114,6 +2212,7 @@ func (client *Client) Snapshot() Snapshot {
 		ConnectionRetryDelayMS:   snapshot.ConnectionRetryDelay.Milliseconds(),
 		ConnectionCandidate: PortInfo{
 			Name:         snapshot.ConnectionCandidate.Name,
+			DisplayName:  firstNonempty(snapshot.ConnectionCandidate.FriendlyName, snapshot.ConnectionCandidate.Product, snapshot.ConnectionCandidate.Name),
 			VID:          snapshot.ConnectionCandidate.VID,
 			PID:          snapshot.ConnectionCandidate.PID,
 			Product:      snapshot.ConnectionCandidate.Product,
@@ -2125,6 +2224,7 @@ func (client *Client) Snapshot() Snapshot {
 		ResetLinesAvailable: resetLinesAvailable,
 		ResetLinesPort: PortInfo{
 			Name:         resetLinesPort.Name,
+			DisplayName:  firstNonempty(resetLinesPort.FriendlyName, resetLinesPort.Product, resetLinesPort.Name),
 			VID:          resetLinesPort.VID,
 			PID:          resetLinesPort.PID,
 			Product:      resetLinesPort.Product,
@@ -2133,10 +2233,16 @@ func (client *Client) Snapshot() Snapshot {
 			FriendlyName: resetLinesPort.FriendlyName,
 			InstanceID:   resetLinesPort.InstanceID,
 		},
-		ResetLinesReason:  resetLinesReason,
-		ProgramState:      snapshot.ProgramState,
-		RFLearning:        snapshot.RFLearning,
-		Macros:            snapshot.Macros,
+		ResetLinesReason: resetLinesReason,
+		ProgramState:     snapshot.ProgramState,
+		EmergencyStop:    snapshot.EmergencyStop,
+		RFLearning:       snapshot.RFLearning,
+		Macros:           snapshot.Macros,
+		// The runtime owns the live host configuration used by command execution
+		// and by the effect runner. Reuse its canonical catalog here so the public
+		// snapshot cannot drift from `effect list` when a new installation receives
+		// the editable JSON seed catalog through the effective configuration path.
+		Effects:           snapshot.Effects,
 		HardwareProblems:  snapshot.HardwareProblems,
 		FrontPanel:        snapshot.FrontPanel,
 		HaveFrontPanel:    snapshot.HaveFrontPanel,
@@ -2608,6 +2714,7 @@ func ListPorts() ([]PortInfo, error) {
 	for _, port := range list {
 		result = append(result, PortInfo{
 			Name:         port.Name,
+			DisplayName:  firstNonempty(port.FriendlyName, port.Product, port.Name),
 			VID:          port.VID,
 			PID:          port.PID,
 			Product:      port.Product,
@@ -2623,7 +2730,8 @@ func ListPorts() ([]PortInfo, error) {
 func publicPortInfo(info ports.Info) PortInfo {
 	return PortInfo{
 		Name: info.Name, VID: info.VID, PID: info.PID,
-		Product: info.Product, Manufacturer: info.Manufacturer,
+		DisplayName: firstNonempty(info.FriendlyName, info.Product, info.Name),
+		Product:     info.Product, Manufacturer: info.Manufacturer,
 		SerialNumber: info.SerialNumber,
 		FriendlyName: info.FriendlyName,
 		InstanceID:   info.InstanceID,

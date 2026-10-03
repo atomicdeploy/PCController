@@ -412,6 +412,33 @@ func apiMacros(source []appconfig.Macro) []controllerapi.Macro {
 	return result
 }
 
+func apiStripEffects(source []appconfig.StripEffect) []controllerapi.StripEffect {
+	result := make([]controllerapi.StripEffect, len(source))
+	for index, effect := range source {
+		result[index] = controllerapi.StripEffect{
+			ID: effect.ID, Name: effect.Name, Category: effect.Category,
+			Description: effect.Description, Program: controllerapi.StripProgram{
+				Primitive: effect.Program.Primitive,
+				Primary:   controllerapi.StripColor{Red: effect.Program.Primary.Red, Green: effect.Program.Primary.Green, Blue: effect.Program.Primary.Blue},
+				Secondary: controllerapi.StripColor{Red: effect.Program.Secondary.Red, Green: effect.Program.Secondary.Green, Blue: effect.Program.Secondary.Blue},
+				PeriodMS:  effect.Program.PeriodMS, StepMS: effect.Program.StepMS,
+				SwapAfterSteps: effect.Program.SwapAfterSteps, DimIntensity: effect.Program.DimIntensity,
+				TailPixels: effect.Program.TailPixels,
+				Envelope: func() []controllerapi.StripEnvelopePoint {
+					result := make([]controllerapi.StripEnvelopePoint, len(effect.Program.Envelope))
+					for index, point := range effect.Program.Envelope {
+						result[index] = controllerapi.StripEnvelopePoint{AtMS: point.AtMS, Intensity: point.Intensity}
+					}
+					return result
+				}(),
+			},
+			DefaultFPS: effect.DefaultFPS, DefaultDurationMS: effect.DefaultDurationMS,
+			DefaultPixels: effect.DefaultPixels,
+		}
+	}
+	return result
+}
+
 func apiAutomations(source []appconfig.Automation) []controllerapi.Automation {
 	result := make([]controllerapi.Automation, len(source))
 	for index, automation := range source {
@@ -475,6 +502,7 @@ func apiOptions(
 		FQBN:                  configuredFQBN(config),
 		FirmwareFeatures:      programmer.FirmwareFeatureNames(firmwareFeatures),
 		Macros:                apiMacros(config.Macros),
+		StripEffects:          apiStripEffects(config.StripEffects),
 		Melodies:              config.Melodies,
 		StatusEffects:         config.StatusEffects,
 		ToolchainCLI:          config.Programming.ToolchainCLI,

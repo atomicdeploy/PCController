@@ -179,6 +179,14 @@ export interface HardwareProblem {
   observed_at: string
 }
 
+export interface EmergencyStopState {
+  active: boolean
+  revision: number
+  source?: string
+  reason?: string
+  changed_at?: string
+}
+
 export interface Snapshot {
 	host_instance_id?: string
   connected: boolean
@@ -204,8 +212,11 @@ export interface Snapshot {
   reset_lines_reason?: string
   port_process?: PortProcessSnapshot
   program_state?: ProgramState
+  emergency_stop?: EmergencyStopState
   rf_learning?: RFLearnState
   macros?: MacroSnapshot
+  effects?: EffectDescriptor[]
+  strip_effects?: StripEffectDescriptor[]
   hardware_problems?: HardwareProblem[]
   front_panel?: FrontPanelState
   have_front_panel?: boolean
@@ -292,6 +303,7 @@ export interface ControllerMacro {
 export interface MacroPlaybackState {
   running: boolean
   mode?: string
+  policy?: string
   connection_generation?: number
   id?: number
   name: string
@@ -335,7 +347,7 @@ export interface MacroRecordingState {
   last_delta_us?: number
   last_opcode?: number
   last_source?: number
-  board_owned?: boolean
+  device_retained?: boolean
   overwritten?: number
   board_id?: number
   dropped_steps?: number
@@ -348,6 +360,50 @@ export interface MacroSnapshot {
   playback: MacroPlaybackState
   recording: MacroRecordingState
   latest_event_id?: number
+}
+
+export interface StripEffectDescriptor {
+  id: string
+  name: string
+  category?: string
+  description?: string
+  program: StripProgram
+  engine: 'host-stream' | string
+  editable: boolean
+  default_fps: number
+  default_duration_ms: number
+  default_pixels: number
+  min_pixels: number
+  max_pixels: number
+  min_fps: number
+  max_fps: number
+}
+
+export interface StripProgram {
+  primitive: 'alternating-zones' | 'envelope' | 'converging-points' | string
+  primary: { red: number; green: number; blue: number }
+  secondary?: { red: number; green: number; blue: number }
+  period_ms: number
+  step_ms?: number
+  swap_after_steps?: number
+  dim_intensity?: number
+  tail_pixels?: number
+  envelope?: Array<{ at_ms: number; intensity: number }>
+}
+
+export interface EffectDescriptor {
+  reference: string
+  id: string
+  name: string
+  category?: string
+  description?: string
+  kind: 'sequence' | 'strip-stream' | string
+  engine: string
+  editable: boolean
+  duration_ms: number
+  default_fps?: number
+  default_pixels?: number
+  program?: StripProgram
 }
 
 export interface RFLearnedEntry {
@@ -661,6 +717,7 @@ export const emptySnapshot: Snapshot = {
   },
   have_status: false,
   have_settings: false,
+	emergency_stop: { active: false, revision: 0 },
 	hardware_problems: [],
 	illumination: {
 		available: false,

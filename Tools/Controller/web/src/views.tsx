@@ -42,6 +42,7 @@ import {
   ListRestart,
   MemoryStick,
   MessageSquareText,
+  MonitorSmartphone,
   Moon,
   MoreHorizontal,
   Network,
@@ -168,6 +169,17 @@ export interface SharedViewProps {
   relayedTerminal: Array<TabTerminalEntry & { id: string; tabId: string }>
   broadcastTerminal: (entry: TabTerminalEntry) => void
   boardSettingsReadState: BoardSettingsReadState
+}
+
+export interface AppInstanceSummary {
+  id: string
+  surface: string
+  page?: string
+  state?: string
+  updated_at?: string
+  expires_at?: string
+  values?: Record<string, string>
+  self?: { kind?: string; pid?: number; vars?: Record<string, string> }
 }
 
 function useFreshnessClock(updated: string | undefined, freshnessMS: number): number {
@@ -534,6 +546,7 @@ export function DashboardView(props: SharedViewProps) {
                 <button
                   key={index}
                   className={`output-cell${active ? ' is-active' : ''}`}
+                  disabled={Boolean(snapshot.emergency_stop?.active && !active)}
                   onClick={() => void command(`relay ${index + 1} ${active ? 'off' : 'on'}`, copy(`R${index + 1} ${active ? 'off' : 'on'}`, `رلهٔ ${index + 1} ${active ? 'خاموش' : 'روشن'} شد`))}
                   aria-pressed={active}
                 >
@@ -561,10 +574,9 @@ export function DashboardView(props: SharedViewProps) {
 
         {boardReady && frame('actions', t('quickActions'), <Card icon={Zap} iconTone="amber" title={t('quickActions')} eyebrow={copy('Confirmation protected', 'محافظت‌شده با تأیید')} className="actions-card">
           <div className="action-grid">
-            {available.relays && <Button icon={Unplug} tone="danger" onClick={() => openDialog({
-              tone: 'danger', title: t('confirmEmergencyTitle'), body: t('confirmEmergencyBody'), confirmLabel: t('emergencyOff'),
-              action: async () => { await command('relay off', t('emergencyOff')); await command('pwm off') },
-            })}>{t('emergencyOff')}</Button>}
+            <Button icon={AlertOctagon} tone="danger" onClick={() => void command(`estop ${snapshot.emergency_stop?.active ? 'off' : 'on'}`)}>
+              {snapshot.emergency_stop?.active ? copy('Release E-STOP', 'آزادسازی توقف اضطراری') : copy('Engage E-STOP', 'فعال‌سازی توقف اضطراری')}
+            </Button>
             <Button icon={Gauge} onClick={() => void command('status')}>{copy('Read status', 'خواندن وضعیت')}</Button>
             {available.statusLED && <Button icon={Lightbulb} onClick={() => void command('rgb effect play attention')}>{copy('Attention cue', 'اعلان توجه')}</Button>}
           </div>
@@ -586,6 +598,7 @@ export function ControlsView(props: SharedViewProps) {
   const copy = (english: string, persian: string) => locale === 'fa' ? persian : english
   const boardReady = props.transport.boardState === 'ready' && snapshot.connected && snapshot.have_status
   const available = peripheralAvailability(snapshot)
+  const emergencyStopActive = Boolean(snapshot.emergency_stop?.active)
   const initialPWM = () => Array.from({ length: 16 }, (_, index) => index === snapshot.status.pwm_channel ? snapshot.status.pwm_value : 0)
   const [pwmReported, setPWMReported] = useState<number[]>(initialPWM)
   const [pwmDraft, setPWMDraft] = useState<number[]>(initialPWM)
@@ -757,6 +770,15 @@ export function ControlsView(props: SharedViewProps) {
   return (
     <>
       <SectionTitle eyebrow={copy('Connected controller', 'کنترلر متصل')} title={t('controls')} detail={pageDetail(snapshot, props.appTitle, locale)} />
+      <div className={`safety-strip controller-estop${emergencyStopActive ? ' is-danger' : ''}`} role="status" aria-live="assertive">
+        <AlertOctagon size={17} />
+        <span>{emergencyStopActive
+          ? copy('E-STOP locked · effects, motion, relay-on, and PWM output are blocked', 'توقف اضطراری قفل است · افکت‌ها، حرکت، روشن‌کردن رله و خروجی PWM مسدود هستند')
+          : copy('E-STOP ready', 'توقف اضطراری آماده است')}</span>
+        <Button compact tone="danger" onClick={() => void command(`estop ${emergencyStopActive ? 'off' : 'on'}`)}>
+          {emergencyStopActive ? copy('Release', 'آزادسازی') : copy('Engage', 'فعال‌سازی')}
+        </Button>
+      </div>
       <section className="control-layout">
         {available.relays && <Card icon={CircuitBoard} iconTone={snapshot.status.active_relays ? 'amber' : 'green'} eyebrow={copy('Eight protected outputs', 'هشت خروجی محافظت‌شده')} title={copy('Relays & motion', 'رله‌ها و حرکت')} className="relay-control-card" action={<StatusBadge tone={snapshot.status.active_relays ? 'warn' : 'good'}>{snapshot.status.active_relays ? copy('ENERGIZED', 'برقدار') : copy('RELEASED', 'آزاد')}</StatusBadge>} menu={[
           { label: copy('Refresh output state', 'تازه‌سازی وضعیت خروجی‌ها'), icon: RefreshCw, onSelect: () => { void command('status') } },
@@ -767,8 +789,8 @@ export function ControlsView(props: SharedViewProps) {
               const active = Boolean(snapshot.status.active_relays & (1 << index))
               return (
                 <article key={index} className={`relay-switch${active ? ' is-active' : ''}`}>
-                  <span>R{index + 1}</span><RelayToggle active={active} disabled={!snapshot.connected} label={copy(`Toggle relay ${index + 1}`, `تغییر وضعیت رله ${index + 1}`)} onToggle={() => void command(`relay ${index + 1} ${active ? 'off' : 'on'}`)} /><small>{peripheralName(`relay.${index + 1}`, relayDefaults[index])}</small>
-                  <div className="relay-switch__actions"><Button compact disabled={active} onClick={() => void command(`relay ${index + 1} on`)}>{t('on')}</Button><Button compact disabled={!active} onClick={() => void command(`relay ${index + 1} off`)}>{t('off')}</Button></div>
+                  <span>R{index + 1}</span><RelayToggle active={active} disabled={!snapshot.connected || emergencyStopActive && !active} label={copy(`Toggle relay ${index + 1}`, `تغییر وضعیت رله ${index + 1}`)} onToggle={() => void command(`relay ${index + 1} ${active ? 'off' : 'on'}`)} /><small>{peripheralName(`relay.${index + 1}`, relayDefaults[index])}</small>
+                  <div className="relay-switch__actions"><Button compact disabled={active || emergencyStopActive} onClick={() => void command(`relay ${index + 1} on`)}>{t('on')}</Button><Button compact disabled={!active} onClick={() => void command(`relay ${index + 1} off`)}>{t('off')}</Button></div>
                 </article>
               )
             })}
@@ -777,9 +799,9 @@ export function ControlsView(props: SharedViewProps) {
             {(['left', 'right'] as const).map((side) => (
               <div key={side} className="motion-side">
                 <strong>{side === 'left' ? peripheralName('motion.a', copy('Side A motion', 'حرکت سمت A')) : peripheralName('motion.b', copy('Side B motion', 'حرکت سمت B'))}</strong>
-                <HoldActionButton compact onHoldStart={() => command(`relay side ${side} up`)} onHoldStop={() => command(`relay side ${side} stop`)}>{copy('Hold Up', 'بالا نگه‌دار')}</HoldActionButton>
+                <HoldActionButton compact disabled={emergencyStopActive} onHoldStart={() => command(`relay side ${side} up`)} onHoldStop={() => command(`relay side ${side} stop`)}>{copy('Hold Up', 'بالا نگه‌دار')}</HoldActionButton>
                 <Button compact onClick={() => void command(`relay side ${side} stop`)}>{copy('Stop', 'توقف')}</Button>
-                <HoldActionButton compact onHoldStart={() => command(`relay side ${side} down`)} onHoldStop={() => command(`relay side ${side} stop`)}>{copy('Hold Down', 'پایین نگه‌دار')}</HoldActionButton>
+                <HoldActionButton compact disabled={emergencyStopActive} onHoldStart={() => command(`relay side ${side} down`)} onHoldStop={() => command(`relay side ${side} stop`)}>{copy('Hold Down', 'پایین نگه‌دار')}</HoldActionButton>
               </div>
             ))}
           </div>
@@ -797,8 +819,8 @@ export function ControlsView(props: SharedViewProps) {
                 <div><strong>{name}</strong><small>{pending
                   ? copy(`Board ${reported} · draft ${draft}`, `برد ${reported} · پیش‌نویس ${draft}`)
                   : copy(`Board reported ${reported} / 4095`, `گزارش برد ${reported} از ۴۰۹۵`)}</small></div>
-                <RangeField label={copy(`${name} duty`, `دیوتی ${name}`)} value={pwmPercent(draft)} min={0} max={100} unit="%" disabled={!pwmLoaded || pwmAllBusy} onChange={(percent) => setPWMPercent(channel, percent)} />
-                <div className="pwm-mixer__actions"><Button compact disabled={!pwmLoaded || pwmAllBusy || draft === 0} onClick={() => setPWMPercent(channel, 0, true)}>{t('off')}</Button><Button compact disabled={!pwmLoaded || pwmAllBusy || draft === 4095} onClick={() => setPWMPercent(channel, 100, true)}>{copy('FULL', 'کامل')}</Button></div>
+                <RangeField label={copy(`${name} duty`, `دیوتی ${name}`)} value={pwmPercent(draft)} min={0} max={100} unit="%" disabled={!pwmLoaded || pwmAllBusy || emergencyStopActive} onChange={(percent) => setPWMPercent(channel, percent)} />
+                <div className="pwm-mixer__actions"><Button compact disabled={!pwmLoaded || pwmAllBusy || draft === 0} onClick={() => setPWMPercent(channel, 0, true)}>{t('off')}</Button><Button compact disabled={!pwmLoaded || pwmAllBusy || draft === 4095 || emergencyStopActive} onClick={() => setPWMPercent(channel, 100, true)}>{copy('FULL', 'کامل')}</Button></div>
               </div>
             })}
           </div>
@@ -1011,7 +1033,7 @@ export function EventsView({ events, locale, t }: SharedViewProps) {
   )
 }
 
-export function SettingsView({ appTitle, snapshot, locale, t, command, appearance, onAppearance, token, onToken, onAppTitle, boardSettingsReadState, uiConfig, onMeasurementTiming, onBuzzerPath, transport, navigationSync, navigationSyncStatus = { state: 'idle', detail: '' }, onNavigationSync }: SharedViewProps & { appearance: Appearance; onAppearance: (value: Appearance) => void; token: string; onToken: (value: string) => void; onAppTitle: (value: string) => Promise<string>; uiConfig: UIConfig | null; onMeasurementTiming?: (statusIntervalMS: number, measurementFreshnessMS: number) => void; onBuzzerPath: (value: BuzzerPath) => Promise<void>; navigationSync: boolean; navigationSyncStatus?: { state: 'idle' | 'pending' | 'error'; detail: string }; onNavigationSync: (value: boolean) => void }) {
+export function SettingsView({ appTitle, snapshot, locale, t, command, appearance, onAppearance, token, onToken, onAppTitle, boardSettingsReadState, uiConfig, onMeasurementTiming, onBuzzerPath, transport, navigationSync, navigationSyncStatus = { state: 'idle', detail: '' }, onNavigationSync, appInstances = [] }: SharedViewProps & { appearance: Appearance; onAppearance: (value: Appearance) => void; token: string; onToken: (value: string) => void; onAppTitle: (value: string) => Promise<string>; uiConfig: UIConfig | null; onMeasurementTiming?: (statusIntervalMS: number, measurementFreshnessMS: number) => void; onBuzzerPath: (value: BuzzerPath) => Promise<void>; navigationSync: boolean; navigationSyncStatus?: { state: 'idle' | 'pending' | 'error'; detail: string }; onNavigationSync: (value: boolean) => void; appInstances?: AppInstanceSummary[] }) {
   const copy = (english: string, persian: string) => locale === 'fa' ? persian : english
   const available = peripheralAvailability(snapshot)
   const validationMessage = (message: string) => locale !== 'fa' ? message : ({
@@ -1506,6 +1528,39 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
               action={<Button type="submit" tone="primary" icon={ShieldCheck} busy={titleBusy} disabled={!titleDirty || !titleValidation.valid}>{copy('Save', 'ذخیره')}</Button>}
             />
           </form>
+        </Card>
+
+        <Card icon={MonitorSmartphone} iconTone="green" title={copy('Connected applications', 'برنامه‌های متصل')} eyebrow={`${appInstances.length} ${copy('live', 'فعال')}`} className="settings-card settings-card--wide">
+          {appInstances.length === 0 ? <EmptyState icon={MonitorSmartphone} title={copy('No connected applications', 'برنامهٔ متصلی وجود ندارد')} detail={copy('Live clients appear here after they advertise their controls.', 'کلاینت‌های زنده پس از معرفی کنترل‌های خود اینجا ظاهر می‌شوند.')} /> : (
+            <div className="connected-apps-list">
+              {appInstances.map((instance) => {
+                const actions = (instance.values?.app_actions ?? '').split(',').map((value) => value.trim()).filter(Boolean)
+                const pealayer = instance.surface.toLowerCase() === 'pealayer'
+                const pid = instance.self?.pid ?? instance.self?.vars?.pid
+                const endpoint = instance.self?.vars?.web_ui ?? instance.self?.vars?.websocket ?? instance.self?.vars?.rpc
+                return <article key={instance.id} className="connected-app">
+                  <div className="connected-app__identity">
+                    <StatusBadge tone={instance.state === 'active' ? 'good' : 'neutral'}>{instance.state || copy('present', 'حاضر')}</StatusBadge>
+                    <div><strong>{instance.surface}</strong><span>{instance.id}</span></div>
+                  </div>
+                  <div className="connected-app__facts">
+                    {instance.page && <span>{copy('Page', 'صفحه')}: {instance.page}</span>}
+                    {instance.self?.kind && <span>{instance.self.kind}{pid ? ` · PID ${pid}` : ''}</span>}
+                    <span>{actions.length} {copy('controls', 'کنترل')}</span>
+                    {endpoint && <span title={endpoint}>{endpoint}</span>}
+                  </div>
+                  <div className="connected-app__capabilities" aria-label={copy('Advertised controls', 'کنترل‌های معرفی‌شده')}>
+                    {actions.slice(0, 5).map((action) => <code key={action}>{action.replace(/^pealayer\./, '')}</code>)}
+                    {actions.length > 5 && <span title={actions.slice(5).join(', ')}>+{actions.length - 5}</span>}
+                  </div>
+                  {pealayer && <div className="connected-app__actions">
+                    {actions.includes('pealayer.play') && <Button icon={Power} onClick={() => void rpc('controller.app.action', { kind: 'pealayer.play', target: instance.id })}>{copy('Play', 'پخش')}</Button>}
+                    {actions.includes('pealayer.pause') && <Button icon={CirclePower} onClick={() => void rpc('controller.app.action', { kind: 'pealayer.pause', target: instance.id })}>{copy('Pause', 'مکث')}</Button>}
+                  </div>}
+                </article>
+              })}
+            </div>
+          )}
         </Card>
 
         <PeripheralNamesEditor locale={locale} />

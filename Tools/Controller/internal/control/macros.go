@@ -23,6 +23,7 @@ const (
 	macroRequestTimeout                  = 2 * time.Second
 	macroModeHost                        = "host"
 	macroModeMCU                         = "mcu"
+	macroModeAuto                        = "auto"
 )
 
 // MacroState is the host-authoritative view shared by TUI, CLI, API, IPC, and
@@ -32,6 +33,7 @@ type MacroState struct {
 	ID                   byte               `json:"id"`
 	Name                 string             `json:"name"`
 	Mode                 string             `json:"mode"`
+	Policy               string             `json:"policy"`
 	Category             string             `json:"category,omitempty"`
 	Color                string             `json:"color,omitempty"`
 	Step                 int                `json:"step"`
@@ -123,10 +125,11 @@ type MacroRunner struct {
 	requestGeneration func(context.Context, uint64, byte, []byte, byte) (native.Frame, error)
 }
 
-// MacroRecordingState describes a HOST-owned recording session. Mode states
-// whether offsets come from host monotonic observations or MCU ACK timestamps.
+// MacroRecordingState describes one transient take that will be saved into the
+// PCController effect catalog. Mode describes the capture clock; DeviceRetained
+// means the bounded relay tail currently also resides in device RAM.
 type MacroRecordingState struct {
-	BoardOwned       bool      `json:"board_owned"`
+	DeviceRetained   bool      `json:"device_retained"`
 	LastAtUS         uint32    `json:"last_at_us"`
 	LastDeltaUS      uint32    `json:"last_delta_us"`
 	Overwritten      int       `json:"overwritten"`
@@ -216,6 +219,17 @@ func (runner *MacroRunner) Snapshot() MacroSnapshot {
 	return MacroSnapshot{Library: runner.List(), Playback: runner.State(), Recording: runner.RecordingState()}
 }
 
+// EffectCatalog returns the one PCController-owned library exposed to every
+// interface. Recorded sequences and rendered strip streams retain their
+// distinct engines, but share discovery, stable references, and commands.
+func (runner *MacroRunner) EffectCatalog() []EffectDescriptor {
+	config := appconfig.Defaults()
+	if runner.hostConfig != nil {
+		config = runner.hostConfig()
+	}
+	return EffectCatalogWithGroups(runner.List(), config.StripEffects, config.EffectGroups)
+}
+
 func (runner *MacroRunner) UpdateMetadata(reference, field, value string) (appconfig.Macro, error) {
 	if runner.updateHostConfig == nil {
 		return appconfig.Macro{}, errors.New("macro persistence is unavailable")
@@ -268,7 +282,7 @@ func (runner *MacroRunner) CreateDraft(id byte, name, category, color string) (a
 	}
 	macro := appconfig.Macro{
 		ID: id, Name: strings.TrimSpace(name), Category: strings.TrimSpace(category),
-		Mode: macroModeHost, Color: normalizedMacroColor(color), TimingToleranceUS: defaultHostMacroToleranceUS,
+		Mode: macroModeAuto, Color: normalizedMacroColor(color),
 	}
 	err := runner.updateHostConfig(func(config *appconfig.Config) error {
 		for _, existing := range config.Macros {
@@ -313,7 +327,7 @@ func (runner *MacroRunner) Delete(reference string) error {
 }
 
 func (runner *MacroRunner) StartRecording(name, category, color string) (MacroRecordingState, error) {
-	return runner.startRecording(name, category, color, macroModeHost)
+	return runner.startRecording(name, category, color, macroModeAuto)
 }
 
 // StartMCURecording retains the exact acknowledgement-timestamp recorder for
@@ -325,6 +339,9 @@ func (runner *MacroRunner) StartMCURecording(name, category, color string) (Macr
 func (runner *MacroRunner) startRecording(name, category, color, mode string) (MacroRecordingState, error) {
 	runner.operationMu.Lock()
 	defer runner.operationMu.Unlock()
+	if runner.runtime.emergencyStop.Load() {
+		return MacroRecordingState{}, ErrEmergencyStopActive
+	}
 	if runner.State().Running {
 		return MacroRecordingState{}, errors.New("cancel playback before starting a recording")
 	}
@@ -393,7 +410,7 @@ func (runner *MacroRunner) startRecording(name, category, color, mode string) (M
 func (runner *MacroRunner) StopRecording(save bool) (appconfig.Macro, error) {
 	runner.operationMu.Lock()
 	defer runner.operationMu.Unlock()
-	if runner.RecordingState().BoardOwned && runner.RecordingState().Active {
+	if runner.RecordingState().DeviceRetained && runner.RecordingState().Active {
 		if err := runner.collectBoardRecording(context.Background(), save); err != nil {
 			return appconfig.Macro{}, err
 		}
@@ -465,7 +482,7 @@ func (runner *MacroRunner) captureCommand(evidence CommandEvidence) {
 		runner.captureRelayEdge(evidence)
 		return
 	}
-	if runner.recording.BoardOwned {
+	if runner.recording.DeviceRetained {
 		return
 	}
 	// Relay commands are intentions, not output edges. Record the timestamped
@@ -478,7 +495,7 @@ func (runner *MacroRunner) captureCommand(evidence CommandEvidence) {
 		return
 	}
 	mode := runner.recordMacro.Mode
-	if mode == macroModeHost {
+	if mode != macroModeMCU {
 		if !hostRecordableOpcode(evidence.Opcode) {
 			return
 		}
@@ -489,7 +506,7 @@ func (runner *MacroRunner) captureCommand(evidence CommandEvidence) {
 	if !ok {
 		return
 	}
-	if mode == macroModeHost {
+	if mode != macroModeMCU {
 		observedAt := evidence.ObservedAt
 		if observedAt.IsZero() {
 			observedAt = time.Now()
@@ -535,17 +552,21 @@ func (runner *MacroRunner) publishRecordedStep(step appconfig.MacroStep) {
 	})
 }
 
-// Start validates a macro and selects its persisted playback engine. Legacy
-// macros with no mode retain MCU playback; newly recorded alpha macros use the
-// host monotonic scheduler by default.
+// Start validates an effect sequence and resolves its persisted execution
+// policy. The definition stays in the PCController library; only a volatile
+// run plan is staged into host or board RAM.
 func (runner *MacroRunner) Start(ctx context.Context, reference string) (MacroState, error) {
 	return runner.StartMode(ctx, reference, "")
 }
 
-// StartMode plays the same saved profile with either execution clock.
+// StartMode plays the same saved definition with an optional execution-policy
+// override. "auto" is capability driven and remains transparent to callers.
 func (runner *MacroRunner) StartMode(ctx context.Context, reference, modeOverride string) (MacroState, error) {
 	runner.operationMu.Lock()
 	defer runner.operationMu.Unlock()
+	if runner.runtime.emergencyStop.Load() {
+		return MacroState{}, ErrEmergencyStopActive
+	}
 	if recording := runner.RecordingState(); recording.Active {
 		return MacroState{}, fmt.Errorf("macro recording %d/%s is active; save or discard it before playback", recording.ID, recording.Name)
 	}
@@ -555,19 +576,26 @@ func (runner *MacroRunner) StartMode(ctx context.Context, reference, modeOverrid
 		return MacroState{}, err
 	}
 	if modeOverride != "" {
-		if modeOverride != macroModeHost && modeOverride != macroModeMCU {
-			return MacroState{}, errors.New("playback mode must be host or mcu")
+		if modeOverride != macroModeAuto && modeOverride != macroModeHost && modeOverride != macroModeMCU {
+			return MacroState{}, errors.New("playback policy must be auto, host, or mcu")
 		}
 		macro.Mode = modeOverride
 		macro.TimingToleranceUS = modeTimingTolerance(modeOverride)
 	}
-	compiled, err := compileMacro(macro)
-	if err != nil {
-		return MacroState{}, err
-	}
 	snapshot := runner.runtime.Snapshot()
 	if !snapshot.Connected {
 		return MacroState{}, errors.New("device is not connected")
+	}
+	policy := macro.Mode
+	if policy == "" {
+		policy = macroModeAuto
+	}
+	if policy == macroModeAuto {
+		macro.Mode = resolveMacroMode(macro, snapshot.Hello.Capabilities)
+	}
+	compiled, err := compileMacro(macro)
+	if err != nil {
+		return MacroState{}, err
 	}
 	if macro.BoardProfileKey != "" {
 		profileKey, profileMode := runner.activeBoardProfile()
@@ -600,7 +628,7 @@ func (runner *MacroRunner) StartMode(ctx context.Context, reference, modeOverrid
 	}
 	runner.state = MacroState{
 		Running: true, ID: macro.ID, Name: macro.Name,
-		Mode:     mode,
+		Mode: mode, Policy: policy,
 		Category: macro.Category, Color: normalizedMacroColor(macro.Color),
 		StepCount: len(compiled.steps), DurationUS: compiled.durationUS,
 		StartedAt: time.Now(), TimingToleranceUS: tolerance,
@@ -1475,6 +1503,24 @@ func compileMacro(macro appconfig.Macro) (compiledMacro, error) {
 	return result, nil
 }
 
+// resolveMacroMode selects the device clock only when the firmware advertises
+// the queue and every step can coexist with its shared AVR workspace. The
+// strip framebuffer is deliberately host streamed; a sequence containing an
+// addressable-pixel command therefore uses the host clock without creating a
+// second effect definition.
+func resolveMacroMode(macro appconfig.Macro, capabilities uint32) string {
+	if capabilities&native.CapabilityTimedMacroQueue == 0 {
+		return macroModeHost
+	}
+	for _, step := range macro.Steps {
+		switch strings.ToLower(strings.TrimSpace(step.Kind)) {
+		case "addressable", "ws2812":
+			return macroModeHost
+		}
+	}
+	return macroModeMCU
+}
+
 func (compiled compiledMacro) completeSteps(offset int) int {
 	return sort.Search(len(compiled.steps), func(index int) bool {
 		return compiled.steps[index].streamEnd > offset
@@ -1597,6 +1643,8 @@ func modeTimingTolerance(mode string) uint32 {
 		return defaultHostMacroToleranceUS
 	case macroModeMCU:
 		return defaultMacroTimingToleranceUS
+	case macroModeAuto:
+		return 0
 	default:
 		return 0
 	}
