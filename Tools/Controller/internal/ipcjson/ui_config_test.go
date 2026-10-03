@@ -296,6 +296,21 @@ func TestPeripheralSettingsCarriesTypedStripEffectDescriptors(t *testing.T) {
 	}
 }
 
+func TestAddressableStripControlContractIsCapabilityGated(t *testing.T) {
+	if got := advertisedStripControl(false, native.CapabilityAddressableLED); got != nil {
+		t.Fatalf("disconnected strip contract=%+v", got)
+	}
+	if got := advertisedStripControl(true, 0); got != nil {
+		t.Fatalf("unsupported strip contract=%+v", got)
+	}
+	got := advertisedStripControl(true, native.CapabilityAddressableLED)
+	if got == nil || got.MinimumPixels != 1 || got.MaximumPixels != native.StripMaximumPixels ||
+		got.DefaultPixels != native.StripMaximumPixels || got.MinimumFPS != 1 || got.MaximumFPS != 30 ||
+		got.DefaultFPS != 20 || strings.Join(got.Modes, ",") != "solid,pixel,frame,rainbow,effect" {
+		t.Fatalf("advertised strip contract=%+v", got)
+	}
+}
+
 func TestSemanticProfileRPCRejectsMalformedParamsAsInvalidParams(t *testing.T) {
 	service, _ := browserUIConfigTestService(t)
 	for _, request := range []Request{
