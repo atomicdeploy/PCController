@@ -29,13 +29,15 @@ type BoardProfile struct {
 // PeripheralPresentation is mutable operator vocabulary attached to a stable
 // peripheral/control key. Empty optional fields mean no override.
 type PeripheralPresentation struct {
-	Name   string `json:"name,omitempty"`
-	Icon   string `json:"icon,omitempty"`
-	Color  string `json:"color,omitempty"`
-	Group  string `json:"group,omitempty"`
-	Order  *int   `json:"order,omitempty"`
-	Hidden bool   `json:"hidden,omitempty"`
-	Locked bool   `json:"locked,omitempty"`
+	Name      string `json:"name,omitempty"`
+	Icon      string `json:"icon,omitempty"`
+	Color     string `json:"color,omitempty"`
+	UpColor   string `json:"up_color,omitempty"`
+	DownColor string `json:"down_color,omitempty"`
+	Group     string `json:"group,omitempty"`
+	Order     *int   `json:"order,omitempty"`
+	Hidden    bool   `json:"hidden,omitempty"`
+	Locked    bool   `json:"locked,omitempty"`
 }
 
 // BoardIdentity describes the strongest currently available physical-device
@@ -93,7 +95,7 @@ func (value Config) validateBoardProfiles() error {
 			if controlKey = strings.TrimSpace(controlKey); controlKey == "" || len(controlKey) > 64 || !profileToken(controlKey) {
 				return fmt.Errorf("board_profiles[%q].presentation key must be 1..64 lower-case letters, digits, dot, dash, or underscore", identity)
 			}
-			for field, text := range map[string]string{"name": presentation.Name, "icon": presentation.Icon, "color": presentation.Color, "group": presentation.Group} {
+			for field, text := range map[string]string{"name": presentation.Name, "icon": presentation.Icon, "color": presentation.Color, "up_color": presentation.UpColor, "down_color": presentation.DownColor, "group": presentation.Group} {
 				text = strings.TrimSpace(text)
 				if utf8.RuneCountInString(text) > 64 || (text != "" && !printableText(text)) {
 					return fmt.Errorf("board_profiles[%q].presentation[%q].%s must be at most 64 printable characters", identity, controlKey, field)
@@ -101,6 +103,12 @@ func (value Config) validateBoardProfiles() error {
 			}
 			if color := strings.TrimSpace(presentation.Color); color != "" && !validPresentationColor(color) {
 				return fmt.Errorf("board_profiles[%q].presentation[%q].color must be #RRGGBB", identity, controlKey)
+			}
+			if color := strings.TrimSpace(presentation.UpColor); color != "" && !validPresentationColor(color) {
+				return fmt.Errorf("board_profiles[%q].presentation[%q].up_color must be #RRGGBB", identity, controlKey)
+			}
+			if color := strings.TrimSpace(presentation.DownColor); color != "" && !validPresentationColor(color) {
+				return fmt.Errorf("board_profiles[%q].presentation[%q].down_color must be #RRGGBB", identity, controlKey)
 			}
 			if presentation.Order != nil && (*presentation.Order < 0 || *presentation.Order >= MaxPeripheralNames) {
 				return fmt.Errorf("board_profiles[%q].presentation[%q].order must be in 0..%d", identity, controlKey, MaxPeripheralNames-1)

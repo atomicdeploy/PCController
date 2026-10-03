@@ -21,6 +21,8 @@ type PeripheralDescriptor struct {
 	Name        string `json:"name,omitempty"`
 	Icon        string `json:"icon,omitempty"`
 	Color       string `json:"color,omitempty"`
+	UpColor     string `json:"up_color,omitempty"`
+	DownColor   string `json:"down_color,omitempty"`
 	Group       string `json:"group,omitempty"`
 	Order       *int   `json:"order,omitempty"`
 	Hidden      bool   `json:"hidden,omitempty"`
@@ -38,17 +40,19 @@ type ActionDescriptor struct {
 // operator-controllable board channel. The canonical key remains suitable for
 // commands and persisted names while Kind supplies the operator vocabulary.
 type ControlDescriptor struct {
-	Key     string             `json:"key"`
-	Kind    string             `json:"kind"`
-	Order   int                `json:"order"`
-	Name    string             `json:"name"`
-	Icon    string             `json:"icon,omitempty"`
-	Color   string             `json:"color,omitempty"`
-	Group   string             `json:"group,omitempty"`
-	Hidden  bool               `json:"hidden,omitempty"`
-	Locked  bool               `json:"locked,omitempty"`
-	Control string             `json:"control"`
-	Actions []ActionDescriptor `json:"actions,omitempty"`
+	Key       string             `json:"key"`
+	Kind      string             `json:"kind"`
+	Order     int                `json:"order"`
+	Name      string             `json:"name"`
+	Icon      string             `json:"icon,omitempty"`
+	Color     string             `json:"color,omitempty"`
+	UpColor   string             `json:"up_color,omitempty"`
+	DownColor string             `json:"down_color,omitempty"`
+	Group     string             `json:"group,omitempty"`
+	Hidden    bool               `json:"hidden,omitempty"`
+	Locked    bool               `json:"locked,omitempty"`
+	Control   string             `json:"control"`
+	Actions   []ActionDescriptor `json:"actions,omitempty"`
 }
 
 var corePeripheralDescriptors = buildPeripheralDescriptors()
@@ -179,7 +183,7 @@ func ProfileDescriptors(mode string, exposeRawRelays bool, legacyNames map[strin
 	controls := make([]ControlDescriptor, 0, 26)
 	addControl := func(descriptor PeripheralDescriptor, kind string, actions []ActionDescriptor) {
 		resolved := resolvePresentation(descriptor.Key, descriptor.DefaultName, legacyNames, presentation)
-		descriptor.Name, descriptor.Icon, descriptor.Color, descriptor.Group, descriptor.Order = resolved.Name, resolved.Icon, resolved.Color, resolved.Group, resolved.Order
+		descriptor.Name, descriptor.Icon, descriptor.Color, descriptor.UpColor, descriptor.DownColor, descriptor.Group, descriptor.Order = resolved.Name, resolved.Icon, resolved.Color, resolved.UpColor, resolved.DownColor, resolved.Group, resolved.Order
 		descriptor.Hidden, descriptor.Locked = resolved.Hidden, resolved.Locked
 		order := descriptor.Index
 		if resolved.Order != nil {
@@ -188,7 +192,7 @@ func ProfileDescriptors(mode string, exposeRawRelays bool, legacyNames map[strin
 		peripherals = append(peripherals, descriptor)
 		controls = append(controls, ControlDescriptor{
 			Key: descriptor.Key, Kind: kind, Order: order,
-			Name: descriptor.Name, Icon: descriptor.Icon, Color: descriptor.Color, Group: descriptor.Group,
+			Name: descriptor.Name, Icon: descriptor.Icon, Color: descriptor.Color, UpColor: descriptor.UpColor, DownColor: descriptor.DownColor, Group: descriptor.Group,
 			Hidden: descriptor.Hidden, Locked: descriptor.Locked,
 			Control: descriptor.Control, Actions: actions,
 		})
@@ -215,7 +219,7 @@ func ProfileDescriptors(mode string, exposeRawRelays bool, legacyNames map[strin
 					{ID: key + ".stop", Verb: "stop", Name: "Stop"},
 				}
 				resolved := resolvePresentation(key, seat.DefaultName, legacy, presentation)
-				seat.Name, seat.Icon, seat.Color, seat.Group, seat.Order = resolved.Name, resolved.Icon, resolved.Color, resolved.Group, resolved.Order
+				seat.Name, seat.Icon, seat.Color, seat.UpColor, seat.DownColor, seat.Group, seat.Order = resolved.Name, resolved.Icon, resolved.Color, resolved.UpColor, resolved.DownColor, resolved.Group, resolved.Order
 				seat.Hidden, seat.Locked = resolved.Hidden, resolved.Locked
 				order := descriptor.Index
 				if resolved.Order != nil {
@@ -224,7 +228,7 @@ func ProfileDescriptors(mode string, exposeRawRelays bool, legacyNames map[strin
 				peripherals = append(peripherals, seat)
 				controls = append(controls, ControlDescriptor{
 					Key: key, Kind: "seat", Order: order, Name: seat.Name,
-					Icon: seat.Icon, Color: seat.Color, Group: seat.Group, Hidden: seat.Hidden, Locked: seat.Locked,
+					Icon: seat.Icon, Color: seat.Color, UpColor: seat.UpColor, DownColor: seat.DownColor, Group: seat.Group, Hidden: seat.Hidden, Locked: seat.Locked,
 					Control: "seat", Actions: actions,
 				})
 			}
@@ -249,7 +253,7 @@ func ProfileDescriptors(mode string, exposeRawRelays bool, legacyNames map[strin
 				addControl(descriptor, "relay", actions)
 			} else {
 				resolved := resolvePresentation(descriptor.Key, descriptor.DefaultName, legacyNames, presentation)
-				descriptor.Name, descriptor.Icon, descriptor.Color, descriptor.Group, descriptor.Order = resolved.Name, resolved.Icon, resolved.Color, resolved.Group, resolved.Order
+				descriptor.Name, descriptor.Icon, descriptor.Color, descriptor.UpColor, descriptor.DownColor, descriptor.Group, descriptor.Order = resolved.Name, resolved.Icon, resolved.Color, resolved.UpColor, resolved.DownColor, resolved.Group, resolved.Order
 				descriptor.Hidden, descriptor.Locked = resolved.Hidden, resolved.Locked
 				peripherals = append(peripherals, descriptor)
 			}
@@ -260,7 +264,7 @@ func ProfileDescriptors(mode string, exposeRawRelays bool, legacyNames map[strin
 			continue
 		}
 		resolved := resolvePresentation(descriptor.Key, descriptor.DefaultName, legacyNames, presentation)
-		descriptor.Name, descriptor.Icon, descriptor.Color, descriptor.Group, descriptor.Order = resolved.Name, resolved.Icon, resolved.Color, resolved.Group, resolved.Order
+		descriptor.Name, descriptor.Icon, descriptor.Color, descriptor.UpColor, descriptor.DownColor, descriptor.Group, descriptor.Order = resolved.Name, resolved.Icon, resolved.Color, resolved.UpColor, resolved.DownColor, resolved.Group, resolved.Order
 		descriptor.Hidden, descriptor.Locked = resolved.Hidden, resolved.Locked
 		peripherals = append(peripherals, descriptor)
 	}

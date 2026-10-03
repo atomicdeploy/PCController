@@ -191,7 +191,7 @@ func TestPeripheralCatalogUsesExplicitBoardProfileWithoutLegacyMotionAliases(t *
 		"serial:board-42": {
 			Key: "cafe-cinema", Mode: appconfig.BoardModeCinemaSeatMotion,
 			Presentation: map[string]appconfig.PeripheralPresentation{
-				"seat.a": {Name: "Left bank", Icon: "seat", Color: "#38D27A", Group: "auditorium", Hidden: true, Locked: true},
+				"seat.a": {Name: "Left bank", Icon: "seat", Color: "#38D27A", UpColor: "#F59E0B", DownColor: "#3B82F6", Group: "auditorium", Hidden: true, Locked: true},
 			},
 		},
 	}
@@ -210,7 +210,7 @@ func TestPeripheralCatalogUsesExplicitBoardProfileWithoutLegacyMotionAliases(t *
 			t.Fatalf("catalog advertised ambiguous legacy control %+v", control)
 		}
 		if control.Key == "seat.a" {
-			seenSeat = control.Name == "Left bank" && control.Icon == "seat" && control.Color == "#38D27A" && control.Group == "auditorium" &&
+			seenSeat = control.Name == "Left bank" && control.Icon == "seat" && control.Color == "#38D27A" && control.UpColor == "#F59E0B" && control.DownColor == "#3B82F6" && control.Group == "auditorium" &&
 				control.Hidden && control.Locked &&
 				len(control.Actions) == 3 && control.Actions[2].ID == "seat.a.stop"
 		}

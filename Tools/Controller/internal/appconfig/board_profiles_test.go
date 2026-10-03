@@ -19,7 +19,7 @@ func TestResolveBoardIdentityPrefersProvisionedSerial(t *testing.T) {
 func TestProfileDescriptorsAdvertiseOnlyConfiguredWiring(t *testing.T) {
 	legacy := map[string]string{"motion.a": "Left legacy", "relay.5": "Lamp"}
 	presentation := map[string]PeripheralPresentation{
-		"seat.a": {Name: "Left seats", Icon: "seat", Color: "#A142F4", Group: "auditorium", Hidden: true, Locked: true},
+		"seat.a": {Name: "Left seats", Icon: "seat", Color: "#A142F4", UpColor: "#F59E0B", DownColor: "#3B82F6", Group: "auditorium", Hidden: true, Locked: true},
 	}
 	_, cinema := ProfileDescriptors(BoardModeCinemaSeatMotion, false, legacy, presentation)
 	if len(cinema) != 22 {
@@ -29,7 +29,7 @@ func TestProfileDescriptorsAdvertiseOnlyConfiguredWiring(t *testing.T) {
 	for _, control := range cinema {
 		switch control.Key {
 		case "seat.a":
-			seenSeat = control.Name == "Left seats" && control.Icon == "seat" && control.Color == "#A142F4" && control.Group == "auditorium" &&
+			seenSeat = control.Name == "Left seats" && control.Icon == "seat" && control.Color == "#A142F4" && control.UpColor == "#F59E0B" && control.DownColor == "#3B82F6" && control.Group == "auditorium" &&
 				control.Hidden && control.Locked &&
 				len(control.Actions) == 3 && control.Actions[0].ID == "seat.a.up"
 		case "motion.a":
@@ -125,6 +125,11 @@ func TestBoardProfileValidationAndRevision(t *testing.T) {
 	config.BoardProfiles["serial:board-42"] = profile
 	if err := config.Validate(); err == nil {
 		t.Fatal("invalid presentation color accepted")
+	}
+	profile.Presentation["seat.a"] = PeripheralPresentation{UpColor: "orange"}
+	config.BoardProfiles["serial:board-42"] = profile
+	if err := config.Validate(); err == nil {
+		t.Fatal("invalid motion direction color accepted")
 	}
 	invalidOrder := MaxPeripheralNames
 	profile.Presentation["seat.a"] = PeripheralPresentation{Order: &invalidOrder}

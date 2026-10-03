@@ -112,7 +112,7 @@ func (service *Service) updateActiveBoardProfile(key, mode string, exposeRawRela
 	return updated, nil
 }
 
-func (service *Service) updatePeripheralPresentation(key string, name, icon, color, group *string, order *int, hidden, locked *bool, expectedRevision string) (presentationUpdateResult, error) {
+func (service *Service) updatePeripheralPresentation(key string, name, icon, color, upColor, downColor, group *string, order *int, hidden, locked *bool, expectedRevision string) (presentationUpdateResult, error) {
 	if service.UpdateHostConfig == nil {
 		return presentationUpdateResult{}, errors.New("persistent host configuration is unavailable")
 	}
@@ -121,8 +121,8 @@ func (service *Service) updatePeripheralPresentation(key string, name, icon, col
 		return presentationUpdateResult{}, errors.New("configure the attached board profile before changing presentation")
 	}
 	key = strings.TrimSpace(key)
-	if key == "" || name == nil && icon == nil && color == nil && group == nil && order == nil && hidden == nil && locked == nil {
-		return presentationUpdateResult{}, &RPCError{Code: -32602, Message: "key and at least one of name, icon, color, group, order, hidden, or locked are required"}
+	if key == "" || name == nil && icon == nil && color == nil && upColor == nil && downColor == nil && group == nil && order == nil && hidden == nil && locked == nil {
+		return presentationUpdateResult{}, &RPCError{Code: -32602, Message: "key and at least one presentation field are required"}
 	}
 	known := false
 	for _, peripheral := range service.peripheralSettings().Peripherals {
@@ -134,7 +134,7 @@ func (service *Service) updatePeripheralPresentation(key string, name, icon, col
 	if !known {
 		return presentationUpdateResult{}, &RPCError{Code: -32602, Message: fmt.Sprintf("peripheral key %q is not advertised by the active profile", key)}
 	}
-	changedFields := make([]string, 0, 7)
+	changedFields := make([]string, 0, 9)
 	changedKeys := []string{key}
 	err := service.UpdateHostConfig(func(config *appconfig.Config) error {
 		profile := config.BoardProfiles[current.BoardIdentity]
@@ -157,6 +157,14 @@ func (service *Service) updatePeripheralPresentation(key string, name, icon, col
 		if color != nil {
 			presentation.Color = strings.ToUpper(strings.TrimSpace(*color))
 			changedFields = append(changedFields, "color")
+		}
+		if upColor != nil {
+			presentation.UpColor = strings.ToUpper(strings.TrimSpace(*upColor))
+			changedFields = append(changedFields, "up_color")
+		}
+		if downColor != nil {
+			presentation.DownColor = strings.ToUpper(strings.TrimSpace(*downColor))
+			changedFields = append(changedFields, "down_color")
 		}
 		if group != nil {
 			presentation.Group = strings.TrimSpace(*group)
