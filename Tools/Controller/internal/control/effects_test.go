@@ -2,6 +2,8 @@ package control
 
 import (
 	"context"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +12,73 @@ import (
 
 	"pccontroller.local/controller/internal/appconfig"
 )
+
+func TestEffectUpsertJSONPersistsTheCompleteSequenceDefinition(t *testing.T) {
+	runtime := New(Options{})
+	t.Cleanup(func() { _ = runtime.Close() })
+	config := appconfig.Defaults()
+	config.Macros = nil
+	config.StripEffects = nil
+	engine := NewCommandEngine(runtime, CommandOptions{
+		Macros:     func() []appconfig.Macro { return config.Macros },
+		HostConfig: func() appconfig.Config { return config },
+		UpdateHostConfig: func(change func(*appconfig.Config) error) error {
+			candidate := config
+			if err := change(&candidate); err != nil {
+				return err
+			}
+			if err := candidate.Validate(); err != nil {
+				return err
+			}
+			config = candidate
+			return nil
+		},
+	})
+	effect := EffectDescriptor{
+		ID: "12", Name: "Cinema motion", Category: "Motion", Icon: "seat",
+		Kind: "sequence", Engine: "host", Editable: true,
+		Steps: []appconfig.MacroStep{
+			{Kind: "relay-mask", Value: 2, ActionIDs: []string{"seat.a.up"}},
+			{AtUS: 750_000, Kind: "relay-mask", ActionIDs: []string{"seat.a.stop"}},
+			{AtUS: 900_000, Kind: "display", Text: "DONE", Destination: "segments", DurationMS: 500},
+			{AtUS: 1_000_000, Kind: "rf", Code: 0x123456, Bits: 24, Protocol: 1, PulseUS: 350},
+		},
+		Properties: map[string]interface{}{
+			"color": "violet", "timing_tolerance_us": 2500,
+			"board_profile_key": "cafe-cinema", "board_profile_mode": "cinema-seat-motion",
+		},
+	}
+	encoded, err := json.Marshal(effect)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.Execute(context.Background(), "effect upsert-json "+hex.EncodeToString(encoded)); err != nil {
+		t.Fatal(err)
+	}
+	if len(config.Macros) != 1 {
+		t.Fatalf("saved macros=%+v", config.Macros)
+	}
+	got := config.Macros[0]
+	if got.ID != 12 || got.Name != effect.Name || got.Icon != "seat" || got.BoardProfileKey != "cafe-cinema" || len(got.Steps) != 4 {
+		t.Fatalf("saved sequence lost descriptor data: %+v", got)
+	}
+	if got.Steps[0].ActionIDs[0] != "seat.a.up" || got.Steps[2].Text != "DONE" || got.Steps[3].Code != 0x123456 {
+		t.Fatalf("saved sequence lost step fields: %+v", got.Steps)
+	}
+
+	effect.Name = "Cinema motion revised"
+	effect.Steps[1].AtUS = 825_000
+	encoded, err = json.Marshal(effect)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.Execute(context.Background(), "effect upsert-json "+hex.EncodeToString(encoded)); err != nil {
+		t.Fatal(err)
+	}
+	if len(config.Macros) != 1 || config.Macros[0].Name != effect.Name || config.Macros[0].Steps[1].AtUS != 825_000 {
+		t.Fatalf("upsert did not replace the complete sequence: %+v", config.Macros)
+	}
+}
 
 func TestEffectCatalogAndEditsUseOnePCControllerStore(t *testing.T) {
 	runtime := New(Options{})

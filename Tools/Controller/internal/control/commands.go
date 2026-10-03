@@ -978,7 +978,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 	})
 	mustRegister(shell.Command{
 		Name:    "effect",
-		Usage:   "effect list|inspect REF|play REF|create|update|rename|category|delete|record|status|cancel",
+		Usage:   "effect list|inspect REF|play REF|create|update|upsert-json|rename|category|delete|record|status|cancel",
 		Summary: "discover, design, record, edit and run PCController-owned effects",
 		Run: func(ctx context.Context, args []string) (string, error) {
 			return effectCommand(ctx, macroRunner, outputs, options.HostConfig, options.UpdateHostConfig, args)

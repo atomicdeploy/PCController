@@ -397,7 +397,7 @@ func effectCommand(
 	updateHostConfig func(func(*appconfig.Config) error) error,
 	args []string,
 ) (string, error) {
-	const usage = "effect list|inspect ID|play ID [host|mcu|COUNT [FPS]]|stop ID|create|update|rename|category|icon|group update|delete|export|import|record|status|cancel"
+	const usage = "effect list|inspect ID|play ID [host|mcu|COUNT [FPS]]|stop ID|create|update|upsert-json|rename|category|icon|group update|delete|export|import|record|status|cancel"
 	if len(args) == 0 {
 		return "", fmt.Errorf("usage: %s", usage)
 	}
@@ -716,6 +716,30 @@ func effectCommand(
 			}
 		}
 		return fmt.Sprintf("effect %s updated", effect.Reference), nil
+	case "upsert-json":
+		if len(args) != 2 {
+			return "", errors.New("usage: effect upsert-json EFFECT_JSON_HEX")
+		}
+		encoded, err := hex.DecodeString(args[1])
+		if err != nil {
+			return "", fmt.Errorf("decode effect definition: %w", err)
+		}
+		var effect EffectDescriptor
+		decoder := json.NewDecoder(strings.NewReader(string(encoded)))
+		decoder.UseNumber()
+		if err := decoder.Decode(&effect); err != nil {
+			return "", fmt.Errorf("parse effect definition: %w", err)
+		}
+		if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+			if err == nil {
+				return "", errors.New("parse effect definition trailing data: multiple JSON values are not allowed")
+			}
+			return "", fmt.Errorf("parse effect definition trailing data: %w", err)
+		}
+		if err := importEffectDocument(effectDocument{Effects: []EffectDescriptor{effect}}, false, updateHostConfig); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("effect effect:%s saved", strings.TrimSpace(effect.ID)), nil
 	case "icon":
 		if len(args) != 3 {
 			return "", errors.New("usage: effect icon REF ICON_OR_DASH")
