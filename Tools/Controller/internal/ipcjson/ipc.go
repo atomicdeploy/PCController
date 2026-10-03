@@ -348,7 +348,29 @@ type peripheralSettings struct {
 	BoardProfile boardProfileDescriptor           `json:"board_profile"`
 	Peripherals  []appconfig.PeripheralDescriptor `json:"peripherals"`
 	Controls     []appconfig.ControlDescriptor    `json:"controls"`
+	Strip        *stripControlDescriptor          `json:"strip,omitempty"`
 	StripEffects []control.StripEffectDescriptor  `json:"strip_effects,omitempty"`
+}
+
+type stripControlDescriptor struct {
+	MinimumPixels int      `json:"minimum_pixels"`
+	MaximumPixels int      `json:"maximum_pixels"`
+	DefaultPixels int      `json:"default_pixels"`
+	MinimumFPS    int      `json:"minimum_fps"`
+	MaximumFPS    int      `json:"maximum_fps"`
+	DefaultFPS    int      `json:"default_fps"`
+	Modes         []string `json:"modes"`
+}
+
+func advertisedStripControl(connected bool, capabilities uint32) *stripControlDescriptor {
+	if !connected || capabilities&native.CapabilityAddressableLED == 0 {
+		return nil
+	}
+	return &stripControlDescriptor{
+		MinimumPixels: 1, MaximumPixels: native.StripMaximumPixels, DefaultPixels: native.StripMaximumPixels,
+		MinimumFPS: 1, MaximumFPS: 30, DefaultFPS: 20,
+		Modes: []string{"solid", "pixel", "frame", "rainbow", "effect"},
+	}
 }
 
 // networkPeerConfig is the versionless bridge topology contract. Deliberately
@@ -1814,10 +1836,12 @@ func (service *Service) peripheralSettings() peripheralSettings {
 	names := config.UI.PeripheralNames
 	profileDescriptor, profile := service.activeBoardProfile()
 	peripherals, controls := appconfig.ProfileDescriptors(profileDescriptor.Mode, profile.ExposeRawRelays, names, profile.Presentation)
-	stripEffects := service.Client.Snapshot().StripEffects
+	snapshot := service.Client.Snapshot()
+	stripEffects := snapshot.StripEffects
 	return peripheralSettings{
 		Names: clonePeripheralNames(names), BoardProfile: profileDescriptor,
-		Peripherals: peripherals, Controls: controls, StripEffects: stripEffects,
+		Peripherals: peripherals, Controls: controls,
+		Strip: advertisedStripControl(snapshot.Connected, snapshot.Hello.Capabilities), StripEffects: stripEffects,
 	}
 }
 
