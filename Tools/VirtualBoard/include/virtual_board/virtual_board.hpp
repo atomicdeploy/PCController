@@ -39,6 +39,11 @@ struct ConsoleResult {
   bool stopRequested = false;
 };
 
+struct OutputSnapshot {
+  std::uint8_t relayMask = 0;
+  std::array<std::uint16_t, 16> pwm{};
+};
+
 class VirtualBoard {
 public:
   VirtualBoard(ISensors &sensors, IRelays &relays, IPwm &pwm,
@@ -50,6 +55,7 @@ public:
   std::vector<wire::Frame> tick();
   ConsoleResult console(const std::string &line);
   std::string describe() const;
+  OutputSnapshot outputSnapshot() const;
   void noteProtocolErrors(std::size_t framing, std::size_t crc);
 
 private:
@@ -124,6 +130,7 @@ private:
   void serviceMacro(TimePoint now, std::vector<wire::Frame> &output);
   bool macroRecordReady() const;
   void queueMacroEvent();
+  void queueRelayEvent(std::uint8_t activeMask);
   void queueEvent(std::initializer_list<std::uint8_t> payload);
   void queueEvent(std::vector<std::uint8_t> payload);
   void queueMirrorChanges();

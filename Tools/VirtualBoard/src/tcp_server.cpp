@@ -143,6 +143,27 @@ bool sendFrames(Socket socket, const std::vector<wire::Frame> &frames,
   return true;
 }
 
+void printOutputChanges(const OutputSnapshot &before,
+                        const OutputSnapshot &after, bool quiet) {
+  if (quiet) {
+    return;
+  }
+  const std::uint8_t changed = before.relayMask ^ after.relayMask;
+  for (std::uint8_t index = 0; index < 8; ++index) {
+    const std::uint8_t bit = static_cast<std::uint8_t>(1U << index);
+    if ((changed & bit) != 0) {
+      std::cout << (((after.relayMask & bit) != 0) ? "ON:" : "OFF:")
+                << static_cast<unsigned>(index + 1U) << '\n';
+    }
+  }
+  for (std::size_t channel = 0; channel < after.pwm.size(); ++channel) {
+    if (before.pwm[channel] != after.pwm[channel]) {
+      std::cout << "PWM" << (channel + 1U) << ':' << after.pwm[channel]
+                << '\n';
+    }
+  }
+}
+
 Socket makeListener(const TcpServerOptions &options) {
   Socket listener = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
   if (listener == kInvalidSocket) {
@@ -275,7 +296,11 @@ void runTcpServer(VirtualBoard &board, const TcpServerOptions &options,
               receiveBuffer.data(), static_cast<std::size_t>(received));
           board.noteProtocolErrors(batch.framingErrors, batch.crcErrors);
           for (const auto &frame : batch.frames) {
-            if (!sendFrames(client.get(), board.handle(frame),
+            const OutputSnapshot before = board.outputSnapshot();
+            const auto responses = board.handle(frame);
+            const OutputSnapshot after = board.outputSnapshot();
+            printOutputChanges(before, after, options.quiet);
+            if (!sendFrames(client.get(), responses,
                             stopRequested)) {
               client.reset();
               decoder.reset();

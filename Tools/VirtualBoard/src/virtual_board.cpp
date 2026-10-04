@@ -612,7 +612,7 @@ std::vector<wire::Frame> VirtualBoard::handle(const wire::Frame &request) {
     } else {
       relays_.set(payload[0], payload[1] != 0);
     }
-    queueEvent({10, relays_.mask()});
+    queueRelayEvent(relays_.mask());
     captureRelayState();
     return ack();
   case wire::RelaySide:
@@ -625,13 +625,13 @@ std::vector<wire::Frame> VirtualBoard::handle(const wire::Frame &request) {
     }
     relays_.setSide(payload[0], payload[1]);
     relayTestPeriodMs_ = 0;
-    queueEvent({10, relays_.mask()});
+    queueRelayEvent(relays_.mask());
     captureRelayState();
     return ack();
   case wire::RelayAllOff:
     relayTestPeriodMs_ = 0;
     relays_.allOff();
-    queueEvent({10, relays_.mask()});
+    queueRelayEvent(relays_.mask());
     captureRelayState();
     return ack();
   case wire::RelayTest:
@@ -849,7 +849,7 @@ ConsoleResult VirtualBoard::console(const std::string &line) {
           stopMotion();
         }
         if (relayMask != relays_.mask()) {
-          queueEvent({10, relays_.mask()});
+          queueRelayEvent(relays_.mask());
         }
         if (!next) {
           setMenuPage(settings_.defaultMenuPage);
@@ -1243,6 +1243,11 @@ ConsoleResult VirtualBoard::console(const std::string &line) {
 std::string VirtualBoard::describe() const {
   std::lock_guard<std::mutex> lock(mutex_);
   return describeLocked();
+}
+
+OutputSnapshot VirtualBoard::outputSnapshot() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return OutputSnapshot{relays_.mask(), pwm_.values()};
 }
 
 void VirtualBoard::noteProtocolErrors(std::size_t framing, std::size_t crc) {
@@ -2276,7 +2281,7 @@ void VirtualBoard::cancelMacro(bool keepOutputs, bool emitEvent) {
       pwm_.set(channel, 0);
     }
     captureRelayState();
-    queueEvent({10, relays_.mask()});
+    queueRelayEvent(relays_.mask());
   }
   macroState_ = 3;
   macroQueue_.clear();
@@ -2402,7 +2407,7 @@ bool VirtualBoard::executeQueuedCommand(
     } else {
       relays_.set(payload[0], payload[1] != 0);
     }
-    queueEvent({10, relays_.mask()});
+    queueRelayEvent(relays_.mask());
     captureRelayState();
     return true;
   case wire::RelaySide: {
@@ -2411,7 +2416,7 @@ bool VirtualBoard::executeQueuedCommand(
       return false;
     }
     relays_.setSide(payload[0], payload[1]);
-    queueEvent({10, relays_.mask()});
+    queueRelayEvent(relays_.mask());
     captureRelayState();
     return true;
   }
@@ -2486,6 +2491,15 @@ void VirtualBoard::serviceMacro(TimePoint now,
 void VirtualBoard::queueEvent(
     std::initializer_list<std::uint8_t> payload) {
   queueEvent(std::vector<std::uint8_t>(payload));
+}
+
+void VirtualBoard::queueRelayEvent(std::uint8_t activeMask) {
+  // Relay events are the protocol's one self-timed event shape:
+  // [type, mask, applied_micros_le32]. Do not route them through queueEvent(),
+  // which marks ordinary events as timed and appends a second timestamp.
+  std::vector<std::uint8_t> payload{10, activeMask};
+  appendU32(payload, deviceMicros(Clock::now()));
+  pendingEvents_.push_back({wire::Event, 0, std::move(payload)});
 }
 
 void VirtualBoard::queueEvent(std::vector<std::uint8_t> payload) {

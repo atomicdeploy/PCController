@@ -408,7 +408,7 @@ func effectCommand(
 	updateHostConfig func(func(*appconfig.Config) error) error,
 	args []string,
 ) (string, error) {
-	const usage = "effect list|inspect ID|play ID [auto|host|mcu|COUNT [FPS]]|stop ID|create|update|upsert-json|rename|category|icon|group update|delete|export|import|record|status|cancel"
+	const usage = "effect list|inspect ID|play ID [auto|host|mcu|COUNT [FPS]]|stop ID|create|update|upsert-json|rename|category|icon|group update|delete|export|import|restore-examples|record|status|cancel"
 	if len(args) == 0 {
 		return "", fmt.Errorf("usage: %s", usage)
 	}
@@ -955,6 +955,34 @@ func effectCommand(
 			return "", err
 		}
 		return fmt.Sprintf("imported %d effects from %s (%s)", len(document.Effects), path, map[bool]string{true: "replace", false: "merge"}[replace]), nil
+	case "restore-examples", "restore-samples":
+		if len(args) != 1 {
+			return "", errors.New("usage: effect restore-examples")
+		}
+		if updateHostConfig == nil {
+			return "", errors.New("effect persistence is unavailable")
+		}
+		added := 0
+		if err := updateHostConfig(func(config *appconfig.Config) error {
+			for _, example := range appconfig.DefaultStripEffects() {
+				present := false
+				for _, configured := range config.StripEffects {
+					if strings.EqualFold(strings.TrimSpace(configured.ID), strings.TrimSpace(example.ID)) ||
+						strings.EqualFold(strings.TrimSpace(configured.Name), strings.TrimSpace(example.Name)) {
+						present = true
+						break
+					}
+				}
+				if !present {
+					config.StripEffects = append(config.StripEffects, example)
+					added++
+				}
+			}
+			return nil
+		}); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("restored %d missing editable example effects; existing user effects were unchanged", added), nil
 	case "record", "status", "cancel", "buffer":
 		return macroCommand(ctx, runner, args)
 	default:

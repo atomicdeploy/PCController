@@ -157,6 +157,9 @@ func TestHostRecordingMixedOutputsRoundTripsNamedPlayback(t *testing.T) {
 		{Opcode: native.OpBuzzer, Payload: native.BuzzerPayload(880, 25)},
 		{Opcode: native.OpDisplayText, Payload: text},
 		{Opcode: native.OpDisplayText, Payload: scheduled},
+		{Opcode: native.OpStatusRGB, Payload: []byte{255, 32, 0, 180}},
+		{Opcode: native.OpMenuSetPage, Payload: []byte{2}},
+		{Opcode: native.OpMenuAction, Payload: []byte{1}},
 		{Opcode: native.OpPWMAllOff},
 		{Opcode: native.OpPWMAllOff},
 	}
@@ -184,7 +187,7 @@ func TestHostRecordingMixedOutputsRoundTripsNamedPlayback(t *testing.T) {
 	if config.Macros[0].Name != "renamed take" || config.Macros[0].Category != "cinema" {
 		t.Fatal(config.Macros)
 	}
-	if text, err := macroCommand(context.Background(), runner, []string{"monitor"}); err != nil || !strings.Contains(text, "steps=7") {
+	if text, err := macroCommand(context.Background(), runner, []string{"monitor"}); err != nil || !strings.Contains(text, "steps=10") {
 		t.Fatalf("monitor=%s err=%v", text, err)
 	}
 	hostDefinition := config.Macros[0]
@@ -367,7 +370,12 @@ func TestBasicHostRecorderIgnoresHousekeepingAndUsesObservedDeltas(t *testing.T)
 	base := time.Now()
 	runner.captureCommand(CommandEvidence{
 		Opcode: native.OpStatusRGB, Payload: []byte{1, 2, 3, 4},
-		DeviceMicros: 100, Timed: true, ObservedAt: base,
+		DeviceMicros: 100, Timed: true, ObservedAt: base, Source: CommandSourceBackground,
+	})
+	backgroundDisplay, _ := native.DisplayTextPayload(native.DisplayLCD, 0, "RELAY           relay outputs changed")
+	runner.captureCommand(CommandEvidence{
+		Opcode: native.OpDisplayText, Payload: backgroundDisplay,
+		DeviceMicros: 150, Timed: true, ObservedAt: base.Add(5 * time.Millisecond), Source: CommandSourceBackground,
 	})
 	runner.captureCommand(CommandEvidence{
 		Opcode: native.OpSetStream, Payload: []byte{1, 0},

@@ -1833,7 +1833,8 @@ func hostRecordableOpcode(opcode byte) bool {
 	switch opcode {
 	case native.OpRelaySet, native.OpRelaySide, native.OpRelayAllOff,
 		native.OpPWMSet, native.OpPWMAllOff, native.OpBuzzer,
-		native.OpDisplayText, native.OpRFTx, native.OpAddressableLED:
+		native.OpDisplayText, native.OpRFTx, native.OpAddressableLED,
+		native.OpStatusRGB, native.OpMenuSetPage, native.OpMenuAction:
 		return true
 	default:
 		return false

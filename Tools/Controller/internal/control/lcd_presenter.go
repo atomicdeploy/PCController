@@ -403,7 +403,7 @@ func (presenter *LCDPresenter) redraw() {
 }
 
 func (presenter *LCDPresenter) send(version uint64, line1, line2 string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(WithBackgroundCommand(context.Background()), 2*time.Second)
 	defer cancel()
 	if err := presenter.acquireSend(ctx); err != nil {
 		return
@@ -505,7 +505,7 @@ func (presenter *LCDPresenter) PrepareDisconnect(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err = presenter.runtime.Command(ctx, native.OpDisplayText, payload); err != nil {
+	if err = presenter.runtime.Command(WithBackgroundCommand(ctx), native.OpDisplayText, payload); err != nil {
 		return err
 	}
 	if snapshot.Hello.Capabilities&native.CapabilityI2CTransfer != 0 {

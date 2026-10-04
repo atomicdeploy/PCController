@@ -29,6 +29,7 @@ library.
 | Stop only that lighting stream | `controller.exe exec effect stop aisle` |
 | Rename or regroup either kind | `controller.exe exec effect rename 4 "Seat rise"`; `effect category aisle Cinema` |
 | Import/export the living library | `controller.exe exec effect export effects.json`; `effect import effects.json merge` |
+| Restore only missing editable lighting examples | `controller.exe exec effect restore-examples` |
 | Delete either kind | `controller.exe exec effect delete 4` or `effect delete aisle` |
 
 The first-install catalog is seeded from
@@ -39,6 +40,11 @@ brightness envelopes, and converging points. Users may add, edit, rename,
 regroup, export, import, or remove every catalog entry. Frames remain host/RAM
 resident and are streamed to the board, saving AVR flash.
 
+`effect restore-examples` is intentionally explicit. It merges the three
+first-install examples (Police, White thunder, and Converging red) only when
+their stable ID and name are both absent. It does not reset the catalog or
+replace user edits.
+
 | Capability | Owner | Availability |
 |---|---|---|
 | Named library, categories, recorded command deltas | 🖥️ Host | CLI, TUI, Web, IPC, API, WebSocket/Socket.IO command path |
@@ -48,7 +54,8 @@ resident and are streamed to the board, saving AVR flash.
 | Circular relay recording | 🔌 Board RAM | Latest 25 state snapshots; import to host before power loss |
 
 New host recordings capture accepted **relay, motion, PWM/MOSFET, beep,
-display/message, RF transmit and addressable-strip** commands. Automatic status
+display/message, RF transmit, addressable-strip, requested status-RGB, and
+front-panel/menu** commands. Automatic status
 RGB animation and stream/settings housekeeping are intentionally excluded.
 Rejected commands are not recorded. Relay commands are not duplicated from
 acknowledgements: actual output-mask changes capture PC, physical-key and RF

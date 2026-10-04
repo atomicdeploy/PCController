@@ -154,13 +154,13 @@ faithful when the same board profile is attached.
 | MCU prebuffer/refill and timing evidence | Implemented | Complete physical long-run acceptance with cinema-seat output disconnected or safely isolated. |
 | Host strip renderer and ACK-paced chunks | Implemented | Complete physical 100-pixel quality/latency acceptance and expose frame progress. |
 | Mixed peripheral sequence | Implemented for command steps | Add first-class nested strip-program lanes so a declarative strip program and motion can share one effect. |
-| Pealayer stable cues and hardware lanes | Partial | Consolidate its dual sequence/strip cue structs into one opaque controller-effect reference. |
-| Pealayer exact sequence editor | Implemented for single-cue editing | The live-capability step catalog, lane ruler, zoom, snap/quantize, move/resize, leading-delay removal, type-aware curves/repetition, and recording handoff are wired to the PCController catalog. Add undo/redo, multi-select/copy/paste, and nested strip-program lanes. |
-| Web editor | Partial | Reach feature parity with egui and consume the same editor schema. |
+| Pealayer stable cues and hardware lanes | Implemented | Native and Web timelines store stable controller references and support drag-in, move, edge-resize, and delete. Resizing uses copy-on-write placement duration so another cue is not modified. |
+| Pealayer exact sequence editor | Implemented for capture and typed step editing | The live-capability step catalog, lane ruler, snap/quantize, move/resize, leading-delay removal, type-aware values/repetition, offline working draft, and recording handoff are wired to the PCController catalog. Undo/redo, multi-select/copy/paste, and nested strip-program lanes remain refinement work. |
+| Web editor | Implemented for recording, typed steps, catalog management, and cue placement | Continue converging advanced graphical curve and multi-selection tools with egui without introducing a second data model. |
 | TUI authoring | Partial | Add complete step/property editing; keep monitoring and run/stop compact. |
 | Runtime progress/outcome | Partial | Publish one effect run ID with buffering, playing, stopping, completed/failed/cancelled, byte/step/frame progress, and timing evidence. |
 | Cross-host routing | Implemented for authenticated command transport | Bind every run to one board session and show owner/consumer identity everywhere. |
-| Live catalogs on DAVID-PC and CAFE-PC | Empty by deliberate user action | Create/import production effects; do not silently restore sample data. |
+| Editable example effects | Explicit restoration available | `effect restore-examples` adds only missing Police, White thunder, and Converging red user effects; it never overwrites edited definitions. |
 
 ## Delivery order and acceptance gates
 
@@ -236,3 +236,15 @@ effect cancel
 
 The same commands are executed through `controller.command.execute` for RPC
 clients. Pealayer should never bypass PCController to write the library.
+
+## Verified software acceptance snapshot
+
+The coordinated Pealayer integration was exercised against VirtualBoard using
+the ordinary TCP board session. An automatic take captured an API-origin Relay
+5 on/off pair and a board-origin Relay 6 on/off pair in one four-step sequence.
+LCD/status housekeeping did not leak into the take. A separate Relay 8 effect
+executed two acknowledged steps and VirtualBoard printed `ON:8` then `OFF:8`.
+
+This is software-path evidence, not loaded hardware evidence. Cinema-seat,
+relay-contact, WS2811 signal, and RF acceptance must be repeated on the actual
+board with the exact commit/session/profile recorded.

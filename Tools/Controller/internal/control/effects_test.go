@@ -177,6 +177,44 @@ func TestEffectLibraryExportsAndImportsLivingEffectsJSON(t *testing.T) {
 	}
 }
 
+func TestEffectRestoreExamplesOnlyAddsMissingEditableDefaults(t *testing.T) {
+	runtime := New(Options{})
+	t.Cleanup(func() { _ = runtime.Close() })
+	config := appconfig.Defaults()
+	config.StripEffects = config.StripEffects[:1]
+	config.StripEffects[0].Name = "My police lights"
+	engine := NewCommandEngine(runtime, CommandOptions{
+		Macros:     func() []appconfig.Macro { return config.Macros },
+		HostConfig: func() appconfig.Config { return config },
+		UpdateHostConfig: func(change func(*appconfig.Config) error) error {
+			candidate := config
+			if err := change(&candidate); err != nil {
+				return err
+			}
+			if err := candidate.Validate(); err != nil {
+				return err
+			}
+			config = candidate
+			return nil
+		},
+	})
+
+	result, err := engine.Execute(context.Background(), "effect restore-examples")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result, "restored 2 missing") || len(config.StripEffects) != 3 {
+		t.Fatalf("restore result=%q effects=%+v", result, config.StripEffects)
+	}
+	if config.StripEffects[0].Name != "My police lights" {
+		t.Fatalf("existing user edit was overwritten: %+v", config.StripEffects[0])
+	}
+	result, err = engine.Execute(context.Background(), "effect restore-examples")
+	if err != nil || !strings.Contains(result, "restored 0 missing") || len(config.StripEffects) != 3 {
+		t.Fatalf("idempotent restore result=%q err=%v effects=%+v", result, err, config.StripEffects)
+	}
+}
+
 func TestEffectAndGroupPresentationRemainPCControllerOwned(t *testing.T) {
 	runtime := New(Options{})
 	t.Cleanup(func() { _ = runtime.Close() })

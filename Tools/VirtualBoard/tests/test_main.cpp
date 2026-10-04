@@ -36,6 +36,13 @@ bool timedEventEquals(const pccontroller::wire::Frame &event,
   return std::equal(expected.begin() + 1, expected.end(), actual + 1);
 }
 
+bool relayEventEquals(const pccontroller::wire::Frame &event,
+                      std::uint8_t activeMask) {
+  return event.opcode == pccontroller::wire::Event &&
+         event.payload.size() == 6U && event.payload[0] == 10U &&
+         event.payload[1] == activeMask;
+}
+
 const pccontroller::wire::Frame *findOpcode(
     const std::vector<pccontroller::wire::Frame> &frames,
     std::uint8_t opcode) {
@@ -449,6 +456,12 @@ void testBoardAndPersistence() {
     require(response[0].opcode == pccontroller::wire::Ack &&
                 (relays.mask() & (1U << 4U)) != 0,
             "relay interface did not update");
+    const auto relayEvents = board.tick();
+    require(std::any_of(relayEvents.begin(), relayEvents.end(),
+                        [&](const auto &event) {
+                          return relayEventEquals(event, relays.mask());
+                        }),
+            "relay event did not use the firmware-compatible self-timed shape");
 
     response = board.handle(
         {pccontroller::wire::AddressableLed, 11, {10, 1, 2, 3, 4}});
