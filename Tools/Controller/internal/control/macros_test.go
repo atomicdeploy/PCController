@@ -53,6 +53,7 @@ func TestTimelineBooleanCueExpandsDurationAndRepetition(t *testing.T) {
 	expanded, err := expandMacroTimeline([]appconfig.MacroStep{{
 		Kind: "relay", Target: 5, Value: 1, DurationMS: 100,
 		RepeatCount: 3, RepeatIntervalMS: 250,
+		ActionIDs: []string{"relay.6.on"},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -68,6 +69,13 @@ func TestTimelineBooleanCueExpandsDurationAndRepetition(t *testing.T) {
 		}
 		if expanded[index].RepeatCount != 0 || expanded[index].DurationMS != 0 {
 			t.Fatalf("runtime step retained authoring fields: %#v", expanded[index])
+		}
+		wantAction := "relay.6.on"
+		if expanded[index].Value == 0 {
+			wantAction = "relay.6.off"
+		}
+		if len(expanded[index].ActionIDs) != 1 || expanded[index].ActionIDs[0] != wantAction {
+			t.Fatalf("step %d semantic action=%v, want %q", index, expanded[index].ActionIDs, wantAction)
 		}
 	}
 }

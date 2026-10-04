@@ -1506,6 +1506,23 @@ func timelineStepAt(step appconfig.MacroStep, offsetUS uint64) (appconfig.MacroS
 	return step, nil
 }
 
+func timelineReleaseActions(actionIDs []string, release string) []string {
+	result := make([]string, 0, len(actionIDs))
+	for _, actionID := range actionIDs {
+		trimmed := strings.TrimSpace(actionID)
+		if trimmed == "" {
+			continue
+		}
+		parts := strings.Split(trimmed, ".")
+		if len(parts) > 1 {
+			parts[len(parts)-1] = release
+			trimmed = strings.Join(parts, ".")
+		}
+		result = append(result, trimmed)
+	}
+	return result
+}
+
 func expandTimelineCue(source appconfig.MacroStep) ([]appconfig.MacroStep, error) {
 	kind := strings.ToLower(strings.TrimSpace(source.Kind))
 	durationUS := uint64(source.DurationMS) * 1000
@@ -1522,6 +1539,7 @@ func expandTimelineCue(source appconfig.MacroStep) ([]appconfig.MacroStep, error
 				return nil, err
 			}
 			end.Value = 0
+			end.ActionIDs = timelineReleaseActions(source.ActionIDs, "off")
 			result = append(result, end)
 		}
 		return result, nil
@@ -1534,6 +1552,7 @@ func expandTimelineCue(source appconfig.MacroStep) ([]appconfig.MacroStep, error
 				return nil, err
 			}
 			end.Value = 0
+			end.ActionIDs = timelineReleaseActions(source.ActionIDs, "stop")
 			result = append(result, end)
 		}
 		return result, nil
