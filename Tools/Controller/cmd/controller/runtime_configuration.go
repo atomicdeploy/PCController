@@ -400,12 +400,17 @@ func apiMacros(source []appconfig.Macro) []controllerapi.Macro {
 			result[index].Steps[stepIndex] = controllerapi.MacroStep{
 				AtUS: step.AtUS, Kind: step.Kind,
 				Target: step.Target, Value: step.Value,
-				DurationMS: step.DurationMS, FrequencyHz: step.FrequencyHz,
-				Text: step.Text, Destination: step.Destination,
+				DurationMS: step.DurationMS, ToValue: step.ToValue,
+				Easing: step.Easing, SampleRateHz: step.SampleRateHz,
+				RepeatCount: step.RepeatCount, RepeatIntervalMS: step.RepeatIntervalMS,
+				FrequencyHz: step.FrequencyHz,
+				Text:        step.Text, Destination: step.Destination,
 				Code: step.Code, Bits: step.Bits, Protocol: step.Protocol,
 				PulseUS: step.PulseUS, Red: step.Red, Green: step.Green,
 				Blue: step.Blue, Brightness: step.Brightness,
-				Opcode: step.Opcode, PayloadHex: step.PayloadHex,
+				ToRed: step.ToRed, ToGreen: step.ToGreen, ToBlue: step.ToBlue,
+				ToBrightness: step.ToBrightness,
+				Opcode:       step.Opcode, PayloadHex: step.PayloadHex,
 			}
 		}
 	}

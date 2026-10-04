@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -1461,6 +1462,185 @@ func (runner *MacroRunner) publishLifecycle(lifecycle string, state MacroState, 
 	runner.queueMacroPresentation(state)
 }
 
+func timelineEase(name string, position float64) float64 {
+	position = math.Max(0, math.Min(1, position))
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "ease-in":
+		return position * position
+	case "ease-out":
+		remaining := 1 - position
+		return 1 - remaining*remaining
+	case "ease-in-out":
+		if position < 0.5 {
+			return 2 * position * position
+		}
+		return 1 - math.Pow(-2*position+2, 2)/2
+	default:
+		return position
+	}
+}
+
+func timelineLerp(start, end uint16, position float64) uint16 {
+	return uint16(math.Round(float64(start) + (float64(end)-float64(start))*timelineEase("linear", position)))
+}
+
+func timelineLerpWithEasing(start, end uint16, easing string, position float64) uint16 {
+	return timelineLerp(start, end, timelineEase(easing, position))
+}
+
+func clearTimelineAuthoring(step *appconfig.MacroStep) {
+	step.ToValue = nil
+	step.ToRed, step.ToGreen, step.ToBlue, step.ToBrightness = nil, nil, nil, nil
+	step.Easing = ""
+	step.SampleRateHz = 0
+	step.RepeatCount = 0
+	step.RepeatIntervalMS = 0
+}
+
+func timelineStepAt(step appconfig.MacroStep, offsetUS uint64) (appconfig.MacroStep, error) {
+	at := uint64(step.AtUS) + offsetUS
+	if at > 0x7FFFFFFF {
+		return appconfig.MacroStep{}, errors.New("expanded cue timing exceeds 2147483647 us")
+	}
+	step.AtUS = uint32(at)
+	return step, nil
+}
+
+func expandTimelineCue(source appconfig.MacroStep) ([]appconfig.MacroStep, error) {
+	kind := strings.ToLower(strings.TrimSpace(source.Kind))
+	durationUS := uint64(source.DurationMS) * 1000
+	base := source
+	clearTimelineAuthoring(&base)
+
+	switch kind {
+	case "relay":
+		base.DurationMS = 0
+		result := []appconfig.MacroStep{base}
+		if source.Value != 0 && durationUS != 0 {
+			end, err := timelineStepAt(base, durationUS)
+			if err != nil {
+				return nil, err
+			}
+			end.Value = 0
+			result = append(result, end)
+		}
+		return result, nil
+	case "motion", "side":
+		base.DurationMS = 0
+		result := []appconfig.MacroStep{base}
+		if source.Value != 0 && durationUS != 0 {
+			end, err := timelineStepAt(base, durationUS)
+			if err != nil {
+				return nil, err
+			}
+			end.Value = 0
+			result = append(result, end)
+		}
+		return result, nil
+	case "pwm", "mosfet":
+		base.DurationMS = 0
+		if source.ToValue == nil || durationUS == 0 {
+			return []appconfig.MacroStep{base}, nil
+		}
+		rate := uint64(source.SampleRateHz)
+		if rate == 0 {
+			rate = 30
+		}
+		samples := max((uint64(source.DurationMS)*rate+999)/1000, uint64(1))
+		result := make([]appconfig.MacroStep, 0, samples+1)
+		for sample := uint64(0); sample <= samples; sample++ {
+			position := float64(sample) / float64(samples)
+			step, err := timelineStepAt(base, durationUS*sample/samples)
+			if err != nil {
+				return nil, err
+			}
+			step.Value = timelineLerpWithEasing(source.Value, *source.ToValue, source.Easing, position)
+			result = append(result, step)
+		}
+		return result, nil
+	case "rgb", "status-led", "addressable", "ws2812":
+		base.DurationMS = 0
+		transition := source.ToRed != nil || source.ToGreen != nil || source.ToBlue != nil || source.ToBrightness != nil
+		if !transition || durationUS == 0 {
+			return []appconfig.MacroStep{base}, nil
+		}
+		rate := uint64(source.SampleRateHz)
+		if rate == 0 {
+			rate = 30
+		}
+		samples := max((uint64(source.DurationMS)*rate+999)/1000, uint64(1))
+		endRed, endGreen := source.Red, source.Green
+		endBlue, endBrightness := source.Blue, source.Brightness
+		if source.ToRed != nil {
+			endRed = *source.ToRed
+		}
+		if source.ToGreen != nil {
+			endGreen = *source.ToGreen
+		}
+		if source.ToBlue != nil {
+			endBlue = *source.ToBlue
+		}
+		if source.ToBrightness != nil {
+			endBrightness = *source.ToBrightness
+		}
+		result := make([]appconfig.MacroStep, 0, samples+1)
+		for sample := uint64(0); sample <= samples; sample++ {
+			position := float64(sample) / float64(samples)
+			step, err := timelineStepAt(base, durationUS*sample/samples)
+			if err != nil {
+				return nil, err
+			}
+			step.Red = byte(timelineLerpWithEasing(uint16(source.Red), uint16(endRed), source.Easing, position))
+			step.Green = byte(timelineLerpWithEasing(uint16(source.Green), uint16(endGreen), source.Easing, position))
+			step.Blue = byte(timelineLerpWithEasing(uint16(source.Blue), uint16(endBlue), source.Easing, position))
+			step.Brightness = byte(timelineLerpWithEasing(uint16(source.Brightness), uint16(endBrightness), source.Easing, position))
+			result = append(result, step)
+		}
+		return result, nil
+	default:
+		return []appconfig.MacroStep{base}, nil
+	}
+}
+
+// expandMacroTimeline compiles authoring-friendly blocks into the exact point
+// commands consumed by the existing host/MCU schedulers. The saved catalog
+// retains durations, curves, and repetition; only the volatile run plan is
+// expanded.
+func expandMacroTimeline(steps []appconfig.MacroStep) ([]appconfig.MacroStep, error) {
+	result := make([]appconfig.MacroStep, 0, len(steps))
+	for index, source := range steps {
+		repeats := int(source.RepeatCount)
+		if repeats < 1 {
+			repeats = 1
+		}
+		intervalMS := uint64(source.RepeatIntervalMS)
+		if repeats > 1 && intervalMS == 0 {
+			intervalMS = max(uint64(source.DurationMS), uint64(1))
+		}
+		if repeats > 1 && intervalMS < uint64(source.DurationMS) {
+			return nil, fmt.Errorf("step %d repeat interval must not be shorter than its duration", index+1)
+		}
+		for repeat := 0; repeat < repeats; repeat++ {
+			copy := source
+			at := uint64(source.AtUS) + uint64(repeat)*intervalMS*1000
+			if at > 0x7FFFFFFF {
+				return nil, fmt.Errorf("step %d repetition exceeds maximum effect time", index+1)
+			}
+			copy.AtUS = uint32(at)
+			expanded, err := expandTimelineCue(copy)
+			if err != nil {
+				return nil, fmt.Errorf("step %d: %w", index+1, err)
+			}
+			result = append(result, expanded...)
+			if len(result) > 65535 {
+				return nil, errors.New("expanded effect exceeds 65535 runtime commands")
+			}
+		}
+	}
+	sort.SliceStable(result, func(left, right int) bool { return result[left].AtUS < result[right].AtUS })
+	return result, nil
+}
+
 func compileMacro(macro appconfig.Macro) (compiledMacro, error) {
 	if macro.Mode != macroModeHost && macro.Mode != macroModeMCU {
 		return compiledMacro{}, fmt.Errorf("macro %d/%s mode must be host or mcu", macro.ID, macro.Name)
@@ -1468,9 +1648,13 @@ func compileMacro(macro appconfig.Macro) (compiledMacro, error) {
 	if len(macro.Steps) == 0 || len(macro.Steps) > 65535 {
 		return compiledMacro{}, fmt.Errorf("macro %d/%s must contain 1..65535 steps", macro.ID, macro.Name)
 	}
-	result := compiledMacro{definition: macro, steps: make([]compiledMacroStep, 0, len(macro.Steps))}
+	expandedSteps, err := expandMacroTimeline(macro.Steps)
+	if err != nil {
+		return compiledMacro{}, fmt.Errorf("macro %d/%s timeline: %w", macro.ID, macro.Name, err)
+	}
+	result := compiledMacro{definition: macro, steps: make([]compiledMacroStep, 0, len(expandedSteps))}
 	var previous uint32
-	for index, step := range macro.Steps {
+	for index, step := range expandedSteps {
 		dueUS, err := macroStepDueUS(step)
 		if err != nil {
 			return compiledMacro{}, fmt.Errorf("macro %d/%s step %d: %w", macro.ID, macro.Name, index+1, err)

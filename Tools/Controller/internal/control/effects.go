@@ -62,8 +62,19 @@ func EffectCatalogWithGroups(macros []appconfig.Macro, strips []appconfig.StripE
 	}
 	for _, macro := range macros {
 		duration := 0
-		if len(macro.Steps) != 0 {
-			duration = int(macro.Steps[len(macro.Steps)-1].AtUS / 1000)
+		for _, step := range macro.Steps {
+			repeats := int(step.RepeatCount)
+			if repeats < 1 {
+				repeats = 1
+			}
+			interval := int(step.RepeatIntervalMS)
+			if repeats > 1 && interval == 0 {
+				interval = max(int(step.DurationMS), 1)
+			}
+			end := int(step.AtUS/1000) + (repeats-1)*interval + int(step.DurationMS)
+			if end > duration {
+				duration = end
+			}
 		}
 		result = append(result, EffectDescriptor{
 			Reference: "effect:" + strconv.Itoa(int(macro.ID)), ID: strconv.Itoa(int(macro.ID)),

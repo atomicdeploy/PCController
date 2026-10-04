@@ -265,22 +265,31 @@ type MacroStep struct {
 	AtUS uint32 `json:"at_us,omitempty"`
 	Kind string `json:"kind"`
 
-	Target      byte   `json:"target,omitempty"`
-	Value       uint16 `json:"value,omitempty"`
-	DurationMS  uint16 `json:"duration_ms,omitempty"`
-	FrequencyHz uint16 `json:"frequency_hz,omitempty"`
-	Text        string `json:"text,omitempty"`
-	Destination string `json:"destination,omitempty"`
-	Code        uint32 `json:"code,omitempty"`
-	Bits        byte   `json:"bits,omitempty"`
-	Protocol    byte   `json:"protocol,omitempty"`
-	PulseUS     uint16 `json:"pulse_us,omitempty"`
-	Red         byte   `json:"red,omitempty"`
-	Green       byte   `json:"green,omitempty"`
-	Blue        byte   `json:"blue,omitempty"`
-	Brightness  byte   `json:"brightness,omitempty"`
-	Opcode      byte   `json:"opcode,omitempty"`
-	PayloadHex  string `json:"payload_hex,omitempty"`
+	Target           byte    `json:"target,omitempty"`
+	Value            uint16  `json:"value,omitempty"`
+	DurationMS       uint16  `json:"duration_ms,omitempty"`
+	ToValue          *uint16 `json:"to_value,omitempty"`
+	Easing           string  `json:"easing,omitempty"`
+	SampleRateHz     byte    `json:"sample_rate_hz,omitempty"`
+	RepeatCount      uint16  `json:"repeat_count,omitempty"`
+	RepeatIntervalMS uint32  `json:"repeat_interval_ms,omitempty"`
+	FrequencyHz      uint16  `json:"frequency_hz,omitempty"`
+	Text             string  `json:"text,omitempty"`
+	Destination      string  `json:"destination,omitempty"`
+	Code             uint32  `json:"code,omitempty"`
+	Bits             byte    `json:"bits,omitempty"`
+	Protocol         byte    `json:"protocol,omitempty"`
+	PulseUS          uint16  `json:"pulse_us,omitempty"`
+	Red              byte    `json:"red,omitempty"`
+	Green            byte    `json:"green,omitempty"`
+	Blue             byte    `json:"blue,omitempty"`
+	Brightness       byte    `json:"brightness,omitempty"`
+	ToRed            *byte   `json:"to_red,omitempty"`
+	ToGreen          *byte   `json:"to_green,omitempty"`
+	ToBlue           *byte   `json:"to_blue,omitempty"`
+	ToBrightness     *byte   `json:"to_brightness,omitempty"`
+	Opcode           byte    `json:"opcode,omitempty"`
+	PayloadHex       string  `json:"payload_hex,omitempty"`
 	// ActionIDs preserves the semantic meaning observed alongside the exact
 	// applied relay mask. Playback continues to use the mask so old and new
 	// firmware remain byte-for-byte faithful.
@@ -895,6 +904,24 @@ func (value Config) Validate() error {
 					return fmt.Errorf("macros[%d].steps[%d].action_ids[%d] is invalid", index, stepIndex, actionIndex)
 				}
 			}
+			switch strings.ToLower(strings.TrimSpace(step.Easing)) {
+			case "", "linear", "ease-in", "ease-out", "ease-in-out":
+			default:
+				return fmt.Errorf("macros[%d].steps[%d].easing must be linear, ease-in, ease-out, or ease-in-out", index, stepIndex)
+			}
+			if step.SampleRateHz > 60 {
+				return fmt.Errorf("macros[%d].steps[%d].sample_rate_hz must be 0..60", index, stepIndex)
+			}
+			if step.RepeatCount > 1000 {
+				return fmt.Errorf("macros[%d].steps[%d].repeat_count must be 0..1000", index, stepIndex)
+			}
+			if step.RepeatIntervalMS > 3_600_000 {
+				return fmt.Errorf("macros[%d].steps[%d].repeat_interval_ms must be 0..3600000", index, stepIndex)
+			}
+			transitionColor := step.ToRed != nil || step.ToGreen != nil || step.ToBlue != nil || step.ToBrightness != nil
+			if (step.ToValue != nil || transitionColor) && step.DurationMS == 0 {
+				return fmt.Errorf("macros[%d].steps[%d] transitions require duration_ms", index, stepIndex)
+			}
 			switch strings.ToLower(step.Kind) {
 			case "relay-mask":
 				if step.Target != 0 || step.Value > 255 {
@@ -909,7 +936,7 @@ func (value Config) Validate() error {
 					return fmt.Errorf("macros[%d].steps[%d] motion requires side 0..1 and motion 0..2", index, stepIndex)
 				}
 			case "pwm", "mosfet":
-				if step.Target > 15 || step.Value > 4095 {
+				if step.Target > 15 || step.Value > 4095 || (step.ToValue != nil && *step.ToValue > 4095) {
 					return fmt.Errorf("macros[%d].steps[%d] PWM requires target 0..15 and value 0..4095", index, stepIndex)
 				}
 			case "relays-off", "pwm-off":
@@ -947,6 +974,13 @@ func (value Config) Validate() error {
 				}
 			default:
 				return fmt.Errorf("macros[%d].steps[%d].kind %q is unknown", index, stepIndex, step.Kind)
+			}
+			kind := strings.ToLower(strings.TrimSpace(step.Kind))
+			if step.ToValue != nil && kind != "pwm" && kind != "mosfet" {
+				return fmt.Errorf("macros[%d].steps[%d].to_value is only valid for PWM", index, stepIndex)
+			}
+			if transitionColor && kind != "rgb" && kind != "status-led" && kind != "addressable" && kind != "ws2812" {
+				return fmt.Errorf("macros[%d].steps[%d] color transition targets require RGB or addressable output", index, stepIndex)
 			}
 		}
 	}

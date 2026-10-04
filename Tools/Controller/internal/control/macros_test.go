@@ -49,6 +49,54 @@ func TestCompileMacroEncodesOrdinaryOpcodesWithExactOffsets(t *testing.T) {
 	}
 }
 
+func TestTimelineBooleanCueExpandsDurationAndRepetition(t *testing.T) {
+	expanded, err := expandMacroTimeline([]appconfig.MacroStep{{
+		Kind: "relay", Target: 5, Value: 1, DurationMS: 100,
+		RepeatCount: 3, RepeatIntervalMS: 250,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(expanded) != 6 {
+		t.Fatalf("expanded steps=%d, want 6: %#v", len(expanded), expanded)
+	}
+	wantDue := []uint32{0, 100000, 250000, 350000, 500000, 600000}
+	wantValue := []uint16{1, 0, 1, 0, 1, 0}
+	for index := range expanded {
+		if expanded[index].AtUS != wantDue[index] || expanded[index].Value != wantValue[index] {
+			t.Fatalf("step %d=%#v, want at=%d value=%d", index, expanded[index], wantDue[index], wantValue[index])
+		}
+		if expanded[index].RepeatCount != 0 || expanded[index].DurationMS != 0 {
+			t.Fatalf("runtime step retained authoring fields: %#v", expanded[index])
+		}
+	}
+}
+
+func TestTimelineRangeCueExpandsEasedPWMFade(t *testing.T) {
+	end := uint16(4095)
+	expanded, err := expandMacroTimeline([]appconfig.MacroStep{{
+		Kind: "pwm", Target: 11, Value: 0, ToValue: &end,
+		DurationMS: 100, Easing: "ease-out", SampleRateHz: 40,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(expanded) != 5 || expanded[0].AtUS != 0 || expanded[4].AtUS != 100000 {
+		t.Fatalf("unexpected expanded fade: %#v", expanded)
+	}
+	if expanded[0].Value != 0 || expanded[4].Value != 4095 {
+		t.Fatalf("fade endpoints=%d..%d", expanded[0].Value, expanded[4].Value)
+	}
+	if expanded[2].Value <= 2048 {
+		t.Fatalf("ease-out midpoint=%d, want above linear midpoint", expanded[2].Value)
+	}
+	for _, step := range expanded {
+		if step.ToValue != nil || step.Easing != "" || step.SampleRateHz != 0 {
+			t.Fatalf("runtime step retained curve authoring fields: %#v", step)
+		}
+	}
+}
+
 func TestAdaptiveEffectExecutionChoosesMostPreciseCompatibleClock(t *testing.T) {
 	sequence := appconfig.Macro{
 		ID: 7, Name: "seat", Mode: macroModeAuto,

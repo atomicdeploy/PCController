@@ -98,8 +98,11 @@ board.
    captures acknowledged actions; relay motion uses device edge timestamps.
 5. Stop and save the take. A device-retained take is transferred into the same
    catalog during Save.
-6. Open Manage and edit exact step times, parameters, semantic action IDs,
-   presentation metadata, and execution policy.
+6. Open Manage and edit the take on the lane timeline. Cues can be moved,
+   edge-resized, duplicated, deleted, snapped, quantized, or shifted together
+   to remove leading delay. The selected cue exposes exact time, channel,
+   value, duration, curve, repetition, semantic action IDs, and presentation
+   metadata.
 7. Preview through PCController and inspect timing evidence.
 8. Drag the effect into Pealayer. The cue stores `effect:<stable-id>` and is
    movable/resizable without cloning the definition.
@@ -126,6 +129,14 @@ parameter schema. A control is offered only when its capability is present.
 | Front panel | advertised page/action ID | acknowledged menu state |
 | Raw | allowlisted opcode and payload | exact response; advanced diagnostics only |
 
+Timeline authoring metadata is stored with the authoritative effect. Boolean
+and motion cues use `duration_ms` to generate a deterministic release/stop.
+PWM and RGB/addressable cues may add a target value or target color,
+`easing`, and a bounded `sample_rate_hz`. Any cue may add `repeat_count` and
+`repeat_interval_ms`. PCController expands these editor-friendly blocks into
+ordinary acknowledged commands only in the volatile run plan; export/import
+retains the editable curve and repetition data.
+
 Semantic action IDs are preferred over physical relay numbers. Exact applied
 relay masks may still be retained as recording evidence so playback remains
 faithful when the same board profile is attached.
@@ -144,7 +155,7 @@ faithful when the same board profile is attached.
 | Host strip renderer and ACK-paced chunks | Implemented | Complete physical 100-pixel quality/latency acceptance and expose frame progress. |
 | Mixed peripheral sequence | Implemented for command steps | Add first-class nested strip-program lanes so a declarative strip program and motion can share one effect. |
 | Pealayer stable cues and hardware lanes | Partial | Consolidate its dual sequence/strip cue structs into one opaque controller-effect reference. |
-| Pealayer exact sequence editor | Partial | Its add-step catalog now follows live capabilities and live relay/PWM identities; add the shared parameter schema, lane view, validation, undo/redo, multi-select, copy/paste, and timing ruler. |
+| Pealayer exact sequence editor | Implemented for single-cue editing | The live-capability step catalog, lane ruler, zoom, snap/quantize, move/resize, leading-delay removal, type-aware curves/repetition, and recording handoff are wired to the PCController catalog. Add undo/redo, multi-select/copy/paste, and nested strip-program lanes. |
 | Web editor | Partial | Reach feature parity with egui and consume the same editor schema. |
 | TUI authoring | Partial | Add complete step/property editing; keep monitoring and run/stop compact. |
 | Runtime progress/outcome | Partial | Publish one effect run ID with buffering, playing, stopping, completed/failed/cancelled, byte/step/frame progress, and timing evidence. |
