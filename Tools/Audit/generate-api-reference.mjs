@@ -136,7 +136,7 @@ const capabilityGroups = {
   board_commands: [
     "controller.program_state.set", "controller.program-state.set", "controller.menu.layout.set",
     "controller.host_menu.directory.replace", "controller.host_menu.content.push", "controller.menu.jump",
-	"controller.menu.page", "controller.pwm.set", "controller.pwm.off", "controller.illumination.set", "controller.illumination.override", "controller.rf.learn.start",
+	"controller.menu.page", "controller.pwm.set", "controller.pwm.off", "controller.status_led.set", "controller.status_led.release", "controller.illumination.set", "controller.illumination.override", "controller.rf.learn.start",
     "controller.rf.learn.cancel", "controller.rf.map", "controller.rf.remove", "controller.rf.clear",
     "controller.rf.transmit", "controller.board_automation.put",
     "controller.board_automation.remove", "controller.board_automation.clear",

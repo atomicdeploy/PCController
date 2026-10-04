@@ -502,8 +502,6 @@
             "controller.pwm.off",
             "controller.pwm.set",
             "controller.pwm.values",
-            "controller.status_led.release",
-            "controller.status_led.set",
             "controller.quit",
             "controller.reset",
             "controller.reset.lines",
@@ -521,6 +519,8 @@
             "controller.session.snapshot.last",
             "controller.snapshot",
             "controller.status",
+            "controller.status_led.release",
+            "controller.status_led.set",
             "controller.subscribe",
             "controller.system.status",
             "controller.temperatures",
@@ -1334,16 +1334,6 @@
       "summary": "pwm values",
       "idempotency": "safe"
     },
-    "controller.status_led.release": {
-      "capability": "board_commands",
-      "summary": "release status LED override",
-      "idempotency": "idempotent-with-authoritative-readback"
-    },
-    "controller.status_led.set": {
-      "capability": "board_commands",
-      "summary": "set status LED override",
-      "idempotency": "idempotent-with-authoritative-readback"
-    },
     "controller.quit": {
       "capability": "shutdown",
       "summary": "quit",
@@ -1428,6 +1418,16 @@
       "capability": "read",
       "summary": "status",
       "idempotency": "safe"
+    },
+    "controller.status_led.release": {
+      "capability": "board_commands",
+      "summary": "status led release",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.status_led.set": {
+      "capability": "board_commands",
+      "summary": "status led set",
+      "idempotency": "idempotent-with-authoritative-readback"
     },
     "controller.subscribe": {
       "capability": "events",

@@ -200,14 +200,9 @@
               "method": "controller.state",
               "params": {
                 "id": 43,
-                "kind": "pwm.changed",
+                "kind": "status_led.changed",
                 "stream": "state",
-                "source": "rpc",
-                "metadata": {
-                  "available": "true",
-                  "selected_channel": "4",
-                  "pwm.4": "2048"
-                }
+                "source": "board"
               }
             }
           ]
