@@ -962,9 +962,27 @@ func (service *Service) dispatch(
 			if params.Red < 0 || params.Red > 255 || params.Green < 0 || params.Green > 255 || params.Blue < 0 || params.Blue > 255 || params.Brightness < 0 || params.Brightness > 255 {
 				err = &RPCError{Code: -32602, Message: "red, green, blue, and brightness must be 0..255"}
 			} else {
-				err = service.Client.SetStatusRGB(ctx, byte(params.Red), byte(params.Green), byte(params.Blue), byte(params.Brightness))
+				// Model a user-selected color as an indefinitely retained native
+				// overlay. The alternate color is identical, so the board renders
+				// a steady frame while preserving the state-policy base underneath.
+				// controller.status_led.release can therefore restore native/status
+				// policy ownership instead of leaving the preview as a new base.
+				operation, operationErr := service.Client.StartStatusLEDEffect(ctx, appconfig.StatusLEDEffect{
+					Name:           "custom RGB preview",
+					Kind:           "flash",
+					Red:            byte(params.Red),
+					Green:          byte(params.Green),
+					Blue:           byte(params.Blue),
+					AlternateRed:   byte(params.Red),
+					AlternateGreen: byte(params.Green),
+					AlternateBlue:  byte(params.Blue),
+					Brightness:     byte(params.Brightness),
+					MinBrightness:  byte(params.Brightness),
+					PeriodMS:       int(native.StatusEffectMinimumPeriodMS),
+				})
+				err = operationErr
 				if err == nil {
-					result = map[string]any{"active": true, "red": params.Red, "green": params.Green, "blue": params.Blue, "brightness": params.Brightness}
+					result = map[string]any{"active": true, "red": params.Red, "green": params.Green, "blue": params.Blue, "brightness": params.Brightness, "operation_id": operation.ID}
 				}
 			}
 		}
