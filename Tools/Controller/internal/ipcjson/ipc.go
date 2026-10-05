@@ -4075,7 +4075,7 @@ func serveWebSocket(
 		defer cancel()
 		return connection.Write(writeContext, websocket.MessageText, encoded)
 	}
-	subscriptions := newWebSocketSubscriptions(ctx, service.Client, writeJSON)
+	subscriptions := newWebSocketSubscriptions(ctx, service.Client, service.controllerSnapshot, writeJSON)
 	defer subscriptions.stopAll()
 
 	for {
@@ -4221,7 +4221,7 @@ func serveSocketIO(
 		return
 	}
 
-	subscriptions := newWebSocketSubscriptions(ctx, service.Client, writeNotification)
+	subscriptions := newWebSocketSubscriptions(ctx, service.Client, service.controllerSnapshot, writeNotification)
 	defer subscriptions.stopAll()
 	go func() {
 		ticker := time.NewTicker(25 * time.Second)
@@ -4646,19 +4646,21 @@ type webSocketSubscriptionWorker struct {
 // A preserve subscription is deliberately topic-scoped: changing status
 // cadence cannot cancel and recreate ordered event/state streams or reset cursors.
 type webSocketSubscriptions struct {
-	ctx     context.Context
-	client  *controller.Client
-	write   func(any) error
-	workers map[string]webSocketSubscriptionWorker
+	ctx      context.Context
+	client   *controller.Client
+	snapshot func() controllerSnapshotEnvelope
+	write    func(any) error
+	workers  map[string]webSocketSubscriptionWorker
 }
 
 func newWebSocketSubscriptions(
 	ctx context.Context,
 	client *controller.Client,
+	snapshot func() controllerSnapshotEnvelope,
 	write func(any) error,
 ) *webSocketSubscriptions {
 	return &webSocketSubscriptions{
-		ctx: ctx, client: client, write: write,
+		ctx: ctx, client: client, snapshot: snapshot, write: write,
 		workers: make(map[string]webSocketSubscriptionWorker),
 	}
 }
@@ -4712,11 +4714,11 @@ func (subscriptions *webSocketSubscriptions) start(topic string, value wsSubscri
 		defer close(done)
 		switch topic {
 		case "events":
-			streamWebSocketEventStream(topicContext, subscriptions.client, afterID, "activity", "controller.event", subscriptions.write)
+			streamWebSocketEventStream(topicContext, subscriptions.client, afterID, "activity", "controller.event", subscriptions.snapshot, subscriptions.write)
 		case "state":
-			streamWebSocketEventStream(topicContext, subscriptions.client, afterID, "state", "controller.state", subscriptions.write)
+			streamWebSocketEventStream(topicContext, subscriptions.client, afterID, "state", "controller.state", subscriptions.snapshot, subscriptions.write)
 		case "debug":
-			streamWebSocketEventStream(topicContext, subscriptions.client, afterID, "debug", "controller.debug", subscriptions.write)
+			streamWebSocketEventStream(topicContext, subscriptions.client, afterID, "debug", "controller.debug", nil, subscriptions.write)
 		case "opcodes":
 			streamWebSocketOpcodes(topicContext, subscriptions.client, afterID, value.Opcodes, subscriptions.write)
 		case "status":
@@ -4764,6 +4766,7 @@ func streamWebSocketEventStream(
 	afterID uint64,
 	stream string,
 	method string,
+	snapshot func() controllerSnapshotEnvelope,
 	write func(any) error,
 ) {
 	for ctx.Err() == nil {
@@ -4779,7 +4782,34 @@ func streamWebSocketEventStream(
 		}); err != nil {
 			return
 		}
+		if snapshot != nil && eventUpdatesClientSnapshot(event) {
+			if err := write(wsNotification{
+				JSONRPC: Version,
+				Method:  "controller.snapshot",
+				Params:  snapshot(),
+			}); err != nil {
+				return
+			}
+		}
 	}
+}
+
+// eventUpdatesClientSnapshot identifies low-rate authority changes whose
+// complete cached result should follow the event edge. High-rate segment and
+// RGB frames already carry compact patches and intentionally do not amplify a
+// full snapshot at animation frequency.
+func eventUpdatesClientSnapshot(event controller.Event) bool {
+	kind := strings.ToLower(strings.TrimSpace(event.Kind))
+	switch kind {
+	case "door", "bluetooth", "pwm", "relay", "hot", "reset", "identity",
+		"front_panel.changed", "settings.changed", "illumination.changed", "peripherals.changed":
+		return true
+	}
+	return strings.HasPrefix(kind, "connection") ||
+		strings.HasPrefix(kind, "usb.") ||
+		strings.HasPrefix(kind, "program.") ||
+		strings.HasPrefix(kind, "rf.learn") ||
+		strings.HasPrefix(kind, "macro.")
 }
 
 func streamWebSocketStatus(

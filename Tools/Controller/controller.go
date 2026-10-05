@@ -473,6 +473,7 @@ type Snapshot struct {
 	HardwareProblems         []HardwareProblem               `json:"hardware_problems,omitempty"`
 	FrontPanel               FrontPanel                      `json:"front_panel"`
 	HaveFrontPanel           bool                            `json:"have_front_panel"`
+	HaveFrontPanelSegments   bool                            `json:"have_front_panel_segments"`
 	FrontPanelUpdated        time.Time                       `json:"front_panel_updated,omitempty"`
 	StatusLED                StatusLEDState                  `json:"status_led"`
 	HaveStatusLED            bool                            `json:"have_status_led"`
@@ -2282,20 +2283,21 @@ func (client *Client) Snapshot() Snapshot {
 		// and by the effect runner. Reuse its canonical catalog here so the public
 		// snapshot cannot drift from `effect list` when a new installation receives
 		// the editable JSON seed catalog through the effective configuration path.
-		Effects:           snapshot.Effects,
-		EffectGroups:      snapshot.EffectGroups,
-		HardwareProblems:  snapshot.HardwareProblems,
-		FrontPanel:        snapshot.FrontPanel,
-		HaveFrontPanel:    snapshot.HaveFrontPanel,
-		FrontPanelUpdated: snapshot.FrontPanelUpdated,
-		StatusLED:         snapshot.StatusLED,
-		HaveStatusLED:     snapshot.HaveStatusLED,
-		StatusLEDUpdated:  snapshot.StatusLEDUpdated,
-		StatusLEDRevision: snapshot.StatusLEDRevision,
-		Outputs:           client.outputs.State(),
-		StripEffects:      stripEffects,
-		Illumination:      illumination,
-		PortProcess:       snapshot.PortProcess,
+		Effects:                snapshot.Effects,
+		EffectGroups:           snapshot.EffectGroups,
+		HardwareProblems:       snapshot.HardwareProblems,
+		FrontPanel:             snapshot.FrontPanel,
+		HaveFrontPanel:         snapshot.HaveFrontPanel,
+		HaveFrontPanelSegments: snapshot.HaveFrontPanelSegments,
+		FrontPanelUpdated:      snapshot.FrontPanelUpdated,
+		StatusLED:              snapshot.StatusLED,
+		HaveStatusLED:          snapshot.HaveStatusLED,
+		StatusLEDUpdated:       snapshot.StatusLEDUpdated,
+		StatusLEDRevision:      snapshot.StatusLEDRevision,
+		Outputs:                client.outputs.State(),
+		StripEffects:           stripEffects,
+		Illumination:           illumination,
+		PortProcess:            snapshot.PortProcess,
 	}
 }
 

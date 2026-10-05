@@ -224,6 +224,7 @@ export function execute(command: string, signal?: AbortSignal): Promise<CommandR
 export interface StreamHandlers {
   status: (value: StatusUpdate, source: StreamSource) => void
   event: (value: ControllerEvent, source: StreamSource) => void
+  snapshot?: (value: Snapshot, source: StreamSource) => void
   state: (state: 'connecting' | 'open' | 'waiting' | 'closed', detail?: string, source?: StreamSource) => void
 }
 
@@ -337,6 +338,7 @@ export function connectStream(config: UIConfig, handlers: StreamHandlers): Strea
     let sourceInstanceID = ''
     let subscriptionAcknowledged = false
     const pendingStateEvents: ControllerEvent[] = []
+    let pendingSnapshot: Snapshot | null = null
     const source = (): StreamSource => ({
       generation: currentGeneration,
       ...(sourceInstanceID ? { instanceID: sourceInstanceID } : {}),
@@ -344,6 +346,10 @@ export function connectStream(config: UIConfig, handlers: StreamHandlers): Strea
     const deliverEvent = (event: ControllerEvent) => {
       if (!isActive()) return
       handlers.event(event, source())
+    }
+    const deliverSnapshot = (snapshot: Snapshot) => {
+      if (!isActive()) return
+      handlers.snapshot?.(snapshot, source())
     }
     activeSocket.addEventListener('open', () => {
       if (!isActive()) return
@@ -389,6 +395,10 @@ export function connectStream(config: UIConfig, handlers: StreamHandlers): Strea
             subscriptionAcknowledged = true
             handlers.state('open', undefined, source())
             for (const event of pendingStateEvents.splice(0)) deliverEvent(event)
+            if (pendingSnapshot) {
+              deliverSnapshot(pendingSnapshot)
+              pendingSnapshot = null
+            }
           }
         }
         if (value.method === 'controller.status') handlers.status(value.params as StatusUpdate, source())
@@ -397,6 +407,11 @@ export function connectStream(config: UIConfig, handlers: StreamHandlers): Strea
           const event = value.params as ControllerEvent
           if (subscriptionAcknowledged) deliverEvent(event)
           else pendingStateEvents.push(event)
+        }
+        if (value.method === 'controller.snapshot') {
+          const snapshot = value.params as Snapshot
+          if (subscriptionAcknowledged) deliverSnapshot(snapshot)
+          else pendingSnapshot = snapshot
         }
         if (value.method === 'controller.error') {
           const detail = (value.params as { error?: string } | undefined)?.error
