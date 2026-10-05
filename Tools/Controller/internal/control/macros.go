@@ -130,21 +130,27 @@ type MacroRunner struct {
 // PCController effect catalog. Mode describes the capture clock; DeviceRetained
 // means the bounded relay tail currently also resides in device RAM.
 type MacroRecordingState struct {
-	DeviceRetained   bool      `json:"device_retained"`
-	LastAtUS         uint32    `json:"last_at_us"`
-	LastDeltaUS      uint32    `json:"last_delta_us"`
-	Overwritten      int       `json:"overwritten"`
-	Active           bool      `json:"active"`
-	ID               byte      `json:"id"`
-	Name             string    `json:"name"`
-	Mode             string    `json:"mode"`
-	Category         string    `json:"category,omitempty"`
-	Color            string    `json:"color,omitempty"`
-	BoardProfileKey  string    `json:"board_profile_key,omitempty"`
-	BoardProfileMode string    `json:"board_profile_mode,omitempty"`
-	Steps            int       `json:"steps"`
-	StartedAt        time.Time `json:"started_at,omitempty"`
-	LastError        string    `json:"last_error,omitempty"`
+	DeviceRetained   bool   `json:"device_retained"`
+	LastAtUS         uint32 `json:"last_at_us"`
+	LastDeltaUS      uint32 `json:"last_delta_us"`
+	Overwritten      int    `json:"overwritten"`
+	Active           bool   `json:"active"`
+	ID               byte   `json:"id"`
+	Name             string `json:"name"`
+	Mode             string `json:"mode"`
+	Category         string `json:"category,omitempty"`
+	Color            string `json:"color,omitempty"`
+	BoardProfileKey  string `json:"board_profile_key,omitempty"`
+	BoardProfileMode string `json:"board_profile_mode,omitempty"`
+	Steps            int    `json:"steps"`
+	// Preview is the live, host-observed sequence accumulated for the current
+	// take. It lets Pealayer and other coordinator clients render captured
+	// actions before Finish is pressed. Board-retained capture remains
+	// authoritative on the MCU; its host mirror is replaced by the downloaded
+	// ring when the take is saved.
+	Preview   []appconfig.MacroStep `json:"preview,omitempty"`
+	StartedAt time.Time             `json:"started_at,omitempty"`
+	LastError string                `json:"last_error,omitempty"`
 }
 
 func NewMacroRunner(
@@ -204,6 +210,14 @@ func (runner *MacroRunner) List() []appconfig.Macro {
 	return result
 }
 
+func cloneMacroSteps(source []appconfig.MacroStep) []appconfig.MacroStep {
+	result := append([]appconfig.MacroStep(nil), source...)
+	for index := range result {
+		result[index].ActionIDs = append([]string(nil), source[index].ActionIDs...)
+	}
+	return result
+}
+
 func (runner *MacroRunner) State() MacroState {
 	runner.mu.RLock()
 	defer runner.mu.RUnlock()
@@ -213,7 +227,9 @@ func (runner *MacroRunner) State() MacroState {
 func (runner *MacroRunner) RecordingState() MacroRecordingState {
 	runner.recordMu.RLock()
 	defer runner.recordMu.RUnlock()
-	return runner.recording
+	state := runner.recording
+	state.Preview = cloneMacroSteps(runner.recordMacro.Steps)
+	return state
 }
 
 func (runner *MacroRunner) Snapshot() MacroSnapshot {
