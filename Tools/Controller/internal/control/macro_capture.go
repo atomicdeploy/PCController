@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -127,12 +128,29 @@ func (runner *MacroRunner) captureRelayEdge(evidence CommandEvidence) {
 		at := evidence.DeviceMicros - runner.recordBaseUS
 		runner.recording.LastDeltaUS = at - runner.recording.LastAtUS
 		runner.recording.LastAtUS = at
+		steps := relayMaskSteps(
+			at,
+			runner.recordRelayMask,
+			evidence.RelayMask,
+			!runner.recordRelaySeen,
+			runner.recordMacro.BoardProfileMode,
+		)
+		runner.recordRelaySeen = true
+		runner.recordRelayMask = evidence.RelayMask
+		runner.recordMacro.Steps = append(runner.recordMacro.Steps, steps...)
 		if runner.recording.Steps < 25 {
 			runner.recording.Steps++
 		} else if runner.recording.Overwritten < 255 {
 			runner.recording.Overwritten++
 		}
-		runner.runtime.PublishStructuredEvent(Event{Kind: "macro.recording", Lifecycle: "captured", Text: "board relay edge captured"})
+		runner.runtime.PublishStructuredEvent(Event{
+			Kind: "macro.recording", Lifecycle: "captured", State: "recording",
+			Text: "board relay edge captured",
+			Metadata: map[string]string{
+				"macro_mode": runner.recording.Mode,
+				"steps":      strconv.Itoa(runner.recording.Steps),
+			},
+		})
 		return
 	}
 	if !runner.recordRelayClock {

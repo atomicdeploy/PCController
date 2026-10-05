@@ -171,6 +171,14 @@ func TestHostRecordingMixedOutputsRoundTripsNamedPlayback(t *testing.T) {
 	if got := runner.Snapshot().Recording.Steps; got != len(inputs) {
 		t.Fatalf("live snapshot steps=%d", got)
 	}
+	preview := runner.Snapshot().Recording.Preview
+	if len(preview) != len(inputs) || preview[0].Kind != "pwm" || preview[2].Kind != "beep" {
+		t.Fatalf("live recording preview=%#v", preview)
+	}
+	preview[0].Kind = "mutated"
+	if runner.Snapshot().Recording.Preview[0].Kind != "pwm" {
+		t.Fatal("live recording preview aliased recorder-owned steps")
+	}
 	macro, err := runner.StopRecording(true)
 	if err != nil {
 		t.Fatal(err)
