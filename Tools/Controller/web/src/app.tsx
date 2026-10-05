@@ -1401,6 +1401,17 @@ export default function App() {
           status: (update, source) => {
             statusFrames?.enqueue(source.generation, update)
           },
+		  snapshot: (value, source) => {
+			const previous = snapshotRef.current
+			const next = mergeStatusLEDSnapshot(previous, value, {
+				epoch: source.generation,
+				instanceID: value.host_instance_id,
+				authoritativeInstanceID: source.instanceID,
+			})
+			snapshotRef.current = next
+			setSnapshot(next)
+			setSamples((current) => metricSamplesAfterSnapshot(current, previous, next))
+		  },
           event: (event, source: StreamSource) => {
 			const adoptedSource = advanceStatusLEDSource(
 				{ epoch: ledTransportEpoch.current, instanceID: ledTransportInstanceID.current },

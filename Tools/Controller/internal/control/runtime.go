@@ -1893,7 +1893,19 @@ func (runtime *Runtime) RefreshFrontPanel(ctx context.Context) (native.FrontPane
 	if err != nil {
 		return native.FrontPanel{}, err
 	}
-	return native.ParseFrontPanel(frame.Payload)
+	panel, err := native.ParseFrontPanel(frame.Payload)
+	if err != nil {
+		return native.FrontPanel{}, err
+	}
+	// The response observer has already installed the exact panel snapshot.
+	// Publish a state edge as well so every subscribed client receives the new
+	// authority; the client that requested the read must not be the only one to
+	// leave its stale/manual-refresh state.
+	runtime.PublishStructuredEvent(Event{
+		Kind: "front_panel.changed", Stream: EventStreamState,
+		Text: "exact front-panel state refreshed",
+	})
+	return panel, nil
 }
 
 func (runtime *Runtime) WriteRaw(data []byte) error {

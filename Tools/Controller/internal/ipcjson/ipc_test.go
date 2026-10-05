@@ -1482,6 +1482,37 @@ func TestIlluminationStatePushReachesTwoIndependentWebSocketClients(t *testing.T
 				break
 			}
 		}
+		for {
+			_, data, err := connection.Read(ctx)
+			if err != nil {
+				t.Fatalf("client %d snapshot: %v", index, err)
+			}
+			if strings.Contains(string(data), `"method":"controller.snapshot"`) {
+				if !strings.Contains(string(data), `"host_instance_id"`) &&
+					!strings.Contains(string(data), `"connected":false`) {
+					t.Fatalf("client %d snapshot=%s", index, data)
+				}
+				break
+			}
+		}
+	}
+}
+
+func TestEventUpdatesClientSnapshotSelectsAuthorityEdgesWithoutAmplifyingFrames(t *testing.T) {
+	for _, kind := range []string{
+		"door", "relay", "pwm", "front_panel.changed", "settings.changed",
+		"illumination.changed", "connection", "usb.reconnected", "macro.completed",
+	} {
+		if !eventUpdatesClientSnapshot(controllerapi.Event{Kind: kind}) {
+			t.Errorf("%s did not request a pushed snapshot", kind)
+		}
+	}
+	for _, kind := range []string{
+		"front_panel.segment", "status_led.changed", "buzzer.note", "telemetry", "rx",
+	} {
+		if eventUpdatesClientSnapshot(controllerapi.Event{Kind: kind}) {
+			t.Errorf("%s amplified a full snapshot", kind)
+		}
 	}
 }
 

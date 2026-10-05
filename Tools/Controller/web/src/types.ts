@@ -209,6 +209,8 @@ export interface Snapshot {
   hardware_problems?: HardwareProblem[]
   front_panel?: FrontPanelState
   have_front_panel?: boolean
+  /** True when the changed-only physical segment fields are authoritative. */
+  have_front_panel_segments?: boolean
   front_panel_updated?: string
 	status_led?: StatusLEDState
 	have_status_led?: boolean

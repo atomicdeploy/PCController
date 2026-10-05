@@ -1191,9 +1191,21 @@ opcode trace events. Subscribe to `opcodes` for opaque unsolicited frames and
 storage and ordinary TUI, WebUI, and secondary-console logs consume `activity`
 only; diagnostic monitors may deliberately request the noisier streams.
 
+Low-rate activity/state edges that change cached controller authority (for
+example relay, door, PWM selection, settings, illumination, connection, macro,
+and an exact front-panel read) are immediately followed by a
+`controller.snapshot` notification on the same subscribed connection. Clients
+apply that pushed snapshot instead of issuing a manual refresh. High-rate
+`front_panel.segment` and `status_led.changed` events remain compact patches so
+animation does not amplify full snapshots. A snapshot distinguishes
+`have_front_panel` (all LCD/menu/key fields are exact) from
+`have_front_panel_segments` (the physical four digits and brightness are exact);
+rendering the latter must not imply authority for the former.
+
 ```json
 {"jsonrpc":"2.0","method":"controller.event","params":{}}
 {"jsonrpc":"2.0","method":"controller.state","params":{}}
+{"jsonrpc":"2.0","method":"controller.snapshot","params":{}}
 {"jsonrpc":"2.0","method":"controller.debug","params":{}}
 {"jsonrpc":"2.0","method":"controller.opcode","params":{"opcode":225,"payload":"qrs="}}
 {"jsonrpc":"2.0","method":"controller.status","params":{}}
