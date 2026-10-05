@@ -133,6 +133,12 @@ func TestHostInstanceRecordResolvesAuthenticatedPrimaryAtDifferentEndpoint(t *te
 		record.DelegationToken == configured.AuthToken || record.Surface != "web" {
 		t.Fatalf("resolved record=%#v", record)
 	}
+	if err := selectHostUpdatePrimary(resolveContext, paths); err != nil {
+		t.Fatalf("select live update primary: %v", err)
+	}
+	if got := currentPrimaryEndpoint(); got != recordPrimaryEndpoint(record) {
+		t.Fatalf("update primary did not select the authenticated live endpoint")
+	}
 	fields["instance_id"] = json.RawMessage(`""`)
 	content, err = json.Marshal(fields)
 	if err != nil {
@@ -143,6 +149,13 @@ func TestHostInstanceRecordResolvesAuthenticatedPrimaryAtDifferentEndpoint(t *te
 	}
 	if _, err := readHostInstanceRecord(paths.RecordPath); err == nil {
 		t.Fatal("host record without a required instance identity was accepted")
+	}
+	before := currentPrimaryEndpoint()
+	if err := selectHostUpdatePrimary(resolveContext, paths); err == nil {
+		t.Fatal("update accepted an invalid host identity")
+	}
+	if currentPrimaryEndpoint() != before {
+		t.Fatal("invalid host record changed the update endpoint")
 	}
 }
 
