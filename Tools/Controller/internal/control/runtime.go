@@ -64,6 +64,7 @@ type Snapshot struct {
 	// host process.
 	StatusLEDEpoch    uint64
 	StatusLEDRevision uint64
+	Motion            MotionSnapshot
 	ProgramState      ProgramStateSnapshot
 	RFLearning        RFLearnState
 	Macros            MacroSnapshot
@@ -72,6 +73,25 @@ type Snapshot struct {
 	EmergencyStop     EmergencyStopState      `json:"emergency_stop"`
 	HardwareProblems  []ports.HardwareProblem `json:"hardware_problems,omitempty"`
 	PortProcess       PortProcessSnapshot     `json:"port_process"`
+}
+
+// MotionSideState separates a user's semantic seat request from the exact
+// relay mask currently applied by the board. During a safe direction reversal
+// the enable relay must briefly drop; Transitioning keeps presentation clients
+// on the requested direction without hiding the raw relay edge stream.
+type MotionSideState struct {
+	Requested     string    `json:"requested"`
+	Applied       string    `json:"applied"`
+	Transitioning bool      `json:"transitioning"`
+	Revision      uint64    `json:"revision"`
+	UpdatedAt     time.Time `json:"updated_at,omitempty"`
+}
+
+// MotionSnapshot is the coordinator-owned semantic state for both interlocked
+// motion sides. Raw electrical truth remains available in Status.ActiveRelays.
+type MotionSnapshot struct {
+	Left  MotionSideState `json:"left"`
+	Right MotionSideState `json:"right"`
 }
 
 type PortProcessSnapshot struct {
@@ -216,6 +236,11 @@ type Runtime struct {
 	haveStatusLED          bool
 	statusLEDUpdated       time.Time
 	statusLEDRevision      uint64
+	motion                 MotionSnapshot
+	motionRevision         uint64
+	motionIntentToken      [2]uint64
+	motionIntentPending    [2]bool
+	motionIntentDeadline   [2]time.Time
 	statusUpdated          time.Time
 	paused                 bool
 	connecting             bool
@@ -662,7 +687,7 @@ func EventStreamForKind(kind string) string {
 		return EventStreamTelemetry
 	case "rx", "tx", "opcode":
 		return EventStreamDebug
-	case "front_panel.segment", "status_led.changed", "pwm.changed", "buzzer.note", "illumination.changed", "settings.changed", "peripherals.changed":
+	case "front_panel.segment", "status_led.changed", "pwm.changed", "buzzer.note", "illumination.changed", "settings.changed", "peripherals.changed", "motion.changed":
 		return EventStreamState
 	}
 	if strings.HasPrefix(kind, "measurement.") || strings.HasSuffix(kind, ".measurement") ||
@@ -780,6 +805,7 @@ func (runtime *Runtime) Snapshot() Snapshot {
 		FrontPanelUpdated:      runtime.frontPanelUpdated,
 		StatusLED:              runtime.statusLED, HaveStatusLED: runtime.haveStatusLED,
 		StatusLEDUpdated: runtime.statusLEDUpdated, StatusLEDRevision: runtime.statusLEDRevision,
+		Motion:           runtime.motion,
 		ProgramState:     programState,
 		RFLearning:       rfLearning,
 		EmergencyStop:    emergencyStop,
@@ -1112,6 +1138,16 @@ func (runtime *Runtime) clearPeerStateLocked() {
 	runtime.statusLED = native.StatusLEDState{}
 	runtime.haveStatusLED = false
 	runtime.statusLEDUpdated = time.Time{}
+	runtime.clearMotionLocked()
+}
+
+func (runtime *Runtime) clearMotionLocked() {
+	runtime.motion = MotionSnapshot{}
+	for side := range runtime.motionIntentPending {
+		runtime.motionIntentToken[side]++
+		runtime.motionIntentPending[side] = false
+		runtime.motionIntentDeadline[side] = time.Time{}
+	}
 }
 
 func (runtime *Runtime) SetFilter(filter ports.Filter) {
@@ -1849,12 +1885,177 @@ func (runtime *Runtime) Command(
 	opcode byte,
 	payload []byte,
 ) error {
+	motionSide, motionValue, tracksMotion := motionIntentFromCommand(opcode, payload)
+	var motionToken uint64
+	if tracksMotion {
+		motionToken = runtime.beginMotionIntent(motionSide, motionValue)
+	}
 	frame, err := runtime.Request(ctx, opcode, payload, native.OpACK)
 	if err != nil {
+		if tracksMotion {
+			runtime.rollbackMotionIntent(motionSide, motionToken)
+		}
 		return err
 	}
 	runtime.publishCommandEvidence(acknowledgedCommandEvidence(ctx, opcode, payload, frame))
 	return nil
+}
+
+const motionIntentTimeout = time.Second
+
+func motionIntentFromCommand(opcode byte, payload []byte) (byte, string, bool) {
+	if opcode != native.OpRelaySide || len(payload) != 2 || payload[0] > 1 || payload[1] > 2 {
+		return 0, "", false
+	}
+	return payload[0], motionName(payload[1]), true
+}
+
+func motionName(value byte) string {
+	switch value {
+	case 1:
+		return "up"
+	case 2:
+		return "down"
+	default:
+		return "stop"
+	}
+}
+
+func motionAppliedFromMask(mask byte, side byte) string {
+	directionBit := side * 2
+	enableBit := directionBit + 1
+	if mask&(1<<enableBit) == 0 {
+		return "stop"
+	}
+	if mask&(1<<directionBit) != 0 {
+		return "down"
+	}
+	return "up"
+}
+
+func (runtime *Runtime) motionSideLocked(side byte) *MotionSideState {
+	if side == 1 {
+		return &runtime.motion.Right
+	}
+	return &runtime.motion.Left
+}
+
+func motionPresentationEqual(left, right MotionSideState) bool {
+	return left.Requested == right.Requested &&
+		left.Applied == right.Applied &&
+		left.Transitioning == right.Transitioning
+}
+
+func (runtime *Runtime) stampMotionLocked(state *MotionSideState, now time.Time) {
+	runtime.motionRevision++
+	state.Revision = runtime.motionRevision
+	state.UpdatedAt = now
+}
+
+func (runtime *Runtime) beginMotionIntent(side byte, requested string) uint64 {
+	now := time.Now()
+	runtime.mu.Lock()
+	runtime.motionIntentToken[side]++
+	token := runtime.motionIntentToken[side]
+	state := runtime.motionSideLocked(side)
+	before := *state
+	if state.Applied == "" {
+		state.Applied = motionAppliedFromMask(runtime.status.ActiveRelays, side)
+	}
+	state.Requested = requested
+	state.Transitioning = state.Applied != requested
+	runtime.motionIntentPending[side] = state.Transitioning
+	if state.Transitioning {
+		runtime.motionIntentDeadline[side] = now.Add(motionIntentTimeout)
+	} else {
+		runtime.motionIntentDeadline[side] = time.Time{}
+	}
+	changed := !motionPresentationEqual(before, *state)
+	if changed {
+		runtime.stampMotionLocked(state, now)
+	}
+	next := *state
+	runtime.mu.Unlock()
+	if changed {
+		runtime.publishMotionState(side, next, "host")
+	}
+	return token
+}
+
+func (runtime *Runtime) rollbackMotionIntent(side byte, token uint64) {
+	now := time.Now()
+	runtime.mu.Lock()
+	if runtime.motionIntentToken[side] != token {
+		runtime.mu.Unlock()
+		return
+	}
+	state := runtime.motionSideLocked(side)
+	before := *state
+	state.Requested = state.Applied
+	state.Transitioning = false
+	runtime.motionIntentPending[side] = false
+	runtime.motionIntentDeadline[side] = time.Time{}
+	changed := !motionPresentationEqual(before, *state)
+	if changed {
+		runtime.stampMotionLocked(state, now)
+	}
+	next := *state
+	runtime.mu.Unlock()
+	if changed {
+		runtime.publishMotionState(side, next, "host")
+	}
+}
+
+// reconcileMotionLocked consumes authoritative electrical feedback without
+// collapsing or delaying the raw relay event. A pending semantic request stays
+// visible through the board's break-before-make edge and settles only when the
+// requested direction is physically applied (or the bounded intent expires).
+func (runtime *Runtime) reconcileMotionLocked(mask byte, now time.Time) {
+	for side := byte(0); side < 2; side++ {
+		state := runtime.motionSideLocked(side)
+		before := *state
+		state.Applied = motionAppliedFromMask(mask, side)
+		if state.Requested == "" {
+			state.Requested = state.Applied
+		}
+		if runtime.motionIntentPending[side] {
+			if state.Applied == state.Requested ||
+				(!runtime.motionIntentDeadline[side].IsZero() && !now.Before(runtime.motionIntentDeadline[side])) {
+				if state.Applied != state.Requested {
+					state.Requested = state.Applied
+				}
+				state.Transitioning = false
+				runtime.motionIntentPending[side] = false
+				runtime.motionIntentDeadline[side] = time.Time{}
+			} else {
+				state.Transitioning = true
+			}
+		} else {
+			state.Requested = state.Applied
+			state.Transitioning = false
+		}
+		if motionPresentationEqual(before, *state) {
+			continue
+		}
+		runtime.stampMotionLocked(state, now)
+		runtime.publishMotionState(side, *state, "board")
+	}
+}
+
+func (runtime *Runtime) publishMotionState(side byte, state MotionSideState, source string) {
+	name := map[bool]string{true: "right", false: "left"}[side == 1]
+	runtime.publishEvent(Event{
+		Kind: "motion.changed", Stream: EventStreamState,
+		Text:   fmt.Sprintf("seat %s requested=%s applied=%s transitioning=%t", name, state.Requested, state.Applied, state.Transitioning),
+		Source: source, Target: "app.clients", MessageType: "event",
+		Metadata: map[string]string{
+			"side":          name,
+			"requested":     state.Requested,
+			"applied":       state.Applied,
+			"transitioning": strconv.FormatBool(state.Transitioning),
+			"revision":      strconv.FormatUint(state.Revision, 10),
+		},
+	})
 }
 
 // SetRelay applies one relay mutation and, for the directly latched general
@@ -2301,6 +2502,7 @@ func (runtime *Runtime) attachWhen(result link.OpenResult, allowed func() bool) 
 	runtime.statusLED = native.StatusLEDState{}
 	runtime.haveStatusLED = false
 	runtime.statusLEDUpdated = time.Time{}
+	runtime.clearMotionLocked()
 	runtime.connectionState = "connected"
 	runtime.connectionReason = ""
 	runtime.connectionUpdated = time.Now()
@@ -3105,6 +3307,7 @@ func (runtime *Runtime) observeLocked(frame native.Frame) uint64 {
 			runtime.status = status
 			runtime.haveStatus = true
 			runtime.statusUpdated = now
+			runtime.reconcileMotionLocked(status.ActiveRelays, now)
 			runtime.recordStatus(now, status)
 		}
 	case native.OpSettings:
@@ -3163,7 +3366,9 @@ func (runtime *Runtime) observeLocked(frame native.Frame) uint64 {
 				runtime.statusUpdated = time.Now()
 			case native.EventRelay:
 				runtime.status.ActiveRelays = event.RelayMask
-				runtime.statusUpdated = time.Now()
+				now := time.Now()
+				runtime.statusUpdated = now
+				runtime.reconcileMotionLocked(event.RelayMask, now)
 			case native.EventAlert:
 				if event.AlertKind == native.AlertHot {
 					runtime.status.Hot = event.AlertActive

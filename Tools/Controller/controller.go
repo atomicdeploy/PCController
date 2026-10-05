@@ -62,6 +62,8 @@ type (
 	StatusLEDPolicy           = appconfig.StatusLEDPolicy
 	StatusLEDVisual           = appconfig.StatusLEDVisual
 	RGBColor                  = appconfig.RGBColor
+	MotionSideState           = control.MotionSideState
+	MotionSnapshot            = control.MotionSnapshot
 	OutputStreamState         = control.OutputStreamState
 	StatusSample              = control.StatusSample
 	TimelineEntry             = control.TimelineEntry
@@ -479,6 +481,7 @@ type Snapshot struct {
 	HaveStatusLED            bool                            `json:"have_status_led"`
 	StatusLEDUpdated         time.Time                       `json:"status_led_updated,omitempty"`
 	StatusLEDRevision        uint64                          `json:"status_led_revision,omitempty"`
+	Motion                   MotionSnapshot                  `json:"motion"`
 	Outputs                  OutputStreamState               `json:"outputs"`
 	StripEffects             []control.StripEffectDescriptor `json:"strip_effects,omitempty"`
 	Illumination             IlluminationState               `json:"illumination"`
@@ -2294,6 +2297,7 @@ func (client *Client) Snapshot() Snapshot {
 		HaveStatusLED:          snapshot.HaveStatusLED,
 		StatusLEDUpdated:       snapshot.StatusLEDUpdated,
 		StatusLEDRevision:      snapshot.StatusLEDRevision,
+		Motion:                 snapshot.Motion,
 		Outputs:                client.outputs.State(),
 		StripEffects:           stripEffects,
 		Illumination:           illumination,
