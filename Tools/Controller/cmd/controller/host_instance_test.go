@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -136,7 +137,7 @@ func TestHostInstanceRecordResolvesAuthenticatedPrimaryAtDifferentEndpoint(t *te
 	if err := selectHostUpdatePrimary(resolveContext, paths); err != nil {
 		t.Fatalf("select live update primary: %v", err)
 	}
-	if got := currentPrimaryEndpoint(); got != recordPrimaryEndpoint(record) {
+	if got := currentPrimaryEndpoint(); !reflect.DeepEqual(got, recordPrimaryEndpoint(record)) {
 		t.Fatalf("update primary did not select the authenticated live endpoint")
 	}
 	fields["instance_id"] = json.RawMessage(`""`)
@@ -154,7 +155,7 @@ func TestHostInstanceRecordResolvesAuthenticatedPrimaryAtDifferentEndpoint(t *te
 	if err := selectHostUpdatePrimary(resolveContext, paths); err == nil {
 		t.Fatal("update accepted an invalid host identity")
 	}
-	if currentPrimaryEndpoint() != before {
+	if !reflect.DeepEqual(currentPrimaryEndpoint(), before) {
 		t.Fatal("invalid host record changed the update endpoint")
 	}
 }
