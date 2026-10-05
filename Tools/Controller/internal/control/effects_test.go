@@ -257,6 +257,69 @@ func TestEffectAndGroupPresentationRemainPCControllerOwned(t *testing.T) {
 	}
 }
 
+func TestEffectGroupsPersistWithoutEffectsAndSurviveExportImport(t *testing.T) {
+	runtime := New(Options{})
+	t.Cleanup(func() { _ = runtime.Close() })
+	config := appconfig.Defaults()
+	config.Macros, config.StripEffects = nil, nil
+	engine := NewCommandEngine(runtime, CommandOptions{
+		Macros:     func() []appconfig.Macro { return config.Macros },
+		HostConfig: func() appconfig.Config { return config },
+		UpdateHostConfig: func(change func(*appconfig.Config) error) error {
+			candidate := config
+			candidate.EffectGroups = make(map[string]appconfig.EffectGroup)
+			for name, group := range config.EffectGroups {
+				candidate.EffectGroups[name] = group
+			}
+			if err := change(&candidate); err != nil {
+				return err
+			}
+			if err := candidate.Validate(); err != nil {
+				return err
+			}
+			config = candidate
+			return nil
+		},
+	})
+	if _, err := engine.Execute(context.Background(), `effect group create "Cinema lighting" lamp`); err != nil {
+		t.Fatal(err)
+	}
+	if len(config.Macros) != 0 || len(config.StripEffects) != 0 {
+		t.Fatal("creating a group created an effect")
+	}
+	if _, err := engine.Execute(context.Background(), `effect group create "cinema lighting" -`); err == nil {
+		t.Fatal("duplicate group accepted")
+	}
+	if _, err := engine.Execute(context.Background(), `effect group update "Cinema lighting" Lighting -`); err != nil {
+		t.Fatal(err)
+	}
+	listed, err := engine.Execute(context.Background(), "effect group list")
+	if err != nil || !strings.Contains(listed, `"name":"Lighting"`) {
+		t.Fatalf("groups=%s err=%v", listed, err)
+	}
+	if len(runtime.Snapshot().EffectGroups) != 1 {
+		t.Fatal("empty group missing from live snapshot")
+	}
+	exported, err := engine.Execute(context.Background(), "effect export")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document effectDocument
+	if err := json.Unmarshal([]byte(exported), &document); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := document.Groups["Lighting"]; !exists {
+		t.Fatal("empty group lost during export")
+	}
+	config.EffectGroups = nil
+	if err := importEffectDocument(document, true, func(change func(*appconfig.Config) error) error { return change(&config) }); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := config.EffectGroups["Lighting"]; !exists {
+		t.Fatal("empty group lost during import")
+	}
+}
+
 func TestEffectDocumentRejectsTrailingJSON(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "effects.json")
 	if err := os.WriteFile(path, []byte(`{"effects":[{"id":"1","name":"One","kind":"sequence"}]} {}`), 0o600); err != nil {

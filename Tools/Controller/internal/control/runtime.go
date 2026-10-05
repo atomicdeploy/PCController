@@ -68,6 +68,7 @@ type Snapshot struct {
 	RFLearning        RFLearnState
 	Macros            MacroSnapshot
 	Effects           []EffectDescriptor
+	EffectGroups      []EffectGroupDescriptor
 	EmergencyStop     EmergencyStopState      `json:"emergency_stop"`
 	HardwareProblems  []ports.HardwareProblem `json:"hardware_problems,omitempty"`
 	PortProcess       PortProcessSnapshot     `json:"port_process"`
@@ -787,6 +788,7 @@ func (runtime *Runtime) Snapshot() Snapshot {
 	}
 	if runtime.macroRunner != nil {
 		snapshot.Effects = runtime.macroRunner.EffectCatalog()
+		snapshot.EffectGroups = runtime.macroRunner.EffectGroups()
 	}
 	return snapshot
 }

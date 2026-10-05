@@ -231,6 +231,15 @@ func (runner *MacroRunner) EffectCatalog() []EffectDescriptor {
 	return EffectCatalogWithGroups(runner.List(), config.StripEffects, config.EffectGroups)
 }
 
+func (runner *MacroRunner) EffectGroups() []EffectGroupDescriptor {
+	config := appconfig.Defaults()
+	if runner.hostConfig != nil {
+		config = runner.hostConfig()
+	}
+	config.Macros = runner.List()
+	return EffectGroupCatalog(config)
+}
+
 func (runner *MacroRunner) UpdateMetadata(reference, field, value string) (appconfig.Macro, error) {
 	if runner.updateHostConfig == nil {
 		return appconfig.Macro{}, errors.New("macro persistence is unavailable")

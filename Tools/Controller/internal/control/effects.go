@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -43,7 +44,40 @@ type EffectDescriptor struct {
 // living contract and import validates every definition before changing the
 // active library.
 type effectDocument struct {
-	Effects []EffectDescriptor `json:"effects"`
+	Effects []EffectDescriptor               `json:"effects"`
+	Groups  map[string]appconfig.EffectGroup `json:"groups,omitempty"`
+}
+
+type EffectGroupDescriptor struct {
+	Name string `json:"name"`
+	Icon string `json:"icon,omitempty"`
+}
+
+// Include empty persisted groups and groups already used by effects.
+func EffectGroupCatalog(config appconfig.Config) []EffectGroupDescriptor {
+	groups := make(map[string]EffectGroupDescriptor)
+	add := func(name, icon string) {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return
+		}
+		key := strings.ToLower(name)
+		if _, exists := groups[key]; !exists || icon != "" {
+			groups[key] = EffectGroupDescriptor{Name: name, Icon: icon}
+		}
+	}
+	for _, effect := range EffectCatalog(config.Macros, config.StripEffects) {
+		add(effect.Category, "")
+	}
+	for name, group := range config.EffectGroups {
+		add(name, group.Icon)
+	}
+	result := make([]EffectGroupDescriptor, 0, len(groups))
+	for _, group := range groups {
+		result = append(result, group)
+	}
+	sort.Slice(result, func(i, j int) bool { return strings.ToLower(result[i].Name) < strings.ToLower(result[j].Name) })
+	return result
 }
 
 func EffectCatalog(macros []appconfig.Macro, strips []appconfig.StripEffect) []EffectDescriptor {
@@ -380,6 +414,9 @@ func importEffectDocument(document effectDocument, replace bool, updateHostConfi
 			names[nameKey] = struct{}{}
 		}
 		groups := make(map[string]appconfig.EffectGroup)
+		for name, group := range document.Groups {
+			groups[name] = group
+		}
 		for _, effect := range document.Effects {
 			if strings.TrimSpace(effect.Category) != "" && strings.TrimSpace(effect.GroupIcon) != "" {
 				groups[effect.Category] = appconfig.EffectGroup{Icon: effect.GroupIcon}
@@ -771,8 +808,39 @@ func effectCommand(
 		}
 		return fmt.Sprintf("effect %s icon updated", effect.Reference), nil
 	case "group":
+		if len(args) == 2 && strings.EqualFold(args[1], "list") {
+			encoded, err := json.Marshal(EffectGroupCatalog(config))
+			return string(encoded), err
+		}
+		if len(args) == 4 && strings.EqualFold(args[1], "create") {
+			name, icon := strings.TrimSpace(args[2]), strings.TrimSpace(args[3])
+			if name == "" {
+				return "", errors.New("effect group name must not be blank")
+			}
+			if icon == "-" {
+				icon = ""
+			}
+			if updateHostConfig == nil {
+				return "", errors.New("effect persistence is unavailable")
+			}
+			if err := updateHostConfig(func(config *appconfig.Config) error {
+				for _, group := range EffectGroupCatalog(*config) {
+					if strings.EqualFold(group.Name, name) {
+						return fmt.Errorf("effect group %q already exists", name)
+					}
+				}
+				if config.EffectGroups == nil {
+					config.EffectGroups = make(map[string]appconfig.EffectGroup)
+				}
+				config.EffectGroups[name] = appconfig.EffectGroup{Icon: icon}
+				return nil
+			}); err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("effect group %q created", name), nil
+		}
 		if len(args) != 5 || !strings.EqualFold(args[1], "update") {
-			return "", errors.New("usage: effect group update CURRENT_CATEGORY NEW_CATEGORY ICON_OR_DASH")
+			return "", errors.New("usage: effect group list|create NAME ICON_OR_DASH|update CURRENT_GROUP NEW_GROUP ICON_OR_DASH")
 		}
 		current, next, icon := strings.TrimSpace(args[2]), strings.TrimSpace(args[3]), strings.TrimSpace(args[4])
 		if current == "" || next == "" {
@@ -786,6 +854,18 @@ func effectCommand(
 		}
 		changed := 0
 		if err := updateHostConfig(func(config *appconfig.Config) error {
+			found := false
+			for _, group := range EffectGroupCatalog(*config) {
+				if strings.EqualFold(group.Name, current) {
+					found = true
+				}
+				if !strings.EqualFold(current, next) && strings.EqualFold(group.Name, next) {
+					return fmt.Errorf("effect group %q already exists", next)
+				}
+			}
+			if !found {
+				return fmt.Errorf("effect group %q is not configured", current)
+			}
 			for index := range config.Macros {
 				if strings.EqualFold(strings.TrimSpace(config.Macros[index].Category), current) {
 					config.Macros[index].Category = next
@@ -798,9 +878,6 @@ func effectCommand(
 					changed++
 				}
 			}
-			if changed == 0 {
-				return fmt.Errorf("effect group %q is not configured", current)
-			}
 			if config.EffectGroups == nil {
 				config.EffectGroups = make(map[string]appconfig.EffectGroup)
 			}
@@ -809,9 +886,7 @@ func effectCommand(
 					delete(config.EffectGroups, category)
 				}
 			}
-			if icon != "" {
-				config.EffectGroups[next] = appconfig.EffectGroup{Icon: icon}
-			}
+			config.EffectGroups[next] = appconfig.EffectGroup{Icon: icon}
 			return nil
 		}); err != nil {
 			return "", err
@@ -916,7 +991,7 @@ func effectCommand(
 		if len(args) > 2 {
 			return "", errors.New("usage: effect export [PATH]")
 		}
-		document := effectDocument{Effects: catalog}
+		document := effectDocument{Effects: catalog, Groups: config.EffectGroups}
 		if len(args) == 1 {
 			encoded, err := json.MarshalIndent(document, "", "  ")
 			return string(encoded), err

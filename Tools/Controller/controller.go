@@ -469,6 +469,7 @@ type Snapshot struct {
 	RFLearning               RFLearnState                    `json:"rf_learning"`
 	Macros                   control.MacroSnapshot           `json:"macros"`
 	Effects                  []control.EffectDescriptor      `json:"effects"`
+	EffectGroups             []control.EffectGroupDescriptor `json:"effect_groups"`
 	HardwareProblems         []HardwareProblem               `json:"hardware_problems,omitempty"`
 	FrontPanel               FrontPanel                      `json:"front_panel"`
 	HaveFrontPanel           bool                            `json:"have_front_panel"`
@@ -2282,6 +2283,7 @@ func (client *Client) Snapshot() Snapshot {
 		// snapshot cannot drift from `effect list` when a new installation receives
 		// the editable JSON seed catalog through the effective configuration path.
 		Effects:           snapshot.Effects,
+		EffectGroups:      snapshot.EffectGroups,
 		HardwareProblems:  snapshot.HardwareProblems,
 		FrontPanel:        snapshot.FrontPanel,
 		HaveFrontPanel:    snapshot.HaveFrontPanel,

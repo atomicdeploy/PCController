@@ -312,9 +312,9 @@ type StripEffect struct {
 	DefaultPixels     int          `json:"default_pixels,omitempty"`
 }
 
-// EffectGroup is PCController-owned presentation metadata for a category.
-// Category membership remains on each effect so effects.json stays portable;
-// this record gives every consumer one durable custom parent icon.
+// EffectGroup is a PCController-owned group record, including empty groups.
+// Membership remains on each effect. effects.json includes these records so
+// empty groups and parent icons survive export/import as well as restart.
 type EffectGroup struct {
 	Icon string `json:"icon,omitempty"`
 }

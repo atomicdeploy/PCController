@@ -88,37 +88,38 @@ type remotePortWire struct {
 }
 
 type remoteSnapshotWire struct {
-	HostInstanceID           string                       `json:"host_instance_id,omitempty"`
-	Connected                bool                         `json:"connected"`
-	Paused                   bool                         `json:"paused"`
-	Port                     remotePortWire               `json:"port"`
-	Hello                    native.Hello                 `json:"hello"`
-	Status                   native.Status                `json:"status"`
-	Settings                 remoteSettingsWire           `json:"settings"`
-	HaveStatus               bool                         `json:"have_status"`
-	HaveSettings             bool                         `json:"have_settings"`
-	StatusUpdated            time.Time                    `json:"status_updated,omitempty"`
-	ConnectionState          string                       `json:"connection_state"`
-	ConnectionReason         string                       `json:"connection_reason,omitempty"`
-	ConnectionUpdated        time.Time                    `json:"connection_updated,omitempty"`
-	ConnectionPhase          string                       `json:"connection_phase"`
-	ConnectionAttempt        uint64                       `json:"connection_attempt,omitempty"`
-	ConnectionAttemptStarted time.Time                    `json:"connection_attempt_started,omitempty"`
-	ConnectionNextRetry      time.Time                    `json:"connection_next_retry,omitempty"`
-	ConnectionRetryDelayMS   int64                        `json:"connection_retry_delay_ms,omitempty"`
-	ConnectionCandidate      remotePortWire               `json:"connection_candidate"`
-	FrontPanel               native.FrontPanel            `json:"front_panel"`
-	HaveFrontPanel           bool                         `json:"have_front_panel"`
-	FrontPanelUpdated        time.Time                    `json:"front_panel_updated,omitempty"`
-	StatusLED                native.StatusLEDState        `json:"status_led"`
-	HaveStatusLED            bool                         `json:"have_status_led"`
-	StatusLEDUpdated         time.Time                    `json:"status_led_updated,omitempty"`
-	StatusLEDRevision        uint64                       `json:"status_led_revision,omitempty"`
-	ProgramState             control.ProgramStateSnapshot `json:"program_state"`
-	RFLearning               control.RFLearnState         `json:"rf_learning"`
-	Macros                   control.MacroSnapshot        `json:"macros"`
-	Effects                  []control.EffectDescriptor   `json:"effects"`
-	HardwareProblems         []ports.HardwareProblem      `json:"hardware_problems,omitempty"`
+	HostInstanceID           string                          `json:"host_instance_id,omitempty"`
+	Connected                bool                            `json:"connected"`
+	Paused                   bool                            `json:"paused"`
+	Port                     remotePortWire                  `json:"port"`
+	Hello                    native.Hello                    `json:"hello"`
+	Status                   native.Status                   `json:"status"`
+	Settings                 remoteSettingsWire              `json:"settings"`
+	HaveStatus               bool                            `json:"have_status"`
+	HaveSettings             bool                            `json:"have_settings"`
+	StatusUpdated            time.Time                       `json:"status_updated,omitempty"`
+	ConnectionState          string                          `json:"connection_state"`
+	ConnectionReason         string                          `json:"connection_reason,omitempty"`
+	ConnectionUpdated        time.Time                       `json:"connection_updated,omitempty"`
+	ConnectionPhase          string                          `json:"connection_phase"`
+	ConnectionAttempt        uint64                          `json:"connection_attempt,omitempty"`
+	ConnectionAttemptStarted time.Time                       `json:"connection_attempt_started,omitempty"`
+	ConnectionNextRetry      time.Time                       `json:"connection_next_retry,omitempty"`
+	ConnectionRetryDelayMS   int64                           `json:"connection_retry_delay_ms,omitempty"`
+	ConnectionCandidate      remotePortWire                  `json:"connection_candidate"`
+	FrontPanel               native.FrontPanel               `json:"front_panel"`
+	HaveFrontPanel           bool                            `json:"have_front_panel"`
+	FrontPanelUpdated        time.Time                       `json:"front_panel_updated,omitempty"`
+	StatusLED                native.StatusLEDState           `json:"status_led"`
+	HaveStatusLED            bool                            `json:"have_status_led"`
+	StatusLEDUpdated         time.Time                       `json:"status_led_updated,omitempty"`
+	StatusLEDRevision        uint64                          `json:"status_led_revision,omitempty"`
+	ProgramState             control.ProgramStateSnapshot    `json:"program_state"`
+	RFLearning               control.RFLearnState            `json:"rf_learning"`
+	Macros                   control.MacroSnapshot           `json:"macros"`
+	Effects                  []control.EffectDescriptor      `json:"effects"`
+	EffectGroups             []control.EffectGroupDescriptor `json:"effect_groups"`
+	HardwareProblems         []ports.HardwareProblem         `json:"hardware_problems,omitempty"`
 }
 
 type remoteUISettingsWire struct {
@@ -386,7 +387,7 @@ func (client *remoteTUIIPC) Snapshot(ctx context.Context) (control.Snapshot, err
 			FrontPanelUpdated: wire.FrontPanelUpdated, StatusLED: wire.StatusLED,
 			HaveStatusLED: wire.HaveStatusLED, StatusLEDUpdated: wire.StatusLEDUpdated,
 			StatusLEDEpoch: epoch, StatusLEDRevision: wire.StatusLEDRevision,
-			ProgramState: wire.ProgramState, RFLearning: wire.RFLearning, Macros: wire.Macros, Effects: wire.Effects,
+			ProgramState: wire.ProgramState, RFLearning: wire.RFLearning, Macros: wire.Macros, Effects: wire.Effects, EffectGroups: wire.EffectGroups,
 			HardwareProblems: wire.HardwareProblems,
 		}, nil
 	}

@@ -440,6 +440,7 @@ export function parseArguments(argv, env = process.env) {
 		vet: true,
 		resources: true,
 		upx: true,
+		stageOnly: false,
 		sharedLibrary: true,
 		compilerBootstrap: true,
 		verbose: false,
@@ -514,6 +515,7 @@ export function parseArguments(argv, env = process.env) {
 			case '--skip-resources':
 			case '--no-resources': options.resources = false; break
 			case '--no-upx': options.upx = false; break
+			case '--stage-only': options.stageOnly = true; break
 			case '--no-shared-library': options.sharedLibrary = false; break
 			case '--no-compiler-bootstrap': options.compilerBootstrap = false; break
 			case '--verbose': options.verbose = true; break
@@ -641,6 +643,9 @@ export function parseArguments(argv, env = process.env) {
 	}
 	if ((options.upload || options.installBootloader) && options.selection === 'host') {
 		throw new BuildError('--host-only cannot be combined with programming', 2)
+	}
+	if (options.stageOnly && (!options.host || options.firmware || options.upload)) {
+		throw new BuildError('--stage-only requires --host-only and cannot program firmware', 2)
 	}
 	if (options.upload) {
 		options.firmware = true
@@ -898,6 +903,7 @@ Safe build options:
   --skip-vet                Explicitly skip Go vet only
   --skip-resources          Build Windows host without regenerated resources
   --no-upx                  Leave Windows controller executable unpacked
+  --stage-only              Prepare host package for coordinator-owned update, without replacing the running package
   --no-shared-library       Skip C ABI library/header/smoke test
   --no-compiler-bootstrap   Do not install a missing native Windows C compiler
   --version VALUE           Host version identity (default: product metadata)
@@ -2330,6 +2336,10 @@ function buildHost(options, identity, env, log, embeddedDefaults = { enabled: fa
 		], { cwd: stage, env, verbose: options.verbose })
 	}
 	log.stage('📤', 'Publishing the canonical host package')
+	if (options.stageOnly) {
+		log.success(`Staged host package: ${relative(PROJECT_ROOT, stage)}`)
+		return executable
+	}
 	installPackage(stage)
 	removeGeneratedTree(stage)
 	removeStaleHostOutputs(log)
