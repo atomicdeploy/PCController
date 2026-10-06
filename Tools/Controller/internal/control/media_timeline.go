@@ -157,6 +157,9 @@ func compileMediaTimeline(plan MediaTimelinePlan, runner *MacroRunner) ([]mediaT
 			if err != nil {
 				return nil, err
 			}
+			if macro.Mode == macroModeMCU {
+				return nil, fmt.Errorf("effect %s explicitly requires MCU execution; absolute media-epoch scheduling is not advertised yet (choose auto/host explicitly)", cue.Reference)
+			}
 			if macro.BoardProfileKey != "" {
 				key, mode := runner.activeBoardProfile()
 				if key != macro.BoardProfileKey || mode != macro.BoardProfileMode {

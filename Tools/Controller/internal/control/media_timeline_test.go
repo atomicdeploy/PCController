@@ -5,6 +5,7 @@ import (
 	"pccontroller.local/controller/internal/link"
 	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/ports"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -45,6 +46,22 @@ func TestMediaTimelineResumeDoesNotReplayOneShots(t *testing.T) {
 	restored := mediaTimelineRestore(steps, 4)
 	if len(restored) != 2 || restored[0].id != "off" || restored[1].id != "pwm" {
 		t.Fatalf("restore %+v", restored)
+	}
+}
+
+func TestMediaTimelinePreservesExplicitMCUExecutionPolicy(t *testing.T) {
+	macro := appconfig.Macro{ID: 7, Name: "Timing policy", Mode: macroModeMCU,
+		Steps: []appconfig.MacroStep{{Kind: "relay", Target: 7, Value: 1}}}
+	runner := NewMacroRunner(nil, func() []appconfig.Macro { return []appconfig.Macro{macro} }, nil)
+	plan := MediaTimelinePlan{ClientID: "test", Revision: 1,
+		Cues: []MediaTimelineCue{{ID: "cue", Reference: "effect:7", TimeMS: 1000}}}
+	if _, err := compileMediaTimeline(plan, runner); err == nil || !strings.Contains(err.Error(), "MCU execution") {
+		t.Fatalf("explicit MCU policy must not silently become host execution: %v", err)
+	}
+	macro.Mode = macroModeHost
+	steps, err := compileMediaTimeline(plan, runner)
+	if err != nil || len(steps) != 1 || steps[0].dueMS != 1000 {
+		t.Fatalf("explicit host policy should compile: %v %+v", err, steps)
 	}
 }
 

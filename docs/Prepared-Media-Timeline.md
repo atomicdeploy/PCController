@@ -17,6 +17,11 @@ Limits: 4,096 cues, 65,535 compiled commands, 8 MiB prepared-command budget,
 32-bit media milliseconds, bounded strip pixels and frame rate. Capacity errors
 never drop a tail of the effect.
 
+An effect explicitly configured for MCU execution is rejected by this host
+timeline until absolute media-epoch scheduling is advertised by firmware. It is
+never silently downgraded. Choose host/automatic execution explicitly if the
+host-scheduled timing contract is acceptable.
+
 `controller.media.playback.update` now also accepts `epoch` and `plan_revision`.
 Playing against an unprepared/faulted revision or unarmed epoch is rejected.
 A paused update must first arm the cursor. Clock extrapolation retains a Go
