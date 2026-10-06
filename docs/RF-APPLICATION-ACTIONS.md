@@ -33,7 +33,10 @@ Keyboard and external-program actions execute on the **PCController host**, whic
 may differ from the computer displaying Pealayer. Keyboard actions preserve the
 native OS executor and allowlist. The explicit Allow checkbox enables and
 allowlists only the chosen keys. Keys are native virtual-key names such as SPACE,
-F5 or MEDIA_PLAY_PAUSE; modifier chords are not accepted by this existing executor.
+F5 or PLAYPAUSE, or exact modifier chords such as `CTRL+SHIFT+S`. A chord is
+allowlisted as one combination; it does not authorize its individual keys or
+other combinations. Native input presses modifiers first and releases in reverse
+order, including cancellation/error cleanup. Standalone modifiers remain denied.
 Program/script arguments are separate argv entries, not an implicit shell string.
 Program/script tasks use the existing bounded 30-second automation contract.
 Enable **Launch independently** to start an application without waiting for it

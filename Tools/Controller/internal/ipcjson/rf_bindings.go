@@ -156,15 +156,15 @@ func (service *Service) putRFBinding(raw json.RawMessage) (any, error) {
 		}
 		for _, action := range rule.Actions {
 			if action.Type == "virtual-key" && params.AllowKeyboard {
-				key, err := hostos.ResolveVirtualKey(action.VirtualKey)
+				key, err := hostos.ResolveKeyStroke(action.VirtualKey)
 				if err != nil {
 					return err
 				}
 				config.OSActions.VirtualKeys.Enabled = true
 				allowed := false
 				for _, value := range config.OSActions.VirtualKeys.Allowed {
-					resolved, err := hostos.ResolveVirtualKey(value)
-					if err == nil && resolved.Code == key.Code {
+					resolved, err := hostos.ResolveKeyStroke(value)
+					if err == nil && resolved.Name == key.Name {
 						allowed = true
 					}
 				}

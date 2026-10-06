@@ -1999,10 +1999,10 @@ func updateVirtualKeyPolicy(
 	if (action == "enable" || action == "disable") && len(args) != 1 {
 		return "", errors.New("usage: os virtual enable|disable")
 	}
-	var resolved hostos.ResolvedVirtualKey
+	var resolved hostos.ResolvedKeyStroke
 	var err error
 	if len(args) == 2 {
-		resolved, err = hostos.ResolveVirtualKey(args[1])
+		resolved, err = hostos.ResolveKeyStroke(args[1])
 		if err != nil {
 			return "", err
 		}
@@ -2015,8 +2015,8 @@ func updateVirtualKeyPolicy(
 			value.OSActions.VirtualKeys.Enabled = false
 		case "allow":
 			for _, existing := range value.OSActions.VirtualKeys.Allowed {
-				candidate, _ := hostos.ResolveVirtualKey(existing)
-				if candidate.Code == resolved.Code {
+				candidate, _ := hostos.ResolveKeyStroke(existing)
+				if candidate.Name == resolved.Name {
 					return fmt.Errorf("virtual key %s is already allowed", resolved.Name)
 				}
 			}
@@ -2024,8 +2024,8 @@ func updateVirtualKeyPolicy(
 		case "deny":
 			filtered := value.OSActions.VirtualKeys.Allowed[:0]
 			for _, existing := range value.OSActions.VirtualKeys.Allowed {
-				candidate, _ := hostos.ResolveVirtualKey(existing)
-				if candidate.Code != resolved.Code {
+				candidate, _ := hostos.ResolveKeyStroke(existing)
+				if candidate.Name != resolved.Name {
 					filtered = append(filtered, existing)
 				}
 			}

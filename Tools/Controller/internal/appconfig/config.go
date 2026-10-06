@@ -1216,21 +1216,14 @@ func (value Config) Validate() error {
 					)
 				}
 			case "virtual-key", "virtual_key", "vk":
-				resolved, resolveErr := hostos.ResolveVirtualKey(action.VirtualKey)
+				resolved, resolveErr := hostos.ResolveKeyStroke(action.VirtualKey)
 				if resolveErr != nil {
 					return fmt.Errorf(
 						"automations[%d].actions[%d].virtual_key: %w",
 						index, actionIndex, resolveErr,
 					)
 				}
-				allowed := false
-				for _, key := range value.OSActions.VirtualKeys.Allowed {
-					candidate, candidateErr := hostos.ResolveVirtualKey(key)
-					if candidateErr == nil && candidate.Code == resolved.Code {
-						allowed = true
-						break
-					}
-				}
+				allowed := hostos.KeyStrokeAllowed(value.OSActions.VirtualKeys, resolved.Name)
 				if !allowed {
 					return fmt.Errorf(
 						"automations[%d].actions[%d] virtual key %s is not allowlisted",

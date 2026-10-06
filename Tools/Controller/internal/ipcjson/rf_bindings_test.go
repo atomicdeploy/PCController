@@ -10,6 +10,7 @@ import (
 	controller "pccontroller.local/controller"
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/control"
+	"pccontroller.local/controller/internal/hostos"
 	"pccontroller.local/controller/internal/hostui"
 	"pccontroller.local/controller/internal/shell"
 )
@@ -99,6 +100,17 @@ func TestRFBindingKeyboardRequiresExplicitPolicyConsent(t *testing.T) {
 	}
 	if len(config.Automations) != 1 {
 		t.Fatal("failed mutation left a partial assignment")
+	}
+}
+
+func TestRFBindingChordConsentIsExact(t *testing.T) {
+	service, config := rfBindingTestService(t)
+	raw := json.RawMessage(`{"allow_keyboard":true,"binding":{"name":"Shortcut","enabled":true,"match":{"kind":"rf.gesture","source":"rf","rf_code":12345,"rf_bits":24,"rf_protocol":1,"gesture":"down"},"actions":[{"type":"virtual-key","virtual_key":"shift+ctrl+s","hold_ms":50}]}}`)
+	if _, err := service.putRFBinding(raw); err != nil {
+		t.Fatal(err)
+	}
+	if !hostos.KeyStrokeAllowed(config.OSActions.VirtualKeys, "CTRL+SHIFT+S") || hostos.KeyStrokeAllowed(config.OSActions.VirtualKeys, "S") || hostos.KeyStrokeAllowed(config.OSActions.VirtualKeys, "CTRL+S") {
+		t.Fatal("chord authorization broadened")
 	}
 }
 
