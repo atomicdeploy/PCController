@@ -69,6 +69,7 @@ enum Opcode : uint8_t {
   AutomationPut = 0x47,
   AutomationRemove = 0x48,
   AutomationClear = 0x49,
+  MediaClock = 0x4A,
   Ack = 0x80,
   HelloResponse = 0x81,
   ErrorResponse = 0x82,

@@ -2534,6 +2534,14 @@ func (client *Client) EmitHostEvent(kind, text string) {
 	client.runtime.PublishHostEvent(kind, text)
 }
 
+type MediaPlaybackUpdate = control.MediaPlaybackUpdate
+type MediaPlaybackSnapshot = control.MediaPlaybackSnapshot
+
+func (client *Client) UpdateMediaPlayback(value MediaPlaybackUpdate) (MediaPlaybackSnapshot, error) {
+	return client.runtime.UpdateMediaPlayback(value)
+}
+func (client *Client) MediaPlayback() MediaPlaybackSnapshot { return client.runtime.MediaPlayback() }
+
 // EmitHostActionEvent publishes a source-tagged host integration event without
 // touching the serial transport. Metadata is copied by the runtime.
 func (client *Client) EmitHostActionEvent(

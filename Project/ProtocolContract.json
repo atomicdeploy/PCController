@@ -57,6 +57,7 @@
     { "cpp": "AutomationPut", "go": "OpAutomationPut", "value": 71, "wireName": "AUTOMATION_PUT" },
     { "cpp": "AutomationRemove", "go": "OpAutomationRemove", "value": 72, "wireName": "AUTOMATION_REMOVE" },
     { "cpp": "AutomationClear", "go": "OpAutomationClear", "value": 73, "wireName": "AUTOMATION_CLEAR" },
+    { "cpp": "MediaClock", "go": "OpMediaClock", "value": 74, "wireName": "MEDIA_CLOCK" },
 
     { "cpp": "Ack", "go": "OpACK", "value": 128, "wireName": "ACK" },
     { "cpp": "HelloResponse", "go": "OpHelloResp", "value": 129, "wireName": "HELLO" },

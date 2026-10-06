@@ -63,6 +63,7 @@ const (
 	OpAutomationPut      byte = 0x47
 	OpAutomationRemove   byte = 0x48
 	OpAutomationClear    byte = 0x49
+	OpMediaClock         byte = 0x4A
 	OpACK                byte = 0x80
 	OpHelloResp          byte = 0x81
 	OpError              byte = 0x82

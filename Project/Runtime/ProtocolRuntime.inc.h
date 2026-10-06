@@ -676,6 +676,18 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame,
       }
       goto acknowledged;
 
+    case ControllerProtocol::MediaClock:
+      if (length != 14 || payload[0] != 3 || payload[1] > 3 || payload[1] == 2)
+        goto badPayload;
+      // Reuse the existing leased host display, rather than a second presenter.
+      // Numeric clock/rate metadata is consumed by the host; AVR needs raw cells.
+      hostSegmentTextActive = (payload[1] & 1U) != 0;
+      hostSegmentTextLength = 4;
+      hostSegmentOptions = 0x20U;
+      hostSegmentTextEndsAt = frameNow + 3000;
+      memcpy(hostSegmentText, payload + 10, 4);
+      goto acknowledged;
+
     case ProgramState:
       // Only the semantic one-byte prefix is required; future appended state
       // metadata is deliberately ignored by this small MCU implementation.

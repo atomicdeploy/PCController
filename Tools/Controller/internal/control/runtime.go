@@ -190,7 +190,8 @@ type connectionEventSignature struct {
 }
 
 type Runtime struct {
-	options Options
+	options       Options
+	mediaPlayback mediaPlaybackState
 
 	openMu                 sync.Mutex
 	closeMu                sync.Mutex
