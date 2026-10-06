@@ -161,7 +161,8 @@ char hostSegmentText[41] = {};
 uint8_t hostSegmentTextLength = 0;
 uint8_t hostSegmentScrollIndex = 0;
 uint16_t hostSegmentStepMs = 0;
-// Low two bits select once/loop/interval, bit 6 marks the interval wait, and
+// Low two bits select once/loop/interval, bit 5 is leased raw media segments,
+// bit 6 marks the interval wait, and
 // bit 7 forces a marquee even when the text fits the four-cell display.
 uint8_t hostSegmentOptions = 0;
 uint16_t hostSegmentHoldMs = 0;

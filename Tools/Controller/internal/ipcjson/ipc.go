@@ -535,6 +535,7 @@ func (service *Service) dispatch(
 		return response
 	}
 	// Primary discovery must not queue behind a long board, firmware, or shell
+	service.configureAutomationActions()
 	// operation holding service.mu. Secondary instances use this bounded ping
 	// before deciding whether they may approach the local serial device.
 	if request.Method == "controller.ping" {
@@ -633,6 +634,32 @@ func (service *Service) dispatch(
 	var result any
 	var err error
 	switch request.Method {
+	case "controller.media.playback.get":
+		result = service.Client.MediaPlayback()
+	case "controller.media.timeline.get":
+		result = service.Client.MediaTimeline()
+	case "controller.media.timeline.prepare":
+		var params controller.MediaTimelinePlan
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			if service.AppInstances == nil {
+				err = errors.New("app instance registry is unavailable")
+			} else if _, ok := service.AppInstances.Get(params.ClientID); !ok {
+				err = errors.New("register client before preparing a timeline")
+			} else {
+				result, err = service.Client.PrepareMediaTimeline(params)
+			}
+		}
+	case "controller.media.playback.update":
+		var params controller.MediaPlaybackUpdate
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			if service.AppInstances == nil {
+				err = errors.New("app instance registry is unavailable")
+			} else if _, ok := service.AppInstances.Get(params.ClientID); !ok {
+				err = errors.New("register client with controller.app.instance.report before publishing playback")
+			} else {
+				result, err = service.Client.UpdateMediaPlayback(params)
+			}
+		}
 	case "controller.device.status":
 		if service.LocalDevice == nil {
 			err = errors.New("local-device integration is unavailable")
@@ -1099,6 +1126,12 @@ func (service *Service) dispatch(
 		}
 	case "controller.rf.list":
 		result, err = service.Client.ListLearnedDetailed(ctx)
+	case "controller.rf.catalog":
+		result, err = service.rfCatalog(ctx, request.Params)
+	case "controller.rf.binding.put":
+		result, err = service.putRFBinding(request.Params)
+	case "controller.rf.binding.remove":
+		result, err = service.removeRFBinding(request.Params)
 	case "controller.board_automation.list":
 		result, err = service.Client.BoardAutomations(ctx)
 	case "controller.board_automation.put":
@@ -1751,13 +1784,15 @@ func (service *Service) primaryPingResult() map[string]any {
 
 type controllerSnapshotEnvelope struct {
 	controller.Snapshot
-	HostInstanceID string `json:"host_instance_id,omitempty"`
+	HostInstanceID string                           `json:"host_instance_id,omitempty"`
+	MediaPlayback  controller.MediaPlaybackSnapshot `json:"media_playback"`
 }
 
 func (service *Service) controllerSnapshot() controllerSnapshotEnvelope {
 	return controllerSnapshotEnvelope{
 		Snapshot:       service.Client.Snapshot(),
 		HostInstanceID: strings.TrimSpace(service.HostInstanceID),
+		MediaPlayback:  service.Client.MediaPlayback(),
 	}
 }
 
@@ -2261,7 +2296,7 @@ func requestCapability(method string, params json.RawMessage) string {
 	case "controller.display.send", "controller.opcode.send",
 		"controller.opcode.exchange", "controller.opcode.request", "controller.action.invoke":
 		return capabilityBoard
-	case "controller.estop.set":
+	case "controller.estop.set", "controller.media.playback.update", "controller.media.timeline.prepare":
 		return capabilityBoard
 	case "controller.host_menu.config", "controller.host_menu.config.get",
 		"controller.ui.config", "controller.ui.config.get",
@@ -2274,6 +2309,10 @@ func requestCapability(method string, params json.RawMessage) string {
 		"controller.webhooks.status",
 		"controller.webhooks.pending", "controller.webhooks.dead":
 		return capabilityRead
+	case "controller.rf.catalog":
+		return capabilityRead
+	case "controller.rf.binding.put", "controller.rf.binding.remove":
+		return capabilityHostConfig
 	case "controller.host_menu.configure", "controller.host_menu.config.set",
 		"controller.ui.config.set",
 		"controller.peripherals.set", "controller.board_profile.update",
@@ -2315,7 +2354,7 @@ func requestCapability(method string, params json.RawMessage) string {
 			}
 		}
 		return capabilityHostConfig
-	case "controller.ping", "controller.snapshot", "controller.estop.get", "controller.port.process", "controller.port.owner", "controller.session.snapshot",
+	case "controller.ping", "controller.snapshot", "controller.media.playback.get", "controller.media.timeline.get", "controller.estop.get", "controller.port.process", "controller.port.owner", "controller.session.snapshot",
 		"controller.session.snapshot.last", "controller.status",
 		"controller.front_panel", "controller.front-panel",
 		"controller.command.catalog", "controller.melodies.list", "controller.program_state.get", "controller.program-state.get",

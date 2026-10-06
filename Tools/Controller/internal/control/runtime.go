@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/link"
 	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/portowner"
@@ -210,7 +211,10 @@ type connectionEventSignature struct {
 }
 
 type Runtime struct {
-	options Options
+	automationAppMu sync.RWMutex
+	automationApp   func(context.Context, appconfig.AutomationAction) error
+	options         Options
+	mediaPlayback   mediaPlaybackState
 
 	openMu                 sync.Mutex
 	closeMu                sync.Mutex
@@ -281,14 +285,15 @@ type Runtime struct {
 
 	events chan Event
 
-	eventMu     sync.Mutex
-	eventLog    []Event
-	activityLog []Event
-	nextEventID uint64
-	eventNotify chan struct{}
-	rfMu        sync.Mutex
-	rfGestures  map[rfGestureKey]*rfGestureState
-	rfClicks    map[rfGestureKey]*rfClickState
+	eventMu       sync.Mutex
+	eventLog      []Event
+	activityLog   []Event
+	rfActivityLog []Event
+	nextEventID   uint64
+	eventNotify   chan struct{}
+	rfMu          sync.Mutex
+	rfGestures    map[rfGestureKey]*rfGestureState
+	rfClicks      map[rfGestureKey]*rfClickState
 
 	rfLearnMu    sync.RWMutex
 	rfLearnState RFLearnState
@@ -316,6 +321,7 @@ type Runtime struct {
 	programStateSentRevision   uint64
 	programStateSentMode       ProgramMode
 	macroRunner                *MacroRunner
+	mediaTimeline              mediaTimelineState
 	emergencyStop              atomic.Bool
 	emergencyStopOperationMu   sync.Mutex
 	emergencyStopStateMu       sync.RWMutex
@@ -1757,6 +1763,7 @@ func (runtime *Runtime) Close() error {
 	runtime.closeMu.Lock()
 	defer runtime.closeMu.Unlock()
 	runtime.cancelDisplaySchedules()
+	runtime.stopMediaTimeline()
 	// A reconnect attempt owns the serial handle before it becomes the active
 	// session. Pause first so it cannot attach, then cancel and join it. The
 	// close response is therefore an actual handle-release barrier rather than
@@ -1847,6 +1854,9 @@ func (runtime *Runtime) requestAtGeneration(
 	payload []byte,
 	expected ...byte,
 ) (native.Frame, error) {
+	if err := runtime.rejectMediaTimelineConflict(ctx, opcode); err != nil {
+		return native.Frame{}, err
+	}
 	if err := runtime.rejectEmergencyStopCommand(opcode, payload); err != nil {
 		return native.Frame{}, err
 	}
@@ -3832,6 +3842,14 @@ func (runtime *Runtime) publishEvent(event Event) Event {
 		runtime.activityLog = append(runtime.activityLog, event)
 		if len(runtime.activityLog) > 512 {
 			runtime.activityLog = append([]Event(nil), runtime.activityLog[len(runtime.activityLog)-512:]...)
+		}
+	}
+	// Keep the RF manager's bounded history independently of high-rate media
+	// and board activity. Bridge echoes are not a second local reception.
+	if strings.HasPrefix(event.Kind, "rf.") && event.Source != "bridge" {
+		runtime.rfActivityLog = append(runtime.rfActivityLog, event)
+		if len(runtime.rfActivityLog) > 20 {
+			runtime.rfActivityLog = append([]Event(nil), runtime.rfActivityLog[len(runtime.rfActivityLog)-20:]...)
 		}
 	}
 	close(runtime.eventNotify)

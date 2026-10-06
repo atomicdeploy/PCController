@@ -457,6 +457,7 @@ func apiAutomations(source []appconfig.Automation) []controllerapi.Automation {
 				Source: automation.Match.Source, RFID: automation.Match.RFID,
 				RFCode:     automation.Match.RFCode,
 				RFProtocol: automation.Match.RFProtocol,
+				RFBits:     automation.Match.RFBits,
 			},
 			Actions: make([]controllerapi.AutomationAction, len(automation.Actions)),
 		}
@@ -464,6 +465,7 @@ func apiAutomations(source []appconfig.Automation) []controllerapi.Automation {
 			result[index].Actions[actionIndex] = controllerapi.AutomationAction{
 				Type: action.Type, Command: action.Command, Macro: action.Macro,
 				Executable: action.Executable,
+				Detached:   action.Detached,
 				Args:       append([]string(nil), action.Args...),
 				Script:     action.Script,
 				Event:      action.Event,
@@ -471,6 +473,7 @@ func apiAutomations(source []appconfig.Automation) []controllerapi.Automation {
 				HoldMS:     action.HoldMS,
 				Power:      action.Power,
 				Confirm:    action.Confirm,
+				AppKind:    action.AppKind, AppValue: action.AppValue, AppTarget: action.AppTarget, ActionID: action.ActionID,
 			}
 			if action.RF != nil {
 				result[index].Actions[actionIndex].RF = &controllerapi.RFTransmit{

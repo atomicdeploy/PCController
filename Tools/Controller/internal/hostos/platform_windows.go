@@ -66,8 +66,11 @@ func sendKeyboardInput(code uint16, keyUp bool) error {
 	input := winInput{Type: 1}
 	keyboard := (*keyboardInput)(unsafe.Pointer(&input.Mouse))
 	keyboard.VirtualKey = code
+	if (code >= 0x21 && code <= 0x2E) || code == 0x5B || code == 0x5C || code == 0xA3 || code == 0xA5 {
+		keyboard.Flags |= 0x0001 // extended navigation/right modifier keys
+	}
 	if keyUp {
-		keyboard.Flags = 0x0002
+		keyboard.Flags |= 0x0002
 	}
 	result, _, callErr := procSendInput.Call(
 		1,

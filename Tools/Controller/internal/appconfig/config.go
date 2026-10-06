@@ -382,6 +382,7 @@ type AutomationMatch struct {
 	RFID       *byte   `json:"rf_id,omitempty"`
 	RFCode     *uint32 `json:"rf_code,omitempty"`
 	RFProtocol byte    `json:"rf_protocol,omitempty"`
+	RFBits     byte    `json:"rf_bits,omitempty"`
 }
 
 // AutomationAction describes one command, macro, process, RF, key, or OS action.
@@ -390,6 +391,7 @@ type AutomationAction struct {
 	Command    string      `json:"command,omitempty"`
 	Macro      string      `json:"macro,omitempty"`
 	Executable string      `json:"executable,omitempty"`
+	Detached   bool        `json:"detached,omitempty"`
 	Args       []string    `json:"args,omitempty"`
 	Script     string      `json:"script,omitempty"`
 	Event      string      `json:"event,omitempty"`
@@ -398,6 +400,10 @@ type AutomationAction struct {
 	HoldMS     int         `json:"hold_ms,omitempty"`
 	Power      string      `json:"power,omitempty"`
 	Confirm    string      `json:"confirm,omitempty"`
+	AppKind    string      `json:"app_kind,omitempty"`
+	AppValue   string      `json:"app_value,omitempty"`
+	AppTarget  string      `json:"app_target,omitempty"`
+	ActionID   string      `json:"action_id,omitempty"`
 }
 
 // RFTransmit defines a host-configured 433 MHz transmission payload.
@@ -1106,6 +1112,9 @@ func (value Config) Validate() error {
 				index,
 			)
 		}
+		if automation.Match.RFBits > 32 {
+			return fmt.Errorf("automations[%d].match.rf_bits must be 0..32", index)
+		}
 		if gesture := strings.ToLower(strings.TrimSpace(
 			automation.Match.Gesture,
 		)); gesture != "" {
@@ -1129,6 +1138,14 @@ func (value Config) Validate() error {
 		}
 		for actionIndex, action := range automation.Actions {
 			switch strings.ToLower(strings.TrimSpace(action.Type)) {
+			case "control":
+				if action.ActionID == "" || len(action.ActionID) > 128 || strings.ContainsAny(action.ActionID, " \x00\r\n") {
+					return fmt.Errorf("automations[%d].actions[%d].action_id is invalid", index, actionIndex)
+				}
+			case "app":
+				if action.AppKind == "" || len(action.AppKind) > 128 || len(action.AppTarget) == 0 || len(action.AppTarget) > 128 || len(action.AppValue) > 4096 || strings.ContainsAny(action.AppKind+action.AppTarget+action.AppValue, "\x00\r\n") {
+					return fmt.Errorf("automations[%d].actions[%d] needs a bounded app_kind, app_target and single-line app_value", index, actionIndex)
+				}
 			case "board":
 				command := strings.TrimSpace(action.Command)
 				if command == "" || len(command) > 512 {
@@ -1145,7 +1162,7 @@ func (value Config) Validate() error {
 						actionIndex,
 					)
 				}
-			case "macro":
+			case "macro", "effect":
 				if strings.TrimSpace(action.Macro) == "" || len(action.Macro) > 64 {
 					return fmt.Errorf(
 						"automations[%d].actions[%d].macro must be 1..64 bytes",
@@ -1199,21 +1216,14 @@ func (value Config) Validate() error {
 					)
 				}
 			case "virtual-key", "virtual_key", "vk":
-				resolved, resolveErr := hostos.ResolveVirtualKey(action.VirtualKey)
+				resolved, resolveErr := hostos.ResolveKeyStroke(action.VirtualKey)
 				if resolveErr != nil {
 					return fmt.Errorf(
 						"automations[%d].actions[%d].virtual_key: %w",
 						index, actionIndex, resolveErr,
 					)
 				}
-				allowed := false
-				for _, key := range value.OSActions.VirtualKeys.Allowed {
-					candidate, candidateErr := hostos.ResolveVirtualKey(key)
-					if candidateErr == nil && candidate.Code == resolved.Code {
-						allowed = true
-						break
-					}
-				}
+				allowed := hostos.KeyStrokeAllowed(value.OSActions.VirtualKeys, resolved.Name)
 				if !allowed {
 					return fmt.Errorf(
 						"automations[%d].actions[%d] virtual key %s is not allowlisted",

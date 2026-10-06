@@ -1096,7 +1096,10 @@ bool showHostSegmentText(uint32_t at) {
       }
       return false;
     }
-    display.showText(hostSegmentText);
+    if ((hostSegmentOptions & 0x20U) != 0)
+      display.showSegments(reinterpret_cast<const uint8_t *>(hostSegmentText));
+    else
+      display.showText(hostSegmentText);
     return true;
   }
   if (timeReached(at, hostSegmentTextEndsAt)) {

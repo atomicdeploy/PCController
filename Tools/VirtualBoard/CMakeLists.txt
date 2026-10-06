@@ -2,6 +2,10 @@ cmake_minimum_required(VERSION 3.20)
 
 project(PCControllerVirtualBoard VERSION 1.0.0 LANGUAGES CXX)
 
+add_executable(media_clock_tests tests/media_clock_test.cpp)
+enable_testing()
+add_test(NAME media_clock_unit COMMAND media_clock_tests)
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)

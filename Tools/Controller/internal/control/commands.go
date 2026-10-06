@@ -1999,10 +1999,10 @@ func updateVirtualKeyPolicy(
 	if (action == "enable" || action == "disable") && len(args) != 1 {
 		return "", errors.New("usage: os virtual enable|disable")
 	}
-	var resolved hostos.ResolvedVirtualKey
+	var resolved hostos.ResolvedKeyStroke
 	var err error
 	if len(args) == 2 {
-		resolved, err = hostos.ResolveVirtualKey(args[1])
+		resolved, err = hostos.ResolveKeyStroke(args[1])
 		if err != nil {
 			return "", err
 		}
@@ -2015,8 +2015,8 @@ func updateVirtualKeyPolicy(
 			value.OSActions.VirtualKeys.Enabled = false
 		case "allow":
 			for _, existing := range value.OSActions.VirtualKeys.Allowed {
-				candidate, _ := hostos.ResolveVirtualKey(existing)
-				if candidate.Code == resolved.Code {
+				candidate, _ := hostos.ResolveKeyStroke(existing)
+				if candidate.Name == resolved.Name {
 					return fmt.Errorf("virtual key %s is already allowed", resolved.Name)
 				}
 			}
@@ -2024,8 +2024,8 @@ func updateVirtualKeyPolicy(
 		case "deny":
 			filtered := value.OSActions.VirtualKeys.Allowed[:0]
 			for _, existing := range value.OSActions.VirtualKeys.Allowed {
-				candidate, _ := hostos.ResolveVirtualKey(existing)
-				if candidate.Code != resolved.Code {
+				candidate, _ := hostos.ResolveKeyStroke(existing)
+				if candidate.Name != resolved.Name {
 					filtered = append(filtered, existing)
 				}
 			}
@@ -5239,6 +5239,19 @@ func macroCommand(
 			return "", fmt.Errorf("usage: macro record start|start-mcu|start-board|import-board NAME [CATEGORY [COLOR]]|status|save|discard")
 		}
 		switch strings.ToLower(args[1]) {
+		case "append":
+			if len(args) < 3 || len(args) > 4 {
+				return "", errors.New("usage: effect record append REF [automatic|device-clock|board-retained]")
+			}
+			mode := "automatic"
+			if len(args) == 4 {
+				mode = args[3]
+			}
+			state, err := runner.StartAppendingRecording(ctx, args[2], mode)
+			if err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("recording effect %d/%s at sequence end", state.ID, state.Name), nil
 		case "start", "start-mcu", "start-board", "import-board":
 			if len(args) < 3 || len(args) > 5 {
 				return "", fmt.Errorf("usage: macro record %s NAME [CATEGORY [COLOR]]", args[1])

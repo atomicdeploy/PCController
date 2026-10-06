@@ -489,6 +489,9 @@ std::vector<wire::Frame> VirtualBoard::handle(const wire::Frame &request) {
       return bad();
     }
     return ack();
+  case wire::MediaClock:
+    if (!mediaClock_.update(payload.data(), static_cast<std::uint8_t>(payload.size()), deviceMillis(now))) return bad();
+    return ack();
   case wire::ProgramState:
     if (payload.empty() || payload[0] > 1) {
       return bad();
@@ -1469,6 +1472,10 @@ wire::Frame VirtualBoard::frontPanelFrame(std::uint8_t sequence) const {
     active = active || payload[1 + index] != 0;
   }
   payload[5] = settings_.displayBrightness;
+  if (mediaClock_.active(deviceMillis(Clock::now()))) {
+    mediaClock_.segments(deviceMillis(Clock::now()), payload.data() + 1);
+    active = true;
+  }
   payload[6] = active ? 2 : 0;
   std::string lcd = state.lcdLine1.substr(0, 16);
   lcd.resize(16, ' ');
@@ -2516,6 +2523,9 @@ void VirtualBoard::queueMirrorChanges() {
   std::array<std::uint8_t, 4> segments{};
   for (std::size_t index = 0; index < segments.size(); ++index) {
     segments[index] = encodeSegment(display.segments[index]);
+  }
+  if (mediaClock_.active(deviceMillis(Clock::now()))) {
+    mediaClock_.segments(deviceMillis(Clock::now()), segments.data());
   }
   if (segments != lastPushedSegments_ ||
       settings_.displayBrightness != lastPushedSegmentBrightness_) {

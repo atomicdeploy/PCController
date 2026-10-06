@@ -63,6 +63,7 @@ func (runtime *Runtime) SetEmergencyStop(ctx context.Context, active bool, sourc
 	}
 
 	var stopErrors []error
+	runtime.stopMediaTimeline()
 	if runner := runtime.MacroRunner(); runner != nil {
 		if runner.RecordingState().Active {
 			if _, err := runner.StopRecording(false); err != nil {
