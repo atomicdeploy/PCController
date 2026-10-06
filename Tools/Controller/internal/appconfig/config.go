@@ -391,6 +391,7 @@ type AutomationAction struct {
 	Command    string      `json:"command,omitempty"`
 	Macro      string      `json:"macro,omitempty"`
 	Executable string      `json:"executable,omitempty"`
+	Detached   bool        `json:"detached,omitempty"`
 	Args       []string    `json:"args,omitempty"`
 	Script     string      `json:"script,omitempty"`
 	Event      string      `json:"event,omitempty"`

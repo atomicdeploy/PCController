@@ -360,6 +360,21 @@ func executeAutomation(
 				return fmt.Errorf("action %d: %w", index, err)
 			}
 			process := exec.CommandContext(ctx, executable, arguments...)
+			if action.Detached {
+				// Explicit application launch is not a 30-second task. Let the
+				// application live independently; reap it without blocking RF input.
+				process = exec.Command(executable, arguments...)
+				if err := process.Start(); err != nil {
+					return fmt.Errorf("action %d launch: %w", index, err)
+				}
+				runtime.PublishHostEvent("automation", fmt.Sprintf("%s launched process %d", automation.Name, process.Process.Pid))
+				go func() {
+					if err := process.Wait(); err != nil {
+						runtime.PublishHostEvent("automation", fmt.Sprintf("launched process exited: %v", err))
+					}
+				}()
+				continue
+			}
 			var output boundedBuffer
 			process.Stdout = &output
 			process.Stderr = &output

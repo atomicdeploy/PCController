@@ -35,8 +35,10 @@ native OS executor and allowlist. The explicit Allow checkbox enables and
 allowlists only the chosen keys. Keys are native virtual-key names such as SPACE,
 F5 or MEDIA_PLAY_PAUSE; modifier chords are not accepted by this existing executor.
 Program/script arguments are separate argv entries, not an implicit shell string.
-Program/script execution uses the existing bounded 30-second automation task
-contract, rather than an unbounded application-launch service.
+Program/script tasks use the existing bounded 30-second automation contract.
+Enable **Launch independently** to start an application without waiting for it
+to close or terminating it at the task timeout. This action reports a successful
+process start, not that the external program completed its own work.
 
 ## Contracts
 

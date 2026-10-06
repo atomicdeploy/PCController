@@ -465,6 +465,7 @@ func apiAutomations(source []appconfig.Automation) []controllerapi.Automation {
 			result[index].Actions[actionIndex] = controllerapi.AutomationAction{
 				Type: action.Type, Command: action.Command, Macro: action.Macro,
 				Executable: action.Executable,
+				Detached:   action.Detached,
 				Args:       append([]string(nil), action.Args...),
 				Script:     action.Script,
 				Event:      action.Event,

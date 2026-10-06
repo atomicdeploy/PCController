@@ -375,6 +375,7 @@ type AutomationAction struct {
 	Command    string      `json:"command,omitempty"`
 	Macro      string      `json:"macro,omitempty"`
 	Executable string      `json:"executable,omitempty"`
+	Detached   bool        `json:"detached,omitempty"`
 	Args       []string    `json:"args,omitempty"`
 	Script     string      `json:"script,omitempty"`
 	Event      string      `json:"event,omitempty"`
@@ -1040,6 +1041,7 @@ func toAppAutomations(source []Automation) []appconfig.Automation {
 			result[index].Actions[actionIndex] = appconfig.AutomationAction{
 				Type: action.Type, Command: action.Command, Macro: action.Macro,
 				Executable: action.Executable,
+				Detached:   action.Detached,
 				Args:       append([]string(nil), action.Args...),
 				Script:     action.Script,
 				Event:      action.Event,
