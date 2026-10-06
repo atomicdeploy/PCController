@@ -1720,7 +1720,8 @@ func TestCommandCatalogAndProgramStateReachRPCAndREST(t *testing.T) {
 	if !ok {
 		t.Fatalf("RPC melody catalog=%#v", melodies.Result)
 	}
-	if len(melodyCatalog) == 0 || melodyCatalog[0] != configuredMelody {
+	if len(melodyCatalog) == 0 || melodyCatalog[0].Name != configuredMelody.Name ||
+		len(melodyCatalog[0].Notes) != 1 || melodyCatalog[0].Notes[0] != configuredMelody.Notes[0] {
 		t.Fatalf("RPC melody catalog did not use live host config: %#v", melodyCatalog)
 	}
 	executeParams, _ := json.Marshal(map[string]string{"command": "help strip"})
