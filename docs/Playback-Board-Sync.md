@@ -3,7 +3,7 @@
 Pealayer is a consumer with a leased identity, not a second serial-port owner.
 The existing `controller.app.instance.report` registry advertises its process
 ID and `application`, `version`, `commit`, `os`, `arch` values. Report every
-ten seconds with a thirty-second lease; remove the identity on disconnect.
+ten seconds with a forty-five-second lease; remove the identity on disconnect.
 Query `controller.app.instances` to inspect consumers.
 
 Register before calling `controller.media.playback.update`:
