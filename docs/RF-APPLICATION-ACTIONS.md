@@ -69,3 +69,31 @@ The catalog's learned records and host bindings are intentionally separate
 storage views of the same RF button. Neither API silently modifies the other.
 Wire acknowledgements do not prove over-the-air delivery to a physical receiver;
 real handset/receiver/transmitter validation remains a physical acceptance gate.
+
+## Integration acceptance checkpoint
+
+The 6 October 2026 local installation uses host revision `3486fc1a` and Pealayer
+revision `60dd5bd`. Both were deployed using their own update APIs, including
+graceful shutdown and hash verification, not copied over running executables.
+
+VirtualBoard RF receive/learning/readback/TX, Pealayer playback acknowledgements,
+Web assignment rename/reassignment and native Windows F23/program actions were
+exercised. Exact key/chord consent and release cleanup passed the focused Go
+runner. RF activity now has an independent newest-20 buffer, unaffected by busy
+media telemetry and excluding bridge echoes. Persisted application/semantic
+automation delivery is initialized before clients are served, not by the first
+RPC call.
+
+After host update `op-ff82c9543489a12e` completed, Pealayer remained running with
+PID 17236. Receive/gesture event 379 triggered automation completion event 406
+and changed real playback. Selected-coordinator identity admission and push
+heartbeats repaired stale command/subscription connections during this restart.
+No outcome-uncertain mutation is blindly replayed.
+
+Temporary bindings/learned test entries were removed, original keyboard policy
+and board connection were restored, and existing user effects were preserved.
+Physical RF acceptance remains open in #73. Cafe's update API did not respond;
+native screenshot capture was unavailable. See the Pealayer guide for captured
+Web dark/light/receive evidence and the exact executable hashes:
+
+[Pealayer RF controls and verification](https://github.com/ToghrolTP/pealayer/blob/fix/hardware-monitor-layout/docs/RF-CONTROLS.md).
