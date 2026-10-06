@@ -234,7 +234,7 @@ export function AdvancedWorkbench({
   const [hostMenuID, setHostMenuID] = useState('')
   const [hostMenuLabel, setHostMenuLabel] = useState('')
   const [frontPanel, setFrontPanel] = useState<FrontPanelState | undefined>(
-    available.segments && snapshot.have_front_panel ? snapshot.front_panel : undefined,
+    available.segments && (snapshot.have_front_panel || snapshot.have_front_panel_segments) ? snapshot.front_panel : undefined,
   )
 
   const [pixel, setPixel] = useState(0)
@@ -324,8 +324,16 @@ export function AdvancedWorkbench({
       setFrontPanel(undefined)
       return
     }
-    if (snapshot.have_front_panel && snapshot.front_panel) setFrontPanel(snapshot.front_panel)
-  }, [available.segments, online, snapshot.front_panel_updated, snapshot.have_front_panel, snapshot.front_panel])
+    if ((snapshot.have_front_panel || snapshot.have_front_panel_segments) && snapshot.front_panel) setFrontPanel(snapshot.front_panel)
+  }, [available.segments, online, snapshot.front_panel_updated, snapshot.have_front_panel, snapshot.have_front_panel_segments, snapshot.front_panel])
+
+  useEffect(() => {
+    if (!online || !available.segments || snapshot.have_front_panel) return
+    // One exact read establishes menu/LCD/key authority. Subsequent physical
+    // segment frames arrive through the event stream and need no polling or
+    // operator-owned refresh button.
+    void rpc<FrontPanelState>('controller.front_panel').then(setFrontPanel).catch(() => undefined)
+  }, [available.segments, online, snapshot.have_front_panel])
 
   useEffect(() => {
     setServiceOutput(copy('No service query yet.', 'هنوز پرس‌وجوی سرویسی انجام نشده است.'))
@@ -650,12 +658,15 @@ export function AdvancedWorkbench({
             <SevenSegmentPreview panel={frontPanel} label={copy('Live physical seven-segment display', 'نمایش زندهٔ نمایشگر فیزیکی هفت‌بخشی')} />
             <div>
               <strong>{copy('Live physical display', 'نمایش زنده پنل')}</strong>
-              <span>{frontPanel ? `${copy('page', 'صفحه')} ${frontPanel.menu_page} · ${copy('brightness', 'روشنایی')} ${frontPanel.brightness}/7` : copy('Awaiting exact front-panel state', 'در انتظار وضعیت دقیق پنل')}</span>
-			  <small>{copy('Changed-only board opcodes update this preview immediately; refresh is explicit.', 'اپ‌کدهای تغییرمحور برد این پیش‌نمایش را فوری به‌روز می‌کنند؛ تازه‌سازی صریح است.')}</small>
+			  <span>{frontPanel ? snapshot.have_front_panel
+			    ? `${copy('page', 'صفحه')} ${frontPanel.menu_page} · ${copy('brightness', 'روشنایی')} ${frontPanel.brightness}/7`
+			    : `${copy('live segment frame', 'فریم زنده نمایشگر')} · ${copy('brightness', 'روشنایی')} ${frontPanel.brightness}/7`
+			    : copy('Waiting for the next physical display event', 'در انتظار رویداد بعدی نمایشگر فیزیکی')}</span>
+			  <small>{copy('Physical changes update every connected client immediately through the state stream.', 'تغییرات فیزیکی از راه جریان وضعیت، همهٔ کارخواه‌های متصل را فوری به‌روز می‌کند.')}</small>
             </div>
           </div>}
           <div className="advanced-actions">
-			{available.segments && <Button icon={RefreshCw} disabled={!online} onClick={() => void rpc<FrontPanelState>('controller.front_panel').then(setFrontPanel).catch(() => undefined)}>{copy('Refresh physical state', 'تازه‌سازی وضعیت فیزیکی')}</Button>}
+			{available.segments && !snapshot.have_front_panel_segments && <Button icon={RefreshCw} disabled={!online} onClick={() => void rpc<FrontPanelState>('controller.front_panel').then(setFrontPanel).catch(() => undefined)}>{copy('Recover physical state', 'بازیابی وضعیت فیزیکی')}</Button>}
             <Button icon={BookOpen} disabled={!online} busy={busy === 'menu list'} onClick={() => void run('menu list')}>{copy('Firmware catalog', 'کاتالوگ میان‌افزار')}</Button>
             <Button icon={LayoutDashboard} disabled={!online} busy={busy === 'menu current'} onClick={() => void run('menu current')}>{copy('Current page', 'صفحه فعلی')}</Button>
             <Button icon={LayoutPanelTop} disabled={!online} busy={busy === 'menu layout'} onClick={() => void run('menu layout')}>{copy('Stored layout', 'چیدمان ذخیره‌شده')}</Button>

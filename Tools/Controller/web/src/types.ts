@@ -187,6 +187,21 @@ export interface EmergencyStopState {
   changed_at?: string
 }
 
+export type MotionDirection = 'stop' | 'up' | 'down'
+
+export interface MotionSideState {
+  requested: MotionDirection
+  applied: MotionDirection
+  transitioning: boolean
+  revision: number
+  updated_at?: string
+}
+
+export interface MotionSnapshot {
+  left: MotionSideState
+  right: MotionSideState
+}
+
 export interface Snapshot {
 	host_instance_id?: string
   connected: boolean
@@ -213,6 +228,7 @@ export interface Snapshot {
   port_process?: PortProcessSnapshot
   program_state?: ProgramState
   emergency_stop?: EmergencyStopState
+	motion?: MotionSnapshot
   rf_learning?: RFLearnState
   macros?: MacroSnapshot
   effects?: EffectDescriptor[]
@@ -220,6 +236,8 @@ export interface Snapshot {
   hardware_problems?: HardwareProblem[]
   front_panel?: FrontPanelState
   have_front_panel?: boolean
+  /** True when the changed-only physical segment fields are authoritative. */
+  have_front_panel_segments?: boolean
   front_panel_updated?: string
 	status_led?: StatusLEDState
 	have_status_led?: boolean

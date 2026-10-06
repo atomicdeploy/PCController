@@ -62,6 +62,8 @@ type (
 	StatusLEDPolicy           = appconfig.StatusLEDPolicy
 	StatusLEDVisual           = appconfig.StatusLEDVisual
 	RGBColor                  = appconfig.RGBColor
+	MotionSideState           = control.MotionSideState
+	MotionSnapshot            = control.MotionSnapshot
 	OutputStreamState         = control.OutputStreamState
 	StatusSample              = control.StatusSample
 	TimelineEntry             = control.TimelineEntry
@@ -473,11 +475,13 @@ type Snapshot struct {
 	HardwareProblems         []HardwareProblem               `json:"hardware_problems,omitempty"`
 	FrontPanel               FrontPanel                      `json:"front_panel"`
 	HaveFrontPanel           bool                            `json:"have_front_panel"`
+	HaveFrontPanelSegments   bool                            `json:"have_front_panel_segments"`
 	FrontPanelUpdated        time.Time                       `json:"front_panel_updated,omitempty"`
 	StatusLED                StatusLEDState                  `json:"status_led"`
 	HaveStatusLED            bool                            `json:"have_status_led"`
 	StatusLEDUpdated         time.Time                       `json:"status_led_updated,omitempty"`
 	StatusLEDRevision        uint64                          `json:"status_led_revision,omitempty"`
+	Motion                   MotionSnapshot                  `json:"motion"`
 	Outputs                  OutputStreamState               `json:"outputs"`
 	StripEffects             []control.StripEffectDescriptor `json:"strip_effects,omitempty"`
 	Illumination             IlluminationState               `json:"illumination"`
@@ -2282,20 +2286,22 @@ func (client *Client) Snapshot() Snapshot {
 		// and by the effect runner. Reuse its canonical catalog here so the public
 		// snapshot cannot drift from `effect list` when a new installation receives
 		// the editable JSON seed catalog through the effective configuration path.
-		Effects:           snapshot.Effects,
-		EffectGroups:      snapshot.EffectGroups,
-		HardwareProblems:  snapshot.HardwareProblems,
-		FrontPanel:        snapshot.FrontPanel,
-		HaveFrontPanel:    snapshot.HaveFrontPanel,
-		FrontPanelUpdated: snapshot.FrontPanelUpdated,
-		StatusLED:         snapshot.StatusLED,
-		HaveStatusLED:     snapshot.HaveStatusLED,
-		StatusLEDUpdated:  snapshot.StatusLEDUpdated,
-		StatusLEDRevision: snapshot.StatusLEDRevision,
-		Outputs:           client.outputs.State(),
-		StripEffects:      stripEffects,
-		Illumination:      illumination,
-		PortProcess:       snapshot.PortProcess,
+		Effects:                snapshot.Effects,
+		EffectGroups:           snapshot.EffectGroups,
+		HardwareProblems:       snapshot.HardwareProblems,
+		FrontPanel:             snapshot.FrontPanel,
+		HaveFrontPanel:         snapshot.HaveFrontPanel,
+		HaveFrontPanelSegments: snapshot.HaveFrontPanelSegments,
+		FrontPanelUpdated:      snapshot.FrontPanelUpdated,
+		StatusLED:              snapshot.StatusLED,
+		HaveStatusLED:          snapshot.HaveStatusLED,
+		StatusLEDUpdated:       snapshot.StatusLEDUpdated,
+		StatusLEDRevision:      snapshot.StatusLEDRevision,
+		Motion:                 snapshot.Motion,
+		Outputs:                client.outputs.State(),
+		StripEffects:           stripEffects,
+		Illumination:           illumination,
+		PortProcess:            snapshot.PortProcess,
 	}
 }
 

@@ -97,6 +97,7 @@ import { PeripheralNamesEditor } from './peripheral-names-editor'
 import { CardLayoutEditor, CardLayoutFrame, type CardLayoutCopy, type LayoutCardDescriptor } from './card-layout-controls'
 import { loadCardLayout, moveCard, resetCardLayout, saveCardLayout, toggleCard } from './dashboard-layout'
 import { pointerReorderTargetChanged } from './pointer-reorder'
+import { presentedMotionDirection } from './motion-feedback'
 import {
   normalizePWMValues,
   pwmPercent,
@@ -796,14 +797,26 @@ export function ControlsView(props: SharedViewProps) {
             })}
           </div>
           <div className="motion-actions">
-            {(['left', 'right'] as const).map((side) => (
-              <div key={side} className="motion-side">
-                <strong>{side === 'left' ? peripheralName('motion.a', copy('Side A motion', 'حرکت سمت A')) : peripheralName('motion.b', copy('Side B motion', 'حرکت سمت B'))}</strong>
+            {(['left', 'right'] as const).map((side) => {
+              const state = snapshot.motion?.[side]
+              const presented = presentedMotionDirection(state)
+              const label = presented === 'up'
+                ? copy('UP', 'بالا')
+                : presented === 'down'
+                  ? copy('DOWN', 'پایین')
+                  : presented === 'stop'
+                    ? copy('STOPPED', 'متوقف')
+                    : copy('UNKNOWN', 'نامشخص')
+              return <div key={side} className="motion-side">
+                <div className="motion-side__identity">
+                  <strong>{side === 'left' ? peripheralName('motion.a', copy('Side A motion', 'حرکت سمت A')) : peripheralName('motion.b', copy('Side B motion', 'حرکت سمت B'))}</strong>
+                  <StatusBadge tone={presented === 'unknown' ? 'neutral' : presented === 'stop' ? 'good' : state?.transitioning ? 'warn' : 'info'} pulse={state?.transitioning}>{state?.transitioning ? `${label} · ${copy('SYNCING', 'همگام‌سازی')}` : label}</StatusBadge>
+                </div>
                 <HoldActionButton compact disabled={emergencyStopActive} onHoldStart={() => command(`relay side ${side} up`)} onHoldStop={() => command(`relay side ${side} stop`)}>{copy('Hold Up', 'بالا نگه‌دار')}</HoldActionButton>
                 <Button compact onClick={() => void command(`relay side ${side} stop`)}>{copy('Stop', 'توقف')}</Button>
                 <HoldActionButton compact disabled={emergencyStopActive} onHoldStart={() => command(`relay side ${side} down`)} onHoldStop={() => command(`relay side ${side} stop`)}>{copy('Hold Down', 'پایین نگه‌دار')}</HoldActionButton>
               </div>
-            ))}
+            })}
           </div>
           <Button icon={AlertOctagon} tone="danger" onClick={() => openDialog({ tone: 'danger', title: t('confirmEmergencyTitle'), body: t('confirmEmergencyBody'), confirmLabel: t('emergencyOff'), action: async () => { await command('relay off') } })}>{t('emergencyOff')}</Button>
         </Card>}
