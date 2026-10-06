@@ -64,6 +64,13 @@ func (service *Service) configureAutomationActions() {
 	})
 }
 
+// InitializeAutomationActions installs coordinator/semantic action delivery
+// before serving clients. Persisted RF rules must not depend on a first RPC
+// request to become operational after a host restart.
+func (service *Service) InitializeAutomationActions() {
+	service.configureAutomationActions()
+}
+
 func (service *Service) rfCatalog(ctx context.Context, raw json.RawMessage) (any, error) {
 	var params struct {
 		ReadBoard bool `json:"read_board,omitempty"`

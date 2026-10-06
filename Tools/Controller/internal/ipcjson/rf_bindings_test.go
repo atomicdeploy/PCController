@@ -114,7 +114,7 @@ func TestRFBindingChordConsentIsExact(t *testing.T) {
 	}
 }
 
-func TestRFApplicationAutomationUsesTrackedCoordinatorAndActualAck(t *testing.T) {
+func TestRFApplicationAutomationStartsWithoutRPCAndUsesActualAck(t *testing.T) {
 	runtime := control.New(control.Options{})
 	defer runtime.Close()
 	registry := hostui.NewInstanceRegistry()
@@ -129,7 +129,7 @@ func TestRFApplicationAutomationUsesTrackedCoordinatorAndActualAck(t *testing.T)
 		return nil
 	})
 	service := Service{Client: controller.AttachSharedRuntime(runtime, shell.New(8)), AppActionSubmit: coordinator.Submit, AppActionOutcome: coordinator.Outcome}
-	service.configureAutomationActions()
+	service.InitializeAutomationActions()
 	code := uint32(12345)
 	config := appconfig.Defaults()
 	config.Automations = []appconfig.Automation{{Name: "RF Play", Enabled: true, Match: appconfig.AutomationMatch{Kind: "rf.gesture", Source: "rf", RFCode: &code, RFBits: 24, RFProtocol: 1, Gesture: "down"}, Actions: []appconfig.AutomationAction{{Type: "app", AppKind: "pealayer.toggle", AppTarget: "pealayer"}}}}
