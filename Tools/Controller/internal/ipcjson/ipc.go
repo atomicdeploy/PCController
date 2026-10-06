@@ -635,6 +635,19 @@ func (service *Service) dispatch(
 	switch request.Method {
 	case "controller.media.playback.get":
 		result = service.Client.MediaPlayback()
+	case "controller.media.timeline.get":
+		result = service.Client.MediaTimeline()
+	case "controller.media.timeline.prepare":
+		var params controller.MediaTimelinePlan
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			if service.AppInstances == nil {
+				err = errors.New("app instance registry is unavailable")
+			} else if _, ok := service.AppInstances.Get(params.ClientID); !ok {
+				err = errors.New("register client before preparing a timeline")
+			} else {
+				result, err = service.Client.PrepareMediaTimeline(params)
+			}
+		}
 	case "controller.media.playback.update":
 		var params controller.MediaPlaybackUpdate
 		if err = decodeStrictParams(request.Params, &params); err == nil {
@@ -2276,7 +2289,7 @@ func requestCapability(method string, params json.RawMessage) string {
 	case "controller.display.send", "controller.opcode.send",
 		"controller.opcode.exchange", "controller.opcode.request", "controller.action.invoke":
 		return capabilityBoard
-	case "controller.estop.set", "controller.media.playback.update":
+	case "controller.estop.set", "controller.media.playback.update", "controller.media.timeline.prepare":
 		return capabilityBoard
 	case "controller.host_menu.config", "controller.host_menu.config.get",
 		"controller.ui.config", "controller.ui.config.get",
@@ -2330,7 +2343,7 @@ func requestCapability(method string, params json.RawMessage) string {
 			}
 		}
 		return capabilityHostConfig
-	case "controller.ping", "controller.snapshot", "controller.media.playback.get", "controller.estop.get", "controller.port.process", "controller.port.owner", "controller.session.snapshot",
+	case "controller.ping", "controller.snapshot", "controller.media.playback.get", "controller.media.timeline.get", "controller.estop.get", "controller.port.process", "controller.port.owner", "controller.session.snapshot",
 		"controller.session.snapshot.last", "controller.status",
 		"controller.front_panel", "controller.front-panel",
 		"controller.command.catalog", "controller.melodies.list", "controller.program_state.get", "controller.program-state.get",

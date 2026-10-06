@@ -588,6 +588,9 @@ func (runner *MacroRunner) Start(ctx context.Context, reference string) (MacroSt
 // StartMode plays the same saved definition with an optional execution-policy
 // override. "auto" is capability driven and remains transparent to callers.
 func (runner *MacroRunner) StartMode(ctx context.Context, reference, modeOverride string) (MacroState, error) {
+	if runner.runtime.MediaTimeline().State == "playing" {
+		return MacroState{}, errors.New("pause media-bound effects before starting standalone playback")
+	}
 	runner.operationMu.Lock()
 	defer runner.operationMu.Unlock()
 	if runner.runtime.emergencyStop.Load() {

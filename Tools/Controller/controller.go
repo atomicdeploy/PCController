@@ -2542,6 +2542,13 @@ func (client *Client) EmitHostEvent(kind, text string) {
 
 type MediaPlaybackUpdate = control.MediaPlaybackUpdate
 type MediaPlaybackSnapshot = control.MediaPlaybackSnapshot
+type MediaTimelinePlan = control.MediaTimelinePlan
+type MediaTimelineStatus = control.MediaTimelineStatus
+
+func (client *Client) PrepareMediaTimeline(value MediaTimelinePlan) (MediaTimelineStatus, error) {
+	return client.runtime.PrepareMediaTimeline(value)
+}
+func (client *Client) MediaTimeline() MediaTimelineStatus { return client.runtime.MediaTimeline() }
 
 func (client *Client) UpdateMediaPlayback(value MediaPlaybackUpdate) (MediaPlaybackSnapshot, error) {
 	return client.runtime.UpdateMediaPlayback(value)

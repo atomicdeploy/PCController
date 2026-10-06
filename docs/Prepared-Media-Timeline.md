@@ -1,0 +1,51 @@
+# Prepared media timelines
+
+Companion: [Pealayer playback contract](https://github.com/ToghrolTP/pealayer/blob/fix/hardware-monitor-layout/docs/prepared-hardware-timeline.md).
+
+Registered consumers can call `controller.media.timeline.prepare` while their
+media clock is paused. The volatile plan accepts `client_id`, positive `revision`,
+`cues` (`id`, `reference`, `time_ms`, `duration_ms`), `actions` (`id`, `time_ms`,
+existing `MacroStep`), and `max_lateness_ms` (default 50, allowed 5–250).
+MacroStep relay/PWM/motion targets use the existing zero-based native contract.
+Do not send human-facing Rn values as native indices.
+
+Preparation uses the existing effect catalog, sequence compiler/expander and
+strip renderer. It resolves profile-bound effects, validates motion permission,
+freezes exact bytes in bounded RAM, and acknowledges their SHA-256 hash and
+authenticated board generation. Revision reuse with different content fails.
+Limits: 4,096 cues, 65,535 compiled commands, 8 MiB prepared-command budget,
+32-bit media milliseconds, bounded strip pixels and frame rate. Capacity errors
+never drop a tail of the effect.
+
+`controller.media.playback.update` now also accepts `epoch` and `plan_revision`.
+Playing against an unprepared/faulted revision or unarmed epoch is rejected.
+A paused update must first arm the cursor. Clock extrapolation retains a Go
+monotonic anchor; public UTC timestamps are not used as scheduling clocks.
+
+`controller.media.timeline.get` and playback snapshot `timeline` return:
+revision/hash/generation/state, armed epoch/clock sequence, command count and ACK
+count, explicitly rebased steps, last command/deadline, last/max ACK lateness,
+device ACK timestamp where advertised, and sticky failure reason. The same ledger
+publishes `media.timeline` state events. ACK count advances only on success.
+
+Clock expiration (250 ms while playing), session replacement, command failure,
+or lateness over the admitted limit faults execution rather than silently skipping
+commands. Cleanup is attempted against the original board generation even if the
+failed command might have applied. Cleanup failures/transport loss cannot prove
+physical outputs are off. E-STOP cancels the media executor as well as existing
+standalone effects. Conflicting live actuator commands are rejected during play.
+
+Pause releases outputs. Resume restores latched relay/PWM/motion/strip values but
+does not replay earlier RF, beep, menu or display one-shots. Seeking requires a
+paused new epoch; skipped historical steps are classified as intentional rebase.
+Effect definitions are frozen for a prepared run; editing them requires pausing
+and preparing a new revision.
+
+## Remaining acceptance gates
+
+This is host-scheduled, precompiled execution, **not** firmware-epoch scheduling.
+ACK lateness measures the received/projected host media clock, not physical
+video presentation or output edges. Network uncertainty is not eliminated.
+Absolute MCU queue start/seek/rate/lease support, physical timing instrumentation,
+and loaded low-end-machine acceptance are still required for hard timing claims.
+No firmware was flashed or physical timing certification performed for this pass.

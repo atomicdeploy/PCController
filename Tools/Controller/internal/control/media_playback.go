@@ -17,23 +17,26 @@ import (
 const mediaPlaybackLease = 3 * time.Second
 
 type MediaPlaybackUpdate struct {
-	ClientID   string  `json:"client_id"`
-	Sequence   uint64  `json:"sequence"`
-	PositionMS uint64  `json:"position_ms"`
-	DurationMS *uint64 `json:"duration_ms,omitempty"`
-	Playing    bool    `json:"playing"`
-	Loaded     bool    `json:"loaded"`
-	Rate       float64 `json:"rate"`
+	ClientID     string  `json:"client_id"`
+	Sequence     uint64  `json:"sequence"`
+	PositionMS   uint64  `json:"position_ms"`
+	DurationMS   *uint64 `json:"duration_ms,omitempty"`
+	Playing      bool    `json:"playing"`
+	Loaded       bool    `json:"loaded"`
+	Rate         float64 `json:"rate"`
+	Epoch        uint64  `json:"epoch,omitempty"`
+	PlanRevision uint64  `json:"plan_revision,omitempty"`
 }
 type MediaPlaybackSnapshot struct {
 	MediaPlaybackUpdate
-	ReceivedAt       time.Time `json:"received_at"`
-	Connected        bool      `json:"connected"`
-	BoardSynced      bool      `json:"board_synced"`
-	BoardError       string    `json:"board_error,omitempty"`
-	BoardSyncedAt    time.Time `json:"board_synced_at,omitempty"`
-	BoardSequence    uint64    `json:"board_sequence"`
-	BoardRoundTripMS int64     `json:"board_round_trip_ms"`
+	ReceivedAt       time.Time           `json:"received_at"`
+	Connected        bool                `json:"connected"`
+	BoardSynced      bool                `json:"board_synced"`
+	BoardError       string              `json:"board_error,omitempty"`
+	BoardSyncedAt    time.Time           `json:"board_synced_at,omitempty"`
+	BoardSequence    uint64              `json:"board_sequence"`
+	BoardRoundTripMS int64               `json:"board_round_trip_ms"`
+	Timeline         MediaTimelineStatus `json:"timeline"`
 }
 type mediaPlaybackState struct {
 	mu       sync.Mutex
@@ -68,18 +71,40 @@ func copyMediaUpdate(value MediaPlaybackUpdate) MediaPlaybackUpdate {
 func (runtime *Runtime) MediaPlayback() MediaPlaybackSnapshot {
 	state := &runtime.mediaPlayback
 	state.mu.Lock()
-	defer state.mu.Unlock()
 	result := state.snapshot
 	result.MediaPlaybackUpdate = copyMediaUpdate(result.MediaPlaybackUpdate)
 	result.Connected = !state.received.IsZero() && time.Since(state.received) < mediaPlaybackLease
 	if !result.Connected {
 		result.BoardSynced = false
 	}
+	state.mu.Unlock()
+	result.Timeline = runtime.MediaTimeline()
 	return result
+}
+
+// Internal schedulers retain Go's monotonic anchor. UTC is for API display only.
+func (runtime *Runtime) mediaTimelineClock() (MediaPlaybackUpdate, time.Time) {
+	runtime.mediaPlayback.mu.Lock()
+	defer runtime.mediaPlayback.mu.Unlock()
+	return copyMediaUpdate(runtime.mediaPlayback.snapshot.MediaPlaybackUpdate), runtime.mediaPlayback.received
 }
 func (runtime *Runtime) UpdateMediaPlayback(value MediaPlaybackUpdate) (MediaPlaybackSnapshot, error) {
 	if err := value.validate(); err != nil {
 		return runtime.MediaPlayback(), err
+	}
+	if value.PlanRevision != 0 {
+		plan := runtime.MediaTimeline()
+		if plan.ClientID != value.ClientID || plan.Revision != value.PlanRevision {
+			return runtime.MediaPlayback(), errors.New("media clock requires the acknowledged prepared timeline revision")
+		}
+		if value.Playing && (plan.State == "faulted" || plan.State == "stopped" || plan.ArmedEpoch != value.Epoch || plan.ClockSequence == 0) {
+			return runtime.MediaPlayback(), errors.New("hardware timeline is not armed for this media epoch; pause and reprepare")
+		}
+	} else if value.Playing {
+		plan := runtime.MediaTimeline()
+		if plan.ClientID == value.ClientID && plan.StepCount > 0 && plan.State != "stopped" {
+			return runtime.MediaPlayback(), errors.New("playing media must acknowledge its prepared hardware timeline")
+		}
 	}
 	state := &runtime.mediaPlayback
 	state.mu.Lock()

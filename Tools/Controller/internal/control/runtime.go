@@ -317,6 +317,7 @@ type Runtime struct {
 	programStateSentRevision   uint64
 	programStateSentMode       ProgramMode
 	macroRunner                *MacroRunner
+	mediaTimeline              mediaTimelineState
 	emergencyStop              atomic.Bool
 	emergencyStopOperationMu   sync.Mutex
 	emergencyStopStateMu       sync.RWMutex
@@ -1758,6 +1759,7 @@ func (runtime *Runtime) Close() error {
 	runtime.closeMu.Lock()
 	defer runtime.closeMu.Unlock()
 	runtime.cancelDisplaySchedules()
+	runtime.stopMediaTimeline()
 	// A reconnect attempt owns the serial handle before it becomes the active
 	// session. Pause first so it cannot attach, then cancel and join it. The
 	// close response is therefore an actual handle-release barrier rather than
@@ -1848,6 +1850,9 @@ func (runtime *Runtime) requestAtGeneration(
 	payload []byte,
 	expected ...byte,
 ) (native.Frame, error) {
+	if err := runtime.rejectMediaTimelineConflict(ctx, opcode); err != nil {
+		return native.Frame{}, err
+	}
 	if err := runtime.rejectEmergencyStopCommand(opcode, payload); err != nil {
 		return native.Frame{}, err
 	}
