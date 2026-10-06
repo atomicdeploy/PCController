@@ -263,7 +263,8 @@ func (runtime *Runtime) PrepareMediaTimeline(plan MediaTimelinePlan) (MediaTimel
 			return old, errors.New("stop standalone effect playback/recording before preparing media playback")
 		}
 		for _, step := range steps {
-			if step.opcode == native.OpRelaySide {
+			if step.opcode == native.OpRelaySide || step.opcode == native.OpRelayTest || step.opcode == native.OpRemoteKeyGesture ||
+				(step.opcode == native.OpRelaySet && ((len(step.payload) == 1 && step.payload[0]&0x0f != 0) || (len(step.payload) == 2 && step.payload[0] < 4 && step.payload[1] != 0))) {
 				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 				err := requireMotionAllowed(ctx, runtime, runner.hostConfig)
 				cancel()
