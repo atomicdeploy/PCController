@@ -2362,9 +2362,9 @@ func (model Model) statusInterval() time.Duration {
 		if interval > time.Duration(appconfig.StatusIntervalMaxMS)*time.Millisecond {
 			interval = time.Duration(appconfig.StatusIntervalMaxMS) * time.Millisecond
 		}
-		if model.snapshot().Status.DoorOpen && interval > 125*time.Millisecond {
-			interval = 125 * time.Millisecond
-		}
+		// Door edges arrive through the event stream. Keeping the entire TUI on a
+		// special 125 ms poll merely because the door remains open wastes CPU and
+		// does not improve edge latency.
 	}
 	// Remote activity events remain push-driven. The snapshot poll is only a
 	// convergence/backstop path, so rendering and making an authenticated RPC
