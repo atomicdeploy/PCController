@@ -2603,7 +2603,7 @@ func waitControlEvent(events <-chan control.Event) tea.Cmd {
 		// actionable activity preempt the window immediately. This changes only
 		// TUI painting; board timing and WebSocket delivery retain full cadence.
 		latest := event
-		timer := time.NewTimer(50 * time.Millisecond)
+		timer := time.NewTimer(100 * time.Millisecond)
 		defer timer.Stop()
 		for {
 			select {
