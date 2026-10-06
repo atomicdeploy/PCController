@@ -35,6 +35,38 @@ func TestWaitForIntegrationShutdownIsBounded(t *testing.T) {
 	}
 }
 
+func TestMelodyCatalogChangePublishesStateEvent(t *testing.T) {
+	store := openHostBridgeTestStore(t, nil)
+	runtime := control.New(control.Options{})
+	defer runtime.Close()
+	client := controller.AttachSharedRuntime(runtime, shell.New(8))
+	manager, err := Start(context.Background(), client, store, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close()
+	before := client.LatestEventID()
+	if _, err := store.Update(func(config *appconfig.Config) error {
+		config.Melodies = append(config.Melodies, appconfig.Melody{
+			Name:  "new-catalog-entry",
+			Notes: []appconfig.MelodyNote{{FrequencyHz: 660, DurationMS: 100}},
+		})
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	event, err := client.NextEvent(ctx, before, "melodies.changed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if event.Stream != control.EventStreamState || event.Action != "refresh" ||
+		event.Metadata["count"] == "" || event.Metadata["revision"] == "" {
+		t.Fatalf("melody catalog event=%#v", event)
+	}
+}
+
 func TestOfflineBridgePeerIsStateNotGlobalIntegrationFailure(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

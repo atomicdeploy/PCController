@@ -718,6 +718,13 @@ request error.
 | `controller.ports` | `{}` | current serial devices with stable identity fields |
 | `controller.quit`, `controller.exit` | `{}` | close the primary and emit lifecycle shutdown |
 
+The melody catalog is live host configuration. After its effective contents
+change, subscribers receive a state-stream `controller.state` notification
+with `params.kind` set to `melodies.changed`, plus `count` and opaque
+`revision` metadata. Consumers should refresh `controller.melodies.list` on
+that event and may also refresh when presenting a picker to guarantee a
+current user choice.
+
 Full TUI instances and each browser tab follow the ephemeral `default`
 navigation group unless that client opts out. Browser opt-out is scoped to the
 current tab; it is not host configuration and does not affect other clients.

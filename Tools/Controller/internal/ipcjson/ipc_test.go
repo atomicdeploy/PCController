@@ -1685,7 +1685,18 @@ func TestCommandCatalogAndProgramStateReachRPCAndREST(t *testing.T) {
 		},
 	})
 	client := controllerapi.AttachSharedRuntime(runtime, engine)
-	service := &Service{Client: client}
+	configuredMelody := appconfig.Melody{
+		Name:  "rpc-live-catalog",
+		Notes: []appconfig.MelodyNote{{FrequencyHz: 880, DurationMS: 90, GapMS: 10}},
+	}
+	service := &Service{
+		Client: client,
+		HostConfig: func() appconfig.Config {
+			config := appconfig.Defaults()
+			config.Melodies = []appconfig.Melody{configuredMelody}
+			return config
+		},
+	}
 
 	catalog := service.Dispatch(context.Background(), Request{
 		Method: "controller.command.catalog",
@@ -1705,8 +1716,12 @@ func TestCommandCatalogAndProgramStateReachRPCAndREST(t *testing.T) {
 	if melodies.Error != nil {
 		t.Fatal(melodies.Error)
 	}
-	if _, ok := melodies.Result.([]controllerapi.Melody); !ok {
+	melodyCatalog, ok := melodies.Result.([]controllerapi.Melody)
+	if !ok {
 		t.Fatalf("RPC melody catalog=%#v", melodies.Result)
+	}
+	if len(melodyCatalog) == 0 || melodyCatalog[0] != configuredMelody {
+		t.Fatalf("RPC melody catalog did not use live host config: %#v", melodyCatalog)
 	}
 	executeParams, _ := json.Marshal(map[string]string{"command": "help strip"})
 	executed := service.Dispatch(context.Background(), Request{

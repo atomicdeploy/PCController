@@ -837,7 +837,10 @@ func (service *Service) dispatch(
 	case "controller.command.catalog":
 		result = service.Client.CommandCatalog()
 	case "controller.melodies.list":
-		result = service.Client.ConfiguredMelodies()
+		// The primary host can expose a shared-runtime facade whose client-side
+		// cache intentionally owns no configuration. Read the watched host
+		// configuration so every RPC response reflects the current catalog.
+		result = appconfig.EffectiveMelodies(service.hostConfig())
 	case "controller.program_state.get", "controller.program-state.get":
 		result = service.Client.ProgramState()
 	case "controller.program_state.set", "controller.program-state.set":
