@@ -2,6 +2,9 @@ package control
 
 import (
 	"encoding/binary"
+	"pccontroller.local/controller/internal/link"
+	"pccontroller.local/controller/internal/native"
+	"pccontroller.local/controller/internal/ports"
 	"testing"
 	"time"
 )
@@ -82,5 +85,48 @@ func TestMediaPlaybackFormattedSegments(t *testing.T) {
 				t.Fatalf("%d cell %d: %x != %x", test.position, i, p[10+i], expected)
 			}
 		}
+	}
+}
+func TestMediaPlaybackBoardACKAndExpiredProgramClaim(t *testing.T) {
+	runtime := New(Options{RequestTimeout: time.Second})
+	defer runtime.Close()
+	port := newProgramStateWirePort()
+	runtime.attach(link.OpenResult{Session: link.NewForPort("MEDIA-TEST", port), Port: ports.Info{Name: "MEDIA-TEST"}, Hello: native.Hello{Name: "PCController", Capabilities: native.CapabilityProgramState}})
+	if _, err := runtime.UpdateMediaPlayback(MediaPlaybackUpdate{ClientID: "player:test", Sequence: 1, Loaded: true, Playing: true, PositionMS: 65000, Rate: 1}); err != nil {
+		t.Fatal(err)
+	}
+	waitClock := func(flags byte) {
+		t.Helper()
+		timer := time.NewTimer(2 * time.Second)
+		defer timer.Stop()
+		for {
+			select {
+			case frame := <-port.writes:
+				if frame.Opcode == native.OpMediaClock && frame.Payload[1] == flags {
+					return
+				}
+			case <-timer.C:
+				t.Fatalf("no acknowledged media clock flags=%d", flags)
+			}
+		}
+	}
+	waitClock(3)
+	deadline := time.Now().Add(time.Second)
+	for !runtime.MediaPlayback().BoardSynced && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if !runtime.MediaPlayback().BoardSynced {
+		t.Fatal("native ACK not reported")
+	}
+	runtime.mediaPlayback.mu.Lock()
+	runtime.mediaPlayback.received = time.Now().Add(-4 * time.Second)
+	runtime.mediaPlayback.mu.Unlock()
+	runtime.mediaPlayback.wake <- struct{}{}
+	waitClock(0)
+	if runtime.ProgramState().Mode != ProgramIdle {
+		t.Fatal("expired playback retained Running claim")
+	}
+	if runtime.MediaPlayback().Connected || runtime.MediaPlayback().BoardSynced {
+		t.Fatal("expired playback reported live synchronization")
 	}
 }
