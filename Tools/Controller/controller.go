@@ -366,6 +366,7 @@ type AutomationMatch struct {
 	RFID       *byte   `json:"rf_id,omitempty"`
 	RFCode     *uint32 `json:"rf_code,omitempty"`
 	RFProtocol byte    `json:"rf_protocol,omitempty"`
+	RFBits     byte    `json:"rf_bits,omitempty"`
 }
 
 // AutomationAction describes one command, macro, integration, or OS action.
@@ -382,6 +383,10 @@ type AutomationAction struct {
 	HoldMS     int         `json:"hold_ms,omitempty"`
 	Power      string      `json:"power,omitempty"`
 	Confirm    string      `json:"confirm,omitempty"`
+	AppKind    string      `json:"app_kind,omitempty"`
+	AppValue   string      `json:"app_value,omitempty"`
+	AppTarget  string      `json:"app_target,omitempty"`
+	ActionID   string      `json:"action_id,omitempty"`
 }
 
 // RFTransmit contains the complete waveform metadata for one 433 MHz send action.
@@ -1027,6 +1032,7 @@ func toAppAutomations(source []Automation) []appconfig.Automation {
 				Source: automation.Match.Source, RFID: automation.Match.RFID,
 				RFCode:     automation.Match.RFCode,
 				RFProtocol: automation.Match.RFProtocol,
+				RFBits:     automation.Match.RFBits,
 			},
 			Actions: make([]appconfig.AutomationAction, len(automation.Actions)),
 		}
@@ -1041,6 +1047,8 @@ func toAppAutomations(source []Automation) []appconfig.Automation {
 				HoldMS:     action.HoldMS,
 				Power:      action.Power,
 				Confirm:    action.Confirm,
+				AppKind:    action.AppKind, AppValue: action.AppValue, AppTarget: action.AppTarget,
+				ActionID: action.ActionID,
 			}
 			if action.RF != nil {
 				result[index].Actions[actionIndex].RF = &appconfig.RFTransmit{
@@ -2143,6 +2151,19 @@ func (client *Client) StartRFLearning(
 // RFLearningState returns the latest host-tracked learning lifecycle.
 func (client *Client) RFLearningState() RFLearnState {
 	return client.runtime.RFLearnState()
+}
+
+func (client *Client) ConfigureAutomationAppDispatcher(dispatch func(context.Context, appconfig.AutomationAction) error) {
+	client.runtime.SetAutomationAppDispatcher(dispatch)
+}
+
+func (client *Client) RFActivity() []Event {
+	values := client.runtime.RFActivity()
+	result := make([]Event, 0, len(values))
+	for _, value := range values {
+		result = append(result, publicEvent(value))
+	}
+	return result
 }
 
 // CancelRFLearn ends the current learning session with an explicit reason.

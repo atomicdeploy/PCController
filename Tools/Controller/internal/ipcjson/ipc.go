@@ -535,6 +535,7 @@ func (service *Service) dispatch(
 		return response
 	}
 	// Primary discovery must not queue behind a long board, firmware, or shell
+	service.configureAutomationActions()
 	// operation holding service.mu. Secondary instances use this bounded ping
 	// before deciding whether they may approach the local serial device.
 	if request.Method == "controller.ping" {
@@ -1125,6 +1126,12 @@ func (service *Service) dispatch(
 		}
 	case "controller.rf.list":
 		result, err = service.Client.ListLearnedDetailed(ctx)
+	case "controller.rf.catalog":
+		result, err = service.rfCatalog(ctx, request.Params)
+	case "controller.rf.binding.put":
+		result, err = service.putRFBinding(request.Params)
+	case "controller.rf.binding.remove":
+		result, err = service.removeRFBinding(request.Params)
 	case "controller.board_automation.list":
 		result, err = service.Client.BoardAutomations(ctx)
 	case "controller.board_automation.put":
@@ -2302,6 +2309,10 @@ func requestCapability(method string, params json.RawMessage) string {
 		"controller.webhooks.status",
 		"controller.webhooks.pending", "controller.webhooks.dead":
 		return capabilityRead
+	case "controller.rf.catalog":
+		return capabilityRead
+	case "controller.rf.binding.put", "controller.rf.binding.remove":
+		return capabilityHostConfig
 	case "controller.host_menu.configure", "controller.host_menu.config.set",
 		"controller.ui.config.set",
 		"controller.peripherals.set", "controller.board_profile.update",

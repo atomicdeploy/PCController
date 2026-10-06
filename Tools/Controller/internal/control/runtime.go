@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/link"
 	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/portowner"
@@ -210,8 +211,10 @@ type connectionEventSignature struct {
 }
 
 type Runtime struct {
-	options       Options
-	mediaPlayback mediaPlaybackState
+	automationAppMu sync.RWMutex
+	automationApp   func(context.Context, appconfig.AutomationAction) error
+	options         Options
+	mediaPlayback   mediaPlaybackState
 
 	openMu                 sync.Mutex
 	closeMu                sync.Mutex
