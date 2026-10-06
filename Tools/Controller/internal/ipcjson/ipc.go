@@ -2817,11 +2817,12 @@ type wsNotification struct {
 }
 
 type wsSubscription struct {
-	Topics     []string `json:"topics"`
-	Opcodes    []int    `json:"opcodes,omitempty"`
-	IntervalMS int      `json:"interval_ms,omitempty"`
-	AfterID    uint64   `json:"after_id,omitempty"`
-	Preserve   bool     `json:"preserve,omitempty"`
+	Topics          []string `json:"topics"`
+	Opcodes         []int    `json:"opcodes,omitempty"`
+	IntervalMS      int      `json:"interval_ms,omitempty"`
+	StateIntervalMS int      `json:"state_interval_ms,omitempty"`
+	AfterID         uint64   `json:"after_id,omitempty"`
+	Preserve        bool     `json:"preserve,omitempty"`
 }
 
 func websocketMux(serverContext context.Context, service *Service) http.Handler {
@@ -4148,14 +4149,15 @@ func serveWebSocket(
 			} else {
 				subscriptions.replace(normalized)
 				response.Result = map[string]any{
-					"subscribed":  true,
-					"topics":      normalized.Topics,
-					"opcodes":     normalized.Opcodes,
-					"interval_ms": normalized.IntervalMS,
-					"preserve":    normalized.Preserve,
-					"latest_id":   service.Client.LatestEventID(),
-					"instance_id": strings.TrimSpace(service.HostInstanceID),
-					"principal":   access.Principal,
+					"subscribed":        true,
+					"topics":            normalized.Topics,
+					"opcodes":           normalized.Opcodes,
+					"interval_ms":       normalized.IntervalMS,
+					"state_interval_ms": normalized.StateIntervalMS,
+					"preserve":          normalized.Preserve,
+					"latest_id":         service.Client.LatestEventID(),
+					"instance_id":       strings.TrimSpace(service.HostInstanceID),
+					"principal":         access.Principal,
 				}
 			}
 			if len(rpcRequest.ID) != 0 {
@@ -4328,11 +4330,12 @@ func serveSocketIO(
 				subscriptions.replace(normalized)
 				_ = writeEvent("subscribed", map[string]any{
 					"topics": normalized.Topics, "opcodes": normalized.Opcodes,
-					"interval_ms": normalized.IntervalMS,
-					"preserve":    normalized.Preserve,
-					"latest_id":   service.Client.LatestEventID(),
-					"instance_id": strings.TrimSpace(service.HostInstanceID),
-					"principal":   access.Principal,
+					"interval_ms":       normalized.IntervalMS,
+					"state_interval_ms": normalized.StateIntervalMS,
+					"preserve":          normalized.Preserve,
+					"latest_id":         service.Client.LatestEventID(),
+					"instance_id":       strings.TrimSpace(service.HostInstanceID),
+					"principal":         access.Principal,
 				})
 			case "unsubscribe":
 				subscriptions.stopAll()
@@ -4673,6 +4676,14 @@ func normalizeSubscription(value wsSubscription) (wsSubscription, error) {
 	} else {
 		value.IntervalMS = 0
 	}
+	if seen["state"] {
+		if value.StateIntervalMS < 0 || value.StateIntervalMS > 1000 ||
+			(value.StateIntervalMS > 0 && value.StateIntervalMS < 16) {
+			return wsSubscription{}, errors.New("state_interval_ms must be 0 or 16..1000")
+		}
+	} else {
+		value.StateIntervalMS = 0
+	}
 	return value, nil
 }
 
@@ -4753,11 +4764,11 @@ func (subscriptions *webSocketSubscriptions) start(topic string, value wsSubscri
 		defer close(done)
 		switch topic {
 		case "events":
-			streamWebSocketEventStream(topicContext, subscriptions.client, afterID, "activity", "controller.event", subscriptions.snapshot, subscriptions.write)
+			streamWebSocketEventStream(topicContext, subscriptions.client, afterID, "activity", "controller.event", 0, subscriptions.snapshot, subscriptions.write)
 		case "state":
-			streamWebSocketEventStream(topicContext, subscriptions.client, afterID, "state", "controller.state", subscriptions.snapshot, subscriptions.write)
+			streamWebSocketEventStream(topicContext, subscriptions.client, afterID, "state", "controller.state", time.Duration(value.StateIntervalMS)*time.Millisecond, subscriptions.snapshot, subscriptions.write)
 		case "debug":
-			streamWebSocketEventStream(topicContext, subscriptions.client, afterID, "debug", "controller.debug", nil, subscriptions.write)
+			streamWebSocketEventStream(topicContext, subscriptions.client, afterID, "debug", "controller.debug", 0, nil, subscriptions.write)
 		case "opcodes":
 			streamWebSocketOpcodes(topicContext, subscriptions.client, afterID, value.Opcodes, subscriptions.write)
 		case "status":
@@ -4805,21 +4816,31 @@ func streamWebSocketEventStream(
 	afterID uint64,
 	stream string,
 	method string,
+	highRateInterval time.Duration,
 	snapshot func() controllerSnapshotEnvelope,
 	write func(any) error,
 ) {
+	var lastHighRateWrite time.Time
 	for ctx.Err() == nil {
 		event, err := client.NextEventStream(ctx, afterID, "", stream)
 		if err != nil {
 			return
 		}
 		afterID = event.ID
+		highRate := stream == "state" && highRateStateEvent(event)
+		if highRate && highRateInterval > 0 &&
+			!lastHighRateWrite.IsZero() && time.Since(lastHighRateWrite) < highRateInterval {
+			continue
+		}
 		if err := write(wsNotification{
 			JSONRPC: Version,
 			Method:  method,
 			Params:  event,
 		}); err != nil {
 			return
+		}
+		if highRate {
+			lastHighRateWrite = time.Now()
 		}
 		if snapshot != nil && eventUpdatesClientSnapshot(event) {
 			if err := write(wsNotification{
@@ -4830,6 +4851,15 @@ func streamWebSocketEventStream(
 				return
 			}
 		}
+	}
+}
+
+func highRateStateEvent(event controller.Event) bool {
+	switch strings.ToLower(strings.TrimSpace(event.Kind)) {
+	case "status_led.changed", "pwm.changed", "animation.frame", "front_panel.segment":
+		return true
+	default:
+		return false
 	}
 }
 
