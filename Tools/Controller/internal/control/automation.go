@@ -35,11 +35,8 @@ func (runtime *Runtime) RFActivity() []Event {
 	runtime.eventMu.Lock()
 	defer runtime.eventMu.Unlock()
 	result := make([]Event, 0, 20)
-	for i := len(runtime.activityLog) - 1; i >= 0 && len(result) < 20; i-- {
-		event := runtime.activityLog[i]
-		if strings.HasPrefix(event.Kind, "rf.") {
-			result = append(result, event)
-		}
+	for i := len(runtime.rfActivityLog) - 1; i >= 0; i-- {
+		result = append(result, runtime.rfActivityLog[i])
 	}
 	return result
 }

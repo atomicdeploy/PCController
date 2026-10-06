@@ -10,6 +10,26 @@ import (
 	"pccontroller.local/controller/internal/shell"
 )
 
+func TestRFActivitySurvivesUnrelatedTrafficAndExcludesBridgeEchoes(t *testing.T) {
+	runtime := New(Options{})
+	first := runtime.PublishStructuredEvent(Event{Kind: "rf.receive", Source: "board", RFCode: 42})
+	for i := 0; i < 1024; i++ {
+		runtime.PublishStructuredEvent(Event{Kind: "media.clock", Source: "pealayer"})
+	}
+	runtime.PublishStructuredEvent(Event{Kind: "rf.receive", Source: "bridge", RFCode: 42})
+	activity := runtime.RFActivity()
+	if len(activity) != 1 || activity[0].ID != first.ID {
+		t.Fatalf("RF reception lost or duplicated by other traffic: %+v", activity)
+	}
+	for code := uint32(100); code < 125; code++ {
+		runtime.PublishStructuredEvent(Event{Kind: "rf.receive", Source: "board", RFCode: code})
+	}
+	activity = runtime.RFActivity()
+	if len(activity) != 20 || activity[0].RFCode != 124 || activity[19].RFCode != 105 {
+		t.Fatalf("RF history must retain the newest 20 receptions, newest first: %+v", activity)
+	}
+}
+
 func TestAutomationMatchesNormalizedKeyAndRFEvents(t *testing.T) {
 	rfID := byte(9)
 	key := Event{Kind: "key", Frame: native.Frame{

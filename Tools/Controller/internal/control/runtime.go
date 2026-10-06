@@ -285,14 +285,15 @@ type Runtime struct {
 
 	events chan Event
 
-	eventMu     sync.Mutex
-	eventLog    []Event
-	activityLog []Event
-	nextEventID uint64
-	eventNotify chan struct{}
-	rfMu        sync.Mutex
-	rfGestures  map[rfGestureKey]*rfGestureState
-	rfClicks    map[rfGestureKey]*rfClickState
+	eventMu       sync.Mutex
+	eventLog      []Event
+	activityLog   []Event
+	rfActivityLog []Event
+	nextEventID   uint64
+	eventNotify   chan struct{}
+	rfMu          sync.Mutex
+	rfGestures    map[rfGestureKey]*rfGestureState
+	rfClicks      map[rfGestureKey]*rfClickState
 
 	rfLearnMu    sync.RWMutex
 	rfLearnState RFLearnState
@@ -3841,6 +3842,14 @@ func (runtime *Runtime) publishEvent(event Event) Event {
 		runtime.activityLog = append(runtime.activityLog, event)
 		if len(runtime.activityLog) > 512 {
 			runtime.activityLog = append([]Event(nil), runtime.activityLog[len(runtime.activityLog)-512:]...)
+		}
+	}
+	// Keep the RF manager's bounded history independently of high-rate media
+	// and board activity. Bridge echoes are not a second local reception.
+	if strings.HasPrefix(event.Kind, "rf.") && event.Source != "bridge" {
+		runtime.rfActivityLog = append(runtime.rfActivityLog, event)
+		if len(runtime.rfActivityLog) > 20 {
+			runtime.rfActivityLog = append([]Event(nil), runtime.rfActivityLog[len(runtime.rfActivityLog)-20:]...)
 		}
 	}
 	close(runtime.eventNotify)
