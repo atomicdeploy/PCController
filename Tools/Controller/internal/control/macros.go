@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -119,6 +120,9 @@ type MacroRunner struct {
 	recordRelayOriginUS uint32
 	recordRelayOriginAt uint32
 	recordRelayClock    bool
+	recordSeed          *appconfig.Macro
+	recordOffsetUS      uint32
+	recordPrefix        []appconfig.MacroStep
 
 	// requestGeneration is a focused protocol-order test seam. Production uses
 	// Runtime.requestAtGeneration so every macro request remains pinned to the
@@ -362,7 +366,7 @@ func (runner *MacroRunner) StartMCURecording(name, category, color string) (Macr
 	return runner.startRecording(name, category, color, macroModeMCU)
 }
 
-func (runner *MacroRunner) startRecording(name, category, color, mode string) (MacroRecordingState, error) {
+func (runner *MacroRunner) startRecording(name, category, color, mode string, seeds ...appconfig.Macro) (MacroRecordingState, error) {
 	runner.operationMu.Lock()
 	defer runner.operationMu.Unlock()
 	if runner.runtime.emergencyStop.Load() {
@@ -384,7 +388,7 @@ func (runner *MacroRunner) startRecording(name, category, color, mode string) (M
 	}
 	used := make(map[byte]bool)
 	for _, macro := range runner.List() {
-		if strings.EqualFold(macro.Name, name) {
+		if strings.EqualFold(macro.Name, name) && (len(seeds) == 0 || macro.ID != seeds[0].ID) {
 			return MacroRecordingState{}, fmt.Errorf("macro %q already exists", name)
 		}
 		used[macro.ID] = true
@@ -394,7 +398,18 @@ func (runner *MacroRunner) startRecording(name, category, color, mode string) (M
 		id++
 	}
 	if used[id] {
-		return MacroRecordingState{}, errors.New("all macro IDs are in use")
+		if len(seeds) == 0 {
+			return MacroRecordingState{}, errors.New("all macro IDs are in use")
+		}
+	}
+	var offset uint32
+	if len(seeds) > 0 {
+		id = seeds[0].ID
+		var err error
+		offset, err = recordingSequenceEnd(seeds[0].Steps)
+		if err != nil {
+			return MacroRecordingState{}, err
+		}
 	}
 
 	runner.recordMu.Lock()
@@ -412,6 +427,17 @@ func (runner *MacroRunner) startRecording(name, category, color, mode string) (M
 		Mode: mode, TimingToleranceUS: modeTimingTolerance(mode),
 		BoardProfileKey: profileKey, BoardProfileMode: profileMode,
 	}
+	runner.recordSeed = nil
+	runner.recordOffsetUS = offset
+	runner.recordPrefix = nil
+	if len(seeds) > 0 {
+		seed := seeds[0]
+		seed.Steps = cloneMacroSteps(seed.Steps)
+		runner.recordSeed = &seed
+		runner.recordMacro = seed
+		runner.recordMacro.Steps = cloneMacroSteps(seed.Steps)
+		runner.recordPrefix = cloneMacroSteps(seed.Steps)
+	}
 	runner.recordBaseUS = 0
 	runner.recordBaseAt = time.Time{}
 	runner.recordHasBase = false
@@ -421,6 +447,7 @@ func (runner *MacroRunner) startRecording(name, category, color, mode string) (M
 		Active: true, ID: id, Name: name, Mode: mode, Category: strings.TrimSpace(category),
 		Color: color, BoardProfileKey: profileKey, BoardProfileMode: profileMode, StartedAt: time.Now(),
 	}
+	runner.recording.Steps = len(runner.recordMacro.Steps)
 	runner.recordRelease = runner.runtime.ObserveCommands(runner.captureCommand)
 	state := runner.recording
 	runner.recordMu.Unlock()
@@ -431,6 +458,68 @@ func (runner *MacroRunner) startRecording(name, category, color, mode string) (M
 		Metadata: map[string]string{"macro_mode": mode},
 	})
 	return state, nil
+}
+
+// StartAppendingRecording keeps one catalog identity and its existing steps.
+// The capture clock is independent of the effect's playback execution policy.
+func (runner *MacroRunner) StartAppendingRecording(ctx context.Context, reference, captureMode string) (MacroRecordingState, error) {
+	macro, err := runner.find(strings.TrimPrefix(reference, "effect:"))
+	if err != nil {
+		return MacroRecordingState{}, err
+	}
+	mode := macroModeAuto
+	if captureMode == "device-clock" || captureMode == "board-retained" {
+		mode = macroModeMCU
+	} else if captureMode != "automatic" && captureMode != "" {
+		return MacroRecordingState{}, errors.New("invalid capture mode")
+	}
+	if captureMode == "board-retained" && !runner.runtime.Snapshot().Connected {
+		return MacroRecordingState{}, errors.New("device is not connected")
+	}
+	state, err := runner.startRecording(macro.Name, macro.Category, macro.Color, mode, macro)
+	if err != nil || captureMode != "board-retained" {
+		return state, err
+	}
+	runner.recordMu.Lock()
+	runner.recording.DeviceRetained = true
+	runner.recordMu.Unlock()
+	_, err = runner.request(ctx, native.OpMacroStep, []byte{3, state.ID}, native.OpACK)
+	if err != nil {
+		runner.recordMu.Lock()
+		runner.recording.DeviceRetained = false
+		runner.recordMu.Unlock()
+		_, _ = runner.StopRecording(false)
+		return MacroRecordingState{}, err
+	}
+	return runner.RecordingState(), nil
+}
+
+func recordingSequenceEnd(steps []appconfig.MacroStep) (uint32, error) {
+	expanded, err := expandMacroTimeline(steps)
+	if err != nil {
+		return 0, err
+	}
+	var end uint64
+	for _, step := range expanded {
+		at := uint64(step.AtUS) + uint64(step.DurationMS)*1000
+		if at > end {
+			end = at
+		}
+	}
+	// A constant range/color cue can have a authored span without a release
+	// command. Its span still determines where a following take begins.
+	for _, step := range steps {
+		repeats := max(uint64(step.RepeatCount), uint64(1))
+		interval := uint64(step.RepeatIntervalMS)
+		if repeats > 1 && interval == 0 {
+			interval = max(uint64(step.DurationMS), uint64(1))
+		}
+		end = max(end, uint64(step.AtUS)+(repeats-1)*interval*1000+uint64(step.DurationMS)*1000)
+	}
+	if end > 0x7fffffff {
+		return 0, errors.New("sequence end exceeds recording timing window")
+	}
+	return uint32(end), nil
 }
 
 func (runner *MacroRunner) StopRecording(save bool) (appconfig.Macro, error) {
@@ -469,10 +558,22 @@ func (runner *MacroRunner) StopRecording(save bool) (appconfig.Macro, error) {
 
 	if save {
 		if err := runner.updateHostConfig(func(config *appconfig.Config) error {
-			for _, existing := range config.Macros {
+			for index, existing := range config.Macros {
+				if runner.recordSeed != nil && existing.ID == macro.ID {
+					before, _ := json.Marshal(runner.recordSeed)
+					current, _ := json.Marshal(existing)
+					if string(before) != string(current) {
+						return errors.New("effect changed during capture; recording retained, concurrent edits were not overwritten")
+					}
+					config.Macros[index] = macro
+					return nil
+				}
 				if existing.ID == macro.ID || strings.EqualFold(existing.Name, macro.Name) {
 					return fmt.Errorf("macro ID %d or name %q already exists", macro.ID, macro.Name)
 				}
+			}
+			if runner.recordSeed != nil {
+				return errors.New("effect was removed during capture; recording retained")
 			}
 			config.Macros = append(config.Macros, macro)
 			return nil
@@ -520,7 +621,7 @@ func (runner *MacroRunner) captureCommand(evidence CommandEvidence) {
 		runner.recording.LastError = "recording reached the 65535 step limit; save it before continuing"
 		return
 	}
-	mode := runner.recordMacro.Mode
+	mode := runner.recording.Mode
 	if mode != macroModeMCU {
 		if !hostRecordableOpcode(evidence.Opcode) {
 			return
@@ -545,7 +646,11 @@ func (runner *MacroRunner) captureCommand(evidence CommandEvidence) {
 			runner.recording.LastError = "recording exceeded the host signed timing window"
 			return
 		}
-		step.AtUS = uint32(delta / time.Microsecond)
+		if uint64(delta/time.Microsecond)+uint64(runner.recordOffsetUS) > 0x7fffffff {
+			runner.recording.LastError = "appended recording timing overflow"
+			return
+		}
+		step.AtUS = uint32(delta/time.Microsecond) + runner.recordOffsetUS
 		runner.recordMacro.Steps = append(runner.recordMacro.Steps, step)
 		runner.recording.Steps = len(runner.recordMacro.Steps)
 		runner.publishRecordedStep(step)
@@ -560,7 +665,11 @@ func (runner *MacroRunner) captureCommand(evidence CommandEvidence) {
 		runner.recording.LastError = "recording exceeded the MCU signed timing window"
 		return
 	}
-	step.AtUS = delta
+	if uint64(delta)+uint64(runner.recordOffsetUS) > 0x7fffffff {
+		runner.recording.LastError = "appended recording timing overflow"
+		return
+	}
+	step.AtUS = delta + runner.recordOffsetUS
 	runner.recordMacro.Steps = append(runner.recordMacro.Steps, step)
 	runner.recording.Steps = len(runner.recordMacro.Steps)
 	runner.publishRecordedStep(step)

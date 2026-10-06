@@ -226,6 +226,7 @@ effect inspect effect:<id>
 effect play effect:<id>
 effect stop effect:<id>
 effect record start <name> [category] [color]
+effect record append effect:<id> [automatic|device-clock|board-retained]
 effect record status
 effect record save
 effect record discard
@@ -236,6 +237,32 @@ effect cancel
 
 The same commands are executed through `controller.command.execute` for RPC
 clients. Pealayer should never bypass PCController to write the library.
+
+### Capture into the effect being edited
+
+In Pealayer, open **Effects Library → New effect** or **Manage** an existing
+sequence. Set its name, group, icon, color and execution policy once in the
+normal editor. **Record** sits beside **Add step**, not in a second creation
+form. It publishes this edited definition first, waits for the acknowledgement,
+then begins a take using the same catalog identity.
+
+New actions start at the existing sequence's end, including cue durations,
+fades and repetitions. **Finish** updates the same effect; existing cues keep
+their identities and are refreshed, and no extra cue is inserted automatically.
+**Discard take** preserves the published prefix. To replace rather than append,
+delete existing steps before pressing Record. An empty new effect has no sample
+action inserted automatically.
+
+Capture clock is separate from playback execution policy. All live sources
+capture applied board relay edges and supported acknowledged application/API
+commands together. Device clock requires timestamped board acknowledgements;
+board capture uses the firmware's bounded retained relay ring. That ring still
+has its existing capacity and overwrite behavior; it is not unlimited storage.
+The retained tail is appended without replacing the original sequence.
+
+If another consumer edits or removes the effect during capture, Finish reports
+the conflict and keeps the unsaved take instead of silently overwriting edits.
+Resolve the conflict or discard the take before starting another operation.
 
 ## Verified software acceptance snapshot
 
