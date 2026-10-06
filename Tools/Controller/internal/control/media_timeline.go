@@ -344,10 +344,11 @@ func (runtime *Runtime) stopMediaTimeline() {
 	}
 	state.mu.Unlock()
 }
-func (runtime *Runtime) mediaTimelineOff(generation uint64) {
+func (runtime *Runtime) mediaTimelineOff(generation uint64) error {
 	// Pin cleanup to this board too. Never switch off a replacement board.
 	ctx, cancel := context.WithTimeout(context.WithValue(context.Background(), mediaTimelineContextKey{}, true), time.Second)
 	defer cancel()
+	var failures []error
 	for _, command := range []struct {
 		op      byte
 		payload []byte
@@ -356,8 +357,11 @@ func (runtime *Runtime) mediaTimelineOff(generation uint64) {
 		{native.OpAddressableLED, []byte{native.AddressableLEDFill, 0, 0, 0, 0xFF}},
 		{native.OpBuzzer, native.BuzzerPayload(0, 1)},
 	} {
-		_, _ = runtime.requestAtGeneration(ctx, generation, command.op, command.payload, native.OpACK)
+		if _, err := runtime.requestAtGeneration(ctx, generation, command.op, command.payload, native.OpACK); err != nil {
+			failures = append(failures, err)
+		}
 	}
+	return errors.Join(failures...)
 }
 
 // Restore latched values after pause/seek without replaying historical RF,
@@ -418,7 +422,14 @@ func (runtime *Runtime) runMediaTimeline(ctx context.Context, done chan struct{}
 	owned := false
 	defer func() {
 		if owned {
-			runtime.mediaTimelineOff(generation)
+			if err := runtime.mediaTimelineOff(generation); err != nil {
+				runtime.mediaTimeline.mu.Lock()
+				runtime.mediaTimeline.status.State = "faulted"
+				runtime.mediaTimeline.status.Error += "; output-off cleanup not acknowledged: " + err.Error()
+				status := runtime.mediaTimeline.status
+				runtime.mediaTimeline.mu.Unlock()
+				runtime.publishMediaTimeline(status)
+			}
 		}
 	}()
 	fault := func(message string) {
@@ -478,7 +489,10 @@ func (runtime *Runtime) runMediaTimeline(ctx context.Context, done chan struct{}
 			epoch = clock.Epoch
 		}
 		if wasPlaying && !clock.Playing && owned {
-			runtime.mediaTimelineOff(generation)
+			if err := runtime.mediaTimelineOff(generation); err != nil {
+				fault("pause output-off cleanup not acknowledged: " + err.Error())
+				return
+			}
 			owned = false
 		}
 		resuming := !wasPlaying && clock.Playing
