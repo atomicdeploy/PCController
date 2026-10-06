@@ -285,6 +285,32 @@ func TestLoadNormalizesOmittedMacroModeToHost(t *testing.T) {
 	}
 }
 
+func TestLoadNormalizesLegacyAutoMacroModeToHost(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	content := `{"macros":[{"id":1,"name":"recorded","mode":"auto","steps":[{"kind":"relay","target":4,"value":1}]}]}`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	value, _, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := value.Macros[0].Mode; got != "host" {
+		t.Fatalf("normalized legacy macro mode=%q, want host", got)
+	}
+	if err := Write(path, value); err != nil {
+		t.Fatal(err)
+	}
+	written, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(written), `"mode": "auto"`) ||
+		!strings.Contains(string(written), `"mode": "host"`) {
+		t.Fatalf("legacy macro mode was not migrated explicitly: %s", written)
+	}
+}
+
 func TestIPCRemoteConnectableRequiresRemoteNonLoopbackListener(t *testing.T) {
 	for _, test := range []struct {
 		name string

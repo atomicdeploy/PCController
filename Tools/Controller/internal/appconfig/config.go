@@ -577,14 +577,14 @@ func Write(path string, value Config) error {
 }
 
 // normalizeMacros keeps file-backed alpha configurations usable as the macro
-// execution target becomes explicit. An omitted mode can only describe the
-// host scheduler that existed before the MCU timing engine was selectable.
-// Persisting the next write makes that choice explicit instead of retaining an
-// ambiguous empty value.
+// execution target becomes explicit. An omitted mode or the former "auto"
+// spelling can only describe the host scheduler that existed before the MCU
+// timing engine was selectable. Persisting the next write makes that choice
+// explicit instead of retaining an ambiguous legacy value.
 func normalizeMacros(macros []Macro) {
 	for index := range macros {
 		mode := strings.ToLower(strings.TrimSpace(macros[index].Mode))
-		if mode == "" {
+		if mode == "" || mode == "auto" {
 			mode = "host"
 		}
 		macros[index].Mode = mode
