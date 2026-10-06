@@ -439,7 +439,7 @@ func Defaults() Config {
 			TableLayout:            "compact",
 			ControlValueColors:     true,
 			WelcomeMelody:          "notify",
-			StatusIntervalMS:       200,
+			StatusIntervalMS:       500,
 			MeasurementFreshnessMS: DefaultMeasurementFreshnessMS,
 			IdleStatusIntervalMS:   0,
 			EventLogLimit:          500,
