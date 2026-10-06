@@ -22,6 +22,16 @@ Each accepted update emits `media.playback` on the state event stream, with
 client identity, sequence, position, duration, advancing state, loaded and rate.
 `controller.snapshot` also includes `media_playback`.
 
+Use `/ipc` WebSocket topic `state` for these notifications, not the separate
+activity topic `events`:
+
+```json
+{"jsonrpc":"2.0","id":4,"method":"controller.subscribe","params":{"topics":["state"],"interval_ms":100}}
+```
+
+Notifications have method `controller.state`, kind `media.playback`, and the
+playback fields in `params.metadata`.
+
 The snapshot separately reports client freshness and board acknowledgement:
 `connected`, `received_at`, `board_synced`, `board_error`, `board_sequence`,
 `board_synced_at`, `board_round_trip_ms`. An unsupported firmware response is
@@ -75,3 +85,15 @@ Deploy host/firmware only through the owned bridge/update transaction. Physical
 acceptance additionally requires a connected real board, verified firmware
 identity, play/pause/seek/speed/unload checks, and observed front-panel output.
 Virtual-board success is not physical acceptance evidence.
+
+The 2026-10-06 live check used actual decoded libmpv time, verified play/pause,
+seek, duration, 2x speed, one shared registered identity and 31 subscribed
+playback events. It restored the user's original position/rate/paused state.
+The full default AVR build passed with source identity `7B81735D`, estimated
+free SRAM 281 bytes and only 6 application-flash bytes spare. No features were
+disabled. Firmware was not flashed: physical-board acceptance remains pending.
+The host replacement was acknowledged by its owned updater operation
+`op-cfa87047799ff23c` (`terminal_verified=true`).
+Detailed evidence and the runnable check are maintained with
+[Pealayer PR #46](https://github.com/ToghrolTP/pealayer/pull/46), under
+`docs/verification/playback-board-results.md`.
