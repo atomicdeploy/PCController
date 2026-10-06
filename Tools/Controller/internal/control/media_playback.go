@@ -97,7 +97,7 @@ func (runtime *Runtime) UpdateMediaPlayback(value MediaPlaybackUpdate) (MediaPla
 		if plan.ClientID != value.ClientID || plan.Revision != value.PlanRevision {
 			return runtime.MediaPlayback(), errors.New("media clock requires the acknowledged prepared timeline revision")
 		}
-		if value.Playing && (plan.State == "faulted" || plan.State == "stopped" || plan.ArmedEpoch != value.Epoch || plan.ClockSequence == 0) {
+		if value.Playing && plan.StepCount > 0 && (plan.State == "faulted" || plan.State == "stopped" || plan.ArmedEpoch != value.Epoch || plan.ClockSequence == 0) {
 			return runtime.MediaPlayback(), errors.New("hardware timeline is not armed for this media epoch; pause and reprepare")
 		}
 	} else if value.Playing {

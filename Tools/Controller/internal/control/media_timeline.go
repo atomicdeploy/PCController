@@ -320,6 +320,10 @@ func (runtime *Runtime) PrepareMediaTimeline(plan MediaTimelinePlan) (MediaTimel
 	status := state.status
 	state.mu.Unlock()
 	runtime.publishMediaTimeline(status)
+	if len(steps) == 0 {
+		close(done)
+		return status, nil // Empty timelines must not leave a polling executor.
+	}
 	go runtime.runMediaTimeline(ctx, done, plan, steps, snapshot.ConnectionGeneration)
 	return status, nil
 }
