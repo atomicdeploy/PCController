@@ -55,6 +55,7 @@ type Session struct {
 	port sessionPort
 
 	writeGate   chan struct{}
+	requestGate chan struct{}
 	stateMu     sync.RWMutex
 	waiters     map[byte]*pendingRequest
 	nextSeq     byte
@@ -206,14 +207,15 @@ func newForTransport(name string, port sessionPort) *Session {
 
 func newSession(name string, port sessionPort) *Session {
 	return &Session{
-		name:      name,
-		port:      port,
-		writeGate: make(chan struct{}, 1),
-		waiters:   make(map[byte]*pendingRequest),
-		nextSeq:   1,
-		events:    make(chan Event, 256),
-		closing:   make(chan struct{}),
-		done:      make(chan struct{}),
+		name:        name,
+		port:        port,
+		writeGate:   make(chan struct{}, 1),
+		requestGate: make(chan struct{}, 1),
+		waiters:     make(map[byte]*pendingRequest),
+		nextSeq:     1,
+		events:      make(chan Event, 256),
+		closing:     make(chan struct{}),
+		done:        make(chan struct{}),
 	}
 }
 
@@ -329,6 +331,10 @@ func (s *Session) Request(
 	if err := ctx.Err(); err != nil {
 		return native.Frame{}, err
 	}
+	if err := s.acquireRequest(ctx); err != nil {
+		return native.Frame{}, err
+	}
+	defer func() { <-s.requestGate }()
 	sequence, waiter, err := s.reserveSequence(opcode, expected)
 	if err != nil {
 		return native.Frame{}, err
@@ -415,6 +421,25 @@ func (s *Session) acquireWrite(ctx context.Context) error {
 	default:
 	}
 	return nil
+}
+
+// acquireRequest keeps one acknowledged request on the wire at a time. The
+// AVR masks UART interrupts while committing a WS281X frame; writing a second
+// request before that commit ACK arrives can corrupt its COBS frame and end a
+// long-running strip stream. Unsolicited device events remain concurrent
+// because only request writers use this gate.
+func (s *Session) acquireRequest(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	select {
+	case s.requestGate <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-s.closing:
+		return ErrClosed
+	}
 }
 
 func (s *Session) writeRawContext(ctx context.Context, data []byte) error {
