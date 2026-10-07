@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   normalizePWMValues,
+	pwmPercent,
+	pwmValue,
   PWMMutationScheduler,
   PWMOperationQueue,
   PWMReconciler,
@@ -17,6 +19,14 @@ function values(channel: number, value: number): PWMValues {
 afterEach(() => vi.useRealTimers())
 
 describe('authoritative PWM contract', () => {
+	it('maps perceptual lighting brightness without changing linear motor duty', () => {
+		const lighting = { output_type: 'lighting' as const, icon: 'lightbulb', curve: 'gamma' as const, gamma: 2.2 }
+		const motor = { output_type: 'motor' as const, icon: 'settings', curve: 'linear' as const, gamma: 1 }
+		expect(pwmValue(15, lighting)).toBeLessThan(pwmValue(15, motor))
+		expect(pwmPercent(pwmValue(15, lighting), lighting)).toBeCloseTo(15, 0)
+		expect(pwmValue(0, lighting)).toBe(0)
+		expect(pwmValue(100, lighting)).toBe(4095)
+	})
   it('exposes only user channels through the generic mixer and validates full snapshots', () => {
     expect(USER_PWM_CHANNELS).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
     expect(normalizePWMValues(values(10, 4095)).values[10]).toBe(4095)

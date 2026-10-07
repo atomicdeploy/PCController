@@ -656,11 +656,12 @@ request error.
 | `controller.board_profile.update` | `key`, `mode`, optional `expose_raw_relays`, optional `expected_revision` | bind the attached board identity to `ordinary-relays` or `cinema-seat-motion`; cinema profiles may advertise both semantic seat controls and raw R1-R4 controls; requires `host_configuration` |
 | `controller.peripheral.presentation.update` | `key`, one or more of `name`/`icon`/`group`, optional `expected_revision` | update one advertised descriptor and return it with the new profile revision; requires `host_configuration` |
 | `controller.action.invoke` | `action_id` | invoke one action actually advertised by the attached profile and return after the board ACK; requires `board_commands` |
-| `controller.pwm.values` | `{}` | authoritative board availability, selected channel, and all sixteen logical values; requires `read` |
+| `controller.pwm.values` | `{}` | authoritative availability, selected channel, raw `values`, and sixteen described channels with logical percent/output type/icon/curve; requires `read` |
 | `controller.illumination.get` | `{}` | persisted Off/Auto/On policy, on/off brightness, live door-selected target, and exact applied enclosure MOSFET channel 12 (internal index 11); requires `read` |
 | `controller.illumination.set` | `{ "mode": 0..2, "on_brightness": 0..255, "off_brightness": 0..255 }` | preserves every unrelated board setting, applies live, waits for durable EEPROM readback, and returns the authoritative illumination state; requires `board_commands` |
 | `controller.illumination.override` | `{ "value": 0..4095 }` | applies a temporary exact raw value to enclosure MOSFET channel 12 and returns authoritative readback; policy/EEPROM ownership remains unchanged and may reassert its target on the next policy event; requires `board_commands` |
-| `controller.pwm.set` | `channel` (`0..15`), `value` (`0..4095`) | write one channel, read back, and return the complete authoritative sixteen-channel snapshot; requires `board_commands` |
+| `controller.pwm.set` | `channel` (`0..15`) and exactly one of `percent` (`0..100`) or `raw_value` (`0..4095`) | map logical intensity once or write exact duty, then return the complete described snapshot; requires `board_commands` |
+| `controller.pwm.channel.configure` | `channel`, `output_type`, `icon`, `curve`, `gamma` | persist one channel's host-owned identity and transfer function and broadcast `peripherals.changed`; requires `host_configuration` |
 | `controller.pwm.off` | `{}` | clear every PWM channel, read back, and return the complete authoritative snapshot; requires `board_commands` |
 | `controller.temperatures` | optional `rescan` | named temperatures and ROM identities |
 | `controller.menu.list`, `controller.menu.current` | `{}` | live board catalog when advertised, otherwise the canonical capability-limited manifest |
@@ -906,9 +907,11 @@ All JSON endpoints share the IPC listener:
 | `GET /api/snapshot` | cached controller snapshot |
 | `GET /api/peripherals` | custom names, the canonical 34-entry peripheral registry, and the resolved ordered 21-entry control registry; `read` capability |
 | `PUT /api/peripherals` | replace custom names from `peripheral_names`; `host_configuration` capability |
-| `GET /api/pwm` | authoritative availability, selected channel, and all sixteen values; `read` capability |
-| `PUT /api/pwm` | write `channel` (`0..15`) and `value` (`0..4095`), then return all sixteen values; `board_commands` capability |
+| `GET /api/pwm` | authoritative availability, raw values, logical percentages, and per-channel configuration; `read` capability |
+| `PUT /api/pwm` | write `channel` plus exactly one of logical `percent` or exact `raw_value`, then return the described snapshot; `board_commands` capability |
 | `DELETE /api/pwm` | clear all sixteen channels and return their authoritative readback; `board_commands` capability |
+| `GET /api/pwm/channel` | return the current per-channel output type, icon, curve, and gamma configuration; `read` capability |
+| `PUT /api/pwm/channel` | persist `channel`, `output_type`, `icon`, `curve`, and `gamma`, then broadcast the descriptor change; `host_configuration` capability |
 | `GET /api/commands` | machine-readable shared command catalog |
 | `GET /api/program-state` | current host-owned Idle/Running state |
 | `PUT` or `POST /api/program-state` | update `owner`, `mode`, and optional `reason` |

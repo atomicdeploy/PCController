@@ -524,12 +524,13 @@ func (model Model) simulateCommand(line string) (Model, tea.Cmd, bool) {
 		model.preview.Status.ActiveRelays = 0
 	} else if len(words) == 4 && words[0] == "pwm" && words[1] == "set" {
 		channel, channelErr := strconv.Atoi(words[2])
-		value, valueErr := strconv.Atoi(words[3])
-		if channelErr == nil && valueErr == nil && channel >= 0 && channel < 16 && value >= 0 && value <= 4095 {
-			model.pwmValues[channel] = uint16(value)
+		percent, valueErr := strconv.ParseFloat(strings.TrimSuffix(words[3], "%"), 64)
+		if channelErr == nil && valueErr == nil && channel >= 0 && channel < 16 && percent >= 0 && percent <= 100 {
+			value := appconfig.PWMRawFromPercent(percent, appconfig.PWMChannel(model.uiValue, channel))
+			model.pwmValues[channel] = value
 			model.havePWMValues = true
 			model.preview.Status.PWMChannel = byte(channel)
-			model.preview.Status.PWMValue = uint16(value)
+			model.preview.Status.PWMValue = value
 		}
 	} else if len(words) == 3 && words[0] == "menu" && words[1] == "page" {
 		if resolved, err := control.ResolveMenuPageIn(model.menuPageInfoValues(), words[2]); err == nil {
@@ -811,14 +812,14 @@ func (model Model) adjustSelection(delta int) (Model, tea.Cmd, bool) {
 		}
 		if row, ok := model.selectedOutputRow(); ok && row.Kind == "pwm" {
 			channel := row.Index
-			value := int(model.pwmValues[channel]) + delta*64
-			if value < 0 {
-				value = 4095
+			percent := int(appconfig.PWMPercentFromRaw(model.pwmValues[channel], appconfig.PWMChannel(model.uiValue, channel))+0.5) + delta
+			if percent < 0 {
+				percent = 100
 			}
-			if value > 4095 {
-				value = 0
+			if percent > 100 {
+				percent = 0
 			}
-			return model.setPWMChannel(channel, uint16(value))
+			return model.setPWMChannel(channel, uint16(percent*appconfig.PWMMaximumValue/100))
 		}
 	case PageMenus:
 		entry, ok := model.selectedMenuConfiguration()
@@ -1007,10 +1008,12 @@ func (model Model) setPWMChannel(channel int, value uint16) (Model, tea.Cmd, boo
 	if channel < 0 || channel > 11 {
 		return model, nil, true
 	}
+	percent := float64(value) * 100 / appconfig.PWMMaximumValue
+	physical := appconfig.PWMRawFromPercent(percent, appconfig.PWMChannel(model.uiValue, channel))
 	// Preview mode simulates the board; live mode remains board-authoritative and
 	// changes only after PWM_GET/STATUS readback confirms the command.
 	if model.preview != nil {
-		model.pwmValues[channel] = value
+		model.pwmValues[channel] = physical
 		model.havePWMValues = true
 	}
 	if channel == 11 && model.preview == nil {
@@ -1018,9 +1021,9 @@ func (model Model) setPWMChannel(channel int, value uint16) (Model, tea.Cmd, boo
 			model.setNotice("Semantic enclosure override is unavailable on this controller")
 			return model, nil, true
 		}
-		return model, overrideIllumination(model.overrideIllumination, value), true
+		return model, overrideIllumination(model.overrideIllumination, physical), true
 	}
-	return model.dispatchLine(fmt.Sprintf("pwm set %d %d", channel, value))
+	return model.dispatchLine(fmt.Sprintf("pwm set %d %.3f", channel, percent))
 }
 
 func (model Model) adjustBoardSetting(delta int, activate bool) (Model, tea.Cmd, bool) {

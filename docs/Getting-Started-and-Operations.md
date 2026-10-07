@@ -376,9 +376,12 @@ Commission unloaded, verify direction, then add one controlled load at a time.
 - Channels 13–15 are status red/green/blue.
 - D6 owns the addressable strip.
 
-PWM has no global operating state. Read all sixteen logical values with
-`pwm get`, write one channel directly with `pwm set CHANNEL VALUE` (`0..15`,
-`0..4095`), and use host macros or automations for scheduled demonstrations.
+PWM has no global operating state. Read all sixteen raw and logical values with
+`pwm get`, write perceptual intensity with `pwm set CHANNEL PERCENT` (`0..15`,
+`0..100`), and reserve `pwm raw CHANNEL VALUE` (`0..4095`) for exact hardware
+control. `pwm configure CHANNEL TYPE CURVE [GAMMA] [ICON]` makes the mapping
+and lighting/motor identity explicit per channel. Use host macros or
+automations for scheduled demonstrations.
 `pwm off` clears all sixteen channels and is an emergency all-output operation;
 use it deliberately. Board output-persistence settings independently decide
 whether motion, user relays, and the eight EEPROM-backed user PWM values may be
@@ -387,9 +390,11 @@ restored after a normal boot; programming mode always keeps them off.
 Web and API clients reconcile every mutation against a fresh sixteen-channel
 board readback. Generic sliders cover only user channels `0..10`; channels
 `11..15` remain visible but use dedicated illumination, power-indicator, and
-status-RGB controls. `controller.pwm.values`, `controller.pwm.set`, and
+status-RGB controls. `controller.pwm.values`, `controller.pwm.set`,
+`controller.pwm.channel.configure`, and
 `controller.pwm.off` provide the typed RPC surface; matching REST operations
-are `GET`, `PUT`, and `DELETE /api/pwm`.
+are `GET`, `PUT`, and `DELETE /api/pwm`; channel configuration is available
+through `GET` and `PUT /api/pwm/channel`.
 
 ### Buzzer and effects
 

@@ -200,6 +200,43 @@ role-specific: enclosure illumination, power indication, and status
 red/green/blue. UI controls must use those roles instead of presenting the five
 system channels as ordinary user sliders.
 
+### Per-channel PWM response and output identity
+
+Every PWM channel advertises an `output_type`, `icon`, `curve`, and `gamma`.
+The host defaults channels 0–7 and enclosure channel 11 to `lighting` with a
+perceptual gamma 2.2 response, channels 8–10 to `general` with a linear
+response, and power/status channels 12–15 to `indicator` with gamma 2.2. A
+channel configured as `motor` or `general` remains linear unless the operator
+explicitly selects another curve.
+
+The separation is intentional:
+
+| Value | Meaning | Where conversion happens |
+|---|---|---|
+| logical percent | Human-visible brightness or requested actuator percentage, `0..100` | CLI, TUI, Web UI, IPC/API and integrations |
+| raw PWM | Exact PCA9685 duty, `0..4095` | Board protocol and explicit diagnostics |
+
+The perceptual curve uses a tangent-continuous linear toe below 4%, followed by
+a configurable power curve. The toe prevents the first 12-bit PWM codes from
+collapsing into one dead step; the continuous join avoids a speed or brightness
+jump during fades. The inverse is used for readback, endpoints are exact, and
+any non-zero logical request maps to at least raw code 1. Fades must interpolate
+logical percent and apply the curve to every sample; applying the curve in both
+a client and the host is a bug. Configure a channel from the Web mixer or with:
+
+```text
+pwm configure user1 lighting gamma 2.2 lightbulb
+pwm set user1 7.5%
+pwm raw user1 512
+```
+
+`controller.pwm.values` returns both the legacy-shaped raw `values` array and a
+described `channels` array containing logical percent and configuration.
+`controller.pwm.set` accepts `percent` for normal control or `raw_value` for an
+explicit low-level write. `controller.pwm.channel.configure` persists one
+channel definition and broadcasts `peripherals.changed` so connected clients,
+including Pealayer, refresh without a manual reload.
+
 Mouse and keyboard actions share the same command path. Remote key injection
 must include down/up/gesture semantics rather than merely changing a local
 preview. The firmware snapshot capability determines whether raw segment bytes
@@ -678,6 +715,8 @@ use `read`, while `controller.pwm.set`, `controller.pwm.off`, `PUT
 /api/pwm`, and `DELETE /api/pwm` use `board_commands`. Each PWM mutation
 performs a board readback and returns all sixteen values, allowing WebSocket,
 REST, TUI, and hotkey clients to reconcile to one authoritative state.
+PWM response configuration is host-owned; it uses `host_configuration` and
+never rewrites board EEPROM.
 
 ## Discovery and remote bridges
 

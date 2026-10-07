@@ -1,4 +1,4 @@
-import type { PWMValues } from './types'
+import type { PWMChannelConfig, PWMValues } from './types'
 
 export const USER_PWM_CHANNELS = Object.freeze(Array.from({ length: 11 }, (_, channel) => channel))
 
@@ -7,13 +7,36 @@ export function clampPWMValue(value: number): number {
   return Math.max(0, Math.min(4095, Math.round(value)))
 }
 
-export function pwmPercent(value: number): number {
-  return Math.round(clampPWMValue(value) * 100 / 4095)
+export function pwmPercent(value: number, config?: PWMChannelConfig): number {
+	let normalized = clampPWMValue(value) / 4095
+	if (config?.curve === 'gamma') normalized = perceptualInverse(normalized, config.gamma)
+	return Math.round(normalized * 1000) / 10
 }
 
-export function pwmValue(percent: number): number {
+export function pwmValue(percent: number, config?: PWMChannelConfig): number {
   if (!Number.isFinite(percent)) return 0
-  return clampPWMValue(Math.max(0, Math.min(100, percent)) * 4095 / 100)
+	let normalized = Math.max(0, Math.min(100, percent)) / 100
+	if (config?.curve === 'gamma') normalized = perceptualForward(normalized, config.gamma)
+	const raw = clampPWMValue(normalized * 4095)
+	return percent > 0 && raw === 0 ? 1 : raw
+}
+
+function perceptualForward(logical: number, gamma: number): number {
+	const toe = 0.04
+	const offset = (gamma - 1) * toe
+	const junction = Math.pow(gamma * toe / (1 + offset), gamma)
+	return logical <= toe
+		? logical * junction / toe
+		: Math.pow((logical + offset) / (1 + offset), gamma)
+}
+
+function perceptualInverse(duty: number, gamma: number): number {
+	const toe = 0.04
+	const offset = (gamma - 1) * toe
+	const junction = Math.pow(gamma * toe / (1 + offset), gamma)
+	return duty <= junction
+		? duty * toe / junction
+		: Math.pow(duty, 1 / gamma) * (1 + offset) - offset
 }
 
 export function normalizePWMValues(value: PWMValues): PWMValues {
@@ -28,7 +51,8 @@ export function normalizePWMValues(value: PWMValues): PWMValues {
     }
     return candidate
   })
-  return { available: value.available, selected_channel: value.selected_channel, values }
+	const channels = value.channels?.map((channel) => ({ ...channel, config: { ...channel.config } }))
+	return { available: value.available, selected_channel: value.selected_channel, values, channels }
 }
 
 interface DesiredPWMValue {

@@ -226,7 +226,8 @@ func (model Model) dashboardPage(snapshot control.Snapshot) string {
 		}
 	}
 	if haveStatus && capabilities&native.CapabilityPWM != 0 && status.PWMAvailable {
-		stateLines = append(stateLines, kvCard(sectionWidth, 22, model.peripheralName(fmt.Sprintf("pwm.%d", status.PWMChannel), "PWM"), fmt.Sprintf("channel %d · %d%%", status.PWMChannel, int(status.PWMValue)*100/4095)))
+		percent := appconfig.PWMPercentFromRaw(status.PWMValue, appconfig.PWMChannel(model.uiValue, int(status.PWMChannel)))
+		stateLines = append(stateLines, kvCard(sectionWidth, 22, model.peripheralName(fmt.Sprintf("pwm.%d", status.PWMChannel), "PWM"), fmt.Sprintf("channel %d · %.1f%%", status.PWMChannel, percent)))
 	}
 	if lcdAvailable {
 		stateLines = append(stateLines, kvCard(sectionWidth, 22, model.peripheralName("display.lcd", "I2C LCD"), lcdStatus))
@@ -383,7 +384,7 @@ func (model Model) controlTableRows(snapshot control.Snapshot, levelWidth int) [
 			key := fmt.Sprintf("pwm.%d", channel)
 			fallback, _ := appconfig.PeripheralDefaultName(key)
 			name := model.peripheralName(key, fallback)
-			percent := int(value) * 100 / 4095
+			percent := int(appconfig.PWMPercentFromRaw(value, appconfig.PWMChannel(model.uiValue, channel)) + 0.5)
 			group := ""
 			if channel == 0 {
 				group = "PWM"
@@ -400,7 +401,7 @@ func (model Model) controlTableRows(snapshot control.Snapshot, levelWidth int) [
 		} else if status.PWMChannel == 11 {
 			value = status.PWMValue
 		}
-		percent := int(value) * 100 / 4095
+		percent := int(appconfig.PWMPercentFromRaw(value, appconfig.PWMChannel(model.uiValue, 11)) + 0.5)
 		targetBrightness := snapshot.Settings.OffBrightness
 		if snapshot.Settings.LightMode == 2 || (snapshot.Settings.LightMode == 1 && status.DoorOpen) {
 			targetBrightness = snapshot.Settings.OnBrightness

@@ -12,15 +12,18 @@ const MaxPeripheralNames = 96
 // mutates board EEPROM or implies that a system-owned channel is directly
 // writable through a generic control.
 type PeripheralDescriptor struct {
-	Key         string `json:"key"`
-	Kind        string `json:"kind"`
-	Role        string `json:"role"`
-	Index       int    `json:"index"`
-	DefaultName string `json:"default_name"`
-	Name        string `json:"name,omitempty"`
-	Icon        string `json:"icon,omitempty"`
-	Group       string `json:"group,omitempty"`
-	Control     string `json:"control"`
+	Key         string  `json:"key"`
+	Kind        string  `json:"kind"`
+	Role        string  `json:"role"`
+	Index       int     `json:"index"`
+	DefaultName string  `json:"default_name"`
+	Name        string  `json:"name,omitempty"`
+	Icon        string  `json:"icon,omitempty"`
+	Group       string  `json:"group,omitempty"`
+	Control     string  `json:"control"`
+	OutputType  string  `json:"output_type,omitempty"`
+	Curve       string  `json:"curve,omitempty"`
+	Gamma       float64 `json:"gamma,omitempty"`
 }
 
 type ActionDescriptor struct {
@@ -33,14 +36,17 @@ type ActionDescriptor struct {
 // operator-controllable board channel. The canonical key remains suitable for
 // commands and persisted names while Kind supplies the operator vocabulary.
 type ControlDescriptor struct {
-	Key     string             `json:"key"`
-	Kind    string             `json:"kind"`
-	Order   int                `json:"order"`
-	Name    string             `json:"name"`
-	Icon    string             `json:"icon,omitempty"`
-	Group   string             `json:"group,omitempty"`
-	Control string             `json:"control"`
-	Actions []ActionDescriptor `json:"actions,omitempty"`
+	Key        string             `json:"key"`
+	Kind       string             `json:"kind"`
+	Order      int                `json:"order"`
+	Name       string             `json:"name"`
+	Icon       string             `json:"icon,omitempty"`
+	Group      string             `json:"group,omitempty"`
+	Control    string             `json:"control"`
+	OutputType string             `json:"output_type,omitempty"`
+	Curve      string             `json:"curve,omitempty"`
+	Gamma      float64            `json:"gamma,omitempty"`
+	Actions    []ActionDescriptor `json:"actions,omitempty"`
 }
 
 var corePeripheralDescriptors = buildPeripheralDescriptors()

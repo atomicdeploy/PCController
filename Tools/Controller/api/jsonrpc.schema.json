@@ -497,6 +497,7 @@
             "controller.program_state.set",
             "controller.program-state.get",
             "controller.program-state.set",
+            "controller.pwm.channel.configure",
             "controller.pwm.off",
             "controller.pwm.set",
             "controller.pwm.values",
@@ -1303,6 +1304,11 @@
     "controller.program-state.set": {
       "capability": "board_commands",
       "summary": "program state set",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.pwm.channel.configure": {
+      "capability": "host_configuration",
+      "summary": "Persist one PWM channel's output type, icon, transfer curve, and gamma, then publish the changed descriptor.",
       "idempotency": "idempotent-with-authoritative-readback"
     },
     "controller.pwm.off": {
