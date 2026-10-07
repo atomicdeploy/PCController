@@ -1760,16 +1760,33 @@ func (service *Service) dispatch(
 		return response
 	}
 	if err != nil {
-		var rpcError *RPCError
-		if errors.As(err, &rpcError) {
-			response.Error = rpcError
-		} else {
-			response.Error = &RPCError{Code: -32000, Message: err.Error()}
-		}
+		response.Error = dispatchRPCError(err)
 		return response
 	}
 	response.Result = result
 	return response
+}
+
+func dispatchRPCError(err error) *RPCError {
+	var rpcError *RPCError
+	if errors.As(err, &rpcError) {
+		return rpcError
+	}
+	var busy *control.ResourceBusyError
+	if errors.As(err, &busy) {
+		return &RPCError{
+			Code:    -32009,
+			Message: busy.Error(),
+			Data: map[string]any{
+				"kind":           "resource_busy",
+				"resource":       busy.Resource,
+				"owner":          busy.Owner,
+				"retryable":      true,
+				"retry_after_ms": busy.RetryAfterMS,
+			},
+		}
+	}
+	return &RPCError{Code: -32000, Message: err.Error()}
 }
 
 func (service *Service) primaryPingResult() map[string]any {

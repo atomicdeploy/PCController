@@ -56,6 +56,27 @@ type MediaTimelineStatus struct {
 	DeviceAckUS       uint32  `json:"device_ack_us,omitempty"`
 	Error             string  `json:"error,omitempty"`
 }
+
+// ResourceBusyError is a temporary ownership conflict, not a hardware or
+// timeline fault. Transports expose this as structured JSON-RPC data so clients
+// can wait without treating the condition as a failed timing guarantee.
+type ResourceBusyError struct {
+	Resource     string
+	Owner        string
+	Message      string
+	RetryAfterMS uint32
+}
+
+func (err *ResourceBusyError) Error() string {
+	if err == nil {
+		return "resource is busy"
+	}
+	if strings.TrimSpace(err.Message) != "" {
+		return err.Message
+	}
+	return fmt.Sprintf("%s is busy", err.Resource)
+}
+
 type mediaTimelineStep struct {
 	id      string
 	dueMS   float64
@@ -239,7 +260,12 @@ func (runtime *Runtime) PrepareMediaTimeline(plan MediaTimelinePlan) (MediaTimel
 		return runtime.MediaTimeline(), ErrEmergencyStopActive
 	}
 	if runtime.activeUseMask.Load()&activeUseStrip != 0 {
-		return runtime.MediaTimeline(), errors.New("stop standalone strip streaming before preparing media playback")
+		return runtime.MediaTimeline(), &ResourceBusyError{
+			Resource:     "addressable_strip",
+			Owner:        "standalone_strip_stream",
+			Message:      "stop standalone strip streaming before preparing media playback",
+			RetryAfterMS: 2000,
+		}
 	}
 	if plan.MaxLatenessMS == 0 {
 		plan.MaxLatenessMS = 50

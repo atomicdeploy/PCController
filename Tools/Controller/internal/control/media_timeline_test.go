@@ -1,6 +1,7 @@
 package control
 
 import (
+	"errors"
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/link"
 	"pccontroller.local/controller/internal/native"
@@ -10,6 +11,20 @@ import (
 	"testing"
 	"time"
 )
+
+func TestMediaTimelineReportsStandaloneStripAsRetryableResourceBusy(t *testing.T) {
+	runtime := New(Options{})
+	defer runtime.Close()
+	runtime.setActiveUseState(activeUseStrip, true)
+	_, err := runtime.PrepareMediaTimeline(MediaTimelinePlan{ClientID: "test", Revision: 1})
+	var busy *ResourceBusyError
+	if !errors.As(err, &busy) {
+		t.Fatalf("expected ResourceBusyError, got %T: %v", err, err)
+	}
+	if busy.Resource != "addressable_strip" || busy.Owner != "standalone_strip_stream" || busy.RetryAfterMS != 2000 {
+		t.Fatalf("unexpected resource conflict: %#v", busy)
+	}
+}
 
 func TestMediaTimelineCompilerFreezesOffsetsAndRejectsInvalidPlans(t *testing.T) {
 	plan := MediaTimelinePlan{ClientID: "test", Revision: 1, Actions: []MediaTimelineAction{

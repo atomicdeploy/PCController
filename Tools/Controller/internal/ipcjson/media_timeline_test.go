@@ -37,3 +37,17 @@ func TestMediaTimelineRPCRequiresIdentityAndUsesStrictPlanContract(t *testing.T)
 		t.Fatal("timeline inspection not read-only")
 	}
 }
+
+func TestMediaTimelineResourceBusyUsesStableRPCData(t *testing.T) {
+	mapped := dispatchRPCError(&control.ResourceBusyError{
+		Resource: "addressable_strip", Owner: "standalone_strip_stream",
+		Message: "strip is busy", RetryAfterMS: 2000,
+	})
+	if mapped.Code != -32009 || mapped.Message != "strip is busy" {
+		t.Fatalf("unexpected RPC error: %#v", mapped)
+	}
+	data, ok := mapped.Data.(map[string]any)
+	if !ok || data["kind"] != "resource_busy" || data["resource"] != "addressable_strip" || data["retryable"] != true || data["retry_after_ms"] != uint32(2000) {
+		t.Fatalf("unexpected resource-busy data: %#v", mapped.Data)
+	}
+}
