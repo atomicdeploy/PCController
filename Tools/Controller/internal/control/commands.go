@@ -3703,6 +3703,15 @@ func pwmCommand(ctx context.Context, runtime *Runtime, options CommandOptions, a
 		if err != nil {
 			return "", err
 		}
+		runtime.PublishStructuredEvent(Event{
+			Kind: "peripherals.changed", Stream: EventStreamState,
+			Text: "PWM channel configuration changed", Source: "host", Target: "refresh", Action: "refresh",
+			Metadata: map[string]string{
+				"changed_keys":   appconfig.PWMChannelKey(int(channel)),
+				"changed_fields": "output_type,icon,curve,gamma",
+				"action":         "refresh",
+			},
+		})
 		return fmt.Sprintf("PWM channel %d type=%s icon=%s curve=%s gamma=%.2f", channel, channelConfig.OutputType, channelConfig.Icon, channelConfig.Curve, channelConfig.Gamma), nil
 	}
 	return "", fmt.Errorf("usage: pwm get | pwm off | pwm set CHANNEL PERCENT | pwm raw CHANNEL VALUE | pwm configure CHANNEL TYPE CURVE [GAMMA] [ICON]")
