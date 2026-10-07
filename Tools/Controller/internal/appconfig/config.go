@@ -353,7 +353,7 @@ func Defaults() Config {
 			ControlValueColors:     true,
 			PWMChannels:            DefaultPWMChannels(),
 			WelcomeMelody:          "notify",
-			StatusIntervalMS:       200,
+			StatusIntervalMS:       500,
 			MeasurementFreshnessMS: DefaultMeasurementFreshnessMS,
 			IdleStatusIntervalMS:   0,
 			EventLogLimit:          500,
