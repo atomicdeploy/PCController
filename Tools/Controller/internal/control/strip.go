@@ -68,8 +68,6 @@ func SupportedConfiguredStripEffectDescriptors(connected bool, capabilities uint
 
 type stripEffectRenderer func(count int, elapsed time.Duration) []byte
 
-const stripStreamConsecutiveTimeoutLimit = 3
-
 func stripCommandError(err error) error {
 	var remote *link.RemoteError
 	if errors.As(err, &remote) {
@@ -312,13 +310,6 @@ func (outputs *OutputScheduler) streamStripEffect(ctx context.Context, count, fp
 				return err
 			}
 			consecutiveTimeouts++
-			if consecutiveTimeouts >= stripStreamConsecutiveTimeoutLimit {
-				return fmt.Errorf(
-					"strip stream timed out %d consecutive times: %w",
-					consecutiveTimeouts,
-					err,
-				)
-			}
 			if consecutiveTimeouts == 1 {
 				outputs.target.PublishHostEvent(
 					"output",
