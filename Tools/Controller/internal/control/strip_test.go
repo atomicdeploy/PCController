@@ -120,6 +120,17 @@ func TestStripStreamRecoversAfterTransientFrameTimeout(t *testing.T) {
 	}
 }
 
+func TestNextStripFrameTimeSkipsBufferedIntervals(t *testing.T) {
+	period := 50 * time.Millisecond
+	previous := time.Unix(100, 0)
+	if got, want := nextStripFrameTime(previous, previous.Add(10*time.Millisecond), period), previous.Add(period); !got.Equal(want) {
+		t.Fatalf("ordinary next frame = %s, want %s", got, want)
+	}
+	if got, want := nextStripFrameTime(previous, previous.Add(121*time.Millisecond), period), previous.Add(150*time.Millisecond); !got.Equal(want) {
+		t.Fatalf("delayed next frame = %s, want %s", got, want)
+	}
+}
+
 func TestStripEffectCatalogUsesExactConfiguredIDs(t *testing.T) {
 	for _, id := range []string{"police", "white-thunder", "converging-red"} {
 		definition, program, ok := stripEffectByID(id)
