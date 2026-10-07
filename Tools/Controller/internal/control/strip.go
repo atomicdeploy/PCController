@@ -68,6 +68,8 @@ func SupportedConfiguredStripEffectDescriptors(connected bool, capabilities uint
 
 type stripEffectRenderer func(count int, elapsed time.Duration) []byte
 
+const stripStreamConsecutiveTimeoutLimit = 3
+
 func stripCommandError(err error) error {
 	var remote *link.RemoteError
 	if errors.As(err, &remote) {
@@ -299,10 +301,38 @@ func (outputs *OutputScheduler) streamStripEffect(ctx context.Context, count, fp
 	ticker := time.NewTicker(time.Second / time.Duration(fps))
 	defer ticker.Stop()
 	started := time.Now()
+	consecutiveTimeouts := 0
 	for {
 		// Render from elapsed monotonic time; slow ACKs skip frames rather than queueing stale colors.
 		if err := outputs.sendStripFrame(ctx, renderer(count, time.Since(started))); err != nil {
-			return err
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			if !errors.Is(err, context.DeadlineExceeded) {
+				return err
+			}
+			consecutiveTimeouts++
+			if consecutiveTimeouts >= stripStreamConsecutiveTimeoutLimit {
+				return fmt.Errorf(
+					"strip stream timed out %d consecutive times: %w",
+					consecutiveTimeouts,
+					err,
+				)
+			}
+			if consecutiveTimeouts == 1 {
+				outputs.target.PublishHostEvent(
+					"output",
+					"strip stream dropped a timed-out frame; continuing from the current animation time",
+				)
+			}
+		} else {
+			if consecutiveTimeouts != 0 {
+				outputs.target.PublishHostEvent(
+					"output",
+					"strip stream recovered after a transient frame timeout",
+				)
+			}
+			consecutiveTimeouts = 0
 		}
 		select {
 		case <-ctx.Done():
