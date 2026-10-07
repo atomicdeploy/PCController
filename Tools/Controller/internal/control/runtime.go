@@ -209,6 +209,9 @@ type Runtime struct {
 	haveStatusLED          bool
 	statusLEDUpdated       time.Time
 	statusLEDRevision      uint64
+	statusLEDPublished     native.StatusLEDState
+	haveStatusLEDPublished bool
+	statusLEDPublishedAt   time.Time
 	statusUpdated          time.Time
 	paused                 bool
 	connecting             bool
@@ -2717,6 +2720,12 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 							// snapshot watermark stable and do not amplify them over IPC.
 							continue
 						}
+						if !runtime.shouldPublishStatusLED(state, time.Now()) {
+							// The snapshot above still observes every firmware frame. Only
+							// host presentation events are bounded so a 50/60 FPS physical
+							// animation cannot force every client to serialize and repaint.
+							continue
+						}
 						kind = "status_led.changed"
 						text = fmt.Sprintf("status LED changed to #%02X%02X%02X", state.Red, state.Green, state.Blue)
 						parsedStatusLED = &state
@@ -2875,6 +2884,39 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 			return
 		}
 	}
+}
+
+const statusLEDPresentationInterval = 50 * time.Millisecond
+
+func (runtime *Runtime) shouldPublishStatusLED(state native.StatusLEDState, observedAt time.Time) bool {
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+
+	immediate := !runtime.haveStatusLEDPublished ||
+		state.Effect != runtime.statusLEDPublished.Effect ||
+		state.Condition != runtime.statusLEDPublished.Condition ||
+		statusLEDColorDistance(state, runtime.statusLEDPublished) >= 64
+	if !immediate && observedAt.Sub(runtime.statusLEDPublishedAt) < statusLEDPresentationInterval {
+		return false
+	}
+	runtime.statusLEDPublished = state
+	runtime.haveStatusLEDPublished = true
+	runtime.statusLEDPublishedAt = observedAt
+	return true
+}
+
+func statusLEDColorDistance(left, right native.StatusLEDState) int {
+	distance := 0
+	for _, pair := range [][2]byte{{left.Red, right.Red}, {left.Green, right.Green}, {left.Blue, right.Blue}, {left.Brightness, right.Brightness}} {
+		delta := int(pair[0]) - int(pair[1])
+		if delta < 0 {
+			delta = -delta
+		}
+		if delta > distance {
+			distance = delta
+		}
+	}
+	return distance
 }
 
 func (runtime *Runtime) publishRecoveredFrameAnomaly(err error) {
