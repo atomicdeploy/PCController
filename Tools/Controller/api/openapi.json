@@ -3748,6 +3748,7 @@
               "controller.program_state.set",
               "controller.program-state.get",
               "controller.program-state.set",
+              "controller.pwm.channel.configure",
               "controller.pwm.off",
               "controller.pwm.set",
               "controller.pwm.values",
