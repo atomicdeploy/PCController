@@ -420,6 +420,7 @@ export interface HostUISettings {
 	measurement_freshness_ms: number
   segment_scroll: SegmentScrollSettings
   peripheral_names: Record<string, string>
+	pwm_channels: Record<string, PWMChannelConfig>
   peripherals: PeripheralDescriptor[]
   controls: ControlDescriptor[]
   changed?: boolean
@@ -435,6 +436,10 @@ export interface PeripheralDescriptor {
   index: number
   default_name: string
   control: 'relay' | 'motion' | 'pwm-user' | 'role-specific' | 'read-only'
+	icon?: string
+	output_type?: PWMOutputType
+	curve?: PWMCurve
+	gamma?: number
 }
 
 export interface ControlDescriptor {
@@ -443,6 +448,10 @@ export interface ControlDescriptor {
   order: number
   name: string
   control: 'relay' | 'motion' | 'pwm-user'
+	icon?: string
+	output_type?: PWMOutputType
+	curve?: PWMCurve
+	gamma?: number
 }
 
 export interface PeripheralSettings {
@@ -455,6 +464,25 @@ export interface PWMValues {
   available: boolean
   selected_channel: number
   values: number[]
+	channels?: PWMChannelValue[]
+}
+
+export type PWMOutputType = 'lighting' | 'indicator' | 'motor' | 'general'
+export type PWMCurve = 'linear' | 'gamma'
+
+export interface PWMChannelConfig {
+	output_type: PWMOutputType
+	icon: string
+	curve: PWMCurve
+	gamma: number
+}
+
+export interface PWMChannelValue {
+	channel: number
+	raw_value: number
+	logical_percent: number
+	name: string
+	config: PWMChannelConfig
 }
 
 export interface SegmentScrollSettings {

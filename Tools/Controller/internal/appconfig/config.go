@@ -90,40 +90,41 @@ type DeviceIdentity struct {
 
 // UI configures host presentation, measurement visibility, and display mirroring.
 type UI struct {
-	AppTitle               string            `json:"app_title"`
-	Tagline                string            `json:"tagline"`
-	Appearance             Appearance        `json:"appearance"`
-	TUIConsole             TUIConsole        `json:"tui_console"`
-	SeparatePortButtons    bool              `json:"separate_port_buttons"`
-	TableLayout            string            `json:"table_layout"`
-	ControlValueColors     bool              `json:"control_value_colors"`
-	PeripheralNames        map[string]string `json:"peripheral_names,omitempty"`
-	SetupComplete          bool              `json:"setup_complete"`
-	WelcomeMelody          string            `json:"welcome_melody"`
-	StatusIntervalMS       int               `json:"status_interval_ms"`
-	MeasurementFreshnessMS int               `json:"measurement_freshness_ms"`
-	IdleStatusIntervalMS   int               `json:"idle_status_interval_ms"`
-	EventLogLimit          int               `json:"event_log_limit"`
-	HistoryHours           int               `json:"history_hours"`
-	HistorySampleMS        int               `json:"history_sample_ms"`
-	VoltageDecimals        int               `json:"voltage_decimals"`
-	CurrentDecimals        int               `json:"current_decimals"`
-	PowerDecimals          int               `json:"power_decimals"`
-	TemperatureDecimals    int               `json:"temperature_decimals"`
-	ShowSupplyVoltage      bool              `json:"show_supply_voltage"`
-	ShowBusVoltage         bool              `json:"show_bus_voltage"`
-	ShowCurrent            bool              `json:"show_current"`
-	ShowPower              bool              `json:"show_power"`
-	ShowTemperatureLED     bool              `json:"show_temperature_led"`
-	ShowTemperatureBT      bool              `json:"show_temperature_bt"`
-	ShowIO                 bool              `json:"show_io"`
-	ShowDiagnostics        bool              `json:"show_diagnostics"`
-	ShowGraphs             bool              `json:"show_graphs"`
-	LCDServiceEnabled      bool              `json:"lcd_service_enabled"`
-	MirrorPromptToLCD      bool              `json:"mirror_prompt_to_lcd"`
-	LCDPromptDebounceMS    int               `json:"lcd_prompt_debounce_ms"`
-	LCDPriorityHoldMS      int               `json:"lcd_priority_hold_ms"`
-	SegmentScroll          SegmentScroll     `json:"segment_scroll"`
+	AppTitle               string                      `json:"app_title"`
+	Tagline                string                      `json:"tagline"`
+	Appearance             Appearance                  `json:"appearance"`
+	TUIConsole             TUIConsole                  `json:"tui_console"`
+	SeparatePortButtons    bool                        `json:"separate_port_buttons"`
+	TableLayout            string                      `json:"table_layout"`
+	ControlValueColors     bool                        `json:"control_value_colors"`
+	PeripheralNames        map[string]string           `json:"peripheral_names,omitempty"`
+	PWMChannels            map[string]PWMChannelConfig `json:"pwm_channels,omitempty"`
+	SetupComplete          bool                        `json:"setup_complete"`
+	WelcomeMelody          string                      `json:"welcome_melody"`
+	StatusIntervalMS       int                         `json:"status_interval_ms"`
+	MeasurementFreshnessMS int                         `json:"measurement_freshness_ms"`
+	IdleStatusIntervalMS   int                         `json:"idle_status_interval_ms"`
+	EventLogLimit          int                         `json:"event_log_limit"`
+	HistoryHours           int                         `json:"history_hours"`
+	HistorySampleMS        int                         `json:"history_sample_ms"`
+	VoltageDecimals        int                         `json:"voltage_decimals"`
+	CurrentDecimals        int                         `json:"current_decimals"`
+	PowerDecimals          int                         `json:"power_decimals"`
+	TemperatureDecimals    int                         `json:"temperature_decimals"`
+	ShowSupplyVoltage      bool                        `json:"show_supply_voltage"`
+	ShowBusVoltage         bool                        `json:"show_bus_voltage"`
+	ShowCurrent            bool                        `json:"show_current"`
+	ShowPower              bool                        `json:"show_power"`
+	ShowTemperatureLED     bool                        `json:"show_temperature_led"`
+	ShowTemperatureBT      bool                        `json:"show_temperature_bt"`
+	ShowIO                 bool                        `json:"show_io"`
+	ShowDiagnostics        bool                        `json:"show_diagnostics"`
+	ShowGraphs             bool                        `json:"show_graphs"`
+	LCDServiceEnabled      bool                        `json:"lcd_service_enabled"`
+	MirrorPromptToLCD      bool                        `json:"mirror_prompt_to_lcd"`
+	LCDPromptDebounceMS    int                         `json:"lcd_prompt_debounce_ms"`
+	LCDPriorityHoldMS      int                         `json:"lcd_priority_hold_ms"`
+	SegmentScroll          SegmentScroll               `json:"segment_scroll"`
 }
 
 // TUIConsole contains local classic-console presentation preferences. These
@@ -350,6 +351,7 @@ func Defaults() Config {
 			TUIConsole:             productTUIConsoleDefaults(),
 			TableLayout:            "compact",
 			ControlValueColors:     true,
+			PWMChannels:            DefaultPWMChannels(),
 			WelcomeMelody:          "notify",
 			StatusIntervalMS:       200,
 			MeasurementFreshnessMS: DefaultMeasurementFreshnessMS,
@@ -680,6 +682,9 @@ func (value Config) Validate() error {
 		if name == "" || utf8.RuneCountInString(name) > 64 || !printableText(name) {
 			return fmt.Errorf("ui.peripheral_names[%q] must be 1..64 printable characters", key)
 		}
+	}
+	if err := ValidatePWMChannels(value.UI.PWMChannels); err != nil {
+		return err
 	}
 	if err := value.validateBoardProfiles(); err != nil {
 		return err

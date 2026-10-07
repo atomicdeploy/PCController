@@ -383,7 +383,7 @@ func (model Model) controlTableRows(snapshot control.Snapshot, levelWidth int) [
 			key := fmt.Sprintf("pwm.%d", channel)
 			fallback, _ := appconfig.PeripheralDefaultName(key)
 			name := model.peripheralName(key, fallback)
-			percent := int(value) * 100 / 4095
+			percent := int(appconfig.PWMPercentFromRaw(value, appconfig.PWMChannel(model.uiValue, channel)) + 0.5)
 			group := ""
 			if channel == 0 {
 				group = "PWM"
@@ -400,7 +400,7 @@ func (model Model) controlTableRows(snapshot control.Snapshot, levelWidth int) [
 		} else if status.PWMChannel == 11 {
 			value = status.PWMValue
 		}
-		percent := int(value) * 100 / 4095
+		percent := int(appconfig.PWMPercentFromRaw(value, appconfig.PWMChannel(model.uiValue, 11)) + 0.5)
 		targetBrightness := snapshot.Settings.OffBrightness
 		if snapshot.Settings.LightMode == 2 || (snapshot.Settings.LightMode == 1 && status.DoorOpen) {
 			targetBrightness = snapshot.Settings.OnBrightness

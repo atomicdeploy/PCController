@@ -134,6 +134,7 @@ import type {
   Locale,
   LocalDeviceSnapshot,
   MetricSample,
+	PWMChannelConfig,
   PWMValues,
   Snapshot,
   SegmentScrollSettings,
@@ -594,6 +595,7 @@ export function ControlsView(props: SharedViewProps) {
   const [pwmError, setPWMError] = useState('')
   const [pwmAllBusy, setPWMAllBusy] = useState(false)
   const [hostUI, setHostUI] = useState<HostUISettings | null>(null)
+	const pwmConfigRef = useRef<Record<string, PWMChannelConfig>>({})
   const [red, setRed] = useState(25)
   const [green, setGreen] = useState(130)
   const [blue, setBlue] = useState(220)
@@ -623,6 +625,8 @@ export function ControlsView(props: SharedViewProps) {
 		: `rgb profile set ${statusProfile} ${statusEffect} "${chosenHex}" --brightness ${statusBrightness}${effectOptions}`
 
   if (!pwmOperationsRef.current) pwmOperationsRef.current = new PWMOperationQueue()
+	pwmConfigRef.current = hostUI?.pwm_channels ?? {}
+	const pwmConfig = (channel: number) => pwmConfigRef.current[`pwm.${channel}`]
 
   const applyAuthoritativePWM = (response: PWMValues, acknowledgedChannel: number | null = null) => {
     const authoritative = normalizePWMValues(response)
@@ -640,7 +644,7 @@ export function ControlsView(props: SharedViewProps) {
   if (!pwmSchedulerRef.current) {
     pwmSchedulerRef.current = new PWMMutationScheduler({
       operations: pwmOperationsRef.current,
-      commit: (channel, value) => rpc<PWMValues>('controller.pwm.set', { channel, value }),
+		commit: (channel, value) => rpc<PWMValues>('controller.pwm.set', { channel, percent: pwmPercent(value, pwmConfig(channel)) }),
       onDraft: (channel, value) => {
         setPWMError('')
         setPWMDraft((current) => current.map((candidate, index) => index === channel ? value : candidate))
@@ -711,8 +715,21 @@ export function ControlsView(props: SharedViewProps) {
   const peripheralName = (key: string, fallback: string) => resolvedControlName(hostUI?.controls, key, hostUI?.peripheral_names?.[key]?.trim() || fallback)
   const pwmName = (channel: number) => peripheralName(`pwm.${channel}`, pwmDefaults[channel])
   const setPWMPercent = (channel: number, percent: number, immediate = false) => {
-    pwmSchedulerRef.current?.schedule(channel, pwmValue(percent), immediate)
+		pwmSchedulerRef.current?.schedule(channel, pwmValue(percent, pwmConfig(channel)), immediate)
   }
+	const updatePWMConfig = async (channel: number, patch: Partial<PWMChannelConfig>) => {
+		const current = pwmConfig(channel)
+		if (!current) return
+		setPWMError('')
+		try {
+			await rpc('controller.pwm.channel.configure', { channel, ...current, ...patch })
+			const updated = await rpc<HostUISettings>('controller.ui.config.get')
+			setHostUI(updated)
+			applyAuthoritativePWM(await pwmOperationsRef.current!.run(() => rpc<PWMValues>('controller.pwm.values')))
+		} catch (cause) {
+			setPWMError(cause instanceof Error ? cause.message : String(cause))
+		}
+	}
   const clearPWM = async () => {
     if (pwmPending.length) return
     pwmAllBusyRef.current = true
@@ -793,12 +810,23 @@ export function ControlsView(props: SharedViewProps) {
               const draft = pwmDraft[channel]
               const pending = pwmPending.includes(channel)
               const name = pwmName(channel)
+			  const config = pwmConfig(channel)
               return <div key={channel} className={`pwm-mixer__row${snapshot.status.pwm_channel === channel && !pending ? ' is-live' : ''}${pending ? ' is-pending' : ''}`}>
-                <div><strong>{name}</strong><small>{pending
+				<div><strong>{config?.icon === 'lightbulb' ? '💡 ' : config?.output_type === 'motor' ? '⚙️ ' : ''}{name}</strong><small>{pending
                   ? copy(`Board ${reported} · draft ${draft}`, `برد ${reported} · پیش‌نویس ${draft}`)
-                  : copy(`Board reported ${reported} / 4095`, `گزارش برد ${reported} از ۴۰۹۵`)}</small></div>
-                <RangeField label={copy(`${name} duty`, `دیوتی ${name}`)} value={pwmPercent(draft)} min={0} max={100} unit="%" disabled={!pwmLoaded || pwmAllBusy} onChange={(percent) => setPWMPercent(channel, percent)} />
+				  : copy(`${pwmPercent(reported, config)}% brightness · raw ${reported}`, `${pwmPercent(reported, config)}٪ روشنایی · خام ${reported}`)}</small>
+				  <div className="pwm-channel-config">
+					<select aria-label={copy(`${name} output type`, `نوع خروجی ${name}`)} value={config?.output_type ?? 'general'} onChange={(event) => void updatePWMConfig(channel, { output_type: event.target.value as PWMChannelConfig['output_type'], icon: event.target.value === 'lighting' ? 'lightbulb' : event.target.value === 'indicator' ? 'led' : event.target.value === 'motor' ? 'settings' : 'sliders-horizontal' })}>
+					  <option value="lighting">{copy('Lighting', 'روشنایی')}</option><option value="indicator">{copy('LED indicator', 'نشانگر LED')}</option><option value="motor">{copy('Motor', 'موتور')}</option><option value="general">{copy('General PWM', 'PWM عمومی')}</option>
+					</select>
+					<select aria-label={copy(`${name} response curve`, `منحنی پاسخ ${name}`)} value={config?.curve ?? 'linear'} onChange={(event) => void updatePWMConfig(channel, { curve: event.target.value as PWMChannelConfig['curve'], gamma: event.target.value === 'linear' ? 1 : config?.gamma === 1 ? 2.2 : config?.gamma ?? 2.2 })}>
+					  <option value="gamma">{copy('Perceptual', 'ادراکی')}</option><option value="linear">{copy('Linear', 'خطی')}</option>
+					</select>
+				  </div>
+				</div>
+				<RangeField label={copy(`${name} brightness`, `روشنایی ${name}`)} value={pwmPercent(draft, config)} min={0} max={100} step={0.1} unit="%" disabled={!pwmLoaded || pwmAllBusy} onChange={(percent) => setPWMPercent(channel, percent)} />
                 <div className="pwm-mixer__actions"><Button compact disabled={!pwmLoaded || pwmAllBusy || draft === 0} onClick={() => setPWMPercent(channel, 0, true)}>{t('off')}</Button><Button compact disabled={!pwmLoaded || pwmAllBusy || draft === 4095} onClick={() => setPWMPercent(channel, 100, true)}>{copy('FULL', 'کامل')}</Button></div>
+				{config?.curve === 'gamma' && <RangeField label={copy('Curve strength', 'شدت منحنی')} value={config.gamma} min={0.1} max={5} step={0.1} disabled={pwmAllBusy} onChange={(gamma) => void updatePWMConfig(channel, { gamma })} />}
               </div>
             })}
           </div>
