@@ -226,7 +226,8 @@ func (model Model) dashboardPage(snapshot control.Snapshot) string {
 		}
 	}
 	if haveStatus && capabilities&native.CapabilityPWM != 0 && status.PWMAvailable {
-		stateLines = append(stateLines, kvCard(sectionWidth, 22, model.peripheralName(fmt.Sprintf("pwm.%d", status.PWMChannel), "PWM"), fmt.Sprintf("channel %d · %d%%", status.PWMChannel, int(status.PWMValue)*100/4095)))
+		percent := appconfig.PWMPercentFromRaw(status.PWMValue, appconfig.PWMChannel(model.uiValue, int(status.PWMChannel)))
+		stateLines = append(stateLines, kvCard(sectionWidth, 22, model.peripheralName(fmt.Sprintf("pwm.%d", status.PWMChannel), "PWM"), fmt.Sprintf("channel %d · %.1f%%", status.PWMChannel, percent)))
 	}
 	if lcdAvailable {
 		stateLines = append(stateLines, kvCard(sectionWidth, 22, model.peripheralName("display.lcd", "I2C LCD"), lcdStatus))
