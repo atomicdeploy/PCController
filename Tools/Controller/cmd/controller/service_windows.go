@@ -19,6 +19,7 @@ import (
 
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/hostui"
+	"pccontroller.local/controller/internal/ownedstorage"
 )
 
 func runPlatformServiceCommand(command string, args []string, configPath string, stdout, stderr io.Writer) error {
@@ -290,11 +291,7 @@ type controllerWindowsService struct {
 
 func (service *controllerWindowsService) Execute(_ []string, requests <-chan svc.ChangeRequest, statuses chan<- svc.Status) (bool, uint32) {
 	statuses <- svc.Status{State: svc.StartPending, CheckPoint: 1, WaitHint: 15000}
-	if err := os.MkdirAll(service.options.DataDir, 0o750); err != nil {
-		return true, 1
-	}
-	logPath := filepath.Join(service.options.DataDir, "service.log")
-	logFile, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o640)
+	logFile, err := openWindowsServiceLog(service.options.DataDir)
 	if err != nil {
 		return true, 2
 	}
@@ -385,6 +382,17 @@ running:
 			}
 		}
 	}
+}
+
+func openWindowsServiceLog(dataDir string) (*os.File, error) {
+	// Establish the durable ownership marker before creating service.log.
+	// Otherwise the log itself makes a new root non-empty and the normal host
+	// storage initialization correctly refuses to adopt it.
+	if err := ownedstorage.Ensure(dataDir); err != nil {
+		return nil, fmt.Errorf("establish service data ownership: %w", err)
+	}
+	logPath := filepath.Join(dataDir, "service.log")
+	return os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o640)
 }
 
 func runWindowsServiceWeb(ctx context.Context, options serviceRuntimeOptions, output io.Writer, ready func()) error {

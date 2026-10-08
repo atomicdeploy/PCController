@@ -117,7 +117,7 @@ identity access to those paths and the binary directory, configures delayed
 automatic startup, and sets bounded restart recovery actions.
 
 ```console
-controller.exe --config "%APPDATA%\PCController\config.json" service install --data-dir C:\ProgramData\PCController
+controller.exe --config "%APPDATA%\PCController\config.json" service install --data-dir C:\ProgramData\PCController\HostService
 controller.exe service status
 controller.exe service restart
 ```
@@ -130,6 +130,10 @@ runtime releases the serial board session before the service exits. Use
 `service remove` for exact removal. In-process host self-update is intentionally
 rejected in service mode because a replacement process cannot impersonate an
 SCM start; stop, replace, repair, and start through the service lifecycle.
+The service data directory must be new/empty or already carry PCController's
+exact ownership marker. Use a dedicated child such as `HostService` when the
+parent ProgramData directory already contains unrelated operational backups;
+the installer will not adopt or delete a foreign non-empty directory.
 
 Do not run a second interactive primary against the same board/listen address.
 Interactive clients should attach to the service API. The separate unelevated
