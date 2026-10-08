@@ -600,6 +600,9 @@ type Client struct {
 	doneOnce           sync.Once
 	statusHub          statusSubscriptionHub
 	statusFetch        func(context.Context) (Status, error)
+	pwmObservationMu   sync.Mutex
+	pwmObservation     PWMValues
+	havePWMObservation bool
 	illuminationMu     sync.RWMutex
 	illumination       IlluminationState
 	illuminationPollAt time.Time
@@ -1889,6 +1892,9 @@ func (client *Client) PWMValues(ctx context.Context) (PWMValues, error) {
 // embedders that already hold an equivalent board readback may also publish it
 // without issuing another serial transaction.
 func (client *Client) PublishPWMValues(values PWMValues) {
+	if !client.shouldPublishPWMValues(values) {
+		return
+	}
 	metadata := map[string]string{
 		"available":        strconv.FormatBool(values.Available),
 		"selected_channel": strconv.Itoa(int(values.SelectedChannel)),
@@ -1902,6 +1908,17 @@ func (client *Client) PublishPWMValues(values PWMValues) {
 		Text:     "PWM outputs updated",
 		Metadata: metadata,
 	})
+}
+
+func (client *Client) shouldPublishPWMValues(values PWMValues) bool {
+	client.pwmObservationMu.Lock()
+	defer client.pwmObservationMu.Unlock()
+	if client.havePWMObservation && client.pwmObservation == values {
+		return false
+	}
+	client.pwmObservation = values
+	client.havePWMObservation = true
+	return true
 }
 
 // Illumination reads the persisted policy, live door state, and exact applied

@@ -9,7 +9,7 @@ import (
 
 func TestMeasurementTimingDefaultsAndCurrentBounds(t *testing.T) {
 	value := Defaults()
-	if value.UI.StatusIntervalMS != 200 ||
+	if value.UI.StatusIntervalMS != 500 ||
 		value.UI.MeasurementFreshnessMS != DefaultMeasurementFreshnessMS ||
 		value.UI.IdleStatusIntervalMS != 0 {
 		t.Fatalf("measurement timing defaults=%d/%d idle=%d", value.UI.StatusIntervalMS, value.UI.MeasurementFreshnessMS, value.UI.IdleStatusIntervalMS)

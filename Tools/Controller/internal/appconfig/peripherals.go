@@ -13,21 +13,24 @@ const MaxPeripheralNames = 96
 // from role-specific channels so clients can apply a visibility policy without
 // losing access to the underlying hardware.
 type PeripheralDescriptor struct {
-	Key         string `json:"key"`
-	Kind        string `json:"kind"`
-	Role        string `json:"role"`
-	Index       int    `json:"index"`
-	DefaultName string `json:"default_name"`
-	Name        string `json:"name,omitempty"`
-	Icon        string `json:"icon,omitempty"`
-	Color       string `json:"color,omitempty"`
-	UpColor     string `json:"up_color,omitempty"`
-	DownColor   string `json:"down_color,omitempty"`
-	Group       string `json:"group,omitempty"`
-	Order       *int   `json:"order,omitempty"`
-	Hidden      bool   `json:"hidden,omitempty"`
-	Locked      bool   `json:"locked,omitempty"`
-	Control     string `json:"control"`
+	Key         string  `json:"key"`
+	Kind        string  `json:"kind"`
+	Role        string  `json:"role"`
+	Index       int     `json:"index"`
+	DefaultName string  `json:"default_name"`
+	Name        string  `json:"name,omitempty"`
+	Icon        string  `json:"icon,omitempty"`
+	Color       string  `json:"color,omitempty"`
+	UpColor     string  `json:"up_color,omitempty"`
+	DownColor   string  `json:"down_color,omitempty"`
+	Group       string  `json:"group,omitempty"`
+	Order       *int    `json:"order,omitempty"`
+	Hidden      bool    `json:"hidden,omitempty"`
+	Locked      bool    `json:"locked,omitempty"`
+	Control     string  `json:"control"`
+	OutputType  string  `json:"output_type,omitempty"`
+	Curve       string  `json:"curve,omitempty"`
+	Gamma       float64 `json:"gamma,omitempty"`
 }
 
 type ActionDescriptor struct {
@@ -40,19 +43,22 @@ type ActionDescriptor struct {
 // operator-controllable board channel. The canonical key remains suitable for
 // commands and persisted names while Kind supplies the operator vocabulary.
 type ControlDescriptor struct {
-	Key       string             `json:"key"`
-	Kind      string             `json:"kind"`
-	Order     int                `json:"order"`
-	Name      string             `json:"name"`
-	Icon      string             `json:"icon,omitempty"`
-	Color     string             `json:"color,omitempty"`
-	UpColor   string             `json:"up_color,omitempty"`
-	DownColor string             `json:"down_color,omitempty"`
-	Group     string             `json:"group,omitempty"`
-	Hidden    bool               `json:"hidden,omitempty"`
-	Locked    bool               `json:"locked,omitempty"`
-	Control   string             `json:"control"`
-	Actions   []ActionDescriptor `json:"actions,omitempty"`
+	Key        string             `json:"key"`
+	Kind       string             `json:"kind"`
+	Order      int                `json:"order"`
+	Name       string             `json:"name"`
+	Icon       string             `json:"icon,omitempty"`
+	Color      string             `json:"color,omitempty"`
+	UpColor    string             `json:"up_color,omitempty"`
+	DownColor  string             `json:"down_color,omitempty"`
+	Group      string             `json:"group,omitempty"`
+	Hidden     bool               `json:"hidden,omitempty"`
+	Locked     bool               `json:"locked,omitempty"`
+	Control    string             `json:"control"`
+	OutputType string             `json:"output_type,omitempty"`
+	Curve      string             `json:"curve,omitempty"`
+	Gamma      float64            `json:"gamma,omitempty"`
+	Actions    []ActionDescriptor `json:"actions,omitempty"`
 }
 
 var corePeripheralDescriptors = buildPeripheralDescriptors()

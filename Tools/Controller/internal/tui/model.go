@@ -2362,9 +2362,9 @@ func (model Model) statusInterval() time.Duration {
 		if interval > time.Duration(appconfig.StatusIntervalMaxMS)*time.Millisecond {
 			interval = time.Duration(appconfig.StatusIntervalMaxMS) * time.Millisecond
 		}
-		if model.snapshot().Status.DoorOpen && interval > 125*time.Millisecond {
-			interval = 125 * time.Millisecond
-		}
+		// Door edges arrive through the event stream. Keeping the entire TUI on a
+		// special 125 ms poll merely because the door remains open wastes CPU and
+		// does not improve edge latency.
 	}
 	// Remote activity events remain push-driven. The snapshot poll is only a
 	// convergence/backstop path, so rendering and making an authenticated RPC
@@ -2593,7 +2593,34 @@ func waitControlEvent(events <-chan control.Event) tea.Cmd {
 		if !ok {
 			return controlEventClosedMsg{}
 		}
-		return runtimeEventMsg(event)
+		if event.Stream != control.EventStreamState {
+			return runtimeEventMsg(event)
+		}
+
+		// Firmware animation and physical mirrors can publish state at 50/60 FPS.
+		// A terminal cannot usefully present every intermediate frame, and asking
+		// Bubble Tea to recompose the full screen for each one can consume a core.
+		// Keep the newest state frame in a short presentation window while letting
+		// actionable activity preempt the window immediately. This changes only
+		// TUI painting; board timing and WebSocket delivery retain full cadence.
+		latest := event
+		timer := time.NewTimer(250 * time.Millisecond)
+		defer timer.Stop()
+		for {
+			select {
+			case <-timer.C:
+				return runtimeEventMsg(latest)
+			case next, open := <-events:
+				if !open {
+					return runtimeEventMsg(latest)
+				}
+				if next.Stream == control.EventStreamState {
+					latest = next
+					continue
+				}
+				return runtimeEventMsg(next)
+			}
+		}
 	}
 }
 

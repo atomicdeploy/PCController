@@ -60,8 +60,10 @@ streaming and precise external-event recording are not supported by this
 bit-banged target. Even standalone streaming can make the MCU uptime lag wall
 time. A DMA-capable MCU or a separate strip controller is needed to remove this
 hardware constraint; the host animation uses its monotonic clock. The firmware
-ACK is emitted after show, preventing the next host frame from overflowing UART
-while interrupts are masked. Unsolicited serial traffic must honor this pacing.
+ACK is emitted after show. The host transport holds a request-wide wire gate
+until that ACK arrives, so status polling, media-clock updates, and other
+commands cannot enter the UART while interrupts are masked. Unsolicited device
+events remain concurrent because they do not write a host request.
 
 The 100-pixel limit is intentional on the AVR SRAM budget. Higher counts require
 a firmware target/profile with enough memory and a matching advertised limit;

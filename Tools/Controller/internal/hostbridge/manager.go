@@ -200,6 +200,8 @@ type Manager struct {
 	mu                  sync.RWMutex
 	closing             bool
 	digest              [sha256.Size]byte
+	melodyDigest        [sha256.Size]byte
+	melodyCatalogReady  bool
 	advertiser          *discovery.Advertiser
 	peers               map[string]*peerState
 	status              Status
@@ -669,17 +671,39 @@ func integrationDigest(config appconfig.Config) [sha256.Size]byte {
 	return sha256.Sum256(encoded)
 }
 
+func melodyCatalogDigest(config appconfig.Config) [sha256.Size]byte {
+	encoded, _ := json.Marshal(appconfig.EffectiveMelodies(config))
+	return sha256.Sum256(encoded)
+}
+
 func (manager *Manager) reconcile(config appconfig.Config) error {
 	manager.client.ConfigureRFPresentation(config.RF)
 	manager.observeBuzzerRoute(config.Integrations.BuzzerMirror.Path, false)
 	manager.segmentScroll.Observe(config.UI.SegmentScroll, manager.client.Snapshot())
 	digest := integrationDigest(config)
-	manager.mu.RLock()
+	melodies := appconfig.EffectiveMelodies(config)
+	melodyDigest := melodyCatalogDigest(config)
+	manager.mu.Lock()
 	closing := manager.closing
 	unchanged := digest == manager.digest
-	manager.mu.RUnlock()
+	melodyChanged := manager.melodyCatalogReady && melodyDigest != manager.melodyDigest
+	manager.melodyDigest = melodyDigest
+	manager.melodyCatalogReady = true
+	manager.mu.Unlock()
 	if closing {
 		return nil
+	}
+	if melodyChanged {
+		manager.client.EmitHostActionEvent(
+			"melodies.changed",
+			"host melody catalog changed",
+			"host-config",
+			"refresh",
+			map[string]string{
+				"count":    strconv.Itoa(len(melodies)),
+				"revision": fmt.Sprintf("%x", melodyDigest),
+			},
+		)
 	}
 	if unchanged {
 		return nil

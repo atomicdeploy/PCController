@@ -265,7 +265,7 @@ func TestMacroValidation(t *testing.T) {
 
 func TestLoadNormalizesOmittedMacroModeToAuto(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
-	content := `{"macros":[{"id":1,"name":"recorded","steps":[{"kind":"relay","target":4,"value":1}]}]}`
+	content := `{"schema":2,"macros":[{"id":1,"name":"recorded","steps":[{"kind":"relay","target":4,"value":1}]}]}`
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -285,6 +285,51 @@ func TestLoadNormalizesOmittedMacroModeToAuto(t *testing.T) {
 	}
 	if !strings.Contains(string(written), `"mode": "auto"`) {
 		t.Fatalf("normalized macro mode was not persisted explicitly: %s", written)
+	}
+}
+
+func TestLoadNormalizesLegacyAutoMacroModeToHost(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	content := `{"macros":[{"id":1,"name":"recorded","mode":"auto","steps":[{"kind":"relay","target":4,"value":1}]}]}`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	value, _, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := value.Macros[0].Mode; got != "host" {
+		t.Fatalf("normalized legacy macro mode=%q, want host", got)
+	}
+	if value.Schema != CurrentConfigSchema {
+		t.Fatalf("migrated schema=%d, want %d", value.Schema, CurrentConfigSchema)
+	}
+	if err := Write(path, value); err != nil {
+		t.Fatal(err)
+	}
+	written, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(written), `"schema": 2`) ||
+		strings.Contains(string(written), `"mode": "auto"`) ||
+		!strings.Contains(string(written), `"mode": "host"`) {
+		t.Fatalf("legacy macro mode was not migrated explicitly: %s", written)
+	}
+}
+
+func TestLoadNormalizesLegacyOmittedMacroModeToHost(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	content := `{"macros":[{"id":1,"name":"recorded","steps":[{"kind":"relay","target":4,"value":1}]}]}`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	value, _, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := value.Macros[0].Mode; got != "host" {
+		t.Fatalf("normalized legacy omitted macro mode=%q, want host", got)
 	}
 }
 
@@ -717,7 +762,7 @@ func TestWritePersistsOnlyUserOverrides(t *testing.T) {
 	if err := json.Unmarshal(content, &defaultsDocument); err != nil {
 		t.Fatal(err)
 	}
-	if len(defaultsDocument) != 0 {
+	if len(defaultsDocument) != 1 || defaultsDocument["schema"] != float64(CurrentConfigSchema) {
 		t.Fatalf("default configuration was expanded on disk: %s", content)
 	}
 
