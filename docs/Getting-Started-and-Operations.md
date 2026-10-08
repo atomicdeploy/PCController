@@ -107,6 +107,34 @@ derived from authenticated serial state, page links appear only while a board
 is connected, and both automatic launch and tray actions refuse to open a page
 while offline. Connect/Reconnect and Exit remain available in either state.
 
+### Windows startup service
+
+For a session-independent Pealayer/controller host, register the packaged
+executable with the real Windows Service Control Manager from an elevated
+terminal. Pin the existing user-owned configuration explicitly; the installer
+records absolute config/data paths, grants only the `NT SERVICE\PCController`
+identity access to those paths and the binary directory, configures delayed
+automatic startup, and sets bounded restart recovery actions.
+
+```console
+controller.exe --config C:\Users\Asus\AppData\Roaming\PCController\config.json service install --data-dir C:\ProgramData\PCController
+controller.exe service status
+controller.exe service restart
+```
+
+The service starts the authenticated loopback API without a browser, tray, or
+desktop-registration writes. SCM reports it running only after the primary API
+has claimed its listener. Stop/Shutdown cancels the primary context so the
+runtime releases the serial board session before the service exits. Use
+`service repair --binary PATH` after deploying a verified replacement, and
+`service remove` for exact removal. In-process host self-update is intentionally
+rejected in service mode because a replacement process cannot impersonate an
+SCM start; stop, replace, repair, and start through the service lifecycle.
+
+Do not run a second interactive primary against the same board/listen address.
+Interactive clients should attach to the service API. The separate unelevated
+tray-controller half of issue #116 remains tracked independently.
+
 Windows desktop integration is explicit and reversible. `desktop ensure`
 installs the current executable's per-user protocol, Start-menu and Desktop entries, and
 hash-bound `toast-logo.png` identity. Every WinRT toast uses that local PNG as

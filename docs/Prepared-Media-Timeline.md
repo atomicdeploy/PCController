@@ -30,12 +30,17 @@ monotonic anchor; public UTC timestamps are not used as scheduling clocks.
 `controller.media.timeline.get` and playback snapshot `timeline` return:
 revision/hash/generation/state, armed epoch/clock sequence, command count and ACK
 count, explicitly rebased steps, last command/deadline, last/max ACK lateness,
-device ACK timestamp where advertised, and sticky failure reason. The same ledger
+last/max dispatch lateness, last/max board-request round-trip, device ACK
+timestamp where advertised, and sticky failure reason. Total ACK lateness is
+the end-to-end host-clock result. Dispatch lateness identifies scheduler delay;
+ACK round-trip identifies transport/board response time. The same ledger
 publishes `media.timeline` state events. ACK count advances only on success.
 
 Clock expiration (250 ms while playing), session replacement, command failure,
 or lateness over the admitted limit faults execution rather than silently skipping
-commands. Cleanup is attempted against the original board generation even if the
+commands. Dispatch consumes the same admitted budget: a command dispatched 12 ms
+late under a 50 ms contract receives at most 38 ms for request plus ACK, never a
+fresh second 50 ms window. Cleanup is attempted against the original board generation even if the
 failed command might have applied. Cleanup failures/transport loss cannot prove
 physical outputs are off. E-STOP cancels the media executor as well as existing
 standalone effects. Conflicting live actuator commands are rejected during play.

@@ -106,6 +106,11 @@ answer's remainder. No firmware profile or hardware state changes in this pass.
 | `privileged-service-tray-controller` | [#116](https://github.com/atomicdeploy/PCController/issues/116) | 🟡 open | Run a privileged background service with a separate interactive tray controller |
 | `ui-surface-capability-parity` | [#124](https://github.com/atomicdeploy/PCController/issues/124) | 🟡 open | Generate and enforce declared capability parity across TUI, WebUI, native GUI, CLI, and APIs |
 
+The headless delayed-auto-start Windows SCM owner, restricted service identity,
+readiness gate, graceful stop, and recovery actions are implemented. Issue #116
+remains open for the separately unelevated tray client and its attach/control
+boundary; the interactive tray is not misrepresented as part of the service.
+
 ## [#8 — IPC, APIs, networking, discovery, and remote bridges](https://github.com/atomicdeploy/PCController/issues/8)
 
 5 open / 0 closed / 5 total

@@ -301,6 +301,7 @@ Interactive control:
   controller                         launch the Charm TUI
 	controller tui [--ipc-addr HOST:PORT] [--ipc-token-ref REF] [--sync-navigation=false] [--simple] [connection flags]
 	controller web [--listen 127.0.0.1:8787] [--no-open] [--no-tray] [--no-auto] [connection flags]
+	controller service install|repair|status|start|stop|restart|remove [service flags]
   controller web export --output FILE.zip
   controller ports [connection flags]
   controller shell [connection flags]

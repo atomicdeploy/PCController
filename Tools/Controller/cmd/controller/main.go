@@ -194,6 +194,11 @@ func run(args []string, stdout, stderr io.Writer) (resultErr error) {
 			args[1:], stdout, stderr, configPath,
 			configuredProductTitle(configPath, presentation.AppName),
 		)
+	case "service":
+		// SCM lifecycle is config-independent here. The service entry point
+		// opens the exact absolute config path recorded by install/repair after
+		// Windows has established its restricted service identity.
+		return runServiceCommand(args[1:], configPath, stdout, stderr)
 	}
 	if isConfigMaintenance(args) {
 		return runConfigMaintenance(args, configPath, stdout)
@@ -524,6 +529,17 @@ func runWebWithInitialAction(
 	store *appconfig.Store,
 	initial hostui.AppAction,
 ) error {
+	return runWebWithContext(nil, nil, args, stdout, stderr, store, initial)
+}
+
+func runWebWithContext(
+	externalContext context.Context,
+	ready func(),
+	args []string,
+	stdout, stderr io.Writer,
+	store *appconfig.Store,
+	initial hostui.AppAction,
+) error {
 	if len(args) != 0 && strings.EqualFold(args[0], "export") {
 		if initial.Kind != "" {
 			return errors.New("a desktop action cannot be combined with web export")
@@ -611,17 +627,25 @@ func runWebWithInitialAction(
 		return err
 	}
 
-	ctx, cancel := signalContext()
+	var ctx context.Context
+	var cancel context.CancelFunc
+	if externalContext == nil {
+		ctx, cancel = signalContext()
+	} else {
+		ctx, cancel = context.WithCancel(externalContext)
+	}
 	defer cancel()
 	// An unpackaged Windows toast needs the per-user AppUserModelID and
 	// Start-menu shortcut before Explorer can associate it with the packaged
 	// application icon. Keep desktop-integration trouble non-fatal: the host
 	// and board connection must remain usable even when a locked-down profile
 	// prevents a notification registration write.
-	if status, desktopErr := ensureWebDesktopIntegration(store); desktopErr != nil {
-		fmt.Fprintln(stderr, "desktop notification identity:", desktopErr)
-	} else if status.Supported && (!status.ProtocolReady || !status.ShortcutReady || !status.DesktopShortcutReady) {
-		fmt.Fprintln(stderr, "desktop notification identity is incomplete")
+	if externalContext == nil {
+		if status, desktopErr := ensureWebDesktopIntegration(store); desktopErr != nil {
+			fmt.Fprintln(stderr, "desktop notification identity:", desktopErr)
+		} else if status.Supported && (!status.ProtocolReady || !status.ShortcutReady || !status.DesktopShortcutReady) {
+			fmt.Fprintln(stderr, "desktop notification identity is incomplete")
+		}
 	}
 	runtime := newRuntime(connection, store)
 	bindRuntimeDevicePersistence(runtime, store)
@@ -759,6 +783,9 @@ func runWebWithInitialAction(
 		}()
 	}
 	primaryReadyOnce.Do(func() { close(primaryReady) })
+	if ready != nil {
+		ready()
+	}
 	go watchConfiguration(ctx, store, runtime, connection)
 	go func() {
 		for value := range store.Subscribe(ctx) {
