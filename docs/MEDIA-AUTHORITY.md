@@ -43,3 +43,19 @@ cleanup, prepared-plan reservation, expiry, snapshot isolation and typed RPC den
 An existing asynchronous timeline fixture once observed its log before the second
 acknowledged edge was copied; a repeated focused run passed. Live deployment and
 physical timing are separate acceptance gates.
+
+## 8 October deployment checkpoint
+
+The primary-owned updater installed the new controller executable on Cafe and
+returned `terminal_verified=true` after restart. Live RPC checks exercised a
+queued observer request, denied self-acceptance, owner rejection, production
+lock, typed foreign-request denial and foreign empty-plan denial. No output
+commands were sent; the temporary observer was removed and the original owner
+remained assigned and unlocked. Its paused media clock stayed at 1196.24 seconds.
+
+The host package passed 44 Go packages plus vet, 353 Web tests, executable smoke
+and C ABI build/smoke. The C ABI artifact was built but not installed as a new
+embedded runtime on Cafe. Pealayer's matching native/Web client build is staged;
+its updater launch was blocked by tool policy and requires user action. Do not
+equate the controller deployment with acceptance of the application dialogs,
+cross-host handoff, sustained timing, physical output edges or startup service.
