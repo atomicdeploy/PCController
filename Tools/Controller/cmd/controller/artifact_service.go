@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	controllerapi "pccontroller.local/controller"
@@ -28,6 +29,9 @@ type primaryArtifactExecutor struct {
 	shutdown  func()
 	forceExit func(int)
 	execute   func(context.Context, string) (string, error)
+	release   func() error
+	reconnect func(context.Context) error
+	programMu sync.Mutex
 }
 
 func newArtifactHostService(
@@ -164,7 +168,7 @@ func (executor *primaryArtifactExecutor) Capture(
 	}
 	ctx = artifactProgrammingContext(ctx, progress)
 	progress("preflight", -1, "checking readback tools and target")
-	output, err := executor.client.Execute(ctx, shell.Join(words))
+	output, err := executor.executeProgrammingCommand(ctx, shell.Join(words))
 	if err != nil {
 		return nil, programmingExecutionFailure(method, err)
 	}
@@ -239,7 +243,7 @@ func (executor *primaryArtifactExecutor) ProgramFirmware(
 	}
 	ctx = artifactProgrammingContext(ctx, progress)
 	progress("preflight", -1, "checking programming tools and target")
-	if _, err := executor.executeCommand(ctx, shell.Join(words)); err != nil {
+	if _, err := executor.executeProgrammingCommand(ctx, shell.Join(words)); err != nil {
 		return programmingExecutionFailure(method, err)
 	}
 	return nil
@@ -279,7 +283,7 @@ func (executor *primaryArtifactExecutor) RestoreFlash(
 	}
 	ctx = artifactProgrammingContext(ctx, progress)
 	progress("preflight", -1, "checking captured-flash restore tools and target")
-	if _, err := executor.executeCommand(ctx, shell.Join(words)); err != nil {
+	if _, err := executor.executeProgrammingCommand(ctx, shell.Join(words)); err != nil {
 		return programmingExecutionFailure(method, err)
 	}
 	return nil
@@ -312,7 +316,7 @@ func (executor *primaryArtifactExecutor) ProgramEEPROM(
 	}
 	ctx = artifactProgrammingContext(ctx, progress)
 	progress("preflight", -1, "checking EEPROM restore tools and target")
-	if _, err := executor.client.Execute(ctx, shell.Join(words)); err != nil {
+	if _, err := executor.executeProgrammingCommand(ctx, shell.Join(words)); err != nil {
 		return programmingExecutionFailure(method, err)
 	}
 	return nil
@@ -448,6 +452,59 @@ func (executor *primaryArtifactExecutor) executeCommand(
 		return executor.execute(ctx, command)
 	}
 	return executor.client.Execute(ctx, command)
+}
+
+// executeProgrammingCommand gives the guarded programmer exclusive ownership
+// of the UART. Client.Close is an actual handle-release barrier: it pauses the
+// reconnect loop and joins an in-flight open before returning. Reconnecting is
+// deliberately attempted after every released transaction, including failed
+// and canceled ones, so the long-running host does not remain paused.
+func (executor *primaryArtifactExecutor) executeProgrammingCommand(
+	ctx artifacts.Context,
+	command string,
+) (string, error) {
+	executor.programMu.Lock()
+	defer executor.programMu.Unlock()
+
+	if err := executor.releasePrimary(); err != nil {
+		reconnectErr := executor.reconnectPrimary(ctx)
+		return "", errors.Join(
+			fmt.Errorf("release primary controller runtime before programming: %w", err),
+			reconnectErr,
+		)
+	}
+
+	output, commandErr := executor.executeCommand(ctx, command)
+	reconnectErr := executor.reconnectPrimary(ctx)
+	if commandErr != nil {
+		commandErr = fmt.Errorf("execute guarded programming transaction: %w", commandErr)
+	}
+	return output, errors.Join(commandErr, reconnectErr)
+}
+
+func (executor *primaryArtifactExecutor) releasePrimary() error {
+	if executor.release != nil {
+		return executor.release()
+	}
+	if executor.client == nil {
+		return nil
+	}
+	return executor.client.Close()
+}
+
+func (executor *primaryArtifactExecutor) reconnectPrimary(ctx context.Context) error {
+	reconnectContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 20*time.Second)
+	defer cancel()
+	var err error
+	if executor.reconnect != nil {
+		err = executor.reconnect(reconnectContext)
+	} else if executor.client != nil {
+		err = executor.client.Connect(reconnectContext)
+	}
+	if err != nil {
+		return fmt.Errorf("reconnect primary controller runtime after programming: %w", err)
+	}
+	return nil
 }
 
 func (executor *primaryArtifactExecutor) port(value string) string {
