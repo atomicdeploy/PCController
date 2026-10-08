@@ -31,8 +31,9 @@ and merged main are the same checkpoint.
 
 ## Media clock and prepared effects
 
-The media clock represents playback position, loaded/playing state, rate,
-sequence, epoch and prepared-plan revision. It is not an AVR oscillator or RTC.
+The media clock represents client identity, playback position and duration,
+loaded/playing state, rate, sequence, epoch and prepared-plan revision. It is
+not an AVR oscillator or RTC.
 libmpv supplies the media position; the host uses monotonic anchors between
 samples; physical output timing still requires acknowledgement and measurement.
 
@@ -42,6 +43,9 @@ acknowledgement arm the plan. Seeks create a new epoch; old acknowledgements and
 old one-shots must not be reused. The host executes the prepared commands and
 faults on stale clock, NACK, changed board session or excessive ACK lateness.
 Paused/resumed and rebased actions must remain distinct in the execution ledger.
+The host methods are `controller.media.timeline.prepare`,
+`controller.media.playback.update` and `controller.media.playback.get`;
+clients must consume acknowledged/applied state, not treat sending as success.
 
 | Timing quantity in the reviewed integration | Meaning |
 | --- | --- |
@@ -141,6 +145,25 @@ it per target and storage layout; do not simply remove the error. Current source
 comments and old issue bodies contain differing capacity/state descriptions;
 future A/B manifests and the actual implemented gates must reconcile those claims.
 
+The current source documents why these defaults differ: LCD/catalog composition
+is host-owned, the dormant scheduler has no registered production tasks, immutable
+audio fallbacks avoid the optional EEPROM loader, and boot opcodes/automations
+must fit an explicit constrained profile. Larger capacity does not automatically
+remove storage conflicts or commission an implementation. For every gate record
+its retained source, reason disabled, measured or historical flash/SRAM/EEPROM
+cost (unknown when unmeasured), dependencies, offline gains/losses, and disposition
+as enable-as-is, redesign or keep host-owned. Reconcile the conversation's
+approximately 1.1 KB automation overflow against an exact historical artifact
+before treating that estimate as a release budget.
+
+An expanded LCD profile should support useful autonomous pages when the host is
+absent and deliberate host ownership when connected. The richer local event
+engine is a proposal: startup, door, temperature, BT, host-connect/loss, RF and
+scheduled triggers should reuse validated relay, PWM, RGB/strip, buzzer, display,
+RF and macro action paths. Not every proposed trigger/action is present in the
+retained compact automation record. EEPROM audio can be expanded beyond the
+current four frequency/duration triples only with target-specific storage tests.
+
 History recovery should extract behavior and tests, compare current contracts,
 then port or redesign behind an explicit feature bundle. Do not blindly restore
 old files, old wire generations or discarded duplication. Useful removed/offloaded
@@ -154,6 +177,18 @@ target and a specific, later-selected STM32 target rather than assuming every
 STM32 variant has the same peripherals or storage. [ATmega2560](https://www.microchip.com/en-us/product/ATmega2560)
 provides 256 KB flash, 8 KB SRAM and 4 KB EEPROM. [MegaCore](https://github.com/MCUdude/MegaCore)
 is a candidate toolchain, not an installed PCController target.
+
+| Proposed profile, not an existing supported target | Intended feature bundle |
+| --- | --- |
+| `controller-mini-atmega328p` | Preserve the constrained production behavior and exact resource gates |
+| `controller-mega-atmega2560` | Expanded LCD/menu, scheduler, local automation/startup features and independent queues, after combined-profile validation |
+| `controller-stm32-*` | Same semantics on an explicitly chosen chip/core; optional timer/DMA strip, double buffers and measured higher-rate telemetry |
+
+Do not rename the existing target implicitly. Explicit pin, profile and capability
+descriptors may live under board-specific directories, but shared semantics must
+remain in the production core. Update dependency discovery, build/package CI,
+programming/recovery, bootloader ceilings and flash identity placement together;
+changing an FQBN alone is not a complete port.
 
 Separate target pin/electrical identity, hardware backend, feature bundle and
 toolchain/programmer policy. Keep protocol/action identities shared; HELLO,
