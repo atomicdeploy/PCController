@@ -171,16 +171,26 @@ func TestMediaTimelineExecutesBothEdgesWithoutUIOrRepeatedCueRPC(t *testing.T) {
 	if status.State == "faulted" || status.MaxAckLatenessMS > 100 {
 		t.Fatalf("not faithful: %+v", status)
 	}
-	mu.Lock()
-	defer mu.Unlock()
-	var edges []byte
-	for _, frame := range *frames {
-		if frame.Opcode == native.OpRelaySet {
-			edges = append(edges, frame.Payload[1])
+	deadline := time.Now().Add(time.Second)
+	for {
+		mu.Lock()
+		var edges []byte
+		for _, frame := range *frames {
+			if frame.Opcode == native.OpRelaySet {
+				edges = append(edges, frame.Payload[1])
+			}
 		}
-	}
-	if len(edges) != 2 || edges[0] != 1 || edges[1] != 0 {
-		t.Fatalf("wire edges %v", edges)
+		mu.Unlock()
+		if len(edges) == 2 {
+			if edges[0] != 1 || edges[1] != 0 {
+				t.Fatalf("wire edges %v", edges)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("wire edges %v", edges)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 func TestMediaTimelineLateActionFaultsWithoutSendingIt(t *testing.T) {
