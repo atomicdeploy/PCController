@@ -39,11 +39,13 @@ type MediaPlaybackSnapshot struct {
 	Timeline         MediaTimelineStatus `json:"timeline"`
 }
 type mediaPlaybackState struct {
-	mu       sync.Mutex
-	snapshot MediaPlaybackSnapshot
-	received time.Time
-	running  bool
-	wake     chan struct{}
+	operation sync.Mutex
+	authority MediaAuthorityStatus
+	mu        sync.Mutex
+	snapshot  MediaPlaybackSnapshot
+	received  time.Time
+	running   bool
+	wake      chan struct{}
 }
 
 func (value MediaPlaybackUpdate) validate() error {
@@ -89,6 +91,8 @@ func (runtime *Runtime) mediaTimelineClock() (MediaPlaybackUpdate, time.Time) {
 	return copyMediaUpdate(runtime.mediaPlayback.snapshot.MediaPlaybackUpdate), runtime.mediaPlayback.received
 }
 func (runtime *Runtime) UpdateMediaPlayback(value MediaPlaybackUpdate) (MediaPlaybackSnapshot, error) {
+	runtime.mediaPlayback.operation.Lock()
+	defer runtime.mediaPlayback.operation.Unlock()
 	if err := value.validate(); err != nil {
 		return runtime.MediaPlayback(), err
 	}
@@ -108,6 +112,10 @@ func (runtime *Runtime) UpdateMediaPlayback(value MediaPlaybackUpdate) (MediaPla
 	}
 	state := &runtime.mediaPlayback
 	state.mu.Lock()
+	if err := runtime.authorityAdmissionLocked(value.ClientID); err != nil {
+		state.mu.Unlock()
+		return runtime.MediaPlayback(), err
+	}
 	fresh := !state.received.IsZero() && time.Since(state.received) < mediaPlaybackLease
 	previous := state.snapshot
 	if fresh && previous.ClientID != value.ClientID && previous.Loaded {
@@ -119,6 +127,16 @@ func (runtime *Runtime) UpdateMediaPlayback(value MediaPlaybackUpdate) (MediaPla
 		return runtime.MediaPlayback(), errors.New("stale media playback sequence")
 	}
 	state.received = time.Now()
+	if value.Loaded && state.authority.OwnerID == "" {
+		state.authority.OwnerID = value.ClientID
+		state.authority.OwnerLabel = value.ClientID
+		state.authority.Revision++
+	}
+	if !value.Loaded && state.authority.OwnerID == value.ClientID && !state.authority.Exclusive {
+		state.authority.OwnerID = ""
+		state.authority.OwnerLabel = ""
+		state.authority.Revision++
+	}
 	state.snapshot = MediaPlaybackSnapshot{MediaPlaybackUpdate: copyMediaUpdate(value), ReceivedAt: state.received.UTC(), Connected: true,
 		BoardSynced: previous.BoardSynced, BoardError: previous.BoardError, BoardSyncedAt: previous.BoardSyncedAt,
 		BoardSequence: previous.BoardSequence, BoardRoundTripMS: previous.BoardRoundTripMS}

@@ -1857,6 +1857,9 @@ func (runtime *Runtime) requestAtGeneration(
 	if err := runtime.rejectMediaTimelineConflict(ctx, opcode); err != nil {
 		return native.Frame{}, err
 	}
+	if err := runtime.rejectExclusiveMediaControl(ctx, opcode); err != nil {
+		return native.Frame{}, err
+	}
 	if err := runtime.rejectEmergencyStopCommand(opcode, payload); err != nil {
 		return native.Frame{}, err
 	}

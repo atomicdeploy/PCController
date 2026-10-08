@@ -535,6 +535,36 @@ func (service *Service) dispatch(
 		return response
 	}
 	// Primary discovery must not queue behind a long board, firmware, or shell
+	if request.ClientID != "" {
+		if service.AppInstances == nil {
+			response.Error = &RPCError{Code: -32000, Message: "app instance registry is unavailable"}
+			return response
+		}
+		if _, ok := service.AppInstances.Get(request.ClientID); !ok {
+			response.Error = &RPCError{Code: -32000, Message: "register client before sending client-scoped commands"}
+			return response
+		}
+		ctx = control.WithMediaActor(ctx, request.ClientID)
+	}
+	if requestCapability(request.Method, request.Params) == capabilityBoard &&
+		request.Method != "controller.media.authority.change" && request.Method != "controller.media.playback.update" && request.Method != "controller.media.timeline.prepare" {
+		// Always admit the emergency latch, not an anonymous release during production.
+		var stop struct {
+			Active bool `json:"active"`
+		}
+		_ = json.Unmarshal(request.Params, &stop)
+		if request.Method != "controller.estop.set" || !stop.Active {
+			if err := service.Client.CheckMediaControlAuthority(ctx); err != nil {
+				var denied *control.MediaAuthorityError
+				if errors.As(err, &denied) {
+					response.Error = &RPCError{Code: -32009, Message: err.Error(), Data: map[string]any{"kind": denied.Kind, "resource": "media_authority", "authority": denied.Status}}
+					return response
+				}
+				response.Error = &RPCError{Code: -32000, Message: err.Error()}
+				return response
+			}
+		}
+	}
 	service.configureAutomationActions()
 	// operation holding service.mu. Secondary instances use this bounded ping
 	// before deciding whether they may approach the local serial device.
@@ -636,6 +666,26 @@ func (service *Service) dispatch(
 	switch request.Method {
 	case "controller.media.playback.get":
 		result = service.Client.MediaPlayback()
+	case "controller.media.authority.get":
+		result = service.Client.MediaAuthority()
+	case "controller.media.authority.change":
+		var params controller.MediaAuthorityRequest
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			if service.AppInstances == nil {
+				err = errors.New("app instance registry is unavailable")
+			} else if instance, ok := service.AppInstances.Get(params.ClientID); !ok {
+				err = errors.New("register client before negotiating authority")
+			} else {
+				params.Label = instance.Values["host"]
+				if params.Label == "" {
+					params.Label = instance.Values["application"]
+				}
+				if params.Label == "" {
+					params.Label = params.ClientID
+				}
+				result, err = service.Client.ChangeMediaAuthority(params)
+			}
+		}
 	case "controller.media.timeline.get":
 		result = service.Client.MediaTimeline()
 	case "controller.media.timeline.prepare":
@@ -1761,7 +1811,10 @@ func (service *Service) dispatch(
 	}
 	if err != nil {
 		var rpcError *RPCError
-		if errors.As(err, &rpcError) {
+		var authorityError *control.MediaAuthorityError
+		if errors.As(err, &authorityError) {
+			response.Error = &RPCError{Code: -32009, Message: err.Error(), Data: map[string]any{"kind": authorityError.Kind, "resource": "media_authority", "authority": authorityError.Status}}
+		} else if errors.As(err, &rpcError) {
 			response.Error = rpcError
 		} else {
 			response.Error = &RPCError{Code: -32000, Message: err.Error()}
@@ -2296,7 +2349,7 @@ func requestCapability(method string, params json.RawMessage) string {
 	case "controller.display.send", "controller.opcode.send",
 		"controller.opcode.exchange", "controller.opcode.request", "controller.action.invoke":
 		return capabilityBoard
-	case "controller.estop.set", "controller.media.playback.update", "controller.media.timeline.prepare":
+	case "controller.estop.set", "controller.media.playback.update", "controller.media.timeline.prepare", "controller.media.authority.change":
 		return capabilityBoard
 	case "controller.host_menu.config", "controller.host_menu.config.get",
 		"controller.ui.config", "controller.ui.config.get",
@@ -2354,7 +2407,7 @@ func requestCapability(method string, params json.RawMessage) string {
 			}
 		}
 		return capabilityHostConfig
-	case "controller.ping", "controller.snapshot", "controller.media.playback.get", "controller.media.timeline.get", "controller.estop.get", "controller.port.process", "controller.port.owner", "controller.session.snapshot",
+	case "controller.ping", "controller.snapshot", "controller.media.playback.get", "controller.media.authority.get", "controller.media.timeline.get", "controller.estop.get", "controller.port.process", "controller.port.owner", "controller.session.snapshot",
 		"controller.session.snapshot.last", "controller.status",
 		"controller.front_panel", "controller.front-panel",
 		"controller.command.catalog", "controller.melodies.list", "controller.program_state.get", "controller.program-state.get",
@@ -4862,7 +4915,7 @@ func streamWebSocketStatus(
 		_ = write(wsNotification{
 			JSONRPC: Version,
 			Method:  "controller.error",
-			Params:  map[string]string{"source": "status", "error": err.Error()},
+			Params:  map[string]any{"source": "status", "error": err.Error(), "board_connected": client.Snapshot().Connected},
 		})
 		return
 	}
@@ -4871,7 +4924,7 @@ func streamWebSocketStatus(
 			if write(wsNotification{
 				JSONRPC: Version,
 				Method:  "controller.error",
-				Params:  map[string]string{"source": "status", "error": update.Error},
+				Params:  map[string]any{"source": "status", "error": update.Error, "board_connected": client.Snapshot().Connected},
 			}) != nil {
 				return
 			}
