@@ -117,7 +117,7 @@ identity access to those paths and the binary directory, configures delayed
 automatic startup, and sets bounded restart recovery actions.
 
 ```console
-controller.exe --config C:\Users\Asus\AppData\Roaming\PCController\config.json service install --data-dir C:\ProgramData\PCController
+controller.exe --config "%APPDATA%\PCController\config.json" service install --data-dir C:\ProgramData\PCController
 controller.exe service status
 controller.exe service restart
 ```
