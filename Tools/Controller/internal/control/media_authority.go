@@ -180,8 +180,11 @@ func (runtime *Runtime) ChangeMediaAuthority(request MediaAuthorityRequest) (Med
 			label = ""
 		}
 		state.authority = MediaAuthorityStatus{OwnerID: transfer, OwnerLabel: label, Revision: state.authority.Revision + 1, Pending: []MediaAuthorityClaim{}}
-		state.snapshot.Loaded = false
-		state.snapshot.Playing = false
+		// A successful transfer starts a new publisher session, even when the
+		// stable client ID belongs to a restarted instance of the same app. Do
+		// not carry the prior process's sequence/epoch into the fresh lease or
+		// its first positive sequence can be rejected as stale.
+		state.snapshot = MediaPlaybackSnapshot{MediaPlaybackUpdate: MediaPlaybackUpdate{ClientID: transfer, Rate: 1}}
 		state.received = time.Now()
 	}
 	result := runtime.authorityLocked()

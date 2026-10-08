@@ -87,6 +87,33 @@ func TestMediaAuthorityExclusiveReservationSurvivesClockExpiry(t *testing.T) {
 	}
 }
 
+func TestMediaAuthorityFreshLeaseResetsRestartedPublisherSequence(t *testing.T) {
+	runtime := New(Options{})
+	defer runtime.Close()
+	request := MediaAuthorityRequest{ClientID: "player:stable", Label: "Production", Operation: "request"}
+	if _, err := runtime.ChangeMediaAuthority(request); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runtime.UpdateMediaPlayback(MediaPlaybackUpdate{ClientID: request.ClientID, Sequence: 7578, Loaded: true, Rate: 1}); err != nil {
+		t.Fatal(err)
+	}
+	runtime.mediaPlayback.mu.Lock()
+	runtime.mediaPlayback.received = time.Now().Add(-mediaPlaybackLease - time.Second)
+	runtime.mediaPlayback.mu.Unlock()
+
+	status, err := runtime.ChangeMediaAuthority(request)
+	if err != nil || status.OwnerID != request.ClientID {
+		t.Fatalf("fresh lease: %+v %v", status, err)
+	}
+	reset := runtime.MediaPlayback()
+	if reset.ClientID != request.ClientID || reset.Sequence != 0 || reset.Loaded || reset.Playing || reset.BoardSynced {
+		t.Fatalf("old publisher state survived fresh lease: %+v", reset)
+	}
+	if _, err := runtime.UpdateMediaPlayback(MediaPlaybackUpdate{ClientID: request.ClientID, Sequence: 1, Loaded: true, Rate: 1}); err != nil {
+		t.Fatalf("restarted publisher sequence rejected: %v", err)
+	}
+}
+
 func TestMediaAuthorityRejectExpireAndSnapshotIsolation(t *testing.T) {
 	runtime := New(Options{})
 	defer runtime.Close()
