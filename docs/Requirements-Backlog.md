@@ -8,6 +8,17 @@ This is the canonical public map from normalized project requirements to GitHub 
 - Closed with current evidence: **10**
 - State policy: hardware, live-system, regression, partial-integration, and finalization work stays open until its own acceptance evidence exists.
 
+## Media timing and expanded MCU follow-up
+
+The [Media Timing and MCU Expansion roadmap](Media-Timing-and-MCU-Expansion.md)
+reconciles the 8 October discussion's prepared-clock explanation, AVR compaction,
+retained feature gates, ATmega2560/STM32 target proposals and isolated strip
+diagnosis. It reuses #18, #103/#227, #87, #44, #390/#71 and #554 rather than adding
+duplicate normalized requirements. The roadmap's per-workstream table defines
+acceptance and dependencies. Larger-target support and physical strip/timing
+proof remain open; conversation preservation also awaits the clipped final
+answer's remainder. No firmware profile or hardware state changes in this pass.
+
 ## [#1 — Firmware architecture, flash budget, EEPROM, and reset safety](https://github.com/atomicdeploy/PCController/issues/1)
 
 3 open / 2 closed / 5 total

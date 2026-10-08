@@ -77,6 +77,9 @@ device identity or interface settings.
   dependencies and recoverable programming lifecycle.
 - [Memory and Feature Tradeoffs](Memory-and-Feature-Tradeoffs.md) — current AVR
   resource constraints and deliberate host/firmware ownership choices.
+- [Media Timing and MCU Expansion](Media-Timing-and-MCU-Expansion.md) — prepared
+  clock boundaries, compaction history, expanded-target restoration and strip
+  diagnostic backlog with existing issue ownership.
 - [Local Library Variant Comparison](Local-Library-Variant-Comparison.md) —
   privacy-safe comparison of the three reviewed helper variants and the parts
   retained, improved, or deliberately excluded.
