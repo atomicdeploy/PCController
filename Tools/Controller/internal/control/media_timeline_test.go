@@ -1,6 +1,7 @@
 package control
 
 import (
+	"errors"
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/link"
 	"pccontroller.local/controller/internal/native"
@@ -10,6 +11,20 @@ import (
 	"testing"
 	"time"
 )
+
+func TestMediaTimelineReportsStandaloneStripAsRetryableResourceBusy(t *testing.T) {
+	runtime := New(Options{})
+	defer runtime.Close()
+	runtime.setActiveUseState(activeUseStrip, true)
+	_, err := runtime.PrepareMediaTimeline(MediaTimelinePlan{ClientID: "test", Revision: 1})
+	var busy *ResourceBusyError
+	if !errors.As(err, &busy) {
+		t.Fatalf("expected ResourceBusyError, got %T: %v", err, err)
+	}
+	if busy.Resource != "addressable_strip" || busy.Owner != "standalone_strip_stream" || busy.RetryAfterMS != 2000 {
+		t.Fatalf("unexpected resource conflict: %#v", busy)
+	}
+}
 
 func TestMediaTimelineCompilerFreezesOffsetsAndRejectsInvalidPlans(t *testing.T) {
 	plan := MediaTimelinePlan{ClientID: "test", Revision: 1, Actions: []MediaTimelineAction{
@@ -156,16 +171,26 @@ func TestMediaTimelineExecutesBothEdgesWithoutUIOrRepeatedCueRPC(t *testing.T) {
 	if status.State == "faulted" || status.MaxAckLatenessMS > 100 {
 		t.Fatalf("not faithful: %+v", status)
 	}
-	mu.Lock()
-	defer mu.Unlock()
-	var edges []byte
-	for _, frame := range *frames {
-		if frame.Opcode == native.OpRelaySet {
-			edges = append(edges, frame.Payload[1])
+	deadline := time.Now().Add(time.Second)
+	for {
+		mu.Lock()
+		var edges []byte
+		for _, frame := range *frames {
+			if frame.Opcode == native.OpRelaySet {
+				edges = append(edges, frame.Payload[1])
+			}
 		}
-	}
-	if len(edges) != 2 || edges[0] != 1 || edges[1] != 0 {
-		t.Fatalf("wire edges %v", edges)
+		mu.Unlock()
+		if len(edges) == 2 {
+			if edges[0] != 1 || edges[1] != 0 {
+				t.Fatalf("wire edges %v", edges)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("wire edges %v", edges)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 func TestMediaTimelineLateActionFaultsWithoutSendingIt(t *testing.T) {

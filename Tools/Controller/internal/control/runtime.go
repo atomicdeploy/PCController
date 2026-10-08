@@ -240,14 +240,14 @@ type Runtime struct {
 	haveStatusLED          bool
 	statusLEDUpdated       time.Time
 	statusLEDRevision      uint64
+	statusLEDPublished     native.StatusLEDState
+	haveStatusLEDPublished bool
+	statusLEDPublishedAt   time.Time
 	motion                 MotionSnapshot
 	motionRevision         uint64
 	motionIntentToken      [2]uint64
 	motionIntentPending    [2]bool
 	motionIntentDeadline   [2]time.Time
-	statusLEDPublished     native.StatusLEDState
-	haveStatusLEDPublished bool
-	statusLEDPublishedAt   time.Time
 	statusUpdated          time.Time
 	paused                 bool
 	connecting             bool
@@ -350,6 +350,8 @@ var (
 
 const (
 	programStateHeartbeatPeriod  = 2 * time.Second
+	boardLivenessProbePeriod     = 5 * time.Second
+	boardLivenessFailureLimit    = 3
 	defaultReconnectInitialDelay = 500 * time.Millisecond
 	defaultReconnectMaximumDelay = 15 * time.Second
 )
@@ -2563,6 +2565,7 @@ func (runtime *Runtime) attachWhen(result link.OpenResult, allowed func() bool) 
 	go runtime.syncProgramState(runtime.ProgramState(), "connected")
 	go runtime.provisionDefaultStatusProfiles(generation)
 	go runtime.programStateHeartbeat(generation)
+	go runtime.boardLivenessMonitor(generation)
 	return true
 }
 
@@ -2803,6 +2806,82 @@ func (runtime *Runtime) programStateHeartbeat(generation uint64) {
 		}
 		runtime.syncProgramState(runtime.ProgramState(), "heartbeat")
 	}
+}
+
+// boardLivenessMonitor proves that an authenticated application session is
+// still answering requests. A writable COM handle is not sufficient evidence:
+// a wedged MCU can leave the USB-UART adapter and OS handle alive indefinitely.
+// Three bounded failures trigger one DTR pulse followed by normal identity-
+// based reconnect; the replacement connection generation owns the next probe.
+func (runtime *Runtime) boardLivenessMonitor(generation uint64) {
+	ticker := time.NewTicker(boardLivenessProbePeriod)
+	defer ticker.Stop()
+	tracker := boardLivenessFailureTracker{}
+	for range ticker.C {
+		runtime.mu.RLock()
+		active := runtime.generation == generation && runtime.session != nil && !runtime.paused
+		timeout := runtime.options.RequestTimeout
+		runtime.mu.RUnlock()
+		if !active {
+			return
+		}
+		if timeout <= 0 {
+			timeout = 1200 * time.Millisecond
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		_, err := runtime.RefreshStatus(ctx)
+		cancel()
+
+		runtime.mu.RLock()
+		stillActive := runtime.generation == generation && runtime.session != nil && !runtime.paused
+		runtime.mu.RUnlock()
+		if !stillActive {
+			return
+		}
+		if !tracker.observe(err) {
+			continue
+		}
+
+		runtime.publishEvent(Event{
+			Kind: "board.liveness", Lifecycle: "dtr_recovery", State: "unresponsive",
+			Reason: err.Error(),
+			Text:   fmt.Sprintf("board missed %d authenticated status probes; pulsing DTR once", boardLivenessFailureLimit),
+			Metadata: map[string]string{
+				"generation": strconv.FormatUint(generation, 10),
+				"failures":   strconv.Itoa(boardLivenessFailureLimit),
+			},
+		})
+
+		recoveryContext, cancelRecovery := context.WithTimeout(context.Background(), timeout+5*time.Second)
+		pulseErr := runtime.PulseResetFor(recoveryContext, 120*time.Millisecond)
+		cancelRecovery()
+		reconnectContext, cancelReconnect := context.WithTimeout(context.Background(), 10*time.Second)
+		reconnectErr := runtime.Reconnect(reconnectContext, "board liveness recovery after consecutive status timeouts")
+		cancelReconnect()
+		if pulseErr != nil || reconnectErr != nil {
+			runtime.publishEvent(Event{
+				Kind: "board.liveness", Lifecycle: "recovery_failed", State: "unresponsive",
+				Reason: errors.Join(pulseErr, reconnectErr).Error(),
+				Text:   "board DTR recovery did not complete; automatic reconnect remains armed",
+			})
+		}
+		return
+	}
+}
+
+type boardLivenessFailureTracker struct {
+	failures uint8
+}
+
+func (tracker *boardLivenessFailureTracker) observe(err error) bool {
+	if err == nil {
+		tracker.failures = 0
+		return false
+	}
+	if tracker.failures < boardLivenessFailureLimit {
+		tracker.failures++
+	}
+	return tracker.failures >= boardLivenessFailureLimit
 }
 
 func (runtime *Runtime) detach(pause bool) error {

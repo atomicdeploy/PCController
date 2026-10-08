@@ -295,19 +295,56 @@ func (outputs *OutputScheduler) streamStripRainbow(ctx context.Context, count, f
 	})
 }
 
+func nextStripFrameTime(previous, now time.Time, period time.Duration) time.Time {
+	next := previous.Add(period)
+	if !next.After(now) {
+		next = next.Add((now.Sub(next)/period + 1) * period)
+	}
+	return next
+}
+
 func (outputs *OutputScheduler) streamStripEffect(ctx context.Context, count, fps int, renderer stripEffectRenderer) error {
-	ticker := time.NewTicker(time.Second / time.Duration(fps))
-	defer ticker.Stop()
+	period := time.Second / time.Duration(fps)
 	started := time.Now()
+	nextFrame := started
+	consecutiveTimeouts := 0
 	for {
 		// Render from elapsed monotonic time; slow ACKs skip frames rather than queueing stale colors.
 		if err := outputs.sendStripFrame(ctx, renderer(count, time.Since(started))); err != nil {
-			return err
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			if !errors.Is(err, context.DeadlineExceeded) {
+				return err
+			}
+			consecutiveTimeouts++
+			if consecutiveTimeouts == 1 {
+				outputs.target.PublishHostEvent(
+					"output",
+					"strip stream dropped a timed-out frame; continuing from the current animation time",
+				)
+			}
+		} else {
+			if consecutiveTimeouts != 0 {
+				outputs.target.PublishHostEvent(
+					"output",
+					"strip stream recovered after a transient frame timeout",
+				)
+			}
+			consecutiveTimeouts = 0
 		}
+		nextFrame = nextStripFrameTime(nextFrame, time.Now(), period)
+		timer := time.NewTimer(time.Until(nextFrame))
 		select {
 		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
 			return ctx.Err()
-		case <-ticker.C:
+		case <-timer.C:
 		}
 	}
 }

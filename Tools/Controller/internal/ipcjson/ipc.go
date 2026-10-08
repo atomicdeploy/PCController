@@ -1847,19 +1847,45 @@ func (service *Service) dispatch(
 		return response
 	}
 	if err != nil {
-		var rpcError *RPCError
-		var authorityError *control.MediaAuthorityError
-		if errors.As(err, &authorityError) {
-			response.Error = &RPCError{Code: -32009, Message: err.Error(), Data: map[string]any{"kind": authorityError.Kind, "resource": "media_authority", "authority": authorityError.Status}}
-		} else if errors.As(err, &rpcError) {
-			response.Error = rpcError
-		} else {
-			response.Error = &RPCError{Code: -32000, Message: err.Error()}
-		}
+		response.Error = dispatchRPCError(err)
 		return response
 	}
 	response.Result = result
 	return response
+}
+
+func dispatchRPCError(err error) *RPCError {
+	var rpcError *RPCError
+	if errors.As(err, &rpcError) {
+		return rpcError
+	}
+	var authorityError *control.MediaAuthorityError
+	if errors.As(err, &authorityError) {
+		return &RPCError{
+			Code:    -32009,
+			Message: err.Error(),
+			Data: map[string]any{
+				"kind":      authorityError.Kind,
+				"resource":  "media_authority",
+				"authority": authorityError.Status,
+			},
+		}
+	}
+	var busy *control.ResourceBusyError
+	if errors.As(err, &busy) {
+		return &RPCError{
+			Code:    -32009,
+			Message: busy.Error(),
+			Data: map[string]any{
+				"kind":           "resource_busy",
+				"resource":       busy.Resource,
+				"owner":          busy.Owner,
+				"retryable":      true,
+				"retry_after_ms": busy.RetryAfterMS,
+			},
+		}
+	}
+	return &RPCError{Code: -32000, Message: err.Error()}
 }
 
 func (service *Service) primaryPingResult() map[string]any {
@@ -5010,6 +5036,15 @@ func streamWebSocketEventStream(
 	}
 }
 
+func highRateStateEvent(event controller.Event) bool {
+	switch strings.ToLower(strings.TrimSpace(event.Kind)) {
+	case "status_led.changed", "pwm.changed", "animation.frame", "front_panel.segment":
+		return true
+	default:
+		return false
+	}
+}
+
 // eventUpdatesClientSnapshot identifies low-rate authority changes whose
 // complete cached result should follow the event edge. High-rate segment and
 // RGB frames already carry compact patches and intentionally do not amplify a
@@ -5026,15 +5061,6 @@ func eventUpdatesClientSnapshot(event controller.Event) bool {
 		strings.HasPrefix(kind, "program.") ||
 		strings.HasPrefix(kind, "rf.learn") ||
 		strings.HasPrefix(kind, "macro.")
-}
-
-func highRateStateEvent(event controller.Event) bool {
-	switch strings.ToLower(strings.TrimSpace(event.Kind)) {
-	case "status_led.changed", "pwm.changed", "animation.frame", "front_panel.segment":
-		return true
-	default:
-		return false
-	}
 }
 
 func streamWebSocketStatus(

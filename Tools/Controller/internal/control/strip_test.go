@@ -81,6 +81,56 @@ func TestStripRainbowStopsWithoutMoreFrames(t *testing.T) {
 	}
 }
 
+func TestStripStreamRecoversAfterTransientFrameTimeout(t *testing.T) {
+	target := &recordingOutputTarget{
+		failCommands: map[int]error{1: context.DeadlineExceeded},
+	}
+	outputs := NewOutputScheduler(target)
+	defer outputs.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- outputs.streamStripEffect(ctx, 1, 30, func(count int, elapsed time.Duration) []byte {
+			return stripRainbowFrame(count, byte(elapsed.Milliseconds()/16))
+		})
+	}()
+
+	deadline := time.Now().Add(time.Second)
+	for len(target.snapshot()) < 3 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if commands := target.snapshot(); len(commands) < 3 {
+		cancel()
+		<-done
+		t.Fatalf("stream did not continue after timeout: %#v", commands)
+	}
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("stream completion error = %v, want cancellation", err)
+	}
+
+	target.mu.Lock()
+	events := append([]string(nil), target.events...)
+	target.mu.Unlock()
+	if len(events) != 2 ||
+		!strings.Contains(events[0], "dropped a timed-out frame") ||
+		!strings.Contains(events[1], "recovered") {
+		t.Fatalf("recovery events = %#v", events)
+	}
+}
+
+func TestNextStripFrameTimeSkipsBufferedIntervals(t *testing.T) {
+	period := 50 * time.Millisecond
+	previous := time.Unix(100, 0)
+	if got, want := nextStripFrameTime(previous, previous.Add(10*time.Millisecond), period), previous.Add(period); !got.Equal(want) {
+		t.Fatalf("ordinary next frame = %s, want %s", got, want)
+	}
+	if got, want := nextStripFrameTime(previous, previous.Add(121*time.Millisecond), period), previous.Add(150*time.Millisecond); !got.Equal(want) {
+		t.Fatalf("delayed next frame = %s, want %s", got, want)
+	}
+}
+
 func TestStripEffectCatalogUsesExactConfiguredIDs(t *testing.T) {
 	for _, id := range []string{"police", "white-thunder", "converging-red"} {
 		definition, program, ok := stripEffectByID(id)
