@@ -138,6 +138,10 @@ func sparseConfigDocument(value Config) (map[string]any, error) {
 			return nil, errors.New("configuration root is not an object")
 		}
 	}
+	// The schema is intentionally never sparse: its presence is what lets a
+	// later reader distinguish legacy "auto" macro values from the adaptive
+	// execution policy introduced by schema 2.
+	document["schema"] = CurrentConfigSchema
 	return document, nil
 }
 

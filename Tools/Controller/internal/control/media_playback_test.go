@@ -1,7 +1,6 @@
 package control
 
 import (
-	"encoding/binary"
 	"pccontroller.local/controller/internal/link"
 	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/ports"
@@ -15,17 +14,17 @@ func TestMediaPlaybackValidationAndClockPayload(t *testing.T) {
 	if err := value.validate(); err != nil {
 		t.Fatal(err)
 	}
-	payload := mediaClockPayload(value, 250*time.Millisecond)
-	if len(payload) != 14 || payload[0] != 3 || payload[1] != 3 || binary.LittleEndian.Uint32(payload[2:]) != 10_500 || binary.LittleEndian.Uint16(payload[6:]) != 512 {
-		t.Fatalf("clock payload %v", payload)
+	cells := mediaClockCells(value, 250*time.Millisecond)
+	if cells != [4]byte{0x3F, 0x3F, 0x06, 0x3F} {
+		t.Fatalf("clock cells % X", cells)
 	}
 	value.Playing = false
-	if position := binary.LittleEndian.Uint32(mediaClockPayload(value, time.Second)[2:]); position != 10_000 {
-		t.Fatalf("paused position %d", position)
+	if paused := mediaClockCells(value, time.Second); paused != [4]byte{0x3F, 0xBF, 0x06, 0x3F} {
+		t.Fatalf("paused cells % X", paused)
 	}
 	value.Playing = true
-	if position := binary.LittleEndian.Uint32(mediaClockPayload(value, 10*time.Second)[2:]); position != 12_000 {
-		t.Fatalf("duration cap %d", position)
+	if capped := mediaClockCells(value, 10*time.Second); capped != [4]byte{0x3F, 0xBF, 0x06, 0x5B} {
+		t.Fatalf("duration-capped cells % X", capped)
 	}
 	value.Rate = 0
 	if value.validate() == nil {
@@ -79,10 +78,10 @@ func TestMediaPlaybackFormattedSegments(t *testing.T) {
 		{65_500, true, [4]byte{0x3f, 0x06, 0x3f, 0x6d}},    // blinking colon off
 		{6_000_000, true, [4]byte{0x3f, 0x86, 0x66, 0x3f}}, // 01:40 after 99:59
 	} {
-		p := mediaClockPayload(MediaPlaybackUpdate{PositionMS: test.position, Loaded: true, Playing: test.playing, Rate: 1}, 0)
+		p := mediaClockCells(MediaPlaybackUpdate{PositionMS: test.position, Loaded: true, Playing: test.playing, Rate: 1}, 0)
 		for i, expected := range test.cells {
-			if p[10+i] != expected {
-				t.Fatalf("%d cell %d: %x != %x", test.position, i, p[10+i], expected)
+			if p[i] != expected {
+				t.Fatalf("%d cell %d: %x != %x", test.position, i, p[i], expected)
 			}
 		}
 	}
@@ -91,26 +90,31 @@ func TestMediaPlaybackBoardACKAndExpiredProgramClaim(t *testing.T) {
 	runtime := New(Options{RequestTimeout: time.Second})
 	defer runtime.Close()
 	port := newProgramStateWirePort()
-	runtime.attach(link.OpenResult{Session: link.NewForPort("MEDIA-TEST", port), Port: ports.Info{Name: "MEDIA-TEST"}, Hello: native.Hello{Name: "PCController", Capabilities: native.CapabilityProgramState}})
+	runtime.attach(link.OpenResult{Session: link.NewForPort("MEDIA-TEST", port), Port: ports.Info{Name: "MEDIA-TEST"}, Hello: native.Hello{Name: "PCController", Capabilities: native.CapabilityProgramState | native.CapabilityScheduledSegments}})
 	if _, err := runtime.UpdateMediaPlayback(MediaPlaybackUpdate{ClientID: "player:test", Sequence: 1, Loaded: true, Playing: true, PositionMS: 65000, Rate: 1}); err != nil {
 		t.Fatal(err)
 	}
-	waitClock := func(flags byte) {
+	waitClock := func(loaded bool) {
 		t.Helper()
 		timer := time.NewTimer(2 * time.Second)
 		defer timer.Stop()
 		for {
 			select {
 			case frame := <-port.writes:
-				if frame.Opcode == native.OpMediaClock && frame.Payload[1] == flags {
-					return
+				if frame.Opcode == native.OpDisplayText && len(frame.Payload) >= 8 && frame.Payload[0] == native.DisplayScheduledSegments {
+					if loaded && len(frame.Payload) == 12 && frame.Payload[3] == 4 && frame.Payload[4] == native.SegmentRawCells {
+						return
+					}
+					if !loaded && len(frame.Payload) == 8 && frame.Payload[3] == 0 {
+						return
+					}
 				}
 			case <-timer.C:
-				t.Fatalf("no acknowledged media clock flags=%d", flags)
+				t.Fatalf("no acknowledged media display loaded=%v", loaded)
 			}
 		}
 	}
-	waitClock(3)
+	waitClock(true)
 	deadline := time.Now().Add(time.Second)
 	for !runtime.MediaPlayback().BoardSynced && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
@@ -122,7 +126,7 @@ func TestMediaPlaybackBoardACKAndExpiredProgramClaim(t *testing.T) {
 	runtime.mediaPlayback.received = time.Now().Add(-4 * time.Second)
 	runtime.mediaPlayback.mu.Unlock()
 	runtime.mediaPlayback.wake <- struct{}{}
-	waitClock(0)
+	waitClock(false)
 	if runtime.ProgramState().Mode != ProgramIdle {
 		t.Fatal("expired playback retained Running claim")
 	}

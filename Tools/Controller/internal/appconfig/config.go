@@ -31,6 +31,10 @@ import (
 )
 
 const (
+	// CurrentConfigSchema distinguishes the pre-adaptive macro contract from
+	// configurations that intentionally use the living "auto" execution mode.
+	CurrentConfigSchema = 2
+
 	// DefaultWatchInterval bounds the polling fallback when file notifications
 	// are unavailable.
 	DefaultWatchInterval = 150 * time.Millisecond
@@ -45,6 +49,7 @@ const (
 // Config is the persistent host-side configuration root; it never mirrors or
 // replaces the MCU's EEPROM-owned settings.
 type Config struct {
+	Schema        int                     `json:"schema"`
 	Connection    Connection              `json:"connection"`
 	UI            UI                      `json:"ui"`
 	IPC           IPC                     `json:"ipc"`
@@ -94,40 +99,41 @@ type DeviceIdentity struct {
 
 // UI configures host presentation, measurement visibility, and display mirroring.
 type UI struct {
-	AppTitle               string            `json:"app_title"`
-	Tagline                string            `json:"tagline"`
-	Appearance             Appearance        `json:"appearance"`
-	TUIConsole             TUIConsole        `json:"tui_console"`
-	SeparatePortButtons    bool              `json:"separate_port_buttons"`
-	TableLayout            string            `json:"table_layout"`
-	ControlValueColors     bool              `json:"control_value_colors"`
-	PeripheralNames        map[string]string `json:"peripheral_names,omitempty"`
-	SetupComplete          bool              `json:"setup_complete"`
-	WelcomeMelody          string            `json:"welcome_melody"`
-	StatusIntervalMS       int               `json:"status_interval_ms"`
-	MeasurementFreshnessMS int               `json:"measurement_freshness_ms"`
-	IdleStatusIntervalMS   int               `json:"idle_status_interval_ms"`
-	EventLogLimit          int               `json:"event_log_limit"`
-	HistoryHours           int               `json:"history_hours"`
-	HistorySampleMS        int               `json:"history_sample_ms"`
-	VoltageDecimals        int               `json:"voltage_decimals"`
-	CurrentDecimals        int               `json:"current_decimals"`
-	PowerDecimals          int               `json:"power_decimals"`
-	TemperatureDecimals    int               `json:"temperature_decimals"`
-	ShowSupplyVoltage      bool              `json:"show_supply_voltage"`
-	ShowBusVoltage         bool              `json:"show_bus_voltage"`
-	ShowCurrent            bool              `json:"show_current"`
-	ShowPower              bool              `json:"show_power"`
-	ShowTemperatureLED     bool              `json:"show_temperature_led"`
-	ShowTemperatureBT      bool              `json:"show_temperature_bt"`
-	ShowIO                 bool              `json:"show_io"`
-	ShowDiagnostics        bool              `json:"show_diagnostics"`
-	ShowGraphs             bool              `json:"show_graphs"`
-	LCDServiceEnabled      bool              `json:"lcd_service_enabled"`
-	MirrorPromptToLCD      bool              `json:"mirror_prompt_to_lcd"`
-	LCDPromptDebounceMS    int               `json:"lcd_prompt_debounce_ms"`
-	LCDPriorityHoldMS      int               `json:"lcd_priority_hold_ms"`
-	SegmentScroll          SegmentScroll     `json:"segment_scroll"`
+	AppTitle               string                      `json:"app_title"`
+	Tagline                string                      `json:"tagline"`
+	Appearance             Appearance                  `json:"appearance"`
+	TUIConsole             TUIConsole                  `json:"tui_console"`
+	SeparatePortButtons    bool                        `json:"separate_port_buttons"`
+	TableLayout            string                      `json:"table_layout"`
+	ControlValueColors     bool                        `json:"control_value_colors"`
+	PeripheralNames        map[string]string           `json:"peripheral_names,omitempty"`
+	PWMChannels            map[string]PWMChannelConfig `json:"pwm_channels,omitempty"`
+	SetupComplete          bool                        `json:"setup_complete"`
+	WelcomeMelody          string                      `json:"welcome_melody"`
+	StatusIntervalMS       int                         `json:"status_interval_ms"`
+	MeasurementFreshnessMS int                         `json:"measurement_freshness_ms"`
+	IdleStatusIntervalMS   int                         `json:"idle_status_interval_ms"`
+	EventLogLimit          int                         `json:"event_log_limit"`
+	HistoryHours           int                         `json:"history_hours"`
+	HistorySampleMS        int                         `json:"history_sample_ms"`
+	VoltageDecimals        int                         `json:"voltage_decimals"`
+	CurrentDecimals        int                         `json:"current_decimals"`
+	PowerDecimals          int                         `json:"power_decimals"`
+	TemperatureDecimals    int                         `json:"temperature_decimals"`
+	ShowSupplyVoltage      bool                        `json:"show_supply_voltage"`
+	ShowBusVoltage         bool                        `json:"show_bus_voltage"`
+	ShowCurrent            bool                        `json:"show_current"`
+	ShowPower              bool                        `json:"show_power"`
+	ShowTemperatureLED     bool                        `json:"show_temperature_led"`
+	ShowTemperatureBT      bool                        `json:"show_temperature_bt"`
+	ShowIO                 bool                        `json:"show_io"`
+	ShowDiagnostics        bool                        `json:"show_diagnostics"`
+	ShowGraphs             bool                        `json:"show_graphs"`
+	LCDServiceEnabled      bool                        `json:"lcd_service_enabled"`
+	MirrorPromptToLCD      bool                        `json:"mirror_prompt_to_lcd"`
+	LCDPromptDebounceMS    int                         `json:"lcd_prompt_debounce_ms"`
+	LCDPriorityHoldMS      int                         `json:"lcd_priority_hold_ms"`
+	SegmentScroll          SegmentScroll               `json:"segment_scroll"`
 }
 
 // TUIConsole contains local classic-console presentation preferences. These
@@ -418,6 +424,7 @@ type RFTransmit struct {
 // Defaults returns a complete safe host configuration for a new installation.
 func Defaults() Config {
 	return Config{
+		Schema: CurrentConfigSchema,
 		Connection: Connection{
 			VID:                "1A86",
 			PID:                "7523",
@@ -438,6 +445,7 @@ func Defaults() Config {
 			TUIConsole:             productTUIConsoleDefaults(),
 			TableLayout:            "compact",
 			ControlValueColors:     true,
+			PWMChannels:            DefaultPWMChannels(),
 			WelcomeMelody:          "notify",
 			StatusIntervalMS:       500,
 			MeasurementFreshnessMS: DefaultMeasurementFreshnessMS,
@@ -560,13 +568,32 @@ func Load(path string) (Config, [sha256.Size]byte, error) {
 	// Decode over defaults so newly added optional fields receive safe values
 	// without a schema migration, while explicitly configured false/zero values
 	// are still honored in JSON, YAML, and TOML.
+	// Decode once without defaults to retain the on-disk schema signal. Schema
+	// zero is the legacy unversioned format; decoding over Defaults alone would
+	// otherwise make it indistinguishable from a newly written configuration.
+	source := Config{}
+	if err := decodeConfig(path, content, &source); err != nil {
+		return Config{}, [sha256.Size]byte{}, fmt.Errorf("parse %s: %w", path, err)
+	}
 	value := Defaults()
 	if err := decodeConfig(path, content, &value); err != nil {
 		return Config{}, [sha256.Size]byte{}, fmt.Errorf("parse %s: %w", path, err)
 	}
+	sourceSchema := source.Schema
+	if sourceSchema == 0 {
+		sourceSchema = 1
+	}
+	if sourceSchema < 1 || sourceSchema > CurrentConfigSchema {
+		return Config{}, [sha256.Size]byte{}, fmt.Errorf(
+			"validate %s: unsupported configuration schema %d",
+			path,
+			sourceSchema,
+		)
+	}
+	value.Schema = CurrentConfigSchema
 	value.RF = canonicalizeRFConfig(value.RF)
 	value.HostMenus = normalizeHostMenus(value.HostMenus)
-	normalizeMacros(value.Macros)
+	normalizeMacros(value.Macros, sourceSchema)
 	normalizeMeasurementFreshness(&value.UI)
 	if err := normalizeProgramming(&value.Programming); err != nil {
 		return Config{}, [sha256.Size]byte{}, fmt.Errorf("validate %s: programming.firmware_features: %w", path, err)
@@ -609,9 +636,10 @@ func LoadOrCreate(path string) (Config, [sha256.Size]byte, error) {
 
 // Write validates and persists a host configuration with protected file permissions.
 func Write(path string, value Config) error {
+	value.Schema = CurrentConfigSchema
 	value.RF = canonicalizeRFConfig(value.RF)
 	value.HostMenus = normalizeHostMenus(value.HostMenus)
-	normalizeMacros(value.Macros)
+	normalizeMacros(value.Macros, CurrentConfigSchema)
 	if err := normalizeProgramming(&value.Programming); err != nil {
 		return fmt.Errorf("programming.firmware_features: %w", err)
 	}
@@ -665,13 +693,17 @@ func Write(path string, value Config) error {
 	return nil
 }
 
-// normalizeMacros makes the living alpha contract explicit. An omitted policy
-// means adaptive execution; it does not imply that the effect is board-owned
-// or host-owned.
-func normalizeMacros(macros []Macro) {
+// normalizeMacros preserves the execution behavior of unversioned/schema-1
+// configurations while making the schema-2 living alpha contract explicit.
+// Legacy omitted/"auto" values described the only scheduler that existed and
+// therefore become "host". In schema 2, omitted means adaptive execution and
+// "auto" is a durable policy rather than an ownership or storage location.
+func normalizeMacros(macros []Macro, sourceSchema int) {
 	for index := range macros {
 		mode := strings.ToLower(strings.TrimSpace(macros[index].Mode))
-		if mode == "" {
+		if sourceSchema < CurrentConfigSchema && (mode == "" || mode == "auto") {
+			mode = "host"
+		} else if mode == "" {
 			mode = "auto"
 		}
 		macros[index].Mode = mode
@@ -767,6 +799,9 @@ func (value Config) Validate() error {
 		if name == "" || utf8.RuneCountInString(name) > 64 || !printableText(name) {
 			return fmt.Errorf("ui.peripheral_names[%q] must be 1..64 printable characters", key)
 		}
+	}
+	if err := ValidatePWMChannels(value.UI.PWMChannels); err != nil {
+		return err
 	}
 	if err := value.validateBoardProfiles(); err != nil {
 		return err

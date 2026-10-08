@@ -698,7 +698,7 @@ func EventStreamForKind(kind string) string {
 		return EventStreamTelemetry
 	case "rx", "tx", "opcode":
 		return EventStreamDebug
-	case "front_panel.segment", "status_led.changed", "pwm.changed", "buzzer.note", "illumination.changed", "settings.changed", "peripherals.changed", "motion.changed":
+	case "front_panel.segment", "status_led.changed", "pwm.changed", "buzzer.note", "illumination.changed", "settings.changed", "peripherals.changed", "motion.changed", "melodies.changed":
 		return EventStreamState
 	}
 	if strings.HasPrefix(kind, "measurement.") || strings.HasSuffix(kind, ".measurement") ||
@@ -1860,6 +1860,9 @@ func (runtime *Runtime) requestAtGeneration(
 	expected ...byte,
 ) (native.Frame, error) {
 	if err := runtime.rejectMediaTimelineConflict(ctx, opcode); err != nil {
+		return native.Frame{}, err
+	}
+	if err := runtime.rejectExclusiveMediaControl(ctx, opcode); err != nil {
 		return native.Frame{}, err
 	}
 	if err := runtime.rejectEmergencyStopCommand(opcode, payload); err != nil {

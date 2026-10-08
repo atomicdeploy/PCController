@@ -84,6 +84,9 @@ device identity or interface settings.
   resource constraints and deliberate host/firmware ownership choices.
 - [Firmware Autonomy and Storage](Firmware-Autonomy-and-Storage.md) — the living
   board/host execution boundary, storage map, and alpha contract policy.
+- [Media Timing and MCU Expansion](Media-Timing-and-MCU-Expansion.md) — prepared
+  clock boundaries, compaction history, expanded-target restoration and strip
+  diagnostic backlog with existing issue ownership.
 - [Local Library Variant Comparison](Local-Library-Variant-Comparison.md) —
   privacy-safe comparison of the three reviewed helper variants and the parts
   retained, improved, or deliberately excluded.

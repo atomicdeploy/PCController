@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"mime"
 	"net"
 	"net/http"
@@ -325,22 +326,23 @@ func appActionTracksOutcome(registry *hostui.InstanceRegistry, action hostui.App
 // browserUISettings is the narrow persistent host-owned subset exposed to the
 // browser. Board EEPROM settings remain on the independent board command path.
 type browserUISettings struct {
-	AppTitle               string                           `json:"app_title"`
-	Tagline                string                           `json:"tagline"`
-	SetupComplete          bool                             `json:"setup_complete"`
-	WelcomeMelody          string                           `json:"welcome_melody"`
-	StatusIntervalMS       int                              `json:"status_interval_ms"`
-	MeasurementFreshnessMS int                              `json:"measurement_freshness_ms"`
-	Appearance             browserAppearance                `json:"appearance"`
-	AppearanceETag         string                           `json:"appearance_etag"`
-	SegmentScroll          appconfig.SegmentScroll          `json:"segment_scroll"`
-	PeripheralNames        map[string]string                `json:"peripheral_names"`
-	Peripherals            []appconfig.PeripheralDescriptor `json:"peripherals"`
-	Controls               []appconfig.ControlDescriptor    `json:"controls"`
-	Changed                *bool                            `json:"changed,omitempty"`
-	ChangedFields          []string                         `json:"changed_fields,omitempty"`
-	Before                 map[string]any                   `json:"before,omitempty"`
-	After                  map[string]any                   `json:"after,omitempty"`
+	AppTitle               string                                `json:"app_title"`
+	Tagline                string                                `json:"tagline"`
+	SetupComplete          bool                                  `json:"setup_complete"`
+	WelcomeMelody          string                                `json:"welcome_melody"`
+	StatusIntervalMS       int                                   `json:"status_interval_ms"`
+	MeasurementFreshnessMS int                                   `json:"measurement_freshness_ms"`
+	Appearance             browserAppearance                     `json:"appearance"`
+	AppearanceETag         string                                `json:"appearance_etag"`
+	SegmentScroll          appconfig.SegmentScroll               `json:"segment_scroll"`
+	PeripheralNames        map[string]string                     `json:"peripheral_names"`
+	PWMChannels            map[string]appconfig.PWMChannelConfig `json:"pwm_channels"`
+	Peripherals            []appconfig.PeripheralDescriptor      `json:"peripherals"`
+	Controls               []appconfig.ControlDescriptor         `json:"controls"`
+	Changed                *bool                                 `json:"changed,omitempty"`
+	ChangedFields          []string                              `json:"changed_fields,omitempty"`
+	Before                 map[string]any                        `json:"before,omitempty"`
+	After                  map[string]any                        `json:"after,omitempty"`
 }
 
 type peripheralSettings struct {
@@ -535,6 +537,36 @@ func (service *Service) dispatch(
 		return response
 	}
 	// Primary discovery must not queue behind a long board, firmware, or shell
+	if request.ClientID != "" {
+		if service.AppInstances == nil {
+			response.Error = &RPCError{Code: -32000, Message: "app instance registry is unavailable"}
+			return response
+		}
+		if _, ok := service.AppInstances.Get(request.ClientID); !ok {
+			response.Error = &RPCError{Code: -32000, Message: "register client before sending client-scoped commands"}
+			return response
+		}
+		ctx = control.WithMediaActor(ctx, request.ClientID)
+	}
+	if requestCapability(request.Method, request.Params) == capabilityBoard &&
+		request.Method != "controller.media.authority.change" && request.Method != "controller.media.playback.update" && request.Method != "controller.media.timeline.prepare" {
+		// Always admit the emergency latch, not an anonymous release during production.
+		var stop struct {
+			Active bool `json:"active"`
+		}
+		_ = json.Unmarshal(request.Params, &stop)
+		if request.Method != "controller.estop.set" || !stop.Active {
+			if err := service.Client.CheckMediaControlAuthority(ctx); err != nil {
+				var denied *control.MediaAuthorityError
+				if errors.As(err, &denied) {
+					response.Error = &RPCError{Code: -32009, Message: err.Error(), Data: map[string]any{"kind": denied.Kind, "resource": "media_authority", "authority": denied.Status}}
+					return response
+				}
+				response.Error = &RPCError{Code: -32000, Message: err.Error()}
+				return response
+			}
+		}
+	}
 	service.configureAutomationActions()
 	// operation holding service.mu. Secondary instances use this bounded ping
 	// before deciding whether they may approach the local serial device.
@@ -636,6 +668,26 @@ func (service *Service) dispatch(
 	switch request.Method {
 	case "controller.media.playback.get":
 		result = service.Client.MediaPlayback()
+	case "controller.media.authority.get":
+		result = service.Client.MediaAuthority()
+	case "controller.media.authority.change":
+		var params controller.MediaAuthorityRequest
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			if service.AppInstances == nil {
+				err = errors.New("app instance registry is unavailable")
+			} else if instance, ok := service.AppInstances.Get(params.ClientID); !ok {
+				err = errors.New("register client before negotiating authority")
+			} else {
+				params.Label = instance.Values["host"]
+				if params.Label == "" {
+					params.Label = instance.Values["application"]
+				}
+				if params.Label == "" {
+					params.Label = params.ClientID
+				}
+				result, err = service.Client.ChangeMediaAuthority(params)
+			}
+		}
 	case "controller.media.timeline.get":
 		result = service.Client.MediaTimeline()
 	case "controller.media.timeline.prepare":
@@ -906,7 +958,10 @@ func (service *Service) dispatch(
 	case "controller.command.catalog":
 		result = service.Client.CommandCatalog()
 	case "controller.melodies.list":
-		result = service.Client.ConfiguredMelodies()
+		// The primary host can expose a shared-runtime facade whose client-side
+		// cache intentionally owns no configuration. Read the watched host
+		// configuration so every RPC response reflects the current catalog.
+		result = appconfig.EffectiveMelodies(service.hostConfig())
 	case "controller.program_state.get", "controller.program-state.get":
 		result = service.Client.ProgramState()
 	case "controller.program_state.set", "controller.program-state.set":
@@ -933,7 +988,7 @@ func (service *Service) dispatch(
 			result = status
 		}
 	case "controller.pwm.values":
-		result, err = service.Client.PWMValues(ctx)
+		result, err = service.pwmValues(ctx)
 	case "controller.illumination.get":
 		result, err = service.Client.Illumination(ctx)
 	case "controller.illumination.set":
@@ -962,21 +1017,53 @@ func (service *Service) dispatch(
 		}
 	case "controller.pwm.set":
 		var params struct {
-			Channel int `json:"channel"`
-			Value   int `json:"value"`
+			Channel  int      `json:"channel"`
+			Percent  *float64 `json:"percent,omitempty"`
+			RawValue *int     `json:"raw_value,omitempty"`
 		}
 		if err = decodeParams(request.Params, &params); err == nil {
-			if params.Channel < 0 || params.Channel > 15 || params.Value < 0 || params.Value > 4095 {
-				err = &RPCError{Code: -32602, Message: "channel must be 0..15 and value must be 0..4095"}
-			} else if err = service.rejectLockedPeripheral(fmt.Sprintf("pwm.%d", params.Channel)); err == nil {
-				if err = service.Client.SetPWMChannel(ctx, byte(params.Channel), uint16(params.Value)); err == nil {
-					result, err = service.Client.PWMValues(ctx)
+			if params.Channel < 0 || params.Channel > 15 {
+				err = &RPCError{Code: -32602, Message: "channel must be 0..15"}
+			} else if params.Percent != nil && params.RawValue != nil {
+				err = &RPCError{Code: -32602, Message: "supply percent or raw_value, not both"}
+			} else {
+				raw := -1
+				switch {
+				case params.Percent != nil:
+					if math.IsNaN(*params.Percent) || math.IsInf(*params.Percent, 0) || *params.Percent < 0 || *params.Percent > 100 {
+						err = &RPCError{Code: -32602, Message: "percent must be a finite value from 0 to 100"}
+					} else {
+						raw = int(appconfig.PWMRawFromPercent(*params.Percent, appconfig.PWMChannel(service.hostConfig().UI, params.Channel)))
+					}
+				case params.RawValue != nil:
+					raw = *params.RawValue
+				default:
+					err = &RPCError{Code: -32602, Message: "percent or raw_value is required"}
+				}
+				if err == nil && (raw < 0 || raw > 4095) {
+					err = &RPCError{Code: -32602, Message: "raw_value must be 0..4095"}
+				}
+				if err == nil {
+					err = service.rejectLockedPeripheral(fmt.Sprintf("pwm.%d", params.Channel))
+				}
+				if err == nil {
+					if err = service.Client.SetPWMChannel(ctx, byte(params.Channel), uint16(raw)); err == nil {
+						result, err = service.pwmValues(ctx)
+					}
 				}
 			}
 		}
+	case "controller.pwm.channel.configure":
+		var params struct {
+			Channel int `json:"channel"`
+			appconfig.PWMChannelConfig
+		}
+		if err = decodeParams(request.Params, &params); err == nil {
+			result, err = service.updatePWMChannelConfig(params.Channel, params.PWMChannelConfig)
+		}
 	case "controller.pwm.off":
 		if err = service.Client.AllPWMOff(ctx); err == nil {
-			result, err = service.Client.PWMValues(ctx)
+			result, err = service.pwmValues(ctx)
 		}
 	case "controller.status_led.set":
 		var params struct {
@@ -1772,6 +1859,18 @@ func dispatchRPCError(err error) *RPCError {
 	if errors.As(err, &rpcError) {
 		return rpcError
 	}
+	var authorityError *control.MediaAuthorityError
+	if errors.As(err, &authorityError) {
+		return &RPCError{
+			Code:    -32009,
+			Message: err.Error(),
+			Data: map[string]any{
+				"kind":      authorityError.Kind,
+				"resource":  "media_authority",
+				"authority": authorityError.Status,
+			},
+		}
+	}
 	var busy *control.ResourceBusyError
 	if errors.As(err, &busy) {
 		return &RPCError{
@@ -1883,6 +1982,9 @@ func (service *Service) setNetworkPeers(raw json.RawMessage) (networkPeersConfig
 
 func (service *Service) browserUISettings() browserUISettings {
 	ui := service.hostConfig().UI
+	peripherals := appconfig.PeripheralDescriptors()
+	controls := appconfig.ControlDescriptors(ui.PeripheralNames)
+	appconfig.ApplyPWMChannelConfig(peripherals, controls, ui)
 	return browserUISettings{
 		AppTitle:               productidentity.Title(ui.AppTitle),
 		Tagline:                ui.Tagline,
@@ -1894,9 +1996,18 @@ func (service *Service) browserUISettings() browserUISettings {
 		AppearanceETag:         appearanceETag(ui.Appearance),
 		SegmentScroll:          ui.SegmentScroll,
 		PeripheralNames:        clonePeripheralNames(ui.PeripheralNames),
-		Peripherals:            appconfig.PeripheralDescriptors(),
-		Controls:               appconfig.ControlDescriptors(ui.PeripheralNames),
+		PWMChannels:            clonePWMChannels(ui.PWMChannels),
+		Peripherals:            peripherals,
+		Controls:               controls,
 	}
+}
+
+func clonePWMChannels(channels map[string]appconfig.PWMChannelConfig) map[string]appconfig.PWMChannelConfig {
+	result := make(map[string]appconfig.PWMChannelConfig, len(channels))
+	for key, value := range channels {
+		result[key] = value
+	}
+	return result
 }
 
 func clonePeripheralNames(names map[string]string) map[string]string {
@@ -1931,6 +2042,7 @@ func (service *Service) peripheralSettings() peripheralSettings {
 	names := config.UI.PeripheralNames
 	profileDescriptor, profile := service.activeBoardProfile()
 	peripherals, controls := appconfig.ProfileDescriptors(profileDescriptor.Mode, profile.ExposeRawRelays, names, profile.Presentation)
+	appconfig.ApplyPWMChannelConfig(peripherals, controls, config.UI)
 	snapshot := service.Client.Snapshot()
 	stripEffects := snapshot.StripEffects
 	return peripheralSettings{
@@ -2313,7 +2425,7 @@ func requestCapability(method string, params json.RawMessage) string {
 	case "controller.display.send", "controller.opcode.send",
 		"controller.opcode.exchange", "controller.opcode.request", "controller.action.invoke":
 		return capabilityBoard
-	case "controller.estop.set", "controller.media.playback.update", "controller.media.timeline.prepare":
+	case "controller.estop.set", "controller.media.playback.update", "controller.media.timeline.prepare", "controller.media.authority.change":
 		return capabilityBoard
 	case "controller.host_menu.config", "controller.host_menu.config.get",
 		"controller.ui.config", "controller.ui.config.get",
@@ -2371,7 +2483,7 @@ func requestCapability(method string, params json.RawMessage) string {
 			}
 		}
 		return capabilityHostConfig
-	case "controller.ping", "controller.snapshot", "controller.media.playback.get", "controller.media.timeline.get", "controller.estop.get", "controller.port.process", "controller.port.owner", "controller.session.snapshot",
+	case "controller.ping", "controller.snapshot", "controller.media.playback.get", "controller.media.authority.get", "controller.media.timeline.get", "controller.estop.get", "controller.port.process", "controller.port.owner", "controller.session.snapshot",
 		"controller.session.snapshot.last", "controller.status",
 		"controller.front_panel", "controller.front-panel",
 		"controller.command.catalog", "controller.melodies.list", "controller.program_state.get", "controller.program-state.get",
@@ -2390,6 +2502,8 @@ func requestCapability(method string, params json.RawMessage) string {
 		return capabilityBridgeCalls
 	case "controller.discovery.config.set":
 		return capabilityIntegrations
+	case "controller.pwm.channel.configure":
+		return capabilityHostConfig
 	case "controller.program_state.set", "controller.program-state.set":
 		return capabilityBoard
 	default:
@@ -3019,7 +3133,7 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 			if !authorizeHTTPCapability(writer, request, service, capabilityRead) {
 				return
 			}
-			values, err := service.Client.PWMValues(request.Context())
+			values, err := service.pwmValues(request.Context())
 			if err != nil {
 				writeHTTPJSON(writer, http.StatusConflict, map[string]string{"error": err.Error()})
 				return
@@ -3037,8 +3151,9 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 		}
 		if request.Method == http.MethodPut {
 			var params struct {
-				Channel int `json:"channel"`
-				Value   int `json:"value"`
+				Channel  int      `json:"channel"`
+				Percent  *float64 `json:"percent,omitempty"`
+				RawValue *int     `json:"raw_value,omitempty"`
 			}
 			decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, maxMessage))
 			decoder.DisallowUnknownFields()
@@ -3046,11 +3161,25 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
 				return
 			}
-			if params.Channel < 0 || params.Channel > 15 || params.Value < 0 || params.Value > 4095 {
-				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": "channel must be 0..15 and value must be 0..4095"})
+			if params.Channel < 0 || params.Channel > 15 || params.Percent == nil && params.RawValue == nil || params.Percent != nil && params.RawValue != nil {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": "channel must be 0..15 and exactly one of percent or raw_value is required"})
 				return
 			}
-			if err := service.Client.SetPWMChannel(request.Context(), byte(params.Channel), uint16(params.Value)); err != nil {
+			raw := -1
+			if params.Percent != nil {
+				if math.IsNaN(*params.Percent) || math.IsInf(*params.Percent, 0) || *params.Percent < 0 || *params.Percent > 100 {
+					writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": "percent must be a finite value from 0 to 100"})
+					return
+				}
+				raw = int(appconfig.PWMRawFromPercent(*params.Percent, appconfig.PWMChannel(service.hostConfig().UI, params.Channel)))
+			} else {
+				raw = *params.RawValue
+			}
+			if raw < 0 || raw > appconfig.PWMMaximumValue {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": "raw_value must be 0..4095"})
+				return
+			}
+			if err := service.Client.SetPWMChannel(request.Context(), byte(params.Channel), uint16(raw)); err != nil {
 				writeHTTPJSON(writer, http.StatusConflict, map[string]string{"error": err.Error()})
 				return
 			}
@@ -3058,12 +3187,48 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 			writeHTTPJSON(writer, http.StatusConflict, map[string]string{"error": err.Error()})
 			return
 		}
-		values, err := service.Client.PWMValues(request.Context())
+		values, err := service.pwmValues(request.Context())
 		if err != nil {
 			writeHTTPJSON(writer, http.StatusConflict, map[string]string{"error": err.Error()})
 			return
 		}
 		writeHTTPJSON(writer, http.StatusOK, values)
+	})
+	mux.HandleFunc("/api/pwm/channel", func(writer http.ResponseWriter, request *http.Request) {
+		if !authorizeHTTPRequest(writer, request, service) {
+			return
+		}
+		if request.Method == http.MethodGet {
+			if !authorizeHTTPCapability(writer, request, service, capabilityRead) {
+				return
+			}
+			writeHTTPJSON(writer, http.StatusOK, clonePWMChannels(service.hostConfig().UI.PWMChannels))
+			return
+		}
+		if request.Method != http.MethodPut {
+			writer.Header().Set("Allow", http.MethodGet+", "+http.MethodPut)
+			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !authorizeHTTPCapability(writer, request, service, capabilityHostConfig) {
+			return
+		}
+		var params struct {
+			Channel int `json:"channel"`
+			appconfig.PWMChannelConfig
+		}
+		decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, maxMessage))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&params); err != nil {
+			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		value, err := service.updatePWMChannelConfig(params.Channel, params.PWMChannelConfig)
+		if err != nil {
+			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		writeHTTPJSON(writer, http.StatusOK, value)
 	})
 	mux.HandleFunc("/api/commands", func(writer http.ResponseWriter, request *http.Request) {
 		if !authorizeHTTPRequest(writer, request, service) {
@@ -4909,7 +5074,7 @@ func streamWebSocketStatus(
 		_ = write(wsNotification{
 			JSONRPC: Version,
 			Method:  "controller.error",
-			Params:  map[string]string{"source": "status", "error": err.Error()},
+			Params:  map[string]any{"source": "status", "error": err.Error(), "board_connected": client.Snapshot().Connected},
 		})
 		return
 	}
@@ -4918,7 +5083,7 @@ func streamWebSocketStatus(
 			if write(wsNotification{
 				JSONRPC: Version,
 				Method:  "controller.error",
-				Params:  map[string]string{"source": "status", "error": update.Error},
+				Params:  map[string]any{"source": "status", "error": update.Error, "board_connected": client.Snapshot().Connected},
 			}) != nil {
 				return
 			}

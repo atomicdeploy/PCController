@@ -2,7 +2,6 @@ package control
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"math"
@@ -39,11 +38,13 @@ type MediaPlaybackSnapshot struct {
 	Timeline         MediaTimelineStatus `json:"timeline"`
 }
 type mediaPlaybackState struct {
-	mu       sync.Mutex
-	snapshot MediaPlaybackSnapshot
-	received time.Time
-	running  bool
-	wake     chan struct{}
+	operation sync.Mutex
+	authority MediaAuthorityStatus
+	mu        sync.Mutex
+	snapshot  MediaPlaybackSnapshot
+	received  time.Time
+	running   bool
+	wake      chan struct{}
 }
 
 func (value MediaPlaybackUpdate) validate() error {
@@ -89,6 +90,8 @@ func (runtime *Runtime) mediaTimelineClock() (MediaPlaybackUpdate, time.Time) {
 	return copyMediaUpdate(runtime.mediaPlayback.snapshot.MediaPlaybackUpdate), runtime.mediaPlayback.received
 }
 func (runtime *Runtime) UpdateMediaPlayback(value MediaPlaybackUpdate) (MediaPlaybackSnapshot, error) {
+	runtime.mediaPlayback.operation.Lock()
+	defer runtime.mediaPlayback.operation.Unlock()
 	if err := value.validate(); err != nil {
 		return runtime.MediaPlayback(), err
 	}
@@ -108,6 +111,10 @@ func (runtime *Runtime) UpdateMediaPlayback(value MediaPlaybackUpdate) (MediaPla
 	}
 	state := &runtime.mediaPlayback
 	state.mu.Lock()
+	if err := runtime.authorityAdmissionLocked(value.ClientID); err != nil {
+		state.mu.Unlock()
+		return runtime.MediaPlayback(), err
+	}
 	fresh := !state.received.IsZero() && time.Since(state.received) < mediaPlaybackLease
 	previous := state.snapshot
 	if fresh && previous.ClientID != value.ClientID && previous.Loaded {
@@ -119,6 +126,16 @@ func (runtime *Runtime) UpdateMediaPlayback(value MediaPlaybackUpdate) (MediaPla
 		return runtime.MediaPlayback(), errors.New("stale media playback sequence")
 	}
 	state.received = time.Now()
+	if value.Loaded && state.authority.OwnerID == "" {
+		state.authority.OwnerID = value.ClientID
+		state.authority.OwnerLabel = value.ClientID
+		state.authority.Revision++
+	}
+	if !value.Loaded && state.authority.OwnerID == value.ClientID && !state.authority.Exclusive {
+		state.authority.OwnerID = ""
+		state.authority.OwnerLabel = ""
+		state.authority.Revision++
+	}
 	state.snapshot = MediaPlaybackSnapshot{MediaPlaybackUpdate: copyMediaUpdate(value), ReceivedAt: state.received.UTC(), Connected: true,
 		BoardSynced: previous.BoardSynced, BoardError: previous.BoardError, BoardSyncedAt: previous.BoardSyncedAt,
 		BoardSequence: previous.BoardSequence, BoardRoundTripMS: previous.BoardRoundTripMS}
@@ -155,7 +172,7 @@ func mediaPlaybackEventState(value MediaPlaybackUpdate) string {
 	}
 	return "paused"
 }
-func mediaClockPayload(value MediaPlaybackUpdate, age time.Duration) []byte {
+func mediaClockCells(value MediaPlaybackUpdate, age time.Duration) [4]byte {
 	position := value.PositionMS
 	if value.Playing {
 		position += uint64(float64(age.Milliseconds()) * value.Rate)
@@ -166,17 +183,6 @@ func mediaClockPayload(value MediaPlaybackUpdate, age time.Duration) []byte {
 	if position > math.MaxUint32 {
 		position = math.MaxUint32
 	}
-	payload := make([]byte, 14)
-	payload[0] = 3
-	if value.Loaded {
-		payload[1] |= 1
-	}
-	if value.Playing {
-		payload[1] |= 2
-	}
-	binary.LittleEndian.PutUint32(payload[2:6], uint32(position))
-	binary.LittleEndian.PutUint16(payload[6:8], uint16(math.Round(value.Rate*256)))
-	binary.LittleEndian.PutUint16(payload[8:10], uint16(mediaPlaybackLease/time.Millisecond))
 	seconds := position / 1000
 	left, right := seconds/60, seconds%60
 	if left > 99 {
@@ -186,11 +192,17 @@ func mediaClockPayload(value MediaPlaybackUpdate, age time.Duration) []byte {
 		left = 99
 	}
 	digits := [10]byte{0x3f, 0x06, 0x5b, 0x4f, 0x66, 0x6d, 0x7d, 0x07, 0x7f, 0x6f}
-	payload[10], payload[11], payload[12], payload[13] = digits[left/10], digits[left%10], digits[right/10], digits[right%10]
+	cells := [4]byte{digits[left/10], digits[left%10], digits[right/10], digits[right%10]}
 	if !value.Playing || position%1000 < 500 {
-		payload[11] |= 0x80
+		cells[1] |= 0x80
 	}
-	return payload
+	return cells
+}
+func mediaDisplayPayload(value MediaPlaybackUpdate, age time.Duration) []byte {
+	if !value.Loaded {
+		return native.ScheduledSegmentReleasePayload()
+	}
+	return native.ScheduledSegmentRawPayload(mediaClockCells(value, age), uint16(mediaPlaybackLease/time.Millisecond))
 }
 func (runtime *Runtime) runMediaPlayback() {
 	state := &runtime.mediaPlayback
@@ -227,7 +239,7 @@ func (runtime *Runtime) runMediaPlayback() {
 			claimed = playing
 		}
 		runtime.mu.RLock()
-		connected, generation := runtime.session != nil, runtime.generation
+		connected, generation, capabilities := runtime.session != nil, runtime.generation, runtime.hello.Capabilities
 		runtime.mu.RUnlock()
 		changed := value.Sequence != lastSequence || value.Playing != lastPlaying || value.Loaded != lastLoaded || generation != lastGeneration
 		if connected && time.Now().After(retryAt) && (changed || time.Since(lastSent) >= 200*time.Millisecond) {
@@ -238,7 +250,16 @@ func (runtime *Runtime) runMediaPlayback() {
 			if transit > 100*time.Millisecond {
 				transit = 100 * time.Millisecond
 			}
-			err := runtime.Command(ctx, native.OpMediaClock, mediaClockPayload(value, time.Since(received)+transit))
+			var err error
+			if capabilities&native.CapabilityScheduledSegments == 0 {
+				err = errors.New("connected firmware does not advertise scheduled segment messages; flash the current firmware first")
+			} else {
+				// Playback display refresh is an owned internal presentation. It
+				// must neither be recorded as a timeline action nor be rejected as
+				// a competing anonymous live display command.
+				commandContext := context.WithValue(WithMediaActor(ctx, value.ClientID), mediaTimelineContextKey{}, true)
+				err = runtime.Command(commandContext, native.OpDisplayText, mediaDisplayPayload(value, time.Since(received)+transit))
+			}
 			cancel()
 			lastSent = time.Now()
 			lastPlaying, lastLoaded, lastGeneration, lastSequence = value.Playing, value.Loaded, generation, value.Sequence

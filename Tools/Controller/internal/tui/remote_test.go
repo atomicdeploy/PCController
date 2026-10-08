@@ -37,8 +37,8 @@ func TestRemoteSnapshotPollingIsBackstopNotRenderLoop(t *testing.T) {
 
 	model.remote = nil
 	model.preview = &snapshot
-	if interval := model.statusInterval(); interval != 125*time.Millisecond {
-		t.Fatalf("local door-open interval=%s, want 125ms", interval)
+	if interval := model.statusInterval(); interval != 250*time.Millisecond {
+		t.Fatalf("local door-open interval=%s, want configured 250ms event-driven cadence", interval)
 	}
 }
 

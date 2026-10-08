@@ -310,8 +310,33 @@ void testBoardAndPersistence() {
     require(response[0].opcode == pccontroller::wire::ErrorResponse,
             "scheduled marquee accepted reserved option bits");
 
+    const std::vector<std::uint8_t> rawCells{
+        5, 80, 0, 4, 0x20, 0xB8, 0x0B, 0, 0x3F, 0x86, 0x6D, 0x7D};
     response = board.handle(
-        {pccontroller::wire::Buzzer, 55, {40, 0, 0xB8, 0x01}});
+        {pccontroller::wire::DisplayText, 55, rawCells});
+    require(response[0].opcode == pccontroller::wire::Ack,
+            "raw scheduled cells were not acknowledged");
+    pushed = board.tick();
+    segmentPush = findOpcode(pushed, pccontroller::wire::SegmentChanged);
+    require(segmentPush != nullptr && segmentPush->payload.size() == 5 &&
+                std::equal(rawCells.begin() + 8, rawCells.end(),
+                           segmentPush->payload.begin()),
+            "raw scheduled cells were re-encoded before mirror publication");
+    response = board.handle(
+        {pccontroller::wire::FrontPanelGet, 56, {}});
+    require(response[0].opcode == pccontroller::wire::FrontPanelResponse &&
+                std::equal(rawCells.begin() + 8, rawCells.end(),
+                           response[0].payload.begin() + 1),
+            "front-panel snapshot did not preserve raw scheduled cells");
+    response = board.handle(
+        {pccontroller::wire::DisplayText, 57,
+         {5, 80, 0, 0, 0, 0, 0, 0}});
+    require(response[0].opcode == pccontroller::wire::Ack &&
+                displays.state().segments == "tLED",
+            "raw scheduled release did not restore the local page");
+
+    response = board.handle(
+        {pccontroller::wire::Buzzer, 58, {40, 0, 0xB8, 0x01}});
     require(response[0].opcode == pccontroller::wire::Ack,
             "buzzer note was not acknowledged");
     pushed = board.tick();

@@ -560,7 +560,9 @@ relay off
 relay test [MS]                        # default 250; 0 stops
 pwm get
 pwm off                                # emergency clear of all 16 channels
-pwm set CHANNEL VALUE                  # channel 0..15, logical value 0..4095
+pwm set CHANNEL PERCENT                # logical 0..100%, mapped by that channel's curve
+pwm raw CHANNEL VALUE                  # explicit hardware duty 0..4095
+pwm configure CHANNEL TYPE CURVE [GAMMA] [ICON]
 rgb [color] #RGB|#RRGGBB [BRIGHTNESS]
 rgb [color] R G B [BRIGHTNESS]
 rgb effect list
@@ -661,11 +663,14 @@ remain available for user relays R5-R8. Existing direct R1-R4 mappings can
 still be listed and should be removed or remapped.
 
 PWM is direct and per-channel; there is no global operating mode or autonomous
-demonstration state. `pwm get` returns controller availability, the selected
-channel, and all sixteen logical values. `pwm set` accepts channel `0..15`
-(including the documented user/enclosure/power/status aliases) and value
-`0..4095`. `pwm off` clears every channel, including enclosure, power, and
-status RGB, and is intended as an emergency all-output clear.
+demonstration state. `pwm get` returns controller availability, exact raw
+readback, logical percentages, and each channel's output identity/curve.
+`pwm set` accepts channel `0..15` (including documented aliases) and logical
+percentage `0..100`; lighting defaults to a perceptual gamma 2.2 response.
+`pwm raw` is the explicit `0..4095` diagnostic/actuator path and never applies a
+curve. `pwm configure` selects `lighting`, `indicator`, `motor`, or `general`
+and `gamma` or `linear` per channel. `pwm off` clears every channel, including
+enclosure, power, and status RGB, and is intended as an emergency clear.
 
 The current settings record separates output policy from live values.
 `OUTPUT_PERSISTENCE` is a bit mask: bit 0 restores motion, bit 1 restores user

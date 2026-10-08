@@ -898,8 +898,9 @@ func TestHostedMenuPreviewAndLivePWMRemainBoardAuthoritative(t *testing.T) {
 	model.cursor = 26
 	model.overrideIllumination = func(_ context.Context, value uint16) (uint16, error) {
 		called = true
-		if value != 3072 {
-			t.Fatalf("override value=%d, want 3072", value)
+		want := appconfig.PWMRawFromPercent(float64(3072)*100/appconfig.PWMMaximumValue, appconfig.PWMChannel(model.uiValue, 11))
+		if value != want {
+			t.Fatalf("override value=%d, want perceptual value %d", value, want)
 		}
 		return 3068, nil
 	}

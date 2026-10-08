@@ -253,6 +253,14 @@ func compileMediaTimeline(plan MediaTimelinePlan, runner *MacroRunner) ([]mediaT
 }
 
 func (runtime *Runtime) PrepareMediaTimeline(plan MediaTimelinePlan) (MediaTimelineStatus, error) {
+	runtime.mediaPlayback.operation.Lock()
+	defer runtime.mediaPlayback.operation.Unlock()
+	runtime.mediaPlayback.mu.Lock()
+	authorityError := runtime.authorityAdmissionLocked(plan.ClientID)
+	runtime.mediaPlayback.mu.Unlock()
+	if authorityError != nil {
+		return runtime.MediaTimeline(), authorityError
+	}
 	state := &runtime.mediaTimeline
 	state.operation.Lock()
 	defer state.operation.Unlock()
@@ -349,6 +357,16 @@ func (runtime *Runtime) PrepareMediaTimeline(plan MediaTimelinePlan) (MediaTimel
 	state.status = MediaTimelineStatus{ClientID: plan.ClientID, Revision: plan.Revision, Hash: token, Generation: snapshot.ConnectionGeneration, State: "ready", StepCount: len(steps)}
 	status := state.status
 	state.mu.Unlock()
+	// Reserve even before the first clock update. Otherwise another client could
+	// replace a successfully prepared plan in the prepare-to-clock interval.
+	runtime.mediaPlayback.mu.Lock()
+	if runtime.mediaPlayback.authority.OwnerID == "" {
+		runtime.mediaPlayback.authority.OwnerID = plan.ClientID
+		runtime.mediaPlayback.authority.OwnerLabel = plan.ClientID
+		runtime.mediaPlayback.authority.Revision++
+		runtime.mediaPlayback.received = time.Now()
+	}
+	runtime.mediaPlayback.mu.Unlock()
 	runtime.publishMediaTimeline(status)
 	if len(steps) == 0 {
 		close(done)

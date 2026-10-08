@@ -205,3 +205,70 @@ func TestRequestAcceptsDelayedACKWithinCallerBudget(t *testing.T) {
 		t.Fatalf("valid delayed ACK rejected: %v", err)
 	}
 }
+
+func TestConcurrentRequestWaitsForPriorAcknowledgement(t *testing.T) {
+	port := newFakePort()
+	firstWritten := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	var writes atomic.Int32
+	port.onWrite = func(encoded []byte) {
+		request, err := native.Decode(encoded)
+		if err != nil {
+			t.Errorf("decode: %v", err)
+			return
+		}
+		response, err := native.Encode(native.Frame{
+			Opcode: native.OpACK,
+			Seq:    request.Seq,
+			Payload: []byte{
+				request.Opcode, 0,
+			},
+		})
+		if err != nil {
+			t.Errorf("encode: %v", err)
+			return
+		}
+		if writes.Add(1) == 1 {
+			close(firstWritten)
+			go func() {
+				<-releaseFirst
+				port.reads <- response
+			}()
+			return
+		}
+		port.reads <- response
+	}
+
+	session := NewForPort("TEST", port)
+	defer session.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	firstDone := make(chan error, 1)
+	secondDone := make(chan error, 1)
+	go func() { firstDone <- session.Command(ctx, native.OpAddressableLED, []byte{0xFC}) }()
+	select {
+	case <-firstWritten:
+	case <-time.After(time.Second):
+		t.Fatal("first request was not written")
+	}
+	go func() { secondDone <- session.Command(ctx, native.OpGetStatus, nil) }()
+	timer := time.NewTimer(100 * time.Millisecond)
+	<-timer.C
+	if writes.Load() != 1 {
+		t.Fatalf("second request reached wire before first ACK: writes=%d", writes.Load())
+	}
+	close(releaseFirst)
+	for index, done := range []<-chan error{firstDone, secondDone} {
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatalf("request %d: %v", index+1, err)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("request %d did not complete", index+1)
+		}
+	}
+	if writes.Load() != 2 {
+		t.Fatalf("writes=%d, want 2", writes.Load())
+	}
+}

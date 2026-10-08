@@ -30,7 +30,14 @@ const (
 	SegmentRepeatInterval
 )
 
-const SegmentForceScroll byte = 0x80
+const (
+	// SegmentRawCells marks a four-cell scheduled presentation whose bytes are
+	// already encoded for the TM1637 display. It is deliberately confined to
+	// the existing scheduled-display contract so media playback does not need a
+	// parallel physical opcode or a second leased presenter.
+	SegmentRawCells    byte = 0x20
+	SegmentForceScroll byte = 0x80
+)
 
 const (
 	StatusEffectNone byte = iota
@@ -207,6 +214,25 @@ func ScheduledSegmentPayload(options ScheduledSegmentOptions, value string) ([]b
 	payload[7] = options.IntervalSecond
 	copy(payload[8:], value)
 	return payload, nil
+}
+
+// ScheduledSegmentRawPayload presents four pre-encoded TM1637 cells for the
+// requested lease. Raw cells never scroll or repeat and may contain any byte.
+func ScheduledSegmentRawPayload(cells [4]byte, holdMS uint16) []byte {
+	payload := make([]byte, 12)
+	payload[0] = DisplayScheduledSegments
+	binary.LittleEndian.PutUint16(payload[1:3], 80)
+	payload[3] = byte(len(cells))
+	payload[4] = SegmentRawCells
+	binary.LittleEndian.PutUint16(payload[5:7], holdMS)
+	copy(payload[8:], cells[:])
+	return payload
+}
+
+// ScheduledSegmentReleasePayload returns physical segment ownership to the
+// local firmware page without inventing placeholder text.
+func ScheduledSegmentReleasePayload() []byte {
+	return []byte{DisplayScheduledSegments, 80, 0, 0, 0, 0, 0, 0}
 }
 
 // HostPanelPayload captures the physical front panel and writes one exact

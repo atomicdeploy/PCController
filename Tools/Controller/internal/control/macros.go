@@ -803,7 +803,7 @@ func (runner *MacroRunner) StartMode(ctx context.Context, reference, modeOverrid
 		if err := runner.showMacroIdentity(ctx, snapshot.ConnectionGeneration, compiled); err != nil {
 			runner.runtime.PublishHostEvent("macro.display", "macro identity display unavailable: "+err.Error())
 		}
-		playContext, cancel := context.WithCancel(context.Background())
+		playContext, cancel := context.WithCancel(context.WithoutCancel(ctx))
 		done := make(chan struct{})
 		runner.mu.Lock()
 		runner.cancel = cancel
@@ -845,7 +845,7 @@ func (runner *MacroRunner) StartMode(ctx context.Context, reference, modeOverrid
 		return fail(err)
 	}
 
-	playContext, cancel := context.WithCancel(context.Background())
+	playContext, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	done := make(chan struct{})
 	runner.mu.Lock()
 	runner.cancel = cancel
@@ -1190,7 +1190,7 @@ func (runner *MacroRunner) safeStopHost() error {
 }
 
 func safeStopHostWithCommand(command hostMacroCommand) error {
-	ctx, cancel := context.WithTimeout(context.Background(), macroRequestTimeout)
+	ctx, cancel := context.WithTimeout(context.WithValue(context.Background(), mediaTimelineContextKey{}, true), macroRequestTimeout)
 	defer cancel()
 	relayErr := command(ctx, native.OpRelayAllOff, nil)
 	pwmErr := command(ctx, native.OpPWMAllOff, nil)

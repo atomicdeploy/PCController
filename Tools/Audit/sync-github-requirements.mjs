@@ -9,6 +9,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadProjectEnv } from '../Build/env.mjs';
 import { repositoryWebUrl, resolveRepository } from '../../.github/scripts/repository-context.mjs';
+import { roadmapFollowup, withRoadmapFollowup } from './roadmap-followup.mjs';
 
 loadProjectEnv();
 
@@ -237,7 +238,7 @@ const R = [
       'Invoke existing safe relay/motion-stop, PWM, RGB/audio, RF-transmit, and host-macro-request paths without duplicating a flash-heavy policy engine.',
       'Expose transactional list/add/edit/remove/clear and readback through the board menu where feasible, host TUI/CLI/APIs, and EEPROM backup/offline inspection.',
       'Define deterministic ordering, recursion/rate bounds, reset behavior, and a safe host-loss action while keeping Silent and motion interlocks authoritative.',
-    ], 'Host-owned automations are implemented, but the firmware has no EEPROM automation table, board CRUD opcodes, or offline event-to-action executor; this remains genuinely missing.'),
+    ], 'Host-owned automations are implemented. Firmware automation storage, its bounded executor and CRUD opcodes are retained behind PCCONTROLLER_ENABLE_BOARD_AUTOMATIONS=0; their presence is not commissioned support in the default AVR image. Expanded-target resource/provisioning validation, device CRUD and offline event execution, cross-surface and physical acceptance remain open.'),
   requirement('reset-safety-journal', 1, 'Complete graceful reset safety and reliable reset-cause journal telemetry', 'open',
     ['🧩 firmware', '🛡️ safety', '💾 storage', '🧪 testing', '🔥 priority: critical'], 'Firmware lifecycle, persistence, and reset', [
       'Turn off side/general relays, PWM test, and all PWM channels before watchdog reset, with an explicit RGB cue.',
@@ -1519,8 +1520,8 @@ async function syncSupplementalTraceability(issues) {
   }
 }
 
-function bodyFor(item) {
-  return [
+function bodyFor(item, existingBody = '') {
+  const generated = [
     ...originalRequestSection(ORIGINAL_REQUESTS[item.id] ?? []),
     marker(item.id),
     '',
@@ -1546,6 +1547,7 @@ function bodyFor(item) {
       : '- Normalized from the project checklist and private local request audit; no raw conversation text is published.',
     '',
   ].join('\n');
+  return withRoadmapFollowup(generated, existingBody);
 }
 
 function sameLabels(issue, expected) {
@@ -1683,7 +1685,7 @@ function epicBody(number, children) {
   ].join('\n');
 }
 
-function markdown(items) {
+function markdown(items, existingBody = '') {
   const closed = items.filter((item) => item.state === 'closed').length;
   const lines = [
     '# Requirements Backlog',
@@ -1696,6 +1698,7 @@ function markdown(items) {
     `- Closed with current evidence: **${closed}**`,
     '- State policy: hardware, live-system, regression, partial-integration, and finalization work stays open until its own acceptance evidence exists.',
     '',
+    ...(roadmapFollowup(existingBody) ? [roadmapFollowup(existingBody), ''] : []),
   ];
   for (const [parentText, title] of Object.entries(EPICS)) {
     const parent = Number(parentText);
@@ -1753,9 +1756,9 @@ async function main() {
 
   const published = [];
   for (const item of R) {
-    const expectedBody = bodyFor(item);
     let issue = issues.find((candidate) => candidate.body?.includes(marker(item.id)));
     if (!issue) issue = issues.find((candidate) => candidate.title === item.title);
+    const expectedBody = bodyFor(item, issue?.body);
     if (!issue) {
       if (!APPLY) {
         process.stdout.write(`CREATE ${item.id}: ${item.title}\n`);
@@ -1870,7 +1873,11 @@ async function main() {
     }
   }
 
-  await fs.writeFile(OUTPUT, markdown(published), 'utf8');
+  const existingBacklog = await fs.readFile(OUTPUT, 'utf8').catch((error) => {
+    if (error.code === 'ENOENT') return '';
+    throw error;
+  });
+  await fs.writeFile(OUTPUT, markdown(published, existingBacklog), 'utf8');
   process.stdout.write(`wrote ${OUTPUT}\n`);
   await validateRemote(published);
 }

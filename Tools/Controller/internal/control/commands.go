@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"reflect"
 	"sort"
 	"strconv"
@@ -782,10 +783,10 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 		},
 	})
 	mustRegister(shell.Command{
-		Name: "pwm", Usage: "pwm get|off|set CHANNEL VALUE",
-		Summary: "query/control logical PWM output values",
+		Name: "pwm", Usage: "pwm get|off|set CHANNEL PERCENT|raw CHANNEL VALUE|configure CHANNEL TYPE CURVE [GAMMA] [ICON]",
+		Summary: "control logical brightness through per-channel curves or exact raw PWM",
 		Run: func(ctx context.Context, args []string) (string, error) {
-			return pwmCommand(ctx, runtime, args)
+			return pwmCommand(ctx, runtime, options, args)
 		},
 	})
 	mustRegister(shell.Command{
@@ -3643,7 +3644,7 @@ func checkMotionDoorPolicy(status native.Status, policy string) error {
 	}
 }
 
-func pwmCommand(ctx context.Context, runtime *Runtime, args []string) (string, error) {
+func pwmCommand(ctx context.Context, runtime *Runtime, options CommandOptions, args []string) (string, error) {
 	if len(args) == 1 {
 		switch strings.ToLower(args[0]) {
 		case "get":
@@ -3655,28 +3656,99 @@ func pwmCommand(ctx context.Context, runtime *Runtime, args []string) (string, e
 			if err != nil {
 				return "", err
 			}
-			return fmt.Sprintf("PWM available=%t selected=%d values=%v", values.Available, values.SelectedChannel, values.Values), nil
+			config := appconfig.Defaults()
+			if options.HostConfig != nil {
+				config = options.HostConfig()
+			}
+			lines := []string{fmt.Sprintf("PWM available=%t selected=%d", values.Available, values.SelectedChannel)}
+			for channel, raw := range values.Values {
+				channelConfig := appconfig.PWMChannel(config.UI, channel)
+				lines = append(lines, fmt.Sprintf("%2d  %7.3f%%  raw=%4d  %-9s  %s %.2f", channel, appconfig.PWMPercentFromRaw(raw, channelConfig), raw, channelConfig.OutputType, channelConfig.Curve, channelConfig.Gamma))
+			}
+			return strings.Join(lines, "\n"), nil
 		case "off":
 			return "all PWM channels off", command(ctx, runtime, native.OpPWMAllOff, nil)
 		}
 	}
-	if len(args) == 3 && strings.EqualFold(args[0], "set") {
+	if len(args) == 3 && (strings.EqualFold(args[0], "set") || strings.EqualFold(args[0], "raw")) {
 		channel, err := parsePWMChannel(args[1])
 		if err != nil {
 			return "", err
 		}
-		value, err := strconv.ParseUint(args[2], 0, 16)
-		if err != nil {
-			return "", fmt.Errorf("invalid PWM value %q", args[2])
+		var value uint16
+		if strings.EqualFold(args[0], "raw") {
+			raw, parseErr := strconv.ParseUint(args[2], 0, 16)
+			if parseErr != nil || raw > appconfig.PWMMaximumValue {
+				return "", fmt.Errorf("raw PWM value must be 0..4095")
+			}
+			value = uint16(raw)
+		} else {
+			percentText := strings.TrimSuffix(strings.TrimSpace(args[2]), "%")
+			percent, parseErr := strconv.ParseFloat(percentText, 64)
+			if parseErr != nil || math.IsNaN(percent) || math.IsInf(percent, 0) || percent < 0 || percent > 100 {
+				return "", fmt.Errorf("logical PWM percentage must be 0..100")
+			}
+			config := appconfig.Defaults()
+			if options.HostConfig != nil {
+				config = options.HostConfig()
+			}
+			value = appconfig.PWMRawFromPercent(percent, appconfig.PWMChannel(config.UI, int(channel)))
 		}
-		payload, err := native.PWMSetPayload(channel, uint16(value))
+		payload, err := native.PWMSetPayload(channel, value)
 		if err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("PWM channel %d logical value %d", channel, value),
+		return fmt.Sprintf("PWM channel %d raw value %d", channel, value),
 			command(ctx, runtime, native.OpPWMSet, payload)
 	}
-	return "", fmt.Errorf("usage: pwm get | pwm off | pwm set CHANNEL VALUE")
+	if len(args) >= 4 && len(args) <= 6 && strings.EqualFold(args[0], "configure") {
+		if options.UpdateHostConfig == nil {
+			return "", errors.New("persistent host configuration is unavailable")
+		}
+		channel, err := parsePWMChannel(args[1])
+		if err != nil {
+			return "", err
+		}
+		channelConfig := appconfig.PWMChannel(appconfig.Defaults().UI, int(channel))
+		if options.HostConfig != nil {
+			channelConfig = appconfig.PWMChannel(options.HostConfig().UI, int(channel))
+		}
+		channelConfig.OutputType = strings.ToLower(strings.TrimSpace(args[2]))
+		channelConfig.Curve = strings.ToLower(strings.TrimSpace(args[3]))
+		if len(args) >= 5 {
+			channelConfig.Gamma, err = strconv.ParseFloat(args[4], 64)
+			if err != nil {
+				return "", fmt.Errorf("invalid gamma %q", args[4])
+			}
+		}
+		if len(args) == 6 {
+			channelConfig.Icon = strings.TrimSpace(args[5])
+		}
+		if err = appconfig.ValidatePWMChannels(map[string]appconfig.PWMChannelConfig{appconfig.PWMChannelKey(int(channel)): channelConfig}); err != nil {
+			return "", err
+		}
+		err = options.UpdateHostConfig(func(config *appconfig.Config) error {
+			if config.UI.PWMChannels == nil {
+				config.UI.PWMChannels = appconfig.DefaultPWMChannels()
+			}
+			config.UI.PWMChannels[appconfig.PWMChannelKey(int(channel))] = channelConfig
+			return config.Validate()
+		})
+		if err != nil {
+			return "", err
+		}
+		runtime.PublishStructuredEvent(Event{
+			Kind: "peripherals.changed", Stream: EventStreamState,
+			Text: "PWM channel configuration changed", Source: "host", Target: "refresh", Action: "refresh",
+			Metadata: map[string]string{
+				"changed_keys":   appconfig.PWMChannelKey(int(channel)),
+				"changed_fields": "output_type,icon,curve,gamma",
+				"action":         "refresh",
+			},
+		})
+		return fmt.Sprintf("PWM channel %d type=%s icon=%s curve=%s gamma=%.2f", channel, channelConfig.OutputType, channelConfig.Icon, channelConfig.Curve, channelConfig.Gamma), nil
+	}
+	return "", fmt.Errorf("usage: pwm get | pwm off | pwm set CHANNEL PERCENT | pwm raw CHANNEL VALUE | pwm configure CHANNEL TYPE CURVE [GAMMA] [ICON]")
 }
 
 func parsePWMChannel(value string) (byte, error) {

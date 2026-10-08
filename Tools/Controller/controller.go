@@ -2582,6 +2582,19 @@ func (client *Client) EmitHostEvent(kind, text string) {
 
 type MediaPlaybackUpdate = control.MediaPlaybackUpdate
 type MediaPlaybackSnapshot = control.MediaPlaybackSnapshot
+type MediaAuthorityStatus = control.MediaAuthorityStatus
+
+func (client *Client) CheckMediaControlAuthority(ctx context.Context) error {
+	return client.runtime.CheckMediaControlAuthority(ctx)
+}
+
+type MediaAuthorityRequest = control.MediaAuthorityRequest
+
+func (client *Client) MediaAuthority() MediaAuthorityStatus { return client.runtime.MediaAuthority() }
+func (client *Client) ChangeMediaAuthority(value MediaAuthorityRequest) (MediaAuthorityStatus, error) {
+	return client.runtime.ChangeMediaAuthority(value)
+}
+
 type MediaTimelinePlan = control.MediaTimelinePlan
 type MediaTimelineStatus = control.MediaTimelineStatus
 
