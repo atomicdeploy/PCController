@@ -380,7 +380,9 @@ the virtual `NT SERVICE\PCController` identity, with explicit absolute config
 and durable-data paths, path-scoped ACLs, bounded recovery restarts, readiness
 before `Running`, and graceful context cancellation on SCM stop/shutdown. It
 does not create desktop shortcuts, notification identity, browser windows, or a
-tray. The service-mode primary refuses the ordinary in-process self-update;
+tray. Its production host mutex is machine-wide, so an interactive account
+cannot silently claim a second board-owning primary while the service owns the
+hardware. The service-mode primary refuses the ordinary in-process self-update;
 operators stop it, deploy a verified replacement, run `service repair`, and
 start it so SCM remains the only lifecycle owner.
 
