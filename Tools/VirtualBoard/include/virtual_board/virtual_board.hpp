@@ -2,7 +2,6 @@
 
 #include "virtual_board/hardware.hpp"
 #include "virtual_board/protocol.hpp"
-#include "../../../../Project/Core/MediaClock.h"
 
 #include <array>
 #include <chrono>
@@ -161,7 +160,6 @@ private:
   mutable std::mutex mutex_;
   Settings settings_;
   TimePoint startedAt_;
-  ::MediaClock mediaClock_;
   std::uint32_t deviceMillis(TimePoint now) const {
     return static_cast<std::uint32_t>(std::chrono::duration_cast<std::chrono::milliseconds>(now - startedAt_).count());
   }

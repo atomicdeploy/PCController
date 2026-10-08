@@ -211,6 +211,19 @@ func TestPayloadBuildersValidateRanges(t *testing.T) {
 	}, "message"); err == nil {
 		t.Fatal("expected zero interval to be rejected")
 	}
+	rawCells := [4]byte{0x3F, 0x86, 0x00, 0xFF}
+	raw := ScheduledSegmentRawPayload(rawCells, 3000)
+	if !bytes.Equal(raw, []byte{
+		DisplayScheduledSegments, 80, 0, 4, SegmentRawCells,
+		0xB8, 0x0B, 0, 0x3F, 0x86, 0x00, 0xFF,
+	}) {
+		t.Fatalf("raw scheduled segment payload=% X", raw)
+	}
+	if release := ScheduledSegmentReleasePayload(); !bytes.Equal(
+		release, []byte{DisplayScheduledSegments, 80, 0, 0, 0, 0, 0, 0},
+	) {
+		t.Fatalf("scheduled segment release payload=% X", release)
+	}
 	if _, err := MacroStepPayload(MacroPWM, 11, 1); err == nil {
 		t.Fatal("expected macro PWM channel error")
 	}

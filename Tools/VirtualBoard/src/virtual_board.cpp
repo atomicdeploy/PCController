@@ -55,6 +55,7 @@ constexpr std::uint8_t kLearnModeIndefinite = 0;
 constexpr std::uint8_t kLearnModeTimer = 1;
 constexpr std::uint8_t kMaximumLearningSeconds = 120;
 constexpr std::uint8_t kSegmentRepeatMask = 0x03U;
+constexpr std::uint8_t kSegmentRawCells = 0x20U;
 constexpr std::uint8_t kSegmentIntervalWaiting = 0x40U;
 constexpr std::uint8_t kSegmentForceScroll = 0x80U;
 constexpr std::chrono::milliseconds kHostOfflineAfter{5000};
@@ -488,9 +489,6 @@ std::vector<wire::Frame> VirtualBoard::handle(const wire::Frame &request) {
         !setStatusProfile(payload[0], payload.data() + 1, now)) {
       return bad();
     }
-    return ack();
-  case wire::MediaClock:
-    if (!mediaClock_.update(payload.data(), static_cast<std::uint8_t>(payload.size()), deviceMillis(now))) return bad();
     return ack();
   case wire::ProgramState:
     if (payload.empty() || payload[0] > 1) {
@@ -1465,17 +1463,17 @@ wire::Frame VirtualBoard::frontPanelFrame(std::uint8_t sequence) const {
   std::vector<std::uint8_t> payload(47, 0);
   payload[0] = 2;
   bool active = false;
+  const bool rawSegments = scheduledSegmentActive_ &&
+                           !scheduledSegmentWaiting_ &&
+                           (scheduledSegmentOptions_ & kSegmentRawCells) != 0;
   for (std::size_t index = 0; index < 4; ++index) {
     const char value = index < state.segments.size() ? state.segments[index]
                                                       : ' ';
-    payload[1 + index] = encodeSegment(value);
+    payload[1 + index] = rawSegments ? static_cast<std::uint8_t>(value)
+                                     : encodeSegment(value);
     active = active || payload[1 + index] != 0;
   }
   payload[5] = settings_.displayBrightness;
-  if (mediaClock_.active(deviceMillis(Clock::now()))) {
-    mediaClock_.segments(deviceMillis(Clock::now()), payload.data() + 1);
-    active = true;
-  }
   payload[6] = active ? 2 : 0;
   std::string lcd = state.lcdLine1.substr(0, 16);
   lcd.resize(16, ' ');
@@ -1680,7 +1678,7 @@ bool VirtualBoard::applyDisplayText(
       (payload[0] == 5 &&
        (payload.size() < 8 || payload.size() < 8U + payload[3] ||
         (payload[4] & kSegmentRepeatMask) > 2 ||
-        (payload[4] & 0x7CU) != 0 ||
+        (payload[4] & 0x5CU) != 0 ||
         ((payload[4] & kSegmentRepeatMask) == 2 && payload[7] == 0))) ||
       (payload[0] == 3 && (payload[3] < 4 || payload[3] > 36)) ||
       (payload[0] == 4 && payload[3] != 0)) {
@@ -2521,11 +2519,13 @@ void VirtualBoard::queueEvent(std::vector<std::uint8_t> payload) {
 void VirtualBoard::queueMirrorChanges() {
   const DisplayState display = displays_.state();
   std::array<std::uint8_t, 4> segments{};
+  const bool rawSegments = scheduledSegmentActive_ &&
+                           !scheduledSegmentWaiting_ &&
+                           (scheduledSegmentOptions_ & kSegmentRawCells) != 0;
   for (std::size_t index = 0; index < segments.size(); ++index) {
-    segments[index] = encodeSegment(display.segments[index]);
-  }
-  if (mediaClock_.active(deviceMillis(Clock::now()))) {
-    mediaClock_.segments(deviceMillis(Clock::now()), segments.data());
+    segments[index] = rawSegments
+                          ? static_cast<std::uint8_t>(display.segments[index])
+                          : encodeSegment(display.segments[index]);
   }
   if (segments != lastPushedSegments_ ||
       settings_.displayBrightness != lastPushedSegmentBrightness_) {

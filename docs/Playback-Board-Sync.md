@@ -39,21 +39,25 @@ visible and retried at most once per second, rather than silently accepted.
 
 ## Board contract
 
-Native opcode `MEDIA_CLOCK` (`0x4A`) carries fourteen bytes:
+The host reuses native `DISPLAY_TEXT` target 5, the board's advertised
+scheduled-segment contract. Its twelve-byte raw-cell form is:
 
 | Offset | Value |
 | --- | --- |
-| 0 | schema 3 |
-| 1 | bit 0 loaded, bit 1 advancing; only 0, 1, 3 valid |
-| 2–5 | elapsed milliseconds, little-endian uint32 |
-| 6–7 | rate Q8, little-endian uint16 |
-| 8–9 | host lease 3000 ms, little-endian uint16 |
-| 10–13 | exact four TM1637 segment cells |
+| 0 | scheduled-segment target 5 |
+| 1–2 | non-scrolling speed field, 80 ms |
+| 3 | four cells |
+| 4 | raw-cell option `0x20`, with no repeat or scrolling bits |
+| 5–6 | host lease 3000 ms, little-endian uint16 |
+| 7 | zero interval |
+| 8–11 | exact four TM1637 segment cells |
 
+An eight-byte target-5 payload with a zero cell count releases the display.
 Numeric/rate metadata remains available on the host; the constrained AVR
 retains only exact raw cells in the **existing** host-display buffer with a
-fixed three-second lease. No EEPROM writes, feature removal, or duplicate
-physical presenter is needed. VirtualBoard models the same retention/expiry.
+fixed three-second lease. Opcode `0x4A` stays reserved and is not a second
+media-clock protocol. No EEPROM writes, feature removal, or duplicate physical
+presenter is needed. VirtualBoard models the same retention/expiry.
 Existing `PROGRAM_STATE` claims communicate advancing/paused activity and
 compose with other active owners rather than cancelling their work.
 
@@ -76,8 +80,8 @@ Use the stable Windows runner, not direct `go test`:
 
 ```powershell
 node Tools/Build/go-tests.mjs --package internal/control --package internal/ipcjson --run TestMediaPlayback
-cmake --build Tools/VirtualBoard/.build/release --target virtual_board media_clock_tests virtual_board_tests
-ctest --test-dir Tools/VirtualBoard/.build/release -R 'media_clock_unit|virtual_board_unit' --output-on-failure
+cmake --build Tools/VirtualBoard/.build/release --target virtual_board virtual_board_tests
+ctest --test-dir Tools/VirtualBoard/.build/release -R virtual_board_unit --output-on-failure
 build.cmd --firmware-only --skip-tests
 ```
 

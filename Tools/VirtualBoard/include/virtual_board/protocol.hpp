@@ -61,7 +61,6 @@ enum Opcode : std::uint8_t {
   HostMenuContent = 0x43,
   HostMenuStateGet = 0x44,
   ProgramState = 0x45,
-  MediaClock = 0x4A,
 
   Ack = 0x80,
   HelloResponse = 0x81,

@@ -26,23 +26,21 @@ void begin() {
     crc = ControllerProtocol::WireCodec::crc8Update(
         crc, EEPROM.read(EepromLayout::MenuLabelsAddress + index));
   }
-  labelsAvailable = commit == EepromLayout::MenuLabelsFormatMarker &&
-                    crc == EEPROM.read(EepromLayout::MenuLabelsCrcAddress);
+  labelsAvailable =
+      (commit == EepromLayout::MenuLabelsFormatMarker) &
+      (crc == EEPROM.read(EepromLayout::MenuLabelsCrcAddress));
 }
 
 bool available() { return labelsAvailable; }
 
 void copy(uint8_t page, char output[LabelWidth]) {
-  if (!labelsAvailable || page >= EepromLayout::MenuLabelCount) {
-    for (uint8_t character = 0; character < LabelWidth; ++character) {
-      output[character] = '-';
-    }
-    return;
-  }
+  const bool valid = labelsAvailable && page < EepromLayout::MenuLabelCount;
   const uint8_t offset = static_cast<uint8_t>(page << 2);
   for (uint8_t character = 0; character < LabelWidth; ++character) {
-    const uint8_t value = EEPROM.read(EepromLayout::MenuLabelsAddress +
-                                      offset + character);
+    const uint8_t value = valid
+                              ? EEPROM.read(EepromLayout::MenuLabelsAddress +
+                                            offset + character)
+                              : static_cast<uint8_t>('-');
     output[character] = printable(value) ? static_cast<char>(value) : '-';
   }
 }

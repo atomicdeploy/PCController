@@ -79,9 +79,6 @@ func TestMediaAuthorityExclusiveReservationSurvivesClockExpiry(t *testing.T) {
 	if err = runtime.rejectExclusiveMediaControl(WithMediaActor(context.Background(), "a"), native.OpRelaySet); err != nil {
 		t.Fatal(err)
 	}
-	if err = runtime.rejectExclusiveMediaControl(context.Background(), native.OpMediaClock); err != nil {
-		t.Fatal("maintenance clock blocked")
-	}
 	if _, err = runtime.ChangeMediaAuthority(MediaAuthorityRequest{ClientID: "a", Operation: "unlock"}); err != nil {
 		t.Fatal(err)
 	}
