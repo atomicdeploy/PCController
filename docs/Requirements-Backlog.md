@@ -8,6 +8,7 @@ This is the canonical public map from normalized project requirements to GitHub 
 - Closed with current evidence: **10**
 - State policy: hardware, live-system, regression, partial-integration, and finalization work stays open until its own acceptance evidence exists.
 
+<!-- media-mcu-roadmap-follow-up -->
 ## Media timing and expanded MCU follow-up
 
 The [Media Timing and MCU Expansion roadmap](Media-Timing-and-MCU-Expansion.md)
@@ -18,6 +19,7 @@ duplicate normalized requirements. The roadmap's per-workstream table defines
 acceptance and dependencies. Larger-target support and physical strip/timing
 proof remain open; conversation preservation also awaits the clipped final
 answer's remainder. No firmware profile or hardware state changes in this pass.
+<!-- /media-mcu-roadmap-follow-up -->
 
 ## [#1 — Firmware architecture, flash budget, EEPROM, and reset safety](https://github.com/atomicdeploy/PCController/issues/1)
 
