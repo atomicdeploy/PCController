@@ -374,14 +374,23 @@ links are present only for an authenticated controller; Connect/Reconnect and
 Exit remain available otherwise. State is checked again at dispatch, so a
 disconnect while the menu is open cannot launch a stale page.
 
-This is currently an in-process interactive-primary tray, not a Windows service. The
-tracked service split keeps a privileged, headless, session-independent serial
-owner separate from an unelevated per-user tray client. That client will attach
-through local IPC, launch or foreground Win32, TUI, or WebUI
-surfaces, select among multiple ports, open/close/reconnect, navigate menus,
-edit quick settings, and exit independently from a separately guarded service
-stop. Until that requirement is implemented, do not register `controller web`
-as a privileged service or assume its tray survives user sign-out. See the
+`controller service install` now registers a real delayed-auto-start Windows
+SCM service. It runs the existing authenticated primary/Web API headlessly under
+the virtual `NT SERVICE\PCController` identity, with explicit absolute config
+and durable-data paths, path-scoped ACLs, bounded recovery restarts, readiness
+before `Running`, and graceful context cancellation on SCM stop/shutdown. It
+does not create desktop shortcuts, notification identity, browser windows, or a
+tray. Its production host mutex is machine-wide, so an interactive account
+cannot silently claim a second board-owning primary while the service owns the
+hardware. The service-mode primary refuses the ordinary in-process self-update;
+operators stop it, deploy a verified replacement, run `service repair`, and
+start it so SCM remains the only lifecycle owner.
+
+Issue #116 remains open for its separate unelevated tray-controller half. The
+current interactive tray belongs to an interactive primary and is not injected
+into a service session. A future tray client must attach through local IPC,
+launch or foreground Win32/TUI/Web surfaces, select ports, reconnect and edit
+quick settings without owning the board or stopping the SCM service. See the
 [service/tray requirement](Requirements-Backlog.md).
 
 The same hidden native window receives Windows session lock/unlock and power

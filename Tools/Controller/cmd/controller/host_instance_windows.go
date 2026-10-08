@@ -5,8 +5,11 @@ package main
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"golang.org/x/sys/windows"
+
+	"pccontroller.local/controller/internal/productidentity"
 )
 
 type windowsHostInstanceLock struct {
@@ -32,6 +35,7 @@ func platformHostInstanceUserKey() (string, error) {
 func platformTryHostInstanceLock(
 	name, _ string,
 ) (platformHostInstanceLock, bool, error) {
+	name = windowsHostInstanceMutexName(name)
 	nameValue, err := windows.UTF16PtrFromString(`Global\` + name)
 	if err != nil {
 		return nil, false, fmt.Errorf("encode per-user host mutex name: %w", err)
@@ -50,6 +54,18 @@ func platformTryHostInstanceLock(
 		return nil, false, fmt.Errorf("create per-user host mutex: %w", createErr)
 	}
 	return &windowsHostInstanceLock{handle: handle}, true, nil
+}
+
+func windowsHostInstanceMutexName(name string) string {
+	// Default production identities used to contain the current user's SID.
+	// A real SCM owner runs under a virtual account, so that scheme allowed an
+	// interactive user to claim a second board-owning primary. Collapse only
+	// product default names to a machine-wide singleton; explicit test/custom
+	// lock names retain their isolation.
+	if strings.HasPrefix(name, productidentity.StableAppID+".Host.") {
+		return productidentity.StableAppID + ".Host.Machine"
+	}
+	return name
 }
 
 func (lock *windowsHostInstanceLock) Close() error {

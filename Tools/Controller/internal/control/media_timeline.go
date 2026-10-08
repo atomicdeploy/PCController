@@ -38,23 +38,27 @@ type MediaTimelinePlan struct {
 	MaxLatenessMS uint32                `json:"max_lateness_ms"`
 }
 type MediaTimelineStatus struct {
-	ClientID          string  `json:"client_id,omitempty"`
-	Revision          uint64  `json:"revision"`
-	Hash              string  `json:"hash,omitempty"`
-	Generation        uint64  `json:"generation"`
-	State             string  `json:"state"`
-	StepCount         int     `json:"step_count"`
-	Acknowledged      int     `json:"acknowledged"`
-	ClockSequence     uint64  `json:"clock_sequence"`
-	ArmedEpoch        uint64  `json:"armed_epoch"`
-	RebasedSteps      int     `json:"rebased_steps"`
-	ClockPositionMS   uint64  `json:"clock_position_ms"`
-	LastStep          string  `json:"last_step,omitempty"`
-	LastDueMS         uint64  `json:"last_due_ms"`
-	LastAckLatenessMS float64 `json:"last_ack_lateness_ms"`
-	MaxAckLatenessMS  float64 `json:"max_ack_lateness_ms"`
-	DeviceAckUS       uint32  `json:"device_ack_us,omitempty"`
-	Error             string  `json:"error,omitempty"`
+	ClientID               string  `json:"client_id,omitempty"`
+	Revision               uint64  `json:"revision"`
+	Hash                   string  `json:"hash,omitempty"`
+	Generation             uint64  `json:"generation"`
+	State                  string  `json:"state"`
+	StepCount              int     `json:"step_count"`
+	Acknowledged           int     `json:"acknowledged"`
+	ClockSequence          uint64  `json:"clock_sequence"`
+	ArmedEpoch             uint64  `json:"armed_epoch"`
+	RebasedSteps           int     `json:"rebased_steps"`
+	ClockPositionMS        uint64  `json:"clock_position_ms"`
+	LastStep               string  `json:"last_step,omitempty"`
+	LastDueMS              uint64  `json:"last_due_ms"`
+	LastDispatchLatenessMS float64 `json:"last_dispatch_lateness_ms"`
+	MaxDispatchLatenessMS  float64 `json:"max_dispatch_lateness_ms"`
+	LastAckRoundTripMS     float64 `json:"last_ack_round_trip_ms"`
+	MaxAckRoundTripMS      float64 `json:"max_ack_round_trip_ms"`
+	LastAckLatenessMS      float64 `json:"last_ack_lateness_ms"`
+	MaxAckLatenessMS       float64 `json:"max_ack_lateness_ms"`
+	DeviceAckUS            uint32  `json:"device_ack_us,omitempty"`
+	Error                  string  `json:"error,omitempty"`
 }
 
 // ResourceBusyError is a temporary ownership conflict, not a hardware or
@@ -377,7 +381,15 @@ func (runtime *Runtime) PrepareMediaTimeline(plan MediaTimelinePlan) (MediaTimel
 }
 func (runtime *Runtime) publishMediaTimeline(status MediaTimelineStatus) {
 	runtime.PublishStructuredEvent(Event{Kind: "media.timeline", Stream: "state", Source: status.ClientID, State: status.State, Text: status.Error,
-		Metadata: map[string]string{"revision": fmt.Sprint(status.Revision), "hash": status.Hash, "acknowledged": fmt.Sprint(status.Acknowledged), "step_count": fmt.Sprint(status.StepCount), "last_step": status.LastStep, "error": status.Error, "max_ack_lateness_ms": fmt.Sprint(status.MaxAckLatenessMS)}})
+		Metadata: map[string]string{"revision": fmt.Sprint(status.Revision), "hash": status.Hash, "acknowledged": fmt.Sprint(status.Acknowledged), "step_count": fmt.Sprint(status.StepCount), "last_step": status.LastStep, "error": status.Error, "max_dispatch_lateness_ms": fmt.Sprint(status.MaxDispatchLatenessMS), "max_ack_round_trip_ms": fmt.Sprint(status.MaxAckRoundTripMS), "max_ack_lateness_ms": fmt.Sprint(status.MaxAckLatenessMS)}})
+}
+
+func mediaTimelineRemainingBudget(maxLatenessMS uint32, dispatchLatenessMS float64) time.Duration {
+	remainingMS := float64(maxLatenessMS) - max(dispatchLatenessMS, 0)
+	if remainingMS <= 0 {
+		return 0
+	}
+	return time.Duration(remainingMS * float64(time.Millisecond))
 }
 func (runtime *Runtime) stopMediaTimeline() {
 	state := &runtime.mediaTimeline
@@ -582,17 +594,24 @@ func (runtime *Runtime) runMediaTimeline(ctx context.Context, done chan struct{}
 		}
 		for index < len(steps) && steps[index].dueMS <= position {
 			step := steps[index]
+			dispatchPosition := float64(clock.PositionMS) + time.Since(anchor).Seconds()*1000*clock.Rate
+			dispatchLateness := dispatchPosition - step.dueMS
 			runtime.mediaTimeline.mu.Lock()
 			runtime.mediaTimeline.status.LastStep, runtime.mediaTimeline.status.LastDueMS = step.id, uint64(step.dueMS)
+			runtime.mediaTimeline.status.LastDispatchLatenessMS = dispatchLateness
+			runtime.mediaTimeline.status.MaxDispatchLatenessMS = max(runtime.mediaTimeline.status.MaxDispatchLatenessMS, dispatchLateness)
 			runtime.mediaTimeline.mu.Unlock()
-			if position-step.dueMS > float64(plan.MaxLatenessMS) {
-				fault(fmt.Sprintf("cue %s missed its deadline by %.1f ms; not executed", step.id, position-step.dueMS))
+			remainingBudget := mediaTimelineRemainingBudget(plan.MaxLatenessMS, dispatchLateness)
+			if remainingBudget <= 0 {
+				fault(fmt.Sprintf("cue %s missed its dispatch deadline by %.1f ms; not executed", step.id, dispatchLateness))
 				return
 			}
-			requestCtx, cancel := context.WithTimeout(ctx, time.Duration(plan.MaxLatenessMS)*time.Millisecond)
+			requestCtx, cancel := context.WithTimeout(ctx, remainingBudget)
+			requestStarted := time.Now()
 			owned = true
 			frame, err := runtime.requestAtGeneration(requestCtx, generation, step.opcode, step.payload, native.OpACK)
 			cancel()
+			ackRoundTrip := time.Since(requestStarted).Seconds() * 1000
 			actual := float64(clock.PositionMS) + time.Since(anchor).Seconds()*1000*clock.Rate
 			lateness := actual - step.dueMS
 			runtime.mediaTimeline.mu.Lock()
@@ -600,6 +619,8 @@ func (runtime *Runtime) runMediaTimeline(ctx context.Context, done chan struct{}
 			runtime.mediaTimeline.status.LastDueMS = uint64(step.dueMS)
 			runtime.mediaTimeline.status.LastAckLatenessMS = lateness
 			runtime.mediaTimeline.status.MaxAckLatenessMS = max(runtime.mediaTimeline.status.MaxAckLatenessMS, lateness)
+			runtime.mediaTimeline.status.LastAckRoundTripMS = ackRoundTrip
+			runtime.mediaTimeline.status.MaxAckRoundTripMS = max(runtime.mediaTimeline.status.MaxAckRoundTripMS, ackRoundTrip)
 			if deviceUS, ok := native.ResponseDeviceMicros(frame); ok {
 				runtime.mediaTimeline.status.DeviceAckUS = deviceUS
 			}

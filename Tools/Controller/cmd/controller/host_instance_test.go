@@ -34,6 +34,18 @@ func testHostInstancePaths(t *testing.T) hostInstancePaths {
 	}
 }
 
+func TestDefaultHostInstancePathsUseExplicitDataDirectory(t *testing.T) {
+	data := filepath.Join(t.TempDir(), "service-data")
+	t.Setenv("PCCONTROLLER_DATA_DIR", data)
+	paths, err := defaultHostInstancePaths()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Dir(paths.RecordPath) != data || filepath.Dir(paths.LockPath) != data {
+		t.Fatalf("host instance paths escaped explicit data directory: %+v", paths)
+	}
+}
+
 func TestHostInstanceClaimSerializesDifferentIPCConfigurations(t *testing.T) {
 	paths := testHostInstancePaths(t)
 	first, err := claimHostInstance(paths, "web")

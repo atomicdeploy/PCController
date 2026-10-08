@@ -80,9 +80,22 @@ func TestMediaTimelinePreservesExplicitMCUExecutionPolicy(t *testing.T) {
 	}
 }
 
+func TestMediaTimelineRemainingBudgetChargesDispatchDelay(t *testing.T) {
+	if got := mediaTimelineRemainingBudget(50, -3); got != 50*time.Millisecond {
+		t.Fatalf("early dispatch budget = %v", got)
+	}
+	if got := mediaTimelineRemainingBudget(50, 12.5); got != 37500*time.Microsecond {
+		t.Fatalf("delayed dispatch budget = %v", got)
+	}
+	if got := mediaTimelineRemainingBudget(50, 50); got != 0 {
+		t.Fatalf("expired dispatch budget = %v", got)
+	}
+}
+
 type mediaTimelineWire struct {
 	*programStateWirePort
-	nack bool
+	nack     bool
+	ackDelay time.Duration
 }
 
 func (port *mediaTimelineWire) Write(data []byte) (int, error) {
@@ -95,6 +108,9 @@ func (port *mediaTimelineWire) Write(data []byte) (int, error) {
 	if port.nack && frame.Opcode == native.OpRelaySet {
 		status = 1
 	}
+	if port.ackDelay > 0 {
+		time.Sleep(port.ackDelay)
+	}
 	ack, err := native.Encode(native.Frame{Opcode: native.OpACK, Seq: frame.Seq, Payload: []byte{frame.Opcode, status}})
 	if err != nil {
 		return 0, err
@@ -106,7 +122,7 @@ func (port *mediaTimelineWire) Write(data []byte) (int, error) {
 func mediaTimelineFixture(t *testing.T, nack bool) (*Runtime, *[]native.Frame, *sync.Mutex) {
 	t.Helper()
 	runtime := New(Options{RequestTimeout: time.Second})
-	port := &mediaTimelineWire{programStateWirePort: newProgramStateWirePort(), nack: nack}
+	port := &mediaTimelineWire{programStateWirePort: newProgramStateWirePort(), nack: nack, ackDelay: time.Millisecond}
 	var frames []native.Frame
 	var mu sync.Mutex
 	go func() {
@@ -170,6 +186,9 @@ func TestMediaTimelineExecutesBothEdgesWithoutUIOrRepeatedCueRPC(t *testing.T) {
 	status := waitTimeline(t, runtime, func(status MediaTimelineStatus) bool { return status.Acknowledged == 2 })
 	if status.State == "faulted" || status.MaxAckLatenessMS > 100 {
 		t.Fatalf("not faithful: %+v", status)
+	}
+	if status.MaxDispatchLatenessMS <= 0 || status.MaxAckRoundTripMS <= 0 {
+		t.Fatalf("timing phases were not reported: %+v", status)
 	}
 	deadline := time.Now().Add(time.Second)
 	for {

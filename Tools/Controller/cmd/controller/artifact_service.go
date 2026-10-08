@@ -332,6 +332,9 @@ func (executor *primaryArtifactExecutor) StageHostUpdate(
 	_ artifacts.UpdateRequest,
 	progress artifacts.ProgressFunc,
 ) error {
+	if os.Getenv("PCCONTROLLER_WINDOWS_SERVICE") == "1" {
+		return errors.New("in-process host self-update is disabled for the Windows service; stop the service, deploy the verified controller.exe, run 'controller service repair', then start it")
+	}
 	current, err := os.Executable()
 	if err != nil {
 		return err

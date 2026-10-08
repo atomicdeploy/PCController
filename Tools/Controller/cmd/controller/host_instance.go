@@ -61,11 +61,21 @@ type hostInstanceClaim struct {
 }
 
 func defaultHostInstancePaths() (hostInstancePaths, error) {
-	base, err := os.UserConfigDir()
-	if err != nil {
-		return hostInstancePaths{}, fmt.Errorf("locate per-user host state: %w", err)
+	base := strings.TrimSpace(os.Getenv("PCCONTROLLER_DATA_DIR"))
+	var err error
+	if base == "" {
+		base, err = os.UserConfigDir()
+		if err != nil {
+			return hostInstancePaths{}, fmt.Errorf("locate per-user host state: %w", err)
+		}
+		base = filepath.Join(base, productidentity.ConfigDirectory)
+	} else {
+		base, err = filepath.Abs(base)
+		if err != nil {
+			return hostInstancePaths{}, fmt.Errorf("resolve configured host data state: %w", err)
+		}
 	}
-	directory := filepath.Join(base, productidentity.ConfigDirectory)
+	directory := base
 	userKey, err := platformHostInstanceUserKey()
 	if err != nil {
 		return hostInstancePaths{}, fmt.Errorf("resolve per-user host identity: %w", err)
