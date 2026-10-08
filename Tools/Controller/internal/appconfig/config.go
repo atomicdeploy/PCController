@@ -6,7 +6,9 @@ package appconfig
 import (
 	"context"
 	"crypto/sha256"
+	_ "embed"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -29,6 +31,10 @@ import (
 )
 
 const (
+	// CurrentConfigSchema distinguishes the pre-adaptive macro contract from
+	// configurations that intentionally use the living "auto" execution mode.
+	CurrentConfigSchema = 2
+
 	// DefaultWatchInterval bounds the polling fallback when file notifications
 	// are unavailable.
 	DefaultWatchInterval = 150 * time.Millisecond
@@ -43,6 +49,7 @@ const (
 // Config is the persistent host-side configuration root; it never mirrors or
 // replaces the MCU's EEPROM-owned settings.
 type Config struct {
+	Schema        int                     `json:"schema"`
 	Connection    Connection              `json:"connection"`
 	UI            UI                      `json:"ui"`
 	IPC           IPC                     `json:"ipc"`
@@ -56,6 +63,8 @@ type Config struct {
 	Scripts       map[string]string       `json:"scripts,omitempty"`
 	BoardProfiles map[string]BoardProfile `json:"board_profiles,omitempty"`
 	Macros        []Macro                 `json:"macros,omitempty"`
+	StripEffects  []StripEffect           `json:"strip_effects,omitempty"`
+	EffectGroups  map[string]EffectGroup  `json:"effect_groups,omitempty"`
 	Melodies      []Melody                `json:"melodies,omitempty"`
 	StatusEffects []StatusLEDEffect       `json:"status_effects,omitempty"`
 	Automations   []Automation            `json:"automations,omitempty"`
@@ -234,14 +243,18 @@ type Programming struct {
 	AvrdudeConf      string                     `json:"avrdude_conf,omitempty"`
 }
 
-// Macro defines a named, host-persisted sequence. Mode "host" schedules
-// ordinary commands from the controller process; mode "mcu" streams the
-// sequence to the firmware timing engine. Mode is always explicit.
+// Macro defines a named, host-persisted effect sequence. Mode is an execution
+// policy, not an ownership or storage location: "auto" selects the most
+// precise executor supported by the connected board and the sequence,
+// "host" forces the controller's monotonic scheduler, and "mcu" forces the
+// firmware timing queue. The durable definition always remains owned by
+// PCController; either executor only receives a volatile run plan.
 type Macro struct {
 	ID                  byte        `json:"id"`
 	Name                string      `json:"name"`
 	Mode                string      `json:"mode,omitempty"`
 	Category            string      `json:"category,omitempty"`
+	Icon                string      `json:"icon,omitempty"`
 	Color               string      `json:"color,omitempty"`
 	Label               string      `json:"label,omitempty"`
 	LCDMessage          string      `json:"lcd_message,omitempty"`
@@ -258,26 +271,100 @@ type MacroStep struct {
 	AtUS uint32 `json:"at_us,omitempty"`
 	Kind string `json:"kind"`
 
-	Target      byte   `json:"target,omitempty"`
-	Value       uint16 `json:"value,omitempty"`
-	DurationMS  uint16 `json:"duration_ms,omitempty"`
-	FrequencyHz uint16 `json:"frequency_hz,omitempty"`
-	Text        string `json:"text,omitempty"`
-	Destination string `json:"destination,omitempty"`
-	Code        uint32 `json:"code,omitempty"`
-	Bits        byte   `json:"bits,omitempty"`
-	Protocol    byte   `json:"protocol,omitempty"`
-	PulseUS     uint16 `json:"pulse_us,omitempty"`
-	Red         byte   `json:"red,omitempty"`
-	Green       byte   `json:"green,omitempty"`
-	Blue        byte   `json:"blue,omitempty"`
-	Brightness  byte   `json:"brightness,omitempty"`
-	Opcode      byte   `json:"opcode,omitempty"`
-	PayloadHex  string `json:"payload_hex,omitempty"`
+	Target           byte    `json:"target,omitempty"`
+	Value            uint16  `json:"value,omitempty"`
+	DurationMS       uint16  `json:"duration_ms,omitempty"`
+	ToValue          *uint16 `json:"to_value,omitempty"`
+	Easing           string  `json:"easing,omitempty"`
+	SampleRateHz     byte    `json:"sample_rate_hz,omitempty"`
+	RepeatCount      uint16  `json:"repeat_count,omitempty"`
+	RepeatIntervalMS uint32  `json:"repeat_interval_ms,omitempty"`
+	FrequencyHz      uint16  `json:"frequency_hz,omitempty"`
+	Text             string  `json:"text,omitempty"`
+	Destination      string  `json:"destination,omitempty"`
+	Code             uint32  `json:"code,omitempty"`
+	Bits             byte    `json:"bits,omitempty"`
+	Protocol         byte    `json:"protocol,omitempty"`
+	PulseUS          uint16  `json:"pulse_us,omitempty"`
+	Red              byte    `json:"red,omitempty"`
+	Green            byte    `json:"green,omitempty"`
+	Blue             byte    `json:"blue,omitempty"`
+	Brightness       byte    `json:"brightness,omitempty"`
+	ToRed            *byte   `json:"to_red,omitempty"`
+	ToGreen          *byte   `json:"to_green,omitempty"`
+	ToBlue           *byte   `json:"to_blue,omitempty"`
+	ToBrightness     *byte   `json:"to_brightness,omitempty"`
+	Opcode           byte    `json:"opcode,omitempty"`
+	PayloadHex       string  `json:"payload_hex,omitempty"`
 	// ActionIDs preserves the semantic meaning observed alongside the exact
 	// applied relay mask. Playback continues to use the mask so old and new
 	// firmware remain byte-for-byte faithful.
 	ActionIDs []string `json:"action_ids,omitempty"`
+}
+
+// StripEffect is a host-owned addressable-light effect definition. Program is
+// declarative user data; the streaming engine only evaluates generic
+// primitives and never embeds named effects. Pealayer and other clients
+// consume this catalog; they never keep a second local effect library.
+type StripEffect struct {
+	ID                string       `json:"id"`
+	Name              string       `json:"name"`
+	Category          string       `json:"category,omitempty"`
+	Icon              string       `json:"icon,omitempty"`
+	Description       string       `json:"description,omitempty"`
+	Program           StripProgram `json:"program"`
+	DefaultFPS        int          `json:"default_fps"`
+	DefaultDurationMS int          `json:"default_duration_ms"`
+	DefaultPixels     int          `json:"default_pixels,omitempty"`
+}
+
+// EffectGroup is a PCController-owned group record, including empty groups.
+// Membership remains on each effect. effects.json includes these records so
+// empty groups and parent icons survive export/import as well as restart.
+type EffectGroup struct {
+	Icon string `json:"icon,omitempty"`
+}
+
+// StripColor is an RGB value stored in a declarative strip program.
+type StripColor struct {
+	Red   byte `json:"red"`
+	Green byte `json:"green"`
+	Blue  byte `json:"blue"`
+}
+
+// StripEnvelopePoint is one brightness keyframe in a repeating envelope.
+type StripEnvelopePoint struct {
+	AtMS      int  `json:"at_ms"`
+	Intensity byte `json:"intensity"`
+}
+
+// StripProgram contains parameters for reusable rendering primitives. Effect
+// names and cinema-specific meaning live entirely in configuration data.
+type StripProgram struct {
+	Primitive      string               `json:"primitive"`
+	Primary        StripColor           `json:"primary"`
+	Secondary      StripColor           `json:"secondary,omitempty"`
+	PeriodMS       int                  `json:"period_ms"`
+	StepMS         int                  `json:"step_ms,omitempty"`
+	SwapAfterSteps int                  `json:"swap_after_steps,omitempty"`
+	DimIntensity   byte                 `json:"dim_intensity,omitempty"`
+	TailPixels     int                  `json:"tail_pixels,omitempty"`
+	Envelope       []StripEnvelopePoint `json:"envelope,omitempty"`
+}
+
+//go:embed assets/default-effects.json
+var defaultEffectsJSON []byte
+
+// DefaultStripEffects loads the editable first-install seed catalog. Named
+// effects are data, not renderer branches or Go configuration literals. A new
+// installation copies these values into its ordinary watched configuration;
+// after that they can be renamed, duplicated, edited, exported, or deleted.
+func DefaultStripEffects() []StripEffect {
+	var effects []StripEffect
+	if err := json.Unmarshal(defaultEffectsJSON, &effects); err != nil {
+		panic(fmt.Sprintf("decode embedded default effect catalog: %v", err))
+	}
+	return effects
 }
 
 // Automation binds matching host or board events to ordered host-side actions.
@@ -301,6 +388,7 @@ type AutomationMatch struct {
 	RFID       *byte   `json:"rf_id,omitempty"`
 	RFCode     *uint32 `json:"rf_code,omitempty"`
 	RFProtocol byte    `json:"rf_protocol,omitempty"`
+	RFBits     byte    `json:"rf_bits,omitempty"`
 }
 
 // AutomationAction describes one command, macro, process, RF, key, or OS action.
@@ -309,6 +397,7 @@ type AutomationAction struct {
 	Command    string      `json:"command,omitempty"`
 	Macro      string      `json:"macro,omitempty"`
 	Executable string      `json:"executable,omitempty"`
+	Detached   bool        `json:"detached,omitempty"`
 	Args       []string    `json:"args,omitempty"`
 	Script     string      `json:"script,omitempty"`
 	Event      string      `json:"event,omitempty"`
@@ -317,6 +406,10 @@ type AutomationAction struct {
 	HoldMS     int         `json:"hold_ms,omitempty"`
 	Power      string      `json:"power,omitempty"`
 	Confirm    string      `json:"confirm,omitempty"`
+	AppKind    string      `json:"app_kind,omitempty"`
+	AppValue   string      `json:"app_value,omitempty"`
+	AppTarget  string      `json:"app_target,omitempty"`
+	ActionID   string      `json:"action_id,omitempty"`
 }
 
 // RFTransmit defines a host-configured 433 MHz transmission payload.
@@ -331,6 +424,7 @@ type RFTransmit struct {
 // Defaults returns a complete safe host configuration for a new installation.
 func Defaults() Config {
 	return Config{
+		Schema: CurrentConfigSchema,
 		Connection: Connection{
 			VID:                "1A86",
 			PID:                "7523",
@@ -422,6 +516,7 @@ func Defaults() Config {
 		},
 		Scripts:       map[string]string{},
 		Macros:        []Macro{},
+		StripEffects:  DefaultStripEffects(),
 		Melodies:      DefaultMelodies(),
 		StatusEffects: DefaultStatusLEDEffects(),
 	}
@@ -473,13 +568,32 @@ func Load(path string) (Config, [sha256.Size]byte, error) {
 	// Decode over defaults so newly added optional fields receive safe values
 	// without a schema migration, while explicitly configured false/zero values
 	// are still honored in JSON, YAML, and TOML.
+	// Decode once without defaults to retain the on-disk schema signal. Schema
+	// zero is the legacy unversioned format; decoding over Defaults alone would
+	// otherwise make it indistinguishable from a newly written configuration.
+	source := Config{}
+	if err := decodeConfig(path, content, &source); err != nil {
+		return Config{}, [sha256.Size]byte{}, fmt.Errorf("parse %s: %w", path, err)
+	}
 	value := Defaults()
 	if err := decodeConfig(path, content, &value); err != nil {
 		return Config{}, [sha256.Size]byte{}, fmt.Errorf("parse %s: %w", path, err)
 	}
+	sourceSchema := source.Schema
+	if sourceSchema == 0 {
+		sourceSchema = 1
+	}
+	if sourceSchema < 1 || sourceSchema > CurrentConfigSchema {
+		return Config{}, [sha256.Size]byte{}, fmt.Errorf(
+			"validate %s: unsupported configuration schema %d",
+			path,
+			sourceSchema,
+		)
+	}
+	value.Schema = CurrentConfigSchema
 	value.RF = canonicalizeRFConfig(value.RF)
 	value.HostMenus = normalizeHostMenus(value.HostMenus)
-	normalizeMacros(value.Macros)
+	normalizeMacros(value.Macros, sourceSchema)
 	normalizeMeasurementFreshness(&value.UI)
 	if err := normalizeProgramming(&value.Programming); err != nil {
 		return Config{}, [sha256.Size]byte{}, fmt.Errorf("validate %s: programming.firmware_features: %w", path, err)
@@ -522,9 +636,10 @@ func LoadOrCreate(path string) (Config, [sha256.Size]byte, error) {
 
 // Write validates and persists a host configuration with protected file permissions.
 func Write(path string, value Config) error {
+	value.Schema = CurrentConfigSchema
 	value.RF = canonicalizeRFConfig(value.RF)
 	value.HostMenus = normalizeHostMenus(value.HostMenus)
-	normalizeMacros(value.Macros)
+	normalizeMacros(value.Macros, CurrentConfigSchema)
 	if err := normalizeProgramming(&value.Programming); err != nil {
 		return fmt.Errorf("programming.firmware_features: %w", err)
 	}
@@ -578,16 +693,18 @@ func Write(path string, value Config) error {
 	return nil
 }
 
-// normalizeMacros keeps file-backed alpha configurations usable as the macro
-// execution target becomes explicit. An omitted mode or the former "auto"
-// spelling can only describe the host scheduler that existed before the MCU
-// timing engine was selectable. Persisting the next write makes that choice
-// explicit instead of retaining an ambiguous legacy value.
-func normalizeMacros(macros []Macro) {
+// normalizeMacros preserves the execution behavior of unversioned/schema-1
+// configurations while making the schema-2 living alpha contract explicit.
+// Legacy omitted/"auto" values described the only scheduler that existed and
+// therefore become "host". In schema 2, omitted means adaptive execution and
+// "auto" is a durable policy rather than an ownership or storage location.
+func normalizeMacros(macros []Macro, sourceSchema int) {
 	for index := range macros {
 		mode := strings.ToLower(strings.TrimSpace(macros[index].Mode))
-		if mode == "" || mode == "auto" {
+		if sourceSchema < CurrentConfigSchema && (mode == "" || mode == "auto") {
 			mode = "host"
+		} else if mode == "" {
+			mode = "auto"
 		}
 		macros[index].Mode = mode
 	}
@@ -786,10 +903,13 @@ func (value Config) Validate() error {
 		if len(macro.Category) > 64 || !printableASCII(macro.Category) {
 			return fmt.Errorf("macros[%d].category must be at most 64 printable ASCII bytes", index)
 		}
+		if len(macro.Icon) > 64 || !printableASCII(macro.Icon) {
+			return fmt.Errorf("macros[%d].icon must be at most 64 printable ASCII bytes", index)
+		}
 		switch macro.Mode {
-		case "mcu", "host":
+		case "auto", "mcu", "host":
 		default:
-			return fmt.Errorf("macros[%d].mode must be host or mcu", index)
+			return fmt.Errorf("macros[%d].mode must be auto, host, or mcu", index)
 		}
 		switch strings.ToLower(strings.TrimSpace(macro.Color)) {
 		case "", "red", "blue", "purple", "violet", "green", "white":
@@ -825,6 +945,24 @@ func (value Config) Validate() error {
 					return fmt.Errorf("macros[%d].steps[%d].action_ids[%d] is invalid", index, stepIndex, actionIndex)
 				}
 			}
+			switch strings.ToLower(strings.TrimSpace(step.Easing)) {
+			case "", "linear", "ease-in", "ease-out", "ease-in-out":
+			default:
+				return fmt.Errorf("macros[%d].steps[%d].easing must be linear, ease-in, ease-out, or ease-in-out", index, stepIndex)
+			}
+			if step.SampleRateHz > 60 {
+				return fmt.Errorf("macros[%d].steps[%d].sample_rate_hz must be 0..60", index, stepIndex)
+			}
+			if step.RepeatCount > 1000 {
+				return fmt.Errorf("macros[%d].steps[%d].repeat_count must be 0..1000", index, stepIndex)
+			}
+			if step.RepeatIntervalMS > 3_600_000 {
+				return fmt.Errorf("macros[%d].steps[%d].repeat_interval_ms must be 0..3600000", index, stepIndex)
+			}
+			transitionColor := step.ToRed != nil || step.ToGreen != nil || step.ToBlue != nil || step.ToBrightness != nil
+			if (step.ToValue != nil || transitionColor) && step.DurationMS == 0 {
+				return fmt.Errorf("macros[%d].steps[%d] transitions require duration_ms", index, stepIndex)
+			}
 			switch strings.ToLower(step.Kind) {
 			case "relay-mask":
 				if step.Target != 0 || step.Value > 255 {
@@ -839,7 +977,7 @@ func (value Config) Validate() error {
 					return fmt.Errorf("macros[%d].steps[%d] motion requires side 0..1 and motion 0..2", index, stepIndex)
 				}
 			case "pwm", "mosfet":
-				if step.Target > 15 || step.Value > 4095 {
+				if step.Target > 15 || step.Value > 4095 || (step.ToValue != nil && *step.ToValue > 4095) {
 					return fmt.Errorf("macros[%d].steps[%d] PWM requires target 0..15 and value 0..4095", index, stepIndex)
 				}
 			case "relays-off", "pwm-off":
@@ -878,6 +1016,83 @@ func (value Config) Validate() error {
 			default:
 				return fmt.Errorf("macros[%d].steps[%d].kind %q is unknown", index, stepIndex, step.Kind)
 			}
+			kind := strings.ToLower(strings.TrimSpace(step.Kind))
+			if step.ToValue != nil && kind != "pwm" && kind != "mosfet" {
+				return fmt.Errorf("macros[%d].steps[%d].to_value is only valid for PWM", index, stepIndex)
+			}
+			if transitionColor && kind != "rgb" && kind != "status-led" && kind != "addressable" && kind != "ws2812" {
+				return fmt.Errorf("macros[%d].steps[%d] color transition targets require RGB or addressable output", index, stepIndex)
+			}
+		}
+	}
+	stripIDs := make(map[string]bool)
+	stripNames := make(map[string]bool)
+	for index, effect := range value.StripEffects {
+		id := strings.ToLower(strings.TrimSpace(effect.ID))
+		if id == "" || len(id) > 64 || !profileToken(id) {
+			return fmt.Errorf("strip_effects[%d].id must use 1..64 lower-case letters, digits, dot, dash, or underscore", index)
+		}
+		if stripIDs[id] {
+			return fmt.Errorf("strip_effects[%d].id %q is duplicated", index, effect.ID)
+		}
+		stripIDs[id] = true
+		name := strings.ToLower(strings.TrimSpace(effect.Name))
+		if name == "" || len(effect.Name) > 64 || !printableASCII(effect.Name) {
+			return fmt.Errorf("strip_effects[%d].name must be 1..64 printable ASCII bytes", index)
+		}
+		if stripNames[name] {
+			return fmt.Errorf("strip_effects[%d].name %q is duplicated", index, effect.Name)
+		}
+		stripNames[name] = true
+		if len(effect.Category) > 64 || !printableASCII(effect.Category) || len(effect.Description) > 256 || !printableASCII(effect.Description) {
+			return fmt.Errorf("strip_effects[%d] category/description must be printable ASCII within 64/256 bytes", index)
+		}
+		if len(effect.Icon) > 64 || !printableASCII(effect.Icon) {
+			return fmt.Errorf("strip_effects[%d].icon must be at most 64 printable ASCII bytes", index)
+		}
+		program := effect.Program
+		if program.PeriodMS < 50 || program.PeriodMS > 3_600_000 {
+			return fmt.Errorf("strip_effects[%d].program.period_ms must be 50..3600000", index)
+		}
+		switch strings.ToLower(strings.TrimSpace(program.Primitive)) {
+		case "alternating-zones":
+			if program.StepMS < 10 || program.StepMS > program.PeriodMS || program.SwapAfterSteps < 1 || program.SwapAfterSteps > 1024 {
+				return fmt.Errorf("strip_effects[%d] alternating-zones requires step_ms 10..period_ms and swap_after_steps 1..1024", index)
+			}
+		case "envelope":
+			if len(program.Envelope) < 2 || len(program.Envelope) > 256 {
+				return fmt.Errorf("strip_effects[%d] envelope requires 2..256 points", index)
+			}
+			previous := -1
+			for pointIndex, point := range program.Envelope {
+				if point.AtMS <= previous || point.AtMS >= program.PeriodMS {
+					return fmt.Errorf("strip_effects[%d].program.envelope[%d].at_ms must increase and remain below period_ms", index, pointIndex)
+				}
+				previous = point.AtMS
+			}
+		case "converging-points":
+			if program.TailPixels < 0 || program.TailPixels > 100 {
+				return fmt.Errorf("strip_effects[%d].program.tail_pixels must be 0..100", index)
+			}
+		default:
+			return fmt.Errorf("strip_effects[%d].program.primitive is unsupported", index)
+		}
+		if effect.DefaultFPS < 1 || effect.DefaultFPS > 30 {
+			return fmt.Errorf("strip_effects[%d].default_fps must be 1..30", index)
+		}
+		if effect.DefaultDurationMS < 100 || effect.DefaultDurationMS > 3_600_000 {
+			return fmt.Errorf("strip_effects[%d].default_duration_ms must be 100..3600000", index)
+		}
+		if effect.DefaultPixels < 1 || effect.DefaultPixels > 100 {
+			return fmt.Errorf("strip_effects[%d].default_pixels must be 1..100", index)
+		}
+	}
+	for category, group := range value.EffectGroups {
+		if category == "" || len(category) > 64 || !printableASCII(category) {
+			return fmt.Errorf("effect_groups category must be 1..64 printable ASCII bytes")
+		}
+		if len(group.Icon) > 64 || !printableASCII(group.Icon) {
+			return fmt.Errorf("effect_groups[%q].icon must be at most 64 printable ASCII bytes", category)
 		}
 	}
 	if err := validateOutputDefinitions(value.Melodies, value.StatusEffects); err != nil {
@@ -932,6 +1147,9 @@ func (value Config) Validate() error {
 				index,
 			)
 		}
+		if automation.Match.RFBits > 32 {
+			return fmt.Errorf("automations[%d].match.rf_bits must be 0..32", index)
+		}
 		if gesture := strings.ToLower(strings.TrimSpace(
 			automation.Match.Gesture,
 		)); gesture != "" {
@@ -955,6 +1173,14 @@ func (value Config) Validate() error {
 		}
 		for actionIndex, action := range automation.Actions {
 			switch strings.ToLower(strings.TrimSpace(action.Type)) {
+			case "control":
+				if action.ActionID == "" || len(action.ActionID) > 128 || strings.ContainsAny(action.ActionID, " \x00\r\n") {
+					return fmt.Errorf("automations[%d].actions[%d].action_id is invalid", index, actionIndex)
+				}
+			case "app":
+				if action.AppKind == "" || len(action.AppKind) > 128 || len(action.AppTarget) == 0 || len(action.AppTarget) > 128 || len(action.AppValue) > 4096 || strings.ContainsAny(action.AppKind+action.AppTarget+action.AppValue, "\x00\r\n") {
+					return fmt.Errorf("automations[%d].actions[%d] needs a bounded app_kind, app_target and single-line app_value", index, actionIndex)
+				}
 			case "board":
 				command := strings.TrimSpace(action.Command)
 				if command == "" || len(command) > 512 {
@@ -971,7 +1197,7 @@ func (value Config) Validate() error {
 						actionIndex,
 					)
 				}
-			case "macro":
+			case "macro", "effect":
 				if strings.TrimSpace(action.Macro) == "" || len(action.Macro) > 64 {
 					return fmt.Errorf(
 						"automations[%d].actions[%d].macro must be 1..64 bytes",
@@ -1025,21 +1251,14 @@ func (value Config) Validate() error {
 					)
 				}
 			case "virtual-key", "virtual_key", "vk":
-				resolved, resolveErr := hostos.ResolveVirtualKey(action.VirtualKey)
+				resolved, resolveErr := hostos.ResolveKeyStroke(action.VirtualKey)
 				if resolveErr != nil {
 					return fmt.Errorf(
 						"automations[%d].actions[%d].virtual_key: %w",
 						index, actionIndex, resolveErr,
 					)
 				}
-				allowed := false
-				for _, key := range value.OSActions.VirtualKeys.Allowed {
-					candidate, candidateErr := hostos.ResolveVirtualKey(key)
-					if candidateErr == nil && candidate.Code == resolved.Code {
-						allowed = true
-						break
-					}
-				}
+				allowed := hostos.KeyStrokeAllowed(value.OSActions.VirtualKeys, resolved.Name)
 				if !allowed {
 					return fmt.Errorf(
 						"automations[%d].actions[%d] virtual key %s is not allowlisted",

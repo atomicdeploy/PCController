@@ -21,11 +21,12 @@ const (
 )
 
 type Request struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      json.RawMessage `json:"id,omitempty"`
-	Method  string          `json:"method"`
-	Params  json.RawMessage `json:"params,omitempty"`
-	Auth    string          `json:"auth,omitempty"`
+	JSONRPC  string          `json:"jsonrpc"`
+	ID       json.RawMessage `json:"id,omitempty"`
+	Method   string          `json:"method"`
+	Params   json.RawMessage `json:"params,omitempty"`
+	Auth     string          `json:"auth,omitempty"`
+	ClientID string          `json:"client_id,omitempty"`
 }
 
 type Response struct {

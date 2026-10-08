@@ -8,6 +8,7 @@ class SevenSegments {
 public:
   void begin(uint8_t brightness = 5);
   void clear();
+  void showSegments(const uint8_t segments[4]) { commit(segments); }
   // Reads at most four bytes from RAM; a terminator is optional within that
   // fixed display-cell bound.
   void showText(const char *text);

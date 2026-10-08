@@ -761,6 +761,28 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 		},
 	})
 	mustRegister(shell.Command{
+		Name: "estop", Usage: "estop status|on|off",
+		Summary: "lock or release all effect, motion, relay, and PWM admission",
+		Run: func(ctx context.Context, args []string) (string, error) {
+			if len(args) == 0 || len(args) == 1 && strings.EqualFold(args[0], "status") {
+				state := runtime.EmergencyStop()
+				return fmt.Sprintf("E-STOP active=%t revision=%d source=%s reason=%s changed=%s", state.Active, state.Revision, state.Source, state.Reason, state.ChangedAt.Format(time.RFC3339Nano)), nil
+			}
+			if len(args) != 1 || !strings.EqualFold(args[0], "on") && !strings.EqualFold(args[0], "off") {
+				return "", errors.New("usage: estop status|on|off")
+			}
+			active := strings.EqualFold(args[0], "on")
+			state, err := runtime.SetEmergencyStop(ctx, active, "shell", "operator command")
+			if err != nil {
+				return "", err
+			}
+			if state.Active {
+				return "E-STOP engaged; effects and motion are locked", nil
+			}
+			return "E-STOP released; stopped work remains stopped", nil
+		},
+	})
+	mustRegister(shell.Command{
 		Name: "pwm", Usage: "pwm get|off|set CHANNEL PERCENT|raw CHANNEL VALUE|configure CHANNEL TYPE CURVE [GAMMA] [ICON]",
 		Summary: "control logical brightness through per-channel curves or exact raw PWM",
 		Run: func(ctx context.Context, args []string) (string, error) {
@@ -783,7 +805,11 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 			if len(args) > 0 {
 				switch strings.ToLower(args[0]) {
 				case "config", "frame", "rainbow", "effect", "stop", "status":
-					return stripStreamCommand(ctx, outputs, args)
+					definitions := appconfig.DefaultStripEffects()
+					if options.HostConfig != nil {
+						definitions = options.HostConfig().StripEffects
+					}
+					return stripStreamCommand(ctx, outputs, args, definitions)
 				}
 			}
 			outputs.stop("strip")
@@ -946,9 +972,17 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 	})
 	mustRegister(shell.Command{
 		Name: "macro", Usage: "macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|rename NAME_OR_ID NAME|category NAME_OR_ID CATEGORY|delete NAME_OR_ID|record start|start-mcu|start-board|import-board NAME [CATEGORY [COLOR]]|record status|record save|record discard|buffer clear|play NAME_OR_ID [host|mcu]|status|monitor|cancel [keep]",
-		Summary: "record and play named host or MCU-timed multi-peripheral macros",
+		Summary: "compatibility name for recorded effects and timed sequences",
 		Run: func(ctx context.Context, args []string) (string, error) {
 			return macroCommand(ctx, macroRunner, args)
+		},
+	})
+	mustRegister(shell.Command{
+		Name:    "effect",
+		Usage:   "effect list|inspect REF|play REF|create|update|upsert-json|rename|category|delete|record|status|cancel",
+		Summary: "discover, design, record, edit and run PCController-owned effects",
+		Run: func(ctx context.Context, args []string) (string, error) {
+			return effectCommand(ctx, macroRunner, outputs, options.HostConfig, options.UpdateHostConfig, args)
 		},
 	})
 	mustRegister(shell.Command{
@@ -1966,10 +2000,10 @@ func updateVirtualKeyPolicy(
 	if (action == "enable" || action == "disable") && len(args) != 1 {
 		return "", errors.New("usage: os virtual enable|disable")
 	}
-	var resolved hostos.ResolvedVirtualKey
+	var resolved hostos.ResolvedKeyStroke
 	var err error
 	if len(args) == 2 {
-		resolved, err = hostos.ResolveVirtualKey(args[1])
+		resolved, err = hostos.ResolveKeyStroke(args[1])
 		if err != nil {
 			return "", err
 		}
@@ -1982,8 +2016,8 @@ func updateVirtualKeyPolicy(
 			value.OSActions.VirtualKeys.Enabled = false
 		case "allow":
 			for _, existing := range value.OSActions.VirtualKeys.Allowed {
-				candidate, _ := hostos.ResolveVirtualKey(existing)
-				if candidate.Code == resolved.Code {
+				candidate, _ := hostos.ResolveKeyStroke(existing)
+				if candidate.Name == resolved.Name {
 					return fmt.Errorf("virtual key %s is already allowed", resolved.Name)
 				}
 			}
@@ -1991,8 +2025,8 @@ func updateVirtualKeyPolicy(
 		case "deny":
 			filtered := value.OSActions.VirtualKeys.Allowed[:0]
 			for _, existing := range value.OSActions.VirtualKeys.Allowed {
-				candidate, _ := hostos.ResolveVirtualKey(existing)
-				if candidate.Code != resolved.Code {
+				candidate, _ := hostos.ResolveKeyStroke(existing)
+				if candidate.Name != resolved.Name {
 					filtered = append(filtered, existing)
 				}
 			}
@@ -5277,6 +5311,19 @@ func macroCommand(
 			return "", fmt.Errorf("usage: macro record start|start-mcu|start-board|import-board NAME [CATEGORY [COLOR]]|status|save|discard")
 		}
 		switch strings.ToLower(args[1]) {
+		case "append":
+			if len(args) < 3 || len(args) > 4 {
+				return "", errors.New("usage: effect record append REF [automatic|device-clock|board-retained]")
+			}
+			mode := "automatic"
+			if len(args) == 4 {
+				mode = args[3]
+			}
+			state, err := runner.StartAppendingRecording(ctx, args[2], mode)
+			if err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("recording effect %d/%s at sequence end", state.ID, state.Name), nil
 		case "start", "start-mcu", "start-board", "import-board":
 			if len(args) < 3 || len(args) > 5 {
 				return "", fmt.Errorf("usage: macro record %s NAME [CATEGORY [COLOR]]", args[1])
@@ -5307,10 +5354,14 @@ func macroCommand(
 			if err != nil {
 				return "", err
 			}
-			if state.Mode == macroModeHost {
-				return fmt.Sprintf("recording macro %d/%s in host mode; relay/motion, PWM, beep, display, RF and strip commands use host deltas (100ms tolerance)", state.ID, state.Name), nil
+			switch state.Mode {
+			case macroModeHost:
+				return fmt.Sprintf("recording effect %d/%s with the host clock; acknowledged peripheral actions use host deltas", state.ID, state.Name), nil
+			case macroModeMCU:
+				return fmt.Sprintf("recording effect %d/%s with the device clock; acknowledged board actions use device deltas", state.ID, state.Name), nil
+			default:
+				return fmt.Sprintf("recording effect %d/%s adaptively; saving keeps one PCController definition and playback selects the most precise compatible clock", state.ID, state.Name), nil
 			}
-			return fmt.Sprintf("recording macro %d/%s in MCU mode; acknowledged board commands use MCU deltas", state.ID, state.Name), nil
 		case "status":
 			if len(args) != 2 {
 				return "", fmt.Errorf("usage: macro record status")
@@ -5319,7 +5370,7 @@ func macroCommand(
 			if !state.Active && state.Name == "" {
 				return "no macro has been recorded in this session", nil
 			}
-			return fmt.Sprintf("macro recording active=%t id=%d name=%q mode=%s category=%q color=%q steps=%d started=%s error=%q", state.Active, state.ID, state.Name, state.Mode, state.Category, state.Color, state.Steps, state.StartedAt.Format(time.RFC3339), state.LastError), nil
+			return fmt.Sprintf("effect recording active=%t id=%d name=%q policy=%s device_retained=%t category=%q color=%q steps=%d started=%s error=%q", state.Active, state.ID, state.Name, state.Mode, state.DeviceRetained, state.Category, state.Color, state.Steps, state.StartedAt.Format(time.RFC3339), state.LastError), nil
 		case "save", "stop":
 			if len(args) != 2 {
 				return "", fmt.Errorf("usage: macro record save")
@@ -5328,7 +5379,7 @@ func macroCommand(
 			if err != nil {
 				return "", err
 			}
-			return fmt.Sprintf("macro %d/%s saved with %d %s-timed steps", macro.ID, macro.Name, len(macro.Steps), macro.Mode), nil
+			return fmt.Sprintf("effect %d/%s saved with %d steps and %s execution policy", macro.ID, macro.Name, len(macro.Steps), macro.Mode), nil
 		case "discard", "cancel":
 			if len(args) != 2 {
 				return "", fmt.Errorf("usage: macro record discard")
@@ -5337,13 +5388,13 @@ func macroCommand(
 			if err != nil {
 				return "", err
 			}
-			return fmt.Sprintf("macro %d/%s recording discarded", macro.ID, macro.Name), nil
+			return fmt.Sprintf("effect %d/%s recording discarded", macro.ID, macro.Name), nil
 		default:
 			return "", fmt.Errorf("usage: macro record start|start-mcu|start-board|import-board NAME [CATEGORY [COLOR]]|status|save|discard")
 		}
 	case "play", "run", "start":
 		if len(args) < 2 || len(args) > 3 {
-			return "", fmt.Errorf("usage: macro play NAME_OR_ID [host|mcu]")
+			return "", fmt.Errorf("usage: macro play NAME_OR_ID [auto|host|mcu]")
 		}
 		mode := ""
 		if len(args) == 3 {
@@ -5354,9 +5405,10 @@ func macroCommand(
 			return "", err
 		}
 		return fmt.Sprintf(
-			"macro %d/%s started in %s mode with %d steps",
+			"effect %d/%s started with %s policy resolved to %s clock with %d steps",
 			state.ID,
 			state.Name,
+			state.Policy,
 			state.Mode,
 			state.StepCount,
 		), nil
@@ -5379,9 +5431,10 @@ func macroCommand(
 			return "no macro has run in this session", nil
 		}
 		return fmt.Sprintf(
-			"macro id=%d name=%q mode=%s lifecycle=%s running=%t step=%d/%d evidence=%d/%d buffer=%dB timing=%dus max=%dus startup_delay_us=%d violations=%d underruns=%d dispatch_errors=%d faithful=%t started=%s error=%q",
+			"effect id=%d name=%q policy=%s clock=%s lifecycle=%s running=%t step=%d/%d evidence=%d/%d buffer=%dB timing=%dus max=%dus startup_delay_us=%d violations=%d underruns=%d dispatch_errors=%d faithful=%t started=%s error=%q",
 			state.ID,
 			state.Name,
+			state.Policy,
 			state.Mode,
 			state.Lifecycle,
 			state.Running,

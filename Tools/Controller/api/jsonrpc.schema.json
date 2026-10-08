@@ -431,6 +431,8 @@
             "controller.discovery.stage",
             "controller.discovery.status",
             "controller.display.send",
+            "controller.estop.get",
+            "controller.estop.set",
             "controller.event.latest",
             "controller.event.next",
             "controller.exit",
@@ -460,6 +462,12 @@
             "controller.lcd.presentation.status",
             "controller.lcd.priority",
             "controller.lcd.prompt",
+            "controller.media.authority.change",
+            "controller.media.authority.get",
+            "controller.media.playback.get",
+            "controller.media.playback.update",
+            "controller.media.timeline.get",
+            "controller.media.timeline.prepare",
             "controller.melodies.list",
             "controller.menu.current",
             "controller.menu.jump",
@@ -505,6 +513,9 @@
             "controller.reset",
             "controller.reset.lines",
             "controller.restore.flash",
+            "controller.rf.binding.put",
+            "controller.rf.binding.remove",
+            "controller.rf.catalog",
             "controller.rf.clear",
             "controller.rf.learn.cancel",
             "controller.rf.learn.start",
@@ -518,6 +529,8 @@
             "controller.session.snapshot.last",
             "controller.snapshot",
             "controller.status",
+            "controller.status_led.release",
+            "controller.status_led.set",
             "controller.subscribe",
             "controller.system.status",
             "controller.temperatures",
@@ -976,6 +989,16 @@
       "summary": "display send",
       "idempotency": "non-idempotent"
     },
+    "controller.estop.get": {
+      "capability": "read",
+      "summary": "Return the authoritative PCController-wide effect and motion interlock state.",
+      "idempotency": "safe"
+    },
+    "controller.estop.set": {
+      "capability": "board_commands",
+      "summary": "Engage or release the PCController-wide effect and motion interlock; release never resumes cancelled work.",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
     "controller.event.latest": {
       "capability": "events",
       "summary": "event latest",
@@ -1121,6 +1144,36 @@
       "summary": "lcd prompt",
       "idempotency": "non-idempotent"
     },
+    "controller.media.authority.change": {
+      "capability": "board_commands",
+      "summary": "Request, accept, reject, release, lock, or unlock playback authority for a registered client.",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.media.authority.get": {
+      "capability": "read",
+      "summary": "Return the registered playback authority owner, pending requests, exclusivity, and revision.",
+      "idempotency": "safe"
+    },
+    "controller.media.playback.get": {
+      "capability": "read",
+      "summary": "Return the authoritative registered consumer playback clock and prepared-timeline state.",
+      "idempotency": "safe"
+    },
+    "controller.media.playback.update": {
+      "capability": "board_commands",
+      "summary": "Publish one sequenced playback-clock update from the registered authority owner.",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.media.timeline.get": {
+      "capability": "read",
+      "summary": "Return the prepared media timeline, acknowledgement ledger, and sticky failure state.",
+      "idempotency": "safe"
+    },
+    "controller.media.timeline.prepare": {
+      "capability": "board_commands",
+      "summary": "Validate and arm a revisioned host-executed hardware timeline for a registered paused consumer.",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
     "controller.melodies.list": {
       "capability": "read",
       "summary": "Return the effective configured host melody catalog.",
@@ -1233,7 +1286,7 @@
     },
     "controller.peripheral.presentation.update": {
       "capability": "host_configuration",
-      "summary": "Update one advertised peripheral name, icon, or group using optional optimistic concurrency.",
+      "summary": "Update one advertised peripheral name, icon, group, kind-local order, visibility, or lock using optional optimistic concurrency.",
       "idempotency": "idempotent-with-authoritative-readback"
     },
     "controller.peripherals": {
@@ -1346,6 +1399,21 @@
       "summary": "Restore a captured flash backup through the guarded restore path.",
       "idempotency": "non-idempotent"
     },
+    "controller.rf.binding.put": {
+      "capability": "host_configuration",
+      "summary": "Transactionally create or replace one validated host-owned RF application binding.",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.rf.binding.remove": {
+      "capability": "host_configuration",
+      "summary": "Remove one named host-owned RF application binding.",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.rf.catalog": {
+      "capability": "read",
+      "summary": "Return learned RF records, live capture state, persisted bindings, and currently advertised action choices.",
+      "idempotency": "safe"
+    },
     "controller.rf.clear": {
       "capability": "board_commands",
       "summary": "rf clear",
@@ -1410,6 +1478,16 @@
       "capability": "read",
       "summary": "status",
       "idempotency": "safe"
+    },
+    "controller.status_led.release": {
+      "capability": "board_commands",
+      "summary": "status led release",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.status_led.set": {
+      "capability": "board_commands",
+      "summary": "status led set",
+      "idempotency": "idempotent-with-authoritative-readback"
     },
     "controller.subscribe": {
       "capability": "events",

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -26,6 +27,30 @@ type boardProfileDescriptor struct {
 type presentationUpdateResult struct {
 	BoardProfile boardProfileDescriptor         `json:"board_profile"`
 	Peripheral   appconfig.PeripheralDescriptor `json:"peripheral"`
+	Control      *appconfig.ControlDescriptor   `json:"control,omitempty"`
+	Controls     []appconfig.ControlDescriptor  `json:"controls,omitempty"`
+}
+
+func presentationResult(settings peripheralSettings, key string) (presentationUpdateResult, error) {
+	var matchedControl *appconfig.ControlDescriptor
+	for index := range settings.Controls {
+		if settings.Controls[index].Key == key {
+			control := settings.Controls[index]
+			matchedControl = &control
+			break
+		}
+	}
+	for _, peripheral := range settings.Peripherals {
+		if peripheral.Key == key {
+			return presentationUpdateResult{
+				BoardProfile: settings.BoardProfile,
+				Peripheral:   peripheral,
+				Control:      matchedControl,
+				Controls:     settings.Controls,
+			}, nil
+		}
+	}
+	return presentationUpdateResult{}, errors.New("updated peripheral disappeared from the active profile")
 }
 
 func (service *Service) activeBoardProfile() (boardProfileDescriptor, appconfig.BoardProfile) {
@@ -87,7 +112,7 @@ func (service *Service) updateActiveBoardProfile(key, mode string, exposeRawRela
 	return updated, nil
 }
 
-func (service *Service) updatePeripheralPresentation(key string, name, icon, group *string, expectedRevision string) (presentationUpdateResult, error) {
+func (service *Service) updatePeripheralPresentation(key string, name, icon, color, upColor, downColor, group *string, order *int, hidden, locked *bool, expectedRevision string) (presentationUpdateResult, error) {
 	if service.UpdateHostConfig == nil {
 		return presentationUpdateResult{}, errors.New("persistent host configuration is unavailable")
 	}
@@ -96,8 +121,8 @@ func (service *Service) updatePeripheralPresentation(key string, name, icon, gro
 		return presentationUpdateResult{}, errors.New("configure the attached board profile before changing presentation")
 	}
 	key = strings.TrimSpace(key)
-	if key == "" || name == nil && icon == nil && group == nil {
-		return presentationUpdateResult{}, &RPCError{Code: -32602, Message: "key and at least one of name, icon, or group are required"}
+	if key == "" || name == nil && icon == nil && color == nil && upColor == nil && downColor == nil && group == nil && order == nil && hidden == nil && locked == nil {
+		return presentationUpdateResult{}, &RPCError{Code: -32602, Message: "key and at least one presentation field are required"}
 	}
 	known := false
 	for _, peripheral := range service.peripheralSettings().Peripherals {
@@ -109,7 +134,8 @@ func (service *Service) updatePeripheralPresentation(key string, name, icon, gro
 	if !known {
 		return presentationUpdateResult{}, &RPCError{Code: -32602, Message: fmt.Sprintf("peripheral key %q is not advertised by the active profile", key)}
 	}
-	changedFields := make([]string, 0, 3)
+	changedFields := make([]string, 0, 9)
+	changedKeys := []string{key}
 	err := service.UpdateHostConfig(func(config *appconfig.Config) error {
 		profile := config.BoardProfiles[current.BoardIdentity]
 		profile.Mode = appconfig.NormalizeBoardMode(profile.Mode)
@@ -128,14 +154,45 @@ func (service *Service) updatePeripheralPresentation(key string, name, icon, gro
 			presentation.Icon = strings.TrimSpace(*icon)
 			changedFields = append(changedFields, "icon")
 		}
+		if color != nil {
+			presentation.Color = strings.ToUpper(strings.TrimSpace(*color))
+			changedFields = append(changedFields, "color")
+		}
+		if upColor != nil {
+			presentation.UpColor = strings.ToUpper(strings.TrimSpace(*upColor))
+			changedFields = append(changedFields, "up_color")
+		}
+		if downColor != nil {
+			presentation.DownColor = strings.ToUpper(strings.TrimSpace(*downColor))
+			changedFields = append(changedFields, "down_color")
+		}
 		if group != nil {
 			presentation.Group = strings.TrimSpace(*group)
 			changedFields = append(changedFields, "group")
+		}
+		if order != nil && (*order < 0 || *order >= appconfig.MaxPeripheralNames) {
+			return &RPCError{Code: -32602, Message: fmt.Sprintf("order must be in 0..%d", appconfig.MaxPeripheralNames-1)}
+		}
+		if hidden != nil {
+			presentation.Hidden = *hidden
+			changedFields = append(changedFields, "hidden")
+		}
+		if locked != nil {
+			presentation.Locked = *locked
+			changedFields = append(changedFields, "locked")
 		}
 		if presentation == (appconfig.PeripheralPresentation{}) {
 			delete(profile.Presentation, key)
 		} else {
 			profile.Presentation[key] = presentation
+		}
+		if order != nil {
+			var reorderErr error
+			changedKeys, reorderErr = reorderPeripheralPresentation(&profile, config.UI.PeripheralNames, key, *order)
+			if reorderErr != nil {
+				return &RPCError{Code: -32602, Message: reorderErr.Error()}
+			}
+			changedFields = append(changedFields, "order")
 		}
 		config.BoardProfiles[current.BoardIdentity] = profile
 		return nil
@@ -144,13 +201,122 @@ func (service *Service) updatePeripheralPresentation(key string, name, icon, gro
 		return presentationUpdateResult{}, err
 	}
 	settings := service.peripheralSettings()
-	service.publishPeripheralChange(settings.BoardProfile, []string{key}, changedFields)
-	for _, peripheral := range settings.Peripherals {
-		if peripheral.Key == key {
-			return presentationUpdateResult{BoardProfile: settings.BoardProfile, Peripheral: peripheral}, nil
+	service.publishPeripheralChange(settings.BoardProfile, changedKeys, changedFields)
+	return presentationResult(settings, key)
+}
+
+// reorderPeripheralPresentation moves one stable control key within its
+// control kind and writes a complete contiguous rank set. Persisting the whole
+// peer order avoids duplicate ranks and makes every client converge after a
+// single optimistic-concurrency transaction.
+func reorderPeripheralPresentation(profile *appconfig.BoardProfile, legacyNames map[string]string, key string, requested int) ([]string, error) {
+	if profile.Presentation == nil {
+		profile.Presentation = make(map[string]appconfig.PeripheralPresentation)
+	}
+	_, controls := appconfig.ProfileDescriptors(
+		profile.Mode,
+		profile.ExposeRawRelays,
+		legacyNames,
+		profile.Presentation,
+	)
+	var kind string
+	for _, control := range controls {
+		if control.Key == key {
+			kind = control.Kind
+			break
 		}
 	}
-	return presentationUpdateResult{}, errors.New("updated peripheral disappeared from the active profile")
+	if kind == "" {
+		return nil, fmt.Errorf("peripheral key %q is not an ordered control", key)
+	}
+	peers := make([]appconfig.ControlDescriptor, 0, len(controls))
+	for _, control := range controls {
+		if control.Kind == kind {
+			peers = append(peers, control)
+		}
+	}
+	sort.SliceStable(peers, func(left, right int) bool {
+		if peers[left].Order != peers[right].Order {
+			return peers[left].Order < peers[right].Order
+		}
+		return peers[left].Key < peers[right].Key
+	})
+	if requested < 0 || requested >= len(peers) {
+		return nil, fmt.Errorf("order for %s controls must be in 0..%d", kind, len(peers)-1)
+	}
+	current := -1
+	for index := range peers {
+		if peers[index].Key == key {
+			current = index
+			break
+		}
+	}
+	if current < 0 {
+		return nil, fmt.Errorf("peripheral key %q disappeared from the %s controls", key, kind)
+	}
+	moved := peers[current]
+	peers = append(peers[:current], peers[current+1:]...)
+	peers = append(peers, appconfig.ControlDescriptor{})
+	copy(peers[requested+1:], peers[requested:])
+	peers[requested] = moved
+
+	changed := make([]string, 0, len(peers))
+	for rank, control := range peers {
+		presentation := profile.Presentation[control.Key]
+		rankValue := rank
+		presentation.Order = &rankValue
+		profile.Presentation[control.Key] = presentation
+		changed = append(changed, control.Key)
+	}
+	return changed, nil
+}
+
+func (service *Service) peripheralLocked(key string) bool {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return false
+	}
+	for _, control := range service.peripheralSettings().Controls {
+		if control.Key == key {
+			return control.Locked
+		}
+	}
+	return false
+}
+
+func (service *Service) rejectLockedPeripheral(key string) error {
+	if service.peripheralLocked(key) {
+		return fmt.Errorf("peripheral %q is locked by the active board profile", key)
+	}
+	return nil
+}
+
+func peripheralKeyForCommand(command string) string {
+	words := strings.Fields(strings.ToLower(strings.TrimSpace(command)))
+	if len(words) < 3 || words[0] != "relay" {
+		return ""
+	}
+	if words[1] == "side" && len(words) >= 4 {
+		switch words[2] {
+		case "a", "left", "1":
+			return "seat.a"
+		case "b", "right", "2":
+			return "seat.b"
+		}
+		return ""
+	}
+	relay, err := strconv.Atoi(words[1])
+	if err != nil || relay < 1 || relay > 8 {
+		return ""
+	}
+	return fmt.Sprintf("relay.%d", relay)
+}
+
+func (service *Service) rejectLockedCommand(command string) error {
+	if key := peripheralKeyForCommand(command); key != "" {
+		return service.rejectLockedPeripheral(key)
+	}
+	return nil
 }
 
 func (service *Service) publishPeripheralChange(profile boardProfileDescriptor, changedKeys, changedFields []string) {
@@ -176,6 +342,9 @@ func (service *Service) invokeSemanticAction(ctx context.Context, actionID strin
 	control, action, advertised := advertisedSemanticAction(service.peripheralSettings().Controls, actionID)
 	if !advertised {
 		return nil, fmt.Errorf("action %q is not advertised by board profile %q", actionID, profile.Key)
+	}
+	if control.Locked {
+		return nil, fmt.Errorf("peripheral %q is locked by board profile %q", control.Key, profile.Key)
 	}
 	controlKey := control.Key
 	var err error

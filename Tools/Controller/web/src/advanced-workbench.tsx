@@ -234,7 +234,7 @@ export function AdvancedWorkbench({
   const [hostMenuID, setHostMenuID] = useState('')
   const [hostMenuLabel, setHostMenuLabel] = useState('')
   const [frontPanel, setFrontPanel] = useState<FrontPanelState | undefined>(
-    available.segments && snapshot.have_front_panel ? snapshot.front_panel : undefined,
+    available.segments && (snapshot.have_front_panel || snapshot.have_front_panel_segments) ? snapshot.front_panel : undefined,
   )
 
   const [pixel, setPixel] = useState(0)
@@ -324,8 +324,16 @@ export function AdvancedWorkbench({
       setFrontPanel(undefined)
       return
     }
-    if (snapshot.have_front_panel && snapshot.front_panel) setFrontPanel(snapshot.front_panel)
-  }, [available.segments, online, snapshot.front_panel_updated, snapshot.have_front_panel, snapshot.front_panel])
+    if ((snapshot.have_front_panel || snapshot.have_front_panel_segments) && snapshot.front_panel) setFrontPanel(snapshot.front_panel)
+  }, [available.segments, online, snapshot.front_panel_updated, snapshot.have_front_panel, snapshot.have_front_panel_segments, snapshot.front_panel])
+
+  useEffect(() => {
+    if (!online || !available.segments || snapshot.have_front_panel) return
+    // One exact read establishes menu/LCD/key authority. Subsequent physical
+    // segment frames arrive through the event stream and need no polling or
+    // operator-owned refresh button.
+    void rpc<FrontPanelState>('controller.front_panel').then(setFrontPanel).catch(() => undefined)
+  }, [available.segments, online, snapshot.have_front_panel])
 
   useEffect(() => {
     setServiceOutput(copy('No service query yet.', 'هنوز پرس‌وجوی سرویسی انجام نشده است.'))
@@ -650,12 +658,15 @@ export function AdvancedWorkbench({
             <SevenSegmentPreview panel={frontPanel} label={copy('Live physical seven-segment display', 'نمایش زندهٔ نمایشگر فیزیکی هفت‌بخشی')} />
             <div>
               <strong>{copy('Live physical display', 'نمایش زنده پنل')}</strong>
-              <span>{frontPanel ? `${copy('page', 'صفحه')} ${frontPanel.menu_page} · ${copy('brightness', 'روشنایی')} ${frontPanel.brightness}/7` : copy('Awaiting exact front-panel state', 'در انتظار وضعیت دقیق پنل')}</span>
-			  <small>{copy('Changed-only board opcodes update this preview immediately; refresh is explicit.', 'اپ‌کدهای تغییرمحور برد این پیش‌نمایش را فوری به‌روز می‌کنند؛ تازه‌سازی صریح است.')}</small>
+			  <span>{frontPanel ? snapshot.have_front_panel
+			    ? `${copy('page', 'صفحه')} ${frontPanel.menu_page} · ${copy('brightness', 'روشنایی')} ${frontPanel.brightness}/7`
+			    : `${copy('live segment frame', 'فریم زنده نمایشگر')} · ${copy('brightness', 'روشنایی')} ${frontPanel.brightness}/7`
+			    : copy('Waiting for the next physical display event', 'در انتظار رویداد بعدی نمایشگر فیزیکی')}</span>
+			  <small>{copy('Physical changes update every connected client immediately through the state stream.', 'تغییرات فیزیکی از راه جریان وضعیت، همهٔ کارخواه‌های متصل را فوری به‌روز می‌کند.')}</small>
             </div>
           </div>}
           <div className="advanced-actions">
-			{available.segments && <Button icon={RefreshCw} disabled={!online} onClick={() => void rpc<FrontPanelState>('controller.front_panel').then(setFrontPanel).catch(() => undefined)}>{copy('Refresh physical state', 'تازه‌سازی وضعیت فیزیکی')}</Button>}
+			{available.segments && !snapshot.have_front_panel_segments && <Button icon={RefreshCw} disabled={!online} onClick={() => void rpc<FrontPanelState>('controller.front_panel').then(setFrontPanel).catch(() => undefined)}>{copy('Recover physical state', 'بازیابی وضعیت فیزیکی')}</Button>}
             <Button icon={BookOpen} disabled={!online} busy={busy === 'menu list'} onClick={() => void run('menu list')}>{copy('Firmware catalog', 'کاتالوگ میان‌افزار')}</Button>
             <Button icon={LayoutDashboard} disabled={!online} busy={busy === 'menu current'} onClick={() => void run('menu current')}>{copy('Current page', 'صفحه فعلی')}</Button>
             <Button icon={LayoutPanelTop} disabled={!online} busy={busy === 'menu layout'} onClick={() => void run('menu layout')}>{copy('Stored layout', 'چیدمان ذخیره‌شده')}</Button>
@@ -727,10 +738,11 @@ export function AdvancedWorkbench({
           <div className="advanced-actions">
             <Button disabled={!online} busy={busy === `strip config ${stripCount}`} onClick={() => void run(`strip config ${stripCount}`)}>{copy('Set LED count', 'تنظیم تعداد LED')}</Button>
             <Button icon={Play} disabled={!online} busy={busy === `strip rainbow ${stripCount} ${stripFPS}`} onClick={() => void run(`strip rainbow ${stripCount} ${stripFPS}`)}>{copy('Rolling rainbow', 'رنگین‌کمان متحرک')}</Button>
-            <Button icon={Sparkles} disabled={!online} busy={busy === `strip effect play police ${stripCount} ${stripFPS}`} onClick={() => void run(`strip effect play police ${stripCount} ${stripFPS}`)}>{copy('Police red / blue', 'پلیسی قرمز / آبی')}</Button>
-            <Button icon={Sparkles} disabled={!online} busy={busy === `strip effect play white-thunder ${stripCount} ${stripFPS}`} onClick={() => void run(`strip effect play white-thunder ${stripCount} ${stripFPS}`)}>{copy('White thunder', 'رعد سفید')}</Button>
-            <Button icon={Sparkles} disabled={!online} busy={busy === `strip effect play converging-red ${stripCount} ${stripFPS}`} onClick={() => void run(`strip effect play converging-red ${stripCount} ${stripFPS}`)}>{copy('Converging red dots', 'نقطه‌های قرمز همگرا')}</Button>
-            <Button icon={CircleStop} onClick={() => void run('strip stop')}>{copy('Stop stream', 'توقف جریان')}</Button>
+            {(snapshot.strip_effects ?? []).map((effect) => {
+              const command = `effect play ${effect.id} ${stripCount} ${stripFPS}`
+              return <Button key={effect.id} icon={Sparkles} disabled={!online} busy={busy === command} onClick={() => void run(command)}>{effect.name}</Button>
+            })}
+            <Button icon={CircleStop} onClick={() => void run('effect stop')}>{copy('Stop', 'توقف')}</Button>
             <Button icon={Eraser} disabled={!online} onClick={() => void run('strip clear')}>{copy('Clear strip', 'خاموش کردن نوار')}</Button>
             <Button icon={Activity} onClick={() => void run('strip status')}>{copy('Stream status', 'وضعیت جریان')}</Button>
           </div>
@@ -825,9 +837,22 @@ export function AdvancedWorkbench({
             <Button icon={ListTree} busy={busy === 'keyboard list'} onClick={() => void run('keyboard list')}>{copy('Binding catalog', 'فهرست نگاشت‌ها')}</Button>
             <Button icon={Keyboard} onClick={() => prepare('keyboard enable', copy('Enabling the global hook activates the configured bindings; review them first with Keyboard list.', 'فعال‌سازی هوک سراسری، نگاشت‌های پیکربندی‌شده را فعال می‌کند؛ ابتدا فهرست صفحه‌کلید را بازبینی کنید.'), 'caution')}>{copy('Review enable', 'بازبینی فعال‌سازی')}</Button>
             <Button icon={KeyboardOff} busy={busy === 'keyboard disable'} onClick={() => void run('keyboard disable')}>{copy('Disable & release', 'غیرفعال و آزادسازی')}</Button>
-            <Button tone="danger" icon={CircleStop} busy={busy === 'keyboard stop'} onClick={() => void run('keyboard stop')}>{copy('Emergency output release', 'آزادسازی اضطراری خروجی‌ها')}</Button>
+            <Button
+              tone="danger"
+              icon={CircleStop}
+              busy={busy === `estop ${snapshot.emergency_stop?.active ? 'off' : 'on'}`}
+              onClick={() => void run(`estop ${snapshot.emergency_stop?.active ? 'off' : 'on'}`)}
+            >
+              {snapshot.emergency_stop?.active
+                ? copy('Release E-STOP', 'آزادسازی توقف اضطراری')
+                : copy('Engage E-STOP', 'فعال‌سازی توقف اضطراری')}
+            </Button>
           </div>
-          <p className="advanced-note advanced-note--safe">{copy('The stop command releases keyboard-held and latched outputs without shutting down the host.', 'فرمان توقف، خروجی‌های نگه‌داشته‌شده توسط صفحه‌کلید را بدون خاموش‌کردن میزبان آزاد می‌کند.')}</p>
+          <p className="advanced-note advanced-note--safe">
+            {snapshot.emergency_stop?.active
+              ? copy('Locked: effects, seat motion, relay tests, relay-on, and PWM output commands are rejected by PCController.', 'قفل است: افکت‌ها، حرکت صندلی، آزمایش رله، روشن‌کردن رله و فرمان‌های PWM توسط PCController رد می‌شوند.')
+              : copy('Ready. Engaging E-STOP cancels effect playback and locks every motion/output command at PCController.', 'آماده است. توقف اضطراری پخش افکت را لغو و همه فرمان‌های حرکت و خروجی را در PCController قفل می‌کند.')}
+          </p>
         </AdvancedPanel></>}
 
         <AdvancedPanel

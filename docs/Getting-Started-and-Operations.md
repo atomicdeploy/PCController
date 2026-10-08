@@ -394,7 +394,12 @@ status-RGB controls. `controller.pwm.values`, `controller.pwm.set`,
 `controller.pwm.channel.configure`, and
 `controller.pwm.off` provide the typed RPC surface; matching REST operations
 are `GET`, `PUT`, and `DELETE /api/pwm`; channel configuration is available
-through `GET` and `PUT /api/pwm/channel`.
+through `GET` and `PUT /api/pwm/channel`. Successful writes publish the complete
+`pwm.changed` readback to every state subscriber, so cards, timelines, and
+remote clients converge without polling one selected channel. The dedicated
+`controller.status_led.set` and `controller.status_led.release` calls apply and
+release a custom RGB override without treating the compositor channels as
+ordinary user sliders.
 
 ### Buzzer and effects
 

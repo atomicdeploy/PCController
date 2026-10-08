@@ -49,6 +49,79 @@ func TestCompileMacroEncodesOrdinaryOpcodesWithExactOffsets(t *testing.T) {
 	}
 }
 
+func TestTimelineBooleanCueExpandsDurationAndRepetition(t *testing.T) {
+	expanded, err := expandMacroTimeline([]appconfig.MacroStep{{
+		Kind: "relay", Target: 5, Value: 1, DurationMS: 100,
+		RepeatCount: 3, RepeatIntervalMS: 250,
+		ActionIDs: []string{"relay.6.on"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(expanded) != 6 {
+		t.Fatalf("expanded steps=%d, want 6: %#v", len(expanded), expanded)
+	}
+	wantDue := []uint32{0, 100000, 250000, 350000, 500000, 600000}
+	wantValue := []uint16{1, 0, 1, 0, 1, 0}
+	for index := range expanded {
+		if expanded[index].AtUS != wantDue[index] || expanded[index].Value != wantValue[index] {
+			t.Fatalf("step %d=%#v, want at=%d value=%d", index, expanded[index], wantDue[index], wantValue[index])
+		}
+		if expanded[index].RepeatCount != 0 || expanded[index].DurationMS != 0 {
+			t.Fatalf("runtime step retained authoring fields: %#v", expanded[index])
+		}
+		wantAction := "relay.6.on"
+		if expanded[index].Value == 0 {
+			wantAction = "relay.6.off"
+		}
+		if len(expanded[index].ActionIDs) != 1 || expanded[index].ActionIDs[0] != wantAction {
+			t.Fatalf("step %d semantic action=%v, want %q", index, expanded[index].ActionIDs, wantAction)
+		}
+	}
+}
+
+func TestTimelineRangeCueExpandsEasedPWMFade(t *testing.T) {
+	end := uint16(4095)
+	expanded, err := expandMacroTimeline([]appconfig.MacroStep{{
+		Kind: "pwm", Target: 11, Value: 0, ToValue: &end,
+		DurationMS: 100, Easing: "ease-out", SampleRateHz: 40,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(expanded) != 5 || expanded[0].AtUS != 0 || expanded[4].AtUS != 100000 {
+		t.Fatalf("unexpected expanded fade: %#v", expanded)
+	}
+	if expanded[0].Value != 0 || expanded[4].Value != 4095 {
+		t.Fatalf("fade endpoints=%d..%d", expanded[0].Value, expanded[4].Value)
+	}
+	if expanded[2].Value <= 2048 {
+		t.Fatalf("ease-out midpoint=%d, want above linear midpoint", expanded[2].Value)
+	}
+	for _, step := range expanded {
+		if step.ToValue != nil || step.Easing != "" || step.SampleRateHz != 0 {
+			t.Fatalf("runtime step retained curve authoring fields: %#v", step)
+		}
+	}
+}
+
+func TestAdaptiveEffectExecutionChoosesMostPreciseCompatibleClock(t *testing.T) {
+	sequence := appconfig.Macro{
+		ID: 7, Name: "seat", Mode: macroModeAuto,
+		Steps: []appconfig.MacroStep{{Kind: "relay", Target: 5, Value: 1}},
+	}
+	if got := resolveMacroMode(sequence, 0); got != macroModeHost {
+		t.Fatalf("without timed queue mode=%q, want host", got)
+	}
+	if got := resolveMacroMode(sequence, native.CapabilityTimedMacroQueue); got != macroModeMCU {
+		t.Fatalf("with timed queue mode=%q, want mcu", got)
+	}
+	sequence.Steps = append(sequence.Steps, appconfig.MacroStep{Kind: "addressable", Target: 1, Red: 255})
+	if got := resolveMacroMode(sequence, native.CapabilityTimedMacroQueue); got != macroModeHost {
+		t.Fatalf("shared strip workspace mode=%q, want host", got)
+	}
+}
+
 func macroTestRunner(config *appconfig.Config, saveError *error) *MacroRunner {
 	runtime := New(Options{})
 	runner := NewMacroRunner(runtime, func() []appconfig.Macro { return config.Macros }, func() appconfig.Config { return *config }, func(change func(*appconfig.Config) error) error {
@@ -84,6 +157,9 @@ func TestHostRecordingMixedOutputsRoundTripsNamedPlayback(t *testing.T) {
 		{Opcode: native.OpBuzzer, Payload: native.BuzzerPayload(880, 25)},
 		{Opcode: native.OpDisplayText, Payload: text},
 		{Opcode: native.OpDisplayText, Payload: scheduled},
+		{Opcode: native.OpStatusRGB, Payload: []byte{255, 32, 0, 180}},
+		{Opcode: native.OpMenuSetPage, Payload: []byte{2}},
+		{Opcode: native.OpMenuAction, Payload: []byte{1}},
 		{Opcode: native.OpPWMAllOff},
 		{Opcode: native.OpPWMAllOff},
 	}
@@ -94,6 +170,14 @@ func TestHostRecordingMixedOutputsRoundTripsNamedPlayback(t *testing.T) {
 	}
 	if got := runner.Snapshot().Recording.Steps; got != len(inputs) {
 		t.Fatalf("live snapshot steps=%d", got)
+	}
+	preview := runner.Snapshot().Recording.Preview
+	if len(preview) != len(inputs) || preview[0].Kind != "pwm" || preview[2].Kind != "beep" {
+		t.Fatalf("live recording preview=%#v", preview)
+	}
+	preview[0].Kind = "mutated"
+	if runner.Snapshot().Recording.Preview[0].Kind != "pwm" {
+		t.Fatal("live recording preview aliased recorder-owned steps")
 	}
 	macro, err := runner.StopRecording(true)
 	if err != nil {
@@ -111,10 +195,12 @@ func TestHostRecordingMixedOutputsRoundTripsNamedPlayback(t *testing.T) {
 	if config.Macros[0].Name != "renamed take" || config.Macros[0].Category != "cinema" {
 		t.Fatal(config.Macros)
 	}
-	if text, err := macroCommand(context.Background(), runner, []string{"monitor"}); err != nil || !strings.Contains(text, "steps=7") {
+	if text, err := macroCommand(context.Background(), runner, []string{"monitor"}); err != nil || !strings.Contains(text, "steps=10") {
 		t.Fatalf("monitor=%s err=%v", text, err)
 	}
-	compiled, err := compileMacro(config.Macros[0])
+	hostDefinition := config.Macros[0]
+	hostDefinition.Mode = macroModeHost
+	compiled, err := compileMacro(hostDefinition)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,13 +372,18 @@ func TestBasicHostRecorderIgnoresHousekeepingAndUsesObservedDeltas(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state.Mode != macroModeHost {
-		t.Fatalf("default recorder mode = %q, want host", state.Mode)
+	if state.Mode != macroModeAuto {
+		t.Fatalf("default recorder policy = %q, want auto", state.Mode)
 	}
 	base := time.Now()
 	runner.captureCommand(CommandEvidence{
 		Opcode: native.OpStatusRGB, Payload: []byte{1, 2, 3, 4},
-		DeviceMicros: 100, Timed: true, ObservedAt: base,
+		DeviceMicros: 100, Timed: true, ObservedAt: base, Source: CommandSourceBackground,
+	})
+	backgroundDisplay, _ := native.DisplayTextPayload(native.DisplayLCD, 0, "RELAY           relay outputs changed")
+	runner.captureCommand(CommandEvidence{
+		Opcode: native.OpDisplayText, Payload: backgroundDisplay,
+		DeviceMicros: 150, Timed: true, ObservedAt: base.Add(5 * time.Millisecond), Source: CommandSourceBackground,
 	})
 	runner.captureCommand(CommandEvidence{
 		Opcode: native.OpSetStream, Payload: []byte{1, 0},
@@ -313,8 +404,8 @@ func TestBasicHostRecorderIgnoresHousekeepingAndUsesObservedDeltas(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if macro.Mode != macroModeHost || macro.TimingToleranceUS != defaultHostMacroToleranceUS {
-		t.Fatalf("unexpected host mode metadata: %#v", macro)
+	if macro.Mode != macroModeAuto || macro.TimingToleranceUS != 0 {
+		t.Fatalf("unexpected adaptive policy metadata: %#v", macro)
 	}
 	if len(macro.Steps) != 3 {
 		t.Fatalf("housekeeping was not filtered: %#v", macro.Steps)

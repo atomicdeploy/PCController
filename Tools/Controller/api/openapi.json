@@ -287,6 +287,132 @@
         }
       }
     },
+    "/api/estop": {
+      "get": {
+        "operationId": "get_api_estop",
+        "summary": "Authoritative effect and motion interlock state",
+        "tags": [
+          "service"
+        ],
+        "x-required-capability": "read",
+        "x-idempotency": "safe",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      },
+      "put": {
+        "operationId": "put_api_estop",
+        "summary": "Engage or release the effect and motion interlock",
+        "tags": [
+          "service"
+        ],
+        "x-required-capability": "board_commands",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "post_api_estop",
+        "summary": "Engage or release the effect and motion interlock",
+        "tags": [
+          "service"
+        ],
+        "x-required-capability": "board_commands",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/peripherals": {
       "get": {
         "operationId": "get_api_peripherals",
@@ -3682,6 +3808,8 @@
               "controller.discovery.stage",
               "controller.discovery.status",
               "controller.display.send",
+              "controller.estop.get",
+              "controller.estop.set",
               "controller.event.latest",
               "controller.event.next",
               "controller.exit",
@@ -3711,6 +3839,12 @@
               "controller.lcd.presentation.status",
               "controller.lcd.priority",
               "controller.lcd.prompt",
+              "controller.media.authority.change",
+              "controller.media.authority.get",
+              "controller.media.playback.get",
+              "controller.media.playback.update",
+              "controller.media.timeline.get",
+              "controller.media.timeline.prepare",
               "controller.melodies.list",
               "controller.menu.current",
               "controller.menu.jump",
@@ -3756,6 +3890,9 @@
               "controller.reset",
               "controller.reset.lines",
               "controller.restore.flash",
+              "controller.rf.binding.put",
+              "controller.rf.binding.remove",
+              "controller.rf.catalog",
               "controller.rf.clear",
               "controller.rf.learn.cancel",
               "controller.rf.learn.start",
@@ -3769,6 +3906,8 @@
               "controller.session.snapshot.last",
               "controller.snapshot",
               "controller.status",
+              "controller.status_led.release",
+              "controller.status_led.set",
               "controller.subscribe",
               "controller.system.status",
               "controller.temperatures",

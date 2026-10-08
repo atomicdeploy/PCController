@@ -23,6 +23,24 @@ const (
 	maxAutomationOutput       = 8 * 1024
 )
 
+// SetAutomationAppDispatcher connects automations to the primary's acknowledged
+// application-action coordinator. There is no untracked fallback delivery.
+func (runtime *Runtime) SetAutomationAppDispatcher(dispatch func(context.Context, appconfig.AutomationAction) error) {
+	runtime.automationAppMu.Lock()
+	runtime.automationApp = dispatch
+	runtime.automationAppMu.Unlock()
+}
+
+func (runtime *Runtime) RFActivity() []Event {
+	runtime.eventMu.Lock()
+	defer runtime.eventMu.Unlock()
+	result := make([]Event, 0, 20)
+	for i := len(runtime.rfActivityLog) - 1; i >= 0; i-- {
+		result = append(result, runtime.rfActivityLog[i])
+	}
+	return result
+}
+
 // RunAutomations observes the retained event ring, so it never steals events
 // from the TUI, monitor, IPC, or API channels. The provider is evaluated for
 // every event, which makes a valid watched config replacement effective
@@ -48,6 +66,9 @@ func RunAutomations(
 			continue
 		}
 		config := provider()
+		if strings.HasPrefix(event.Kind, "rf.") && runtime.RFLearnState().Active {
+			continue // Learning a button must not trigger its host assignment.
+		}
 		for _, automation := range config.Automations {
 			if !automation.Enabled || !automationMatches(automation.Match, event) {
 				continue
@@ -167,7 +188,7 @@ func automationMatches(match appconfig.AutomationMatch, event Event) bool {
 		if actual == "" && haveDevice && device.Type == native.EventKey {
 			actual = NormalizeGesture(device.Gesture)
 		}
-		if !strings.EqualFold(actual, normalizeGestureName(match.Gesture)) {
+		if !strings.EqualFold(normalizeGestureName(actual), normalizeGestureName(match.Gesture)) {
 			return false
 		}
 	}
@@ -208,6 +229,15 @@ func automationMatches(match appconfig.AutomationMatch, event Event) bool {
 			actual = device.RFProtocol
 		}
 		if actual != match.RFProtocol {
+			return false
+		}
+	}
+	if match.RFBits != 0 {
+		actual := event.RFBits
+		if actual == 0 && haveDevice && device.Type == native.EventRFReceived {
+			actual = device.RFBits
+		}
+		if actual != match.RFBits {
 			return false
 		}
 	}
@@ -258,6 +288,16 @@ func executeAutomation(
 ) error {
 	for index, action := range automation.Actions {
 		switch strings.ToLower(strings.TrimSpace(action.Type)) {
+		case "app", "control":
+			runtime.automationAppMu.RLock()
+			dispatch := runtime.automationApp
+			runtime.automationAppMu.RUnlock()
+			if dispatch == nil {
+				return fmt.Errorf("action %d application coordinator is unavailable", index)
+			}
+			if err := dispatch(ctx, action); err != nil {
+				return fmt.Errorf("action %d application: %w", index, err)
+			}
 		case "board":
 			output, err := engine.Execute(ctx, action.Command)
 			if err != nil {
@@ -287,6 +327,10 @@ func executeAutomation(
 					fmt.Sprintf("%s macro: %s", automation.Name, output),
 				)
 			}
+		case "effect":
+			if _, err := engine.Execute(ctx, shell.Join([]string{"effect", "play", action.Macro})); err != nil {
+				return fmt.Errorf("action %d effect: %w", index, err)
+			}
 		case "rf":
 			if action.RF == nil {
 				return fmt.Errorf("action %d RF payload is missing", index)
@@ -313,6 +357,21 @@ func executeAutomation(
 				return fmt.Errorf("action %d: %w", index, err)
 			}
 			process := exec.CommandContext(ctx, executable, arguments...)
+			if action.Detached {
+				// Explicit application launch is not a 30-second task. Let the
+				// application live independently; reap it without blocking RF input.
+				process = exec.Command(executable, arguments...)
+				if err := process.Start(); err != nil {
+					return fmt.Errorf("action %d launch: %w", index, err)
+				}
+				runtime.PublishHostEvent("automation", fmt.Sprintf("%s launched process %d", automation.Name, process.Process.Pid))
+				go func() {
+					if err := process.Wait(); err != nil {
+						runtime.PublishHostEvent("automation", fmt.Sprintf("launched process exited: %v", err))
+					}
+				}()
+				continue
+			}
 			var output boundedBuffer
 			process.Stdout = &output
 			process.Stderr = &output

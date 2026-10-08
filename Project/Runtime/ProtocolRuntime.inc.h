@@ -854,7 +854,7 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame,
            (length < 8 ||
             length < static_cast<uint8_t>(8 + payload[3]) ||
             (payload[4] & 0x03U) > 2 ||
-            (payload[4] & 0x7CU) != 0 ||
+            (payload[4] & 0x5CU) != 0 ||
             ((payload[4] & 0x03U) == 2 && payload[7] == 0))) ||
           (payload[0] == 3 && (payload[3] < 4 || payload[3] > 36)) ||
           (payload[0] == 4 && payload[3] != 0)) {

@@ -30,15 +30,19 @@ const repositoryIdentityPaths = new Set([
   "docs/Media-Timing-and-MCU-Expansion.md",
 ]);
 
-// This reviewed roadmap cites the paired client and candidate hardware
-// backends. Keep exceptions specific to both the document and repository;
-// private paths, stale-origin language and unrelated URLs remain forbidden.
-const reviewedRoadmapRepositories = new Map([
+// These reviewed integration documents cite the paired client or candidate
+// hardware backends. Keep exceptions specific to both the document and
+// repository; private paths, stale-origin language and unrelated URLs remain
+// forbidden.
+const reviewedExternalRepositories = new Map([
   ["docs/Media-Timing-and-MCU-Expansion.md", new Set([
     "toghroltp/pealayer",
     "mcudude/megacore",
     "fastled/fastled",
   ])],
+  ["docs/Playback-Board-Sync.md", new Set(["toghroltp/pealayer"])],
+  ["docs/Prepared-Media-Timeline.md", new Set(["toghroltp/pealayer"])],
+  ["docs/RF-APPLICATION-ACTIONS.md", new Set(["toghroltp/pealayer"])],
 ]);
 
 // External repository URLs are limited to reviewed dependency provenance.
@@ -149,7 +153,7 @@ export function privacyFindings(path, text, { repository = "" } = {}) {
     const ownRepository = repository && found.toLowerCase() === repository.toLowerCase();
     if (
       (ownRepository && repositoryIdentityPaths.has(relativePath)) ||
-      reviewedRoadmapRepositories.get(relativePath)?.has(found.toLowerCase()) ||
+      reviewedExternalRepositories.get(relativePath)?.has(found.toLowerCase()) ||
       isThirdPartyProvenance(relativePath)
     ) {
       continue;

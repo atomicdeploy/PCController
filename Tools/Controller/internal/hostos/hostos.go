@@ -139,16 +139,16 @@ func ValidatePolicy(value Policy) error {
 	if len(value.VirtualKeys.Allowed) == 0 || len(value.VirtualKeys.Allowed) > 64 {
 		return errors.New("os_actions.virtual_keys.allowed must contain 1..64 keys")
 	}
-	seenKeys := make(map[uint16]bool)
+	seenKeys := make(map[string]bool)
 	for index, key := range value.VirtualKeys.Allowed {
-		resolved, err := ResolveVirtualKey(key)
+		resolved, err := ResolveKeyStroke(key)
 		if err != nil {
 			return fmt.Errorf("os_actions.virtual_keys.allowed[%d]: %w", index, err)
 		}
-		if seenKeys[resolved.Code] {
-			return fmt.Errorf("os_actions.virtual_keys.allowed[%d] duplicates VK 0x%02X", index, resolved.Code)
+		if seenKeys[resolved.Name] {
+			return fmt.Errorf("os_actions.virtual_keys.allowed[%d] duplicates %s", index, resolved.Name)
 		}
-		seenKeys[resolved.Code] = true
+		seenKeys[resolved.Name] = true
 	}
 	if len(value.Power.Allowed) == 0 || len(value.Power.Allowed) > 6 {
 		return errors.New("os_actions.power.allowed must contain 1..6 actions")
@@ -269,10 +269,65 @@ func canonicalVirtualKeyName(code uint16) string {
 	return fmt.Sprintf("VK_0x%02X", code)
 }
 
-func virtualKeyAllowed(policy VirtualKeyPolicy, code uint16) bool {
+// ResolvedKeyStroke is one exact key or modifier chord. Modifiers are never
+// allowed alone, and allowing S does not authorize CTRL+S (or vice versa).
+type ResolvedKeyStroke struct {
+	Name  string
+	Codes []uint16
+}
+
+func ResolveKeyStroke(value string) (ResolvedKeyStroke, error) {
+	parts := strings.Split(value, "+")
+	if len(parts) == 1 {
+		key, err := ResolveVirtualKey(value)
+		if err != nil {
+			return ResolvedKeyStroke{}, err
+		}
+		return ResolvedKeyStroke{Name: key.Name, Codes: []uint16{key.Code}}, nil
+	}
+	if len(parts) > 5 {
+		return ResolvedKeyStroke{}, errors.New("keyboard chord has too many modifiers")
+	}
+	modifiers := map[string]uint16{}
+	for _, part := range parts[:len(parts)-1] {
+		name, code := "", uint16(0)
+		switch normalizeKeyName(part) {
+		case "CTRL", "CONTROL":
+			name, code = "CTRL", 0x11
+		case "SHIFT":
+			name, code = "SHIFT", 0x10
+		case "ALT", "OPTION":
+			name, code = "ALT", 0x12
+		case "WIN", "WINDOWS", "SUPER", "META":
+			name, code = "WIN", 0x5B
+		default:
+			return ResolvedKeyStroke{}, fmt.Errorf("invalid chord modifier %q", part)
+		}
+		if _, exists := modifiers[name]; exists {
+			return ResolvedKeyStroke{}, fmt.Errorf("duplicate chord modifier %s", name)
+		}
+		modifiers[name] = code
+	}
+	key, err := ResolveVirtualKey(parts[len(parts)-1])
+	if err != nil {
+		return ResolvedKeyStroke{}, err
+	}
+	names, codes := []string{}, []uint16{}
+	for _, name := range []string{"CTRL", "SHIFT", "ALT", "WIN"} {
+		if code, ok := modifiers[name]; ok {
+			names = append(names, name)
+			codes = append(codes, code)
+		}
+	}
+	names = append(names, key.Name)
+	codes = append(codes, key.Code)
+	return ResolvedKeyStroke{Name: strings.Join(names, "+"), Codes: codes}, nil
+}
+
+func KeyStrokeAllowed(policy VirtualKeyPolicy, name string) bool {
 	for _, value := range policy.Allowed {
-		resolved, err := ResolveVirtualKey(value)
-		if err == nil && resolved.Code == code {
+		resolved, err := ResolveKeyStroke(value)
+		if err == nil && resolved.Name == name {
 			return true
 		}
 	}
@@ -302,6 +357,8 @@ type Executor struct {
 	mu                sync.Mutex
 	lastDown          time.Time
 	pressed           map[uint16]bool
+	keyDown           func(uint16) error
+	keyUp             func(uint16) error
 	brightnessBackend BrightnessBackend
 }
 
@@ -339,11 +396,11 @@ func (executor *Executor) PressVirtualKey(
 	if !policy.Enabled {
 		return ActionResult{}, errors.New("virtual-key emission is disabled by host policy")
 	}
-	resolved, err := ResolveVirtualKey(request.Key)
+	resolved, err := ResolveKeyStroke(request.Key)
 	if err != nil {
 		return ActionResult{}, err
 	}
-	if !virtualKeyAllowed(policy, resolved.Code) {
+	if !KeyStrokeAllowed(policy, resolved.Name) {
 		return ActionResult{}, fmt.Errorf("virtual key %s is not in the configured allowlist", resolved.Name)
 	}
 	hold := request.HoldMS
@@ -364,13 +421,36 @@ func (executor *Executor) PressVirtualKey(
 		return ActionResult{}, ctx.Err()
 	default:
 	}
-	if err := platformKeyDown(resolved.Code); err != nil {
-		return ActionResult{}, err
-	}
 	if executor.pressed == nil {
 		executor.pressed = make(map[uint16]bool)
 	}
-	executor.pressed[resolved.Code] = true
+	down, up := executor.keyDown, executor.keyUp
+	if down == nil {
+		down = platformKeyDown
+	}
+	if up == nil {
+		up = platformKeyUp
+	}
+	pressed := []uint16{}
+	release := func() error {
+		var failures []error
+		for i := len(pressed) - 1; i >= 0; i-- {
+			code := pressed[i]
+			if err := up(code); err != nil {
+				failures = append(failures, fmt.Errorf("release VK 0x%02X: %w", code, err))
+			} else {
+				delete(executor.pressed, code)
+			}
+		}
+		return errors.Join(failures...)
+	}
+	for _, code := range resolved.Codes {
+		if err := down(code); err != nil {
+			return ActionResult{}, errors.Join(err, release())
+		}
+		executor.pressed[code] = true
+		pressed = append(pressed, code)
+	}
 	executor.lastDown = time.Now()
 	timer := time.NewTimer(time.Duration(hold) * time.Millisecond)
 	select {
@@ -380,17 +460,16 @@ func (executor *Executor) PressVirtualKey(
 		}
 	case <-timer.C:
 	}
-	releaseErr := platformKeyUp(resolved.Code)
+	releaseErr := release()
 	if releaseErr != nil {
 		return ActionResult{}, fmt.Errorf("release virtual key %s: %w", resolved.Name, releaseErr)
 	}
-	delete(executor.pressed, resolved.Code)
 	if err := ctx.Err(); err != nil {
 		return ActionResult{}, err
 	}
 	return ActionResult{
 		Action: "virtual-key", At: time.Now().UTC(),
-		Detail: fmt.Sprintf("%s (0x%02X) pressed for %dms", resolved.Name, resolved.Code, hold),
+		Detail: fmt.Sprintf("%s pressed for %dms", resolved.Name, hold),
 	}, nil
 }
 
@@ -399,8 +478,12 @@ func (executor *Executor) ReleaseAll() error {
 	executor.mu.Lock()
 	defer executor.mu.Unlock()
 	var failures []error
+	up := executor.keyUp
+	if up == nil {
+		up = platformKeyUp
+	}
 	for code := range executor.pressed {
-		if err := platformKeyUp(code); err != nil {
+		if err := up(code); err != nil {
 			failures = append(failures, fmt.Errorf("release VK 0x%02X: %w", code, err))
 			continue
 		}

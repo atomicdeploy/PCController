@@ -49,9 +49,41 @@ func runHostUpdate(args []string, stdout, stderr io.Writer) error {
 	if flags.NArg() != 1 {
 		return errors.New("usage: controller update host FILE [--expected-sha256 SHA256] [--idempotency-key KEY]")
 	}
+	candidate := flags.Arg(0)
+	// Validate the documented FILE argument before looking up a running host.
+	// Besides producing the useful local error first, this keeps the command's
+	// parsing contract deterministic on clean machines that have no host record.
+	file, err := os.Open(candidate)
+	if err != nil {
+		return fmt.Errorf("open host update candidate: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("close host update candidate: %w", err)
+	}
 	ctx, cancel := lifecycleCommandContext()
 	defer cancel()
-	return delegatePrimaryHostUpdate(ctx, flags.Arg(0), *expected, *idempotencyKey, stdout, callPrimary)
+	paths, err := defaultHostInstancePaths()
+	if err != nil {
+		return err
+	}
+	if err := selectHostUpdatePrimary(ctx, paths); err != nil {
+		return err
+	}
+	return delegatePrimaryHostUpdate(ctx, candidate, *expected, *idempotencyKey, stdout, callPrimary)
+}
+
+// A running host may override its persisted listen address. Authenticate its
+// published identity before sending an update; never fall back to a stale port.
+func selectHostUpdatePrimary(ctx context.Context, paths hostInstancePaths) error {
+	record, err := readHostInstanceRecord(paths.RecordPath)
+	if err != nil {
+		return fmt.Errorf("locate running host for update: %w", err)
+	}
+	if err := verifyHostInstanceRecord(ctx, record); err != nil {
+		return fmt.Errorf("verify running host for update: %w", err)
+	}
+	primaryEndpoint.Store(recordPrimaryEndpoint(record))
+	return nil
 }
 
 func delegatePrimaryHostUpdate(

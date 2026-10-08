@@ -50,7 +50,7 @@ func TestBrowserUIConfigRPCPersistsOnlyRequestedHostFields(t *testing.T) {
 	if get.Error != nil || !ok || initial.AppTitle != "Workshop Controller" || initial.SetupComplete {
 		t.Fatalf("initial UI config=%#v error=%v", get.Result, get.Error)
 	}
-	if initial.PeripheralNames["relay.5"] != "Workbench lamp" || len(initial.Peripherals) != 34 || len(initial.Controls) != 21 {
+	if initial.PeripheralNames["relay.5"] != "Workbench lamp" || len(initial.Peripherals) != 34 || len(initial.Controls) != 26 {
 		t.Fatalf("initial peripheral contract names=%#v descriptors=%d controls=%d", initial.PeripheralNames, len(initial.Peripherals), len(initial.Controls))
 	}
 	if !initial.SegmentScroll.Enabled || len(initial.SegmentScroll.Pages) != 1 || initial.SegmentScroll.Pages[0] != "door" {
@@ -119,7 +119,7 @@ func TestPeripheralNamesRPCNormalizesPersistsAndNeverTouchesBoardSettings(t *tes
 	if _, exists := updated.Names["pwm.0"]; exists {
 		t.Fatalf("blank custom name was not restored to default: %#v", updated.Names)
 	}
-	if len(updated.Peripherals) != 32 || len(updated.Controls) != 15 || updated.BoardProfile.Mode != appconfig.BoardModeUnconfigured || config.Connection.ResetOnReconnect {
+	if len(updated.Peripherals) != 32 || len(updated.Controls) != 20 || updated.BoardProfile.Mode != appconfig.BoardModeUnconfigured || config.Connection.ResetOnReconnect {
 		t.Fatalf("peripheral update descriptors=%d controls=%d reset-on-reconnect=%t", len(updated.Peripherals), len(updated.Controls), config.Connection.ResetOnReconnect)
 	}
 	if got := updated.Controls[0]; got.Key != "relay.5" || got.Kind != "relay" || got.Order != 5 || got.Name != "Bench lamp" {
@@ -157,7 +157,7 @@ func TestPeripheralNamesRESTUsesTheSameTypedContract(t *testing.T) {
 	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
 		t.Fatal(err)
 	}
-	if response.StatusCode != http.StatusOK || result.Names["display.lcd"] != "Cabinet LCD" || len(result.Peripherals) != 32 || len(result.Controls) != 15 || result.BoardProfile.Configured {
+	if response.StatusCode != http.StatusOK || result.Names["display.lcd"] != "Cabinet LCD" || len(result.Peripherals) != 32 || len(result.Controls) != 20 || result.BoardProfile.Configured {
 		t.Fatalf("REST peripheral response status=%d result=%+v", response.StatusCode, result)
 	}
 }
@@ -173,6 +173,8 @@ func TestPeripheralAndPWMCapabilitiesSeparateReadConfigurationAndBoardWrites(t *
 		"controller.pwm.values":                     capabilityRead,
 		"controller.pwm.set":                        capabilityBoard,
 		"controller.pwm.off":                        capabilityBoard,
+		"controller.status_led.set":                 capabilityBoard,
+		"controller.status_led.release":             capabilityBoard,
 		"controller.illumination.get":               capabilityRead,
 		"controller.illumination.override":          capabilityBoard,
 		"controller.illumination.set":               capabilityBoard,
@@ -191,7 +193,7 @@ func TestPeripheralCatalogUsesExplicitBoardProfileWithoutLegacyMotionAliases(t *
 		"serial:board-42": {
 			Key: "cafe-cinema", Mode: appconfig.BoardModeCinemaSeatMotion,
 			Presentation: map[string]appconfig.PeripheralPresentation{
-				"seat.a": {Name: "Left bank", Icon: "seat", Group: "auditorium"},
+				"seat.a": {Name: "Left bank", Icon: "seat", Color: "#38D27A", UpColor: "#F59E0B", DownColor: "#3B82F6", Group: "auditorium", Hidden: true, Locked: true},
 			},
 		},
 	}
@@ -201,7 +203,7 @@ func TestPeripheralCatalogUsesExplicitBoardProfileWithoutLegacyMotionAliases(t *
 		t.Fatalf("result=%#v error=%v", response.Result, response.Error)
 	}
 	if !settings.BoardProfile.Configured || settings.BoardProfile.Attached || settings.BoardProfile.Key != "cafe-cinema" ||
-		settings.BoardProfile.BoardIdentity != "serial:board-42" || settings.BoardProfile.Mode != appconfig.BoardModeCinemaSeatMotion || len(settings.Controls) != 17 {
+		settings.BoardProfile.BoardIdentity != "serial:board-42" || settings.BoardProfile.Mode != appconfig.BoardModeCinemaSeatMotion || len(settings.Controls) != 22 {
 		t.Fatalf("profile=%+v controls=%d", settings.BoardProfile, len(settings.Controls))
 	}
 	seenSeat := false
@@ -210,7 +212,8 @@ func TestPeripheralCatalogUsesExplicitBoardProfileWithoutLegacyMotionAliases(t *
 			t.Fatalf("catalog advertised ambiguous legacy control %+v", control)
 		}
 		if control.Key == "seat.a" {
-			seenSeat = control.Name == "Left bank" && control.Icon == "seat" && control.Group == "auditorium" &&
+			seenSeat = control.Name == "Left bank" && control.Icon == "seat" && control.Color == "#38D27A" && control.UpColor == "#F59E0B" && control.DownColor == "#3B82F6" && control.Group == "auditorium" &&
+				control.Hidden && control.Locked &&
 				len(control.Actions) == 3 && control.Actions[2].ID == "seat.a.stop"
 		}
 	}
@@ -222,6 +225,89 @@ func TestPeripheralCatalogUsesExplicitBoardProfileWithoutLegacyMotionAliases(t *
 	rejected := service.Dispatch(context.Background(), Request{Method: "controller.board_profile.update", Params: params})
 	if rejected.Error == nil || !strings.Contains(rejected.Error.Message, "attached") {
 		t.Fatalf("unattached update=%+v", rejected)
+	}
+}
+
+func TestPresentationUpdateResultCarriesTheAuthoritativeControl(t *testing.T) {
+	settings := peripheralSettings{
+		BoardProfile: boardProfileDescriptor{Key: "cafe-cinema", Revision: "next-revision"},
+		Peripherals: []appconfig.PeripheralDescriptor{{
+			Key: "relay.5", Kind: "relay", Index: 5, DefaultName: "User Relay 5",
+			Name: "Aisle lamp", Icon: "lightbulb", Color: "#38D27A", Control: "relay",
+		}},
+		Controls: []appconfig.ControlDescriptor{{
+			Key: "relay.5", Kind: "relay", Order: 5, Name: "Aisle lamp",
+			Icon: "lightbulb", Color: "#38D27A", Control: "relay",
+			Actions: []appconfig.ActionDescriptor{{ID: "relay.5.on", Verb: "on", Name: "On"}},
+		}},
+	}
+	result, err := presentationResult(settings, "relay.5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.BoardProfile.Revision != "next-revision" || result.Peripheral.Name != "Aisle lamp" ||
+		result.Control == nil || result.Control.Key != "relay.5" || result.Control.Icon != "lightbulb" ||
+		len(result.Control.Actions) != 1 || result.Control.Actions[0].ID != "relay.5.on" || len(result.Controls) != 1 {
+		t.Fatalf("presentation update result=%+v", result)
+	}
+	if _, err := presentationResult(settings, "relay.6"); err == nil {
+		t.Fatal("missing updated peripheral was accepted")
+	}
+}
+
+func TestPresentationReorderPersistsACompleteKindLocalPermutation(t *testing.T) {
+	profile := appconfig.BoardProfile{Mode: appconfig.BoardModeOrdinaryRelays}
+	changed, err := reorderPeripheralPresentation(&profile, nil, "relay.7", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changed) != 8 || changed[0] != "relay.7" {
+		t.Fatalf("changed relay keys=%v", changed)
+	}
+	for rank, key := range changed {
+		presentation, ok := profile.Presentation[key]
+		if !ok || presentation.Order == nil || *presentation.Order != rank {
+			t.Fatalf("%s presentation=%+v, want order %d", key, presentation, rank)
+		}
+	}
+	if _, err := reorderPeripheralPresentation(&profile, nil, "relay.8", 8); err == nil {
+		t.Fatal("out-of-range relay order was accepted")
+	}
+	if _, err := reorderPeripheralPresentation(&profile, nil, "display.segment", 0); err == nil {
+		t.Fatal("read-only peripheral was accepted as an ordered control")
+	}
+}
+
+func TestPeripheralLockTargetsStableRelayAndSeatKeys(t *testing.T) {
+	service, config := browserUIConfigTestService(t)
+	config.Connection.LastDevice = &appconfig.DeviceIdentity{Port: "COM18", SerialNumber: "BOARD-42"}
+	config.BoardProfiles = map[string]appconfig.BoardProfile{
+		"serial:board-42": {
+			Key: "cafe-cinema", Mode: appconfig.BoardModeCinemaSeatMotion,
+			Presentation: map[string]appconfig.PeripheralPresentation{
+				"seat.a":  {Locked: true},
+				"relay.5": {Locked: true},
+				"pwm.0":   {Locked: true},
+			},
+		},
+	}
+	for command, want := range map[string]string{
+		"relay 5 on":         "relay.5",
+		"relay side left up": "seat.a",
+		"relay side b stop":  "seat.b",
+		"status":             "",
+	} {
+		if got := peripheralKeyForCommand(command); got != want {
+			t.Fatalf("command %q key=%q, want %q", command, got, want)
+		}
+	}
+	for _, key := range []string{"seat.a", "relay.5", "pwm.0"} {
+		if err := service.rejectLockedPeripheral(key); err == nil {
+			t.Fatalf("locked peripheral %q was accepted", key)
+		}
+	}
+	if err := service.rejectLockedPeripheral("relay.6"); err != nil {
+		t.Fatalf("unlocked peripheral rejected: %v", err)
 	}
 }
 

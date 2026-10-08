@@ -187,6 +187,14 @@ if(BUILD_TESTING)
   add_test(NAME firmware_macro_queue_adapter_unit
            COMMAND firmware_macro_queue_adapter_tests)
 
+  # Preserve the recovered scheduling invariant without copying the obsolete
+  # firmware implementation: one due MCU action precedes ordinary UART backlog
+  # and only one action is dispatched per controller loop.
+  add_test(NAME firmware_macro_dispatch_priority_contract
+    COMMAND ${CMAKE_COMMAND}
+      -DPCCONTROLLER_ROOT=${CMAKE_CURRENT_SOURCE_DIR}/../..
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/macro_dispatch_priority_contract.cmake)
+
   add_executable(virtual_board_tests tests/test_main.cpp)
   target_link_libraries(virtual_board_tests PRIVATE virtual_board_core)
   if(MSVC)

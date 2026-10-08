@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -119,26 +120,48 @@ func (runner *MacroRunner) captureRelayEdge(evidence CommandEvidence) {
 		runner.recording.LastError = "relay edge has no MCU timestamp"
 		return
 	}
-	if runner.recording.BoardOwned {
+	if runner.recording.DeviceRetained {
 		if !runner.recordHasBase {
 			runner.recordBaseUS = evidence.DeviceMicros
 			runner.recordHasBase = true
 		}
 		at := evidence.DeviceMicros - runner.recordBaseUS
+		if uint64(at)+uint64(runner.recordOffsetUS) > 0x7fffffff {
+			runner.recording.LastError = "appended recording timing overflow"
+			return
+		}
+		at += runner.recordOffsetUS
 		runner.recording.LastDeltaUS = at - runner.recording.LastAtUS
 		runner.recording.LastAtUS = at
+		steps := relayMaskSteps(
+			at,
+			runner.recordRelayMask,
+			evidence.RelayMask,
+			!runner.recordRelaySeen,
+			runner.recordMacro.BoardProfileMode,
+		)
+		runner.recordRelaySeen = true
+		runner.recordRelayMask = evidence.RelayMask
+		runner.recordMacro.Steps = append(runner.recordMacro.Steps, steps...)
 		if runner.recording.Steps < 25 {
 			runner.recording.Steps++
 		} else if runner.recording.Overwritten < 255 {
 			runner.recording.Overwritten++
 		}
-		runner.runtime.PublishStructuredEvent(Event{Kind: "macro.recording", Lifecycle: "captured", Text: "board relay edge captured"})
+		runner.runtime.PublishStructuredEvent(Event{
+			Kind: "macro.recording", Lifecycle: "captured", State: "recording",
+			Text: "board relay edge captured",
+			Metadata: map[string]string{
+				"macro_mode": runner.recording.Mode,
+				"steps":      strconv.Itoa(runner.recording.Steps),
+			},
+		})
 		return
 	}
 	if !runner.recordRelayClock {
 		runner.recordRelayOriginUS = evidence.DeviceMicros
 		runner.recordRelayOriginAt = 0
-		if runner.recordMacro.Mode == macroModeMCU {
+		if runner.recording.Mode == macroModeMCU {
 			if !runner.recordHasBase {
 				runner.recordBaseUS = evidence.DeviceMicros
 				runner.recordHasBase = true
@@ -159,6 +182,11 @@ func (runner *MacroRunner) captureRelayEdge(evidence CommandEvidence) {
 		runner.recording.LastError = "recording timing overflow"
 		return
 	}
+	if uint64(at)+uint64(runner.recordOffsetUS) > 0x7fffffff {
+		runner.recording.LastError = "appended recording timing overflow"
+		return
+	}
+	at += runner.recordOffsetUS
 	if runner.recordBaseAt.IsZero() {
 		runner.recordBaseAt = evidence.ObservedAt
 	}
@@ -187,12 +215,12 @@ func (runner *MacroRunner) StartBoardRecording(ctx context.Context, name, catego
 		return state, err
 	}
 	runner.recordMu.Lock()
-	runner.recording.BoardOwned = true
+	runner.recording.DeviceRetained = true
 	runner.recordMu.Unlock()
 	_, err = runner.request(ctx, native.OpMacroStep, []byte{3, state.ID}, native.OpACK)
 	if err != nil {
 		runner.recordMu.Lock()
-		runner.recording.BoardOwned = false
+		runner.recording.DeviceRetained = false
 		runner.recordMu.Unlock()
 		_, _ = runner.StopRecording(false)
 		return MacroRecordingState{}, err
@@ -222,7 +250,7 @@ func (runner *MacroRunner) ImportBoardRecording(name, category, color string) (a
 		return appconfig.Macro{}, err
 	}
 	runner.recordMu.Lock()
-	runner.recording.BoardOwned = true
+	runner.recording.DeviceRetained = true
 	runner.recordMu.Unlock()
 	return runner.StopRecording(true)
 }
@@ -263,8 +291,19 @@ func (runner *MacroRunner) collectBoardRecording(ctx context.Context, save bool)
 		return err
 	}
 	runner.recordMu.Lock()
-	runner.recordMacro.Steps = steps
-	runner.recording.Steps = len(steps)
+	for index := range steps {
+		if uint64(steps[index].AtUS)+uint64(runner.recordOffsetUS) > 0x7fffffff {
+			runner.recordMu.Unlock()
+			return errors.New("appended board recording timing overflow")
+		}
+		steps[index].AtUS += runner.recordOffsetUS
+	}
+	if len(runner.recordPrefix)+len(steps) > 65535 {
+		runner.recordMu.Unlock()
+		return errors.New("appended recording exceeds step capacity")
+	}
+	runner.recordMacro.Steps = append(cloneMacroSteps(runner.recordPrefix), steps...)
+	runner.recording.Steps = len(runner.recordMacro.Steps)
 	runner.recording.Overwritten = int(status.Underruns)
 	runner.recordMu.Unlock()
 	return nil

@@ -23,6 +23,12 @@ test('temporary macro-strip profile is explicit and preserved in the build plan'
 	assert.ok(compile.command.args.includes('macro-strip-test'))
 })
 
+test('host update staging is explicit and leaves publication to the coordinator', () => {
+	assert.equal(parseArguments(['--host-only', '--stage-only']).stageOnly, true)
+	assert.equal(parseArguments(['--host-only']).stageOnly, false)
+	assert.throws(() => parseArguments(['--firmware-only', '--stage-only']), /requires --host-only/)
+})
+
 test('build helper executables use stable product paths, never Go temporary paths', () => {
 	const env = { LOCALAPPDATA: join(tmpdir(), 'local-app-data') }
 	assert.equal(goBuildHelperPath('generate-icon', env, 'win32'), join(env.LOCALAPPDATA, 'PCController', 'build-programs', 'generate-icon.exe'))

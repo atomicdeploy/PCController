@@ -105,12 +105,15 @@ func publicMacros(source []appconfig.Macro) []controller.Macro {
 		for stepIndex, step := range macro.Steps {
 			result[index].Steps[stepIndex] = controller.MacroStep{
 				AtUS: step.AtUS, Kind: step.Kind, Target: step.Target,
-				Value: step.Value, DurationMS: step.DurationMS,
+				Value: step.Value, DurationMS: step.DurationMS, ToValue: step.ToValue,
+				Easing: step.Easing, SampleRateHz: step.SampleRateHz,
+				RepeatCount: step.RepeatCount, RepeatIntervalMS: step.RepeatIntervalMS,
 				FrequencyHz: step.FrequencyHz, Text: step.Text,
 				Destination: step.Destination, Code: step.Code, Bits: step.Bits,
 				Protocol: step.Protocol, PulseUS: step.PulseUS,
 				Red: step.Red, Green: step.Green, Blue: step.Blue,
-				Brightness: step.Brightness, Opcode: step.Opcode,
+				Brightness: step.Brightness, ToRed: step.ToRed, ToGreen: step.ToGreen,
+				ToBlue: step.ToBlue, ToBrightness: step.ToBrightness, Opcode: step.Opcode,
 				PayloadHex: step.PayloadHex,
 			}
 		}

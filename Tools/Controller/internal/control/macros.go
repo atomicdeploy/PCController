@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,6 +25,7 @@ const (
 	macroRequestTimeout                  = 2 * time.Second
 	macroModeHost                        = "host"
 	macroModeMCU                         = "mcu"
+	macroModeAuto                        = "auto"
 )
 
 // MacroState is the host-authoritative view shared by TUI, CLI, API, IPC, and
@@ -32,6 +35,7 @@ type MacroState struct {
 	ID                   byte               `json:"id"`
 	Name                 string             `json:"name"`
 	Mode                 string             `json:"mode"`
+	Policy               string             `json:"policy"`
 	Category             string             `json:"category,omitempty"`
 	Color                string             `json:"color,omitempty"`
 	Step                 int                `json:"step"`
@@ -116,6 +120,9 @@ type MacroRunner struct {
 	recordRelayOriginUS uint32
 	recordRelayOriginAt uint32
 	recordRelayClock    bool
+	recordSeed          *appconfig.Macro
+	recordOffsetUS      uint32
+	recordPrefix        []appconfig.MacroStep
 
 	// requestGeneration is a focused protocol-order test seam. Production uses
 	// Runtime.requestAtGeneration so every macro request remains pinned to the
@@ -123,24 +130,31 @@ type MacroRunner struct {
 	requestGeneration func(context.Context, uint64, byte, []byte, byte) (native.Frame, error)
 }
 
-// MacroRecordingState describes a HOST-owned recording session. Mode states
-// whether offsets come from host monotonic observations or MCU ACK timestamps.
+// MacroRecordingState describes one transient take that will be saved into the
+// PCController effect catalog. Mode describes the capture clock; DeviceRetained
+// means the bounded relay tail currently also resides in device RAM.
 type MacroRecordingState struct {
-	BoardOwned       bool      `json:"board_owned"`
-	LastAtUS         uint32    `json:"last_at_us"`
-	LastDeltaUS      uint32    `json:"last_delta_us"`
-	Overwritten      int       `json:"overwritten"`
-	Active           bool      `json:"active"`
-	ID               byte      `json:"id"`
-	Name             string    `json:"name"`
-	Mode             string    `json:"mode"`
-	Category         string    `json:"category,omitempty"`
-	Color            string    `json:"color,omitempty"`
-	BoardProfileKey  string    `json:"board_profile_key,omitempty"`
-	BoardProfileMode string    `json:"board_profile_mode,omitempty"`
-	Steps            int       `json:"steps"`
-	StartedAt        time.Time `json:"started_at,omitempty"`
-	LastError        string    `json:"last_error,omitempty"`
+	DeviceRetained   bool   `json:"device_retained"`
+	LastAtUS         uint32 `json:"last_at_us"`
+	LastDeltaUS      uint32 `json:"last_delta_us"`
+	Overwritten      int    `json:"overwritten"`
+	Active           bool   `json:"active"`
+	ID               byte   `json:"id"`
+	Name             string `json:"name"`
+	Mode             string `json:"mode"`
+	Category         string `json:"category,omitempty"`
+	Color            string `json:"color,omitempty"`
+	BoardProfileKey  string `json:"board_profile_key,omitempty"`
+	BoardProfileMode string `json:"board_profile_mode,omitempty"`
+	Steps            int    `json:"steps"`
+	// Preview is the live, host-observed sequence accumulated for the current
+	// take. It lets Pealayer and other coordinator clients render captured
+	// actions before Finish is pressed. Board-retained capture remains
+	// authoritative on the MCU; its host mirror is replaced by the downloaded
+	// ring when the take is saved.
+	Preview   []appconfig.MacroStep `json:"preview,omitempty"`
+	StartedAt time.Time             `json:"started_at,omitempty"`
+	LastError string                `json:"last_error,omitempty"`
 }
 
 func NewMacroRunner(
@@ -200,6 +214,14 @@ func (runner *MacroRunner) List() []appconfig.Macro {
 	return result
 }
 
+func cloneMacroSteps(source []appconfig.MacroStep) []appconfig.MacroStep {
+	result := append([]appconfig.MacroStep(nil), source...)
+	for index := range result {
+		result[index].ActionIDs = append([]string(nil), source[index].ActionIDs...)
+	}
+	return result
+}
+
 func (runner *MacroRunner) State() MacroState {
 	runner.mu.RLock()
 	defer runner.mu.RUnlock()
@@ -209,11 +231,33 @@ func (runner *MacroRunner) State() MacroState {
 func (runner *MacroRunner) RecordingState() MacroRecordingState {
 	runner.recordMu.RLock()
 	defer runner.recordMu.RUnlock()
-	return runner.recording
+	state := runner.recording
+	state.Preview = cloneMacroSteps(runner.recordMacro.Steps)
+	return state
 }
 
 func (runner *MacroRunner) Snapshot() MacroSnapshot {
 	return MacroSnapshot{Library: runner.List(), Playback: runner.State(), Recording: runner.RecordingState()}
+}
+
+// EffectCatalog returns the one PCController-owned library exposed to every
+// interface. Recorded sequences and rendered strip streams retain their
+// distinct engines, but share discovery, stable references, and commands.
+func (runner *MacroRunner) EffectCatalog() []EffectDescriptor {
+	config := appconfig.Defaults()
+	if runner.hostConfig != nil {
+		config = runner.hostConfig()
+	}
+	return EffectCatalogWithGroups(runner.List(), config.StripEffects, config.EffectGroups)
+}
+
+func (runner *MacroRunner) EffectGroups() []EffectGroupDescriptor {
+	config := appconfig.Defaults()
+	if runner.hostConfig != nil {
+		config = runner.hostConfig()
+	}
+	config.Macros = runner.List()
+	return EffectGroupCatalog(config)
 }
 
 func (runner *MacroRunner) UpdateMetadata(reference, field, value string) (appconfig.Macro, error) {
@@ -268,7 +312,7 @@ func (runner *MacroRunner) CreateDraft(id byte, name, category, color string) (a
 	}
 	macro := appconfig.Macro{
 		ID: id, Name: strings.TrimSpace(name), Category: strings.TrimSpace(category),
-		Mode: macroModeHost, Color: normalizedMacroColor(color), TimingToleranceUS: defaultHostMacroToleranceUS,
+		Mode: macroModeAuto, Color: normalizedMacroColor(color),
 	}
 	err := runner.updateHostConfig(func(config *appconfig.Config) error {
 		for _, existing := range config.Macros {
@@ -313,7 +357,7 @@ func (runner *MacroRunner) Delete(reference string) error {
 }
 
 func (runner *MacroRunner) StartRecording(name, category, color string) (MacroRecordingState, error) {
-	return runner.startRecording(name, category, color, macroModeHost)
+	return runner.startRecording(name, category, color, macroModeAuto)
 }
 
 // StartMCURecording retains the exact acknowledgement-timestamp recorder for
@@ -322,9 +366,12 @@ func (runner *MacroRunner) StartMCURecording(name, category, color string) (Macr
 	return runner.startRecording(name, category, color, macroModeMCU)
 }
 
-func (runner *MacroRunner) startRecording(name, category, color, mode string) (MacroRecordingState, error) {
+func (runner *MacroRunner) startRecording(name, category, color, mode string, seeds ...appconfig.Macro) (MacroRecordingState, error) {
 	runner.operationMu.Lock()
 	defer runner.operationMu.Unlock()
+	if runner.runtime.emergencyStop.Load() {
+		return MacroRecordingState{}, ErrEmergencyStopActive
+	}
 	if runner.State().Running {
 		return MacroRecordingState{}, errors.New("cancel playback before starting a recording")
 	}
@@ -341,7 +388,7 @@ func (runner *MacroRunner) startRecording(name, category, color, mode string) (M
 	}
 	used := make(map[byte]bool)
 	for _, macro := range runner.List() {
-		if strings.EqualFold(macro.Name, name) {
+		if strings.EqualFold(macro.Name, name) && (len(seeds) == 0 || macro.ID != seeds[0].ID) {
 			return MacroRecordingState{}, fmt.Errorf("macro %q already exists", name)
 		}
 		used[macro.ID] = true
@@ -351,7 +398,18 @@ func (runner *MacroRunner) startRecording(name, category, color, mode string) (M
 		id++
 	}
 	if used[id] {
-		return MacroRecordingState{}, errors.New("all macro IDs are in use")
+		if len(seeds) == 0 {
+			return MacroRecordingState{}, errors.New("all macro IDs are in use")
+		}
+	}
+	var offset uint32
+	if len(seeds) > 0 {
+		id = seeds[0].ID
+		var err error
+		offset, err = recordingSequenceEnd(seeds[0].Steps)
+		if err != nil {
+			return MacroRecordingState{}, err
+		}
 	}
 
 	runner.recordMu.Lock()
@@ -369,6 +427,17 @@ func (runner *MacroRunner) startRecording(name, category, color, mode string) (M
 		Mode: mode, TimingToleranceUS: modeTimingTolerance(mode),
 		BoardProfileKey: profileKey, BoardProfileMode: profileMode,
 	}
+	runner.recordSeed = nil
+	runner.recordOffsetUS = offset
+	runner.recordPrefix = nil
+	if len(seeds) > 0 {
+		seed := seeds[0]
+		seed.Steps = cloneMacroSteps(seed.Steps)
+		runner.recordSeed = &seed
+		runner.recordMacro = seed
+		runner.recordMacro.Steps = cloneMacroSteps(seed.Steps)
+		runner.recordPrefix = cloneMacroSteps(seed.Steps)
+	}
 	runner.recordBaseUS = 0
 	runner.recordBaseAt = time.Time{}
 	runner.recordHasBase = false
@@ -378,6 +447,7 @@ func (runner *MacroRunner) startRecording(name, category, color, mode string) (M
 		Active: true, ID: id, Name: name, Mode: mode, Category: strings.TrimSpace(category),
 		Color: color, BoardProfileKey: profileKey, BoardProfileMode: profileMode, StartedAt: time.Now(),
 	}
+	runner.recording.Steps = len(runner.recordMacro.Steps)
 	runner.recordRelease = runner.runtime.ObserveCommands(runner.captureCommand)
 	state := runner.recording
 	runner.recordMu.Unlock()
@@ -390,10 +460,72 @@ func (runner *MacroRunner) startRecording(name, category, color, mode string) (M
 	return state, nil
 }
 
+// StartAppendingRecording keeps one catalog identity and its existing steps.
+// The capture clock is independent of the effect's playback execution policy.
+func (runner *MacroRunner) StartAppendingRecording(ctx context.Context, reference, captureMode string) (MacroRecordingState, error) {
+	macro, err := runner.find(strings.TrimPrefix(reference, "effect:"))
+	if err != nil {
+		return MacroRecordingState{}, err
+	}
+	mode := macroModeAuto
+	if captureMode == "device-clock" || captureMode == "board-retained" {
+		mode = macroModeMCU
+	} else if captureMode != "automatic" && captureMode != "" {
+		return MacroRecordingState{}, errors.New("invalid capture mode")
+	}
+	if captureMode == "board-retained" && !runner.runtime.Snapshot().Connected {
+		return MacroRecordingState{}, errors.New("device is not connected")
+	}
+	state, err := runner.startRecording(macro.Name, macro.Category, macro.Color, mode, macro)
+	if err != nil || captureMode != "board-retained" {
+		return state, err
+	}
+	runner.recordMu.Lock()
+	runner.recording.DeviceRetained = true
+	runner.recordMu.Unlock()
+	_, err = runner.request(ctx, native.OpMacroStep, []byte{3, state.ID}, native.OpACK)
+	if err != nil {
+		runner.recordMu.Lock()
+		runner.recording.DeviceRetained = false
+		runner.recordMu.Unlock()
+		_, _ = runner.StopRecording(false)
+		return MacroRecordingState{}, err
+	}
+	return runner.RecordingState(), nil
+}
+
+func recordingSequenceEnd(steps []appconfig.MacroStep) (uint32, error) {
+	expanded, err := expandMacroTimeline(steps)
+	if err != nil {
+		return 0, err
+	}
+	var end uint64
+	for _, step := range expanded {
+		at := uint64(step.AtUS) + uint64(step.DurationMS)*1000
+		if at > end {
+			end = at
+		}
+	}
+	// A constant range/color cue can have a authored span without a release
+	// command. Its span still determines where a following take begins.
+	for _, step := range steps {
+		repeats := max(uint64(step.RepeatCount), uint64(1))
+		interval := uint64(step.RepeatIntervalMS)
+		if repeats > 1 && interval == 0 {
+			interval = max(uint64(step.DurationMS), uint64(1))
+		}
+		end = max(end, uint64(step.AtUS)+(repeats-1)*interval*1000+uint64(step.DurationMS)*1000)
+	}
+	if end > 0x7fffffff {
+		return 0, errors.New("sequence end exceeds recording timing window")
+	}
+	return uint32(end), nil
+}
+
 func (runner *MacroRunner) StopRecording(save bool) (appconfig.Macro, error) {
 	runner.operationMu.Lock()
 	defer runner.operationMu.Unlock()
-	if runner.RecordingState().BoardOwned && runner.RecordingState().Active {
+	if runner.RecordingState().DeviceRetained && runner.RecordingState().Active {
 		if err := runner.collectBoardRecording(context.Background(), save); err != nil {
 			return appconfig.Macro{}, err
 		}
@@ -426,10 +558,22 @@ func (runner *MacroRunner) StopRecording(save bool) (appconfig.Macro, error) {
 
 	if save {
 		if err := runner.updateHostConfig(func(config *appconfig.Config) error {
-			for _, existing := range config.Macros {
+			for index, existing := range config.Macros {
+				if runner.recordSeed != nil && existing.ID == macro.ID {
+					before, _ := json.Marshal(runner.recordSeed)
+					current, _ := json.Marshal(existing)
+					if string(before) != string(current) {
+						return errors.New("effect changed during capture; recording retained, concurrent edits were not overwritten")
+					}
+					config.Macros[index] = macro
+					return nil
+				}
 				if existing.ID == macro.ID || strings.EqualFold(existing.Name, macro.Name) {
 					return fmt.Errorf("macro ID %d or name %q already exists", macro.ID, macro.Name)
 				}
+			}
+			if runner.recordSeed != nil {
+				return errors.New("effect was removed during capture; recording retained")
 			}
 			config.Macros = append(config.Macros, macro)
 			return nil
@@ -465,7 +609,7 @@ func (runner *MacroRunner) captureCommand(evidence CommandEvidence) {
 		runner.captureRelayEdge(evidence)
 		return
 	}
-	if runner.recording.BoardOwned {
+	if runner.recording.DeviceRetained {
 		return
 	}
 	// Relay commands are intentions, not output edges. Record the timestamped
@@ -477,8 +621,8 @@ func (runner *MacroRunner) captureCommand(evidence CommandEvidence) {
 		runner.recording.LastError = "recording reached the 65535 step limit; save it before continuing"
 		return
 	}
-	mode := runner.recordMacro.Mode
-	if mode == macroModeHost {
+	mode := runner.recording.Mode
+	if mode != macroModeMCU {
 		if !hostRecordableOpcode(evidence.Opcode) {
 			return
 		}
@@ -489,7 +633,7 @@ func (runner *MacroRunner) captureCommand(evidence CommandEvidence) {
 	if !ok {
 		return
 	}
-	if mode == macroModeHost {
+	if mode != macroModeMCU {
 		observedAt := evidence.ObservedAt
 		if observedAt.IsZero() {
 			observedAt = time.Now()
@@ -502,7 +646,11 @@ func (runner *MacroRunner) captureCommand(evidence CommandEvidence) {
 			runner.recording.LastError = "recording exceeded the host signed timing window"
 			return
 		}
-		step.AtUS = uint32(delta / time.Microsecond)
+		if uint64(delta/time.Microsecond)+uint64(runner.recordOffsetUS) > 0x7fffffff {
+			runner.recording.LastError = "appended recording timing overflow"
+			return
+		}
+		step.AtUS = uint32(delta/time.Microsecond) + runner.recordOffsetUS
 		runner.recordMacro.Steps = append(runner.recordMacro.Steps, step)
 		runner.recording.Steps = len(runner.recordMacro.Steps)
 		runner.publishRecordedStep(step)
@@ -517,7 +665,11 @@ func (runner *MacroRunner) captureCommand(evidence CommandEvidence) {
 		runner.recording.LastError = "recording exceeded the MCU signed timing window"
 		return
 	}
-	step.AtUS = delta
+	if uint64(delta)+uint64(runner.recordOffsetUS) > 0x7fffffff {
+		runner.recording.LastError = "appended recording timing overflow"
+		return
+	}
+	step.AtUS = delta + runner.recordOffsetUS
 	runner.recordMacro.Steps = append(runner.recordMacro.Steps, step)
 	runner.recording.Steps = len(runner.recordMacro.Steps)
 	runner.publishRecordedStep(step)
@@ -535,17 +687,24 @@ func (runner *MacroRunner) publishRecordedStep(step appconfig.MacroStep) {
 	})
 }
 
-// Start validates a macro and selects its persisted playback engine. Legacy
-// macros with no mode retain MCU playback; newly recorded alpha macros use the
-// host monotonic scheduler by default.
+// Start validates an effect sequence and resolves its persisted execution
+// policy. The definition stays in the PCController library; only a volatile
+// run plan is staged into host or board RAM.
 func (runner *MacroRunner) Start(ctx context.Context, reference string) (MacroState, error) {
 	return runner.StartMode(ctx, reference, "")
 }
 
-// StartMode plays the same saved profile with either execution clock.
+// StartMode plays the same saved definition with an optional execution-policy
+// override. "auto" is capability driven and remains transparent to callers.
 func (runner *MacroRunner) StartMode(ctx context.Context, reference, modeOverride string) (MacroState, error) {
+	if runner.runtime.MediaTimeline().State == "playing" {
+		return MacroState{}, errors.New("pause media-bound effects before starting standalone playback")
+	}
 	runner.operationMu.Lock()
 	defer runner.operationMu.Unlock()
+	if runner.runtime.emergencyStop.Load() {
+		return MacroState{}, ErrEmergencyStopActive
+	}
 	if recording := runner.RecordingState(); recording.Active {
 		return MacroState{}, fmt.Errorf("macro recording %d/%s is active; save or discard it before playback", recording.ID, recording.Name)
 	}
@@ -555,19 +714,26 @@ func (runner *MacroRunner) StartMode(ctx context.Context, reference, modeOverrid
 		return MacroState{}, err
 	}
 	if modeOverride != "" {
-		if modeOverride != macroModeHost && modeOverride != macroModeMCU {
-			return MacroState{}, errors.New("playback mode must be host or mcu")
+		if modeOverride != macroModeAuto && modeOverride != macroModeHost && modeOverride != macroModeMCU {
+			return MacroState{}, errors.New("playback policy must be auto, host, or mcu")
 		}
 		macro.Mode = modeOverride
 		macro.TimingToleranceUS = modeTimingTolerance(modeOverride)
 	}
-	compiled, err := compileMacro(macro)
-	if err != nil {
-		return MacroState{}, err
-	}
 	snapshot := runner.runtime.Snapshot()
 	if !snapshot.Connected {
 		return MacroState{}, errors.New("device is not connected")
+	}
+	policy := macro.Mode
+	if policy == "" {
+		policy = macroModeAuto
+	}
+	if policy == macroModeAuto {
+		macro.Mode = resolveMacroMode(macro, snapshot.Hello.Capabilities)
+	}
+	compiled, err := compileMacro(macro)
+	if err != nil {
+		return MacroState{}, err
 	}
 	if macro.BoardProfileKey != "" {
 		profileKey, profileMode := runner.activeBoardProfile()
@@ -600,7 +766,7 @@ func (runner *MacroRunner) StartMode(ctx context.Context, reference, modeOverrid
 	}
 	runner.state = MacroState{
 		Running: true, ID: macro.ID, Name: macro.Name,
-		Mode:     mode,
+		Mode: mode, Policy: policy,
 		Category: macro.Category, Color: normalizedMacroColor(macro.Color),
 		StepCount: len(compiled.steps), DurationUS: compiled.durationUS,
 		StartedAt: time.Now(), TimingToleranceUS: tolerance,
@@ -637,7 +803,7 @@ func (runner *MacroRunner) StartMode(ctx context.Context, reference, modeOverrid
 		if err := runner.showMacroIdentity(ctx, snapshot.ConnectionGeneration, compiled); err != nil {
 			runner.runtime.PublishHostEvent("macro.display", "macro identity display unavailable: "+err.Error())
 		}
-		playContext, cancel := context.WithCancel(context.Background())
+		playContext, cancel := context.WithCancel(context.WithoutCancel(ctx))
 		done := make(chan struct{})
 		runner.mu.Lock()
 		runner.cancel = cancel
@@ -679,7 +845,7 @@ func (runner *MacroRunner) StartMode(ctx context.Context, reference, modeOverrid
 		return fail(err)
 	}
 
-	playContext, cancel := context.WithCancel(context.Background())
+	playContext, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	done := make(chan struct{})
 	runner.mu.Lock()
 	runner.cancel = cancel
@@ -1024,7 +1190,7 @@ func (runner *MacroRunner) safeStopHost() error {
 }
 
 func safeStopHostWithCommand(command hostMacroCommand) error {
-	ctx, cancel := context.WithTimeout(context.Background(), macroRequestTimeout)
+	ctx, cancel := context.WithTimeout(context.WithValue(context.Background(), mediaTimelineContextKey{}, true), macroRequestTimeout)
 	defer cancel()
 	relayErr := command(ctx, native.OpRelayAllOff, nil)
 	pwmErr := command(ctx, native.OpPWMAllOff, nil)
@@ -1433,6 +1599,204 @@ func (runner *MacroRunner) publishLifecycle(lifecycle string, state MacroState, 
 	runner.queueMacroPresentation(state)
 }
 
+func timelineEase(name string, position float64) float64 {
+	position = math.Max(0, math.Min(1, position))
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "ease-in":
+		return position * position
+	case "ease-out":
+		remaining := 1 - position
+		return 1 - remaining*remaining
+	case "ease-in-out":
+		if position < 0.5 {
+			return 2 * position * position
+		}
+		return 1 - math.Pow(-2*position+2, 2)/2
+	default:
+		return position
+	}
+}
+
+func timelineLerp(start, end uint16, position float64) uint16 {
+	return uint16(math.Round(float64(start) + (float64(end)-float64(start))*timelineEase("linear", position)))
+}
+
+func timelineLerpWithEasing(start, end uint16, easing string, position float64) uint16 {
+	return timelineLerp(start, end, timelineEase(easing, position))
+}
+
+func clearTimelineAuthoring(step *appconfig.MacroStep) {
+	step.ToValue = nil
+	step.ToRed, step.ToGreen, step.ToBlue, step.ToBrightness = nil, nil, nil, nil
+	step.Easing = ""
+	step.SampleRateHz = 0
+	step.RepeatCount = 0
+	step.RepeatIntervalMS = 0
+}
+
+func timelineStepAt(step appconfig.MacroStep, offsetUS uint64) (appconfig.MacroStep, error) {
+	at := uint64(step.AtUS) + offsetUS
+	if at > 0x7FFFFFFF {
+		return appconfig.MacroStep{}, errors.New("expanded cue timing exceeds 2147483647 us")
+	}
+	step.AtUS = uint32(at)
+	return step, nil
+}
+
+func timelineReleaseActions(actionIDs []string, release string) []string {
+	result := make([]string, 0, len(actionIDs))
+	for _, actionID := range actionIDs {
+		trimmed := strings.TrimSpace(actionID)
+		if trimmed == "" {
+			continue
+		}
+		parts := strings.Split(trimmed, ".")
+		if len(parts) > 1 {
+			parts[len(parts)-1] = release
+			trimmed = strings.Join(parts, ".")
+		}
+		result = append(result, trimmed)
+	}
+	return result
+}
+
+func expandTimelineCue(source appconfig.MacroStep) ([]appconfig.MacroStep, error) {
+	kind := strings.ToLower(strings.TrimSpace(source.Kind))
+	durationUS := uint64(source.DurationMS) * 1000
+	base := source
+	clearTimelineAuthoring(&base)
+
+	switch kind {
+	case "relay":
+		base.DurationMS = 0
+		result := []appconfig.MacroStep{base}
+		if source.Value != 0 && durationUS != 0 {
+			end, err := timelineStepAt(base, durationUS)
+			if err != nil {
+				return nil, err
+			}
+			end.Value = 0
+			end.ActionIDs = timelineReleaseActions(source.ActionIDs, "off")
+			result = append(result, end)
+		}
+		return result, nil
+	case "motion", "side":
+		base.DurationMS = 0
+		result := []appconfig.MacroStep{base}
+		if source.Value != 0 && durationUS != 0 {
+			end, err := timelineStepAt(base, durationUS)
+			if err != nil {
+				return nil, err
+			}
+			end.Value = 0
+			end.ActionIDs = timelineReleaseActions(source.ActionIDs, "stop")
+			result = append(result, end)
+		}
+		return result, nil
+	case "pwm", "mosfet":
+		base.DurationMS = 0
+		if source.ToValue == nil || durationUS == 0 {
+			return []appconfig.MacroStep{base}, nil
+		}
+		rate := uint64(source.SampleRateHz)
+		if rate == 0 {
+			rate = 30
+		}
+		samples := max((uint64(source.DurationMS)*rate+999)/1000, uint64(1))
+		result := make([]appconfig.MacroStep, 0, samples+1)
+		for sample := uint64(0); sample <= samples; sample++ {
+			position := float64(sample) / float64(samples)
+			step, err := timelineStepAt(base, durationUS*sample/samples)
+			if err != nil {
+				return nil, err
+			}
+			step.Value = timelineLerpWithEasing(source.Value, *source.ToValue, source.Easing, position)
+			result = append(result, step)
+		}
+		return result, nil
+	case "rgb", "status-led", "addressable", "ws2812":
+		base.DurationMS = 0
+		transition := source.ToRed != nil || source.ToGreen != nil || source.ToBlue != nil || source.ToBrightness != nil
+		if !transition || durationUS == 0 {
+			return []appconfig.MacroStep{base}, nil
+		}
+		rate := uint64(source.SampleRateHz)
+		if rate == 0 {
+			rate = 30
+		}
+		samples := max((uint64(source.DurationMS)*rate+999)/1000, uint64(1))
+		endRed, endGreen := source.Red, source.Green
+		endBlue, endBrightness := source.Blue, source.Brightness
+		if source.ToRed != nil {
+			endRed = *source.ToRed
+		}
+		if source.ToGreen != nil {
+			endGreen = *source.ToGreen
+		}
+		if source.ToBlue != nil {
+			endBlue = *source.ToBlue
+		}
+		if source.ToBrightness != nil {
+			endBrightness = *source.ToBrightness
+		}
+		result := make([]appconfig.MacroStep, 0, samples+1)
+		for sample := uint64(0); sample <= samples; sample++ {
+			position := float64(sample) / float64(samples)
+			step, err := timelineStepAt(base, durationUS*sample/samples)
+			if err != nil {
+				return nil, err
+			}
+			step.Red = byte(timelineLerpWithEasing(uint16(source.Red), uint16(endRed), source.Easing, position))
+			step.Green = byte(timelineLerpWithEasing(uint16(source.Green), uint16(endGreen), source.Easing, position))
+			step.Blue = byte(timelineLerpWithEasing(uint16(source.Blue), uint16(endBlue), source.Easing, position))
+			step.Brightness = byte(timelineLerpWithEasing(uint16(source.Brightness), uint16(endBrightness), source.Easing, position))
+			result = append(result, step)
+		}
+		return result, nil
+	default:
+		return []appconfig.MacroStep{base}, nil
+	}
+}
+
+// expandMacroTimeline compiles authoring-friendly blocks into the exact point
+// commands consumed by the existing host/MCU schedulers. The saved catalog
+// retains durations, curves, and repetition; only the volatile run plan is
+// expanded.
+func expandMacroTimeline(steps []appconfig.MacroStep) ([]appconfig.MacroStep, error) {
+	result := make([]appconfig.MacroStep, 0, len(steps))
+	for index, source := range steps {
+		repeats := int(source.RepeatCount)
+		if repeats < 1 {
+			repeats = 1
+		}
+		intervalMS := uint64(source.RepeatIntervalMS)
+		if repeats > 1 && intervalMS == 0 {
+			intervalMS = max(uint64(source.DurationMS), uint64(1))
+		}
+		if repeats > 1 && intervalMS < uint64(source.DurationMS) {
+			return nil, fmt.Errorf("step %d repeat interval must not be shorter than its duration", index+1)
+		}
+		for repeat := 0; repeat < repeats; repeat++ {
+			copy := source
+			at := uint64(source.AtUS) + uint64(repeat)*intervalMS*1000
+			if at > 0x7FFFFFFF {
+				return nil, fmt.Errorf("step %d repetition exceeds maximum effect time", index+1)
+			}
+			copy.AtUS = uint32(at)
+			expanded, err := expandTimelineCue(copy)
+			if err != nil {
+				return nil, fmt.Errorf("step %d: %w", index+1, err)
+			}
+			result = append(result, expanded...)
+			if len(result) > 65535 {
+				return nil, errors.New("expanded effect exceeds 65535 runtime commands")
+			}
+		}
+	}
+	sort.SliceStable(result, func(left, right int) bool { return result[left].AtUS < result[right].AtUS })
+	return result, nil
+}
+
 func compileMacro(macro appconfig.Macro) (compiledMacro, error) {
 	if macro.Mode != macroModeHost && macro.Mode != macroModeMCU {
 		return compiledMacro{}, fmt.Errorf("macro %d/%s mode must be host or mcu", macro.ID, macro.Name)
@@ -1440,9 +1804,13 @@ func compileMacro(macro appconfig.Macro) (compiledMacro, error) {
 	if len(macro.Steps) == 0 || len(macro.Steps) > 65535 {
 		return compiledMacro{}, fmt.Errorf("macro %d/%s must contain 1..65535 steps", macro.ID, macro.Name)
 	}
-	result := compiledMacro{definition: macro, steps: make([]compiledMacroStep, 0, len(macro.Steps))}
+	expandedSteps, err := expandMacroTimeline(macro.Steps)
+	if err != nil {
+		return compiledMacro{}, fmt.Errorf("macro %d/%s timeline: %w", macro.ID, macro.Name, err)
+	}
+	result := compiledMacro{definition: macro, steps: make([]compiledMacroStep, 0, len(expandedSteps))}
 	var previous uint32
-	for index, step := range macro.Steps {
+	for index, step := range expandedSteps {
 		dueUS, err := macroStepDueUS(step)
 		if err != nil {
 			return compiledMacro{}, fmt.Errorf("macro %d/%s step %d: %w", macro.ID, macro.Name, index+1, err)
@@ -1473,6 +1841,24 @@ func compileMacro(macro appconfig.Macro) (compiledMacro, error) {
 	}
 	result.durationUS = previous
 	return result, nil
+}
+
+// resolveMacroMode selects the device clock only when the firmware advertises
+// the queue and every step can coexist with its shared AVR workspace. The
+// strip framebuffer is deliberately host streamed; a sequence containing an
+// addressable-pixel command therefore uses the host clock without creating a
+// second effect definition.
+func resolveMacroMode(macro appconfig.Macro, capabilities uint32) string {
+	if capabilities&native.CapabilityTimedMacroQueue == 0 {
+		return macroModeHost
+	}
+	for _, step := range macro.Steps {
+		switch strings.ToLower(strings.TrimSpace(step.Kind)) {
+		case "addressable", "ws2812":
+			return macroModeHost
+		}
+	}
+	return macroModeMCU
 }
 
 func (compiled compiledMacro) completeSteps(offset int) int {
@@ -1584,7 +1970,8 @@ func hostRecordableOpcode(opcode byte) bool {
 	switch opcode {
 	case native.OpRelaySet, native.OpRelaySide, native.OpRelayAllOff,
 		native.OpPWMSet, native.OpPWMAllOff, native.OpBuzzer,
-		native.OpDisplayText, native.OpRFTx, native.OpAddressableLED:
+		native.OpDisplayText, native.OpRFTx, native.OpAddressableLED,
+		native.OpStatusRGB, native.OpMenuSetPage, native.OpMenuAction:
 		return true
 	default:
 		return false
@@ -1597,6 +1984,8 @@ func modeTimingTolerance(mode string) uint32 {
 		return defaultHostMacroToleranceUS
 	case macroModeMCU:
 		return defaultMacroTimingToleranceUS
+	case macroModeAuto:
+		return 0
 	default:
 		return 0
 	}

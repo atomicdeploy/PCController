@@ -83,7 +83,8 @@
   ],
   "reservedOpcodes": [
     { "value": 19, "note": "No PWM mode or auto-demo state is implemented." },
-    { "value": 38, "note": "Mappings are updated as complete records through RADIO_LEARN_REPLACE." }
+    { "value": 38, "note": "Mappings are updated as complete records through RADIO_LEARN_REPLACE." },
+    { "value": 74, "note": "Media cells reuse DISPLAY_TEXT scheduled segments instead of a parallel physical opcode." }
   ],
   "errors": [
     { "cpp": "NoError", "go": "ErrorNoError", "value": 0 },

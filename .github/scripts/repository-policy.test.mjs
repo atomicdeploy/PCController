@@ -130,6 +130,24 @@ test("reviewed engineering roadmap permits only its named public sources", () =>
   );
 });
 
+test("reviewed integration guides permit only the paired Pealayer repository", () => {
+  const context = { repository: "atomicdeploy/PCController" };
+  for (const path of [
+    "docs/Playback-Board-Sync.md",
+    "docs/Prepared-Media-Timeline.md",
+    "docs/RF-APPLICATION-ACTIONS.md",
+  ]) {
+    assert.deepEqual(
+      privacyFindings(path, "https://github.com/ToghrolTP/pealayer/pull/46", context),
+      [],
+    );
+    assert.equal(
+      privacyFindings(path, "https://github.com/other/unreviewed", context)[0].kind,
+      "unreviewed repository reference",
+    );
+  }
+});
+
 test("generated and ignored-equivalent paths are not text-scan candidates", () => {
   for (const path of [
     ".cache/private/turns.jsonl",

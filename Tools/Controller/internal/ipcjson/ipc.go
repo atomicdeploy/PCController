@@ -537,6 +537,37 @@ func (service *Service) dispatch(
 		return response
 	}
 	// Primary discovery must not queue behind a long board, firmware, or shell
+	if request.ClientID != "" {
+		if service.AppInstances == nil {
+			response.Error = &RPCError{Code: -32000, Message: "app instance registry is unavailable"}
+			return response
+		}
+		if _, ok := service.AppInstances.Get(request.ClientID); !ok {
+			response.Error = &RPCError{Code: -32000, Message: "register client before sending client-scoped commands"}
+			return response
+		}
+		ctx = control.WithMediaActor(ctx, request.ClientID)
+	}
+	if requestCapability(request.Method, request.Params) == capabilityBoard &&
+		request.Method != "controller.media.authority.change" && request.Method != "controller.media.playback.update" && request.Method != "controller.media.timeline.prepare" {
+		// Always admit the emergency latch, not an anonymous release during production.
+		var stop struct {
+			Active bool `json:"active"`
+		}
+		_ = json.Unmarshal(request.Params, &stop)
+		if request.Method != "controller.estop.set" || !stop.Active {
+			if err := service.Client.CheckMediaControlAuthority(ctx); err != nil {
+				var denied *control.MediaAuthorityError
+				if errors.As(err, &denied) {
+					response.Error = &RPCError{Code: -32009, Message: err.Error(), Data: map[string]any{"kind": denied.Kind, "resource": "media_authority", "authority": denied.Status}}
+					return response
+				}
+				response.Error = &RPCError{Code: -32000, Message: err.Error()}
+				return response
+			}
+		}
+	}
+	service.configureAutomationActions()
 	// operation holding service.mu. Secondary instances use this bounded ping
 	// before deciding whether they may approach the local serial device.
 	if request.Method == "controller.ping" {
@@ -635,6 +666,52 @@ func (service *Service) dispatch(
 	var result any
 	var err error
 	switch request.Method {
+	case "controller.media.playback.get":
+		result = service.Client.MediaPlayback()
+	case "controller.media.authority.get":
+		result = service.Client.MediaAuthority()
+	case "controller.media.authority.change":
+		var params controller.MediaAuthorityRequest
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			if service.AppInstances == nil {
+				err = errors.New("app instance registry is unavailable")
+			} else if instance, ok := service.AppInstances.Get(params.ClientID); !ok {
+				err = errors.New("register client before negotiating authority")
+			} else {
+				params.Label = instance.Values["host"]
+				if params.Label == "" {
+					params.Label = instance.Values["application"]
+				}
+				if params.Label == "" {
+					params.Label = params.ClientID
+				}
+				result, err = service.Client.ChangeMediaAuthority(params)
+			}
+		}
+	case "controller.media.timeline.get":
+		result = service.Client.MediaTimeline()
+	case "controller.media.timeline.prepare":
+		var params controller.MediaTimelinePlan
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			if service.AppInstances == nil {
+				err = errors.New("app instance registry is unavailable")
+			} else if _, ok := service.AppInstances.Get(params.ClientID); !ok {
+				err = errors.New("register client before preparing a timeline")
+			} else {
+				result, err = service.Client.PrepareMediaTimeline(params)
+			}
+		}
+	case "controller.media.playback.update":
+		var params controller.MediaPlaybackUpdate
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			if service.AppInstances == nil {
+				err = errors.New("app instance registry is unavailable")
+			} else if _, ok := service.AppInstances.Get(params.ClientID); !ok {
+				err = errors.New("register client with controller.app.instance.report before publishing playback")
+			} else {
+				result, err = service.Client.UpdateMediaPlayback(params)
+			}
+		}
 	case "controller.device.status":
 		if service.LocalDevice == nil {
 			err = errors.New("local-device integration is unavailable")
@@ -738,13 +815,19 @@ func (service *Service) dispatch(
 			Key              string  `json:"key"`
 			Name             *string `json:"name,omitempty"`
 			Icon             *string `json:"icon,omitempty"`
+			Color            *string `json:"color,omitempty"`
+			UpColor          *string `json:"up_color,omitempty"`
+			DownColor        *string `json:"down_color,omitempty"`
 			Group            *string `json:"group,omitempty"`
+			Order            *int    `json:"order,omitempty"`
+			Hidden           *bool   `json:"hidden,omitempty"`
+			Locked           *bool   `json:"locked,omitempty"`
 			ExpectedRevision string  `json:"expected_revision,omitempty"`
 		}
 		if err = decodeStrictParams(request.Params, &params); err != nil {
 			err = &RPCError{Code: -32602, Message: err.Error()}
 		} else {
-			result, err = service.updatePeripheralPresentation(params.Key, params.Name, params.Icon, params.Group, params.ExpectedRevision)
+			result, err = service.updatePeripheralPresentation(params.Key, params.Name, params.Icon, params.Color, params.UpColor, params.DownColor, params.Group, params.Order, params.Hidden, params.Locked, params.ExpectedRevision)
 		}
 	case "controller.action.invoke":
 		var params struct {
@@ -848,6 +931,20 @@ func (service *Service) dispatch(
 		}
 	case "controller.snapshot":
 		result = service.controllerSnapshot()
+	case "controller.estop.get":
+		result = service.Client.EmergencyStop()
+	case "controller.estop.set":
+		var params struct {
+			Active bool   `json:"active"`
+			Source string `json:"source,omitempty"`
+			Reason string `json:"reason,omitempty"`
+		}
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			if strings.TrimSpace(params.Source) == "" {
+				params.Source = access.Principal
+			}
+			result, err = service.Client.SetEmergencyStop(ctx, params.Active, params.Source, params.Reason)
+		}
 	case "controller.port.process", "controller.port.owner":
 		result = service.Client.Snapshot().PortProcess
 	case "controller.session.snapshot", "controller.session.snapshot.last":
@@ -947,6 +1044,9 @@ func (service *Service) dispatch(
 					err = &RPCError{Code: -32602, Message: "raw_value must be 0..4095"}
 				}
 				if err == nil {
+					err = service.rejectLockedPeripheral(fmt.Sprintf("pwm.%d", params.Channel))
+				}
+				if err == nil {
 					if err = service.Client.SetPWMChannel(ctx, byte(params.Channel), uint16(raw)); err == nil {
 						result, err = service.pwmValues(ctx)
 					}
@@ -964,6 +1064,46 @@ func (service *Service) dispatch(
 	case "controller.pwm.off":
 		if err = service.Client.AllPWMOff(ctx); err == nil {
 			result, err = service.pwmValues(ctx)
+		}
+	case "controller.status_led.set":
+		var params struct {
+			Red        int `json:"red"`
+			Green      int `json:"green"`
+			Blue       int `json:"blue"`
+			Brightness int `json:"brightness"`
+		}
+		if err = decodeParams(request.Params, &params); err == nil {
+			if params.Red < 0 || params.Red > 255 || params.Green < 0 || params.Green > 255 || params.Blue < 0 || params.Blue > 255 || params.Brightness < 0 || params.Brightness > 255 {
+				err = &RPCError{Code: -32602, Message: "red, green, blue, and brightness must be 0..255"}
+			} else {
+				// Model a user-selected color as an indefinitely retained native
+				// overlay. The alternate color is identical, so the board renders
+				// a steady frame while preserving the state-policy base underneath.
+				// controller.status_led.release can therefore restore native/status
+				// policy ownership instead of leaving the preview as a new base.
+				operation, operationErr := service.Client.StartStatusLEDEffect(ctx, appconfig.StatusLEDEffect{
+					Name:           "custom RGB preview",
+					Kind:           "flash",
+					Red:            byte(params.Red),
+					Green:          byte(params.Green),
+					Blue:           byte(params.Blue),
+					AlternateRed:   byte(params.Red),
+					AlternateGreen: byte(params.Green),
+					AlternateBlue:  byte(params.Blue),
+					Brightness:     byte(params.Brightness),
+					MinBrightness:  byte(params.Brightness),
+					PeriodMS:       int(native.StatusEffectMinimumPeriodMS),
+				})
+				err = operationErr
+				if err == nil {
+					result = map[string]any{"active": true, "red": params.Red, "green": params.Green, "blue": params.Blue, "brightness": params.Brightness, "operation_id": operation.ID}
+				}
+			}
+		}
+	case "controller.status_led.release":
+		err = service.Client.ReleaseStatusLEDEffect(ctx)
+		if err == nil {
+			result = map[string]any{"active": false}
 		}
 	case "controller.temperatures":
 		var params struct {
@@ -1053,7 +1193,7 @@ func (service *Service) dispatch(
 						service.Shutdown()
 					}()
 				}
-			} else {
+			} else if err = service.rejectLockedCommand(command); err == nil {
 				var output string
 				service.commandMu.Lock()
 				output, err = service.Client.Execute(ctx, command)
@@ -1073,6 +1213,12 @@ func (service *Service) dispatch(
 		}
 	case "controller.rf.list":
 		result, err = service.Client.ListLearnedDetailed(ctx)
+	case "controller.rf.catalog":
+		result, err = service.rfCatalog(ctx, request.Params)
+	case "controller.rf.binding.put":
+		result, err = service.putRFBinding(request.Params)
+	case "controller.rf.binding.remove":
+		result, err = service.removeRFBinding(request.Params)
 	case "controller.board_automation.list":
 		result, err = service.Client.BoardAutomations(ctx)
 	case "controller.board_automation.put":
@@ -1702,7 +1848,10 @@ func (service *Service) dispatch(
 	}
 	if err != nil {
 		var rpcError *RPCError
-		if errors.As(err, &rpcError) {
+		var authorityError *control.MediaAuthorityError
+		if errors.As(err, &authorityError) {
+			response.Error = &RPCError{Code: -32009, Message: err.Error(), Data: map[string]any{"kind": authorityError.Kind, "resource": "media_authority", "authority": authorityError.Status}}
+		} else if errors.As(err, &rpcError) {
 			response.Error = rpcError
 		} else {
 			response.Error = &RPCError{Code: -32000, Message: err.Error()}
@@ -1725,13 +1874,15 @@ func (service *Service) primaryPingResult() map[string]any {
 
 type controllerSnapshotEnvelope struct {
 	controller.Snapshot
-	HostInstanceID string `json:"host_instance_id,omitempty"`
+	HostInstanceID string                           `json:"host_instance_id,omitempty"`
+	MediaPlayback  controller.MediaPlaybackSnapshot `json:"media_playback"`
 }
 
 func (service *Service) controllerSnapshot() controllerSnapshotEnvelope {
 	return controllerSnapshotEnvelope{
 		Snapshot:       service.Client.Snapshot(),
 		HostInstanceID: strings.TrimSpace(service.HostInstanceID),
+		MediaPlayback:  service.Client.MediaPlayback(),
 	}
 }
 
@@ -2248,6 +2399,8 @@ func requestCapability(method string, params json.RawMessage) string {
 	case "controller.display.send", "controller.opcode.send",
 		"controller.opcode.exchange", "controller.opcode.request", "controller.action.invoke":
 		return capabilityBoard
+	case "controller.estop.set", "controller.media.playback.update", "controller.media.timeline.prepare", "controller.media.authority.change":
+		return capabilityBoard
 	case "controller.host_menu.config", "controller.host_menu.config.get",
 		"controller.ui.config", "controller.ui.config.get",
 		"controller.peripherals", "controller.peripherals.get", "controller.board_profile.get",
@@ -2259,6 +2412,10 @@ func requestCapability(method string, params json.RawMessage) string {
 		"controller.webhooks.status",
 		"controller.webhooks.pending", "controller.webhooks.dead":
 		return capabilityRead
+	case "controller.rf.catalog":
+		return capabilityRead
+	case "controller.rf.binding.put", "controller.rf.binding.remove":
+		return capabilityHostConfig
 	case "controller.host_menu.configure", "controller.host_menu.config.set",
 		"controller.ui.config.set",
 		"controller.peripherals.set", "controller.board_profile.update",
@@ -2300,7 +2457,7 @@ func requestCapability(method string, params json.RawMessage) string {
 			}
 		}
 		return capabilityHostConfig
-	case "controller.ping", "controller.snapshot", "controller.port.process", "controller.port.owner", "controller.session.snapshot",
+	case "controller.ping", "controller.snapshot", "controller.media.playback.get", "controller.media.authority.get", "controller.media.timeline.get", "controller.estop.get", "controller.port.process", "controller.port.owner", "controller.session.snapshot",
 		"controller.session.snapshot.last", "controller.status",
 		"controller.front_panel", "controller.front-panel",
 		"controller.command.catalog", "controller.melodies.list", "controller.program_state.get", "controller.program-state.get",
@@ -2350,6 +2507,11 @@ func commandCapability(command string) string {
 		return capabilityBoard
 	case "program-state", "run-state":
 		if len(words) == 1 || (len(words) == 2 && words[1] == "status") {
+			return capabilityRead
+		}
+		return capabilityBoard
+	case "estop":
+		if len(words) == 1 || len(words) == 2 && words[1] == "status" {
 			return capabilityRead
 		}
 		return capabilityBoard
@@ -2860,6 +3022,46 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 		}
 		writeHTTPJSON(writer, http.StatusOK, service.controllerSnapshot())
 	})
+	mux.HandleFunc("/api/estop", func(writer http.ResponseWriter, request *http.Request) {
+		if !authorizeHTTPRequest(writer, request, service) {
+			return
+		}
+		if request.Method == http.MethodGet {
+			if !authorizeHTTPCapability(writer, request, service, capabilityRead) {
+				return
+			}
+			writeHTTPJSON(writer, http.StatusOK, service.Client.EmergencyStop())
+			return
+		}
+		if request.Method != http.MethodPut && request.Method != http.MethodPost {
+			writer.Header().Set("Allow", http.MethodGet+", "+http.MethodPut+", "+http.MethodPost)
+			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !authorizeHTTPCapability(writer, request, service, capabilityBoard) {
+			return
+		}
+		var params struct {
+			Active bool   `json:"active"`
+			Source string `json:"source,omitempty"`
+			Reason string `json:"reason,omitempty"`
+		}
+		decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, maxMessage))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&params); err != nil {
+			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		if strings.TrimSpace(params.Source) == "" {
+			params.Source = "rest"
+		}
+		state, err := service.Client.SetEmergencyStop(request.Context(), params.Active, params.Source, params.Reason)
+		if err != nil {
+			writeHTTPJSON(writer, http.StatusConflict, map[string]any{"error": err.Error(), "emergency_stop": state})
+			return
+		}
+		writeHTTPJSON(writer, http.StatusOK, state)
+	})
 	mux.HandleFunc("/api/peripherals", func(writer http.ResponseWriter, request *http.Request) {
 		if !authorizeHTTPRequest(writer, request, service) {
 			return
@@ -3281,6 +3483,10 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 		encoded, _ := json.Marshal(params)
 		if err := service.authorizeAccess(access, "controller.command.execute", encoded); err != nil {
 			writeHTTPJSON(writer, http.StatusForbidden, map[string]string{"error": err.Error()})
+			return
+		}
+		if err := service.rejectLockedCommand(params.Command); err != nil {
+			writeHTTPJSON(writer, http.StatusConflict, map[string]string{"error": err.Error()})
 			return
 		}
 		output, err := service.Client.Execute(request.Context(), params.Command)
@@ -4065,7 +4271,7 @@ func serveWebSocket(
 		defer cancel()
 		return connection.Write(writeContext, websocket.MessageText, encoded)
 	}
-	subscriptions := newWebSocketSubscriptions(ctx, service.Client, writeJSON)
+	subscriptions := newWebSocketSubscriptions(ctx, service.Client, service.controllerSnapshot, writeJSON)
 	defer subscriptions.stopAll()
 
 	for {
@@ -4212,7 +4418,7 @@ func serveSocketIO(
 		return
 	}
 
-	subscriptions := newWebSocketSubscriptions(ctx, service.Client, writeNotification)
+	subscriptions := newWebSocketSubscriptions(ctx, service.Client, service.controllerSnapshot, writeNotification)
 	defer subscriptions.stopAll()
 	go func() {
 		ticker := time.NewTicker(25 * time.Second)
@@ -4646,19 +4852,21 @@ type webSocketSubscriptionWorker struct {
 // A preserve subscription is deliberately topic-scoped: changing status
 // cadence cannot cancel and recreate ordered event/state streams or reset cursors.
 type webSocketSubscriptions struct {
-	ctx     context.Context
-	client  *controller.Client
-	write   func(any) error
-	workers map[string]webSocketSubscriptionWorker
+	ctx      context.Context
+	client   *controller.Client
+	snapshot func() controllerSnapshotEnvelope
+	write    func(any) error
+	workers  map[string]webSocketSubscriptionWorker
 }
 
 func newWebSocketSubscriptions(
 	ctx context.Context,
 	client *controller.Client,
+	snapshot func() controllerSnapshotEnvelope,
 	write func(any) error,
 ) *webSocketSubscriptions {
 	return &webSocketSubscriptions{
-		ctx: ctx, client: client, write: write,
+		ctx: ctx, client: client, snapshot: snapshot, write: write,
 		workers: make(map[string]webSocketSubscriptionWorker),
 	}
 }
@@ -4712,11 +4920,11 @@ func (subscriptions *webSocketSubscriptions) start(topic string, value wsSubscri
 		defer close(done)
 		switch topic {
 		case "events":
-			streamWebSocketEventStream(topicContext, subscriptions.client, afterID, "activity", "controller.event", 0, subscriptions.write)
+			streamWebSocketEventStream(topicContext, subscriptions.client, afterID, "activity", "controller.event", 0, subscriptions.snapshot, subscriptions.write)
 		case "state":
-			streamWebSocketEventStream(topicContext, subscriptions.client, afterID, "state", "controller.state", time.Duration(value.StateIntervalMS)*time.Millisecond, subscriptions.write)
+			streamWebSocketEventStream(topicContext, subscriptions.client, afterID, "state", "controller.state", time.Duration(value.StateIntervalMS)*time.Millisecond, subscriptions.snapshot, subscriptions.write)
 		case "debug":
-			streamWebSocketEventStream(topicContext, subscriptions.client, afterID, "debug", "controller.debug", 0, subscriptions.write)
+			streamWebSocketEventStream(topicContext, subscriptions.client, afterID, "debug", "controller.debug", 0, nil, subscriptions.write)
 		case "opcodes":
 			streamWebSocketOpcodes(topicContext, subscriptions.client, afterID, value.Opcodes, subscriptions.write)
 		case "status":
@@ -4765,6 +4973,7 @@ func streamWebSocketEventStream(
 	stream string,
 	method string,
 	highRateInterval time.Duration,
+	snapshot func() controllerSnapshotEnvelope,
 	write func(any) error,
 ) {
 	var lastHighRateWrite time.Time
@@ -4789,7 +4998,34 @@ func streamWebSocketEventStream(
 		if highRate {
 			lastHighRateWrite = time.Now()
 		}
+		if snapshot != nil && eventUpdatesClientSnapshot(event) {
+			if err := write(wsNotification{
+				JSONRPC: Version,
+				Method:  "controller.snapshot",
+				Params:  snapshot(),
+			}); err != nil {
+				return
+			}
+		}
 	}
+}
+
+// eventUpdatesClientSnapshot identifies low-rate authority changes whose
+// complete cached result should follow the event edge. High-rate segment and
+// RGB frames already carry compact patches and intentionally do not amplify a
+// full snapshot at animation frequency.
+func eventUpdatesClientSnapshot(event controller.Event) bool {
+	kind := strings.ToLower(strings.TrimSpace(event.Kind))
+	switch kind {
+	case "door", "bluetooth", "pwm", "relay", "hot", "reset", "identity",
+		"front_panel.changed", "settings.changed", "illumination.changed", "peripherals.changed":
+		return true
+	}
+	return strings.HasPrefix(kind, "connection") ||
+		strings.HasPrefix(kind, "usb.") ||
+		strings.HasPrefix(kind, "program.") ||
+		strings.HasPrefix(kind, "rf.learn") ||
+		strings.HasPrefix(kind, "macro.")
 }
 
 func highRateStateEvent(event controller.Event) bool {
@@ -4800,6 +5036,7 @@ func highRateStateEvent(event controller.Event) bool {
 		return false
 	}
 }
+
 func streamWebSocketStatus(
 	ctx context.Context,
 	client *controller.Client,
@@ -4811,7 +5048,7 @@ func streamWebSocketStatus(
 		_ = write(wsNotification{
 			JSONRPC: Version,
 			Method:  "controller.error",
-			Params:  map[string]string{"source": "status", "error": err.Error()},
+			Params:  map[string]any{"source": "status", "error": err.Error(), "board_connected": client.Snapshot().Connected},
 		})
 		return
 	}
@@ -4820,7 +5057,7 @@ func streamWebSocketStatus(
 			if write(wsNotification{
 				JSONRPC: Version,
 				Method:  "controller.error",
-				Params:  map[string]string{"source": "status", "error": update.Error},
+				Params:  map[string]any{"source": "status", "error": update.Error, "board_connected": client.Snapshot().Connected},
 			}) != nil {
 				return
 			}

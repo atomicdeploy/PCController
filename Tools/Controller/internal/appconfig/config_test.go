@@ -144,6 +144,9 @@ func TestPeripheralRegistryCoversEveryCoreRoleAndNamingCapacity(t *testing.T) {
 		}
 		seen[descriptor.Key] = true
 		counts[descriptor.Kind]++
+		if strings.HasPrefix(descriptor.Role, "status-") && !descriptor.Hidden {
+			t.Fatalf("status RGB channel %q must be hidden by default", descriptor.Key)
+		}
 	}
 	for kind, want := range map[string]int{
 		"relay": 8, "motion": 2, "pwm": 16, "display": 2, "sensor": 6,
@@ -260,9 +263,9 @@ func TestMacroValidation(t *testing.T) {
 	}
 }
 
-func TestLoadNormalizesOmittedMacroModeToHost(t *testing.T) {
+func TestLoadNormalizesOmittedMacroModeToAuto(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
-	content := `{"macros":[{"id":1,"name":"recorded","steps":[{"kind":"relay","target":4,"value":1}]}]}`
+	content := `{"schema":2,"macros":[{"id":1,"name":"recorded","steps":[{"kind":"relay","target":4,"value":1}]}]}`
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -270,8 +273,8 @@ func TestLoadNormalizesOmittedMacroModeToHost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := value.Macros[0].Mode; got != "host" {
-		t.Fatalf("normalized macro mode=%q, want host", got)
+	if got := value.Macros[0].Mode; got != "auto" {
+		t.Fatalf("normalized macro mode=%q, want auto", got)
 	}
 	if err := Write(path, value); err != nil {
 		t.Fatal(err)
@@ -280,7 +283,7 @@ func TestLoadNormalizesOmittedMacroModeToHost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(written), `"mode": "host"`) {
+	if !strings.Contains(string(written), `"mode": "auto"`) {
 		t.Fatalf("normalized macro mode was not persisted explicitly: %s", written)
 	}
 }
@@ -298,6 +301,9 @@ func TestLoadNormalizesLegacyAutoMacroModeToHost(t *testing.T) {
 	if got := value.Macros[0].Mode; got != "host" {
 		t.Fatalf("normalized legacy macro mode=%q, want host", got)
 	}
+	if value.Schema != CurrentConfigSchema {
+		t.Fatalf("migrated schema=%d, want %d", value.Schema, CurrentConfigSchema)
+	}
 	if err := Write(path, value); err != nil {
 		t.Fatal(err)
 	}
@@ -305,9 +311,25 @@ func TestLoadNormalizesLegacyAutoMacroModeToHost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(written), `"mode": "auto"`) ||
+	if !strings.Contains(string(written), `"schema": 2`) ||
+		strings.Contains(string(written), `"mode": "auto"`) ||
 		!strings.Contains(string(written), `"mode": "host"`) {
 		t.Fatalf("legacy macro mode was not migrated explicitly: %s", written)
+	}
+}
+
+func TestLoadNormalizesLegacyOmittedMacroModeToHost(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	content := `{"macros":[{"id":1,"name":"recorded","steps":[{"kind":"relay","target":4,"value":1}]}]}`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	value, _, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := value.Macros[0].Mode; got != "host" {
+		t.Fatalf("normalized legacy omitted macro mode=%q, want host", got)
 	}
 }
 
@@ -740,7 +762,7 @@ func TestWritePersistsOnlyUserOverrides(t *testing.T) {
 	if err := json.Unmarshal(content, &defaultsDocument); err != nil {
 		t.Fatal(err)
 	}
-	if len(defaultsDocument) != 0 {
+	if len(defaultsDocument) != 1 || defaultsDocument["schema"] != float64(CurrentConfigSchema) {
 		t.Fatalf("default configuration was expanded on disk: %s", content)
 	}
 
@@ -876,15 +898,15 @@ func TestFutureConfigFieldsAreIgnoredButKnownTypesRemainStrict(t *testing.T) {
 	}
 }
 
-func TestControlDescriptorsAreOrderedResolvedAndExcludeSystemChannels(t *testing.T) {
+func TestControlDescriptorsAreOrderedResolvedAndIncludeRoleSpecificChannels(t *testing.T) {
 	controls := ControlDescriptors(map[string]string{
 		"relay.5":  "Bench lamp",
 		"motion.b": "Right lift",
 		"pwm.10":   "Fan",
-		"pwm.11":   "Must remain excluded",
+		"pwm.11":   "Enclosure lighting",
 	})
-	if len(controls) != 21 {
-		t.Fatalf("controls=%d, want 21", len(controls))
+	if len(controls) != 26 {
+		t.Fatalf("controls=%d, want 26", len(controls))
 	}
 	wants := []ControlDescriptor{
 		{Key: "relay.1", Kind: "relay", Order: 1, Name: "Side A Direction", Control: "relay"},
@@ -893,6 +915,7 @@ func TestControlDescriptorsAreOrderedResolvedAndExcludeSystemChannels(t *testing
 		{Key: "motion.b", Kind: "side", Order: 2, Name: "Right lift", Control: "motion"},
 		{Key: "pwm.0", Kind: "mosfet", Order: 0, Name: "MOSFET 1", Control: "pwm-user"},
 		{Key: "pwm.10", Kind: "mosfet", Order: 10, Name: "Fan", Control: "pwm-user"},
+		{Key: "pwm.11", Kind: "mosfet", Order: 11, Name: "Enclosure lighting", Control: "role-specific"},
 	}
 	for _, want := range wants {
 		found := false

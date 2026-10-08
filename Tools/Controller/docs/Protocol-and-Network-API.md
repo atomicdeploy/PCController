@@ -654,15 +654,17 @@ request error.
 | `controller.peripherals.set` | `peripheral_names` object | atomically replace custom host names and return normalized names plus both registries; requires `host_configuration` |
 | `controller.board_profile.get` | `{}` | physical identity source/stability, attachment/configuration truth, wiring mode, and opaque revision; requires `read` |
 | `controller.board_profile.update` | `key`, `mode`, optional `expose_raw_relays`, optional `expected_revision` | bind the attached board identity to `ordinary-relays` or `cinema-seat-motion`; cinema profiles may advertise both semantic seat controls and raw R1-R4 controls; requires `host_configuration` |
-| `controller.peripheral.presentation.update` | `key`, one or more of `name`/`icon`/`group`, optional `expected_revision` | update one advertised descriptor and return it with the new profile revision; requires `host_configuration` |
+| `controller.peripheral.presentation.update` | `key`, one or more of `name`/`icon`/`group`/`hidden`/`locked`, optional `expected_revision` | update one advertised descriptor and return it with the new profile revision; requires `host_configuration` |
 | `controller.action.invoke` | `action_id` | invoke one action actually advertised by the attached profile and return after the board ACK; requires `board_commands` |
 | `controller.pwm.values` | `{}` | authoritative availability, selected channel, raw `values`, and sixteen described channels with logical percent/output type/icon/curve; requires `read` |
 | `controller.illumination.get` | `{}` | persisted Off/Auto/On policy, on/off brightness, live door-selected target, and exact applied enclosure MOSFET channel 12 (internal index 11); requires `read` |
 | `controller.illumination.set` | `{ "mode": 0..2, "on_brightness": 0..255, "off_brightness": 0..255 }` | preserves every unrelated board setting, applies live, waits for durable EEPROM readback, and returns the authoritative illumination state; requires `board_commands` |
 | `controller.illumination.override` | `{ "value": 0..4095 }` | applies a temporary exact raw value to enclosure MOSFET channel 12 and returns authoritative readback; policy/EEPROM ownership remains unchanged and may reassert its target on the next policy event; requires `board_commands` |
-| `controller.pwm.set` | `channel` (`0..15`) and exactly one of `percent` (`0..100`) or `raw_value` (`0..4095`) | map logical intensity once or write exact duty, then return the complete described snapshot; requires `board_commands` |
+| `controller.pwm.set` | `channel` (`0..15`) and exactly one of `percent` (`0..100`) or `raw_value` (`0..4095`) | map logical intensity once or write exact duty, then return the complete described sixteen-channel snapshot and publish `pwm.changed` to every state subscriber; requires `board_commands` |
 | `controller.pwm.channel.configure` | `channel`, `output_type`, `icon`, `curve`, `gamma` | persist one channel's host-owned identity and transfer function and broadcast `peripherals.changed`; requires `host_configuration` |
-| `controller.pwm.off` | `{}` | clear every PWM channel, read back, and return the complete authoritative snapshot; requires `board_commands` |
+| `controller.pwm.off` | `{}` | clear every PWM channel, read back, return the complete authoritative snapshot, and publish `pwm.changed`; requires `board_commands` |
+| `controller.status_led.set` | `red`, `green`, `blue`, `brightness` (`0..255`) | apply an explicit steady status-light override through the shared output scheduler; requires `board_commands` |
+| `controller.status_led.release` | `{}` | release the explicit status-light override back to the board/state policy; requires `board_commands` |
 | `controller.temperatures` | optional `rescan` | named temperatures and ROM identities |
 | `controller.menu.list`, `controller.menu.current` | `{}` | live board catalog when advertised, otherwise the canonical capability-limited manifest |
 | `controller.menu.jump`, `controller.menu.page` | `page` ID or name | select a board menu page |
@@ -1008,16 +1010,28 @@ routed path—not the raw `RequestURI` or query string.
       ]
     }
   ],
-  "strip_effects": [
+  "effects": [
     {
+      "reference": "effect:police",
       "id": "police",
-      "name": "Police",
+      "name": "Police red / blue",
+      "category": "Lighting",
       "description": "Alternating red and blue emergency-light sweep",
+      "kind": "strip-stream",
+      "engine": "host",
+      "editable": true,
+      "duration_ms": 5000,
       "default_fps": 20,
-      "min_pixels": 1,
-      "max_pixels": 100,
-      "min_fps": 1,
-      "max_fps": 30
+      "default_pixels": 100,
+      "program": {
+        "primitive": "alternating-zones",
+        "primary": {"red": 255, "green": 0, "blue": 0},
+        "secondary": {"red": 0, "green": 0, "blue": 255},
+        "period_ms": 800,
+        "step_ms": 100,
+        "swap_after_steps": 4,
+        "dim_intensity": 36
+      }
     }
   ]
 }
@@ -1038,24 +1052,28 @@ remain ordinary relays in both modes; MOSFET/PWM 0..10 remain directly
 controllable, while system-owned PWM 11..15, displays, and sensors remain
 descriptive peripherals.
 
-`name`, `icon`, and `group` are mutable presentation stored in the PC profile;
-the descriptor `key` and action IDs remain stable. Supplying an empty field to
-`controller.peripheral.presentation.update` clears that override. Callers may
-send the opaque `expected_revision`; a stale revision is rejected with
-`-32000`. Successful profile/presentation changes publish a state-stream
+`name`, `icon`, `group`, `hidden`, and `locked` are mutable presentation policy
+stored in the PC profile; the descriptor `key` and action IDs remain stable.
+Supplying an empty text field to `controller.peripheral.presentation.update`
+clears that text override. `hidden` is a discoverable consumer presentation
+preference: the descriptor remains in the catalog so a UI can reveal it again.
+`locked` is enforced by PCController for semantic actions, relay commands, and
+PWM writes as well as advertised to consumers. Callers may send the opaque
+`expected_revision`; a stale revision is rejected with `-32000`. Successful
+profile/presentation changes publish a state-stream
 `controller.state` event whose `params.kind` is `peripherals.changed`; clients
 then refresh the full catalog. Legacy whole-map `peripheral_names` remains a
 compatibility fallback and also advances the revision. No presentation method
 reads or writes MCU EEPROM.
 
-`strip_effects` is a typed host-rendered effect catalog and is omitted unless
-the board is currently connected and its authenticated HELLO advertises the
-addressable-strip streaming capability. The stable IDs are `police`,
-`white-thunder`, and `converging-red`; every descriptor includes its display
-name, concise description, default frame rate, and accepted pixel/FPS bounds.
-The same gated list is present in `controller.snapshot`. A consumer must parse
-the returned catalog before offering an effect and must not infer availability
-from a stale config or the presence of the generic command string.
+`effects` is the unified, editable PCController-owned catalog. Lighting entries
+are included only while the board is connected and its authenticated HELLO
+advertises addressable-strip streaming; timed sequences use the same array.
+Each lighting descriptor includes the complete declarative program, display
+metadata, default duration, frame rate, and pixel count. Named starter entries
+are first-install data, not protocol constants. A consumer must parse the live
+catalog before offering an effect and must not infer availability from stale
+configuration or a generic command string.
 
 For a one-shot board tone, `controller buzzer --frequency 440 --duration 125`
 is the typed top-level spelling of `controller exec buzzer 440 125`. Both use
@@ -1201,9 +1219,21 @@ opcode trace events. Subscribe to `opcodes` for opaque unsolicited frames and
 storage and ordinary TUI, WebUI, and secondary-console logs consume `activity`
 only; diagnostic monitors may deliberately request the noisier streams.
 
+Low-rate activity/state edges that change cached controller authority (for
+example relay, door, PWM selection, settings, illumination, connection, macro,
+and an exact front-panel read) are immediately followed by a
+`controller.snapshot` notification on the same subscribed connection. Clients
+apply that pushed snapshot instead of issuing a manual refresh. High-rate
+`front_panel.segment` and `status_led.changed` events remain compact patches so
+animation does not amplify full snapshots. A snapshot distinguishes
+`have_front_panel` (all LCD/menu/key fields are exact) from
+`have_front_panel_segments` (the physical four digits and brightness are exact);
+rendering the latter must not imply authority for the former.
+
 ```json
 {"jsonrpc":"2.0","method":"controller.event","params":{}}
 {"jsonrpc":"2.0","method":"controller.state","params":{}}
+{"jsonrpc":"2.0","method":"controller.snapshot","params":{}}
 {"jsonrpc":"2.0","method":"controller.debug","params":{}}
 {"jsonrpc":"2.0","method":"controller.opcode","params":{"opcode":225,"payload":"qrs="}}
 {"jsonrpc":"2.0","method":"controller.status","params":{}}

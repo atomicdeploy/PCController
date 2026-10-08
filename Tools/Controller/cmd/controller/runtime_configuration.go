@@ -400,13 +400,45 @@ func apiMacros(source []appconfig.Macro) []controllerapi.Macro {
 			result[index].Steps[stepIndex] = controllerapi.MacroStep{
 				AtUS: step.AtUS, Kind: step.Kind,
 				Target: step.Target, Value: step.Value,
-				DurationMS: step.DurationMS, FrequencyHz: step.FrequencyHz,
-				Text: step.Text, Destination: step.Destination,
+				DurationMS: step.DurationMS, ToValue: step.ToValue,
+				Easing: step.Easing, SampleRateHz: step.SampleRateHz,
+				RepeatCount: step.RepeatCount, RepeatIntervalMS: step.RepeatIntervalMS,
+				FrequencyHz: step.FrequencyHz,
+				Text:        step.Text, Destination: step.Destination,
 				Code: step.Code, Bits: step.Bits, Protocol: step.Protocol,
 				PulseUS: step.PulseUS, Red: step.Red, Green: step.Green,
 				Blue: step.Blue, Brightness: step.Brightness,
-				Opcode: step.Opcode, PayloadHex: step.PayloadHex,
+				ToRed: step.ToRed, ToGreen: step.ToGreen, ToBlue: step.ToBlue,
+				ToBrightness: step.ToBrightness,
+				Opcode:       step.Opcode, PayloadHex: step.PayloadHex,
 			}
+		}
+	}
+	return result
+}
+
+func apiStripEffects(source []appconfig.StripEffect) []controllerapi.StripEffect {
+	result := make([]controllerapi.StripEffect, len(source))
+	for index, effect := range source {
+		result[index] = controllerapi.StripEffect{
+			ID: effect.ID, Name: effect.Name, Category: effect.Category,
+			Description: effect.Description, Program: controllerapi.StripProgram{
+				Primitive: effect.Program.Primitive,
+				Primary:   controllerapi.StripColor{Red: effect.Program.Primary.Red, Green: effect.Program.Primary.Green, Blue: effect.Program.Primary.Blue},
+				Secondary: controllerapi.StripColor{Red: effect.Program.Secondary.Red, Green: effect.Program.Secondary.Green, Blue: effect.Program.Secondary.Blue},
+				PeriodMS:  effect.Program.PeriodMS, StepMS: effect.Program.StepMS,
+				SwapAfterSteps: effect.Program.SwapAfterSteps, DimIntensity: effect.Program.DimIntensity,
+				TailPixels: effect.Program.TailPixels,
+				Envelope: func() []controllerapi.StripEnvelopePoint {
+					result := make([]controllerapi.StripEnvelopePoint, len(effect.Program.Envelope))
+					for index, point := range effect.Program.Envelope {
+						result[index] = controllerapi.StripEnvelopePoint{AtMS: point.AtMS, Intensity: point.Intensity}
+					}
+					return result
+				}(),
+			},
+			DefaultFPS: effect.DefaultFPS, DefaultDurationMS: effect.DefaultDurationMS,
+			DefaultPixels: effect.DefaultPixels,
 		}
 	}
 	return result
@@ -425,6 +457,7 @@ func apiAutomations(source []appconfig.Automation) []controllerapi.Automation {
 				Source: automation.Match.Source, RFID: automation.Match.RFID,
 				RFCode:     automation.Match.RFCode,
 				RFProtocol: automation.Match.RFProtocol,
+				RFBits:     automation.Match.RFBits,
 			},
 			Actions: make([]controllerapi.AutomationAction, len(automation.Actions)),
 		}
@@ -432,6 +465,7 @@ func apiAutomations(source []appconfig.Automation) []controllerapi.Automation {
 			result[index].Actions[actionIndex] = controllerapi.AutomationAction{
 				Type: action.Type, Command: action.Command, Macro: action.Macro,
 				Executable: action.Executable,
+				Detached:   action.Detached,
 				Args:       append([]string(nil), action.Args...),
 				Script:     action.Script,
 				Event:      action.Event,
@@ -439,6 +473,7 @@ func apiAutomations(source []appconfig.Automation) []controllerapi.Automation {
 				HoldMS:     action.HoldMS,
 				Power:      action.Power,
 				Confirm:    action.Confirm,
+				AppKind:    action.AppKind, AppValue: action.AppValue, AppTarget: action.AppTarget, ActionID: action.ActionID,
 			}
 			if action.RF != nil {
 				result[index].Actions[actionIndex].RF = &controllerapi.RFTransmit{
@@ -475,6 +510,7 @@ func apiOptions(
 		FQBN:                  configuredFQBN(config),
 		FirmwareFeatures:      programmer.FirmwareFeatureNames(firmwareFeatures),
 		Macros:                apiMacros(config.Macros),
+		StripEffects:          apiStripEffects(config.StripEffects),
 		Melodies:              config.Melodies,
 		StatusEffects:         config.StatusEffects,
 		ToolchainCLI:          config.Programming.ToolchainCLI,

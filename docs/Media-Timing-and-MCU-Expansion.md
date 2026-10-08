@@ -59,12 +59,14 @@ The original explanation conflated the 250 ms execution gate with all clock
 leases. These limits have different owners and purposes; preserve that
 distinction in documentation, diagnostics and tests.
 
-In the reviewed firmware candidate, native `MEDIA_CLOCK` is opcode `0x4A`.
-The AVR handler validates a bounded 14-byte payload and reuses the leased
-seven-segment presenter with four raw cells. It does **not** run an absolute
-video-epoch hardware timeline or retain the host's full epoch/revision contract.
-An older image may return Unsupported while serial transport is still healthy.
-Firmware capability/identity mismatch must not be called a physical disconnect.
+The reviewed firmware candidate reuses `DISPLAY_TEXT` target 5, the advertised
+scheduled-segment contract, with a four-cell raw option and a three-second
+lease. Opcode `0x4A` remains reserved rather than adding a parallel media-clock
+dispatcher that the constrained profile cannot afford. The AVR does **not** run
+an absolute video-epoch hardware timeline or retain the host's full
+epoch/revision contract. An older image may return BadPayload while serial
+transport is still healthy. Firmware capability/identity mismatch must not be
+called a physical disconnect.
 
 The historical host/firmware mismatch and guarded update are recorded in
 [Pealayer's deployment checkpoint](https://github.com/ToghrolTP/pealayer/blob/release/preferences-organization/docs/verification/DEPLOYMENT-AND-MERGE-CHECKPOINT.md).

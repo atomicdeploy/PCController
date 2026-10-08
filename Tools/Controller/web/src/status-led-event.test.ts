@@ -18,14 +18,15 @@ describe('pushed status LED events', () => {
     expect(snapshot.status_led).toEqual(state)
   })
 
-	it('does not promote a changed-only segment event to an exact panel', () => {
+	it('retains changed-only segment authority without promoting it to an exact panel', () => {
 		const event = { id: 5, time: '2026-08-03T10:00:01Z', kind: 'front_panel.segment', text: 'changed', metadata: { raw_segments: '065B4F66', brightness: '7' } }
 		expect(segmentStateFromEvent(event)).toEqual({ raw_segments: [0x06, 0x5B, 0x4F, 0x66], brightness: 7 })
 		const snapshot = applyPushedOutputEvent(emptySnapshot, event)
-		expect(snapshot).toBe(emptySnapshot)
-		expect(snapshot.front_panel?.raw_segments).toEqual([0, 0, 0, 0])
-		expect(snapshot.front_panel?.brightness).toBe(0)
+		expect(snapshot.front_panel?.raw_segments).toEqual([0x06, 0x5B, 0x4F, 0x66])
+		expect(snapshot.front_panel?.brightness).toBe(7)
 		expect(snapshot.have_front_panel).toBe(false)
+		expect(snapshot.have_front_panel_segments).toBe(true)
+		expect(snapshot.front_panel_updated).toBe(event.time)
 	})
 
 	it('merges changed segment fields into a previously fetched exact panel', () => {
@@ -48,6 +49,7 @@ describe('pushed status LED events', () => {
 		expect(snapshot.front_panel?.program_mode).toBe(7)
 		expect(snapshot.front_panel?.pressed_keys).toBe(4)
 		expect(snapshot.have_front_panel).toBe(true)
+		expect(snapshot.have_front_panel_segments).toBe(true)
 		expect(snapshot.front_panel_updated).toBe(event.time)
 	})
 

@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"errors"
+	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/link"
 	"pccontroller.local/controller/internal/native"
 	"strings"
@@ -80,10 +81,10 @@ func TestStripRainbowStopsWithoutMoreFrames(t *testing.T) {
 	}
 }
 
-func TestStripEffectCatalogAndAliases(t *testing.T) {
-	for _, id := range []string{"police", "white-thunder", "thunder", "lightning", "converging-red", "converge", "red-dots"} {
-		definition, renderer, ok := stripEffectByID(id)
-		if !ok || definition.ID == "" || renderer == nil {
+func TestStripEffectCatalogUsesExactConfiguredIDs(t *testing.T) {
+	for _, id := range []string{"police", "white-thunder", "converging-red"} {
+		definition, program, ok := stripEffectByID(id)
+		if !ok || definition.ID == "" || program.Primitive == "" {
 			t.Fatalf("missing effect %q", id)
 		}
 	}
@@ -113,28 +114,30 @@ func TestTypedStripEffectCatalogIsLiveCapabilityGated(t *testing.T) {
 		}
 	}
 	catalog[0].Name = "mutated"
-	if StripEffectDescriptors()[0].Name != "Police" {
+	if StripEffectDescriptors()[0].Name != "Police red / blue" {
 		t.Fatal("catalog caller mutated the canonical descriptors")
 	}
 }
 
-func TestStripPoliceFrameAlternatesRedAndBlue(t *testing.T) {
-	first := stripPoliceFrame(4, 0)
+func TestAlternatingZonesProgramUsesConfiguredColors(t *testing.T) {
+	program := appconfig.DefaultStripEffects()[0].Program
+	first := renderStripProgram(program, 4, 0)
 	if first[0] != 255 || first[2] != 0 || first[6] != 0 || first[8] != 255 {
 		t.Fatalf("unexpected first police frame: %v", first)
 	}
-	second := stripPoliceFrame(4, 400*time.Millisecond)
+	second := renderStripProgram(program, 4, 400*time.Millisecond)
 	if second[0] != 0 || second[2] != 255 || second[6] != 255 || second[8] != 0 {
 		t.Fatalf("unexpected swapped police frame: %v", second)
 	}
 }
 
-func TestStripWhiteThunderFrameEnvelope(t *testing.T) {
-	peak := stripWhiteThunderFrame(2, 0)
+func TestEnvelopeProgramUsesConfiguredKeyframes(t *testing.T) {
+	program := appconfig.DefaultStripEffects()[1].Program
+	peak := renderStripProgram(program, 2, 0)
 	if len(peak) != 6 || peak[0] != 255 || peak[1] != 255 || peak[2] != 255 {
 		t.Fatalf("unexpected thunder peak: %v", peak)
 	}
-	dark := stripWhiteThunderFrame(2, 500*time.Millisecond)
+	dark := renderStripProgram(program, 2, 500*time.Millisecond)
 	for _, channel := range dark {
 		if channel != 0 {
 			t.Fatalf("thunder should be dark between strikes: %v", dark)
@@ -142,27 +145,24 @@ func TestStripWhiteThunderFrameEnvelope(t *testing.T) {
 	}
 }
 
-func TestStripConvergingRedFrameMovesTowardCenter(t *testing.T) {
-	start := stripConvergingRedFrame(10, 0)
+func TestConvergingPointsProgramMovesTowardCenter(t *testing.T) {
+	program := appconfig.DefaultStripEffects()[2].Program
+	start := renderStripProgram(program, 10, 0)
 	if start[0] != 255 || start[27] != 255 || start[12] != 0 {
 		t.Fatalf("unexpected converging start: %v", start)
 	}
-	middle := stripConvergingRedFrame(10, 1900*time.Millisecond)
+	middle := renderStripProgram(program, 10, 1900*time.Millisecond)
 	if middle[12] == 0 || middle[15] == 0 {
 		t.Fatalf("dots did not reach center: %v", middle)
 	}
 }
 
-func TestStripEffectCommandListsAndStarts(t *testing.T) {
+func TestUnifiedEffectCommandListsAndStartsLighting(t *testing.T) {
 	target := &recordingOutputTarget{}
 	outputs := NewOutputScheduler(target)
 	defer outputs.Close()
-	list, err := stripStreamCommand(context.Background(), outputs, []string{"effect", "list"})
-	if err != nil || !strings.Contains(list, "converging-red") {
-		t.Fatalf("effect list: %q, %v", list, err)
-	}
-	started, err := stripStreamCommand(context.Background(), outputs, []string{"effect", "play", "police", "8", "20"})
-	if err != nil || !strings.Contains(started, "strip effect police started") {
+	started, err := playStripProgramCommand(context.Background(), outputs, "police", []string{"8", "20"}, appconfig.DefaultStripEffects())
+	if err != nil || !strings.Contains(started, "effect effect:police started") {
 		t.Fatalf("effect start: %q, %v", started, err)
 	}
 	if _, err := stripStreamCommand(context.Background(), outputs, []string{"stop"}); err != nil {
@@ -170,12 +170,15 @@ func TestStripEffectCommandListsAndStarts(t *testing.T) {
 	}
 }
 
-func TestStripEffectCommandRoutesThroughPublicCommandEngine(t *testing.T) {
+func TestEffectCatalogRoutesThroughPublicCommandEngine(t *testing.T) {
 	runtime := New(Options{})
 	t.Cleanup(func() { _ = runtime.Close() })
 	engine := NewCommandEngine(runtime, CommandOptions{})
-	list, err := engine.Execute(context.Background(), "strip effect list")
+	list, err := engine.Execute(context.Background(), "effect list")
 	if err != nil || !strings.Contains(list, "white-thunder") {
-		t.Fatalf("public strip effect route: %q, %v", list, err)
+		t.Fatalf("public effect route: %q, %v", list, err)
+	}
+	if _, err := engine.Execute(context.Background(), "strip effect list"); err == nil {
+		t.Fatal("obsolete split effect command remained public")
 	}
 }

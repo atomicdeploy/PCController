@@ -641,6 +641,15 @@ commands remain available under every policy. The firmware's
 direction/enable break-before-make sequencer remains authoritative at the
 relay layer.
 
+PCController snapshots also expose semantic `motion.left` and `motion.right`
+state with `requested`, `applied`, `transitioning`, `revision`, and
+`updated_at` fields. A side command publishes `motion.changed` immediately,
+then raw relay/status feedback reconciles the applied direction. Operator UIs
+should render `requested` while `transitioning` and `applied` after it settles;
+this avoids a false stopped-direction blink during the intentional safe break.
+The raw `active_relays` mask and relay events remain unchanged and are the
+electrical truth for diagnostics, recording, and safety analysis.
+
 R5-R8 are directly latched general outputs. Their shared CLI, HTTP, IPC, and Go
 library mutation path does not treat the board ACK alone as applied state: it
 immediately requests STATUS, updates the shared snapshot, and returns success

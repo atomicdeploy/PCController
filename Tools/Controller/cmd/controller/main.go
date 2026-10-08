@@ -1349,6 +1349,7 @@ func runTUIWithInitialAction(
 				return state.AppliedPWM, overrideErr
 			},
 			AppActions:         appActions,
+			AppInstances:       primary.instances.List,
 			InstanceID:         tuiInstanceID,
 			NavigationSync:     *syncNavigation,
 			NavigationGroup:    hostui.DefaultNavigationGroup,

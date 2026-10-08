@@ -31,6 +31,7 @@ type libraryRequest struct {
 	Port        string             `json:"port,omitempty"`
 	Command     string             `json:"command,omitempty"`
 	Method      string             `json:"method,omitempty"`
+	ClientID    string             `json:"client_id,omitempty"`
 	Params      json.RawMessage    `json:"params,omitempty"`
 	AfterID     uint64             `json:"after_id,omitempty"`
 	Kind        string             `json:"kind,omitempty"`
@@ -58,10 +59,11 @@ type libraryHostOptions struct {
 }
 
 type libraryResponse struct {
-	OK     bool   `json:"ok"`
-	Handle uint64 `json:"handle,omitempty"`
-	Result any    `json:"result,omitempty"`
-	Error  string `json:"error,omitempty"`
+	OK       bool          `json:"ok"`
+	Handle   uint64        `json:"handle,omitempty"`
+	Result   any           `json:"result,omitempty"`
+	Error    string        `json:"error,omitempty"`
+	RPCError *rpc.RPCError `json:"rpc_error,omitempty"`
 }
 
 type libraryClient struct {
@@ -261,9 +263,12 @@ func invokeHost(request libraryRequest) libraryResponse {
 			return response(nil, err)
 		}
 		result, err := client.Call(ctx, rpc.Request{
-			Method: request.Method, Params: request.Params,
+			Method: request.Method, Params: request.Params, ClientID: request.ClientID,
 		})
 		if err != nil {
+			if result.Error != nil {
+				return libraryResponse{Error: err.Error(), RPCError: result.Error}
+			}
 			return response(nil, err)
 		}
 		return response(result.Result, nil)

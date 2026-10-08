@@ -96,6 +96,35 @@ func TestIlluminationOverrideRequiresExplicitValue(t *testing.T) {
 	}
 }
 
+func TestEmergencyStopRPCReportsAuthoritativeLatchAndExplicitRelease(t *testing.T) {
+	runtime := control.New(control.Options{})
+	defer runtime.Close()
+	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	service := Service{Client: client}
+
+	if _, err := client.SetEmergencyStop(context.Background(), true, "test-suite", "admission gate"); err == nil {
+		t.Fatal("disconnected board unexpectedly accepted terminal-state reassertion")
+	}
+	get := service.Dispatch(context.Background(), Request{Method: "controller.estop.get"})
+	if get.Error != nil {
+		t.Fatal(get.Error)
+	}
+	latched, ok := get.Result.(control.EmergencyStopState)
+	if !ok || !latched.Active || latched.Source != "test-suite" || latched.Reason != "admission gate" {
+		t.Fatalf("controller.estop.get result=%T %#v", get.Result, get.Result)
+	}
+
+	params := json.RawMessage(`{"active":false,"source":"operator","reason":"reset"}`)
+	released := service.Dispatch(context.Background(), Request{Method: "controller.estop.set", Params: params})
+	if released.Error != nil {
+		t.Fatal(released.Error)
+	}
+	state, ok := released.Result.(control.EmergencyStopState)
+	if !ok || state.Active || state.Revision != latched.Revision+1 {
+		t.Fatalf("controller.estop.set release result=%T %#v", released.Result, released.Result)
+	}
+}
+
 func TestAppPageRPCPublishesValidatedTUIAction(t *testing.T) {
 	runtime := control.New(control.Options{})
 	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
@@ -1481,6 +1510,37 @@ func TestIlluminationStatePushReachesTwoIndependentWebSocketClients(t *testing.T
 				}
 				break
 			}
+		}
+		for {
+			_, data, err := connection.Read(ctx)
+			if err != nil {
+				t.Fatalf("client %d snapshot: %v", index, err)
+			}
+			if strings.Contains(string(data), `"method":"controller.snapshot"`) {
+				if !strings.Contains(string(data), `"host_instance_id"`) &&
+					!strings.Contains(string(data), `"connected":false`) {
+					t.Fatalf("client %d snapshot=%s", index, data)
+				}
+				break
+			}
+		}
+	}
+}
+
+func TestEventUpdatesClientSnapshotSelectsAuthorityEdgesWithoutAmplifyingFrames(t *testing.T) {
+	for _, kind := range []string{
+		"door", "relay", "pwm", "front_panel.changed", "settings.changed",
+		"illumination.changed", "connection", "usb.reconnected", "macro.completed",
+	} {
+		if !eventUpdatesClientSnapshot(controllerapi.Event{Kind: kind}) {
+			t.Errorf("%s did not request a pushed snapshot", kind)
+		}
+	}
+	for _, kind := range []string{
+		"front_panel.segment", "status_led.changed", "buzzer.note", "telemetry", "rx",
+	} {
+		if eventUpdatesClientSnapshot(controllerapi.Event{Kind: kind}) {
+			t.Errorf("%s amplified a full snapshot", kind)
 		}
 	}
 }

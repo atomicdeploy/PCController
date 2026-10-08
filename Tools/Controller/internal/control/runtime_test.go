@@ -1117,8 +1117,10 @@ func TestDisconnectedRuntimeDropsPeerOwnedSnapshotValues(t *testing.T) {
 	runtime.hello = native.Hello{Name: "PCController", Capabilities: native.CapabilityINA219}
 	runtime.status = native.Status{SupplyMV: 12220}
 	runtime.settings = native.DefaultSettings()
+	runtime.boardName = native.BoardName{Name: "CAFE-01", Persisted: true}
 	runtime.haveStatus = true
 	runtime.haveSettings = true
+	runtime.haveBoardName = true
 	runtime.statusUpdated = time.Now()
 	runtime.frontPanel = native.FrontPanel{MenuPage: 3}
 	runtime.haveFrontPanel = true
@@ -1130,7 +1132,8 @@ func TestDisconnectedRuntimeDropsPeerOwnedSnapshotValues(t *testing.T) {
 
 	snapshot := runtime.Snapshot()
 	if snapshot.Hello != (native.Hello{}) || snapshot.Status != (native.Status{}) ||
-		snapshot.Settings != (native.Settings{}) || snapshot.HaveStatus || snapshot.HaveSettings ||
+		snapshot.Settings != (native.Settings{}) || snapshot.BoardName != (native.BoardName{}) ||
+		snapshot.HaveStatus || snapshot.HaveSettings || snapshot.HaveBoardName ||
 		snapshot.HaveFrontPanel || snapshot.HaveFrontPanelSegments || snapshot.HaveStatusLED ||
 		!snapshot.StatusUpdated.IsZero() {
 		t.Fatalf("disconnected runtime retained peer-owned state: %#v", snapshot)
@@ -2168,6 +2171,7 @@ func TestEventStreamClassification(t *testing.T) {
 		"door": EventStreamActivity, "telemetry": EventStreamTelemetry,
 		"rx": EventStreamDebug, "front_panel.segment": EventStreamState,
 		"status_led.changed": EventStreamState, "buzzer.note": EventStreamState,
+		"pwm.changed":          EventStreamState,
 		"illumination.changed": EventStreamState, "settings.changed": EventStreamState,
 		"melodies.changed": EventStreamState,
 		"sensor.sample":    EventStreamTelemetry, "animation.frame": EventStreamState,

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { connectStream, downloadIntegration, getUIConfig, rpc, streamRetryDelay } from './api'
+import { emptySnapshot } from './types'
 
 type Listener = (event: any) => void
 
@@ -86,6 +87,7 @@ describe('Web IPC transport', () => {
 
     const events: Array<{ value: { kind: string; stream?: string }; generation: number; instanceID?: string }> = []
     const statuses: Array<{ generation: number; instanceID?: string }> = []
+    const snapshots: Array<{ connected: boolean; generation: number; instanceID?: string }> = []
     const states: Array<{ state: string; generation?: number; instanceID?: string }> = []
     const stop = connectStream({
       name: 'PCController', setup_complete: false, websocket_path: '/ipc', session_ticket_path: '/api/session/ticket', auth_required: false,
@@ -95,6 +97,7 @@ describe('Web IPC transport', () => {
     }, {
       status: (_value, source) => statuses.push(source),
       event: (value, source) => events.push({ value, ...source }),
+      snapshot: (value, source) => snapshots.push({ connected: value.connected, ...source }),
       state: (state, _detail, source) => states.push({ state, ...source }),
     })
     await new Promise((resolve) => setTimeout(resolve, 0))
@@ -117,7 +120,11 @@ describe('Web IPC transport', () => {
       method: 'controller.state',
       params: { id: 7, kind: 'status_led.changed', stream: 'state', text: '#12AB34', time: '2026-08-03T00:00:00Z' },
     })
+    sockets[0].pushMessage({
+      jsonrpc: '2.0', method: 'controller.snapshot', params: { ...emptySnapshot, connected: true },
+    })
     expect(events).toEqual([])
+    expect(snapshots).toEqual([])
     expect(states.some((value) => value.state === 'open')).toBe(false)
     const subscription = JSON.parse(sockets[0].sent[0]) as { id: number }
     sockets[0].pushMessage({
@@ -127,6 +134,11 @@ describe('Web IPC transport', () => {
     expect(states.at(-1)).toMatchObject({ state: 'open', instanceID: 'primary-web-test' })
     expect(events).toEqual([{
       value: { id: 7, kind: 'status_led.changed', stream: 'state', text: '#12AB34', time: '2026-08-03T00:00:00Z' },
+      generation: expect.any(Number),
+      instanceID: 'primary-web-test',
+    }])
+    expect(snapshots).toEqual([{
+      connected: true,
       generation: expect.any(Number),
       instanceID: 'primary-web-test',
     }])

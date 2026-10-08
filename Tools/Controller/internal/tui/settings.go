@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"pccontroller.local/controller/internal/appconfig"
+	"pccontroller.local/controller/internal/hostui"
 	"pccontroller.local/controller/internal/native"
 )
 
@@ -215,6 +216,29 @@ func (model Model) appSettingRows() []settingRow {
 			prefix += " · " + strings.Join(detail, " · ")
 		}
 		rows = append(rows, settingRow{Key: fmt.Sprintf("network.device.%d", index), Group: "DISCOVERED", Label: device.Name, Value: prefix, Editable: true})
+	}
+	if model.appInstances != nil {
+		for _, instance := range model.appInstances() {
+			if instance.ID == model.instanceID {
+				continue
+			}
+			detail := []string{strings.ToUpper(defaultText(instance.State, "present"))}
+			if instance.Self != nil {
+				if instance.Self.Kind != "" {
+					detail = append(detail, instance.Self.Kind)
+				}
+				if instance.Self.ProcessID != 0 {
+					detail = append(detail, fmt.Sprintf("PID %d", instance.Self.ProcessID))
+				}
+			}
+			if actions := strings.TrimSpace(instance.Values[hostui.ActionCapabilitiesKey]); actions != "" {
+				detail = append(detail, fmt.Sprintf("%d controls", len(strings.Split(actions, ","))))
+			}
+			rows = append(rows, settingRow{
+				Key: "instance.connected:" + instance.ID, Group: "CONNECTED APPLICATIONS",
+				Label: strings.ToUpper(instance.Surface), Value: strings.Join(detail, " · "),
+			})
+		}
 	}
 	for _, item := range []struct {
 		key, label string

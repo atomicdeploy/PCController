@@ -530,6 +530,7 @@ func startPrimaryIPCAtWithIdentity(
 		server.releaseDiscovery = releaseDiscovery
 		service.ReleaseDiscovery = releaseDiscovery
 	}
+	service.InitializeAutomationActions()
 	go func() {
 		server.done <- ipcjson.Serve(ctx, listener, service)
 		close(server.done)
