@@ -27,6 +27,18 @@ const repositoryIdentityPaths = new Set([
   "docs/CI-CD-and-Releases.md",
   "docs/Project-Checklist.md",
   "docs/Requirements-Backlog.md",
+  "docs/Media-Timing-and-MCU-Expansion.md",
+]);
+
+// This reviewed roadmap cites the paired client and candidate hardware
+// backends. Keep exceptions specific to both the document and repository;
+// private paths, stale-origin language and unrelated URLs remain forbidden.
+const reviewedRoadmapRepositories = new Map([
+  ["docs/Media-Timing-and-MCU-Expansion.md", new Set([
+    "toghroltp/pealayer",
+    "mcudude/megacore",
+    "fastled/fastled",
+  ])],
 ]);
 
 // External repository URLs are limited to reviewed dependency provenance.
@@ -137,6 +149,7 @@ export function privacyFindings(path, text, { repository = "" } = {}) {
     const ownRepository = repository && found.toLowerCase() === repository.toLowerCase();
     if (
       (ownRepository && repositoryIdentityPaths.has(relativePath)) ||
+      reviewedRoadmapRepositories.get(relativePath)?.has(found.toLowerCase()) ||
       isThirdPartyProvenance(relativePath)
     ) {
       continue;

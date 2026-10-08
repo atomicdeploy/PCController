@@ -104,6 +104,32 @@ test("repository URLs have narrow product and provenance allowlists", () => {
   );
 });
 
+test("reviewed engineering roadmap permits only its named public sources", () => {
+  const path = "docs/Media-Timing-and-MCU-Expansion.md";
+  const context = { repository: "atomicdeploy/PCController" };
+  for (const repository of [
+    "atomicdeploy/PCController", "ToghrolTP/pealayer", "MCUdude/MegaCore", "FastLED/FastLED",
+  ]) {
+    assert.deepEqual(privacyFindings(path, `https://github.com/${repository}/issues/1`, context), []);
+  }
+  assert.equal(
+    privacyFindings(path, "https://github.com/other/unreviewed", context)[0].kind,
+    "unreviewed repository reference",
+  );
+  assert.equal(
+    privacyFindings("docs/other.md", "https://github.com/FastLED/FastLED", context)[0].kind,
+    "unreviewed repository reference",
+  );
+  assert.equal(
+    privacyFindings(path, "C:\\Users\\Example\\Desktop\\private.txt", context)[0].kind,
+    "private path",
+  );
+  assert.equal(
+    privacyFindings(path, "Copied from another project.", context)[0].kind,
+    "stale origin language",
+  );
+});
+
 test("generated and ignored-equivalent paths are not text-scan candidates", () => {
   for (const path of [
     ".cache/private/turns.jsonl",
