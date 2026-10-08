@@ -205,10 +205,15 @@ do not silently weaken the invariant.
 | RF catalog UX | Learn/list/map opcodes and guarded execution | Search, formatting, bulk editing, audit history |
 | Update workflow | Boot/application identity and protocol handoff | Download, hashing, backup, programmer, verify, recovery |
 
-## Board features that are still genuinely missing
+## Historical board feature gaps
 
-These are implementation gaps in the current AVR candidate, not merely absent
-TUI labels:
+The table below records an earlier AVR candidate, not the current source state.
+The later source retains `AutomationStore`, its bounded executor and CRUD
+opcodes behind `PCCONTROLLER_ENABLE_BOARD_AUTOMATIONS=0`, and retains boot/menu
+feature implementations behind separate gates. They are not thereby enabled or
+physically commissioned in the default AVR image. Use the
+[current roadmap](Media-Timing-and-MCU-Expansion.md) for the reviewed gate inventory
+and restoration acceptance; preserve these older cost estimates as historical.
 
 The compact on-board motion-door policy editor is no longer a gap. Board
 Settings item `SAFE` rolls through numeric values 0 Always, 1 Closed only,
@@ -219,13 +224,13 @@ path more than paid for it: compared with candidate `800A5B70`, application
 and full-flash data both fell by 26 bytes, static SRAM rose by one byte, and the
 EEPROM layout did not change.
 
-| Requested board capability | What exists now | Exact missing portion | Cost/evidence |
+| Requested board capability | What existed at this checkpoint | Missing portion at this checkpoint | Historical cost/evidence |
 |---|---|---|---:|
 | Board-pull hosted menus | The host has six file-watched menu definitions. The AVR supports pushed `DisplayText` capture/release, forwards physical keys, and releases capture after host loss. | AVR opcodes `0x42..0x44` and events `0x9A..0x9B`, the eight-entry RAM directory, generation/state, content request on selection, retry timing, `----`, and terminal failure presentation are not in `ControllerProtocol::Opcode` and no capability advertises them. | 450-850 flash, 30-40 SRAM. The directory alone is exactly 24 bytes for eight `{id,parent,flags}` entries; existing 4+32 display buffers can be reused. |
 | Generic EEPROM startup/event opcodes | Door and output cues now use a validated 13-byte EEPROM record with immutable fallbacks; the ordinary `TonePlayer` remains the sole playback engine. | A bounded general executor for startup/event-triggered relay, PWM, display, RF, macro, and multi-note actions in the remaining/repurposed EEPROM budget. | The audio-only recovery fits now; the general executor remains the separately estimated 700-1,400 flash / 16-24 SRAM design. |
 | Board EEPROM automation | Twenty learned RF records can directly map one code to Key/Menu/Relay/Side/PWM behavior. Host automations can react to all events. | There is no generic EEPROM event-to-action rule table for door, BT Audio, relay, host loss, temperature, or other events; no board rule can invoke RF transmit or a macro on those events. Host-loss handling is fixed, not programmable. | 700-1,400 flash, 16-24 SRAM, and about 108 EEPROM bytes for eight compact rules plus an atomic header and CRC that reuse ordinary opcode validation. |
 
-The current map has 37 reserved/unallocated bytes outside owned records.
+That checkpoint's map had 37 reserved/unallocated bytes outside owned records.
 Expanding the general executor therefore needs a deliberate record trade-off,
 not an overlapping alpha layout. Flash remains the limiting resource.
 
@@ -247,7 +252,7 @@ melodies by sending the ordinary buzzer opcode; it does not replace the engine.
 The EEPROM record at `0..12` stores four frequency/duration triples and CRC-8.
 Blank, corrupt, torn, zero-duration, or out-of-range data rejects the whole
 record and uses the exact compiled fallback. The factory image writes the same
-defaults. The current-main A/B build used the identical locked stock profile:
+defaults. The historical main A/B build used the identical locked stock profile:
 
 | Candidate | Application data | Free below 32,384 | Static SRAM | Estimated free SRAM |
 |---|---:|---:|---:|---:|

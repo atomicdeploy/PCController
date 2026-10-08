@@ -66,6 +66,8 @@ jobs:
           node --test .github/scripts/package-directory.test.mjs
           node --test .github/scripts/repository-context.test.mjs
           node --test .github/scripts/repository-policy.test.mjs
+          node --check Tools/Audit/sync-github-requirements.mjs
+          node --test Tools/Audit/roadmap-followup.test.mjs
           node --test Tools/Dependencies/export-lock.test.mjs
           node --test .github/scripts/release-asset-collisions.test.mjs
           node --test .github/scripts/release-showcase.test.mjs
