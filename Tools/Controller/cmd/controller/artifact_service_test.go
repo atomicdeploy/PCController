@@ -134,6 +134,63 @@ func TestPrimaryFirmwareUpdatePropagatesDevelopmentEEPROMReinitialization(t *tes
 	}
 }
 
+func TestPrimaryProgrammingTransactionReleasesUARTAndReconnects(t *testing.T) {
+	var events []string
+	executor := &primaryArtifactExecutor{
+		release: func() error {
+			events = append(events, "release")
+			return nil
+		},
+		execute: func(_ context.Context, _ string) (string, error) {
+			events = append(events, "execute")
+			return "programmed", errors.New("write failed")
+		},
+		reconnect: func(ctx context.Context) error {
+			events = append(events, "reconnect")
+			if ctx.Err() != nil {
+				t.Fatalf("reconnect context already ended: %v", ctx.Err())
+			}
+			return errors.New("HELLO failed")
+		},
+	}
+
+	output, err := executor.executeProgrammingCommand(context.Background(), "program flash firmware.hex")
+	if output != "programmed" {
+		t.Fatalf("output=%q", output)
+	}
+	if strings.Join(events, ",") != "release,execute,reconnect" {
+		t.Fatalf("events=%v", events)
+	}
+	if err == nil || !strings.Contains(err.Error(), "write failed") || !strings.Contains(err.Error(), "HELLO failed") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestPrimaryProgrammingTransactionDoesNotExecuteWithoutUARTRelease(t *testing.T) {
+	var events []string
+	executor := &primaryArtifactExecutor{
+		release: func() error {
+			events = append(events, "release")
+			return errors.New("port still owned")
+		},
+		execute: func(_ context.Context, _ string) (string, error) {
+			events = append(events, "execute")
+			return "", nil
+		},
+		reconnect: func(context.Context) error {
+			events = append(events, "reconnect")
+			return nil
+		},
+	}
+
+	if _, err := executor.executeProgrammingCommand(context.Background(), "program flash firmware.hex"); err == nil || !strings.Contains(err.Error(), "port still owned") {
+		t.Fatalf("err=%v", err)
+	}
+	if strings.Join(events, ",") != "release,reconnect" {
+		t.Fatalf("events=%v", events)
+	}
+}
+
 func TestPrimaryFirmwareUpdateRejectsInvalidDeployment(t *testing.T) {
 	called := false
 	executor := &primaryArtifactExecutor{execute: func(_ context.Context, _ string) (string, error) {
