@@ -33,6 +33,18 @@ func TestMediaTimelineRPCRequiresIdentityAndUsesStrictPlanContract(t *testing.T)
 	if result.Error != nil {
 		t.Fatal(result.Error)
 	}
+	payload, err := json.Marshal(result.Result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var identity map[string]json.RawMessage
+	if err = json.Unmarshal(payload, &identity); err != nil {
+		t.Fatal(err)
+	}
+	clientID, ok := identity["client_id"]
+	if !ok || string(clientID) != `""` {
+		t.Fatalf("idle timeline must publish an explicit empty client_id: %s", payload)
+	}
 	if requestCapability("controller.media.timeline.get", nil) != capabilityRead {
 		t.Fatal("timeline inspection not read-only")
 	}

@@ -38,7 +38,7 @@ type MediaTimelinePlan struct {
 	MaxLatenessMS uint32                `json:"max_lateness_ms"`
 }
 type MediaTimelineStatus struct {
-	ClientID               string  `json:"client_id,omitempty"`
+	ClientID               string  `json:"client_id"`
 	Revision               uint64  `json:"revision"`
 	Hash                   string  `json:"hash,omitempty"`
 	Generation             uint64  `json:"generation"`
