@@ -87,6 +87,9 @@ device identity or interface settings.
 - [Media Timing and MCU Expansion](Media-Timing-and-MCU-Expansion.md) — prepared
   clock boundaries, compaction history, expanded-target restoration and strip
   diagnostic backlog with existing issue ownership.
+- [MCU Expansion Successor Checklist](Media-Timing-and-MCU-Expansion-Successor.md) —
+  complete supplied tail, per-requirement ownership and feature audit contract;
+  missing-tail reconciliation is complete, engineering acceptance remains open.
 - [Local Library Variant Comparison](Local-Library-Variant-Comparison.md) —
   privacy-safe comparison of the three reviewed helper variants and the parts
   retained, improved, or deliberately excluded.

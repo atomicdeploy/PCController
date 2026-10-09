@@ -17,8 +17,11 @@ retained feature gates, ATmega2560/STM32 target proposals and isolated strip
 diagnosis. It reuses #18, #103/#227, #87, #44, #390/#71 and #554 rather than adding
 duplicate normalized requirements. The roadmap's per-workstream table defines
 acceptance and dependencies. Larger-target support and physical strip/timing
-proof remain open; conversation preservation also awaits the clipped final
-answer's remainder. No firmware profile or hardware state changes in this pass.
+proof remain open. The user-supplied final-answer remainder is now fully
+[preserved and reconciled](Media-Timing-and-MCU-Expansion-Successor.md), resolving
+the missing-tail blocker only. The per-feature existing/missing-test audit,
+managed isolated FastLED experiment and named target-specific CI/resource gates
+remain later acceptance work. No firmware profile or hardware state changes.
 <!-- /media-mcu-roadmap-follow-up -->
 
 ## [#1 — Firmware architecture, flash budget, EEPROM, and reset safety](https://github.com/atomicdeploy/PCController/issues/1)

@@ -9,10 +9,12 @@ non-working strip independently before selecting a replacement output backend.
 This roadmap reconciles the 8 October 2026 discussion titled **Explain media
 clock command**, including its firmware-capacity and larger-MCU follow-ups.
 It preserves requirements and engineering findings, not a raw private transcript.
-The conversation reader returned three turns, but clipped the last answer at
-20,000 characters within its successor checklist. **Full source preservation
-remains pending the missing remainder.** Do not close that acceptance item from
-this document alone.
+The reader originally clipped the last answer at 20,000 characters. The user has
+now supplied the complete tail from “For each one, report…” through its final
+paragraph. The [preserved successor checklist and reconciliation](Media-Timing-and-MCU-Expansion-Successor.md)
+resolves that missing-tail blocker. Expanded-target implementation, the full
+feature/resource/test audit and physical acceptance remain open; this does not
+claim archival of an unprovided raw conversation export.
 
 ## Current support and source boundaries
 
@@ -154,7 +156,11 @@ must fit an explicit constrained profile. Larger capacity does not automatically
 remove storage conflicts or commission an implementation. For every gate record
 its retained source, reason disabled, measured or historical flash/SRAM/EEPROM
 cost (unknown when unmeasured), dependencies, offline gains/losses, and disposition
-as enable-as-is, redesign or keep host-owned. Reconcile the conversation's
+as enable-as-is, redesign or keep host-owned. Include named existing test
+paths/cases and missing tests for every feature, using the
+[feature-recovery report contract](Media-Timing-and-MCU-Expansion-Successor.md#feature-recovery-report-contract).
+Inspect Git and merged PR history for actually deleted behavior, not only gates.
+Reconcile the conversation's
 approximately 1.1 KB automation overflow against an exact historical artifact
 before treating that estimate as a release budget.
 
@@ -237,15 +243,27 @@ to replace production firmware in this documentation pass.
 2. Verify the actual strip chipset, voltage, color order, DIN direction, common
    ground, D6 continuity and safe current limit. Ten pixels at low brightness is
    the proposed starting test, not a newly asserted hardware descriptor.
-3. Run a minimal RGB/off library sequence on an isolated test board if possible;
-   otherwise use an explicitly approved temporary target/artifact and rollback plan.
+3. Run a standalone sketch or explicitly named diagnostic-only profile on an
+   isolated test board if possible; otherwise use an explicitly approved temporary
+   artifact and rollback plan. Add and pin FastLED through normal dependency
+   management, not an unmanaged library. Use the existing configured data pin,
+   verified WS2811 type, small pixel count and low brightness. Exercise solid
+   red, green, blue, safe low-brightness white, black and moving/rainbow patterns;
+   test plausible color orders independently. Do not operate relay/motion outputs.
 4. Compare the compact backend and known-good library on the same verified
    pin/buffer/count/order. Record waveform, reset interval, colors and timing.
 5. If the library works but production does not, trace workspace ownership,
    frame staging/commit and custom waveform. If both fail, inspect wiring, power,
    first IC/pixel, logic level and chipset timing before guessing another patch.
    Two failures do not alone prove an electrical fault; a known-good external
-   driver and scope/logic-analyzer evidence narrow the cause.
+   driver and scope/logic-analyzer evidence narrow the cause. Intermittent results
+   require signal-integrity, supply, interrupt/timing and first-pixel checks.
+   Record first-segment supply voltage, ground, DIN/DOUT, continuity, data idle
+   level, available waveform, each sender's outcome and optional external MCU
+   result. A passing FastLED test alone does not justify production replacement:
+   compare 328P flash/RAM/timing/interruption behavior first. Keep the public
+   AddressableLeds API stable across AVR, library, STM32 timer/DMA and no-hardware
+   adapters.
 6. Restore production, verify HELLO/readback/settings and known output state.
    Attach sanitized measurements to #71/#390; keep private captures off GitHub.
 
@@ -269,17 +287,26 @@ retain their full acceptance contracts; this table adds the conversation's scope
 
 - Read current issues/comments and exact main/active heads before editing; claim
   a path-disjoint lane and preserve useful branch ancestry and private state.
-- Recover the missing conversation remainder and reconcile additional requirements
-  before marking source preservation complete.
+- The supplied missing tail is preserved and reconciled in the linked successor
+  checklist. Keep its implementation and physical acceptance items open until
+  their own evidence exists.
 - Inventory portable logic, AVR-family code, 328P-specific registers, bootloader
   assumptions and HAL candidates; choose the exact expanded target explicitly.
 - Classify retained versus removed/offloaded features, costs, dependencies and
   offline behavior. Propose feature bundles before changing defaults.
 - Build current constrained and expanded candidates with source identity,
-  flash/identity bounds, SRAM/stack/EEPROM checks and capability parity tests.
+  target-specific flash/identity bounds, SRAM/stack/EEPROM checks and truthful
+  HELLO/build-feature parity tests. Expanded bundles must be first-class named
+  profiles, not hidden compiler flags. Compile/test every practical supported
+  target/profile combination; keep host protocol and native tests independent
+  of physical targets and the exact constrained production build/gates intact.
 - Keep E-STOP, interlocks, CRC/bounds, safe reset and command priority intact;
   rich functionality must not claim resources it cannot support.
 - Complete the isolated strip experiment with the physical owner before choosing
   FastLED/DMA production changes. Do not weaken timing limits to hide a failure.
 - Publish verified checkpoints, tests, blockers and next owner on existing issues.
   A compile, merge or staged package is not peripheral/deployment acceptance.
+- Deliver architecture/portability and feature-recovery reports, history notes,
+  exact Mega/STM32 architecture proposals, strip plan/observed results,
+  documentation and resource/test measurements in focused PRs, not one giant
+  MCU port. Keep the 328P working throughout.
