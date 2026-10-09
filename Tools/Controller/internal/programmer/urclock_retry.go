@@ -13,7 +13,9 @@ import (
 // Windows can retain an Urclock AVRDUDE serial handle briefly after the
 // process exits. The next guarded-backup read must remain safe and bounded: it
 // is retried only when AVRDUDE explicitly reports a transient sharing/access
-// failure, never for protocol, verification, or device-response failures.
+// failure or the complete Urclock bootloader resynchronization signature.
+// This policy is used only by read-only backup commands; writes and ambiguous
+// protocol, verification, or device-response failures remain fail-closed.
 var urclockPortReleaseRetryDelays = []time.Duration{
 	250 * time.Millisecond,
 	750 * time.Millisecond,
@@ -72,9 +74,9 @@ func runBackupCommandWithRetryPolicy(
 		}
 		failure := "serial port remained busy"
 		progress := "serial handle is still being released"
-		if retryKind == "metadata-sync" {
-			failure = "metadata handshake did not synchronize"
-			progress = "metadata handshake did not synchronize after UART release"
+		if retryKind == "bootloader-sync" {
+			failure = "bootloader handshake did not synchronize"
+			progress = "bootloader handshake did not synchronize after UART release"
 		}
 		if attempt >= len(delays) {
 			return fmt.Errorf(
@@ -104,24 +106,21 @@ func runBackupCommandWithRetryPolicy(
 }
 
 func retryableUrclockBackupFailure(
-	command Command,
+	_ Command,
 	runErr error,
 	diagnostic string,
 ) string {
 	if isTransientUrclockPortReleaseFailure(runErr, diagnostic) {
 		return "port-release"
 	}
-	if command.Stage != "metadata handshake" {
-		return ""
-	}
 	text := strings.ToLower(diagnostic)
 	if runErr != nil {
 		text += "\n" + strings.ToLower(runErr.Error())
 	}
 	if strings.Contains(text, "not in sync") &&
-		(strings.Contains(text, "programmer is not responding") ||
-			strings.Contains(text, "unable to open port")) {
-		return "metadata-sync"
+		strings.Contains(text, "programmer is not responding") &&
+		strings.Contains(text, "unable to open port") {
+		return "bootloader-sync"
 	}
 	return ""
 }

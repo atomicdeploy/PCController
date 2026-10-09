@@ -141,6 +141,31 @@ func TestGuardedBackupRetriesInitialUrclockMetadataSynchronization(t *testing.T)
 	}
 }
 
+func TestUrclockBackupRetriesReadAfterCompleteSynchronizationFailure(t *testing.T) {
+	attempts := 0
+	var output strings.Builder
+	runner := CommandRunnerFunc(func(_ context.Context, _ Command, writer io.Writer) error {
+		attempts++
+		if attempts == 1 {
+			_, _ = io.WriteString(writer, "Warning: attempt 10 of 10: not in sync\nWarning: programmer is not responding; try -x strict and/or vary -x delay=100\nError: unable to open port COM3 for programmer urclock")
+			return errors.New("exit status 1")
+		}
+		return nil
+	})
+
+	err := runBackupCommandWithRetryPolicy(
+		context.Background(), MethodUrclock, Command{Name: "avrdude", Stage: "flash read"},
+		&output, runner, []time.Duration{time.Millisecond},
+		func(context.Context, time.Duration) error { return nil },
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if attempts != 2 || !strings.Contains(output.String(), "bootloader handshake did not synchronize") {
+		t.Fatalf("attempts=%d output=%q, want one explained read-only resynchronization retry", attempts, output.String())
+	}
+}
+
 func TestBackupRetryDoesNotMaskNonTransientOrNonUrclockFailures(t *testing.T) {
 	for _, test := range []struct {
 		name       string
