@@ -9,4 +9,9 @@ if ! command -v node >/dev/null 2>&1; then
     exit 1
 fi
 
+# Keep native Windows Node on native paths when launched from MSYS/Cygwin.
+if command -v cygpath >/dev/null 2>&1 && [[ "$(node -p 'process.platform')" == "win32" ]]; then
+    repo_root="$(cygpath -w "${repo_root}")"
+fi
+
 exec node "${repo_root}/Tools/Firmware/firmware.mjs" "$@"
