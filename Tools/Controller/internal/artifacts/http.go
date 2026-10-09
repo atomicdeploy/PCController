@@ -57,17 +57,17 @@ func (service *Service) serveHTTP(writer http.ResponseWriter, request *http.Requ
 		applyIdempotencyHeader(request, &value.IdempotencyKey)
 		result, err := service.StartCapture(value)
 		writeHTTPAccepted(writer, result, err)
+	case path == "/api/board/firmware/upload" && request.Method == http.MethodPost:
+		// Upload is named from the board's perspective: the immutable firmware
+		// artifact must already be staged, then this queues the guarded transfer
+		// to the board. Follow result.progress over the authenticated /ipc WS.
+		service.serveUpdate(writer, request, service.StartFirmwareUpdate)
+	case path == "/api/board/firmware/download" && request.Method == http.MethodPost:
+		service.serveBoardFirmwareDownload(writer, request)
+	case path == "/api/board/firmware/download" && (request.Method == http.MethodGet || request.Method == http.MethodHead):
+		service.serveCurrentFlash(writer, request)
 	case path == "/api/artifacts/current/flash" && (request.Method == http.MethodGet || request.Method == http.MethodHead):
-		descriptor, err := service.store.Current(KindFlashBackup)
-		if err != nil {
-			writeHTTPError(writer, http.StatusInternalServerError, err)
-			return
-		}
-		if descriptor == nil || !descriptor.VerifiedReadback {
-			writeHTTPError(writer, http.StatusNotFound, errors.New("no verified current flash readback; request an explicit capture first"))
-			return
-		}
-		service.serveDownload(writer, request, descriptor.Kind, descriptor.SHA256)
+		service.serveCurrentFlash(writer, request)
 	case path == "/api/artifacts/current/eeprom" && (request.Method == http.MethodGet || request.Method == http.MethodHead):
 		descriptor, err := service.store.Current(KindEEPROM)
 		if err != nil {
@@ -108,6 +108,37 @@ func (service *Service) serveHTTP(writer http.ResponseWriter, request *http.Requ
 		writer.Header().Set("Allow", allowedMethods(path))
 		writeHTTPError(writer, http.StatusNotFound, errors.New("artifact endpoint not found"))
 	}
+}
+
+func (service *Service) serveBoardFirmwareDownload(writer http.ResponseWriter, request *http.Request) {
+	var value CaptureRequest
+	if !decodeHTTPJSON(writer, request, &value) {
+		return
+	}
+	if len(value.Components) != 0 {
+		components, err := normalizeComponents(value.Components)
+		if err != nil || len(components) != 1 || components[0] != "flash" {
+			writeHTTPError(writer, http.StatusBadRequest, errors.New("board firmware download captures flash only"))
+			return
+		}
+	}
+	value.Components = []string{"flash"}
+	applyIdempotencyHeader(request, &value.IdempotencyKey)
+	result, err := service.StartCapture(value)
+	writeHTTPAccepted(writer, result, err)
+}
+
+func (service *Service) serveCurrentFlash(writer http.ResponseWriter, request *http.Request) {
+	descriptor, err := service.store.Current(KindFlashBackup)
+	if err != nil {
+		writeHTTPError(writer, http.StatusInternalServerError, err)
+		return
+	}
+	if descriptor == nil || !descriptor.VerifiedReadback {
+		writeHTTPError(writer, http.StatusNotFound, errors.New("no verified current flash readback; request an explicit board firmware download/capture first"))
+		return
+	}
+	service.serveDownload(writer, request, descriptor.Kind, descriptor.SHA256)
 }
 
 // HTTPRequiresProgramming tells the outer IPC policy whether this route can
@@ -303,6 +334,9 @@ func optionalUint32(value string) (uint32, error) {
 }
 
 func allowedMethods(path string) string {
+	if strings.HasSuffix(path, "/api/board/firmware/download") {
+		return http.MethodGet + ", " + http.MethodHead + ", " + http.MethodPost
+	}
 	if strings.Contains(path, "/upload") || strings.Contains(path, "/fetch") ||
 		strings.Contains(path, "/capture") || strings.Contains(path, "/updates/") ||
 		strings.Contains(path, "/restores/") {

@@ -1375,6 +1375,37 @@ func TestRawJSONRPCAndWebSocketShareOneIPCListener(t *testing.T) {
 			break
 		}
 	}
+	client.EmitHostActionEvent(
+		"update.toolchain-ready", "toolchain ready", "artifact-service", "update",
+		map[string]string{
+			"operation_id": "board-upload-1", "progress_known": "false",
+			"toolchain_ready": "true", "toolchain_version": "1.5.1",
+		},
+	)
+	for {
+		_, data, readErr := connection.Read(websocketContext)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		var message struct {
+			Method string `json:"method"`
+			Params struct {
+				Kind     string            `json:"kind"`
+				Metadata map[string]string `json:"metadata"`
+			} `json:"params"`
+		}
+		if err := json.Unmarshal(data, &message); err != nil {
+			t.Fatal(err)
+		}
+		if message.Method == "controller.event" && message.Params.Kind == "update.toolchain-ready" {
+			if message.Params.Metadata["operation_id"] != "board-upload-1" ||
+				message.Params.Metadata["toolchain_ready"] != "true" ||
+				message.Params.Metadata["progress_known"] != "false" {
+				t.Fatalf("toolchain progress event=%#v", message.Params.Metadata)
+			}
+			break
+		}
+	}
 	runtime.PublishHostEvent("status_led.changed", "#12AB34")
 	for {
 		_, data, readErr := connection.Read(websocketContext)

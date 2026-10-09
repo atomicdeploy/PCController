@@ -79,7 +79,7 @@ func TestToolchainBootstrapDryRunPinsCoreLibrariesAndManagedCLI(t *testing.T) {
 	}
 	joined := output.String()
 	for _, expected := range []string{
-		"MiniCore:avr@3.1.2",
+		"MiniCore:avr@3.1.3",
 		"Adafruit PWM Servo Driver Library@3.0.3",
 		"Adafruit INA219@1.2.3", "rc-switch@2.6.4",
 		"TM1637TinyDisplay@1.12.2", "DallasTemperature@4.0.6", "OneWire@2.3.8",

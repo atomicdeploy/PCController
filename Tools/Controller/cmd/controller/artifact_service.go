@@ -23,21 +23,23 @@ import (
 )
 
 type primaryArtifactExecutor struct {
-	client    *controllerapi.Client
-	store     *appconfig.Store
-	paths     programmer.HostDataPaths
-	shutdown  func()
-	forceExit func(int)
-	execute   func(context.Context, string) (string, error)
-	release   func() error
-	reconnect func(context.Context) error
-	programMu sync.Mutex
+	client          *controllerapi.Client
+	store           *appconfig.Store
+	paths           programmer.HostDataPaths
+	shutdown        func()
+	forceExit       func(int)
+	execute         func(context.Context, string) (string, error)
+	release         func() error
+	reconnect       func(context.Context) error
+	ensureToolchain func(context.Context, artifacts.ProgressFunc) (artifacts.ToolchainReadiness, error)
+	programMu       sync.Mutex
 }
 
 func newArtifactHostService(
 	client *controllerapi.Client,
 	store *appconfig.Store,
 	shutdown func(),
+	progressURL string,
 ) (*artifacts.Service, error) {
 	if client == nil || store == nil {
 		return nil, errors.New("artifact service requires the primary client and configuration store")
@@ -59,7 +61,8 @@ func newArtifactHostService(
 	}
 	service, err := artifacts.NewService(artifacts.Options{
 		Store: artifactStore, Executor: executor,
-		Deployment: func() string { return store.Current().Programming.Deployment },
+		ProgressURL: progressURL,
+		Deployment:  func() string { return store.Current().Programming.Deployment },
 		Events: func(kind, text string, metadata map[string]string) {
 			client.EmitHostActionEvent(kind, text, "artifact-service", "update", metadata)
 		},

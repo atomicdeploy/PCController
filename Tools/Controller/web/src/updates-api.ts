@@ -10,6 +10,9 @@ export type UpdateOperationKind = 'artifact-upload' | 'peer-artifact-upload' | '
 /** Lifecycle states emitted by artifact and programming operations. */
 export type UpdateState =
   | 'queued'
+  | 'toolchain-resolving'
+  | 'toolchain-provisioning'
+  | 'toolchain-ready'
   | 'uploading'
   | 'downloading'
   | 'downloaded'
@@ -69,6 +72,14 @@ export interface UpdateStatus {
   programming_method?: 'none' | 'urclock' | 'usbasp'
   bootloader_outcome?: 'not_attempted' | 'succeeded' | 'failed' | 'timed_out' | 'unavailable'
   isp_fallback_suggested?: boolean
+  toolchain?: {
+    ready: boolean
+    policy?: string
+    provider?: string
+    version?: string
+    compatible_sources?: number
+    providers?: string[]
+  }
 }
 
 /** Aggregate defaults, current artifacts, board identity, and update policy. */
@@ -108,6 +119,12 @@ export interface ArtifactOperationResult {
   operation: UpdateStatus
   artifact?: ArtifactDescriptor
   reused?: boolean
+  progress: {
+    transport: 'websocket'
+    url: string
+    event_prefix: 'update.'
+    operation_id: string
+  }
 }
 
 export interface BridgePeer {
@@ -203,6 +220,16 @@ export function captureDeviceArtifacts(request: ArtifactCaptureRequest, signal?:
 /** Queues a guarded firmware update from a stored artifact. */
 export function startFirmwareUpdate(request: ArtifactUpdateRequest, signal?: AbortSignal): Promise<ArtifactOperationResult> {
   return rpc<ArtifactOperationResult>('controller.update.firmware', request, signal)
+}
+
+/** Queues a remote firmware transfer to the board through its primary owner. */
+export function uploadBoardFirmware(request: ArtifactUpdateRequest, signal?: AbortSignal): Promise<ArtifactOperationResult> {
+  return rpc<ArtifactOperationResult>('controller.board.firmware.upload', request, signal)
+}
+
+/** Queues a verified firmware readback from the remote board. */
+export function downloadBoardFirmware(request: ArtifactCaptureRequest, signal?: AbortSignal): Promise<ArtifactOperationResult> {
+  return rpc<ArtifactOperationResult>('controller.board.firmware.download', { ...request, components: ['flash'] }, signal)
 }
 
 /** Queues an exact captured-flash restore. */

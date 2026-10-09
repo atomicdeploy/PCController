@@ -509,7 +509,9 @@ func startPrimaryIPCAtWithIdentity(
 			_, err := store.Update(change)
 			return err
 		}
-		artifactService, artifactErr := newArtifactHostService(sharedClient, store, service.Shutdown)
+		artifactService, artifactErr := newArtifactHostService(
+			sharedClient, store, service.Shutdown, endpoint.WebSocketPath,
+		)
 		if artifactErr != nil {
 			server.localDevice.Close()
 			_ = listener.Close()

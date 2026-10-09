@@ -195,6 +195,15 @@ func TestCanonicalRESTRouteInventory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := artifactService.UploadOperation(
+		strings.NewReader(":00000001FF\n"),
+		artifacts.PutOptions{
+			Kind: artifacts.KindFlashBackup, Name: "inventory-readback.hex",
+			Source: "device-readback", VerifiedReadback: true, Current: true,
+		},
+	); err != nil {
+		t.Fatal(err)
+	}
 	releaseClient := releaseplane.NewTrustedClient(&http.Client{Transport: inventoryRoundTripper(
 		func(*http.Request) (*http.Response, error) {
 			return nil, errors.New("route inventory transport is intentionally offline")
@@ -298,6 +307,9 @@ func TestCanonicalRESTRouteInventory(t *testing.T) {
 		{name: "artifact fetch", method: http.MethodPost, path: "/api/artifacts/fetch", body: `{}`},
 		{name: "artifact capture", method: http.MethodPost, path: "/api/artifacts/capture", body: `{}`},
 		{name: "artifact download", method: http.MethodGet, path: upload.Artifact.DownloadURL},
+		{name: "board firmware upload", method: http.MethodPost, path: "/api/board/firmware/upload", body: `{}`},
+		{name: "board firmware download request", method: http.MethodPost, path: "/api/board/firmware/download", body: `{}`},
+		{name: "board firmware download", method: http.MethodGet, path: "/api/board/firmware/download"},
 		{name: "firmware update", method: http.MethodPost, path: "/api/updates/firmware", body: `{}`},
 		{name: "EEPROM update", method: http.MethodPost, path: "/api/updates/eeprom", body: `{}`},
 		{name: "host update", method: http.MethodPost, path: "/api/updates/host", body: `{}`},
