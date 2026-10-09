@@ -409,6 +409,8 @@
             "controller.board_automation.remove",
             "controller.board_profile.get",
             "controller.board_profile.update",
+            "controller.board.firmware.download",
+            "controller.board.firmware.upload",
             "controller.bridge.call",
             "controller.bridge.list",
             "controller.close",
@@ -878,6 +880,16 @@
       "capability": "host_configuration",
       "summary": "Bind the attached physical board identity to one explicit host-owned wiring profile.",
       "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.board.firmware.download": {
+      "capability": "programming",
+      "summary": "Queue a fresh verified flash-only readback from the board.",
+      "idempotency": "non-idempotent"
+    },
+    "controller.board.firmware.upload": {
+      "capability": "programming",
+      "summary": "Queue a guarded transfer of a staged immutable firmware artifact to the board.",
+      "idempotency": "non-idempotent"
     },
     "controller.bridge.call": {
       "capability": "bridge_calls",
