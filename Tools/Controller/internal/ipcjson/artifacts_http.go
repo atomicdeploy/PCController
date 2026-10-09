@@ -36,6 +36,8 @@ func registerArtifactHTTP(mux *http.ServeMux, service *Service) {
 	})
 	mux.Handle("/api/artifacts", handler)
 	mux.Handle("/api/artifacts/", handler)
+	mux.Handle("/api/board/firmware/upload", handler)
+	mux.Handle("/api/board/firmware/download", handler)
 	mux.Handle("/api/updates", handler)
 	mux.Handle("/api/updates/", handler)
 	mux.Handle("/api/restores", handler)

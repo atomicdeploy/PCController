@@ -81,7 +81,7 @@ func TestPrimaryArtifactServiceRegistersHostAndOptionalDefaultsWithoutHardware(t
 	}
 	client := controllerapi.New(controllerapi.Options{})
 	defer client.Shutdown()
-	service, err := newArtifactHostService(client, store, nil)
+	service, err := newArtifactHostService(client, store, nil, "/ipc")
 	if err != nil {
 		t.Fatal(err)
 	}

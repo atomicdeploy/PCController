@@ -215,9 +215,32 @@ type UpdateRequest struct {
 // OperationResult returns the queued or completed operation and any imported
 // artifact produced by it.
 type OperationResult struct {
-	Operation UpdateStatus `json:"operation"`
-	Artifact  *Descriptor  `json:"artifact,omitempty"`
-	Reused    bool         `json:"reused,omitempty"`
+	Operation UpdateStatus   `json:"operation"`
+	Artifact  *Descriptor    `json:"artifact,omitempty"`
+	Reused    bool           `json:"reused,omitempty"`
+	Progress  ProgressStream `json:"progress"`
+}
+
+// ProgressStream tells remote callers how to follow an accepted operation
+// without polling. The configured authenticated WebSocket carries the update.*
+// events, each correlated by OperationID.
+type ProgressStream struct {
+	Transport   string `json:"transport"`
+	URL         string `json:"url"`
+	EventPrefix string `json:"event_prefix"`
+	OperationID string `json:"operation_id"`
+}
+
+// ToolchainReadiness is recorded before any measured board-transfer progress
+// is allowed to start. Policy is one compatibility source and the selected,
+// verified provider is another; optional providers are reported separately.
+type ToolchainReadiness struct {
+	Ready             bool     `json:"ready"`
+	Policy            string   `json:"policy,omitempty"`
+	Provider          string   `json:"provider,omitempty"`
+	Version           string   `json:"version,omitempty"`
+	CompatibleSources int      `json:"compatible_sources,omitempty"`
+	Providers         []string `json:"providers,omitempty"`
 }
 
 // ProgrammingMethod is explicit telemetry for the transport that owned the
@@ -250,20 +273,21 @@ type UpdateStatus struct {
 	State           string `json:"state"`
 	ProgressPercent int    `json:"progress_percent"`
 	// Percent describes the current stage, never an estimated whole transaction.
-	ProgressKnown        bool              `json:"progress_known"`
-	Stage                string            `json:"stage,omitempty"`
-	StageStartedAt       time.Time         `json:"stage_started_at,omitempty"`
-	BytesDone            int64             `json:"bytes_done,omitempty"`
-	BytesTotal           int64             `json:"bytes_total,omitempty"`
-	StartedAt            time.Time         `json:"started_at,omitempty"`
-	UpdatedAt            time.Time         `json:"updated_at,omitempty"`
-	ArtifactSHA256       string            `json:"artifact_sha256,omitempty"`
-	Detail               string            `json:"detail,omitempty"`
-	ErrorCode            string            `json:"error_code,omitempty"`
-	IdempotencyKey       string            `json:"idempotency_key,omitempty"`
-	ProgrammingMethod    ProgrammingMethod `json:"programming_method,omitempty"`
-	BootloaderOutcome    BootloaderOutcome `json:"bootloader_outcome,omitempty"`
-	ISPFallbackSuggested bool              `json:"isp_fallback_suggested,omitempty"`
+	ProgressKnown        bool                `json:"progress_known"`
+	Stage                string              `json:"stage,omitempty"`
+	StageStartedAt       time.Time           `json:"stage_started_at,omitempty"`
+	BytesDone            int64               `json:"bytes_done,omitempty"`
+	BytesTotal           int64               `json:"bytes_total,omitempty"`
+	StartedAt            time.Time           `json:"started_at,omitempty"`
+	UpdatedAt            time.Time           `json:"updated_at,omitempty"`
+	ArtifactSHA256       string              `json:"artifact_sha256,omitempty"`
+	Detail               string              `json:"detail,omitempty"`
+	ErrorCode            string              `json:"error_code,omitempty"`
+	IdempotencyKey       string              `json:"idempotency_key,omitempty"`
+	ProgrammingMethod    ProgrammingMethod   `json:"programming_method,omitempty"`
+	BootloaderOutcome    BootloaderOutcome   `json:"bootloader_outcome,omitempty"`
+	ISPFallbackSuggested bool                `json:"isp_fallback_suggested,omitempty"`
+	Toolchain            *ToolchainReadiness `json:"toolchain,omitempty"`
 }
 
 // ExecutionFailure is the typed boundary between a programmer adapter and the
@@ -333,6 +357,14 @@ type Executor interface {
 	RestoreFlash(ctx Context, artifact Descriptor, request UpdateRequest, progress ProgressFunc) error
 	ProgramEEPROM(ctx Context, artifact Descriptor, request UpdateRequest, progress ProgressFunc) error
 	StageHostUpdate(ctx Context, artifact Descriptor, request UpdateRequest, progress ProgressFunc) error
+}
+
+// ToolchainEnsurer is an optional executor capability used by every board
+// read/write transaction. Production implements it; small tests and storage-
+// only services may omit it. The operation service invokes it before the
+// executor can publish a known 0% programming/readback stage.
+type ToolchainEnsurer interface {
+	EnsureToolchain(ctx Context, progress ProgressFunc) (ToolchainReadiness, error)
 }
 
 // Context is the subset needed from context.Context. The alias keeps executor

@@ -721,7 +721,7 @@ func runIPC(args []string, stdout, stderr io.Writer, store *appconfig.Store) err
 			)
 			service.AppLaunch = launches.Launch
 		}
-		artifactService, err := newArtifactHostService(client, store, service.Shutdown)
+		artifactService, err := newArtifactHostService(client, store, service.Shutdown, *websocketPath)
 		if err != nil {
 			return fmt.Errorf("configure artifact/update service: %w", err)
 		}

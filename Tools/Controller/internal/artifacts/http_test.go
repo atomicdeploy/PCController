@@ -120,3 +120,83 @@ func TestHTTPFlashRestoreUsesDedicatedRoute(t *testing.T) {
 		t.Fatalf("status=%#v", status)
 	}
 }
+
+func TestHTTPBoardFirmwareUploadAndDownloadAliases(t *testing.T) {
+	store := newTestStore(t)
+	firmware, err := store.Put(strings.NewReader(validIntelHEX), PutOptions{
+		Kind: KindFirmware, Name: "remote-board.hex",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	readback, err := store.Put(strings.NewReader(validIntelHEX), PutOptions{
+		Kind: KindFlashBackup, Name: "board-readback.hex", Source: "device-readback",
+		VerifiedReadback: true, Current: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, readbackFile, err := store.Open(KindFlashBackup, readback.SHA256)
+	if err != nil {
+		t.Fatal(err)
+	}
+	readbackPath := readbackFile.Name()
+	if err := readbackFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+	executor := &fakeExecutor{captured: []CapturedFile{{
+		Kind: KindFlashBackup, Name: "fresh-readback.hex", Path: readbackPath,
+	}}}
+	service, err := NewService(Options{Store: store, Executor: executor})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+	handler := service.Handler()
+
+	body, _ := json.Marshal(UpdateRequest{ArtifactSHA256: firmware.SHA256, Authorized: true})
+	uploadResponse := httptest.NewRecorder()
+	handler.ServeHTTP(uploadResponse, httptest.NewRequest(
+		http.MethodPost, "/api/board/firmware/upload", bytes.NewReader(body),
+	))
+	if uploadResponse.Code != http.StatusAccepted {
+		t.Fatalf("upload status=%d body=%s", uploadResponse.Code, uploadResponse.Body.String())
+	}
+	var uploadResult OperationResult
+	if err := json.Unmarshal(uploadResponse.Body.Bytes(), &uploadResult); err != nil {
+		t.Fatal(err)
+	}
+	if uploadResult.Operation.Kind != "firmware" || uploadResult.Progress.Transport != "websocket" {
+		t.Fatalf("upload result=%#v", uploadResult)
+	}
+	if status := waitOperation(t, service, uploadResult.Operation.ID); status.State != "completed" {
+		t.Fatalf("upload status=%#v", status)
+	}
+
+	downloadBody, _ := json.Marshal(CaptureRequest{Authorized: true})
+	downloadResponse := httptest.NewRecorder()
+	handler.ServeHTTP(downloadResponse, httptest.NewRequest(
+		http.MethodPost, "/api/board/firmware/download", bytes.NewReader(downloadBody),
+	))
+	if downloadResponse.Code != http.StatusAccepted {
+		t.Fatalf("download queue status=%d body=%s", downloadResponse.Code, downloadResponse.Body.String())
+	}
+	var downloadResult OperationResult
+	if err := json.Unmarshal(downloadResponse.Body.Bytes(), &downloadResult); err != nil {
+		t.Fatal(err)
+	}
+	if downloadResult.Operation.Kind != "device-capture" || downloadResult.Progress.OperationID != downloadResult.Operation.ID {
+		t.Fatalf("download result=%#v", downloadResult)
+	}
+	if status := waitOperation(t, service, downloadResult.Operation.ID); status.State != "completed" {
+		t.Fatalf("download status=%#v", status)
+	}
+
+	currentResponse := httptest.NewRecorder()
+	handler.ServeHTTP(currentResponse, httptest.NewRequest(
+		http.MethodGet, "/api/board/firmware/download", nil,
+	))
+	if currentResponse.Code != http.StatusOK || currentResponse.Header().Get("X-Artifact-Kind") != string(KindFlashBackup) {
+		t.Fatalf("current status=%d headers=%v body=%s", currentResponse.Code, currentResponse.Header(), currentResponse.Body.String())
+	}
+}

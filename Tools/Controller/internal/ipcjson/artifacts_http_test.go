@@ -63,6 +63,17 @@ func TestCapturedFlashRestoreRPCRequiresProgrammingCapability(t *testing.T) {
 	}
 }
 
+func TestBoardFirmwareTransferRPCRequiresProgrammingCapability(t *testing.T) {
+	for _, method := range []string{
+		"controller.board.firmware.upload",
+		"controller.board.firmware.download",
+	} {
+		if got := requestCapability(method, nil); got != capabilityProgramming {
+			t.Fatalf("method=%s capability=%q want %q", method, got, capabilityProgramming)
+		}
+	}
+}
+
 func TestArtifactHTTPAlphaAuthorizationHonorsRemoteExposure(t *testing.T) {
 	artifactService, client := newIPCArtifactService(t)
 	config := appconfig.Defaults()

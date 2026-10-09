@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ControllerRPCError } from './api'
-import { adoptPeerHostUpdateIntent, compareBuildIdentity, peerHostUpdateIdempotencyKey, sha256File, startFlashRestore, startPeerHostUpdate, uploadArtifact } from './updates-api'
+import { adoptPeerHostUpdateIntent, compareBuildIdentity, downloadBoardFirmware, peerHostUpdateIdempotencyKey, sha256File, startFlashRestore, startPeerHostUpdate, uploadArtifact, uploadBoardFirmware } from './updates-api'
 
 afterEach(() => vi.restoreAllMocks())
 
@@ -65,6 +65,31 @@ describe('firmware artifact adapter', () => {
     expect(request.method).toBe('controller.restore.flash')
     expect(request.method).not.toBe('controller.update.firmware')
     expect(request.params).toMatchObject({ authorized: true, method: 'urclock', port: 'COM18' })
+  })
+
+  it('uses the board firmware RPC aliases and returns their websocket progress contract', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
+      const request = JSON.parse(String(init?.body)) as { id: number; method: string }
+      const operationID = request.method.endsWith('upload') ? 'board-upload-1' : 'board-download-1'
+      return new Response(JSON.stringify({
+        jsonrpc: '2.0', id: request.id,
+        result: {
+          operation: { id: operationID, kind: 'firmware', state: 'queued', progress_percent: 0 },
+          progress: { transport: 'websocket', url: '/ipc', event_prefix: 'update.', operation_id: operationID },
+        },
+      }), { status: 200 })
+    })
+
+    const upload = await uploadBoardFirmware({ artifact_sha256: 'a'.repeat(64), authorized: true, method: 'urclock', port: 'COM18' })
+    const download = await downloadBoardFirmware({ components: ['eeprom'], authorized: true, method: 'usbasp' })
+    const requests = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)) as {
+      method: string; params: Record<string, unknown>
+    })
+
+    expect(requests[0]).toMatchObject({ method: 'controller.board.firmware.upload' })
+    expect(requests[1]).toMatchObject({ method: 'controller.board.firmware.download', params: { components: ['flash'] } })
+    expect(upload.progress).toEqual({ transport: 'websocket', url: '/ipc', event_prefix: 'update.', operation_id: 'board-upload-1' })
+    expect(download.progress.operation_id).toBe('board-download-1')
   })
 
   it('retains one intent key across transport uncertainty and rotates after known success', async () => {

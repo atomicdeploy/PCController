@@ -76,6 +76,12 @@ export function updateStatusFromEvent(event: Pick<SharedViewProps['events'][numb
     artifact_sha256: meta.sha256, programming_method: meta.programming_method as UpdateStatus['programming_method'],
     bootloader_outcome: meta.bootloader_outcome as UpdateStatus['bootloader_outcome'],
     isp_fallback_suggested: meta.isp_fallback_suggested === 'true',
+    toolchain: meta.toolchain_ready ? {
+      ready: meta.toolchain_ready === 'true', policy: meta.toolchain_policy,
+      provider: meta.toolchain_provider, version: meta.toolchain_version,
+      compatible_sources: meta.toolchain_compatible_sources ? Number(meta.toolchain_compatible_sources) : undefined,
+      providers: meta.toolchain_providers ? meta.toolchain_providers.split(',').filter(Boolean) : undefined,
+    } : undefined,
     bytes_done: meta.bytes_done ? Number(meta.bytes_done) : undefined,
     bytes_total: meta.bytes_total ? Number(meta.bytes_total) : undefined,
   }

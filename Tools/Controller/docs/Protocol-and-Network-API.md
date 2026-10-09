@@ -1515,7 +1515,9 @@ Artifact and update JSON-RPC methods are:
 | `controller.artifact.fetch` | `url`, `kind`, optional `name`, `sha256`, `bytes`, build identity, `idempotency_key` | queue a verified proxy-aware HTTP download |
 | `controller.artifact.upload.begin`, `.chunk`, `.finish`, `.abort` | bounded transfer descriptor, ordered binary chunks, or `transfer_id` | authenticated bridge artifact transport; incomplete transfers expire and never enter the immutable store |
 | `controller.artifact.capture` | `components`, `authorized`, optional `method`, `port`, `idempotency_key` | explicitly read and verify current flash/EEPROM through the primary |
+| `controller.board.firmware.download` | `authorized`, optional `method`, `port`, `idempotency_key` | board-facing alias for a fresh verified flash-only readback; supplied components, if any, must be exactly `flash` |
 | `controller.update.firmware` | `artifact_sha256`, `authorized`, optional `method`, `port`, `deployment`, `reinitialize_eeprom`, `idempotency_key` | guarded flash; explicit development workflow skips new raw capture, production defaults to verified backup; reinitialization always retains raw EEPROM, programs/readbacks the Go-owned factory image, and discards incompatible semantic settings |
+| `controller.board.firmware.upload` | same as `controller.update.firmware` | board-facing alias that uploads a staged immutable firmware artifact through the guarded primary-owner transaction |
 | `controller.restore.flash` | `artifact_sha256`, `authorized`, optional `method`, `port` | guarded restore of a `flash-backup`; Urclock by default, explicit USBasp fallback |
 | `controller.update.eeprom` | same | full pre-write capture, then confirmed EEPROM restore |
 | `controller.update.host` | `artifact_sha256`, `authorized` | stage a verified deferred self-update |
@@ -1585,6 +1587,9 @@ The equivalent REST routes are:
 | `GET` or `HEAD /api/artifacts/{kind}/{sha256}` | ranged immutable artifact download |
 | `GET` or `HEAD /api/artifacts/current/flash` | last explicitly captured and verified current flash |
 | `GET` or `HEAD /api/artifacts/current/eeprom` | last explicitly captured and verified current EEPROM |
+| `POST /api/board/firmware/upload` | upload a staged immutable firmware artifact to the board through the guarded transaction |
+| `POST /api/board/firmware/download` | request a fresh verified flash-only board readback |
+| `GET` or `HEAD /api/board/firmware/download` | download the last verified board flash readback |
 | `POST /api/updates/firmware` | explicit firmware programming job |
 | `POST /api/restores/flash` | explicit captured-flash restore job; never routed through firmware update |
 | `POST /api/updates/eeprom` | explicit EEPROM restore job |
@@ -1598,11 +1603,32 @@ The equivalent REST routes are:
 | `POST /api/discovery/stage` | queue verified download/extraction/import; no programming |
 | `GET /api/discovery/status/{id}` | discovery/staging bytes, percentage, result, or safe failure |
 
-Progress is emitted on the existing event/WebSocket/Socket.IO paths as
-`update.queued`, `update.downloading`, `update.downloaded`,
-`update.programming`, `update.verifying`, `update.completed`, or
-`update.failed`, with operation ID, percent, kind, hash, and safe error code in
-metadata. Status also carries typed `programming_method`,
+Every accepted artifact/update response contains a `progress` descriptor:
+
+```json
+{
+  "transport": "websocket",
+  "url": "/ipc",
+  "event_prefix": "update.",
+  "operation_id": "operation-to-correlate"
+}
+```
+
+Subscribe to `events` on that authenticated WebSocket and retain only
+`controller.event` notifications whose metadata `operation_id` matches the
+descriptor. Progress is emitted on the existing event/WebSocket/Socket.IO paths
+as `update.queued`, `update.toolchain-resolving`,
+`update.toolchain-provisioning`, `update.toolchain-ready`,
+`update.downloading`, `update.downloaded`, `update.programming`,
+`update.verifying`, `update.completed`, or `update.failed`, with operation ID,
+percent, whether that percent is known, kind, hash, and safe error code in
+metadata. Board transfer stages cannot publish a known `0%` until
+`update.toolchain-ready` has reported the resolved policy, selected provider,
+exact version, and at least two compatible sources. Toolchain failure is
+terminal and occurs before the programmer/bootloader is attempted. If live
+registry resolution is unavailable, the gate may only verify the exact CLI,
+core, and library versions from the embedded checksum-bearing lock; it never
+installs from the fallback. Status also carries typed `programming_method`,
 `bootloader_outcome`, and `isp_fallback_suggested`. A timed-out Urclock job
 therefore reports `timed_out` and explicitly suggests ISP recovery without a UI
 parsing AVRDUDE prose; USBasp/host jobs report `not_attempted`. A secondary

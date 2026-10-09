@@ -43,4 +43,22 @@ describe('update progress truth', () => {
     expect(updateStatusFromEvent(event)).toMatchObject({ stage: 'writing', progress_percent: 42, progress_known: true, detail: 'Writing flash' })
     expect(updateStatusFromEvent({ ...event, source: 'bridge' })).toBeNull()
   })
+
+  it('hydrates toolchain readiness from websocket event metadata', () => {
+    const event = { kind: 'update.toolchain-ready', source: 'artifact-service', text: 'ready', metadata: {
+      operation_id: 'op-toolchain', kind: 'firmware', state: 'toolchain-ready', stage: 'toolchain-ready',
+      progress_known: 'false', progress_percent: '0', toolchain_ready: 'true',
+      toolchain_policy: 'controllerboardmini-atmega328p', toolchain_provider: 'pccontroller-managed-arduino-cli',
+      toolchain_version: '1.5.1', toolchain_compatible_sources: '2',
+      toolchain_providers: 'pccontroller-policy:controllerboardmini-atmega328p,arduino-cli:1.5.1:selected',
+    } }
+    expect(updateStatusFromEvent(event)).toMatchObject({
+      progress_known: false,
+      toolchain: {
+        ready: true, policy: 'controllerboardmini-atmega328p', provider: 'pccontroller-managed-arduino-cli',
+        version: '1.5.1', compatible_sources: 2,
+        providers: ['pccontroller-policy:controllerboardmini-atmega328p', 'arduino-cli:1.5.1:selected'],
+      },
+    })
+  })
 })

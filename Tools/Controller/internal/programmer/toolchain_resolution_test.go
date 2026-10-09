@@ -14,6 +14,24 @@ import (
 	"time"
 )
 
+func TestDefaultToolchainLockMatchesSourceControlledLock(t *testing.T) {
+	want, err := LoadToolchainLock(filepath.Join("..", "..", "toolchain-lock.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantJSON, err := json.Marshal(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotJSON, err := json.Marshal(DefaultToolchainLock())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(gotJSON, wantJSON) {
+		t.Fatal("embedded toolchain lock drifted from source-controlled lock")
+	}
+}
+
 func TestResolveToolchainPolicySelectsLatestStableAndReportsCanaries(t *testing.T) {
 	const (
 		stableCommit = "1111111111111111111111111111111111111111"

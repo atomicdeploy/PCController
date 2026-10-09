@@ -62,37 +62,7 @@ type ToolchainProfile struct {
 }
 
 func DefaultToolchainProfile() ToolchainProfile {
-	policy := DefaultToolchainPolicy()
-	return ToolchainProfile{
-		Name:           policy.Name,
-		FQBN:           policy.FQBN,
-		PackageIndexes: []string{MiniCorePackageIndexURL},
-		CLI: ToolchainCLI{
-			Dependency: "arduino-cli", Version: "1.5.1",
-			Assets: []ToolchainAsset{
-				{GOOS: "windows", GOARCH: "amd64", Archive: "zip", SHA256: "fabe42e0eb04d00e776a66178299ff95a46c623dbc260f997e58fd514853dd40", URL: "https://github.com/arduino/arduino-cli/releases/download/v1.5.1/arduino-cli_1.5.1_Windows_64bit.zip"},
-				{GOOS: "windows", GOARCH: "386", Archive: "zip", SHA256: "885e491c7c7fb8b396151c09daa5c4c56d8b60697d172a5cfe72c939eed50fe3", URL: "https://github.com/arduino/arduino-cli/releases/download/v1.5.1/arduino-cli_1.5.1_Windows_32bit.zip"},
-				{GOOS: "linux", GOARCH: "amd64", Archive: "tar.gz", SHA256: "28a8e119c498a25607821c36cb2dc49e8463941b261a0d99091baa7bc692dd2b", URL: "https://github.com/arduino/arduino-cli/releases/download/v1.5.1/arduino-cli_1.5.1_Linux_64bit.tar.gz"},
-				{GOOS: "linux", GOARCH: "arm64", Archive: "tar.gz", SHA256: "1e69e077479f300614d4551334e0a33f08ee40b04315d83b8e7e0e94f0d0ee62", URL: "https://github.com/arduino/arduino-cli/releases/download/v1.5.1/arduino-cli_1.5.1_Linux_ARM64.tar.gz"},
-				{GOOS: "darwin", GOARCH: "amd64", Archive: "tar.gz", SHA256: "c982e940027996bea9901050e95fae99c59c1dcfee54beedecaf28141e7bf2e7", URL: "https://github.com/arduino/arduino-cli/releases/download/v1.5.1/arduino-cli_1.5.1_macOS_64bit.tar.gz"},
-				{GOOS: "darwin", GOARCH: "arm64", Archive: "tar.gz", SHA256: "cb952e8c1621c95ef5f1d17831c945e3d0ec5973f89c557a7ec8feb9c4f7d4c9", URL: "https://github.com/arduino/arduino-cli/releases/download/v1.5.1/arduino-cli_1.5.1_macOS_ARM64.tar.gz"},
-			},
-		},
-		CoreID: "MiniCore:avr", CoreVersion: "3.1.2",
-		Libraries: []ToolchainLibrary{
-			{Name: "Adafruit PWM Servo Driver Library", Version: "3.0.3"},
-			{Name: "Adafruit INA219", Version: "1.2.3"},
-			{Name: "rc-switch", Version: "2.6.4"},
-			{Name: "TM1637TinyDisplay", Version: "1.12.2"},
-			{Name: "DallasTemperature", Version: "4.0.6"},
-			{Name: "OneWire", Version: "2.3.8"},
-		},
-		ProvidedTools: []string{
-			"avr-gcc 7.3.0-atmel3.6.1-arduino7 (installed by MiniCore)",
-			"AVRDUDE 8.0-arduino.1 (installed by MiniCore)",
-			"Urboot/Urclock UART programmer metadata (installed by MiniCore)",
-		},
-	}
+	return DefaultToolchainLock().Firmware
 }
 
 func LoadToolchainProfile(path string) (ToolchainProfile, error) {

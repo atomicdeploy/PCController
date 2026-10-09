@@ -2404,8 +2404,9 @@ func requestCapability(method string, params json.RawMessage) string {
 	case "controller.artifact.fetch", "controller.artifact.upload",
 		"controller.artifact.upload.begin", "controller.artifact.upload.chunk",
 		"controller.artifact.upload.finish", "controller.artifact.upload.abort",
-		"controller.artifact.capture", "controller.peer.update.host",
-		"controller.update.firmware", "controller.restore.flash",
+		"controller.artifact.capture", "controller.board.firmware.download",
+		"controller.peer.update.host", "controller.update.firmware",
+		"controller.board.firmware.upload", "controller.restore.flash",
 		"controller.update.eeprom", "controller.update.host", "controller.discovery.stage",
 		"controller.firmware.build":
 		return capabilityProgramming

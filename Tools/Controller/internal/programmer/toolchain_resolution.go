@@ -196,6 +196,20 @@ func DefaultToolchainPolicy() ToolchainPolicy {
 	return policy
 }
 
+// DefaultToolchainLock returns the reviewed checksum-bearing resolution
+// embedded at build time. Runtime code may use it only as a fail-closed
+// verification baseline when the current upstream registries are unreachable.
+func DefaultToolchainLock() ToolchainLock {
+	var lock ToolchainLock
+	if err := json.Unmarshal([]byte(generatedToolchainLockJSON), &lock); err != nil {
+		panic(fmt.Sprintf("decode generated toolchain lock: %v", err))
+	}
+	if err := lock.Validate(); err != nil {
+		panic(fmt.Sprintf("validate generated toolchain lock: %v", err))
+	}
+	return lock
+}
+
 // DefaultFQBN returns the board target generated from toolchain-profile.json.
 // Keeping this as a function prevents another authored compile-time definition.
 func DefaultFQBN() string {

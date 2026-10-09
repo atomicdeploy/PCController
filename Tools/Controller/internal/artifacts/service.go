@@ -31,6 +31,7 @@ type Options struct {
 	Downloader               *Downloader
 	Executor                 Executor
 	Events                   EventSink
+	ProgressURL              string
 	BoardIdentity            func() BoardIdentity
 	RemoteProgrammingEnabled func() bool
 	Deployment               func() string
@@ -43,6 +44,7 @@ type Service struct {
 	downloader             *Downloader
 	executor               Executor
 	events                 EventSink
+	progressURL            string
 	board                  func() BoardIdentity
 	remote                 func() bool
 	deployment             func() string
@@ -72,12 +74,15 @@ func NewService(options Options) (*Service, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	service := &Service{
 		store: options.Store, downloader: options.Downloader, executor: options.Executor,
-		events: options.Events, board: options.BoardIdentity,
+		events: options.Events, progressURL: strings.TrimSpace(options.ProgressURL), board: options.BoardIdentity,
 		remote: options.RemoteProgrammingEnabled, deployment: options.Deployment, ctx: ctx, cancel: cancel,
 		operations: make(map[string]UpdateStatus), defaults: make(map[Kind]string),
 		idempotency: make(map[string]idempotencyRecord), operationMeta: make(map[string]operationJournal),
 		transaction: make(chan struct{}, 1), peerUploads: make(map[string]*peerUpload),
 		peerUploadCreateTemp: os.CreateTemp,
+	}
+	if service.progressURL == "" {
+		service.progressURL = "/ipc"
 	}
 	service.transaction <- struct{}{}
 	if service.downloader == nil {
@@ -259,7 +264,7 @@ func (service *Service) UploadOperation(input io.Reader, options PutOptions) (Op
 	service.updateBytes(status.ID, descriptor.Bytes, descriptor.Bytes)
 	service.updateStatus(status.ID, "completed", 100, "artifact upload verified", "", "unknown")
 	status, _ = service.Status(status.ID)
-	return OperationResult{Operation: status, Artifact: &descriptor}, nil
+	return service.operationResult(status, &descriptor, false), nil
 }
 
 // Open resolves a stored artifact and opens its verified local content stream.
@@ -294,7 +299,7 @@ func (service *Service) StartFetch(request FetchRequest) (OperationResult, error
 		return OperationResult{}, err
 	}
 	if reused {
-		return OperationResult{Operation: status, Reused: true}, nil
+		return service.operationResult(status, nil, true), nil
 	}
 	if request.Bytes > 0 {
 		service.updateBytes(status.ID, 0, request.Bytes)
@@ -309,7 +314,7 @@ func (service *Service) StartFetch(request FetchRequest) (OperationResult, error
 		service.updateBytes(status.ID, descriptor.Bytes, descriptor.Bytes)
 		return descriptor.SHA256, nil
 	})
-	return OperationResult{Operation: status}, nil
+	return service.operationResult(status, nil, false), nil
 }
 
 // StartCapture queues an explicitly authorized device flash and/or EEPROM
@@ -342,16 +347,19 @@ func (service *Service) StartCapture(request CaptureRequest) (OperationResult, e
 		return OperationResult{}, err
 	}
 	if reused {
-		return OperationResult{Operation: status, Reused: true}, nil
+		return service.operationResult(status, nil, true), nil
 	}
 	go service.runTransaction(status.ID, func(ctx context.Context, progress ProgressFunc) (string, error) {
+		if err := service.ensureToolchain(ctx, status.ID, progress); err != nil {
+			return "", err
+		}
 		captured, err := service.executor.Capture(ctx, request, progress)
 		if err != nil {
 			return "", err
 		}
 		return service.importCaptured(captured, components)
 	})
-	return OperationResult{Operation: status}, nil
+	return service.operationResult(status, nil, false), nil
 }
 
 // StartFirmwareUpdate queues a guarded firmware programming transaction.
@@ -430,7 +438,7 @@ func (service *Service) startUpdate(operationKind string, request UpdateRequest)
 	if reused {
 		responseArtifact := publicDescriptor(artifact)
 		decorateDescriptor(&responseArtifact)
-		return OperationResult{Operation: status, Artifact: &responseArtifact, Reused: true}, nil
+		return service.operationResult(status, &responseArtifact, true), nil
 	}
 	// The worker owns an immutable execution snapshot. Finalize a separate
 	// public response before launching it so response decoration can never race
@@ -440,6 +448,11 @@ func (service *Service) startUpdate(operationKind string, request UpdateRequest)
 	decorateDescriptor(&responseArtifact)
 	go service.runTransaction(status.ID, func(ctx context.Context, progress ProgressFunc) (string, error) {
 		var updateErr error
+		if operationKind != "host" {
+			if ensureErr := service.ensureToolchain(ctx, status.ID, progress); ensureErr != nil {
+				return executionArtifact.SHA256, ensureErr
+			}
+		}
 		switch operationKind {
 		case "firmware":
 			updateErr = service.executor.ProgramFirmware(ctx, executionArtifact, request, progress)
@@ -472,7 +485,64 @@ func (service *Service) startUpdate(operationKind string, request UpdateRequest)
 		}
 		return executionArtifact.SHA256, updateErr
 	})
-	return OperationResult{Operation: status, Artifact: &responseArtifact}, nil
+	return service.operationResult(status, &responseArtifact, false), nil
+}
+
+func (service *Service) operationResult(status UpdateStatus, artifact *Descriptor, reused bool) OperationResult {
+	return OperationResult{
+		Operation: status, Artifact: artifact, Reused: reused,
+		Progress: ProgressStream{
+			Transport: "websocket", URL: service.progressURL, EventPrefix: "update.",
+			OperationID: status.ID,
+		},
+	}
+}
+
+func (service *Service) ensureToolchain(
+	ctx context.Context,
+	operationID string,
+	progress ProgressFunc,
+) error {
+	ensurer, ok := service.executor.(ToolchainEnsurer)
+	if !ok {
+		return nil
+	}
+	progress("toolchain-resolving", -1, "resolving the latest compatible board toolchain")
+	readiness, err := ensurer.EnsureToolchain(ctx, progress)
+	if err != nil {
+		return NewExecutionFailure(
+			"", BootloaderNotAttempted, "toolchain_unavailable", false,
+			fmt.Errorf("ensure board toolchain before transfer progress: %w", err),
+		)
+	}
+	if !readiness.Ready || readiness.CompatibleSources < 2 {
+		return NewExecutionFailure(
+			"", BootloaderNotAttempted, "toolchain_incompatible", false,
+			fmt.Errorf("board toolchain compatibility requires at least two agreeing sources; got %d", readiness.CompatibleSources),
+		)
+	}
+	service.setToolchain(operationID, readiness)
+	progress("toolchain-ready", -1, fmt.Sprintf(
+		"toolchain ready: %s %s (%d compatible sources)",
+		readiness.Provider, readiness.Version, readiness.CompatibleSources,
+	))
+	return nil
+}
+
+func (service *Service) setToolchain(id string, readiness ToolchainReadiness) {
+	service.mu.Lock()
+	status, ok := service.operations[id]
+	if ok {
+		value := readiness
+		value.Providers = append([]string(nil), readiness.Providers...)
+		status.Toolchain = &value
+		status.UpdatedAt = time.Now().UTC()
+		service.operations[id] = status
+	}
+	service.mu.Unlock()
+	if ok {
+		_ = service.persistOperation(id)
+	}
 }
 
 func (service *Service) importCaptured(captured []CapturedFile, components []string) (string, error) {
@@ -596,14 +666,23 @@ func (service *Service) DispatchRPC(ctx context.Context, method string, params j
 		}
 		err := service.AbortPeerUpload(request)
 		return map[string]bool{"aborted": err == nil}, true, err
-	case "controller.artifact.capture":
+	case "controller.artifact.capture", "controller.board.firmware.download":
 		var request CaptureRequest
 		if err := decodeRPCParams(params, &request); err != nil {
 			return nil, true, err
 		}
+		if method == "controller.board.firmware.download" {
+			if len(request.Components) != 0 {
+				components, err := normalizeComponents(request.Components)
+				if err != nil || len(components) != 1 || components[0] != "flash" {
+					return nil, true, errors.New("board firmware download captures flash only")
+				}
+			}
+			request.Components = []string{"flash"}
+		}
 		value, err := service.StartCapture(request)
 		return value, true, err
-	case "controller.update.firmware":
+	case "controller.update.firmware", "controller.board.firmware.upload":
 		var request UpdateRequest
 		if err := decodeRPCParams(params, &request); err != nil {
 			return nil, true, err
@@ -776,6 +855,16 @@ func (service *Service) publishStatus(status UpdateStatus) {
 	}
 	if status.ISPFallbackSuggested {
 		metadata["isp_fallback_suggested"] = "true"
+	}
+	if status.Toolchain != nil {
+		metadata["toolchain_ready"] = strconv.FormatBool(status.Toolchain.Ready)
+		metadata["toolchain_policy"] = status.Toolchain.Policy
+		metadata["toolchain_provider"] = status.Toolchain.Provider
+		metadata["toolchain_version"] = status.Toolchain.Version
+		metadata["toolchain_compatible_sources"] = strconv.Itoa(status.Toolchain.CompatibleSources)
+		if len(status.Toolchain.Providers) != 0 {
+			metadata["toolchain_providers"] = strings.Join(status.Toolchain.Providers, ",")
+		}
 	}
 	service.emit("update."+status.State, status.Detail, metadata)
 }

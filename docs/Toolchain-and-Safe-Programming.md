@@ -107,15 +107,48 @@ paths. Later Controller compile, core-info, bootloader, and programming
 operations reuse this configuration. `toolchain sync` remains a separate
 operation for auditing/updating an explicitly selected existing installation.
 
+## Runtime readiness gate and provider coordination
+
+Every board-memory operation resolves and verifies the current stable policy
+before measured transfer progress can begin. This includes fresh flash/EEPROM
+capture, firmware programming, captured-flash restore, and EEPROM restore. The
+operation emits `update.toolchain-resolving`, optional
+`update.toolchain-provisioning`, and `update.toolchain-ready` with
+`progress_known: false`. Only after `toolchain-ready` may a read/write stage
+publish a known `0%`. When upstream registries are unavailable, runtime may
+fall back only to the embedded, checksum-bearing lock and only to verify an
+already installed exact CLI, core, and library inventory. The fallback never
+installs or upgrades from stale metadata. A resolver, provisioner, inventory,
+or compatibility failure stops the operation before the board executor opens
+the programmer or bootloader.
+
+The runtime inventories the configured dependency CLI, the PCController-managed
+copy, `PATH`, and an already installed `platformio`/`pio`. Canonical executable
+paths are deduplicated. An existing Arduino CLI is reused only when its exact
+stable version matches the freshly resolved policy; otherwise PCController
+installs one checksum-verified managed copy. Core packages, compiler tools, and
+libraries always share PCController's one generated configuration/data tree, so
+an external compatible CLI does not create another package installation.
+`DefaultToolchainProfile()` is derived from the same generated lock rather than
+maintaining a second handwritten version list.
+
+Readiness requires two agreeing sources: PCController's resolved policy and the
+selected, verified Arduino CLI. An installed PlatformIO whose `atmelavr`
+platform is usable is reported as an additional compatible provider. Runtime
+assurance does not install PlatformIO or delete an unrelated global tool: stale
+or incompatible installations are reported/ignored while PCController keeps
+using the verified managed selection. This preserves host ownership while
+preventing duplicate PCController package trees.
+
 At the time of this documentation update, the exact lock resolves:
 
 | Area | Stable lock |
 | --- | --- |
 | Firmware dependency CLI | 1.5.1, per-platform archives SHA-256 verified |
-| Board core | `MiniCore:avr@3.1.2` |
+| Board core | `MiniCore:avr@3.1.3` |
 | FQBN | Canonical `fqbn` in [`toolchain-profile.json`](../Tools/Controller/toolchain-profile.json); copied only into generated lock/runtime artifacts |
 | Urboot | `u8.0.1`, commit `bd52751acaa5923163e938a6e35051c22317da68` |
-| Go | 1.26.5 |
+| Go | 1.27.1 |
 | PWM library | Adafruit PWM Servo Driver Library 3.0.3 |
 | Power monitor library | Adafruit INA219 1.2.3 |
 | RF library | rc-switch 2.6.4 |
