@@ -1,0 +1,156 @@
+name: "🧪 Virtual Board · Cross-platform"
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version associated with the simulator package
+        required: false
+        default: ""
+        type: string
+  workflow_call:
+    inputs:
+      version:
+        description: Version associated with the simulator package
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: virtual-board-${{ github.workflow }}-${{ inputs.version || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test-package:
+    name: "🧪 Virtual Board · ${{ matrix.target }}"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: Linux-x64
+            windows: false
+            binary: Tools/VirtualBoard/.build/release/bin/virtual_board
+          - runner: ubuntu-24.04-arm
+            target: Linux-ARM64
+            windows: false
+            binary: Tools/VirtualBoard/.build/release/bin/virtual_board
+          - runner: windows-2025
+            target: Windows-x64
+            windows: true
+            binary: Tools/VirtualBoard/.build/release/bin/virtual_board.exe
+          - runner: macos-15-intel
+            target: macOS-Intel
+            windows: false
+            binary: Tools/VirtualBoard/.build/release/bin/virtual_board
+          - runner: macos-15
+            target: macOS-Apple-Silicon
+            windows: false
+            binary: Tools/VirtualBoard/.build/release/bin/virtual_board
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    env:
+      FORCE_COLOR: "1"
+      PCCONTROLLER_VERSION: ${{ inputs.version || format('0.0.0-ci.{0}', github.run_number) }}
+      TZ: UTC
+
+    steps:
+      - name: "📥 Check out source"
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: "🟢 Install Node.js"
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+
+      - name: "⚙️ Configure native simulator"
+        working-directory: Tools/VirtualBoard
+        run: cmake --preset release
+
+      - name: "🔨 Build simulator and tests"
+        working-directory: Tools/VirtualBoard
+        run: cmake --build --preset release --parallel
+
+      - name: "🧪 Run native CTest suite"
+        working-directory: Tools/VirtualBoard
+        run: ctest --preset release
+
+      - name: "🕰️ Freeze reproducible package time"
+        shell: bash
+        run: echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)" >> "$GITHUB_ENV"
+
+      - name: "📦 Create Virtual Board package"
+        id: package
+        run: >-
+          node .github/scripts/package-directory.mjs
+          "${{ matrix.binary }}"
+          PCController-VirtualBoard
+          ${{ matrix.target }}
+
+      - name: "⬆️ Upload Virtual Board artifact"
+        id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: PCController-VirtualBoard-${{ matrix.target }}
+          path: |
+            ${{ steps.package.outputs.archive }}
+            ${{ steps.package.outputs.checksum }}
+          if-no-files-found: error
+          retention-days: ${{ github.event_name == 'pull_request' && 14 || 90 }}
+          compression-level: 0
+
+  summary:
+    name: "📋 Virtual Board · Codebase summary"
+    if: ${{ always() }}
+    needs: build-test-package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    steps:
+      - name: "📥 Check out source"
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: "🟢 Install Node.js"
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+
+      - name: "🔎 Capture Virtual Board results"
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build-summary
+          printf '{"total_count":0,"jobs":[]}\n' > build-summary/jobs.json
+          printf '{"total_count":0,"artifacts":[]}\n' > build-summary/artifacts.json
+          gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/jobs?filter=latest&per_page=100" \
+            > build-summary/jobs.response.json
+          mv build-summary/jobs.response.json build-summary/jobs.json
+          gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100" \
+            > build-summary/artifacts.response.json
+          mv build-summary/artifacts.response.json build-summary/artifacts.json
+
+      - name: "⬇️ Download available Virtual Board artifacts"
+        if: ${{ always() }}
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: PCController-VirtualBoard-*
+          path: build-summary/packages
+          merge-multiple: true
+
+      - name: "✨ Publish Virtual Board summary"
+        if: ${{ always() }}
+        run: >-
+          node .github/scripts/codebase-summary.mjs
+          virtual-board
+          build-summary/jobs.json
+          build-summary/artifacts.json
+          build-summary/packages

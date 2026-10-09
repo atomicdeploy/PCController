@@ -1,0 +1,1083 @@
+{
+  "schema": 1,
+  "connection": {
+    "vid": "1A86",
+    "pid": "7523",
+    "name": "USB-SERIAL CH340",
+    "baud_rate": 115200,
+    "startup_wait_ms": 1200,
+    "request_timeout_ms": 1200,
+    "hello_attempts": 3,
+    "reset_on_reconnect": false,
+    "last_device": {
+      "port": "tcp://127.0.0.1:8899",
+      "name": "PCController Virtual Board",
+      "last_seen": "2026-08-01T20:05:25.3631391Z"
+    }
+  },
+  "ui": {
+    "app_title": "PCController",
+	"tagline": "One host. Every board surface.",
+	"tui_console": {
+	  "enabled": true,
+	  "columns": 132,
+	  "rows": 38,
+	  "font_face": "Consolas",
+	  "font_size": 18
+	},
+    "table_layout": "compact",
+    "setup_complete": false,
+    "welcome_melody": "notify",
+    "status_interval_ms": 250,
+    "idle_status_interval_ms": 0,
+    "event_log_limit": 500,
+    "history_hours": 24,
+    "history_sample_ms": 1000,
+    "voltage_decimals": 2,
+    "current_decimals": 1,
+    "power_decimals": 2,
+    "temperature_decimals": 1,
+    "show_supply_voltage": true,
+    "show_bus_voltage": true,
+    "show_current": true,
+    "show_power": true,
+    "show_temperature_led": true,
+    "show_temperature_bt": true,
+    "show_io": true,
+    "show_diagnostics": true,
+    "show_graphs": true,
+    "lcd_service_enabled": true,
+    "mirror_prompt_to_lcd": false,
+    "lcd_prompt_debounce_ms": 120,
+    "lcd_priority_hold_ms": 2000,
+    "segment_scroll": {
+      "enabled": true,
+      "pages": ["door"],
+      "door_open_text": "door is open",
+      "door_closed_text": "door is closed",
+      "speed_ms": 220,
+      "gap_cells": 0,
+      "repeat": "interval",
+      "interval_seconds": 30
+    }
+  },
+  "ipc": {
+    "listen": "127.0.0.1:8787",
+    "websocket_path": "/ipc",
+    "allow_remote": false,
+    "remote_principal": "remote-operator",
+    "remote_policy": {
+      "read": true,
+      "events": true,
+      "messages": false,
+      "board_commands": false,
+      "host_configuration": false,
+      "connection_control": false,
+      "reset": false,
+      "programming": false,
+      "shutdown": false,
+      "virtual_keys": false,
+      "power_actions": false,
+      "host_automations": false,
+      "bridge_calls": false,
+      "integrations": false
+    },
+    "allowed_origins": [
+      "localhost:*",
+      "127.0.0.1:*",
+      "[::1]:*"
+    ],
+    "socket_io_path": "/socket.io/"
+  },
+  "integrations": {
+    "buzzer_mirror": {
+      "enabled": false,
+      "native_enabled": false,
+      "web_audio_enabled": true,
+      "driver_directory": ""
+    },
+    "hotkeys": [
+      {
+        "name": "open-events",
+        "enabled": true,
+        "chord": "Ctrl+Alt+P",
+        "command": "app page events"
+      },
+      {
+        "name": "emergency-outputs-off",
+        "enabled": true,
+        "chord": "Ctrl+Alt+Shift+S",
+        "command": "relay off"
+      }
+    ],
+    "keyboard_control": {
+      "enabled": false,
+      "bindings": [
+        {
+          "name": "side-b-up",
+          "enabled": true,
+          "key": "A",
+          "primary": {
+            "type": "motion",
+            "behavior": "momentary",
+            "side": "B",
+            "direction": "up"
+          },
+          "control": {
+            "type": "motion",
+            "behavior": "latch",
+            "side": "B",
+            "direction": "up"
+          }
+        },
+        {
+          "name": "side-b-down",
+          "enabled": true,
+          "key": "S",
+          "primary": {
+            "type": "motion",
+            "behavior": "momentary",
+            "side": "B",
+            "direction": "down"
+          },
+          "control": {
+            "type": "motion",
+            "behavior": "latch",
+            "side": "B",
+            "direction": "down"
+          }
+        },
+        {
+          "name": "side-a-up",
+          "enabled": true,
+          "key": "K",
+          "primary": {
+            "type": "motion",
+            "behavior": "momentary",
+            "side": "A",
+            "direction": "up"
+          },
+          "control": {
+            "type": "motion",
+            "behavior": "latch",
+            "side": "A",
+            "direction": "up"
+          }
+        },
+        {
+          "name": "side-a-down",
+          "enabled": true,
+          "key": "L",
+          "primary": {
+            "type": "motion",
+            "behavior": "momentary",
+            "side": "A",
+            "direction": "down"
+          },
+          "control": {
+            "type": "motion",
+            "behavior": "latch",
+            "side": "A",
+            "direction": "down"
+          }
+        },
+        {
+          "name": "relay-1",
+          "enabled": true,
+          "key": "1",
+          "primary": {
+            "type": "relay",
+            "behavior": "toggle",
+            "relay": 1
+          },
+          "control": {
+            "type": "relay",
+            "behavior": "momentary",
+            "relay": 1
+          }
+        },
+        {
+          "name": "relay-2",
+          "enabled": true,
+          "key": "2",
+          "primary": {
+            "type": "relay",
+            "behavior": "toggle",
+            "relay": 2
+          },
+          "control": {
+            "type": "relay",
+            "behavior": "momentary",
+            "relay": 2
+          }
+        },
+        {
+          "name": "relay-3",
+          "enabled": true,
+          "key": "3",
+          "primary": {
+            "type": "relay",
+            "behavior": "toggle",
+            "relay": 3
+          },
+          "control": {
+            "type": "relay",
+            "behavior": "momentary",
+            "relay": 3
+          }
+        },
+        {
+          "name": "relay-4",
+          "enabled": true,
+          "key": "4",
+          "primary": {
+            "type": "relay",
+            "behavior": "toggle",
+            "relay": 4
+          },
+          "control": {
+            "type": "relay",
+            "behavior": "momentary",
+            "relay": 4
+          }
+        },
+        {
+          "name": "relay-5",
+          "enabled": true,
+          "key": "5",
+          "primary": {
+            "type": "relay",
+            "behavior": "toggle",
+            "relay": 5
+          },
+          "control": {
+            "type": "relay",
+            "behavior": "momentary",
+            "relay": 5
+          }
+        },
+        {
+          "name": "relay-6",
+          "enabled": true,
+          "key": "6",
+          "primary": {
+            "type": "relay",
+            "behavior": "toggle",
+            "relay": 6
+          },
+          "control": {
+            "type": "relay",
+            "behavior": "momentary",
+            "relay": 6
+          }
+        },
+        {
+          "name": "relay-7",
+          "enabled": true,
+          "key": "7",
+          "primary": {
+            "type": "relay",
+            "behavior": "toggle",
+            "relay": 7
+          },
+          "control": {
+            "type": "relay",
+            "behavior": "momentary",
+            "relay": 7
+          }
+        },
+        {
+          "name": "relay-8",
+          "enabled": true,
+          "key": "8",
+          "primary": {
+            "type": "relay",
+            "behavior": "toggle",
+            "relay": 8
+          },
+          "control": {
+            "type": "relay",
+            "behavior": "momentary",
+            "relay": 8
+          }
+        },
+        {
+          "name": "pwm-1",
+          "enabled": true,
+          "key": "9",
+          "primary": {
+            "type": "pwm",
+            "behavior": "toggle",
+            "value": 4095
+          },
+          "control": {
+            "type": "pwm",
+            "behavior": "momentary",
+            "value": 4095
+          }
+        }
+      ]
+    },
+    "lifecycle_safety": {
+      "session_lock": "stop-motion",
+      "suspend": "stop-motion",
+      "refresh_on_resume": true
+    },
+    "notifications": {
+      "enabled": true,
+      "door_running_beep": true,
+      "door_running_toast": true,
+      "important_kinds": [
+        "error",
+        "door",
+        "warning.door-open-running",
+        "motion",
+        "rf.learn.ended",
+        "hot"
+      ],
+      "actions": [
+        {
+          "id": "events",
+          "label": "Open events",
+          "command": "app page events"
+        },
+        {
+          "id": "stop",
+          "label": "Stop outputs",
+          "command": "relay off"
+        }
+      ]
+    },
+    "status_led": {
+      "enabled": true,
+      "transition_ms": 420,
+      "step_ms": 50,
+      "rf_hold_ms": 1400,
+      "door_cue_hold_ms": 1600,
+      "hot_threshold_centi_c": 5000,
+      "idle": {
+        "effect": "steady",
+        "color": {
+          "red": 0,
+          "green": 255,
+          "blue": 0
+        },
+        "alternate_color": {
+          "red": 0,
+          "green": 0,
+          "blue": 0
+        },
+        "brightness": 128,
+        "minimum_brightness": 0,
+        "period_ms": 0
+      },
+      "running": {
+        "effect": "steady",
+        "color": {
+          "red": 255,
+          "green": 150,
+          "blue": 0
+        },
+        "alternate_color": {
+          "red": 0,
+          "green": 0,
+          "blue": 0
+        },
+        "brightness": 160,
+        "minimum_brightness": 0,
+        "period_ms": 0
+      },
+      "bluetooth_audio_connected": {
+        "effect": "steady",
+        "color": {
+          "red": 0,
+          "green": 0,
+          "blue": 255
+        },
+        "alternate_color": {
+          "red": 0,
+          "green": 0,
+          "blue": 0
+        },
+        "brightness": 150,
+        "minimum_brightness": 0,
+        "period_ms": 0
+      },
+      "bluetooth_audio_searching": {
+        "effect": "breathe",
+        "color": {
+          "red": 0,
+          "green": 80,
+          "blue": 255
+        },
+        "alternate_color": {
+          "red": 0,
+          "green": 0,
+          "blue": 0
+        },
+        "brightness": 145,
+        "minimum_brightness": 18,
+        "period_ms": 1800
+      },
+      "bluetooth_audio_off": {
+        "effect": "crossfade",
+        "color": {
+          "red": 0,
+          "green": 255,
+          "blue": 0
+        },
+        "alternate_color": {
+          "red": 255,
+          "green": 0,
+          "blue": 0
+        },
+        "brightness": 120,
+        "minimum_brightness": 0,
+        "period_ms": 1800
+      },
+      "rf_activity": {
+        "effect": "breathe",
+        "color": {
+          "red": 190,
+          "green": 0,
+          "blue": 255
+        },
+        "alternate_color": {
+          "red": 0,
+          "green": 0,
+          "blue": 0
+        },
+        "brightness": 190,
+        "minimum_brightness": 20,
+        "period_ms": 900
+      },
+      "door_opened": {
+        "effect": "steady",
+        "color": {
+          "red": 255,
+          "green": 96,
+          "blue": 0
+        },
+        "alternate_color": {
+          "red": 0,
+          "green": 0,
+          "blue": 0
+        },
+        "brightness": 190,
+        "minimum_brightness": 0,
+        "period_ms": 0
+      },
+      "door_closed": {
+        "effect": "steady",
+        "color": {
+          "red": 0,
+          "green": 255,
+          "blue": 72
+        },
+        "alternate_color": {
+          "red": 0,
+          "green": 0,
+          "blue": 0
+        },
+        "brightness": 170,
+        "minimum_brightness": 0,
+        "period_ms": 0
+      },
+      "hot": {
+        "effect": "breathe",
+        "color": {
+          "red": 255,
+          "green": 0,
+          "blue": 0
+        },
+        "alternate_color": {
+          "red": 255,
+          "green": 72,
+          "blue": 0
+        },
+        "brightness": 255,
+        "minimum_brightness": 72,
+        "period_ms": 1000
+      },
+      "running_door_open": {
+        "effect": "flash",
+        "color": {
+          "red": 255,
+          "green": 0,
+          "blue": 0
+        },
+        "alternate_color": {
+          "red": 0,
+          "green": 0,
+          "blue": 0
+        },
+        "brightness": 255,
+        "minimum_brightness": 0,
+        "period_ms": 640
+      },
+      "pc_offline": {
+        "effect": "steady",
+        "color": {
+          "red": 255,
+          "green": 0,
+          "blue": 0
+        },
+        "alternate_color": {
+          "red": 0,
+          "green": 0,
+          "blue": 0
+        },
+        "brightness": 180,
+        "minimum_brightness": 0,
+        "period_ms": 0
+      }
+    },
+    "discovery": {
+      "mdns_enabled": false,
+      "ssdp_enabled": false
+    },
+    "inbound_webhooks_enabled": false,
+    "local_device": {
+      "enabled": false
+    },
+    "data_hub": {
+      "enabled": false,
+      "base_url": "http://127.0.0.1:8080"
+    }
+  },
+  "safety": {
+    "motion_door_policy": "always"
+  },
+  "rf": {
+    "display_radix": "hex"
+  },
+  "host_menus": {
+    "default_menu": "host",
+    "request_gesture": "door-hold-k4",
+    "display_duration_ms": 1500,
+    "session_timeout_ms": 120000,
+    "menus": [
+      {
+        "id": "host",
+        "node_id": 128,
+        "parent_id": 255,
+        "order_id": 128,
+        "label": "HOST",
+        "title": "PC Host",
+        "content": "Controls ready",
+        "brightness": 5,
+        "edit_visual": "blink",
+        "flags": {
+          "visible": true,
+          "selectable": true
+        },
+        "items": [
+          {
+            "id": "host-status",
+            "label": "PC",
+            "title": "Host status",
+            "type": "readonly",
+            "read_action": "host.status"
+          },
+          {
+            "id": "device-status",
+            "label": "DEV",
+            "title": "Device status",
+            "type": "readonly",
+            "read_action": "device.status"
+          },
+          {
+            "id": "date",
+            "label": "DATE",
+            "title": "Current date",
+            "type": "readonly",
+            "read_action": "host.date"
+          },
+          {
+            "id": "time",
+            "label": "TIME",
+            "title": "Current time",
+            "type": "readonly",
+            "read_action": "host.time"
+          },
+          {
+            "id": "ip",
+            "label": "IP",
+            "title": "Host IP",
+            "type": "readonly",
+            "read_action": "host.ip"
+          },
+          {
+            "id": "api",
+            "label": "API",
+            "title": "API and links",
+            "type": "readonly",
+            "read_action": "api.status"
+          },
+          {
+            "id": "macros",
+            "label": "MACR",
+            "title": "Macros",
+            "type": "submenu",
+            "submenu": "macro-library"
+          },
+          {
+            "id": "settings",
+            "label": "CFG",
+            "title": "HOST settings",
+            "type": "submenu",
+            "submenu": "pc-settings"
+          },
+          {
+            "id": "system",
+            "label": "SYS",
+            "title": "System actions",
+            "type": "submenu",
+            "submenu": "system-actions"
+          }
+        ]
+      },
+      {
+        "id": "pc-settings",
+        "node_id": 129,
+        "parent_id": 128,
+        "order_id": 129,
+        "label": "CFG",
+        "title": "HOST Settings",
+        "content": "Configuration",
+        "brightness": 5,
+        "edit_visual": "blink",
+        "flags": {
+          "visible": true,
+          "selectable": true,
+          "editable": true
+        },
+        "items": [
+          {
+            "id": "app-title",
+            "label": "NAME",
+            "title": "Application title",
+            "type": "text",
+            "read_action": "pc.ui.app_title",
+            "write_action": "pc.ui.app_title"
+          },
+          {
+            "id": "poll",
+            "label": "POLL",
+            "title": "Polling ms",
+            "type": "number",
+            "value": "200",
+            "min": 100,
+            "max": 5000,
+            "step": 50,
+            "read_action": "pc.ui.status_interval_ms",
+            "write_action": "pc.ui.status_interval_ms"
+          },
+          {
+            "id": "lcd-service",
+            "label": "I2C",
+            "title": "HOST LCD service",
+            "type": "bool",
+            "value": "true",
+            "read_action": "pc.ui.lcd_service_enabled",
+            "write_action": "pc.ui.lcd_service_enabled"
+          },
+          {
+            "id": "lcd-mirror",
+            "label": "LCD",
+            "title": "Prompt mirror",
+            "type": "bool",
+            "value": "false",
+            "read_action": "pc.ui.mirror_prompt_to_lcd",
+            "write_action": "pc.ui.mirror_prompt_to_lcd"
+          },
+          {
+            "id": "dtr",
+            "label": "DTR",
+            "title": "Reset reconnect",
+            "type": "bool",
+            "value": "false",
+            "read_action": "pc.connection.reset_on_reconnect",
+            "write_action": "pc.connection.reset_on_reconnect"
+          }
+        ]
+      },
+      {
+        "id": "system-actions",
+        "node_id": 130,
+        "parent_id": 128,
+        "order_id": 130,
+        "label": "SYS",
+        "title": "System Actions",
+        "content": "Guarded actions",
+        "brightness": 5,
+        "edit_visual": "pulse",
+        "flags": {
+          "visible": true,
+          "selectable": true,
+          "action": true
+        },
+        "items": [
+          {
+            "id": "brightness",
+            "label": "BRIT",
+            "title": "Monitor brightness",
+            "type": "number",
+            "value": "50",
+            "max": 100,
+            "step": 5,
+            "read_action": "os.brightness",
+            "write_action": "os.brightness",
+            "guarded": true
+          },
+          {
+            "id": "lock",
+            "label": "LOCK",
+            "title": "Lock Windows",
+            "type": "action",
+            "write_action": "os.lock",
+            "guarded": true
+          },
+          {
+            "id": "suspend",
+            "label": "SUSP",
+            "title": "Suspend Windows",
+            "type": "action",
+            "write_action": "os.sleep",
+            "guarded": true
+          },
+          {
+            "id": "hibernate",
+            "label": "HIBR",
+            "title": "Hibernate Windows",
+            "type": "action",
+            "write_action": "os.hibernate",
+            "guarded": true
+          },
+          {
+            "id": "restart",
+            "label": "RSTR",
+            "title": "Restart Windows",
+            "type": "action",
+            "write_action": "os.restart",
+            "guarded": true
+          },
+          {
+            "id": "shutdown",
+            "label": "OFF",
+            "title": "Shut down host",
+            "type": "action",
+            "write_action": "os.shutdown",
+            "guarded": true
+          }
+        ]
+      },
+      {
+        "id": "macro-library",
+        "node_id": 131,
+        "parent_id": 128,
+        "order_id": 131,
+        "label": "MACR",
+        "title": "Macro Library",
+        "content": "Select and run",
+        "brightness": 5,
+        "edit_visual": "blink",
+        "flags": {"visible": true, "selectable": true, "editable": true},
+        "items": [
+          {"id": "selected", "label": "MACR", "title": "Macro", "type": "select", "options_source": "macro.library", "read_action": "host.macro.selection", "write_action": "host.macro.selection"},
+          {"id": "details", "label": "INFO", "title": "Selected", "type": "readonly", "read_action": "host.macro.selected"},
+          {"id": "play", "label": "PLAY", "title": "Play selected", "type": "action", "write_action": "host.macro.play", "guarded": true},
+          {"id": "record", "label": "REC", "title": "Record macro", "type": "submenu", "submenu": "macro-recording"},
+          {"id": "status", "label": "RUN", "title": "Playback", "type": "submenu", "submenu": "macro-playback"}
+        ]
+      },
+      {
+        "id": "macro-recording",
+        "node_id": 132,
+        "parent_id": 131,
+        "order_id": 132,
+        "label": "REC",
+        "title": "Macro Recording",
+        "content": "MCU timed deltas",
+        "brightness": 5,
+        "edit_visual": "alternate",
+        "flags": {"visible": true, "selectable": true, "action": true},
+        "items": [
+          {"id": "status", "label": "STAT", "title": "Record", "type": "readonly", "read_action": "host.macro.recording"},
+          {"id": "start", "label": "REC", "title": "Start recording", "type": "action", "write_action": "host.macro.record.start"},
+          {"id": "save", "label": "SAVE", "title": "Save recording", "type": "action", "write_action": "host.macro.record.save"},
+          {"id": "discard", "label": "DISC", "title": "Discard recording", "type": "action", "write_action": "host.macro.record.discard", "guarded": true}
+        ]
+      },
+      {
+        "id": "macro-playback",
+        "node_id": 133,
+        "parent_id": 131,
+        "order_id": 133,
+        "label": "RUN",
+        "title": "Macro Playback",
+        "content": "Progress / stop",
+        "brightness": 5,
+        "edit_visual": "alternate",
+        "flags": {"visible": true, "selectable": true, "action": true},
+        "items": [
+          {"id": "status", "label": "STAT", "title": "Playback", "type": "readonly", "read_action": "host.macro.playback"},
+          {"id": "cancel", "label": "STOP", "title": "Cancel safely", "type": "action", "write_action": "host.macro.cancel"},
+          {"id": "keep", "label": "KEEP", "title": "Cancel keep output", "type": "action", "write_action": "host.macro.cancel.keep", "guarded": true}
+        ]
+      }
+    ]
+  },
+  "os_actions": {
+    "virtual_keys": {
+      "enabled": false,
+      "allowed": [
+        "UP",
+        "DOWN",
+        "LEFT",
+        "RIGHT",
+        "F13"
+      ],
+      "min_interval_ms": 120,
+      "hold_ms": 30
+    },
+    "power": {
+      "enabled": false,
+      "allowed": [
+        "lock",
+        "sleep",
+        "hibernate"
+      ],
+      "require_confirmation": true,
+      "confirmation_token": "CONFIRM",
+      "allow_automation": false
+    },
+    "brightness": {
+      "enabled": false,
+      "min_percent": 0,
+      "max_percent": 100
+    }
+  },
+  "paths": {},
+  "programming": {
+    "method": "urclock",
+    "programmer": "usbasp"
+  },
+  "scripts": {
+    "door-log": "scripts/door-log.cmd"
+  },
+  "macros": [
+    {
+      "id": 1,
+      "name": "output-demo",
+      "category": "lighting",
+      "color": "violet",
+      "label": "dEMO",
+      "lcd_message": "Output demo running",
+      "timing_tolerance_us": 20000,
+      "steps": [
+        {
+          "kind": "relay",
+          "target": 4,
+          "value": 1
+        },
+        {
+          "at_us": 250000,
+          "kind": "pwm",
+          "value": 1024
+        },
+        {
+          "at_us": 750000,
+          "kind": "pwm",
+          "value": 3072
+        },
+        {
+          "at_us": 1250000,
+          "kind": "relay",
+          "target": 4
+        },
+        {
+          "at_us": 1500000,
+          "kind": "pwm"
+        }
+      ]
+    }
+  ],
+  "melodies": [
+    {
+      "name": "notify",
+      "notes": [
+        {
+          "frequency_hz": 1047,
+          "duration_ms": 75,
+          "gap_ms": 25
+        },
+        {
+          "frequency_hz": 1319,
+          "duration_ms": 75,
+          "gap_ms": 25
+        },
+        {
+          "frequency_hz": 1568,
+          "duration_ms": 150
+        }
+      ]
+    },
+    {
+      "name": "edge-ready",
+      "notes": [
+        {
+          "frequency_hz": 523,
+          "duration_ms": 100,
+          "gap_ms": 25
+        },
+        {
+          "frequency_hz": 659,
+          "duration_ms": 100,
+          "gap_ms": 25
+        },
+        {
+          "frequency_hz": 784,
+          "duration_ms": 120,
+          "gap_ms": 30
+        },
+        {
+          "frequency_hz": 1047,
+          "duration_ms": 180,
+          "gap_ms": 60
+        },
+        {
+          "frequency_hz": 988,
+          "duration_ms": 90,
+          "gap_ms": 20
+        },
+        {
+          "frequency_hz": 1175,
+          "duration_ms": 90,
+          "gap_ms": 20
+        },
+        {
+          "frequency_hz": 1319,
+          "duration_ms": 110,
+          "gap_ms": 25
+        },
+        {
+          "frequency_hz": 1568,
+          "duration_ms": 260
+        }
+      ]
+    },
+    {
+      "name": "power-down",
+      "notes": [
+        {
+          "frequency_hz": 784,
+          "duration_ms": 80,
+          "gap_ms": 25
+        },
+        {
+          "frequency_hz": 659,
+          "duration_ms": 90,
+          "gap_ms": 25
+        },
+        {
+          "frequency_hz": 523,
+          "duration_ms": 140
+        }
+      ]
+    },
+    {
+      "name": "programming-ready",
+      "notes": [
+        {
+          "frequency_hz": 1032,
+          "duration_ms": 70,
+          "gap_ms": 60
+        },
+        {
+          "frequency_hz": 2010,
+          "duration_ms": 70,
+          "gap_ms": 60
+        },
+        {
+          "frequency_hz": 2400,
+          "duration_ms": 120,
+          "gap_ms": 150
+        }
+      ]
+    }
+  ],
+  "status_effects": [
+    {
+      "name": "attention",
+      "kind": "flash",
+      "red": 255,
+      "green": 96,
+      "blue": 0,
+      "brightness": 220,
+      "period_ms": 700
+    },
+    {
+      "name": "breathe-blue",
+      "kind": "breathe",
+      "red": 30,
+      "green": 120,
+      "blue": 255,
+      "brightness": 200,
+      "min_brightness": 8,
+      "period_ms": 1800
+    }
+  ],
+  "automations": [
+    {
+      "name": "door-open-notify",
+      "enabled": true,
+      "cooldown_ms": 500,
+      "match": {
+        "kind": "door",
+        "contains": "opened"
+      },
+      "actions": [
+        {
+          "type": "board",
+          "command": "display lcd 2000 Door open"
+        },
+        {
+          "type": "emit",
+          "event": "door-open"
+        }
+      ]
+    },
+    {
+      "name": "remote-button-demo",
+      "enabled": false,
+      "cooldown_ms": 400,
+      "match": {
+        "kind": "rf",
+        "gesture": "down",
+        "rf_code": 1193046,
+        "rf_protocol": 1
+      },
+      "actions": [
+        {
+          "type": "board",
+          "command": "menu next"
+        },
+        {
+          "type": "rf",
+          "rf": {
+            "code": 6636321,
+            "bits": 24,
+            "protocol": 1,
+            "pulse_us": 350,
+            "repeats": 2
+          }
+        },
+        {
+          "type": "emit",
+          "event": "remote-button"
+        }
+      ]
+    }
+  ]
+}

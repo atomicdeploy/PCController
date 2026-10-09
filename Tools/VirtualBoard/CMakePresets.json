@@ -1,0 +1,62 @@
+{
+  "version": 2,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 20,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "debug",
+      "displayName": "PCController Virtual Board · Debug",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/.build/debug",
+      "cacheVariables": {
+        "BUILD_TESTING": "ON",
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "release",
+      "displayName": "PCController Virtual Board · Release",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/.build/release",
+      "cacheVariables": {
+        "BUILD_TESTING": "ON",
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "relwithdebinfo",
+      "displayName": "PCController Virtual Board · RelWithDebInfo",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/.build/relwithdebinfo",
+      "cacheVariables": {
+        "BUILD_TESTING": "ON",
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "debug", "configurePreset": "debug" },
+    { "name": "release", "configurePreset": "release" },
+    { "name": "relwithdebinfo", "configurePreset": "relwithdebinfo" }
+  ],
+  "testPresets": [
+    {
+      "name": "debug",
+      "configurePreset": "debug",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "release",
+      "configurePreset": "release",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "relwithdebinfo",
+      "configurePreset": "relwithdebinfo",
+      "output": { "outputOnFailure": true }
+    }
+  ]
+}

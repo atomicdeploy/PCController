@@ -1,0 +1,12 @@
+SPDX-License-Identifier: MIT OR BSD-2-Clause
+
+PCController original code and documentation are dual-licensed under your
+choice of the MIT License or the BSD 2-Clause "Simplified" License. The full
+texts are provided in LICENSES/MIT.txt and LICENSES/BSD-2-Clause.txt.
+
+This dual license does not relicense third-party code or dependencies. Files
+with their own SPDX identifier remain under that identifier. In particular,
+Project/AddressableLeds.cpp contains an adapted Adafruit NeoPixel AVR timing
+loop and is distributed under LGPL-3.0-or-later. LocalLib/DallasTemperatureBus.cpp
+contains OneWire/Dallas ROM-search and CRC-derived code and is distributed
+under MIT. See THIRD_PARTY_NOTICES.md and the corresponding texts in LICENSES/.

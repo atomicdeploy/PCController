@@ -1,0 +1,81 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: daily
+      time: "05:00"
+      timezone: Asia/Tehran
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    labels:
+      - "📦 dependencies"
+      - "🏗️ tooling-build"
+    groups:
+      actions-minor-and-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+      actions-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+
+  - package-ecosystem: gomod
+    directory: /Tools/Controller
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:15"
+      timezone: Asia/Tehran
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    labels:
+      - "📦 dependencies"
+      - "🖥️ host"
+    groups:
+      go-minor-and-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+      go-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+
+  - package-ecosystem: npm
+    directories:
+      - /Tools/Build
+      - /Tools/Firmware
+      - /Tools/Controller/web
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:30"
+      timezone: Asia/Tehran
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    labels:
+      - "📦 dependencies"
+      - "🏗️ tooling-build"
+    groups:
+      npm-minor-and-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+      npm-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
