@@ -33,8 +33,8 @@ choice, not the normal update policy. Lock writers compare substantive fields
 and preserve the existing file byte-for-byte when only a resolution timestamp
 would change.
 
-The currently resolved firmware set is CLI 1.5.1, MiniCore 3.1.2, Urboot
-`u8.0.1`, Go 1.26.5, and these libraries:
+The currently resolved firmware set is CLI 1.5.1, MiniCore 3.1.3, Urboot
+`u8.0.1`, Go 1.27.2, and these libraries:
 
 | Library | Resolved version |
 | --- | ---: |
@@ -45,8 +45,8 @@ The currently resolved firmware set is CLI 1.5.1, MiniCore 3.1.2, Urboot
 | DallasTemperature | 4.0.6 |
 | OneWire | 2.3.8 |
 
-The host-tool lock currently resolves Node.js LTS 24.18.1 (`Krypton`), UPX
-5.2.0, and go-winres 0.3.3. Treat these numbers as a lock snapshot, not as
+The host-tool lock currently resolves Node.js LTS 24.21.0 (`Krypton`), UPX
+5.2.1, and go-winres 0.3.3. Treat these numbers as a lock snapshot, not as
 hard-coded recommendations: the updater resolves a newer compatible stable
 release when one becomes available and records its exact identity.
 
