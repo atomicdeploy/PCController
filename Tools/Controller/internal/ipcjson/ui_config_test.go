@@ -169,6 +169,7 @@ func TestPeripheralAndPWMCapabilitiesSeparateReadConfigurationAndBoardWrites(t *
 		"controller.board_profile.get":              capabilityRead,
 		"controller.board_profile.update":           capabilityHostConfig,
 		"controller.peripheral.presentation.update": capabilityHostConfig,
+		"controller.peripheral.folder.update":       capabilityHostConfig,
 		"controller.action.invoke":                  capabilityBoard,
 		"controller.pwm.values":                     capabilityRead,
 		"controller.pwm.set":                        capabilityBoard,
@@ -219,6 +220,14 @@ func TestPeripheralCatalogUsesExplicitBoardProfileWithoutLegacyMotionAliases(t *
 	}
 	if !seenSeat {
 		t.Fatalf("seat.a missing from %+v", settings.Controls)
+	}
+	if len(settings.Folders) != 1 || settings.Folders[0].Kind != "motion" || settings.Folders[0].Name != "auditorium" {
+		t.Fatalf("hidden channel's authoritative folder missing: %+v", settings.Folders)
+	}
+	folderParams, _ := json.Marshal(map[string]any{"operation": "create", "kind": "pwm", "name": "Empty", "expected_revision": settings.BoardProfile.Revision})
+	folderRejected := service.Dispatch(context.Background(), Request{Method: "controller.peripheral.folder.update", Params: folderParams})
+	if folderRejected.Error == nil || !strings.Contains(folderRejected.Error.Message, "attached") {
+		t.Fatalf("unattached folder update=%+v", folderRejected)
 	}
 
 	params, _ := json.Marshal(map[string]any{"key": "cafe-cinema", "mode": appconfig.BoardModeCinemaSeatMotion})

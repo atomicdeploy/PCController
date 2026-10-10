@@ -29,6 +29,7 @@ type presentationUpdateResult struct {
 	Peripheral   appconfig.PeripheralDescriptor `json:"peripheral"`
 	Control      *appconfig.ControlDescriptor   `json:"control,omitempty"`
 	Controls     []appconfig.ControlDescriptor  `json:"controls,omitempty"`
+	Folders      []appconfig.ChannelFolder      `json:"folders"`
 }
 
 func presentationResult(settings peripheralSettings, key string) (presentationUpdateResult, error) {
@@ -47,6 +48,7 @@ func presentationResult(settings peripheralSettings, key string) (presentationUp
 				Peripheral:   peripheral,
 				Control:      matchedControl,
 				Controls:     settings.Controls,
+				Folders:      settings.Folders,
 			}, nil
 		}
 	}
@@ -125,9 +127,14 @@ func (service *Service) updatePeripheralPresentation(key string, name, icon, col
 		return presentationUpdateResult{}, &RPCError{Code: -32602, Message: "key and at least one presentation field are required"}
 	}
 	known := false
+	defaultHidden := false
 	for _, peripheral := range service.peripheralSettings().Peripherals {
 		if peripheral.Key == key {
+			if group != nil && strings.TrimSpace(*group) != "" && peripheral.Control == "seat-internal" {
+				return presentationUpdateResult{}, &RPCError{Code: -32602, Message: "raw seat relays cannot be assigned to an operator folder"}
+			}
 			known = true
+			defaultHidden = peripheral.Hidden
 			break
 		}
 	}
@@ -146,6 +153,12 @@ func (service *Service) updatePeripheralPresentation(key string, name, icon, col
 			profile.Presentation = make(map[string]appconfig.PeripheralPresentation)
 		}
 		presentation := profile.Presentation[key]
+		if _, exists := profile.Presentation[key]; !exists {
+			presentation.Hidden = defaultHidden
+		}
+		if group != nil {
+			profile.Folders = appconfig.ChannelFolderCatalog(profile, config.UI.PeripheralNames)
+		}
 		if name != nil {
 			presentation.Name = strings.TrimSpace(*name)
 			changedFields = append(changedFields, "name")
@@ -186,6 +199,9 @@ func (service *Service) updatePeripheralPresentation(key string, name, icon, col
 		} else {
 			profile.Presentation[key] = presentation
 		}
+		if group != nil {
+			profile.Folders = appconfig.ChannelFolderCatalog(profile, config.UI.PeripheralNames)
+		}
 		if order != nil {
 			var reorderErr error
 			changedKeys, reorderErr = reorderPeripheralPresentation(&profile, config.UI.PeripheralNames, key, *order)
@@ -203,6 +219,39 @@ func (service *Service) updatePeripheralPresentation(key string, name, icon, col
 	settings := service.peripheralSettings()
 	service.publishPeripheralChange(settings.BoardProfile, changedKeys, changedFields)
 	return presentationResult(settings, key)
+}
+
+func (service *Service) updateChannelFolder(change appconfig.ChannelFolderMutation, expectedRevision string) (peripheralSettings, error) {
+	if service.UpdateHostConfig == nil {
+		return peripheralSettings{}, errors.New("persistent host configuration is unavailable")
+	}
+	current, _ := service.activeBoardProfile()
+	if !current.Attached || !current.Configured {
+		return peripheralSettings{}, errors.New("configure the attached board profile before changing folders")
+	}
+	if expectedRevision == "" {
+		return peripheralSettings{}, &RPCError{Code: -32602, Message: "expected_revision is required"}
+	}
+	var changedKeys []string
+	err := service.UpdateHostConfig(func(config *appconfig.Config) error {
+		profile := config.BoardProfiles[current.BoardIdentity]
+		if expectedRevision != appconfig.BoardProfileRevision(current.BoardIdentity, profile, config.UI.PeripheralNames) {
+			return &RPCError{Code: -32000, Message: "board profile changed; refresh controller.peripherals.get and retry"}
+		}
+		var err error
+		changedKeys, err = appconfig.ApplyChannelFolderMutation(&profile, config.UI.PeripheralNames, change)
+		if err != nil {
+			return &RPCError{Code: -32602, Message: err.Error()}
+		}
+		config.BoardProfiles[current.BoardIdentity] = profile
+		return nil
+	})
+	if err != nil {
+		return peripheralSettings{}, err
+	}
+	settings := service.peripheralSettings()
+	service.publishPeripheralChange(settings.BoardProfile, changedKeys, []string{"folders", "group"})
+	return settings, nil
 }
 
 // reorderPeripheralPresentation moves one stable control key within its
@@ -263,6 +312,9 @@ func reorderPeripheralPresentation(profile *appconfig.BoardProfile, legacyNames 
 	changed := make([]string, 0, len(peers))
 	for rank, control := range peers {
 		presentation := profile.Presentation[control.Key]
+		if _, exists := profile.Presentation[control.Key]; !exists {
+			presentation.Hidden = control.Hidden
+		}
 		rankValue := rank
 		presentation.Order = &rankValue
 		profile.Presentation[control.Key] = presentation
