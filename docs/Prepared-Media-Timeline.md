@@ -32,9 +32,35 @@ revision/hash/generation/state, armed epoch/clock sequence, command count and AC
 count, explicitly rebased steps, last command/deadline, last/max ACK lateness,
 last/max dispatch lateness, last/max board-request round-trip, device ACK
 timestamp where advertised, and sticky failure reason. Total ACK lateness is
-the end-to-end host-clock result. Dispatch lateness identifies scheduler delay;
+the end-to-end host-clock result. Dispatch lateness measures lateness against
+the admitted/projected clock; it alone does not distinguish scheduler delay
+from an incoming position correction.
 ACK round-trip identifies transport/board response time. The same ledger
 publishes `media.timeline` state events. ACK count advances only on success.
+
+Timing diagnosis uses measured values, without relaxing the execution guards:
+
+| Snapshot field | Meaning |
+| --- | --- |
+| `clock_timing.feedback_interval_ms` / `max_feedback_interval_ms` | Monotonic gap between accepted playing updates |
+| `clock_timing.position_correction_ms` / `max_forward_correction_ms` | New position minus the previous position projected at its previous rate |
+| Timeline `last_worker_gap_ms` / `max_worker_gap_ms` | Gap between executor iterations, including any intervening command work; not CPU attribution by itself |
+| Timeline `last_clock_read_ms` / `max_clock_read_ms` | Elapsed read of the admitted clock, including lock wait and scheduling |
+| Timeline `last_board_read_ms` / `max_board_read_ms` | Elapsed connection-generation read, including lock wait and scheduling |
+
+`clock_timing` appears in both playback and timeline snapshots. Clock maxima
+reset across pause/resume, owner, revision or epoch changes; they do not carry
+an old test's playing gap into a new test. Worker maxima belong to the prepared
+plan. The timeline retains the clock evidence sampled at the failure even when
+a later paused playback update resets its own clock counters. Dispatch failures
+include these measured phases in their error; this adds no per-tick events.
+None of these host measurements prove a physical actuator edge.
+
+Board snapshots copy connection facts under their lock, then expand effect
+catalogs outside it. Library/configuration providers and presentation sorting
+must not hold that lock: a waiting connection writer would also block subsequent
+executor readers. The regression test blocks a catalog provider and verifies
+connection writer/reader access remains available without dropping the catalog.
 
 Clock expiration (250 ms while playing), session replacement, command failure,
 or lateness over the admitted limit faults execution rather than silently skipping

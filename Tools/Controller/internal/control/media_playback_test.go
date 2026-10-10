@@ -9,6 +9,55 @@ import (
 	"time"
 )
 
+func TestMediaClockTimingSeparatesFeedbackGapFromPositionCorrection(t *testing.T) {
+	anchor := time.Now()
+	previous := MediaPlaybackSnapshot{MediaPlaybackUpdate: MediaPlaybackUpdate{
+		ClientID: "test", Sequence: 3, Loaded: true, Playing: true, Rate: 1, Epoch: 5, PlanRevision: 178, PositionMS: 280},
+		ClockTiming: MediaClockTiming{MaxFeedbackIntervalMS: 47, MaxForwardCorrectionMS: 2}}
+	value := previous.MediaPlaybackUpdate
+	value.Sequence++
+	value.PositionMS = 458
+	timing := mediaClockTiming(previous, value, anchor, anchor.Add(80*time.Millisecond))
+	if timing.FeedbackIntervalMS != 80 || timing.PositionCorrectionMS != 98 || timing.MaxForwardCorrectionMS != 98 || timing.MaxFeedbackIntervalMS != 80 {
+		t.Fatalf("incoming clock leap was not separated from receipt gap: %+v", timing)
+	}
+	previous.ClockTiming = timing
+	value.PositionMS = 350
+	timing = mediaClockTiming(previous, value, anchor, anchor.Add(80*time.Millisecond))
+	if timing.PositionCorrectionMS != -10 || timing.MaxForwardCorrectionMS != 98 {
+		t.Fatalf("backward correction erased prior forward evidence: %+v", timing)
+	}
+	previous.Rate = 2
+	value.PositionMS = 440
+	if timing = mediaClockTiming(previous, value, anchor, anchor.Add(80*time.Millisecond)); timing.PositionCorrectionMS != 0 {
+		t.Fatalf("projection did not use the previous rate: %+v", timing)
+	}
+	for _, name := range []string{"pause", "resume", "epoch", "plan", "owner", "unloaded", "no-anchor"} {
+		t.Run(name, func(t *testing.T) {
+			before, current, received := previous, value, anchor
+			switch name {
+			case "pause":
+				current.Playing = false
+			case "resume":
+				before.Playing = false
+			case "epoch":
+				current.Epoch++
+			case "plan":
+				current.PlanRevision++
+			case "owner":
+				current.ClientID = "replacement"
+			case "unloaded":
+				current.Loaded = false
+			case "no-anchor":
+				received = time.Time{}
+			}
+			if got := mediaClockTiming(before, current, received, anchor.Add(time.Second)); got != (MediaClockTiming{}) {
+				t.Fatalf("prior test maxima leaked across %s: %+v", name, got)
+			}
+		})
+	}
+}
+
 func TestMediaPlaybackUnchangedPausedHeartbeatDoesNotRearm(t *testing.T) {
 	runtime := New(Options{})
 	defer runtime.Close()

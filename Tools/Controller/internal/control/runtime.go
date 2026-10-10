@@ -787,7 +787,6 @@ func (runtime *Runtime) Snapshot() Snapshot {
 	rfLearning := runtime.RFLearnState()
 	emergencyStop := runtime.EmergencyStop()
 	runtime.mu.RLock()
-	defer runtime.mu.RUnlock()
 	hardwareProblems := cloneHardwareProblems(runtime.hardwareProblems)
 	snapshot := Snapshot{
 		Connected:              runtime.session != nil,
@@ -823,9 +822,15 @@ func (runtime *Runtime) Snapshot() Snapshot {
 		HardwareProblems: hardwareProblems,
 		PortProcess:      runtime.portProcess,
 	}
-	if runtime.macroRunner != nil {
-		snapshot.Effects = runtime.macroRunner.EffectCatalog()
-		snapshot.EffectGroups = runtime.macroRunner.EffectGroups()
+	runner := runtime.macroRunner
+	runtime.mu.RUnlock()
+	// Catalog expansion calls configuration/library providers and sorts/clones
+	// user effects. Never hold the connection lock across that presentation work:
+	// a waiting writer also blocks subsequent RWMutex readers, including the
+	// prepared executor's small session-generation check.
+	if runner != nil {
+		snapshot.Effects = runner.EffectCatalog()
+		snapshot.EffectGroups = runner.EffectGroups()
 	}
 	return snapshot
 }
