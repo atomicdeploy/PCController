@@ -3,10 +3,89 @@ package control
 import (
 	"context"
 	"errors"
+	"pccontroller.local/controller/internal/appconfig"
+	"pccontroller.local/controller/internal/link"
 	"pccontroller.local/controller/internal/native"
+	"pccontroller.local/controller/internal/ports"
+	"sync"
 	"testing"
 	"time"
 )
+
+type authorityCleanupWire struct {
+	*programStateWirePort
+	entered chan struct{}
+	release chan struct{}
+	started sync.Once
+}
+
+func (port *authorityCleanupWire) Write(data []byte) (int, error) {
+	frame, err := native.Decode(data)
+	if err != nil {
+		return 0, err
+	}
+	if frame.Opcode == native.OpRelayAllOff {
+		port.started.Do(func() { close(port.entered) })
+		select {
+		case <-port.release:
+		case <-port.closed:
+			return 0, errors.New("closed")
+		}
+	}
+	return port.programStateWirePort.Write(data)
+}
+
+func TestMediaSnapshotsRemainAvailableDuringAuthoritySafetyCleanup(t *testing.T) {
+	runtime := New(Options{RequestTimeout: time.Second})
+	port := &authorityCleanupWire{programStateWirePort: newProgramStateWirePort(), entered: make(chan struct{}), release: make(chan struct{})}
+	var released sync.Once
+	release := func() { released.Do(func() { close(port.release) }) }
+	t.Cleanup(func() { release(); runtime.Close() })
+	runtime.attach(link.OpenResult{Session: link.NewForPort("AUTHORITY-TEST", port), Port: ports.Info{Name: "AUTHORITY-TEST"}, Hello: native.Hello{Name: "Virtual"}})
+	if _, err := runtime.PrepareMediaTimeline(MediaTimelinePlan{ClientID: "owner", Revision: 1, Actions: []MediaTimelineAction{
+		{ID: "future", TimeMS: 1000, Step: appconfig.MacroStep{Kind: "relay", Target: 7, Value: 0}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	cleanupDone := make(chan error, 1)
+	go func() {
+		_, err := runtime.ChangeMediaAuthority(MediaAuthorityRequest{ClientID: "owner", Operation: "release"})
+		cleanupDone <- err
+	}()
+	select {
+	case <-port.entered:
+	case <-time.After(time.Second):
+		t.Fatal("authority release did not enter safety cleanup")
+	}
+	readDone := make(chan MediaAuthorityStatus, 1)
+	go func() {
+		status := runtime.MediaAuthority()
+		_ = runtime.MediaPlayback()
+		readDone <- status
+	}()
+	select {
+	case status := <-readDone:
+		if status.OwnerID != "owner" {
+			t.Fatalf("authority changed before safety cleanup completed: %+v", status)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("read-only media snapshots waited for blocked serial safety cleanup")
+	}
+	select {
+	case err := <-cleanupDone:
+		t.Fatalf("safety cleanup returned before the wire was released: %v", err)
+	default:
+	}
+	release()
+	select {
+	case err := <-cleanupDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("authority release did not finish after the wire was released")
+	}
+}
 
 func TestMediaAuthorityNegotiationRequiresOwnerConsentAndPause(t *testing.T) {
 	runtime := New(Options{})
