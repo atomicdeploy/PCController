@@ -1,11 +1,59 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
+	"runtime"
+	"strings"
 	"testing"
 
 	"pccontroller.local/controller/internal/programmer"
 )
+
+func TestArduinoCLIEnvironmentBindsConfiguredDirectories(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "firmware-cli.yaml")
+	content := "directories:\n" +
+		"  data: C:/shared/arduino-data\n" +
+		"  downloads: C:/shared/arduino-downloads\n" +
+		"  user: C:/shared/arduino-user\n"
+	if err := os.WriteFile(configPath, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	environment, err := arduinoCLIEnvironment([]string{
+		"PATH=example",
+		"ARDUINO_DIRECTORIES_DATA=stale",
+		"arduino_directories_user=stale-user",
+	}, configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := map[string]string{}
+	for _, entry := range environment {
+		name, value, found := strings.Cut(entry, "=")
+		if found {
+			values[strings.ToUpper(name)] = value
+		}
+	}
+	for name, want := range map[string]string{
+		"ARDUINO_DIRECTORIES_DATA":      "C:/shared/arduino-data",
+		"ARDUINO_DIRECTORIES_DOWNLOADS": "C:/shared/arduino-downloads",
+		"ARDUINO_DIRECTORIES_USER":      "C:/shared/arduino-user",
+	} {
+		if got := values[name]; got != want {
+			t.Fatalf("%s=%q want %q", name, got, want)
+		}
+	}
+	if runtime.GOOS == "windows" {
+		profile := filepath.Join(filepath.Dir(configPath), "cli-profile")
+		if got := values["USERPROFILE"]; got != profile {
+			t.Fatalf("USERPROFILE=%q want %q", got, profile)
+		}
+		if info, err := os.Stat(filepath.Join(profile, "Documents")); err != nil || !info.IsDir() {
+			t.Fatalf("service Documents directory was not prepared: info=%v err=%v", info, err)
+		}
+	}
+}
 
 func TestSelectLatestCompatibleCLIReusesOneExistingProvider(t *testing.T) {
 	providers := []detectedToolchainProvider{

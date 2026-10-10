@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"gopkg.in/yaml.v3"
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/artifacts"
 	"pccontroller.local/controller/internal/programmer"
@@ -209,8 +210,13 @@ func verifyInstalledArduinoToolchain(
 func runArduinoCLIJSON(ctx context.Context, cliPath, configPath string, args ...string) ([]byte, error) {
 	probe, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
+	environment, err := arduinoCLIEnvironment(os.Environ(), configPath)
+	if err != nil {
+		return nil, fmt.Errorf("prepare firmware CLI environment: %w", err)
+	}
 	arguments := append([]string{"--config-file", configPath}, args...)
 	command := exec.CommandContext(probe, cliPath, arguments...)
+	command.Env = environment
 	command.Stdin = nil
 	var stderr bytes.Buffer
 	command.Stderr = &stderr
@@ -219,6 +225,75 @@ func runArduinoCLIJSON(ctx context.Context, cliPath, configPath string, args ...
 		return nil, fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
 	}
 	return content, nil
+}
+
+type arduinoCLIConfiguration struct {
+	Directories struct {
+		Data      string `yaml:"data"`
+		Downloads string `yaml:"downloads"`
+		User      string `yaml:"user"`
+	} `yaml:"directories"`
+}
+
+// arduinoCLIEnvironment makes the paths in the reviewed CLI configuration
+// authoritative for child-process discovery. Arduino CLI otherwise attempts
+// to resolve a Windows Documents known folder before fully applying the YAML;
+// virtual service accounts do not have one and consequently expose an empty
+// installed-core inventory even when the shared toolchain is intact.
+func arduinoCLIEnvironment(base []string, configPath string) ([]string, error) {
+	content, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil, err
+	}
+	var config arduinoCLIConfiguration
+	if err := yaml.Unmarshal(content, &config); err != nil {
+		return nil, fmt.Errorf("decode %s: %w", configPath, err)
+	}
+	overrides := map[string]string{}
+	for name, value := range map[string]string{
+		"ARDUINO_DIRECTORIES_DATA":      config.Directories.Data,
+		"ARDUINO_DIRECTORIES_DOWNLOADS": config.Directories.Downloads,
+		"ARDUINO_DIRECTORIES_USER":      config.Directories.User,
+	} {
+		if value = strings.TrimSpace(value); value != "" {
+			overrides[name] = value
+		}
+	}
+	if runtime.GOOS == "windows" {
+		absoluteConfig, absoluteErr := filepath.Abs(configPath)
+		if absoluteErr != nil {
+			return nil, absoluteErr
+		}
+		profileRoot := filepath.Join(filepath.Dir(absoluteConfig), "cli-profile")
+		if err := os.MkdirAll(filepath.Join(profileRoot, "Documents"), 0o700); err != nil {
+			return nil, fmt.Errorf("prepare firmware CLI service profile: %w", err)
+		}
+		overrides["HOME"] = profileRoot
+		overrides["USERPROFILE"] = profileRoot
+		if volume := filepath.VolumeName(profileRoot); volume != "" {
+			overrides["HOMEDRIVE"] = volume
+			overrides["HOMEPATH"] = strings.TrimPrefix(profileRoot, volume)
+		}
+	}
+	result := make([]string, 0, len(base)+len(overrides))
+	for _, entry := range base {
+		name, _, found := strings.Cut(entry, "=")
+		if found {
+			if _, overridden := overrides[strings.ToUpper(name)]; overridden {
+				continue
+			}
+		}
+		result = append(result, entry)
+	}
+	names := make([]string, 0, len(overrides))
+	for name := range overrides {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		result = append(result, name+"="+overrides[name])
+	}
+	return result, nil
 }
 
 func coreInventoryHas(content []byte, id, version string) bool {
