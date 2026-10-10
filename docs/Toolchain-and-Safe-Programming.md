@@ -129,6 +129,11 @@ stable version matches the freshly resolved policy; otherwise PCController
 installs one checksum-verified managed copy. Core packages, compiler tools, and
 libraries always share PCController's one generated configuration/data tree, so
 an external compatible CLI does not create another package installation.
+The host also exports the reviewed `directories.data`, `directories.downloads`,
+and `directories.user` values to every Arduino CLI inventory subprocess. On
+Windows it supplies a service-owned profile with a Documents directory. This
+keeps the exact same toolchain visible when the primary runs as the
+`NT SERVICE\PCController` virtual account instead of an interactive user.
 `DefaultToolchainProfile()` is derived from the same generated lock rather than
 maintaining a second handwritten version list.
 
