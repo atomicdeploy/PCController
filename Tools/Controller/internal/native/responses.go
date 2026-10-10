@@ -1028,7 +1028,10 @@ func EncodeMenuLayout(layout MenuLayout) ([]byte, error) {
 	if count < 1 || count > 16 {
 		return nil, fmt.Errorf("MENU_LAYOUT count %d is outside 1..16", count)
 	}
-	payload := make([]byte, 4+(count+1)/2)
+	// The wire format contains at most sixteen packed page IDs. Use a fixed
+	// backing buffer so allocation sizing never depends on an input slice.
+	var storage [12]byte
+	payload := storage[:4+(count+1)/2]
 	payload[0] = MenuLayoutSchema
 	payload[1] = byte(count)
 	binary.LittleEndian.PutUint16(payload[2:4], layout.VisibleMask)
