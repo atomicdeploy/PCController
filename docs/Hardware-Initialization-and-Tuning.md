@@ -209,7 +209,11 @@ generic TM1637 library. It services presentation every 20 ms but compares the
 four encoded segment bytes with a cache and sends nothing when they have not
 changed. This provides a 50 Hz decision rate without the old constant bus
 refresh flicker. The low-level bit delay is 3 us, and the chip brightness range
-is 0..7 with factory EEPROM value 5.
+is 0..7 with factory EEPROM value 5. Each transmitted byte samples the TM1637
+ACK slot. The brightness service health-checks an otherwise idle display once
+per second even when telemetry is disabled. On a missing-to-present transition,
+firmware restores the cached cells and
+brightness before publishing detected state.
 
 Voltage and current decimal places are independent persistent settings in the
 range 0..2; erased EEPROM decodes both to two decimals. Measurement acquisition

@@ -154,7 +154,8 @@ when the selected macro is removed.
   and a 12-bit editable value.
 - `DISPLAY_TEXT` target 4 releases capture.
 - `FRONT_PANEL` schema 2 provides exact raw segments, LCD content, physical key
-  mask, capture state, host state, and editable value for the TUI/API mirror.
+  mask, capture state, host state, editable value, and an explicitly-known
+  TM1637 ACK/detection state for the TUI/API/Web mirror.
 - Physical key events remain ordinary asynchronous `EVENT` frames and are
   consumed by the same manager as TUI/IPC virtual keys.
 

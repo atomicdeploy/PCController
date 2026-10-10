@@ -253,7 +253,8 @@ void testBoardAndPersistence() {
                 (response[0].payload[44] & 0x80U) != 0 &&
                 (response[0].payload[44] & 0x0FU) == 2 &&
                 response[0].payload[45] == 0xBC &&
-                response[0].payload[46] == 0x0A,
+                response[0].payload[46] == 0x0A &&
+                (response[0].payload[8] & 0xC0U) == 0xC0U,
             "front-panel snapshot omitted capture metadata");
     response = board.handle(
         {pccontroller::wire::DisplayText, 51, {4, 0, 0, 0, 0xAA}});

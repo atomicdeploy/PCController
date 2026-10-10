@@ -217,13 +217,24 @@ normal low-latency path.
 
 The board pushes changed physical outputs instead of requiring the host to poll
 the active front panel. `SEGMENT_CHANGED` (`9C`) carries four raw TM1637 segment
-bytes followed by `u8 brightness`. `BUZZER_CHANGED` (`9D`) carries
+bytes followed by a packed state byte: bits 0..2 are brightness, bit 7 means
+ACK detection is authoritative, and bit 6 means the display ACKed.
+`BUZZER_CHANGED` (`9D`) carries
 the five-byte state `u16 frequency_hz, u16 duration_ms, u8 muted`, optionally
 followed by `u32 device_micros` when the producer can timestamp the physical
 edge. This is one current variable-length contract, not a migration chain.
 These frames use sequence zero and are emitted only when the
 corresponding physical output changes. The host may still request
 `FRONT_PANEL_GET` during connection, manual refresh, or recovery.
+
+`FRONT_PANEL` schema 2 reserves the upper bits of its LCD-flags byte for
+TM1637 presence: bit 7 means the detection field is authoritative and bit 6
+means the display ACKed. Older schema-2 firmware leaves both bits clear, so a
+new host reports detection as unknown rather than inventing an absent device.
+The same high bits are copied into `FRONT_PANEL` once the compact state has
+been sampled. Presence changes emit `SEGMENT_CHANGED`; the host updates the
+detection fields without promoting that partial event to an exact full-panel
+snapshot.
 
 The host's melody scheduler sends acknowledged `BUZZER` frames on one monotonic
 deadline sequence; command/ACK latency is not added to every note interval.
@@ -342,7 +353,7 @@ off only outputs claimed by that macro.
 | RF_ENTRIES | `94` | paginated learned entries below |
 | TEMPERATURES | `95` | named temperature records below |
 | MENU_LIST | `97` | paginated firmware-owned menu entries below |
-| SEGMENT_CHANGED | `9C` | `u8 raw_segments[4], u8 brightness`; unsolicited, changed-only |
+| SEGMENT_CHANGED | `9C` | `u8 raw_segments[4], u8 state` (brightness bits 0..2, detected bit 6, known bit 7); unsolicited, changed-only |
 | BUZZER_CHANGED | `9D` | `u16 frequency_hz, u16 duration_ms, u8 muted[, u32 device_micros]`; unsolicited, changed-only |
 | EVENT | `A0` | `u8 eventType, event-specific data...` |
 

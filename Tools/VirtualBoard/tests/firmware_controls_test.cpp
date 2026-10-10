@@ -410,6 +410,28 @@ void testDisplayBrightnessFade() {
           "door-open TM1637 fade did not clamp/reach full brightness");
 }
 
+void testDisplayAckDetectionAndRecovery() {
+  arduino_mock::resetHardware();
+  arduino_mock::portInput = 0; // TM1637 pulls DIO low during ACK.
+  SevenSegments segments;
+  segments.begin(5);
+  segments.showText("ACK ");
+  require(segments.detected(), "TM1637 ACK was not recognized");
+
+  arduino_mock::portInput = 0xFF; // Open/high bus: device disconnected.
+  segments.serviceBrightness(5, 999);
+  require(segments.detected(), "TM1637 health check ran before its cadence");
+  segments.serviceBrightness(5, 1000);
+  require(!segments.detected(), "missing TM1637 ACK was not reported");
+
+  arduino_mock::portInput = 0;
+  segments.serviceBrightness(5, 2000);
+  require(segments.detected(),
+          "TM1637 did not reinitialize after ACK returned");
+  require(segments.brightness() == 5 && segments.rawSegments()[0] == 0x77,
+          "TM1637 recovery did not preserve cached presentation state");
+}
+
 void testSemanticProtocolAndTemperatureRoles() {
   require(ControllerProtocol::ProgramState == 0x45,
           "semantic PROGRAM_STATE opcode moved");
@@ -535,6 +557,7 @@ int main() {
     testMotionDoorPolicyMatrixAndEntryPaths();
     testTransitionsAndRollover();
     testDisplayBrightnessFade();
+    testDisplayAckDetectionAndRecovery();
     testSemanticProtocolAndTemperatureRoles();
     testFrontPanelLeafDecreaseDispatch();
     testRetiredMotionMenuAlias();

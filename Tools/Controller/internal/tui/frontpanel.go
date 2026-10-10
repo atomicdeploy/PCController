@@ -124,6 +124,10 @@ func (model Model) currentFrontPanel(snapshot control.Snapshot) FrontPanelState 
 		state.StatusLED = snapshot.StatusLED
 		state.HaveStatusLED = true
 	}
+	if snapshot.FrontPanel.TM1637DetectionKnown {
+		state.TM1637Detected = snapshot.FrontPanel.TM1637Detected
+		state.TM1637DetectionKnown = true
+	}
 	state.Segments = padCells(state.Segments, 4)
 	state.LCDLine1 = padCells(state.LCDLine1, 16)
 	state.LCDLine2 = padCells(state.LCDLine2, 16)
@@ -183,6 +187,9 @@ func renderFrontPanel(state FrontPanelState) string {
 		boolWord(state.Blink, "ON", "OFF"), boolWord(state.CategorySelector, "SELECT", "page"),
 		state.InputSource, state.PressedKeys,
 	)
+	if state.TM1637DetectionKnown {
+		detail += "\nTM1637 · " + boolWord(state.TM1637Detected, "detected", "not detected")
+	}
 	if state.HaveStatusLED {
 		hex := fmt.Sprintf("#%02X%02X%02X", state.StatusLED.Red, state.StatusLED.Green, state.StatusLED.Blue)
 		dot := lipgloss.NewStyle().Foreground(lipgloss.Color(hex)).Render("●")

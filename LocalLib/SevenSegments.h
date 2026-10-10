@@ -26,6 +26,7 @@ public:
   void serviceBrightness(uint8_t target, uint32_t now = millis());
   const uint8_t *rawSegments() const { return cachedSegments_; }
   uint8_t brightness() const { return brightness_; }
+  bool detected() const;
 
 private:
   static uint8_t encodeCharacter(char value);
@@ -38,7 +39,6 @@ private:
   uint8_t cachedSegments_[4] = {0xFF, 0xFF, 0xFF, 0xFF};
   uint8_t brightness_ = 0xFF;
   uint16_t brightnessChangedAt_ = 0;
-  bool begun_ = false;
 };
 
 // display is the single board-wide TM1637 presentation service.

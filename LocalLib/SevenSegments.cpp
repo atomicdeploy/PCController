@@ -18,6 +18,7 @@ constexpr uint8_t DisplayOffCommand = 0x80;
 constexpr uint8_t DisplayOnCommand = 0x88;
 constexpr uint8_t DecimalPoint = 0x80;
 constexpr uint8_t MinusSegment = 0x40;
+uint8_t busNack;
 
 inline void busDelay() {
 #if defined(__AVR__)
@@ -104,15 +105,20 @@ void writeBusByte(uint8_t value) {
     value >>= 1;
   }
 
-  // Release DIO while the TM1637 drives its ACK bit. An ACK is not required
-  // for forward progress, but releasing the line prevents output contention.
+  // Release DIO while the TM1637 owns its ninth-clock ACK slot. Sampling in
+  // the middle of the high phase both avoids contention and distinguishes a
+  // connected controller from an open/high bus.
   clockLow();
   releaseData();
   busDelay();
   clockHigh();
   busDelay();
-  clockLow();
-  dataLow();
+#if defined(__AVR__) && defined(PINB) && defined(PINB3)
+  busNack = PINB;
+#else
+  busNack = digitalRead(BoardPins::Tm1637Data) != LOW;
+#endif
+  // The caller immediately begins the next byte or STOP by lowering CLK.
 }
 
 } // namespace
@@ -126,7 +132,6 @@ void SevenSegments::begin(uint8_t brightness) {
 #endif
   clockHigh();
   dataHigh();
-  begun_ = true;
   clear();
   setBrightness(brightness);
 }
@@ -174,29 +179,40 @@ void SevenSegments::showUnavailable() {
 }
 
 void SevenSegments::setBrightness(uint8_t brightness) {
+#if !defined(__AVR__)
   if (brightness > 7) {
     brightness = 7;
   }
-  if (brightness_ == brightness) {
-    return;
-  }
+#endif
   brightness_ = brightness;
-  if (begun_) {
-    // Zero is a true display-off level; values 1..7 retain their prior TM1637
-    // intensity mapping so existing nonzero EEPROM settings do not get dimmer.
-    sendCommand(brightness_ == 0
-                    ? DisplayOffCommand
-                    : static_cast<uint8_t>(DisplayOnCommand | brightness_));
+  if (!detected()) {
+    // A returning TM1637 receives a complete data-mode/addressed frame before
+    // display control, so recovery does not require an MCU reset.
+    writeSegments(cachedSegments_);
   }
+  // Zero is a true display-off level; values 1..7 retain their prior TM1637
+  // intensity mapping so existing nonzero EEPROM settings do not get dimmer.
+  sendCommand(brightness_ == 0
+                  ? DisplayOffCommand
+                  : static_cast<uint8_t>(DisplayOnCommand | brightness_));
 }
 
 void SevenSegments::serviceBrightness(uint8_t target, uint32_t now) {
+#if !defined(__AVR__)
   if (target > 7) {
     target = 7;
   }
+#endif
   const uint16_t tick = static_cast<uint16_t>(now);
-  if (brightness_ == target ||
-      static_cast<uint16_t>(tick - brightnessChangedAt_) < 70U) {
+  const uint16_t elapsed = static_cast<uint16_t>(tick - brightnessChangedAt_);
+  if (brightness_ == target) {
+    if (elapsed >= 1000U) {
+      brightnessChangedAt_ = tick;
+      setBrightness(brightness_);
+    }
+    return;
+  }
+  if (elapsed < 70U) {
     return;
   }
   brightnessChangedAt_ = tick;
@@ -302,10 +318,15 @@ uint8_t SevenSegments::encodeCharacter(char value) {
 }
 
 void SevenSegments::showScaled(int32_t value, uint8_t decimalPlaces) {
+#if !defined(__AVR__)
   if (decimalPlaces > 2 || value == INT32_MIN) {
     showUnavailable();
     return;
   }
+#endif
+  // AVR call sites reject sensor sentinels and load decimalPlaces only from
+  // the CRC-validated 0..2 setting; keep the defensive generic check in the
+  // native implementation without spending the constrained image twice.
 
   const bool negative = value < 0;
   uint32_t magnitude =
@@ -351,10 +372,15 @@ void SevenSegments::sendCommand(uint8_t command) {
   stopBus();
 }
 
+bool SevenSegments::detected() const {
+#if defined(__AVR__) && defined(PINB3)
+  return (busNack & _BV(PINB3)) == 0;
+#else
+  return busNack == 0;
+#endif
+}
+
 void SevenSegments::writeSegments(const uint8_t segments[4]) {
-  if (!begun_) {
-    return;
-  }
   sendCommand(DataCommand);
 
   startBus();

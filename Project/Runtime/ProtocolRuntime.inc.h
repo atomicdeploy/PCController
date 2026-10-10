@@ -179,7 +179,9 @@ void sendFrontPanel(uint8_t sequence) {
 #endif
                                     );
   payload[7] = 0;
-  payload[8] = 0;
+  // The compact change event stores the latest ACK-derived known/detected
+  // flags in its brightness cache; reuse those reserved bits here.
+  payload[8] = lastPushedSegmentBrightness & 0xC0U;
   memcpy(payload + 9, hostLcdText, sizeof(hostLcdText));
   payload[41] =
       static_cast<uint8_t>(shiftRegisters.activeInputs() & 0x0FU);
@@ -198,16 +200,22 @@ void sendFrontPanel(uint8_t sequence) {
 // available for initial synchronization and explicit refreshes.
 void serviceSegmentPush() {
   const uint8_t *segments = display.rawSegments();
-  const uint8_t brightness = display.brightness();
-  if (brightness == lastPushedSegmentBrightness &&
+  // Brightness uses only bits 0..2. The previously reserved high bits carry
+  // the same authoritative ACK state as FRONT_PANEL, so a presence transition
+  // rides the compact push instead of allocating a second 47-byte response.
+  uint8_t state = static_cast<uint8_t>(display.brightness() | 0x80U);
+  if (display.detected()) {
+    state |= 0x40U;
+  }
+  if (state == lastPushedSegmentBrightness &&
       memcmp(segments, lastPushedSegments, 4) == 0) {
     return;
   }
   uint8_t payload[5];
   memcpy(payload, segments, 4);
-  payload[4] = brightness;
+  payload[4] = state;
   memcpy(lastPushedSegments, segments, 4);
-  lastPushedSegmentBrightness = brightness;
+  lastPushedSegmentBrightness = state;
   appProtocol.send(ControllerProtocol::SegmentChanged, 0, payload,
                    sizeof(payload));
 }

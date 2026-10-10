@@ -698,7 +698,7 @@ func EventStreamForKind(kind string) string {
 		return EventStreamTelemetry
 	case "rx", "tx", "opcode":
 		return EventStreamDebug
-	case "front_panel.segment", "status_led.changed", "pwm.changed", "buzzer.note", "illumination.changed", "settings.changed", "peripherals.changed", "motion.changed", "melodies.changed":
+	case "front_panel.changed", "front_panel.segment", "status_led.changed", "pwm.changed", "buzzer.note", "illumination.changed", "settings.changed", "peripherals.changed", "motion.changed", "melodies.changed":
 		return EventStreamState
 	}
 	if strings.HasPrefix(kind, "measurement.") || strings.HasSuffix(kind, ".measurement") ||
@@ -3036,6 +3036,9 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 					// useful only to a protocol debugger. Ordinary UI/IPC events
 					// deliberately omit the raw HELLO payload.
 					event.Frame.Payload = nil
+				} else if event.Frame.Opcode == native.OpFrontPanel {
+					kind = "front_panel.changed"
+					text = "front-panel state changed"
 				} else if event.Frame.Opcode == native.OpEvent {
 					if parsed, err := native.ParseDeviceEvent(event.Frame.Payload); err == nil {
 						rfMappingRequired, rfCaptured = runtime.observeRFLearningEvent(parsed)
@@ -3468,6 +3471,10 @@ func (runtime *Runtime) observeLocked(frame native.Frame) uint64 {
 			runtime.frontPanel.RawSegments = state.RawSegments
 			runtime.frontPanel.Brightness = state.Brightness
 			runtime.frontPanel.SegmentsActive = true
+			if state.TM1637DetectionKnown {
+				runtime.frontPanel.TM1637Detected = state.TM1637Detected
+				runtime.frontPanel.TM1637DetectionKnown = true
+			}
 			runtime.haveFrontPanelSegments = true
 			runtime.frontPanelUpdated = time.Now()
 		}

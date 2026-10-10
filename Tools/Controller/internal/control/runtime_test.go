@@ -1147,7 +1147,7 @@ func TestSegmentChangedDoesNotPromotePartialStateToExactFrontPanel(t *testing.T)
 	runtime := New(Options{})
 	runtime.observe(native.Frame{
 		Opcode:  native.OpSegmentChanged,
-		Payload: []byte{0x11, 0x22, 0x33, 0x44, 5},
+		Payload: []byte{0x11, 0x22, 0x33, 0x44, 0xC5},
 	})
 	snapshot := runtime.Snapshot()
 	if snapshot.HaveFrontPanel {
@@ -1157,7 +1157,8 @@ func TestSegmentChangedDoesNotPromotePartialStateToExactFrontPanel(t *testing.T)
 		t.Fatal("five-byte segment update was not retained as partial segment authority")
 	}
 	if snapshot.FrontPanel.RawSegments != ([4]byte{0x11, 0x22, 0x33, 0x44}) ||
-		snapshot.FrontPanel.Brightness != 5 || !snapshot.FrontPanel.SegmentsActive {
+		snapshot.FrontPanel.Brightness != 5 || !snapshot.FrontPanel.SegmentsActive ||
+		!snapshot.FrontPanel.TM1637DetectionKnown || !snapshot.FrontPanel.TM1637Detected {
 		t.Fatalf("partial segment fields were not retained: %#v", snapshot.FrontPanel)
 	}
 
@@ -1167,7 +1168,7 @@ func TestSegmentChangedDoesNotPromotePartialStateToExactFrontPanel(t *testing.T)
 	runtime.mu.Unlock()
 	runtime.observe(native.Frame{
 		Opcode:  native.OpSegmentChanged,
-		Payload: []byte{0x01, 0x02, 0x03, 0x04, 6},
+		Payload: []byte{0x01, 0x02, 0x03, 0x04, 0x86},
 	})
 	snapshot = runtime.Snapshot()
 	if !snapshot.HaveFrontPanel || snapshot.FrontPanel.MenuPage != 3 ||
@@ -1178,7 +1179,8 @@ func TestSegmentChangedDoesNotPromotePartialStateToExactFrontPanel(t *testing.T)
 		t.Fatal("exact panel snapshot lost segment authority")
 	}
 	if snapshot.FrontPanel.RawSegments != ([4]byte{0x01, 0x02, 0x03, 0x04}) ||
-		snapshot.FrontPanel.Brightness != 6 {
+		snapshot.FrontPanel.Brightness != 6 || !snapshot.FrontPanel.TM1637DetectionKnown ||
+		snapshot.FrontPanel.TM1637Detected {
 		t.Fatalf("exact snapshot did not absorb changed segment fields: %#v", snapshot.FrontPanel)
 	}
 }

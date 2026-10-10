@@ -176,6 +176,8 @@ export function WorkbenchView(props: SharedViewProps) {
   const displayTextLimit = displayTarget === 'segments' ? 40 : 32
   const displayTextIsValid = displayText.length > 0 && displayText.length <= displayTextLimit && /^[\x20-\x7e]*$/.test(displayText)
   const available = peripheralAvailability(snapshot)
+  const tm1637DetectionKnown = Boolean(snapshot.front_panel?.tm1637_detection_known)
+  const tm1637Detected = Boolean(snapshot.front_panel?.tm1637_detected)
   const boardReady = transport.boardState === 'ready' && snapshot.connected && snapshot.have_status
   const canHardwareReset = hardwareResetAvailable(snapshot)
   const completionItems = terminalCompletions(line, commandCatalog)
@@ -485,7 +487,7 @@ export function WorkbenchView(props: SharedViewProps) {
           </div>
         </Card>)}
 
-        {boardReady && available.segments && frame('displays', copy('Displays', 'نمایشگرها'), <Card icon={Binary} iconTone="violet" title={copy('Displays', 'نمایشگرها')} eyebrow={available.lcd ? 'TM1637 + LCD' : 'TM1637'}>
+        {boardReady && available.segments && frame('displays', copy('Displays', 'نمایشگرها'), <Card icon={Binary} iconTone="violet" title={copy('Displays', 'نمایشگرها')} eyebrow={available.lcd ? 'TM1637 + LCD' : 'TM1637'} action={tm1637DetectionKnown ? <StatusBadge tone={tm1637Detected ? 'good' : 'bad'}>{tm1637Detected ? copy('TM1637 detected', 'TM1637 شناسایی شد') : copy('TM1637 not detected', 'TM1637 شناسایی نشد')}</StatusBadge> : undefined}>
           {available.lcd && <div className="setting-group"><label>{copy('Target', 'مقصد')}</label><Segmented value={displayTarget} label={copy('Display target', 'مقصد نمایش')} options={displayTargetOptions} onChange={setDisplayTarget} /></div>}
           <TextField
             label={copy(`Display text · ${displayTextLimit} characters maximum`, `متن نمایشگر، حداکثر ${displayTextLimit} نویسه`)}
