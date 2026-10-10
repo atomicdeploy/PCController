@@ -47,5 +47,17 @@ The stable-path Windows runner passed the appconfig/ipcjson focused folder,
 profile, presentation and capability tests on 2026-10-10. Domain regressions cover
 hidden members, empty-folder JSON roundtrips, rename/delete/move, wrong-kind and
 raw-relay rejection, unchanged state after invalid mutations, clone isolation and
-revision changes. Runtime deployment evidence is coordinated in Pealayer's
-`docs/verification/channel-folders.md`. No firmware or output action is required.
+revision changes. All 44 stable-path Go package suites, Go vet and the 357 embedded
+Web tests passed. The menu-layout encoder now uses fixed twelve-byte storage;
+roundtrips for every supported count 1–16 and rejection of 0/17 are tested, avoiding
+allocation-size false positives from an already bounded expression.
+
+Runtime deployment and live folder create/drag/rename/icon/stale-revision/delete
+evidence is coordinated in Pealayer's
+[channel-folders receipt](https://github.com/ToghrolTP/pealayer/blob/main/docs/verification/channel-folders.md).
+The final controller executable SHA-256 is
+`6a8482a8c2eecee41619a30b091fe7e4339db0446a8b5ffb3fd45fc81f1a043b`,
+built from `6537f1f56982408aec2b9395ed40126c87da22cd`. It is verified on Cafe port
+8787 and local port 8788. Both Cafe applications remain paused/connected with no
+hardware error, saved board wiring and original presentation are retained, and the
+temporary acceptance folder is removed. No firmware or output action was required.
