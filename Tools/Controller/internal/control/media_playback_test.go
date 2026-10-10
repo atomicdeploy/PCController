@@ -9,6 +9,68 @@ import (
 	"time"
 )
 
+func TestMediaPlaybackUnchangedPausedHeartbeatDoesNotRearm(t *testing.T) {
+	runtime := New(Options{})
+	defer runtime.Close()
+	previous := MediaPlaybackUpdate{ClientID: "player:test", Sequence: 1, Loaded: true, Rate: 1, Epoch: 3, PlanRevision: 1, PositionMS: 100}
+	runtime.mediaPlayback.snapshot.MediaPlaybackUpdate = previous
+	runtime.mediaPlayback.received = time.Now()
+	// Deliberately no timeline worker: an acknowledged, unchanged pause must
+	// not require another scheduler round-trip just to renew its lease.
+	runtime.mediaTimeline.status = MediaTimelineStatus{ClientID: previous.ClientID, Revision: 1, StepCount: 814,
+		State: "paused", ArmedEpoch: 3, ClockSequence: 1, ClockPositionMS: 100}
+	value := previous
+	value.Sequence++
+	snapshot, err := runtime.UpdateMediaPlayback(value)
+	if err != nil || snapshot.Sequence != 2 || snapshot.Timeline.ClockSequence != 1 {
+		t.Fatalf("unchanged paused heartbeat unnecessarily rearmed: %+v, %v", snapshot, err)
+	}
+}
+
+func TestMediaTimelinePausedHeartbeatRequiresAcknowledgedUnchangedPause(t *testing.T) {
+	value := MediaPlaybackUpdate{ClientID: "player:test", Sequence: 2, Loaded: true, Rate: 1, Epoch: 3, PlanRevision: 1, PositionMS: 100}
+	previous := value
+	previous.Sequence = 1
+	plan := MediaTimelineStatus{ClientID: value.ClientID, Revision: 1, State: "paused", ArmedEpoch: 3, ClockSequence: 1, ClockPositionMS: 100}
+	if !mediaTimelinePausedHeartbeatArmed(plan, previous, value) {
+		t.Fatal("acknowledged unchanged pause not recognized")
+	}
+	for _, name := range []string{"initial", "playing", "seek", "epoch", "revision", "owner", "unloaded", "faulted", "ready", "unacknowledged", "unarmed", "position"} {
+		t.Run(name, func(t *testing.T) {
+			before, current, status := previous, value, plan
+			switch name {
+			case "initial":
+				before.Loaded = false
+			case "playing":
+				before.Playing = true
+			case "seek":
+				current.PositionMS++
+			case "epoch":
+				current.Epoch++
+			case "revision":
+				current.PlanRevision++
+			case "owner":
+				current.ClientID = "other"
+			case "unloaded":
+				current.Loaded = false
+			case "faulted":
+				status.State = "faulted"
+			case "ready":
+				status.State = "ready"
+			case "unacknowledged":
+				status.ClockSequence = 0
+			case "unarmed":
+				status.ArmedEpoch++
+			case "position":
+				status.ClockPositionMS++
+			}
+			if mediaTimelinePausedHeartbeatArmed(status, before, current) {
+				t.Fatal("required worker acknowledgement was bypassed")
+			}
+		})
+	}
+}
+
 func TestMediaPlaybackPublishesAcceptedPauseWhenArmingFails(t *testing.T) {
 	runtime := New(Options{})
 	defer runtime.Close()
