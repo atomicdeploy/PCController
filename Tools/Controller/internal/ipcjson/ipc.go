@@ -350,6 +350,7 @@ type peripheralSettings struct {
 	BoardProfile boardProfileDescriptor           `json:"board_profile"`
 	Peripherals  []appconfig.PeripheralDescriptor `json:"peripherals"`
 	Controls     []appconfig.ControlDescriptor    `json:"controls"`
+	Folders      []appconfig.ChannelFolder        `json:"folders"`
 	Strip        *stripControlDescriptor          `json:"strip,omitempty"`
 	StripEffects []control.StripEffectDescriptor  `json:"strip_effects,omitempty"`
 }
@@ -809,6 +810,16 @@ func (service *Service) dispatch(
 			err = &RPCError{Code: -32602, Message: err.Error()}
 		} else {
 			result, err = service.updateActiveBoardProfile(params.Key, params.Mode, params.ExposeRawRelays, params.ExpectedRevision)
+		}
+	case "controller.peripheral.folder.update":
+		var params struct {
+			appconfig.ChannelFolderMutation
+			ExpectedRevision string `json:"expected_revision"`
+		}
+		if err = decodeStrictParams(request.Params, &params); err != nil {
+			err = &RPCError{Code: -32602, Message: err.Error()}
+		} else {
+			result, err = service.updateChannelFolder(params.ChannelFolderMutation, params.ExpectedRevision)
 		}
 	case "controller.peripheral.presentation.update":
 		var params struct {
@@ -2047,7 +2058,7 @@ func (service *Service) peripheralSettings() peripheralSettings {
 	stripEffects := snapshot.StripEffects
 	return peripheralSettings{
 		Names: clonePeripheralNames(names), BoardProfile: profileDescriptor,
-		Peripherals: peripherals, Controls: controls,
+		Peripherals: peripherals, Controls: controls, Folders: appconfig.ChannelFolderCatalog(profile, names),
 		Strip: advertisedStripControl(snapshot.Connected, snapshot.Hello.Capabilities), StripEffects: stripEffects,
 	}
 }
@@ -2447,6 +2458,7 @@ func requestCapability(method string, params json.RawMessage) string {
 		"controller.ui.config.set",
 		"controller.peripherals.set", "controller.board_profile.update",
 		"controller.peripheral.presentation.update",
+		"controller.peripheral.folder.update",
 		"controller.hotkeys.set",
 		"controller.os.configure", "controller.lcd.presentation.configure",
 		"controller.app.page", "controller.app.navigate", "controller.app.action.ack", "controller.app.launch",

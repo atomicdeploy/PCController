@@ -136,6 +136,7 @@ test("reviewed integration guides permit only the paired Pealayer repository", (
     "docs/Playback-Board-Sync.md",
     "docs/Prepared-Media-Timeline.md",
     "docs/RF-APPLICATION-ACTIONS.md",
+    "docs/Channel-Folders.md",
   ]) {
     assert.deepEqual(
       privacyFindings(path, "https://github.com/ToghrolTP/pealayer/pull/46", context),

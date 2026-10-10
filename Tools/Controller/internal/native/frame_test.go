@@ -702,6 +702,27 @@ func TestMenuListCountRejectsProtocolOverflow(t *testing.T) {
 	}
 }
 
+func TestMenuLayoutEncodingBounds(t *testing.T) {
+	for count := 1; count <= 16; count++ {
+		order := make([]byte, count)
+		for index := range order {
+			order[index] = byte(index)
+		}
+		payload, err := EncodeMenuLayout(MenuLayout{VisibleMask: 1, Order: order})
+		if err != nil {
+			t.Fatalf("count %d: %v", count, err)
+		}
+		if len(payload) != 4+(count+1)/2 {
+			t.Fatalf("count %d: encoded length %d", count, len(payload))
+		}
+	}
+	for _, count := range []int{0, 17} {
+		if _, err := EncodeMenuLayout(MenuLayout{VisibleMask: 1, Order: make([]byte, count)}); err == nil {
+			t.Fatalf("invalid count %d accepted", count)
+		}
+	}
+}
+
 func TestMenuLayoutSchemaRoundTripAndValidation(t *testing.T) {
 	order := []byte{0, 3, 4, 1, 2, 5, 6, 7, 11, 12, 13, 8, 9, 10}
 	payload, err := EncodeMenuLayout(MenuLayout{

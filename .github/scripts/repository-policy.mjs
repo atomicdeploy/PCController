@@ -43,6 +43,7 @@ const reviewedExternalRepositories = new Map([
   ["docs/Playback-Board-Sync.md", new Set(["toghroltp/pealayer"])],
   ["docs/Prepared-Media-Timeline.md", new Set(["toghroltp/pealayer"])],
   ["docs/RF-APPLICATION-ACTIONS.md", new Set(["toghroltp/pealayer"])],
+  ["docs/Channel-Folders.md", new Set(["toghroltp/pealayer"])],
 ]);
 
 // External repository URLs are limited to reviewed dependency provenance.

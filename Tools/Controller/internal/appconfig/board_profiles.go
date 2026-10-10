@@ -24,6 +24,7 @@ type BoardProfile struct {
 	Mode            string                            `json:"mode"`
 	ExposeRawRelays bool                              `json:"expose_raw_relays,omitempty"`
 	Presentation    map[string]PeripheralPresentation `json:"presentation,omitempty"`
+	Folders         []ChannelFolder                   `json:"folders,omitempty"`
 }
 
 // PeripheralPresentation is mutable operator vocabulary attached to a stable
@@ -90,6 +91,9 @@ func (value Config) validateBoardProfiles() error {
 		}
 		if len(profile.Presentation) > MaxPeripheralNames {
 			return fmt.Errorf("board_profiles[%q].presentation may contain at most %d entries", identity, MaxPeripheralNames)
+		}
+		if err := validateChannelFolders(profile.Folders); err != nil {
+			return fmt.Errorf("board_profiles[%q].folders: %w", identity, err)
 		}
 		for controlKey, presentation := range profile.Presentation {
 			if controlKey = strings.TrimSpace(controlKey); controlKey == "" || len(controlKey) > 64 || !profileToken(controlKey) {
@@ -170,6 +174,7 @@ func cloneBoardProfiles(source map[string]BoardProfile) map[string]BoardProfile 
 	result := make(map[string]BoardProfile, len(source))
 	for identity, profile := range source {
 		copyProfile := profile
+		copyProfile.Folders = append([]ChannelFolder(nil), profile.Folders...)
 		copyProfile.Presentation = make(map[string]PeripheralPresentation, len(profile.Presentation))
 		for key, presentation := range profile.Presentation {
 			copyProfile.Presentation[key] = presentation

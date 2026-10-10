@@ -492,6 +492,7 @@
             "controller.os.power",
             "controller.os.status",
             "controller.peer.update.host",
+            "controller.peripheral.folder.update",
             "controller.peripheral.presentation.update",
             "controller.peripherals",
             "controller.peripherals.get",
@@ -1295,6 +1296,11 @@
       "capability": "programming",
       "summary": "Transfer a verified executable using a caller-generated idempotency_key, wait through the peer restart, and verify its exact active SHA-256 acknowledgement. Retry uncertain outcomes with the same key.",
       "idempotency": "non-idempotent"
+    },
+    "controller.peripheral.folder.update": {
+      "capability": "host_configuration",
+      "summary": "Atomically create, rename, set the icon, delete or move members of a board-profile channel folder using required expected_revision; return the complete authoritative folder/control catalog.",
+      "idempotency": "idempotent-with-authoritative-readback"
     },
     "controller.peripheral.presentation.update": {
       "capability": "host_configuration",
