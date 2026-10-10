@@ -1,7 +1,7 @@
 {
   "format": "pccontroller-host-tool-lock/v1",
   "policy_name": "pccontroller-host-build-tools",
-  "resolved_at_utc": "2026-10-09T09:35:17.662Z",
+  "resolved_at_utc": "2026-10-10T01:46:27.418Z",
   "node": {
     "version": "24.21.0",
     "lts": "Krypton",
@@ -132,7 +132,7 @@
     "installer_sha256": "c1f52294597c0b73786b2a78eb5d176d89226d2f21875eab75e783a8b1cefcc4"
   },
   "web": {
-    "package_lock_sha256": "1724b17280eebed2dc397e8fdd6dccdae30519b1a104ad1f2e0cf9fb546b3c6f"
+    "package_lock_sha256": "01bd1598f7631c37e0765131b6d5e26f849872d825c8de7dc9e4ea4ec5375923"
   },
   "build": {
     "package_lock_sha256": "323ac44b9417ec4a68487f026e41d4bc29199b7f40ded040de0d5b592318ca98"
