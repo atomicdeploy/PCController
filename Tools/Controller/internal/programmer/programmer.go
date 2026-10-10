@@ -497,6 +497,13 @@ func ExecuteWithRunner(
 		if output != nil {
 			fmt.Fprintln(output, "firmware manifest:", manifestPath)
 		}
+		removed, pruneErr := pruneCompileCache(compileIdentity, retainedFirmwareCompileCaches)
+		if output != nil && removed > 0 {
+			fmt.Fprintf(output, "Removed %d superseded firmware compile cache(s); retained the %d most recent source identities.\n", removed, retainedFirmwareCompileCaches)
+		}
+		if pruneErr != nil && output != nil {
+			fmt.Fprintf(output, "Firmware compile cache cleanup deferred: %v\n", pruneErr)
+		}
 	}
 	return nil
 }

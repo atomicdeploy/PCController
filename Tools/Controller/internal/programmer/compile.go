@@ -17,6 +17,8 @@ import (
 
 var firmwareDomainSources = []string{"LocalLib", "Project", "src"}
 
+const retainedFirmwareCompileCaches = 12
+
 // CompileIdentity describes the deterministic source identity and isolated
 // Arduino paths selected for one controller-owned firmware build.
 type CompileIdentity struct {
@@ -212,6 +214,85 @@ func compileCacheRoot() (string, error) {
 		return "", errors.New("neither a user cache directory nor temporary directory is available")
 	}
 	return filepath.Join(root, "PCController-ArduinoBuild"), nil
+}
+
+// pruneCompileCache bounds source-keyed Arduino compiler output after a
+// successful build. The current source identity is always retained, along with
+// the most recently used compatible entries. Non-cache children (including the
+// process-wide lock) are never candidates.
+func pruneCompileCache(identity CompileIdentity, keep int) (int, error) {
+	if keep < 1 {
+		return 0, errors.New("firmware compile cache retention must keep at least one entry")
+	}
+	stateDirectory := filepath.Dir(identity.SketchPath)
+	cacheRoot := filepath.Dir(stateDirectory)
+	current := filepath.Base(stateDirectory)
+	if !isCompileCacheKey(current) {
+		return 0, fmt.Errorf("firmware compile cache current state %q is not a source key", current)
+	}
+	entries, err := os.ReadDir(cacheRoot)
+	if err != nil {
+		return 0, fmt.Errorf("enumerate firmware compile cache: %w", err)
+	}
+	now := time.Now()
+	var failures []error
+	if err := os.Chtimes(stateDirectory, now, now); err != nil {
+		failures = append(failures, fmt.Errorf("refresh current firmware compile cache age: %w", err))
+	}
+	type candidate struct {
+		name    string
+		modTime time.Time
+	}
+	candidates := make([]candidate, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() || !isCompileCacheKey(entry.Name()) {
+			continue
+		}
+		info, infoErr := entry.Info()
+		if infoErr != nil {
+			failures = append(failures, fmt.Errorf("inspect firmware compile cache %s: %w", entry.Name(), infoErr))
+			continue
+		}
+		modified := info.ModTime()
+		if entry.Name() == current {
+			modified = now
+		}
+		candidates = append(candidates, candidate{name: entry.Name(), modTime: modified})
+	}
+	sort.Slice(candidates, func(left, right int) bool {
+		if candidates[left].modTime.Equal(candidates[right].modTime) {
+			return candidates[left].name < candidates[right].name
+		}
+		return candidates[left].modTime.After(candidates[right].modTime)
+	})
+	protected := map[string]bool{current: true}
+	for _, entry := range candidates {
+		if len(protected) >= keep {
+			break
+		}
+		protected[entry.name] = true
+	}
+	removed := 0
+	for _, entry := range candidates {
+		if protected[entry.name] {
+			continue
+		}
+		path := filepath.Join(cacheRoot, entry.name)
+		if err := os.RemoveAll(path); err != nil {
+			failures = append(failures, fmt.Errorf("remove stale firmware compile cache %s: %w", entry.name, err))
+			continue
+		}
+		removed++
+	}
+	return removed, errors.Join(failures...)
+}
+
+func isCompileCacheKey(name string) bool {
+	if len(name) != 8 {
+		return false
+	}
+	_, err := strconv.ParseUint(name, 16, 32)
+	return err == nil
 }
 
 func requestedBuildTimestamp(now time.Time) (uint32, error) {

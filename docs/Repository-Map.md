@@ -426,7 +426,10 @@ Important children are:
 
 Arduino compile scratch data defaults under the platform user cache at
 `PCController/ArduinoBuild` and can be overridden with
-`PCCONTROLLER_ARDUINO_CACHE`. It is disposable and not a backup.
+`PCCONTROLLER_ARDUINO_CACHE`. It is disposable and not a backup. After each
+successful compile, PCController retains the current source identity plus the
+most recently used cache entries, bounded to twelve identities. Unknown or
+non-cache children are never removed.
 
 ### Secrets and board-owned state
 
