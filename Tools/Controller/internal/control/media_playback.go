@@ -15,6 +15,10 @@ import (
 
 const mediaPlaybackLease = 3 * time.Second
 
+// A paused clock update must not return before the timeline worker has observed
+// and armed its epoch. Clients can send Play immediately after that return.
+const mediaTimelineArmAckTimeout = 250 * time.Millisecond
+
 type MediaPlaybackUpdate struct {
 	ClientID     string  `json:"client_id"`
 	Sequence     uint64  `json:"sequence"`
@@ -151,6 +155,32 @@ func (runtime *Runtime) UpdateMediaPlayback(value MediaPlaybackUpdate) (MediaPla
 	select {
 	case state.wake <- struct{}{}:
 	default:
+	}
+	if !value.Playing && value.PlanRevision != 0 {
+		plan := runtime.MediaTimeline()
+		if plan.ClientID == value.ClientID && plan.Revision == value.PlanRevision && plan.StepCount > 0 {
+			deadline := time.NewTimer(mediaTimelineArmAckTimeout)
+			poll := time.NewTicker(time.Millisecond)
+			defer deadline.Stop()
+			defer poll.Stop()
+			for {
+				plan = runtime.MediaTimeline()
+				if plan.ClientID != value.ClientID || plan.Revision != value.PlanRevision {
+					return runtime.MediaPlayback(), errors.New("prepared media timeline changed while arming its paused clock")
+				}
+				if plan.State == "faulted" {
+					return runtime.MediaPlayback(), fmt.Errorf("prepared media timeline could not arm paused clock: %s", plan.Error)
+				}
+				if plan.ArmedEpoch == value.Epoch && plan.ClockSequence >= value.Sequence {
+					break
+				}
+				select {
+				case <-deadline.C:
+					return runtime.MediaPlayback(), fmt.Errorf("prepared media timeline did not acknowledge paused clock sequence %d / epoch %d within %s", value.Sequence, value.Epoch, mediaTimelineArmAckTimeout)
+				case <-poll.C:
+				}
+			}
+		}
 	}
 	duration := ""
 	if value.DurationMS != nil {
