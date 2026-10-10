@@ -150,7 +150,6 @@ bool hostWasUnavailable = true;
 #endif
 uint8_t lastPushedSegments[4] = {};
 uint8_t lastPushedSegmentBrightness = 0;
-bool lastPushedSegmentDetected = false;
 uint8_t lastPushedBuzzerRevision = 0;
 uint8_t lastPushedStatusLed[6] = {};
 uint8_t lastStatusLedPushAt = 0;

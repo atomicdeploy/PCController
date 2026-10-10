@@ -419,11 +419,13 @@ void testDisplayAckDetectionAndRecovery() {
   require(segments.detected(), "TM1637 ACK was not recognized");
 
   arduino_mock::portInput = 0xFF; // Open/high bus: device disconnected.
-  segments.setBrightness(5);
+  segments.serviceBrightness(5, 999);
+  require(segments.detected(), "TM1637 health check ran before its cadence");
+  segments.serviceBrightness(5, 1000);
   require(!segments.detected(), "missing TM1637 ACK was not reported");
 
   arduino_mock::portInput = 0;
-  segments.setBrightness(5);
+  segments.serviceBrightness(5, 2000);
   require(segments.detected(),
           "TM1637 did not reinitialize after ACK returned");
   require(segments.brightness() == 5 && segments.rawSegments()[0] == 0x77,

@@ -13,9 +13,10 @@ namespace {
 
 bool labelsAvailable = false;
 
-// The 7-segment renderer accepts these printable ASCII bytes. A per-cell check
-// keeps a checksum collision from rendering erased/control EEPROM bytes.
-bool printable(uint8_t value) { return value >= ' ' && value <= '~'; }
+bool printable(uint8_t value) {
+  return static_cast<uint8_t>(value - static_cast<uint8_t>(' ')) <
+         static_cast<uint8_t>('~' - ' ' + 1);
+}
 
 } // namespace
 

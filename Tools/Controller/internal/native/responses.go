@@ -173,15 +173,21 @@ type FrontPanel struct {
 // intentionally smaller than FrontPanel: hosts use FRONT_PANEL_GET for an
 // initial/explicit refresh and this event for low-latency live mirroring.
 type SegmentState struct {
-	RawSegments [4]byte `json:"raw_segments"`
-	Brightness  byte    `json:"brightness"`
+	RawSegments          [4]byte `json:"raw_segments"`
+	Brightness           byte    `json:"brightness"`
+	TM1637Detected       bool    `json:"tm1637_detected"`
+	TM1637DetectionKnown bool    `json:"tm1637_detection_known"`
 }
 
 func ParseSegmentState(payload []byte) (SegmentState, error) {
 	if len(payload) != 5 {
 		return SegmentState{}, fmt.Errorf("SEGMENT_CHANGED payload is %d bytes, need exactly 5", len(payload))
 	}
-	state := SegmentState{Brightness: payload[4]}
+	state := SegmentState{
+		Brightness:           payload[4] & 0x07,
+		TM1637Detected:       payload[4]&0x40 != 0,
+		TM1637DetectionKnown: payload[4]&0x80 != 0,
+	}
 	copy(state.RawSegments[:], payload[:4])
 	return state, nil
 }

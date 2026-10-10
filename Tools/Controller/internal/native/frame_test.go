@@ -748,13 +748,19 @@ func TestMenuLayoutSchemaRoundTripAndValidation(t *testing.T) {
 }
 
 func TestParseChangedDisplayAndBuzzerPushes(t *testing.T) {
-	segments, err := ParseSegmentState([]byte{0x06, 0x5B, 0x4F, 0x66, 7})
+	segments, err := ParseSegmentState([]byte{0x06, 0x5B, 0x4F, 0x66, 0xC7})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if segments.RawSegments != [4]byte{0x06, 0x5B, 0x4F, 0x66} ||
-		segments.Brightness != 7 {
+		segments.Brightness != 7 || !segments.TM1637Detected ||
+		!segments.TM1637DetectionKnown {
 		t.Fatalf("segments=%#v", segments)
+	}
+	legacy, err := ParseSegmentState([]byte{0x06, 0x5B, 0x4F, 0x66, 5})
+	if err != nil || legacy.Brightness != 5 || legacy.TM1637DetectionKnown ||
+		legacy.TM1637Detected {
+		t.Fatalf("legacy segments=%#v err=%v", legacy, err)
 	}
 	if _, err := ParseSegmentState([]byte{1, 2, 3, 4}); err == nil {
 		t.Fatal("truncated SEGMENT_CHANGED payload was accepted")

@@ -3471,6 +3471,10 @@ func (runtime *Runtime) observeLocked(frame native.Frame) uint64 {
 			runtime.frontPanel.RawSegments = state.RawSegments
 			runtime.frontPanel.Brightness = state.Brightness
 			runtime.frontPanel.SegmentsActive = true
+			if state.TM1637DetectionKnown {
+				runtime.frontPanel.TM1637Detected = state.TM1637Detected
+				runtime.frontPanel.TM1637DetectionKnown = true
+			}
 			runtime.haveFrontPanelSegments = true
 			runtime.frontPanelUpdated = time.Now()
 		}

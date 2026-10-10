@@ -2531,7 +2531,8 @@ void VirtualBoard::queueMirrorChanges() {
   if (segments != lastPushedSegments_ ||
       settings_.displayBrightness != lastPushedSegmentBrightness_) {
     std::vector<std::uint8_t> payload(segments.begin(), segments.end());
-    payload.push_back(settings_.displayBrightness);
+    payload.push_back(static_cast<std::uint8_t>(
+        settings_.displayBrightness | 0xC0U));
     pendingEvents_.push_back({wire::SegmentChanged, 0, std::move(payload)});
     lastPushedSegments_ = segments;
     lastPushedSegmentBrightness_ = settings_.displayBrightness;

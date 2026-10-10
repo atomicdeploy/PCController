@@ -26,21 +26,19 @@ public:
   void serviceBrightness(uint8_t target, uint32_t now = millis());
   const uint8_t *rawSegments() const { return cachedSegments_; }
   uint8_t brightness() const { return brightness_; }
-  bool detected() const { return detected_; }
+  bool detected() const;
 
 private:
   static uint8_t encodeCharacter(char value);
 
   void showScaled(int32_t value, uint8_t decimalPlaces);
   void commit(const uint8_t segments[4]);
-  void writeBusByte(uint8_t value);
   void sendCommand(uint8_t command);
   void writeSegments(const uint8_t segments[4]);
 
   uint8_t cachedSegments_[4] = {0xFF, 0xFF, 0xFF, 0xFF};
   uint8_t brightness_ = 0xFF;
   uint16_t brightnessChangedAt_ = 0;
-  bool detected_ = false;
 };
 
 // display is the single board-wide TM1637 presentation service.
