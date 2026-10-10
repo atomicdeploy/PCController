@@ -1,12 +1,36 @@
 package control
 
 import (
+	"context"
 	"pccontroller.local/controller/internal/link"
 	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/ports"
 	"testing"
 	"time"
 )
+
+func TestMediaPlaybackPublishesAcceptedPauseWhenArmingFails(t *testing.T) {
+	runtime := New(Options{})
+	defer runtime.Close()
+	runtime.mediaTimeline.mu.Lock()
+	runtime.mediaTimeline.status = MediaTimelineStatus{ClientID: "player:test", Revision: 1, StepCount: 1, State: "faulted", Error: "clock expired"}
+	runtime.mediaTimeline.mu.Unlock()
+	after := runtime.LatestEventID()
+	value := MediaPlaybackUpdate{ClientID: "player:test", Sequence: 1, Loaded: true, Rate: 1, Epoch: 1, PlanRevision: 1}
+	snapshot, err := runtime.UpdateMediaPlayback(value)
+	if err == nil || snapshot.Sequence != value.Sequence || snapshot.Playing {
+		t.Fatalf("accepted pause must remain visible alongside arm failure: %+v, %v", snapshot, err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	event, err := runtime.WaitEvent(ctx, after, "media.playback")
+	if err != nil {
+		t.Fatalf("accepted paused clock was not broadcast after arming failure: %v", err)
+	}
+	if event.State != "paused" || event.Stream != "state" || event.Source != value.ClientID || event.Metadata["sequence"] != "1" {
+		t.Fatalf("wrong accepted pause event: %+v", event)
+	}
+}
 
 func TestMediaPlaybackValidationAndClockPayload(t *testing.T) {
 	duration := uint64(12_000)

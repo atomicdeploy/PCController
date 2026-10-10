@@ -156,6 +156,17 @@ func (runtime *Runtime) UpdateMediaPlayback(value MediaPlaybackUpdate) (MediaPla
 	case state.wake <- struct{}{}:
 	default:
 	}
+	// The clock state was accepted above even if the executor cannot arm it.
+	// Publish that state before waiting so every client sees a requested pause.
+	duration := ""
+	if value.DurationMS != nil {
+		duration = strconv.FormatUint(*value.DurationMS, 10)
+	}
+	runtime.PublishStructuredEvent(Event{Kind: "media.playback", Stream: "state", Source: value.ClientID,
+		State: mediaPlaybackEventState(value),
+		Metadata: map[string]string{"client_id": value.ClientID, "sequence": strconv.FormatUint(value.Sequence, 10),
+			"position_ms": strconv.FormatUint(value.PositionMS, 10), "duration_ms": duration,
+			"loaded": strconv.FormatBool(value.Loaded), "playing": strconv.FormatBool(value.Playing), "rate": strconv.FormatFloat(value.Rate, 'f', -1, 64)}})
 	if !value.Playing && value.PlanRevision != 0 {
 		plan := runtime.MediaTimeline()
 		if plan.ClientID == value.ClientID && plan.Revision == value.PlanRevision && plan.StepCount > 0 {
@@ -182,15 +193,6 @@ func (runtime *Runtime) UpdateMediaPlayback(value MediaPlaybackUpdate) (MediaPla
 			}
 		}
 	}
-	duration := ""
-	if value.DurationMS != nil {
-		duration = strconv.FormatUint(*value.DurationMS, 10)
-	}
-	runtime.PublishStructuredEvent(Event{Kind: "media.playback", Stream: "state", Source: value.ClientID,
-		State: mediaPlaybackEventState(value),
-		Metadata: map[string]string{"client_id": value.ClientID, "sequence": strconv.FormatUint(value.Sequence, 10),
-			"position_ms": strconv.FormatUint(value.PositionMS, 10), "duration_ms": duration,
-			"loaded": strconv.FormatBool(value.Loaded), "playing": strconv.FormatBool(value.Playing), "rate": strconv.FormatFloat(value.Rate, 'f', -1, 64)}})
 	return runtime.MediaPlayback(), nil
 }
 func mediaPlaybackEventState(value MediaPlaybackUpdate) string {
