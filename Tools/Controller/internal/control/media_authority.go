@@ -169,7 +169,11 @@ func (runtime *Runtime) ChangeMediaAuthority(request MediaAuthorityRequest) (Med
 		// complete. No new publisher is admitted until the old executor has stopped.
 		state.mu.Unlock()
 		runtime.stopMediaTimeline()
-		if plan := runtime.MediaTimeline(); plan.StepCount > 0 && runtime.Snapshot().Connected {
+		plan, board := runtime.MediaTimeline(), runtime.Snapshot()
+		// A superseded generation no longer owns outputs on the current board.
+		// Retrying its cleanup can never succeed and must not target a replacement
+		// session. Current-generation cleanup still has to be acknowledged.
+		if plan.StepCount > 0 && board.Connected && plan.Generation == board.ConnectionGeneration {
 			if err := runtime.mediaTimelineOff(plan.Generation); err != nil {
 				return runtime.MediaAuthority(), fmt.Errorf("handoff safety cleanup was not acknowledged: %w", err)
 			}
