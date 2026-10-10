@@ -4031,6 +4031,7 @@
               "controller.os.power",
               "controller.os.status",
               "controller.peer.update.host",
+              "controller.peripheral.folder.update",
               "controller.peripheral.presentation.update",
               "controller.peripherals",
               "controller.peripherals.get",
