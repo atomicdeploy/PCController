@@ -7,6 +7,7 @@ import (
 	"pccontroller.local/controller/internal/link"
 	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/ports"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -17,6 +18,7 @@ type authorityCleanupWire struct {
 	entered chan struct{}
 	release chan struct{}
 	started sync.Once
+	failure error
 }
 
 func (port *authorityCleanupWire) Write(data []byte) (int, error) {
@@ -25,6 +27,9 @@ func (port *authorityCleanupWire) Write(data []byte) (int, error) {
 		return 0, err
 	}
 	if frame.Opcode == native.OpRelayAllOff {
+		if port.failure != nil {
+			return 0, port.failure
+		}
 		port.started.Do(func() { close(port.entered) })
 		select {
 		case <-port.release:
@@ -33,6 +38,22 @@ func (port *authorityCleanupWire) Write(data []byte) (int, error) {
 		}
 	}
 	return port.programStateWirePort.Write(data)
+}
+
+func TestMediaAuthorityStillRejectsCurrentGenerationCleanupFailure(t *testing.T) {
+	runtime := New(Options{RequestTimeout: time.Second})
+	defer runtime.Close()
+	port := &authorityCleanupWire{programStateWirePort: newProgramStateWirePort(), failure: errors.New("test cleanup write failed")}
+	runtime.attach(link.OpenResult{Session: link.NewForPort("AUTHORITY-TEST", port), Port: ports.Info{Name: "AUTHORITY-TEST"}, Hello: native.Hello{Name: "Virtual"}})
+	if _, err := runtime.PrepareMediaTimeline(MediaTimelinePlan{ClientID: "owner", Revision: 1, Actions: []MediaTimelineAction{
+		{ID: "future", TimeMS: 1000, Step: appconfig.MacroStep{Kind: "relay", Target: 7, Value: 0}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	status, err := runtime.ChangeMediaAuthority(MediaAuthorityRequest{ClientID: "owner", Operation: "release"})
+	if err == nil || !strings.Contains(err.Error(), "test cleanup write failed") || status.OwnerID != "owner" {
+		t.Fatalf("current-generation safety failure was ignored: %+v, %v", status, err)
+	}
 }
 
 func TestMediaSnapshotsRemainAvailableDuringAuthoritySafetyCleanup(t *testing.T) {
@@ -84,6 +105,55 @@ func TestMediaSnapshotsRemainAvailableDuringAuthoritySafetyCleanup(t *testing.T)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("authority release did not finish after the wire was released")
+	}
+}
+
+func TestMediaAuthorityRecoversFromSupersededBoardGeneration(t *testing.T) {
+	for _, operation := range []string{"request", "release"} {
+		t.Run(operation, func(t *testing.T) {
+			runtime := New(Options{RequestTimeout: time.Second})
+			port := &authorityCleanupWire{programStateWirePort: newProgramStateWirePort(), entered: make(chan struct{}), release: make(chan struct{})}
+			t.Cleanup(func() { close(port.release); runtime.Close() })
+			runtime.attach(link.OpenResult{Session: link.NewForPort("AUTHORITY-TEST", port), Port: ports.Info{Name: "AUTHORITY-TEST"}, Hello: native.Hello{Name: "Virtual"}})
+			old, err := runtime.PrepareMediaTimeline(MediaTimelinePlan{ClientID: "owner", Revision: 1, Actions: []MediaTimelineAction{
+				{ID: "future", TimeMS: 1000, Step: appconfig.MacroStep{Kind: "relay", Target: 7, Value: 0}},
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Simulate the same generation invalidation used on session recovery.
+			// Keep the new board connected: stale cleanup must neither gate its
+			// next publisher nor send output commands to this replacement session.
+			runtime.mu.Lock()
+			runtime.generation++
+			runtime.mu.Unlock()
+			client := "owner"
+			if operation == "request" {
+				client = "new-publisher"
+				runtime.mediaPlayback.mu.Lock()
+				runtime.mediaPlayback.received = time.Now().Add(-4 * time.Second)
+				runtime.mediaPlayback.mu.Unlock()
+			}
+			status, err := runtime.ChangeMediaAuthority(MediaAuthorityRequest{ClientID: client, Operation: operation})
+			if err != nil {
+				t.Fatalf("superseded generation blocked authority %s: %v", operation, err)
+			}
+			want := ""
+			if operation == "request" {
+				want = client
+			}
+			if status.OwnerID != want {
+				t.Fatalf("authority = %+v, want owner %q", status, want)
+			}
+			select {
+			case <-port.entered:
+				t.Fatal("old generation cleanup targeted the replacement board")
+			default:
+			}
+			if runtime.MediaTimeline().Generation != old.Generation {
+				t.Fatal("old plan was silently retargeted instead of requiring reprepare")
+			}
+		})
 	}
 }
 
