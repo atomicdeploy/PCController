@@ -131,9 +131,13 @@ libraries always share PCController's one generated configuration/data tree, so
 an external compatible CLI does not create another package installation.
 The host also exports the reviewed `directories.data`, `directories.downloads`,
 and `directories.user` values to every Arduino CLI inventory subprocess. On
-Windows it supplies a service-owned profile with a Documents directory. This
-keeps the exact same toolchain visible when the primary runs as the
-`NT SERVICE\PCController` virtual account instead of an interactive user.
+Windows, an existing owner profile named by the reviewed sketchbook path is
+reused for known-folder discovery, while the data, download, and sketchbook
+directories remain explicitly pinned. Managed layouts that do not name an
+owner profile receive a service-owned profile with Documents and AppData
+directories. This keeps the exact same toolchain visible when the primary runs
+as the `NT SERVICE\PCController` virtual account instead of an interactive
+user, without installing a duplicate core or library tree.
 `DefaultToolchainProfile()` is derived from the same generated lock rather than
 maintaining a second handwritten version list.
 
