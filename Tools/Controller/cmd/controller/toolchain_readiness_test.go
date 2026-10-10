@@ -55,6 +55,26 @@ func TestArduinoCLIEnvironmentBindsConfiguredDirectories(t *testing.T) {
 	}
 }
 
+func TestArduinoCLIProfileRootReusesConfiguredOwnerProfile(t *testing.T) {
+	owner := filepath.Join(t.TempDir(), "owner")
+	sketchbook := filepath.Join(owner, "Documents", "Arduino")
+	if err := os.MkdirAll(sketchbook, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	config := arduinoCLIConfiguration{}
+	config.Directories.User = sketchbook
+	configPath := filepath.Join(t.TempDir(), "firmware-cli.yaml")
+	if got := arduinoCLIProfileRoot(config, configPath); got != owner {
+		t.Fatalf("profile root=%q want configured owner %q", got, owner)
+	}
+
+	config.Directories.User = filepath.Join(t.TempDir(), "shared-sketchbook")
+	wantFallback := filepath.Join(filepath.Dir(configPath), "cli-profile")
+	if got := arduinoCLIProfileRoot(config, configPath); got != wantFallback {
+		t.Fatalf("profile root=%q want service fallback %q", got, wantFallback)
+	}
+}
+
 func TestSelectLatestCompatibleCLIReusesOneExistingProvider(t *testing.T) {
 	providers := []detectedToolchainProvider{
 		{name: "arduino-cli", path: "old", version: "1.0.4"},

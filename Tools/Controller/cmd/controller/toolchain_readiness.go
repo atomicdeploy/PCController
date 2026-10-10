@@ -264,10 +264,18 @@ func arduinoCLIEnvironment(base []string, configPath string) ([]string, error) {
 		if absoluteErr != nil {
 			return nil, absoluteErr
 		}
-		profileRoot := filepath.Join(filepath.Dir(absoluteConfig), "cli-profile")
-		if err := os.MkdirAll(filepath.Join(profileRoot, "Documents"), 0o700); err != nil {
-			return nil, fmt.Errorf("prepare firmware CLI service profile: %w", err)
+		profileRoot := arduinoCLIProfileRoot(config, absoluteConfig)
+		for _, directory := range []string{
+			filepath.Join(profileRoot, "Documents"),
+			filepath.Join(profileRoot, "AppData", "Local"),
+			filepath.Join(profileRoot, "AppData", "Roaming"),
+		} {
+			if err := os.MkdirAll(directory, 0o700); err != nil {
+				return nil, fmt.Errorf("prepare firmware CLI service profile: %w", err)
+			}
 		}
+		overrides["APPDATA"] = filepath.Join(profileRoot, "AppData", "Roaming")
+		overrides["LOCALAPPDATA"] = filepath.Join(profileRoot, "AppData", "Local")
 		overrides["HOME"] = profileRoot
 		overrides["USERPROFILE"] = profileRoot
 		if volume := filepath.VolumeName(profileRoot); volume != "" {
@@ -294,6 +302,26 @@ func arduinoCLIEnvironment(base []string, configPath string) ([]string, error) {
 		result = append(result, name+"="+overrides[name])
 	}
 	return result, nil
+}
+
+// arduinoCLIProfileRoot keeps a service subprocess on the same existing owner
+// profile when the reviewed sketchbook path explicitly identifies one. The
+// Arduino CLI asks Windows for profile known folders before it applies the
+// configured directory overrides; a synthetic profile can therefore hide an
+// otherwise valid shared core inventory. Managed/non-profile layouts retain a
+// service-owned fallback next to the reviewed configuration.
+func arduinoCLIProfileRoot(config arduinoCLIConfiguration, absoluteConfig string) string {
+	userDirectory := filepath.Clean(strings.TrimSpace(config.Directories.User))
+	if userDirectory != "." {
+		documents := filepath.Dir(userDirectory)
+		if strings.EqualFold(filepath.Base(documents), "Documents") {
+			profile := filepath.Dir(documents)
+			if info, err := os.Stat(profile); err == nil && info.IsDir() {
+				return profile
+			}
+		}
+	}
+	return filepath.Join(filepath.Dir(absoluteConfig), "cli-profile")
 }
 
 func coreInventoryHas(content []byte, id, version string) bool {
