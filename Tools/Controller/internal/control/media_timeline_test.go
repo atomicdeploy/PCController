@@ -230,6 +230,35 @@ func TestMediaTimelineLateActionFaultsWithoutSendingIt(t *testing.T) {
 		}
 	}
 }
+
+func TestMediaTimelineBlockedBoardSnapshotReportsDelayWithoutExecutingExpiredCue(t *testing.T) {
+	runtime, frames, mu := mediaTimelineFixture(t, false)
+	value := armTimeline(t, runtime, 0)
+	// Inject an accepted Play directly, while holding the board snapshot lock.
+	// This deterministic source fixture does not depend on a busy real machine,
+	// a client publisher or an artificially enlarged dispatch budget.
+	runtime.mu.Lock()
+	runtime.mediaPlayback.mu.Lock()
+	runtime.mediaPlayback.snapshot.MediaPlaybackUpdate = value
+	runtime.mediaPlayback.received = time.Now()
+	runtime.mediaPlayback.mu.Unlock()
+	time.Sleep(200 * time.Millisecond)
+	runtime.mu.Unlock()
+	status := waitTimeline(t, runtime, func(status MediaTimelineStatus) bool { return status.State == "faulted" })
+	if status.Acknowledged != 0 || status.LastStep != "on/0" || !strings.Contains(status.Error, "not executed (worker gap") {
+		t.Fatalf("expired cue lost its diagnostic evidence: %+v", status)
+	}
+	if max(status.MaxWorkerGapMS, status.MaxBoardReadMS) < 100 {
+		t.Fatalf("snapshot contention was invisible: %+v", status)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	for _, frame := range *frames {
+		if frame.Opcode == native.OpRelaySet {
+			t.Fatal("expired cue reached the wire")
+		}
+	}
+}
 func TestMediaTimelineNACKNeverAdvancesLedgerAndAttemptsCleanup(t *testing.T) {
 	runtime, frames, mu := mediaTimelineFixture(t, true)
 	value := armTimeline(t, runtime, 0)

@@ -32,6 +32,7 @@ type MediaPlaybackUpdate struct {
 }
 type MediaPlaybackSnapshot struct {
 	MediaPlaybackUpdate
+	ClockTiming      MediaClockTiming    `json:"clock_timing"`
 	ReceivedAt       time.Time           `json:"received_at"`
 	Connected        bool                `json:"connected"`
 	BoardSynced      bool                `json:"board_synced"`
@@ -41,6 +42,31 @@ type MediaPlaybackSnapshot struct {
 	BoardRoundTripMS int64               `json:"board_round_trip_ms"`
 	Timeline         MediaTimelineStatus `json:"timeline"`
 }
+
+// Clock corrections are measured at admission, before an executor can miss an
+// intervening update. These are per uninterrupted playing epoch, not cumulative
+// maxima from earlier tests. Receipt times retain Go's monotonic clock.
+type MediaClockTiming struct {
+	FeedbackIntervalMS     float64 `json:"feedback_interval_ms"`
+	MaxFeedbackIntervalMS  float64 `json:"max_feedback_interval_ms"`
+	PositionCorrectionMS   float64 `json:"position_correction_ms"`
+	MaxForwardCorrectionMS float64 `json:"max_forward_correction_ms"`
+}
+
+func mediaClockTiming(previous MediaPlaybackSnapshot, value MediaPlaybackUpdate, received, now time.Time) MediaClockTiming {
+	if received.IsZero() || !previous.Loaded || !value.Loaded || !previous.Playing || !value.Playing ||
+		previous.ClientID != value.ClientID || previous.PlanRevision != value.PlanRevision || previous.Epoch != value.Epoch {
+		return MediaClockTiming{}
+	}
+	timing := previous.ClockTiming
+	timing.FeedbackIntervalMS = now.Sub(received).Seconds() * 1000
+	timing.MaxFeedbackIntervalMS = max(timing.MaxFeedbackIntervalMS, timing.FeedbackIntervalMS)
+	projected := float64(previous.PositionMS) + timing.FeedbackIntervalMS*previous.Rate
+	timing.PositionCorrectionMS = float64(value.PositionMS) - projected
+	timing.MaxForwardCorrectionMS = max(timing.MaxForwardCorrectionMS, timing.PositionCorrectionMS)
+	return timing
+}
+
 type mediaPlaybackState struct {
 	operation sync.Mutex
 	authority MediaAuthorityStatus
@@ -88,10 +114,10 @@ func (runtime *Runtime) MediaPlayback() MediaPlaybackSnapshot {
 }
 
 // Internal schedulers retain Go's monotonic anchor. UTC is for API display only.
-func (runtime *Runtime) mediaTimelineClock() (MediaPlaybackUpdate, time.Time) {
+func (runtime *Runtime) mediaTimelineClock() (MediaPlaybackUpdate, time.Time, MediaClockTiming) {
 	runtime.mediaPlayback.mu.Lock()
 	defer runtime.mediaPlayback.mu.Unlock()
-	return copyMediaUpdate(runtime.mediaPlayback.snapshot.MediaPlaybackUpdate), runtime.mediaPlayback.received
+	return copyMediaUpdate(runtime.mediaPlayback.snapshot.MediaPlaybackUpdate), runtime.mediaPlayback.received, runtime.mediaPlayback.snapshot.ClockTiming
 }
 func (runtime *Runtime) UpdateMediaPlayback(value MediaPlaybackUpdate) (MediaPlaybackSnapshot, error) {
 	runtime.mediaPlayback.operation.Lock()
@@ -129,7 +155,9 @@ func (runtime *Runtime) UpdateMediaPlayback(value MediaPlaybackUpdate) (MediaPla
 		state.mu.Unlock()
 		return runtime.MediaPlayback(), errors.New("stale media playback sequence")
 	}
-	state.received = time.Now()
+	received := time.Now()
+	clockTiming := mediaClockTiming(previous, value, state.received, received)
+	state.received = received
 	if value.Loaded && state.authority.OwnerID == "" {
 		state.authority.OwnerID = value.ClientID
 		state.authority.OwnerLabel = value.ClientID
@@ -141,6 +169,7 @@ func (runtime *Runtime) UpdateMediaPlayback(value MediaPlaybackUpdate) (MediaPla
 		state.authority.Revision++
 	}
 	state.snapshot = MediaPlaybackSnapshot{MediaPlaybackUpdate: copyMediaUpdate(value), ReceivedAt: state.received.UTC(), Connected: true,
+		ClockTiming: clockTiming,
 		BoardSynced: previous.BoardSynced, BoardError: previous.BoardError, BoardSyncedAt: previous.BoardSyncedAt,
 		BoardSequence: previous.BoardSequence, BoardRoundTripMS: previous.BoardRoundTripMS}
 	if state.wake == nil {

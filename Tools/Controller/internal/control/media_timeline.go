@@ -39,30 +39,37 @@ type MediaTimelinePlan struct {
 	MaxLatenessMS uint32                `json:"max_lateness_ms"`
 }
 type MediaTimelineStatus struct {
-	ClientID               string  `json:"client_id"`
-	Revision               uint64  `json:"revision"`
-	Hash                   string  `json:"hash,omitempty"`
-	Generation             uint64  `json:"generation"`
-	State                  string  `json:"state"`
-	StepCount              int     `json:"step_count"`
-	Acknowledged           int     `json:"acknowledged"`
-	ClockSequence          uint64  `json:"clock_sequence"`
-	ArmedEpoch             uint64  `json:"armed_epoch"`
-	RebasedSteps           int     `json:"rebased_steps"`
-	ClockPositionMS        uint64  `json:"clock_position_ms"`
-	LastStep               string  `json:"last_step,omitempty"`
-	LastDueMS              uint64  `json:"last_due_ms"`
-	LastDispatchLatenessMS float64 `json:"last_dispatch_lateness_ms"`
-	MaxDispatchLatenessMS  float64 `json:"max_dispatch_lateness_ms"`
-	LastAckRoundTripMS     float64 `json:"last_ack_round_trip_ms"`
-	MaxAckRoundTripMS      float64 `json:"max_ack_round_trip_ms"`
-	LastAckLatenessMS      float64 `json:"last_ack_lateness_ms"`
-	MaxAckLatenessMS       float64 `json:"max_ack_lateness_ms"`
-	LastRestoreStep        string  `json:"last_restore_step,omitempty"`
-	LastRestoreAckMS       float64 `json:"last_restore_ack_ms"`
-	MaxRestoreAckMS        float64 `json:"max_restore_ack_ms"`
-	DeviceAckUS            uint32  `json:"device_ack_us,omitempty"`
-	Error                  string  `json:"error,omitempty"`
+	ClientID               string           `json:"client_id"`
+	Revision               uint64           `json:"revision"`
+	Hash                   string           `json:"hash,omitempty"`
+	Generation             uint64           `json:"generation"`
+	State                  string           `json:"state"`
+	StepCount              int              `json:"step_count"`
+	Acknowledged           int              `json:"acknowledged"`
+	ClockSequence          uint64           `json:"clock_sequence"`
+	ArmedEpoch             uint64           `json:"armed_epoch"`
+	RebasedSteps           int              `json:"rebased_steps"`
+	ClockPositionMS        uint64           `json:"clock_position_ms"`
+	LastStep               string           `json:"last_step,omitempty"`
+	LastDueMS              uint64           `json:"last_due_ms"`
+	LastDispatchLatenessMS float64          `json:"last_dispatch_lateness_ms"`
+	MaxDispatchLatenessMS  float64          `json:"max_dispatch_lateness_ms"`
+	LastAckRoundTripMS     float64          `json:"last_ack_round_trip_ms"`
+	MaxAckRoundTripMS      float64          `json:"max_ack_round_trip_ms"`
+	LastAckLatenessMS      float64          `json:"last_ack_lateness_ms"`
+	MaxAckLatenessMS       float64          `json:"max_ack_lateness_ms"`
+	LastRestoreStep        string           `json:"last_restore_step,omitempty"`
+	LastRestoreAckMS       float64          `json:"last_restore_ack_ms"`
+	MaxRestoreAckMS        float64          `json:"max_restore_ack_ms"`
+	DeviceAckUS            uint32           `json:"device_ack_us,omitempty"`
+	LastWorkerGapMS        float64          `json:"last_worker_gap_ms"`
+	MaxWorkerGapMS         float64          `json:"max_worker_gap_ms"`
+	LastClockReadMS        float64          `json:"last_clock_read_ms"`
+	MaxClockReadMS         float64          `json:"max_clock_read_ms"`
+	LastBoardReadMS        float64          `json:"last_board_read_ms"`
+	MaxBoardReadMS         float64          `json:"max_board_read_ms"`
+	ClockTiming            MediaClockTiming `json:"clock_timing"`
+	Error                  string           `json:"error,omitempty"`
 }
 
 // ResourceBusyError is a temporary ownership conflict, not a hardware or
@@ -488,6 +495,7 @@ func (runtime *Runtime) runMediaTimeline(ctx context.Context, done chan struct{}
 	epoch := ^uint64(0)
 	wasPlaying := false
 	owned := false
+	lastWake := time.Now()
 	defer func() {
 		if owned {
 			if err := runtime.mediaTimelineOff(generation); err != nil {
@@ -514,7 +522,18 @@ func (runtime *Runtime) runMediaTimeline(ctx context.Context, done chan struct{}
 			return
 		case <-ticker.C:
 		}
-		clock, anchor := runtime.mediaTimelineClock()
+		wake := time.Now()
+		workerGapMS := wake.Sub(lastWake).Seconds() * 1000
+		lastWake = wake
+		clock, anchor, clockTiming := runtime.mediaTimelineClock()
+		clockReadMS := time.Since(wake).Seconds() * 1000
+		runtime.mediaTimeline.mu.Lock()
+		runtime.mediaTimeline.status.LastWorkerGapMS = workerGapMS
+		runtime.mediaTimeline.status.MaxWorkerGapMS = max(runtime.mediaTimeline.status.MaxWorkerGapMS, workerGapMS)
+		runtime.mediaTimeline.status.LastClockReadMS = clockReadMS
+		runtime.mediaTimeline.status.MaxClockReadMS = max(runtime.mediaTimeline.status.MaxClockReadMS, clockReadMS)
+		runtime.mediaTimeline.status.ClockTiming = clockTiming
+		runtime.mediaTimeline.mu.Unlock()
 		if clock.ClientID != plan.ClientID || clock.PlanRevision != plan.Revision {
 			if wasPlaying {
 				fault("prepared timeline/clock ownership changed during playback")
@@ -533,9 +552,15 @@ func (runtime *Runtime) runMediaTimeline(ctx context.Context, done chan struct{}
 			fault("E-STOP interrupted prepared playback")
 			return
 		}
+		boardReadStarted := time.Now()
 		runtime.mu.RLock()
 		connected, currentGeneration := runtime.session != nil, runtime.generation
 		runtime.mu.RUnlock()
+		boardReadMS := time.Since(boardReadStarted).Seconds() * 1000
+		runtime.mediaTimeline.mu.Lock()
+		runtime.mediaTimeline.status.LastBoardReadMS = boardReadMS
+		runtime.mediaTimeline.status.MaxBoardReadMS = max(runtime.mediaTimeline.status.MaxBoardReadMS, boardReadMS)
+		runtime.mediaTimeline.mu.Unlock()
 		if !connected || currentGeneration != generation {
 			fault("prepared board session was disconnected/replaced; reprepare")
 			return
@@ -617,7 +642,8 @@ func (runtime *Runtime) runMediaTimeline(ctx context.Context, done chan struct{}
 			runtime.mediaTimeline.mu.Unlock()
 			remainingBudget := mediaTimelineRemainingBudget(plan.MaxLatenessMS, dispatchLateness)
 			if remainingBudget <= 0 {
-				fault(fmt.Sprintf("cue %s missed its dispatch deadline by %.1f ms; not executed", step.id, dispatchLateness))
+				fault(fmt.Sprintf("cue %s missed its dispatch deadline by %.1f ms; not executed (worker gap %.1f ms, clock read %.1f ms, board read %.1f ms, feedback interval %.1f ms, clock correction %+.1f ms)", step.id, dispatchLateness,
+					workerGapMS, clockReadMS, boardReadMS, clockTiming.FeedbackIntervalMS, clockTiming.PositionCorrectionMS))
 				return
 			}
 			requestCtx, cancel := context.WithTimeout(ctx, remainingBudget)
