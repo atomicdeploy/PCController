@@ -148,23 +148,25 @@ const (
 )
 
 type FrontPanel struct {
-	Schema            byte    `json:"schema"`
-	RawSegments       [4]byte `json:"raw_segments"`
-	Brightness        byte    `json:"brightness"`
-	Blink             bool    `json:"blink"`
-	SegmentsActive    bool    `json:"segments_active"`
-	CategorySelector  bool    `json:"category_selector"`
-	LCDAddress        byte    `json:"lcd_address"`
-	LCDAvailable      bool    `json:"lcd_available"`
-	LCDBacklight      bool    `json:"lcd_backlight"`
-	LCDLine1          string  `json:"lcd_line_1"`
-	LCDLine2          string  `json:"lcd_line_2"`
-	PressedKeys       byte    `json:"pressed_keys"`
-	MenuPage          byte    `json:"menu_page"`
-	ProgramMode       byte    `json:"program_mode"`
-	HostCaptured      bool    `json:"host_captured"`
-	HostState         byte    `json:"host_state"`
-	HostEditableValue uint16  `json:"host_editable_value"`
+	Schema               byte    `json:"schema"`
+	RawSegments          [4]byte `json:"raw_segments"`
+	Brightness           byte    `json:"brightness"`
+	Blink                bool    `json:"blink"`
+	SegmentsActive       bool    `json:"segments_active"`
+	CategorySelector     bool    `json:"category_selector"`
+	LCDAddress           byte    `json:"lcd_address"`
+	LCDAvailable         bool    `json:"lcd_available"`
+	LCDBacklight         bool    `json:"lcd_backlight"`
+	LCDLine1             string  `json:"lcd_line_1"`
+	LCDLine2             string  `json:"lcd_line_2"`
+	PressedKeys          byte    `json:"pressed_keys"`
+	MenuPage             byte    `json:"menu_page"`
+	ProgramMode          byte    `json:"program_mode"`
+	HostCaptured         bool    `json:"host_captured"`
+	HostState            byte    `json:"host_state"`
+	HostEditableValue    uint16  `json:"host_editable_value"`
+	TM1637Detected       bool    `json:"tm1637_detected"`
+	TM1637DetectionKnown bool    `json:"tm1637_detection_known"`
 }
 
 // SegmentState is the changed-only display frame pushed by the board. It is
@@ -278,6 +280,8 @@ func ParseFrontPanel(payload []byte) (FrontPanel, error) {
 	panel.LCDAddress = payload[7]
 	panel.LCDAvailable = payload[8]&0x01 != 0
 	panel.LCDBacklight = payload[8]&0x02 != 0
+	panel.TM1637Detected = payload[8]&0x40 != 0
+	panel.TM1637DetectionKnown = payload[8]&0x80 != 0
 	panel.LCDLine1 = strings.TrimRight(string(payload[9:25]), " \x00")
 	panel.LCDLine2 = strings.TrimRight(string(payload[25:41]), " \x00")
 	panel.PressedKeys = payload[41]

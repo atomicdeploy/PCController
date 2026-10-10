@@ -297,6 +297,7 @@ __attribute__((noinline)) void serviceController() {
   if (streamPeriodMs != 0 &&
       static_cast<uint32_t>(loopNow - lastTelemetryAt) >= streamPeriodMs) {
     lastTelemetryAt = loopNow;
+    display.setBrightness(display.brightness());
     sendTelemetry(0);
   }
 

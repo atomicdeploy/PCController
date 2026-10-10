@@ -75,6 +75,14 @@ inline void releaseData() {
 #endif
 }
 
+inline bool dataIsLow() {
+#if defined(__AVR__) && defined(PINB) && defined(PINB3)
+  return (PINB & _BV(PINB3)) == 0;
+#else
+  return digitalRead(BoardPins::Tm1637Data) == LOW;
+#endif
+}
+
 void startBus() {
   clockHigh();
   dataHigh();
@@ -94,7 +102,9 @@ void stopBus() {
   busDelay();
 }
 
-void writeBusByte(uint8_t value) {
+} // namespace
+
+void SevenSegments::writeBusByte(uint8_t value) {
   for (uint8_t bit = 0; bit < 8; ++bit) {
     clockLow();
     (value & 0x01) != 0 ? dataHigh() : dataLow();
@@ -104,18 +114,17 @@ void writeBusByte(uint8_t value) {
     value >>= 1;
   }
 
-  // Release DIO while the TM1637 drives its ACK bit. An ACK is not required
-  // for forward progress, but releasing the line prevents output contention.
+  // Release DIO while the TM1637 owns its ninth-clock ACK slot. Sampling in
+  // the middle of the high phase both avoids contention and distinguishes a
+  // connected controller from an open/high bus.
   clockLow();
   releaseData();
   busDelay();
   clockHigh();
   busDelay();
+  detected_ = dataIsLow();
   clockLow();
-  dataLow();
 }
-
-} // namespace
 
 SevenSegments display;
 
@@ -126,7 +135,6 @@ void SevenSegments::begin(uint8_t brightness) {
 #endif
   clockHigh();
   dataHigh();
-  begun_ = true;
   clear();
   setBrightness(brightness);
 }
@@ -177,17 +185,17 @@ void SevenSegments::setBrightness(uint8_t brightness) {
   if (brightness > 7) {
     brightness = 7;
   }
-  if (brightness_ == brightness) {
-    return;
-  }
   brightness_ = brightness;
-  if (begun_) {
-    // Zero is a true display-off level; values 1..7 retain their prior TM1637
-    // intensity mapping so existing nonzero EEPROM settings do not get dimmer.
-    sendCommand(brightness_ == 0
-                    ? DisplayOffCommand
-                    : static_cast<uint8_t>(DisplayOnCommand | brightness_));
+  if (!detected_) {
+    // A returning TM1637 receives a complete data-mode/addressed frame before
+    // display control, so recovery does not require an MCU reset.
+    writeSegments(cachedSegments_);
   }
+  // Zero is a true display-off level; values 1..7 retain their prior TM1637
+  // intensity mapping so existing nonzero EEPROM settings do not get dimmer.
+  sendCommand(brightness_ == 0
+                  ? DisplayOffCommand
+                  : static_cast<uint8_t>(DisplayOnCommand | brightness_));
 }
 
 void SevenSegments::serviceBrightness(uint8_t target, uint32_t now) {
@@ -352,9 +360,6 @@ void SevenSegments::sendCommand(uint8_t command) {
 }
 
 void SevenSegments::writeSegments(const uint8_t segments[4]) {
-  if (!begun_) {
-    return;
-  }
   sendCommand(DataCommand);
 
   startBus();

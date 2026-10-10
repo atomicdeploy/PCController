@@ -139,6 +139,9 @@ export interface FrontPanelState {
   host_captured: boolean
   host_state: number
   host_editable_value: number
+  /** Authoritative only when tm1637_detection_known is true. */
+  tm1637_detected?: boolean
+  tm1637_detection_known?: boolean
 }
 
 export interface StatusLEDState {

@@ -98,3 +98,24 @@ func TestParseFrontPanelSchema2CaptureMetadata(t *testing.T) {
 		t.Fatalf("front panel=%+v", panel)
 	}
 }
+
+func TestParseFrontPanelSchema2TM1637Detection(t *testing.T) {
+	payload := make([]byte, 47)
+	payload[0] = 2
+	payload[8] = 0xC0
+	panel, err := ParseFrontPanel(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !panel.TM1637DetectionKnown || !panel.TM1637Detected {
+		t.Fatalf("front panel=%+v", panel)
+	}
+	payload[8] = 0x80
+	panel, err = ParseFrontPanel(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !panel.TM1637DetectionKnown || panel.TM1637Detected {
+		t.Fatalf("missing front panel=%+v", panel)
+	}
+}

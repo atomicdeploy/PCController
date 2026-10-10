@@ -391,6 +391,40 @@ describe('offline and settings UI contracts', () => {
     expect(workbench).not.toContain('Temperature identities')
   })
 
+  it('presents authoritative TM1637 ACK detection without inferring legacy state', () => {
+    const connected = {
+      ...emptySnapshot,
+      connected: true,
+      have_status: true,
+      connection_state: 'connected',
+      hello: { ...emptySnapshot.hello, capabilities: 1 << 5 },
+      front_panel: {
+        schema: 2, raw_segments: [0, 0, 0, 0] as [number, number, number, number], brightness: 5,
+        blink: false, segments_active: false, category_selector: false,
+        lcd_address: 0, lcd_available: false, lcd_backlight: false,
+        lcd_line_1: '', lcd_line_2: '', pressed_keys: 0, menu_page: 0, program_mode: 0,
+        host_captured: false, host_state: 0, host_editable_value: 0,
+        tm1637_detection_known: true, tm1637_detected: false,
+      },
+      have_front_panel: true,
+      have_front_panel_segments: true,
+    }
+    const missing = renderToStaticMarkup(<WorkbenchView {...shared()} snapshot={connected} />)
+    expect(missing).toContain('TM1637 not detected')
+
+    const detected = renderToStaticMarkup(<WorkbenchView {...shared()} snapshot={{
+      ...connected,
+      front_panel: { ...connected.front_panel, tm1637_detected: true },
+    }} />)
+    expect(detected).toContain('TM1637 detected')
+
+    const legacy = renderToStaticMarkup(<WorkbenchView {...shared()} snapshot={{
+      ...connected,
+      front_panel: { ...connected.front_panel, tm1637_detection_known: false },
+    }} />)
+    expect(legacy).not.toContain('TM1637 not detected')
+  })
+
   it('keeps the first-run synchronization phase truthful before a controller is known', () => {
     const markup = renderToStaticMarkup(<BootGate
       open

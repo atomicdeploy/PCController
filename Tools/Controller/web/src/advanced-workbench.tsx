@@ -652,6 +652,8 @@ export function AdvancedWorkbench({
           eyebrow={copy('FRONT PANEL', 'پنل جلویی')}
           title={copy('Catalog, layout & navigation', 'کاتالوگ، چیدمان و پیمایش')}
           detail={copy('Firmware page IDs and HOST-supplied menu overlays remain separately inspectable.', 'شناسه صفحات میان‌افزار و منوهای میزبان به‌صورت مستقل قابل بررسی هستند.')}
+          status={frontPanel?.tm1637_detection_known ? (frontPanel.tm1637_detected ? copy('TM1637 detected', 'TM1637 شناسایی شد') : copy('TM1637 not detected', 'TM1637 شناسایی نشد')) : undefined}
+          tone={frontPanel?.tm1637_detection_known ? (frontPanel.tm1637_detected ? 'good' : 'bad') : 'neutral'}
           defaultOpen
         >
           {available.segments && <div className="front-panel-live">

@@ -214,7 +214,12 @@ discovery/service logic in [PCController.ino](../PCController.ino).
 The TM1637 driver owns the board's SCK and MOSI-labelled pins as ordinary GPIO;
 it is not using hardware SPI. D13 is clock and D11 is bidirectional data. It
 uses a 3 us bus delay, sends `0x40` data and `0xC0` address commands, releases
-the data line for the TM1637 ACK slot, and clamps brightness to 0-7. EEPROM
+the data line for the TM1637 ACK slot, and samples the device-driven low ACK.
+The default telemetry cadence issues a harmless display-control health check.
+After a NACK, the next check replays data mode, the complete cached four-cell
+frame, and brightness using fresh start/stop boundaries; a returning display
+therefore recovers without an MCU reset. Detection transitions are pushed to
+the host as full front-panel state. Brightness is clamped to 0-7 and EEPROM
 factory brightness is 5. The main display service runs every 20 ms, but the
 driver compares all four segment bytes and sends nothing when they are
 unchanged. That preserves the responsive UI without continuously refreshing

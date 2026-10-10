@@ -155,25 +155,27 @@ type timelineEntry struct {
 }
 
 type FrontPanelState struct {
-	Segments         string
-	RawSegments      [4]byte
-	HasRawSegments   bool
-	DecimalMask      byte
-	Blink            bool
-	CategorySelector bool
-	Brightness       byte
-	LCDLine1         string
-	LCDLine2         string
-	LCDBacklight     bool
-	HaveLCD          bool
-	MenuID           byte
-	MenuName         string
-	Submode          string
-	PressedKeys      byte
-	InputSource      string
-	Exact            bool
-	StatusLED        native.StatusLEDState
-	HaveStatusLED    bool
+	Segments             string
+	RawSegments          [4]byte
+	HasRawSegments       bool
+	DecimalMask          byte
+	Blink                bool
+	CategorySelector     bool
+	Brightness           byte
+	LCDLine1             string
+	LCDLine2             string
+	LCDBacklight         bool
+	HaveLCD              bool
+	MenuID               byte
+	MenuName             string
+	Submode              string
+	PressedKeys          byte
+	InputSource          string
+	Exact                bool
+	TM1637Detected       bool
+	TM1637DetectionKnown bool
+	StatusLED            native.StatusLEDState
+	HaveStatusLED        bool
 }
 
 // RemoteLiveUpdate is one coalescible high-rate patch from the primary host.

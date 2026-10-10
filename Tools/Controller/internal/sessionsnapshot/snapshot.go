@@ -62,23 +62,25 @@ type Connection struct {
 // FrontPanel is a privacy-bounded live panel summary. LCD text can mirror host
 // prompts, so the snapshot records its presence but never the line contents.
 type FrontPanel struct {
-	Schema            byte    `json:"schema"`
-	RawSegments       [4]byte `json:"raw_segments"`
-	Brightness        byte    `json:"brightness"`
-	Blink             bool    `json:"blink"`
-	SegmentsActive    bool    `json:"segments_active"`
-	CategorySelector  bool    `json:"category_selector"`
-	LCDAddress        byte    `json:"lcd_address"`
-	LCDAvailable      bool    `json:"lcd_available"`
-	LCDBacklight      bool    `json:"lcd_backlight"`
-	LCDTextPresent    bool    `json:"lcd_text_present"`
-	LCDTextOmitted    bool    `json:"lcd_text_omitted"`
-	PressedKeys       byte    `json:"pressed_keys"`
-	MenuPage          byte    `json:"menu_page"`
-	ProgramMode       byte    `json:"program_mode"`
-	HostCaptured      bool    `json:"host_captured"`
-	HostState         byte    `json:"host_state"`
-	HostEditableValue uint16  `json:"host_editable_value"`
+	Schema               byte    `json:"schema"`
+	RawSegments          [4]byte `json:"raw_segments"`
+	Brightness           byte    `json:"brightness"`
+	Blink                bool    `json:"blink"`
+	SegmentsActive       bool    `json:"segments_active"`
+	CategorySelector     bool    `json:"category_selector"`
+	LCDAddress           byte    `json:"lcd_address"`
+	LCDAvailable         bool    `json:"lcd_available"`
+	LCDBacklight         bool    `json:"lcd_backlight"`
+	LCDTextPresent       bool    `json:"lcd_text_present"`
+	LCDTextOmitted       bool    `json:"lcd_text_omitted"`
+	PressedKeys          byte    `json:"pressed_keys"`
+	MenuPage             byte    `json:"menu_page"`
+	ProgramMode          byte    `json:"program_mode"`
+	HostCaptured         bool    `json:"host_captured"`
+	HostState            byte    `json:"host_state"`
+	HostEditableValue    uint16  `json:"host_editable_value"`
+	TM1637Detected       bool    `json:"tm1637_detected"`
+	TM1637DetectionKnown bool    `json:"tm1637_detection_known"`
 }
 
 // PWMSummary records the status stream's selected channel. Full 16-channel
@@ -512,7 +514,9 @@ func BuildWithOperationalContext(
 			LCDTextOmitted: true, PressedKeys: panel.PressedKeys,
 			MenuPage: panel.MenuPage, ProgramMode: panel.ProgramMode,
 			HostCaptured: panel.HostCaptured, HostState: panel.HostState,
-			HostEditableValue: panel.HostEditableValue,
+			HostEditableValue:    panel.HostEditableValue,
+			TM1637Detected:       panel.TM1637Detected,
+			TM1637DetectionKnown: panel.TM1637DetectionKnown,
 		}
 		document.FrontPanelUpdatedAt = live.FrontPanelUpdated
 		document.Completeness.FrontPanel = true

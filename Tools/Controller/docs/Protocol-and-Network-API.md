@@ -225,6 +225,13 @@ These frames use sequence zero and are emitted only when the
 corresponding physical output changes. The host may still request
 `FRONT_PANEL_GET` during connection, manual refresh, or recovery.
 
+`FRONT_PANEL` schema 2 reserves the upper bits of its LCD-flags byte for
+TM1637 presence: bit 7 means the detection field is authoritative and bit 6
+means the display ACKed. Older schema-2 firmware leaves both bits clear, so a
+new host reports detection as unknown rather than inventing an absent device.
+Firmware emits an unsolicited `FRONT_PANEL` state edge when ACK presence
+changes; the host fans that transition out as `front_panel.changed`.
+
 The host's melody scheduler sends acknowledged `BUZZER` frames on one monotonic
 deadline sequence; command/ACK latency is not added to every note interval.
 Each accepted firmware note or explicit pause is mirrored through

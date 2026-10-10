@@ -179,7 +179,9 @@ void sendFrontPanel(uint8_t sequence) {
 #endif
                                     );
   payload[7] = 0;
-  payload[8] = 0;
+  // Bit 7 makes the ACK-derived state authoritative; bit 6 is detection.
+  // Existing schema-2 hosts ignore both reserved bits.
+  payload[8] = display.detected() ? 0xC0U : 0x80U;
   memcpy(payload + 9, hostLcdText, sizeof(hostLcdText));
   payload[41] =
       static_cast<uint8_t>(shiftRegisters.activeInputs() & 0x0FU);
@@ -199,6 +201,11 @@ void sendFrontPanel(uint8_t sequence) {
 void serviceSegmentPush() {
   const uint8_t *segments = display.rawSegments();
   const uint8_t brightness = display.brightness();
+  const bool detected = display.detected();
+  if (detected != lastPushedSegmentDetected) {
+    lastPushedSegmentDetected = detected;
+    sendFrontPanel(0);
+  }
   if (brightness == lastPushedSegmentBrightness &&
       memcmp(segments, lastPushedSegments, 4) == 0) {
     return;
