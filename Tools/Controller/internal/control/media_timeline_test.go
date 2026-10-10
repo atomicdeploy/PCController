@@ -259,6 +259,57 @@ func TestMediaTimelineBlockedBoardSnapshotReportsDelayWithoutExecutingExpiredCue
 		}
 	}
 }
+
+func TestMediaTimelineCatalogSnapshotDoesNotBlockConnectionAccess(t *testing.T) {
+	runtime := New(Options{})
+	defer runtime.Close()
+	entered, release := make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	releaseCatalog := func() { releaseOnce.Do(func() { close(release) }) }
+	defer releaseCatalog()
+	var once sync.Once
+	runner := NewMacroRunner(nil, func() []appconfig.Macro {
+		once.Do(func() { close(entered) })
+		<-release
+		return []appconfig.Macro{{ID: 7, Name: "fixture", Mode: macroModeHost,
+			Steps: []appconfig.MacroStep{{Kind: "relay", Target: 7, Value: 0}}}}
+	}, nil)
+	runtime.setMacroRunner(runner)
+	snapshotDone := make(chan Snapshot, 1)
+	go func() { snapshotDone <- runtime.Snapshot() }()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("snapshot never entered catalog provider")
+	}
+	accessDone := make(chan struct{})
+	go func() {
+		// Model a pending connection writer followed by the executor's reader.
+		runtime.mu.Lock()
+		runtime.mu.Unlock()
+		runtime.mu.RLock()
+		runtime.mu.RUnlock()
+		close(accessDone)
+	}()
+	select {
+	case <-accessDone:
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("catalog presentation held the shared connection lock")
+	}
+	releaseCatalog()
+	select {
+	case snapshot := <-snapshotDone:
+		found := false
+		for _, effect := range snapshot.Effects {
+			found = found || effect.Reference == "effect:7" && effect.Name == "fixture"
+		}
+		if !found {
+			t.Fatalf("moving catalog work dropped effects: %+v", snapshot.Effects)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("snapshot did not finish")
+	}
+}
 func TestMediaTimelineNACKNeverAdvancesLedgerAndAttemptsCleanup(t *testing.T) {
 	runtime, frames, mu := mediaTimelineFixture(t, true)
 	value := armTimeline(t, runtime, 0)

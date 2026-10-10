@@ -56,6 +56,12 @@ a later paused playback update resets its own clock counters. Dispatch failures
 include these measured phases in their error; this adds no per-tick events.
 None of these host measurements prove a physical actuator edge.
 
+Board snapshots copy connection facts under their lock, then expand effect
+catalogs outside it. Library/configuration providers and presentation sorting
+must not hold that lock: a waiting connection writer would also block subsequent
+executor readers. The regression test blocks a catalog provider and verifies
+connection writer/reader access remains available without dropping the catalog.
+
 Clock expiration (250 ms while playing), session replacement, command failure,
 or lateness over the admitted limit faults execution rather than silently skipping
 commands. Dispatch consumes the same admitted budget: a command dispatched 12 ms
