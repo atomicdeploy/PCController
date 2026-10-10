@@ -264,14 +264,17 @@ func arduinoCLIEnvironment(base []string, configPath string) ([]string, error) {
 		if absoluteErr != nil {
 			return nil, absoluteErr
 		}
+		managedProfile := filepath.Join(filepath.Dir(absoluteConfig), "cli-profile")
 		profileRoot := arduinoCLIProfileRoot(config, absoluteConfig)
-		for _, directory := range []string{
-			filepath.Join(profileRoot, "Documents"),
-			filepath.Join(profileRoot, "AppData", "Local"),
-			filepath.Join(profileRoot, "AppData", "Roaming"),
-		} {
-			if err := os.MkdirAll(directory, 0o700); err != nil {
-				return nil, fmt.Errorf("prepare firmware CLI service profile: %w", err)
+		if strings.EqualFold(filepath.Clean(profileRoot), filepath.Clean(managedProfile)) {
+			for _, directory := range []string{
+				filepath.Join(profileRoot, "Documents"),
+				filepath.Join(profileRoot, "AppData", "Local"),
+				filepath.Join(profileRoot, "AppData", "Roaming"),
+			} {
+				if err := os.MkdirAll(directory, 0o700); err != nil {
+					return nil, fmt.Errorf("prepare firmware CLI service profile: %w", err)
+				}
 			}
 		}
 		overrides["APPDATA"] = filepath.Join(profileRoot, "AppData", "Roaming")
