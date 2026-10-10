@@ -54,13 +54,13 @@ type Session struct {
 	name string
 	port sessionPort
 
-	writeGate   chan struct{}
-	requestGate chan struct{}
-	stateMu     sync.RWMutex
-	waiters     map[byte]*pendingRequest
-	nextSeq     byte
-	hello       native.Hello
-	terminalErr error
+	writeGate        chan struct{}
+	requestAdmission requestAdmission
+	stateMu          sync.RWMutex
+	waiters          map[byte]*pendingRequest
+	nextSeq          byte
+	hello            native.Hello
+	terminalErr      error
 
 	events  chan Event
 	closing chan struct{}
@@ -89,6 +89,104 @@ type pendingRequest struct {
 	requestOpcode byte
 	responses     map[byte]bool
 	channel       chan native.Frame
+}
+
+// RequestPriority orders requests that are waiting for the one-command-on-wire
+// gate. It cannot interrupt a request already sent to the MCU.
+type RequestPriority uint8
+
+const (
+	RequestPriorityNormal RequestPriority = iota
+	RequestPriorityTimeline
+)
+
+type requestWaiter struct {
+	priority RequestPriority
+	ready    chan struct{}
+	granted  bool
+}
+
+type requestAdmission struct {
+	mu      sync.Mutex
+	active  bool
+	waiters []*requestWaiter
+}
+
+func (admission *requestAdmission) acquire(
+	ctx context.Context,
+	closing <-chan struct{},
+	priority RequestPriority,
+) (func(), error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	select {
+	case <-closing:
+		return nil, ErrClosed
+	default:
+	}
+
+	waiter := &requestWaiter{priority: priority, ready: make(chan struct{})}
+	admission.mu.Lock()
+	if !admission.active && len(admission.waiters) == 0 {
+		admission.active = true
+		admission.mu.Unlock()
+		return admission.release, nil
+	}
+	admission.waiters = append(admission.waiters, waiter)
+	admission.mu.Unlock()
+
+	select {
+	case <-waiter.ready:
+		return admission.release, nil
+	case <-ctx.Done():
+		admission.cancel(waiter)
+		return nil, ctx.Err()
+	case <-closing:
+		admission.cancel(waiter)
+		return nil, ErrClosed
+	}
+}
+
+func (admission *requestAdmission) cancel(waiter *requestWaiter) {
+	admission.mu.Lock()
+	defer admission.mu.Unlock()
+	if waiter.granted {
+		// Cancellation can race with a grant. Return the slot immediately so a
+		// canceled high-priority request cannot strand later work.
+		admission.grantNextLocked()
+		return
+	}
+	for index, queued := range admission.waiters {
+		if queued == waiter {
+			admission.waiters = append(admission.waiters[:index], admission.waiters[index+1:]...)
+			return
+		}
+	}
+}
+
+func (admission *requestAdmission) release() {
+	admission.mu.Lock()
+	defer admission.mu.Unlock()
+	admission.grantNextLocked()
+}
+
+func (admission *requestAdmission) grantNextLocked() {
+	if len(admission.waiters) == 0 {
+		admission.active = false
+		return
+	}
+	best := 0
+	for index := 1; index < len(admission.waiters); index++ {
+		if admission.waiters[index].priority > admission.waiters[best].priority {
+			best = index
+		}
+	}
+	waiter := admission.waiters[best]
+	admission.waiters = append(admission.waiters[:best], admission.waiters[best+1:]...)
+	waiter.granted = true
+	admission.active = true
+	close(waiter.ready)
 }
 
 func Open(name string, baudRate int) (*Session, error) {
@@ -207,15 +305,14 @@ func newForTransport(name string, port sessionPort) *Session {
 
 func newSession(name string, port sessionPort) *Session {
 	return &Session{
-		name:        name,
-		port:        port,
-		writeGate:   make(chan struct{}, 1),
-		requestGate: make(chan struct{}, 1),
-		waiters:     make(map[byte]*pendingRequest),
-		nextSeq:     1,
-		events:      make(chan Event, 256),
-		closing:     make(chan struct{}),
-		done:        make(chan struct{}),
+		name:      name,
+		port:      port,
+		writeGate: make(chan struct{}, 1),
+		waiters:   make(map[byte]*pendingRequest),
+		nextSeq:   1,
+		events:    make(chan Event, 256),
+		closing:   make(chan struct{}),
+		done:      make(chan struct{}),
 	}
 }
 
@@ -328,13 +425,27 @@ func (s *Session) Request(
 	payload []byte,
 	expected ...byte,
 ) (native.Frame, error) {
+	return s.RequestWithPriority(ctx, RequestPriorityNormal, opcode, payload, expected...)
+}
+
+// RequestWithPriority preserves wire serialization while allowing timing-bound
+// prepared-timeline commands to overtake noncritical requests that are queued
+// but have not yet reached the MCU. It never preempts an in-flight request.
+func (s *Session) RequestWithPriority(
+	ctx context.Context,
+	priority RequestPriority,
+	opcode byte,
+	payload []byte,
+	expected ...byte,
+) (native.Frame, error) {
 	if err := ctx.Err(); err != nil {
 		return native.Frame{}, err
 	}
-	if err := s.acquireRequest(ctx); err != nil {
-		return native.Frame{}, err
+	releaseRequest, err := s.requestAdmission.acquire(ctx, s.closing, priority)
+	if err != nil {
+		return native.Frame{}, fmt.Errorf("waiting for serial request slot: %w", err)
 	}
-	defer func() { <-s.requestGate }()
+	defer releaseRequest()
 	sequence, waiter, err := s.reserveSequence(opcode, expected)
 	if err != nil {
 		return native.Frame{}, err
@@ -356,7 +467,7 @@ func (s *Session) Request(
 	for {
 		select {
 		case <-ctx.Done():
-			return native.Frame{}, ctx.Err()
+			return native.Frame{}, fmt.Errorf("waiting for opcode 0x%02X response: %w", opcode, ctx.Err())
 		case <-s.closing:
 			return native.Frame{}, ErrClosed
 		case response := <-waiter.channel:
@@ -421,25 +532,6 @@ func (s *Session) acquireWrite(ctx context.Context) error {
 	default:
 	}
 	return nil
-}
-
-// acquireRequest keeps one acknowledged request on the wire at a time. The
-// AVR masks UART interrupts while committing a WS281X frame; writing a second
-// request before that commit ACK arrives can corrupt its COBS frame and end a
-// long-running strip stream. Unsolicited device events remain concurrent
-// because only request writers use this gate.
-func (s *Session) acquireRequest(ctx context.Context) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	select {
-	case s.requestGate <- struct{}{}:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-s.closing:
-		return ErrClosed
-	}
 }
 
 func (s *Session) writeRawContext(ctx context.Context, data []byte) error {
