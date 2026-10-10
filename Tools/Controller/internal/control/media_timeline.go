@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"pccontroller.local/controller/internal/appconfig"
+	"pccontroller.local/controller/internal/link"
 	"pccontroller.local/controller/internal/native"
 )
 
@@ -57,6 +58,9 @@ type MediaTimelineStatus struct {
 	MaxAckRoundTripMS      float64 `json:"max_ack_round_trip_ms"`
 	LastAckLatenessMS      float64 `json:"last_ack_lateness_ms"`
 	MaxAckLatenessMS       float64 `json:"max_ack_lateness_ms"`
+	LastRestoreStep        string  `json:"last_restore_step,omitempty"`
+	LastRestoreAckMS       float64 `json:"last_restore_ack_ms"`
+	MaxRestoreAckMS        float64 `json:"max_restore_ack_ms"`
 	DeviceAckUS            uint32  `json:"device_ack_us,omitempty"`
 	Error                  string  `json:"error,omitempty"`
 }
@@ -421,7 +425,7 @@ func (runtime *Runtime) mediaTimelineOff(generation uint64) error {
 		{native.OpAddressableLED, []byte{native.AddressableLEDFill, 0, 0, 0, 0xFF}},
 		{native.OpBuzzer, native.BuzzerPayload(0, 1)},
 	} {
-		if _, err := runtime.requestAtGeneration(ctx, generation, command.op, command.payload, native.OpACK); err != nil {
+		if _, err := runtime.requestAtGenerationPriority(ctx, generation, link.RequestPriorityTimeline, command.op, command.payload, native.OpACK); err != nil {
 			failures = append(failures, err)
 		}
 	}
@@ -583,10 +587,20 @@ func (runtime *Runtime) runMediaTimeline(ctx context.Context, done chan struct{}
 			for _, step := range mediaTimelineRestore(steps, index) {
 				owned = true // A lost ACK can still mean the hardware applied it.
 				requestCtx, cancel := context.WithTimeout(ctx, time.Duration(plan.MaxLatenessMS)*time.Millisecond)
-				_, err := runtime.requestAtGeneration(requestCtx, generation, step.opcode, step.payload, native.OpACK)
+				requestStarted := time.Now()
+				frame, err := runtime.requestAtGenerationPriority(requestCtx, generation, link.RequestPriorityTimeline, step.opcode, step.payload, native.OpACK)
 				cancel()
+				ackMS := time.Since(requestStarted).Seconds() * 1000
+				runtime.mediaTimeline.mu.Lock()
+				runtime.mediaTimeline.status.LastRestoreStep = step.id
+				runtime.mediaTimeline.status.LastRestoreAckMS = ackMS
+				runtime.mediaTimeline.status.MaxRestoreAckMS = max(runtime.mediaTimeline.status.MaxRestoreAckMS, ackMS)
+				if deviceUS, ok := native.ResponseDeviceMicros(frame); ok {
+					runtime.mediaTimeline.status.DeviceAckUS = deviceUS
+				}
+				runtime.mediaTimeline.mu.Unlock()
 				if err != nil {
-					fault(fmt.Sprintf("resume state %s not acknowledged: %v", step.id, err))
+					fault(fmt.Sprintf("resume state %s not acknowledged after %.1f ms: %v", step.id, ackMS, err))
 					return
 				}
 			}
@@ -609,7 +623,7 @@ func (runtime *Runtime) runMediaTimeline(ctx context.Context, done chan struct{}
 			requestCtx, cancel := context.WithTimeout(ctx, remainingBudget)
 			requestStarted := time.Now()
 			owned = true
-			frame, err := runtime.requestAtGeneration(requestCtx, generation, step.opcode, step.payload, native.OpACK)
+			frame, err := runtime.requestAtGenerationPriority(requestCtx, generation, link.RequestPriorityTimeline, step.opcode, step.payload, native.OpACK)
 			cancel()
 			ackRoundTrip := time.Since(requestStarted).Seconds() * 1000
 			actual := float64(clock.PositionMS) + time.Since(anchor).Seconds()*1000*clock.Rate

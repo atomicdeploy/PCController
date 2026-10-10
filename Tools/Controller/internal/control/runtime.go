@@ -1859,6 +1859,17 @@ func (runtime *Runtime) requestAtGeneration(
 	payload []byte,
 	expected ...byte,
 ) (native.Frame, error) {
+	return runtime.requestAtGenerationPriority(ctx, generation, link.RequestPriorityNormal, opcode, payload, expected...)
+}
+
+func (runtime *Runtime) requestAtGenerationPriority(
+	ctx context.Context,
+	generation uint64,
+	priority link.RequestPriority,
+	opcode byte,
+	payload []byte,
+	expected ...byte,
+) (native.Frame, error) {
 	if err := runtime.rejectMediaTimelineConflict(ctx, opcode); err != nil {
 		return native.Frame{}, err
 	}
@@ -1882,7 +1893,7 @@ func (runtime *Runtime) requestAtGeneration(
 	}
 	session := runtime.session
 	runtime.mu.RUnlock()
-	frame, err := session.Request(ctx, opcode, payload, expected...)
+	frame, err := session.RequestWithPriority(ctx, priority, opcode, payload, expected...)
 	if err != nil {
 		return native.Frame{}, err
 	}

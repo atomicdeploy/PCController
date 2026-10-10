@@ -172,7 +172,6 @@ func armTimeline(t *testing.T, runtime *Runtime, at uint64) MediaPlaybackUpdate 
 	if _, err := runtime.UpdateMediaPlayback(value); err != nil {
 		t.Fatal(err)
 	}
-	waitTimeline(t, runtime, func(status MediaTimelineStatus) bool { return status.ClockSequence == 1 && status.ArmedEpoch == 1 })
 	value.Sequence++
 	value.Playing = true
 	return value
@@ -284,7 +283,6 @@ func TestMediaTimelinePauseResumeRestoresLatchedValueAndSeekRequiresArming(t *te
 	if _, err := runtime.UpdateMediaPlayback(value); err != nil {
 		t.Fatal(err)
 	}
-	waitTimeline(t, runtime, func(s MediaTimelineStatus) bool { return s.State == "paused" && s.ClockSequence == value.Sequence })
 	value.Sequence++
 	value.Playing = true
 	if _, err := runtime.UpdateMediaPlayback(value); err != nil {

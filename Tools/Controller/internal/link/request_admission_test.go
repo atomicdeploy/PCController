@@ -11,6 +11,99 @@ import (
 	"pccontroller.local/controller/internal/native"
 )
 
+func waitForQueuedRequests(t *testing.T, admission *requestAdmission, count int) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		admission.mu.Lock()
+		queued := len(admission.waiters)
+		admission.mu.Unlock()
+		if queued >= count {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("request waiters did not reach %d", count)
+}
+
+func TestTimelineRequestOvertakesQueuedNormalRequest(t *testing.T) {
+	var admission requestAdmission
+	closing := make(chan struct{})
+	releaseActive, err := admission.acquire(context.Background(), closing, RequestPriorityNormal)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	normalGranted := make(chan func(), 1)
+	go func() {
+		release, acquireErr := admission.acquire(context.Background(), closing, RequestPriorityNormal)
+		if acquireErr != nil {
+			t.Errorf("normal request admission: %v", acquireErr)
+			return
+		}
+		normalGranted <- release
+	}()
+	waitForQueuedRequests(t, &admission, 1)
+
+	timelineGranted := make(chan func(), 1)
+	go func() {
+		release, acquireErr := admission.acquire(context.Background(), closing, RequestPriorityTimeline)
+		if acquireErr != nil {
+			t.Errorf("timeline request admission: %v", acquireErr)
+			return
+		}
+		timelineGranted <- release
+	}()
+	waitForQueuedRequests(t, &admission, 2)
+
+	releaseActive()
+	var releaseTimeline func()
+	select {
+	case releaseTimeline = <-timelineGranted:
+	case <-time.After(time.Second):
+		t.Fatal("timed timeline request did not overtake queued normal request")
+	}
+	releaseTimeline()
+
+	select {
+	case releaseNormal := <-normalGranted:
+		releaseNormal()
+	case <-time.After(time.Second):
+		t.Fatal("queued normal request was not admitted after timeline request")
+	}
+}
+
+func TestCancelledQueuedRequestDoesNotRetainAdmission(t *testing.T) {
+	var admission requestAdmission
+	closing := make(chan struct{})
+	releaseActive, err := admission.acquire(context.Background(), closing, RequestPriorityNormal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, acquireErr := admission.acquire(ctx, closing, RequestPriorityTimeline)
+		done <- acquireErr
+	}()
+	waitForQueuedRequests(t, &admission, 1)
+	cancel()
+	select {
+	case acquireErr := <-done:
+		if !errors.Is(acquireErr, context.Canceled) {
+			t.Fatalf("cancelled queued request: %v", acquireErr)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("cancelled request remained queued")
+	}
+	releaseActive()
+	if release, acquireErr := admission.acquire(context.Background(), closing, RequestPriorityNormal); acquireErr != nil {
+		t.Fatalf("request slot remained blocked after cancellation: %v", acquireErr)
+	} else {
+		release()
+	}
+}
+
 func TestRequestAlreadyExpiredDoesNotWrite(t *testing.T) {
 	port := newFakePort()
 	var writes atomic.Int32
