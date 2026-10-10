@@ -67,6 +67,18 @@ func TestArduinoCLIProfileRootReusesConfiguredOwnerProfile(t *testing.T) {
 	if got := arduinoCLIProfileRoot(config, configPath); got != owner {
 		t.Fatalf("profile root=%q want configured owner %q", got, owner)
 	}
+	if runtime.GOOS == "windows" {
+		content := "directories:\n  user: '" + strings.ReplaceAll(sketchbook, "'", "''") + "'\n"
+		if err := os.WriteFile(configPath, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := arduinoCLIEnvironment(nil, configPath); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(filepath.Join(owner, "AppData")); !os.IsNotExist(err) {
+			t.Fatalf("existing owner profile was modified: err=%v", err)
+		}
+	}
 
 	config.Directories.User = filepath.Join(t.TempDir(), "shared-sketchbook")
 	wantFallback := filepath.Join(filepath.Dir(configPath), "cli-profile")
