@@ -87,6 +87,7 @@ type sessionPort interface {
 
 type pendingRequest struct {
 	requestOpcode byte
+	startedAt     time.Time
 	responses     map[byte]bool
 	channel       chan native.Frame
 }
@@ -441,9 +442,10 @@ func (s *Session) RequestWithPriority(
 	if err := ctx.Err(); err != nil {
 		return native.Frame{}, err
 	}
+	waitStarted := time.Now()
 	releaseRequest, err := s.requestAdmission.acquire(ctx, s.closing, priority)
 	if err != nil {
-		return native.Frame{}, fmt.Errorf("waiting for serial request slot: %w", err)
+		return native.Frame{}, s.requestSlotError(opcode, waitStarted, err)
 	}
 	defer releaseRequest()
 	sequence, waiter, err := s.reserveSequence(opcode, expected)
@@ -487,6 +489,20 @@ func (s *Session) RequestWithPriority(
 			}
 		}
 	}
+}
+
+// Capture the registered request occupying the slot at failure, without
+// exposing command payloads, device names or client information. Admission may
+// race with completion, so explicitly report when no request is registered.
+func (s *Session) requestSlotError(opcode byte, started time.Time, err error) error {
+	active := "no registered active request"
+	s.stateMu.RLock()
+	for _, waiter := range s.waiters {
+		active = fmt.Sprintf("active opcode 0x%02X, registered for %.1f ms", waiter.requestOpcode, time.Since(waiter.startedAt).Seconds()*1000)
+		break // Wire admission allows only one registered request.
+	}
+	s.stateMu.RUnlock()
+	return fmt.Errorf("waiting for serial request slot for opcode 0x%02X after %.1f ms (%s): %w", opcode, time.Since(started).Seconds()*1000, active, err)
 }
 
 func (s *Session) Command(ctx context.Context, opcode byte, payload []byte) error {
@@ -814,6 +830,7 @@ func (s *Session) reserveSequence(
 		}
 		waiter := &pendingRequest{
 			requestOpcode: requestOpcode,
+			startedAt:     time.Now(),
 			responses:     responses,
 			channel:       make(chan native.Frame, 4),
 		}

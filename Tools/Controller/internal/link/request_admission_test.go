@@ -3,6 +3,8 @@ package link
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -10,6 +12,45 @@ import (
 
 	"pccontroller.local/controller/internal/native"
 )
+
+func TestRequestSlotTimeoutIdentifiesActiveOpcodeWithoutLateWrite(t *testing.T) {
+	port := newFakePort()
+	entered := make(chan struct{}, 1)
+	var writes atomic.Int32
+	port.onWrite = func([]byte) { writes.Add(1); entered <- struct{}{} }
+	session := NewForPort("TEST", port)
+	defer session.Close()
+	firstCtx, cancelFirst := context.WithCancel(context.Background())
+	defer cancelFirst()
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := session.Request(firstCtx, native.OpGetStatus, nil, native.OpStatus)
+		firstDone <- err
+	}()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("first request did not reach the wire")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	_, err := session.RequestWithPriority(ctx, RequestPriorityTimeline, native.OpRelaySide, []byte{0, 0}, native.OpACK)
+	if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), fmt.Sprintf("active opcode 0x%02X", native.OpGetStatus)) || !strings.Contains(err.Error(), "registered for") {
+		t.Fatalf("missing blocking request evidence or error identity: %v", err)
+	}
+	cancelFirst()
+	select {
+	case <-firstDone:
+	case <-time.After(time.Second):
+		t.Fatal("active request did not exit after cancellation")
+	}
+	if writes.Load() != 1 {
+		t.Fatal("expired queued request was written after admission became free")
+	}
+	if err := session.requestSlotError(native.OpRelaySide, time.Now(), context.Canceled); !errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), "no registered active request") {
+		t.Fatalf("completion-race diagnostic wrong: %v", err)
+	}
+}
 
 func waitForQueuedRequests(t *testing.T, admission *requestAdmission, count int) {
 	t.Helper()
