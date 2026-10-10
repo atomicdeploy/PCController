@@ -169,7 +169,8 @@ func (runtime *Runtime) UpdateMediaPlayback(value MediaPlaybackUpdate) (MediaPla
 			"loaded": strconv.FormatBool(value.Loaded), "playing": strconv.FormatBool(value.Playing), "rate": strconv.FormatFloat(value.Rate, 'f', -1, 64)}})
 	if !value.Playing && value.PlanRevision != 0 {
 		plan := runtime.MediaTimeline()
-		if plan.ClientID == value.ClientID && plan.Revision == value.PlanRevision && plan.StepCount > 0 {
+		if plan.ClientID == value.ClientID && plan.Revision == value.PlanRevision && plan.StepCount > 0 &&
+			!(fresh && mediaTimelinePausedHeartbeatArmed(plan, previous.MediaPlaybackUpdate, value)) {
 			deadline := time.NewTimer(mediaTimelineArmAckTimeout)
 			poll := time.NewTicker(time.Millisecond)
 			defer deadline.Stop()
@@ -195,6 +196,20 @@ func (runtime *Runtime) UpdateMediaPlayback(value MediaPlaybackUpdate) (MediaPla
 	}
 	return runtime.MediaPlayback(), nil
 }
+
+// An unchanged paused heartbeat renews the clock lease, not the arm operation.
+// The worker has already acknowledged this exact paused epoch and position.
+// Initial pause, seek, plan replacement and playing-to-paused cleanup still
+// require a fresh worker acknowledgement before Play may be accepted.
+func mediaTimelinePausedHeartbeatArmed(plan MediaTimelineStatus, previous, value MediaPlaybackUpdate) bool {
+	return previous.Loaded && value.Loaded && !previous.Playing && !value.Playing &&
+		previous.ClientID == value.ClientID && previous.PlanRevision == value.PlanRevision &&
+		previous.Epoch == value.Epoch && previous.PositionMS == value.PositionMS &&
+		plan.ClientID == value.ClientID && plan.Revision == value.PlanRevision &&
+		plan.State == "paused" && plan.ClockSequence > 0 && plan.ArmedEpoch == value.Epoch &&
+		plan.ClockPositionMS == value.PositionMS
+}
+
 func mediaPlaybackEventState(value MediaPlaybackUpdate) string {
 	if !value.Loaded {
 		return "unloaded"
