@@ -186,18 +186,24 @@ func TestNamedSurfaceLaunchSerializesSameSurfaceRegistration(t *testing.T) {
 		return visibleSurfaceStart{Backend: "fake-terminal", Accepted: true}
 	}}
 
-	results := make(chan hostui.SurfaceLaunchResult, 2)
-	errors := make(chan error, 2)
-	launch := func() {
+	type launchOutcome struct {
+		result hostui.SurfaceLaunchResult
+		err    error
+	}
+	// Registration is serialized, but a caller may be descheduled after
+	// releasing the gate and before reporting its result. Bind each outcome
+	// to its invocation rather than assuming shared-channel arrival order.
+	firstDone := make(chan launchOutcome, 1)
+	secondDone := make(chan launchOutcome, 1)
+	launch := func(done chan<- launchOutcome) {
 		result, err := launcher.launch(context.Background(), hostui.SurfaceLaunchRequest{
 			Surface: hostui.SurfaceTUI, Mode: hostui.SurfaceLaunchLaunch,
 		})
-		results <- result
-		errors <- err
+		done <- launchOutcome{result: result, err: err}
 	}
-	go launch()
+	go launch(firstDone)
 	<-firstStarted
-	go launch()
+	go launch(secondDone)
 	select {
 	case <-secondStarted:
 		t.Fatal("second launch started before the first registration completed")
@@ -205,19 +211,20 @@ func TestNamedSurfaceLaunchSerializesSameSurfaceRegistration(t *testing.T) {
 	}
 	releaseFirst.Do(func() { close(allowFirstRegistration) })
 
-	first := <-results
-	if err := <-errors; err != nil {
-		t.Fatal(err)
+	firstOutcome := <-firstDone
+	if firstOutcome.err != nil {
+		t.Fatal(firstOutcome.err)
 	}
 	select {
 	case <-secondStarted:
 	case <-time.After(time.Second):
 		t.Fatal("second launch did not begin after the first registration")
 	}
-	second := <-results
-	if err := <-errors; err != nil {
-		t.Fatal(err)
+	secondOutcome := <-secondDone
+	if secondOutcome.err != nil {
+		t.Fatal(secondOutcome.err)
 	}
+	first, second := firstOutcome.result, secondOutcome.result
 	if !first.Confirmed || !second.Confirmed || first.InstanceID == second.InstanceID {
 		t.Fatalf("first=%#v second=%#v", first, second)
 	}
