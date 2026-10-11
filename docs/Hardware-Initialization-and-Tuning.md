@@ -184,7 +184,7 @@ At startup the driver:
 Eleven-bit conversion takes 375 ms and has 0.125 C resolution. New conversions
 start every 450 ms while the door is open and every 1000 ms while it is closed.
 Valid temperature samples use a 50/50 EMA. A first sample, a disconnected
-sample, or a sample at/above the 50.00 C HOT threshold bypasses the EMA so a
+sample, or a sample at/above the 55.00 C HOT threshold bypasses the EMA so a
 fault or warning is not hidden by smoothing.
 
 The factory role mapping assigns lexicographically sorted ROM 0 to
