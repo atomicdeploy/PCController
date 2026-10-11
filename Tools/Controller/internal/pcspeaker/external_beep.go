@@ -13,6 +13,7 @@ import (
 
 var externalBeepLookPath = exec.LookPath
 var externalBeepCommand = exec.CommandContext
+var externalBeepStop = stopExternalBeep
 
 func playExternalBeep(ctx context.Context, driverDirectory, executable string, frequencyHz, durationMS int) error {
 	path, err := findExternalBeep(driverDirectory, executable)
@@ -21,14 +22,22 @@ func playExternalBeep(ctx context.Context, driverDirectory, executable string, f
 	}
 	command := externalBeepCommand(ctx, path, externalBeepArguments(frequencyHz, durationMS)...)
 	if output, err := command.CombinedOutput(); err != nil {
+		stopErr := externalBeepStop(path)
 		if ctxErr := ctx.Err(); ctxErr != nil {
+			if stopErr != nil {
+				return errors.Join(ctxErr, fmt.Errorf("stop canceled external beep: %w", stopErr))
+			}
 			return ctxErr
 		}
 		detail := strings.TrimSpace(string(output))
 		if detail == "" {
 			detail = err.Error()
 		}
-		return fmt.Errorf("external beep %s failed: %s", filepath.Base(path), detail)
+		playbackErr := fmt.Errorf("external beep %s failed: %s", filepath.Base(path), detail)
+		if stopErr != nil {
+			return errors.Join(playbackErr, fmt.Errorf("stop failed external beep: %w", stopErr))
+		}
+		return playbackErr
 	}
 	return nil
 }
