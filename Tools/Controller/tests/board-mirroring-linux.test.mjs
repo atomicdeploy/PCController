@@ -1,5 +1,5 @@
 // Live, real-protocol acceptance smoke. No fake transport or physical-I/O claim.
-// node tests/board-mirroring-linux.test.mjs CONTROLLER VIRTUAL_BOARD
+// node tests/board-mirroring-linux.test.mjs CONTROLLER VIRTUAL_BOARD [--native-buzzer]
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
@@ -8,8 +8,11 @@ import { join, resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 
 if (process.platform !== 'linux') throw new Error('This acceptance smoke requires Linux')
-if (process.argv.length !== 4) throw new Error('Pass controller and VirtualBoard executable paths')
-const [controller, firmware] = process.argv.slice(2).map(value => resolve(value))
+if (process.argv.length < 4 || process.argv.length > 5 || (process.argv[4] && process.argv[4] !== '--native-buzzer')) {
+  throw new Error('Pass controller and VirtualBoard executable paths, optionally --native-buzzer')
+}
+const [controller, firmware] = process.argv.slice(2, 4).map(value => resolve(value))
+const nativeBuzzer = process.argv[4] === '--native-buzzer'
 const root = await mkdtemp('/dev/shm/pccontroller-mirror-smoke-')
 const children = []
 const outputs = new Map()
@@ -86,7 +89,8 @@ try {
       ui: { setup_complete: true },
       integrations: {
         discovery: { enabled: false }, notifications: { enabled: false }, status_led: { enabled: false },
-        buzzer_mirror: { enabled: false, native_enabled: false }, board_mirror: mirrorConfig(coordinatorSide),
+        buzzer_mirror: { enabled: nativeBuzzer && coordinatorSide, native_enabled: nativeBuzzer && coordinatorSide, backend: 'native', web_audio_enabled: false },
+        board_mirror: mirrorConfig(coordinatorSide),
         websocket_clients: coordinatorSide ? [{ name: 'second', enabled: true, protocol: 'jsonrpc', url: `ws://127.0.0.1:${hostPortB}/ipc`, allow_commands: true, forward_events: false }] : []
       }
     }))
@@ -149,6 +153,13 @@ try {
   ;[group] = await rpc(endpointA, 'controller.mirror.status')
   assert.equal(group.sequence, noteSequence, 'buzzer echo storm')
   console.log('PASS pushed full-duplex buzzer + bounded echo suppression + honest ACK')
+  if (nativeBuzzer) {
+    const { buzzer_runtime: runtime } = await rpc(endpointA, 'controller.integrations.status')
+    assert.equal(runtime.host_mirror, true)
+    assert.equal(runtime.backend_effective, 'native', JSON.stringify(runtime))
+    assert.ok(!runtime.backend_error, JSON.stringify(runtime))
+    console.log('PASS native Linux host buzzer enabled during real board notes, no backend error (not audibility proof)')
+  }
 
   const segmentPolicy = { ...policy, domains: [...policy.domains, 'segments'] }
   await rpc(endpointB, 'controller.mirror.configure', mirrorConfig(false, segmentPolicy))

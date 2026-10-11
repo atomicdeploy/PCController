@@ -46,6 +46,8 @@ worktree, no physical AVR firmware programming, no Cafe/Erfan deployment.
   - volatile receiver menu navigation both directions;
   - pushed finite buzzer notes both directions, ACK-only disposition and no
     recurring note sequence;
+  - optional native Linux host buzzer enabled for those real board notes with
+    the IPC surface reporting its actual selected backend and no backend error;
   - four raw segment cells both directions, including renewal beyond lease;
   - disconnect quarantine, no actuation replay on reconnect, explicit verified
     resync from a selected board;
@@ -57,6 +59,12 @@ node Tools/Controller/tests/board-mirroring-linux.test.mjs \
   /path/to/controller \
   Tools/VirtualBoard/.build/release/bin/virtual_board
 ```
+
+Append `--native-buzzer` only on an explicitly commissioned Linux host with a
+usable PC speaker. It plays finite test notes; success does not prove audibility.
+CI exercises the real two-board test on Linux x64 and ARM64 without requesting
+physical audio. The headless IPC server now reports the integration manager's
+actual buzzer backend instead of a configuration-only fallback.
 
 The test deliberately uses real board messages rather than a mock coordinator.
 It exposed and fixed both pre-write polling baselines losing an immediate

@@ -711,6 +711,9 @@ func runIPC(args []string, stdout, stderr io.Writer, store *appconfig.Store) err
 			BridgeList:  func() any { return integrations.BridgePeers() },
 			BridgeCall:  integrations.CallBridge,
 			BoardMirror: func() ipcjson.BoardMirrorService { return integrations },
+			BuzzerRuntimeStatus: func() appconfig.BuzzerRuntimeStatus {
+				return integrations.Status().BuzzerRuntime
+			},
 			WebhookAdmin: func() ipcjson.WebhookAdminService {
 				return integrations
 			},
