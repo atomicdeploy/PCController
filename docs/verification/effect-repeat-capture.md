@@ -54,8 +54,10 @@ The PCController Web recorder in `web/src/macro-library.tsx` and TUI shortcut
 in `internal/tui/macros.go` still use start/import entry points without a
 selection. With the deliberate default of none, these cannot be advertised as
 recording-ready. Before deployment, wire explicit advertised-key/opcode
-selection with None/All into both interfaces and their direct recording RPC
-paths, and add focused interface tests. Do not restore default-all as a shortcut.
+selection with None/All into both interfaces through the existing command
+carrier, and add focused interface tests. The Web `controller.macro.*` strings
+are local busy/action labels, not proof of dedicated recording RPC methods.
+Do not invent new RPC methods or restore default-all as a shortcut.
 
 Full catalogue duration is planned span, not proof that the existing execution
 lifecycle waits for every autonomous peripheral tail: runner completion and
