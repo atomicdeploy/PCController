@@ -3,6 +3,7 @@
 #endif
 #include "virtual_board/tcp_server.hpp"
 #include <atomic>
+#include <array>
 #include <chrono>
 #include <csignal>
 #include <cstdlib>
@@ -11,16 +12,42 @@
 #include <memory>
 #include <thread>
 #ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
 #include <fcntl.h>
 #include <io.h>
 #include <process.h>
 #else
 #include <unistd.h>
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
 #endif
 
 namespace {
 std::atomic<bool> *stopFlag=nullptr;
 void signalStop(int) { if(stopFlag) stopFlag->store(true); }
+std::string currentExecutablePath() {
+  // argv[0] is caller-controlled. Reset may re-execute ONLY this loaded image,
+  // never an arbitrary executable selected by an argument or console input.
+  std::array<char,32768> path{};
+#ifdef _WIN32
+  const auto length=GetModuleFileNameA(nullptr,path.data(),static_cast<DWORD>(path.size()));
+  if(length==0 || length>=path.size()) throw std::runtime_error("cannot locate loaded firmware executable");
+#elif defined(__APPLE__)
+  uint32_t length=static_cast<uint32_t>(path.size());
+  if(_NSGetExecutablePath(path.data(),&length)!=0) throw std::runtime_error("cannot locate loaded firmware executable");
+#else
+  const auto length=readlink("/proc/self/exe",path.data(),path.size()-1);
+  if(length<=0 || static_cast<size_t>(length)>=path.size()-1) throw std::runtime_error("cannot locate loaded firmware executable");
+#endif
+  return std::filesystem::canonical(path.data()).string();
+}
 }
 int main(int argc,char **argv) {
   try {
@@ -88,17 +115,18 @@ int main(int argc,char **argv) {
     board->flush();
     stopFlag=nullptr;
     if(board->resetRequested()) {
+      const auto executable=currentExecutablePath();
       pccontroller::virtual_board::releaseNativeEeprom();
       // An OS process is the MCU memory/reset boundary, including function
       // statics. Never pretend calling setup() clears all firmware state.
 #ifdef _WIN32
       _putenv_s("PCCONTROLLER_NATIVE_RESET","1");
       if(memory) _putenv_s("PCCONTROLLER_NATIVE_EEPROM",pccontroller::virtual_board::nativeEepromSnapshot().c_str());
-      _execv(argv[0],argv);
+      _execv(executable.c_str(),argv);
 #else
       setenv("PCCONTROLLER_NATIVE_RESET","1",1);
       if(memory) setenv("PCCONTROLLER_NATIVE_EEPROM",pccontroller::virtual_board::nativeEepromSnapshot().c_str(),1);
-      execv(argv[0],argv);
+      execv(executable.c_str(),argv);
 #endif
       throw std::runtime_error("native reset restart failed");
     }

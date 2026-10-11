@@ -52,7 +52,7 @@ int main(int argc,char **argv) {
           strip=true; request(pccontroller::wire::GetStatus,44);
         } else if(frame.opcode==pccontroller::wire::StatusResponse && frame.sequence==44) {
           if(!strip || frame.payload.size()!=48) throw std::runtime_error("STATUS ABI");
-          done=true; result=0; std::cout << "production HELLO, timestamped strip ACK and 48-byte STATUS passed; reset/reconnect is tested by transport_integration.mjs\n";
+          done=true; result=0; std::cout << "production HELLO, timestamped strip ACK and 48-byte STATUS passed; reset/reconnect is tested by transport_integration.test.mjs\n";
         }
       }
     }

@@ -49,8 +49,8 @@ assert(binary, 'native binary required')
 const state = await mkdtemp(join(tmpdir(), 'pccontroller-native-conformance-'))
 const children = [], sockets = []
 const pidFile = join(state, 'board.pid')
-function start(args) {
-  const child = spawn(binary, args, { stdio: ['pipe', 'pipe', 'pipe'] }); children.push(child)
+function start(args, argv0 = binary) {
+  const child = spawn(binary, args, { argv0, stdio: ['pipe', 'pipe', 'pipe'] }); children.push(child)
   let diagnostics = ''; child.stderr.on('data', chunk => { diagnostics += chunk })
   child.on('error', error => { diagnostics += error.message })
   child.diagnostics = () => diagnostics
@@ -70,7 +70,8 @@ try {
   stdio.stdin.end(); await new Promise(resolve => stdio.once('exit', resolve)); assert.equal(stdio.exitCode, 0, stdio.diagnostics())
 
   const port = await freePort(), eeprom = join(state, 'board.bin')
-  let child = start(['--port', String(port), '--eeprom', eeprom, '--pid-file', pidFile, '--no-stdin'])
+  // Restart must resolve the loaded OS image, not this untrusted argv[0].
+  let child = start(['--port', String(port), '--eeprom', eeprom, '--pid-file', pidFile, '--no-stdin'], join(state, 'not-a-firmware-executable'))
   let outputLog = ''; child.stdout.on('data', bytes => { outputLog += bytes })
   let socket = await connect(port); sockets.push(socket); let receive = channel(socket)
   socket.write(encode(1, 50)); const tcpHello = await receive(f => f.opcode === 129 && f.sequence === 50)
