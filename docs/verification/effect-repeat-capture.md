@@ -50,6 +50,20 @@ adds evidence to the base authored sequence; whole-effect repeat settings remain
 on that same definition. Board-retained filtering is relay-only, and excluded
 edges can still consume the board ring capacity.
 
+The PCController Web recorder in `web/src/macro-library.tsx` and TUI shortcut
+in `internal/tui/macros.go` still use start/import entry points without a
+selection. With the deliberate default of none, these cannot be advertised as
+recording-ready. Before deployment, wire explicit advertised-key/opcode
+selection with None/All into both interfaces and their direct recording RPC
+paths, and add focused interface tests. Do not restore default-all as a shortcut.
+
+Full catalogue duration is planned span, not proof that the existing execution
+lifecycle waits for every autonomous peripheral tail: runner completion and
+`DurationUS` currently refer to the last command dispatch. Repetition spacing
+does include the complete authored span. End-of-span lifecycle accounting for
+trailing beep/display/PWM duration remains a separate host/MCU executor item;
+do not add an output-altering fake wait opcode or claim this acceptance complete.
+
 After source review and CI, merge the exact tested source; deployment stays
 separate until the persisted-definition blocker and coordinated front-end
 readiness are satisfied. Retain the earlier seat-cue protocol-success receipt
