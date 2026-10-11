@@ -133,12 +133,13 @@ func (runner *MacroRunner) captureRelayEdge(evidence CommandEvidence) {
 		at += runner.recordOffsetUS
 		runner.recording.LastDeltaUS = at - runner.recording.LastAtUS
 		runner.recording.LastAtUS = at
-		steps := relayMaskSteps(
+		steps := selectedRelaySteps(
 			at,
 			runner.recordRelayMask,
 			evidence.RelayMask,
 			!runner.recordRelaySeen,
 			runner.recordMacro.BoardProfileMode,
+			runner.recording.CaptureSelection,
 		)
 		runner.recordRelaySeen = true
 		runner.recordRelayMask = evidence.RelayMask
@@ -190,7 +191,7 @@ func (runner *MacroRunner) captureRelayEdge(evidence CommandEvidence) {
 	if runner.recordBaseAt.IsZero() {
 		runner.recordBaseAt = evidence.ObservedAt
 	}
-	steps := relayMaskSteps(at, runner.recordRelayMask, evidence.RelayMask, !runner.recordRelaySeen, runner.recordMacro.BoardProfileMode)
+	steps := selectedRelaySteps(at, runner.recordRelayMask, evidence.RelayMask, !runner.recordRelaySeen, runner.recordMacro.BoardProfileMode, runner.recording.CaptureSelection)
 	if len(runner.recordMacro.Steps)+len(steps) > 65535 {
 		runner.recording.LastError = "recording reached the step limit"
 		return
@@ -206,11 +207,15 @@ func (runner *MacroRunner) captureRelayEdge(evidence CommandEvidence) {
 
 // StartBoardRecording uses the firmware-owned circular RAM ring. The board
 // continues capturing when the host disconnects; stopping imports a named copy.
-func (runner *MacroRunner) StartBoardRecording(ctx context.Context, name, category, color string) (MacroRecordingState, error) {
+func (runner *MacroRunner) StartBoardRecording(ctx context.Context, name, category, color string, selections ...CaptureSelection) (MacroRecordingState, error) {
 	if !runner.runtime.Snapshot().Connected {
 		return MacroRecordingState{}, errors.New("device is not connected")
 	}
-	state, err := runner.startRecording(name, category, color, macroModeMCU)
+	selection, err := runner.validateCaptureSelection(firstCaptureSelection(selections), macroModeMCU, true)
+	if err != nil {
+		return MacroRecordingState{}, err
+	}
+	state, err := runner.startRecording(name, category, color, macroModeMCU, selection)
 	if err != nil {
 		return state, err
 	}
@@ -238,7 +243,7 @@ func (runner *MacroRunner) StartBoardRecording(ctx context.Context, name, catego
 
 // ImportBoardRecording recovers retained board RAM after a host restart without
 // issuing RECORD BEGIN (which would replace the retained take).
-func (runner *MacroRunner) ImportBoardRecording(name, category, color string) (appconfig.Macro, error) {
+func (runner *MacroRunner) ImportBoardRecording(name, category, color string, selections ...CaptureSelection) (appconfig.Macro, error) {
 	status, err := runner.queryBoard(context.Background())
 	if err != nil {
 		return appconfig.Macro{}, err
@@ -246,7 +251,11 @@ func (runner *MacroRunner) ImportBoardRecording(name, category, color string) (a
 	if status.State != native.MacroRecorded && status.State != native.MacroRecording {
 		return appconfig.Macro{}, errors.New("board has no retained recording")
 	}
-	if _, err := runner.startRecording(name, category, color, macroModeMCU); err != nil {
+	selection, err := runner.validateCaptureSelection(firstCaptureSelection(selections), macroModeMCU, true)
+	if err != nil {
+		return appconfig.Macro{}, err
+	}
+	if _, err := runner.startRecording(name, category, color, macroModeMCU, selection); err != nil {
 		return appconfig.Macro{}, err
 	}
 	runner.recordMu.Lock()
@@ -291,6 +300,14 @@ func (runner *MacroRunner) collectBoardRecording(ctx context.Context, save bool)
 		return err
 	}
 	runner.recordMu.Lock()
+	var filtered []appconfig.MacroStep
+	var previous byte
+	for index, step := range steps {
+		mask := byte(step.Value)
+		filtered = append(filtered, selectedRelaySteps(step.AtUS, previous, mask, index == 0, runner.recordMacro.BoardProfileMode, runner.recording.CaptureSelection)...)
+		previous = mask
+	}
+	steps = filtered
 	for index := range steps {
 		if uint64(steps[index].AtUS)+uint64(runner.recordOffsetUS) > 0x7fffffff {
 			runner.recordMu.Unlock()

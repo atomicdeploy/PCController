@@ -263,6 +263,8 @@ type Macro struct {
 	BoardProfileKey     string      `json:"board_profile_key,omitempty"`
 	BoardProfileMode    string      `json:"board_profile_mode,omitempty"`
 	Steps               []MacroStep `json:"steps"`
+	RepeatCount         *uint16     `json:"repeat_count,omitempty"`
+	RepeatIntervalMS    uint32      `json:"repeat_interval_ms,omitempty"`
 }
 
 // MacroStep describes one precisely timed macro operation.
@@ -271,31 +273,29 @@ type MacroStep struct {
 	AtUS uint32 `json:"at_us,omitempty"`
 	Kind string `json:"kind"`
 
-	Target           byte    `json:"target,omitempty"`
-	Value            uint16  `json:"value,omitempty"`
-	DurationMS       uint16  `json:"duration_ms,omitempty"`
-	ToValue          *uint16 `json:"to_value,omitempty"`
-	Easing           string  `json:"easing,omitempty"`
-	SampleRateHz     byte    `json:"sample_rate_hz,omitempty"`
-	RepeatCount      uint16  `json:"repeat_count,omitempty"`
-	RepeatIntervalMS uint32  `json:"repeat_interval_ms,omitempty"`
-	FrequencyHz      uint16  `json:"frequency_hz,omitempty"`
-	Text             string  `json:"text,omitempty"`
-	Destination      string  `json:"destination,omitempty"`
-	Code             uint32  `json:"code,omitempty"`
-	Bits             byte    `json:"bits,omitempty"`
-	Protocol         byte    `json:"protocol,omitempty"`
-	PulseUS          uint16  `json:"pulse_us,omitempty"`
-	Red              byte    `json:"red,omitempty"`
-	Green            byte    `json:"green,omitempty"`
-	Blue             byte    `json:"blue,omitempty"`
-	Brightness       byte    `json:"brightness,omitempty"`
-	ToRed            *byte   `json:"to_red,omitempty"`
-	ToGreen          *byte   `json:"to_green,omitempty"`
-	ToBlue           *byte   `json:"to_blue,omitempty"`
-	ToBrightness     *byte   `json:"to_brightness,omitempty"`
-	Opcode           byte    `json:"opcode,omitempty"`
-	PayloadHex       string  `json:"payload_hex,omitempty"`
+	Target       byte    `json:"target,omitempty"`
+	Value        uint16  `json:"value,omitempty"`
+	DurationMS   uint16  `json:"duration_ms,omitempty"`
+	ToValue      *uint16 `json:"to_value,omitempty"`
+	Easing       string  `json:"easing,omitempty"`
+	SampleRateHz byte    `json:"sample_rate_hz,omitempty"`
+	FrequencyHz  uint16  `json:"frequency_hz,omitempty"`
+	Text         string  `json:"text,omitempty"`
+	Destination  string  `json:"destination,omitempty"`
+	Code         uint32  `json:"code,omitempty"`
+	Bits         byte    `json:"bits,omitempty"`
+	Protocol     byte    `json:"protocol,omitempty"`
+	PulseUS      uint16  `json:"pulse_us,omitempty"`
+	Red          byte    `json:"red,omitempty"`
+	Green        byte    `json:"green,omitempty"`
+	Blue         byte    `json:"blue,omitempty"`
+	Brightness   byte    `json:"brightness,omitempty"`
+	ToRed        *byte   `json:"to_red,omitempty"`
+	ToGreen      *byte   `json:"to_green,omitempty"`
+	ToBlue       *byte   `json:"to_blue,omitempty"`
+	ToBrightness *byte   `json:"to_brightness,omitempty"`
+	Opcode       byte    `json:"opcode,omitempty"`
+	PayloadHex   string  `json:"payload_hex,omitempty"`
 	// ActionIDs preserves the semantic meaning observed alongside the exact
 	// applied relay mask. Playback continues to use the mask so old and new
 	// firmware remain byte-for-byte faithful.
@@ -876,6 +876,15 @@ func (value Config) Validate() error {
 			return fmt.Errorf("macros[%d].id %d is duplicated", index, macro.ID)
 		}
 		ids[macro.ID] = true
+		if _, _, _, err := macro.Repetition(); err != nil {
+			return fmt.Errorf("macros[%d]: %w", index, err)
+		}
+		if macro.RepeatCount != nil && (*macro.RepeatCount < 1 || *macro.RepeatCount > 1000) {
+			return fmt.Errorf("macros[%d].repeat_count must be 1..1000", index)
+		}
+		if macro.RepeatIntervalMS > 3_600_000 {
+			return fmt.Errorf("macros[%d].repeat_interval_ms must be 0..3600000", index)
+		}
 		name := strings.ToLower(strings.TrimSpace(macro.Name))
 		if name == "" {
 			return fmt.Errorf("macros[%d].name is required", index)
@@ -952,12 +961,6 @@ func (value Config) Validate() error {
 			}
 			if step.SampleRateHz > 60 {
 				return fmt.Errorf("macros[%d].steps[%d].sample_rate_hz must be 0..60", index, stepIndex)
-			}
-			if step.RepeatCount > 1000 {
-				return fmt.Errorf("macros[%d].steps[%d].repeat_count must be 0..1000", index, stepIndex)
-			}
-			if step.RepeatIntervalMS > 3_600_000 {
-				return fmt.Errorf("macros[%d].steps[%d].repeat_interval_ms must be 0..3600000", index, stepIndex)
 			}
 			transitionColor := step.ToRed != nil || step.ToGreen != nil || step.ToBlue != nil || step.ToBrightness != nil
 			if (step.ToValue != nil || transitionColor) && step.DurationMS == 0 {

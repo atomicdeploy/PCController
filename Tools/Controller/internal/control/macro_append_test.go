@@ -18,7 +18,7 @@ func TestAppendRecordingPreservesIdentityAndExistingSequence(t *testing.T) {
 	seed := appconfig.Macro{ID: 8, Name: "existing", Category: "Cinema", Icon: "seat", Color: "blue", Mode: "host", TimingToleranceUS: 1234, KeepOutputsOnCancel: true, Steps: prefix}
 	config.Macros = []appconfig.Macro{seed}
 	runner := macroTestRunner(&config, nil)
-	if _, err := runner.StartAppendingRecording(context.Background(), "effect:8", "automatic"); err != nil {
+	if _, err := runner.StartAppendingRecording(context.Background(), "effect:8", "automatic", CaptureSelection{All: true}); err != nil {
 		t.Fatal(err)
 	}
 	base := time.Now()
@@ -46,7 +46,7 @@ func TestAppendRecordingDiscardAndClearedSequence(t *testing.T) {
 	seed := appconfig.Macro{ID: 3, Name: "take", Color: "green", Mode: "auto", Steps: []appconfig.MacroStep{{AtUS: 500000, Kind: "pwm", Target: 1, Value: 32}}}
 	config.Macros = []appconfig.Macro{seed}
 	runner := macroTestRunner(&config, nil)
-	if _, err := runner.StartAppendingRecording(context.Background(), "3", "automatic"); err != nil {
+	if _, err := runner.StartAppendingRecording(context.Background(), "3", "automatic", CaptureSelection{All: true}); err != nil {
 		t.Fatal(err)
 	}
 	runner.captureCommand(CommandEvidence{Opcode: native.OpPWMSet, Payload: []byte{1, 64, 0}, ObservedAt: time.Now()})
@@ -58,7 +58,7 @@ func TestAppendRecordingDiscardAndClearedSequence(t *testing.T) {
 	}
 	// Clearing in the existing editor is the replacement workflow; no new ID.
 	config.Macros[0].Steps = nil
-	if _, err := runner.StartAppendingRecording(context.Background(), "effect:3", "device-clock"); err != nil {
+	if _, err := runner.StartAppendingRecording(context.Background(), "effect:3", "device-clock", CaptureSelection{All: true}); err != nil {
 		t.Fatal(err)
 	}
 	runner.captureCommand(CommandEvidence{Opcode: native.OpPWMSet, Payload: []byte{1, 64, 0}, Timed: true, DeviceMicros: 0xFFFFFF00})
@@ -77,7 +77,7 @@ func TestAppendRecordingDoesNotOverwriteConcurrentEditOrDeletion(t *testing.T) {
 		config := appconfig.Defaults()
 		config.Macros = []appconfig.Macro{{ID: 3, Name: "take", Color: "green", Mode: "auto", Steps: []appconfig.MacroStep{{Kind: "pwm", Target: 1, Value: 32}}}}
 		runner := macroTestRunner(&config, nil)
-		if _, err := runner.StartAppendingRecording(context.Background(), "3", "automatic"); err != nil {
+		if _, err := runner.StartAppendingRecording(context.Background(), "3", "automatic", CaptureSelection{All: true}); err != nil {
 			t.Fatal(err)
 		}
 		runner.captureCommand(CommandEvidence{Opcode: native.OpPWMSet, Payload: []byte{1, 64, 0}, ObservedAt: time.Now()})
@@ -103,9 +103,9 @@ func TestAppendRecordingDoesNotOverwriteConcurrentEditOrDeletion(t *testing.T) {
 
 func TestAppendRecordingUsesFullAuthoredEnd(t *testing.T) {
 	for _, kind := range []string{"relay", "pwm", "rgb"} {
-		steps := []appconfig.MacroStep{{AtUS: 100000, Kind: kind, Target: 1, Value: 1, DurationMS: 100, RepeatCount: 3, RepeatIntervalMS: 250}}
+		steps := []appconfig.MacroStep{{AtUS: 100000, Kind: kind, Target: 1, Value: 1, DurationMS: 100}}
 		end, err := recordingSequenceEnd(steps)
-		if err != nil || end != 700000 {
+		if err != nil || end != 200000 {
 			t.Fatalf("%s end=%d err=%v", kind, end, err)
 		}
 	}
@@ -131,7 +131,7 @@ func TestAppendRecordingBoardRetainedDownloadPreservesPrefix(t *testing.T) {
 		}
 		return native.Frame{Opcode: native.OpACK}, nil
 	}
-	if _, err := runner.StartAppendingRecording(context.Background(), "effect:3", "board-retained"); err != nil {
+	if _, err := runner.StartAppendingRecording(context.Background(), "effect:3", "board-retained", CaptureSelection{All: true}); err != nil {
 		t.Fatal(err)
 	}
 	macro, err := runner.StopRecording(true)

@@ -50,11 +50,11 @@ func TestCompileMacroEncodesOrdinaryOpcodesWithExactOffsets(t *testing.T) {
 }
 
 func TestTimelineBooleanCueExpandsDurationAndRepetition(t *testing.T) {
-	expanded, err := expandMacroTimeline([]appconfig.MacroStep{{
+	count := uint16(3)
+	expanded, err := expandEffectTimeline(appconfig.Macro{RepeatCount: &count, RepeatIntervalMS: 250, Steps: []appconfig.MacroStep{{
 		Kind: "relay", Target: 5, Value: 1, DurationMS: 100,
-		RepeatCount: 3, RepeatIntervalMS: 250,
 		ActionIDs: []string{"relay.6.on"},
-	}})
+	}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestTimelineBooleanCueExpandsDurationAndRepetition(t *testing.T) {
 		if expanded[index].AtUS != wantDue[index] || expanded[index].Value != wantValue[index] {
 			t.Fatalf("step %d=%#v, want at=%d value=%d", index, expanded[index], wantDue[index], wantValue[index])
 		}
-		if expanded[index].RepeatCount != 0 || expanded[index].DurationMS != 0 {
+		if expanded[index].DurationMS != 0 {
 			t.Fatalf("runtime step retained authoring fields: %#v", expanded[index])
 		}
 		wantAction := "relay.6.on"
@@ -146,7 +146,7 @@ func macroTestRunner(config *appconfig.Config, saveError *error) *MacroRunner {
 func TestHostRecordingMixedOutputsRoundTripsNamedPlayback(t *testing.T) {
 	config := appconfig.Defaults()
 	runner := macroTestRunner(&config, nil)
-	if _, err := runner.StartRecording("mixed prototype", "tests", "green"); err != nil {
+	if _, err := runner.StartRecording("mixed prototype", "tests", "green", CaptureSelection{All: true}); err != nil {
 		t.Fatal(err)
 	}
 	text, _ := native.DisplayTextPayload(native.DisplaySegments, 100, "TEST")
@@ -226,7 +226,7 @@ func TestMacroSaveFailureAndEmptySaveRetainTake(t *testing.T) {
 	config := appconfig.Defaults()
 	var saveErr error
 	runner := macroTestRunner(&config, &saveErr)
-	if _, err := runner.StartRecording("retained", "", ""); err != nil {
+	if _, err := runner.StartRecording("retained", "", "", CaptureSelection{All: true}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := runner.StopRecording(true); err == nil || !runner.RecordingState().Active {
@@ -325,7 +325,7 @@ func TestMacroRecorderUsesWrappingMCUAcknowledgementDeltas(t *testing.T) {
 			return config.Validate()
 		},
 	)
-	if _, err := runner.StartMCURecording("lift", "motion", "purple"); err != nil {
+	if _, err := runner.StartMCURecording("lift", "motion", "purple", CaptureSelection{All: true}); err != nil {
 		t.Fatal(err)
 	}
 	runner.captureCommand(CommandEvidence{
@@ -368,7 +368,7 @@ func TestBasicHostRecorderIgnoresHousekeepingAndUsesObservedDeltas(t *testing.T)
 			return config.Validate()
 		},
 	)
-	state, err := runner.StartRecording("quick-motion", "prototype", "green")
+	state, err := runner.StartRecording("quick-motion", "prototype", "green", CaptureSelection{All: true})
 	if err != nil {
 		t.Fatal(err)
 	}

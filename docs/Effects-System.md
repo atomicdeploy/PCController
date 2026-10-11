@@ -132,10 +132,56 @@ parameter schema. A control is offered only when its capability is present.
 Timeline authoring metadata is stored with the authoritative effect. Boolean
 and motion cues use `duration_ms` to generate a deterministic release/stop.
 PWM and RGB/addressable cues may add a target value or target color,
-`easing`, and a bounded `sample_rate_hz`. Any cue may add `repeat_count` and
-`repeat_interval_ms`. PCController expands these editor-friendly blocks into
+`easing`, and a bounded `sample_rate_hz`. Sequence effects, not their steps,
+carry optional `repeat_count` (omitted means once; explicit 1–1000) and
+`repeat_interval_ms` (start-to-start; zero means the full base span). An explicit
+interval cannot be shorter than the base span. PCController validates total
+time and expanded command capacity, then expands these editor-friendly blocks into
 ordinary acknowledged commands only in the volatile run plan; export/import
 retains the editable curve and repetition data.
+
+Catalog `base_duration_ms` is the derived one-iteration span; `duration_ms` is
+the derived complete repeated span. Neither overrides the authored step times.
+Zero-span repetition needs an explicit nonzero interval. Retired per-step
+repeat fields are rejected, not silently ignored, migrated or aliased.
+
+## Explicit recording selection
+
+`effect record capabilities` returns JSON with advertised `controls` and
+`opcodes` (`opcode`, `name`, `capture_modes`). Capture modes are `automatic`,
+`device-clock`, and `board-retained`. Consumers fetch these when opening a
+chooser rather than inventing keys, numeric opcodes or per-clock polls.
+
+All command transports share these typed JSON-in-hex requests:
+
+| Command | JSON input |
+| --- | --- |
+| `effect record start-json JSON_HEX` | `name`, optional `category`/`color`/`capture_mode`, `capture_selection` |
+| `effect record append-json JSON_HEX` | `reference`, optional `capture_mode`, `capture_selection`; metadata inherited |
+| `effect record import-json JSON_HEX` | New name/metadata and selection for the retained board take |
+| `effect record selection JSON_HEX` | New selection for an active host/device-clock take, never a retained ring |
+| `effect record status-json` | No input; current typed recording state |
+
+Example request before hex encoding:
+
+```json
+{"reference":"effect:3","capture_mode":"automatic","capture_selection":{"all":false,"control_keys":["seat.a","pwm.2"],"opcodes":[]}}
+```
+
+The shared `controller.command` carrier returns serialized JSON in `output` for
+these commands. Recording state exposes `capture_selection` and start-bound
+`capabilities`. Empty/omitted selection means **none**, not all; explicit `all`
+selects eligible evidence for the mode. Control keys and raw opcodes are ORed.
+Raw opcodes cover all of their targets and must be shown as broad-scope choices.
+Relay selection records timestamped applied edges, not command intentions:
+partial seat/relay selection emits targeted operations, preserving unselected
+outputs rather than replaying a zero-filled full mask. Partial PWM all-off
+becomes zero commands only for selected channels. Board-retained selection is
+limited to the relay tail; unsupported choices fail before starting capture.
+Excluded ring entries can still consume the board's bounded capture capacity.
+Changing active selection affects future evidence only; already captured steps
+remain. Safety cancellation/cleanup retains its existing scope and is not
+weakened by a recorder filter. No physical timing claim follows from selection.
 
 Semantic action IDs are preferred over physical relay numbers. Exact applied
 relay masks may still be retained as recording evidence so playback remains

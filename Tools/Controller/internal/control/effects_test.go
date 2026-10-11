@@ -35,15 +35,17 @@ func TestEffectUpsertJSONPersistsTheCompleteSequenceDefinition(t *testing.T) {
 		},
 	})
 	fadeTarget := uint16(3072)
+	repeats := uint16(2)
 	effect := EffectDescriptor{
 		ID: "12", Name: "Cinema motion", Category: "Motion", Icon: "seat",
 		Kind: "sequence", Engine: "host", Editable: true,
+		RepeatCount: &repeats, RepeatIntervalMS: 3000,
 		Steps: []appconfig.MacroStep{
 			{Kind: "relay-mask", Value: 2, ActionIDs: []string{"seat.a.up"}},
 			{AtUS: 750_000, Kind: "relay-mask", ActionIDs: []string{"seat.a.stop"}},
 			{AtUS: 900_000, Kind: "display", Text: "DONE", Destination: "segments", DurationMS: 500},
 			{AtUS: 1_000_000, Kind: "rf", Code: 0x123456, Bits: 24, Protocol: 1, PulseUS: 350},
-			{AtUS: 1_250_000, Kind: "pwm", Target: 11, Value: 128, ToValue: &fadeTarget, DurationMS: 800, Easing: "ease-in-out", SampleRateHz: 30, RepeatCount: 2, RepeatIntervalMS: 1_000},
+			{AtUS: 1_250_000, Kind: "pwm", Target: 11, Value: 128, ToValue: &fadeTarget, DurationMS: 800, Easing: "ease-in-out", SampleRateHz: 30},
 		},
 		Properties: map[string]interface{}{
 			"color": "violet", "timing_tolerance_us": 2500,
@@ -67,7 +69,7 @@ func TestEffectUpsertJSONPersistsTheCompleteSequenceDefinition(t *testing.T) {
 	if got.Steps[0].ActionIDs[0] != "seat.a.up" || got.Steps[2].Text != "DONE" || got.Steps[3].Code != 0x123456 {
 		t.Fatalf("saved sequence lost step fields: %+v", got.Steps)
 	}
-	if got.Steps[4].ToValue == nil || *got.Steps[4].ToValue != fadeTarget || got.Steps[4].Easing != "ease-in-out" || got.Steps[4].RepeatCount != 2 {
+	if got.Steps[4].ToValue == nil || *got.Steps[4].ToValue != fadeTarget || got.Steps[4].Easing != "ease-in-out" || got.RepeatCount == nil || *got.RepeatCount != 2 || got.RepeatIntervalMS != 3000 {
 		t.Fatalf("saved sequence lost editable timeline fields: %+v", got.Steps[4])
 	}
 

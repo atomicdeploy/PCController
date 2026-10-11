@@ -21,22 +21,25 @@ import (
 // strip-stream uses the host renderer. Both are PCController-owned entries and
 // are addressed through the same stable reference.
 type EffectDescriptor struct {
-	Reference     string                 `json:"reference"`
-	ID            string                 `json:"id"`
-	Name          string                 `json:"name"`
-	Category      string                 `json:"category,omitempty"`
-	Icon          string                 `json:"icon,omitempty"`
-	GroupIcon     string                 `json:"group_icon,omitempty"`
-	Description   string                 `json:"description,omitempty"`
-	Kind          string                 `json:"kind"`
-	Engine        string                 `json:"engine"`
-	Editable      bool                   `json:"editable"`
-	DurationMS    int                    `json:"duration_ms"`
-	DefaultFPS    int                    `json:"default_fps,omitempty"`
-	DefaultPixels int                    `json:"default_pixels,omitempty"`
-	Program       appconfig.StripProgram `json:"program,omitempty"`
-	Steps         []appconfig.MacroStep  `json:"steps,omitempty"`
-	Properties    map[string]interface{} `json:"properties,omitempty"`
+	Reference        string                 `json:"reference"`
+	ID               string                 `json:"id"`
+	Name             string                 `json:"name"`
+	Category         string                 `json:"category,omitempty"`
+	Icon             string                 `json:"icon,omitempty"`
+	GroupIcon        string                 `json:"group_icon,omitempty"`
+	Description      string                 `json:"description,omitempty"`
+	Kind             string                 `json:"kind"`
+	Engine           string                 `json:"engine"`
+	Editable         bool                   `json:"editable"`
+	DurationMS       int                    `json:"duration_ms"`
+	BaseDurationMS   int                    `json:"base_duration_ms,omitempty"`
+	DefaultFPS       int                    `json:"default_fps,omitempty"`
+	DefaultPixels    int                    `json:"default_pixels,omitempty"`
+	Program          appconfig.StripProgram `json:"program,omitempty"`
+	Steps            []appconfig.MacroStep  `json:"steps,omitempty"`
+	RepeatCount      *uint16                `json:"repeat_count,omitempty"`
+	RepeatIntervalMS uint32                 `json:"repeat_interval_ms,omitempty"`
+	Properties       map[string]interface{} `json:"properties,omitempty"`
 }
 
 // effectDocument is the portable PCController-owned effect library format.
@@ -95,25 +98,18 @@ func EffectCatalogWithGroups(macros []appconfig.Macro, strips []appconfig.StripE
 		return ""
 	}
 	for _, macro := range macros {
-		duration := 0
-		for _, step := range macro.Steps {
-			repeats := int(step.RepeatCount)
-			if repeats < 1 {
-				repeats = 1
-			}
-			interval := int(step.RepeatIntervalMS)
-			if repeats > 1 && interval == 0 {
-				interval = max(int(step.DurationMS), 1)
-			}
-			end := int(step.AtUS/1000) + (repeats-1)*interval + int(step.DurationMS)
-			if end > duration {
-				duration = end
-			}
-		}
+		count, _, totalUS, _ := macro.Repetition() // Persisted config is validated.
+		duration := int((uint64(totalUS) + 999) / 1000)
+		base := macro
+		base.RepeatCount = nil
+		base.RepeatIntervalMS = 0
+		_, _, baseUS, _ := base.Repetition()
 		result = append(result, EffectDescriptor{
 			Reference: "effect:" + strconv.Itoa(int(macro.ID)), ID: strconv.Itoa(int(macro.ID)),
 			Name: macro.Name, Category: macro.Category, Icon: macro.Icon, GroupIcon: groupIcon(macro.Category), Kind: "sequence", Engine: macro.Mode,
 			Editable: true, DurationMS: duration, Steps: append([]appconfig.MacroStep(nil), macro.Steps...),
+			RepeatCount: &count, RepeatIntervalMS: macro.RepeatIntervalMS,
+			BaseDurationMS: int((uint64(baseUS) + 999) / 1000),
 			Properties: map[string]interface{}{
 				"color": macro.Color, "label": macro.Label, "lcd_message": macro.LCDMessage,
 				"timing_tolerance_us":    macro.TimingToleranceUS,
@@ -364,6 +360,7 @@ func importEffectDocument(document effectDocument, replace bool, updateHostConfi
 					BoardProfileKey:     effectPropertyString(effect, "board_profile_key", ""),
 					BoardProfileMode:    effectPropertyString(effect, "board_profile_mode", ""),
 					Steps:               append([]appconfig.MacroStep(nil), effect.Steps...),
+					RepeatCount:         effect.RepeatCount, RepeatIntervalMS: effect.RepeatIntervalMS,
 				}
 				if macro.Mode == "" {
 					macro.Mode = "auto"
@@ -379,6 +376,9 @@ func importEffectDocument(document effectDocument, replace bool, updateHostConfi
 					macros = append(macros, macro)
 				}
 			case "strip-stream":
+				if effect.RepeatCount != nil || effect.RepeatIntervalMS != 0 {
+					return errors.New("repeat settings apply to sequence effects, not strip-stream definitions")
+				}
 				strip := appconfig.StripEffect{
 					ID: id, Name: effect.Name, Category: effect.Category, Description: effect.Description,
 					Icon:    effect.Icon,
