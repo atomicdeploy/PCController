@@ -11,7 +11,12 @@ import (
 
 func TestExternalBeepPreservesContextDeadline(t *testing.T) {
 	original := externalBeepCommand
-	defer func() { externalBeepCommand = original }()
+	originalStop := externalBeepStop
+	defer func() {
+		externalBeepCommand = original
+		externalBeepStop = originalStop
+	}()
+	externalBeepStop = func(string) error { return nil }
 	externalBeepCommand = func(ctx context.Context, _ string, _ ...string) *exec.Cmd {
 		command := exec.CommandContext(ctx, os.Args[0], "-test.run=TestExternalBeepDeadlineHelper")
 		command.Env = append(os.Environ(), "PCCONTROLLER_BEEP_DEADLINE_HELPER=1")
