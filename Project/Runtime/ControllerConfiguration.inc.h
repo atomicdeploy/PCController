@@ -27,7 +27,11 @@ struct __attribute__((packed)) FirmwareIdentityRecord {
   uint32_t packedTimestamp;
 };
 const FirmwareIdentityRecord firmwareIdentity
+#if defined(__AVR__)
     __attribute__((section(".firmware_identity"), used)) = {
+#else
+    = {
+#endif
         0x44494350UL, static_cast<uint32_t>(PCCONTROLLER_BUILD_HASH),
         static_cast<uint32_t>(PCCONTROLLER_BUILD_TIMESTAMP)};
 static_assert(sizeof(FirmwareIdentityRecord) == 12,

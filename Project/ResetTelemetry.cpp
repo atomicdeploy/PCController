@@ -49,15 +49,13 @@ void captureResetCause()
 
 void captureResetCause() {
   uint8_t cause = MCUSR;
-  if (cause == 0
-#if !defined(__AVR_ATmega328P__)
-      && false
-#endif
-      ) {
+#if defined(__AVR_ATmega328P__)
+  if (cause == 0) {
     // Urboot preserves the pre-clear MCUSR byte in r2 across its app jump.
     register uint8_t urbootCause asm("r2");
     cause = urbootCause;
   }
+#endif
   capturedResetCause = cause;
   MCUSR = 0;
   wdt_disable();

@@ -376,11 +376,13 @@ void transferI2c(uint8_t sequence, const uint8_t *request, uint8_t length,
     }
   }
   if (response[0] == 0 && readLength != 0) {
-    const uint8_t received = i2cBus.requestFrom(address, readLength);
-    if (received != readLength) response[0] = 4; // Partial/unavailable is not success.
-    while (response[2] < readLength && i2cBus.available() > 0) {
-      response[3 + response[2]++] = i2cBus.read();
-    }
+    // requestFrom returns the exact bounded buffered byte count; no second
+    // availability/length loop is needed. Preserve partial bytes on failure.
+    response[2] = i2cBus.requestFrom(address, readLength);
+    uint8_t *next = response + 3;
+    for (uint8_t remaining = response[2]; remaining != 0; --remaining)
+      *next++ = i2cBus.read();
+    if (response[2] != readLength) response[0] = 4; // Partial/unavailable is not success.
   }
   appProtocol.send(ControllerProtocol::I2cTransferResponse, sequence, response,
                    static_cast<uint8_t>(3 + response[2]));

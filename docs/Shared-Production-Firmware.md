@@ -69,7 +69,10 @@ node Tools/Firmware/targets.mjs build mega2560 expanded-autonomous
 
 This lane verifies installed core/FQBN/capacities before compilation, reuses the
 configured Arduino CLI cache and records sources/artifact checksums and HEX
-boundaries. Changed sources during compilation invalidate delivery evidence.
+boundaries, resolved CLI/core/radio-library versions and the fixed PCID record.
+CLI and radio-library resolution must match the configured toolchain lock;
+`ARDUINO_CLI` / `ARDUINO_CLI_CONFIG_FILE` select an existing installation.
+Changed sources during compilation invalidate delivery evidence.
 It never opens a serial device, writes fuses or provisions another toolchain
 copy. CI installs the declared Mega core in the existing CLI cache and preserves
 build-only evidence separately from the eleven commissioned distribution packages.

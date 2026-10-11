@@ -4,6 +4,7 @@
 #include <chrono>
 #include <fstream>
 #include <cstdlib>
+#include <string>
 #include <thread>
 #ifdef _WIN32
 #define NOUSER

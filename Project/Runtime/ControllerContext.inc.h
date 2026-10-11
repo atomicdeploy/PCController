@@ -4,12 +4,18 @@
 // -----------------------------------------------------------------------------
 
 // Filtered readings in native integer units: mV, mA, mW, and centi-degrees C.
+// AVR members already have byte alignment. Native telemetry needs an explicit
+// packed member type, including its initialized unavailable sentinels.
+#if defined(__AVR__)
 struct SensorState {
-  int32_t supplyMilliVolts;
-  int32_t busMilliVolts;
-  int32_t currentMilliAmps;
-  int32_t powerMilliWatts;
-  int16_t temperatureCentiC[2];
+#else
+struct __attribute__((packed)) SensorState {
+#endif
+  int32_t supplyMilliVolts = INVALID_I32;
+  int32_t busMilliVolts = INVALID_I32;
+  int32_t currentMilliAmps = INVALID_I32;
+  int32_t powerMilliWatts = INVALID_I32;
+  int16_t temperatureCentiC[2] = {INVALID_I16, INVALID_I16};
 };
 static_assert(sizeof(SensorState) == 20, "Sensor telemetry wire layout changed");
 
@@ -68,8 +74,7 @@ AutomationExecutor automationExecutor(boardAutomations,
 // Front-panel key order intentionally matches MenuAction IDs 0..3.
 Key menuKeys[4];
 
-SensorState sensors = {INVALID_I32, INVALID_I32, INVALID_I32, INVALID_I32,
-                       {INVALID_I16, INVALID_I16}};
+SensorState sensors;
 RadioState radioState;
 
 // Smooths normal readings while allowing invalid/HOT state changes immediately.

@@ -104,6 +104,15 @@ test("repository URLs have narrow product and provenance allowlists", () => {
   );
 });
 
+test("shared firmware guide permits only product issues and the selected core", () => {
+  const path = "docs/Shared-Production-Firmware.md";
+  const context = { repository: "atomicdeploy/PCController" };
+  for (const repository of ["atomicdeploy/PCController", "MCUdude/MegaCore"]) {
+    assert.deepEqual(privacyFindings(path, `https://github.com/${repository}`, context), []);
+  }
+  assert.equal(privacyFindings(path, "https://github.com/other/unreviewed", context)[0].kind, "unreviewed repository reference");
+});
+
 test("reviewed engineering roadmap permits only its named public sources", () => {
   const path = "docs/Media-Timing-and-MCU-Expansion.md";
   const context = { repository: "atomicdeploy/PCController" };

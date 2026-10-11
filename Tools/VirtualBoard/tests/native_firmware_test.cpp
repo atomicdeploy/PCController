@@ -78,6 +78,8 @@ int main() {
     require(std::any_of(panel.begin(),panel.end(),[](const auto &f){return f.opcode==wire::FrontPanelResponse && f.payload.size()==47;}),"production front-panel wire shape");
     auto unconnected=request(wire::I2cTransfer,32,{0x55,0,0,0});
     require(std::any_of(unconnected.begin(),unconnected.end(),[](const auto &f){return f.opcode==wire::I2cTransferResponse && f.payload[0]!=0;}),"unconnected I2C must not synthesize successful reads");
+    auto missingRead=request(wire::I2cTransfer,33,{0x55,0,0,3});
+    require(std::any_of(missingRead.begin(),missingRead.end(),[](const auto &f){return f.opcode==wire::I2cTransferResponse && f.payload[0]==4 && f.payload[2]==0;}),"unavailable I2C read must report failure and exact byte count");
     board.console("tm1637 off"); receive(1100000);
     require(!board.outputSnapshot().tm1637Detected,"missing TM1637 ACK detection");
     board.console("tm1637 on"); receive(1100000);

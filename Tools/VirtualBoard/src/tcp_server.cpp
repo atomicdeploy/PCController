@@ -116,14 +116,14 @@ void printOutputChanges(const OutputSnapshot &before,
     const std::uint8_t bit = static_cast<std::uint8_t>(1U << index);
     if ((changed & bit) != 0) {
       std::cout << (((after.relayMask & bit) != 0) ? "ON:" : "OFF:")
-                << static_cast<unsigned>(index + 1U) << '\n';
+                << static_cast<unsigned>(index + 1U) << std::endl;
     }
   }
   if (!logPwm) return;
   for (std::size_t channel = 0; channel < after.pwm.size(); ++channel) {
     if (before.pwm[channel] != after.pwm[channel]) {
       std::cout << "PWM" << (channel + 1U) << ':' << after.pwm[channel]
-                << '\n';
+                << std::endl;
     }
   }
 }
