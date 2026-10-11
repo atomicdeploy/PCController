@@ -5311,6 +5311,23 @@ func macroCommand(
 			return "", fmt.Errorf("usage: macro record start|start-mcu|start-board|import-board NAME [CATEGORY [COLOR]]|status|save|discard")
 		}
 		switch strings.ToLower(args[1]) {
+		case "start-json", "append-json", "import-json", "selection":
+			if len(args) != 3 {
+				return "", errors.New("usage: effect record start-json|append-json|selection JSON_HEX")
+			}
+			return runner.recordingJSONCommand(ctx, strings.ToLower(args[1]), args[2])
+		case "status-json":
+			if len(args) != 2 {
+				return "", errors.New("usage: effect record status-json")
+			}
+			data, _ := json.Marshal(runner.RecordingState())
+			return string(data), nil
+		case "capabilities":
+			if len(args) != 2 {
+				return "", errors.New("usage: effect record capabilities")
+			}
+			data, _ := json.Marshal(runner.recordingCapabilities())
+			return string(data), nil
 		case "append":
 			if len(args) < 3 || len(args) > 4 {
 				return "", errors.New("usage: effect record append REF [automatic|device-clock|board-retained]")

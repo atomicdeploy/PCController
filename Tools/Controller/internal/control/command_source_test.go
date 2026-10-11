@@ -44,7 +44,7 @@ func TestMCURecorderIgnoresBackgroundRGBButPreservesExplicitCommands(t *testing.
 		t.Run(name, func(t *testing.T) {
 			config := appconfig.Defaults()
 			runner := macroTestRunner(&config, nil)
-			if _, err := runner.StartMCURecording("clean-mcu", "tests", "green"); err != nil {
+			if _, err := runner.StartMCURecording("clean-mcu", "tests", "green", CaptureSelection{All: true}); err != nil {
 				t.Fatal(err)
 			}
 			publish := func(ctx context.Context, opcode byte, payload []byte, at uint32) {

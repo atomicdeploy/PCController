@@ -39,7 +39,7 @@ var macroPrimaryButtons = []macroButtonDefinition{
 	{key: "m", label: "M Catalog"},
 	{key: "n", label: "N New"},
 	{key: "l", label: "L New light"},
-	{key: "r", label: "R Record", tone: macroButtonGood},
+	{key: "r", label: "R Capture help"},
 	{key: "s", label: "S Save", tone: macroButtonGood},
 	{key: "d", label: "D Discard", tone: macroButtonDanger},
 	{key: "p", label: "P Play", tone: macroButtonGood},
@@ -313,10 +313,7 @@ func (model Model) macroShortcut(key string) (Model, tea.Cmd, bool) {
 			model.setNotice(fmt.Sprintf("Already recording %d/%s with %d steps", recording.ID, recording.Name, recording.Steps))
 			return model, nil, true
 		}
-		model.input.SetValue("effect record start ")
-		model.input.CursorEnd()
-		model.revealTerminal()
-		model.setNotice("Complete NAME [CATEGORY [COLOR]], then operate relay/motion, PWM, beep or display controls; host timing is used")
+		model.setNotice("Choose capture channels with effect record start-json in Console; the recording chooser is not available yet")
 		return model, nil, true
 	case "s":
 		if !model.macroRecordingState().Active {
@@ -539,7 +536,7 @@ func macroRecordingHelp(state control.MacroRecordingState) string {
 		}
 		return warnStyle.Render("Operate relay/motion, PWM, beep, display, RF or LED controls; housekeeping is ignored. S saves, D discards.")
 	}
-	return labelStyle.Render("R starts an adaptive live recording; playback chooses the most precise compatible clock. N creates a draft.")
+	return labelStyle.Render("R explains capture channel selection. N creates a draft.")
 }
 
 func macroTableHeader(width int) string {
@@ -601,17 +598,17 @@ func macroColumnWidths(width int) (int, int) {
 }
 
 func macroDefinitionDuration(macro appconfig.Macro) time.Duration {
-	var maximum uint32
-	for _, step := range macro.Steps {
-		due := step.AtUS
-		if due > maximum {
-			maximum = due
-		}
+	_, _, total, err := macro.Repetition()
+	if err != nil {
+		return -1
 	}
-	return time.Duration(maximum) * time.Microsecond
+	return time.Duration(total) * time.Microsecond
 }
 
 func formatMacroDuration(value time.Duration) string {
+	if value < 0 {
+		return "invalid"
+	}
 	if value <= 0 {
 		return "0s"
 	}

@@ -395,6 +395,7 @@ func apiMacros(source []appconfig.Macro) []controllerapi.Macro {
 			TimingToleranceUS:   macro.TimingToleranceUS,
 			KeepOutputsOnCancel: macro.KeepOutputsOnCancel,
 			Steps:               make([]controllerapi.MacroStep, len(macro.Steps)),
+			RepeatCount:         macro.RepeatCount, RepeatIntervalMS: macro.RepeatIntervalMS,
 		}
 		for stepIndex, step := range macro.Steps {
 			result[index].Steps[stepIndex] = controllerapi.MacroStep{
@@ -402,7 +403,6 @@ func apiMacros(source []appconfig.Macro) []controllerapi.Macro {
 				Target: step.Target, Value: step.Value,
 				DurationMS: step.DurationMS, ToValue: step.ToValue,
 				Easing: step.Easing, SampleRateHz: step.SampleRateHz,
-				RepeatCount: step.RepeatCount, RepeatIntervalMS: step.RepeatIntervalMS,
 				FrequencyHz: step.FrequencyHz,
 				Text:        step.Text, Destination: step.Destination,
 				Code: step.Code, Bits: step.Bits, Protocol: step.Protocol,

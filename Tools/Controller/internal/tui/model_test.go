@@ -2698,7 +2698,7 @@ func TestAutomationPageProvidesCompleteMacroWorkspace(t *testing.T) {
 		"EFFECTS & TRIGGERS", "TIMED EFFECTS", "LIGHTING EFFECTS", "output-demo", "door-notify", "PLAYBACK",
 		"Elapsed / Duration", "buffer 42/127 B", "accepted 95 B",
 		"last +267 µs", "faithful pending", "RECORDING",
-		"N New", "R Record", "C Cancel off", "K Cancel keep",
+		"N New", "R Capture help", "C Cancel off", "K Cancel keep",
 		"HOST PLATFORM & BRIDGES",
 	} {
 		if !strings.Contains(rendered, expected) {
@@ -2791,7 +2791,7 @@ func TestAutomationSearchAndKeyboardLifecycle(t *testing.T) {
 	model.input.SetValue("")
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
 	model = updated.(Model)
-	if got := model.input.Value(); got != "effect record start " {
+	if got := model.input.Value(); got != "" || !strings.Contains(model.notice, "start-json") {
 		t.Fatalf("record prompt=%q", got)
 	}
 }
@@ -2878,7 +2878,7 @@ func TestAutomationMouseButtonsAndLibrarySelection(t *testing.T) {
 		lipgloss.Width(buttonStyle.Render("L New light")) + 1
 	updated, command := model.handleContentClick(1, recordX)
 	model = updated.(Model)
-	if command != nil || model.input.Value() != "effect record start " {
+	if command != nil || model.input.Value() != "" || !strings.Contains(model.notice, "start-json") {
 		t.Fatalf("record mouse action command=%v input=%q", command, model.input.Value())
 	}
 	model.input.SetValue("")

@@ -30,6 +30,17 @@ function event(id: number, kind: string, metadata: Record<string, string> = {}):
 }
 
 describe('typed macro live state', () => {
+  it('requests an authoritative refresh when capture selection changes', () => {
+    const current = snapshot()
+    current.recording.active = true
+    current.recording.steps = 4
+    const changed = { ...event(20, 'macro.recording'), lifecycle: 'selection-changed', state: 'recording' }
+    expect(macroEventNeedsSnapshot(changed)).toBe(true)
+    const next = applyMacroEventToSnapshot(current, changed)
+    expect(next.recording.active).toBe(true)
+    expect(next.recording.steps).toBe(4)
+  })
+
   it('applies exact recording and playback delta evidence without polling', () => {
     const recording = applyMacroEventToSnapshot(snapshot(), {
       ...event(41, 'macro.recording.step', {

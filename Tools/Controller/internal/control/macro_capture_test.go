@@ -13,7 +13,7 @@ import (
 func TestHostRecordingGuardsStripClockAndRawUART(t *testing.T) {
 	config := appconfig.Defaults()
 	runner := macroTestRunner(&config, nil)
-	if _, err := runner.StartRecording("protected", "test", "green"); err != nil {
+	if _, err := runner.StartRecording("protected", "test", "green", CaptureSelection{All: true}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := runner.runtime.Request(context.Background(), native.OpAddressableLED, []byte{0}); err == nil || !strings.Contains(err.Error(), "WS2811") {
@@ -33,7 +33,7 @@ func TestHostRecordingGuardsStripClockAndRawUART(t *testing.T) {
 func TestHostCaptureUsesAppliedRelayClockNotUSBArrival(t *testing.T) {
 	config := appconfig.Defaults()
 	runner := macroTestRunner(&config, nil)
-	if _, err := runner.StartRecording("RF and PC", "test", "green"); err != nil {
+	if _, err := runner.StartRecording("RF and PC", "test", "green", CaptureSelection{All: true}); err != nil {
 		t.Fatal(err)
 	}
 	base := time.Now()
@@ -128,7 +128,7 @@ func TestRecordingBindsProfileAndAnnotatesAppliedRelayEvidence(t *testing.T) {
 		"serial:board-42": {Key: "cafe-cinema", Mode: appconfig.BoardModeCinemaSeatMotion},
 	}
 	runner := macroTestRunner(&config, nil)
-	state, err := runner.StartRecording("seats", "cinema", "violet")
+	state, err := runner.StartRecording("seats", "cinema", "violet", CaptureSelection{All: true})
 	if err != nil {
 		t.Fatal(err)
 	}
