@@ -161,14 +161,14 @@ void moveMenuCategory(bool forward, uint32_t at) {
 #endif
 #endif
 
-// Activates a stable page and optionally persists it as the boot default.
+// Activates a stable page; its high bit requests volatile host navigation.
 void setMenuPage(uint8_t page) {
-  menuPage = canonicalMenuPage(page);
+  menuPage = canonicalMenuPage(page & 0x7FU);
 #if PCCONTROLLER_MENU_HIERARCHY
   menuTreeState = menuCategory(menuPage);
 #endif
   ControllerSettings &settings = settingsStore.values();
-  if (settings.saveLastMenuPage() &&
+  if ((page & 0x80U) == 0 && settings.saveLastMenuPage() &&
 #if PCCONTROLLER_MENU_VISIBILITY
       settings.menuPageVisible(menuPage) &&
 #endif

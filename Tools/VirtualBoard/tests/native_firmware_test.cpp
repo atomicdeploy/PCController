@@ -20,6 +20,7 @@ int main() {
     };
     auto startup=receive();
     require(std::any_of(startup.begin(),startup.end(),[](const auto &f) {return f.opcode==wire::HelloResponse;}),"production startup HELLO missing");
+    require(std::any_of(startup.begin(),startup.end(),[](const auto &f) {return f.opcode==wire::HelloResponse && f.payload.size()==16 && f.payload[0]==4 && (f.payload[15]&0x40)!=0;}),"volatile menu capability missing");
     auto status=request(wire::GetStatus,1);
     auto found=std::find_if(status.begin(),status.end(),[](const auto &f) {return f.opcode==wire::StatusResponse && f.sequence==1;});
     require(found!=status.end() && found->payload.size()==48,"production telemetry ABI");
@@ -28,6 +29,15 @@ int main() {
     auto settings=request(wire::GetSettings,2);
     auto sf=std::find_if(settings.begin(),settings.end(),[](const auto &f) {return f.opcode==wire::SettingsResponse;});
     require(sf!=settings.end(),"shared EEPROM settings response");
+    const auto originalSettings=sf->payload;
+    auto volatileMenu=request(wire::MenuSetPage,38,{0x81});
+    require(std::any_of(volatileMenu.begin(),volatileMenu.end(),[](const auto &f) {return f.opcode==wire::Ack && f.sequence==38;}),"volatile menu request rejected");
+    receive(1500000);
+    auto afterMenu=request(wire::GetSettings,39);
+    auto settingsAfter=std::find_if(afterMenu.begin(),afterMenu.end(),[](const auto &f) {return f.opcode==wire::SettingsResponse;});
+    require(settingsAfter!=afterMenu.end() && settingsAfter->payload==originalSettings,"volatile mirrored navigation changed EEPROM settings");
+    auto invalidMenu=request(wire::MenuSetPage,40,{1,2});
+    require(std::any_of(invalidMenu.begin(),invalidMenu.end(),[](const auto &f) {return f.opcode==wire::ErrorResponse;}),"unknown menu request flags accepted");
     auto malformedSettings=request(wire::SetSettings,20,{3,0});
     require(std::any_of(malformedSettings.begin(),malformedSettings.end(),[](const auto &f){return f.opcode==wire::ErrorResponse && f.payload[1]==wire::BadPayload;}),"truncated settings rejected");
     // Production schema/CRC parser must recover from oversized and corrupt

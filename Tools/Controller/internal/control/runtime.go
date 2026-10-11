@@ -219,6 +219,8 @@ type Runtime struct {
 	openMu                 sync.Mutex
 	closeMu                sync.Mutex
 	detachMu               sync.Mutex
+	segmentCommandMu       sync.Mutex
+	segmentRevision        atomic.Uint64
 	mu                     sync.RWMutex
 	closeEpoch             uint64
 	closeInProgress        bool
@@ -1875,6 +1877,11 @@ func (runtime *Runtime) requestAtGenerationPriority(
 	payload []byte,
 	expected ...byte,
 ) (native.Frame, error) {
+	segmentUnlock, err := runtime.guardSegmentRequest(ctx, opcode, payload)
+	if err != nil {
+		return native.Frame{}, err
+	}
+	defer segmentUnlock()
 	if err := runtime.rejectMediaTimelineConflict(ctx, opcode); err != nil {
 		return native.Frame{}, err
 	}

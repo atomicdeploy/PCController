@@ -50,7 +50,6 @@ void sendHello(uint8_t sequence) {
       (1UL << 31) | // checksum-backed operator board name (up to 8 ASCII chars)
       0;
   // HelloPayload is the fixed build identity and capability response.
-#if PCCONTROLLER_ENABLE_BOARD_AUTOMATIONS
   struct __attribute__((packed)) HelloPayload {
     uint8_t schema;
     uint8_t boardKind;
@@ -59,18 +58,22 @@ void sendHello(uint8_t sequence) {
     uint32_t buildTimestamp;
     uint8_t featureProfile;
     uint8_t buildFeatures;
-  } payload = {4, 1, capabilities,
-               identityHash(), identityTimestamp(),
-               PCCONTROLLER_FEATURE_PROFILE, static_cast<uint8_t>(1U << 5)};
+  } payload;
+  payload.schema = 4;
+  payload.boardKind = 1;
+  payload.capabilities = capabilities;
+  payload.featureProfile = PCCONTROLLER_FEATURE_PROFILE;
+  payload.buildFeatures = static_cast<uint8_t>((1U << 6) |
+      (PCCONTROLLER_ENABLE_BOARD_AUTOMATIONS ? (1U << 5) : 0));
+#if defined(__AVR__) && !defined(__AVR_ATmega2560__)
+  // Copy the two contiguous, host-patchable identity fields in one flash
+  // read. Do not replace these with compile-time constants: the guarded host
+  // workflow can legitimately patch the fixed identity record after linking.
+  memcpy_P(&payload.buildHash, &firmwareIdentity.sourceHash, 8);
 #else
-  struct __attribute__((packed)) HelloPayload {
-    uint8_t schema;
-    uint8_t boardKind;
-    uint32_t capabilities;
-    uint32_t buildHash;
-    uint32_t buildTimestamp;
-  } payload = {3, 1, capabilities,
-               identityHash(), identityTimestamp()};
+  // Mega2560 identity is above the near-flash window; keep its far reader.
+  payload.buildHash = identityHash();
+  payload.buildTimestamp = identityTimestamp();
 #endif
   appProtocol.send(ControllerProtocol::HelloResponse, sequence,
                    reinterpret_cast<const uint8_t *>(&payload),
@@ -841,9 +844,10 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame,
       appEvents.key(payload[0], payload[1], InputEventSource::Host);
       goto acknowledged;
 
-    case MenuSetPage:
-      if (length < 1 || payload[0] >= PAGE_COUNT ||
-          (!PCCONTROLLER_ENABLE_RF_LEARNING && payload[0] == PAGE_RF)) {
+    case MenuSetPage: {
+      const uint8_t page = payload[0] & 0x7FU;
+      if (length != 1 || page >= PAGE_COUNT ||
+          (!PCCONTROLLER_ENABLE_RF_LEARNING && page == PAGE_RF)) {
         goto badPayload;
       }
       if (modeManager.current() == MODE_MOTION_CONTROL) {
@@ -853,8 +857,11 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame,
         restoreEditTransaction(frameNow);
         editTransactionActive = false;
       }
+      // The high bit selects volatile navigation; ordinary page IDs retain
+      // the configured save-last-page behavior. HELLO advertises this flag.
       setMenuPage(payload[0]);
       goto acknowledged;
+    }
 
     case DisplayText: {
       if (length < 4 || payload[0] > 5 || payload[3] > 40 ||

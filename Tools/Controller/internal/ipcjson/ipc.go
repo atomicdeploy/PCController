@@ -275,6 +275,7 @@ type Service struct {
 	SubscribeHostConfig func(context.Context) <-chan appconfig.Config
 	BuzzerRuntimeStatus func() appconfig.BuzzerRuntimeStatus
 	BridgeList          func() any
+	BoardMirror         func() BoardMirrorService
 	BridgeCall          func(context.Context, string, Request) (Response, error)
 	WebhookAdmin        func() WebhookAdminService
 	HotkeyStatus        func() any
@@ -667,6 +668,8 @@ func (service *Service) dispatch(
 	var result any
 	var err error
 	switch request.Method {
+	case "controller.mirror.configure", "controller.mirror.status", "controller.mirror.inspect", "controller.mirror.apply", "controller.mirror.resync":
+		result, err = service.dispatchMirror(ctx, request)
 	case "controller.media.playback.get":
 		result = service.Client.MediaPlayback()
 	case "controller.media.authority.get":
@@ -2401,6 +2404,17 @@ func remoteCapabilityAllowed(
 }
 
 func requestCapability(method string, params json.RawMessage) string {
+	method = strings.ToLower(strings.TrimSpace(method))
+	// Configuration is host-owned; mirror writes/resync are board commands.
+	// Read-only diagnostics must not grant write permission by association.
+	switch method {
+	case "controller.mirror.configure":
+		return capabilityHostConfig
+	case "controller.mirror.inspect", "controller.mirror.status":
+		return capabilityRead
+	case "controller.mirror.apply", "controller.mirror.resync":
+		return capabilityBoard
+	}
 	method = strings.ToLower(strings.TrimSpace(method))
 	switch method {
 	case "controller.event.next", "controller.event.latest", "controller.subscribe",

@@ -1626,8 +1626,34 @@ func (client *Client) Timeline(since time.Time, limit int) []TimelineEntry {
 
 // SetMenuPage navigates directly to one stable board menu ID.
 func (client *Client) SetMenuPage(ctx context.Context, page byte) error {
+	if page > 127 {
+		return errors.New("menu page must fit seven bits; use SetVolatileMenuPage for mirrored navigation")
+	}
 	return client.runtime.Command(ctx, native.OpMenuSetPage, []byte{page})
 }
+
+// SetVolatileMenuPage cannot silently fall back to the older EEPROM-writing
+// navigation request. A peer must advertise support in its live HELLO.
+func (client *Client) SetVolatileMenuPage(ctx context.Context, page byte) error {
+	if client.Snapshot().Hello.BuildFeatures&native.BuildFeatureVolatileMenu == 0 {
+		return errors.New("firmware does not advertise volatile menu navigation")
+	}
+	if page > 127 {
+		return errors.New("volatile menu page must fit seven bits")
+	}
+	return client.runtime.Command(ctx, native.OpMenuSetPage, []byte{page | 0x80})
+}
+
+// PresentMirrorSegments takes a bounded two-second presentation lease. It
+// changes cells only, never EEPROM brightness or physical detection state.
+func (client *Client) PresentMirrorSegments(ctx context.Context, cells [4]byte, revision uint64) error {
+	if client.Snapshot().Hello.Capabilities&native.CapabilityScheduledSegments == 0 {
+		return errors.New("firmware does not advertise scheduled segments")
+	}
+	return client.runtime.PresentMirrorSegments(ctx, cells, revision)
+}
+
+func (client *Client) SegmentRevision() uint64 { return client.runtime.SegmentRevision() }
 
 // BoardName reads the operator-assigned MCU EEPROM name.
 func (client *Client) BoardName(ctx context.Context) (BoardName, error) {

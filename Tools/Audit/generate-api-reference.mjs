@@ -91,6 +91,7 @@ const capabilityGroups = {
   shutdown: ["controller.quit", "controller.exit"],
   messages: ["controller.message.send"],
   host_configuration: [
+		"controller.mirror.configure",
     "controller.host_menu.configure", "controller.host_menu.config.set", "controller.ui.config.set",
     "controller.peripherals.set", "controller.board_profile.update", "controller.peripheral.presentation.update",
     "controller.peripheral.folder.update",
@@ -112,6 +113,7 @@ const capabilityGroups = {
 		"controller.discovery.config.set",
   ],
   read: [
+		"controller.mirror.inspect", "controller.mirror.status",
 		"controller.audio.cues",
     "controller.artifact.manifest", "controller.artifact.list", "controller.update.status",
     "controller.discovery.github.workflow", "controller.discovery.github.release",
@@ -139,6 +141,7 @@ const capabilityGroups = {
 		"controller.rf.catalog",
   ],
   board_commands: [
+		"controller.mirror.apply", "controller.mirror.resync",
     "controller.program_state.set", "controller.program-state.set", "controller.menu.layout.set",
     "controller.host_menu.directory.replace", "controller.host_menu.content.push", "controller.menu.jump",
 	"controller.menu.page", "controller.pwm.set", "controller.pwm.off", "controller.status_led.set", "controller.status_led.release", "controller.illumination.set", "controller.illumination.override", "controller.rf.learn.start",

@@ -184,6 +184,16 @@ jobs:
         shell: cmd
         run: build.cmd --host-only --version %PCCONTROLLER_VERSION%
 
+      - name: "🔄 Exercise real two-board mirroring against production firmware"
+        if: startsWith(matrix.target, 'Linux-')
+        shell: bash
+        run: |
+          cmake -S Tools/VirtualBoard -B .build/mirror-firmware -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+          cmake --build .build/mirror-firmware --target virtual_board --parallel 2
+          node Tools/Controller/tests/board-mirroring-linux.test.mjs \
+            Tools/Controller/bin/controller .build/mirror-firmware/bin/virtual_board
+
       - name: "🧷 Assert both defaults are embedded in the host manifest"
         if: inputs.firmware_artifact_name != ''
         shell: bash

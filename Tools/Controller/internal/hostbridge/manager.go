@@ -21,7 +21,9 @@ import (
 
 	controller "pccontroller.local/controller"
 	"pccontroller.local/controller/internal/appconfig"
+	"pccontroller.local/controller/internal/boardmirror"
 	"pccontroller.local/controller/internal/discovery"
+	"pccontroller.local/controller/internal/fleet"
 	"pccontroller.local/controller/internal/hostui"
 	"pccontroller.local/controller/internal/ipcjson"
 	"pccontroller.local/controller/internal/lanresolver"
@@ -192,10 +194,19 @@ func (peer *peerState) attach(session *peerRPCSession) func() {
 }
 
 type Manager struct {
-	client *controller.Client
-	store  *appconfig.Store
-	ctx    context.Context
-	cancel context.CancelFunc
+	boardMirror              *boardmirror.Coordinator
+	mirrorWriteMu            sync.Mutex
+	mirrorObserveMu          sync.Mutex
+	mirrorObservedGeneration uint64
+	mirrorLegacyReadAt       time.Time
+	mirrorPWM                native.PWMValues
+	mirrorReplay             *fleet.ReplayCache
+	mirrorEpoch              uint64
+	mirrorSequence           uint64
+	client                   *controller.Client
+	store                    *appconfig.Store
+	ctx                      context.Context
+	cancel                   context.CancelFunc
 
 	mu                  sync.RWMutex
 	closing             bool
@@ -275,6 +286,11 @@ func Start(
 		discoveryRefresh:  make(chan struct{}, 1),
 	}
 	manager.buzzerRouteSnapshot = client.Snapshot
+	manager.boardMirror = boardmirror.New(mirrorAdapter{manager})
+	if err := manager.boardMirror.Configure(runtimeConfig.Integrations.BoardMirror); err != nil {
+		cancel()
+		return nil, err
+	}
 	manager.buzzerRouteExecute = func(ctx context.Context, silent bool) error {
 		_, err := client.SetBoardSilent(ctx, silent)
 		return err
@@ -364,7 +380,11 @@ func Start(
 	// published immediately after Start returns can land between the goroutine
 	// launch and its first LatestEventID call and be skipped forever.
 	afterID := client.LatestEventID()
-	manager.wait.Add(9)
+	manager.wait.Add(10)
+	go func() {
+		defer manager.wait.Done()
+		manager.boardMirror.Run(ctx, func() fleet.MirrorConfig { return store.Current().Integrations.BoardMirror })
+	}()
 	manager.webhooks.Start()
 	go func() {
 		defer manager.wait.Done()
@@ -961,7 +981,9 @@ func (manager *Manager) eventLoop(afterID uint64) {
 		manager.dispatchWebhooks(config, event)
 		manager.dispatchTextMappings(config, event)
 		manager.dispatchNotification(config, event)
-		manager.dispatchBuzzerMirror(config, event)
+		if manager.observeBoardMirror(event) {
+			manager.dispatchBuzzerMirror(config, event)
+		}
 		manager.requestDiscoveryMetadataRefresh()
 		if bridgeEventForwardable(event) {
 			manager.mu.RLock()
@@ -1790,6 +1812,8 @@ func decodeSocketIOPacket(value string) (string, json.RawMessage, error) {
 
 func (manager *Manager) remotePeerService() ipcjson.Service {
 	return ipcjson.Service{
+		BoardMirror:           func() ipcjson.BoardMirrorService { return manager },
+		BuzzerRuntimeStatus:   func() appconfig.BuzzerRuntimeStatus { return manager.Status().BuzzerRuntime },
 		Client:                manager.client,
 		AuthorizationDisabled: true,
 		HostConfig:            manager.store.CurrentRuntime,
