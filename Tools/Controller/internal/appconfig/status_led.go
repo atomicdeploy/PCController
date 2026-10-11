@@ -53,7 +53,7 @@ type StatusLEDPolicy struct {
 func DefaultStatusLEDPolicy() StatusLEDPolicy {
 	return StatusLEDPolicy{
 		Enabled: true, TransitionMS: 420, StepMS: 50,
-		RFHoldMS: 1400, DoorCueHoldMS: 1600, HotThresholdCentiC: 5000,
+		RFHoldMS: 1400, DoorCueHoldMS: 1600, HotThresholdCentiC: 5500,
 		Idle:                    steadyVisual(RGBColor{Green: 255}, 128),
 		Running:                 steadyVisual(RGBColor{Red: 255, Green: 150}, 160),
 		BluetoothAudioConnected: steadyVisual(RGBColor{Blue: 255}, 150),
