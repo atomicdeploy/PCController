@@ -378,10 +378,8 @@ void transferI2c(uint8_t sequence, const uint8_t *request, uint8_t length,
   if (response[0] == 0 && readLength != 0) {
     // requestFrom returns the exact bounded buffered byte count; no second
     // availability/length loop is needed. Preserve partial bytes on failure.
-    response[2] = i2cBus.requestFrom(address, readLength);
-    uint8_t *next = response + 3;
-    for (uint8_t remaining = response[2]; remaining != 0; --remaining)
-      *next++ = i2cBus.read();
+    (void)i2cBus.requestFrom(address, readLength);
+    response[2] = i2cBus.readReceived(response + 3);
     if (response[2] != readLength) response[0] = 4; // Partial/unavailable is not success.
   }
   appProtocol.send(ControllerProtocol::I2cTransferResponse, sequence, response,
@@ -768,7 +766,9 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame,
       } else {
         AddressableLeds::setPixel(payload[0], color);
       }
+#if PCCONTROLLER_FEATURE_PROFILE != 0
       AddressableLeds::setBrightness(payload[4]);
+#endif
       AddressableLeds::show();
       goto acknowledged;
     }

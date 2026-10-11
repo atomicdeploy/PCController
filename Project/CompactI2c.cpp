@@ -117,6 +117,13 @@ int CompactI2c::read() {
   return rxIndex_ < rxLength_ ? rx_[rxIndex_++] : -1;
 }
 
+uint8_t CompactI2c::readReceived(uint8_t *destination) {
+  const uint8_t length = rxLength_ - rxIndex_;
+  memcpy(destination, rx_ + rxIndex_, length);
+  rxIndex_ = rxLength_;
+  return length;
+}
+
 #if defined(__AVR__)
 bool CompactI2c::waitForInterrupt() {
   const uint32_t startedAt = micros();

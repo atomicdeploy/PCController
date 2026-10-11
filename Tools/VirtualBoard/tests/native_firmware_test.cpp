@@ -80,6 +80,8 @@ int main() {
     require(std::any_of(unconnected.begin(),unconnected.end(),[](const auto &f){return f.opcode==wire::I2cTransferResponse && f.payload[0]!=0;}),"unconnected I2C must not synthesize successful reads");
     auto missingRead=request(wire::I2cTransfer,33,{0x55,0,0,3});
     require(std::any_of(missingRead.begin(),missingRead.end(),[](const auto &f){return f.opcode==wire::I2cTransferResponse && f.payload[0]==4 && f.payload[2]==0;}),"unavailable I2C read must report failure and exact byte count");
+    auto bufferedRead=request(wire::I2cTransfer,34,{0x41,0,1,3,0});
+    require(std::any_of(bufferedRead.begin(),bufferedRead.end(),[](const auto &f){return f.opcode==wire::I2cTransferResponse && f.payload[0]==0 && f.payload[2]==3 && f.payload.size()==6;}),"bounded I2C bulk read must return exactly the received bytes");
     board.console("tm1637 off"); receive(1100000);
     require(!board.outputSnapshot().tm1637Detected,"missing TM1637 ACK detection");
     board.console("tm1637 on"); receive(1100000);

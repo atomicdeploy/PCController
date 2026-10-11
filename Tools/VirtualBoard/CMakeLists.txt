@@ -292,7 +292,7 @@ if(BUILD_TESTING)
   find_program(PCCONTROLLER_NODE node)
   if(PCCONTROLLER_NODE)
     add_test(NAME firmware_transport_integration COMMAND "${PCCONTROLLER_NODE}"
-      "${CMAKE_CURRENT_SOURCE_DIR}/tests/transport_integration.mjs" $<TARGET_FILE:virtual_board>)
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/transport_integration.test.mjs" $<TARGET_FILE:virtual_board>)
     set_tests_properties(firmware_transport_integration PROPERTIES TIMEOUT 45)
   endif()
 

@@ -7,6 +7,9 @@ import { resolve, dirname, relative, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
 import { parseIntelHex } from './firmware.mjs'
+import { loadProjectEnv } from '../Build/env.mjs'
+
+loadProjectEnv()
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const targets = JSON.parse(readFileSync(join(root, 'Tools/Firmware/targets.json'), 'utf8'))
