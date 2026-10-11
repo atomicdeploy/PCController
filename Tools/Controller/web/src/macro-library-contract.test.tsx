@@ -59,6 +59,14 @@ describe('macro catalog DOM contract', () => {
     expect(markup).toContain('Invalid timing')
   })
 
+  it('composes step repeats inside the complete whole-effect span', () => {
+    const markup = renderToStaticMarkup(<MacroCatalog locale="en" selectedReference="" onSelect={vi.fn()} macros={[{
+      id: 4, name: 'Nested', repeat_count: 2,
+      steps: [{ kind: 'beep', at_us: 50_000, duration_ms: 100, repeat_count: 3, repeat_interval_ms: 200 }],
+    }]} />)
+    expect(markup).toContain('1.1 s')
+  })
+
   it('keeps split-path terminology and narration out of the effect source contract', () => {
     const source = [
       readFileSync(new URL('./macro-library.tsx', import.meta.url), 'utf8'),

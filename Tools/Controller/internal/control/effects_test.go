@@ -41,7 +41,7 @@ func TestEffectUpsertJSONPersistsTheCompleteSequenceDefinition(t *testing.T) {
 		Kind: "sequence", Engine: "host", Editable: true,
 		RepeatCount: &repeats, RepeatIntervalMS: 3000,
 		Steps: []appconfig.MacroStep{
-			{Kind: "relay-mask", Value: 2, ActionIDs: []string{"seat.a.up"}},
+			{Kind: "relay-mask", Value: 2, RepeatCount: &repeats, RepeatIntervalMS: 100, ActionIDs: []string{"seat.a.up"}},
 			{AtUS: 750_000, Kind: "relay-mask", ActionIDs: []string{"seat.a.stop"}},
 			{AtUS: 900_000, Kind: "display", Text: "DONE", Destination: "segments", DurationMS: 500},
 			{AtUS: 1_000_000, Kind: "rf", Code: 0x123456, Bits: 24, Protocol: 1, PulseUS: 350},
@@ -63,6 +63,9 @@ func TestEffectUpsertJSONPersistsTheCompleteSequenceDefinition(t *testing.T) {
 		t.Fatalf("saved macros=%+v", config.Macros)
 	}
 	got := config.Macros[0]
+	if got.Steps[0].RepeatCount == nil || *got.Steps[0].RepeatCount != 2 || got.Steps[0].RepeatIntervalMS != 100 {
+		t.Fatal("upsert lost independent step repetition")
+	}
 	if got.ID != 12 || got.Name != effect.Name || got.Icon != "seat" || got.BoardProfileKey != "cafe-cinema" || len(got.Steps) != 5 {
 		t.Fatalf("saved sequence lost descriptor data: %+v", got)
 	}

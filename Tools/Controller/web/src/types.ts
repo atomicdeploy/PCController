@@ -290,6 +290,8 @@ export interface MacroStep {
   target?: number
   value?: number
   duration_ms?: number
+  repeat_count?: number
+  repeat_interval_ms?: number
   frequency_hz?: number
   text?: string
   destination?: string
