@@ -130,7 +130,10 @@ immutable defaults instead of loading cue parameters from EEPROM; that frees
 the flash required by the validated boot-script executor without overlapping
 the cue record.
 
-Build and test the Virtual Board through the same project-owned build plan:
+VirtualBoard compiles the production sketch and source aggregators with OS
+adapters, rather than an independent firmware implementation. See
+[shared targets and acceptance gates](docs/Shared-Production-Firmware.md).
+Build and test it through the same project-owned build plan:
 
 ```console
 build.cmd --virtual-board-only
@@ -336,7 +339,7 @@ hardware from CI evidence alone.
 | Firmware | Real MiniCore compile, Intel HEX validation, flash/SRAM budgets, protocol and settings tests | Upload, sensors, RF range, sound, displays, loaded outputs, and mechanisms remain board-specific |
 | Host | Go tests, vet, native packaging, resource identity, C ABI smoke, deterministic build checks | Real busy-port diagnostics and OS policy actions require target-machine observation |
 | WebUI | Type checking, component/unit tests, production bundle, HTTP cache/range tests, responsive/RTL/theme interaction sweep | Final color, audio, motion, keyboard, and peripheral behavior should be accepted with the packaged executable |
-| Virtual Board | Native build, unit tests, CTest, protocol smoke | Behavioral simulator; not evidence of electrical timing or load safety |
+| Virtual Board | Same production sources, full-runtime/C ABI/stdio/TCP tests and richer profiles | Native firmware adapter; not evidence of electrical timing or physical load safety |
 | Release | Package manifests, SHA-256 sidecars, dependency inventory, optional provenance | No stable or code-signed release is currently claimed |
 
 Current pass/fail evidence belongs to the exact CI run or local build manifest;

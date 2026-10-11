@@ -4,7 +4,13 @@
 // -----------------------------------------------------------------------------
 
 // Filtered readings in native integer units: mV, mA, mW, and centi-degrees C.
+// AVR members already have byte alignment. Native telemetry needs an explicit
+// packed member type, including its initialized unavailable sentinels.
+#if defined(__AVR__)
 struct SensorState {
+#else
+struct __attribute__((packed)) SensorState {
+#endif
   int32_t supplyMilliVolts = INVALID_I32;
   int32_t busMilliVolts = INVALID_I32;
   int32_t currentMilliAmps = INVALID_I32;

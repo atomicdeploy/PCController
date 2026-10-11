@@ -1,6 +1,5 @@
 #include "virtual_board/tcp_server.hpp"
 
-#include "virtual_board/protocol.hpp"
 
 #include <array>
 #include <chrono>
@@ -107,44 +106,8 @@ private:
   Socket value_ = kInvalidSocket;
 };
 
-bool sendBytes(Socket socket, const std::vector<std::uint8_t> &data,
-               const std::atomic<bool> &stopRequested) {
-  std::size_t offset = 0;
-  while (offset < data.size() && !stopRequested.load()) {
-#ifdef _WIN32
-    const int sent =
-        send(socket, reinterpret_cast<const char *>(data.data() + offset),
-             static_cast<int>(data.size() - offset), 0);
-#else
-    const int sent =
-        static_cast<int>(send(socket, data.data() + offset,
-                              data.size() - offset, 0));
-#endif
-    if (sent > 0) {
-      offset += static_cast<std::size_t>(sent);
-      continue;
-    }
-    const int error = lastSocketError();
-    if (!wouldBlock(error)) {
-      return false;
-    }
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-  }
-  return offset == data.size();
-}
-
-bool sendFrames(Socket socket, const std::vector<wire::Frame> &frames,
-                const std::atomic<bool> &stopRequested) {
-  for (const auto &frame : frames) {
-    if (!sendBytes(socket, wire::encode(frame), stopRequested)) {
-      return false;
-    }
-  }
-  return true;
-}
-
 void printOutputChanges(const OutputSnapshot &before,
-                        const OutputSnapshot &after, bool quiet) {
+                        const OutputSnapshot &after, bool quiet, bool logPwm) {
   if (quiet) {
     return;
   }
@@ -153,13 +116,14 @@ void printOutputChanges(const OutputSnapshot &before,
     const std::uint8_t bit = static_cast<std::uint8_t>(1U << index);
     if ((changed & bit) != 0) {
       std::cout << (((after.relayMask & bit) != 0) ? "ON:" : "OFF:")
-                << static_cast<unsigned>(index + 1U) << '\n';
+                << static_cast<unsigned>(index + 1U) << std::endl;
     }
   }
+  if (!logPwm) return;
   for (std::size_t channel = 0; channel < after.pwm.size(); ++channel) {
     if (before.pwm[channel] != after.pwm[channel]) {
       std::cout << "PWM" << (channel + 1U) << ':' << after.pwm[channel]
-                << '\n';
+                << std::endl;
     }
   }
 }
@@ -209,7 +173,9 @@ void runTcpServer(VirtualBoard &board, const TcpServerOptions &options,
   [[maybe_unused]] NetworkRuntime network;
   SocketOwner listener(makeListener(options));
   SocketOwner client;
-  wire::StreamDecoder decoder;
+  std::vector<uint8_t> pending;
+  auto previous = board.outputSnapshot();
+  auto disconnect = [&]() { client.reset(); pending.clear(); board.disconnected(); };
 
   if (!options.quiet) {
     std::cout << "Virtual board listening on tcp://" << options.bindAddress
@@ -217,7 +183,7 @@ void runTcpServer(VirtualBoard &board, const TcpServerOptions &options,
   }
 
   std::array<std::uint8_t, 512> receiveBuffer{};
-  while (!stopRequested.load()) {
+  while (!stopRequested.load() && !board.resetRequested()) {
     if (!client.valid()) {
       sockaddr_in peer{};
 #ifdef _WIN32
@@ -232,15 +198,15 @@ void runTcpServer(VirtualBoard &board, const TcpServerOptions &options,
         if (!setNonBlocking(accepted)) {
           closeSocket(accepted);
         } else {
+#ifdef SO_NOSIGPIPE
+          int noSigpipe = 1;
+          setsockopt(accepted, SOL_SOCKET, SO_NOSIGPIPE, &noSigpipe, sizeof(noSigpipe));
+#endif
           client.reset(accepted);
-          decoder.reset();
           if (!options.quiet) {
             std::cout << "Client connected\n";
           }
-          if (!sendFrames(client.get(), board.connectedFrames(),
-                          stopRequested)) {
-            client.reset();
-          }
+          pending = board.connectedBytes();
         }
       } else if (!wouldBlock(lastSocketError())) {
         throw std::runtime_error("TCP accept failed: " +
@@ -280,44 +246,46 @@ void runTcpServer(VirtualBoard &board, const TcpServerOptions &options,
           if (!options.quiet) {
             std::cout << "Client disconnected\n";
           }
-          client.reset();
-          decoder.reset();
+          disconnect();
         } else if (received < 0) {
           const int error = lastSocketError();
           if (!wouldBlock(error)) {
             if (!options.quiet) {
               std::cout << "Client socket error " << error << '\n';
             }
-            client.reset();
-            decoder.reset();
+            disconnect();
           }
         } else {
-          wire::DecodeBatch batch = decoder.feed(
-              receiveBuffer.data(), static_cast<std::size_t>(received));
-          board.noteProtocolErrors(batch.framingErrors, batch.crcErrors);
-          for (const auto &frame : batch.frames) {
-            const OutputSnapshot before = board.outputSnapshot();
-            const auto responses = board.handle(frame);
-            const OutputSnapshot after = board.outputSnapshot();
-            printOutputChanges(before, after, options.quiet);
-            if (!sendFrames(client.get(), responses,
-                            stopRequested)) {
-              client.reset();
-              decoder.reset();
-              break;
-            }
-          }
+          board.feed(receiveBuffer.data(), static_cast<std::size_t>(received));
         }
       }
     } else {
-      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 
     const auto asynchronous = board.tick();
-    if (client.valid() &&
-        !sendFrames(client.get(), asynchronous, stopRequested)) {
-      client.reset();
-      decoder.reset();
+    const auto current = board.outputSnapshot();
+    printOutputChanges(previous, current, options.quiet, options.logPwm);
+    previous = current;
+    if (client.valid()) {
+      // Bounded, nonblocking output: a slow peer cannot stall firmware safety.
+      if (pending.size() + asynchronous.size() > 65536) { disconnect(); continue; }
+      pending.insert(pending.end(), asynchronous.begin(), asynchronous.end());
+      if (!pending.empty()) {
+#ifdef _WIN32
+        const int sent = send(client.get(), reinterpret_cast<const char *>(pending.data()), static_cast<int>(pending.size()), 0);
+#else
+        const int sent = static_cast<int>(send(client.get(), pending.data(), pending.size(),
+#ifdef MSG_NOSIGNAL
+          MSG_NOSIGNAL
+#else
+          0
+#endif
+          ));
+#endif
+        if (sent > 0) pending.erase(pending.begin(), pending.begin() + sent);
+        else if (sent == 0 || !wouldBlock(lastSocketError())) disconnect();
+      }
     }
   }
 }

@@ -61,5 +61,26 @@ inline uint8_t cobsDecode(const uint8_t *input, uint8_t length,
   return writeIndex;
 }
 
+// Bounded encoding used by native transport clients. Firmware UART streams
+// directly to HardwareSerial to preserve its constrained stack/RAM budget.
+inline uint8_t cobsEncode(const uint8_t *input, uint8_t length,
+                         uint8_t *output, uint8_t capacity) {
+  if (length >= 254 || capacity < static_cast<uint16_t>(length) + 2) return 0;
+  uint8_t read = 0, written = 1, codeIndex = 0, code = 1;
+  while (read < length) {
+    const uint8_t value = input[read++];
+    if (value == 0) {
+      output[codeIndex] = code;
+      codeIndex = written++;
+      code = 1;
+    } else {
+      output[written++] = value;
+      ++code;
+    }
+  }
+  output[codeIndex] = code;
+  return written;
+}
+
 } // namespace WireCodec
 } // namespace ControllerProtocol

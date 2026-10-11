@@ -37,7 +37,9 @@ static_assert(
         E2END + 1,
     "Reset journal exceeds ATmega328P EEPROM");
 
-#if defined(PCCONTROLLER_NATIVE_TEST)
+#if defined(PCCONTROLLER_NATIVE)
+uint8_t capturedResetCause = NativeHal::resetCause();
+#elif defined(PCCONTROLLER_NATIVE_TEST)
 uint8_t capturedResetCause = 0;
 #else
 uint8_t capturedResetCause __attribute__((section(".noinit")));
@@ -47,11 +49,13 @@ void captureResetCause()
 
 void captureResetCause() {
   uint8_t cause = MCUSR;
+#if defined(__AVR_ATmega328P__)
   if (cause == 0) {
     // Urboot preserves the pre-clear MCUSR byte in r2 across its app jump.
     register uint8_t urbootCause asm("r2");
     cause = urbootCause;
   }
+#endif
   capturedResetCause = cause;
   MCUSR = 0;
   wdt_disable();

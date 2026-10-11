@@ -30,6 +30,9 @@ public:
   int available() const;
   // Returns the next received byte, or -1 when none remains.
   int read();
+  // Consumes all unread bytes (at most BufferSize) into caller-owned storage.
+  // The caller must provide BufferSize bytes. Returns the exact copied count.
+  uint8_t readReceived(uint8_t *destination);
 
 private:
 #if defined(__AVR__)

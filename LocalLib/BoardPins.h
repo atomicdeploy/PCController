@@ -8,6 +8,29 @@
 // unambiguous even when a different Arduino pin-number variant is selected.
 namespace BoardPins {
 
+#if defined(__AVR_ATmega2560__)
+// ControllerBoardMega: Arduino Mega 2560 numbering, UART0 and hardware TWI.
+// This is an explicit wiring profile, not a claim that Mini wiring fits Mega.
+constexpr uint8_t ShiftDataIn = 54;           // A0
+constexpr uint8_t ShiftOutputLatch = 55;      // A1
+constexpr uint8_t ShiftClock = 56;            // A2
+constexpr uint8_t ShiftDataOut = 57;          // A3
+constexpr uint8_t I2cSda = 20;
+constexpr uint8_t I2cScl = 21;
+constexpr uint8_t ShiftInputLoad = 4;
+constexpr uint8_t ShiftMasterReset = 5;
+constexpr uint8_t ShiftClockEnable = 7;
+constexpr uint8_t ShiftOutputEnable = 8;
+constexpr uint8_t Buzzer = 11;                // PB5 / OC1A, Timer1
+constexpr uint8_t OneWireData = 12;
+constexpr uint8_t Tm1637Data = 10;
+constexpr uint8_t RcTransmit = 3;
+constexpr uint8_t Tm1637Clock = 13;
+constexpr uint8_t RcReceive = 2;
+constexpr uint8_t SparePin = 9;
+constexpr uint8_t AddressableLed = 6;          // PH3
+#else
+
 // 74HC165 input + 74HC595 output chain.
 constexpr uint8_t ShiftDataIn = PIN_PC0;       // A0, 74HC165 QH
 constexpr uint8_t ShiftOutputLatch = PIN_PC1;  // A1, 74HC595 RCLK
@@ -31,6 +54,7 @@ constexpr uint8_t RcReceive = PIN_PD2;          // D2 / INT0, 433 MHz receiver
 // D6 (PD6).
 constexpr uint8_t SparePin = PIN_PB4;
 constexpr uint8_t AddressableLed = PIN_PD6;     // D6, WS2811 / WS2812B data
+#endif
 
 // The first four active-low 74HC165 bits drive the menu. Inputs 4 and 5 are
 // reserved system-sense positions. The final two positions are monitored

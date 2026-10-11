@@ -18,8 +18,8 @@
 // Final-application record patched only by the guarded host workflow. The Go
 // compiler places it in the last 12 bytes below the selected core bootloader.
 // "PCID" identifies the fixed little-endian source hash and packed timestamp.
-constexpr uint16_t FirmwareIdentityAddress =
-    static_cast<uint16_t>(PCCONTROLLER_IDENTITY_ADDRESS);
+constexpr uint32_t FirmwareIdentityAddress =
+    static_cast<uint32_t>(PCCONTROLLER_IDENTITY_ADDRESS);
 // FirmwareIdentityRecord occupies the guarded fixed-location patch region.
 struct __attribute__((packed)) FirmwareIdentityRecord {
   uint32_t magic;
@@ -27,11 +27,30 @@ struct __attribute__((packed)) FirmwareIdentityRecord {
   uint32_t packedTimestamp;
 };
 const FirmwareIdentityRecord firmwareIdentity
+#if defined(__AVR__)
     __attribute__((section(".firmware_identity"), used)) = {
+#else
+    = {
+#endif
         0x44494350UL, static_cast<uint32_t>(PCCONTROLLER_BUILD_HASH),
         static_cast<uint32_t>(PCCONTROLLER_BUILD_TIMESTAMP)};
 static_assert(sizeof(FirmwareIdentityRecord) == 12,
               "Firmware identity patch record changed shape");
+
+uint32_t identityHash() {
+#if defined(__AVR_ATmega2560__)
+  return pgm_read_dword_far(pgm_get_far_address(firmwareIdentity) + offsetof(FirmwareIdentityRecord, sourceHash));
+#else
+  return pgm_read_dword(&firmwareIdentity.sourceHash);
+#endif
+}
+uint32_t identityTimestamp() {
+#if defined(__AVR_ATmega2560__)
+  return pgm_read_dword_far(pgm_get_far_address(firmwareIdentity) + offsetof(FirmwareIdentityRecord, packedTimestamp));
+#else
+  return pgm_read_dword(&firmwareIdentity.packedTimestamp);
+#endif
+}
 
 // Cooperative service periods are milliseconds; all comparisons are rollover-safe.
 constexpr uint16_t SHIFT_POLL_MS = 5;

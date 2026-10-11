@@ -75,9 +75,24 @@ jobs:
         working-directory: Tools/VirtualBoard
         run: cmake --build --preset release --parallel
 
-      - name: "🧪 Run native CTest suite"
+      - name: "🧪 Run production firmware CTest suite"
         working-directory: Tools/VirtualBoard
         run: ctest --preset release
+
+      - name: "🧩 Build and test richer firmware profiles in the same cache"
+        working-directory: Tools/VirtualBoard
+        shell: bash
+        run: |
+          set -euo pipefail
+          for profile in 1 2; do
+            cmake --preset release -DPCCONTROLLER_FEATURE_PROFILE="$profile"
+            cmake --build --preset release --parallel
+            ctest --preset release
+          done
+
+      - name: "📁 Stage standalone firmware and native library SDK"
+        working-directory: Tools/VirtualBoard
+        run: cmake --install .build/release --prefix .build/distribution
 
       - name: "🕰️ Freeze reproducible package time"
         shell: bash
@@ -87,7 +102,7 @@ jobs:
         id: package
         run: >-
           node .github/scripts/package-directory.mjs
-          "${{ matrix.binary }}"
+          Tools/VirtualBoard/.build/distribution
           PCController-VirtualBoard
           ${{ matrix.target }}
 

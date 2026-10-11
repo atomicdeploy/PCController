@@ -1,6 +1,16 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(PCControllerVirtualBoard VERSION 1.0.0 LANGUAGES CXX)
+if(CMAKE_HOST_WIN32 AND NOT DEFINED CMAKE_CXX_COMPILER)
+  find_program(PCCONTROLLER_CLANG clang++)
+  if(PCCONTROLLER_CLANG)
+    set(CMAKE_CXX_COMPILER "${PCCONTROLLER_CLANG}" CACHE FILEPATH "Native firmware compiler")
+  endif()
+endif()
+project(PCControllerNativeFirmware VERSION 1.0.0 LANGUAGES CXX)
+if(MINGW)
+  add_link_options(-static)
+endif()
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -9,13 +19,68 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
 find_package(Threads REQUIRED)
 
-add_library(virtual_board_core
-  src/hardware.cpp
-  src/protocol.cpp
-  src/virtual_board.cpp
+set(PCCONTROLLER_FEATURE_PROFILE "0" CACHE STRING "0=constrained, 1=expanded panel, 2=expanded autonomous")
+if(NOT PCCONTROLLER_FEATURE_PROFILE MATCHES "^[012]$")
+  message(FATAL_ERROR "Unknown firmware feature profile")
+endif()
+file(GLOB_RECURSE PCCONTROLLER_FIRMWARE_FILES CONFIGURE_DEPENDS
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../Project/*.h"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../Project/*.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../LocalLib/*.h"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../LocalLib/*.cpp")
+list(APPEND PCCONTROLLER_FIRMWARE_FILES
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../PCController.ino"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../ProjectConfig.h"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../BoardSupportSources.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../ControllerDomainSources.cpp")
+list(SORT PCCONTROLLER_FIRMWARE_FILES)
+set(PCCONTROLLER_SOURCE_DIGEST "")
+foreach(source IN LISTS PCCONTROLLER_FIRMWARE_FILES)
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${source}")
+  file(SHA256 "${source}" digest)
+  file(RELATIVE_PATH source_name "${CMAKE_CURRENT_SOURCE_DIR}/../.." "${source}")
+  string(APPEND PCCONTROLLER_SOURCE_DIGEST "${source_name}:${digest}\n")
+endforeach()
+string(SHA256 PCCONTROLLER_SOURCE_SHA256 "${PCCONTROLLER_SOURCE_DIGEST}")
+file(GLOB_RECURSE PCCONTROLLER_NATIVE_FILES CONFIGURE_DEPENDS
+  "${CMAKE_CURRENT_SOURCE_DIR}/platform/*.h"
+  "${CMAKE_CURRENT_SOURCE_DIR}/include/*.h"
+  "${CMAKE_CURRENT_SOURCE_DIR}/include/*.hpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
+list(SORT PCCONTROLLER_NATIVE_FILES)
+set(PCCONTROLLER_NATIVE_DIGEST "")
+foreach(source IN LISTS PCCONTROLLER_NATIVE_FILES)
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${source}")
+  file(SHA256 "${source}" digest)
+  file(RELATIVE_PATH source_name "${CMAKE_CURRENT_SOURCE_DIR}/../.." "${source}")
+  string(APPEND PCCONTROLLER_NATIVE_DIGEST "${source_name}:${digest}\n")
+endforeach()
+string(SHA256 PCCONTROLLER_NATIVE_SHA256 "${PCCONTROLLER_NATIVE_DIGEST}")
+string(SHA256 PCCONTROLLER_TARGET_SHA256 "${PCCONTROLLER_SOURCE_SHA256}:${PCCONTROLLER_NATIVE_SHA256}:${PCCONTROLLER_FEATURE_PROFILE}")
+string(SUBSTRING "${PCCONTROLLER_TARGET_SHA256}" 0 8 PCCONTROLLER_BUILD_HASH)
+file(GENERATE OUTPUT "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/firmware-manifest.json" CONTENT
+  "{\"implementation\":\"PCController.ino + BoardSupportSources.cpp + ControllerDomainSources.cpp\",\"target\":\"${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}\",\"featureProfile\":${PCCONTROLLER_FEATURE_PROFILE},\"sourceSha256\":\"${PCCONTROLLER_SOURCE_SHA256}\",\"adapterSha256\":\"${PCCONTROLLER_NATIVE_SHA256}\",\"targetSha256\":\"${PCCONTROLLER_TARGET_SHA256}\",\"buildHash\":\"${PCCONTROLLER_BUILD_HASH}\",\"physicalAcceptance\":false}\n")
+file(GENERATE OUTPUT "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/firmware-sources.sha256" CONTENT "${PCCONTROLLER_SOURCE_DIGEST}")
+file(GENERATE OUTPUT "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/firmware-adapters.sha256" CONTENT "${PCCONTROLLER_NATIVE_DIGEST}")
+
+add_library(native_firmware_objects OBJECT
+  src/native_hal.cpp
+  src/native_firmware.cpp
+  ../../BoardSupportSources.cpp
+  ../../ControllerDomainSources.cpp
 )
+set_target_properties(native_firmware_objects PROPERTIES POSITION_INDEPENDENT_CODE ON CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
+target_include_directories(native_firmware_objects PRIVATE include platform ../..)
+target_compile_definitions(native_firmware_objects PRIVATE PCCONTROLLER_NATIVE=1
+  PCCONTROLLER_FEATURE_PROFILE=${PCCONTROLLER_FEATURE_PROFILE}
+  PCCONTROLLER_BUILD_HASH=0x${PCCONTROLLER_BUILD_HASH}UL)
+add_library(virtual_board_core STATIC src/protocol.cpp $<TARGET_OBJECTS:native_firmware_objects>)
 target_include_directories(virtual_board_core PUBLIC include)
 target_link_libraries(virtual_board_core PUBLIC Threads::Threads)
+add_library(pccontroller_firmware SHARED src/firmware_c_api.cpp $<TARGET_OBJECTS:native_firmware_objects>)
+target_include_directories(pccontroller_firmware PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> $<INSTALL_INTERFACE:include>)
+target_compile_definitions(pccontroller_firmware PRIVATE PCCONTROLLER_FIRMWARE_EXPORTS=1)
+target_link_libraries(pccontroller_firmware PRIVATE Threads::Threads)
 
 add_executable(virtual_board
   src/main.cpp
@@ -36,6 +101,20 @@ if(WIN32 AND NOT VIRTUAL_BOARD_COMPILER_TARGET MATCHES "msys")
   target_link_libraries(virtual_board PRIVATE ws2_32)
   target_link_libraries(virtual_board_smoke PRIVATE ws2_32)
 endif()
+
+include(GNUInstallDirs)
+install(TARGETS virtual_board RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(TARGETS pccontroller_firmware EXPORT PCControllerFirmwareTargets
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
+install(FILES include/pccontroller_firmware.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(EXPORT PCControllerFirmwareTargets NAMESPACE PCController:: DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/PCControllerFirmware)
+install(FILES PCControllerFirmwareConfig.cmake DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/PCControllerFirmware)
+install(FILES "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/firmware-manifest.json"
+  "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/firmware-sources.sha256"
+  "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/firmware-adapters.sha256"
+  DESTINATION ${CMAKE_INSTALL_DATADIR}/PCController)
 
 if(MSVC)
   target_compile_options(virtual_board_core PRIVATE /W4 /permissive-)
@@ -195,7 +274,8 @@ if(BUILD_TESTING)
       -DPCCONTROLLER_ROOT=${CMAKE_CURRENT_SOURCE_DIR}/../..
       -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/macro_dispatch_priority_contract.cmake)
 
-  add_executable(virtual_board_tests tests/test_main.cpp)
+  add_executable(virtual_board_tests tests/native_firmware_test.cpp)
+  target_compile_definitions(virtual_board_tests PRIVATE PCCONTROLLER_TEST_PROFILE=${PCCONTROLLER_FEATURE_PROFILE})
   target_link_libraries(virtual_board_tests PRIVATE virtual_board_core)
   if(MSVC)
     target_compile_options(virtual_board_tests PRIVATE /W4 /permissive-)
@@ -203,6 +283,18 @@ if(BUILD_TESTING)
     target_compile_options(virtual_board_tests PRIVATE ${VIRTUAL_BOARD_WARNINGS})
   endif()
   add_test(NAME virtual_board_unit COMMAND virtual_board_tests)
+  add_test(NAME firmware_same_source_contract COMMAND ${CMAKE_COMMAND}
+    -DPCCONTROLLER_ROOT=${CMAKE_CURRENT_SOURCE_DIR}/../..
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/same_source_contract.cmake)
+  add_executable(firmware_c_api_tests tests/firmware_c_api_test.cpp src/protocol.cpp)
+  target_link_libraries(firmware_c_api_tests PRIVATE pccontroller_firmware)
+  add_test(NAME firmware_c_api_unit COMMAND firmware_c_api_tests)
+  find_program(PCCONTROLLER_NODE node)
+  if(PCCONTROLLER_NODE)
+    add_test(NAME firmware_transport_integration COMMAND "${PCCONTROLLER_NODE}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/transport_integration.test.mjs" $<TARGET_FILE:virtual_board>)
+    set_tests_properties(firmware_transport_integration PROPERTIES TIMEOUT 45)
+  endif()
 
   # Compile the production AVR framing implementation against a minimal serial
   # double so zero-copy/in-place RX behavior cannot silently drift.

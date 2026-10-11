@@ -1,0 +1,15 @@
+{
+  "mega2560": {
+    "core": "MegaCore:avr",
+    "minimumCoreVersion": "3.0.3",
+    "index": "https://mcudude.github.io/MegaCore/package_MCUdude_MegaCore_index.json",
+    "fqbn": "MegaCore:avr:2560:clock=16MHz_external,BOD=2v7,eeprom=keep,LTO=Os_flto,pinout=mega_pinout,bootloader=uart0,baudrate=115200",
+    "mcu": "atmega2560",
+    "flashBytes": 262144,
+    "applicationLimitBytes": 261632,
+    "sramBytes": 8192,
+    "eepromBytes": 4096,
+    "identityAddress": 261620,
+    "programmingCommissioned": false
+  }
+}

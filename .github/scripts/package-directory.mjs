@@ -104,13 +104,16 @@ const packageReadme = (() => {
   const header = `# ${name} ${version} — ${target}\n\nThis is a CI-built, source-identified ${productName} distribution. Source: [${sourceRepository}@${sourceCommit}](${sourceUrl}/tree/${sourceRef}).\n\n`;
   const footer = `\n## Trust and support\n\n- \`PACKAGE-MANIFEST.json\` identifies the exact source and package root.\n- \`THIRD_PARTY_NOTICES.md\` records bundled dependency notices.\n- Release downloads include a sibling \`.sha256\` file and GitHub build-provenance attestation.\n- Full documentation: [${productName} ${target} guide](${sourceUrl}/blob/${sourceRef}/docs/CI-CD-and-Releases.md).\n`;
   if (/firmware/iu.test(name)) {
+    if (/mega2560/iu.test(target)) {
+      return `${header}## Build-only expanded target\n\nThis package contains constrained, expanded-panel and expanded-autonomous ATmega2560 builds from the production sketch. Each target-manifest.json records the exact pin/core/identity/capacity profile and source hashes. Programming is NOT commissioned: do not send these files to the ATmega328P updater, fuse or EEPROM recovery workflow. Compile evidence is not electrical, motion-safety, strip-waveform or physical acceptance.\n${footer}`;
+    }
     return `${header}## Choose the correct image\n\n- \`PCController.ino.hex\`: normal guarded upload through the installed Urboot bootloader.\n- \`PCController.ino.with_bootloader.hex\`: explicit USBasp/ISP recovery only; this replaces the full flash including bootloader.\n- \`safe-default-eeprom.hex\`: complete 1 KiB current-layout defaults for an explicitly authorized recovery transaction.\n- \`firmware-manifest.json\`: flash, EEPROM, SRAM, source, and per-image SHA-256 evidence.\n\nDo not use the full-flash recovery image for a normal serial update. A successful CI build proves compilation and static validation, not physical-device acceptance.\n${footer}`;
   }
   if (/virtualboard/iu.test(name)) {
     const launch = /windows/iu.test(target)
-      ? ".\\\\virtual_board.exe"
-      : "chmod +x ./virtual_board && ./virtual_board";
-    return `${header}## Run the simulator\n\n~~~text\n${launch}\n~~~\n\nThe Virtual Board package is a native simulator for protocol and UI integration work. Its CMake/CTest suite passed on ${target} before packaging.\n${footer}`;
+      ? ".\\\\bin\\\\virtual_board.exe"
+      : "./bin/virtual_board";
+    return `${header}## Run the production firmware natively\n\n~~~text\n${launch} --memory --no-stdin\n~~~\n\nVirtualBoard now compiles PCController.ino and the production source aggregators, with OS hardware/transport adapters. This package uses the expanded-autonomous profile; all three profiles passed CTest on ${target}. Missing physical sensors are unavailable unless explicitly injected as fixtures. bin/lib contains the native C ABI library; include/pccontroller_firmware.h documents its one-MCU-per-process lifecycle. share/PCController carries source/target manifests. Stdio is binary-safe; TCP supports relay ON:n/OFF:n stdout output, isolated EEPROM images, and real process reset.\n${footer}`;
   }
   const executable = /windows/iu.test(target) ? "controller.exe" : "controller";
   const launch = /windows/iu.test(target)

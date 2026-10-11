@@ -1,4 +1,5 @@
 #pragma once
+#include "Project/FeatureProfiles.h"
 
 // Explicit temporary verification profile. The ordinary source/default build
 // retains RF administration; this test image keeps learned RF execution while
