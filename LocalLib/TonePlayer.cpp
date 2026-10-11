@@ -2,8 +2,12 @@
 
 #include <avr/interrupt.h>
 
+#if defined(__AVR_ATmega2560__)
+static_assert(BoardPins::Buzzer == 11, "Mega buzzer must use Timer1 OC1A/D11");
+#else
 static_assert(BoardPins::Buzzer == PIN_PB1,
               "Timer1 OC1A buzzer output must remain on PB1 / Arduino D9");
+#endif
 static_assert(F_CPU == 16000000UL,
               "TonePlayer's compact Timer1 divider assumes the 16 MHz profile");
 
@@ -123,6 +127,9 @@ bool TonePlayer::startHardwareTone(uint16_t frequencyHz) {
     stopHardwareTone();
     return false;
   }
+#if defined(PCCONTROLLER_NATIVE)
+  tone(pin_, frequencyHz);
+#else
   const uint16_t top = static_cast<uint16_t>(
       (1000000UL + frequencyHz / 2U) / frequencyHz - 1UL);
 
@@ -141,10 +148,14 @@ bool TonePlayer::startHardwareTone(uint16_t frequencyHz) {
   TCCR1B = static_cast<uint8_t>(_BV(WGM12) | _BV(CS11));
 
   SREG = savedStatus;
+#endif
   return true;
 }
 
 void TonePlayer::stopHardwareTone() {
+#if defined(PCCONTROLLER_NATIVE)
+  noTone(pin_);
+#else
   const uint8_t savedStatus = SREG;
   cli();
 
@@ -155,5 +166,6 @@ void TonePlayer::stopHardwareTone() {
       ~(_BV(CS12) | _BV(CS11) | _BV(CS10)));
 
   SREG = savedStatus;
+#endif
   digitalWrite(pin_, LOW);
 }

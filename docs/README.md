@@ -95,6 +95,7 @@ device identity or interface settings.
   retained, improved, or deliberately excluded.
 - [Host Controller Tool](../Tools/Controller/README.md) — WebUI, TUI, CLI,
   native integration, programming, and packaging reference.
+- [Shared production firmware](Shared-Production-Firmware.md) — same-source physical/native targets, drift recovery and explicit deployment gates.
 - [Virtual Board](../Tools/VirtualBoard/README.md) — hardware-free native
   simulator setup and protocol testing.
 - [Requirements Backlog](Requirements-Backlog.md) — issue-linked open work.

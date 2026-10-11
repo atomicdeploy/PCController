@@ -5,6 +5,7 @@
 
 // Releases a stuck fixed-port I2C bus with nine clocks and a generated STOP.
 bool prepareI2cBus() {
+#if defined(__AVR_ATmega328P__)
   constexpr uint8_t sda = _BV(PORTC4);
   constexpr uint8_t scl = _BV(PORTC5);
   // Release both open-drain lines with their weak pull-ups enabled.
@@ -44,6 +45,29 @@ bool prepareI2cBus() {
 
   return (PINC & static_cast<uint8_t>(sda | scl)) ==
          static_cast<uint8_t>(sda | scl);
+#else
+  // Same recovery sequence through the target pin map, never Mini port C on Mega.
+  pinMode(BoardPins::I2cSda, INPUT_PULLUP);
+  pinMode(BoardPins::I2cScl, INPUT_PULLUP);
+  delayMicroseconds(10);
+  if (digitalRead(BoardPins::I2cScl) == LOW) return false;
+  for (uint8_t pulse = 0; pulse < 9 && digitalRead(BoardPins::I2cSda) == LOW; ++pulse) {
+    digitalWrite(BoardPins::I2cScl, LOW);
+    pinMode(BoardPins::I2cScl, OUTPUT);
+    delayMicroseconds(5);
+    pinMode(BoardPins::I2cScl, INPUT_PULLUP);
+    delayMicroseconds(5);
+    if (digitalRead(BoardPins::I2cScl) == LOW) return false;
+  }
+  digitalWrite(BoardPins::I2cSda, LOW);
+  pinMode(BoardPins::I2cSda, OUTPUT);
+  delayMicroseconds(5);
+  pinMode(BoardPins::I2cScl, INPUT_PULLUP);
+  delayMicroseconds(5);
+  pinMode(BoardPins::I2cSda, INPUT_PULLUP);
+  delayMicroseconds(5);
+  return digitalRead(BoardPins::I2cSda) != LOW && digitalRead(BoardPins::I2cScl) != LOW;
+#endif
 }
 
 // Restores the active-high/low MODE2 contract after PWM startup.
@@ -85,12 +109,21 @@ void sampleIna219(uint32_t at) {
     ina219Available = false;
     return;
   }
+#if defined(__AVR__)
   int32_t *filtered = &sensors.supplyMilliVolts;
   const int32_t *sample = &reading.supplyMilliVolts;
   for (uint8_t index = 0; index < 4; ++index) {
     filtered[index] = smoothInaValue(filtered[index], sample[index],
                                      index >= 2);
   }
+#else
+  // Native pointer arithmetic must not walk unrelated struct members, even
+  // when their wire layout is adjacent. Reuse the same smoothing algorithm.
+  sensors.supplyMilliVolts = smoothInaValue(sensors.supplyMilliVolts, reading.supplyMilliVolts, false);
+  sensors.busMilliVolts = smoothInaValue(sensors.busMilliVolts, reading.busMilliVolts, false);
+  sensors.currentMilliAmps = smoothInaValue(sensors.currentMilliAmps, reading.currentMilliAmps, true);
+  sensors.powerMilliWatts = smoothInaValue(sensors.powerMilliWatts, reading.powerMilliWatts, true);
+#endif
 }
 
 // Gives DS18B20 probes a deterministic ROM order before role assignment.

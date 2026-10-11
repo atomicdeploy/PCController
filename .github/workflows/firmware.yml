@@ -192,3 +192,25 @@ jobs:
 
       - name: "🔎 Recheck feature-profile records and boundaries"
         run: ./firmware.sh check
+
+      - name: "🧩 Install declared larger-MCU core in the existing CLI cache"
+        run: |
+          node -e 'const { execFileSync } = require("node:child_process");
+          const target = require("./Tools/Firmware/targets.json").mega2560;
+          execFileSync("arduino-cli", ["core", "update-index", "--additional-urls", target.index], { stdio: "inherit" });
+          execFileSync("arduino-cli", ["core", "install", target.core + "@" + target.minimumCoreVersion, "--additional-urls", target.index], { stdio: "inherit" });'
+
+      - name: "🧪 Compile each ATmega2560 production profile without device access"
+        run: |
+          node Tools/Firmware/targets.mjs build mega2560 constrained
+          node Tools/Firmware/targets.mjs build mega2560 expanded-panel
+          node Tools/Firmware/targets.mjs build mega2560 expanded-autonomous
+
+      - name: "⬆️ Preserve build-only ATmega2560 evidence (not a commissioned release)"
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: BuildOnly-ATmega2560-Targets
+          path: .build/firmware/mega2560
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0

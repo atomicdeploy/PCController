@@ -28,6 +28,7 @@ const repositoryIdentityPaths = new Set([
   "docs/Project-Checklist.md",
   "docs/Requirements-Backlog.md",
   "docs/Media-Timing-and-MCU-Expansion.md",
+  "docs/Shared-Production-Firmware.md",
 ]);
 
 // These reviewed integration documents cite the paired client or candidate
@@ -35,6 +36,7 @@ const repositoryIdentityPaths = new Set([
 // repository; private paths, stale-origin language and unrelated URLs remain
 // forbidden.
 const reviewedExternalRepositories = new Map([
+  ["docs/Shared-Production-Firmware.md", new Set(["mcudude/megacore"])],
   ["docs/Media-Timing-and-MCU-Expansion.md", new Set([
     "toghroltp/pealayer",
     "mcudude/megacore",

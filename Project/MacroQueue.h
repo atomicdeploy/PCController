@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Arduino.h>
+#include "../ProjectConfig.h"
 
 #include "Core/MacroRing.h"
 #include "UartProtocol.h"
@@ -28,11 +29,22 @@ public:
   bool recording() const {
     return ring_.status().report.state == ControllerCore::MacroRing::Recording;
   }
-  uint8_t *claimSharedWorkspace() { return ring_.claimSharedWorkspace(); }
+  uint8_t *claimSharedWorkspace() {
+#if PCCONTROLLER_FEATURE_PROFILE != 0
+    return stripWorkspace_;
+#else
+    return ring_.claimSharedWorkspace();
+#endif
+  }
 
 private:
   void sendStatus(uint8_t opcode, uint8_t sequence);
 
   ControllerProtocol::UartProtocol &protocol_;
   ControllerCore::MacroRing ring_;
+#if PCCONTROLLER_FEATURE_PROFILE != 0
+  // Rich hardware need not trade retained recordings for strip RAM. Queue
+  // capacity remains the negotiated 127-byte contract; do not silently widen.
+  uint8_t stripWorkspace_[300];
+#endif
 };
