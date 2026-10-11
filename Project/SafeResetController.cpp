@@ -35,9 +35,13 @@ void SafeResetController::service(RelayController &relays,
   relays.allOff(now);
   (void)pwm.tryAllOff();
   Serial.flush();
+#if defined(PCCONTROLLER_NATIVE)
+  NativeHal::requestReset();
+#else
   wdt_enable(WDTO_15MS);
   for (;;) {
   }
+#endif
 }
 
 bool SafeResetController::pending() const { return pending_; }

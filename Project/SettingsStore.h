@@ -74,7 +74,7 @@ constexpr uint8_t Defaults = RememberUserRelays | RememberUserPwm;
 } // namespace OutputPersistence
 
 // ControllerSettings is the packed MCU-owned EEPROM and native settings record.
-struct ControllerSettings {
+struct __attribute__((packed)) ControllerSettings {
   // Core flags and illumination/display boot values use their native 8-bit units.
   uint8_t flags;
   uint8_t illuminationMode;
@@ -241,10 +241,8 @@ struct ControllerSettings {
 // prefix. Keep the shared semantic prefix explicit while allowing later
 // payloads to append independently discoverable fields.
 constexpr uint8_t ControllerSettingsPrefixSize = 7;
-#if defined(__AVR__)
-// AVR byte alignment defines the EEPROM/wire record. Desktop test compilers
-// may align uint16_t differently, so production-layout assertions belong to
-// the target that serializes this structure.
+// The same packed record is serialized by physical AND native firmware.
+// Desktop ABI padding must never shift EEPROM fields/checksums.
 static_assert(offsetof(ControllerSettings, streamPeriodMs) ==
                   ControllerSettingsPrefixSize,
               "Controller settings prefix layout changed");
@@ -254,7 +252,6 @@ static_assert(sizeof(ControllerSettings) == 31,
 #else
 static_assert(sizeof(ControllerSettings) == 22,
               "Controller settings AVR layout changed");
-#endif
 #endif
 
 // Owns the MCU EEPROM settings record, defaults, checksum, and delayed writes.

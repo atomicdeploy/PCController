@@ -60,9 +60,8 @@ void sendHello(uint8_t sequence) {
     uint8_t featureProfile;
     uint8_t buildFeatures;
   } payload = {4, 1, capabilities,
-               pgm_read_dword(&firmwareIdentity.sourceHash),
-               pgm_read_dword(&firmwareIdentity.packedTimestamp),
-               0, static_cast<uint8_t>(1U << 5)};
+               identityHash(), identityTimestamp(),
+               PCCONTROLLER_FEATURE_PROFILE, static_cast<uint8_t>(1U << 5)};
 #else
   struct __attribute__((packed)) HelloPayload {
     uint8_t schema;
@@ -71,8 +70,7 @@ void sendHello(uint8_t sequence) {
     uint32_t buildHash;
     uint32_t buildTimestamp;
   } payload = {3, 1, capabilities,
-               pgm_read_dword(&firmwareIdentity.sourceHash),
-               pgm_read_dword(&firmwareIdentity.packedTimestamp)};
+               identityHash(), identityTimestamp()};
 #endif
   appProtocol.send(ControllerProtocol::HelloResponse, sequence,
                    reinterpret_cast<const uint8_t *>(&payload),
@@ -378,7 +376,8 @@ void transferI2c(uint8_t sequence, const uint8_t *request, uint8_t length,
     }
   }
   if (response[0] == 0 && readLength != 0) {
-    (void)i2cBus.requestFrom(address, readLength);
+    const uint8_t received = i2cBus.requestFrom(address, readLength);
+    if (received != readLength) response[0] = 4; // Partial/unavailable is not success.
     while (response[2] < readLength && i2cBus.available() > 0) {
       response[3 + response[2]++] = i2cBus.read();
     }
@@ -767,6 +766,7 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame,
       } else {
         AddressableLeds::setPixel(payload[0], color);
       }
+      AddressableLeds::setBrightness(payload[4]);
       AddressableLeds::show();
       goto acknowledged;
     }

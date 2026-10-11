@@ -32,6 +32,8 @@ void CompactI2c::beginTransmission(uint8_t address) {
   if (!start(address, false)) {
     error_ = 2;
   }
+#elif defined(PCCONTROLLER_NATIVE)
+  error_ = NativeHal::i2cBegin(address);
 #else
   (void)address;
   error_ = 4;
@@ -43,6 +45,8 @@ size_t CompactI2c::write(uint8_t value) {
   if (error_ == 0 && !writeByte(value)) {
     error_ = 3;
   }
+#elif defined(PCCONTROLLER_NATIVE)
+  if (error_ == 0 && !NativeHal::i2cWrite(value)) error_ = 3;
 #else
   (void)value;
 #endif
@@ -63,6 +67,9 @@ uint8_t CompactI2c::endTransmission(bool sendStop) {
   if (sendStop || error_ != 0) {
     stop();
   }
+#elif defined(PCCONTROLLER_NATIVE)
+  (void)sendStop;
+  if (error_ == 0) error_ = NativeHal::i2cEnd();
 #else
   (void)sendStop;
 #endif
@@ -94,6 +101,8 @@ uint8_t CompactI2c::requestFrom(uint8_t address, uint8_t length) {
     rx_[rxLength_++] = TWDR;
   }
   stop();
+#elif defined(PCCONTROLLER_NATIVE)
+  rxLength_ = NativeHal::i2cRead(address, rx_, length);
 #else
   (void)address;
 #endif

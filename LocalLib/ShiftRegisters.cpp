@@ -8,7 +8,7 @@
 ShiftRegisters shiftRegisters;
 
 void ShiftRegisters::begin() {
-#if defined(__AVR__)
+#if defined(__AVR_ATmega328P__)
   // Fixed ControllerBoardMini wiring: PC0 input, PC1..3 outputs, PD4/5/7
   // controls, and PB0 active-low output enable. Direct port setup avoids the
   // generic Arduino pin lookup on every shift-register edge.
@@ -42,7 +42,7 @@ void ShiftRegisters::begin() {
   allOutputsOff();
   service();
 
-#if defined(__AVR__)
+#if defined(__AVR_ATmega328P__)
   PORTB &= static_cast<uint8_t>(~_BV(PORTB0));
   DDRB |= _BV(DDB0);
 #else
@@ -52,7 +52,7 @@ void ShiftRegisters::begin() {
 }
 
 void ShiftRegisters::service() {
-#if defined(__AVR__)
+#if defined(__AVR_ATmega328P__)
   // Shift the active-low 74HC595 byte LSB first, then latch it.
   PORTC &= static_cast<uint8_t>(~(_BV(PORTC2) | _BV(PORTC1)));
   uint8_t outputs = outputRegister_;

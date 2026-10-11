@@ -5,11 +5,11 @@
 
 // Filtered readings in native integer units: mV, mA, mW, and centi-degrees C.
 struct SensorState {
-  int32_t supplyMilliVolts = INVALID_I32;
-  int32_t busMilliVolts = INVALID_I32;
-  int32_t currentMilliAmps = INVALID_I32;
-  int32_t powerMilliWatts = INVALID_I32;
-  int16_t temperatureCentiC[2] = {INVALID_I16, INVALID_I16};
+  int32_t supplyMilliVolts;
+  int32_t busMilliVolts;
+  int32_t currentMilliAmps;
+  int32_t powerMilliWatts;
+  int16_t temperatureCentiC[2];
 };
 static_assert(sizeof(SensorState) == 20, "Sensor telemetry wire layout changed");
 
@@ -68,7 +68,8 @@ AutomationExecutor automationExecutor(boardAutomations,
 // Front-panel key order intentionally matches MenuAction IDs 0..3.
 Key menuKeys[4];
 
-SensorState sensors;
+SensorState sensors = {INVALID_I32, INVALID_I32, INVALID_I32, INVALID_I32,
+                       {INVALID_I16, INVALID_I16}};
 RadioState radioState;
 
 // Smooths normal readings while allowing invalid/HOT state changes immediately.

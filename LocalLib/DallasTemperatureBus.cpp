@@ -52,6 +52,16 @@ void DallasTemperatureBus::begin(uint8_t pin) {
 }
 
 void DallasTemperatureBus::begin() {
+#if defined(PCCONTROLLER_NATIVE)
+  // Optional explicit device fixtures; runtime owns discovery and conversion.
+  addressCount_ = 0;
+  for (uint8_t index = 0; index < 2; ++index) {
+    if (NativeHal::temperature[index] == DisconnectedCentiC) continue;
+    uint8_t *rom = addresses_[addressCount_++];
+    memset(rom, 0, 8); rom[0] = Ds18b20Family; rom[1] = index + 1;
+    rom[7] = crc8(rom, 7);
+  }
+#else
   const uint8_t port = digitalPinToPort(pin_);
   bitMask_ = digitalPinToBitMask(pin_);
   outputRegister_ = portOutputRegister(port);
@@ -79,6 +89,7 @@ void DallasTemperatureBus::begin() {
       ++addressCount_;
     }
   }
+#endif
 }
 
 uint8_t DallasTemperatureBus::getDeviceCount() const {
@@ -96,6 +107,9 @@ bool DallasTemperatureBus::getAddress(Ds18b20Address destination,
 
 bool DallasTemperatureBus::setResolution(const uint8_t address[8],
                                          uint8_t resolutionBits) {
+#if defined(PCCONTROLLER_NATIVE)
+  return address && address[0] == Ds18b20Family && resolutionBits >= 9 && resolutionBits <= 12;
+#else
   if (address == nullptr || resolutionBits < 9 || resolutionBits > 12 ||
       !reset()) {
     return false;
@@ -107,9 +121,13 @@ bool DallasTemperatureBus::setResolution(const uint8_t address[8],
   writeByte(70); // TL alarm register; retained at a harmless default.
   writeByte(static_cast<uint8_t>(0x1F | ((resolutionBits - 9) << 5)));
   return true;
+#endif
 }
 
 bool DallasTemperatureBus::requestTemperatures() {
+#if defined(PCCONTROLLER_NATIVE)
+  return addressCount_ != 0;
+#else
   if (addressCount_ == 0 || !reset()) {
     return false;
   }
@@ -117,9 +135,14 @@ bool DallasTemperatureBus::requestTemperatures() {
   writeByte(ConvertTemperatureCommand);
   release();
   return true;
+#endif
 }
 
 int16_t DallasTemperatureBus::getTempCentiC(const uint8_t address[8]) {
+#if defined(PCCONTROLLER_NATIVE)
+  if (!address || address[0] != Ds18b20Family || address[1] < 1 || address[1] > 2) return DisconnectedCentiC;
+  return NativeHal::temperature[address[1] - 1];
+#else
   if (address == nullptr || !reset()) {
     return DisconnectedCentiC;
   }
@@ -157,6 +180,7 @@ int16_t DallasTemperatureBus::getTempCentiC(const uint8_t address[8]) {
   const int32_t scaled = static_cast<int32_t>(raw) * 100;
   return static_cast<int16_t>(
       scaled >= 0 ? (scaled + 8) / 16 : (scaled - 8) / 16);
+#endif
 }
 
 float DallasTemperatureBus::getTempC(const uint8_t address[8]) {

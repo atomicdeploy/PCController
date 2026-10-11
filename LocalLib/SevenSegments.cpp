@@ -29,7 +29,7 @@ inline void busDelay() {
 }
 
 inline void clockLow() {
-#if defined(__AVR__) && defined(PORTB) && defined(DDB5)
+#if defined(__AVR_ATmega328P__) && defined(PORTB) && defined(DDB5)
   PORTB &= static_cast<uint8_t>(~_BV(PORTB5));
   DDRB |= _BV(DDB5);
 #else
@@ -38,7 +38,7 @@ inline void clockLow() {
 }
 
 inline void clockHigh() {
-#if defined(__AVR__) && defined(PORTB) && defined(DDB5)
+#if defined(__AVR_ATmega328P__) && defined(PORTB) && defined(DDB5)
   PORTB |= _BV(PORTB5);
   DDRB |= _BV(DDB5);
 #else
@@ -47,7 +47,7 @@ inline void clockHigh() {
 }
 
 inline void dataLow() {
-#if defined(__AVR__) && defined(PORTB) && defined(DDB3)
+#if defined(__AVR_ATmega328P__) && defined(PORTB) && defined(DDB3)
   PORTB &= static_cast<uint8_t>(~_BV(PORTB3));
   DDRB |= _BV(DDB3);
 #else
@@ -57,7 +57,7 @@ inline void dataLow() {
 }
 
 inline void dataHigh() {
-#if defined(__AVR__) && defined(PORTB) && defined(DDB3)
+#if defined(__AVR_ATmega328P__) && defined(PORTB) && defined(DDB3)
   PORTB |= _BV(PORTB3);
   DDRB |= _BV(DDB3);
 #else
@@ -67,7 +67,7 @@ inline void dataHigh() {
 }
 
 inline void releaseData() {
-#if defined(__AVR__) && defined(PORTB) && defined(DDB3)
+#if defined(__AVR_ATmega328P__) && defined(PORTB) && defined(DDB3)
   PORTB &= static_cast<uint8_t>(~_BV(PORTB3));
   DDRB &= static_cast<uint8_t>(~_BV(DDB3));
 #else
@@ -113,7 +113,7 @@ void writeBusByte(uint8_t value) {
   busDelay();
   clockHigh();
   busDelay();
-#if defined(__AVR__) && defined(PINB) && defined(PINB3)
+#if defined(__AVR_ATmega328P__) && defined(PINB) && defined(PINB3)
   busNack = PINB;
 #else
   busNack = digitalRead(BoardPins::Tm1637Data) != LOW;
@@ -126,7 +126,7 @@ void writeBusByte(uint8_t value) {
 SevenSegments display;
 
 void SevenSegments::begin(uint8_t brightness) {
-#if !defined(__AVR__)
+#if !defined(__AVR_ATmega328P__)
   pinMode(BoardPins::Tm1637Clock, OUTPUT);
   pinMode(BoardPins::Tm1637Data, OUTPUT);
 #endif
@@ -373,7 +373,7 @@ void SevenSegments::sendCommand(uint8_t command) {
 }
 
 bool SevenSegments::detected() const {
-#if defined(__AVR__) && defined(PINB3)
+#if defined(__AVR_ATmega328P__) && defined(PINB3)
   return (busNack & _BV(PINB3)) == 0;
 #else
   return busNack == 0;
