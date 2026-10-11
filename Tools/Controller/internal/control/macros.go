@@ -235,6 +235,7 @@ func (runner *MacroRunner) RecordingState() MacroRecordingState {
 	state := runner.recording
 	state.Preview = cloneMacroSteps(runner.recordMacro.Steps)
 	state.CaptureSelection = state.CaptureSelection.clone()
+	state.Capabilities = state.Capabilities.clone()
 	runner.recordMu.RUnlock()
 	return state
 }

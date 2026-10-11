@@ -10,6 +10,33 @@ import (
 	"time"
 )
 
+func TestRecordingStateCapabilitiesCannotMutateActiveTake(t *testing.T) {
+	config := appconfig.Defaults()
+	runner := macroTestRunner(&config, nil)
+	if _, err := runner.StartRecording("snapshot", "tests", "green"); err != nil {
+		t.Fatal(err)
+	}
+	state := runner.RecordingState()
+	if len(state.Capabilities.Controls) == 0 || len(state.Capabilities.Opcodes) == 0 {
+		t.Fatal("recording capabilities missing")
+	}
+	want := state.Capabilities.clone()
+	state.Capabilities.Controls[0].Name = "mutated"
+	for i := range state.Capabilities.Controls {
+		if len(state.Capabilities.Controls[i].Actions) > 0 {
+			state.Capabilities.Controls[i].Actions[0] = appconfig.ActionDescriptor{}
+		}
+	}
+	state.Capabilities.Opcodes[0].Name = "mutated"
+	state.Capabilities.Opcodes[0].CaptureModes[0] = "mutated"
+	gotJSON, _ := json.Marshal(runner.RecordingState().Capabilities)
+	wantJSON, _ := json.Marshal(want)
+	if string(gotJSON) != string(wantJSON) {
+		t.Fatal("caller mutated capability state of active recording")
+	}
+	_, _ = runner.StopRecording(false)
+}
+
 func TestWholeEffectRepeatPreservesMixedSequenceOrderForBothExecutors(t *testing.T) {
 	count := uint16(3)
 	macro := appconfig.Macro{ID: 9, Name: "repeat", RepeatCount: &count, Steps: []appconfig.MacroStep{
@@ -121,6 +148,9 @@ func TestCaptureSelectionUpfrontValidationAndORRawOpcode(t *testing.T) {
 	if _, err := runner.validateCaptureSelection(CaptureSelection{Opcodes: []uint16{256}}, macroModeAuto, false); err == nil {
 		t.Fatal("opcode overflow accepted")
 	}
+	if _, err := runner.validateCaptureSelection(CaptureSelection{Opcodes: []uint16{uint16(native.OpRelaySide)}}, macroModeAuto, false); err == nil {
+		t.Fatal("unadvertised semantic motion opcode accepted")
+	}
 	if _, err := runner.StartRecording("or", "", "", selection); err != nil {
 		t.Fatal(err)
 	}
@@ -132,6 +162,9 @@ func TestCaptureSelectionUpfrontValidationAndORRawOpcode(t *testing.T) {
 	steps := selectedRelaySteps(100, 0, 0xff, true, appconfig.BoardModeCinemaSeatMotion, CaptureSelection{Opcodes: []uint16{uint16(native.OpRelaySet)}})
 	if len(steps) != 1 || steps[0].Kind != "relay-mask" || steps[0].Value != 255 {
 		t.Fatalf("explicit broad opcode lost exact mask: %+v", steps)
+	}
+	if steps = selectedRelaySteps(100, 0, 255, true, appconfig.BoardModeCinemaSeatMotion, CaptureSelection{Opcodes: []uint16{uint16(native.OpRelayAllOff)}}); len(steps) != 0 {
+		t.Fatal("all-off selector captured an on edge")
 	}
 }
 

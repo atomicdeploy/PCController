@@ -26,6 +26,18 @@ type RecordingCapabilities struct {
 	Opcodes  []CaptureOpcode               `json:"opcodes"`
 }
 
+func (capabilities RecordingCapabilities) clone() RecordingCapabilities {
+	capabilities.Controls = append([]appconfig.ControlDescriptor{}, capabilities.Controls...)
+	for i := range capabilities.Controls {
+		capabilities.Controls[i].Actions = append([]appconfig.ActionDescriptor{}, capabilities.Controls[i].Actions...)
+	}
+	capabilities.Opcodes = append([]CaptureOpcode{}, capabilities.Opcodes...)
+	for i := range capabilities.Opcodes {
+		capabilities.Opcodes[i].CaptureModes = append([]string{}, capabilities.Opcodes[i].CaptureModes...)
+	}
+	return capabilities
+}
+
 func (s CaptureSelection) key(key string) bool {
 	for _, v := range s.ControlKeys {
 		if v == key {
@@ -77,6 +89,9 @@ func (runner *MacroRunner) recordingCapabilities() RecordingCapabilities {
 	result := RecordingCapabilities{Controls: controls, Opcodes: []CaptureOpcode{}}
 	for n := 0; n < 256; n++ {
 		op := byte(n)
+		if op == native.OpRelaySide && appconfig.NormalizeBoardMode(profile.Mode) != appconfig.BoardModeCinemaSeatMotion {
+			continue
+		}
 		modes := []string{}
 		if hostRecordableOpcode(op) {
 			modes = append(modes, "automatic")
@@ -99,7 +114,8 @@ func (runner *MacroRunner) validateCaptureSelection(selection CaptureSelection, 
 	}
 	selection = selection.clone()
 	available := map[string]bool{}
-	for _, control := range runner.recordingCapabilities().Controls {
+	capabilities := runner.recordingCapabilities()
+	for _, control := range capabilities.Controls {
 		available[control.Key] = true
 	}
 	for _, key := range selection.ControlKeys {
@@ -115,6 +131,16 @@ func (runner *MacroRunner) validateCaptureSelection(selection CaptureSelection, 
 			return selection, fmt.Errorf("capture opcode must be 0..255")
 		}
 		op := byte(value)
+		advertised := false
+		for _, descriptor := range capabilities.Opcodes {
+			if descriptor.Opcode == op {
+				advertised = true
+				break
+			}
+		}
+		if !advertised {
+			return selection, fmt.Errorf("capture opcode %s is not advertised by the active board profile", native.OpcodeName(op))
+		}
 		allowed := hostRecordableOpcode(op)
 		if mode == macroModeMCU {
 			allowed = macroQueueableOpcode(op)

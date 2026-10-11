@@ -1,7 +1,7 @@
 # Whole-effect repeat and selective capture checkpoint
 
-Owners: [PCController #633](https://github.com/atomicdeploy/PCController/issues/633)
-and [Pealayer #141](https://github.com/ToghrolTP/pealayer/issues/141).
+Owning backend issue: #633. The paired application's issue and source-readiness
+checkpoint are linked from that issue and the owning pull request on GitHub.
 
 The current alpha sequence contract owns finite whole-effect repetition. Step
 repeat fields are removed and rejected, with no alias or automatic migration.
@@ -20,6 +20,13 @@ JSON arrays/range validation, inherited append metadata, strict retired-field
 rejection, media execution and existing capture/append/effect round trips.
 Some public/host packages had no test matching this filter: their compilation
 is evidence, not runtime acceptance. Full CI remains the merge gate.
+
+The follow-up ran the complete `internal/control` and `internal/appconfig`
+stable-path suites without a test-name filter; both passed. Additional tests
+reject raw seat commands absent from the active profile, ensure an all-off-only
+selector does not capture on edges, and prove reading recording capabilities
+cannot mutate the active take, including nested actions and capture modes.
+The repository structure/link/privacy check also passed locally.
 
 Local verification used installed Go 1.27.1 with the module directive lowered
 only during the stable runner pass, then restored to 1.27.2 before committing.
