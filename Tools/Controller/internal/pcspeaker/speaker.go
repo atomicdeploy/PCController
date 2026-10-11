@@ -45,6 +45,9 @@ func PlayConfigured(ctx context.Context, driverDirectory, backend, executable st
 	if durationMS < 1 || durationMS > MaxDurationMS {
 		return fmt.Errorf("speaker duration must be 1..%d ms", MaxDurationMS)
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	backend = strings.ToLower(strings.TrimSpace(backend))
 	if backend == "" {
 		backend = BackendAuto
@@ -65,6 +68,10 @@ func PlayConfigured(ctx context.Context, driverDirectory, backend, executable st
 		if backend == BackendNative {
 			return nativeErr
 		}
+	}
+	// Cancellation is not a backend failure; do not start a fallback note.
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	if fallbackErr := playExternalBeep(ctx, driverDirectory, executable, frequencyHz, durationMS); fallbackErr == nil {
 		return nil

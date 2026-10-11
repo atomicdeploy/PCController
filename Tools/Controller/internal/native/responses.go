@@ -28,6 +28,9 @@ const (
 // EEPROM automation engine is actually compiled into that image.
 const BuildFeatureBoardAutomation byte = 1 << 5
 
+// A two-byte MENU_SET_PAGE request navigates without updating EEPROM.
+const BuildFeatureVolatileMenu byte = 1 << 6
+
 // HELLO capability bits are the authoritative guard for optional operations.
 const (
 	CapabilityINA219             uint32 = 1 << 0

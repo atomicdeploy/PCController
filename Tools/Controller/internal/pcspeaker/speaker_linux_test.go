@@ -94,6 +94,17 @@ func TestLinuxPlayDoesNotRequireWinRing0Directory(t *testing.T) {
 	}
 }
 
+func TestLinuxCancelledQueuedNoteDoesNotTouchDevice(t *testing.T) {
+	linuxSpeakerGate <- struct{}{}
+	defer func() { <-linuxSpeakerGate }()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	operations := linuxSpeakerOperations{open: func(string, int, uint32) (int, error) { t.Fatal("cancelled note touched device"); return 0, nil }, ioctl: func(int, uint, int) error { return nil }, close: func(int) error { return nil }}
+	if err := playLinuxConsoleSpeaker(ctx, []string{"/console"}, operations, 440, 100); !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+}
+
 func TestLinuxNativeProbeUsesConsoleDevicesWithoutEmittingTone(t *testing.T) {
 	originalDevices := linuxSpeakerDevices
 	originalOperations := nativeLinuxSpeakerOperations

@@ -708,8 +708,9 @@ func runIPC(args []string, stdout, stderr io.Writer, store *appconfig.Store) err
 				_, err := store.Update(change)
 				return err
 			},
-			BridgeList: func() any { return integrations.BridgePeers() },
-			BridgeCall: integrations.CallBridge,
+			BridgeList:  func() any { return integrations.BridgePeers() },
+			BridgeCall:  integrations.CallBridge,
+			BoardMirror: func() ipcjson.BoardMirrorService { return integrations },
 			WebhookAdmin: func() ipcjson.WebhookAdminService {
 				return integrations
 			},

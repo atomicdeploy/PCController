@@ -1629,6 +1629,24 @@ func (client *Client) SetMenuPage(ctx context.Context, page byte) error {
 	return client.runtime.Command(ctx, native.OpMenuSetPage, []byte{page})
 }
 
+// SetVolatileMenuPage cannot silently fall back to the older EEPROM-writing
+// navigation request. A peer must advertise support in its live HELLO.
+func (client *Client) SetVolatileMenuPage(ctx context.Context, page byte) error {
+	if client.Snapshot().Hello.BuildFeatures&native.BuildFeatureVolatileMenu == 0 {
+		return errors.New("firmware does not advertise volatile menu navigation")
+	}
+	return client.runtime.Command(ctx, native.OpMenuSetPage, []byte{page, 1})
+}
+
+// PresentMirrorSegments takes a bounded two-second presentation lease. It
+// changes cells only, never EEPROM brightness or physical detection state.
+func (client *Client) PresentMirrorSegments(ctx context.Context, cells [4]byte) error {
+	if client.Snapshot().Hello.Capabilities&native.CapabilityScheduledSegments == 0 {
+		return errors.New("firmware does not advertise scheduled segments")
+	}
+	return client.runtime.Command(ctx, native.OpDisplayText, native.ScheduledSegmentRawPayload(cells, 2000))
+}
+
 // BoardName reads the operator-assigned MCU EEPROM name.
 func (client *Client) BoardName(ctx context.Context) (BoardName, error) {
 	return client.runtime.BoardName(ctx)

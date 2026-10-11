@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -18,7 +17,7 @@ import (
 // It is intentionally kept local because x/sys/unix does not publish it.
 const linuxKDMKTONE = 0x4B30
 
-var linuxSpeakerMu sync.Mutex
+var linuxSpeakerGate = make(chan struct{}, 1)
 var linuxSpeakerDevices = []string{"/dev/console", "/dev/tty0"}
 
 type linuxSpeakerOperations struct {
@@ -57,8 +56,16 @@ func playLinuxConsoleSpeaker(
 		return errors.New("Linux PC-speaker operations are incomplete")
 	}
 
-	linuxSpeakerMu.Lock()
-	defer linuxSpeakerMu.Unlock()
+	select {
+	case linuxSpeakerGate <- struct{}{}:
+		defer func() { <-linuxSpeakerGate }()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	// A cancelled queued note must never briefly energize the speaker.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 
 	var attempts []error
 	for _, device := range devices {

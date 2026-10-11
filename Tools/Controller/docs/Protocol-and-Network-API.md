@@ -729,6 +729,14 @@ request error.
 | `controller.integrations.local.get` | `{}` | credential-free local-device and data-hub enable/URL settings |
 | `controller.integrations.local.set` | `local_device`, `data_hub` | validate and persist LAN-only device and loopback-only data roots |
 | `controller.integrations.status` | `{}` | requested and effective buzzer route, mirror backend, and board reconciliation state |
+| `controller.mirror.configure` | `MirrorConfig` | persist explicit board IDs, one coordinator, receive allowlist and semantic groups |
+| `controller.mirror.inspect` | `{}` | actual board generation, supported volatile state, board-scoped observations and unsupported domains |
+| `controller.mirror.status` | `{}` | mirror members, ordering, ACK/readback results, failures and dropped notes |
+| `controller.mirror.apply` | routed `Write` | bounded identity/generation/intent/sequence-validated volatile receive operation |
+| `controller.mirror.resync` | `group_id`, `source_board_id` | explicitly synchronize available state; never replay tones or disconnected actuation |
+
+See [Board mirroring](../../../docs/Board-Mirroring.md) for commissioning,
+capabilities, exclusions, echo limits and physical-acceptance gates.
 | `controller.ports` | `{}` | current serial devices with stable identity fields |
 | `controller.quit`, `controller.exit` | `{}` | close the primary and emit lifecycle shutdown |
 

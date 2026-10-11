@@ -70,6 +70,22 @@ func (cache *ReplayCache) Begin(routeID string, now time.Time) (record ReplayRec
 		cache.order.MoveToFront(element)
 		return cloneReplayRecord(element.Value.(*replayEntry).record), false, nil
 	}
+	if len(cache.entries) >= cache.capacity {
+		// Never evict a command that can still be executing. Admission fails
+		// closed when all slots are active instead of permitting redispatch.
+		var victim *list.Element
+		for candidate := cache.order.Back(); candidate != nil; candidate = candidate.Prev() {
+			if candidate.Value.(*replayEntry).record.State == ReplayComplete {
+				victim = candidate
+				break
+			}
+		}
+		if victim == nil {
+			return ReplayRecord{}, false, errors.New("replay cache has no completed eviction slot")
+		}
+		delete(cache.entries, victim.Value.(*replayEntry).record.RouteID)
+		cache.order.Remove(victim)
+	}
 	record = ReplayRecord{
 		RouteID: routeID,
 		State:   ReplayInProgress,
@@ -78,7 +94,6 @@ func (cache *ReplayCache) Begin(routeID string, now time.Time) (record ReplayRec
 	}
 	element := cache.order.PushFront(&replayEntry{record: record})
 	cache.entries[routeID] = element
-	cache.enforceCapacityLocked()
 	return cloneReplayRecord(record), true, nil
 }
 
@@ -133,7 +148,7 @@ func (cache *ReplayCache) pruneLocked(now time.Time) {
 	for element := cache.order.Back(); element != nil; {
 		previous := element.Prev()
 		entry := element.Value.(*replayEntry)
-		if !now.Before(entry.record.Expires) {
+		if entry.record.State == ReplayComplete && !now.Before(entry.record.Expires) {
 			delete(cache.entries, entry.record.RouteID)
 			cache.order.Remove(element)
 		}

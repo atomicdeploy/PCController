@@ -162,13 +162,13 @@ void moveMenuCategory(bool forward, uint32_t at) {
 #endif
 
 // Activates a stable page and optionally persists it as the boot default.
-void setMenuPage(uint8_t page) {
+void setMenuPage(uint8_t page, bool persistDefault) {
   menuPage = canonicalMenuPage(page);
 #if PCCONTROLLER_MENU_HIERARCHY
   menuTreeState = menuCategory(menuPage);
 #endif
   ControllerSettings &settings = settingsStore.values();
-  if (settings.saveLastMenuPage() &&
+  if (persistDefault && settings.saveLastMenuPage() &&
 #if PCCONTROLLER_MENU_VISIBILITY
       settings.menuPageVisible(menuPage) &&
 #endif

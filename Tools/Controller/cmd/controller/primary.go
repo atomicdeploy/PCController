@@ -458,6 +458,12 @@ func startPrimaryIPCAtWithIdentity(
 			}
 			return []hostbridge.PeerInfo{}
 		},
+		BoardMirror: func() ipcjson.BoardMirrorService {
+			if integrations := server.integrations.Load(); integrations != nil {
+				return integrations
+			}
+			return nil
+		},
 		WebhookAdmin: func() ipcjson.WebhookAdminService {
 			if integrations := server.integrations.Load(); integrations != nil {
 				return integrations

@@ -12,6 +12,7 @@ import (
 
 	"golang.org/x/net/http/httpguts"
 
+	"pccontroller.local/controller/internal/fleet"
 	"pccontroller.local/controller/internal/hostui"
 	"pccontroller.local/controller/internal/integrationproxy"
 	"pccontroller.local/controller/internal/netpolicy"
@@ -22,19 +23,20 @@ import (
 // explicit exception that may reconcile the MCU Silent bit through the owning
 // runtime; no other integration value is mirrored into EEPROM.
 type Integrations struct {
-	Hotkeys                []Hotkey          `json:"hotkeys,omitempty"`
-	Keyboard               KeyboardControl   `json:"keyboard_control"`
-	Lifecycle              LifecycleSafety   `json:"lifecycle_safety"`
-	Notifications          Notifications     `json:"notifications"`
-	StatusLED              StatusLEDPolicy   `json:"status_led"`
-	BuzzerMirror           BuzzerMirror      `json:"buzzer_mirror"`
-	Discovery              Discovery         `json:"discovery"`
-	InboundWebhooksEnabled bool              `json:"inbound_webhooks_enabled"`
-	OutboundWebhooks       []Webhook         `json:"outbound_webhooks,omitempty"`
-	WebSocketClients       []WebSocketClient `json:"websocket_clients,omitempty"`
-	TextMappings           []TextMapping     `json:"text_mappings,omitempty"`
-	LocalDevice            LocalDevice       `json:"local_device"`
-	DataHub                DataHub           `json:"data_hub"`
+	Hotkeys                []Hotkey           `json:"hotkeys,omitempty"`
+	Keyboard               KeyboardControl    `json:"keyboard_control"`
+	Lifecycle              LifecycleSafety    `json:"lifecycle_safety"`
+	Notifications          Notifications      `json:"notifications"`
+	StatusLED              StatusLEDPolicy    `json:"status_led"`
+	BuzzerMirror           BuzzerMirror       `json:"buzzer_mirror"`
+	BoardMirror            fleet.MirrorConfig `json:"board_mirror"`
+	Discovery              Discovery          `json:"discovery"`
+	InboundWebhooksEnabled bool               `json:"inbound_webhooks_enabled"`
+	OutboundWebhooks       []Webhook          `json:"outbound_webhooks,omitempty"`
+	WebSocketClients       []WebSocketClient  `json:"websocket_clients,omitempty"`
+	TextMappings           []TextMapping      `json:"text_mappings,omitempty"`
+	LocalDevice            LocalDevice        `json:"local_device"`
+	DataHub                DataHub            `json:"data_hub"`
 }
 
 // BuzzerMirror controls optional host playback of board-generated tones. The
@@ -290,6 +292,9 @@ type TextMapping struct {
 }
 
 func (value Config) validateIntegrations() error {
+	if err := value.Integrations.BoardMirror.Validate(); err != nil {
+		return fmt.Errorf("integrations.board_mirror: %w", err)
+	}
 	if err := validateIPC(value.IPC); err != nil {
 		return err
 	}

@@ -55,6 +55,9 @@ func TestReplayCacheExpiresAndEvictsLeastRecentlyUsed(t *testing.T) {
 		if _, fresh, err := cache.Begin(id, now); err != nil || !fresh {
 			t.Fatalf("begin %s fresh=%t err=%v", id, fresh, err)
 		}
+		if err := cache.Complete(id, json.RawMessage(`{}`), now); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if _, ok := cache.Lookup(ids[0], now.Add(time.Second)); !ok {
 		t.Fatal("first route missing before eviction")
@@ -67,6 +70,25 @@ func TestReplayCacheExpiresAndEvictsLeastRecentlyUsed(t *testing.T) {
 	}
 	if _, fresh, err := cache.Begin(ids[0], now.Add(2*time.Minute)); err != nil || !fresh {
 		t.Fatalf("expired route fresh=%t err=%v", fresh, err)
+	}
+}
+
+func TestReplayCacheNeverExpiresOrEvictsActiveCommands(t *testing.T) {
+	cache, _ := NewReplayCache(1, time.Second)
+	now := time.Now()
+	first := "00000000000000000000000000000001"
+	second := "00000000000000000000000000000002"
+	if _, fresh, err := cache.Begin(first, now); err != nil || !fresh {
+		t.Fatal(err)
+	}
+	if _, fresh, err := cache.Begin(first, now.Add(time.Minute)); err != nil || fresh {
+		t.Fatal("active route expired", err)
+	}
+	if _, _, err := cache.Begin(second, now.Add(time.Minute)); err == nil {
+		t.Fatal("active route evicted")
+	}
+	if err := cache.Complete(first, json.RawMessage(`{}`), now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
 	}
 }
 

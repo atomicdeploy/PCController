@@ -50,7 +50,6 @@ void sendHello(uint8_t sequence) {
       (1UL << 31) | // checksum-backed operator board name (up to 8 ASCII chars)
       0;
   // HelloPayload is the fixed build identity and capability response.
-#if PCCONTROLLER_ENABLE_BOARD_AUTOMATIONS
   struct __attribute__((packed)) HelloPayload {
     uint8_t schema;
     uint8_t boardKind;
@@ -61,17 +60,9 @@ void sendHello(uint8_t sequence) {
     uint8_t buildFeatures;
   } payload = {4, 1, capabilities,
                identityHash(), identityTimestamp(),
-               PCCONTROLLER_FEATURE_PROFILE, static_cast<uint8_t>(1U << 5)};
-#else
-  struct __attribute__((packed)) HelloPayload {
-    uint8_t schema;
-    uint8_t boardKind;
-    uint32_t capabilities;
-    uint32_t buildHash;
-    uint32_t buildTimestamp;
-  } payload = {3, 1, capabilities,
-               identityHash(), identityTimestamp()};
-#endif
+               PCCONTROLLER_FEATURE_PROFILE,
+               static_cast<uint8_t>((1U << 6) |
+                   (PCCONTROLLER_ENABLE_BOARD_AUTOMATIONS ? (1U << 5) : 0))};
   appProtocol.send(ControllerProtocol::HelloResponse, sequence,
                    reinterpret_cast<const uint8_t *>(&payload),
                    sizeof(payload));
@@ -842,7 +833,7 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame,
       goto acknowledged;
 
     case MenuSetPage:
-      if (length < 1 || payload[0] >= PAGE_COUNT ||
+      if (length < 1 || length > 2 || (length == 2 && payload[1] != 1) || payload[0] >= PAGE_COUNT ||
           (!PCCONTROLLER_ENABLE_RF_LEARNING && payload[0] == PAGE_RF)) {
         goto badPayload;
       }
@@ -853,7 +844,9 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame,
         restoreEditTransaction(frameNow);
         editTransactionActive = false;
       }
-      setMenuPage(payload[0]);
+      // Two-byte menu requests are volatile mirror navigation. Ordinary
+      // one-byte requests retain the configured save-last-page behavior.
+      setMenuPage(payload[0], length == 1);
       goto acknowledged;
 
     case DisplayText: {
