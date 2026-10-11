@@ -1626,6 +1626,9 @@ func (client *Client) Timeline(since time.Time, limit int) []TimelineEntry {
 
 // SetMenuPage navigates directly to one stable board menu ID.
 func (client *Client) SetMenuPage(ctx context.Context, page byte) error {
+	if page > 127 {
+		return errors.New("menu page must fit seven bits; use SetVolatileMenuPage for mirrored navigation")
+	}
 	return client.runtime.Command(ctx, native.OpMenuSetPage, []byte{page})
 }
 
@@ -1635,7 +1638,10 @@ func (client *Client) SetVolatileMenuPage(ctx context.Context, page byte) error 
 	if client.Snapshot().Hello.BuildFeatures&native.BuildFeatureVolatileMenu == 0 {
 		return errors.New("firmware does not advertise volatile menu navigation")
 	}
-	return client.runtime.Command(ctx, native.OpMenuSetPage, []byte{page, 1})
+	if page > 127 {
+		return errors.New("volatile menu page must fit seven bits")
+	}
+	return client.runtime.Command(ctx, native.OpMenuSetPage, []byte{page | 0x80})
 }
 
 // PresentMirrorSegments takes a bounded two-second presentation lease. It

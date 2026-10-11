@@ -1,6 +1,7 @@
 package fleet
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 )
@@ -48,6 +49,29 @@ type MirrorCommand struct {
 	Lines       [2]string `json:"lines,omitempty"`
 	FrequencyHz uint16    `json:"frequency_hz,omitempty"`
 	DurationMS  uint16    `json:"duration_ms,omitempty"`
+}
+
+// Zero is meaningful (relay off, PWM zero, page zero). Emit the fields of the
+// chosen semantic domain explicitly, without meaningless array placeholders.
+func (command MirrorCommand) MarshalJSON() ([]byte, error) {
+	value := map[string]any{"kind": command.Kind}
+	switch command.Kind {
+	case "menu":
+		value["page"] = command.Page
+	case "segments":
+		value["cells"] = command.Cells
+	case "lcd":
+		value["lines"] = command.Lines
+	case "status_led":
+		value["rgb"], value["brightness"] = command.RGB, command.Brightness
+	case "relay":
+		value["channel"], value["active"] = command.Channel, command.Active
+	case "pwm":
+		value["channel"], value["value"] = command.Channel, command.Value
+	case "buzzer":
+		value["frequency_hz"], value["duration_ms"] = command.FrequencyHz, command.DurationMS
+	}
+	return json.Marshal(value)
 }
 
 func (command MirrorCommand) Key() string {

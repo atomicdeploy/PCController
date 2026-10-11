@@ -73,6 +73,20 @@ func TestMirrorFullDuplexStateAndNoEcho(t *testing.T) {
 		}
 	}
 }
+
+func TestMirrorImmediateReverseChangeUsesVerifiedAckBaseline(t *testing.T) {
+	coordinator, fake := newTestCoordinator(t)
+	ctx := context.Background()
+	coordinator.Poll(ctx)
+	fake.states["one"].Values["pwm.0"] = fleet.MirrorCommand{Kind: "pwm", Value: 123}
+	coordinator.Poll(ctx)
+	// Target changes back before any subsequent polling observation.
+	fake.states["two"].Values["pwm.0"] = fleet.MirrorCommand{Kind: "pwm", Value: 0}
+	coordinator.Poll(ctx)
+	if len(fake.writes) != 2 || fake.states["one"].Values["pwm.0"].Value != 0 {
+		t.Fatalf("reverse change lost: %+v", fake.writes)
+	}
+}
 func TestMirrorDisconnectRebaselineAndExplicitResync(t *testing.T) {
 	coordinator, fake := newTestCoordinator(t)
 	ctx := context.Background()

@@ -30,7 +30,7 @@ int main() {
     auto sf=std::find_if(settings.begin(),settings.end(),[](const auto &f) {return f.opcode==wire::SettingsResponse;});
     require(sf!=settings.end(),"shared EEPROM settings response");
     const auto originalSettings=sf->payload;
-    auto volatileMenu=request(wire::MenuSetPage,38,{1,1});
+    auto volatileMenu=request(wire::MenuSetPage,38,{0x81});
     require(std::any_of(volatileMenu.begin(),volatileMenu.end(),[](const auto &f) {return f.opcode==wire::Ack && f.sequence==38;}),"volatile menu request rejected");
     receive(1500000);
     auto afterMenu=request(wire::GetSettings,39);

@@ -203,7 +203,7 @@ constexpr uint8_t HOST_PANEL_CAPTURED = 1U << 4;
 
 // Cross-domain entry points required before their ordered implementation fragments.
 void handleMenuAction(uint8_t action, bool fromRemote = false);
-void setMenuPage(uint8_t page, bool persistDefault = true);
+void setMenuPage(uint8_t page);
 void sendTelemetry(uint8_t sequence);
 void endLearning(uint8_t state);
 void programService(uint32_t at);

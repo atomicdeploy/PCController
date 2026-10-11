@@ -832,9 +832,10 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame,
       appEvents.key(payload[0], payload[1], InputEventSource::Host);
       goto acknowledged;
 
-    case MenuSetPage:
-      if (length < 1 || length > 2 || (length == 2 && payload[1] != 1) || payload[0] >= PAGE_COUNT ||
-          (!PCCONTROLLER_ENABLE_RF_LEARNING && payload[0] == PAGE_RF)) {
+    case MenuSetPage: {
+      const uint8_t page = payload[0] & 0x7FU;
+      if (length != 1 || page >= PAGE_COUNT ||
+          (!PCCONTROLLER_ENABLE_RF_LEARNING && page == PAGE_RF)) {
         goto badPayload;
       }
       if (modeManager.current() == MODE_MOTION_CONTROL) {
@@ -844,10 +845,11 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame,
         restoreEditTransaction(frameNow);
         editTransactionActive = false;
       }
-      // Two-byte menu requests are volatile mirror navigation. Ordinary
-      // one-byte requests retain the configured save-last-page behavior.
-      setMenuPage(payload[0], length == 1);
+      // The high bit selects volatile navigation; ordinary page IDs retain
+      // the configured save-last-page behavior. HELLO advertises this flag.
+      setMenuPage(payload[0]);
       goto acknowledged;
+    }
 
     case DisplayText: {
       if (length < 4 || payload[0] > 5 || payload[3] > 40 ||

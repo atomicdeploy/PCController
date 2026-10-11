@@ -203,6 +203,11 @@ func (coordinator *Coordinator) poll(ctx context.Context, group *groupRuntime) {
 		delete(group.status.Errors, member.BoardID)
 		states[member.BoardID], group.status.Members[member.BoardID] = state, state
 	}
+	type change struct {
+		board   fleet.BoardID
+		command fleet.MirrorCommand
+	}
+	changes := []change{}
 	for _, member := range group.group.Members {
 		state, ok := states[member.BoardID]
 		if !ok {
@@ -224,10 +229,18 @@ func (coordinator *Coordinator) poll(ctx context.Context, group *groupRuntime) {
 				if !known || command == old || command == group.desired[key] {
 					continue
 				}
-				coordinator.fanout(ctx, group, member.BoardID, command)
+				changes = append(changes, change{member.BoardID, command})
 			}
 		}
 		group.previous[member.BoardID] = state
+	}
+	// Store the poll baselines first; verified fanout then advances the target
+	// baseline to actual readback, even when a user changes it back before the
+	// next poll. Never overwrite that ACK baseline with a pre-write sample.
+	for _, change := range changes {
+		if change.command != group.desired[change.command.Key()] {
+			coordinator.fanout(ctx, group, change.board, change.command)
+		}
 	}
 	// Segment mirrors are leased, not permanent capture of the second panel.
 	// Renew only while every member is still the same connected generation
@@ -336,6 +349,13 @@ func (coordinator *Coordinator) fanout(ctx context.Context, group *groupRuntime,
 			result.Error = err.Error()
 		} else {
 			result = applied
+		}
+		if result.Verified && command.Kind != "buzzer" {
+			previous, known := group.previous[member.BoardID]
+			if known && previous.Generation == state.Generation {
+				previous.Values[command.Key()] = command
+				group.previous[member.BoardID] = previous
+			}
 		}
 		group.status.Results = append(group.status.Results, result)
 	}
