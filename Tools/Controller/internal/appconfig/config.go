@@ -273,29 +273,31 @@ type MacroStep struct {
 	AtUS uint32 `json:"at_us,omitempty"`
 	Kind string `json:"kind"`
 
-	Target       byte    `json:"target,omitempty"`
-	Value        uint16  `json:"value,omitempty"`
-	DurationMS   uint16  `json:"duration_ms,omitempty"`
-	ToValue      *uint16 `json:"to_value,omitempty"`
-	Easing       string  `json:"easing,omitempty"`
-	SampleRateHz byte    `json:"sample_rate_hz,omitempty"`
-	FrequencyHz  uint16  `json:"frequency_hz,omitempty"`
-	Text         string  `json:"text,omitempty"`
-	Destination  string  `json:"destination,omitempty"`
-	Code         uint32  `json:"code,omitempty"`
-	Bits         byte    `json:"bits,omitempty"`
-	Protocol     byte    `json:"protocol,omitempty"`
-	PulseUS      uint16  `json:"pulse_us,omitempty"`
-	Red          byte    `json:"red,omitempty"`
-	Green        byte    `json:"green,omitempty"`
-	Blue         byte    `json:"blue,omitempty"`
-	Brightness   byte    `json:"brightness,omitempty"`
-	ToRed        *byte   `json:"to_red,omitempty"`
-	ToGreen      *byte   `json:"to_green,omitempty"`
-	ToBlue       *byte   `json:"to_blue,omitempty"`
-	ToBrightness *byte   `json:"to_brightness,omitempty"`
-	Opcode       byte    `json:"opcode,omitempty"`
-	PayloadHex   string  `json:"payload_hex,omitempty"`
+	Target           byte    `json:"target,omitempty"`
+	Value            uint16  `json:"value,omitempty"`
+	DurationMS       uint16  `json:"duration_ms,omitempty"`
+	RepeatCount      *uint16 `json:"repeat_count,omitempty"`
+	RepeatIntervalMS uint32  `json:"repeat_interval_ms,omitempty"`
+	ToValue          *uint16 `json:"to_value,omitempty"`
+	Easing           string  `json:"easing,omitempty"`
+	SampleRateHz     byte    `json:"sample_rate_hz,omitempty"`
+	FrequencyHz      uint16  `json:"frequency_hz,omitempty"`
+	Text             string  `json:"text,omitempty"`
+	Destination      string  `json:"destination,omitempty"`
+	Code             uint32  `json:"code,omitempty"`
+	Bits             byte    `json:"bits,omitempty"`
+	Protocol         byte    `json:"protocol,omitempty"`
+	PulseUS          uint16  `json:"pulse_us,omitempty"`
+	Red              byte    `json:"red,omitempty"`
+	Green            byte    `json:"green,omitempty"`
+	Blue             byte    `json:"blue,omitempty"`
+	Brightness       byte    `json:"brightness,omitempty"`
+	ToRed            *byte   `json:"to_red,omitempty"`
+	ToGreen          *byte   `json:"to_green,omitempty"`
+	ToBlue           *byte   `json:"to_blue,omitempty"`
+	ToBrightness     *byte   `json:"to_brightness,omitempty"`
+	Opcode           byte    `json:"opcode,omitempty"`
+	PayloadHex       string  `json:"payload_hex,omitempty"`
 	// ActionIDs preserves the semantic meaning observed alongside the exact
 	// applied relay mask. Playback continues to use the mask so old and new
 	// firmware remain byte-for-byte faithful.

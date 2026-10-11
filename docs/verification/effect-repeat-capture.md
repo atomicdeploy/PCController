@@ -1,5 +1,13 @@
 # Whole-effect repeat and selective capture checkpoint
 
+Historical checkpoint: step repeats have since been restored alongside
+whole-effect repetition at the user's explicit request. The current contract is
+[Effects System](../Effects-System.md). Per-step fields are now validated and
+retained; both levels expand through the same bounded host/MCU run plan. The
+removal/rejection and deployment observations below describe the earlier pass,
+not current source behavior. Existing explicitly reauthored schedules are not
+automatically decompiled or overwritten.
+
 Owning backend issue: #633. The paired application's issue and source-readiness
 checkpoint are linked from that issue and the owning pull request on GitHub.
 

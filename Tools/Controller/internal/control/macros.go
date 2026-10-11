@@ -1643,6 +1643,8 @@ func timelineLerpWithEasing(start, end uint16, easing string, position float64) 
 }
 
 func clearTimelineAuthoring(step *appconfig.MacroStep) {
+	step.RepeatCount = nil
+	step.RepeatIntervalMS = 0
 	step.ToValue = nil
 	step.ToRed, step.ToGreen, step.ToBlue, step.ToBrightness = nil, nil, nil, nil
 	step.Easing = ""
@@ -1780,13 +1782,25 @@ func expandTimelineCue(source appconfig.MacroStep) ([]appconfig.MacroStep, error
 func expandMacroTimeline(steps []appconfig.MacroStep) ([]appconfig.MacroStep, error) {
 	result := make([]appconfig.MacroStep, 0, len(steps))
 	for index, source := range steps {
+		count, interval, _, err := source.Repetition()
+		if err != nil {
+			return nil, fmt.Errorf("step %d: %w", index+1, err)
+		}
 		expanded, err := expandTimelineCue(source)
 		if err != nil {
 			return nil, fmt.Errorf("step %d: %w", index+1, err)
 		}
-		result = append(result, expanded...)
-		if len(result) > 65535 {
+		if len(result)+len(expanded)*int(count) > 65535 {
 			return nil, errors.New("expanded effect exceeds 65535 runtime commands")
+		}
+		for repeat := uint16(0); repeat < count; repeat++ {
+			for _, point := range expanded {
+				point, err = timelineStepAt(point, uint64(repeat)*uint64(interval))
+				if err != nil {
+					return nil, fmt.Errorf("step %d: %w", index+1, err)
+				}
+				result = append(result, point)
+			}
 		}
 	}
 	sort.SliceStable(result, func(left, right int) bool { return result[left].AtUS < result[right].AtUS })
