@@ -1,4 +1,5 @@
 #include "CompactI2c.h"
+#include <string.h>
 
 #if defined(__AVR__)
 #include <avr/io.h>
