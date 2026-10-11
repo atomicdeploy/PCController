@@ -85,8 +85,8 @@ func (command MirrorCommand) Validate() error {
 	switch command.Kind {
 	case "menu":
 	case "segments":
-		if command.Brightness > 7 {
-			return errors.New("segment brightness must be 0..7")
+		if command.Brightness != 0 {
+			return errors.New("segment mirror changes cells only; brightness is local physical policy")
 		}
 	case "lcd":
 		for _, line := range command.Lines {
@@ -121,7 +121,7 @@ func (command MirrorCommand) Validate() error {
 	case "menu":
 		normalized.Page = command.Page
 	case "segments":
-		normalized.Cells, normalized.Brightness = command.Cells, command.Brightness
+		normalized.Cells = command.Cells
 	case "lcd":
 		normalized.Lines = command.Lines
 	case "status_led":

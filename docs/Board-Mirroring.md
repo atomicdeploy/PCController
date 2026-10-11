@@ -10,7 +10,7 @@ distributed leader election or automatic coordinator failover is implemented.
 
 | Domain | Observation and write contract |
 | --- | --- |
-| Menu | Live menu page; requires HELLO schema 4 build feature `0x40`. `MENU_SET_PAGE [page \| 0x80]` is volatile and does not save the boot page. Older firmware is unavailable, not silently downgraded. |
+| Menu | Live menu page; requires the advertised HELLO build feature `0x40`. `MENU_SET_PAGE [page \| 0x80]` is volatile and does not save the boot page. An absent capability is unavailable, not silently downgraded. |
 | Segments | Exact four raw cells through a renewable two-second presentation lease. Brightness, TM1637 detection, local safety and editing remain physical-board policy. |
 | LCD | Exact two 16-byte ASCII lines, only when the board reports an available LCD. |
 | Static status RGB | Only available when the physical compositor reports no local safety condition or animated effect. No mirroring of safety overrides as base colors. |

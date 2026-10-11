@@ -192,7 +192,7 @@ try {
   console.log(JSON.stringify({ result: 'passed', platform: process.platform, architecture: process.arch, physicalAvrAcceptance: false, gpioAdapter: false }))
 } catch (error) {
   for (const endpoint of [endpointA, endpointB].filter(Boolean)) {
-    try { const state = await inspect(endpoint); console.error(JSON.stringify({ endpoint, connected: state.connected, generation: state.generation, values: state.values, status: state.observations?.status, mirror: await rpc(endpoint, 'controller.mirror.status') })) } catch {}
+    try { const state = await inspect(endpoint); const mirror = await rpc(endpoint, 'controller.mirror.status'); console.error(JSON.stringify({ endpoint, connected: state.connected, generation: state.generation, values: Object.fromEntries(['pwm.0', 'relay.5', 'menu', 'segments'].map(key => [key, state.values[key]])), mirror: mirror.map(group => ({ id: group.id, sequence: group.sequence, errors: group.errors, results: group.last_results, dropped: group.dropped_notes })) })) } catch {}
   }
   for (const [name, output] of outputs) console.error(`${name}: ${output.slice(-8000)}`)
   throw error

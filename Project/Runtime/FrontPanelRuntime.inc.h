@@ -162,9 +162,7 @@ void moveMenuCategory(bool forward, uint32_t at) {
 #endif
 
 // Activates a stable page; its high bit requests volatile host navigation.
-// Sharing this small transition keeps volatile mirror navigation within the
-// constrained AVR flash budget instead of cloning the EEPROM path at callers.
-__attribute__((noinline)) void setMenuPage(uint8_t page) {
+void setMenuPage(uint8_t page) {
   menuPage = canonicalMenuPage(page & 0x7FU);
 #if PCCONTROLLER_MENU_HIERARCHY
   menuTreeState = menuCategory(menuPage);
