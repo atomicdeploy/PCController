@@ -315,6 +315,8 @@ export interface ControllerMacro {
   lcd_message?: string
   timing_tolerance_us?: number
   keep_outputs_on_cancel?: boolean
+  repeat_count?: number
+  repeat_interval_ms?: number
   recording_source?: string
   capture_dropped_steps?: number
   capture_missing_steps?: number

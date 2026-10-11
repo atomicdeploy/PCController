@@ -1,9 +1,25 @@
 import { readFileSync } from 'node:fs'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
-import { MacroCatalog } from './macro-library'
+import { MacroCatalog, MacroLibraryPanel } from './macro-library'
 
 describe('macro catalog DOM contract', () => {
+  it.each(['en', 'fa'] as const)('does not offer an unwired empty capture in %s', (locale) => {
+    const command = vi.fn()
+    const markup = renderToStaticMarkup(<MacroLibraryPanel locale={locale} online events={[]} commandSurface={command} />)
+    const pending = markup.match(/<button[^>]*data-capture-selection="unavailable"[^>]*>/g) ?? []
+    expect(pending).toHaveLength(3)
+    expect(pending.every((button) => button.includes('disabled=""'))).toBe(true)
+    expect(markup).toContain('effect record start-json')
+    expect(command).not.toHaveBeenCalled()
+    const source = readFileSync(new URL('./macro-library.tsx', import.meta.url), 'utf8')
+    expect(source).not.toContain('`effect record start ')
+    expect(source).not.toContain('`effect record start-board ')
+    expect(source).not.toContain('`effect record import-board ')
+    expect(source).toContain("'effect record save'")
+    expect(source).toContain("'effect record discard'")
+  })
+
   it('renders typed name, category, color, step count, and exact duration', () => {
     const markup = renderToStaticMarkup(<MacroCatalog
       locale="en"
@@ -26,6 +42,21 @@ describe('macro catalog DOM contract', () => {
     expect(markup).toContain('>2<')
     expect(markup).toContain('125.5 ms')
     expect(markup).toContain('aria-selected="true"')
+  })
+
+  it('includes duration tails and whole-effect repeat intervals in catalogue span', () => {
+    const markup = renderToStaticMarkup(<MacroCatalog locale="en" selectedReference="" onSelect={vi.fn()} macros={[{
+      id: 4, name: 'Repeat', repeat_count: 3, repeat_interval_ms: 200,
+      steps: [{ kind: 'beep', at_us: 50_000, duration_ms: 100 }],
+    }]} />)
+    expect(markup).toContain('550 ms')
+  })
+
+  it('does not invent a duration for an invalid repeat', () => {
+    const markup = renderToStaticMarkup(<MacroCatalog locale="en" selectedReference="" onSelect={vi.fn()} macros={[{
+      id: 4, name: 'Invalid', repeat_count: 0, steps: [{ kind: 'relay', at_us: 0 }],
+    }]} />)
+    expect(markup).toContain('Invalid timing')
   })
 
   it('keeps split-path terminology and narration out of the effect source contract', () => {

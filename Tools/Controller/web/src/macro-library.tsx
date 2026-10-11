@@ -48,8 +48,14 @@ function normalizedColor(value?: string): MacroColor {
   }
 }
 
-function macroDurationUS(macro: ControllerMacro): number {
-  return (macro.steps ?? []).reduce((maximum, step) => Math.max(maximum, step.at_us ?? 0), 0)
+function macroDurationUS(macro: ControllerMacro): number | undefined {
+  const count = macro.repeat_count ?? 1
+  const base = (macro.steps ?? []).reduce((maximum, step) => Math.max(maximum, (step.at_us ?? 0) + (step.duration_ms ?? 0) * 1000), 0)
+  const intervalMS = macro.repeat_interval_ms ?? 0
+  const interval = intervalMS === 0 ? base : intervalMS * 1000
+  const total = base + (count - 1) * interval
+  if (!Number.isInteger(count) || count < 1 || count > 1000 || !Number.isInteger(intervalMS) || intervalMS < 0 || intervalMS > 3_600_000 || interval < base || interval > 0x7fffffff || (count > 1 && interval === 0) || !Number.isInteger(total) || total < 0 || total > 0x7fffffff) return undefined
+  return total
 }
 
 function formatMicroseconds(value: number | undefined, locale: Locale): string {
@@ -70,6 +76,7 @@ export function MacroCatalog({ macros, selectedReference, locale, onSelect }: Ma
     <div className="macro-library__catalog" role="listbox" aria-label={persian ? 'کتابخانه جلوه‌ها' : 'Effect library'}>
       {macros.map((macro) => {
         const selected = selectedReference === String(macro.id)
+        const duration = macroDurationUS(macro)
         return (
           <button
             key={macro.id}
@@ -89,7 +96,7 @@ export function MacroCatalog({ macros, selectedReference, locale, onSelect }: Ma
               <small>{persian ? 'گام' : 'steps'}</small>
             </span>
             <span className="macro-library__measure">
-              <strong>{formatMicroseconds(macroDurationUS(macro), locale)}</strong>
+              <strong>{duration === undefined ? (persian ? 'زمان‌بندی نامعتبر' : 'Invalid timing') : formatMicroseconds(duration, locale)}</strong>
               <small>{persian ? 'مدت' : 'duration'}</small>
             </span>
           </button>
@@ -102,6 +109,10 @@ export function MacroCatalog({ macros, selectedReference, locale, onSelect }: Ma
 export function MacroLibraryPanel({ online, locale, events, initialSnapshot, stripEffects = [], commandSurface }: MacroLibraryPanelProps) {
   const persian = locale === 'fa'
   const copy = (english: string, farsi: string) => persian ? farsi : english
+  const captureSelectionHelp = copy(
+    'Choose recording channels with effect record start-json in Console. The recording chooser is not available yet.',
+    'کانال‌های ضبط را با فرمان effect record start-json در کنسول انتخاب کنید. انتخاب‌گر ضبط هنوز آماده نیست.',
+  )
   const [snapshot, setSnapshot] = useState<MacroSnapshot | null>(initialSnapshot ?? null)
   const [snapshotState, setSnapshotState] = useState<'loading' | 'ready' | 'error'>(initialSnapshot ? 'ready' : 'loading')
   const [busy, setBusy] = useState('')
@@ -345,12 +356,9 @@ export function MacroLibraryPanel({ online, locale, events, initialSnapshot, str
       <div className="macro-library__control-grid">
         <section>
           <header>{copy('Host recording', 'ضبط میزبان')}</header>
+          <p role="status">{captureSelectionHelp}</p>
           <div className="macro-library__actions">
-            <Button tone="primary" icon={CircleDot} disabled={!online || !name.trim() || Boolean(recording?.active)} busy={busy === 'controller.macro.record.start'} onClick={() => void perform(
-              'controller.macro.record.start',
-              { name: name.trim(), category: category.trim(), color },
-              `effect record start ${shellArgument(name.trim())} ${shellArgument(category.trim())} ${shellArgument(color)}`,
-            )}>{copy('Start', 'شروع')}</Button>
+            <Button tone="primary" icon={CircleDot} disabled title={captureSelectionHelp} data-capture-selection="unavailable">{copy('Start', 'شروع')}</Button>
             <Button icon={Save} disabled={!recording?.active || Boolean(recording.device_retained)} busy={busy === 'controller.macro.record.stop'} onClick={() => void perform(
               'controller.macro.record.stop', { save: true }, 'effect record save',
             )}>{copy('Stop + save', 'توقف و ذخیره')}</Button>
@@ -363,12 +371,8 @@ export function MacroLibraryPanel({ online, locale, events, initialSnapshot, str
           <header>{copy('Device-retained recording', 'ضبط نگه‌داری‌شده در دستگاه')}</header>
           <p>{copy('Keeps the latest 25 relay snapshots in RAM. Save before resetting the board. Stop and release retained RAM before strip streaming.', '۲۵ وضعیت آخر رله در حافظه نگهداری می‌شود. پیش از ریست ذخیره کنید. قبل از پخش نوار، ضبط را متوقف و حافظه را آزاد کنید.')}</p>
           <div className="macro-library__actions">
-            <Button icon={RadioTower} disabled={!online || !name.trim() || Boolean(recording?.active)} busy={busy === 'controller.macro.board_record.start'} onClick={() => void perform(
-              'controller.macro.board_record.start', {}, `effect record start-board ${shellArgument(name.trim())} ${shellArgument(category.trim())} ${shellArgument(color)}`,
-            )}>{copy('Start retained take', 'شروع برداشت نگه‌داری‌شده')}</Button>
-            <Button icon={Database} disabled={!online || !name.trim() || Boolean(recording?.active)} onClick={() => void perform(
-              'controller.macro.board_record.import', {}, `effect record import-board ${shellArgument(name.trim())} ${shellArgument(category.trim())} ${shellArgument(color)}`,
-            )}>{copy('Import retained capture', 'وارد کردن ضبط باقی‌مانده')}</Button>
+            <Button icon={RadioTower} disabled title={captureSelectionHelp} data-capture-selection="unavailable">{copy('Start retained take', 'شروع برداشت نگه‌داری‌شده')}</Button>
+            <Button icon={Database} disabled title={captureSelectionHelp} data-capture-selection="unavailable">{copy('Import retained capture', 'وارد کردن ضبط باقی‌مانده')}</Button>
             <Button icon={Save} disabled={!recording?.active || !recording.device_retained} busy={busy === 'controller.macro.board_record.stop'} onClick={() => void perform(
               'controller.macro.board_record.stop', {}, 'effect record save',
             )}>{copy('Stop + import', 'توقف و واردکردن')}</Button>

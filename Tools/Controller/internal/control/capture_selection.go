@@ -72,6 +72,31 @@ func relayCaptureOpcode(op byte) bool {
 	return op == native.OpRelaySet || op == native.OpRelaySide || op == native.OpRelayAllOff
 }
 
+// The presentation catalog may grow independently of evidence capture. Only
+// advertise keys that the targeted recorder can actually map to operations.
+func selectableCaptureControls(controls []appconfig.ControlDescriptor) []appconfig.ControlDescriptor {
+	result := make([]appconfig.ControlDescriptor, 0, len(controls))
+	for _, descriptor := range controls {
+		supported := false
+		switch descriptor.Kind {
+		case "seat":
+			supported = descriptor.Key == "seat.a" || descriptor.Key == "seat.b"
+		case "relay":
+			for n := 1; n <= 8; n++ {
+				supported = supported || descriptor.Key == fmt.Sprintf("relay.%d", n)
+			}
+		case "mosfet":
+			for n := 0; n < 16; n++ {
+				supported = supported || descriptor.Key == fmt.Sprintf("pwm.%d", n)
+			}
+		}
+		if supported {
+			result = append(result, descriptor)
+		}
+	}
+	return result
+}
+
 func (runner *MacroRunner) recordingCapabilities() RecordingCapabilities {
 	config := appconfig.Defaults()
 	if runner.hostConfig != nil {
@@ -86,7 +111,7 @@ func (runner *MacroRunner) recordingCapabilities() RecordingCapabilities {
 	identity := appconfig.ResolveBoardIdentity(port.SerialNumber, port.InstanceID, port.Name)
 	profile := config.BoardProfiles[identity.Value]
 	_, controls := appconfig.ProfileDescriptors(profile.Mode, profile.ExposeRawRelays, config.UI.PeripheralNames, profile.Presentation)
-	result := RecordingCapabilities{Controls: controls, Opcodes: []CaptureOpcode{}}
+	result := RecordingCapabilities{Controls: selectableCaptureControls(controls), Opcodes: []CaptureOpcode{}}
 	for n := 0; n < 256; n++ {
 		op := byte(n)
 		if op == native.OpRelaySide && appconfig.NormalizeBoardMode(profile.Mode) != appconfig.BoardModeCinemaSeatMotion {

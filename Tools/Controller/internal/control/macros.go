@@ -460,7 +460,6 @@ func (runner *MacroRunner) startRecording(name, category, color, mode string, se
 	}
 	runner.recording.Steps = len(runner.recordMacro.Steps)
 	runner.recordRelease = runner.runtime.ObserveCommands(runner.captureCommand)
-	state := runner.recording
 	runner.recordMu.Unlock()
 	runner.runtime.setActiveUseState(activeUseMacroRecording, true)
 	runner.runtime.PublishStructuredEvent(Event{
@@ -468,7 +467,7 @@ func (runner *MacroRunner) startRecording(name, category, color, mode string, se
 		Text:     fmt.Sprintf("macro recording %d/%s started in %s mode", id, name, mode),
 		Metadata: map[string]string{"macro_mode": mode},
 	})
-	return state, nil
+	return runner.RecordingState(), nil
 }
 
 // StartAppendingRecording keeps one catalog identity and its existing steps.

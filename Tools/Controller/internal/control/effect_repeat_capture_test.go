@@ -13,7 +13,8 @@ import (
 func TestRecordingStateCapabilitiesCannotMutateActiveTake(t *testing.T) {
 	config := appconfig.Defaults()
 	runner := macroTestRunner(&config, nil)
-	if _, err := runner.StartRecording("snapshot", "tests", "green"); err != nil {
+	started, err := runner.StartRecording("snapshot", "tests", "green", CaptureSelection{ControlKeys: []string{"relay.5"}})
+	if err != nil {
 		t.Fatal(err)
 	}
 	state := runner.RecordingState()
@@ -21,6 +22,9 @@ func TestRecordingStateCapabilitiesCannotMutateActiveTake(t *testing.T) {
 		t.Fatal("recording capabilities missing")
 	}
 	want := state.Capabilities.clone()
+	started.Capabilities.Controls[0].Name = "mutated-start"
+	started.Capabilities.Opcodes[0].CaptureModes[0] = "mutated-start"
+	started.CaptureSelection.ControlKeys[0] = "mutated-start"
 	state.Capabilities.Controls[0].Name = "mutated"
 	for i := range state.Capabilities.Controls {
 		if len(state.Capabilities.Controls[i].Actions) > 0 {
@@ -34,7 +38,57 @@ func TestRecordingStateCapabilitiesCannotMutateActiveTake(t *testing.T) {
 	if string(gotJSON) != string(wantJSON) {
 		t.Fatal("caller mutated capability state of active recording")
 	}
+	if runner.RecordingState().CaptureSelection.ControlKeys[0] != "relay.5" {
+		t.Fatal("start response mutated active capture selection")
+	}
 	_, _ = runner.StopRecording(false)
+}
+
+func TestRecordingSelectionChangeBroadcastsAuthoritativeRefreshEvent(t *testing.T) {
+	config := appconfig.Defaults()
+	runner := macroTestRunner(&config, nil)
+	if _, err := runner.StartRecording("selection", "tests", "green"); err != nil {
+		t.Fatal(err)
+	}
+	after := runner.runtime.LatestEventID()
+	selection, _ := json.Marshal(CaptureSelection{ControlKeys: []string{"relay.5"}})
+	if _, err := runner.recordingJSONCommand(context.Background(), "selection", hex.EncodeToString(selection)); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	defer cancel()
+	event, err := runner.runtime.WaitEvent(ctx, after, "macro.recording")
+	if err != nil || event.Lifecycle != "selection-changed" || event.State != "recording" {
+		t.Fatalf("selection change not broadcast: %+v %v", event, err)
+	}
+	if runner.RecordingState().CaptureSelection.ControlKeys[0] != "relay.5" {
+		t.Fatal("refresh event did not refer to updated recorder state")
+	}
+	_, _ = runner.StopRecording(false)
+}
+
+func TestCaptureControlsOnlyAdvertiseImplementedSemanticMappings(t *testing.T) {
+	controls := []appconfig.ControlDescriptor{
+		{Key: "seat.a", Kind: "seat"}, {Key: "relay.5", Kind: "relay"}, {Key: "pwm.2", Kind: "mosfet"},
+		{Key: "rgb", Kind: "rgb"}, {Key: "display", Kind: "display"}, {Key: "strip", Kind: "strip"},
+		{Key: "buzzer", Kind: "buzzer"}, {Key: "relay.9", Kind: "relay"}, {Key: "pwm.16", Kind: "mosfet"},
+		{Key: "pwm.02", Kind: "mosfet"}, {Key: "seat.c", Kind: "seat"},
+	}
+	got := selectableCaptureControls(controls)
+	if len(got) != 3 || got[0].Key != "seat.a" || got[1].Key != "relay.5" || got[2].Key != "pwm.2" {
+		t.Fatalf("unsupported capture controls advertised: %+v", got)
+	}
+	config := appconfig.Defaults()
+	runner := macroTestRunner(&config, nil)
+	for _, key := range []string{"rgb", "display", "strip", "buzzer", "pwm.16", "relay.9"} {
+		if _, err := runner.validateCaptureSelection(CaptureSelection{ControlKeys: []string{key}}, macroModeAuto, false); err == nil {
+			t.Fatalf("unsupported semantic selection %s accepted", key)
+		}
+	}
+	_, advertised := appconfig.ProfileDescriptors("", false, nil, nil)
+	if len(selectableCaptureControls(advertised)) != len(advertised) {
+		t.Fatal("current profile contained an unimplemented capture control")
+	}
 }
 
 func TestWholeEffectRepeatPreservesMixedSequenceOrderForBothExecutors(t *testing.T) {

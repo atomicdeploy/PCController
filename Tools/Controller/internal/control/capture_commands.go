@@ -60,6 +60,10 @@ func (runner *MacroRunner) recordingJSONCommand(ctx context.Context, action, enc
 		runner.recording.CaptureSelection = validated
 		runner.recordRelaySeen = false
 		runner.recordMu.Unlock()
+		runner.runtime.PublishStructuredEvent(Event{
+			Kind: "macro.recording", Lifecycle: "selection-changed", State: "recording",
+			Text: "recording capture selection changed",
+		})
 		data, _ := json.Marshal(runner.RecordingState())
 		return string(data), nil
 	}
