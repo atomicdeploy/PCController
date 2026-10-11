@@ -922,10 +922,8 @@ func (value Config) Validate() error {
 		default:
 			return fmt.Errorf("macros[%d].mode must be auto, host, or mcu", index)
 		}
-		switch strings.ToLower(strings.TrimSpace(macro.Color)) {
-		case "", "red", "blue", "purple", "violet", "green", "white":
-		default:
-			return fmt.Errorf("macros[%d].color must be red, blue, purple/violet, green, or white", index)
+		if !ValidEffectColor(macro.Color) {
+			return fmt.Errorf("macros[%d].color must be a supported preset or #RRGGBB", index)
 		}
 		if macro.TimingToleranceUS > 1_000_000 {
 			return fmt.Errorf("macros[%d].timing_tolerance_us must be 0..1000000", index)

@@ -48,7 +48,7 @@ func TestEffectUpsertJSONPersistsTheCompleteSequenceDefinition(t *testing.T) {
 			{AtUS: 1_250_000, Kind: "pwm", Target: 11, Value: 128, ToValue: &fadeTarget, DurationMS: 800, Easing: "ease-in-out", SampleRateHz: 30},
 		},
 		Properties: map[string]interface{}{
-			"color": "violet", "timing_tolerance_us": 2500,
+			"color": "#A142F4", "timing_tolerance_us": 2500,
 			"board_profile_key": "cafe-cinema", "board_profile_mode": "cinema-seat-motion",
 		},
 	}
@@ -63,6 +63,9 @@ func TestEffectUpsertJSONPersistsTheCompleteSequenceDefinition(t *testing.T) {
 		t.Fatalf("saved macros=%+v", config.Macros)
 	}
 	got := config.Macros[0]
+	if got.Color != "#A142F4" {
+		t.Fatalf("upsert lost custom effect color: %q", got.Color)
+	}
 	if got.Steps[0].RepeatCount == nil || *got.Steps[0].RepeatCount != 2 || got.Steps[0].RepeatIntervalMS != 100 {
 		t.Fatal("upsert lost independent step repetition")
 	}
