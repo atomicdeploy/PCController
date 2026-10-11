@@ -1809,6 +1809,7 @@ func decodeSocketIOPacket(value string) (string, json.RawMessage, error) {
 func (manager *Manager) remotePeerService() ipcjson.Service {
 	return ipcjson.Service{
 		BoardMirror:           func() ipcjson.BoardMirrorService { return manager },
+		BuzzerRuntimeStatus:   func() appconfig.BuzzerRuntimeStatus { return manager.Status().BuzzerRuntime },
 		Client:                manager.client,
 		AuthorizationDisabled: true,
 		HostConfig:            manager.store.CurrentRuntime,

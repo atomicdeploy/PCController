@@ -5,9 +5,19 @@ import (
 	"testing"
 	"time"
 
+	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/boardmirror"
 	"pccontroller.local/controller/internal/fleet"
 )
+
+func TestMirrorPeerReportsActualBuzzerBackend(t *testing.T) {
+	expected := appconfig.BuzzerRuntimeStatus{BackendEffective: "native", BackendError: "device denied"}
+	manager := &Manager{status: Status{BuzzerRuntime: expected}}
+	service := manager.remotePeerService()
+	if service.BuzzerRuntimeStatus == nil || service.BuzzerRuntimeStatus() != expected {
+		t.Fatal("peer service replaced actual buzzer backend state with configuration")
+	}
+}
 
 func TestMirrorWriteRequiresMatchingIntentTargetOwnerAndGeneration(t *testing.T) {
 	now := time.Now()
