@@ -132,18 +132,25 @@ parameter schema. A control is offered only when its capability is present.
 Timeline authoring metadata is stored with the authoritative effect. Boolean
 and motion cues use `duration_ms` to generate a deterministic release/stop.
 PWM and RGB/addressable cues may add a target value or target color,
-`easing`, and a bounded `sample_rate_hz`. Sequence effects, not their steps,
+`easing`, and a bounded `sample_rate_hz`. Steps and sequence effects independently
 carry optional `repeat_count` (omitted means once; explicit 1–1000) and
-`repeat_interval_ms` (start-to-start; zero means the full base span). An explicit
-interval cannot be shorter than the base span. PCController validates total
+`repeat_interval_ms` (start-to-start; 0–3600000ms). A step's zero interval follows
+its duration, or 1ms for an instantaneous command. Step repeats may interleave
+and overlap, retaining stable release/start ordering. Whole-effect zero interval
+uses the full base span, including every step repeat. Its explicit interval
+cannot be shorter than that span. PCController validates total
 time and expanded command capacity, then expands these editor-friendly blocks into
 ordinary acknowledged commands only in the volatile run plan; export/import
 retains the editable curve and repetition data.
 
 Catalog `base_duration_ms` is the derived one-iteration span; `duration_ms` is
 the derived complete repeated span. Neither overrides the authored step times.
-Zero-span repetition needs an explicit nonzero interval. Retired per-step
-repeat fields are rejected, not silently ignored, migrated or aliased.
+Zero-span whole-effect repetition needs an explicit nonzero interval. Unknown
+fields are rejected, not silently ignored, migrated or aliased. Pealayer's
+designer presents step repetitions as dimmed source-bound instances: moving a
+ghost edits start-to-start spacing, and its trailing handle edits the shared
+step duration. Both execution modes expand the same current contract; firmware
+continues receiving ordinary point commands without needing a flash.
 
 ## Explicit recording selection
 

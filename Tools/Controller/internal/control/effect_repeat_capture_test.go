@@ -248,7 +248,10 @@ func TestRecordingJSONAppendInheritsMetadataAndExposesSelectionCapabilities(t *t
 		t.Fatal("unknown selector silently ignored")
 	}
 	var step appconfig.MacroStep
-	if err = json.Unmarshal([]byte(`{"kind":"relay","repeat_count":2}`), &step); err == nil {
-		t.Fatal("retired step repeat silently ignored")
+	if err = json.Unmarshal([]byte(`{"kind":"relay","repeat_count":2}`), &step); err != nil || step.RepeatCount == nil || *step.RepeatCount != 2 {
+		t.Fatal("step repeat was not preserved")
+	}
+	if err = json.Unmarshal([]byte(`{"kind":"relay","repeat_typo":2}`), &step); err == nil {
+		t.Fatal("unknown step authoring field silently ignored")
 	}
 }

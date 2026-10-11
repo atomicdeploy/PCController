@@ -50,7 +50,14 @@ function normalizedColor(value?: string): MacroColor {
 
 function macroDurationUS(macro: ControllerMacro): number | undefined {
   const count = macro.repeat_count ?? 1
-  const base = (macro.steps ?? []).reduce((maximum, step) => Math.max(maximum, (step.at_us ?? 0) + (step.duration_ms ?? 0) * 1000), 0)
+  let base = 0
+  for (const step of macro.steps ?? []) {
+    const repeats = step.repeat_count ?? 1, periodMS = step.repeat_interval_ms ?? 0
+    const duration = step.duration_ms ?? 0
+    if (!Number.isInteger(repeats) || repeats < 1 || repeats > 1000 || !Number.isInteger(periodMS) || periodMS < 0 || periodMS > 3_600_000) return undefined
+    const span = (step.at_us ?? 0) + duration * 1000 + (repeats - 1) * (periodMS === 0 ? Math.max(duration, 1) : periodMS) * 1000
+    base = Math.max(base, span)
+  }
   const intervalMS = macro.repeat_interval_ms ?? 0
   const interval = intervalMS === 0 ? base : intervalMS * 1000
   const total = base + (count - 1) * interval
