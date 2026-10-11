@@ -5,10 +5,35 @@ import (
 	"testing"
 	"time"
 
+	controller "pccontroller.local/controller"
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/boardmirror"
 	"pccontroller.local/controller/internal/fleet"
+	"pccontroller.local/controller/internal/native"
 )
+
+func TestMirrorPeriodicPanelReadsStopWhenSegmentPushExists(t *testing.T) {
+	snapshot := controller.Snapshot{HaveFrontPanel: true, Hello: controller.Hello{Capabilities: native.CapabilitySegmentPush}}
+	if mirrorReadPanel(snapshot, false, true, false) {
+		t.Fatal("periodic display read shadows firmware push")
+	}
+	if !mirrorReadPanel(snapshot, true, false, false) {
+		t.Fatal("explicit refresh was lost")
+	}
+	snapshot.HaveFrontPanel = false
+	if !mirrorReadPanel(snapshot, false, false, false) {
+		t.Fatal("initial exact snapshot was lost")
+	}
+	snapshot.HaveFrontPanel = true
+	snapshot.Hello.Capabilities = 0
+	if mirrorReadPanel(snapshot, false, false, false) || !mirrorReadPanel(snapshot, false, true, false) {
+		t.Fatal("legacy fallback cadence is not bounded")
+	}
+	snapshot.Hello.Capabilities = native.CapabilitySegmentPush
+	if !mirrorReadPanel(snapshot, false, true, true) {
+		t.Fatal("opt-in LCD legacy readback unavailable")
+	}
+}
 
 func TestMirrorPeerReportsActualBuzzerBackend(t *testing.T) {
 	expected := appconfig.BuzzerRuntimeStatus{BackendEffective: "native", BackendError: "device denied"}
@@ -16,6 +41,22 @@ func TestMirrorPeerReportsActualBuzzerBackend(t *testing.T) {
 	service := manager.remotePeerService()
 	if service.BuzzerRuntimeStatus == nil || service.BuzzerRuntimeStatus() != expected {
 		t.Fatal("peer service replaced actual buzzer backend state with configuration")
+	}
+}
+
+func TestMirrorStaticRGBAllowsManualButNeverSafetyOrCues(t *testing.T) {
+	for _, condition := range []byte{0xff, native.StatusConditionOff, native.StatusConditionReady, native.StatusConditionCustom, native.StatusConditionBluetoothOff} {
+		if !mirrorStaticRGBAvailable(native.StatusLEDState{Condition: condition}) {
+			t.Fatal("safe static color unavailable", condition)
+		}
+	}
+	for _, condition := range []byte{native.StatusConditionBoot, native.StatusConditionLearning, native.StatusConditionHot, native.StatusConditionFault, native.StatusConditionRunning, native.StatusConditionDoorOpen, native.StatusConditionReset} {
+		if mirrorStaticRGBAvailable(native.StatusLEDState{Condition: condition}) {
+			t.Fatal("local safety/cue exposed as mirror base", condition)
+		}
+	}
+	if mirrorStaticRGBAvailable(native.StatusLEDState{Condition: 0xff, Effect: native.StatusEffectBreathe}) {
+		t.Fatal("animated physical result exposed as static base")
 	}
 }
 

@@ -100,6 +100,9 @@ func (command MirrorCommand) Validate() error {
 			}
 		}
 	case "status_led":
+		if command.Brightness != 255 {
+			return errors.New("RGB mirror carries rendered bytes at full scale; brightness is not applied twice")
+		}
 	case "buzzer":
 		if command.DurationMS == 0 || command.DurationMS > 60000 || (command.FrequencyHz != 0 && (command.FrequencyHz < 20 || command.FrequencyHz > 20000)) {
 			return errors.New("buzzer requires 0 or 20..20000 Hz and 1..60000 ms")

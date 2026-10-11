@@ -11,6 +11,7 @@ import (
 
 type BoardMirrorService interface {
 	MirrorInspect(context.Context) (boardmirror.State, error)
+	MirrorObserve(context.Context) (boardmirror.State, error)
 	MirrorApply(context.Context, boardmirror.Write) (boardmirror.Result, error)
 	MirrorStatus() []boardmirror.GroupStatus
 	MirrorResync(context.Context, string, fleet.BoardID) ([]boardmirror.Result, error)
@@ -37,6 +38,15 @@ func (service *Service) dispatchMirror(ctx context.Context, request Request) (an
 	manager := service.BoardMirror()
 	switch request.Method {
 	case "controller.mirror.inspect":
+		var params struct {
+			Cached bool `json:"cached"`
+		}
+		if err := decodeStrictParams(request.Params, &params); err != nil {
+			return nil, err
+		}
+		if params.Cached {
+			return manager.MirrorObserve(ctx)
+		}
 		return manager.MirrorInspect(ctx)
 	case "controller.mirror.status":
 		return manager.MirrorStatus(), nil

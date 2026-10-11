@@ -49,6 +49,8 @@ worktree, no physical AVR firmware programming, no Cafe/Erfan deployment.
   - optional native Linux host buzzer enabled for those real board notes with
     the IPC surface reporting its actual selected backend and no backend error;
   - four raw segment cells both directions, including renewal beyond lease;
+  - pushed steady RGB both directions at different source brightness levels,
+    preserving exact physical bytes without scaling twice;
   - disconnect quarantine, no actuation replay on reconnect, explicit verified
     resync from a selected board;
   - TM1637 fixture disappearance/recovery without RESET;
@@ -69,6 +71,14 @@ actual buzzer backend instead of a configuration-only fallback.
 The test deliberately uses real board messages rather than a mock coordinator.
 It exposed and fixed both pre-write polling baselines losing an immediate
 reverse change and JSON omitting meaningful zero/off state.
+ARM64 CI additionally exposed a command-ACK/render race in the test; the test
+now waits for the intended glyphs before comparing peers or lease renewal.
+Push-capable segments/RGB use immediate coalesced owner wakeups and the shared
+runtime cache. Regression tests forbid periodic full-panel reads on that path;
+status/PWM and opt-in LCD readback remain labelled bounded legacy observations.
+Immediate observation also exposed a reconnect boundary: a delayed source
+sample must not actuate a target in its first new-generation pass, and an old
+segment lease must not renew even after a fast reconnect. Both have regressions.
 
 ## Remaining gates
 

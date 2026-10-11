@@ -17,28 +17,32 @@ import (
 )
 
 type State struct {
-	BoardID    fleet.BoardID                  `json:"board_id"`
-	Connected  bool                           `json:"connected"`
-	Generation uint64                         `json:"generation"`
-	Values     map[string]fleet.MirrorCommand `json:"values"`
+	BoardID         fleet.BoardID                  `json:"board_id"`
+	Connected       bool                           `json:"connected"`
+	Generation      uint64                         `json:"generation"`
+	SegmentRevision uint64                         `json:"segment_revision"`
+	Values          map[string]fleet.MirrorCommand `json:"values"`
 	// Physical observations stay board-scoped. They are not synthetic readings
 	// or raw key/I2C writes on another board.
-	Observations map[string]any `json:"observations,omitempty"`
-	Unsupported  []string       `json:"unsupported,omitempty"`
+	Observations     map[string]any    `json:"observations,omitempty"`
+	Unsupported      []string          `json:"unsupported,omitempty"`
+	ObservationPaths map[string]string `json:"observation_paths,omitempty"`
 }
 
 type Write struct {
-	Route      fleet.RouteEnvelope `json:"route"`
-	Command    fleet.MirrorCommand `json:"command"`
-	Generation uint64              `json:"generation"`
+	Route           fleet.RouteEnvelope `json:"route"`
+	Command         fleet.MirrorCommand `json:"command"`
+	Generation      uint64              `json:"generation"`
+	SegmentRevision uint64              `json:"segment_revision"`
 }
 
 type Result struct {
-	RouteID      string        `json:"route_id"`
-	BoardID      fleet.BoardID `json:"board_id"`
-	Acknowledged bool          `json:"acknowledged"`
-	Verified     bool          `json:"verified"`
-	Error        string        `json:"error,omitempty"`
+	RouteID         string        `json:"route_id"`
+	BoardID         fleet.BoardID `json:"board_id"`
+	Acknowledged    bool          `json:"acknowledged"`
+	Verified        bool          `json:"verified"`
+	SegmentRevision uint64        `json:"segment_revision"`
+	Error           string        `json:"error,omitempty"`
 }
 
 type Adapter interface {
@@ -47,13 +51,14 @@ type Adapter interface {
 }
 
 type GroupStatus struct {
-	ID           string                   `json:"id"`
-	Sequence     uint64                   `json:"sequence"`
-	Members      map[fleet.BoardID]State  `json:"members"`
-	Errors       map[fleet.BoardID]string `json:"errors"`
-	Results      []Result                 `json:"last_results,omitempty"`
-	Origin       fleet.BoardID            `json:"last_origin,omitempty"`
-	DroppedNotes uint64                   `json:"dropped_notes"`
+	ID             string                   `json:"id"`
+	Sequence       uint64                   `json:"sequence"`
+	Members        map[fleet.BoardID]State  `json:"members"`
+	Errors         map[fleet.BoardID]string `json:"errors"`
+	Results        []Result                 `json:"last_results,omitempty"`
+	Origin         fleet.BoardID            `json:"last_origin,omitempty"`
+	DroppedNotes   uint64                   `json:"dropped_notes"`
+	ResyncRequired []fleet.BoardID          `json:"resync_required,omitempty"`
 }
 
 type tone struct {
@@ -69,6 +74,7 @@ type groupRuntime struct {
 	group          fleet.MirrorGroup
 	status         GroupStatus
 	previous       map[fleet.BoardID]State
+	ready          map[fleet.BoardID]bool
 	desired        map[string]fleet.MirrorCommand
 	segmentOrigin  fleet.BoardID
 	segmentRenewed time.Time
@@ -85,13 +91,23 @@ type Coordinator struct {
 	epoch       uint64
 	groups      []*groupRuntime
 	notes       chan tone
+	wake        chan struct{}
 	expected    map[fleet.BoardID][]expectedNote
 	echoMu      sync.Mutex
 	dropped     atomic.Uint64
 }
 
 func New(adapter Adapter) *Coordinator {
-	return &Coordinator{adapter: adapter, epoch: uint64(time.Now().UnixNano()), notes: make(chan tone, 64), expected: map[fleet.BoardID][]expectedNote{}}
+	return &Coordinator{adapter: adapter, epoch: uint64(time.Now().UnixNano()), notes: make(chan tone, 64), wake: make(chan struct{}, 1), expected: map[fleet.BoardID][]expectedNote{}}
+}
+
+// NotifyState schedules an immediate authoritative-cache observation. It never
+// blocks the UART/event consumer or creates another board transport owner.
+func (coordinator *Coordinator) NotifyState() {
+	select {
+	case coordinator.wake <- struct{}{}:
+	default:
+	}
 }
 
 func (coordinator *Coordinator) Configure(config fleet.MirrorConfig) error {
@@ -113,7 +129,7 @@ func (coordinator *Coordinator) Configure(config fleet.MirrorConfig) error {
 	coordinator.echoMu.Unlock()
 	coordinator.epoch = uint64(time.Now().UnixNano())
 	for _, group := range coordinator.config.Groups {
-		coordinator.groups = append(coordinator.groups, &groupRuntime{group: group, status: GroupStatus{ID: group.ID, Members: map[fleet.BoardID]State{}, Errors: map[fleet.BoardID]string{}}, previous: map[fleet.BoardID]State{}, desired: map[string]fleet.MirrorCommand{}})
+		coordinator.groups = append(coordinator.groups, &groupRuntime{group: group, status: GroupStatus{ID: group.ID, Members: map[fleet.BoardID]State{}, Errors: map[fleet.BoardID]string{}}, previous: map[fleet.BoardID]State{}, ready: map[fleet.BoardID]bool{}, desired: map[string]fleet.MirrorCommand{}})
 	}
 	return nil
 }
@@ -124,6 +140,12 @@ func (coordinator *Coordinator) Status() []GroupStatus {
 	result := make([]GroupStatus, 0, len(coordinator.groups))
 	for _, group := range coordinator.groups {
 		status := group.status
+		status.ResyncRequired = nil
+		for _, member := range group.group.Members {
+			if !group.ready[member.BoardID] {
+				status.ResyncRequired = append(status.ResyncRequired, member.BoardID)
+			}
+		}
 		status.DroppedNotes += coordinator.dropped.Load()
 		result = append(result, status)
 	}
@@ -160,6 +182,10 @@ func (coordinator *Coordinator) Run(ctx context.Context, config func() fleet.Mir
 				continue
 			}
 			coordinator.Poll(ctx)
+		case <-coordinator.wake:
+			if coordinator.Configure(config()) == nil {
+				coordinator.Poll(ctx)
+			}
 		case note := <-coordinator.notes:
 			coordinator.mu.Lock()
 			coordinator.note(ctx, note)
@@ -193,11 +219,10 @@ func (coordinator *Coordinator) poll(ctx context.Context, group *groupRuntime) {
 			}
 			group.status.Errors[member.BoardID] = err.Error()
 			delete(group.previous, member.BoardID)
+			delete(group.ready, member.BoardID)
 			delete(group.status.Members, member.BoardID)
 			// Do not renew a disconnected presentation on reconnect.
-			if member.BoardID == group.segmentOrigin {
-				group.segmentOrigin = ""
-			}
+			group.segmentOrigin = ""
 			continue
 		}
 		delete(group.status.Errors, member.BoardID)
@@ -214,6 +239,15 @@ func (coordinator *Coordinator) poll(ctx context.Context, group *groupRuntime) {
 			continue
 		}
 		previous, initialized := group.previous[member.BoardID]
+		if initialized && previous.SegmentRevision != state.SegmentRevision {
+			group.segmentOrigin = ""
+		}
+		if initialized && previous.Generation != state.Generation {
+			group.ready[member.BoardID] = false
+		}
+		if !group.ready[member.BoardID] {
+			group.segmentOrigin = ""
+		}
 		if initialized && previous.Generation == state.Generation {
 			keys := make([]string, 0, len(state.Values))
 			for key := range state.Values {
@@ -295,6 +329,10 @@ func (coordinator *Coordinator) note(ctx context.Context, note tone) {
 }
 
 func (coordinator *Coordinator) fanout(ctx context.Context, group *groupRuntime, origin fleet.BoardID, command fleet.MirrorCommand) {
+	coordinator.fanoutWithBaseline(ctx, group, origin, command, false)
+}
+
+func (coordinator *Coordinator) fanoutWithBaseline(ctx context.Context, group *groupRuntime, origin fleet.BoardID, command fleet.MirrorCommand, explicit bool) {
 	group.status.Sequence++
 	group.status.Origin = origin
 	group.status.Results = nil
@@ -322,6 +360,11 @@ func (coordinator *Coordinator) fanout(ctx context.Context, group *groupRuntime,
 			group.status.Results = append(group.status.Results, result)
 			continue
 		}
+		if !explicit && !group.ready[member.BoardID] {
+			result.Error = "generation is baseline-only until explicit resync; no deferred actuation"
+			group.status.Results = append(group.status.Results, result)
+			continue
+		}
 		if command.Kind != "buzzer" {
 			if _, capable := state.Values[command.Key()]; !capable {
 				result.Error = "domain unavailable on target"
@@ -335,6 +378,9 @@ func (coordinator *Coordinator) fanout(ctx context.Context, group *groupRuntime,
 			Target: fleet.Destination{BoardID: member.BoardID}, Coordinator: fleet.CoordinatorPosition{ID: coordinator.config.CoordinatorID, Epoch: coordinator.epoch, Sequence: group.status.Sequence}, HopCount: 1, HopLimit: 1, Deadline: time.Now().Add(2 * time.Second),
 			Intent: fleet.Intent{Domain: command.Kind, Name: "mirror", Arguments: map[string]json.RawMessage{"command": encoded}},
 		}}
+		if command.Kind == "segments" {
+			write.SegmentRevision = state.SegmentRevision
+		}
 		if command.Kind == "buzzer" {
 			coordinator.echoMu.Lock()
 			coordinator.expected[member.BoardID] = append(coordinator.expected[member.BoardID], expectedNote{command, time.Now().Add(2 * time.Second)})
@@ -351,9 +397,12 @@ func (coordinator *Coordinator) fanout(ctx context.Context, group *groupRuntime,
 			result = applied
 		}
 		if result.Verified && command.Kind != "buzzer" {
+			state.SegmentRevision = result.SegmentRevision
+			group.status.Members[member.BoardID] = state
 			previous, known := group.previous[member.BoardID]
 			if known && previous.Generation == state.Generation {
 				previous.Values[command.Key()] = command
+				previous.SegmentRevision = result.SegmentRevision
 				group.previous[member.BoardID] = previous
 			}
 		}
@@ -373,6 +422,11 @@ func (coordinator *Coordinator) Resync(ctx context.Context, groupID string, orig
 		if !ok {
 			return nil, errors.New("resync source is unavailable or not a member")
 		}
+		// Explicitly commission this baseline before fanout. A failure below
+		// revokes only the affected target; reconnect can never auto-commission.
+		for board := range group.status.Members {
+			group.ready[board] = true
+		}
 		keys := []string{}
 		for key := range state.Values {
 			keys = append(keys, key)
@@ -382,8 +436,13 @@ func (coordinator *Coordinator) Resync(ctx context.Context, groupID string, orig
 		for _, key := range keys {
 			command := state.Values[key]
 			if command.Kind != "buzzer" && group.group.Policy.Allows(command) {
-				coordinator.fanout(ctx, group, origin, command)
+				coordinator.fanoutWithBaseline(ctx, group, origin, command, true)
 				results = append(results, group.status.Results...)
+			}
+		}
+		for _, result := range results {
+			if result.Error != "" || !result.Verified {
+				group.ready[result.BoardID] = false
 			}
 		}
 		return results, nil

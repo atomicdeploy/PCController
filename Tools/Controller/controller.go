@@ -1646,12 +1646,14 @@ func (client *Client) SetVolatileMenuPage(ctx context.Context, page byte) error 
 
 // PresentMirrorSegments takes a bounded two-second presentation lease. It
 // changes cells only, never EEPROM brightness or physical detection state.
-func (client *Client) PresentMirrorSegments(ctx context.Context, cells [4]byte) error {
+func (client *Client) PresentMirrorSegments(ctx context.Context, cells [4]byte, revision uint64) error {
 	if client.Snapshot().Hello.Capabilities&native.CapabilityScheduledSegments == 0 {
 		return errors.New("firmware does not advertise scheduled segments")
 	}
-	return client.runtime.Command(ctx, native.OpDisplayText, native.ScheduledSegmentRawPayload(cells, 2000))
+	return client.runtime.PresentMirrorSegments(ctx, cells, revision)
 }
+
+func (client *Client) SegmentRevision() uint64 { return client.runtime.SegmentRevision() }
 
 // BoardName reads the operator-assigned MCU EEPROM name.
 func (client *Client) BoardName(ctx context.Context) (BoardName, error) {

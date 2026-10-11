@@ -13,7 +13,7 @@ distributed leader election or automatic coordinator failover is implemented.
 | Menu | Live menu page; requires the advertised HELLO build feature `0x40`. `MENU_SET_PAGE [page \| 0x80]` is volatile and does not save the boot page. An absent capability is unavailable, not silently downgraded. |
 | Segments | Exact four raw cells through a renewable two-second presentation lease. Brightness, TM1637 detection, local safety and editing remain physical-board policy. |
 | LCD | Exact two 16-byte ASCII lines, only when the board reports an available LCD. |
-| Static status RGB | Only available when the physical compositor reports no local safety condition or animated effect. No mirroring of safety overrides as base colors. |
+| Static status RGB | Available for safe steady base/manual conditions, never safety overrides, running state, transient cues or animations. Exact rendered RGB uses receiver brightness 255 to avoid double-scaling; the source's physical brightness remains an observation, not a settings write. |
 | Buzzer | Pushed finite tones/rests, bounded receipt queue and echo matching; ACK means accepted, not audible. Repeated identical simultaneous notes are ambiguous on legacy UART (no route ID in the device event). |
 | General relays | Explicit R5..R8 allowlist; SDK readback required. R1..R4 are interlocked motion outputs in this firmware and are rejected. UI profile labels do not change the wire safety mapping. |
 | PWM / PCA9685 | Explicit logical channels 0..15 and exact 12-bit values; actual availability and full readback required. This is the device-specific I2C output path, not motherboard-bus access. |
@@ -67,10 +67,16 @@ commands permitted. Board IDs are explicit stable identities, not inferred
 from a COM port or a peer label. Duplicate/overlapping IDs/endpoints are
 rejected; a peer returning the wrong identity is quarantined.
 
-- `controller.mirror.inspect {}`: actual availability, generation, volatile
+- `controller.mirror.inspect {}`: explicit refresh of availability, generation, volatile
   values and board-scoped physical observations, plus unsupported domains.
+  `{"cached":true}` uses the authoritative push cache and labelled bounded legacy
+  readback instead; it is the coordinator's observation path. `observation_paths`
+  distinguishes firmware push, bounded legacy readback and initial-only LCD state.
 - `controller.mirror.status {}`: members, per-member errors, coordinator
-  sequence, last origin, ACK/verified dispositions and dropped-note count.
+  sequence, last origin, ACK/verified dispositions, dropped-note count and
+  `resync_required` boards. A new configuration or connection needs explicit
+  selected-source resync before receiving mirrored actuation, not an automatic
+  timer-based promotion. Local standalone control remains available.
 - `controller.mirror.resync {"group_id":"front-panels","source_board_id":"panel-a"}`:
   explicit initial/reconnect synchronization from a selected connected source.
   Buzzer notes are never replayed by resync. Results are per operation/target;
@@ -80,8 +86,13 @@ rejected; a peer returning the wrong identity is quarantined.
   deadline, connection generation, sequence and replay disposition. Not a raw
   opcode gateway.
 
-State polling is 250 ms when endpoints respond promptly; slower endpoints
-reduce cadence. Conflicts use serialized observation order (configured member
+Changed segment/RGB/PWM events wake the single coordinator immediately; segment
+and RGB push never require a repeating snapshot read. The 250 ms owner tick
+checks leases/connections and provides labelled bounded legacy status/PWM
+readback (and LCD only when opted in, since no LCD push is advertised). Exact
+panel reads are reserved for initial connection, explicit refresh/verification,
+or that opt-in legacy domain. Slower endpoints reduce cadence. Conflicts use
+serialized observation order (configured member
 order within one poll), not remote wall-clock last-write-wins. First observation
 and new connection generations only establish a baseline. Disconnected writes
 are reported unavailable and are **not queued for reconnect**. Reconnect needs
@@ -90,8 +101,12 @@ a boot epoch and per-epoch sequence; a backwards coordinator clock is rejected
 rather than silently weakening ordering.
 
 Segment leases renew at 750 ms only while connected readback agrees. On drift
-or lost ownership they expire to the real local panel. LCD and RGB safety remain
-local. Buzzer event matching is bounded to two seconds; there is no audio-clock
+or lost ownership they expire to the real local panel. A host-side segment
+intention revision is checked under the same wire
+send lock, so renewal cannot overwrite a newly accepted local display/menu
+command before its rendered push arrives. Local intentions and any reconnect
+end the old lease ownership; a reconnect is never an automatic lease restore.
+LCD and RGB safety remain local. Buzzer event matching is bounded to two seconds; there is no audio-clock
 phase lock across hosts. Host buzzer mirroring retains its existing timestamped
 note scheduler, rest cancellation, backend diagnostics and overflow reporting.
 

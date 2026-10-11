@@ -45,7 +45,43 @@ func newTestCoordinator(t *testing.T) (*Coordinator, *fakeAdapter) {
 	if err := coordinator.Configure(config); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := coordinator.Resync(context.Background(), "pair", "one"); err != nil {
+		t.Fatal(err)
+	}
+	fake.writes = nil // fixture represents an explicitly commissioned baseline
 	return coordinator, fake
+}
+
+func TestMirrorNeedsExplicitInitialResync(t *testing.T) {
+	coordinator, fake := newTestCoordinator(t)
+	coordinator.groups[0].ready = map[fleet.BoardID]bool{}
+	fake.states["one"].Values["pwm.0"] = fleet.MirrorCommand{Kind: "pwm", Value: 123}
+	for i := 0; i < 3; i++ {
+		coordinator.Poll(context.Background())
+	}
+	if len(fake.writes) != 0 || len(coordinator.Status()[0].ResyncRequired) != 2 {
+		t.Fatal("uncommissioned boards actuated automatically")
+	}
+	if _, err := coordinator.Resync(context.Background(), "pair", "one"); err != nil || len(fake.writes) != 1 {
+		t.Fatal("explicit baseline unavailable", err)
+	}
+}
+
+func TestMirrorPushWakeIsCoalescedAndNonblocking(t *testing.T) {
+	coordinator := New(nil)
+	for i := 0; i < 100; i++ {
+		coordinator.NotifyState()
+	}
+	select {
+	case <-coordinator.wake:
+	default:
+		t.Fatal("push event did not wake mirror owner")
+	}
+	select {
+	case <-coordinator.wake:
+		t.Fatal("push wake overflowed its one-slot queue")
+	default:
+	}
 }
 func TestMirrorFullDuplexStateAndNoEcho(t *testing.T) {
 	coordinator, fake := newTestCoordinator(t)
@@ -113,6 +149,7 @@ func TestMirrorBuzzerEchoAndExpiredQueue(t *testing.T) {
 	coordinator, fake := newTestCoordinator(t)
 	ctx := context.Background()
 	coordinator.Poll(ctx)
+	coordinator.Poll(ctx) // stable generation before accepting transient writes
 	command := fleet.MirrorCommand{Kind: "buzzer", FrequencyHz: 440, DurationMS: 50}
 	coordinator.note(ctx, tone{"one", command, time.Now()})
 	if coordinator.ObserveNote("two", command) {
@@ -131,6 +168,57 @@ func TestMirrorBuzzerEchoAndExpiredQueue(t *testing.T) {
 	coordinator.note(ctx, tone{"one", command, time.Now().Add(-time.Second)})
 	if len(fake.writes) != 2 {
 		t.Fatal("stale note played")
+	}
+}
+
+func TestMirrorReconnectCannotActuateDelayedSourceObservation(t *testing.T) {
+	coordinator, fake := newTestCoordinator(t)
+	ctx := context.Background()
+	coordinator.Poll(ctx)
+	coordinator.Poll(ctx)
+	state := fake.states["two"]
+	state.Generation++
+	fake.states["two"] = state
+	// The source change happened while offline, but is first observed in the
+	// same pass as the new target generation. It is not a reconnect write.
+	fake.states["one"].Values["pwm.0"] = fleet.MirrorCommand{Kind: "pwm", Value: 123}
+	coordinator.Poll(ctx)
+	coordinator.Poll(ctx)
+	if len(fake.writes) != 0 {
+		t.Fatal("delayed observation actuated new generation")
+	}
+	if _, err := coordinator.Resync(ctx, "pair", "one"); err != nil || len(fake.writes) != 1 {
+		t.Fatal("explicit resync unavailable", err)
+	}
+}
+
+func TestMirrorReconnectDoesNotRenewOldSegmentLease(t *testing.T) {
+	coordinator, fake := newTestCoordinator(t)
+	ctx := context.Background()
+	group := coordinator.groups[0]
+	group.group.Policy.Domains = append(group.group.Policy.Domains, "segments")
+	for board, state := range fake.states {
+		state.Values["segments"] = fleet.MirrorCommand{Kind: "segments"}
+		fake.states[board] = state
+	}
+	coordinator.Poll(ctx)
+	fake.states["one"].Values["segments"] = fleet.MirrorCommand{Kind: "segments", Cells: [4]byte{6, 91, 79, 102}}
+	coordinator.Poll(ctx)
+	if len(fake.writes) != 1 {
+		t.Fatal("initial display change not mirrored")
+	}
+	state := fake.states["two"]
+	state.Connected = false
+	fake.states["two"] = state
+	coordinator.Poll(ctx)
+	state.Connected = true
+	state.Generation++
+	fake.states["two"] = state
+	group.segmentRenewed = time.Now().Add(-time.Second)
+	coordinator.Poll(ctx)
+	coordinator.Poll(ctx)
+	if len(fake.writes) != 1 || group.segmentOrigin != "" {
+		t.Fatal("old presentation lease renewed on reconnect")
 	}
 }
 func TestMirrorQuarantinesIdentityAndKeepsFailureHonest(t *testing.T) {

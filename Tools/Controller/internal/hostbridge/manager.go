@@ -194,15 +194,19 @@ func (peer *peerState) attach(session *peerRPCSession) func() {
 }
 
 type Manager struct {
-	boardMirror    *boardmirror.Coordinator
-	mirrorWriteMu  sync.Mutex
-	mirrorReplay   *fleet.ReplayCache
-	mirrorEpoch    uint64
-	mirrorSequence uint64
-	client         *controller.Client
-	store          *appconfig.Store
-	ctx            context.Context
-	cancel         context.CancelFunc
+	boardMirror              *boardmirror.Coordinator
+	mirrorWriteMu            sync.Mutex
+	mirrorObserveMu          sync.Mutex
+	mirrorObservedGeneration uint64
+	mirrorLegacyReadAt       time.Time
+	mirrorPWM                native.PWMValues
+	mirrorReplay             *fleet.ReplayCache
+	mirrorEpoch              uint64
+	mirrorSequence           uint64
+	client                   *controller.Client
+	store                    *appconfig.Store
+	ctx                      context.Context
+	cancel                   context.CancelFunc
 
 	mu                  sync.RWMutex
 	closing             bool

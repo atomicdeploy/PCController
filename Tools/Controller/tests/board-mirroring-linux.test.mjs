@@ -61,8 +61,14 @@ function mirrorConfig(coordinatorSide, nextPolicy = policy) {
 }
 async function inspect(endpoint) { return rpc(endpoint, 'controller.mirror.inspect') }
 async function waitValue(endpoint, key, match) {
+  let lastTrace
   return eventually(`${key} at ${endpoint}`, async () => {
     const state = await inspect(endpoint)
+    if (process.env.PCCONTROLLER_MIRROR_TRACE && key === 'segments') {
+      const [group] = await rpc(endpointA, 'controller.mirror.status')
+      const trace = JSON.stringify({ endpoint, value: state.values[key], sequence: group?.sequence, origin: group?.last_origin, results: group?.last_results })
+      if (trace !== lastTrace) { console.log(trace); lastTrace = trace }
+    }
     return match(state.values[key]) && state
   })
 }
@@ -106,6 +112,9 @@ try {
     const [group] = await rpc(endpointA, 'controller.mirror.status')
     return group?.members['smoke-a']?.connected && group?.members['smoke-b']?.connected
   })
+  const initialSync = await rpc(endpointA, 'controller.mirror.resync', { group_id: 'smoke-pair', source_board_id: 'smoke-a' })
+  assert.ok(initialSync.length && initialSync.every(result => result.verified), JSON.stringify(initialSync))
+  assert.ok(!(await rpc(endpointA, 'controller.mirror.status'))[0].resync_required?.length)
   for (const endpoint of [endpointA, endpointB]) {
     const state = await inspect(endpoint)
     assert.equal(state.observations.status.ina219_available, false)
@@ -161,22 +170,36 @@ try {
     console.log('PASS native Linux host buzzer enabled during real board notes, no backend error (not audibility proof)')
   }
 
-  const segmentPolicy = { ...policy, domains: [...policy.domains, 'segments'] }
+  const segmentPolicy = { ...policy, domains: [...policy.domains, 'segments', 'status_led'] }
   await rpc(endpointB, 'controller.mirror.configure', mirrorConfig(false, segmentPolicy))
   await rpc(endpointA, 'controller.mirror.configure', mirrorConfig(true, segmentPolicy))
   await delay(600)
+  const displaySync = await rpc(endpointA, 'controller.mirror.resync', { group_id: 'smoke-pair', source_board_id: 'smoke-a' })
+  assert.ok(displaySync.length && displaySync.every(result => result.verified), JSON.stringify(displaySync))
+  await rpc(endpointA, 'controller.command.execute', { command: 'rgb 120 30 10 128' })
+  let expectedRGB = [60, 15, 5]
+  await waitValue(endpointA, 'status_led', value => JSON.stringify(value?.rgb) === JSON.stringify(expectedRGB))
+  await waitValue(endpointB, 'status_led', value => JSON.stringify(value?.rgb) === JSON.stringify(expectedRGB))
+  await rpc(endpointB, 'controller.command.execute', { command: 'rgb 10 80 150 64' })
+  expectedRGB = [2, 20, 38]
+  await waitValue(endpointB, 'status_led', value => JSON.stringify(value?.rgb) === JSON.stringify(expectedRGB))
+  await waitValue(endpointA, 'status_led', value => JSON.stringify(value?.rgb) === JSON.stringify(expectedRGB))
+  console.log('PASS pushed full-duplex static physical RGB without double brightness scaling')
   await rpc(endpointA, 'controller.display.send', { target: 'segments', text: '1234', duration_ms: 10000 })
-  let expected = (await inspect(endpointA)).values.segments.cells
+  let expected = [0x06, 0x5b, 0x4f, 0x66] // rendered 1234, not the pre-render ACK snapshot
+  await waitValue(endpointA, 'segments', value => JSON.stringify(value?.cells) === JSON.stringify(expected))
   await waitValue(endpointB, 'segments', value => JSON.stringify(value?.cells) === JSON.stringify(expected))
   await delay(2500) // beyond the destination lease; renewal must be real
   assert.deepEqual((await inspect(endpointB)).values.segments.cells, expected)
   await rpc(endpointB, 'controller.display.send', { target: 'segments', text: '5678', duration_ms: 10000 })
-  expected = (await inspect(endpointB)).values.segments.cells
+  expected = [0x6d, 0x7d, 0x07, 0x7f] // rendered 5678
+  await waitValue(endpointB, 'segments', value => JSON.stringify(value?.cells) === JSON.stringify(expected))
   await waitValue(endpointA, 'segments', value => JSON.stringify(value?.cells) === JSON.stringify(expected))
   console.log('PASS four-cell segments both ways + renewable bounded presentation lease')
   await rpc(endpointA, 'controller.mirror.configure', mirrorConfig(true))
   await rpc(endpointB, 'controller.mirror.configure', mirrorConfig(false))
   await delay(500)
+  await rpc(endpointA, 'controller.mirror.resync', { group_id: 'smoke-pair', source_board_id: 'smoke-a' })
 
   const beforeDisconnect = (await inspect(endpointB)).values['pwm.0'].value
   await rpc(endpointB, 'controller.close')
@@ -203,7 +226,7 @@ try {
   console.log(JSON.stringify({ result: 'passed', platform: process.platform, architecture: process.arch, physicalAvrAcceptance: false, gpioAdapter: false }))
 } catch (error) {
   for (const endpoint of [endpointA, endpointB].filter(Boolean)) {
-    try { const state = await inspect(endpoint); const mirror = await rpc(endpoint, 'controller.mirror.status'); console.error(JSON.stringify({ endpoint, connected: state.connected, generation: state.generation, values: Object.fromEntries(['pwm.0', 'relay.5', 'menu', 'segments'].map(key => [key, state.values[key]])), mirror: mirror.map(group => ({ id: group.id, sequence: group.sequence, errors: group.errors, results: group.last_results, dropped: group.dropped_notes })) })) } catch {}
+    try { const state = await inspect(endpoint); const mirror = await rpc(endpoint, 'controller.mirror.status'); console.error(JSON.stringify({ endpoint, connected: state.connected, generation: state.generation, values: Object.fromEntries(['pwm.0', 'relay.5', 'menu', 'segments', 'status_led'].map(key => [key, state.values[key]])), mirror: mirror.map(group => ({ id: group.id, sequence: group.sequence, origin: group.last_origin, errors: group.errors, results: group.last_results, dropped: group.dropped_notes })) })) } catch {}
   }
   for (const [name, output] of outputs) console.error(`${name}: ${output.slice(-8000)}`)
   throw error

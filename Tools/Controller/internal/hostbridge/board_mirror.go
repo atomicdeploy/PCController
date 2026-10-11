@@ -19,18 +19,41 @@ import (
 // Inspect uses the existing serial owner. Optional hardware is advertised only
 // when its live firmware capability AND peripheral readback are available.
 func (manager *Manager) MirrorInspect(ctx context.Context) (boardmirror.State, error) {
+	return manager.mirrorInspect(ctx, true)
+}
+
+func (manager *Manager) MirrorObserve(ctx context.Context) (boardmirror.State, error) {
+	return manager.mirrorInspect(ctx, false)
+}
+
+// Periodic observations read push-capable display state only from the one
+// authoritative runtime cache. Status/PWM and optional LCD have no changed-only
+// push contract; their labelled legacy fallback is bounded to 250 ms.
+func (manager *Manager) mirrorInspect(ctx context.Context, fresh bool) (boardmirror.State, error) {
+	manager.mirrorObserveMu.Lock()
+	defer manager.mirrorObserveMu.Unlock()
 	config := manager.store.Current().Integrations.BoardMirror
 	state := boardmirror.State{BoardID: config.LocalBoardID, Values: map[string]fleet.MirrorCommand{}, Unsupported: []string{"motion: coordinated safety/lease not commissioned", "raw_i2c: no device-specific write policy", "physical_inputs: observations only, never injected readings", "segments_brightness: local physical policy"}}
 	snapshot := manager.client.Snapshot()
 	state.Connected, state.Generation = snapshot.Connected, snapshot.ConnectionGeneration
+	state.SegmentRevision = manager.client.SegmentRevision()
 	if !snapshot.Connected {
 		return state, nil
 	}
-	status, err := manager.client.Status(ctx)
-	if err != nil {
-		return state, err
+	if manager.mirrorObservedGeneration != state.Generation {
+		manager.mirrorPWM = native.PWMValues{}
+	}
+	legacyDue := fresh || manager.mirrorObservedGeneration != state.Generation || time.Since(manager.mirrorLegacyReadAt) >= 250*time.Millisecond
+	status := snapshot.Status
+	if legacyDue || !snapshot.HaveStatus {
+		var err error
+		status, err = manager.client.Status(ctx)
+		if err != nil {
+			return state, err
+		}
 	}
 	state.Observations = map[string]any{"status": status}
+	state.ObservationPaths = map[string]string{"menu": "bounded_legacy_readback", "relay": "bounded_legacy_readback", "pwm": "bounded_legacy_readback"}
 	hello := snapshot.Hello
 	if hello.BuildFeatures&native.BuildFeatureVolatileMenu != 0 {
 		state.Values["menu"] = fleet.MirrorCommand{Kind: "menu", Page: status.MenuPage}
@@ -42,23 +65,41 @@ func (manager *Manager) MirrorInspect(ctx context.Context) (boardmirror.State, e
 		}
 	}
 	if hello.Capabilities&native.CapabilityPWM != 0 && status.PWMAvailable {
-		values, err := manager.client.PWMValues(ctx)
-		if err != nil {
-			return state, err
+		if legacyDue || !manager.mirrorPWM.Available {
+			values, err := manager.client.PWMValues(ctx)
+			if err != nil {
+				return state, err
+			}
+			manager.mirrorPWM = values
 		}
+		values := manager.mirrorPWM
 		if values.Available {
 			for channel, value := range values.Values {
 				command := fleet.MirrorCommand{Kind: "pwm", Channel: channel, Value: value}
 				state.Values[command.Key()] = command
 			}
 		}
+	} else {
+		manager.mirrorPWM = native.PWMValues{}
 	}
 	if hello.Capabilities&native.CapabilityFrontPanelSnapshot != 0 {
-		panel, err := manager.client.RefreshFrontPanel(ctx)
-		if err != nil {
-			return state, err
+		panel := manager.client.Snapshot().FrontPanel
+		if mirrorReadPanel(snapshot, fresh, legacyDue, mirrorIncludesLCD(config)) {
+			var err error
+			panel, err = manager.client.RefreshFrontPanel(ctx)
+			if err != nil {
+				return state, err
+			}
 		}
 		state.Observations["front_panel"] = panel
+		state.ObservationPaths["segments"] = "bounded_legacy_readback"
+		if hello.Capabilities&native.CapabilitySegmentPush != 0 {
+			state.ObservationPaths["segments"] = "firmware_push"
+		}
+		state.ObservationPaths["lcd"] = "initial_snapshot"
+		if mirrorIncludesLCD(config) {
+			state.ObservationPaths["lcd"] = "bounded_legacy_readback"
+		}
 		if hello.Capabilities&native.CapabilityScheduledSegments != 0 && (!panel.TM1637DetectionKnown || panel.TM1637Detected) {
 			state.Values["segments"] = fleet.MirrorCommand{Kind: "segments", Cells: panel.RawSegments}
 		}
@@ -70,19 +111,62 @@ func (manager *Manager) MirrorInspect(ctx context.Context) (boardmirror.State, e
 	if !snapshot.Connected || snapshot.ConnectionGeneration != state.Generation {
 		return state, errors.New("connection changed during mirror observation")
 	}
+	if legacyDue {
+		manager.mirrorLegacyReadAt, manager.mirrorObservedGeneration = time.Now(), state.Generation
+	}
 	if hello.Capabilities&native.CapabilityStatusLEDPush != 0 && snapshot.HaveStatusLED {
 		led := snapshot.StatusLED
 		state.Observations["status_led"] = led
+		state.ObservationPaths["status_led"] = "firmware_push"
 		// Safety/animated compositors remain board-local. Never translate a
 		// red safety override into the base color of another healthy board.
-		if led.Condition == 0 && led.Effect == native.StatusEffectNone {
-			state.Values["status_led"] = fleet.MirrorCommand{Kind: "status_led", RGB: [3]byte{led.Red, led.Green, led.Blue}, Brightness: led.Brightness}
+		if mirrorStaticRGBAvailable(led) {
+			// These are physical, already-scaled bytes. Full-scale receiver
+			// brightness preserves them without applying the source scale twice.
+			state.Values["status_led"] = fleet.MirrorCommand{Kind: "status_led", RGB: [3]byte{led.Red, led.Green, led.Blue}, Brightness: 255}
 		}
 	}
 	if hello.Capabilities&native.CapabilityBuzzerPush != 0 {
 		state.Values["buzzer"] = fleet.MirrorCommand{Kind: "buzzer", DurationMS: 1}
 	}
+	state.SegmentRevision = manager.client.SegmentRevision()
 	return state, nil
+}
+
+func mirrorReadPanel(snapshot controller.Snapshot, fresh, legacyDue, lcd bool) bool {
+	return fresh || !snapshot.HaveFrontPanel || (legacyDue && (snapshot.Hello.Capabilities&native.CapabilitySegmentPush == 0 || lcd))
+}
+
+func mirrorStaticRGBAvailable(led native.StatusLEDState) bool {
+	if led.Effect != native.StatusEffectNone {
+		return false
+	}
+	switch led.Condition {
+	case native.StatusConditionOff, native.StatusConditionReady, native.StatusConditionCustom,
+		native.StatusConditionBluetoothConnected, native.StatusConditionBluetoothOff, 0xff: // firmware ManualCondition
+		return true
+	}
+	return false // boot, local safety, running state and transient cues stay local
+}
+
+func mirrorIncludesLCD(config fleet.MirrorConfig) bool {
+	hasLCD := func(policy fleet.MirrorPolicy) bool {
+		for _, domain := range policy.Domains {
+			if domain == "lcd" {
+				return true
+			}
+		}
+		return false
+	}
+	if hasLCD(config.Receive) {
+		return true
+	}
+	for _, group := range config.Groups {
+		if hasLCD(group.Policy) {
+			return true
+		}
+	}
+	return false
 }
 
 func (manager *Manager) MirrorApply(ctx context.Context, write boardmirror.Write) (boardmirror.Result, error) {
@@ -131,7 +215,7 @@ func (manager *Manager) MirrorApply(ctx context.Context, write boardmirror.Write
 		} else if _, ok := state.Values[write.Command.Key()]; !ok {
 			result.Error = "mirror domain unavailable on target"
 		} else {
-			applyErr := manager.applyMirrorCommand(ctx, write.Command)
+			applyErr := manager.applyMirrorCommand(ctx, write.Command, write.SegmentRevision)
 			result.Acknowledged = applyErr == nil
 			if applyErr != nil {
 				result.Error = applyErr.Error()
@@ -148,7 +232,12 @@ func (manager *Manager) MirrorApply(ctx context.Context, write boardmirror.Write
 						break
 					}
 					if actual, ok := state.Values[write.Command.Key()]; ok && actual == write.Command {
+						if write.Command.Kind == "segments" && state.SegmentRevision != write.SegmentRevision {
+							result.Error = "new local panel intention superseded mirror verification"
+							break
+						}
 						result.Verified = true
+						result.SegmentRevision = state.SegmentRevision
 						break
 					}
 					select {
@@ -208,12 +297,12 @@ func jsonEqual(left, right []byte) bool {
 	return string(aa) == string(bb)
 }
 
-func (manager *Manager) applyMirrorCommand(ctx context.Context, command fleet.MirrorCommand) error {
+func (manager *Manager) applyMirrorCommand(ctx context.Context, command fleet.MirrorCommand, segmentRevision uint64) error {
 	switch command.Kind {
 	case "menu":
 		return manager.client.SetVolatileMenuPage(ctx, command.Page)
 	case "segments":
-		return manager.client.PresentMirrorSegments(ctx, command.Cells)
+		return manager.client.PresentMirrorSegments(ctx, command.Cells, segmentRevision)
 	case "lcd":
 		_, err := manager.client.PresentDisplay(ctx, controller.DisplayRequest{Target: "lcd", Text: fmt.Sprintf("%-16s%-16s", command.Lines[0], command.Lines[1])})
 		return err
@@ -238,10 +327,10 @@ type mirrorAdapter struct{ manager *Manager }
 
 func (adapter mirrorAdapter) Inspect(ctx context.Context, member fleet.MirrorMember) (boardmirror.State, error) {
 	if member.Peer == "" {
-		return adapter.manager.MirrorInspect(ctx)
+		return adapter.manager.MirrorObserve(ctx)
 	}
 	var result boardmirror.State
-	err := adapter.call(ctx, member.Peer, "controller.mirror.inspect", nil, &result)
+	err := adapter.call(ctx, member.Peer, "controller.mirror.inspect", map[string]bool{"cached": true}, &result)
 	return result, err
 }
 func (adapter mirrorAdapter) Apply(ctx context.Context, member fleet.MirrorMember, write boardmirror.Write) (boardmirror.Result, error) {
@@ -285,6 +374,12 @@ func (adapter mirrorAdapter) call(ctx context.Context, name, method string, para
 }
 
 func (manager *Manager) observeBoardMirror(event controller.Event) bool {
+	if manager.boardMirror != nil {
+		switch event.Kind {
+		case "front_panel.segment", "status_led.changed", "pwm.changed", "connection":
+			manager.boardMirror.NotifyState()
+		}
+	}
 	if manager.boardMirror == nil || event.Kind != "buzzer.note" {
 		return true
 	}
