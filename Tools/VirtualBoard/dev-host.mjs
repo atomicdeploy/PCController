@@ -2,7 +2,8 @@
 // discovers serial ports, flashes a device, or replaces a running coordinator.
 import { spawn } from 'node:child_process'
 import { createConnection, createServer } from 'node:net'
-import { mkdir, readFile, writeFile, access } from 'node:fs/promises'
+import { mkdir, open, access } from 'node:fs/promises'
+import { constants } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -34,24 +35,42 @@ for (const port of [boardPort, hostPort]) {
 const state = resolve(options['state-root']), configPath = join(state, 'config.json')
 await mkdir(state, { recursive: true })
 const marker = join(state, 'virtual-development.json')
-let existingConfig = false
-try { await access(configPath); existingConfig = true } catch (error) { if (error.code !== 'ENOENT') throw error }
+const seed = JSON.stringify({ schema: 2, connection: { port: `tcp://127.0.0.1:${boardPort}`, reset_on_reconnect: false },
+  ipc: { listen: `127.0.0.1:${hostPort}`, allow_remote: false }, ui: { history_hours: 0 },
+  integrations: { discovery: { mdns_enabled:false, dns_sd_enabled:false, ssdp_enabled:false, upnp_enabled:false, ws_discovery_enabled:false, broadcast_enabled:false, netbios_enabled:false },
+    buzzer_mirror: { enabled:false }, keyboard_control: { enabled:false } } }, null, 2) + '\n'
+const readFlags = constants.O_RDONLY | (constants.O_NOFOLLOW || 0)
+const createFlags = constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW || 0)
+async function readJson(handle) {
+  const stat = await handle.stat()
+  if (!stat.isFile() || stat.size > 1048576) throw new Error('development metadata must be a bounded regular file')
+  return JSON.parse(await handle.readFile('utf8'))
+}
+let owned = false
 try {
-  if (JSON.parse(await readFile(marker, 'utf8')).owner !== 'pccontroller-virtual-development') throw new Error('wrong development directory owner')
+  const handle = await open(marker, readFlags)
+  try { owned = (await readJson(handle)).owner === 'pccontroller-virtual-development' } finally { await handle.close() }
+  if (!owned) throw new Error('wrong development directory owner')
 } catch (error) {
-  if (error.code !== 'ENOENT' || existingConfig) throw new Error('refusing unowned/existing configuration directory')
-  await writeFile(marker, JSON.stringify({owner:'pccontroller-virtual-development'})+'\n', {flag:'wx'})
-}
-try { await access(configPath) } catch (error) {
   if (error.code !== 'ENOENT') throw error
-  // Only seed a new explicitly isolated host profile. Existing authored effects,
-  // names and folders are retained on every subsequent run.
-  await writeFile(configPath, JSON.stringify({ schema: 2, connection: { port: `tcp://127.0.0.1:${boardPort}`, reset_on_reconnect: false },
-    ipc: { listen: `127.0.0.1:${hostPort}`, allow_remote: false }, ui: { history_hours: 0 },
-    integrations: { discovery: { mdns_enabled:false, dns_sd_enabled:false, ssdp_enabled:false, upnp_enabled:false, ws_discovery_enabled:false, broadcast_enabled:false, netbios_enabled:false },
-      buzzer_mirror: { enabled:false }, keyboard_control: { enabled:false } } }, null, 2) + '\n', { flag: 'wx' })
 }
-const config = JSON.parse(await readFile(configPath, 'utf8'))
+let config
+let handle
+let created = false
+if (owned) {
+  try { handle = await open(configPath, readFlags) } catch (error) { if (error.code !== 'ENOENT') throw error }
+}
+// An unowned directory must win exclusive creation, never probe-then-overwrite
+// an existing configuration. Read/check/write against the opened descriptors.
+if (!handle) { handle = await open(configPath, createFlags, 0o600); created = true }
+try {
+  if (created) { await handle.writeFile(seed); config = JSON.parse(seed) }
+  else config = await readJson(handle)
+  if (!owned) {
+    const ownerHandle = await open(marker, createFlags, 0o600)
+    try { await ownerHandle.writeFile(JSON.stringify({owner:'pccontroller-virtual-development'})+'\n') } finally { await ownerHandle.close() }
+  }
+} finally { await handle.close() }
 if (config.ipc?.allow_remote || config.integrations?.websocket_clients?.length
     || config.integrations?.board_mirror?.groups?.length || config.integrations?.board_mirror?.receive_from)
   throw new Error('dev launcher refuses a remotely connected/shared configuration')
