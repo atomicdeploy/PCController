@@ -67,7 +67,7 @@ try {
   if (created) { await handle.writeFile(seed); config = JSON.parse(seed) }
   else config = await readJson(handle)
   if (!owned) {
-    const ownerHandle = await open(marker, createFlags, 0o600)
+    const ownerHandle = await open(marker, 'wx', 0o600)
     try { await ownerHandle.writeFile(JSON.stringify({owner:'pccontroller-virtual-development'})+'\n') } finally { await ownerHandle.close() }
   }
 } finally { await handle.close() }
