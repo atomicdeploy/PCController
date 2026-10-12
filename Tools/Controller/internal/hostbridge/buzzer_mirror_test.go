@@ -9,6 +9,7 @@ import (
 	controller "pccontroller.local/controller"
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/control"
+	"pccontroller.local/controller/internal/pcspeaker"
 	"pccontroller.local/controller/internal/shell"
 )
 
@@ -249,6 +250,35 @@ func TestBuzzerDispatchReusesResolvedExternalBackend(t *testing.T) {
 	job := <-manager.buzzerJobs
 	if job.config.Backend != "external" || job.config.Executable != "/usr/local/bin/beep" {
 		t.Fatalf("resolved backend was not reused: %+v", job.config)
+	}
+}
+
+func TestBuzzerReconcileDoesNotProbeAnUnchangedReadyBackend(t *testing.T) {
+	config := appconfig.DefaultBuzzerMirror()
+	config.Enabled, config.NativeEnabled, config.Backend = true, true, "native"
+	previous := config
+	status := Status{BuzzerNativeState: "ready", BuzzerNativeBackend: "native"}
+	calls := 0
+	resolve := func(appconfig.BuzzerMirror) (pcspeaker.BackendStatus, error) {
+		calls++
+		return pcspeaker.BackendStatus{Backend: "native"}, nil
+	}
+	config.WebAudioEnabled = !config.WebAudioEnabled
+	config.Path = "host"
+	if _, err := reuseOrResolveNativeBuzzer(config, &previous, status, resolve); err != nil || calls != 0 {
+		t.Fatalf("presentation-only change probed live speaker: calls=%d err=%v", calls, err)
+	}
+	config.DriverDirectory = "changed"
+	if _, err := reuseOrResolveNativeBuzzer(config, &previous, status, resolve); err != nil || calls != 1 {
+		t.Fatalf("changed native configuration was not resolved: calls=%d err=%v", calls, err)
+	}
+	config = previous
+	status.BuzzerNativeState = "failed"
+	if _, err := reuseOrResolveNativeBuzzer(config, &previous, status, resolve); err != nil || calls != 2 {
+		t.Fatalf("failed backend did not retry resolution: calls=%d err=%v", calls, err)
+	}
+	if _, err := reuseOrResolveNativeBuzzer(config, nil, status, resolve); err != nil || calls != 3 {
+		t.Fatalf("first startup did not resolve: calls=%d err=%v", calls, err)
 	}
 }
 

@@ -376,3 +376,15 @@ func playNativeBuzzer(parent context.Context, job buzzerMirrorJob) error {
 func resolveNativeBuzzer(config appconfig.BuzzerMirror) (pcspeaker.BackendStatus, error) {
 	return pcspeaker.ResolveBackend(config.DriverDirectory, config.Backend, config.Executable)
 }
+
+func reuseOrResolveNativeBuzzer(config appconfig.BuzzerMirror, previous *appconfig.BuzzerMirror,
+	status Status, resolve func(appconfig.BuzzerMirror) (pcspeaker.BackendStatus, error)) (pcspeaker.BackendStatus, error) {
+	if previous != nil && previous.Enabled == config.Enabled && previous.NativeEnabled == config.NativeEnabled &&
+		previous.Backend == config.Backend && previous.Executable == config.Executable && previous.DriverDirectory == config.DriverDirectory &&
+		status.BuzzerNativeState == "ready" && status.BuzzerNativeBackend != "" {
+		// Linux's native capability probe issues KDMKTONE(0). Reprobing an
+		// unchanged ready backend for unrelated settings can cut a live note.
+		return pcspeaker.BackendStatus{Backend: status.BuzzerNativeBackend, Executable: status.BuzzerNativeExecutable}, nil
+	}
+	return resolve(config)
+}

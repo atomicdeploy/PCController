@@ -18,6 +18,13 @@ and five-minute gap guards remain; expired notes are still skipped rather than
 replayed or stretched. This adds 50 ms initial receiver latency, not a claim of
 sample-accurate acoustic synchronization.
 
+A second interruption path was found in source: Linux capability probing uses
+`KDMKTONE(0)`, which stops sound. Reconciliation now reuses an unchanged, already
+ready native backend instead of probing it when unrelated integration or
+presentation settings change. First setup, changed native configuration and
+failed-backend recovery still perform real resolution; no unavailable backend
+is fabricated as ready.
+
 An explicit zero-frequency/zero-duration Stop bypasses playout, cancels its own
 active note and flushes that source's pending/replacement buffer immediately.
 Generation changes discard old-source buffered notes before reanchoring. Other
