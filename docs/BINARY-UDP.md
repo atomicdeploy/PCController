@@ -44,8 +44,9 @@ Both dispatchers expose these method suffixes:
 | `subscribe`, `unsubscribe` | `{peer, timeout_ms}`; receive remote state/event pushes |
 | `events.get` | Bounded received observations, sequence and refresh-required state |
 
-Provisioning and outbound routing require local IPC/loopback; they are not
-remote bridge pivots. PCController exposes these through its normal IPC/HTTP/WS
+Provisioning requires local IPC/loopback. Existing API clients may route to a
+named configured peer under the current access/control policy. UDP/bridge ingress
+cannot chain another hop or persist a route change. PCController exposes these through its normal IPC/HTTP/WS
 dispatcher. Pealayer exposes them through native IPC, `/api/rpc`, `/ws`, and the
 process-local `/api/udp` endpoint, even in consumer mode. Its configuration write
 returns `accepted:true` when queued; inspect config/status to confirm application.

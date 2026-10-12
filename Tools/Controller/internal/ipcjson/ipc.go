@@ -2254,6 +2254,11 @@ func (service *Service) authorizeAccess(
 	method string,
 	params json.RawMessage,
 ) error {
+	if strings.EqualFold(strings.TrimSpace(access.Transport), "udp") {
+		if err := ValidateBridgeRequest(Request{Method: method, Params: params}); err != nil {
+			return err
+		}
+	}
 	if !access.Remote {
 		return nil
 	}
@@ -2277,6 +2282,10 @@ func (service *Service) authorizeAccess(
 
 func bridgeIngressCanPivot(method string, params json.RawMessage) bool {
 	switch strings.ToLower(strings.TrimSpace(method)) {
+	case "controller.udp.call", "controller.udp.subscribe", "controller.udp.unsubscribe", "controller.udp.config.set",
+		"pealayer.udp.call", "pealayer.udp.subscribe", "pealayer.udp.unsubscribe", "pealayer.udp.config.set",
+		"pealayer.process.connect", "config.update", "pealayer.config.update", "config.reload", "pealayer.config.reload":
+		return true
 	case "controller.bridge.call", "controller.peer.update.host", "controller.discovery.connect":
 		return true
 	case "controller.network.peers.set", "controller.integrations.local.set", "controller.hotkeys.set",
@@ -2309,7 +2318,7 @@ func bridgeCommandCanPivot(command string) bool {
 		root := strings.FieldsFunc(words[2], func(character rune) bool { return character == '.' || character == '[' })
 		if len(root) != 0 {
 			switch root[0] {
-			case "integrations", "host_menu", "host_menus", "hotkeys", "automations":
+			case "ipc", "integrations", "host_menu", "host_menus", "hotkeys", "automations":
 				return true
 			}
 		}

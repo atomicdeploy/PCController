@@ -172,8 +172,8 @@ func (s *Service) dispatchUDP(ctx context.Context, r Request, access Access) Res
 		}
 		response.Result = config
 	case "controller.udp.call", "controller.udp.subscribe", "controller.udp.unsubscribe":
-		if access.Remote {
-			return fail("UDP outbound routing requires local IPC; remote pivots are not allowed")
+		if access.Transport == "udp" || access.Transport == "bridge" {
+			return fail("UDP/bridge ingress may not pivot to another peer")
 		}
 		if ep == nil {
 			return fail("UDP transport is not running")
@@ -185,6 +185,11 @@ func (s *Service) dispatchUDP(ctx context.Context, r Request, access Access) Res
 		}
 		if err := decodeParams(r.Params, &params); err != nil {
 			return fail(err.Error())
+		}
+		if r.Method == "controller.udp.call" {
+			if err := ValidateBridgeRequest(params.Request); err != nil {
+				return fail(err.Error())
+			}
 		}
 		if params.TimeoutMS == 0 {
 			params.TimeoutMS = 5000
