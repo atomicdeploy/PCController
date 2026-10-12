@@ -26,8 +26,9 @@ String newAutomationToken() {
 bool sameSecret(String a, String b) {
   if (a.length != b.length || a.isEmpty) return false;
   var difference = 0;
-  for (var i = 0; i < a.length; i++)
+  for (var i = 0; i < a.length; i++) {
     difference |= a.codeUnitAt(i) ^ b.codeUnitAt(i);
+  }
   return difference == 0;
 }
 
@@ -52,8 +53,9 @@ class LocalAutomation {
   static const httpPort = 18990, tcpPort = 18991, maximum = 32768;
   Future<void> start(String secret) async {
     if (running) return;
-    if (secret.length < 32)
+    if (secret.length < 32) {
       throw const AutomationFailure(-32001, 'Invalid automation secret');
+    }
     final epoch = ++_epoch;
     HttpServer? http;
     ServerSocket? tcp;
@@ -102,33 +104,41 @@ class LocalAutomation {
     bool intent = false,
   }) async {
     final request = object(input), id = request['id'];
-    if (!allowed || !sameSecret(auth, token))
+    if (!allowed || !sameSecret(auth, token)) {
       return error(
         id,
         -32001,
         'Automation is disabled or authorization failed',
       );
+    }
     if (request['jsonrpc'] != '2.0' ||
         request['method'] is! String ||
         (id != null && id is! String && id is! int) ||
         (id is String && id.length > 128) ||
-        (request['params'] != null && request['params'] is! Map))
+        (request['params'] != null && request['params'] is! Map)) {
       return error(id, -32600, 'Invalid JSON-RPC request');
+    }
     // Mutating notifications have no receipt, so they are not dispatched.
     if (!request.containsKey('id')) return null;
     if (_requests >= 8) return error(id, -32003, 'Too many active requests');
-    if (intent && request['method'] == 'app.capture')
+    if (intent && request['method'] == 'app.capture') {
       return error(id, -32602, 'Use authenticated HTTP for app capture');
+    }
     final method = request['method'] as String;
     final mutating = [
       'board.action',
       'board.pwm.set',
       'board.connect',
       'board.disconnect',
+      'board.menu.press',
+      'board.display.show',
+      'board.buzzer.play',
+      'board.mode.set',
       'player.call',
     ].contains(method);
-    if (mutating && _mutating)
+    if (mutating && _mutating) {
       return error(id, -32003, 'Another automation action is pending');
+    }
     if (mutating) _mutating = true;
     _requests++;
     try {
@@ -187,13 +197,16 @@ class LocalAutomation {
             final input = jsonDecode(data);
             final response = await receive(input, secret);
             if (object(input)['method'] == 'app.subscribe' &&
-                response?.containsKey('result') == true)
+                response?.containsKey('result') == true) {
               _subscriptions.add(socket);
-            if (response != null && socket.readyState == WebSocket.open)
+            }
+            if (response != null && socket.readyState == WebSocket.open) {
               socket.add(jsonEncode(response));
+            }
           } catch (_) {
-            if (socket.readyState == WebSocket.open)
+            if (socket.readyState == WebSocket.open) {
               socket.add(jsonEncode(error(null, -32700, 'Invalid JSON')));
+            }
           }
         },
         onDone: () {
@@ -215,15 +228,17 @@ class LocalAutomation {
     try {
       final bytes = <int>[];
       await for (final chunk in request.timeout(const Duration(seconds: 5))) {
-        if (bytes.length + chunk.length > maximum)
+        if (bytes.length + chunk.length > maximum) {
           throw const AutomationFailure(-32600, 'Request exceeds 32 KiB');
+        }
         bytes.addAll(chunk);
       }
       final response = await receive(jsonDecode(utf8.decode(bytes)), secret);
-      if (response == null)
+      if (response == null) {
         request.response.statusCode = 204;
-      else
+      } else {
         request.response.write(jsonEncode(response));
+      }
     } catch (_) {
       request.response.statusCode = 400;
       request.response.write(
@@ -297,8 +312,9 @@ class LocalAutomation {
     });
     if (frame.length > 262144) return;
     for (final client in List<Object>.of(_subscriptions)) {
-      if (client is WebSocket && client.readyState == WebSocket.open)
+      if (client is WebSocket && client.readyState == WebSocket.open) {
         client.add(frame);
+      }
       // TCP is request/response and subscribe receipts; use WS for pushed state
       // rather than bypassing stream backpressure with a repeating write loop.
     }

@@ -1,11 +1,91 @@
 # Unified native controller acceptance
 
+## User acceptance requirements, 2026-10-13
+
+**The deployed app is not accepted.** This list remains durable even where a
+feature has source coverage or an earlier deployment receipt. Check items only
+when the named behavior is demonstrated; human acceptance remains separate.
+
+- [ ] Professional unified visual design at least matching Pealayer egui and
+  both projects' Web/native UIs, in light/dark, phone/tablet and scaled text.
+- [ ] Channel indicators at the trailing end of card headers, truthful
+  On/Off/Unknown state, three-dot management menus and polished activity tabs.
+- [ ] Accessible settings, appearance/preferences, launcher icon selection
+  and selectable multiple branded launcher entries.
+- [ ] Actual Android beep mirroring with bounded timing, cancellation,
+  reconnect ownership and background cutoff verified.
+- [ ] One contextual front-panel button row, no duplicated menu/key rows.
+- [ ] Complete live measurement charts and working live seven-segment frames;
+  partial LCD/menu availability must not hide independent segment authority.
+- [ ] Board monitoring, telemetry, firmware import/upload/backup/progress,
+  front panel, seven-segment, keys, buzzer, mode and channel management.
+- [ ] Branded Pealayer mini-app, playback/workspaces/media/effects/designer,
+  migrated desktop/Web controls and unified activities.
+- [ ] Mutual PCController/Pealayer peer bridges with scoped admission and
+  real acknowledgement; no unrestricted recursive proxy.
+- [ ] Local JSON-RPC/IPC, NDJSON, Android Intents and supported ADB, Termux,
+  root-shell, Tasker, WebSocket and TCP send/receive paths verified on Android.
+- [ ] Remote and full native standalone control, with the actual supported
+  hardware/coordinator route stated (offline drafts alone are insufficient).
+- [ ] Deploy, launch and test on every reachable distinct Android device,
+  with screenshots and interaction receipts; physical tablet tests if found.
+
+The active improvement goal must preserve unfinished gates and resolve
+observed defects. Implementation, analyzer/tests, deployment, physical/audio
+behavior and human visual acceptance are distinct evidence categories.
+
 ## Implemented source scope
 
 The app is Android-native with responsive phone/tablet layouts, shared routing,
 PCController control/telemetry/front-panel/firmware activities, Pealayer remote
 activities, and offline drafts/sequence editing. Existing host protocols and
 physical safety admission are reused without adding an unrestricted proxy.
+
+## Improvement pass, preview 0.1.2+3
+
+- Channel states moved into trailing card headers beside three-dot management.
+  Presentation editing uses a native icon picker, color swatches, folder/name
+  fields, host profile revision guards and host-owned channel locking.
+- Activity tabs use a shared selected surface and stable horizontal scrolling.
+  Front-panel navigation and HOST keys now share one contextual four-button
+  row; unknown panel mode cannot dispatch a key. Host mode is its own control.
+- Settings contains System/Light/Dark, automatic/mobile/tablet layout, compact
+  controls, mirror volume and one/both branded launcher entries. Both aliases
+  target the same single-task app; launcher changes never kill the app.
+- Current `buzzer.note` frames now reach the existing native frequency-driven
+  PCM receiver. Timing preserves bounded MCU deltas, shortening/dropping late
+  notes, duplicate rejection, zero-note Stop, peer/generation ownership,
+  background/disconnect cutoff and a finite native receiver lease. Mirroring
+  is explicitly enabled in Settings; physical audibility remains unverified.
+- Local HTTP/WS JSON-RPC, TCP NDJSON and Intent dispatch now additionally cover
+  current-mode panel keys, bounded display messages/tones, buzzer Stop and host
+  mode. Target, opt-in actuation, E-STOP and mutation concurrency guards remain.
+- Pealayer playback uses advertised media-session actions in one transport row,
+  stable seek/volume drag previews, the actual 0..130 volume domain, contextual
+  mute, actual workspace profiles, speed, chapters, audio and subtitles.
+- All five bounded telemetry histories/charts and independent segment-frame
+  authority remain present. Renderer captures replay earlier measured values;
+  they are not evidence of a currently connected Android physical board.
+
+Verification: locked offline restore, analyzer with no issues, 117 full tests
+passed (two opt-in tests skipped), followed by 13 focused final checks and the
+opt-in renderer. Read-only snapshot/catalog/subscription smoke passed against
+the isolated local shared-firmware development host, not physical hardware.
+
+Both distinct reachable Samsung devices (phone SM-S908E and tablet SM-X906B)
+received the development-signed ARM64 APK in place and launched. Repeated
+Controller launcher invocation reused its activity. Android Intent requests
+with an invalid token reached the Dart router on both devices and returned
+JSON-RPC `-32001`. Both screens remained locked: touch/visual/native launcher
+selection, authorized local transports, audible mirroring, live seven-segment
+and physical peer acceptance are still pending. Android refused shell-based
+component toggling; no launcher selection is claimed from that rejected check.
+
+The reported Cafe peer endpoint was unreachable from this workstation during
+this pass. The earlier blanket Cafe smoke-launch denial is superseded by
+Pealayer's current paired-peer-deployment receipt; live Android routing must
+still be verified against a reachable authoritative host. Full native/Web
+designer/settings parity and direct standalone hardware control remain open.
 
 ## Evidence to record at handoff
 
@@ -47,8 +127,8 @@ physical safety admission are reused without adding an unrestricted proxy.
 
 - Pealayer is currently offline on this workstation. Direct playback, cue
   dispatch, mutual live application acknowledgement and its Pealayer→board
-  route need a running approved host. Existing local GUI/Cafe smoke-launch
-  denials are not bypassed by this app delivery.
+  route need a reachable approved host. A separate host delivery receipt does
+  not establish Android connectivity or mutual live application acceptance.
 - No AVR flash, reset, motion, relay/PWM write or physical tone is used merely
   to verify app/UI styling. Host/programming admission, physical recovery,
   flash/readback and firmware persistence still need explicit live acceptance.
@@ -57,7 +137,7 @@ physical safety admission are reused without adding an unrestricted proxy.
   the intended standalone hardware route before implementing that expansion.
 - Full Web/native parity is unfinished: graphical multi-track cue dragging,
   full RF/I2C/strip settings, discovery onboarding, palette/icon/folder editing,
-  exact Android buzzer mirroring, tablet physical-device acceptance and a
+  actual Android buzzer timing/audibility, tablet interaction acceptance and a
   production signing/update channel remain investigation/continuation items.
 - The retained Pakar implementations are donor/reference coverage, not proof
   that their ESP-specific activities control the PCController board.

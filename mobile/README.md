@@ -25,6 +25,12 @@ PakarController remains a separate project and Android installation.
 
 Phones use bottom navigation; tablets use a rail and responsive multi-column
 cards. System light/dark preference and platform text scaling are retained.
+Settings also selects Light/Dark explicitly, layout and control density. The
+PCController and Pealayer launcher icons may be enabled separately or together;
+both open their own section of the same app. Android applies component changes
+from the app's own UID without restarting it. Beep mirroring is explicitly
+enabled in Settings and stops on backgrounding, loss of the selected peer or
+generation change; actual audible/timing acceptance is tracked separately.
 The neutral card/action styling shares Pealayer's purple accent and semantic
 state indicators rather than coloring every action as selected. Relay, motion
 and PWM cards distinguish observed state from commands/setpoints; stale values

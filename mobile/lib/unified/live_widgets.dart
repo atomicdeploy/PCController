@@ -23,11 +23,13 @@ class TelemetryHistory {
     final time = DateTime.tryParse('${snapshot['status_updated']}');
     if (snapshot['have_status'] != true ||
         time == null ||
-        snapshot['connected'] != true)
+        snapshot['connected'] != true) {
       return;
+    }
     if (points.isNotEmpty &&
-        time.difference(points.last.time).inMilliseconds < 500)
+        time.difference(points.last.time).inMilliseconds < 500) {
       return;
+    }
     final status = object(snapshot['status']);
     double? read(
       String key,
@@ -125,6 +127,107 @@ class StatePill extends StatelessWidget {
   }
 }
 
+class FrontPanelButtons extends StatelessWidget {
+  const FrontPanelButtons({
+    super.key,
+    required this.captured,
+    required this.enabled,
+    required this.dispatch,
+    this.pressedKeys,
+  });
+  final bool captured, enabled;
+  final int? pressedKeys;
+  final ValueChanged<String> dispatch;
+  @override
+  Widget build(BuildContext context) => Row(
+    children: [
+      for (var index = 0; index < 4; index++) ...[
+        if (index > 0) const SizedBox(width: 6),
+        Expanded(
+          child: OutlinedButton(
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size(44, 48),
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              backgroundColor:
+                  pressedKeys != null && pressedKeys! & (1 << index) != 0
+                  ? Theme.of(context).colorScheme.primaryContainer
+                  : null,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            onPressed: enabled
+                ? () => dispatch(
+                    captured
+                        ? 'host-menu key K${index + 1} press'
+                        : 'menu ${['prev', 'next', 'dec', 'inc'][index]}',
+                  )
+                : null,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (!captured)
+                  Icon(
+                    [
+                      Icons.arrow_back,
+                      Icons.arrow_forward,
+                      Icons.remove,
+                      Icons.add,
+                    ][index],
+                    size: 18,
+                  ),
+                Text(
+                  captured
+                      ? 'K${index + 1}'
+                      : ['Prev', 'Next', '−', '+'][index],
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    ],
+  );
+}
+
+/// Keep a user's drag preview stable while live host snapshots continue. Only
+/// release sends a request; the owner-bearing key retires a drag on peer change.
+class RemoteSlider extends StatefulWidget {
+  const RemoteSlider({
+    super.key,
+    required this.value,
+    required this.maximum,
+    required this.changed,
+    this.enabled = true,
+    this.label,
+  });
+  final double value, maximum;
+  final bool enabled;
+  final ValueChanged<double> changed;
+  final String Function(double)? label;
+  @override
+  State<RemoteSlider> createState() => _RemoteSliderState();
+}
+
+class _RemoteSliderState extends State<RemoteSlider> {
+  double? draft;
+  @override
+  Widget build(BuildContext context) => Slider(
+    value: (draft ?? widget.value).clamp(0, widget.maximum),
+    max: widget.maximum,
+    label: widget.label?.call(draft ?? widget.value),
+    onChanged: widget.enabled ? (v) => setState(() => draft = v) : null,
+    onChangeEnd: widget.enabled
+        ? (v) {
+            setState(() => draft = null);
+            widget.changed(v);
+          }
+        : null,
+  );
+}
+
 class ChannelObservation {
   const ChannelObservation(this.label, this.active, {this.percent});
   final String label;
@@ -138,8 +241,9 @@ ChannelObservation observeChannel(
   Json pwm,
   bool fresh,
 ) {
-  if (!fresh || snapshot['have_status'] != true)
+  if (!fresh || snapshot['have_status'] != true) {
     return const ChannelObservation('Unknown', null);
+  }
   final key = '${control['key']}', status = object(snapshot['status']);
   if (key.startsWith('relay.')) {
     final id = int.tryParse(key.split('.').last),
@@ -213,7 +317,7 @@ class TelemetryChart extends StatelessWidget {
         .map((p) => p.values[field])
         .whereType<double>()
         .toList();
-    if (numbers.isEmpty)
+    if (numbers.isEmpty) {
       return SizedBox(
         height: height,
         child: Center(
@@ -226,6 +330,7 @@ class TelemetryChart extends StatelessWidget {
           ),
         ),
       );
+    }
     final low = numbers.reduce(math.min), high = numbers.reduce(math.max);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -278,7 +383,7 @@ class _ChartPainter extends CustomPainter {
         .whereType<double>()
         .toList();
     if (values.isEmpty) return;
-    for (var row = 0; row < 3; row++)
+    for (var row = 0; row < 3; row++) {
       canvas.drawLine(
         Offset(0, 4 + row * (size.height - 8) / 2),
         Offset(size.width, 4 + row * (size.height - 8) / 2),
@@ -286,6 +391,7 @@ class _ChartPainter extends CustomPainter {
           ..color = grid.withValues(alpha: .3)
           ..strokeWidth = 1,
       );
+    }
     final min = values.reduce(math.min), max = values.reduce(math.max);
     final padding = math.max(
       (max - min) * .15,
@@ -311,12 +417,14 @@ class _ChartPainter extends CustomPainter {
         size.height - 4 - (value - low) / span * (size.height - 8),
       );
       if (previousTime != null &&
-          point.time.difference(previousTime).inMilliseconds > 3000)
+          point.time.difference(previousTime).inMilliseconds > 3000) {
         joined = false;
-      if (joined)
+      }
+      if (joined) {
         path.lineTo(position.dx, position.dy);
-      else
+      } else {
         path.moveTo(position.dx, position.dy);
+      }
       joined = true;
       last = position;
       previousTime = point.time;

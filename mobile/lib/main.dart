@@ -15,20 +15,38 @@ import 'unified/transport.dart';
 import 'unified/effect_editor.dart';
 import 'unified/live_widgets.dart';
 import 'unified/automation.dart';
+import 'unified/preferences.dart';
+import 'unified/buzzer_mirror.dart';
+import 'unified/channel_editor.dart';
 
 void main() => runApp(const UnifiedControllerApp());
 
-class UnifiedControllerApp extends StatelessWidget {
+class UnifiedControllerApp extends StatefulWidget {
   const UnifiedControllerApp({super.key, this.restore = true});
   final bool restore;
   @override
-  Widget build(BuildContext context) => MaterialApp(
-    title: 'PCController',
-    debugShowCheckedModeBanner: false,
-    themeMode: ThemeMode.system,
-    theme: _theme(Brightness.light),
-    darkTheme: _theme(Brightness.dark),
-    home: ControllerHome(restore: restore),
+  State<UnifiedControllerApp> createState() => _UnifiedControllerAppState();
+}
+
+class _UnifiedControllerAppState extends State<UnifiedControllerApp> {
+  final preferences = AppPreferences();
+  @override
+  void dispose() {
+    preferences.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: preferences,
+    builder: (context, _) => MaterialApp(
+      title: 'PCController',
+      debugShowCheckedModeBanner: false,
+      themeMode: preferences.theme,
+      theme: _theme(Brightness.light),
+      darkTheme: _theme(Brightness.dark),
+      home: ControllerHome(restore: widget.restore, preferences: preferences),
+    ),
   );
   ThemeData _theme(Brightness brightness) => ThemeData(
     useMaterial3: true,
@@ -91,12 +109,19 @@ class UnifiedControllerApp extends StatelessWidget {
     chipTheme: ChipThemeData(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
     ),
-    visualDensity: VisualDensity.standard,
+    visualDensity: preferences.compact
+        ? VisualDensity.compact
+        : VisualDensity.standard,
   );
 }
 
 class ControllerHome extends StatefulWidget {
-  const ControllerHome({super.key, this.restore = true});
+  const ControllerHome({
+    super.key,
+    this.restore = true,
+    required this.preferences,
+  });
+  final AppPreferences preferences;
   final bool restore;
   @override
   State<ControllerHome> createState() => _ControllerHomeState();
@@ -113,6 +138,14 @@ class _ControllerHomeState extends State<ControllerHome>
       draftProgram = TextEditingController(text: '{"steps": []}');
   final logs = <String>[];
   final history = TelemetryHistory();
+  AppPreferences get preferences => widget.preferences;
+  late final buzzerMirror = BuzzerMirror(
+    failed: (error) {
+      preferences.mirrorBuzzer = false;
+      unawaited(preferences.save());
+      if (mounted) setState(() => lastError = error);
+    },
+  );
   final captureKey = GlobalKey();
   late final automation = LocalAutomation(
     dispatch: _automationCall,
@@ -144,8 +177,18 @@ class _ControllerHomeState extends State<ControllerHome>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     board.addListener(_changed);
+    preferences.addListener(_changed);
+    board.onBuzzerNote = (event) => unawaited(buzzerMirror.event(event));
+    if (widget.restore) {
+      AppPreferences.native.setMethodCallHandler((call) async {
+        if (call.method == 'launch' && mounted) {
+          Navigator.of(context).popUntil((route) => route.isFirst);
+          setState(() => section = call.arguments == 'pealayer' ? 1 : 0);
+        }
+      });
+    }
     player.addListener(_changed);
-    if (widget.restore)
+    if (widget.restore) {
       automationChannel.setMethodCallHandler((call) async {
         if (call.method != 'request') throw MissingPluginException();
         final arguments = object(call.arguments);
@@ -155,16 +198,32 @@ class _ControllerHomeState extends State<ControllerHome>
           intent: true,
         );
       });
+    }
     if (widget.restore) unawaited(_restore());
   }
 
   void _changed() {
     history.record(board.state);
+    buzzerMirror.configure(
+      owner: board.identity,
+      generation: board.state['connection_generation'],
+      enabled:
+          foreground &&
+          preferences.mirrorBuzzer &&
+          board.boardReady &&
+          board.subscribed,
+      volume: preferences.mirrorVolume,
+    );
     if (mounted) setState(() {});
   }
 
   Future<void> _restore() async {
     try {
+      await preferences.load();
+      final launch = await AppPreferences.native.invokeMethod<String>(
+        'initialSection',
+      );
+      if (launch == 'pealayer') section = 1;
       final prefs = await SharedPreferences.getInstance();
       boardOrigin =
           prefs.getString('pccontroller.origin') ??
@@ -212,8 +271,9 @@ class _ControllerHomeState extends State<ControllerHome>
       player.disconnect();
     } else if (state == AppLifecycleState.resumed && widget.restore) {
       foreground = true;
-      if (automationEnabled && automationToken.isNotEmpty)
+      if (automationEnabled && automationToken.isNotEmpty) {
         unawaited(_startAutomation());
+      }
       unawaited(connectBoard());
       if (playerWanted && playerOrigin.isNotEmpty) {
         unawaited(player.connect(playerOrigin, playerToken));
@@ -226,6 +286,10 @@ class _ControllerHomeState extends State<ControllerHome>
     unawaited(automation.close());
     if (widget.restore) automationChannel.setMethodCallHandler(null);
     WidgetsBinding.instance.removeObserver(this);
+    preferences.removeListener(_changed);
+    if (widget.restore) AppPreferences.native.setMethodCallHandler(null);
+    board.onBuzzerNote = null;
+    buzzerMirror.dispose();
     board.removeListener(_changed);
     player.removeListener(_changed);
     board.dispose();
@@ -243,11 +307,12 @@ class _ControllerHomeState extends State<ControllerHome>
       await automation.start(automationToken);
     } catch (_) {
       // An optional IPC bind failure must not break saved board/player routes.
-      if (mounted)
+      if (mounted) {
         setState(
           () => lastError =
               'Local API unavailable; check loopback ports 18990 and 18991.',
         );
+      }
     }
     if (mounted) setState(() {});
   }
@@ -418,6 +483,7 @@ class _ControllerHomeState extends State<ControllerHome>
           params['seconds'] ??
           params['value'] ??
           params['target'] ??
+          params['profile'] ??
           params['workspace'] ??
           '';
       await perform(method, () async {
@@ -546,18 +612,19 @@ class _ControllerHomeState extends State<ControllerHome>
     IconData icon,
     VoidCallback? callback, {
     bool priority = false,
+    bool? danger,
   }) => OutlinedButton.icon(
     onPressed: busy && !priority ? null : callback,
     style: OutlinedButton.styleFrom(
       minimumSize: const Size(40, 42),
-      foregroundColor: priority
+      foregroundColor: (danger ?? priority)
           ? Theme.of(context).colorScheme.error
           : Theme.of(context).colorScheme.onSurface,
-      backgroundColor: priority
+      backgroundColor: (danger ?? priority)
           ? Theme.of(context).colorScheme.error.withValues(alpha: .08)
           : Colors.transparent,
       side: BorderSide(
-        color: priority
+        color: (danger ?? priority)
             ? Theme.of(context).colorScheme.error.withValues(alpha: .4)
             : Theme.of(context).colorScheme.outline,
       ),
@@ -601,7 +668,7 @@ class _ControllerHomeState extends State<ControllerHome>
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
               ),
-              if (trailing != null) trailing,
+              ?trailing,
             ],
           ),
           const SizedBox(height: 14),
@@ -626,26 +693,66 @@ class _ControllerHomeState extends State<ControllerHome>
     },
   );
   Widget tabs(List<String> values, int selected, ValueChanged<int> change) =>
-      SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          children: [
-            for (var i = 0; i < values.length; i++)
-              Padding(
-                padding: const EdgeInsetsDirectional.only(end: 8),
-                child: ChoiceChip(
-                  label: Text(values[i]),
-                  selected: selected == i,
-                  onSelected: (_) => change(i),
+      Container(
+        padding: const EdgeInsets.all(4),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surfaceContainer,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: Theme.of(context).colorScheme.outlineVariant,
+          ),
+        ),
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              for (var i = 0; i < values.length; i++)
+                Padding(
+                  padding: const EdgeInsetsDirectional.only(end: 4),
+                  child: TextButton(
+                    onPressed: () => change(i),
+                    style: TextButton.styleFrom(
+                      backgroundColor: selected == i
+                          ? Theme.of(context).colorScheme.surface
+                          : null,
+                      foregroundColor: selected == i
+                          ? Theme.of(context).colorScheme.primary
+                          : Theme.of(context).colorScheme.onSurfaceVariant,
+                      minimumSize: const Size(44, 44),
+                      padding: const EdgeInsets.symmetric(horizontal: 18),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      side: selected == i
+                          ? BorderSide(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .outlineVariant,
+                            )
+                          : BorderSide.none,
+                      textStyle: Theme.of(context).textTheme.labelLarge
+                          ?.copyWith(
+                            fontWeight: selected == i
+                                ? FontWeight.w700
+                                : FontWeight.w500,
+                          ),
+                    ),
+                    child: Semantics(
+                      selected: selected == i,
+                      child: Text(values[i]),
+                    ),
+                  ),
                 ),
-              ),
-          ],
+            ],
+          ),
         ),
       );
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, bounds) {
-      final tablet = bounds.maxWidth >= 760;
+      final tablet =
+          preferences.layout == 'tablet' && bounds.maxWidth >= 600 ||
+          preferences.layout == 'auto' && bounds.maxWidth >= 760;
       final pages = ['PCController', 'Pealayer', 'Activities', 'Workspace'];
       final icons = [
         Icons.memory_outlined,
@@ -710,6 +817,11 @@ class _ControllerHomeState extends State<ControllerHome>
               ],
             ),
             actions: [
+              IconButton(
+                tooltip: 'Settings',
+                icon: const Icon(Icons.settings_outlined),
+                onPressed: openSettings,
+              ),
               IconButton(
                 tooltip: 'Connect peers',
                 icon: const Icon(Icons.link),
@@ -858,8 +970,9 @@ class _ControllerHomeState extends State<ControllerHome>
         : '—';
     String peripheral(String key, String fallback) {
       for (final entry in objects(board.peripherals['peripherals'])) {
-        if (entry['key'] == key && entry['name'] is String)
+        if (entry['key'] == key && entry['name'] is String) {
           return entry['name'];
+        }
       }
       return fallback;
     }
@@ -1076,49 +1189,8 @@ class _ControllerHomeState extends State<ControllerHome>
                   for (final control in group.value)
                     card(
                       '${control['name']}',
-                      ['seat', 'side', 'motion'].contains(control['kind'])
-                          ? Icons.airline_seat_recline_normal
-                          : control['kind'] == 'relay'
-                          ? Icons.power
-                          : Icons.lightbulb_outline,
+                      channelIcon(control),
                       [
-                        Builder(
-                          builder: (context) {
-                            final observed = observeChannel(
-                              control,
-                              board.state,
-                              board.pwmUpdated != null &&
-                                      DateTime.now()
-                                              .difference(board.pwmUpdated!)
-                                              .inMilliseconds <
-                                          board.freshnessMs
-                                  ? board.pwmValues
-                                  : {},
-                              board.measurementsFresh,
-                            );
-                            return Padding(
-                              padding: const EdgeInsets.only(bottom: 12),
-                              child: Row(
-                                children: [
-                                  StatePill(
-                                    observed.label,
-                                    active: observed.active,
-                                  ),
-                                  if (observed.percent != null) ...[
-                                    const SizedBox(width: 12),
-                                    Expanded(
-                                      child: LinearProgressIndicator(
-                                        value: observed.percent! / 100,
-                                        minHeight: 4,
-                                        borderRadius: BorderRadius.circular(4),
-                                      ),
-                                    ),
-                                  ],
-                                ],
-                              ),
-                            );
-                          },
-                        ),
                         if (control['control'] == 'pwm-user')
                           _PwmControl(
                             key: ValueKey(
@@ -1175,10 +1247,27 @@ class _ControllerHomeState extends State<ControllerHome>
                                   'stop',
                                   'off',
                                 ].contains(entry['verb']),
+                                danger: entry['verb'] == 'stop',
                               ),
                           ],
                         ),
                       ],
+                      color: channelColor(control['color']),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Builder(
+                            builder: (context) {
+                              final observed = channelObservation(control);
+                              return StatePill(
+                                observed.label,
+                                active: observed.active,
+                              );
+                            },
+                          ),
+                          channelMenu(control),
+                        ],
+                      ),
                     ),
                 ]),
               ),
@@ -1242,39 +1331,16 @@ class _ControllerHomeState extends State<ControllerHome>
               ? '${object(board.state['status'])['menu_page']}'
               : 'Unavailable',
         ),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final entry in [
-              ('prev', Icons.arrow_back),
-              ('next', Icons.arrow_forward),
-              ('dec', Icons.remove),
-              ('inc', Icons.add),
-            ])
-              action(
-                entry.$1,
-                entry.$2,
-                ready
-                    ? () => unawaited(boardCommand('menu ${entry.$1}'))
-                    : null,
-              ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (var key = 1; key <= 4; key++)
-              action(
-                'K$key',
-                Icons.touch_app,
-                full && panel['host_captured'] == true
-                    ? () => unawaited(boardCommand('host-menu key K$key press'))
-                    : null,
-              ),
-          ],
+        const SizedBox(height: 12),
+        FrontPanelButtons(
+          captured: full && panel['host_captured'] == true,
+          enabled: full && !busy,
+          pressedKeys: full && panel['pressed_keys'] is int
+              ? panel['pressed_keys'] as int
+              : board.measurementsFresh
+              ? object(board.state['status'])['active_keys'] as int?
+              : null,
+          dispatch: (command) => unawaited(boardCommand(command)),
         ),
       ]),
       card('Display message', Icons.text_fields, [
@@ -1351,29 +1417,75 @@ class _ControllerHomeState extends State<ControllerHome>
             ),
           ],
         ),
-        const SizedBox(height: 12),
-        Wrap(
-          spacing: 8,
-          children: [
-            for (final mode in ['idle', 'running'])
-              action(
-                mode,
-                Icons.settings,
-                ready
-                    ? () => unawaited(
-                        perform(
-                          'Host mode',
-                          () => board.transport!.rpc(
-                            'controller.program_state.set',
-                            {'mode': mode, 'owner': 'mobile'},
-                          ),
-                        ),
-                      )
-                    : null,
-              ),
-          ],
-        ),
       ]),
+      card(
+        'Host mode',
+        Icons.tune,
+        [
+          SegmentedButton<String>(
+            emptySelectionAllowed: true,
+            segments: const [
+              ButtonSegment(
+                value: 'idle',
+                label: Text('Idle'),
+                icon: Icon(Icons.pause_circle_outline),
+              ),
+              ButtonSegment(
+                value: 'running',
+                label: Text('Running'),
+                icon: Icon(Icons.play_circle_outline),
+              ),
+            ],
+            selected:
+                board.fresh &&
+                    [
+                      'Idle',
+                      'Running',
+                    ].contains(object(board.state['program_state'])['mode'])
+                ? {
+                    '${object(board.state['program_state'])['mode']}'
+                        .toLowerCase(),
+                  }
+                : {},
+            onSelectionChanged: ready && !busy
+                ? (values) {
+                    if (values.isEmpty) return;
+                    final stamp = board.targetStamp, peer = board.transport;
+                    unawaited(
+                      perform('Host mode', () async {
+                        if (peer == null ||
+                            stamp != board.targetStamp ||
+                            !board.boardReady) {
+                          throw const Rejected(
+                            'Board changed; reopen mode controls.',
+                          );
+                        }
+                        final result = await peer.rpc(
+                          'controller.program_state.set',
+                          {'mode': values.single, 'owner': 'mobile'},
+                        );
+                        await board.refresh();
+                        return result;
+                      }),
+                    );
+                  }
+                : null,
+          ),
+        ],
+        trailing: StatePill(
+          board.fresh
+              ? '${object(board.state['program_state'])['mode'] ?? 'Unknown'}'
+              : 'Unknown',
+          active:
+              board.fresh &&
+                  [
+                    'Idle',
+                    'Running',
+                  ].contains(object(board.state['program_state'])['mode'])
+              ? object(board.state['program_state'])['mode'] == 'Running'
+              : null,
+        ),
+      ),
     ]);
   }
 
@@ -1632,6 +1744,23 @@ class _ControllerHomeState extends State<ControllerHome>
       },
     ],
   );
+  bool playerCan(String action) {
+    if (!playerReady) return false;
+    if (player.fresh) {
+      return object(
+            player.state['media_session_capabilities'],
+          )['can_$action'] ==
+          true;
+    }
+    final selected = board.instances
+        .where((v) => v['id'] == bridgeTarget)
+        .firstOrNull;
+    return '${object(selected?['values'])['app_actions']}'
+        .split(',')
+        .map((v) => v.trim())
+        .contains('pealayer.$action');
+  }
+
   Widget playback() {
     final state = player.state;
     return grid([
@@ -1645,23 +1774,33 @@ class _ControllerHomeState extends State<ControllerHome>
           maxLines: 3,
         ),
         const SizedBox(height: 16),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
             for (final entry in [
               ('previous', Icons.skip_previous),
-              ('play', Icons.play_arrow),
-              ('pause', Icons.pause),
+              (
+                player.fresh && state['playing'] == true ? 'pause' : 'play',
+                player.fresh && state['playing'] == true
+                    ? Icons.pause
+                    : Icons.play_arrow,
+              ),
               ('stop', Icons.stop),
               ('next', Icons.skip_next),
             ])
-              action(
-                entry.$1,
-                entry.$2,
-                playerReady
-                    ? () => unawaited(playerCommand('pealayer.${entry.$1}'))
-                    : null,
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: IconButton.filledTonal(
+                  tooltip: entry.$1[0].toUpperCase() + entry.$1.substring(1),
+                  icon: Icon(
+                    entry.$2,
+                    size: entry.$1 == 'play' || entry.$1 == 'pause' ? 30 : 24,
+                  ),
+                  style: IconButton.styleFrom(minimumSize: const Size(48, 48)),
+                  onPressed: playerCan(entry.$1)
+                      ? () => unawaited(playerCommand('pealayer.${entry.$1}'))
+                      : null,
+                ),
               ),
           ],
         ),
@@ -1675,32 +1814,33 @@ class _ControllerHomeState extends State<ControllerHome>
             'Position',
             '${(state['playback_time'] as num).toStringAsFixed(1)} / ${(state['duration'] as num).toStringAsFixed(1)} s',
           ),
-          Slider(
-            value: (state['playback_time'] as num).toDouble().clamp(
-              0,
-              (state['duration'] as num).toDouble(),
-            ),
-            max: (state['duration'] as num).toDouble(),
-            onChanged: busy ? null : (_) {},
-            onChangeEnd: (value) => unawaited(
-              playerCommand('pealayer.seek_to', {'seconds': value}),
-            ),
+          RemoteSlider(
+            key: ValueKey('${player.targetStamp}/seek'),
+            value: (state['playback_time'] as num).toDouble(),
+            maximum: (state['duration'] as num).toDouble(),
+            enabled: !busy,
+            label: (v) => '${v.toStringAsFixed(1)} s',
+            changed: (v) =>
+                unawaited(playerCommand('pealayer.seek_to', {'seconds': v})),
           ),
         ],
         if (player.fresh && state['volume'] is num) ...[
           fact('Volume', '${(state['volume'] as num).round()}%'),
-          Slider(
-            value: (state['volume'] as num).toDouble().clamp(0, 100),
-            max: 100,
-            onChanged: busy ? null : (_) {},
-            onChangeEnd: (value) => unawaited(
-              playerCommand('pealayer.volume.set', {'value': value}),
-            ),
+          RemoteSlider(
+            key: ValueKey('${player.targetStamp}/volume'),
+            value: (state['volume'] as num).toDouble(),
+            maximum: 130,
+            enabled: !busy,
+            label: (v) => '${v.round()}%',
+            changed: (v) =>
+                unawaited(playerCommand('pealayer.volume.set', {'value': v})),
           ),
         ],
         action(
-          'Toggle mute',
-          Icons.volume_off_outlined,
+          player.fresh && state['muted'] == true ? 'Unmute' : 'Mute',
+          player.fresh && state['muted'] == true
+              ? Icons.volume_off_outlined
+              : Icons.volume_up_outlined,
           playerReady
               ? () => unawaited(playerCommand('pealayer.mute.toggle'))
               : null,
@@ -1726,26 +1866,162 @@ class _ControllerHomeState extends State<ControllerHome>
                 )
               : null,
         ),
-        const SizedBox(height: 16),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final mode in ['simple', 'nle'])
-              action(
-                mode,
-                Icons.dashboard_outlined,
-                playerReady
-                    ? () => unawaited(
-                        playerCommand('pealayer.workspace.set', {
-                          'workspace': mode,
-                        }),
-                      )
+        if (player.fresh &&
+            objects(state['workspace_profiles']).isNotEmpty) ...[
+          const SizedBox(height: 16),
+          DropdownButtonFormField<String>(
+            key: ValueKey(
+              '${player.targetStamp}/${state['active_workspace_profile']}',
+            ),
+            initialValue:
+                objects(state['workspace_profiles'])
+                    .any((v) => v['id'] == state['active_workspace_profile'])
+                ? state['active_workspace_profile'] as String
+                : null,
+            decoration: const InputDecoration(labelText: 'Workspace'),
+            items: [
+              for (final profile in objects(state['workspace_profiles']))
+                DropdownMenuItem(
+                  value: '${profile['id']}',
+                  child: Text(
+                    '${profile['name']}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+            ],
+            onChanged: !busy
+                ? (v) {
+                    if (v != null) {
+                      unawaited(
+                        playerCommand('pealayer.workspace.set', {'profile': v}),
+                      );
+                    }
+                  }
+                : null,
+          ),
+        ],
+      ], color: const Color(0xff79bc63)),
+      if (player.fresh && state['playback_rate'] is num)
+        card('Playback options', Icons.tune, [
+          DropdownButtonFormField<double>(
+            key: ValueKey('${player.targetStamp}/${state['playback_rate']}'),
+            initialValue: (state['playback_rate'] as num).toDouble(),
+            decoration: const InputDecoration(labelText: 'Speed'),
+            items: [
+              for (final rate in ({
+                .25,
+                .5,
+                .75,
+                1.0,
+                1.25,
+                1.5,
+                2.0,
+                (state['playback_rate'] as num).toDouble(),
+              }.toList()..sort()))
+                DropdownMenuItem(
+                  value: rate,
+                  child: Text('${rate.toStringAsFixed(2)}×'),
+                ),
+            ],
+            onChanged: !busy
+                ? (v) {
+                    if (v != null) {
+                      unawaited(
+                        playerCommand('pealayer.rate.set', {'rate': v}),
+                      );
+                    }
+                  }
+                : null,
+          ),
+          if (objects(state['chapters']).isNotEmpty) ...[
+            const SizedBox(height: 16),
+            DropdownButtonFormField<int>(
+              key: ValueKey(
+                '${player.targetStamp}/${state['current_chapter_index']}',
+              ),
+              initialValue:
+                  objects(state['chapters'])
+                      .any((v) => v['index'] == state['current_chapter_index'])
+                  ? state['current_chapter_index'] as int
+                  : null,
+              decoration: const InputDecoration(labelText: 'Chapter'),
+              items: [
+                for (final chapter in objects(state['chapters']))
+                  DropdownMenuItem(
+                    value: chapter['index'] as int,
+                    child: Text(
+                      '${chapter['title']}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+              ],
+              onChanged: !busy
+                  ? (v) {
+                      if (v != null) {
+                        unawaited(
+                          playerCommand('pealayer.chapter.set', {'index': v}),
+                        );
+                      }
+                    }
+                  : null,
+            ),
+          ],
+          for (final kind in ['audio', 'sub'])
+            if (objects(state['media_tracks'])
+                .any((v) => v['kind'] == kind && v['id'] is int)) ...[
+              const SizedBox(height: 16),
+              DropdownButtonFormField<int>(
+                key: ValueKey(
+                  '${player.targetStamp}/$kind/${objects(state['media_tracks']).where((v) => v['kind'] == kind && v['selected'] == true).map((v) => v['id']).join()}',
+                ),
+                initialValue:
+                    objects(state['media_tracks'])
+                            .where(
+                              (v) =>
+                                  v['kind'] == kind &&
+                                  v['selected'] == true &&
+                                  v['id'] is int,
+                            )
+                            .firstOrNull?['id']
+                        as int? ??
+                    -1,
+                isExpanded: true,
+                decoration: InputDecoration(
+                  labelText: kind == 'audio' ? 'Audio track' : 'Subtitles',
+                ),
+                items: [
+                  const DropdownMenuItem(value: -1, child: Text('Off')),
+                  for (final track in objects(
+                    state['media_tracks'],
+                  ).where((v) => v['kind'] == kind && v['id'] is int))
+                    DropdownMenuItem(
+                      value: track['id'] as int,
+                      child: Text(
+                        '${track['title'] ?? track['language'] ?? track['codec'] ?? track['id']}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                ],
+                onChanged: !busy
+                    ? (v) {
+                        if (v != null) {
+                          unawaited(
+                            playerCommand(
+                              v == -1
+                                  ? 'pealayer.media.track.disable'
+                                  : 'pealayer.media.track.select',
+                              {'kind': kind, if (v != -1) 'id': v},
+                            ),
+                          );
+                        }
+                      }
                     : null,
               ),
-          ],
-        ),
-      ], color: const Color(0xff79bc63)),
+            ],
+        ], color: const Color(0xff79bc63)),
     ]);
   }
 
@@ -1794,7 +2070,7 @@ class _ControllerHomeState extends State<ControllerHome>
     for (final cue in objects(player.state['cues']))
       ListTile(
         title: Text('${cue['name'] ?? cue['reference'] ?? cue['id']}'),
-        subtitle: Text('${cue['start_time_ms'] ?? cue['start_time'] ?? ''}'),
+        subtitle: Text('${cue['start_time_ms']} ms'),
         onTap: player.fresh && !busy
             ? () => unawaited(
                 playerCommand('timeline.cue.edit', {'instance_id': cue['id']}),
@@ -2034,6 +2310,10 @@ class _ControllerHomeState extends State<ControllerHome>
         ),
       ]),
       const SizedBox(height: 16),
+      automationSettings(),
+    ],
+  );
+  Widget automationSettings() =>
       card('Automation / local API', Icons.hub_outlined, [
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
@@ -2057,11 +2337,15 @@ class _ControllerHomeState extends State<ControllerHome>
                   !await confirm(
                     'Allow automation actions?',
                     'Authorized local clients can operate the selected board and player. Motion also requires an explicit confirmed target.',
-                  ))
+                  )) {
                 return;
+              }
               final prefs = await SharedPreferences.getInstance();
               await prefs.setBool('automation.actuation', value);
-              if (mounted) setState(() => automationActuation = value);
+              if (mounted) {
+                setState(() => automationActuation = value);
+                preferences.refresh();
+              }
             },
           ),
           Wrap(
@@ -2081,9 +2365,102 @@ class _ControllerHomeState extends State<ControllerHome>
             ],
           ),
         ],
-      ]),
-    ],
+      ]);
+
+  void openSettings() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => AnimatedBuilder(
+          animation: Listenable.merge([preferences, board, player]),
+          builder: (context, _) => AppSettings(
+            preferences: preferences,
+            changed: _changed,
+            connections: card('Connections', Icons.link, [
+              action(
+                'PCController connection',
+                Icons.memory_outlined,
+                () => configure(true),
+              ),
+              const SizedBox(height: 8),
+              action(
+                'Pealayer connection',
+                Icons.play_circle_outline,
+                () => configure(false),
+              ),
+            ]),
+            automation: automationSettings(),
+          ),
+        ),
+      ),
+    );
+  }
+
+  ChannelObservation channelObservation(Json control) => observeChannel(
+    control,
+    board.state,
+    board.pwmUpdated != null &&
+            DateTime.now().difference(board.pwmUpdated!).inMilliseconds <
+                board.freshnessMs
+        ? board.pwmValues
+        : {},
+    board.measurementsFresh,
   );
+
+  Widget channelMenu(Json control) {
+    final profile = object(board.peripherals['board_profile']);
+    final editable =
+        board.fresh &&
+        !busy &&
+        profile['attached'] == true &&
+        profile['configured'] == true;
+    return PopupMenuButton<String>(
+      tooltip: 'Manage ${control['name']}',
+      icon: const Icon(Icons.more_vert, size: 20),
+      onSelected: (value) => unawaited(editChannel(control, value)),
+      itemBuilder: (_) => [
+        PopupMenuItem(
+          value: 'edit',
+          enabled: editable,
+          child: const Text('Edit channel'),
+        ),
+        PopupMenuItem(
+          value: 'lock',
+          enabled: editable,
+          child: Text(
+            control['locked'] == true ? 'Unlock channel' : 'Lock channel',
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> editChannel(Json control, String operation) async {
+    final stamp = board.targetStamp, transport = board.transport;
+    final revision = object(board.peripherals['board_profile'])['revision'];
+    Json? changes;
+    if (operation == 'lock') {
+      changes = {'locked': control['locked'] != true};
+    } else {
+      changes = await showDialog<Json>(
+        context: context,
+        builder: (_) => ChannelEditor(control: control),
+      );
+    }
+    if (changes == null || !mounted) return;
+    await perform('Channel presentation', () async {
+      if (!board.fresh || board.targetStamp != stamp || transport == null) {
+        throw const Rejected('Channel owner changed. Reopen the channel menu.');
+      }
+      await transport.rpc('controller.peripheral.presentation.update', {
+        'key': control['key'],
+        'expected_revision': revision,
+        ...changes!,
+      });
+      await board.refresh();
+      return null;
+    });
+  }
+
   Future<void> editEffect(Json initial) => showDialog<void>(
     context: context,
     barrierDismissible: false,
@@ -2117,6 +2494,7 @@ class _ControllerHomeState extends State<ControllerHome>
         if (foreground) await automation.start(automationToken);
       }
       automationEnabled = enabled;
+      preferences.refresh();
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool('automation.enabled', enabled);
       return null;
@@ -2156,7 +2534,7 @@ class _ControllerHomeState extends State<ControllerHome>
   Future<dynamic> _automationCall(String method, Json params) async {
     switch (method) {
       case 'app.ping':
-        return {'ok': true, 'app': 'PCController', 'version': '0.1.1'};
+        return {'ok': true, 'app': 'PCController', 'version': '0.1.2'};
       case 'app.capabilities':
         return {
           'jsonrpc': '2.0',
@@ -2169,6 +2547,20 @@ class _ControllerHomeState extends State<ControllerHome>
           'actuation_enabled': automationActuation,
           'batch': false,
           'notifications_dispatch': false,
+          'board_methods': [
+            'board.refresh',
+            'board.connect',
+            'board.disconnect',
+            'board.action',
+            'board.pwm.set',
+            'board.stop',
+            'board.estop',
+            'board.menu.press',
+            'board.display.show',
+            'board.buzzer.play',
+            'board.buzzer.stop',
+            'board.mode.set',
+          ],
         };
       case 'app.state':
         return automationSnapshot();
@@ -2186,8 +2578,9 @@ class _ControllerHomeState extends State<ControllerHome>
           'workspace',
         ].indexOf('${params['section']}');
         if (next < 0) throw const AutomationFailure(-32602, 'Unknown section');
-        if (!foreground)
+        if (!foreground) {
           throw const AutomationFailure(-32002, 'App is not foreground');
+        }
         final page = params['page'];
         final boardPage = [
           'monitor',
@@ -2196,39 +2589,45 @@ class _ControllerHomeState extends State<ControllerHome>
           'firmware',
           'effects',
         ].indexOf('$page');
-        if (page != null && (next != 0 || boardPage < 0))
+        if (page != null && (next != 0 || boardPage < 0)) {
           throw const AutomationFailure(-32602, 'Unknown section page');
+        }
         setState(() {
           section = next;
           if (page != null) boardTab = boardPage;
         });
-        return {'section': params['section'], if (page != null) 'page': page};
+        return {'section': params['section'], 'page': ?page};
       case 'app.capture':
-        if (!foreground)
+        if (!foreground) {
           throw const AutomationFailure(-32002, 'App is not foreground');
+        }
         if (_captureInFlight ||
             (_lastCapture != null &&
-                DateTime.now().difference(_lastCapture!).inMilliseconds < 1000))
+                DateTime.now().difference(_lastCapture!).inMilliseconds <
+                    1000)) {
           throw const AutomationFailure(
             -32003,
             'Capture is busy; limited to one per second',
           );
+        }
         _captureInFlight = true;
         try {
           await WidgetsBinding.instance.endOfFrame;
           final boundary = captureKey.currentContext?.findRenderObject();
-          if (boundary is! RenderRepaintBoundary)
+          if (boundary is! RenderRepaintBoundary) {
             throw const AutomationFailure(
               -32002,
               'No rendered application frame',
             );
+          }
           final image = await boundary.toImage(pixelRatio: 1.5);
           try {
             final bytes = await image.toByteData(
               format: ui.ImageByteFormat.png,
             );
-            if (bytes == null || bytes.lengthInBytes > 2097152)
+            if (bytes == null || bytes.lengthInBytes > 2097152) {
               throw const AutomationFailure(-32003, 'Capture exceeds 2 MiB');
+            }
             return {
               'mime_type': 'image/png',
               'png_base64': base64Encode(bytes.buffer.asUint8List()),
@@ -2246,8 +2645,9 @@ class _ControllerHomeState extends State<ControllerHome>
         await board.refresh();
         return automationSnapshot()['board'];
       case 'board.connect':
-        if (!foreground)
+        if (!foreground) {
           throw const AutomationFailure(-32002, 'App is not foreground');
+        }
         boardWanted = true;
         connectionChoiceRevision++;
         await connectBoard();
@@ -2259,39 +2659,135 @@ class _ControllerHomeState extends State<ControllerHome>
       case 'board.pwm.set':
       case 'board.stop':
       case 'board.estop':
+      case 'board.menu.press':
+      case 'board.display.show':
+      case 'board.buzzer.play':
+      case 'board.buzzer.stop':
+      case 'board.mode.set':
         if (!foreground ||
             !board.boardReady ||
-            params['expected_target'] != board.targetStamp)
+            params['expected_target'] != board.targetStamp) {
           throw const AutomationFailure(
             -32002,
             'Board is unavailable or target changed',
           );
+        }
         final peer = board.transport!,
-            stop = method == 'board.stop' || method == 'board.estop';
-        if (busy && !stop)
+            stop =
+                method == 'board.stop' ||
+                method == 'board.estop' ||
+                method == 'board.buzzer.stop';
+        if (busy && !stop) {
           throw const AutomationFailure(-32003, 'Application is busy');
-        if (method == 'board.estop')
+        }
+        if (method == 'board.estop') {
           return peer.rpc('controller.command.execute', {
             'command': 'estop on',
           });
+        }
         if (method == 'board.stop') {
           final stamp = board.targetStamp;
           await peer.rpc('controller.command.execute', {
             'command': 'relay off',
           });
-          if (stamp != board.targetStamp || !board.boardReady)
+          if (stamp != board.targetStamp || !board.boardReady) {
             throw const AutomationFailure(
               -32002,
               'Target changed during stop; refresh to check outcome',
             );
+          }
           return peer.rpc('controller.pwm.off');
         }
+        if (method == 'board.buzzer.stop') {
+          buzzerMirror.stop();
+          return peer.rpc('controller.command.execute', {
+            'command': 'melody stop',
+          });
+        }
         if (!automationActuation ||
-            object(board.state['emergency_stop'])['active'] == true)
+            object(board.state['emergency_stop'])['active'] == true) {
           throw const AutomationFailure(
             -32004,
             'Automation actuation is not enabled or E-STOP is active',
           );
+        }
+        if (method == 'board.menu.press') {
+          if (board.state['have_front_panel'] != true) {
+            throw const AutomationFailure(
+              -32002,
+              'Front-panel mode is not yet available',
+            );
+          }
+          final button = params['button'];
+          final panel = object(board.state['front_panel']);
+          final captured =
+              board.state['have_front_panel'] == true &&
+              panel['host_captured'] == true;
+          final allowed = captured
+              ? ['K1', 'K2', 'K3', 'K4']
+              : ['prev', 'next', 'dec', 'inc'];
+          if (!allowed.contains(button)) {
+            throw const AutomationFailure(
+              -32602,
+              'Button is not available in the current panel mode',
+            );
+          }
+          return peer.rpc('controller.command.execute', {
+            'command': captured
+                ? 'host-menu key $button press'
+                : 'menu $button',
+          });
+        }
+        if (method == 'board.display.show') {
+          final target = params['display'], text = params['text'];
+          final seconds = params['duration_seconds'] ?? 5;
+          if (!['segments', 'lcd'].contains(target) ||
+              text is! String ||
+              text.trim().isEmpty ||
+              text.length > 240 ||
+              seconds is! int ||
+              seconds < 1 ||
+              seconds > 30 ||
+              (target == 'lcd' &&
+                  (board.state['have_front_panel'] != true ||
+                      object(board.state['front_panel'])['lcd_available'] !=
+                          true))) {
+            throw const AutomationFailure(
+              -32602,
+              'Display or bounded message is invalid',
+            );
+          }
+          return peer.rpc('controller.command.execute', {
+            'command':
+                'display $target --duration ${seconds}s --repeat once -- ${jsonEncode(text)}',
+          });
+        }
+        if (method == 'board.buzzer.play') {
+          final hz = params['frequency_hz'], ms = params['duration_ms'];
+          if (hz is! int ||
+              hz < 20 ||
+              hz > 20000 ||
+              ms is! int ||
+              ms < 1 ||
+              ms > 1000) {
+            throw const AutomationFailure(
+              -32602,
+              'Tone requires 20..20000 Hz and 1..1000 ms',
+            );
+          }
+          return peer.rpc('controller.command.execute', {
+            'command': 'buzzer $hz $ms',
+          });
+        }
+        if (method == 'board.mode.set') {
+          if (!['idle', 'running'].contains(params['mode'])) {
+            throw const AutomationFailure(-32602, 'Unknown mode');
+          }
+          return peer.rpc('controller.program_state.set', {
+            'mode': params['mode'],
+            'owner': 'mobile-automation',
+          });
+        }
         if (method == 'board.pwm.set') {
           final channel = params['channel'], percent = params['percent'];
           if (channel is! int ||
@@ -2304,11 +2800,12 @@ class _ControllerHomeState extends State<ControllerHome>
                     c['key'] == 'pwm.$channel' &&
                     c['control'] == 'pwm-user' &&
                     c['locked'] != true,
-              ))
+              )) {
             throw const AutomationFailure(
               -32602,
               'PWM target/value is not advertised',
             );
+          }
           return peer.rpc('controller.pwm.set', {
             'channel': channel,
             'percent': percent,
@@ -2317,15 +2814,17 @@ class _ControllerHomeState extends State<ControllerHome>
         for (final control in objects(board.peripherals['controls'])) {
           for (final action in objects(control['actions'])) {
             if (action['id'] != params['action_id']) continue;
-            if (control['locked'] == true)
+            if (control['locked'] == true) {
               throw const AutomationFailure(-32004, 'Channel is locked');
+            }
             if (['seat', 'side', 'motion'].contains(control['kind']) &&
                 action['verb'] != 'stop' &&
-                params['confirm_motion'] != true)
+                params['confirm_motion'] != true) {
               throw const AutomationFailure(
                 -32004,
                 'Motion requires an explicit confirmed target',
               );
+            }
             return peer.rpc('controller.action.invoke', {
               'action_id': action['id'],
             });
@@ -2340,11 +2839,12 @@ class _ControllerHomeState extends State<ControllerHome>
             !player.fresh ||
             params['expected_target'] != player.targetStamp ||
             !automationActuation ||
-            busy)
+            busy) {
           throw const AutomationFailure(
             -32002,
             'Player is unavailable, target changed or actuation disabled',
           );
+        }
         final action = params['method'];
         if (![
           'pealayer.play',
@@ -2356,8 +2856,9 @@ class _ControllerHomeState extends State<ControllerHome>
           'pealayer.volume.set',
           'pealayer.mute.toggle',
           'pealayer.workspace.set',
-        ].contains(action))
+        ].contains(action)) {
           throw const AutomationFailure(-32602, 'Player method is not allowed');
+        }
         return player.transport!.rpc(action, object(params['params']));
       default:
         throw const AutomationFailure(-32601, 'Method not found');

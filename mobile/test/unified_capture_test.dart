@@ -24,6 +24,9 @@ void main() {
       final icons = FontLoader('MaterialIcons')
         ..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'));
       await icons.load();
+      final phosphor = FontLoader('Phosphor')
+        ..addFont(rootBundle.load('assets/fonts/Phosphor.ttf'));
+      await phosphor.load();
       await tester.runAsync(() async {
         await rootBundle.load('assets/branding/pccontroller.png');
         await rootBundle.load('assets/branding/pealayer.png');
@@ -129,6 +132,59 @@ void main() {
           });
           tester.platformDispatcher.clearPlatformBrightnessTestValue();
         }
+        final dynamic home = tester.state(find.byType(ControllerHome));
+        home.openSettings();
+        await tester.pumpAndSettle();
+        await tester.runAsync(() async {
+          final frame = await render.toImage();
+          final bytes = await frame.toByteData(format: ui.ImageByteFormat.png);
+          await File('$directory/settings-${size.width.toInt()}.png')
+              .writeAsBytes(bytes!.buffer.asUint8List());
+          frame.dispose();
+        });
+        await tester.pageBack();
+        await tester.pumpAndSettle();
+        final PeerSession player = home.player;
+        // Current-contract memory fixture; never a real media/output request.
+        player.state = {
+          'playing': false,
+          'volume': 80.0,
+          'muted': false,
+          'playback_time': 14.0,
+          'duration': 120.0,
+          'seekable': true,
+          'current_video': 'Preview media',
+          'playback_rate': 1.0,
+          'media_session_capabilities': {'can_play': true, 'can_stop': true},
+          'workspace_profiles': [
+            {'id': 'fixture', 'name': 'Editing workspace'},
+          ],
+          'active_workspace_profile': 'fixture',
+          'chapters': [
+            {'index': 0, 'title': 'Opening', 'time_seconds': 0.0},
+          ],
+          'current_chapter_index': 0,
+          'media_tracks': [
+            {'id': 1, 'kind': 'audio', 'title': 'Main audio', 'selected': true},
+            {'id': 2, 'kind': 'sub', 'title': 'Subtitles', 'selected': false},
+          ],
+        };
+        player.online = true;
+        player.received = DateTime.now();
+        home.section = 1;
+        player.notifyListeners();
+        await tester.pumpAndSettle();
+        await tester.runAsync(() async {
+          await precacheImage(
+            const AssetImage('assets/branding/pealayer.png'),
+            boundary.currentContext!,
+          );
+          final frame = await render.toImage();
+          final bytes = await frame.toByteData(format: ui.ImageByteFormat.png);
+          await File('$directory/pealayer-${size.width.toInt()}.png')
+              .writeAsBytes(bytes!.buffer.asUint8List());
+          frame.dispose();
+        });
         expect(tester.takeException(), null);
         await tester.pumpWidget(const SizedBox());
         await tester.pumpWidget(

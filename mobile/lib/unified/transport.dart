@@ -313,6 +313,7 @@ String operationLabel(Json value) {
 class PeerSession extends ChangeNotifier {
   PeerSession({required this.controller});
   final bool controller;
+  void Function(Json)? onBuzzerNote;
   PeerTransport? transport;
   WebSocket? _socket;
   Timer? _retry, _freshness;
@@ -615,14 +616,17 @@ class PeerSession extends ChangeNotifier {
                   online = true;
                   error = null;
                 }
-                if (event['kind'] == 'status_led.changed')
+                if (event['kind'] == 'status_led.changed') {
                   _schedulePwmRefresh(epoch);
+                }
                 notifyListeners();
                 return; // Frames never trigger full snapshot/catalog polling.
               }
-              if (event['kind'] != 'buzzer.note') {
-                events = [event, ...events].take(100).toList();
+              if (event['kind'] == 'buzzer.note') {
+                onBuzzerNote?.call(event);
+                return; // Audio frames must not poll snapshot/catalog per note.
               }
+              events = [event, ...events].take(100).toList();
               if ([
                 'pwm.changed',
                 'pwm',
@@ -668,8 +672,9 @@ class PeerSession extends ChangeNotifier {
         if (fresh &&
             state['connected'] == true &&
             (pwmUpdated == null ||
-                DateTime.now().difference(pwmUpdated!).inMilliseconds >= 2000))
+                DateTime.now().difference(pwmUpdated!).inMilliseconds >= 2000)) {
           unawaited(refreshPwm());
+        }
         // Only repaint when freshness expires, not continuous UI persistence.
         if (!fresh && online) {
           online = false;
@@ -699,8 +704,9 @@ class PeerSession extends ChangeNotifier {
     if (!controller ||
         peer == null ||
         _pwmReading ||
-        state['connected'] != true)
+        state['connected'] != true) {
       return;
+    }
     _pwmReading = true;
     try {
       final value = object(await peer.rpc('controller.pwm.values'));
