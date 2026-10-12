@@ -21,6 +21,8 @@ type BoardCoreInitializeOptions struct {
 	SketchPath       string
 	Avrdude          string
 	AvrdudeConf      string
+	AvrdudeBackend   string
+	AvrdudeAdapter   string
 	MCU              string
 	BackupRoot       string
 	USBaspBitClockUS float64
@@ -98,7 +100,8 @@ func InitializeBoardCoreWithRunner(
 	isp := Options{
 		Method: MethodUSBasp, MCU: options.MCU,
 		ArduinoCLI: options.ArduinoCLI, ArduinoConfig: options.ArduinoConfig, Avrdude: options.Avrdude,
-		AvrdudeConf: options.AvrdudeConf, USBaspBitClockUS: options.USBaspBitClockUS,
+		AvrdudeConf: options.AvrdudeConf, AvrdudeBackend: options.AvrdudeBackend,
+		AvrdudeAdapter: options.AvrdudeAdapter, USBaspBitClockUS: options.USBaspBitClockUS,
 	}
 	if strings.EqualFold(options.Programmer, "usbasp_slow") && isp.USBaspBitClockUS <= 0 {
 		isp.USBaspBitClockUS = defaultUSBaspSlowBitClockUS
@@ -193,7 +196,7 @@ func InitializeBoardCoreWithRunner(
 	report.BootloaderInstalled = true
 
 	fmt.Fprintln(output, "[4/4] Re-reading target signature, fuses, and lock bits after bootloader install")
-	verify := isp
+	verify := withAvrdudeCLICompatibility(isp)
 	verify.Operation = OperationProbe
 	if strings.EqualFold(coreProgrammer, "usbasp_slow") && verify.USBaspBitClockUS <= 0 {
 		verify.USBaspBitClockUS = defaultUSBaspSlowBitClockUS
@@ -263,6 +266,7 @@ func resolveBoardCoreFusePolicy(
 }
 
 func buildSlowFuseCorrectionCommand(isp Options, policy boardCoreFusePolicy) (Command, error) {
+	isp = withAvrdudeCLICompatibility(isp)
 	isp.Operation = OperationProbe
 	command, err := Build(isp)
 	if err != nil {

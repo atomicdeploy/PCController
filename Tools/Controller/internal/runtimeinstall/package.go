@@ -58,14 +58,15 @@ type HostManifest struct {
 	} `json:"identity"`
 	Toolchains json.RawMessage `json:"toolchains,omitempty"`
 	Validation struct {
-		WindowsResources string          `json:"windowsResources,omitempty"`
-		WebUI            json.RawMessage `json:"webUI,omitempty"`
-		EmbeddedDefaults json.RawMessage `json:"embeddedDefaults,omitempty"`
-		Notices          json.RawMessage `json:"notices,omitempty"`
-		Tests            string          `json:"tests,omitempty"`
-		Vet              string          `json:"vet,omitempty"`
-		UPX              json.RawMessage `json:"upx,omitempty"`
-		SharedLibrary    string          `json:"sharedLibrary,omitempty"`
+		WindowsResources  string          `json:"windowsResources,omitempty"`
+		WebUI             json.RawMessage `json:"webUI,omitempty"`
+		EmbeddedDefaults  json.RawMessage `json:"embeddedDefaults,omitempty"`
+		Notices           json.RawMessage `json:"notices,omitempty"`
+		Tests             string          `json:"tests,omitempty"`
+		Vet               string          `json:"vet,omitempty"`
+		UPX               json.RawMessage `json:"upx,omitempty"`
+		SharedLibrary     string          `json:"sharedLibrary,omitempty"`
+		ProgrammerLibrary string          `json:"programmerLibrary,omitempty"`
 	} `json:"validation,omitempty"`
 	Artifacts []HostArtifact `json:"artifacts"`
 }

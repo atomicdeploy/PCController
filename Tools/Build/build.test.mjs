@@ -88,6 +88,8 @@ import {
 	stalePackageTransactionPaths,
 	unixSmokeSource,
 	verboseCommandText,
+	windowsCMakeCABundle,
+	windowsCMakeParserArguments,
 	windowsCompilerProvisionArguments,
 	windowsSmokeSource
 } from './build.mjs'
@@ -471,6 +473,47 @@ test('safe default builds both targets without touching hardware', () => {
 	assert.equal(options.virtualBoard, false)
 	assert.equal(options.upload, false)
 	assert.equal(options.installBootloader, false)
+	assert.equal(options.avrdudeLibrary, true)
+	const plan = createPlan(options, resolveBuildIdentity(options, {}), 'win32')
+	const adapter = plan.actions.find(action => action.id === 'libavrdude-adapter')
+	assert.equal(adapter.hardware, false)
+	assert.deepEqual(adapter.command.args, [
+		'--build', '<avrdude-adapter-build>', '--target', 'pccontroller-avrdude'
+	])
+})
+
+test('libavrdude packaging has an explicit CLI-only opt-out', () => {
+	const options = parseArguments(['--host-only', '--no-avrdude-library'], {})
+	assert.equal(options.avrdudeLibrary, false)
+	const plan = createPlan(options, resolveBuildIdentity(options, {}), 'win32')
+	assert.equal(plan.actions.some(action => action.id === 'libavrdude-adapter'), false)
+})
+
+test('Windows libavrdude downloads use the Git for Windows CA bundle', async t => {
+	const root = await mkdtemp(join(tmpdir(), 'pccontroller-git-ca-'))
+	t.after(() => rm(root, { recursive: true, force: true }))
+	const command = join(root, 'cmd')
+	const bundle = join(root, 'mingw64', 'etc', 'ssl', 'certs', 'ca-bundle.crt')
+	await mkdir(command, { recursive: true })
+	await mkdir(resolve(bundle, '..'), { recursive: true })
+	await writeFile(join(command, 'git.exe'), '')
+	await writeFile(bundle, 'reviewed CA bundle')
+	assert.equal(windowsCMakeCABundle({ PATH: command, PATHEXT: '.exe' }, 'win32'), bundle)
+	assert.equal(windowsCMakeCABundle({ CMAKE_TLS_CAINFO: bundle }, 'linux'), bundle)
+})
+
+test('Windows libavrdude configure uses installed WinFlexBison executables in place', async t => {
+	const root = await mkdtemp(join(tmpdir(), 'pccontroller-parser-tools-'))
+	t.after(() => rm(root, { recursive: true, force: true }))
+	const flex = join(root, 'win_flex.exe')
+	const bison = join(root, 'win_bison.exe')
+	await writeFile(flex, '')
+	await writeFile(bison, '')
+	assert.deepEqual(windowsCMakeParserArguments({ PATH: root, PATHEXT: '.exe' }, 'win32'), [
+		`-DFLEX_EXECUTABLE=${resolve(flex).replaceAll('\\', '/')}`,
+		`-DBISON_EXECUTABLE=${resolve(bison).replaceAll('\\', '/')}`
+	])
+	assert.deepEqual(windowsCMakeParserArguments({}, 'linux'), [])
 })
 
 test('virtual-board-only delegates to the existing CMake presets without hardware', () => {

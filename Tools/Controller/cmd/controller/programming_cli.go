@@ -99,6 +99,11 @@ func runProgramWithConfig(
 	noFirmwareFeatures := flags.Bool("no-firmware-features", false, "override configured compile features with the default-off profile")
 	avrdude := flags.String("avrdude", config.Programming.Avrdude, "avrdude executable")
 	avrdudeConf := flags.String("avrdude-conf", config.Programming.AvrdudeConf, "avrdude.conf path")
+	avrdudeBackend := flags.String("avrdude-backend", config.Programming.AvrdudeBackend, "auto|library|cli AVRDUDE backend")
+	avrdudeAdapter := flags.String("avrdude-adapter", config.Programming.AvrdudeAdapter, "pinned libavrdude adapter executable")
+	flashBytes := flags.Uint("flash-bytes", uint(config.Programming.FlashBytes), "selected non-default MCU flash capacity")
+	eepromBytes := flags.Uint("eeprom-bytes", uint(config.Programming.EEPROMBytes), "selected non-default MCU EEPROM capacity")
+	bootloaderBytes := flags.Uint("bootloader-bytes", uint(config.Programming.BootloaderBytes), "selected non-default Urclock protected bootloader size")
 	usbaspBitClock := flags.Float64("usbasp-bitclock-us", 0, "force USBasp AVRDUDE -B bit-clock period in microseconds")
 	usbaspAutoSlow := flags.Bool("usbasp-auto-slow", true, "retry the first failed USBasp exchange at the conservative -B32 period")
 	programmerTimeout := flags.Duration(
@@ -117,6 +122,10 @@ func runProgramWithConfig(
 		"explicitly authorize destructive EEPROM write",
 	)
 	dryRun := flags.Bool("dry-run", false, "print the resolved command without running it")
+	externalBoard := flags.Bool(
+		"external-board", false,
+		"explicitly select generic dependency-toolchain compile/upload outside the PCController AVR lifecycle",
+	)
 	appReconnect := flags.Bool(
 		"app-reconnect",
 		true,
@@ -150,6 +159,14 @@ func runProgramWithConfig(
 		*port = *device
 		explicitDevice = true
 	}
+	for name, value := range map[string]uint{
+		"flash-bytes": *flashBytes, "eeprom-bytes": *eepromBytes,
+		"bootloader-bytes": *bootloaderBytes,
+	} {
+		if uint64(value) > uint64(^uint32(0)) {
+			return fmt.Errorf("--%s exceeds the supported 32-bit board geometry", name)
+		}
+	}
 	options := programmer.Options{
 		Method:    programmer.Method(strings.ToLower(*method)),
 		Operation: programmer.Operation(strings.ToLower(*operation)),
@@ -158,6 +175,8 @@ func runProgramWithConfig(
 		FQBN: *fqbn, Programmer: *programmerName,
 		MCU: *mcu, BaudRate: *baud, ArduinoCLI: *toolchainCLI, ArduinoConfig: *toolchainConfig,
 		Avrdude: *avrdude, AvrdudeConf: *avrdudeConf,
+		AvrdudeBackend: *avrdudeBackend, AvrdudeAdapter: *avrdudeAdapter,
+		FlashBytes: uint32(*flashBytes), EEPROMBytes: uint32(*eepromBytes), BootloaderBytes: uint32(*bootloaderBytes),
 		ConfirmEEPROMWrite: *confirmEEPROM,
 		USBaspBitClockUS:   *usbaspBitClock, USBaspAutoSlow: *usbaspAutoSlow,
 		ProgrammerTimeout: *programmerTimeout,
@@ -183,14 +202,22 @@ func runProgramWithConfig(
 	if options.ProgrammerTimeout < 0 {
 		return errors.New("--programmer-timeout must be zero or positive")
 	}
+	if err := validateExternalToolchainSelection(options, *externalBoard); err != nil {
+		return err
+	}
+	externalToolchainUpload := *externalBoard && options.Method == programmer.MethodArduino &&
+		options.Operation == programmer.OperationWriteFlash
 	// A dry-run describes the dependency command without probing the machine;
 	// real execution still resolves and validates the configured executable.
-	if *dryRun && options.Method == programmer.MethodCompile &&
+	if *dryRun && (options.Method == programmer.MethodCompile || options.Method == programmer.MethodArduino) &&
 		strings.TrimSpace(options.ArduinoCLI) == "" {
 		options.ArduinoCLI = "arduino-cli"
 	}
 	safeFlash := options.Operation == programmer.OperationWriteFlash &&
-		options.Method != programmer.MethodCompile
+		(options.Method == programmer.MethodUrclock || options.Method == programmer.MethodUSBasp)
+	if options.Operation == programmer.OperationWriteFlash && options.Method == programmer.MethodAvrdude {
+		return errors.New("guarded flash supports Urclock or USBasp; use those routes for AVR writes")
+	}
 	if safeFlash {
 		switch options.Method {
 		case programmer.MethodUrclock:
@@ -202,14 +229,13 @@ func runProgramWithConfig(
 				return errors.New("USBasp does not accept --port/--device; use --app-device only for the separate application UART lifecycle")
 			}
 			options.Port = ""
-		case programmer.MethodArduino:
-			return errors.New("direct dependency upload is disabled; compile to Intel HEX, then use program flash HEX [PORT]")
 		default:
 			return fmt.Errorf("guarded flash supports Urclock or USBasp, got %q", options.Method)
 		}
 	}
 	deviceOperation := options.Method != programmer.MethodCompile &&
-		options.Operation != programmer.OperationCoreInfo
+		options.Operation != programmer.OperationCoreInfo &&
+		options.Operation != programmer.OperationCompile
 	if deviceOperation && !*dryRun {
 		probeContext, probeCancel := context.WithTimeout(
 			context.Background(),
@@ -218,6 +244,9 @@ func runProgramWithConfig(
 		havePrimary := primaryAvailable(probeContext)
 		probeCancel()
 		if havePrimary {
+			if externalToolchainUpload {
+				return errors.New("external-board upload requires the primary Controller to release the selected port first")
+			}
 			ctx, cancel := signalContext()
 			defer cancel()
 			if explicitDevice {
@@ -353,6 +382,9 @@ func runProgramWithConfig(
 			options.OutputPath,
 		)
 	} else {
+		if externalToolchainUpload {
+			fmt.Fprintln(stdout, "EXTERNAL BOARD: dependency-toolchain upload has no PCController EEPROM backup, native HELLO, or AVR readback contract")
+		}
 		command, err = programmer.Build(options)
 		if err != nil {
 			return err
@@ -369,7 +401,7 @@ func runProgramWithConfig(
 	ctx, cancel := signalContext()
 	defer cancel()
 	programErr := programmer.Execute(ctx, options, stdout)
-	if !*appReconnect || !deviceOperation || options.Port == "" {
+	if !*appReconnect || !deviceOperation || externalToolchainUpload || options.Port == "" {
 		return programErr
 	}
 	reconnectErr := reconnectApplicationAfterProgramming(
@@ -379,6 +411,34 @@ func runProgramWithConfig(
 		stdout,
 	)
 	return errors.Join(programErr, reconnectErr)
+}
+
+func validateExternalToolchainSelection(options programmer.Options, selected bool) error {
+	genericOperation := options.Method == programmer.MethodArduino &&
+		(options.Operation == programmer.OperationCompile || options.Operation == programmer.OperationWriteFlash)
+	if genericOperation && !selected {
+		return errors.New("generic dependency-toolchain compile/upload requires explicit --external-board")
+	}
+	if selected && options.Method != programmer.MethodArduino {
+		return errors.New("--external-board requires --method toolchain")
+	}
+	if selected && !genericOperation {
+		return errors.New("--external-board supports only toolchain compile or write-flash")
+	}
+	if !selected {
+		return nil
+	}
+	parts := strings.Split(strings.TrimSpace(options.FQBN), ":")
+	if len(parts) < 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
+		return errors.New("--external-board requires a complete board FQBN")
+	}
+	if options.Operation == programmer.OperationWriteFlash && strings.Contains(strings.ToLower(parts[1]), "avr") {
+		return errors.New("external-board upload cannot bypass the guarded libavrdude path for AVR targets")
+	}
+	if options.Operation == programmer.OperationWriteFlash && strings.TrimSpace(options.OutputDir) == "" {
+		return errors.New("external-board upload requires --output-dir from the matching toolchain compile")
+	}
+	return nil
 }
 
 type primaryCallFunc func(context.Context, string, any, any) error

@@ -68,6 +68,31 @@ jobs:
       - name: "📥 Check out source"
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      - name: "🔌 Install libavrdude build dependencies on Linux"
+        if: runner.os == 'Linux'
+        shell: bash
+        run: >-
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends
+          flex bison libelf-dev libusb-dev libhidapi-dev libftdi1-dev
+
+      - name: "🔌 Install libavrdude build dependencies on macOS"
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          brew install flex bison libusb-compat hidapi libftdi
+          echo "$(brew --prefix flex)/bin" >> "$GITHUB_PATH"
+          echo "$(brew --prefix bison)/bin" >> "$GITHUB_PATH"
+
+      - name: "🔌 Install libavrdude parser tools on Windows"
+        if: matrix.windows
+        shell: pwsh
+        run: |
+          choco install winflexbison3 --yes --no-progress
+          $flex = (Get-Command win_flex.exe -ErrorAction Stop).Source
+          $bison = (Get-Command win_bison.exe -ErrorAction Stop).Source
+          "FLEX_EXECUTABLE=$flex" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "BISON_EXECUTABLE=$bison" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: "🔐 Read exact host dependency lock"
         id: host-dependencies
         shell: bash

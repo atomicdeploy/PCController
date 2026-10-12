@@ -7,6 +7,43 @@ firmware dependency CLI, AVR compiler/programmer tools, and upstream libraries
 are implementation dependencies; their product names are not part of the
 public command hierarchy.
 
+## Programmer backends and board families
+
+Packaged hosts build AVRDUDE 8.3 from a checksum-locked upstream commit and
+link `pccontroller-avrdude` directly to that exact `libavrdude` source. The
+adapter translates the library message and progress callbacks into JSON Lines;
+Controller feeds those events into the same `update.*` progress hook used by
+the TUI, Web UI, RPC, and bridge coordinator. The matching `avrdude` CLI is
+packaged from the same source only for Urclock metadata/version extensions that
+the library does not expose as operations.
+
+`programming.avrdude_backend` and `--avrdude-backend` accept `auto`, `library`,
+or `cli`. `auto` is the default and prefers the packaged library adapter.
+`--avrdude-adapter` can select an explicitly reviewed adapter. The CLI backend
+remains an explicit compatibility/recovery choice.
+
+The programmer layer is not tied to one AVR part or programmer: `--method
+avrdude --mcu PART --programmer ID` selects any part/programmer pair present in
+the pinned configuration. Non-default AVR parts must also provide
+`--flash-bytes` and `--eeprom-bytes`, and Urclock targets must provide
+`--bootloader-bytes`; guarded writes fail closed when geometry is missing.
+Those values can be persisted as `programming.flash_bytes`,
+`programming.eeprom_bytes`, and `programming.bootloader_bytes` for a selected
+board profile.
+The firmware dependency CLI can compile and upload arbitrary installed board
+cores by FQBN for non-AVR architectures. This deliberately separate path needs
+`--external-board`, and upload refuses AVR FQBNs so it cannot bypass the
+guarded libavrdude/readback contract. For example:
+
+```console
+controller program --method toolchain --operation compile --external-board --fqbn esp32:esp32:esp32s3 --sketch external-sketch --output-dir external-output
+controller program --method toolchain --operation write-flash --external-board --fqbn esp32:esp32:esp32s3 --sketch external-sketch --output-dir external-output --port COM9
+```
+
+PCController's commissioned ATmega328P profile retains its generated defaults,
+bridge ownership, semantic EEPROM lifecycle, and mandatory independent
+readback checks.
+
 ## Latest-first and reproducible by design
 
 The toolchain has two source-controlled layers:

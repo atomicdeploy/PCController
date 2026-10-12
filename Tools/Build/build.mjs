@@ -53,6 +53,8 @@ const WEB_DIST = join(HOST_ROOT, 'internal', 'webui', 'dist')
 const VIRTUAL_BOARD_ROOT = join(PROJECT_ROOT, 'Tools', 'VirtualBoard')
 const VIRTUAL_BOARD_BUILD_ROOT = join(VIRTUAL_BOARD_ROOT, '.build')
 const VIRTUAL_BOARD_PRESETS = Object.freeze(['debug', 'release', 'relwithdebinfo'])
+const AVRDUDE_ADAPTER_ROOT = join(PROJECT_ROOT, 'Tools', 'AvrdudeAdapter')
+const AVRDUDE_ADAPTER_LOCK = join(AVRDUDE_ADAPTER_ROOT, 'dependency-lock.json')
 const WEB_LOCK = join(WEB_ROOT, 'package-lock.json')
 const BUILD_ROOT = join(PROJECT_ROOT, '.build')
 const COMMAND_PATHS = commandPlanPaths(PROJECT_ROOT)
@@ -445,6 +447,7 @@ export function parseArguments(argv, env = process.env) {
 		upx: true,
 		stageOnly: false,
 		sharedLibrary: true,
+		avrdudeLibrary: true,
 		compilerBootstrap: true,
 		verbose: false,
 		noColor: hasEnvironmentName(env, 'NO_COLOR'),
@@ -520,6 +523,7 @@ export function parseArguments(argv, env = process.env) {
 			case '--no-upx': options.upx = false; break
 			case '--stage-only': options.stageOnly = true; break
 			case '--no-shared-library': options.sharedLibrary = false; break
+			case '--no-avrdude-library': options.avrdudeLibrary = false; break
 			case '--no-compiler-bootstrap': options.compilerBootstrap = false; break
 			case '--verbose': options.verbose = true; break
 			case '--no-color': options.noColor = true; break
@@ -815,6 +819,12 @@ export function createPlan(options, identity, platform = process.platform) {
 			'-ldflags', '<embedded presentation defaults>',
 			'-buildmode=c-shared', '-o', '<staging>/pccontroller', './cmd/controller-cabi'
 		], HOST_ROOT))
+		if (options.avrdudeLibrary) actions.push(commandAction(
+			'libavrdude-adapter',
+			'Build pinned libavrdude and its structured progress adapter',
+			'cmake', ['--build', '<avrdude-adapter-build>', '--target', 'pccontroller-avrdude'],
+			AVRDUDE_ADAPTER_ROOT
+		))
 		actions.push({ id: 'licenses', stage: 'Collect project and Go-module notices', hardware: false })
 		actions.push({ id: 'host-manifest', stage: 'Write canonical host package manifest', hardware: false })
 		if (platform === 'win32') actions.push({
@@ -908,6 +918,7 @@ Safe build options:
   --no-upx                  Leave Windows controller executable unpacked
   --stage-only              Prepare host package for coordinator-owned update, without replacing the running package
   --no-shared-library       Skip C ABI library/header/smoke test
+  --no-avrdude-library      Skip the pinned libavrdude adapter (CLI fallback only)
   --no-compiler-bootstrap   Do not install a missing native Windows C compiler
   --version VALUE           Host version identity (default: product metadata)
   --app-name TEXT           Embed the default host/WebUI application name
@@ -1061,6 +1072,39 @@ export function allExecutables(name, env, platform = process.platform) {
 		}
 	}
 	return found
+}
+
+export function windowsCMakeCABundle(env = process.env, platform = process.platform) {
+	const configured = environmentValue(env, 'CMAKE_TLS_CAINFO') || environmentValue(env, 'SSL_CERT_FILE')
+	if (configured) return resolve(expandWindowsVariables(configured, env))
+	if (platform !== 'win32') return ''
+	const git = allExecutables('git', env, platform)[0]
+	if (!git) return ''
+	const parent = resolve(dirname(git), '..')
+	const grandparent = resolve(parent, '..')
+	const candidates = [
+		join(parent, 'mingw64', 'etc', 'ssl', 'certs', 'ca-bundle.crt'),
+		join(parent, 'etc', 'ssl', 'certs', 'ca-bundle.crt'),
+		join(parent, 'usr', 'ssl', 'certs', 'ca-bundle.crt'),
+		join(grandparent, 'mingw64', 'etc', 'ssl', 'certs', 'ca-bundle.crt'),
+		join(grandparent, 'usr', 'ssl', 'certs', 'ca-bundle.crt')
+	]
+	return candidates.find(candidate => existsSync(candidate)) || ''
+}
+
+export function windowsCMakeParserArguments(env = process.env, platform = process.platform) {
+	if (platform !== 'win32') return []
+	const configuredFlex = environmentValue(env, 'FLEX_EXECUTABLE')
+	const configuredBison = environmentValue(env, 'BISON_EXECUTABLE')
+	const flex = configuredFlex || allExecutables('flex', env, platform)[0] || allExecutables('win_flex', env, platform)[0]
+	const bison = configuredBison || allExecutables('bison', env, platform)[0] || allExecutables('win_bison', env, platform)[0]
+	if (!flex || !bison) {
+		throw new BuildError('libavrdude requires flex/bison (or win_flex/win_bison) on Windows')
+	}
+	return [
+		`-DFLEX_EXECUTABLE=${resolve(flex).replaceAll('\\', '/')}`,
+		`-DBISON_EXECUTABLE=${resolve(bison).replaceAll('\\', '/')}`
+	]
 }
 
 function requireTool(name, env) {
@@ -2172,6 +2216,91 @@ export function stageEmbeddedDefaults(manifest, identity) {
 	}
 }
 
+function buildAvrdudeAdapter(stage, env, options) {
+	let dependency
+	try {
+		dependency = JSON.parse(readFileSync(AVRDUDE_ADAPTER_LOCK, 'utf8'))
+	} catch (error) {
+		throw new BuildError(`decode libavrdude dependency lock: ${error.message}`)
+	}
+	for (const field of ['name', 'version', 'source_commit', 'source_url', 'source_sha256', 'license']) {
+		if (typeof dependency[field] !== 'string' || !dependency[field].trim()) {
+			throw new BuildError(`libavrdude dependency lock requires ${field}`)
+		}
+	}
+	if (!/^https:\/\//.test(dependency.source_url) || !/^[0-9a-f]{64}$/i.test(dependency.source_sha256)) {
+		throw new BuildError('libavrdude dependency lock requires an HTTPS source and SHA-256')
+	}
+	if (!/^[0-9a-f]{40}$/i.test(dependency.source_commit) || !dependency.source_url.includes(dependency.source_commit)) {
+		throw new BuildError('libavrdude dependency lock URL must name its exact 40-digit source commit')
+	}
+	const cmake = requireTool('cmake', env)
+	const ninja = requireTool('ninja', env)
+	const buildRoot = join(BUILD_ROOT, 'avrdude-adapter-host')
+	const configure = [
+		'-S', AVRDUDE_ADAPTER_ROOT, '-B', buildRoot,
+		'-G', 'Ninja', `-DCMAKE_MAKE_PROGRAM=${ninja}`, '-DCMAKE_BUILD_TYPE=Release'
+	]
+	const caBundle = windowsCMakeCABundle(env)
+	if (caBundle) configure.push(`-DCMAKE_TLS_CAINFO=${caBundle.replaceAll('\\', '/')}`, '-DCMAKE_TLS_VERIFY=ON')
+	configure.push(...windowsCMakeParserArguments(env))
+	const sourceOverride = environmentValue(env, 'FETCHCONTENT_SOURCE_DIR_PCCONTROLLER_AVRDUDE')
+	if (sourceOverride) {
+		configure.push(`-DFETCHCONTENT_SOURCE_DIR_PCCONTROLLER_AVRDUDE=${resolve(sourceOverride)}`)
+	}
+	run(cmake, configure, { cwd: PROJECT_ROOT, env, verbose: options.verbose })
+	run(cmake, ['--build', buildRoot, '--target', 'pccontroller-avrdude', '--parallel'], {
+		cwd: PROJECT_ROOT, env, verbose: options.verbose
+	})
+	const suffix = process.platform === 'win32' ? '.exe' : ''
+	const builtAdapter = join(buildRoot, `pccontroller-avrdude${suffix}`)
+	const builtCLI = join(buildRoot, `avrdude${suffix}`)
+	const builtConfig = join(buildRoot, 'avrdude.conf')
+	if (!existsSync(builtAdapter) || !existsSync(builtCLI) || !existsSync(builtConfig)) {
+		throw new BuildError('libavrdude build did not produce its adapter, compatibility CLI, and matching configuration')
+	}
+	let reported
+	try {
+		reported = JSON.parse(run(builtAdapter, ['--version-json'], {
+			cwd: buildRoot, env, capture: true, verbose: options.verbose
+		}).stdout)
+	} catch (error) {
+		throw new BuildError(`verify libavrdude adapter identity: ${error.message}`)
+	}
+	if (reported.type !== 'version' || reported.libavrdude !== dependency.version) {
+		throw new BuildError(`libavrdude adapter version drift: expected ${dependency.version}`)
+	}
+	const adapter = join(stage, `pccontroller-avrdude${suffix}`)
+	const cli = join(stage, `avrdude${suffix}`)
+	const configuration = join(stage, 'avrdude.conf')
+	const copying = join(stage, 'avrdude-COPYING.txt')
+	copyFileSync(builtAdapter, adapter)
+	copyFileSync(builtCLI, cli)
+	copyFileSync(builtConfig, configuration)
+	const fetchedSource = sourceOverride
+		? resolve(sourceOverride)
+		: join(buildRoot, '_deps', 'pccontroller_avrdude-src')
+	const upstreamCopying = join(fetchedSource, 'COPYING')
+	if (!existsSync(upstreamCopying)) {
+		throw new BuildError('pinned libavrdude source did not provide its COPYING file')
+	}
+	copyFileSync(upstreamCopying, copying)
+	return {
+		enabled: true,
+		paths: [adapter, cli, configuration, copying],
+		dependency: {
+			name: dependency.name,
+			version: dependency.version,
+			sourceCommit: dependency.source_commit,
+			sourceURL: dependency.source_url,
+			sourceSHA256: dependency.source_sha256,
+			license: dependency.license,
+			protocol: 'libavrdude-jsonl',
+			compatibilityCLI: true
+		}
+	}
+}
+
 function buildHost(options, identity, env, log, embeddedDefaults = { enabled: false }) {
 	const stage = join(PACKAGE_ROOT, `host-${process.pid}`)
 	assertGeneratedPath(PROJECT_ROOT, stage)
@@ -2288,6 +2417,12 @@ function buildHost(options, identity, env, log, embeddedDefaults = { enabled: fa
 		shared = buildSharedLibrary(go, stage, goEnv, goArch, options, log, presentationFlags)
 	} else log.warning('C ABI package was explicitly skipped.')
 
+	let programmerLibrary = { enabled: false, paths: [], dependency: null }
+	if (options.avrdudeLibrary) {
+		log.stage('🔌', 'Building pinned libavrdude callback adapter')
+		programmerLibrary = buildAvrdudeAdapter(stage, env, options)
+	} else log.warning('libavrdude adapter was explicitly skipped; AVRDUDE CLI fallback remains available.')
+
 	log.stage('📜', 'Collecting project and dependency notices')
 	const notices = collectModuleNotices(go, stage, goEnv, options)
 	let toastLogo = ''
@@ -2307,7 +2442,9 @@ function buildHost(options, identity, env, log, embeddedDefaults = { enabled: fa
 			return target
 		})
 	}
-	const artifacts = [executable, ...(toastLogo ? [toastLogo] : []), ...toastEventIcons, ...shared.paths].map(path => artifactRecord(path, stage))
+	const artifacts = [executable, ...(toastLogo ? [toastLogo] : []), ...toastEventIcons, ...shared.paths]
+		.concat(programmerLibrary.paths)
+		.map(path => artifactRecord(path, stage))
 	const manifest = {
 		generatedUtc: identity.hostBuildTime,
 		target: { platform: process.platform, architecture: goArch },
@@ -2329,7 +2466,10 @@ function buildHost(options, identity, env, log, embeddedDefaults = { enabled: fa
 			buildTime: identity.hostBuildTime,
 			packedFirmwareTimestamp: identity.packedTimestamp
 		},
-		toolchains: options.sharedLibrary ? { cCompiler: shared.compiler } : {},
+		toolchains: {
+			...(options.sharedLibrary ? { cCompiler: shared.compiler } : {}),
+			...(programmerLibrary.enabled ? { programmerLibrary: programmerLibrary.dependency } : {})
+		},
 		validation: {
 			webUI,
 			embeddedDefaults,
@@ -2338,7 +2478,8 @@ function buildHost(options, identity, env, log, embeddedDefaults = { enabled: fa
 			vet: options.vet ? 'passed' : 'skipped',
 			windowsResources: process.platform === 'win32' ? (resourceGenerated ? 'verified' : 'skipped') : 'not-applicable',
 			upx,
-			sharedLibrary: options.sharedLibrary ? 'smoke-passed' : 'skipped'
+			sharedLibrary: options.sharedLibrary ? 'smoke-passed' : 'skipped',
+			programmerLibrary: programmerLibrary.enabled ? 'callback-adapter-verified' : 'skipped'
 		},
 		artifacts
 	}
@@ -2375,7 +2516,8 @@ function buildHost(options, identity, env, log, embeddedDefaults = { enabled: fa
 		['Embedded board defaults', embeddedDefaults.enabled ? `${shortHash(embeddedDefaults.firmwareSHA256)} + EEPROM ${shortHash(embeddedDefaults.eepromSHA256)}` : 'not packaged'],
 		['Win32 resources', manifest.validation.windowsResources],
 		['UPX', upx.enabled ? `${upx.version} / ${upx.tested ? 'tested' : 'not tested'}` : 'disabled'],
-		['C ABI', manifest.validation.sharedLibrary]
+		['C ABI', manifest.validation.sharedLibrary],
+		['libavrdude', manifest.validation.programmerLibrary]
 	])
 	log.success(`Canonical host package: ${relative(PROJECT_ROOT, CANONICAL_HOST_OUTPUT)}`)
 	return join(CANONICAL_HOST_OUTPUT, executableName)
