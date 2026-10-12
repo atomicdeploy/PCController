@@ -87,6 +87,9 @@ const STALE_HOST_OUTPUTS = [
 const WINDOWS_GNU_PACKAGE_ID = 'BrechtSanders.WinLibs.POSIX.UCRT'
 const MINIMUM_NODE = [22, 12, 0]
 const MINIMUM_WEB_NODE = [22, 12, 0]
+const TOAST_EVENT_ICONS = Object.freeze([
+	'info', 'warning', 'error', 'door', 'hot', 'temperature-cleared', 'motion', 'relay', 'radio'
+])
 
 export class BuildError extends Error {
 	constructor(message, exitCode = 1) {
@@ -2288,11 +2291,23 @@ function buildHost(options, identity, env, log, embeddedDefaults = { enabled: fa
 	log.stage('📜', 'Collecting project and dependency notices')
 	const notices = collectModuleNotices(go, stage, goEnv, options)
 	let toastLogo = ''
+	let toastEventIcons = []
 	if (process.platform === 'win32') {
 		toastLogo = join(stage, 'toast-logo.png')
 		copyFileSync(identity.toastIcon || join(HOST_ROOT, 'winres', 'icon.png'), toastLogo)
+		toastEventIcons = TOAST_EVENT_ICONS.map(name => {
+			const fileName = `toast-event-${name}.png`
+			const source = join(HOST_ROOT, 'winres', fileName)
+			const image = inspectPNG(readFileSync(source), `toast event icon ${name}`)
+			if (image.width !== 256 || image.height !== 256) {
+				throw new BuildError(`toast event icon ${name} must be 256x256 pixels`, 2)
+			}
+			const target = join(stage, fileName)
+			copyFileSync(source, target)
+			return target
+		})
 	}
-	const artifacts = [executable, ...(toastLogo ? [toastLogo] : []), ...shared.paths].map(path => artifactRecord(path, stage))
+	const artifacts = [executable, ...(toastLogo ? [toastLogo] : []), ...toastEventIcons, ...shared.paths].map(path => artifactRecord(path, stage))
 	const manifest = {
 		generatedUtc: identity.hostBuildTime,
 		target: { platform: process.platform, architecture: goArch },

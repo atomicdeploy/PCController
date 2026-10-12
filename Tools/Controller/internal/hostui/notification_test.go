@@ -62,3 +62,35 @@ func TestImportantEventMappingSuppressesTelemetryAndAddsSafetyAction(t *testing.
 		t.Fatalf("custom-title notification=%#v ok=%t", custom, ok)
 	}
 }
+
+func TestImportantEventsSelectSemanticToastIcons(t *testing.T) {
+	tests := []struct {
+		kind    string
+		message string
+		want    string
+	}{
+		{kind: "hot", message: "temperature alert active", want: NotificationIconHot},
+		{kind: "hot", message: "temperature alert cleared", want: NotificationIconTemperatureCleared},
+		{kind: "warning.door-open-running", message: "door opened while Running", want: NotificationIconDoor},
+		{kind: "motion.fault", message: "Side A timeout", want: NotificationIconMotion},
+		{kind: "relay.changed", message: "R1 on", want: NotificationIconRelay},
+		{kind: "rf.learn.ended", message: "learning ended", want: NotificationIconRadio},
+		{kind: "error", message: "controller failed", want: NotificationIconError},
+	}
+	for _, test := range tests {
+		notification, ok := NotificationForImportantEvent(ImportantEvent{Kind: test.kind, Message: test.message})
+		if !ok || notification.Icon != test.want {
+			t.Errorf("kind=%q message=%q icon=%q ok=%t; want %q", test.kind, test.message, notification.Icon, ok, test.want)
+		}
+	}
+}
+
+func TestMessageNotificationsSelectSeverityIcon(t *testing.T) {
+	notification, err := NotificationForMessage(MessageNotification{ID: 1, Text: "maintenance required", Severity: "warning"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if notification.Icon != NotificationIconWarning {
+		t.Fatalf("message icon=%q; want %q", notification.Icon, NotificationIconWarning)
+	}
+}

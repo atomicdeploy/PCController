@@ -18,15 +18,17 @@ import (
 )
 
 type windowsNotifier struct {
-	mu      sync.RWMutex
-	appID   string
-	logoURI string
-	logoErr error
-	status  NotificationStatus
-	deliver func(context.Context, []byte, string) error
-	balloon func(context.Context, Notification, error) error
-	dialog  func(context.Context, Notification, error) error
-	gate    chan struct{}
+	mu       sync.RWMutex
+	appID    string
+	logoURI  string
+	logoErr  error
+	iconURIs map[string]string
+	iconErrs map[string]error
+	status   NotificationStatus
+	deliver  func(context.Context, []byte, string) error
+	balloon  func(context.Context, Notification, error) error
+	dialog   func(context.Context, Notification, error) error
+	gate     chan struct{}
 }
 
 func newPlatformNotifier(options NotifierOptions) Notifier {
@@ -35,16 +37,42 @@ func newPlatformNotifier(options NotifierOptions) Notifier {
 		appID = productidentity.StableAppID
 	}
 	logoURI, logoErr := resolveWindowsToastLogo(options.LogoPath)
+	iconURIs, iconErrs := resolveWindowsToastEventIcons(options.LogoPath)
 	return &windowsNotifier{
-		appID:   appID,
-		logoURI: logoURI,
-		logoErr: logoErr,
-		status:  NotificationStatus{Supported: true, Available: true, Branded: logoErr == nil, Backend: "winrt-toast"},
-		deliver: deliverWindowsToast,
-		balloon: showWindowsBalloon,
-		dialog:  showWindowsNotificationDialog,
-		gate:    make(chan struct{}, 1),
+		appID:    appID,
+		logoURI:  logoURI,
+		logoErr:  logoErr,
+		iconURIs: iconURIs,
+		iconErrs: iconErrs,
+		status:   NotificationStatus{Supported: true, Available: true, Branded: logoErr == nil, Backend: "winrt-toast"},
+		deliver:  deliverWindowsToast,
+		balloon:  showWindowsBalloon,
+		dialog:   showWindowsNotificationDialog,
+		gate:     make(chan struct{}, 1),
 	}
+}
+
+func resolveWindowsToastEventIcons(logoPath string) (map[string]string, map[string]error) {
+	path := strings.TrimSpace(logoPath)
+	if path == "" {
+		var err error
+		path, err = ResolveToastLogoPath("")
+		if err != nil {
+			return nil, map[string]error{"": err}
+		}
+	}
+	directory := filepath.Dir(path)
+	resolved := make(map[string]string, len(toastEventIconNames))
+	failures := make(map[string]error)
+	for _, name := range toastEventIconNames {
+		uri, err := resolveWindowsToastLogo(filepath.Join(directory, toastEventIconFileName(name)))
+		if err != nil {
+			failures[name] = err
+			continue
+		}
+		resolved[name] = uri
+	}
+	return resolved, failures
 }
 
 func resolveWindowsToastLogo(value string) (string, error) {
@@ -97,12 +125,24 @@ func (notifier *windowsNotifier) Notify(ctx context.Context, notification Notifi
 		return ctx.Err()
 	}
 	var err error
+	imageURI := notifier.logoURI
 	if notifier.logoErr != nil {
 		err = notifier.logoErr
 	}
+	if icon := strings.ToLower(strings.TrimSpace(notification.Icon)); err == nil && icon != "" {
+		var ok bool
+		imageURI, ok = notifier.iconURIs[icon]
+		if !ok {
+			if iconErr := notifier.iconErrs[icon]; iconErr != nil {
+				err = fmt.Errorf("resolve notification icon %q: %w", icon, iconErr)
+			} else {
+				err = fmt.Errorf("notification icon %q is not supported", icon)
+			}
+		}
+	}
 	var payload []byte
 	if err == nil {
-		payload, err = buildToastXML(notification, notifier.logoURI)
+		payload, err = buildToastXML(notification, imageURI)
 	}
 	if err == nil {
 		err = notifier.deliver(ctx, payload, notifier.appID)

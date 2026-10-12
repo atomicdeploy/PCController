@@ -22,9 +22,22 @@ type Notification struct {
 	Title     string               `json:"title"`
 	Body      string               `json:"body"`
 	Severity  string               `json:"severity,omitempty"`
+	Icon      string               `json:"icon,omitempty"`
 	LaunchURI string               `json:"launch_uri,omitempty"`
 	Actions   []NotificationAction `json:"actions,omitempty"`
 }
+
+const (
+	NotificationIconInfo               = "info"
+	NotificationIconWarning            = "warning"
+	NotificationIconError              = "error"
+	NotificationIconDoor               = "door"
+	NotificationIconHot                = "hot"
+	NotificationIconTemperatureCleared = "temperature-cleared"
+	NotificationIconMotion             = "motion"
+	NotificationIconRelay              = "relay"
+	NotificationIconRadio              = "radio"
+)
 
 type NotificationStatus struct {
 	Supported    bool      `json:"supported"`
@@ -99,7 +112,7 @@ func buildToastXML(notification Notification, logoURI string) ([]byte, error) {
 		}
 		value.Visual.Binding.Images = []toastImage{{
 			Placement: "appLogoOverride", Source: logoURI,
-			Alternate: productidentity.DefaultAppTitle(),
+			Alternate: notificationIconAlternateText(notification.Icon),
 		}}
 	}
 	if notification.LaunchURI != "" {
@@ -121,6 +134,31 @@ func buildToastXML(notification Notification, logoURI string) ([]byte, error) {
 		}
 	}
 	return xml.Marshal(value)
+}
+
+func notificationIconAlternateText(icon string) string {
+	switch strings.ToLower(strings.TrimSpace(icon)) {
+	case NotificationIconInfo:
+		return "Information"
+	case NotificationIconWarning:
+		return "Warning"
+	case NotificationIconError:
+		return "Error"
+	case NotificationIconDoor:
+		return "Door"
+	case NotificationIconHot:
+		return "High temperature"
+	case NotificationIconTemperatureCleared:
+		return "Temperature normal"
+	case NotificationIconMotion:
+		return "Motion output"
+	case NotificationIconRelay:
+		return "Relay output"
+	case NotificationIconRadio:
+		return "Radio"
+	default:
+		return productidentity.DefaultAppTitle()
+	}
 }
 
 func validateToastLogoURI(value string) error {
@@ -187,6 +225,7 @@ func NotificationForMessage(message MessageNotification) (Notification, error) {
 	notification := Notification{
 		ID: id, Title: title, Body: message.Text,
 		Severity:  strings.ToLower(strings.TrimSpace(message.Severity)),
+		Icon:      semanticNotificationIcon(typeName, message.Severity, message.Text),
 		LaunchURI: pageURI,
 	}
 	if strings.TrimSpace(message.Action) == "" {
@@ -242,9 +281,38 @@ func NotificationForImportantEvent(event ImportantEvent) (Notification, bool) {
 	}
 	return Notification{
 		ID: fmt.Sprintf("%s-%d", kind, time.Now().UnixNano()), Title: title,
-		Body: event.Message, Severity: kind, LaunchURI: actionPrefix + "page/" + page,
+		Body: event.Message, Severity: kind,
+		Icon: semanticNotificationIcon(kind, kind, event.Message), LaunchURI: actionPrefix + "page/" + page,
 		Actions: actions,
 	}, true
+}
+
+func semanticNotificationIcon(kind, severity, message string) string {
+	kind = strings.ToLower(strings.TrimSpace(kind))
+	severity = strings.ToLower(strings.TrimSpace(severity))
+	message = strings.ToLower(strings.TrimSpace(message))
+	switch {
+	case strings.Contains(kind, "hot") || strings.Contains(kind, "temperature"):
+		if strings.Contains(message, "cleared") || strings.Contains(message, "normal") ||
+			strings.Contains(message, "recovered") || strings.Contains(message, "resolved") {
+			return NotificationIconTemperatureCleared
+		}
+		return NotificationIconHot
+	case kind == "warning.door-open-running" || strings.Contains(kind, "door"):
+		return NotificationIconDoor
+	case strings.Contains(kind, "motion"):
+		return NotificationIconMotion
+	case strings.Contains(kind, "relay"):
+		return NotificationIconRelay
+	case strings.HasPrefix(kind, "rf") || strings.Contains(kind, "radio"):
+		return NotificationIconRadio
+	case kind == "error" || strings.Contains(kind, "fault") || strings.Contains(severity, "error") || strings.Contains(severity, "fault"):
+		return NotificationIconError
+	case strings.Contains(severity, "warn"):
+		return NotificationIconWarning
+	default:
+		return NotificationIconInfo
+	}
 }
 
 func titleWord(value string) string {
