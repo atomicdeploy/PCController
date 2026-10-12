@@ -5,6 +5,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import 'transport.dart';
+import 'sequence_timeline.dart';
 
 /// Pure native authoring; never creates a connection or actuates an output.
 class EffectEditor extends StatefulWidget {
@@ -19,6 +20,7 @@ class _EffectEditorState extends State<EffectEditor> {
   late Json effect;
   late TextEditingController name, id, category, raw;
   int selected = -1;
+  int timingRevision = 0;
   bool saving = false;
   String? error;
   @override
@@ -92,7 +94,7 @@ class _EffectEditorState extends State<EffectEditor> {
       SizedBox(
         width: 140,
         child: TextFormField(
-          key: ValueKey('$selected/$key'),
+          key: ValueKey('$selected/$key/$timingRevision'),
           initialValue: '${value / scale}',
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
           decoration: InputDecoration(labelText: label),
@@ -183,37 +185,27 @@ class _EffectEditorState extends State<EffectEditor> {
                       ),
                       const SizedBox(height: 16),
                       if (effect['kind'] == 'sequence') ...[
-                        Text('Timeline · ${steps.length} steps'),
-                        const SizedBox(height: 8),
-                        for (var index = 0; index < steps.length; index++)
-                          InkWell(
-                            onTap: () => setState(() => selected = index),
-                            child: SizedBox(
-                              height: 36,
-                              child: Row(
-                                children: [
-                                  SizedBox(
-                                    width: 96,
-                                    child: Text(
-                                      '${index + 1} · ${steps[index]['kind']}',
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                  Expanded(
-                                    child: CustomPaint(
-                                      size: const Size(double.infinity, 32),
-                                      painter: StepPainter(
-                                        steps[index],
-                                        index == selected,
-                                        sequenceDuration(steps),
-                                        Theme.of(context).colorScheme.primary,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
+                        SequenceTimeline(
+                          steps: steps,
+                          selected: selected,
+                          enabled: !saving,
+                          select: (index) => setState(() => selected = index),
+                          edit: (index, start, length) {
+                            final next = steps;
+                            if (index < 0 || index >= next.length) return;
+                            next[index] = {
+                              ...next[index],
+                              'at_us': start,
+                              'duration_ms': ?length,
+                            };
+                            setState(() {
+                              timingRevision++;
+                              effect['steps'] = next;
+                              raw.text = const JsonEncoder.withIndent('  ')
+                                  .convert(effect);
+                            });
+                          },
+                        ),
                         const SizedBox(height: 12),
                         Wrap(
                           spacing: 8,
@@ -300,6 +292,89 @@ class _EffectEditorState extends State<EffectEditor> {
                                 onChanged: (text) => changeStep('text', text),
                               ),
                             ),
+                          if (current['kind'] == 'rgb') ...[
+                            const SizedBox(height: 12),
+                            for (final entry in [
+                              ('red', 'Red', Colors.red),
+                              ('green', 'Green', Colors.green),
+                              ('blue', 'Blue', Colors.blue),
+                              (
+                                'brightness',
+                                'Brightness',
+                                Theme.of(context).colorScheme.primary,
+                              ),
+                            ])
+                              Row(
+                                children: [
+                                  SizedBox(width: 86, child: Text(entry.$2)),
+                                  Expanded(
+                                    child: Slider(
+                                      min: 0,
+                                      max: 255,
+                                      divisions: 255,
+                                      activeColor: entry.$3,
+                                      value:
+                                          (current[entry.$1] is num &&
+                                                      (current[entry.$1] as num)
+                                                          .isFinite
+                                                  ? (current[entry.$1] as num)
+                                                        .toDouble()
+                                                  : 0)
+                                              .clamp(0, 255)
+                                              .toDouble(),
+                                      label: '${current[entry.$1] ?? 0}',
+                                      onChanged: saving
+                                          ? null
+                                          : (v) =>
+                                                changeStep(entry.$1, v.round()),
+                                    ),
+                                  ),
+                                  SizedBox(
+                                    width: 32,
+                                    child: Text(
+                                      '${current[entry.$1] ?? 0}',
+                                      textAlign: TextAlign.end,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                for (final color in [
+                                  const Color(0xffff4040),
+                                  const Color(0xff40dd80),
+                                  const Color(0xff4080ff),
+                                  const Color(0xffaa70dd),
+                                  Colors.white,
+                                ])
+                                  IconButton(
+                                    tooltip:
+                                        '#${color.toARGB32().toRadixString(16).substring(2).toUpperCase()}',
+                                    icon: Icon(Icons.circle, color: color),
+                                    onPressed: saving
+                                        ? null
+                                        : () {
+                                            final next = steps;
+                                            next[selected] = {
+                                              ...next[selected],
+                                              'red': (color.r * 255).round(),
+                                              'green': (color.g * 255).round(),
+                                              'blue': (color.b * 255).round(),
+                                            };
+                                            setState(() {
+                                              effect['steps'] = next;
+                                              raw.text =
+                                                  const JsonEncoder.withIndent(
+                                                    '  ',
+                                                  ).convert(effect);
+                                            });
+                                          },
+                                  ),
+                              ],
+                            ),
+                          ],
                           TextButton.icon(
                             onPressed: () => setState(() {
                               final next = steps;

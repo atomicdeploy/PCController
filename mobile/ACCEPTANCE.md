@@ -87,6 +87,37 @@ Pealayer's current paired-peer-deployment receipt; live Android routing must
 still be verified against a reachable authoritative host. Full native/Web
 designer/settings parity and direct standalone hardware control remain open.
 
+## Native authoring pass, preview 0.1.3+4
+
+- Replaced static sequence bars with a native interactive timeline: shared step
+  selection, release-only start/duration edits, 10 ms snapping, zoom/Fit,
+  horizontal scrolling and dimmed repetition previews. Moving preserves the
+  existing duration and unknown descriptor fields. Changed or removed step
+  ownership cancels a gesture instead of retargeting it.
+- Added RGB/brightness sliders and color swatches to sequence steps. Inspector
+  timing fields refresh after canvas edits without recreating input on every
+  typed character.
+- Pealayer cues now open a native timing editor. Unchanged Save sends nothing;
+  moving uses `timeline.cue.place`, explicit permitted resizing uses
+  `effect_cue.update`. Exact millisecond parsing, the current 1 ms..24 hour
+  resize contract, intrinsic durations, peer/cue identity, unsaved edits and
+  uncertain/rejected requests retain their appropriate guards.
+- Cafe's live COM3 controller and paused Pealayer were verified read-only over
+  the existing SSH path. Direct Android HTTP reachability to both published
+  endpoints timed out on the phone and tablet. These are separate observations.
+- The existing Go C API successfully cross-compiled with the installed Android
+  NDK as an AArch64 ELF shared object. This is a concrete shared-core path for
+  standalone work, but it is not yet packaged, started or connected to Android
+  USB, and does not satisfy standalone hardware acceptance.
+- The prior Android CI passed. The broader host Linux-x64 job failed at the
+  status-LED observation in the two-board mirroring test; that failure is not
+  described as all-green CI and is independent of the Flutter source checks.
+
+The existing user checklist remains open. Complete native cue properties,
+direct USB/programmer ownership, Android foreground service/receiver lifecycle,
+native UDP discovery/command/event integration and physical acceptance are
+continuation work, not claims from this preview.
+
 ## Evidence to record at handoff
 
 - Locked offline Flutter restore, analyzer, full inherited + new tests.
@@ -141,8 +172,8 @@ designer/settings parity and direct standalone hardware control remain open.
   production signing/update channel remain investigation/continuation items.
 - The retained Pakar implementations are donor/reference coverage, not proof
   that their ESP-specific activities control the PCController board.
-- Pealayer cue editing currently opens the existing host editor. This does not
-  claim that its entire native designer has been ported into Flutter.
+- Pealayer cue timing edits are native on Android. Its complete cue properties,
+  channel modes, track routing and effect designer are not yet fully ported.
 
 Keep physical, renderer, source/CI and deployment claims separate.
 

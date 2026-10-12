@@ -15,9 +15,11 @@ PakarController remains a separate project and Android installation.
   durable operation status and WebSocket-triggered progress refresh. Toolchain
   provisioning is indeterminate, never a fabricated 0% progress bar.
 - Pealayer: playback/stop/seek/volume/mute, media opening, workspaces,
-  effect playback/cue placement and opening the existing host cue editor.
+  effect playback/cue placement and a native cue timing editor. Intrinsic
+  duration remains read-only; moving and resizing use the current host APIs.
 - Workspace: local drafts and a native sequence designer with selectable step
-  rows, timing/duration/repetition fields and dimmed repetition previews. Existing
+  rows, timeline dragging/resizing, zoom, snapping, RGB controls,
+  timing/duration/repetition fields and dimmed repetition previews. Existing
   descriptors retain their unknown fields; technical editing is collapsed.
   Publishing to PCController is explicit and does not run the effect.
 - Activities: bounded in-memory host events and request receipts. Request

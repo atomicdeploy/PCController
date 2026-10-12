@@ -10,6 +10,56 @@ import 'package:pccontroller_mobile/unified/live_widgets.dart';
 import 'package:pccontroller_mobile/unified/automation.dart';
 
 void main() {
+  testWidgets('native cue editor refuses a changed cue owner before any RPC', (
+    tester,
+  ) async {
+    await tester.pumpWidget(const UnifiedControllerApp(restore: false));
+    final dynamic home = tester.state(find.byType(ControllerHome));
+    final PeerSession peer = home.player;
+    var calls = 0;
+    peer.transport = PeerTransport(
+      'http://fixture',
+      client: MockClient((request) async {
+        calls++;
+        return http.Response('{}', 200);
+      }),
+    );
+    final cue = <String, dynamic>{
+      'id': '00000000-0000-4000-8000-000000000001',
+      'name': 'Fixture cue',
+      'start_time_ms': 1000,
+      'duration_ms': 500,
+      'resizable': true,
+    };
+    peer.online = true;
+    peer.received = DateTime.now();
+    peer.state = {
+      'cues': [cue],
+    };
+    final open = home.editPlayerCue(cue) as Future<void>;
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextFormField).first, '2');
+    peer.state = {
+      'cues': [
+        {...cue, 'start_time_ms': 3000},
+      ],
+    };
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text(
+        'Cue or player changed. Reopen the cue to edit its current values.',
+      ),
+      findsOneWidget,
+    );
+    expect(calls, 0);
+    await tester.tap(find.byTooltip('Close'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Discard'));
+    await tester.pumpAndSettle();
+    await open;
+    await tester.pumpWidget(const SizedBox());
+  });
   testWidgets(
     'live slider keeps drag preview and sends one request only on release',
     (tester) async {

@@ -18,6 +18,7 @@ import 'unified/automation.dart';
 import 'unified/preferences.dart';
 import 'unified/buzzer_mirror.dart';
 import 'unified/channel_editor.dart';
+import 'unified/cue_editor.dart';
 
 void main() => runApp(const UnifiedControllerApp());
 
@@ -2072,9 +2073,7 @@ class _ControllerHomeState extends State<ControllerHome>
         title: Text('${cue['name'] ?? cue['reference'] ?? cue['id']}'),
         subtitle: Text('${cue['start_time_ms']} ms'),
         onTap: player.fresh && !busy
-            ? () => unawaited(
-                playerCommand('timeline.cue.edit', {'instance_id': cue['id']}),
-              )
+            ? () => unawaited(editPlayerCue(cue))
             : null,
       ),
     action(
@@ -2085,6 +2084,65 @@ class _ControllerHomeState extends State<ControllerHome>
           : null,
     ),
   ]);
+  Future<void> editPlayerCue(Json cue) async {
+    if (!player.fresh ||
+        busy ||
+        cue['id'] is! String ||
+        cue['start_time_ms'] is! int ||
+        cue['duration_ms'] is! int) {
+      return;
+    }
+    final owner = player.targetStamp, peer = player.transport;
+    final fingerprint = jsonEncode(cue);
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => CueEditor(
+        cue: cue,
+        save: (start, length) async {
+          final current = objects(player.state['cues'])
+              .where((v) => v['id'] == cue['id'])
+              .firstOrNull;
+          if (!player.fresh ||
+              player.targetStamp != owner ||
+              peer == null ||
+              current == null ||
+              jsonEncode(current) != fingerprint) {
+            throw const Rejected(
+              'Cue or player changed. Reopen the cue to edit its current values.',
+            );
+          }
+          if (length != cue['duration_ms'] && current['resizable'] != true) {
+            throw const Rejected('This cue has an intrinsic duration.');
+          }
+          setState(() {
+            activeRequests++;
+            busy = true;
+          });
+          try {
+            await peer.rpc(
+              length == cue['duration_ms']
+                  ? 'timeline.cue.place'
+                  : 'effect_cue.update',
+              {
+                'instance_id': cue['id'],
+                'start_time_ms': start,
+                if (length != cue['duration_ms']) 'duration_ms': length,
+              },
+            );
+          } finally {
+            if (mounted) {
+              setState(() {
+                activeRequests--;
+                busy = activeRequests > 0;
+              });
+            }
+          }
+        },
+      ),
+    );
+  }
+
   Widget peers() => card('Connected peers', Icons.hub_outlined, [
     const Text(
       'Select a registered Pealayer instance to control it through PCController. Commands retain the host’s authority and delivery checks.',
@@ -2534,7 +2592,7 @@ class _ControllerHomeState extends State<ControllerHome>
   Future<dynamic> _automationCall(String method, Json params) async {
     switch (method) {
       case 'app.ping':
-        return {'ok': true, 'app': 'PCController', 'version': '0.1.2'};
+        return {'ok': true, 'app': 'PCController', 'version': '0.1.3'};
       case 'app.capabilities':
         return {
           'jsonrpc': '2.0',
