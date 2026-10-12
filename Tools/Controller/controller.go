@@ -473,6 +473,7 @@ type Snapshot struct {
 	ResetLinesPort           PortInfo                        `json:"reset_lines_port"`
 	ResetLinesReason         string                          `json:"reset_lines_reason,omitempty"`
 	ProgramState             ProgramStateSnapshot            `json:"program_state"`
+	Programming              control.ProgrammingSnapshot     `json:"programming"`
 	EmergencyStop            EmergencyStopState              `json:"emergency_stop"`
 	RFLearning               RFLearnState                    `json:"rf_learning"`
 	Macros                   control.MacroSnapshot           `json:"macros"`
@@ -496,38 +497,39 @@ type Snapshot struct {
 
 // Event is the normalized event envelope shared by embedders and bridge clients.
 type Event struct {
-	ID          uint64            `json:"id"`
-	Time        time.Time         `json:"time"`
-	Kind        string            `json:"kind"`
-	Stream      string            `json:"stream"`
-	Text        string            `json:"text"`
-	Opcode      byte              `json:"opcode,omitempty"`
-	Seq         byte              `json:"seq,omitempty"`
-	Payload     []byte            `json:"payload,omitempty"`
-	Device      *DeviceEvent      `json:"device,omitempty"`
-	Lifecycle   string            `json:"lifecycle,omitempty"`
-	Port        PortInfo          `json:"port,omitempty"`
-	Reason      string            `json:"reason,omitempty"`
-	State       string            `json:"state,omitempty"`
-	Key         byte              `json:"key,omitempty"`
-	Gesture     string            `json:"gesture,omitempty"`
-	Source      string            `json:"source,omitempty"`
-	Target      string            `json:"target,omitempty"`
-	Targets     []string          `json:"targets,omitempty"`
-	MessageType string            `json:"message_type,omitempty"`
-	Action      string            `json:"action,omitempty"`
-	Severity    string            `json:"severity,omitempty"`
-	Correlation string            `json:"correlation,omitempty"`
-	Delivery    string            `json:"delivery,omitempty"`
-	Metadata    map[string]string `json:"metadata,omitempty"`
-	SourceID    *byte             `json:"source_id,omitempty"`
-	RFID        *byte             `json:"rf_id,omitempty"`
-	RFCode      uint32            `json:"rf_code,omitempty"`
-	RFBits      byte              `json:"rf_bits,omitempty"`
-	RFProtocol  byte              `json:"rf_protocol,omitempty"`
-	RFPulseUS   uint16            `json:"rf_pulse_us,omitempty"`
-	ResetCause  byte              `json:"reset_cause,omitempty"`
-	ResetCount  uint32            `json:"reset_count,omitempty"`
+	ID          uint64                       `json:"id"`
+	Time        time.Time                    `json:"time"`
+	Kind        string                       `json:"kind"`
+	Stream      string                       `json:"stream"`
+	Text        string                       `json:"text"`
+	Opcode      byte                         `json:"opcode,omitempty"`
+	Seq         byte                         `json:"seq,omitempty"`
+	Payload     []byte                       `json:"payload,omitempty"`
+	Device      *DeviceEvent                 `json:"device,omitempty"`
+	Lifecycle   string                       `json:"lifecycle,omitempty"`
+	Port        PortInfo                     `json:"port,omitempty"`
+	Reason      string                       `json:"reason,omitempty"`
+	State       string                       `json:"state,omitempty"`
+	Key         byte                         `json:"key,omitempty"`
+	Gesture     string                       `json:"gesture,omitempty"`
+	Source      string                       `json:"source,omitempty"`
+	Target      string                       `json:"target,omitempty"`
+	Targets     []string                     `json:"targets,omitempty"`
+	MessageType string                       `json:"message_type,omitempty"`
+	Action      string                       `json:"action,omitempty"`
+	Severity    string                       `json:"severity,omitempty"`
+	Correlation string                       `json:"correlation,omitempty"`
+	Delivery    string                       `json:"delivery,omitempty"`
+	Metadata    map[string]string            `json:"metadata,omitempty"`
+	Programming *control.ProgrammingSnapshot `json:"programming,omitempty"`
+	SourceID    *byte                        `json:"source_id,omitempty"`
+	RFID        *byte                        `json:"rf_id,omitempty"`
+	RFCode      uint32                       `json:"rf_code,omitempty"`
+	RFBits      byte                         `json:"rf_bits,omitempty"`
+	RFProtocol  byte                         `json:"rf_protocol,omitempty"`
+	RFPulseUS   uint16                       `json:"rf_pulse_us,omitempty"`
+	ResetCause  byte                         `json:"reset_cause,omitempty"`
+	ResetCount  uint32                       `json:"reset_count,omitempty"`
 }
 
 // FirmwareBuildRequest is the strict, typed alternative to sending a raw
@@ -2310,6 +2312,7 @@ func (client *Client) Snapshot() Snapshot {
 		Settings:                 snapshot.Settings,
 		HaveStatus:               snapshot.HaveStatus,
 		HaveSettings:             snapshot.HaveSettings,
+		Programming:              snapshot.Programming,
 		StatusUpdated:            snapshot.StatusUpdated,
 		ConnectionState:          snapshot.ConnectionState,
 		ConnectionReason:         snapshot.ConnectionReason,
@@ -2922,8 +2925,9 @@ func publicEvent(event control.Event) Event {
 		Gesture: event.Gesture, Source: event.Source,
 		Target: event.Target, Targets: append([]string(nil), event.Targets...), MessageType: event.MessageType, Action: event.Action,
 		Severity: event.Severity, Correlation: event.Correlation, Delivery: event.Delivery,
-		Metadata: cloneStringMap(event.Metadata),
-		RFCode:   event.RFCode, RFBits: event.RFBits,
+		Metadata:    cloneStringMap(event.Metadata),
+		Programming: event.Programming,
+		RFCode:      event.RFCode, RFBits: event.RFBits,
 		RFProtocol: event.RFProtocol, RFPulseUS: event.RFPulseUS,
 		ResetCause: event.ResetCause, ResetCount: event.ResetCount,
 	}

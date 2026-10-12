@@ -5080,7 +5080,7 @@ func eventUpdatesClientSnapshot(event controller.Event) bool {
 	kind := strings.ToLower(strings.TrimSpace(event.Kind))
 	switch kind {
 	case "door", "bluetooth", "pwm", "relay", "hot", "reset", "identity",
-		"front_panel.changed", "settings.changed", "illumination.changed", "peripherals.changed":
+		"front_panel.changed", "settings.changed", "illumination.changed", "peripherals.changed", "programming.lifecycle":
 		return true
 	}
 	return strings.HasPrefix(kind, "connection") ||
