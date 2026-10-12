@@ -88,6 +88,7 @@ import {
 	stalePackageTransactionPaths,
 	unixSmokeSource,
 	verboseCommandText,
+	windowsCMakeCABundle,
 	windowsCompilerProvisionArguments,
 	windowsSmokeSource
 } from './build.mjs'
@@ -485,6 +486,19 @@ test('libavrdude packaging has an explicit CLI-only opt-out', () => {
 	assert.equal(options.avrdudeLibrary, false)
 	const plan = createPlan(options, resolveBuildIdentity(options, {}), 'win32')
 	assert.equal(plan.actions.some(action => action.id === 'libavrdude-adapter'), false)
+})
+
+test('Windows libavrdude downloads use the Git for Windows CA bundle', async t => {
+	const root = await mkdtemp(join(tmpdir(), 'pccontroller-git-ca-'))
+	t.after(() => rm(root, { recursive: true, force: true }))
+	const command = join(root, 'cmd')
+	const bundle = join(root, 'mingw64', 'etc', 'ssl', 'certs', 'ca-bundle.crt')
+	await mkdir(command, { recursive: true })
+	await mkdir(resolve(bundle, '..'), { recursive: true })
+	await writeFile(join(command, 'git.exe'), '')
+	await writeFile(bundle, 'reviewed CA bundle')
+	assert.equal(windowsCMakeCABundle({ PATH: command, PATHEXT: '.exe' }, 'win32'), bundle)
+	assert.equal(windowsCMakeCABundle({ CMAKE_TLS_CAINFO: bundle }, 'linux'), bundle)
 })
 
 test('virtual-board-only delegates to the existing CMake presets without hardware', () => {

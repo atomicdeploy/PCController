@@ -1074,6 +1074,24 @@ export function allExecutables(name, env, platform = process.platform) {
 	return found
 }
 
+export function windowsCMakeCABundle(env = process.env, platform = process.platform) {
+	const configured = environmentValue(env, 'CMAKE_TLS_CAINFO') || environmentValue(env, 'SSL_CERT_FILE')
+	if (configured) return resolve(expandWindowsVariables(configured, env))
+	if (platform !== 'win32') return ''
+	const git = allExecutables('git', env, platform)[0]
+	if (!git) return ''
+	const parent = resolve(dirname(git), '..')
+	const grandparent = resolve(parent, '..')
+	const candidates = [
+		join(parent, 'mingw64', 'etc', 'ssl', 'certs', 'ca-bundle.crt'),
+		join(parent, 'etc', 'ssl', 'certs', 'ca-bundle.crt'),
+		join(parent, 'usr', 'ssl', 'certs', 'ca-bundle.crt'),
+		join(grandparent, 'mingw64', 'etc', 'ssl', 'certs', 'ca-bundle.crt'),
+		join(grandparent, 'usr', 'ssl', 'certs', 'ca-bundle.crt')
+	]
+	return candidates.find(candidate => existsSync(candidate)) || ''
+}
+
 function requireTool(name, env) {
 	const found = allExecutables(name, env)
 	if (found.length === 0) throw new BuildError(`required tool '${name}' was not found on the refreshed PATH`)
@@ -2208,6 +2226,8 @@ function buildAvrdudeAdapter(stage, env, options) {
 		'-S', AVRDUDE_ADAPTER_ROOT, '-B', buildRoot,
 		'-G', 'Ninja', `-DCMAKE_MAKE_PROGRAM=${ninja}`, '-DCMAKE_BUILD_TYPE=Release'
 	]
+	const caBundle = windowsCMakeCABundle(env)
+	if (caBundle) configure.push(`-DCMAKE_TLS_CAINFO=${caBundle.replaceAll('\\', '/')}`, '-DCMAKE_TLS_VERIFY=ON')
 	const sourceOverride = environmentValue(env, 'FETCHCONTENT_SOURCE_DIR_PCCONTROLLER_AVRDUDE')
 	if (sourceOverride) {
 		configure.push(`-DFETCHCONTENT_SOURCE_DIR_PCCONTROLLER_AVRDUDE=${resolve(sourceOverride)}`)
