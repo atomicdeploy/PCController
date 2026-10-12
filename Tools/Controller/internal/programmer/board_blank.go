@@ -20,6 +20,8 @@ type BoardBlankOptions struct {
 	ArduinoConfig    string
 	Avrdude          string
 	AvrdudeConf      string
+	AvrdudeBackend   string
+	AvrdudeAdapter   string
 	BackupRoot       string
 	USBaspBitClockUS float64
 	USBaspAutoSlow   bool
@@ -79,6 +81,7 @@ func BlankBoardWithRunner(
 		Method: MethodUSBasp, MCU: options.MCU,
 		ArduinoCLI: options.ArduinoCLI, ArduinoConfig: options.ArduinoConfig,
 		Avrdude: options.Avrdude, AvrdudeConf: options.AvrdudeConf,
+		AvrdudeBackend: options.AvrdudeBackend, AvrdudeAdapter: options.AvrdudeAdapter,
 		USBaspBitClockUS: options.USBaspBitClockUS,
 	}
 	if strings.EqualFold(options.Programmer, "usbasp_slow") && isp.USBaspBitClockUS <= 0 {
@@ -163,7 +166,7 @@ func BlankBoardWithRunner(
 	report.FlashBytes = ATmega328PFlashSize
 
 	fmt.Fprintln(output, "[6/6] Re-reading signature, fuses, and lock bits")
-	verify := isp
+	verify := withAvrdudeCLICompatibility(isp)
 	verify.Operation = OperationProbe
 	verifyCommand, err := Build(verify)
 	if err != nil {

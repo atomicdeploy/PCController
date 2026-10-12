@@ -114,6 +114,30 @@ func TestArduinoUploadUsesSketchNotInputFile(t *testing.T) {
 	}
 }
 
+func TestGenericToolchainCompilePreservesArbitraryFQBN(t *testing.T) {
+	command, err := Build(Options{
+		Method: MethodArduino, Operation: OperationCompile,
+		FQBN: "esp32:esp32:esp32s3", SketchPath: "external-sketch",
+		OutputDir: "external-output", ArduinoCLI: "arduino-cli",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(command.Args, " ")
+	for _, expected := range []string{
+		"compile --fqbn esp32:esp32:esp32s3", "--output-dir external-output", "external-sketch",
+	} {
+		if !strings.Contains(joined, expected) {
+			t.Fatalf("generic compile missing %q: %s", expected, joined)
+		}
+	}
+	for _, forbidden := range []string{"PCCONTROLLER_BUILD_HASH", "firmware_identity", "-mcall-prologues"} {
+		if strings.Contains(joined, forbidden) {
+			t.Fatalf("generic compile inherited PCController-only flag %q: %s", forbidden, joined)
+		}
+	}
+}
+
 func TestArduinoCompileUsesFirmwareRelaxFlags(t *testing.T) {
 	root := firmwareCompileFixture(t)
 	t.Setenv("PCCONTROLLER_BUILD_TIMESTAMP", "0x35019D5D")
@@ -216,12 +240,12 @@ func firmwareCompileFixture(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	files := map[string]string{
-		"PCController.ino":                     "void setup() {}\nvoid loop() {}\n",
-		"ProjectConfig.h":                      "#pragma once\n",
-		"MenuLogic.cpp":                        "void menuLogic() {}\n",
-		filepath.Join("LocalLib", "value.cpp"): "int value = 1;\n",
+		"PCController.ino":                                  "void setup() {}\nvoid loop() {}\n",
+		"ProjectConfig.h":                                   "#pragma once\n",
+		"MenuLogic.cpp":                                     "void menuLogic() {}\n",
+		filepath.Join("LocalLib", "value.cpp"):              "int value = 1;\n",
 		filepath.Join("Project", "Runtime", "Domain.inc.h"): "void firmwareDomain() {}\n",
-		filepath.Join(".cache", "poison.cpp"):                "#error must not be staged\n",
+		filepath.Join(".cache", "poison.cpp"):               "#error must not be staged\n",
 	}
 	for name, content := range files {
 		path := filepath.Join(root, name)

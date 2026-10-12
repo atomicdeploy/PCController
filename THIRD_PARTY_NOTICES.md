@@ -166,6 +166,16 @@ Node.js, CMake, Ninja, GCC/MinGW-w64, Go, `go-winres`, UPX, Git, and GitHub CLI
 are discovered from the user's environment. They are not included in this
 source tree and retain their own licenses.
 
+The packaged `pccontroller-avrdude` helper and matching compatibility CLI are
+built from checksum-locked AVRDUDE 8.3 source; the helper links libavrdude plus
+its selected USB/HID dependencies. AVRDUDE and the linked adapter are
+distributed under GPL-2.0-or-later; the
+package includes the upstream `COPYING` text and the exact source URL, commit,
+version, and SHA-256 are recorded in
+`Tools/AvrdudeAdapter/dependency-lock.json`. The main Go host communicates with
+this helper through a documented JSON Lines process protocol and does not link
+or load libavrdude.
+
 The project-owned Node build presentation resolves Chalk (MIT) and
 `cli-table3` (MIT), plus their transitive dependencies, from the exact
 `Tools/Build/package-lock.json`. They are build-time dependencies rather than

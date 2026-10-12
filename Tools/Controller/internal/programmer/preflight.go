@@ -31,15 +31,23 @@ func PreflightProgrammer(ctx context.Context, options Options) (resolvedOptions 
 	if err := ctx.Err(); err != nil {
 		return options, err
 	}
-	executable, configuration, err := findAvrdudeWithContext(
-		ctx, options.Avrdude, options.AvrdudeConf, options.ArduinoCLI, options.ArduinoConfig,
-	)
+	adapter, executable, configuration, err := resolveAvrdudeCommandTools(options)
 	if err != nil {
 		return options, err
 	}
-	resolved, err := exec.LookPath(executable)
-	if err != nil {
-		return options, fmt.Errorf("configured AVRDUDE executable %q is unavailable: %w", executable, err)
+	resolved := ""
+	if adapter != "" {
+		resolved, err = exec.LookPath(adapter)
+		if err != nil {
+			return options, fmt.Errorf("configured libavrdude adapter %q is unavailable: %w", adapter, err)
+		}
+		options.AvrdudeAdapter = resolved
+	} else {
+		resolved, err = exec.LookPath(executable)
+		if err != nil {
+			return options, fmt.Errorf("configured AVRDUDE executable %q is unavailable: %w", executable, err)
+		}
+		options.Avrdude = resolved
 	}
 	file, err := os.Open(configuration)
 	if err != nil {
@@ -59,6 +67,6 @@ func PreflightProgrammer(ctx context.Context, options Options) (resolvedOptions 
 	if err := ctx.Err(); err != nil {
 		return options, err
 	}
-	options.Avrdude, options.AvrdudeConf = resolved, configuration
+	options.AvrdudeConf = configuration
 	return options, nil
 }

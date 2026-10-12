@@ -157,6 +157,7 @@ func blankBoard(
 		MCU: programmer.DefaultBoardTarget().MCU, Programmer: *programmerName,
 		ArduinoCLI: store.Current().Programming.ToolchainCLI, ArduinoConfig: store.Current().Programming.ToolchainConfig,
 		Avrdude: store.Current().Programming.Avrdude, AvrdudeConf: store.Current().Programming.AvrdudeConf,
+		AvrdudeBackend: store.Current().Programming.AvrdudeBackend, AvrdudeAdapter: store.Current().Programming.AvrdudeAdapter,
 		BackupRoot: paths.BackupsDir, USBaspBitClockUS: *bitClock, USBaspAutoSlow: true,
 	}, output)
 	if err != nil {
@@ -332,6 +333,8 @@ func initializeBoard(
 		SketchPath:       project,
 		Avrdude:          store.Current().Programming.Avrdude,
 		AvrdudeConf:      store.Current().Programming.AvrdudeConf,
+		AvrdudeBackend:   store.Current().Programming.AvrdudeBackend,
+		AvrdudeAdapter:   store.Current().Programming.AvrdudeAdapter,
 		BackupRoot:       dataPaths.BackupsDir,
 		USBaspBitClockUS: *bitClock, USBaspAutoSlow: true,
 	}, output)
@@ -372,7 +375,9 @@ func initializeBoard(
 		Method: programmer.MethodUrclock, Operation: programmer.OperationWriteFlash,
 		Port: uartPort, HexPath: applicationHex, FQBN: *fqbn,
 		ArduinoCLI: cli, ArduinoConfig: cliConfig, Avrdude: store.Current().Programming.Avrdude,
-		AvrdudeConf: store.Current().Programming.AvrdudeConf,
+		AvrdudeConf:    store.Current().Programming.AvrdudeConf,
+		AvrdudeBackend: store.Current().Programming.AvrdudeBackend,
+		AvrdudeAdapter: store.Current().Programming.AvrdudeAdapter,
 	}, output); err != nil {
 		return fmt.Errorf("program application through UART bootloader: %w", err)
 	}

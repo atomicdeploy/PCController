@@ -92,6 +92,24 @@ func TestApplyApplicationIdentityWarnsOnOrdinaryUnavailability(t *testing.T) {
 	}
 }
 
+func TestExternalToolchainSelectionRejectsAVRBypass(t *testing.T) {
+	base := programmer.Options{
+		Method: programmer.MethodArduino, Operation: programmer.OperationWriteFlash,
+		FQBN: "arduino:avr:uno",
+	}
+	if err := validateExternalToolchainSelection(base, true); err == nil || !strings.Contains(err.Error(), "guarded libavrdude") {
+		t.Fatalf("AVR bypass accepted: %v", err)
+	}
+	base.FQBN = "esp32:esp32:esp32s3"
+	base.OutputDir = "external-output"
+	if err := validateExternalToolchainSelection(base, true); err != nil {
+		t.Fatalf("non-AVR board rejected: %v", err)
+	}
+	if err := validateExternalToolchainSelection(base, false); err == nil || !strings.Contains(err.Error(), "external-board") {
+		t.Fatalf("implicit generic upload accepted: %v", err)
+	}
+}
+
 func TestReconnectApplicationPropagatesDeferredCloseFailure(t *testing.T) {
 	closeErr := errors.New("cancel serial I/O")
 	runtime := &applicationIdentityRuntimeStub{

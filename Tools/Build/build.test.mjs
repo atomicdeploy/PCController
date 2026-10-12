@@ -471,6 +471,20 @@ test('safe default builds both targets without touching hardware', () => {
 	assert.equal(options.virtualBoard, false)
 	assert.equal(options.upload, false)
 	assert.equal(options.installBootloader, false)
+	assert.equal(options.avrdudeLibrary, true)
+	const plan = createPlan(options, resolveBuildIdentity(options, {}), 'win32')
+	const adapter = plan.actions.find(action => action.id === 'libavrdude-adapter')
+	assert.equal(adapter.hardware, false)
+	assert.deepEqual(adapter.command.args, [
+		'--build', '<avrdude-adapter-build>', '--target', 'pccontroller-avrdude'
+	])
+})
+
+test('libavrdude packaging has an explicit CLI-only opt-out', () => {
+	const options = parseArguments(['--host-only', '--no-avrdude-library'], {})
+	assert.equal(options.avrdudeLibrary, false)
+	const plan = createPlan(options, resolveBuildIdentity(options, {}), 'win32')
+	assert.equal(plan.actions.some(action => action.id === 'libavrdude-adapter'), false)
 })
 
 test('virtual-board-only delegates to the existing CMake presets without hardware', () => {

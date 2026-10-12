@@ -1,0 +1,8 @@
+{
+  "name": "libavrdude",
+  "version": "8.3",
+  "source_commit": "f139b390a6821039f5e4a2693f179803a85117b0",
+  "source_url": "https://github.com/avrdudes/avrdude/archive/f139b390a6821039f5e4a2693f179803a85117b0.tar.gz",
+  "source_sha256": "b8a4efb574c8e7a795b308765bb871df1213f5ce6b5841047b4830bb58a407fc",
+  "license": "GPL-2.0-or-later"
+}

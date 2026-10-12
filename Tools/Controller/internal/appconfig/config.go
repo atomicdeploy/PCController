@@ -241,6 +241,11 @@ type Programming struct {
 	FirmwareFeatures []firmwarefeatures.Feature `json:"firmware_features,omitempty"`
 	Avrdude          string                     `json:"avrdude,omitempty"`
 	AvrdudeConf      string                     `json:"avrdude_conf,omitempty"`
+	AvrdudeBackend   string                     `json:"avrdude_backend,omitempty"`
+	AvrdudeAdapter   string                     `json:"avrdude_adapter,omitempty"`
+	FlashBytes       uint32                     `json:"flash_bytes,omitempty"`
+	EEPROMBytes      uint32                     `json:"eeprom_bytes,omitempty"`
+	BootloaderBytes  uint32                     `json:"bootloader_bytes,omitempty"`
 }
 
 // Macro defines a named, host-persisted effect sequence. Mode is an execution

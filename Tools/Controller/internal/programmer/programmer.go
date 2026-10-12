@@ -43,23 +43,34 @@ const (
 	OperationBurnBoot       Operation = "install-bootloader"
 	OperationBackup         Operation = "backup"
 	OperationChipErase      Operation = "chip-erase"
+	OperationCompile        Operation = "compile"
 )
 
 type Options struct {
-	Method                     Method
-	Port                       string
-	HexPath                    string
-	SketchPath                 string
-	OutputDir                  string
-	BuildPath                  string
-	FQBN                       string
-	Programmer                 string
-	MCU                        string
-	BaudRate                   int
-	ArduinoCLI                 string
-	ArduinoConfig              string
-	Avrdude                    string
-	AvrdudeConf                string
+	Method        Method
+	Port          string
+	HexPath       string
+	SketchPath    string
+	OutputDir     string
+	BuildPath     string
+	FQBN          string
+	Programmer    string
+	MCU           string
+	BaudRate      int
+	ArduinoCLI    string
+	ArduinoConfig string
+	Avrdude       string
+	AvrdudeConf   string
+	// AvrdudeBackend selects "auto" (prefer the pinned libavrdude adapter),
+	// "library", or "cli". AvrdudeAdapter can name an explicit adapter;
+	// otherwise auto/library discover the packaged sibling or PATH entry.
+	AvrdudeBackend string
+	AvrdudeAdapter string
+	// Explicit memory geometry makes guarded readback available to additional
+	// AVR parts without weakening the commissioned ATmega328P defaults.
+	FlashBytes                 uint32
+	EEPROMBytes                uint32
+	BootloaderBytes            uint32
 	NoVerify                   bool
 	Operation                  Operation
 	OutputPath                 string
@@ -122,6 +133,9 @@ type Command struct {
 	Args    []string
 	Stage   string
 	Timeout time.Duration
+	// ProgressProtocol is empty for ordinary command output and
+	// "libavrdude-jsonl" for the project-owned callback adapter.
+	ProgressProtocol string
 }
 
 const (
@@ -218,6 +232,21 @@ func Build(options Options) (Command, error) {
 			return Command{}, err
 		}
 		switch options.Operation {
+		case OperationCompile:
+			if strings.TrimSpace(options.SketchPath) == "" {
+				return Command{}, errors.New("dependency CLI compile requires a project path")
+			}
+			args := []string{"compile", "--fqbn", options.FQBN, "--warnings", "all"}
+			if options.BuildPath != "" {
+				args = append(args, "--build-path", options.BuildPath)
+			}
+			if options.OutputDir != "" {
+				args = append(args, "--output-dir", options.OutputDir)
+			}
+			args = append(args, options.SketchPath)
+			return Command{Name: executable, Args: toolchainCLIArguments(
+				executable, options.ArduinoConfig, args...,
+			)}, nil
 		case OperationWriteFlash:
 			if options.Port == "" {
 				return Command{}, errors.New("dependency CLI upload requires a serial port")
@@ -225,9 +254,13 @@ func Build(options Options) (Command, error) {
 			if options.SketchPath == "" {
 				return Command{}, errors.New("dependency CLI upload requires a project path")
 			}
-			return Command{Name: executable, Args: toolchainCLIArguments(executable, options.ArduinoConfig,
-				"upload", "--port", options.Port, "--fqbn", options.FQBN,
-				options.SketchPath,
+			args := []string{"upload", "--port", options.Port, "--fqbn", options.FQBN}
+			if options.OutputDir != "" {
+				args = append(args, "--input-dir", options.OutputDir)
+			}
+			args = append(args, options.SketchPath)
+			return Command{Name: executable, Args: toolchainCLIArguments(
+				executable, options.ArduinoConfig, args...,
 			)}, nil
 		case OperationCoreInfo:
 			return Command{Name: executable, Args: toolchainCLIArguments(executable, options.ArduinoConfig,
@@ -264,14 +297,33 @@ func Build(options Options) (Command, error) {
 		}
 
 	case MethodUrclock, MethodUSBasp, MethodAvrdude:
-		executable, configuration, err := FindAvrdudeWithCLIConfig(
-			options.Avrdude,
-			options.AvrdudeConf,
-			options.ArduinoCLI,
-			options.ArduinoConfig,
-		)
+		adapter, executable, configuration, err := resolveAvrdudeCommandTools(options)
 		if err != nil {
 			return Command{}, err
+		}
+		// Urclock's metadata/version extensions are CLI-only. Auto mode keeps
+		// those compatibility operations working while all read/write/probe
+		// operations use the pinned library adapter and its callback stream.
+		if adapter != "" && (options.Operation == OperationMetadata || options.Operation == OperationStart) {
+			if strings.EqualFold(strings.TrimSpace(options.AvrdudeBackend), "library") {
+				return Command{}, fmt.Errorf(
+					"operation %s requires the AVRDUDE CLI compatibility backend",
+					options.Operation,
+				)
+			}
+			packagedCLI := filepath.Join(filepath.Dir(adapter), executableName("avrdude"))
+			adapter = ""
+			if strings.TrimSpace(options.Avrdude) == "" {
+				if info, statErr := os.Stat(packagedCLI); statErr == nil && info.Mode().IsRegular() {
+					options.Avrdude = packagedCLI
+				}
+			}
+			executable, configuration, err = FindAvrdudeWithCLIConfig(
+				options.Avrdude, options.AvrdudeConf, options.ArduinoCLI, options.ArduinoConfig,
+			)
+			if err != nil {
+				return Command{}, fmt.Errorf("resolve AVRDUDE CLI compatibility backend: %w", err)
+			}
 		}
 		programmer := options.Programmer
 		switch options.Method {
@@ -302,7 +354,10 @@ func Build(options Options) (Command, error) {
 			// mode when its metadata is unavailable. AVRDUDE then requires the
 			// canonical protected boot size, plus the board's EEPROM capability,
 			// before any signature/read/write operation is safe.
-			bootloaderBytes := generatedBoardFlashBytes - generatedBoardApplicationBytes
+			bootloaderBytes, geometryErr := resolvedBootloaderBytes(options)
+			if geometryErr != nil {
+				return Command{}, geometryErr
+			}
 			args = append(args,
 				"-xbootsize="+strconv.FormatUint(uint64(bootloaderBytes), 10),
 				"-xeepromrw",
@@ -370,6 +425,16 @@ func Build(options Options) (Command, error) {
 		stage, timeout := programmerCommandPolicy(options.Operation)
 		if options.ProgrammerTimeout > 0 {
 			timeout = options.ProgrammerTimeout
+		}
+		if adapter != "" {
+			adapterArgs, err := libavrdudeAdapterArguments(options, configuration, programmer)
+			if err != nil {
+				return Command{}, err
+			}
+			return Command{
+				Name: adapter, Args: adapterArgs, Stage: stage, Timeout: timeout,
+				ProgressProtocol: libavrdudeJSONLProtocol,
+			}, nil
 		}
 		return Command{Name: executable, Args: args, Stage: stage, Timeout: timeout}, nil
 	default:
@@ -520,10 +585,14 @@ func validateMandatoryWriteReadback(options Options) error {
 	default:
 		return fmt.Errorf("%s through %q cannot provide mandatory programmer readback", options.Operation, options.Method)
 	}
-	capacity := ATmega328PFlashSize
+	flashCapacity, eepromCapacity, capacityErr := resolvedMemoryCapacities(options)
+	if capacityErr != nil {
+		return capacityErr
+	}
+	capacity := flashCapacity
 	memory := "flash"
 	if options.Operation == OperationWriteEEPROM {
-		capacity = atmega328PEEPROMCapacity
+		capacity = eepromCapacity
 		memory = "EEPROM"
 	}
 	document, err := LoadIntelHex(options.HexPath)
@@ -564,11 +633,15 @@ func verifyMandatoryProgrammerReadback(
 	readOptions.OutputPath = readbackPath
 	readOptions.NoVerify = false
 	memory := "flash"
-	capacity := ATmega328PFlashSize
+	flashCapacity, eepromCapacity, capacityErr := resolvedMemoryCapacities(options)
+	if capacityErr != nil {
+		return capacityErr
+	}
+	capacity := flashCapacity
 	readOptions.Operation = OperationReadFlash
 	if options.Operation == OperationWriteEEPROM {
 		memory = "EEPROM"
-		capacity = atmega328PEEPROMCapacity
+		capacity = eepromCapacity
 		readOptions.Operation = OperationReadEEPROM
 	}
 	command, err := Build(readOptions)
@@ -956,7 +1029,7 @@ func BackupWithRunner(
 		failures = append(failures, fmt.Errorf("metadata: %w", createErr))
 		manifest.Errors = append(manifest.Errors, failures[len(failures)-1].Error())
 	} else {
-		metadataOptions := options
+		metadataOptions := withAvrdudeCLICompatibility(options)
 		if options.Method == MethodUrclock {
 			metadataOptions.Operation = OperationMetadata
 		} else {
@@ -1235,7 +1308,14 @@ func Run(ctx context.Context, command Command, output io.Writer) error {
 	}
 	defer cancel()
 	process := exec.CommandContext(runContext, command.Name, command.Args...)
-	stream := &progressOutput{ctx: ctx, output: output, stage: commandStage(command)}
+	var stream io.Writer
+	var adapterStream *libavrdudeEventOutput
+	if command.ProgressProtocol == libavrdudeJSONLProtocol {
+		adapterStream = newLibavrdudeEventOutput(ctx, output, commandStage(command))
+		stream = adapterStream
+	} else {
+		stream = &progressOutput{ctx: ctx, output: output, stage: commandStage(command)}
+	}
 	process.Stdout = stream
 	process.Stderr = stream
 	process.Stdin = nil
@@ -1265,6 +1345,9 @@ func Run(ctx context.Context, command Command, output io.Writer) error {
 	err = process.Wait()
 	elapsed := time.Since(started)
 	if err == nil {
+		if adapterStream != nil && !adapterStream.completedSuccessfully() {
+			return fmt.Errorf("%s ended without a successful libavrdude result event", command.String())
+		}
 		return nil
 	}
 	if command.Timeout > 0 && context.Cause(runContext) == errProgrammerCommandTimeout {
