@@ -11,7 +11,7 @@ ACK, availability/LWT, an outbound WebSocket and authenticated local Android
 HTTP/WebSocket clients. It is explicitly foreground-only and loopback-only;
 remote commands/firmware staging are opt-in, duplicate/retained/stale requests
 fail closed, and no lost command is replayed. See
-[the contracts and remaining acceptance](../docs/MOBILE-NETWORK-WORKSPACE.md).
+[the contracts and remaining acceptance](https://github.com/atomicdeploy/PakarController/blob/6dfc3e72ca0264242325f76b7fba04dec1f38fe2/docs/MOBILE-NETWORK-WORKSPACE.md).
 
 The Flutter control surface targets Android phones and tablets with the same
 truthful board-state contract as the native and embedded Web interfaces.
@@ -89,4 +89,4 @@ with an explicit simulated peer and a silent injected audio output. Front panel
 and actual 7-segment masks are independent previews; phone-speaker mirroring
 synthesizes the advertised AVR Hz and timestamp cadence and is opt-in,
 foreground-only and peer/boot/AVR-session fenced. See
-[MOBILE-MIRRORING](../docs/MOBILE-MIRRORING.md) for contracts and live-test gates.
+[MOBILE-MIRRORING](https://github.com/atomicdeploy/PakarController/blob/6dfc3e72ca0264242325f76b7fba04dec1f38fe2/docs/MOBILE-MIRRORING.md) for contracts and live-test gates.

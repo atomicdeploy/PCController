@@ -113,6 +113,18 @@ test("shared firmware guide permits only product issues and the selected core", 
   assert.equal(privacyFindings(path, "https://github.com/other/unreviewed", context)[0].kind, "unreviewed repository reference");
 });
 
+test("mobile donor documentation and font notice retain narrow public provenance", () => {
+  const context = { repository: "atomicdeploy/PCController" };
+  for (const [path, repository] of [
+    ["mobile/assets/fonts/Vazirmatn-OFL.txt", "rastikerdar/vazirmatn"],
+    ["mobile/PAKAR-README.md", "atomicdeploy/PakarController"],
+  ]) {
+    assert.deepEqual(privacyFindings(path, `https://github.com/${repository}`, context), []);
+    assert.equal(privacyFindings(path, "https://github.com/other/unreviewed", context)[0].kind, "unreviewed repository reference");
+    assert.equal(privacyFindings(path, "C:\\Users\\Private\\secret", context)[0].kind, "private path");
+  }
+});
+
 test("reviewed engineering roadmap permits only its named public sources", () => {
   const path = "docs/Media-Timing-and-MCU-Expansion.md";
   const context = { repository: "atomicdeploy/PCController" };

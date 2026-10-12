@@ -20,10 +20,16 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
-        with:
-          channel: stable
-          flutter-version: '3.47.3'
+      - name: Restore the verified official Flutter SDK
+        shell: bash
+        run: |
+          curl --fail --location --retry 3 --connect-timeout 15 --max-time 240 \
+            https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_3.47.3-stable.tar.xz \
+            --output "$RUNNER_TEMP/pccontroller-flutter-sdk.tar.xz"
+          printf '%s  %s\n' '988665565cad9091db1baa54bf6d3868bb40e29719592f3c3a164deefd4208e1' "$RUNNER_TEMP/pccontroller-flutter-sdk.tar.xz" | sha256sum --check -
+          tar --extract --xz --file "$RUNNER_TEMP/pccontroller-flutter-sdk.tar.xz" --directory "$RUNNER_TEMP"
+          test "$(git -C "$RUNNER_TEMP/flutter" rev-parse HEAD)" = 'e8113bf45620cbeb8aff64947ee4c93e16adb4cf'
+          printf '%s\n' "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
       - name: Analyze and test
         working-directory: mobile
         env:

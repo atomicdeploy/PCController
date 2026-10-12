@@ -1,4 +1,4 @@
-// Ported from PCController web/src/status-led-event.ts (same current contract).
+// Same current contract as PCController web/src/status-led-event.ts.
 import 'transport.dart' show Json, object;
 
 Json applyOutputEvent(Json snapshot, Json event) {
