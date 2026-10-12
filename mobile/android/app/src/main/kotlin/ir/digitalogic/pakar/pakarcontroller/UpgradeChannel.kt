@@ -130,6 +130,8 @@ class UpgradeChannel(private val activity: Activity, messenger: BinaryMessenger)
         // Before 0% or file creation; installation needs an additional OS copy.
         require(activity.cacheDir.usableSpace >= size * 2 + 64 * 1024 * 1024) { "Insufficient space for APK and Android installation" }
         require(root.exists() || root.mkdirs()) { "Cannot create private staging" }
+        val retained = root.listFiles()?.filter { it.name.matches(Regex("[a-f0-9-]{36}\\.apk")) }?.sumOf { it.length() } ?: 0
+        require(retained + size <= maximum) { "Interrupted APK cache reaches its 128 MiB budget; clear this app's cache or wait for expiry" }
         val id = UUID.randomUUID().toString(); val file = File(root, "$id.apk")
         require(file.createNewFile()) { "Cannot create private transfer" }
         transfer = Transfer(id, file, size, hash)

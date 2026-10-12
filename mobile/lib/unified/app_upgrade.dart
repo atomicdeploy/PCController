@@ -27,17 +27,23 @@ class AppUpgrade extends ChangeNotifier {
   };
   Json state = {'state': 'idle'};
   bool pulling = false;
+  bool _disposed = false;
   Timer? _changed;
+  void _emit() {
+    if (!_disposed) super.notifyListeners();
+  }
+
   void _notify() {
+    if (_disposed) return;
     if (state['state'] == 'receiving' || state['state'] == 'transmitting') {
       _changed ??= Timer(const Duration(milliseconds: 80), () {
         _changed = null;
-        notifyListeners();
+        _emit();
       });
     } else {
       _changed?.cancel();
       _changed = null;
-      notifyListeners();
+      _emit();
     }
   }
 
@@ -45,7 +51,7 @@ class AppUpgrade extends ChangeNotifier {
     channel.setMethodCallHandler((call) async {
       if (call.method == 'installStatus') {
         state = {'state': 'android_receipt', ...object(call.arguments)};
-        notifyListeners();
+        _emit();
       }
     });
   }
@@ -113,7 +119,7 @@ class AppUpgrade extends ChangeNotifier {
     try {
       // Preflight before 0%: source identity, manifest, version, signer, space.
       state = {'state': 'verifying'};
-      notifyListeners();
+      _emit();
       final health = await boundedPeerGet(client, origin.resolve('/healthz'));
       if (health['status'] != 'ok' ||
           health['service'] != 'controller-mobile') {
@@ -185,7 +191,7 @@ class AppUpgrade extends ChangeNotifier {
     } finally {
       pulling = false;
       client.close(force: true);
-      notifyListeners();
+      _emit();
     }
   }
 
@@ -202,7 +208,7 @@ class AppUpgrade extends ChangeNotifier {
     String? transfer, capability;
     try {
       state = {'state': 'offering'};
-      notifyListeners();
+      _emit();
       final health = await boundedPeerGet(client, origin.resolve('/healthz'));
       if (health['status'] != 'ok' ||
           health['service'] != 'controller-mobile') {
@@ -266,7 +272,7 @@ class AppUpgrade extends ChangeNotifier {
         'endpoint': address,
         'version_code': manifest['version_code'],
       };
-      notifyListeners();
+      _emit();
       return result;
     } catch (error) {
       if (transfer != null && capability != null) {
@@ -283,12 +289,13 @@ class AppUpgrade extends ChangeNotifier {
     } finally {
       pulling = false;
       client.close(force: true);
-      notifyListeners();
+      _emit();
     }
   }
 
   @override
   void dispose() {
+    _disposed = true;
     _changed?.cancel();
     channel.setMethodCallHandler(null);
     super.dispose();
