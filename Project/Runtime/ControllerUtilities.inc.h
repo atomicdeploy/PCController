@@ -143,8 +143,8 @@ bool hostUnavailable() {
 
 // Collapses both named temperature channels into the safety warning state.
 bool temperatureHot() {
-  return sensors.temperatureCentiC[0] >= HOT_TEMPERATURE_CENTI_C ||
-         sensors.temperatureCentiC[1] >= HOT_TEMPERATURE_CENTI_C;
+  return sensors.temperatureCentiC[0] >= settingsStore.hotTemperatureCentiC() ||
+         sensors.temperatureCentiC[1] >= settingsStore.hotTemperatureCentiC();
 }
 
 // Composes the compact availability/activity bitmap used by StatusResponse.

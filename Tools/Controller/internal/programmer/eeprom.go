@@ -2,6 +2,7 @@ package programmer
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -32,6 +33,11 @@ const (
 	EEPROMRemoteRecordSize         byte   = 12
 	EEPROMRemoteCapacity           byte   = 20
 	EEPROMRemoteRecordBytes        uint32 = 12
+	EEPROMTemperatureAddress       uint32 = EEPROMRemoteEntriesAddress + uint32(EEPROMRemoteCapacity)*EEPROMRemoteRecordBytes
+	EEPROMTemperatureRecordBytes   uint32 = 11
+	MinimumHotTemperatureCentiC    uint16 = 3000
+	MaximumHotTemperatureCentiC    uint16 = 10000
+	DefaultHotTemperatureCentiC    uint16 = 5500
 	EEPROMResetJournalAddress      uint32 = 336
 	EEPROMResetJournalSlots        byte   = 64
 	EEPROMResetJournalRecordSize   uint32 = 6
@@ -63,9 +69,22 @@ type OfflineEEPROMDecode struct {
 	SourceSHA256 string                    `json:"source_sha256"`
 	Layout       string                    `json:"layout"`
 	Settings     OfflineSettingsDecode     `json:"settings"`
+	Temperature  TemperatureConfiguration  `json:"temperature"`
 	Remotes      OfflineRemoteStoreDecode  `json:"remotes"`
 	ResetJournal OfflineResetJournalDecode `json:"reset_journal"`
 	Automations  OfflineAutomationDecode   `json:"automations"`
+}
+
+type TemperatureConfiguration struct {
+	Present            bool    `json:"present"`
+	Configured         bool    `json:"configured"`
+	Valid              bool    `json:"valid"`
+	Issue              string  `json:"issue,omitempty"`
+	LightingROM        [8]byte `json:"lighting_rom"`
+	LightingIdentifier string  `json:"lighting_identifier,omitempty"`
+	HotThresholdCentiC uint16  `json:"hot_threshold_centi_c"`
+	StoredChecksum     byte    `json:"stored_checksum"`
+	ComputedChecksum   byte    `json:"computed_checksum"`
 }
 
 // ControllerSettings is the current semantic MCU settings/name layout. Alpha
@@ -74,7 +93,6 @@ type ControllerSettings struct {
 	Flags                     byte    `json:"flags"`
 	Silent                    bool    `json:"silent"`
 	ProgrammingMode           bool    `json:"programming_mode"`
-	SwapTemperatureSensors    bool    `json:"swap_temperature_sensors"`
 	MotionDoorPolicy          byte    `json:"motion_door_policy"`
 	DoorAudioEnabled          bool    `json:"door_audio_enabled"`
 	RelayAudioEnabled         bool    `json:"relay_audio_enabled"`
@@ -234,13 +252,105 @@ func DecodeOfflineEEPROMHex(path string) (OfflineEEPROMDecode, error) {
 	decoded := OfflineEEPROMDecode{
 		SourceKind: "offline-eeprom-hex",
 		SourcePath: path, SourceSHA256: document.SourceSHA256,
-		Layout: "settings-name-unversioned-40/rf-record12-cap20/reset-journal-336",
+		Layout: "settings-name-unversioned-40/rf-record12-cap20/temperature-rom8-threshold2-crc/reset-journal-336",
 	}
 	decoded.Settings = decodeOfflineSettings(document.Image)
+	decoded.Temperature = decodeTemperatureConfiguration(document.Image)
 	decoded.Remotes = decodeOfflineRemotes(document.Image)
 	decoded.ResetJournal = decodeOfflineResetJournal(document.Image)
 	decoded.Automations = decodeOfflineAutomations(document.Image)
 	return decoded, nil
+}
+
+func decodeTemperatureConfiguration(image *IntelHexImage) TemperatureConfiguration {
+	record, err := image.BytesAt(EEPROMTemperatureAddress, EEPROMTemperatureRecordBytes)
+	if err != nil {
+		return TemperatureConfiguration{Issue: err.Error()}
+	}
+	result := TemperatureConfiguration{Present: true}
+	allBlank := true
+	for _, value := range record {
+		allBlank = allBlank && value == 0xFF
+	}
+	if allBlank {
+		result.Valid = true
+		result.HotThresholdCentiC = DefaultHotTemperatureCentiC
+		return result
+	}
+	result.Configured = true
+	copy(result.LightingROM[:], record[:8])
+	result.LightingIdentifier = formatDS18B20ROM(result.LightingROM)
+	result.HotThresholdCentiC = binary.LittleEndian.Uint16(record[8:10])
+	result.StoredChecksum = record[10]
+	result.ComputedChecksum = avrCRC8(record[:10])
+	switch {
+	case result.StoredChecksum != result.ComputedChecksum:
+		result.Issue = "temperature configuration CRC-8 mismatch"
+	case !validDS18B20ROM(result.LightingROM):
+		result.Issue = "lighting ROM is not a CRC-valid DS18B20 identity"
+	case result.HotThresholdCentiC < MinimumHotTemperatureCentiC || result.HotThresholdCentiC > MaximumHotTemperatureCentiC:
+		result.Issue = fmt.Sprintf("hot threshold %d centi-C is outside %d..%d", result.HotThresholdCentiC, MinimumHotTemperatureCentiC, MaximumHotTemperatureCentiC)
+	default:
+		result.Valid = true
+	}
+	return result
+}
+
+func formatDS18B20ROM(rom [8]byte) string {
+	return fmt.Sprintf("%02X-%02X%02X%02X%02X%02X%02X-%02X", rom[0], rom[1], rom[2], rom[3], rom[4], rom[5], rom[6], rom[7])
+}
+
+func validDS18B20ROM(rom [8]byte) bool {
+	if rom[0] != 0x28 {
+		return false
+	}
+	var crc byte
+	for _, item := range rom[:7] {
+		value := item
+		for bit := 0; bit < 8; bit++ {
+			mix := (crc ^ value) & 1
+			crc >>= 1
+			if mix != 0 {
+				crc ^= 0x8C
+			}
+			value >>= 1
+		}
+	}
+	return crc == rom[7]
+}
+
+// ConfigureTemperatureEEPROM creates a new complete EEPROM image with only
+// the CRC-protected temperature record changed. The guarded EEPROM programmer
+// remains responsible for backup, physical write, and independent readback.
+func ConfigureTemperatureEEPROM(sourcePath, outputPath string, lightingROM [8]byte, hotThresholdCentiC uint16) (IntelHexPatchResult, error) {
+	if !validDS18B20ROM(lightingROM) {
+		return IntelHexPatchResult{}, errors.New("lighting ROM is not a CRC-valid DS18B20 identity")
+	}
+	if hotThresholdCentiC < MinimumHotTemperatureCentiC || hotThresholdCentiC > MaximumHotTemperatureCentiC {
+		return IntelHexPatchResult{}, fmt.Errorf("hot threshold %d centi-C is outside %d..%d", hotThresholdCentiC, MinimumHotTemperatureCentiC, MaximumHotTemperatureCentiC)
+	}
+	document, err := LoadIntelHex(sourcePath)
+	if err != nil {
+		return IntelHexPatchResult{}, err
+	}
+	if err := requireFullEEPROMImage(document.Image); err != nil {
+		return IntelHexPatchResult{}, err
+	}
+	oldRecord, err := document.Image.BytesAt(EEPROMTemperatureAddress, EEPROMTemperatureRecordBytes)
+	if err != nil {
+		return IntelHexPatchResult{}, err
+	}
+	newRecord := make([]byte, EEPROMTemperatureRecordBytes)
+	copy(newRecord[:8], lightingROM[:])
+	binary.LittleEndian.PutUint16(newRecord[8:10], hotThresholdCentiC)
+	newRecord[10] = avrCRC8(newRecord[:10])
+	return ApplyIntelHexPatchPlan(sourcePath, outputPath, FlashLayout{
+		FlashSize: PCControllerEEPROMBytes, BootloaderBase: PCControllerEEPROMBytes,
+	}, IntelHexPatchPlan{
+		SourceSHA256: document.SourceSHA256,
+		Regions:      []NamedPatchRegion{{Name: "temperature-configuration", Start: EEPROMTemperatureAddress, Length: EEPROMTemperatureRecordBytes}},
+		Patches:      []RegionPatch{{Region: "temperature-configuration", ExpectedOld: oldRecord, Replacement: newRecord}},
+	})
 }
 
 func decodeOfflineSettings(image *IntelHexImage) OfflineSettingsDecode {
@@ -287,7 +397,6 @@ func decodeOfflineSettingsRecord(record []byte) OfflineSettingsDecode {
 	copy(values.UserPWM[:], settings[9:17])
 	values.Silent = values.Flags&0x01 != 0
 	values.ProgrammingMode = values.Flags&0x02 != 0
-	values.SwapTemperatureSensors = values.Flags&0x04 != 0
 	values.MotionDoorPolicy = (values.Flags >> 3) & 0x03
 	values.DoorAudioEnabled = values.Flags&0x20 == 0
 	values.RelayAudioEnabled = values.Flags&0x40 == 0

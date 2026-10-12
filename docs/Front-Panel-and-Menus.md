@@ -49,12 +49,12 @@ The expected I2C addresses do not conflict:
 Any future device strapped to one of those same addresses would conflict on
 the shared bus. DS18B20 and 433 MHz devices are not I2C devices.
 
-The firmware discovers at most two valid DS18B20 ROMs, sorts their 64-bit ROM
-codes, and reports each ROM, logical role, and current value through
-`TemperatureList`. The current canonical default maps the lower sorted ROM to
-`Temperature LED` and the higher ROM to `Temperature BT`; the EEPROM Swap
-Temperature Sensors flag reverses that assignment. A controlled illumination
-heating test is still the authority for the physical harness.
+The firmware discovers at most two valid DS18B20 ROMs and reports each ROM,
+logical role, and current value through `TemperatureList`. The commissioned
+EEPROM record names `Temperature LED` by its complete ROM ID; the other probe
+is `Temperature BT`. Discovery order is temporary before commissioning. A
+controlled illumination heating test is still the authority for the physical
+harness.
 
 R1/R2 and R3/R4 are not two independent Up/Down relay pairs. R1 and R3 select
 direction; R2 and R4 enable power:
@@ -180,18 +180,17 @@ external 4.7 kOhm pull-up to VCC**; the bounded custom driver returns a
 disconnected value rather than waiting forever if presence is absent. Parasite
 power is not supported because conversion would also need a strong pull-up.
 
-The scan keeps at most two valid, CRC-checked DS18B20 ROMs, sorts them
-lexicographically, configures 11-bit resolution (0.125 C, 375 ms maximum), and
-uses one Skip-ROM conversion for both probes. Conversion and scratchpad reads
+The scan keeps at most two valid, CRC-checked DS18B20 ROMs, configures 11-bit
+resolution (0.125 C, 375 ms maximum), and uses one Skip-ROM conversion for
+both probes. Conversion and scratchpad reads
 are asynchronous: requests begin every 450 ms while the door is open and every
 1000 ms while closed. A 50/50 integer EMA smooths each valid sample; a sample
 at or above 55.00 C bypasses the filter so HOT indication is not delayed.
 1-Wire service is suspended during RF learning because its brief interrupt
 masking can disturb received pulse timing.
 
-The current canonical default maps the lower sorted ROM to `Temperature LED`
-and the higher ROM to `Temperature BT`. The EEPROM Swap Temperature Sensors
-setting reverses logical roles without editing firmware. The host can query
+The EEPROM temperature record maps the complete lighting-probe ROM to
+`Temperature LED`; the other probe is `Temperature BT`. The host can query
 both ROM identities and current values; confirm the physical identity by
 heating the enclosure illumination and verifying only tLED rises materially.
 

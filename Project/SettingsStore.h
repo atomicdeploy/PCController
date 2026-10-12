@@ -27,7 +27,8 @@ constexpr uint8_t Silent = 1U << 0;
 // Host-managed programming latch: survives every reset in the current EEPROM
 // record without changing the user's persistent Silent preference.
 constexpr uint8_t ProgrammingMode = 1U << 1;
-constexpr uint8_t SwapTemperatureSensors = 1U << 2;
+// Bit 2 is retired. Temperature roles are mapped by CRC-valid DS18B20 ROM in
+// the dedicated temperature settings record, never by sorted position.
 constexpr uint8_t MotionDoorPolicyMask = ControllerCore::MotionDoorPolicyMask;
 constexpr uint8_t MotionDoorPolicyShift =
     ControllerCore::MotionDoorPolicyShift;
@@ -141,17 +142,6 @@ struct __attribute__((packed)) ControllerSettings {
   bool retainDirectionOnStop() const {
     return (outputPersistence & OutputPersistence::RetainDirectionOnStop) != 0;
   }
-  bool swapTemperatureSensors() const {
-    return (flags & SettingsFlags::SwapTemperatureSensors) != 0;
-  }
-  void setSwapTemperatureSensors(bool value) {
-    if (value) {
-      flags |= SettingsFlags::SwapTemperatureSensors;
-    } else {
-      flags &=
-          static_cast<uint8_t>(~SettingsFlags::SwapTemperatureSensors);
-    }
-  }
   MotionDoorPolicy motionDoorPolicy() const {
     return ControllerCore::motionDoorPolicyFromFlags(flags);
   }
@@ -237,6 +227,11 @@ struct __attribute__((packed)) ControllerSettings {
 #endif
 };
 
+struct __attribute__((packed)) TemperatureConfiguration {
+  uint8_t lightingRom[8];
+  int16_t hotThresholdCentiC;
+};
+
 // The seven leading byte-sized settings form the canonical UART settings
 // prefix. Keep the shared semantic prefix explicit while allowing later
 // payloads to append independently discoverable fields.
@@ -260,6 +255,9 @@ public:
   static constexpr int EepromAddress = EepromLayout::SettingsAddress;
   static constexpr uint16_t SaveDelayMs = 1500;
   static constexpr uint8_t MaximumBoardNameLength = 8;
+  static constexpr int16_t DefaultHotTemperatureCentiC = 5500;
+  static constexpr int16_t MinimumHotTemperatureCentiC = 3000;
+  static constexpr int16_t MaximumHotTemperatureCentiC = 10000;
 
   // Loads a valid EEPROM record or installs development defaults in RAM.
   bool begin(uint32_t now = millis());
@@ -284,9 +282,23 @@ public:
   bool boardName(uint8_t *record) const;
   bool setBoardName(const uint8_t *name, uint8_t length);
 
+  // The lighting probe is identified by its complete CRC-valid DS18B20 ROM.
+  // With the board's fixed maximum of two probes, every other discovered ROM
+  // is the Bluetooth-audio role. A blank mapping uses temporary discovery
+  // order only until the host commissions the physical installation.
+  int16_t hotTemperatureCentiC() const {
+    return temperatureConfiguration_.hotThresholdCentiC;
+  }
+  bool temperatureConfigurationPersisted() const {
+    return temperatureConfiguration_.lightingRom[0] == 0x28;
+  }
+  const uint8_t *lightingTemperatureRom() const {
+    return temperatureConfiguration_.lightingRom;
+  }
 private:
   void setDefaults();
   bool loadCurrent();
+  void loadTemperatureConfiguration();
 
   ControllerSettings settings_{}; // Live MCU settings; never host-config storage.
   uint8_t boardNameLength_ = 0;
@@ -294,6 +306,7 @@ private:
   uint32_t changedAt_ = 0;
   bool dirty_ = false;
   bool persisted_ = false;
+  TemperatureConfiguration temperatureConfiguration_{};
 };
 
 // settingsStore is the single MCU EEPROM settings owner.

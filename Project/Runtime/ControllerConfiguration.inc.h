@@ -81,8 +81,6 @@ enum RfLearningMode : uint8_t {
 };
 constexpr uint16_t PWM_MENU_STEP = 256;
 constexpr uint8_t ILLUMINATION_MENU_STEP = 16;
-constexpr int16_t HOT_TEMPERATURE_CENTI_C = 5500;
-
 // Invalid sensor sentinels survive packed native telemetry without floating point.
 constexpr int32_t INVALID_I32 = (-2147483647L - 1L);
 constexpr int16_t INVALID_I16 = (-32767 - 1);

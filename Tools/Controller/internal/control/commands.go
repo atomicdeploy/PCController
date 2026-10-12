@@ -454,7 +454,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 	mustRegister(shell.Command{
 		Name: "temp", Aliases: []string{"temperature"},
 		Usage:   "temp [list|scan]",
-		Summary: "read tLED/tBT or list their DS18B20 ROM identities",
+		Summary: "read temperatures and stable sensor identities",
 		Run: func(ctx context.Context, args []string) (string, error) {
 			if len(args) == 0 {
 				status, err := refresh(ctx, runtime)

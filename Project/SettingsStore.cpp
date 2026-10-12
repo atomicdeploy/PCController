@@ -25,6 +25,9 @@ static_assert(sizeof(StoredSettings) == EepromLayout::SettingsRecordBytes,
 static_assert(SettingsStore::EepromAddress + sizeof(StoredSettings) <=
                   EepromLayout::RemoteHeaderAddress,
               "Settings overlap learned RF header");
+static_assert(sizeof(TemperatureConfiguration) + 1 ==
+                  EepromLayout::TemperatureSettingsBytes,
+              "Temperature settings EEPROM payload changed shape");
 
 uint8_t checksum(const void *value, uint8_t length) {
   return ControllerProtocol::UartProtocol::crc8(
@@ -64,6 +67,7 @@ uint8_t firstVisiblePersistentMenuPage(uint16_t visibleMask,
 
 bool SettingsStore::begin(uint32_t now) {
   setDefaults();
+  loadTemperatureConfiguration();
   if (loadCurrent()) {
     persisted_ = true;
 #if PCCONTROLLER_MENU_VISIBILITY
@@ -210,6 +214,22 @@ void SettingsStore::setDefaults() {
   // Host-owned factory provisioning supplies the legacy packed menu bytes.
   // They intentionally stay zero in the volatile blank-EEPROM fallback.
   settings_.motionBreakMs = 1;
+}
+
+void SettingsStore::loadTemperatureConfiguration() {
+  EEPROM.get(EepromLayout::TemperatureSettingsAddress,
+             temperatureConfiguration_);
+  // The host owns record CRC generation and verified readback. The MCU guards
+  // the safety-critical value semantically; an arbitrary ROM is harmless
+  // unless all eight bytes exactly match a CRC-valid discovered probe.
+  if (static_cast<uint16_t>(
+          temperatureConfiguration_.hotThresholdCentiC -
+          MinimumHotTemperatureCentiC) >
+      static_cast<uint16_t>(MaximumHotTemperatureCentiC -
+                            MinimumHotTemperatureCentiC)) {
+    temperatureConfiguration_.hotThresholdCentiC =
+        DefaultHotTemperatureCentiC;
+  }
 }
 
 bool SettingsStore::loadCurrent() {

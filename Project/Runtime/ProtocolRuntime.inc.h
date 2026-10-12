@@ -149,11 +149,10 @@ void sendTemperatureList(uint8_t sequence) {
   uint8_t index = 2;
   for (uint8_t addressIndex = 0;
        addressIndex < temperatureAddressCount; ++addressIndex) {
-    const uint8_t role = temperatureRole(addressIndex);
-    payload[index++] = role; // 0=tLED, 1=tBT
+    payload[index++] = addressIndex; // 0=tLED, 1=tBT
     memcpy(payload + index, temperatureAddresses[addressIndex], 8);
     index += 8;
-    appendI16(payload, index, sensors.temperatureCentiC[role]);
+    appendI16(payload, index, sensors.temperatureCentiC[addressIndex]);
   }
   appProtocol.send(ControllerProtocol::TemperatureListResponse, sequence,
                    payload, index);
@@ -489,7 +488,6 @@ bool applySettings(const uint8_t *payload, uint8_t length, uint32_t at) {
   settings.flags &=
       SettingsFlags::Silent |
       SettingsFlags::ProgrammingMode |
-      SettingsFlags::SwapTemperatureSensors |
       SettingsFlags::MotionDoorPolicyMask |
       SettingsFlags::DoorAudioDisabled |
       SettingsFlags::RelayAudioDisabled;

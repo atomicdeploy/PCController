@@ -507,7 +507,7 @@ func monitorPrimaryFirmwareUpdate(
 }
 
 func runEEPROM(args []string, stdout, stderr io.Writer) error {
-	const usage = "usage: controller eeprom factory-defaults --output EEPROM.hex | inspect (--input IMAGE.hex | --backup-manifest MANIFEST.json) | export --backup-manifest MANIFEST.json --output SETTINGS.hex | import --backup-manifest MANIFEST.json --settings SETTINGS.hex --output EEPROM.hex | restore --backup-manifest MANIFEST.json --output EEPROM.hex"
+	const usage = "usage: controller eeprom factory-defaults --output EEPROM.hex | inspect (--input IMAGE.hex | --backup-manifest MANIFEST.json) | temperature --input EEPROM.hex --output EEPROM.hex --lighting-rom ROM --hot-threshold-centi-c 5500 | export --backup-manifest MANIFEST.json --output SETTINGS.hex | import --backup-manifest MANIFEST.json --settings SETTINGS.hex --output EEPROM.hex | restore --backup-manifest MANIFEST.json --output EEPROM.hex"
 	if len(args) == 0 {
 		return errors.New(usage)
 	}
@@ -527,6 +527,35 @@ func runEEPROM(args []string, stdout, stderr io.Writer) error {
 		}
 		fmt.Fprintln(stdout, "factory EEPROM image:", *output)
 		fmt.Fprintln(stdout, "Includes current settings, empty RF storage, reset journal space, and host-owned status LED profiles; no board was written.")
+		return nil
+
+	case "temperature":
+		flags := flag.NewFlagSet("eeprom temperature", flag.ContinueOnError)
+		flags.SetOutput(stderr)
+		input := flags.String("input", "", "complete captured EEPROM Intel HEX image")
+		output := flags.String("output", "", "new no-overwrite complete EEPROM Intel HEX image")
+		lighting := flags.String("lighting-rom", "", "CRC-valid eight-byte DS18B20 ROM identity")
+		hot := flags.Uint("hot-threshold-centi-c", uint(programmer.DefaultHotTemperatureCentiC), "hot threshold in centi-C")
+		if err := flags.Parse(args[1:]); err != nil {
+			return err
+		}
+		if flags.NArg() != 0 || strings.TrimSpace(*input) == "" || strings.TrimSpace(*output) == "" || strings.TrimSpace(*lighting) == "" || *hot > 0xFFFF {
+			return errors.New(usage)
+		}
+		compact := strings.NewReplacer("-", "", ":", "").Replace(strings.TrimSpace(*lighting))
+		decoded, err := hex.DecodeString(compact)
+		if err != nil || len(decoded) != 8 {
+			return errors.New("lighting ROM must contain exactly eight hexadecimal bytes")
+		}
+		var rom [8]byte
+		copy(rom[:], decoded)
+		result, err := programmer.ConfigureTemperatureEEPROM(*input, *output, rom, uint16(*hot))
+		if err != nil {
+			return err
+		}
+		encoded, _ := json.MarshalIndent(result, "", "  ")
+		fmt.Fprintln(stdout, string(encoded))
+		fmt.Fprintln(stdout, "Temperature EEPROM record patched offline; no serial port was opened and no board EEPROM was written.")
 		return nil
 
 	case "inspect":
