@@ -69,6 +69,7 @@ import {
 import { rpc } from './api'
 import { redactSensitiveCommand, shellArgument as quoteArgument } from './command-line'
 import { SevenSegmentPreview } from './seven-segment-preview'
+import { UDPSettings } from './udp-settings'
 import type { FrontPanelState } from './types'
 import type { SharedViewProps } from './views'
 import { peripheralAvailability } from './peripheral-availability'
@@ -929,6 +930,7 @@ export function AdvancedWorkbench({
             <Toggle checked={discoverBroadcast} onChange={setDiscoverBroadcast} label="UDP broadcast" />
             <Toggle checked={discoverNetBIOS} onChange={setDiscoverNetBIOS} label="NetBIOS" />
           </div>
+          <UDPSettings locale={locale} />
           <div className="advanced-fields advanced-fields--split">
             <TextField label={copy('Advertised instance name', 'نام تبلیغ‌شده نمونه')} hint={copy('Blank uses the configured app title', 'خالی یعنی عنوان برنامه')} value={discoveryInstanceName} maxLength={63} onChange={(event) => setDiscoveryInstanceName(event.target.value)} />
             <TextField label={copy('UDP broadcast port', 'درگاه پخش UDP')} type="number" min={1024} max={65535} value={discoveryBroadcastPort} onChange={(event) => setDiscoveryBroadcastPort(boundedInteger(event.target.value, 37889, 1024, 65535))} />

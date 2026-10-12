@@ -18,6 +18,7 @@ const (
 	TransportNamedPipe = "named_pipe"
 	TransportUnix      = "unix"
 	TransportTCP       = "tcp"
+	TransportUDP       = "udp"
 )
 
 type Request struct {
@@ -67,7 +68,7 @@ func (endpoint Endpoint) Validate() error {
 		return errors.New("RPC endpoint address is required")
 	}
 	switch transport {
-	case TransportNamedPipe, TransportUnix, TransportTCP:
+	case TransportNamedPipe, TransportUnix, TransportTCP, TransportUDP:
 		return nil
 	case TransportInProcess:
 		return errors.New("in-process RPC does not have a dialable endpoint")

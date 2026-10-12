@@ -227,6 +227,8 @@ const (
 )
 
 type Service struct {
+	udpOnce          sync.Once
+	udpState         udpRuntime
 	Client           *controller.Client
 	WebSocketPath    string
 	SocketIOPath     string
@@ -537,6 +539,9 @@ func (service *Service) dispatch(
 	if err := service.authorizeAccess(access, request.Method, request.Params); err != nil {
 		response.Error = &RPCError{Code: -32003, Message: err.Error()}
 		return response
+	}
+	if strings.HasPrefix(request.Method, "controller.udp.") {
+		return service.dispatchUDP(ctx, request, access)
 	}
 	// Primary discovery must not queue behind a long board, firmware, or shell
 	if request.ClientID != "" {
@@ -2423,6 +2428,14 @@ func requestCapability(method string, params json.RawMessage) string {
 	}
 	method = strings.ToLower(strings.TrimSpace(method))
 	switch method {
+	case "controller.udp.config.get", "controller.udp.status":
+		return capabilityRead
+	case "controller.udp.events.get", "controller.udp.subscribe", "controller.udp.unsubscribe":
+		return capabilityEvents
+	case "controller.udp.config.set":
+		return capabilityHostConfig
+	case "controller.udp.call":
+		return capabilityBridgeCalls
 	case "controller.event.next", "controller.event.latest", "controller.subscribe",
 		"controller.unsubscribe":
 		return capabilityEvents
@@ -2751,6 +2764,7 @@ func (service *Service) powerAction(
 }
 
 func Serve(ctx context.Context, listener net.Listener, service *Service) error {
+	service.StartUDP(ctx)
 	var wait sync.WaitGroup
 	websocketListener := newDispatchListener(listener.Addr())
 	websocketServer := &http.Server{
@@ -5148,6 +5162,7 @@ func serveStreams(
 	service *Service,
 	access Access,
 ) error {
+	service.StartUDP(ctx)
 	scanner := bufio.NewScanner(input)
 	scanner.Buffer(make([]byte, 4096), maxMessage)
 	encoder := json.NewEncoder(output)
