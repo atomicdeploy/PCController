@@ -90,7 +90,7 @@ const (
 	// SettingsProgrammingMode is the durable programming safety latch. While
 	// set, firmware keeps motion, relays, PWM, and illumination inactive.
 	SettingsProgrammingMode
-	SettingsSwapTemperatureRoles
+	SettingsRetiredTemperatureSwap
 	SettingsMotionDoorPolicy0
 	SettingsMotionDoorPolicy1
 	SettingsDoorAudioDisabled

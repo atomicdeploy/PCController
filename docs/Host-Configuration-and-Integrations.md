@@ -897,6 +897,7 @@ for the exact command and recovery behavior.
 ```console
 Tools\Controller\bin\controller.exe eeprom inspect --backup-manifest BACKUP\manifest.json
 Tools\Controller\bin\controller.exe eeprom factory-defaults --output EEPROM-FACTORY.hex
+Tools\Controller\bin\controller.exe eeprom temperature --input EEPROM-LIVE.hex --output EEPROM-TEMPERATURE.hex --lighting-rom 28-616435FB503F-E9 --hot-threshold-centi-c 5500
 Tools\Controller\bin\controller.exe eeprom export --backup-manifest BACKUP\manifest.json --output SETTINGS.hex
 Tools\Controller\bin\controller.exe eeprom import --backup-manifest BACKUP\manifest.json --settings SETTINGS.hex --output EEPROM-RESTORE.hex
 Tools\Controller\bin\controller.exe eeprom restore --backup-manifest BACKUP\manifest.json --output EEPROM-ORIGINAL.hex
@@ -906,7 +907,10 @@ Tools\Controller\bin\controller.exe program --operation write-eeprom --method ur
 
 The current settings artifact is exactly 40 settings/name value bytes plus
 CRC-8 at EEPROM addresses `0x0020..0x0048`. Export emits only that sparse
-region. Import
+region. The temperature command requires a complete captured image and changes
+only `0x0144..0x014E`: full lighting DS18B20 ROM, little-endian centi-C HOT
+threshold, and CRC-8. It rejects non-DS18B20/CRC-invalid ROMs and thresholds
+outside 30.00..100.00 C. Import
 overlays it on the validated 1,024-byte backup so RF records, reset journal,
 and every unknown byte remain unchanged; restore reproduces the original full
 EEPROM image. Outputs are hashed and never overwritten. These commands do not

@@ -435,16 +435,9 @@ void testDisplayAckDetectionAndRecovery() {
 void testSemanticProtocolAndTemperatureRoles() {
   require(ControllerProtocol::ProgramState == 0x45,
           "semantic PROGRAM_STATE opcode moved");
-  require(TemperatureRoles::fromSortedIndex(0, false) ==
-              TemperatureRoles::Led &&
-              TemperatureRoles::fromSortedIndex(1, false) ==
-                  TemperatureRoles::BluetoothAudio,
-          "factory sorted-ROM temperature roles are reversed");
-  require(TemperatureRoles::fromSortedIndex(0, true) ==
-              TemperatureRoles::BluetoothAudio &&
-              TemperatureRoles::fromSortedIndex(1, true) ==
-                  TemperatureRoles::Led,
-          "EEPROM temperature swap did not reverse both roles");
+  require(TemperatureRoles::Led == 0 &&
+              TemperatureRoles::BluetoothAudio == 1,
+          "temperature roles should retain LED then Bluetooth wire IDs");
 }
 
 void testFrontPanelLeafDecreaseDispatch() {
@@ -516,6 +509,35 @@ void testDallasAbsentPullupBound() {
           "absent DS18B20 bus accepted a conversion request");
 }
 
+void testTemperatureEEPROMIdentityAndThreshold() {
+  EEPROM.fill(0xFF);
+  std::uint8_t record[EepromLayout::TemperatureSettingsBytes] = {
+      0x28, 0x61, 0x64, 0x35, 0xFB, 0x50, 0x3F, 0xE9,
+      0x7C, 0x15, 0x00}; // 5500 centi-C, then CRC.
+  record[10] = ControllerProtocol::UartProtocol::crc8(record, 10);
+  for (std::uint8_t index = 0; index < sizeof(record); ++index) {
+    EEPROM.update(EepromLayout::TemperatureSettingsAddress + index,
+                  record[index]);
+  }
+  SettingsStore configured;
+  require(!configured.begin(1),
+          "temperature-only fixture unexpectedly supplied main settings");
+  require(configured.temperatureConfigurationPersisted() &&
+              configured.hotTemperatureCentiC() == 5500 &&
+              std::equal(record, record + 8,
+                         configured.lightingTemperatureRom()),
+          "CRC-valid temperature EEPROM configuration was not loaded");
+
+  EEPROM.update(EepromLayout::TemperatureSettingsAddress + 10,
+                static_cast<std::uint8_t>(record[10] ^ 0x01));
+  SettingsStore corrupt;
+  require(!corrupt.begin(2) &&
+              !corrupt.temperatureConfigurationPersisted() &&
+              corrupt.hotTemperatureCentiC() ==
+                  SettingsStore::DefaultHotTemperatureCentiC,
+          "CRC-corrupt temperature record did not use safe defaults");
+}
+
 void testBuzzerTimerAndQueue() {
   TonePlayer player(PIN_PB1);
   player.begin();
@@ -562,6 +584,7 @@ int main() {
     testFrontPanelLeafDecreaseDispatch();
     testRetiredMotionMenuAlias();
     testDallasAbsentPullupBound();
+    testTemperatureEEPROMIdentityAndThreshold();
     testBuzzerTimerAndQueue();
     std::cout << "firmware_controls_tests: all checks passed\n";
     return 0;

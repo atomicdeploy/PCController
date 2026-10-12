@@ -665,13 +665,17 @@ settings/name record:
 
 ```console
 controller eeprom inspect --backup-manifest BACKUP\manifest.json
+controller eeprom temperature --input EEPROM-LIVE.hex --output EEPROM-TEMPERATURE.hex --lighting-rom 28-616435FB503F-E9 --hot-threshold-centi-c 5500
 controller eeprom export --backup-manifest BACKUP\manifest.json --output SETTINGS.hex
 controller eeprom import --backup-manifest BACKUP\manifest.json --settings SETTINGS.hex --output EEPROM-RESTORE.hex
 controller eeprom restore --backup-manifest BACKUP\manifest.json --output EEPROM-ORIGINAL.hex
 ```
 
-Outputs are hashed and never overwritten. These file operations do not write a
-board.
+Outputs are hashed and never overwritten. The temperature operation accepts
+only a complete 1,024-byte capture and changes only the CRC-protected sensor-ID
+and HOT-threshold record. These file operations do not write a board; use the
+ordinary confirmed EEPROM programmer operation for the separate guarded write
+and readback.
 
 ## Verification boundary
 

@@ -80,7 +80,7 @@ RadioState radioState;
 // Smooths normal readings while allowing invalid/HOT state changes immediately.
 int16_t smoothTemperature(int16_t filtered, int16_t sample) {
   if (filtered == INVALID_I16 || sample == INVALID_I16 ||
-      sample >= HOT_TEMPERATURE_CENTI_C) {
+      sample >= settingsStore.hotTemperatureCentiC()) {
     return sample;
   }
   // A 50/50 EMA smooths jitter without delaying first-valid or HOT indication.

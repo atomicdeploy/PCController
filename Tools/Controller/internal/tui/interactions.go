@@ -1038,30 +1038,36 @@ func (model Model) adjustBoardSetting(delta int, activate bool) (Model, tea.Cmd,
 		// Programming mode is a recovery latch, never a direct user toggle.
 		return model, nil, true
 	case 2:
-		if toggle {
-			settings.Flags ^= native.SettingsSwapTemperatureRoles
-		}
-	case 3:
 		settings.LightMode = wrapByte(settings.LightMode, deltaOrOne(delta), 3)
-	case 4:
+	case 3:
 		settings.OnBrightness = wrapByte(settings.OnBrightness, deltaOrOne(delta)*16, 256)
-	case 5:
+	case 4:
 		settings.OffBrightness = wrapByte(settings.OffBrightness, deltaOrOne(delta)*16, 256)
-	case 6:
+	case 5:
 		settings.DisplayBrightness = wrapByte(settings.DisplayBrightness, deltaOrOne(delta), 8)
-	case 7:
+	case 6:
 		settings.DisplayClosedBrightness = wrapByte(settings.DisplayClosedBrightness, deltaOrOne(delta), 8)
-	case 8:
+	case 7:
 		settings.StatusBrightness = wrapByte(settings.StatusBrightness, deltaOrOne(delta)*16, 256)
+	case 8:
+		_ = settings.SetStatusColor(wrapByte(settings.StatusColor(), deltaOrOne(delta), 8))
 	case 9:
 		settings.OutputPersistence = wrapByte(
 			settings.OutputPersistence, deltaOrOne(delta),
 			int(native.OutputPersistenceMask)+1,
 		)
 	case 10:
+		settings.RelayRestoreMask = wrapByte(
+			settings.RelayRestoreMask, deltaOrOne(delta), 256,
+		)
+	case 11:
 		periods := []uint16{0, 100, 125, 200, 250, 500, 1000, 2000, 5000}
 		settings.StreamPeriodMS = cycleUint16(periods, settings.StreamPeriodMS, deltaOrOne(delta))
-	case 11:
+	case 12:
+		value := wrapByte(settings.VoltageDecimals(), deltaOrOne(delta), 3)
+		_ = settings.SetVoltageDecimals(value)
+		_ = settings.SetCurrentDecimals(value)
+	case 13:
 		visible := model.visibleMenuPages()
 		if len(visible) != 0 {
 			index := 0
@@ -1073,27 +1079,13 @@ func (model Model) adjustBoardSetting(delta int, activate bool) (Model, tea.Cmd,
 			}
 			settings.DefaultPage = visible[wrapInt(index, deltaOrOne(delta), len(visible))].ID
 		}
-	case 12:
+	case 14:
 		if toggle {
 			settings.SetSaveLastPage(!settings.SaveLastPage())
 		}
-	case 13:
-		_ = settings.SetStatusColor(wrapByte(settings.StatusColor(), deltaOrOne(delta), 8))
-	case 14:
-		_ = settings.SetVoltageDecimals(wrapByte(settings.VoltageDecimals(), deltaOrOne(delta), 3))
 	case 15:
-		_ = settings.SetCurrentDecimals(wrapByte(settings.CurrentDecimals(), deltaOrOne(delta), 3))
-	case 16:
 		_ = settings.SetMotionDoorPolicy(wrapByte(settings.MotionDoorPolicy(), deltaOrOne(delta), 4))
-	case 17:
-		if toggle {
-			settings.SetDoorAudioEnabled(!settings.DoorAudioEnabled())
-		}
-	case 18:
-		if toggle {
-			settings.SetRelayAudioEnabled(!settings.RelayAudioEnabled())
-		}
-	case 19:
+	case 16:
 		current := settings.MotionExitHoldSeconds
 		if current == 0 {
 			current = native.SettingsDefaultMotionExitHoldSeconds
@@ -1102,10 +1094,17 @@ func (model Model) adjustBoardSetting(delta int, activate bool) (Model, tea.Cmd,
 			wrapInt(int(current)-1, deltaOrOne(delta),
 				int(native.SettingsMaximumMotionExitHoldSeconds)) + 1,
 		)
-	case 20:
-		settings.RelayRestoreMask = wrapByte(
-			settings.RelayRestoreMask, deltaOrOne(delta), 256,
-		)
+	case 17:
+		current := settings.MotionBreakMS()
+		_ = settings.SetMotionBreakMS(uint16(wrapInt(int(current)-1, deltaOrOne(delta), 255) + 1))
+	case 18:
+		if toggle {
+			settings.SetDoorAudioEnabled(!settings.DoorAudioEnabled())
+		}
+	case 19:
+		if toggle {
+			settings.SetRelayAudioEnabled(!settings.RelayAudioEnabled())
+		}
 	}
 	if model.preview != nil {
 		model.preview.Settings = settings

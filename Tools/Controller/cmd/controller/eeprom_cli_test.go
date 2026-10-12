@@ -88,6 +88,36 @@ func TestEEPROMFactoryDefaultsCLIWritesCompleteImageWithoutBoard(t *testing.T) {
 	}
 }
 
+func TestEEPROMTemperatureCLIUsesOfflineGuardedPatchBackend(t *testing.T) {
+	directory := t.TempDir()
+	source := filepath.Join(directory, "captured.hex")
+	output := filepath.Join(directory, "configured.hex")
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{"eeprom", "factory-defaults", "--output", source}, &stdout, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	stdout.Reset()
+	if err := run([]string{
+		"eeprom", "temperature", "--input", source, "--output", output,
+		"--lighting-rom", "28-616435FB503F-E9", "--hot-threshold-centi-c", "5500",
+	}, &stdout, &stderr); err != nil {
+		t.Fatalf("temperature patch failed: %v\nstderr=%s", err, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), `"address": 324`) ||
+		!strings.Contains(stdout.String(), "no board EEPROM was written") {
+		t.Fatalf("temperature patch output lacks backend evidence: %s", stdout.String())
+	}
+	stdout.Reset()
+	if err := run([]string{"eeprom", "inspect", "--input", output}, &stdout, &stderr); err != nil {
+		t.Fatalf("configured image inspection failed: %v", err)
+	}
+	for _, want := range []string{`"configured": true`, `"lighting_identifier": "28-616435FB503F-E9"`, `"hot_threshold_centi_c": 5500`} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("inspection output missing %q: %s", want, stdout.String())
+		}
+	}
+}
+
 func currentSettingsFixture() []byte {
 	values := make([]byte, 40)
 	values[1] = 1

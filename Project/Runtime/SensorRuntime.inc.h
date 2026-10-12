@@ -126,12 +126,7 @@ void sampleIna219(uint32_t at) {
 #endif
 }
 
-// Gives DS18B20 probes a deterministic ROM order before role assignment.
-void sortTemperatureAddresses() {
-  if (temperatureAddressCount < 2 ||
-      memcmp(temperatureAddresses[0], temperatureAddresses[1], 8) <= 0) {
-    return;
-  }
+void swapTemperatureAddresses() {
   for (uint8_t i = 0; i < 8; ++i) {
     const uint8_t temporary = temperatureAddresses[0][i];
     temperatureAddresses[0][i] = temperatureAddresses[1][i];
@@ -151,18 +146,23 @@ void discoverTemperatureSensors() {
       ++temperatureAddressCount;
     }
   }
-  sortTemperatureAddresses();
+  if (temperatureAddressCount == 2 &&
+      memcmp(temperatureAddresses[0], temperatureAddresses[1], 8) > 0) {
+    swapTemperatureAddresses();
+  }
+  // Canonicalize the commissioned lighting probe as role/index zero. The full
+  // ROM ID, rather than a positional swap bit, remains the EEPROM authority.
+  if (temperatureAddressCount == 2 &&
+      settingsStore.hasLightingTemperatureRom() &&
+      memcmp(temperatureAddresses[1],
+             settingsStore.lightingTemperatureRom(), 8) == 0) {
+    swapTemperatureAddresses();
+  }
   for (uint8_t index = 0; index < temperatureAddressCount; ++index) {
     // 11-bit conversion is 375 ms with 0.125 C resolution, allowing a more
     // responsive open-enclosure display without blocking UART servicing.
     temperatureBus.setResolution(temperatureAddresses[index], 11);
   }
-}
-
-// Maps sorted ROM index to tLED/tBT, honoring the EEPROM swap option.
-uint8_t temperatureRole(uint8_t addressIndex) {
-  return TemperatureRoles::fromSortedIndex(
-      addressIndex, settingsStore.values().swapTemperatureSensors());
 }
 
 // Starts a nonblocking conversion unless RF learning owns interrupt timing.
@@ -203,16 +203,13 @@ void serviceTemperatures(uint32_t at) {
       return;
     }
     for (uint8_t index = 0; index < temperatureAddressCount; ++index) {
-      // Factory semantics assign the first sorted ROM to tLED and the second
-      // to tBT; the EEPROM swap flag reverses them. Physical probe identity
-      // still requires the illumination-heating test after installation.
-      const uint8_t destination = temperatureRole(index);
+      // The EEPROM lighting ROM owns the role. A deterministic sorted fallback
+      // exists only until physical illumination commissioning is completed.
       const int16_t sample =
           temperatureBus.getTempCentiC(temperatureAddresses[index]);
-      sensors.temperatureCentiC[destination] =
-          smoothTemperature(sensors.temperatureCentiC[destination], sample);
-      formatTemperatureSegmentText(
-          destination, sensors.temperatureCentiC[destination]);
+      sensors.temperatureCentiC[index] =
+          smoothTemperature(sensors.temperatureCentiC[index], sample);
+      formatTemperatureSegmentText(index, sensors.temperatureCentiC[index]);
     }
     temperatureConversionPending = false;
     return;

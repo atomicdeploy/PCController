@@ -14,6 +14,12 @@ struct __attribute__((packed)) StoredSettings {
   uint8_t checksum;
 };
 
+struct __attribute__((packed)) StoredTemperatureConfiguration {
+  uint8_t lightingRom[8];
+  uint16_t hotThresholdCentiC;
+  uint8_t checksum;
+};
+
 #if !defined(PCCONTROLLER_SETTINGS_TEST_LAYOUT)
 static_assert(sizeof(StoredSettings) == EepromLayout::SettingsRecordBytes,
               "settings/name EEPROM record layout changed");
@@ -25,6 +31,9 @@ static_assert(sizeof(StoredSettings) == EepromLayout::SettingsRecordBytes,
 static_assert(SettingsStore::EepromAddress + sizeof(StoredSettings) <=
                   EepromLayout::RemoteHeaderAddress,
               "Settings overlap learned RF header");
+static_assert(sizeof(StoredTemperatureConfiguration) ==
+                  EepromLayout::TemperatureSettingsBytes,
+              "Temperature settings EEPROM record changed shape");
 
 uint8_t checksum(const void *value, uint8_t length) {
   return ControllerProtocol::UartProtocol::crc8(
@@ -64,6 +73,7 @@ uint8_t firstVisiblePersistentMenuPage(uint16_t visibleMask,
 
 bool SettingsStore::begin(uint32_t now) {
   setDefaults();
+  loadTemperatureConfiguration();
   if (loadCurrent()) {
     persisted_ = true;
 #if PCCONTROLLER_MENU_VISIBILITY
@@ -210,6 +220,17 @@ void SettingsStore::setDefaults() {
   // Host-owned factory provisioning supplies the legacy packed menu bytes.
   // They intentionally stay zero in the volatile blank-EEPROM fallback.
   settings_.motionBreakMs = 1;
+}
+
+bool SettingsStore::loadTemperatureConfiguration() {
+  StoredTemperatureConfiguration record;
+  EEPROM.get(EepromLayout::TemperatureSettingsAddress, record);
+  if (record.checksum != checksum(&record, sizeof(record) - 1)) {
+    return false;
+  }
+  memcpy(lightingTemperatureRom_, record.lightingRom, 8);
+  hotTemperatureCentiC_ = record.hotThresholdCentiC;
+  return true;
 }
 
 bool SettingsStore::loadCurrent() {

@@ -61,7 +61,7 @@ func TestDecodeOfflineEEPROMCurrentSemanticLayout(t *testing.T) {
 		t.Fatal(err)
 	}
 	if decoded.SourceKind != "offline-eeprom-hex" ||
-		decoded.Layout != "settings-name-unversioned-40/rf-record12-cap20/reset-journal-336" ||
+		decoded.Layout != "settings-name-unversioned-40/rf-record12-cap20/temperature-rom8-threshold2-crc/reset-journal-336" ||
 		!decoded.Settings.Supported || !decoded.Settings.Valid ||
 		decoded.Settings.Format != "current/unversioned-40+crc8" ||
 		decoded.Settings.ValueBytes != 40 {
@@ -95,6 +95,42 @@ func TestDecodeOfflineEEPROMCurrentSemanticLayout(t *testing.T) {
 		*decoded.ResetJournal.NewestCount != 41 || decoded.ResetJournal.NewestSlot == nil ||
 		*decoded.ResetJournal.NewestSlot != 4 {
 		t.Fatalf("unexpected reset journal: %#v", decoded.ResetJournal)
+	}
+}
+
+func TestConfigureTemperatureEEPROMPatchesOnlyCRCProtectedRecord(t *testing.T) {
+	source := writeEEPROMFixture(t, nil)
+	output := filepath.Join(t.TempDir(), "temperature-configured.eep")
+	rom := [8]byte{0x28, 0x61, 0x64, 0x35, 0xFB, 0x50, 0x3F, 0xE9}
+	result, err := ConfigureTemperatureEEPROM(source, output, rom, 5500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Patches) != 1 || result.Patches[0].Address != EEPROMTemperatureAddress || result.Patches[0].Length != EEPROMTemperatureRecordBytes {
+		t.Fatalf("unexpected patch result: %#v", result)
+	}
+	decoded, err := DecodeOfflineEEPROMHex(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !decoded.Temperature.Present || !decoded.Temperature.Configured || !decoded.Temperature.Valid || decoded.Temperature.LightingROM != rom || decoded.Temperature.HotThresholdCentiC != 5500 || decoded.Temperature.LightingIdentifier != "28-616435FB503F-E9" {
+		t.Fatalf("unexpected temperature decode: %#v", decoded.Temperature)
+	}
+	before, err := LoadIntelHex(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := LoadIntelHex(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for address := uint32(0); address < PCControllerEEPROMBytes; address++ {
+		oldValue, _ := before.Image.Byte(address)
+		newValue, _ := after.Image.Byte(address)
+		inside := address >= EEPROMTemperatureAddress && address < EEPROMTemperatureAddress+EEPROMTemperatureRecordBytes
+		if !inside && oldValue != newValue {
+			t.Fatalf("byte 0x%04X changed outside temperature record", address)
+		}
 	}
 }
 
@@ -246,7 +282,9 @@ func writeEEPROMFixture(t *testing.T, mutate func([]byte)) string {
 	for index := range data {
 		data[index] = 0xFF
 	}
-	mutate(data)
+	if mutate != nil {
+		mutate(data)
+	}
 	image := &IntelHexImage{data: make(map[uint32]byte, len(data))}
 	for address, value := range data {
 		image.data[uint32(address)] = value

@@ -184,14 +184,19 @@ At startup the driver:
 Eleven-bit conversion takes 375 ms and has 0.125 C resolution. New conversions
 start every 450 ms while the door is open and every 1000 ms while it is closed.
 Valid temperature samples use a 50/50 EMA. A first sample, a disconnected
-sample, or a sample at/above the 55.00 C HOT threshold bypasses the EMA so a
-fault or warning is not hidden by smoothing.
+sample, or a sample at/above the EEPROM-configured HOT threshold bypasses the
+EMA so a fault or warning is not hidden by smoothing. The guarded host EEPROM
+backend accepts 30.00..100.00 C and provisions 55.00 C by default.
 
-The factory role mapping assigns lexicographically sorted ROM 0 to
-`Temperature LED` (`tLED`) and ROM 1 to `Temperature BT` (`tBT`). The persistent
-`swapTemperatureSensors` flag reverses that assignment if a probe is replaced
-or the harness changes. The host reports each full 64-bit ROM so identity can
-be confirmed electrically rather than inferred only from heat response.
+Before commissioning, lexicographically sorted ROM 0 is the deterministic
+`Temperature LED` (`tLED`) fallback and ROM 1 is `Temperature BT` (`tBT`). The
+commissioned EEPROM record stores the complete CRC-valid 64-bit lighting-probe
+ROM, the HOT threshold, and a record CRC. Firmware moves the matching ROM to
+the tLED role at discovery; the other sensor is tBT. The guarded host EEPROM
+backend patches only that record in a complete captured image, and the normal
+verified EEPROM writer preserves all unrelated settings. A repeated
+illumination-off/full thermal response test establishes the physical mapping;
+position or a swap flag is never treated as identity.
 
 Resolution alternatives are:
 

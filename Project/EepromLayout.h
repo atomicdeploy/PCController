@@ -27,6 +27,14 @@ constexpr uint8_t RemoteCapacity = 20;
 constexpr uint8_t RemoteRecordBytes = 12;
 constexpr int RemoteEnd =
     RemoteEntriesAddress + RemoteCapacity * RemoteRecordBytes;
+// Board-owned temperature commissioning state fits the otherwise unused gap
+// before the reset journal. The record is lighting ROM + hot threshold + CRC-8,
+// so a settings reset cannot silently turn a positional swap bit into
+// a different physical role.
+constexpr int TemperatureSettingsAddress = RemoteEnd;
+constexpr uint8_t TemperatureSettingsBytes = 11;
+constexpr int TemperatureSettingsEnd =
+    TemperatureSettingsAddress + TemperatureSettingsBytes;
 constexpr int ResetJournalAddress = 336;
 constexpr uint8_t ResetJournalSlots = 64;
 constexpr uint8_t ResetRecordBytes = 6;
@@ -82,6 +90,8 @@ static_assert(MenuLabelsHeaderEnd <= RemoteHeaderAddress,
               "menu-label header overlaps RF records");
 static_assert(RemoteEnd <= ResetJournalAddress,
               "RF records overlap reset journal");
+static_assert(TemperatureSettingsEnd <= ResetJournalAddress,
+              "temperature settings overlap reset journal");
 static_assert(BootOpcodeAddress + BootOpcodeBytes <= SettingsAddress,
               "boot opcodes overlap settings");
 static_assert(ResetJournalEnd <= E2END + 1,
