@@ -136,6 +136,13 @@ void main() {
         home.openSettings();
         await tester.pumpAndSettle();
         await tester.runAsync(() async {
+          await precacheImage(
+            const AssetImage('assets/branding/pealayer.png'),
+            boundary.currentContext!,
+          );
+        });
+        await tester.pumpAndSettle();
+        await tester.runAsync(() async {
           final frame = await render.toImage();
           final bytes = await frame.toByteData(format: ui.ImageByteFormat.png);
           await File('$directory/settings-${size.width.toInt()}.png')
