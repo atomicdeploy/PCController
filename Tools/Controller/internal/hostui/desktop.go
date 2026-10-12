@@ -8,6 +8,20 @@ import (
 
 const ToastLogoFileName = "toast-logo.png"
 
+var toastEventIconNames = [...]string{
+	NotificationIconInfo,
+	NotificationIconWarning,
+	NotificationIconError,
+	NotificationIconDoor,
+	NotificationIconHot,
+	NotificationIconTemperatureCleared,
+	NotificationIconMotion,
+	NotificationIconRelay,
+	NotificationIconRadio,
+}
+
+func toastEventIconFileName(icon string) string { return "toast-event-" + icon + ".png" }
+
 type DesktopIntegrationOptions struct {
 	AppID       string
 	DisplayName string

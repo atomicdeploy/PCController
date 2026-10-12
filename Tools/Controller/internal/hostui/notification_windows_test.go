@@ -16,9 +16,15 @@ import (
 
 func newTestWindowsNotifier(t *testing.T) *windowsNotifier {
 	t.Helper()
-	logo := filepath.Join(t.TempDir(), ToastLogoFileName)
+	directory := t.TempDir()
+	logo := filepath.Join(directory, ToastLogoFileName)
 	if err := os.WriteFile(logo, append([]byte("\x89PNG\r\n\x1a\n"), 0), 0o600); err != nil {
 		t.Fatal(err)
+	}
+	for _, name := range toastEventIconNames {
+		if err := os.WriteFile(filepath.Join(directory, toastEventIconFileName(name)), append([]byte("\x89PNG\r\n\x1a\n"), 0), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
 	return newPlatformNotifier(NotifierOptions{AppID: "PCController.Tests", LogoPath: logo}).(*windowsNotifier)
 }
@@ -33,6 +39,26 @@ func TestWindowsNotifierRunnerCanBeInjectedWithoutDisplayingToast(t *testing.T) 
 	status := notifier.Status()
 	if !called || status.Accepted != 1 || !status.Available {
 		t.Fatalf("called=%t status=%#v", called, status)
+	}
+}
+
+func TestWindowsNotifierUsesSemanticEventImageInsteadOfProductLogo(t *testing.T) {
+	notifier := newTestWindowsNotifier(t)
+	var payload string
+	notifier.deliver = func(_ context.Context, value []byte, _ string) error {
+		payload = string(value)
+		return nil
+	}
+	if err := notifier.Notify(context.Background(), Notification{
+		Title: "PCController · HOT", Body: "temperature alert cleared", Icon: NotificationIconTemperatureCleared,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(payload, "toast-event-temperature-cleared.png") || strings.Contains(payload, "toast-logo.png") {
+		t.Fatalf("toast payload did not select the cleared-temperature icon: %s", payload)
+	}
+	if !strings.Contains(payload, `alt="Temperature normal"`) {
+		t.Fatalf("toast payload did not describe the semantic image: %s", payload)
 	}
 }
 

@@ -140,6 +140,159 @@ func drawLine(canvas *image.RGBA, from, to image.Point, thickness int, value col
 	}
 }
 
+func fillRing(canvas *image.RGBA, center image.Point, outer, inner int, value color.RGBA) {
+	for y := center.Y - outer; y <= center.Y+outer; y++ {
+		for x := center.X - outer; x <= center.X+outer; x++ {
+			dx, dy := x-center.X, y-center.Y
+			distance := dx*dx + dy*dy
+			if distance <= outer*outer && distance >= inner*inner && image.Pt(x, y).In(canvas.Bounds()) {
+				canvas.SetRGBA(x, y, value)
+			}
+		}
+	}
+}
+
+func fillUpperArc(canvas *image.RGBA, center image.Point, outer, inner int, value color.RGBA) {
+	for y := center.Y - outer; y <= center.Y; y++ {
+		for x := center.X - outer; x <= center.X+outer; x++ {
+			dx, dy := x-center.X, y-center.Y
+			distance := dx*dx + dy*dy
+			if distance <= outer*outer && distance >= inner*inner && image.Pt(x, y).In(canvas.Bounds()) {
+				canvas.SetRGBA(x, y, value)
+			}
+		}
+	}
+}
+
+func triangleSign(point, left, right image.Point) int {
+	return (point.X-right.X)*(left.Y-right.Y) - (left.X-right.X)*(point.Y-right.Y)
+}
+
+func fillTriangle(canvas *image.RGBA, a, b, c image.Point, value color.RGBA) {
+	minimumX := min(a.X, min(b.X, c.X))
+	maximumX := max(a.X, max(b.X, c.X))
+	minimumY := min(a.Y, min(b.Y, c.Y))
+	maximumY := max(a.Y, max(b.Y, c.Y))
+	for y := minimumY; y <= maximumY; y++ {
+		for x := minimumX; x <= maximumX; x++ {
+			point := image.Pt(x, y)
+			first := triangleSign(point, a, b)
+			second := triangleSign(point, b, c)
+			third := triangleSign(point, c, a)
+			hasNegative := first < 0 || second < 0 || third < 0
+			hasPositive := first > 0 || second > 0 || third > 0
+			if !(hasNegative && hasPositive) && point.In(canvas.Bounds()) {
+				canvas.SetRGBA(x, y, value)
+			}
+		}
+	}
+}
+
+func drawCheck(canvas *image.RGBA, offset image.Point, scale int, value color.RGBA) {
+	drawLine(canvas, image.Pt(offset.X, offset.Y+2*scale), image.Pt(offset.X+2*scale, offset.Y+4*scale), scale, value)
+	drawLine(canvas, image.Pt(offset.X+2*scale, offset.Y+4*scale), image.Pt(offset.X+6*scale, offset.Y), scale, value)
+}
+
+func drawThermometer(canvas *image.RGBA, shifted bool, background color.RGBA) {
+	shift := 0
+	if shifted {
+		shift = -31
+	}
+	fillRoundedRect(canvas, image.Rect(103+shift, 56, 143+shift, 173), 20, func(_, _ int) color.RGBA { return white })
+	fillCircle(canvas, image.Pt(123+shift, 174), 42, white)
+	fillRoundedRect(canvas, image.Rect(114+shift, 76, 132+shift, 174), 9, func(_, _ int) color.RGBA { return background })
+	fillCircle(canvas, image.Pt(123+shift, 174), 25, background)
+	fillRoundedRect(canvas, image.Rect(118+shift, 111, 128+shift, 174), 5, func(_, _ int) color.RGBA { return amber })
+	fillCircle(canvas, image.Pt(123+shift, 174), 16, amber)
+}
+
+func notificationIcon(name string) *image.RGBA {
+	canvas := image.NewRGBA(image.Rect(0, 0, 256, 256))
+	background := violet
+	switch name {
+	case "info":
+		background = color.RGBA{37, 99, 235, 255}
+	case "warning", "door":
+		background = color.RGBA{217, 119, 6, 255}
+	case "error", "hot":
+		background = color.RGBA{220, 38, 38, 255}
+	case "temperature-cleared":
+		background = color.RGBA{5, 150, 105, 255}
+	case "relay":
+		background = color.RGBA{2, 132, 199, 255}
+	}
+	fillRoundedRect(canvas, image.Rect(12, 12, 244, 244), 50, func(x, y int) color.RGBA {
+		return blend(background, surface, 0.16*float64(x+y-24)/440)
+	})
+
+	switch name {
+	case "info":
+		fillRing(canvas, image.Pt(128, 128), 72, 60, white)
+		fillCircle(canvas, image.Pt(128, 91), 9, white)
+		fillRoundedRect(canvas, image.Rect(119, 112, 137, 174), 8, func(_, _ int) color.RGBA { return white })
+	case "warning":
+		fillTriangle(canvas, image.Pt(128, 43), image.Pt(218, 205), image.Pt(38, 205), white)
+		fillTriangle(canvas, image.Pt(128, 69), image.Pt(195, 191), image.Pt(61, 191), background)
+		fillRoundedRect(canvas, image.Rect(120, 104, 136, 157), 7, func(_, _ int) color.RGBA { return white })
+		fillCircle(canvas, image.Pt(128, 178), 9, white)
+	case "error":
+		fillRing(canvas, image.Pt(128, 128), 76, 62, white)
+		drawLine(canvas, image.Pt(96, 96), image.Pt(160, 160), 14, white)
+		drawLine(canvas, image.Pt(160, 96), image.Pt(96, 160), 14, white)
+	case "door":
+		fillRoundedRect(canvas, image.Rect(65, 47, 186, 211), 12, func(_, _ int) color.RGBA { return white })
+		fillRoundedRect(canvas, image.Rect(82, 64, 169, 211), 5, func(_, _ int) color.RGBA { return surface })
+		drawLine(canvas, image.Pt(92, 70), image.Pt(156, 82), 7, white)
+		drawLine(canvas, image.Pt(156, 82), image.Pt(156, 196), 7, white)
+		fillCircle(canvas, image.Pt(141, 140), 7, amber)
+	case "hot":
+		drawThermometer(canvas, false, background)
+		drawLine(canvas, image.Pt(163, 78), image.Pt(190, 78), 8, white)
+		drawLine(canvas, image.Pt(163, 108), image.Pt(202, 108), 8, white)
+		drawLine(canvas, image.Pt(163, 138), image.Pt(190, 138), 8, white)
+	case "temperature-cleared":
+		drawThermometer(canvas, true, background)
+		fillCircle(canvas, image.Pt(173, 148), 49, white)
+		fillCircle(canvas, image.Pt(173, 148), 36, background)
+		drawCheck(canvas, image.Pt(145, 135), 8, white)
+	case "motion":
+		drawLine(canvas, image.Pt(49, 128), image.Pt(103, 74), 13, white)
+		drawLine(canvas, image.Pt(49, 128), image.Pt(103, 182), 13, white)
+		drawLine(canvas, image.Pt(49, 128), image.Pt(207, 128), 13, white)
+		drawLine(canvas, image.Pt(207, 128), image.Pt(153, 74), 13, white)
+		drawLine(canvas, image.Pt(207, 128), image.Pt(153, 182), 13, white)
+	case "relay":
+		fillRoundedRect(canvas, image.Rect(42, 82, 214, 174), 46, func(_, _ int) color.RGBA { return white })
+		fillRoundedRect(canvas, image.Rect(57, 97, 199, 159), 31, func(_, _ int) color.RGBA { return surface })
+		fillCircle(canvas, image.Pt(164, 128), 42, white)
+	case "radio":
+		fillCircle(canvas, image.Pt(128, 184), 13, white)
+		fillUpperArc(canvas, image.Pt(128, 184), 48, 37, white)
+		fillUpperArc(canvas, image.Pt(128, 184), 82, 71, white)
+		fillUpperArc(canvas, image.Pt(128, 184), 112, 101, white)
+	}
+	return canvas
+}
+
+func writeNotificationIcons(directory string) error {
+	for _, name := range []string{"info", "warning", "error", "door", "hot", "temperature-cleared", "motion", "relay", "radio"} {
+		path := filepath.Join(directory, "toast-event-"+name+".png")
+		file, err := os.Create(path)
+		if err != nil {
+			return fmt.Errorf("create %s notification icon: %w", name, err)
+		}
+		encodeErr := png.Encode(file, notificationIcon(name))
+		closeErr := file.Close()
+		if encodeErr != nil {
+			return fmt.Errorf("encode %s notification icon: %w", name, encodeErr)
+		}
+		if closeErr != nil {
+			return fmt.Errorf("close %s notification icon: %w", name, closeErr)
+		}
+	}
+	return nil
+}
+
 func stateIcon(source *image.RGBA, state string) *image.RGBA {
 	target := cloneRGBA(source)
 	badge := surface
@@ -292,6 +445,9 @@ func main() {
 	}
 	defer file.Close()
 	if err := png.Encode(file, canvas); err != nil {
+		panic(err)
+	}
+	if err := writeNotificationIcons(filepath.Dir(os.Args[1])); err != nil {
 		panic(err)
 	}
 	if len(os.Args) == 3 {
