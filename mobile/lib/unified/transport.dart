@@ -324,6 +324,8 @@ class PeerSession extends ChangeNotifier {
   DateTime? pwmUpdated, _lastPanelAttempt;
   String _panelOwner = '';
   bool _pwmReading = false;
+  int _pwmRevision = 0, _pwmWriteSequence = 0;
+  int? _activePwmWrite;
   Timer? _pwmTimer;
   List<Json> instances = [], artifacts = [], events = [];
   DateTime? received;
@@ -472,6 +474,8 @@ class PeerSession extends ChangeNotifier {
       events = [];
       pwmValues = {};
       pwmUpdated = null;
+      _pwmRevision++;
+      _activePwmWrite = null;
       _panelOwner = '';
       _lastPanelAttempt = null;
     }
@@ -672,7 +676,8 @@ class PeerSession extends ChangeNotifier {
         if (fresh &&
             state['connected'] == true &&
             (pwmUpdated == null ||
-                DateTime.now().difference(pwmUpdated!).inMilliseconds >= 2000)) {
+                DateTime.now().difference(pwmUpdated!).inMilliseconds >=
+                    2000)) {
           unawaited(refreshPwm());
         }
         // Only repaint when freshness expires, not continuous UI persistence.
@@ -700,10 +705,12 @@ class PeerSession extends ChangeNotifier {
 
   Future<void> refreshPwm() async {
     final peer = transport, epoch = generation;
+    final revision = _pwmRevision;
     final owner = '$identity/${state['connection_generation']}';
     if (!controller ||
         peer == null ||
         _pwmReading ||
+        _activePwmWrite != null ||
         state['connected'] != true) {
       return;
     }
@@ -711,6 +718,8 @@ class PeerSession extends ChangeNotifier {
     try {
       final value = object(await peer.rpc('controller.pwm.values'));
       if (epoch == generation &&
+          revision == _pwmRevision &&
+          _activePwmWrite == null &&
           owner == '$identity/${state['connection_generation']}' &&
           value['channels'] is List &&
           value['available'] is bool) {
@@ -722,6 +731,74 @@ class PeerSession extends ChangeNotifier {
       /* Retained PWM cache is never substituted with a false zero. */
     } finally {
       _pwmReading = false;
+    }
+  }
+
+  /// Typed set + its actual board readback. The host requests PWMValues only
+  /// after command acknowledgement; this is not an optimistic local setpoint.
+  Future<double> setPwm(
+    int channel,
+    int percent, {
+    required String expectedTarget,
+  }) async {
+    final peer = transport, epoch = generation;
+    if (!controller ||
+        peer == null ||
+        !boardReady ||
+        targetStamp != expectedTarget ||
+        _activePwmWrite != null ||
+        channel < 0 ||
+        channel > 15 ||
+        percent < 0 ||
+        percent > 100 ||
+        object(state['emergency_stop'])['active'] == true ||
+        !objects(peripherals['controls']).any(
+          (c) =>
+              c['key'] == 'pwm.$channel' &&
+              c['control'] == 'pwm-user' &&
+              c['locked'] != true &&
+              c['hidden'] != true,
+        )) {
+      throw const Rejected('PWM target is not currently writable.');
+    }
+    final write = ++_pwmWriteSequence;
+    _activePwmWrite = write;
+    ++_pwmRevision; // Retire every read issued before this mutation.
+    try {
+      final value = object(
+        await peer.rpc('controller.pwm.set', {
+          'channel': channel,
+          'percent': percent,
+        }),
+      );
+      if (epoch != generation ||
+          !identical(peer, transport) ||
+          targetStamp != expectedTarget ||
+          _activePwmWrite != write ||
+          !boardReady) {
+        throw const Uncertain();
+      }
+      final channels = objects(value['channels']);
+      final matches = channels.where((c) => c['channel'] == channel).toList();
+      final actual = matches.length == 1
+          ? matches.single['logical_percent']
+          : null;
+      if (value['available'] != true ||
+          actual is! num ||
+          !actual.isFinite ||
+          actual < 0 ||
+          actual > 100) {
+        throw const Uncertain(); // Ack without supported readback is not applied proof.
+      }
+      pwmValues = value;
+      pwmUpdated = DateTime.now();
+      notifyListeners();
+      return actual.toDouble();
+    } finally {
+      if (_activePwmWrite == write) _activePwmWrite = null;
+      if (epoch == generation) {
+        _schedulePwmRefresh(epoch); // One read, never mutation replay.
+      }
     }
   }
 
@@ -797,6 +874,8 @@ class PeerSession extends ChangeNotifier {
     operation = {};
     pwmValues = {};
     pwmUpdated = null;
+    _pwmRevision++;
+    _activePwmWrite = null;
     _panelOwner = '';
     _lastPanelAttempt = null;
     events = [];
