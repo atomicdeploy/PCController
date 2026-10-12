@@ -1,10 +1,18 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(PCControllerAvrdudeAdapter VERSION 1.0.0 LANGUAGES C)
+# AVRDUDE uses CMAKE_PROJECT_VERSION in its generated version metadata when it
+# is embedded as a subproject. Load the reviewed lock before project() so both
+# the adapter and the matching compatibility CLI report the pinned release.
+file(READ "${CMAKE_CURRENT_LIST_DIR}/dependency-lock.json"
+  _pccontroller_avrdude_lock)
+string(JSON PCCONTROLLER_AVRDUDE_VERSION GET "${_pccontroller_avrdude_lock}" version)
+string(JSON PCCONTROLLER_AVRDUDE_SOURCE_URL GET "${_pccontroller_avrdude_lock}" source_url)
+string(JSON PCCONTROLLER_AVRDUDE_SOURCE_SHA256 GET "${_pccontroller_avrdude_lock}" source_sha256)
+
+project(PCControllerAvrdudeAdapter VERSION "${PCCONTROLLER_AVRDUDE_VERSION}" LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
-set(CMAKE_C_EXTENSIONS OFF)
 
 include(FetchContent)
 include(GNUInstallDirs)
@@ -12,15 +20,30 @@ include(GNUInstallDirs)
 # libavrdude does not promise a stable ABI. Fetching the reviewed source and
 # compiling the adapter and library together is therefore part of the safety
 # boundary, not merely build convenience.
-file(READ "${CMAKE_CURRENT_SOURCE_DIR}/dependency-lock.json"
-  _pccontroller_avrdude_lock)
-string(JSON PCCONTROLLER_AVRDUDE_VERSION GET "${_pccontroller_avrdude_lock}" version)
-string(JSON PCCONTROLLER_AVRDUDE_SOURCE_URL GET "${_pccontroller_avrdude_lock}" source_url)
-string(JSON PCCONTROLLER_AVRDUDE_SOURCE_SHA256 GET "${_pccontroller_avrdude_lock}" source_sha256)
-
 set(BUILD_DOC OFF CACHE BOOL "" FORCE)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(FORCE_DISABLE_PYTHON_SUPPORT ON CACHE BOOL "" FORCE)
+if(APPLE)
+  # Apple Silicon Homebrew lives outside Clang's implicit /usr/local search
+  # root. Feed its headers to both AVRDUDE's configure probes and targets;
+  # libftdi's public header also includes libusb.h without its subdirectory.
+  find_program(_pccontroller_brew brew)
+  if(_pccontroller_brew)
+    execute_process(COMMAND "${_pccontroller_brew}" --prefix
+      OUTPUT_VARIABLE _pccontroller_brew_prefix
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+      RESULT_VARIABLE _pccontroller_brew_result)
+    if(_pccontroller_brew_result EQUAL 0 AND _pccontroller_brew_prefix)
+      list(PREPEND CMAKE_PREFIX_PATH "${_pccontroller_brew_prefix}")
+      list(APPEND CMAKE_REQUIRED_INCLUDES
+        "${_pccontroller_brew_prefix}/include"
+        "${_pccontroller_brew_prefix}/include/libusb-1.0")
+      include_directories(SYSTEM
+        "${_pccontroller_brew_prefix}/include"
+        "${_pccontroller_brew_prefix}/include/libusb-1.0")
+    endif()
+  endif()
+endif()
 if(WIN32)
   # Upstream's reviewed dependency set enables USBasp and other USB-backed
   # programmers without relying on an arbitrary DLL already on the host.
@@ -32,6 +55,17 @@ FetchContent_Declare(pccontroller_avrdude
   URL_HASH "SHA256=${PCCONTROLLER_AVRDUDE_SOURCE_SHA256}"
   DOWNLOAD_EXTRACT_TIMESTAMP TRUE
   EXCLUDE_FROM_ALL)
+# The archive is extracted inside the PCController Git worktree. Stop Git's
+# repository discovery at its containing directory so AVRDUDE does not report
+# PCController's HEAD as its own revision. Git remains available to
+# FetchContent for AVRDUDE's reviewed Windows dependencies.
+if(FETCHCONTENT_SOURCE_DIR_PCCONTROLLER_AVRDUDE)
+  get_filename_component(_pccontroller_avrdude_git_ceiling
+    "${FETCHCONTENT_SOURCE_DIR_PCCONTROLLER_AVRDUDE}" DIRECTORY)
+else()
+  set(_pccontroller_avrdude_git_ceiling "${CMAKE_BINARY_DIR}/_deps")
+endif()
+set(ENV{GIT_CEILING_DIRECTORIES} "${_pccontroller_avrdude_git_ceiling}")
 FetchContent_MakeAvailable(pccontroller_avrdude)
 
 # AVRDUDE 8.3's pinned libusb-win32 dependency predates GCC 16's rejection of
@@ -67,6 +101,7 @@ if(WIN32)
 endif()
 
 add_executable(pccontroller-avrdude adapter.c)
+set_target_properties(pccontroller-avrdude PROPERTIES C_EXTENSIONS OFF)
 add_dependencies(pccontroller-avrdude avrdude conf)
 target_link_libraries(pccontroller-avrdude PRIVATE libavrdude)
 if(MINGW)
