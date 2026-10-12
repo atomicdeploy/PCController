@@ -41,17 +41,20 @@ Keep physical, renderer, source/CI and deployment claims separate.
 ## Observed verification, 2026-10-12
 
 - Flutter 3.47.3 / Dart 3.13.3: locked offline restore and analyzer passed.
-- Full suite: 101 passed, two opt-in renderer/live tests skipped by default.
+- Full suite: 105 passed, two opt-in renderer/live tests skipped by default.
 - Opt-in renderer and live-host tests: both passed. Direct PCController
   snapshot, peripheral catalog and advertised WebSocket subscription were
   exercised read-only against a host connected to the physical board.
 - Offline phone (412×915) and tablet (1280×800) captures were inspected,
   including native sequence editing and dimmed repeat previews. These are
   explicitly renderer previews, not installed-device screenshots.
-- ARM64 preview APK: 18.4 MB, development signing, SHA-256
-  `96be664748ebf3d9c3323863de59b3eb13f3a15ffbe1007829b8e935087adbe8`.
-  This local preview uses an optional non-secret localhost ADB test endpoint;
-  normal CI previews open with no preconfigured peer.
+- ARM64 preview APK: 18.5 MB, development signing, SHA-256
+  `353fc77c6af7778d138144079236cb26bc50212f794d9021baf10e92c3803d14`.
+  Local and CI delivery previews open without a preconfigured peer.
+- Native SAF resume/owner revalidation, retained bridge selection, explicit
+  disconnect persistence, partial panel authority and disappearing LCD choices
+  have source/unit/renderer coverage. Actual Android SAF interaction remains
+  unverified because installation is blocked; mocks are not device acceptance.
 - The discovered Samsung Android device refused installation:
   `Requested internal only, but not enough space`. Its installer reserve
   remains authoritative; no app/data was deleted and no alternative install

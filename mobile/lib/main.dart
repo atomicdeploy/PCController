@@ -63,6 +63,11 @@ class _ControllerHomeState extends State<ControllerHome>
   int activeRequests = 0;
   String? lastError, bridgeTarget;
   String boardOrigin = '', playerOrigin = '', boardToken = '', playerToken = '';
+  bool viaPealayer = false,
+      boardWanted = false,
+      playerWanted = false,
+      foreground = true;
+  int connectionChoiceRevision = 0;
   List<Json> drafts = [];
   List<Json> deliveries = [];
   String displayTarget = 'segments';
@@ -87,15 +92,18 @@ class _ControllerHomeState extends State<ControllerHome>
           prefs.getString('pccontroller.origin') ??
           const String.fromEnvironment('PC_ORIGIN');
       playerOrigin = prefs.getString('pealayer.origin') ?? '';
+      viaPealayer = prefs.getBool('pccontroller.via-pealayer') ?? false;
+      boardWanted =
+          prefs.getBool('pccontroller.connect') ?? boardOrigin.isNotEmpty;
+      playerWanted =
+          prefs.getBool('pealayer.connect') ?? playerOrigin.isNotEmpty;
       boardToken = await secure.read(key: 'pccontroller.token') ?? '';
       playerToken = await secure.read(key: 'pealayer.token') ?? '';
       drafts = objects(jsonDecode(prefs.getString('local.drafts') ?? '[]'));
       if (!mounted) return;
       setState(() {});
-      if (boardOrigin.isNotEmpty) {
-        unawaited(board.connect(boardOrigin, boardToken));
-      }
-      if (playerOrigin.isNotEmpty) {
+      unawaited(connectBoard());
+      if (foreground && playerWanted && playerOrigin.isNotEmpty) {
         unawaited(player.connect(playerOrigin, playerToken));
       }
     } catch (_) {
@@ -112,13 +120,13 @@ class _ControllerHomeState extends State<ControllerHome>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.detached) {
+      foreground = false;
       board.disconnect();
       player.disconnect();
     } else if (state == AppLifecycleState.resumed && widget.restore) {
-      if (boardOrigin.isNotEmpty) {
-        unawaited(board.connect(boardOrigin, boardToken));
-      }
-      if (playerOrigin.isNotEmpty) {
+      foreground = true;
+      unawaited(connectBoard());
+      if (playerWanted && playerOrigin.isNotEmpty) {
         unawaited(player.connect(playerOrigin, playerToken));
       }
     }
@@ -136,6 +144,55 @@ class _ControllerHomeState extends State<ControllerHome>
     draftName.dispose();
     draftProgram.dispose();
     super.dispose();
+  }
+
+  Future<void> connectBoard() async {
+    if (!foreground) return;
+    final selected = selectedControllerOrigin(
+      boardWanted,
+      viaPealayer,
+      boardOrigin,
+      playerOrigin,
+    );
+    if (selected == null) return;
+    if (viaPealayer) {
+      await board.connectRelay(selected, playerToken);
+    } else {
+      await board.connect(selected, boardToken);
+    }
+  }
+
+  Future<void> disconnectPeer(PeerSession peer) async {
+    if (peer.controller) connectionChoiceRevision++;
+    if (peer.controller) {
+      boardWanted = false;
+    } else {
+      playerWanted = false;
+    }
+    peer.disconnect();
+    await perform('Disconnect', () async {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(
+        peer.controller ? 'pccontroller.connect' : 'pealayer.connect',
+        false,
+      );
+    }, priority: true);
+  }
+
+  Future<bool> reacquireDocumentOwner(String pinned, int choice) async {
+    final deadline = DateTime.now().add(const Duration(seconds: 6));
+    while (mounted &&
+        connectionChoiceRevision == choice &&
+        boardWanted &&
+        DateTime.now().isBefore(deadline)) {
+      if (foreground &&
+          board.fresh &&
+          board.peripherals['board_profile'] is Map) {
+        return board.stableTargetStamp == pinned;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+    return false;
   }
 
   Future<void> perform(
@@ -355,13 +412,22 @@ class _ControllerHomeState extends State<ControllerHome>
           value: secret,
         );
         if (controller) {
+          connectionChoiceRevision++;
           boardOrigin = address;
           boardToken = secret;
-          await board.connect(address, secret);
+          viaPealayer = false;
+          boardWanted = true;
+          await prefs.setBool('pccontroller.via-pealayer', false);
+          await prefs.setBool('pccontroller.connect', true);
+          await connectBoard();
         } else {
+          if (viaPealayer) connectionChoiceRevision++;
           playerOrigin = address;
           playerToken = secret;
+          playerWanted = true;
+          await prefs.setBool('pealayer.connect', true);
           await player.connect(address, secret);
+          if (viaPealayer && boardWanted) await connectBoard();
         }
       });
     }
@@ -582,7 +648,7 @@ class _ControllerHomeState extends State<ControllerHome>
             action(
               'Disconnect',
               Icons.link_off,
-              peer.enabled ? peer.disconnect : null,
+              peer.enabled ? () => unawaited(disconnectPeer(peer)) : null,
             ),
           ],
         ),
@@ -662,16 +728,19 @@ class _ControllerHomeState extends State<ControllerHome>
         fact(
           'Name',
           board.fresh
-              ? '${board.state['board_name'] ?? object(board.state['hello'])['name']}'
+              ? '${board.state['have_board_name'] == true ? board.state['board_name'] : object(board.state['hello'])['name'] ?? 'Unavailable'}'
               : 'Unavailable',
         ),
         fact(
           'Mode',
-          board.fresh
+          board.measurementsFresh
               ? '${status['program_mode'] ?? 'Unavailable'}'
               : 'Unavailable',
         ),
-        fact('Door', board.fresh ? '${status['door_open']}' : 'Unavailable'),
+        fact(
+          'Door',
+          board.measurementsFresh ? '${status['door_open']}' : 'Unavailable',
+        ),
         fact(
           'E-STOP',
           board.fresh
@@ -797,9 +866,13 @@ class _ControllerHomeState extends State<ControllerHome>
 
   Widget frontPanel() {
     final panel = object(board.state['front_panel']), ready = board.boardReady;
+    final full = ready && board.state['have_front_panel'] == true;
+    final lcdAvailable = full && panel['lcd_available'] == true;
+    final validDisplay =
+        displayTarget == 'segments' || (displayTarget == 'lcd' && lcdAvailable);
     return grid([
       card('Live front panel', Icons.dialpad, [
-        if (board.fresh &&
+        if (ready &&
             board.state['have_front_panel_segments'] == true &&
             panel['raw_segments'] is List)
           SevenSegmentPreview(
@@ -812,28 +885,24 @@ class _ControllerHomeState extends State<ControllerHome>
         const SizedBox(height: 12),
         fact(
           'TM1637',
-          board.fresh && panel['tm1637_detection_known'] == true
+          full && panel['tm1637_detection_known'] == true
               ? panel['tm1637_detected'] == true
                     ? 'Detected'
                     : 'Not detected'
               : 'Unknown',
         ),
-        if (board.fresh && panel['lcd_available'] == true)
+        if (lcdAvailable)
           Text(
             '${panel['lcd_line_1']}\n${panel['lcd_line_2']}',
             style: const TextStyle(fontFamily: 'monospace'),
           ),
         fact(
           'Pressed keys',
-          board.fresh
-              ? '${panel['pressed_keys'] ?? 'Unavailable'}'
-              : 'Unavailable',
+          full ? '${panel['pressed_keys'] ?? 'Unavailable'}' : 'Unavailable',
         ),
         fact(
           'Page',
-          board.fresh
-              ? '${panel['menu_page'] ?? 'Unavailable'}'
-              : 'Unavailable',
+          full ? '${panel['menu_page'] ?? 'Unavailable'}' : 'Unavailable',
         ),
         Wrap(
           spacing: 8,
@@ -863,7 +932,7 @@ class _ControllerHomeState extends State<ControllerHome>
               action(
                 'K$key',
                 Icons.touch_app,
-                ready && panel['host_captured'] == true
+                full && panel['host_captured'] == true
                     ? () => unawaited(boardCommand('host-menu key K$key press'))
                     : null,
               ),
@@ -872,11 +941,12 @@ class _ControllerHomeState extends State<ControllerHome>
       ]),
       card('Display message', Icons.text_fields, [
         DropdownButtonFormField<String>(
-          initialValue: displayTarget,
+          key: ValueKey('${board.targetStamp}/$lcdAvailable/$displayTarget'),
+          initialValue: validDisplay ? displayTarget : null,
           decoration: const InputDecoration(labelText: 'Display'),
           items: [
             const DropdownMenuItem(value: 'segments', child: Text('7-segment')),
-            if (panel['lcd_available'] == true)
+            if (lcdAvailable)
               const DropdownMenuItem(value: 'lcd', child: Text('LCD')),
           ],
           onChanged: (value) {
@@ -893,7 +963,7 @@ class _ControllerHomeState extends State<ControllerHome>
         action(
           'Show for 5 seconds',
           Icons.send,
-          ready && displayText.text.trim().isNotEmpty
+          ready && validDisplay && displayText.text.trim().isNotEmpty
               ? () => unawaited(
                   boardCommand(
                     'display $displayTarget --duration 5s --repeat once -- ${jsonEncode(displayText.text)}',
@@ -1010,16 +1080,20 @@ class _ControllerHomeState extends State<ControllerHome>
               board.fresh
                   ? () => unawaited(
                       perform('Artifact import', () async {
-                        final epoch = board.generation, peer = board.transport!;
+                        final pinned = board.stableTargetStamp,
+                            choice = connectionChoiceRevision;
                         final document = await AndroidDocuments().pick(
                           extensions: const ['hex', 'bin'],
                         );
-                        if (document == null ||
-                            epoch != board.generation ||
-                            !board.fresh) {
+                        if (document == null) {
                           return null;
                         }
-                        final result = await peer.upload(
+                        if (!await reacquireDocumentOwner(pinned, choice)) {
+                          throw const Rejected(
+                            'Selected board ownership could not be reverified; firmware was not staged.',
+                          );
+                        }
+                        final result = await board.transport!.upload(
                           document.name,
                           document.bytes,
                         );
@@ -1098,14 +1172,19 @@ class _ControllerHomeState extends State<ControllerHome>
                   board.fresh
                       ? () => unawaited(
                           perform('Export', () async {
-                            final stamp = board.targetStamp,
+                            final pinned = board.stableTargetStamp,
+                                choice = connectionChoiceRevision,
                                 peer = board.transport!;
                             final bytes = await peer.download(artifact);
                             return AndroidDocuments().export(
                               'pccontroller-${artifact['sha256'].toString().substring(0, 12)}.bin',
                               bytes,
                               stillOwned: () =>
-                                  board.targetStamp == stamp && board.fresh,
+                                  connectionChoiceRevision == choice &&
+                                  board.stableTargetStamp == pinned &&
+                                  board.fresh,
+                              reacquire: () =>
+                                  reacquireDocumentOwner(pinned, choice),
                             );
                           }),
                         )
@@ -1441,7 +1520,13 @@ class _ControllerHomeState extends State<ControllerHome>
       player.fresh
           ? () => unawaited(
               perform('Use Pealayer bridge', () async {
-                await board.connectRelay(playerOrigin, playerToken);
+                connectionChoiceRevision++;
+                final prefs = await SharedPreferences.getInstance();
+                viaPealayer = true;
+                boardWanted = true;
+                await prefs.setBool('pccontroller.via-pealayer', true);
+                await prefs.setBool('pccontroller.connect', true);
+                await connectBoard();
                 if (mounted) {
                   setState(() {
                     section = 0;

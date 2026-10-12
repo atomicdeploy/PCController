@@ -49,6 +49,11 @@ and application outcome. Never forward the destination's credential from a
 different peer. Direct host sessions and bridge authority remain distinct.
 
 Disconnect/background revokes live state, closes sockets and cancels retries.
+Explicit Disconnect stays disconnected after resume; a selected Pealayer board
+route remains selected instead of silently returning to an earlier direct host.
+Android SAF pickers may pause the app. Import/export reacquires the same actual
+host/board/profile and explicitly selected route after resume before sending
+bytes or consuming a one-use destination. A changed owner cancels the operation.
 Reconnect performs an authoritative refresh; it never replays mutations.
 Confirmation and document-picker returns are fenced by connection/host/board
 identity. A lost acknowledgement is uncertain, not successful and not retried.

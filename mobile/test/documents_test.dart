@@ -4,6 +4,61 @@ import 'package:pccontroller_mobile/documents.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test('SAF resume reacquires the same owner before one-use export, without replay', () async {
+    var owned = true;
+    final calls = <String>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(AndroidDocuments.channel, (call) async {
+          calls.add(call.method);
+          if (call.method == 'create') {
+            owned = false;
+            return 'destination';
+          }
+          return null;
+        });
+    addTearDown(
+      () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(AndroidDocuments.channel, null),
+    );
+    expect(
+      await AndroidDocuments().export(
+        'board.bin',
+        Uint8List.fromList([1]),
+        stillOwned: () => owned,
+        reacquire: () async {
+          owned = true;
+          return true;
+        },
+      ),
+      true,
+    );
+    expect(calls, ['create', 'write']);
+  });
+  test(
+    'failed SAF ownership reacquisition abandons destination without a write',
+    () async {
+      final calls = <String>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(AndroidDocuments.channel, (call) async {
+            calls.add(call.method);
+            return call.method == 'create' ? 'destination' : null;
+          });
+      addTearDown(
+        () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(AndroidDocuments.channel, null),
+      );
+      await expectLater(
+        AndroidDocuments().export(
+          'board.bin',
+          Uint8List.fromList([1]),
+          stillOwned: () => true,
+          reacquire: () async => false,
+        ),
+        throwsFormatException,
+      );
+      expect(calls, ['create', 'abandon']);
+    },
+  );
   test('Actual donor extension rule is case-insensitive, with no false suffix match', () {
     expect(preferenceFileAllowed('firmware.BIN', ['bin']), true);
     expect(preferenceFileAllowed('firmware.bin.exe', ['bin']), false);

@@ -10,6 +10,17 @@ import 'package:http/http.dart' as http;
 import 'output_events.dart';
 
 typedef Json = Map<String, dynamic>;
+String? selectedControllerOrigin(
+  bool wanted,
+  bool relay,
+  String direct,
+  String player,
+) {
+  if (!wanted) return null;
+  final selected = relay ? player : direct;
+  return selected.isEmpty ? null : selected;
+}
+
 Json object(dynamic value) =>
     value is Map ? Map<String, dynamic>.from(value) : {};
 List<Json> objects(dynamic value) =>
@@ -335,6 +346,8 @@ class PeerSession extends ChangeNotifier {
       '${state['host_instance_id'] ?? object(state['runtime'])['instance_id'] ?? ''}';
   String get targetStamp =>
       '$generation/$identity/${state['connection_generation']}/${state['port']}/${object(state['hello'])['build_hash']}/${object(peripherals['board_profile'])['revision']}';
+  String get stableTargetStamp =>
+      '${transport?.origin}/${transport is ControllerRelayTransport}/$identity/${state['connection_generation']}/${state['port']}/${object(state['hello'])['build_hash']}/${object(peripherals['board_profile'])['revision']}';
 
   Future<void> connect(String origin, String token) async {
     disconnect();
@@ -462,7 +475,7 @@ class PeerSession extends ChangeNotifier {
       }
       socket.listen(
         (frame) {
-          if (epoch != generation) return;
+          if (epoch != generation || _socket != socket) return;
           try {
             if (frame is! String || frame.length > 8 * 1024 * 1024) {
               throw const FormatException();
@@ -537,8 +550,19 @@ class PeerSession extends ChangeNotifier {
             _scheduleRefresh(epoch);
           }
         },
-        onError: (_) => _lost(epoch),
-        onDone: () => _lost(epoch),
+        onError: (_) {
+          if (_socket == socket) {
+            _socket = null;
+            unawaited(socket.close());
+            _lost(epoch);
+          }
+        },
+        onDone: () {
+          if (_socket == socket) {
+            _socket = null;
+            _lost(epoch);
+          }
+        },
         cancelOnError: true,
       );
       _freshness?.cancel();

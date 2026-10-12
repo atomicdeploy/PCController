@@ -44,16 +44,18 @@ class AndroidDocuments {
     String name,
     Uint8List bytes, {
     required bool Function() stillOwned,
+    Future<bool> Function()? reacquire,
   }) async {
     if (!stillOwned()) {
       throw const FormatException('Board changed before export');
     }
     final token = await channel.invokeMethod<String>('create', {'name': name});
     if (token == null) return false;
-    if (!stillOwned()) {
+    final reacquired = reacquire == null || await reacquire();
+    if (!reacquired || !stillOwned()) {
       await channel.invokeMethod<void>('abandon', {'token': token});
       throw const FormatException(
-        'Board changed while choosing the destination; a new empty document may remain, but no backup was written',
+        'Selected board ownership could not be reverified after choosing the destination; a new empty document may remain, but no backup was written',
       );
     }
     // Native consumes the one-use token even on failure. Never replay a write.

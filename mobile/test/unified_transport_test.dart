@@ -9,6 +9,32 @@ import 'package:pccontroller_mobile/unified/output_events.dart';
 
 void main() {
   test(
+    'resume keeps the selected bridge and explicit disconnect cannot reconnect',
+    () {
+      expect(
+        selectedControllerOrigin(
+          true,
+          true,
+          'http://previous-board',
+          'http://player',
+        ),
+        'http://player',
+      );
+      expect(
+        selectedControllerOrigin(true, true, 'http://previous-board', ''),
+        null,
+      );
+      expect(
+        selectedControllerOrigin(false, false, 'http://previous-board', ''),
+        null,
+      );
+      expect(
+        selectedControllerOrigin(true, false, 'http://board', 'http://player'),
+        'http://board',
+      );
+    },
+  );
+  test(
     'incomplete catalog is rejected, not converted to a false empty inventory',
     () {
       expect(() => verifiedCatalog({}), throwsA(isA<Rejected>()));
