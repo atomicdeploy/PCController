@@ -46,31 +46,35 @@ async function readJson(handle) {
   if (!stat.isFile() || stat.size > 1048576) throw new Error('development metadata must be a bounded regular file')
   return JSON.parse(await handle.readFile('utf8'))
 }
-let owned = false
+let owned = false, ownerHandle, createdOwner = false
 try {
-  const handle = await open(marker, readFlags)
-  try { owned = (await readJson(handle)).owner === 'pccontroller-virtual-development' } finally { await handle.close() }
-  if (!owned) throw new Error('wrong development directory owner')
+  // Acquire a new ownership descriptor first, rather than checking the marker
+  // and reopening its pathname later. Existing metadata is read only.
+  ownerHandle = await open(marker, 'wx+', 0o600)
+  createdOwner = true
 } catch (error) {
-  if (error.code !== 'ENOENT') throw error
+  if (error.code !== 'EEXIST') throw error
+  ownerHandle = await open(marker, readFlags)
 }
 let config
 let handle
 let created = false
-if (owned) {
-  try { handle = await open(configPath, readFlags) } catch (error) { if (error.code !== 'ENOENT') throw error }
-}
-// An unowned directory must win exclusive creation, never probe-then-overwrite
-// an existing configuration. Read/check/write against the opened descriptors.
-if (!handle) { handle = await open(configPath, createFlags, 0o600); created = true }
 try {
+  if (!createdOwner) {
+    owned = (await readJson(ownerHandle)).owner === 'pccontroller-virtual-development'
+    if (!owned) throw new Error('wrong development directory owner')
+  }
+  if (owned) {
+    try { handle = await open(configPath, readFlags) } catch (error) { if (error.code !== 'ENOENT') throw error }
+  }
+  // An unowned directory must win exclusive creation, never probe-then-overwrite
+  // an existing configuration. A failed seed leaves an empty (invalid) marker:
+  // later launches still fail closed, without deleting a pathname after close.
+  if (!handle) { handle = await open(configPath, createFlags, 0o600); created = true }
   if (created) { await handle.writeFile(seed); config = JSON.parse(seed) }
   else config = await readJson(handle)
-  if (!owned) {
-    const ownerHandle = await open(marker, 'wx', 0o600)
-    try { await ownerHandle.writeFile(JSON.stringify({owner:'pccontroller-virtual-development'})+'\n') } finally { await ownerHandle.close() }
-  }
-} finally { await handle.close() }
+  if (createdOwner) await ownerHandle.writeFile(JSON.stringify({owner:'pccontroller-virtual-development'})+'\n')
+} finally { await handle?.close(); await ownerHandle.close() }
 if (config.ipc?.allow_remote || config.integrations?.websocket_clients?.length
     || config.integrations?.board_mirror?.groups?.length || config.integrations?.board_mirror?.receive_from)
   throw new Error('dev launcher refuses a remotely connected/shared configuration')

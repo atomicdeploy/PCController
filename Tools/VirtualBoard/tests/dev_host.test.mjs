@@ -32,7 +32,7 @@ test('unowned existing configuration is neither read as a profile nor overwritte
     const result = await run(state)
     assert(result.error); assert.match(result.stderr,/EEXIST/)
     assert.equal(await readFile(join(state,'config.json'),'utf8'),content)
-    await assert.rejects(readFile(join(state,'virtual-development.json')), {code:'ENOENT'})
+    assert.equal(await readFile(join(state,'virtual-development.json'),'utf8'),'','failed exclusive seed must not publish valid ownership')
   } finally { await rm(state,{recursive:true,force:true}) }
 })
 test('owned remote configuration is refused without overwriting authoring', async () => {
