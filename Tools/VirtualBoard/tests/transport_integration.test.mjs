@@ -104,6 +104,26 @@ try {
   mapped.stdin.end(); await new Promise(resolve => mapped.once('exit', resolve)); assert.equal(mapped.exitCode, 0, mapped.diagnostics())
   assert(!await readFile(join(state, 'native-firmware-eeprom-8765.bin')).then(() => true, () => false), 'RAM-only development must not create EEPROM files')
 
+  // Optional live Linux scalar-source acceptance, still on our own native
+  // process. Never actuates or connects to an existing physical controller.
+  if (process.env.PCCONTROLLER_NATIVE_TEMPERATURE_SOURCE) {
+    const source = process.env.PCCONTROLLER_NATIVE_TEMPERATURE_SOURCE
+    const actual = Number((await readFile(source, 'utf8')).trim())
+    assert(Number.isInteger(actual) && actual >= -55000 && actual <= 125000)
+    const hostMapped = start(['--stdio','--memory','--sensor-temp0',source])
+    const hostFrames = channel(hostMapped.stdout)
+    let observed
+    for (let i=0; i<60; ++i) {
+      hostMapped.stdin.write(encode(2, 44))
+      const { payload } = await hostFrames(f => f.opcode === 144 && f.sequence === 44)
+      if (payload.readUInt16LE(24) & 4) { observed = payload.readInt16LE(20); break }
+      await new Promise(resolve => setTimeout(resolve, 100))
+    }
+    assert(observed !== undefined && observed >= -5500 && observed <= 12500, 'live source must be observed through production telemetry')
+    console.log(`live host-mapped native temperature: ${observed / 100} C`)
+    hostMapped.stdin.end(); await new Promise(resolve => hostMapped.once('exit', resolve)); assert.equal(hostMapped.exitCode, 0, hostMapped.diagnostics())
+  }
+
   const port = await freePort(), eeprom = join(state, 'board.bin')
   // Restart must resolve the loaded OS image, not this untrusted argv[0].
   let child = start(['--port', String(port), '--eeprom', eeprom, '--pid-file', pidFile, '--no-stdin'], join(state, 'not-a-firmware-executable'))

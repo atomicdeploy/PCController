@@ -7,6 +7,9 @@ import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createInterface } from 'node:readline'
+import { loadProjectEnv } from '../Build/env.mjs'
+
+loadProjectEnv()
 
 const here = dirname(fileURLToPath(import.meta.url))
 const suffix = process.platform === 'win32' ? '.exe' : ''
@@ -46,10 +49,11 @@ try { await access(configPath) } catch (error) {
   await writeFile(configPath, JSON.stringify({ schema: 2, connection: { port: `tcp://127.0.0.1:${boardPort}`, reset_on_reconnect: false },
     ipc: { listen: `127.0.0.1:${hostPort}`, allow_remote: false }, ui: { history_hours: 0 },
     integrations: { discovery: { mdns_enabled:false, dns_sd_enabled:false, ssdp_enabled:false, upnp_enabled:false, ws_discovery_enabled:false, broadcast_enabled:false, netbios_enabled:false },
-      buzzer_mirror: { enabled:false }, keyboard: { enabled:false } } }, null, 2) + '\n', { flag: 'wx' })
+      buzzer_mirror: { enabled:false }, keyboard_control: { enabled:false } } }, null, 2) + '\n', { flag: 'wx' })
 }
 const config = JSON.parse(await readFile(configPath, 'utf8'))
-if (config.ipc?.allow_remote || config.integrations?.websocket_clients?.length || config.integrations?.peers?.length)
+if (config.ipc?.allow_remote || config.integrations?.websocket_clients?.length
+    || config.integrations?.board_mirror?.groups?.length || config.integrations?.board_mirror?.receive_from)
   throw new Error('dev launcher refuses a remotely connected/shared configuration')
 const children = []
 let socket, shuttingDown = false
