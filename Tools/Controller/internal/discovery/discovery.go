@@ -35,6 +35,8 @@ const (
 )
 
 type Instance struct {
+	Product   string      `json:"product,omitempty"`
+	Verified  bool        `json:"verified"`
 	Protocol  string      `json:"protocol"`
 	Protocols []string    `json:"protocols,omitempty"`
 	Sources   []Source    `json:"sources,omitempty"`
@@ -61,6 +63,7 @@ type Options struct {
 	WSDiscovery   bool
 	Broadcast     bool
 	NetBIOS       bool
+	MNDP          bool
 	BroadcastPort int
 }
 
@@ -89,6 +92,7 @@ type Advertiser struct {
 	wsListener       *net.UDPConn
 	broadcastConn    *net.UDPConn
 	netbiosConn      *net.UDPConn
+	mndpConn         *net.UDPConn
 
 	mu       sync.RWMutex
 	closed   bool
@@ -202,6 +206,17 @@ func AdvertiseWithOptions(
 			result.active = append(result.active, "netbios")
 		}
 	}
+	if options.MNDP {
+		enabled++
+		group, _ := net.ResolveUDPAddr("udp4", "224.0.0.88:5678")
+		connection, err := net.ListenMulticastUDP("udp4", nil, group)
+		if err != nil {
+			recordFailure("mndp", err)
+		} else {
+			result.mndpConn = connection
+			result.active = append(result.active, "mndp")
+		}
+	}
 	if enabled > 0 && len(result.active) == 0 {
 		cancel()
 		messages := make([]error, 0, len(result.failures))
@@ -213,6 +228,10 @@ func AdvertiseWithOptions(
 	go func() {
 		defer close(result.done)
 		var wait sync.WaitGroup
+		if result.mndpConn != nil {
+			wait.Add(1)
+			go func() { defer wait.Done(); runMNDPAdvertiser(ctx, result) }()
+		}
 		if result.ssdp {
 			wait.Add(1)
 			go func() { defer wait.Done(); runSSDPAdvertiser(ctx, result) }()
@@ -446,6 +465,10 @@ func DiscoverWithOptions(ctx context.Context, options Options) ([]Instance, erro
 		wait.Add(1)
 		go func() { defer wait.Done(); recordError(discoverNetBIOS(ctx, add)) }()
 	}
+	if options.MNDP {
+		wait.Add(1)
+		go func() { defer wait.Done(); recordError(discoverMNDP(ctx, add)) }()
+	}
 	wait.Wait()
 	enrich.Wait()
 	result := make([]Instance, 0, len(instances))
@@ -460,6 +483,26 @@ func DiscoverWithOptions(ctx context.Context, options Options) ([]Instance, erro
 }
 
 func browseMDNS(ctx context.Context, add func(Instance)) error {
+	var wait sync.WaitGroup
+	var first error
+	var mu sync.Mutex
+	for _, service := range []string{MDNSService, "_pealayer._tcp", "_digitalogic._tcp"} {
+		wait.Add(1)
+		go func(service string) {
+			defer wait.Done()
+			if err := browseMDNSService(ctx, service, add); err != nil {
+				mu.Lock()
+				if first == nil {
+					first = err
+				}
+				mu.Unlock()
+			}
+		}(service)
+	}
+	wait.Wait()
+	return first
+}
+func browseMDNSService(ctx context.Context, service string, add func(Instance)) error {
 	resolver, err := zeroconf.NewResolver(nil)
 	if err != nil {
 		return fmt.Errorf("create mDNS resolver: %w", err)
@@ -477,6 +520,7 @@ func browseMDNS(ctx context.Context, add func(Instance)) error {
 				addresses = append(addresses, address.String())
 			}
 			add(Instance{
+				Product:  map[string]string{MDNSService: "pccontroller", "_pealayer._tcp": "pealayer", "_digitalogic._tcp": "controller-mobile"}[service],
 				Protocol: "mdns", Name: entry.Instance,
 				Host: strings.TrimSuffix(entry.HostName, "."), Port: entry.Port,
 				Addresses: addresses, TXT: append([]string(nil), entry.Text...),
@@ -484,7 +528,7 @@ func browseMDNS(ctx context.Context, add func(Instance)) error {
 			})
 		}
 	}()
-	err = resolver.Browse(ctx, MDNSService, MDNSDomain, entries)
+	err = resolver.Browse(ctx, service, MDNSDomain, entries)
 	if err != nil {
 		close(entries)
 		<-done
@@ -651,7 +695,7 @@ func discoverSSDP(ctx context.Context, add func(Instance)) error {
 	}
 	request := strings.Join([]string{
 		"M-SEARCH * HTTP/1.1", "HOST: " + ssdpAddress,
-		`MAN: "ssdp:discover"`, "MX: 1", "ST: " + SSDPType, "", "",
+		`MAN: "ssdp:discover"`, "MX: 1", "ST: ssdp:all", "", "",
 	}, "\r\n")
 	if _, err := connection.WriteToUDP([]byte(request), address); err != nil {
 		return fmt.Errorf("send SSDP search: %w", err)
@@ -685,7 +729,8 @@ func parseSSDPResponse(data []byte, source *net.UDPAddr) (Instance, bool) {
 		return Instance{}, false
 	}
 	_ = request.Body.Close()
-	if request.Header.Get("ST") != SSDPType {
+	product := map[string]string{SSDPType: "pccontroller", "urn:digitalogic-ir:device:Pealayer:1": "pealayer", "urn:digitalogic-ir:device:ControllerMobile:1": "controller-mobile"}[request.Header.Get("ST")]
+	if product == "" {
 		return Instance{}, false
 	}
 	host := ""
@@ -703,8 +748,13 @@ func parseSSDPResponse(data []byte, source *net.UDPAddr) (Instance, bool) {
 			port = parsed.port
 		}
 	}
+	name := request.Header.Get("X-PCController-Name")
+	if name == "" {
+		name = request.Header.Get("X-Digitalogic-Name")
+	}
 	return Instance{
-		Protocol: "ssdp", Name: request.Header.Get("X-PCController-Name"),
+		Product:  product,
+		Protocol: "ssdp", Name: name,
 		Host: host, Port: port, Addresses: addresses, Location: request.Header.Get("Location"), PublicURL: request.Header.Get("X-PCController-Public"),
 		USN: request.Header.Get("USN"),
 		TXT: normalizeTXT(request.Header.Values("X-PCController-Meta")), SeenAt: time.Now(),

@@ -112,6 +112,7 @@ interface DiscoveryConfig {
   ws_discovery_enabled: boolean
   broadcast_enabled: boolean
   netbios_enabled: boolean
+  mndp_enabled: boolean
   broadcast_port: number
   instance_name: string
 }
@@ -273,6 +274,7 @@ export function AdvancedWorkbench({
   const [discoverWS, setDiscoverWS] = useState(true)
   const [discoverBroadcast, setDiscoverBroadcast] = useState(true)
   const [discoverNetBIOS, setDiscoverNetBIOS] = useState(true)
+  const [discoverMNDP, setDiscoverMNDP] = useState(true)
   const [discoverTimeout, setDiscoverTimeout] = useState(1500)
   const [discoveryInstanceName, setDiscoveryInstanceName] = useState('')
   const [discoveryBroadcastPort, setDiscoveryBroadcastPort] = useState(37889)
@@ -349,6 +351,7 @@ export function AdvancedWorkbench({
       setDiscoverWS(value.ws_discovery_enabled)
       setDiscoverBroadcast(value.broadcast_enabled)
       setDiscoverNetBIOS(value.netbios_enabled)
+      setDiscoverMNDP(value.mndp_enabled ?? false)
       setDiscoveryBroadcastPort(value.broadcast_port || 37889)
       setDiscoveryInstanceName(value.instance_name || '')
     }).catch(() => {
@@ -462,6 +465,7 @@ export function AdvancedWorkbench({
         ws_discovery: discoverWS,
         broadcast: discoverBroadcast,
         netbios: discoverNetBIOS,
+        mndp: discoverMNDP,
       })
       setNetworkDevices(value)
       setServiceOutput(JSON.stringify(value, null, 2))
@@ -483,6 +487,7 @@ export function AdvancedWorkbench({
         ws_discovery_enabled: discoverWS,
         broadcast_enabled: discoverBroadcast,
         netbios_enabled: discoverNetBIOS,
+        mndp_enabled: discoverMNDP,
         broadcast_port: discoveryBroadcastPort,
         instance_name: discoveryInstanceName.trim(),
       })
@@ -929,6 +934,7 @@ export function AdvancedWorkbench({
             <Toggle checked={discoverWS} onChange={setDiscoverWS} label="WS-Discovery" />
             <Toggle checked={discoverBroadcast} onChange={setDiscoverBroadcast} label="UDP broadcast" />
             <Toggle checked={discoverNetBIOS} onChange={setDiscoverNetBIOS} label="NetBIOS" />
+            <Toggle checked={discoverMNDP} onChange={setDiscoverMNDP} label="MNDP" />
           </div>
           <UDPSettings locale={locale} />
           <div className="advanced-fields advanced-fields--split">
@@ -938,7 +944,7 @@ export function AdvancedWorkbench({
           <Button icon={Save} busy={serviceBusy === 'discovery-config'} onClick={saveDiscoveryAdvertisement}>{copy('Save advertisement settings', 'ذخیره تنظیمات معرفی')}</Button>
           <p className="advanced-note advanced-note--safe">{copy('Advertisement is enabled by default and publishes only bounded public identity, health and telemetry. Remote commands still require an authenticated, remotely enabled IPC policy.', 'معرفی شبکه به‌طور پیش‌فرض فعال است و فقط هویت، سلامت و تله‌متری عمومی محدود را منتشر می‌کند. فرمان‌های راه‌دور همچنان به IPC فعال و احراز هویت‌شده نیاز دارند.')}</p>
           <RangeField label={copy('Discovery timeout', 'مهلت کشف')} value={discoverTimeout} min={100} max={5000} step={100} unit="ms" onChange={setDiscoverTimeout} />
-          <Button icon={ScanSearch} busy={serviceBusy === 'discovery'} disabled={!discoverMDNS && !discoverSSDP && !discoverWS && !discoverBroadcast && !discoverNetBIOS} onClick={() => void discoverNetworkDevices()}>{copy('Discover network hosts', 'کشف میزبان‌های شبکه')}</Button>
+          <Button icon={ScanSearch} busy={serviceBusy === 'discovery'} disabled={!discoverMDNS && !discoverSSDP && !discoverWS && !discoverBroadcast && !discoverNetBIOS && !discoverMNDP} onClick={() => void discoverNetworkDevices()}>{copy('Discover network hosts', 'کشف میزبان‌های شبکه')}</Button>
           {networkDevices.length > 0 && <div className="network-device-directory" aria-live="polite">
             {networkDevices.map((device) => {
               const info = device.public

@@ -1709,6 +1709,7 @@ func (service *Service) dispatch(
 			WSDiscovery bool     `json:"ws_discovery,omitempty"`
 			Broadcast   bool     `json:"broadcast,omitempty"`
 			NetBIOS     bool     `json:"netbios,omitempty"`
+			MNDP        bool     `json:"mndp,omitempty"`
 			Protocols   []string `json:"protocols,omitempty"`
 		}
 		if err = decodeParams(request.Params, &params); err == nil {
@@ -1727,6 +1728,8 @@ func (service *Service) dispatch(
 						params.Broadcast = true
 					case "netbios", "nbns":
 						params.NetBIOS = true
+					case "mndp":
+						params.MNDP = true
 					default:
 						err = fmt.Errorf("unsupported discovery protocol %q", protocol)
 					}
@@ -1735,8 +1738,9 @@ func (service *Service) dispatch(
 			if err != nil {
 				break
 			}
-			if !params.MDNS && !params.DNSSD && !params.SSDP && !params.UPnP && !params.WSDiscovery && !params.Broadcast && !params.NetBIOS {
+			if !params.MDNS && !params.DNSSD && !params.SSDP && !params.UPnP && !params.WSDiscovery && !params.Broadcast && !params.NetBIOS && !params.MNDP {
 				params.MDNS, params.DNSSD, params.SSDP, params.UPnP, params.WSDiscovery, params.Broadcast, params.NetBIOS = true, true, true, true, true, true, true
+				params.MNDP = true
 			}
 			if params.TimeoutMS == 0 {
 				params.TimeoutMS = 1500
@@ -1750,6 +1754,7 @@ func (service *Service) dispatch(
 				ctx, time.Duration(params.TimeoutMS)*time.Millisecond,
 			)
 			result, err = discovery.DiscoverWithOptions(discoveryContext, discovery.Options{
+				MNDP: params.MNDP,
 				MDNS: params.MDNS, DNSSD: params.DNSSD, SSDP: params.SSDP, UPnP: params.UPnP,
 				WSDiscovery: params.WSDiscovery, Broadcast: params.Broadcast, NetBIOS: params.NetBIOS,
 				BroadcastPort: service.hostConfig().Integrations.Discovery.BroadcastPort,
@@ -4012,7 +4017,8 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 	})
 	mux.HandleFunc("/healthz", func(writer http.ResponseWriter, _ *http.Request) {
 		writeHTTPJSON(writer, http.StatusOK, map[string]any{
-			"ok": true,
+			"ok":     true,
+			"status": "ok", "product": "pccontroller",
 			"service": productidentity.ServiceName(
 				service.hostConfig().UI.AppTitle,
 				"IPC",

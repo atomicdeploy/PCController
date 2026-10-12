@@ -125,17 +125,19 @@ class LocalAutomation {
       return error(id, -32602, 'Use authenticated HTTP for app capture');
     }
     final method = request['method'] as String;
-    final mutating = [
-      'board.action',
-      'board.pwm.set',
-      'board.connect',
-      'board.disconnect',
-      'board.menu.press',
-      'board.display.show',
-      'board.buzzer.play',
-      'board.mode.set',
-      'player.call',
-    ].contains(method);
+    final mutating =
+        [
+          'board.action',
+          'board.pwm.set',
+          'board.connect',
+          'board.disconnect',
+          'board.menu.press',
+          'board.display.show',
+          'board.buzzer.play',
+          'board.mode.set',
+          'player.call',
+        ].contains(method) ||
+        method.startsWith('app.upgrade.');
     if (mutating && _mutating) {
       return error(id, -32003, 'Another automation action is pending');
     }

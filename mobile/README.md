@@ -101,6 +101,52 @@ installation/launch of this separate app, not destructive physical board tests.
 
 ## Provenance and remaining acceptance
 
+### Unified workspace, discovery and self-package RPC
+
+The earlier basic Flutter design is rejected. `AGENTS.md` requires one contextual
+activity workspace, not product tabs; no unavailable-only cards or dormant peer
+token fields. The optional protected local automation API still keeps its actual
+security boundary. Android preview delivery is not design or physical acceptance.
+
+Discovery browses `_pccontroller._tcp`, `_pealayer._tcp` and `_digitalogic._tcp`
+using Android DNS-SD/mDNS, plus SSDP and MNDP. Each candidate is pinned to its
+responder's real origin and verified by a bounded read-only health probe with no
+proxy, redirects or credentials. Existing PCController health responses can be
+verified against their own native public directory. Duplicate endpoints collapse;
+this app's own sharing endpoint is excluded. Automatic connection applies only
+to a unique verified vacant role under saved intent; explicit Disconnect and
+live selections win. Actual network changes are coalesced, not probed per frame.
+
+Standard MNDP has no HTTP port. Digitalogic application advertisements add
+big-endian TLVs `0xff01` (product) and `0xff02` (two-byte API port). An identity-only
+RouterOS neighbour is not an invented controller on port 80. The MAC field is
+explicitly an application-scoped locally administered identity, not a board/NIC
+MAC. Generic advertisements never authorize hardware actions.
+
+`app.package.info/read` export only the installed single APK. The same protected
+local HTTP/WS/TCP/Android Intent RPC offers `app.upgrade.begin/write/finish/status/
+abort/install/permission/pull/push`. Chunks are at most 16 KiB, request/response
+JSON at most 32 KiB, one incoming transfer at most 128 MiB. Offsets are exact;
+lost mutation acknowledgements are not blindly retried. Storage is checked
+before 0% or staging creation. Digest, self-package, signer, newer version,
+minimum SDK and CPU compatibility are verified before Android installation.
+
+Opt-in foreground peer sharing uses port 18992 and the same package RPC. Public
+read-only export reveals no authoring, credentials or board/player proxy. A push
+requires an expiring receiver approval dialog and a short-lived capability pinned
+to one transfer/digest; the remote sender cannot invoke Install. Pull also verifies
+the source manifest. Android installation permission and consent remain explicit;
+`awaiting_android`/pending consent is not an installed receipt. There is no root,
+shell installer, uninstall, silent update or cross-app APK import. Staging is in
+the app's bounded private cache; only this module's own expired files are removed.
+Split installs cannot currently be exported as one APK.
+
+Source gates: focused Dart analysis, Android Kotlin compilation, Go build/vet,
+PCController Web type-check and Pealayer Cargo check passed. All-four-protocol LAN
+round trips, mutual device APK transfer/install, locked-device UI and hardware
+acceptance remain separate. Full CI/test-suite waits are not required for this
+iteration; retain those acceptance gaps rather than claiming production-ready.
+
 See [provenance](PROVENANCE.md) and [acceptance](ACCEPTANCE.md). The reference
 Pakar screens are retained in source/tests but are not the shipped entrypoint.
 Their ESP protocol is not an alias for PCController. Native offline authoring

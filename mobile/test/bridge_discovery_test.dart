@@ -140,7 +140,43 @@ void main() {
       3,
       ...utf8.encode('led'),
     ]);
-    expect(parseMndp(packet, '192.0.2.1')?.name, 'led');
+    expect(parseMndp(packet, '192.0.2.1'), isNull); // No invented HTTP port80.
+    final application = Uint8List.fromList([
+      ...packet,
+      0,
+      1,
+      0,
+      6,
+      2,
+      0,
+      0,
+      0,
+      0,
+      1,
+      255,
+      1,
+      0,
+      12,
+      ...utf8.encode('pccontroller'),
+      255,
+      2,
+      0,
+      2,
+      0x22,
+      0x53,
+    ]);
+    expect(
+      parseMndp(application, '192.0.2.1')?.endpoint,
+      'http://192.0.2.1:8787',
+    );
+    expect(parseMndp(application, '192.0.2.1')?.product, 'pccontroller');
+    expect(
+      parseSsdp(
+        bytes('HTTP/1.1 200 OK\r\nLOCATION: http://192.0.2.2:8787/\r\n'),
+        source: '192.0.2.1',
+      ),
+      isNull,
+    );
     expect(parseMndp(packet.sublist(0, 10), '192.0.2.1'), isNull);
     expect(
       parseMndp(Uint8List.fromList([...packet, 0, 5, 0, 1, 65]), '192.0.2.1'),
