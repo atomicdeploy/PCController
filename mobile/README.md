@@ -25,6 +25,17 @@ PakarController remains a separate project and Android installation.
 
 Phones use bottom navigation; tablets use a rail and responsive multi-column
 cards. System light/dark preference and platform text scaling are retained.
+The neutral card/action styling shares Pealayer's purple accent and semantic
+state indicators rather than coloring every action as selected. Relay, motion
+and PWM cards distinguish observed state from commands/setpoints; stale values
+become Unknown. In-memory voltage/current/power and both temperature histories
+retain at most 600 observations (at most 2 Hz), with gaps for missing readings.
+No chart samples are persisted to disk. Live segment frames and TM1637 ACK
+detection work independently of full LCD/menu snapshot availability.
+
+Optional authenticated local JSON-RPC (HTTP/WebSocket), TCP NDJSON and Android
+Intent adapters are described in [Automation](AUTOMATION.md), including ADB,
+Termux and Tasker usage, exact safety fences and background limitations.
 
 ## Connections and mutually routed controls
 

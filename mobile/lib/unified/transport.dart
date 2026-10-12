@@ -319,7 +319,11 @@ class PeerSession extends ChangeNotifier {
   int generation = 0, _attempt = 0;
   bool enabled = false, online = false, subscribed = false;
   String? error;
-  Json state = {}, peripherals = {}, operation = {};
+  Json state = {}, peripherals = {}, operation = {}, pwmValues = {};
+  DateTime? pwmUpdated, _lastPanelAttempt;
+  String _panelOwner = '';
+  bool _pwmReading = false;
+  Timer? _pwmTimer;
   List<Json> instances = [], artifacts = [], events = [];
   DateTime? received;
   int freshnessMs = 5000;
@@ -389,6 +393,47 @@ class PeerSession extends ChangeNotifier {
         );
         if (epoch != generation) return;
         peripherals = inventory;
+        await refreshPwm();
+        if (epoch != generation) return;
+        final owner = '$identity/${state['connection_generation']}';
+        if (state['connected'] == true &&
+            state['have_front_panel'] != true &&
+            _panelOwner != owner &&
+            (_lastPanelAttempt == null ||
+                DateTime.now().difference(_lastPanelAttempt!).inSeconds >=
+                    10)) {
+          _lastPanelAttempt = DateTime.now();
+          final requestedAt = _lastPanelAttempt!;
+          try {
+            var panel = object(await peer.rpc('controller.front_panel'));
+            if (epoch != generation) return;
+            if (owner != '$identity/${state['connection_generation']}') return;
+            if (panel['raw_segments'] is List && panel['schema'] is int) {
+              final pushedAt = DateTime.tryParse(
+                '${state['front_panel_updated']}',
+              );
+              if (pushedAt != null && pushedAt.isAfter(requestedAt)) {
+                panel = {
+                  ...panel,
+                  for (final field in [
+                    'raw_segments',
+                    'brightness',
+                    'segments_active',
+                  ])
+                    field: object(state['front_panel'])[field],
+                };
+              }
+              state = {
+                ...state,
+                'front_panel': panel,
+                'have_front_panel': true,
+              };
+              _panelOwner = owner;
+            }
+          } catch (_) {
+            /* Missing panel does not invalidate telemetry/channel truth. */
+          }
+        }
         final incomingInstances = objects(
           await peer.rpc('controller.app.instances'),
         );
@@ -417,11 +462,47 @@ class PeerSession extends ChangeNotifier {
     if (!controller && (value['playing'] is! bool || value['volume'] is! num)) {
       throw const Rejected('Missing player state.');
     }
-    if (controller && state['host_instance_id'] != value['host_instance_id']) {
+    if (controller &&
+        (state['host_instance_id'] != value['host_instance_id'] ||
+            state['connection_generation'] != value['connection_generation'])) {
       peripherals = {};
       instances = [];
       operation = {};
       events = [];
+      pwmValues = {};
+      pwmUpdated = null;
+      _panelOwner = '';
+      _lastPanelAttempt = null;
+    }
+    // A slow snapshot must not erase newer pushed display/RGB state from the
+    // same board generation. Never retain it across a changed board/host.
+    if (controller &&
+        state['host_instance_id'] == value['host_instance_id'] &&
+        state['connection_generation'] == value['connection_generation']) {
+      final oldTime = DateTime.tryParse('${state['front_panel_updated']}');
+      final newTime = DateTime.tryParse('${value['front_panel_updated']}');
+      if (oldTime != null && (newTime == null || oldTime.isAfter(newTime))) {
+        value = {
+          ...value,
+          'front_panel': {
+            ...object(value['front_panel']),
+            for (final key in ['raw_segments', 'brightness', 'segments_active'])
+              key: object(state['front_panel'])[key],
+          },
+          'have_front_panel_segments': state['have_front_panel_segments'],
+          'front_panel_updated': state['front_panel_updated'],
+        };
+      }
+      if ((state['status_led_revision'] as num? ?? 0) >
+          (value['status_led_revision'] as num? ?? 0)) {
+        value = {
+          ...value,
+          'status_led': state['status_led'],
+          'status_led_revision': state['status_led_revision'],
+          'have_status_led': state['have_status_led'],
+          'status_led_updated': state['status_led_updated'],
+        };
+      }
     }
     state = value;
     received = DateTime.now();
@@ -527,12 +608,28 @@ class PeerSession extends ChangeNotifier {
                 'front_panel.segment',
                 'status_led.changed',
               ].contains(event['kind'])) {
-                state = applyOutputEvent(state, event);
+                final updated = applyOutputEvent(state, event);
+                if (!identical(updated, state)) {
+                  state = updated;
+                  received = DateTime.now();
+                  online = true;
+                  error = null;
+                }
+                if (event['kind'] == 'status_led.changed')
+                  _schedulePwmRefresh(epoch);
                 notifyListeners();
                 return; // Frames never trigger full snapshot/catalog polling.
               }
               if (event['kind'] != 'buzzer.note') {
                 events = [event, ...events].take(100).toList();
+              }
+              if ([
+                'pwm.changed',
+                'pwm',
+                'illumination.changed',
+                'status_led.changed',
+              ].contains(event['kind'])) {
+                _schedulePwmRefresh(epoch);
               }
               if ('${event['kind']}'.startsWith('update.')) {
                 // Events are cues to read durable status, not fabricated progress.
@@ -568,6 +665,11 @@ class PeerSession extends ChangeNotifier {
       _freshness?.cancel();
       _freshness = Timer.periodic(const Duration(seconds: 1), (_) {
         if (epoch != generation) return;
+        if (fresh &&
+            state['connected'] == true &&
+            (pwmUpdated == null ||
+                DateTime.now().difference(pwmUpdated!).inMilliseconds >= 2000))
+          unawaited(refreshPwm());
         // Only repaint when freshness expires, not continuous UI persistence.
         if (!fresh && online) {
           online = false;
@@ -584,6 +686,39 @@ class PeerSession extends ChangeNotifier {
   }
 
   Timer? _refreshTimer;
+  void _schedulePwmRefresh(int epoch) {
+    if (_pwmTimer?.isActive == true) return;
+    _pwmTimer = Timer(const Duration(milliseconds: 500), () {
+      if (epoch == generation) unawaited(refreshPwm());
+    });
+  }
+
+  Future<void> refreshPwm() async {
+    final peer = transport, epoch = generation;
+    final owner = '$identity/${state['connection_generation']}';
+    if (!controller ||
+        peer == null ||
+        _pwmReading ||
+        state['connected'] != true)
+      return;
+    _pwmReading = true;
+    try {
+      final value = object(await peer.rpc('controller.pwm.values'));
+      if (epoch == generation &&
+          owner == '$identity/${state['connection_generation']}' &&
+          value['channels'] is List &&
+          value['available'] is bool) {
+        pwmValues = value;
+        pwmUpdated = DateTime.now();
+        notifyListeners();
+      }
+    } catch (_) {
+      /* Retained PWM cache is never substituted with a false zero. */
+    } finally {
+      _pwmReading = false;
+    }
+  }
+
   void _scheduleRefresh(int epoch) {
     if (_refreshTimer?.isActive == true) return;
     _refreshTimer = Timer(const Duration(milliseconds: 250), () {
@@ -643,6 +778,7 @@ class PeerSession extends ChangeNotifier {
     _retry?.cancel();
     _freshness?.cancel();
     _refreshTimer?.cancel();
+    _pwmTimer?.cancel();
     _socket?.close();
     _socket = null;
     transport?.close();
@@ -653,6 +789,10 @@ class PeerSession extends ChangeNotifier {
     artifacts = [];
     received = null;
     operation = {};
+    pwmValues = {};
+    pwmUpdated = null;
+    _panelOwner = '';
+    _lastPanelAttempt = null;
     events = [];
     notifyListeners();
   }

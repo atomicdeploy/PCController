@@ -15,6 +15,34 @@ physical safety admission are reused without adding an unrestricted proxy.
   screenshot inspection and read-only physical-host connection.
 - GitHub source ref, PR and observed CI status (not inferred green).
 
+## Observed delivery, 2026-10-13
+
+- Preview 0.1.1+2: ARM64 release build succeeded using the existing development
+  signing key. Full tests, analysis and CI waiting were skipped at the user's
+  request; only the requested opt-in Flutter screenshot renderer was executed.
+- APK: 19,576,759 bytes, SHA-256
+  `46dbf150bcee92776d4a1bd3b81ec40a0b6ff85bf9449ab0fd6d35754fda26ec`.
+- The same APK was transferred and hash-verified via Termux SSH port 5022 at
+  `/sdcard/Download/PCController-0.1.1-preview-46dbf150.apk`. The previous
+  0.1.0 APK is retained as a named rollback, not deleted generically.
+- ADB became available again. Two advertisements were deduplicated by device
+  identity; one selected transport performed an in-place `install -r` with
+  `Success`. Installed version is 0.1.1/code 2; installed base.apk SHA matches
+  the delivered APK. No app data or drafts were cleared.
+- Actual installed-phone captures were inspected: live voltage/current charts,
+  connected state, raw mirrored seven-segment digits and `TM1637: Detected`.
+  Existing saved peer settings reconnected without inserting a test peer or
+  creating a new network tunnel. No board writes/tone/flash were triggered.
+- Separate phone/tablet light/dark renderer previews replay real read-only
+  board measurements with their original relative intervals. Their wall-clock
+  timestamps are shifted for replay; they are not live/tablet-device evidence.
+- Android explicit broadcast reached the Dart JSON-RPC router and rejected an
+  invalid token with JSON-RPC `-32001`, as intended. Authorized HTTP/WS/TCP and
+  Intent command acceptance still need the user-enabled token and live client
+  acceptance. Automation defaults disabled; actuation is separately disabled.
+- Implemented local automation and its limits are in [AUTOMATION.md](AUTOMATION.md).
+  No gRPC, background service, root grant or full native/Web parity is claimed.
+
 ## Outstanding acceptance and feature work
 
 - Pealayer is currently offline on this workstation. Direct playback, cue

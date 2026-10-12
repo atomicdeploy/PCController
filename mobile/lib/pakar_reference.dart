@@ -1329,10 +1329,15 @@ class SegmentPainter extends CustomPainter {
       RRect.fromRectAndRadius(Offset.zero & size, const Radius.circular(12)),
       Paint()..color = const Color(0xff130c0d),
     );
-    final scale = (size.height - 24) / 60;
+    final scale = ((size.height - 24) / 60).clamp(
+      0.0,
+      (size.width - 24).clamp(0.0, double.infinity) / 144,
+    );
     final width = 36 * scale;
     final startX = (size.width - width * 4) / 2;
-    final alpha = active ? (0.2 + 0.8 * brightness.clamp(0, 7) / 7) : .08;
+    // TM1637 level 0 is the dimmest ON level, not display-off. Keep lit
+    // segments distinguishable from the unlit paths at every valid level.
+    final alpha = active ? (0.55 + 0.45 * brightness.clamp(0, 7) / 7) : .08;
     for (var digit = 0; digit < 4; digit++) {
       final mask = masks.elementAtOrNull(digit) ?? 0;
       for (var bit = 0; bit < 7; bit++) {
@@ -1343,7 +1348,7 @@ class SegmentPainter extends CustomPainter {
           Paint()
             ..color = (mask & (1 << bit)) != 0
                 ? Color.fromRGBO(255, 74, 58, alpha)
-                : const Color(0xff4d2023)
+                : const Color(0xff281417)
             ..strokeWidth = 4 * scale
             ..strokeCap = StrokeCap.round,
         );
@@ -1354,7 +1359,7 @@ class SegmentPainter extends CustomPainter {
         Paint()
           ..color = (mask & 0x80) != 0
               ? Color.fromRGBO(255, 74, 58, alpha)
-              : const Color(0xff4d2023),
+              : const Color(0xff281417),
       );
     }
   }

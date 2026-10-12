@@ -14,6 +14,7 @@ import java.util.concurrent.Executors
 class MainActivity : FlutterActivity() {
     private var discovery: DiscoveryChannel? = null
     private var toneMirror: ToneMirrorChannel? = null
+    private var automation: MethodChannel? = null
     private val io = Executors.newSingleThreadExecutor()
     private var pending: MethodChannel.Result? = null
     private var maximum = 0
@@ -27,6 +28,8 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         discovery = DiscoveryChannel(this, flutterEngine.dartExecutor.binaryMessenger)
         toneMirror = ToneMirrorChannel(this, flutterEngine.dartExecutor.binaryMessenger)
+        automation = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "ir.digitalogic.pccontroller/automation")
+        AutomationBridge.channel = automation
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "ir.digitalogic.pccontroller/documents")
             .setMethodCallHandler { call, result ->
                 try {
@@ -133,6 +136,8 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        if (AutomationBridge.channel === automation) AutomationBridge.channel = null
+        automation = null
         toneMirror?.close(); toneMirror = null
         discovery?.close(); discovery = null
         closed = true

@@ -1,7 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -9,6 +13,8 @@ import 'documents.dart';
 import 'pakar_reference.dart' show SevenSegmentPreview;
 import 'unified/transport.dart';
 import 'unified/effect_editor.dart';
+import 'unified/live_widgets.dart';
+import 'unified/automation.dart';
 
 void main() => runApp(const UnifiedControllerApp());
 
@@ -28,15 +34,63 @@ class UnifiedControllerApp extends StatelessWidget {
     useMaterial3: true,
     brightness: brightness,
     fontFamily: 'Vazirmatn',
-    colorScheme: ColorScheme.fromSeed(
-      seedColor: const Color(0xff8b5cf6),
-      brightness: brightness,
+    colorScheme:
+        ColorScheme.fromSeed(
+          seedColor: const Color(0xff7166ce),
+          brightness: brightness,
+        ).copyWith(
+          surface: brightness == Brightness.dark
+              ? const Color(0xff232323)
+              : const Color(0xfffafafa),
+          surfaceContainer: brightness == Brightness.dark
+              ? const Color(0xff292929)
+              : const Color(0xfff2f2f3),
+          onSurface: brightness == Brightness.dark
+              ? const Color(0xffededed)
+              : const Color(0xff242428),
+          onSurfaceVariant: brightness == Brightness.dark
+              ? const Color(0xffaaaaae)
+              : const Color(0xff64646a),
+          outline: brightness == Brightness.dark
+              ? const Color(0xff414145)
+              : const Color(0xffd2d2d6),
+        ),
+    scaffoldBackgroundColor: brightness == Brightness.dark
+        ? const Color(0xff1c1c1e)
+        : const Color(0xfff5f5f7),
+    appBarTheme: const AppBarTheme(
+      centerTitle: false,
+      scrolledUnderElevation: 0,
     ),
     inputDecorationTheme: const InputDecorationTheme(
       border: OutlineInputBorder(),
       isDense: true,
     ),
-    cardTheme: const CardThemeData(margin: EdgeInsets.zero),
+    cardTheme: CardThemeData(
+      margin: EdgeInsets.zero,
+      elevation: 0,
+      color: brightness == Brightness.dark
+          ? const Color(0xff232323)
+          : const Color(0xfffafafa),
+      surfaceTintColor: Colors.transparent,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(
+          color: brightness == Brightness.dark
+              ? const Color(0xff3c3c40)
+              : const Color(0xffdddddf),
+        ),
+      ),
+    ),
+    filledButtonTheme: FilledButtonThemeData(
+      style: FilledButton.styleFrom(
+        minimumSize: const Size(40, 42),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      ),
+    ),
+    chipTheme: ChipThemeData(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+    ),
     visualDensity: VisualDensity.standard,
   );
 }
@@ -58,6 +112,19 @@ class _ControllerHomeState extends State<ControllerHome>
   final draftName = TextEditingController(),
       draftProgram = TextEditingController(text: '{"steps": []}');
   final logs = <String>[];
+  final history = TelemetryHistory();
+  final captureKey = GlobalKey();
+  late final automation = LocalAutomation(
+    dispatch: _automationCall,
+    snapshot: automationSnapshot,
+  );
+  final automationChannel = const MethodChannel(
+    'ir.digitalogic.pccontroller/automation',
+  );
+  bool automationEnabled = false, automationActuation = false;
+  String automationToken = '';
+  bool _captureInFlight = false;
+  DateTime? _lastCapture;
   int section = 0, boardTab = 0, playerTab = 0;
   bool busy = false;
   int activeRequests = 0;
@@ -78,10 +145,21 @@ class _ControllerHomeState extends State<ControllerHome>
     WidgetsBinding.instance.addObserver(this);
     board.addListener(_changed);
     player.addListener(_changed);
+    if (widget.restore)
+      automationChannel.setMethodCallHandler((call) async {
+        if (call.method != 'request') throw MissingPluginException();
+        final arguments = object(call.arguments);
+        return automation.receive(
+          object(jsonDecode('${arguments['rpc']}')),
+          '${arguments['auth'] ?? ''}',
+          intent: true,
+        );
+      });
     if (widget.restore) unawaited(_restore());
   }
 
   void _changed() {
+    history.record(board.state);
     if (mounted) setState(() {});
   }
 
@@ -100,6 +178,14 @@ class _ControllerHomeState extends State<ControllerHome>
       boardToken = await secure.read(key: 'pccontroller.token') ?? '';
       playerToken = await secure.read(key: 'pealayer.token') ?? '';
       drafts = objects(jsonDecode(prefs.getString('local.drafts') ?? '[]'));
+      automationEnabled = prefs.getBool('automation.enabled') ?? false;
+      automationActuation = prefs.getBool('automation.actuation') ?? false;
+      if (automationEnabled) {
+        automationToken =
+            await secure.read(key: 'automation.token') ?? newAutomationToken();
+        await secure.write(key: 'automation.token', value: automationToken);
+        await _startAutomation();
+      }
       if (!mounted) return;
       setState(() {});
       unawaited(connectBoard());
@@ -121,10 +207,13 @@ class _ControllerHomeState extends State<ControllerHome>
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.detached) {
       foreground = false;
+      unawaited(automation.close());
       board.disconnect();
       player.disconnect();
     } else if (state == AppLifecycleState.resumed && widget.restore) {
       foreground = true;
+      if (automationEnabled && automationToken.isNotEmpty)
+        unawaited(_startAutomation());
       unawaited(connectBoard());
       if (playerWanted && playerOrigin.isNotEmpty) {
         unawaited(player.connect(playerOrigin, playerToken));
@@ -134,6 +223,8 @@ class _ControllerHomeState extends State<ControllerHome>
 
   @override
   void dispose() {
+    unawaited(automation.close());
+    if (widget.restore) automationChannel.setMethodCallHandler(null);
     WidgetsBinding.instance.removeObserver(this);
     board.removeListener(_changed);
     player.removeListener(_changed);
@@ -144,6 +235,21 @@ class _ControllerHomeState extends State<ControllerHome>
     draftName.dispose();
     draftProgram.dispose();
     super.dispose();
+  }
+
+  Future<void> _startAutomation() async {
+    if (!foreground || !automationEnabled || automationToken.isEmpty) return;
+    try {
+      await automation.start(automationToken);
+    } catch (_) {
+      // An optional IPC bind failure must not break saved board/player routes.
+      if (mounted)
+        setState(
+          () => lastError =
+              'Local API unavailable; check loopback ports 18990 and 18991.',
+        );
+    }
+    if (mounted) setState(() {});
   }
 
   Future<void> connectBoard() async {
@@ -282,7 +388,7 @@ class _ControllerHomeState extends State<ControllerHome>
             object(board.state['emergency_stop'])['active'] == true)) {
       return;
     }
-    if (control['kind'] == 'seat' &&
+    if (['seat', 'side', 'motion'].contains(control['kind']) &&
         !safetyStop &&
         !await confirm(
           'Move ${control['name']}?',
@@ -440,8 +546,23 @@ class _ControllerHomeState extends State<ControllerHome>
     IconData icon,
     VoidCallback? callback, {
     bool priority = false,
-  }) => FilledButton.tonalIcon(
+  }) => OutlinedButton.icon(
     onPressed: busy && !priority ? null : callback,
+    style: OutlinedButton.styleFrom(
+      minimumSize: const Size(40, 42),
+      foregroundColor: priority
+          ? Theme.of(context).colorScheme.error
+          : Theme.of(context).colorScheme.onSurface,
+      backgroundColor: priority
+          ? Theme.of(context).colorScheme.error.withValues(alpha: .08)
+          : Colors.transparent,
+      side: BorderSide(
+        color: priority
+            ? Theme.of(context).colorScheme.error.withValues(alpha: .4)
+            : Theme.of(context).colorScheme.outline,
+      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+    ),
     icon: Icon(icon, size: 18),
     label: Text(label),
   );
@@ -450,6 +571,7 @@ class _ControllerHomeState extends State<ControllerHome>
     IconData icon,
     List<Widget> children, {
     Color? color,
+    Widget? trailing,
   }) => Card(
     child: Padding(
       padding: const EdgeInsets.all(18),
@@ -458,7 +580,20 @@ class _ControllerHomeState extends State<ControllerHome>
         children: [
           Row(
             children: [
-              Icon(icon, color: color),
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: (color ?? Theme.of(context).colorScheme.primary)
+                      .withValues(alpha: .10),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(
+                  icon,
+                  color: color ?? Theme.of(context).colorScheme.primary,
+                  size: 20,
+                ),
+              ),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
@@ -466,6 +601,7 @@ class _ControllerHomeState extends State<ControllerHome>
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
               ),
+              if (trailing != null) trailing,
             ],
           ),
           const SizedBox(height: 14),
@@ -552,107 +688,135 @@ class _ControllerHomeState extends State<ControllerHome>
           ),
         ],
       );
-      return Scaffold(
-        appBar: AppBar(
-          title: Row(
-            children: [
-              Image.asset(
-                'assets/branding/${section == 1 ? 'pealayer' : 'pccontroller'}.png',
-                width: 30,
-                height: 30,
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  pages[section],
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+      return RepaintBoundary(
+        key: captureKey,
+        child: Scaffold(
+          appBar: AppBar(
+            title: Row(
+              children: [
+                Image.asset(
+                  'assets/branding/${section == 1 ? 'pealayer' : 'pccontroller'}.png',
+                  width: 30,
+                  height: 30,
                 ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    pages[section],
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              IconButton(
+                tooltip: 'Connect peers',
+                icon: const Icon(Icons.link),
+                onPressed: () => configure(section != 1),
               ),
             ],
           ),
-          actions: [
-            IconButton(
-              tooltip: 'Connect peers',
-              icon: const Icon(Icons.link),
-              onPressed: () => configure(section != 1),
-            ),
-          ],
-        ),
-        body: tablet
-            ? Row(
-                children: [
-                  NavigationRail(
-                    selectedIndex: section,
-                    labelType: NavigationRailLabelType.all,
-                    onDestinationSelected: (value) =>
-                        setState(() => section = value),
-                    destinations: [
-                      for (var i = 0; i < pages.length; i++)
-                        NavigationRailDestination(
-                          icon: Icon(icons[i]),
-                          label: Text(pages[i]),
-                        ),
-                    ],
-                  ),
-                  const VerticalDivider(width: 1),
-                  Expanded(child: content),
-                ],
-              )
-            : content,
-        bottomNavigationBar: tablet
-            ? null
-            : NavigationBar(
-                selectedIndex: section,
-                onDestinationSelected: (value) =>
-                    setState(() => section = value),
-                destinations: [
-                  for (var i = 0; i < pages.length; i++)
-                    NavigationDestination(
-                      icon: Icon(icons[i]),
-                      label: pages[i],
+          body: tablet
+              ? Row(
+                  children: [
+                    NavigationRail(
+                      selectedIndex: section,
+                      labelType: NavigationRailLabelType.all,
+                      onDestinationSelected: (value) =>
+                          setState(() => section = value),
+                      destinations: [
+                        for (var i = 0; i < pages.length; i++)
+                          NavigationRailDestination(
+                            icon: Icon(icons[i]),
+                            label: Text(pages[i]),
+                          ),
+                      ],
                     ),
-                ],
-              ),
+                    const VerticalDivider(width: 1),
+                    Expanded(child: content),
+                  ],
+                )
+              : content,
+          bottomNavigationBar: tablet
+              ? null
+              : NavigationBar(
+                  selectedIndex: section,
+                  onDestinationSelected: (value) =>
+                      setState(() => section = value),
+                  destinations: [
+                    for (var i = 0; i < pages.length; i++)
+                      NavigationDestination(
+                        icon: Icon(icons[i]),
+                        label: pages[i],
+                      ),
+                  ],
+                ),
+        ),
       );
     },
   );
-  Widget connection(PeerSession peer, String name) =>
-      card(name, Icons.lan_outlined, [
-        Text(
-          peer.fresh
-              ? (peer.controller
-                    ? (peer.state['connected'] == true
-                          ? 'Board connected'
-                          : 'Host connected · board offline')
-                    : 'Player connected')
-              : 'Offline · last values unavailable',
-          style: Theme.of(context).textTheme.titleLarge,
+  Widget connection(PeerSession peer, String name) => card(
+    name,
+    Icons.lan_outlined,
+    [
+      if (!peer.fresh) const Text('Offline · last values unavailable'),
+      if (peer.error != null)
+        Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Text(peer.error!),
         ),
-        if (peer.error != null)
-          Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: Text(peer.error!),
+      if (!peer.fresh || peer.error != null) const SizedBox(height: 12),
+      Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          action(
+            peer.fresh ? 'Connection' : 'Connect',
+            Icons.link,
+            () => configure(peer.controller),
           ),
-        const SizedBox(height: 12),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            action('Connect', Icons.link, () => configure(peer.controller)),
-            action(
-              'Refresh',
-              Icons.refresh,
-              peer.transport == null ? null : () => unawaited(peer.refresh()),
+          IconButton.outlined(
+            tooltip: 'Refresh',
+            icon: const Icon(Icons.refresh, size: 20),
+            onPressed: peer.transport == null
+                ? null
+                : () => unawaited(peer.refresh()),
+            style: IconButton.styleFrom(
+              fixedSize: const Size(42, 42),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
             ),
-            action(
-              'Disconnect',
-              Icons.link_off,
-              peer.enabled ? () => unawaited(disconnectPeer(peer)) : null,
+          ),
+          IconButton.outlined(
+            tooltip: 'Disconnect',
+            icon: const Icon(Icons.link_off, size: 20),
+            onPressed: peer.enabled
+                ? () => unawaited(disconnectPeer(peer))
+                : null,
+            style: IconButton.styleFrom(
+              fixedSize: const Size(42, 42),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
             ),
-          ],
-        ),
-      ]);
+          ),
+        ],
+      ),
+    ],
+    trailing: StatePill(
+      peer.fresh
+          ? peer.controller
+                ? peer.state['connected'] == true
+                      ? 'Connected'
+                      : 'Host only'
+                : 'Connected'
+          : 'Offline',
+      active:
+          peer.fresh && (!peer.controller || peer.state['connected'] == true),
+    ),
+  );
   Widget boardPage() => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
@@ -691,17 +855,67 @@ class _ControllerHomeState extends State<ControllerHome>
             (available == null || status[available] == true) &&
             status[key] is num
         ? '${((status[key] as num) / scale).toStringAsFixed(scale == 1 ? 0 : 2)} $unit'
-        : 'Unavailable';
+        : '—';
+    String peripheral(String key, String fallback) {
+      for (final entry in objects(board.peripherals['peripherals'])) {
+        if (entry['key'] == key && entry['name'] is String)
+          return entry['name'];
+      }
+      return fallback;
+    }
+
+    Widget metric(
+      String title,
+      IconData icon,
+      String value,
+      String field,
+      String unit,
+      Color color,
+    ) => card(title, icon, [
+      Text(
+        value,
+        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+          fontFeatures: const [FontFeature.tabularFigures()],
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      const SizedBox(height: 12),
+      TelemetryChart(
+        points: history.points,
+        field: field,
+        color: color,
+        unit: unit,
+        height: 64,
+      ),
+    ], color: color);
     return grid([
-      card('Power', Icons.bolt, [
-        fact('Supply', measurement('supply_mv', 1000, 'V')),
-        fact('Bus', measurement('bus_mv', 1000, 'V', 'ina219_available')),
-        fact('Current', measurement('current_ma', 1, 'mA', 'ina219_available')),
-        fact('Power', measurement('power_mw', 1000, 'W', 'ina219_available')),
-      ]),
+      metric(
+        peripheral('sensor.bus-voltage', 'Voltage'),
+        Icons.bolt,
+        measurement('bus_mv', 1000, 'V', 'ina219_available'),
+        'voltage',
+        'V',
+        const Color(0xff9786ed),
+      ),
+      metric(
+        peripheral('sensor.current', 'Current'),
+        Icons.electric_meter,
+        measurement('current_ma', 1, 'mA', 'ina219_available'),
+        'current',
+        'mA',
+        const Color(0xff62bcae),
+      ),
+      metric(
+        peripheral('sensor.power', 'Power'),
+        Icons.power,
+        measurement('power_mw', 1000, 'W', 'ina219_available'),
+        'power',
+        'W',
+        const Color(0xffe0ac62),
+      ),
       card('Temperature', Icons.thermostat, [
         fact(
-          'Lighting',
+          peripheral('sensor.temperature-led', 'Lighting'),
           measurement(
             'temperature_led_centi_c',
             100,
@@ -709,14 +923,30 @@ class _ControllerHomeState extends State<ControllerHome>
             'temperature_led_available',
           ),
         ),
+        const SizedBox(height: 8),
+        TelemetryChart(
+          points: history.points,
+          field: 'temperature',
+          color: const Color(0xffe68b85),
+          unit: '°C',
+          height: 64,
+        ),
+        const SizedBox(height: 12),
         fact(
-          'Audio',
+          peripheral('sensor.temperature-audio', 'Audio'),
           measurement(
             'temperature_bt_audio_centi_c',
             100,
             '°C',
             'temperature_bt_audio_available',
           ),
+        ),
+        TelemetryChart(
+          points: history.points,
+          field: 'audio',
+          color: const Color(0xff62bcae),
+          unit: '°C',
+          height: 40,
         ),
         if (board.fresh && status['hot'] == true)
           const Text(
@@ -728,7 +958,7 @@ class _ControllerHomeState extends State<ControllerHome>
         fact(
           'Name',
           board.fresh
-              ? '${board.state['have_board_name'] == true ? board.state['board_name'] : object(board.state['hello'])['name'] ?? 'Unavailable'}'
+              ? '${board.state['have_board_name'] == true && '${object(board.state['board_name'])['name'] ?? ''}'.trim().isNotEmpty ? object(board.state['board_name'])['name'] : object(board.state['hello'])['name'] ?? '—'}'
               : 'Unavailable',
         ),
         fact(
@@ -739,12 +969,18 @@ class _ControllerHomeState extends State<ControllerHome>
         ),
         fact(
           'Door',
-          board.measurementsFresh ? '${status['door_open']}' : 'Unavailable',
+          board.measurementsFresh && status['door_open'] is bool
+              ? status['door_open'] == true
+                    ? 'Open'
+                    : 'Closed'
+              : 'Unavailable',
         ),
         fact(
           'E-STOP',
-          board.fresh
-              ? '${object(board.state['emergency_stop'])['active']}'
+          board.fresh && object(board.state['emergency_stop'])['active'] is bool
+              ? object(board.state['emergency_stop'])['active'] == true
+                    ? 'Active'
+                    : 'Released'
               : 'Unavailable',
         ),
         action(
@@ -756,6 +992,33 @@ class _ControllerHomeState extends State<ControllerHome>
           priority: true,
         ),
       ]),
+      if (board.fresh && board.state['have_status_led'] == true)
+        card('Status LED', Icons.lightbulb_outline, [
+          Row(
+            children: [
+              Container(
+                width: 28,
+                height: 28,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Color.fromARGB(
+                    255,
+                    object(board.state['status_led'])['red'] as int? ?? 0,
+                    object(board.state['status_led'])['green'] as int? ?? 0,
+                    object(board.state['status_led'])['blue'] as int? ?? 0,
+                  ),
+                  border: Border.all(
+                    color: Theme.of(context).colorScheme.outline,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                'RGB ${object(board.state['status_led'])['red']} · ${object(board.state['status_led'])['green']} · ${object(board.state['status_led'])['blue']}',
+              ),
+            ],
+          ),
+        ]),
     ]);
   }
 
@@ -786,7 +1049,16 @@ class _ControllerHomeState extends State<ControllerHome>
     final groups = <String, List<Json>>{};
     for (final control in controls) {
       groups
-          .putIfAbsent('${control['group'] ?? 'Other outputs'}', () => [])
+          .putIfAbsent(
+            '${control['group'] ?? ''}'.trim().isEmpty
+                ? (control['kind'] == 'relay'
+                      ? 'Relay outputs'
+                      : control['kind'] == 'pwm'
+                      ? 'PWM outputs'
+                      : 'Motion / seat controls')
+                : '${control['group']}',
+            () => [],
+          )
           .add(control);
     }
     final estop = object(board.state['emergency_stop'])['active'] == true;
@@ -804,15 +1076,67 @@ class _ControllerHomeState extends State<ControllerHome>
                   for (final control in group.value)
                     card(
                       '${control['name']}',
-                      control['kind'] == 'seat'
+                      ['seat', 'side', 'motion'].contains(control['kind'])
                           ? Icons.airline_seat_recline_normal
                           : control['kind'] == 'relay'
                           ? Icons.power
                           : Icons.lightbulb_outline,
                       [
+                        Builder(
+                          builder: (context) {
+                            final observed = observeChannel(
+                              control,
+                              board.state,
+                              board.pwmUpdated != null &&
+                                      DateTime.now()
+                                              .difference(board.pwmUpdated!)
+                                              .inMilliseconds <
+                                          board.freshnessMs
+                                  ? board.pwmValues
+                                  : {},
+                              board.measurementsFresh,
+                            );
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 12),
+                              child: Row(
+                                children: [
+                                  StatePill(
+                                    observed.label,
+                                    active: observed.active,
+                                  ),
+                                  if (observed.percent != null) ...[
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: LinearProgressIndicator(
+                                        value: observed.percent! / 100,
+                                        minHeight: 4,
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            );
+                          },
+                        ),
                         if (control['control'] == 'pwm-user')
                           _PwmControl(
+                            key: ValueKey(
+                              '${board.identity}/${control['key']}',
+                            ),
                             control: control,
+                            observed: observeChannel(
+                              control,
+                              board.state,
+                              board.pwmUpdated != null &&
+                                      DateTime.now()
+                                              .difference(board.pwmUpdated!)
+                                              .inMilliseconds <
+                                          board.freshnessMs
+                                  ? board.pwmValues
+                                  : {},
+                              board.measurementsFresh,
+                            ).percent,
                             enabled:
                                 board.boardReady &&
                                 !busy &&
@@ -873,8 +1197,12 @@ class _ControllerHomeState extends State<ControllerHome>
     return grid([
       card('Live front panel', Icons.dialpad, [
         if (ready &&
-            board.state['have_front_panel_segments'] == true &&
-            panel['raw_segments'] is List)
+            (full || board.state['have_front_panel_segments'] == true) &&
+            panel['raw_segments'] is List &&
+            (panel['raw_segments'] as List).length == 4 &&
+            (panel['raw_segments'] as List).every(
+              (v) => v is int && v >= 0 && v <= 255,
+            ))
           SevenSegmentPreview(
             segments: (panel['raw_segments'] as List).whereType<int>().toList(),
             brightness: panel['brightness'] as int? ?? 0,
@@ -885,7 +1213,7 @@ class _ControllerHomeState extends State<ControllerHome>
         const SizedBox(height: 12),
         fact(
           'TM1637',
-          full && panel['tm1637_detection_known'] == true
+          ready && panel['tm1637_detection_known'] == true
               ? panel['tm1637_detected'] == true
                     ? 'Detected'
                     : 'Not detected'
@@ -898,11 +1226,21 @@ class _ControllerHomeState extends State<ControllerHome>
           ),
         fact(
           'Pressed keys',
-          full ? '${panel['pressed_keys'] ?? 'Unavailable'}' : 'Unavailable',
+          full
+              ? '${panel['pressed_keys'] ?? 'Unavailable'}'
+              : board.measurementsFresh &&
+                    object(board.state['status'])['active_keys'] is int
+              ? '${object(board.state['status'])['active_keys']}'
+              : 'Unavailable',
         ),
         fact(
           'Page',
-          full ? '${panel['menu_page'] ?? 'Unavailable'}' : 'Unavailable',
+          full
+              ? '${panel['menu_page'] ?? 'Unavailable'}'
+              : board.measurementsFresh &&
+                    object(board.state['status'])['menu_page'] is int
+              ? '${object(board.state['status'])['menu_page']}'
+              : 'Unavailable',
         ),
         Wrap(
           spacing: 8,
@@ -1695,6 +2033,55 @@ class _ControllerHomeState extends State<ControllerHome>
           () => configure(false),
         ),
       ]),
+      const SizedBox(height: 16),
+      card('Automation / local API', Icons.hub_outlined, [
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Enable local automation'),
+          value: automationEnabled,
+          onChanged: (value) => unawaited(_setAutomation(value)),
+        ),
+        if (automationEnabled) ...[
+          fact('HTTP / WebSocket', '127.0.0.1:${LocalAutomation.httpPort}'),
+          fact('NDJSON / TCP', '127.0.0.1:${LocalAutomation.tcpPort}'),
+          StatePill(
+            automation.running ? 'Listening' : 'Paused',
+            active: automation.running,
+          ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Allow output / playback actions'),
+            value: automationActuation,
+            onChanged: (value) async {
+              if (value &&
+                  !await confirm(
+                    'Allow automation actions?',
+                    'Authorized local clients can operate the selected board and player. Motion also requires an explicit confirmed target.',
+                  ))
+                return;
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.setBool('automation.actuation', value);
+              if (mounted) setState(() => automationActuation = value);
+            },
+          ),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              action(
+                'Copy access token',
+                Icons.key,
+                () => Clipboard.setData(ClipboardData(text: automationToken)),
+              ),
+              action(
+                'Revoke token',
+                Icons.refresh,
+                () => unawaited(_setAutomation(true, rotate: true)),
+              ),
+            ],
+          ),
+        ],
+      ]),
     ],
   );
   Future<void> editEffect(Json initial) => showDialog<void>(
@@ -1718,6 +2105,265 @@ class _ControllerHomeState extends State<ControllerHome>
       },
     ),
   );
+  Future<void> _setAutomation(bool enabled, {bool rotate = false}) async {
+    await perform('Automation', () async {
+      await automation.close();
+      if (enabled) {
+        automationToken = rotate
+            ? newAutomationToken()
+            : await secure.read(key: 'automation.token') ??
+                  newAutomationToken();
+        await secure.write(key: 'automation.token', value: automationToken);
+        if (foreground) await automation.start(automationToken);
+      }
+      automationEnabled = enabled;
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('automation.enabled', enabled);
+      return null;
+    });
+  }
+
+  Json automationSnapshot() => {
+    'foreground': foreground,
+    'section': ['pccontroller', 'pealayer', 'activities', 'workspace'][section],
+    'board': {
+      'connected': board.boardReady,
+      'target': board.targetStamp,
+      'measurements_fresh': board.measurementsFresh,
+      'status': board.measurementsFresh ? board.state['status'] : null,
+      'front_panel': board.fresh ? board.state['front_panel'] : null,
+      'pwm':
+          board.fresh &&
+              board.pwmUpdated != null &&
+              DateTime.now().difference(board.pwmUpdated!).inMilliseconds <
+                  board.freshnessMs
+          ? board.pwmValues
+          : null,
+    },
+    'player': {
+      'connected': player.fresh,
+      'target': player.targetStamp,
+      for (final key in [
+        'playing',
+        'playback_time',
+        'duration',
+        'volume',
+        'seekable',
+      ])
+        key: player.fresh ? player.state[key] : null,
+    },
+  };
+  Future<dynamic> _automationCall(String method, Json params) async {
+    switch (method) {
+      case 'app.ping':
+        return {'ok': true, 'app': 'PCController', 'version': '0.1.1'};
+      case 'app.capabilities':
+        return {
+          'jsonrpc': '2.0',
+          'http': true,
+          'websocket': true,
+          'ndjson_tcp': true,
+          'android_intent': defaultTargetPlatform == TargetPlatform.android,
+          'grpc': false,
+          'foreground_required': true,
+          'actuation_enabled': automationActuation,
+          'batch': false,
+          'notifications_dispatch': false,
+        };
+      case 'app.state':
+        return automationSnapshot();
+      case 'app.subscribe':
+        return {
+          'subscribed': true,
+          'events_transport': 'websocket',
+          'interval_ms': 250,
+        };
+      case 'app.navigation.set':
+        final next = [
+          'pccontroller',
+          'pealayer',
+          'activities',
+          'workspace',
+        ].indexOf('${params['section']}');
+        if (next < 0) throw const AutomationFailure(-32602, 'Unknown section');
+        if (!foreground)
+          throw const AutomationFailure(-32002, 'App is not foreground');
+        final page = params['page'];
+        final boardPage = [
+          'monitor',
+          'outputs',
+          'front_panel',
+          'firmware',
+          'effects',
+        ].indexOf('$page');
+        if (page != null && (next != 0 || boardPage < 0))
+          throw const AutomationFailure(-32602, 'Unknown section page');
+        setState(() {
+          section = next;
+          if (page != null) boardTab = boardPage;
+        });
+        return {'section': params['section'], if (page != null) 'page': page};
+      case 'app.capture':
+        if (!foreground)
+          throw const AutomationFailure(-32002, 'App is not foreground');
+        if (_captureInFlight ||
+            (_lastCapture != null &&
+                DateTime.now().difference(_lastCapture!).inMilliseconds < 1000))
+          throw const AutomationFailure(
+            -32003,
+            'Capture is busy; limited to one per second',
+          );
+        _captureInFlight = true;
+        try {
+          await WidgetsBinding.instance.endOfFrame;
+          final boundary = captureKey.currentContext?.findRenderObject();
+          if (boundary is! RenderRepaintBoundary)
+            throw const AutomationFailure(
+              -32002,
+              'No rendered application frame',
+            );
+          final image = await boundary.toImage(pixelRatio: 1.5);
+          try {
+            final bytes = await image.toByteData(
+              format: ui.ImageByteFormat.png,
+            );
+            if (bytes == null || bytes.lengthInBytes > 2097152)
+              throw const AutomationFailure(-32003, 'Capture exceeds 2 MiB');
+            return {
+              'mime_type': 'image/png',
+              'png_base64': base64Encode(bytes.buffer.asUint8List()),
+              'width': image.width,
+              'height': image.height,
+            };
+          } finally {
+            image.dispose();
+          }
+        } finally {
+          _lastCapture = DateTime.now();
+          _captureInFlight = false;
+        }
+      case 'board.refresh':
+        await board.refresh();
+        return automationSnapshot()['board'];
+      case 'board.connect':
+        if (!foreground)
+          throw const AutomationFailure(-32002, 'App is not foreground');
+        boardWanted = true;
+        connectionChoiceRevision++;
+        await connectBoard();
+        return automationSnapshot()['board'];
+      case 'board.disconnect':
+        await disconnectPeer(board);
+        return {'disconnected': true};
+      case 'board.action':
+      case 'board.pwm.set':
+      case 'board.stop':
+      case 'board.estop':
+        if (!foreground ||
+            !board.boardReady ||
+            params['expected_target'] != board.targetStamp)
+          throw const AutomationFailure(
+            -32002,
+            'Board is unavailable or target changed',
+          );
+        final peer = board.transport!,
+            stop = method == 'board.stop' || method == 'board.estop';
+        if (busy && !stop)
+          throw const AutomationFailure(-32003, 'Application is busy');
+        if (method == 'board.estop')
+          return peer.rpc('controller.command.execute', {
+            'command': 'estop on',
+          });
+        if (method == 'board.stop') {
+          final stamp = board.targetStamp;
+          await peer.rpc('controller.command.execute', {
+            'command': 'relay off',
+          });
+          if (stamp != board.targetStamp || !board.boardReady)
+            throw const AutomationFailure(
+              -32002,
+              'Target changed during stop; refresh to check outcome',
+            );
+          return peer.rpc('controller.pwm.off');
+        }
+        if (!automationActuation ||
+            object(board.state['emergency_stop'])['active'] == true)
+          throw const AutomationFailure(
+            -32004,
+            'Automation actuation is not enabled or E-STOP is active',
+          );
+        if (method == 'board.pwm.set') {
+          final channel = params['channel'], percent = params['percent'];
+          if (channel is! int ||
+              percent is! num ||
+              !percent.isFinite ||
+              percent < 0 ||
+              percent > 100 ||
+              !objects(board.peripherals['controls']).any(
+                (c) =>
+                    c['key'] == 'pwm.$channel' &&
+                    c['control'] == 'pwm-user' &&
+                    c['locked'] != true,
+              ))
+            throw const AutomationFailure(
+              -32602,
+              'PWM target/value is not advertised',
+            );
+          return peer.rpc('controller.pwm.set', {
+            'channel': channel,
+            'percent': percent,
+          });
+        }
+        for (final control in objects(board.peripherals['controls'])) {
+          for (final action in objects(control['actions'])) {
+            if (action['id'] != params['action_id']) continue;
+            if (control['locked'] == true)
+              throw const AutomationFailure(-32004, 'Channel is locked');
+            if (['seat', 'side', 'motion'].contains(control['kind']) &&
+                action['verb'] != 'stop' &&
+                params['confirm_motion'] != true)
+              throw const AutomationFailure(
+                -32004,
+                'Motion requires an explicit confirmed target',
+              );
+            return peer.rpc('controller.action.invoke', {
+              'action_id': action['id'],
+            });
+          }
+        }
+        throw const AutomationFailure(
+          -32602,
+          'Action is not advertised by this board',
+        );
+      case 'player.call':
+        if (!foreground ||
+            !player.fresh ||
+            params['expected_target'] != player.targetStamp ||
+            !automationActuation ||
+            busy)
+          throw const AutomationFailure(
+            -32002,
+            'Player is unavailable, target changed or actuation disabled',
+          );
+        final action = params['method'];
+        if (![
+          'pealayer.play',
+          'pealayer.pause',
+          'pealayer.stop',
+          'pealayer.previous',
+          'pealayer.next',
+          'pealayer.seek_to',
+          'pealayer.volume.set',
+          'pealayer.mute.toggle',
+          'pealayer.workspace.set',
+        ].contains(action))
+          throw const AutomationFailure(-32602, 'Player method is not allowed');
+        return player.transport!.rpc(action, object(params['params']));
+      default:
+        throw const AutomationFailure(-32601, 'Method not found');
+    }
+  }
+
   Future<void> publishDraft(Json effect) async {
     final stamp = board.targetStamp, peer = board.transport;
     if (peer == null || !board.fresh) return;
@@ -1744,31 +2390,59 @@ class _ControllerHomeState extends State<ControllerHome>
 
 class _PwmControl extends StatefulWidget {
   const _PwmControl({
+    super.key,
     required this.control,
     required this.enabled,
     required this.changed,
+    this.observed,
   });
   final Json control;
   final bool enabled;
   final ValueChanged<int> changed;
+  final double? observed;
   @override
   State<_PwmControl> createState() => _PwmControlState();
 }
 
 class _PwmControlState extends State<_PwmControl> {
   double value = 0;
+  bool editing = false;
+  @override
+  void initState() {
+    super.initState();
+    value = widget.observed ?? 0;
+  }
+
+  @override
+  void didUpdateWidget(covariant _PwmControl oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!editing && widget.observed != null) value = widget.observed!;
+  }
+
   @override
   Widget build(BuildContext context) => Column(
     children: [
-      Text('Setpoint ${value.round()}%'),
+      Text(
+        'Setpoint ${value.round()}%',
+        style: TextStyle(
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+          fontSize: 12,
+        ),
+      ),
       Slider(
         value: value,
         max: 100,
         onChanged: widget.enabled
-            ? (next) => setState(() => value = next)
+            ? (next) => setState(() {
+                editing = true;
+                value = next;
+              })
             : null,
         onChangeEnd: widget.enabled
-            ? (next) => widget.changed(next.round())
+            ? (next) {
+                editing = false;
+                widget.changed(next.round());
+              }
             : null,
       ),
     ],
