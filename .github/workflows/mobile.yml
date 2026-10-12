@@ -1,0 +1,49 @@
+name: Android native controller
+on:
+  pull_request:
+    paths: ['mobile/**', '.github/workflows/mobile.yml']
+  push:
+    branches: [main]
+    paths: ['mobile/**', '.github/workflows/mobile.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  android-preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Restore the verified official Flutter SDK
+        shell: bash
+        run: |
+          curl --fail --location --retry 3 --connect-timeout 15 --max-time 240 \
+            https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_3.47.3-stable.tar.xz \
+            --output "$RUNNER_TEMP/pccontroller-flutter-sdk.tar.xz"
+          printf '%s  %s\n' '988665565cad9091db1baa54bf6d3868bb40e29719592f3c3a164deefd4208e1' "$RUNNER_TEMP/pccontroller-flutter-sdk.tar.xz" | sha256sum --check -
+          tar --extract --xz --file "$RUNNER_TEMP/pccontroller-flutter-sdk.tar.xz" --directory "$RUNNER_TEMP"
+          test "$(git -C "$RUNNER_TEMP/flutter" rev-parse HEAD)" = 'e8113bf45620cbeb8aff64947ee4c93e16adb4cf'
+          printf '%s\n' "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+      - name: Analyze and test
+        working-directory: mobile
+        env:
+          NO_PROXY: localhost,127.0.0.1,::1
+        run: |
+          flutter pub get --enforce-lockfile
+          flutter analyze --no-pub
+          flutter test --no-pub
+      - name: Build development-signed ARM64 preview
+        working-directory: mobile
+        run: flutter build apk --release --no-pub --target-platform android-arm64
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: PCController-Android-preview
+          retention-days: 7
+          if-no-files-found: error
+          path: mobile/build/app/outputs/flutter-apk/app-release.apk

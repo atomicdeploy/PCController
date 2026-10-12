@@ -36,6 +36,8 @@ const repositoryIdentityPaths = new Set([
 // repository; private paths, stale-origin language and unrelated URLs remain
 // forbidden.
 const reviewedExternalRepositories = new Map([
+  ["mobile/assets/fonts/Vazirmatn-OFL.txt", new Set(["rastikerdar/vazirmatn"])],
+  ["mobile/PAKAR-README.md", new Set(["atomicdeploy/pakarcontroller"])],
   ["docs/Shared-Production-Firmware.md", new Set(["mcudude/megacore"])],
   ["docs/Media-Timing-and-MCU-Expansion.md", new Set([
     "toghroltp/pealayer",
