@@ -1092,6 +1092,21 @@ export function windowsCMakeCABundle(env = process.env, platform = process.platf
 	return candidates.find(candidate => existsSync(candidate)) || ''
 }
 
+export function windowsCMakeParserArguments(env = process.env, platform = process.platform) {
+	if (platform !== 'win32') return []
+	const configuredFlex = environmentValue(env, 'FLEX_EXECUTABLE')
+	const configuredBison = environmentValue(env, 'BISON_EXECUTABLE')
+	const flex = configuredFlex || allExecutables('flex', env, platform)[0] || allExecutables('win_flex', env, platform)[0]
+	const bison = configuredBison || allExecutables('bison', env, platform)[0] || allExecutables('win_bison', env, platform)[0]
+	if (!flex || !bison) {
+		throw new BuildError('libavrdude requires flex/bison (or win_flex/win_bison) on Windows')
+	}
+	return [
+		`-DFLEX_EXECUTABLE=${resolve(flex).replaceAll('\\', '/')}`,
+		`-DBISON_EXECUTABLE=${resolve(bison).replaceAll('\\', '/')}`
+	]
+}
+
 function requireTool(name, env) {
 	const found = allExecutables(name, env)
 	if (found.length === 0) throw new BuildError(`required tool '${name}' was not found on the refreshed PATH`)
@@ -2228,6 +2243,7 @@ function buildAvrdudeAdapter(stage, env, options) {
 	]
 	const caBundle = windowsCMakeCABundle(env)
 	if (caBundle) configure.push(`-DCMAKE_TLS_CAINFO=${caBundle.replaceAll('\\', '/')}`, '-DCMAKE_TLS_VERIFY=ON')
+	configure.push(...windowsCMakeParserArguments(env))
 	const sourceOverride = environmentValue(env, 'FETCHCONTENT_SOURCE_DIR_PCCONTROLLER_AVRDUDE')
 	if (sourceOverride) {
 		configure.push(`-DFETCHCONTENT_SOURCE_DIR_PCCONTROLLER_AVRDUDE=${resolve(sourceOverride)}`)

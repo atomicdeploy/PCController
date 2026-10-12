@@ -89,6 +89,7 @@ import {
 	unixSmokeSource,
 	verboseCommandText,
 	windowsCMakeCABundle,
+	windowsCMakeParserArguments,
 	windowsCompilerProvisionArguments,
 	windowsSmokeSource
 } from './build.mjs'
@@ -499,6 +500,20 @@ test('Windows libavrdude downloads use the Git for Windows CA bundle', async t =
 	await writeFile(bundle, 'reviewed CA bundle')
 	assert.equal(windowsCMakeCABundle({ PATH: command, PATHEXT: '.exe' }, 'win32'), bundle)
 	assert.equal(windowsCMakeCABundle({ CMAKE_TLS_CAINFO: bundle }, 'linux'), bundle)
+})
+
+test('Windows libavrdude configure uses installed WinFlexBison executables in place', async t => {
+	const root = await mkdtemp(join(tmpdir(), 'pccontroller-parser-tools-'))
+	t.after(() => rm(root, { recursive: true, force: true }))
+	const flex = join(root, 'win_flex.exe')
+	const bison = join(root, 'win_bison.exe')
+	await writeFile(flex, '')
+	await writeFile(bison, '')
+	assert.deepEqual(windowsCMakeParserArguments({ PATH: root, PATHEXT: '.exe' }, 'win32'), [
+		`-DFLEX_EXECUTABLE=${resolve(flex).replaceAll('\\', '/')}`,
+		`-DBISON_EXECUTABLE=${resolve(bison).replaceAll('\\', '/')}`
+	])
+	assert.deepEqual(windowsCMakeParserArguments({}, 'linux'), [])
 })
 
 test('virtual-board-only delegates to the existing CMake presets without hardware', () => {

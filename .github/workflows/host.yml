@@ -90,11 +90,8 @@ jobs:
           choco install winflexbison3 --yes --no-progress
           $flex = (Get-Command win_flex.exe -ErrorAction Stop).Source
           $bison = (Get-Command win_bison.exe -ErrorAction Stop).Source
-          $tools = Join-Path $env:RUNNER_TEMP 'pccontroller-parser-tools'
-          New-Item -ItemType Directory -Path $tools -Force | Out-Null
-          Copy-Item -LiteralPath $flex -Destination (Join-Path $tools 'flex.exe')
-          Copy-Item -LiteralPath $bison -Destination (Join-Path $tools 'bison.exe')
-          $tools | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "FLEX_EXECUTABLE=$flex" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "BISON_EXECUTABLE=$bison" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: "🔐 Read exact host dependency lock"
         id: host-dependencies
