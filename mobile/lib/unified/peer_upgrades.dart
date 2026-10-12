@@ -26,6 +26,7 @@ class PeerUpgrades {
   String? _capability, _transfer;
   DateTime? _expires;
   bool _offering = false;
+  bool _rebinding = false;
   int _active = 0, _epoch = 0, _sequence = 0;
   final _instance = newAutomationToken();
   late final _ssdpId = () {
@@ -239,6 +240,10 @@ class PeerUpgrades {
       mndp ? 5678 : 1900,
       reuseAddress: true,
     );
+    if (!running || epoch != _epoch) {
+      socket.close();
+      return;
+    }
     try {
       socket.broadcastEnabled = true;
       socket.joinMulticast(
@@ -365,6 +370,45 @@ class PeerUpgrades {
         s.send(_mndp(), InternetAddress('255.255.255.255'), 5678);
         s.send(_mndp(), InternetAddress('224.0.0.88'), 5678);
       }
+    }
+  }
+
+  /// OS link changes refresh real NIC addresses/multicast membership, not the
+  /// selected board/player. Sharing remains the same explicit foreground API.
+  Future<void> networkChanged() async {
+    if (!running || _rebinding) return;
+    _rebinding = true;
+    final epoch = _epoch, apiPort = port!;
+    try {
+      final addresses = (await NetworkInterface.list(
+        type: InternetAddressType.IPv4,
+      )).expand((n) => n.addresses).where((ip) => !ip.isLoopback).toList();
+      if (!running || epoch != _epoch) return;
+      DeviceDiscovery.localEndpoints.removeAll(
+        _addresses.map((ip) => 'http://${ip.address}:$apiPort'),
+      );
+      _addresses
+        ..clear()
+        ..addAll(addresses);
+      DeviceDiscovery.localEndpoints.addAll(
+        _addresses.map((ip) => 'http://${ip.address}:$apiPort'),
+      );
+      for (final socket in _sockets) {
+        socket.close();
+      }
+      _sockets.clear();
+      for (final mndp in [false, true]) {
+        try {
+          await _udp(mndp, epoch);
+          errors.remove(mndp ? 'mndp' : 'ssdp');
+        } on SocketException catch (error) {
+          errors[mndp ? 'mndp' : 'ssdp'] =
+              '${error.osError?.errorCode ?? 'socket'}';
+        }
+      }
+      _beacon();
+    } finally {
+      _rebinding = false;
     }
   }
 
