@@ -227,10 +227,9 @@ struct __attribute__((packed)) ControllerSettings {
 #endif
 };
 
-struct __attribute__((packed)) StoredTemperatureConfiguration {
+struct __attribute__((packed)) TemperatureConfiguration {
   uint8_t lightingRom[8];
   int16_t hotThresholdCentiC;
-  uint8_t checksum;
 };
 
 // The seven leading byte-sized settings form the canonical UART settings
@@ -256,9 +255,9 @@ public:
   static constexpr int EepromAddress = EepromLayout::SettingsAddress;
   static constexpr uint16_t SaveDelayMs = 1500;
   static constexpr uint8_t MaximumBoardNameLength = 8;
-  static constexpr uint16_t DefaultHotTemperatureCentiC = 5500;
-  static constexpr uint16_t MinimumHotTemperatureCentiC = 3000;
-  static constexpr uint16_t MaximumHotTemperatureCentiC = 10000;
+  static constexpr int16_t DefaultHotTemperatureCentiC = 5500;
+  static constexpr int16_t MinimumHotTemperatureCentiC = 3000;
+  static constexpr int16_t MaximumHotTemperatureCentiC = 10000;
 
   // Loads a valid EEPROM record or installs development defaults in RAM.
   bool begin(uint32_t now = millis());
@@ -285,8 +284,8 @@ public:
 
   // The lighting probe is identified by its complete CRC-valid DS18B20 ROM.
   // With the board's fixed maximum of two probes, every other discovered ROM
-  // is the Bluetooth-audio role. A blank mapping uses deterministic sorted
-  // fallback only until the host commissions the physical installation.
+  // is the Bluetooth-audio role. A blank mapping uses temporary discovery
+  // order only until the host commissions the physical installation.
   int16_t hotTemperatureCentiC() const {
     return temperatureConfiguration_.hotThresholdCentiC;
   }
@@ -307,8 +306,7 @@ private:
   uint32_t changedAt_ = 0;
   bool dirty_ = false;
   bool persisted_ = false;
-  StoredTemperatureConfiguration temperatureConfiguration_ = {
-      {}, DefaultHotTemperatureCentiC, 0};
+  TemperatureConfiguration temperatureConfiguration_{};
 };
 
 // settingsStore is the single MCU EEPROM settings owner.

@@ -526,16 +526,18 @@ void testTemperatureEEPROMIdentityAndThreshold() {
               configured.hotTemperatureCentiC() == 5500 &&
               std::equal(record, record + 8,
                          configured.lightingTemperatureRom()),
-          "CRC-valid temperature EEPROM configuration was not loaded");
+          "host-validated temperature EEPROM configuration was not loaded");
 
-  EEPROM.update(EepromLayout::TemperatureSettingsAddress + 10,
-                static_cast<std::uint8_t>(record[10] ^ 0x01));
-  SettingsStore corrupt;
-  require(!corrupt.begin(2) &&
-              !corrupt.temperatureConfigurationPersisted() &&
-              corrupt.hotTemperatureCentiC() ==
-                  SettingsStore::DefaultHotTemperatureCentiC,
-          "CRC-corrupt temperature record did not use safe defaults");
+  EEPROM.update(EepromLayout::TemperatureSettingsAddress + 8, 0xFF);
+  EEPROM.update(EepromLayout::TemperatureSettingsAddress + 9, 0x7F);
+  SettingsStore invalidThreshold;
+  require(!invalidThreshold.begin(2) &&
+              invalidThreshold.temperatureConfigurationPersisted() &&
+              invalidThreshold.hotTemperatureCentiC() ==
+                  SettingsStore::DefaultHotTemperatureCentiC &&
+              std::equal(record, record + 8,
+                         invalidThreshold.lightingTemperatureRom()),
+          "out-of-range temperature threshold did not use safe default");
 }
 
 void testBuzzerTimerAndQueue() {

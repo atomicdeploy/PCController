@@ -188,8 +188,7 @@ sample, or a sample at/above the EEPROM-configured HOT threshold bypasses the
 EMA so a fault or warning is not hidden by smoothing. The guarded host EEPROM
 backend accepts 30.00..100.00 C and provisions 55.00 C by default.
 
-Before commissioning, lexicographically sorted ROM 0 is the deterministic
-`Temperature LED` (`tLED`) fallback and ROM 1 is `Temperature BT` (`tBT`). The
+Before commissioning, discovery order is only a temporary role assignment. The
 commissioned EEPROM record stores the complete CRC-valid 64-bit lighting-probe
 ROM, the HOT threshold, and a record CRC. Firmware moves the matching ROM to
 the tLED role at discovery; the other sensor is tBT. The guarded host EEPROM
@@ -347,7 +346,7 @@ particular board.
 | Motion door policy | Always |
 | Break before direction | 1 ms |
 | Door / output buzzer cues | enabled; 1,700/1,100 Hz × 45 ms and 1,900/1,250 Hz × 35 ms |
-| Temperature identity swap | off; sorted ROM 0 is tLED, ROM 1 is tBT |
+| Temperature identity mapping | uncommissioned; host writes the physical tLED ROM after the heating test |
 
 ## What to verify before tuning
 

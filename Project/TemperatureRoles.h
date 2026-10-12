@@ -8,6 +8,6 @@ namespace TemperatureRoles {
 constexpr uint8_t Led = 0;
 constexpr uint8_t BluetoothAudio = 1;
 
-// A commissioned lighting ROM is authoritative. Sorted order is only the
-// deterministic uncommissioned fallback and is never persisted as identity.
+// A commissioned lighting ROM is authoritative. Discovery order before
+// commissioning is temporary and is never persisted as identity.
 } // namespace TemperatureRoles

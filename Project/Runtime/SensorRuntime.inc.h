@@ -147,16 +147,10 @@ void discoverTemperatureSensors() {
     }
   }
   if (temperatureAddressCount == 2) {
-    if (memcmp(temperatureAddresses[0], temperatureAddresses[1], 8) > 0) {
-      swapTemperatureAddresses();
-    }
-    // Canonicalize the commissioned lighting probe as role/index zero. The
-    // full ROM ID, rather than a positional swap bit, remains the EEPROM
-    // authority.
-    // An absent or CRC-rejected mapping is zero-prefixed, so it cannot match
-    // a host-validated DS18B20 family-0x28 ROM.
-    if (memcmp(temperatureAddresses[1],
-               settingsStore.lightingTemperatureRom(), 8) == 0) {
+    const uint8_t *lightingRom = settingsStore.lightingTemperatureRom();
+    // A commissioned ROM owns role zero. Without one, discovery order is only
+    // a temporary role assignment until the physical installation is mapped.
+    if (memcmp(temperatureAddresses[1], lightingRom, 8) == 0) {
       swapTemperatureAddresses();
     }
   }
@@ -205,8 +199,8 @@ void serviceTemperatures(uint32_t at) {
       return;
     }
     for (uint8_t index = 0; index < temperatureAddressCount; ++index) {
-      // The EEPROM lighting ROM owns the role. A deterministic sorted fallback
-      // exists only until physical illumination commissioning is completed.
+      // The EEPROM lighting ROM owns role zero; discovery order is temporary
+      // until the physical installation is commissioned.
       const int16_t sample =
           temperatureBus.getTempCentiC(temperatureAddresses[index]);
       sensors.temperatureCentiC[index] =

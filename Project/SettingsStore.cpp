@@ -25,9 +25,9 @@ static_assert(sizeof(StoredSettings) == EepromLayout::SettingsRecordBytes,
 static_assert(SettingsStore::EepromAddress + sizeof(StoredSettings) <=
                   EepromLayout::RemoteHeaderAddress,
               "Settings overlap learned RF header");
-static_assert(sizeof(StoredTemperatureConfiguration) ==
+static_assert(sizeof(TemperatureConfiguration) + 1 ==
                   EepromLayout::TemperatureSettingsBytes,
-              "Temperature settings EEPROM record changed shape");
+              "Temperature settings EEPROM payload changed shape");
 
 uint8_t checksum(const void *value, uint8_t length) {
   return ControllerProtocol::UartProtocol::crc8(
@@ -219,13 +219,16 @@ void SettingsStore::setDefaults() {
 void SettingsStore::loadTemperatureConfiguration() {
   EEPROM.get(EepromLayout::TemperatureSettingsAddress,
              temperatureConfiguration_);
-  if (temperatureConfiguration_.checksum !=
-      checksum(&temperatureConfiguration_,
-               sizeof(temperatureConfiguration_) - 1)) {
-    temperatureConfiguration_.lightingRom[0] = 0;
+  // The host owns record CRC generation and verified readback. The MCU guards
+  // the safety-critical value semantically; an arbitrary ROM is harmless
+  // unless all eight bytes exactly match a CRC-valid discovered probe.
+  if (static_cast<uint16_t>(
+          temperatureConfiguration_.hotThresholdCentiC -
+          MinimumHotTemperatureCentiC) >
+      static_cast<uint16_t>(MaximumHotTemperatureCentiC -
+                            MinimumHotTemperatureCentiC)) {
     temperatureConfiguration_.hotThresholdCentiC =
         DefaultHotTemperatureCentiC;
-    return;
   }
 }
 
