@@ -53,6 +53,7 @@ const thirdPartyProvenancePaths = new Set([
   "THIRD_PARTY_NOTICES.md",
   "REUSE.toml",
   "Tools/Build/package-lock.json",
+  "Tools/AvrdudeAdapter/dependency-lock.json",
   "Tools/Bootloader/Urboot-Custom/source-manifest.json",
   "Tools/Controller/internal/programmer/toolchain.go",
   "Tools/Controller/toolchain-lock.json",
