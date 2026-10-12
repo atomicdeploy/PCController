@@ -22,6 +22,13 @@
   `f3ab0659028944986e90759973f06e634b57b4ac8964fa332659fc44c3c66f35`.
 - Public Pealayer icon SHA-256:
   `082cd912ba2a649f4f2c975b570efa6063e1c96a8051e0b81cdd1895826ab9ca`.
+  The Android Pealayer launcher uses an unchanged copy of this same public
+  asset; its upstream copyright/license annotation is retained.
+- Preview 0.1.2's Pealayer controls were checked against current source
+  `d42cfeb8d08d1c662aea9683f27cca326bdd9b39`: media-session capability fields,
+  workspace profiles, chapter/track selection and the 0..130 volume domain.
+  Buzzer scheduling follows PCController's current `buzzer.note` metadata and
+  wrapping-clock timeline policy, using the retained Android PCM adapter.
 
 MIT notices are preserved as PAKAR-LICENSE and PEALAYER-LICENSE. Font notices
 remain under assets/fonts. No private Soulayer/user artworks were copied.

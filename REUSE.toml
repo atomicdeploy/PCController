@@ -53,7 +53,7 @@ SPDX-FileCopyrightText = ["2026 AtomicDeploy contributors", "2026 David Refoua a
 SPDX-License-Identifier = "MIT"
 
 [[annotations]]
-path = ["mobile/assets/branding/pealayer.png", "mobile/PEALAYER-LICENSE"]
+path = ["mobile/assets/branding/pealayer.png", "mobile/android/app/src/main/res/drawable-nodpi/pealayer_application.png", "mobile/PEALAYER-LICENSE"]
 precedence = "override"
 SPDX-FileCopyrightText = "2026 ToghrolTP"
 SPDX-License-Identifier = "MIT"
