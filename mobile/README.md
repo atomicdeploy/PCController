@@ -1,0 +1,84 @@
+# PCController native controller
+
+An independently packaged Flutter Android phone/tablet app with PCController
+and Pealayer mini-apps. It is a native Flutter surface, not an embedded Web page.
+PakarController remains a separate project and Android installation.
+
+## Activities
+
+- PCController: live power/temperature/HOT monitoring, host-resolved channel
+  names/folders and semantic relay/motion actions, PWM setpoints, E-STOP,
+  physical TM1637 frames/detection, LCD, menu navigation, HOST-captured keys,
+  bounded buzzer tones, host Idle/Running state, effect catalog and cancellation.
+- Firmware: Android SAF import of bounded HEX/BIN files, SHA-256 immutable
+  artifacts, explicit programming confirmation, flash capture, verified export,
+  durable operation status and WebSocket-triggered progress refresh. Toolchain
+  provisioning is indeterminate, never a fabricated 0% progress bar.
+- Pealayer: playback/stop/seek/volume/mute, media opening, workspaces,
+  effect playback/cue placement and opening the existing host cue editor.
+- Workspace: local drafts and a native sequence designer with selectable step
+  rows, timing/duration/repetition fields and dimmed repetition previews. Existing
+  descriptors retain their unknown fields; technical editing is collapsed.
+  Publishing to PCController is explicit and does not run the effect.
+- Activities: bounded in-memory host events and request receipts. Request
+  acceptance is not reported as physical completion or applied playback.
+
+Phones use bottom navigation; tablets use a rail and responsive multi-column
+cards. System light/dark preference and platform text scaling are retained.
+
+## Connections and mutually routed controls
+
+Configure HTTP(S) origins without paths, user-info, query strings or fragments.
+Access tokens are stored only in Android secure storage, not SharedPreferences,
+URLs, logs or build arguments. Use HTTPS on untrusted networks.
+
+Direct PCController uses `/api/snapshot`, current `/api/rpc` and the bootstrap's
+advertised `websocket_path` with native
+Bearer headers. Direct Pealayer uses `/api/player/status`, `/api/rpc` and its
+authoritative `/ws` state. No API-version or obsolete-protocol fallback exists.
+
+Pealayer → PCController uses its existing `/api/peer/controller` typed dispatcher.
+The explicit bridge route refreshes at a bounded two-second cadence because it
+does not advertise the controller's live frame stream. Direct PCController
+remains the route for high-rate frames and artifact bytes. Recursive bridges
+and third-peer host updates are denied in this client and remain host guarded.
+
+PCController → Pealayer uses registered `app_actions`, exact instance targets,
+and `controller.app.action`. The host owns admission, leases, acknowledgement
+and application outcome. Never forward the destination's credential from a
+different peer. Direct host sessions and bridge authority remain distinct.
+
+Disconnect/background revokes live state, closes sockets and cancels retries.
+Reconnect performs an authoritative refresh; it never replays mutations.
+Confirmation and document-picker returns are fenced by connection/host/board
+identity. A lost acknowledgement is uncertain, not successful and not retried.
+
+## Reproducible low-write build
+
+Reuse the installed Flutter 3.47.3/Dart 3.13.3 and Android SDK; dependencies are
+locked. No SDK copy, dependency upgrade, global proxy change, cache clean,
+per-frame persistence or physical action occurs during verification.
+
+```powershell
+./tools/build.ps1 -Mode Verify
+./tools/build.ps1 -Mode ApkPreview
+```
+
+The wrapper checks free space/build-cache budget, restores packages offline,
+runs analysis/tests and optionally builds one ARM64 APK. It scopes localhost
+`NO_PROXY` only around Flutter and restores the previous setting. Preview APKs
+use the inherited development signing key, not production signing.
+
+Android application ID: `ir.digitalogic.pccontroller.mobile`.
+APK: `build/app/outputs/flutter-apk/app-release.apk` (ignored, never source).
+Use an explicitly selected ADB device; deduplicate devices by `ro.serialno`.
+Never reset shared ADB or automate a PIN/password/pattern. The user authorizes
+installation/launch of this separate app, not destructive physical board tests.
+
+## Provenance and remaining acceptance
+
+See [provenance](PROVENANCE.md) and [acceptance](ACCEPTANCE.md). The reference
+Pakar screens are retained in source/tests but are not the shipped entrypoint.
+Their ESP protocol is not an alias for PCController. Native offline authoring
+does not imply direct Android USB/Bluetooth firmware ownership or an embedded
+Go/Rust host; those are explicitly separate unfinished work.
