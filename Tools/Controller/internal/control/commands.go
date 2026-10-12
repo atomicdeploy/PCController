@@ -919,6 +919,10 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 				if settings.Flags&native.SettingsSilent != 0 {
 					return "buzzer suppressed: board is silent", nil
 				}
+				if err := outputs.StartTone(ctx, uint16(values[0]), uint16(values[1])); err != nil {
+					return "", err
+				}
+				return "buzzer command accepted", nil
 			}
 			if err := command(ctx, runtime, native.OpBuzzer, native.BuzzerPayload(uint16(values[0]), uint16(values[1]))); err != nil {
 				return "", err

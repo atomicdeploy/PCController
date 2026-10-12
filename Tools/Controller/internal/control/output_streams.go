@@ -392,6 +392,42 @@ func (scheduler *OutputScheduler) StartMelody(
 	return operation, nil
 }
 
+// StartTone uses the existing exclusive buzzer lane without adding a configured
+// melody. Keep the synchronous command ACK and expose bounded tone activity to
+// snapshot consumers, including clients that connect while the tone is running.
+func (scheduler *OutputScheduler) StartTone(ctx context.Context, frequency, duration uint16) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if frequency < 20 || frequency > 20000 || duration == 0 {
+		return errors.New("tone requires 20..20000 Hz and a nonzero duration")
+	}
+	_, runContext, running, previousDone, err := scheduler.replace("melody", fmt.Sprintf("%d Hz", frequency))
+	if err != nil {
+		return err
+	}
+	// Honor caller cancellation until the command is ACKed, but do not tie the
+	// finite tone's lifetime to an RPC request that closes after acceptance.
+	requestContext, cancelRequest := context.WithCancel(runContext)
+	stopCallerCancellation := context.AfterFunc(ctx, cancelRequest)
+	defer stopCallerCancellation()
+	defer cancelRequest()
+	if err = waitPreviousOutput(requestContext, previousDone); err != nil {
+		scheduler.finish("melody", running, err, nil)
+		return err
+	}
+	started := time.Now()
+	if err = scheduler.send(requestContext, native.OpBuzzer, native.BuzzerPayload(frequency, duration)); err != nil {
+		scheduler.finish("melody", running, err, nil)
+		return err
+	}
+	go func() {
+		err := waitOutput(runContext, time.Until(started.Add(time.Duration(duration)*time.Millisecond)))
+		scheduler.finish("melody", running, err, nil)
+	}()
+	return nil
+}
+
 func (scheduler *OutputScheduler) StartStatusEffect(
 	ctx context.Context,
 	effect appconfig.StatusLEDEffect,
