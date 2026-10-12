@@ -8,6 +8,53 @@ import 'package:pccontroller_mobile/unified/transport.dart';
 import 'package:pccontroller_mobile/unified/output_events.dart';
 
 void main() {
+  test(
+    'incomplete catalog is rejected, not converted to a false empty inventory',
+    () {
+      expect(() => verifiedCatalog({}), throwsA(isA<Rejected>()));
+      expect(
+        () => verifiedCatalog({
+          'controls': [42],
+          'peripherals': [],
+          'board_profile': {},
+        }),
+        throwsA(isA<Rejected>()),
+      );
+      expect(
+        verifiedCatalog({
+          'controls': [],
+          'peripherals': [],
+          'board_profile': {},
+        })['controls'],
+        isEmpty,
+      );
+    },
+  );
+  test(
+    'terminal operation does not remain stuck at its former preparing stage',
+    () {
+      for (final state in ['completed', 'failed', 'cancelled']) {
+        expect(operationLabel({'state': state, 'stage': 'preparing'}), state);
+      }
+    },
+  );
+  test('board profile drift retires an open confirmation target', () {
+    final session = PeerSession(controller: true);
+    session.state = {
+      'host_instance_id': 'host',
+      'port': 'usb',
+      'connection_generation': 1,
+    };
+    session.peripherals = {
+      'board_profile': {'revision': 'before'},
+    };
+    final stamp = session.targetStamp;
+    session.peripherals = {
+      'board_profile': {'revision': 'after'},
+    };
+    expect(session.targetStamp, isNot(stamp));
+    session.dispose();
+  });
   test('an authoritative old measurement does not become fresh after a host refresh', () {
     final now = DateTime.utc(2026, 10, 12, 12);
     expect(

@@ -26,6 +26,25 @@ bool measurementIsFresh(Json snapshot, int limitMs, {DateTime? now}) {
   return age >= -1000 && age <= limitMs;
 }
 
+Json verifiedCatalog(dynamic value) {
+  final catalog = object(value);
+  if (catalog['controls'] is! List ||
+      catalog['peripherals'] is! List ||
+      catalog['board_profile'] is! Map ||
+      (catalog['controls'] as List).any(
+        (item) =>
+            item is! Map ||
+            item['key'] is! String ||
+            item['name'] is! String ||
+            item['control'] is! String,
+      )) {
+    throw const Rejected(
+      'Invalid channel catalog. Last verified inventory retained; controls disabled.',
+    );
+  }
+  return catalog;
+}
+
 Uri endpoint(String value) {
   final uri = Uri.parse(value.trim());
   if (!['http', 'https'].contains(uri.scheme) ||
@@ -274,6 +293,12 @@ double? operationProgress(Json value) {
       : null;
 }
 
+String operationLabel(Json value) {
+  final state = '${value['state'] ?? 'Unavailable'}';
+  if (['completed', 'failed', 'cancelled'].contains(state)) return state;
+  return '${value['stage'] ?? state}';
+}
+
 class PeerSession extends ChangeNotifier {
   PeerSession({required this.controller});
   final bool controller;
@@ -309,7 +334,7 @@ class PeerSession extends ChangeNotifier {
   String get identity =>
       '${state['host_instance_id'] ?? object(state['runtime'])['instance_id'] ?? ''}';
   String get targetStamp =>
-      '$generation/$identity/${state['connection_generation']}/${state['port']}/${object(state['hello'])['build_hash']}';
+      '$generation/$identity/${state['connection_generation']}/${state['port']}/${object(state['hello'])['build_hash']}/${object(peripherals['board_profile'])['revision']}';
 
   Future<void> connect(String origin, String token) async {
     disconnect();
@@ -346,7 +371,9 @@ class PeerSession extends ChangeNotifier {
       error = null;
       notifyListeners();
       if (controller) {
-        final inventory = object(await peer.rpc('controller.peripherals.get'));
+        final inventory = verifiedCatalog(
+          await peer.rpc('controller.peripherals.get'),
+        );
         if (epoch != generation) return;
         peripherals = inventory;
         final incomingInstances = objects(
@@ -369,7 +396,9 @@ class PeerSession extends ChangeNotifier {
 
   void _install(Json value) {
     if (controller &&
-        (value['host_instance_id'] is! String || value['connected'] is! bool)) {
+        (value['host_instance_id'] is! String ||
+            (value['host_instance_id'] as String).trim().isEmpty ||
+            value['connected'] is! bool)) {
       throw const Rejected('Missing controller identity or connection state.');
     }
     if (!controller && (value['playing'] is! bool || value['volume'] is! num)) {
@@ -480,7 +509,6 @@ class PeerSession extends ChangeNotifier {
             ].contains(value['method'])) {
               final event = object(value['params']);
               if (!subscribed) return;
-              events = [event, ...events].take(100).toList();
               final payload = object(event['metadata']);
               if ([
                 'front_panel.segment',
@@ -489,6 +517,9 @@ class PeerSession extends ChangeNotifier {
                 state = applyOutputEvent(state, event);
                 notifyListeners();
                 return; // Frames never trigger full snapshot/catalog polling.
+              }
+              if (event['kind'] != 'buzzer.note') {
+                events = [event, ...events].take(100).toList();
               }
               if ('${event['kind']}'.startsWith('update.')) {
                 // Events are cues to read durable status, not fabricated progress.

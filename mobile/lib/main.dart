@@ -1123,7 +1123,7 @@ class _ControllerHomeState extends State<ControllerHome>
       if (operation['id'] == null)
         const Text('No operation loaded')
       else ...[
-        Text('${operation['stage'] ?? operation['state']}'),
+        Text(operationLabel(operation)),
         const SizedBox(height: 12),
         if (!['completed', 'failed', 'cancelled'].contains(operation['state']))
           LinearProgressIndicator(value: operationProgress(operation)),

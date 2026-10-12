@@ -41,7 +41,7 @@ Keep physical, renderer, source/CI and deployment claims separate.
 ## Observed verification, 2026-10-12
 
 - Flutter 3.47.3 / Dart 3.13.3: locked offline restore and analyzer passed.
-- Full suite: 98 passed, two opt-in renderer/live tests skipped by default.
+- Full suite: 101 passed, two opt-in renderer/live tests skipped by default.
 - Opt-in renderer and live-host tests: both passed. Direct PCController
   snapshot, peripheral catalog and advertised WebSocket subscription were
   exercised read-only against a host connected to the physical board.
@@ -49,7 +49,7 @@ Keep physical, renderer, source/CI and deployment claims separate.
   including native sequence editing and dimmed repeat previews. These are
   explicitly renderer previews, not installed-device screenshots.
 - ARM64 preview APK: 18.4 MB, development signing, SHA-256
-  `f0cef0dbddcdb8a67ec7c5f28faa7bbf2d9155f73dbd6482843a4f7f257e9e39`.
+  `96be664748ebf3d9c3323863de59b3eb13f3a15ffbe1007829b8e935087adbe8`.
   This local preview uses an optional non-secret localhost ADB test endpoint;
   normal CI previews open with no preconfigured peer.
 - The discovered Samsung Android device refused installation:
