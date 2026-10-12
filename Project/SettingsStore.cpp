@@ -14,12 +14,6 @@ struct __attribute__((packed)) StoredSettings {
   uint8_t checksum;
 };
 
-struct __attribute__((packed)) StoredTemperatureConfiguration {
-  uint8_t lightingRom[8];
-  uint16_t hotThresholdCentiC;
-  uint8_t checksum;
-};
-
 #if !defined(PCCONTROLLER_SETTINGS_TEST_LAYOUT)
 static_assert(sizeof(StoredSettings) == EepromLayout::SettingsRecordBytes,
               "settings/name EEPROM record layout changed");
@@ -222,15 +216,17 @@ void SettingsStore::setDefaults() {
   settings_.motionBreakMs = 1;
 }
 
-bool SettingsStore::loadTemperatureConfiguration() {
-  StoredTemperatureConfiguration record;
-  EEPROM.get(EepromLayout::TemperatureSettingsAddress, record);
-  if (record.checksum != checksum(&record, sizeof(record) - 1)) {
-    return false;
+void SettingsStore::loadTemperatureConfiguration() {
+  EEPROM.get(EepromLayout::TemperatureSettingsAddress,
+             temperatureConfiguration_);
+  if (temperatureConfiguration_.checksum !=
+      checksum(&temperatureConfiguration_,
+               sizeof(temperatureConfiguration_) - 1)) {
+    temperatureConfiguration_.lightingRom[0] = 0;
+    temperatureConfiguration_.hotThresholdCentiC =
+        DefaultHotTemperatureCentiC;
+    return;
   }
-  memcpy(lightingTemperatureRom_, record.lightingRom, 8);
-  hotTemperatureCentiC_ = record.hotThresholdCentiC;
-  return true;
 }
 
 bool SettingsStore::loadCurrent() {

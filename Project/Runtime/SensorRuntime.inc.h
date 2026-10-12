@@ -146,17 +146,19 @@ void discoverTemperatureSensors() {
       ++temperatureAddressCount;
     }
   }
-  if (temperatureAddressCount == 2 &&
-      memcmp(temperatureAddresses[0], temperatureAddresses[1], 8) > 0) {
-    swapTemperatureAddresses();
-  }
-  // Canonicalize the commissioned lighting probe as role/index zero. The full
-  // ROM ID, rather than a positional swap bit, remains the EEPROM authority.
-  if (temperatureAddressCount == 2 &&
-      settingsStore.hasLightingTemperatureRom() &&
-      memcmp(temperatureAddresses[1],
-             settingsStore.lightingTemperatureRom(), 8) == 0) {
-    swapTemperatureAddresses();
+  if (temperatureAddressCount == 2) {
+    if (memcmp(temperatureAddresses[0], temperatureAddresses[1], 8) > 0) {
+      swapTemperatureAddresses();
+    }
+    // Canonicalize the commissioned lighting probe as role/index zero. The
+    // full ROM ID, rather than a positional swap bit, remains the EEPROM
+    // authority.
+    // An absent or CRC-rejected mapping is zero-prefixed, so it cannot match
+    // a host-validated DS18B20 family-0x28 ROM.
+    if (memcmp(temperatureAddresses[1],
+               settingsStore.lightingTemperatureRom(), 8) == 0) {
+      swapTemperatureAddresses();
+    }
   }
   for (uint8_t index = 0; index < temperatureAddressCount; ++index) {
     // 11-bit conversion is 375 ms with 0.125 C resolution, allowing a more

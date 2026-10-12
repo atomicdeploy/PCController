@@ -227,6 +227,12 @@ struct __attribute__((packed)) ControllerSettings {
 #endif
 };
 
+struct __attribute__((packed)) StoredTemperatureConfiguration {
+  uint8_t lightingRom[8];
+  int16_t hotThresholdCentiC;
+  uint8_t checksum;
+};
+
 // The seven leading byte-sized settings form the canonical UART settings
 // prefix. Keep the shared semantic prefix explicit while allowing later
 // payloads to append independently discoverable fields.
@@ -281,20 +287,19 @@ public:
   // With the board's fixed maximum of two probes, every other discovered ROM
   // is the Bluetooth-audio role. A blank mapping uses deterministic sorted
   // fallback only until the host commissions the physical installation.
-  int16_t hotTemperatureCentiC() const { return hotTemperatureCentiC_; }
-  bool temperatureConfigurationPersisted() const {
-    return lightingTemperatureRom_[0] == 0x28;
+  int16_t hotTemperatureCentiC() const {
+    return temperatureConfiguration_.hotThresholdCentiC;
   }
-  bool hasLightingTemperatureRom() const {
-    return lightingTemperatureRom_[0] == 0x28;
+  bool temperatureConfigurationPersisted() const {
+    return temperatureConfiguration_.lightingRom[0] == 0x28;
   }
   const uint8_t *lightingTemperatureRom() const {
-    return lightingTemperatureRom_;
+    return temperatureConfiguration_.lightingRom;
   }
 private:
   void setDefaults();
   bool loadCurrent();
-  bool loadTemperatureConfiguration();
+  void loadTemperatureConfiguration();
 
   ControllerSettings settings_{}; // Live MCU settings; never host-config storage.
   uint8_t boardNameLength_ = 0;
@@ -302,8 +307,8 @@ private:
   uint32_t changedAt_ = 0;
   bool dirty_ = false;
   bool persisted_ = false;
-  uint8_t lightingTemperatureRom_[8]{};
-  int16_t hotTemperatureCentiC_ = DefaultHotTemperatureCentiC;
+  StoredTemperatureConfiguration temperatureConfiguration_ = {
+      {}, DefaultHotTemperatureCentiC, 0};
 };
 
 // settingsStore is the single MCU EEPROM settings owner.
