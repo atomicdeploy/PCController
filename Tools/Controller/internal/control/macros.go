@@ -393,7 +393,7 @@ func (runner *MacroRunner) startRecording(name, category, color, mode string, se
 	}
 	color = normalizedMacroColor(color)
 	if !validMacroColor(color) {
-		return MacroRecordingState{}, fmt.Errorf("macro color %q is not red, blue, violet, green, or white", color)
+		return MacroRecordingState{}, fmt.Errorf("macro color %q is not a supported preset or #RRGGBB", color)
 	}
 	used := make(map[byte]bool)
 	for _, macro := range runner.List() {
@@ -2118,6 +2118,9 @@ func macroNeedsMotionPermission(macro appconfig.Macro) bool {
 
 func normalizedMacroColor(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
+	if strings.HasPrefix(value, "#") && appconfig.ValidEffectColor(value) {
+		return strings.ToUpper(value)
+	}
 	if value == "purple" {
 		return "violet"
 	}
@@ -2125,12 +2128,7 @@ func normalizedMacroColor(value string) string {
 }
 
 func validMacroColor(value string) bool {
-	switch normalizedMacroColor(value) {
-	case "", "red", "blue", "violet", "green", "white":
-		return true
-	default:
-		return false
-	}
+	return appconfig.ValidEffectColor(value)
 }
 
 func macroTerminal(state byte) bool {

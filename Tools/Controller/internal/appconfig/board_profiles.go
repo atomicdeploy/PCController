@@ -122,6 +122,16 @@ func (value Config) validateBoardProfiles() error {
 	return nil
 }
 
+// ValidEffectColor retains semantic presets and accepts an exact RGB custom color.
+func ValidEffectColor(value string) bool {
+	value = strings.TrimSpace(value)
+	switch strings.ToLower(value) {
+	case "", "red", "blue", "purple", "violet", "green", "white":
+		return true
+	}
+	return validPresentationColor(value)
+}
+
 func validPresentationColor(value string) bool {
 	if len(value) != 7 || value[0] != '#' {
 		return false
