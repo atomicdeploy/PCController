@@ -1,6 +1,6 @@
 # Bounded buzzer mirror playout
 
-Owner: [Linux/board mirroring issue #106](https://github.com/atomicdeploy/PCController/issues/106).
+Owner: Linux/board mirroring issue #106.
 
 ## Cause and behavior
 
