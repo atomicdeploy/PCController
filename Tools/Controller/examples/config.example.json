@@ -355,7 +355,6 @@
       "step_ms": 50,
       "rf_hold_ms": 1400,
       "door_cue_hold_ms": 1600,
-      "hot_threshold_centi_c": 5500,
       "idle": {
         "effect": "steady",
         "color": {

@@ -34,7 +34,6 @@ type StatusLEDPolicy struct {
 	StepMS                  int             `json:"step_ms"`
 	RFHoldMS                int             `json:"rf_hold_ms"`
 	DoorCueHoldMS           int             `json:"door_cue_hold_ms"`
-	HotThresholdCentiC      int16           `json:"hot_threshold_centi_c"`
 	Idle                    StatusLEDVisual `json:"idle"`
 	Running                 StatusLEDVisual `json:"running"`
 	BluetoothAudioConnected StatusLEDVisual `json:"bluetooth_audio_connected"`
@@ -53,7 +52,7 @@ type StatusLEDPolicy struct {
 func DefaultStatusLEDPolicy() StatusLEDPolicy {
 	return StatusLEDPolicy{
 		Enabled: true, TransitionMS: 420, StepMS: 50,
-		RFHoldMS: 1400, DoorCueHoldMS: 1600, HotThresholdCentiC: 5500,
+		RFHoldMS: 1400, DoorCueHoldMS: 1600,
 		Idle:                    steadyVisual(RGBColor{Green: 255}, 128),
 		Running:                 steadyVisual(RGBColor{Red: 255, Green: 150}, 160),
 		BluetoothAudioConnected: steadyVisual(RGBColor{Blue: 255}, 150),
@@ -103,9 +102,6 @@ func validateStatusLEDPolicy(policy StatusLEDPolicy) error {
 	}
 	if policy.DoorCueHoldMS < 100 || policy.DoorCueHoldMS > 60_000 {
 		return fmt.Errorf("integrations.status_led.door_cue_hold_ms must be 100..60000")
-	}
-	if policy.HotThresholdCentiC < 3000 || policy.HotThresholdCentiC > 12500 {
-		return fmt.Errorf("integrations.status_led.hot_threshold_centi_c must be 3000..12500")
 	}
 	visuals := []struct {
 		name  string

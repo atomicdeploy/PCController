@@ -186,7 +186,10 @@ start every 450 ms while the door is open and every 1000 ms while it is closed.
 Valid temperature samples use a 50/50 EMA. A first sample, a disconnected
 sample, or a sample at/above the EEPROM-configured HOT threshold bypasses the
 EMA so a fault or warning is not hidden by smoothing. The guarded host EEPROM
-backend accepts 30.00..100.00 C and provisions 55.00 C by default.
+backend accepts 30.00..100.00 C and requires the threshold explicitly. The
+guarded EEPROM writer applies that CRC-protected record and verifies a fresh
+readback. Missing or out-of-range configuration remains explicitly
+unconfigured; no compiled temperature is substituted.
 
 Before commissioning, discovery order is only a temporary role assignment. The
 commissioned EEPROM record stores the complete CRC-valid 64-bit lighting-probe

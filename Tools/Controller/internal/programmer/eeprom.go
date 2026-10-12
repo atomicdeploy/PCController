@@ -37,7 +37,6 @@ const (
 	EEPROMTemperatureRecordBytes   uint32 = 11
 	MinimumHotTemperatureCentiC    uint16 = 3000
 	MaximumHotTemperatureCentiC    uint16 = 10000
-	DefaultHotTemperatureCentiC    uint16 = 5500
 	EEPROMResetJournalAddress      uint32 = 336
 	EEPROMResetJournalSlots        byte   = 64
 	EEPROMResetJournalRecordSize   uint32 = 6
@@ -274,7 +273,6 @@ func decodeTemperatureConfiguration(image *IntelHexImage) TemperatureConfigurati
 	}
 	if allBlank {
 		result.Valid = true
-		result.HotThresholdCentiC = DefaultHotTemperatureCentiC
 		return result
 	}
 	result.Configured = true

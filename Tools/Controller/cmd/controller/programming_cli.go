@@ -507,7 +507,7 @@ func monitorPrimaryFirmwareUpdate(
 }
 
 func runEEPROM(args []string, stdout, stderr io.Writer) error {
-	const usage = "usage: controller eeprom factory-defaults --output EEPROM.hex | inspect (--input IMAGE.hex | --backup-manifest MANIFEST.json) | temperature --input EEPROM.hex --output EEPROM.hex --lighting-rom ROM --hot-threshold-centi-c 5500 | export --backup-manifest MANIFEST.json --output SETTINGS.hex | import --backup-manifest MANIFEST.json --settings SETTINGS.hex --output EEPROM.hex | restore --backup-manifest MANIFEST.json --output EEPROM.hex"
+	const usage = "usage: controller eeprom factory-defaults --output EEPROM.hex | inspect (--input IMAGE.hex | --backup-manifest MANIFEST.json) | temperature --input EEPROM.hex --output EEPROM.hex --lighting-rom ROM --hot-threshold-centi-c CENTI_C | export --backup-manifest MANIFEST.json --output SETTINGS.hex | import --backup-manifest MANIFEST.json --settings SETTINGS.hex --output EEPROM.hex | restore --backup-manifest MANIFEST.json --output EEPROM.hex"
 	if len(args) == 0 {
 		return errors.New(usage)
 	}
@@ -535,7 +535,7 @@ func runEEPROM(args []string, stdout, stderr io.Writer) error {
 		input := flags.String("input", "", "complete captured EEPROM Intel HEX image")
 		output := flags.String("output", "", "new no-overwrite complete EEPROM Intel HEX image")
 		lighting := flags.String("lighting-rom", "", "CRC-valid eight-byte DS18B20 ROM identity")
-		hot := flags.Uint("hot-threshold-centi-c", uint(programmer.DefaultHotTemperatureCentiC), "hot threshold in centi-C")
+		hot := flags.Uint("hot-threshold-centi-c", 0, "required hot threshold in centi-C")
 		if err := flags.Parse(args[1:]); err != nil {
 			return err
 		}

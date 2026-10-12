@@ -185,7 +185,9 @@ resolution (0.125 C, 375 ms maximum), and uses one Skip-ROM conversion for
 both probes. Conversion and scratchpad reads
 are asynchronous: requests begin every 450 ms while the door is open and every
 1000 ms while closed. A 50/50 integer EMA smooths each valid sample; a sample
-at or above 55.00 C bypasses the filter so HOT indication is not delayed.
+at or above the current EEPROM threshold bypasses the filter so HOT indication
+is not delayed. Missing or out-of-range temperature configuration is reported as
+unconfigured; firmware does not substitute a compiled threshold.
 1-Wire service is suspended during RF learning because its brief interrupt
 masking can disturb received pulse timing.
 

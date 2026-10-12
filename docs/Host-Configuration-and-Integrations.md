@@ -897,13 +897,17 @@ for the exact command and recovery behavior.
 ```console
 Tools\Controller\bin\controller.exe eeprom inspect --backup-manifest BACKUP\manifest.json
 Tools\Controller\bin\controller.exe eeprom factory-defaults --output EEPROM-FACTORY.hex
-Tools\Controller\bin\controller.exe eeprom temperature --input EEPROM-LIVE.hex --output EEPROM-TEMPERATURE.hex --lighting-rom 28-616435FB503F-E9 --hot-threshold-centi-c 5500
+Tools\Controller\bin\controller.exe eeprom temperature --input EEPROM-LIVE.hex --output EEPROM-TEMPERATURE.hex --lighting-rom 28-616435FB503F-E9 --hot-threshold-centi-c CENTI_C
 Tools\Controller\bin\controller.exe eeprom export --backup-manifest BACKUP\manifest.json --output SETTINGS.hex
 Tools\Controller\bin\controller.exe eeprom import --backup-manifest BACKUP\manifest.json --settings SETTINGS.hex --output EEPROM-RESTORE.hex
 Tools\Controller\bin\controller.exe eeprom restore --backup-manifest BACKUP\manifest.json --output EEPROM-ORIGINAL.hex
 Tools\Controller\bin\controller.exe program --operation read-eeprom --method urclock --port COM18 --output EEPROM-LIVE.hex
 Tools\Controller\bin\controller.exe program --operation write-eeprom --method urclock --port COM18 --hex EEPROM-FACTORY.hex --confirm-eeprom-write
 ```
+
+`CENTI_C` is required and must be selected explicitly from 3000 to 10000. The
+temperature patch preserves unrelated EEPROM fields; use the guarded EEPROM
+writer and a fresh readback to apply and verify it on a board.
 
 The current settings artifact is exactly 40 settings/name value bytes plus
 CRC-8 at EEPROM addresses `0x0020..0x0048`. Export emits only that sparse

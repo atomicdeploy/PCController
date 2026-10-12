@@ -43,7 +43,9 @@ The commissioned record at EEPROM `0x0144..0x014E` is:
 
 The first eight bytes are the full lighting-probe ROM, `7C 15` is little-endian
 `5500` centi-C (`55.00 C`), and `C0` is the record CRC-8. A fresh post-write
-backend capture decoded to this exact record. Preserve other current settings:
+backend capture decoded to this exact record. This is the captured commissioning
+value, not a firmware default; current firmware exposes it as an adjustable
+EEPROM setting. Preserve other current settings:
 capture the complete EEPROM first, patch only this record with
 `controller eeprom temperature`, then use the guarded EEPROM update endpoint
 and verify a fresh readback.

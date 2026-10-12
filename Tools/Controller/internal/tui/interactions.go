@@ -1241,13 +1241,11 @@ func (model Model) adjustStatusLEDSetting(delta int, activate bool) (Model, tea.
 			step,
 		)
 	case 22:
-		policy.HotThresholdCentiC += int16(step * 100)
-		if policy.HotThresholdCentiC < 3000 {
-			policy.HotThresholdCentiC = 12500
-		}
-		if policy.HotThresholdCentiC > 12500 {
-			policy.HotThresholdCentiC = 3000
-		}
+		policy.DoorCueHoldMS = cycleInt(
+			[]int{250, 500, 900, 1400, 1600, 2000, 3000, 5000},
+			policy.DoorCueHoldMS,
+			step,
+		)
 	default:
 		visual := statusLEDVisualByCursor(&policy, model.cursor)
 		if visual != nil {

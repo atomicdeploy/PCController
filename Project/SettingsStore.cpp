@@ -34,6 +34,13 @@ uint8_t checksum(const void *value, uint8_t length) {
       static_cast<const uint8_t *>(value), length);
 }
 
+bool validHotThreshold(int16_t value) {
+  return static_cast<uint16_t>(value -
+                               SettingsStore::MinimumHotTemperatureCentiC) <=
+         static_cast<uint16_t>(SettingsStore::MaximumHotTemperatureCentiC -
+                               SettingsStore::MinimumHotTemperatureCentiC);
+}
+
 } // namespace
 
 SettingsStore settingsStore;
@@ -219,16 +226,13 @@ void SettingsStore::setDefaults() {
 void SettingsStore::loadTemperatureConfiguration() {
   EEPROM.get(EepromLayout::TemperatureSettingsAddress,
              temperatureConfiguration_);
-  // The host owns record CRC generation and verified readback. The MCU guards
-  // the safety-critical value semantically; an arbitrary ROM is harmless
-  // unless all eight bytes exactly match a CRC-valid discovered probe.
-  if (static_cast<uint16_t>(
-          temperatureConfiguration_.hotThresholdCentiC -
-          MinimumHotTemperatureCentiC) >
-      static_cast<uint16_t>(MaximumHotTemperatureCentiC -
-                            MinimumHotTemperatureCentiC)) {
-    temperatureConfiguration_.hotThresholdCentiC =
-        DefaultHotTemperatureCentiC;
+  // The host owns whole-record CRC validation during commissioning and guarded
+  // EEPROM readback. The MCU still rejects an out-of-range threshold before it
+  // can become the live alarm authority.
+  if (!validHotThreshold(temperatureConfiguration_.hotThresholdCentiC)) {
+    memset(temperatureConfiguration_.lightingRom, 0,
+           sizeof(temperatureConfiguration_.lightingRom));
+    temperatureConfiguration_.hotThresholdCentiC = 0;
   }
 }
 
