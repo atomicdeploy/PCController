@@ -67,6 +67,7 @@ type Snapshot struct {
 	StatusLEDRevision uint64
 	Motion            MotionSnapshot
 	ProgramState      ProgramStateSnapshot
+	Programming       ProgrammingSnapshot
 	RFLearning        RFLearnState
 	Macros            MacroSnapshot
 	Effects           []EffectDescriptor
@@ -130,6 +131,7 @@ type Event struct {
 	Correlation string
 	Delivery    string
 	Metadata    map[string]string
+	Programming *ProgrammingSnapshot
 	RFCode      uint32
 	RFBits      byte
 	RFProtocol  byte
@@ -321,6 +323,7 @@ type Runtime struct {
 	programState               *ProgramStateManager
 	programStateSyncMu         sync.Mutex
 	programmingMu              sync.Mutex
+	programming                ProgrammingSnapshot
 	programStateSent           bool
 	programStateSentGeneration uint64
 	programStateSentRevision   uint64
@@ -819,6 +822,7 @@ func (runtime *Runtime) Snapshot() Snapshot {
 		StatusLEDUpdated: runtime.statusLEDUpdated, StatusLEDRevision: runtime.statusLEDRevision,
 		Motion:           runtime.motion,
 		ProgramState:     programState,
+		Programming:      runtime.programming,
 		RFLearning:       rfLearning,
 		EmergencyStop:    emergencyStop,
 		HardwareProblems: hardwareProblems,
@@ -1141,6 +1145,11 @@ func sameHardwareProblems(left, right []ports.HardwareProblem) bool {
 // clearPeerStateLocked removes values whose authority ended with the serial
 // session while retaining the last port identity needed for reconnect.
 func (runtime *Runtime) clearPeerStateLocked() {
+	previous := runtime.programming
+	if !runtime.programming.IntentionalUARTRelease {
+		runtime.programming.LatchKnown = false
+	}
+	runtime.touchProgrammingLocked(previous)
 	runtime.hello = native.Hello{}
 	runtime.status = native.Status{}
 	runtime.settings = native.Settings{}
@@ -2527,6 +2536,14 @@ func (runtime *Runtime) attachWhen(result link.OpenResult, allowed func() bool) 
 	runtime.generation++
 	generation := runtime.generation
 	runtime.session = result.Session
+	previousProgramming := runtime.programming
+	if runtime.programming.Device.Port != "" && !sameProgrammingDevice(runtime.programming.Device, programmingIdentity(result.Port)) {
+		runtime.programming = ProgrammingSnapshot{Revision: previousProgramming.Revision}
+	}
+	runtime.programming.IntentionalUARTRelease = false
+	runtime.programming.Device = programmingIdentity(result.Port)
+	runtime.programming.ConnectionGeneration = generation
+	runtime.touchProgrammingLocked(previousProgramming)
 	runtime.port = result.Port
 	runtime.hello = result.Hello
 	runtime.status = native.Status{}
@@ -2935,6 +2952,9 @@ func (runtime *Runtime) detachReason(pause bool, reason string) error {
 	session := runtime.session
 	port := runtime.port
 	runtime.paused = pause
+	previousProgramming := runtime.programming
+	runtime.programming.IntentionalUARTRelease = pause && runtime.programming.Active && runtime.programming.RestorationPending
+	runtime.touchProgrammingLocked(previousProgramming)
 	runtime.reconnectEpoch++
 	runtime.portRebindAllowed = false
 	runtime.connectionAttemptStart = time.Time{}
@@ -3226,6 +3246,9 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 				owned = true
 				port = runtime.port
 				runtime.session = nil
+				previousProgramming := runtime.programming
+				runtime.programming.IntentionalUARTRelease = false
+				runtime.touchProgrammingLocked(previousProgramming)
 				runtime.clearPeerStateLocked()
 				runtime.connectionState = "reconnecting"
 				runtime.connectionReason = disconnectReason
@@ -3474,6 +3497,7 @@ func (runtime *Runtime) observeLocked(frame native.Frame) uint64 {
 		if settings, err := native.ParseSettings(frame.Payload); err == nil {
 			runtime.settings = settings
 			runtime.haveSettings = true
+			runtime.observeProgrammingSettingsLocked(settings)
 		}
 		if name, err := native.ParseBoardNameFromSettings(frame.Payload); err == nil {
 			runtime.boardName = name

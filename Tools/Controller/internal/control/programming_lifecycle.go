@@ -107,6 +107,7 @@ type ProgrammingSession struct {
 	Phase              string           `json:"phase"`
 	HostResult         string           `json:"host_result,omitempty"`
 	Warnings           []string         `json:"warnings,omitempty"`
+	phaseObserver      func(string)
 }
 
 // ProgrammingRecoveryDiagnostic is a path-free, privacy-safe projection of a
@@ -388,9 +389,10 @@ func (device runtimeProgrammingDevice) RestoreLiveState(
 }
 
 func (device runtimeProgrammingDevice) PublishProgrammingPhase(phase string) {
-	device.runtime.PublishHostEvent(
-		"programming.lifecycle", "programming phase: "+phase,
-	)
+	device.runtime.mu.Lock()
+	state := device.runtime.programmingPhaseLocked(phase)
+	device.runtime.mu.Unlock()
+	device.runtime.publishProgrammingState(state)
 }
 
 func (device runtimeProgrammingDevice) EnterSafeProgrammingState(ctx context.Context) error {
@@ -519,6 +521,7 @@ func prepareProgrammingSession(
 		OriginalLiveState: snapshot.LiveState, Phase: "captured",
 		ReinitializeEEPROM: options.ReinitializeEEPROM,
 		SettingsQueryError: snapshot.SettingsQueryError,
+		phaseObserver:      device.PublishProgrammingPhase,
 	}
 	if options.ReinitializeEEPROM {
 		session.Warnings = append(session.Warnings,
@@ -875,6 +878,7 @@ func restoreProgrammingSessionWithDisposition(
 	if err := os.Remove(session.RecoveryMarkerPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("remove completed programming recovery marker: %w", err)
 	}
+	device.PublishProgrammingPhase("complete")
 	writeProgrammingWarningsFrom(output, session, warningStart)
 	if output != nil {
 		if abandonFailed {
@@ -978,6 +982,7 @@ func finalizeDevelopmentEEPROMReinitialization(
 	if err := os.Remove(session.RecoveryMarkerPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("remove completed EEPROM reinitialization recovery marker: %w", err)
 	}
+	device.PublishProgrammingPhase("complete")
 	writeProgrammingWarningsFrom(output, session, warningStart)
 	if output != nil {
 		fmt.Fprintln(output,
@@ -1005,6 +1010,9 @@ func MarkProgrammingSessionComplete(session *ProgrammingSession, succeeded bool)
 	if err := rewriteProgrammingMarker(session); err != nil {
 		session.Phase, session.HostResult = previousPhase, previousResult
 		return err
+	}
+	if session.phaseObserver != nil {
+		session.phaseObserver(session.Phase)
 	}
 	return nil
 }
