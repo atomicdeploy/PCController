@@ -19,15 +19,25 @@ constexpr uint16_t Calibration32V2A = 4096;
 } // namespace
 
 bool Ina219Sensor::begin() {
+#if defined(PCCONTROLLER_NATIVE)
+  return NativeHal::powerAvailable;
+#else
   i2cBus.beginTransmission(address_);
   if (i2cBus.endTransmission() != 0) {
     return false;
   }
   return write16(CalibrationRegister, Calibration32V2A) &&
          write16(ConfigRegister, Config32V2A);
+#endif
 }
 
 bool Ina219Sensor::read(Ina219Reading &reading) {
+#if defined(PCCONTROLLER_NATIVE)
+  if (!NativeHal::powerAvailable) return false;
+  reading = {NativeHal::supplyMilliVolts, NativeHal::supplyMilliVolts,
+             NativeHal::currentMilliAmps, NativeHal::powerMilliWatts};
+  return true;
+#else
   // Some compatible devices clear calibration after reset; refreshing it also
   // matches the established Adafruit 32V/2A measurement sequence.
   if (!write16(CalibrationRegister, Calibration32V2A)) {
@@ -61,6 +71,7 @@ bool Ina219Sensor::read(Ina219Reading &reading) {
                          : (signedCurrent - 5L) / 10L;
   reading.powerMilliWatts = static_cast<uint32_t>(powerRaw) * 2UL;
   return true;
+#endif
 }
 
 bool Ina219Sensor::write16(uint8_t reg, uint16_t value) {

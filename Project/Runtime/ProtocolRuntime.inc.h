@@ -65,6 +65,9 @@ void sendHello(uint8_t sequence) {
   payload.featureProfile = PCCONTROLLER_FEATURE_PROFILE;
   payload.buildFeatures = static_cast<uint8_t>((1U << 6) |
       (PCCONTROLLER_ENABLE_BOARD_AUTOMATIONS ? (1U << 5) : 0));
+#if defined(PCCONTROLLER_NATIVE)
+  payload.buildFeatures |= (1U << 7); // Native HAL: mapped/fixture inputs, not physical sensors.
+#endif
 #if defined(__AVR__) && !defined(__AVR_ATmega2560__)
   // Copy the two contiguous, host-patchable identity fields in one flash
   // read. Do not replace these with compile-time constants: the guarded host

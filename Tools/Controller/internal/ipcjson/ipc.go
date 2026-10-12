@@ -1996,6 +1996,9 @@ func (service *Service) setNetworkPeers(raw json.RawMessage) (networkPeersConfig
 
 func (service *Service) browserUISettings() browserUISettings {
 	ui := service.hostConfig().UI
+	if service.Client.Snapshot().Hello.BuildFeatures&native.BuildFeatureNativeHAL != 0 {
+		ui.PeripheralNames = appconfig.NativeSensorNames(ui.PeripheralNames)
+	}
 	peripherals := appconfig.PeripheralDescriptors()
 	controls := appconfig.ControlDescriptors(ui.PeripheralNames)
 	appconfig.ApplyPWMChannelConfig(peripherals, controls, ui)
@@ -2054,6 +2057,9 @@ func normalizePeripheralNames(names map[string]string) (map[string]string, error
 func (service *Service) peripheralSettings() peripheralSettings {
 	config := service.hostConfig()
 	names := config.UI.PeripheralNames
+	if service.Client.Snapshot().Hello.BuildFeatures&native.BuildFeatureNativeHAL != 0 {
+		names = appconfig.NativeSensorNames(names)
+	}
 	profileDescriptor, profile := service.activeBoardProfile()
 	peripherals, controls := appconfig.ProfileDescriptors(profileDescriptor.Mode, profile.ExposeRawRelays, names, profile.Presentation)
 	appconfig.ApplyPWMChannelConfig(peripherals, controls, config.UI)

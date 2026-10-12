@@ -1,6 +1,6 @@
 import { spawn, execFileSync } from 'node:child_process'
 import { createConnection, createServer } from 'node:net'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import assert from 'node:assert/strict'
@@ -68,6 +68,41 @@ try {
   assert.equal(status.payload.length, 48); assert.equal(status.payload.readInt32LE(4), -2147483648)
   assert.equal(status.payload.readInt16LE(20), -32768)
   stdio.stdin.end(); await new Promise(resolve => stdio.once('exit', resolve)); assert.equal(stdio.exitCode, 0, stdio.diagnostics())
+
+  // Explicit host mappings still traverse production sampling, smoothing,
+  // discovery, status validity and recovery; not a second telemetry runtime.
+  const tempPath = join(state, 'host-temp'), voltagePath = join(state, 'host-voltage'), currentPath = join(state, 'host-current')
+  await writeFile(tempPath, '42000\n'); await writeFile(voltagePath, '12000000\n'); await writeFile(currentPath, '250000\n')
+  const mapped = start(['--stdio', '--memory', '--sensor-temp1', tempPath, '--sensor-voltage', voltagePath, '--sensor-current', currentPath])
+  const mappedFrames = channel(mapped.stdout)
+  mapped.stdin.write(encode(1, 43))
+  assert((await mappedFrames(f => f.opcode === 129 && f.sequence === 43)).payload[15] & 128, 'native input origin must be advertised')
+  let sensorSeq = 60
+  const mappedStatus = async predicate => {
+    const until = Date.now() + 6000
+    while (Date.now() < until) {
+      const seq = sensorSeq++ % 255
+      mapped.stdin.write(encode(2, seq))
+      const { payload } = await mappedFrames(f => f.opcode === 144 && f.sequence === seq)
+      if (predicate(payload)) return payload
+      await new Promise(resolve => setTimeout(resolve, 100))
+    }
+    throw new Error('mapped sensor state never became authoritative')
+  }
+  const liveMapped = await mappedStatus(p => (p.readUInt16LE(24) & 9) === 9)
+  assert.equal(liveMapped.readInt32LE(4), 12000); assert.equal(liveMapped.readInt32LE(12), 250); assert.equal(liveMapped.readInt32LE(16), 3000)
+  assert.equal(liveMapped.readInt16LE(20), -32768, 'source one must not migrate into role zero')
+  assert.equal(liveMapped.readInt16LE(22), 4200)
+  await writeFile(currentPath, '250000junk\n'); await writeFile(tempPath, '999999999999999999999999999999999999999\n')
+  const missingMapped = await mappedStatus(p => (p.readUInt16LE(24) & 9) === 0)
+  assert.equal(missingMapped.readInt32LE(4), -2147483648, 'invalid/missing source must clear stale power')
+  assert.equal(missingMapped.readInt16LE(22), -32768, 'invalid/missing source must clear stale temperature')
+  await writeFile(currentPath, '-100000\n'); await writeFile(tempPath, '-10000\n')
+  const recoveredMapped = await mappedStatus(p => (p.readUInt16LE(24) & 9) === 9)
+  assert.equal(recoveredMapped.readInt32LE(12), -100); assert.equal(recoveredMapped.readInt32LE(16), -1200)
+  assert.equal(recoveredMapped.readInt16LE(22), -1000)
+  mapped.stdin.end(); await new Promise(resolve => mapped.once('exit', resolve)); assert.equal(mapped.exitCode, 0, mapped.diagnostics())
+  assert(!await readFile(join(state, 'native-firmware-eeprom-8765.bin')).then(() => true, () => false), 'RAM-only development must not create EEPROM files')
 
   const port = await freePort(), eeprom = join(state, 'board.bin')
   // Restart must resolve the loaded OS image, not this untrusted argv[0].
