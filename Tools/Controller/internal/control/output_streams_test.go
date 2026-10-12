@@ -268,6 +268,69 @@ func TestMelodyStreamingWaitsBetweenAcknowledgedNotes(t *testing.T) {
 	}
 }
 
+func TestToneActivityUsesSharedBuzzerLaneAndExpiresWithoutExtraCommands(t *testing.T) {
+	target := &recordingOutputTarget{}
+	scheduler := NewOutputScheduler(target)
+	defer scheduler.Close()
+	if err := scheduler.StartTone(context.Background(), 880, 50); err != nil {
+		t.Fatal(err)
+	}
+	state := scheduler.State()
+	if state.MelodyID == 0 || state.MelodyName != "880 Hz" || len(target.snapshot()) != 1 {
+		t.Fatalf("tone must be ACKed and tracked: state=%#v commands=%#v", state, target.snapshot())
+	}
+	scheduler.mu.Lock()
+	done := scheduler.melody.done
+	scheduler.mu.Unlock()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("finite tone did not expire")
+	}
+	if scheduler.State().MelodyID != 0 || len(target.snapshot()) != 1 {
+		t.Fatal("completion must clear activity without extra writes")
+	}
+}
+
+func TestToneActivityRejectsInvalidAndFailedCommandsAndAllowsStop(t *testing.T) {
+	target := &recordingOutputTarget{}
+	scheduler := NewOutputScheduler(target)
+	defer scheduler.Close()
+	for _, input := range [][2]uint16{{0, 1}, {19, 1}, {20001, 1}, {880, 0}} {
+		if scheduler.StartTone(context.Background(), input[0], input[1]) == nil {
+			t.Fatal("invalid tone accepted")
+		}
+	}
+	if scheduler.State().MelodyID != 0 || len(target.snapshot()) != 0 {
+		t.Fatal("invalid tone changed output")
+	}
+	if err := scheduler.StartTone(context.Background(), 880, 60000); err != nil {
+		t.Fatal(err)
+	}
+	scheduler.mu.Lock()
+	done := scheduler.melody.done
+	scheduler.mu.Unlock()
+	if !scheduler.StopMelody() {
+		t.Fatal("long tone is not stoppable through shared lane")
+	}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("stop did not clear tone activity")
+	}
+	if scheduler.State().MelodyID != 0 {
+		t.Fatal("stopped tone remains active")
+	}
+	failing := NewOutputScheduler(&recordingOutputTarget{failAt: 1})
+	defer failing.Close()
+	if failing.StartTone(context.Background(), 880, 50) == nil || failing.State().MelodyID != 0 {
+		t.Fatal("failed command falsely remained active")
+	}
+}
+
 func TestMelodyStreamingDoesNotAddAcknowledgementLatencyToEveryNote(t *testing.T) {
 	target := &recordingOutputTarget{ackDelay: 40 * time.Millisecond}
 	scheduler := NewOutputScheduler(target)
