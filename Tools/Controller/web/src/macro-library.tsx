@@ -20,7 +20,7 @@ import {
 } from './macro-live'
 import type { ControllerEvent, ControllerMacro, Locale, MacroSnapshot, StripEffectDescriptor } from './types'
 
-type MacroColor = 'red' | 'blue' | 'violet' | 'green' | 'white'
+type MacroColor = 'red' | 'blue' | 'violet' | 'green' | 'white' | `#${string}`
 
 interface MacroLibraryPanelProps {
   online: boolean
@@ -39,6 +39,7 @@ interface MacroCatalogProps {
 }
 
 function normalizedColor(value?: string): MacroColor {
+  if (/^#[0-9a-f]{6}$/i.test(value?.trim() ?? '')) return value!.trim().toUpperCase() as MacroColor
   switch (value?.trim().toLowerCase()) {
     case 'blue': return 'blue'
     case 'violet': return 'violet'
@@ -93,7 +94,7 @@ export function MacroCatalog({ macros, selectedReference, locale, onSelect }: Ma
             className={selected ? 'is-selected' : ''}
             onClick={() => onSelect(macro)}
           >
-            <span className={`macro-library__color is-${normalizedColor(macro.color)}`} aria-hidden="true" />
+            <span className={`macro-library__color is-${normalizedColor(macro.color)}`} style={macro.color?.startsWith('#') ? { backgroundColor: normalizedColor(macro.color) } : undefined} aria-hidden="true" />
             <span className="macro-library__identity">
               <strong>{macro.name}</strong>
               <small>#{macro.id} · {macro.category || (persian ? 'بدون دسته' : 'Uncategorized')} · {macro.mode || 'auto'}</small>
@@ -274,7 +275,9 @@ export function MacroLibraryPanel({ online, locale, events, initialSnapshot, str
               { value: 'violet', label: copy('Violet', 'بنفش') },
               { value: 'green', label: copy('Green', 'سبز') },
               { value: 'white', label: copy('White', 'سفید') },
+              { value: color.startsWith('#') ? color : '#38D27A', label: copy('Custom', 'سفارشی') },
             ]} onChange={setColor} />
+            {color.startsWith('#') && <input type="color" aria-label={copy('Custom color', 'رنگ سفارشی')} value={color} onChange={event => setColor(event.target.value.toUpperCase() as MacroColor)} />}
           </div>
           <div className="macro-library__actions">
             {!selected && <Button icon={Plus} disabled={!name.trim()} busy={busy === 'controller.macro.create'} onClick={() => void perform(
