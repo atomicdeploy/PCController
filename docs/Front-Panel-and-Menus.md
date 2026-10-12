@@ -88,7 +88,7 @@ addressable LEDs, EEPROM/display, recovered I2C plus PWM/INA219, temperatures,
 |---|---|---|---|
 | INA219 | I2C `0x40`, A4/A5 | 32 V, gain /8, 64-sample bus and 128-sample shunt averaging, continuous conversion | Probed after I2C recovery; unavailable if probe/configuration fails |
 | 16-channel PWM (PCA9685 hardware) | I2C `0x41`, A4/A5 | 1 kHz, auto-increment, active-high logical mapping | Every channel is forced off with one retry before only explicitly enabled stored outputs are restored |
-| Two DS18B20 probes | D10/PB2/CS, shared 1-Wire | Externally powered, 11-bit, asynchronous conversion, maximum two valid ROMs | Scan, sort ROMs, request first conversion; no blocking wait |
+| Two DS18B20 probes | D10/PB2/CS, shared 1-Wire | Externally powered, 11-bit, asynchronous conversion, maximum two valid ROMs | Scan, use temporary discovery order until the configured lighting ROM is matched, request first conversion; no blocking wait |
 | TM1637 | D13/PB5 clock, D11/PB3 data | Fixed-pin open-drain-style sender, 3 us half-cycle, brightness 0-7 | Clear, EEPROM brightness (factory 5), show `boot`; changed segments only thereafter |
 | 74HC165/74HC595 | A0-A3, D4, D5, D7, D8 | Active-low inputs and outputs, 5 ms service interval | `/OE` held inactive until an all-off frame has been latched |
 | 433 MHz | RX D2/INT0, TX D3/INT1 | rc-switch 2.6.4, receive tolerance 70%, transmit/receive enabled | Receiver active; temporarily paused only while transmitting |
@@ -945,8 +945,9 @@ protocol and host:
 - boot melody and boot/status RGB indication; door, BT Audio, RF, navigation,
   save/discard, warning/hot, fault, and reset RGB cues;
 - door and relay audio enable flags plus global Silent mode in EEPROM;
-- two DS18B20 ROM identities, role swap setting, asynchronous 11-bit
-  conversion, and temperature smoothing; OneWire work pauses during RF learn;
+- two DS18B20 ROM identities, full-ROM lighting-role mapping, EEPROM HOT
+  threshold, asynchronous 11-bit conversion, and temperature smoothing;
+  OneWire work pauses during RF learn;
 - INA219 hardware averaging and faster 100 ms reads while the enclosure is
   open (500 ms while closed);
 - reset watchdog and startup SDA/SCL recovery;

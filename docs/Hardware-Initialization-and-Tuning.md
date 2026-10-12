@@ -177,7 +177,7 @@ At startup the driver:
   returns promptly instead of locking the MCU;
 - caps ROM-search attempts at eight and retains at most two valid family
   `0x28` addresses whose ROM CRC passes;
-- sorts the ROMs lexicographically for deterministic identity;
+- retains discovery order only as a temporary pre-commissioning role order;
 - writes 11-bit scratchpad resolution to each detected sensor; and
 - starts conversion asynchronously, keeping UART and RF service available.
 
@@ -196,6 +196,9 @@ backend patches only that record in a complete captured image, and the normal
 verified EEPROM writer preserves all unrelated settings. A repeated
 illumination-off/full thermal response test establishes the physical mapping;
 position or a swap flag is never treated as identity.
+
+The commissioned Cafe ROMs and repeated physical light-cycle evidence are
+recorded in [Cafe temperature sensor commissioning](verification/cafe-temperature-commissioning.md).
 
 Resolution alternatives are:
 
