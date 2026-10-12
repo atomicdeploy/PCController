@@ -50,6 +50,31 @@ copyright 2015 The Vazirmatn Project Authors.
 - Vendored font SHA-256:
   `4E3FA217D38FDAFC1FEA4414CEB58CA5E662CF0AB5FA735A8C8C20E8B42CAD92`
 
+## Native mobile client
+
+### Native Flutter controller scaffold and artwork
+
+`mobile/` retains the tracked Android/Flutter scaffold and reference screens
+from [PakarController](https://github.com/atomicdeploy/PakarController), commit
+`6dfc3e72ca0264242325f76b7fba04dec1f38fe2`. New PCController/Pealayer transport
+and UI code uses the paired current host contracts. Donor MIT terms remain in
+`mobile/PAKAR-LICENSE`; this does not relicense its fonts or claim full parity.
+
+The public Pealayer icon is from [Pealayer](https://github.com/ToghrolTP/pealayer),
+commit `00687b16a70217963794bc2d867160f3fbcd5e65`, with retained MIT notice in
+`mobile/PEALAYER-LICENSE`. No private user artwork is included.
+
+The unmodified Vazirmatn TTF has its OFL notice in
+`mobile/assets/fonts/Vazirmatn-OFL.txt`; SHA-256
+`b69fd4c680b8f3f225feabcc655a2c585d97627b8f5f5c0f9985e894069f3a56`.
+Phosphor's unmodified icon font has MIT terms in
+`mobile/assets/fonts/Phosphor-LICENSE.txt`; SHA-256
+`06b91e022b7ee899a63efced879392a74f0bacbda54e4467e9f663220d173a10`.
+
+Flutter/Dart and Android build dependencies are externally installed/locked,
+not copied into source. CI verifies the official Flutter 3.47.3 Linux SDK
+archive SHA-256 before extraction and retains the repository's Actions policy.
+
 ## AVR build dependencies (not vendored)
 
 The firmware resolves these through Arduino CLI/MiniCore rather than copying

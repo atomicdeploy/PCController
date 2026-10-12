@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Legacy launchers use the same PNG as native/Web, not the Flutter template. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/pakar_launcher_background" />
+    <item android:left="8dp" android:top="8dp" android:right="8dp" android:bottom="8dp">
+        <bitmap android:src="@drawable/pakar_application" android:gravity="fill" android:filter="true" />
+    </item>
+</layer-list>
