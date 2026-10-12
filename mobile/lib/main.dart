@@ -10,6 +10,10 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'documents.dart';
+import 'discovery.dart';
+import 'unified/workspace_chrome.dart';
+import 'unified/app_upgrade.dart';
+import 'unified/peer_upgrades.dart';
 import 'pakar_reference.dart' show SevenSegmentPreview;
 import 'unified/transport.dart';
 import 'unified/effect_editor.dart';
@@ -41,7 +45,7 @@ class _UnifiedControllerAppState extends State<UnifiedControllerApp> {
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: preferences,
     builder: (context, _) => MaterialApp(
-      title: 'PCController',
+      title: preferences.title,
       debugShowCheckedModeBanner: false,
       themeMode: preferences.theme,
       theme: _theme(Brightness.light),
@@ -49,71 +53,49 @@ class _UnifiedControllerAppState extends State<UnifiedControllerApp> {
       home: ControllerHome(restore: widget.restore, preferences: preferences),
     ),
   );
-  ThemeData _theme(Brightness brightness) => ThemeData(
-    useMaterial3: true,
-    brightness: brightness,
-    fontFamily: 'Vazirmatn',
-    colorScheme:
-        ColorScheme.fromSeed(
-          seedColor: const Color(0xff7166ce),
-          brightness: brightness,
-        ).copyWith(
-          surface: brightness == Brightness.dark
-              ? const Color(0xff232323)
-              : const Color(0xfffafafa),
-          surfaceContainer: brightness == Brightness.dark
-              ? const Color(0xff292929)
-              : const Color(0xfff2f2f3),
-          onSurface: brightness == Brightness.dark
-              ? const Color(0xffededed)
-              : const Color(0xff242428),
-          onSurfaceVariant: brightness == Brightness.dark
-              ? const Color(0xffaaaaae)
-              : const Color(0xff64646a),
-          outline: brightness == Brightness.dark
-              ? const Color(0xff414145)
-              : const Color(0xffd2d2d6),
-        ),
-    scaffoldBackgroundColor: brightness == Brightness.dark
-        ? const Color(0xff1c1c1e)
-        : const Color(0xfff5f5f7),
-    appBarTheme: const AppBarTheme(
-      centerTitle: false,
-      scrolledUnderElevation: 0,
-    ),
-    inputDecorationTheme: const InputDecorationTheme(
-      border: OutlineInputBorder(),
-      isDense: true,
-    ),
-    cardTheme: CardThemeData(
-      margin: EdgeInsets.zero,
-      elevation: 0,
-      color: brightness == Brightness.dark
-          ? const Color(0xff232323)
-          : const Color(0xfffafafa),
-      surfaceTintColor: Colors.transparent,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(
-          color: brightness == Brightness.dark
-              ? const Color(0xff3c3c40)
-              : const Color(0xffdddddf),
+  ThemeData _theme(Brightness brightness) {
+    final colors = preferences.scheme(brightness);
+    return ThemeData(
+      useMaterial3: true,
+      brightness: brightness,
+      fontFamily: 'Vazirmatn',
+      colorScheme: colors,
+      scaffoldBackgroundColor: colors.surfaceContainerLowest,
+      appBarTheme: AppBarTheme(
+        centerTitle: false,
+        scrolledUnderElevation: 0,
+        backgroundColor: colors.surfaceContainerLowest,
+      ),
+      inputDecorationTheme: InputDecorationTheme(
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+        isDense: true,
+      ),
+      cardTheme: CardThemeData(
+        margin: EdgeInsets.zero,
+        elevation: 0,
+        color: colors.surfaceContainerLow,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+          side: BorderSide(color: colors.outlineVariant.withValues(alpha: .65)),
         ),
       ),
-    ),
-    filledButtonTheme: FilledButtonThemeData(
-      style: FilledButton.styleFrom(
-        minimumSize: const Size(40, 42),
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          minimumSize: const Size(44, 44),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+        ),
+      ),
+      chipTheme: ChipThemeData(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       ),
-    ),
-    chipTheme: ChipThemeData(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-    ),
-    visualDensity: preferences.compact
-        ? VisualDensity.compact
-        : VisualDensity.standard,
-  );
+      visualDensity: preferences.compact
+          ? VisualDensity.compact
+          : VisualDensity.standard,
+    );
+  }
 }
 
 class ControllerHome extends StatefulWidget {
@@ -135,15 +117,11 @@ class _ControllerHomeState extends State<ControllerHome>
   final secure = const FlutterSecureStorage();
   final displayText = TextEditingController(),
       mediaTarget = TextEditingController();
-  final draftName = TextEditingController(),
-      draftProgram = TextEditingController(text: '{"steps": []}');
   final logs = <String>[];
   final history = TelemetryHistory();
   AppPreferences get preferences => widget.preferences;
   late final buzzerMirror = BuzzerMirror(
     failed: (error) {
-      preferences.mirrorBuzzer = false;
-      unawaited(preferences.save());
       if (mounted) setState(() => lastError = error);
     },
   );
@@ -159,7 +137,16 @@ class _ControllerHomeState extends State<ControllerHome>
   String automationToken = '';
   bool _captureInFlight = false;
   DateTime? _lastCapture;
-  int section = 0, boardTab = 0, playerTab = 0;
+  int section = 0;
+  final discovery = DeviceDiscovery();
+  final upgrades = AppUpgrade();
+  late final packagePeers = PeerUpgrades(upgrades, approve: approvePackage);
+  bool sharingSync = false;
+  bool restored = false, previousAutoConnect = true;
+  List<DiscoveredDevice> discovered = [];
+  bool discovering = false,
+      boardDiscoveryBlocked = false,
+      playerDiscoveryBlocked = false;
   bool busy = false;
   int activeRequests = 0;
   String? lastError, bridgeTarget;
@@ -179,12 +166,28 @@ class _ControllerHomeState extends State<ControllerHome>
     WidgetsBinding.instance.addObserver(this);
     board.addListener(_changed);
     preferences.addListener(_changed);
+    upgrades.addListener(_changed);
     board.onBuzzerNote = (event) => unawaited(buzzerMirror.event(event));
     if (widget.restore) {
+      DeviceDiscovery.channel.setMethodCallHandler((call) async {
+        if (call.method == 'networkChanged' &&
+            foreground &&
+            restored &&
+            preferences.autoConnect &&
+            ((!board.enabled &&
+                    !boardDiscoveryBlocked &&
+                    boardOrigin.isEmpty &&
+                    !viaPealayer) ||
+                (!player.enabled &&
+                    !playerDiscoveryBlocked &&
+                    playerOrigin.isEmpty))) {
+          unawaited(scanPeers());
+        }
+      });
       AppPreferences.native.setMethodCallHandler((call) async {
         if (call.method == 'launch' && mounted) {
           Navigator.of(context).popUntil((route) => route.isFirst);
-          setState(() => section = call.arguments == 'pealayer' ? 1 : 0);
+          setState(() => section = 0);
         }
       });
     }
@@ -204,6 +207,11 @@ class _ControllerHomeState extends State<ControllerHome>
   }
 
   void _changed() {
+    if (restored && preferences.autoConnect && !previousAutoConnect) {
+      unawaited(scanPeers());
+    }
+    previousAutoConnect = preferences.autoConnect;
+    unawaited(syncSharing());
     history.record(board.state);
     buzzerMirror.configure(
       owner: board.identity,
@@ -221,11 +229,16 @@ class _ControllerHomeState extends State<ControllerHome>
   Future<void> _restore() async {
     try {
       await preferences.load();
-      final launch = await AppPreferences.native.invokeMethod<String>(
-        'initialSection',
-      );
-      if (launch == 'pealayer') section = 1;
+      try {
+        await upgrades.rpc('app.upgrade.status', {});
+      } on Object {
+        /* Optional Android adapter. */
+      }
       final prefs = await SharedPreferences.getInstance();
+      boardDiscoveryBlocked =
+          prefs.getBool('pccontroller.discovery-blocked') ?? false;
+      playerDiscoveryBlocked =
+          prefs.getBool('pealayer.discovery-blocked') ?? false;
       boardOrigin =
           prefs.getString('pccontroller.origin') ??
           const String.fromEnvironment('PC_ORIGIN');
@@ -247,11 +260,13 @@ class _ControllerHomeState extends State<ControllerHome>
         await _startAutomation();
       }
       if (!mounted) return;
+      restored = true;
       setState(() {});
       unawaited(connectBoard());
       if (foreground && playerWanted && playerOrigin.isNotEmpty) {
         unawaited(player.connect(playerOrigin, playerToken));
       }
+      if (preferences.autoConnect) unawaited(scanPeers());
     } catch (_) {
       if (mounted) {
         setState(
@@ -267,11 +282,14 @@ class _ControllerHomeState extends State<ControllerHome>
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.detached) {
       foreground = false;
+      unawaited(packagePeers.close());
       unawaited(automation.close());
       board.disconnect();
       player.disconnect();
     } else if (state == AppLifecycleState.resumed && widget.restore) {
       foreground = true;
+      unawaited(syncSharing());
+      unawaited(refreshUpgrade());
       if (automationEnabled && automationToken.isNotEmpty) {
         unawaited(_startAutomation());
       }
@@ -288,7 +306,11 @@ class _ControllerHomeState extends State<ControllerHome>
     if (widget.restore) automationChannel.setMethodCallHandler(null);
     WidgetsBinding.instance.removeObserver(this);
     preferences.removeListener(_changed);
+    upgrades.removeListener(_changed);
+    unawaited(packagePeers.close());
+    upgrades.dispose();
     if (widget.restore) AppPreferences.native.setMethodCallHandler(null);
+    if (widget.restore) DeviceDiscovery.channel.setMethodCallHandler(null);
     board.onBuzzerNote = null;
     buzzerMirror.dispose();
     board.removeListener(_changed);
@@ -297,8 +319,6 @@ class _ControllerHomeState extends State<ControllerHome>
     player.dispose();
     displayText.dispose();
     mediaTarget.dispose();
-    draftName.dispose();
-    draftProgram.dispose();
     super.dispose();
   }
 
@@ -335,15 +355,23 @@ class _ControllerHomeState extends State<ControllerHome>
   }
 
   Future<void> disconnectPeer(PeerSession peer) async {
-    if (peer.controller) connectionChoiceRevision++;
+    connectionChoiceRevision++;
     if (peer.controller) {
       boardWanted = false;
+      boardDiscoveryBlocked = true;
     } else {
       playerWanted = false;
+      playerDiscoveryBlocked = true;
     }
     peer.disconnect();
     await perform('Disconnect', () async {
       final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(
+        peer.controller
+            ? 'pccontroller.discovery-blocked'
+            : 'pealayer.discovery-blocked',
+        true,
+      );
       await prefs.setBool(
         peer.controller ? 'pccontroller.connect' : 'pealayer.connect',
         false,
@@ -514,9 +542,6 @@ class _ControllerHomeState extends State<ControllerHome>
     final origin = TextEditingController(
       text: controller ? boardOrigin : playerOrigin,
     );
-    final token = TextEditingController(
-      text: controller ? boardToken : playerToken,
-    );
     final saved = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -534,20 +559,6 @@ class _ControllerHomeState extends State<ControllerHome>
                   labelText: 'Host URL',
                   hintText: 'http://192.168.1.20:8787',
                 ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: token,
-                obscureText: true,
-                autocorrect: false,
-                enableSuggestions: false,
-                decoration: const InputDecoration(
-                  labelText: 'Access token (if required)',
-                ),
-              ),
-              const SizedBox(height: 12),
-              const Text(
-                'Use HTTPS on untrusted networks. Tokens stay in Android secure storage.',
               ),
             ],
           ),
@@ -573,7 +584,10 @@ class _ControllerHomeState extends State<ControllerHome>
       ),
     );
     if (saved == true && mounted) {
-      final address = endpoint(origin.text).toString(), secret = token.text;
+      final address = endpoint(origin.text).toString();
+      final secret = address == (controller ? boardOrigin : playerOrigin)
+          ? (controller ? boardToken : playerToken)
+          : '';
       await perform('Connect', () async {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString(
@@ -590,6 +604,8 @@ class _ControllerHomeState extends State<ControllerHome>
           boardToken = secret;
           viaPealayer = false;
           boardWanted = true;
+          boardDiscoveryBlocked = false;
+          await prefs.setBool('pccontroller.discovery-blocked', false);
           await prefs.setBool('pccontroller.via-pealayer', false);
           await prefs.setBool('pccontroller.connect', true);
           await connectBoard();
@@ -598,6 +614,8 @@ class _ControllerHomeState extends State<ControllerHome>
           playerOrigin = address;
           playerToken = secret;
           playerWanted = true;
+          playerDiscoveryBlocked = false;
+          await prefs.setBool('pealayer.discovery-blocked', false);
           await prefs.setBool('pealayer.connect', true);
           await player.connect(address, secret);
           if (viaPealayer && boardWanted) await connectBoard();
@@ -605,7 +623,6 @@ class _ControllerHomeState extends State<ControllerHome>
       });
     }
     origin.dispose();
-    token.dispose();
   }
 
   Widget action(
@@ -617,15 +634,16 @@ class _ControllerHomeState extends State<ControllerHome>
   }) => OutlinedButton.icon(
     onPressed: busy && !priority ? null : callback,
     style: OutlinedButton.styleFrom(
-      minimumSize: const Size(40, 42),
-      foregroundColor: (danger ?? priority)
+      minimumSize: const Size(44, 44),
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      foregroundColor: (danger ?? priority) && callback != null
           ? Theme.of(context).colorScheme.error
           : Theme.of(context).colorScheme.onSurface,
-      backgroundColor: (danger ?? priority)
+      backgroundColor: (danger ?? priority) && callback != null
           ? Theme.of(context).colorScheme.error.withValues(alpha: .08)
           : Colors.transparent,
       side: BorderSide(
-        color: (danger ?? priority)
+        color: (danger ?? priority) && callback != null
             ? Theme.of(context).colorScheme.error.withValues(alpha: .4)
             : Theme.of(context).colorScheme.outline,
       ),
@@ -642,7 +660,7 @@ class _ControllerHomeState extends State<ControllerHome>
     Widget? trailing,
   }) => Card(
     child: Padding(
-      padding: const EdgeInsets.all(18),
+      padding: EdgeInsets.all(preferences.compact ? 12 : 18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -672,7 +690,7 @@ class _ControllerHomeState extends State<ControllerHome>
               ?trailing,
             ],
           ),
-          const SizedBox(height: 14),
+          if (children.isNotEmpty) const SizedBox(height: 12),
           ...children,
         ],
       ),
@@ -748,26 +766,32 @@ class _ControllerHomeState extends State<ControllerHome>
           ),
         ),
       );
+  void selectActivity(int value) {
+    setState(() => section = value);
+    if (value == 5 && board.online) {
+      unawaited(perform('Artifact catalog', board.loadArtifacts));
+    }
+  }
+
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, bounds) {
       final tablet =
           preferences.layout == 'tablet' && bounds.maxWidth >= 600 ||
           preferences.layout == 'auto' && bounds.maxWidth >= 760;
-      final pages = ['PCController', 'Pealayer', 'Activities', 'Workspace'];
-      final icons = [
-        Icons.memory_outlined,
-        Icons.play_circle_outline,
-        Icons.insights,
-        Icons.dashboard_customize_outlined,
-      ];
-      final content = Column(
+      final colors = Theme.of(context).colorScheme;
+      final body = Column(
         children: [
-          if (busy) const LinearProgressIndicator(),
+          if (!tablet)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              child: ActivityStrip(selected: section, changed: selectActivity),
+            ),
+          if (busy) const LinearProgressIndicator(minHeight: 2),
           if (lastError != null)
             MaterialBanner(
               content: Text(lastError!),
-              leading: const Icon(Icons.warning_amber),
+              leading: Icon(Icons.warning_amber, color: colors.error),
               actions: [
                 TextButton(
                   onPressed: () => setState(() => lastError = null),
@@ -777,20 +801,58 @@ class _ControllerHomeState extends State<ControllerHome>
             ),
           Expanded(
             child: SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(14),
               child: switch (section) {
-                0 => boardPage(),
-                1 => Theme(
-                  data: Theme.of(context).copyWith(
-                    colorScheme: ColorScheme.fromSeed(
-                      seedColor: const Color(0xff95bc66),
-                      brightness: Theme.of(context).brightness,
-                    ),
-                  ),
-                  child: playerPage(),
+                0 => Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    liveConnections(),
+                    if (board.fresh) ...[const SizedBox(height: 14), monitor()],
+                    if (player.fresh || bridgeTarget != null) ...[
+                      const SizedBox(height: 14),
+                      playback(),
+                    ],
+                    if (!board.fresh &&
+                        !player.fresh &&
+                        discovered.isNotEmpty) ...[
+                      const SizedBox(height: 14),
+                      discoveredPeers(),
+                    ],
+                  ],
                 ),
-                2 => activities(),
-                _ => workspace(),
+                1 => outputs(),
+                2 => board.boardReady ? frontPanel() : peerRoster(),
+                3 => Column(
+                  children: [
+                    workspace(),
+                    if (board.fresh) ...[const SizedBox(height: 14), effects()],
+                    if (player.fresh) ...[
+                      const SizedBox(height: 14),
+                      playerEffects(),
+                    ],
+                  ],
+                ),
+                4 => Column(
+                  children: [
+                    peerRoster(),
+                    const SizedBox(height: 14),
+                    discoveredPeers(),
+                    if (preferences.sharePackages ||
+                        upgrades.state['state'] != 'idle' ||
+                        discovered.any(
+                          (d) => d.product == 'controller-mobile',
+                        )) ...[
+                      const SizedBox(height: 14),
+                      upgradePanel(),
+                    ],
+                    if (board.fresh || player.fresh) ...[
+                      const SizedBox(height: 14),
+                      peers(),
+                    ],
+                  ],
+                ),
+                5 => board.fresh ? firmware() : peerRoster(),
+                _ => activities(),
               },
             ),
           ),
@@ -800,161 +862,677 @@ class _ControllerHomeState extends State<ControllerHome>
         key: captureKey,
         child: Scaffold(
           appBar: AppBar(
+            titleSpacing: 16,
             title: Row(
               children: [
                 Image.asset(
-                  'assets/branding/${section == 1 ? 'pealayer' : 'pccontroller'}.png',
+                  'assets/branding/${preferences.branding}.png',
                   width: 30,
                   height: 30,
                 ),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: Text(
-                    pages[section],
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        preferences.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w700),
+                      ),
+                      Text(
+                        activityNames[section],
+                        style: Theme.of(context).textTheme.labelMedium
+                            ?.copyWith(color: colors.onSurfaceVariant),
+                      ),
+                    ],
                   ),
                 ),
               ],
             ),
             actions: [
+              if (board.boardReady)
+                IconButton(
+                  tooltip: 'Emergency stop',
+                  color: Theme.of(context).colorScheme.error,
+                  icon: const Icon(Icons.front_hand_outlined),
+                  onPressed: () =>
+                      unawaited(boardCommand('estop on', safetyStop: true)),
+                ),
+              IconButton(
+                tooltip: 'Discover peers',
+                onPressed: discovering ? null : () => unawaited(scanPeers()),
+                icon: discovering
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.radar),
+              ),
               IconButton(
                 tooltip: 'Settings',
-                icon: const Icon(Icons.settings_outlined),
                 onPressed: openSettings,
+                icon: const Icon(Icons.settings_outlined),
               ),
-              IconButton(
-                tooltip: 'Connect peers',
-                icon: const Icon(Icons.link),
-                onPressed: () => configure(section != 1),
-              ),
+              const SizedBox(width: 6),
             ],
           ),
           body: tablet
               ? Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    NavigationRail(
-                      selectedIndex: section,
-                      labelType: NavigationRailLabelType.all,
-                      onDestinationSelected: (value) =>
-                          setState(() => section = value),
-                      destinations: [
-                        for (var i = 0; i < pages.length; i++)
-                          NavigationRailDestination(
-                            icon: Icon(icons[i]),
-                            label: Text(pages[i]),
-                          ),
-                      ],
+                    Padding(
+                      padding: const EdgeInsets.only(top: 14),
+                      child: ActivityStrip(
+                        selected: section,
+                        changed: selectActivity,
+                        vertical: true,
+                      ),
                     ),
-                    const VerticalDivider(width: 1),
-                    Expanded(child: content),
+                    VerticalDivider(width: 1, color: colors.outlineVariant),
+                    Expanded(child: body),
                   ],
                 )
-              : content,
-          bottomNavigationBar: tablet
-              ? null
-              : NavigationBar(
-                  selectedIndex: section,
-                  onDestinationSelected: (value) =>
-                      setState(() => section = value),
-                  destinations: [
-                    for (var i = 0; i < pages.length; i++)
-                      NavigationDestination(
-                        icon: Icon(icons[i]),
-                        label: pages[i],
-                      ),
-                  ],
-                ),
+              : body,
         ),
       );
     },
   );
-  Widget connection(PeerSession peer, String name) => card(
-    name,
-    Icons.lan_outlined,
-    [
-      if (!peer.fresh) const Text('Offline · last values unavailable'),
-      if (peer.error != null)
-        Padding(
-          padding: const EdgeInsets.only(top: 8),
-          child: Text(peer.error!),
-        ),
-      if (!peer.fresh || peer.error != null) const SizedBox(height: 12),
-      Wrap(
-        spacing: 8,
-        runSpacing: 8,
+
+  Widget liveConnections() => Card(
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      child: Row(
         children: [
-          action(
-            peer.fresh ? 'Connection' : 'Connect',
-            Icons.link,
-            () => configure(peer.controller),
-          ),
-          IconButton.outlined(
-            tooltip: 'Refresh',
-            icon: const Icon(Icons.refresh, size: 20),
-            onPressed: peer.transport == null
-                ? null
-                : () => unawaited(peer.refresh()),
-            style: IconButton.styleFrom(
-              fixedSize: const Size(42, 42),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
+          for (final peer in [board, player]) ...[
+            if (!peer.controller) const SizedBox(width: 8),
+            Expanded(
+              child: Row(
+                children: [
+                  Expanded(
+                    child: PopupMenuButton<String>(
+                      tooltip:
+                          'Manage ${peer.controller ? 'PCController' : 'Pealayer'} connection',
+                      padding: EdgeInsets.zero,
+                      onSelected: (value) {
+                        if (value == 'address') {
+                          unawaited(configure(peer.controller));
+                        }
+                        if (value == 'refresh') unawaited(peer.refresh());
+                      },
+                      itemBuilder: (_) => [
+                        const PopupMenuItem(
+                          value: 'address',
+                          child: Text('Edit address'),
+                        ),
+                        if (peer.transport != null)
+                          const PopupMenuItem(
+                            value: 'refresh',
+                            child: Text('Refresh'),
+                          ),
+                      ],
+                      child: Row(
+                        children: [
+                          Image.asset(
+                            'assets/branding/${peer.controller ? 'pccontroller' : 'pealayer'}.png',
+                            width: 22,
+                            height: 22,
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              peer.controller ? 'PCController' : 'Pealayer',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.labelLarge,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          Tooltip(
+                            message: peer.fresh
+                                ? peer.controller && !peer.boardReady
+                                      ? 'Host only'
+                                      : 'Connected'
+                                : peer.enabled
+                                ? 'Connecting'
+                                : 'Offline',
+                            child: Icon(
+                              peer.fresh
+                                  ? Icons.circle
+                                  : peer.enabled
+                                  ? Icons.sync
+                                  : Icons.circle_outlined,
+                              size: 10,
+                              color:
+                                  peer.fresh &&
+                                      (!peer.controller || peer.boardReady)
+                                  ? const Color(0xff55bd83)
+                                  : Theme.of(context)
+                                        .colorScheme
+                                        .onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip:
+                        '${peer.enabled || peer.fresh
+                            ? peer.fresh
+                                  ? 'Disconnect'
+                                  : 'Cancel connection'
+                            : 'Connect'} ${peer.controller ? 'PCController' : 'Pealayer'}',
+                    onPressed: () => unawaited(
+                      peer.enabled || peer.fresh
+                          ? disconnectPeer(peer)
+                          : resumePeer(peer),
+                    ),
+                    icon: Icon(
+                      peer.enabled || peer.fresh ? Icons.link_off : Icons.link,
+                      size: 20,
+                    ),
+                    style: IconButton.styleFrom(
+                      minimumSize: const Size(44, 44),
+                    ),
+                  ),
+                ],
               ),
             ),
-          ),
-          IconButton.outlined(
-            tooltip: 'Disconnect',
-            icon: const Icon(Icons.link_off, size: 20),
-            onPressed: peer.enabled
-                ? () => unawaited(disconnectPeer(peer))
-                : null,
-            style: IconButton.styleFrom(
-              fixedSize: const Size(42, 42),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
-          ),
+          ],
         ],
       ),
-    ],
-    trailing: StatePill(
-      peer.fresh
-          ? peer.controller
-                ? peer.state['connected'] == true
-                      ? 'Connected'
-                      : 'Host only'
-                : 'Connected'
-          : 'Offline',
-      active:
-          peer.fresh && (!peer.controller || peer.state['connected'] == true),
     ),
   );
-  Widget boardPage() => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      connection(board, 'PCController'),
-      const SizedBox(height: 16),
-      tabs(
-        ['Monitor', 'Outputs', 'Front panel', 'Firmware', 'Effects'],
-        boardTab,
-        (value) {
-          setState(() => boardTab = value);
-          if (value == 3 && board.online) {
-            unawaited(perform('Artifact catalog', board.loadArtifacts));
-          }
-        },
+
+  Widget peerRoster() => grid([
+    connection(board, 'PCController'),
+    connection(player, 'Pealayer'),
+  ], minimum: 310);
+
+  Widget connection(PeerSession peer, String name) {
+    final status = peer.fresh
+        ? peer.controller && peer.state['connected'] != true
+              ? 'Host only'
+              : 'Connected'
+        : peer.enabled
+        ? peer.error == null
+              ? 'Connecting'
+              : 'Reconnecting'
+        : 'Offline';
+    final toggle = peer.enabled || peer.fresh
+        ? peer.fresh
+              ? 'Disconnect'
+              : 'Cancel connection'
+        : 'Connect';
+    return LayoutBuilder(
+      builder: (context, bounds) => card(
+        name,
+        peer.controller ? Icons.memory_outlined : Icons.play_circle_outline,
+        [
+          if (peer.transport != null)
+            Text(
+              peer.transport!.origin.toString(),
+              style: Theme.of(context).textTheme.labelMedium,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          if (peer.error != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                peer.error!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ),
+        ],
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (bounds.maxWidth < 360 ||
+                MediaQuery.textScalerOf(context).scale(12) > 15)
+              Tooltip(
+                message: status,
+                child: Semantics(
+                  label: status,
+                  child: Icon(
+                    peer.fresh
+                        ? Icons.circle
+                        : peer.enabled
+                        ? Icons.sync
+                        : Icons.circle_outlined,
+                    size: 14,
+                    color: peer.fresh
+                        ? const Color(0xff55bd83)
+                        : Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              )
+            else
+              StatePill(
+                status,
+                active:
+                    peer.fresh &&
+                    (!peer.controller || peer.state['connected'] == true),
+              ),
+            const SizedBox(width: 4),
+            IconButton(
+              tooltip: '$toggle $name',
+              onPressed: () => unawaited(
+                peer.enabled || peer.fresh
+                    ? disconnectPeer(peer)
+                    : resumePeer(peer),
+              ),
+              icon: Icon(
+                peer.enabled || peer.fresh ? Icons.link_off : Icons.link,
+              ),
+              style: IconButton.styleFrom(minimumSize: const Size(44, 44)),
+            ),
+            PopupMenuButton<String>(
+              tooltip: 'Manage $name connection',
+              icon: const Icon(Icons.more_vert, size: 20),
+              onSelected: (value) {
+                if (value == 'address') unawaited(configure(peer.controller));
+                if (value == 'refresh') unawaited(peer.refresh());
+              },
+              itemBuilder: (_) => [
+                const PopupMenuItem(
+                  value: 'address',
+                  child: Text('Edit address'),
+                ),
+                if (peer.transport != null)
+                  const PopupMenuItem(value: 'refresh', child: Text('Refresh')),
+              ],
+            ),
+          ],
+        ),
       ),
-      const SizedBox(height: 16),
-      switch (boardTab) {
-        0 => monitor(),
-        1 => outputs(),
-        2 => frontPanel(),
-        3 => firmware(),
-        _ => effects(),
-      },
-    ],
-  );
+    );
+  }
+
+  Future<void> resumePeer(PeerSession peer) async {
+    final address = peer.controller
+        ? (viaPealayer ? playerOrigin : boardOrigin)
+        : playerOrigin;
+    if (address.isEmpty) {
+      await configure(peer.controller);
+      return;
+    }
+    connectionChoiceRevision++;
+    final prefs = await SharedPreferences.getInstance();
+    final role = peer.controller ? 'pccontroller' : 'pealayer';
+    await prefs.setBool('$role.discovery-blocked', false);
+    await prefs.setBool('$role.connect', true);
+    if (!mounted || !foreground) return;
+    if (peer.controller) {
+      boardDiscoveryBlocked = false;
+      boardWanted = true;
+      await connectBoard();
+    } else {
+      playerDiscoveryBlocked = false;
+      playerWanted = true;
+      await player.connect(playerOrigin, playerToken);
+    }
+  }
+
+  Future<void> scanPeers() async {
+    if (discovering || !foreground) return;
+    final choice = connectionChoiceRevision;
+    setState(() => discovering = true);
+    try {
+      final found = await discovery.scan();
+      if (!mounted || !foreground) return;
+      setState(() => discovered = found);
+      if (!preferences.autoConnect || choice != connectionChoiceRevision) {
+        return;
+      }
+      for (final role in ['pccontroller', 'pealayer']) {
+        final peer = role == 'pccontroller' ? board : player;
+        final candidates = found
+            .where((d) => d.verified && d.product == role)
+            .toList();
+        final blocked = peer.controller
+            ? boardDiscoveryBlocked
+            : playerDiscoveryBlocked;
+        final selected = peer.controller
+            ? boardOrigin.isNotEmpty || viaPealayer
+            : playerOrigin.isNotEmpty;
+        if (candidates.length != 1 ||
+            blocked ||
+            selected ||
+            peer.enabled ||
+            peer.transport != null) {
+          continue;
+        }
+        if (!mounted ||
+            !foreground ||
+            choice != connectionChoiceRevision ||
+            !preferences.autoConnect) {
+          return;
+        }
+        // Verification determines product routing only, never physical authority.
+        await useDiscovered(candidates.single, expectedChoice: choice);
+      }
+    } catch (error) {
+      if (mounted) setState(() => lastError = '$error');
+    } finally {
+      if (mounted) setState(() => discovering = false);
+    }
+  }
+
+  Future<void> useDiscovered(
+    DiscoveredDevice device, {
+    int? expectedChoice,
+  }) async {
+    if (!device.verified ||
+        !['pccontroller', 'pealayer'].contains(device.product) ||
+        !foreground) {
+      return;
+    }
+    if (expectedChoice != null && expectedChoice != connectionChoiceRevision) {
+      return;
+    }
+    final controller = device.product == 'pccontroller',
+        peer = device.product == 'pccontroller' ? board : player;
+    if (peer.enabled || peer.transport != null || peer.fresh) return;
+    if (expectedChoice == null) connectionChoiceRevision++;
+    final intent = connectionChoiceRevision;
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted ||
+        !foreground ||
+        intent != connectionChoiceRevision ||
+        peer.enabled ||
+        peer.transport != null) {
+      return;
+    }
+    if (controller) {
+      boardOrigin = device.endpoint;
+      boardToken = '';
+      boardWanted = true;
+      viaPealayer = false;
+      boardDiscoveryBlocked = false;
+    } else {
+      playerOrigin = device.endpoint;
+      playerToken = '';
+      playerWanted = true;
+      playerDiscoveryBlocked = false;
+    }
+    await Future.wait([
+      prefs.setString('${device.product}.origin', device.endpoint),
+      prefs.setBool('${device.product}.connect', true),
+      prefs.setBool('${device.product}.discovery-blocked', false),
+      if (controller) prefs.setBool('pccontroller.via-pealayer', false),
+    ]);
+    if (!mounted || !foreground || intent != connectionChoiceRevision) {
+      return;
+    }
+    if (controller) {
+      await connectBoard();
+    } else {
+      await player.connect(playerOrigin, playerToken);
+    }
+  }
+
+  Future<void> syncSharing() async {
+    if (sharingSync) return;
+    final desired = foreground && preferences.sharePackages;
+    if (desired == packagePeers.running) return;
+    sharingSync = true;
+    try {
+      if (desired) {
+        await packagePeers.start();
+      } else {
+        await packagePeers.close();
+      }
+    } catch (error) {
+      if (mounted) setState(() => lastError = 'Package sharing: $error');
+    } finally {
+      sharingSync = false;
+      if (mounted) setState(() {});
+    }
+  }
+
+  Future<void> refreshUpgrade() async {
+    try {
+      await upgrades.rpc('app.upgrade.status', {});
+    } on Object {
+      /* Optional native adapter. */
+    }
+  }
+
+  Future<bool> approvePackage(Json manifest) async {
+    if (!mounted || !foreground || !preferences.sharePackages) return false;
+    BuildContext? offerDialog;
+    final expiry = Timer(const Duration(seconds: 28), () {
+      final dialog = offerDialog;
+      if (dialog != null &&
+          dialog.mounted &&
+          ModalRoute.of(dialog)?.isCurrent == true) {
+        Navigator.pop(dialog, false);
+      }
+    });
+    try {
+      final accepted =
+          await showDialog<bool>(
+            context: context,
+            barrierDismissible: false,
+            builder: (dialog) {
+              offerDialog = dialog;
+              return AlertDialog(
+                title: const Text('Receive app update?'),
+                content: SizedBox(
+                  width: 420,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      fact('Source', '${manifest['source']}'),
+                      fact('Package', '${manifest['package']}'),
+                      fact(
+                        'Version',
+                        '${manifest['version_name'] ?? manifest['version_code']}',
+                      ),
+                      fact('Size', '${manifest['bytes']} bytes'),
+                      const SizedBox(height: 8),
+                      SelectableText(
+                        'SHA-256 ${manifest['sha256']}',
+                        style: Theme.of(context).textTheme.labelSmall,
+                      ),
+                      const SizedBox(height: 8),
+                      SelectableText(
+                        'Signer ${manifest['signers']}',
+                        style: Theme.of(context).textTheme.labelSmall,
+                      ),
+                    ],
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(dialog, false),
+                    child: const Text('Decline'),
+                  ),
+                  FilledButton(
+                    onPressed: () => Navigator.pop(dialog, true),
+                    child: const Text('Receive'),
+                  ),
+                ],
+              );
+            },
+          ) ??
+          false;
+      return mounted && foreground && preferences.sharePackages && accepted;
+    } finally {
+      expiry.cancel();
+    }
+  }
+
+  Widget upgradePanel() {
+    final state = upgrades.state, phase = '${state['state']}';
+    final receiving = phase == 'receiving' || phase == 'transmitting',
+        verified = phase == 'verified',
+        permission =
+            phase == 'permission_required' ||
+            phase == 'verified' && state['install_permission'] == false;
+    final received = state['received'] ?? state['sent'], total = state['bytes'];
+    return card('App updates', Icons.system_update, [
+      if (packagePeers.running) fact('Sharing', 'Port ${packagePeers.port}'),
+      if (phase != 'idle')
+        StatePill(
+          switch (phase) {
+            'verified' => 'Verified',
+            'verifying' => 'Verifying',
+            'receiving' => 'Receiving',
+            'transmitting' => 'Sending',
+            'offering' => 'Awaiting receiver',
+            'delivered' => 'Delivered',
+            'failed' => 'Failed',
+            'permission_required' => 'Permission required',
+            'awaiting_android' => 'Awaiting Android',
+            'android_receipt' =>
+              state['status'] == 0
+                  ? 'Installed'
+                  : state['status'] == -1
+                  ? 'Awaiting consent'
+                  : 'Installation failed',
+            _ => phase,
+          },
+          active:
+              verified || phase == 'android_receipt' && state['status'] == 0,
+        ),
+      if (receiving && received is int && total is int && total > 0) ...[
+        const SizedBox(height: 12),
+        LinearProgressIndicator(value: received / total),
+        fact('Received', '$received / $total bytes'),
+      ],
+      if (state['version_name'] != null)
+        fact('Version', '${state['version_name']}'),
+      if ('${state['message'] ?? ''}'.isNotEmpty)
+        Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Text('${state['message']}'),
+        ),
+      if (state['error'] != null)
+        Text(
+          '${state['error']}',
+          style: TextStyle(color: Theme.of(context).colorScheme.error),
+        ),
+      if (verified || permission)
+        Wrap(
+          spacing: 8,
+          children: [
+            action(
+              permission ? 'Allow installation' : 'Install',
+              permission ? Icons.security : Icons.system_update,
+              () => unawaited(
+                perform(
+                  'App update',
+                  () => upgrades.rpc(
+                    permission
+                        ? 'app.upgrade.permission'
+                        : 'app.upgrade.install',
+                    {'transfer_id': state['transfer_id']},
+                  ),
+                ),
+              ),
+            ),
+            action(
+              'Discard package',
+              Icons.delete_outline,
+              () => unawaited(
+                perform(
+                  'Discard update',
+                  () => upgrades.rpc('app.upgrade.abort', {
+                    'transfer_id': state['transfer_id'],
+                  }),
+                ),
+              ),
+            ),
+          ],
+        ),
+      for (final peer in discovered.where(
+        (d) => d.verified && d.product == 'controller-mobile',
+      ))
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          dense: true,
+          leading: const Icon(Icons.phone_android),
+          title: Text(peer.name),
+          subtitle: Text(peer.endpoint),
+          trailing: Wrap(
+            children: [
+              IconButton(
+                tooltip: 'Download update from ${peer.name}',
+                onPressed: upgrades.pulling || state['transfer_id'] != null
+                    ? null
+                    : () => unawaited(
+                        perform(
+                          'Download app update',
+                          () => upgrades.pull(peer.endpoint),
+                        ),
+                      ),
+                icon: const Icon(Icons.download_outlined),
+              ),
+              IconButton(
+                tooltip: 'Send app to ${peer.name}',
+                onPressed: upgrades.pulling || state['transfer_id'] != null
+                    ? null
+                    : () => unawaited(
+                        perform(
+                          'Send app update',
+                          () => upgrades.push(peer.endpoint),
+                        ),
+                      ),
+                icon: const Icon(Icons.upload_outlined),
+              ),
+            ],
+          ),
+        ),
+    ]);
+  }
+
+  Widget discoveredPeers() => card('Discovered devices', Icons.radar, [
+    for (final device in discovered)
+      ListTile(
+        contentPadding: EdgeInsets.zero,
+        dense: true,
+        leading: Icon(
+          device.product == 'pealayer'
+              ? Icons.play_circle_outline
+              : device.product == 'controller-mobile'
+              ? Icons.phone_android
+              : Icons.memory_outlined,
+        ),
+        title: Text(device.name),
+        subtitle: Text('${device.endpoint} · ${device.protocol}'),
+        trailing: device.product == 'controller-mobile'
+            ? null
+            : IconButton(
+                tooltip: 'Connect ${device.name}',
+                onPressed:
+                    (device.product == 'pccontroller' ? board : player).enabled
+                    ? null
+                    : () => unawaited(useDiscovered(device)),
+                icon: const Icon(Icons.link),
+              ),
+      ),
+    if (discovered.isEmpty)
+      IconButton(
+        tooltip: 'Scan network',
+        onPressed: discovering ? null : () => unawaited(scanPeers()),
+        icon: const Icon(Icons.radar),
+      ),
+    for (final error in discovery.errors.entries)
+      Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: Text(
+          '${error.key}: ${error.value}',
+          style: TextStyle(color: Theme.of(context).colorScheme.error),
+        ),
+      ),
+  ]);
   Widget monitor() {
     final status = object(board.state['status']);
     String measurement(
@@ -999,166 +1577,216 @@ class _ControllerHomeState extends State<ControllerHome>
         field: field,
         color: color,
         unit: unit,
-        height: 64,
+        height: MediaQuery.sizeOf(context).width < 760 ? 32 : 64,
       ),
     ], color: color);
-    return grid([
-      metric(
-        peripheral('sensor.bus-voltage', 'Voltage'),
-        Icons.bolt,
-        measurement('bus_mv', 1000, 'V', 'ina219_available'),
-        'voltage',
-        'V',
-        const Color(0xff9786ed),
-      ),
-      metric(
-        peripheral('sensor.current', 'Current'),
-        Icons.electric_meter,
-        measurement('current_ma', 1, 'mA', 'ina219_available'),
-        'current',
-        'mA',
-        const Color(0xff62bcae),
-      ),
-      metric(
-        peripheral('sensor.power', 'Power'),
-        Icons.power,
-        measurement('power_mw', 1000, 'W', 'ina219_available'),
-        'power',
-        'W',
-        const Color(0xffe0ac62),
-      ),
-      card('Temperature', Icons.thermostat, [
-        fact(
-          peripheral('sensor.temperature-led', 'Lighting'),
-          measurement(
-            'temperature_led_centi_c',
-            100,
-            '°C',
-            'temperature_led_available',
-          ),
-        ),
-        const SizedBox(height: 8),
-        TelemetryChart(
-          points: history.points,
-          field: 'temperature',
-          color: const Color(0xffe68b85),
-          unit: '°C',
-          height: 64,
-        ),
-        const SizedBox(height: 12),
-        fact(
-          peripheral('sensor.temperature-audio', 'Audio'),
-          measurement(
-            'temperature_bt_audio_centi_c',
-            100,
-            '°C',
-            'temperature_bt_audio_available',
-          ),
-        ),
-        TelemetryChart(
-          points: history.points,
-          field: 'audio',
-          color: const Color(0xff62bcae),
-          unit: '°C',
-          height: 40,
-        ),
-        if (board.fresh && status['hot'] == true)
-          const Text(
-            'HOT · board reports over-temperature',
-            style: TextStyle(color: Colors.red),
-          ),
-      ]),
-      card('Board state', Icons.memory, [
-        fact(
-          'Name',
-          board.fresh
-              ? '${board.state['have_board_name'] == true && '${object(board.state['board_name'])['name'] ?? ''}'.trim().isNotEmpty ? object(board.state['board_name'])['name'] : object(board.state['hello'])['name'] ?? '—'}'
-              : 'Unavailable',
-        ),
-        fact(
-          'Mode',
-          board.measurementsFresh
-              ? '${status['program_mode'] ?? 'Unavailable'}'
-              : 'Unavailable',
-        ),
-        fact(
-          'Door',
-          board.measurementsFresh && status['door_open'] is bool
-              ? status['door_open'] == true
-                    ? 'Open'
-                    : 'Closed'
-              : 'Unavailable',
-        ),
-        fact(
-          'E-STOP',
-          board.fresh && object(board.state['emergency_stop'])['active'] is bool
-              ? object(board.state['emergency_stop'])['active'] == true
-                    ? 'Active'
-                    : 'Released'
-              : 'Unavailable',
-        ),
-        action(
-          'Emergency stop',
-          Icons.front_hand,
-          board.boardReady
-              ? () => unawaited(boardCommand('estop on', safetyStop: true))
-              : null,
-          priority: true,
-        ),
-      ]),
-      if (board.fresh && board.state['have_status_led'] == true)
-        card('Status LED', Icons.lightbulb_outline, [
-          Row(
-            children: [
-              Container(
-                width: 28,
-                height: 28,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: Color.fromARGB(
-                    255,
-                    object(board.state['status_led'])['red'] as int? ?? 0,
-                    object(board.state['status_led'])['green'] as int? ?? 0,
-                    object(board.state['status_led'])['blue'] as int? ?? 0,
-                  ),
-                  border: Border.all(
-                    color: Theme.of(context).colorScheme.outline,
-                  ),
+    final narrow = MediaQuery.sizeOf(context).width < 760;
+    return Column(
+      children: [
+        grid([
+          if (measurement('bus_mv', 1, '', 'ina219_available') != '—')
+            metric(
+              peripheral('sensor.bus-voltage', 'Voltage'),
+              Icons.bolt,
+              measurement('bus_mv', 1000, 'V', 'ina219_available'),
+              'voltage',
+              'V',
+              const Color(0xff9786ed),
+            ),
+          if (measurement('current_ma', 1, '', 'ina219_available') != '—')
+            metric(
+              peripheral('sensor.current', 'Current'),
+              Icons.electric_meter,
+              measurement('current_ma', 1, 'mA', 'ina219_available'),
+              'current',
+              'mA',
+              const Color(0xff62bcae),
+            ),
+          if (measurement('power_mw', 1, '', 'ina219_available') != '—')
+            metric(
+              peripheral('sensor.power', 'Power'),
+              Icons.power,
+              measurement('power_mw', 1000, 'W', 'ina219_available'),
+              'power',
+              'W',
+              const Color(0xffe0ac62),
+            ),
+          if (narrow && hasStatusLed) statusLedCard(),
+        ], minimum: narrow ? 150 : 280),
+        const SizedBox(height: 14),
+        grid([
+          if (measurement(
+                    'temperature_led_centi_c',
+                    100,
+                    '°C',
+                    'temperature_led_available',
+                  ) !=
+                  '—' ||
+              measurement(
+                    'temperature_bt_audio_centi_c',
+                    100,
+                    '°C',
+                    'temperature_bt_audio_available',
+                  ) !=
+                  '—')
+            card('Temperature', Icons.thermostat, [
+              fact(
+                peripheral('sensor.temperature-led', 'Lighting'),
+                measurement(
+                  'temperature_led_centi_c',
+                  100,
+                  '°C',
+                  'temperature_led_available',
                 ),
               ),
-              const SizedBox(width: 12),
-              Text(
-                'RGB ${object(board.state['status_led'])['red']} · ${object(board.state['status_led'])['green']} · ${object(board.state['status_led'])['blue']}',
+              const SizedBox(height: 8),
+              TelemetryChart(
+                points: history.points,
+                field: 'temperature',
+                color: const Color(0xffe68b85),
+                unit: '°C',
+                height: 64,
               ),
-            ],
-          ),
+              const SizedBox(height: 12),
+              fact(
+                peripheral('sensor.temperature-audio', 'Audio'),
+                measurement(
+                  'temperature_bt_audio_centi_c',
+                  100,
+                  '°C',
+                  'temperature_bt_audio_available',
+                ),
+              ),
+              TelemetryChart(
+                points: history.points,
+                field: 'audio',
+                color: const Color(0xff62bcae),
+                unit: '°C',
+                height: 40,
+              ),
+              if (board.fresh && status['hot'] == true)
+                const Text(
+                  'HOT · board reports over-temperature',
+                  style: TextStyle(color: Colors.red),
+                ),
+            ]),
+          if (board.fresh &&
+              (board.state['have_board_name'] == true ||
+                  object(board.state['hello'])['name'] != null ||
+                  board.measurementsFresh ||
+                  object(board.state['emergency_stop'])['active'] is bool))
+            card('Board state', Icons.memory, [
+              fact(
+                'Name',
+                board.fresh
+                    ? '${board.state['have_board_name'] == true && '${object(board.state['board_name'])['name'] ?? ''}'.trim().isNotEmpty ? object(board.state['board_name'])['name'] : object(board.state['hello'])['name'] ?? '—'}'
+                    : 'Unavailable',
+              ),
+              fact(
+                'Mode',
+                board.measurementsFresh
+                    ? '${status['program_mode'] ?? 'Unavailable'}'
+                    : 'Unavailable',
+              ),
+              fact(
+                'Door',
+                board.measurementsFresh && status['door_open'] is bool
+                    ? status['door_open'] == true
+                          ? 'Open'
+                          : 'Closed'
+                    : 'Unavailable',
+              ),
+              fact(
+                'E-STOP',
+                board.fresh &&
+                        object(board.state['emergency_stop'])['active'] is bool
+                    ? object(board.state['emergency_stop'])['active'] == true
+                          ? 'Active'
+                          : 'Released'
+                    : 'Unavailable',
+              ),
+            ]),
+          if (!narrow && hasStatusLed) statusLedCard(),
         ]),
+      ],
+    );
+  }
+
+  bool get hasStatusLed =>
+      board.fresh &&
+      board.state['have_status_led'] == true &&
+      ['red', 'green', 'blue'].every((key) {
+        final value = object(board.state['status_led'])[key];
+        return value is int && value >= 0 && value <= 255;
+      });
+  Widget statusLedCard() {
+    final led = object(board.state['status_led']);
+    return card('Status LED', Icons.lightbulb_outline, [
+      Row(
+        children: [
+          Container(
+            width: 24,
+            height: 24,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: Color.fromARGB(255, led['red'], led['green'], led['blue']),
+              border: Border.all(color: Theme.of(context).colorScheme.outline),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'RGB ${led['red']} · ${led['green']} · ${led['blue']}',
+              style: Theme.of(context).textTheme.labelSmall,
+            ),
+          ),
+        ],
+      ),
     ]);
   }
 
-  Widget fact(String name, String value) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 5),
-    child: Row(
-      children: [
-        Expanded(child: Text(name)),
-        Flexible(
-          child: Text(
-            value,
-            textAlign: TextAlign.end,
-            style: const TextStyle(
-              fontFeatures: [FontFeature.tabularFigures()],
-            ),
+  bool idleSeatStop(Json control, Json action) {
+    if (action['verb'] != 'stop' ||
+        !['seat.a', 'seat.b'].contains(control['key'])) {
+      return false;
+    }
+    final side = object(
+      object(board.state['motion'])[control['key'] == 'seat.a'
+          ? 'left'
+          : 'right'],
+    );
+    return board.measurementsFresh &&
+        side['applied'] == 'stop' &&
+        side['transitioning'] == false;
+  }
+
+  Widget fact(String name, String value) =>
+      ['Unavailable', '—', 'Unknown'].contains(value)
+      ? const SizedBox.shrink()
+      : Padding(
+          padding: const EdgeInsets.symmetric(vertical: 5),
+          child: Row(
+            children: [
+              Expanded(child: Text(name)),
+              const SizedBox(width: 12),
+              Flexible(
+                child: Text(
+                  value,
+                  textAlign: TextAlign.end,
+                  style: const TextStyle(
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ),
+            ],
           ),
-        ),
-      ],
-    ),
-  );
+        );
   Widget outputs() {
     final controls = objects(board.peripherals['controls'])
         .where((control) => control['hidden'] != true)
         .toList();
     if (controls.isEmpty) {
-      return const Text('Connect to load the authoritative channel catalog.');
+      return peerRoster();
     }
     final groups = <String, List<Json>>{};
     for (final control in controls) {
@@ -1221,37 +1849,47 @@ class _ControllerHomeState extends State<ControllerHome>
                               ),
                             ),
                           ),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            for (final entry in objects(control['actions']))
-                              action(
-                                '${entry['name']}',
-                                entry['verb'] == 'stop'
-                                    ? Icons.stop
-                                    : entry['verb'] == 'up'
-                                    ? Icons.arrow_upward
-                                    : entry['verb'] == 'down'
-                                    ? Icons.arrow_downward
-                                    : Icons.power_settings_new,
-                                board.boardReady &&
-                                        control['locked'] != true &&
-                                        (!estop ||
-                                            [
-                                              'stop',
-                                              'off',
-                                            ].contains(entry['verb']))
-                                    ? () => unawaited(invoke(control, entry))
-                                    : null,
-                                priority: [
-                                  'stop',
-                                  'off',
-                                ].contains(entry['verb']),
-                                danger: entry['verb'] == 'stop',
-                              ),
-                          ],
-                        ),
+                        if (control['kind'] != 'relay' ||
+                            channelObservation(control).active == null)
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              for (final entry
+                                  in objects(control['actions']).where(
+                                    (entry) =>
+                                        control['kind'] != 'relay' ||
+                                        channelObservation(control).active ==
+                                            null ||
+                                        !['on', 'off'].contains(entry['verb']),
+                                  ))
+                                action(
+                                  '${entry['name']}',
+                                  entry['verb'] == 'stop'
+                                      ? Icons.stop
+                                      : entry['verb'] == 'up'
+                                      ? Icons.arrow_upward
+                                      : entry['verb'] == 'down'
+                                      ? Icons.arrow_downward
+                                      : Icons.power_settings_new,
+                                  board.boardReady &&
+                                          !idleSeatStop(control, entry) &&
+                                          control['locked'] != true &&
+                                          (!estop ||
+                                              [
+                                                'stop',
+                                                'off',
+                                              ].contains(entry['verb']))
+                                      ? () => unawaited(invoke(control, entry))
+                                      : null,
+                                  priority: [
+                                    'stop',
+                                    'off',
+                                  ].contains(entry['verb']),
+                                  danger: entry['verb'] == 'stop',
+                                ),
+                            ],
+                          ),
                       ],
                       color: channelColor(control['color']),
                       trailing: Row(
@@ -1266,6 +1904,34 @@ class _ControllerHomeState extends State<ControllerHome>
                               );
                             },
                           ),
+                          if (control['kind'] == 'relay' &&
+                              channelObservation(control).active != null)
+                            for (final entry
+                                in objects(control['actions']).where(
+                                  (entry) =>
+                                      entry['verb'] ==
+                                      (channelObservation(control).active ==
+                                              true
+                                          ? 'off'
+                                          : 'on'),
+                                ))
+                              IconButton(
+                                tooltip: '${entry['name']} ${control['name']}',
+                                icon: const Icon(
+                                  Icons.power_settings_new,
+                                  size: 20,
+                                ),
+                                style: IconButton.styleFrom(
+                                  minimumSize: const Size(44, 44),
+                                ),
+                                onPressed:
+                                    board.boardReady &&
+                                        !busy &&
+                                        control['locked'] != true &&
+                                        (!estop || entry['verb'] == 'off')
+                                    ? () => unawaited(invoke(control, entry))
+                                    : null,
+                              ),
                           channelMenu(control),
                         ],
                       ),
@@ -1297,9 +1963,8 @@ class _ControllerHomeState extends State<ControllerHome>
             segments: (panel['raw_segments'] as List).whereType<int>().toList(),
             brightness: panel['brightness'] as int? ?? 0,
             active: panel['segments_active'] == true,
-          )
-        else
-          const Text('Waiting for physical segment frames'),
+          ),
+
         const SizedBox(height: 12),
         fact(
           'TM1637',
@@ -1727,24 +2392,6 @@ class _ControllerHomeState extends State<ControllerHome>
 
   bool get playerReady =>
       !busy && (player.fresh || (board.fresh && bridgeTarget != null));
-  Widget playerPage() => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      connection(player, 'Pealayer'),
-      const SizedBox(height: 16),
-      tabs(
-        ['Playback', 'Effects & cues', 'Peers'],
-        playerTab,
-        (value) => setState(() => playerTab = value),
-      ),
-      const SizedBox(height: 16),
-      switch (playerTab) {
-        0 => playback(),
-        1 => playerEffects(),
-        _ => peers(),
-      },
-    ],
-  );
   bool playerCan(String action) {
     if (!playerReady) return false;
     if (player.fresh) {
@@ -2052,13 +2699,13 @@ class _ControllerHomeState extends State<ControllerHome>
             IconButton(
               tooltip: 'Place cue at current position',
               icon: const Icon(Icons.add),
-              onPressed: player.fresh && !busy
+              onPressed:
+                  player.fresh && !busy && player.state['playback_time'] is num
                   ? () => unawaited(
                       playerCommand('pealayer.controller_effect_cue.add', {
                         'reference': effect['reference'],
                         'start_time_ms':
-                            ((player.state['playback_time'] as num? ?? 0) *
-                                    1000)
+                            ((player.state['playback_time'] as num) * 1000)
                                 .round(),
                       }),
                     )
@@ -2162,8 +2809,7 @@ class _ControllerHomeState extends State<ControllerHome>
         title: Text('${instance['id']}'),
         subtitle: Text('${instance['surface']} · ${instance['state']}'),
       ),
-    if (board.instances.isEmpty)
-      const Text('No registered Pealayer instance available.'),
+
     action(
       'Refresh peers',
       Icons.refresh,
@@ -2202,7 +2848,6 @@ class _ControllerHomeState extends State<ControllerHome>
                 if (mounted) {
                   setState(() {
                     section = 0;
-                    boardTab = 0;
                   });
                 }
               }),
@@ -2255,121 +2900,67 @@ class _ControllerHomeState extends State<ControllerHome>
             ),
         ]),
       const SizedBox(height: 16),
-      card('Activity', Icons.history, [
-        for (final value in logs)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Text(value),
-          ),
-        for (final event in board.events.take(40))
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            dense: true,
-            leading: Icon(
-              '${event['kind']}'.contains('hot')
-                  ? Icons.thermostat
-                  : Icons.bolt,
-              size: 18,
+      if (logs.isNotEmpty || board.events.isNotEmpty)
+        card('Activity', Icons.history, [
+          for (final value in logs)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(value),
             ),
-            title: Text('${event['text'] ?? event['kind']}'),
-            subtitle: Text('${event['time'] ?? ''}'),
-          ),
-        if (logs.isEmpty && board.events.isEmpty)
-          const Text(
-            'No activity yet. History is bounded and stays in memory.',
-          ),
-      ]),
+          for (final event in board.events.take(40))
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              leading: Icon(
+                '${event['kind']}'.contains('hot')
+                    ? Icons.thermostat
+                    : Icons.bolt,
+                size: 18,
+              ),
+              title: Text('${event['text'] ?? event['kind']}'),
+              subtitle: Text('${event['time'] ?? ''}'),
+            ),
+        ]),
     ],
   );
-  Widget workspace() => Column(
-    children: [
-      action(
-        'Native effect designer',
-        Icons.auto_awesome,
-        () => unawaited(
-          editEffect({
-            'id': '',
-            'name': '',
-            'category': 'Effects',
-            'kind': 'sequence',
-            'steps': [],
-          }),
+  Widget workspace() => card(
+    'Drafts',
+    Icons.edit_note,
+    [
+      for (final draft in drafts)
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          dense: true,
+          leading: const Icon(Icons.auto_awesome_outlined),
+          title: Text('${draft['name']}'),
+          subtitle: Text('${draft['saved_at']}'),
+          onTap: draft['effect'] is Map
+              ? () => unawaited(editEffect(object(draft['effect'])))
+              : null,
+          trailing: draft['effect'] is Map && board.fresh
+              ? IconButton(
+                  tooltip: 'Publish draft to PCController',
+                  icon: const Icon(Icons.cloud_upload_outlined),
+                  onPressed: busy
+                      ? null
+                      : () => unawaited(publishDraft(object(draft['effect']))),
+                )
+              : null,
         ),
-      ),
-      const SizedBox(height: 16),
-      card('Native offline workspace', Icons.edit_note, [
-        const Text(
-          'Drafts are local and work without a host. They do not run a board or publish until explicitly submitted to a connected owner.',
-        ),
-        const SizedBox(height: 12),
-        TextField(
-          controller: draftName,
-          decoration: const InputDecoration(labelText: 'Effect name'),
-        ),
-        const SizedBox(height: 12),
-        TextField(
-          controller: draftProgram,
-          minLines: 4,
-          maxLines: 12,
-          decoration: const InputDecoration(labelText: 'Effect program JSON'),
-        ),
-        const SizedBox(height: 12),
-        action(
-          'Save local draft',
-          Icons.save_outlined,
-          () => unawaited(
-            perform('Local draft', () async {
-              final program = jsonDecode(draftProgram.text);
-              if (program is! Map || draftName.text.trim().isEmpty) {
-                throw const Rejected('Enter a name and a JSON object.');
-              }
-              final draft = {
-                'name': draftName.text.trim(),
-                'program': program,
-                'saved_at': DateTime.now().toUtc().toIso8601String(),
-              };
-              final next = [draft, ...drafts].take(100).toList();
-              final prefs = await SharedPreferences.getInstance();
-              await prefs.setString('local.drafts', jsonEncode(next));
-              drafts = next;
-              return null;
-            }),
-          ),
-        ),
-        for (final draft in drafts)
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            title: Text('${draft['name']}'),
-            subtitle: Text('${draft['saved_at']}'),
-            trailing: draft['effect'] is Map
-                ? IconButton(
-                    tooltip: 'Publish draft to PCController',
-                    icon: const Icon(Icons.cloud_upload_outlined),
-                    onPressed: board.fresh && !busy
-                        ? () => unawaited(publishDraft(object(draft['effect'])))
-                        : null,
-                  )
-                : null,
-            onTap: () => setState(() {
-              draftName.text = '${draft['name']}';
-              draftProgram.text = const JsonEncoder.withIndent('  ')
-                  .convert(draft['program']);
-            }),
-          ),
-      ]),
-      const SizedBox(height: 16),
-      card('Connections', Icons.settings_outlined, [
-        action('PCController connection', Icons.memory, () => configure(true)),
-        const SizedBox(height: 8),
-        action(
-          'Pealayer connection',
-          Icons.play_circle_outline,
-          () => configure(false),
-        ),
-      ]),
-      const SizedBox(height: 16),
-      automationSettings(),
     ],
+    trailing: IconButton(
+      tooltip: 'New effect',
+      icon: const Icon(Icons.add),
+      onPressed: () => unawaited(
+        editEffect({
+          'id': '',
+          'name': '',
+          'category': 'Effects',
+          'kind': 'sequence',
+          'steps': [],
+        }),
+      ),
+    ),
   );
   Widget automationSettings() =>
       card('Automation / local API', Icons.hub_outlined, [
@@ -2433,19 +3024,7 @@ class _ControllerHomeState extends State<ControllerHome>
           builder: (context, _) => AppSettings(
             preferences: preferences,
             changed: _changed,
-            connections: card('Connections', Icons.link, [
-              action(
-                'PCController connection',
-                Icons.memory_outlined,
-                () => configure(true),
-              ),
-              const SizedBox(height: 8),
-              action(
-                'Pealayer connection',
-                Icons.play_circle_outline,
-                () => configure(false),
-              ),
-            ]),
+            connections: peerRoster(),
             automation: automationSettings(),
           ),
         ),
@@ -2561,7 +3140,12 @@ class _ControllerHomeState extends State<ControllerHome>
 
   Json automationSnapshot() => {
     'foreground': foreground,
-    'section': ['pccontroller', 'pealayer', 'activities', 'workspace'][section],
+    'activity': activityIds[section],
+    'upgrade': {
+      ...upgrades.state,
+      'sharing': packagePeers.running,
+      'port': packagePeers.port,
+    },
     'board': {
       'connected': board.boardReady,
       'target': board.targetStamp,
@@ -2590,9 +3174,15 @@ class _ControllerHomeState extends State<ControllerHome>
     },
   };
   Future<dynamic> _automationCall(String method, Json params) async {
+    if (AppUpgrade.methods.contains(method)) {
+      if (!foreground) {
+        throw const AutomationFailure(-32002, 'App is not foreground');
+      }
+      return upgrades.rpc(method, params);
+    }
     switch (method) {
       case 'app.ping':
-        return {'ok': true, 'app': 'PCController', 'version': '0.1.3'};
+        return {'ok': true, 'app': 'PCController', 'version': '0.1.4'};
       case 'app.capabilities':
         return {
           'jsonrpc': '2.0',
@@ -2629,32 +3219,13 @@ class _ControllerHomeState extends State<ControllerHome>
           'interval_ms': 250,
         };
       case 'app.navigation.set':
-        final next = [
-          'pccontroller',
-          'pealayer',
-          'activities',
-          'workspace',
-        ].indexOf('${params['section']}');
-        if (next < 0) throw const AutomationFailure(-32602, 'Unknown section');
+        final next = activityIds.indexOf('${params['activity']}');
+        if (next < 0) throw const AutomationFailure(-32602, 'Unknown activity');
         if (!foreground) {
           throw const AutomationFailure(-32002, 'App is not foreground');
         }
-        final page = params['page'];
-        final boardPage = [
-          'monitor',
-          'outputs',
-          'front_panel',
-          'firmware',
-          'effects',
-        ].indexOf('$page');
-        if (page != null && (next != 0 || boardPage < 0)) {
-          throw const AutomationFailure(-32602, 'Unknown section page');
-        }
-        setState(() {
-          section = next;
-          if (page != null) boardTab = boardPage;
-        });
-        return {'section': params['section'], 'page': ?page};
+        selectActivity(next);
+        return {'activity': activityIds[next]};
       case 'app.capture':
         if (!foreground) {
           throw const AutomationFailure(-32002, 'App is not foreground');

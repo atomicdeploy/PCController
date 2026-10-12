@@ -317,20 +317,7 @@ class TelemetryChart extends StatelessWidget {
         .map((p) => p.values[field])
         .whereType<double>()
         .toList();
-    if (numbers.isEmpty) {
-      return SizedBox(
-        height: height,
-        child: Center(
-          child: Text(
-            'No readings yet',
-            style: TextStyle(
-              fontSize: 12,
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
-          ),
-        ),
-      );
-    }
+    if (numbers.isEmpty) return const SizedBox.shrink();
     final low = numbers.reduce(math.min), high = numbers.reduce(math.max);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -347,25 +334,28 @@ class TelemetryChart extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 4),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(
-              '${low.toStringAsFixed(field == 'current' ? 0 : 2)}–${high.toStringAsFixed(field == 'current' ? 0 : 2)} $unit',
-              style: TextStyle(
-                fontSize: 11,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
+        if (points.length > 1)
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                low == high
+                    ? '${low.toStringAsFixed(field == 'current' ? 0 : 2)} $unit'
+                    : '${low.toStringAsFixed(field == 'current' ? 0 : 2)}–${high.toStringAsFixed(field == 'current' ? 0 : 2)} $unit',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
-            ),
-            Text(
-              '${points.length > 1 ? points.last.time.difference(points.first.time).inSeconds : 0}s',
-              style: TextStyle(
-                fontSize: 11,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              Text(
+                '${points.length > 1 ? points.last.time.difference(points.first.time).inSeconds : 0}s',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
-            ),
-          ],
-        ),
+            ],
+          ),
       ],
     );
   }

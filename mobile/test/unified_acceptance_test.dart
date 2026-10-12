@@ -148,7 +148,7 @@ void main() {
             },
           ],
         };
-        home.section = 1;
+        home.section = 0;
         peer.notifyListeners();
         await tester.pumpAndSettle();
         expect(find.byTooltip('Play'), findsOneWidget);
@@ -265,7 +265,7 @@ void main() {
             },
           ],
         };
-        home.boardTab = 1;
+        home.section = 1;
         peer.notifyListeners();
         await tester.pumpAndSettle();
         final title = find.text('Lobby lighting'), indicator = find.text('On');

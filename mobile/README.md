@@ -1,7 +1,7 @@
 # PCController native controller
 
 An independently packaged Flutter Android phone/tablet app with PCController
-and Pealayer mini-apps. It is a native Flutter surface, not an embedded Web page.
+and Pealayer activities in one workspace. It is a native Flutter surface.
 PakarController remains a separate project and Android installation.
 
 ## Activities
@@ -25,16 +25,33 @@ PakarController remains a separate project and Android installation.
 - Activities: bounded in-memory host events and request receipts. Request
   acceptance is not reported as physical completion or applied playback.
 
-Phones use bottom navigation; tablets use a rail and responsive multi-column
-cards. System light/dark preference and platform text scaling are retained.
-Settings also selects Light/Dark explicitly, layout and control density. The
-PCController and Pealayer launcher icons may be enabled separately or together;
-both open their own section of the same app. Android applies component changes
-from the app's own UID without restarting it. Beep mirroring is explicitly
-enabled in Settings and stops on backgrounding, loss of the selected peer or
-generation change; actual audible/timing acceptance is tracked separately.
-The neutral card/action styling shares Pealayer's purple accent and semantic
-state indicators rather than coloring every action as selected. Relay, motion
+Phones use a compact activity strip; tablets use an activity sidebar with
+responsive multi-column cards. Live combines PCController telemetry and Pealayer
+playback. Channels, Panel, Studio, Devices, Firmware and Events share the same
+workspace. The connection strip uses one Connect, Cancel connection or Disconnect
+action per peer. Unavailable-only cards and dormant remote token inputs are omitted.
+
+Preferences select System/Light/Dark, layout, density, Digitalogic/Pealayer/
+original PakarController/Amber palettes or a custom color seed. Branding updates
+the app title and Android task icon/title. One or both launcher aliases may be
+enabled; both open the same unified workspace. The app's own UID applies aliases
+without restarting it. Native task/launcher behavior still requires device checks.
+Beep mirroring is explicitly enabled in Preferences and stops on backgrounding,
+loss of the selected peer or generation change. Transient audio failures preserve
+the saved mirroring intent; actual audibility/timing acceptance remains separate.
+
+Saved automatic discovery connects only one verified candidate for a vacant role;
+ambiguous advertisements, manual selections and explicit Disconnect opt-outs are
+preserved. Android network change notifications trigger bounded rescans for vacant
+roles. Discovery never takes physical authority or actuates an output.
+
+Devices provides explicit peer package sharing, push/download and verified
+staging actions. Incoming offers show source/package/version/digest/signers and
+expire without approval. Installation requires a separate action and Android
+consent. Protected local automation tokens remain in force. See
+[Peer upgrades](#unified-workspace-discovery-and-self-package-rpc) for the transport and package checks.
+
+Relay, motion
 and PWM cards distinguish observed state from commands/setpoints; stale values
 become Unknown. In-memory voltage/current/power and both temperature histories
 retain at most 600 observations (at most 2 Hz), with gaps for missing readings.

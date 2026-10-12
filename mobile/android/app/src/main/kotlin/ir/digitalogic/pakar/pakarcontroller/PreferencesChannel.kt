@@ -1,6 +1,8 @@
 package ir.digitalogic.pccontroller.mobile
 
 import android.app.Activity
+import android.app.ActivityManager
+import android.graphics.BitmapFactory
 import android.content.ComponentName
 import android.content.pm.PackageManager
 import io.flutter.plugin.common.BinaryMessenger
@@ -24,6 +26,19 @@ class PreferencesChannel(private val activity: Activity, messenger: BinaryMessen
             try {
                 when (call.method) {
                     "initialSection" -> result.success(section())
+                    "setTask" -> {
+                        val title = call.argument<String>("title") ?: error("Title required")
+                        require(title == "PCController" || title == "Pealayer")
+                        val bytes = call.argument<ByteArray>("icon") ?: error("Icon required")
+                        require(bytes.size in 1..1048576)
+                        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: error("Invalid icon")
+                        require(bitmap.width <= 1024 && bitmap.height <= 1024)
+                        val color = (call.argument<Number>("color") ?: error("Color required")).toLong().toInt() or 0xff000000.toInt()
+                        @Suppress("DEPRECATION")
+                        val description = ActivityManager.TaskDescription(title, bitmap, color)
+                        activity.setTaskDescription(description)
+                        result.success(null)
+                    }
                     "launchers" -> result.success(aliases.keys.filter { enabled(it) })
                     "setLaunchers" -> {
                         val selected = call.argument<List<String>>("values")?.toSet() ?: error("Selection required")
@@ -36,7 +51,7 @@ class PreferencesChannel(private val activity: Activity, messenger: BinaryMessen
                     }
                     else -> result.notImplemented()
                 }
-            } catch (_: Exception) { result.error("preferences_failed", "Launcher settings unavailable", null) }
+            } catch (_: Exception) { result.error("preferences_failed", "Android appearance settings unavailable", null) }
         }
     }
     fun close() = channel.setMethodCallHandler(null)

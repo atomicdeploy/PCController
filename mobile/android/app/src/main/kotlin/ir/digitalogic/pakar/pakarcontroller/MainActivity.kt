@@ -16,6 +16,7 @@ class MainActivity : FlutterActivity() {
     private var toneMirror: ToneMirrorChannel? = null
     private var automation: MethodChannel? = null
     private var preferences: PreferencesChannel? = null
+    private var upgrades: UpgradeChannel? = null
     private val io = Executors.newSingleThreadExecutor()
     private var pending: MethodChannel.Result? = null
     private var maximum = 0
@@ -28,6 +29,7 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         preferences = PreferencesChannel(this, flutterEngine.dartExecutor.binaryMessenger)
+        upgrades = UpgradeChannel(this, flutterEngine.dartExecutor.binaryMessenger)
         discovery = DiscoveryChannel(this, flutterEngine.dartExecutor.binaryMessenger)
         toneMirror = ToneMirrorChannel(this, flutterEngine.dartExecutor.binaryMessenger)
         automation = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "ir.digitalogic.pccontroller/automation")
@@ -144,6 +146,8 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        upgrades?.close()
+        upgrades = null
         if (AutomationBridge.channel === automation) AutomationBridge.channel = null
         automation = null
         preferences?.close(); preferences = null

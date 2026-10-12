@@ -63,9 +63,8 @@ use WebSocket for push, including live front-panel/status state.
 
 Read/UI methods: `app.ping`, `app.capabilities`, `app.state`, `app.subscribe`,
 `app.navigation.set`, `app.capture`, `board.refresh`.
-Navigation takes `section` (`pccontroller`, `pealayer`, `activities`, `workspace`)
-and an optional PCController `page` (`monitor`, `outputs`, `front_panel`,
-`firmware`, `effects`). Capture returns an app-only PNG, base64, width/height;
+Navigation takes `activity` (`live`, `channels`, `panel`, `studio`, `devices`,
+`firmware`, `events`) in the unified workspace. Capture returns an app-only PNG, base64, width/height;
 HTTP recommended. No desktop/other-app screen is captured. Max one capture per
 second and 2 MiB PNG; capture is rejected over Intent to avoid Binder limits.
 

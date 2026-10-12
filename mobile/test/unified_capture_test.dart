@@ -89,6 +89,10 @@ void main() {
             const AssetImage('assets/branding/pccontroller.png'),
             boundary.currentContext!,
           );
+          await precacheImage(
+            const AssetImage('assets/branding/pealayer.png'),
+            boundary.currentContext!,
+          );
         });
         await tester.pumpAndSettle();
         final render =
@@ -105,7 +109,7 @@ void main() {
         if (readback != null) {
           final dynamic home = tester.state(find.byType(ControllerHome));
           for (final page in [(1, 'outputs'), (2, 'panel')]) {
-            home.boardTab = page.$1;
+            home.section = page.$1;
             (home.board as PeerSession).notifyListeners();
             await tester.pumpAndSettle();
             await tester.runAsync(() async {
@@ -120,7 +124,7 @@ void main() {
           }
           tester.platformDispatcher.platformBrightnessTestValue =
               Brightness.dark;
-          home.boardTab = 0;
+          home.section = 0;
           (home.board as PeerSession).notifyListeners();
           await tester.pumpAndSettle();
           await tester.runAsync(() async {
@@ -178,7 +182,7 @@ void main() {
         };
         player.online = true;
         player.received = DateTime.now();
-        home.section = 1;
+        home.section = 0;
         player.notifyListeners();
         await tester.pumpAndSettle();
         await tester.runAsync(() async {

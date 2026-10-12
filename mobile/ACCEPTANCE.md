@@ -200,3 +200,40 @@ Keep physical, renderer, source/CI and deployment claims separate.
   location was used to bypass it. The unused test ADB reverse was removed.
 - Pealayer live playback/mutual routing, physical output/programming and
   Android physical/tablet acceptance are not passed by the above evidence.
+
+## Unified expert workspace redesign, source 0.1.4+5
+
+The previous deployed design is explicitly rejected. This source pass removes
+separate product navigation, simultaneous peer connection/disconnection buttons,
+unavailable-only telemetry cards, dormant host token inputs and empty-state
+narration. Live has one compact peer strip, phone two-column numeric telemetry,
+short measured sparks and a single top-level emergency-stop action. Known relay
+states have one contextual header action beside the state pill and channel menu.
+
+Preferences now include custom color seeds and the original PakarController dark
+surface/background, persistent branding, native Android task presentation and
+one/both launcher aliases. Discovery integrates source-verified products,
+unique vacant-role auto-connect, explicit Disconnect opt-out and Android network
+changes without authority takeover. The coordinated peer upgrade modules are
+wired to protected local RPC, optional sharing, incoming offer approval/expiry,
+push/download, verified staging and separate permission/install/discard actions.
+
+Focused source checks covered contextual connection cancellation and persisted
+opt-out, sparse telemetry, dormant auth, native task adapter arguments, original
+Pakar colors, RTL/enlarged text, current cue ownership, sliders, trailing channel
+indicators, front-panel modes, unsupported LCD disappearance and update permission/
+installer receipt semantics. Analyzer and Android Kotlin compilation passed.
+Controlled phone/tablet renders use a recorded Cafe snapshot, 12 read-only measured
+telemetry samples and generic Pealayer media fixtures. These are renderer previews,
+not screenshots of deployed Android interaction or physical/audio acceptance.
+
+An inherited suite run exposed obsolete UI expectations and the old unverified
+MNDP fixture. Their current contracts were repaired with owner-scoped changes.
+Further full inherited suites/CI were not repeated during this iteration. No
+all-green CI or all-device acceptance claim is made.
+
+Deployment remains held for design review. The tablet still has 0.1.3+4; the phone
+still has 0.1.2+3 after its prior 0.1.3 installer-space rejection. The phone's free
+space changed since that attempt, but no new installation was attempted. Both
+screens were locked at the latest check. Standalone shared-core packaging/USB,
+full native/Web parity and physical mirroring/peer/firmware gates remain open.
