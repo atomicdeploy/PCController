@@ -162,7 +162,6 @@ func (model Model) appSettingRows() []settingRow {
 		{Key: "led.transition", Group: "", Label: "Eased transition", Value: fmt.Sprintf("%d ms", status.TransitionMS), Editable: true},
 		{Key: "led.rf_hold", Group: "", Label: "RF activity hold", Value: fmt.Sprintf("%d ms", status.RFHoldMS), Editable: true},
 		{Key: "led.door_hold", Group: "", Label: "Door cue hold", Value: fmt.Sprintf("%d ms", status.DoorCueHoldMS), Editable: true},
-		{Key: "led.hot", Group: "", Label: "HOT threshold", Value: fmt.Sprintf("%.2f °C", float64(status.HotThresholdCentiC)/100), Editable: true},
 	}
 	if snapshot.Connected && snapshot.HaveSettings {
 		rows = append(rows, settingRow{Key: "buzzer.path", Group: "BUZZER", Label: "Playback path", Value: strings.ToUpper(buzzerPath), Editable: true})
@@ -623,8 +622,6 @@ func (model Model) buildAppSettingEditor(editor *settingEditor) {
 		editor.Fields = []settingEditorField{{Key: "milliseconds", Label: "RF activity hold", Value: status.RFHoldMS, Options: intOptions([]int{250, 500, 900, 1400, 2000, 3000, 5000}, "ms")}}
 	case "led.door_hold":
 		editor.Fields = []settingEditorField{{Key: "milliseconds", Label: "Door cue hold", Value: status.DoorCueHoldMS, Options: intOptions([]int{250, 500, 900, 1400, 1600, 2000, 3000, 5000}, "ms")}}
-	case "led.hot":
-		editor.Fields = []settingEditorField{rangeField("centi", "HOT threshold", int(status.HotThresholdCentiC), 3000, 12500, 100, "°C", true)}
 	default:
 		if strings.HasPrefix(editor.Key, "led.visual.") {
 			visual := statusVisualByKey(&status, strings.TrimPrefix(editor.Key, "led.visual."))

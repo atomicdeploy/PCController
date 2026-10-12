@@ -28,7 +28,7 @@ func TestStatusLEDStatePriority(t *testing.T) {
 	assertStatusLEDState(t, policy, snapshot, now.Add(time.Second), now, statusLEDRF)
 	snapshot.Status.DoorOpen = true
 	assertStatusLEDState(t, policy, snapshot, now.Add(time.Second), now, statusLEDDoorWarning)
-	snapshot.Status.TLEDCenti = policy.HotThresholdCentiC
+	snapshot.Status.Hot = true
 	assertStatusLEDState(t, policy, snapshot, now.Add(time.Second), now, statusLEDHot)
 	snapshot.Connected = false
 	assertStatusLEDState(t, policy, snapshot, now.Add(time.Second), now, statusLEDOffline)

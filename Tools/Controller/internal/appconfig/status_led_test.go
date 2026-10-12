@@ -13,7 +13,6 @@ func TestDefaultStatusLEDPolicyIsValid(t *testing.T) {
 	if !policy.Enabled || policy.Idle.Color.Green == 0 ||
 		policy.RunningDoorOpen.Effect != "flash" ||
 		policy.Hot.Effect != "breathe" || policy.DoorCueHoldMS == 0 ||
-		policy.HotThresholdCentiC != 5500 ||
 		policy.DoorOpened == policy.DoorClosed {
 		t.Fatalf("unexpected default status policy: %#v", policy)
 	}

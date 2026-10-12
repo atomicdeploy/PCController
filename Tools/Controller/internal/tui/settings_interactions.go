@@ -554,12 +554,6 @@ func (model Model) commitStatusLEDSettingEditor() (Model, tea.Cmd, bool) {
 		policy.RFHoldMS = editorField(editor, "milliseconds")
 	case "led.door_hold":
 		policy.DoorCueHoldMS = editorField(editor, "milliseconds")
-	case "led.hot":
-		converted, err := checkedInt16(editorField(editor, "centi"))
-		if err != nil {
-			valueErr = fmt.Errorf("centi: %w", err)
-		}
-		policy.HotThresholdCentiC = converted
 	default:
 		if !strings.HasPrefix(editor.Key, "led.visual.") {
 			return model, nil, true

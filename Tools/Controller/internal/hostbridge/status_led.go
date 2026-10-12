@@ -356,9 +356,7 @@ func selectStatusLEDState(
 	if !snapshot.Connected || !snapshot.HaveStatus {
 		return statusLEDOffline, policy.PCOffline
 	}
-	hot := snapshot.Status.TLEDCenti >= policy.HotThresholdCentiC ||
-		snapshot.Status.TBTCenti >= policy.HotThresholdCentiC
-	if hot {
+	if snapshot.Status.Hot {
 		return statusLEDHot, policy.Hot
 	}
 	running := strings.EqualFold(string(snapshot.ProgramState.Mode), "Running")

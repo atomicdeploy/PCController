@@ -255,7 +255,6 @@ public:
   static constexpr int EepromAddress = EepromLayout::SettingsAddress;
   static constexpr uint16_t SaveDelayMs = 1500;
   static constexpr uint8_t MaximumBoardNameLength = 8;
-  static constexpr int16_t DefaultHotTemperatureCentiC = 5500;
   static constexpr int16_t MinimumHotTemperatureCentiC = 3000;
   static constexpr int16_t MaximumHotTemperatureCentiC = 10000;
 
@@ -290,7 +289,11 @@ public:
     return temperatureConfiguration_.hotThresholdCentiC;
   }
   bool temperatureConfigurationPersisted() const {
-    return temperatureConfiguration_.lightingRom[0] == 0x28;
+    return temperatureConfiguration_.hotThresholdCentiC != 0;
+  }
+  bool lightingTemperatureMapped() const {
+    return temperatureConfigurationPersisted() &&
+           temperatureConfiguration_.lightingRom[0] == 0x28;
   }
   const uint8_t *lightingTemperatureRom() const {
     return temperatureConfiguration_.lightingRom;

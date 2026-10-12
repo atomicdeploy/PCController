@@ -97,6 +97,18 @@ func TestEEPROMTemperatureCLIUsesOfflineGuardedPatchBackend(t *testing.T) {
 		t.Fatal(err)
 	}
 	stdout.Reset()
+	missingThresholdOutput := filepath.Join(directory, "missing-threshold.hex")
+	if err := run([]string{
+		"eeprom", "temperature", "--input", source, "--output", missingThresholdOutput,
+		"--lighting-rom", "28-616435FB503F-E9",
+	}, &stdout, &stderr); err == nil {
+		t.Fatal("temperature patch accepted an implicit HOT threshold")
+	}
+	if _, err := os.Stat(missingThresholdOutput); !os.IsNotExist(err) {
+		t.Fatalf("failed temperature patch created output: %v", err)
+	}
+	stdout.Reset()
+	stderr.Reset()
 	if err := run([]string{
 		"eeprom", "temperature", "--input", source, "--output", output,
 		"--lighting-rom", "28-616435FB503F-E9", "--hot-threshold-centi-c", "5500",

@@ -532,12 +532,10 @@ void testTemperatureEEPROMIdentityAndThreshold() {
   EEPROM.update(EepromLayout::TemperatureSettingsAddress + 9, 0x7F);
   SettingsStore invalidThreshold;
   require(!invalidThreshold.begin(2) &&
-              invalidThreshold.temperatureConfigurationPersisted() &&
-              invalidThreshold.hotTemperatureCentiC() ==
-                  SettingsStore::DefaultHotTemperatureCentiC &&
-              std::equal(record, record + 8,
-                         invalidThreshold.lightingTemperatureRom()),
-          "out-of-range temperature threshold did not use safe default");
+              !invalidThreshold.temperatureConfigurationPersisted() &&
+              invalidThreshold.hotTemperatureCentiC() == 0 &&
+              !invalidThreshold.lightingTemperatureMapped(),
+          "damaged temperature record was treated as persistent authority");
 }
 
 void testBuzzerTimerAndQueue() {
