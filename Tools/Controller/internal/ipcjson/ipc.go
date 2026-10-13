@@ -1634,6 +1634,7 @@ func (service *Service) dispatch(
 		} else if instance, ok := service.AppInstances.Get(service.CoordinatorInstanceID); !ok {
 			err = errors.New("coordinator bridge instance is not registered")
 		} else {
+			hostui.RefreshCurrentProcessConsole(instance.Self)
 			result = instance
 		}
 	case "controller.app.instance.get":

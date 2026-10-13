@@ -36,6 +36,21 @@ type Result struct {
 
 var setTitle = setTitlePlatform
 
+// State describes only this process's attached console, never arbitrary windows.
+type State struct {
+	Supported          bool
+	Attached           bool
+	Visible            bool
+	SoleOwner          bool
+	InteractiveStreams bool
+}
+
+func Inspect() State { return inspectPlatform() }
+
+// HideBackground preserves shared terminals. Explicit UI-less Web hosts may
+// still inherit console streams from their original Windows launcher.
+func HideBackground(explicit bool) (Result, error) { return hideBackgroundPlatform(explicit) }
+
 // Validate rejects values that cannot be represented safely by the Win32
 // classic-console APIs or by the TUI's minimum usable layout.
 func Validate(settings Settings) error {

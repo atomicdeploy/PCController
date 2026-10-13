@@ -5,6 +5,7 @@ package consolewindow
 import (
 	"errors"
 	"fmt"
+	"os"
 	"runtime"
 	"syscall"
 	"unicode/utf16"
@@ -59,7 +60,49 @@ var (
 	procGetCurrentConsoleFontEx     = consoleKernel32.NewProc("GetCurrentConsoleFontEx")
 	procSetCurrentConsoleFontEx     = consoleKernel32.NewProc("SetCurrentConsoleFontEx")
 	procIsWindowVisible             = consoleUser32.NewProc("IsWindowVisible")
+	procShowWindow                  = consoleUser32.NewProc("ShowWindow")
+	procGetConsoleProcessList       = consoleKernel32.NewProc("GetConsoleProcessList")
 )
+
+func inspectPlatform() State {
+	state := State{Supported: true}
+	var processes [32]uint32
+	count, _, _ := procGetConsoleProcessList.Call(uintptr(unsafe.Pointer(&processes[0])), uintptr(len(processes)))
+	state.Attached = count > 0
+	state.SoleOwner = count == 1 && processes[0] == uint32(os.Getpid())
+	hwnd, _, _ := procGetConsoleWindow.Call()
+	if hwnd != 0 {
+		visible, _, _ := procIsWindowVisible.Call(hwnd)
+		state.Visible = visible != 0
+	}
+	for _, file := range []*os.File{os.Stdin, os.Stdout, os.Stderr} {
+		if file == nil {
+			continue
+		}
+		var mode uint32
+		if ok, _, _ := procGetConsoleMode.Call(file.Fd(), uintptr(unsafe.Pointer(&mode))); ok != 0 {
+			state.InteractiveStreams = true
+		}
+	}
+	return state
+}
+
+func hideBackgroundPlatform(explicit bool) (Result, error) {
+	state := inspectPlatform()
+	if !state.Visible {
+		return Result{Reason: "no visible classic console"}, nil
+	}
+	if !state.SoleOwner || (state.InteractiveStreams && !explicit) {
+		return Result{Reason: "interactive or shared console is preserved"}, nil
+	}
+	hwnd, _, _ := procGetConsoleWindow.Call()
+	procShowWindow.Call(hwnd, 0) // SW_HIDE; only this process's sole-owned window.
+	visible, _, _ := procIsWindowVisible.Call(hwnd)
+	if visible != 0 {
+		return Result{}, errors.New("background console remained visible")
+	}
+	return Result{Applied: true}, nil
+}
 
 func setTitlePlatform(value string) (Result, error) {
 	title, err := windows.UTF16PtrFromString(value)

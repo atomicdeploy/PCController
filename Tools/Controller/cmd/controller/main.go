@@ -50,6 +50,7 @@ var (
 )
 
 func main() {
+	prepareStartupPresentation(os.Args[1:], os.Stdout)
 	if _, err := envfile.LoadProcess(); err != nil {
 		fmt.Fprintln(os.Stderr, "environment:", err)
 		os.Exit(1)
