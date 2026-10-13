@@ -714,6 +714,8 @@ export function ControlsView(props: SharedViewProps) {
     return () => reconciler.stop()
   }, [available.pwm, boardReady, props.transport.streamState])
 
+  // Selected-channel telemetry can predate the complete mutation ACK. It must
+  // not replace the mixer's full authoritative readback with an older sample.
   useEffect(() => {
     if (boardReady && snapshot.pwm_values) applyAuthoritativePWM(snapshot.pwm_values)
   }, [boardReady, snapshot.pwm_revision, snapshot.pwm_values, pwmPending.length])
