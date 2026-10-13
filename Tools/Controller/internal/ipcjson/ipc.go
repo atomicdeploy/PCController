@@ -227,6 +227,8 @@ const (
 )
 
 type Service struct {
+	udpOnce          sync.Once
+	udpState         udpRuntime
 	Client           *controller.Client
 	WebSocketPath    string
 	SocketIOPath     string
@@ -537,6 +539,9 @@ func (service *Service) dispatch(
 	if err := service.authorizeAccess(access, request.Method, request.Params); err != nil {
 		response.Error = &RPCError{Code: -32003, Message: err.Error()}
 		return response
+	}
+	if strings.HasPrefix(request.Method, "controller.udp.") {
+		return service.dispatchUDP(ctx, request, access)
 	}
 	// Primary discovery must not queue behind a long board, firmware, or shell
 	if request.ClientID != "" {
@@ -1058,12 +1063,7 @@ func (service *Service) dispatch(
 					err = &RPCError{Code: -32602, Message: "raw_value must be 0..4095"}
 				}
 				if err == nil {
-					err = service.rejectLockedPeripheral(fmt.Sprintf("pwm.%d", params.Channel))
-				}
-				if err == nil {
-					if err = service.Client.SetPWMChannel(ctx, byte(params.Channel), uint16(raw)); err == nil {
-						result, err = service.pwmValues(ctx)
-					}
+					result, err = service.setPWMAndReadback(ctx, byte(params.Channel), uint16(raw))
 				}
 			}
 		}
@@ -1076,9 +1076,7 @@ func (service *Service) dispatch(
 			result, err = service.updatePWMChannelConfig(params.Channel, params.PWMChannelConfig)
 		}
 	case "controller.pwm.off":
-		if err = service.Client.AllPWMOff(ctx); err == nil {
-			result, err = service.pwmValues(ctx)
-		}
+		result, err = service.clearPWMAndReadback(ctx)
 	case "controller.status_led.set":
 		var params struct {
 			Red        int `json:"red"`
@@ -1629,6 +1627,7 @@ func (service *Service) dispatch(
 		} else if instance, ok := service.AppInstances.Get(service.CoordinatorInstanceID); !ok {
 			err = errors.New("coordinator bridge instance is not registered")
 		} else {
+			hostui.RefreshCurrentProcessConsole(instance.Self)
 			result = instance
 		}
 	case "controller.app.instance.get":
@@ -1704,6 +1703,7 @@ func (service *Service) dispatch(
 			WSDiscovery bool     `json:"ws_discovery,omitempty"`
 			Broadcast   bool     `json:"broadcast,omitempty"`
 			NetBIOS     bool     `json:"netbios,omitempty"`
+			MNDP        bool     `json:"mndp,omitempty"`
 			Protocols   []string `json:"protocols,omitempty"`
 		}
 		if err = decodeParams(request.Params, &params); err == nil {
@@ -1722,6 +1722,8 @@ func (service *Service) dispatch(
 						params.Broadcast = true
 					case "netbios", "nbns":
 						params.NetBIOS = true
+					case "mndp":
+						params.MNDP = true
 					default:
 						err = fmt.Errorf("unsupported discovery protocol %q", protocol)
 					}
@@ -1730,8 +1732,9 @@ func (service *Service) dispatch(
 			if err != nil {
 				break
 			}
-			if !params.MDNS && !params.DNSSD && !params.SSDP && !params.UPnP && !params.WSDiscovery && !params.Broadcast && !params.NetBIOS {
+			if !params.MDNS && !params.DNSSD && !params.SSDP && !params.UPnP && !params.WSDiscovery && !params.Broadcast && !params.NetBIOS && !params.MNDP {
 				params.MDNS, params.DNSSD, params.SSDP, params.UPnP, params.WSDiscovery, params.Broadcast, params.NetBIOS = true, true, true, true, true, true, true
+				params.MNDP = true
 			}
 			if params.TimeoutMS == 0 {
 				params.TimeoutMS = 1500
@@ -1745,6 +1748,7 @@ func (service *Service) dispatch(
 				ctx, time.Duration(params.TimeoutMS)*time.Millisecond,
 			)
 			result, err = discovery.DiscoverWithOptions(discoveryContext, discovery.Options{
+				MNDP: params.MNDP,
 				MDNS: params.MDNS, DNSSD: params.DNSSD, SSDP: params.SSDP, UPnP: params.UPnP,
 				WSDiscovery: params.WSDiscovery, Broadcast: params.Broadcast, NetBIOS: params.NetBIOS,
 				BroadcastPort: service.hostConfig().Integrations.Discovery.BroadcastPort,
@@ -1869,6 +1873,12 @@ func (service *Service) dispatch(
 }
 
 func dispatchRPCError(err error) *RPCError {
+	var confirmation *pwmConfirmationError
+	if errors.As(err, &confirmation) {
+		return &RPCError{Code: -32010, Message: confirmation.Error(), Data: map[string]any{
+			"kind": "confirmation_unavailable", "resource": "pwm", "write_acknowledged": true, "retryable": false,
+		}}
+	}
 	var rpcError *RPCError
 	if errors.As(err, &rpcError) {
 		return rpcError
@@ -1914,16 +1924,42 @@ func (service *Service) primaryPingResult() map[string]any {
 
 type controllerSnapshotEnvelope struct {
 	controller.Snapshot
+	PWMValues      *pwmValues                       `json:"pwm_values,omitempty"`
 	HostInstanceID string                           `json:"host_instance_id,omitempty"`
 	MediaPlayback  controller.MediaPlaybackSnapshot `json:"media_playback"`
 }
 
+func (snapshot *controllerSnapshotEnvelope) UnmarshalJSON(data []byte) error {
+	var core controller.Snapshot
+	if err := json.Unmarshal(data, &core); err != nil {
+		return err
+	}
+	var fields struct {
+		HostInstanceID string                           `json:"host_instance_id"`
+		MediaPlayback  controller.MediaPlaybackSnapshot `json:"media_playback"`
+		PWMValues      *pwmValues                       `json:"pwm_values"`
+	}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	*snapshot = controllerSnapshotEnvelope{Snapshot: core, HostInstanceID: fields.HostInstanceID, MediaPlayback: fields.MediaPlayback, PWMValues: fields.PWMValues}
+	return nil
+}
+
 func (service *Service) controllerSnapshot() controllerSnapshotEnvelope {
-	return controllerSnapshotEnvelope{
-		Snapshot:       service.Client.Snapshot(),
+	snapshot := service.Client.Snapshot()
+	envelope := controllerSnapshotEnvelope{
+		Snapshot:       snapshot,
 		HostInstanceID: strings.TrimSpace(service.HostInstanceID),
 		MediaPlayback:  service.Client.MediaPlayback(),
 	}
+	if snapshot.PWMValues != nil {
+		values := service.describePWMValuesForSnapshot(*snapshot.PWMValues, snapshot)
+		values.HostInstanceID, values.ConnectionGeneration = envelope.HostInstanceID, snapshot.ConnectionGeneration
+		values.Revision, values.Time = snapshot.PWMRevision, snapshot.PWMUpdated
+		envelope.PWMValues = &values
+	}
+	return envelope
 }
 
 func (service *Service) hostConfig() appconfig.Config {
@@ -1996,9 +2032,10 @@ func (service *Service) setNetworkPeers(raw json.RawMessage) (networkPeersConfig
 
 func (service *Service) browserUISettings() browserUISettings {
 	ui := service.hostConfig().UI
-	peripherals := appconfig.PeripheralDescriptors()
-	controls := appconfig.ControlDescriptors(ui.PeripheralNames)
-	appconfig.ApplyPWMChannelConfig(peripherals, controls, ui)
+	if service.Client.Snapshot().Hello.BuildFeatures&native.BuildFeatureNativeHAL != 0 {
+		ui.PeripheralNames = appconfig.NativeSensorNames(ui.PeripheralNames)
+	}
+	catalog := service.peripheralSettings()
 	return browserUISettings{
 		AppTitle:               productidentity.Title(ui.AppTitle),
 		Tagline:                ui.Tagline,
@@ -2011,8 +2048,8 @@ func (service *Service) browserUISettings() browserUISettings {
 		SegmentScroll:          ui.SegmentScroll,
 		PeripheralNames:        clonePeripheralNames(ui.PeripheralNames),
 		PWMChannels:            clonePWMChannels(ui.PWMChannels),
-		Peripherals:            peripherals,
-		Controls:               controls,
+		Peripherals:            catalog.Peripherals,
+		Controls:               catalog.Controls,
 	}
 }
 
@@ -2054,6 +2091,9 @@ func normalizePeripheralNames(names map[string]string) (map[string]string, error
 func (service *Service) peripheralSettings() peripheralSettings {
 	config := service.hostConfig()
 	names := config.UI.PeripheralNames
+	if service.Client.Snapshot().Hello.BuildFeatures&native.BuildFeatureNativeHAL != 0 {
+		names = appconfig.NativeSensorNames(names)
+	}
 	profileDescriptor, profile := service.activeBoardProfile()
 	peripherals, controls := appconfig.ProfileDescriptors(profileDescriptor.Mode, profile.ExposeRawRelays, names, profile.Presentation)
 	appconfig.ApplyPWMChannelConfig(peripherals, controls, config.UI)
@@ -2243,6 +2283,11 @@ func (service *Service) authorizeAccess(
 	method string,
 	params json.RawMessage,
 ) error {
+	if strings.EqualFold(strings.TrimSpace(access.Transport), "udp") {
+		if err := ValidateBridgeRequest(Request{Method: method, Params: params}); err != nil {
+			return err
+		}
+	}
 	if !access.Remote {
 		return nil
 	}
@@ -2266,6 +2311,10 @@ func (service *Service) authorizeAccess(
 
 func bridgeIngressCanPivot(method string, params json.RawMessage) bool {
 	switch strings.ToLower(strings.TrimSpace(method)) {
+	case "controller.udp.call", "controller.udp.subscribe", "controller.udp.unsubscribe", "controller.udp.config.set",
+		"pealayer.udp.call", "pealayer.udp.subscribe", "pealayer.udp.unsubscribe", "pealayer.udp.config.set",
+		"pealayer.process.connect", "config.update", "pealayer.config.update", "config.reload", "pealayer.config.reload":
+		return true
 	case "controller.bridge.call", "controller.peer.update.host", "controller.discovery.connect":
 		return true
 	case "controller.network.peers.set", "controller.integrations.local.set", "controller.hotkeys.set",
@@ -2298,7 +2347,7 @@ func bridgeCommandCanPivot(command string) bool {
 		root := strings.FieldsFunc(words[2], func(character rune) bool { return character == '.' || character == '[' })
 		if len(root) != 0 {
 			switch root[0] {
-			case "integrations", "host_menu", "host_menus", "hotkeys", "automations":
+			case "ipc", "integrations", "host_menu", "host_menus", "hotkeys", "automations":
 				return true
 			}
 		}
@@ -2417,6 +2466,14 @@ func requestCapability(method string, params json.RawMessage) string {
 	}
 	method = strings.ToLower(strings.TrimSpace(method))
 	switch method {
+	case "controller.udp.config.get", "controller.udp.status":
+		return capabilityRead
+	case "controller.udp.events.get", "controller.udp.subscribe", "controller.udp.unsubscribe":
+		return capabilityEvents
+	case "controller.udp.config.set":
+		return capabilityHostConfig
+	case "controller.udp.call":
+		return capabilityBridgeCalls
 	case "controller.event.next", "controller.event.latest", "controller.subscribe",
 		"controller.unsubscribe":
 		return capabilityEvents
@@ -2745,6 +2802,7 @@ func (service *Service) powerAction(
 }
 
 func Serve(ctx context.Context, listener net.Listener, service *Service) error {
+	service.StartUDP(ctx)
 	var wait sync.WaitGroup
 	websocketListener := newDispatchListener(listener.Addr())
 	websocketServer := &http.Server{
@@ -2987,6 +3045,7 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 	webSocketPath := service.currentWebSocketPath()
 	socketIOPath := service.currentSocketIOPath()
 	mux := http.NewServeMux()
+	mux.HandleFunc("/api/diagnostics/cpu-profile", service.serveCPUProfile)
 	mux.HandleFunc(webSocketPath, func(writer http.ResponseWriter, request *http.Request) {
 		if !authorizeHTTPRequest(writer, request, service) {
 			return
@@ -3176,6 +3235,8 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 		if !authorizeHTTPCapability(writer, request, service, capabilityBoard) {
 			return
 		}
+		var values pwmValues
+		var err error
 		if request.Method == http.MethodPut {
 			var params struct {
 				Channel  int      `json:"channel"`
@@ -3206,17 +3267,12 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": "raw_value must be 0..4095"})
 				return
 			}
-			if err := service.Client.SetPWMChannel(request.Context(), byte(params.Channel), uint16(raw)); err != nil {
-				writeHTTPJSON(writer, http.StatusConflict, map[string]string{"error": err.Error()})
-				return
-			}
-		} else if err := service.Client.AllPWMOff(request.Context()); err != nil {
-			writeHTTPJSON(writer, http.StatusConflict, map[string]string{"error": err.Error()})
-			return
+			values, err = service.setPWMAndReadback(request.Context(), byte(params.Channel), uint16(raw))
+		} else {
+			values, err = service.clearPWMAndReadback(request.Context())
 		}
-		values, err := service.pwmValues(request.Context())
 		if err != nil {
-			writeHTTPJSON(writer, http.StatusConflict, map[string]string{"error": err.Error()})
+			writeHTTPJSON(writer, http.StatusConflict, map[string]any{"error": err.Error(), "details": dispatchRPCError(err).Data})
 			return
 		}
 		writeHTTPJSON(writer, http.StatusOK, values)
@@ -3983,7 +4039,8 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 	})
 	mux.HandleFunc("/healthz", func(writer http.ResponseWriter, _ *http.Request) {
 		writeHTTPJSON(writer, http.StatusOK, map[string]any{
-			"ok": true,
+			"ok":     true,
+			"status": "ok", "product": "pccontroller",
 			"service": productidentity.ServiceName(
 				service.hostConfig().UI.AppTitle,
 				"IPC",
@@ -4324,7 +4381,7 @@ func serveWebSocket(
 		defer cancel()
 		return connection.Write(writeContext, websocket.MessageText, encoded)
 	}
-	subscriptions := newWebSocketSubscriptions(ctx, service.Client, service.controllerSnapshot, writeJSON)
+	subscriptions := newWebSocketSubscriptions(ctx, service.Client, service.controllerSnapshot, service.cachedPWMValues, service.HostInstanceID, writeJSON)
 	defer subscriptions.stopAll()
 
 	for {
@@ -4471,7 +4528,7 @@ func serveSocketIO(
 		return
 	}
 
-	subscriptions := newWebSocketSubscriptions(ctx, service.Client, service.controllerSnapshot, writeNotification)
+	subscriptions := newWebSocketSubscriptions(ctx, service.Client, service.controllerSnapshot, service.cachedPWMValues, service.HostInstanceID, writeNotification)
 	defer subscriptions.stopAll()
 	go func() {
 		ticker := time.NewTicker(25 * time.Second)
@@ -4905,21 +4962,25 @@ type webSocketSubscriptionWorker struct {
 // A preserve subscription is deliberately topic-scoped: changing status
 // cadence cannot cancel and recreate ordered event/state streams or reset cursors.
 type webSocketSubscriptions struct {
-	ctx      context.Context
-	client   *controller.Client
-	snapshot func() controllerSnapshotEnvelope
-	write    func(any) error
-	workers  map[string]webSocketSubscriptionWorker
+	instanceID string
+	ctx        context.Context
+	client     *controller.Client
+	snapshot   func() controllerSnapshotEnvelope
+	pwm        func() *pwmValues
+	write      func(any) error
+	workers    map[string]webSocketSubscriptionWorker
 }
 
 func newWebSocketSubscriptions(
 	ctx context.Context,
 	client *controller.Client,
 	snapshot func() controllerSnapshotEnvelope,
+	pwm func() *pwmValues,
+	instanceID string,
 	write func(any) error,
 ) *webSocketSubscriptions {
 	return &webSocketSubscriptions{
-		ctx: ctx, client: client, snapshot: snapshot, write: write,
+		ctx: ctx, client: client, snapshot: snapshot, pwm: pwm, instanceID: instanceID, write: write,
 		workers: make(map[string]webSocketSubscriptionWorker),
 	}
 }
@@ -4973,15 +5034,18 @@ func (subscriptions *webSocketSubscriptions) start(topic string, value wsSubscri
 		defer close(done)
 		switch topic {
 		case "events":
-			streamWebSocketEventStream(topicContext, subscriptions.client, afterID, "activity", "controller.event", 0, subscriptions.snapshot, subscriptions.write)
+			streamWebSocketEventStream(topicContext, subscriptions.client, afterID, "activity", "controller.event", 0, subscriptions.snapshot, nil, subscriptions.write)
 		case "state":
-			streamWebSocketEventStream(topicContext, subscriptions.client, afterID, "state", "controller.state", time.Duration(value.StateIntervalMS)*time.Millisecond, subscriptions.snapshot, subscriptions.write)
+			if err := subscriptions.write(wsNotification{JSONRPC: Version, Method: "controller.snapshot", Params: subscriptions.snapshot()}); err != nil {
+				return
+			}
+			streamWebSocketEventStream(topicContext, subscriptions.client, afterID, "state", "controller.state", time.Duration(value.StateIntervalMS)*time.Millisecond, subscriptions.snapshot, subscriptions.pwm, subscriptions.write)
 		case "debug":
-			streamWebSocketEventStream(topicContext, subscriptions.client, afterID, "debug", "controller.debug", 0, nil, subscriptions.write)
+			streamWebSocketEventStream(topicContext, subscriptions.client, afterID, "debug", "controller.debug", 0, nil, nil, subscriptions.write)
 		case "opcodes":
 			streamWebSocketOpcodes(topicContext, subscriptions.client, afterID, value.Opcodes, subscriptions.write)
 		case "status":
-			streamWebSocketStatus(topicContext, subscriptions.client, time.Duration(value.IntervalMS)*time.Millisecond, subscriptions.write)
+			streamWebSocketStatus(topicContext, subscriptions.client, time.Duration(value.IntervalMS)*time.Millisecond, subscriptions.instanceID, subscriptions.write)
 		}
 	}()
 }
@@ -5019,6 +5083,20 @@ func streamWebSocketOpcodes(
 	}
 }
 
+type stateFrameBudget map[string]time.Time
+
+func (budget stateFrameBudget) allow(event controller.Event, interval time.Duration, now time.Time) bool {
+	if interval <= 0 || !highRateStateEvent(event) {
+		return true
+	}
+	key := strings.ToLower(strings.TrimSpace(event.Kind))
+	if last := budget[key]; !last.IsZero() && now.Sub(last) < interval {
+		return false
+	}
+	budget[key] = now
+	return true
+}
+
 func streamWebSocketEventStream(
 	ctx context.Context,
 	client *controller.Client,
@@ -5027,46 +5105,40 @@ func streamWebSocketEventStream(
 	method string,
 	highRateInterval time.Duration,
 	snapshot func() controllerSnapshotEnvelope,
+	pwm func() *pwmValues,
 	write func(any) error,
 ) {
-	var lastHighRateWrite time.Time
-	for ctx.Err() == nil {
-		event, err := client.NextEventStream(ctx, afterID, "", stream)
-		if err != nil {
-			return
+	deliver := func(event controller.Event) error {
+		if err := write(wsNotification{JSONRPC: Version, Method: method, Params: event}); err != nil {
+			return err
 		}
-		afterID = event.ID
-		highRate := stream == "state" && highRateStateEvent(event)
-		if highRate && highRateInterval > 0 &&
-			!lastHighRateWrite.IsZero() && time.Since(lastHighRateWrite) < highRateInterval {
-			continue
-		}
-		if err := write(wsNotification{
-			JSONRPC: Version,
-			Method:  method,
-			Params:  event,
-		}); err != nil {
-			return
-		}
-		if highRate {
-			lastHighRateWrite = time.Now()
-		}
-		if snapshot != nil && eventUpdatesClientSnapshot(event) {
-			if err := write(wsNotification{
-				JSONRPC: Version,
-				Method:  "controller.snapshot",
-				Params:  snapshot(),
-			}); err != nil {
-				return
+		if pwm != nil && event.Kind == "pwm.changed" {
+			if values := pwm(); values != nil {
+				if err := write(wsNotification{JSONRPC: Version, Method: "controller.pwm.values", Params: values}); err != nil {
+					return err
+				}
 			}
 		}
+		if snapshot != nil && eventUpdatesClientSnapshot(event) {
+			return write(wsNotification{JSONRPC: Version, Method: "controller.snapshot", Params: snapshot()})
+		}
+		return nil
 	}
+	streamLatestState(ctx, afterID, highRateInterval,
+		func(ctx context.Context, cursor uint64) (controller.Event, error) {
+			return client.NextEventStream(ctx, cursor, "", stream)
+		}, deliver)
+
 }
 
 func highRateStateEvent(event controller.Event) bool {
 	switch strings.ToLower(strings.TrimSpace(event.Kind)) {
-	case "status_led.changed", "pwm.changed", "animation.frame", "front_panel.segment":
+	case "status_led.changed", "pwm.changed", "animation.frame":
 		return true
+	case "front_panel.segment":
+		// Digit/blank/blink edges are already changed-only. Dropping one cannot
+		// be repaired by interpolation or the slow telemetry subscription.
+		return false
 	default:
 		return false
 	}
@@ -5080,20 +5152,25 @@ func eventUpdatesClientSnapshot(event controller.Event) bool {
 	kind := strings.ToLower(strings.TrimSpace(event.Kind))
 	switch kind {
 	case "door", "bluetooth", "pwm", "relay", "hot", "reset", "identity",
-		"front_panel.changed", "settings.changed", "illumination.changed", "peripherals.changed", "programming.lifecycle":
+		"front_panel.changed", "settings.changed", "illumination.changed", "peripherals.changed", "programming.lifecycle",
+		"emergency_stop", "output", "motion.changed", "melodies.changed", "config", "port.process.changed":
 		return true
+	}
+	if kind == "macro" {
+		return event.Lifecycle == "started" || event.Lifecycle == "completed" || event.Lifecycle == "cancelled" || event.Lifecycle == "failed"
 	}
 	return strings.HasPrefix(kind, "connection") ||
 		strings.HasPrefix(kind, "usb.") ||
 		strings.HasPrefix(kind, "program.") ||
 		strings.HasPrefix(kind, "rf.learn") ||
-		strings.HasPrefix(kind, "macro.")
+		(strings.HasPrefix(kind, "macro.") && kind != "macro.step")
 }
 
 func streamWebSocketStatus(
 	ctx context.Context,
 	client *controller.Client,
 	interval time.Duration,
+	instanceID string,
 	write func(any) error,
 ) {
 	updates, err := client.SubscribeStatus(ctx, interval)
@@ -5116,10 +5193,15 @@ func streamWebSocketStatus(
 			}
 			continue
 		}
+		observed := client.CachedStatusObservation()
+		if !observed.HaveStatus || !observed.BoardConnected {
+			continue
+		}
+		observed.HostInstanceID = strings.TrimSpace(instanceID)
 		if write(wsNotification{
 			JSONRPC: Version,
 			Method:  "controller.status",
-			Params:  update,
+			Params:  observed,
 		}) != nil {
 			return
 		}
@@ -5142,6 +5224,7 @@ func serveStreams(
 	service *Service,
 	access Access,
 ) error {
+	service.StartUDP(ctx)
 	scanner := bufio.NewScanner(input)
 	scanner.Buffer(make([]byte, 4096), maxMessage)
 	encoder := json.NewEncoder(output)

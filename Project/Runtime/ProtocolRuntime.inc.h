@@ -65,6 +65,9 @@ void sendHello(uint8_t sequence) {
   payload.featureProfile = PCCONTROLLER_FEATURE_PROFILE;
   payload.buildFeatures = static_cast<uint8_t>((1U << 6) |
       (PCCONTROLLER_ENABLE_BOARD_AUTOMATIONS ? (1U << 5) : 0));
+#if defined(PCCONTROLLER_NATIVE)
+  payload.buildFeatures |= (1U << 7); // Native HAL: mapped/fixture inputs, not physical sensors.
+#endif
 #if defined(__AVR__) && !defined(__AVR_ATmega2560__)
   // Copy the two contiguous, host-patchable identity fields in one flash
   // read. Do not replace these with compile-time constants: the guarded host
@@ -254,6 +257,29 @@ void serviceStatusLedPush() {
   lastStatusLedPushAt = tick;
   appProtocol.send(ControllerProtocol::StatusLedChanged, 0, payload,
                    sizeof(payload));
+}
+
+// Publish applied logical values, including local/front-panel/effect changes.
+// Compare against the last SENT state, so the final change survives throttling.
+// Sequence zero is an observation, never a request or another output write.
+void servicePwmPush(uint32_t at) {
+  if (havePushedPwmValues && static_cast<uint32_t>(at - lastPwmPushAt) < 50U) {
+    return;
+  }
+  uint8_t payload[34];
+  uint8_t index = 0;
+  payload[index++] = pwm.available() ? 1U : 0U;
+  payload[index++] = pwm.channel();
+  for (uint8_t channel = 0; channel < PwmChannels::Count; ++channel) {
+    appendU16(payload, index, pwm.logicalValue(channel));
+  }
+  if (havePushedPwmValues && memcmp(payload, lastPushedPwmValues, sizeof(payload)) == 0) {
+    return;
+  }
+  memcpy(lastPushedPwmValues, payload, sizeof(payload));
+  havePushedPwmValues = true;
+  lastPwmPushAt = at;
+  appProtocol.send(ControllerProtocol::PwmValuesResponse, 0, payload, sizeof(payload));
 }
 
 #if PCCONTROLLER_ENABLE_MENU_DIRECTORY

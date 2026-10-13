@@ -225,6 +225,10 @@ func publicInfo(service *Service, request *http.Request) discovery.PublicInfo {
 }
 
 func enabledDiscoveryProtocols(value appconfig.Discovery) []string {
+	var mndp = []string{}
+	if value.MNDPEnabled {
+		mndp = append(mndp, "mndp")
+	}
 	result := make([]string, 0, 6)
 	if value.MDNSEnabled || value.DNSSDenabled {
 		result = append(result, "dns-sd")
@@ -244,7 +248,7 @@ func enabledDiscoveryProtocols(value appconfig.Discovery) []string {
 	if value.NetBIOSEnabled {
 		result = append(result, "netbios")
 	}
-	return result
+	return append(result, mndp...)
 }
 
 func resolveSOAPAction(header string, body []byte) (string, bool) {

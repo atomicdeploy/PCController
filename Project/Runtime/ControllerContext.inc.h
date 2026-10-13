@@ -161,6 +161,10 @@ uint8_t lastPushedBuzzerRevision = 0;
 uint8_t lastPushedStatusLed[6] = {};
 uint8_t lastStatusLedPushAt = 0;
 
+uint8_t lastPushedPwmValues[34] = {};
+bool havePushedPwmValues = false;
+uint32_t lastPwmPushAt = 0;
+
 // Host-captured panel text, LCD fallback metadata, and cooperative I2C lease.
 bool hostSegmentTextActive = false;
 // DISPLAY_TEXT reuses one 40-byte buffer for static text or a scheduled scroll.

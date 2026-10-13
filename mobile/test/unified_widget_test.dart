@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pccontroller_mobile/main.dart';
 import 'package:pccontroller_mobile/unified/transport.dart';
+import 'package:pccontroller_mobile/unified/workspace_chrome.dart';
 
 void main() {
   testWidgets(
@@ -30,7 +31,7 @@ void main() {
       home.displayTarget = 'lcd';
       session.notifyListeners();
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Front panel'));
+      await tester.tap(find.text('Panel'));
       await tester.pumpAndSettle();
       expect(
         tester
@@ -59,7 +60,9 @@ void main() {
             .initialValue,
         null,
       );
-      expect(find.text('Unavailable'), findsWidgets);
+      expect(find.text('Unavailable'), findsNothing);
+      expect(find.text('Pressed keys'), findsNothing);
+      expect(find.text('Page'), findsNothing);
       expect(find.text('0'), findsNothing);
       expect(tester.takeException(), null);
       await tester.pumpWidget(const SizedBox());
@@ -80,21 +83,20 @@ void main() {
       await tester.pumpWidget(const UnifiedControllerApp(restore: false));
       await tester.pumpAndSettle();
       expect(find.text('Board connected'), findsNothing);
-      expect(find.text('Unavailable'), findsWidgets);
-      expect(
-        find.byType(size.width >= 760 ? NavigationRail : NavigationBar),
-        findsOneWidget,
-      );
+      expect(find.text('Unavailable'), findsNothing);
+      expect(find.byType(ActivityStrip), findsOneWidget);
       expect(tester.takeException(), null);
-      await tester.ensureVisible(find.text('Front panel'));
+      await tester.ensureVisible(find.text('Panel'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Front panel'));
+      await tester.tap(find.text('Panel'));
       await tester.pumpAndSettle();
-      expect(find.text('Waiting for physical segment frames'), findsOneWidget);
+      expect(find.text('Waiting for physical segment frames'), findsNothing);
+      expect(find.byTooltip('Connect PCController'), findsOneWidget);
       expect(tester.takeException(), null);
-      await tester.tap(find.text('Pealayer').last);
+      await tester.tap(find.text('Live').first);
       await tester.pumpAndSettle();
-      expect(find.text('Connect Pealayer to load media state'), findsOneWidget);
+      expect(find.text('Connect Pealayer to load media state'), findsNothing);
+      expect(find.byTooltip('Connect Pealayer'), findsOneWidget);
       expect(tester.takeException(), null);
       await tester.pumpWidget(const SizedBox());
     });

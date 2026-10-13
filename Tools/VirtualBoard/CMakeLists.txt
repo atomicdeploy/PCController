@@ -65,6 +65,7 @@ file(GENERATE OUTPUT "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/firmware-adapters.sha256
 
 add_library(native_firmware_objects OBJECT
   src/native_hal.cpp
+  src/sensor_sources.cpp
   src/native_firmware.cpp
   ../../BoardSupportSources.cpp
   ../../ControllerDomainSources.cpp
@@ -293,7 +294,10 @@ if(BUILD_TESTING)
   if(PCCONTROLLER_NODE)
     add_test(NAME firmware_transport_integration COMMAND "${PCCONTROLLER_NODE}"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/transport_integration.test.mjs" $<TARGET_FILE:virtual_board>)
-    set_tests_properties(firmware_transport_integration PROPERTIES TIMEOUT 45)
+    set_tests_properties(firmware_transport_integration PROPERTIES TIMEOUT 60)
+    add_test(NAME firmware_dev_host_guards COMMAND "${PCCONTROLLER_NODE}"
+      --test "${CMAKE_CURRENT_SOURCE_DIR}/tests/dev_host.test.mjs")
+    set_tests_properties(firmware_dev_host_guards PROPERTIES TIMEOUT 45)
   endif()
 
   # Compile the production AVR framing implementation against a minimal serial

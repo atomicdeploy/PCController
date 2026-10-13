@@ -28,6 +28,7 @@ import (
 	"pccontroller.local/controller/internal/hostos"
 	"pccontroller.local/controller/internal/productidentity"
 	"pccontroller.local/controller/internal/secretstore"
+	udptransport "pccontroller.local/controller/transport/udp"
 )
 
 const (
@@ -175,14 +176,15 @@ func NormalizeAppearance(value Appearance) Appearance {
 
 // IPC configures authenticated local and optional remote controller transports.
 type IPC struct {
-	Listen          string             `json:"listen"`
-	WebSocketPath   string             `json:"websocket_path"`
-	AllowRemote     bool               `json:"allow_remote"`
-	AuthToken       string             `json:"auth_token,omitempty"`
-	AuthTokenRef    string             `json:"auth_token_ref,omitempty"`
-	RemotePrincipal string             `json:"remote_principal"`
-	AllowedOrigins  []string           `json:"allowed_origins,omitempty"`
-	RemotePolicy    RemoteAccessPolicy `json:"remote_policy"`
+	UDP             udptransport.Config `json:"udp"`
+	Listen          string              `json:"listen"`
+	WebSocketPath   string              `json:"websocket_path"`
+	AllowRemote     bool                `json:"allow_remote"`
+	AuthToken       string              `json:"auth_token,omitempty"`
+	AuthTokenRef    string              `json:"auth_token_ref,omitempty"`
+	RemotePrincipal string              `json:"remote_principal"`
+	AllowedOrigins  []string            `json:"allowed_origins,omitempty"`
+	RemotePolicy    RemoteAccessPolicy  `json:"remote_policy"`
 	// Socket.IO is a distinct protocol and is never advertised by the plain
 	// WebSocket endpoint. This path is reserved for an explicit adapter.
 	SocketIOPath string `json:"socket_io_path"`
@@ -480,6 +482,7 @@ func Defaults() Config {
 			SegmentScroll:          DefaultSegmentScroll(),
 		},
 		IPC: IPC{
+			UDP:             udptransport.Config{Listen: "127.0.0.1:8787"},
 			Listen:          "127.0.0.1:8787",
 			WebSocketPath:   "/ipc",
 			RemotePrincipal: "remote-operator",
@@ -719,6 +722,9 @@ func normalizeMacros(macros []Macro, sourceSchema int) {
 
 // Validate rejects unsafe, ambiguous, or unsupported host configuration values.
 func (value Config) Validate() error {
+	if err := value.IPC.UDP.Validate(); err != nil {
+		return err
+	}
 	if _, err := deployment.Normalize(value.Programming.Deployment); err != nil {
 		return fmt.Errorf("programming.deployment: %w", err)
 	}
@@ -1951,6 +1957,10 @@ func clone(value Config) Config {
 		value.StatusEffects...,
 	)
 	copyValue.IPC.AllowedOrigins = append([]string(nil), value.IPC.AllowedOrigins...)
+	copyValue.IPC.UDP.Peers = make(map[string]string, len(value.IPC.UDP.Peers))
+	for name, address := range value.IPC.UDP.Peers {
+		copyValue.IPC.UDP.Peers[name] = address
+	}
 	copyValue.Integrations = cloneIntegrations(value.Integrations)
 	copyValue.RF = cloneRFConfig(value.RF)
 	copyValue.HostMenus = cloneHostMenus(value.HostMenus)

@@ -24,12 +24,12 @@ func TestNormalizeSubscriptionAcceptsBoundedStatePresentationCadence(t *testing.
 }
 
 func TestHighRateStateEventClassificationLeavesEdgesImmediate(t *testing.T) {
-	for _, kind := range []string{"status_led.changed", "pwm.changed", "animation.frame", "front_panel.segment"} {
+	for _, kind := range []string{"status_led.changed", "pwm.changed", "animation.frame"} {
 		if !highRateStateEvent(controllerapi.Event{Kind: kind}) {
 			t.Fatalf("%q must be presentation-rate limited", kind)
 		}
 	}
-	for _, kind := range []string{"relay.changed", "door", "connection.changed", "settings.changed"} {
+	for _, kind := range []string{"relay.changed", "door", "connection.changed", "settings.changed", "front_panel.segment", "buzzer.note"} {
 		if highRateStateEvent(controllerapi.Event{Kind: kind}) {
 			t.Fatalf("%q must remain immediate", kind)
 		}

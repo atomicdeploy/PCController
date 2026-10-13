@@ -10,6 +10,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -222,9 +223,18 @@ type OutputOperation struct {
 
 // StatusUpdate contains one subscribed telemetry result or its polling error.
 type StatusUpdate struct {
-	Time   time.Time `json:"time"`
-	Status Status    `json:"status"`
-	Error  string    `json:"error,omitempty"`
+	HostInstanceID       string    `json:"host_instance_id,omitempty"`
+	ConnectionGeneration uint64    `json:"connection_generation"`
+	BoardConnected       bool      `json:"board_connected"`
+	HaveStatus           bool      `json:"have_status"`
+	Time                 time.Time `json:"time"`
+	Status               Status    `json:"status"`
+	Error                string    `json:"error,omitempty"`
+}
+
+func (client *Client) CachedStatusObservation() StatusUpdate {
+	status, have, stamp, generation, connected := client.runtime.ObservedStatus()
+	return StatusUpdate{Status: status, HaveStatus: have, Time: stamp, ConnectionGeneration: generation, BoardConnected: connected}
 }
 
 // Options configures discovery, transport, tooling, automation, and host policy.
@@ -448,6 +458,7 @@ type IlluminationState struct {
 
 // Snapshot is a point-in-time view of connection, board, and front-panel state.
 type Snapshot struct {
+	HostInstanceID           string                          `json:"host_instance_id,omitempty"`
 	Connected                bool                            `json:"connected"`
 	Paused                   bool                            `json:"paused"`
 	Port                     PortInfo                        `json:"port"`
@@ -488,11 +499,35 @@ type Snapshot struct {
 	HaveStatusLED            bool                            `json:"have_status_led"`
 	StatusLEDUpdated         time.Time                       `json:"status_led_updated,omitempty"`
 	StatusLEDRevision        uint64                          `json:"status_led_revision,omitempty"`
+	PWMValues                *PWMValues                      `json:"pwm_values,omitempty"`
+	PWMRevision              uint64                          `json:"pwm_revision,omitempty"`
+	PWMUpdated               time.Time                       `json:"pwm_updated,omitempty"`
 	Motion                   MotionSnapshot                  `json:"motion"`
 	Outputs                  OutputStreamState               `json:"outputs"`
 	StripEffects             []control.StripEffectDescriptor `json:"strip_effects,omitempty"`
 	Illumination             IlluminationState               `json:"illumination"`
 	PortProcess              PortProcessSnapshot             `json:"port_process"`
+}
+
+// Unknown offline settings are not an EEPROM write payload. Decode their
+// presence flag first so an initial pushed offline snapshot remains usable.
+func (snapshot *Snapshot) UnmarshalJSON(data []byte) error {
+	type fields Snapshot
+	var result Snapshot
+	wire := struct {
+		*fields
+		Settings json.RawMessage `json:"settings"`
+	}{fields: (*fields)(&result)}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	if result.HaveSettings {
+		if err := json.Unmarshal(wire.Settings, &result.Settings); err != nil {
+			return err
+		}
+	}
+	*snapshot = result
+	return nil
 }
 
 // Event is the normalized event envelope shared by embedders and bridge clients.
@@ -602,9 +637,6 @@ type Client struct {
 	doneOnce           sync.Once
 	statusHub          statusSubscriptionHub
 	statusFetch        func(context.Context) (Status, error)
-	pwmObservationMu   sync.Mutex
-	pwmObservation     PWMValues
-	havePWMObservation bool
 	illuminationMu     sync.RWMutex
 	illumination       IlluminationState
 	illuminationPollAt time.Time
@@ -1911,7 +1943,6 @@ func (client *Client) PWMValues(ctx context.Context) (PWMValues, error) {
 	if err != nil {
 		return PWMValues{}, err
 	}
-	client.PublishPWMValues(values)
 	return values, nil
 }
 
@@ -1920,33 +1951,7 @@ func (client *Client) PWMValues(ctx context.Context) (PWMValues, error) {
 // embedders that already hold an equivalent board readback may also publish it
 // without issuing another serial transaction.
 func (client *Client) PublishPWMValues(values PWMValues) {
-	if !client.shouldPublishPWMValues(values) {
-		return
-	}
-	metadata := map[string]string{
-		"available":        strconv.FormatBool(values.Available),
-		"selected_channel": strconv.Itoa(int(values.SelectedChannel)),
-	}
-	for channel, value := range values.Values {
-		metadata[fmt.Sprintf("pwm.%d", channel)] = strconv.Itoa(int(value))
-	}
-	client.runtime.PublishStructuredEvent(control.Event{
-		Kind:     "pwm.changed",
-		Stream:   control.EventStreamState,
-		Text:     "PWM outputs updated",
-		Metadata: metadata,
-	})
-}
-
-func (client *Client) shouldPublishPWMValues(values PWMValues) bool {
-	client.pwmObservationMu.Lock()
-	defer client.pwmObservationMu.Unlock()
-	if client.havePWMObservation && client.pwmObservation == values {
-		return false
-	}
-	client.pwmObservation = values
-	client.havePWMObservation = true
-	return true
+	client.runtime.PublishPWMValues(values)
 }
 
 // Illumination reads the persisted policy, live door state, and exact applied
@@ -2366,11 +2371,12 @@ func (client *Client) Snapshot() Snapshot {
 		HaveStatusLED:          snapshot.HaveStatusLED,
 		StatusLEDUpdated:       snapshot.StatusLEDUpdated,
 		StatusLEDRevision:      snapshot.StatusLEDRevision,
-		Motion:                 snapshot.Motion,
-		Outputs:                client.outputs.State(),
-		StripEffects:           stripEffects,
-		Illumination:           illumination,
-		PortProcess:            snapshot.PortProcess,
+		PWMValues:              snapshot.PWMValues, PWMRevision: snapshot.PWMRevision, PWMUpdated: snapshot.PWMUpdated,
+		Motion:       snapshot.Motion,
+		Outputs:      client.outputs.State(),
+		StripEffects: stripEffects,
+		Illumination: illumination,
+		PortProcess:  snapshot.PortProcess,
 	}
 }
 

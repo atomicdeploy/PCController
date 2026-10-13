@@ -45,6 +45,7 @@ yarn-error.log*
 pnpm-debug.log*
 
 # MCU/virtual-board runtime state and backups
+/build-programs/
 virtual-mcu-eeprom.bin
 *.eeprom
 *.backup

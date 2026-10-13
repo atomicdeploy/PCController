@@ -88,9 +88,73 @@ explicit process-management artifact useful for tracing Windows process reset.
 Native relay/PWM/strip/display/buzzer values reflect the running shared drivers.
 There is no electrical waveform, physical motion or AVR interrupt-fidelity claim.
 INA219 and DS18B20 values are unavailable by default, not synthetic 12 V/25 C.
-CPU temperature is **not** mislabeled as LED/BT temperature. A future commissioned
+CPU temperature is **not** mislabeled as LED/BT temperature. Native HELLO feature
+`0x80` marks mapped/fixture inputs; the host supplies renamable Native sensor
+defaults without overwriting operator/profile titles. A future commissioned
 Linux/Raspberry Pi GPIO/I2C/sensor adapter can use this same production core.
 The existing Linux ARM64 build is the no-hardware/demo adapter, not Pi wiring proof.
+
+### Pealayer development without hardware
+
+Build the native profile and current controller once, then run:
+
+```sh
+node Tools/VirtualBoard/dev-host.mjs
+```
+
+The launcher runs the shared profile-2 firmware in RAM on loopback `18765` and
+an isolated, headless coordinator on `18987`. In Pealayer select hardware endpoint
+`pccontroller://127.0.0.1:18987`. Its initial cinema profile advertises both seat
+controls and user outputs for authoring; existing profile names, effects and
+folders survive restart. Native settings/front-panel caches are read once so a
+controller GUI is not required. The normal Pealayer transport, timeline,
+recording, macro and safety paths are used, not a second mock engine.
+
+Use `--board FILE` / `--controller FILE` for packaged binaries. The launcher
+checks both ports and a directory-ownership marker, refuses unowned existing
+configuration, and does not read or replace production settings. LAN discovery,
+keyboard integration, measurement history and buzzer mirroring start disabled.
+Ctrl+C stops only its children. The native board creates no EEPROM/log file;
+explicit authoring/profile saves still persist in the isolated development root.
+The launcher does not start/update Pealayer or change its existing authoring state.
+
+### Explicit host sensor mappings
+
+Native sensor paths are read-only scalar sources. Map known Linux thermal/hwmon
+files under `/sys`. Custom adapters must write scalar files inside the owned
+sensor directory: `%LOCALAPPDATA%/Programs/PCController/sensors` on Windows,
+`~/Library/Application Support/PCController/sensors` on macOS, or
+`$XDG_STATE_HOME/pccontroller/sensors` (default `~/.local/state/pccontroller/sensors`)
+on Linux. Relative paths, traversal, prefix collisions and links escaping those
+roots are rejected. Missing files within a permitted root still report unknown
+and can recover when the adapter creates them. Arbitrary host-file reads are not
+a sensor mapping feature. Map known thermal/hwmon
+temperature files (milli-Celsius), or power_supply voltage/current files
+(micro-volts/micro-amps), for example:
+
+```sh
+node Tools/VirtualBoard/dev-host.mjs \
+  --sensor-temp0 /sys/class/hwmon/hwmon1/temp1_input
+```
+
+Inspect that device's `name`/`type` first; hwmon numbering is not a stable sensor
+identity. Rename the advertised sensor to its actual source (e.g. Host CPU).
+`--sensor-temp1 FILE` maps the second role without sliding it into the first.
+`--sensor-voltage FILE --sensor-current FILE` must be supplied together: missing
+current is not zero. Both native voltage slots reflect that same mapped voltage,
+and power is derived from signed voltage/current; they are not independent INA219
+electrical measurements. No bus at address 0x40 is fabricated. The same options
+work directly on `virtual_board`, including stdio mode.
+
+Files are parsed strictly with a 64-byte bound and sampled at most once per second,
+then production conversion/smoothing/validity policies run normally. Missing,
+malformed or out-of-range input becomes unavailable and recovers on later valid
+input. A mapped temperature can trigger the shared HOT safety policy: select the
+source deliberately. These are host readings, not temperatures of absent LED/BT
+peripherals. Windows does not have a universally available standard CPU/rail
+sensor provider; keep unavailable values absent or explicitly supply a trusted
+sensor-export file in these units. No WMI polling subprocess or invented reading
+is added to the firmware loop.
 
 With interactive stdin enabled, `help` lists bounded, explicitly named fixtures:
 

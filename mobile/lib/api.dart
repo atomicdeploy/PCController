@@ -9,6 +9,7 @@ import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'models.dart';
+import 'unified/endpoint_address.dart';
 
 class PakarApi {
   PakarApi({
@@ -81,20 +82,10 @@ class PakarApi {
       _transportOwner == baseUrl ? _discoveredBaseUrl ?? baseUrl : baseUrl;
 
   static String normalizeEndpoint(String value) {
-    final text = value.trim();
-    final uri = Uri.tryParse(text.contains('://') ? text : 'http://$text');
-    if (uri == null ||
-        !['http', 'https'].contains(uri.scheme) ||
-        uri.host.isEmpty ||
-        uri.userInfo.isNotEmpty ||
-        uri.hasQuery ||
-        uri.hasFragment ||
-        (uri.path.isNotEmpty && uri.path != '/')) {
-      throw const FormatException(
-        'Enter an HTTP(S) device hostname or origin without credentials or a path',
-      );
-    }
-    return uri.replace(path: '').toString();
+    return EndpointAddress.parse(
+      value,
+      allowServicePath: false,
+    ).origin.toString();
   }
 
   Uri _uri(String base, String path, [Map<String, String>? query]) =>

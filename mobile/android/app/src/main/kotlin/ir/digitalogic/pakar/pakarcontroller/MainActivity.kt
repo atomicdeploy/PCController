@@ -14,6 +14,9 @@ import java.util.concurrent.Executors
 class MainActivity : FlutterActivity() {
     private var discovery: DiscoveryChannel? = null
     private var toneMirror: ToneMirrorChannel? = null
+    private var automation: MethodChannel? = null
+    private var preferences: PreferencesChannel? = null
+    private var upgrades: UpgradeChannel? = null
     private val io = Executors.newSingleThreadExecutor()
     private var pending: MethodChannel.Result? = null
     private var maximum = 0
@@ -25,8 +28,12 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        preferences = PreferencesChannel(this, flutterEngine.dartExecutor.binaryMessenger)
+        upgrades = UpgradeChannel(this, flutterEngine.dartExecutor.binaryMessenger)
         discovery = DiscoveryChannel(this, flutterEngine.dartExecutor.binaryMessenger)
         toneMirror = ToneMirrorChannel(this, flutterEngine.dartExecutor.binaryMessenger)
+        automation = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "ir.digitalogic.pccontroller/automation")
+        AutomationBridge.channel = automation
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "ir.digitalogic.pccontroller/documents")
             .setMethodCallHandler { call, result ->
                 try {
@@ -127,12 +134,23 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        preferences?.launch()
+    }
+
     override fun onPause() {
         toneMirror?.stopAll() // Native cutoff also works if Dart stalls or loses lifecycle delivery.
         super.onPause()
     }
 
     override fun onDestroy() {
+        upgrades?.close()
+        upgrades = null
+        if (AutomationBridge.channel === automation) AutomationBridge.channel = null
+        automation = null
+        preferences?.close(); preferences = null
         toneMirror?.close(); toneMirror = null
         discovery?.close(); discovery = null
         closed = true

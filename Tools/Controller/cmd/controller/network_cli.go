@@ -215,7 +215,7 @@ func runNetwork(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 		flags := flag.NewFlagSet("network advertise", flag.ContinueOnError)
 		flags.SetOutput(stderr)
 		enabled := flags.Bool("enabled", true, "enable or disable advertisement")
-		protocols := flags.String("protocols", "dns-sd,ssdp,upnp,ws-discovery,broadcast,netbios", "comma-separated protocols")
+		protocols := flags.String("protocols", "dns-sd,ssdp,upnp,ws-discovery,broadcast,netbios,mndp", "comma-separated protocols")
 		instance := flags.String("instance", "", "advertised instance name")
 		broadcastPort := flags.Int("broadcast-port", discovery.BroadcastPort, "UDP broadcast discovery port")
 		if err := flags.Parse(args[1:]); err != nil {
@@ -234,6 +234,7 @@ func runNetwork(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 			configured.SSDPEnabled, configured.UPnPEnabled = options.SSDP, options.UPnP
 			configured.WSDiscoveryEnabled, configured.BroadcastEnabled = options.WSDiscovery, options.Broadcast
 			configured.NetBIOSEnabled = options.NetBIOS
+			configured.MNDPEnabled = options.MNDP
 		}
 		primaryContext, stopPrimary := context.WithTimeout(context.Background(), time.Second)
 		havePrimary := primaryAvailable(primaryContext)
@@ -259,7 +260,7 @@ func runNetwork(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 	case "discover", "list":
 		flags := flag.NewFlagSet("network discover", flag.ContinueOnError)
 		flags.SetOutput(stderr)
-		protocols := flags.String("protocols", "dns-sd,ssdp,upnp,ws-discovery,broadcast,netbios", "comma-separated protocols")
+		protocols := flags.String("protocols", "dns-sd,ssdp,upnp,ws-discovery,broadcast,netbios,mndp", "comma-separated protocols")
 		timeout := flags.Duration("timeout", 3*time.Second, "discovery timeout")
 		if err := flags.Parse(args[1:]); err != nil {
 			return err
@@ -284,7 +285,7 @@ func runNetwork(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 			"timeout_ms": optionsTimeoutMilliseconds(scanDuration),
 			"mdns":       options.MDNS, "dns_sd": options.DNSSD, "ssdp": options.SSDP,
 			"upnp": options.UPnP, "ws_discovery": options.WSDiscovery,
-			"broadcast": options.Broadcast, "netbios": options.NetBIOS,
+			"broadcast": options.Broadcast, "netbios": options.NetBIOS, "mndp": options.MNDP,
 		}, &instances)
 		stopScan()
 		if err != nil {
@@ -303,7 +304,7 @@ func runNetwork(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 		flags.SetOutput(stderr)
 		target := flags.String("target", "", "discovered name, hostname, instance id, or address")
 		tokenRef := flags.String("token-ref", "", "OS-vault or environment bearer-token reference")
-		protocols := flags.String("protocols", "dns-sd,ssdp,upnp,ws-discovery,broadcast,netbios", "comma-separated protocols")
+		protocols := flags.String("protocols", "dns-sd,ssdp,upnp,ws-discovery,broadcast,netbios,mndp", "comma-separated protocols")
 		timeout := flags.Duration("timeout", 15*time.Second, "discovery and connection timeout")
 		origin := flags.String("origin", "", "allowed HTTP origin (local hostname by default)")
 		if err := flags.Parse(args[1:]); err != nil {
@@ -464,6 +465,7 @@ func parseDiscoveryOptions(protocols string) (discovery.Options, error) {
 		case "all":
 			options.MDNS, options.DNSSD, options.SSDP, options.UPnP = true, true, true, true
 			options.WSDiscovery, options.Broadcast, options.NetBIOS = true, true, true
+			options.MNDP = true
 		case "mdns", "dns-sd", "dnssd":
 			options.MDNS, options.DNSSD = true, true
 		case "ssdp":
@@ -476,6 +478,8 @@ func parseDiscoveryOptions(protocols string) (discovery.Options, error) {
 			options.Broadcast = true
 		case "netbios", "nbns":
 			options.NetBIOS = true
+		case "mndp":
+			options.MNDP = true
 		case "":
 		default:
 			return discovery.Options{}, fmt.Errorf("unsupported discovery protocol %q", protocol)
@@ -504,6 +508,9 @@ func enabledProtocolNames(value appconfig.Discovery) []string {
 	if value.NetBIOSEnabled {
 		result = append(result, "netbios")
 	}
+	if value.MNDPEnabled {
+		result = append(result, "mndp")
+	}
 	return result
 }
 
@@ -511,6 +518,10 @@ func resolveDiscoveredInstance(instances []discovery.Instance, target string) (d
 	target = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(target), "."))
 	matches := make([]discovery.Instance, 0, 1)
 	for _, instance := range instances {
+		// Other products are visible neighbours, not PCController bridge targets.
+		if instance.Product != "" && instance.Product != "pccontroller" {
+			continue
+		}
 		values := []string{instance.Name, instance.Host, instance.USN}
 		values = append(values, instance.Addresses...)
 		if instance.Public != nil {

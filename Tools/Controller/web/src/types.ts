@@ -206,6 +206,10 @@ export interface MotionSnapshot {
 }
 
 export interface Snapshot {
+	connection_generation?: number
+	pwm_values?: PWMValues
+	pwm_revision?: number
+	pwm_updated?: string
 	host_instance_id?: string
   connected: boolean
   paused: boolean
@@ -252,6 +256,10 @@ export interface Snapshot {
 }
 
 export interface StatusUpdate {
+	host_instance_id?: string
+	connection_generation?: number
+	board_connected?: boolean
+	have_status?: boolean
   time: string
   status: ControllerStatus
   error?: string
@@ -512,11 +520,12 @@ export interface HostUISettings {
 
 export interface PeripheralDescriptor {
   key: string
-  kind: 'relay' | 'motion' | 'pwm' | 'display' | 'sensor'
+  kind: 'relay' | 'motion' | 'seat' | 'pwm' | 'display' | 'sensor'
   role: string
   index: number
   default_name: string
-  control: 'relay' | 'motion' | 'pwm-user' | 'role-specific' | 'read-only'
+  name?: string
+  control: 'relay' | 'motion' | 'seat' | 'seat-internal' | 'pwm-user' | 'role-specific' | 'read-only'
 	icon?: string
 	output_type?: PWMOutputType
 	curve?: PWMCurve
@@ -525,10 +534,13 @@ export interface PeripheralDescriptor {
 
 export interface ControlDescriptor {
   key: string
-  kind: 'relay' | 'side' | 'mosfet'
+  kind: 'relay' | 'side' | 'seat' | 'mosfet'
   order: number
   name: string
-  control: 'relay' | 'motion' | 'pwm-user'
+  control: 'relay' | 'motion' | 'seat' | 'pwm-user' | 'role-specific'
+  hidden?: boolean
+  locked?: boolean
+  group?: string
 	icon?: string
 	output_type?: PWMOutputType
 	curve?: PWMCurve
@@ -542,6 +554,10 @@ export interface PeripheralSettings {
 }
 
 export interface PWMValues {
+	host_instance_id?: string
+	connection_generation?: number
+	revision?: number
+	time?: string
   available: boolean
   selected_channel: number
   values: number[]

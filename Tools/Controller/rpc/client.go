@@ -1,12 +1,16 @@
 package rpc
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
+	udp "pccontroller.local/controller/transport/udp"
+	"sync"
+	"time"
 )
 
 type Caller interface {
@@ -73,6 +77,9 @@ func Dial(endpoint Endpoint, options ClientOptions) (*Client, error) {
 	if err := endpoint.Validate(); err != nil {
 		return nil, err
 	}
+	if endpoint.Transport == TransportUDP {
+		return NewClient(&udpCaller{address: endpoint.Address})
+	}
 	return NewClient(&streamCaller{endpoint: endpoint, options: options})
 }
 
@@ -81,7 +88,74 @@ func Call(ctx context.Context, endpoint Endpoint, request Request, options Clien
 	if err != nil {
 		return Response{}, err
 	}
+	defer client.Close()
 	return client.Call(ctx, request)
+}
+
+// Close releases a retained UDP client socket. Stream/in-process clients need
+// no lifetime resource and remain unaffected.
+func (client *Client) Close() error {
+	if client == nil {
+		return nil
+	}
+	if c, ok := client.caller.(interface{ Close() error }); ok {
+		return c.Close()
+	}
+	return nil
+}
+
+type udpCaller struct {
+	sync.Mutex
+	address  string
+	endpoint *udp.Endpoint
+	closed   bool
+}
+
+func (c *udpCaller) Close() error {
+	c.Lock()
+	defer c.Unlock()
+	c.closed = true
+	if c.endpoint != nil {
+		c.endpoint.Close()
+	}
+	return nil
+}
+func (c *udpCaller) Call(ctx context.Context, request Request) (Response, error) {
+	c.Lock()
+	if c.closed {
+		c.Unlock()
+		return Response{}, errors.New("UDP RPC client is closed")
+	}
+	if c.endpoint == nil {
+		var err error
+		c.endpoint, err = udp.StartClient(context.Background(), c.address)
+		if err != nil {
+			c.Unlock()
+			return Response{}, err
+		}
+	}
+	ep := c.endpoint
+	c.Unlock()
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	v, err := ep.Call(ctx, "remote", udp.Request, request)
+	if err != nil {
+		return Response{}, err
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return Response{}, err
+	}
+	var response Response
+	decoder := json.NewDecoder(bytes.NewReader(b))
+	decoder.UseNumber()
+	if err = decoder.Decode(&response); err != nil {
+		return response, err
+	}
+	if response.Error != nil {
+		return response, response.Error
+	}
+	return response, nil
 }
 
 func (caller *streamCaller) Call(ctx context.Context, request Request) (Response, error) {

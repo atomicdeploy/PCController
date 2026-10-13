@@ -293,6 +293,7 @@ __attribute__((noinline)) void serviceController() {
 #endif
   buzzer.update(loopNow);
   serviceBuzzerPush();
+  servicePwmPush(loopNow);
 
   if (streamPeriodMs != 0 &&
       static_cast<uint32_t>(loopNow - lastTelemetryAt) >= streamPeriodMs) {

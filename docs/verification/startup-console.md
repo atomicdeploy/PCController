@@ -1,0 +1,71 @@
+# Windows startup console and TUI first paint
+
+Cafe's reported blank window was a Web host, not a running terminal UI:
+`controller.exe web --no-open --no-tray`, interactive session 4. The background
+primary survived with a visible classic console after the host updater restarted
+a console-subsystem executable. No TUI renderer existed to fill that window.
+
+The first candidate's live diagnostics found that this explicit background host
+also inherited a console stream. A redirected-stream-only guard therefore
+preserved the blank window. The corrected rule permits hiding an explicitly
+UI-less Web host's own window only when the current process is its sole owner.
+Ordinary Web commands with interactive streams, shared terminals, TUI commands
+and machine-readable invocations retain their presentation. No arbitrary-window
+lookup, console detachment, process termination or board command is introduced.
+
+Windows updater helpers and replacements use CREATE_NO_WINDOW for background
+work without combining conflicting CREATE_NEW_CONSOLE/DETACHED_PROCESS flags.
+Interactive terminal I/O and the replacement's normal Ctrl+C behavior remain
+preserved. A bounded, one-shot 12-second startup recheck handles an old helper
+sharing the console until its 10-second health commit; no repeating poll is added.
+The bridge diagnostic read reports current-process console state freshly.
+
+Actual TUI invocations print the product title and startup text immediately,
+before environment/configuration and transport initialization. Remote TUI setup
+adds a connecting line before the initial IPC handshake and settings reads.
+Both are restricted to real terminal output; JSON/version/helper output is not
+contaminated. No fabricated percentage or board readiness is displayed. This
+does not claim the startup handshakes have become instantaneous.
+
+Pure regressions cover command classification, explicit background flags,
+startup text/pipe omission and Windows replacement presentation. Tests and CI
+are intentionally not run under the user's standing instruction. Staged builds
+still perform TypeScript, fresh Web bundling, native compilation, C ABI smoke
+and package integrity checks. The build now reuses npm's installed lock graph
+only when declarations, lock metadata, installed versions and package-directory
+timestamps match; invalid caches still use npm ci. This avoids destructive
+dependency reinstall churn without reusing an old Web bundle.
+
+## Cafe delivery, 13 October 2026
+
+The corrected staged package is `.build/package/host-107216`; host source digest
+`bd686fdad96ee99a0463c7e19f737088d058cb4634a169eefc6c73f39bc9ce94`,
+controller SHA-256
+`f28330f2ddd9336599be4178290a81c239582ba295ae64c8c37b2e2763ffa11a`.
+The 30.4-second build passed the selected compilation/package checks with
+`locked-cache-verified` dependencies and skipped suites. It preserves the
+previously deployed development lineage; it is not a package of the isolated
+main-based PR tree.
+
+Primary-owned update `op-2b1ae95fc68b3871` completed with
+`terminal_verified=true`. A fresh bridge RPC identified PID 83576 in Cafe's
+interactive session 4 and reported `console_visible=false`,
+`console_attached=true`, `console_sole_owner=true`,
+`console_interactive_streams=true`. The installed executable hash matches the
+package. Thus the inherited console was hidden, not detached or forcibly killed.
+The previous candidate `5c85b2479cff642787312233afc3efc0f18e06335248180289ed4c9cd96c21f2`
+had correctly reported visible=true and was not falsely accepted as fixed.
+
+Controller configuration remained semantically unchanged against the private
+named backup `verification/startup-console/config.json` (backup SHA-256
+`82a8fd03af13add569555f741905a9d91cb650ce95d133e5e71215adcfbedba5`).
+Pealayer remained paused, connected to the controller and hardware, with no
+hardware/sync error, no requested Play, and matching desired/prepared/clock ACK
+revision 87. No physical output command, playback start, firmware flash or
+unrelated console/process action was issued.
+
+The source checkpoint is `e05ebc9b`, isolated onto main as `7ebf4a59` without
+switching the shared checkout or creating a worktree. Concurrent mobile edits
+remain outside the fix. The actual TUI first paint has not been captured on Cafe:
+the running surface is a background Web host. Console visibility was verified
+through process-local diagnostics, not a claimed screenshot/human UI acceptance.

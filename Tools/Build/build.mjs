@@ -771,7 +771,7 @@ export function createPlan(options, identity, platform = process.platform) {
 	}
 	if (!options.cleanOnly && options.host) {
 		actions.push({ id: 'embedded-defaults', stage: 'Stage the exact validated firmware and safe EEPROM pair for host embedding', hardware: false })
-		actions.push(commandAction('web-install', 'Install locked web dependencies', 'npm', ['ci', '--no-audit', '--no-fund'], WEB_ROOT))
+		actions.push(commandAction('web-install', 'Verify locked web dependencies; install if cache is invalid', 'npm', ['ci', '--no-audit', '--no-fund'], WEB_ROOT))
 		actions.push(commandAction('web-typecheck', 'Type-check embedded web application', 'npm', ['run', 'typecheck'], WEB_ROOT))
 		if (options.tests) actions.push(commandAction('web-test', 'Run embedded web tests', 'npm', ['run', 'test', '--', '--passWithNoTests'], WEB_ROOT))
 		actions.push(commandAction('web-build', 'Build embedded web application', 'npm', ['run', 'build'], WEB_ROOT))
@@ -1198,6 +1198,35 @@ function verifyEmbeddedWebBuild(expectedAppName) {
 	return identity
 }
 
+export function reusableWebDependencies(webRoot = WEB_ROOT) {
+	try {
+		const lock = JSON.parse(readFileSync(join(webRoot, 'package-lock.json'), 'utf8'))
+		const declared = JSON.parse(readFileSync(join(webRoot, 'package.json'), 'utf8'))
+		const hiddenPath = join(webRoot, 'node_modules', '.package-lock.json')
+		const installed = JSON.parse(readFileSync(hiddenPath, 'utf8'))
+		const hiddenTime = statSync(hiddenPath).mtimeMs
+		if (lock.lockfileVersion < 3 || installed.lockfileVersion < 3 || !lock.packages || !installed.packages) return false
+		const spec = value => JSON.stringify(Object.entries(value || {}).sort(([left], [right]) => left.localeCompare(right)))
+		for (const field of ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies']) {
+			if (spec(declared[field]) !== spec(lock.packages['']?.[field])) return false
+		}
+		const actual = Object.entries(installed.packages)
+		if (!actual.length || actual.length > 10000) return false
+		for (const [path, metadata] of actual) {
+			if (!path.startsWith('node_modules/') || path.split('/').some(part => part === '..' || part === '.' || !part)) return false
+			const expected = lock.packages[path]
+			if (!expected || metadata.link || expected.link || ['version', 'resolved', 'integrity'].some(field => metadata[field] !== expected[field])) return false
+			const directory = join(webRoot, ...path.split('/'))
+			if (!statSync(directory).isDirectory() || statSync(directory).mtimeMs > hiddenTime) return false
+			if (JSON.parse(readFileSync(join(directory, 'package.json'), 'utf8')).version !== expected.version) return false
+		}
+		for (const [path, metadata] of Object.entries(lock.packages)) {
+			if (path.startsWith('node_modules/') && !metadata.optional && !installed.packages[path]) return false
+		}
+		return true
+	} catch { return false }
+}
+
 function buildWebUI(options, env, log, expectedAppName) {
 	assertNodeVersion(MINIMUM_WEB_NODE, 'the embedded web build')
 	if (!existsSync(WEB_LOCK)) {
@@ -1221,8 +1250,9 @@ function buildWebUI(options, env, log, expectedAppName) {
 	runGoBuildHelper(go, 'generate-icon', './winres/generate_icon.go', ['./winres/icon.png', './winres/icon.ico'], env, options)
 	copyFileSync(join(HOST_ROOT, 'winres', 'icon.ico'), join(WEB_ROOT, 'public', 'favicon.ico'))
 	const inputsBefore = directoryIdentity(WEB_ROOT, true)
-	log.stage('🔒', 'Installing locked web dependencies')
-	invoke(['ci', '--no-audit', '--no-fund'])
+	const reuseDependencies = reusableWebDependencies()
+	log.stage('🔒', reuseDependencies ? 'Reusing verified locked web dependencies' : 'Installing locked web dependencies')
+	if (!reuseDependencies) invoke(['ci', '--no-audit', '--no-fund'])
 	log.stage('🧭', 'Type-checking embedded web application')
 	invoke(['run', 'typecheck'])
 	if (options.tests) {
@@ -1238,7 +1268,7 @@ function buildWebUI(options, env, log, expectedAppName) {
 	const dist = verifyEmbeddedWebBuild(expectedAppName)
 	log.detail(`embedded web: ${dist.files} files, SHA256 ${dist.sha256}`)
 	return {
-		dependencies: 'npm-ci',
+		dependencies: reuseDependencies ? 'locked-cache-verified' : 'npm-ci',
 		typecheck: 'passed',
 		tests: options.tests ? 'passed' : 'skipped',
 		build: 'verified',

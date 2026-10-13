@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"time"
 
+	controller "pccontroller.local/controller"
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/native"
 )
@@ -19,36 +21,96 @@ type pwmChannelValue struct {
 }
 
 type pwmValues struct {
-	Available       bool              `json:"available"`
-	SelectedChannel byte              `json:"selected_channel"`
-	Values          [16]uint16        `json:"values"`
-	Channels        []pwmChannelValue `json:"channels"`
+	HostInstanceID       string            `json:"host_instance_id"`
+	ConnectionGeneration uint64            `json:"connection_generation"`
+	Revision             uint64            `json:"revision"`
+	Time                 time.Time         `json:"time"`
+	Available            bool              `json:"available"`
+	SelectedChannel      byte              `json:"selected_channel"`
+	Values               [16]uint16        `json:"values"`
+	Channels             []pwmChannelValue `json:"channels"`
 }
 
 func (service *Service) pwmValues(ctx context.Context) (pwmValues, error) {
+	ctx, cancel := context.WithTimeout(ctx, pwmOperationTimeout)
+	defer cancel()
 	values, err := service.Client.PWMValues(ctx)
 	if err != nil {
 		return pwmValues{}, err
 	}
-	return service.describePWMValues(values), nil
+	_ = values
+	if values := service.cachedPWMValues(); values != nil {
+		return *values, nil
+	}
+	return pwmValues{}, fmt.Errorf("PWM readback owner changed")
+}
+
+func (service *Service) cachedPWMValues() *pwmValues {
+	snapshot := service.Client.Snapshot()
+	if snapshot.PWMValues == nil {
+		return nil
+	}
+	values := service.describePWMValuesForSnapshot(*snapshot.PWMValues, snapshot)
+	values.HostInstanceID, values.ConnectionGeneration = strings.TrimSpace(service.HostInstanceID), snapshot.ConnectionGeneration
+	values.Revision, values.Time = snapshot.PWMRevision, snapshot.PWMUpdated
+	return &values
+}
+
+// Write and readback share a budget below native clients' 3-second socket
+// deadline. Never retry a write whose acknowledgement may have been lost.
+const pwmOperationTimeout = 2 * time.Second
+
+type pwmConfirmationError struct{ cause error }
+
+func (err *pwmConfirmationError) Error() string {
+	return "PWM change acknowledged, but readback was not received. Refresh hardware values; the change was not retried."
+}
+func (err *pwmConfirmationError) Unwrap() error { return err.cause }
+
+func changePWMAndReadback(ctx context.Context, change func(context.Context) error, read func(context.Context) (pwmValues, error)) (pwmValues, error) {
+	ctx, cancel := context.WithTimeout(ctx, pwmOperationTimeout)
+	defer cancel()
+	if err := change(ctx); err != nil {
+		return pwmValues{}, err
+	}
+	values, err := read(ctx)
+	if err != nil {
+		return pwmValues{}, &pwmConfirmationError{cause: err}
+	}
+	return values, nil
+}
+
+func (service *Service) setPWMAndReadback(ctx context.Context, channel byte, raw uint16) (pwmValues, error) {
+	if err := service.rejectLockedPeripheral(fmt.Sprintf("pwm.%d", channel)); err != nil {
+		return pwmValues{}, err
+	}
+	return changePWMAndReadback(ctx, func(ctx context.Context) error {
+		return service.Client.SetPWMChannel(ctx, channel, raw)
+	}, service.pwmValues)
+}
+
+func (service *Service) clearPWMAndReadback(ctx context.Context) (pwmValues, error) {
+	return changePWMAndReadback(ctx, service.Client.AllPWMOff, service.pwmValues)
 }
 
 func (service *Service) describePWMValues(values native.PWMValues) pwmValues {
+	return service.describePWMValuesForSnapshot(values, service.Client.Snapshot())
+}
+
+func (service *Service) describePWMValuesForSnapshot(values native.PWMValues, snapshot controller.Snapshot) pwmValues {
 	config := service.hostConfig()
 	result := pwmValues{
 		Available: values.Available, SelectedChannel: values.SelectedChannel, Values: values.Values,
 		Channels: make([]pwmChannelValue, 0, appconfig.PWMChannelCount),
 	}
+	_, profile, _ := boardProfileForSnapshot(config, snapshot)
+	names := appconfig.PWMDisplayNames(config.UI, profile.Presentation)
 	for channel, raw := range values.Values {
 		channelConfig := appconfig.PWMChannel(config.UI, channel)
-		name, _ := appconfig.PeripheralDefaultName(appconfig.PWMChannelKey(channel))
-		if configured := config.UI.PeripheralNames[appconfig.PWMChannelKey(channel)]; strings.TrimSpace(configured) != "" {
-			name = strings.TrimSpace(configured)
-		}
 		result.Channels = append(result.Channels, pwmChannelValue{
 			Channel: channel, RawValue: raw,
 			LogicalPercent: math.Round(appconfig.PWMPercentFromRaw(raw, channelConfig)*1000) / 1000,
-			Name:           name, Config: channelConfig,
+			Name:           names[channel], Config: channelConfig,
 		})
 	}
 	return result

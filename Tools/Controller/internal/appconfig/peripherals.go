@@ -281,6 +281,22 @@ func ProfileDescriptors(mode string, exposeRawRelays bool, legacyNames map[strin
 	return peripherals, controls
 }
 
+// PWMDisplayNames uses the same presentation resolver as the full catalog,
+// without allocating unrelated controls or a second snapshot at frame cadence.
+func PWMDisplayNames(ui UI, presentation map[string]PeripheralPresentation) [PWMChannelCount]string {
+	var names [PWMChannelCount]string
+	for channel := range names {
+		key := PWMChannelKey(channel)
+		fallback, _ := PeripheralDefaultName(key)
+		name := strings.TrimSpace(resolvePresentation(key, fallback, ui.PeripheralNames, presentation).Name)
+		if name == "" {
+			name = fallback
+		}
+		names[channel] = name
+	}
+	return names
+}
+
 func resolvePresentation(key, defaultName string, legacyNames map[string]string, presentation map[string]PeripheralPresentation) PeripheralPresentation {
 	result := presentation[key]
 	if result.Name == "" {

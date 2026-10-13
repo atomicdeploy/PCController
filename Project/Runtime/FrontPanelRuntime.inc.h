@@ -3,11 +3,19 @@
 // Menu, keys, display, and buzzer
 // -----------------------------------------------------------------------------
 
+// Share the same fixed label dwell arithmetic across its four call sites.
+#if defined(__AVR__)
+__attribute__((noinline))
+#endif
+void holdMenuLabel(uint32_t at) {
+  menuLabelEndsAt = at + 650;
+}
+
 // Shows one packed four-character label for a short dwell.
 void showPackedLabel(const char *labels, uint8_t index, uint32_t at) {
   display.showText(reinterpret_cast<const __FlashStringHelper *>(
       labels + static_cast<uint8_t>(index << 2)));
-  menuLabelEndsAt = at + 650;
+  holdMenuLabel(at);
 }
 
 // Shows an ordinary menu label from its compile-selected storage. EEPROM labels
@@ -18,7 +26,7 @@ void showMenuLabel(uint8_t index, uint32_t at) {
   char label[EepromMenuLabels::LabelWidth];
   EepromMenuLabels::copy(index, label);
   display.showText(label);
-  menuLabelEndsAt = at + 650;
+  holdMenuLabel(at);
 #else
   showPackedLabel(MenuLabels, index, at);
 #endif
@@ -204,7 +212,7 @@ void programService(uint32_t at) {
     if (editLabel < EditLabelCount) {
       display.showText(reinterpret_cast<const __FlashStringHelper *>(
           EditLabels + static_cast<uint8_t>(editLabel << 2)));
-      menuLabelEndsAt = at + 650;
+      holdMenuLabel(at);
       return;
     }
 
@@ -367,8 +375,7 @@ void setSilentMode(bool silent, uint32_t at) {
 
 // Expands an EEPROM 8-bit user value over the full 12-bit PWM range.
 uint16_t userPwm12(uint8_t value) {
-  return static_cast<uint16_t>(
-      static_cast<uint16_t>(value) * 16U + value / 16U);
+  return TransitionMath::expandByte12(value);
 }
 
 // Applies all persisted live settings without changing their EEPROM ownership.
@@ -838,7 +845,7 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
 #endif
       } else {
         display.showText(commonText(TextError));
-        menuLabelEndsAt = actionNow + 650;
+        holdMenuLabel(actionNow);
         statusLeds.playCue(StatusLedCue::Discard, 650, actionNow);
         return;
       }

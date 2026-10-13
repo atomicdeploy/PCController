@@ -1,0 +1,6 @@
+Droid Sans Mono Regular, Version 1.00
+Digitized data copyright 2007, Google Corporation.
+Source: PU850 app/src/main/res/font/monospace.ttf
+License metadata in the original font: Apache License, Version 2.0.
+See DroidSansMono-LICENSE.txt for the full license.
+https://www.apache.org/licenses/LICENSE-2.0

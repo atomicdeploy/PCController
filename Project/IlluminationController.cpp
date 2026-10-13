@@ -17,9 +17,7 @@ void IlluminationController::begin(PwmController &pwm, bool doorOpen,
   pwm_ = &pwm;
   currentBrightness_ =
       mode_ == IlluminationMode::On ? onBrightness_ : offBrightness_;
-  pwm_->setEnclosureIllumination(
-      static_cast<uint16_t>(currentBrightness_) * 16U +
-      currentBrightness_ / 16U);
+  pwm_->setEnclosureIllumination(TransitionMath::expandByte12(currentBrightness_));
   lastFadeAt_ = now;
   initialized_ = true;
 
@@ -56,8 +54,7 @@ void IlluminationController::service(bool doorOpen, bool allowLedUpdate,
   // jitter while preserving the responsive 20 ms control cadence.
   lastFadeAt_ = now;
   const uint8_t next = TransitionMath::easedByte(currentBrightness_, target);
-  if (pwm_->setEnclosureIllumination(
-          static_cast<uint16_t>(next) * 16U + next / 16U)) {
+  if (pwm_->setEnclosureIllumination(TransitionMath::expandByte12(next))) {
     currentBrightness_ = next;
   }
 }

@@ -19,6 +19,35 @@ function values(channel: number, value: number): PWMValues {
 afterEach(() => vi.useRealTimers())
 
 describe('authoritative PWM contract', () => {
+  it('protects a live gesture between acknowledged writes and flushes on release', async () => {
+    const scheduler = new PWMMutationScheduler({
+      commit: async (channel, value) => values(channel, value),
+      onDraft: vi.fn(), onAuthoritative: vi.fn(), onPending: vi.fn(), onError: vi.fn(),
+    })
+    scheduler.beginEdit(0)
+    scheduler.schedule(0, 1000, true)
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve()
+    expect(scheduler.pendingChannels()).toContain(0)
+    expect(scheduler.isEditing(0)).toBe(true)
+    scheduler.endEdit(0)
+    scheduler.dispose()
+    expect(scheduler.pendingChannels()).toEqual([])
+  })
+  it('an older failed write cannot roll back a newer desired value', async () => {
+    let fail: ((reason: Error) => void) | undefined
+    const onError = vi.fn()
+    let calls = 0
+    const scheduler = new PWMMutationScheduler({
+      commit: (channel, value) => ++calls === 1 ? new Promise((_, reject) => { fail = reject }) : Promise.resolve(values(channel, value)),
+      onDraft: vi.fn(), onAuthoritative: vi.fn(), onPending: vi.fn(), onError,
+    })
+    scheduler.schedule(0, 100, true)
+    scheduler.schedule(0, 1200, true)
+    fail?.(new Error('old write failed'))
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve()
+    expect(onError).toHaveBeenCalledWith(0, expect.any(Error), false)
+    scheduler.dispose()
+  })
 	it('maps perceptual lighting brightness without changing linear motor duty', () => {
 		const lighting = { output_type: 'lighting' as const, icon: 'lightbulb', curve: 'gamma' as const, gamma: 2.2 }
 		const motor = { output_type: 'motor' as const, icon: 'settings', curve: 'linear' as const, gamma: 1 }

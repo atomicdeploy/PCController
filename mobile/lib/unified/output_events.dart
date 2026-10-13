@@ -3,6 +3,10 @@ import 'transport.dart' show Json, object;
 
 Json applyOutputEvent(Json snapshot, Json event) {
   final metadata = object(event['metadata']);
+  final generation = int.tryParse('${metadata['connection_generation']}');
+  if (generation != null && generation != snapshot['connection_generation']) {
+    return snapshot;
+  }
   if (event['kind'] == 'front_panel.segment') {
     final raw = metadata['raw_segments'],
         brightness = int.tryParse('${metadata['brightness']}');

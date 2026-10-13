@@ -22,6 +22,9 @@ const policyDefinitionPaths = new Set([
 
 // Current-product links are permitted only in maintained public entry points.
 const repositoryIdentityPaths = new Set([
+  "docs/WEB-HOST-TERMINAL.md",
+  "docs/verification/serial-response-deadlines.md",
+  "docs/verification/web-channel-controls.md",
   "README.md",
   "docs/Alpha-Delivery-Ledger.md",
   "docs/CI-CD-and-Releases.md",
@@ -36,6 +39,7 @@ const repositoryIdentityPaths = new Set([
 // repository; private paths, stale-origin language and unrelated URLs remain
 // forbidden.
 const reviewedExternalRepositories = new Map([
+  ["docs/verification/serial-response-deadlines.md", new Set(["toghroltp/pealayer"])],
   ["mobile/assets/fonts/Vazirmatn-OFL.txt", new Set(["rastikerdar/vazirmatn"])],
   ["mobile/PAKAR-README.md", new Set(["atomicdeploy/pakarcontroller"])],
   ["docs/Shared-Production-Firmware.md", new Set(["mcudude/megacore"])],

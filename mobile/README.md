@@ -1,7 +1,7 @@
 # PCController native controller
 
 An independently packaged Flutter Android phone/tablet app with PCController
-and Pealayer mini-apps. It is a native Flutter surface, not an embedded Web page.
+and Pealayer activities in one workspace. It is a native Flutter surface.
 PakarController remains a separate project and Android installation.
 
 ## Activities
@@ -15,16 +15,52 @@ PakarController remains a separate project and Android installation.
   durable operation status and WebSocket-triggered progress refresh. Toolchain
   provisioning is indeterminate, never a fabricated 0% progress bar.
 - Pealayer: playback/stop/seek/volume/mute, media opening, workspaces,
-  effect playback/cue placement and opening the existing host cue editor.
+  effect playback/cue placement and a native cue timing editor. Intrinsic
+  duration remains read-only; moving and resizing use the current host APIs.
 - Workspace: local drafts and a native sequence designer with selectable step
-  rows, timing/duration/repetition fields and dimmed repetition previews. Existing
+  rows, timeline dragging/resizing, zoom, snapping, RGB controls,
+  timing/duration/repetition fields and dimmed repetition previews. Existing
   descriptors retain their unknown fields; technical editing is collapsed.
   Publishing to PCController is explicit and does not run the effect.
 - Activities: bounded in-memory host events and request receipts. Request
   acceptance is not reported as physical completion or applied playback.
 
-Phones use bottom navigation; tablets use a rail and responsive multi-column
-cards. System light/dark preference and platform text scaling are retained.
+Phones use a compact activity strip; tablets use an activity sidebar with
+responsive multi-column cards. Live combines PCController telemetry and Pealayer
+playback. Channels, Panel, Studio, Devices, Firmware and Events share the same
+workspace. The connection strip uses one Connect, Cancel connection or Disconnect
+action per peer. Unavailable-only cards and dormant remote token inputs are omitted.
+
+Preferences select System/Light/Dark, layout, density, Digitalogic/Pealayer/
+original PakarController/Amber palettes or a custom color seed. Branding updates
+the app title and Android task icon/title. One or both launcher aliases may be
+enabled; both open the same unified workspace. The app's own UID applies aliases
+without restarting it. Native task/launcher behavior still requires device checks.
+Beep mirroring is explicitly enabled in Preferences and stops on backgrounding,
+loss of the selected peer or generation change. Transient audio failures preserve
+the saved mirroring intent; actual audibility/timing acceptance remains separate.
+
+Saved automatic discovery connects only one verified candidate for a vacant role;
+ambiguous advertisements, manual selections and explicit Disconnect opt-outs are
+preserved. Android network change notifications trigger bounded rescans for vacant
+roles. Discovery never takes physical authority or actuates an output.
+
+Devices provides explicit peer package sharing, push/download and verified
+staging actions. Incoming offers show source/package/version/digest/signers and
+expire without approval. Installation requires a separate action and Android
+consent. Protected local automation tokens remain in force. See
+[Peer upgrades](#unified-workspace-discovery-and-self-package-rpc) for the transport and package checks.
+
+Relay, motion
+and PWM cards distinguish observed state from commands/setpoints; stale values
+become Unknown. In-memory voltage/current/power and both temperature histories
+retain at most 600 observations (at most 2 Hz), with gaps for missing readings.
+No chart samples are persisted to disk. Live segment frames and TM1637 ACK
+detection work independently of full LCD/menu snapshot availability.
+
+Optional authenticated local JSON-RPC (HTTP/WebSocket), TCP NDJSON and Android
+Intent adapters are described in [Automation](AUTOMATION.md), including ADB,
+Termux and Tasker usage, exact safety fences and background limitations.
 
 ## Connections and mutually routed controls
 
@@ -81,6 +117,62 @@ Never reset shared ADB or automate a PIN/password/pattern. The user authorizes
 installation/launch of this separate app, not destructive physical board tests.
 
 ## Provenance and remaining acceptance
+
+### Unified workspace, discovery and self-package RPC
+
+PWM sliders preserve the editing/pending setpoint through command completion.
+The typed setter returns the host's post-acknowledgement board readback; reads
+issued before that write cannot replace it. The return value is the authoritative
+logical percentage after configured curve/quantization, not optimistic input.
+Changed owner, unavailable readback or lost acknowledgement stays uncertain and
+is never replayed. Actual Cafe read-only checks reported PWM available and no
+PWM/framing/CRC errors; no physical output was changed for this verification.
+Preferences support compact one-line relay cards (default) or explicit two-line
+On/Off controls, with the same observed state, lock and safety rules.
+
+The earlier basic Flutter design is rejected. `AGENTS.md` requires one contextual
+activity workspace, not product tabs; no unavailable-only cards or dormant peer
+token fields. The optional protected local automation API still keeps its actual
+security boundary. Android preview delivery is not design or physical acceptance.
+
+Discovery browses `_pccontroller._tcp`, `_pealayer._tcp` and `_digitalogic._tcp`
+using Android DNS-SD/mDNS, plus SSDP and MNDP. Each candidate is pinned to its
+responder's real origin and verified by a bounded read-only health probe with no
+proxy, redirects or credentials. Existing PCController health responses can be
+verified against their own native public directory. Duplicate endpoints collapse;
+this app's own sharing endpoint is excluded. Automatic connection applies only
+to a unique verified vacant role under saved intent; explicit Disconnect and
+live selections win. Actual network changes are coalesced, not probed per frame.
+
+Standard MNDP has no HTTP port. Digitalogic application advertisements add
+big-endian TLVs `0xff01` (product) and `0xff02` (two-byte API port). An identity-only
+RouterOS neighbour is not an invented controller on port 80. The MAC field is
+explicitly an application-scoped locally administered identity, not a board/NIC
+MAC. Generic advertisements never authorize hardware actions.
+
+`app.package.info/read` export only the installed single APK. The same protected
+local HTTP/WS/TCP/Android Intent RPC offers `app.upgrade.begin/write/finish/status/
+abort/install/permission/pull/push`. Chunks are at most 16 KiB, request/response
+JSON at most 32 KiB, one incoming transfer at most 128 MiB. Offsets are exact;
+lost mutation acknowledgements are not blindly retried. Storage is checked
+before 0% or staging creation. Digest, self-package, signer, newer version,
+minimum SDK and CPU compatibility are verified before Android installation.
+
+Opt-in foreground peer sharing uses port 18992 and the same package RPC. Public
+read-only export reveals no authoring, credentials or board/player proxy. A push
+requires an expiring receiver approval dialog and a short-lived capability pinned
+to one transfer/digest; the remote sender cannot invoke Install. Pull also verifies
+the source manifest. Android installation permission and consent remain explicit;
+`awaiting_android`/pending consent is not an installed receipt. There is no root,
+shell installer, uninstall, silent update or cross-app APK import. Staging is in
+the app's bounded private cache; only this module's own expired files are removed.
+Split installs cannot currently be exported as one APK.
+
+Source gates: focused Dart analysis, Android Kotlin compilation, Go build/vet,
+PCController Web type-check and Pealayer Cargo check passed. All-four-protocol LAN
+round trips, mutual device APK transfer/install, locked-device UI and hardware
+acceptance remain separate. Full CI/test-suite waits are not required for this
+iteration; retain those acceptance gaps rather than claiming production-ready.
 
 See [provenance](PROVENANCE.md) and [acceptance](ACCEPTANCE.md). The reference
 Pakar screens are retained in source/tests but are not the shipped entrypoint.

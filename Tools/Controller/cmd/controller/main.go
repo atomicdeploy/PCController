@@ -50,6 +50,7 @@ var (
 )
 
 func main() {
+	prepareStartupPresentation(os.Args[1:], os.Stdout)
 	if _, err := envfile.LoadProcess(); err != nil {
 		fmt.Fprintln(os.Stderr, "environment:", err)
 		os.Exit(1)
@@ -556,12 +557,24 @@ func runWebWithContext(
 	noAuto := flags.Bool("no-auto", false, "start with automatic connection paused")
 	noOpen := flags.Bool("no-open", false, "serve the web app without opening a browser")
 	noTray := flags.Bool("no-tray", false, "serve the web app without a native system-tray menu")
+	noTUI := flags.Bool("no-tui", false, "disable the attached TUI and hide this host's owned console window")
+	consoleOptions, err := addTUIConsoleFlags(flags, store.Current().UI.TUIConsole)
+	if err != nil {
+		return err
+	}
 	listen := flags.String("listen", "", "transient loopback IPC/WebUI listen address (does not change saved config)")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	if flags.NArg() != 0 {
-		return errors.New("usage: controller web [--listen 127.0.0.1:8787] [--no-open] [--no-tray] [--no-auto] [connection flags]")
+		return errors.New("usage: controller web [--listen 127.0.0.1:8787] [--no-open] [--no-tray] [--no-tui] [--no-auto] [connection flags]")
+	}
+	if err := consoleOptions.captureOverrides(flags); err != nil {
+		return err
+	}
+	tuiEnabled := !*noTUI && externalContext == nil && terminalOutput(stdout) && terminalOutput(os.Stdin)
+	if !tuiEnabled {
+		_, _ = consolewindow.HideBackground(true)
 	}
 	connection.captureOverrides(flags)
 	if err := buzzerOptions.captureOverrides(flags); err != nil {
@@ -609,6 +622,10 @@ func runWebWithContext(
 			if err := deliverExistingAppAction(context.Background(), initial, stdout); err != nil {
 				return err
 			}
+		}
+		if tuiEnabled {
+			configured := currentPrimaryEndpoint()
+			return runRemoteTUIContext(context.Background(), existing.Listen, configured.AuthToken, stdout, store, consoleOptions, false)
 		}
 		if *noOpen {
 			return nil
@@ -799,11 +816,23 @@ func runWebWithContext(
 	} else if !*noOpen {
 		fmt.Fprintln(stdout, "controller offline; browser will open after an authenticated connection")
 	}
+	var tuiDone <-chan error
+	if tuiEnabled {
+		done := make(chan error, 1)
+		tuiDone = done
+		configured := currentPrimaryEndpoint()
+		go func() {
+			done <- runRemoteTUIContext(ctx, configured.Listen, configured.AuthToken, stdout, store, consoleOptions, false)
+		}()
+	}
 	select {
 	case <-ctx.Done():
 		return nil
 	case <-primary.QuitRequested():
 		return nil
+	case err := <-tuiDone:
+		// An exited or failed terminal never leaves a blank visible web host.
+		return err
 	}
 }
 

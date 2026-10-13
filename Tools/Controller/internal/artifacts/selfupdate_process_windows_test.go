@@ -7,11 +7,37 @@ import (
 	"os"
 	"os/exec"
 	"reflect"
+	"syscall"
 	"testing"
 	"time"
 
 	"golang.org/x/sys/windows"
+	"pccontroller.local/controller/internal/consolewindow"
 )
+
+func TestBackgroundReplacementFlagsPreserveTUIAndSharedTerminals(t *testing.T) {
+	for _, test := range []struct {
+		args                []string
+		interactive, hidden bool
+		soleOwner           bool
+	}{
+		{[]string{"web", "--no-open", "--no-tray"}, false, true, false},
+		{[]string{"web", "--no-open", "--no-tray"}, true, false, true},
+		{[]string{"web", "--no-tui", "--no-open", "--no-tray"}, true, true, true},
+		{[]string{"web", "--no-tui"}, true, false, false},
+		{[]string{"web", "--no-open", "--no-tray"}, true, false, false},
+		{[]string{"web"}, true, false, true},
+		{nil, false, false, true},
+		{[]string{"--config", "custom.json", "tui"}, false, false, true},
+	} {
+		command := exec.Command("controller.exe")
+		command.SysProcAttr = &syscall.SysProcAttr{}
+		configureReplacementConsole(command, test.args, consolewindow.State{InteractiveStreams: test.interactive, SoleOwner: test.soleOwner})
+		if got := command.SysProcAttr.CreationFlags&windows.CREATE_NO_WINDOW != 0; got != test.hidden {
+			t.Fatalf("args=%q interactive=%v hidden=%v", test.args, test.interactive, got)
+		}
+	}
+}
 
 func TestWindowsReplacementLaunchClearsConsoleHandlerForCandidateAndRollback(t *testing.T) {
 	oldSetConsoleCtrlIgnored := setReplacementConsoleCtrlIgnored

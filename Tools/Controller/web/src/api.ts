@@ -1,5 +1,6 @@
 import type {
   CommandResult,
+	PWMValues,
   ControllerEvent,
   Snapshot,
   StatusUpdate,
@@ -222,6 +223,7 @@ export function execute(command: string, signal?: AbortSignal): Promise<CommandR
 
 /** Receives live status, event, and transport-lifecycle notifications. */
 export interface StreamHandlers {
+	pwm?: (value: PWMValues, source: StreamSource) => void
   status: (value: StatusUpdate, source: StreamSource) => void
   event: (value: ControllerEvent, source: StreamSource) => void
   snapshot?: (value: Snapshot, source: StreamSource) => void
@@ -339,6 +341,8 @@ export function connectStream(config: UIConfig, handlers: StreamHandlers): Strea
     let subscriptionAcknowledged = false
     const pendingStateEvents: ControllerEvent[] = []
     let pendingSnapshot: Snapshot | null = null
+	let pendingPWM: PWMValues | null = null
+	let pendingStatus: StatusUpdate | null = null
     const source = (): StreamSource => ({
       generation: currentGeneration,
       ...(sourceInstanceID ? { instanceID: sourceInstanceID } : {}),
@@ -399,14 +403,23 @@ export function connectStream(config: UIConfig, handlers: StreamHandlers): Strea
               deliverSnapshot(pendingSnapshot)
               pendingSnapshot = null
             }
+			if (pendingPWM) { handlers.pwm?.(pendingPWM, source()); pendingPWM = null }
+			if (pendingStatus) { handlers.status(pendingStatus, source()); pendingStatus = null }
           }
         }
-        if (value.method === 'controller.status') handlers.status(value.params as StatusUpdate, source())
+        if (value.method === 'controller.status') {
+			if (subscriptionAcknowledged) handlers.status(value.params as StatusUpdate, source())
+			else pendingStatus = value.params as StatusUpdate
+		}
+		if (value.method === 'controller.pwm.values') {
+			if (subscriptionAcknowledged) handlers.pwm?.(value.params as PWMValues, source())
+			else if (!pendingPWM || Number((value.params as PWMValues).revision) > Number(pendingPWM.revision)) pendingPWM = value.params as PWMValues
+		}
         if (value.method === 'controller.event') deliverEvent(value.params as ControllerEvent)
         if (value.method === 'controller.state') {
           const event = value.params as ControllerEvent
           if (subscriptionAcknowledged) deliverEvent(event)
-          else pendingStateEvents.push(event)
+          else { if (pendingStateEvents.length >= 256) pendingStateEvents.shift(); pendingStateEvents.push(event) }
         }
         if (value.method === 'controller.snapshot') {
           const snapshot = value.params as Snapshot

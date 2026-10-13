@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import 'output_events.dart';
+import 'endpoint_address.dart';
 
 typedef Json = Map<String, dynamic>;
 String? selectedControllerOrigin(
@@ -57,18 +58,7 @@ Json verifiedCatalog(dynamic value) {
 }
 
 Uri endpoint(String value) {
-  final uri = Uri.parse(value.trim());
-  if (!['http', 'https'].contains(uri.scheme) ||
-      uri.host.isEmpty ||
-      uri.userInfo.isNotEmpty ||
-      uri.hasQuery ||
-      uri.hasFragment ||
-      !['', '/'].contains(uri.path)) {
-    throw const FormatException(
-      'Use an HTTP(S) host and port, without credentials or a path.',
-    );
-  }
-  return uri.replace(path: '');
+  return EndpointAddress.parse(value, allowServicePath: false).origin;
 }
 
 class Rejected implements Exception {
@@ -83,6 +73,13 @@ class Uncertain implements Exception {
   @override
   String toString() =>
       'Acknowledgement unavailable. The action was not retried; refresh before trying again.';
+}
+
+class ConfirmationUnavailable extends Uncertain {
+  const ConfirmationUnavailable(this.message);
+  final String message;
+  @override
+  String toString() => message;
 }
 
 /// Native IO transport: credentials never appear in URLs, redirects or peers.
@@ -123,7 +120,7 @@ class PeerTransport {
     } catch (_) {
       if (body != null) throw const Uncertain();
       throw const Rejected(
-        'Host unavailable or invalid response. Check address, access token and network.',
+        'Host unavailable or invalid response. Check its address and network.',
       );
     }
   }
@@ -145,6 +142,14 @@ class PeerTransport {
       final error = object(result['error']);
       if (error['code'] is! int || error['message'] is! String) {
         throw const Uncertain();
+      }
+      final details = object(error['data']);
+      if (error['code'] == -32010 &&
+          details['kind'] == 'confirmation_unavailable' &&
+          details['resource'] == 'pwm' &&
+          details['write_acknowledged'] == true &&
+          details['retryable'] == false) {
+        throw ConfirmationUnavailable(error['message']);
       }
       throw Rejected(error['message']);
     }
@@ -313,17 +318,41 @@ String operationLabel(Json value) {
 class PeerSession extends ChangeNotifier {
   PeerSession({required this.controller});
   final bool controller;
+  void Function(Json)? onBuzzerNote;
   PeerTransport? transport;
   WebSocket? _socket;
   Timer? _retry, _freshness;
   int generation = 0, _attempt = 0;
   bool enabled = false, online = false, subscribed = false;
   String? error;
-  Json state = {}, peripherals = {}, operation = {};
+  Json state = {}, peripherals = {}, operation = {}, pwmValues = {};
+  DateTime? pwmUpdated, _lastPanelAttempt;
+  bool? _pwmAvailable;
+  String _panelOwner = '';
+  bool _pwmReading = false;
+  int _pwmRevision = 0, _pwmWriteSequence = 0;
+  int _pwmPushRevision = 0;
+  Json? _pendingPwmPush;
+  int _catalogRevision = 0;
+  int? _activePwmWrite;
+  Timer? _pwmTimer;
   List<Json> instances = [], artifacts = [], events = [];
   DateTime? received;
   int freshnessMs = 5000;
   int statusIntervalMs = 250;
+  // A continuous acknowledged live stream retains same-owner readback until a
+  // change event; degraded request/response reads keep their bounded age budget.
+  int get pwmFreshnessMs => freshnessMs.clamp(6000, 120000);
+  bool get pwmReadbackFresh =>
+      boardReady &&
+      _pwmAvailable != false &&
+      pwmUpdated != null &&
+      (liveStateAvailable ||
+          DateTime.now().difference(pwmUpdated!).inMilliseconds <
+              pwmFreshnessMs);
+  bool get liveStateAvailable =>
+      _socket != null && fresh && (!controller || subscribed);
+  DateTime? _lastFallbackRead;
   String websocketPath = '/ws';
   bool get measurementsFresh =>
       fresh &&
@@ -368,13 +397,29 @@ class PeerSession extends ChangeNotifier {
     });
   }
 
-  bool _refreshing = false;
+  Future<void>? _refreshTask;
 
-  Future<void> refresh() async {
+  void acceptPresentationCatalog(Json catalog) {
+    peripherals = verifiedCatalog(catalog);
+    _catalogRevision++;
+    notifyListeners();
+  }
+
+  Future<void> refresh() {
     final epoch = generation, peer = transport;
-    if (peer == null || _refreshing) return;
-    _refreshing = true;
+    if (peer == null) return Future<void>.value();
+    final active = _refreshTask;
+    if (active != null) return active;
+    late final Future<void> task;
+    task = _readRefresh(epoch, peer).whenComplete(() {
+      if (identical(_refreshTask, task)) _refreshTask = null;
+    });
+    return _refreshTask = task;
+  }
+
+  Future<void> _readRefresh(int epoch, PeerTransport peer) async {
     try {
+      _lastFallbackRead = DateTime.now();
       final value = object(
         await peer.request(controller ? '/api/snapshot' : '/api/player/status'),
       );
@@ -384,11 +429,53 @@ class PeerSession extends ChangeNotifier {
       error = null;
       notifyListeners();
       if (controller) {
+        final catalogRevision = _catalogRevision;
         final inventory = verifiedCatalog(
           await peer.rpc('controller.peripherals.get'),
         );
         if (epoch != generation) return;
-        peripherals = inventory;
+        if (catalogRevision == _catalogRevision) peripherals = inventory;
+        await refreshPwm();
+        if (epoch != generation) return;
+        final owner = '$identity/${state['connection_generation']}';
+        if (state['connected'] == true &&
+            state['have_front_panel'] != true &&
+            _panelOwner != owner &&
+            (_lastPanelAttempt == null ||
+                DateTime.now().difference(_lastPanelAttempt!).inSeconds >=
+                    10)) {
+          _lastPanelAttempt = DateTime.now();
+          final requestedAt = _lastPanelAttempt!;
+          try {
+            var panel = object(await peer.rpc('controller.front_panel'));
+            if (epoch != generation) return;
+            if (owner != '$identity/${state['connection_generation']}') return;
+            if (panel['raw_segments'] is List && panel['schema'] is int) {
+              final pushedAt = DateTime.tryParse(
+                '${state['front_panel_updated']}',
+              );
+              if (pushedAt != null && pushedAt.isAfter(requestedAt)) {
+                panel = {
+                  ...panel,
+                  for (final field in [
+                    'raw_segments',
+                    'brightness',
+                    'segments_active',
+                  ])
+                    field: object(state['front_panel'])[field],
+                };
+              }
+              state = {
+                ...state,
+                'front_panel': panel,
+                'have_front_panel': true,
+              };
+              _panelOwner = owner;
+            }
+          } catch (_) {
+            /* Missing panel does not invalidate telemetry/channel truth. */
+          }
+        }
         final incomingInstances = objects(
           await peer.rpc('controller.app.instances'),
         );
@@ -402,8 +489,6 @@ class PeerSession extends ChangeNotifier {
         online = false;
         notifyListeners();
       }
-    } finally {
-      _refreshing = false;
     }
   }
 
@@ -417,18 +502,147 @@ class PeerSession extends ChangeNotifier {
     if (!controller && (value['playing'] is! bool || value['volume'] is! num)) {
       throw const Rejected('Missing player state.');
     }
-    if (controller && state['host_instance_id'] != value['host_instance_id']) {
+    if (controller &&
+        (state['host_instance_id'] != value['host_instance_id'] ||
+            state['connection_generation'] != value['connection_generation'])) {
       peripherals = {};
       instances = [];
       operation = {};
       events = [];
+      pwmValues = {};
+      pwmUpdated = null;
+      _pwmAvailable = null;
+      _pwmRevision++;
+      _activePwmWrite = null;
+      _pwmPushRevision = 0;
+      _pendingPwmPush = null;
+      _panelOwner = '';
+      _lastPanelAttempt = null;
+    }
+    // A slow snapshot must not erase newer pushed display/RGB state from the
+    // same board generation. Never retain it across a changed board/host.
+    if (controller &&
+        state['host_instance_id'] == value['host_instance_id'] &&
+        state['connection_generation'] == value['connection_generation']) {
+      final oldTime = DateTime.tryParse('${state['front_panel_updated']}');
+      final newTime = DateTime.tryParse('${value['front_panel_updated']}');
+      if (oldTime != null && (newTime == null || oldTime.isAfter(newTime))) {
+        value = {
+          ...value,
+          'front_panel': {
+            ...object(value['front_panel']),
+            for (final key in ['raw_segments', 'brightness', 'segments_active'])
+              key: object(state['front_panel'])[key],
+          },
+          'have_front_panel_segments': state['have_front_panel_segments'],
+          'front_panel_updated': state['front_panel_updated'],
+        };
+      }
+      if ((state['status_led_revision'] as num? ?? 0) >
+          (value['status_led_revision'] as num? ?? 0)) {
+        value = {
+          ...value,
+          'status_led': state['status_led'],
+          'status_led_revision': state['status_led_revision'],
+          'have_status_led': state['have_status_led'],
+          'status_led_updated': state['status_led_updated'],
+        };
+      }
     }
     state = value;
     received = DateTime.now();
+    if (controller && value['pwm_values'] is Map) {
+      acceptPwmPush(object(value['pwm_values']));
+    }
   }
 
-  Future<void> _open(int epoch) async {
-    if (!enabled || epoch != generation || transport == null) return;
+  /// Complete, calibrated observations from the selected primary. A push is
+  /// factual readback, never an optimistic setpoint or a new board owner.
+  bool acceptPwmPush(Json value) {
+    final revision = value['revision'], channels = objects(value['channels']);
+    final time = DateTime.tryParse('${value['time']}');
+    if (!controller ||
+        state['connected'] != true ||
+        value['host_instance_id'] != identity ||
+        value['connection_generation'] != state['connection_generation'] ||
+        revision is! int ||
+        revision <= _pwmPushRevision ||
+        time == null ||
+        time.isAfter(DateTime.now().add(const Duration(seconds: 1))) ||
+        value['available'] is! bool ||
+        channels.length != 16 ||
+        channels.map((c) => c['channel']).toSet().length != 16 ||
+        channels.any(
+          (c) =>
+              c['channel'] is! int ||
+              c['channel'] < 0 ||
+              c['channel'] > 15 ||
+              c['raw_value'] is! int ||
+              c['raw_value'] < 0 ||
+              c['raw_value'] > 4095 ||
+              c['logical_percent'] is! num ||
+              !(c['logical_percent'] as num).isFinite ||
+              c['logical_percent'] < 0 ||
+              c['logical_percent'] > 100,
+        )) {
+      return false;
+    }
+    if (_activePwmWrite != null) {
+      if (revision > (_pendingPwmPush?['revision'] as int? ?? 0)) {
+        _pendingPwmPush = value;
+      }
+      return true;
+    }
+    _pwmPushRevision = revision;
+    ++_pwmRevision; // Retire reads issued before this newer observation.
+    _pwmAvailable = value['available'];
+    if (value['available'] == true) {
+      pwmValues = value;
+      pwmUpdated = time;
+    }
+    return true;
+  }
+
+  void _flushPwmPush() {
+    final value = _pendingPwmPush;
+    _pendingPwmPush = null;
+    if (value != null && acceptPwmPush(value)) notifyListeners();
+  }
+
+  Future<void>? _openingTask;
+  Future<void> _open(int epoch) {
+    if (!enabled || epoch != generation || transport == null) {
+      return Future<void>.value();
+    }
+    final active = _openingTask;
+    if (active != null) return active;
+    late final Future<void> task;
+    task = _openOnce(epoch).whenComplete(() {
+      if (identical(_openingTask, task)) _openingTask = null;
+    });
+    return _openingTask = task;
+  }
+
+  /// Wake only the selected connection, without command replay or discovery.
+  Future<void> networkAvailable() async {
+    if (!enabled || transport == null || (_socket != null && fresh)) return;
+    // Pealayer's typed controller relay is request/response only. Do not
+    // substitute its player WebSocket for a controller subscription.
+    if (transport is ControllerRelayTransport) {
+      await refresh();
+      return;
+    }
+    _retry?.cancel();
+    _retry = null;
+    _attempt = 0;
+    final socket = _socket;
+    _socket = null;
+    if (socket != null) await socket.close();
+    await _open(generation);
+  }
+
+  Future<void> _openOnce(int epoch) async {
+    _startConnectionMonitor(epoch);
     try {
       if (controller) {
         final config = object(await transport!.request('/api/ui-config'));
@@ -453,11 +667,16 @@ class PeerSession extends ChangeNotifier {
       }
       await refresh();
       if (!enabled || epoch != generation) return;
+      if (!online) {
+        _lost(epoch);
+        return;
+      }
       final socket = await transport!.socket(websocketPath);
       if (epoch != generation || !enabled) {
         await socket.close();
         return;
       }
+      socket.pingInterval = const Duration(seconds: 10);
       _socket = socket;
       if (controller) {
         socket.add(
@@ -473,80 +692,145 @@ class PeerSession extends ChangeNotifier {
           }),
         );
       }
+      final buffered = <Json>[];
+      var overflow = false;
+      late void Function(Json) acceptValue;
+      acceptValue = (value) {
+        if (epoch != generation || _socket != socket) return;
+        if (controller && !subscribed && value['id'] != 'mobile-subscribe') {
+          if (value['method'] is String) {
+            if (buffered.length >= 256) {
+              buffered.removeAt(0);
+              overflow = true;
+            }
+            buffered.add(value);
+          }
+          return;
+        }
+        try {
+          if (!controller) {
+            if (value['jsonrpc'] == '2.0') return;
+            _install(value['type'] == 'state' ? object(value['state']) : value);
+            online = true;
+          } else if (value['id'] == 'mobile-subscribe') {
+            final acknowledgement = object(value['result']);
+            subscribed =
+                acknowledgement['subscribed'] == true &&
+                acknowledgement['instance_id'] == identity;
+            if (!subscribed) {
+              socket.close();
+              return;
+            }
+            for (final pending in buffered.toList()) {
+              acceptValue(pending);
+            }
+            buffered.clear();
+            if (overflow) _scheduleRefresh(epoch);
+          } else if (value['method'] == 'controller.snapshot') {
+            if (!subscribed) return;
+            _install(object(value['params']));
+            online = true;
+          } else if (value['method'] == 'controller.status') {
+            if (!subscribed) return;
+            final params = object(value['params']);
+            if (params['host_instance_id'] != null &&
+                params['host_instance_id'] != identity) {
+              return;
+            }
+            if (params['connection_generation'] != null &&
+                params['connection_generation'] !=
+                    state['connection_generation']) {
+              _scheduleRefresh(epoch);
+              return;
+            }
+            if (params['error'] != null) {
+              error = '${params['error']}';
+              return;
+            }
+            if (params['status'] is! Map) return;
+            state = {
+              ...state,
+              'status': params['status'],
+              'have_status': true,
+              'status_updated': params['time'],
+            };
+            received = DateTime.now();
+            online = true;
+          } else if (value['method'] == 'controller.pwm.values') {
+            if (!subscribed) return;
+            final values = object(value['params']);
+            if (!acceptPwmPush(values)) {
+              if ((values['revision'] as num? ?? 0) > _pwmPushRevision) {
+                _schedulePwmRefresh(epoch);
+              }
+              return;
+            }
+          } else if ([
+            'controller.event',
+            'controller.state',
+          ].contains(value['method'])) {
+            final event = object(value['params']);
+            if (!subscribed) return;
+            final payload = object(event['metadata']);
+            if ([
+              'front_panel.segment',
+              'status_led.changed',
+            ].contains(event['kind'])) {
+              final updated = applyOutputEvent(state, event);
+              if (!identical(updated, state)) {
+                state = updated;
+                received = DateTime.now();
+                online = true;
+                error = null;
+              }
+              notifyListeners();
+              return; // Frames never trigger full snapshot/catalog polling.
+            }
+            if (event['kind'] == 'buzzer.note') {
+              onBuzzerNote?.call(event);
+              return; // Audio frames must not poll snapshot/catalog per note.
+            }
+            events = [event, ...events].take(100).toList();
+            if (event['kind'] == 'pwm.changed' && payload['revision'] != null) {
+              // The compact calibrated readback follows this edge on the
+              // same ordered stream; no per-client UART/HTTP read.
+              return;
+            }
+            if ([
+              'pwm.changed',
+              'pwm',
+              'illumination.changed',
+              'status_led.changed',
+            ].contains(event['kind'])) {
+              _schedulePwmRefresh(epoch);
+            }
+            if ('${event['kind']}'.startsWith('update.')) {
+              // Events are cues to read durable status, not fabricated progress.
+              unawaited(loadOperation());
+            }
+            if (payload.isNotEmpty || value['method'] == 'controller.state') {
+              _scheduleRefresh(epoch);
+            }
+          }
+          _attempt = 0;
+          error = null;
+          notifyListeners();
+        } catch (_) {
+          error = 'Invalid live state; refreshing authoritative snapshot.';
+          _scheduleRefresh(epoch);
+        }
+      };
       socket.listen(
         (frame) {
           if (epoch != generation || _socket != socket) return;
-          try {
-            if (frame is! String || frame.length > 8 * 1024 * 1024) {
-              throw const FormatException();
-            }
-            final value = object(jsonDecode(frame));
-            if (!controller) {
-              if (value['jsonrpc'] == '2.0') return;
-              _install(
-                value['type'] == 'state' ? object(value['state']) : value,
-              );
-              online = true;
-            } else if (value['id'] == 'mobile-subscribe') {
-              final acknowledgement = object(value['result']);
-              subscribed =
-                  acknowledgement['subscribed'] == true &&
-                  acknowledgement['instance_id'] == identity;
-              if (!subscribed) {
-                socket.close();
-                return;
-              }
-            } else if (value['method'] == 'controller.snapshot') {
-              if (!subscribed) return;
-              _install(object(value['params']));
-              online = true;
-            } else if (value['method'] == 'controller.status') {
-              if (!subscribed) return;
-              final params = object(value['params']);
-              if (params['error'] != null) {
-                error = '${params['error']}';
-                return;
-              }
-              if (params['status'] is! Map) return;
-              state = {
-                ...state,
-                'status': params['status'],
-                'have_status': true,
-                'status_updated': params['time'],
-              };
-              received = DateTime.now();
-              online = true;
-            } else if ([
-              'controller.event',
-              'controller.state',
-            ].contains(value['method'])) {
-              final event = object(value['params']);
-              if (!subscribed) return;
-              final payload = object(event['metadata']);
-              if ([
-                'front_panel.segment',
-                'status_led.changed',
-              ].contains(event['kind'])) {
-                state = applyOutputEvent(state, event);
-                notifyListeners();
-                return; // Frames never trigger full snapshot/catalog polling.
-              }
-              if (event['kind'] != 'buzzer.note') {
-                events = [event, ...events].take(100).toList();
-              }
-              if ('${event['kind']}'.startsWith('update.')) {
-                // Events are cues to read durable status, not fabricated progress.
-                unawaited(loadOperation());
-              }
-              if (payload.isNotEmpty || value['method'] == 'controller.state') {
-                _scheduleRefresh(epoch);
-              }
-            }
-            _attempt = 0;
-            error = null;
-            notifyListeners();
-          } catch (_) {
+          if (frame is! String || frame.length > 8 * 1024 * 1024) {
             error = 'Invalid live state; refreshing authoritative snapshot.';
+            _scheduleRefresh(epoch);
+            return;
+          }
+          try {
+            acceptValue(object(jsonDecode(frame)));
+          } catch (_) {
             _scheduleRefresh(epoch);
           }
         },
@@ -565,16 +849,6 @@ class PeerSession extends ChangeNotifier {
         },
         cancelOnError: true,
       );
-      _freshness?.cancel();
-      _freshness = Timer.periodic(const Duration(seconds: 1), (_) {
-        if (epoch != generation) return;
-        // Only repaint when freshness expires, not continuous UI persistence.
-        if (!fresh && online) {
-          online = false;
-          notifyListeners();
-          _scheduleRefresh(epoch);
-        }
-      });
     } catch (e) {
       if (epoch == generation) {
         error = '$e';
@@ -583,7 +857,212 @@ class PeerSession extends ChangeNotifier {
     }
   }
 
+  void _startConnectionMonitor(int epoch) {
+    if (_freshness?.isActive == true) return;
+    _freshness = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (epoch != generation || !enabled) return;
+      if (!fresh && online) {
+        online = false;
+        notifyListeners();
+      }
+      if (liveStateAvailable || _openingTask != null) return;
+      if (_socket != null && !fresh) {
+        unawaited(networkAvailable());
+        return;
+      }
+      final interval = (freshnessMs ~/ 2).clamp(1000, 5000);
+      if (_lastFallbackRead == null ||
+          DateTime.now().difference(_lastFallbackRead!).inMilliseconds >=
+              interval) {
+        // Only a degraded transport reads periodically. Join in-flight reads;
+        // never replay commands or infer PWM from a telemetry heartbeat.
+        unawaited(refresh());
+      }
+    });
+  }
+
   Timer? _refreshTimer;
+  void _schedulePwmRefresh(int epoch) {
+    if (_pwmTimer?.isActive == true) return;
+    _pwmTimer = Timer(const Duration(milliseconds: 500), () {
+      if (epoch == generation) unawaited(refreshPwm());
+    });
+  }
+
+  Future<void> refreshPwm() async {
+    final peer = transport, epoch = generation;
+    final revision = _pwmRevision;
+    final owner = '$identity/${state['connection_generation']}';
+    if (!controller ||
+        peer == null ||
+        _pwmReading ||
+        _activePwmWrite != null ||
+        state['connected'] != true) {
+      return;
+    }
+    _pwmReading = true;
+    try {
+      final value = object(await peer.rpc('controller.pwm.values'));
+      if (epoch == generation &&
+          revision == _pwmRevision &&
+          _activePwmWrite == null &&
+          owner == '$identity/${state['connection_generation']}' &&
+          value['channels'] is List &&
+          value['available'] is bool) {
+        _pwmAvailable = value['available'] == true && _validPwmReadback(value);
+        if (_pwmAvailable == true) {
+          pwmValues = value;
+          pwmUpdated = DateTime.now();
+        }
+        notifyListeners();
+      }
+    } catch (_) {
+      /* Retained PWM cache is never substituted with a false zero. */
+    } finally {
+      _pwmReading = false;
+    }
+  }
+
+  bool _validPwmReadback(Json value) {
+    final channels = objects(value['channels']);
+    if (channels.isEmpty ||
+        channels.length != (value['channels'] as List).length) {
+      return false;
+    }
+    final seen = <int>{};
+    for (final reading in channels) {
+      final channel = reading['channel'], percent = reading['logical_percent'];
+      if (channel is! int ||
+          channel < 0 ||
+          channel > 15 ||
+          !seen.add(channel) ||
+          percent is! num ||
+          !percent.isFinite ||
+          percent < 0 ||
+          percent > 100) {
+        return false;
+      }
+    }
+    for (final control in objects(peripherals['controls'])) {
+      final key = '${control['key']}';
+      if (key.startsWith('pwm.')) {
+        final channel = int.tryParse(key.substring(4));
+        if (channel == null || !seen.contains(channel)) return false;
+      }
+    }
+    return true;
+  }
+
+  /// Typed set + its actual board readback. The host requests PWMValues only
+  /// after command acknowledgement; this is not an optimistic local setpoint.
+  Future<double> setPwm(
+    int channel,
+    num percent, {
+    required String expectedTarget,
+  }) async {
+    final peer = transport, epoch = generation;
+    if (!controller ||
+        peer == null ||
+        !boardReady ||
+        targetStamp != expectedTarget ||
+        _activePwmWrite != null ||
+        channel < 0 ||
+        channel > 15 ||
+        !percent.isFinite ||
+        percent < 0 ||
+        percent > 100 ||
+        object(state['emergency_stop'])['active'] == true ||
+        !objects(peripherals['controls']).any(
+          (c) =>
+              c['key'] == 'pwm.$channel' &&
+              c['control'] == 'pwm-user' &&
+              c['locked'] != true &&
+              c['hidden'] != true,
+        )) {
+      throw const Rejected('PWM target is not currently writable.');
+    }
+    final write = ++_pwmWriteSequence;
+    _activePwmWrite = write;
+    ++_pwmRevision; // Retire every read issued before this mutation.
+    try {
+      final value = object(
+        await peer.rpc('controller.pwm.set', {
+          'channel': channel,
+          'percent': percent,
+        }),
+      );
+      if (epoch != generation ||
+          !identical(peer, transport) ||
+          targetStamp != expectedTarget ||
+          _activePwmWrite != write ||
+          !boardReady) {
+        throw const Uncertain();
+      }
+      final channels = objects(value['channels']);
+      final matches = channels.where((c) => c['channel'] == channel).toList();
+      final actual = matches.length == 1
+          ? matches.single['logical_percent']
+          : null;
+      if (value['available'] != true ||
+          !_validPwmReadback(value) ||
+          actual is! num ||
+          !actual.isFinite ||
+          actual < 0 ||
+          actual > 100) {
+        throw const Uncertain(); // Ack without supported readback is not applied proof.
+      }
+      pwmValues = value;
+      pwmUpdated = DateTime.now();
+      final nativeRevision = value['revision'];
+      if (value['host_instance_id'] == identity &&
+          value['connection_generation'] == state['connection_generation'] &&
+          nativeRevision is int &&
+          nativeRevision > _pwmPushRevision) {
+        _pwmPushRevision = nativeRevision;
+      }
+      _pwmAvailable = true;
+      notifyListeners();
+      return actual.toDouble();
+    } on Uncertain {
+      if (epoch == generation && _activePwmWrite == write) {
+        _pwmAvailable = false;
+        notifyListeners();
+      }
+      rethrow;
+    } finally {
+      if (_activePwmWrite == write) _activePwmWrite = null;
+      _flushPwmPush();
+      if (epoch == generation) {
+        _schedulePwmRefresh(epoch); // One read, never mutation replay.
+      }
+    }
+  }
+
+  /// Expert CLI PWM writes use the same draft/readback exclusion as typed set.
+  /// Keep the last observation visible as stale until one post-command read.
+  int beginPwmCommand(String expectedTarget) {
+    if (targetStamp != expectedTarget ||
+        !boardReady ||
+        _activePwmWrite != null) {
+      throw const Rejected(
+        'PWM target changed or another write is in progress.',
+      );
+    }
+    final write = ++_pwmWriteSequence;
+    _activePwmWrite = write;
+    ++_pwmRevision;
+    _pwmAvailable = false;
+    notifyListeners();
+    return write;
+  }
+
+  void finishPwmCommand(int write, int epoch) {
+    if (_activePwmWrite != write) return;
+    _activePwmWrite = null;
+    _flushPwmPush();
+    if (generation == epoch) _schedulePwmRefresh(epoch);
+  }
+
   void _scheduleRefresh(int epoch) {
     if (_refreshTimer?.isActive == true) return;
     _refreshTimer = Timer(const Duration(milliseconds: 250), () {
@@ -637,12 +1116,15 @@ class PeerSession extends ChangeNotifier {
 
   void disconnect() {
     generation++;
+    _openingTask = null;
+    _refreshTask = null;
     enabled = false;
     online = false;
     subscribed = false;
     _retry?.cancel();
     _freshness?.cancel();
     _refreshTimer?.cancel();
+    _pwmTimer?.cancel();
     _socket?.close();
     _socket = null;
     transport?.close();
@@ -652,7 +1134,18 @@ class PeerSession extends ChangeNotifier {
     instances = [];
     artifacts = [];
     received = null;
+    _lastFallbackRead = null;
+    _freshness = null;
     operation = {};
+    pwmValues = {};
+    pwmUpdated = null;
+    _pwmAvailable = null;
+    _pwmRevision++;
+    _activePwmWrite = null;
+    _pwmPushRevision = 0;
+    _pendingPwmPush = null;
+    _panelOwner = '';
+    _lastPanelAttempt = null;
     events = [];
     notifyListeners();
   }

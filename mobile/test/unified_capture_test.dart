@@ -1,16 +1,25 @@
 import 'dart:io';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:pccontroller_mobile/main.dart';
 import 'package:pccontroller_mobile/unified/effect_editor.dart';
+import 'package:pccontroller_mobile/unified/transport.dart';
+import 'package:pccontroller_mobile/unified/pwm_control.dart';
+import 'package:pccontroller_mobile/unified/live_widgets.dart';
+import 'package:pccontroller_mobile/unified/output_organization.dart';
 
 import 'dart:ui' as ui;
 
 void main() {
   final directory = Platform.environment['PC_MOBILE_CAPTURE_DIR'];
+  final readback = Platform.environment['PC_MOBILE_CAPTURE_READBACK'];
+  final readings = Platform.environment['PC_MOBILE_CAPTURE_READINGS'];
   testWidgets(
     'Explicit offline renderer captures without any host or device work',
     (tester) async {
@@ -20,6 +29,9 @@ void main() {
       final icons = FontLoader('MaterialIcons')
         ..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'));
       await icons.load();
+      final phosphor = FontLoader('Phosphor')
+        ..addFont(rootBundle.load('assets/fonts/Phosphor.ttf'));
+      await phosphor.load();
       await tester.runAsync(() async {
         await rootBundle.load('assets/branding/pccontroller.png');
         await rootBundle.load('assets/branding/pealayer.png');
@@ -35,9 +47,73 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
+        if (readback != null) {
+          final fixture = object(jsonDecode(File(readback).readAsStringSync()));
+          final dynamic home = tester.state(find.byType(ControllerHome));
+          final PeerSession peer = home.board;
+          peer.state = {
+            ...object(fixture['snapshot']),
+            'status_updated': DateTime.now().toUtc().toIso8601String(),
+          };
+          peer.peripherals = object(fixture['peripherals']);
+          // A memory-only endpoint enables metadata affordances in this renderer.
+          peer.transport = PeerTransport(
+            'http://fixture',
+            client: MockClient((request) async {
+              final rpc = object(jsonDecode(request.body));
+              return http.Response(
+                jsonEncode({
+                  'jsonrpc': '2.0',
+                  'id': rpc['id'],
+                  'error': {
+                    'code': -32000,
+                    'message': 'Renderer does not persist metadata.',
+                  },
+                }),
+                200,
+              );
+            }),
+          );
+          if (readings != null) {
+            final recorded = object(
+              jsonDecode(File(readings).readAsStringSync()),
+            );
+            final samples = objects(recorded['history']);
+            if (samples.isNotEmpty) {
+              // Replay measured values/relative intervals, not wall-clock age.
+              // This harness is a renderer preview, never live device evidence.
+              final anchor = DateTime.now().toUtc();
+              final last = DateTime.parse('${samples.last['status_updated']}');
+              final shift = anchor.difference(last);
+              for (final sample in samples) {
+                home.history.record({
+                  ...sample,
+                  'status_updated': DateTime.parse(
+                    '${sample['status_updated']}',
+                  ).add(shift).toIso8601String(),
+                });
+              }
+              peer.state = {
+                ...peer.state,
+                'status': samples.last['status'],
+                'status_updated': anchor.toIso8601String(),
+              };
+            }
+            peer.pwmValues = object(recorded['pwm']);
+            peer.pwmUpdated = DateTime.now();
+          }
+          peer.online = true;
+          peer.received = DateTime.now();
+          peer.notifyListeners();
+          await tester.pumpAndSettle();
+        }
         await tester.runAsync(() async {
           await precacheImage(
             const AssetImage('assets/branding/pccontroller.png'),
+            boundary.currentContext!,
+          );
+          await precacheImage(
+            const AssetImage('assets/branding/pealayer.png'),
             boundary.currentContext!,
           );
         });
@@ -52,6 +128,225 @@ void main() {
           expect(output.existsSync(), false);
           await output.writeAsBytes(data!.buffer.asUint8List());
           image.dispose();
+        });
+        if (readback != null) {
+          final dynamic home = tester.state(find.byType(ControllerHome));
+          for (final page in [(1, 'outputs'), (2, 'panel')]) {
+            home.section = page.$1;
+            (home.board as PeerSession).notifyListeners();
+            await tester.pumpAndSettle();
+            await tester.runAsync(() async {
+              final image = await render.toImage();
+              final data = await image.toByteData(
+                format: ui.ImageByteFormat.png,
+              );
+              await File('$directory/${page.$2}-${size.width.toInt()}.png')
+                  .writeAsBytes(data!.buffer.asUint8List());
+              image.dispose();
+            });
+            if (page.$1 == 1) {
+              final names = find.byType(InlineOutputName);
+              if (names.evaluate().isNotEmpty) {
+                final name = tester.widget<InlineOutputName>(names.first);
+                await tester.tap(find.byTooltip('Rename ${name.name}'));
+                await tester.pumpAndSettle();
+                await tester.enterText(
+                  find.byType(TextField).first,
+                  '${name.name} draft',
+                );
+                await tester.pumpAndSettle();
+                await tester.runAsync(() async {
+                  final frame = await render.toImage();
+                  final bytes = await frame.toByteData(
+                    format: ui.ImageByteFormat.png,
+                  );
+                  await File(
+                    '$directory/inline-output-rename-${size.width.toInt()}.png',
+                  ).writeAsBytes(bytes!.buffer.asUint8List());
+                  frame.dispose();
+                });
+                await tester.tap(find.byTooltip('Manage ${name.name}'));
+                await tester.pumpAndSettle();
+                await tester.tap(find.text('Cancel rename'));
+                await tester.pumpAndSettle();
+              }
+              home.preferences.relayLayout = 'explicit';
+              home.preferences.refresh();
+              await tester.pumpAndSettle();
+              await tester.runAsync(() async {
+                final frame = await render.toImage();
+                final data = await frame.toByteData(
+                  format: ui.ImageByteFormat.png,
+                );
+                await File(
+                  '$directory/relays-explicit-${size.width.toInt()}.png',
+                ).writeAsBytes(data!.buffer.asUint8List());
+                frame.dispose();
+              });
+              home.preferences.relayLayout = 'compact';
+              home.preferences.refresh();
+              await tester.pumpAndSettle();
+              if (find.byType(PwmSetpointControl).evaluate().isNotEmpty) {
+                await tester.ensureVisible(
+                  find
+                      .ancestor(
+                        of: find.byType(PwmSetpointControl).first,
+                        matching: find.byType(Card),
+                      )
+                      .first,
+                );
+                await tester.pumpAndSettle();
+                await tester.runAsync(() async {
+                  final frame = await render.toImage();
+                  final data = await frame.toByteData(
+                    format: ui.ImageByteFormat.png,
+                  );
+                  await File('$directory/mosfet-${size.width.toInt()}.png')
+                      .writeAsBytes(data!.buffer.asUint8List());
+                  frame.dispose();
+                });
+                await tester.drag(
+                  find.byType(SingleChildScrollView).last,
+                  const Offset(0, 2000),
+                );
+                await tester.pumpAndSettle();
+              }
+            }
+          }
+          for (final preset in ['pastel', 'vibrant']) {
+            home.section = 0;
+            home.preferences.compact = false;
+            home.preferences.tone = preset;
+            home.preferences.headerStyle = 'theme';
+            home.preferences.refresh();
+            await tester.pumpAndSettle();
+            await tester.drag(
+              find.byType(SingleChildScrollView).last,
+              const Offset(0, 4000),
+            );
+            await tester.pumpAndSettle();
+            await tester.runAsync(() async {
+              final frame = await render.toImage();
+              final bytes = await frame.toByteData(
+                format: ui.ImageByteFormat.png,
+              );
+              await File(
+                '$directory/uncompact-$preset-${size.width.toInt()}.png',
+              ).writeAsBytes(bytes!.buffer.asUint8List());
+              frame.dispose();
+            });
+            await tester.ensureVisible(find.byType(TelemetryChart).last);
+            await tester.pumpAndSettle();
+            await tester.runAsync(() async {
+              final frame = await render.toImage();
+              final bytes = await frame.toByteData(
+                format: ui.ImageByteFormat.png,
+              );
+              await File(
+                '$directory/uncompact-$preset-temperatures-${size.width.toInt()}.png',
+              ).writeAsBytes(bytes!.buffer.asUint8List());
+              frame.dispose();
+            });
+          }
+          home.preferences.compact = true;
+          home.preferences.headerStyle = 'accent';
+          home.preferences.buttonStyle = 'tonal';
+          home.preferences.relayLayout = 'explicit';
+          home.section = 1;
+          home.preferences.refresh();
+          await tester.pumpAndSettle();
+          await tester.drag(
+            find.byType(SingleChildScrollView).last,
+            const Offset(0, 4000),
+          );
+          await tester.pumpAndSettle();
+          await tester.runAsync(() async {
+            final frame = await render.toImage();
+            final bytes = await frame.toByteData(
+              format: ui.ImageByteFormat.png,
+            );
+            await File(
+              '$directory/accent-soft-actions-${size.width.toInt()}.png',
+            ).writeAsBytes(bytes!.buffer.asUint8List());
+            frame.dispose();
+          });
+          home.preferences.headerStyle = 'theme';
+          home.preferences.buttonStyle = 'outlined';
+          home.preferences.relayLayout = 'compact';
+          home.preferences.refresh();
+          tester.platformDispatcher.platformBrightnessTestValue =
+              Brightness.dark;
+          home.section = 0;
+          (home.board as PeerSession).notifyListeners();
+          await tester.pumpAndSettle();
+          await tester.runAsync(() async {
+            final image = await render.toImage();
+            final data = await image.toByteData(format: ui.ImageByteFormat.png);
+            await File('$directory/dark-monitor-${size.width.toInt()}.png')
+                .writeAsBytes(data!.buffer.asUint8List());
+            image.dispose();
+          });
+          tester.platformDispatcher.clearPlatformBrightnessTestValue();
+        }
+        final dynamic home = tester.state(find.byType(ControllerHome));
+        home.openSettings();
+        await tester.pumpAndSettle();
+        await tester.runAsync(() async {
+          await precacheImage(
+            const AssetImage('assets/branding/pealayer.png'),
+            boundary.currentContext!,
+          );
+        });
+        await tester.pumpAndSettle();
+        await tester.runAsync(() async {
+          final frame = await render.toImage();
+          final bytes = await frame.toByteData(format: ui.ImageByteFormat.png);
+          await File('$directory/settings-${size.width.toInt()}.png')
+              .writeAsBytes(bytes!.buffer.asUint8List());
+          frame.dispose();
+        });
+        await tester.pageBack();
+        await tester.pumpAndSettle();
+        final PeerSession player = home.player;
+        // Current-contract memory fixture; never a real media/output request.
+        player.state = {
+          'playing': false,
+          'volume': 80.0,
+          'muted': false,
+          'playback_time': 14.0,
+          'duration': 120.0,
+          'seekable': true,
+          'current_video': 'Preview media',
+          'playback_rate': 1.0,
+          'media_session_capabilities': {'can_play': true, 'can_stop': true},
+          'workspace_profiles': [
+            {'id': 'fixture', 'name': 'Editing workspace'},
+          ],
+          'active_workspace_profile': 'fixture',
+          'chapters': [
+            {'index': 0, 'title': 'Opening', 'time_seconds': 0.0},
+          ],
+          'current_chapter_index': 0,
+          'media_tracks': [
+            {'id': 1, 'kind': 'audio', 'title': 'Main audio', 'selected': true},
+            {'id': 2, 'kind': 'sub', 'title': 'Subtitles', 'selected': false},
+          ],
+        };
+        player.online = true;
+        player.received = DateTime.now();
+        home.section = 0;
+        player.notifyListeners();
+        await tester.pumpAndSettle();
+        await tester.runAsync(() async {
+          await precacheImage(
+            const AssetImage('assets/branding/pealayer.png'),
+            boundary.currentContext!,
+          );
+          final frame = await render.toImage();
+          final bytes = await frame.toByteData(format: ui.ImageByteFormat.png);
+          await File('$directory/pealayer-${size.width.toInt()}.png')
+              .writeAsBytes(bytes!.buffer.asUint8List());
+          frame.dispose();
         });
         expect(tester.takeException(), null);
         await tester.pumpWidget(const SizedBox());

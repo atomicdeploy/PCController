@@ -56,7 +56,7 @@ void DallasTemperatureBus::begin() {
   // Optional explicit device fixtures; runtime owns discovery and conversion.
   addressCount_ = 0;
   for (uint8_t index = 0; index < 2; ++index) {
-    if (NativeHal::temperature[index] == DisconnectedCentiC) continue;
+    if (!NativeHal::temperatureConfigured[index] && NativeHal::temperature[index] == DisconnectedCentiC) continue;
     uint8_t *rom = addresses_[addressCount_++];
     memset(rom, 0, 8); rom[0] = Ds18b20Family; rom[1] = index + 1;
     rom[7] = crc8(rom, 7);
