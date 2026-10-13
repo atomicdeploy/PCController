@@ -67,3 +67,22 @@ opt-in renderer passed and produced phone/tablet hardware and folder-dialog PNGs
 using actual app themes/fonts. Those are controlled source fixtures, not device
 screenshots. Analyzer/package/device receipts are added after final delivery.
 The application remains unaccepted until its live and human gates are met.
+
+## Package/device receipt
+
+Final analyzer and one ARM64 release build passed. Source checkpoint
+0eef88bb5736b7010efa990fc65278c0531641de produced 0.1.11/code 12,
+20,133,536 bytes, SHA-256
+`0af60c9b04f34964f19a0f072cd87df13fb6decd3bf585789bb9647c2986ba37`.
+The inherited Android development signer verified. One ordinary non-streamed
+in-place tablet install succeeded under continuing delivery authorization and
+the recent saved-drafts/update confirmation. Installed version/code/base hash
+match. Active video foreground remained intact; the controller was not launched
+over it. No physical relay/motor/beep/firmware or player action was sent.
+
+The deduplicated phone remains 0.1.2/code 3, with 498,272 KiB available below
+its previously verified 1 GiB installer threshold. No repeated install, data
+removal, reserve bypass or unlock was attempted. Exact receipts are in
+android-0.1.11-delivery.json. Live Android discovery, OS branding/launcher changes,
+two-device upgrade/installation consent, full egui parity and physical/audio/human
+acceptance remain open. The continuous goal remains active.
