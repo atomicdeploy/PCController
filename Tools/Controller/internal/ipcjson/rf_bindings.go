@@ -80,13 +80,14 @@ func (service *Service) rfCatalog(ctx context.Context, raw json.RawMessage) (any
 	}
 	config := service.hostConfig()
 	snapshot := service.Client.Snapshot()
+	peripherals := service.peripheralSettings()
 	result := map[string]any{
 		"bindings": rfBindings(config), "learning": service.Client.RFLearningState(),
 		"activity": service.Client.RFActivity(), "keyboard": config.OSActions.VirtualKeys,
 		"connected": snapshot.Connected, "hostname": "", "entries": []any{},
 		"gestures":     []string{"down", "up", "click", "double", "hold", "repeat"},
 		"action_types": []string{"app", "control", "board", "effect", "rf", "virtual-key", "host", "script", "emit"},
-		"effects":      snapshot.Effects, "peripherals": service.peripheralSettings(),
+		"effects":      snapshot.Effects, "peripherals": peripherals,
 	}
 	hostname, _ := os.Hostname()
 	result["hostname"] = hostname
@@ -97,7 +98,7 @@ func (service *Service) rfCatalog(ctx context.Context, raw json.RawMessage) (any
 		{"action": "menu", "targets": []string{"prev", "next", "dec", "inc"}, "behaviors": []string{}},
 		{"action": "relay", "targets": []string{"5", "6", "7", "8"}, "behaviors": []string{"press", "toggle", "momentary"}},
 		{"action": "side", "targets": []string{"a", "b"}, "behaviors": []string{"up", "down", "stop"}},
-		{"action": "pwm", "targets": []string{"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"}, "behaviors": []string{"press", "toggle", "momentary"}},
+		{"action": "pwm", "targets": []string{"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"}, "behaviors": []string{"press", "toggle", "momentary"}, "behavior_labels": map[string]string{"press": "Press · toggle 0/100%", "toggle": "Toggle 0/100%", "momentary": "Hold · full on, off after 350 ms silence"}},
 	}
 	instances := []hostui.AppInstance{}
 	if service.AppInstances != nil {
@@ -108,8 +109,9 @@ func (service *Service) rfCatalog(ctx context.Context, raw json.RawMessage) (any
 		entries, err := service.Client.ListLearnedDetailed(ctx)
 		if err != nil {
 			result["board_error"] = err.Error()
+			result["board_error_detail"] = dispatchRPCError(err)
 		} else {
-			result["entries"] = entries
+			result["entries"] = enrichRFCatalogEntries(entries, peripherals.Controls, service.Client.RFLastSeen)
 			result["entries_sampled"] = true
 		}
 	}

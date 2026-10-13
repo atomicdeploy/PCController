@@ -97,6 +97,22 @@ action is bounded by three such phases, not an invented progress percentage.
   recent receive activity, assignments, discovered application identities/actions,
   keyboard policy, board controls, effects and semantic board mapping options.
   Omit read_board for cached host activity polling without serial table reads.
+  Each sampled learned entry includes `board_assignment` with machine `action`,
+  `target`, `behavior` and a current-name `label`; raw MCU fields remain available
+  for diagnostics, not UI enum inference. PWM mapping `behavior_labels` explain
+  that both Press/Toggle toggle 0/100%, while Momentary expires after 350 ms
+  silence. These are autonomous firmware mappings, unlike host control actions.
+  Optional `last_seen` is RFC3339 genuine board reception time matched by the
+  complete code/bits/protocol waveform. A bounded 256-waveform session cache
+  survives catalog/activity-ring refresh, not process restart; unknown is
+  omitted, never inferred from refresh, learning completion or transmission.
+  The existing immediate `rf.receive` event (`source:board`, `time`, `rf_code`,
+  `rf_bits`, `rf_protocol`) updates visible dates directly; coalesce rendering,
+  never request a serial learned table for each packet. Catalog reads may expose
+  structured `board_error_detail` with the same RPC error code/message/data.
+  An acknowledged PWM write with failed confirmation uses code -32010 and data
+  `kind:confirmation_unavailable`, `resource:pwm`, `write_acknowledged:true`,
+  `retryable:false`; retain its detail and do not blindly repeat the mutation.
 - `controller.rf.binding.put {"binding":{...},"previous_name":"...", "allow_keyboard":false}`:
   validated, transactional watched-config mutation. Bindings are the existing
   `automations` entries matching `rf.gesture` and `source:rf`; selectors include
