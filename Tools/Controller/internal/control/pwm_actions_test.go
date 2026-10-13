@@ -253,3 +253,49 @@ func TestPWMActionFramedTransportReadbackAndReplacement(t *testing.T) {
 		})
 	}
 }
+
+func TestPWMAbsoluteCommandUsesConfiguredCurveAndRejectsInvalidPercent(t *testing.T) {
+	for _, curve := range []string{"linear", "gamma"} {
+		for _, text := range []string{"0", "12.5", "35", "100", "-1", "100.1", "NaN", "+Inf"} {
+			t.Run(curve+"/"+text, func(t *testing.T) {
+				runtime := New(Options{RequestTimeout: time.Second})
+				t.Cleanup(func() { _ = runtime.Close() })
+				config := appconfig.Defaults()
+				channel := appconfig.PWMChannel(config.UI, 0)
+				channel.Curve, channel.Gamma = curve, 2.2
+				config.UI.PWMChannels[appconfig.PWMChannelKey(0)] = channel
+				var mu sync.Mutex
+				writes := 0
+				var actual uint16
+				port := &pwmActionTestPort{reconnectTestPort: newReconnectTestPort(), replies: make(chan []byte, 4)}
+				port.handle = func(frame native.Frame) (native.Frame, error) {
+					mu.Lock()
+					defer mu.Unlock()
+					if frame.Opcode != native.OpPWMSet || len(frame.Payload) != 3 || frame.Payload[0] != 0 {
+						return native.Frame{}, errors.New("unexpected PWM command frame")
+					}
+					writes++
+					actual = binary.LittleEndian.Uint16(frame.Payload[1:])
+					return native.Frame{Opcode: native.OpACK, Payload: []byte{native.OpPWMSet, 0}}, nil
+				}
+				session := link.NewForPort("fixture", port)
+				runtime.session, runtime.generation = session, 7
+				t.Cleanup(func() { _ = session.Close() })
+				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+				defer cancel()
+				_, err := pwmCommand(ctx, runtime, CommandOptions{HostConfig: func() appconfig.Config { return config }}, []string{"set", "0", text})
+				percent, _ := strconv.ParseFloat(text, 64)
+				valid := !math.IsNaN(percent) && !math.IsInf(percent, 0) && percent >= 0 && percent <= 100
+				mu.Lock()
+				defer mu.Unlock()
+				if !valid {
+					if err == nil || writes != 0 {
+						t.Fatalf("invalid percent reached transport: %q writes=%d err=%v", text, writes, err)
+					}
+				} else if err != nil || writes != 1 || actual != appconfig.PWMRawFromPercent(percent, channel) {
+					t.Fatalf("absolute percent conversion/write failed: %q curve=%s raw=%d writes=%d err=%v", text, curve, actual, writes, err)
+				}
+			})
+		}
+	}
+}
