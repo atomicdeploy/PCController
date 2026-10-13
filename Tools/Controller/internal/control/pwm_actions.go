@@ -72,6 +72,23 @@ func pwmActionPercent(raw uint16, verb string, config appconfig.PWMChannelConfig
 	}
 }
 
+func pwmActionRaw(raw uint16, verb string, config appconfig.PWMChannelConfig) (uint16, error) {
+	percent, err := pwmActionPercent(raw, verb, config)
+	if err != nil {
+		return 0, err
+	}
+	target := appconfig.PWMRawFromPercent(percent, config)
+	// Relative intent must make progress at the actual 12-bit resolution.
+	// Re-reading unchanged duty would otherwise lose every sub-quantum step.
+	// Do not change absolute percent conversion or invent an observed setpoint.
+	if verb == "increase" && raw < appconfig.PWMMaximumValue && target <= raw {
+		target = raw + 1
+	} else if verb == "decrease" && raw > 0 && target >= raw {
+		target = raw - 1
+	}
+	return target, nil
+}
+
 func applyPWMActionWithIO(channel byte, verb string, config appconfig.PWMChannelConfig, read func() (native.PWMValues, error), write func(uint16) error) (native.PWMValues, error) {
 	if channel >= appconfig.PWMChannelCount {
 		return native.PWMValues{}, errors.New("PWM channel must be 0..15")
@@ -83,11 +100,11 @@ func applyPWMActionWithIO(channel byte, verb string, config appconfig.PWMChannel
 	if err := validatePWMActionReadback(values); err != nil {
 		return native.PWMValues{}, err
 	}
-	percent, err := pwmActionPercent(values.Values[channel], verb, config)
+	raw, err := pwmActionRaw(values.Values[channel], verb, config)
 	if err != nil {
 		return native.PWMValues{}, err
 	}
-	if err := write(appconfig.PWMRawFromPercent(percent, config)); err != nil {
+	if err := write(raw); err != nil {
 		return native.PWMValues{}, err
 	}
 	values, err = read()
