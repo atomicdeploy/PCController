@@ -783,7 +783,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 		},
 	})
 	mustRegister(shell.Command{
-		Name: "pwm", Usage: "pwm get|off|on|off|increase|decrease CHANNEL|set CHANNEL PERCENT|raw CHANNEL VALUE|configure CHANNEL TYPE CURVE [GAMMA [ICON [STEP_PERCENT]]]",
+		Name: "pwm", Usage: "pwm get|off|on|off|increase|decrease CHANNEL|set CHANNEL PERCENT|raw CHANNEL VALUE|configure CHANNEL TYPE CURVE [GAMMA [ICON [STEP_PERCENT]]]|trace start CHANNEL DURATION_MS|trace get|trace stop",
 		Summary: "control logical brightness through per-channel curves or exact raw PWM",
 		Run: func(ctx context.Context, args []string) (string, error) {
 			return pwmCommand(ctx, runtime, options, args)
@@ -3649,6 +3649,32 @@ func checkMotionDoorPolicy(status native.Status, policy string) error {
 }
 
 func pwmCommand(ctx context.Context, runtime *Runtime, options CommandOptions, args []string) (string, error) {
+	if len(args) > 0 && strings.EqualFold(args[0], "trace") {
+		var trace PWMWriteTrace
+		switch {
+		case len(args) == 2 && strings.EqualFold(args[1], "get"):
+			trace = runtime.PWMWriteTrace()
+		case len(args) == 2 && strings.EqualFold(args[1], "stop"):
+			trace = runtime.StopPWMWriteTrace()
+		case len(args) == 4 && strings.EqualFold(args[1], "start"):
+			channel, err := parsePWMChannel(args[2])
+			if err != nil {
+				return "", err
+			}
+			milliseconds, err := strconv.ParseInt(args[3], 10, 32)
+			if err != nil || milliseconds < 1 || milliseconds > 60000 {
+				return "", errors.New("PWM trace duration_ms must be 1..60000")
+			}
+			trace, err = runtime.StartPWMWriteTrace(channel, time.Duration(milliseconds)*time.Millisecond)
+			if err != nil {
+				return "", err
+			}
+		default:
+			return "", errors.New("usage: pwm trace start CHANNEL DURATION_MS | pwm trace get | pwm trace stop")
+		}
+		encoded, err := json.MarshalIndent(trace, "", "  ")
+		return string(encoded), err
+	}
 	if len(args) == 2 && (strings.EqualFold(args[0], "on") || strings.EqualFold(args[0], "off") || strings.EqualFold(args[0], "increase") || strings.EqualFold(args[0], "decrease")) {
 		channel, err := parsePWMChannel(args[1])
 		if err != nil {

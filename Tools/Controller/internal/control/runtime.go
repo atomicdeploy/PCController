@@ -354,6 +354,7 @@ type Runtime struct {
 	commandObserverMu      sync.RWMutex
 	commandObservers       map[uint64]func(CommandEvidence)
 	nextCommandObserver    uint64
+	pwmTrace               pwmWriteTraceState
 	hostMenuRequestMu      sync.RWMutex
 	hostMenuRequestHandler func(native.HostMenuContentRequest)
 	portProcess            PortProcessSnapshot
@@ -715,7 +716,7 @@ func EventStreamForKind(kind string) string {
 	switch kind {
 	case "telemetry":
 		return EventStreamTelemetry
-	case "rx", "tx", "opcode":
+	case "rx", "tx", "opcode", "pwm.write.ack":
 		return EventStreamDebug
 	case "front_panel.changed", "front_panel.segment", "status_led.changed", "pwm.changed", "buzzer.note", "illumination.changed", "settings.changed", "peripherals.changed", "motion.changed", "melodies.changed":
 		return EventStreamState
@@ -1972,6 +1973,7 @@ func (runtime *Runtime) requestAtGenerationPriority(
 	}
 	session := runtime.session
 	runtime.mu.RUnlock()
+	traceEpoch := runtime.pwmTraceAdmission(opcode, payload)
 	frame, err := session.RequestWithPriority(ctx, priority, opcode, payload, expected...)
 	if err != nil {
 		return native.Frame{}, err
@@ -1985,6 +1987,7 @@ func (runtime *Runtime) requestAtGenerationPriority(
 	if _, observed := runtime.observeAtGeneration(frame, generation); !observed {
 		return native.Frame{}, fmt.Errorf("connection generation %d changed before its response could be observed", generation)
 	}
+	runtime.observePWMWriteAck(ctx, traceEpoch, generation, opcode, payload, frame)
 	return frame, nil
 }
 

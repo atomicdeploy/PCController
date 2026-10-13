@@ -1944,6 +1944,15 @@ func (client *Client) AllPWMOff(ctx context.Context) error {
 	return client.runtime.Command(ctx, native.OpPWMAllOff, nil)
 }
 
+type PWMWriteTrace = control.PWMWriteTrace
+
+func (client *Client) StartPWMWriteTrace(channel byte, duration time.Duration) (PWMWriteTrace, error) {
+	return client.runtime.StartPWMWriteTrace(channel, duration)
+}
+
+func (client *Client) StopPWMWriteTrace() PWMWriteTrace { return client.runtime.StopPWMWriteTrace() }
+func (client *Client) PWMWriteTrace() PWMWriteTrace     { return client.runtime.PWMWriteTrace() }
+
 // PWMValues requests all logical PWM values and controller availability.
 func (client *Client) PWMValues(ctx context.Context) (PWMValues, error) {
 	frame, err := client.runtime.Request(

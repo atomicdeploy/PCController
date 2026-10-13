@@ -74,6 +74,7 @@ const product = productIdentity(productMetadata);
 const capabilityGroups = {
   events: [
     "controller.event.next", "controller.event.latest", "controller.subscribe", "controller.unsubscribe",
+		"controller.pwm.trace.start", "controller.pwm.trace.stop",
   ],
   programming: [
 	"controller.firmware.build",
@@ -140,7 +141,7 @@ const capabilityGroups = {
     "controller.app.instances", "controller.app.instance.get", "controller.app.bridge",
 		"controller.network.peers.get", "controller.app.action.outcome",
 		"controller.media.playback.get", "controller.media.authority.get", "controller.media.timeline.get",
-		"controller.rf.catalog",
+		"controller.rf.catalog", "controller.pwm.trace.get",
   ],
   board_commands: [
 		"controller.mirror.apply", "controller.mirror.resync",
@@ -160,6 +161,9 @@ const capabilityGroups = {
 };
 
 const methodOverrides = {
+	"controller.pwm.trace.get": "Return bounded DEBUG-only PWM acknowledgements; no board read or output change.",
+	"controller.pwm.trace.start": "Temporarily capture one channel 0..15 for explicit duration_ms 1..60000, off by default; no board operation.",
+	"controller.pwm.trace.stop": "Stop temporary PWM acknowledgement capture and retain bounded receipts; no board operation.",
 	"controller.audio.cues": "Return the receiving host's declared local sound-effect intent vocabulary.",
 	"controller.audio.play": "Play one validated sound-effect intent on the receiving host while honoring its mute and volume policy.",
 	"controller.ping": "Return service health and protocol identity.",

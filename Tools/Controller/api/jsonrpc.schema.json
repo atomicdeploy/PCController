@@ -516,6 +516,9 @@
             "controller.pwm.channel.configure",
             "controller.pwm.off",
             "controller.pwm.set",
+            "controller.pwm.trace.get",
+            "controller.pwm.trace.start",
+            "controller.pwm.trace.stop",
             "controller.pwm.values",
             "controller.quit",
             "controller.reset",
@@ -1428,6 +1431,21 @@
       "capability": "board_commands",
       "summary": "pwm set",
       "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.pwm.trace.get": {
+      "capability": "read",
+      "summary": "Return bounded DEBUG-only PWM acknowledgements; no board read or output change.",
+      "idempotency": "safe"
+    },
+    "controller.pwm.trace.start": {
+      "capability": "events",
+      "summary": "Temporarily capture one channel 0..15 for explicit duration_ms 1..60000, off by default; no board operation.",
+      "idempotency": "safe"
+    },
+    "controller.pwm.trace.stop": {
+      "capability": "events",
+      "summary": "Stop temporary PWM acknowledgement capture and retain bounded receipts; no board operation.",
+      "idempotency": "safe"
     },
     "controller.pwm.values": {
       "capability": "read",
