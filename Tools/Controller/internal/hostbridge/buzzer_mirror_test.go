@@ -149,6 +149,38 @@ func TestBuzzerPlaybackTimelinePreservesDeviceCadenceAndBuffersTransportJitter(t
 	}
 }
 
+func TestBuzzerPlaybackTimelineRebuffersFreshShortNoteAfterMissedCushion(t *testing.T) {
+	timeline := newBuzzerPlaybackTimeline()
+	base := time.Unix(1700000000, 0)
+	_ = timeline.plan(buzzerMirrorJob{source: "board-a", timed: true,
+		deviceMicros: 1000, durationMS: 10, observedAt: base}, base)
+	// Previously this fresh 10 ms note ended at +160 ms and was entirely
+	// skipped when it arrived at +190 ms. Rebuffer, don't stretch the note.
+	received := base.Add(190 * time.Millisecond)
+	late := timeline.plan(buzzerMirrorJob{source: "board-a", timed: true,
+		deviceMicros: 101000, durationMS: 10, observedAt: received}, received)
+	if !late.start.Equal(received.Add(buzzerPlayoutDelay)) || late.end.Sub(late.start) != 10*time.Millisecond {
+		t.Fatalf("fresh short note was truncated: %+v", late)
+	}
+	next := timeline.plan(buzzerMirrorJob{source: "board-a", timed: true,
+		deviceMicros: 121000, durationMS: 10, observedAt: received.Add(time.Millisecond)}, received.Add(time.Millisecond))
+	if next.start.Sub(late.start) != 20*time.Millisecond {
+		t.Fatalf("device cadence lost after recovery: %+v", next)
+	}
+}
+
+func TestBuzzerPlaybackTimelineDoesNotRebufferStaleQueuedNote(t *testing.T) {
+	timeline := newBuzzerPlaybackTimeline()
+	base := time.Unix(1700000000, 0)
+	_ = timeline.plan(buzzerMirrorJob{source: "board-a", timed: true,
+		deviceMicros: 1000, durationMS: 10, observedAt: base}, base)
+	stale := timeline.plan(buzzerMirrorJob{source: "board-a", timed: true,
+		deviceMicros: 101000, durationMS: 10, observedAt: base.Add(190 * time.Millisecond)}, base.Add(time.Second))
+	if _, audible := stale.remaining(base.Add(time.Second)); audible {
+		t.Fatal("stale queued note was replayed as fresh")
+	}
+}
+
 func TestBuzzerPlaybackTimelineReanchorsAfterDeviceRestart(t *testing.T) {
 	timeline := newBuzzerPlaybackTimeline()
 	base := time.Unix(1700000000, 0)

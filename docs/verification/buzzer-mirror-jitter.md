@@ -2,6 +2,36 @@
 
 Owner: Linux/board mirroring issue #106.
 
+## Follow-up: short-note and display fidelity
+
+The 50 ms receiver cushion alone did not cover arrival bursts beyond that
+cushion: the old device-clock deadline deducted lateness from a fresh note,
+and could discard a short note entirely. A fresh observation now reanchors
+its source at receipt plus the same 50 ms cushion if its mapped start has
+already passed. The original duration is retained; following notes resume
+device-clock cadence from that anchor. This is bounded playout recovery, not
+sample-exact acoustic synchronization or permission to replay old audio.
+
+Dispatch preserves Runtime's local monotonic receipt timestamp (also assigned
+when remote events are ingressed), rather than restamping after integration
+work. Observations queued longer than the existing 250 ms freshness bound
+are not rebuffered. Explicit Stop still cancels/flushed its source immediately;
+generation replacement still discards prior buffered notes. Mirror enablement,
+board sound policy, native kernel finite-tone limits and cleanup are unchanged.
+
+The WebSocket state limiter previously shared one timestamp between RGB, PWM
+and segment frames. An RGB frame could consume the budget for the next digit
+or blink frame. Continuous domains now have independent budgets, while changed
+segment edges bypass decimation. Pealayer requests immediate changed state
+and uses its hardware revision for peer delivery rather than a 100 ms sample.
+No extra board polling, synthetic frames or interpolation is introduced.
+
+Go host compilation and focused package vet passed. Pure regression cases were
+added for fresh 10 ms recovery, stale queued notes and cross-domain frame
+budgets; tests/CI were not run in this iteration at the user's request.
+Pealayer passed offline cargo check with existing warnings. Deployment and
+physical short-note/segment fidelity must be recorded separately below.
+
 ## Cause and behavior
 
 The receiver anchored the first device-clock note at local receipt time, then

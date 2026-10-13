@@ -5054,6 +5054,20 @@ func streamWebSocketOpcodes(
 	}
 }
 
+type stateFrameBudget map[string]time.Time
+
+func (budget stateFrameBudget) allow(event controller.Event, interval time.Duration, now time.Time) bool {
+	if interval <= 0 || !highRateStateEvent(event) {
+		return true
+	}
+	key := strings.ToLower(strings.TrimSpace(event.Kind))
+	if last := budget[key]; !last.IsZero() && now.Sub(last) < interval {
+		return false
+	}
+	budget[key] = now
+	return true
+}
+
 func streamWebSocketEventStream(
 	ctx context.Context,
 	client *controller.Client,
@@ -5064,16 +5078,15 @@ func streamWebSocketEventStream(
 	snapshot func() controllerSnapshotEnvelope,
 	write func(any) error,
 ) {
-	var lastHighRateWrite time.Time
+	// Independent domains must not consume each other's frame budget.
+	budget := make(stateFrameBudget)
 	for ctx.Err() == nil {
 		event, err := client.NextEventStream(ctx, afterID, "", stream)
 		if err != nil {
 			return
 		}
 		afterID = event.ID
-		highRate := stream == "state" && highRateStateEvent(event)
-		if highRate && highRateInterval > 0 &&
-			!lastHighRateWrite.IsZero() && time.Since(lastHighRateWrite) < highRateInterval {
+		if stream == "state" && !budget.allow(event, highRateInterval, time.Now()) {
 			continue
 		}
 		if err := write(wsNotification{
@@ -5082,9 +5095,6 @@ func streamWebSocketEventStream(
 			Params:  event,
 		}); err != nil {
 			return
-		}
-		if highRate {
-			lastHighRateWrite = time.Now()
 		}
 		if snapshot != nil && eventUpdatesClientSnapshot(event) {
 			if err := write(wsNotification{
@@ -5100,8 +5110,12 @@ func streamWebSocketEventStream(
 
 func highRateStateEvent(event controller.Event) bool {
 	switch strings.ToLower(strings.TrimSpace(event.Kind)) {
-	case "status_led.changed", "pwm.changed", "animation.frame", "front_panel.segment":
+	case "status_led.changed", "pwm.changed", "animation.frame":
 		return true
+	case "front_panel.segment":
+		// Digit/blank/blink edges are already changed-only. Dropping one cannot
+		// be repaired by interpolation or the slow telemetry subscription.
+		return false
 	default:
 		return false
 	}

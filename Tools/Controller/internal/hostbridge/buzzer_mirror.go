@@ -72,7 +72,13 @@ func (timeline *buzzerPlaybackTimeline) plan(job buzzerMirrorJob, now time.Time)
 			withinObservedWindow := !candidate.Before(observedAt.Add(-maxBuzzerObservedSkew)) &&
 				!candidate.After(observedAt.Add(maxBuzzerObservedSkew))
 			if sameGeneration && delta <= maxBuzzerSourceGap && withinObservedWindow {
-				start = candidate
+				// A fresh note that missed the cushion must not lose its entire
+				// duration. Re-anchor this source, then retain device cadence from
+				// that anchor. Do not rehabilitate a stale queued observation.
+				fresh := now.Sub(observedAt) <= maxBuzzerObservedSkew
+				if !candidate.Before(observedAt) || !fresh {
+					start = candidate
+				}
 			}
 		}
 		timeline.anchors[job.source] = buzzerTimelineAnchor{
@@ -138,9 +144,12 @@ func (manager *Manager) dispatchBuzzerMirror(config appconfig.Config, event cont
 	if !ok {
 		return
 	}
-	// Event.Time may originate on a bridged host with a skewed wall clock.
-	// Anchor against this host's monotonic receipt time instead.
-	job.observedAt = time.Now()
+	// Runtime.publishEvent stamps both local and ingressed events with this
+	// host's receipt time. Preserve it: stamping again after slow integration
+	// work disguises queue delay and can replay stale observations as fresh.
+	if job.observedAt.IsZero() {
+		job.observedAt = time.Now()
+	}
 	// Configure-time resolution is authoritative for auto mode. Reusing it
 	// avoids probing the native device before launching the already-selected
 	// optional external helper for every pushed note.
