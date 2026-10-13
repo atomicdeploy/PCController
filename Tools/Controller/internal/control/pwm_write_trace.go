@@ -144,6 +144,6 @@ func (runtime *Runtime) observePWMWriteAck(ctx context.Context, epoch, generatio
 		"capture_id": strconv.FormatUint(epoch, 10),
 		"channel":    strconv.Itoa(int(record.Channel)), "raw_value": strconv.Itoa(int(record.RawValue)), "connection_generation": strconv.FormatUint(generation, 10),
 		"source": record.Source, "actor_id": record.ActorID, "method": record.Method, "transport": record.Transport, "sequence": strconv.FormatUint(record.Sequence, 10),
-		"device_micros": strconv.FormatUint(record.DeviceMicros, 10), "timed": strconv.FormatBool(record.Timed),
+		"device_micros": strconv.FormatUint(uint64(record.DeviceMicros), 10), "timed": strconv.FormatBool(record.Timed),
 	}})
 }
