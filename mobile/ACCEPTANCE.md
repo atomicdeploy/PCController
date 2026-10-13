@@ -401,3 +401,21 @@ Read-only tablet observations showed the app running but display Dozing/black;
 the bounded Cafe read-only sampling attempt timed out. Neither is live flicker
 reproduction proof. No physical output or host metadata was written. This source
 targets 0.1.7+8; package and device identity are recorded after delivery.
+
+The coordinated chat subsequently recovered the exited Cafe controller through
+its user-approved installed recovery task. Eight read-only samples after recovery
+confirmed one stable host/generation, PWM available with all 16 channels, no RPC
+errors, and 9–16ms read latency. The live peer advertises 1500ms freshness and
+500ms status interval, confirming the cadence mismatch. The earlier timeouts were
+the stopped host, not proof of PWM-age behavior. No output mutation occurred here.
+
+One ARM64 build from `19672cf0f06672be6e596d9412f5baa558486d76` passed. APK
+0.1.7/code 8 is 19,926,839 bytes, SHA-256
+`348528f8c311b942bae0534940592a3e3d6281a09e2d2c5b9022fb34d7c8a7e9`,
+with its inherited development signature verified. Under the recent direct
+saved-drafts/update confirmation and standing bug-fix delivery authorization,
+one ordinary non-streamed in-place tablet install succeeded. Installed version/code
+and base.apk hash match; the ordinary launcher and read-only invalid-token Intent
+returned the expected routing/auth rejection. The tablet was locked/Dozing, so
+actual on-screen stability still needs human verification. The phone remains
+0.1.2/code 3 with 503,148 KiB available; no retry or data removal was performed.
