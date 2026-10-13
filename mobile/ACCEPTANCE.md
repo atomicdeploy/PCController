@@ -486,3 +486,15 @@ geometry regressions passed. They cover actual pull gestures on short pages,
 coalesced reads, response waiting, read failures, draft preservation, replacement
 owners, read-only firmware RPCs and discovery without connection. This source
 targets 0.1.9+10; live device gesture acceptance and delivery are recorded separately.
+
+Three PWM ownership/readback guards and one older-catalog fence check also
+passed, making twelve relevant checks in this pass. Final analyzer and one
+ARM64 build passed. APK from 0d978d6d is 0.1.9/code 10, 19,992,375 bytes,
+SHA-256 65c380a077f69c915b6b9b9f793ad3af307ed43b97f0d2940e680a4b28b79e23,
+with the inherited Android development signature verified. One ordinary
+non-streamed in-place tablet install succeeded; installed version/code/base hash
+match. The tablet's foreground video app was preserved, so the controller was
+not launched over it and live gesture acceptance remains pending.
+The phone remains 0.1.2/code 3 with 499,652 KiB free below its previously verified
+1 GiB installer threshold. No retry, data removal, physical action or firmware
+operation was performed. Concurrent generated Web outputs were left untouched.
