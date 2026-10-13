@@ -237,6 +237,29 @@ func TestPeripheralCatalogUsesExplicitBoardProfileWithoutLegacyMotionAliases(t *
 	}
 }
 
+func TestBrowserAndPWMNamesFollowTheBoardProfile(t *testing.T) {
+	service, config := browserUIConfigTestService(t)
+	config.Connection.LastDevice = &appconfig.DeviceIdentity{Port: "COM18", SerialNumber: "BOARD-42"}
+	config.BoardProfiles = map[string]appconfig.BoardProfile{
+		"serial:board-42": {Key: "cinema", Mode: appconfig.BoardModeCinemaSeatMotion,
+			Presentation: map[string]appconfig.PeripheralPresentation{"pwm.0": {Name: "Window"}}},
+	}
+	settings := service.browserUISettings()
+	found := false
+	for _, control := range settings.Controls {
+		if control.Key == "pwm.0" {
+			found = control.Name == "Window"
+		}
+	}
+	if !found {
+		t.Fatal("browser catalog ignored the board-profile name")
+	}
+	values := service.describePWMValues(native.PWMValues{Available: true})
+	if values.Channels[0].Name != "Window" {
+		t.Fatalf("PWM channel name = %q", values.Channels[0].Name)
+	}
+}
+
 func TestPresentationUpdateResultCarriesTheAuthoritativeControl(t *testing.T) {
 	settings := peripheralSettings{
 		BoardProfile: boardProfileDescriptor{Key: "cafe-cinema", Revision: "next-revision"},

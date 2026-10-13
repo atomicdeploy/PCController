@@ -2009,9 +2009,7 @@ func (service *Service) browserUISettings() browserUISettings {
 	if service.Client.Snapshot().Hello.BuildFeatures&native.BuildFeatureNativeHAL != 0 {
 		ui.PeripheralNames = appconfig.NativeSensorNames(ui.PeripheralNames)
 	}
-	peripherals := appconfig.PeripheralDescriptors()
-	controls := appconfig.ControlDescriptors(ui.PeripheralNames)
-	appconfig.ApplyPWMChannelConfig(peripherals, controls, ui)
+	catalog := service.peripheralSettings()
 	return browserUISettings{
 		AppTitle:               productidentity.Title(ui.AppTitle),
 		Tagline:                ui.Tagline,
@@ -2024,8 +2022,8 @@ func (service *Service) browserUISettings() browserUISettings {
 		SegmentScroll:          ui.SegmentScroll,
 		PeripheralNames:        clonePeripheralNames(ui.PeripheralNames),
 		PWMChannels:            clonePWMChannels(ui.PWMChannels),
-		Peripherals:            peripherals,
-		Controls:               controls,
+		Peripherals:            catalog.Peripherals,
+		Controls:               catalog.Controls,
 	}
 }
 
