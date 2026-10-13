@@ -78,7 +78,7 @@ void main() {
       final PeerSession board = home.board;
       expect(find.byType(NavigationBar), findsNothing);
       expect(find.byType(NavigationRail), findsNothing);
-      expect(find.byType(ActivityStrip), findsOneWidget);
+      expect(find.byType(ActivityStrip), findsNothing);
       expect(find.text('Voltage'), findsNothing);
       expect(find.text('Temperature'), findsNothing);
       expect(find.textContaining('Unavailable'), findsNothing);
@@ -102,7 +102,7 @@ void main() {
       await tester.tap(find.byTooltip('Connect PCController'));
       await tester.pumpAndSettle();
       expect(find.byType(EndpointDialog), findsOneWidget);
-      expect(find.text('Hostname or URL'), findsOneWidget);
+      expect(find.text('Endpoint'), findsOneWidget);
       expect(find.textContaining('Access token'), findsNothing);
       await tester.tap(find.text('Cancel'));
       await tester.pumpAndSettle();

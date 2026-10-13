@@ -142,7 +142,9 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.byType(RefreshProgressIndicator), findsNothing);
         expect(player.state['volume'], 43);
-        expect(tester.getRect(view), viewport);
+        // Successful connection now exposes contextual navigation. Its arrival
+        // is independent of the overlay's fixed in-flight geometry.
+        expect(scrollable.position, same(position));
         expect(position.pixels, 0);
         expect(requests, hasLength(1));
         expect(tester.takeException(), null);
@@ -150,6 +152,170 @@ void main() {
       },
     );
   }
+
+  testWidgets(
+    'fresh values suppress pull; expiration enables it without rebuilding or moving scroll',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      await tester.pumpWidget(const UnifiedControllerApp(restore: false));
+      final dynamic home = tester.state(find.byType(ControllerHome));
+      final PeerSession player = home.player;
+      final response = Completer<http.Response>();
+      var reads = 0;
+      player.transport = PeerTransport(
+        'http://fixture',
+        client: MockClient((_) {
+          reads++;
+          return response.future;
+        }),
+      );
+      player.online = true;
+      player.received = DateTime.now();
+      player.state = {'playing': false, 'volume': 42};
+      player.notifyListeners();
+      await tester.pumpAndSettle();
+      final view = find.byType(SingleChildScrollView).last;
+      final viewport = tester.getRect(view);
+      final position = tester
+          .state<ScrollableState>(
+            find.descendant(of: view, matching: find.byType(Scrollable)).first,
+          )
+          .position;
+      await pull(tester, viewport);
+      expect(reads, 0);
+      expect(find.byType(RefreshProgressIndicator), findsNothing);
+      expect(tester.getRect(view), viewport);
+      player.received = DateTime.now().subtract(const Duration(seconds: 20));
+      // Deliberately no notifyListeners: a gesture must evaluate actual age.
+      await pull(tester, viewport);
+      await tester.runAsync(() async => Future<void>.delayed(Duration.zero));
+      expect(reads, 1);
+      expect(find.byType(RefreshProgressIndicator), findsOneWidget);
+      final joining = player.refresh();
+      await tester.runAsync(() async {
+        response.complete(http.Response('{"playing":false,"volume":43}', 200));
+        await joining;
+      });
+      await tester.pumpAndSettle();
+      expect(find.byType(RefreshProgressIndicator), findsNothing);
+      expect(tester.getRect(view), viewport);
+      expect(
+        tester
+            .state<ScrollableState>(
+              find
+                  .descendant(of: view, matching: find.byType(Scrollable))
+                  .first,
+            )
+            .position,
+        same(position),
+      );
+      await pull(tester, viewport);
+      expect(reads, 1);
+      expect(find.byType(RefreshProgressIndicator), findsNothing);
+      expect(tester.takeException(), null);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'fresh status with advertised PWM but no first readback permits read-only recovery',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      await tester.pumpWidget(const UnifiedControllerApp(restore: false));
+      final dynamic home = tester.state(find.byType(ControllerHome));
+      final PeerSession board = home.board;
+      final snapshot = Completer<http.Response>();
+      final methods = <String>[];
+      var reads = 0;
+      final controls = [
+        {
+          'key': 'pwm.0',
+          'name': 'MOSFET 1',
+          'kind': 'mosfet',
+          'control': 'pwm-user',
+        },
+      ];
+      final status = {
+        'connected': true,
+        'have_front_panel': true,
+        'host_instance_id': 'fixture',
+      };
+      board.transport = PeerTransport(
+        'http://fixture',
+        client: MockClient((request) {
+          if (request.method == 'GET') {
+            reads++;
+            expect(request.url.path, '/api/snapshot');
+            return snapshot.future;
+          }
+          final rpc = object(jsonDecode(request.body));
+          methods.add(rpc['method'] as String);
+          final Object result = switch (rpc['method']) {
+            'controller.peripherals.get' => {
+              'controls': controls,
+              'peripherals': [],
+              'board_profile': {},
+            },
+            'controller.pwm.values' => {
+              'available': true,
+              'channels': [
+                {'channel': 0, 'logical_percent': 25},
+              ],
+            },
+            'controller.app.instances' => [],
+            _ => throw StateError('Unexpected mutation or RPC'),
+          };
+          return Future.value(
+            http.Response(
+              jsonEncode({'jsonrpc': '2.0', 'id': rpc['id'], 'result': result}),
+              200,
+            ),
+          );
+        }),
+      );
+      board.online = true;
+      board.received = DateTime.now();
+      board.state = status;
+      board.peripherals = {'controls': controls};
+      home.selectActivity(1);
+      await tester.pumpAndSettle();
+      expect(board.fresh, true);
+      expect(board.pwmUpdated, null);
+      expect(home.canPullRefresh, true);
+      final view = find.byType(SingleChildScrollView).last;
+      await pull(tester, tester.getRect(view));
+      await tester.runAsync(() async => Future<void>.delayed(Duration.zero));
+      expect(find.byType(RefreshProgressIndicator), findsOneWidget);
+      expect(reads, 1);
+      final joining = board.refresh();
+      snapshot.complete(http.Response(jsonEncode(status), 200));
+      // The controller chains several RPCs after its snapshot. Drain their
+      // fake/real microtasks before awaiting the joined future.
+      for (var i = 0; i < 10; i++) {
+        await tester.pump();
+        await tester.runAsync(() async => Future<void>.delayed(Duration.zero));
+      }
+      await tester.pumpAndSettle();
+      await joining;
+      expect(
+        methods,
+        unorderedEquals([
+          'controller.peripherals.get',
+          'controller.pwm.values',
+          'controller.app.instances',
+        ]),
+      );
+      expect(board.pwmReadbackFresh, true);
+      expect(find.text('Setpoint 25.0%'), findsOneWidget);
+      expect(home.canPullRefresh, false);
+      expect(find.byType(RefreshProgressIndicator), findsNothing);
+      await pull(tester, tester.getRect(view));
+      expect(methods, hasLength(3));
+      expect(find.byType(RefreshProgressIndicator), findsNothing);
+      expect(tester.takeException(), null);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
 
   testWidgets(
     'pull refresh failure finishes and preserves authoring text and viewport',

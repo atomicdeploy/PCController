@@ -32,16 +32,21 @@ class EndpointDialog extends StatefulWidget {
 class _EndpointDialogState extends State<EndpointDialog> {
   late final address = TextEditingController(text: widget.initialValue);
   EndpointDetector? activeDetector;
+  EndpointAddress? inputIntent;
+  String? canonicalInput;
   DetectedEndpoint? verified;
   String? failure;
   bool edited = false, checking = false;
   int revision = 0;
   String get product => widget.controller ? 'pccontroller' : 'pealayer';
   String get name => widget.controller ? 'PCController' : 'Pealayer';
-  EndpointAddress parse() => EndpointAddress.parse(
-    address.text,
-    defaultPort: widget.controller ? 8787 : 8080,
-  );
+  EndpointAddress parse() =>
+      address.text == canonicalInput && inputIntent != null
+      ? inputIntent!
+      : EndpointAddress.parse(
+          address.text,
+          defaultPort: widget.controller ? 8787 : 8080,
+        );
 
   @override
   void initState() {
@@ -53,6 +58,8 @@ class _EndpointDialogState extends State<EndpointDialog> {
   }
 
   void changed(String value) {
+    inputIntent = null;
+    canonicalInput = null;
     ++revision;
     activeDetector?.close();
     activeDetector = null;
@@ -84,6 +91,16 @@ class _EndpointDialogState extends State<EndpointDialog> {
     final detector = widget.detectorFactory?.call() ?? EndpointDetector();
     activeDetector = detector;
     setState(() {
+      // Normalize the actual full endpoint field after parsing. Probe with the
+      // original intent so a short hostname still permits default-port search.
+      inputIntent = input;
+      canonicalInput = input.origin.toString();
+      address.value = TextEditingValue(
+        text: input.origin.toString(),
+        selection: TextSelection.collapsed(
+          offset: input.origin.toString().length,
+        ),
+      );
       checking = true;
       failure = null;
     });
@@ -99,6 +116,8 @@ class _EndpointDialogState extends State<EndpointDialog> {
         Navigator.pop(context, result.origin.toString());
       } else {
         setState(() {
+          inputIntent = null;
+          canonicalInput = null;
           address.text = result.origin.toString();
           address.selection = TextSelection.collapsed(
             offset: address.text.length,
@@ -174,47 +193,13 @@ class _EndpointDialogState extends State<EndpointDialog> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          TextField(
-            key: const ValueKey('peer-address'),
-            controller: address,
-            autofocus: true,
-            textDirection: TextDirection.ltr,
-            keyboardType: TextInputType.url,
-            textInputAction: TextInputAction.done,
-            autocorrect: false,
-            enableSuggestions: false,
-            inputFormatters: [AddressCharacterFormatter()],
+          EndpointInput(
+            address: address,
+            controller: widget.controller,
+            invalid: edited ? invalid : null,
+            verified: verified != null,
             onChanged: changed,
-            onSubmitted: (_) => detect(connect: true),
-            decoration: InputDecoration(
-              labelText: 'Hostname or URL',
-              hintText: widget.controller
-                  ? '192.168.1.20:8787'
-                  : 'pealayer.local:8080',
-              prefixIcon: const Icon(Icons.link),
-              enabledBorder: edited && invalid != null
-                  ? OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: BorderSide(color: colors.error),
-                    )
-                  : null,
-              focusedBorder: edited && invalid != null
-                  ? OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: BorderSide(color: colors.error, width: 2),
-                    )
-                  : null,
-              suffixIcon: address.text.isEmpty
-                  ? null
-                  : IconButton(
-                      tooltip: 'Clear address',
-                      onPressed: () {
-                        address.clear();
-                        changed('');
-                      },
-                      icon: const Icon(Icons.clear),
-                    ),
-            ),
+            onSubmitted: () => detect(connect: true),
           ),
           const SizedBox(height: 12),
           SizedBox(
@@ -222,48 +207,6 @@ class _EndpointDialogState extends State<EndpointDialog> {
             child: checking
                 ? const LinearProgressIndicator(minHeight: 2)
                 : null,
-          ),
-          const SizedBox(height: 12),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: colors.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(
-                  verified != null
-                      ? Icons.check_circle_outline
-                      : Icons.dns_outlined,
-                  size: 18,
-                  color: verified != null
-                      ? colors.primary
-                      : colors.onSurfaceVariant,
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (verified != null)
-                        Text(
-                          '$name verified',
-                          style: Theme.of(context).textTheme.labelMedium,
-                        ),
-                      SelectableText(
-                        normalized?.origin.toString() ?? name,
-                        textDirection: TextDirection.ltr,
-                        style: Theme.of(context).textTheme.bodyMedium
-                            ?.copyWith(fontFamily: 'DroidSansMono'),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
           ),
           // A reserved error slot keeps the input/footer still during checking.
           SizedBox(
@@ -280,6 +223,83 @@ class _EndpointDialogState extends State<EndpointDialog> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// A single complete endpoint editor; detection updates this same field.
+class EndpointInput extends StatelessWidget {
+  const EndpointInput({
+    super.key,
+    required this.address,
+    required this.controller,
+    required this.onChanged,
+    required this.onSubmitted,
+    this.invalid,
+    this.verified = false,
+  });
+  final TextEditingController address;
+  final bool controller, verified;
+  final String? invalid;
+  final ValueChanged<String> onChanged;
+  final VoidCallback onSubmitted;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final border = OutlineInputBorder(
+      borderRadius: BorderRadius.circular(14),
+      borderSide: BorderSide(
+        color: invalid != null ? colors.error : colors.outlineVariant,
+      ),
+    );
+    return TextField(
+      key: const ValueKey('peer-address'),
+      controller: address,
+      autofocus: true,
+      textDirection: TextDirection.ltr,
+      keyboardType: TextInputType.url,
+      textInputAction: TextInputAction.done,
+      autocorrect: false,
+      enableSuggestions: false,
+      inputFormatters: [AddressCharacterFormatter()],
+      onChanged: onChanged,
+      onSubmitted: (_) => onSubmitted(),
+      decoration: InputDecoration(
+        labelText: 'Endpoint',
+        hintText: controller
+            ? 'http://pccontroller.local:8787'
+            : 'http://pealayer.local:8080',
+        filled: true,
+        fillColor: colors.primary.withValues(alpha: .045),
+        enabledBorder: border,
+        focusedBorder: border.copyWith(
+          borderSide: BorderSide(
+            color: invalid != null ? colors.error : colors.primary,
+            width: 2,
+          ),
+        ),
+        prefixIcon: Icon(Icons.dns_rounded, color: colors.primary),
+        suffixIcon: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (verified)
+              const Tooltip(
+                message: 'Endpoint verified',
+                child: Icon(Icons.verified_rounded, color: Color(0xff239765)),
+              ),
+            if (address.text.isNotEmpty)
+              IconButton(
+                tooltip: 'Clear address',
+                onPressed: () {
+                  address.clear();
+                  onChanged('');
+                },
+                icon: const Icon(Icons.clear, size: 20),
+              ),
+          ],
+        ),
       ),
     );
   }
