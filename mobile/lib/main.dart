@@ -917,8 +917,14 @@ class _ControllerHomeState extends State<ControllerHome>
         !board.measurementsFresh) {
       return true;
     }
-    if (section == 1 && board.pwmUpdated != null && !board.pwmReadbackFresh) {
-      return true;
+    if (section == 1 && !board.pwmReadbackFresh) {
+      final needsPwm =
+          board.state['connected'] == true &&
+          objects(board.peripherals['controls']).any(
+            (control) =>
+                control['control'] == 'pwm-user' && control['hidden'] != true,
+          );
+      if (board.pwmUpdated != null || needsPwm) return true;
     }
     return false;
   }

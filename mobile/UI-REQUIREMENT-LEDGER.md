@@ -1,4 +1,4 @@
-# Flutter UI requirement ledger - 0.1.16
+# Flutter UI requirement ledger - 0.1.17
 
 The user design rejection remains authoritative. This ledger separates implemented UI, source verification, Android delivery and live/human acceptance; it does not close the broader acceptance goal.
 
@@ -27,3 +27,7 @@ Delivery observed 2026-10-13 08:14 UTC: final 0.1.14/code15 ARM64 release from 5
 Latest direct rejection addressed in 0.1.16/code17 source: disconnected navigation, fresh pull gesture, duplicate derived endpoint presentation and plain activity-bar backgrounds. Source checks and controlled render results are recorded below after verification; these changes still require live Android and human design acceptance. Version 0.1.15/code16 was transferred manually to the SSH phone in the delivery chat, not an installed identity inferred from this ledger.
 
 0.1.16 verification: 58 focused functional checks passed, including disconnected/connecting/connected/stale/offline transitions on phone/tablet, distinct activity colors in light/dark, one endpoint field with unchanged late-probe fencing and short-host retry intent, no fresh pull reads/indicator, stale pull without an intervening rebuild, retained ScrollPosition and pending front-panel viewport/extent. Analyzer clean. Two opt-in renderer checks produced 12 actual Flutter fixture routes across disconnected/connected phone/tablet, Vibrant/Pastel dark, endpoint keyboard/error and existing authoring/preferences; rendered phone navigation, endpoint and dark tablet inspected. Fixtures are not live Android evidence.
+
+Review follow-up 0.1.17/code18: fresh status/catalog with advertised visible PWM channels and no initial readback must still offer read-only pull recovery. Gate recovery on the missing required domain, not only a previously observed PWM timestamp. After actual readback arrives the gesture is suppressed again. Code17 was copied/hash-verified but superseded before the final ready-to-install notice; retain its separate historical transfer receipt.
+
+Follow-up verification: 18 focused pull/PWM/ownership/front-panel checks passed, including a real widget pull with fresh status and no first PWM readback, only snapshot/catalog/PWM/instance reads, verified readback installation, and suppression of a second fresh gesture. The earlier 58 UI checks and 12 rendered fixture routes retain their separate evidence. Analyzer clean for the follow-up source. No board or Android installer action.

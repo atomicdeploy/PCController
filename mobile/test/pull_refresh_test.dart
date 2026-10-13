@@ -218,6 +218,106 @@ void main() {
   );
 
   testWidgets(
+    'fresh status with advertised PWM but no first readback permits read-only recovery',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      await tester.pumpWidget(const UnifiedControllerApp(restore: false));
+      final dynamic home = tester.state(find.byType(ControllerHome));
+      final PeerSession board = home.board;
+      final snapshot = Completer<http.Response>();
+      final methods = <String>[];
+      var reads = 0;
+      final controls = [
+        {
+          'key': 'pwm.0',
+          'name': 'MOSFET 1',
+          'kind': 'mosfet',
+          'control': 'pwm-user',
+        },
+      ];
+      final status = {
+        'connected': true,
+        'have_front_panel': true,
+        'host_instance_id': 'fixture',
+      };
+      board.transport = PeerTransport(
+        'http://fixture',
+        client: MockClient((request) {
+          if (request.method == 'GET') {
+            reads++;
+            expect(request.url.path, '/api/snapshot');
+            return snapshot.future;
+          }
+          final rpc = object(jsonDecode(request.body));
+          methods.add(rpc['method'] as String);
+          final Object result = switch (rpc['method']) {
+            'controller.peripherals.get' => {
+              'controls': controls,
+              'peripherals': [],
+              'board_profile': {},
+            },
+            'controller.pwm.values' => {
+              'available': true,
+              'channels': [
+                {'channel': 0, 'logical_percent': 25},
+              ],
+            },
+            'controller.app.instances' => [],
+            _ => throw StateError('Unexpected mutation or RPC'),
+          };
+          return Future.value(
+            http.Response(
+              jsonEncode({'jsonrpc': '2.0', 'id': rpc['id'], 'result': result}),
+              200,
+            ),
+          );
+        }),
+      );
+      board.online = true;
+      board.received = DateTime.now();
+      board.state = status;
+      board.peripherals = {'controls': controls};
+      home.selectActivity(1);
+      await tester.pumpAndSettle();
+      expect(board.fresh, true);
+      expect(board.pwmUpdated, null);
+      expect(home.canPullRefresh, true);
+      final view = find.byType(SingleChildScrollView).last;
+      await pull(tester, tester.getRect(view));
+      await tester.runAsync(() async => Future<void>.delayed(Duration.zero));
+      expect(find.byType(RefreshProgressIndicator), findsOneWidget);
+      expect(reads, 1);
+      final joining = board.refresh();
+      snapshot.complete(http.Response(jsonEncode(status), 200));
+      // The controller chains several RPCs after its snapshot. Drain their
+      // fake/real microtasks before awaiting the joined future.
+      for (var i = 0; i < 10; i++) {
+        await tester.pump();
+        await tester.runAsync(() async => Future<void>.delayed(Duration.zero));
+      }
+      await tester.pumpAndSettle();
+      await joining;
+      expect(
+        methods,
+        unorderedEquals([
+          'controller.peripherals.get',
+          'controller.pwm.values',
+          'controller.app.instances',
+        ]),
+      );
+      expect(board.pwmReadbackFresh, true);
+      expect(find.text('Setpoint 25.0%'), findsOneWidget);
+      expect(home.canPullRefresh, false);
+      expect(find.byType(RefreshProgressIndicator), findsNothing);
+      await pull(tester, tester.getRect(view));
+      expect(methods, hasLength(3));
+      expect(find.byType(RefreshProgressIndicator), findsNothing);
+      expect(tester.takeException(), null);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
     'pull refresh failure finishes and preserves authoring text and viewport',
     (tester) async {
       SharedPreferences.setMockInitialValues({});
