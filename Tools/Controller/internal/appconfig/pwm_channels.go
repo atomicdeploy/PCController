@@ -19,12 +19,19 @@ const (
 // channel. Percent is always logical intensity; Raw is always the exact board
 // duty. Curve conversion happens once, at the host/board boundary.
 type PWMChannelConfig struct {
-	OutputType  string   `json:"output_type"`
-	Icon        string   `json:"icon"`
-	Curve       string   `json:"curve"`
-	Gamma       float64  `json:"gamma"`
-	StepPercent *float64 `json:"step_percent,omitempty"`
-	OnBehavior  string   `json:"on_behavior,omitempty"`
+	OutputType         string   `json:"output_type"`
+	Icon               string   `json:"icon"`
+	Curve              string   `json:"curve"`
+	Gamma              float64  `json:"gamma"`
+	StepPercent        *float64 `json:"step_percent,omitempty"`
+	OnBehavior         string   `json:"on_behavior,omitempty"`
+	PersistedRecallRaw uint16   `json:"-"` // Injected from the selected board profile.
+}
+
+func PWMChannelForProfile(config Config, identity string, channel int) PWMChannelConfig {
+	value := PWMChannel(config.UI, channel)
+	value.PersistedRecallRaw = config.BoardProfiles[identity].PWMRecall[PWMChannelKey(channel)]
+	return value
 }
 
 func PWMOnBehavior(config PWMChannelConfig) string {

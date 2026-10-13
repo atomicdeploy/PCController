@@ -13,14 +13,15 @@ import (
 )
 
 type pwmChannelValue struct {
-	Channel           int                        `json:"channel"`
-	RawValue          uint16                     `json:"raw_value"`
-	LogicalPercent    float64                    `json:"logical_percent"`
-	Name              string                     `json:"name"`
-	Config            appconfig.PWMChannelConfig `json:"config"`
-	RememberedKnown   bool                       `json:"remembered_known"`
-	RememberedRaw     uint16                     `json:"remembered_raw"`
-	RememberedPercent float64                    `json:"remembered_percent"`
+	Channel             int                        `json:"channel"`
+	RawValue            uint16                     `json:"raw_value"`
+	LogicalPercent      float64                    `json:"logical_percent"`
+	Name                string                     `json:"name"`
+	Config              appconfig.PWMChannelConfig `json:"config"`
+	RememberedKnown     bool                       `json:"remembered_known"`
+	RememberedRaw       uint16                     `json:"remembered_raw"`
+	RememberedPercent   float64                    `json:"remembered_percent"`
+	RememberedPersisted bool                       `json:"remembered_persisted"`
 }
 
 type pwmValues struct {
@@ -106,17 +107,22 @@ func (service *Service) describePWMValuesForSnapshot(values native.PWMValues, sn
 		Available: values.Available, SelectedChannel: values.SelectedChannel, Values: values.Values,
 		Channels: make([]pwmChannelValue, 0, appconfig.PWMChannelCount),
 	}
-	_, profile, _ := boardProfileForSnapshot(config, snapshot)
+	identity, profile, _ := boardProfileForSnapshot(config, snapshot)
 	names := appconfig.PWMDisplayNames(config.UI, profile.Presentation)
 	for channel, raw := range values.Values {
-		channelConfig := appconfig.PWMChannel(config.UI, channel)
+		channelConfig := appconfig.PWMChannelForProfile(config, identity.Value, channel)
 		recall := snapshot.PWMRecall[channel]
+		persisted := profile.PWMRecall[appconfig.PWMChannelKey(channel)]
+		if !recall.Known && persisted > 0 {
+			recall.Known, recall.Raw = true, persisted
+		}
 		result.Channels = append(result.Channels, pwmChannelValue{
 			Channel: channel, RawValue: raw,
 			LogicalPercent: math.Round(appconfig.PWMPercentFromRaw(raw, channelConfig)*1000) / 1000,
 			Name:           names[channel], Config: channelConfig,
 			RememberedKnown: recall.Known, RememberedRaw: recall.Raw,
-			RememberedPercent: math.Round(appconfig.PWMPercentFromRaw(recall.Raw, channelConfig)*1000) / 1000,
+			RememberedPersisted: persisted != 0 && recall.Raw == persisted,
+			RememberedPercent:   math.Round(appconfig.PWMPercentFromRaw(recall.Raw, channelConfig)*1000) / 1000,
 		})
 	}
 	return result

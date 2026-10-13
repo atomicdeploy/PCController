@@ -783,7 +783,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 		},
 	})
 	mustRegister(shell.Command{
-		Name: "pwm", Usage: "pwm get|off|on|off|toggle|increase|decrease CHANNEL|set CHANNEL PERCENT|raw CHANNEL VALUE|configure CHANNEL TYPE CURVE [GAMMA [ICON [STEP_PERCENT [ON_BEHAVIOR]]]]|trace start CHANNEL DURATION_MS|trace get|trace stop",
+		Name: "pwm", Usage: "pwm get|off|on|off|toggle|increase|decrease|roll|remember CHANNEL|set CHANNEL PERCENT|raw CHANNEL VALUE|configure CHANNEL TYPE CURVE [GAMMA [ICON [STEP_PERCENT [ON_BEHAVIOR]]]]|trace start CHANNEL DURATION_MS|trace get|trace stop",
 		Summary: "control logical brightness through per-channel curves or exact raw PWM",
 		Run: func(ctx context.Context, args []string) (string, error) {
 			return pwmCommand(ctx, runtime, options, args)
@@ -3675,7 +3675,27 @@ func pwmCommand(ctx context.Context, runtime *Runtime, options CommandOptions, a
 		encoded, err := json.MarshalIndent(trace, "", "  ")
 		return string(encoded), err
 	}
-	if len(args) == 2 && (strings.EqualFold(args[0], "on") || strings.EqualFold(args[0], "off") || strings.EqualFold(args[0], "toggle") || strings.EqualFold(args[0], "increase") || strings.EqualFold(args[0], "decrease")) {
+	if len(args) == 2 && strings.EqualFold(args[0], "remember") {
+		channel, err := parsePWMChannel(args[1])
+		if err != nil {
+			return "", err
+		}
+		before := runtime.Snapshot()
+		frame, err := runtime.requestAtGeneration(ctx, before.ConnectionGeneration, native.OpPWMGet, nil, native.OpPWMValues)
+		if err != nil {
+			return "", err
+		}
+		values, err := native.ParsePWMValues(frame.Payload)
+		if err != nil {
+			return "", err
+		}
+		if err = validatePWMActionReadback(values); err != nil {
+			return "", err
+		}
+		err = persistPWMRecall(runtime, options, before.ConnectionGeneration, channel)
+		return "confirmed PWM brightness retained", err
+	}
+	if len(args) == 2 && (strings.EqualFold(args[0], "on") || strings.EqualFold(args[0], "off") || strings.EqualFold(args[0], "toggle") || strings.EqualFold(args[0], "increase") || strings.EqualFold(args[0], "decrease") || strings.EqualFold(args[0], "roll")) {
 		channel, err := parsePWMChannel(args[1])
 		if err != nil {
 			return "", err
@@ -3684,13 +3704,18 @@ func pwmCommand(ctx context.Context, runtime *Runtime, options CommandOptions, a
 		if options.HostConfig != nil {
 			config = options.HostConfig()
 		}
-		channelConfig := appconfig.PWMChannel(config.UI, int(channel))
+		channelConfig := appconfig.PWMChannelForProfile(config, pwmProfileIdentity(runtime.Snapshot()), int(channel))
 		runtime.mu.RLock()
 		generation := runtime.generation
 		runtime.mu.RUnlock()
 		values, err := runtime.ApplyPWMAction(ctx, generation, channel, strings.ToLower(args[0]), channelConfig)
 		if err != nil {
 			return "", err
+		}
+		if (strings.EqualFold(args[0], "toggle") || strings.EqualFold(args[0], "off")) && appconfig.PWMOnBehavior(channelConfig) == "restore" {
+			if err = persistPWMRecall(runtime, options, generation, channel); err != nil {
+				return "", fmt.Errorf("PWM applied but brightness persistence failed (not retried): %w", err)
+			}
 		}
 		return fmt.Sprintf("PWM channel %d logical=%.3f%% raw=%d", channel, appconfig.PWMPercentFromRaw(values.Values[channel], channelConfig), values.Values[channel]), nil
 	}
@@ -3807,7 +3832,7 @@ func pwmCommand(ctx context.Context, runtime *Runtime, options CommandOptions, a
 		})
 		return fmt.Sprintf("PWM channel %d type=%s icon=%s curve=%s gamma=%.2f step=%.3f%% on=%s", channel, channelConfig.OutputType, channelConfig.Icon, channelConfig.Curve, channelConfig.Gamma, appconfig.PWMStepPercent(channelConfig), appconfig.PWMOnBehavior(channelConfig)), nil
 	}
-	return "", fmt.Errorf("usage: pwm get | pwm off | pwm on|off|toggle|increase|decrease CHANNEL | pwm set CHANNEL PERCENT | pwm raw CHANNEL VALUE | pwm configure CHANNEL TYPE CURVE [GAMMA [ICON [STEP_PERCENT [ON_BEHAVIOR]]]]")
+	return "", fmt.Errorf("usage: pwm get | pwm off | pwm on|off|toggle|increase|decrease|roll|remember CHANNEL | pwm set CHANNEL PERCENT | pwm raw CHANNEL VALUE | pwm configure CHANNEL TYPE CURVE [GAMMA [ICON [STEP_PERCENT [ON_BEHAVIOR]]]]")
 }
 
 func parsePWMChannel(value string) (byte, error) {

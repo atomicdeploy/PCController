@@ -85,7 +85,7 @@ func (service *Service) rfCatalog(ctx context.Context, raw json.RawMessage) (any
 		"bindings": rfBindings(config), "learning": service.Client.RFLearningState(),
 		"activity": service.Client.RFActivity(), "keyboard": config.OSActions.VirtualKeys,
 		"connected": snapshot.Connected, "hostname": "", "entries": []any{},
-		"gestures":     []string{"down", "up", "click", "double", "hold", "repeat"},
+		"gestures":     []string{"down", "up", "tap", "click", "double", "hold", "repeat", "hold-end"},
 		"action_types": []string{"app", "control", "board", "effect", "rf", "virtual-key", "host", "script", "emit"},
 		"effects":      snapshot.Effects, "peripherals": peripherals,
 	}

@@ -3812,6 +3812,11 @@ func (runtime *Runtime) dispatchBoardAutomation(event native.DeviceEvent) {
 }
 
 func (runtime *Runtime) observeRFGesture(event native.DeviceEvent) {
+	// Capture receptions remain visible, but their delayed releases must not
+	// turn into a newly enabled tap after learning has been stopped.
+	if runtime.RFLearnState().Active {
+		return
+	}
 	now := time.Now()
 	key := rfGestureKey{
 		code: event.RFCode, bits: event.RFBits, protocol: event.RFProtocol,
@@ -3900,6 +3905,11 @@ func (runtime *Runtime) finishRFGesture(
 	}
 	runtime.rfMu.Unlock()
 	runtime.publishRFGesture(event, "up")
+	if held {
+		runtime.publishRFGesture(event, "hold-end")
+	} else {
+		runtime.publishRFGesture(event, "tap")
+	}
 	if double {
 		runtime.publishRFGesture(event, "double-click")
 	}

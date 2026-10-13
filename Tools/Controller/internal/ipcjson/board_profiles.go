@@ -353,7 +353,7 @@ func peripheralKeyForCommand(command string) string {
 	words := strings.Fields(strings.ToLower(strings.TrimSpace(command)))
 	if len(words) >= 3 && words[0] == "pwm" {
 		switch words[1] {
-		case "on", "off", "toggle", "increase", "decrease", "set", "raw", "configure":
+		case "on", "off", "toggle", "increase", "decrease", "roll", "remember", "set", "raw", "configure":
 			if channel, err := appconfig.ParsePWMChannel(words[2]); err == nil {
 				return appconfig.PWMChannelKey(int(channel))
 			}
@@ -449,7 +449,9 @@ func (service *Service) invokeSemanticAction(ctx context.Context, actionID strin
 		if parseErr != nil || channel < 0 || channel >= appconfig.PWMChannelCount {
 			return nil, fmt.Errorf("invalid advertised PWM channel %q", parts[1])
 		}
-		_, actionErr := service.Client.ApplyPWMAction(ctx, generation, byte(channel), action.Verb, appconfig.PWMChannel(service.hostConfig().UI, channel))
+		config := service.hostConfig()
+		identity, _, _ := boardProfileForSnapshot(config, service.Client.Snapshot())
+		_, actionErr := service.Client.ApplyPWMAction(ctx, generation, byte(channel), action.Verb, appconfig.PWMChannelForProfile(config, identity.Value, channel))
 		err = actionErr
 		if err == nil {
 			snapshot := service.Client.Snapshot()

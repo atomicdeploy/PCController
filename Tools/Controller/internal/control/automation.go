@@ -73,6 +73,25 @@ func RunAutomations(
 			if !automation.Enabled || !automationMatches(automation.Match, event) {
 				continue
 			}
+			roll := false
+			for _, action := range automation.Actions {
+				words := strings.Fields(strings.ToLower(action.Command))
+				roll = roll || action.Type == "board" && len(words) == 3 && words[0] == "pwm" && words[1] == "roll"
+			}
+			timeout := automationActionTimeout
+			if roll && event.Kind == "rf.gesture" && (event.Gesture == "hold" || event.Gesture == "repeat") {
+				runtime.rfMu.Lock()
+				state := runtime.rfGestures[rfGestureKey{code: event.RFCode, bits: event.RFBits, protocol: event.RFProtocol}]
+				active := state != nil && state.held && time.Since(event.Time) <= rfReleaseAfter
+				if active {
+					timeout = time.Until(state.lastSeen.Add(rfReleaseAfter))
+					active = timeout > 0
+				}
+				runtime.rfMu.Unlock()
+				if !active {
+					continue
+				} // A released RF hold cannot replay queued ramp writes.
+			}
 			name := strings.ToLower(strings.TrimSpace(automation.Name))
 			cooldown := time.Duration(automation.CooldownMS) * time.Millisecond
 			if cooldown == 0 {
@@ -84,7 +103,7 @@ func RunAutomations(
 				continue
 			}
 			lastTriggered[name] = now
-			actionContext, cancel := context.WithTimeout(ctx, automationActionTimeout)
+			actionContext, cancel := context.WithTimeout(ctx, timeout)
 			err := executeAutomation(
 				actionContext,
 				runtime,
