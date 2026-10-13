@@ -91,3 +91,17 @@ func TestPWMRecallConfigMergesInsideSerializedMutation(t *testing.T) {
 		t.Fatalf("overwrote other client edit: %+v %v", got, err)
 	}
 }
+
+func TestPWMPartialConfigRejectsExplicitInvalidFields(t *testing.T) {
+	service, config := browserUIConfigTestService(t)
+	before := appconfig.PWMChannel(config.UI, 1)
+	for _, raw := range []string{`{"on_behavior":"restore"}`, `{"channel":1,"gamma":0}`, `{"channel":1,"gamma":9}`, `{"channel":1,"on_behavior":""}`, `{"channel":1,"curve":""}`, `{"channel":1,"icon":""}`, `{"channel":1,"step_percent":0}`} {
+		response := service.Dispatch(context.Background(), Request{Method: "controller.pwm.channel.configure", Params: json.RawMessage(raw)})
+		if response.Error == nil || response.Error.Code != -32602 {
+			t.Fatalf("invalid input %s accepted: %+v", raw, response)
+		}
+		if got := appconfig.PWMChannel(config.UI, 1); got.Curve != before.Curve || got.Gamma != before.Gamma || got.OnBehavior != before.OnBehavior {
+			t.Fatal("invalid edit changed config")
+		}
+	}
+}

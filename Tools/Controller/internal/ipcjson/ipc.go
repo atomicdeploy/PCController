@@ -1093,12 +1093,14 @@ func (service *Service) dispatch(
 			}
 		}
 	case "controller.pwm.channel.configure":
-		var params struct {
-			Channel int `json:"channel"`
-			appconfig.PWMChannelConfig
-		}
+		var params pwmChannelConfigParams
 		if err = decodeParams(request.Params, &params); err == nil {
-			result, err = service.updatePWMChannelConfig(params.Channel, params.PWMChannelConfig)
+			var channel int
+			var value appconfig.PWMChannelConfig
+			channel, value, err = params.patch()
+			if err == nil {
+				result, err = service.updatePWMChannelConfig(channel, value)
+			}
 		}
 	case "controller.pwm.off":
 		result, err = service.clearPWMAndReadback(ctx)
@@ -3338,17 +3340,19 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 		if !authorizeHTTPCapability(writer, request, service, capabilityHostConfig) {
 			return
 		}
-		var params struct {
-			Channel int `json:"channel"`
-			appconfig.PWMChannelConfig
-		}
+		var params pwmChannelConfigParams
 		decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, maxMessage))
 		decoder.DisallowUnknownFields()
 		if err := decoder.Decode(&params); err != nil {
 			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
-		value, err := service.updatePWMChannelConfig(params.Channel, params.PWMChannelConfig)
+		channel, patch, err := params.patch()
+		if err != nil {
+			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		value, err := service.updatePWMChannelConfig(channel, patch)
 		if err != nil {
 			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return

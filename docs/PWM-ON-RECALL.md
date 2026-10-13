@@ -55,7 +55,7 @@ curve edits, absolute100, external observations, malformed/unavailable readings,
 ACK without readback, replaced generations, framed transport, two callers and
 partial/concurrent config edits. CI must pass before deployment. Source/CI
 receipts are not proof of physical light stability: the separate unexplained
-cutout investigation remains [#672](https://github.com/atomicdeploy/PCController/issues/672).
+cutout investigation remains tracked in GitHub issue #672.
 
 For live acceptance on a human-approved channel: set a nonzero percent, Off,
 On from a second client, compare fresh raw readback; toggle twice; explicitly

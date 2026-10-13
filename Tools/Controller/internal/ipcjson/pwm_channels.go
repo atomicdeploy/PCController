@@ -128,6 +128,49 @@ func validatePWMChannelConfig(channel int, value appconfig.PWMChannelConfig) err
 	})
 }
 
+// Pointer fields distinguish omitted edits from invalid explicit zero/empty
+// input. The same decoder is used by RPC and HTTP, without contract aliases.
+type pwmChannelConfigParams struct {
+	Channel     *int     `json:"channel"`
+	OutputType  *string  `json:"output_type"`
+	Icon        *string  `json:"icon"`
+	Curve       *string  `json:"curve"`
+	Gamma       *float64 `json:"gamma"`
+	StepPercent *float64 `json:"step_percent"`
+	OnBehavior  *string  `json:"on_behavior"`
+}
+
+func (params pwmChannelConfigParams) patch() (int, appconfig.PWMChannelConfig, error) {
+	bad := func(message string) (int, appconfig.PWMChannelConfig, error) {
+		return 0, appconfig.PWMChannelConfig{}, &RPCError{Code: -32602, Message: message}
+	}
+	if params.Channel == nil || *params.Channel < 0 || *params.Channel >= appconfig.PWMChannelCount {
+		return bad("channel must be explicitly specified as 0..15")
+	}
+	value := appconfig.PWMChannelConfig{StepPercent: params.StepPercent}
+	for _, field := range []struct {
+		name   string
+		input  *string
+		target *string
+	}{
+		{"output_type", params.OutputType, &value.OutputType}, {"icon", params.Icon, &value.Icon}, {"curve", params.Curve, &value.Curve}, {"on_behavior", params.OnBehavior, &value.OnBehavior},
+	} {
+		if field.input != nil {
+			if strings.TrimSpace(*field.input) == "" {
+				return bad(field.name + " must not be empty")
+			}
+			*field.target = *field.input
+		}
+	}
+	if params.Gamma != nil {
+		if math.IsNaN(*params.Gamma) || math.IsInf(*params.Gamma, 0) || *params.Gamma < appconfig.PWMMinimumGamma || *params.Gamma > appconfig.PWMMaximumGamma {
+			return bad("gamma must be 0.10..5.00")
+		}
+		value.Gamma = *params.Gamma
+	}
+	return *params.Channel, value, nil
+}
+
 func mergePWMChannelConfig(current, value appconfig.PWMChannelConfig) appconfig.PWMChannelConfig {
 	// Resolve omission inside the serialized config mutation, not from a stale
 	// client catalog or a snapshot preceding another client's edit.
@@ -139,9 +182,9 @@ func mergePWMChannelConfig(current, value appconfig.PWMChannelConfig) appconfig.
 	}
 	if value.Curve == "" {
 		value.Curve = current.Curve
-		if value.Gamma == 0 {
-			value.Gamma = current.Gamma
-		}
+	}
+	if value.Gamma == 0 {
+		value.Gamma = current.Gamma
 	}
 	if value.OnBehavior == "" {
 		value.OnBehavior = appconfig.PWMOnBehavior(current)
