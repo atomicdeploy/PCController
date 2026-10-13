@@ -761,7 +761,7 @@ export function ControlsView(props: SharedViewProps) {
 		}
 	}
   const invokePWMAction = async (channel: number, verb: 'on' | 'off' | 'toggle') => {
-    if (pwmPending.length || pwmAllBusyRef.current) return
+    if (pwmSchedulerRef.current?.pendingChannels().length || pwmAllBusyRef.current) return
     pwmAllBusyRef.current = true
     setPWMAllBusy(true)
     setPWMError('')

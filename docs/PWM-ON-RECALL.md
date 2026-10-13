@@ -6,7 +6,7 @@ using any of these commands. A MOSFET label is one-based; `pwm.N` is zero-based.
 | Interface | Set policy | Invoke |
 | --- | --- | --- |
 | RPC / IPC / WebSocket / bridge | `controller.pwm.channel.configure {"channel":1,"on_behavior":"restore"}` | `controller.control.invoke {"action_id":"pwm.1.on"}` |
-| CLI / TUI console | `pwm configure 1 lighting gamma 2.2 lightbulb 1 restore` | `pwm on 1`, `pwm off 1`, `pwm toggle 1` |
+| CLI / TUI | `pwm configure 1 lighting gamma 2.2 lightbulb 1 restore` | `pwm on 1`, `pwm off 1`, `pwm toggle 1`; ordinary output-row Enter toggles, arrows use shared relative steps |
 | Web PWM mixer | Channel's **On** behavior selector | **On** / **Off** use the same semantic actions |
 | Host RF binding / other clients | Consume advertised config and semantic actions | `pwm.N.on`, `.off`, `.toggle`, `.increase`, `.decrease` |
 | Config file | `ui.pwm_channels["pwm.1"].on_behavior` | Same primary-owned policy |
@@ -18,6 +18,8 @@ An absolute `controller.pwm.set {"channel":1,"percent":100}` remains 100%,
 never recall. Relative actions and configured curve/step semantics are unchanged.
 Indicator click choice (toggle/on/off) and action visibility are **client
 presentation preferences**, not competing backend channel configuration.
+TUI Home/End and pointer sliders remain explicit absolute 0/100/set controls,
+not recall. The enclosure-owned manual override remains on its existing path.
 
 Configuration updates preserve omitted fields, including custom step and recall
 policy, inside the serialized mutation. `peripherals.changed` tells subscribed
