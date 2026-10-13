@@ -1820,8 +1820,8 @@ func TestAsyncTransportCloseFailurePausesRuntimeUntilRetry(t *testing.T) {
 	for {
 		snapshot := runtime.Snapshot()
 		if snapshot.ConnectionState == "close_failed" {
-			if !snapshot.Paused || !snapshot.Connected {
-				t.Fatalf("asynchronous close failure snapshot = %#v, want paused retained ownership", snapshot)
+			if !snapshot.Paused || snapshot.Connected || snapshot.ConnectionPhase != "blocked" {
+				t.Fatalf("asynchronous close failure snapshot = %#v, want blocked cleanup ownership without authentication", snapshot)
 			}
 			break
 		}

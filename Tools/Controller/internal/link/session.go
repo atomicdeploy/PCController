@@ -323,6 +323,10 @@ func newSession(name string, port sessionPort) *Session {
 func newPendingOpenSession(name string, acquisition *serialOpenAcquisition) *Session {
 	session := newSession(name, nil)
 	session.pendingOpen = acquisition
+	// This is a cleanup owner, never an authenticated transport. Fence every
+	// writer/DTR immediately, even before the caller's first Close attempt.
+	// Close still owns and retries release of the exact late acquisition.
+	session.closingOnce.Do(func() { close(session.closing) })
 	return session
 }
 

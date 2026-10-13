@@ -10,6 +10,18 @@ import (
 	"pccontroller.local/controller/internal/native"
 )
 
+// PWMActionConfirmationError separates an acknowledged mutation from a
+// missing/invalid confirmation; callers must not retry the write blindly.
+type PWMActionConfirmationError struct{ Cause error }
+
+func (err *PWMActionConfirmationError) Error() string {
+	if err.Cause == nil {
+		return "PWM write acknowledged but confirmation unavailable; output outcome is unknown"
+	}
+	return "PWM write acknowledged but confirmation unavailable; output outcome is unknown: " + err.Cause.Error()
+}
+func (err *PWMActionConfirmationError) Unwrap() error { return err.Cause }
+
 func (runtime *Runtime) acquirePWMAction(ctx context.Context) (func(), error) {
 	runtime.pwmActionOnce.Do(func() { runtime.pwmActionGate = make(chan struct{}, 1) })
 	select {
@@ -109,10 +121,10 @@ func applyPWMActionWithIO(channel byte, verb string, config appconfig.PWMChannel
 	}
 	values, err = read()
 	if err != nil {
-		return native.PWMValues{}, fmt.Errorf("PWM write acknowledged but readback failed; output outcome is unknown: %w", err)
+		return native.PWMValues{}, &PWMActionConfirmationError{Cause: err}
 	}
 	if err := validatePWMActionReadback(values); err != nil {
-		return native.PWMValues{}, fmt.Errorf("PWM readback invalid after write; output outcome is unknown: %w", err)
+		return native.PWMValues{}, &PWMActionConfirmationError{Cause: err}
 	}
 	return values, nil
 }
