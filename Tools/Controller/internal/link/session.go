@@ -77,6 +77,7 @@ type Session struct {
 	closed      bool
 	readDone    sync.WaitGroup
 	pendingOpen *serialOpenAcquisition
+	rfWire      rfWireState
 }
 
 type sessionPort interface {
@@ -756,6 +757,7 @@ func (s *Session) readLoop() {
 				s.publish(Event{Err: decodeErr, Recoverable: true})
 			}
 			for _, frame := range frames {
+				s.observeRFClock(frame)
 				s.observeHello(frame)
 				if !s.deliver(frame) {
 					s.publish(Event{Frame: frame})

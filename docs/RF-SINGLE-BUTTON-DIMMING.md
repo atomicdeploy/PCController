@@ -13,6 +13,14 @@ one selected MOSFET channel, using the existing persisted RF binding API:
 Configure that channel's `on_behavior` to `restore`. Tap is emitted once at
 short release, without the double-click delay; a held release never emits Tap.
 RF release is inferred after 250 ms of silence; hold begins after 600 ms.
+Timed firmware uses the MCU clock, not delayed host/UI arrival times, for
+continuity, hold duration and silence. A bounded receive-pump cache observes RF
+before presentation dispatch; buffered receptions cannot split a continuous
+hold into false taps. Release requires a later MCU clock observation proving
+silence, with a read-only status heartbeat when necessary. A failed heartbeat
+or lost/replaced session never becomes a toggle. Untimed firmware retains the
+legacy host-clock inference. This is inferred release, not a physical button-up
+signal; physical acceptance is still required.
 Existing Click/Double and Down/Up events remain available independently. Do not
 assign both Tap and Click/Down toggles to the same waveform. Learning receptions
 never schedule delayed taps that could execute after learning is stopped.

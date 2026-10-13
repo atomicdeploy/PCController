@@ -14,8 +14,10 @@ are stored in Pealayer.
 3. Choose **Assign**, name the assignment and choose a gesture. **Down** executes
    immediately once per press; **Up** executes after reception stops. Hold,
    repeat, click and double-click are also available. A radio receiver cannot
-   observe a physical release directly; Up uses the existing 250 ms packet-gap
-   timeout. Click waits for the double-click window.
+   observe a physical release directly; Up uses a 250 ms packet-gap inference.
+   Timed firmware requires MCU-clock silence evidence, so delayed host dispatch
+   does not create false releases; untimed sources use the legacy host clock.
+   Click waits for the double-click window.
 4. Add one or more ordered actions (maximum eight): advertised board control,
    effect, application command, RF transmission, keyboard key, external program,
    script or event. Choose **Application → pealayer (all) → Toggle** for play/pause.
