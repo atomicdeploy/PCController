@@ -352,7 +352,7 @@ func peripheralKeyForCommand(command string) string {
 	words := strings.Fields(strings.ToLower(strings.TrimSpace(command)))
 	if len(words) >= 3 && words[0] == "pwm" {
 		switch words[1] {
-		case "on", "off", "increase", "decrease", "set", "raw", "configure":
+		case "on", "off", "toggle", "increase", "decrease", "set", "raw", "configure":
 			if channel, err := appconfig.ParsePWMChannel(words[2]); err == nil {
 				return appconfig.PWMChannelKey(int(channel))
 			}

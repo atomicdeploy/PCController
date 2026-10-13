@@ -2080,8 +2080,14 @@ func (service *Service) browserUISettings() browserUISettings {
 }
 
 func clonePWMChannels(channels map[string]appconfig.PWMChannelConfig) map[string]appconfig.PWMChannelConfig {
-	result := make(map[string]appconfig.PWMChannelConfig, len(channels))
-	for key, value := range channels {
+	result := make(map[string]appconfig.PWMChannelConfig, appconfig.PWMChannelCount)
+	for channel := 0; channel < appconfig.PWMChannelCount; channel++ {
+		key := appconfig.PWMChannelKey(channel)
+		value := appconfig.PWMChannel(appconfig.UI{PWMChannels: channels}, channel)
+		if value.StepPercent != nil {
+			step := *value.StepPercent
+			value.StepPercent = &step
+		}
 		result[key] = value
 	}
 	return result

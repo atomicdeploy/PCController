@@ -1419,7 +1419,7 @@
     },
     "controller.pwm.channel.configure": {
       "capability": "host_configuration",
-      "summary": "Persist one PWM channel's output type, icon, transfer curve, and gamma, then publish the changed descriptor.",
+      "summary": "Persist a partial PWM channel configuration (output type, icon, curve, gamma, step_percent, on_behavior full|restore), preserving omitted fields, then publish the changed descriptor.",
       "idempotency": "idempotent-with-authoritative-readback"
     },
     "controller.pwm.off": {

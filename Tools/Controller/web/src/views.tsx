@@ -752,7 +752,7 @@ export function ControlsView(props: SharedViewProps) {
 		if (!current) return
 		setPWMError('')
 		try {
-			await rpc('controller.pwm.channel.configure', { channel, ...current, ...patch })
+			await rpc('controller.pwm.channel.configure', { channel, ...patch })
 			const updated = await rpc<HostUISettings>('controller.ui.config.get')
 			setHostUI(updated)
 			applyAuthoritativePWM(await pwmOperationsRef.current!.run(() => rpc<PWMValues>('controller.pwm.values')))
@@ -760,6 +760,21 @@ export function ControlsView(props: SharedViewProps) {
 			setPWMError(cause instanceof Error ? cause.message : String(cause))
 		}
 	}
+  const invokePWMAction = async (channel: number, verb: 'on' | 'off' | 'toggle') => {
+    if (pwmPending.length || pwmAllBusyRef.current) return
+    pwmAllBusyRef.current = true
+    setPWMAllBusy(true)
+    setPWMError('')
+    try {
+      const response = await pwmOperationsRef.current!.run(() => rpc<{ pwm: PWMValues }>('controller.control.invoke', { action_id: `pwm.${channel}.${verb}` }))
+      applyAuthoritativePWM(response.pwm)
+    } catch (cause) {
+      setPWMError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      pwmAllBusyRef.current = false
+      setPWMAllBusy(false)
+    }
+  }
   const clearPWM = async () => {
     if (pwmPending.length) return
     pwmAllBusyRef.current = true
@@ -875,10 +890,13 @@ export function ControlsView(props: SharedViewProps) {
 					<select aria-label={copy(`${name} response curve`, `منحنی پاسخ ${name}`)} value={config?.curve ?? 'linear'} onChange={(event) => void updatePWMConfig(channel, { curve: event.target.value as PWMChannelConfig['curve'], gamma: event.target.value === 'linear' ? 1 : config?.gamma === 1 ? 2.2 : config?.gamma ?? 2.2 })}>
 					  <option value="gamma">{copy('Perceptual', 'ادراکی')}</option><option value="linear">{copy('Linear', 'خطی')}</option>
 					</select>
+					{config?.on_behavior && <select aria-label={copy(`${name} On behavior`, `رفتار روشن شدن ${name}`)} value={config.on_behavior} disabled={pending || pwmAllBusy} onChange={(event) => void updatePWMConfig(channel, { on_behavior: event.target.value as PWMChannelConfig['on_behavior'] })}>
+					  <option value="full">{copy('On: full brightness', 'روشن: نور کامل')}</option><option value="restore">{copy('On: last brightness', 'روشن: آخرین روشنایی')}</option>
+					</select>}
 				  </div>
 				</div>
 				<RangeField label={copy(`${name} brightness`, `روشنایی ${name}`)} value={pwmPercent(draft, config)} min={0} max={100} step={0.1} unit="%" disabled={!pwmLoaded || pwmAllBusy || emergencyStopActive || hostUI?.controls.find(control => control.key === `pwm.${channel}`)?.locked} onEditStart={() => pwmSchedulerRef.current?.beginEdit(channel)} onEditEnd={() => pwmSchedulerRef.current?.endEdit(channel)} onChange={(percent) => setPWMPercent(channel, percent)} />
-				<div className="pwm-mixer__actions"><Button compact disabled={!pwmLoaded || pwmAllBusy || draft === 0} onClick={() => setPWMPercent(channel, 0, true)}>{t('off')}</Button><Button compact disabled={!pwmLoaded || pwmAllBusy || draft === 4095 || emergencyStopActive} onClick={() => setPWMPercent(channel, 100, true)}>{copy('FULL', 'کامل')}</Button></div>
+				<div className="pwm-mixer__actions"><Button compact disabled={!pwmLoaded || pwmAllBusy || pending || reported === 0 || hostUI?.controls.find(control => control.key === `pwm.${channel}`)?.locked} onClick={() => void invokePWMAction(channel, 'off')}>{t('off')}</Button><Button compact disabled={!pwmLoaded || pwmAllBusy || pending || emergencyStopActive || hostUI?.controls.find(control => control.key === `pwm.${channel}`)?.locked || (config?.on_behavior === 'restore' ? reported > 0 : reported === 4095)} onClick={() => void invokePWMAction(channel, 'on')}>{t('on')}</Button></div>
 				{config?.curve === 'gamma' && <RangeField label={copy('Curve strength', 'شدت منحنی')} value={config.gamma} min={0.1} max={5} step={0.1} disabled={pwmAllBusy} onChange={(gamma) => void updatePWMConfig(channel, { gamma })} />}
               </div>
             })}

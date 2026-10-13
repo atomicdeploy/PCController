@@ -13,11 +13,14 @@ import (
 )
 
 type pwmChannelValue struct {
-	Channel        int                        `json:"channel"`
-	RawValue       uint16                     `json:"raw_value"`
-	LogicalPercent float64                    `json:"logical_percent"`
-	Name           string                     `json:"name"`
-	Config         appconfig.PWMChannelConfig `json:"config"`
+	Channel           int                        `json:"channel"`
+	RawValue          uint16                     `json:"raw_value"`
+	LogicalPercent    float64                    `json:"logical_percent"`
+	Name              string                     `json:"name"`
+	Config            appconfig.PWMChannelConfig `json:"config"`
+	RememberedKnown   bool                       `json:"remembered_known"`
+	RememberedRaw     uint16                     `json:"remembered_raw"`
+	RememberedPercent float64                    `json:"remembered_percent"`
 }
 
 type pwmValues struct {
@@ -107,10 +110,13 @@ func (service *Service) describePWMValuesForSnapshot(values native.PWMValues, sn
 	names := appconfig.PWMDisplayNames(config.UI, profile.Presentation)
 	for channel, raw := range values.Values {
 		channelConfig := appconfig.PWMChannel(config.UI, channel)
+		recall := snapshot.PWMRecall[channel]
 		result.Channels = append(result.Channels, pwmChannelValue{
 			Channel: channel, RawValue: raw,
 			LogicalPercent: math.Round(appconfig.PWMPercentFromRaw(raw, channelConfig)*1000) / 1000,
 			Name:           names[channel], Config: channelConfig,
+			RememberedKnown: recall.Known, RememberedRaw: recall.Raw,
+			RememberedPercent: math.Round(appconfig.PWMPercentFromRaw(recall.Raw, channelConfig)*1000) / 1000,
 		})
 	}
 	return result
@@ -122,35 +128,58 @@ func validatePWMChannelConfig(channel int, value appconfig.PWMChannelConfig) err
 	})
 }
 
+func mergePWMChannelConfig(current, value appconfig.PWMChannelConfig) appconfig.PWMChannelConfig {
+	// Resolve omission inside the serialized config mutation, not from a stale
+	// client catalog or a snapshot preceding another client's edit.
+	if value.OutputType == "" {
+		value.OutputType = current.OutputType
+	}
+	if value.Icon == "" {
+		value.Icon = current.Icon
+	}
+	if value.Curve == "" {
+		value.Curve = current.Curve
+		if value.Gamma == 0 {
+			value.Gamma = current.Gamma
+		}
+	}
+	if value.OnBehavior == "" {
+		value.OnBehavior = appconfig.PWMOnBehavior(current)
+	}
+	if value.StepPercent == nil {
+		if current.StepPercent != nil {
+			step := *current.StepPercent
+			value.StepPercent = &step
+		}
+	}
+	return value
+}
+
 func (service *Service) updatePWMChannelConfig(channel int, value appconfig.PWMChannelConfig) (appconfig.PWMChannelConfig, error) {
 	if channel < 0 || channel >= appconfig.PWMChannelCount {
 		return appconfig.PWMChannelConfig{}, &RPCError{Code: -32602, Message: "channel must be 0..15"}
 	}
-	// A curve/type editor need not replace an independently configured step.
-	// Omission is a partial update; explicitly supply 1 to reset the default.
-	if value.StepPercent == nil {
-		if current := appconfig.PWMChannel(service.hostConfig().UI, channel).StepPercent; current != nil {
-			step := *current
-			value.StepPercent = &step
-		}
-	}
-	if err := validatePWMChannelConfig(channel, value); err != nil {
+	if err := validatePWMChannelConfig(channel, mergePWMChannelConfig(appconfig.PWMChannel(service.hostConfig().UI, channel), value)); err != nil {
 		return appconfig.PWMChannelConfig{}, &RPCError{Code: -32602, Message: err.Error()}
 	}
 	if service.UpdateHostConfig == nil {
 		return appconfig.PWMChannelConfig{}, fmt.Errorf("persistent host configuration is unavailable")
 	}
 	err := service.UpdateHostConfig(func(config *appconfig.Config) error {
+		merged := mergePWMChannelConfig(appconfig.PWMChannel(config.UI, channel), value)
+		if err := validatePWMChannelConfig(channel, merged); err != nil {
+			return &RPCError{Code: -32602, Message: err.Error()}
+		}
 		if config.UI.PWMChannels == nil {
 			config.UI.PWMChannels = appconfig.DefaultPWMChannels()
 		}
-		config.UI.PWMChannels[appconfig.PWMChannelKey(channel)] = value
+		config.UI.PWMChannels[appconfig.PWMChannelKey(channel)] = merged
 		return config.Validate()
 	})
 	if err != nil {
 		return appconfig.PWMChannelConfig{}, err
 	}
 	profile, _ := service.activeBoardProfile()
-	service.publishPeripheralChange(profile, []string{appconfig.PWMChannelKey(channel)}, []string{"output_type", "icon", "curve", "gamma", "step_percent"})
+	service.publishPeripheralChange(profile, []string{appconfig.PWMChannelKey(channel)}, []string{"output_type", "icon", "curve", "gamma", "step_percent", "on_behavior"})
 	return appconfig.PWMChannel(service.hostConfig().UI, channel), nil
 }

@@ -49,7 +49,9 @@ process start, not that the external program completed its own work.
 
 Choose a channel from the advertised control list; do not infer channel numbers
 from a 0–100 brightness range. MOSFET controls advertise `pwm.N.on`, `.off`,
-`.increase` and `.decrease`. On requests 100% logical intensity, Off requests
+`.toggle`, `.increase` and `.decrease`. On defaults to 100% logical intensity;
+the optional shared [recall policy](PWM-ON-RECALL.md) restores confirmed nonzero
+duty instead. Off requests
 0%; relative actions use the channel's advertised `step_percent` (default 1%).
 When that step is smaller than the hardware's representable change, a relative
 action advances by one actual 12-bit duty quantum in the requested direction,
@@ -72,8 +74,8 @@ Use the appropriate type/curve for the actual output; motors do not receive a
 lighting curve implicitly.
 
 The shared CLI/TUI commands are `pwm on CHANNEL`, `pwm off CHANNEL`,
-`pwm increase CHANNEL` and `pwm decrease CHANNEL`; `pwm off` without a channel
-still zeros all channels. `pwm configure CHANNEL TYPE CURVE [GAMMA [ICON [STEP_PERCENT]]]`
+`pwm toggle CHANNEL`, `pwm increase CHANNEL` and `pwm decrease CHANNEL`; `pwm off` without a channel
+still zeros all channels. `pwm configure CHANNEL TYPE CURVE [GAMMA [ICON [STEP_PERCENT [ON_BEHAVIOR]]]]`
 configures the same channel data. Thus `pwm configure 0 lighting gamma 2.2 lightbulb 2.5`
 sets a 2.5% logical step for a confirmed lighting channel. Raw duty remains
 0–4095 and is not a percent step.

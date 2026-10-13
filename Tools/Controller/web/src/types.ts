@@ -572,6 +572,8 @@ export interface PWMChannelConfig {
 	icon: string
 	curve: PWMCurve
 	gamma: number
+	step_percent?: number
+	on_behavior?: 'full' | 'restore'
 }
 
 export interface PWMChannelValue {
@@ -580,6 +582,9 @@ export interface PWMChannelValue {
 	logical_percent: number
 	name: string
 	config: PWMChannelConfig
+	remembered_known?: boolean
+	remembered_raw?: number
+	remembered_percent?: number
 }
 
 export interface SegmentScrollSettings {

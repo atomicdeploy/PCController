@@ -175,7 +175,7 @@ const methodOverrides = {
 	"controller.board_profile.update": "Bind the attached physical board identity to one explicit host-owned wiring profile.",
 	"controller.peripheral.presentation.update": "Update one advertised peripheral name, icon, group, kind-local order, visibility, or lock using optional optimistic concurrency.",
 	"controller.peripheral.folder.update": "Atomically create, rename, set the icon, delete or move members of a board-profile channel folder using required expected_revision; return the complete authoritative folder/control catalog.",
-	"controller.pwm.channel.configure": "Persist one PWM channel's output type, icon, transfer curve, and gamma, then publish the changed descriptor.",
+	"controller.pwm.channel.configure": "Persist a partial PWM channel configuration (output type, icon, curve, gamma, step_percent, on_behavior full|restore), preserving omitted fields, then publish the changed descriptor.",
 	"controller.action.invoke": "Invoke one stable action ID advertised by the attached board profile and wait for the board acknowledgement.",
 	"controller.estop.get": "Return the authoritative PCController-wide effect and motion interlock state.",
 	"controller.estop.set": "Engage or release the PCController-wide effect and motion interlock; release never resumes cancelled work.",

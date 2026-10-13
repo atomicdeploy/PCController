@@ -24,6 +24,14 @@ type PWMChannelConfig struct {
 	Curve       string   `json:"curve"`
 	Gamma       float64  `json:"gamma"`
 	StepPercent *float64 `json:"step_percent,omitempty"`
+	OnBehavior  string   `json:"on_behavior,omitempty"`
+}
+
+func PWMOnBehavior(config PWMChannelConfig) string {
+	if config.OnBehavior == "" {
+		return "full"
+	}
+	return strings.ToLower(strings.TrimSpace(config.OnBehavior))
 }
 
 func PWMStepPercent(config PWMChannelConfig) float64 {
@@ -86,6 +94,7 @@ func normalizePWMChannel(value PWMChannelConfig) PWMChannelConfig {
 	value.OutputType = strings.ToLower(strings.TrimSpace(value.OutputType))
 	value.Icon = strings.TrimSpace(value.Icon)
 	value.Curve = strings.ToLower(strings.TrimSpace(value.Curve))
+	value.OnBehavior = PWMOnBehavior(value)
 	if value.Curve == "linear" {
 		value.Gamma = 1
 	}
@@ -102,6 +111,9 @@ func ValidatePWMChannels(channels map[string]PWMChannelConfig) error {
 			return fmt.Errorf("ui.pwm_channels key %q must be pwm.0..pwm.15", key)
 		}
 		value := normalizePWMChannel(raw)
+		if value.OnBehavior != "full" && value.OnBehavior != "restore" {
+			return fmt.Errorf("ui.pwm_channels[%q].on_behavior must be full or restore", key)
+		}
 		step := PWMStepPercent(value)
 		if math.IsNaN(step) || math.IsInf(step, 0) || step <= 0 || step > 100 {
 			return fmt.Errorf("ui.pwm_channels[%q].step_percent must be finite and greater than 0, at most 100", key)
@@ -198,6 +210,7 @@ func ApplyPWMChannelConfig(peripherals []PeripheralDescriptor, controls []Contro
 		peripherals[index].Curve = config.Curve
 		peripherals[index].Gamma = config.Gamma
 		peripherals[index].StepPercent = PWMStepPercent(config)
+		peripherals[index].OnBehavior = PWMOnBehavior(config)
 		if peripherals[index].Icon == "" {
 			peripherals[index].Icon = config.Icon
 		}
@@ -215,6 +228,7 @@ func ApplyPWMChannelConfig(peripherals []PeripheralDescriptor, controls []Contro
 		controls[index].Curve = config.Curve
 		controls[index].Gamma = config.Gamma
 		controls[index].StepPercent = PWMStepPercent(config)
+		controls[index].OnBehavior = PWMOnBehavior(config)
 		if controls[index].Icon == "" {
 			controls[index].Icon = config.Icon
 		}

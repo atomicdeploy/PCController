@@ -783,7 +783,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 		},
 	})
 	mustRegister(shell.Command{
-		Name: "pwm", Usage: "pwm get|off|on|off|increase|decrease CHANNEL|set CHANNEL PERCENT|raw CHANNEL VALUE|configure CHANNEL TYPE CURVE [GAMMA [ICON [STEP_PERCENT]]]|trace start CHANNEL DURATION_MS|trace get|trace stop",
+		Name: "pwm", Usage: "pwm get|off|on|off|toggle|increase|decrease CHANNEL|set CHANNEL PERCENT|raw CHANNEL VALUE|configure CHANNEL TYPE CURVE [GAMMA [ICON [STEP_PERCENT [ON_BEHAVIOR]]]]|trace start CHANNEL DURATION_MS|trace get|trace stop",
 		Summary: "control logical brightness through per-channel curves or exact raw PWM",
 		Run: func(ctx context.Context, args []string) (string, error) {
 			return pwmCommand(ctx, runtime, options, args)
@@ -3675,7 +3675,7 @@ func pwmCommand(ctx context.Context, runtime *Runtime, options CommandOptions, a
 		encoded, err := json.MarshalIndent(trace, "", "  ")
 		return string(encoded), err
 	}
-	if len(args) == 2 && (strings.EqualFold(args[0], "on") || strings.EqualFold(args[0], "off") || strings.EqualFold(args[0], "increase") || strings.EqualFold(args[0], "decrease")) {
+	if len(args) == 2 && (strings.EqualFold(args[0], "on") || strings.EqualFold(args[0], "off") || strings.EqualFold(args[0], "toggle") || strings.EqualFold(args[0], "increase") || strings.EqualFold(args[0], "decrease")) {
 		channel, err := parsePWMChannel(args[1])
 		if err != nil {
 			return "", err
@@ -3750,7 +3750,7 @@ func pwmCommand(ctx context.Context, runtime *Runtime, options CommandOptions, a
 		return fmt.Sprintf("PWM channel %d raw value %d", channel, value),
 			command(ctx, runtime, native.OpPWMSet, payload)
 	}
-	if len(args) >= 4 && len(args) <= 7 && strings.EqualFold(args[0], "configure") {
+	if len(args) >= 4 && len(args) <= 8 && strings.EqualFold(args[0], "configure") {
 		if options.UpdateHostConfig == nil {
 			return "", errors.New("persistent host configuration is unavailable")
 		}
@@ -3773,12 +3773,15 @@ func pwmCommand(ctx context.Context, runtime *Runtime, options CommandOptions, a
 		if len(args) >= 6 {
 			channelConfig.Icon = strings.TrimSpace(args[5])
 		}
-		if len(args) == 7 {
+		if len(args) >= 7 {
 			step, parseErr := strconv.ParseFloat(args[6], 64)
 			if parseErr != nil {
 				return "", fmt.Errorf("invalid step_percent %q", args[6])
 			}
 			channelConfig.StepPercent = &step
+		}
+		if len(args) == 8 {
+			channelConfig.OnBehavior = strings.ToLower(strings.TrimSpace(args[7]))
 		}
 		if err = appconfig.ValidatePWMChannels(map[string]appconfig.PWMChannelConfig{appconfig.PWMChannelKey(int(channel)): channelConfig}); err != nil {
 			return "", err
@@ -3798,13 +3801,13 @@ func pwmCommand(ctx context.Context, runtime *Runtime, options CommandOptions, a
 			Text: "PWM channel configuration changed", Source: "host", Target: "refresh", Action: "refresh",
 			Metadata: map[string]string{
 				"changed_keys":   appconfig.PWMChannelKey(int(channel)),
-				"changed_fields": "output_type,icon,curve,gamma,step_percent",
+				"changed_fields": "output_type,icon,curve,gamma,step_percent,on_behavior",
 				"action":         "refresh",
 			},
 		})
-		return fmt.Sprintf("PWM channel %d type=%s icon=%s curve=%s gamma=%.2f step=%.3f%%", channel, channelConfig.OutputType, channelConfig.Icon, channelConfig.Curve, channelConfig.Gamma, appconfig.PWMStepPercent(channelConfig)), nil
+		return fmt.Sprintf("PWM channel %d type=%s icon=%s curve=%s gamma=%.2f step=%.3f%% on=%s", channel, channelConfig.OutputType, channelConfig.Icon, channelConfig.Curve, channelConfig.Gamma, appconfig.PWMStepPercent(channelConfig), appconfig.PWMOnBehavior(channelConfig)), nil
 	}
-	return "", fmt.Errorf("usage: pwm get | pwm off | pwm on|off|increase|decrease CHANNEL | pwm set CHANNEL PERCENT | pwm raw CHANNEL VALUE | pwm configure CHANNEL TYPE CURVE [GAMMA [ICON [STEP_PERCENT]]]")
+	return "", fmt.Errorf("usage: pwm get | pwm off | pwm on|off|toggle|increase|decrease CHANNEL | pwm set CHANNEL PERCENT | pwm raw CHANNEL VALUE | pwm configure CHANNEL TYPE CURVE [GAMMA [ICON [STEP_PERCENT [ON_BEHAVIOR]]]]")
 }
 
 func parsePWMChannel(value string) (byte, error) {

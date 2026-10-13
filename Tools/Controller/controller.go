@@ -502,6 +502,7 @@ type Snapshot struct {
 	PWMValues                *PWMValues                      `json:"pwm_values,omitempty"`
 	PWMRevision              uint64                          `json:"pwm_revision,omitempty"`
 	PWMUpdated               time.Time                       `json:"pwm_updated,omitempty"`
+	PWMRecall                [16]control.PWMRecallValue      `json:"pwm_recall"`
 	Motion                   MotionSnapshot                  `json:"motion"`
 	Outputs                  OutputStreamState               `json:"outputs"`
 	StripEffects             []control.StripEffectDescriptor `json:"strip_effects,omitempty"`
@@ -2403,6 +2404,7 @@ func (client *Client) Snapshot() Snapshot {
 		StatusLEDUpdated:       snapshot.StatusLEDUpdated,
 		StatusLEDRevision:      snapshot.StatusLEDRevision,
 		PWMValues:              snapshot.PWMValues, PWMRevision: snapshot.PWMRevision, PWMUpdated: snapshot.PWMUpdated,
+		PWMRecall:    snapshot.PWMRecall,
 		Motion:       snapshot.Motion,
 		Outputs:      client.outputs.State(),
 		StripEffects: stripEffects,

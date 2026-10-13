@@ -339,6 +339,7 @@ func TestPeripheralLockTargetsStableRelayAndSeatKeys(t *testing.T) {
 	}
 	for command, want := range map[string]string{
 		"pwm increase 0":     "pwm.0",
+		"pwm toggle 0":       "pwm.0",
 		"pwm decrease user1": "pwm.0",
 		"pwm off enclosure":  "pwm.11",
 		"pwm raw red 1":      "pwm.13",
@@ -368,7 +369,7 @@ func TestSemanticActionDispatchUsesTheAdvertisedProfileCatalog(t *testing.T) {
 		nil,
 		nil,
 	)
-	for _, actionID := range []string{"seat.a.up", "seat.b.stop", "relay.5.on", "relay.8.off", "pwm.0.on", "pwm.0.off", "pwm.0.increase", "pwm.0.decrease"} {
+	for _, actionID := range []string{"seat.a.up", "seat.b.stop", "relay.5.on", "relay.8.off", "pwm.0.on", "pwm.0.off", "pwm.0.toggle", "pwm.0.increase", "pwm.0.decrease"} {
 		control, action, ok := advertisedSemanticAction(cinemaControls, actionID)
 		if !ok || action.ID != actionID || control.Key == "" {
 			t.Fatalf("advertised action %q was not executable: control=%+v action=%+v ok=%t", actionID, control, action, ok)

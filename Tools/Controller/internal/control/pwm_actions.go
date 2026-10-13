@@ -75,6 +75,11 @@ func pwmActionPercent(raw uint16, verb string, config appconfig.PWMChannelConfig
 		return 100, nil
 	case "off":
 		return 0, nil
+	case "toggle":
+		if raw > 0 {
+			return 0, nil
+		}
+		return 100, nil
 	case "increase":
 		return math.Min(100, appconfig.PWMPercentFromRaw(raw, config)+step), nil
 	case "decrease":
@@ -102,6 +107,23 @@ func pwmActionRaw(raw uint16, verb string, config appconfig.PWMChannelConfig) (u
 }
 
 func applyPWMActionWithIO(channel byte, verb string, config appconfig.PWMChannelConfig, read func() (native.PWMValues, error), write func(uint16) error) (native.PWMValues, error) {
+	return applyPWMActionWithRecallIO(channel, verb, config, read, write, func() PWMRecallValue { return PWMRecallValue{} })
+}
+
+func pwmActionTarget(raw uint16, verb string, config appconfig.PWMChannelConfig, recall PWMRecallValue) (uint16, error) {
+	if (verb == "on" || verb == "toggle" && raw == 0) && appconfig.PWMOnBehavior(config) == "restore" {
+		// On is idempotent when already lit, even if a stale memory exists.
+		if raw > 0 {
+			return raw, nil
+		}
+		if recall.Known && recall.Raw > 0 && recall.Raw <= appconfig.PWMMaximumValue {
+			return recall.Raw, nil
+		}
+	}
+	return pwmActionRaw(raw, verb, config)
+}
+
+func applyPWMActionWithRecallIO(channel byte, verb string, config appconfig.PWMChannelConfig, read func() (native.PWMValues, error), write func(uint16) error, recall func() PWMRecallValue) (native.PWMValues, error) {
 	if channel >= appconfig.PWMChannelCount {
 		return native.PWMValues{}, errors.New("PWM channel must be 0..15")
 	}
@@ -112,7 +134,7 @@ func applyPWMActionWithIO(channel byte, verb string, config appconfig.PWMChannel
 	if err := validatePWMActionReadback(values); err != nil {
 		return native.PWMValues{}, err
 	}
-	raw, err := pwmActionRaw(values.Values[channel], verb, config)
+	raw, err := pwmActionTarget(values.Values[channel], verb, config, recall())
 	if err != nil {
 		return native.PWMValues{}, err
 	}
@@ -196,7 +218,7 @@ func (runtime *Runtime) ApplyPWMAction(ctx context.Context, generation uint64, c
 		}
 		return values, err
 	}
-	values, err := applyPWMActionWithIO(channel, verb, config, read, func(raw uint16) error {
+	values, err := applyPWMActionWithRecallIO(channel, verb, config, read, func(raw uint16) error {
 		payload, err := native.PWMSetPayload(channel, raw)
 		if err != nil {
 			return err
@@ -206,7 +228,7 @@ func (runtime *Runtime) ApplyPWMAction(ctx context.Context, generation uint64, c
 			runtime.publishCommandEvidence(acknowledgedCommandEvidence(ctx, native.OpPWMSet, payload, frame))
 		}
 		return err
-	})
+	}, func() PWMRecallValue { return runtime.pwmRecallAtGeneration(generation, channel) })
 	if err != nil {
 		return native.PWMValues{}, err
 	}
