@@ -583,3 +583,19 @@ source renderer passed; analyzer clean. Existing front-panel progress and pull
 refresh viewport checks remain passing. Controlled renders are not device screenshots.
 No physical relay/motor/beep/RF/firmware/player action was sent. Final package/device
 receipt follows separately. Continuous acceptance goal remains active.
+
+## Go parity package/device receipt
+
+One ARM64 release build from 1f9f2b2071d754222834da3d87b1cec3afa09547
+produced 0.1.12/code 13, 20,266,596 bytes, SHA-256
+`e124b356e95c41765636791c61e75b4347db9d14663ee44bf7094f67edfbb5d8`.
+The inherited Android development signer verified. One ordinary non-streamed
+in-place tablet install succeeded; version/code/base APK hash match. The tablet
+is locked and retains its observed video activity/task; no controller launch
+replaced it. No physical output/audio/RF/firmware/player action was sent.
+
+The deduplicated phone remains 0.1.2/code 3, with 491,588 KiB available below
+its previously verified 1 GiB installer threshold. No repeated install, data
+removal, reserve bypass or unlock was attempted. android-0.1.12-delivery.json
+records current identities and open gates. Source/render/build/delivery are
+separate from live physical/audio/human acceptance. Continuous goal active.

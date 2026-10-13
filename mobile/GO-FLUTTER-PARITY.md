@@ -85,3 +85,12 @@ action was sent. Package/device identities are recorded separately in ACCEPTANCE
 and delivery receipts. Full Go/egui/Web parity, native Android standalone core/USB,
 real command transports/multicast/branding/launchers, two-device upgrades and
 physical/audio/human acceptance remain open. Continuous acceptance goal active.
+
+Package delivery: source 1f9f2b2071d754222834da3d87b1cec3afa09547 built
+0.1.12/code 13 (20,266,596 bytes; SHA-256
+e124b356e95c41765636791c61e75b4347db9d14663ee44bf7094f67edfbb5d8).
+Signer verified; one background tablet install succeeded and installed identity
+matches. Locked video activity preserved, controller launch/live proof open.
+Phone remains 0.1.2/code 3 with 491,588 KiB free; no repeated failed install.
+Exact device observations: android-0.1.12-delivery.json. Source branches may be
+reconciled separately; the APK identity remains tied to the exact build source.
