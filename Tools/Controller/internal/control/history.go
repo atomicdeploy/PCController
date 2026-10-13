@@ -219,13 +219,17 @@ func (runtime *Runtime) Timeline(since time.Time, limit int) []TimelineEntry {
 	// that actually exist. The caller-provided page size must never drive an
 	// eager allocation, even after it has been clamped.
 	result := make([]TimelineEntry, 0)
-	for _, entry := range runtime.timeline {
+	// A small live page must not clone the whole retained history while holding
+	// the lock needed by the serial event pump. Preserve append order, including
+	// concurrent events whose timestamps are not strictly increasing.
+	for index := len(runtime.timeline) - 1; index >= 0 && len(result) < limit; index-- {
+		entry := runtime.timeline[index]
 		if since.IsZero() || !entry.Time.Before(since) {
 			result = append(result, cloneTimelineEntry(entry))
 		}
 	}
-	if len(result) > limit {
-		result = append([]TimelineEntry(nil), result[len(result)-limit:]...)
+	for left, right := 0, len(result)-1; left < right; left, right = left+1, right-1 {
+		result[left], result[right] = result[right], result[left]
 	}
 	return result
 }

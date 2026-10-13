@@ -3280,6 +3280,14 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 						Kind: kind, Text: text, Frame: event.Frame,
 						Source: "board", Target: "host", MessageType: "event",
 					}
+					if parsedDevice.Type == native.EventRFReceived {
+						deviceEvent.RFCode, deviceEvent.RFBits = parsedDevice.RFCode, parsedDevice.RFBits
+						deviceEvent.RFProtocol, deviceEvent.RFPulseUS = parsedDevice.RFProtocol, parsedDevice.RFPulseUS
+						deviceEvent.RFID, deviceEvent.HaveRFID = parsedDevice.RFLearnedID, parsedDevice.RFLearnedID != 0xFF
+						if parsedDevice.Timed {
+							deviceEvent.Metadata = map[string]string{"device_micros": strconv.FormatUint(uint64(parsedDevice.DeviceMicros), 10)}
+						}
+					}
 					if parsedDevice.Type == native.EventAppNavigation {
 						deviceEvent.Target = "app.clients"
 						deviceEvent.Action = "navigate"
