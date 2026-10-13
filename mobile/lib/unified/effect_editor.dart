@@ -140,7 +140,7 @@ class _EffectEditorState extends State<EffectEditor> {
         child: TextFormField(
           key: ValueKey('$selected/$key/$timingRevision'),
           initialValue: numberDrafts['$selected/$key'] ?? '${value / scale}',
-          enabled: !saving,
+          enabled: typedEditing,
           autovalidateMode: AutovalidateMode.onUserInteraction,
           keyboardType: TextInputType.numberWithOptions(decimal: scale != 1),
           decoration: InputDecoration(labelText: label),

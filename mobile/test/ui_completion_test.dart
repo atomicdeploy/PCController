@@ -248,6 +248,44 @@ void main() {
     },
   );
   testWidgets(
+    'unapplied technical JSON disables numeric edits and cannot silently save the old descriptor',
+    (tester) async {
+      var calls = 0;
+      await openEditor(tester, (_) async {
+        calls++;
+      });
+      await tester.ensureVisible(find.widgetWithText(ChoiceChip, '1 · buzzer'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(ChoiceChip, '1 · buzzer'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Technical definition'));
+      await tester.tap(find.text('Technical definition'));
+      await tester.pumpAndSettle();
+      final raw = find.byWidgetPredicate(
+        (widget) =>
+            widget is TextField &&
+            widget.decoration?.labelText == 'Effect JSON',
+      );
+      await tester.ensureVisible(raw);
+      await tester.enterText(raw, '{}');
+      await tester.pump();
+      expect(
+        tester.widget<TextFormField>(field('Duration (ms)')).enabled,
+        false,
+      );
+      await tester.tap(find.text('Save local draft'));
+      await tester.pumpAndSettle();
+      expect(calls, 0);
+      await tester.ensureVisible(find.text('Revert technical edits'));
+      await tester.tap(find.text('Revert technical edits'));
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<TextFormField>(field('Duration (ms)')).enabled,
+        true,
+      );
+    },
+  );
+  testWidgets(
     'failed local save retains edited name and all fields stay disabled while pending',
     (tester) async {
       final pending = Completer<void>();
