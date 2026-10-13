@@ -385,7 +385,7 @@ class PeerSession extends ChangeNotifier {
     });
   }
 
-  bool _refreshing = false;
+  Future<void>? _refreshTask;
 
   void acceptPresentationCatalog(Json catalog) {
     peripherals = verifiedCatalog(catalog);
@@ -393,10 +393,19 @@ class PeerSession extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> refresh() async {
+  Future<void> refresh() {
     final epoch = generation, peer = transport;
-    if (peer == null || _refreshing) return;
-    _refreshing = true;
+    if (peer == null) return Future<void>.value();
+    final active = _refreshTask;
+    if (active != null) return active;
+    late final Future<void> task;
+    task = _readRefresh(epoch, peer).whenComplete(() {
+      if (identical(_refreshTask, task)) _refreshTask = null;
+    });
+    return _refreshTask = task;
+  }
+
+  Future<void> _readRefresh(int epoch, PeerTransport peer) async {
     try {
       final value = object(
         await peer.request(controller ? '/api/snapshot' : '/api/player/status'),
@@ -467,8 +476,6 @@ class PeerSession extends ChangeNotifier {
         online = false;
         notifyListeners();
       }
-    } finally {
-      _refreshing = false;
     }
   }
 
@@ -909,6 +916,7 @@ class PeerSession extends ChangeNotifier {
 
   void disconnect() {
     generation++;
+    _refreshTask = null;
     enabled = false;
     online = false;
     subscribed = false;

@@ -464,3 +464,25 @@ receiver/peer/speaker acceptance is claimed. A listening comparison was requeste
 The phone remains 0.1.2/code 3 with 500,792 KiB free, below its prior verified
 1 GiB installer threshold; no repeated install, data removal or reserve bypass.
 The continuous goal stays active. No full inherited suite/CI iteration was run.
+
+## Pull-to-refresh
+
+All main activity views now support a downward pull at the top, including
+content too short to scroll. A full-height scroll viewport and overlay spinner
+preserve layout, scroll position and the fixed global progress slot. Refresh
+uses selected PCController/Pealayer readback; Firmware additionally reads its
+artifact catalog and current update status. Network and offline refresh scan
+nearby peers without auto-connecting or changing saved connection intent.
+Unsaved text remains intact, and read failures use an overlay SnackBar.
+
+Concurrent refreshes join the same current-owner read/discovery future. A
+disconnect retires the old read without blocking or overwriting its replacement.
+Existing catalog revision, PWM-write fencing and command ownership remain.
+Pulling never sends a hardware action, prepares/downloads/uploads firmware,
+retries a mutation or changes a selected connection.
+
+Six focused refresh checks and both existing phone/tablet front-panel progress
+geometry regressions passed. They cover actual pull gestures on short pages,
+coalesced reads, response waiting, read failures, draft preservation, replacement
+owners, read-only firmware RPCs and discovery without connection. This source
+targets 0.1.9+10; live device gesture acceptance and delivery are recorded separately.

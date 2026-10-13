@@ -114,8 +114,10 @@ class ControllerHome extends StatefulWidget {
     super.key,
     this.restore = true,
     required this.preferences,
+    this.discovery,
   });
   final AppPreferences preferences;
+  final DeviceDiscovery? discovery;
   final bool restore;
   @override
   State<ControllerHome> createState() => _ControllerHomeState();
@@ -149,7 +151,8 @@ class _ControllerHomeState extends State<ControllerHome>
   bool _captureInFlight = false;
   DateTime? _lastCapture;
   int section = 0;
-  final discovery = DeviceDiscovery();
+  late final discovery = widget.discovery ?? DeviceDiscovery();
+  Future<void>? _discoveryTask;
   final upgrades = AppUpgrade();
   late final packagePeers = PeerUpgrades(upgrades, approve: approvePackage);
   bool sharingSync = false;
@@ -882,6 +885,51 @@ class _ControllerHomeState extends State<ControllerHome>
     }
   }
 
+  Future<void> refreshActivity() async {
+    if (!foreground) return;
+    final activity = section;
+    final peers = [
+      for (final peer in [board, player])
+        if (peer.transport != null)
+          (peer: peer, epoch: peer.generation, transport: peer.transport),
+    ];
+    final failures = <String>[];
+    await Future.wait([
+      ...peers.map((owner) => owner.peer.refresh()),
+      if (activity == 4 || peers.isEmpty)
+        scanPeers(connectDiscovered: false, reportError: false).catchError((
+          Object error,
+        ) {
+          failures.add('$error');
+        }),
+    ]);
+    if (!mounted || !foreground) return;
+    final current = peers.where(
+      (owner) =>
+          owner.epoch == owner.peer.generation &&
+          identical(owner.transport, owner.peer.transport),
+    );
+    failures.addAll([
+      for (final owner in current)
+        if (owner.peer.error != null)
+          (owner.peer.controller ? 'PCController: ' : 'Pealayer: ') +
+              owner.peer.error.toString(),
+    ]);
+    if (activity == 5 &&
+        current.any((owner) => identical(owner.peer, board)) &&
+        board.online) {
+      try {
+        await Future.wait([board.loadArtifacts(), board.loadOperation()]);
+      } catch (error) {
+        failures.add('$error');
+      }
+    }
+    if (mounted && failures.isNotEmpty) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(failures.join('\n'))));
+    }
+  }
+
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, bounds) {
@@ -912,60 +960,72 @@ class _ControllerHomeState extends State<ControllerHome>
               ],
             ),
           Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(14),
-              child: switch (section) {
-                0 => Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    preferences.compact ? liveConnections() : peerRoster(),
-                    if (board.fresh) ...[const SizedBox(height: 14), monitor()],
-                    if (player.fresh || bridgeTarget != null) ...[
-                      const SizedBox(height: 14),
-                      playback(),
-                    ],
-                    if (!board.fresh &&
-                        !player.fresh &&
-                        discovered.isNotEmpty) ...[
-                      const SizedBox(height: 14),
-                      discoveredPeers(),
-                    ],
-                  ],
+            child: RefreshIndicator(
+              onRefresh: refreshActivity,
+              child: SizedBox.expand(
+                child: SingleChildScrollView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.all(14),
+                  child: switch (section) {
+                    0 => Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        preferences.compact ? liveConnections() : peerRoster(),
+                        if (board.fresh) ...[
+                          const SizedBox(height: 14),
+                          monitor(),
+                        ],
+                        if (player.fresh || bridgeTarget != null) ...[
+                          const SizedBox(height: 14),
+                          playback(),
+                        ],
+                        if (!board.fresh &&
+                            !player.fresh &&
+                            discovered.isNotEmpty) ...[
+                          const SizedBox(height: 14),
+                          discoveredPeers(),
+                        ],
+                      ],
+                    ),
+                    1 => outputs(),
+                    2 => board.boardReady ? frontPanel() : peerRoster(),
+                    3 => Column(
+                      children: [
+                        workspace(),
+                        if (board.fresh) ...[
+                          const SizedBox(height: 14),
+                          effects(),
+                        ],
+                        if (player.fresh) ...[
+                          const SizedBox(height: 14),
+                          playerEffects(),
+                        ],
+                      ],
+                    ),
+                    4 => Column(
+                      children: [
+                        peerRoster(),
+                        const SizedBox(height: 14),
+                        discoveredPeers(),
+                        if (preferences.sharePackages ||
+                            upgrades.state['state'] != 'idle' ||
+                            discovered.any(
+                              (d) => d.product == 'controller-mobile',
+                            )) ...[
+                          const SizedBox(height: 14),
+                          upgradePanel(),
+                        ],
+                        if (board.fresh || player.fresh) ...[
+                          const SizedBox(height: 14),
+                          peers(),
+                        ],
+                      ],
+                    ),
+                    5 => board.fresh ? firmware() : peerRoster(),
+                    _ => activities(),
+                  },
                 ),
-                1 => outputs(),
-                2 => board.boardReady ? frontPanel() : peerRoster(),
-                3 => Column(
-                  children: [
-                    workspace(),
-                    if (board.fresh) ...[const SizedBox(height: 14), effects()],
-                    if (player.fresh) ...[
-                      const SizedBox(height: 14),
-                      playerEffects(),
-                    ],
-                  ],
-                ),
-                4 => Column(
-                  children: [
-                    peerRoster(),
-                    const SizedBox(height: 14),
-                    discoveredPeers(),
-                    if (preferences.sharePackages ||
-                        upgrades.state['state'] != 'idle' ||
-                        discovered.any(
-                          (d) => d.product == 'controller-mobile',
-                        )) ...[
-                      const SizedBox(height: 14),
-                      upgradePanel(),
-                    ],
-                    if (board.fresh || player.fresh) ...[
-                      const SizedBox(height: 14),
-                      peers(),
-                    ],
-                  ],
-                ),
-                5 => board.fresh ? firmware() : peerRoster(),
-                _ => activities(),
-              },
+              ),
             ),
           ),
         ],
@@ -1218,15 +1278,30 @@ class _ControllerHomeState extends State<ControllerHome>
     }
   }
 
-  Future<void> scanPeers() async {
-    if (discovering || !foreground) return;
+  Future<void> scanPeers({
+    bool connectDiscovered = true,
+    bool reportError = true,
+  }) {
+    if (!foreground) return Future<void>.value();
+    final active = _discoveryTask;
+    if (active != null) return active;
+    late final Future<void> task;
+    task = _scanPeers(connectDiscovered, reportError).whenComplete(() {
+      if (identical(_discoveryTask, task)) _discoveryTask = null;
+    });
+    return _discoveryTask = task;
+  }
+
+  Future<void> _scanPeers(bool connectDiscovered, bool reportError) async {
     final choice = connectionChoiceRevision;
     setState(() => discovering = true);
     try {
       final found = await discovery.scan();
       if (!mounted || !foreground) return;
       setState(() => discovered = found);
-      if (!preferences.autoConnect || choice != connectionChoiceRevision) {
+      if (!connectDiscovered ||
+          !preferences.autoConnect ||
+          choice != connectionChoiceRevision) {
         return;
       }
       for (final role in ['pccontroller', 'pealayer']) {
@@ -1257,6 +1332,7 @@ class _ControllerHomeState extends State<ControllerHome>
         await useDiscovered(candidates.single, expectedChoice: choice);
       }
     } catch (error) {
+      if (!reportError) rethrow;
       if (mounted) setState(() => lastError = '$error');
     } finally {
       if (mounted) setState(() => discovering = false);
