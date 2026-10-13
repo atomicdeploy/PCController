@@ -111,7 +111,7 @@ func (plan buzzerPlaybackPlan) remaining(now time.Time) (time.Duration, bool) {
 func (timeline *buzzerPlaybackTimeline) rebaseForStart(job buzzerMirrorJob, plan buzzerPlaybackPlan, now time.Time) (buzzerPlaybackPlan, time.Duration) {
 	age := now.Sub(job.observedAt)
 	late := now.Sub(plan.start)
-	if !job.timed || job.observedAt.IsZero() || age < 0 || age > maxBuzzerObservedSkew || late <= 0 {
+	if !job.timed || job.frequencyHz == 0 || job.observedAt.IsZero() || age < 0 || age > maxBuzzerObservedSkew || late <= 0 {
 		return plan, 0
 	}
 	// Timer wakeup and serialized backend cleanup can miss even a 1 ms note.
@@ -237,6 +237,14 @@ func (manager *Manager) buzzerMirrorLoop() {
 		}
 		timerChannel = timer.C
 	}
+	sortPending := func() {
+		sort.SliceStable(pending, func(left, right int) bool {
+			if pending[left].plan.start.Equal(pending[right].plan.start) {
+				return pending[left].order < pending[right].order
+			}
+			return pending[left].plan.start.Before(pending[right].plan.start)
+		})
+	}
 	start := func(next scheduledPlayback) bool {
 		now := time.Now()
 		var shift time.Duration
@@ -248,6 +256,7 @@ func (manager *Manager) buzzerMirrorLoop() {
 					pending[index].plan.end = pending[index].plan.end.Add(shift)
 				}
 			}
+			sortPending()
 		}
 		remaining, audible := next.plan.remaining(now)
 		if !audible || next.job.frequencyHz == 0 {
@@ -351,12 +360,7 @@ func (manager *Manager) buzzerMirrorLoop() {
 			plan := timeline.plan(job, time.Now())
 			order++
 			pending = append(pending, scheduledPlayback{job: job, plan: plan, order: order})
-			sort.SliceStable(pending, func(left, right int) bool {
-				if pending[left].plan.start.Equal(pending[right].plan.start) {
-					return pending[left].order < pending[right].order
-				}
-				return pending[left].plan.start.Before(pending[right].plan.start)
-			})
+			sortPending()
 		case err := <-activeDone:
 			finishActive(err)
 		case <-timerChannel:
