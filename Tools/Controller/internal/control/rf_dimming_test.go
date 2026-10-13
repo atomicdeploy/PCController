@@ -9,11 +9,11 @@ import (
 )
 
 func TestRFPWMRecallPersistenceNeverReentersPresentationProvider(t *testing.T) {
-	runtime := New(Options{})
+	// Do not start unrelated process-monitor goroutines in this lock-order fixture.
+	runtime := &Runtime{}
 	runtime.session, runtime.generation, runtime.pwmRecallGeneration = &link.Session{}, 7, 7
 	runtime.port = ports.Info{Name: "COM3"}
 	runtime.pwmRecall[0] = PWMRecallValue{Known: true, Raw: 239}
-	defer func() { runtime.session = nil; runtime.Close() }()
 	config := appconfig.Defaults()
 	identity := pwmProfileIdentity(pwmRecallOwnerSnapshot(runtime))
 	config.BoardProfiles = map[string]appconfig.BoardProfile{identity: {Key: "cafe", Mode: appconfig.BoardModeOrdinaryRelays}}
