@@ -325,6 +325,7 @@ class PeerSession extends ChangeNotifier {
   String _panelOwner = '';
   bool _pwmReading = false;
   int _pwmRevision = 0, _pwmWriteSequence = 0;
+  int _catalogRevision = 0;
   int? _activePwmWrite;
   Timer? _pwmTimer;
   List<Json> instances = [], artifacts = [], events = [];
@@ -377,6 +378,12 @@ class PeerSession extends ChangeNotifier {
 
   bool _refreshing = false;
 
+  void acceptPresentationCatalog(Json catalog) {
+    peripherals = verifiedCatalog(catalog);
+    _catalogRevision++;
+    notifyListeners();
+  }
+
   Future<void> refresh() async {
     final epoch = generation, peer = transport;
     if (peer == null || _refreshing) return;
@@ -391,11 +398,12 @@ class PeerSession extends ChangeNotifier {
       error = null;
       notifyListeners();
       if (controller) {
+        final catalogRevision = _catalogRevision;
         final inventory = verifiedCatalog(
           await peer.rpc('controller.peripherals.get'),
         );
         if (epoch != generation) return;
-        peripherals = inventory;
+        if (catalogRevision == _catalogRevision) peripherals = inventory;
         await refreshPwm();
         if (epoch != generation) return;
         final owner = '$identity/${state['connection_generation']}';

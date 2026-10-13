@@ -53,8 +53,8 @@ void main() {
               .first,
         );
         final position = scrollable.position;
-        expect(position.maxScrollExtent, greaterThan(40));
-        position.jumpTo(40);
+        expect(position.maxScrollExtent, greaterThan(20));
+        position.jumpTo(20);
         await tester.pump();
         final button = find
             .descendant(
@@ -79,7 +79,7 @@ void main() {
         expect(object(requests.single['params'])['command'], 'menu prev');
         expect(find.byType(LinearProgressIndicator), findsOneWidget);
         expect(identical(scrollable.position, position), true);
-        expect(position.pixels, 40);
+        expect(position.pixels, 20);
         expect(position.maxScrollExtent, extent);
         expect(tester.getRect(scrollView), viewport);
         expect(tester.getRect(button), target);
@@ -100,7 +100,7 @@ void main() {
         await tester.pumpAndSettle();
         expect(home.busy, false);
         expect(find.byType(LinearProgressIndicator), findsNothing);
-        expect(position.pixels, 40);
+        expect(position.pixels, 20);
         expect(position.maxScrollExtent, extent);
         expect(tester.getRect(scrollView), viewport);
         expect(tester.getRect(button), target);

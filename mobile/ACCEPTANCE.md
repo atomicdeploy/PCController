@@ -334,3 +334,29 @@ button position, scroll extent and offset before/during/after acknowledgement.
 Both passed; Flutter analysis passed. No real board action was sent. This source
 fix is subsequent to delivered 0.1.5 and must be included in the next coordinated
 APK; source regression proof is not installed-device acceptance.
+
+## Outputs organization
+
+Channel icon/grip targets support handle-only drag/drop with edge auto-scrolling, including responsive
+tablet grids. More offers Move earlier/later as a keyboard/accessibility alternative.
+Reorder uses one native presentation transaction with expected_revision and the
+complete same-kind rank set, including hidden controls. Same-kind channels may
+move between folders; mixed hardware kinds and raw-seat folder assignments are
+rejected. This changes host presentation metadata, not output state or wiring.
+
+Tap a caption or use More > Rename for inline editing. Keyboard Done or the
+checkmark saves; More > Cancel rename or Escape cancels. The caption/editor share
+font, inset and a constant 44-pixel slot. Cancelled, unchanged and stale-owner
+edits send no mutation. Applied names/order come from the authoritative full
+catalog receipt, with identity-keyed widgets and a fence against older reads.
+Uncertain writes are not replayed automatically.
+
+Fourteen focused Outputs, PWM, progress-scroll and semantic-color checks passed across the focused passes,
+including actual handle gestures, delayed acknowledgement, hidden-rank accounting,
+owner replacement, cancellation and stale catalog reads. Analyzer and controlled
+phone/tablet renders passed. No real output or host metadata was mutated. This
+source targets the combined 0.1.6+7 APK, including the prior progress-slot and
+semantic-caption fixes. Android delivery and human/physical acceptance are separate.
+
+A short 1280x400 viewport exposed a separate vertical activity-rail overflow;
+that small-height responsive-layout gate remains open.

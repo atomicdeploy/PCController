@@ -24,6 +24,7 @@ import 'unified/automation.dart';
 import 'unified/preferences.dart';
 import 'unified/buzzer_mirror.dart';
 import 'unified/channel_editor.dart';
+import 'unified/output_organization.dart';
 import 'unified/cue_editor.dart';
 
 void main() => runApp(const UnifiedControllerApp());
@@ -731,6 +732,8 @@ class _ControllerHomeState extends State<ControllerHome>
     List<Widget> children, {
     Color? color,
     Widget? trailing,
+    Widget? caption,
+    Widget? leading,
   }) => Card(
     child: Padding(
       padding: EdgeInsets.all(preferences.compact ? 12 : 18),
@@ -751,33 +754,37 @@ class _ControllerHomeState extends State<ControllerHome>
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    color: preferences.effectiveHeader == 'plain'
-                        ? Colors.transparent
-                        : (color ?? Theme.of(context).colorScheme.primary)
-                              .withValues(alpha: .10),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Icon(
-                    icon,
-                    color: color ?? Theme.of(context).colorScheme.primary,
-                    size: 20,
-                  ),
-                ),
+                leading ??
+                    Container(
+                      width: 32,
+                      height: 32,
+                      decoration: BoxDecoration(
+                        color: preferences.effectiveHeader == 'plain'
+                            ? Colors.transparent
+                            : (color ?? Theme.of(context).colorScheme.primary)
+                                  .withValues(alpha: .10),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Icon(
+                        icon,
+                        color: color ?? Theme.of(context).colorScheme.primary,
+                        size: 20,
+                      ),
+                    ),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: Text(
-                    title,
-                    textHeightBehavior: cardTextHeightBehavior,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontSize: preferences.effectiveHeader == 'classic'
-                          ? 16
-                          : null,
-                    ),
-                  ),
+                  child:
+                      caption ??
+                      Text(
+                        title,
+                        textHeightBehavior: cardTextHeightBehavior,
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(
+                              fontSize: preferences.effectiveHeader == 'classic'
+                                  ? 16
+                                  : null,
+                            ),
+                      ),
                 ),
                 ?trailing,
               ],
@@ -802,7 +809,13 @@ class _ControllerHomeState extends State<ControllerHome>
         spacing: 16,
         runSpacing: 16,
         children: children
-            .map((child) => SizedBox(width: width, child: child))
+            .map(
+              (child) => SizedBox(
+                key: child.key is ValueKey ? child.key : null,
+                width: width,
+                child: child,
+              ),
+            )
             .toList(),
       );
     },
@@ -1869,8 +1882,20 @@ class _ControllerHomeState extends State<ControllerHome>
             ],
           ),
         );
+  String _outputNameOwner = '';
+  final _outputNameKeys = <String, GlobalKey<InlineOutputNameState>>{};
+  GlobalKey<InlineOutputNameState> outputNameKey(Json control) =>
+      _outputNameKeys.putIfAbsent(
+        '${control['key']}',
+        () => GlobalKey<InlineOutputNameState>(),
+      );
+
   Widget outputs() {
-    final controls = objects(board.peripherals['controls'])
+    if (_outputNameOwner != outputOwner) {
+      _outputNameOwner = outputOwner;
+      _outputNameKeys.clear();
+    }
+    final controls = orderedOutputs(objects(board.peripherals['controls']))
         .where((control) => control['hidden'] != true)
         .toList();
     if (controls.isEmpty) {
@@ -1906,189 +1931,233 @@ class _ControllerHomeState extends State<ControllerHome>
                 padding: const EdgeInsets.only(bottom: 16),
                 child: grid([
                   for (final control in group.value)
-                    card(
-                      '${control['name']}',
-                      channelIcon(control),
-                      [
-                        if (control['control'] == 'pwm-user')
-                          PwmSetpointControl(
-                            key: ValueKey(
-                              '${board.targetStamp}/${control['key']}',
+                    OutputDropCard(
+                      key: ValueKey('$outputOwner/${control['key']}'),
+                      control: control,
+                      target: board.targetStamp,
+                      enabled: outputOrderEditable(control),
+                      dropped: (drag) => unawaited(moveOutput(drag, control)),
+                      child: card(
+                        '${control['name']}',
+                        channelIcon(control),
+                        [
+                          if (control['control'] == 'pwm-user')
+                            PwmSetpointControl(
+                              key: ValueKey(
+                                '${board.targetStamp}/${control['key']}',
+                              ),
+                              observed: observeChannel(
+                                control,
+                                board.state,
+                                board.pwmUpdated != null &&
+                                        DateTime.now()
+                                                .difference(board.pwmUpdated!)
+                                                .inMilliseconds <
+                                            board.freshnessMs
+                                    ? board.pwmValues
+                                    : {},
+                                board.measurementsFresh,
+                              ).percent,
+                              enabled:
+                                  board.boardReady &&
+                                  !busy &&
+                                  !estop &&
+                                  control['locked'] != true,
+                              commit: pwmCommit(control),
+                              applyStyle: preferences.actionIconStyle(
+                                Theme.of(context).colorScheme,
+                              ),
                             ),
-                            observed: observeChannel(
-                              control,
-                              board.state,
-                              board.pwmUpdated != null &&
-                                      DateTime.now()
-                                              .difference(board.pwmUpdated!)
-                                              .inMilliseconds <
-                                          board.freshnessMs
-                                  ? board.pwmValues
-                                  : {},
-                              board.measurementsFresh,
-                            ).percent,
-                            enabled:
-                                board.boardReady &&
-                                !busy &&
-                                !estop &&
-                                control['locked'] != true,
-                            commit: pwmCommit(control),
-                            applyStyle: preferences.actionIconStyle(
-                              Theme.of(context).colorScheme,
+                          if (control['kind'] != 'relay' ||
+                              preferences.relayLayout == 'explicit')
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                for (final entry
+                                    in objects(control['actions']).where(
+                                      (entry) =>
+                                          control['kind'] != 'relay' ||
+                                          preferences.relayLayout ==
+                                              'explicit' ||
+                                          ![
+                                            'on',
+                                            'off',
+                                          ].contains(entry['verb']),
+                                    ))
+                                  action(
+                                    '${entry['name']}',
+                                    entry['verb'] == 'stop'
+                                        ? Icons.stop
+                                        : entry['verb'] == 'up'
+                                        ? Icons.arrow_upward
+                                        : entry['verb'] == 'down'
+                                        ? Icons.arrow_downward
+                                        : Icons.power_settings_new,
+                                    board.boardReady &&
+                                            !idleSeatStop(control, entry) &&
+                                            control['locked'] != true &&
+                                            (!estop ||
+                                                [
+                                                  'stop',
+                                                  'off',
+                                                ].contains(entry['verb']))
+                                        ? invokeCallback(control, entry)
+                                        : null,
+                                    priority: [
+                                      'stop',
+                                      'off',
+                                    ].contains(entry['verb']),
+                                    danger: entry['verb'] == 'stop',
+                                    powerVerb: control['kind'] == 'relay'
+                                        ? '${entry['verb']}'
+                                        : null,
+                                  ),
+                              ],
                             ),
+                        ],
+                        color: channelColor(control['color']),
+                        leading: OutputDragHandle(
+                          drag: OutputDrag(
+                            board.targetStamp,
+                            '${control['key']}',
+                            '${control['kind']}',
+                            '${control['group'] ?? ''}',
                           ),
-                        if (control['kind'] != 'relay' ||
-                            preferences.relayLayout == 'explicit')
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: [
+                          name: '${control['name']}',
+                          icon: channelIcon(control),
+                          color: channelColor(control['color']),
+                          tile: preferences.effectiveHeader != 'plain',
+                          enabled: outputOrderEditable(control),
+                        ),
+                        caption: InlineOutputName(
+                          key: outputNameKey(control),
+                          name: '${control['name']}',
+                          enabled: outputMetadataEditable,
+                          style: Theme.of(context).textTheme.titleMedium
+                              ?.copyWith(
+                                fontSize:
+                                    preferences.effectiveHeader == 'classic'
+                                    ? 16
+                                    : null,
+                              ),
+                          commit: outputRename(control),
+                        ),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Builder(
+                              builder: (context) {
+                                final observed = channelObservation(control);
+                                return StatePill(
+                                  observed.label,
+                                  active: observed.active,
+                                );
+                              },
+                            ),
+                            if (control['kind'] == 'relay' &&
+                                preferences.relayLayout == 'compact' &&
+                                channelObservation(control).active != null)
                               for (final entry
                                   in objects(control['actions']).where(
                                     (entry) =>
-                                        control['kind'] != 'relay' ||
-                                        preferences.relayLayout == 'explicit' ||
-                                        !['on', 'off'].contains(entry['verb']),
+                                        entry['verb'] ==
+                                        (channelObservation(control).active ==
+                                                true
+                                            ? 'off'
+                                            : 'on'),
                                   ))
-                                action(
-                                  '${entry['name']}',
-                                  entry['verb'] == 'stop'
-                                      ? Icons.stop
-                                      : entry['verb'] == 'up'
-                                      ? Icons.arrow_upward
-                                      : entry['verb'] == 'down'
-                                      ? Icons.arrow_downward
-                                      : Icons.power_settings_new,
-                                  board.boardReady &&
-                                          !idleSeatStop(control, entry) &&
-                                          control['locked'] != true &&
-                                          (!estop ||
-                                              [
-                                                'stop',
-                                                'off',
-                                              ].contains(entry['verb']))
-                                      ? invokeCallback(control, entry)
-                                      : null,
-                                  priority: [
-                                    'stop',
-                                    'off',
-                                  ].contains(entry['verb']),
-                                  danger: entry['verb'] == 'stop',
-                                  powerVerb: control['kind'] == 'relay'
-                                      ? '${entry['verb']}'
-                                      : null,
-                                ),
-                            ],
-                          ),
-                      ],
-                      color: channelColor(control['color']),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Builder(
-                            builder: (context) {
-                              final observed = channelObservation(control);
-                              return StatePill(
-                                observed.label,
-                                active: observed.active,
-                              );
-                            },
-                          ),
-                          if (control['kind'] == 'relay' &&
-                              preferences.relayLayout == 'compact' &&
-                              channelObservation(control).active != null)
-                            for (final entry
-                                in objects(control['actions']).where(
-                                  (entry) =>
-                                      entry['verb'] ==
-                                      (channelObservation(control).active ==
-                                              true
-                                          ? 'off'
-                                          : 'on'),
-                                ))
-                              IconButton(
-                                tooltip: '${entry['name']} ${control['name']}',
-                                icon: const Icon(
-                                  Icons.power_settings_new,
-                                  size: 20,
-                                ),
-                                style: relayActionStyle(
-                                  Theme.of(context).colorScheme,
-                                  preferences.buttonStyle,
-                                  entry['verb'] == 'on',
-                                ),
-                                onPressed:
-                                    board.boardReady &&
-                                        !busy &&
-                                        control['locked'] != true &&
-                                        (!estop || entry['verb'] == 'off')
-                                    ? invokeCallback(control, entry)
-                                    : null,
-                              ),
-                          if (control['kind'] == 'relay' &&
-                              preferences.relayLayout == 'compact' &&
-                              channelObservation(control).active == null)
-                            Builder(
-                              builder: (context) {
-                                final target = board.targetStamp;
-                                return PopupMenuButton<String>(
-                                  tooltip: 'Set power ${control['name']}',
+                                IconButton(
+                                  tooltip:
+                                      '${entry['name']} ${control['name']}',
                                   icon: const Icon(
                                     Icons.power_settings_new,
                                     size: 20,
                                   ),
-                                  enabled:
+                                  style: relayActionStyle(
+                                    Theme.of(context).colorScheme,
+                                    preferences.buttonStyle,
+                                    entry['verb'] == 'on',
+                                  ),
+                                  onPressed:
                                       board.boardReady &&
-                                      !busy &&
-                                      control['locked'] != true,
-                                  onSelected: (id) {
-                                    final selected = objects(control['actions'])
-                                        .where((entry) => entry['id'] == id)
-                                        .firstOrNull;
-                                    if (selected != null) {
-                                      unawaited(
-                                        invoke(
-                                          control,
-                                          selected,
-                                          expectedTarget: target,
-                                        ),
-                                      );
-                                    }
-                                  },
-                                  itemBuilder: (_) => [
-                                    for (final entry
-                                        in objects(control['actions']).where(
-                                          (entry) => [
-                                            'on',
-                                            'off',
-                                          ].contains(entry['verb']),
-                                        ))
-                                      PopupMenuItem(
-                                        value: '${entry['id']}',
-                                        enabled:
-                                            !estop || entry['verb'] == 'off',
-                                        child: Text(
-                                          '${entry['name']}',
-                                          style: TextStyle(
-                                            color:
-                                                !estop || entry['verb'] == 'off'
-                                                ? relayActionStyle(
-                                                    Theme.of(context)
-                                                        .colorScheme,
-                                                    'outlined',
-                                                    entry['verb'] == 'on',
-                                                  ).foregroundColor?.resolve({})
-                                                : Theme.of(context)
-                                                      .disabledColor,
+                                          !busy &&
+                                          control['locked'] != true &&
+                                          (!estop || entry['verb'] == 'off')
+                                      ? invokeCallback(control, entry)
+                                      : null,
+                                ),
+                            if (control['kind'] == 'relay' &&
+                                preferences.relayLayout == 'compact' &&
+                                channelObservation(control).active == null)
+                              Builder(
+                                builder: (context) {
+                                  final target = board.targetStamp;
+                                  return PopupMenuButton<String>(
+                                    tooltip: 'Set power ${control['name']}',
+                                    icon: const Icon(
+                                      Icons.power_settings_new,
+                                      size: 20,
+                                    ),
+                                    enabled:
+                                        board.boardReady &&
+                                        !busy &&
+                                        control['locked'] != true,
+                                    onSelected: (id) {
+                                      final selected =
+                                          objects(control['actions'])
+                                              .where(
+                                                (entry) => entry['id'] == id,
+                                              )
+                                              .firstOrNull;
+                                      if (selected != null) {
+                                        unawaited(
+                                          invoke(
+                                            control,
+                                            selected,
+                                            expectedTarget: target,
+                                          ),
+                                        );
+                                      }
+                                    },
+                                    itemBuilder: (_) => [
+                                      for (final entry
+                                          in objects(control['actions']).where(
+                                            (entry) => [
+                                              'on',
+                                              'off',
+                                            ].contains(entry['verb']),
+                                          ))
+                                        PopupMenuItem(
+                                          value: '${entry['id']}',
+                                          enabled:
+                                              !estop || entry['verb'] == 'off',
+                                          child: Text(
+                                            '${entry['name']}',
+                                            style: TextStyle(
+                                              color:
+                                                  !estop ||
+                                                      entry['verb'] == 'off'
+                                                  ? relayActionStyle(
+                                                      Theme.of(context)
+                                                          .colorScheme,
+                                                      'outlined',
+                                                      entry['verb'] == 'on',
+                                                    ).foregroundColor?.resolve(
+                                                      {},
+                                                    )
+                                                  : Theme.of(context)
+                                                        .disabledColor,
+                                            ),
                                           ),
                                         ),
-                                      ),
-                                  ],
-                                );
-                              },
-                            ),
-                          channelMenu(control),
-                        ],
+                                    ],
+                                  );
+                                },
+                              ),
+                            channelMenu(control),
+                          ],
+                        ),
                       ),
                     ),
                 ]),
@@ -2102,6 +2171,143 @@ class _ControllerHomeState extends State<ControllerHome>
   Future<double> Function(int) pwmCommit(Json control) {
     final target = board.targetStamp;
     return (percent) => setPwm(control, percent, target);
+  }
+
+  String get outputOwner => jsonEncode([
+    board.generation,
+    board.transport?.origin.toString(),
+    board.identity,
+    board.state['connection_generation'],
+    board.state['port'],
+    object(board.state['hello'])['build_hash'],
+    object(board.peripherals['board_profile'])['board_identity'],
+    object(board.peripherals['board_profile'])['key'],
+  ]);
+
+  bool get outputMetadataEditable {
+    final profile = object(board.peripherals['board_profile']);
+    return board.fresh &&
+        !busy &&
+        board.transport != null &&
+        profile['attached'] == true &&
+        profile['configured'] == true &&
+        profile['revision'] is String &&
+        (profile['revision'] as String).isNotEmpty;
+  }
+
+  bool outputOrderEditable(Json control) =>
+      outputMetadataEditable &&
+      objects(board.peripherals['controls'])
+          .where((c) => c['kind'] == control['kind'])
+          .every(
+            (c) =>
+                c['order'] is int &&
+                (c['order'] as int) >= 0 &&
+                (c['order'] as int) < 96,
+          );
+
+  Future<void> Function(String) outputRename(Json control) {
+    final target = board.targetStamp;
+    return (name) =>
+        updateOutputPresentation('${control['key']}', {'name': name}, target);
+  }
+
+  Future<void> moveOutput(OutputDrag drag, Json destination) async {
+    try {
+      if (drag.target != board.targetStamp) {
+        throw const Rejected('Channel layout changed. Start the drag again.');
+      }
+      final changes = outputMove(
+        objects(board.peripherals['controls']),
+        drag,
+        destination,
+      );
+      await updateOutputPresentation(drag.key, changes, drag.target);
+    } catch (failure) {
+      if (mounted) setState(() => lastError = '$failure');
+    }
+  }
+
+  Future<void> updateOutputPresentation(
+    String key,
+    Json changes,
+    String target,
+  ) async {
+    final peer = board.transport, owner = outputOwner;
+    final previous = board.peripherals;
+    final profile = object(previous['board_profile']);
+    if (!outputMetadataEditable ||
+        target != board.targetStamp ||
+        !objects(previous['controls']).any(
+          (control) => control['key'] == key && control['hidden'] != true,
+        )) {
+      throw const Rejected(
+        'Channel owner or layout changed. Reopen the channel.',
+      );
+    }
+    setState(() {
+      activeRequests++;
+      busy = true;
+    });
+    try {
+      final result = object(
+        await peer!.rpc('controller.peripheral.presentation.update', {
+          'key': key,
+          'expected_revision': profile['revision'],
+          ...changes,
+        }),
+      );
+      final nextProfile = object(result['board_profile']);
+      if (!mounted ||
+          board.transport != peer ||
+          outputOwner != owner ||
+          !board.fresh) {
+        throw const Rejected(
+          'Channel owner changed. The old response was discarded.',
+        );
+      }
+      final currentRevision = object(
+        board.peripherals['board_profile'],
+      )['revision'];
+      if ((currentRevision != profile['revision'] &&
+              currentRevision != nextProfile['revision']) ||
+          nextProfile['revision'] is! String ||
+          (nextProfile['revision'] as String).isEmpty ||
+          nextProfile['key'] != profile['key'] ||
+          nextProfile['board_identity'] != profile['board_identity'] ||
+          nextProfile['attached'] != true ||
+          nextProfile['configured'] != true ||
+          object(result['peripheral'])['key'] != key) {
+        throw const Rejected(
+          'Channel layout changed or its receipt was invalid. Refresh before editing again.',
+        );
+      }
+      final receiptKeys = objects(result['controls'])
+          .map((c) => c['key'])
+          .toSet();
+      final expectedKeys = objects(previous['controls'])
+          .map((c) => c['key'])
+          .toSet();
+      if (!setEquals(receiptKeys, expectedKeys)) throw const Uncertain();
+      final catalog = verifiedCatalog({
+        ...previous,
+        'board_profile': nextProfile,
+        'controls': result['controls'],
+        'folders': result['folders'],
+        'peripherals': [
+          for (final peripheral in objects(previous['peripherals']))
+            peripheral['key'] == key ? result['peripheral'] : peripheral,
+        ],
+      });
+      board.acceptPresentationCatalog(catalog);
+    } finally {
+      if (mounted) {
+        setState(() {
+          activeRequests--;
+          busy = activeRequests > 0;
+        });
+      }
+    }
   }
 
   Future<double> setPwm(Json control, int percent, String target) async {
@@ -3255,6 +3461,12 @@ class _ControllerHomeState extends State<ControllerHome>
   );
 
   Widget channelMenu(Json control) {
+    final target = board.targetStamp;
+    final nameKey = outputNameKey(control);
+    final peers = orderedOutputs(objects(board.peripherals['controls']))
+        .where((c) => c['kind'] == control['kind'] && c['hidden'] != true)
+        .toList();
+    final index = peers.indexWhere((c) => c['key'] == control['key']);
     final profile = object(board.peripherals['board_profile']);
     final editable =
         board.fresh &&
@@ -3264,21 +3476,80 @@ class _ControllerHomeState extends State<ControllerHome>
     return PopupMenuButton<String>(
       tooltip: 'Manage ${control['name']}',
       icon: const Icon(Icons.more_vert, size: 20),
-      onSelected: (value) => unawaited(editChannel(control, value)),
-      itemBuilder: (_) => [
-        PopupMenuItem(
-          value: 'edit',
-          enabled: editable,
-          child: const Text('Edit channel'),
-        ),
-        PopupMenuItem(
-          value: 'lock',
-          enabled: editable,
-          child: Text(
-            control['locked'] == true ? 'Unlock channel' : 'Lock channel',
-          ),
-        ),
-      ],
+      onSelected: (value) {
+        if (target != board.targetStamp) {
+          setState(
+            () => lastError =
+                'Channel owner or layout changed. Reopen the channel.',
+          );
+          return;
+        }
+        if (value == 'rename') {
+          nameKey.currentState?.start();
+        } else if (value == 'save-name') {
+          unawaited(nameKey.currentState?.save());
+        } else if (value == 'cancel-name') {
+          nameKey.currentState?.cancel();
+        } else if (value == 'earlier' || value == 'later') {
+          final destination = index + (value == 'earlier' ? -1 : 1);
+          if (destination >= 0 && destination < peers.length) {
+            unawaited(
+              moveOutput(
+                OutputDrag(
+                  target,
+                  '${control['key']}',
+                  '${control['kind']}',
+                  '${control['group'] ?? ''}',
+                ),
+                peers[destination],
+              ),
+            );
+          }
+        } else {
+          unawaited(editChannel(control, value));
+        }
+      },
+      itemBuilder: (_) => nameKey.currentState?.editing == true
+          ? [
+              PopupMenuItem(
+                value: 'save-name',
+                enabled: nameKey.currentState?.pending != true,
+                child: const Text('Save name'),
+              ),
+              PopupMenuItem(
+                value: 'cancel-name',
+                enabled: nameKey.currentState?.pending != true,
+                child: const Text('Cancel rename'),
+              ),
+            ]
+          : [
+              PopupMenuItem(
+                value: 'rename',
+                enabled: outputMetadataEditable,
+                child: const Text('Rename'),
+              ),
+              if (outputOrderEditable(control) && index > 0)
+                const PopupMenuItem(
+                  value: 'earlier',
+                  child: Text('Move earlier'),
+                ),
+              if (outputOrderEditable(control) &&
+                  index >= 0 &&
+                  index < peers.length - 1)
+                const PopupMenuItem(value: 'later', child: Text('Move later')),
+              PopupMenuItem(
+                value: 'edit',
+                enabled: editable,
+                child: const Text('Edit channel'),
+              ),
+              PopupMenuItem(
+                value: 'lock',
+                enabled: editable,
+                child: Text(
+                  control['locked'] == true ? 'Unlock channel' : 'Lock channel',
+                ),
+              ),
+            ],
     );
   }
 
@@ -3393,7 +3664,7 @@ class _ControllerHomeState extends State<ControllerHome>
     }
     switch (method) {
       case 'app.ping':
-        return {'ok': true, 'app': 'PCController', 'version': '0.1.5'};
+        return {'ok': true, 'app': 'PCController', 'version': '0.1.6'};
       case 'app.capabilities':
         return {
           'jsonrpc': '2.0',

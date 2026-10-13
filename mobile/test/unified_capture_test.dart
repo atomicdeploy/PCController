@@ -5,11 +5,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:pccontroller_mobile/main.dart';
 import 'package:pccontroller_mobile/unified/effect_editor.dart';
 import 'package:pccontroller_mobile/unified/transport.dart';
 import 'package:pccontroller_mobile/unified/pwm_control.dart';
 import 'package:pccontroller_mobile/unified/live_widgets.dart';
+import 'package:pccontroller_mobile/unified/output_organization.dart';
 
 import 'dart:ui' as ui;
 
@@ -53,6 +56,24 @@ void main() {
             'status_updated': DateTime.now().toUtc().toIso8601String(),
           };
           peer.peripherals = object(fixture['peripherals']);
+          // A memory-only endpoint enables metadata affordances in this renderer.
+          peer.transport = PeerTransport(
+            'http://fixture',
+            client: MockClient((request) async {
+              final rpc = object(jsonDecode(request.body));
+              return http.Response(
+                jsonEncode({
+                  'jsonrpc': '2.0',
+                  'id': rpc['id'],
+                  'error': {
+                    'code': -32000,
+                    'message': 'Renderer does not persist metadata.',
+                  },
+                }),
+                200,
+              );
+            }),
+          );
           if (readings != null) {
             final recorded = object(
               jsonDecode(File(readings).readAsStringSync()),
@@ -124,6 +145,31 @@ void main() {
               image.dispose();
             });
             if (page.$1 == 1) {
+              final names = find.byType(InlineOutputName);
+              if (names.evaluate().isNotEmpty) {
+                final name = tester.widget<InlineOutputName>(names.first);
+                await tester.tap(find.byTooltip('Rename ${name.name}'));
+                await tester.pumpAndSettle();
+                await tester.enterText(
+                  find.byType(TextField).first,
+                  '${name.name} draft',
+                );
+                await tester.pumpAndSettle();
+                await tester.runAsync(() async {
+                  final frame = await render.toImage();
+                  final bytes = await frame.toByteData(
+                    format: ui.ImageByteFormat.png,
+                  );
+                  await File(
+                    '$directory/inline-output-rename-${size.width.toInt()}.png',
+                  ).writeAsBytes(bytes!.buffer.asUint8List());
+                  frame.dispose();
+                });
+                await tester.tap(find.byTooltip('Manage ${name.name}'));
+                await tester.pumpAndSettle();
+                await tester.tap(find.text('Cancel rename'));
+                await tester.pumpAndSettle();
+              }
               home.preferences.relayLayout = 'explicit';
               home.preferences.refresh();
               await tester.pumpAndSettle();
