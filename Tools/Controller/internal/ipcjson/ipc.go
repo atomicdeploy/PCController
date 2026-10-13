@@ -1954,7 +1954,7 @@ func (service *Service) controllerSnapshot() controllerSnapshotEnvelope {
 		MediaPlayback:  service.Client.MediaPlayback(),
 	}
 	if snapshot.PWMValues != nil {
-		values := service.describePWMValues(*snapshot.PWMValues)
+		values := service.describePWMValuesForSnapshot(*snapshot.PWMValues, snapshot)
 		values.HostInstanceID, values.ConnectionGeneration = envelope.HostInstanceID, snapshot.ConnectionGeneration
 		values.Revision, values.Time = snapshot.PWMRevision, snapshot.PWMUpdated
 		envelope.PWMValues = &values

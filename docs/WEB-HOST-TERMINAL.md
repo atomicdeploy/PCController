@@ -76,3 +76,19 @@ and passes the footprint/stack guards with 50 flash bytes and an estimated
 231 SRAM bytes free (96 required). All 24 native firmware checks pass. No board
 was flashed, identity moved into bootloader space or feature removed; the
 fresh Linux/Windows required merge checks still need to confirm this tree.
+
+The optional EEPROM-menu-label profile also passes its complete footprint and
+stack checks after sharing its label deadline arithmetic: 24 flash bytes and
+an estimated 230 SRAM bytes remain free (96 required). The default profile and
+all 24 native checks pass too; EEPROM CRC, label sanitization and the original
+650/450 ms dwell values remain unchanged. Neither image was flashed.
+
+The explicit Cafe application profile attributed substantial allocation work
+to repeated full snapshot/catalog construction in PWM projection. That path now
+uses the same authoritative snapshot once and resolves only its sixteen PWM
+names through the existing presentation resolver, instead of constructing the
+unrelated control catalog and repeatedly cloning configuration. Calibration,
+profile/legacy name precedence, host/generation/revision/time and immediate
+final value delivery remain unchanged. Focused regressions compare every PWM
+name with every full profile catalog and require one configuration read. Live
+post-update process CPU remains a separate required acceptance check.

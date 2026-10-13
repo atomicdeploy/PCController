@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	controller "pccontroller.local/controller"
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/native"
 )
@@ -49,7 +50,7 @@ func (service *Service) cachedPWMValues() *pwmValues {
 	if snapshot.PWMValues == nil {
 		return nil
 	}
-	values := service.describePWMValues(*snapshot.PWMValues)
+	values := service.describePWMValuesForSnapshot(*snapshot.PWMValues, snapshot)
 	values.HostInstanceID, values.ConnectionGeneration = strings.TrimSpace(service.HostInstanceID), snapshot.ConnectionGeneration
 	values.Revision, values.Time = snapshot.PWMRevision, snapshot.PWMUpdated
 	return &values
@@ -93,25 +94,23 @@ func (service *Service) clearPWMAndReadback(ctx context.Context) (pwmValues, err
 }
 
 func (service *Service) describePWMValues(values native.PWMValues) pwmValues {
+	return service.describePWMValuesForSnapshot(values, service.Client.Snapshot())
+}
+
+func (service *Service) describePWMValuesForSnapshot(values native.PWMValues, snapshot controller.Snapshot) pwmValues {
 	config := service.hostConfig()
 	result := pwmValues{
 		Available: values.Available, SelectedChannel: values.SelectedChannel, Values: values.Values,
 		Channels: make([]pwmChannelValue, 0, appconfig.PWMChannelCount),
 	}
-	names := make(map[string]string)
-	for _, peripheral := range service.peripheralSettings().Peripherals {
-		names[peripheral.Key] = peripheral.Name
-	}
+	_, profile, _ := boardProfileForSnapshot(config, snapshot)
+	names := appconfig.PWMDisplayNames(config.UI, profile.Presentation)
 	for channel, raw := range values.Values {
 		channelConfig := appconfig.PWMChannel(config.UI, channel)
-		name, _ := appconfig.PeripheralDefaultName(appconfig.PWMChannelKey(channel))
-		if configured := names[appconfig.PWMChannelKey(channel)]; strings.TrimSpace(configured) != "" {
-			name = strings.TrimSpace(configured)
-		}
 		result.Channels = append(result.Channels, pwmChannelValue{
 			Channel: channel, RawValue: raw,
 			LogicalPercent: math.Round(appconfig.PWMPercentFromRaw(raw, channelConfig)*1000) / 1000,
-			Name:           name, Config: channelConfig,
+			Name:           names[channel], Config: channelConfig,
 		})
 	}
 	return result

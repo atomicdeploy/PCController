@@ -105,9 +105,11 @@ void showHostOfflineOnLcd() {
 void appendU16(uint8_t *buffer, uint8_t &index, uint16_t value) {
   // The caller-owned cursor is separate from the reply buffer. Publish it
   // once after both bytes rather than forcing two aliased reference stores.
+  // Every reply builder reserves both bytes inside its bounded UART payload.
   const uint8_t offset = index;
-  buffer[offset] = static_cast<uint8_t>(value);
-  buffer[static_cast<uint8_t>(offset + 1U)] = static_cast<uint8_t>(value >> 8);
+  uint8_t *const output = buffer + offset;
+  output[0] = static_cast<uint8_t>(value);
+  output[1] = static_cast<uint8_t>(value >> 8);
   index = static_cast<uint8_t>(offset + 2U);
 }
 

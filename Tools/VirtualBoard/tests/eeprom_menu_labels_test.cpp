@@ -203,6 +203,14 @@ int main() {
 		testVersionedRecordAndTornWriteStayUnavailable();
 		testCrcRejectsPrintableXorCollisions();
 		testFactoryBlockReadsEveryPackedCell();
+    for (unsigned page = 0; page <= 255; ++page) {
+      char output[EepromMenuLabels::LabelWidth];
+      EepromMenuLabels::copy(static_cast<uint8_t>(page), output);
+      for (uint8_t cell = 0; cell < EepromMenuLabels::LabelWidth; ++cell) {
+        require(output[cell] == EepromMenuLabels::read(static_cast<uint8_t>(page), cell),
+                "copy and public cell reader disagree on page bounds/sanitization");
+      }
+    }
     std::cout << "eeprom_menu_labels_tests: all checks passed\n";
     return 0;
   } catch (const std::exception &error) {
