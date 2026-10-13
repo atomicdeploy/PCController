@@ -45,6 +45,52 @@ process start, not that the external program completed its own work.
 
 ## Contracts
 
+### MOSFET percentage assignments
+
+Choose a channel from the advertised control list; do not infer channel numbers
+from a 0–100 brightness range. MOSFET controls advertise `pwm.N.on`, `.off`,
+`.increase` and `.decrease`. On requests 100% logical intensity, Off requests
+0%; relative actions use the channel's advertised `step_percent` (default 1%).
+The existing `controller.control.invoke {"action_id":"pwm.0.increase"}` carries
+the same action chosen in RF assignments; no extra per-binding delta parameter
+is required. Existing motion mappings and firmware RF mappings are not rewritten.
+
+Configure the step through the existing channel configuration RPC, for example
+`controller.pwm.channel.configure` with
+`{"channel":0,"output_type":"lighting","icon":"lightbulb","curve":"gamma","gamma":2.2,"step_percent":2.5}`.
+Omission retains the documented 1% default, not a migration or persisted rewrite.
+An explicitly supplied step must be finite, greater than zero and at most 100.
+Use the appropriate type/curve for the actual output; motors do not receive a
+lighting curve implicitly.
+
+The shared CLI/TUI commands are `pwm on CHANNEL`, `pwm off CHANNEL`,
+`pwm increase CHANNEL` and `pwm decrease CHANNEL`; `pwm off` without a channel
+still zeros all channels. `pwm configure CHANNEL TYPE CURVE [GAMMA [ICON [STEP_PERCENT]]]`
+configures the same channel data. Thus `pwm configure 0 lighting gamma 2.2 lightbulb 2.5`
+sets a 2.5% logical step for a confirmed lighting channel. Raw duty remains
+0–4095 and is not a percent step.
+
+Actions use a fresh board read, a single curve conversion, an acknowledged
+write and authoritative all-channel readback. The transport generation is fixed
+throughout; reconnect, unavailable hardware, invalid readback or timeout cannot
+fall through to another board or invent success. A failed readback after an
+acknowledged write means the current output outcome is unknown. Readback events
+update subscribed clients, and configured peripheral locks remain authoritative.
+Host percentage changes are serialized with ordinary host PWM writes. Zeroing
+requests cancel/supersede pending percentage changes without waiting on that
+gate. Autonomous firmware/macro output changes are not a host-side atomic
+compare-and-swap: an owned channel may independently change again after the ACK.
+System ownership and physical acceptance remain separate from assigning an ID.
+
+Source regression coverage includes logical gamma/linear steps, exact endpoints,
+clamping, channel-step validation and advertised IDs, named/numeric command lock
+resolution, read/write/readback failures, cancellation/zeroing preemption, and a
+framed in-memory serial fixture proving read/set/ACK/readback plus rejection of
+a replaced connection during the first read. These tests do not learn a real
+code, modify EEPROM/configuration or establish physical output behavior.
+Transport phases use the configured serial request timeout; the complete queued
+action is bounded by three such phases, not an invented progress percentage.
+
 - `controller.rf.catalog {"read_board":true}`: learned records, learning status,
   recent receive activity, assignments, discovered application identities/actions,
   keyboard policy, board controls, effects and semantic board mapping options.

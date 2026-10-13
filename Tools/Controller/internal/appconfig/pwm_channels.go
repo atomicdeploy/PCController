@@ -3,24 +3,57 @@ package appconfig
 import (
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 )
 
 const (
-	PWMChannelCount = 16
-	PWMMaximumValue = 4095
-	PWMMinimumGamma = 0.10
-	PWMMaximumGamma = 5.00
+	PWMChannelCount       = 16
+	PWMMaximumValue       = 4095
+	PWMMinimumGamma       = 0.10
+	PWMMaximumGamma       = 5.00
+	PWMDefaultStepPercent = 1.0
 )
 
 // PWMChannelConfig describes the operator-facing meaning of one physical PWM
 // channel. Percent is always logical intensity; Raw is always the exact board
 // duty. Curve conversion happens once, at the host/board boundary.
 type PWMChannelConfig struct {
-	OutputType string  `json:"output_type"`
-	Icon       string  `json:"icon"`
-	Curve      string  `json:"curve"`
-	Gamma      float64 `json:"gamma"`
+	OutputType  string   `json:"output_type"`
+	Icon        string   `json:"icon"`
+	Curve       string   `json:"curve"`
+	Gamma       float64  `json:"gamma"`
+	StepPercent *float64 `json:"step_percent,omitempty"`
+}
+
+func PWMStepPercent(config PWMChannelConfig) float64 {
+	if config.StepPercent == nil {
+		return PWMDefaultStepPercent
+	}
+	return *config.StepPercent
+}
+
+// ParsePWMChannel is shared by command execution and profile lock checks.
+func ParsePWMChannel(value string) (byte, error) {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	named := map[string]byte{"enclosure": 11, "illumination": 11, "light": 11, "power": 12, "power-led": 12, "status-r": 13, "rgb-r": 13, "red": 13, "status-g": 14, "rgb-g": 14, "green": 14, "status-b": 15, "rgb-b": 15, "blue": 15}
+	if channel, ok := named[normalized]; ok {
+		return channel, nil
+	}
+	for _, prefix := range []string{"user", "u"} {
+		if strings.HasPrefix(normalized, prefix) {
+			number, err := strconv.ParseUint(strings.TrimPrefix(normalized, prefix), 10, 8)
+			if err != nil || number < 1 || number > 11 {
+				return 0, fmt.Errorf("PWM user channel must be user1..user11")
+			}
+			return byte(number - 1), nil
+		}
+	}
+	number, err := strconv.ParseUint(normalized, 0, 8)
+	if err != nil || number > 15 {
+		return 0, fmt.Errorf("PWM channel must be 0..15, user1..user11, enclosure, power, or status-r/g/b")
+	}
+	return byte(number), nil
 }
 
 func DefaultPWMChannels() map[string]PWMChannelConfig {
@@ -69,6 +102,10 @@ func ValidatePWMChannels(channels map[string]PWMChannelConfig) error {
 			return fmt.Errorf("ui.pwm_channels key %q must be pwm.0..pwm.15", key)
 		}
 		value := normalizePWMChannel(raw)
+		step := PWMStepPercent(value)
+		if math.IsNaN(step) || math.IsInf(step, 0) || step <= 0 || step > 100 {
+			return fmt.Errorf("ui.pwm_channels[%q].step_percent must be finite and greater than 0, at most 100", key)
+		}
 		switch value.OutputType {
 		case "lighting", "indicator", "motor", "general":
 		default:
@@ -160,6 +197,7 @@ func ApplyPWMChannelConfig(peripherals []PeripheralDescriptor, controls []Contro
 		peripherals[index].OutputType = config.OutputType
 		peripherals[index].Curve = config.Curve
 		peripherals[index].Gamma = config.Gamma
+		peripherals[index].StepPercent = PWMStepPercent(config)
 		if peripherals[index].Icon == "" {
 			peripherals[index].Icon = config.Icon
 		}
@@ -176,6 +214,7 @@ func ApplyPWMChannelConfig(peripherals []PeripheralDescriptor, controls []Contro
 		controls[index].OutputType = config.OutputType
 		controls[index].Curve = config.Curve
 		controls[index].Gamma = config.Gamma
+		controls[index].StepPercent = PWMStepPercent(config)
 		if controls[index].Icon == "" {
 			controls[index].Icon = config.Icon
 		}

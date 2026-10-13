@@ -1878,6 +1878,22 @@ func (client *Client) SetEmergencyStop(ctx context.Context, active bool, source,
 	return client.runtime.SetEmergencyStop(ctx, active, source, reason)
 }
 
+// PWMChannelConfig describes logical intensity conversion and action steps.
+type PWMChannelConfig = appconfig.PWMChannelConfig
+
+// ApplyPWMAction applies an advertised logical percentage action to the exact
+// connection generation and publishes authoritative all-channel readback.
+func (client *Client) ApplyPWMAction(ctx context.Context, generation uint64, channel byte, verb string, config PWMChannelConfig) (PWMValues, error) {
+	values, err := client.runtime.ApplyPWMAction(ctx, generation, channel, verb, config)
+	if err != nil {
+		return PWMValues{}, err
+	}
+	if client.runtime.Snapshot().ConnectionGeneration != generation {
+		return PWMValues{}, errors.New("connection changed before PWM action readback publication")
+	}
+	return values, nil
+}
+
 // SetPWMChannel controls a native logical PWM channel 0..15 at 0..4095.
 func (client *Client) SetPWMChannel(
 	ctx context.Context,

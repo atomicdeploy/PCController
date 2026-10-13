@@ -81,6 +81,6 @@ func (service *Service) updatePWMChannelConfig(channel int, value appconfig.PWMC
 		return appconfig.PWMChannelConfig{}, err
 	}
 	profile, _ := service.activeBoardProfile()
-	service.publishPeripheralChange(profile, []string{appconfig.PWMChannelKey(channel)}, []string{"output_type", "icon", "curve", "gamma"})
+	service.publishPeripheralChange(profile, []string{appconfig.PWMChannelKey(channel)}, []string{"output_type", "icon", "curve", "gamma", "step_percent"})
 	return appconfig.PWMChannel(service.hostConfig().UI, channel), nil
 }
