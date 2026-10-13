@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -236,6 +237,8 @@ type tickMsg time.Time
 type welcomeTickMsg time.Time
 type welcomeMelodyResultMsg struct{ err error }
 type runtimeEventMsg control.Event
+type runtimeEventReplayMsg control.Event
+type runtimeEventBatchMsg []control.Event
 type controlEventClosedMsg struct{}
 type commandResultMsg struct {
 	line   string
@@ -797,8 +800,30 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			model.finishWelcome()
 		}
 
-	case runtimeEventMsg:
-		event := control.Event(message)
+	case runtimeEventBatchMsg:
+		for _, event := range message {
+			updated, cmd := model.Update(runtimeEventReplayMsg(event))
+			model = updated.(Model)
+			if cmd != nil {
+				commands = append(commands, cmd)
+			}
+		}
+		if model.remote != nil && model.remote.Events != nil && !model.remoteEventsClosed {
+			commands = append(commands, waitControlEvent(model.remote.Events))
+		} else if model.runtime != nil {
+			commands = append(commands, waitControlEvent(model.runtime.Events()))
+		}
+		return model, tea.Batch(commands...)
+	case runtimeEventMsg, runtimeEventReplayMsg:
+		var event control.Event
+		replay := false
+		switch value := message.(type) {
+		case runtimeEventMsg:
+			event = control.Event(value)
+		case runtimeEventReplayMsg:
+			event = control.Event(value)
+			replay = true
+		}
 		if strings.HasPrefix(event.Kind, "macro") && model.remote != nil && model.remote.Snapshot != nil && !model.remoteSnapshotPending {
 			model.remoteSnapshotPending = true
 			commands = append(commands, refreshRemoteSnapshot(model.remote.Snapshot, model.remoteStatusSequence, model.remoteLEDSequence))
@@ -883,12 +908,14 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if show {
 			model.appendLog(event.Kind, event.Text)
 		}
-		if model.remote != nil {
-			if model.remote.Events != nil && !model.remoteEventsClosed {
-				commands = append(commands, waitControlEvent(model.remote.Events))
+		if !replay {
+			if model.remote != nil {
+				if model.remote.Events != nil && !model.remoteEventsClosed {
+					commands = append(commands, waitControlEvent(model.remote.Events))
+				}
+			} else if model.runtime != nil {
+				commands = append(commands, waitControlEvent(model.runtime.Events()))
 			}
-		} else {
-			commands = append(commands, waitControlEvent(model.runtime.Events()))
 		}
 
 	case controlEventClosedMsg:
@@ -903,6 +930,25 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 
 	case remoteLiveUpdateMsg:
 		update := RemoteLiveUpdate(message)
+		if update.Snapshot != nil && update.Snapshot.ConnectionGeneration >= model.remoteSnapshot.ConnectionGeneration {
+			incoming := *update.Snapshot
+			if incoming.ConnectionGeneration == model.remoteSnapshot.ConnectionGeneration {
+				incoming = mergeRemoteSnapshot(model.remoteSnapshot, incoming, !incoming.StatusUpdated.Before(model.remoteSnapshot.StatusUpdated), true)
+				if incoming.PWMRevision < model.remoteSnapshot.PWMRevision {
+					incoming.PWMValues, incoming.PWMRevision, incoming.PWMUpdated = model.remoteSnapshot.PWMValues, model.remoteSnapshot.PWMRevision, model.remoteSnapshot.PWMUpdated
+				}
+			}
+			model.remoteSnapshot = incoming
+			if incoming.HaveStatus {
+				model.remoteStatusReceivedAt = time.Now()
+			}
+		}
+		if update.PWMValues != nil && update.ConnectionGeneration == model.remoteSnapshot.ConnectionGeneration && update.PWMRevision > model.remoteSnapshot.PWMRevision {
+			model.remoteSnapshot.PWMValues, model.remoteSnapshot.PWMRevision, model.remoteSnapshot.PWMUpdated = update.PWMValues, update.PWMRevision, update.PWMUpdated
+		}
+		if update.ConnectionGeneration != 0 && update.ConnectionGeneration != model.remoteSnapshot.ConnectionGeneration {
+			update.HaveStatus, update.HaveStatusLED, update.StatusLEDOrderKnown, update.ConnectionChange = false, false, false, false
+		}
 		if update.ConnectionChange {
 			wasConnected := model.remoteLiveConnected
 			model.remoteLiveConnected = update.Connected
@@ -2593,32 +2639,42 @@ func waitControlEvent(events <-chan control.Event) tea.Cmd {
 		if !ok {
 			return controlEventClosedMsg{}
 		}
-		if event.Stream != control.EventStreamState {
+		continuous := func(event control.Event) bool {
+			return event.Stream == control.EventStreamState && (event.Kind == "status_led.changed" || event.Kind == "pwm.changed" || event.Kind == "animation.frame")
+		}
+		if !continuous(event) {
 			return runtimeEventMsg(event)
 		}
-
-		// Firmware animation and physical mirrors can publish state at 50/60 FPS.
-		// A terminal cannot usefully present every intermediate frame, and asking
-		// Bubble Tea to recompose the full screen for each one can consume a core.
-		// Keep the newest state frame in a short presentation window while letting
-		// actionable activity preempt the window immediately. This changes only
-		// TUI painting; board timing and WebSocket delivery retain full cadence.
-		latest := event
+		latest := map[string]control.Event{event.Kind: event}
+		batch := func(edge *control.Event) tea.Msg {
+			values := make([]control.Event, 0, len(latest)+1)
+			for _, value := range latest {
+				values = append(values, value)
+			}
+			sort.Slice(values, func(i, j int) bool { return values[i].ID < values[j].ID })
+			if edge != nil {
+				values = append(values, *edge)
+			}
+			if len(values) == 1 {
+				return runtimeEventMsg(values[0])
+			}
+			return runtimeEventBatchMsg(values)
+		}
 		timer := time.NewTimer(250 * time.Millisecond)
 		defer timer.Stop()
 		for {
 			select {
 			case <-timer.C:
-				return runtimeEventMsg(latest)
+				return batch(nil)
 			case next, open := <-events:
 				if !open {
-					return runtimeEventMsg(latest)
+					return batch(nil)
 				}
-				if next.Stream == control.EventStreamState {
-					latest = next
+				if continuous(next) {
+					latest[next.Kind] = next
 					continue
 				}
-				return runtimeEventMsg(next)
+				return batch(&next)
 			}
 		}
 	}

@@ -65,6 +65,9 @@ type Snapshot struct {
 	// host process.
 	StatusLEDEpoch    uint64
 	StatusLEDRevision uint64
+	PWMValues         *native.PWMValues
+	PWMRevision       uint64
+	PWMUpdated        time.Time
 	Motion            MotionSnapshot
 	ProgramState      ProgramStateSnapshot
 	Programming       ProgrammingSnapshot
@@ -252,6 +255,11 @@ type Runtime struct {
 	statusLEDPublished     native.StatusLEDState
 	haveStatusLEDPublished bool
 	statusLEDPublishedAt   time.Time
+	statusLEDFlush         *time.Timer
+	pwmValues              native.PWMValues
+	havePWMValues          bool
+	pwmRevision            uint64
+	pwmUpdated             time.Time
 	motion                 MotionSnapshot
 	motionRevision         uint64
 	motionIntentToken      [2]uint64
@@ -832,6 +840,11 @@ func (runtime *Runtime) Snapshot() Snapshot {
 		EmergencyStop:    emergencyStop,
 		HardwareProblems: hardwareProblems,
 		PortProcess:      runtime.portProcess,
+		PWMRevision:      runtime.pwmRevision, PWMUpdated: runtime.pwmUpdated,
+	}
+	if runtime.havePWMValues {
+		values := runtime.pwmValues
+		snapshot.PWMValues = &values
 	}
 	runner := runtime.macroRunner
 	runtime.mu.RUnlock()
@@ -1170,6 +1183,14 @@ func (runtime *Runtime) clearPeerStateLocked() {
 	runtime.statusLED = native.StatusLEDState{}
 	runtime.haveStatusLED = false
 	runtime.statusLEDUpdated = time.Time{}
+	if runtime.statusLEDFlush != nil {
+		runtime.statusLEDFlush.Stop()
+		runtime.statusLEDFlush = nil
+	}
+	runtime.haveStatusLEDPublished = false
+	runtime.havePWMValues = false
+	runtime.pwmValues = native.PWMValues{}
+	runtime.pwmUpdated = time.Time{}
 	runtime.clearMotionLocked()
 }
 
@@ -3078,7 +3099,10 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 					return
 				}
 			} else {
-				statusLEDRevision := runtime.observe(event.Frame)
+				statusLEDRevision, current := runtime.observeAtGeneration(event.Frame, generation)
+				if !current {
+					continue
+				}
 				kind := "rx"
 				text := fmt.Sprintf(
 					"%s seq=%d payload=% X",
@@ -3211,14 +3235,15 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 						Kind: kind, Text: text, Frame: event.Frame,
 						Source: "board", Target: "host", MessageType: "event",
 						Metadata: map[string]string{
-							"red":        strconv.Itoa(int(parsedStatusLED.Red)),
-							"green":      strconv.Itoa(int(parsedStatusLED.Green)),
-							"blue":       strconv.Itoa(int(parsedStatusLED.Blue)),
-							"hex":        fmt.Sprintf("#%02X%02X%02X", parsedStatusLED.Red, parsedStatusLED.Green, parsedStatusLED.Blue),
-							"brightness": strconv.Itoa(int(parsedStatusLED.Brightness)),
-							"effect":     strconv.Itoa(int(parsedStatusLED.Effect)),
-							"condition":  strconv.Itoa(int(parsedStatusLED.Condition)),
-							"revision":   strconv.FormatUint(statusLEDRevision, 10),
+							"red":                   strconv.Itoa(int(parsedStatusLED.Red)),
+							"green":                 strconv.Itoa(int(parsedStatusLED.Green)),
+							"blue":                  strconv.Itoa(int(parsedStatusLED.Blue)),
+							"hex":                   fmt.Sprintf("#%02X%02X%02X", parsedStatusLED.Red, parsedStatusLED.Green, parsedStatusLED.Blue),
+							"brightness":            strconv.Itoa(int(parsedStatusLED.Brightness)),
+							"effect":                strconv.Itoa(int(parsedStatusLED.Effect)),
+							"condition":             strconv.Itoa(int(parsedStatusLED.Condition)),
+							"revision":              strconv.FormatUint(statusLEDRevision, 10),
+							"connection_generation": strconv.FormatUint(generation, 10),
 						},
 					})
 				} else if parsedDevice != nil {
@@ -3319,6 +3344,7 @@ func (runtime *Runtime) shouldPublishStatusLED(state native.StatusLEDState, obse
 		state.Condition != runtime.statusLEDPublished.Condition ||
 		statusLEDColorDistance(state, runtime.statusLEDPublished) >= 64
 	if !immediate && observedAt.Sub(runtime.statusLEDPublishedAt) < statusLEDPresentationInterval {
+		runtime.scheduleStatusLEDFlushLocked()
 		return false
 	}
 	runtime.statusLEDPublished = state
@@ -3509,6 +3535,10 @@ func (runtime *Runtime) observeAtGeneration(frame native.Frame, generation uint6
 
 func (runtime *Runtime) observeLocked(frame native.Frame) uint64 {
 	switch frame.Opcode {
+	case native.OpPWMValues:
+		if values, err := native.ParsePWMValues(frame.Payload); err == nil {
+			runtime.publishPWMValuesLocked(values)
+		}
 	case native.OpStatus:
 		if status, err := native.ParseStatus(frame.Payload); err == nil {
 			now := time.Now()

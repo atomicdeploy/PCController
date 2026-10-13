@@ -2,6 +2,7 @@
 #include "../../../PCController.ino"
 #include <EEPROM.h>
 #include "virtual_board/virtual_board.hpp"
+#include "virtual_board/sensor_sources.hpp"
 #include <atomic>
 #include <sstream>
 #include <stdexcept>
@@ -11,6 +12,7 @@ namespace { std::atomic<bool> claimed{false}; }
 VirtualBoard::VirtualBoard(const std::filesystem::path &eeprom,bool deterministic) {
   if(claimed.exchange(true)) throw std::runtime_error("one firmware instance per process; use an isolated process/EEPROM for each board");
   NativeHal::configureClock(deterministic);
+  NativeHal::refreshSensorSources(0, true);
   EEPROM.open(eeprom);
   setup();
   EEPROM.flush();
@@ -25,6 +27,13 @@ std::vector<uint8_t> VirtualBoard::tick(uint64_t advanceUs) {
   std::lock_guard<std::mutex> lock(mutex_);
   if(!resetRequested_) {
     NativeHal::advance(advanceUs);
+    if (NativeHal::refreshSensorSources(NativeHal::clockMicros())) {
+      ina219Available = NativeHal::powerAvailable;
+      if (!ina219Available) {
+        sensors.supplyMilliVolts = sensors.busMilliVolts = INVALID_I32;
+        sensors.currentMilliAmps = sensors.powerMilliWatts = INVALID_I32;
+      }
+    }
     try { loop(); } catch(const NativeHal::ResetRequested &) { resetRequested_=true; EEPROM.flush(); }
     // Coalesce native image writes; EEPROM.update still owns wear reduction.
     static uint32_t lastFlush=0;
@@ -64,7 +73,7 @@ OutputSnapshot VirtualBoard::outputSnapshot() const {
 std::string VirtualBoard::describe() const {
   const auto s=outputSnapshot();
   std::ostringstream out;
-  out << "production firmware; relays=" << unsigned(s.relayMask) << "; TM1637=" << (s.tm1637Detected ? "present" : "absent") << "; buzzer=" << s.buzzerHz << " Hz; strip=" << s.strip.size()/3 << " pixels; INA219=unavailable; temperatures=unavailable unless explicitly injected";
+  out << "production firmware; relays=" << unsigned(s.relayMask) << "; TM1637=" << (s.tm1637Detected ? "present" : "absent") << "; buzzer=" << s.buzzerHz << " Hz; strip=" << s.strip.size()/3 << " pixels; sensors=native inputs (explicit mappings/fixtures only)";
   return out.str();
 }
 ConsoleResult VirtualBoard::console(const std::string &line) {

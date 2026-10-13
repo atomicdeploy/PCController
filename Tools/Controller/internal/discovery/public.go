@@ -269,6 +269,34 @@ func trustedDiscoveryURL(candidate string, instance Instance) bool {
 }
 
 func enrichInstance(ctx context.Context, instance Instance) Instance {
+	if instance.Product != "" && instance.Product != "pccontroller" {
+		for _, host := range append(append([]string(nil), instance.Addresses...), instance.Host) {
+			u := "http://" + net.JoinHostPort(host, strconv.Itoa(instance.Port)) + "/healthz"
+			requestCtx, cancel := context.WithTimeout(ctx, 650*time.Millisecond)
+			request, err := http.NewRequestWithContext(requestCtx, http.MethodGet, u, nil)
+			if err != nil {
+				cancel()
+				continue
+			}
+			client := &http.Client{Transport: publicHTTPTransport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+			response, err := client.Do(request)
+			if err == nil {
+				var health struct {
+					Service string `json:"service"`
+					Status  string `json:"status"`
+				}
+				err = json.NewDecoder(io.LimitReader(response.Body, 4096)).Decode(&health)
+				response.Body.Close()
+				if err == nil && response.StatusCode == 200 && health.Service == instance.Product && health.Status == "ok" {
+					instance.Verified = true
+					cancel()
+					return instance
+				}
+			}
+			cancel()
+		}
+		return instance
+	}
 	client := &http.Client{
 		Transport: publicHTTPTransport,
 		CheckRedirect: func(request *http.Request, _ []*http.Request) error {
@@ -299,6 +327,8 @@ func enrichInstance(ctx context.Context, instance Instance) Instance {
 		}
 		pinPublicInfoEndpoints(&info, instance)
 		instance.Public = &info
+		instance.Product = "pccontroller"
+		instance.Verified = true
 		instance.PublicURL = candidate
 		if info.InstanceName != "" {
 			instance.Name = info.InstanceName
@@ -452,6 +482,10 @@ func mergeInstances(values []Instance) []Instance {
 			continue
 		}
 		current := result[match]
+		current.Verified = current.Verified || value.Verified
+		if current.Product == "" {
+			current.Product = value.Product
+		}
 		current.Protocols = uniqueStrings(append(current.Protocols, value.Protocol))
 		current.Sources = append(current.Sources, Source{Protocol: value.Protocol, Host: value.Host, Port: value.Port, Location: value.Location, SeenAt: value.SeenAt})
 		current.Addresses = uniqueStrings(append(current.Addresses, value.Addresses...))
@@ -480,6 +514,9 @@ func mergeInstances(values []Instance) []Instance {
 }
 
 func sameInstance(left, right Instance) bool {
+	if left.Product != "" && right.Product != "" && left.Product != right.Product {
+		return false
+	}
 	if left.Public != nil && right.Public != nil && left.Public.InstanceID != "" && right.Public.InstanceID != "" {
 		return strings.EqualFold(left.Public.InstanceID, right.Public.InstanceID)
 	}

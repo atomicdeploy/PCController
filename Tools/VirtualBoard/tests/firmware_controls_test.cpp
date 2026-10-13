@@ -538,6 +538,48 @@ void testTemperatureEEPROMIdentityAndThreshold() {
           "damaged temperature record was treated as persistent authority");
 }
 
+void testDisplayNumericBoundaries() {
+  SevenSegments segments;
+  segments.begin(5);
+  segments.showInteger(9999);
+  require(std::all_of(segments.rawSegments(), segments.rawSegments() + 4,
+                     [](uint8_t cell) { return cell == 0x6F; }),
+          "largest positive four-cell number did not render");
+  segments.showFixed(-999, 2);
+  require(segments.rawSegments()[0] == 0x40 &&
+              segments.rawSegments()[1] == 0xEF &&
+              segments.rawSegments()[2] == 0x6F &&
+              segments.rawSegments()[3] == 0x6F,
+          "negative fixed-point boundary lost sign or decimal position");
+  for (int32_t value : {int32_t(10000), int32_t(-1000), INT32_MAX, INT32_MIN}) {
+    segments.showInteger(value);
+    require(std::all_of(segments.rawSegments(), segments.rawSegments() + 4,
+                       [](uint8_t cell) { return cell == 0x40; }),
+            "out-of-range number was narrowed to a misleading display value");
+  }
+  segments.showInteger(0);
+  require(segments.rawSegments()[3] == 0x3F,
+          "zero did not recover from unavailable presentation");
+}
+
+void testEveryEasedBytePair() {
+  for (unsigned current = 0; current <= 255; ++current) {
+    require(TransitionMath::expandByte12(static_cast<uint8_t>(current)) ==
+                current * 16U + current / 16U,
+            "8-to-12-bit PWM expansion changed a calibrated value");
+    for (unsigned target = 0; target <= 255; ++target) {
+      const unsigned distance = current > target ? current - target : target - current;
+      const unsigned step = std::max(1U, std::min(8U, distance / 16U));
+      const unsigned expected = current == target ? current :
+          (current < target ? std::min(target, current + step) :
+                              std::max(target, current - step));
+      require(TransitionMath::easedByte(static_cast<uint8_t>(current),
+                                       static_cast<uint8_t>(target)) == expected,
+              "byte damping changed at a target or electrical boundary");
+    }
+  }
+}
+
 void testBuzzerTimerAndQueue() {
   TonePlayer player(PIN_PB1);
   player.begin();
@@ -586,6 +628,8 @@ int main() {
     testDallasAbsentPullupBound();
     testTemperatureEEPROMIdentityAndThreshold();
     testBuzzerTimerAndQueue();
+    testDisplayNumericBoundaries();
+    testEveryEasedBytePair();
     std::cout << "firmware_controls_tests: all checks passed\n";
     return 0;
   } catch (const std::exception &error) {

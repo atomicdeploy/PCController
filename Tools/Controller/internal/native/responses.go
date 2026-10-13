@@ -31,6 +31,9 @@ const BuildFeatureBoardAutomation byte = 1 << 5
 // The high bit of MENU_SET_PAGE's page byte navigates without updating EEPROM.
 const BuildFeatureVolatileMenu byte = 1 << 6
 
+// Native firmware inputs are explicit mappings/fixtures, not physical probes.
+const BuildFeatureNativeHAL byte = 1 << 7
+
 // HELLO capability bits are the authoritative guard for optional operations.
 const (
 	CapabilityINA219             uint32 = 1 << 0

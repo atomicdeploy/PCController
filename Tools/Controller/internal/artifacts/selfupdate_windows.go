@@ -9,9 +9,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"golang.org/x/sys/windows"
+	"pccontroller.local/controller/internal/consolewindow"
+	"pccontroller.local/controller/internal/startupmode"
 )
 
 type platformHelperLauncher struct{}
@@ -32,6 +35,9 @@ var (
 func PrepareSelfUpdateHelperProcess() error { return setConsoleCtrlIgnored(true) }
 
 func setConsoleCtrlIgnored(ignored bool) error {
+	if !consolewindow.Inspect().Attached {
+		return nil
+	}
 	value := uintptr(0)
 	if ignored {
 		value = 1
@@ -44,6 +50,7 @@ func setConsoleCtrlIgnored(ignored bool) error {
 }
 
 func platformStartReplacementProcess(command *exec.Cmd) error {
+	configureReplacementConsole(command, command.Args[1:], consolewindow.Inspect())
 	if err := setReplacementConsoleCtrlIgnored(false); err != nil {
 		return err
 	}
@@ -61,13 +68,34 @@ func platformStartReplacementProcess(command *exec.Cmd) error {
 }
 
 func (platformHelperLauncher) Launch(_ context.Context, helperPath, journalPath string) error {
+	journal, err := loadSelfUpdateJournal(journalPath)
+	if err != nil {
+		return fmt.Errorf("read prepared self-update presentation: %w", err)
+	}
 	command := exec.Command(helperPath, selfUpdateHelperCommand, journalPath)
 	command.Env = withoutSelfUpdateEnvironment(os.Environ())
 	inheritSelfUpdateIO(command)
+	configureReplacementConsole(command, journal.Arguments, consolewindow.Inspect())
 	if err := command.Start(); err != nil {
 		return err
 	}
 	return command.Process.Release()
+}
+
+func configureReplacementConsole(command *exec.Cmd, arguments []string, console consolewindow.State) {
+	preserveInteractive := console.InteractiveStreams && (!startupmode.BackgroundWeb(arguments) || !console.SoleOwner)
+	if command == nil || startupmode.TUI(arguments) || preserveInteractive {
+		return
+	}
+	if command.SysProcAttr == nil {
+		command.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	// Never combine CREATE_NO_WINDOW with conflicting console flags.
+	if command.SysProcAttr.CreationFlags&(windows.CREATE_NEW_CONSOLE|windows.DETACHED_PROCESS) != 0 {
+		return
+	}
+	command.SysProcAttr.HideWindow = true
+	command.SysProcAttr.CreationFlags |= windows.CREATE_NO_WINDOW
 }
 
 func platformHelperExtension() string { return ".helper.exe" }

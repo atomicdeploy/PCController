@@ -318,6 +318,9 @@ func (outputs *OutputScheduler) streamStripEffect(ctx context.Context, count, fp
 				return err
 			}
 			consecutiveTimeouts++
+			if consecutiveTimeouts >= 3 {
+				return fmt.Errorf("strip stream stopped after repeated missing acknowledgements; output state is unconfirmed: %w", err)
+			}
 			if consecutiveTimeouts == 1 {
 				outputs.target.PublishHostEvent(
 					"output",

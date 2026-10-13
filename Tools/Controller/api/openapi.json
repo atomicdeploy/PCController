@@ -287,6 +287,53 @@
         }
       }
     },
+    "/api/diagnostics/cpu-profile": {
+      "post": {
+        "operationId": "post_api_diagnostics_cpu_profile",
+        "summary": "Explicit five-second application CPU profile; loopback callers only, one active capture, no board actions or request body",
+        "tags": [
+          "cpu-profile"
+        ],
+        "x-required-capability": "local-only",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Five-second gzip-encoded Go CPU profile",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/estop": {
       "get": {
         "operationId": "get_api_estop",
@@ -4081,6 +4128,13 @@
               "controller.subscribe",
               "controller.system.status",
               "controller.temperatures",
+              "controller.udp.call",
+              "controller.udp.config.get",
+              "controller.udp.config.set",
+              "controller.udp.events.get",
+              "controller.udp.status",
+              "controller.udp.subscribe",
+              "controller.udp.unsubscribe",
               "controller.ui.config",
               "controller.ui.config.get",
               "controller.ui.config.set",

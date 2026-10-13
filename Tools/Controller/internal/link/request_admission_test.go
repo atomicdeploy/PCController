@@ -67,6 +67,50 @@ func waitForQueuedRequests(t *testing.T, admission *requestAdmission, count int)
 	t.Fatalf("request waiters did not reach %d", count)
 }
 
+func TestNormalControlOvertakesQueuedStripWork(t *testing.T) {
+	var admission requestAdmission
+	closing := make(chan struct{})
+	releaseActive, _ := admission.acquire(context.Background(), closing, RequestPriorityNormal)
+	background := make(chan func(), 1)
+	normal := make(chan func(), 1)
+	go func() {
+		release, _ := admission.acquire(context.Background(), closing, RequestPriorityBackground)
+		background <- release
+	}()
+	waitForQueuedRequests(t, &admission, 1)
+	go func() {
+		release, _ := admission.acquire(context.Background(), closing, RequestPriorityNormal)
+		normal <- release
+	}()
+	waitForQueuedRequests(t, &admission, 2)
+	releaseActive()
+	select {
+	case release := <-normal:
+		release()
+	case <-time.After(time.Second):
+		t.Fatal("control request did not overtake queued strip work")
+	}
+	select {
+	case release := <-background:
+		release()
+	case <-time.After(time.Second):
+		t.Fatal("strip slot was stranded")
+	}
+}
+
+func TestLostStripACKReleasesWireBeforeStatusDeadline(t *testing.T) {
+	port := newFakePort()
+	var writes atomic.Int32
+	port.onWrite = func([]byte) { writes.Add(1) }
+	session := NewForPort("TEST", port)
+	defer session.Close()
+	started := time.Now()
+	err := session.Command(context.Background(), native.OpAddressableLED, []byte{0xFC})
+	if !errors.Is(err, context.DeadlineExceeded) || time.Since(started) >= 1500*time.Millisecond || writes.Load() != 1 {
+		t.Fatalf("strip response bound/replay failed: elapsed=%s writes=%d err=%v", time.Since(started), writes.Load(), err)
+	}
+}
+
 func TestTimelineRequestOvertakesQueuedNormalRequest(t *testing.T) {
 	var admission requestAdmission
 	closing := make(chan struct{})

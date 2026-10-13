@@ -13,8 +13,19 @@ abstract class ToneOutput {
   Future<void> stop(String session);
 }
 
+/// Native receivers can schedule ahead on their audio-frame clock, without a
+/// Dart timer for each note. The basic interface remains usable by other hosts.
+abstract interface class ScheduledToneOutput implements ToneOutput {
+  Future<void> schedule(
+    String session,
+    int frequency,
+    int durationMs,
+    int delayMicros,
+  );
+}
+
 /// Frequency-driven PCM, not Android's fixed ToneGenerator cue catalog.
-class AndroidToneOutput implements ToneOutput {
+class AndroidToneOutput implements ScheduledToneOutput {
   static const channel = MethodChannel(
     'ir.digitalogic.pccontroller/tone-mirror',
   );
@@ -28,6 +39,18 @@ class AndroidToneOutput implements ToneOutput {
         'frequency': frequency,
         'duration_ms': durationMs,
       });
+  @override
+  Future<void> schedule(
+    String session,
+    int frequency,
+    int durationMs,
+    int delayMicros,
+  ) => channel.invokeMethod('note', {
+    'session': session,
+    'frequency': frequency,
+    'duration_ms': durationMs,
+    'start_delay_us': delayMicros,
+  });
   @override
   Future<void> lease(String session) =>
       channel.invokeMethod('lease', {'session': session});

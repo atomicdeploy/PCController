@@ -207,6 +207,7 @@ type NotificationAction struct {
 }
 
 type Discovery struct {
+	MNDPEnabled        bool   `json:"mndp_enabled"`
 	MDNSEnabled        bool   `json:"mdns_enabled"`
 	DNSSDenabled       bool   `json:"dns_sd_enabled"`
 	SSDPEnabled        bool   `json:"ssdp_enabled"`
@@ -222,6 +223,7 @@ type Discovery struct {
 // available on first run. It does not enable remote control or weaken IPC auth.
 func DefaultDiscovery() Discovery {
 	return Discovery{
+		MNDPEnabled: true,
 		MDNSEnabled: true, DNSSDenabled: true, SSDPEnabled: true, UPnPEnabled: true,
 		WSDiscoveryEnabled: true, BroadcastEnabled: true, NetBIOSEnabled: true,
 		BroadcastPort: 37889,

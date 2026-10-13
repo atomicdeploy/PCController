@@ -1,7 +1,7 @@
-import { spawn, execFileSync } from 'node:child_process'
+import { spawn, spawnSync, execFileSync } from 'node:child_process'
 import { createConnection, createServer } from 'node:net'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { mkdir, mkdtemp, readFile, writeFile, rm } from 'node:fs/promises'
+import { tmpdir, homedir } from 'node:os'
 import { join } from 'node:path'
 import assert from 'node:assert/strict'
 
@@ -47,6 +47,11 @@ async function connect(port) {
 const binary = process.argv[2]
 assert(binary, 'native binary required')
 const state = await mkdtemp(join(tmpdir(), 'pccontroller-native-conformance-'))
+const sensorRoot = process.platform === 'win32' ? join(process.env.LOCALAPPDATA, 'Programs', 'PCController', 'sensors')
+  : process.platform === 'darwin' ? join(homedir(), 'Library', 'Application Support', 'PCController', 'sensors')
+  : join(process.env.XDG_STATE_HOME || join(homedir(), '.local', 'state'), 'pccontroller', 'sensors')
+await mkdir(sensorRoot, {recursive:true})
+const sensorState = await mkdtemp(join(sensorRoot, 'conformance-'))
 const children = [], sockets = []
 const pidFile = join(state, 'board.pid')
 function start(args, argv0 = binary) {
@@ -67,7 +72,77 @@ try {
   const status = await stream(f => f.opcode === 144 && f.sequence === 42)
   assert.equal(status.payload.length, 48); assert.equal(status.payload.readInt32LE(4), -2147483648)
   assert.equal(status.payload.readInt16LE(20), -32768)
+  // A read-only initial observation and quiet final PWM changes must push
+  // without any PwmValues request. These are RAM-only native firmware fixtures.
+  const initialPwm = await stream(f => f.opcode === 0x92 && f.sequence === 0)
+  assert.equal(initialPwm.payload.length, 34)
+  if (initialPwm.payload[0]) {
+    stdio.stdin.write(encode(0x11, 46, [0, 123, 0]))
+    await stream(f => f.opcode === 0x92 && f.sequence === 0 && f.payload.readUInt16LE(2) === 123)
+    stdio.stdin.write(encode(0x11, 47, [0, 234, 0]))
+    await stream(f => f.opcode === 0x92 && f.sequence === 0 && f.payload.readUInt16LE(2) === 234)
+  }
   stdio.stdin.end(); await new Promise(resolve => stdio.once('exit', resolve)); assert.equal(stdio.exitCode, 0, stdio.diagnostics())
+
+  // Explicit host mappings still traverse production sampling, smoothing,
+  // discovery, status validity and recovery; not a second telemetry runtime.
+  for (const forbidden of [join(state, 'outside'), join(sensorRoot+'-other','value'), join(sensorRoot,'..','private-value')]) {
+    const rejected = spawnSync(binary, ['--stdio','--memory','--sensor-temp0',forbidden], {timeout:2000})
+    assert.notEqual(rejected.status, 0, 'uncontrolled sensor path must be rejected')
+    assert.match(String(rejected.stderr), /native sensor paths/)
+  }
+  const tempPath = join(sensorState, 'host-temp'), voltagePath = join(sensorState, 'host-voltage'), currentPath = join(sensorState, 'host-current')
+  await writeFile(tempPath, '42000\n'); await writeFile(voltagePath, '12000000\n'); await writeFile(currentPath, '250000\n')
+  const mapped = start(['--stdio', '--memory', '--sensor-temp1', tempPath, '--sensor-voltage', voltagePath, '--sensor-current', currentPath])
+  const mappedFrames = channel(mapped.stdout)
+  mapped.stdin.write(encode(1, 43))
+  assert((await mappedFrames(f => f.opcode === 129 && f.sequence === 43)).payload[15] & 128, 'native input origin must be advertised')
+  let sensorSeq = 60
+  const mappedStatus = async predicate => {
+    const until = Date.now() + 6000
+    while (Date.now() < until) {
+      const seq = sensorSeq++ % 255
+      mapped.stdin.write(encode(2, seq))
+      const { payload } = await mappedFrames(f => f.opcode === 144 && f.sequence === seq)
+      if (predicate(payload)) return payload
+      await new Promise(resolve => setTimeout(resolve, 100))
+    }
+    throw new Error('mapped sensor state never became authoritative')
+  }
+  const liveMapped = await mappedStatus(p => (p.readUInt16LE(24) & 9) === 9)
+  assert.equal(liveMapped.readInt32LE(4), 12000); assert.equal(liveMapped.readInt32LE(12), 250); assert.equal(liveMapped.readInt32LE(16), 3000)
+  assert.equal(liveMapped.readInt16LE(20), -32768, 'source one must not migrate into role zero')
+  assert.equal(liveMapped.readInt16LE(22), 4200)
+  await writeFile(currentPath, '250000junk\n'); await writeFile(tempPath, '999999999999999999999999999999999999999\n')
+  const missingMapped = await mappedStatus(p => (p.readUInt16LE(24) & 9) === 0)
+  assert.equal(missingMapped.readInt32LE(4), -2147483648, 'invalid/missing source must clear stale power')
+  assert.equal(missingMapped.readInt16LE(22), -32768, 'invalid/missing source must clear stale temperature')
+  await writeFile(currentPath, '-100000\n'); await writeFile(tempPath, '-10000\n')
+  const recoveredMapped = await mappedStatus(p => (p.readUInt16LE(24) & 9) === 9)
+  assert.equal(recoveredMapped.readInt32LE(12), -100); assert.equal(recoveredMapped.readInt32LE(16), -1200)
+  assert.equal(recoveredMapped.readInt16LE(22), -1000)
+  mapped.stdin.end(); await new Promise(resolve => mapped.once('exit', resolve)); assert.equal(mapped.exitCode, 0, mapped.diagnostics())
+  assert(!await readFile(join(state, 'native-firmware-eeprom-8765.bin')).then(() => true, () => false), 'RAM-only development must not create EEPROM files')
+
+  // Optional live Linux scalar-source acceptance, still on our own native
+  // process. Never actuates or connects to an existing physical controller.
+  if (process.env.PCCONTROLLER_NATIVE_TEMPERATURE_SOURCE) {
+    const source = process.env.PCCONTROLLER_NATIVE_TEMPERATURE_SOURCE
+    const actual = Number((await readFile(source, 'utf8')).trim())
+    assert(Number.isInteger(actual) && actual >= -55000 && actual <= 125000)
+    const hostMapped = start(['--stdio','--memory','--sensor-temp0',source])
+    const hostFrames = channel(hostMapped.stdout)
+    let observed
+    for (let i=0; i<60; ++i) {
+      hostMapped.stdin.write(encode(2, 44))
+      const { payload } = await hostFrames(f => f.opcode === 144 && f.sequence === 44)
+      if (payload.readUInt16LE(24) & 4) { observed = payload.readInt16LE(20); break }
+      await new Promise(resolve => setTimeout(resolve, 100))
+    }
+    assert(observed !== undefined && observed >= -5500 && observed <= 12500, 'live source must be observed through production telemetry')
+    console.log(`live host-mapped native temperature: ${observed / 100} C`)
+    hostMapped.stdin.end(); await new Promise(resolve => hostMapped.once('exit', resolve)); assert.equal(hostMapped.exitCode, 0, hostMapped.diagnostics())
+  }
 
   const port = await freePort(), eeprom = join(state, 'board.bin')
   // Restart must resolve the loaded OS image, not this untrusted argv[0].
@@ -107,4 +182,6 @@ try {
   } catch {}
   await new Promise(resolve => setTimeout(resolve, 200))
   await rm(state, { recursive: true, force: true })
+  assert(sensorState.startsWith(sensorRoot + (process.platform === 'win32' ? '\\' : '/')))
+  await rm(sensorState, { recursive: true, force: true })
 }

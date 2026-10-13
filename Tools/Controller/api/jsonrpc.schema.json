@@ -542,6 +542,13 @@
             "controller.subscribe",
             "controller.system.status",
             "controller.temperatures",
+            "controller.udp.call",
+            "controller.udp.config.get",
+            "controller.udp.config.set",
+            "controller.udp.events.get",
+            "controller.udp.status",
+            "controller.udp.subscribe",
+            "controller.udp.unsubscribe",
             "controller.ui.config",
             "controller.ui.config.get",
             "controller.ui.config.set",
@@ -1551,6 +1558,41 @@
       "capability": "read",
       "summary": "temperatures",
       "idempotency": "safe"
+    },
+    "controller.udp.call": {
+      "capability": "bridge_calls",
+      "summary": "udp call",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.udp.config.get": {
+      "capability": "read",
+      "summary": "udp config get",
+      "idempotency": "safe"
+    },
+    "controller.udp.config.set": {
+      "capability": "host_configuration",
+      "summary": "udp config set",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.udp.events.get": {
+      "capability": "read",
+      "summary": "udp events get",
+      "idempotency": "safe"
+    },
+    "controller.udp.status": {
+      "capability": "read",
+      "summary": "udp status",
+      "idempotency": "safe"
+    },
+    "controller.udp.subscribe": {
+      "capability": "host_configuration",
+      "summary": "udp subscribe",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.udp.unsubscribe": {
+      "capability": "host_configuration",
+      "summary": "udp unsubscribe",
+      "idempotency": "idempotent-with-authoritative-readback"
     },
     "controller.ui.config": {
       "capability": "read",

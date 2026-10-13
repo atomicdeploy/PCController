@@ -5,6 +5,11 @@
 // Small, allocation-free transition helpers shared by front-panel domains.
 namespace TransitionMath {
 
+// Exact endpoint-preserving byte expansion shared by every PWM/fade caller.
+inline uint16_t expandByte12(uint8_t value) {
+  return static_cast<uint16_t>(static_cast<uint16_t>(value) * 16U + value / 16U);
+}
+
 // Rolls a byte setting through both electrical endpoints before wrapping.
 inline uint8_t rollByte(uint8_t value, uint8_t step, bool increase) {
   if (increase) {
@@ -34,12 +39,11 @@ inline uint8_t easedByte(uint8_t current, uint8_t target) {
   } else if (step > 8) {
     step = 8;
   }
-  if (current < target) {
-    const uint16_t next = static_cast<uint16_t>(current) + step;
-    return static_cast<uint8_t>(next > target ? target : next);
-  }
-  return static_cast<uint8_t>(current - target > step ? current - step
-                                                       : target);
+  // For every nonzero distance, 1 <= step <= distance. Neither direction can
+  // overshoot its target or wrap an electrical endpoint, so a second 16-bit
+  // addition and redundant endpoint clamps need not occupy AVR flash.
+  return current < target ? static_cast<uint8_t>(current + step)
+                          : static_cast<uint8_t>(current - step);
 }
 
 // Damps one 12-bit RGB channel while guaranteeing eventual convergence.

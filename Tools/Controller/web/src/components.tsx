@@ -525,6 +525,8 @@ export function RangeField({
   unit,
   onChange,
   disabled,
+  onEditStart,
+  onEditEnd,
 }: {
   label: ReactNode
   value: number
@@ -534,6 +536,8 @@ export function RangeField({
   unit?: string
   onChange: (value: number) => void
   disabled?: boolean
+  onEditStart?: () => void
+  onEditEnd?: () => void
 }) {
   const rangeID = useId()
   const [exactValue, setExactValue] = useState(String(value))
@@ -564,7 +568,8 @@ export function RangeField({
             disabled={disabled}
             aria-label={typeof label === 'string' ? interfaceCopy(`${label} exact value`, `مقدار دقیق ${label}`) : interfaceCopy('Exact value', 'مقدار دقیق')}
             onInput={(event) => setExactValue(event.currentTarget.value)}
-            onBlur={commitExactValue}
+            onFocus={onEditStart}
+            onBlur={() => { commitExactValue(); onEditEnd?.() }}
             onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }}
           />
           {unit && <span>{unit}</span>}
@@ -579,6 +584,13 @@ export function RangeField({
         step={step}
         disabled={disabled}
         style={{ '--range': `${ratio}%` } as React.CSSProperties}
+        onPointerDown={onEditStart}
+        onPointerUp={onEditEnd}
+        onPointerCancel={onEditEnd}
+        onLostPointerCapture={onEditEnd}
+        onBlur={onEditEnd}
+        onKeyDown={event => { if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'].includes(event.key)) onEditStart?.() }}
+        onKeyUp={onEditEnd}
         onChange={(event) => onChange(Number(event.target.value))}
       />
     </div>

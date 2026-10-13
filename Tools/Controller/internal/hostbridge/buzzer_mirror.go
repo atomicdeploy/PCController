@@ -63,7 +63,12 @@ func (timeline *buzzerPlaybackTimeline) plan(job buzzerMirrorJob, now time.Time)
 	}
 	start := observedAt
 	if job.timed {
+		fresh := !observedAt.After(now) && now.Sub(observedAt) <= maxBuzzerObservedSkew
 		start = observedAt.Add(buzzerPlayoutDelay)
+		if fresh && !start.After(now) {
+			// Integration/scheduler handoff can itself miss the cushion.
+			start = now.Add(buzzerPlayoutDelay)
+		}
 		if previous, ok := timeline.anchors[job.source]; ok {
 			delta := time.Duration(uint32(job.deviceMicros-previous.deviceMicros)) * time.Microsecond
 			candidate := previous.start.Add(delta)
@@ -72,7 +77,12 @@ func (timeline *buzzerPlaybackTimeline) plan(job buzzerMirrorJob, now time.Time)
 			withinObservedWindow := !candidate.Before(observedAt.Add(-maxBuzzerObservedSkew)) &&
 				!candidate.After(observedAt.Add(maxBuzzerObservedSkew))
 			if sameGeneration && delta <= maxBuzzerSourceGap && withinObservedWindow {
-				start = candidate
+				// A fresh note that missed the cushion must not lose its entire
+				// duration. Re-anchor this source, then retain device cadence from
+				// that anchor. Do not rehabilitate a stale queued observation.
+				if !candidate.Before(now) || !fresh {
+					start = candidate
+				}
 			}
 		}
 		timeline.anchors[job.source] = buzzerTimelineAnchor{
@@ -96,6 +106,23 @@ func (plan buzzerPlaybackPlan) remaining(now time.Time) (time.Duration, bool) {
 		return plan.end.Sub(plan.start), true
 	}
 	return plan.end.Sub(now), true
+}
+
+func (timeline *buzzerPlaybackTimeline) rebaseForStart(job buzzerMirrorJob, plan buzzerPlaybackPlan, now time.Time) (buzzerPlaybackPlan, time.Duration) {
+	age := now.Sub(job.observedAt)
+	late := now.Sub(plan.start)
+	if !job.timed || job.frequencyHz == 0 || job.observedAt.IsZero() || age < 0 || age > maxBuzzerObservedSkew || late <= 0 {
+		return plan, 0
+	}
+	// Timer wakeup and serialized backend cleanup can miss even a 1 ms note.
+	// Shift this source's fresh playout cadence, not its declared durations.
+	plan.start = plan.start.Add(late)
+	plan.end = plan.end.Add(late)
+	if anchor, ok := timeline.anchors[job.source]; ok {
+		anchor.start = anchor.start.Add(late)
+		timeline.anchors[job.source] = anchor
+	}
+	return plan, late
 }
 
 func buzzerMirrorJobFor(config appconfig.BuzzerMirror, event controller.Event) (buzzerMirrorJob, bool) {
@@ -138,9 +165,12 @@ func (manager *Manager) dispatchBuzzerMirror(config appconfig.Config, event cont
 	if !ok {
 		return
 	}
-	// Event.Time may originate on a bridged host with a skewed wall clock.
-	// Anchor against this host's monotonic receipt time instead.
-	job.observedAt = time.Now()
+	// Runtime.publishEvent stamps both local and ingressed events with this
+	// host's receipt time. Preserve it: stamping again after slow integration
+	// work disguises queue delay and can replay stale observations as fresh.
+	if job.observedAt.IsZero() {
+		job.observedAt = time.Now()
+	}
 	// Configure-time resolution is authoritative for auto mode. Reusing it
 	// avoids probing the native device before launching the already-selected
 	// optional external helper for every pushed note.
@@ -207,8 +237,28 @@ func (manager *Manager) buzzerMirrorLoop() {
 		}
 		timerChannel = timer.C
 	}
+	sortPending := func() {
+		sort.SliceStable(pending, func(left, right int) bool {
+			if pending[left].plan.start.Equal(pending[right].plan.start) {
+				return pending[left].order < pending[right].order
+			}
+			return pending[left].plan.start.Before(pending[right].plan.start)
+		})
+	}
 	start := func(next scheduledPlayback) bool {
-		remaining, audible := next.plan.remaining(time.Now())
+		now := time.Now()
+		var shift time.Duration
+		next.plan, shift = timeline.rebaseForStart(next.job, next.plan, now)
+		if shift > 0 {
+			for index := range pending {
+				if pending[index].job.source == next.job.source {
+					pending[index].plan.start = pending[index].plan.start.Add(shift)
+					pending[index].plan.end = pending[index].plan.end.Add(shift)
+				}
+			}
+			sortPending()
+		}
+		remaining, audible := next.plan.remaining(now)
 		if !audible || next.job.frequencyHz == 0 {
 			return false
 		}
@@ -310,12 +360,7 @@ func (manager *Manager) buzzerMirrorLoop() {
 			plan := timeline.plan(job, time.Now())
 			order++
 			pending = append(pending, scheduledPlayback{job: job, plan: plan, order: order})
-			sort.SliceStable(pending, func(left, right int) bool {
-				if pending[left].plan.start.Equal(pending[right].plan.start) {
-					return pending[left].order < pending[right].order
-				}
-				return pending[left].plan.start.Before(pending[right].plan.start)
-			})
+			sortPending()
 		case err := <-activeDone:
 			finishActive(err)
 		case <-timerChannel:

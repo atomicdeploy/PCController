@@ -58,6 +58,17 @@ func presentationResult(settings peripheralSettings, key string) (presentationUp
 func (service *Service) activeBoardProfile() (boardProfileDescriptor, appconfig.BoardProfile) {
 	config := service.hostConfig()
 	snapshot := service.Client.Snapshot()
+	identity, profile, configured := boardProfileForSnapshot(config, snapshot)
+	descriptor := boardProfileDescriptor{
+		Key: profile.Key, BoardIdentity: identity.Value, IdentitySource: identity.Source,
+		IdentityStable: identity.Stable, Mode: profile.Mode, ExposeRawRelays: profile.ExposeRawRelays, Configured: configured,
+		Attached: snapshot.Connected && identity.Value != "",
+	}
+	descriptor.Revision = appconfig.BoardProfileRevision(identity.Value, profile, config.UI.PeripheralNames)
+	return descriptor, profile
+}
+
+func boardProfileForSnapshot(config appconfig.Config, snapshot controller.Snapshot) (appconfig.BoardIdentity, appconfig.BoardProfile, bool) {
 	port := snapshot.Port
 	if strings.TrimSpace(port.SerialNumber) == "" && strings.TrimSpace(port.InstanceID) == "" && strings.TrimSpace(port.Name) == "" && config.Connection.LastDevice != nil {
 		port.SerialNumber = config.Connection.LastDevice.SerialNumber
@@ -71,13 +82,7 @@ func (service *Service) activeBoardProfile() (boardProfileDescriptor, appconfig.
 		mode = appconfig.NormalizeBoardMode(profile.Mode)
 	}
 	profile.Mode = mode
-	descriptor := boardProfileDescriptor{
-		Key: profile.Key, BoardIdentity: identity.Value, IdentitySource: identity.Source,
-		IdentityStable: identity.Stable, Mode: mode, ExposeRawRelays: profile.ExposeRawRelays, Configured: configured,
-		Attached: snapshot.Connected && identity.Value != "",
-	}
-	descriptor.Revision = appconfig.BoardProfileRevision(identity.Value, profile, config.UI.PeripheralNames)
-	return descriptor, profile
+	return identity, profile, configured
 }
 
 func (service *Service) updateActiveBoardProfile(key, mode string, exposeRawRelays *bool, expectedRevision string) (boardProfileDescriptor, error) {

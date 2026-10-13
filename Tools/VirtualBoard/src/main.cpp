@@ -2,6 +2,7 @@
 #define _POSIX_C_SOURCE 200809L
 #endif
 #include "virtual_board/tcp_server.hpp"
+#include "virtual_board/sensor_sources.hpp"
 #include <atomic>
 #include <array>
 #include <chrono>
@@ -55,6 +56,7 @@ int main(int argc,char **argv) {
     std::filesystem::path eeprom;
     std::filesystem::path pidFile;
     bool stdinEnabled=true,stdioMode=false,memory=false;
+    NativeHal::SensorSources sensorSources;
     for(int i=1;i<argc;++i) {
       std::string arg=argv[i];
       auto value=[&]() -> std::string { if(++i==argc) throw std::invalid_argument(arg+" requires a value"); return argv[i]; };
@@ -67,10 +69,15 @@ int main(int argc,char **argv) {
       else if(arg=="--quiet") options.quiet=true;
       else if(arg=="--log-pwm") options.logPwm=true;
       else if(arg=="--stdio") stdioMode=true;
-      else if(arg=="--help" || arg=="-h") { std::cout << "PCController production firmware, OS-native target\nvirtual_board [--bind IPv4] [--port 8765] [--eeprom FILE | --memory] [--no-stdin] [--quiet] [--log-pwm] [--stdio] [--pid-file FILE]\nTCP mode: relay ON:n/OFF:n on stdout; opt-in PWM logging. Console inputs are explicit fixtures.\nStdio mode: binary protocol only on stdin/stdout, diagnostics on stderr.\n"; return 0; }
+      else if(arg=="--sensor-temp0") sensorSources.temperature[0]=value();
+      else if(arg=="--sensor-temp1") sensorSources.temperature[1]=value();
+      else if(arg=="--sensor-voltage") sensorSources.voltage=value();
+      else if(arg=="--sensor-current") sensorSources.current=value();
+      else if(arg=="--help" || arg=="-h") { std::cout << "PCController production firmware, OS-native target\nvirtual_board [--bind IPv4] [--port 8765] [--eeprom FILE | --memory] [--no-stdin] [--quiet] [--log-pwm] [--stdio] [--pid-file FILE]\nOptional read-only host mappings: --sensor-temp0 FILE --sensor-temp1 FILE (milli-Celsius); --sensor-voltage FILE --sensor-current FILE (micro-V/A, both required).\nTCP mode: relay ON:n/OFF:n on stdout; opt-in PWM logging. Console inputs are explicit fixtures.\nStdio mode: binary protocol only on stdin/stdout, diagnostics on stderr.\n"; return 0; }
       else throw std::invalid_argument("unknown option: "+arg);
     }
     if(memory && !eeprom.empty()) throw std::invalid_argument("--memory and --eeprom are exclusive");
+    NativeHal::configureSensorSources(sensorSources);
     if(!memory && eeprom.empty()) eeprom="native-firmware-eeprom-"+std::to_string(options.port)+".bin";
     auto board=std::make_shared<pccontroller::virtual_board::VirtualBoard>(eeprom);
     if(!pidFile.empty()) {

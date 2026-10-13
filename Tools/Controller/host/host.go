@@ -358,6 +358,7 @@ func (host *Host) start(parent context.Context) error {
 		}
 		return manager.BridgePeers()
 	}
+	service.StartUDP(ctx)
 	service.BridgeCall = func(callContext context.Context, peer string, request ipcjson.Request) (ipcjson.Response, error) {
 		host.mu.RLock()
 		manager := host.integrations

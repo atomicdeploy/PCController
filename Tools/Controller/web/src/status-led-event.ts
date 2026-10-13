@@ -167,6 +167,8 @@ export function applyPushedOutputEvent(
   event: ControllerEvent,
   source: StatusLEDSource = { epoch: 0 },
 ): Snapshot {
+  const generation = event.metadata?.connection_generation
+  if (generation !== undefined && Number(generation) !== snapshot.connection_generation) return snapshot
   const led = statusLEDFromEvent(event)
   if (led) return applyStatusLEDEvent(snapshot, event, source)
   const segment = segmentStateFromEvent(event)

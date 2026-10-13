@@ -1,0 +1,382 @@
+{
+  "source_root": "C:\\Users\\David\\Desktop\\PU850",
+  "reviewed_on": "2026-10-13",
+  "source_modified": false,
+  "files": [
+    {
+      "path": "app/build.gradle",
+      "lines": 81,
+      "sha256": "9e922d0bc22eae0523e6b898b9168dd3bb5beedc18d0756cab585e583d6fe1d2"
+    },
+    {
+      "path": "app/src/main/AndroidManifest.xml",
+      "lines": 50,
+      "sha256": "49ef5e2b41590fe8ea05acaeb238d400943bd65cad776615b6bda70fd6033d95"
+    },
+    {
+      "path": "app/src/main/java/com/pandcaspian/indicator/CommonDefine.java",
+      "lines": 405,
+      "sha256": "027dc663c0d093230a2482a34704cc7ad85feb80d60d8717a1201e25901b9a9e"
+    },
+    {
+      "path": "app/src/main/java/com/pandcaspian/indicator/MainActivity.java",
+      "lines": 5429,
+      "sha256": "de5c45e329c15fe9083c3ffa217192a71c4906806970822ee72fecd050f1e951"
+    },
+    {
+      "path": "app/src/main/java/com/pandcaspian/indicator/utils/FileDownloader.java",
+      "lines": 291,
+      "sha256": "710c32292f8dda8f51d4915eaa131dd798ba22d7c230c933fcc1941ed43ad386"
+    },
+    {
+      "path": "app/src/main/java/com/pandcaspian/indicator/utils/HttpRequest.java",
+      "lines": 301,
+      "sha256": "d7e1b9d109026e3c6800c9c0a7c16578df05575c4f5ac5fe2cbe8a75f6d7219c"
+    },
+    {
+      "path": "app/src/main/java/com/pandcaspian/indicator/utils/SocketClient.java",
+      "lines": 114,
+      "sha256": "146a819e8577199ba9280034d3091f4c4a0888555cfc314ffa395111ab14558c"
+    },
+    {
+      "path": "app/src/main/java/com/pandcaspian/indicator/utils/SocketServer.java",
+      "lines": 55,
+      "sha256": "d346152ad0dfe025ee96f55adb0cf8c5c081df795ae6e89259fcfbab4d7ef924"
+    },
+    {
+      "path": "app/src/main/java/com/pandcaspian/indicator/utils/StorageUtils.java.disabled",
+      "lines": 839,
+      "sha256": "c332936e83e9e7d8ab9fc7101fe6142e7d9039b5d6c323a026cf4266cc873707"
+    },
+    {
+      "path": "app/src/main/java/com/pandcaspian/indicator/utils/WebServer.java.disabled",
+      "lines": 475,
+      "sha256": "fecc7cf9b108502b092d0eeaacc1b0cd74c4c55c1ac25b3d50ec67a1c9c633c0"
+    },
+    {
+      "path": "app/src/main/res/anim/progress_indeterminate_horizontal_rect1.xml",
+      "lines": 15,
+      "sha256": "f337a4fbdb59ab0f08b98a62927ddef4fc558bfb1a8a83357a4b1c3b12bd3fb5"
+    },
+    {
+      "path": "app/src/main/res/anim/progress_indeterminate_horizontal_rect2.xml",
+      "lines": 15,
+      "sha256": "531eecd0c6be941f52a11f844efbe775285118aca59d462d4ed4e18a5cb3eafb"
+    },
+    {
+      "path": "app/src/main/res/drawable/ic_icon_account.xml",
+      "lines": 9,
+      "sha256": "39fce3aff2e7ace8b2e54bc1e185f47211370e783f6068b8b665b78f5b5e3e69"
+    },
+    {
+      "path": "app/src/main/res/drawable/ic_icon_caution.xml",
+      "lines": 12,
+      "sha256": "7b30a2a0b35030200acc54f88a4fff0ee39cfe2279d9b6ed0884dda437a743f9"
+    },
+    {
+      "path": "app/src/main/res/drawable/ic_icon_clock.xml",
+      "lines": 5,
+      "sha256": "30e1d7f5f100a54b8a4694f424f78131dd1ca608842fb3bad12b4604d7a4ecb7"
+    },
+    {
+      "path": "app/src/main/res/drawable/ic_icon_delete.xml",
+      "lines": 28,
+      "sha256": "97b7b1b657c83179274a9c1897178aca546624a2cc4fc68126ee023411b827ef"
+    },
+    {
+      "path": "app/src/main/res/drawable/ic_icon_disconnected.xml",
+      "lines": 12,
+      "sha256": "9d74d3feef5a3150d79873920bf3ec958b9104c56c219328b0d062572bcd4652"
+    },
+    {
+      "path": "app/src/main/res/drawable/ic_icon_error.xml",
+      "lines": 16,
+      "sha256": "b920ab1130c2dba8dc2dcd0265358fd8dd547e89e38f9536fae2dafc15793f31"
+    },
+    {
+      "path": "app/src/main/res/drawable/ic_icon_exit.xml",
+      "lines": 4,
+      "sha256": "6fc02be16dff7ceb8ae86460765b3179aeee405196031a2d160e8b2514b39b28"
+    },
+    {
+      "path": "app/src/main/res/drawable/ic_icon_information.xml",
+      "lines": 14,
+      "sha256": "3ec413fd113050757b0e3fd085b2c37b6d33743c529cf02d518dda765685b7e6"
+    },
+    {
+      "path": "app/src/main/res/drawable/ic_icon_question.xml",
+      "lines": 16,
+      "sha256": "5bb3cb4fb42d874661dea4cc3f717a9b06b422f70659cbd5a97b2fc052d9a8be"
+    },
+    {
+      "path": "app/src/main/res/drawable/ic_icon_save.xml",
+      "lines": 28,
+      "sha256": "f0988708426e10f712614e430c4b75979b5d9077422bec79941e553e1d0c6fb6"
+    },
+    {
+      "path": "app/src/main/res/drawable/ic_icon_settings.xml",
+      "lines": 8,
+      "sha256": "c98a401a28007e9a57e6c7d4ecee84fbe5e562521b108eb9acd56a913c6fa160"
+    },
+    {
+      "path": "app/src/main/res/drawable/ic_icon_user.xml",
+      "lines": 12,
+      "sha256": "1ea802239172de4c70832aafdd9461200540b66d816f98bb30bfc6b95837cd5b"
+    },
+    {
+      "path": "app/src/main/res/drawable/ic_icon_wait.xml",
+      "lines": 44,
+      "sha256": "e73469673cde9a32db037c08da39908c1d600c4e555a6445ec269509790d0a85"
+    },
+    {
+      "path": "app/src/main/res/drawable/ic_icon_warning.xml",
+      "lines": 5,
+      "sha256": "cc1415901e2909837afd72abc767bfdd080fbd993dc4cdd27befdba7286595a0"
+    },
+    {
+      "path": "app/src/main/res/drawable/ic_icon_wifi.xml",
+      "lines": 16,
+      "sha256": "3bfca282dae8696859d858863839da71e8ad2a24151e7c8a023907f8bf03532e"
+    },
+    {
+      "path": "app/src/main/res/drawable/ic_key_develop.xml",
+      "lines": 13,
+      "sha256": "319f3247d3eb62ccb61d7bda974c9560b322f19b9021db2ecc27f9cab4e26998"
+    },
+    {
+      "path": "app/src/main/res/drawable/ic_key_hide.xml",
+      "lines": 12,
+      "sha256": "4664fcaf4cfd0f15eacb215d7fae14771c2ebeefb2f82f53cf73049874615774"
+    },
+    {
+      "path": "app/src/main/res/drawable/ic_key_net.xml",
+      "lines": 15,
+      "sha256": "330927bc02ca266a860787e6e85b9226d171bf21b449bf5afef12d635b500e1b"
+    },
+    {
+      "path": "app/src/main/res/drawable/ic_key_power.xml",
+      "lines": 12,
+      "sha256": "7d651cfb375c5907858dedbaef25c242118a871f5ade02254e900134c308c334"
+    },
+    {
+      "path": "app/src/main/res/drawable/ic_key_receipt.xml",
+      "lines": 12,
+      "sha256": "29bc134a5b7439941f6564dbf1aabdcd3bf34bfb07a8dd0333d97e5cb98a0b10"
+    },
+    {
+      "path": "app/src/main/res/drawable/ic_key_report.xml",
+      "lines": 12,
+      "sha256": "74a2d61dcad555aa702e1aaaeef81033184ebee112ffd5872c7281fa4a977a6a"
+    },
+    {
+      "path": "app/src/main/res/drawable/ic_key_settings.xml",
+      "lines": 12,
+      "sha256": "e918f9a8151e8ebb83b558982d261d168311ba667cd1f85bd0b6c2f04e8fd1a3"
+    },
+    {
+      "path": "app/src/main/res/drawable/ic_key_show.xml",
+      "lines": 24,
+      "sha256": "74270c003225646b5ad1a14bee870a3b29eea981b3a0877f3fa3c7f55163c1ac"
+    },
+    {
+      "path": "app/src/main/res/drawable/ic_key_tare.xml",
+      "lines": 12,
+      "sha256": "9a0727890f3d82f6b9ff29f22fb58f718f2a561358090a06db678460954baeea"
+    },
+    {
+      "path": "app/src/main/res/drawable/ic_launcher_background.xml",
+      "lines": 10,
+      "sha256": "1075af9007d0068608e3fd0de7ff612e0b7436932ae9654c05b6a167c847f22d"
+    },
+    {
+      "path": "app/src/main/res/drawable/ic_logo_pand.xml",
+      "lines": 12,
+      "sha256": "74b83a716449f16efcb28b33ee1b444cfd3cee6915dc0d30303b67b4e08ae94a"
+    },
+    {
+      "path": "app/src/main/res/drawable/ic_pandapp_foreground.xml",
+      "lines": 19,
+      "sha256": "25509ac2d9ad61330e44a954bd341327c805153684d4a95714149f90bb4b8bf7"
+    },
+    {
+      "path": "app/src/main/res/drawable/ic_visibility_off.xml",
+      "lines": 3,
+      "sha256": "a1bb8f792ea6616eae412754575a751d46972c98fa719a0e3bed17d51709e52f"
+    },
+    {
+      "path": "app/src/main/res/drawable/ic_visibility_on.xml",
+      "lines": 3,
+      "sha256": "ab7df82020200d8df5b7bac0793d45771af1f2b28d7cbd6a0564f892ca6172dd"
+    },
+    {
+      "path": "app/src/main/res/drawable/progress_horizontal.xml",
+      "lines": 23,
+      "sha256": "dc642cd846babd30b439f07ba8e9baf83ccee103b355c0a2a7ba42ef514b927e"
+    },
+    {
+      "path": "app/src/main/res/drawable/progress_horizontal_indeterminate.xml",
+      "lines": 10,
+      "sha256": "f6349dbbcd8979f014bb12427213b0643280ee45b775a3eea3fc359c9e3ab7d3"
+    },
+    {
+      "path": "app/src/main/res/drawable/rounded_dialog.xml",
+      "lines": 22,
+      "sha256": "8837032caced8390c21692a4ebc6a3170839b10eadd3c5022d714d25e96a8f33"
+    },
+    {
+      "path": "app/src/main/res/drawable/rounded_dialog_bottom.xml",
+      "lines": 8,
+      "sha256": "9c8b8979ea6210aa2cba1ee99798da33e312d11501556c381d8ee93c560ff4ec"
+    },
+    {
+      "path": "app/src/main/res/drawable/vector_drawable_progress_indeterminate_horizontal.xml",
+      "lines": 37,
+      "sha256": "ab5b7dd669e784afe3e792cb3e66c87b15bc3a4e789b3d6455e8a233ff95ffe6"
+    },
+    {
+      "path": "app/src/main/res/drawable-night/ic_icon_clock.xml",
+      "lines": 5,
+      "sha256": "be84de971b1ca95f291b6173a477d6d580e11c6627d4b647c381ea7ccb289402"
+    },
+    {
+      "path": "app/src/main/res/drawable-night/ic_icon_information.xml",
+      "lines": 14,
+      "sha256": "fabca53943fad9ca53c69cd6891187ff329fe16b3f2154a8838ad9f56872e646"
+    },
+    {
+      "path": "app/src/main/res/drawable-night/ic_icon_settings.xml",
+      "lines": 9,
+      "sha256": "9ea5a01c7b02664374d2876405eb0a07edbe9288c58058e306640b451411fd15"
+    },
+    {
+      "path": "app/src/main/res/drawable-night/ic_launcher_background.xml",
+      "lines": 10,
+      "sha256": "ba5ea4d77740603868a2eb2694d2750d1d303b5ae21b5158892e84ccbe7e3561"
+    },
+    {
+      "path": "app/src/main/res/drawable-night/ic_pandapp_foreground.xml",
+      "lines": 19,
+      "sha256": "62d529daf63196ec83fadc372a8bf8f7ea68ee2e201ba138f6ba39d74f6edc1b"
+    },
+    {
+      "path": "app/src/main/res/interpolator/progress_indeterminate_horizontal_rect1_scalex.xml",
+      "lines": 4,
+      "sha256": "703eacbc7f3305894177ebcbb128f313304c8c86ab48832ee71aa2a72de2a405"
+    },
+    {
+      "path": "app/src/main/res/interpolator/progress_indeterminate_horizontal_rect1_translatex.xml",
+      "lines": 4,
+      "sha256": "58fda28ff736755e7960ba856ab6b2435ee5e868b17e3e1d46ff80245188f326"
+    },
+    {
+      "path": "app/src/main/res/interpolator/progress_indeterminate_horizontal_rect2_scalex.xml",
+      "lines": 4,
+      "sha256": "2ecc73c382150675b515c9b74b666dc2167b60cf5aea5513c15a379b077db1ff"
+    },
+    {
+      "path": "app/src/main/res/interpolator/progress_indeterminate_horizontal_rect2_translatex.xml",
+      "lines": 4,
+      "sha256": "7e551e88e7bc559ba06898ac202e9441252260debbd91c8688335af00569a3a1"
+    },
+    {
+      "path": "app/src/main/res/layout/activity_main.xml",
+      "lines": 371,
+      "sha256": "664b1b5184f78ee498c16015d46e8190e940f3ef5b6bb26d2f6dac8df2567b82"
+    },
+    {
+      "path": "app/src/main/res/layout/toast_layout.xml",
+      "lines": 63,
+      "sha256": "1dc74d2b1f6eafcd263a8bb1132ea62134bdb1290709c1fd87cab85ce08fa5ec"
+    },
+    {
+      "path": "app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml",
+      "lines": 5,
+      "sha256": "16943b5c84630a9a0c5f79ed5909d03c64729af8b8412705e65cc21342a0c0e4"
+    },
+    {
+      "path": "app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml",
+      "lines": 5,
+      "sha256": "16943b5c84630a9a0c5f79ed5909d03c64729af8b8412705e65cc21342a0c0e4"
+    },
+    {
+      "path": "app/src/main/res/values/arrays.xml",
+      "lines": 14,
+      "sha256": "bc9be88eb3d86181434cd7cd66ca2b9a75acad5061debeff5cb700825af9830a"
+    },
+    {
+      "path": "app/src/main/res/values/attrs.xml",
+      "lines": 3,
+      "sha256": "22f303091b555d902a2bde8b19d17ad87aa07b52a984a08e4d72214b0a25e54d"
+    },
+    {
+      "path": "app/src/main/res/values/colors.xml",
+      "lines": 28,
+      "sha256": "0687ae87b076c112d6034237cba6006e0722eebbc38ce552d3ba7a12c71f879f"
+    },
+    {
+      "path": "app/src/main/res/values/dimens.xml",
+      "lines": 5,
+      "sha256": "60d65d852bdce84687e0aeb99658ed637fa3d36f87fcf917ae7f369a440007cd"
+    },
+    {
+      "path": "app/src/main/res/values/strings.xml",
+      "lines": 116,
+      "sha256": "0575cc351dda1f2ad4fa1b20abfffad29599a906ec40aad55aec24a01e1f9347"
+    },
+    {
+      "path": "app/src/main/res/values/styles.xml",
+      "lines": 138,
+      "sha256": "5039aa412fdef77c7f1d0f9ac3fd8643d0601736229a8989c6fa33ee3be5e612"
+    },
+    {
+      "path": "app/src/main/res/values-en/arrays.xml",
+      "lines": 14,
+      "sha256": "bc9be88eb3d86181434cd7cd66ca2b9a75acad5061debeff5cb700825af9830a"
+    },
+    {
+      "path": "app/src/main/res/values-en/strings.xml",
+      "lines": 106,
+      "sha256": "81fccc1c3daf29f8184578255a603e2fc51c465d6379928c86d90306f4a5907f"
+    },
+    {
+      "path": "app/src/main/res/values-fa/arrays.xml",
+      "lines": 14,
+      "sha256": "930e7255da3b39cef91d429d9c24ffdc20f4066744a9edb09de94092b21b0655"
+    },
+    {
+      "path": "app/src/main/res/values-fa/strings.xml",
+      "lines": 104,
+      "sha256": "7c4c35fd674deae3707c414100188f5af0c142fcfee4d45e2e7cfbf8eb749b49"
+    },
+    {
+      "path": "app/src/main/res/values-night/colors.xml",
+      "lines": 27,
+      "sha256": "96d99405dd69d23ec32e9ac05c37c85fe3d67e526cb067e4619de21af4d6414f"
+    },
+    {
+      "path": "app/src/main/res/values-night/styles.xml",
+      "lines": 138,
+      "sha256": "77cd9f3e1e19b5def1d2475ccc5d2ec60e7dbb29e7833a5534b57140a1f925eb"
+    },
+    {
+      "path": "app/src/main/res/values-night-v27/styles.xml",
+      "lines": 140,
+      "sha256": "b7a2f353b7057e9b7a1cbc1730f3ab35968d6101ff6e29914e0137edd8a0e18f"
+    },
+    {
+      "path": "app/src/main/res/values-v27/styles.xml",
+      "lines": 140,
+      "sha256": "334490cbfc8a2f3ab79748487cebf1744d35e5a00a83b0c4cf97c2edb80969a7"
+    },
+    {
+      "path": "build.gradle",
+      "lines": 28,
+      "sha256": "50ab7a721a345c8326c0144790679ef010235cc8794a14cb499590fca9142f31"
+    },
+    {
+      "path": "settings.gradle",
+      "lines": 2,
+      "sha256": "fd44b64c4008784bb180b8c44e1b307abd5c63a52b5073c0db4a6ece58eb4c3f"
+    }
+  ]
+}

@@ -1,4 +1,5 @@
 #include "PwmController.h"
+#include "TransitionMath.h"
 
 namespace {
 
@@ -292,6 +293,5 @@ void PwmController::tripUnavailable() {
 
 uint16_t PwmController::from8Bit(uint8_t value) {
   // Exact endpoint-preserving 8-bit to 12-bit expansion.
-  return static_cast<uint16_t>(static_cast<uint16_t>(value) * 16U +
-                               value / 16U);
+  return TransitionMath::expandByte12(value);
 }

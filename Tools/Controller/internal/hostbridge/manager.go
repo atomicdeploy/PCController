@@ -833,7 +833,7 @@ func (manager *Manager) reconcile(config appconfig.Config) error {
 	discoveryConfig := config.Integrations.Discovery
 	if discoveryConfig.MDNSEnabled || discoveryConfig.DNSSDenabled || discoveryConfig.SSDPEnabled ||
 		discoveryConfig.UPnPEnabled || discoveryConfig.WSDiscoveryEnabled || discoveryConfig.BroadcastEnabled ||
-		discoveryConfig.NetBIOSEnabled {
+		discoveryConfig.NetBIOSEnabled || discoveryConfig.MNDPEnabled {
 		_, rawPort, err := net.SplitHostPort(config.IPC.Listen)
 		if err != nil {
 			return err
@@ -847,6 +847,7 @@ func (manager *Manager) reconcile(config appconfig.Config) error {
 			name = config.UI.AppTitle
 		}
 		created, err := discovery.AdvertiseWithOptions(manager.ctx, name, port, discovery.Options{
+			MNDP: discoveryConfig.MNDPEnabled,
 			MDNS: discoveryConfig.MDNSEnabled, DNSSD: discoveryConfig.DNSSDenabled,
 			SSDP: discoveryConfig.SSDPEnabled, UPnP: discoveryConfig.UPnPEnabled,
 			WSDiscovery: discoveryConfig.WSDiscoveryEnabled,
