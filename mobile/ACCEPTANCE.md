@@ -419,3 +419,36 @@ and base.apk hash match; the ordinary launcher and read-only invalid-token Inten
 returned the expected routing/auth rejection. The tablet was locked/Dozing, so
 actual on-screen stability still needs human verification. The phone remains
 0.1.2/code 3 with 503,148 KiB available; no retry or data removal was performed.
+
+## Android buzzer timing and waveform
+
+The user reports missing, clipped, crackly, imprecise and muffled Android mirroring.
+The referenced Linux work was read and checked against the current Go receiver.
+Its bounded 50ms playout cushion, 250ms fresh-observation rebasing, full-duration
+handoff, clock-wrap and immediate Stop policy informed this Android change.
+
+The old Dart path published a session before native open completed, omitted
+startup notes, and subtracted handoff/timer delays from short notes. The old
+native singleton replaced burst notes, paused/flushed PCM on every transition
+and wall-clock expiry, and could discard non-blocking short transfers. Its
+sine-only waveform and 3ms ramps also attenuated very short beeps.
+
+Android now receives ahead-of-time note scheduling on a persistent audio-frame
+timeline. Startup bursts wait for one receiver open; fresh late notes/followers
+shift equally with their original duration, while stale queued receipts expire.
+PCM duration uses frame counts, including 48 frames for a 1ms note at 48kHz.
+Partial writes retain the original tail/phase/envelope. Ordinary transitions
+do not flush; explicit Stop, lost owner/focus/lifecycle and the independent
+six-second lease still cut off sound. Temporary focus ducking reduces volume
+and retains the receiver. A PolyBLEP square wave adds brighter harmonics with
+0.25ms bounded edge ramps and headroom instead of a sine-only sound.
+
+Thirteen focused Dart current/legacy mirroring tests and seven native PCM tests
+passed, including delayed open, 1/3ms notes, clock wrap, stale startup, Stop/open
+and owner races, delayed cadence, partial writes/chunk continuity, queue bounds,
+silence, bounded integer conversion and harmonic/no-clipping checks. These are source/synthetic evidence,
+not a measurement of Android route latency, real peer packet loss or speaker
+acoustics. The selected-board bridge-source fence remains; explicit routed
+source ownership is still needed for unrelated bridged-board playback.
+This source targets 0.1.8+9. Device delivery and human listening are recorded
+separately; no physical board tone, relay, motor or firmware action was sent.
