@@ -238,6 +238,17 @@ core/USB and physical mirroring/peer/firmware acceptance remain open.
 
 ## Mobile bug priority: MOSFET setpoints and relay layout
 
+Relay power actions now use semantic green/red instead of the appearance accent,
+including explicit ON/OFF rows, compact power icons and unknown-state menu choices.
+Filled, tonal and outlined preferences remain supported; disabled actions resolve
+to muted surface colors and all existing target/lock/E-STOP/busy guards remain.
+Card captions, action labels, fact rows and state pills share outer-leading trim
+for centered text beside fixed icon boxes without changing font size or wrapping.
+The desktop companion reserves density/font-aware header height while retaining
+matching caption/inline-editor slots. Dart analyzer passed; a pure style regression
+was added but not executed in this root pass, per the user's tests/CI skip request.
+These source changes do not supersede the last exact Android delivery receipt.
+
 PWM edits now keep the drag/pending thumb through older snapshots until the
 typed setter returns its native post-ACK readback. Pre-write read revisions are
 fenced, owner/profile changes cancel old results and an uncertain write is never

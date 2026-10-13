@@ -15,6 +15,7 @@ import 'unified/workspace_chrome.dart';
 import 'unified/app_upgrade.dart';
 import 'unified/peer_upgrades.dart';
 import 'unified/pwm_control.dart';
+import 'unified/relay_style.dart';
 import 'pakar_reference.dart' show SevenSegmentPreview;
 import 'unified/transport.dart';
 import 'unified/effect_editor.dart';
@@ -671,51 +672,56 @@ class _ControllerHomeState extends State<ControllerHome>
     VoidCallback? callback, {
     bool priority = false,
     bool? danger,
+    String? powerVerb,
   }) {
     final colors = Theme.of(context).colorScheme;
     final destructive = (danger ?? priority) && callback != null;
     final solid = preferences.buttonStyle == 'filled';
     final tonal = preferences.buttonStyle == 'tonal';
-    final style = OutlinedButton.styleFrom(
-      minimumSize: const Size(44, 44),
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      foregroundColor: destructive
-          ? (solid ? colors.onError : colors.error)
-          : solid
-          ? colors.onPrimary
-          : colors.onSurface,
-      backgroundColor: destructive
-          ? solid
-                ? colors.error
-                : colors.error.withValues(alpha: .08)
-          : solid
-          ? colors.primary
-          : tonal
-          ? colors.secondaryContainer
-          : Colors.transparent,
-      side: BorderSide(
-        color: destructive
-            ? colors.error.withValues(alpha: .4)
-            : solid || tonal
-            ? Colors.transparent
-            : colors.outline,
-      ),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-    );
+    final style = powerVerb == 'on' || powerVerb == 'off'
+        ? relayActionStyle(colors, preferences.buttonStyle, powerVerb == 'on')
+        : OutlinedButton.styleFrom(
+            minimumSize: const Size(44, 44),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            foregroundColor: destructive
+                ? (solid ? colors.onError : colors.error)
+                : solid
+                ? colors.onPrimary
+                : colors.onSurface,
+            backgroundColor: destructive
+                ? solid
+                      ? colors.error
+                      : colors.error.withValues(alpha: .08)
+                : solid
+                ? colors.primary
+                : tonal
+                ? colors.secondaryContainer
+                : Colors.transparent,
+            side: BorderSide(
+              color: destructive
+                  ? colors.error.withValues(alpha: .4)
+                  : solid || tonal
+                  ? Colors.transparent
+                  : colors.outline,
+            ),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+          );
     final enabled = busy && !priority ? null : callback;
     if (solid || tonal) {
       return FilledButton.icon(
         onPressed: enabled,
         style: style,
         icon: Icon(icon, size: 18),
-        label: Text(label),
+        label: Text(label, textHeightBehavior: cardTextHeightBehavior),
       );
     }
     return OutlinedButton.icon(
       onPressed: enabled,
       style: style,
       icon: Icon(icon, size: 18),
-      label: Text(label),
+      label: Text(label, textHeightBehavior: cardTextHeightBehavior),
     );
   }
 
@@ -743,6 +749,7 @@ class _ControllerHomeState extends State<ControllerHome>
                   )
                 : null,
             child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 Container(
                   width: 32,
@@ -764,6 +771,7 @@ class _ControllerHomeState extends State<ControllerHome>
                 Expanded(
                   child: Text(
                     title,
+                    textHeightBehavior: cardTextHeightBehavior,
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
                       fontSize: preferences.effectiveHeader == 'classic'
                           ? 16
@@ -1844,11 +1852,14 @@ class _ControllerHomeState extends State<ControllerHome>
           padding: const EdgeInsets.symmetric(vertical: 5),
           child: Row(
             children: [
-              Expanded(child: Text(name)),
+              Expanded(
+                child: Text(name, textHeightBehavior: cardTextHeightBehavior),
+              ),
               const SizedBox(width: 12),
               Flexible(
                 child: Text(
                   value,
+                  textHeightBehavior: cardTextHeightBehavior,
                   textAlign: TextAlign.end,
                   style: const TextStyle(
                     fontFeatures: [FontFeature.tabularFigures()],
@@ -1963,6 +1974,9 @@ class _ControllerHomeState extends State<ControllerHome>
                                     'off',
                                   ].contains(entry['verb']),
                                   danger: entry['verb'] == 'stop',
+                                  powerVerb: control['kind'] == 'relay'
+                                      ? '${entry['verb']}'
+                                      : null,
                                 ),
                             ],
                           ),
@@ -1998,8 +2012,10 @@ class _ControllerHomeState extends State<ControllerHome>
                                   Icons.power_settings_new,
                                   size: 20,
                                 ),
-                                style: preferences.actionIconStyle(
+                                style: relayActionStyle(
                                   Theme.of(context).colorScheme,
+                                  preferences.buttonStyle,
+                                  entry['verb'] == 'on',
                                 ),
                                 onPressed:
                                     board.boardReady &&
@@ -2051,7 +2067,21 @@ class _ControllerHomeState extends State<ControllerHome>
                                         value: '${entry['id']}',
                                         enabled:
                                             !estop || entry['verb'] == 'off',
-                                        child: Text('${entry['name']}'),
+                                        child: Text(
+                                          '${entry['name']}',
+                                          style: TextStyle(
+                                            color:
+                                                !estop || entry['verb'] == 'off'
+                                                ? relayActionStyle(
+                                                    Theme.of(context)
+                                                        .colorScheme,
+                                                    'outlined',
+                                                    entry['verb'] == 'on',
+                                                  ).foregroundColor?.resolve({})
+                                                : Theme.of(context)
+                                                      .disabledColor,
+                                          ),
+                                        ),
                                       ),
                                   ],
                                 );

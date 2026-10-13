@@ -4,6 +4,13 @@ import 'package:flutter/material.dart';
 
 import 'transport.dart' show Json, object, objects;
 
+// Trim only the outer theme leading so visible text groups center beside icons.
+// Wrapped lines retain their internal line spacing and accessibility scaling.
+const cardTextHeightBehavior = TextHeightBehavior(
+  applyHeightToFirstAscent: false,
+  applyHeightToLastDescent: false,
+);
+
 class TelemetryPoint {
   TelemetryPoint(this.time, this.values);
   final DateTime time;
@@ -114,6 +121,7 @@ class StatePill extends StatelessWidget {
             const SizedBox(width: 6),
             Text(
               label,
+              textHeightBehavior: cardTextHeightBehavior,
               style: TextStyle(
                 color: tone,
                 fontSize: 12,
