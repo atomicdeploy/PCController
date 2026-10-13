@@ -9,10 +9,12 @@ class PwmSetpointControl extends StatefulWidget {
     required this.commit,
     this.observed,
     this.applyStyle,
+    this.stale = false,
   });
   final bool enabled;
   final double? observed;
   final ButtonStyle? applyStyle;
+  final bool stale;
   final Future<double> Function(int) commit;
   @override
   State<PwmSetpointControl> createState() => _PwmSetpointControlState();
@@ -87,7 +89,7 @@ class _PwmSetpointControlState extends State<PwmSetpointControl> {
           children: [
             Expanded(
               child: Text(
-                'Setpoint ${value!.toStringAsFixed(editing || pending ? 0 : 1)}%',
+                '${widget.stale && !editing && !pending ? 'Last known' : 'Setpoint'} ${value!.toStringAsFixed(editing || pending ? 0 : 1)}%',
                 style: Theme.of(context).textTheme.labelMedium,
               ),
             ),

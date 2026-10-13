@@ -237,22 +237,54 @@ class _RemoteSliderState extends State<RemoteSlider> {
 }
 
 class ChannelObservation {
-  const ChannelObservation(this.label, this.active, {this.percent});
+  const ChannelObservation(
+    this.label,
+    this.active, {
+    this.percent,
+    this.stale = false,
+  });
   final String label;
   final bool? active;
   final double? percent;
+  final bool stale;
 }
 
 ChannelObservation observeChannel(
   Json control,
   Json snapshot,
   Json pwm,
-  bool fresh,
-) {
+  bool fresh, {
+  bool? pwmFresh,
+}) {
+  final key = '${control['key']}';
+  if (key.startsWith('pwm.') && pwm['available'] == true) {
+    final channel = int.tryParse(key.split('.').last);
+    for (final reading in objects(pwm['channels'])) {
+      final value = reading['logical_percent'];
+      if (reading['channel'] == channel &&
+          value is num &&
+          value.isFinite &&
+          value >= 0 &&
+          value <= 100) {
+        final current = pwmFresh ?? fresh;
+        return ChannelObservation(
+          current
+              ? value > 0
+                    ? '${value.toStringAsFixed(1)}%'
+                    : 'Off'
+              : 'Stale',
+          current ? value > 0 : null,
+          percent: value.toDouble(),
+          stale: !current,
+        );
+      }
+    }
+    return const ChannelObservation('Unknown', null);
+  }
   if (!fresh || snapshot['have_status'] != true) {
     return const ChannelObservation('Unknown', null);
   }
-  final key = '${control['key']}', status = object(snapshot['status']);
+  final status = object(snapshot['status']);
   if (key.startsWith('relay.')) {
     final id = int.tryParse(key.split('.').last),
         mask = status['active_relays'];
@@ -282,25 +314,6 @@ ChannelObservation observeChannel(
             : 'Moving down',
         applied != 'stop',
       );
-    }
-  }
-  if (key.startsWith('pwm.') &&
-      pwm['available'] == true &&
-      status['pwm_available'] == true) {
-    final channel = int.tryParse(key.split('.').last);
-    for (final reading in objects(pwm['channels'])) {
-      final value = reading['logical_percent'];
-      if (reading['channel'] == channel &&
-          value is num &&
-          value.isFinite &&
-          value >= 0 &&
-          value <= 100) {
-        return ChannelObservation(
-          value > 0 ? '${value.toStringAsFixed(1)}%' : 'Off',
-          value > 0,
-          percent: value.toDouble(),
-        );
-      }
     }
   }
   return const ChannelObservation('Unknown', null);

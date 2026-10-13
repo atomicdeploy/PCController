@@ -379,3 +379,25 @@ available, below the previously verified 1 GiB vendor low-storage threshold. No
 repeat install, data/cache removal or reserve bypass was performed. Its live
 unlocked use was left intact. The continuous goal and unfinished acceptance gates
 remain active; no full suites or CI iteration was run for this package.
+
+## MOSFET readback stability
+
+The reported jumping card exposed a source timing bug: native default status
+freshness is 1500ms, but Flutter PWM polling runs every 2000ms. Using the former
+to discard PWM readback caused known sliders to become Unknown inputs between
+ordinary reads. PWM observations also incorrectly depended on unrelated status
+freshness/availability despite a valid direct PWM response.
+
+PWM now has an independent bounded readback window (at least 6000ms for its poll
+cadence). Same-owner late, unavailable or incomplete reads retain the last valid
+percentage; Stale/Last known presentation disables edit while keeping slider/card
+geometry. Fresh complete readback restores current state. Changed owners and
+explicit disconnect clear the ownership-bound cache. Unknown with no observation
+still has no fabricated value. Current automation PWM follows its own freshness.
+
+Ten focused freshness, PWM interaction and transport checks passed; the three
+typed-transport checks were repeated after strengthening complete-receipt validation.
+Read-only tablet observations showed the app running but display Dozing/black;
+the bounded Cafe read-only sampling attempt timed out. Neither is live flicker
+reproduction proof. No physical output or host metadata was written. This source
+targets 0.1.7+8; package and device identity are recorded after delivery.

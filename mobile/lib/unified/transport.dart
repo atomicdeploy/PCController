@@ -322,6 +322,7 @@ class PeerSession extends ChangeNotifier {
   String? error;
   Json state = {}, peripherals = {}, operation = {}, pwmValues = {};
   DateTime? pwmUpdated, _lastPanelAttempt;
+  bool? _pwmAvailable;
   String _panelOwner = '';
   bool _pwmReading = false;
   int _pwmRevision = 0, _pwmWriteSequence = 0;
@@ -332,6 +333,14 @@ class PeerSession extends ChangeNotifier {
   DateTime? received;
   int freshnessMs = 5000;
   int statusIntervalMs = 250;
+  // PWM is polled every two seconds; status freshness can be only 1.5 seconds.
+  // Allow two missed read intervals, while still requiring the live board owner.
+  int get pwmFreshnessMs => freshnessMs.clamp(6000, 120000);
+  bool get pwmReadbackFresh =>
+      boardReady &&
+      _pwmAvailable != false &&
+      pwmUpdated != null &&
+      DateTime.now().difference(pwmUpdated!).inMilliseconds < pwmFreshnessMs;
   String websocketPath = '/ws';
   bool get measurementsFresh =>
       fresh &&
@@ -482,6 +491,7 @@ class PeerSession extends ChangeNotifier {
       events = [];
       pwmValues = {};
       pwmUpdated = null;
+      _pwmAvailable = null;
       _pwmRevision++;
       _activePwmWrite = null;
       _panelOwner = '';
@@ -731,8 +741,11 @@ class PeerSession extends ChangeNotifier {
           owner == '$identity/${state['connection_generation']}' &&
           value['channels'] is List &&
           value['available'] is bool) {
-        pwmValues = value;
-        pwmUpdated = DateTime.now();
+        _pwmAvailable = value['available'] == true && _validPwmReadback(value);
+        if (_pwmAvailable == true) {
+          pwmValues = value;
+          pwmUpdated = DateTime.now();
+        }
         notifyListeners();
       }
     } catch (_) {
@@ -740,6 +753,36 @@ class PeerSession extends ChangeNotifier {
     } finally {
       _pwmReading = false;
     }
+  }
+
+  bool _validPwmReadback(Json value) {
+    final channels = objects(value['channels']);
+    if (channels.isEmpty ||
+        channels.length != (value['channels'] as List).length) {
+      return false;
+    }
+    final seen = <int>{};
+    for (final reading in channels) {
+      final channel = reading['channel'], percent = reading['logical_percent'];
+      if (channel is! int ||
+          channel < 0 ||
+          channel > 15 ||
+          !seen.add(channel) ||
+          percent is! num ||
+          !percent.isFinite ||
+          percent < 0 ||
+          percent > 100) {
+        return false;
+      }
+    }
+    for (final control in objects(peripherals['controls'])) {
+      final key = '${control['key']}';
+      if (key.startsWith('pwm.')) {
+        final channel = int.tryParse(key.substring(4));
+        if (channel == null || !seen.contains(channel)) return false;
+      }
+    }
+    return true;
   }
 
   /// Typed set + its actual board readback. The host requests PWMValues only
@@ -793,6 +836,7 @@ class PeerSession extends ChangeNotifier {
           ? matches.single['logical_percent']
           : null;
       if (value['available'] != true ||
+          !_validPwmReadback(value) ||
           actual is! num ||
           !actual.isFinite ||
           actual < 0 ||
@@ -801,6 +845,7 @@ class PeerSession extends ChangeNotifier {
       }
       pwmValues = value;
       pwmUpdated = DateTime.now();
+      _pwmAvailable = true;
       notifyListeners();
       return actual.toDouble();
     } finally {
@@ -883,6 +928,7 @@ class PeerSession extends ChangeNotifier {
     operation = {};
     pwmValues = {};
     pwmUpdated = null;
+    _pwmAvailable = null;
     _pwmRevision++;
     _activePwmWrite = null;
     _panelOwner = '';

@@ -1946,23 +1946,14 @@ class _ControllerHomeState extends State<ControllerHome>
                               key: ValueKey(
                                 '${board.targetStamp}/${control['key']}',
                               ),
-                              observed: observeChannel(
-                                control,
-                                board.state,
-                                board.pwmUpdated != null &&
-                                        DateTime.now()
-                                                .difference(board.pwmUpdated!)
-                                                .inMilliseconds <
-                                            board.freshnessMs
-                                    ? board.pwmValues
-                                    : {},
-                                board.measurementsFresh,
-                              ).percent,
+                              observed: channelObservation(control).percent,
+                              stale: channelObservation(control).stale,
                               enabled:
                                   board.boardReady &&
                                   !busy &&
                                   !estop &&
-                                  control['locked'] != true,
+                                  control['locked'] != true &&
+                                  !channelObservation(control).stale,
                               commit: pwmCommit(control),
                               applyStyle: preferences.actionIconStyle(
                                 Theme.of(context).colorScheme,
@@ -3452,12 +3443,9 @@ class _ControllerHomeState extends State<ControllerHome>
   ChannelObservation channelObservation(Json control) => observeChannel(
     control,
     board.state,
-    board.pwmUpdated != null &&
-            DateTime.now().difference(board.pwmUpdated!).inMilliseconds <
-                board.freshnessMs
-        ? board.pwmValues
-        : {},
+    board.pwmValues,
     board.measurementsFresh,
+    pwmFresh: board.pwmReadbackFresh,
   );
 
   Widget channelMenu(Json control) {
@@ -3634,13 +3622,8 @@ class _ControllerHomeState extends State<ControllerHome>
       'measurements_fresh': board.measurementsFresh,
       'status': board.measurementsFresh ? board.state['status'] : null,
       'front_panel': board.fresh ? board.state['front_panel'] : null,
-      'pwm':
-          board.fresh &&
-              board.pwmUpdated != null &&
-              DateTime.now().difference(board.pwmUpdated!).inMilliseconds <
-                  board.freshnessMs
-          ? board.pwmValues
-          : null,
+      'pwm': board.pwmReadbackFresh ? board.pwmValues : null,
+      'pwm_fresh': board.pwmReadbackFresh,
     },
     'player': {
       'connected': player.fresh,
@@ -3664,7 +3647,7 @@ class _ControllerHomeState extends State<ControllerHome>
     }
     switch (method) {
       case 'app.ping':
-        return {'ok': true, 'app': 'PCController', 'version': '0.1.6'};
+        return {'ok': true, 'app': 'PCController', 'version': '0.1.7'};
       case 'app.capabilities':
         return {
           'jsonrpc': '2.0',
