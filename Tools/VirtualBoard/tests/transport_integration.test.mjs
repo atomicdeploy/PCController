@@ -1,7 +1,7 @@
-import { spawn, execFileSync } from 'node:child_process'
+import { spawn, spawnSync, execFileSync } from 'node:child_process'
 import { createConnection, createServer } from 'node:net'
-import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { mkdir, mkdtemp, readFile, writeFile, rm } from 'node:fs/promises'
+import { tmpdir, homedir } from 'node:os'
 import { join } from 'node:path'
 import assert from 'node:assert/strict'
 
@@ -47,6 +47,11 @@ async function connect(port) {
 const binary = process.argv[2]
 assert(binary, 'native binary required')
 const state = await mkdtemp(join(tmpdir(), 'pccontroller-native-conformance-'))
+const sensorRoot = process.platform === 'win32' ? join(process.env.LOCALAPPDATA, 'Programs', 'PCController', 'sensors')
+  : process.platform === 'darwin' ? join(homedir(), 'Library', 'Application Support', 'PCController', 'sensors')
+  : join(process.env.XDG_STATE_HOME || join(homedir(), '.local', 'state'), 'pccontroller', 'sensors')
+await mkdir(sensorRoot, {recursive:true})
+const sensorState = await mkdtemp(join(sensorRoot, 'conformance-'))
 const children = [], sockets = []
 const pidFile = join(state, 'board.pid')
 function start(args, argv0 = binary) {
@@ -81,7 +86,12 @@ try {
 
   // Explicit host mappings still traverse production sampling, smoothing,
   // discovery, status validity and recovery; not a second telemetry runtime.
-  const tempPath = join(state, 'host-temp'), voltagePath = join(state, 'host-voltage'), currentPath = join(state, 'host-current')
+  for (const forbidden of [join(state, 'outside'), join(sensorRoot+'-other','value'), join(sensorRoot,'..','private-value')]) {
+    const rejected = spawnSync(binary, ['--stdio','--memory','--sensor-temp0',forbidden], {timeout:2000})
+    assert.notEqual(rejected.status, 0, 'uncontrolled sensor path must be rejected')
+    assert.match(String(rejected.stderr), /native sensor paths/)
+  }
+  const tempPath = join(sensorState, 'host-temp'), voltagePath = join(sensorState, 'host-voltage'), currentPath = join(sensorState, 'host-current')
   await writeFile(tempPath, '42000\n'); await writeFile(voltagePath, '12000000\n'); await writeFile(currentPath, '250000\n')
   const mapped = start(['--stdio', '--memory', '--sensor-temp1', tempPath, '--sensor-voltage', voltagePath, '--sensor-current', currentPath])
   const mappedFrames = channel(mapped.stdout)
@@ -172,4 +182,6 @@ try {
   } catch {}
   await new Promise(resolve => setTimeout(resolve, 200))
   await rm(state, { recursive: true, force: true })
+  assert(sensorState.startsWith(sensorRoot + (process.platform === 'win32' ? '\\' : '/')))
+  await rm(sensorState, { recursive: true, force: true })
 }

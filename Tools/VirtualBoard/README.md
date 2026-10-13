@@ -121,6 +121,14 @@ The launcher does not start/update Pealayer or change its existing authoring sta
 ### Explicit host sensor mappings
 
 Native sensor paths are read-only scalar sources. Map known Linux thermal/hwmon
+files under `/sys`. Custom adapters must write scalar files inside the owned
+sensor directory: `%LOCALAPPDATA%/Programs/PCController/sensors` on Windows,
+`~/Library/Application Support/PCController/sensors` on macOS, or
+`$XDG_STATE_HOME/pccontroller/sensors` (default `~/.local/state/pccontroller/sensors`)
+on Linux. Relative paths, traversal, prefix collisions and links escaping those
+roots are rejected. Missing files within a permitted root still report unknown
+and can recover when the adapter creates them. Arbitrary host-file reads are not
+a sensor mapping feature. Map known thermal/hwmon
 temperature files (milli-Celsius), or power_supply voltage/current files
 (micro-volts/micro-amps), for example:
 
