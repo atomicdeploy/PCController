@@ -721,8 +721,10 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame,
       } else {
         hostLcdFlags |= HOST_PROGRAM_RUNNING;
       }
-      hostLcdFlags &= static_cast<uint8_t>(~HOST_STATUS_OVERRIDE);
-      statusLeds.cancelEffect();
+      // Program-state heartbeats and explicit LED ownership are independent.
+      // Only explicit status commands/release and local safety termination
+      // change HOST_STATUS_OVERRIDE; repeating this heartbeat must not reset
+      // a static color or the phase of an MCU-rendered effect (PR #181).
       goto acknowledged;
 
 #if PCCONTROLLER_ENABLE_BOARD_AUTOMATIONS
