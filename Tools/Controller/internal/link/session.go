@@ -573,6 +573,11 @@ func (s *Session) writeRawContext(ctx context.Context, data []byte) error {
 		return err
 	}
 	defer func() { <-s.writeGate }()
+	if guard, ok := ctx.Value(requestWriteGuardKey{}).(func() error); ok {
+		if err := guard(); err != nil {
+			return err
+		}
+	}
 	written, err := s.port.Write(data)
 	if err != nil {
 		return fmt.Errorf("write %s: %w", s.name, err)
@@ -581,6 +586,18 @@ func (s *Session) writeRawContext(ctx context.Context, data []byte) error {
 		return io.ErrShortWrite
 	}
 	return nil
+}
+
+type requestWriteGuardKey struct{}
+
+// WithRequestWriteGuard revalidates an ephemeral intent after both admission
+// and writer queues, immediately before handing bytes to the transport. It
+// does not cancel a write already sent or its acknowledgement/readback.
+func WithRequestWriteGuard(ctx context.Context, guard func() error) context.Context {
+	if guard == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, requestWriteGuardKey{}, guard)
 }
 
 func (s *Session) PulseReset(ctx context.Context, lowTime time.Duration) error {

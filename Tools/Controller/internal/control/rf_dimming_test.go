@@ -1,12 +1,76 @@
 package control
 
 import (
+	"errors"
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/link"
 	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/ports"
 	"testing"
+	"time"
 )
+
+func expiredRFState(t *testing.T, runtime *Runtime, key rfGestureKey) *rfGestureState {
+	t.Helper()
+	runtime.rfMu.Lock()
+	defer runtime.rfMu.Unlock()
+	state := runtime.rfGestures[key]
+	if state == nil {
+		t.Fatal("RF state missing")
+	}
+	state.lastSeen = time.Now().Add(-rfReleaseAfter)
+	return state
+}
+
+func TestRFPWMRollGuardFollowsLiveHoldNotOldPacketDeadline(t *testing.T) {
+	key := rfGestureKey{code: 1, bits: 24, protocol: 1}
+	state := &rfGestureState{held: true, lastSeen: time.Now()}
+	runtime := &Runtime{rfGestures: map[rfGestureKey]*rfGestureState{key: state}}
+	guard := runtime.rfRollWriteGuard(Event{RFCode: 1, RFBits: 24, RFProtocol: 1})
+	if err := guard(); err != nil {
+		t.Fatal(err)
+	}
+	state.lastSeen = time.Now().Add(-rfReleaseAfter)
+	if !errors.Is(guard(), errRFRollReleased) {
+		t.Fatal("stale hold allowed a write")
+	}
+	state.lastSeen = time.Now()
+	if err := guard(); err != nil {
+		t.Fatal("fresh packet did not extend the hold", err)
+	}
+	runtime.rfGestures[key] = &rfGestureState{held: true, lastSeen: time.Now()}
+	if !errors.Is(guard(), errRFRollReleased) {
+		t.Fatal("old hold wrote into a replacement press")
+	}
+}
+
+func TestRFHoldObsoleteReleaseCallbackCannotEndFreshReception(t *testing.T) {
+	runtime := New(Options{})
+	defer runtime.Close()
+	key := rfGestureKey{code: 1, bits: 24, protocol: 1}
+	state := &rfGestureState{held: true, lastSeen: time.Now(), event: native.DeviceEvent{RFCode: 1, RFBits: 24, RFProtocol: 1}}
+	runtime.rfMu.Lock()
+	runtime.rfGestures[key] = state
+	runtime.rfMu.Unlock()
+	after := runtime.LatestEventID()
+	runtime.finishRFGesture(key, state)
+	if runtime.LatestEventID() != after {
+		t.Fatal("obsolete callback emitted a release")
+	}
+	runtime.rfMu.Lock()
+	current := runtime.rfGestures[key]
+	state.timer.Stop()
+	runtime.rfMu.Unlock()
+	if current != state {
+		t.Fatal("fresh hold was removed")
+	}
+	runtime.finishRFGesture(key, expiredRFState(t, runtime, key))
+	up := waitTestEvent(t, runtime, after, "rf.gesture")
+	end := waitTestEvent(t, runtime, up.ID, "rf.gesture")
+	if up.Gesture != "up" || end.Gesture != "hold-end" {
+		t.Fatal(up.Gesture, end.Gesture)
+	}
+}
 
 func TestRFPWMRecallPersistenceNeverReentersPresentationProvider(t *testing.T) {
 	// Do not start unrelated process-monitor goroutines in this lock-order fixture.

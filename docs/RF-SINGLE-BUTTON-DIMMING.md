@@ -21,8 +21,11 @@ Roll increases the coordinator-calibrated logical percentage by the channel's
 configured step. It reaches 100%, then rolls to a low nonzero output and repeats
 while packets continue. The low level is 1% or at least one 12-bit quantum,
 whichever is representable under the current curve. It does not toggle Off
-before dimming. Only fresh active-hold roll events execute; their context is
-bounded by the reception-gap deadline so a backlog cannot continue after release.
+before dimming. Only fresh active-hold roll events execute; an owner-pinned
+freshness guard is checked after serial admission and writer queues, immediately
+before PWM_SET. Release prevents a queued mutation, while a write already sent
+can finish its normal acknowledgement and authoritative readback deadline.
+Obsolete release-timer callbacks recheck the most recent packet before releasing.
 Use a 1 ms binding cooldown for hold/repeat if the ordinary 250 ms automation
 cooldown is not desired; the established RF repeat cadence still bounds writes.
 

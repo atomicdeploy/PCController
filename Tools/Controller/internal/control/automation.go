@@ -3,6 +3,7 @@ package control
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"path/filepath"
@@ -79,16 +80,10 @@ func RunAutomations(
 				roll = roll || action.Type == "board" && len(words) == 3 && words[0] == "pwm" && words[1] == "roll"
 			}
 			timeout := automationActionTimeout
+			var rollGuard func() error
 			if roll && event.Kind == "rf.gesture" && (event.Gesture == "hold" || event.Gesture == "repeat") {
-				runtime.rfMu.Lock()
-				state := runtime.rfGestures[rfGestureKey{code: event.RFCode, bits: event.RFBits, protocol: event.RFProtocol}]
-				active := state != nil && state.held && time.Since(event.Time) <= rfReleaseAfter
-				if active {
-					timeout = time.Until(state.lastSeen.Add(rfReleaseAfter))
-					active = timeout > 0
-				}
-				runtime.rfMu.Unlock()
-				if !active {
+				rollGuard = runtime.rfRollWriteGuard(event)
+				if time.Since(event.Time) > rfReleaseAfter || rollGuard() != nil {
 					continue
 				} // A released RF hold cannot replay queued ramp writes.
 			}
@@ -104,6 +99,9 @@ func RunAutomations(
 			}
 			lastTriggered[name] = now
 			actionContext, cancel := context.WithTimeout(ctx, timeout)
+			if rollGuard != nil {
+				actionContext = withRFRollGuard(actionContext, rollGuard)
+			}
 			err := executeAutomation(
 				actionContext,
 				runtime,
@@ -112,6 +110,9 @@ func RunAutomations(
 				automation,
 			)
 			cancel()
+			if errors.Is(err, errRFRollReleased) {
+				continue // Release is an expected cancellation, not a hardware fault.
+			}
 			if err != nil {
 				runtime.PublishHostEvent(
 					"automation",

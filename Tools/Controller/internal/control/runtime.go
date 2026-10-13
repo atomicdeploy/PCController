@@ -1980,6 +1980,11 @@ func (runtime *Runtime) requestAtGenerationPriority(
 	session := runtime.session
 	runtime.mu.RUnlock()
 	traceEpoch := runtime.pwmTraceAdmission(opcode, payload)
+	if opcode == native.OpPWMSet {
+		if guard, ok := ctx.Value(rfRollGuardKey{}).(func() error); ok {
+			ctx = link.WithRequestWriteGuard(ctx, guard)
+		}
+	}
 	frame, err := session.RequestWithPriority(ctx, priority, opcode, payload, expected...)
 	if err != nil {
 		return native.Frame{}, err
@@ -3886,6 +3891,16 @@ func (runtime *Runtime) finishRFGesture(
 ) {
 	runtime.rfMu.Lock()
 	if runtime.rfGestures[key] != state {
+		runtime.rfMu.Unlock()
+		return
+	}
+	// Stop can lose a race with a callback already running. A fresh reception
+	// keeps this same state alive; the obsolete callback must not release it.
+	if remaining := rfReleaseAfter - time.Since(state.lastSeen); remaining > 0 {
+		if state.timer != nil {
+			state.timer.Stop()
+		}
+		state.timer = time.AfterFunc(remaining, func() { runtime.finishRFGesture(key, state) })
 		runtime.rfMu.Unlock()
 		return
 	}

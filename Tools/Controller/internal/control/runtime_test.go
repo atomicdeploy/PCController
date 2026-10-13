@@ -2042,8 +2042,7 @@ func TestRFShortReleaseProducesDelayedSingleClick(t *testing.T) {
 	runtime.observeRFGesture(event)
 	down := waitTestEvent(t, runtime, after, "rf.gesture")
 	key := rfGestureKey{code: event.RFCode, bits: event.RFBits, protocol: event.RFProtocol}
-	state := activeRFState(t, runtime, key)
-	runtime.finishRFGesture(key, state)
+	runtime.finishRFGesture(key, expiredRFState(t, runtime, key))
 	up := waitTestEvent(t, runtime, down.ID, "rf.gesture")
 	if up.Gesture != "up" {
 		t.Fatalf("release gesture=%q", up.Gesture)
@@ -2070,7 +2069,7 @@ func TestRFSecondShortPressProducesDoubleClickWithoutSingle(t *testing.T) {
 
 	runtime.observeRFGesture(event)
 	firstDown := waitTestEvent(t, runtime, after, "rf.gesture")
-	runtime.finishRFGesture(key, activeRFState(t, runtime, key))
+	runtime.finishRFGesture(key, expiredRFState(t, runtime, key))
 	firstUp := waitTestEvent(t, runtime, firstDown.ID, "rf.gesture")
 	firstTap := waitTestEvent(t, runtime, firstUp.ID, "rf.gesture")
 	if firstTap.Gesture != "tap" {
@@ -2082,7 +2081,7 @@ func TestRFSecondShortPressProducesDoubleClickWithoutSingle(t *testing.T) {
 	if secondDown.Gesture != "down" {
 		t.Fatalf("second press gesture=%q", secondDown.Gesture)
 	}
-	runtime.finishRFGesture(key, activeRFState(t, runtime, key))
+	runtime.finishRFGesture(key, expiredRFState(t, runtime, key))
 	secondUp := waitTestEvent(t, runtime, secondDown.ID, "rf.gesture")
 	secondTap := waitTestEvent(t, runtime, secondUp.ID, "rf.gesture")
 	if secondTap.Gesture != "tap" {
@@ -2133,7 +2132,7 @@ func TestRFHoldSuppressesSingleClick(t *testing.T) {
 	if hold.Gesture != "hold" {
 		t.Fatalf("long press gesture=%q", hold.Gesture)
 	}
-	runtime.finishRFGesture(key, activeRFState(t, runtime, key))
+	runtime.finishRFGesture(key, expiredRFState(t, runtime, key))
 	up := waitTestEvent(t, runtime, hold.ID, "rf.gesture")
 	if up.Gesture != "up" {
 		t.Fatalf("hold release gesture=%q", up.Gesture)
