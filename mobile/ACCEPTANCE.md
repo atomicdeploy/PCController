@@ -452,3 +452,15 @@ acoustics. The selected-board bridge-source fence remains; explicit routed
 source ownership is still needed for unrelated bridged-board playback.
 This source targets 0.1.8+9. Device delivery and human listening are recorded
 separately; no physical board tone, relay, motor or firmware action was sent.
+
+One ARM64 build from db8bcb7b passed. APK 0.1.8/code 9 is 19,926,839 bytes,
+SHA-256 fc40ac2748c6bb241ca273e1bc6083d469cf6907294e5ca7cb1714370c88b57f;
+its inherited Android development signature verified. One ordinary non-streamed
+in-place tablet install succeeded under the recent saved-drafts/update confirmation
+and continuing bug-fix delivery authorization. Installed version/code/base.apk
+hash match; the ordinary launcher and read-only invalid-token Intent passed
+routing/auth-rejection checks. The tablet remained locked, so no actual audible
+receiver/peer/speaker acceptance is claimed. A listening comparison was requested.
+The phone remains 0.1.2/code 3 with 500,792 KiB free, below its prior verified
+1 GiB installer threshold; no repeated install, data removal or reserve bypass.
+The continuous goal stays active. No full inherited suite/CI iteration was run.
