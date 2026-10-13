@@ -126,6 +126,14 @@ func (service *Service) updatePWMChannelConfig(channel int, value appconfig.PWMC
 	if channel < 0 || channel >= appconfig.PWMChannelCount {
 		return appconfig.PWMChannelConfig{}, &RPCError{Code: -32602, Message: "channel must be 0..15"}
 	}
+	// A curve/type editor need not replace an independently configured step.
+	// Omission is a partial update; explicitly supply 1 to reset the default.
+	if value.StepPercent == nil {
+		if current := appconfig.PWMChannel(service.hostConfig().UI, channel).StepPercent; current != nil {
+			step := *current
+			value.StepPercent = &step
+		}
+	}
 	if err := validatePWMChannelConfig(channel, value); err != nil {
 		return appconfig.PWMChannelConfig{}, &RPCError{Code: -32602, Message: err.Error()}
 	}
@@ -143,6 +151,6 @@ func (service *Service) updatePWMChannelConfig(channel int, value appconfig.PWMC
 		return appconfig.PWMChannelConfig{}, err
 	}
 	profile, _ := service.activeBoardProfile()
-	service.publishPeripheralChange(profile, []string{appconfig.PWMChannelKey(channel)}, []string{"output_type", "icon", "curve", "gamma"})
+	service.publishPeripheralChange(profile, []string{appconfig.PWMChannelKey(channel)}, []string{"output_type", "icon", "curve", "gamma", "step_percent"})
 	return appconfig.PWMChannel(service.hostConfig().UI, channel), nil
 }

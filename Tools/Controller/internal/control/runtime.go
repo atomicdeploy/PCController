@@ -216,6 +216,11 @@ type connectionEventSignature struct {
 }
 
 type Runtime struct {
+	pwmActionOnce   sync.Once
+	pwmActionGate   chan struct{}
+	pwmCancelMu     sync.Mutex
+	pwmActionCancel context.CancelFunc
+	pwmActionEpoch  atomic.Uint64
 	automationAppMu sync.RWMutex
 	automationApp   func(context.Context, appconfig.AutomationAction) error
 	options         Options
@@ -1880,6 +1885,26 @@ func (runtime *Runtime) Request(
 	payload []byte,
 	expected ...byte,
 ) (native.Frame, error) {
+	if err := ctx.Err(); err != nil {
+		return native.Frame{}, err
+	}
+	zeroPWM := opcode == native.OpPWMAllOff && len(payload) == 0 || opcode == native.OpPWMSet && len(payload) == 3 && payload[0] < appconfig.PWMChannelCount && payload[1] == 0 && payload[2] == 0
+	if zeroPWM {
+		runtime.cancelPWMAction()
+	} else if opcode == native.OpPWMSet {
+		epoch := runtime.pwmActionEpoch.Load()
+		release, err := runtime.acquirePWMAction(ctx)
+		if err != nil {
+			return native.Frame{}, err
+		}
+		defer release()
+		bound, cleanup, err := runtime.bindPWMActionContext(ctx, epoch)
+		if err != nil {
+			return native.Frame{}, err
+		}
+		defer cleanup()
+		ctx = bound
+	}
 	runtime.mu.RLock()
 	generation := runtime.generation
 	runtime.mu.RUnlock()

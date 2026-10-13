@@ -350,6 +350,14 @@ func (service *Service) rejectLockedPeripheral(key string) error {
 
 func peripheralKeyForCommand(command string) string {
 	words := strings.Fields(strings.ToLower(strings.TrimSpace(command)))
+	if len(words) >= 3 && words[0] == "pwm" {
+		switch words[1] {
+		case "on", "off", "increase", "decrease", "set", "raw", "configure":
+			if channel, err := appconfig.ParsePWMChannel(words[2]); err == nil {
+				return appconfig.PWMChannelKey(int(channel))
+			}
+		}
+	}
 	if len(words) < 3 || words[0] != "relay" {
 		return ""
 	}
@@ -391,6 +399,7 @@ func (service *Service) publishPeripheralChange(profile boardProfileDescriptor, 
 }
 
 func (service *Service) invokeSemanticAction(ctx context.Context, actionID string) (map[string]any, error) {
+	generation := service.Client.Snapshot().ConnectionGeneration
 	profile, _ := service.activeBoardProfile()
 	if !profile.Attached || !profile.Configured {
 		return nil, errors.New("the attached board has no configured control profile")
@@ -404,6 +413,7 @@ func (service *Service) invokeSemanticAction(ctx context.Context, actionID strin
 		return nil, fmt.Errorf("peripheral %q is locked by board profile %q", control.Key, profile.Key)
 	}
 	controlKey := control.Key
+	var pwmReadback any
 	var err error
 	switch control.Kind {
 	case "seat":
@@ -429,13 +439,31 @@ func (service *Service) invokeSemanticAction(ctx context.Context, actionID strin
 			return nil, fmt.Errorf("action %q is not advertised by board profile %q", actionID, profile.Key)
 		}
 		err = service.Client.SetRelay(ctx, byte(number), parts[2] == "on")
+	case "mosfet":
+		parts := strings.Split(action.ID, ".")
+		if len(parts) != 3 || parts[0] != "pwm" || control.Key != strings.Join(parts[:2], ".") {
+			return nil, fmt.Errorf("invalid advertised PWM action %q", action.ID)
+		}
+		channel, parseErr := strconv.Atoi(parts[1])
+		if parseErr != nil || channel < 0 || channel >= appconfig.PWMChannelCount {
+			return nil, fmt.Errorf("invalid advertised PWM channel %q", parts[1])
+		}
+		values, actionErr := service.Client.ApplyPWMAction(ctx, generation, byte(channel), action.Verb, appconfig.PWMChannel(service.hostConfig().UI, channel))
+		err = actionErr
+		if err == nil {
+			pwmReadback = service.describePWMValues(values)
+		}
 	default:
 		return nil, fmt.Errorf("action %q is not executable by control %q", actionID, control.Key)
 	}
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"accepted": true, "action_id": actionID, "control_key": controlKey, "board_profile": profile}, nil
+	result := map[string]any{"accepted": true, "action_id": actionID, "control_key": controlKey, "board_profile": profile}
+	if pwmReadback != nil {
+		result["pwm"] = pwmReadback
+	}
+	return result, nil
 }
 
 // advertisedSemanticAction resolves execution from the same catalog returned

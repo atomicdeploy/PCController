@@ -51,3 +51,38 @@ func TestPWMChannelValidationRejectsUnsafeCurve(t *testing.T) {
 		t.Fatal("expected out-of-range gamma rejection")
 	}
 }
+
+func TestPWMStepConfigurationAndActionCatalog(t *testing.T) {
+	ui := Defaults().UI
+	if PWMStepPercent(PWMChannel(ui, 0)) != 1 {
+		t.Fatal("omitted step default changed")
+	}
+	for _, value := range []float64{0, -1, 101, math.NaN(), math.Inf(1)} {
+		config := PWMChannel(ui, 0)
+		config.StepPercent = &value
+		if ValidatePWMChannels(map[string]PWMChannelConfig{"pwm.0": config}) == nil {
+			t.Fatalf("invalid step %v accepted", value)
+		}
+	}
+	step := 2.5
+	config := PWMChannel(ui, 0)
+	config.StepPercent = &step
+	ui.PWMChannels["pwm.0"] = config
+	peripherals, controls := ProfileDescriptors(BoardModeCinemaSeatMotion, false, nil, nil)
+	ApplyPWMChannelConfig(peripherals, controls, ui)
+	for _, control := range controls {
+		if control.Key != "pwm.0" {
+			continue
+		}
+		if control.StepPercent != step || len(control.Actions) != 4 {
+			t.Fatalf("missing configurable actions: %+v", control)
+		}
+		for i, verb := range []string{"on", "off", "increase", "decrease"} {
+			if control.Actions[i].ID != "pwm.0."+verb || control.Actions[i].Verb != verb {
+				t.Fatalf("wrong semantic action %+v", control.Actions[i])
+			}
+		}
+		return
+	}
+	t.Fatal("PWM control missing")
+}
