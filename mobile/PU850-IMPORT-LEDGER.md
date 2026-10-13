@@ -140,3 +140,7 @@ below its previously verified 1 GiB installer threshold. No repeated install,
 data removal, reserve bypass or unlock was attempted. The continuous acceptance
 goal remains active. android-0.1.10-delivery.json records exact identities and
 source/device/physical acceptance separately.
+
+## Batch 2 - remaining authoring/dialog input surfaces
+
+U10 cue/effect/custom-color dialogs now share ControllerDialog with keyboard-safe scrolling, explicit Close/Cancel and fixed cue busy geometry. U11 effect integer/repetition/display bounds follow the native Go config validator, retain invalid edits and reject unapplied/invalid technical JSON without replacing the draft. Media authority normalization preserves resource path/query and native host-path semantics; firmware imports currently use the document picker. Shared source checks and five current phone/tablet/theme fixtures are recorded in UI-REQUIREMENT-LEDGER.md. Android IME, live resources, haptics/localization/screen policy and full physical/human acceptance remain open.

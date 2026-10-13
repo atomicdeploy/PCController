@@ -10,12 +10,16 @@ class ControllerDialog extends StatelessWidget {
     required this.child,
     this.actions = const [],
     this.onClose,
+    this.closeEnabled = true,
+    this.maxWidth = 560,
   });
   final String title;
   final IconData icon;
   final Widget child;
   final List<Widget> actions;
   final VoidCallback? onClose;
+  final bool closeEnabled;
+  final double maxWidth;
   @override
   Widget build(BuildContext context) {
     final media = MediaQuery.of(context),
@@ -35,7 +39,7 @@ class ControllerDialog extends StatelessWidget {
       ),
       child: ConstrainedBox(
         constraints: BoxConstraints(
-          maxWidth: 560,
+          maxWidth: maxWidth,
           maxHeight:
               (media.size.height -
                       media.viewInsets.bottom -
@@ -68,7 +72,9 @@ class ControllerDialog extends StatelessWidget {
                         style: IconButton.styleFrom(
                           minimumSize: const Size(44, 44),
                         ),
-                        onPressed: onClose ?? () => Navigator.of(context).pop(),
+                        onPressed: closeEnabled
+                            ? (onClose ?? () => Navigator.of(context).pop())
+                            : null,
                         icon: const Icon(Icons.close),
                       ),
                     ],

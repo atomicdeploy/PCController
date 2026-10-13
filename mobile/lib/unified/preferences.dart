@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../pakar_reference.dart' show studioDark;
+import 'relay_style.dart';
+import 'controller_dialog.dart';
 
 const paletteSeeds = {
   'digitalogic': Color(0xff7166ce),
@@ -226,6 +228,8 @@ class AppSettings extends StatelessWidget {
             children: [
               for (final section in [
                 _section(context, 'Appearance', Icons.palette_outlined, [
+                  _appearancePreview(context),
+                  const SizedBox(height: 16),
                   Wrap(
                     spacing: 8,
                     runSpacing: 8,
@@ -568,23 +572,9 @@ class AppSettings extends StatelessWidget {
     final key = GlobalKey<FormState>();
     final result = await showDialog<Color>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Custom palette'),
-        content: Form(
-          key: key,
-          child: TextFormField(
-            controller: text,
-            maxLength: 6,
-            decoration: const InputDecoration(
-              labelText: 'Color',
-              prefixText: '#',
-            ),
-            validator: (value) =>
-                RegExp(r'^[0-9a-fA-F]{6}$').hasMatch(value ?? '')
-                ? null
-                : 'Enter six hexadecimal digits.',
-          ),
-        ),
+      builder: (context) => ControllerDialog(
+        title: 'Custom palette',
+        icon: Icons.palette_outlined,
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -602,10 +592,102 @@ class AppSettings extends StatelessWidget {
             child: const Text('Apply'),
           ),
         ],
+        child: Form(
+          key: key,
+          child: TextFormField(
+            controller: text,
+            maxLength: 6,
+            decoration: const InputDecoration(
+              labelText: 'Color',
+              prefixText: '#',
+            ),
+            validator: (value) =>
+                RegExp(r'^[0-9a-fA-F]{6}$').hasMatch(value ?? '')
+                ? null
+                : 'Enter six hexadecimal digits.',
+          ),
+        ),
       ),
     );
     text.dispose();
     return result;
+  }
+
+  Widget _appearancePreview(BuildContext context) {
+    final colors = Theme.of(context).colorScheme,
+        header = preferences.effectiveHeader;
+    return Container(
+      key: const ValueKey('appearance-preview'),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: colors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: colors.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Preview',
+            style: Theme.of(context).textTheme.labelSmall
+                ?.copyWith(color: colors.onSurfaceVariant),
+          ),
+          const SizedBox(height: 8),
+          Container(
+            padding: header == 'accent'
+                ? const EdgeInsets.all(8)
+                : EdgeInsets.zero,
+            decoration: header == 'accent'
+                ? BoxDecoration(
+                    color: colors.primary.withValues(alpha: .12),
+                    borderRadius: BorderRadius.circular(8),
+                  )
+                : null,
+            child: Row(
+              children: [
+                Image.asset(
+                  'assets/branding/${preferences.branding}.png',
+                  width: 28,
+                  height: 28,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    preferences.title,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ),
+                Icon(Icons.more_vert, color: colors.onSurfaceVariant),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              for (final on in [true, false]) ...[
+                if (!on) const SizedBox(width: 8),
+                Expanded(
+                  child: ExcludeSemantics(
+                    child: IgnorePointer(
+                      child: OutlinedButton.icon(
+                        style: relayActionStyle(
+                          colors,
+                          preferences.buttonStyle,
+                          on,
+                        ),
+                        onPressed: () {},
+                        icon: const Icon(Icons.power_settings_new, size: 18),
+                        label: Text(on ? 'ON' : 'OFF'),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _section(

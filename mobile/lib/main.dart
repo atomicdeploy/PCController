@@ -29,6 +29,7 @@ import 'unified/controller_dialog.dart';
 import 'unified/endpoint_dialog.dart';
 import 'unified/cue_editor.dart';
 import 'unified/go_tools.dart';
+import 'unified/resource_target.dart';
 
 void main() {
   LicenseRegistry.addLicense(() async* {
@@ -1202,44 +1203,56 @@ class _ControllerHomeState extends State<ControllerHome>
   );
 
   Widget liveConnections() => Card(
-    child: Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      child: Row(
-        children: [
-          for (final peer in [board, player]) ...[
-            if (!peer.controller) const SizedBox(width: 8),
-            Expanded(
-              child: Row(
-                children: [
-                  Image.asset(
-                    'assets/branding/${peer.controller ? 'pccontroller' : 'pealayer'}.png',
-                    width: 22,
-                    height: 22,
+    child: LayoutBuilder(
+      builder: (context, bounds) {
+        Widget tile(PeerSession peer) {
+          final name = peer.controller ? 'PCController' : 'Pealayer';
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            child: Row(
+              children: [
+                Image.asset(
+                  'assets/branding/${peer.controller ? 'pccontroller' : 'pealayer'}.png',
+                  width: 26,
+                  height: 26,
+                ),
+                const SizedBox(width: 9),
+                Expanded(
+                  child: Text(
+                    name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.labelLarge
+                        ?.copyWith(fontWeight: FontWeight.w700),
                   ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      peer.controller ? 'PCController' : 'Pealayer',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.labelLarge,
-                    ),
-                  ),
-                  peerConnect(
-                    peer,
-                    peer.controller ? 'PCController' : 'Pealayer',
-                  ),
-                  peerMore(
-                    peer,
-                    peer.controller ? 'PCController' : 'Pealayer',
-                    compact: true,
-                  ),
-                ],
-              ),
+                ),
+                StatePill(
+                  peerStatus(peer),
+                  active: peer.fresh && (!peer.controller || peer.boardReady),
+                ),
+                const SizedBox(width: 4),
+                peerConnect(peer, name),
+                peerMore(peer, name, compact: true),
+              ],
             ),
-          ],
-        ],
-      ),
+          );
+        }
+
+        return bounds.maxWidth < 620
+            ? Column(
+                children: [
+                  tile(board),
+                  const Divider(height: 1, indent: 12, endIndent: 12),
+                  tile(player),
+                ],
+              )
+            : Row(
+                children: [
+                  Expanded(child: tile(board)),
+                  Expanded(child: tile(player)),
+                ],
+              );
+      },
     ),
   );
 
@@ -1643,46 +1656,49 @@ class _ControllerHomeState extends State<ControllerHome>
     ]);
   }
 
-  Widget discoveredPeers() => card('Discovered devices', Icons.radar, [
-    for (final device in discovered)
-      ListTile(
-        contentPadding: EdgeInsets.zero,
-        dense: true,
-        leading: Icon(
-          device.product == 'pealayer'
-              ? Icons.play_circle_outline
-              : device.product == 'controller-mobile'
-              ? Icons.phone_android
-              : Icons.memory_outlined,
-        ),
-        title: Text(device.name),
-        subtitle: Text('${device.endpoint} · ${device.protocol}'),
-        trailing: device.product == 'controller-mobile'
-            ? null
-            : IconButton(
-                tooltip: 'Connect ${device.name}',
-                onPressed:
-                    (device.product == 'pccontroller' ? board : player).enabled
-                    ? null
-                    : () => unawaited(useDiscovered(device)),
-                icon: const Icon(Icons.link),
+  Widget discoveredPeers() => discovered.isEmpty
+      ? const SizedBox.shrink()
+      : card('Discovered devices', Icons.radar, [
+          for (final device in discovered)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              leading: Icon(
+                device.product == 'pealayer'
+                    ? Icons.play_circle_outline
+                    : device.product == 'controller-mobile'
+                    ? Icons.phone_android
+                    : Icons.memory_outlined,
               ),
-      ),
-    if (discovered.isEmpty)
-      IconButton(
-        tooltip: 'Scan network',
-        onPressed: discovering ? null : () => unawaited(scanPeers()),
-        icon: const Icon(Icons.radar),
-      ),
-    for (final error in discovery.errors.entries)
-      Padding(
-        padding: const EdgeInsets.only(top: 8),
-        child: Text(
-          '${error.key}: ${error.value}',
-          style: TextStyle(color: Theme.of(context).colorScheme.error),
-        ),
-      ),
-  ]);
+              title: Text(device.name),
+              subtitle: Text('${device.endpoint} · ${device.protocol}'),
+              trailing: device.product == 'controller-mobile'
+                  ? null
+                  : IconButton(
+                      tooltip: 'Connect ${device.name}',
+                      onPressed:
+                          (device.product == 'pccontroller' ? board : player)
+                              .enabled
+                          ? null
+                          : () => unawaited(useDiscovered(device)),
+                      icon: const Icon(Icons.link),
+                    ),
+            ),
+          if (discovered.isEmpty)
+            IconButton(
+              tooltip: 'Scan network',
+              onPressed: discovering ? null : () => unawaited(scanPeers()),
+              icon: const Icon(Icons.radar),
+            ),
+          for (final error in discovery.errors.entries)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                '${error.key}: ${error.value}',
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ),
+        ]);
   Widget monitor() {
     final status = object(board.state['status']);
     String measurement(
@@ -2749,10 +2765,6 @@ class _ControllerHomeState extends State<ControllerHome>
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
       card('Firmware & verified backups', Icons.system_update, [
-        const Text(
-          'Firmware is prepared on the host with its configured toolchain. A queued operation is not a successful flash.',
-        ),
-        const SizedBox(height: 12),
         Wrap(
           spacing: 8,
           runSpacing: 8,
@@ -2826,7 +2838,7 @@ class _ControllerHomeState extends State<ControllerHome>
         ),
       ]),
       const SizedBox(height: 16),
-      operationCard(),
+      if (board.operation['id'] != null) operationCard(),
       const SizedBox(height: 16),
       for (final artifact in board.artifacts)
         Padding(
@@ -2912,20 +2924,13 @@ class _ControllerHomeState extends State<ControllerHome>
     final effects = value is List
         ? objects(value)
         : objects(object(value)['effects']);
+    final running =
+        object(object(board.state['macros'])['playback'])['running'] == true ||
+        ((object(board.state['outputs'])['effect_id'] as num?) ?? 0) > 0 ||
+        ((object(board.state['outputs'])['effect_pending_id'] as num?) ?? 0) >
+            0;
+    if (effects.isEmpty && !running) return const SizedBox.shrink();
     return card('Board effect library', Icons.auto_awesome, [
-      action(
-        'New effect draft',
-        Icons.add,
-        () => unawaited(
-          editEffect({
-            'id': '',
-            'name': '',
-            'category': 'Effects',
-            'kind': 'sequence',
-            'steps': [],
-          }),
-        ),
-      ),
       for (final effect in effects)
         ListTile(
           contentPadding: EdgeInsets.zero,
@@ -3071,18 +3076,22 @@ class _ControllerHomeState extends State<ControllerHome>
         TextField(
           controller: mediaTarget,
           onChanged: (_) => setState(() {}),
-          decoration: const InputDecoration(
+          decoration: InputDecoration(
             labelText: 'Host path or media URL',
+            prefixIcon: const Icon(Icons.link),
+            errorText: mediaTargetError(mediaTarget.text),
           ),
         ),
         const SizedBox(height: 12),
         action(
           'Open on Pealayer',
           Icons.play_circle_outline,
-          playerReady && mediaTarget.text.trim().isNotEmpty
+          playerReady &&
+                  mediaTarget.text.trim().isNotEmpty &&
+                  mediaTargetError(mediaTarget.text) == null
               ? () => unawaited(
                   playerCommand('pealayer.open', {
-                    'target': mediaTarget.text.trim(),
+                    'target': normalizeMediaTarget(mediaTarget.text),
                   }),
                 )
               : null,
@@ -3441,7 +3450,7 @@ class _ControllerHomeState extends State<ControllerHome>
   ]);
   Widget activities() => Column(
     children: [
-      operationCard(),
+      if (board.operation['id'] != null) operationCard(),
       const SizedBox(height: 16),
       if (deliveries.isNotEmpty)
         card('Peer delivery outcomes', Icons.checklist, [
@@ -3753,6 +3762,16 @@ class _ControllerHomeState extends State<ControllerHome>
     barrierDismissible: false,
     builder: (_) => EffectEditor(
       initial: initial,
+      folders: <String>{
+        for (final effect
+            in (board.state['effects'] is List
+                ? objects(board.state['effects'])
+                : objects(object(board.state['effects'])['effects'])))
+          if (effect['category'] is String) effect['category'] as String,
+        for (final draft in drafts)
+          if (object(draft['effect'])['category'] is String)
+            object(draft['effect'])['category'] as String,
+      }.toList(),
       saved: (effect) async {
         final next = [
           {
@@ -3761,7 +3780,9 @@ class _ControllerHomeState extends State<ControllerHome>
             'program': effect,
             'saved_at': DateTime.now().toUtc().toIso8601String(),
           },
-          ...drafts,
+          ...drafts.where(
+            (draft) => object(draft['effect'])['id'] != effect['id'],
+          ),
         ].take(100).toList();
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('local.drafts', jsonEncode(next));

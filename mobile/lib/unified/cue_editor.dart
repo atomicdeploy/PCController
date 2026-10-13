@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import 'transport.dart' show Json;
+import 'controller_dialog.dart';
 
 int? cueSecondsToMs(String text) {
   final match = RegExp(r'^\+?(?:(\d+)(?:\.(\d*))?|\.(\d+))$')
@@ -85,24 +86,48 @@ class _CueEditorState extends State<CueEditor> {
     onPopInvokedWithResult: (didPop, _) {
       if (!didPop) unawaited(close());
     },
-    child: AlertDialog(
-      title: Row(
-        children: [
-          Expanded(
-            child: Text(
-              '${widget.cue['name']}',
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          IconButton(
-            tooltip: 'Close',
-            onPressed: saving ? null : () => unawaited(close()),
-            icon: const Icon(Icons.close),
-          ),
-        ],
-      ),
-      content: SizedBox(
+    child: ControllerDialog(
+      title: '${widget.cue['name']}',
+      icon: Icons.edit_calendar_outlined,
+      closeEnabled: !saving,
+      onClose: () => unawaited(close()),
+      actions: [
+        TextButton(
+          onPressed: saving ? null : () => unawaited(close()),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: saving
+              ? null
+              : () async {
+                  if (!form.currentState!.validate()) return;
+                  final startMs = cueSecondsToMs(start.text)!;
+                  final durationMs = int.parse(duration.text);
+                  if (startMs == widget.cue['start_time_ms'] &&
+                      durationMs == widget.cue['duration_ms']) {
+                    Navigator.pop(context);
+                    return;
+                  }
+                  setState(() {
+                    saving = true;
+                    error = null;
+                  });
+                  try {
+                    await widget.save(startMs, durationMs);
+                    if (context.mounted) Navigator.pop(context);
+                  } catch (e) {
+                    if (mounted) {
+                      setState(() {
+                        saving = false;
+                        error = '$e';
+                      });
+                    }
+                  }
+                },
+          child: Text(saving ? 'Saving…' : 'Save'),
+        ),
+      ],
+      child: SizedBox(
         width: 420,
         child: SingleChildScrollView(
           child: Form(
@@ -150,52 +175,18 @@ class _CueEditorState extends State<CueEditor> {
                       ),
                     ),
                   ),
-                if (saving)
-                  const Padding(
-                    padding: EdgeInsets.only(top: 16),
-                    child: LinearProgressIndicator(),
-                  ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  height: 2,
+                  child: saving
+                      ? const LinearProgressIndicator(minHeight: 2)
+                      : null,
+                ),
               ],
             ),
           ),
         ),
       ),
-      actions: [
-        TextButton(
-          onPressed: saving ? null : () => unawaited(close()),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: saving
-              ? null
-              : () async {
-                  if (!form.currentState!.validate()) return;
-                  final startMs = cueSecondsToMs(start.text)!;
-                  final durationMs = int.parse(duration.text);
-                  if (startMs == widget.cue['start_time_ms'] &&
-                      durationMs == widget.cue['duration_ms']) {
-                    Navigator.pop(context);
-                    return;
-                  }
-                  setState(() {
-                    saving = true;
-                    error = null;
-                  });
-                  try {
-                    await widget.save(startMs, durationMs);
-                    if (context.mounted) Navigator.pop(context);
-                  } catch (e) {
-                    if (mounted) {
-                      setState(() {
-                        saving = false;
-                        error = '$e';
-                      });
-                    }
-                  }
-                },
-          child: Text(saving ? 'Saving…' : 'Save'),
-        ),
-      ],
     ),
   );
 }
