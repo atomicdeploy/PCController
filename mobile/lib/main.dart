@@ -25,9 +25,24 @@ import 'unified/preferences.dart';
 import 'unified/buzzer_mirror.dart';
 import 'unified/channel_editor.dart';
 import 'unified/output_organization.dart';
+import 'unified/controller_dialog.dart';
+import 'unified/endpoint_dialog.dart';
 import 'unified/cue_editor.dart';
 
-void main() => runApp(const UnifiedControllerApp());
+void main() {
+  LicenseRegistry.addLicense(() async* {
+    final notice = await rootBundle.loadString(
+      'assets/fonts/DroidSansMono-NOTICE.txt',
+    );
+    final license = await rootBundle.loadString(
+      'assets/fonts/DroidSansMono-LICENSE.txt',
+    );
+    yield LicenseEntryWithLineBreaks([
+      'Droid Sans Mono',
+    ], '$notice\n\n$license');
+  });
+  runApp(const UnifiedControllerApp());
+}
 
 class UnifiedControllerApp extends StatefulWidget {
   const UnifiedControllerApp({super.key, this.restore = true});
@@ -89,6 +104,14 @@ class _UnifiedControllerAppState extends State<UnifiedControllerApp> {
               alpha: preferences.tone == 'pastel' ? 1 : .65,
             ),
           ),
+        ),
+      ),
+      dialogTheme: DialogThemeData(
+        backgroundColor: colors.surfaceContainerLow,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: colors.outlineVariant),
         ),
       ),
       filledButtonTheme: FilledButtonThemeData(
@@ -185,6 +208,9 @@ class _ControllerHomeState extends State<ControllerHome>
     if (widget.restore) {
       DeviceDiscovery.channel.setMethodCallHandler((call) async {
         if (call.method != 'networkChanged' || !foreground) return;
+        for (final peer in [board, player]) {
+          if (peer.enabled) unawaited(peer.networkAvailable());
+        }
         if (packagePeers.running) {
           unawaited(
             packagePeers.networkChanged().catchError((Object failure) {
@@ -458,9 +484,9 @@ class _ControllerHomeState extends State<ControllerHome>
   Future<bool> confirm(String title, String description) async =>
       await showDialog<bool>(
         context: context,
-        builder: (context) => AlertDialog(
-          title: Text(title),
-          content: Text(description),
+        builder: (context) => ControllerDialog(
+          title: title,
+          icon: Icons.help_outline,
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context, false),
@@ -471,6 +497,7 @@ class _ControllerHomeState extends State<ControllerHome>
               child: const Text('Confirm'),
             ),
           ],
+          child: Text(description),
         ),
       ) ??
       false;
@@ -584,53 +611,31 @@ class _ControllerHomeState extends State<ControllerHome>
   }
 
   Future<void> configure(bool controller) async {
-    final origin = TextEditingController(
-      text: controller ? boardOrigin : playerOrigin,
-    );
-    final saved = await showDialog<bool>(
+    final choice = connectionChoiceRevision;
+    final address = await showDialog<String>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text('Connect ${controller ? 'PCController' : 'Pealayer'}'),
-        content: SizedBox(
-          width: 440,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: origin,
-                keyboardType: TextInputType.url,
-                autocorrect: false,
-                decoration: const InputDecoration(
-                  labelText: 'Host URL',
-                  hintText: 'http://192.168.1.20:8787',
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              try {
-                endpoint(origin.text);
-                Navigator.pop(dialogContext, true);
-              } catch (e) {
-                ScaffoldMessenger.of(context)
-                    .showSnackBar(SnackBar(content: Text('$e')));
-              }
-            },
-            child: const Text('Connect'),
-          ),
+      builder: (_) => EndpointDialog(
+        controller: controller,
+        initialValue: controller ? boardOrigin : playerOrigin,
+        advertised: [
+          for (final peer in discovered)
+            if (peer.verified &&
+                peer.product == (controller ? 'pccontroller' : 'pealayer'))
+              peer.endpoint,
         ],
       ),
     );
-    if (saved == true && mounted) {
-      final address = endpoint(origin.text).toString();
-      final secret = address == (controller ? boardOrigin : playerOrigin)
+    if (address != null &&
+        mounted &&
+        foreground &&
+        choice == connectionChoiceRevision) {
+      var previous = controller ? boardOrigin : playerOrigin;
+      try {
+        previous = endpoint(previous).toString();
+      } on FormatException {
+        /* An invalid saved address does not own credentials. */
+      }
+      final secret = address == previous
           ? (controller ? boardToken : playerToken)
           : '';
       await perform('Connect', () async {
@@ -667,7 +672,6 @@ class _ControllerHomeState extends State<ControllerHome>
         }
       });
     }
-    origin.dispose();
   }
 
   Widget action(

@@ -498,3 +498,23 @@ not launched over it and live gesture acceptance remains pending.
 The phone remains 0.1.2/code 3 with 499,652 KiB free below its previously verified
 1 GiB installer threshold. No retry, data removal, physical action or firmware
 operation was performed. Concurrent generated Web outputs were left untouched.
+
+## PU850 endpoint and dialog import, batch 1
+
+The full 5,429-line MainActivity and active/inactive non-business network/UI
+helpers and resource variants were reviewed without modifying or running PU850.
+PU850-IMPORT-LEDGER.md records findings, exclusions, source digests and U01–U14
+phased migration statuses. The first batch adds localized address normalization,
+modern host/URL/IPv6/port validation, inline errors and canonical preview,
+bounded same-host product detection and explicit offline targets, responsive
+connection/confirmation dialogs and selected-peer native-network reconnect wakes.
+Opening attempts coalesce; explicit disconnect, owner fences, typed relay
+routing and command non-replay remain intact. Pastel/Vibrant styles are retained;
+PU850 Droid Sans Mono is ported with its original digest and bundled license.
+
+Twenty-five focused checks and one source-renderer check passed; analyzer clean.
+Phone/tablet front-panel busy geometry checks still pass. Three modal PNGs are
+source fixtures only. Read-only LAN probes to the previous Cafe :8787/:8080
+addresses timed out; live endpoint/reconnect behavior and human design acceptance
+remain open. No physical action or PU850 business command was sent. Source
+targets 0.1.10+11; package/device identity is recorded separately after delivery.

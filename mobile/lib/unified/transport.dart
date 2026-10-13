@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import 'output_events.dart';
+import 'endpoint_address.dart';
 
 typedef Json = Map<String, dynamic>;
 String? selectedControllerOrigin(
@@ -57,18 +58,7 @@ Json verifiedCatalog(dynamic value) {
 }
 
 Uri endpoint(String value) {
-  final uri = Uri.parse(value.trim());
-  if (!['http', 'https'].contains(uri.scheme) ||
-      uri.host.isEmpty ||
-      uri.userInfo.isNotEmpty ||
-      uri.hasQuery ||
-      uri.hasFragment ||
-      !['', '/'].contains(uri.path)) {
-    throw const FormatException(
-      'Use an HTTP(S) host and port, without credentials or a path.',
-    );
-  }
-  return uri.replace(path: '');
+  return EndpointAddress.parse(value, allowServicePath: false).origin;
 }
 
 class Rejected implements Exception {
@@ -538,8 +528,39 @@ class PeerSession extends ChangeNotifier {
     received = DateTime.now();
   }
 
-  Future<void> _open(int epoch) async {
-    if (!enabled || epoch != generation || transport == null) return;
+  Future<void>? _openingTask;
+  Future<void> _open(int epoch) {
+    if (!enabled || epoch != generation || transport == null) {
+      return Future<void>.value();
+    }
+    final active = _openingTask;
+    if (active != null) return active;
+    late final Future<void> task;
+    task = _openOnce(epoch).whenComplete(() {
+      if (identical(_openingTask, task)) _openingTask = null;
+    });
+    return _openingTask = task;
+  }
+
+  /// Wake only the selected connection, without command replay or discovery.
+  Future<void> networkAvailable() async {
+    if (!enabled || transport == null || (_socket != null && fresh)) return;
+    // Pealayer's typed controller relay is request/response only. Do not
+    // substitute its player WebSocket for a controller subscription.
+    if (transport is ControllerRelayTransport) {
+      await refresh();
+      return;
+    }
+    _retry?.cancel();
+    _retry = null;
+    _attempt = 0;
+    final socket = _socket;
+    _socket = null;
+    if (socket != null) await socket.close();
+    await _open(generation);
+  }
+
+  Future<void> _openOnce(int epoch) async {
     try {
       if (controller) {
         final config = object(await transport!.request('/api/ui-config'));
@@ -564,11 +585,16 @@ class PeerSession extends ChangeNotifier {
       }
       await refresh();
       if (!enabled || epoch != generation) return;
+      if (!online) {
+        _lost(epoch);
+        return;
+      }
       final socket = await transport!.socket(websocketPath);
       if (epoch != generation || !enabled) {
         await socket.close();
         return;
       }
+      socket.pingInterval = const Duration(seconds: 10);
       _socket = socket;
       if (controller) {
         socket.add(
@@ -916,6 +942,7 @@ class PeerSession extends ChangeNotifier {
 
   void disconnect() {
     generation++;
+    _openingTask = null;
     _refreshTask = null;
     enabled = false;
     online = false;
