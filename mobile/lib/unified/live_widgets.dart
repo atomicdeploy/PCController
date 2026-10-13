@@ -87,17 +87,26 @@ class TelemetryHistory {
 }
 
 class StatePill extends StatelessWidget {
-  const StatePill(this.label, {super.key, this.active, this.color});
+  const StatePill(
+    this.label, {
+    super.key,
+    this.active,
+    this.color,
+    this.onPressed,
+    this.actionLabel,
+  });
   final String label;
   final bool? active;
   final Color? color;
+  final VoidCallback? onPressed;
+  final String? actionLabel;
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final tone =
         color ??
         (active == true ? const Color(0xff55bd83) : scheme.onSurfaceVariant);
-    return Semantics(
+    final pill = Semantics(
       label: label,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
@@ -129,6 +138,26 @@ class StatePill extends StatelessWidget {
               ),
             ),
           ],
+        ),
+      ),
+    );
+    if (actionLabel == null) return pill;
+    return Tooltip(
+      message: actionLabel!,
+      child: Semantics(
+        button: true,
+        enabled: onPressed != null,
+        child: Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(20),
+          child: InkWell(
+            onTap: onPressed,
+            borderRadius: BorderRadius.circular(20),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+              child: Center(widthFactor: 1, heightFactor: 1, child: pill),
+            ),
+          ),
         ),
       ),
     );

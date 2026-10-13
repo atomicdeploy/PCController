@@ -96,7 +96,7 @@ void main() {
 
   for (final compact in [true, false]) {
     testWidgets(
-      'Disconnect is menu-only and preserves opt-out in ${compact ? 'compact' : 'roomy'} mode',
+      'One connection lifecycle toggle preserves opt-out in ${compact ? 'compact' : 'roomy'} mode',
       (tester) async {
         SharedPreferences.setMockInitialValues({});
         await tester.pumpWidget(const UnifiedControllerApp(restore: false));
@@ -109,12 +109,10 @@ void main() {
         home.preferences.refresh();
         board.notifyListeners();
         await tester.pumpAndSettle();
-        expect(find.byTooltip('Disconnect PCController'), findsNothing);
+        expect(find.byTooltip('Disconnect PCController'), findsOneWidget);
+        expect(find.byTooltip('Connect PCController'), findsNothing);
         expect(find.text('Disconnect'), findsNothing);
-        await tester.tap(find.byTooltip('Manage PCController connection'));
-        await tester.pumpAndSettle();
-        expect(find.text('Disconnect'), findsOneWidget);
-        await tester.tap(find.text('Disconnect'));
+        await tester.tap(find.byTooltip('Disconnect PCController'));
         await tester.pumpAndSettle();
         expect(board.online, false);
         final saved = await SharedPreferences.getInstance();

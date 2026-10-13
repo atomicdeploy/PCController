@@ -134,7 +134,10 @@ class ActivityStrip extends StatelessWidget {
       );
     });
     return vertical
-        ? SizedBox(width: 164, child: Column(children: items))
+        ? SizedBox(
+            width: 164,
+            child: SingleChildScrollView(child: Column(children: items)),
+          )
         : SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Row(children: items),

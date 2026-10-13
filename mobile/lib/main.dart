@@ -562,7 +562,12 @@ class _ControllerHomeState extends State<ControllerHome>
         )) {
       return;
     }
-    if (stamp != board.targetStamp || !board.boardReady) return;
+    if (stamp != board.targetStamp ||
+        !board.boardReady ||
+        (object(board.state['emergency_stop'])['active'] == true &&
+            !safetyStop)) {
+      return;
+    }
     await perform(
       '${control['name']} ${action['name']}',
       () => board.transport!.rpc('controller.action.invoke', {
@@ -808,22 +813,27 @@ class _ControllerHomeState extends State<ControllerHome>
   );
   Widget grid(List<Widget> children, {double minimum = 340}) => LayoutBuilder(
     builder: (context, bounds) {
-      final columns = bounds.maxWidth >= minimum * 2 + 16
-          ? (bounds.maxWidth / (minimum + 16)).floor().clamp(2, 3)
-          : 1;
+      final columns =
+          (bounds.maxWidth >= minimum * 2 + 16
+                  ? (bounds.maxWidth / (minimum + 16)).floor().clamp(2, 3)
+                  : 1)
+              .clamp(1, children.isEmpty ? 1 : children.length);
       final width = (bounds.maxWidth - (columns - 1) * 16) / columns;
-      return Wrap(
-        spacing: 16,
-        runSpacing: 16,
-        children: children
-            .map(
-              (child) => SizedBox(
-                key: child.key is ValueKey ? child.key : null,
-                width: width,
-                child: child,
-              ),
-            )
-            .toList(),
+      return SizedBox(
+        width: bounds.maxWidth,
+        child: Wrap(
+          spacing: 16,
+          runSpacing: 16,
+          children: children
+              .map(
+                (child) => SizedBox(
+                  key: child.key is ValueKey ? child.key : null,
+                  width: width,
+                  child: child,
+                ),
+              )
+              .toList(),
+        ),
       );
     },
   );
@@ -1136,29 +1146,43 @@ class _ControllerHomeState extends State<ControllerHome>
         onSelected: (value) {
           if (value == 'address') unawaited(configure(peer.controller));
           if (value == 'refresh') unawaited(peer.refresh());
-          if (value == 'disconnect') unawaited(disconnectPeer(peer));
-          if (value == 'connect') unawaited(resumePeer(peer));
         },
         itemBuilder: (_) => [
           const PopupMenuItem(value: 'address', child: Text('Edit address')),
           if (peer.transport != null)
             const PopupMenuItem(value: 'refresh', child: Text('Refresh')),
-          if (peer.fresh || (compact && peer.enabled))
-            PopupMenuItem(
-              value: 'disconnect',
-              child: Text(peer.fresh ? 'Disconnect' : 'Cancel connection'),
-            ),
-          if (compact && !peer.fresh && !peer.enabled)
-            const PopupMenuItem(value: 'connect', child: Text('Connect')),
         ],
       );
 
   Widget peerConnect(PeerSession peer, String name) => IconButton(
-    tooltip: '${peer.enabled ? 'Cancel connection' : 'Connect'} $name',
-    onPressed: () =>
-        unawaited(peer.enabled ? disconnectPeer(peer) : resumePeer(peer)),
-    icon: Icon(peer.enabled ? Icons.close : Icons.link, size: 20),
-    style: IconButton.styleFrom(minimumSize: const Size(44, 44)),
+    tooltip:
+        '${peer.fresh
+            ? 'Disconnect'
+            : peer.enabled
+            ? 'Cancel connection'
+            : 'Connect'} $name',
+    onPressed: () => unawaited(
+      peer.fresh || peer.enabled ? disconnectPeer(peer) : resumePeer(peer),
+    ),
+    icon: Icon(
+      peer.fresh
+          ? Icons.link_off
+          : peer.enabled
+          ? Icons.close
+          : Icons.link,
+      size: 20,
+    ),
+    style: preferences
+        .actionIconStyle(Theme.of(context).colorScheme)
+        .copyWith(
+          foregroundColor: WidgetStatePropertyAll(
+            peer.fresh
+                ? (peer.controller && !peer.boardReady
+                      ? const Color(0xffe0ac62)
+                      : const Color(0xff55bd83))
+                : Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+        ),
   );
 
   Widget liveConnections() => Card(
@@ -1185,19 +1209,9 @@ class _ControllerHomeState extends State<ControllerHome>
                       style: Theme.of(context).textTheme.labelLarge,
                     ),
                   ),
-                  Tooltip(
-                    message: peerStatus(peer),
-                    child: Icon(
-                      peer.fresh
-                          ? Icons.circle
-                          : peer.enabled
-                          ? Icons.sync
-                          : Icons.circle_outlined,
-                      size: 10,
-                      color: peer.fresh && (!peer.controller || peer.boardReady)
-                          ? const Color(0xff55bd83)
-                          : Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
+                  peerConnect(
+                    peer,
+                    peer.controller ? 'PCController' : 'Pealayer',
                   ),
                   peerMore(
                     peer,
@@ -1250,7 +1264,7 @@ class _ControllerHomeState extends State<ControllerHome>
                 (!peer.controller || peer.state['connected'] == true),
           ),
           const SizedBox(width: 4),
-          if (!peer.fresh) peerConnect(peer, name),
+          peerConnect(peer, name),
           peerMore(peer, name),
         ],
       ),
@@ -1848,17 +1862,13 @@ class _ControllerHomeState extends State<ControllerHome>
                 ),
             ]),
           if (board.fresh &&
-              (board.state['have_board_name'] == true ||
-                  object(board.state['hello'])['name'] != null ||
-                  board.measurementsFresh ||
+              (usableFact(observedBoardName) ||
+                  (board.measurementsFresh &&
+                      (usableFact(status['program_mode']) ||
+                          status['door_open'] is bool)) ||
                   object(board.state['emergency_stop'])['active'] is bool))
             card('Board state', Icons.memory, [
-              fact(
-                'Name',
-                board.fresh
-                    ? '${board.state['have_board_name'] == true && '${object(board.state['board_name'])['name'] ?? ''}'.trim().isNotEmpty ? object(board.state['board_name'])['name'] : object(board.state['hello'])['name'] ?? '—'}'
-                    : 'Unavailable',
-              ),
+              fact('Name', observedBoardName),
               fact(
                 'Mode',
                 board.measurementsFresh
@@ -1938,8 +1948,21 @@ class _ControllerHomeState extends State<ControllerHome>
         side['transitioning'] == false;
   }
 
-  Widget fact(String name, String value) =>
-      ['Unavailable', '—', 'Unknown'].contains(value)
+  bool usableFact(Object? value) =>
+      value != null &&
+      '$value'.trim().isNotEmpty &&
+      !['Unavailable', '—', 'Unknown'].contains('$value');
+  String get observedBoardName {
+    if (!board.fresh) return '';
+    final name = board.state['have_board_name'] == true
+        ? '${object(board.state['board_name'])['name'] ?? ''}'
+        : '';
+    return name.trim().isNotEmpty
+        ? name
+        : '${object(board.state['hello'])['name'] ?? ''}';
+  }
+
+  Widget fact(String name, String value) => !usableFact(value)
       ? const SizedBox.shrink()
       : Padding(
           padding: const EdgeInsets.symmetric(vertical: 5),
@@ -2041,9 +2064,7 @@ class _ControllerHomeState extends State<ControllerHome>
                             ),
                           if (control['kind'] != 'relay' ||
                               preferences.relayLayout == 'explicit')
-                            Wrap(
-                              spacing: 8,
-                              runSpacing: 8,
+                            Row(
                               children: [
                                 for (final entry
                                     in objects(control['actions']).where(
@@ -2056,33 +2077,40 @@ class _ControllerHomeState extends State<ControllerHome>
                                             'off',
                                           ].contains(entry['verb']),
                                     ))
-                                  action(
-                                    '${entry['name']}',
-                                    entry['verb'] == 'stop'
-                                        ? Icons.stop
-                                        : entry['verb'] == 'up'
-                                        ? Icons.arrow_upward
-                                        : entry['verb'] == 'down'
-                                        ? Icons.arrow_downward
-                                        : Icons.power_settings_new,
-                                    board.boardReady &&
-                                            !idleSeatStop(control, entry) &&
-                                            control['locked'] != true &&
-                                            (!estop ||
-                                                [
-                                                  'stop',
-                                                  'off',
-                                                ].contains(entry['verb']))
-                                        ? invokeCallback(control, entry)
-                                        : null,
-                                    priority: [
-                                      'stop',
-                                      'off',
-                                    ].contains(entry['verb']),
-                                    danger: entry['verb'] == 'stop',
-                                    powerVerb: control['kind'] == 'relay'
-                                        ? '${entry['verb']}'
-                                        : null,
+                                  Expanded(
+                                    child: Padding(
+                                      padding: const EdgeInsetsDirectional.only(
+                                        end: 4,
+                                      ),
+                                      child: action(
+                                        '${entry['name']}',
+                                        entry['verb'] == 'stop'
+                                            ? Icons.stop
+                                            : entry['verb'] == 'up'
+                                            ? Icons.arrow_upward
+                                            : entry['verb'] == 'down'
+                                            ? Icons.arrow_downward
+                                            : Icons.power_settings_new,
+                                        board.boardReady &&
+                                                !idleSeatStop(control, entry) &&
+                                                control['locked'] != true &&
+                                                (!estop ||
+                                                    [
+                                                      'stop',
+                                                      'off',
+                                                    ].contains(entry['verb']))
+                                            ? invokeCallback(control, entry)
+                                            : null,
+                                        priority: [
+                                          'stop',
+                                          'off',
+                                        ].contains(entry['verb']),
+                                        danger: entry['verb'] == 'stop',
+                                        powerVerb: control['kind'] == 'relay'
+                                            ? '${entry['verb']}'
+                                            : null,
+                                      ),
+                                    ),
                                   ),
                               ],
                             ),
@@ -2120,44 +2148,41 @@ class _ControllerHomeState extends State<ControllerHome>
                             Builder(
                               builder: (context) {
                                 final observed = channelObservation(control);
+                                final next = objects(control['actions'])
+                                    .where(
+                                      (entry) =>
+                                          entry['verb'] ==
+                                          (observed.active == true
+                                              ? 'off'
+                                              : 'on'),
+                                    )
+                                    .firstOrNull;
+                                final relay =
+                                    control['kind'] == 'relay' &&
+                                    observed.active != null;
                                 return StatePill(
                                   observed.label,
                                   active: observed.active,
+                                  color: relay
+                                      ? (observed.active == true
+                                            ? const Color(0xff55bd83)
+                                            : const Color(0xffe68b85))
+                                      : null,
+                                  actionLabel: relay
+                                      ? '${next?['name'] ?? ''} ${control['name']}'
+                                      : null,
+                                  onPressed:
+                                      relay &&
+                                          next != null &&
+                                          board.boardReady &&
+                                          !busy &&
+                                          control['locked'] != true &&
+                                          (!estop || next['verb'] == 'off')
+                                      ? invokeCallback(control, next)
+                                      : null,
                                 );
                               },
                             ),
-                            if (control['kind'] == 'relay' &&
-                                preferences.relayLayout == 'compact' &&
-                                channelObservation(control).active != null)
-                              for (final entry
-                                  in objects(control['actions']).where(
-                                    (entry) =>
-                                        entry['verb'] ==
-                                        (channelObservation(control).active ==
-                                                true
-                                            ? 'off'
-                                            : 'on'),
-                                  ))
-                                IconButton(
-                                  tooltip:
-                                      '${entry['name']} ${control['name']}',
-                                  icon: const Icon(
-                                    Icons.power_settings_new,
-                                    size: 20,
-                                  ),
-                                  style: relayActionStyle(
-                                    Theme.of(context).colorScheme,
-                                    preferences.buttonStyle,
-                                    entry['verb'] == 'on',
-                                  ),
-                                  onPressed:
-                                      board.boardReady &&
-                                          !busy &&
-                                          control['locked'] != true &&
-                                          (!estop || entry['verb'] == 'off')
-                                      ? invokeCallback(control, entry)
-                                      : null,
-                                ),
                             if (control['kind'] == 'relay' &&
                                 preferences.relayLayout == 'compact' &&
                                 channelObservation(control).active == null)
@@ -2225,6 +2250,11 @@ class _ControllerHomeState extends State<ControllerHome>
                                     ],
                                   );
                                 },
+                              ),
+                            if (control['locked'] == true)
+                              const Tooltip(
+                                message: 'Channel locked',
+                                child: Icon(Icons.lock_outline, size: 16),
                               ),
                             channelMenu(control),
                           ],
@@ -2439,64 +2469,73 @@ class _ControllerHomeState extends State<ControllerHome>
     final validDisplay =
         displayTarget == 'segments' || (displayTarget == 'lcd' && lcdAvailable);
     return grid([
-      card('Live front panel', Icons.dialpad, [
-        if (ready &&
-            (full || board.state['have_front_panel_segments'] == true) &&
-            panel['raw_segments'] is List &&
-            (panel['raw_segments'] as List).length == 4 &&
-            (panel['raw_segments'] as List).every(
-              (v) => v is int && v >= 0 && v <= 255,
-            ))
-          SevenSegmentPreview(
-            segments: (panel['raw_segments'] as List).whereType<int>().toList(),
-            brightness: panel['brightness'] as int? ?? 0,
-            active: panel['segments_active'] == true,
-          ),
+      if (ready &&
+          (full ||
+              board.state['have_front_panel_segments'] == true ||
+              panel['tm1637_detection_known'] == true ||
+              (board.measurementsFresh &&
+                  (object(board.state['status'])['active_keys'] is int ||
+                      object(board.state['status'])['menu_page'] is int))))
+        card('Live front panel', Icons.dialpad, [
+          if (ready &&
+              (full || board.state['have_front_panel_segments'] == true) &&
+              panel['raw_segments'] is List &&
+              (panel['raw_segments'] as List).length == 4 &&
+              (panel['raw_segments'] as List).every(
+                (v) => v is int && v >= 0 && v <= 255,
+              ))
+            SevenSegmentPreview(
+              segments: (panel['raw_segments'] as List)
+                  .whereType<int>()
+                  .toList(),
+              brightness: panel['brightness'] as int? ?? 0,
+              active: panel['segments_active'] == true,
+            ),
 
-        const SizedBox(height: 12),
-        fact(
-          'TM1637',
-          ready && panel['tm1637_detection_known'] == true
-              ? panel['tm1637_detected'] == true
-                    ? 'Detected'
-                    : 'Not detected'
-              : 'Unknown',
-        ),
-        if (lcdAvailable)
-          Text(
-            '${panel['lcd_line_1']}\n${panel['lcd_line_2']}',
-            style: const TextStyle(fontFamily: 'monospace'),
+          const SizedBox(height: 12),
+          fact(
+            'TM1637',
+            ready && panel['tm1637_detection_known'] == true
+                ? panel['tm1637_detected'] == true
+                      ? 'Detected'
+                      : 'Not detected'
+                : 'Unknown',
           ),
-        fact(
-          'Pressed keys',
-          full
-              ? '${panel['pressed_keys'] ?? 'Unavailable'}'
-              : board.measurementsFresh &&
-                    object(board.state['status'])['active_keys'] is int
-              ? '${object(board.state['status'])['active_keys']}'
-              : 'Unavailable',
-        ),
-        fact(
-          'Page',
-          full
-              ? '${panel['menu_page'] ?? 'Unavailable'}'
-              : board.measurementsFresh &&
-                    object(board.state['status'])['menu_page'] is int
-              ? '${object(board.state['status'])['menu_page']}'
-              : 'Unavailable',
-        ),
-        const SizedBox(height: 12),
-        FrontPanelButtons(
-          captured: full && panel['host_captured'] == true,
-          enabled: full && !busy,
-          pressedKeys: full && panel['pressed_keys'] is int
-              ? panel['pressed_keys'] as int
-              : board.measurementsFresh
-              ? object(board.state['status'])['active_keys'] as int?
-              : null,
-          dispatch: (command) => unawaited(boardCommand(command)),
-        ),
-      ]),
+          if (lcdAvailable)
+            Text(
+              '${panel['lcd_line_1']}\n${panel['lcd_line_2']}',
+              style: const TextStyle(fontFamily: 'monospace'),
+            ),
+          fact(
+            'Pressed keys',
+            full
+                ? '${panel['pressed_keys'] ?? 'Unavailable'}'
+                : board.measurementsFresh &&
+                      object(board.state['status'])['active_keys'] is int
+                ? '${object(board.state['status'])['active_keys']}'
+                : 'Unavailable',
+          ),
+          fact(
+            'Page',
+            full
+                ? '${panel['menu_page'] ?? 'Unavailable'}'
+                : board.measurementsFresh &&
+                      object(board.state['status'])['menu_page'] is int
+                ? '${object(board.state['status'])['menu_page']}'
+                : 'Unavailable',
+          ),
+          const SizedBox(height: 12),
+          FrontPanelButtons(
+            captured: full && panel['host_captured'] == true,
+            enabled: full && !busy,
+            pressedKeys: full && panel['pressed_keys'] is int
+                ? panel['pressed_keys'] as int
+                : board.measurementsFresh
+                ? object(board.state['status'])['active_keys'] as int?
+                : null,
+            dispatch: (command) => unawaited(boardCommand(command)),
+          ),
+        ]),
       card('Display message', Icons.text_fields, [
         DropdownButtonFormField<String>(
           key: ValueKey('${board.targetStamp}/$lcdAvailable/$displayTarget'),
@@ -2847,8 +2886,6 @@ class _ControllerHomeState extends State<ControllerHome>
           }),
         ),
       ),
-      if (effects.isEmpty)
-        const Text('No effects advertised in the current snapshot.'),
       for (final effect in effects)
         ListTile(
           contentPadding: EdgeInsets.zero,
@@ -2867,14 +2904,22 @@ class _ControllerHomeState extends State<ControllerHome>
                 : null,
           ),
         ),
-      action(
-        'Cancel playback',
-        Icons.stop,
-        board.boardReady
-            ? () => unawaited(boardCommand('effect cancel', safetyStop: true))
-            : null,
-        priority: true,
-      ),
+      if (board.boardReady &&
+          (object(object(board.state['macros'])['playback'])['running'] ==
+                  true ||
+              ((object(board.state['outputs'])['effect_id'] as num?) ?? 0) >
+                  0 ||
+              ((object(board.state['outputs'])['effect_pending_id'] as num?) ??
+                      0) >
+                  0))
+        action(
+          'Cancel playback',
+          Icons.stop,
+          board.boardReady
+              ? () => unawaited(boardCommand('effect cancel', safetyStop: true))
+              : null,
+          priority: true,
+        ),
     ]);
   }
 
@@ -3161,64 +3206,75 @@ class _ControllerHomeState extends State<ControllerHome>
     ]);
   }
 
-  Widget playerEffects() => card('Effects & timeline', Icons.auto_awesome, [
-    if (!player.fresh)
-      const Text(
-        'Connect directly to Pealayer to load the current effect and cue catalog.',
-      ),
-    for (final effect in objects(player.state['controller_effects']))
-      ListTile(
-        contentPadding: EdgeInsets.zero,
-        title: Text('${effect['name']}'),
-        subtitle: Text('${effect['category'] ?? ''}'),
-        trailing: Wrap(
-          children: [
-            IconButton(
-              tooltip: 'Play effect',
-              icon: const Icon(Icons.play_arrow),
-              onPressed: playerReady
+  Widget playerEffects() =>
+      !player.fresh ||
+          (objects(player.state['controller_effects']).isEmpty &&
+              objects(player.state['cues']).isEmpty &&
+              object(player.state['hardware_details'])['macro_running'] != true)
+      ? const SizedBox.shrink()
+      : card('Effects & timeline', Icons.auto_awesome, [
+          for (final effect in objects(player.state['controller_effects']))
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text('${effect['name']}'),
+              subtitle: Text('${effect['category'] ?? ''}'),
+              trailing: Wrap(
+                children: [
+                  IconButton(
+                    tooltip: 'Play effect',
+                    icon: const Icon(Icons.play_arrow),
+                    onPressed: playerReady
+                        ? () => unawaited(
+                            playerCommand('pealayer.controller_effect.play', {
+                              'reference': effect['reference'],
+                            }),
+                          )
+                        : null,
+                  ),
+                  IconButton(
+                    tooltip: 'Place cue at current position',
+                    icon: const Icon(Icons.add),
+                    onPressed:
+                        player.fresh &&
+                            !busy &&
+                            player.state['playback_time'] is num
+                        ? () => unawaited(
+                            playerCommand(
+                              'pealayer.controller_effect_cue.add',
+                              {
+                                'reference': effect['reference'],
+                                'start_time_ms':
+                                    ((player.state['playback_time'] as num) *
+                                            1000)
+                                        .round(),
+                              },
+                            ),
+                          )
+                        : null,
+                  ),
+                ],
+              ),
+            ),
+          if (objects(player.state['cues']).isNotEmpty) const Divider(),
+          for (final cue in objects(player.state['cues']))
+            ListTile(
+              title: Text('${cue['name'] ?? cue['reference'] ?? cue['id']}'),
+              subtitle: Text('${cue['start_time_ms']} ms'),
+              onTap: player.fresh && !busy
+                  ? () => unawaited(editPlayerCue(cue))
+                  : null,
+            ),
+          if (object(player.state['hardware_details'])['macro_running'] == true)
+            action(
+              'Stop effects',
+              Icons.stop,
+              player.fresh
                   ? () => unawaited(
-                      playerCommand('pealayer.controller_effect.play', {
-                        'reference': effect['reference'],
-                      }),
+                      playerCommand('pealayer.controller_effect.stop'),
                     )
                   : null,
             ),
-            IconButton(
-              tooltip: 'Place cue at current position',
-              icon: const Icon(Icons.add),
-              onPressed:
-                  player.fresh && !busy && player.state['playback_time'] is num
-                  ? () => unawaited(
-                      playerCommand('pealayer.controller_effect_cue.add', {
-                        'reference': effect['reference'],
-                        'start_time_ms':
-                            ((player.state['playback_time'] as num) * 1000)
-                                .round(),
-                      }),
-                    )
-                  : null,
-            ),
-          ],
-        ),
-      ),
-    const Divider(),
-    for (final cue in objects(player.state['cues']))
-      ListTile(
-        title: Text('${cue['name'] ?? cue['reference'] ?? cue['id']}'),
-        subtitle: Text('${cue['start_time_ms']} ms'),
-        onTap: player.fresh && !busy
-            ? () => unawaited(editPlayerCue(cue))
-            : null,
-      ),
-    action(
-      'Stop effects',
-      Icons.stop,
-      player.fresh
-          ? () => unawaited(playerCommand('pealayer.controller_effect.stop'))
-          : null,
-    ),
-  ]);
+        ]);
   Future<void> editPlayerCue(Json cue) async {
     if (!player.fresh ||
         busy ||
@@ -3630,7 +3686,11 @@ class _ControllerHomeState extends State<ControllerHome>
     } else {
       changes = await showDialog<Json>(
         context: context,
-        builder: (_) => ChannelEditor(control: control),
+        builder: (_) => ChannelEditor(
+          control: control,
+          folders: objects(board.peripherals['folders']),
+          controls: objects(board.peripherals['controls']),
+        ),
       );
     }
     if (changes == null || !mounted) return;
@@ -3727,7 +3787,7 @@ class _ControllerHomeState extends State<ControllerHome>
     }
     switch (method) {
       case 'app.ping':
-        return {'ok': true, 'app': 'PCController', 'version': '0.1.7'};
+        return {'ok': true, 'app': 'PCController'};
       case 'app.capabilities':
         return {
           'jsonrpc': '2.0',

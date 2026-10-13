@@ -113,7 +113,7 @@ class PeerTransport {
     } catch (_) {
       if (body != null) throw const Uncertain();
       throw const Rejected(
-        'Host unavailable or invalid response. Check address, access token and network.',
+        'Host unavailable or invalid response. Check its address and network.',
       );
     }
   }
@@ -323,14 +323,19 @@ class PeerSession extends ChangeNotifier {
   DateTime? received;
   int freshnessMs = 5000;
   int statusIntervalMs = 250;
-  // PWM is polled every two seconds; status freshness can be only 1.5 seconds.
-  // Allow two missed read intervals, while still requiring the live board owner.
+  // A continuous acknowledged live stream retains same-owner readback until a
+  // change event; degraded request/response reads keep their bounded age budget.
   int get pwmFreshnessMs => freshnessMs.clamp(6000, 120000);
   bool get pwmReadbackFresh =>
       boardReady &&
       _pwmAvailable != false &&
       pwmUpdated != null &&
-      DateTime.now().difference(pwmUpdated!).inMilliseconds < pwmFreshnessMs;
+      (liveStateAvailable ||
+          DateTime.now().difference(pwmUpdated!).inMilliseconds <
+              pwmFreshnessMs);
+  bool get liveStateAvailable =>
+      _socket != null && fresh && (!controller || subscribed);
+  DateTime? _lastFallbackRead;
   String websocketPath = '/ws';
   bool get measurementsFresh =>
       fresh &&
@@ -397,6 +402,7 @@ class PeerSession extends ChangeNotifier {
 
   Future<void> _readRefresh(int epoch, PeerTransport peer) async {
     try {
+      _lastFallbackRead = DateTime.now();
       final value = object(
         await peer.request(controller ? '/api/snapshot' : '/api/player/status'),
       );
@@ -561,6 +567,7 @@ class PeerSession extends ChangeNotifier {
   }
 
   Future<void> _openOnce(int epoch) async {
+    _startConnectionMonitor(epoch);
     try {
       if (controller) {
         final config = object(await transport!.request('/api/ui-config'));
@@ -721,29 +728,36 @@ class PeerSession extends ChangeNotifier {
         },
         cancelOnError: true,
       );
-      _freshness?.cancel();
-      _freshness = Timer.periodic(const Duration(seconds: 1), (_) {
-        if (epoch != generation) return;
-        if (fresh &&
-            state['connected'] == true &&
-            (pwmUpdated == null ||
-                DateTime.now().difference(pwmUpdated!).inMilliseconds >=
-                    2000)) {
-          unawaited(refreshPwm());
-        }
-        // Only repaint when freshness expires, not continuous UI persistence.
-        if (!fresh && online) {
-          online = false;
-          notifyListeners();
-          _scheduleRefresh(epoch);
-        }
-      });
     } catch (e) {
       if (epoch == generation) {
         error = '$e';
         _lost(epoch);
       }
     }
+  }
+
+  void _startConnectionMonitor(int epoch) {
+    if (_freshness?.isActive == true) return;
+    _freshness = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (epoch != generation || !enabled) return;
+      if (!fresh && online) {
+        online = false;
+        notifyListeners();
+      }
+      if (liveStateAvailable || _openingTask != null) return;
+      if (_socket != null && !fresh) {
+        unawaited(networkAvailable());
+        return;
+      }
+      final interval = (freshnessMs ~/ 2).clamp(1000, 5000);
+      if (_lastFallbackRead == null ||
+          DateTime.now().difference(_lastFallbackRead!).inMilliseconds >=
+              interval) {
+        // Only a degraded transport reads periodically. Join in-flight reads;
+        // never replay commands or infer PWM from a telemetry heartbeat.
+        unawaited(refresh());
+      }
+    });
   }
 
   Timer? _refreshTimer;
@@ -960,6 +974,8 @@ class PeerSession extends ChangeNotifier {
     instances = [];
     artifacts = [];
     received = null;
+    _lastFallbackRead = null;
+    _freshness = null;
     operation = {};
     pwmValues = {};
     pwmUpdated = null;

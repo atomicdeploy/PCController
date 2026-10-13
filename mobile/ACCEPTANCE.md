@@ -535,3 +535,14 @@ below its previously verified 1 GiB installer threshold. No repeated install,
 data removal, reserve bypass or unlock was attempted. The continuous acceptance
 goal remains active. android-0.1.10-delivery.json records exact identities and
 source/device/physical acceptance separately.
+
+## Latest contextual utility rejection
+
+The complete requirements are retained in root/mobile AGENTS.md and the scoped
+source/device audit is CONTEXTUAL-UTILITY-AUDIT.md. This wave targets 0.1.11+12:
+one lifecycle connection toggle, contextual effect cancellation and live cards,
+clickable guarded relay indicators, balanced full-width action rows, kind-scoped
+folder dropdown/dialog, event-first readback and only degraded-transport polling.
+Thirty focused checks and one source renderer passed. Native Cafe directory and
+Pealayer active-protocol readbacks are recorded separately from Android multicast,
+OS launcher/branding, peer install, physical/audio and human acceptance.
