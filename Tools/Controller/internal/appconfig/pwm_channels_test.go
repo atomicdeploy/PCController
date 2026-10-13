@@ -74,10 +74,10 @@ func TestPWMStepConfigurationAndActionCatalog(t *testing.T) {
 		if control.Key != "pwm.0" {
 			continue
 		}
-		if control.StepPercent != step || len(control.Actions) != 4 {
+		if control.StepPercent != step || len(control.Actions) != 5 || control.OnBehavior != "full" {
 			t.Fatalf("missing configurable actions: %+v", control)
 		}
-		for i, verb := range []string{"on", "off", "increase", "decrease"} {
+		for i, verb := range []string{"on", "off", "toggle", "increase", "decrease"} {
 			if control.Actions[i].ID != "pwm.0."+verb || control.Actions[i].Verb != verb {
 				t.Fatalf("wrong semantic action %+v", control.Actions[i])
 			}

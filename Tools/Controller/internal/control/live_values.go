@@ -25,6 +25,7 @@ func (runtime *Runtime) PublishPWMValues(values native.PWMValues) {
 }
 
 func (runtime *Runtime) publishPWMValuesLocked(values native.PWMValues) {
+	runtime.observePWMRecallLocked(values)
 	for _, value := range values.Values {
 		if value > 4095 {
 			return
