@@ -292,4 +292,20 @@ Ten focused appearance/PWM/relay regressions passed; five appearance regressions
 were rerun after the compact-menu adjustment. Analyzer and phone/tablet controlled
 rendering passed. Renderer images replay the recorded read-only telemetry and
 are not deployed-device visual or physical acceptance. Release version is 0.1.5+6;
-the package and fresh Android delivery evidence will be recorded after the build.
+one ARM64 release build passed from checkpoint `0db47657`. APK bytes: 19,861,303;
+SHA-256: `999506a72adfb3271be5815b06210eb963cafecbf0927b4c57c6baa18f3a2935`.
+
+The SM-X906B tablet updated in place using an ordinary non-streamed `install -r`;
+installed version/code 0.1.5/6 and base.apk SHA-256 match this deliverable. The
+SM-S908E phone remains 0.1.2/3 with its prior APK hash; current available storage
+is 472,384 KiB, below its previously verified 1 GiB vendor low-storage threshold.
+No repeat phone install, data removal or storage-reserve bypass was performed.
+
+Both ordinary launchers were invoked and both invalid-token read-only app.ping
+Intent requests reached Dart and returned -32001. The phone remained locked.
+The tablet became unlocked during verification, with Termux in the foreground
+when its current display was inspected; its live use was preserved. This is not
+a deployed Flutter visual/touch test. Authorized RPC/peer flows, physical behavior,
+standalone support and human acceptance remain open. The coordinated chat owns
+the subsequent semantic relay-color/caption-alignment source follow-up; 0.1.5 is
+the delivered appearance checkpoint, not proof of that subsequent requested fix.
