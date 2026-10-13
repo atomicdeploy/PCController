@@ -50,8 +50,22 @@ func TestBrowserUIConfigRPCPersistsOnlyRequestedHostFields(t *testing.T) {
 	if get.Error != nil || !ok || initial.AppTitle != "Workshop Controller" || initial.SetupComplete {
 		t.Fatalf("initial UI config=%#v error=%v", get.Result, get.Error)
 	}
-	if initial.PeripheralNames["relay.5"] != "Workbench lamp" || len(initial.Peripherals) != 34 || len(initial.Controls) != 26 {
+	// An unconfigured board advertises its safe generic channels, not cinema
+	// motion channels or raw seat relays belonging to a configured profile.
+	if initial.PeripheralNames["relay.5"] != "Workbench lamp" || len(initial.Peripherals) != 32 || len(initial.Controls) != 20 {
 		t.Fatalf("initial peripheral contract names=%#v descriptors=%d controls=%d", initial.PeripheralNames, len(initial.Peripherals), len(initial.Controls))
+	}
+	renamedRelay := false
+	for _, item := range initial.Controls {
+		if item.Key == "seat.a" || item.Key == "seat.b" || item.Key == "relay.1" {
+			t.Fatalf("unconfigured board advertised profile-specific control %q", item.Key)
+		}
+		if item.Key == "relay.5" {
+			renamedRelay = item.Name == "Workbench lamp" && item.Kind == "relay"
+		}
+	}
+	if !renamedRelay {
+		t.Fatal("UI catalog lost the renamed relay")
 	}
 	if !initial.SegmentScroll.Enabled || len(initial.SegmentScroll.Pages) != 1 || initial.SegmentScroll.Pages[0] != "door" {
 		t.Fatalf("initial segment scroll config=%+v", initial.SegmentScroll)

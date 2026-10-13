@@ -1,6 +1,6 @@
 # PU850 non-business import ledger
 
-Source: C:/Users/David/Desktop/PU850. Reviewed on 2026-10-13 without
+Source: the user-provided local PU850 checkout. Reviewed on 2026-10-13 without
 modifying, building, launching or installing the PU850 project.
 
 MainActivity.java was read in full, all 5,429 physical lines (including comments

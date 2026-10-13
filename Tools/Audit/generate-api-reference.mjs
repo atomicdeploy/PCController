@@ -91,6 +91,7 @@ const capabilityGroups = {
   shutdown: ["controller.quit", "controller.exit"],
   messages: ["controller.message.send"],
   host_configuration: [
+    "controller.udp.config.set", "controller.udp.subscribe", "controller.udp.unsubscribe",
 		"controller.mirror.configure",
     "controller.host_menu.configure", "controller.host_menu.config.set", "controller.ui.config.set",
     "controller.peripherals.set", "controller.board_profile.update", "controller.peripheral.presentation.update",
@@ -104,7 +105,7 @@ const capabilityGroups = {
   ],
   virtual_keys: ["controller.os.key", "controller.virtual_key"],
   power_actions: ["controller.os.power"],
-  bridge_calls: ["controller.bridge.call", "controller.discovery.connect"],
+  bridge_calls: ["controller.bridge.call", "controller.discovery.connect", "controller.udp.call"],
   integrations: [
 		"controller.audio.play",
     "controller.device.status", "controller.device.action", "controller.device.inspect",
@@ -113,6 +114,7 @@ const capabilityGroups = {
 		"controller.discovery.config.set",
   ],
   read: [
+    "controller.udp.config.get", "controller.udp.status", "controller.udp.events.get",
 		"controller.mirror.inspect", "controller.mirror.status",
 		"controller.audio.cues",
     "controller.artifact.manifest", "controller.artifact.list", "controller.update.status",
