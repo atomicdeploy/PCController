@@ -51,6 +51,12 @@ Choose a channel from the advertised control list; do not infer channel numbers
 from a 0–100 brightness range. MOSFET controls advertise `pwm.N.on`, `.off`,
 `.increase` and `.decrease`. On requests 100% logical intensity, Off requests
 0%; relative actions use the channel's advertised `step_percent` (default 1%).
+When that step is smaller than the hardware's representable change, a relative
+action advances by one actual 12-bit duty quantum in the requested direction,
+except at 0/4095 endpoints. This prevents repeated Increase/Decrease getting
+stuck on unchanged readback, including the first code above zero. Actual
+readback remains authoritative: the configured logical step is not a promise
+of finer-than-hardware resolution, and absolute-percent conversion is unchanged.
 The existing `controller.control.invoke {"action_id":"pwm.0.increase"}` carries
 the same action chosen in RF assignments; no extra per-binding delta parameter
 is required. Existing motion mappings and firmware RF mappings are not rewritten.
