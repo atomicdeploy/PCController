@@ -181,6 +181,25 @@ func TestBuzzerPlaybackTimelineDoesNotRebufferStaleQueuedNote(t *testing.T) {
 	}
 }
 
+func TestBuzzerPlaybackTimelineRebuffersFreshSchedulerHandoff(t *testing.T) {
+	timeline := newBuzzerPlaybackTimeline()
+	base := time.Unix(1700000000, 0)
+	now := base.Add(75 * time.Millisecond)
+	first := timeline.plan(buzzerMirrorJob{source: "board-a", timed: true,
+		deviceMicros: 1000, durationMS: 10, observedAt: base}, now)
+	if !first.start.Equal(now.Add(buzzerPlayoutDelay)) || first.end.Sub(first.start) != 10*time.Millisecond {
+		t.Fatalf("handoff delay truncated first note: %+v", first)
+	}
+	// A later candidate can be newer than receipt yet older than scheduling.
+	received := base.Add(180 * time.Millisecond)
+	now = base.Add(240 * time.Millisecond)
+	next := timeline.plan(buzzerMirrorJob{source: "board-a", timed: true,
+		deviceMicros: 101000, durationMS: 10, observedAt: received}, now)
+	if !next.start.Equal(now.Add(buzzerPlayoutDelay)) || next.end.Sub(next.start) != 10*time.Millisecond {
+		t.Fatalf("handoff delay truncated following note: %+v", next)
+	}
+}
+
 func TestBuzzerPlaybackTimelineReanchorsAfterDeviceRestart(t *testing.T) {
 	timeline := newBuzzerPlaybackTimeline()
 	base := time.Unix(1700000000, 0)

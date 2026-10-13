@@ -63,7 +63,12 @@ func (timeline *buzzerPlaybackTimeline) plan(job buzzerMirrorJob, now time.Time)
 	}
 	start := observedAt
 	if job.timed {
+		fresh := !observedAt.After(now) && now.Sub(observedAt) <= maxBuzzerObservedSkew
 		start = observedAt.Add(buzzerPlayoutDelay)
+		if fresh && !start.After(now) {
+			// Integration/scheduler handoff can itself miss the cushion.
+			start = now.Add(buzzerPlayoutDelay)
+		}
 		if previous, ok := timeline.anchors[job.source]; ok {
 			delta := time.Duration(uint32(job.deviceMicros-previous.deviceMicros)) * time.Microsecond
 			candidate := previous.start.Add(delta)
@@ -75,8 +80,7 @@ func (timeline *buzzerPlaybackTimeline) plan(job buzzerMirrorJob, now time.Time)
 				// A fresh note that missed the cushion must not lose its entire
 				// duration. Re-anchor this source, then retain device cadence from
 				// that anchor. Do not rehabilitate a stale queued observation.
-				fresh := now.Sub(observedAt) <= maxBuzzerObservedSkew
-				if !candidate.Before(observedAt) || !fresh {
+				if !candidate.Before(now) || !fresh {
 					start = candidate
 				}
 			}

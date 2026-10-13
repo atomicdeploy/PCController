@@ -7,8 +7,9 @@ Owner: Linux/board mirroring issue #106.
 The 50 ms receiver cushion alone did not cover arrival bursts beyond that
 cushion: the old device-clock deadline deducted lateness from a fresh note,
 and could discard a short note entirely. A fresh observation now reanchors
-its source at receipt plus the same 50 ms cushion if its mapped start has
-already passed. The original duration is retained; following notes resume
+its source with the same 50 ms cushion if its mapped start has already passed,
+including a fresh first note delayed by scheduler handoff. The original duration
+is retained; following notes resume
 device-clock cadence from that anchor. This is bounded playout recovery, not
 sample-exact acoustic synchronization or permission to replay old audio.
 
@@ -27,7 +28,7 @@ and uses its hardware revision for peer delivery rather than a 100 ms sample.
 No extra board polling, synthetic frames or interpolation is introduced.
 
 Go host compilation and focused package vet passed. Pure regression cases were
-added for fresh 10 ms recovery, stale queued notes and cross-domain frame
+added for fresh 10 ms recovery, scheduler handoff, stale queued notes and cross-domain frame
 budgets; tests/CI were not run in this iteration at the user's request.
 Pealayer passed offline cargo check with existing warnings. Deployment and
 physical short-note/segment fidelity must be recorded separately below.
