@@ -309,6 +309,7 @@ type Runtime struct {
 	eventLog      []Event
 	activityLog   []Event
 	rfActivityLog []Event
+	rfLastSeen    map[rfGestureKey]time.Time
 	nextEventID   uint64
 	eventNotify   chan struct{}
 	rfMu          sync.Mutex
@@ -4067,6 +4068,7 @@ func (runtime *Runtime) publishEvent(event Event) Event {
 	runtime.nextEventID++
 	event.ID = runtime.nextEventID
 	event.Time = time.Now()
+	runtime.recordRFReceptionLocked(event)
 	runtime.eventLog = append(runtime.eventLog, event)
 	if len(runtime.eventLog) > 512 {
 		runtime.eventLog = append([]Event(nil), runtime.eventLog[len(runtime.eventLog)-512:]...)

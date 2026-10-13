@@ -1874,8 +1874,9 @@ func (service *Service) dispatch(
 
 func dispatchRPCError(err error) *RPCError {
 	var confirmation *pwmConfirmationError
-	if errors.As(err, &confirmation) {
-		return &RPCError{Code: -32010, Message: confirmation.Error(), Data: map[string]any{
+	var actionConfirmation *control.PWMActionConfirmationError
+	if errors.As(err, &confirmation) || errors.As(err, &actionConfirmation) {
+		return &RPCError{Code: -32010, Message: err.Error(), Data: map[string]any{
 			"kind": "confirmation_unavailable", "resource": "pwm", "write_acknowledged": true, "retryable": false,
 		}}
 	}
