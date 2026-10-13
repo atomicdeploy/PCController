@@ -22,6 +22,13 @@ void main() {
                   : colors.error;
               if (presentation == 'filled') {
                 expect(style.backgroundColor!.resolve({}), tone);
+                final foreground = style.foregroundColor!.resolve({})!;
+                final a = foreground.computeLuminance(),
+                    b = tone.computeLuminance();
+                expect(
+                  a > b ? (a + .05) / (b + .05) : (b + .05) / (a + .05),
+                  greaterThanOrEqualTo(4.5),
+                );
               } else {
                 expect(style.foregroundColor!.resolve({}), tone);
               }
@@ -35,4 +42,10 @@ void main() {
       }
     },
   );
+  test('mid-luminance semantic fill chooses readable text', () {
+    final colors = ColorScheme.fromSeed(seedColor: Colors.blue)
+        .copyWith(error: const Color(0xffef6461));
+    final style = relayActionStyle(colors, 'filled', false);
+    expect(style.foregroundColor!.resolve({}), Colors.black);
+  });
 }

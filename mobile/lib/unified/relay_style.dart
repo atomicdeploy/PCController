@@ -9,7 +9,8 @@ ButtonStyle relayActionStyle(ColorScheme colors, String presentation, bool on) {
       : colors.error;
   final filled = presentation == 'filled';
   final tonal = presentation == 'tonal';
-  final onTone = ThemeData.estimateBrightnessForColor(tone) == Brightness.light
+  final luminance = tone.computeLuminance();
+  final onTone = (luminance + .05) / .05 >= 1.05 / (luminance + .05)
       ? Colors.black
       : Colors.white;
   return ButtonStyle(
