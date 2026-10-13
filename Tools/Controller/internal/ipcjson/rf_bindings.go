@@ -137,6 +137,9 @@ func (service *Service) putRFBinding(raw json.RawMessage) (any, error) {
 	if len(rule.Name) > 64 || strings.TrimSpace(rule.Name) == "" {
 		return nil, errors.New("RF binding name must be 1..64 bytes")
 	}
+	if err := validateRFControlActions(rule.Actions, service.peripheralSettings().Controls); err != nil {
+		return nil, err
+	}
 	if service.UpdateHostConfig == nil {
 		return nil, errors.New("persistent host configuration is unavailable")
 	}
@@ -190,6 +193,31 @@ func (service *Service) putRFBinding(raw json.RawMessage) (any, error) {
 	}
 	service.Client.EmitHostEvent("rf.bindings.changed", "RF assignment saved")
 	return rfBindings(service.hostConfig()), nil
+}
+
+// Resolve the same catalog used by the assignment editor without executing any
+// action. Invalid drafts must not reach persistent configuration or enable keys.
+func validateRFControlActions(actions []appconfig.AutomationAction, controls []appconfig.ControlDescriptor) error {
+	for index, action := range actions {
+		if !strings.EqualFold(strings.TrimSpace(action.Type), "control") {
+			continue
+		}
+		reason := ""
+		if strings.TrimSpace(action.ActionID) == "" {
+			reason = "required"
+		} else if len(action.ActionID) > 128 || strings.ContainsAny(action.ActionID, " \x00\r\n") {
+			reason = "invalid_format"
+		} else if _, _, advertised := advertisedSemanticAction(controls, action.ActionID); !advertised {
+			reason = "not_advertised"
+		}
+		if reason != "" {
+			return &RPCError{Code: -32602, Message: "Choose an available control action before saving this assignment", Data: map[string]any{
+				"kind": "validation_error", "resource": "rf_binding",
+				"field": fmt.Sprintf("binding.actions[%d].action_id", index), "reason": reason,
+			}}
+		}
+	}
+	return nil
 }
 
 func (service *Service) removeRFBinding(raw json.RawMessage) (any, error) {

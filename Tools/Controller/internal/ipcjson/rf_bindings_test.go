@@ -82,6 +82,48 @@ func TestRFBindingCRUDPreservesUnrelatedRulesAndRejectsAmbiguity(t *testing.T) {
 	}
 }
 
+func TestRFBindingControlValidationHasHumanMessageAndNoSideEffects(t *testing.T) {
+	for _, test := range []struct{ id, reason string }{
+		{"", "required"}, {"pwm.99.on", "not_advertised"},
+		{"pwm.2.unknown", "not_advertised"}, {"pwm.2. on", "invalid_format"},
+	} {
+		t.Run(test.reason+test.id, func(t *testing.T) {
+			service, config := rfBindingTestService(t)
+			before, _ := json.Marshal(config)
+			mutations := 0
+			service.UpdateHostConfig = func(func(*appconfig.Config) error) error { mutations++; return nil }
+			code := uint32(42)
+			rule := appconfig.Automation{Name: "Draft", Enabled: true, Match: appconfig.AutomationMatch{Kind: "rf.gesture", Source: "rf", RFCode: &code, RFBits: 24, RFProtocol: 1, Gesture: "down"}, Actions: []appconfig.AutomationAction{
+				{Type: "virtual-key", VirtualKey: "F23", HoldMS: 50}, {Type: "control", ActionID: test.id},
+			}}
+			raw, _ := json.Marshal(map[string]any{"binding": rule, "allow_keyboard": true})
+			response := service.Dispatch(context.Background(), Request{Method: "controller.rf.binding.put", Params: raw})
+			if response.Error == nil || response.Error.Code != -32602 || response.Error.Message != "Choose an available control action before saving this assignment" {
+				t.Fatalf("wrong human error %+v", response.Error)
+			}
+			data, ok := response.Error.Data.(map[string]any)
+			if !ok || data["kind"] != "validation_error" || data["resource"] != "rf_binding" || data["field"] != "binding.actions[1].action_id" || data["reason"] != test.reason {
+				t.Fatalf("missing technical disclosure %+v", response.Error.Data)
+			}
+			after, _ := json.Marshal(config)
+			if mutations != 0 || string(before) != string(after) {
+				t.Fatal("invalid draft touched persistence or keyboard policy")
+			}
+		})
+	}
+}
+
+func TestRFBindingAdvertisedPWMControlCanBeSavedWithoutActuation(t *testing.T) {
+	service, config := rfBindingTestService(t)
+	raw := json.RawMessage(`{"binding":{"name":"Lighting","enabled":true,"match":{"kind":"rf.gesture","source":"rf","rf_code":42,"rf_bits":24,"rf_protocol":1,"gesture":"down"},"actions":[{"type":"control","action_id":"pwm.2.increase"}]}}`)
+	if _, err := service.putRFBinding(raw); err != nil {
+		t.Fatal(err)
+	}
+	if len(config.Automations) != 1 || config.Automations[0].Actions[0].ActionID != "pwm.2.increase" {
+		t.Fatal("valid catalog action was not persisted")
+	}
+}
+
 func TestRFBindingKeyboardRequiresExplicitPolicyConsent(t *testing.T) {
 	service, config := rfBindingTestService(t)
 	raw := json.RawMessage(`{"binding":{"name":"Keyboard","enabled":true,"match":{"kind":"rf.gesture","source":"rf","rf_code":12345,"rf_bits":24,"rf_protocol":1,"gesture":"down"},"actions":[{"type":"virtual-key","virtual_key":"F23","hold_ms":50}]}}`)
