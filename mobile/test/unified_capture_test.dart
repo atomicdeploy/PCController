@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:pccontroller_mobile/main.dart';
 import 'package:pccontroller_mobile/unified/effect_editor.dart';
 import 'package:pccontroller_mobile/unified/transport.dart';
+import 'package:pccontroller_mobile/unified/pwm_control.dart';
 
 import 'dart:ui' as ui;
 
@@ -121,6 +122,49 @@ void main() {
                   .writeAsBytes(data!.buffer.asUint8List());
               image.dispose();
             });
+            if (page.$1 == 1) {
+              home.preferences.relayLayout = 'explicit';
+              home.preferences.refresh();
+              await tester.pumpAndSettle();
+              await tester.runAsync(() async {
+                final frame = await render.toImage();
+                final data = await frame.toByteData(
+                  format: ui.ImageByteFormat.png,
+                );
+                await File(
+                  '$directory/relays-explicit-${size.width.toInt()}.png',
+                ).writeAsBytes(data!.buffer.asUint8List());
+                frame.dispose();
+              });
+              home.preferences.relayLayout = 'compact';
+              home.preferences.refresh();
+              await tester.pumpAndSettle();
+              if (find.byType(PwmSetpointControl).evaluate().isNotEmpty) {
+                await tester.ensureVisible(
+                  find
+                      .ancestor(
+                        of: find.byType(PwmSetpointControl).first,
+                        matching: find.byType(Card),
+                      )
+                      .first,
+                );
+                await tester.pumpAndSettle();
+                await tester.runAsync(() async {
+                  final frame = await render.toImage();
+                  final data = await frame.toByteData(
+                    format: ui.ImageByteFormat.png,
+                  );
+                  await File('$directory/mosfet-${size.width.toInt()}.png')
+                      .writeAsBytes(data!.buffer.asUint8List());
+                  frame.dispose();
+                });
+                await tester.drag(
+                  find.byType(SingleChildScrollView).last,
+                  const Offset(0, 2000),
+                );
+                await tester.pumpAndSettle();
+              }
+            }
           }
           tester.platformDispatcher.platformBrightnessTestValue =
               Brightness.dark;

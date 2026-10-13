@@ -14,6 +14,7 @@ import 'discovery.dart';
 import 'unified/workspace_chrome.dart';
 import 'unified/app_upgrade.dart';
 import 'unified/peer_upgrades.dart';
+import 'unified/pwm_control.dart';
 import 'pakar_reference.dart' show SevenSegmentPreview;
 import 'unified/transport.dart';
 import 'unified/effect_editor.dart';
@@ -170,9 +171,17 @@ class _ControllerHomeState extends State<ControllerHome>
     board.onBuzzerNote = (event) => unawaited(buzzerMirror.event(event));
     if (widget.restore) {
       DeviceDiscovery.channel.setMethodCallHandler((call) async {
-        if (call.method == 'networkChanged' &&
-            foreground &&
-            restored &&
+        if (call.method != 'networkChanged' || !foreground) return;
+        if (packagePeers.running) {
+          unawaited(
+            packagePeers.networkChanged().catchError((Object failure) {
+              if (mounted) {
+                setState(() => lastError = 'Package discovery: $failure');
+              }
+            }),
+          );
+        }
+        if (restored &&
             preferences.autoConnect &&
             ((!board.enabled &&
                     !boardDiscoveryBlocked &&
@@ -473,8 +482,31 @@ class _ControllerHomeState extends State<ControllerHome>
     );
   }
 
-  Future<void> invoke(Json control, Json action) async {
+  VoidCallback invokeCallback(Json control, Json action) {
+    final target = board.targetStamp;
+    return () => unawaited(invoke(control, action, expectedTarget: target));
+  }
+
+  Future<void> invoke(
+    Json control,
+    Json action, {
+    String? expectedTarget,
+  }) async {
     final stamp = board.targetStamp;
+    final current = objects(board.peripherals['controls'])
+        .where((entry) => entry['key'] == control['key'])
+        .firstOrNull;
+    if ((expectedTarget != null && expectedTarget != stamp) ||
+        current == null ||
+        current['locked'] == true ||
+        current['hidden'] == true ||
+        !objects(current['actions'])
+            .any((entry) => entry['id'] == action['id'])) {
+      if (mounted) {
+        setState(() => lastError = 'Channel changed; reopen its controls.');
+      }
+      return;
+    }
     final safetyStop = ['stop', 'off'].contains(action['verb']);
     if (!board.boardReady ||
         (busy && !safetyStop) ||
@@ -1795,7 +1827,9 @@ class _ControllerHomeState extends State<ControllerHome>
             '${control['group'] ?? ''}'.trim().isEmpty
                 ? (control['kind'] == 'relay'
                       ? 'Relay outputs'
-                      : control['kind'] == 'pwm'
+                      : control['kind'] == 'pwm' ||
+                            control['kind'] == 'mosfet' ||
+                            control['control'] == 'pwm-user'
                       ? 'PWM outputs'
                       : 'Motion / seat controls')
                 : '${control['group']}',
@@ -1821,11 +1855,10 @@ class _ControllerHomeState extends State<ControllerHome>
                       channelIcon(control),
                       [
                         if (control['control'] == 'pwm-user')
-                          _PwmControl(
+                          PwmSetpointControl(
                             key: ValueKey(
-                              '${board.identity}/${control['key']}',
+                              '${board.targetStamp}/${control['key']}',
                             ),
-                            control: control,
                             observed: observeChannel(
                               control,
                               board.state,
@@ -1843,14 +1876,10 @@ class _ControllerHomeState extends State<ControllerHome>
                                 !busy &&
                                 !estop &&
                                 control['locked'] != true,
-                            changed: (value) => unawaited(
-                              boardCommand(
-                                'pwm set ${control['key'].toString().split('.').last} $value',
-                              ),
-                            ),
+                            commit: pwmCommit(control),
                           ),
                         if (control['kind'] != 'relay' ||
-                            channelObservation(control).active == null)
+                            preferences.relayLayout == 'explicit')
                           Wrap(
                             spacing: 8,
                             runSpacing: 8,
@@ -1859,8 +1888,7 @@ class _ControllerHomeState extends State<ControllerHome>
                                   in objects(control['actions']).where(
                                     (entry) =>
                                         control['kind'] != 'relay' ||
-                                        channelObservation(control).active ==
-                                            null ||
+                                        preferences.relayLayout == 'explicit' ||
                                         !['on', 'off'].contains(entry['verb']),
                                   ))
                                 action(
@@ -1880,7 +1908,7 @@ class _ControllerHomeState extends State<ControllerHome>
                                                 'stop',
                                                 'off',
                                               ].contains(entry['verb']))
-                                      ? () => unawaited(invoke(control, entry))
+                                      ? invokeCallback(control, entry)
                                       : null,
                                   priority: [
                                     'stop',
@@ -1905,6 +1933,7 @@ class _ControllerHomeState extends State<ControllerHome>
                             },
                           ),
                           if (control['kind'] == 'relay' &&
+                              preferences.relayLayout == 'compact' &&
                               channelObservation(control).active != null)
                             for (final entry
                                 in objects(control['actions']).where(
@@ -1929,9 +1958,57 @@ class _ControllerHomeState extends State<ControllerHome>
                                         !busy &&
                                         control['locked'] != true &&
                                         (!estop || entry['verb'] == 'off')
-                                    ? () => unawaited(invoke(control, entry))
+                                    ? invokeCallback(control, entry)
                                     : null,
                               ),
+                          if (control['kind'] == 'relay' &&
+                              preferences.relayLayout == 'compact' &&
+                              channelObservation(control).active == null)
+                            Builder(
+                              builder: (context) {
+                                final target = board.targetStamp;
+                                return PopupMenuButton<String>(
+                                  tooltip: 'Set power ${control['name']}',
+                                  icon: const Icon(
+                                    Icons.power_settings_new,
+                                    size: 20,
+                                  ),
+                                  enabled:
+                                      board.boardReady &&
+                                      !busy &&
+                                      control['locked'] != true,
+                                  onSelected: (id) {
+                                    final selected = objects(control['actions'])
+                                        .where((entry) => entry['id'] == id)
+                                        .firstOrNull;
+                                    if (selected != null) {
+                                      unawaited(
+                                        invoke(
+                                          control,
+                                          selected,
+                                          expectedTarget: target,
+                                        ),
+                                      );
+                                    }
+                                  },
+                                  itemBuilder: (_) => [
+                                    for (final entry
+                                        in objects(control['actions']).where(
+                                          (entry) => [
+                                            'on',
+                                            'off',
+                                          ].contains(entry['verb']),
+                                        ))
+                                      PopupMenuItem(
+                                        value: '${entry['id']}',
+                                        enabled:
+                                            !estop || entry['verb'] == 'off',
+                                        child: Text('${entry['name']}'),
+                                      ),
+                                  ],
+                                );
+                              },
+                            ),
                           channelMenu(control),
                         ],
                       ),
@@ -1942,6 +2019,62 @@ class _ControllerHomeState extends State<ControllerHome>
           ),
       ],
     );
+  }
+
+  Future<double> Function(int) pwmCommit(Json control) {
+    final target = board.targetStamp;
+    return (percent) => setPwm(control, percent, target);
+  }
+
+  Future<double> setPwm(Json control, int percent, String target) async {
+    final current = objects(board.peripherals['controls'])
+        .where(
+          (entry) =>
+              entry['key'] == control['key'] && entry['control'] == 'pwm-user',
+        )
+        .firstOrNull;
+    final channel = int.tryParse('${control['key']}'.split('.').last);
+    if (!foreground ||
+        busy ||
+        !board.boardReady ||
+        board.targetStamp != target ||
+        channel == null ||
+        current == null ||
+        current['locked'] == true ||
+        object(board.state['emergency_stop'])['active'] == true ||
+        percent < 0 ||
+        percent > 100) {
+      throw const Rejected(
+        'PWM target unavailable or changed; nothing dispatched.',
+      );
+    }
+    setState(() {
+      activeRequests++;
+      busy = true;
+      lastError = null;
+    });
+    try {
+      final actual = await board.setPwm(
+        channel,
+        percent,
+        expectedTarget: target,
+      );
+      if (mounted) {
+        logs.insert(0, 'PWM ${channel + 1} · ${actual.toStringAsFixed(1)}%');
+        if (logs.length > 100) logs.removeLast();
+      }
+      return actual;
+    } catch (failure) {
+      if (mounted) setState(() => lastError = '$failure');
+      rethrow;
+    } finally {
+      if (mounted) {
+        setState(() {
+          activeRequests--;
+          busy = activeRequests > 0;
+        });
+      }
+    }
   }
 
   Widget frontPanel() {
@@ -3435,10 +3568,12 @@ class _ControllerHomeState extends State<ControllerHome>
               'PWM target/value is not advertised',
             );
           }
-          return peer.rpc('controller.pwm.set', {
-            'channel': channel,
-            'percent': percent,
-          });
+          await board.setPwm(
+            channel,
+            percent,
+            expectedTarget: board.targetStamp,
+          );
+          return Map<String, dynamic>.of(board.pwmValues);
         }
         for (final control in objects(board.peripherals['controls'])) {
           for (final action in objects(control['actions'])) {
@@ -3516,65 +3651,4 @@ class _ControllerHomeState extends State<ControllerHome>
       return result;
     });
   }
-}
-
-class _PwmControl extends StatefulWidget {
-  const _PwmControl({
-    super.key,
-    required this.control,
-    required this.enabled,
-    required this.changed,
-    this.observed,
-  });
-  final Json control;
-  final bool enabled;
-  final ValueChanged<int> changed;
-  final double? observed;
-  @override
-  State<_PwmControl> createState() => _PwmControlState();
-}
-
-class _PwmControlState extends State<_PwmControl> {
-  double value = 0;
-  bool editing = false;
-  @override
-  void initState() {
-    super.initState();
-    value = widget.observed ?? 0;
-  }
-
-  @override
-  void didUpdateWidget(covariant _PwmControl oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (!editing && widget.observed != null) value = widget.observed!;
-  }
-
-  @override
-  Widget build(BuildContext context) => Column(
-    children: [
-      Text(
-        'Setpoint ${value.round()}%',
-        style: TextStyle(
-          color: Theme.of(context).colorScheme.onSurfaceVariant,
-          fontSize: 12,
-        ),
-      ),
-      Slider(
-        value: value,
-        max: 100,
-        onChanged: widget.enabled
-            ? (next) => setState(() {
-                editing = true;
-                value = next;
-              })
-            : null,
-        onChangeEnd: widget.enabled
-            ? (next) {
-                editing = false;
-                widget.changed(next.round());
-              }
-            : null,
-      ),
-    ],
-  );
 }

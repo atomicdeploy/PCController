@@ -237,3 +237,24 @@ still has 0.1.2+3 after its prior 0.1.3 installer-space rejection. The phone's f
 space changed since that attempt, but no new installation was attempted. Both
 screens were locked at the latest check. Standalone shared-core packaging/USB,
 full native/Web parity and physical mirroring/peer/firmware gates remain open.
+
+## Mobile bug priority: MOSFET setpoints and relay layout
+
+PWM edits now keep the drag/pending thumb through older snapshots until the
+typed setter returns its native post-ACK readback. Pre-write read revisions are
+fenced, owner/profile changes cancel old results and an uncertain write is never
+replayed. Unknown levels use an empty bounded input rather than a false zero.
+Protected PWM automation preserves fractional percentages and its JSON receipt.
+
+Preferences save compact one-line relay cards or two-line explicit ON/OFF cards.
+Unknown compact state offers explicit power choices; action callbacks pin the
+rendered target and revalidate current catalog/lock/hidden state. Authored groups
+are preserved; ungrouped MOSFET controls use the PWM group. Package-sharing
+network changes refresh actual interfaces independently of auto-connect choices.
+
+Eight focused pure widget/transport/layout regressions passed, alongside the
+controlled renderer and analyzer. Cafe read-only queries reported PWM available
+with valid channel values; no physical output mutation was performed. Screenshots
+are recorded-value renderer evidence. A fresh APK is being prepared; both old
+Android processes were running behind keyguard, and their old local API was not
+listening, so unsaved draft readiness could not be verified before replacement.

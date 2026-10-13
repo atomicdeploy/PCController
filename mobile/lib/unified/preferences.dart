@@ -26,7 +26,9 @@ class AppPreferences extends ChangeNotifier {
   bool compact = true;
   bool autoConnect = true;
   bool sharePackages = false;
-  String palette = 'digitalogic', branding = 'pccontroller';
+  String palette = 'digitalogic',
+      branding = 'pccontroller',
+      relayLayout = 'compact';
   Color customColor = const Color(0xff7166ce);
   String get title => branding == 'pealayer' ? 'Pealayer' : 'PCController';
   ColorScheme scheme(Brightness brightness) {
@@ -65,6 +67,10 @@ class AppPreferences extends ChangeNotifier {
     compact = prefs.getBool('appearance.compact') ?? true;
     autoConnect = prefs.getBool('connections.auto') ?? true;
     sharePackages = prefs.getBool('upgrades.sharing') ?? false;
+    final savedRelayLayout = prefs.getString('controls.relay-layout');
+    if (['compact', 'explicit'].contains(savedRelayLayout)) {
+      relayLayout = savedRelayLayout!;
+    }
     final savedPalette = prefs.getString('appearance.palette');
     if (paletteSeeds.containsKey(savedPalette)) palette = savedPalette!;
     customColor = Color(prefs.getInt('appearance.color') ?? 0xff7166ce);
@@ -99,6 +105,7 @@ class AppPreferences extends ChangeNotifier {
     await prefs.setBool('appearance.compact', compact);
     await prefs.setBool('connections.auto', autoConnect);
     await prefs.setBool('upgrades.sharing', sharePackages);
+    await prefs.setString('controls.relay-layout', relayLayout);
     await prefs.setString('appearance.palette', palette);
     await prefs.setInt('appearance.color', customColor.toARGB32());
     await prefs.setString('appearance.branding', branding);
@@ -253,6 +260,28 @@ class AppSettings extends StatelessWidget {
                     onChanged: (v) {
                       preferences.compact = v;
                       preferences.save();
+                    },
+                  ),
+                ]),
+                _section(context, 'Controls', Icons.tune, [
+                  DropdownButtonFormField<String>(
+                    initialValue: preferences.relayLayout,
+                    decoration: const InputDecoration(labelText: 'Relay cards'),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'compact',
+                        child: Text('Compact · one line'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'explicit',
+                        child: Text('Explicit ON / OFF · two lines'),
+                      ),
+                    ],
+                    onChanged: (value) {
+                      if (value != null) {
+                        preferences.relayLayout = value;
+                        preferences.save();
+                      }
                     },
                   ),
                 ]),
