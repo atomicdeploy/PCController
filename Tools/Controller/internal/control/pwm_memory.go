@@ -5,6 +5,19 @@ import (
 	"pccontroller.local/controller/internal/appconfig"
 )
 
+// This fence deliberately excludes effect/configuration providers. In particular,
+// a Store.Update callback already owns the configuration write lock and must not
+// call Snapshot, whose effect catalog can re-enter Store.Current.
+func pwmRecallOwnerSnapshot(runtime *Runtime) Snapshot {
+	runtime.mu.RLock()
+	defer runtime.mu.RUnlock()
+	value := Snapshot{Connected: runtime.sessionUsableLocked(), Port: runtime.port, ConnectionGeneration: runtime.generation}
+	if value.Connected && runtime.pwmRecallGeneration == runtime.generation {
+		value.PWMRecall = runtime.pwmRecall
+	}
+	return value
+}
+
 func pwmProfileIdentity(snapshot Snapshot) string {
 	return appconfig.ResolveBoardIdentity(snapshot.Port.SerialNumber, snapshot.Port.InstanceID, snapshot.Port.Name).Value
 }
@@ -15,7 +28,10 @@ func persistPWMRecall(runtime *Runtime, options CommandOptions, generation uint6
 	if options.HostConfig == nil || options.UpdateHostConfig == nil {
 		return errors.New("persistent PWM recall configuration is unavailable")
 	}
-	snapshot := runtime.Snapshot()
+	if channel >= 16 {
+		return errors.New("PWM recall channel must be 0..15")
+	}
+	snapshot := pwmRecallOwnerSnapshot(runtime)
 	if !snapshot.Connected || snapshot.ConnectionGeneration != generation {
 		return errors.New("PWM recall owner changed")
 	}
@@ -33,7 +49,7 @@ func persistPWMRecall(runtime *Runtime, options CommandOptions, generation uint6
 		return nil
 	}
 	return options.UpdateHostConfig(func(config *appconfig.Config) error {
-		live := runtime.Snapshot()
+		live := pwmRecallOwnerSnapshot(runtime)
 		current, present := config.BoardProfiles[identity]
 		if !live.Connected || live.ConnectionGeneration != generation || !present || current.Key != profile.Key {
 			return errors.New("PWM recall profile or owner changed")

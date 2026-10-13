@@ -2,9 +2,43 @@ package control
 
 import (
 	"pccontroller.local/controller/internal/appconfig"
+	"pccontroller.local/controller/internal/link"
 	"pccontroller.local/controller/internal/native"
+	"pccontroller.local/controller/internal/ports"
 	"testing"
 )
+
+func TestRFPWMRecallPersistenceNeverReentersPresentationProvider(t *testing.T) {
+	runtime := New(Options{})
+	runtime.session, runtime.generation, runtime.pwmRecallGeneration = &link.Session{}, 7, 7
+	runtime.port = ports.Info{Name: "COM3"}
+	runtime.pwmRecall[0] = PWMRecallValue{Known: true, Raw: 239}
+	defer func() { runtime.session = nil; runtime.Close() }()
+	config := appconfig.Defaults()
+	identity := pwmProfileIdentity(pwmRecallOwnerSnapshot(runtime))
+	config.BoardProfiles = map[string]appconfig.BoardProfile{identity: {Key: "cafe", Mode: appconfig.BoardModeOrdinaryRelays}}
+	runtime.macroRunner = NewMacroRunner(runtime, nil, func() appconfig.Config {
+		t.Fatal("recall persistence entered an effect/configuration provider")
+		return config
+	})
+	updates := 0
+	options := CommandOptions{HostConfig: func() appconfig.Config { return config }, UpdateHostConfig: func(change func(*appconfig.Config) error) error {
+		updates++
+		return change(&config)
+	}}
+	if err := persistPWMRecall(runtime, options, 7, 0); err != nil {
+		t.Fatal(err)
+	}
+	if config.BoardProfiles[identity].PWMRecall["pwm.0"] != 239 || updates != 1 {
+		t.Fatal("confirmed recall was not persisted once")
+	}
+	if err := persistPWMRecall(runtime, options, 7, 0); err != nil || updates != 1 {
+		t.Fatal("unchanged memory rewrote configuration", err)
+	}
+	if err := persistPWMRecall(runtime, options, 7, 16); err == nil {
+		t.Fatal("out-of-range channel accepted")
+	}
+}
 
 func TestRFPWMRollReachesHighThenWrapsWithoutOff(t *testing.T) {
 	for _, channel := range []int{0, 1, 8} {
