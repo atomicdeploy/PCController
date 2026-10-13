@@ -367,8 +367,7 @@ void setSilentMode(bool silent, uint32_t at) {
 
 // Expands an EEPROM 8-bit user value over the full 12-bit PWM range.
 uint16_t userPwm12(uint8_t value) {
-  return static_cast<uint16_t>(
-      static_cast<uint16_t>(value) * 16U + value / 16U);
+  return TransitionMath::expandByte12(value);
 }
 
 // Applies all persisted live settings without changing their EEPROM ownership.

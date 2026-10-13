@@ -22,7 +22,9 @@ func TestBackgroundReplacementFlagsPreserveTUIAndSharedTerminals(t *testing.T) {
 		soleOwner           bool
 	}{
 		{[]string{"web", "--no-open", "--no-tray"}, false, true, false},
-		{[]string{"web", "--no-open", "--no-tray"}, true, true, true},
+		{[]string{"web", "--no-open", "--no-tray"}, true, false, true},
+		{[]string{"web", "--no-tui", "--no-open", "--no-tray"}, true, true, true},
+		{[]string{"web", "--no-tui"}, true, false, false},
 		{[]string{"web", "--no-open", "--no-tray"}, true, false, false},
 		{[]string{"web"}, true, false, true},
 		{nil, false, false, true},

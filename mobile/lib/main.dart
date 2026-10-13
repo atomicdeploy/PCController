@@ -1207,34 +1207,126 @@ class _ControllerHomeState extends State<ControllerHome>
       builder: (context, bounds) {
         Widget tile(PeerSession peer) {
           final name = peer.controller ? 'PCController' : 'Pealayer';
-          return Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            child: Row(
-              children: [
-                Image.asset(
-                  'assets/branding/${peer.controller ? 'pccontroller' : 'pealayer'}.png',
-                  width: 26,
-                  height: 26,
-                ),
-                const SizedBox(width: 9),
-                Expanded(
-                  child: Text(
-                    name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.labelLarge
-                        ?.copyWith(fontWeight: FontWeight.w700),
+          final tileWidth = bounds.maxWidth < 620
+              ? bounds.maxWidth
+              : bounds.maxWidth / 2;
+          final scaler = MediaQuery.textScalerOf(context);
+          final statusMeasure = TextPainter(
+            text: TextSpan(
+              text: 'Reconnecting',
+              style: DefaultTextStyle.of(context).style
+                  .copyWith(fontSize: 12, fontWeight: FontWeight.w600),
+            ),
+            textScaler: scaler,
+            textDirection: Directionality.of(context),
+          )..layout();
+          // Reserve the longest lifecycle label, caption and 44px actions once
+          // for this width/font, so changing connection state cannot reflow it.
+          final stacked =
+              tileWidth < statusMeasure.width + 26 + 9 + 56 + 36 + 4 + 112 + 20;
+          statusMeasure.dispose();
+          final active = peer.fresh && (!peer.controller || peer.boardReady);
+          final status = peerStatus(peer);
+          Widget pill() {
+            if (!stacked) {
+              return StatePill(status, active: active);
+            }
+            final tone = active
+                ? const Color(0xff55bd83)
+                : Theme.of(context).colorScheme.onSurfaceVariant;
+            return ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: (tileWidth - 20) * .5),
+              child: Semantics(
+                label: status,
+                child: Tooltip(
+                  message: status,
+                  excludeFromSemantics: true,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: tone.withValues(alpha: .10),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: tone.withValues(alpha: .22)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          active ? Icons.circle : Icons.circle_outlined,
+                          size: 10,
+                          color: tone,
+                        ),
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: ExcludeSemantics(
+                            child: Text(
+                              status,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              textHeightBehavior: cardTextHeightBehavior,
+                              style: TextStyle(
+                                color: tone,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-                StatePill(
-                  peerStatus(peer),
-                  active: peer.fresh && (!peer.controller || peer.boardReady),
+              ),
+            );
+          }
+
+          final header = Row(
+            children: [
+              Image.asset(
+                'assets/branding/${peer.controller ? 'pccontroller' : 'pealayer'}.png',
+                width: 26,
+                height: 26,
+              ),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Text(
+                  name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.labelLarge
+                      ?.copyWith(fontWeight: FontWeight.w700),
                 ),
+              ),
+              pill(),
+              if (!stacked) ...[
                 const SizedBox(width: 4),
                 peerConnect(peer, name),
                 peerMore(peer, name, compact: true),
               ],
-            ),
+            ],
+          );
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            child: stacked
+                ? Column(
+                    children: [
+                      SizedBox(
+                        height: scaler.scale(12) * 2.5 + 10,
+                        child: header,
+                      ),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          peerConnect(peer, name),
+                          peerMore(peer, name, compact: true),
+                        ],
+                      ),
+                    ],
+                  )
+                : header,
           );
         }
 

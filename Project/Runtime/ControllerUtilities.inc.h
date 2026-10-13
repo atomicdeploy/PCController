@@ -29,8 +29,8 @@ int32_t scaledMilliValue(int32_t value, uint8_t decimalPlaces) {
   const uint16_t divisor =
       decimalPlaces == 0 ? 1000U : (decimalPlaces == 1 ? 100U : 10U);
   const int32_t rounding = divisor / 2U;
-  return value >= 0 ? (value + rounding) / divisor
-                    : (value - rounding) / divisor;
+  // Select the signed rounding adjustment once before the wide division.
+  return (value + (value >= 0 ? rounding : -rounding)) / divisor;
 }
 
 // Loads EEPROM once, then mirrors persisted illumination fields into the controller.
@@ -103,8 +103,12 @@ void showHostOfflineOnLcd() {
 
 // Appends little-endian integers without allocating a serializer object.
 void appendU16(uint8_t *buffer, uint8_t &index, uint16_t value) {
-  buffer[index++] = static_cast<uint8_t>(value);
-  buffer[index++] = static_cast<uint8_t>(value >> 8);
+  // The caller-owned cursor is separate from the reply buffer. Publish it
+  // once after both bytes rather than forcing two aliased reference stores.
+  const uint8_t offset = index;
+  buffer[offset] = static_cast<uint8_t>(value);
+  buffer[static_cast<uint8_t>(offset + 1U)] = static_cast<uint8_t>(value >> 8);
+  index = static_cast<uint8_t>(offset + 2U);
 }
 
 // Appends a signed 16-bit value with the same little-endian wire representation.

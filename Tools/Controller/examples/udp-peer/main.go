@@ -11,11 +11,14 @@ import (
 	"path/filepath"
 	"pccontroller.local/controller/host"
 	"pccontroller.local/controller/internal/appconfig"
+	"pccontroller.local/controller/internal/envfile"
 	udp "pccontroller.local/controller/transport/udp"
 	"time"
 )
 
 func main() {
+	_, err := envfile.LoadProcess()
+	must(err)
 	if len(os.Args) == 2 && os.Args[1] == "--codec" {
 		b, err := udp.Marshal(map[string]any{"signed": int64(-9223372036854775808), "unsigned": uint64(18446744073709551615), "float": 0.125, "unicode": "همتا", "array": []any{nil, false, true}})
 		must(err)

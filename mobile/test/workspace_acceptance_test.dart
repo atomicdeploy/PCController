@@ -7,6 +7,7 @@ import 'package:pccontroller_mobile/unified/preferences.dart';
 import 'package:pccontroller_mobile/unified/transport.dart';
 import 'package:pccontroller_mobile/unified/workspace_chrome.dart';
 import 'package:pccontroller_mobile/unified/app_upgrade.dart';
+import 'package:pccontroller_mobile/unified/endpoint_dialog.dart';
 import 'package:pccontroller_mobile/pakar_reference.dart' show studioDark;
 
 void main() {
@@ -100,7 +101,8 @@ void main() {
       );
       await tester.tap(find.byTooltip('Connect PCController'));
       await tester.pumpAndSettle();
-      expect(find.text('Host URL'), findsOneWidget);
+      expect(find.byType(EndpointDialog), findsOneWidget);
+      expect(find.text('Hostname or URL'), findsOneWidget);
       expect(find.textContaining('Access token'), findsNothing);
       await tester.tap(find.text('Cancel'));
       await tester.pumpAndSettle();
@@ -179,33 +181,82 @@ void main() {
     },
   );
 
-  for (final size in [const Size(320, 800), const Size(1280, 800)]) {
-    testWidgets('activity workspace handles RTL and enlarged text at $size', (
-      tester,
-    ) async {
-      tester.view.physicalSize = size;
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-      final prefs = AppPreferences();
-      await tester.pumpWidget(
-        MaterialApp(
-          home: MediaQuery(
-            data: MediaQueryData(
-              size: size,
-              textScaler: const TextScaler.linear(1.4),
-            ),
-            child: Directionality(
-              textDirection: TextDirection.rtl,
-              child: ControllerHome(restore: false, preferences: prefs),
+  for (final fixture in [
+    (const Size(320, 800), 1.0),
+    (const Size(320, 800), 1.2),
+    (const Size(320, 800), 1.4),
+    (const Size(320, 800), 2.0),
+    (const Size(1280, 800), 1.4),
+  ]) {
+    final size = fixture.$1;
+    testWidgets(
+      'activity workspace handles RTL and ${fixture.$2}x text at $size',
+      (tester) async {
+        tester.view.physicalSize = size;
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final prefs = AppPreferences();
+        await tester.pumpWidget(
+          MaterialApp(
+            home: MediaQuery(
+              data: MediaQueryData(
+                size: size,
+                textScaler: TextScaler.linear(fixture.$2),
+              ),
+              child: Directionality(
+                textDirection: TextDirection.rtl,
+                child: ControllerHome(restore: false, preferences: prefs),
+              ),
             ),
           ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      expect(tester.takeException(), null);
-      await tester.pumpWidget(const SizedBox());
-      prefs.dispose();
-    });
+        );
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), null);
+        final dynamic home = tester.state(find.byType(ControllerHome));
+        final PeerSession board = home.board;
+        for (final state in [
+          (
+            false,
+            true,
+            false,
+            null,
+            'Cancel connection PCController',
+            'Connecting',
+          ),
+          (
+            false,
+            true,
+            false,
+            'Read failed',
+            'Cancel connection PCController',
+            'Reconnecting',
+          ),
+          (true, true, true, null, 'Disconnect PCController', 'Connected'),
+          (true, true, false, null, 'Disconnect PCController', 'Host only'),
+        ]) {
+          board.online = state.$1;
+          board.enabled = state.$2;
+          board.error = state.$4;
+          board.received = DateTime.now();
+          board.state = {
+            'host_instance_id': 'fixture',
+            'connection_generation': 1,
+            'connected': state.$3,
+          };
+          board.notifyListeners();
+          await tester.pumpAndSettle();
+          expect(find.byTooltip(state.$5), findsOneWidget);
+          expect(find.text(state.$6), findsOneWidget);
+          expect(
+            find.byTooltip('Manage PCController connection'),
+            findsOneWidget,
+          );
+          expect(tester.takeException(), null, reason: state.$6);
+        }
+        await tester.pumpWidget(const SizedBox());
+        prefs.dispose();
+      },
+    );
   }
 }

@@ -45,7 +45,19 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('ON'), findsOneWidget);
       expect(find.text('OFF'), findsOneWidget);
-      expect(find.byTooltip('ON Fixture relay'), findsNothing);
+      expect(find.byTooltip('ON Fixture relay'), findsOneWidget);
+      expect(
+        tester
+            .widget<OutlinedButton>(find.widgetWithText(OutlinedButton, 'ON'))
+            .onPressed,
+        isNotNull,
+      );
+      expect(
+        tester
+            .widget<OutlinedButton>(find.widgetWithText(OutlinedButton, 'OFF'))
+            .onPressed,
+        isNotNull,
+      );
       expect(find.text('Off'), findsOneWidget);
       expect(
         (await SharedPreferences.getInstance()).getString(

@@ -286,6 +286,7 @@ const routes = [
   { path: "/api/session/ticket", methods: ["post"], capability: "session", summary: "Dormant alpha compatibility endpoint; returns 409 while application authentication is disabled" },
   { path: "/api/rpc", methods: ["post"], capability: "dynamic", summary: "JSON-RPC 2.0 request" },
   { path: "/api/snapshot", methods: ["get"], capability: "read", summary: "Authoritative cached controller snapshot" },
+  { path: "/api/diagnostics/cpu-profile", methods: ["post"], capability: "local-only", binaryResponse: true, summary: "Explicit five-second application CPU profile; loopback callers only, one active capture, no board actions or request body" },
   { path: "/api/estop", methods: ["get"], capability: "read", summary: "Authoritative effect and motion interlock state" },
   { path: "/api/estop", methods: ["put", "post"], capability: "board_commands", summary: "Engage or release the effect and motion interlock" },
   { path: "/api/peripherals", methods: ["get"], capability: "read", summary: "Peripheral descriptors and host-owned names" },
@@ -462,7 +463,9 @@ function operationFor(route, method) {
     "x-required-capability": route.capability,
     "x-idempotency": ["get", "head"].includes(method) ? "safe" : "see operation semantics and idempotency keys",
     responses: {
-      "200": { description: "Accepted response", content: { "application/json": { schema: { type: "object", additionalProperties: true } } } },
+      "200": route.binaryResponse
+        ? { description: "Five-second gzip-encoded Go CPU profile", content: { "application/octet-stream": { schema: { type: "string", format: "binary" } } } }
+        : { description: "Accepted response", content: { "application/json": { schema: { type: "object", additionalProperties: true } } } },
       "400": { $ref: "#/components/responses/BadRequest" },
       "401": { $ref: "#/components/responses/Unauthorized" },
       "403": { $ref: "#/components/responses/Forbidden" },

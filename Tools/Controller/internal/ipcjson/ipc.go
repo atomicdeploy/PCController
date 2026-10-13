@@ -3045,6 +3045,7 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 	webSocketPath := service.currentWebSocketPath()
 	socketIOPath := service.currentSocketIOPath()
 	mux := http.NewServeMux()
+	mux.HandleFunc("/api/diagnostics/cpu-profile", service.serveCPUProfile)
 	mux.HandleFunc(webSocketPath, func(writer http.ResponseWriter, request *http.Request) {
 		if !authorizeHTTPRequest(writer, request, service) {
 			return
