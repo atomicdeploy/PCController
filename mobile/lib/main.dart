@@ -12,6 +12,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'documents.dart';
 import 'discovery.dart';
 import 'unified/workspace_chrome.dart';
+import 'unified/activity_swipe.dart';
 import 'unified/app_upgrade.dart';
 import 'unified/peer_upgrades.dart';
 import 'unified/pwm_control.dart';
@@ -1023,74 +1024,85 @@ class _ControllerHomeState extends State<ControllerHome>
               ],
             ),
           Expanded(
-            child: RefreshIndicator(
-              notificationPredicate: (notification) =>
-                  notification.depth == 0 && canPullRefresh,
-              onRefresh: () async {
-                if (canPullRefresh) await refreshActivity();
-              },
-              child: SizedBox.expand(
-                child: SingleChildScrollView(
-                  physics: const AlwaysScrollableScrollPhysics(),
-                  padding: const EdgeInsets.all(14),
-                  child: switch (section) {
-                    0 => Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        preferences.compact ? liveConnections() : peerRoster(),
-                        if (board.fresh) ...[
-                          const SizedBox(height: 14),
-                          monitor(),
+            child: ActivitySwipe(
+              selected: section,
+              activities: availableActivities,
+              enabled: connected,
+              changed: selectActivity,
+              child: RefreshIndicator(
+                notificationPredicate: (notification) =>
+                    notification.depth == 0 && canPullRefresh,
+                onRefresh: () async {
+                  if (canPullRefresh) await refreshActivity();
+                },
+                child: SizedBox.expand(
+                  child: SingleChildScrollView(
+                    key: PageStorageKey(
+                      'activity-scroll-${activityIds[section]}',
+                    ),
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.all(14),
+                    child: switch (section) {
+                      0 => Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          preferences.compact
+                              ? liveConnections()
+                              : peerRoster(),
+                          if (board.fresh) ...[
+                            const SizedBox(height: 14),
+                            monitor(),
+                          ],
+                          if (player.fresh || bridgeTarget != null) ...[
+                            const SizedBox(height: 14),
+                            playback(),
+                          ],
+                          if (!board.fresh &&
+                              !player.fresh &&
+                              discovered.isNotEmpty) ...[
+                            const SizedBox(height: 14),
+                            discoveredPeers(),
+                          ],
                         ],
-                        if (player.fresh || bridgeTarget != null) ...[
-                          const SizedBox(height: 14),
-                          playback(),
+                      ),
+                      1 => outputs(),
+                      2 => board.boardReady ? frontPanel() : peerRoster(),
+                      3 => Column(
+                        children: [
+                          workspace(),
+                          if (board.fresh) ...[
+                            const SizedBox(height: 14),
+                            effects(),
+                          ],
+                          if (player.fresh) ...[
+                            const SizedBox(height: 14),
+                            playerEffects(),
+                          ],
                         ],
-                        if (!board.fresh &&
-                            !player.fresh &&
-                            discovered.isNotEmpty) ...[
+                      ),
+                      4 => Column(
+                        children: [
+                          peerRoster(),
                           const SizedBox(height: 14),
                           discoveredPeers(),
+                          if (preferences.sharePackages ||
+                              upgrades.state['state'] != 'idle' ||
+                              discovered.any(
+                                (d) => d.product == 'controller-mobile',
+                              )) ...[
+                            const SizedBox(height: 14),
+                            upgradePanel(),
+                          ],
+                          if (board.fresh || player.fresh) ...[
+                            const SizedBox(height: 14),
+                            peers(),
+                          ],
                         ],
-                      ],
-                    ),
-                    1 => outputs(),
-                    2 => board.boardReady ? frontPanel() : peerRoster(),
-                    3 => Column(
-                      children: [
-                        workspace(),
-                        if (board.fresh) ...[
-                          const SizedBox(height: 14),
-                          effects(),
-                        ],
-                        if (player.fresh) ...[
-                          const SizedBox(height: 14),
-                          playerEffects(),
-                        ],
-                      ],
-                    ),
-                    4 => Column(
-                      children: [
-                        peerRoster(),
-                        const SizedBox(height: 14),
-                        discoveredPeers(),
-                        if (preferences.sharePackages ||
-                            upgrades.state['state'] != 'idle' ||
-                            discovered.any(
-                              (d) => d.product == 'controller-mobile',
-                            )) ...[
-                          const SizedBox(height: 14),
-                          upgradePanel(),
-                        ],
-                        if (board.fresh || player.fresh) ...[
-                          const SizedBox(height: 14),
-                          peers(),
-                        ],
-                      ],
-                    ),
-                    5 => board.fresh ? firmware() : peerRoster(),
-                    _ => activities(),
-                  },
+                      ),
+                      5 => board.fresh ? firmware() : peerRoster(),
+                      _ => activities(),
+                    },
+                  ),
                 ),
               ),
             ),
