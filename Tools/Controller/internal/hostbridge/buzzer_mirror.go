@@ -27,6 +27,9 @@ type buzzerMirrorJob struct {
 
 const (
 	maxBuzzerSourceGap = 5 * time.Minute
+	// Preserve short device-clock notes across modest transport jitter instead
+	// of spending that jitter out of their audible duration. Stops bypass this.
+	buzzerPlayoutDelay = 50 * time.Millisecond
 	// Device timestamps preserve short melody cadence, but must never schedule
 	// playback far away from this host's receipt time. The bound also gives
 	// peers without generation metadata a safe reconnect fallback.
@@ -60,6 +63,7 @@ func (timeline *buzzerPlaybackTimeline) plan(job buzzerMirrorJob, now time.Time)
 	}
 	start := observedAt
 	if job.timed {
+		start = observedAt.Add(buzzerPlayoutDelay)
 		if previous, ok := timeline.anchors[job.source]; ok {
 			delta := time.Duration(uint32(job.deviceMicros-previous.deviceMicros)) * time.Microsecond
 			candidate := previous.start.Add(delta)
@@ -279,6 +283,30 @@ func (manager *Manager) buzzerMirrorLoop() {
 			}
 			return
 		case job := <-manager.buzzerJobs:
+			previous, havePrevious := timeline.anchors[job.source]
+			restarted := job.timed && havePrevious && (previous.haveGeneration != job.haveGeneration ||
+				(job.haveGeneration && previous.generation != job.generation))
+			stop := job.frequencyHz == 0 && job.durationMS == 0
+			if stop || restarted {
+				// No stopped/reconnected source may replay buffered actuation.
+				delete(timeline.anchors, job.source)
+				kept := pending[:0]
+				for _, candidate := range pending {
+					if candidate.job.source != job.source {
+						kept = append(kept, candidate)
+					}
+				}
+				pending = kept
+				if replacement != nil && replacement.job.source == job.source {
+					replacement = nil
+				}
+				if active != nil && active.source == job.source {
+					active.cancel()
+				}
+				if stop {
+					continue
+				}
+			}
 			plan := timeline.plan(job, time.Now())
 			order++
 			pending = append(pending, scheduledPlayback{job: job, plan: plan, order: order})
@@ -347,4 +375,16 @@ func playNativeBuzzer(parent context.Context, job buzzerMirrorJob) error {
 
 func resolveNativeBuzzer(config appconfig.BuzzerMirror) (pcspeaker.BackendStatus, error) {
 	return pcspeaker.ResolveBackend(config.DriverDirectory, config.Backend, config.Executable)
+}
+
+func reuseOrResolveNativeBuzzer(config appconfig.BuzzerMirror, previous *appconfig.BuzzerMirror,
+	status Status, resolve func(appconfig.BuzzerMirror) (pcspeaker.BackendStatus, error)) (pcspeaker.BackendStatus, error) {
+	if previous != nil && previous.Enabled == config.Enabled && previous.NativeEnabled == config.NativeEnabled &&
+		previous.Backend == config.Backend && previous.Executable == config.Executable && previous.DriverDirectory == config.DriverDirectory &&
+		status.BuzzerNativeState == "ready" && status.BuzzerNativeBackend != "" {
+		// Linux's native capability probe issues KDMKTONE(0). Reprobing an
+		// unchanged ready backend for unrelated settings can cut a live note.
+		return pcspeaker.BackendStatus{Backend: status.BuzzerNativeBackend, Executable: status.BuzzerNativeExecutable}, nil
+	}
+	return resolve(config)
 }

@@ -9,6 +9,7 @@ import (
 	controller "pccontroller.local/controller"
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/control"
+	"pccontroller.local/controller/internal/pcspeaker"
 	"pccontroller.local/controller/internal/shell"
 )
 
@@ -120,14 +121,14 @@ func TestBuzzerMirrorJobRequiresOptInAndValidBoardNote(t *testing.T) {
 	}
 }
 
-func TestBuzzerPlaybackTimelinePreservesDeviceCadenceAndTrimsLateNotes(t *testing.T) {
+func TestBuzzerPlaybackTimelinePreservesDeviceCadenceAndBuffersTransportJitter(t *testing.T) {
 	timeline := newBuzzerPlaybackTimeline()
 	base := time.Unix(1700000000, 0)
 	first := timeline.plan(buzzerMirrorJob{
 		durationMS: 100, deviceMicros: 0xFFFFFF00, timed: true,
 		observedAt: base, source: "board-a",
 	}, base)
-	if !first.start.Equal(base) || !first.end.Equal(base.Add(100*time.Millisecond)) {
+	if !first.start.Equal(base.Add(buzzerPlayoutDelay)) || !first.end.Equal(base.Add(buzzerPlayoutDelay+100*time.Millisecond)) {
 		t.Fatalf("first plan=%+v", first)
 	}
 	// uint32 subtraction deliberately preserves the MCU clock across wrap.
@@ -135,12 +136,12 @@ func TestBuzzerPlaybackTimelinePreservesDeviceCadenceAndTrimsLateNotes(t *testin
 		durationMS: 80, deviceMicros: 0x0001D3C0, timed: true,
 		observedAt: base.Add(145 * time.Millisecond), source: "board-a",
 	}, base.Add(145*time.Millisecond))
-	wantStart := base.Add(120 * time.Millisecond)
+	wantStart := base.Add(buzzerPlayoutDelay + 120*time.Millisecond)
 	if !second.start.Equal(wantStart) {
 		t.Fatalf("second start=%v want=%v", second.start, wantStart)
 	}
 	remaining, ok := second.remaining(base.Add(150 * time.Millisecond))
-	if !ok || remaining != 50*time.Millisecond {
+	if !ok || remaining != 80*time.Millisecond {
 		t.Fatalf("late remaining=%v ok=%t", remaining, ok)
 	}
 	if remaining, ok := second.remaining(base.Add(250 * time.Millisecond)); ok || remaining != 0 {
@@ -159,7 +160,7 @@ func TestBuzzerPlaybackTimelineReanchorsAfterDeviceRestart(t *testing.T) {
 		durationMS: 10, deviceMicros: 1_000, timed: true,
 		observedAt: base.Add(time.Second), source: "board-a",
 	}, base.Add(time.Second))
-	if !restarted.start.Equal(base.Add(time.Second)) {
+	if !restarted.start.Equal(base.Add(time.Second + buzzerPlayoutDelay)) {
 		t.Fatalf("restart did not re-anchor to observation: %+v", restarted)
 	}
 }
@@ -177,8 +178,8 @@ func TestBuzzerPlaybackTimelineReanchorsSmallForwardCounterAfterGenerationChange
 		generation: 2, haveGeneration: true,
 		observedAt: base.Add(time.Second), source: "board-a",
 	}, base.Add(time.Second))
-	if !restarted.start.Equal(base.Add(time.Second)) ||
-		!restarted.end.Equal(base.Add(1100*time.Millisecond)) {
+	if !restarted.start.Equal(base.Add(time.Second+buzzerPlayoutDelay)) ||
+		!restarted.end.Equal(base.Add(1100*time.Millisecond+buzzerPlayoutDelay)) {
 		t.Fatalf("generation change did not re-anchor to observation: %+v", restarted)
 	}
 }
@@ -194,7 +195,7 @@ func TestBuzzerPlaybackTimelineBoundsMissingGenerationAndFutureSkew(t *testing.T
 		durationMS: 100, deviceMicros: 2_000, timed: true,
 		observedAt: base.Add(time.Second), source: "peer-without-generation",
 	}, base.Add(time.Second))
-	if !restarted.start.Equal(base.Add(time.Second)) {
+	if !restarted.start.Equal(base.Add(time.Second + buzzerPlayoutDelay)) {
 		t.Fatalf("missing-generation restart did not re-anchor: %+v", restarted)
 	}
 
@@ -202,8 +203,8 @@ func TestBuzzerPlaybackTimelineBoundsMissingGenerationAndFutureSkew(t *testing.T
 		durationMS: 100, deviceMicros: 240_002_000, timed: true,
 		observedAt: base.Add(1100 * time.Millisecond), source: "peer-without-generation",
 	}, base.Add(1100*time.Millisecond))
-	if !jumped.start.Equal(base.Add(1100*time.Millisecond)) ||
-		!jumped.end.Equal(base.Add(1200*time.Millisecond)) {
+	if !jumped.start.Equal(base.Add(1100*time.Millisecond+buzzerPlayoutDelay)) ||
+		!jumped.end.Equal(base.Add(1200*time.Millisecond+buzzerPlayoutDelay)) {
 		t.Fatalf("future timestamp jump was scheduled away from observation: %+v", jumped)
 	}
 }
@@ -220,7 +221,7 @@ func TestBuzzerPlaybackTimelineReanchorsAfterWholeMicrosWrapOfSilence(t *testing
 		durationMS: 100, deviceMicros: 30_001_000, timed: true,
 		observedAt: observedAt, source: "board-a",
 	}, observedAt)
-	if !fresh.start.Equal(observedAt) {
+	if !fresh.start.Equal(observedAt.Add(buzzerPlayoutDelay)) {
 		t.Fatalf("full-wrap silence did not re-anchor to observation: %+v", fresh)
 	}
 	remaining, ok := fresh.remaining(observedAt)
@@ -249,6 +250,35 @@ func TestBuzzerDispatchReusesResolvedExternalBackend(t *testing.T) {
 	job := <-manager.buzzerJobs
 	if job.config.Backend != "external" || job.config.Executable != "/usr/local/bin/beep" {
 		t.Fatalf("resolved backend was not reused: %+v", job.config)
+	}
+}
+
+func TestBuzzerReconcileDoesNotProbeAnUnchangedReadyBackend(t *testing.T) {
+	config := appconfig.DefaultBuzzerMirror()
+	config.Enabled, config.NativeEnabled, config.Backend = true, true, "native"
+	previous := config
+	status := Status{BuzzerNativeState: "ready", BuzzerNativeBackend: "native"}
+	calls := 0
+	resolve := func(appconfig.BuzzerMirror) (pcspeaker.BackendStatus, error) {
+		calls++
+		return pcspeaker.BackendStatus{Backend: "native"}, nil
+	}
+	config.WebAudioEnabled = !config.WebAudioEnabled
+	config.Path = "host"
+	if _, err := reuseOrResolveNativeBuzzer(config, &previous, status, resolve); err != nil || calls != 0 {
+		t.Fatalf("presentation-only change probed live speaker: calls=%d err=%v", calls, err)
+	}
+	config.DriverDirectory = "changed"
+	if _, err := reuseOrResolveNativeBuzzer(config, &previous, status, resolve); err != nil || calls != 1 {
+		t.Fatalf("changed native configuration was not resolved: calls=%d err=%v", calls, err)
+	}
+	config = previous
+	status.BuzzerNativeState = "failed"
+	if _, err := reuseOrResolveNativeBuzzer(config, &previous, status, resolve); err != nil || calls != 2 {
+		t.Fatalf("failed backend did not retry resolution: calls=%d err=%v", calls, err)
+	}
+	if _, err := reuseOrResolveNativeBuzzer(config, nil, status, resolve); err != nil || calls != 3 {
+		t.Fatalf("first startup did not resolve: calls=%d err=%v", calls, err)
 	}
 }
 
@@ -357,6 +387,62 @@ func TestBuzzerMirrorStopDoesNotCancelAnotherSource(t *testing.T) {
 	}
 	cancel()
 	manager.wait.Wait()
+}
+
+func TestBuzzerMirrorStopFlushesBufferedNotesWithoutPlayback(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	played := make(chan int, 4)
+	manager := &Manager{ctx: ctx, cancel: cancel, buzzerJobs: make(chan buzzerMirrorJob, 4),
+		status: Status{BuzzerNativeState: "ready"},
+		buzzerPlay: func(ctx context.Context, job buzzerMirrorJob) error {
+			played <- job.frequencyHz
+			<-ctx.Done()
+			return ctx.Err()
+		},
+	}
+	defer func() { cancel(); manager.wait.Wait() }()
+	manager.wait.Add(1)
+	// Queue in stream order before starting the scheduler to avoid wall-clock races.
+	manager.buzzerJobs <- buzzerMirrorJob{source: "board-a", frequencyHz: 440, durationMS: 500,
+		timed: true, deviceMicros: 1000, observedAt: time.Now()}
+	manager.buzzerJobs <- buzzerMirrorJob{source: "board-a", frequencyHz: 660, durationMS: 500,
+		timed: true, deviceMicros: 2000, observedAt: time.Now()}
+	manager.buzzerJobs <- buzzerMirrorJob{source: "board-a", frequencyHz: 0, durationMS: 0,
+		timed: true, deviceMicros: 3000, observedAt: time.Now()}
+	go manager.buzzerMirrorLoop()
+	select {
+	case frequency := <-played:
+		t.Fatalf("stopped buffered note replayed at %d Hz", frequency)
+	case <-time.After(2 * buzzerPlayoutDelay):
+	}
+}
+
+func TestBuzzerMirrorReconnectDropsPreviousGenerationBuffer(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	played := make(chan int, 4)
+	manager := &Manager{ctx: ctx, cancel: cancel, buzzerJobs: make(chan buzzerMirrorJob, 4),
+		status: Status{BuzzerNativeState: "ready"},
+		buzzerPlay: func(ctx context.Context, job buzzerMirrorJob) error {
+			played <- job.frequencyHz
+			<-ctx.Done()
+			return ctx.Err()
+		},
+	}
+	defer func() { cancel(); manager.wait.Wait() }()
+	manager.wait.Add(1)
+	for generation := uint64(1); generation <= 2; generation++ {
+		manager.buzzerJobs <- buzzerMirrorJob{source: "board-a", frequencyHz: int(generation) * 440, durationMS: 500,
+			timed: true, deviceMicros: 1000, generation: generation, haveGeneration: true, observedAt: time.Now()}
+	}
+	go manager.buzzerMirrorLoop()
+	select {
+	case frequency := <-played:
+		if frequency != 880 {
+			t.Fatalf("old-generation buffer replayed at %d Hz", frequency)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("fresh generation did not play")
+	}
 }
 
 func TestNativeBuzzerFailuresAreStateTransitionsNotPerNoteLogSpam(t *testing.T) {

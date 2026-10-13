@@ -208,44 +208,45 @@ type Manager struct {
 	ctx                      context.Context
 	cancel                   context.CancelFunc
 
-	mu                  sync.RWMutex
-	closing             bool
-	digest              [sha256.Size]byte
-	melodyDigest        [sha256.Size]byte
-	melodyCatalogReady  bool
-	advertiser          *discovery.Advertiser
-	peers               map[string]*peerState
-	status              Status
-	webhooks            *webhookDeliveryQueue
-	wait                sync.WaitGroup
-	actions             *hostui.ActionBroker
-	hotkeys             hostui.HotkeyRegistrar
-	keyboard            hostui.KeyboardRegistrar
-	keyboardLatchMu     sync.Mutex
-	keyboardLatches     map[string]keyboardLatch
-	lastPWMReconcile    time.Time
-	keyboardActuator    func(context.Context, keyboardOperation) error
-	lifecycleActuator   func(context.Context, string) error
-	notifier            hostui.Notifier
-	notificationQueue   *notificationQueue
-	updateNotifications hostui.UpdateNotificationTracker
-	warningBeep         func() error
-	runningDoorWarning  bool
-	statusLED           *statusLEDArbiter
-	segmentScroll       *segmentScrollPresenter
-	buzzerJobs          chan buzzerMirrorJob
-	buzzerPlay          func(context.Context, buzzerMirrorJob) error
-	buzzerRouteWake     chan struct{}
-	buzzerRouteMu       sync.RWMutex
-	buzzerRoutePath     string
-	buzzerRouteState    string
-	buzzerRouteError    string
-	buzzerRouteRevision uint64
-	buzzerRouteAttempts int
-	buzzerRouteSnapshot func() controller.Snapshot
-	buzzerRouteExecute  func(context.Context, bool) error
-	discoveryRefresh    chan struct{}
-	discoveryIdentity   DiscoveryHostIdentity
+	mu                   sync.RWMutex
+	closing              bool
+	digest               [sha256.Size]byte
+	melodyDigest         [sha256.Size]byte
+	melodyCatalogReady   bool
+	advertiser           *discovery.Advertiser
+	peers                map[string]*peerState
+	status               Status
+	webhooks             *webhookDeliveryQueue
+	wait                 sync.WaitGroup
+	actions              *hostui.ActionBroker
+	hotkeys              hostui.HotkeyRegistrar
+	keyboard             hostui.KeyboardRegistrar
+	keyboardLatchMu      sync.Mutex
+	keyboardLatches      map[string]keyboardLatch
+	lastPWMReconcile     time.Time
+	keyboardActuator     func(context.Context, keyboardOperation) error
+	lifecycleActuator    func(context.Context, string) error
+	notifier             hostui.Notifier
+	notificationQueue    *notificationQueue
+	updateNotifications  hostui.UpdateNotificationTracker
+	warningBeep          func() error
+	runningDoorWarning   bool
+	statusLED            *statusLEDArbiter
+	segmentScroll        *segmentScrollPresenter
+	buzzerJobs           chan buzzerMirrorJob
+	buzzerPlay           func(context.Context, buzzerMirrorJob) error
+	buzzerResolvedConfig *appconfig.BuzzerMirror
+	buzzerRouteWake      chan struct{}
+	buzzerRouteMu        sync.RWMutex
+	buzzerRoutePath      string
+	buzzerRouteState     string
+	buzzerRouteError     string
+	buzzerRouteRevision  uint64
+	buzzerRouteAttempts  int
+	buzzerRouteSnapshot  func() controller.Snapshot
+	buzzerRouteExecute   func(context.Context, bool) error
+	discoveryRefresh     chan struct{}
+	discoveryIdentity    DiscoveryHostIdentity
 }
 
 type DiscoveryHostIdentity struct {
@@ -739,6 +740,8 @@ func (manager *Manager) reconcile(config appconfig.Config) error {
 	buzzerNativeBackend := manager.status.BuzzerNativeBackend
 	buzzerNativeExecutable := manager.status.BuzzerNativeExecutable
 	buzzerNativeLastError := manager.status.BuzzerNativeLastError
+	buzzerResolvedConfig := manager.buzzerResolvedConfig
+	previousBuzzerStatus := manager.status
 	doorWarning := manager.runningDoorWarning
 	manager.advertiser, manager.hotkeys, manager.keyboard = nil, nil, nil
 	manager.peers = make(map[string]*peerState)
@@ -775,7 +778,8 @@ func (manager *Manager) reconcile(config appconfig.Config) error {
 		status.BuzzerNativeExecutable = ""
 		status.BuzzerNativeLastError = ""
 	} else {
-		resolved, resolveErr := resolveNativeBuzzer(config.Integrations.BuzzerMirror)
+		resolved, resolveErr := reuseOrResolveNativeBuzzer(config.Integrations.BuzzerMirror,
+			buzzerResolvedConfig, previousBuzzerStatus, resolveNativeBuzzer)
 		if resolveErr != nil {
 			status.BuzzerNativeState = "failed"
 			status.BuzzerNativeBackend = ""
@@ -913,6 +917,8 @@ func (manager *Manager) reconcile(config appconfig.Config) error {
 	manager.advertiser = advertiser
 	manager.peers = peers
 	manager.status = status
+	resolvedBuzzerConfig := config.Integrations.BuzzerMirror
+	manager.buzzerResolvedConfig = &resolvedBuzzerConfig
 	manager.digest = digest
 	manager.mu.Unlock()
 	manager.statusLED.Observe(
