@@ -3971,7 +3971,15 @@ func (runtime *Runtime) finishRFGesture(
 		default:
 		}
 		progress, known := state.wireSession.RFReceiveProgress(key.code, key.bits, key.protocol)
-		if known && progress.ReceiptTimed && (progress.ReceiptMicros != state.event.DeviceMicros || !progress.QuietFor(rfReleaseAfter)) {
+		if !known || !progress.ReceiptTimed {
+			// Bounded-cache eviction or an untimed replacement loses the radio
+			// evidence. Host inactivity cannot justify a timed-source Tap or
+			// hold-end, so discard without publishing an action-bearing release.
+			delete(runtime.rfGestures, key)
+			runtime.rfMu.Unlock()
+			return
+		}
+		if progress.ReceiptMicros != state.event.DeviceMicros || !progress.QuietFor(rfReleaseAfter) {
 			if state.timer != nil {
 				state.timer.Stop()
 			}

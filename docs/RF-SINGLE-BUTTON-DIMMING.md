@@ -21,6 +21,9 @@ silence, with a read-only status heartbeat when necessary. A failed heartbeat
 or lost/replaced session never becomes a toggle. Untimed firmware retains the
 legacy host-clock inference. This is inferred release, not a physical button-up
 signal; physical acceptance is still required.
+If the bounded receive cache loses a timed waveform or its timing evidence is
+replaced, the pending gesture is discarded without Tap or hold-end. Elapsed host
+time alone never turns missing MCU evidence into an output action.
 Existing Click/Double and Down/Up events remain available independently. Do not
 assign both Tap and Click/Down toggles to the same waveform. Learning receptions
 never schedule delayed taps that could execute after learning is stopped.
