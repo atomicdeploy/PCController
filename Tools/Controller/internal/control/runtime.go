@@ -216,6 +216,11 @@ type connectionEventSignature struct {
 }
 
 type Runtime struct {
+	pwmActionOnce   sync.Once
+	pwmActionGate   chan struct{}
+	pwmCancelMu     sync.Mutex
+	pwmActionCancel context.CancelFunc
+	pwmActionEpoch  atomic.Uint64
 	automationAppMu sync.RWMutex
 	automationApp   func(context.Context, appconfig.AutomationAction) error
 	options         Options
@@ -304,6 +309,7 @@ type Runtime struct {
 	eventLog      []Event
 	activityLog   []Event
 	rfActivityLog []Event
+	rfLastSeen    map[rfGestureKey]time.Time
 	nextEventID   uint64
 	eventNotify   chan struct{}
 	rfMu          sync.Mutex
@@ -802,7 +808,7 @@ func (runtime *Runtime) Snapshot() Snapshot {
 	runtime.mu.RLock()
 	hardwareProblems := cloneHardwareProblems(runtime.hardwareProblems)
 	snapshot := Snapshot{
-		Connected:              runtime.session != nil,
+		Connected:              runtime.sessionUsableLocked(),
 		Paused:                 runtime.paused,
 		Port:                   runtime.port,
 		Hello:                  runtime.hello,
@@ -937,11 +943,11 @@ func (runtime *Runtime) refreshResetLinesCapability() {
 // facts. It deliberately does not parse error strings or infer progress in a
 // client, so every interface reports the same connection truth.
 func (runtime *Runtime) connectionPhaseLocked() string {
-	if runtime.session != nil {
-		return "connected"
-	}
 	if runtime.connectionState == "close_failed" || len(runtime.retainedClose) != 0 {
 		return "blocked"
+	}
+	if runtime.sessionUsableLocked() {
+		return "connected"
 	}
 	if runtime.paused {
 		return "paused"
@@ -956,6 +962,13 @@ func (runtime *Runtime) connectionPhaseLocked() string {
 		return "queued"
 	}
 	return "disconnected"
+}
+
+// A quarantined or closing session still owns OS cleanup but must not advertise
+// authentication or accept application requests. Call while runtime.mu is held.
+func (runtime *Runtime) sessionUsableLocked() bool {
+	return runtime.session != nil && runtime.connectionState != "close_failed" &&
+		runtime.connectionState != "closing" && len(runtime.retainedClose) == 0
 }
 
 func cloneHardwareProblems(values []ports.HardwareProblem) []ports.HardwareProblem {
@@ -1880,6 +1893,26 @@ func (runtime *Runtime) Request(
 	payload []byte,
 	expected ...byte,
 ) (native.Frame, error) {
+	if err := ctx.Err(); err != nil {
+		return native.Frame{}, err
+	}
+	zeroPWM := opcode == native.OpPWMAllOff && len(payload) == 0 || opcode == native.OpPWMSet && len(payload) == 3 && payload[0] < appconfig.PWMChannelCount && payload[1] == 0 && payload[2] == 0
+	if zeroPWM {
+		runtime.cancelPWMAction()
+	} else if opcode == native.OpPWMSet {
+		epoch := runtime.pwmActionEpoch.Load()
+		release, err := runtime.acquirePWMAction(ctx)
+		if err != nil {
+			return native.Frame{}, err
+		}
+		defer release()
+		bound, cleanup, err := runtime.bindPWMActionContext(ctx, epoch)
+		if err != nil {
+			return native.Frame{}, err
+		}
+		defer cleanup()
+		ctx = bound
+	}
 	runtime.mu.RLock()
 	generation := runtime.generation
 	runtime.mu.RUnlock()
@@ -1932,6 +1965,10 @@ func (runtime *Runtime) requestAtGenerationPriority(
 	if runtime.session == nil {
 		runtime.mu.RUnlock()
 		return native.Frame{}, errors.New("device is not connected")
+	}
+	if !runtime.sessionUsableLocked() {
+		runtime.mu.RUnlock()
+		return native.Frame{}, link.ErrClosed
 	}
 	session := runtime.session
 	runtime.mu.RUnlock()
@@ -4042,6 +4079,7 @@ func (runtime *Runtime) publishEvent(event Event) Event {
 	runtime.nextEventID++
 	event.ID = runtime.nextEventID
 	event.Time = time.Now()
+	runtime.recordRFReceptionLocked(event)
 	runtime.eventLog = append(runtime.eventLog, event)
 	if len(runtime.eventLog) > 512 {
 		runtime.eventLog = append([]Event(nil), runtime.eventLog[len(runtime.eventLog)-512:]...)

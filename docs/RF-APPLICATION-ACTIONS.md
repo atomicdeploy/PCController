@@ -45,14 +45,91 @@ process start, not that the external program completed its own work.
 
 ## Contracts
 
+### MOSFET percentage assignments
+
+Choose a channel from the advertised control list; do not infer channel numbers
+from a 0–100 brightness range. MOSFET controls advertise `pwm.N.on`, `.off`,
+`.increase` and `.decrease`. On requests 100% logical intensity, Off requests
+0%; relative actions use the channel's advertised `step_percent` (default 1%).
+When that step is smaller than the hardware's representable change, a relative
+action advances by one actual 12-bit duty quantum in the requested direction,
+except at 0/4095 endpoints. This prevents repeated Increase/Decrease getting
+stuck on unchanged readback, including the first code above zero. Actual
+readback remains authoritative: the configured logical step is not a promise
+of finer-than-hardware resolution, and absolute-percent conversion is unchanged.
+The existing `controller.control.invoke {"action_id":"pwm.0.increase"}` carries
+the same action chosen in RF assignments; no extra per-binding delta parameter
+is required. Existing motion mappings and firmware RF mappings are not rewritten.
+
+Configure the step through the existing channel configuration RPC, for example
+`controller.pwm.channel.configure` with
+`{"channel":0,"output_type":"lighting","icon":"lightbulb","curve":"gamma","gamma":2.2,"step_percent":2.5}`.
+Omission in stored channel data uses the documented 1% default, not a migration
+or persisted rewrite. In a channel configuration update, omitting the step
+preserves an existing custom step; explicitly supply 1 to restore the default.
+An explicitly supplied step must be finite, greater than zero and at most 100.
+Use the appropriate type/curve for the actual output; motors do not receive a
+lighting curve implicitly.
+
+The shared CLI/TUI commands are `pwm on CHANNEL`, `pwm off CHANNEL`,
+`pwm increase CHANNEL` and `pwm decrease CHANNEL`; `pwm off` without a channel
+still zeros all channels. `pwm configure CHANNEL TYPE CURVE [GAMMA [ICON [STEP_PERCENT]]]`
+configures the same channel data. Thus `pwm configure 0 lighting gamma 2.2 lightbulb 2.5`
+sets a 2.5% logical step for a confirmed lighting channel. Raw duty remains
+0–4095 and is not a percent step.
+
+Actions use a fresh board read, a single curve conversion, an acknowledged
+write and authoritative all-channel readback. The transport generation is fixed
+throughout; reconnect, unavailable hardware, invalid readback or timeout cannot
+fall through to another board or invent success. A failed readback after an
+acknowledged write means the current output outcome is unknown. Readback events
+update subscribed clients, and configured peripheral locks remain authoritative.
+Host percentage changes are serialized with ordinary host PWM writes. Zeroing
+requests cancel/supersede pending percentage changes without waiting on that
+gate. Autonomous firmware/macro output changes are not a host-side atomic
+compare-and-swap: an owned channel may independently change again after the ACK.
+System ownership and physical acceptance remain separate from assigning an ID.
+
+Source regression coverage includes logical gamma/linear steps, exact endpoints,
+clamping, channel-step validation and advertised IDs, named/numeric command lock
+resolution, read/write/readback failures, cancellation/zeroing preemption, and a
+framed in-memory serial fixture proving read/set/ACK/readback plus rejection of
+a replaced connection during the first read. These tests do not learn a real
+code, modify EEPROM/configuration or establish physical output behavior.
+Transport phases use the configured serial request timeout; the complete queued
+action is bounded by three such phases, not an invented progress percentage.
+
 - `controller.rf.catalog {"read_board":true}`: learned records, learning status,
   recent receive activity, assignments, discovered application identities/actions,
   keyboard policy, board controls, effects and semantic board mapping options.
   Omit read_board for cached host activity polling without serial table reads.
+  Each sampled learned entry includes `board_assignment` with machine `action`,
+  `target`, `behavior` and a current-name `label`; raw MCU fields remain available
+  for diagnostics, not UI enum inference. PWM mapping `behavior_labels` explain
+  that both Press/Toggle toggle 0/100%, while Momentary expires after 350 ms
+  silence. These are autonomous firmware mappings, unlike host control actions.
+  Optional `last_seen` is RFC3339 genuine board reception time matched by the
+  complete code/bits/protocol waveform. A bounded 256-waveform session cache
+  survives catalog/activity-ring refresh, not process restart; unknown is
+  omitted, never inferred from refresh, learning completion or transmission.
+  The existing immediate `rf.receive` event (`source:board`, `time`, `rf_code`,
+  `rf_bits`, `rf_protocol`) updates visible dates directly; coalesce rendering,
+  never request a serial learned table for each packet. Catalog reads may expose
+  structured `board_error_detail` with the same RPC error code/message/data.
+  An acknowledged PWM write with failed confirmation uses code -32010 and data
+  `kind:confirmation_unavailable`, `resource:pwm`, `write_acknowledged:true`,
+  `retryable:false`; retain its detail and do not blindly repeat the mutation.
 - `controller.rf.binding.put {"binding":{...},"previous_name":"...", "allow_keyboard":false}`:
   validated, transactional watched-config mutation. Bindings are the existing
   `automations` entries matching `rf.gesture` and `source:rf`; selectors include
   `rf_code`, `rf_bits`, `rf_protocol`, `gesture`.
+  Missing, malformed or unadvertised control actions are rejected before any
+  persistence or keyboard-consent change. RPC code -32602 carries the human
+  message "Choose an available control action before saving this assignment"
+  and `data` with `kind:validation_error`, `resource:rf_binding`, the exact
+  `binding.actions[N].action_id` field and reason `required`, `invalid_format`
+  or `not_advertised`. Show the human message and retain field detail for
+  technical disclosure; do not infer validation state from a raw error string.
 - `controller.rf.binding.remove {"name":"..."}` removes only that RF assignment.
 - Existing `controller.rf.learn.start/status/cancel`, `.map`, `.remove`, `.clear`
   and `.transmit` remain authoritative. Map/remove/clear use board readback.

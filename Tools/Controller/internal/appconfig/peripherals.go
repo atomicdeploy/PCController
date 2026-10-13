@@ -31,6 +31,7 @@ type PeripheralDescriptor struct {
 	OutputType  string  `json:"output_type,omitempty"`
 	Curve       string  `json:"curve,omitempty"`
 	Gamma       float64 `json:"gamma,omitempty"`
+	StepPercent float64 `json:"step_percent,omitempty"`
 }
 
 type ActionDescriptor struct {
@@ -43,22 +44,23 @@ type ActionDescriptor struct {
 // operator-controllable board channel. The canonical key remains suitable for
 // commands and persisted names while Kind supplies the operator vocabulary.
 type ControlDescriptor struct {
-	Key        string             `json:"key"`
-	Kind       string             `json:"kind"`
-	Order      int                `json:"order"`
-	Name       string             `json:"name"`
-	Icon       string             `json:"icon,omitempty"`
-	Color      string             `json:"color,omitempty"`
-	UpColor    string             `json:"up_color,omitempty"`
-	DownColor  string             `json:"down_color,omitempty"`
-	Group      string             `json:"group,omitempty"`
-	Hidden     bool               `json:"hidden,omitempty"`
-	Locked     bool               `json:"locked,omitempty"`
-	Control    string             `json:"control"`
-	OutputType string             `json:"output_type,omitempty"`
-	Curve      string             `json:"curve,omitempty"`
-	Gamma      float64            `json:"gamma,omitempty"`
-	Actions    []ActionDescriptor `json:"actions,omitempty"`
+	Key         string             `json:"key"`
+	Kind        string             `json:"kind"`
+	Order       int                `json:"order"`
+	Name        string             `json:"name"`
+	Icon        string             `json:"icon,omitempty"`
+	Color       string             `json:"color,omitempty"`
+	UpColor     string             `json:"up_color,omitempty"`
+	DownColor   string             `json:"down_color,omitempty"`
+	Group       string             `json:"group,omitempty"`
+	Hidden      bool               `json:"hidden,omitempty"`
+	Locked      bool               `json:"locked,omitempty"`
+	Control     string             `json:"control"`
+	OutputType  string             `json:"output_type,omitempty"`
+	Curve       string             `json:"curve,omitempty"`
+	Gamma       float64            `json:"gamma,omitempty"`
+	StepPercent float64            `json:"step_percent,omitempty"`
+	Actions     []ActionDescriptor `json:"actions,omitempty"`
 }
 
 var corePeripheralDescriptors = buildPeripheralDescriptors()
@@ -270,7 +272,13 @@ func ProfileDescriptors(mode string, exposeRawRelays bool, legacyNames map[strin
 			continue
 		}
 		if descriptor.Kind == "pwm" {
-			addControl(descriptor, "mosfet", nil)
+			actions := []ActionDescriptor{
+				{ID: descriptor.Key + ".on", Verb: "on", Name: "On"},
+				{ID: descriptor.Key + ".off", Verb: "off", Name: "Off"},
+				{ID: descriptor.Key + ".increase", Verb: "increase", Name: "Increase"},
+				{ID: descriptor.Key + ".decrease", Verb: "decrease", Name: "Decrease"},
+			}
+			addControl(descriptor, "mosfet", actions)
 			continue
 		}
 		resolved := resolvePresentation(descriptor.Key, descriptor.DefaultName, legacyNames, presentation)
