@@ -37,3 +37,29 @@ and executable SHA-256
 This package preserves the already deployed development lineage; it is not a
 package of the isolated main-based PR tree. Actual physical failure injection
 and PWM changes are not authorized merely to reproduce these errors.
+
+## Cafe delivery, 13 October 2026
+
+Primary-owned update `op-091610e2d50112ba` completed with
+`terminal_verified=true`; the installed executable hash matches the package.
+The controller configuration remained semantically identical to private backup
+`verification/serial-response-deadlines/config.json` (SHA-256
+`82a8fd03af13add569555f741905a9d91cb650ce95d133e5e71215adcfbedba5`).
+Three live GET_STATUS calls and three full PWM reads over the same 3-second
+NDJSON TCP transport returned in 19.1/8.4/8.8/11.8/13.5/23.5 ms respectively,
+without errors. The first diagnostic writer used a BOM and was rejected as
+invalid input; the corrected UTF-8-without-BOM probe matches native wire output.
+No physical output was changed. Pealayer remained paused and hardware/controller
+connected, without hardware/sync error, at matching desired/prepared/clock ACK 88.
+
+Source checkpoint `db407fce` was isolated onto main as `969969ca` for
+[PR #659](https://github.com/atomicdeploy/PCController/pull/659), preserving
+concurrent mobile work without switching the shared checkout or creating a
+worktree. Protected branch checks block merging; normal auto-merge is enabled,
+with no policy override or CI run. Generated Web output is preserved in stash
+`853e1a3616eb22203818ef60dd43f98d76df1e53`.
+
+The paired [Pealayer PR #176](https://github.com/ToghrolTP/pealayer/pull/176)
+has a compiled/smoke-verified candidate. Its runtime replacement is held for a
+current Cafe draft-state confirmation. Successful read-only probes do not prove
+physical PWM gesture acceptance, injected ACK-loss recovery or a playback soak.
