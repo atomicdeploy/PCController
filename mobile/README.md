@@ -120,6 +120,16 @@ installation/launch of this separate app, not destructive physical board tests.
 
 ### Unified workspace, discovery and self-package RPC
 
+PWM sliders preserve the editing/pending setpoint through command completion.
+The typed setter returns the host's post-acknowledgement board readback; reads
+issued before that write cannot replace it. The return value is the authoritative
+logical percentage after configured curve/quantization, not optimistic input.
+Changed owner, unavailable readback or lost acknowledgement stays uncertain and
+is never replayed. Actual Cafe read-only checks reported PWM available and no
+PWM/framing/CRC errors; no physical output was changed for this verification.
+Preferences support compact one-line relay cards (default) or explicit two-line
+On/Off controls, with the same observed state, lock and safety rules.
+
 The earlier basic Flutter design is rejected. `AGENTS.md` requires one contextual
 activity workspace, not product tabs; no unavailable-only cards or dormant peer
 token fields. The optional protected local automation API still keeps its actual
