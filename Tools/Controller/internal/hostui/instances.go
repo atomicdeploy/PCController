@@ -4,8 +4,10 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"pccontroller.local/controller/internal/consolewindow"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -79,10 +81,30 @@ func CurrentProcessSelf(startedAt time.Time) InstanceSelf {
 	if startedAt.IsZero() {
 		startedAt = time.Now().UTC()
 	}
-	return InstanceSelf{
+	self := InstanceSelf{
 		Kind: "process", ProcessID: os.Getpid(), ParentProcessID: os.Getppid(),
 		ImagePath: imagePath, WorkingDirectory: workingDirectory,
 		StartedAt: startedAt.UTC(), Vars: variables,
+	}
+	RefreshCurrentProcessConsole(&self)
+	return self
+}
+
+// RefreshCurrentProcessConsole updates a response copy, never another process or
+// the registry. In particular the bounded startup recheck may hide the console
+// after registration, so a diagnostic read must not return the initial value.
+func RefreshCurrentProcessConsole(self *InstanceSelf) {
+	if self == nil || self.Kind != "process" || self.ProcessID != os.Getpid() {
+		return
+	}
+	if console := consolewindow.Inspect(); console.Supported {
+		if self.Vars == nil {
+			self.Vars = make(map[string]string)
+		}
+		self.Vars["console_attached"] = strconv.FormatBool(console.Attached)
+		self.Vars["console_visible"] = strconv.FormatBool(console.Visible)
+		self.Vars["console_sole_owner"] = strconv.FormatBool(console.SoleOwner)
+		self.Vars["console_interactive_streams"] = strconv.FormatBool(console.InteractiveStreams)
 	}
 }
 

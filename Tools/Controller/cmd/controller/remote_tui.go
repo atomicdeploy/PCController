@@ -1371,6 +1371,9 @@ func runRemoteTUIContext(
 	consoleOptions *tuiConsoleOptions,
 	syncNavigation bool,
 ) error {
+	if terminalOutput(stdout) {
+		fmt.Fprintln(stdout, "  Connecting terminal to controller...")
+	}
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	client := newRemoteTUIIPC(ctx, address, auth)
