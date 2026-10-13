@@ -738,7 +738,7 @@ class PeerSession extends ChangeNotifier {
   /// after command acknowledgement; this is not an optimistic local setpoint.
   Future<double> setPwm(
     int channel,
-    int percent, {
+    num percent, {
     required String expectedTarget,
   }) async {
     final peer = transport, epoch = generation;
@@ -749,6 +749,7 @@ class PeerSession extends ChangeNotifier {
         _activePwmWrite != null ||
         channel < 0 ||
         channel > 15 ||
+        !percent.isFinite ||
         percent < 0 ||
         percent > 100 ||
         object(state['emergency_stop'])['active'] == true ||
