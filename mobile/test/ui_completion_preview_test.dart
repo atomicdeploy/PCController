@@ -58,6 +58,7 @@ void main() {
       );
       final dynamic home = tester.state(find.byType(ControllerHome));
       final PeerSession board = home.board;
+      await capture(key, '${entry.$1}-offline');
       board.online = true;
       board.received = DateTime.now();
       board.state = {
@@ -77,6 +78,10 @@ void main() {
       home.preferences.refresh();
       await tester.pumpAndSettle();
       await capture(key, entry.$1);
+      home.preferences.theme = ThemeMode.dark;
+      home.preferences.tone = 'pastel';
+      home.preferences.refresh();
+      await capture(key, '${entry.$1}-pastel-dark');
       await tester.pumpWidget(const SizedBox());
     }
     for (final entry in [

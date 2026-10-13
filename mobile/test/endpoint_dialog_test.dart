@@ -89,7 +89,8 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(selected, null);
-      expect(find.text('http://new-host:8787'), findsOneWidget);
+      expect(tester.widget<TextField>(field).controller!.text, 'new-host:8787');
+      expect(find.byType(SelectableText), findsNothing);
       expect(find.text('PCController verified'), findsNothing);
       expect(detector.closed, true);
       await tester.tap(find.byTooltip('Close'));
@@ -127,7 +128,12 @@ void main() {
       expect(find.byType(SnackBar), findsNothing);
       await tester.enterText(field, 'HOST.LOCAL:8787');
       await tester.pump();
-      expect(find.text('http://host.local:8787'), findsOneWidget);
+      expect(
+        tester.widget<TextField>(field).controller!.text,
+        'HOST.LOCAL:8787',
+      );
+      expect(find.byType(TextField), findsOneWidget);
+      expect(find.byType(SelectableText), findsNothing);
       expect(
         find.text('Enter a port from 1 to 65535 after the colon.'),
         findsNothing,
@@ -164,6 +170,15 @@ void main() {
       await tester.pump();
       expect(detector.checks, 1);
       expect(detector.input!.origin, Uri.parse('http://workshop:8787'));
+      expect(detector.input!.explicitPort, false);
+      expect(detector.input!.explicitScheme, false);
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const ValueKey('peer-address')))
+            .controller!
+            .text,
+        'http://workshop:8787',
+      );
       expect(selected, null);
       expect(find.byType(LinearProgressIndicator), findsOneWidget);
       detector.result.complete(
@@ -173,6 +188,68 @@ void main() {
       expect(selected, 'http://workshop:9080');
       expect(detector.closed, true);
       expect(find.byType(EndpointDialog), findsNothing);
+      expect(tester.takeException(), null);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'single normalized endpoint retains short-host detection intent on retry',
+    (tester) async {
+      final detectors = [ControlledDetector(), ControlledDetector()];
+      var attempt = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: EndpointDialog(
+              controller: true,
+              detectorFactory: () => detectors[attempt++],
+            ),
+          ),
+        ),
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('peer-address')),
+        'WORKSHOP',
+      );
+      await tester.pump();
+      await tester.tap(find.text('Detect'));
+      await tester.pump();
+      detectors[0].result.completeError(
+        const FormatException('No verified PCController endpoint found.'),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(TextField), findsOneWidget);
+      expect(find.byType(SelectableText), findsNothing);
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const ValueKey('peer-address')))
+            .controller!
+            .text,
+        'http://workshop:8787',
+      );
+      await tester.tap(find.text('Detect'));
+      await tester.pump();
+      expect(detectors[1].input!.explicitPort, false);
+      expect(detectors[1].input!.explicitScheme, false);
+      detectors[1].result.complete(
+        DetectedEndpoint(Uri.parse('http://workshop:9080'), 'pccontroller'),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const ValueKey('peer-address')))
+            .controller!
+            .text,
+        'http://workshop:9080',
+      );
+      expect(find.byTooltip('Endpoint verified'), findsOneWidget);
+      await tester.enterText(
+        find.byKey(const ValueKey('peer-address')),
+        'wss://other.example:9443/ws',
+      );
+      await tester.pump();
+      expect(find.byTooltip('Endpoint verified'), findsNothing);
       expect(tester.takeException(), null);
       await tester.pumpWidget(const SizedBox());
     },

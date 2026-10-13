@@ -35,10 +35,14 @@ class ActivityStrip extends StatefulWidget {
     required this.selected,
     required this.changed,
     this.vertical = false,
+    this.muted = false,
+    this.activities = const [0, 1, 2, 3, 4, 5, 6],
   });
   final int selected;
   final ValueChanged<int> changed;
   final bool vertical;
+  final bool muted;
+  final List<int> activities;
   @override
   State<ActivityStrip> createState() => _ActivityStripState();
 }
@@ -76,8 +80,31 @@ class _ActivityStripState extends State<ActivityStrip> {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    final items = List.generate(activityIds.length, (index) {
+    final items = widget.activities.map((index) {
       final active = widget.selected == index;
+      final dark = Theme.of(context).brightness == Brightness.dark;
+      final accent = (dark
+          ? const [
+              Color(0xff5ce0b6),
+              Color(0xffffc86a),
+              Color(0xff82b6ff),
+              Color(0xffcda0ff),
+              Color(0xff6cdbed),
+              Color(0xffffa780),
+              Color(0xfff49dce),
+            ]
+          : const [
+              Color(0xff007b60),
+              Color(0xff956000),
+              Color(0xff235ec0),
+              Color(0xff8541c5),
+              Color(0xff00788c),
+              Color(0xffb64b20),
+              Color(0xffb3317b),
+            ])[index];
+      final ink = widget.muted
+          ? Color.lerp(accent, colors.onSurfaceVariant, .35)!
+          : accent;
       return Padding(
         key: targets[index],
         padding: EdgeInsets.symmetric(
@@ -89,12 +116,14 @@ class _ActivityStripState extends State<ActivityStrip> {
           child: Tooltip(
             message: activityNames[index],
             child: Material(
-              color: active ? colors.primaryContainer : Colors.transparent,
+              color: active
+                  ? ink.withValues(alpha: widget.muted ? .09 : .13)
+                  : Colors.transparent,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
                 side: BorderSide(
                   color: active
-                      ? colors.primary.withValues(alpha: .16)
+                      ? ink.withValues(alpha: .38)
                       : Colors.transparent,
                 ),
               ),
@@ -114,12 +143,13 @@ class _ActivityStripState extends State<ActivityStrip> {
                         ? MainAxisSize.max
                         : MainAxisSize.min,
                     children: [
-                      Icon(
-                        activityIcons[index],
-                        size: 20,
-                        color: active
-                            ? colors.onPrimaryContainer
-                            : colors.onSurfaceVariant,
+                      Container(
+                        padding: const EdgeInsets.all(5),
+                        decoration: BoxDecoration(
+                          color: ink.withValues(alpha: active ? .18 : .09),
+                          borderRadius: BorderRadius.circular(9),
+                        ),
+                        child: Icon(activityIcons[index], size: 20, color: ink),
                       ),
                       const SizedBox(width: 9),
                       if (widget.vertical)
@@ -129,9 +159,7 @@ class _ActivityStripState extends State<ActivityStrip> {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                              color: active
-                                  ? colors.onPrimaryContainer
-                                  : colors.onSurfaceVariant,
+                              color: active ? ink : colors.onSurfaceVariant,
                               fontWeight: active
                                   ? FontWeight.w700
                                   : FontWeight.w500,
@@ -142,9 +170,7 @@ class _ActivityStripState extends State<ActivityStrip> {
                         Text(
                           activityNames[index],
                           style: TextStyle(
-                            color: active
-                                ? colors.onPrimaryContainer
-                                : colors.onSurfaceVariant,
+                            color: active ? ink : colors.onSurfaceVariant,
                             fontWeight: active
                                 ? FontWeight.w700
                                 : FontWeight.w500,
@@ -157,7 +183,7 @@ class _ActivityStripState extends State<ActivityStrip> {
                               ? Icons.chevron_left
                               : Icons.chevron_right,
                           size: 16,
-                          color: colors.onPrimaryContainer,
+                          color: ink,
                         ),
                       ],
                     ],
@@ -168,18 +194,9 @@ class _ActivityStripState extends State<ActivityStrip> {
           ),
         ),
       );
-    });
-    return Container(
+    }).toList();
+    return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
-      decoration: widget.vertical
-          ? null
-          : BoxDecoration(
-              color: colors.surfaceContainerLow,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                color: colors.outlineVariant.withValues(alpha: .7),
-              ),
-            ),
       child: widget.vertical
           ? SizedBox(
               width: 164,

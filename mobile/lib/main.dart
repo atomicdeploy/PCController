@@ -12,6 +12,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'documents.dart';
 import 'discovery.dart';
 import 'unified/workspace_chrome.dart';
+import 'unified/activity_swipe.dart';
 import 'unified/app_upgrade.dart';
 import 'unified/peer_upgrades.dart';
 import 'unified/pwm_control.dart';
@@ -901,6 +902,34 @@ class _ControllerHomeState extends State<ControllerHome>
     }
   }
 
+  // Evaluate at gesture time too: freshness may expire without a UI rebuild.
+  bool get canPullRefresh {
+    final relevant = switch (section) {
+      1 || 2 || 5 => [board],
+      _ => [
+        for (final peer in [board, player])
+          if (peer.transport != null || peer.online) peer,
+      ],
+    };
+    if (relevant.isEmpty || relevant.any((peer) => !peer.fresh)) return true;
+    if (section == 0 &&
+        board.fresh &&
+        board.state['have_status'] == true &&
+        !board.measurementsFresh) {
+      return true;
+    }
+    if (section == 1 && !board.pwmReadbackFresh) {
+      final needsPwm =
+          board.state['connected'] == true &&
+          objects(board.peripherals['controls']).any(
+            (control) =>
+                control['control'] == 'pwm-user' && control['hidden'] != true,
+          );
+      if (board.pwmUpdated != null || needsPwm) return true;
+    }
+    return false;
+  }
+
   Future<void> refreshActivity() async {
     if (!foreground) return;
     final activity = section;
@@ -953,12 +982,31 @@ class _ControllerHomeState extends State<ControllerHome>
           preferences.layout == 'tablet' && bounds.maxWidth >= 600 ||
           preferences.layout == 'auto' && bounds.maxWidth >= 760;
       final colors = Theme.of(context).colorScheme;
+      // A verified host session enables its workspace; stale reads retain
+      // navigation so recovery does not move an active editor or viewport.
+      final connected = board.online || player.online;
+      final availableActivities = [
+        0,
+        if (board.online && board.state['connected'] == true) ...[1, 2],
+        3,
+        4,
+        if (board.online) 5,
+        if (logs.isNotEmpty ||
+            board.events.isNotEmpty ||
+            player.events.isNotEmpty)
+          6,
+      ];
       final body = Column(
         children: [
-          if (!tablet)
+          if (!tablet && connected)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 10),
-              child: ActivityStrip(selected: section, changed: selectActivity),
+              child: ActivityStrip(
+                selected: section,
+                changed: selectActivity,
+                muted: preferences.tone == 'pastel',
+                activities: availableActivities,
+              ),
             ),
           SizedBox(
             height: 2,
@@ -976,70 +1024,85 @@ class _ControllerHomeState extends State<ControllerHome>
               ],
             ),
           Expanded(
-            child: RefreshIndicator(
-              onRefresh: refreshActivity,
-              child: SizedBox.expand(
-                child: SingleChildScrollView(
-                  physics: const AlwaysScrollableScrollPhysics(),
-                  padding: const EdgeInsets.all(14),
-                  child: switch (section) {
-                    0 => Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        preferences.compact ? liveConnections() : peerRoster(),
-                        if (board.fresh) ...[
-                          const SizedBox(height: 14),
-                          monitor(),
+            child: ActivitySwipe(
+              selected: section,
+              activities: availableActivities,
+              enabled: connected,
+              changed: selectActivity,
+              child: RefreshIndicator(
+                notificationPredicate: (notification) =>
+                    notification.depth == 0 && canPullRefresh,
+                onRefresh: () async {
+                  if (canPullRefresh) await refreshActivity();
+                },
+                child: SizedBox.expand(
+                  child: SingleChildScrollView(
+                    key: PageStorageKey(
+                      'activity-scroll-${activityIds[section]}',
+                    ),
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.all(14),
+                    child: switch (section) {
+                      0 => Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          preferences.compact
+                              ? liveConnections()
+                              : peerRoster(),
+                          if (board.fresh) ...[
+                            const SizedBox(height: 14),
+                            monitor(),
+                          ],
+                          if (player.fresh || bridgeTarget != null) ...[
+                            const SizedBox(height: 14),
+                            playback(),
+                          ],
+                          if (!board.fresh &&
+                              !player.fresh &&
+                              discovered.isNotEmpty) ...[
+                            const SizedBox(height: 14),
+                            discoveredPeers(),
+                          ],
                         ],
-                        if (player.fresh || bridgeTarget != null) ...[
-                          const SizedBox(height: 14),
-                          playback(),
+                      ),
+                      1 => outputs(),
+                      2 => board.boardReady ? frontPanel() : peerRoster(),
+                      3 => Column(
+                        children: [
+                          workspace(),
+                          if (board.fresh) ...[
+                            const SizedBox(height: 14),
+                            effects(),
+                          ],
+                          if (player.fresh) ...[
+                            const SizedBox(height: 14),
+                            playerEffects(),
+                          ],
                         ],
-                        if (!board.fresh &&
-                            !player.fresh &&
-                            discovered.isNotEmpty) ...[
+                      ),
+                      4 => Column(
+                        children: [
+                          peerRoster(),
                           const SizedBox(height: 14),
                           discoveredPeers(),
+                          if (preferences.sharePackages ||
+                              upgrades.state['state'] != 'idle' ||
+                              discovered.any(
+                                (d) => d.product == 'controller-mobile',
+                              )) ...[
+                            const SizedBox(height: 14),
+                            upgradePanel(),
+                          ],
+                          if (board.fresh || player.fresh) ...[
+                            const SizedBox(height: 14),
+                            peers(),
+                          ],
                         ],
-                      ],
-                    ),
-                    1 => outputs(),
-                    2 => board.boardReady ? frontPanel() : peerRoster(),
-                    3 => Column(
-                      children: [
-                        workspace(),
-                        if (board.fresh) ...[
-                          const SizedBox(height: 14),
-                          effects(),
-                        ],
-                        if (player.fresh) ...[
-                          const SizedBox(height: 14),
-                          playerEffects(),
-                        ],
-                      ],
-                    ),
-                    4 => Column(
-                      children: [
-                        peerRoster(),
-                        const SizedBox(height: 14),
-                        discoveredPeers(),
-                        if (preferences.sharePackages ||
-                            upgrades.state['state'] != 'idle' ||
-                            discovered.any(
-                              (d) => d.product == 'controller-mobile',
-                            )) ...[
-                          const SizedBox(height: 14),
-                          upgradePanel(),
-                        ],
-                        if (board.fresh || player.fresh) ...[
-                          const SizedBox(height: 14),
-                          peers(),
-                        ],
-                      ],
-                    ),
-                    5 => board.fresh ? firmware() : peerRoster(),
-                    _ => activities(),
-                  },
+                      ),
+                      5 => board.fresh ? firmware() : peerRoster(),
+                      _ => activities(),
+                    },
+                  ),
                 ),
               ),
             ),
@@ -1070,11 +1133,12 @@ class _ControllerHomeState extends State<ControllerHome>
                         style: Theme.of(context).textTheme.titleMedium
                             ?.copyWith(fontWeight: FontWeight.w700),
                       ),
-                      Text(
-                        activityNames[section],
-                        style: Theme.of(context).textTheme.labelMedium
-                            ?.copyWith(color: colors.onSurfaceVariant),
-                      ),
+                      if (connected || section == 3)
+                        Text(
+                          activityNames[section],
+                          style: Theme.of(context).textTheme.labelMedium
+                              ?.copyWith(color: colors.onSurfaceVariant),
+                        ),
                     ],
                   ),
                 ),
@@ -1120,10 +1184,23 @@ class _ControllerHomeState extends State<ControllerHome>
                 onPressed: openSettings,
                 icon: const Icon(Icons.settings_outlined),
               ),
+              if (!connected)
+                PopupMenuButton<int>(
+                  tooltip: 'Workspace',
+                  icon: const Icon(Icons.more_vert),
+                  onSelected: selectActivity,
+                  itemBuilder: (_) => [
+                    const PopupMenuItem(value: 0, child: Text('Connections')),
+                    const PopupMenuItem(value: 3, child: Text('Local drafts')),
+                    const PopupMenuItem(value: 4, child: Text('Devices')),
+                    if (logs.isNotEmpty)
+                      const PopupMenuItem(value: 6, child: Text('Events')),
+                  ],
+                ),
               const SizedBox(width: 6),
             ],
           ),
-          body: tablet
+          body: tablet && connected
               ? Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -1133,6 +1210,8 @@ class _ControllerHomeState extends State<ControllerHome>
                         selected: section,
                         changed: selectActivity,
                         vertical: true,
+                        muted: preferences.tone == 'pastel',
+                        activities: availableActivities,
                       ),
                     ),
                     VerticalDivider(width: 1, color: colors.outlineVariant),
