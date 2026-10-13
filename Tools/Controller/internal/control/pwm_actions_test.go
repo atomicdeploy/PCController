@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"math"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -243,7 +244,10 @@ func TestPWMActionFramedTransportReadbackAndReplacement(t *testing.T) {
 				t.Fatalf("framed action failed: %+v reads%d writes%d err%v", got, observedReads, observedWrites, err)
 			}
 			event, err := runtime.WaitEvent(ctx, after, "pwm.changed")
-			if err != nil || event.Metadata["connection_generation"] != "7" || event.Metadata["pwm.1"] != "1234" {
+			for err == nil && event.Metadata["pwm.0"] != strconv.Itoa(int(want)) {
+				event, err = runtime.WaitEvent(ctx, event.ID, "pwm.changed")
+			}
+			if err != nil || event.Metadata["connection_generation"] != "7" || event.Metadata["pwm.1"] != "1234" || event.Metadata["revision"] == "" {
 				t.Fatalf("readback broadcast missing: %+v %v", event, err)
 			}
 		})

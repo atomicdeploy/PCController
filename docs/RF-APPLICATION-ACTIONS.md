@@ -58,7 +58,9 @@ is required. Existing motion mappings and firmware RF mappings are not rewritten
 Configure the step through the existing channel configuration RPC, for example
 `controller.pwm.channel.configure` with
 `{"channel":0,"output_type":"lighting","icon":"lightbulb","curve":"gamma","gamma":2.2,"step_percent":2.5}`.
-Omission retains the documented 1% default, not a migration or persisted rewrite.
+Omission in stored channel data uses the documented 1% default, not a migration
+or persisted rewrite. In a channel configuration update, omitting the step
+preserves an existing custom step; explicitly supply 1 to restore the default.
 An explicitly supplied step must be finite, greater than zero and at most 100.
 Use the appropriate type/curve for the actual output; motors do not receive a
 lighting curve implicitly.

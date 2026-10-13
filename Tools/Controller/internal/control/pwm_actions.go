@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"strconv"
 
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/native"
@@ -81,11 +80,8 @@ func applyPWMActionWithIO(channel byte, verb string, config appconfig.PWMChannel
 	if err != nil {
 		return native.PWMValues{}, err
 	}
-	if !values.Available {
-		return native.PWMValues{}, errors.New("PWM driver is unavailable")
-	}
-	if values.Values[channel] > appconfig.PWMMaximumValue {
-		return native.PWMValues{}, errors.New("PWM readback exceeds 4095")
+	if err := validatePWMActionReadback(values); err != nil {
+		return native.PWMValues{}, err
 	}
 	percent, err := pwmActionPercent(values.Values[channel], verb, config)
 	if err != nil {
@@ -98,13 +94,25 @@ func applyPWMActionWithIO(channel byte, verb string, config appconfig.PWMChannel
 	if err != nil {
 		return native.PWMValues{}, fmt.Errorf("PWM write acknowledged but readback failed; output outcome is unknown: %w", err)
 	}
-	if err == nil && !values.Available {
-		err = errors.New("PWM driver became unavailable after write; output outcome is unknown")
+	if err := validatePWMActionReadback(values); err != nil {
+		return native.PWMValues{}, fmt.Errorf("PWM readback invalid after write; output outcome is unknown: %w", err)
 	}
-	if values.Values[channel] > appconfig.PWMMaximumValue {
-		err = errors.New("PWM readback exceeds 4095 after write; output outcome is unknown")
+	return values, nil
+}
+
+func validatePWMActionReadback(values native.PWMValues) error {
+	if !values.Available {
+		return errors.New("PWM driver is unavailable")
 	}
-	return values, err
+	if values.SelectedChannel >= appconfig.PWMChannelCount {
+		return errors.New("PWM selected-channel readback exceeds 15")
+	}
+	for _, raw := range values.Values {
+		if raw > appconfig.PWMMaximumValue {
+			return errors.New("PWM readback exceeds 4095")
+		}
+	}
+	return nil
 }
 
 // ApplyPWMAction pins the complete read/modify/write/readback to one session.
@@ -173,10 +181,7 @@ func (runtime *Runtime) ApplyPWMAction(ctx context.Context, generation uint64, c
 	if err != nil {
 		return native.PWMValues{}, err
 	}
-	metadata := map[string]string{"available": strconv.FormatBool(values.Available), "selected_channel": strconv.Itoa(int(values.SelectedChannel)), "connection_generation": strconv.FormatUint(generation, 10)}
-	for channel, raw := range values.Values {
-		metadata[appconfig.PWMChannelKey(channel)] = strconv.Itoa(int(raw))
-	}
-	runtime.PublishStructuredEvent(Event{Kind: "pwm.changed", Stream: EventStreamState, Text: "PWM outputs updated", Metadata: metadata})
+	// requestAtGeneration already admits the complete readback through the
+	// shared revisioned publisher. Do not emit a duplicate, unrevisioned event.
 	return values, nil
 }
