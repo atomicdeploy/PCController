@@ -36,5 +36,36 @@ only when declarations, lock metadata, installed versions and package-directory
 timestamps match; invalid caches still use npm ci. This avoids destructive
 dependency reinstall churn without reusing an old Web bundle.
 
-Delivery, exact package identity and remaining visual acceptance are recorded
-below after live verification. Concurrent mobile edits remain outside this fix.
+## Cafe delivery, 13 October 2026
+
+The corrected staged package is `.build/package/host-107216`; host source digest
+`bd686fdad96ee99a0463c7e19f737088d058cb4634a169eefc6c73f39bc9ce94`,
+controller SHA-256
+`f28330f2ddd9336599be4178290a81c239582ba295ae64c8c37b2e2763ffa11a`.
+The 30.4-second build passed the selected compilation/package checks with
+`locked-cache-verified` dependencies and skipped suites. It preserves the
+previously deployed development lineage; it is not a package of the isolated
+main-based PR tree.
+
+Primary-owned update `op-2b1ae95fc68b3871` completed with
+`terminal_verified=true`. A fresh bridge RPC identified PID 83576 in Cafe's
+interactive session 4 and reported `console_visible=false`,
+`console_attached=true`, `console_sole_owner=true`,
+`console_interactive_streams=true`. The installed executable hash matches the
+package. Thus the inherited console was hidden, not detached or forcibly killed.
+The previous candidate `5c85b2479cff642787312233afc3efc0f18e06335248180289ed4c9cd96c21f2`
+had correctly reported visible=true and was not falsely accepted as fixed.
+
+Controller configuration remained semantically unchanged against the private
+named backup `verification/startup-console/config.json` (backup SHA-256
+`82a8fd03af13add569555f741905a9d91cb650ce95d133e5e71215adcfbedba5`).
+Pealayer remained paused, connected to the controller and hardware, with no
+hardware/sync error, no requested Play, and matching desired/prepared/clock ACK
+revision 87. No physical output command, playback start, firmware flash or
+unrelated console/process action was issued.
+
+The source checkpoint is `e05ebc9b`, isolated onto main as `7ebf4a59` without
+switching the shared checkout or creating a worktree. Concurrent mobile edits
+remain outside the fix. The actual TUI first paint has not been captured on Cafe:
+the running surface is a background Web host. Console visibility was verified
+through process-local diagnostics, not a claimed screenshot/human UI acceptance.
