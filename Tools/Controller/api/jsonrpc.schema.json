@@ -1474,7 +1474,7 @@
     },
     "controller.rf.binding.put": {
       "capability": "host_configuration",
-      "summary": "Transactionally create or replace one validated host-owned RF application binding.",
+      "summary": "Create a uniquely named validated RF binding, or explicitly edit with previous_name; reject name/stale-target conflicts without replacing unrelated assignments.",
       "idempotency": "idempotent-with-authoritative-readback"
     },
     "controller.rf.binding.remove": {

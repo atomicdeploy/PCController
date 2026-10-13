@@ -128,6 +128,8 @@ func (service *Service) putRFBinding(raw json.RawMessage) (any, error) {
 		return nil, err
 	}
 	rule := params.Binding
+	rule.Name = strings.TrimSpace(rule.Name)
+	params.PreviousName = strings.TrimSpace(params.PreviousName)
 	if !isRFBinding(rule) || rule.Match.RFCode == nil || *rule.Match.RFCode == 0 || rule.Match.RFBits < 1 || rule.Match.RFBits > 32 || rule.Match.RFProtocol < 1 || rule.Match.RFProtocol > 12 {
 		return nil, errors.New("RF binding requires rf.gesture/source rf and complete code, bits and protocol")
 	}
@@ -148,12 +150,14 @@ func (service *Service) putRFBinding(raw json.RawMessage) (any, error) {
 		foundPrevious := params.PreviousName == ""
 		rules := make([]appconfig.Automation, 0, len(config.Automations)+1)
 		for _, existing := range config.Automations {
-			if strings.EqualFold(existing.Name, rule.Name) || (params.PreviousName != "" && strings.EqualFold(existing.Name, params.PreviousName)) {
+			existingName := strings.TrimSpace(existing.Name)
+			isPrevious := params.PreviousName != "" && strings.EqualFold(existingName, params.PreviousName)
+			if strings.EqualFold(existingName, rule.Name) || isPrevious {
 				if !isRFBinding(existing) {
-					return errors.New("name belongs to a non-RF automation")
+					return rfBindingConflict("not_rf", existing.Name, "This name belongs to another automation; choose a different assignment name")
 				}
-				if params.PreviousName != "" && !strings.EqualFold(existing.Name, params.PreviousName) {
-					return errors.New("another binding already has that name")
+				if !isPrevious {
+					return rfBindingConflict("name_exists", existing.Name, "An assignment already uses this name; choose a different name or explicitly edit that assignment")
 				}
 				foundPrevious = true
 				continue
@@ -164,7 +168,7 @@ func (service *Service) putRFBinding(raw json.RawMessage) (any, error) {
 			rules = append(rules, existing)
 		}
 		if !foundPrevious {
-			return errors.New("assignment changed or was removed; refresh before saving")
+			return rfBindingConflict("previous_missing", params.PreviousName, "The assignment was renamed or removed; refresh before saving")
 		}
 		for _, action := range rule.Actions {
 			if action.Type == "virtual-key" && params.AllowKeyboard {
@@ -193,6 +197,17 @@ func (service *Service) putRFBinding(raw json.RawMessage) (any, error) {
 	}
 	service.Client.EmitHostEvent("rf.bindings.changed", "RF assignment saved")
 	return rfBindings(service.hostConfig()), nil
+}
+
+func rfBindingConflict(reason, name, message string) *RPCError {
+	field := "binding.name"
+	if reason == "previous_missing" {
+		field = "previous_name"
+	}
+	return &RPCError{Code: -32009, Message: message, Data: map[string]any{
+		"kind": "conflict", "resource": "rf_binding", "field": field,
+		"reason": reason, "name": name,
+	}}
 }
 
 // Resolve the same catalog used by the assignment editor without executing any
