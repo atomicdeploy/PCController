@@ -10,6 +10,7 @@ import (
 
 	controller "pccontroller.local/controller"
 	"pccontroller.local/controller/internal/appconfig"
+	runtimecontrol "pccontroller.local/controller/internal/control"
 )
 
 type boardProfileDescriptor struct {
@@ -448,10 +449,17 @@ func (service *Service) invokeSemanticAction(ctx context.Context, actionID strin
 		if parseErr != nil || channel < 0 || channel >= appconfig.PWMChannelCount {
 			return nil, fmt.Errorf("invalid advertised PWM channel %q", parts[1])
 		}
-		values, actionErr := service.Client.ApplyPWMAction(ctx, generation, byte(channel), action.Verb, appconfig.PWMChannel(service.hostConfig().UI, channel))
+		_, actionErr := service.Client.ApplyPWMAction(ctx, generation, byte(channel), action.Verb, appconfig.PWMChannel(service.hostConfig().UI, channel))
 		err = actionErr
 		if err == nil {
-			pwmReadback = service.describePWMValues(values)
+			snapshot := service.Client.Snapshot()
+			if !snapshot.Connected || snapshot.ConnectionGeneration != generation || snapshot.PWMValues == nil {
+				err = &runtimecontrol.PWMActionConfirmationError{Cause: errors.New("PWM readback owner changed before the response")}
+			} else {
+				// Values, recall and revision must describe one coherent snapshot;
+				// an unstamped semantic reply is rejected by fenced live clients.
+				pwmReadback = service.describePWMValuesForSnapshot(*snapshot.PWMValues, snapshot)
+			}
 		}
 	default:
 		return nil, fmt.Errorf("action %q is not executable by control %q", actionID, control.Key)

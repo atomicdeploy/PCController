@@ -54,8 +54,6 @@ func (service *Service) cachedPWMValues() *pwmValues {
 		return nil
 	}
 	values := service.describePWMValuesForSnapshot(*snapshot.PWMValues, snapshot)
-	values.HostInstanceID, values.ConnectionGeneration = strings.TrimSpace(service.HostInstanceID), snapshot.ConnectionGeneration
-	values.Revision, values.Time = snapshot.PWMRevision, snapshot.PWMUpdated
 	return &values
 }
 
@@ -103,6 +101,8 @@ func (service *Service) describePWMValues(values native.PWMValues) pwmValues {
 func (service *Service) describePWMValuesForSnapshot(values native.PWMValues, snapshot controller.Snapshot) pwmValues {
 	config := service.hostConfig()
 	result := pwmValues{
+		HostInstanceID: strings.TrimSpace(service.HostInstanceID), ConnectionGeneration: snapshot.ConnectionGeneration,
+		Revision: snapshot.PWMRevision, Time: snapshot.PWMUpdated,
 		Available: values.Available, SelectedChannel: values.SelectedChannel, Values: values.Values,
 		Channels: make([]pwmChannelValue, 0, appconfig.PWMChannelCount),
 	}
