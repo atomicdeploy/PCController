@@ -108,6 +108,23 @@ func (plan buzzerPlaybackPlan) remaining(now time.Time) (time.Duration, bool) {
 	return plan.end.Sub(now), true
 }
 
+func (timeline *buzzerPlaybackTimeline) rebaseForStart(job buzzerMirrorJob, plan buzzerPlaybackPlan, now time.Time) (buzzerPlaybackPlan, time.Duration) {
+	age := now.Sub(job.observedAt)
+	late := now.Sub(plan.start)
+	if !job.timed || job.observedAt.IsZero() || age < 0 || age > maxBuzzerObservedSkew || late <= 0 {
+		return plan, 0
+	}
+	// Timer wakeup and serialized backend cleanup can miss even a 1 ms note.
+	// Shift this source's fresh playout cadence, not its declared durations.
+	plan.start = plan.start.Add(late)
+	plan.end = plan.end.Add(late)
+	if anchor, ok := timeline.anchors[job.source]; ok {
+		anchor.start = anchor.start.Add(late)
+		timeline.anchors[job.source] = anchor
+	}
+	return plan, late
+}
+
 func buzzerMirrorJobFor(config appconfig.BuzzerMirror, event controller.Event) (buzzerMirrorJob, bool) {
 	if !config.Enabled || !config.NativeEnabled || event.Kind != "buzzer.note" {
 		return buzzerMirrorJob{}, false
@@ -221,7 +238,18 @@ func (manager *Manager) buzzerMirrorLoop() {
 		timerChannel = timer.C
 	}
 	start := func(next scheduledPlayback) bool {
-		remaining, audible := next.plan.remaining(time.Now())
+		now := time.Now()
+		var shift time.Duration
+		next.plan, shift = timeline.rebaseForStart(next.job, next.plan, now)
+		if shift > 0 {
+			for index := range pending {
+				if pending[index].job.source == next.job.source {
+					pending[index].plan.start = pending[index].plan.start.Add(shift)
+					pending[index].plan.end = pending[index].plan.end.Add(shift)
+				}
+			}
+		}
+		remaining, audible := next.plan.remaining(now)
 		if !audible || next.job.frequencyHz == 0 {
 			return false
 		}

@@ -12,6 +12,9 @@ including a fresh first note delayed by scheduler handoff. The original duration
 is retained; following notes resume
 device-clock cadence from that anchor. This is bounded playout recovery, not
 sample-exact acoustic synchronization or permission to replay old audio.
+Late timer wakeup or serialized backend cleanup also rebases fresh source
+playout and its queued followers, retaining declared durations instead of
+spending those delays out of a 1 ms note. Stale observations are not revived.
 
 Dispatch preserves Runtime's local monotonic receipt timestamp (also assigned
 when remote events are ingressed), rather than restamping after integration

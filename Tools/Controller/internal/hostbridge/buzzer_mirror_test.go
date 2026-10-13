@@ -200,6 +200,27 @@ func TestBuzzerPlaybackTimelineRebuffersFreshSchedulerHandoff(t *testing.T) {
 	}
 }
 
+func TestBuzzerPlaybackTimelineRetainsVeryShortNoteAfterTimerWakeup(t *testing.T) {
+	timeline := newBuzzerPlaybackTimeline()
+	base := time.Unix(1700000000, 0)
+	job := buzzerMirrorJob{source: "board-a", timed: true, deviceMicros: 1000,
+		frequencyHz: 880, durationMS: 1, observedAt: base}
+	plan := timeline.plan(job, base)
+	started := plan.start.Add(2 * time.Millisecond)
+	rebased, shift := timeline.rebaseForStart(job, plan, started)
+	if remaining, audible := rebased.remaining(started); !audible || remaining != time.Millisecond || shift != 2*time.Millisecond {
+		t.Fatalf("short timer wakeup remaining=%v audible=%t shift=%v", remaining, audible, shift)
+	}
+	next := timeline.plan(buzzerMirrorJob{source: "board-a", timed: true,
+		deviceMicros: 21000, durationMS: 1, observedAt: base.Add(20 * time.Millisecond)}, started)
+	if next.start.Sub(rebased.start) != 20*time.Millisecond {
+		t.Fatal("timer recovery lost following source cadence")
+	}
+	if _, shift := timeline.rebaseForStart(job, plan, base.Add(time.Second)); shift != 0 {
+		t.Fatal("timer recovery rehabilitated a stale note")
+	}
+}
+
 func TestBuzzerPlaybackTimelineReanchorsAfterDeviceRestart(t *testing.T) {
 	timeline := newBuzzerPlaybackTimeline()
 	base := time.Unix(1700000000, 0)
