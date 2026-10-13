@@ -189,7 +189,7 @@ export interface PWMMutationSchedulerOptions {
   onDraft: (channel: number, value: number) => void
   onAuthoritative: (values: PWMValues, acknowledgedChannel: number | null) => void
   onPending: (channels: readonly number[]) => void
-  onError: (channel: number, cause: Error) => void
+  onError: (channel: number, cause: Error, revertDraft: boolean) => void
 }
 
 // PWMMutationScheduler keeps at most one write in flight per channel and one
@@ -202,6 +202,7 @@ export class PWMMutationScheduler {
   private readonly desired = new Map<number, DesiredPWMValue>()
   private readonly inFlight = new Set<number>()
   private readonly timers = new Map<number, ReturnType<typeof setTimeout>>()
+  private readonly editing = new Set<number>()
   private revision = 0
   private disposed = false
 
@@ -214,7 +215,7 @@ export class PWMMutationScheduler {
   schedule(channel: number, value: number, immediate = false): void {
     if (this.disposed) return
     if (!USER_PWM_CHANNELS.includes(channel)) {
-      this.options.onError(channel, new Error('Generic PWM controls are limited to user channels 0..10'))
+      this.options.onError(channel, new Error('Generic PWM controls are limited to user channels 0..10'), true)
       return
     }
     const bounded = clampPWMValue(value)
@@ -235,7 +236,24 @@ export class PWMMutationScheduler {
   }
 
   pendingChannels(): number[] {
-    return [...new Set([...this.desired.keys(), ...this.inFlight])].sort((a, b) => a - b)
+    return [...new Set([...this.desired.keys(), ...this.inFlight, ...this.editing])].sort((a, b) => a - b)
+  }
+
+  beginEdit(channel: number): void {
+    if (this.disposed || !USER_PWM_CHANNELS.includes(channel)) return
+    this.editing.add(channel)
+    this.notifyPending()
+  }
+
+  isEditing(channel: number): boolean { return this.editing.has(channel) }
+
+  endEdit(channel: number): void {
+    this.editing.delete(channel)
+    const timer = this.timers.get(channel)
+    if (timer) clearTimeout(timer)
+    this.timers.delete(channel)
+    if (this.desired.has(channel)) void this.flush(channel)
+    this.notifyPending()
   }
 
   dispose(): void {
@@ -243,6 +261,7 @@ export class PWMMutationScheduler {
     for (const timer of this.timers.values()) clearTimeout(timer)
     this.timers.clear()
     this.desired.clear()
+    this.editing.clear()
   }
 
   private async flush(channel: number): Promise<void> {
@@ -262,7 +281,7 @@ export class PWMMutationScheduler {
       if (this.disposed) return
       const latest = this.desired.get(channel)
       if (latest?.revision === requested.revision) this.desired.delete(channel)
-      this.options.onError(channel, cause instanceof Error ? cause : new Error(String(cause)))
+      this.options.onError(channel, cause instanceof Error ? cause : new Error(String(cause)), latest?.revision === requested.revision)
     } finally {
       this.inFlight.delete(channel)
       if (!this.disposed && this.desired.has(channel)) {

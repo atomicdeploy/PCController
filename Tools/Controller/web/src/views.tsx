@@ -171,6 +171,7 @@ export interface SharedViewProps {
   relayedTerminal: Array<TabTerminalEntry & { id: string; tabId: string }>
   broadcastTerminal: (entry: TabTerminalEntry) => void
   boardSettingsReadState: BoardSettingsReadState
+  focusControl?: { key: string; revision: number }
 }
 
 export interface AppInstanceSummary {
@@ -647,6 +648,7 @@ export function ControlsView(props: SharedViewProps) {
     pwmReportedRef.current = authoritative.values
     setPWMReported(authoritative.values)
     setPWMDraft((current) => current.map((value, channel) => {
+      if (pwmSchedulerRef.current?.isEditing(channel)) return value
       if (channel === acknowledgedChannel) return authoritative.values[channel]
       if (pwmSchedulerRef.current?.pendingChannels().includes(channel)) return value
       return authoritative.values[channel]
@@ -658,16 +660,16 @@ export function ControlsView(props: SharedViewProps) {
   if (!pwmSchedulerRef.current) {
     pwmSchedulerRef.current = new PWMMutationScheduler({
       operations: pwmOperationsRef.current,
-		commit: (channel, value) => rpc<PWMValues>('controller.pwm.set', { channel, percent: pwmPercent(value, pwmConfig(channel)) }),
+		commit: (channel, value) => rpc<PWMValues>('controller.pwm.set', { channel, raw_value: value }),
       onDraft: (channel, value) => {
         setPWMError('')
         setPWMDraft((current) => current.map((candidate, index) => index === channel ? value : candidate))
       },
       onAuthoritative: applyAuthoritativePWM,
       onPending: (channels) => setPWMPending([...channels]),
-      onError: (channel, cause) => {
+      onError: (channel, cause, revertDraft) => {
         setPWMError(cause.message)
-        setPWMDraft((current) => current.map((value, index) => index === channel ? pwmReportedRef.current[channel] : value))
+        if (revertDraft) setPWMDraft((current) => current.map((value, index) => index === channel ? pwmReportedRef.current[channel] : value))
       },
     })
   }
@@ -684,7 +686,7 @@ export function ControlsView(props: SharedViewProps) {
       .then((value) => { if (active) setHostUI(value) })
       .catch(() => { if (active) setHostUI(null) })
     return () => { active = false }
-  }, [boardReady, configurationEventID])
+  }, [boardReady, configurationEventID, props.events.find(event => event.kind === 'peripherals.changed')?.id, snapshot.port.name])
 
   useEffect(() => {
     if (!boardReady || !available.pwm) {
@@ -703,16 +705,15 @@ export function ControlsView(props: SharedViewProps) {
     return () => reconciler.stop()
   }, [available.pwm, boardReady])
 
+  // Selected-channel telemetry can predate the complete mutation ACK. It must
+  // not replace the mixer's full authoritative readback with an older sample.
   useEffect(() => {
-    if (!boardReady || !available.pwm || snapshot.status.pwm_channel < 0 || snapshot.status.pwm_channel > 15) return
-    const channel = snapshot.status.pwm_channel
-    const value = snapshot.status.pwm_value
-    pwmReportedRef.current = pwmReportedRef.current.map((candidate, index) => index === channel ? value : candidate)
-    setPWMReported(pwmReportedRef.current)
-    if (!pwmSchedulerRef.current?.pendingChannels().includes(channel)) {
-      setPWMDraft((current) => current.map((candidate, index) => index === channel ? value : candidate))
-    }
-  }, [available.pwm, boardReady, snapshot.status.pwm_channel, snapshot.status.pwm_value])
+    if (!props.focusControl || !boardReady || !hostUI) return
+    const element = [...document.querySelectorAll<HTMLElement>('[data-control-key]')]
+      .find(element => element.dataset.controlKey === props.focusControl?.key)
+    element?.scrollIntoView({ block: 'center', behavior: props.reduceMotion ? 'auto' : 'smooth' })
+    element?.focus({ preventScroll: true })
+  }, [props.focusControl, boardReady, hostUI])
 
   const pwmDefaults = [
     'MOSFET 1', 'MOSFET 2', 'MOSFET 3', 'MOSFET 4',
@@ -806,7 +807,7 @@ export function ControlsView(props: SharedViewProps) {
             {Array.from({ length: 8 }, (_, index) => {
               const active = Boolean(snapshot.status.active_relays & (1 << index))
               return (
-                <article key={index} className={`relay-switch${active ? ' is-active' : ''}`}>
+                <article key={index} data-control-key={`relay.${index + 1}`} tabIndex={-1} className={`relay-switch${active ? ' is-active' : ''}`}>
                   <span>R{index + 1}</span><RelayToggle active={active} disabled={!snapshot.connected || emergencyStopActive && !active} label={copy(`Toggle relay ${index + 1}`, `تغییر وضعیت رله ${index + 1}`)} onToggle={() => void command(`relay ${index + 1} ${active ? 'off' : 'on'}`)} /><small>{peripheralName(`relay.${index + 1}`, relayDefaults[index])}</small>
                   <div className="relay-switch__actions"><Button compact disabled={active || emergencyStopActive} onClick={() => void command(`relay ${index + 1} on`)}>{t('on')}</Button><Button compact disabled={!active} onClick={() => void command(`relay ${index + 1} off`)}>{t('off')}</Button></div>
                 </article>
@@ -824,14 +825,16 @@ export function ControlsView(props: SharedViewProps) {
                   : presented === 'stop'
                     ? copy('STOPPED', 'متوقف')
                     : copy('UNKNOWN', 'نامشخص')
-              return <div key={side} className="motion-side">
+              return <div key={side} className="motion-side" data-control-key={side === 'left' ? 'seat.a' : 'seat.b'} tabIndex={-1}>
                 <div className="motion-side__identity">
-                  <strong>{side === 'left' ? peripheralName('motion.a', copy('Side A motion', 'حرکت سمت A')) : peripheralName('motion.b', copy('Side B motion', 'حرکت سمت B'))}</strong>
+                  <strong>{side === 'left' ? peripheralName('seat.a', copy('Side A motion', 'حرکت سمت A')) : peripheralName('seat.b', copy('Side B motion', 'حرکت سمت B'))}</strong>
                   <StatusBadge tone={presented === 'unknown' ? 'neutral' : presented === 'stop' ? 'good' : state?.transitioning ? 'warn' : 'info'} pulse={state?.transitioning}>{state?.transitioning ? `${label} · ${copy('SYNCING', 'همگام‌سازی')}` : label}</StatusBadge>
                 </div>
+                <div className="motion-side__actions">
                 <HoldActionButton compact disabled={emergencyStopActive} onHoldStart={() => command(`relay side ${side} up`)} onHoldStop={() => command(`relay side ${side} stop`)}>{copy('Hold Up', 'بالا نگه‌دار')}</HoldActionButton>
                 <Button compact onClick={() => void command(`relay side ${side} stop`)}>{copy('Stop', 'توقف')}</Button>
                 <HoldActionButton compact disabled={emergencyStopActive} onHoldStart={() => command(`relay side ${side} down`)} onHoldStop={() => command(`relay side ${side} stop`)}>{copy('Hold Down', 'پایین نگه‌دار')}</HoldActionButton>
+                </div>
               </div>
             })}
           </div>
@@ -846,8 +849,8 @@ export function ControlsView(props: SharedViewProps) {
               const pending = pwmPending.includes(channel)
               const name = pwmName(channel)
 			  const config = pwmConfig(channel)
-              return <div key={channel} className={`pwm-mixer__row${snapshot.status.pwm_channel === channel && !pending ? ' is-live' : ''}${pending ? ' is-pending' : ''}`}>
-				<div><strong>{config?.icon === 'lightbulb' ? '💡 ' : config?.output_type === 'motor' ? '⚙️ ' : ''}{name}</strong><small>{pending
+              return <div key={channel} data-control-key={`pwm.${channel}`} tabIndex={-1} className={`pwm-mixer__row${snapshot.status.pwm_channel === channel && !pending ? ' is-live' : ''}${pending ? ' is-pending' : ''}`}>
+				<div><strong>{config?.icon === 'lightbulb' ? '💡 ' : config?.output_type === 'motor' ? '⚙️ ' : ''}{name}</strong><small>{name === pwmDefaults[channel] ? `pwm.${channel}` : `${pwmDefaults[channel]} · pwm.${channel}`}</small><small>{pending
 				  ? copy(`Board ${reported} · draft ${draft}`, `برد ${reported} · پیش‌نویس ${draft}`)
 				  : copy(`${pwmPercent(reported, config)}% brightness · raw ${reported}`, `${pwmPercent(reported, config)}٪ روشنایی · خام ${reported}`)}</small>
 				  <div className="pwm-channel-config">
@@ -859,14 +862,14 @@ export function ControlsView(props: SharedViewProps) {
 					</select>
 				  </div>
 				</div>
-				<RangeField label={copy(`${name} brightness`, `روشنایی ${name}`)} value={pwmPercent(draft, config)} min={0} max={100} step={0.1} unit="%" disabled={!pwmLoaded || pwmAllBusy || emergencyStopActive} onChange={(percent) => setPWMPercent(channel, percent)} />
+				<RangeField label={copy(`${name} brightness`, `روشنایی ${name}`)} value={pwmPercent(draft, config)} min={0} max={100} step={0.1} unit="%" disabled={!pwmLoaded || pwmAllBusy || emergencyStopActive || hostUI?.controls.find(control => control.key === `pwm.${channel}`)?.locked} onEditStart={() => pwmSchedulerRef.current?.beginEdit(channel)} onEditEnd={() => pwmSchedulerRef.current?.endEdit(channel)} onChange={(percent) => setPWMPercent(channel, percent)} />
 				<div className="pwm-mixer__actions"><Button compact disabled={!pwmLoaded || pwmAllBusy || draft === 0} onClick={() => setPWMPercent(channel, 0, true)}>{t('off')}</Button><Button compact disabled={!pwmLoaded || pwmAllBusy || draft === 4095 || emergencyStopActive} onClick={() => setPWMPercent(channel, 100, true)}>{copy('FULL', 'کامل')}</Button></div>
 				{config?.curve === 'gamma' && <RangeField label={copy('Curve strength', 'شدت منحنی')} value={config.gamma} min={0.1} max={5} step={0.1} disabled={pwmAllBusy} onChange={(gamma) => void updatePWMConfig(channel, { gamma })} />}
               </div>
             })}
           </div>
           <div className="system-output-summary" aria-label={copy('Role-specific system PWM channels', 'کانال‌های PWM سیستمی با کنترل اختصاصی')}>
-            {[11, 12, 13, 14, 15].map((channel) => <span key={channel}><strong>{pwmName(channel)}</strong><small>{pwmReported[channel]} / 4095</small></span>)}
+            {[11, 12, 13, 14, 15].map((channel) => <span key={channel} data-control-key={`pwm.${channel}`} tabIndex={-1}><strong>{pwmName(channel)}</strong><small>{pwmReported[channel]} / 4095</small></span>)}
           </div>
           <div className={`pwm-authority-status${pwmError ? ' is-error' : ''}`} role="status" aria-live="polite">{pwmError || (pwmPending.length
             ? copy(`${pwmPending.length} channel${pwmPending.length === 1 ? '' : 's'} waiting for controller acknowledgement.`, `${pwmPending.length} کانال در انتظار تأیید کنترلر است.`)

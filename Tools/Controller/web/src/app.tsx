@@ -74,6 +74,7 @@ import {
   type TerminalEntry as TabTerminalEntry,
 } from './tab-channel'
 import { controllerChannelOrigin } from './transport-config'
+import { searchChannels } from './channel-search'
 import { matchesAppTarget } from './instance-routing'
 import {
   loadNavigationSync,
@@ -87,6 +88,8 @@ import type {
   ControllerEvent,
   DialogState,
   HostUISettings,
+  ControlDescriptor,
+  PeripheralSettings,
   HistorySample,
   MetricSample,
   Snapshot,
@@ -438,6 +441,8 @@ export default function App() {
   const [palette, setPalette] = useState(false)
   const [paletteQuery, setPaletteQuery] = useState('')
   const [paletteIndex, setPaletteIndex] = useState(0)
+  const [paletteControls, setPaletteControls] = useState<ControlDescriptor[]>([])
+  const [focusControl, setFocusControl] = useState<{key: string; revision: number} | undefined>()
   const [hotkeyHelp, setHotkeyHelp] = useState(false)
   const [appPreferencesOpen, setAppPreferencesOpen] = useState(false)
   const [quickHeader, setQuickHeader] = useState(loadQuickHeaderPreferences)
@@ -1209,13 +1214,29 @@ export default function App() {
     }
   }, [])
 
+  const filteredPalette = navigation.filter((item) => t(item.label).toLowerCase().includes(paletteQuery.toLowerCase()))
+  const filteredChannels = searchChannels(paletteControls, paletteQuery)
+  const peripheralChangeID = events.find(event => event.kind === 'peripherals.changed' || event.kind === 'config')?.id
+  useEffect(() => {
+    if (!palette || !snapshot.connected || demo) { if (!snapshot.connected) setPaletteControls([]); return }
+    const abort = new AbortController()
+    void rpc<PeripheralSettings>('controller.peripherals.get', {}, abort.signal)
+      .then(catalog => { if (!abort.signal.aborted) setPaletteControls(catalog.controls) })
+      .catch(cause => { if (!abort.signal.aborted) notify('warning', 'Channel search unavailable', cause instanceof Error ? cause.message : String(cause)) })
+    return () => abort.abort()
+  }, [palette, snapshot.connected, snapshot.port.name, peripheralChangeID])
+  const revealChannel = (key: string) => {
+    setFocusControl(previous => ({ key, revision: (previous?.revision ?? 0) + 1 }))
+    navigate('controls')
+    setPalette(false); setPaletteQuery('')
+  }
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (bootOpen || appPreferencesOpen) return
       const composing = event.isComposing || event.keyCode === 229
       if (palette) {
         if (composing) return
-        const choices = navigation.filter((item) => t(item.label).toLowerCase().includes(paletteQuery.toLowerCase()))
+        const choices = [...filteredPalette.map(item => () => navigate(item.id)), ...filteredChannels.map(item => () => revealChannel(item.key))]
         if (event.key === 'Escape') {
           event.preventDefault()
           setPalette(false)
@@ -1235,8 +1256,7 @@ export default function App() {
         }
         if (event.key === 'Enter' && choices.length) {
           event.preventDefault()
-          const selected = choices[Math.min(paletteIndex, choices.length - 1)]
-          navigate(selected.id)
+          choices[Math.min(paletteIndex, choices.length - 1)]()
           setPalette(false)
           setPaletteQuery('')
           audioRef.current?.cue('select')
@@ -1309,7 +1329,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [appPreferencesOpen, bootOpen, dialog.open, hotkeyHelp, mobileNav, navigate, page, palette, paletteIndex, paletteQuery, t, toggleAudio])
+  }, [appPreferencesOpen, bootOpen, dialog.open, hotkeyHelp, mobileNav, navigate, page, palette, paletteIndex, paletteQuery, paletteControls, t, toggleAudio])
 
   useEffect(() => {
     setPaletteIndex(0)
@@ -1625,6 +1645,7 @@ export default function App() {
       ? 'loading'
       : 'unavailable'
   const shared: SharedViewProps = {
+    focusControl,
     reduceMotion: appearance.reduceMotion,
     appTitle: productTitle, snapshot, samples, events, macroEvents, locale: appearance.locale, t, command: runCommand, refresh, openDialog,
     boardSettingsReadState,
@@ -1655,7 +1676,6 @@ export default function App() {
   )
 
   const current = navigation.find((item) => item.id === page) ?? navigation[0]
-  const filteredPalette = navigation.filter((item) => t(item.label).toLowerCase().includes(paletteQuery.toLowerCase()))
 
   const closeDialog = () => {
     if (dialogBusy) return
@@ -1859,14 +1879,15 @@ export default function App() {
           <motion.div className="palette-layer" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             <button className="palette-backdrop" aria-label={t('closeCommandPalette')} onClick={() => { setPalette(false); setPaletteQuery('') }} />
             <motion.section className="palette" role="dialog" aria-modal="true" aria-label={t('commandPalette')} initial={{ opacity: 0, scale: .985 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: .99 }} transition={{ duration: .2, ease: 'easeOut' }}>
-              <header><Command size={19} /><input autoFocus value={paletteQuery} placeholder={t('commandPalettePlaceholder')} aria-controls="palette-results" aria-activedescendant={filteredPalette[paletteIndex] ? `palette-page-${filteredPalette[paletteIndex].id}` : undefined} onChange={(event) => setPaletteQuery(event.target.value)} /><KeyCombo keys={["Esc"]} /></header>
+              <header><Command size={19} /><input autoFocus value={paletteQuery} placeholder={t('commandPalettePlaceholder')} aria-controls="palette-results" aria-activedescendant={filteredPalette[paletteIndex] ? `palette-page-${filteredPalette[paletteIndex].id}` : filteredChannels[paletteIndex - filteredPalette.length] ? `palette-channel-${filteredChannels[paletteIndex - filteredPalette.length].key}` : undefined} onChange={(event) => setPaletteQuery(event.target.value)} /><KeyCombo keys={["Esc"]} /></header>
               <div className="palette__results" id="palette-results" role="listbox" aria-label={t('matchingPages')}>
                 <span className="palette__label">{t('pagesLabel').toUpperCase()}</span>
                 {filteredPalette.map((item, index) => <button id={`palette-page-${item.id}`} role="option" aria-selected={index === paletteIndex} className={index === paletteIndex ? 'is-highlighted' : ''} key={item.id} onPointerMove={() => setPaletteIndex(index)} onClick={() => { navigate(item.id); setPalette(false); setPaletteQuery('') }}><Icon icon={item.icon} size={18} /><div><strong>{t(item.label)}</strong><small>{page === item.id ? (appearance.locale === 'fa' ? 'صفحه فعلی' : 'Current page') : (appearance.locale === 'fa' ? 'باز کردن' : 'Open')}</small></div><Check className={page === item.id ? 'is-visible' : ''} size={16} /></button>)}
                 <span className="palette__label">{t('quickCommandsLabel').toUpperCase()}</span>
+                {filteredChannels.map((item, index) => <button id={`palette-channel-${item.key}`} role="option" aria-selected={paletteIndex === filteredPalette.length + index} className={paletteIndex === filteredPalette.length + index ? 'is-highlighted' : ''} key={item.key} onPointerMove={() => setPaletteIndex(filteredPalette.length + index)} onClick={() => revealChannel(item.key)}><Box size={18} /><div><strong>{item.name}</strong><small>{item.key}</small></div></button>)}
                 {quickCommands.filter(([value, label]) => `${value} ${label}`.toLowerCase().includes(paletteQuery.toLowerCase())).map(([value, label]) => <button role="option" aria-selected="false" key={value} onClick={() => { void runCommand(value); setPalette(false) }}><Box size={18} /><div><strong dir="ltr">{value}</strong><small>{label}</small></div></button>)}
               </div>
-              <footer><span><KeyCombo keys={[["↑", "↓"]]} /> {t('navigate')}</span><span><KeyCombo keys={["Enter"]} /> {t('select')}</span><span>{filteredPalette.length + quickCommands.length} {t('actions')} · WS {streamState}</span></footer>
+              <footer><span><KeyCombo keys={[["↑", "↓"]]} /> {t('navigate')}</span><span><KeyCombo keys={["Enter"]} /> {t('select')}</span><span>{filteredPalette.length + filteredChannels.length + quickCommands.filter(([value, label]) => `${value} ${label}`.toLowerCase().includes(paletteQuery.toLowerCase())).length} {t('actions')} · WS {streamState}</span></footer>
             </motion.section>
           </motion.div>
         )}

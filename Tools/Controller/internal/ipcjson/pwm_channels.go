@@ -39,10 +39,14 @@ func (service *Service) describePWMValues(values native.PWMValues) pwmValues {
 		Available: values.Available, SelectedChannel: values.SelectedChannel, Values: values.Values,
 		Channels: make([]pwmChannelValue, 0, appconfig.PWMChannelCount),
 	}
+	names := make(map[string]string)
+	for _, peripheral := range service.peripheralSettings().Peripherals {
+		names[peripheral.Key] = peripheral.Name
+	}
 	for channel, raw := range values.Values {
 		channelConfig := appconfig.PWMChannel(config.UI, channel)
 		name, _ := appconfig.PeripheralDefaultName(appconfig.PWMChannelKey(channel))
-		if configured := config.UI.PeripheralNames[appconfig.PWMChannelKey(channel)]; strings.TrimSpace(configured) != "" {
+		if configured := names[appconfig.PWMChannelKey(channel)]; strings.TrimSpace(configured) != "" {
 			name = strings.TrimSpace(configured)
 		}
 		result.Channels = append(result.Channels, pwmChannelValue{

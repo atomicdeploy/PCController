@@ -512,11 +512,12 @@ export interface HostUISettings {
 
 export interface PeripheralDescriptor {
   key: string
-  kind: 'relay' | 'motion' | 'pwm' | 'display' | 'sensor'
+  kind: 'relay' | 'motion' | 'seat' | 'pwm' | 'display' | 'sensor'
   role: string
   index: number
   default_name: string
-  control: 'relay' | 'motion' | 'pwm-user' | 'role-specific' | 'read-only'
+  name?: string
+  control: 'relay' | 'motion' | 'seat' | 'seat-internal' | 'pwm-user' | 'role-specific' | 'read-only'
 	icon?: string
 	output_type?: PWMOutputType
 	curve?: PWMCurve
@@ -525,10 +526,13 @@ export interface PeripheralDescriptor {
 
 export interface ControlDescriptor {
   key: string
-  kind: 'relay' | 'side' | 'mosfet'
+  kind: 'relay' | 'side' | 'seat' | 'mosfet'
   order: number
   name: string
-  control: 'relay' | 'motion' | 'pwm-user'
+  control: 'relay' | 'motion' | 'seat' | 'pwm-user' | 'role-specific'
+  hidden?: boolean
+  locked?: boolean
+  group?: string
 	icon?: string
 	output_type?: PWMOutputType
 	curve?: PWMCurve
