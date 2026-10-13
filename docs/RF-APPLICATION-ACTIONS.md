@@ -127,6 +127,19 @@ action is bounded by three such phases, not an invented progress percentage.
   validated, transactional watched-config mutation. Bindings are the existing
   `automations` entries matching `rf.gesture` and `source:rf`; selectors include
   `rf_code`, `rf_bits`, `rf_protocol`, `gesture`.
+  **Create:** omit `previous_name` (or leave it empty) and choose a unique name.
+  **Edit, rename, enable/disable:** send the existing exact `previous_name`
+  together with the complete edited binding, even when its name is unchanged.
+  A create is never an upsert: identical/case-insensitive names conflict rather
+  than silently replace another signal's actions. Outer whitespace is normalized.
+  Renaming to another occupied name or editing a missing previous target also
+  rejects without changing config, keyboard consent or physical outputs.
+  RPC -32009 carries `kind:conflict`, `resource:rf_binding`, `reason:name_exists`,
+  `not_rf` or `previous_missing`, and the relevant name/field. Show the message,
+  preserve the draft, and require a deliberate edit or a distinct name; never
+  retry with `previous_name` automatically filled from a colliding new name.
+  Four distinct On/Off/Increase/Decrease keys need distinct assignment names
+  (for example Lighting On, Lighting Off, Lighting Increase, Lighting Decrease).
   Missing, malformed or unadvertised control actions are rejected before any
   persistence or keyboard-consent change. RPC code -32602 carries the human
   message "Choose an available control action before saving this assignment"
