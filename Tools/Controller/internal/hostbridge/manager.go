@@ -977,14 +977,7 @@ func (manager *Manager) eventLoop(afterID uint64) {
 			)
 		}
 		config := manager.store.Current()
-		manager.observeRunningDoor(config)
-		manager.segmentScroll.Observe(config.UI.SegmentScroll, manager.client.Snapshot())
-		manager.statusLED.Observe(
-			config.Integrations.StatusLED,
-			manager.client.Snapshot(),
-			event,
-			time.Duration(config.Connection.RequestTimeoutMS)*time.Millisecond,
-		)
+		manager.observeEventPresentation(config, event, manager.client.Snapshot)
 		manager.dispatchWebhooks(config, event)
 		manager.dispatchTextMappings(config, event)
 		manager.dispatchNotification(config, event)
@@ -1003,6 +996,17 @@ func (manager *Manager) eventLoop(afterID uint64) {
 			manager.mu.RUnlock()
 		}
 	}
+}
+
+// Take one coherent observation after keyboard/buzzer-route processing, not
+// three catalog-expanding snapshots for the same event. Do not retain it across
+// events or across later text-mapping actions/notification delivery.
+func (manager *Manager) observeEventPresentation(config appconfig.Config, event controller.Event, observe func() controller.Snapshot) {
+	snapshot := observe()
+	manager.observeRunningDoor(config, snapshot)
+	manager.segmentScroll.Observe(config.UI.SegmentScroll, snapshot)
+	manager.statusLED.Observe(config.Integrations.StatusLED, snapshot, event,
+		time.Duration(config.Connection.RequestTimeoutMS)*time.Millisecond)
 }
 
 func bridgeEventForwardable(event controller.Event) bool {
@@ -1039,8 +1043,7 @@ func (manager *Manager) ingestPeerEvent(peerName string, raw json.RawMessage) bo
 // observeRunningDoor combines the explicit HOST-owned Running state with the
 // live reed input. The door never changes ProgramState; it only raises/clears
 // this host warning and its configurable desktop sound/toast presentation.
-func (manager *Manager) observeRunningDoor(config appconfig.Config) {
-	snapshot := manager.client.Snapshot()
+func (manager *Manager) observeRunningDoor(config appconfig.Config, snapshot controller.Snapshot) {
 	active := runningDoorCondition(snapshot)
 	manager.mu.Lock()
 	if active == manager.runningDoorWarning {
@@ -1122,7 +1125,7 @@ func (manager *Manager) dispatchNotification(
 		}
 		return
 	}
-	job, ok, err := notificationJobForEvent(config, event, manager.client.Snapshot())
+	job, ok, err := notificationJobFromObservation(config, event, manager.client.Snapshot)
 	if err != nil {
 		manager.recordError("notification actions: " + err.Error())
 		return
@@ -1137,6 +1140,10 @@ func notificationJobForEvent(
 	event controller.Event,
 	snapshot controller.Snapshot,
 ) (notificationJob, bool, error) {
+	return notificationJobFromObservation(config, event, func() controller.Snapshot { return snapshot })
+}
+
+func notificationJobFromObservation(config appconfig.Config, event controller.Event, observe func() controller.Snapshot) (notificationJob, bool, error) {
 	kind := strings.ToLower(strings.TrimSpace(event.Kind))
 	if kind == "warning.door-open-running" &&
 		!config.Integrations.Notifications.DoorRunningToast {
@@ -1160,6 +1167,7 @@ func notificationJobForEvent(
 		if !physical {
 			return notificationJob{}, false, nil
 		}
+		snapshot := observe()
 		// The derived Running-door event owns the one safety toast. If that
 		// presentation is disabled, retain the ordinary physical-door toast.
 		if open && runningDoorCondition(snapshot) &&
@@ -1179,6 +1187,7 @@ func notificationJobForEvent(
 			jobKey = "door.closed"
 		}
 	} else if kind == "warning.door-open-running" {
+		snapshot := observe()
 		notification = hostui.NotificationForDoorTransition(
 			doorNotification(snapshot, true, true, config.UI.AppTitle),
 		)
