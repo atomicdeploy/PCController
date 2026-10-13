@@ -68,6 +68,7 @@ type Snapshot struct {
 	PWMValues         *native.PWMValues
 	PWMRevision       uint64
 	PWMUpdated        time.Time
+	PWMRecall         [16]PWMRecallValue
 	Motion            MotionSnapshot
 	ProgramState      ProgramStateSnapshot
 	Programming       ProgrammingSnapshot
@@ -260,6 +261,8 @@ type Runtime struct {
 	havePWMValues          bool
 	pwmRevision            uint64
 	pwmUpdated             time.Time
+	pwmRecall              [16]PWMRecallValue
+	pwmRecallGeneration    uint64
 	motion                 MotionSnapshot
 	motionRevision         uint64
 	motionIntentToken      [2]uint64
@@ -847,6 +850,9 @@ func (runtime *Runtime) Snapshot() Snapshot {
 	if runtime.havePWMValues {
 		values := runtime.pwmValues
 		snapshot.PWMValues = &values
+	}
+	if runtime.session != nil && runtime.pwmRecallGeneration == runtime.generation {
+		snapshot.PWMRecall = runtime.pwmRecall
 	}
 	runner := runtime.macroRunner
 	runtime.mu.RUnlock()
