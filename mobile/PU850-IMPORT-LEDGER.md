@@ -15,6 +15,9 @@ layouts; base/night/v27 style variants, colors, dimensions and localization
 resources; manifest/build configuration; and the inactive StorageUtils/WebServer
 prototypes. Resource variants were compared against their fully read base
 files. The source inventory/digests are recorded separately in PU850-source-inventory.json.
+Its 75 text entries include inventory-only vector/assets; this is not a claim
+that every decorative vector shape was read. All MainActivity and non-business
+helper code, including the inactive prototypes, was reviewed.
 
 ## Findings
 
@@ -112,7 +115,28 @@ notice are bundled and registered with Flutter LicenseRegistry, following the
 [Apache redistribution conditions](https://www.apache.org/licenses/LICENSE-2.0.txt).
 No commercial/localized PU850 fonts or business assets are imported.
 
+Connection endpoints have origin semantics. Firmware manifest and media URLs
+retain their own path/scheme contracts; do not apply an origin-stripping parser
+to those fields. Their contextual field/dialog improvements belong to U10.
+
 Next batches are U07/U08 transfer and saved-file actions, U09 localization,
 U10 remaining channel/cue/effect/settings dialog bodies and U11 their validation.
 U12 haptics and U14 explicit screen policy require product decisions and actual
 Android checks. They remain open; first-batch delivery is not full UI acceptance.
+
+## Batch 1 package/device receipt
+
+One ARM64 release build from c561c207edf75bfc347b6bcda24ee1249e50cb9c passed.
+APK 0.1.10/code 11 is 20,133,328 bytes, SHA-256
+`3e40eda6c0d36589ebe04081d46dc578464555eee40592662aab2fbb97e4593d`.
+Its inherited Android development signature verified. One ordinary non-streamed,
+in-place tablet install succeeded under the existing saved-drafts/update and
+continuing delivery authorization. Installed version/code/base APK hash match.
+The tablet's active video foreground was preserved; no controller launch or
+physical output/audio/firmware action was sent. Live interaction is still open.
+
+The deduplicated SM-S908E phone remains 0.1.2/code 3, with 499,840 KiB available
+below its previously verified 1 GiB installer threshold. No repeated install,
+data removal, reserve bypass or unlock was attempted. The continuous acceptance
+goal remains active. android-0.1.10-delivery.json records exact identities and
+source/device/physical acceptance separately.

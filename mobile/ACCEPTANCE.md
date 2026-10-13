@@ -518,3 +518,20 @@ source fixtures only. Read-only LAN probes to the previous Cafe :8787/:8080
 addresses timed out; live endpoint/reconnect behavior and human design acceptance
 remain open. No physical action or PU850 business command was sent. Source
 targets 0.1.10+11; package/device identity is recorded separately after delivery.
+
+## Batch 1 package/device receipt
+
+One ARM64 release build from c561c207edf75bfc347b6bcda24ee1249e50cb9c passed.
+APK 0.1.10/code 11 is 20,133,328 bytes, SHA-256
+`3e40eda6c0d36589ebe04081d46dc578464555eee40592662aab2fbb97e4593d`.
+Its inherited Android development signature verified. One ordinary non-streamed,
+in-place tablet install succeeded under the existing saved-drafts/update and
+continuing delivery authorization. Installed version/code/base APK hash match.
+The tablet's active video foreground was preserved; no controller launch or
+physical output/audio/firmware action was sent. Live interaction is still open.
+
+The deduplicated SM-S908E phone remains 0.1.2/code 3, with 499,840 KiB available
+below its previously verified 1 GiB installer threshold. No repeated install,
+data removal, reserve bypass or unlock was attempted. The continuous acceptance
+goal remains active. android-0.1.10-delivery.json records exact identities and
+source/device/physical acceptance separately.
