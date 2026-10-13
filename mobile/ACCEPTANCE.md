@@ -309,3 +309,17 @@ a deployed Flutter visual/touch test. Authorized RPC/peer flows, physical behavi
 standalone support and human acceptance remain open. The coordinated chat owns
 the subsequent semantic relay-color/caption-alignment source follow-up; 0.1.5 is
 the delivered appearance checkpoint, not proof of that subsequent requested fix.
+
+## Front-panel loading scroll stability
+
+Global command progress now reserves a constant two-pixel slot instead of inserting
+and removing a sibling above the scroll viewport. Front-panel loading therefore
+does not change viewport geometry, content extent or the current scroll offset.
+The animation exists only while a command is pending.
+
+Two focused phone/tablet widget regressions click a real front-panel widget through
+a memory-only deferred RPC, verify exactly one command, and compare viewport,
+button position, scroll extent and offset before/during/after acknowledgement.
+Both passed; Flutter analysis passed. No real board action was sent. This source
+fix is subsequent to delivered 0.1.5 and must be included in the next coordinated
+APK; source regression proof is not installed-device acceptance.

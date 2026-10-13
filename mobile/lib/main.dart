@@ -875,7 +875,10 @@ class _ControllerHomeState extends State<ControllerHome>
               padding: const EdgeInsets.symmetric(horizontal: 10),
               child: ActivityStrip(selected: section, changed: selectActivity),
             ),
-          if (busy) const LinearProgressIndicator(minHeight: 2),
+          SizedBox(
+            height: 2,
+            child: busy ? const LinearProgressIndicator(minHeight: 2) : null,
+          ),
           if (lastError != null)
             MaterialBanner(
               content: Text(lastError!),
