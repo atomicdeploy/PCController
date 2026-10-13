@@ -131,6 +131,18 @@ func TestNextStripFrameTimeSkipsBufferedIntervals(t *testing.T) {
 	}
 }
 
+func TestStripStreamStopsAfterRepeatedUnconfirmedFrames(t *testing.T) {
+	target := &recordingOutputTarget{failCommands: map[int]error{
+		1: context.DeadlineExceeded, 2: context.DeadlineExceeded, 3: context.DeadlineExceeded,
+	}}
+	outputs := NewOutputScheduler(target)
+	defer outputs.Close()
+	err := outputs.streamStripEffect(context.Background(), 1, 30, func(count int, elapsed time.Duration) []byte { return stripRainbowFrame(count, 0) })
+	if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "unconfirmed") || len(target.snapshotCommands()) != 3 {
+		t.Fatalf("stream continued after repeated missing ACKs: err=%v commands=%d", err, len(target.snapshotCommands()))
+	}
+}
+
 func TestStripEffectCatalogUsesExactConfiguredIDs(t *testing.T) {
 	for _, id := range []string{"police", "white-thunder", "converging-red"} {
 		definition, program, ok := stripEffectByID(id)

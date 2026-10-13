@@ -1058,12 +1058,7 @@ func (service *Service) dispatch(
 					err = &RPCError{Code: -32602, Message: "raw_value must be 0..4095"}
 				}
 				if err == nil {
-					err = service.rejectLockedPeripheral(fmt.Sprintf("pwm.%d", params.Channel))
-				}
-				if err == nil {
-					if err = service.Client.SetPWMChannel(ctx, byte(params.Channel), uint16(raw)); err == nil {
-						result, err = service.pwmValues(ctx)
-					}
+					result, err = service.setPWMAndReadback(ctx, byte(params.Channel), uint16(raw))
 				}
 			}
 		}
@@ -1076,9 +1071,7 @@ func (service *Service) dispatch(
 			result, err = service.updatePWMChannelConfig(params.Channel, params.PWMChannelConfig)
 		}
 	case "controller.pwm.off":
-		if err = service.Client.AllPWMOff(ctx); err == nil {
-			result, err = service.pwmValues(ctx)
-		}
+		result, err = service.clearPWMAndReadback(ctx)
 	case "controller.status_led.set":
 		var params struct {
 			Red        int `json:"red"`
@@ -1869,6 +1862,12 @@ func (service *Service) dispatch(
 }
 
 func dispatchRPCError(err error) *RPCError {
+	var confirmation *pwmConfirmationError
+	if errors.As(err, &confirmation) {
+		return &RPCError{Code: -32010, Message: confirmation.Error(), Data: map[string]any{
+			"kind": "confirmation_unavailable", "resource": "pwm", "write_acknowledged": true, "retryable": false,
+		}}
+	}
 	var rpcError *RPCError
 	if errors.As(err, &rpcError) {
 		return rpcError
@@ -3176,6 +3175,8 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 		if !authorizeHTTPCapability(writer, request, service, capabilityBoard) {
 			return
 		}
+		var values pwmValues
+		var err error
 		if request.Method == http.MethodPut {
 			var params struct {
 				Channel  int      `json:"channel"`
@@ -3206,17 +3207,12 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": "raw_value must be 0..4095"})
 				return
 			}
-			if err := service.Client.SetPWMChannel(request.Context(), byte(params.Channel), uint16(raw)); err != nil {
-				writeHTTPJSON(writer, http.StatusConflict, map[string]string{"error": err.Error()})
-				return
-			}
-		} else if err := service.Client.AllPWMOff(request.Context()); err != nil {
-			writeHTTPJSON(writer, http.StatusConflict, map[string]string{"error": err.Error()})
-			return
+			values, err = service.setPWMAndReadback(request.Context(), byte(params.Channel), uint16(raw))
+		} else {
+			values, err = service.clearPWMAndReadback(request.Context())
 		}
-		values, err := service.pwmValues(request.Context())
 		if err != nil {
-			writeHTTPJSON(writer, http.StatusConflict, map[string]string{"error": err.Error()})
+			writeHTTPJSON(writer, http.StatusConflict, map[string]any{"error": err.Error(), "details": dispatchRPCError(err).Data})
 			return
 		}
 		writeHTTPJSON(writer, http.StatusOK, values)

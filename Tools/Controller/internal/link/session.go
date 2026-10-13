@@ -20,6 +20,8 @@ import (
 const (
 	DefaultBaudRate    = 115200
 	DefaultReadTimeout = 100 * time.Millisecond
+	// A lost strip ACK must not hold the sole wire slot beyond status refresh.
+	stripResponseTimeout = 750 * time.Millisecond
 )
 
 var (
@@ -97,7 +99,8 @@ type pendingRequest struct {
 type RequestPriority uint8
 
 const (
-	RequestPriorityNormal RequestPriority = iota
+	RequestPriorityBackground RequestPriority = iota
+	RequestPriorityNormal
 	RequestPriorityTimeline
 )
 
@@ -443,11 +446,22 @@ func (s *Session) RequestWithPriority(
 		return native.Frame{}, err
 	}
 	waitStarted := time.Now()
+	if opcode == native.OpAddressableLED && priority == RequestPriorityNormal {
+		priority = RequestPriorityBackground
+	}
 	releaseRequest, err := s.requestAdmission.acquire(ctx, s.closing, priority)
 	if err != nil {
 		return native.Frame{}, s.requestSlotError(opcode, waitStarted, err)
 	}
 	defer releaseRequest()
+	if opcode == native.OpAddressableLED {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, stripResponseTimeout)
+		defer cancel()
+	}
+	if err := ctx.Err(); err != nil {
+		return native.Frame{}, err
+	}
 	sequence, waiter, err := s.reserveSequence(opcode, expected)
 	if err != nil {
 		return native.Frame{}, err
