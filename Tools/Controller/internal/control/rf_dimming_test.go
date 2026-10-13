@@ -18,7 +18,7 @@ func expiredRFState(t *testing.T, runtime *Runtime, key rfGestureKey) *rfGesture
 	if state == nil {
 		t.Fatal("RF state missing")
 	}
-	state.lastSeen = time.Now().Add(-rfReleaseAfter)
+	state.lastSeen = time.Now().Add(-rfReleaseAfter - time.Millisecond)
 	return state
 }
 
@@ -30,7 +30,7 @@ func TestRFPWMRollGuardFollowsLiveHoldNotOldPacketDeadline(t *testing.T) {
 	if err := guard(); err != nil {
 		t.Fatal(err)
 	}
-	state.lastSeen = time.Now().Add(-rfReleaseAfter)
+	state.lastSeen = time.Now().Add(-rfReleaseAfter - time.Millisecond)
 	if !errors.Is(guard(), errRFRollReleased) {
 		t.Fatal("stale hold allowed a write")
 	}
@@ -50,6 +50,9 @@ func TestRFHoldObsoleteReleaseCallbackCannotEndFreshReception(t *testing.T) {
 	key := rfGestureKey{code: 1, bits: 24, protocol: 1}
 	state := &rfGestureState{held: true, lastSeen: time.Now(), event: native.DeviceEvent{RFCode: 1, RFBits: 24, RFProtocol: 1}}
 	runtime.rfMu.Lock()
+	if runtime.rfGestures == nil {
+		runtime.rfGestures = make(map[rfGestureKey]*rfGestureState)
+	}
 	runtime.rfGestures[key] = state
 	runtime.rfMu.Unlock()
 	after := runtime.LatestEventID()
