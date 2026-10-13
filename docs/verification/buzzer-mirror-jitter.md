@@ -36,6 +36,31 @@ budgets; tests/CI were not run in this iteration at the user's request.
 Pealayer passed offline cargo check with existing warnings. Deployment and
 physical short-note/segment fidelity must be recorded separately below.
 
+### Linux receiver delivery, 13 October 2026
+
+The final receive-only x86-64 Linux build was deployed on `asus@server` and
+the existing user service restarted. Source commit `564791b2` is GitHub-backed;
+embedded source SHA-256 is
+`0ff3f476c592a6b89a283b3a082c17694276179a12cfc636ecef4f5d53f505da`.
+Both installed file and running `/proc/2174666/exe` matched executable SHA-256
+`27d6a27041a2acf06ed8879e99418db111d7377042ed975ac26cc0f649dabc5d`.
+Version is the explicitly development-labelled `0.0.0-dev.mirror-fidelity`.
+
+Service status was active/running, with Cafe connected, command forwarding
+disabled, event forwarding disabled, host mirroring enabled and native backend
+selected. Existing owner, mode, ACL and `cap_sys_tty_config=ep` were retained;
+no service/config edit or board firmware write occurred. The original receiver
+is recoverable at `bin/controller.before-mirror-fidelity` (hardlink, SHA-256
+`313830be2cb1ed41aafd7be38d6aa58652e0a0614e6014cebe6d3773b3468590`).
+An intermediate receiver was superseded after further timer/handoff review;
+only the final identity above is the current delivery claim.
+
+No physical tone, motion or relay test was triggered. Human short-note,
+melody/pause, cancellation and display fidelity are not inferred from health,
+compile/vet or matching hashes. Pealayer source `ec74666` passed offline cargo
+check, but its native fix is not installed: production packaging requires a
+clean checkout, and existing generated Web-distribution edits remain preserved.
+
 ## Cause and behavior
 
 The receiver anchored the first device-clock note at local receipt time, then
