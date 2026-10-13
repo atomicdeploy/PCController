@@ -40,7 +40,6 @@ const seed = JSON.stringify({ schema: 2, connection: { port: `tcp://127.0.0.1:${
   integrations: { discovery: { mdns_enabled:false, dns_sd_enabled:false, ssdp_enabled:false, upnp_enabled:false, ws_discovery_enabled:false, broadcast_enabled:false, netbios_enabled:false },
     buzzer_mirror: { enabled:false }, keyboard_control: { enabled:false } } }, null, 2) + '\n'
 const readFlags = constants.O_RDONLY | (constants.O_NOFOLLOW || 0)
-const createFlags = constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW || 0)
 async function readJson(handle) {
   const stat = await handle.stat()
   if (!stat.isFile() || stat.size > 1048576) throw new Error('development metadata must be a bounded regular file')
@@ -48,13 +47,14 @@ async function readJson(handle) {
 }
 let owned = false, ownerHandle, createdOwner = false
 try {
-  // Acquire a new ownership descriptor first, rather than checking the marker
-  // and reopening its pathname later. Existing metadata is read only.
+  // Existing metadata is opened read-only without following a final symlink.
+  // A missing marker is created exclusively; if another launcher wins that
+  // race, fail closed instead of reopening a pathname selected by the winner.
+  ownerHandle = await open(marker, readFlags)
+} catch (error) {
+  if (error.code !== 'ENOENT') throw error
   ownerHandle = await open(marker, 'wx+', 0o600)
   createdOwner = true
-} catch (error) {
-  if (error.code !== 'EEXIST') throw error
-  ownerHandle = await open(marker, readFlags)
 }
 let config
 let handle
@@ -70,7 +70,7 @@ try {
   // An unowned directory must win exclusive creation, never probe-then-overwrite
   // an existing configuration. A failed seed leaves an empty (invalid) marker:
   // later launches still fail closed, without deleting a pathname after close.
-  if (!handle) { handle = await open(configPath, createFlags, 0o600); created = true }
+  if (!handle) { handle = await open(configPath, 'wx+', 0o600); created = true }
   if (created) { await handle.writeFile(seed); config = JSON.parse(seed) }
   else config = await readJson(handle)
   if (createdOwner) await ownerHandle.writeFile(JSON.stringify({owner:'pccontroller-virtual-development'})+'\n')

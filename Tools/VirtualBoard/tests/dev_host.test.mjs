@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, writeFile, readFile, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -59,3 +59,30 @@ test('fresh development seed uses bounded RAM-only isolated defaults', async () 
     assert.equal(JSON.parse(await readFile(join(state,'virtual-development.json'),'utf8')).owner,'pccontroller-virtual-development')
   } finally { await rm(state,{recursive:true,force:true}) }
 })
+
+test('invalid existing ownership cannot authorize a configuration seed', async () => {
+  const state = await mkdtemp(join(tmpdir(),'pccontroller-dev-invalid-owner-'))
+  try {
+    const marker = JSON.stringify({owner:'another-application'})
+    await writeFile(join(state,'virtual-development.json'),marker)
+    const result = await run(state)
+    assert(result.error); assert.match(result.stderr,/wrong development directory owner/)
+    assert.equal(await readFile(join(state,'virtual-development.json'),'utf8'),marker)
+    await assert.rejects(readFile(join(state,'config.json')), {code:'ENOENT'})
+  } finally { await rm(state,{recursive:true,force:true}) }
+})
+
+test('existing symlink ownership is refused without changing its target',
+  {skip:process.platform === 'win32'}, async () => {
+    const state = await mkdtemp(join(tmpdir(),'pccontroller-dev-symlink-'))
+    try {
+      const target = join(state,'protected.json')
+      const content = JSON.stringify({owner:'pccontroller-virtual-development'})
+      await writeFile(target,content)
+      await symlink(target,join(state,'virtual-development.json'))
+      const result = await run(state)
+      assert(result.error); assert.match(result.stderr,/ELOOP/)
+      assert.equal(await readFile(target,'utf8'),content)
+      await assert.rejects(readFile(join(state,'config.json')), {code:'ENOENT'})
+    } finally { await rm(state,{recursive:true,force:true}) }
+  })
