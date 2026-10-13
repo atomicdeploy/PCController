@@ -193,7 +193,7 @@ const methodOverrides = {
   "controller.rf.map": "Replace one learned RF mapping and return board readback.",
   "controller.rf.transmit": "Transmit one validated RF waveform request.",
 	"controller.rf.catalog": "Return learned RF records, live capture state, persisted bindings, and currently advertised action choices.",
-	"controller.rf.binding.put": "Transactionally create or replace one validated host-owned RF application binding.",
+	"controller.rf.binding.put": "Create a uniquely named validated RF binding, or explicitly edit with previous_name; reject name/stale-target conflicts without replacing unrelated assignments.",
 	"controller.rf.binding.remove": "Remove one named host-owned RF application binding.",
   "controller.board_automation.list": "Read one generation-consistent board automation snapshot.",
   "controller.board_automation.put": "Transactionally add or edit one board automation and verify readback.",
