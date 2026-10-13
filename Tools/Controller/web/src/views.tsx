@@ -623,6 +623,10 @@ export function ControlsView(props: SharedViewProps) {
 	const [statusProfile, setStatusProfile] = useState('ready')
   const configurationEventID = props.events.find((event) => event.kind === 'config')?.id ?? 0
   const pwmReportedRef = useRef(pwmReported)
+  const pwmRevisionRef = useRef(0)
+  const pwmOwnerRef = useRef('')
+  const currentPWMOwner = `${snapshot.host_instance_id}/${snapshot.connection_generation}`
+  if (pwmOwnerRef.current !== currentPWMOwner) { pwmOwnerRef.current = currentPWMOwner; pwmRevisionRef.current = 0 }
   const pwmAllBusyRef = useRef(pwmAllBusy)
   const pwmOperationsRef = useRef<PWMOperationQueue | null>(null)
   const pwmSchedulerRef = useRef<PWMMutationScheduler | null>(null)
@@ -644,7 +648,11 @@ export function ControlsView(props: SharedViewProps) {
 	const pwmConfig = (channel: number) => pwmConfigRef.current[`pwm.${channel}`]
 
   const applyAuthoritativePWM = (response: PWMValues, acknowledgedChannel: number | null = null) => {
+    if (response.revision !== undefined && response.revision < pwmRevisionRef.current) return
+    if (response.host_instance_id !== undefined && `${response.host_instance_id}/${response.connection_generation}` !== pwmOwnerRef.current) return
     const authoritative = normalizePWMValues(response)
+    if (!authoritative.available) { setPWMError('PWM unavailable'); return }
+    if (response.revision !== undefined) pwmRevisionRef.current = response.revision
     pwmReportedRef.current = authoritative.values
     setPWMReported(authoritative.values)
     setPWMDraft((current) => current.map((value, channel) => {
@@ -695,6 +703,7 @@ export function ControlsView(props: SharedViewProps) {
     }
     setPWMError('')
     const reconciler = new PWMReconciler({
+      eventDriven: props.transport.streamState === 'open',
       operations: pwmOperationsRef.current!,
       canRead: () => !pwmAllBusyRef.current && (pwmSchedulerRef.current?.pendingChannels().length ?? 0) === 0,
       read: (signal) => rpc<PWMValues>('controller.pwm.values', {}, signal),
@@ -703,7 +712,11 @@ export function ControlsView(props: SharedViewProps) {
     })
     reconciler.start()
     return () => reconciler.stop()
-  }, [available.pwm, boardReady])
+  }, [available.pwm, boardReady, props.transport.streamState])
+
+  useEffect(() => {
+    if (boardReady && snapshot.pwm_values) applyAuthoritativePWM(snapshot.pwm_values)
+  }, [boardReady, snapshot.pwm_revision, snapshot.pwm_values, pwmPending.length])
 
   // Selected-channel telemetry can predate the complete mutation ACK. It must
   // not replace the mixer's full authoritative readback with an older sample.

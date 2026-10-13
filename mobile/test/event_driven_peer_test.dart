@@ -156,6 +156,44 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 750));
     expect(pwmReads, 2);
     expect(reads, baseline + 1);
+    socket.add(
+      jsonEncode({
+        'jsonrpc': '2.0',
+        'method': 'controller.event',
+        'params': {
+          'kind': 'pwm.changed',
+          'metadata': {'revision': '7', 'connection_generation': '1'},
+        },
+      }),
+    );
+    socket.add(
+      jsonEncode({
+        'jsonrpc': '2.0',
+        'method': 'controller.pwm.values',
+        'params': {
+          'host_instance_id': 'fixture',
+          'connection_generation': 1,
+          'revision': 7,
+          'time': DateTime.now().toUtc().toIso8601String(),
+          'available': true,
+          'selected_channel': 0,
+          'values': List.generate(16, (i) => i * 100),
+          'channels': List.generate(
+            16,
+            (i) => {
+              'channel': i,
+              'raw_value': i * 100,
+              'logical_percent': i * 5.0,
+            },
+          ),
+        },
+      }),
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 750));
+    expect(session.pwmValues['revision'], 7);
+    expect(session.pwmValues['channels'][3]['logical_percent'], 15);
+    expect(pwmReads, 2);
+    expect(reads, baseline + 1);
     transport.unavailable = true;
     await socket.close();
     await Future<void>.delayed(const Duration(milliseconds: 1300));

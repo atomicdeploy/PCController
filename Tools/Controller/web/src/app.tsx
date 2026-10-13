@@ -104,6 +104,7 @@ import {
   StatusFrameBatcher,
 } from './status-frame-batcher'
 import { advanceStatusLEDSource, applyPushedOutputEvent, isPushedOutputEvent, mergeStatusLEDSnapshot, statusLEDSnapshotMatchesSource, statusLEDSourceUnchanged } from './status-led-event'
+import { mergePushedPWM, mergePWMSnapshot } from './pwm-push'
 import { BuzzerPlaybackTimeline, type BuzzerPath } from './buzzer-routing'
 import { isMacroControllerEvent, prependMacroControllerEvent } from './macro-live'
 import { emptySnapshot } from './types'
@@ -1430,16 +1431,22 @@ export default function App() {
             setSamples((current) => applyStatusFrameBatch(previous, current, updates).samples)
         })
         stopStream = connectStream(config, {
+          pwm: (value, source) => {
+            const next = mergePushedPWM(snapshotRef.current, value, source.instanceID)
+            if (next !== snapshotRef.current) { snapshotRef.current = next; setSnapshot(next) }
+          },
           status: (update, source) => {
+            if (update.host_instance_id !== undefined && update.host_instance_id !== snapshotRef.current.host_instance_id) return
+            if (update.connection_generation !== undefined && update.connection_generation !== snapshotRef.current.connection_generation) { void refresh(); return }
             statusFrames?.enqueue(source.generation, update)
           },
 		  snapshot: (value, source) => {
 			const previous = snapshotRef.current
-			const next = mergeStatusLEDSnapshot(previous, value, {
+			const next = mergePWMSnapshot(previous, mergeStatusLEDSnapshot(previous, value, {
 				epoch: source.generation,
 				instanceID: value.host_instance_id,
 				authoritativeInstanceID: source.instanceID,
-			})
+			}))
 			snapshotRef.current = next
 			setSnapshot(next)
 			setSamples((current) => metricSamplesAfterSnapshot(current, previous, next))

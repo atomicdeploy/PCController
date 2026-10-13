@@ -259,6 +259,29 @@ void serviceStatusLedPush() {
                    sizeof(payload));
 }
 
+// Publish applied logical values, including local/front-panel/effect changes.
+// Compare against the last SENT state, so the final change survives throttling.
+// Sequence zero is an observation, never a request or another output write.
+void servicePwmPush(uint32_t at) {
+  if (havePushedPwmValues && static_cast<uint32_t>(at - lastPwmPushAt) < 50U) {
+    return;
+  }
+  uint8_t payload[34];
+  uint8_t index = 0;
+  payload[index++] = pwm.available() ? 1U : 0U;
+  payload[index++] = pwm.channel();
+  for (uint8_t channel = 0; channel < PwmChannels::Count; ++channel) {
+    appendU16(payload, index, pwm.logicalValue(channel));
+  }
+  if (havePushedPwmValues && memcmp(payload, lastPushedPwmValues, sizeof(payload)) == 0) {
+    return;
+  }
+  memcpy(lastPushedPwmValues, payload, sizeof(payload));
+  havePushedPwmValues = true;
+  lastPwmPushAt = at;
+  appProtocol.send(ControllerProtocol::PwmValuesResponse, 0, payload, sizeof(payload));
+}
+
 #if PCCONTROLLER_ENABLE_MENU_DIRECTORY
 // Reports every stable direct-selector ID. PAGE_MOTION is a non-browsable
 // compatibility alias, but stays in the complete directory so persisted

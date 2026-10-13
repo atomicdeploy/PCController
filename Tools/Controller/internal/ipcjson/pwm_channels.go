@@ -20,10 +20,14 @@ type pwmChannelValue struct {
 }
 
 type pwmValues struct {
-	Available       bool              `json:"available"`
-	SelectedChannel byte              `json:"selected_channel"`
-	Values          [16]uint16        `json:"values"`
-	Channels        []pwmChannelValue `json:"channels"`
+	HostInstanceID       string            `json:"host_instance_id"`
+	ConnectionGeneration uint64            `json:"connection_generation"`
+	Revision             uint64            `json:"revision"`
+	Time                 time.Time         `json:"time"`
+	Available            bool              `json:"available"`
+	SelectedChannel      byte              `json:"selected_channel"`
+	Values               [16]uint16        `json:"values"`
+	Channels             []pwmChannelValue `json:"channels"`
 }
 
 func (service *Service) pwmValues(ctx context.Context) (pwmValues, error) {
@@ -33,7 +37,22 @@ func (service *Service) pwmValues(ctx context.Context) (pwmValues, error) {
 	if err != nil {
 		return pwmValues{}, err
 	}
-	return service.describePWMValues(values), nil
+	_ = values
+	if values := service.cachedPWMValues(); values != nil {
+		return *values, nil
+	}
+	return pwmValues{}, fmt.Errorf("PWM readback owner changed")
+}
+
+func (service *Service) cachedPWMValues() *pwmValues {
+	snapshot := service.Client.Snapshot()
+	if snapshot.PWMValues == nil {
+		return nil
+	}
+	values := service.describePWMValues(*snapshot.PWMValues)
+	values.HostInstanceID, values.ConnectionGeneration = strings.TrimSpace(service.HostInstanceID), snapshot.ConnectionGeneration
+	values.Revision, values.Time = snapshot.PWMRevision, snapshot.PWMUpdated
+	return &values
 }
 
 // Write and readback share a budget below native clients' 3-second socket

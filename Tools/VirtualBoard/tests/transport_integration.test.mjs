@@ -67,6 +67,16 @@ try {
   const status = await stream(f => f.opcode === 144 && f.sequence === 42)
   assert.equal(status.payload.length, 48); assert.equal(status.payload.readInt32LE(4), -2147483648)
   assert.equal(status.payload.readInt16LE(20), -32768)
+  // A read-only initial observation and quiet final PWM changes must push
+  // without any PwmValues request. These are RAM-only native firmware fixtures.
+  const initialPwm = await stream(f => f.opcode === 0x92 && f.sequence === 0)
+  assert.equal(initialPwm.payload.length, 34)
+  if (initialPwm.payload[0]) {
+    stdio.stdin.write(encode(0x11, 46, [0, 123, 0]))
+    await stream(f => f.opcode === 0x92 && f.sequence === 0 && f.payload.readUInt16LE(2) === 123)
+    stdio.stdin.write(encode(0x11, 47, [0, 234, 0]))
+    await stream(f => f.opcode === 0x92 && f.sequence === 0 && f.payload.readUInt16LE(2) === 234)
+  }
   stdio.stdin.end(); await new Promise(resolve => stdio.once('exit', resolve)); assert.equal(stdio.exitCode, 0, stdio.diagnostics())
 
   // Explicit host mappings still traverse production sampling, smoothing,

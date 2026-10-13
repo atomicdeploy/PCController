@@ -88,6 +88,10 @@ type remotePortWire struct {
 }
 
 type remoteSnapshotWire struct {
+	ConnectionGeneration     uint64                          `json:"connection_generation"`
+	PWMValues                *native.PWMValues               `json:"pwm_values"`
+	PWMRevision              uint64                          `json:"pwm_revision"`
+	PWMUpdated               time.Time                       `json:"pwm_updated"`
 	HostInstanceID           string                          `json:"host_instance_id,omitempty"`
 	Connected                bool                            `json:"connected"`
 	Paused                   bool                            `json:"paused"`
@@ -357,39 +361,45 @@ func (client *remoteTUIIPC) Snapshot(ctx context.Context) (control.Snapshot, err
 		}
 		epoch := client.adoptLiveInstanceLocked(responseInstanceID)
 		client.liveMu.Unlock()
-		return control.Snapshot{
-			Connected: wire.Connected, Paused: wire.Paused,
-			Port: ports.Info{
-				Name: wire.Port.Name, IsUSB: wire.Port.VID != "" || wire.Port.PID != "",
-				VID: wire.Port.VID, PID: wire.Port.PID, Product: wire.Port.Product,
-				Manufacturer: wire.Port.Manufacturer, SerialNumber: wire.Port.SerialNumber,
-				FriendlyName: wire.Port.FriendlyName, InstanceID: wire.Port.InstanceID,
-			},
-			Hello: wire.Hello, Status: wire.Status, Settings: native.Settings(wire.Settings),
-			HaveStatus: wire.HaveStatus, HaveSettings: wire.HaveSettings,
-			StatusUpdated: wire.StatusUpdated, ConnectionState: wire.ConnectionState,
-			ConnectionReason: wire.ConnectionReason, ConnectionUpdated: wire.ConnectionUpdated,
-			ConnectionPhase: wire.ConnectionPhase, ConnectionAttempt: wire.ConnectionAttempt,
-			ConnectionAttemptStart: wire.ConnectionAttemptStarted,
-			ConnectionNextRetry:    wire.ConnectionNextRetry,
-			ConnectionRetryDelay:   time.Duration(wire.ConnectionRetryDelayMS) * time.Millisecond,
-			ConnectionCandidate: ports.Info{
-				Name:  wire.ConnectionCandidate.Name,
-				IsUSB: wire.ConnectionCandidate.VID != "" || wire.ConnectionCandidate.PID != "",
-				VID:   wire.ConnectionCandidate.VID, PID: wire.ConnectionCandidate.PID,
-				Product:      wire.ConnectionCandidate.Product,
-				Manufacturer: wire.ConnectionCandidate.Manufacturer,
-				SerialNumber: wire.ConnectionCandidate.SerialNumber,
-				FriendlyName: wire.ConnectionCandidate.FriendlyName,
-				InstanceID:   wire.ConnectionCandidate.InstanceID,
-			},
-			FrontPanel: wire.FrontPanel, HaveFrontPanel: wire.HaveFrontPanel,
-			FrontPanelUpdated: wire.FrontPanelUpdated, StatusLED: wire.StatusLED,
-			HaveStatusLED: wire.HaveStatusLED, StatusLEDUpdated: wire.StatusLEDUpdated,
-			StatusLEDEpoch: epoch, StatusLEDRevision: wire.StatusLEDRevision,
-			ProgramState: wire.ProgramState, RFLearning: wire.RFLearning, Macros: wire.Macros, Effects: wire.Effects, EffectGroups: wire.EffectGroups,
-			HardwareProblems: wire.HardwareProblems,
-		}, nil
+		return remoteSnapshotValues(wire, epoch), nil
+	}
+}
+
+func remoteSnapshotValues(wire remoteSnapshotWire, epoch uint64) control.Snapshot {
+	return control.Snapshot{
+		ConnectionGeneration: wire.ConnectionGeneration,
+		PWMValues:            wire.PWMValues, PWMRevision: wire.PWMRevision, PWMUpdated: wire.PWMUpdated,
+		Connected: wire.Connected, Paused: wire.Paused,
+		Port: ports.Info{
+			Name: wire.Port.Name, IsUSB: wire.Port.VID != "" || wire.Port.PID != "",
+			VID: wire.Port.VID, PID: wire.Port.PID, Product: wire.Port.Product,
+			Manufacturer: wire.Port.Manufacturer, SerialNumber: wire.Port.SerialNumber,
+			FriendlyName: wire.Port.FriendlyName, InstanceID: wire.Port.InstanceID,
+		},
+		Hello: wire.Hello, Status: wire.Status, Settings: native.Settings(wire.Settings),
+		HaveStatus: wire.HaveStatus, HaveSettings: wire.HaveSettings,
+		StatusUpdated: wire.StatusUpdated, ConnectionState: wire.ConnectionState,
+		ConnectionReason: wire.ConnectionReason, ConnectionUpdated: wire.ConnectionUpdated,
+		ConnectionPhase: wire.ConnectionPhase, ConnectionAttempt: wire.ConnectionAttempt,
+		ConnectionAttemptStart: wire.ConnectionAttemptStarted,
+		ConnectionNextRetry:    wire.ConnectionNextRetry,
+		ConnectionRetryDelay:   time.Duration(wire.ConnectionRetryDelayMS) * time.Millisecond,
+		ConnectionCandidate: ports.Info{
+			Name:  wire.ConnectionCandidate.Name,
+			IsUSB: wire.ConnectionCandidate.VID != "" || wire.ConnectionCandidate.PID != "",
+			VID:   wire.ConnectionCandidate.VID, PID: wire.ConnectionCandidate.PID,
+			Product:      wire.ConnectionCandidate.Product,
+			Manufacturer: wire.ConnectionCandidate.Manufacturer,
+			SerialNumber: wire.ConnectionCandidate.SerialNumber,
+			FriendlyName: wire.ConnectionCandidate.FriendlyName,
+			InstanceID:   wire.ConnectionCandidate.InstanceID,
+		},
+		FrontPanel: wire.FrontPanel, HaveFrontPanel: wire.HaveFrontPanel,
+		FrontPanelUpdated: wire.FrontPanelUpdated, StatusLED: wire.StatusLED,
+		HaveStatusLED: wire.HaveStatusLED, StatusLEDUpdated: wire.StatusLEDUpdated,
+		StatusLEDEpoch: epoch, StatusLEDRevision: wire.StatusLEDRevision,
+		ProgramState: wire.ProgramState, RFLearning: wire.RFLearning, Macros: wire.Macros, Effects: wire.Effects, EffectGroups: wire.EffectGroups,
+		HardwareProblems: wire.HardwareProblems,
 	}
 }
 
@@ -1097,8 +1107,11 @@ func (client *remoteTUIIPC) consumeOrBufferLiveMessage(
 ) (bool, error) {
 	if !subscriptionAcknowledged {
 		var message remoteLiveMessage
-		if json.Unmarshal(data, &message) == nil && message.Method == "controller.state" {
+		if json.Unmarshal(data, &message) == nil && (message.Method == "controller.state" || message.Method == "controller.snapshot" || message.Method == "controller.pwm.values" || message.Method == "controller.status") {
 			if pendingStateMessages != nil {
+				if len(*pendingStateMessages) >= 256 {
+					return false, errors.New("remote subscription backlog requires a fresh baseline")
+				}
 				*pendingStateMessages = append(*pendingStateMessages, append([]byte(nil), data...))
 			}
 			return false, nil
@@ -1140,12 +1153,47 @@ func (client *remoteTUIIPC) consumeLiveMessage(data []byte, pendingRequestID uin
 	}
 	now := time.Now()
 	switch message.Method {
+	case "controller.snapshot":
+		var wire remoteSnapshotWire
+		if json.Unmarshal(message.Params, &wire) != nil {
+			return false, nil
+		}
+		client.liveMu.Lock()
+		matches := wire.HostInstanceID == client.liveSessionInstanceID && wire.HostInstanceID != ""
+		client.liveMu.Unlock()
+		if !matches {
+			return false, nil
+		}
+		snapshot := remoteSnapshotValues(wire, client.currentLiveSessionEpoch())
+		client.publishLive(tui.RemoteLiveUpdate{Snapshot: &snapshot, ConnectionGeneration: wire.ConnectionGeneration})
+	case "controller.pwm.values":
+		var values struct {
+			native.PWMValues
+			HostInstanceID string    `json:"host_instance_id"`
+			Generation     uint64    `json:"connection_generation"`
+			Revision       uint64    `json:"revision"`
+			Time           time.Time `json:"time"`
+		}
+		if json.Unmarshal(message.Params, &values) != nil || values.Revision == 0 {
+			return false, nil
+		}
+		client.liveMu.Lock()
+		matches := values.HostInstanceID == client.liveSessionInstanceID && values.HostInstanceID != ""
+		client.liveMu.Unlock()
+		if !matches {
+			return false, nil
+		}
+		client.publishLive(tui.RemoteLiveUpdate{PWMValues: &values.PWMValues, PWMRevision: values.Revision, PWMUpdated: values.Time, ConnectionGeneration: values.Generation})
 	case "controller.status":
 		var update controllerapi.StatusUpdate
 		if json.Unmarshal(message.Params, &update) != nil || update.Error != "" {
 			return false, nil
 		}
 		client.liveMu.Lock()
+		if update.HostInstanceID != "" && update.HostInstanceID != client.liveSessionInstanceID {
+			client.liveMu.Unlock()
+			return false, nil
+		}
 		identical := client.haveLastStatus && client.lastStatus == update.Status
 		forward := !identical || now.Sub(client.lastStatusForwardedAt) >= 500*time.Millisecond
 		if forward {
@@ -1158,26 +1206,38 @@ func (client *remoteTUIIPC) consumeLiveMessage(data []byte, pendingRequestID uin
 			return false, nil
 		}
 		client.publishLive(tui.RemoteLiveUpdate{
-			Status: update.Status, HaveStatus: true,
+			ConnectionGeneration: update.ConnectionGeneration,
+			Status:               update.Status, HaveStatus: true,
 			StatusUpdated: update.Time, StatusReceivedAt: now,
 			ConnectionChange: true, Connected: true,
 		})
 	case "controller.state":
 		var event controllerapi.Event
-		if json.Unmarshal(message.Params, &event) != nil ||
-			event.Opcode != native.OpStatusLEDChanged {
+		if json.Unmarshal(message.Params, &event) != nil || event.Kind != "status_led.changed" {
 			return false, nil
 		}
 		if !client.advanceLiveStateCursor(event.ID) {
 			return false, nil
 		}
-		state, err := native.ParseStatusLEDState(event.Payload)
+		payload := event.Payload
+		if len(payload) == 0 {
+			for _, key := range []string{"red", "green", "blue", "brightness", "effect", "condition"} {
+				value, err := strconv.ParseUint(event.Metadata[key], 10, 8)
+				if err != nil {
+					return false, nil
+				}
+				payload = append(payload, byte(value))
+			}
+		}
+		state, err := native.ParseStatusLEDState(payload)
 		if err != nil {
 			return false, nil
 		}
 		revision, _ := strconv.ParseUint(event.Metadata["revision"], 10, 64)
+		generation, _ := strconv.ParseUint(event.Metadata["connection_generation"], 10, 64)
 		client.publishLive(tui.RemoteLiveUpdate{
-			StatusLED: state, HaveStatusLED: true,
+			ConnectionGeneration: generation,
+			StatusLED:            state, HaveStatusLED: true,
 			StatusLEDUpdated: event.Time, StatusLEDReceivedAt: now,
 			StatusLEDOrderKnown: true, StatusLEDEpoch: client.currentLiveSessionEpoch(),
 			StatusLEDRevision: revision,
@@ -1231,6 +1291,22 @@ func (client *remoteTUIIPC) publishLive(update tui.RemoteLiveUpdate) {
 func mergeRemoteLiveUpdate(pending *tui.RemoteLiveUpdate, update tui.RemoteLiveUpdate) {
 	if pending == nil {
 		return
+	}
+	if update.ConnectionGeneration != 0 && pending.ConnectionGeneration != 0 && update.ConnectionGeneration != pending.ConnectionGeneration {
+		if update.ConnectionGeneration < pending.ConnectionGeneration {
+			return
+		}
+		*pending = tui.RemoteLiveUpdate{}
+	}
+	if update.ConnectionGeneration != 0 {
+		pending.ConnectionGeneration = update.ConnectionGeneration
+	}
+	if update.Snapshot != nil {
+		pending.Snapshot = update.Snapshot
+	}
+	if update.PWMValues != nil && (pending.PWMValues == nil || update.ConnectionGeneration > pending.ConnectionGeneration ||
+		(update.ConnectionGeneration == pending.ConnectionGeneration && update.PWMRevision > pending.PWMRevision)) {
+		pending.PWMValues, pending.PWMRevision, pending.PWMUpdated, pending.ConnectionGeneration = update.PWMValues, update.PWMRevision, update.PWMUpdated, update.ConnectionGeneration
 	}
 	if update.HaveStatus {
 		pending.Status = update.Status

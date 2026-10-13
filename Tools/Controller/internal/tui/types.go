@@ -183,20 +183,25 @@ type FrontPanelState struct {
 // path so a slow terminal always renders the newest state instead of building
 // an unbounded animation backlog.
 type RemoteLiveUpdate struct {
-	Status              native.Status
-	HaveStatus          bool
-	StatusUpdated       time.Time
-	StatusReceivedAt    time.Time
-	StatusLED           native.StatusLEDState
-	HaveStatusLED       bool
-	StatusLEDUpdated    time.Time
-	StatusLEDReceivedAt time.Time
-	StatusLEDOrderKnown bool
-	StatusLEDEpoch      uint64
-	StatusLEDRevision   uint64
-	ConnectionChange    bool
-	Connected           bool
-	Error               string
+	Snapshot             *control.Snapshot
+	PWMValues            *native.PWMValues
+	PWMRevision          uint64
+	PWMUpdated           time.Time
+	ConnectionGeneration uint64
+	Status               native.Status
+	HaveStatus           bool
+	StatusUpdated        time.Time
+	StatusReceivedAt     time.Time
+	StatusLED            native.StatusLEDState
+	HaveStatusLED        bool
+	StatusLEDUpdated     time.Time
+	StatusLEDReceivedAt  time.Time
+	StatusLEDOrderKnown  bool
+	StatusLEDEpoch       uint64
+	StatusLEDRevision    uint64
+	ConnectionChange     bool
+	Connected            bool
+	Error                string
 }
 
 // RemoteBackend supplies the live board state and activity stream for a TUI

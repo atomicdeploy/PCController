@@ -599,3 +599,7 @@ its previously verified 1 GiB installer threshold. No repeated install, data
 removal, reserve bypass or unlock was attempted. android-0.1.12-delivery.json
 records current identities and open gates. Source/render/build/delivery are
 separate from live physical/audio/human acceptance. Continuous goal active.
+
+## 0.1.13 live value wave
+
+See ../docs/WS-LIVE-VALUES.md for the publisher and known-client audit. Flutter regression checks cover complete calibrated PWM push, old owner/revision rejection, stale retention, no extra HTTP read on healthy complete events, recovery and stable Front Panel scroll. Candidate deployment and phone storage are verified per device; no physical acceptance claim follows source or package checks.

@@ -1924,16 +1924,42 @@ func (service *Service) primaryPingResult() map[string]any {
 
 type controllerSnapshotEnvelope struct {
 	controller.Snapshot
+	PWMValues      *pwmValues                       `json:"pwm_values,omitempty"`
 	HostInstanceID string                           `json:"host_instance_id,omitempty"`
 	MediaPlayback  controller.MediaPlaybackSnapshot `json:"media_playback"`
 }
 
+func (snapshot *controllerSnapshotEnvelope) UnmarshalJSON(data []byte) error {
+	var core controller.Snapshot
+	if err := json.Unmarshal(data, &core); err != nil {
+		return err
+	}
+	var fields struct {
+		HostInstanceID string                           `json:"host_instance_id"`
+		MediaPlayback  controller.MediaPlaybackSnapshot `json:"media_playback"`
+		PWMValues      *pwmValues                       `json:"pwm_values"`
+	}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	*snapshot = controllerSnapshotEnvelope{Snapshot: core, HostInstanceID: fields.HostInstanceID, MediaPlayback: fields.MediaPlayback, PWMValues: fields.PWMValues}
+	return nil
+}
+
 func (service *Service) controllerSnapshot() controllerSnapshotEnvelope {
-	return controllerSnapshotEnvelope{
-		Snapshot:       service.Client.Snapshot(),
+	snapshot := service.Client.Snapshot()
+	envelope := controllerSnapshotEnvelope{
+		Snapshot:       snapshot,
 		HostInstanceID: strings.TrimSpace(service.HostInstanceID),
 		MediaPlayback:  service.Client.MediaPlayback(),
 	}
+	if snapshot.PWMValues != nil {
+		values := service.describePWMValues(*snapshot.PWMValues)
+		values.HostInstanceID, values.ConnectionGeneration = envelope.HostInstanceID, snapshot.ConnectionGeneration
+		values.Revision, values.Time = snapshot.PWMRevision, snapshot.PWMUpdated
+		envelope.PWMValues = &values
+	}
+	return envelope
 }
 
 func (service *Service) hostConfig() appconfig.Config {
@@ -4354,7 +4380,7 @@ func serveWebSocket(
 		defer cancel()
 		return connection.Write(writeContext, websocket.MessageText, encoded)
 	}
-	subscriptions := newWebSocketSubscriptions(ctx, service.Client, service.controllerSnapshot, writeJSON)
+	subscriptions := newWebSocketSubscriptions(ctx, service.Client, service.controllerSnapshot, service.cachedPWMValues, service.HostInstanceID, writeJSON)
 	defer subscriptions.stopAll()
 
 	for {
@@ -4501,7 +4527,7 @@ func serveSocketIO(
 		return
 	}
 
-	subscriptions := newWebSocketSubscriptions(ctx, service.Client, service.controllerSnapshot, writeNotification)
+	subscriptions := newWebSocketSubscriptions(ctx, service.Client, service.controllerSnapshot, service.cachedPWMValues, service.HostInstanceID, writeNotification)
 	defer subscriptions.stopAll()
 	go func() {
 		ticker := time.NewTicker(25 * time.Second)
@@ -4935,21 +4961,25 @@ type webSocketSubscriptionWorker struct {
 // A preserve subscription is deliberately topic-scoped: changing status
 // cadence cannot cancel and recreate ordered event/state streams or reset cursors.
 type webSocketSubscriptions struct {
-	ctx      context.Context
-	client   *controller.Client
-	snapshot func() controllerSnapshotEnvelope
-	write    func(any) error
-	workers  map[string]webSocketSubscriptionWorker
+	instanceID string
+	ctx        context.Context
+	client     *controller.Client
+	snapshot   func() controllerSnapshotEnvelope
+	pwm        func() *pwmValues
+	write      func(any) error
+	workers    map[string]webSocketSubscriptionWorker
 }
 
 func newWebSocketSubscriptions(
 	ctx context.Context,
 	client *controller.Client,
 	snapshot func() controllerSnapshotEnvelope,
+	pwm func() *pwmValues,
+	instanceID string,
 	write func(any) error,
 ) *webSocketSubscriptions {
 	return &webSocketSubscriptions{
-		ctx: ctx, client: client, snapshot: snapshot, write: write,
+		ctx: ctx, client: client, snapshot: snapshot, pwm: pwm, instanceID: instanceID, write: write,
 		workers: make(map[string]webSocketSubscriptionWorker),
 	}
 }
@@ -5003,15 +5033,18 @@ func (subscriptions *webSocketSubscriptions) start(topic string, value wsSubscri
 		defer close(done)
 		switch topic {
 		case "events":
-			streamWebSocketEventStream(topicContext, subscriptions.client, afterID, "activity", "controller.event", 0, subscriptions.snapshot, subscriptions.write)
+			streamWebSocketEventStream(topicContext, subscriptions.client, afterID, "activity", "controller.event", 0, subscriptions.snapshot, nil, subscriptions.write)
 		case "state":
-			streamWebSocketEventStream(topicContext, subscriptions.client, afterID, "state", "controller.state", time.Duration(value.StateIntervalMS)*time.Millisecond, subscriptions.snapshot, subscriptions.write)
+			if err := subscriptions.write(wsNotification{JSONRPC: Version, Method: "controller.snapshot", Params: subscriptions.snapshot()}); err != nil {
+				return
+			}
+			streamWebSocketEventStream(topicContext, subscriptions.client, afterID, "state", "controller.state", time.Duration(value.StateIntervalMS)*time.Millisecond, subscriptions.snapshot, subscriptions.pwm, subscriptions.write)
 		case "debug":
-			streamWebSocketEventStream(topicContext, subscriptions.client, afterID, "debug", "controller.debug", 0, nil, subscriptions.write)
+			streamWebSocketEventStream(topicContext, subscriptions.client, afterID, "debug", "controller.debug", 0, nil, nil, subscriptions.write)
 		case "opcodes":
 			streamWebSocketOpcodes(topicContext, subscriptions.client, afterID, value.Opcodes, subscriptions.write)
 		case "status":
-			streamWebSocketStatus(topicContext, subscriptions.client, time.Duration(value.IntervalMS)*time.Millisecond, subscriptions.write)
+			streamWebSocketStatus(topicContext, subscriptions.client, time.Duration(value.IntervalMS)*time.Millisecond, subscriptions.instanceID, subscriptions.write)
 		}
 	}()
 }
@@ -5071,36 +5104,30 @@ func streamWebSocketEventStream(
 	method string,
 	highRateInterval time.Duration,
 	snapshot func() controllerSnapshotEnvelope,
+	pwm func() *pwmValues,
 	write func(any) error,
 ) {
-	// Independent domains must not consume each other's frame budget.
-	budget := make(stateFrameBudget)
-	for ctx.Err() == nil {
-		event, err := client.NextEventStream(ctx, afterID, "", stream)
-		if err != nil {
-			return
+	deliver := func(event controller.Event) error {
+		if err := write(wsNotification{JSONRPC: Version, Method: method, Params: event}); err != nil {
+			return err
 		}
-		afterID = event.ID
-		if stream == "state" && !budget.allow(event, highRateInterval, time.Now()) {
-			continue
-		}
-		if err := write(wsNotification{
-			JSONRPC: Version,
-			Method:  method,
-			Params:  event,
-		}); err != nil {
-			return
-		}
-		if snapshot != nil && eventUpdatesClientSnapshot(event) {
-			if err := write(wsNotification{
-				JSONRPC: Version,
-				Method:  "controller.snapshot",
-				Params:  snapshot(),
-			}); err != nil {
-				return
+		if pwm != nil && event.Kind == "pwm.changed" {
+			if values := pwm(); values != nil {
+				if err := write(wsNotification{JSONRPC: Version, Method: "controller.pwm.values", Params: values}); err != nil {
+					return err
+				}
 			}
 		}
+		if snapshot != nil && eventUpdatesClientSnapshot(event) {
+			return write(wsNotification{JSONRPC: Version, Method: "controller.snapshot", Params: snapshot()})
+		}
+		return nil
 	}
+	streamLatestState(ctx, afterID, highRateInterval,
+		func(ctx context.Context, cursor uint64) (controller.Event, error) {
+			return client.NextEventStream(ctx, cursor, "", stream)
+		}, deliver)
+
 }
 
 func highRateStateEvent(event controller.Event) bool {
@@ -5124,20 +5151,25 @@ func eventUpdatesClientSnapshot(event controller.Event) bool {
 	kind := strings.ToLower(strings.TrimSpace(event.Kind))
 	switch kind {
 	case "door", "bluetooth", "pwm", "relay", "hot", "reset", "identity",
-		"front_panel.changed", "settings.changed", "illumination.changed", "peripherals.changed", "programming.lifecycle":
+		"front_panel.changed", "settings.changed", "illumination.changed", "peripherals.changed", "programming.lifecycle",
+		"emergency_stop", "output", "motion.changed", "melodies.changed", "config", "port.process.changed":
 		return true
+	}
+	if kind == "macro" {
+		return event.Lifecycle == "started" || event.Lifecycle == "completed" || event.Lifecycle == "cancelled" || event.Lifecycle == "failed"
 	}
 	return strings.HasPrefix(kind, "connection") ||
 		strings.HasPrefix(kind, "usb.") ||
 		strings.HasPrefix(kind, "program.") ||
 		strings.HasPrefix(kind, "rf.learn") ||
-		strings.HasPrefix(kind, "macro.")
+		(strings.HasPrefix(kind, "macro.") && kind != "macro.step")
 }
 
 func streamWebSocketStatus(
 	ctx context.Context,
 	client *controller.Client,
 	interval time.Duration,
+	instanceID string,
 	write func(any) error,
 ) {
 	updates, err := client.SubscribeStatus(ctx, interval)
@@ -5160,10 +5192,15 @@ func streamWebSocketStatus(
 			}
 			continue
 		}
+		observed := client.CachedStatusObservation()
+		if !observed.HaveStatus || !observed.BoardConnected {
+			continue
+		}
+		observed.HostInstanceID = strings.TrimSpace(instanceID)
 		if write(wsNotification{
 			JSONRPC: Version,
 			Method:  "controller.status",
-			Params:  update,
+			Params:  observed,
 		}) != nil {
 			return
 		}

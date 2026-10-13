@@ -52,7 +52,7 @@ export function normalizePWMValues(value: PWMValues): PWMValues {
     return candidate
   })
 	const channels = value.channels?.map((channel) => ({ ...channel, config: { ...channel.config } }))
-	return { available: value.available, selected_channel: value.selected_channel, values, channels }
+	return { ...value, available: value.available, selected_channel: value.selected_channel, values, channels }
 }
 
 interface DesiredPWMValue {
@@ -112,6 +112,7 @@ export class PWMOperationQueue {
 export const PWM_RECONCILIATION_INTERVAL_MS = 1_500
 
 export interface PWMReconcilerOptions {
+  eventDriven?: boolean
   intervalMS?: number
   operations: PWMOperationQueue
   canRead: () => boolean
@@ -177,7 +178,7 @@ export class PWMReconciler {
       }
     } finally {
       if (this.readAbort === readAbort) this.readAbort = null
-      this.schedule(this.intervalMS, generation)
+      if (!this.options.eventDriven) this.schedule(this.intervalMS, generation)
     }
   }
 }
