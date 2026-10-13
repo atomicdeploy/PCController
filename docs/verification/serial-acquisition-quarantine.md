@@ -1,6 +1,6 @@
 # Serial acquisition quarantine
 
-Owning issue: [#667](https://github.com/atomicdeploy/PCController/issues/667).
+Owning issue: #667.
 
 ## Reproduced defect
 
