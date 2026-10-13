@@ -65,7 +65,9 @@ class _UnifiedControllerAppState extends State<UnifiedControllerApp> {
       appBarTheme: AppBarTheme(
         centerTitle: false,
         scrolledUnderElevation: 0,
-        backgroundColor: colors.surfaceContainerLowest,
+        backgroundColor: preferences.effectiveHeader == 'accent'
+            ? colors.primaryContainer
+            : colors.surfaceContainerLowest,
       ),
       inputDecorationTheme: InputDecorationTheme(
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
@@ -77,8 +79,14 @@ class _UnifiedControllerAppState extends State<UnifiedControllerApp> {
         color: colors.surfaceContainerLow,
         surfaceTintColor: Colors.transparent,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14),
-          side: BorderSide(color: colors.outlineVariant.withValues(alpha: .65)),
+          borderRadius: BorderRadius.circular(
+            preferences.tone == 'pastel' ? 12 : 14,
+          ),
+          side: BorderSide(
+            color: colors.outlineVariant.withValues(
+              alpha: preferences.tone == 'pastel' ? 1 : .65,
+            ),
+          ),
         ),
       ),
       filledButtonTheme: FilledButtonThemeData(
@@ -663,27 +671,54 @@ class _ControllerHomeState extends State<ControllerHome>
     VoidCallback? callback, {
     bool priority = false,
     bool? danger,
-  }) => OutlinedButton.icon(
-    onPressed: busy && !priority ? null : callback,
-    style: OutlinedButton.styleFrom(
+  }) {
+    final colors = Theme.of(context).colorScheme;
+    final destructive = (danger ?? priority) && callback != null;
+    final solid = preferences.buttonStyle == 'filled';
+    final tonal = preferences.buttonStyle == 'tonal';
+    final style = OutlinedButton.styleFrom(
       minimumSize: const Size(44, 44),
       padding: const EdgeInsets.symmetric(horizontal: 12),
-      foregroundColor: (danger ?? priority) && callback != null
-          ? Theme.of(context).colorScheme.error
-          : Theme.of(context).colorScheme.onSurface,
-      backgroundColor: (danger ?? priority) && callback != null
-          ? Theme.of(context).colorScheme.error.withValues(alpha: .08)
+      foregroundColor: destructive
+          ? (solid ? colors.onError : colors.error)
+          : solid
+          ? colors.onPrimary
+          : colors.onSurface,
+      backgroundColor: destructive
+          ? solid
+                ? colors.error
+                : colors.error.withValues(alpha: .08)
+          : solid
+          ? colors.primary
+          : tonal
+          ? colors.secondaryContainer
           : Colors.transparent,
       side: BorderSide(
-        color: (danger ?? priority) && callback != null
-            ? Theme.of(context).colorScheme.error.withValues(alpha: .4)
-            : Theme.of(context).colorScheme.outline,
+        color: destructive
+            ? colors.error.withValues(alpha: .4)
+            : solid || tonal
+            ? Colors.transparent
+            : colors.outline,
       ),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-    ),
-    icon: Icon(icon, size: 18),
-    label: Text(label),
-  );
+    );
+    final enabled = busy && !priority ? null : callback;
+    if (solid || tonal) {
+      return FilledButton.icon(
+        onPressed: enabled,
+        style: style,
+        icon: Icon(icon, size: 18),
+        label: Text(label),
+      );
+    }
+    return OutlinedButton.icon(
+      onPressed: enabled,
+      style: style,
+      icon: Icon(icon, size: 18),
+      label: Text(label),
+    );
+  }
+
   Widget card(
     String title,
     IconData icon,
@@ -696,33 +731,54 @@ class _ControllerHomeState extends State<ControllerHome>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Container(
-                width: 32,
-                height: 32,
-                decoration: BoxDecoration(
-                  color: (color ?? Theme.of(context).colorScheme.primary)
-                      .withValues(alpha: .10),
-                  borderRadius: BorderRadius.circular(8),
+          Container(
+            padding: preferences.effectiveHeader == 'accent'
+                ? const EdgeInsets.all(8)
+                : EdgeInsets.zero,
+            decoration: preferences.effectiveHeader == 'accent'
+                ? BoxDecoration(
+                    color: (color ?? Theme.of(context).colorScheme.primary)
+                        .withValues(alpha: .12),
+                    borderRadius: BorderRadius.circular(8),
+                  )
+                : null,
+            child: Row(
+              children: [
+                Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: preferences.effectiveHeader == 'plain'
+                        ? Colors.transparent
+                        : (color ?? Theme.of(context).colorScheme.primary)
+                              .withValues(alpha: .10),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(
+                    icon,
+                    color: color ?? Theme.of(context).colorScheme.primary,
+                    size: 20,
+                  ),
                 ),
-                child: Icon(
-                  icon,
-                  color: color ?? Theme.of(context).colorScheme.primary,
-                  size: 20,
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontSize: preferences.effectiveHeader == 'classic'
+                          ? 16
+                          : null,
+                    ),
+                  ),
                 ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  title,
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-              ),
-              ?trailing,
-            ],
+                ?trailing,
+              ],
+            ),
           ),
-          if (children.isNotEmpty) const SizedBox(height: 12),
+          if (children.isNotEmpty)
+            SizedBox(
+              height: preferences.effectiveHeader == 'classic' ? 14 : 12,
+            ),
           ...children,
         ],
       ),
@@ -838,7 +894,7 @@ class _ControllerHomeState extends State<ControllerHome>
                 0 => Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    liveConnections(),
+                    preferences.compact ? liveConnections() : peerRoster(),
                     if (board.fresh) ...[const SizedBox(height: 14), monitor()],
                     if (player.fresh || bridgeTarget != null) ...[
                       const SizedBox(height: 14),
@@ -974,6 +1030,49 @@ class _ControllerHomeState extends State<ControllerHome>
     },
   );
 
+  String peerStatus(PeerSession peer) => peer.fresh
+      ? peer.controller && peer.state['connected'] != true
+            ? 'Host only'
+            : 'Connected'
+      : peer.enabled
+      ? peer.error == null
+            ? 'Connecting'
+            : 'Reconnecting'
+      : 'Offline';
+
+  Widget peerMore(PeerSession peer, String name, {bool compact = false}) =>
+      PopupMenuButton<String>(
+        tooltip: 'Manage $name connection',
+        icon: const Icon(Icons.more_vert, size: 20),
+        style: IconButton.styleFrom(minimumSize: const Size(44, 44)),
+        onSelected: (value) {
+          if (value == 'address') unawaited(configure(peer.controller));
+          if (value == 'refresh') unawaited(peer.refresh());
+          if (value == 'disconnect') unawaited(disconnectPeer(peer));
+          if (value == 'connect') unawaited(resumePeer(peer));
+        },
+        itemBuilder: (_) => [
+          const PopupMenuItem(value: 'address', child: Text('Edit address')),
+          if (peer.transport != null)
+            const PopupMenuItem(value: 'refresh', child: Text('Refresh')),
+          if (peer.fresh || (compact && peer.enabled))
+            PopupMenuItem(
+              value: 'disconnect',
+              child: Text(peer.fresh ? 'Disconnect' : 'Cancel connection'),
+            ),
+          if (compact && !peer.fresh && !peer.enabled)
+            const PopupMenuItem(value: 'connect', child: Text('Connect')),
+        ],
+      );
+
+  Widget peerConnect(PeerSession peer, String name) => IconButton(
+    tooltip: '${peer.enabled ? 'Cancel connection' : 'Connect'} $name',
+    onPressed: () =>
+        unawaited(peer.enabled ? disconnectPeer(peer) : resumePeer(peer)),
+    icon: Icon(peer.enabled ? Icons.close : Icons.link, size: 20),
+    style: IconButton.styleFrom(minimumSize: const Size(44, 44)),
+  );
+
   Widget liveConnections() => Card(
     child: Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -984,92 +1083,38 @@ class _ControllerHomeState extends State<ControllerHome>
             Expanded(
               child: Row(
                 children: [
+                  Image.asset(
+                    'assets/branding/${peer.controller ? 'pccontroller' : 'pealayer'}.png',
+                    width: 22,
+                    height: 22,
+                  ),
+                  const SizedBox(width: 6),
                   Expanded(
-                    child: PopupMenuButton<String>(
-                      tooltip:
-                          'Manage ${peer.controller ? 'PCController' : 'Pealayer'} connection',
-                      padding: EdgeInsets.zero,
-                      onSelected: (value) {
-                        if (value == 'address') {
-                          unawaited(configure(peer.controller));
-                        }
-                        if (value == 'refresh') unawaited(peer.refresh());
-                      },
-                      itemBuilder: (_) => [
-                        const PopupMenuItem(
-                          value: 'address',
-                          child: Text('Edit address'),
-                        ),
-                        if (peer.transport != null)
-                          const PopupMenuItem(
-                            value: 'refresh',
-                            child: Text('Refresh'),
-                          ),
-                      ],
-                      child: Row(
-                        children: [
-                          Image.asset(
-                            'assets/branding/${peer.controller ? 'pccontroller' : 'pealayer'}.png',
-                            width: 22,
-                            height: 22,
-                          ),
-                          const SizedBox(width: 6),
-                          Expanded(
-                            child: Text(
-                              peer.controller ? 'PCController' : 'Pealayer',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.labelLarge,
-                            ),
-                          ),
-                          const SizedBox(width: 4),
-                          Tooltip(
-                            message: peer.fresh
-                                ? peer.controller && !peer.boardReady
-                                      ? 'Host only'
-                                      : 'Connected'
-                                : peer.enabled
-                                ? 'Connecting'
-                                : 'Offline',
-                            child: Icon(
-                              peer.fresh
-                                  ? Icons.circle
-                                  : peer.enabled
-                                  ? Icons.sync
-                                  : Icons.circle_outlined,
-                              size: 10,
-                              color:
-                                  peer.fresh &&
-                                      (!peer.controller || peer.boardReady)
-                                  ? const Color(0xff55bd83)
-                                  : Theme.of(context)
-                                        .colorScheme
-                                        .onSurfaceVariant,
-                            ),
-                          ),
-                        ],
-                      ),
+                    child: Text(
+                      peer.controller ? 'PCController' : 'Pealayer',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.labelLarge,
                     ),
                   ),
-                  IconButton(
-                    tooltip:
-                        '${peer.enabled || peer.fresh
-                            ? peer.fresh
-                                  ? 'Disconnect'
-                                  : 'Cancel connection'
-                            : 'Connect'} ${peer.controller ? 'PCController' : 'Pealayer'}',
-                    onPressed: () => unawaited(
-                      peer.enabled || peer.fresh
-                          ? disconnectPeer(peer)
-                          : resumePeer(peer),
+                  Tooltip(
+                    message: peerStatus(peer),
+                    child: Icon(
+                      peer.fresh
+                          ? Icons.circle
+                          : peer.enabled
+                          ? Icons.sync
+                          : Icons.circle_outlined,
+                      size: 10,
+                      color: peer.fresh && (!peer.controller || peer.boardReady)
+                          ? const Color(0xff55bd83)
+                          : Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
-                    icon: Icon(
-                      peer.enabled || peer.fresh ? Icons.link_off : Icons.link,
-                      size: 20,
-                    ),
-                    style: IconButton.styleFrom(
-                      minimumSize: const Size(44, 44),
-                    ),
+                  ),
+                  peerMore(
+                    peer,
+                    peer.controller ? 'PCController' : 'Pealayer',
+                    compact: true,
                   ),
                 ],
               ),
@@ -1086,101 +1131,40 @@ class _ControllerHomeState extends State<ControllerHome>
   ], minimum: 310);
 
   Widget connection(PeerSession peer, String name) {
-    final status = peer.fresh
-        ? peer.controller && peer.state['connected'] != true
-              ? 'Host only'
-              : 'Connected'
-        : peer.enabled
-        ? peer.error == null
-              ? 'Connecting'
-              : 'Reconnecting'
-        : 'Offline';
-    final toggle = peer.enabled || peer.fresh
-        ? peer.fresh
-              ? 'Disconnect'
-              : 'Cancel connection'
-        : 'Connect';
-    return LayoutBuilder(
-      builder: (context, bounds) => card(
-        name,
-        peer.controller ? Icons.memory_outlined : Icons.play_circle_outline,
-        [
-          if (peer.transport != null)
-            Text(
-              peer.transport!.origin.toString(),
-              style: Theme.of(context).textTheme.labelMedium,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+    final status = peerStatus(peer);
+    return card(
+      name,
+      peer.controller ? Icons.memory_outlined : Icons.play_circle_outline,
+      [
+        if (peer.transport != null)
+          Text(
+            peer.transport!.origin.toString(),
+            style: Theme.of(context).textTheme.labelMedium,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        if (peer.error != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              peer.error!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
             ),
-          if (peer.error != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Text(
-                peer.error!,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
-            ),
+          ),
+      ],
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          StatePill(
+            status,
+            active:
+                peer.fresh &&
+                (!peer.controller || peer.state['connected'] == true),
+          ),
+          const SizedBox(width: 4),
+          if (!peer.fresh) peerConnect(peer, name),
+          peerMore(peer, name),
         ],
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (bounds.maxWidth < 360 ||
-                MediaQuery.textScalerOf(context).scale(12) > 15)
-              Tooltip(
-                message: status,
-                child: Semantics(
-                  label: status,
-                  child: Icon(
-                    peer.fresh
-                        ? Icons.circle
-                        : peer.enabled
-                        ? Icons.sync
-                        : Icons.circle_outlined,
-                    size: 14,
-                    color: peer.fresh
-                        ? const Color(0xff55bd83)
-                        : Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              )
-            else
-              StatePill(
-                status,
-                active:
-                    peer.fresh &&
-                    (!peer.controller || peer.state['connected'] == true),
-              ),
-            const SizedBox(width: 4),
-            IconButton(
-              tooltip: '$toggle $name',
-              onPressed: () => unawaited(
-                peer.enabled || peer.fresh
-                    ? disconnectPeer(peer)
-                    : resumePeer(peer),
-              ),
-              icon: Icon(
-                peer.enabled || peer.fresh ? Icons.link_off : Icons.link,
-              ),
-              style: IconButton.styleFrom(minimumSize: const Size(44, 44)),
-            ),
-            PopupMenuButton<String>(
-              tooltip: 'Manage $name connection',
-              icon: const Icon(Icons.more_vert, size: 20),
-              onSelected: (value) {
-                if (value == 'address') unawaited(configure(peer.controller));
-                if (value == 'refresh') unawaited(peer.refresh());
-              },
-              itemBuilder: (_) => [
-                const PopupMenuItem(
-                  value: 'address',
-                  child: Text('Edit address'),
-                ),
-                if (peer.transport != null)
-                  const PopupMenuItem(value: 'refresh', child: Text('Refresh')),
-              ],
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -1609,58 +1593,115 @@ class _ControllerHomeState extends State<ControllerHome>
         field: field,
         color: color,
         unit: unit,
-        height: MediaQuery.sizeOf(context).width < 760 ? 32 : 64,
+        height: preferences.compact
+            ? MediaQuery.sizeOf(context).width < 760
+                  ? 32
+                  : 64
+            : 96,
       ),
     ], color: color);
     final narrow = MediaQuery.sizeOf(context).width < 760;
     return Column(
       children: [
-        grid([
-          if (measurement('bus_mv', 1, '', 'ina219_available') != '—')
-            metric(
-              peripheral('sensor.bus-voltage', 'Voltage'),
-              Icons.bolt,
-              measurement('bus_mv', 1000, 'V', 'ina219_available'),
-              'voltage',
-              'V',
-              const Color(0xff9786ed),
-            ),
-          if (measurement('current_ma', 1, '', 'ina219_available') != '—')
-            metric(
-              peripheral('sensor.current', 'Current'),
-              Icons.electric_meter,
-              measurement('current_ma', 1, 'mA', 'ina219_available'),
-              'current',
-              'mA',
-              const Color(0xff62bcae),
-            ),
-          if (measurement('power_mw', 1, '', 'ina219_available') != '—')
-            metric(
-              peripheral('sensor.power', 'Power'),
-              Icons.power,
-              measurement('power_mw', 1000, 'W', 'ina219_available'),
-              'power',
-              'W',
-              const Color(0xffe0ac62),
-            ),
-          if (narrow && hasStatusLed) statusLedCard(),
-        ], minimum: narrow ? 150 : 280),
+        grid(
+          [
+            if (measurement('bus_mv', 1, '', 'ina219_available') != '—')
+              metric(
+                peripheral('sensor.bus-voltage', 'Voltage'),
+                Icons.bolt,
+                measurement('bus_mv', 1000, 'V', 'ina219_available'),
+                'voltage',
+                'V',
+                const Color(0xff9786ed),
+              ),
+            if (measurement('current_ma', 1, '', 'ina219_available') != '—')
+              metric(
+                peripheral('sensor.current', 'Current'),
+                Icons.electric_meter,
+                measurement('current_ma', 1, 'mA', 'ina219_available'),
+                'current',
+                'mA',
+                const Color(0xff62bcae),
+              ),
+            if (measurement('power_mw', 1, '', 'ina219_available') != '—')
+              metric(
+                peripheral('sensor.power', 'Power'),
+                Icons.power,
+                measurement('power_mw', 1000, 'W', 'ina219_available'),
+                'power',
+                'W',
+                const Color(0xffe0ac62),
+              ),
+            if (preferences.compact && narrow && hasStatusLed) statusLedCard(),
+          ],
+          minimum: preferences.compact ? (narrow ? 150 : 280) : double.infinity,
+        ),
         const SizedBox(height: 14),
         grid([
-          if (measurement(
-                    'temperature_led_centi_c',
-                    100,
-                    '°C',
-                    'temperature_led_available',
-                  ) !=
-                  '—' ||
-              measurement(
-                    'temperature_bt_audio_centi_c',
-                    100,
-                    '°C',
-                    'temperature_bt_audio_available',
-                  ) !=
-                  '—')
+          if (!preferences.compact) ...[
+            if (measurement(
+                  'temperature_led_centi_c',
+                  100,
+                  '°C',
+                  'temperature_led_available',
+                ) !=
+                '—')
+              metric(
+                peripheral('sensor.temperature-led', 'Lighting temperature'),
+                Icons.thermostat,
+                measurement(
+                  'temperature_led_centi_c',
+                  100,
+                  '°C',
+                  'temperature_led_available',
+                ),
+                'temperature',
+                '°C',
+                const Color(0xffe68b85),
+              ),
+            if (measurement(
+                  'temperature_bt_audio_centi_c',
+                  100,
+                  '°C',
+                  'temperature_bt_audio_available',
+                ) !=
+                '—')
+              metric(
+                peripheral('sensor.temperature-audio', 'Audio temperature'),
+                Icons.thermostat,
+                measurement(
+                  'temperature_bt_audio_centi_c',
+                  100,
+                  '°C',
+                  'temperature_bt_audio_available',
+                ),
+                'audio',
+                '°C',
+                const Color(0xff62bcae),
+              ),
+            if (board.fresh && status['hot'] == true)
+              card('Temperature warning', Icons.warning_amber, [
+                const Text(
+                  'HOT · board reports over-temperature',
+                  style: TextStyle(color: Colors.red),
+                ),
+              ]),
+          ],
+          if (preferences.compact &&
+              (measurement(
+                        'temperature_led_centi_c',
+                        100,
+                        '°C',
+                        'temperature_led_available',
+                      ) !=
+                      '—' ||
+                  measurement(
+                        'temperature_bt_audio_centi_c',
+                        100,
+                        '°C',
+                        'temperature_bt_audio_available',
+                      ) !=
+                      '—'))
             card('Temperature', Icons.thermostat, [
               fact(
                 peripheral('sensor.temperature-led', 'Lighting'),
@@ -1738,8 +1779,9 @@ class _ControllerHomeState extends State<ControllerHome>
                     : 'Unavailable',
               ),
             ]),
-          if (!narrow && hasStatusLed) statusLedCard(),
-        ]),
+          if ((!preferences.compact || !narrow) && hasStatusLed)
+            statusLedCard(),
+        ], minimum: preferences.compact ? 340 : double.infinity),
       ],
     );
   }
@@ -1877,6 +1919,9 @@ class _ControllerHomeState extends State<ControllerHome>
                                 !estop &&
                                 control['locked'] != true,
                             commit: pwmCommit(control),
+                            applyStyle: preferences.actionIconStyle(
+                              Theme.of(context).colorScheme,
+                            ),
                           ),
                         if (control['kind'] != 'relay' ||
                             preferences.relayLayout == 'explicit')
@@ -1950,8 +1995,8 @@ class _ControllerHomeState extends State<ControllerHome>
                                   Icons.power_settings_new,
                                   size: 20,
                                 ),
-                                style: IconButton.styleFrom(
-                                  minimumSize: const Size(44, 44),
+                                style: preferences.actionIconStyle(
+                                  Theme.of(context).colorScheme,
                                 ),
                                 onPressed:
                                     board.boardReady &&
@@ -3315,7 +3360,7 @@ class _ControllerHomeState extends State<ControllerHome>
     }
     switch (method) {
       case 'app.ping':
-        return {'ok': true, 'app': 'PCController', 'version': '0.1.4'};
+        return {'ok': true, 'app': 'PCController', 'version': '0.1.5'};
       case 'app.capabilities':
         return {
           'jsonrpc': '2.0',

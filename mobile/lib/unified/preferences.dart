@@ -28,10 +28,47 @@ class AppPreferences extends ChangeNotifier {
   bool sharePackages = false;
   String palette = 'digitalogic',
       branding = 'pccontroller',
-      relayLayout = 'compact';
+      relayLayout = 'compact',
+      tone = 'vibrant',
+      headerStyle = 'theme',
+      buttonStyle = 'outlined';
+  String get effectiveHeader => headerStyle == 'theme'
+      ? (tone == 'pastel' ? 'classic' : 'tile')
+      : headerStyle;
   Color customColor = const Color(0xff7166ce);
   String get title => branding == 'pealayer' ? 'Pealayer' : 'PCController';
+  ButtonStyle actionIconStyle(ColorScheme colors) => IconButton.styleFrom(
+    minimumSize: const Size(44, 44),
+    foregroundColor: buttonStyle == 'filled'
+        ? colors.onPrimary
+        : colors.onSurface,
+    backgroundColor: buttonStyle == 'filled'
+        ? colors.primary
+        : buttonStyle == 'tonal'
+        ? colors.secondaryContainer
+        : Colors.transparent,
+    side: buttonStyle == 'outlined'
+        ? BorderSide(color: colors.outline)
+        : BorderSide.none,
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+  );
   ColorScheme scheme(Brightness brightness) {
+    if (tone == 'pastel') {
+      final dark = brightness == Brightness.dark;
+      return ColorScheme.fromSeed(
+        seedColor: palette == 'custom' ? customColor : paletteSeeds[palette]!,
+        brightness: brightness,
+      ).copyWith(
+        surface: Color(dark ? 0xff232323 : 0xfffafafa),
+        surfaceContainerLowest: Color(dark ? 0xff1c1c1e : 0xfff5f5f7),
+        surfaceContainerLow: Color(dark ? 0xff232323 : 0xfffafafa),
+        surfaceContainer: Color(dark ? 0xff292929 : 0xfff2f2f3),
+        onSurface: Color(dark ? 0xffededed : 0xff242428),
+        onSurfaceVariant: Color(dark ? 0xffaaaaae : 0xff64646a),
+        outline: Color(dark ? 0xff414145 : 0xffd2d2d6),
+        outlineVariant: Color(dark ? 0xff3c3c40 : 0xffdddddf),
+      );
+    }
     if (palette == 'pakar' && brightness == Brightness.dark) {
       return studioDark.copyWith(
         surfaceContainerLowest: const Color(0xff080a0e),
@@ -65,6 +102,16 @@ class AppPreferences extends ChangeNotifier {
       layout = savedLayout!;
     }
     compact = prefs.getBool('appearance.compact') ?? true;
+    final savedTone = prefs.getString('appearance.tone');
+    if (['pastel', 'vibrant'].contains(savedTone)) tone = savedTone!;
+    final savedHeader = prefs.getString('appearance.header');
+    if (['theme', 'classic', 'tile', 'accent', 'plain'].contains(savedHeader)) {
+      headerStyle = savedHeader!;
+    }
+    final savedButtons = prefs.getString('appearance.buttons');
+    if (['outlined', 'tonal', 'filled'].contains(savedButtons)) {
+      buttonStyle = savedButtons!;
+    }
     autoConnect = prefs.getBool('connections.auto') ?? true;
     sharePackages = prefs.getBool('upgrades.sharing') ?? false;
     final savedRelayLayout = prefs.getString('controls.relay-layout');
@@ -103,6 +150,9 @@ class AppPreferences extends ChangeNotifier {
     await prefs.setString('appearance.theme', theme.name);
     await prefs.setString('appearance.layout', layout);
     await prefs.setBool('appearance.compact', compact);
+    await prefs.setString('appearance.tone', tone);
+    await prefs.setString('appearance.header', headerStyle);
+    await prefs.setString('appearance.buttons', buttonStyle);
     await prefs.setBool('connections.auto', autoConnect);
     await prefs.setBool('upgrades.sharing', sharePackages);
     await prefs.setString('controls.relay-layout', relayLayout);
@@ -216,6 +266,86 @@ class AppSettings extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 16),
+                  DropdownButtonFormField<String>(
+                    initialValue: preferences.tone,
+                    decoration: const InputDecoration(labelText: 'Color style'),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'pastel',
+                        child: Text('Pastel · muted (previous)'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'vibrant',
+                        child: Text('Vibrant · current'),
+                      ),
+                    ],
+                    onChanged: (value) {
+                      if (value != null) {
+                        preferences.tone = value;
+                        preferences.save();
+                      }
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  DropdownButtonFormField<String>(
+                    initialValue: preferences.headerStyle,
+                    decoration: const InputDecoration(
+                      labelText: 'Header style',
+                    ),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'theme',
+                        child: Text('Follow color style'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'classic',
+                        child: Text('Classic · previous'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'tile',
+                        child: Text('Icon tile · current'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'accent',
+                        child: Text('Accent band'),
+                      ),
+                      DropdownMenuItem(value: 'plain', child: Text('Plain')),
+                    ],
+                    onChanged: (value) {
+                      if (value != null) {
+                        preferences.headerStyle = value;
+                        preferences.save();
+                      }
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  DropdownButtonFormField<String>(
+                    initialValue: preferences.buttonStyle,
+                    decoration: const InputDecoration(
+                      labelText: 'Action buttons',
+                    ),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'outlined',
+                        child: Text('Outlined'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'tonal',
+                        child: Text('Soft fill'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'filled',
+                        child: Text('Solid fill'),
+                      ),
+                    ],
+                    onChanged: (value) {
+                      if (value != null) {
+                        preferences.buttonStyle = value;
+                        preferences.save();
+                      }
+                    },
+                  ),
+                  const SizedBox(height: 16),
                   DropdownButtonFormField<ThemeMode>(
                     initialValue: preferences.theme,
                     decoration: const InputDecoration(labelText: 'Theme'),
@@ -255,7 +385,7 @@ class AppSettings extends StatelessWidget {
                   ),
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
-                    title: const Text('Compact controls'),
+                    title: const Text('Compact layout'),
                     value: preferences.compact,
                     onChanged: (v) {
                       preferences.compact = v;

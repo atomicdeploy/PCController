@@ -8,9 +8,11 @@ class PwmSetpointControl extends StatefulWidget {
     required this.enabled,
     required this.commit,
     this.observed,
+    this.applyStyle,
   });
   final bool enabled;
   final double? observed;
+  final ButtonStyle? applyStyle;
   final Future<double> Function(int) commit;
   @override
   State<PwmSetpointControl> createState() => _PwmSetpointControlState();
@@ -128,6 +130,7 @@ class _PwmSetpointControlState extends State<PwmSetpointControl> {
               tooltip: 'Apply PWM setpoint',
               onPressed: widget.enabled && !pending ? applyInput : null,
               icon: const Icon(Icons.check),
+              style: widget.applyStyle,
             ),
           ),
           validator: (text) {

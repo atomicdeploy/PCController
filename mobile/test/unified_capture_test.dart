@@ -9,6 +9,7 @@ import 'package:pccontroller_mobile/main.dart';
 import 'package:pccontroller_mobile/unified/effect_editor.dart';
 import 'package:pccontroller_mobile/unified/transport.dart';
 import 'package:pccontroller_mobile/unified/pwm_control.dart';
+import 'package:pccontroller_mobile/unified/live_widgets.dart';
 
 import 'dart:ui' as ui;
 
@@ -166,6 +167,67 @@ void main() {
               }
             }
           }
+          for (final preset in ['pastel', 'vibrant']) {
+            home.section = 0;
+            home.preferences.compact = false;
+            home.preferences.tone = preset;
+            home.preferences.headerStyle = 'theme';
+            home.preferences.refresh();
+            await tester.pumpAndSettle();
+            await tester.drag(
+              find.byType(SingleChildScrollView).last,
+              const Offset(0, 4000),
+            );
+            await tester.pumpAndSettle();
+            await tester.runAsync(() async {
+              final frame = await render.toImage();
+              final bytes = await frame.toByteData(
+                format: ui.ImageByteFormat.png,
+              );
+              await File(
+                '$directory/uncompact-$preset-${size.width.toInt()}.png',
+              ).writeAsBytes(bytes!.buffer.asUint8List());
+              frame.dispose();
+            });
+            await tester.ensureVisible(find.byType(TelemetryChart).last);
+            await tester.pumpAndSettle();
+            await tester.runAsync(() async {
+              final frame = await render.toImage();
+              final bytes = await frame.toByteData(
+                format: ui.ImageByteFormat.png,
+              );
+              await File(
+                '$directory/uncompact-$preset-temperatures-${size.width.toInt()}.png',
+              ).writeAsBytes(bytes!.buffer.asUint8List());
+              frame.dispose();
+            });
+          }
+          home.preferences.compact = true;
+          home.preferences.headerStyle = 'accent';
+          home.preferences.buttonStyle = 'tonal';
+          home.preferences.relayLayout = 'explicit';
+          home.section = 1;
+          home.preferences.refresh();
+          await tester.pumpAndSettle();
+          await tester.drag(
+            find.byType(SingleChildScrollView).last,
+            const Offset(0, 4000),
+          );
+          await tester.pumpAndSettle();
+          await tester.runAsync(() async {
+            final frame = await render.toImage();
+            final bytes = await frame.toByteData(
+              format: ui.ImageByteFormat.png,
+            );
+            await File(
+              '$directory/accent-soft-actions-${size.width.toInt()}.png',
+            ).writeAsBytes(bytes!.buffer.asUint8List());
+            frame.dispose();
+          });
+          home.preferences.headerStyle = 'theme';
+          home.preferences.buttonStyle = 'outlined';
+          home.preferences.relayLayout = 'compact';
+          home.preferences.refresh();
           tester.platformDispatcher.platformBrightnessTestValue =
               Brightness.dark;
           home.section = 0;

@@ -272,3 +272,24 @@ transport, visual/touch, native launcher/task, peer APK, audible/segment timing 
 physical PWM acceptance. The phone needs available storage before another update;
 the continuous improvement goal and all unfinished user acceptance gates remain
 active. No full suites, extra APK builds or CI were run for this delivery.
+
+## Appearance and uncompact follow-up
+
+The latest requested uncompact layout restores full peer connection cards with
+the actual Connected pill and a full-width row for each available chart, including
+separate lighting and audio temperature series. Compact mode retains its grid.
+Disconnect is menu-only in both layouts; the compact strip also exposes Connect/
+Cancel in its visible More menu so peer names fit. Explicit disconnect still
+persists the discovery opt-out.
+
+Preferences retain the former neutral light/dark surfaces and classic headers as
+Pastel (muted), alongside the current Vibrant appearance. Header styles can follow
+the selected appearance or use Classic, Icon tile, Accent band or Plain. Real
+channel action buttons support Outlined, Soft fill and Solid fill, with the same
+ownership, lock, pending PWM and safety guards. All choices persist independently.
+
+Ten focused appearance/PWM/relay regressions passed; five appearance regressions
+were rerun after the compact-menu adjustment. Analyzer and phone/tablet controlled
+rendering passed. Renderer images replay the recorded read-only telemetry and
+are not deployed-device visual or physical acceptance. Release version is 0.1.5+6;
+the package and fresh Android delivery evidence will be recorded after the build.
