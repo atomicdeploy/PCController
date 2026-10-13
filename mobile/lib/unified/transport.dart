@@ -75,6 +75,13 @@ class Uncertain implements Exception {
       'Acknowledgement unavailable. The action was not retried; refresh before trying again.';
 }
 
+class ConfirmationUnavailable extends Uncertain {
+  const ConfirmationUnavailable(this.message);
+  final String message;
+  @override
+  String toString() => message;
+}
+
 /// Native IO transport: credentials never appear in URLs, redirects or peers.
 class PeerTransport {
   PeerTransport(String origin, {this.token = '', http.Client? client})
@@ -135,6 +142,14 @@ class PeerTransport {
       final error = object(result['error']);
       if (error['code'] is! int || error['message'] is! String) {
         throw const Uncertain();
+      }
+      final details = object(error['data']);
+      if (error['code'] == -32010 &&
+          details['kind'] == 'confirmation_unavailable' &&
+          details['resource'] == 'pwm' &&
+          details['write_acknowledged'] == true &&
+          details['retryable'] == false) {
+        throw ConfirmationUnavailable(error['message']);
       }
       throw Rejected(error['message']);
     }
@@ -895,12 +910,42 @@ class PeerSession extends ChangeNotifier {
       _pwmAvailable = true;
       notifyListeners();
       return actual.toDouble();
+    } on Uncertain {
+      if (epoch == generation && _activePwmWrite == write) {
+        _pwmAvailable = false;
+        notifyListeners();
+      }
+      rethrow;
     } finally {
       if (_activePwmWrite == write) _activePwmWrite = null;
       if (epoch == generation) {
         _schedulePwmRefresh(epoch); // One read, never mutation replay.
       }
     }
+  }
+
+  /// Expert CLI PWM writes use the same draft/readback exclusion as typed set.
+  /// Keep the last observation visible as stale until one post-command read.
+  int beginPwmCommand(String expectedTarget) {
+    if (targetStamp != expectedTarget ||
+        !boardReady ||
+        _activePwmWrite != null) {
+      throw const Rejected(
+        'PWM target changed or another write is in progress.',
+      );
+    }
+    final write = ++_pwmWriteSequence;
+    _activePwmWrite = write;
+    ++_pwmRevision;
+    _pwmAvailable = false;
+    notifyListeners();
+    return write;
+  }
+
+  void finishPwmCommand(int write, int epoch) {
+    if (_activePwmWrite != write) return;
+    _activePwmWrite = null;
+    if (generation == epoch) _schedulePwmRefresh(epoch);
   }
 
   void _scheduleRefresh(int epoch) {

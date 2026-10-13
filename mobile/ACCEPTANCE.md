@@ -565,3 +565,21 @@ removal, reserve bypass or unlock was attempted. Exact receipts are in
 android-0.1.11-delivery.json. Live Android discovery, OS branding/launcher changes,
 two-device upgrade/installation consent, full egui parity and physical/audio/human
 acceptance remain open. The continuous goal remains active.
+
+## Go help and usage parity wave
+
+0.1.12+13 adds Controller tools, with 50 useful advertised native command families
+and dedicated settings/name/display/lighting/routing/melody/recording/RF forms.
+GO-FLUTTER-PARITY.md records the help/runtime provenance, parser findings, exact
+native limits, dedicated versus workbench/platform scope and remaining gaps.
+Owner/E-STOP/uncertain fences, priority Stop, reviewed release and typed-relay
+third-peer exclusions apply. EEPROM preflight conflicts retain edited drafts;
+native CAS remains a gap. Native acknowledged-but-unconfirmed PWM stays connected,
+retains stale last values and never retries. Expert PWM commands share read fencing.
+Tools have no periodic polling; entry/explicit refresh reads preserve drafts.
+
+42 focused source checks, three tools/dialog widget checks and one phone/tablet
+source renderer passed; analyzer clean. Existing front-panel progress and pull
+refresh viewport checks remain passing. Controlled renders are not device screenshots.
+No physical relay/motor/beep/RF/firmware/player action was sent. Final package/device
+receipt follows separately. Continuous acceptance goal remains active.

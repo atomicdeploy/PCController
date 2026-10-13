@@ -30,6 +30,77 @@ void prepare(PeerSession peer) {
 }
 
 void main() {
+  test('native acknowledged write without confirmation retains stale PWM and never disconnects or retries', () async {
+    var writes = 0;
+    final peer = PeerSession(controller: true);
+    prepare(peer);
+    peer.pwmValues = values(42);
+    peer.pwmUpdated = DateTime.now();
+    peer.transport = PeerTransport(
+      'http://fixture',
+      client: MockClient((request) async {
+        final rpc = object(jsonDecode(request.body));
+        expect(rpc['method'], 'controller.pwm.set');
+        writes++;
+        return http.Response(
+          jsonEncode({
+            'jsonrpc': '2.0',
+            'id': rpc['id'],
+            'error': {
+              'code': -32010,
+              'message': 'Confirmation unavailable',
+              'data': {
+                'kind': 'confirmation_unavailable',
+                'resource': 'pwm',
+                'write_acknowledged': true,
+                'retryable': false,
+              },
+            },
+          }),
+          200,
+        );
+      }),
+    );
+    await expectLater(
+      peer.setPwm(0, 70, expectedTarget: peer.targetStamp),
+      throwsA(isA<ConfirmationUnavailable>()),
+    );
+    expect(writes, 1);
+    expect(peer.online, true);
+    expect(peer.pwmReadbackFresh, false);
+    expect(objects(peer.pwmValues['channels']).single['logical_percent'], 42);
+    peer.dispose();
+  });
+  test('expert PWM command fences pending pre-write reads without clearing last observation', () async {
+    final gate = Completer<http.Response>();
+    final peer = PeerSession(controller: true);
+    prepare(peer);
+    peer.pwmValues = values(42);
+    peer.pwmUpdated = DateTime.now();
+    peer.transport = PeerTransport(
+      'http://fixture',
+      client: MockClient((request) => gate.future),
+    );
+    final read = peer.refreshPwm();
+    await Future<void>.delayed(Duration.zero);
+    final write = peer.beginPwmCommand(peer.targetStamp);
+    gate.complete(
+      http.Response(
+        jsonEncode({
+          'available': true,
+          'channels': [
+            {'channel': 0, 'logical_percent': 10},
+          ],
+        }),
+        200,
+      ),
+    );
+    await read;
+    expect(objects(peer.pwmValues['channels']).single['logical_percent'], 42);
+    expect(peer.pwmReadbackFresh, false);
+    peer.finishPwmCommand(write, peer.generation);
+    peer.dispose();
+  });
   testWidgets(
     'protected PWM automation preserves fractional percentage and receipt schema',
     (tester) async {

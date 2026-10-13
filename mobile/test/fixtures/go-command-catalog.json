@@ -1,0 +1,335 @@
+[
+  {
+    "name": "clear",
+    "usage": "clear",
+    "summary": "clear the interactive console",
+    "group": "Console"
+  },
+  {
+    "name": "audio",
+    "usage": "audio list | audio play CUE",
+    "summary": "list or play a headless local host sound effect",
+    "group": "Other"
+  },
+  {
+    "name": "quit",
+    "aliases": [
+      "exit"
+    ],
+    "usage": "quit|exit",
+    "summary": "close the interactive controller application",
+    "group": "Console"
+  },
+  {
+    "name": "config",
+    "usage": "config get ui.app_title | config set ui.app_title VALUE",
+    "summary": "inspect or update supported watched host settings",
+    "group": "Other"
+  },
+  {
+    "name": "program-state",
+    "aliases": [
+      "run-state"
+    ],
+    "usage": "program-state [running [REASON...]|idle] | program-state set OWNER idle|running [REASON...]",
+    "summary": "inspect or set the host-owned Idle/Running application state",
+    "group": "PC and operating system"
+  },
+  {
+    "name": "ports",
+    "usage": "ports",
+    "summary": "list serial ports with VID/PID",
+    "group": "Connection and telemetry"
+  },
+  {
+    "name": "discover",
+    "usage": "discover [mdns dns-sd ssdp upnp ws-discovery broadcast netbios]",
+    "summary": "discover peer PCController hosts on the local network",
+    "group": "Other"
+  },
+  {
+    "name": "port-process",
+    "aliases": [
+      "port-owner"
+    ],
+    "usage": "port-process",
+    "summary": "show the exact process currently holding the selected serial port",
+    "group": "Other"
+  },
+  {
+    "name": "open",
+    "usage": "open [PORT]",
+    "summary": "open explicitly or auto-detect by HELLO",
+    "group": "Connection and telemetry"
+  },
+  {
+    "name": "close",
+    "usage": "close",
+    "summary": "close and pause auto-reconnect",
+    "group": "Connection and telemetry"
+  },
+  {
+    "name": "reconnect",
+    "usage": "reconnect",
+    "summary": "resume authenticated auto-reconnect",
+    "group": "Connection and telemetry"
+  },
+  {
+    "name": "hello",
+    "usage": "hello",
+    "summary": "query and verify device identity",
+    "group": "Connection and telemetry"
+  },
+  {
+    "name": "status",
+    "aliases": [
+      "st"
+    ],
+    "usage": "status",
+    "summary": "query complete measurements and I/O state",
+    "group": "Connection and telemetry"
+  },
+  {
+    "name": "event",
+    "usage": "event latest | event wait [KIND] [TIMEOUT]",
+    "summary": "wait for an immediate door/key/RF/macro/device event",
+    "group": "Connection and telemetry"
+  },
+  {
+    "name": "voltage",
+    "usage": "voltage",
+    "summary": "read supply and INA219 bus voltage",
+    "group": "Other"
+  },
+  {
+    "name": "current",
+    "usage": "current",
+    "summary": "read INA219 current",
+    "group": "Other"
+  },
+  {
+    "name": "temp",
+    "aliases": [
+      "temperature"
+    ],
+    "usage": "temp [list|scan]",
+    "summary": "read temperatures and stable sensor identities",
+    "group": "Connection and telemetry"
+  },
+  {
+    "name": "stream",
+    "usage": "stream PERIOD_MS",
+    "summary": "set STATUS stream period; zero disables",
+    "group": "Connection and telemetry"
+  },
+  {
+    "name": "message",
+    "usage": "message TARGETS TYPE TEXT",
+    "summary": "deliver a bounded notification to capability-selected receivers",
+    "group": "Other"
+  },
+  {
+    "name": "settings",
+    "usage": "settings | settings decimals VOLTAGE CURRENT | settings export-live | settings color INDEX | settings motion always|closed|open|never | settings motion-break 1..255 | settings motion-exit-hold SECONDS | settings audio door|relay on|off | settings set FLAGS LIGHT ON OFF DISPLAY_OPEN DISPLAY_CLOSED STATUS OUTPUT_PERSISTENCE STREAM DEFAULT_PAGE SAVE_LAST STATUS_COLOR VOLTAGE_DECIMALS CURRENT_DECIMALS MOTION_EXIT_HOLD_SECONDS MOTION_BREAK_MS RELAY_RESTORE_MASK",
+    "summary": "query or update the firmware-owned EEPROM settings",
+    "group": "Board configuration and menus"
+  },
+  {
+    "name": "menu",
+    "usage": "menu list|current|layout [reset|set MASK PAGE...]|show PAGE|hide PAGE|move PAGE RANK|order PAGE...|page PAGE|prev|next|dec|inc",
+    "summary": "navigate stable page IDs or inspect/configure persistent menu layout",
+    "group": "Board configuration and menus"
+  },
+  {
+    "name": "relay",
+    "usage": "relay N on|off|toggle | relay side left|right stop|up|down | relay off | relay test [MS]",
+    "summary": "control safe relay outputs and side motion",
+    "group": "Outputs and front panel"
+  },
+  {
+    "name": "estop",
+    "usage": "estop status|on|off",
+    "summary": "lock or release all effect, motion, relay, and PWM admission",
+    "group": "Other"
+  },
+  {
+    "name": "pwm",
+    "usage": "pwm get|off|set CHANNEL PERCENT|raw CHANNEL VALUE|configure CHANNEL TYPE CURVE [GAMMA] [ICON]",
+    "summary": "control logical brightness through per-channel curves or exact raw PWM",
+    "group": "Outputs and front panel"
+  },
+  {
+    "name": "rgb",
+    "usage": "rgb R G B [BRIGHTNESS] | rgb effect list|play|wait|stop|status ...",
+    "summary": "set status RGB color or stream a configured flash/breathe effect",
+    "group": "Outputs and front panel"
+  },
+  {
+    "name": "strip",
+    "usage": "strip config COUNT | frame RGBHEX | rainbow [COUNT [FPS]] | effect list | effect play NAME [COUNT [FPS]] | stop | status | pixel N R G B [BRIGHTNESS] | fill R G B [BRIGHTNESS] | clear",
+    "summary": "stream exact RGB frames or a rolling rainbow to 1..100 addressable LEDs",
+    "group": "Outputs and front panel"
+  },
+  {
+    "name": "buzzer",
+    "usage": "buzzer FREQUENCY_HZ DURATION_MS | buzzer status | buzzer path board|host|both|none",
+    "summary": "play a tone or select board/PC buzzer routing",
+    "group": "Outputs and front panel"
+  },
+  {
+    "name": "melody",
+    "usage": "melody list|create NAME NOTE...|delete NAME|play NAME [REPEATS]|wait NAME [REPEATS]|stop|status",
+    "summary": "stream a reusable configured melody without filling the MCU queue",
+    "group": "Outputs and front panel"
+  },
+  {
+    "name": "silent",
+    "usage": "silent status|on|off | silent board|host|both status|on|off",
+    "summary": "control independent board and host buzzer silence",
+    "group": "Outputs and front panel"
+  },
+  {
+    "name": "display",
+    "usage": "display segments|lcd|both [--speed 220ms] [--duration 5s] [--repeat once|loop|interval] [--interval 30s] [--scroll] [--] [TEXT]",
+    "summary": "send arbitrary timed text; long segment messages marquee automatically",
+    "group": "Board configuration and menus"
+  },
+  {
+    "name": "macro",
+    "usage": "macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|rename NAME_OR_ID NAME|category NAME_OR_ID CATEGORY|delete NAME_OR_ID|record start|start-mcu|start-board|import-board NAME [CATEGORY [COLOR]]|record status|record save|record discard|buffer clear|play NAME_OR_ID [host|mcu]|status|monitor|cancel [keep]",
+    "summary": "compatibility name for recorded effects and timed sequences",
+    "group": "RF, macros and automation"
+  },
+  {
+    "name": "effect",
+    "usage": "effect list|inspect REF|play REF|create|update|upsert-json|rename|category|delete|record|status|cancel",
+    "summary": "discover, design, record, edit and run PCController-owned effects",
+    "group": "Other"
+  },
+  {
+    "name": "os",
+    "usage": "os status|facts [PROFILE|list]|policy|key KEY [HOLD_MS] | os virtual enable|disable|allow|deny [KEY] | os power ACTION CONFIRMATION | os power-policy enable|disable|allow|deny [ACTION] | os brightness get|set VALUE | os brightness-policy enable|disable|range MIN MAX",
+    "summary": "inspect the PC or invoke explicitly policy-gated OS actions",
+    "group": "PC and operating system"
+  },
+  {
+    "name": "automation",
+    "usage": "automation list|run NAME",
+    "summary": "list or manually run host JSON event-action rules",
+    "group": "RF, macros and automation"
+  },
+  {
+    "name": "board-automation",
+    "aliases": [
+      "mcu-automation"
+    ],
+    "usage": "board-automation list | board-automation add EVENT EVENT_VALUE EVENT_MASK ACTION TARGET VALUE EXTRA [on|off] | board-automation edit ID EVENT EVENT_VALUE EVENT_MASK ACTION TARGET VALUE EXTRA [on|off] | board-automation remove ID | board-automation clear",
+    "summary": "list or transactionally manage board-owned offline rules",
+    "group": "Other"
+  },
+  {
+    "name": "rf",
+    "usage": "rf send ... | learn [SEC] | cancel | list | remove ID|all | map ID ACTION ...",
+    "summary": "send, learn, list, remove, and map 433 MHz controls",
+    "group": "RF, macros and automation"
+  },
+  {
+    "name": "i2c",
+    "usage": "i2c scan|read|write|transfer|release|lcd",
+    "summary": "scan or use the cooperative host-owned I2C bus",
+    "group": "Outputs and front panel"
+  },
+  {
+    "name": "reset",
+    "usage": "reset lines [PORT]|app|bootloader",
+    "summary": "pulse DTR or request a device reset",
+    "group": "Protocol and diagnostics"
+  },
+  {
+    "name": "query",
+    "aliases": [
+      "command"
+    ],
+    "usage": "query OPCODE RESPONSE_OPCODE [PAYLOAD_HEX]",
+    "summary": "send a generic native request",
+    "group": "Protocol and diagnostics"
+  },
+  {
+    "name": "opcode",
+    "usage": "opcode OPCODE [PAYLOAD_HEX] [--expect RESPONSE_OPCODE]",
+    "summary": "exchange an opaque versionless opcode (ACK expected by default)",
+    "group": "Other"
+  },
+  {
+    "name": "write",
+    "usage": "write HEX_BYTES",
+    "summary": "write raw serial bytes",
+    "group": "Protocol and diagnostics"
+  },
+  {
+    "name": "board",
+    "usage": "board initialize [--name NAME] [...] | board blank --confirm NAME [...] | board name [get|set NAME|clear]",
+    "summary": "provision, securely blank, or name a board",
+    "group": "Other"
+  },
+  {
+    "name": "driver",
+    "usage": "driver usbasp status|ensure|zadig",
+    "summary": "inspect or repair the Windows USBasp driver",
+    "group": "Other"
+  },
+  {
+    "name": "toolchain",
+    "usage": "toolchain bootstrap|sync|profile|features|compile SKETCH [--firmware-feature NAME ...|--no-firmware-features]|core-info|install-bootloader [PORT]",
+    "summary": "bootstrap or synchronize the firmware build/programming toolchain",
+    "group": "Firmware and bootloader"
+  },
+  {
+    "name": "boot",
+    "usage": "boot probe|info|metadata|backup DIR|read FILE|write FILE|verify FILE|start [PORT]",
+    "summary": "temporarily hand the UART to Urboot/Urclock, then reconnect the app",
+    "group": "Firmware and bootloader"
+  },
+  {
+    "name": "program",
+    "usage": "program flash HEX [PORT] [--method urclock|usbasp] [--deployment production|development] [--reinitialize-eeprom] | program recover HEX [PORT] | program abandon TARGET_SHA256 ABANDON | program compile SKETCH [--firmware-feature NAME ...|--no-firmware-features] | program OPERATION METHOD PATH [PORT]",
+    "summary": "guarded backup-then-flash, or non-write programmer diagnostics",
+    "group": "Firmware and bootloader"
+  },
+  {
+    "name": "host-menu",
+    "usage": "host-menu list|directory|content NODE|set REF FIELD VALUE|add NODE ID LABEL TITLE [PARENT]|override STABLE LABEL TITLE [PARENT]|remove REF|open [ID]|status|key K1..K4 PHASE|refresh|close",
+    "summary": "control HOST-owned front-panel menus",
+    "group": "Board configuration and menus"
+  },
+  {
+    "name": "hotkeys",
+    "usage": "hotkeys status",
+    "summary": "inspect the active system-wide controller hotkey bindings",
+    "group": "Other"
+  },
+  {
+    "name": "keyboard",
+    "usage": "keyboard status|list|enable|disable|stop",
+    "summary": "inspect or control the primary low-level PC keyboard hook",
+    "group": "PC and operating system"
+  },
+  {
+    "name": "bridge",
+    "usage": "bridge list | bridge call PEER METHOD [PARAMS_JSON]",
+    "summary": "inspect or call authenticated remote controller hosts",
+    "group": "PC and operating system"
+  },
+  {
+    "name": "peer-update",
+    "usage": "peer-update host PEER ARTIFACT_SHA256 [IDEMPOTENCY_KEY]",
+    "summary": "transfer a verified host artifact and ask the peer coordinator to upgrade",
+    "group": "Other"
+  },
+  {
+    "name": "webhook",
+    "usage": "webhook status | pending [LIMIT] | dead [LIMIT] | replay DELIVERY_ID|all CONFIRM | clear dead DELIVERY_ID|all CONFIRM",
+    "summary": "inspect and operate the durable outbound-webhook delivery queue",
+    "group": "Other"
+  }
+]

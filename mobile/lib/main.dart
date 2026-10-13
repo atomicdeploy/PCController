@@ -28,6 +28,7 @@ import 'unified/output_organization.dart';
 import 'unified/controller_dialog.dart';
 import 'unified/endpoint_dialog.dart';
 import 'unified/cue_editor.dart';
+import 'unified/go_tools.dart';
 
 void main() {
   LicenseRegistry.addLicense(() async* {
@@ -1086,6 +1087,21 @@ class _ControllerHomeState extends State<ControllerHome>
                   icon: const Icon(Icons.front_hand_outlined),
                   onPressed: () =>
                       unawaited(boardCommand('estop on', safetyStop: true)),
+                ),
+              if (board.fresh)
+                IconButton(
+                  tooltip: 'Controller tools',
+                  icon: const Icon(Icons.terminal),
+                  onPressed: busy
+                      ? null
+                      : () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => GoToolsPage(
+                              session: board,
+                              preferences: preferences,
+                            ),
+                          ),
+                        ),
                 ),
               IconButton(
                 tooltip: 'Discover peers',
@@ -2462,12 +2478,38 @@ class _ControllerHomeState extends State<ControllerHome>
     }
   }
 
+  Future<void> sendDisplayOptions(bool lcdAvailable) async {
+    final owner = board.targetStamp, peer = board.transport;
+    final params = await showDialog<Json>(
+      context: context,
+      builder: (_) => GoDisplayDialog(
+        text: displayText.text,
+        target: displayTarget,
+        lcd: lcdAvailable,
+      ),
+    );
+    if (params == null || !mounted) return;
+    await perform('Display', () async {
+      if (!foreground ||
+          peer == null ||
+          board.targetStamp != owner ||
+          !board.boardReady ||
+          object(board.state['emergency_stop'])['active'] == true) {
+        throw const Rejected(
+          'Display target changed or emergency stop is active.',
+        );
+      }
+      return peer.rpc('controller.display.send', params);
+    });
+  }
+
   Widget frontPanel() {
     final panel = object(board.state['front_panel']), ready = board.boardReady;
     final full = ready && board.state['have_front_panel'] == true;
     final lcdAvailable = full && panel['lcd_available'] == true;
     final validDisplay =
-        displayTarget == 'segments' || (displayTarget == 'lcd' && lcdAvailable);
+        displayTarget == 'segments' ||
+        (['lcd', 'both'].contains(displayTarget) && lcdAvailable);
     return grid([
       if (ready &&
           (full ||
@@ -2545,6 +2587,8 @@ class _ControllerHomeState extends State<ControllerHome>
             const DropdownMenuItem(value: 'segments', child: Text('7-segment')),
             if (lcdAvailable)
               const DropdownMenuItem(value: 'lcd', child: Text('LCD')),
+            if (lcdAvailable)
+              const DropdownMenuItem(value: 'both', child: Text('Both')),
           ],
           onChanged: (value) {
             if (value != null) setState(() => displayTarget = value);
@@ -2554,18 +2598,14 @@ class _ControllerHomeState extends State<ControllerHome>
         TextField(
           controller: displayText,
           onChanged: (_) => setState(() {}),
-          maxLength: 240,
+          maxLength: 40,
           decoration: const InputDecoration(labelText: 'Message'),
         ),
         action(
-          'Show for 5 seconds',
+          'Timing & send',
           Icons.send,
-          ready && validDisplay && displayText.text.trim().isNotEmpty
-              ? () => unawaited(
-                  boardCommand(
-                    'display $displayTarget --duration 5s --repeat once -- ${jsonEncode(displayText.text)}',
-                  ),
-                )
+          ready && validDisplay
+              ? () => unawaited(sendDisplayOptions(lcdAvailable))
               : null,
         ),
       ]),
