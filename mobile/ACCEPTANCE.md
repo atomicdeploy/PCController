@@ -232,11 +232,9 @@ MNDP fixture. Their current contracts were repaired with owner-scoped changes.
 Further full inherited suites/CI were not repeated during this iteration. No
 all-green CI or all-device acceptance claim is made.
 
-Deployment remains held for design review. The tablet still has 0.1.3+4; the phone
-still has 0.1.2+3 after its prior 0.1.3 installer-space rejection. The phone's free
-space changed since that attempt, but no new installation was attempted. Both
-screens were locked at the latest check. Standalone shared-core packaging/USB,
-full native/Web parity and physical mirroring/peer/firmware gates remain open.
+That source checkpoint preceded the mobile bug-priority pass and the direct
+saved-drafts confirmation recorded below. Design, unlocked UI, standalone shared
+core/USB and physical mirroring/peer/firmware acceptance remain open.
 
 ## Mobile bug priority: MOSFET setpoints and relay layout
 
@@ -253,8 +251,24 @@ are preserved; ungrouped MOSFET controls use the PWM group. Package-sharing
 network changes refresh actual interfaces independently of auto-connect choices.
 
 Eight focused pure widget/transport/layout regressions passed, alongside the
-controlled renderer and analyzer. Cafe read-only queries reported PWM available
-with valid channel values; no physical output mutation was performed. Screenshots
-are recorded-value renderer evidence. A fresh APK is being prepared; both old
-Android processes were running behind keyguard, and their old local API was not
-listening, so unsaved draft readiness could not be verified before replacement.
+controlled renderer, analyzer and one ARM64 release APK build. Cafe read-only
+queries reported PWM available with valid channel values; no physical output
+mutation was performed. Screenshots are recorded-value renderer evidence.
+
+David directly confirmed "All drafts saved; safe to update" for both Android
+devices. The APK is 0.1.4+5, 19,861,439 bytes, development signed, SHA-256
+`05100434e1695e6e3e2e8bc7d62bf5230c2f9c32f6e5ee1587f2b73e44504641`,
+built from UI checkpoint `7200fe3b` atop the coordinated transport fixes.
+
+| Device | Actual delivery | Installed identity |
+| --- | --- | --- |
+| Samsung SM-X906B / R52T60C6V9B | Initial streamed install failed to load/parse its temporary base.apk; one ordinary non-streamed `install -r` succeeded, retaining data. ControllerLauncher started. | 0.1.4 / code 5; installed base.apk SHA-256 matches the deliverable. |
+| Samsung SM-S908E / R5CT44LZ42K | In-place install rejected: Requested internal only, but not enough space. 439,388 KiB available; vendor low-storage threshold 1 GiB. No unrelated data/cache was removed and no reserve bypass was used. | Still 0.1.2 / code 3; base.apk retains its prior `e298b2d2...54880df` hash. |
+
+Both distinct devices were launched through the ordinary ControllerLauncher and
+remain locked. Invalid-token ordered Intent requests reached their Dart routers
+and returned JSON-RPC `-32001`. This proves rejection/routing, not authorized
+transport, visual/touch, native launcher/task, peer APK, audible/segment timing or
+physical PWM acceptance. The phone needs available storage before another update;
+the continuous improvement goal and all unfinished user acceptance gates remain
+active. No full suites, extra APK builds or CI were run for this delivery.
