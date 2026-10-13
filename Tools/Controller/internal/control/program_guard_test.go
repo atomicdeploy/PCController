@@ -129,6 +129,9 @@ func TestDevelopmentUploadDisconnectWhileWaitingForProgrammingLock(t *testing.T)
 
 func TestProgramFlashUsesAutomaticBackupGate(t *testing.T) {
 	root := t.TempDir()
+	// This fixture mocks AVRDUDE CLI arguments. Do not let an adapter installed
+	// on the workstation select the unrelated library command dialect instead.
+	t.Setenv("PATH", root)
 	firmware := filepath.Join(root, "firmware.hex")
 	const image = ":020000000102FB\n:00000001FF\n"
 	if err := os.WriteFile(firmware, []byte(image), 0o600); err != nil {
