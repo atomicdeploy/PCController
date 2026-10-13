@@ -26,6 +26,10 @@
   suffixes. Finish, test, merge, and delete them promptly; do not delete any
   branch until its unique commits and dirty work are represented on GitHub and
   proven merged or deliberately superseded on the corresponding PR/issue.
+- An ancestor/merged-PR marker is not proof that a historical fix still exists
+  in current functional source. Compare the actual behavior/content and retain
+  focused regression tests when reconciling rewritten or relocated firmware;
+  provenance-only merges must not be reported as restored functionality.
 
 ## Digitalogic interface design
 
