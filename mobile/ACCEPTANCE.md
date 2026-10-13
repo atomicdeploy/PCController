@@ -360,3 +360,22 @@ semantic-caption fixes. Android delivery and human/physical acceptance are separ
 
 A short 1280x400 viewport exposed a separate vertical activity-rail overflow;
 that small-height responsive-layout gate remains open.
+
+### Combined 0.1.6 delivery
+
+The ARM64 APK built from `884f1a8167d58c474df67dc16b4d40c95f144124` is
+0.1.6/code 7, 19,926,839 bytes, SHA-256
+`e4e2548d280aef3a84a70dc7a2062c32a229557518569e1e1ed6f20f3098ac5b`.
+Its signature verified with the same inherited Android development certificate.
+After the fresh direct confirmation "All drafts saved; update the tablet", one
+ordinary non-streamed in-place install succeeded on SM-X906B/R52T60C6V9B.
+Its installed version/code and base.apk hash match the deliverable. Data was retained;
+the ordinary launcher started and an invalid-token read-only Intent reached Dart
+and returned -32001. The tablet was locked at verification, so these receipts do
+not prove real drag/rename, peer metadata persistence, visual or physical acceptance.
+
+SM-S908E/R5CT44LZ42K remained 0.1.2/code 3 with its earlier APK hash and 504,996 KiB
+available, below the previously verified 1 GiB vendor low-storage threshold. No
+repeat install, data/cache removal or reserve bypass was performed. Its live
+unlocked use was left intact. The continuous goal and unfinished acceptance gates
+remain active; no full suites or CI iteration was run for this package.
