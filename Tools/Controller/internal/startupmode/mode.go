@@ -41,12 +41,13 @@ func Command(args []string) string {
 
 func TUI(args []string) bool { return Command(args) == "tui" }
 
-// BackgroundWeb is an explicitly UI-less host, not an interactive Web command.
+// BackgroundWeb disables the terminal explicitly. Browser/tray preferences
+// do not disable the TUI: even a --no-open --no-tray host has a terminal UI.
 func BackgroundWeb(args []string) bool {
 	if Command(args) != "web" {
 		return false
 	}
-	var noOpen, noTray bool
+	var noTUI bool
 	for index := 0; index < len(args); index++ {
 		flag := args[index]
 		if flag == "--config" || flag == "--app-name" || flag == "--tagline" || flag == "--app-tagline" {
@@ -56,15 +57,11 @@ func BackgroundWeb(args []string) bool {
 		switch flag {
 		case "--help", "-h":
 			return false
-		case "--no-open", "--no-open=true":
-			noOpen = true
-		case "--no-open=false":
-			noOpen = false
-		case "--no-tray", "--no-tray=true":
-			noTray = true
-		case "--no-tray=false":
-			noTray = false
+		case "--no-tui", "--no-tui=true":
+			noTUI = true
+		case "--no-tui=false":
+			noTUI = false
 		}
 	}
-	return noOpen && noTray
+	return noTUI
 }

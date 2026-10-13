@@ -15,13 +15,15 @@ func TestTUIModeExcludesMachineReadableAndBackgroundCommands(t *testing.T) {
 	}
 }
 
-func TestBackgroundWebRequiresBothExplicitFlags(t *testing.T) {
+func TestBackgroundWebRequiresExplicitNoTUI(t *testing.T) {
 	for _, test := range []struct {
 		args []string
 		want bool
 	}{
-		{[]string{"web", "--no-open", "--no-tray"}, true},
-		{[]string{"--config", "custom.json", "web", "--no-open=true", "--no-tray=true"}, true},
+		{[]string{"web", "--no-open", "--no-tray"}, false},
+		{[]string{"--config", "custom.json", "web", "--no-tui=true"}, true},
+		{[]string{"web", "--no-tui"}, true},
+		{[]string{"web", "--no-tui", "--no-tui=false"}, false},
 		{[]string{"web", "--no-open"}, false},
 		{[]string{"web", "--no-open", "--no-tray", "--no-tray=false"}, false},
 		{[]string{"web", "--no-open", "--no-tray", "--help"}, false},

@@ -31,6 +31,10 @@ func prepareStartupPresentation(args []string, output io.Writer) {
 	}
 	if startupmode.Command(args) == "web" {
 		explicit := startupmode.BackgroundWeb(args)
+		if !explicit && terminalOutput(output) && terminalOutput(os.Stdin) {
+			writeTUIStartup(output, true, productidentity.DefaultAppTitle())
+			return
+		}
 		_, _ = consolewindow.HideBackground(explicit)
 		// The previous updater may still share its classic console until the
 		// 10-second health commit. One bounded recheck handles that old launcher
