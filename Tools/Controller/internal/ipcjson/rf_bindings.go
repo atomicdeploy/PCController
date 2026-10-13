@@ -80,13 +80,14 @@ func (service *Service) rfCatalog(ctx context.Context, raw json.RawMessage) (any
 	}
 	config := service.hostConfig()
 	snapshot := service.Client.Snapshot()
+	peripherals := service.peripheralSettings()
 	result := map[string]any{
 		"bindings": rfBindings(config), "learning": service.Client.RFLearningState(),
 		"activity": service.Client.RFActivity(), "keyboard": config.OSActions.VirtualKeys,
 		"connected": snapshot.Connected, "hostname": "", "entries": []any{},
 		"gestures":     []string{"down", "up", "click", "double", "hold", "repeat"},
 		"action_types": []string{"app", "control", "board", "effect", "rf", "virtual-key", "host", "script", "emit"},
-		"effects":      snapshot.Effects, "peripherals": service.peripheralSettings(),
+		"effects":      snapshot.Effects, "peripherals": peripherals,
 	}
 	hostname, _ := os.Hostname()
 	result["hostname"] = hostname
@@ -97,7 +98,7 @@ func (service *Service) rfCatalog(ctx context.Context, raw json.RawMessage) (any
 		{"action": "menu", "targets": []string{"prev", "next", "dec", "inc"}, "behaviors": []string{}},
 		{"action": "relay", "targets": []string{"5", "6", "7", "8"}, "behaviors": []string{"press", "toggle", "momentary"}},
 		{"action": "side", "targets": []string{"a", "b"}, "behaviors": []string{"up", "down", "stop"}},
-		{"action": "pwm", "targets": []string{"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"}, "behaviors": []string{"press", "toggle", "momentary"}},
+		{"action": "pwm", "targets": []string{"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"}, "behaviors": []string{"press", "toggle", "momentary"}, "behavior_labels": map[string]string{"press": "Press · toggle 0/100%", "toggle": "Toggle 0/100%", "momentary": "Hold · full on, off after 350 ms silence"}},
 	}
 	instances := []hostui.AppInstance{}
 	if service.AppInstances != nil {
@@ -108,8 +109,9 @@ func (service *Service) rfCatalog(ctx context.Context, raw json.RawMessage) (any
 		entries, err := service.Client.ListLearnedDetailed(ctx)
 		if err != nil {
 			result["board_error"] = err.Error()
+			result["board_error_detail"] = dispatchRPCError(err)
 		} else {
-			result["entries"] = entries
+			result["entries"] = enrichRFCatalogEntries(entries, peripherals.Controls, service.Client.RFLastSeen)
 			result["entries_sampled"] = true
 		}
 	}
@@ -134,6 +136,9 @@ func (service *Service) putRFBinding(raw json.RawMessage) (any, error) {
 	}
 	if len(rule.Name) > 64 || strings.TrimSpace(rule.Name) == "" {
 		return nil, errors.New("RF binding name must be 1..64 bytes")
+	}
+	if err := validateRFControlActions(rule.Actions, service.peripheralSettings().Controls); err != nil {
+		return nil, err
 	}
 	if service.UpdateHostConfig == nil {
 		return nil, errors.New("persistent host configuration is unavailable")
@@ -188,6 +193,31 @@ func (service *Service) putRFBinding(raw json.RawMessage) (any, error) {
 	}
 	service.Client.EmitHostEvent("rf.bindings.changed", "RF assignment saved")
 	return rfBindings(service.hostConfig()), nil
+}
+
+// Resolve the same catalog used by the assignment editor without executing any
+// action. Invalid drafts must not reach persistent configuration or enable keys.
+func validateRFControlActions(actions []appconfig.AutomationAction, controls []appconfig.ControlDescriptor) error {
+	for index, action := range actions {
+		if !strings.EqualFold(strings.TrimSpace(action.Type), "control") {
+			continue
+		}
+		reason := ""
+		if strings.TrimSpace(action.ActionID) == "" {
+			reason = "required"
+		} else if len(action.ActionID) > 128 || strings.ContainsAny(action.ActionID, " \x00\r\n") {
+			reason = "invalid_format"
+		} else if _, _, advertised := advertisedSemanticAction(controls, action.ActionID); !advertised {
+			reason = "not_advertised"
+		}
+		if reason != "" {
+			return &RPCError{Code: -32602, Message: "Choose an available control action before saving this assignment", Data: map[string]any{
+				"kind": "validation_error", "resource": "rf_binding",
+				"field": fmt.Sprintf("binding.actions[%d].action_id", index), "reason": reason,
+			}}
+		}
+	}
+	return nil
 }
 
 func (service *Service) removeRFBinding(raw json.RawMessage) (any, error) {

@@ -2234,6 +2234,12 @@ func (client *Client) RFActivity() []Event {
 	return result
 }
 
+// RFLastSeen returns genuine board reception time for this exact waveform.
+// Zero means not observed in the current host session, not a guessed date.
+func (client *Client) RFLastSeen(code uint32, bits, protocol byte) time.Time {
+	return client.runtime.RFLastSeen(code, bits, protocol)
+}
+
 // CancelRFLearn ends the current learning session with an explicit reason.
 func (client *Client) CancelRFLearn(ctx context.Context) error {
 	return client.runtime.CancelRFLearning(ctx, "cancelled through API")
