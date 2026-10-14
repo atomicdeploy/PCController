@@ -1921,6 +1921,13 @@ func (service *Service) dispatch(
 }
 
 func dispatchRPCError(err error) *RPCError {
+	var persistence *control.PWMRecallPersistenceError
+	if errors.As(err, &persistence) {
+		return &RPCError{Code: -32010, Message: err.Error(), Data: map[string]any{
+			"kind": "persistence_failed", "resource": "pwm_recall", "write_acknowledged": true,
+			"readback_confirmed": true, "retryable": false,
+		}}
+	}
 	var confirmation *pwmConfirmationError
 	var actionConfirmation *control.PWMActionConfirmationError
 	if errors.As(err, &confirmation) || errors.As(err, &actionConfirmation) {

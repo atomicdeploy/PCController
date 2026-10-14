@@ -1927,6 +1927,12 @@ func (client *Client) ApplyPWMAction(ctx context.Context, generation uint64, cha
 	return values, nil
 }
 
+// ApplyPWMAllOff is the confirmed operator route, including configured recall
+// persistence. AllPWMOff remains the native zeroing primitive for safe cleanup.
+func (client *Client) ApplyPWMAllOff(ctx context.Context, generation uint64) (PWMValues, error) {
+	return client.runtime.ApplyPWMAllOff(ctx, generation)
+}
+
 // SetPWMChannel controls a native logical PWM channel 0..15 at 0..4095.
 func (client *Client) SetPWMChannel(
 	ctx context.Context,
