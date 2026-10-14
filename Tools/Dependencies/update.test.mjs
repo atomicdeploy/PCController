@@ -31,6 +31,26 @@ import {
 const here = dirname(fileURLToPath(import.meta.url))
 const repo = resolve(here, '..', '..')
 
+test('Windows candidate validation provisions actual libavrdude parser paths before building', () => {
+  for (const filename of ['host.yml', 'update-dependencies.yml']) {
+    const workflow = readFileSync(join(repo, '.github', 'workflows', filename), 'utf8')
+    const start = workflow.indexOf('choco install winflexbison3 --yes --no-progress')
+    assert.ok(start >= 0, `${filename} must provision parser tools`)
+    const step = workflow.slice(start, workflow.indexOf('\n      - name:', start))
+    assert.match(step, /if \(\$LASTEXITCODE -ne 0\) \{ throw/u)
+    for (const [variable, executable] of [['FLEX', 'win_flex'], ['BISON', 'win_bison']]) {
+      assert.ok(step.includes(`Get-Command ${executable}.exe -ErrorAction Stop`))
+      assert.ok(step.includes(`${variable}_EXECUTABLE=`))
+    }
+    assert.match(step, /\$env:GITHUB_ENV/u)
+    if (filename === 'update-dependencies.yml') {
+      assert.ok(start < workflow.indexOf('id: candidate'), 'parser setup must precede candidate validation')
+      assert.match(workflow.slice(workflow.lastIndexOf('\n      - name:', start), start),
+        /if: env\.CHECK_ONLY != 'true'/u)
+    }
+  }
+})
+
 test('Windows command scripts use an explicit ComSpec command line while native commands stay direct', () => {
   const commandProcessor = 'C:\\Windows\\System32\\cmd.exe'
   assert.deepEqual(
