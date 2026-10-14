@@ -267,6 +267,8 @@ type Runtime struct {
 	pwmUpdated             time.Time
 	pwmRecall              [16]PWMRecallValue
 	pwmRecallGeneration    uint64
+	pwmRecallOptionsMu     sync.RWMutex
+	pwmRecallOptions       func() CommandOptions
 	motion                 MotionSnapshot
 	motionRevision         uint64
 	motionIntentToken      [2]uint64

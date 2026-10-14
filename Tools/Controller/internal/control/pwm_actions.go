@@ -243,7 +243,80 @@ func (runtime *Runtime) ApplyPWMAction(ctx context.Context, generation uint64, c
 	if err != nil {
 		return native.PWMValues{}, err
 	}
+	if values.Values[channel] == 0 {
+		snapshot := pwmRecallOwnerSnapshot(runtime)
+		if err := runtime.CommitPWMOffRecall(generation, snapshot.PWMRevision, []byte{channel}); err != nil {
+			return values, err
+		}
+	}
 	// requestAtGeneration already admits the complete readback through the
 	// shared revisioned publisher. Do not emit a duplicate, unrevisioned event.
+	return values, nil
+}
+
+// ApplyPWMAllOff is an explicit operator action. Generic native safety cleanup
+// still bypasses persistence. One confirmed batch produces at most one save.
+func (runtime *Runtime) ApplyPWMAllOff(ctx context.Context, generation uint64) (native.PWMValues, error) {
+	if runtime.options.RequestTimeout <= 0 {
+		return native.PWMValues{}, errors.New("PWM action requires a positive serial request timeout")
+	}
+	ctx, finish := context.WithTimeout(ctx, 3*runtime.options.RequestTimeout)
+	defer finish()
+	runtime.cancelPWMAction()
+	epoch := runtime.pwmActionEpoch.Load()
+	release, err := runtime.acquirePWMAction(ctx)
+	if err != nil {
+		return native.PWMValues{}, err
+	}
+	defer release()
+	ctx, cleanup, err := runtime.bindPWMActionContext(ctx, epoch)
+	if err != nil {
+		return native.PWMValues{}, err
+	}
+	defer cleanup()
+	request := func(opcode byte, expected byte) (native.Frame, error) {
+		bounded, cancel := context.WithTimeout(ctx, runtime.options.RequestTimeout)
+		defer cancel()
+		return runtime.requestAtGeneration(bounded, generation, opcode, nil, expected)
+	}
+	read := func() (native.PWMValues, error) {
+		frame, err := request(native.OpPWMGet, native.OpPWMValues)
+		if err != nil {
+			return native.PWMValues{}, err
+		}
+		values, err := native.ParsePWMValues(frame.Payload)
+		if err == nil {
+			err = validatePWMActionReadback(values)
+		}
+		if err == nil && !values.Available {
+			err = errors.New("PWM driver is unavailable")
+		}
+		return values, err
+	}
+	// Capture current nonzero duty when possible, but a missed preliminary read
+	// never blocks an operator's still-live zeroing request.
+	_, _ = read()
+	if err := ctx.Err(); err != nil {
+		return native.PWMValues{}, err
+	}
+	ack, err := request(native.OpPWMAllOff, native.OpACK)
+	if err != nil {
+		return native.PWMValues{}, err
+	}
+	runtime.publishCommandEvidence(acknowledgedCommandEvidence(ctx, native.OpPWMAllOff, nil, ack))
+	values, err := read()
+	if err != nil {
+		return native.PWMValues{}, &PWMActionConfirmationError{Cause: err}
+	}
+	channels := make([]byte, 0, appconfig.PWMChannelCount)
+	for channel, raw := range values.Values {
+		if raw == 0 {
+			channels = append(channels, byte(channel))
+		}
+	}
+	snapshot := pwmRecallOwnerSnapshot(runtime)
+	if err := runtime.CommitPWMOffRecall(generation, snapshot.PWMRevision, channels); err != nil {
+		return values, err
+	}
 	return values, nil
 }
