@@ -25,6 +25,7 @@ type BoardProfile struct {
 	ExposeRawRelays bool                              `json:"expose_raw_relays,omitempty"`
 	Presentation    map[string]PeripheralPresentation `json:"presentation,omitempty"`
 	Folders         []ChannelFolder                   `json:"folders,omitempty"`
+	PWMRecall       map[string]uint16                 `json:"pwm_recall,omitempty"`
 }
 
 // PeripheralPresentation is mutable operator vocabulary attached to a stable
@@ -94,6 +95,12 @@ func (value Config) validateBoardProfiles() error {
 		}
 		if err := validateChannelFolders(profile.Folders); err != nil {
 			return fmt.Errorf("board_profiles[%q].folders: %w", identity, err)
+		}
+		for key, raw := range profile.PWMRecall {
+			channel, err := ParsePWMChannel(strings.TrimPrefix(key, "pwm."))
+			if err != nil || key != PWMChannelKey(int(channel)) || raw == 0 || raw > PWMMaximumValue {
+				return fmt.Errorf("board_profiles[%q].pwm_recall needs pwm.0..pwm.15 and confirmed duty 1..4095", identity)
+			}
 		}
 		for controlKey, presentation := range profile.Presentation {
 			if controlKey = strings.TrimSpace(controlKey); controlKey == "" || len(controlKey) > 64 || !profileToken(controlKey) {
@@ -184,6 +191,10 @@ func cloneBoardProfiles(source map[string]BoardProfile) map[string]BoardProfile 
 	result := make(map[string]BoardProfile, len(source))
 	for identity, profile := range source {
 		copyProfile := profile
+		copyProfile.PWMRecall = make(map[string]uint16, len(profile.PWMRecall))
+		for key, raw := range profile.PWMRecall {
+			copyProfile.PWMRecall[key] = raw
+		}
 		copyProfile.Folders = append([]ChannelFolder(nil), profile.Folders...)
 		copyProfile.Presentation = make(map[string]PeripheralPresentation, len(profile.Presentation))
 		for key, presentation := range profile.Presentation {

@@ -185,24 +185,28 @@ type rfGestureKey struct {
 
 const (
 	rfHoldAfter        = 600 * time.Millisecond
-	rfReleaseAfter     = 250 * time.Millisecond
+	rfReleaseAfter     = link.RFContinuityGap
 	rfDoubleClickAfter = 400 * time.Millisecond
 )
 
 type rfGestureState struct {
-	firstSeen  time.Time
-	lastSeen   time.Time
-	lastRepeat time.Time
-	held       bool
-	double     bool
-	timer      *time.Timer
-	event      native.DeviceEvent
+	firstSeen         time.Time
+	lastSeen          time.Time
+	lastRepeat        time.Time
+	held              bool
+	double            bool
+	timer             *time.Timer
+	event             native.DeviceEvent
+	firstDeviceMicros uint32
+	deviceTimed       bool
+	wireSession       *link.Session
 }
 
 type rfClickState struct {
-	releasedAt time.Time
-	timer      *time.Timer
-	event      native.DeviceEvent
+	releasedAt  time.Time
+	timer       *time.Timer
+	event       native.DeviceEvent
+	wireSession *link.Session
 }
 
 type connectionEventSignature struct {
@@ -316,6 +320,7 @@ type Runtime struct {
 	nextEventID   uint64
 	eventNotify   chan struct{}
 	rfMu          sync.Mutex
+	rfClockProbe  atomic.Bool
 	rfGestures    map[rfGestureKey]*rfGestureState
 	rfClicks      map[rfGestureKey]*rfClickState
 
@@ -1980,6 +1985,11 @@ func (runtime *Runtime) requestAtGenerationPriority(
 	session := runtime.session
 	runtime.mu.RUnlock()
 	traceEpoch := runtime.pwmTraceAdmission(opcode, payload)
+	if opcode == native.OpPWMSet {
+		if guard, ok := ctx.Value(rfRollGuardKey{}).(func() error); ok {
+			ctx = link.WithRequestWriteGuard(ctx, guard)
+		}
+	}
 	frame, err := session.RequestWithPriority(ctx, priority, opcode, payload, expected...)
 	if err != nil {
 		return native.Frame{}, err
@@ -3275,6 +3285,14 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 						Kind: kind, Text: text, Frame: event.Frame,
 						Source: "board", Target: "host", MessageType: "event",
 					}
+					if parsedDevice.Type == native.EventRFReceived {
+						deviceEvent.RFCode, deviceEvent.RFBits = parsedDevice.RFCode, parsedDevice.RFBits
+						deviceEvent.RFProtocol, deviceEvent.RFPulseUS = parsedDevice.RFProtocol, parsedDevice.RFPulseUS
+						deviceEvent.RFID, deviceEvent.HaveRFID = parsedDevice.RFLearnedID, parsedDevice.RFLearnedID != 0xFF
+						if parsedDevice.Timed {
+							deviceEvent.Metadata = map[string]string{"device_micros": strconv.FormatUint(uint64(parsedDevice.DeviceMicros), 10)}
+						}
+					}
 					if parsedDevice.Type == native.EventAppNavigation {
 						deviceEvent.Target = "app.clients"
 						deviceEvent.Action = "navigate"
@@ -3812,12 +3830,27 @@ func (runtime *Runtime) dispatchBoardAutomation(event native.DeviceEvent) {
 }
 
 func (runtime *Runtime) observeRFGesture(event native.DeviceEvent) {
+	// Capture receptions remain visible, but their delayed releases must not
+	// turn into a newly enabled tap after learning has been stopped.
+	if runtime.RFLearnState().Active {
+		return
+	}
 	now := time.Now()
+	runtime.mu.RLock()
+	wireSession := runtime.session
+	runtime.mu.RUnlock()
+	var wireProgress link.RFClockObservation
+	var haveWireProgress bool
+	if wireSession != nil && event.Timed {
+		wireProgress, haveWireProgress = wireSession.RFReceiveProgress(event.RFCode, event.RFBits, event.RFProtocol)
+	}
 	key := rfGestureKey{
 		code: event.RFCode, bits: event.RFBits, protocol: event.RFProtocol,
 	}
 	gesture := ""
 	var expiredClick *native.DeviceEvent
+	var released *rfReleasedGesture
+	additionalGesture := ""
 	runtime.rfMu.Lock()
 	if runtime.rfGestures == nil {
 		runtime.rfGestures = make(map[rfGestureKey]*rfGestureState)
@@ -3826,15 +3859,31 @@ func (runtime *Runtime) observeRFGesture(event native.DeviceEvent) {
 		runtime.rfClicks = make(map[rfGestureKey]*rfClickState)
 	}
 	state := runtime.rfGestures[key]
-	if state == nil || now.Sub(state.lastSeen) > rfReleaseAfter {
+	continued := state != nil && now.Sub(state.lastSeen) <= rfReleaseAfter
+	if state != nil && state.deviceTimed && event.Timed {
+		continued = uint32(event.DeviceMicros-state.event.DeviceMicros) <= uint32(rfReleaseAfter/time.Microsecond) && state.wireSession == wireSession
+		if haveWireProgress && state.wireSession == wireSession && wireProgress.ContainsReceipt(state.event.DeviceMicros) && wireProgress.ContainsReceipt(event.DeviceMicros) {
+			continued = true
+		}
+	}
+	if !continued {
 		if state != nil && state.timer != nil {
 			state.timer.Stop()
+		}
+		if state != nil {
+			value := runtime.releaseRFStateLocked(key, state)
+			released = &value
 		}
 		double := false
 		if pending := runtime.rfClicks[key]; pending != nil {
 			pending.timer.Stop()
 			delete(runtime.rfClicks, key)
-			if now.Sub(pending.releasedAt) <= rfDoubleClickAfter {
+			withinDouble := now.Sub(pending.releasedAt) <= rfDoubleClickAfter
+			if event.Timed && pending.event.Timed {
+				delta := uint32(event.DeviceMicros - pending.event.DeviceMicros)
+				withinDouble = delta >= uint32(rfReleaseAfter/time.Microsecond) && delta-uint32(rfReleaseAfter/time.Microsecond) <= uint32(rfDoubleClickAfter/time.Microsecond)
+			}
+			if withinDouble {
 				double = true
 			} else {
 				value := pending.event
@@ -3843,19 +3892,34 @@ func (runtime *Runtime) observeRFGesture(event native.DeviceEvent) {
 		}
 		state = &rfGestureState{
 			firstSeen: now, lastSeen: now, lastRepeat: now, event: event,
-			double: double,
+			double:            double,
+			firstDeviceMicros: event.DeviceMicros, deviceTimed: event.Timed,
+		}
+		if event.Timed {
+			state.wireSession = wireSession
+			if haveWireProgress && wireProgress.ContainsReceipt(event.DeviceMicros) {
+				state.firstDeviceMicros = wireProgress.FirstReceiptMicros
+			}
 		}
 		runtime.rfGestures[key] = state
 		gesture = "down"
+		if state.deviceTimed && time.Duration(uint32(event.DeviceMicros-state.firstDeviceMicros))*time.Microsecond >= rfHoldAfter {
+			state.held = true
+			additionalGesture = "hold"
+		}
 	} else {
 		state.lastSeen = now
 		state.event = event
-		if !state.held && now.Sub(state.firstSeen) >= rfHoldAfter {
+		heldFor := now.Sub(state.firstSeen)
+		if state.deviceTimed && event.Timed {
+			heldFor = time.Duration(uint32(event.DeviceMicros-state.firstDeviceMicros)) * time.Microsecond
+		}
+		if !state.held && heldFor >= rfHoldAfter {
 			state.held = true
 			state.lastRepeat = now
 			gesture = "hold"
 		} else if state.held &&
-			now.Sub(state.lastRepeat) >= rfRepeatInterval(now.Sub(state.firstSeen)) {
+			now.Sub(state.lastRepeat) >= rfRepeatInterval(heldFor) {
 			state.lastRepeat = now
 			gesture = "repeat"
 		}
@@ -3867,11 +3931,17 @@ func (runtime *Runtime) observeRFGesture(event native.DeviceEvent) {
 		runtime.finishRFGesture(key, state)
 	})
 	runtime.rfMu.Unlock()
+	if released != nil {
+		runtime.publishRFRelease(*released)
+	}
 	if expiredClick != nil {
 		runtime.publishRFGesture(*expiredClick, "click")
 	}
 	if gesture != "" {
 		runtime.publishRFGesture(event, gesture)
+	}
+	if additionalGesture != "" {
+		runtime.publishRFGesture(event, additionalGesture)
 	}
 }
 
@@ -3884,24 +3954,87 @@ func (runtime *Runtime) finishRFGesture(
 		runtime.rfMu.Unlock()
 		return
 	}
+	if state.wireSession != nil {
+		runtime.mu.RLock()
+		currentOwner := runtime.session == state.wireSession && runtime.sessionUsableLocked()
+		runtime.mu.RUnlock()
+		if !currentOwner {
+			delete(runtime.rfGestures, key)
+			runtime.rfMu.Unlock()
+			return
+		}
+		select {
+		case <-state.wireSession.Done():
+			delete(runtime.rfGestures, key)
+			runtime.rfMu.Unlock()
+			return // A lost source can never produce a toggle on its replacement.
+		default:
+		}
+		progress, known := state.wireSession.RFReceiveProgress(key.code, key.bits, key.protocol)
+		if !known || !progress.ReceiptTimed {
+			// Bounded-cache eviction or an untimed replacement loses the radio
+			// evidence. Host inactivity cannot justify a timed-source Tap or
+			// hold-end, so discard without publishing an action-bearing release.
+			delete(runtime.rfGestures, key)
+			runtime.rfMu.Unlock()
+			return
+		}
+		if progress.ReceiptMicros != state.event.DeviceMicros || !progress.QuietFor(rfReleaseAfter) {
+			if state.timer != nil {
+				state.timer.Stop()
+			}
+			state.timer = time.AfterFunc(50*time.Millisecond, func() { runtime.finishRFGesture(key, state) })
+			if progress.ReceiptMicros == state.event.DeviceMicros && time.Since(progress.ClockSeen) > rfReleaseAfter && runtime.rfClockProbe.CompareAndSwap(false, true) {
+				go runtime.probeRFReleaseClock(state)
+			}
+			runtime.rfMu.Unlock()
+			return // Host inactivity is not proof of radio silence on timed boards.
+		}
+	}
+	// Stop can lose a race with a callback already running. A fresh reception
+	// keeps this same state alive; the obsolete callback must not release it.
+	if remaining := rfReleaseAfter - time.Since(state.lastSeen); remaining > 0 {
+		if state.timer != nil {
+			state.timer.Stop()
+		}
+		state.timer = time.AfterFunc(remaining, func() { runtime.finishRFGesture(key, state) })
+		runtime.rfMu.Unlock()
+		return
+	}
+	released := runtime.releaseRFStateLocked(key, state)
+	runtime.rfMu.Unlock()
+	runtime.publishRFRelease(released)
+}
+
+type rfReleasedGesture struct {
+	event        native.DeviceEvent
+	held, double bool
+}
+
+func (runtime *Runtime) releaseRFStateLocked(key rfGestureKey, state *rfGestureState) rfReleasedGesture {
 	delete(runtime.rfGestures, key)
-	event := state.event
-	held := state.held
-	double := state.double
-	if !held && !double {
+	if !state.held && !state.double {
 		if runtime.rfClicks == nil {
 			runtime.rfClicks = make(map[rfGestureKey]*rfClickState)
 		}
-		click := &rfClickState{releasedAt: time.Now(), event: event}
+		click := &rfClickState{releasedAt: time.Now(), event: state.event, wireSession: state.wireSession}
 		click.timer = time.AfterFunc(rfDoubleClickAfter, func() {
 			runtime.finishRFClick(key, click)
 		})
 		runtime.rfClicks[key] = click
 	}
-	runtime.rfMu.Unlock()
-	runtime.publishRFGesture(event, "up")
-	if double {
-		runtime.publishRFGesture(event, "double-click")
+	return rfReleasedGesture{state.event, state.held, state.double}
+}
+
+func (runtime *Runtime) publishRFRelease(value rfReleasedGesture) {
+	runtime.publishRFGesture(value.event, "up")
+	if value.held {
+		runtime.publishRFGesture(value.event, "hold-end")
+	} else {
+		runtime.publishRFGesture(value.event, "tap")
+	}
+	if value.double {
+		runtime.publishRFGesture(value.event, "double-click")
 	}
 }
 
@@ -3913,6 +4046,30 @@ func (runtime *Runtime) finishRFClick(
 	if runtime.rfClicks[key] != click {
 		runtime.rfMu.Unlock()
 		return
+	}
+	if click.wireSession != nil && click.event.Timed {
+		runtime.mu.RLock()
+		currentOwner := runtime.session == click.wireSession && runtime.sessionUsableLocked()
+		runtime.mu.RUnlock()
+		if !currentOwner {
+			delete(runtime.rfClicks, key)
+			runtime.rfMu.Unlock()
+			return
+		}
+		select {
+		case <-click.wireSession.Done():
+			delete(runtime.rfClicks, key)
+			runtime.rfMu.Unlock()
+			return
+		default:
+		}
+		progress, known := click.wireSession.RFReceiveProgress(key.code, key.bits, key.protocol)
+		delta := uint32(progress.ReceiptMicros - click.event.DeviceMicros)
+		if known && delta > uint32(rfReleaseAfter/time.Microsecond) && delta <= uint32((rfReleaseAfter+rfDoubleClickAfter)/time.Microsecond) {
+			click.timer = time.AfterFunc(50*time.Millisecond, func() { runtime.finishRFClick(key, click) })
+			runtime.rfMu.Unlock()
+			return
+		}
 	}
 	delete(runtime.rfClicks, key)
 	event := click.event

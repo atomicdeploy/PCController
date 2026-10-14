@@ -82,6 +82,11 @@ func pwmActionPercent(raw uint16, verb string, config appconfig.PWMChannelConfig
 		return 100, nil
 	case "increase":
 		return math.Min(100, appconfig.PWMPercentFromRaw(raw, config)+step), nil
+	case "roll":
+		if raw == appconfig.PWMMaximumValue {
+			return 1, nil
+		}
+		return math.Min(100, appconfig.PWMPercentFromRaw(raw, config)+step), nil
 	case "decrease":
 		return math.Max(0, appconfig.PWMPercentFromRaw(raw, config)-step), nil
 	default:
@@ -95,10 +100,13 @@ func pwmActionRaw(raw uint16, verb string, config appconfig.PWMChannelConfig) (u
 		return 0, err
 	}
 	target := appconfig.PWMRawFromPercent(percent, config)
+	if verb == "roll" && percent > 0 && target == 0 {
+		target = 1
+	}
 	// Relative intent must make progress at the actual 12-bit resolution.
 	// Re-reading unchanged duty would otherwise lose every sub-quantum step.
 	// Do not change absolute percent conversion or invent an observed setpoint.
-	if verb == "increase" && raw < appconfig.PWMMaximumValue && target <= raw {
+	if (verb == "increase" || verb == "roll" && percent > appconfig.PWMPercentFromRaw(raw, config)) && raw < appconfig.PWMMaximumValue && target <= raw {
 		target = raw + 1
 	} else if verb == "decrease" && raw > 0 && target >= raw {
 		target = raw - 1
@@ -111,6 +119,9 @@ func applyPWMActionWithIO(channel byte, verb string, config appconfig.PWMChannel
 }
 
 func pwmActionTarget(raw uint16, verb string, config appconfig.PWMChannelConfig, recall PWMRecallValue) (uint16, error) {
+	if !recall.Known && config.PersistedRecallRaw > 0 && config.PersistedRecallRaw <= appconfig.PWMMaximumValue {
+		recall = PWMRecallValue{Known: true, Raw: config.PersistedRecallRaw}
+	}
 	if (verb == "on" || verb == "toggle" && raw == 0) && appconfig.PWMOnBehavior(config) == "restore" {
 		// On is idempotent when already lit, even if a stale memory exists.
 		if raw > 0 {
