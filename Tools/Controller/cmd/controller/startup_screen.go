@@ -6,10 +6,12 @@ import (
 	"os"
 	"time"
 
+	"github.com/charmbracelet/x/term"
 	"github.com/mattn/go-isatty"
 	"pccontroller.local/controller/internal/consolewindow"
 	"pccontroller.local/controller/internal/productidentity"
 	"pccontroller.local/controller/internal/startupmode"
+	"pccontroller.local/controller/internal/tui"
 )
 
 func terminalOutput(output io.Writer) bool {
@@ -21,17 +23,25 @@ func writeTUIStartup(output io.Writer, terminal bool, title string) {
 	if !terminal {
 		return
 	}
-	fmt.Fprintf(output, "\n  %s\n  Starting terminal interface...\n\n", title)
+	width := 80
+	if file, ok := output.(*os.File); ok {
+		if columns, _, err := term.GetSize(file.Fd()); err == nil {
+			width = columns
+		}
+	}
+	fmt.Fprint(output, tui.StartupFrame(title, "Starting terminal interface…", width))
 }
 
 func prepareStartupPresentation(args []string, output io.Writer) {
 	if startupmode.TUI(args) {
+		enableStartupANSI(output)
 		writeTUIStartup(output, terminalOutput(output), productidentity.DefaultAppTitle())
 		return
 	}
 	if startupmode.Command(args) == "web" {
 		explicit := startupmode.BackgroundWeb(args)
 		if !explicit && terminalOutput(output) && terminalOutput(os.Stdin) {
+			enableStartupANSI(output)
 			writeTUIStartup(output, true, productidentity.DefaultAppTitle())
 			return
 		}

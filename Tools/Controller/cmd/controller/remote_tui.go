@@ -1447,9 +1447,6 @@ func runRemoteTUIContext(
 	consoleOptions *tuiConsoleOptions,
 	syncNavigation bool,
 ) error {
-	if terminalOutput(stdout) {
-		fmt.Fprintln(stdout, "  Connecting terminal to controller...")
-	}
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	client := newRemoteTUIIPC(ctx, address, auth)
@@ -1463,11 +1460,8 @@ func runRemoteTUIContext(
 	defer instanceLease.Close()
 
 	probeContext, probeCancel := context.WithTimeout(ctx, 8*time.Second)
-	initial, err := client.Snapshot(probeContext)
-	initialReceivedAt := time.Now()
+	initial, initialReceivedAt, engine, err := remoteTUIBootstrap(probeContext, client.Snapshot, client.CommandEngine)
 	if err == nil {
-		var engine *shell.Engine
-		engine, err = client.CommandEngine(probeContext)
 		if err == nil {
 			if syncNavigation {
 				cursorContext, cursorCancel := context.WithTimeout(ctx, 3*time.Second)
@@ -1479,17 +1473,8 @@ func runRemoteTUIContext(
 				}
 			}
 			probeCancel()
-			remoteHostUI := remoteUISettingsWire{}
-			haveRemoteHostUI := false
-			remoteRF := appconfig.DefaultRFConfig()
 			settingsContext, settingsCancel := context.WithTimeout(ctx, 4*time.Second)
-			if value, settingsErr := client.UISettings(settingsContext); settingsErr == nil {
-				remoteHostUI = value
-				haveRemoteHostUI = true
-			}
-			if value, rfErr := client.RFPresentation(settingsContext); rfErr == nil {
-				remoteRF = value
-			}
+			remoteHostUI, haveRemoteHostUI, remoteRF := remoteTUIStartupPreferences(settingsContext, client)
 			settingsCancel()
 
 			clientUI := func() appconfig.UI {

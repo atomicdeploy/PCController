@@ -19,4 +19,7 @@ func TestTUIStartupScreenIsImmediateAndNeverWrittenToPipes(t *testing.T) {
 	if strings.Contains(output.String(), "%") {
 		t.Fatal("invented startup progress")
 	}
+	if !strings.Contains(output.String(), "\x1b[") || !strings.Contains(output.String(), "TERMINAL") {
+		t.Fatal("unstyled startup splash")
+	}
 }

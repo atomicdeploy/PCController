@@ -19,6 +19,10 @@ func main() {
 	height := flag.Int("height", 38, "render height")
 	all := flag.Bool("all", false, "render every page separated by a form feed")
 	flag.Parse()
+	if *pageName == "startup" {
+		fmt.Print(tui.StartupFrame("PCController", "Starting terminal interface…", *width))
+		return
+	}
 	if *all {
 		for page := tui.PageDashboard; page <= tui.PageConsole; page++ {
 			if page != tui.PageDashboard {
