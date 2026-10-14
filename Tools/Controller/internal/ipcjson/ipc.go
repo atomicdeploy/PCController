@@ -555,6 +555,9 @@ func (service *Service) dispatch(
 		}
 		ctx = control.WithMediaActor(ctx, request.ClientID)
 	}
+	if requestCapability(request.Method, request.Params) == capabilityBoard {
+		ctx = control.WithPWMTraceOrigin(ctx, request.Method, request.ClientID, access.Transport)
+	}
 	if requestCapability(request.Method, request.Params) == capabilityBoard &&
 		request.Method != "controller.media.authority.change" && request.Method != "controller.media.playback.update" && request.Method != "controller.media.timeline.prepare" {
 		// Always admit the emergency latch, not an anonymous release during production.
@@ -1006,6 +1009,28 @@ func (service *Service) dispatch(
 		if err == nil {
 			result = status
 		}
+	case "controller.pwm.trace.get":
+		var params struct{}
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			result = service.Client.PWMWriteTrace()
+		}
+	case "controller.pwm.trace.stop":
+		var params struct{}
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			result = service.Client.StopPWMWriteTrace()
+		}
+	case "controller.pwm.trace.start":
+		var params struct {
+			Channel    *int `json:"channel"`
+			DurationMS *int `json:"duration_ms"`
+		}
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			if params.Channel == nil || params.DurationMS == nil || *params.Channel < 0 || *params.Channel >= appconfig.PWMChannelCount || *params.DurationMS < 1 || *params.DurationMS > 60000 {
+				err = &RPCError{Code: -32602, Message: "channel 0..15 and duration_ms 1..60000 are required"}
+			} else {
+				result, err = service.Client.StartPWMWriteTrace(byte(*params.Channel), time.Duration(*params.DurationMS)*time.Millisecond)
+			}
+		}
 	case "controller.pwm.values":
 		result, err = service.pwmValues(ctx)
 	case "controller.illumination.get":
@@ -1068,12 +1093,14 @@ func (service *Service) dispatch(
 			}
 		}
 	case "controller.pwm.channel.configure":
-		var params struct {
-			Channel int `json:"channel"`
-			appconfig.PWMChannelConfig
-		}
+		var params pwmChannelConfigParams
 		if err = decodeParams(request.Params, &params); err == nil {
-			result, err = service.updatePWMChannelConfig(params.Channel, params.PWMChannelConfig)
+			var channel int
+			var value appconfig.PWMChannelConfig
+			channel, value, err = params.patch()
+			if err == nil {
+				result, err = service.updatePWMChannelConfig(channel, value)
+			}
 		}
 	case "controller.pwm.off":
 		result, err = service.clearPWMAndReadback(ctx)
@@ -1873,6 +1900,13 @@ func (service *Service) dispatch(
 }
 
 func dispatchRPCError(err error) *RPCError {
+	var persistence *control.PWMRecallPersistenceError
+	if errors.As(err, &persistence) {
+		return &RPCError{Code: -32010, Message: err.Error(), Data: map[string]any{
+			"kind": "persistence_failed", "resource": "pwm_recall", "write_acknowledged": true,
+			"readback_confirmed": true, "retryable": false,
+		}}
+	}
 	var confirmation *pwmConfirmationError
 	var actionConfirmation *control.PWMActionConfirmationError
 	if errors.As(err, &confirmation) || errors.As(err, &actionConfirmation) {
@@ -2055,8 +2089,14 @@ func (service *Service) browserUISettings() browserUISettings {
 }
 
 func clonePWMChannels(channels map[string]appconfig.PWMChannelConfig) map[string]appconfig.PWMChannelConfig {
-	result := make(map[string]appconfig.PWMChannelConfig, len(channels))
-	for key, value := range channels {
+	result := make(map[string]appconfig.PWMChannelConfig, appconfig.PWMChannelCount)
+	for channel := 0; channel < appconfig.PWMChannelCount; channel++ {
+		key := appconfig.PWMChannelKey(channel)
+		value := appconfig.PWMChannel(appconfig.UI{PWMChannels: channels}, channel)
+		if value.StepPercent != nil {
+			step := *value.StepPercent
+			value.StepPercent = &step
+		}
 		result[key] = value
 	}
 	return result
@@ -2458,6 +2498,10 @@ func requestCapability(method string, params json.RawMessage) string {
 	// Configuration is host-owned; mirror writes/resync are board commands.
 	// Read-only diagnostics must not grant write permission by association.
 	switch method {
+	case "controller.pwm.trace.get":
+		return capabilityRead
+	case "controller.pwm.trace.start", "controller.pwm.trace.stop":
+		return capabilityEvents
 	case "controller.mirror.configure":
 		return capabilityHostConfig
 	case "controller.mirror.inspect", "controller.mirror.status":
@@ -2633,6 +2677,12 @@ func commandCapability(command string) string {
 		}
 		return capabilityBoard
 	case "pwm":
+		if len(words) >= 3 && words[1] == "trace" {
+			if words[2] == "get" {
+				return capabilityRead
+			}
+			return capabilityEvents
+		}
 		if len(words) >= 2 && words[1] == "get" {
 			return capabilityRead
 		}
@@ -3297,17 +3347,19 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 		if !authorizeHTTPCapability(writer, request, service, capabilityHostConfig) {
 			return
 		}
-		var params struct {
-			Channel int `json:"channel"`
-			appconfig.PWMChannelConfig
-		}
+		var params pwmChannelConfigParams
 		decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, maxMessage))
 		decoder.DisallowUnknownFields()
 		if err := decoder.Decode(&params); err != nil {
 			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
-		value, err := service.updatePWMChannelConfig(params.Channel, params.PWMChannelConfig)
+		channel, patch, err := params.patch()
+		if err != nil {
+			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		value, err := service.updatePWMChannelConfig(channel, patch)
 		if err != nil {
 			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return

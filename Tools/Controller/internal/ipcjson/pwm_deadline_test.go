@@ -5,7 +5,17 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"pccontroller.local/controller/internal/control"
 )
+
+func TestPWMPersistenceFailureRetainsConfirmedOutputWithoutRetry(t *testing.T) {
+	rpc := dispatchRPCError(&control.PWMRecallPersistenceError{Cause: errors.New("fixture configuration unavailable")})
+	data := rpc.Data.(map[string]any)
+	if data["kind"] != "persistence_failed" || data["write_acknowledged"] != true || data["readback_confirmed"] != true || data["retryable"] != false {
+		t.Fatalf("persistence error misrepresented output acknowledgement: %#v", data)
+	}
+}
 
 func TestPWMWriteAndReadbackShareDeadlineWithoutRetry(t *testing.T) {
 	parent, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)

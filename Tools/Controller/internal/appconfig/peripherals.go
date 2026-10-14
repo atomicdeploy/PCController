@@ -32,6 +32,7 @@ type PeripheralDescriptor struct {
 	Curve       string  `json:"curve,omitempty"`
 	Gamma       float64 `json:"gamma,omitempty"`
 	StepPercent float64 `json:"step_percent,omitempty"`
+	OnBehavior  string  `json:"on_behavior,omitempty"`
 }
 
 type ActionDescriptor struct {
@@ -60,6 +61,7 @@ type ControlDescriptor struct {
 	Curve       string             `json:"curve,omitempty"`
 	Gamma       float64            `json:"gamma,omitempty"`
 	StepPercent float64            `json:"step_percent,omitempty"`
+	OnBehavior  string             `json:"on_behavior,omitempty"`
 	Actions     []ActionDescriptor `json:"actions,omitempty"`
 }
 
@@ -275,6 +277,7 @@ func ProfileDescriptors(mode string, exposeRawRelays bool, legacyNames map[strin
 			actions := []ActionDescriptor{
 				{ID: descriptor.Key + ".on", Verb: "on", Name: "On"},
 				{ID: descriptor.Key + ".off", Verb: "off", Name: "Off"},
+				{ID: descriptor.Key + ".toggle", Verb: "toggle", Name: "Toggle"},
 				{ID: descriptor.Key + ".increase", Verb: "increase", Name: "Increase"},
 				{ID: descriptor.Key + ".decrease", Verb: "decrease", Name: "Decrease"},
 			}

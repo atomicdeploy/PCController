@@ -54,6 +54,17 @@ jobs:
         shell: cmd
         run: npm ci --prefix Tools\Build --no-audit --no-fund
 
+      - name: Install libavrdude parser tools for candidate validation
+        if: env.CHECK_ONLY != 'true'
+        shell: pwsh
+        run: |
+          choco install winflexbison3 --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { throw "WinFlexBison installation failed: $LASTEXITCODE" }
+          $flex = (Get-Command win_flex.exe -ErrorAction Stop).Source
+          $bison = (Get-Command win_bison.exe -ErrorAction Stop).Source
+          "FLEX_EXECUTABLE=$flex" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "BISON_EXECUTABLE=$bison" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Resolve, update, and validate before PR creation
         id: candidate
         shell: cmd

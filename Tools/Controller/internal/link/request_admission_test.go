@@ -13,6 +13,43 @@ import (
 	"pccontroller.local/controller/internal/native"
 )
 
+func TestRequestWriteGuardRechecksAfterQueuedAdmissionWithoutLateWrite(t *testing.T) {
+	port := newFakePort()
+	var writes atomic.Int32
+	port.onWrite = func([]byte) { writes.Add(1) }
+	session := NewForPort("TEST", port)
+	defer session.Close()
+	release, err := session.requestAdmission.acquire(context.Background(), session.closing, RequestPriorityNormal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var active atomic.Bool
+	active.Store(true)
+	ended := errors.New("intent released")
+	ctx := WithRequestWriteGuard(context.Background(), func() error {
+		if !active.Load() {
+			return ended
+		}
+		return nil
+	})
+	done := make(chan error, 1)
+	go func() { _, err := session.Request(ctx, native.OpPWMSet, []byte{0, 1, 0}, native.OpACK); done <- err }()
+	waitForQueuedRequests(t, &session.requestAdmission, 1)
+	active.Store(false)
+	release()
+	select {
+	case err := <-done:
+		if !errors.Is(err, ended) {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("released queued mutation did not return")
+	}
+	if writes.Load() != 0 {
+		t.Fatal("released intent reached the wire")
+	}
+}
+
 func TestRequestSlotTimeoutIdentifiesActiveOpcodeWithoutLateWrite(t *testing.T) {
 	port := newFakePort()
 	entered := make(chan struct{}, 1)

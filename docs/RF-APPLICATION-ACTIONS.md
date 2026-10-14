@@ -14,8 +14,10 @@ are stored in Pealayer.
 3. Choose **Assign**, name the assignment and choose a gesture. **Down** executes
    immediately once per press; **Up** executes after reception stops. Hold,
    repeat, click and double-click are also available. A radio receiver cannot
-   observe a physical release directly; Up uses the existing 250 ms packet-gap
-   timeout. Click waits for the double-click window.
+   observe a physical release directly; Up uses a 250 ms packet-gap inference.
+   Timed firmware requires MCU-clock silence evidence, so delayed host dispatch
+   does not create false releases; untimed sources use the legacy host clock.
+   Click waits for the double-click window.
 4. Add one or more ordered actions (maximum eight): advertised board control,
    effect, application command, RF transmission, keyboard key, external program,
    script or event. Choose **Application → pealayer (all) → Toggle** for play/pause.
@@ -65,7 +67,9 @@ EEPROM execution when the host is stopped.
 
 Choose a channel from the advertised control list; do not infer channel numbers
 from a 0–100 brightness range. MOSFET controls advertise `pwm.N.on`, `.off`,
-`.increase` and `.decrease`. On requests 100% logical intensity, Off requests
+`.toggle`, `.increase` and `.decrease`. On defaults to 100% logical intensity;
+the optional shared [recall policy](PWM-ON-RECALL.md) restores confirmed nonzero
+duty instead. Off requests
 0%; relative actions use the channel's advertised `step_percent` (default 1%).
 When that step is smaller than the hardware's representable change, a relative
 action advances by one actual 12-bit duty quantum in the requested direction,
@@ -88,8 +92,8 @@ Use the appropriate type/curve for the actual output; motors do not receive a
 lighting curve implicitly.
 
 The shared CLI/TUI commands are `pwm on CHANNEL`, `pwm off CHANNEL`,
-`pwm increase CHANNEL` and `pwm decrease CHANNEL`; `pwm off` without a channel
-still zeros all channels. `pwm configure CHANNEL TYPE CURVE [GAMMA [ICON [STEP_PERCENT]]]`
+`pwm toggle CHANNEL`, `pwm increase CHANNEL` and `pwm decrease CHANNEL`; `pwm off` without a channel
+still zeros all channels. `pwm configure CHANNEL TYPE CURVE [GAMMA [ICON [STEP_PERCENT [ON_BEHAVIOR]]]]`
 configures the same channel data. Thus `pwm configure 0 lighting gamma 2.2 lightbulb 2.5`
 sets a 2.5% logical step for a confirmed lighting channel. Raw duty remains
 0–4095 and is not a percent step.
@@ -139,6 +143,19 @@ action is bounded by three such phases, not an invented progress percentage.
   validated, transactional watched-config mutation. Bindings are the existing
   `automations` entries matching `rf.gesture` and `source:rf`; selectors include
   `rf_code`, `rf_bits`, `rf_protocol`, `gesture`.
+  **Create:** omit `previous_name` (or leave it empty) and choose a unique name.
+  **Edit, rename, enable/disable:** send the existing exact `previous_name`
+  together with the complete edited binding, even when its name is unchanged.
+  A create is never an upsert: identical/case-insensitive names conflict rather
+  than silently replace another signal's actions. Outer whitespace is normalized.
+  Renaming to another occupied name or editing a missing previous target also
+  rejects without changing config, keyboard consent or physical outputs.
+  RPC -32009 carries `kind:conflict`, `resource:rf_binding`, `reason:name_exists`,
+  `not_rf` or `previous_missing`, and the relevant name/field. Show the message,
+  preserve the draft, and require a deliberate edit or a distinct name; never
+  retry with `previous_name` automatically filled from a colliding new name.
+  Four distinct On/Off/Increase/Decrease keys need distinct assignment names
+  (for example Lighting On, Lighting Off, Lighting Increase, Lighting Decrease).
   Missing, malformed or unadvertised control actions are rejected before any
   persistence or keyboard-consent change. RPC code -32602 carries the human
   message "Choose an available control action before saving this assignment"

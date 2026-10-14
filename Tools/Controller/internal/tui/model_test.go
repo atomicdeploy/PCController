@@ -916,6 +916,54 @@ func TestHostedMenuPreviewAndLivePWMRemainBoardAuthoritative(t *testing.T) {
 	}
 }
 
+func TestLiveTUIUsesCentralPWMToggleAndRelativeActions(t *testing.T) {
+	engine := shell.New(10)
+	var calls []string
+	if err := engine.Register(shell.Command{Name: "pwm", Run: func(_ context.Context, args []string) (string, error) {
+		calls = append(calls, strings.Join(args, " "))
+		return "ok", nil
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	runtime := control.New(control.Options{})
+	t.Cleanup(func() { _ = runtime.Close() })
+	model := NewApplicationWithOptions(runtime, engine, Options{DisableWelcome: true, Remote: &RemoteBackend{InitialSnapshot: RichPreviewSnapshot()}})
+	model.page = PageOutputs
+	found := false
+	for index, row := range model.controlTableRows(model.snapshot(), 12) {
+		if row.Kind == "pwm" && row.Index == 1 {
+			model.cursor = index
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("fixture PWM row absent")
+	}
+	before := model.pwmValues[1]
+	updated, command, _ := model.activateOutput()
+	if command == nil {
+		t.Fatal("toggle not routed")
+	}
+	_ = command()
+	updated, command, _ = updated.adjustSelection(1)
+	if command == nil {
+		t.Fatal("increase not routed")
+	}
+	_ = command()
+	updated, command, _ = updated.adjustSelection(-1)
+	if command == nil {
+		t.Fatal("decrease not routed")
+	}
+	_ = command()
+	if got := strings.Join(calls, ","); got != "toggle 1,increase 1,decrease 1" {
+		t.Fatalf("client computed its own brightness: %s", got)
+	}
+	if updated.pwmValues[1] != before {
+		t.Fatal("live TUI invented optimistic output")
+	}
+}
+
 func TestNestedTabAndRightArrowCompletion(t *testing.T) {
 	model := readyModel(t, PageConsole)
 	model.input.SetValue("silent sta")

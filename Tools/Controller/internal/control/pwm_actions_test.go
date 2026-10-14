@@ -47,7 +47,7 @@ func TestPWMActionUsesLogicalCurveAndAuthoritativeReadback(t *testing.T) {
 	if bottom, _ := pwmActionPercent(0, "decrease", config); bottom != 0 {
 		t.Fatal("lower clamp failed")
 	}
-	if _, err := pwmActionPercent(0, "toggle", config); err == nil {
+	if _, err := pwmActionPercent(0, "invalid", config); err == nil {
 		t.Fatal("unadvertised action accepted")
 	}
 }

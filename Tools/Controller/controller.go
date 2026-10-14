@@ -502,6 +502,7 @@ type Snapshot struct {
 	PWMValues                *PWMValues                      `json:"pwm_values,omitempty"`
 	PWMRevision              uint64                          `json:"pwm_revision,omitempty"`
 	PWMUpdated               time.Time                       `json:"pwm_updated,omitempty"`
+	PWMRecall                [16]control.PWMRecallValue      `json:"pwm_recall"`
 	Motion                   MotionSnapshot                  `json:"motion"`
 	Outputs                  OutputStreamState               `json:"outputs"`
 	StripEffects             []control.StripEffectDescriptor `json:"strip_effects,omitempty"`
@@ -1926,6 +1927,12 @@ func (client *Client) ApplyPWMAction(ctx context.Context, generation uint64, cha
 	return values, nil
 }
 
+// ApplyPWMAllOff is the confirmed operator route, including configured recall
+// persistence. AllPWMOff remains the native zeroing primitive for safe cleanup.
+func (client *Client) ApplyPWMAllOff(ctx context.Context, generation uint64) (PWMValues, error) {
+	return client.runtime.ApplyPWMAllOff(ctx, generation)
+}
+
 // SetPWMChannel controls a native logical PWM channel 0..15 at 0..4095.
 func (client *Client) SetPWMChannel(
 	ctx context.Context,
@@ -1943,6 +1950,15 @@ func (client *Client) SetPWMChannel(
 func (client *Client) AllPWMOff(ctx context.Context) error {
 	return client.runtime.Command(ctx, native.OpPWMAllOff, nil)
 }
+
+type PWMWriteTrace = control.PWMWriteTrace
+
+func (client *Client) StartPWMWriteTrace(channel byte, duration time.Duration) (PWMWriteTrace, error) {
+	return client.runtime.StartPWMWriteTrace(channel, duration)
+}
+
+func (client *Client) StopPWMWriteTrace() PWMWriteTrace { return client.runtime.StopPWMWriteTrace() }
+func (client *Client) PWMWriteTrace() PWMWriteTrace     { return client.runtime.PWMWriteTrace() }
 
 // PWMValues requests all logical PWM values and controller availability.
 func (client *Client) PWMValues(ctx context.Context) (PWMValues, error) {
@@ -2394,6 +2410,7 @@ func (client *Client) Snapshot() Snapshot {
 		StatusLEDUpdated:       snapshot.StatusLEDUpdated,
 		StatusLEDRevision:      snapshot.StatusLEDRevision,
 		PWMValues:              snapshot.PWMValues, PWMRevision: snapshot.PWMRevision, PWMUpdated: snapshot.PWMUpdated,
+		PWMRecall:    snapshot.PWMRecall,
 		Motion:       snapshot.Motion,
 		Outputs:      client.outputs.State(),
 		StripEffects: stripEffects,

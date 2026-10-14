@@ -74,6 +74,7 @@ const product = productIdentity(productMetadata);
 const capabilityGroups = {
   events: [
     "controller.event.next", "controller.event.latest", "controller.subscribe", "controller.unsubscribe",
+		"controller.pwm.trace.start", "controller.pwm.trace.stop",
   ],
   programming: [
 	"controller.firmware.build",
@@ -140,7 +141,7 @@ const capabilityGroups = {
     "controller.app.instances", "controller.app.instance.get", "controller.app.bridge",
 		"controller.network.peers.get", "controller.app.action.outcome",
 		"controller.media.playback.get", "controller.media.authority.get", "controller.media.timeline.get",
-		"controller.rf.catalog",
+		"controller.rf.catalog", "controller.pwm.trace.get",
   ],
   board_commands: [
 		"controller.mirror.apply", "controller.mirror.resync",
@@ -160,6 +161,9 @@ const capabilityGroups = {
 };
 
 const methodOverrides = {
+	"controller.pwm.trace.get": "Return bounded DEBUG-only PWM acknowledgements; no board read or output change.",
+	"controller.pwm.trace.start": "Temporarily capture one channel 0..15 for explicit duration_ms 1..60000, off by default; no board operation.",
+	"controller.pwm.trace.stop": "Stop temporary PWM acknowledgement capture and retain bounded receipts; no board operation.",
 	"controller.audio.cues": "Return the receiving host's declared local sound-effect intent vocabulary.",
 	"controller.audio.play": "Play one validated sound-effect intent on the receiving host while honoring its mute and volume policy.",
 	"controller.ping": "Return service health and protocol identity.",
@@ -171,7 +175,7 @@ const methodOverrides = {
 	"controller.board_profile.update": "Bind the attached physical board identity to one explicit host-owned wiring profile.",
 	"controller.peripheral.presentation.update": "Update one advertised peripheral name, icon, group, kind-local order, visibility, or lock using optional optimistic concurrency.",
 	"controller.peripheral.folder.update": "Atomically create, rename, set the icon, delete or move members of a board-profile channel folder using required expected_revision; return the complete authoritative folder/control catalog.",
-	"controller.pwm.channel.configure": "Persist one PWM channel's output type, icon, transfer curve, and gamma, then publish the changed descriptor.",
+	"controller.pwm.channel.configure": "Persist a partial PWM channel configuration (output type, icon, curve, gamma, step_percent, on_behavior full|restore), preserving omitted fields, then publish the changed descriptor.",
 	"controller.action.invoke": "Invoke one stable action ID advertised by the attached board profile and wait for the board acknowledgement.",
 	"controller.estop.get": "Return the authoritative PCController-wide effect and motion interlock state.",
 	"controller.estop.set": "Engage or release the PCController-wide effect and motion interlock; release never resumes cancelled work.",
@@ -189,7 +193,7 @@ const methodOverrides = {
   "controller.rf.map": "Replace one learned RF mapping and return board readback.",
   "controller.rf.transmit": "Transmit one validated RF waveform request.",
 	"controller.rf.catalog": "Return learned RF records, live capture state, persisted bindings, and currently advertised action choices.",
-	"controller.rf.binding.put": "Transactionally create or replace one validated host-owned RF application binding.",
+	"controller.rf.binding.put": "Create a uniquely named validated RF binding, or explicitly edit with previous_name; reject name/stale-target conflicts without replacing unrelated assignments.",
 	"controller.rf.binding.remove": "Remove one named host-owned RF application binding.",
   "controller.board_automation.list": "Read one generation-consistent board automation snapshot.",
   "controller.board_automation.put": "Transactionally add or edit one board automation and verify readback.",

@@ -155,6 +155,9 @@ func parseDisplayMilliseconds(value string) (int, error) {
 
 func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 	engine := shell.New(100)
+	if options.HostConfig != nil || options.Resolve != nil {
+		runtime.configurePWMRecallPersistence(func() CommandOptions { return resolveCommandOptions(options) })
+	}
 	macroRunner := NewMacroRunner(
 		runtime,
 		options.Macros,
@@ -783,7 +786,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 		},
 	})
 	mustRegister(shell.Command{
-		Name: "pwm", Usage: "pwm get|off|on|off|increase|decrease CHANNEL|set CHANNEL PERCENT|raw CHANNEL VALUE|configure CHANNEL TYPE CURVE [GAMMA [ICON [STEP_PERCENT]]]",
+		Name: "pwm", Usage: "pwm get|off|on|off|toggle|increase|decrease|roll|remember CHANNEL|set CHANNEL PERCENT|raw CHANNEL VALUE|configure CHANNEL TYPE CURVE [GAMMA [ICON [STEP_PERCENT [ON_BEHAVIOR]]]]|trace start CHANNEL DURATION_MS|trace get|trace stop",
 		Summary: "control logical brightness through per-channel curves or exact raw PWM",
 		Run: func(ctx context.Context, args []string) (string, error) {
 			return pwmCommand(ctx, runtime, options, args)
@@ -3649,7 +3652,53 @@ func checkMotionDoorPolicy(status native.Status, policy string) error {
 }
 
 func pwmCommand(ctx context.Context, runtime *Runtime, options CommandOptions, args []string) (string, error) {
-	if len(args) == 2 && (strings.EqualFold(args[0], "on") || strings.EqualFold(args[0], "off") || strings.EqualFold(args[0], "increase") || strings.EqualFold(args[0], "decrease")) {
+	if len(args) > 0 && strings.EqualFold(args[0], "trace") {
+		var trace PWMWriteTrace
+		switch {
+		case len(args) == 2 && strings.EqualFold(args[1], "get"):
+			trace = runtime.PWMWriteTrace()
+		case len(args) == 2 && strings.EqualFold(args[1], "stop"):
+			trace = runtime.StopPWMWriteTrace()
+		case len(args) == 4 && strings.EqualFold(args[1], "start"):
+			channel, err := parsePWMChannel(args[2])
+			if err != nil {
+				return "", err
+			}
+			milliseconds, err := strconv.ParseInt(args[3], 10, 32)
+			if err != nil || milliseconds < 1 || milliseconds > 60000 {
+				return "", errors.New("PWM trace duration_ms must be 1..60000")
+			}
+			trace, err = runtime.StartPWMWriteTrace(channel, time.Duration(milliseconds)*time.Millisecond)
+			if err != nil {
+				return "", err
+			}
+		default:
+			return "", errors.New("usage: pwm trace start CHANNEL DURATION_MS | pwm trace get | pwm trace stop")
+		}
+		encoded, err := json.MarshalIndent(trace, "", "  ")
+		return string(encoded), err
+	}
+	if len(args) == 2 && strings.EqualFold(args[0], "remember") {
+		channel, err := parsePWMChannel(args[1])
+		if err != nil {
+			return "", err
+		}
+		before := runtime.Snapshot()
+		frame, err := runtime.requestAtGeneration(ctx, before.ConnectionGeneration, native.OpPWMGet, nil, native.OpPWMValues)
+		if err != nil {
+			return "", err
+		}
+		values, err := native.ParsePWMValues(frame.Payload)
+		if err != nil {
+			return "", err
+		}
+		if err = validatePWMActionReadback(values); err != nil {
+			return "", err
+		}
+		err = persistPWMRecall(runtime, options, before.ConnectionGeneration, channel)
+		return "confirmed PWM brightness retained", err
+	}
+	if len(args) == 2 && (strings.EqualFold(args[0], "on") || strings.EqualFold(args[0], "off") || strings.EqualFold(args[0], "toggle") || strings.EqualFold(args[0], "increase") || strings.EqualFold(args[0], "decrease") || strings.EqualFold(args[0], "roll")) {
 		channel, err := parsePWMChannel(args[1])
 		if err != nil {
 			return "", err
@@ -3658,7 +3707,7 @@ func pwmCommand(ctx context.Context, runtime *Runtime, options CommandOptions, a
 		if options.HostConfig != nil {
 			config = options.HostConfig()
 		}
-		channelConfig := appconfig.PWMChannel(config.UI, int(channel))
+		channelConfig := appconfig.PWMChannelForProfile(config, pwmProfileIdentity(runtime.Snapshot()), int(channel))
 		runtime.mu.RLock()
 		generation := runtime.generation
 		runtime.mu.RUnlock()
@@ -3690,7 +3739,9 @@ func pwmCommand(ctx context.Context, runtime *Runtime, options CommandOptions, a
 			}
 			return strings.Join(lines, "\n"), nil
 		case "off":
-			return "all PWM channels off", command(ctx, runtime, native.OpPWMAllOff, nil)
+			owner := pwmRecallOwnerSnapshot(runtime)
+			_, err := runtime.ApplyPWMAllOff(ctx, owner.ConnectionGeneration)
+			return "PWM All-Off acknowledged and read back", err
 		}
 	}
 	if len(args) == 3 && (strings.EqualFold(args[0], "set") || strings.EqualFold(args[0], "raw")) {
@@ -3721,10 +3772,20 @@ func pwmCommand(ctx context.Context, runtime *Runtime, options CommandOptions, a
 		if err != nil {
 			return "", err
 		}
+		if value == 0 {
+			config := appconfig.Defaults()
+			if options.HostConfig != nil {
+				config = options.HostConfig()
+			}
+			owner := pwmRecallOwnerSnapshot(runtime)
+			channelConfig := appconfig.PWMChannelForProfile(config, pwmProfileIdentity(owner), int(channel))
+			_, err := runtime.ApplyPWMAction(ctx, owner.ConnectionGeneration, channel, "off", channelConfig)
+			return fmt.Sprintf("PWM channel %d raw value 0", channel), err
+		}
 		return fmt.Sprintf("PWM channel %d raw value %d", channel, value),
 			command(ctx, runtime, native.OpPWMSet, payload)
 	}
-	if len(args) >= 4 && len(args) <= 7 && strings.EqualFold(args[0], "configure") {
+	if len(args) >= 4 && len(args) <= 8 && strings.EqualFold(args[0], "configure") {
 		if options.UpdateHostConfig == nil {
 			return "", errors.New("persistent host configuration is unavailable")
 		}
@@ -3747,12 +3808,15 @@ func pwmCommand(ctx context.Context, runtime *Runtime, options CommandOptions, a
 		if len(args) >= 6 {
 			channelConfig.Icon = strings.TrimSpace(args[5])
 		}
-		if len(args) == 7 {
+		if len(args) >= 7 {
 			step, parseErr := strconv.ParseFloat(args[6], 64)
 			if parseErr != nil {
 				return "", fmt.Errorf("invalid step_percent %q", args[6])
 			}
 			channelConfig.StepPercent = &step
+		}
+		if len(args) == 8 {
+			channelConfig.OnBehavior = strings.ToLower(strings.TrimSpace(args[7]))
 		}
 		if err = appconfig.ValidatePWMChannels(map[string]appconfig.PWMChannelConfig{appconfig.PWMChannelKey(int(channel)): channelConfig}); err != nil {
 			return "", err
@@ -3772,13 +3836,13 @@ func pwmCommand(ctx context.Context, runtime *Runtime, options CommandOptions, a
 			Text: "PWM channel configuration changed", Source: "host", Target: "refresh", Action: "refresh",
 			Metadata: map[string]string{
 				"changed_keys":   appconfig.PWMChannelKey(int(channel)),
-				"changed_fields": "output_type,icon,curve,gamma,step_percent",
+				"changed_fields": "output_type,icon,curve,gamma,step_percent,on_behavior",
 				"action":         "refresh",
 			},
 		})
-		return fmt.Sprintf("PWM channel %d type=%s icon=%s curve=%s gamma=%.2f step=%.3f%%", channel, channelConfig.OutputType, channelConfig.Icon, channelConfig.Curve, channelConfig.Gamma, appconfig.PWMStepPercent(channelConfig)), nil
+		return fmt.Sprintf("PWM channel %d type=%s icon=%s curve=%s gamma=%.2f step=%.3f%% on=%s", channel, channelConfig.OutputType, channelConfig.Icon, channelConfig.Curve, channelConfig.Gamma, appconfig.PWMStepPercent(channelConfig), appconfig.PWMOnBehavior(channelConfig)), nil
 	}
-	return "", fmt.Errorf("usage: pwm get | pwm off | pwm on|off|increase|decrease CHANNEL | pwm set CHANNEL PERCENT | pwm raw CHANNEL VALUE | pwm configure CHANNEL TYPE CURVE [GAMMA [ICON [STEP_PERCENT]]]")
+	return "", fmt.Errorf("usage: pwm get | pwm off | pwm on|off|toggle|increase|decrease|roll|remember CHANNEL | pwm set CHANNEL PERCENT | pwm raw CHANNEL VALUE | pwm configure CHANNEL TYPE CURVE [GAMMA [ICON [STEP_PERCENT [ON_BEHAVIOR]]]]")
 }
 
 func parsePWMChannel(value string) (byte, error) {

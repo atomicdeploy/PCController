@@ -1170,7 +1170,7 @@ func (value Config) Validate() error {
 			switch gesture {
 			case "click", "double", "double-click", "hold", "hold-start",
 				"repeat", "hold-repeat", "release", "hold-release",
-				"down", "up":
+				"down", "up", "tap", "hold-end":
 			default:
 				return fmt.Errorf(
 					"automations[%d].match.gesture %q is unknown",

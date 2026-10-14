@@ -383,6 +383,8 @@ type rawVirtualBoard struct {
 	statusCount atomic.Int32
 	done        chan struct{}
 	wait        sync.WaitGroup
+	pwmMu       sync.Mutex
+	pwmValues   [16]uint16
 }
 
 func startRawVirtualBoard(t *testing.T) *rawVirtualBoard {
@@ -446,7 +448,7 @@ func (board *rawVirtualBoard) acceptLoop() {
 					response.Payload = make([]byte, 14)
 					response.Payload[0] = native.IdentitySchemaCompact
 					response.Payload[1] = native.BoardKindPCController
-					binary.LittleEndian.PutUint32(response.Payload[2:6], native.CapabilityLCD)
+					binary.LittleEndian.PutUint32(response.Payload[2:6], native.CapabilityLCD|native.CapabilityPWM)
 					binary.LittleEndian.PutUint32(response.Payload[6:10], 0xA1B2C3D4)
 				case native.OpGetStatus:
 					count := board.statusCount.Add(1)
@@ -454,6 +456,28 @@ func (board *rawVirtualBoard) acceptLoop() {
 					response.Payload = make([]byte, native.StatusPayloadSize)
 					binary.LittleEndian.PutUint32(response.Payload[0:4], uint32(count)*50)
 					binary.LittleEndian.PutUint32(response.Payload[8:12], 12000)
+				case native.OpPWMGet:
+					response.Opcode = native.OpPWMValues
+					response.Payload = make([]byte, 34)
+					response.Payload[0] = 1
+					board.pwmMu.Lock()
+					for channel, raw := range board.pwmValues {
+						binary.LittleEndian.PutUint16(response.Payload[2+channel*2:], raw)
+					}
+					board.pwmMu.Unlock()
+				case native.OpPWMSet:
+					if len(request.Payload) != 3 || request.Payload[0] >= 16 {
+						return
+					}
+					board.pwmMu.Lock()
+					board.pwmValues[request.Payload[0]] = binary.LittleEndian.Uint16(request.Payload[1:])
+					board.pwmMu.Unlock()
+					response.Opcode, response.Payload = native.OpACK, []byte{request.Opcode, 0}
+				case native.OpPWMAllOff:
+					board.pwmMu.Lock()
+					board.pwmValues = [16]uint16{}
+					board.pwmMu.Unlock()
+					response.Opcode, response.Payload = native.OpACK, []byte{request.Opcode, 0}
 				default:
 					response.Opcode = native.OpACK
 					response.Payload = []byte{request.Opcode, 0}

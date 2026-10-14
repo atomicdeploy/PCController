@@ -75,7 +75,17 @@ func pwmActionPercent(raw uint16, verb string, config appconfig.PWMChannelConfig
 		return 100, nil
 	case "off":
 		return 0, nil
+	case "toggle":
+		if raw > 0 {
+			return 0, nil
+		}
+		return 100, nil
 	case "increase":
+		return math.Min(100, appconfig.PWMPercentFromRaw(raw, config)+step), nil
+	case "roll":
+		if raw == appconfig.PWMMaximumValue {
+			return 1, nil
+		}
 		return math.Min(100, appconfig.PWMPercentFromRaw(raw, config)+step), nil
 	case "decrease":
 		return math.Max(0, appconfig.PWMPercentFromRaw(raw, config)-step), nil
@@ -90,10 +100,13 @@ func pwmActionRaw(raw uint16, verb string, config appconfig.PWMChannelConfig) (u
 		return 0, err
 	}
 	target := appconfig.PWMRawFromPercent(percent, config)
+	if verb == "roll" && percent > 0 && target == 0 {
+		target = 1
+	}
 	// Relative intent must make progress at the actual 12-bit resolution.
 	// Re-reading unchanged duty would otherwise lose every sub-quantum step.
 	// Do not change absolute percent conversion or invent an observed setpoint.
-	if verb == "increase" && raw < appconfig.PWMMaximumValue && target <= raw {
+	if (verb == "increase" || verb == "roll" && percent > appconfig.PWMPercentFromRaw(raw, config)) && raw < appconfig.PWMMaximumValue && target <= raw {
 		target = raw + 1
 	} else if verb == "decrease" && raw > 0 && target >= raw {
 		target = raw - 1
@@ -102,6 +115,26 @@ func pwmActionRaw(raw uint16, verb string, config appconfig.PWMChannelConfig) (u
 }
 
 func applyPWMActionWithIO(channel byte, verb string, config appconfig.PWMChannelConfig, read func() (native.PWMValues, error), write func(uint16) error) (native.PWMValues, error) {
+	return applyPWMActionWithRecallIO(channel, verb, config, read, write, func() PWMRecallValue { return PWMRecallValue{} })
+}
+
+func pwmActionTarget(raw uint16, verb string, config appconfig.PWMChannelConfig, recall PWMRecallValue) (uint16, error) {
+	if !recall.Known && config.PersistedRecallRaw > 0 && config.PersistedRecallRaw <= appconfig.PWMMaximumValue {
+		recall = PWMRecallValue{Known: true, Raw: config.PersistedRecallRaw}
+	}
+	if (verb == "on" || verb == "toggle" && raw == 0) && appconfig.PWMOnBehavior(config) == "restore" {
+		// On is idempotent when already lit, even if a stale memory exists.
+		if raw > 0 {
+			return raw, nil
+		}
+		if recall.Known && recall.Raw > 0 && recall.Raw <= appconfig.PWMMaximumValue {
+			return recall.Raw, nil
+		}
+	}
+	return pwmActionRaw(raw, verb, config)
+}
+
+func applyPWMActionWithRecallIO(channel byte, verb string, config appconfig.PWMChannelConfig, read func() (native.PWMValues, error), write func(uint16) error, recall func() PWMRecallValue) (native.PWMValues, error) {
 	if channel >= appconfig.PWMChannelCount {
 		return native.PWMValues{}, errors.New("PWM channel must be 0..15")
 	}
@@ -112,7 +145,7 @@ func applyPWMActionWithIO(channel byte, verb string, config appconfig.PWMChannel
 	if err := validatePWMActionReadback(values); err != nil {
 		return native.PWMValues{}, err
 	}
-	raw, err := pwmActionRaw(values.Values[channel], verb, config)
+	raw, err := pwmActionTarget(values.Values[channel], verb, config, recall())
 	if err != nil {
 		return native.PWMValues{}, err
 	}
@@ -196,7 +229,7 @@ func (runtime *Runtime) ApplyPWMAction(ctx context.Context, generation uint64, c
 		}
 		return values, err
 	}
-	values, err := applyPWMActionWithIO(channel, verb, config, read, func(raw uint16) error {
+	values, err := applyPWMActionWithRecallIO(channel, verb, config, read, func(raw uint16) error {
 		payload, err := native.PWMSetPayload(channel, raw)
 		if err != nil {
 			return err
@@ -206,11 +239,84 @@ func (runtime *Runtime) ApplyPWMAction(ctx context.Context, generation uint64, c
 			runtime.publishCommandEvidence(acknowledgedCommandEvidence(ctx, native.OpPWMSet, payload, frame))
 		}
 		return err
-	})
+	}, func() PWMRecallValue { return runtime.pwmRecallAtGeneration(generation, channel) })
 	if err != nil {
 		return native.PWMValues{}, err
 	}
+	if values.Values[channel] == 0 {
+		snapshot := pwmRecallOwnerSnapshot(runtime)
+		if err := runtime.CommitPWMOffRecall(generation, snapshot.PWMRevision, []byte{channel}); err != nil {
+			return values, err
+		}
+	}
 	// requestAtGeneration already admits the complete readback through the
 	// shared revisioned publisher. Do not emit a duplicate, unrevisioned event.
+	return values, nil
+}
+
+// ApplyPWMAllOff is an explicit operator action. Generic native safety cleanup
+// still bypasses persistence. One confirmed batch produces at most one save.
+func (runtime *Runtime) ApplyPWMAllOff(ctx context.Context, generation uint64) (native.PWMValues, error) {
+	if runtime.options.RequestTimeout <= 0 {
+		return native.PWMValues{}, errors.New("PWM action requires a positive serial request timeout")
+	}
+	ctx, finish := context.WithTimeout(ctx, 3*runtime.options.RequestTimeout)
+	defer finish()
+	runtime.cancelPWMAction()
+	epoch := runtime.pwmActionEpoch.Load()
+	release, err := runtime.acquirePWMAction(ctx)
+	if err != nil {
+		return native.PWMValues{}, err
+	}
+	defer release()
+	ctx, cleanup, err := runtime.bindPWMActionContext(ctx, epoch)
+	if err != nil {
+		return native.PWMValues{}, err
+	}
+	defer cleanup()
+	request := func(opcode byte, expected byte) (native.Frame, error) {
+		bounded, cancel := context.WithTimeout(ctx, runtime.options.RequestTimeout)
+		defer cancel()
+		return runtime.requestAtGeneration(bounded, generation, opcode, nil, expected)
+	}
+	read := func() (native.PWMValues, error) {
+		frame, err := request(native.OpPWMGet, native.OpPWMValues)
+		if err != nil {
+			return native.PWMValues{}, err
+		}
+		values, err := native.ParsePWMValues(frame.Payload)
+		if err == nil {
+			err = validatePWMActionReadback(values)
+		}
+		if err == nil && !values.Available {
+			err = errors.New("PWM driver is unavailable")
+		}
+		return values, err
+	}
+	// Capture current nonzero duty when possible, but a missed preliminary read
+	// never blocks an operator's still-live zeroing request.
+	_, _ = read()
+	if err := ctx.Err(); err != nil {
+		return native.PWMValues{}, err
+	}
+	ack, err := request(native.OpPWMAllOff, native.OpACK)
+	if err != nil {
+		return native.PWMValues{}, err
+	}
+	runtime.publishCommandEvidence(acknowledgedCommandEvidence(ctx, native.OpPWMAllOff, nil, ack))
+	values, err := read()
+	if err != nil {
+		return native.PWMValues{}, &PWMActionConfirmationError{Cause: err}
+	}
+	channels := make([]byte, 0, appconfig.PWMChannelCount)
+	for channel, raw := range values.Values {
+		if raw == 0 {
+			channels = append(channels, byte(channel))
+		}
+	}
+	snapshot := pwmRecallOwnerSnapshot(runtime)
+	if err := runtime.CommitPWMOffRecall(generation, snapshot.PWMRevision, channels); err != nil {
+		return values, err
+	}
 	return values, nil
 }

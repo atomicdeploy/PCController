@@ -812,6 +812,13 @@ func (model Model) adjustSelection(delta int) (Model, tea.Cmd, bool) {
 		}
 		if row, ok := model.selectedOutputRow(); ok && row.Kind == "pwm" {
 			channel := row.Index
+			if channel < 11 && model.preview == nil && delta != 0 {
+				verb := "increase"
+				if delta < 0 {
+					verb = "decrease"
+				}
+				return model.dispatchLine(fmt.Sprintf("pwm %s %d", verb, channel))
+			}
 			percent := int(appconfig.PWMPercentFromRaw(model.pwmValues[channel], appconfig.PWMChannel(model.uiValue, channel))+0.5) + delta
 			if percent < 0 {
 				percent = 100
@@ -844,6 +851,9 @@ func (model Model) activateOutput() (Model, tea.Cmd, bool) {
 			return model.dispatchLine(row.Action)
 		}
 		if row.Kind == "pwm" {
+			if row.Index < 11 && model.preview == nil {
+				return model.dispatchLine(fmt.Sprintf("pwm toggle %d", row.Index))
+			}
 			value := model.pwmValues[row.Index]
 			if value == 0 {
 				value = 2048
