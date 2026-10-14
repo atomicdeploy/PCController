@@ -95,6 +95,11 @@ The equivalent POSIX commands are:
   source dependency is stale; it is suitable for a no-device CI gate.
 - `--apply` refreshes exact locks plus compatible Go/npm source requirements.
 - `--validate` runs the complete hardware-free candidate gate after applying.
+  Windows validation requires Flex/Bison (or WinFlexBison) for the bundled
+  libavrdude adapter. The scheduled candidate workflow provisions these tools
+  before validation and exports their actual executable paths, just like host
+  packaging. Check-only resolution does not install parser tools. Parser setup
+  failure blocks validation; it never silently drops the adapter.
 - `--sync-npm-lock-hashes` is an offline reconciliation path for an already
   reviewed npm lock change (for example, a Dependabot PR). It validates that
   each lock's root dependency declarations match its `package.json`, then
