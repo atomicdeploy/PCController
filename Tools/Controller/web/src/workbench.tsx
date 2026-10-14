@@ -54,7 +54,7 @@ import { AdvancedWorkbench } from './advanced-workbench'
 import { displayPresentationCommand, type DisplayRepeat, type DisplayTarget } from './display-command'
 import { peripheralAvailability } from './peripheral-availability'
 import { hardwareResetAvailable } from './connection-presentation'
-import { RFGuidedWorkflow } from './rf-guided-workflow'
+import { RFManager } from './rf-manager'
 import { MacroLibraryPanel } from './macro-library'
 import { CardLayoutEditor, CardLayoutFrame, type CardLayoutCopy, type LayoutCardDescriptor } from './card-layout-controls'
 import { loadCardLayout, moveCard, resetCardLayout, saveCardLayout, toggleCard } from './dashboard-layout'
@@ -541,7 +541,7 @@ export function WorkbenchView(props: SharedViewProps) {
           <div className="inline-actions"><Button icon={Play} disabled={!melody} onClick={() => void run(`melody play ${shellArgument(melody)}`)}>{copy('Play', 'پخش')}</Button><Button icon={StopCircle} onClick={() => void run('melody stop')}>{copy('Stop', 'توقف')}</Button><Button icon={List} onClick={() => void run('melody list')}>{copy('List', 'فهرست')}</Button></div>
         </Card>)}
 
-        {boardReady && available.rf && frame('radio', copy('Radio controls', 'کنترل‌های رادیویی'), <RFGuidedWorkflow snapshot={snapshot} events={events} locale={locale} openDialog={props.openDialog} />)}
+        {boardReady && available.rf && frame('radio', copy('Radio controls', 'کنترل‌های رادیویی'), <RFManager snapshot={snapshot} events={events} locale={locale} openDialog={props.openDialog} />)}
 
         {frame('macros', copy('Effect library', 'کتابخانه جلوه‌ها'), <Card className="macro-card" icon={Workflow} iconTone="green" title={copy('Effect library', 'کتابخانه جلوه‌ها')}>
           <MacroLibraryPanel

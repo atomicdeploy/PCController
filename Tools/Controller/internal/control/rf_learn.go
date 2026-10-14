@@ -17,8 +17,9 @@ const (
 )
 
 type RFLearnOptions struct {
-	Mode    RFLearnMode
-	Timeout time.Duration
+	Mode       RFLearnMode
+	Timeout    time.Duration
+	Continuous bool
 }
 
 type RFLearnState struct {
@@ -29,6 +30,7 @@ type RFLearnState struct {
 	StartedAt    time.Time   `json:"started_at,omitempty"`
 	EndsAt       time.Time   `json:"ends_at,omitempty"`
 	Learned      uint32      `json:"learned"`
+	Continuous   bool        `json:"continuous"`
 	Reason       string      `json:"reason,omitempty"`
 }
 
@@ -62,13 +64,15 @@ func (runtime *Runtime) StartRFLearning(
 	ctx context.Context,
 	options RFLearnOptions,
 ) (RFLearnState, error) {
+	runtime.rfLearnOpsMu.Lock()
+	defer runtime.rfLearnOpsMu.Unlock()
 	mode, err := ParseRFLearnMode(string(options.Mode))
 	if err != nil {
 		return RFLearnState{}, err
 	}
 	options.Mode = mode
 	if options.Mode == RFLearnTimer && options.Timeout <= 0 {
-		options.Timeout = 15 * time.Second
+		options.Timeout = 60 * time.Second
 	}
 	maximum := time.Duration(native.MaxRFLearnSeconds) * time.Second
 	if options.Mode == RFLearnTimer {
@@ -85,6 +89,7 @@ func (runtime *Runtime) StartRFLearning(
 		Active: true, Mode: options.Mode, StartedAt: now,
 		ConfiguredMS: options.Timeout.Milliseconds(),
 		RemainingMS:  options.Timeout.Milliseconds(),
+		Continuous:   options.Continuous,
 	}
 	if options.Mode == RFLearnTimer {
 		state.EndsAt = now.Add(options.Timeout)
@@ -102,10 +107,36 @@ func (runtime *Runtime) StartRFLearning(
 	return state, nil
 }
 
+// A confirmed board capture ends the default one-code session. Cancellation is
+// pinned to the receiving generation; it cannot stop a replacement board.
+func (runtime *Runtime) stopAfterRFLearnCapture(generation uint64, captured uint32, startedAt time.Time) {
+	runtime.rfLearnOpsMu.Lock()
+	defer runtime.rfLearnOpsMu.Unlock()
+	state := runtime.RFLearnState()
+	if !state.Active || state.Continuous || captured != 1 || state.StartedAt != startedAt {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), runtime.options.RequestTimeout)
+	defer cancel()
+	if _, err := runtime.requestAtGeneration(ctx, generation, native.OpRFLearnCancel, nil, native.OpACK); err != nil {
+		runtime.PublishHostEvent("rf.learn.stop-failed", "Stop after first capture: "+err.Error())
+		return
+	}
+	runtime.rfLearnMu.Lock()
+	if runtime.rfLearnState.StartedAt == state.StartedAt && runtime.rfLearnState.Active {
+		runtime.rfLearnState.Active = false
+		runtime.rfLearnState.RemainingMS = 0
+		runtime.rfLearnState.Reason = "first capture confirmed"
+	}
+	runtime.rfLearnMu.Unlock()
+}
+
 func (runtime *Runtime) CancelRFLearning(
 	ctx context.Context,
 	reason string,
 ) error {
+	runtime.rfLearnOpsMu.Lock()
+	defer runtime.rfLearnOpsMu.Unlock()
 	if reason == "" {
 		reason = "cancelled by host"
 	}

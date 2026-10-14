@@ -28,12 +28,14 @@ type RFReplaceService struct {
 	transport    rfReplaceTransport
 	capabilities func() (string, uint32, bool)
 
-	mu sync.Mutex
+	mu      sync.Mutex
+	ownerMu *sync.Mutex
 }
 
 // NewRFReplaceService binds transactional RF management to the live runtime.
 func NewRFReplaceService(runtime *Runtime) *RFReplaceService {
 	return &RFReplaceService{
+		ownerMu:   &runtime.rfReplaceMu,
 		transport: runtime,
 		capabilities: func() (string, uint32, bool) {
 			snapshot := runtime.Snapshot()
@@ -42,6 +44,15 @@ func NewRFReplaceService(runtime *Runtime) *RFReplaceService {
 			return key, hello.Capabilities, snapshot.Connected && hello.IsPCController()
 		},
 	}
+}
+
+func (service *RFReplaceService) lockTransaction() func() {
+	if service.ownerMu != nil {
+		service.ownerMu.Lock()
+		return service.ownerMu.Unlock
+	}
+	service.mu.Lock()
+	return service.mu.Unlock
 }
 
 // Support reports the current firmware's advertised full-record capability.
@@ -99,8 +110,8 @@ func (service *RFReplaceService) Fetch(ctx context.Context) ([]native.RFEntry, e
 // validates every complete record, writes the desired snapshot, verifies
 // readback, and restores the original snapshot after any failure or mismatch.
 func (service *RFReplaceService) Replace(ctx context.Context, desired []native.RFEntry) error {
-	service.mu.Lock()
-	defer service.mu.Unlock()
+	unlock := service.lockTransaction()
+	defer unlock()
 	return service.replaceLocked(ctx, desired)
 }
 
@@ -113,8 +124,8 @@ func (service *RFReplaceService) UpdateMapping(
 	if _, err := native.RFMappingPayload(id, actionKind, actionValue, behavior); err != nil {
 		return err
 	}
-	service.mu.Lock()
-	defer service.mu.Unlock()
+	unlock := service.lockTransaction()
+	defer unlock()
 	if support := service.supportLocked(); !support.Supported {
 		return fmt.Errorf("RF full-record update unavailable: %s", support.Reason)
 	}

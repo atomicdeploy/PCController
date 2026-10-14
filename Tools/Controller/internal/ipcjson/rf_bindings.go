@@ -82,6 +82,8 @@ func (service *Service) rfCatalog(ctx context.Context, raw json.RawMessage) (any
 	snapshot := service.Client.Snapshot()
 	peripherals := service.peripheralSettings()
 	result := map[string]any{
+		"preferences": config.RF.Learning, "receptions": service.Client.RFReceptions(),
+		"host_instance_id": service.HostInstanceID, "connection_generation": snapshot.ConnectionGeneration,
 		"bindings": rfBindings(config), "learning": service.Client.RFLearningState(),
 		"activity": service.Client.RFActivity(), "keyboard": config.OSActions.VirtualKeys,
 		"connected": snapshot.Connected, "hostname": "", "entries": []any{},

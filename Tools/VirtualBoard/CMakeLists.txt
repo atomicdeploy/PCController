@@ -276,6 +276,7 @@ if(BUILD_TESTING)
       -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/macro_dispatch_priority_contract.cmake)
 
   add_executable(virtual_board_tests tests/native_firmware_test.cpp)
+  target_include_directories(virtual_board_tests PRIVATE platform)
   target_compile_definitions(virtual_board_tests PRIVATE PCCONTROLLER_TEST_PROFILE=${PCCONTROLLER_FEATURE_PROFILE})
   target_link_libraries(virtual_board_tests PRIVATE virtual_board_core)
   if(MSVC)

@@ -9,9 +9,20 @@ import (
 var RFCategoryPalette = []string{"red", "blue", "violet", "green", "white"}
 
 type RFConfig struct {
-	DisplayRadix string       `json:"display_radix"`
-	Categories   []RFCategory `json:"categories,omitempty"`
-	Metadata     []RFMetadata `json:"metadata,omitempty"`
+	DisplayRadix string                `json:"display_radix"`
+	Learning     RFLearningPreferences `json:"learning"`
+	Categories   []RFCategory          `json:"categories,omitempty"`
+	Metadata     []RFMetadata          `json:"metadata,omitempty"`
+}
+
+type RFLearningPreferences struct {
+	Timed          bool `json:"timed"`
+	TimeoutSeconds int  `json:"timeout_seconds"`
+	Continuous     bool `json:"continuous"`
+}
+
+func DefaultRFLearningPreferences() RFLearningPreferences {
+	return RFLearningPreferences{TimeoutSeconds: 60}
 }
 
 type RFCategory struct {
@@ -36,7 +47,7 @@ type RFMetadata struct {
 }
 
 func DefaultRFConfig() RFConfig {
-	return RFConfig{DisplayRadix: "hex"}
+	return RFConfig{DisplayRadix: "hex", Learning: DefaultRFLearningPreferences()}
 }
 
 func FormatRFCode(code uint32, radix string) string {
@@ -57,6 +68,9 @@ func (config RFConfig) MetadataFor(key RFCodeKey) (RFMetadata, bool) {
 }
 
 func validateRFConfig(config RFConfig) error {
+	if config.Learning.TimeoutSeconds < 1 || config.Learning.TimeoutSeconds > 120 {
+		return fmt.Errorf("rf.learning.timeout_seconds must be 1..120")
+	}
 	radix := strings.ToLower(strings.TrimSpace(config.DisplayRadix))
 	if radix != "hex" && radix != "decimal" {
 		return fmt.Errorf("rf.display_radix must be hex or decimal")
@@ -106,6 +120,9 @@ func cloneRFConfig(source RFConfig) RFConfig {
 
 func canonicalizeRFConfig(source RFConfig) RFConfig {
 	result := cloneRFConfig(source)
+	if result.Learning.TimeoutSeconds == 0 {
+		result.Learning.TimeoutSeconds = 60
+	}
 	result.DisplayRadix = strings.ToLower(strings.TrimSpace(result.DisplayRadix))
 	for index := range result.Categories {
 		result.Categories[index].Name = strings.TrimSpace(result.Categories[index].Name)

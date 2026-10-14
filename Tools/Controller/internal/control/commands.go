@@ -3894,6 +3894,11 @@ func rfCommand(
 		if err != nil {
 			return "", err
 		}
+		options.Continuous = rfConfig.Learning.Continuous
+		if len(args) == 1 && rfConfig.Learning.Timed {
+			options.Mode = RFLearnTimer
+			options.Timeout = time.Duration(rfConfig.Learning.TimeoutSeconds) * time.Second
+		}
 		state, err := runtime.StartRFLearning(ctx, options)
 		if err != nil {
 			return "", err
@@ -3993,7 +3998,7 @@ func parseRFLearnOptions(args []string) (RFLearnOptions, error) {
 		}
 		return options, nil
 	}
-	options.Timeout = 15 * time.Second
+	options.Timeout = 60 * time.Second
 	if len(args) == 2 {
 		duration, parseErr := time.ParseDuration(args[1])
 		if parseErr != nil {

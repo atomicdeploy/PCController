@@ -1,5 +1,6 @@
 #include "virtual_board/virtual_board.hpp"
 #include "virtual_board/protocol.hpp"
+#include "../../../Project/ControllerEvents.h"
 #include <iostream>
 #include <stdexcept>
 #include <algorithm>
@@ -79,9 +80,20 @@ int main() {
 #endif
     request(wire::RadioLearnStart,27,{0,0});
     board.console("rf 0xABCDEF 24 1 350"); receive();
+    board.console("rf 0xABCDEF 24 1 350");
+    auto repeatedRf=receive(100000);
+    require(std::any_of(repeatedRf.begin(),repeatedRf.end(),[](const auto &f){return f.opcode==wire::Event && !f.payload.empty() && (f.payload[0]&0x7F)==static_cast<uint8_t>(ControllerEventType::RfReceived);}),"held RF must remain visible while learning");
+    require(std::none_of(repeatedRf.begin(),repeatedRf.end(),[](const auto &f){return f.opcode==wire::Event && !f.payload.empty() && (f.payload[0]&0x7F)==static_cast<uint8_t>(ControllerEventType::RfLearned);}),"RF repeat must not learn twice");
     request(wire::RadioLearnCancel,28);
     auto learned=request(wire::RadioLearnList,29,{0});
     require(std::any_of(learned.begin(),learned.end(),[](const auto &f){return f.opcode==wire::RadioLearnListResponse && f.payload.size()>5;}),"RF platform injection must use shared learning/EEPROM code");
+    const auto beforeUnknown=board.outputSnapshot();
+    board.console("rf 0x123456 24 1 350");
+    auto unknownRf=receive(100000);
+    require(std::any_of(unknownRf.begin(),unknownRf.end(),[](const auto &f){return f.opcode==wire::Event && !f.payload.empty() && (f.payload[0]&0x7F)==static_cast<uint8_t>(ControllerEventType::RfReceived);}),"unlearned RF must reach host outside learning");
+    const auto afterUnknown=board.outputSnapshot();
+    require(beforeUnknown.relayMask==afterUnknown.relayMask,"unlearned reception actuated a relay");
+    for(size_t channel=0;channel<11;++channel)require(beforeUnknown.pwm[channel]==afterUnknown.pwm[channel],"unlearned reception actuated a user PWM output");
     const auto textResult=request(wire::DisplayText,30,{0,0,0,4,'T','E','S','T'});
     require(std::any_of(textResult.begin(),textResult.end(),[](const auto &f){return f.opcode==wire::Ack && f.sequence==30;}),"shared display text acknowledged");
     auto panel=request(wire::FrontPanelGet,31);
