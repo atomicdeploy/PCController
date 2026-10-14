@@ -49,6 +49,22 @@ process start, not that the external program completed its own work.
 
 ### MOSFET percentage assignments
 
+To assign an arbitrary level, use the existing host-owned **Board command**
+action with `pwm set CHANNEL PERCENT`, for example `pwm set 0 35` for 35%.
+The persisted action is `{"type":"board","command":"pwm set 0 35"}`.
+Channel numbers are the advertised zero-based PWM IDs, not relay numbers;
+use the channel's current renamable title when choosing it. Values accept
+0–100, including fractional percentages, and use the channel's configured
+linear/gamma curve. `pwm raw CHANNEL DUTY` is the separate 0–4095 expert path,
+not a percentage. Saving a binding does not execute its actions.
+
+For relative actions, choose the advertised Increase/Decrease control action,
+for example `{"type":"control","action_id":"pwm.0.increase"}` or
+`pwm.0.decrease`. Both retain the configured channel step and shared safety,
+serialization and authoritative-readback handling. The `board` action type
+means a command sent to the board by the host; it does not imply autonomous
+EEPROM execution when the host is stopped.
+
 Choose a channel from the advertised control list; do not infer channel numbers
 from a 0–100 brightness range. MOSFET controls advertise `pwm.N.on`, `.off`,
 `.toggle`, `.increase` and `.decrease`. On defaults to 100% logical intensity;
@@ -163,6 +179,34 @@ The catalog's learned records and host bindings are intentionally separate
 storage views of the same RF button. Neither API silently modifies the other.
 Wire acknowledgements do not prove over-the-air delivery to a physical receiver;
 real handset/receiver/transmitter validation remains a physical acceptance gate.
+
+## Cafe deployment and small-AVR fit check · 14 October 2026
+
+The requested deployment-first pass installed current main source
+`0f067a2f3d02c8d8a9779b2c3e29ee4f81a4208c` using the primary-owned updater.
+Operation `op-3cf502807cf36e56` acknowledged restart/health with
+`terminal_verified=true`; executable SHA-256 is
+`8cd71d69c5da513160ecc2558fabbc6b8b57407ca636ef1f88ecb5f51f579ff6`.
+The live cached RF catalog is connected and advertises Increase/Decrease for
+current names including Window, Loostr and Garden. Settings and learned RF
+records were not edited, and no output, RF transmission or firmware was flashed.
+Post-deployment PWM/RF/configuration suites passed through the stable Go runner;
+fresh five-target/native/AVR CI was dispatched as run `38467880758`.
+
+Board ownership was assessed, not assumed. The full default AVR manifest has
+68 flash bytes before the reserved identity at `0x7e74`. A compact RF set/step
+prototype reusing the existing 8-to-12-bit expansion overflowed that boundary
+by 62 bytes. A second prototype preserved the existing twelve-byte RF record:
+its two mapping bytes packed a four-bit channel and twelve-bit raw value/step,
+and reused `adjustValue` for bounded relative changes. That build's data load
+range `0x7e50..0x7ed3` also overlapped identity `0x7e74..0x7e7f` (96 bytes past
+the allowed start). Neither is a production implementation or a proof that all
+possible future optimizations are impossible. Both failed trials were restored;
+the working shared production firmware, EEPROM layout and existing mappings
+remain unchanged. A larger-flash target could be assessed separately; it has not
+been built or flashed with those trials. Do not remove firmware features or move
+the identity/bootloader to claim a fit. Host-owned curve-aware assignments remain
+the delivered choice for Cafe, with physical RF/actuator acceptance still open.
 
 ## Integration acceptance checkpoint
 

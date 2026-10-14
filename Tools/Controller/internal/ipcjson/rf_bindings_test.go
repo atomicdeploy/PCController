@@ -124,6 +124,44 @@ func TestRFBindingAdvertisedPWMControlCanBeSavedWithoutActuation(t *testing.T) {
 	}
 }
 
+func TestRFBindingPWMAbsoluteValueAndRelativeStepsPreserveIntent(t *testing.T) {
+	for _, command := range []string{"pwm set 0 0", "pwm set 0 12.5", "pwm set 0 35", "pwm set 0 100"} {
+		t.Run(command, func(t *testing.T) {
+			service, config := rfBindingTestService(t)
+			step := 2.5
+			channel := appconfig.PWMChannel(config.UI, 0)
+			channel.StepPercent = &step
+			config.UI.PWMChannels[appconfig.PWMChannelKey(0)] = channel
+			code := uint32(42)
+			rule := appconfig.Automation{Name: "MOSFET", Enabled: true,
+				Match: appconfig.AutomationMatch{Kind: "rf.gesture", Source: "rf", RFCode: &code, RFBits: 24, RFProtocol: 1, Gesture: "down"},
+				Actions: []appconfig.AutomationAction{
+					{Type: "board", Command: command},
+					{Type: "control", ActionID: "pwm.0.increase"},
+					{Type: "control", ActionID: "pwm.0.decrease"},
+				},
+			}
+			raw, _ := json.Marshal(map[string]any{"binding": rule})
+			if _, err := service.putRFBinding(raw); err != nil {
+				t.Fatal(err)
+			}
+			if len(config.Automations) != 1 {
+				t.Fatal("RF rule was not saved exactly once")
+			}
+			got := config.Automations[0].Actions
+			if len(got) != 3 || got[0].Command != command || got[1].ActionID != "pwm.0.increase" || got[2].ActionID != "pwm.0.decrease" {
+				t.Fatalf("RF value or ordered relative actions changed: %+v", got)
+			}
+			if appconfig.PWMStepPercent(appconfig.PWMChannel(config.UI, 0)) != step {
+				t.Fatal("RF assignment rewrote channel step")
+			}
+			if service.Client.Snapshot().Connected {
+				t.Fatal("saving an assignment connected or actuated a board")
+			}
+		})
+	}
+}
+
 func TestRFBindingKeyboardRequiresExplicitPolicyConsent(t *testing.T) {
 	service, config := rfBindingTestService(t)
 	raw := json.RawMessage(`{"binding":{"name":"Keyboard","enabled":true,"match":{"kind":"rf.gesture","source":"rf","rf_code":12345,"rf_bits":24,"rf_protocol":1,"gesture":"down"},"actions":[{"type":"virtual-key","virtual_key":"F23","hold_ms":50}]}}`)
