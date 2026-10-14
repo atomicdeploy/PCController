@@ -32,8 +32,9 @@ func (model Model) handleRFLearningPreferencesKey(key string) (Model, tea.Cmd, b
 			model.rfValue.Learning.TimeoutSeconds--
 		}
 	case "s":
-		model.persistRFConfig("RF learning settings saved")
-		model.rfPreferencesOpen = false
+		if model.persistRFConfig("RF learning settings saved") {
+			model.rfPreferencesOpen = false
+		}
 	}
 	return model, nil, true
 }
