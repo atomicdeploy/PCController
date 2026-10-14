@@ -265,12 +265,22 @@ func TestPWMAbsoluteCommandUsesConfiguredCurveAndRejectsInvalidPercent(t *testin
 				channel.Curve, channel.Gamma = curve, 2.2
 				config.UI.PWMChannels[appconfig.PWMChannelKey(0)] = channel
 				var mu sync.Mutex
-				writes := 0
+				writes, reads := 0, 0
 				var actual uint16
 				port := &pwmActionTestPort{reconnectTestPort: newReconnectTestPort(), replies: make(chan []byte, 4)}
 				port.handle = func(frame native.Frame) (native.Frame, error) {
 					mu.Lock()
 					defer mu.Unlock()
+					// Absolute zero uses the shared semantic Off read/write/read
+					// path so brightness recall is preserved; positive absolute
+					// values still have one direct framed write.
+					if frame.Opcode == native.OpPWMGet && len(frame.Payload) == 0 {
+						reads++
+						payload := make([]byte, 34)
+						payload[0] = 1
+						binary.LittleEndian.PutUint16(payload[2:], actual)
+						return native.Frame{Opcode: native.OpPWMValues, Payload: payload}, nil
+					}
 					if frame.Opcode != native.OpPWMSet || len(frame.Payload) != 3 || frame.Payload[0] != 0 {
 						return native.Frame{}, errors.New("unexpected PWM command frame")
 					}
@@ -289,11 +299,18 @@ func TestPWMAbsoluteCommandUsesConfiguredCurveAndRejectsInvalidPercent(t *testin
 				mu.Lock()
 				defer mu.Unlock()
 				if !valid {
-					if err == nil || writes != 0 {
+					if err == nil || writes != 0 || reads != 0 {
 						t.Fatalf("invalid percent reached transport: %q writes=%d err=%v", text, writes, err)
 					}
 				} else if err != nil || writes != 1 || actual != appconfig.PWMRawFromPercent(percent, channel) {
 					t.Fatalf("absolute percent conversion/write failed: %q curve=%s raw=%d writes=%d err=%v", text, curve, actual, writes, err)
+				}
+				wantReads := 0
+				if valid && percent == 0 {
+					wantReads = 2
+				}
+				if reads != wantReads {
+					t.Fatalf("absolute value readback count = %d, want %d", reads, wantReads)
 				}
 			})
 		}
