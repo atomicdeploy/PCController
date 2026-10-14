@@ -1,6 +1,6 @@
 # Shared Off-intent brightness persistence
 
-Follow-up to [#675](https://github.com/atomicdeploy/PCController/issues/675).
+Follow-up to GitHub issue #675.
 The accepted one-button RF implementation remains independently available on
 main; this follow-up closes normal CLI/RPC/semantic Off persistence gaps.
 

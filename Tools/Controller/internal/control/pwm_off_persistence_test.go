@@ -45,8 +45,11 @@ func TestPWMOffPersistenceEvidenceAndSerializedStore(t *testing.T) {
 	for _, mode := range []string{"save", "duplicate", "unknown", "full policy", "stale generation", "stale revision", "nonzero", "owner replaced in store", "slot changed in store", "other slot changed", "same save in store", "policy changed in store"} {
 		t.Run(mode, func(t *testing.T) {
 			config := pwmOffPersistenceConfig()
-			runtime := &Runtime{session: &link.Session{}, generation: 7, port: ports.Info{Name: "fixture"},
-				havePWMValues: true, pwmValues: native.PWMValues{Available: true}, pwmRevision: 9, pwmRecallGeneration: 7}
+			runtime := New(Options{})
+			session := link.NewForPort("fixture", newReconnectTestPort())
+			t.Cleanup(func() { _ = session.Close() })
+			runtime.session, runtime.generation, runtime.port = session, 7, ports.Info{Name: "fixture"}
+			runtime.havePWMValues, runtime.pwmValues, runtime.pwmRevision, runtime.pwmRecallGeneration = true, native.PWMValues{Available: true}, 9, 7
 			runtime.pwmRecall[1] = PWMRecallValue{Known: true, Raw: 239}
 			attempts, saves := 0, 0
 			options := CommandOptions{HostConfig: func() appconfig.Config { return config }, UpdateHostConfig: func(change func(*appconfig.Config) error) error {
