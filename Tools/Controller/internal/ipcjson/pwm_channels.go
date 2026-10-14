@@ -86,13 +86,39 @@ func (service *Service) setPWMAndReadback(ctx context.Context, channel byte, raw
 	if err := service.rejectLockedPeripheral(fmt.Sprintf("pwm.%d", channel)); err != nil {
 		return pwmValues{}, err
 	}
+	if raw == 0 {
+		ctx, cancel := context.WithTimeout(ctx, pwmOperationTimeout)
+		defer cancel()
+		snapshot := service.Client.Snapshot()
+		config := service.hostConfig()
+		identity, _, _ := boardProfileForSnapshot(config, snapshot)
+		_, err := service.Client.ApplyPWMAction(ctx, snapshot.ConnectionGeneration, channel, "off", appconfig.PWMChannelForProfile(config, identity.Value, int(channel)))
+		if err != nil {
+			return pwmValues{}, err
+		}
+		values := service.cachedPWMValues()
+		if values == nil || values.ConnectionGeneration != snapshot.ConnectionGeneration {
+			return pwmValues{}, &pwmConfirmationError{cause: fmt.Errorf("PWM owner changed after Off")}
+		}
+		return *values, nil
+	}
 	return changePWMAndReadback(ctx, func(ctx context.Context) error {
 		return service.Client.SetPWMChannel(ctx, channel, raw)
 	}, service.pwmValues)
 }
 
 func (service *Service) clearPWMAndReadback(ctx context.Context) (pwmValues, error) {
-	return changePWMAndReadback(ctx, service.Client.AllPWMOff, service.pwmValues)
+	ctx, cancel := context.WithTimeout(ctx, pwmOperationTimeout)
+	defer cancel()
+	snapshot := service.Client.Snapshot()
+	if _, err := service.Client.ApplyPWMAllOff(ctx, snapshot.ConnectionGeneration); err != nil {
+		return pwmValues{}, err
+	}
+	values := service.cachedPWMValues()
+	if values == nil || values.ConnectionGeneration != snapshot.ConnectionGeneration {
+		return pwmValues{}, &pwmConfirmationError{cause: fmt.Errorf("PWM owner changed after All-Off")}
+	}
+	return *values, nil
 }
 
 func (service *Service) describePWMValues(values native.PWMValues) pwmValues {

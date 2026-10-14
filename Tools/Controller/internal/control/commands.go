@@ -155,6 +155,9 @@ func parseDisplayMilliseconds(value string) (int, error) {
 
 func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 	engine := shell.New(100)
+	if options.HostConfig != nil || options.Resolve != nil {
+		runtime.configurePWMRecallPersistence(func() CommandOptions { return resolveCommandOptions(options) })
+	}
 	macroRunner := NewMacroRunner(
 		runtime,
 		options.Macros,
@@ -3712,11 +3715,6 @@ func pwmCommand(ctx context.Context, runtime *Runtime, options CommandOptions, a
 		if err != nil {
 			return "", err
 		}
-		if (strings.EqualFold(args[0], "toggle") || strings.EqualFold(args[0], "off")) && appconfig.PWMOnBehavior(channelConfig) == "restore" {
-			if err = persistPWMRecall(runtime, options, generation, channel); err != nil {
-				return "", fmt.Errorf("PWM applied but brightness persistence failed (not retried): %w", err)
-			}
-		}
 		return fmt.Sprintf("PWM channel %d logical=%.3f%% raw=%d", channel, appconfig.PWMPercentFromRaw(values.Values[channel], channelConfig), values.Values[channel]), nil
 	}
 	if len(args) == 1 {
@@ -3741,7 +3739,9 @@ func pwmCommand(ctx context.Context, runtime *Runtime, options CommandOptions, a
 			}
 			return strings.Join(lines, "\n"), nil
 		case "off":
-			return "all PWM channels off", command(ctx, runtime, native.OpPWMAllOff, nil)
+			owner := pwmRecallOwnerSnapshot(runtime)
+			_, err := runtime.ApplyPWMAllOff(ctx, owner.ConnectionGeneration)
+			return "PWM All-Off acknowledged and read back", err
 		}
 	}
 	if len(args) == 3 && (strings.EqualFold(args[0], "set") || strings.EqualFold(args[0], "raw")) {
@@ -3771,6 +3771,16 @@ func pwmCommand(ctx context.Context, runtime *Runtime, options CommandOptions, a
 		payload, err := native.PWMSetPayload(channel, value)
 		if err != nil {
 			return "", err
+		}
+		if value == 0 {
+			config := appconfig.Defaults()
+			if options.HostConfig != nil {
+				config = options.HostConfig()
+			}
+			owner := pwmRecallOwnerSnapshot(runtime)
+			channelConfig := appconfig.PWMChannelForProfile(config, pwmProfileIdentity(owner), int(channel))
+			_, err := runtime.ApplyPWMAction(ctx, owner.ConnectionGeneration, channel, "off", channelConfig)
+			return fmt.Sprintf("PWM channel %d raw value 0", channel), err
 		}
 		return fmt.Sprintf("PWM channel %d raw value %d", channel, value),
 			command(ctx, runtime, native.OpPWMSet, payload)
