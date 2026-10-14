@@ -4119,6 +4119,8 @@
               "controller.rf.learn.status",
               "controller.rf.list",
               "controller.rf.map",
+              "controller.rf.observed.add",
+              "controller.rf.preferences.set",
               "controller.rf.presentation",
               "controller.rf.remove",
               "controller.rf.transmit",

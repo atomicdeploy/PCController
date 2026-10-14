@@ -658,7 +658,7 @@ func (model Model) appSettingsPage() string {
 func (model Model) rfPrimaryItems() []actionBarItem {
 	items := []actionBarItem{
 		{label: "L Learn", action: "rf-learn", style: buttonGoodStyle},
-		{label: "Y Timed learn · 30s", action: "rf-timer", style: buttonStyle},
+		{label: "P Settings", action: "rf-settings", style: buttonStyle},
 	}
 	if model.preview == nil && model.rfLearnState().Active {
 		items = []actionBarItem{{label: "C Cancel learning", action: "rf-cancel", style: buttonBadStyle}}
@@ -670,6 +670,9 @@ func (model Model) rfPrimaryItems() []actionBarItem {
 }
 
 func (model Model) rfPage() string {
+	if model.rfPreferencesOpen {
+		return model.rfLearningPreferencesPage()
+	}
 	if model.rfActionPicker {
 		return model.rfActionPickerPage()
 	}
@@ -727,7 +730,7 @@ func (model Model) rfPage() string {
 	lines := []string{
 		sectionHeader(model.width, "433 MHz RF", "receive INT0 · transmit INT1 · learning "+learnState),
 		lipgloss.JoinHorizontal(lipgloss.Top, intersperseStrings(primaryButtons, " ")...),
-		lipgloss.JoinHorizontal(lipgloss.Top, buttonGoodStyle.Render("W Guided A/B/C/D"), " ", buttonStyle.Render("A Search action"), " ", buttonStyle.Render("N Rename"), " ", buttonStyle.Render("K Category"), " ", buttonStyle.Render("Z View in "+strings.ToUpper(radix)), " ", buttonStyle.Render("[ / ] Move ID"), " ", buttonStyle.Render("V Review"), " ", buttonBadStyle.Render("G Apply"), " ", buttonStyle.Render("X Rollback")),
+		lipgloss.JoinHorizontal(lipgloss.Top, buttonStyle.Render("A Search action"), " ", buttonStyle.Render("N Rename"), " ", buttonStyle.Render("K Category"), " ", buttonStyle.Render("Z View in "+strings.ToUpper(radix)), " ", buttonStyle.Render("[ / ] Move ID"), " ", buttonStyle.Render("V Review"), " ", buttonBadStyle.Render("G Apply"), " ", buttonStyle.Render("X Rollback")),
 		labelStyle.Render("Metadata (code, bits, protocol) follows each code when IDs are reordered."),
 		kv("Staged order", stageState),
 		kv("Apply transaction", applyState),

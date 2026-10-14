@@ -533,6 +533,8 @@
             "controller.rf.learn.status",
             "controller.rf.list",
             "controller.rf.map",
+            "controller.rf.observed.add",
+            "controller.rf.preferences.set",
             "controller.rf.presentation",
             "controller.rf.remove",
             "controller.rf.transmit",
@@ -1515,6 +1517,16 @@
     "controller.rf.map": {
       "capability": "board_commands",
       "summary": "Replace one learned RF mapping and return board readback.",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.rf.observed.add": {
+      "capability": "board_commands",
+      "summary": "Save a waveform actually received from the current board, unassigned, with preserved records and verified readback.",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.rf.preferences.set": {
+      "capability": "host_configuration",
+      "summary": "Save timed-learning, duration and continuous-capture preferences without entering learning.",
       "idempotency": "idempotent-with-authoritative-readback"
     },
     "controller.rf.presentation": {

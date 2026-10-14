@@ -2250,6 +2250,12 @@ func (client *Client) RFActivity() []Event {
 	return result
 }
 
+func (client *Client) RFReceptions() []control.RFReception { return client.runtime.RFReceptions() }
+
+func (client *Client) AddObservedRF(ctx context.Context, code uint32, bits, protocol byte) error {
+	return client.runtime.AddObservedRF(ctx, code, bits, protocol)
+}
+
 // RFLastSeen returns genuine board reception time for this exact waveform.
 // Zero means not observed in the current host session, not a guessed date.
 func (client *Client) RFLastSeen(code uint32, bits, protocol byte) time.Time {

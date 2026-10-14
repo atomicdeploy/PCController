@@ -408,20 +408,21 @@ func (model *Model) toggleRFRadix() {
 	model.persistRFConfig("RF code view changed to " + strings.ToUpper(model.rfValue.DisplayRadix))
 }
 
-func (model *Model) persistRFConfig(success string) {
+func (model *Model) persistRFConfig(success string) bool {
 	if model.saveRF == nil {
 		if model.remote != nil {
 			model.setNotice("Remote RF presentation editing is unavailable; board RF commands remain available")
-			return
+			return false
 		}
 		model.setNotice(success + " for this session; persistence hook unavailable")
-		return
+		return false
 	}
 	if err := model.saveRF(model.rfValue); err != nil {
 		model.appendLog("error", "save RF presentation: "+err.Error())
-		return
+		return false
 	}
 	model.setNotice(success)
+	return true
 }
 
 func (model *Model) cancelRFModal() {

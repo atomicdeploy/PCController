@@ -319,6 +319,9 @@ type Runtime struct {
 	activityLog   []Event
 	rfActivityLog []Event
 	rfLastSeen    map[rfGestureKey]time.Time
+	rfReceptions  map[rfGestureKey]RFReception
+	rfReplaceMu   sync.Mutex
+	rfLearnOpsMu  sync.Mutex
 	nextEventID   uint64
 	eventNotify   chan struct{}
 	rfMu          sync.Mutex
@@ -3294,6 +3297,10 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 						if parsedDevice.Timed {
 							deviceEvent.Metadata = map[string]string{"device_micros": strconv.FormatUint(uint64(parsedDevice.DeviceMicros), 10)}
 						}
+						if deviceEvent.Metadata == nil {
+							deviceEvent.Metadata = make(map[string]string)
+						}
+						deviceEvent.Metadata["connection_generation"] = strconv.FormatUint(generation, 10)
 					}
 					if parsedDevice.Type == native.EventAppNavigation {
 						deviceEvent.Target = "app.clients"
@@ -3309,6 +3316,8 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 				}
 				if rfMappingRequired && parsedDevice != nil {
 					runtime.publishRFMappingRequired(*parsedDevice, rfCaptured)
+					captureSession := runtime.RFLearnState().StartedAt
+					go runtime.stopAfterRFLearnCapture(generation, rfCaptured, captureSession)
 				}
 				if parsedDevice != nil &&
 					parsedDevice.Type == native.EventRFReceived {
@@ -4247,7 +4256,7 @@ func (runtime *Runtime) publishEvent(event Event) Event {
 	runtime.nextEventID++
 	event.ID = runtime.nextEventID
 	event.Time = time.Now()
-	runtime.recordRFReceptionLocked(event)
+	runtime.recordRFReceptionLocked(&event)
 	runtime.eventLog = append(runtime.eventLog, event)
 	if len(runtime.eventLog) > 512 {
 		runtime.eventLog = append([]Event(nil), runtime.eventLog[len(runtime.eventLog)-512:]...)
