@@ -9,7 +9,7 @@ import type { ControllerEvent, DialogState, Locale, Snapshot } from './types'
 
 type Entry = RfSignal & { id?:number; name?:string; pulse_us?:number; code_display?:string; action_kind?:number; action_value?:number; behavior?:number; board_assignment?:{label:string;action:string;target?:string;behavior?:string} }
 type Mapping = { action:string;targets:string[];behaviors:string[];behavior_labels?:Record<string,string> }
-type Catalog = { entries:Entry[];entries_sampled?:boolean;receptions:RfReception[];preferences:RfLearnPreferences;host_instance_id:string;connection_generation:number;learning:{active:boolean;remaining_ms:number;mode:string};bindings:{name:string;match:{rf_code:number;rf_bits:number;rf_protocol:number}}[];board_mapping_options:Mapping[];peripherals:{controls:{key:string;name:string}[]} }
+type Catalog = { entries:Entry[];entries_sampled?:boolean;receptions:RfReception[];preferences:RfLearnPreferences;host_instance_id:string;connection_generation:number;learning:{active:boolean;remaining_ms:number;mode:string};bindings:{name:string;match:{rf_code:number;rf_bits:number;rf_protocol:number};actions:{type:string;command?:string;action_id?:string}[]}[];board_mapping_options:Mapping[];peripherals:{controls:{key:string;name:string;actions?:{id:string;name?:string}[]}[]} }
 
 export function RFManager({ snapshot,events,locale,openDialog }: {snapshot:Snapshot;events:ControllerEvent[];locale:Locale;openDialog:(dialog:DialogState)=>void}) {
  const copy=(en:string,fa:string)=>locale==='fa'?fa:en
@@ -45,6 +45,11 @@ export function RFManager({ snapshot,events,locale,openDialog }: {snapshot:Snaps
  const rows=useMemo(()=>{const map=new Map<string,Entry>();for(const e of catalog?.entries??[])map.set(rfKey(e),e);for(const r of receipts)if(!map.has(rfKey(r)))map.set(rfKey(r),r);for(const b of catalog?.bindings??[]){const s={code:b.match.rf_code,bits:b.match.rf_bits,protocol:b.match.rf_protocol};if(!map.has(rfKey(s)))map.set(rfKey(s),s)}return [...map.values()]},[catalog,receipts])
  const active=snapshot.rf_learning?.active??catalog?.learning?.active
  const option=catalog?.board_mapping_options.find(o=>o.action===mapping?.action)
+ const bindingLabels=(entry:Entry)=>[...new Set((catalog?.bindings??[]).filter(b=>b.match.rf_code===entry.code&&b.match.rf_bits===entry.bits&&b.match.rf_protocol===entry.protocol).flatMap(b=>b.actions.map(action=>{
+  if(action.type==='control'){for(const control of catalog?.peripherals.controls??[]){const found=control.actions?.find(a=>a.id===action.action_id);if(found)return `${control.name} · ${found.name??action.action_id}`}}
+  if(action.type==='board'){const words=(action.command??'').split(/\s+/);if(words.length===3&&words[0]==='pwm'&&/^(?:[0-9]|1[0-5])$/.test(words[2])){const control=catalog?.peripherals.controls.find(c=>c.key===`pwm.${words[2]}`);if(control)return `${control.name} · ${words[1]}`}}
+  return b.name
+ })))]
  return <Card icon={Radio} iconTone="violet" title={copy('RF controls','کنترل RF')} action={<Button tone="ghost" icon={Settings2} aria-label={copy('RF settings','تنظیمات RF')} onClick={()=>setSettings(!settings)} />}>
   {error&&<div role="alert" className="inline-error">{error}</div>}
   <div className="rf-manager__toolbar">
@@ -61,7 +66,7 @@ export function RFManager({ snapshot,events,locale,openDialog }: {snapshot:Snaps
    return <div key={rfKey(entry)} className="rf-manager__row">
     <span className={`rf-receive-indicator${on?' is-on':''}`} role="img" aria-label={on?copy('Receiving','در حال دریافت'):copy('Not receiving','دریافت نمی‌شود')}/>
     <span className="rf-receive-count" title={copy('Receptions since this view opened','دریافت‌ها از باز شدن این نما')}>×{session.current.count(receipt)}</span>
-    <div className={`rf-manager__identity${learned?'':' is-unlearned'}`}><strong>{entry.name||`0x${entry.code.toString(16).toUpperCase()}`}</strong><small>{entry.bits} bits · {copy('Protocol','پروتکل')} {entry.protocol}{entry.board_assignment&&` · ${entry.board_assignment.label}`}</small>{catalog?.bindings.filter(b=>b.match.rf_code===entry.code&&b.match.rf_bits===entry.bits&&b.match.rf_protocol===entry.protocol).map(b=><small key={b.name}>{b.name}</small>)}</div>
+    <div className={`rf-manager__identity${learned?'':' is-unlearned'}`}><strong>{entry.name||`0x${entry.code.toString(16).toUpperCase()}`}</strong><small>{entry.bits} bits · {copy('Protocol','پروتکل')} {entry.protocol}{entry.board_assignment&&` · ${copy('On board','روی برد')}: ${entry.board_assignment.label}`}</small>{bindingLabels(entry).map(label=><small key={label}>{label}</small>)}</div>
     <div className="rf-manager__actions">{learned?<><Button tone="ghost" icon={Settings2} disabled={busy} aria-label={copy('Edit board assignment','ویرایش نگاشت برد')} onClick={()=>setMapping({id:entry.id!,action:entry.board_assignment?.action??'none',target:entry.board_assignment?.target,behavior:entry.board_assignment?.behavior})}/><Button tone="ghost" icon={Trash2} disabled={busy} aria-label={copy('Remove learned button','حذف دکمهٔ آموخته')} onClick={()=>{openDialog({open:true,tone:'danger',title:copy('Remove learned RF button?','دکمهٔ آموخته حذف شود؟'),body:entry.code_display??`0x${entry.code.toString(16)}`,confirmLabel:copy('Remove','حذف'),action:()=>command('remove',{id:entry.id})})}}/></>:<Button icon={Plus} disabled={busy||!receipt||active} onClick={()=>void command('observed.add',{code:entry.code,bits:entry.bits,protocol:entry.protocol})}>{copy('Add','افزودن')}</Button>}</div>
    </div>})}</div>
   {mapping&&<div className="rf-manager__settings"><select aria-label={copy('Board action','عمل برد')} value={mapping.action} onChange={e=>setMapping({id:mapping.id,action:e.target.value})}>{catalog?.board_mapping_options.map(o=><option key={o.action} value={o.action}>{o.action}</option>)}</select>

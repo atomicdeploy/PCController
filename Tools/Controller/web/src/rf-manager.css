@@ -10,4 +10,6 @@
 .rf-manager__identity strong,.rf-manager__identity small{overflow-wrap:anywhere}
 .rf-manager__identity.is-unlearned{color:var(--text-muted,#888)}
 .rf-manager__identity small{font-size:.8em;color:var(--text-muted,#888)}
+.workbench-grid > [data-layout-card-id="radio"]{grid-column:1 / -1}
+@media(min-width:1100px){.rf-manager__list{grid-template-columns:repeat(2,minmax(0,1fr))}.rf-manager__settings{grid-template-columns:repeat(3,minmax(0,1fr));align-items:center}}
 @media(max-width:480px){.rf-manager__row{flex-wrap:wrap}.rf-manager__actions{margin-inline-start:auto}}
