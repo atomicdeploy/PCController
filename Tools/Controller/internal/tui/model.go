@@ -110,6 +110,7 @@ type Model struct {
 	rfEditMode               string
 	rfCategoryDraft          string
 	rfGuideActive            bool
+	rfPreferencesOpen        bool
 	rfGuideStep              int
 	rfGuidePhase             string
 	rfGuideCandidate         *native.RFEntry

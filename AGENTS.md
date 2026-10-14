@@ -1,5 +1,7 @@
 # Repository execution rules
 
+- RF managers share the reception/learning contract in `docs/RF-RECEPTION-AND-LEARNING.md`: show all complete waveform identities, dim unlearned observations, preserve modal-local count baselines across refresh and use cumulative reception metadata through coalescing. Defaults are timed learning off, optional duration 60 seconds and continuous learning off. Learning settings are persistent, not competing timed/indefinite runtime actions. Keep hard-coded guided entry points hidden until pattern profiles exist. Unknown reception never grants output authority or persists a record without explicit Add/Assign.
+
 - On Windows, never run `go test` directly. It executes test programs from
   changing temporary paths and can repeatedly trigger Windows Firewall prompts.
 - Run Go verification through `build.cmd --host-only` or

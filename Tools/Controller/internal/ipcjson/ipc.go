@@ -1254,10 +1254,18 @@ func (service *Service) dispatch(
 		result, err = service.Client.ListLearnedDetailed(ctx)
 	case "controller.rf.catalog":
 		result, err = service.rfCatalog(ctx, request.Params)
+	case "controller.rf.observed.add":
+		var params struct { Code uint32 `json:"code"`; Bits byte `json:"bits"`; Protocol byte `json:"protocol"` }
+		if err = decodeStrictParams(request.Params,&params); err == nil {
+			err = service.Client.AddObservedRF(ctx,params.Code,params.Bits,params.Protocol)
+			if err == nil { result,err = service.Client.ListLearnedDetailed(ctx) }
+		}
 	case "controller.rf.binding.put":
 		result, err = service.putRFBinding(request.Params)
 	case "controller.rf.binding.remove":
 		result, err = service.removeRFBinding(request.Params)
+	case "controller.rf.preferences.set":
+		result, err = service.setRFLearningPreferences(request.Params)
 	case "controller.board_automation.list":
 		result, err = service.Client.BoardAutomations(ctx)
 	case "controller.board_automation.put":
@@ -1286,11 +1294,23 @@ func (service *Service) dispatch(
 		}
 	case "controller.rf.learn.start":
 		var params struct {
-			Mode      string `json:"mode,omitempty"`
-			TimeoutMS int64  `json:"timeout_ms,omitempty"`
+			Mode       string `json:"mode,omitempty"`
+			TimeoutMS  int64  `json:"timeout_ms,omitempty"`
+			Continuous *bool  `json:"continuous,omitempty"`
 		}
 		if err = decodeStrictParams(request.Params, &params); err == nil {
 			var mode controller.RFLearnMode
+			preferences := service.hostConfig().RF.Learning
+			if params.Mode == "" && preferences.Timed {
+				params.Mode = "timer"
+			}
+			if params.Mode == "timer" && params.TimeoutMS == 0 {
+				params.TimeoutMS = int64(preferences.TimeoutSeconds) * 1000
+			}
+			continuous := preferences.Continuous
+			if params.Continuous != nil {
+				continuous = *params.Continuous
+			}
 			mode, err = controller.ParseRFLearnMode(params.Mode)
 			if err != nil {
 				break
@@ -1308,6 +1328,7 @@ func (service *Service) dispatch(
 				ctx,
 				controller.RFLearnOptions{
 					Mode: mode, Timeout: time.Duration(params.TimeoutMS) * time.Millisecond,
+					Continuous: continuous,
 				},
 			)
 		}
@@ -2568,7 +2589,7 @@ func requestCapability(method string, params json.RawMessage) string {
 		return capabilityRead
 	case "controller.rf.catalog":
 		return capabilityRead
-	case "controller.rf.binding.put", "controller.rf.binding.remove":
+	case "controller.rf.binding.put", "controller.rf.binding.remove", "controller.rf.preferences.set":
 		return capabilityHostConfig
 	case "controller.host_menu.configure", "controller.host_menu.config.set",
 		"controller.ui.config.set",

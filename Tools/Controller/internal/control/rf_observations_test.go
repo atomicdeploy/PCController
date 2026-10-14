@@ -52,3 +52,30 @@ func TestRFLastSeenOnlyUsesGenuineMatchingReception(t *testing.T) {
 		t.Fatal("new session invented historical time")
 	}
 }
+
+func TestRFReceptionCountsIncludeUnlearnedPacketsAndIgnoreBridgeEchoes(t *testing.T) {
+	runtime := New(Options{})
+	for range 7 {
+		runtime.PublishStructuredEvent(rfReceptionFixture(42, 24, 1))
+	}
+	receipts := runtime.RFReceptions()
+	if len(receipts) != 1 || receipts[0].ReceivedCount != 7 {
+		t.Fatalf("wrong cumulative receptions: %+v", receipts)
+	}
+	event := rfReceptionFixture(42, 24, 1)
+	event.Source = "bridge"
+	runtime.PublishStructuredEvent(event)
+	if runtime.RFReceptions()[0].ReceivedCount != 7 {
+		t.Fatal("bridge echo counted")
+	}
+	latest := runtime.PublishStructuredEvent(rfReceptionFixture(42, 24, 1))
+	if latest.Metadata["received_count"] != "8" {
+		t.Fatal("coalesced consumers cannot recover count")
+	}
+	runtime.mu.Lock()
+	runtime.generation = 1
+	runtime.mu.Unlock()
+	if len(runtime.RFReceptions()) != 0 {
+		t.Fatal("replacement board inherited observations")
+	}
+}

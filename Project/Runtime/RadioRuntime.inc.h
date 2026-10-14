@@ -225,13 +225,15 @@ void serviceRadio() {
   const bool wasLearning = learningActive;
   if (wasLearning) {
     if (repeated) {
-      return;
-    }
-    remote.id = 0;
-    learned =
-        learnedRemotes.learn(code, bits, protocol, pulseLength, remote.id);
-    if (learned) {
-      appEvents.rfLearned(remote.id);
+      // Repeats remain reception evidence, without another EEPROM write.
+      learned = learnedRemotes.find(code, bits, protocol, remote);
+    } else {
+      remote.id = 0;
+      learned =
+          learnedRemotes.learn(code, bits, protocol, pulseLength, remote.id);
+      if (learned) {
+        appEvents.rfLearned(remote.id);
+      }
     }
   } else
 #endif

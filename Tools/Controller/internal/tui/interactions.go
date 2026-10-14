@@ -207,9 +207,13 @@ func (model Model) handleKey(message tea.KeyMsg) (Model, tea.Cmd, bool) {
 		}
 	}
 	if model.page == PageRF && model.rfGuideActive {
+		// Hidden until guided learning is driven by a pattern profile.
 		if updated, command, handled := model.handleRFGuidedKey(message); handled {
 			return updated, command, true
 		}
+	}
+	if model.page == PageRF && model.rfPreferencesOpen {
+		return model.handleRFLearningPreferencesKey(key)
 	}
 	// q is the conventional fast exit while the TUI itself owns the keyboard.
 	// Focused editors, searches, and pickers keep ownership so entering a literal
@@ -1342,21 +1346,15 @@ func (model Model) pageShortcut(key string) (Model, tea.Cmd, bool) {
 		}
 	case PageRF:
 		switch key {
-		case "w":
-			model = model.beginRFGuidedWorkflow()
+		case "p":
+			model.rfPreferencesOpen = true
 			return model, nil, true
 		case "l":
 			if model.preview == nil && model.rfLearnState().Active {
 				model.setNotice("RF learning is already active; cancel it before starting another session")
 				return model, nil, true
 			}
-			return model.dispatchLine("rf learn indefinite")
-		case "y":
-			if model.preview == nil && model.rfLearnState().Active {
-				model.setNotice("RF learning is already active; cancel it before starting another session")
-				return model, nil, true
-			}
-			return model.dispatchLine("rf learn timer 30s")
+			return model.dispatchLine("rf learn")
 		case "c":
 			if model.preview == nil && !model.rfLearnState().Active {
 				model.setNotice("RF learning is idle")
@@ -2059,11 +2057,11 @@ func (model Model) handleContentClick(row, x int) (tea.Model, tea.Cmd) {
 				if x >= position && x < position+width {
 					switch item.action {
 					case "rf-learn":
-						updated, command, _ := model.dispatchLine("rf learn indefinite")
+						updated, command, _ := model.dispatchLine("rf learn")
 						return updated, command
-					case "rf-timer":
-						updated, command, _ := model.dispatchLine("rf learn timer 30s")
-						return updated, command
+					case "rf-settings":
+						model.rfPreferencesOpen = true
+						return model, nil
 					case "rf-cancel":
 						updated, command, _ := model.dispatchLine("rf cancel")
 						return updated, command
