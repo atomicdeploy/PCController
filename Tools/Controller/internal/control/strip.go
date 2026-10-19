@@ -298,7 +298,9 @@ func (outputs *OutputScheduler) streamStripRainbow(ctx context.Context, count, f
 func nextStripFrameTime(previous, now time.Time, period time.Duration) time.Time {
 	next := previous.Add(period)
 	if !next.After(now) {
-		next = next.Add((now.Sub(next)/period + 1) * period)
+		// A late transfer already consumed the frame budget. Render current
+		// animation time immediately and rebase, without a catch-up burst.
+		next = now
 	}
 	return next
 }

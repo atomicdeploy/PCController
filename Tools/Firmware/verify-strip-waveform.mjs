@@ -3,6 +3,9 @@
 // Exercise the actual linked AVR bit loop, including compiler register allocation.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { loadProjectEnv } from '../Build/env.mjs'
+
+loadProjectEnv()
 
 const listingPath = process.argv[2]
 if (!listingPath) throw new Error('Usage: node Tools/Firmware/verify-strip-waveform.mjs AVR-LISTING.lst')
