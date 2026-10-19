@@ -120,14 +120,21 @@ func TestStripStreamRecoversAfterTransientFrameTimeout(t *testing.T) {
 	}
 }
 
-func TestNextStripFrameTimeSkipsBufferedIntervals(t *testing.T) {
+func TestNextStripFrameTimeRebasesLateTransfers(t *testing.T) {
 	period := 50 * time.Millisecond
 	previous := time.Unix(100, 0)
 	if got, want := nextStripFrameTime(previous, previous.Add(10*time.Millisecond), period), previous.Add(period); !got.Equal(want) {
 		t.Fatalf("ordinary next frame = %s, want %s", got, want)
 	}
-	if got, want := nextStripFrameTime(previous, previous.Add(121*time.Millisecond), period), previous.Add(150*time.Millisecond); !got.Equal(want) {
-		t.Fatalf("delayed next frame = %s, want %s", got, want)
+	for _, delay := range []time.Duration{50, 70, 121} {
+		now := previous.Add(delay * time.Millisecond)
+		got := nextStripFrameTime(previous, now, period)
+		if !got.Equal(now) {
+			t.Fatalf("late transfer %s: next frame = %s, want %s", delay*time.Millisecond, got, now)
+		}
+		if following := nextStripFrameTime(got, now.Add(10*time.Millisecond), period); !following.Equal(now.Add(period)) {
+			t.Fatalf("late transfer must rebase subsequent pacing: got %s", following)
+		}
 	}
 }
 
