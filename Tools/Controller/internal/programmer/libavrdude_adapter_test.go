@@ -124,3 +124,22 @@ func TestNonDefaultAVRRequiresExplicitGeometry(t *testing.T) {
 		t.Fatalf("unexpected non-default AVR command: %s", joined)
 	}
 }
+
+// The firmware identity occupies the end of application flash. Urclock metadata
+// must not reserve its final byte; this must match the CLI uploader contract.
+func TestLibavrdudeUrclockFlashDisablesMetadata(t *testing.T) {
+	for _, programmer := range []string{"urclock", "usbasp"} {
+		args, err := libavrdudeAdapterArguments(Options{
+			MCU: "atmega328p", Operation: OperationWriteFlash,
+			HexPath: "firmware.hex", BaudRate: 115200,
+		}, "avrdude.conf", programmer)
+		if err != nil {
+			t.Fatal(err)
+		}
+		joined := strings.Join(args, " ")
+		got := strings.Contains(joined, "--extended nometadata")
+		if got != (programmer == "urclock") {
+			t.Fatalf("%s metadata policy: %s", programmer, joined)
+		}
+	}
+}

@@ -172,7 +172,7 @@ func libavrdudeAdapterArguments(options Options, configuration, programmer strin
 	switch options.Operation {
 	case OperationWriteFlash:
 		if programmer == "urclock" {
-			args = append(args, "--no-auto-erase")
+			args = append(args, "--no-auto-erase", "--extended", "nometadata")
 		}
 		update = "flash:w:" + options.HexPath + ":i"
 	case OperationReadFlash:
