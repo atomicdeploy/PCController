@@ -101,6 +101,11 @@ jobs:
           --clean
           --version "$PCCONTROLLER_VERSION"
 
+      - name: "Verify linked strip output waveform"
+        run: >-
+          node Tools/Firmware/verify-strip-waveform.mjs
+          .build/firmware/PCController.ino_atmega328p_16000000L.lst
+
       - name: "💾 Assert the safe 1 KiB default EEPROM image"
         run: >-
           node .github/scripts/assert-firmware-defaults.mjs

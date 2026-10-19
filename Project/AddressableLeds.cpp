@@ -92,9 +92,12 @@ void show() {
       "nop" "\n\t"
       "sbiw %[count], 1" "\n\t"
       "brne head20%=" "\n"
-      : [port] "+e"(port), [byte] "+r"(byte), [bit] "+r"(bit),
-        [next] "+r"(next), [count] "+w"(count)
-      : [ptr] "e"(ptr), [hi] "r"(hi), [lo] "r"(lo));
+      // The loop overwrites these operands before its final use of hi/lo/port.
+      // Early-clobber prevents next (initially lo) from sharing lo's register.
+      : [byte] "+&r"(byte), [bit] "+&d"(bit), [next] "+&r"(next),
+        [count] "+&w"(count), [ptr] "+&e"(ptr)
+      : [port] "e"(port), [hi] "r"(hi), [lo] "r"(lo)
+      : "memory");
   SREG = savedSreg;
   _delay_us(80);
 #elif defined(PCCONTROLLER_NATIVE)
