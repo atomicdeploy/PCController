@@ -294,8 +294,9 @@ func commandOptions(store *appconfig.Store, fallbackProject string) control.Comm
 		ArduinoConfig:         config.Programming.ToolchainConfig,
 		Avrdude:               config.Programming.Avrdude,
 		AvrdudeConf:           config.Programming.AvrdudeConf,
-		Programmer:            configuredProgrammer(config),
-		HostConfig:            store.Current,
+		AvrdudeBackend:        config.Programming.AvrdudeBackend, AvrdudeAdapter: config.Programming.AvrdudeAdapter,
+		Programmer: configuredProgrammer(config),
+		HostConfig: store.Current,
 		BuzzerRuntime: func(settings native.Settings, haveBoard bool) appconfig.BuzzerRuntimeStatus {
 			state := store.BuzzerRuntimeState()
 			var backend, executable, backendError string
@@ -352,14 +353,15 @@ func commandOptions(store *appconfig.Store, fallbackProject string) control.Comm
 			ArduinoConfig:         current.Programming.ToolchainConfig,
 			Avrdude:               current.Programming.Avrdude,
 			AvrdudeConf:           current.Programming.AvrdudeConf,
-			Programmer:            configuredProgrammer(current),
-			HostConfig:            store.Current,
-			BuzzerRuntime:         options.BuzzerRuntime,
-			UpdateHostConfig:      options.UpdateHostConfig,
-			Macros:                options.Macros,
-			InitializeBoard:       options.InitializeBoard,
-			BlankBoard:            options.BlankBoard,
-			USBaspDriver:          options.USBaspDriver,
+			AvrdudeBackend:        current.Programming.AvrdudeBackend, AvrdudeAdapter: current.Programming.AvrdudeAdapter,
+			Programmer:       configuredProgrammer(current),
+			HostConfig:       store.Current,
+			BuzzerRuntime:    options.BuzzerRuntime,
+			UpdateHostConfig: options.UpdateHostConfig,
+			Macros:           options.Macros,
+			InitializeBoard:  options.InitializeBoard,
+			BlankBoard:       options.BlankBoard,
+			USBaspDriver:     options.USBaspDriver,
 		}
 	}
 	return options
@@ -517,10 +519,11 @@ func apiOptions(
 		ToolchainConfig:       config.Programming.ToolchainConfig,
 		Avrdude:               config.Programming.Avrdude,
 		AvrdudeConf:           config.Programming.AvrdudeConf,
-		Programmer:            configuredProgrammer(config),
-		MotionDoorPolicy:      config.Safety.MotionDoorPolicy,
-		RF:                    config.RF,
-		OSActions:             config.OSActions,
+		AvrdudeBackend:        config.Programming.AvrdudeBackend, AvrdudeAdapter: config.Programming.AvrdudeAdapter,
+		Programmer:       configuredProgrammer(config),
+		MotionDoorPolicy: config.Safety.MotionDoorPolicy,
+		RF:               config.RF,
+		OSActions:        config.OSActions,
 		LCDPresentation: controllerapi.LCDPresentationOptions{
 			Enabled:      config.UI.LCDServiceEnabled,
 			Debounce:     time.Duration(config.UI.LCDPromptDebounceMS) * time.Millisecond,

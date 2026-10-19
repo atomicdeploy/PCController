@@ -94,15 +94,15 @@ func TestPublicOptionsExposeCanonicalFirmwareFeatureStatus(t *testing.T) {
 }
 
 func TestToolchainConfigurationSurvivesPublicFacadeUpdates(t *testing.T) {
-	client := New(Options{ToolchainCLI: "cli", ToolchainConfig: "managed.yaml", Avrdude: "avr", AvrdudeConf: "avr.conf"})
+	client := New(Options{ToolchainCLI: "cli", ToolchainConfig: "managed.yaml", Avrdude: "avr", AvrdudeConf: "avr.conf", AvrdudeBackend: "cli", AvrdudeAdapter: "adapter"})
 	defer client.Shutdown()
 	options := client.currentCommandOptions()
-	if options.ArduinoConfig != "managed.yaml" || options.ArduinoCLI != "cli" || options.Avrdude != "avr" || options.AvrdudeConf != "avr.conf" {
+	if options.ArduinoConfig != "managed.yaml" || options.ArduinoCLI != "cli" || options.Avrdude != "avr" || options.AvrdudeConf != "avr.conf" || options.AvrdudeBackend != "cli" || options.AvrdudeAdapter != "adapter" {
 		t.Fatalf("initial programming paths lost: %#v", options)
 	}
-	client.ApplyHostOptions(Options{ToolchainCLI: "updated-cli", ToolchainConfig: "updated.yaml", Avrdude: "updated-avr", AvrdudeConf: "updated.conf"})
+	client.ApplyHostOptions(Options{ToolchainCLI: "updated-cli", ToolchainConfig: "updated.yaml", Avrdude: "updated-avr", AvrdudeConf: "updated.conf", AvrdudeBackend: "library", AvrdudeAdapter: "updated-adapter"})
 	options = client.currentCommandOptions()
-	if options.ArduinoConfig != "updated.yaml" || options.ArduinoCLI != "updated-cli" || options.Avrdude != "updated-avr" || options.AvrdudeConf != "updated.conf" {
+	if options.ArduinoConfig != "updated.yaml" || options.ArduinoCLI != "updated-cli" || options.Avrdude != "updated-avr" || options.AvrdudeConf != "updated.conf" || options.AvrdudeBackend != "library" || options.AvrdudeAdapter != "updated-adapter" {
 		t.Fatalf("updated programming paths lost: %#v", options)
 	}
 }
