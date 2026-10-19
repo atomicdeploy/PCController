@@ -258,6 +258,8 @@ type Options struct {
 	ToolchainConfig       string                 `json:"toolchain_config,omitempty"`
 	Avrdude               string                 `json:"avrdude,omitempty"`
 	AvrdudeConf           string                 `json:"avrdude_conf,omitempty"`
+	AvrdudeBackend        string                 `json:"avrdude_backend,omitempty"`
+	AvrdudeAdapter        string                 `json:"avrdude_adapter,omitempty"`
 	Programmer            string                 `json:"programmer,omitempty"`
 	Macros                []Macro                `json:"macros,omitempty"`
 	StripEffects          []StripEffect          `json:"strip_effects,omitempty"`
@@ -717,10 +719,11 @@ func New(options Options) *Client {
 		ArduinoConfig:         options.ToolchainConfig,
 		Avrdude:               options.Avrdude,
 		AvrdudeConf:           options.AvrdudeConf,
-		Programmer:            options.Programmer,
-		HostConfig:            client.currentHostConfig,
-		UpdateHostConfig:      client.updateHostConfig,
-		Outputs:               client.outputs,
+		AvrdudeBackend:        options.AvrdudeBackend, AvrdudeAdapter: options.AvrdudeAdapter,
+		Programmer:       options.Programmer,
+		HostConfig:       client.currentHostConfig,
+		UpdateHostConfig: client.updateHostConfig,
+		Outputs:          client.outputs,
 	}
 	client.engine = control.NewCommandEngine(runtime, control.CommandOptions{
 		ProjectPath:           options.ProjectPath,
@@ -732,11 +735,12 @@ func New(options Options) *Client {
 		ArduinoConfig:         options.ToolchainConfig,
 		Avrdude:               options.Avrdude,
 		AvrdudeConf:           options.AvrdudeConf,
-		Programmer:            options.Programmer,
-		HostConfig:            client.currentHostConfig,
-		UpdateHostConfig:      client.updateHostConfig,
-		Resolve:               client.currentCommandOptions,
-		Outputs:               client.outputs,
+		AvrdudeBackend:        options.AvrdudeBackend, AvrdudeAdapter: options.AvrdudeAdapter,
+		Programmer:       options.Programmer,
+		HostConfig:       client.currentHostConfig,
+		UpdateHostConfig: client.updateHostConfig,
+		Resolve:          client.currentCommandOptions,
+		Outputs:          client.outputs,
 	})
 	automationContext, cancelAutomations := context.WithCancel(context.Background())
 	go func() {
@@ -826,8 +830,9 @@ func (client *Client) ApplyHostOptions(options Options) bool {
 		FirmwareFeatures:      firmwareFeatures,
 		FirmwareFeaturesError: firmwareFeaturesErr,
 		ArduinoCLI:            options.ToolchainCLI, Avrdude: options.Avrdude,
-		ArduinoConfig:    options.ToolchainConfig,
-		AvrdudeConf:      options.AvrdudeConf,
+		ArduinoConfig:  options.ToolchainConfig,
+		AvrdudeConf:    options.AvrdudeConf,
+		AvrdudeBackend: options.AvrdudeBackend, AvrdudeAdapter: options.AvrdudeAdapter,
 		Programmer:       options.Programmer,
 		HostConfig:       client.currentHostConfig,
 		UpdateHostConfig: client.updateHostConfig,

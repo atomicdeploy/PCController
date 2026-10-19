@@ -50,6 +50,8 @@ type CommandOptions struct {
 	ArduinoConfig         string
 	Avrdude               string
 	AvrdudeConf           string
+	AvrdudeBackend        string
+	AvrdudeAdapter        string
 	Programmer            string
 	HostConfig            func() appconfig.Config
 	BuzzerRuntime         func(native.Settings, bool) appconfig.BuzzerRuntimeStatus
@@ -4298,6 +4300,7 @@ func programCommandRun(
 		Method: method, Operation: operation, FQBN: options.FQBN,
 		ArduinoCLI: options.ArduinoCLI, ArduinoConfig: options.ArduinoConfig,
 		Avrdude: options.Avrdude, AvrdudeConf: options.AvrdudeConf,
+		AvrdudeBackend: options.AvrdudeBackend, AvrdudeAdapter: options.AvrdudeAdapter,
 		Programmer:     options.Programmer,
 		USBaspAutoSlow: true,
 	}
@@ -4720,7 +4723,8 @@ func safeFlashCommand(
 		Method: method, Port: port, Operation: programmer.OperationBackup,
 		FQBN: options.FQBN, Programmer: options.Programmer,
 		ArduinoCLI: options.ArduinoCLI, ArduinoConfig: options.ArduinoConfig, Avrdude: options.Avrdude,
-		AvrdudeConf:               options.AvrdudeConf,
+		AvrdudeConf:    options.AvrdudeConf,
+		AvrdudeBackend: options.AvrdudeBackend, AvrdudeAdapter: options.AvrdudeAdapter,
 		USBaspAutoSlow:            true,
 		ApplicationHash:           snapshot.Hello.BuildHash,
 		ApplicationIdentitySchema: snapshot.Hello.IdentitySchema,
@@ -5019,6 +5023,7 @@ func recoverProgrammingCommand(
 		HexPath: firmwarePath, FQBN: options.FQBN,
 		Programmer: options.Programmer, ArduinoCLI: options.ArduinoCLI, ArduinoConfig: options.ArduinoConfig,
 		Avrdude: options.Avrdude, AvrdudeConf: options.AvrdudeConf,
+		AvrdudeBackend: options.AvrdudeBackend, AvrdudeAdapter: options.AvrdudeAdapter,
 		USBaspAutoSlow: true,
 	}
 	verifyErr := programmer.VerifyFlashReadbackWithRunner(
