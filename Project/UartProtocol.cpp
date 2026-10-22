@@ -164,6 +164,8 @@ void UartProtocol::processEncodedFrame() {
   if (rawLength < RawOverhead || receive_[0] != Magic ||
       receive_[4] > MaximumPayload ||
       rawLength != static_cast<uint8_t>(receive_[4] + RawOverhead)) {
+    // Temporary bench trace: rejected bytes, consumed through opcode subscription.
+    send(0xE1, 0, receive_, receiveLength_ < 48 ? receiveLength_ : 48);
     if (framingErrors_ != UINT16_MAX) {
       ++framingErrors_;
     }
