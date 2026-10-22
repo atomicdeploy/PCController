@@ -7,3 +7,9 @@ Live checks: coordinator and Pealayer report a connected board. The four existin
 The shared effect catalog contains police, white-thunder and converging-red. These entries are catalog evidence only. Next: capture one new handset key at a time, confirm its intended seat action, append matching board assignments without replacing the old handset, read back, then verify press/release and physical movement. After remote acceptance, test rainbow on the currently attached pixel count, verify the three effects individually, and resume MOSFET investigation (#672). Do not infer physical acceptance from software acknowledgements.
 
 Validation for this preservation checkpoint: git diff --check only; no firmware build/upload or hardware stress test. Runtime configuration backups, screenshots and private hardware snapshots remain local and are excluded from Git.
+
+## New handset configuration completed
+
+Four distinct buttons were captured individually and appended to the board catalog: A left seat up, B left seat down, C right seat up, D right seat down. Each mapping was checked through a separate authoritative board read. Stable identities/actions of all original nine entries and all host bindings were compared and preserved. Learning is inactive after the final capture. No app binary or firmware was changed for this setup.
+
+The board reports both seats stopped. Physical direction and release-to-stop confirmation remains the next human step; configuration readback does not establish movement acceptance. The subsequent phase remains the rainbow check, MOSFET investigation and individual checks of police, white-thunder and converging-red. Private RF identities, device settings and snapshots remain excluded from Git.
