@@ -13,3 +13,13 @@ Validation for this preservation checkpoint: git diff --check only; no firmware 
 Four distinct buttons were captured individually and appended to the board catalog: A left seat up, B left seat down, C right seat up, D right seat down. Each mapping was checked through a separate authoritative board read. Stable identities/actions of all original nine entries and all host bindings were compared and preserved. Learning is inactive after the final capture. No app binary or firmware was changed for this setup.
 
 The board reports both seats stopped. Physical direction and release-to-stop confirmation remains the next human step; configuration readback does not establish movement acceptance. The subsequent phase remains the rainbow check, MOSFET investigation and individual checks of police, white-thunder and converging-red. Private RF identities, device settings and snapshots remain excluded from Git.
+
+## Human remote acceptance and start of lighting checks
+
+The human confirmed all four new remote directions and stopping after release. The board subsequently reported both seats stopped. This acceptance applies to the handset test, not unrelated seat stress or timing tests.
+
+A three-pixel, 20-FPS rainbow was started through Pealayer hardware.strip.rainbow. The coordinator reports an active rainbow stream and Pealayer reflects it after status refresh. During observation the reset count, framing/CRC errors and PWM errors remained unchanged. Physical rainbow smoothness and current connected pixel count await human confirmation; no visual LED acceptance is inferred from ACKs.
+
+A read-only command diagnostic found that strip effect list is rejected by the current coordinator, whereas effect inspect police succeeds. The hardware preview in Pealayer also uses the obsolete strip effect play namespace. A focused correction to effect play ID COUNT FPS is pushed at ToghrolTP/pealayer fix/strip-effect-dispatch, f5fb6a19db711adefa634ff11e0b48e6871c074e, PR #212. Hosted checks are pending; Cafe deployment has not happened. Build/deployment is blocked on the exact-source successful package and requires a fresh authoring-state check and the existing validated local MPV pairing. No local production Rust compilation or firmware upload was performed.
+
+Next: obtain rainbow visual confirmation, run a bounded watched MOSFET test preserving unrelated outputs, then verify the three lighting effects individually. Complete PR #212 checks and the supported updater deployment before claiming the hardware-preview fix is delivered. The original MOSFET shutdown cause remains unproven (#672).
