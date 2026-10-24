@@ -1,38 +1,38 @@
 {
   "format": "pccontroller-host-tool-lock/v1",
   "policy_name": "pccontroller-host-build-tools",
-  "resolved_at_utc": "2026-10-11T01:49:10.068Z",
+  "resolved_at_utc": "2026-10-24T01:35:05.447Z",
   "node": {
-    "version": "24.21.0",
+    "version": "24.22.1",
     "lts": "Krypton",
-    "source": "https://nodejs.org/dist/v24.21.0/",
-    "checksums_url": "https://nodejs.org/dist/v24.21.0/SHASUMS256.txt",
-    "checksums_sha256": "f410428039e2c922a14058df067a4482691c9304a5c01a75847f9f3f2d3307f6",
+    "source": "https://nodejs.org/dist/v24.22.1/",
+    "checksums_url": "https://nodejs.org/dist/v24.22.1/SHASUMS256.txt",
+    "checksums_sha256": "fdfbffc969c0f604beff0124d409b33a43b53f5c681d6220f80023e0d6df9dc4",
     "assets": [
       {
-        "name": "node-v24.21.0-win-x64.zip",
-        "url": "https://nodejs.org/dist/v24.21.0/node-v24.21.0-win-x64.zip",
-        "sha256": "158f7685b44de51f6c0df1d153526cbcd3e1bc739a8dfc607721cef75de9e541"
+        "name": "node-v24.22.1-win-x64.zip",
+        "url": "https://nodejs.org/dist/v24.22.1/node-v24.22.1-win-x64.zip",
+        "sha256": "d2046d28c2c3dcd211ac5145c0bf30e2047ef9dfb306693c8c6e2eccd8b95fa5"
       },
       {
-        "name": "node-v24.21.0-linux-x64.tar.xz",
-        "url": "https://nodejs.org/dist/v24.21.0/node-v24.21.0-linux-x64.tar.xz",
-        "sha256": "fd8e59d5a511510f6a298afb548f18c7d2b1be404d8b4a27d94fbe49f56cb2d6"
+        "name": "node-v24.22.1-linux-x64.tar.xz",
+        "url": "https://nodejs.org/dist/v24.22.1/node-v24.22.1-linux-x64.tar.xz",
+        "sha256": "6c172a9ab6718f7b801fb5a7bd486af2ee5e32758086a04b84fcce2aa77095e6"
       },
       {
-        "name": "node-v24.21.0-linux-arm64.tar.xz",
-        "url": "https://nodejs.org/dist/v24.21.0/node-v24.21.0-linux-arm64.tar.xz",
-        "sha256": "6ad1325edbdb5649c379b75a237147a666c95d4f9ae8d340fef2d1575d289ad2"
+        "name": "node-v24.22.1-linux-arm64.tar.xz",
+        "url": "https://nodejs.org/dist/v24.22.1/node-v24.22.1-linux-arm64.tar.xz",
+        "sha256": "dbabf7a1cbf947e6059ffad2c27b80041db97dea1e553b62afdee7f13fca336e"
       },
       {
-        "name": "node-v24.21.0-darwin-x64.tar.gz",
-        "url": "https://nodejs.org/dist/v24.21.0/node-v24.21.0-darwin-x64.tar.gz",
-        "sha256": "1462cb3b3046b815cf8ea436d3da450ec1a9f11dac7e5a46b0ada5305d7e8097"
+        "name": "node-v24.22.1-darwin-x64.tar.gz",
+        "url": "https://nodejs.org/dist/v24.22.1/node-v24.22.1-darwin-x64.tar.gz",
+        "sha256": "d132557e7ee2b85af08b0c8c34338e65c6430f2238d01f727728ef42dc83b035"
       },
       {
-        "name": "node-v24.21.0-darwin-arm64.tar.gz",
-        "url": "https://nodejs.org/dist/v24.21.0/node-v24.21.0-darwin-arm64.tar.gz",
-        "sha256": "bed7eea5325e1108f32ce5228ddd6a5f0f08a499ee42aa7442aea583702f6057"
+        "name": "node-v24.22.1-darwin-arm64.tar.gz",
+        "url": "https://nodejs.org/dist/v24.22.1/node-v24.22.1-darwin-arm64.tar.gz",
+        "sha256": "89c682593d76cd44233fa53b1563264e7de9cbb189cad169135c5b4fadfbc0a7"
       }
     ]
   },
@@ -120,19 +120,19 @@
   },
   "windows_c_compiler": {
     "package_id": "BrechtSanders.WinLibs.POSIX.UCRT",
-    "package_version": "16.2.0-14.0.0-r1",
+    "package_version": "16.2.0-14.0.0-r2",
     "compiler": "gcc",
     "compiler_version": "16.2.0",
     "architecture": "x64",
     "target": "x86_64-w64-mingw32",
     "provenance": "winget-community-manifest",
-    "manifest_url": "https://raw.githubusercontent.com/microsoft/winget-pkgs/master/manifests/b/BrechtSanders/WinLibs/POSIX/UCRT/16.2.0-14.0.0-r1/BrechtSanders.WinLibs.POSIX.UCRT.installer.yaml",
-    "manifest_git_sha": "335054676d2475976d43181393427e8c3426b4f7",
-    "installer_url": "https://github.com/brechtsanders/winlibs_mingw/releases/download/16.2.0posix-14.0.0-ucrt-r1/winlibs-x86_64-posix-seh-gcc-16.2.0-mingw-w64ucrt-14.0.0-r1.zip",
-    "installer_sha256": "c1f52294597c0b73786b2a78eb5d176d89226d2f21875eab75e783a8b1cefcc4"
+    "manifest_url": "https://raw.githubusercontent.com/microsoft/winget-pkgs/master/manifests/b/BrechtSanders/WinLibs/POSIX/UCRT/16.2.0-14.0.0-r2/BrechtSanders.WinLibs.POSIX.UCRT.installer.yaml",
+    "manifest_git_sha": "3fe36c89a865a9d8aba1fe8f6b7237bd42095857",
+    "installer_url": "https://github.com/brechtsanders/winlibs_mingw/releases/download/16.2.0posix-14.0.0-ucrt-r2/winlibs-x86_64-posix-seh-gcc-16.2.0-mingw-w64ucrt-14.0.0-r2.zip",
+    "installer_sha256": "d5dbafc4a170e762ca6143151ec918fb9e2c72736fb14cd704abebc6bdd5276a"
   },
   "web": {
-    "package_lock_sha256": "0d97267c5ef5797fd91a74e444ccff932747451c33081578583ff47e9cc79783"
+    "package_lock_sha256": "3597dc0d5b48c4d51cf164f5d231edbd5d4b4c1ad39a9dadca971ceea40b6251"
   },
   "build": {
     "package_lock_sha256": "323ac44b9417ec4a68487f026e41d4bc29199b7f40ded040de0d5b592318ca98"
@@ -166,7 +166,7 @@
       },
       {
         "name": "actions/download-artifact",
-        "revision": "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+        "revision": "9000827ccba6bdab643e8b6fd33ac0654aef8333",
         "version": "v8",
         "workflows": [
           "build.yml",
@@ -199,7 +199,7 @@
       },
       {
         "name": "actions/setup-node",
-        "revision": "820762786026740c76f36085b0efc47a31fe5020",
+        "revision": "949feb2413d6458794dcd2491c4babbbce0c15c1",
         "version": "v7",
         "workflows": [
           "build.yml",
@@ -215,7 +215,7 @@
       },
       {
         "name": "actions/upload-artifact",
-        "revision": "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+        "revision": "cf430e030ddbb5b0abf93d22962f4752f3646cd9",
         "version": "v7",
         "workflows": [
           "deploy-avr.yml",
@@ -227,16 +227,16 @@
       },
       {
         "name": "github/codeql-action/analyze",
-        "revision": "2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2",
-        "version": "v4.38.2",
+        "revision": "24c54180a607b1449ed407dd24f251e4e9147c8d",
+        "version": "v4.38.3",
         "workflows": [
           "codeql.yml"
         ]
       },
       {
         "name": "github/codeql-action/init",
-        "revision": "2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2",
-        "version": "v4.38.2",
+        "revision": "24c54180a607b1449ed407dd24f251e4e9147c8d",
+        "version": "v4.38.3",
         "workflows": [
           "codeql.yml"
         ]
