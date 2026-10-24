@@ -1,17 +1,19 @@
 module pccontroller.local/controller
 
-go 1.27.2
+go 1.27.3
 
 require (
-	github.com/Microsoft/go-winio v0.6.3
+	github.com/Microsoft/go-winio v0.6.4
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/charmbracelet/x/ansi v0.11.9
+	github.com/charmbracelet/x/term v0.2.2
 	github.com/coder/websocket v1.8.15
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/go-ole/go-ole v1.3.0
 	github.com/grandcat/zeroconf v1.0.0
+	github.com/mattn/go-isatty v0.0.24
 	github.com/muesli/termenv v0.16.0
 	github.com/pelletier/go-toml/v2 v2.4.3
 	go.bug.st/serial v1.8.0
@@ -26,12 +28,10 @@ require (
 	github.com/cenkalti/backoff v2.2.1+incompatible // indirect
 	github.com/charmbracelet/colorprofile v0.4.3 // indirect
 	github.com/charmbracelet/x/cellbuf v0.0.15 // indirect
-	github.com/charmbracelet/x/term v0.2.2 // indirect
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f // indirect
 	github.com/lucasb-eyer/go-colorful v1.4.1 // indirect
-	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/mattn/go-localereader v0.0.1 // indirect
 	github.com/mattn/go-runewidth v0.0.31 // indirect
 	github.com/miekg/dns v1.1.73 // indirect
