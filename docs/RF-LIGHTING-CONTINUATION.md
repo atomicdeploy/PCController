@@ -47,3 +47,11 @@ The user resumed the three-pixel test. Pealayer and the coordinator reported the
 The existing firmware artifact manifest reports a 16 MHz ATmega328P, D6/PD6 sender, and build identity F9387E79 / 261020010132 matching the board-reported identity. Read-only linked-listing validation passes all byte patterns, boundaries and a 300-byte frame. This does not independently verify current flash, the actual electrical waveform, common ground, input direction or attached strip type.
 
 No app/firmware replacement, board reset, new motion command or MOSFET adjustment was performed for this diagnostic. Short observation counters remain stable. Next: obtain the human clear response and actual wiring facts, then isolate the data path before changing firmware. Preserve all accepted RF mappings/settings. Private snapshots remain local; no physical LED acceptance or proven electrical/software cause is claimed.
+
+## Open negative wire reported; post-repair red retest pending
+
+The human confirmed that clear and a repeated exact black frame both left the pixels steady white. A multimeter measurement at the first pixel supply input was 11.83 V. The human subsequently reported discovering an open negative wire. This is a reported wiring fault, not yet accepted proof that the complete data path is restored.
+
+At the user's explicit request, the coordinator accepted strip config 3 followed by strip frame FF0000FF0000FF0000. A separate strip status reports streaming stopped. The current requested strip output is solid red for three pixels; physical color confirmation after the reported wiring discovery is pending. No firmware/application replacement, board reset, motion command or MOSFET adjustment was introduced. Existing RF setup remains accepted and should be preserved.
+
+Next: obtain the human color result. If red is confirmed, verify a second color and black, then resume rainbow and the three primary effects. If it remains white, verify the repaired negative/common reference and first-pixel data input before proposing firmware changes. ACKs and an idle multimeter reading do not establish a valid physical LED waveform. Private runtime snapshots and wiring details remain local.
