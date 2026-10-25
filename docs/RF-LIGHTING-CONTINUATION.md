@@ -23,3 +23,11 @@ A three-pixel, 20-FPS rainbow was started through Pealayer hardware.strip.rainbo
 A read-only command diagnostic found that strip effect list is rejected by the current coordinator, whereas effect inspect police succeeds. The hardware preview in Pealayer also uses the obsolete strip effect play namespace. A focused correction to effect play ID COUNT FPS is pushed at ToghrolTP/pealayer fix/strip-effect-dispatch, f5fb6a19db711adefa634ff11e0b48e6871c074e, PR #212. Hosted checks are pending; Cafe deployment has not happened. Build/deployment is blocked on the exact-source successful package and requires a fresh authoring-state check and the existing validated local MPV pairing. No local production Rust compilation or firmware upload was performed.
 
 Next: obtain rainbow visual confirmation, run a bounded watched MOSFET test preserving unrelated outputs, then verify the three lighting effects individually. Complete PR #212 checks and the supported updater deployment before claiming the hardware-preview fix is delivered. The original MOSFET shutdown cause remains unproven (#672).
+
+## MOSFET remote continuation
+
+The user deferred LED/rainbow checks and confirmed a separate lighting handset. A and B match already stored lighting waveforms; the user physically confirmed the first lamp at about 20 percent and the chandelier lit. No duplicate bindings were added. B dimming across the range is not yet accepted.
+
+C reception was confirmed against the third lamp's existing complete waveform. Its tap, hold, repeat and hold-end host rules were disabled. These four rules were enabled through controller.rf.binding.put with explicit previous_name, preserving names, gestures, targets, actions and cooldowns. Independent catalog readback confirmed all four flags and exact preservation of the other host bindings and all 13 board RF mappings. Enabling configuration did not command an output; the third lamp remains at zero awaiting the human press.
+
+Next: ask the user to hold C for two seconds and confirm the third lamp physically lights, then verify D and the short-tap/hold behavior on the intended lamps. Keep the LED tests deferred. No app binary or firmware change is required for this configuration step. Full private RF/settings snapshots remain local.
