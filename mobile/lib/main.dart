@@ -20,6 +20,7 @@ import 'unified/relay_style.dart';
 import 'pakar_reference.dart' show SevenSegmentPreview;
 import 'unified/transport.dart';
 import 'unified/effect_editor.dart';
+import 'unified/strip_designer.dart';
 import 'unified/live_widgets.dart';
 import 'unified/automation.dart';
 import 'unified/preferences.dart';
@@ -3712,16 +3713,27 @@ class _ControllerHomeState extends State<ControllerHome>
               : null,
         ),
     ],
-    trailing: IconButton(
+    trailing: PopupMenuButton<String>(
       tooltip: 'New effect',
       icon: const Icon(Icons.add),
-      onPressed: () => unawaited(
+      itemBuilder: (_) => const [
+        PopupMenuItem(value: 'sequence', child: Text('Sequence')),
+        PopupMenuItem(value: 'strip-stream', child: Text('Strip lighting')),
+      ],
+      onSelected: (kind) => unawaited(
         editEffect({
           'id': '',
           'name': '',
-          'category': 'Effects',
-          'kind': 'sequence',
-          'steps': [],
+          'category': kind == 'sequence' ? 'Effects' : 'Lighting',
+          'kind': kind,
+          if (kind == 'sequence') 'steps': [],
+          if (kind == 'strip-stream') ...{
+            'program': stripPreset(3),
+            'default_pixels': 1,
+            'default_fps': 20,
+            'duration_ms': 5000,
+            'engine': 'host-stream',
+          },
         }),
       ),
     ),
