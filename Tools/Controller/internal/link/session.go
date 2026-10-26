@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.bug.st/serial"
@@ -46,6 +47,8 @@ type serialOpenAcquisition struct {
 type Event struct {
 	Frame native.Frame
 	Err   error
+	// ReceivedAt is when Read returned these bytes, before decoder/observer work.
+	ReceivedAt time.Time
 	// Recoverable identifies a decoder anomaly that was isolated at the next
 	// frame delimiter. The transport is still usable and later frames remain
 	// authoritative; consumers must not treat this as a disconnect cause.
@@ -69,16 +72,18 @@ type Session struct {
 	closing chan struct{}
 	done    chan struct{}
 
-	closeMu     sync.Mutex
-	observerMu  sync.Mutex
-	beforeClose func()
-	closeSeen   bool
-	closingOnce sync.Once
-	doneOnce    sync.Once
-	closed      bool
-	readDone    sync.WaitGroup
-	pendingOpen *serialOpenAcquisition
-	rfWire      rfWireState
+	closeMu          sync.Mutex
+	observerMu       sync.Mutex
+	beforeClose      func()
+	closeSeen        bool
+	closingOnce      sync.Once
+	doneOnce         sync.Once
+	closed           bool
+	readDone         sync.WaitGroup
+	pendingOpen      *serialOpenAcquisition
+	rfWire           rfWireState
+	lastReadReturned atomic.Int64
+	lastDataReceived atomic.Int64
 }
 
 type sessionPort interface {
@@ -526,6 +531,7 @@ func (s *Session) RequestWithPriority(
 		return native.Frame{}, s.requestSlotError(opcode, waitStarted, err)
 	}
 	defer releaseRequest()
+	admittedAt := time.Now()
 	if opcode == native.OpAddressableLED {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, stripResponseTimeout)
@@ -548,14 +554,16 @@ func (s *Session) RequestWithPriority(
 	if err != nil {
 		return native.Frame{}, err
 	}
+	writeStarted := time.Now()
 	if err := s.writeRawContext(ctx, encoded); err != nil {
 		return native.Frame{}, err
 	}
+	writeFinished := time.Now()
 
 	for {
 		select {
 		case <-ctx.Done():
-			return native.Frame{}, fmt.Errorf("waiting for opcode 0x%02X response: %w", opcode, ctx.Err())
+			return native.Frame{}, s.responseWaitError(opcode, sequence, waitStarted, admittedAt, writeStarted, writeFinished, ctx.Err())
 		case <-s.closing:
 			return native.Frame{}, ErrClosed
 		case response := <-waiter.channel:
@@ -575,6 +583,22 @@ func (s *Session) RequestWithPriority(
 			}
 		}
 	}
+}
+
+// Diagnostic ages measure host receive-pump progress, not MCU execution time.
+// Keep sequence and phase timing without including command payloads or paths.
+func (s *Session) responseWaitError(opcode, sequence byte, started, admitted, writeStarted, written time.Time, cause error) error {
+	now := time.Now()
+	age := func(stamp int64) float64 {
+		if stamp == 0 {
+			return -1
+		}
+		return float64(now.UnixNano()-stamp) / float64(time.Millisecond)
+	}
+	return fmt.Errorf("waiting for opcode 0x%02X response: %w (seq=%d admission=%.1f ms prepare=%.1f ms write=%.1f ms response=%.1f ms read_return_age=%.1f ms data_age=%.1f ms)",
+		opcode, cause, sequence, admitted.Sub(started).Seconds()*1000, writeStarted.Sub(admitted).Seconds()*1000,
+		written.Sub(writeStarted).Seconds()*1000, now.Sub(written).Seconds()*1000,
+		age(s.lastReadReturned.Load()), age(s.lastDataReceived.Load()))
 }
 
 // Capture the registered request occupying the slot at failure, without
@@ -818,7 +842,10 @@ func (s *Session) readLoop() {
 
 	for {
 		n, err := s.port.Read(buffer)
+		receivedAt := time.Now()
+		s.lastReadReturned.Store(receivedAt.UnixNano())
 		if n > 0 {
+			s.lastDataReceived.Store(receivedAt.UnixNano())
 			frames, decodeErrors := decoder.Feed(buffer[:n])
 			for _, decodeErr := range decodeErrors {
 				s.publish(Event{Err: decodeErr, Recoverable: true})
@@ -827,7 +854,7 @@ func (s *Session) readLoop() {
 				s.observeRFClock(frame)
 				s.observeHello(frame)
 				if !s.deliver(frame) {
-					s.publish(Event{Frame: frame})
+					s.publish(Event{Frame: frame, ReceivedAt: receivedAt})
 				}
 			}
 		}

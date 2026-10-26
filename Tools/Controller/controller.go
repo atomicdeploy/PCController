@@ -1460,6 +1460,8 @@ func (client *Client) runStatusSubscriptionHub() {
 		}
 		cancel()
 		update := StatusUpdate{Time: at, Status: status}
+		var busy *control.ResourceBusyError
+		deferred := errors.As(err, &busy) && busy.Resource == "serial_channel" && busy.Owner == "media_timeline"
 		if err != nil {
 			update.Error = err.Error()
 		}
@@ -1470,6 +1472,11 @@ func (client *Client) runStatusSubscriptionHub() {
 			}
 			for !subscriber.next.After(at) {
 				subscriber.next = subscriber.next.Add(subscriber.interval)
+			}
+			if deferred {
+				// No query reached the board. Advance cadence without inventing a
+				// fresh sample or publishing a controller.error to every player.
+				continue
 			}
 			if err != nil {
 				backoff := at.Add(time.Second)

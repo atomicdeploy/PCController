@@ -118,7 +118,8 @@ func (runtime *Runtime) rejectMediaTimelineConflict(ctx context.Context, opcode 
 	}
 	status := runtime.MediaTimeline()
 	if status.State == "playing" && hostRecordableOpcode(opcode) {
-		return errors.New("pause the prepared media timeline before issuing competing live output commands")
+		return &ResourceBusyError{Resource: "serial_channel", Owner: "media_timeline",
+			Message: "pause the prepared media timeline before issuing competing live output commands"}
 	}
 	return nil
 }

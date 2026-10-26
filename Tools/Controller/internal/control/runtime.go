@@ -3331,7 +3331,14 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 					}
 					runtime.publishEvent(deviceEvent)
 				} else {
-					runtime.publish(kind, text, event.Frame)
+					if event.Frame.Opcode == native.OpACK && !event.ReceivedAt.IsZero() {
+						runtime.publishEvent(Event{Kind: kind, Text: text, Frame: event.Frame, Source: "board", Target: "host", Metadata: map[string]string{
+							"transport_received_at": event.ReceivedAt.Format(time.RFC3339Nano),
+							"observer_delay_ms":     fmt.Sprintf("%.3f", time.Since(event.ReceivedAt).Seconds()*1000),
+						}})
+					} else {
+						runtime.publish(kind, text, event.Frame)
+					}
 				}
 				if rfMappingRequired && parsedDevice != nil {
 					runtime.publishRFMappingRequired(*parsedDevice, rfCaptured)
