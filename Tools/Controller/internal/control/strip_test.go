@@ -57,6 +57,31 @@ func TestStripFailureDoesNotCommitPartialFrame(t *testing.T) {
 	}
 }
 
+func TestManualStripFrameConfiguresExactLengthBeforeDisplay(t *testing.T) {
+	target := &recordingOutputTarget{}
+	outputs := NewOutputScheduler(target)
+	defer outputs.Close()
+	if _, err := stripStreamCommand(context.Background(), outputs, []string{"frame", "000000ff0000000000"}); err != nil {
+		t.Fatal(err)
+	}
+	commands := target.snapshotCommands()
+	if len(commands) != 3 || string(commands[0].payload) != string([]byte{0xFE, 3}) || commands[1].payload[0] != 0xFD || commands[2].payload[0] != 0xFC {
+		t.Fatalf("configuration/staging/show order = %#v", commands)
+	}
+}
+
+func TestManualStripFrameDoesNotStageAfterFailedConfiguration(t *testing.T) {
+	target := &recordingOutputTarget{failAt: 1}
+	outputs := NewOutputScheduler(target)
+	defer outputs.Close()
+	if err := outputs.sendConfiguredStripFrame(context.Background(), []byte{255, 0, 0}); err == nil {
+		t.Fatal("expected configuration failure")
+	}
+	if len(target.snapshotCommands()) != 1 {
+		t.Fatal("staged after uncertain configuration")
+	}
+}
+
 func TestStripRainbowStopsWithoutMoreFrames(t *testing.T) {
 	target := &recordingOutputTarget{}
 	outputs := NewOutputScheduler(target)
