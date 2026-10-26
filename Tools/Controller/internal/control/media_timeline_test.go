@@ -13,6 +13,19 @@ import (
 	"time"
 )
 
+func TestMediaTimelineRestoreChecksElapsedBudgetAfterSuccessfulACK(t *testing.T) {
+	budget := 50 * time.Millisecond
+	if err := mediaTimelineRestoreAckError(nil, budget, budget); err != nil {
+		t.Fatal(err)
+	}
+	if err := mediaTimelineRestoreAckError(nil, budget+time.Nanosecond, budget); err == nil {
+		t.Fatal("late successful ACK bypassed restore deadline")
+	}
+	if err := mediaTimelineRestoreAckError(context.DeadlineExceeded, time.Millisecond, budget); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("original request failure lost: %v", err)
+	}
+}
+
 func TestMediaTimelineBackgroundTrafficCannotBlockPreparedEdges(t *testing.T) {
 	runtime, frames, mu := mediaTimelineFixture(t, false)
 	value := armTimeline(t, runtime, 0)

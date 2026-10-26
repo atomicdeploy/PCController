@@ -89,3 +89,14 @@ recognizes only the typed serial-channel/media-timeline deferral: it advances
 its polling cadence without emitting an error or a fabricated fresh observation.
 Other failures remain visible. Competing output commands retain the same typed
 ownership error, and automatic LCD presentation reports deferral honestly.
+
+The ci.1651 replay emitted no false background errors, but missed the first
+strip configure dispatch by 54.1 ms after a 61.1 ms executor iteration gap. It
+refused the expired command, then paused with outputs stopped and unchanged
+serial/reset counters. A paused CPU profile did not establish the cause.
+`POST /api/diagnostics/execution-trace` now offers the same local-only,
+authenticated, body-free five-second capture contract as the CPU profiler;
+captures share exclusion and remain private diagnostic data. It is intended to
+separate runnable delay, blocking and GC in one coordinated replay. Restore ACKs
+also receive a post-response elapsed-budget check, because delayed timer
+callbacks must not admit an acknowledgement that exceeded its original budget.

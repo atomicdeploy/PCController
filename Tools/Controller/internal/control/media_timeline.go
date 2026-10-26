@@ -496,6 +496,19 @@ func mediaTimelineRestore(steps []mediaTimelineStep, index int) []mediaTimelineS
 	}
 	return restored
 }
+
+// A timer callback may itself be delayed. A successful response must still
+// satisfy the elapsed budget; receiving an ACK does not make a late edge timely.
+func mediaTimelineRestoreAckError(err error, elapsed, budget time.Duration) error {
+	if err != nil {
+		return err
+	}
+	if elapsed > budget {
+		return fmt.Errorf("ACK exceeded %.1f ms restore budget", budget.Seconds()*1000)
+	}
+	return nil
+}
+
 func (runtime *Runtime) runMediaTimeline(ctx context.Context, done chan struct{}, plan MediaTimelinePlan, steps []mediaTimelineStep, generation uint64) {
 	defer close(done)
 	defer runtime.releaseMediaTimelineWire()
@@ -627,7 +640,9 @@ func (runtime *Runtime) runMediaTimeline(ctx context.Context, done chan struct{}
 				requestStarted := time.Now()
 				frame, err := runtime.requestAtGenerationPriority(requestCtx, generation, link.RequestPriorityTimeline, step.opcode, step.payload, native.OpACK)
 				cancel()
-				ackMS := time.Since(requestStarted).Seconds() * 1000
+				elapsed := time.Since(requestStarted)
+				ackMS := elapsed.Seconds() * 1000
+				err = mediaTimelineRestoreAckError(err, elapsed, time.Duration(plan.MaxLatenessMS)*time.Millisecond)
 				runtime.mediaTimeline.mu.Lock()
 				runtime.mediaTimeline.status.LastRestoreStep = step.id
 				runtime.mediaTimeline.status.LastRestoreAckMS = ackMS
