@@ -121,7 +121,7 @@ void main() {
       await settle(tester);
       expect(
         object(calls.last['params'])['command'],
-        'strip effect play "warm-pulse" 100 20',
+        'effect play "warm-pulse" 100 20',
       );
       await tester.enterText(find.byKey(const ValueKey('Pixels')), '50');
       await tester.pump();
