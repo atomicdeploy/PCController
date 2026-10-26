@@ -61,3 +61,12 @@ the three effect demonstrations and seat stress acceptance remain open. The next
 action is to reproduce the reported playback stop at its effect boundary with
 the recovered host available, recording new error deltas rather than historical
 maintenance disconnects. This checkpoint does not claim those acceptance gates.
+
+CI also exposed a flash overflow in the optional EEPROM menu-label profile.
+Protocol and pulse indices now use bytes (12 protocols, at most 67 captured
+durations), with a compile-time bound on buffer size. The regression fixture also
+covers a full 32-bit identity, capture overflow and resynchronization. The optional
+profile now builds at 32,314 flash bytes with 270 bytes of estimated stack margin;
+its waveform and default-EEPROM contract checks pass. This size optimization is
+source-validated but has not replaced the running `5B86029E` image, because live
+playback investigation owns the board after the recovery handoff.

@@ -8,10 +8,10 @@ void edge(unsigned int duration) {
     fakeMicros+=duration; assert(edgeHandler); inInterrupt=true;
     edgeHandler(); inInterrupt=false;
 }
-void packet(unsigned int code) {
-    for(int bit=7;bit>=0;--bit) {
-        edge((code&(1<<bit))?1050:350);
-        edge((code&(1<<bit))?350:1050);
+void packet(unsigned long code, int bits=8) {
+    for(int bit=bits-1;bit>=0;--bit) {
+        edge((code&(1UL<<bit))?1050:350);
+        edge((code&(1UL<<bit))?350:1050);
     }
     edge(350); edge(10850);
 }
@@ -29,5 +29,14 @@ int main() {
     radio.resetAvailable();
     frame(0x33); radio.disableReceive(); radio.enableReceive(0);
     assert(!radio.available()); // rearming drops obsolete pending captures
+    edge(10850); packet(0xA65A1234UL,32); packet(0xA65A1234UL,32);
+    assert(radio.available()); // longest supported identity fits byte indices
+    assert(radio.getReceivedValue()==0xA65A1234UL);
+    assert(radio.getReceivedBitlength()==32);
+    radio.resetAvailable();
+    for(int i=0;i<150;++i) edge(200); // overflow must discard, not wrap indices
+    assert(!radio.available());
+    frame(0x5A); packet(0x5A);
+    assert(radio.available() && radio.getReceivedValue()==0x5A);
     std::cout << "RF deferred decoding: ISR ownership, pending buffer, decode and rearm passed\n";
 }

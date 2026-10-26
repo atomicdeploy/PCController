@@ -582,7 +582,7 @@ bool RCSwitch::available() {
   // UART interrupts remain enabled during division/protocol matching.
   const uint8_t count = pendingChanges;
   if (count != 0) {
-    for (unsigned int i = 1; i <= numProto; ++i) {
+    for (uint8_t i = 1; i <= numProto; ++i) {
       if (receiveProtocol(i, count)) break;
     }
     pendingChanges = 0;
@@ -622,7 +622,7 @@ static inline unsigned int diff(int A, int B) {
 /**
  *
  */
-bool RECEIVE_ATTR RCSwitch::receiveProtocol(const int p, unsigned int changeCount) {
+bool RECEIVE_ATTR RCSwitch::receiveProtocol(uint8_t p, uint8_t changeCount) {
 #if defined(ESP8266) || defined(ESP32)
     const Protocol &pro = proto[p-1];
 #else
@@ -653,9 +653,9 @@ bool RECEIVE_ATTR RCSwitch::receiveProtocol(const int p, unsigned int changeCoun
      *
      * The 2nd saved duration starts the data
      */
-    const unsigned int firstDataTiming = (pro.invertedSignal) ? (2) : (1);
+    const uint8_t firstDataTiming = (pro.invertedSignal) ? (2) : (1);
 
-    for (unsigned int i = firstDataTiming; i < changeCount - 1; i += 2) {
+    for (uint8_t i = firstDataTiming; i < changeCount - 1; i += 2) {
         code <<= 1;
         if (diff(RCSwitch::timings[i], delay * pro.zero.high) < delayTolerance &&
             diff(RCSwitch::timings[i + 1], delay * pro.zero.low) < delayTolerance) {
@@ -686,9 +686,10 @@ void RECEIVE_ATTR RCSwitch::handleInterrupt() {
   // gap resynchronizes capture. Do not re-enable interrupts inside this ISR.
   if (pendingChanges != 0) return;
 
-  static unsigned int changeCount = 0;
+  static_assert(RCSWITCH_MAX_CHANGES < 255, "RF pulse indices must fit one byte");
+  static uint8_t changeCount = 0;
   static unsigned long lastTime = 0;
-  static unsigned int repeatCount = 0;
+  static uint8_t repeatCount = 0;
 
   const long time = micros();
   const unsigned int duration = time - lastTime;
