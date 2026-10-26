@@ -43,17 +43,21 @@ serial slot for 88 ms. The strip configure cue reached dispatch about 2 ms late,
 then exhausted its unchanged 50 ms deadline behind that read. Framing and CRC
 counters remained unchanged: this is a separate scheduling conflict.
 
-Fresh PWM reads now return a structured resource conflict during prepared
-playback, with a second check immediately before the wire write. The PWM status
-RPC serves the existing observation during playback without changing its time,
-generation or revision. Resume fences new reads before checking registered ones;
-an already in-flight PWM read rejects Play without accepting a playing clock.
-The read is not canceled, and no mutation is retried. Pause releases the fence.
+A subsequent ci.1648 replay exposed internal display refresh (0x38) blocking
+resume after the PWM-only guard. The current solution reserves the whole serial
+channel during an explicit paused `prepare_play` handshake. Pealayer must wait
+for matching `play_ready` feedback before unpausing. Queued/background work is
+rejected before writing; in-flight work drains within the original arming budget.
+The PWM status RPC retains the observation's time, generation and revision.
+Pause, cancellation, stale intent, terminal faults and disconnect release the
+reservation. Deferred health probes cannot trigger DTR recovery. Optional board
+presentation runs through the timeline owner only in sufficiently large gaps;
+dense playback defers it honestly. See [the complete contract](Prepared-Media-Timeline.md).
 
-This deliberately does not preempt an in-flight request. A client must handle
-the pre-Play resource conflict honestly; seamless resume under that contention
-and the final live synchronized replay remain acceptance gates. The earlier
-ProgramState contention observed on ci.1631 is not claimed fixed by this change.
+The new host and Pealayer publisher must be deployed together. Final synchronized
+replay, dense/sparse playback and human physical acceptance remain open until
+verified on that exact pair. Neither the PWM-only intermediate update nor the
+standalone strip soak establishes synchronized playback acceptance.
 
 Deployment evidence must include live compiled version/source identity from
 the current listener. A prior updater reported a new disk digest while an old

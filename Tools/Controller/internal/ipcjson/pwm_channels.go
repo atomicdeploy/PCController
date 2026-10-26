@@ -36,7 +36,7 @@ type pwmValues struct {
 }
 
 func (service *Service) pwmValues(ctx context.Context) (pwmValues, error) {
-	if service.Client.MediaTimeline().State == "playing" {
+	if service.Client.MediaTimeline().PlayReady {
 		// Preserve the observation's generation, revision and original time.
 		// Playback must not create polling traffic or pretend this is a new ACK.
 		if values := service.cachedPWMValues(); values != nil {

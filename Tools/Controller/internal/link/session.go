@@ -29,6 +29,7 @@ var (
 	ErrSerialOpenPending       = errors.New("serial port acquisition is still pending")
 	ErrSequenceExhaust         = errors.New("all request sequence numbers are in use")
 	ErrControlLinesUnsupported = errors.New("transport does not support DTR/RTS")
+	ErrTimelineReserved        = errors.New("serial channel is reserved for prepared playback")
 )
 
 var openSerialPort = serial.Open
@@ -103,18 +104,21 @@ const (
 	RequestPriorityBackground RequestPriority = iota
 	RequestPriorityNormal
 	RequestPriorityTimeline
+	RequestPrioritySafety
 )
 
 type requestWaiter struct {
 	priority RequestPriority
 	ready    chan struct{}
 	granted  bool
+	err      error
 }
 
 type requestAdmission struct {
-	mu      sync.Mutex
-	active  bool
-	waiters []*requestWaiter
+	mu       sync.Mutex
+	active   bool
+	reserved bool
+	waiters  []*requestWaiter
 }
 
 func (admission *requestAdmission) acquire(
@@ -133,6 +137,10 @@ func (admission *requestAdmission) acquire(
 
 	waiter := &requestWaiter{priority: priority, ready: make(chan struct{})}
 	admission.mu.Lock()
+	if admission.reserved && priority < RequestPriorityTimeline {
+		admission.mu.Unlock()
+		return nil, ErrTimelineReserved
+	}
 	if !admission.active && len(admission.waiters) == 0 {
 		admission.active = true
 		admission.mu.Unlock()
@@ -143,6 +151,9 @@ func (admission *requestAdmission) acquire(
 
 	select {
 	case <-waiter.ready:
+		if waiter.err != nil {
+			return nil, waiter.err
+		}
 		return admission.release, nil
 	case <-ctx.Done():
 		admission.cancel(waiter)
@@ -151,6 +162,49 @@ func (admission *requestAdmission) acquire(
 		admission.cancel(waiter)
 		return nil, ErrClosed
 	}
+}
+
+// ReserveTimeline fences normal/background traffic before draining the current
+// transaction. It never cancels bytes already sent. The returned lease permits
+// timeline and safety commands until its owner releases it.
+func (s *Session) ReserveTimeline(ctx context.Context) (func(), error) {
+	a := &s.requestAdmission
+	a.mu.Lock()
+	if a.reserved {
+		a.mu.Unlock()
+		return nil, ErrTimelineReserved
+	}
+	a.reserved = true
+	kept := a.waiters[:0]
+	for _, waiter := range a.waiters {
+		if waiter.priority < RequestPriorityTimeline {
+			waiter.err = ErrTimelineReserved
+			close(waiter.ready)
+		} else {
+			kept = append(kept, waiter)
+		}
+	}
+	a.waiters = kept
+	a.mu.Unlock()
+	var once sync.Once
+	release := func() {
+		once.Do(func() {
+			a.mu.Lock()
+			a.reserved = false
+			a.mu.Unlock()
+		})
+	}
+	drain, err := a.acquire(ctx, s.closing, RequestPriorityTimeline)
+	if err != nil {
+		release()
+		return nil, err
+	}
+	drain()
+	if err := ctx.Err(); err != nil {
+		release()
+		return nil, err
+	}
+	return release, nil
 }
 
 func (admission *requestAdmission) cancel(waiter *requestWaiter) {

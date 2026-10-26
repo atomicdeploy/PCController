@@ -13,21 +13,21 @@ import (
 	"time"
 )
 
-func TestMediaTimelinePWMReadbackCannotBlockPreparedEdges(t *testing.T) {
+func TestMediaTimelineBackgroundTrafficCannotBlockPreparedEdges(t *testing.T) {
 	runtime, frames, mu := mediaTimelineFixture(t, false)
 	value := armTimeline(t, runtime, 0)
-	if err := runtime.rejectTimelinePWMReadback(); err != nil {
-		t.Fatalf("paused readback rejected: %v", err)
-	}
 	if _, err := runtime.UpdateMediaPlayback(value); err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 10; i++ {
+	for _, opcode := range []byte{native.OpPWMGet, native.OpGetStatus, native.OpDisplayText, native.OpProgramState} {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		_, err := runtime.Request(ctx, native.OpPWMGet, nil, native.OpPWMValues)
+		// Internal presentation bypasses the live-output conflict check, but
+		// still must not bypass the actual wire reservation.
+		ctx = context.WithValue(ctx, mediaTimelineContextKey{}, true)
+		_, err := runtime.Request(ctx, opcode, nil, native.OpACK)
 		cancel()
 		var busy *ResourceBusyError
-		if !errors.As(err, &busy) || busy.Resource != "serial_readback" {
+		if !errors.As(err, &busy) || busy.Resource != "serial_channel" {
 			t.Fatalf("fresh readback should report ownership conflict, got %v", err)
 		}
 	}
@@ -48,14 +48,38 @@ func TestMediaTimelinePWMReadbackCannotBlockPreparedEdges(t *testing.T) {
 	if _, err := runtime.UpdateMediaPlayback(value); err != nil {
 		t.Fatal(err)
 	}
-	if err := runtime.rejectTimelinePWMReadback(); err != nil {
-		t.Fatalf("pause did not release readback: %v", err)
+	if runtime.MediaTimeline().PlayReady {
+		t.Fatal("pause did not release readback")
+	}
+}
+
+func TestMediaTimelineReservationLeaseUsesGrantTimeNotOldClockReceipt(t *testing.T) {
+	runtime, _, _ := mediaTimelineFixture(t, false)
+	_ = armTimeline(t, runtime, 0)
+	runtime.mediaPlayback.mu.Lock()
+	runtime.mediaPlayback.received = time.Now().Add(-300 * time.Millisecond)
+	runtime.mediaPlayback.mu.Unlock()
+	runtime.expirePausedMediaTimelineWire()
+	if !runtime.MediaTimeline().PlayReady {
+		t.Fatal("old paused clock receipt prematurely expired newly granted reservation")
+	}
+	runtime.mediaTimeline.mu.Lock()
+	runtime.mediaTimeline.wireRenewedAt = time.Now().Add(-300 * time.Millisecond)
+	runtime.mediaTimeline.mu.Unlock()
+	runtime.expirePausedMediaTimelineWire()
+	if runtime.MediaTimeline().PlayReady {
+		t.Fatal("expired reservation still advertised readiness")
 	}
 }
 
 func TestMediaTimelineDoesNotAcknowledgePlayWithPWMReadbackInFlight(t *testing.T) {
 	runtime, frames, mu := mediaTimelineFixture(t, false)
 	value := armTimeline(t, runtime, 0)
+	value.Playing = false
+	if _, err := runtime.UpdateMediaPlayback(value); err != nil {
+		t.Fatal(err)
+	}
+	value.Sequence++
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
@@ -81,13 +105,16 @@ func TestMediaTimelineDoesNotAcknowledgePlayWithPWMReadbackInFlight(t *testing.T
 	if !written || !session.HasPendingRequest(native.OpPWMGet) {
 		t.Fatal("PWM read did not acquire the wire")
 	}
-	_, err := runtime.UpdateMediaPlayback(value)
-	var busy *ResourceBusyError
-	if !errors.As(err, &busy) || busy.Owner != "pwm_readback" {
-		t.Fatalf("Play falsely accepted an occupied serial slot: %v", err)
+	value.PreparePlay = true
+	armed := make(chan error, 1)
+	go func() { _, err := runtime.UpdateMediaPlayback(value); armed <- err }()
+	select {
+	case err := <-armed:
+		t.Fatalf("reservation returned before read drained: %v", err)
+	case <-time.After(20 * time.Millisecond):
 	}
-	if runtime.MediaPlayback().Playing || runtime.mediaTimeline.readbackReserved.Load() {
-		t.Fatal("rejected Play changed the accepted clock or stranded admission")
+	if runtime.MediaPlayback().Playing || runtime.MediaTimeline().PlayReady {
+		t.Fatal("draining reservation falsely acknowledged readiness or Play")
 	}
 	cancel()
 	select {
@@ -95,6 +122,20 @@ func TestMediaTimelineDoesNotAcknowledgePlayWithPWMReadbackInFlight(t *testing.T
 	case <-time.After(time.Second):
 		t.Fatal("readback did not release its request slot")
 	}
+	select {
+	case err := <-armed:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("reservation did not finish")
+	}
+	if !runtime.MediaTimeline().PlayReady {
+		t.Fatal("drained reservation not acknowledged")
+	}
+	value.PreparePlay = false
+	value.Playing = true
+	value.Sequence++
 	if _, err := runtime.UpdateMediaPlayback(value); err != nil {
 		t.Fatalf("released readback still blocks explicit Play: %v", err)
 	}
@@ -111,6 +152,43 @@ func TestMediaTimelineReportsStandaloneStripAsRetryableResourceBusy(t *testing.T
 	}
 	if busy.Resource != "addressable_strip" || busy.Owner != "standalone_strip_stream" || busy.RetryAfterMS != 2000 {
 		t.Fatalf("unexpected resource conflict: %#v", busy)
+	}
+}
+
+func TestMediaTimelinePausedReservationExpiresAndRequiresNewPreparePlay(t *testing.T) {
+	runtime, _, _ := mediaTimelineFixture(t, false)
+	value := armTimeline(t, runtime, 0)
+	if !runtime.MediaTimeline().PlayReady {
+		t.Fatal("paused reservation missing")
+	}
+	waitTimeline(t, runtime, func(status MediaTimelineStatus) bool { return !status.PlayReady })
+	if _, err := runtime.UpdateMediaPlayback(value); err == nil {
+		t.Fatal("expired serial reservation accepted Play")
+	}
+}
+
+func TestMediaTimelineEmergencyStopReleasesPausedReservation(t *testing.T) {
+	runtime, _, _ := mediaTimelineFixture(t, false)
+	_ = armTimeline(t, runtime, 0)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := runtime.SetEmergencyStop(ctx, true, "test", "reservation regression"); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.MediaTimeline().PlayReady {
+		t.Fatal("E-STOP left wire reserved")
+	}
+}
+
+func TestMediaTimelinePreparePlayValidation(t *testing.T) {
+	for _, value := range []MediaPlaybackUpdate{
+		{ClientID: "test", Sequence: 1, Rate: 1, PreparePlay: true, Loaded: false, PlanRevision: 1},
+		{ClientID: "test", Sequence: 1, Rate: 1, PreparePlay: true, Loaded: true, PlanRevision: 0},
+		{ClientID: "test", Sequence: 1, Rate: 1, PreparePlay: true, Loaded: true, Playing: true, PlanRevision: 1},
+	} {
+		if err := value.validate(); err == nil {
+			t.Fatalf("invalid preparation accepted: %+v", value)
+		}
 	}
 }
 
@@ -257,11 +335,13 @@ func armTimeline(t *testing.T, runtime *Runtime, at uint64) MediaPlaybackUpdate 
 	}
 	value.Playing = false
 	value.PositionMS = at
+	value.PreparePlay = true
 	if _, err := runtime.UpdateMediaPlayback(value); err != nil {
 		t.Fatal(err)
 	}
 	value.Sequence++
 	value.Playing = true
+	value.PreparePlay = false
 	return value
 }
 func TestMediaTimelineExecutesBothEdgesWithoutUIOrRepeatedCueRPC(t *testing.T) {
@@ -433,8 +513,8 @@ func TestMediaTimelineClockLeaseFaultsInsteadOfSkippingPendingCue(t *testing.T) 
 	if status.Acknowledged != 2 {
 		t.Fatalf("unexpected ACK ledger: %+v", status)
 	}
-	if _, err := runtime.UpdateMediaPlayback(MediaPlaybackUpdate{ClientID: "test", Sequence: 3, Loaded: true, Playing: true, Rate: 1, Epoch: 1, PlanRevision: 1}); err == nil {
-		t.Fatal("faulted plan resumed")
+	if _, err := runtime.UpdateMediaPlayback(MediaPlaybackUpdate{ClientID: "test", Sequence: 3, Loaded: true, Playing: true, Rate: 1, Epoch: 1, PlanRevision: 1}); err == nil || !strings.Contains(err.Error(), status.Error) {
+		t.Fatalf("faulted plan resumed or its original error was masked: %v", err)
 	}
 }
 
@@ -448,11 +528,13 @@ func TestMediaTimelinePauseResumeRestoresLatchedValueAndSeekRequiresArming(t *te
 	value.Sequence++
 	value.Playing = false
 	value.PositionMS = 100
+	value.PreparePlay = true
 	if _, err := runtime.UpdateMediaPlayback(value); err != nil {
 		t.Fatal(err)
 	}
 	value.Sequence++
 	value.Playing = true
+	value.PreparePlay = false
 	if _, err := runtime.UpdateMediaPlayback(value); err != nil {
 		t.Fatal(err)
 	}

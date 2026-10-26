@@ -26,3 +26,19 @@ func TestBoardLivenessRequiresConsecutiveFailuresAndSuccessResetsWindow(t *testi
 		}
 	}
 }
+
+func TestBoardLivenessReservationIsNotAStatusFailureOrSuccess(t *testing.T) {
+	tracker := boardLivenessFailureTracker{failures: 1}
+	for i := 0; i < 10; i++ {
+		if tracker.observe(&ResourceBusyError{Resource: "serial_channel", Owner: "media_timeline"}) {
+			t.Fatal("intentional serial reservation triggered DTR recovery")
+		}
+	}
+	if tracker.failures != 1 {
+		t.Fatal("deferred probe invented a healthy response")
+	}
+	tracker.observe(nil)
+	if tracker.failures != 0 {
+		t.Fatal("real successful probe did not restore health")
+	}
+}

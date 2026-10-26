@@ -1962,14 +1962,6 @@ func (runtime *Runtime) requestAtGenerationPriority(
 		return native.Frame{}, err
 	}
 	defer segmentUnlock()
-	if opcode == native.OpPWMGet {
-		if err := runtime.rejectTimelinePWMReadback(); err != nil {
-			return native.Frame{}, err
-		}
-		// A request admitted while paused may wait behind another transaction.
-		// Recheck immediately before writing so it cannot leak into playback.
-		ctx = link.WithRequestWriteGuard(ctx, runtime.rejectTimelinePWMReadback)
-	}
 	if err := runtime.rejectMediaTimelineConflict(ctx, opcode); err != nil {
 		return native.Frame{}, err
 	}
@@ -2004,6 +1996,10 @@ func (runtime *Runtime) requestAtGenerationPriority(
 		}
 	}
 	frame, err := session.RequestWithPriority(ctx, priority, opcode, payload, expected...)
+	if errors.Is(err, link.ErrTimelineReserved) {
+		return native.Frame{}, &ResourceBusyError{Resource: "serial_channel", Owner: "media_timeline",
+			Message: "serial channel reserved for prepared playback; pause before issuing live commands"}
+	}
 	if err != nil {
 		return native.Frame{}, err
 	}
@@ -2901,6 +2897,12 @@ func (runtime *Runtime) syncProgramState(snapshot ProgramStateSnapshot, lifecycl
 	err := runtime.Command(ctx, native.OpProgramState, payload)
 	cancel()
 	if err != nil {
+		var busy *ResourceBusyError
+		if errors.As(err, &busy) && busy.Resource == "serial_channel" {
+			runtime.publishEvent(Event{Kind: "program.state.sync", Lifecycle: "deferred",
+				State: string(snapshot.Mode), Reason: err.Error(), Text: "program state presentation deferred by prepared playback"})
+			return
+		}
 		runtime.publishEvent(Event{
 			Kind: "program.state.sync", Lifecycle: "failed",
 			State: string(snapshot.Mode), Reason: err.Error(),
@@ -3004,6 +3006,12 @@ type boardLivenessFailureTracker struct {
 }
 
 func (tracker *boardLivenessFailureTracker) observe(err error) bool {
+	var busy *ResourceBusyError
+	if errors.As(err, &busy) && busy.Resource == "serial_channel" && busy.Owner == "media_timeline" {
+		// No probe went on the wire. Neither diagnose a lost board nor invent
+		// a successful liveness response from intentional admission deferral.
+		return false
+	}
 	if err == nil {
 		tracker.failures = 0
 		return false

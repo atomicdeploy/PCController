@@ -13,7 +13,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"pccontroller.local/controller/internal/appconfig"
@@ -40,6 +39,7 @@ type MediaTimelinePlan struct {
 	MaxLatenessMS uint32                `json:"max_lateness_ms"`
 }
 type MediaTimelineStatus struct {
+	PlayReady              bool             `json:"play_ready"`
 	ClientID               string           `json:"client_id"`
 	Revision               uint64           `json:"revision"`
 	Hash                   string           `json:"hash,omitempty"`
@@ -100,37 +100,17 @@ type mediaTimelineStep struct {
 	payload []byte
 }
 type mediaTimelineState struct {
-	readbackReserved atomic.Bool
-	operation        sync.Mutex
-	mu               sync.Mutex
-	status           MediaTimelineStatus
-	plan             MediaTimelinePlan
-	steps            []mediaTimelineStep
-	cancel           context.CancelFunc
-	done             chan struct{}
+	releaseWire   func()
+	wireRenewedAt time.Time
+	operation     sync.Mutex
+	mu            sync.Mutex
+	status        MediaTimelineStatus
+	plan          MediaTimelinePlan
+	steps         []mediaTimelineStep
+	cancel        context.CancelFunc
+	done          chan struct{}
 }
 type mediaTimelineContextKey struct{}
-
-// PWM observations already arrive as complete changed-only frames. A fresh
-// readback must not occupy the wire across a prepared cue's deadline. Check the
-// accepted clock as well as worker state, including the resume/pause boundary.
-func (runtime *Runtime) rejectTimelinePWMReadback() error {
-	if runtime.mediaTimeline.readbackReserved.Load() {
-		return timelinePWMReadbackBusy()
-	}
-	plan := runtime.MediaTimeline()
-	clock, _, _ := runtime.mediaTimelineClock()
-	if plan.State == "playing" || (plan.StepCount > 0 && clock.Playing &&
-		clock.ClientID == plan.ClientID && clock.PlanRevision == plan.Revision) {
-		return timelinePWMReadbackBusy()
-	}
-	return nil
-}
-
-func timelinePWMReadbackBusy() error {
-	return &ResourceBusyError{Resource: "serial_readback", Owner: "media_timeline",
-		Message: "pause prepared playback before requesting fresh PWM readback; use published PWM observations while playing"}
-}
 
 func (runtime *Runtime) rejectMediaTimelineConflict(ctx context.Context, opcode byte) error {
 	if ctx.Value(mediaTimelineContextKey{}) != nil {
@@ -146,7 +126,11 @@ func (runtime *Runtime) rejectMediaTimelineConflict(ctx context.Context, opcode 
 func (runtime *Runtime) MediaTimeline() MediaTimelineStatus {
 	runtime.mediaTimeline.mu.Lock()
 	defer runtime.mediaTimeline.mu.Unlock()
-	return runtime.mediaTimeline.status
+	status := runtime.mediaTimeline.status
+	if status.State == "paused" && time.Since(runtime.mediaTimeline.wireRenewedAt) > mediaTimelineArmAckTimeout {
+		status.PlayReady = false
+	}
+	return status
 }
 
 func compileMediaTimeline(plan MediaTimelinePlan, runner *MacroRunner) ([]mediaTimelineStep, error) {
@@ -441,7 +425,7 @@ func (runtime *Runtime) stopMediaTimeline() {
 		state.status.State = "stopped"
 	}
 	state.mu.Unlock()
-	state.readbackReserved.Store(false)
+	runtime.releaseMediaTimelineWire()
 }
 func (runtime *Runtime) mediaTimelineOff(generation uint64) error {
 	// Pin cleanup to this board too. Never switch off a replacement board.
@@ -513,6 +497,7 @@ func mediaTimelineRestore(steps []mediaTimelineStep, index int) []mediaTimelineS
 }
 func (runtime *Runtime) runMediaTimeline(ctx context.Context, done chan struct{}, plan MediaTimelinePlan, steps []mediaTimelineStep, generation uint64) {
 	defer close(done)
+	defer runtime.releaseMediaTimelineWire()
 	ticker := time.NewTicker(2 * time.Millisecond)
 	defer ticker.Stop()
 	index := 0
@@ -520,6 +505,7 @@ func (runtime *Runtime) runMediaTimeline(ctx context.Context, done chan struct{}
 	wasPlaying := false
 	owned := false
 	lastWake := time.Now()
+	var lastPresentation time.Time
 	defer func() {
 		if owned {
 			if err := runtime.mediaTimelineOff(generation); err != nil {
@@ -570,6 +556,7 @@ func (runtime *Runtime) runMediaTimeline(ctx context.Context, done chan struct{}
 				fault("video clock feedback expired; seek before the pending cue and reprepare")
 				return
 			}
+			runtime.expirePausedMediaTimelineWire()
 			continue
 		}
 		if runtime.emergencyStop.Load() {
@@ -706,6 +693,17 @@ func (runtime *Runtime) runMediaTimeline(ctx context.Context, done chan struct{}
 			}
 			index++
 			position = actual
+		}
+		// Bound optional maintenance to 50 ms in gaps of at least 250 ms.
+		// The original cue timestamps and lateness checks remain unchanged.
+		currentPosition := float64(clock.PositionMS) + time.Since(anchor).Seconds()*1000*clock.Rate
+		gapMS := math.Inf(1)
+		if index < len(steps) {
+			gapMS = (steps[index].dueMS - currentPosition) / clock.Rate
+		}
+		if gapMS >= 250 && time.Since(lastPresentation) >= 2*time.Second {
+			runtime.serviceTimelinePresentation(ctx, clock, anchor, generation)
+			lastPresentation = time.Now()
 		}
 	}
 }
