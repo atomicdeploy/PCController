@@ -35,3 +35,28 @@ this does not imply 150 physical relay cycles. Human motion acceptance is pendin
 The three existing strip definitions retain their stable IDs and are grouped
 with Fade/Pulse in Strip demos with three-pixel defaults for the current bench.
 Private settings backups and live logs are not included in this repository.
+
+## Prepared playback and readback contention
+
+A replay on host ci.1647 exposed a PWM_GET (0x15) response wait occupying the
+serial slot for 88 ms. The strip configure cue reached dispatch about 2 ms late,
+then exhausted its unchanged 50 ms deadline behind that read. Framing and CRC
+counters remained unchanged: this is a separate scheduling conflict.
+
+Fresh PWM reads now return a structured resource conflict during prepared
+playback, with a second check immediately before the wire write. The PWM status
+RPC serves the existing observation during playback without changing its time,
+generation or revision. Resume fences new reads before checking registered ones;
+an already in-flight PWM read rejects Play without accepting a playing clock.
+The read is not canceled, and no mutation is retried. Pause releases the fence.
+
+This deliberately does not preempt an in-flight request. A client must handle
+the pre-Play resource conflict honestly; seamless resume under that contention
+and the final live synchronized replay remain acceptance gates. The earlier
+ProgramState contention observed on ci.1631 is not claimed fixed by this change.
+
+Deployment evidence must include live compiled version/source identity from
+the current listener. A prior updater reported a new disk digest while an old
+TUI subsequently took primary ownership. That old process was gracefully closed
+with operator approval and the ci.1647 listener verified separately. A disk
+artifact manifest alone does not prove which executable image owns the board.

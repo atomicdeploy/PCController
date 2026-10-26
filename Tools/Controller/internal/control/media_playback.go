@@ -155,6 +155,23 @@ func (runtime *Runtime) UpdateMediaPlayback(value MediaPlaybackUpdate) (MediaPla
 		state.mu.Unlock()
 		return runtime.MediaPlayback(), errors.New("stale media playback sequence")
 	}
+	if value.Playing && value.PlanRevision != 0 && !previous.Playing {
+		// Fence queued/new PWM reads before checking the non-preemptible one.
+		// Never acknowledge Play while a previously sent read owns the slot.
+		runtime.mediaTimeline.readbackReserved.Store(true)
+		runtime.mu.RLock()
+		session := runtime.session
+		runtime.mu.RUnlock()
+		if session != nil && session.HasPendingRequest(native.OpPWMGet) {
+			runtime.mediaTimeline.readbackReserved.Store(false)
+			state.mu.Unlock()
+			return runtime.MediaPlayback(), &ResourceBusyError{Resource: "serial_readback", Owner: "pwm_readback",
+				Message: "PWM readback is still in flight; playback was not started"}
+		}
+	}
+	if !value.Playing {
+		runtime.mediaTimeline.readbackReserved.Store(false)
+	}
 	received := time.Now()
 	clockTiming := mediaClockTiming(previous, value, state.received, received)
 	state.received = received

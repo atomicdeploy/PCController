@@ -437,6 +437,19 @@ func (s *Session) Request(
 	return s.RequestWithPriority(ctx, RequestPriorityNormal, opcode, payload, expected...)
 }
 
+// HasPendingRequest reports a registered request, including its response wait.
+// Callers must separately fence new admission before using this as readiness.
+func (s *Session) HasPendingRequest(opcode byte) bool {
+	s.stateMu.RLock()
+	defer s.stateMu.RUnlock()
+	for _, waiter := range s.waiters {
+		if waiter.requestOpcode == opcode {
+			return true
+		}
+	}
+	return false
+}
+
 // RequestWithPriority preserves wire serialization while allowing timing-bound
 // prepared-timeline commands to overtake noncritical requests that are queued
 // but have not yet reached the MCU. It never preempts an in-flight request.

@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"pccontroller.local/controller/internal/appconfig"
@@ -99,15 +100,37 @@ type mediaTimelineStep struct {
 	payload []byte
 }
 type mediaTimelineState struct {
-	operation sync.Mutex
-	mu        sync.Mutex
-	status    MediaTimelineStatus
-	plan      MediaTimelinePlan
-	steps     []mediaTimelineStep
-	cancel    context.CancelFunc
-	done      chan struct{}
+	readbackReserved atomic.Bool
+	operation        sync.Mutex
+	mu               sync.Mutex
+	status           MediaTimelineStatus
+	plan             MediaTimelinePlan
+	steps            []mediaTimelineStep
+	cancel           context.CancelFunc
+	done             chan struct{}
 }
 type mediaTimelineContextKey struct{}
+
+// PWM observations already arrive as complete changed-only frames. A fresh
+// readback must not occupy the wire across a prepared cue's deadline. Check the
+// accepted clock as well as worker state, including the resume/pause boundary.
+func (runtime *Runtime) rejectTimelinePWMReadback() error {
+	if runtime.mediaTimeline.readbackReserved.Load() {
+		return timelinePWMReadbackBusy()
+	}
+	plan := runtime.MediaTimeline()
+	clock, _, _ := runtime.mediaTimelineClock()
+	if plan.State == "playing" || (plan.StepCount > 0 && clock.Playing &&
+		clock.ClientID == plan.ClientID && clock.PlanRevision == plan.Revision) {
+		return timelinePWMReadbackBusy()
+	}
+	return nil
+}
+
+func timelinePWMReadbackBusy() error {
+	return &ResourceBusyError{Resource: "serial_readback", Owner: "media_timeline",
+		Message: "pause prepared playback before requesting fresh PWM readback; use published PWM observations while playing"}
+}
 
 func (runtime *Runtime) rejectMediaTimelineConflict(ctx context.Context, opcode byte) error {
 	if ctx.Value(mediaTimelineContextKey{}) != nil {
@@ -418,6 +441,7 @@ func (runtime *Runtime) stopMediaTimeline() {
 		state.status.State = "stopped"
 	}
 	state.mu.Unlock()
+	state.readbackReserved.Store(false)
 }
 func (runtime *Runtime) mediaTimelineOff(generation uint64) error {
 	// Pin cleanup to this board too. Never switch off a replacement board.

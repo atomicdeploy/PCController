@@ -1962,6 +1962,14 @@ func (runtime *Runtime) requestAtGenerationPriority(
 		return native.Frame{}, err
 	}
 	defer segmentUnlock()
+	if opcode == native.OpPWMGet {
+		if err := runtime.rejectTimelinePWMReadback(); err != nil {
+			return native.Frame{}, err
+		}
+		// A request admitted while paused may wait behind another transaction.
+		// Recheck immediately before writing so it cannot leak into playback.
+		ctx = link.WithRequestWriteGuard(ctx, runtime.rejectTimelinePWMReadback)
+	}
 	if err := runtime.rejectMediaTimelineConflict(ctx, opcode); err != nil {
 		return native.Frame{}, err
 	}

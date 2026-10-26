@@ -1,6 +1,7 @@
 package control
 
 import (
+	"context"
 	"errors"
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/link"
@@ -11,6 +12,93 @@ import (
 	"testing"
 	"time"
 )
+
+func TestMediaTimelinePWMReadbackCannotBlockPreparedEdges(t *testing.T) {
+	runtime, frames, mu := mediaTimelineFixture(t, false)
+	value := armTimeline(t, runtime, 0)
+	if err := runtime.rejectTimelinePWMReadback(); err != nil {
+		t.Fatalf("paused readback rejected: %v", err)
+	}
+	if _, err := runtime.UpdateMediaPlayback(value); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 10; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		_, err := runtime.Request(ctx, native.OpPWMGet, nil, native.OpPWMValues)
+		cancel()
+		var busy *ResourceBusyError
+		if !errors.As(err, &busy) || busy.Resource != "serial_readback" {
+			t.Fatalf("fresh readback should report ownership conflict, got %v", err)
+		}
+	}
+	status := waitTimeline(t, runtime, func(status MediaTimelineStatus) bool { return status.Acknowledged == 2 })
+	if status.State == "faulted" {
+		t.Fatal(status.Error)
+	}
+	mu.Lock()
+	for _, frame := range *frames {
+		if frame.Opcode == native.OpPWMGet {
+			mu.Unlock()
+			t.Fatal("PWM poll reached the wire during playback")
+		}
+	}
+	mu.Unlock()
+	value.Playing = false
+	value.Sequence++
+	if _, err := runtime.UpdateMediaPlayback(value); err != nil {
+		t.Fatal(err)
+	}
+	if err := runtime.rejectTimelinePWMReadback(); err != nil {
+		t.Fatalf("pause did not release readback: %v", err)
+	}
+}
+
+func TestMediaTimelineDoesNotAcknowledgePlayWithPWMReadbackInFlight(t *testing.T) {
+	runtime, frames, mu := mediaTimelineFixture(t, false)
+	value := armTimeline(t, runtime, 0)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		// This fixture ACKs commands, but deliberately does not provide PWM
+		// values, leaving the read registered until its caller cancels it.
+		_, err := runtime.Request(ctx, native.OpPWMGet, nil, native.OpPWMValues)
+		done <- err
+	}()
+	runtime.mu.RLock()
+	session := runtime.session
+	runtime.mu.RUnlock()
+	deadline := time.Now().Add(time.Second)
+	written := false
+	for !written && time.Now().Before(deadline) {
+		mu.Lock()
+		for _, frame := range *frames {
+			written = written || frame.Opcode == native.OpPWMGet
+		}
+		mu.Unlock()
+		time.Sleep(time.Millisecond)
+	}
+	if !written || !session.HasPendingRequest(native.OpPWMGet) {
+		t.Fatal("PWM read did not acquire the wire")
+	}
+	_, err := runtime.UpdateMediaPlayback(value)
+	var busy *ResourceBusyError
+	if !errors.As(err, &busy) || busy.Owner != "pwm_readback" {
+		t.Fatalf("Play falsely accepted an occupied serial slot: %v", err)
+	}
+	if runtime.MediaPlayback().Playing || runtime.mediaTimeline.readbackReserved.Load() {
+		t.Fatal("rejected Play changed the accepted clock or stranded admission")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("readback did not release its request slot")
+	}
+	if _, err := runtime.UpdateMediaPlayback(value); err != nil {
+		t.Fatalf("released readback still blocks explicit Play: %v", err)
+	}
+}
 
 func TestMediaTimelineReportsStandaloneStripAsRetryableResourceBusy(t *testing.T) {
 	runtime := New(Options{})
