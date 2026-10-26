@@ -25,6 +25,11 @@ Bench investigation is ongoing: the original 38-pixel run rejected a staged
 packet after 498 acknowledged frames, increasing framing errors by one without
 CRC errors or resets. The first deferred-decoding run acknowledged 588 frames
 with zero framing/CRC errors, then hit a host request deadline. Longer serial and
-host scheduling tests are required before claiming full resolution. Temporary
+host scheduling tests are required before claiming full resolution. A subsequent
+180-second, 38-pixel chase acknowledged 2,442 of 2,443 attempted frames, with no
+framing errors, CRC errors, or resets. One HTTP client request exceeded its
+five-second deadline; its physical outcome is unknown. Later animation frames
+continued without replaying that request. This is evidence for improved UART
+reception, not proof that all host latency issues are resolved. Temporary
 UART tracing is local bench instrumentation and must be removed before final
 production delivery. No physical RF remote acceptance is claimed by the fixture.
