@@ -38,7 +38,7 @@ List<Color> stripPreview(Json p,int count,int at) {
   final period=p['period_ms'] as int,time=at%(p['period_ms'] as int);
   Color color(String key,int intensity){final c=object(p[key]);int channel(String k)=>((c[k] as int? ?? 0)*intensity~/255).clamp(0,255);return Color.fromARGB(255,channel('red'),channel('green'),channel('blue'));}
   return List.generate(count,(pixel){
-    if(p['primitive']=='alternating-zones'){final step=p['step_ms'] as int;final phase=(time~/step)%math.max(2,period~/step);return color((pixel<(count+1)~/2)==(phase<(p['swap_after_steps'] as int))?'primary':'secondary',phase.isEven?255:(p['dim_intensity'] as int? ?? 0));}
+    if(p['primitive']=='alternating-zones'){final step=p['step_ms'] as int;final phase=(time~/step)%math.max(2,period~/step);return color((pixel<(count+1)~/2)==(phase<(p['swap_after_steps'] as int))?'primary':'secondary',phase % 2 == 0 ? 255 :(p['dim_intensity'] as int? ?? 0));}
     if(p['primitive']=='envelope'){final points=objects(p['envelope']);var level=0;for(var i=0;i<points.length;i++){final end=points[i]['at_ms'] as int;if(time<end){if(i>0){final previous=points[i-1],start=previous['at_ms'] as int,a=previous['intensity'] as int,b=points[i]['intensity'] as int;level=a+(b-a)*(time-start)~/(end-start);}break;}level=points[i]['intensity'] as int;}return color('primary',level);}
     final head=time*((count-1)~/2+1)~/period;
     final configured=p['tail_pixels'] as int? ?? 0,tail=math.max(3,configured==0?count~/12:configured);
