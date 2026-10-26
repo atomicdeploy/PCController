@@ -113,7 +113,7 @@ type mediaTimelineState struct {
 type mediaTimelineContextKey struct{}
 
 func (runtime *Runtime) rejectMediaTimelineConflict(ctx context.Context, opcode byte) error {
-	if ctx.Value(mediaTimelineContextKey{}) != nil {
+	if ctx.Value(mediaTimelineContextKey{}) != nil || ctx.Value(emergencySafetyContextKey{}) != nil {
 		return nil
 	}
 	status := runtime.MediaTimeline()

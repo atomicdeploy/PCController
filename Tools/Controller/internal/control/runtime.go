@@ -1990,6 +1990,9 @@ func (runtime *Runtime) requestAtGenerationPriority(
 	session := runtime.session
 	runtime.mu.RUnlock()
 	traceEpoch := runtime.pwmTraceAdmission(opcode, payload)
+	if ctx.Value(emergencySafetyContextKey{}) != nil {
+		priority = link.RequestPrioritySafety
+	}
 	if opcode == native.OpPWMSet {
 		if guard, ok := ctx.Value(rfRollGuardKey{}).(func() error); ok {
 			ctx = link.WithRequestWriteGuard(ctx, guard)

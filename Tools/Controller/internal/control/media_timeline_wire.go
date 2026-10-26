@@ -44,22 +44,36 @@ func (runtime *Runtime) expirePausedMediaTimelineWire() {
 func (runtime *Runtime) serviceTimelinePresentation(ctx context.Context, value MediaPlaybackUpdate, anchor time.Time, generation uint64) {
 	ctx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
 	defer cancel()
-	_, err := runtime.requestAtGenerationPriority(ctx, generation, link.RequestPriorityTimeline,
-		native.OpProgramState, native.ProgramStatePayload(true), native.OpACK)
-	if err == nil {
+	runtime.mu.RLock()
+	capabilities := runtime.hello.Capabilities
+	runtime.mu.RUnlock()
+	programSupported := capabilities&native.CapabilityProgramState != 0
+	displaySupported := capabilities&native.CapabilityScheduledSegments != 0
+	var err error
+	if programSupported {
+		_, err = runtime.requestAtGenerationPriority(ctx, generation, link.RequestPriorityTimeline,
+			native.OpProgramState, native.ProgramStatePayload(true), native.OpACK)
+	}
+	if displaySupported && err == nil {
 		_, err = runtime.requestAtGenerationPriority(ctx, generation, link.RequestPriorityTimeline,
 			native.OpDisplayText, mediaDisplayPayload(value, time.Since(anchor)), native.OpACK)
+	}
+	if !programSupported && !displaySupported {
+		_, err = runtime.requestAtGenerationPriority(ctx, generation, link.RequestPriorityTimeline,
+			native.OpGetStatus, nil, native.OpStatus)
 	}
 	state := &runtime.mediaPlayback
 	state.mu.Lock()
 	defer state.mu.Unlock()
-	state.snapshot.BoardSynced = err == nil
-	if err == nil {
+	state.snapshot.BoardSynced = err == nil && displaySupported
+	if err == nil && displaySupported {
 		state.snapshot.BoardSyncedAt = time.Now().UTC()
 		state.snapshot.BoardSequence = value.Sequence
 		state.snapshot.BoardError = ""
-	} else {
+	} else if err != nil {
 		state.snapshot.BoardError = fmt.Sprintf("timeline presentation not acknowledged: %v", err)
+	} else {
+		state.snapshot.BoardError = "board does not advertise scheduled clock display"
 	}
 }
 

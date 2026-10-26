@@ -180,6 +180,25 @@ func TestMediaTimelineEmergencyStopReleasesPausedReservation(t *testing.T) {
 	}
 }
 
+func TestMediaTimelineEmergencyStopBypassesReservationStillBeingGranted(t *testing.T) {
+	runtime, _, _ := mediaTimelineFixture(t, false)
+	runtime.mu.RLock()
+	session := runtime.session
+	runtime.mu.RUnlock()
+	// Model the reservation's drain phase: the link has fenced admission but
+	// no completed lease has yet been installed in mediaTimeline.releaseWire.
+	release, err := session.ReserveTimeline(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := runtime.SetEmergencyStop(ctx, true, "test", "pending reservation"); err != nil {
+		t.Fatalf("safety cleanup was blocked by pending reservation: %v", err)
+	}
+}
+
 func TestMediaTimelinePreparePlayValidation(t *testing.T) {
 	for _, value := range []MediaPlaybackUpdate{
 		{ClientID: "test", Sequence: 1, Rate: 1, PreparePlay: true, Loaded: false, PlanRevision: 1},
@@ -303,7 +322,7 @@ func mediaTimelineFixture(t *testing.T, nack bool) (*Runtime, *[]native.Frame, *
 			}
 		}
 	}()
-	runtime.attach(link.OpenResult{Session: link.NewForPort("TIMELINE-TEST", port), Port: ports.Info{Name: "TIMELINE-TEST"}, Hello: native.Hello{Name: "Virtual"}})
+	runtime.attach(link.OpenResult{Session: link.NewForPort("TIMELINE-TEST", port), Port: ports.Info{Name: "TIMELINE-TEST"}, Hello: native.Hello{Name: "Virtual", Capabilities: native.CapabilityProgramState | native.CapabilityScheduledSegments}})
 	t.Cleanup(func() { runtime.Close() })
 	return runtime, &frames, &mu
 }

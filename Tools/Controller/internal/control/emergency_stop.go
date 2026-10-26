@@ -12,6 +12,8 @@ import (
 	"pccontroller.local/controller/internal/native"
 )
 
+type emergencySafetyContextKey struct{}
+
 // EmergencyStopState is the host-authoritative, transport-neutral motion and
 // effect interlock. Unlocking removes the command block but never resumes work
 // that was cancelled when the latch engaged.
@@ -97,6 +99,7 @@ func (runtime *Runtime) reassertEmergencyStop() {
 }
 
 func (runtime *Runtime) applyEmergencyStopTerminalState(ctx context.Context) []error {
+	ctx = context.WithValue(ctx, emergencySafetyContextKey{}, true)
 	var stopErrors []error
 	// Repeat the board-safe terminal state after cancellation. This defeats a
 	// final in-flight macro/stream frame without ever energizing an output.
