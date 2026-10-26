@@ -33,3 +33,31 @@ continued without replaying that request. This is evidence for improved UART
 reception, not proof that all host latency issues are resolved. Temporary
 UART tracing is local bench instrumentation and must be removed before final
 production delivery. No physical RF remote acceptance is claimed by the fixture.
+
+## Bench checkpoint
+
+The temporary tracing was removed for firmware identity `5B86029E`. The final
+build uses 32,334 flash bytes and 1,571 static SRAM bytes; the existing final-LTO
+serial-response-plus-INT0 guard estimates 269 bytes of margin. The linked strip
+waveform fixture passes all 256 byte values, byte boundaries and a 300-byte frame.
+The programmer's immediate verify passed, but its separate readback initially
+failed to synchronize. A read-only retry succeeded. Guarded recovery then verified
+32,346 written bytes including the identity section, restored and verified EEPROM
+settings, cleared its recovery marker and released the programming latch.
+
+Pealayer's individual-frame path was also exercised for 60 seconds before that
+final upload: 166 frame requests were accepted, with 105 waits for its pending
+operation to finish. No new board framing/CRC errors, resets or Pealayer clock
+failures were observed. API acceptance is not an optical acknowledgement. This
+path is suitable for manual diagnostics; smooth playback needs the host streaming
+engine rather than frequent individual UI operations.
+
+The host connection and Pealayer automatic connection were restored after
+recovery. A fresh 38-pixel configuration was acknowledged. Playback remains
+paused and standalone chase/rainbow streaming is stopped so the separate playback
+investigation owns effects. Long streaming validation on the final trace-free
+image, the isolated host deadline, physical RF reception, synchronized playback,
+the three effect demonstrations and seat stress acceptance remain open. The next
+action is to reproduce the reported playback stop at its effect boundary with
+the recovered host available, recording new error deltas rather than historical
+maintenance disconnects. This checkpoint does not claim those acceptance gates.
