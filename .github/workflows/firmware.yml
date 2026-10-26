@@ -101,6 +101,9 @@ jobs:
           --clean
           --version "$PCCONTROLLER_VERSION"
 
+      - name: "Verify RF decoding stays outside the interrupt handler"
+        run: node Tools/Firmware/verify-rf-deferred.mjs
+
       - name: "Verify linked strip output waveform"
         run: >-
           node Tools/Firmware/verify-strip-waveform.mjs

@@ -3,7 +3,11 @@
 
 #include "ProjectConfig.h"
 
+#if defined(PCCONTROLLER_NATIVE)
 #include <RCSwitch.h>
+#else
+#include "LocalLib/RCSwitch.h"
+#endif
 
 #include "LocalLib/BoardPins.h"
 #include "LocalLib/DallasTemperatureBus.h"

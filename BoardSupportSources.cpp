@@ -2,6 +2,9 @@
 // Keep the LocalLib domain layout while building each implementation once.
 #include "ProjectConfig.h"
 
+#if !defined(PCCONTROLLER_NATIVE)
+#include "LocalLib/RCSwitch.cpp"
+#endif
 #include "LocalLib/DallasTemperatureBus.cpp"
 #include "LocalLib/I2cLcd.cpp"
 #include "LocalLib/Keys.cpp"
