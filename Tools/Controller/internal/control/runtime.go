@@ -4291,12 +4291,12 @@ func (runtime *Runtime) publishEvent(event Event) Event {
 	runtime.recordRFReceptionLocked(&event)
 	runtime.eventLog = append(runtime.eventLog, event)
 	if len(runtime.eventLog) > 512 {
-		runtime.eventLog = append([]Event(nil), runtime.eventLog[len(runtime.eventLog)-512:]...)
+		runtime.eventLog = retainSliceSuffix(runtime.eventLog, len(runtime.eventLog)-512)
 	}
 	if event.Stream == EventStreamActivity {
 		runtime.activityLog = append(runtime.activityLog, event)
 		if len(runtime.activityLog) > 512 {
-			runtime.activityLog = append([]Event(nil), runtime.activityLog[len(runtime.activityLog)-512:]...)
+			runtime.activityLog = retainSliceSuffix(runtime.activityLog, len(runtime.activityLog)-512)
 		}
 	}
 	// Keep the RF manager's bounded history independently of high-rate media
@@ -4304,7 +4304,7 @@ func (runtime *Runtime) publishEvent(event Event) Event {
 	if strings.HasPrefix(event.Kind, "rf.") && event.Source != "bridge" {
 		runtime.rfActivityLog = append(runtime.rfActivityLog, event)
 		if len(runtime.rfActivityLog) > 20 {
-			runtime.rfActivityLog = append([]Event(nil), runtime.rfActivityLog[len(runtime.rfActivityLog)-20:]...)
+			runtime.rfActivityLog = retainSliceSuffix(runtime.rfActivityLog, len(runtime.rfActivityLog)-20)
 		}
 	}
 	close(runtime.eventNotify)

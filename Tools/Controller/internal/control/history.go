@@ -320,7 +320,7 @@ func (runtime *Runtime) pruneHistoryLocked(now time.Time) {
 			statusStart++
 		}
 		if statusStart != 0 {
-			runtime.statusHistory = retainHistorySuffix(runtime.statusHistory, statusStart)
+			runtime.statusHistory = retainSliceSuffix(runtime.statusHistory, statusStart)
 		}
 		timelineStart := 0
 		for timelineStart < len(runtime.timeline) &&
@@ -328,18 +328,18 @@ func (runtime *Runtime) pruneHistoryLocked(now time.Time) {
 			timelineStart++
 		}
 		if timelineStart != 0 {
-			runtime.timeline = retainHistorySuffix(runtime.timeline, timelineStart)
+			runtime.timeline = retainSliceSuffix(runtime.timeline, timelineStart)
 		}
 	}
 	if runtime.timelineLimit > 0 && len(runtime.timeline) > runtime.timelineLimit {
-		runtime.timeline = retainHistorySuffix(runtime.timeline, len(runtime.timeline)-runtime.timelineLimit)
+		runtime.timeline = retainSliceSuffix(runtime.timeline, len(runtime.timeline)-runtime.timelineLimit)
 	}
 }
 
-// Call only under historyMu. Public readers already receive detached copies.
+// Call only with exclusive ownership of the slice. Public readers receive detached copies.
 // Reuse bounded storage and clear discarded references instead of allocating
 // the entire retained history for each new event at the retention limit.
-func retainHistorySuffix[T any](entries []T, start int) []T {
+func retainSliceSuffix[T any](entries []T, start int) []T {
 	retained := copy(entries, entries[start:])
 	clear(entries[retained:])
 	return entries[:retained]
