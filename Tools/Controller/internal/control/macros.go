@@ -248,17 +248,21 @@ func (runner *MacroRunner) Snapshot() MacroSnapshot {
 // interface. Recorded sequences and rendered strip streams retain their
 // distinct engines, but share discovery, stable references, and commands.
 func (runner *MacroRunner) EffectCatalog() []EffectDescriptor {
-	config := appconfig.Defaults()
+	var config appconfig.Config
 	if runner.hostConfig != nil {
 		config = runner.hostConfig()
+	} else {
+		config = appconfig.Defaults()
 	}
 	return EffectCatalogWithGroups(runner.List(), config.StripEffects, config.EffectGroups)
 }
 
 func (runner *MacroRunner) EffectGroups() []EffectGroupDescriptor {
-	config := appconfig.Defaults()
+	var config appconfig.Config
 	if runner.hostConfig != nil {
 		config = runner.hostConfig()
+	} else {
+		config = appconfig.Defaults()
 	}
 	config.Macros = runner.List()
 	return EffectGroupCatalog(config)

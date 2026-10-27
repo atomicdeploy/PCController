@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/url"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -842,6 +843,7 @@ func (s *Session) readLoop() {
 
 	for {
 		n, err := s.port.Read(buffer)
+		replyDelivered := false
 		receivedAt := time.Now()
 		s.lastReadReturned.Store(receivedAt.UnixNano())
 		if n > 0 {
@@ -853,7 +855,9 @@ func (s *Session) readLoop() {
 			for _, frame := range frames {
 				s.observeRFClock(frame)
 				s.observeHello(frame)
-				if !s.deliver(frame) {
+				if s.deliver(frame) {
+					replyDelivered = true
+				} else {
 					s.publish(Event{Frame: frame, ReceivedAt: receivedAt})
 				}
 			}
@@ -880,6 +884,14 @@ func (s *Session) readLoop() {
 		case <-s.closing:
 			return
 		default:
+		}
+		if replyDelivered && runtime.GOOS == "windows" {
+			// Let the awakened request consume its response before this reader
+			// enters another blocking Win32 serial syscall. Execution traces
+			// showed the waiter remaining runnable for tens of milliseconds
+			// while the reader blocked, despite another idle P.
+			// Yield once per decoded batch, without sleeps or changed deadlines.
+			runtime.Gosched()
 		}
 	}
 }

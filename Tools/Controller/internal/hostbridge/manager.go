@@ -1125,7 +1125,7 @@ func (manager *Manager) dispatchNotification(
 		}
 		return
 	}
-	job, ok, err := notificationJobFromObservation(config, event, manager.client.Snapshot)
+	job, ok, err := notificationJobFromObservation(config, event, manager.client.BoardSnapshot)
 	if err != nil {
 		manager.recordError("notification actions: " + err.Error())
 		return
