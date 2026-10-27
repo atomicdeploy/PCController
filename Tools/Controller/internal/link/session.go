@@ -222,12 +222,14 @@ func (s *Session) ReserveTimeline(ctx context.Context) (func(), error) {
 			a.mu.Lock()
 			a.reserved = false
 			s.releaseTimeline = nil
+			a.mu.Unlock()
+			// Scheduling cleanup and logging must not block safety admission.
+			// The process manager retains ownership if another lease overlaps.
 			if releasePriority != nil {
 				if err := releasePriority(); err != nil {
 					log.Printf("playback scheduling cleanup: %v", err)
 				}
 			}
-			a.mu.Unlock()
 		})
 	}
 	s.releaseTimeline = release

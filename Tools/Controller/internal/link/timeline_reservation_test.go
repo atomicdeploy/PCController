@@ -151,3 +151,39 @@ func TestTimelinePriorityFailureAndDrainTimeoutUnwind(t *testing.T) {
 		t.Fatal("drain timeout retained priority/wire")
 	}
 }
+
+func TestTimelinePriorityCleanupDoesNotBlockSafetyAdmission(t *testing.T) {
+	session := NewForPort("PRIORITY", newFakePort())
+	defer session.Close()
+	entered, resume := make(chan struct{}), make(chan struct{})
+	session.acquirePlaybackPriority = func() (func() error, error) {
+		return func() error { close(entered); <-resume; return nil }, nil
+	}
+	release, err := session.ReserveTimeline(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() { release(); close(done) }()
+	<-entered
+	admitted := make(chan error, 1)
+	go func() {
+		releaseSafety, err := session.requestAdmission.acquire(context.Background(), session.closing, RequestPrioritySafety)
+		if releaseSafety != nil {
+			releaseSafety()
+		}
+		admitted <- err
+	}()
+	select {
+	case err := <-admitted:
+		close(resume)
+		<-done
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		close(resume)
+		<-done
+		t.Fatal("scheduling cleanup held safety admission")
+	}
+}
