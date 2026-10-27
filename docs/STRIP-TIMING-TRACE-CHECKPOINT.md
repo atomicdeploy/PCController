@@ -1,0 +1,11 @@
+# Strip integration timing checkpoint
+
+The synchronized restore failure on host ci.1653 was distinct from serial framing corruption. A five-second execution trace showed the timeline worker starting its request at +173.45 ms, the serial reader delivering the ACK at +189.335 ms, and the worker resuming at +234.281 ms. Delivery took about 15.9 ms; the runnable worker then waited 44.95 ms. A GC sweep-termination stop-the-world interval occupied 15.59 ms of that wait. These are host observations, not hardware arrival timestamps.
+
+The allocation triggering that collection came from hostbridge event presentation -> Client.Snapshot -> effect groups -> Store.Current -> deep configuration clone. Door, segment and status-light observers do not need the effect library. BoardSnapshot now supplies their cached live state without catalog providers, macro library copies or reset-device enumeration. The facade regression also caught an indirect catalog expansion through output-status capability checks; those checks now prefer the same board-only observation while preserving the existing fallback for other commanders. Full public query snapshots still contain the catalogs. Regression coverage checks provider exclusion, retained state/timestamps, public catalog preservation and shared fresh presentation observations.
+
+This removes demonstrated unnecessary allocation; it does not prove every prior timing failure had the same cause or guarantee a Windows scheduling deadline. The 50 ms limit remains unchanged. The next gate is hosted CI, exact-artifact host update, and a coordinated unprofiled synchronized replay with cleanup and counter checks. Do not count the profiled failure as playback acceptance.
+
+Standalone evidence remains separate: a three-pixel 180-second stream and 150 seat Up requests over 15 seconds had no new framing/CRC/reset errors. Identical seat commands coalesce, so this does not establish 150 relay cycles. Police, White Thunder, Converging, Fade and Pulse demos are available; visual, physical and audible acceptance remains with the user. Android installation and native modal visual verification are still open.
+
+Private traces, machine configuration and captures are retained locally, not published.

@@ -216,7 +216,14 @@ func retainedStatusOwner(owner *retainedOutput) string {
 }
 
 func (scheduler *OutputScheduler) targetSnapshot() Snapshot {
-	reporter, ok := scheduler.target.(outputCapabilityReporter)
+	return outputBoardSnapshot(scheduler.target)
+}
+
+func outputBoardSnapshot(target outputCommander) Snapshot {
+	if reporter, ok := target.(interface{ BoardSnapshot() Snapshot }); ok {
+		return reporter.BoardSnapshot()
+	}
+	reporter, ok := target.(outputCapabilityReporter)
 	if !ok {
 		return Snapshot{}
 	}
@@ -823,16 +830,11 @@ func (scheduler *OutputScheduler) sendStatusDescriptor(
 }
 
 func supportsNativeStatusEffects(target outputCommander) bool {
-	reporter, ok := target.(outputCapabilityReporter)
-	return ok && reporter.Snapshot().Hello.Capabilities&native.CapabilityStatusEffects != 0
+	return outputBoardSnapshot(target).Hello.Capabilities&native.CapabilityStatusEffects != 0
 }
 
 func supportsNativeStatusProfiles(target outputCommander) bool {
-	reporter, ok := target.(outputCapabilityReporter)
-	if !ok {
-		return false
-	}
-	capabilities := reporter.Snapshot().Hello.Capabilities
+	capabilities := outputBoardSnapshot(target).Hello.Capabilities
 	return capabilities&native.CapabilityStatusEffects != 0 &&
 		capabilities&native.CapabilityStatusProfiles != 0
 }

@@ -27,12 +27,18 @@ func TestPublicPortInfoPublishesCrossPlatformDisplayIdentity(t *testing.T) {
 func TestSharedFacadeSnapshotUsesRuntimeEffectCatalog(t *testing.T) {
 	runtime := control.New(control.Options{})
 	config := appconfig.Defaults()
+	configReads := 0
 	engine := control.NewCommandEngine(runtime, control.CommandOptions{
-		HostConfig: func() appconfig.Config { return config },
+		HostConfig: func() appconfig.Config { configReads++; return config },
 	})
 	client := AttachSharedRuntime(runtime, engine)
 	defer client.Shutdown()
 
+	configReads = 0
+	board := client.BoardSnapshot()
+	if configReads != 0 || len(board.Effects) != 0 || len(board.StripEffects) != 0 {
+		t.Fatal("internal board observation expanded configuration or catalogs")
+	}
 	snapshot := client.Snapshot()
 	if len(snapshot.Effects) != len(config.StripEffects) {
 		t.Fatalf("snapshot effects=%d, want runtime catalog=%d", len(snapshot.Effects), len(config.StripEffects))

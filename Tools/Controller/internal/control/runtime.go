@@ -815,7 +815,13 @@ func eventKindMatches(requested, actual string) bool {
 		(requested != "" && strings.HasPrefix(actual, requested+"."))
 }
 
-func (runtime *Runtime) Snapshot() Snapshot {
+func (runtime *Runtime) Snapshot() Snapshot { return runtime.snapshot(true) }
+
+// BoardSnapshot returns cached live state without expanding effect catalogs.
+// Internal observers must not copy the user library for every telemetry event.
+func (runtime *Runtime) BoardSnapshot() Snapshot { return runtime.snapshot(false) }
+
+func (runtime *Runtime) snapshot(includeCatalog bool) Snapshot {
 	programState := runtime.ProgramState()
 	rfLearning := runtime.RFLearnState()
 	emergencyStop := runtime.EmergencyStop()
@@ -870,7 +876,7 @@ func (runtime *Runtime) Snapshot() Snapshot {
 	// user effects. Never hold the connection lock across that presentation work:
 	// a waiting writer also blocks subsequent RWMutex readers, including the
 	// prepared executor's small session-generation check.
-	if runner != nil {
+	if includeCatalog && runner != nil {
 		snapshot.Effects = runner.EffectCatalog()
 		snapshot.EffectGroups = runner.EffectGroups()
 	}

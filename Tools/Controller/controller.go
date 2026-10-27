@@ -2337,12 +2337,26 @@ func (client *Client) MapLearnedRF(
 // Snapshot returns cached board state without polling firmware. When no
 // transport candidate is cached, serial-reset capability discovery may perform
 // one throttled host-side device enumeration.
-func (client *Client) Snapshot() Snapshot {
-	snapshot := client.runtime.Snapshot()
-	resetLinesAvailable, resetLinesPort, resetLinesReason := client.runtime.ResetLinesCapability()
+func (client *Client) Snapshot() Snapshot { return client.snapshot(true) }
+
+// BoardSnapshot is for internal live-state observers. It omits catalogs, macro
+// libraries and reset-device enumeration; public query snapshots remain complete.
+func (client *Client) BoardSnapshot() Snapshot { return client.snapshot(false) }
+
+func (client *Client) snapshot(includeCatalog bool) Snapshot {
+	var snapshot control.Snapshot
+	var resetLinesAvailable bool
+	var resetLinesPort ports.Info
+	var resetLinesReason string
+	if includeCatalog {
+		snapshot = client.runtime.Snapshot()
+		resetLinesAvailable, resetLinesPort, resetLinesReason = client.runtime.ResetLinesCapability()
+	} else {
+		snapshot = client.runtime.BoardSnapshot()
+	}
 	// Library snapshots belong to client queries, not the hot board-status
 	// path: copying a long take for every internal status check is unnecessary.
-	if runner := client.runtime.MacroRunner(); runner != nil {
+	if runner := client.runtime.MacroRunner(); includeCatalog && runner != nil {
 		snapshot.Macros = runner.Snapshot()
 	}
 	client.illuminationMu.RLock()
@@ -2351,7 +2365,10 @@ func (client *Client) Snapshot() Snapshot {
 	if !snapshot.Connected || !snapshot.HaveSettings || !snapshot.HaveStatus {
 		illumination = IlluminationState{}
 	}
-	stripEffects := control.SupportedConfiguredStripEffectDescriptors(snapshot.Connected, snapshot.Hello.Capabilities, client.currentStripEffects())
+	var stripEffects []control.StripEffectDescriptor
+	if includeCatalog {
+		stripEffects = control.SupportedConfiguredStripEffectDescriptors(snapshot.Connected, snapshot.Hello.Capabilities, client.currentStripEffects())
+	}
 	return Snapshot{
 		Connected: snapshot.Connected,
 		Paused:    snapshot.Paused,

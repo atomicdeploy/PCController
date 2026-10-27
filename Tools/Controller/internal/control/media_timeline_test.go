@@ -583,3 +583,33 @@ func TestMediaTimelinePauseResumeRestoresLatchedValueAndSeekRequiresArming(t *te
 	}
 	waitTimeline(t, runtime, func(s MediaTimelineStatus) bool { return s.ArmedEpoch == 2 && s.RebasedSteps == 2 })
 }
+
+func TestBoardSnapshotSkipsCatalogProvidersAndRetainsLiveState(t *testing.T) {
+	runtime := New(Options{})
+	defer runtime.Close()
+	calls := 0
+	runtime.setMacroRunner(NewMacroRunner(nil, func() []appconfig.Macro {
+		calls++
+		return []appconfig.Macro{{ID: 7, Name: "fixture", Mode: macroModeHost,
+			Steps: []appconfig.MacroStep{{Kind: "relay", Target: 7, Value: 0}}}}
+	}, nil))
+	runtime.mu.Lock()
+	runtime.haveStatus = true
+	runtime.status.DoorOpen = true
+	runtime.statusUpdated = time.Now()
+	runtime.mu.Unlock()
+	light := runtime.BoardSnapshot()
+	if calls != 0 {
+		t.Fatalf("board observation expanded catalog %d times", calls)
+	}
+	full := runtime.Snapshot()
+	if calls == 0 || len(full.Effects) == 0 {
+		t.Fatal("public snapshot lost its catalog")
+	}
+	if light.Status != full.Status || light.StatusUpdated != full.StatusUpdated || !light.HaveStatus {
+		t.Fatal("board observation lost authoritative state or timestamp")
+	}
+	if len(light.Effects) != 0 || len(light.EffectGroups) != 0 {
+		t.Fatal("board observation includes catalog")
+	}
+}
