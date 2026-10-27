@@ -303,7 +303,13 @@ func OpenContext(ctx context.Context, name string, baudRate int) (*Session, erro
 	if err := ctx.Err(); err != nil {
 		return newSession(name, port), fmt.Errorf("open %s canceled after serial acquisition: %w", name, err)
 	}
-	if err := port.SetReadTimeout(DefaultReadTimeout); err != nil {
+	readTimeout := DefaultReadTimeout
+	if runtime.GOOS == "windows" {
+		// Bound idle overlapped-read residency on Windows/CH340. Empty reads
+		// retain decoder state; this is not a response or cue deadline.
+		readTimeout = 10 * time.Millisecond
+	}
+	if err := port.SetReadTimeout(readTimeout); err != nil {
 		configureErr := fmt.Errorf("configure %s: %w", name, err)
 		if closeErr := port.Close(); closeErr != nil {
 			// Return a close-only Session together with the error so the caller

@@ -49,3 +49,34 @@ func TestLateACKRetainsReceiveTimeAfterRequestCancellation(t *testing.T) {
 		t.Fatal("late ACK was swallowed by the canceled waiter")
 	}
 }
+
+func TestFragmentedACKSurvivesEmptyReadIntervals(t *testing.T) {
+	port := newFakePort()
+	session := NewForPort("TEST", port)
+	defer session.Close()
+	port.onWrite = func(encoded []byte) {
+		request, err := native.Decode(encoded)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reply, err := native.Encode(native.Frame{Opcode: native.OpACK, Seq: request.Seq, Payload: []byte{request.Opcode, 0}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, value := range reply {
+			port.reads <- []byte{value}
+			port.reads <- nil
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	frame, err := session.Request(ctx, native.OpRelayAllOff, nil, native.OpACK)
+	if err != nil || frame.Opcode != native.OpACK {
+		t.Fatalf("partial ACK lost across idle reads: %+v, %v", frame, err)
+	}
+	select {
+	case event := <-session.Events():
+		t.Fatalf("partial/idle read produced an error or unsolicited frame: %+v", event)
+	default:
+	}
+}
