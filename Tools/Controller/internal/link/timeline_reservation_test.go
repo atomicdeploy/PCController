@@ -95,3 +95,59 @@ func TestTimelineReservationTimeoutDoesNotStrandAdmission(t *testing.T) {
 	}
 	release()
 }
+
+func TestTimelinePriorityLeaseFollowsReservationAndClose(t *testing.T) {
+	for _, closeFirst := range []bool{false, true} {
+		session := NewForPort("PRIORITY", newFakePort())
+		acquired, released := 0, 0
+		session.acquirePlaybackPriority = func() (func() error, error) { acquired++; return func() error { released++; return nil }, nil }
+		release, err := session.ReserveTimeline(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if acquired != 1 || released != 0 {
+			t.Fatal("priority not held by reservation")
+		}
+		if closeFirst {
+			if err = session.Close(); err != nil {
+				t.Fatal(err)
+			}
+		}
+		release()
+		release()
+		if err = session.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if released != 1 {
+			t.Fatalf("priority released %d times", released)
+		}
+	}
+}
+
+func TestTimelinePriorityFailureAndDrainTimeoutUnwind(t *testing.T) {
+	session := NewForPort("PRIORITY", newFakePort())
+	defer session.Close()
+	failure := errors.New("priority denied")
+	session.acquirePlaybackPriority = func() (func() error, error) { return nil, failure }
+	if release, err := session.ReserveTimeline(context.Background()); release != nil || !errors.Is(err, failure) {
+		t.Fatalf("release present=%v error=%v", release != nil, err)
+	}
+	if session.requestAdmission.reserved {
+		t.Fatal("failed priority acquisition reserved wire")
+	}
+	released := 0
+	session.acquirePlaybackPriority = func() (func() error, error) { return func() error { released++; return nil }, nil }
+	active, err := session.requestAdmission.acquire(context.Background(), session.closing, RequestPriorityNormal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	if _, err = session.ReserveTimeline(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal(err)
+	}
+	active()
+	if released != 1 || session.requestAdmission.reserved {
+		t.Fatal("drain timeout retained priority/wire")
+	}
+}

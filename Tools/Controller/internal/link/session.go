@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/url"
 	"runtime"
@@ -16,6 +17,7 @@ import (
 	"go.bug.st/serial"
 
 	"pccontroller.local/controller/internal/native"
+	"pccontroller.local/controller/internal/playbackpriority"
 	"pccontroller.local/controller/internal/portowner"
 )
 
@@ -85,6 +87,10 @@ type Session struct {
 	rfWire           rfWireState
 	lastReadReturned atomic.Int64
 	lastDataReceived atomic.Int64
+	// Real local serial sessions attach scheduling to their wire reservation.
+	// Test/adaptor sessions do not mutate the test runner's process priority.
+	acquirePlaybackPriority func() (func() error, error)
+	releaseTimeline         func() // guarded by requestAdmission.mu
 }
 
 type sessionPort interface {
@@ -176,9 +182,28 @@ func (admission *requestAdmission) acquire(
 func (s *Session) ReserveTimeline(ctx context.Context) (func(), error) {
 	a := &s.requestAdmission
 	a.mu.Lock()
+	if err := ctx.Err(); err != nil {
+		a.mu.Unlock()
+		return nil, err
+	}
+	select {
+	case <-s.closing:
+		a.mu.Unlock()
+		return nil, ErrClosed
+	default:
+	}
 	if a.reserved {
 		a.mu.Unlock()
 		return nil, ErrTimelineReserved
+	}
+	var releasePriority func() error
+	if s.acquirePlaybackPriority != nil {
+		var err error
+		releasePriority, err = s.acquirePlaybackPriority()
+		if err != nil {
+			a.mu.Unlock()
+			return nil, err
+		}
 	}
 	a.reserved = true
 	kept := a.waiters[:0]
@@ -191,15 +216,22 @@ func (s *Session) ReserveTimeline(ctx context.Context) (func(), error) {
 		}
 	}
 	a.waiters = kept
-	a.mu.Unlock()
 	var once sync.Once
 	release := func() {
 		once.Do(func() {
 			a.mu.Lock()
 			a.reserved = false
+			s.releaseTimeline = nil
+			if releasePriority != nil {
+				if err := releasePriority(); err != nil {
+					log.Printf("playback scheduling cleanup: %v", err)
+				}
+			}
 			a.mu.Unlock()
 		})
 	}
+	s.releaseTimeline = release
+	a.mu.Unlock()
 	drain, err := a.acquire(ctx, s.closing, RequestPriorityTimeline)
 	if err != nil {
 		release()
@@ -345,6 +377,7 @@ func OpenContext(ctx context.Context, name string, baudRate int) (*Session, erro
 	}
 
 	session := NewForPort(name, port)
+	session.acquirePlaybackPriority = playbackpriority.Acquire
 	return session, nil
 }
 
@@ -818,6 +851,12 @@ func (s *Session) closeTransport() error {
 	}
 	s.notifyBeforeClose()
 	s.closingOnce.Do(func() { close(s.closing) })
+	s.requestAdmission.mu.Lock()
+	releaseTimeline := s.releaseTimeline
+	s.requestAdmission.mu.Unlock()
+	if releaseTimeline != nil {
+		releaseTimeline()
+	}
 	if s.pendingOpen != nil {
 		select {
 		case result := <-s.pendingOpen.result:
