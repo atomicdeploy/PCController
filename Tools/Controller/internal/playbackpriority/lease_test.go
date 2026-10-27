@@ -76,7 +76,7 @@ func TestLeaseAcquisitionFailureDoesNotCreateOwner(t *testing.T) {
 		}, set: func(uint32) error { return failure }}
 		release, err := m.acquire()
 		if !errors.Is(err, failure) || release != nil || m.refs != 0 || m.changed {
-			t.Fatalf("failure leaked ownership: %+v, %v", m, err)
+			t.Fatalf("failure leaked ownership: refs=%d changed=%v error=%v", m.refs, m.changed, err)
 		}
 	}
 }
