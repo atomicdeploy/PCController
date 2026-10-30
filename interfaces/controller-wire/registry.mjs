@@ -327,6 +327,7 @@ export function renderDart(contract) {
     "  static const magic = " + ns.envelope.magic + ";\n" +
     "  static const reserved = " + ns.envelope.reserved + ";\n" +
     "  static const maximumPayload = " + ns.envelope.maximumPayload + ";\n" +
+    "  static const requests = <int>{" + ns.opcodes.filter(r => r.value < 128).map(r => r.value).join(", ") + "};\n" +
     ns.opcodes.map(r => "  static const " + dartName(r.cpp) + " = 0x" + formatHex(r.value) + ";").join("\n") +
     "\n}\n").join("\n");
 }
