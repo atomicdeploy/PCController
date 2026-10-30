@@ -188,6 +188,13 @@ try {
 // the exception file- and value-specific so docs and all other source remain
 // subject to the normal external-repository privacy gate.
 const reviewedRepositoryFixtures = new Map([
+  // Upstream attribution retained in the vendored LGPL RF library.
+  ["LocalLib/RCSwitch.cpp", new Set([
+    ["https://github", ".com/sui77/rc-switch"].join(""),
+  ])],
+  ["LocalLib/RCSwitch.h", new Set([
+    ["https://github", ".com/sui77/rc-switch"].join(""),
+  ])],
   ["Tools/Controller/README.md", new Set([
     ["https://github", ".com/atomicdeploy/PCController"].join(""),
   ])],

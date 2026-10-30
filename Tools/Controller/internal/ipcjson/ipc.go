@@ -1255,10 +1255,16 @@ func (service *Service) dispatch(
 	case "controller.rf.catalog":
 		result, err = service.rfCatalog(ctx, request.Params)
 	case "controller.rf.observed.add":
-		var params struct { Code uint32 `json:"code"`; Bits byte `json:"bits"`; Protocol byte `json:"protocol"` }
-		if err = decodeStrictParams(request.Params,&params); err == nil {
-			err = service.Client.AddObservedRF(ctx,params.Code,params.Bits,params.Protocol)
-			if err == nil { result,err = service.Client.ListLearnedDetailed(ctx) }
+		var params struct {
+			Code     uint32 `json:"code"`
+			Bits     byte   `json:"bits"`
+			Protocol byte   `json:"protocol"`
+		}
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			err = service.Client.AddObservedRF(ctx, params.Code, params.Bits, params.Protocol)
+			if err == nil {
+				result, err = service.Client.ListLearnedDetailed(ctx)
+			}
 		}
 	case "controller.rf.binding.put":
 		result, err = service.putRFBinding(request.Params)
@@ -3118,6 +3124,7 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 	socketIOPath := service.currentSocketIOPath()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/diagnostics/cpu-profile", service.serveCPUProfile)
+	mux.HandleFunc("/api/diagnostics/execution-trace", service.serveExecutionTrace)
 	mux.HandleFunc(webSocketPath, func(writer http.ResponseWriter, request *http.Request) {
 		if !authorizeHTTPRequest(writer, request, service) {
 			return

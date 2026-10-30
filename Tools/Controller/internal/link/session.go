@@ -5,15 +5,19 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/url"
+	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.bug.st/serial"
 
 	"pccontroller.local/controller/internal/native"
+	"pccontroller.local/controller/internal/playbackpriority"
 	"pccontroller.local/controller/internal/portowner"
 )
 
@@ -29,6 +33,7 @@ var (
 	ErrSerialOpenPending       = errors.New("serial port acquisition is still pending")
 	ErrSequenceExhaust         = errors.New("all request sequence numbers are in use")
 	ErrControlLinesUnsupported = errors.New("transport does not support DTR/RTS")
+	ErrTimelineReserved        = errors.New("serial channel is reserved for prepared playback")
 )
 
 var openSerialPort = serial.Open
@@ -45,6 +50,8 @@ type serialOpenAcquisition struct {
 type Event struct {
 	Frame native.Frame
 	Err   error
+	// ReceivedAt is when Read returned these bytes, before decoder/observer work.
+	ReceivedAt time.Time
 	// Recoverable identifies a decoder anomaly that was isolated at the next
 	// frame delimiter. The transport is still usable and later frames remain
 	// authoritative; consumers must not treat this as a disconnect cause.
@@ -68,16 +75,22 @@ type Session struct {
 	closing chan struct{}
 	done    chan struct{}
 
-	closeMu     sync.Mutex
-	observerMu  sync.Mutex
-	beforeClose func()
-	closeSeen   bool
-	closingOnce sync.Once
-	doneOnce    sync.Once
-	closed      bool
-	readDone    sync.WaitGroup
-	pendingOpen *serialOpenAcquisition
-	rfWire      rfWireState
+	closeMu          sync.Mutex
+	observerMu       sync.Mutex
+	beforeClose      func()
+	closeSeen        bool
+	closingOnce      sync.Once
+	doneOnce         sync.Once
+	closed           bool
+	readDone         sync.WaitGroup
+	pendingOpen      *serialOpenAcquisition
+	rfWire           rfWireState
+	lastReadReturned atomic.Int64
+	lastDataReceived atomic.Int64
+	// Real local serial sessions attach scheduling to their wire reservation.
+	// Test/adaptor sessions do not mutate the test runner's process priority.
+	acquirePlaybackPriority func() (func() error, error)
+	releaseTimeline         func() // guarded by requestAdmission.mu
 }
 
 type sessionPort interface {
@@ -103,18 +116,21 @@ const (
 	RequestPriorityBackground RequestPriority = iota
 	RequestPriorityNormal
 	RequestPriorityTimeline
+	RequestPrioritySafety
 )
 
 type requestWaiter struct {
 	priority RequestPriority
 	ready    chan struct{}
 	granted  bool
+	err      error
 }
 
 type requestAdmission struct {
-	mu      sync.Mutex
-	active  bool
-	waiters []*requestWaiter
+	mu       sync.Mutex
+	active   bool
+	reserved bool
+	waiters  []*requestWaiter
 }
 
 func (admission *requestAdmission) acquire(
@@ -133,6 +149,10 @@ func (admission *requestAdmission) acquire(
 
 	waiter := &requestWaiter{priority: priority, ready: make(chan struct{})}
 	admission.mu.Lock()
+	if admission.reserved && priority < RequestPriorityTimeline {
+		admission.mu.Unlock()
+		return nil, ErrTimelineReserved
+	}
 	if !admission.active && len(admission.waiters) == 0 {
 		admission.active = true
 		admission.mu.Unlock()
@@ -143,6 +163,9 @@ func (admission *requestAdmission) acquire(
 
 	select {
 	case <-waiter.ready:
+		if waiter.err != nil {
+			return nil, waiter.err
+		}
 		return admission.release, nil
 	case <-ctx.Done():
 		admission.cancel(waiter)
@@ -151,6 +174,77 @@ func (admission *requestAdmission) acquire(
 		admission.cancel(waiter)
 		return nil, ErrClosed
 	}
+}
+
+// ReserveTimeline fences normal/background traffic before draining the current
+// transaction. It never cancels bytes already sent. The returned lease permits
+// timeline and safety commands until its owner releases it.
+func (s *Session) ReserveTimeline(ctx context.Context) (func(), error) {
+	a := &s.requestAdmission
+	a.mu.Lock()
+	if err := ctx.Err(); err != nil {
+		a.mu.Unlock()
+		return nil, err
+	}
+	select {
+	case <-s.closing:
+		a.mu.Unlock()
+		return nil, ErrClosed
+	default:
+	}
+	if a.reserved {
+		a.mu.Unlock()
+		return nil, ErrTimelineReserved
+	}
+	var releasePriority func() error
+	if s.acquirePlaybackPriority != nil {
+		var err error
+		releasePriority, err = s.acquirePlaybackPriority()
+		if err != nil {
+			a.mu.Unlock()
+			return nil, err
+		}
+	}
+	a.reserved = true
+	kept := a.waiters[:0]
+	for _, waiter := range a.waiters {
+		if waiter.priority < RequestPriorityTimeline {
+			waiter.err = ErrTimelineReserved
+			close(waiter.ready)
+		} else {
+			kept = append(kept, waiter)
+		}
+	}
+	a.waiters = kept
+	var once sync.Once
+	release := func() {
+		once.Do(func() {
+			a.mu.Lock()
+			a.reserved = false
+			s.releaseTimeline = nil
+			a.mu.Unlock()
+			// Scheduling cleanup and logging must not block safety admission.
+			// The process manager retains ownership if another lease overlaps.
+			if releasePriority != nil {
+				if err := releasePriority(); err != nil {
+					log.Printf("playback scheduling cleanup: %v", err)
+				}
+			}
+		})
+	}
+	s.releaseTimeline = release
+	a.mu.Unlock()
+	drain, err := a.acquire(ctx, s.closing, RequestPriorityTimeline)
+	if err != nil {
+		release()
+		return nil, err
+	}
+	drain()
+	if err := ctx.Err(); err != nil {
+		release()
+		return nil, err
+	}
+	return release, nil
 }
 
 func (admission *requestAdmission) cancel(waiter *requestWaiter) {
@@ -243,7 +337,13 @@ func OpenContext(ctx context.Context, name string, baudRate int) (*Session, erro
 	if err := ctx.Err(); err != nil {
 		return newSession(name, port), fmt.Errorf("open %s canceled after serial acquisition: %w", name, err)
 	}
-	if err := port.SetReadTimeout(DefaultReadTimeout); err != nil {
+	readTimeout := DefaultReadTimeout
+	if runtime.GOOS == "windows" {
+		// Bound idle overlapped-read residency on Windows/CH340. Empty reads
+		// retain decoder state; this is not a response or cue deadline.
+		readTimeout = 10 * time.Millisecond
+	}
+	if err := port.SetReadTimeout(readTimeout); err != nil {
 		configureErr := fmt.Errorf("configure %s: %w", name, err)
 		if closeErr := port.Close(); closeErr != nil {
 			// Return a close-only Session together with the error so the caller
@@ -279,6 +379,7 @@ func OpenContext(ctx context.Context, name string, baudRate int) (*Session, erro
 	}
 
 	session := NewForPort(name, port)
+	session.acquirePlaybackPriority = playbackpriority.Acquire
 	return session, nil
 }
 
@@ -437,6 +538,19 @@ func (s *Session) Request(
 	return s.RequestWithPriority(ctx, RequestPriorityNormal, opcode, payload, expected...)
 }
 
+// HasPendingRequest reports a registered request, including its response wait.
+// Callers must separately fence new admission before using this as readiness.
+func (s *Session) HasPendingRequest(opcode byte) bool {
+	s.stateMu.RLock()
+	defer s.stateMu.RUnlock()
+	for _, waiter := range s.waiters {
+		if waiter.requestOpcode == opcode {
+			return true
+		}
+	}
+	return false
+}
+
 // RequestWithPriority preserves wire serialization while allowing timing-bound
 // prepared-timeline commands to overtake noncritical requests that are queued
 // but have not yet reached the MCU. It never preempts an in-flight request.
@@ -459,6 +573,7 @@ func (s *Session) RequestWithPriority(
 		return native.Frame{}, s.requestSlotError(opcode, waitStarted, err)
 	}
 	defer releaseRequest()
+	admittedAt := time.Now()
 	if opcode == native.OpAddressableLED {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, stripResponseTimeout)
@@ -481,14 +596,16 @@ func (s *Session) RequestWithPriority(
 	if err != nil {
 		return native.Frame{}, err
 	}
+	writeStarted := time.Now()
 	if err := s.writeRawContext(ctx, encoded); err != nil {
 		return native.Frame{}, err
 	}
+	writeFinished := time.Now()
 
 	for {
 		select {
 		case <-ctx.Done():
-			return native.Frame{}, fmt.Errorf("waiting for opcode 0x%02X response: %w", opcode, ctx.Err())
+			return native.Frame{}, s.responseWaitError(opcode, sequence, waitStarted, admittedAt, writeStarted, writeFinished, ctx.Err())
 		case <-s.closing:
 			return native.Frame{}, ErrClosed
 		case response := <-waiter.channel:
@@ -508,6 +625,22 @@ func (s *Session) RequestWithPriority(
 			}
 		}
 	}
+}
+
+// Diagnostic ages measure host receive-pump progress, not MCU execution time.
+// Keep sequence and phase timing without including command payloads or paths.
+func (s *Session) responseWaitError(opcode, sequence byte, started, admitted, writeStarted, written time.Time, cause error) error {
+	now := time.Now()
+	age := func(stamp int64) float64 {
+		if stamp == 0 {
+			return -1
+		}
+		return float64(now.UnixNano()-stamp) / float64(time.Millisecond)
+	}
+	return fmt.Errorf("waiting for opcode 0x%02X response: %w (seq=%d admission=%.1f ms prepare=%.1f ms write=%.1f ms response=%.1f ms read_return_age=%.1f ms data_age=%.1f ms)",
+		opcode, cause, sequence, admitted.Sub(started).Seconds()*1000, writeStarted.Sub(admitted).Seconds()*1000,
+		written.Sub(writeStarted).Seconds()*1000, now.Sub(written).Seconds()*1000,
+		age(s.lastReadReturned.Load()), age(s.lastDataReceived.Load()))
 }
 
 // Capture the registered request occupying the slot at failure, without
@@ -720,6 +853,12 @@ func (s *Session) closeTransport() error {
 	}
 	s.notifyBeforeClose()
 	s.closingOnce.Do(func() { close(s.closing) })
+	s.requestAdmission.mu.Lock()
+	releaseTimeline := s.releaseTimeline
+	s.requestAdmission.mu.Unlock()
+	if releaseTimeline != nil {
+		releaseTimeline()
+	}
 	if s.pendingOpen != nil {
 		select {
 		case result := <-s.pendingOpen.result:
@@ -751,7 +890,11 @@ func (s *Session) readLoop() {
 
 	for {
 		n, err := s.port.Read(buffer)
+		replyDelivered := false
+		receivedAt := time.Now()
+		s.lastReadReturned.Store(receivedAt.UnixNano())
 		if n > 0 {
+			s.lastDataReceived.Store(receivedAt.UnixNano())
 			frames, decodeErrors := decoder.Feed(buffer[:n])
 			for _, decodeErr := range decodeErrors {
 				s.publish(Event{Err: decodeErr, Recoverable: true})
@@ -759,8 +902,10 @@ func (s *Session) readLoop() {
 			for _, frame := range frames {
 				s.observeRFClock(frame)
 				s.observeHello(frame)
-				if !s.deliver(frame) {
-					s.publish(Event{Frame: frame})
+				if s.deliver(frame) {
+					replyDelivered = true
+				} else {
+					s.publish(Event{Frame: frame, ReceivedAt: receivedAt})
 				}
 			}
 		}
@@ -786,6 +931,14 @@ func (s *Session) readLoop() {
 		case <-s.closing:
 			return
 		default:
+		}
+		if replyDelivered && runtime.GOOS == "windows" {
+			// Let the awakened request consume its response before this reader
+			// enters another blocking Win32 serial syscall. Execution traces
+			// showed the waiter remaining runnable for tens of milliseconds
+			// while the reader blocked, despite another idle P.
+			// Yield once per decoded batch, without sleeps or changed deadlines.
+			runtime.Gosched()
 		}
 	}
 }

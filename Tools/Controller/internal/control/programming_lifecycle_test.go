@@ -880,6 +880,36 @@ func TestFindRetryableProgrammingSessionUsesNewestMarkerBeforeOlderConflicts(t *
 	}
 }
 
+func TestProgrammingRecoveryAcceptsVerifiedWriteWithFailedRestore(t *testing.T) {
+	paths, firmware := programmingLifecycleFixture(t)
+	document, err := programmer.LoadIntelHex(firmware)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := programmingIdentity(connectedProgrammingSnapshot(0).Port)
+	session := &ProgrammingSession{
+		Format: programmingMarkerFormat, PreparedAt: time.Now().UTC(),
+		Device: identity, TargetFirmwareSHA256: document.SourceSHA256,
+		SafeStateApplied: true, Phase: "restore-failed-safe", HostResult: "succeeded",
+	}
+	if _, err := persistProgrammingMarker(paths, session); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := findFailedProgrammingSession(paths, identity, document.SourceSHA256); err != nil || got == nil {
+		t.Fatalf("verified write with failed restore must permit fresh-readback recovery: %v", err)
+	}
+	if _, err := findFailedProgrammingSession(paths, identity, strings.Repeat("0", 64)); err == nil {
+		t.Fatal("recovery accepted a different image")
+	}
+	session.Phase = "restored"
+	if _, err := persistProgrammingMarker(paths, session); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := findFailedProgrammingSession(paths, identity, document.SourceSHA256); err == nil {
+		t.Fatal("completed success was treated as failed restoration")
+	}
+}
+
 func TestProgrammingLifecycleFailedProgrammerResultRetainsLatchAndMarker(t *testing.T) {
 	paths, firmware := programmingLifecycleFixture(t)
 	device := &fakeProgrammingDevice{

@@ -25,6 +25,7 @@ type MediaPlaybackUpdate struct {
 	PositionMS   uint64  `json:"position_ms"`
 	DurationMS   *uint64 `json:"duration_ms,omitempty"`
 	Playing      bool    `json:"playing"`
+	PreparePlay  bool    `json:"prepare_play"`
 	Loaded       bool    `json:"loaded"`
 	Rate         float64 `json:"rate"`
 	Epoch        uint64  `json:"epoch,omitempty"`
@@ -90,6 +91,9 @@ func (value MediaPlaybackUpdate) validate() error {
 	if value.Playing && !value.Loaded {
 		return errors.New("unloaded media cannot be playing")
 	}
+	if value.PreparePlay && (value.Playing || !value.Loaded || value.PlanRevision == 0) {
+		return errors.New("prepare_play requires paused loaded media and a prepared plan revision")
+	}
 	return nil
 }
 func copyMediaUpdate(value MediaPlaybackUpdate) MediaPlaybackUpdate {
@@ -130,8 +134,14 @@ func (runtime *Runtime) UpdateMediaPlayback(value MediaPlaybackUpdate) (MediaPla
 		if plan.ClientID != value.ClientID || plan.Revision != value.PlanRevision {
 			return runtime.MediaPlayback(), errors.New("media clock requires the acknowledged prepared timeline revision")
 		}
-		if value.Playing && plan.StepCount > 0 && (plan.State == "faulted" || plan.State == "stopped" || plan.ArmedEpoch != value.Epoch || plan.ClockSequence == 0) {
+		if value.Playing && plan.StepCount > 0 && plan.State == "faulted" {
+			return runtime.MediaPlayback(), fmt.Errorf("prepared hardware timeline fault: %s", plan.Error)
+		}
+		if value.Playing && plan.StepCount > 0 && (plan.State == "stopped" || plan.ArmedEpoch != value.Epoch || plan.ClockSequence == 0) {
 			return runtime.MediaPlayback(), errors.New("hardware timeline is not armed for this media epoch; pause and reprepare")
+		}
+		if value.Playing && plan.StepCount > 0 && !plan.PlayReady {
+			return runtime.MediaPlayback(), errors.New("prepare_play must reserve the paused hardware timeline before starting playback")
 		}
 	} else if value.Playing {
 		plan := runtime.MediaTimeline()
@@ -154,6 +164,11 @@ func (runtime *Runtime) UpdateMediaPlayback(value MediaPlaybackUpdate) (MediaPla
 	if fresh && previous.ClientID == value.ClientID && value.Sequence <= previous.Sequence {
 		state.mu.Unlock()
 		return runtime.MediaPlayback(), errors.New("stale media playback sequence")
+	}
+	if value.Playing {
+		runtime.mediaTimeline.mu.Lock()
+		runtime.mediaTimeline.wireRenewedAt = time.Now()
+		runtime.mediaTimeline.mu.Unlock()
 	}
 	received := time.Now()
 	clockTiming := mediaClockTiming(previous, value, state.received, received)
@@ -200,7 +215,7 @@ func (runtime *Runtime) UpdateMediaPlayback(value MediaPlaybackUpdate) (MediaPla
 		plan := runtime.MediaTimeline()
 		if plan.ClientID == value.ClientID && plan.Revision == value.PlanRevision && plan.StepCount > 0 &&
 			!(fresh && mediaTimelinePausedHeartbeatArmed(plan, previous.MediaPlaybackUpdate, value)) {
-			deadline := time.NewTimer(mediaTimelineArmAckTimeout)
+			deadline := time.NewTimer(time.Until(received.Add(mediaTimelineArmAckTimeout)))
 			poll := time.NewTicker(time.Millisecond)
 			defer deadline.Stop()
 			defer poll.Stop()
@@ -221,6 +236,19 @@ func (runtime *Runtime) UpdateMediaPlayback(value MediaPlaybackUpdate) (MediaPla
 				case <-poll.C:
 				}
 			}
+		}
+	}
+	if !value.Playing {
+		plan := runtime.MediaTimeline()
+		if value.PreparePlay && plan.StepCount > 0 {
+			ctx, cancel := context.WithDeadline(context.Background(), received.Add(mediaTimelineArmAckTimeout))
+			err := runtime.reserveMediaTimelineWire(ctx, value)
+			cancel()
+			if err != nil {
+				return runtime.MediaPlayback(), fmt.Errorf("paused serial reservation not ready: %w", err)
+			}
+		} else {
+			runtime.releaseMediaTimelineWire()
 		}
 	}
 	return runtime.MediaPlayback(), nil
@@ -313,6 +341,15 @@ func (runtime *Runtime) runMediaPlayback() {
 			}
 			_, _ = runtime.SetProgramState("media-playback", mode, "client playback")
 			claimed = playing
+		}
+		if runtime.MediaTimeline().PlayReady {
+			// Presentation cannot compete with actuator deadlines. Keep the last
+			// observed display receipt and label it deferred, never synchronized.
+			state.mu.Lock()
+			state.snapshot.BoardSynced = false
+			state.snapshot.BoardError = "board clock display deferred during prepared playback"
+			state.mu.Unlock()
+			continue
 		}
 		runtime.mu.RLock()
 		connected, generation, capabilities := runtime.session != nil, runtime.generation, runtime.hello.Capabilities

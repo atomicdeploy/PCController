@@ -2,9 +2,11 @@ package ipcjson
 
 import (
 	"bytes"
+	"io"
 	"net"
 	"net/http"
 	"runtime/pprof"
+	"runtime/trace"
 	"sync/atomic"
 	"time"
 )
@@ -14,6 +16,15 @@ var cpuProfileBusy atomic.Bool
 // A bounded, explicitly requested application profile, never an OS profiler
 // or a public pprof/debug listener. No files, configuration or board commands.
 func (service *Service) serveCPUProfile(writer http.ResponseWriter, request *http.Request) {
+	service.serveApplicationProfile(writer, request, pprof.StartCPUProfile, pprof.StopCPUProfile, "controller-cpu.pprof")
+}
+
+func (service *Service) serveExecutionTrace(writer http.ResponseWriter, request *http.Request) {
+	service.serveApplicationProfile(writer, request, trace.Start, trace.Stop, "controller-execution.trace")
+}
+
+// CPU and execution captures share exclusion and the same five-second bound.
+func (service *Service) serveApplicationProfile(writer http.ResponseWriter, request *http.Request, start func(io.Writer) error, stop func(), filename string) {
 	if request.Method != http.MethodPost {
 		writer.Header().Set("Allow", http.MethodPost)
 		writeHTTPJSON(writer, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
@@ -37,7 +48,7 @@ func (service *Service) serveCPUProfile(writer http.ResponseWriter, request *htt
 	}
 	defer cpuProfileBusy.Store(false)
 	var profile bytes.Buffer
-	if err := pprof.StartCPUProfile(&profile); err != nil {
+	if err := start(&profile); err != nil {
 		writeHTTPJSON(writer, http.StatusConflict, map[string]string{"error": "application profiler unavailable"})
 		return
 	}
@@ -47,9 +58,9 @@ func (service *Service) serveCPUProfile(writer http.ResponseWriter, request *htt
 	case <-timer.C:
 	case <-request.Context().Done():
 	}
-	pprof.StopCPUProfile()
+	stop()
 	writer.Header().Set("Content-Type", "application/octet-stream")
 	writer.Header().Set("Cache-Control", "no-store")
-	writer.Header().Set("Content-Disposition", "attachment; filename=controller-cpu.pprof")
+	writer.Header().Set("Content-Disposition", "attachment; filename="+filename)
 	_, _ = writer.Write(profile.Bytes())
 }

@@ -815,7 +815,13 @@ func eventKindMatches(requested, actual string) bool {
 		(requested != "" && strings.HasPrefix(actual, requested+"."))
 }
 
-func (runtime *Runtime) Snapshot() Snapshot {
+func (runtime *Runtime) Snapshot() Snapshot { return runtime.snapshot(true) }
+
+// BoardSnapshot returns cached live state without expanding effect catalogs.
+// Internal observers must not copy the user library for every telemetry event.
+func (runtime *Runtime) BoardSnapshot() Snapshot { return runtime.snapshot(false) }
+
+func (runtime *Runtime) snapshot(includeCatalog bool) Snapshot {
 	programState := runtime.ProgramState()
 	rfLearning := runtime.RFLearnState()
 	emergencyStop := runtime.EmergencyStop()
@@ -870,7 +876,7 @@ func (runtime *Runtime) Snapshot() Snapshot {
 	// user effects. Never hold the connection lock across that presentation work:
 	// a waiting writer also blocks subsequent RWMutex readers, including the
 	// prepared executor's small session-generation check.
-	if runner != nil {
+	if includeCatalog && runner != nil {
 		snapshot.Effects = runner.EffectCatalog()
 		snapshot.EffectGroups = runner.EffectGroups()
 	}
@@ -1990,12 +1996,19 @@ func (runtime *Runtime) requestAtGenerationPriority(
 	session := runtime.session
 	runtime.mu.RUnlock()
 	traceEpoch := runtime.pwmTraceAdmission(opcode, payload)
+	if ctx.Value(emergencySafetyContextKey{}) != nil {
+		priority = link.RequestPrioritySafety
+	}
 	if opcode == native.OpPWMSet {
 		if guard, ok := ctx.Value(rfRollGuardKey{}).(func() error); ok {
 			ctx = link.WithRequestWriteGuard(ctx, guard)
 		}
 	}
 	frame, err := session.RequestWithPriority(ctx, priority, opcode, payload, expected...)
+	if errors.Is(err, link.ErrTimelineReserved) {
+		return native.Frame{}, &ResourceBusyError{Resource: "serial_channel", Owner: "media_timeline",
+			Message: "serial channel reserved for prepared playback; pause before issuing live commands"}
+	}
 	if err != nil {
 		return native.Frame{}, err
 	}
@@ -2893,6 +2906,12 @@ func (runtime *Runtime) syncProgramState(snapshot ProgramStateSnapshot, lifecycl
 	err := runtime.Command(ctx, native.OpProgramState, payload)
 	cancel()
 	if err != nil {
+		var busy *ResourceBusyError
+		if errors.As(err, &busy) && busy.Resource == "serial_channel" {
+			runtime.publishEvent(Event{Kind: "program.state.sync", Lifecycle: "deferred",
+				State: string(snapshot.Mode), Reason: err.Error(), Text: "program state presentation deferred by prepared playback"})
+			return
+		}
 		runtime.publishEvent(Event{
 			Kind: "program.state.sync", Lifecycle: "failed",
 			State: string(snapshot.Mode), Reason: err.Error(),
@@ -2996,6 +3015,12 @@ type boardLivenessFailureTracker struct {
 }
 
 func (tracker *boardLivenessFailureTracker) observe(err error) bool {
+	var busy *ResourceBusyError
+	if errors.As(err, &busy) && busy.Resource == "serial_channel" && busy.Owner == "media_timeline" {
+		// No probe went on the wire. Neither diagnose a lost board nor invent
+		// a successful liveness response from intentional admission deferral.
+		return false
+	}
 	if err == nil {
 		tracker.failures = 0
 		return false
@@ -3312,7 +3337,14 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 					}
 					runtime.publishEvent(deviceEvent)
 				} else {
-					runtime.publish(kind, text, event.Frame)
+					if event.Frame.Opcode == native.OpACK && !event.ReceivedAt.IsZero() {
+						runtime.publishEvent(Event{Kind: kind, Text: text, Frame: event.Frame, Source: "board", Target: "host", Metadata: map[string]string{
+							"transport_received_at": event.ReceivedAt.Format(time.RFC3339Nano),
+							"observer_delay_ms":     fmt.Sprintf("%.3f", time.Since(event.ReceivedAt).Seconds()*1000),
+						}})
+					} else {
+						runtime.publish(kind, text, event.Frame)
+					}
 				}
 				if rfMappingRequired && parsedDevice != nil {
 					runtime.publishRFMappingRequired(*parsedDevice, rfCaptured)
@@ -4259,12 +4291,12 @@ func (runtime *Runtime) publishEvent(event Event) Event {
 	runtime.recordRFReceptionLocked(&event)
 	runtime.eventLog = append(runtime.eventLog, event)
 	if len(runtime.eventLog) > 512 {
-		runtime.eventLog = append([]Event(nil), runtime.eventLog[len(runtime.eventLog)-512:]...)
+		runtime.eventLog = retainSliceSuffix(runtime.eventLog, len(runtime.eventLog)-512)
 	}
 	if event.Stream == EventStreamActivity {
 		runtime.activityLog = append(runtime.activityLog, event)
 		if len(runtime.activityLog) > 512 {
-			runtime.activityLog = append([]Event(nil), runtime.activityLog[len(runtime.activityLog)-512:]...)
+			runtime.activityLog = retainSliceSuffix(runtime.activityLog, len(runtime.activityLog)-512)
 		}
 	}
 	// Keep the RF manager's bounded history independently of high-rate media
@@ -4272,7 +4304,7 @@ func (runtime *Runtime) publishEvent(event Event) Event {
 	if strings.HasPrefix(event.Kind, "rf.") && event.Source != "bridge" {
 		runtime.rfActivityLog = append(runtime.rfActivityLog, event)
 		if len(runtime.rfActivityLog) > 20 {
-			runtime.rfActivityLog = append([]Event(nil), runtime.rfActivityLog[len(runtime.rfActivityLog)-20:]...)
+			runtime.rfActivityLog = retainSliceSuffix(runtime.rfActivityLog, len(runtime.rfActivityLog)-20)
 		}
 	}
 	close(runtime.eventNotify)

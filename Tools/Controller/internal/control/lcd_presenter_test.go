@@ -9,6 +9,36 @@ import (
 	"pccontroller.local/controller/internal/native"
 )
 
+func TestLCDTimelineDeferralDoesNotClaimErrorOrConfirmedDisplay(t *testing.T) {
+	runtime, _, _ := mediaTimelineFixture(t, false)
+	runtime.mediaTimeline.mu.Lock()
+	runtime.mediaTimeline.status.State = "playing"
+	runtime.mediaTimeline.mu.Unlock()
+	err := runtime.rejectMediaTimelineConflict(context.Background(), native.OpDisplayText)
+	var busy *ResourceBusyError
+	if !errors.As(err, &busy) || busy.Resource != "serial_channel" || busy.Owner != "media_timeline" {
+		t.Fatalf("output conflict lost typed ownership: %v", err)
+	}
+	presenter := NewLCDPresenter(runtime)
+	presenter.options.Enabled = true
+	presenter.send(0, "waiting", "for playback")
+	if presenter.firmwareLines != [2]string{} || presenter.firmwareDevice != "" {
+		t.Fatal("deferred presentation was reported as confirmed")
+	}
+	runtime.eventMu.Lock()
+	defer runtime.eventMu.Unlock()
+	deferred := false
+	for _, event := range runtime.eventLog {
+		if event.Kind == "lcd.error" {
+			t.Fatalf("intentional reservation reported as error: %s", event.Text)
+		}
+		deferred = deferred || event.Kind == "lcd.deferred"
+	}
+	if !deferred {
+		t.Fatal("missing honest deferral event")
+	}
+}
+
 func TestLCDPromptChangedDuringPriorityRestoresNewestPrompt(t *testing.T) {
 	presenter := NewLCDPresenter(nil)
 	if err := presenter.Configure(LCDPresentationOptions{

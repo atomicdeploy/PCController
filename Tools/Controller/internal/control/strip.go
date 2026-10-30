@@ -138,7 +138,7 @@ func stripStreamCommand(ctx context.Context, outputs *OutputScheduler, args []st
 			return "", err
 		}
 		outputs.stop("strip")
-		if err = outputs.sendStripFrame(ctx, rgb); err != nil {
+		if err = outputs.sendConfiguredStripFrame(ctx, rgb); err != nil {
 			return "", err
 		}
 		return fmt.Sprintf("strip frame displayed: %d LEDs", len(rgb)/3), nil
@@ -272,12 +272,34 @@ func (outputs *OutputScheduler) streamStripProgram(ctx context.Context, count, f
 }
 
 func (outputs *OutputScheduler) sendStripFrame(ctx context.Context, rgb []byte) error {
-	frames, err := native.StripFramePayloads(rgb)
+	outputs.stripMu.Lock()
+	defer outputs.stripMu.Unlock()
+	return outputs.sendStripFrameLocked(ctx, rgb)
+}
+
+// A deliberate full-frame diagnostic owns its exact length, including when the
+// previous animation used a different count. Continuous streams configure once.
+func (outputs *OutputScheduler) sendConfiguredStripFrame(ctx context.Context, rgb []byte) error {
+	if _, err := native.StripFramePayloads(rgb); err != nil {
+		return err
+	}
+	configuration, err := native.StripConfigurePayload(len(rgb) / 3)
 	if err != nil {
 		return err
 	}
 	outputs.stripMu.Lock()
 	defer outputs.stripMu.Unlock()
+	if err := outputs.sendStrip(ctx, configuration); err != nil {
+		return err
+	}
+	return outputs.sendStripFrameLocked(ctx, rgb)
+}
+
+func (outputs *OutputScheduler) sendStripFrameLocked(ctx context.Context, rgb []byte) error {
+	frames, err := native.StripFramePayloads(rgb)
+	if err != nil {
+		return err
+	}
 	for _, payload := range frames {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -298,7 +320,9 @@ func (outputs *OutputScheduler) streamStripRainbow(ctx context.Context, count, f
 func nextStripFrameTime(previous, now time.Time, period time.Duration) time.Time {
 	next := previous.Add(period)
 	if !next.After(now) {
-		next = next.Add((now.Sub(next)/period + 1) * period)
+		// A late transfer already consumed the frame budget. Render current
+		// animation time immediately and rebase, without a catch-up burst.
+		next = now
 	}
 	return next
 }

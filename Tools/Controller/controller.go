@@ -258,6 +258,8 @@ type Options struct {
 	ToolchainConfig       string                 `json:"toolchain_config,omitempty"`
 	Avrdude               string                 `json:"avrdude,omitempty"`
 	AvrdudeConf           string                 `json:"avrdude_conf,omitempty"`
+	AvrdudeBackend        string                 `json:"avrdude_backend,omitempty"`
+	AvrdudeAdapter        string                 `json:"avrdude_adapter,omitempty"`
 	Programmer            string                 `json:"programmer,omitempty"`
 	Macros                []Macro                `json:"macros,omitempty"`
 	StripEffects          []StripEffect          `json:"strip_effects,omitempty"`
@@ -717,10 +719,11 @@ func New(options Options) *Client {
 		ArduinoConfig:         options.ToolchainConfig,
 		Avrdude:               options.Avrdude,
 		AvrdudeConf:           options.AvrdudeConf,
-		Programmer:            options.Programmer,
-		HostConfig:            client.currentHostConfig,
-		UpdateHostConfig:      client.updateHostConfig,
-		Outputs:               client.outputs,
+		AvrdudeBackend:        options.AvrdudeBackend, AvrdudeAdapter: options.AvrdudeAdapter,
+		Programmer:       options.Programmer,
+		HostConfig:       client.currentHostConfig,
+		UpdateHostConfig: client.updateHostConfig,
+		Outputs:          client.outputs,
 	}
 	client.engine = control.NewCommandEngine(runtime, control.CommandOptions{
 		ProjectPath:           options.ProjectPath,
@@ -732,11 +735,12 @@ func New(options Options) *Client {
 		ArduinoConfig:         options.ToolchainConfig,
 		Avrdude:               options.Avrdude,
 		AvrdudeConf:           options.AvrdudeConf,
-		Programmer:            options.Programmer,
-		HostConfig:            client.currentHostConfig,
-		UpdateHostConfig:      client.updateHostConfig,
-		Resolve:               client.currentCommandOptions,
-		Outputs:               client.outputs,
+		AvrdudeBackend:        options.AvrdudeBackend, AvrdudeAdapter: options.AvrdudeAdapter,
+		Programmer:       options.Programmer,
+		HostConfig:       client.currentHostConfig,
+		UpdateHostConfig: client.updateHostConfig,
+		Resolve:          client.currentCommandOptions,
+		Outputs:          client.outputs,
 	})
 	automationContext, cancelAutomations := context.WithCancel(context.Background())
 	go func() {
@@ -826,8 +830,9 @@ func (client *Client) ApplyHostOptions(options Options) bool {
 		FirmwareFeatures:      firmwareFeatures,
 		FirmwareFeaturesError: firmwareFeaturesErr,
 		ArduinoCLI:            options.ToolchainCLI, Avrdude: options.Avrdude,
-		ArduinoConfig:    options.ToolchainConfig,
-		AvrdudeConf:      options.AvrdudeConf,
+		ArduinoConfig:  options.ToolchainConfig,
+		AvrdudeConf:    options.AvrdudeConf,
+		AvrdudeBackend: options.AvrdudeBackend, AvrdudeAdapter: options.AvrdudeAdapter,
 		Programmer:       options.Programmer,
 		HostConfig:       client.currentHostConfig,
 		UpdateHostConfig: client.updateHostConfig,
@@ -1455,6 +1460,8 @@ func (client *Client) runStatusSubscriptionHub() {
 		}
 		cancel()
 		update := StatusUpdate{Time: at, Status: status}
+		var busy *control.ResourceBusyError
+		deferred := errors.As(err, &busy) && busy.Resource == "serial_channel" && busy.Owner == "media_timeline"
 		if err != nil {
 			update.Error = err.Error()
 		}
@@ -1465,6 +1472,11 @@ func (client *Client) runStatusSubscriptionHub() {
 			}
 			for !subscriber.next.After(at) {
 				subscriber.next = subscriber.next.Add(subscriber.interval)
+			}
+			if deferred {
+				// No query reached the board. Advance cadence without inventing a
+				// fresh sample or publishing a controller.error to every player.
+				continue
 			}
 			if err != nil {
 				backoff := at.Add(time.Second)
@@ -2325,12 +2337,26 @@ func (client *Client) MapLearnedRF(
 // Snapshot returns cached board state without polling firmware. When no
 // transport candidate is cached, serial-reset capability discovery may perform
 // one throttled host-side device enumeration.
-func (client *Client) Snapshot() Snapshot {
-	snapshot := client.runtime.Snapshot()
-	resetLinesAvailable, resetLinesPort, resetLinesReason := client.runtime.ResetLinesCapability()
+func (client *Client) Snapshot() Snapshot { return client.snapshot(true) }
+
+// BoardSnapshot is for internal live-state observers. It omits catalogs, macro
+// libraries and reset-device enumeration; public query snapshots remain complete.
+func (client *Client) BoardSnapshot() Snapshot { return client.snapshot(false) }
+
+func (client *Client) snapshot(includeCatalog bool) Snapshot {
+	var snapshot control.Snapshot
+	var resetLinesAvailable bool
+	var resetLinesPort ports.Info
+	var resetLinesReason string
+	if includeCatalog {
+		snapshot = client.runtime.Snapshot()
+		resetLinesAvailable, resetLinesPort, resetLinesReason = client.runtime.ResetLinesCapability()
+	} else {
+		snapshot = client.runtime.BoardSnapshot()
+	}
 	// Library snapshots belong to client queries, not the hot board-status
 	// path: copying a long take for every internal status check is unnecessary.
-	if runner := client.runtime.MacroRunner(); runner != nil {
+	if runner := client.runtime.MacroRunner(); includeCatalog && runner != nil {
 		snapshot.Macros = runner.Snapshot()
 	}
 	client.illuminationMu.RLock()
@@ -2339,7 +2365,10 @@ func (client *Client) Snapshot() Snapshot {
 	if !snapshot.Connected || !snapshot.HaveSettings || !snapshot.HaveStatus {
 		illumination = IlluminationState{}
 	}
-	stripEffects := control.SupportedConfiguredStripEffectDescriptors(snapshot.Connected, snapshot.Hello.Capabilities, client.currentStripEffects())
+	var stripEffects []control.StripEffectDescriptor
+	if includeCatalog {
+		stripEffects = control.SupportedConfiguredStripEffectDescriptors(snapshot.Connected, snapshot.Hello.Capabilities, client.currentStripEffects())
+	}
 	return Snapshot{
 		Connected: snapshot.Connected,
 		Paused:    snapshot.Paused,

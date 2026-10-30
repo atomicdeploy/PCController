@@ -9,6 +9,7 @@ import 'endpoint_dialog.dart' show AddressCharacterFormatter;
 import 'go_commands.dart';
 import 'preferences.dart';
 import 'transport.dart';
+import 'pixel_diagnostic.dart';
 
 class GoToolsPage extends StatefulWidget {
   const GoToolsPage({
@@ -568,6 +569,7 @@ class _GoToolsPageState extends State<GoToolsPage> {
                   }[mode] ??
                   mode,
           }, (v) => stripMode = v),
+          if (modes.contains('frame')) ExpansionTile(title: const Text('Pixel diagnostics'), children: [PixelDiagnostic(client: client, count: pixels.clamp(1,maxPixels))]),
           const SizedBox(height: 12),
           pair(
             number(
@@ -631,7 +633,7 @@ class _GoToolsPageState extends State<GoToolsPage> {
                             'strip pixel $pixel ${rgb!.join(' ')} $brightness',
                           'rainbow' => 'strip rainbow $pixels $fps',
                           'effect' =>
-                            'strip effect play ${nativeArgument(stripEffect!)} $pixels $fps',
+                            'effect play ${nativeArgument(stripEffect!)} $pixels $fps',
                           _ => 'strip frame ${frame.text}',
                         };
                         unawaited(run(value));
