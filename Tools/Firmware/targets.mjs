@@ -52,10 +52,19 @@ function collect(path, list = []) {
 }
 try {
   if (action === 'help') {
-    console.log('node Tools/Firmware/targets.mjs build mega2560 [constrained|expanded-panel|expanded-autonomous]\nBuild-only: same sketch and production source aggregators. Existing Arduino CLI/core/library cache; no upload/reset/fuse action.\nATmega328P remains node Tools/Firmware/firmware.mjs build (commissioned guards).')
+    console.log('node Tools/Firmware/targets.mjs list\nnode Tools/Firmware/targets.mjs build mega2560 [constrained|expanded-panel|expanded-autonomous]\nBuild-only: same sketch and production source aggregators. Existing Arduino CLI/core/library cache; no upload/reset/fuse action.\nATmega328P remains node Tools/Firmware/firmware.mjs build (commissioned guards).')
+  } else if (action === 'list') {
+    if (process.argv.length !== 3) throw new Error('list accepts no target, profile or tool arguments')
+    console.log(JSON.stringify({
+      productionSources: ['PCController.ino', 'BoardSupportSources.cpp', 'ControllerDomainSources.cpp'],
+      primaryTarget: { id: 'atmega328p', tool: 'Tools/Firmware/firmware.mjs' },
+      additionalTargets: Object.entries(targets).map(([id, target]) => ({id, ...target, profiles: Object.keys(names), buildOnly: true})),
+      nativeConformance: {tool: 'Tools/VirtualBoard/CMakePresets.json', sameProductionSources: true},
+    }, null, 2))
   } else {
     if (action !== 'build' || !targets[name] || names[profileName] === undefined || process.argv.length > 5) throw new Error('unsupported target/profile/action; use help')
     const target = targets[name], profile = names[profileName]
+    if (target.architecture !== 'avr' || target.buildAdapter !== 'arduino-avr') throw new Error('No implementation for the selected MCU build adapter; registration alone does not port the firmware')
     // Finish provisioning/compatibility checks BEFORE compilation/progress.
     const cli = run(['version', '--format', 'json'], true)
     if (cli.VersionString !== toolchain.cli.version) throw new Error(`configured Arduino CLI drift: expected ${toolchain.cli.version}, found ${cli.VersionString}`)

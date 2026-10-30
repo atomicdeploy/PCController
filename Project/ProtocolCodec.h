@@ -49,6 +49,7 @@ inline uint8_t cobsDecode(const uint8_t *input, uint8_t length,
       return 0;
     }
     for (uint8_t index = 0; index < count; ++index) {
+      if (input[readIndex] == 0) return 0;
       output[writeIndex++] = input[readIndex++];
     }
     if (code != 0xFF && readIndex < length) {

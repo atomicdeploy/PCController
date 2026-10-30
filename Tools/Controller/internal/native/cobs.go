@@ -44,8 +44,13 @@ func COBSDecode(src []byte) ([]byte, error) {
 		index++
 
 		count := code - 1
-		if index+count > len(src) {
+		if count > len(src)-index {
 			return nil, ErrMalformedCOBS
+		}
+		for _, value := range src[index : index+count] {
+			if value == 0 {
+				return nil, ErrMalformedCOBS
+			}
 		}
 		dst = append(dst, src[index:index+count]...)
 		index += count

@@ -3,6 +3,8 @@ import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
+import { spawnSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 
 import {
         BOARD,
@@ -20,6 +22,31 @@ import {
 	runValidatedProgrammingStages,
 	sourceDigest
 } from './firmware.mjs'
+
+test('MCU inventory reports real same-source build lanes without invoking a toolchain', () => {
+    const result = spawnSync(process.execPath, [fileURLToPath(new URL('./targets.mjs', import.meta.url)), 'list'], {
+        encoding: 'utf8', windowsHide: true, env: {...process.env, ARDUINO_CLI: 'does-not-exist-do-not-run'}
+    })
+    assert.equal(result.status, 0, result.stderr)
+    const value = JSON.parse(result.stdout)
+    assert.equal(value.primaryTarget.id, 'atmega328p')
+    assert.deepEqual(value.productionSources, ['PCController.ino', 'BoardSupportSources.cpp', 'ControllerDomainSources.cpp'])
+    assert.equal(value.additionalTargets.length, 1)
+    assert.equal(value.additionalTargets[0].id, 'mega2560')
+    assert.equal(value.additionalTargets[0].architecture, 'avr')
+    assert.equal(value.additionalTargets[0].buildAdapter, 'arduino-avr')
+    assert.equal(value.additionalTargets[0].buildOnly, true)
+    assert.equal(value.additionalTargets[0].programmingCommissioned, false)
+    assert.equal(value.nativeConformance.sameProductionSources, true)
+})
+
+test('MCU inventory rejects extra arguments instead of invoking programming', () => {
+    const result = spawnSync(process.execPath, [fileURLToPath(new URL('./targets.mjs', import.meta.url)), 'list', 'upload'], {
+        encoding: 'utf8', windowsHide: true, env: {...process.env, ARDUINO_CLI: 'does-not-exist-do-not-run'}
+    })
+    assert.equal(result.status, 1)
+    assert.match(result.stderr, /list accepts no/)
+})
 
 test('safe default EEPROM has a distinct bounded manifest role', () => {
         assert.equal(artifactRole('safe-default-eeprom.hex'), 'default-eeprom')
