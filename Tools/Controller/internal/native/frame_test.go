@@ -123,7 +123,7 @@ func TestDecodeRejectsCRCAndLength(t *testing.T) {
 	}
 }
 
-func TestDecodeAcceptsUnknownReservedEnvelopeByte(t *testing.T) {
+func TestDecodeRejectsForeignProtocolBeforeOpcodeDispatch(t *testing.T) {
 	encoded, err := Encode(Frame{Opcode: OpHello, Seq: 9})
 	if err != nil {
 		t.Fatal(err)
@@ -132,11 +132,17 @@ func TestDecodeAcceptsUnknownReservedEnvelopeByte(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw[1] = 0x7F
-	raw[len(raw)-1] = CRC8(raw[:len(raw)-1])
-	decoded, err := Decode(append(COBSEncode(raw), 0))
-	if err != nil || decoded.Opcode != OpHello || decoded.Seq != 9 {
-		t.Fatalf("unknown reserved envelope byte was rejected: frame=%#v err=%v", decoded, err)
+	for discriminator := 0; discriminator < 256; discriminator++ {
+		if byte(discriminator) == ReservedEnvelopeByte {
+			continue
+		}
+		raw[1] = byte(discriminator)
+		raw[2] = OpPWMSet // Also Pakar AUDIO_CUE: never reinterpret its payload.
+		raw[len(raw)-1] = CRC8(raw[:len(raw)-1])
+		_, err := Decode(append(COBSEncode(raw), 0))
+		if !errors.Is(err, ErrWrongProtocol) {
+			t.Fatalf("foreign discriminator 0x%02X accepted: %v", discriminator, err)
+		}
 	}
 }
 

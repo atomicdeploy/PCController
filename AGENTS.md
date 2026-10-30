@@ -1,5 +1,13 @@
 # Repository execution rules
 
+- Project/ProtocolContract.json is the opcode owner for native and Pakar
+  namespaces. Keep published allocations append-only, generate every consumer
+  view with interfaces/controller-wire, and retain protected-base CI comparisons.
+  Fixed A5/1 native and A5/0 Pakar admission is mandatory before dispatch, never
+  a version selector or advisory byte. Unknown operations must not fall through
+  into another namespace or be assumed acknowledged. Sync consumers with the
+  guarded Tools/Build/sync-controller-opcodes.mjs helper.
+
 - RF managers share the reception/learning contract in `docs/RF-RECEPTION-AND-LEARNING.md`: show all complete waveform identities, dim unlearned observations, preserve modal-local count baselines across refresh and use cumulative reception metadata through coalescing. Defaults are timed learning off, optional duration 60 seconds and continuous learning off. Learning settings are persistent, not competing timed/indefinite runtime actions. Keep hard-coded guided entry points hidden until pattern profiles exist. Unknown reception never grants output authority or persists a record without explicit Add/Assign.
 
 - On Windows, never run `go test` directly. It executes test programs from

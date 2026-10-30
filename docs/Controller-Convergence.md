@@ -3,7 +3,7 @@
 Linked work: [PCController#702](https://github.com/atomicdeploy/PCController/issues/702)
 and [PakarController#41](https://github.com/atomicdeploy/PakarController/issues/41).
 The detailed comparison and phased decision live in PakarController's
-[TRANSPORT-CONVERGENCE.md](https://github.com/atomicdeploy/PakarController/blob/codex/transport-convergence/docs/TRANSPORT-CONVERGENCE.md).
+[TRANSPORT-CONVERGENCE.md](https://github.com/atomicdeploy/PakarController/blob/main/docs/TRANSPORT-CONVERGENCE.md).
 Existing issues103/227/18/125/375 retain their firmware/MCU/contract ownership.
 
 ## This source checkpoint
@@ -21,6 +21,15 @@ things, and HELLO/status/settings/timed receipts/storage have distinct semantics
 Future convergence uses a living capability/service contract, not version-selected
 adapters, exact-build equality or a third independent dispatcher. CRC is not auth;
 unknown required operations fail closed and uncertain mutations are not replayed.
+
+The opcode follow-up now owns both namespace allocations in
+Project/ProtocolContract.json. The portable generator emits the actual C++, Go,
+Rust and Dart views; consumer imports are pinned to exact canonical source bytes
+and commit. Independent published-allocation fixtures and CI base comparisons
+reject renumbering, removal or reuse. Fixed A5/1 native versus A5/0 Pakar admission
+is mandatory before dispatch; no fallback reinterprets one namespace as the other.
+Unknown optional operations inside the correct namespace remain supported by the
+normal Unsupported path. This does not unify the distinct payload semantics.
 
 ## Real target inventory, not hypothetical ports
 
