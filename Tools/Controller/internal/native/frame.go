@@ -10,6 +10,7 @@ var (
 	ErrMalformedCOBS   = errors.New("malformed COBS frame")
 	ErrFrameTooLong    = errors.New("frame exceeds protocol limit")
 	ErrBadMagic        = errors.New("invalid frame magic")
+	ErrWrongProtocol   = errors.New("frame belongs to a different protocol namespace")
 	ErrBadLength       = errors.New("payload length does not match frame")
 	ErrBadCRC          = errors.New("frame CRC mismatch")
 	ErrPayloadTooLong  = errors.New("payload exceeds 48 bytes")
@@ -56,6 +57,9 @@ func Decode(encoded []byte) (Frame, error) {
 	}
 	if raw[0] != Magic {
 		return Frame{}, fmt.Errorf("%w: got 0x%02X", ErrBadMagic, raw[0])
+	}
+	if raw[1] != ReservedEnvelopeByte {
+		return Frame{}, fmt.Errorf("%w: discriminator 0x%02X", ErrWrongProtocol, raw[1])
 	}
 	payloadLength := int(raw[4])
 	if payloadLength > MaxPayload || len(raw) != 6+payloadLength {
