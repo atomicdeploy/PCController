@@ -193,6 +193,8 @@ test('dependency network sources are code allowlisted with exact GitHub reposito
   ]) assert.equal(assertTrustedDependencyURL(url), url)
 
   assert.equal(assertTrustedRepository('MCUdude/MiniCore'), 'mcudude/minicore')
+  assert.equal(assertTrustedRepository('actions/setup-java'), 'actions/setup-java')
+  assert.throws(() => assertTrustedRepository('example/setup-java'), /not code-review allowlisted/u)
   assert.equal(
     assertTrustedGitHubURL(
       'https://api.github.com/repos/microsoft/winget-pkgs/contents/manifests/example',

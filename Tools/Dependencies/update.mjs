@@ -56,6 +56,7 @@ const trustedRepositories = new Set([
   'actions/download-artifact',
   'actions/github-script',
   'actions/setup-go',
+  'actions/setup-java',
   'actions/setup-node',
   'actions/upload-artifact',
   'arduino/arduino-cli',
