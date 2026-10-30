@@ -11,6 +11,7 @@ import {
   syncProtocolContract,
   validateContract,
 } from "./generate-protocol-contract.mjs";
+import {validatePublishedBindings, renderPakarCpp, renderRust, renderDart} from "../../interfaces/controller-wire/registry.mjs";
 
 async function loadContract() {
   return JSON.parse(await readFile(sourcePath, "utf8"));
@@ -52,4 +53,39 @@ test("registry validation rejects extension or error-number drift", async () => 
   const wrongError = structuredClone(contract);
   wrongError.errors.find((entry) => entry.cpp === "Unsafe").value = 7;
   assert.throws(() => validateContract(wrongError), /Unsafe must remain 6/);
+});
+
+test("every published opcode and error is append-only in each explicit namespace", async () => {
+  const source = await loadContract();
+  const published = JSON.parse(await readFile(new URL("../../interfaces/controller-wire/published.json", import.meta.url), "utf8"));
+  validatePublishedBindings(source, published);
+  for (const namespace of ["controller", "pakar"]) {
+    for (const kind of ["opcodes", "errors"]) {
+      for (const entry of published[namespace][kind]) {
+        const changed = structuredClone(source);
+        const registry = namespace === "controller" ? changed : changed.pakar;
+        registry[kind].find(row => row.cpp === entry.cpp).value = 0xFC;
+        registry[kind].sort((a,b) => a.value-b.value);
+        assert.throws(() => validatePublishedBindings(changed, published), undefined, namespace + "/" + entry.cpp);
+        const removed = structuredClone(source);
+        const target = namespace === "controller" ? removed : removed.pakar;
+        target[kind] = target[kind].filter(row => row.cpp !== entry.cpp);
+        assert.throws(() => validatePublishedBindings(removed, published));
+      }
+    }
+  }
+  const extended = structuredClone(source);
+  extended.pakar.opcodes.push({cpp:"kOptionalProbe",go:"PakarOptionalProbe",rust:"OPTIONAL_PROBE",dart:"optionalProbe",value:0xFC,wireName:"OPTIONAL_PROBE"});
+  validatePublishedBindings(extended, published); // Optional additions do not select a generation.
+});
+
+test("all consumer views preserve the audio/PWM namespace boundary", async () => {
+  const contract = await loadContract();
+  assert.equal(contract.opcodes.find(row => row.cpp === "PwmSet").value, 0x11);
+  assert.equal(contract.pakar.opcodes.find(row => row.cpp === "kAudioCue").value, 0x11);
+  assert.notEqual(contract.envelope.reserved, contract.pakar.envelope.reserved);
+  assert.match(renderPakarCpp(contract), /kAudioCue = 0x11/);
+  assert.match(renderRust(contract), /pub mod pakar[\s\S]*AUDIO_CUE: u8 = 0x11/);
+  assert.match(renderRust(contract), /pub mod controller[\s\S]*PWM_SET: u8 = 0x11/);
+  assert.match(renderDart(contract), /class PakarOpcode[\s\S]*audioCue = 0x11/);
 });
