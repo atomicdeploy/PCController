@@ -10,6 +10,13 @@ void require(bool ok,const char *message) { if(!ok) throw std::runtime_error(mes
 uint32_t u32(const std::vector<uint8_t> &v,size_t i) { return uint32_t(v.at(i)) | uint32_t(v.at(i+1))<<8 | uint32_t(v.at(i+2))<<16 | uint32_t(v.at(i+3))<<24; }
 int main() {
   try {
+    for (unsigned discriminator=0;discriminator<256;++discriminator) {
+      if(discriminator==wire::kReservedEnvelopeByte)continue;
+      std::vector<uint8_t> raw{wire::kMagic,static_cast<uint8_t>(discriminator),wire::PwmSet,7,1,4};
+      raw.push_back(wire::crc8(raw.data(),raw.size()));
+      const auto encoded=wire::cobsEncode(raw.data(),raw.size());
+      require(!wire::decode(encoded.data(),encoded.size()),"trace decoder accepted foreign audio/PWM namespace");
+    }
     virtual_board::VirtualBoard board({},true);
     wire::StreamDecoder decoder;
     auto receive=[&](uint64_t us=1000) { const auto bytes=board.tick(us); return decoder.feed(bytes.data(),bytes.size()).frames; };

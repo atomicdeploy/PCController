@@ -62,7 +62,7 @@ Frames are COBS encoded and terminated by `0x00`. The decoded frame is:
 ```text
 offset  type          meaning
 0       u8            magic = 0xA5
-1       u8            reserved/advisory byte (senders currently write 1)
+1       u8            fixed native namespace discriminator (1; Pakar uses 0)
 2       u8            opcode
 3       u8            sequence
 4       u8            payload length, 0..48
@@ -73,10 +73,10 @@ offset  type          meaning
 CRC uses polynomial `0x07`, initial value `0x00`, over every decoded byte
 before the CRC. Multi-byte values are little-endian.
 
-The MCU accepts a frame by canonical magic, bounded length, and CRC rather
-than requiring the reserved/advisory byte to equal the local build's value.
-The byte is not a protocol generation: senders preserve the current value for
-stable physical framing, while readers tolerate unknown values.
+The MCU and host require canonical magic, bounded length, CRC and the fixed
+native namespace discriminator1. Pakar's discriminator0 is rejected before
+dispatch: its0x11 means audio rather than PWM. There is no dialect guessing or
+fallback. This byte is not a firmware/API generation or feature selector.
 Known write operations validate a required semantic payload prefix and ignore
 trailing extension fields. Structurally distinct record shapes retain their
 shape byte; unknown opcodes receive `Unsupported`. This provides loose
