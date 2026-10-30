@@ -104,6 +104,17 @@ test("repository URLs have narrow product and provenance allowlists", () => {
   );
 });
 
+test("controller convergence permits only the two reviewed repositories", () => {
+  const path = "docs/Controller-Convergence.md";
+  const context = { repository: "atomicdeploy/PCController" };
+  for (const repository of ["atomicdeploy/PCController", "atomicdeploy/PakarController"]) {
+    assert.deepEqual(privacyFindings(path, `https://github.com/${repository}/issues/1`, context), []);
+  }
+  assert.equal(privacyFindings(path, "https://github.com/other/unreviewed", context)[0].kind, "unreviewed repository reference");
+  assert.equal(privacyFindings("docs/other.md", "https://github.com/atomicdeploy/PakarController", context)[0].kind, "unreviewed repository reference");
+  assert.equal(privacyFindings(path, "C:\\Users\\Private\\secret", context)[0].kind, "private path");
+});
+
 test("shared firmware guide permits only product issues and the selected core", () => {
   const path = "docs/Shared-Production-Firmware.md";
   const context = { repository: "atomicdeploy/PCController" };

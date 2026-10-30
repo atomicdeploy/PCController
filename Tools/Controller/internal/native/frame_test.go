@@ -3,10 +3,53 @@ package native
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"math/rand"
+	"os"
+	"reflect"
 	"testing"
 )
+
+// Shared with PakarController; valid wire bytes remain unchanged. A zero in a
+// COBS data block is malformed even if a surrounding frame has a matching CRC.
+func TestSharedCOBSVectors(t *testing.T) {
+	var vectors struct {
+		Valid   []struct{ Decoded, Encoded []byte }
+		Invalid [][]byte
+		CRC     struct {
+			Input    []byte
+			Checksum byte
+		} `json:"crc8_atm"`
+	}
+	bytes, err := os.ReadFile("../../../../tests/fixtures/cobs.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = json.Unmarshal(bytes, &vectors); err != nil {
+		t.Fatal(err)
+	}
+	if len(vectors.Valid) < 4 || len(vectors.Invalid) < 6 {
+		t.Fatal("shared conformance cases missing")
+	}
+	for _, value := range vectors.Valid {
+		got, failure := COBSDecode(value.Encoded)
+		if failure != nil || !reflect.DeepEqual(append([]byte{}, got...), append([]byte{}, value.Decoded...)) {
+			t.Fatalf("decode %x: %x %v", value.Encoded, got, failure)
+		}
+		if !reflect.DeepEqual(COBSEncode(value.Decoded), value.Encoded) {
+			t.Fatalf("encoder changed valid wire bytes: %x", value.Decoded)
+		}
+	}
+	for _, value := range vectors.Invalid {
+		if _, err := COBSDecode(value); err == nil {
+			t.Fatalf("accepted malformed COBS: %x", value)
+		}
+	}
+	if CRC8(vectors.CRC.Input) != vectors.CRC.Checksum {
+		t.Fatal("CRC-8/ATM vector changed")
+	}
+}
 
 func TestCOBSRoundTrip(t *testing.T) {
 	cases := [][]byte{
