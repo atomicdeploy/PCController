@@ -1,7 +1,7 @@
 {
   "format": "pccontroller-host-tool-lock/v1",
   "policy_name": "pccontroller-host-build-tools",
-  "resolved_at_utc": "2026-10-30T01:24:38.571Z",
+  "resolved_at_utc": "2026-10-30T15:53:15.066Z",
   "node": {
     "version": "26.13.0",
     "lts": "Lithium",
@@ -132,7 +132,7 @@
     "installer_sha256": "3c69305081e4a647144339a936244fcf7d3d9e558319e1ad7be2cd2886d4b6a1"
   },
   "web": {
-    "package_lock_sha256": "6bfd2cae4edc79633c8db73830d6e4b024af6d4de0b82e3aa2e6bd332030e8d9"
+    "package_lock_sha256": "6796ca737cb5b71d5287a58913e776c5b2aa6a6058625a9a60dd1d046d23a8d5"
   },
   "build": {
     "package_lock_sha256": "323ac44b9417ec4a68487f026e41d4bc29199b7f40ded040de0d5b592318ca98"
@@ -227,16 +227,16 @@
       },
       {
         "name": "github/codeql-action/analyze",
-        "revision": "24c54180a607b1449ed407dd24f251e4e9147c8d",
-        "version": "v4.38.3",
+        "revision": "6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee",
+        "version": "v4.39.0",
         "workflows": [
           "codeql.yml"
         ]
       },
       {
         "name": "github/codeql-action/init",
-        "revision": "24c54180a607b1449ed407dd24f251e4e9147c8d",
-        "version": "v4.38.3",
+        "revision": "6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee",
+        "version": "v4.39.0",
         "workflows": [
           "codeql.yml"
         ]
