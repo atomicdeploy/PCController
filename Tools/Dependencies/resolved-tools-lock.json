@@ -158,6 +158,7 @@
           "deploy-avr.yml",
           "firmware.yml",
           "host.yml",
+          "mobile.yml",
           "release.yml",
           "repository-health.yml",
           "update-dependencies.yml",
@@ -198,6 +199,14 @@
         ]
       },
       {
+        "name": "actions/setup-java",
+        "revision": "b843ebf9b913146b38da2eaa7aeddf76074ae1ad",
+        "version": "v6.1.0",
+        "workflows": [
+          "mobile.yml"
+        ]
+      },
+      {
         "name": "actions/setup-node",
         "revision": "949feb2413d6458794dcd2491c4babbbce0c15c1",
         "version": "v7",
@@ -221,6 +230,7 @@
           "deploy-avr.yml",
           "firmware.yml",
           "host.yml",
+          "mobile.yml",
           "update-dependencies.yml",
           "virtual-board.yml"
         ]

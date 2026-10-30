@@ -370,9 +370,26 @@ test('scheduled updater validates every required candidate gate before PR creati
     'build-system test failures must remain captured for the structured report')
 })
 
+test('action inventory admits both YAML step forms and rejects unpinned list steps', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'pccontroller-action-inventory-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const workflow = join(directory, 'mobile.yml')
+  const revision = 'a'.repeat(40)
+  writeFileSync(workflow, `steps:\n  - uses: actions/setup-java@${revision} # v6.1.0\n  - name: Named step\n    uses: actions/setup-java@${revision} # v6.1.0\n  - uses: ./local-action\n`)
+  assert.deepEqual(workflowActionInventory(directory), [{
+    name: 'actions/setup-java', revision, version: 'v6.1.0', workflows: ['mobile.yml'],
+  }])
+  writeFileSync(workflow, 'steps:\n  - uses: actions/setup-java@v6 # v6\n')
+  assert.throws(() => workflowActionInventory(directory), /immutable 40-character revision/u)
+  writeFileSync(workflow, `steps:\n  - uses: actions/setup-java@${revision}\n`)
+  assert.throws(() => workflowActionInventory(directory), /readable major-version comment/u)
+})
+
 test('every external workflow action is immutable and included in the resolved inventory', () => {
   const inventory = workflowActionInventory()
   assert.ok(inventory.length >= 8)
+  const lock = JSON.parse(readFileSync(join(here, 'resolved-tools-lock.json'), 'utf8'))
+  assert.deepEqual(lock.github_actions.actions, inventory, 'Action lock must cover both named and list-form steps')
   for (const action of inventory) {
     assert.match(action.revision, /^[0-9a-f]{40}$/u)
     assert.match(action.version, /^v\d+/u)

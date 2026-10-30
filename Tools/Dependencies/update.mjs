@@ -469,11 +469,11 @@ function readJSON(path, fallback = null) {
   return existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : fallback
 }
 
-function workflowActionInventory() {
+function workflowActionInventory(directory = workflowsDirectory) {
   const actions = new Map()
-  for (const file of readdirSync(workflowsDirectory).filter((name) => /\.ya?ml$/iu.test(name)).sort()) {
-    const content = readFileSync(join(workflowsDirectory, file), 'utf8')
-    for (const match of content.matchAll(/^\s*uses:\s*([^@\s]+)@([^\s#]+)(?:\s*#\s*(.+))?$/gmu)) {
+  for (const file of readdirSync(directory).filter((name) => /\.ya?ml$/iu.test(name)).sort()) {
+    const content = readFileSync(join(directory, file), 'utf8')
+    for (const match of content.matchAll(/^\s*(?:-\s+)?uses:\s*([^@\s]+)@([^\s#]+)(?:\s*#\s*(.+))?$/gmu)) {
       const name = match[1]
       if (name.startsWith('./')) continue
       const revision = match[2]
