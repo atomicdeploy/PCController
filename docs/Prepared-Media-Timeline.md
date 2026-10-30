@@ -27,6 +27,32 @@ Playing against an unprepared/faulted revision or unarmed epoch is rejected.
 A paused update must first arm the cursor. Clock extrapolation retains a Go
 monotonic anchor; public UTC timestamps are not used as scheduling clocks.
 
+Before starting a nonempty plan, send a paused, loaded update with
+`prepare_play: true`. The host arms that exact revision/epoch and reserves the
+serial channel within the same 250 ms arming budget, draining the current
+transaction without canceling it. Wait for matching feedback with
+`timeline.play_ready: true` before unpausing the media. The pending-start client
+renews its paused intent at 100 ms intervals until the decoder actually starts;
+only then does it publish `playing: true` and `prepare_play: false`. A paused
+`prepare_play: false` cancels the reservation after output-off cleanup. Ordinary
+paused arming and empty plans do not require a serial reservation.
+
+The paused reservation's 250 ms lease starts at its actual grant/renewal, while
+the original clock receipt anchor remains unchanged. Expiry, pause, terminal
+fault, plan replacement or disconnect revokes readiness. Playing without the
+matching reservation is rejected. This is the current contract: deploy the
+updated host and clock publisher together; an old client cannot skip it.
+
+While reserved, queued/new normal and background requests return a resource
+conflict before writing. Timeline and safety requests remain admissible.
+Intentional deferral is not a failed liveness probe and cannot cause DTR recovery.
+The prepared executor owns optional ProgramState/display maintenance too: at
+most every two seconds in cue-free gaps of at least 250 ms, with a shared 50 ms
+request budget. Dense command streams themselves renew firmware host presence.
+Display refresh is honestly deferred where no safe gap exists; its old readback
+is not reported as a newly synchronized display. Actuator deadlines stay intact.
+The original terminal fault is retained in later rejected playing updates.
+
 `controller.media.timeline.get` and playback snapshot `timeline` return:
 revision/hash/generation/state, armed epoch/clock sequence, command count and ACK
 count, explicitly rebased steps, last command/deadline, last/max ACK lateness,

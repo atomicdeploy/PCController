@@ -212,3 +212,29 @@ func equalStatusSamples(left, right []StatusSample) bool {
 	}
 	return true
 }
+
+func TestHistoryPruningReusesStorageAndClearsDiscardedReferences(t *testing.T) {
+	now := time.Now()
+	backing := make([]TimelineEntry, 4)
+	runtime := &Runtime{historyRetention: time.Hour, timelineLimit: 2}
+	allocations := testing.AllocsPerRun(100, func() {
+		backing[0] = TimelineEntry{Time: now.Add(-2 * time.Hour), Kind: "expired"}
+		backing[1] = TimelineEntry{Time: now, Kind: "oldest"}
+		backing[2] = TimelineEntry{Time: now, Kind: "kept-first"}
+		backing[3] = TimelineEntry{Time: now, Kind: "kept-last"}
+		runtime.timeline = backing
+		runtime.pruneHistoryLocked(now)
+	})
+	if allocations != 0 {
+		t.Fatalf("prune allocated %.1f times per event", allocations)
+	}
+	if len(runtime.timeline) != 2 || runtime.timeline[0].Kind != "kept-first" || runtime.timeline[1].Kind != "kept-last" {
+		t.Fatalf("wrong retained ordering: %+v", runtime.timeline)
+	}
+	if backing[2].Kind != "" || backing[3].Kind != "" {
+		t.Fatal("discarded references retained")
+	}
+	if &runtime.timeline[0] != &backing[0] {
+		t.Fatal("prune replaced backing storage")
+	}
+}

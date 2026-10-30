@@ -94,3 +94,9 @@ matches. Locked video activity preserved, controller launch/live proof open.
 Phone remains 0.1.2/code 3 with 491,588 KiB free; no repeated failed install.
 Exact device observations: android-0.1.12-delivery.json. Source branches may be
 reconciled separately; the APK identity remains tied to the exact build source.
+
+Strip effects now use the current `effect play ID COUNT FPS` command from the
+native workbench. The shared effect dialog includes typed strip programs and
+Fade/Pulse envelope presets. Deliberate full-frame probes use `strip frame` with
+peer fencing and no mutation replay. Current AVR firmware provides no RGB frame
+readback; acknowledgement and physical observation remain distinct.

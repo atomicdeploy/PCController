@@ -293,6 +293,7 @@ const routes = [
   { path: "/api/rpc", methods: ["post"], capability: "dynamic", summary: "JSON-RPC 2.0 request" },
   { path: "/api/snapshot", methods: ["get"], capability: "read", summary: "Authoritative cached controller snapshot" },
   { path: "/api/diagnostics/cpu-profile", methods: ["post"], capability: "local-only", binaryResponse: true, summary: "Explicit five-second application CPU profile; loopback callers only, one active capture, no board actions or request body" },
+  { path: "/api/diagnostics/execution-trace", methods: ["post"], capability: "local-only", binaryResponse: true, summary: "Explicit five-second Go execution trace; loopback callers only, shared profile capture exclusion, no board actions or request body" },
   { path: "/api/estop", methods: ["get"], capability: "read", summary: "Authoritative effect and motion interlock state" },
   { path: "/api/estop", methods: ["put", "post"], capability: "board_commands", summary: "Engage or release the effect and motion interlock" },
   { path: "/api/peripherals", methods: ["get"], capability: "read", summary: "Peripheral descriptors and host-owned names" },

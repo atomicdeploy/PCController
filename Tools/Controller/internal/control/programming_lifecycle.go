@@ -1174,7 +1174,11 @@ func findFailedProgrammingSession(
 		return session, err
 	}
 	targetSHA256 = strings.ToLower(strings.TrimSpace(targetSHA256))
-	matching := session.HostResult == "failed" && session.SafeStateApplied &&
+	// A verified write can still lose the connection while restoring settings.
+	// Recovery performs fresh flash readback before attempting restoration again.
+	recoverable := session.HostResult == "failed" ||
+		(session.HostResult == "succeeded" && session.Phase == "restore-failed-safe")
+	matching := recoverable && session.SafeStateApplied &&
 		strings.EqualFold(session.TargetFirmwareSHA256, targetSHA256)
 	if !matching {
 		return nil, fmt.Errorf(

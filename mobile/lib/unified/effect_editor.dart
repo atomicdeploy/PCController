@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'transport.dart';
 import 'sequence_timeline.dart';
 import 'controller_dialog.dart';
+import 'strip_designer.dart';
 
 class EffectEditor extends StatefulWidget {
   const EffectEditor({
@@ -375,6 +376,7 @@ class _EffectEditorState extends State<EffectEditor> {
                   ),
                 ],
               ),
+              if (effect['kind'] == 'strip-stream') StripDesigner(effect: effect, enabled: typedEditing, changed: (value) => setState(() { effect = value; syncRaw(); })),
               if (effect['kind'] == 'sequence') ...[
                 const SizedBox(height: 20),
                 SequenceTimeline(
@@ -690,6 +692,13 @@ int effectSpanUs(List<Json> steps) => steps.fold<int>(0, (span, step) {
 });
 
 String? effectDefinitionError(Json effect) {
+  if (effect['kind'] == 'strip-stream') {
+    for(final entry in {'default_pixels':100,'default_fps':30,'duration_ms':3600000}.entries) {
+      final v=effect[entry.key];
+      if(v is! int || v < (entry.key=='duration_ms'?100:1) || v > entry.value)return 'Invalid ${entry.key.replaceAll('_',' ')}.';
+    }
+    return stripProgramError(object(effect['program']));
+  }
   if (effect['steps'] != null &&
       (effect['steps'] is! List ||
           (effect['steps'] as List).any((value) => value is! Map))) {

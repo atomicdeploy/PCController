@@ -57,6 +57,31 @@ func TestStripFailureDoesNotCommitPartialFrame(t *testing.T) {
 	}
 }
 
+func TestManualStripFrameConfiguresExactLengthBeforeDisplay(t *testing.T) {
+	target := &recordingOutputTarget{}
+	outputs := NewOutputScheduler(target)
+	defer outputs.Close()
+	if _, err := stripStreamCommand(context.Background(), outputs, []string{"frame", "000000ff0000000000"}); err != nil {
+		t.Fatal(err)
+	}
+	commands := target.snapshotCommands()
+	if len(commands) != 3 || string(commands[0].payload) != string([]byte{0xFE, 3}) || commands[1].payload[0] != 0xFD || commands[2].payload[0] != 0xFC {
+		t.Fatalf("configuration/staging/show order = %#v", commands)
+	}
+}
+
+func TestManualStripFrameDoesNotStageAfterFailedConfiguration(t *testing.T) {
+	target := &recordingOutputTarget{failAt: 1}
+	outputs := NewOutputScheduler(target)
+	defer outputs.Close()
+	if err := outputs.sendConfiguredStripFrame(context.Background(), []byte{255, 0, 0}); err == nil {
+		t.Fatal("expected configuration failure")
+	}
+	if len(target.snapshotCommands()) != 1 {
+		t.Fatal("staged after uncertain configuration")
+	}
+}
+
 func TestStripRainbowStopsWithoutMoreFrames(t *testing.T) {
 	target := &recordingOutputTarget{}
 	outputs := NewOutputScheduler(target)
@@ -120,14 +145,21 @@ func TestStripStreamRecoversAfterTransientFrameTimeout(t *testing.T) {
 	}
 }
 
-func TestNextStripFrameTimeSkipsBufferedIntervals(t *testing.T) {
+func TestNextStripFrameTimeRebasesLateTransfers(t *testing.T) {
 	period := 50 * time.Millisecond
 	previous := time.Unix(100, 0)
 	if got, want := nextStripFrameTime(previous, previous.Add(10*time.Millisecond), period), previous.Add(period); !got.Equal(want) {
 		t.Fatalf("ordinary next frame = %s, want %s", got, want)
 	}
-	if got, want := nextStripFrameTime(previous, previous.Add(121*time.Millisecond), period), previous.Add(150*time.Millisecond); !got.Equal(want) {
-		t.Fatalf("delayed next frame = %s, want %s", got, want)
+	for _, delay := range []time.Duration{50, 70, 121} {
+		now := previous.Add(delay * time.Millisecond)
+		got := nextStripFrameTime(previous, now, period)
+		if !got.Equal(now) {
+			t.Fatalf("late transfer %s: next frame = %s, want %s", delay*time.Millisecond, got, now)
+		}
+		if following := nextStripFrameTime(got, now.Add(10*time.Millisecond), period); !following.Equal(now.Add(period)) {
+			t.Fatalf("late transfer must rebase subsequent pacing: got %s", following)
+		}
 	}
 }
 

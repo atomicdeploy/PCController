@@ -1,6 +1,7 @@
 package control
 
 import (
+	"context"
 	"errors"
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/link"
@@ -11,6 +12,147 @@ import (
 	"testing"
 	"time"
 )
+
+func TestMediaTimelineRestoreChecksElapsedBudgetAfterSuccessfulACK(t *testing.T) {
+	budget := 50 * time.Millisecond
+	if err := mediaTimelineRestoreAckError(nil, budget, budget); err != nil {
+		t.Fatal(err)
+	}
+	if err := mediaTimelineRestoreAckError(nil, budget+time.Nanosecond, budget); err == nil {
+		t.Fatal("late successful ACK bypassed restore deadline")
+	}
+	if err := mediaTimelineRestoreAckError(context.DeadlineExceeded, time.Millisecond, budget); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("original request failure lost: %v", err)
+	}
+}
+
+func TestMediaTimelineBackgroundTrafficCannotBlockPreparedEdges(t *testing.T) {
+	runtime, frames, mu := mediaTimelineFixture(t, false)
+	value := armTimeline(t, runtime, 0)
+	if _, err := runtime.UpdateMediaPlayback(value); err != nil {
+		t.Fatal(err)
+	}
+	for _, opcode := range []byte{native.OpPWMGet, native.OpGetStatus, native.OpDisplayText, native.OpProgramState} {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		// Internal presentation bypasses the live-output conflict check, but
+		// still must not bypass the actual wire reservation.
+		ctx = context.WithValue(ctx, mediaTimelineContextKey{}, true)
+		_, err := runtime.Request(ctx, opcode, nil, native.OpACK)
+		cancel()
+		var busy *ResourceBusyError
+		if !errors.As(err, &busy) || busy.Resource != "serial_channel" {
+			t.Fatalf("fresh readback should report ownership conflict, got %v", err)
+		}
+	}
+	status := waitTimeline(t, runtime, func(status MediaTimelineStatus) bool { return status.Acknowledged == 2 })
+	if status.State == "faulted" {
+		t.Fatal(status.Error)
+	}
+	mu.Lock()
+	for _, frame := range *frames {
+		if frame.Opcode == native.OpPWMGet {
+			mu.Unlock()
+			t.Fatal("PWM poll reached the wire during playback")
+		}
+	}
+	mu.Unlock()
+	value.Playing = false
+	value.Sequence++
+	if _, err := runtime.UpdateMediaPlayback(value); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.MediaTimeline().PlayReady {
+		t.Fatal("pause did not release readback")
+	}
+}
+
+func TestMediaTimelineReservationLeaseUsesGrantTimeNotOldClockReceipt(t *testing.T) {
+	runtime, _, _ := mediaTimelineFixture(t, false)
+	_ = armTimeline(t, runtime, 0)
+	runtime.mediaPlayback.mu.Lock()
+	runtime.mediaPlayback.received = time.Now().Add(-300 * time.Millisecond)
+	runtime.mediaPlayback.mu.Unlock()
+	runtime.expirePausedMediaTimelineWire()
+	if !runtime.MediaTimeline().PlayReady {
+		t.Fatal("old paused clock receipt prematurely expired newly granted reservation")
+	}
+	runtime.mediaTimeline.mu.Lock()
+	runtime.mediaTimeline.wireRenewedAt = time.Now().Add(-300 * time.Millisecond)
+	runtime.mediaTimeline.mu.Unlock()
+	runtime.expirePausedMediaTimelineWire()
+	if runtime.MediaTimeline().PlayReady {
+		t.Fatal("expired reservation still advertised readiness")
+	}
+}
+
+func TestMediaTimelineDoesNotAcknowledgePlayWithPWMReadbackInFlight(t *testing.T) {
+	runtime, frames, mu := mediaTimelineFixture(t, false)
+	value := armTimeline(t, runtime, 0)
+	value.Playing = false
+	if _, err := runtime.UpdateMediaPlayback(value); err != nil {
+		t.Fatal(err)
+	}
+	value.Sequence++
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		// This fixture ACKs commands, but deliberately does not provide PWM
+		// values, leaving the read registered until its caller cancels it.
+		_, err := runtime.Request(ctx, native.OpPWMGet, nil, native.OpPWMValues)
+		done <- err
+	}()
+	runtime.mu.RLock()
+	session := runtime.session
+	runtime.mu.RUnlock()
+	deadline := time.Now().Add(time.Second)
+	written := false
+	for !written && time.Now().Before(deadline) {
+		mu.Lock()
+		for _, frame := range *frames {
+			written = written || frame.Opcode == native.OpPWMGet
+		}
+		mu.Unlock()
+		time.Sleep(time.Millisecond)
+	}
+	if !written || !session.HasPendingRequest(native.OpPWMGet) {
+		t.Fatal("PWM read did not acquire the wire")
+	}
+	value.PreparePlay = true
+	armed := make(chan error, 1)
+	go func() { _, err := runtime.UpdateMediaPlayback(value); armed <- err }()
+	select {
+	case err := <-armed:
+		t.Fatalf("reservation returned before read drained: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	if runtime.MediaPlayback().Playing || runtime.MediaTimeline().PlayReady {
+		t.Fatal("draining reservation falsely acknowledged readiness or Play")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("readback did not release its request slot")
+	}
+	select {
+	case err := <-armed:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("reservation did not finish")
+	}
+	if !runtime.MediaTimeline().PlayReady {
+		t.Fatal("drained reservation not acknowledged")
+	}
+	value.PreparePlay = false
+	value.Playing = true
+	value.Sequence++
+	if _, err := runtime.UpdateMediaPlayback(value); err != nil {
+		t.Fatalf("released readback still blocks explicit Play: %v", err)
+	}
+}
 
 func TestMediaTimelineReportsStandaloneStripAsRetryableResourceBusy(t *testing.T) {
 	runtime := New(Options{})
@@ -23,6 +165,62 @@ func TestMediaTimelineReportsStandaloneStripAsRetryableResourceBusy(t *testing.T
 	}
 	if busy.Resource != "addressable_strip" || busy.Owner != "standalone_strip_stream" || busy.RetryAfterMS != 2000 {
 		t.Fatalf("unexpected resource conflict: %#v", busy)
+	}
+}
+
+func TestMediaTimelinePausedReservationExpiresAndRequiresNewPreparePlay(t *testing.T) {
+	runtime, _, _ := mediaTimelineFixture(t, false)
+	value := armTimeline(t, runtime, 0)
+	if !runtime.MediaTimeline().PlayReady {
+		t.Fatal("paused reservation missing")
+	}
+	waitTimeline(t, runtime, func(status MediaTimelineStatus) bool { return !status.PlayReady })
+	if _, err := runtime.UpdateMediaPlayback(value); err == nil {
+		t.Fatal("expired serial reservation accepted Play")
+	}
+}
+
+func TestMediaTimelineEmergencyStopReleasesPausedReservation(t *testing.T) {
+	runtime, _, _ := mediaTimelineFixture(t, false)
+	_ = armTimeline(t, runtime, 0)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := runtime.SetEmergencyStop(ctx, true, "test", "reservation regression"); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.MediaTimeline().PlayReady {
+		t.Fatal("E-STOP left wire reserved")
+	}
+}
+
+func TestMediaTimelineEmergencyStopBypassesReservationStillBeingGranted(t *testing.T) {
+	runtime, _, _ := mediaTimelineFixture(t, false)
+	runtime.mu.RLock()
+	session := runtime.session
+	runtime.mu.RUnlock()
+	// Model the reservation's drain phase: the link has fenced admission but
+	// no completed lease has yet been installed in mediaTimeline.releaseWire.
+	release, err := session.ReserveTimeline(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := runtime.SetEmergencyStop(ctx, true, "test", "pending reservation"); err != nil {
+		t.Fatalf("safety cleanup was blocked by pending reservation: %v", err)
+	}
+}
+
+func TestMediaTimelinePreparePlayValidation(t *testing.T) {
+	for _, value := range []MediaPlaybackUpdate{
+		{ClientID: "test", Sequence: 1, Rate: 1, PreparePlay: true, Loaded: false, PlanRevision: 1},
+		{ClientID: "test", Sequence: 1, Rate: 1, PreparePlay: true, Loaded: true, PlanRevision: 0},
+		{ClientID: "test", Sequence: 1, Rate: 1, PreparePlay: true, Loaded: true, Playing: true, PlanRevision: 1},
+	} {
+		if err := value.validate(); err == nil {
+			t.Fatalf("invalid preparation accepted: %+v", value)
+		}
 	}
 }
 
@@ -137,7 +335,7 @@ func mediaTimelineFixture(t *testing.T, nack bool) (*Runtime, *[]native.Frame, *
 			}
 		}
 	}()
-	runtime.attach(link.OpenResult{Session: link.NewForPort("TIMELINE-TEST", port), Port: ports.Info{Name: "TIMELINE-TEST"}, Hello: native.Hello{Name: "Virtual"}})
+	runtime.attach(link.OpenResult{Session: link.NewForPort("TIMELINE-TEST", port), Port: ports.Info{Name: "TIMELINE-TEST"}, Hello: native.Hello{Name: "Virtual", Capabilities: native.CapabilityProgramState | native.CapabilityScheduledSegments}})
 	t.Cleanup(func() { runtime.Close() })
 	return runtime, &frames, &mu
 }
@@ -169,11 +367,13 @@ func armTimeline(t *testing.T, runtime *Runtime, at uint64) MediaPlaybackUpdate 
 	}
 	value.Playing = false
 	value.PositionMS = at
+	value.PreparePlay = true
 	if _, err := runtime.UpdateMediaPlayback(value); err != nil {
 		t.Fatal(err)
 	}
 	value.Sequence++
 	value.Playing = true
+	value.PreparePlay = false
 	return value
 }
 func TestMediaTimelineExecutesBothEdgesWithoutUIOrRepeatedCueRPC(t *testing.T) {
@@ -345,8 +545,8 @@ func TestMediaTimelineClockLeaseFaultsInsteadOfSkippingPendingCue(t *testing.T) 
 	if status.Acknowledged != 2 {
 		t.Fatalf("unexpected ACK ledger: %+v", status)
 	}
-	if _, err := runtime.UpdateMediaPlayback(MediaPlaybackUpdate{ClientID: "test", Sequence: 3, Loaded: true, Playing: true, Rate: 1, Epoch: 1, PlanRevision: 1}); err == nil {
-		t.Fatal("faulted plan resumed")
+	if _, err := runtime.UpdateMediaPlayback(MediaPlaybackUpdate{ClientID: "test", Sequence: 3, Loaded: true, Playing: true, Rate: 1, Epoch: 1, PlanRevision: 1}); err == nil || !strings.Contains(err.Error(), status.Error) {
+		t.Fatalf("faulted plan resumed or its original error was masked: %v", err)
 	}
 }
 
@@ -360,11 +560,13 @@ func TestMediaTimelinePauseResumeRestoresLatchedValueAndSeekRequiresArming(t *te
 	value.Sequence++
 	value.Playing = false
 	value.PositionMS = 100
+	value.PreparePlay = true
 	if _, err := runtime.UpdateMediaPlayback(value); err != nil {
 		t.Fatal(err)
 	}
 	value.Sequence++
 	value.Playing = true
+	value.PreparePlay = false
 	if _, err := runtime.UpdateMediaPlayback(value); err != nil {
 		t.Fatal(err)
 	}
@@ -380,4 +582,34 @@ func TestMediaTimelinePauseResumeRestoresLatchedValueAndSeekRequiresArming(t *te
 		t.Fatal(err)
 	}
 	waitTimeline(t, runtime, func(s MediaTimelineStatus) bool { return s.ArmedEpoch == 2 && s.RebasedSteps == 2 })
+}
+
+func TestBoardSnapshotSkipsCatalogProvidersAndRetainsLiveState(t *testing.T) {
+	runtime := New(Options{})
+	defer runtime.Close()
+	calls := 0
+	runtime.setMacroRunner(NewMacroRunner(nil, func() []appconfig.Macro {
+		calls++
+		return []appconfig.Macro{{ID: 7, Name: "fixture", Mode: macroModeHost,
+			Steps: []appconfig.MacroStep{{Kind: "relay", Target: 7, Value: 0}}}}
+	}, nil))
+	runtime.mu.Lock()
+	runtime.haveStatus = true
+	runtime.status.DoorOpen = true
+	runtime.statusUpdated = time.Now()
+	runtime.mu.Unlock()
+	light := runtime.BoardSnapshot()
+	if calls != 0 {
+		t.Fatalf("board observation expanded catalog %d times", calls)
+	}
+	full := runtime.Snapshot()
+	if calls == 0 || len(full.Effects) == 0 {
+		t.Fatal("public snapshot lost its catalog")
+	}
+	if light.Status != full.Status || light.StatusUpdated != full.StatusUpdated || !light.HaveStatus {
+		t.Fatal("board observation lost authoritative state or timestamp")
+	}
+	if len(light.Effects) != 0 || len(light.EffectGroups) != 0 {
+		t.Fatal("board observation includes catalog")
+	}
 }

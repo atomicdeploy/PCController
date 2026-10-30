@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -427,6 +428,11 @@ func (presenter *LCDPresenter) send(version uint64, line1, line2 string) {
 	line1, line2 = lcdLine(line1), lcdLine(line2)
 	err = presenter.runtime.Command(ctx, native.OpDisplayText, payload)
 	if err != nil {
+		var busy *ResourceBusyError
+		if errors.As(err, &busy) && busy.Resource == "serial_channel" && busy.Owner == "media_timeline" {
+			presenter.runtime.PublishHostEvent("lcd.deferred", "LCD presentation deferred by prepared playback")
+			return
+		}
 		// Keep transport failures out of the generic error priority path: feeding
 		// them back into the presenter would recursively retry an unavailable LCD.
 		presenter.runtime.PublishHostEvent("lcd.error", "LCD presentation: "+err.Error())

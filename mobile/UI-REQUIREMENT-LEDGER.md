@@ -39,3 +39,13 @@ Final delivery observed 2026-10-13T18:20:30.258795+00:00: 0.1.17/code18 Android 
 Swipe source verification completed: final analyzer clean; one opt-in renderer produced nine phone/tablet/theme/editor fixtures and the phone Live frame was inspected. Gesture behavior is established by the 32 focused checks rather than static screenshots. No native backend/runtime, device installer, output or firmware action.
 
 Swipe delivery observed 2026-10-13T18:38:00.154038+00:00: 0.1.18/code19 Android release from a603ecaa216760aba8c8482ce3e897bb0aea1255, mobile tree 04923307280f10a21fec4df1ca4b6c8228af1920; 20,332,384 bytes, SHA256 61c1046709ced11edcb96f6554d377513688189d42f1e481c9bcbe31f540dc47. Package/inherited signer verified. SSH localhost:5022 SM-S908E received /storage/emulated/0/Download/PCController-0.1.18.apk, with exact final hash/size verified after temporary-file promotion; 2,321,252 KiB free afterward. Ready for manual installation; no installer or controller launch. ADB and Android mDNS inventories empty, so no reachable ADB tablet update. PR #673 contains the swipe topic stacked on #671. Source/build/transfer are distinct from actual Android touch, installation and human acceptance; no native runtime replacement or board action.
+
+## Strip workspace checkpoint
+Typed strip authoring, offline pixel preview, five presets (Police, Thunder,
+Converging, Fade, Pulse), and explicit peer-bound one-shot pixel probes now have
+source implementations. Technical drafts remain authoritative until applied.
+Manual RGB frames configure their exact count before stage/show; stream pacing
+is unchanged. Source tests are separate from installed APK, visual, physical
+and audio acceptance. Board RGB readback is not advertised by the current AVR
+contract; diagnostic receipts mean host acknowledgement only. See
+../docs/STRIP-WORKSPACE-INTEGRATION.md for remaining gates.

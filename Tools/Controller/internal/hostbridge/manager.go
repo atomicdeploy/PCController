@@ -977,7 +977,7 @@ func (manager *Manager) eventLoop(afterID uint64) {
 			)
 		}
 		config := manager.store.Current()
-		manager.observeEventPresentation(config, event, manager.client.Snapshot)
+		manager.observeEventPresentation(config, event, manager.client.BoardSnapshot)
 		manager.dispatchWebhooks(config, event)
 		manager.dispatchTextMappings(config, event)
 		manager.dispatchNotification(config, event)
@@ -1125,7 +1125,7 @@ func (manager *Manager) dispatchNotification(
 		}
 		return
 	}
-	job, ok, err := notificationJobFromObservation(config, event, manager.client.Snapshot)
+	job, ok, err := notificationJobFromObservation(config, event, manager.client.BoardSnapshot)
 	if err != nil {
 		manager.recordError("notification actions: " + err.Error())
 		return
