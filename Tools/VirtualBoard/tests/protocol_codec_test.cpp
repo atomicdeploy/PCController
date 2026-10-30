@@ -50,10 +50,16 @@ void testCobsRejectsMalformedAndCapacityOverflow() {
   const std::array<std::uint8_t, 1> zeroCode{{0}};
   const std::array<std::uint8_t, 2> truncated{{3, 0x42}};
   const std::array<std::uint8_t, 3> tooSmall{{3, 0x42, 0x43}};
+  const std::array<std::uint8_t, 2> embeddedZero{{2, 0}};
+  const std::array<std::uint8_t, 3> secondZero{{3, 0x11, 0}};
   std::array<std::uint8_t, 3> output{{0, 0, 0}};
 
   require(cobsDecode(zeroCode.data(), 1, output.data(), 3) == 0,
           "COBS accepted a zero code");
+  require(cobsDecode(embeddedZero.data(), 2, output.data(), 3) == 0,
+          "COBS accepted a zero in a data block");
+  require(cobsDecode(secondZero.data(), 3, output.data(), 3) == 0,
+          "COBS accepted a zero after a nonzero data byte");
   require(cobsDecode(truncated.data(), 2, output.data(), 3) == 0,
           "COBS accepted a truncated block");
   require(cobsDecode(tooSmall.data(), 3, output.data(), 1) == 0,

@@ -1,5 +1,9 @@
 # Shared production firmware and target acceptance
 
+The cross-project transport and future repository-merger work is tracked in
+[Controller-Convergence.md](Controller-Convergence.md). Read-only machine inventory:
+`node Tools/Firmware/targets.mjs list`. This does not upload or commission a target.
+
 ## Source ownership
 
 Issue [#103](https://github.com/atomicdeploy/PCController/issues/103) requires one

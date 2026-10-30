@@ -39,7 +39,7 @@ type Packet struct {
 }
 
 func EncodePacket(p Packet) ([]byte, error) {
-	if p.Kind < Discover || p.Kind > Unsubscribe || p.ID == 0 || p.Count == 0 || p.Count > 256 || p.Index >= p.Count || len(p.Data) > ChunkSize {
+	if p.Kind < Discover || p.Kind > Unsubscribe || p.ID == 0 || p.Count == 0 || p.Count > 256 || p.Index >= p.Count || len(p.Data) > ChunkSize || (p.Index+1 < p.Count && len(p.Data) != ChunkSize) {
 		return nil, errors.New("invalid UDP envelope")
 	}
 	b := append([]byte("DGLU"), p.Kind)
