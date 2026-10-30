@@ -331,3 +331,12 @@ export function renderDart(contract) {
     ns.opcodes.map(r => "  static const " + dartName(r.cpp) + " = 0x" + formatHex(r.value) + ";").join("\n") +
     "\n}\n").join("\n");
 }
+export function renderPowerShell(contract) {
+  validateContract(contract);
+  return "# Generated from PCController Project/ProtocolContract.json; DO NOT EDIT.\n" +
+    [["Pakar", contract.pakar], ["Controller", contract]].map(([name, ns]) =>
+      "enum " + name + "Envelope { Magic = " + ns.envelope.magic + "; Reserved = " + ns.envelope.reserved +
+      "; MaximumPayload = " + ns.envelope.maximumPayload + " }\n" +
+      "enum " + name + "Opcode {\n" + ns.opcodes.map(r =>
+        "  " + r.cpp.replace(/^k(?=[A-Z])/, "") + " = " + r.value).join("\n") + "\n}\n").join("\n");
+}

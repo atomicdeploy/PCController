@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import {readFile, writeFile} from "node:fs/promises";
 import {createHash} from "node:crypto";
 import {fileURLToPath} from "node:url";
-import {validatePublishedBindings, renderCpp, renderPakarCpp, renderRust, renderDart} from "./registry.mjs";
+import {validatePublishedBindings, renderCpp, renderPakarCpp, renderRust, renderDart, renderPowerShell} from "./registry.mjs";
 
 const root = new URL("../../", import.meta.url);
 const args = process.argv.slice(2);
@@ -38,7 +38,8 @@ const outputs = pakar ? [
   ["libraries/BoardCore/src/ProtocolOpcodes.h", renderPakarCpp(contract)],
   ["libraries/BoardCore/src/pccontroller/ProtocolContract.h", renderCpp(contract)],
   ["desktop/src/protocol_opcodes.rs", renderRust(contract)],
-  ["mobile/lib/protocol_opcodes.dart", renderDart(contract)]
+  ["mobile/lib/protocol_opcodes.dart", renderDart(contract)],
+  ["tools/ProtocolOpcodes.ps1", renderPowerShell(contract)]
 ] : [["src/four_d/protocol_opcodes.rs", renderRust(contract)]];
 for (const [path, expected] of outputs) {
   let actual = ""; try { actual = await read(path); } catch (error) { if (error.code !== "ENOENT") throw error; }
