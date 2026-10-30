@@ -71,21 +71,25 @@ void captureFrame(const Frame &frame, void *context) {
       std::equal(before.begin(), before.end(), frame.payload);
 }
 
-void testUnknownReservedEnvelopeByteDoesNotBlockSemanticFrames() {
+void testForeignEnvelopeCannotReachSemanticDispatch() {
   HardwareSerial serial;
   UartProtocol protocol(serial);
   Capture capture;
   capture.protocol = &protocol;
   protocol.begin(115200, captureFrame, &capture);
 
-  const std::vector<std::uint8_t> expected{0x41, 0x42};
-  serial.feed(encode(ControllerProtocol::DisplayText, 9, expected, 0x7E));
+  for (unsigned discriminator = 0; discriminator < 256; ++discriminator) {
+    if (discriminator == ControllerProtocol::ReservedEnvelopeByte) continue;
+    serial.feed(encode(ControllerProtocol::PwmSet, 9, {1},
+                       static_cast<std::uint8_t>(discriminator)));
+    protocol.service();
+  }
+  require(capture.payloads.empty(), "foreign audio opcode reached PWM dispatch");
+  require(protocol.framingErrors() == 255 && protocol.crcErrors() == 0,
+          "foreign protocol rejection was not counted");
+  serial.feed(encode(ControllerProtocol::PwmSet, 9, {1, 0, 0}));
   protocol.service();
-
-  require(capture.payloads.size() == 1 && capture.payloads[0] == expected,
-          "unknown reserved envelope byte blocked a valid semantic frame");
-  require(protocol.framingErrors() == 0 && protocol.crcErrors() == 0,
-          "reserved envelope byte advanced an envelope error counter");
+  require(capture.payloads.size() == 1, "foreign frame poisoned the next valid frame");
 }
 
 void testUnknownOptionalOpcodeReachesSemanticDispatch() {
@@ -266,7 +270,7 @@ void testBuzzerPushCarriesMCUTimestamp() {
 int main() {
   try {
     testRepresentativeAndMaximumPayloads();
-    testUnknownReservedEnvelopeByteDoesNotBlockSemanticFrames();
+    testForeignEnvelopeCannotReachSemanticDispatch();
     testUnknownOptionalOpcodeReachesSemanticDispatch();
     testInvalidFramesAreRejected();
     testMacroScratchCannotCorruptSplitSerialFrame();
