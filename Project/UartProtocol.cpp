@@ -157,11 +157,11 @@ void UartProtocol::processEncodedFrame() {
   // in RX storage leaves raw_ available for nested ACK/error/response writes.
   const uint8_t rawLength = WireCodec::cobsDecode(
       receive_, receiveLength_, receive_, sizeof(receive_));
-  // The reserved byte is advisory: magic, bounded shape, CRC, and each known
-  // opcode's semantic validation decide whether a frame is understandable.
-  // This lets reduced/newer feature sets interoperate without build-specific
-  // branches; unknown operations still receive Unsupported from the handler.
+  // This fixed envelope discriminator is not a version selector. Pakar uses
+  // the same framing but a different command namespace (0x11 is audio, not PWM).
+  // Reject another envelope before semantic dispatch; never guess/fall back.
   if (rawLength < RawOverhead || receive_[0] != Magic ||
+      receive_[1] != ReservedEnvelopeByte ||
       receive_[4] > MaximumPayload ||
       rawLength != static_cast<uint8_t>(receive_[4] + RawOverhead)) {
     if (framingErrors_ != UINT16_MAX) {

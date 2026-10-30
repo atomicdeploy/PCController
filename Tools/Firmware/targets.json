@@ -1,5 +1,7 @@
 {
   "mega2560": {
+    "architecture": "avr",
+    "buildAdapter": "arduino-avr",
     "core": "MegaCore:avr",
     "minimumCoreVersion": "3.0.3",
     "index": "https://mcudude.github.io/MegaCore/package_MCUdude_MegaCore_index.json",

@@ -67,6 +67,9 @@ DecodeResult decode(const std::uint8_t *encoded, std::size_t length) {
   if (raw[0] != kMagic) {
     return {{}, DecodeError::Framing, "frame magic mismatch"};
   }
+  if (raw[1] != kReservedEnvelopeByte) {
+    return {{}, DecodeError::Framing, "foreign protocol namespace"};
+  }
   const std::size_t payloadLength = raw[4];
   if (payloadLength > kMaximumPayload ||
       raw.size() != payloadLength + kRawOverhead) {
