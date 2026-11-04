@@ -171,8 +171,10 @@ func removeOwnedRegistryIntegration(
 
 	identityPath := `Software\Classes\AppUserModelId\` + appID
 	iconURI, identityErr := registry.String(identityPath, "IconUri")
+	owner, ownerErr := registry.String(identityPath, "OwnerExecutable")
 	switch {
-	case identityErr == nil && (sameWindowsPath(iconURI, executable) || sameWindowsPath(iconURI, filepath.Join(filepath.Dir(executable), ToastLogoFileName))):
+	case (ownerErr == nil && sameWindowsPath(owner, executable)) ||
+		(isNotExist(ownerErr) && identityErr == nil && (sameWindowsPath(iconURI, executable) || sameWindowsPath(iconURI, filepath.Join(filepath.Dir(executable), ToastLogoFileName)))):
 		if deleteErr := registry.DeleteTree(identityPath); deleteErr != nil && !isNotExist(deleteErr) {
 			err = errors.Join(err, fmt.Errorf("remove application identity: %w", deleteErr))
 		} else if deleteErr == nil {
@@ -470,6 +472,7 @@ func ensureProtocolRegistry(
 		{`Software\Classes\` + productidentity.ProtocolScheme + `\shell\open\command`, "", protocolCommand(executable)},
 		{`Software\Classes\AppUserModelId\` + appID, "DisplayName", displayName},
 		{`Software\Classes\AppUserModelId\` + appID, "IconUri", logo},
+		{`Software\Classes\AppUserModelId\` + appID, "OwnerExecutable", executable},
 	}
 	for _, value := range values {
 		if err := registry.Set(value.path, value.name, value.value); err != nil {

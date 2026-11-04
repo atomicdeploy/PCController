@@ -134,6 +134,12 @@ export function goTestSourceIdentity(moduleRoot, goVersion, environment = {}) {
 	// must invalidate the stable test cache just like a changed .go source file.
 	walkEmbeddedFiles(join(moduleRoot, 'internal', 'webui', 'dist'), files)
 	walkEmbeddedFiles(join(moduleRoot, 'internal', 'defaultassets', 'assets'), files)
+	const artwork = join(moduleRoot, 'winres')
+	if (existsSync(artwork)) {
+		for (const name of readdirSync(artwork)) {
+			if (name === 'icon.png' || /^toast-event-.*\.png$/u.test(name)) files.push(join(artwork, name))
+		}
+	}
 	for (const name of ['go.mod', 'go.sum']) {
 		const path = join(moduleRoot, name)
 		if (existsSync(path)) files.push(path)

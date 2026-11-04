@@ -89,9 +89,6 @@ const STALE_HOST_OUTPUTS = [
 const WINDOWS_GNU_PACKAGE_ID = 'BrechtSanders.WinLibs.POSIX.UCRT'
 const MINIMUM_NODE = [22, 12, 0]
 const MINIMUM_WEB_NODE = [22, 12, 0]
-const TOAST_EVENT_ICONS = Object.freeze([
-	'info', 'warning', 'error', 'door', 'hot', 'temperature-cleared', 'motion', 'relay', 'radio'
-])
 
 export class BuildError extends Error {
 	constructor(message, exitCode = 1) {
@@ -1354,6 +1351,8 @@ export function hostSourceIdentity(hostRoot = HOST_ROOT) {
 	for (const path of [join(hostRoot, 'go.mod'), join(hostRoot, 'go.sum'), join(hostRoot, 'winres', 'winres.json')]) {
 		if (existsSync(path)) files.push(path)
 	}
+	const artwork = join(hostRoot, 'winres')
+	if (existsSync(artwork)) walkFiles(artwork, files, path => extname(path).toLowerCase() === '.png')
 	const webRoot = join(hostRoot, 'web')
 	if (existsSync(webRoot)) walkFiles(webRoot, files, () => true)
 	const webDist = join(hostRoot, 'internal', 'webui', 'dist')
@@ -2013,6 +2012,9 @@ function buildSharedLibrary(go, stage, env, goArch, options, log, ldflags) {
 		rmSync(smokeSource, { force: true })
 		rmSync(smoke, { force: true })
 	}
+	// host_start creates this empty history file in the fresh, build-owned
+	// stage. It is smoke-test state, not a distribution asset.
+	rmSync(join(stage, 'measurements.jsonl'), { force: true })
 	return { paths: [output, header], compiler: compilerIdentity }
 }
 
@@ -2300,10 +2302,12 @@ function buildAvrdudeAdapter(stage, env, options) {
 	if (reported.type !== 'version' || reported.libavrdude !== dependency.version) {
 		throw new BuildError(`libavrdude adapter version drift: expected ${dependency.version}`)
 	}
-	const adapter = join(stage, `pccontroller-avrdude${suffix}`)
-	const cli = join(stage, `avrdude${suffix}`)
-	const configuration = join(stage, 'avrdude.conf')
-	const copying = join(stage, 'avrdude-COPYING.txt')
+	const toolDirectory = join(stage, 'tools', 'avrdude')
+	mkdirSync(toolDirectory, { recursive: true })
+	const adapter = join(toolDirectory, `pccontroller-avrdude${suffix}`)
+	const cli = join(toolDirectory, `avrdude${suffix}`)
+	const configuration = join(toolDirectory, 'avrdude.conf')
+	const copying = join(toolDirectory, 'COPYING.txt')
 	copyFileSync(builtAdapter, adapter)
 	copyFileSync(builtCLI, cli)
 	copyFileSync(builtConfig, configuration)
@@ -2315,6 +2319,13 @@ function buildAvrdudeAdapter(stage, env, options) {
 		throw new BuildError('pinned libavrdude source did not provide its COPYING file')
 	}
 	copyFileSync(upstreamCopying, copying)
+	// Smoke the staged tools without the developer's MinGW/Arduino PATH. These
+	// identity/help commands never enumerate or open a programming interface.
+	const smokeEnv = process.platform === 'win32'
+		? { ...withoutEnvironmentNames(env, ['PATH']), PATH: join(env.SystemRoot || env.SYSTEMROOT || 'C:\\Windows', 'System32') }
+		: env
+	run(adapter, ['--version-json'], { cwd: toolDirectory, env: smokeEnv, capture: true })
+	run(cli, ['-C', configuration, '-?'], { cwd: toolDirectory, env: smokeEnv, capture: true })
 	return {
 		enabled: true,
 		paths: [adapter, cli, configuration, copying],
@@ -2456,23 +2467,15 @@ function buildHost(options, identity, env, log, embeddedDefaults = { enabled: fa
 	log.stage('📜', 'Collecting project and dependency notices')
 	const notices = collectModuleNotices(go, stage, goEnv, options)
 	let toastLogo = ''
-	let toastEventIcons = []
-	if (process.platform === 'win32') {
-		toastLogo = join(stage, 'toast-logo.png')
-		copyFileSync(identity.toastIcon || join(HOST_ROOT, 'winres', 'icon.png'), toastLogo)
-		toastEventIcons = TOAST_EVENT_ICONS.map(name => {
-			const fileName = `toast-event-${name}.png`
-			const source = join(HOST_ROOT, 'winres', fileName)
-			const image = inspectPNG(readFileSync(source), `toast event icon ${name}`)
-			if (image.width !== 256 || image.height !== 256) {
-				throw new BuildError(`toast event icon ${name} must be 256x256 pixels`, 2)
-			}
-			const target = join(stage, fileName)
-			copyFileSync(source, target)
-			return target
-		})
+	// Defaults are embedded by winres/assets.go. Only an explicitly selected
+	// branding override belongs in the distribution's assets directory.
+	if (process.platform === 'win32' && identity.toastIcon) {
+		const toastDirectory = join(stage, 'assets', 'toast')
+		mkdirSync(toastDirectory, { recursive: true })
+		toastLogo = join(toastDirectory, 'toast-logo.png')
+		copyFileSync(identity.toastIcon, toastLogo)
 	}
-	const artifacts = [executable, ...(toastLogo ? [toastLogo] : []), ...toastEventIcons, ...shared.paths]
+	const artifacts = [executable, ...(toastLogo ? [toastLogo] : []), ...shared.paths]
 		.concat(programmerLibrary.paths)
 		.map(path => artifactRecord(path, stage))
 	const manifest = {

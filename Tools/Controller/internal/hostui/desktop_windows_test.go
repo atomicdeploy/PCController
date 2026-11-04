@@ -42,6 +42,26 @@ type cleanupRegistry struct {
 	deleted []string
 }
 
+func TestCachedToastIdentityCleanupUsesExecutableOwner(t *testing.T) {
+	executable := filepath.Join(t.TempDir(), "controller.exe")
+	appID := "PCController.Tests"
+	identity := `Software\Classes\AppUserModelId\` + appID
+	for _, owned := range []bool{true, false} {
+		owner := executable
+		if !owned {
+			owner = filepath.Join(t.TempDir(), "other.exe")
+		}
+		record := &cleanupRegistry{values: map[string]string{
+			identity + "|IconUri":         `C:\Cache\shared-logo.png`,
+			identity + "|OwnerExecutable": owner,
+		}}
+		_, removed, _, err := removeOwnedRegistryIntegration(record, executable, appID)
+		if err != nil || removed != owned {
+			t.Fatalf("owned=%t removed=%t error=%v", owned, removed, err)
+		}
+	}
+}
+
 func (registry *cleanupRegistry) String(path, name string) (string, error) {
 	value, ok := registry.values[path+"|"+name]
 	if !ok {

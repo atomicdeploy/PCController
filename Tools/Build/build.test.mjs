@@ -289,6 +289,20 @@ test('stable Go test identity includes embedded defaults and build environment',
 	assert.notEqual(afterEnvironment.sha256, afterAsset.sha256)
 })
 
+test('embedded toast bytes invalidate both package identity and stable Go tests', async t => {
+	const root = await mkdtemp(join(tmpdir(), 'controller-toast-identity-'))
+	t.after(() => rm(root, { recursive: true, force: true }))
+	await mkdir(join(root, 'winres'))
+	for (const name of ['icon.png', 'toast-event-relay.png']) {
+		await writeFile(join(root, 'winres', name), 'before')
+		const beforePackage = hostSourceIdentity(root)
+		const beforeTest = goTestSourceIdentity(root, 'fixture')
+		await writeFile(join(root, 'winres', name), 'after')
+		assert.notEqual(hostSourceIdentity(root).sha256, beforePackage.sha256)
+		assert.notEqual(goTestSourceIdentity(root, 'fixture').sha256, beforeTest.sha256)
+	}
+})
+
 test('package publishing tolerates a shell holding the canonical directory', async t => {
         const root = await mkdtemp(join(tmpdir(), 'pccontroller-package-lock-'))
         t.after(() => rm(root, { recursive: true, force: true }))
@@ -1239,13 +1253,14 @@ test('Windows installation inventory follows the final packed host manifest', ()
 	assert.equal(linux.actions.some(action => action.id === 'installation-inventory'), false)
 })
 
-test('Windows package carries hash-bound toast and semantic event icons before inventory generation', async () => {
+test('Windows package embeds default toast artwork and stages only a named branding override', async () => {
 	const source = await readFile(join(PROJECT_ROOT, 'Tools', 'Build', 'build.mjs'), 'utf8')
-	assert.match(source, /copyFileSync\(identity\.toastIcon \|\| join\(HOST_ROOT, 'winres', 'icon\.png'\), toastLogo\)/)
-	assert.match(source, /inspectPNG\(readFileSync\(source\), `toast event icon \$\{name\}`\)/)
-	assert.match(source, /copyFileSync\(source, target\)/)
-	assert.match(source, /\[executable, \.\.\.\(toastLogo \? \[toastLogo\] : \[\]\), \.\.\.toastEventIcons, \.\.\.shared\.paths\]/)
-	assert.ok(source.indexOf("toastLogo = join(stage, 'toast-logo.png')") < source.indexOf("'installation-package.json'"))
+	assert.match(source, /join\(stage, 'assets', 'toast'\)/)
+	assert.match(source, /copyFileSync\(identity\.toastIcon, toastLogo\)/)
+	assert.doesNotMatch(source, /join\(stage, 'toast-logo.png'\)/)
+	assert.match(source, /join\(stage, 'tools', 'avrdude'\)/)
+	const embedded = await readFile(join(PROJECT_ROOT, 'Tools', 'Controller', 'winres', 'assets.go'), 'utf8')
+	assert.match(embedded, /go:embed icon.png toast-event-\*.png/)
 })
 
 test('Win32 resource configuration retains icon, manifest, and version data', async () => {

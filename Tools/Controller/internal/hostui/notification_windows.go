@@ -65,7 +65,16 @@ func resolveWindowsToastEventIcons(logoPath string) (map[string]string, map[stri
 	resolved := make(map[string]string, len(toastEventIconNames))
 	failures := make(map[string]error)
 	for _, name := range toastEventIconNames {
-		uri, err := resolveWindowsToastLogo(filepath.Join(directory, toastEventIconFileName(name)))
+		iconPath := filepath.Join(directory, toastEventIconFileName(name))
+		if _, err := os.Lstat(iconPath); os.IsNotExist(err) {
+			var resolveErr error
+			iconPath, resolveErr = resolveToastAsset("", toastEventIconFileName(name))
+			if resolveErr != nil {
+				failures[name] = resolveErr
+				continue
+			}
+		}
+		uri, err := resolveWindowsToastLogo(iconPath)
 		if err != nil {
 			failures[name] = err
 			continue

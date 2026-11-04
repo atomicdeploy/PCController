@@ -141,7 +141,10 @@ tray-controller half of issue #116 remains tracked independently.
 
 Windows desktop integration is explicit and reversible. `desktop ensure`
 installs the current executable's per-user protocol, Start-menu and Desktop entries, and
-hash-bound `toast-logo.png` identity. Every WinRT toast uses that local PNG as
+the built-in toast logo identity. Default logo and semantic PNGs are embedded
+in the executable and materialized in a content-addressed per-user cache for
+Windows. Optional overrides go in `assets/toast/` beside the executable (for
+example `toast-logo.png` or `toast-event-relay.png`). Every WinRT toast uses a PNG as
 its `appLogoOverride`; Windows is never asked to silently render a text-only
 product toast. `desktop test` sends a branded, actionable end-to-end
 diagnostic. `desktop uninstall` removes only entries whose ownership still

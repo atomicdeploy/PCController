@@ -113,6 +113,10 @@ if(MINGW)
   # Apply the same static archive ordering to the matching upstream CLI. It is
   # packaged only for extension queries that libavrdude does not expose.
   target_link_libraries(avrdude PRIVATE libusb libftdi stdc++ winusb)
+  # These C entry points link C++ USB dependencies. Make the MinGW support
+  # libraries static as well; otherwise a developer PATH hides missing DLLs.
+  target_link_options(pccontroller-avrdude PRIVATE -static -static-libgcc -static-libstdc++)
+  target_link_options(avrdude PRIVATE -static -static-libgcc -static-libstdc++)
 endif()
 target_compile_definitions(pccontroller-avrdude PRIVATE
   PCCONTROLLER_AVRDUDE_VERSION="${PCCONTROLLER_AVRDUDE_VERSION}")
