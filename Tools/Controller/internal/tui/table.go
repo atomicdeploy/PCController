@@ -28,6 +28,7 @@ type controlTableRow struct {
 	Group         string
 	Name          string
 	Value         string
+	Detail        string
 	Tone          controlValueTone
 	Action        string
 	Adjust        string
@@ -112,7 +113,13 @@ func renderControlTable(
 			marker = "▸ "
 		}
 		name := alignCell(marker+row.Name, columns[0].Width, lipgloss.Left)
-		value := alignCell(row.Value, columns[1].Width, lipgloss.Left)
+		// Optional diagnostics must never force an otherwise fitting measurement
+		// (especially the percent sign in 100%) through ellipsis truncation.
+		valueText := row.Value
+		if remaining := columns[1].Width - lipgloss.Width(valueText) - 3; row.Detail != "" && remaining > 1 {
+			valueText += " · " + truncateDisplayText(row.Detail, remaining)
+		}
+		value := alignCell(valueText, columns[1].Width, lipgloss.Left)
 		nameStyle := lipgloss.NewStyle().Foreground(colorBright)
 		valueStyle := lipgloss.NewStyle().Foreground(colorBright)
 		if colorValues {

@@ -1817,7 +1817,7 @@ func TestControlTableUsesMappedGroupSeparatorsAndStableHeaders(t *testing.T) {
 
 	columns := outputTableColumns(model.presentationTableWidth(118))
 	rows := model.controlTableRows(model.snapshot(), max(8, columns[1].Width-7))
-	if len(rows) <= 26 || !strings.Contains(rows[26].Name, "CH 12 · Enclosure illumination · manual override") || !strings.Contains(rows[26].Value, "/4095") {
+	if len(rows) <= 26 || !strings.Contains(rows[26].Name, "CH 12 · Enclosure illumination · manual override") || !strings.Contains(rows[26].Detail, "/4095") {
 		t.Fatalf("enclosure override row missing exact live value: %#v", rows)
 	}
 	visible := visibleControlTableLines(rows, tableBodyRows(model.contentHeight()), model.cursor)

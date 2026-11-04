@@ -346,7 +346,7 @@ func programStateSummary(state control.ProgramStateSnapshot) string {
 func (model Model) outputsPage(snapshot control.Snapshot) string {
 	tableWidth := model.presentationTableWidth(118)
 	columns := outputTableColumns(tableWidth)
-	rows := model.controlTableRows(snapshot, max(8, columns[1].Width-7))
+	rows := model.controlTableRows(snapshot, controlLevelWidth(columns[1].Width))
 	tableView := renderControlTable(tableWidth, tableBodyRows(model.contentHeight()), model.cursor, columns, rows, model.uiValue.ControlValueColors)
 	detail := "↑/↓ select · ←/→ adjust · Home/End limits · Enter activate · F2 rename"
 	if snapshot.Connected && snapshot.Hello.Capabilities&native.CapabilityAddressableLED != 0 {
@@ -436,8 +436,9 @@ func (model Model) controlTableRows(snapshot control.Snapshot, levelWidth int) [
 		target := uint16(targetBrightness)*16 + uint16(targetBrightness)/16
 		rows = append(rows, controlTableRow{
 			Group: "LIGHTING", Name: "CH 12 · Enclosure illumination · manual override",
-			Value: sliderPercentPlain(percent, levelWidth) + fmt.Sprintf(" %3d%% · applied %d/4095 · policy %d/4095", percent, value, target), Tone: controlToneLevel,
-			Kind: "pwm", Index: 11, PeripheralKey: "pwm.11",
+			Value: sliderPercentPlain(percent, levelWidth) + fmt.Sprintf(" %3d%%", percent), Tone: controlToneLevel,
+			Detail: fmt.Sprintf("applied %d/4095 · policy %d/4095", value, target),
+			Kind:   "pwm", Index: 11, PeripheralKey: "pwm.11",
 		})
 		rows = append(rows, controlTableRow{Name: "All user PWM", Value: "Set 0%", Tone: controlToneAction, Action: "pwm off", Kind: "pwm-all"})
 	}
@@ -1203,6 +1204,12 @@ func outputTableColumns(width int) []dataColumn {
 		{Title: "CONTROL", Width: name, Align: lipgloss.Left},
 		{Title: "STATUS", Width: value, Align: lipgloss.Left},
 	}
+}
+
+// Reserve two brackets and five cells for the fixed-width " 100%" suffix.
+// Rendering and pointer hit-testing must use the same bar width after resize.
+func controlLevelWidth(valueWidth int) int {
+	return max(0, valueWidth-7)
 }
 
 func settingsTableColumns(width int) []dataColumn {
