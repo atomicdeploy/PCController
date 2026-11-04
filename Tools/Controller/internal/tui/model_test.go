@@ -1930,7 +1930,7 @@ func TestControlTableDisablesStripMutationsWhileMacroWorkspaceIsBusy(t *testing.
 			continue
 		}
 		switch row.Name {
-		case "Stop stream", "Stream status":
+		case "Stop stream", "Stream status", "Pixel color order":
 			if row.Action == "" {
 				t.Fatalf("host-only %q action was disabled", row.Name)
 			}

@@ -767,7 +767,8 @@ kbd { padding: 3px 6px; border: 1px solid var(--line-strong); border-bottom-colo
 .device-unavailable__actions { display: flex; flex-wrap: wrap; gap: 8px; margin-inline-start: auto; }
 .device-side { display: grid; gap: 14px; }
 .message-compose { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
-.message-compose input, .text-field input { min-width: 0; height: 39px; padding: 0 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); outline: 0; background: var(--surface-muted); color: var(--text); font-size: 11px; transition: border-color .2s, box-shadow .2s; }
+.message-compose input, .text-field input, .text-field select { min-width: 0; height: 39px; padding: 0 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); outline: 0; background: var(--surface-muted); color: var(--text); font-size: 11px; transition: border-color .2s, box-shadow .2s; }
+.text-field select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .message-compose input:focus, .text-field input:focus { border-color: color-mix(in srgb, var(--accent) 48%, transparent); box-shadow: inset 0 0 16px var(--accent-soft); }
 .beep-row { display: flex; align-items: center; gap: 7px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
 .beep-row > div { flex: 1; display: flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: 10px; }

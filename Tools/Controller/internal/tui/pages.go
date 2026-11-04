@@ -458,6 +458,7 @@ func (model Model) controlTableRows(snapshot control.Snapshot, levelWidth int) [
 		}
 		rows = append(rows,
 			mutation(controlTableRow{Group: "WS2811 STRIP", Name: "Pixel count", Value: fmt.Sprintf("%d · ←/→ adjust · Enter configure", pixels), Tone: controlToneLevel, Action: fmt.Sprintf("strip config %d", pixels), Adjust: "strip-count", Kind: "strip"}),
+			controlTableRow{Name: "Pixel color order", Value: appconfig.EffectiveStripOrder(model.uiValue.StripColorOrder) + " · ←/→ change", Tone: controlToneLevel, Action: "strip order next", Adjust: "strip-order", Kind: "strip"},
 			mutation(controlTableRow{Name: "Rainbow", Value: fmt.Sprintf("%d px @ %d FPS · Enter start", pixels, fps), Tone: controlToneAction, Action: fmt.Sprintf("strip rainbow %d %d", pixels, fps), Adjust: "strip-fps", Kind: "strip"}),
 			mutation(controlTableRow{Name: "Fill color", Value: fmt.Sprintf("#%02X%02X%02X · ←/→ color · Enter apply", color[0], color[1], color[2]), Tone: controlToneLevel, Action: fmt.Sprintf("strip fill %d %d %d", color[0], color[1], color[2]), Adjust: "strip-color", Kind: "strip"}),
 		)

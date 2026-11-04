@@ -21,6 +21,28 @@ tests live, and which per-user files must never enter Git.
 
 ## 1. Prerequisites
 
+### Pixel color order
+
+Use **Control → WS2811 strip → Pixel color order** in the TUI (Left/Right,
+or Enter for the next order), or the **Per-pixel light & effect engine** selector
+in the WebUI workbench. Both use the same host setting and common-first catalog:
+GRB, RGB, BRG, BGR, RBG, GBR. The CLI equivalents are `strip order` to inspect
+and `strip order GRB` to save. Changes apply to subsequent pixel/fill commands
+and complete host-streamed frames; saving alone does not actuate any output.
+
+`ui.strip_color_order` persists the desired LED-wire order in the active host
+configuration. BRG remains the default, preserving existing production colors.
+Conversion is performed once at the primary host's native output boundary;
+effect RGB data stays logical RGB. This needs no new firmware or EEPROM write.
+It does not alter the separate status RGB LED or firmware-autonomous output.
+
+For custom firmware, `ui.strip_firmware_order` must match its compiled encoder:
+BRG for the production WS2811 build, GRB for `PCCONTROLLER_USE_WS2812B=1`.
+This advanced baseline is not the desired LED order: the host compensates for
+it when preparing protocol RGB triples. It cannot be auto-detected from the
+current firmware HELLO. A different controller host must have its own matching
+configuration; this is a host preference, not a board EEPROM setting.
+
 ### Host configuration and startup introduction
 
 `controller config path` prints the active configuration file. Selection order

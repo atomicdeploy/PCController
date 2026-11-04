@@ -111,6 +111,8 @@ type UI struct {
 	PWMChannels            map[string]PWMChannelConfig `json:"pwm_channels,omitempty"`
 	SetupComplete          bool                        `json:"setup_complete"`
 	IntroMode              string                      `json:"intro_mode"`
+	StripColorOrder        string                      `json:"strip_color_order"`
+	StripFirmwareOrder     string                      `json:"strip_firmware_order"`
 	WelcomeMelody          string                      `json:"welcome_melody"`
 	StatusIntervalMS       int                         `json:"status_interval_ms"`
 	MeasurementFreshnessMS int                         `json:"measurement_freshness_ms"`
@@ -458,6 +460,8 @@ func Defaults() Config {
 			PWMChannels:            DefaultPWMChannels(),
 			WelcomeMelody:          "notify",
 			IntroMode:              "auto",
+			StripColorOrder:        "BRG",
+			StripFirmwareOrder:     "BRG",
 			StatusIntervalMS:       500,
 			MeasurementFreshnessMS: DefaultMeasurementFreshnessMS,
 			IdleStatusIntervalMS:   0,
@@ -822,6 +826,12 @@ func (value Config) Validate() error {
 		return err
 	}
 	if err := ValidateIntroMode(value.UI.IntroMode); err != nil {
+		return err
+	}
+	if err := ValidateStripOrder(value.UI.StripColorOrder); err != nil {
+		return err
+	}
+	if err := ValidateStripOrder(value.UI.StripFirmwareOrder); err != nil {
 		return err
 	}
 	if melody := strings.TrimSpace(value.UI.WelcomeMelody); melody == "" || len(melody) > 64 {

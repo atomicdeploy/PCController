@@ -221,6 +221,12 @@ type connectionEventSignature struct {
 }
 
 type Runtime struct {
+	stripConfigMu        sync.RWMutex
+	stripConfig          func() appconfig.UI
+	stripFrameConfig     appconfig.UI
+	stripFrameActive     bool
+	stripFrameGeneration uint64
+
 	pwmActionOnce   sync.Once
 	pwmActionGate   chan struct{}
 	pwmCancelMu     sync.Mutex
@@ -2004,7 +2010,11 @@ func (runtime *Runtime) requestAtGenerationPriority(
 			ctx = link.WithRequestWriteGuard(ctx, guard)
 		}
 	}
-	frame, err := session.RequestWithPriority(ctx, priority, opcode, payload, expected...)
+	wirePayload, err := runtime.stripWirePayload(ctx, opcode, payload)
+	if err != nil {
+		return native.Frame{}, err
+	}
+	frame, err := session.RequestWithPriority(ctx, priority, opcode, wirePayload, expected...)
 	if errors.Is(err, link.ErrTimelineReserved) {
 		return native.Frame{}, &ResourceBusyError{Resource: "serial_channel", Owner: "media_timeline",
 			Message: "serial channel reserved for prepared playback; pause before issuing live commands"}

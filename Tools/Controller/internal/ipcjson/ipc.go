@@ -335,6 +335,8 @@ type browserUISettings struct {
 	Tagline                string                                `json:"tagline"`
 	SetupComplete          bool                                  `json:"setup_complete"`
 	IntroMode              string                                `json:"intro_mode"`
+	StripColorOrder        string                                `json:"strip_color_order"`
+	StripFirmwareOrder     string                                `json:"strip_firmware_order"`
 	ConfigFile             string                                `json:"config_file,omitempty"`
 	ConfigOpenSupported    bool                                  `json:"config_open_supported"`
 	WelcomeMelody          string                                `json:"welcome_melody"`
@@ -2122,6 +2124,8 @@ func (service *Service) browserUISettings() browserUISettings {
 		Tagline:                ui.Tagline,
 		SetupComplete:          ui.SetupComplete,
 		IntroMode:              service.persistentHostConfig().UI.IntroMode,
+		StripColorOrder:        appconfig.EffectiveStripOrder(ui.StripColorOrder),
+		StripFirmwareOrder:     appconfig.EffectiveStripOrder(ui.StripFirmwareOrder),
 		ConfigFile:             service.ConfigFile,
 		ConfigOpenSupported:    service.OpenConfig != nil && hostui.ConfigurationDesktopAvailable(),
 		WelcomeMelody:          ui.WelcomeMelody,
@@ -2695,6 +2699,17 @@ func commandCapability(command string) string {
 		return capabilityBoard
 	}
 	switch words[0] {
+	case "strip":
+		if len(words) >= 2 && words[1] == "order" {
+			if len(words) == 2 {
+				return capabilityRead
+			}
+			return capabilityHostConfig
+		}
+		if len(words) == 2 && words[1] == "status" {
+			return capabilityRead
+		}
+		return capabilityBoard
 	case "help", "?", "ports", "hello", "status", "st", "temp", "temperature":
 		return capabilityRead
 	case "audio":

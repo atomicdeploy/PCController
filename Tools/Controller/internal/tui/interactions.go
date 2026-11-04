@@ -803,6 +803,12 @@ func (model Model) adjustSelection(delta int) (Model, tea.Cmd, bool) {
 	case PageOutputs:
 		if row, ok := model.selectedOutputRow(); ok && row.Adjust != "" {
 			switch row.Adjust {
+			case "strip-order":
+				direction := "next"
+				if delta < 0 {
+					direction = "previous"
+				}
+				return model.dispatchLine("strip order " + direction)
 			case "strip-count":
 				pixels, _ := model.stripConfiguration()
 				model.stripPixels = wrapInt(pixels-1, delta, native.StripMaximumPixels) + 1

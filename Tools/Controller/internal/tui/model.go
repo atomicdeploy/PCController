@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -828,6 +829,9 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if strings.HasPrefix(event.Kind, "macro") && model.remote != nil && model.remote.Snapshot != nil && !model.remoteSnapshotPending {
 			model.remoteSnapshotPending = true
 			commands = append(commands, refreshRemoteSnapshot(model.remote.Snapshot, model.remoteStatusSequence, model.remoteLEDSequence))
+		}
+		if event.Kind == "strip-order" {
+			model.consumeStructuredResult(commandResultMsg{line: "strip order", output: event.Text})
 		}
 		if event.Kind == "client.navigation.session.reset" {
 			model.navigationCursor.Reset()
@@ -2575,6 +2579,14 @@ func (model *Model) updateInputPlaceholder() {
 }
 
 func (model *Model) consumeStructuredResult(message commandResultMsg) {
+	if message.err == nil && strings.HasPrefix(message.line, "strip order") {
+		var value struct {
+			Order string `json:"color_order"`
+		}
+		if json.Unmarshal([]byte(message.output), &value) == nil && value.Order != "" && appconfig.ValidateStripOrder(value.Order) == nil {
+			model.uiValue.StripColorOrder = value.Order
+		}
+	}
 	if message.err != nil || !strings.HasPrefix(message.output, "PWM available=") {
 		return
 	}

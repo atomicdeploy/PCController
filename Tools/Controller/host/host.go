@@ -302,6 +302,13 @@ func (host *Host) start(parent context.Context) error {
 		controllerOptions = &value
 	}
 	client := controller.New(*controllerOptions)
+	client.ConfigureStripColorOrder(store.StripOrder, func(order string) error {
+		_, err := store.Update(func(config *appconfig.Config) error {
+			config.UI.StripColorOrder = order
+			return nil
+		})
+		return err
+	})
 	if err := configureHistory(client, runtimeConfig, store.Path()); err != nil {
 		_ = client.Shutdown()
 		host.releaseProcessOwner()

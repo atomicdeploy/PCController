@@ -296,6 +296,10 @@ func (outputs *OutputScheduler) sendConfiguredStripFrame(ctx context.Context, rg
 }
 
 func (outputs *OutputScheduler) sendStripFrameLocked(ctx context.Context, rgb []byte) error {
+	if runtime, ok := outputs.target.(*Runtime); ok {
+		// A file reload or another client cannot mix color orders within a frame.
+		ctx = context.WithValue(ctx, stripOrderContextKey{}, runtime.stripOutputConfig())
+	}
 	frames, err := native.StripFramePayloads(rgb)
 	if err != nil {
 		return err

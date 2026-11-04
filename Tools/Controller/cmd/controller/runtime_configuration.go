@@ -297,6 +297,7 @@ func commandOptions(store *appconfig.Store, fallbackProject string) control.Comm
 		AvrdudeBackend:        config.Programming.AvrdudeBackend, AvrdudeAdapter: config.Programming.AvrdudeAdapter,
 		Programmer: configuredProgrammer(config),
 		HostConfig: store.Current,
+		StripOrder: store.StripOrder,
 		BuzzerRuntime: func(settings native.Settings, haveBoard bool) appconfig.BuzzerRuntimeStatus {
 			state := store.BuzzerRuntimeState()
 			var backend, executable, backendError string
