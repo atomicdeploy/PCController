@@ -50,11 +50,11 @@ var (
 )
 
 func main() {
-	prepareStartupPresentation(os.Args[1:], os.Stdout)
 	if _, err := envfile.LoadProcess(); err != nil {
 		fmt.Fprintln(os.Stderr, "environment:", err)
 		os.Exit(1)
 	}
+	prepareStartupPresentation(os.Args[1:], os.Stdout)
 	// A console can be created by conhost before Windows consults the named
 	// executable icon resource. Explicitly apply the packaged product icon so
 	// direct launches and inherited build/terminal consoles do not retain the
@@ -120,7 +120,9 @@ func main() {
 	// A replacement must survive normal config/IPC/device startup long enough
 	// to prove it is not an immediate crash loop before the helper commits it.
 	artifacts.ScheduleSelfUpdateHealthAcknowledgement(10 * time.Second)
-	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
+	err := run(os.Args[1:], os.Stdout, os.Stderr)
+	finishStartupPresentation(os.Stdout)
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
@@ -143,7 +145,7 @@ func run(args []string, stdout, stderr io.Writer) (resultErr error) {
 		if openErr != nil {
 			return openErr
 		}
-		if overrideErr := store.SetPresentationOverrides(presentation.AppName, presentation.Tagline); overrideErr != nil {
+		if overrideErr := store.SetPresentationOverrides(presentation.AppName, presentation.Tagline, presentation.IntroMode); overrideErr != nil {
 			return overrideErr
 		}
 		if overrideErr := applyMeasurementTimingEnvironment(store); overrideErr != nil {
@@ -252,7 +254,7 @@ func run(args []string, stdout, stderr io.Writer) (resultErr error) {
 	if err != nil {
 		return err
 	}
-	if err := store.SetPresentationOverrides(presentation.AppName, presentation.Tagline); err != nil {
+	if err := store.SetPresentationOverrides(presentation.AppName, presentation.Tagline, presentation.IntroMode); err != nil {
 		return err
 	}
 	if err := applyMeasurementTimingEnvironment(store); err != nil {

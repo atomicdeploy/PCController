@@ -13,7 +13,7 @@ import (
 // StartupFrame is a pure, immediate presentation: no configuration, transport,
 // timers or device work. It shares the full TUI palette without changing the
 // global renderer's colour profile or emitting a fictitious progress value.
-func StartupFrame(title, phase string, width int) string {
+func StartupFrame(title, phase string, width int, details ...string) string {
 	if width < 8 {
 		return ""
 	}
@@ -39,8 +39,13 @@ func StartupFrame(title, phase string, width int) string {
 			accent.Render("─┤  ") + bright.Render("PC") + accent.Render("   ├─"), accent.Render(" ╰─┬─┬─┬─╯ "), accent.Render("   │ │ │   ")}, "\n")
 		captionWidth := contentWidth - 14
 		caption := "\n" + bright.Render(ansi.Truncate(title, captionWidth, "…")) + "\n" +
-			accent.Render("TERMINAL") + "\n\n" + muted.Render(ansi.Truncate(phase, captionWidth, "…"))
-		content = lipgloss.JoinHorizontal(lipgloss.Top, mark, "  ", caption)
+			accent.Render("TERMINAL")
+		content = lipgloss.JoinHorizontal(lipgloss.Top, mark, "  ", caption) + "\n" + muted.Width(contentWidth).Render(phase)
+	}
+	for _, detail := range details {
+		if detail = clean(detail); detail != "" {
+			content += "\n" + muted.Width(contentWidth).Render(detail)
+		}
 	}
 	card := renderer.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorPanel).
 		Padding(1).Width(contentWidth).Render(content)

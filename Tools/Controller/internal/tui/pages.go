@@ -959,49 +959,15 @@ func (model Model) consolePage() string {
 }
 
 func (model Model) welcomeView() string {
-	frames := []string{"◇", "◈", "◆", "◈"}
-	icon := frames[(model.welcomeFrame/2)%len(frames)]
-	progress := 2
-	phase := strings.ToLower(model.welcomePhase)
-	switch {
-	case strings.Contains(phase, "hello"):
-		progress = 5
-	case strings.Contains(phase, "ready/status"):
-		progress = 8
-	case strings.Contains(phase, "board welcome"), strings.Contains(phase, "buzzer"):
-		progress = 12
-	case strings.Contains(phase, "host welcome"), strings.Contains(phase, "scheduler"):
-		progress = 16
-	case strings.Contains(phase, "complete"), strings.Contains(phase, "ready"):
-		progress = 20
-	}
-	bar := strings.Repeat("━", progress) + strings.Repeat("─", 20-progress)
 	status := model.welcomePhase
 	if status == "" {
 		status = "Waiting for controller"
 	}
 	action := ""
 	if model.welcomeCanContinue {
-		action = buttonStyle.Render("Enter / click to continue with the warning")
+		action = "Enter / click to continue with the warning"
 	}
-	errorLine := ""
-	if model.welcomeError != "" {
-		errorLine = errorStyle.Render(model.welcomeError)
-	}
-	body := lipgloss.JoinVertical(
-		lipgloss.Center,
-		titleStyle.Copy().Bold(true).Render(icon+"  "+model.prefs.AppTitle+"  "+icon),
-		"",
-		valueStyle.Render(model.prefs.Tagline),
-		labelStyle.Render("Native opcodes · Urboot/Urclock · RF · motion · PWM · telemetry"),
-		"",
-		lipgloss.NewStyle().Foreground(colorAccent2).Render(bar),
-		valueStyle.Render(status),
-		errorLine,
-		"",
-		action,
-	)
-	return lipgloss.Place(model.width, model.height, lipgloss.Center, lipgloss.Center, cardStyle.Copy().Padding(2, 5).Render(body))
+	return StartupFrame(model.prefs.AppTitle, status, model.width, model.prefs.Tagline, model.welcomeError, action)
 }
 
 func (model Model) contentHeight() int {

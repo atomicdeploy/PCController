@@ -35,6 +35,7 @@ type browserUIConfigMutation struct {
 	AppTitle               *string                  `json:"app_title,omitempty"`
 	Tagline                *string                  `json:"tagline,omitempty"`
 	SetupComplete          *bool                    `json:"setup_complete,omitempty"`
+	IntroMode              *string                  `json:"intro_mode,omitempty"`
 	SegmentScroll          *appconfig.SegmentScroll `json:"segment_scroll,omitempty"`
 	PeripheralNames        *map[string]string       `json:"peripheral_names,omitempty"`
 	Appearance             *browserAppearancePatch  `json:"appearance,omitempty"`
@@ -89,7 +90,7 @@ func (patch browserAppearancePatch) apply(value appconfig.Appearance) appconfig.
 }
 
 func (params browserUIConfigMutation) empty() bool {
-	return params.AppTitle == nil && params.Tagline == nil && params.SetupComplete == nil &&
+	return params.AppTitle == nil && params.Tagline == nil && params.SetupComplete == nil && params.IntroMode == nil &&
 		params.SegmentScroll == nil && params.PeripheralNames == nil &&
 		params.Appearance == nil && params.StatusIntervalMS == nil &&
 		params.MeasurementFreshnessMS == nil
@@ -104,6 +105,9 @@ func (params browserUIConfigMutation) apply(value *appconfig.Config) error {
 	}
 	if params.SetupComplete != nil {
 		value.UI.SetupComplete = *params.SetupComplete
+	}
+	if params.IntroMode != nil {
+		value.UI.IntroMode = *params.IntroMode
 	}
 	if params.SegmentScroll != nil {
 		value.UI.SegmentScroll = *params.SegmentScroll
@@ -141,6 +145,7 @@ func browserUIConfigDiff(before, after appconfig.Config) ([]string, map[string]a
 	add("app_title", before.UI.AppTitle, after.UI.AppTitle)
 	add("tagline", before.UI.Tagline, after.UI.Tagline)
 	add("setup_complete", before.UI.SetupComplete, after.UI.SetupComplete)
+	add("intro_mode", before.UI.IntroMode, after.UI.IntroMode)
 	add("segment_scroll", before.UI.SegmentScroll, after.UI.SegmentScroll)
 	add("peripheral_names", before.UI.PeripheralNames, after.UI.PeripheralNames)
 	add("status_interval_ms", before.UI.StatusIntervalMS, after.UI.StatusIntervalMS)
@@ -181,6 +186,7 @@ func (service *Service) updateBrowserUISettings(raw json.RawMessage) (any, error
 	}
 
 	initial := service.hostConfig()
+	initial.UI.IntroMode = service.persistentHostConfig().UI.IntroMode
 	if params.Appearance != nil && params.IfMatch != "" && params.IfMatch != appearanceETag(initial.UI.Appearance) {
 		return nil, &RPCError{Code: -32000, Message: "appearance changed on the host; refresh before saving"}
 	}

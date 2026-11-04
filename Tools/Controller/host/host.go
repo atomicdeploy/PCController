@@ -342,6 +342,8 @@ func (host *Host) start(parent context.Context) error {
 		AppInstances:          instances,
 		Shutdown:              cancel,
 		HostConfig:            store.CurrentRuntime,
+		ConfigFile:            store.Path(),
+		OpenConfig:            func(target string) error { return hostui.OpenConfiguration(store.Path(), target) },
 		PersistentHostConfig:  store.Persistent,
 		SubscribeHostConfig:   store.SubscribeRuntime,
 		UpdateHostConfig: func(change func(*appconfig.Config) error) error {

@@ -9,7 +9,7 @@ func Command(args []string) string {
 	for index := 0; index < len(args); index++ {
 		value := args[index]
 		global := false
-		for _, flag := range []string{"--config", "--app-name", "--tagline", "--app-tagline"} {
+		for _, flag := range []string{"--config", "--app-name", "--tagline", "--app-tagline", "--intro"} {
 			if value == flag {
 				if index+1 >= len(args) {
 					return "invalid"
@@ -50,7 +50,7 @@ func BackgroundWeb(args []string) bool {
 	var noTUI bool
 	for index := 0; index < len(args); index++ {
 		flag := args[index]
-		if flag == "--config" || flag == "--app-name" || flag == "--tagline" || flag == "--app-tagline" {
+		if flag == "--config" || flag == "--app-name" || flag == "--tagline" || flag == "--app-tagline" || flag == "--intro" {
 			index++
 			continue
 		}

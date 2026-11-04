@@ -3,6 +3,7 @@ import { Gauge, Languages, PanelTop, Settings2, Volume2, X } from 'lucide-react'
 import { Button, RangeField, Segmented, Toggle } from './components'
 import type { Appearance, Locale } from './types'
 import type { QuickHeaderControlID, QuickHeaderPreferences } from './quick-header-preferences'
+import { StartupPreferences } from './startup-preferences'
 
 type PreferenceTab = 'appearance' | 'header'
 
@@ -14,6 +15,7 @@ export function AppPreferencesDialog({
   onAppearance,
   onQuickHeader,
   onClose,
+  hostSettingsEnabled = false,
 }: {
   open: boolean
   locale: Locale
@@ -22,6 +24,7 @@ export function AppPreferencesDialog({
   onAppearance: (value: Appearance) => void
   onQuickHeader: (value: QuickHeaderPreferences) => void
   onClose: () => void
+  hostSettingsEnabled?: boolean
 }) {
   const [tab, setTab] = useState<PreferenceTab>('appearance')
   const dialog = useRef<HTMLElement>(null)
@@ -129,6 +132,7 @@ export function AppPreferencesDialog({
         role="tabpanel"
         aria-labelledby="app-preferences-tab-appearance"
       >
+        {hostSettingsEnabled && <StartupPreferences locale={locale} />}
         <div className="setting-group"><label>{copy('Theme', 'پوسته')}</label><Segmented value={appearance.theme} label={copy('Theme', 'پوسته')} options={[{ value: 'system', label: copy('System', 'سیستم'), icon: PanelTop }, { value: 'dark', label: copy('Dark', 'تیره') }, { value: 'light', label: copy('Light', 'روشن') }]} onChange={(theme) => onAppearance({ ...appearance, theme })} /></div>
         <label className="app-preferences-select"><span><Languages size={16} />{copy('Language', 'زبان')}</span><select value={appearance.locale} onChange={(event) => onAppearance({ ...appearance, locale: event.target.value as Locale })}><option value="en">English</option><option value="fa">فارسی</option></select></label>
         <div className="setting-group"><label>{copy('Direction', 'جهت')}</label><Segmented value={appearance.direction} label={copy('Direction', 'جهت')} options={[{ value: 'auto', label: copy('Auto', 'خودکار') }, { value: 'ltr', label: copy('Left to right', 'چپ به راست') }, { value: 'rtl', label: copy('Right to left', 'راست به چپ') }]} onChange={(direction) => onAppearance({ ...appearance, direction })} /></div>

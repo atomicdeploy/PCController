@@ -21,6 +21,48 @@ tests live, and which per-user files must never enter Git.
 
 ## 1. Prerequisites
 
+### Host configuration and startup introduction
+
+`controller config path` prints the active configuration file. Selection order
+is `--config FILE`, then `PCCONTROLLER_CONFIG`, then the platform default:
+Windows `%APPDATA%\PCController\config.json`, Linux
+`$XDG_CONFIG_HOME/PCController/config.json` (normally `~/.config/PCController/config.json`),
+or macOS `~/Library/Application Support/PCController/config.json`. A Windows
+service uses the explicit file recorded by its installation, which can differ
+from the signed-in user's default. Host settings are separate from board EEPROM.
+
+The first-run marker is `ui.setup_complete`. Successful setup, or explicit
+continuation after its bounded readiness warning, stores `true`. `ui.intro_mode`
+controls the unified startup presentation: `auto` (default) shows it until that
+marker is set; `always` shows it on each launch; `skip` suppresses it. The early
+loading frame and interactive readiness phases use the same renderer and screen.
+
+```console
+controller config intro
+controller config intro reset
+controller config intro auto
+controller config intro always
+controller config intro skip
+controller --intro always tui
+controller --intro skip web
+controller config open file
+controller config open config
+```
+
+`intro reset` clears only the first-run marker, preserving the selected mode and
+all other settings. Select `auto` as well if the mode was `skip`. The global
+`--intro auto|always|skip` flag applies only to the current process and does not
+overwrite the saved preference. `config open file` opens the active file in a
+text editor; `config open config` opens its containing folder. `config path data`
+and `config open data` locate the separate host data directory.
+
+The Web UI's **Application preferences → Appearance → Startup introduction**
+has the same mode selector, contextual reset action, actual configuration path,
+and **Open configuration on host / Open folder on host** actions. These open on
+the controller's desktop, not the browser device; headless hosts may have no
+desktop session. Changing these preferences applies to the next launch. Existing
+setup readiness and hardware authorization checks remain unchanged.
+
 For a complete local validation environment, install:
 
 - Go and Node.js versions accepted by the checked-in module/package metadata;

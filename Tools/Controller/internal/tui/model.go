@@ -381,7 +381,7 @@ func NewApplicationWithOptions(
 		}
 	}
 	if !options.DisableWelcome {
-		options.ForceWelcome = options.ForceWelcome || !value.SetupComplete
+		options.ForceWelcome = options.ForceWelcome || value.ShouldShowIntro()
 	}
 	if options.MarkWelcomed == nil {
 		save := options.SaveUI
