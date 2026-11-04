@@ -4,6 +4,7 @@ The user design rejection remains authoritative. This ledger separates implement
 
 | Requirement | UI status and proof | Remaining acceptance |
 | --- | --- | --- |
+| Strip FPS ceiling | Native validators, advertised limits, Web/TUI and mobile editors admit 1..120 FPS, including 60. Existing chosen rates are unchanged. Boundary and slider tests cover 60/120 and invalid values. | Actual device/transport frame delivery |
 | One professional activity workspace | Navigation appears only after a successful peer session; no strip/rail or idle activity subtitle while disconnected/connecting. Hardware activities require an attached controller. Local drafts/devices remain accessible offline from the workspace menu. Individual colored icons/selection surfaces replace the background slab, with Pastel preserved. Stale reads retain the connected workspace. | Human phone/tablet composition acceptance |
 | Contextual connection action and pill | One lifecycle icon action per peer. Narrow compact views use full-width peer rows with end-aligned actual state pills; uncompact full cards remain. | Live reconnection and human acceptance |
 | Channel indicators, menus and sophisticated controls | Current observed relay/PWM/motion pills, guarded indicator toggles, equal-width semantic actions, three-dot management, inline rename/handle reorder and native presentation revisions retained. Existing output checks pass. | Actual hardware feedback and mixed-client acceptance |

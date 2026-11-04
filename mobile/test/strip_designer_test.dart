@@ -2,8 +2,20 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pccontroller_mobile/unified/strip_designer.dart';
 import 'package:pccontroller_mobile/unified/pixel_diagnostic.dart';
+import 'package:pccontroller_mobile/unified/effect_editor.dart';
 
 void main(){
+  test('strip definitions accept 60/120 FPS and reject out-of-range values', () {
+    for (final fps in [60, 120, 0, 121]) {
+      final error = effectDefinitionError({'kind':'strip-stream','program':stripPreset(0),'default_pixels':3,'default_fps':fps,'duration_ms':1000});
+      expect(error == null, fps >= 1 && fps <= 120);
+    }
+  });
+  testWidgets('FPS slider exposes the 120 ceiling without changing its value', (tester) async {
+    await tester.pumpWidget(MaterialApp(home:Scaffold(body:SingleChildScrollView(child:StripDesigner(effect:{'program':stripPreset(0),'default_pixels':3,'default_fps':60},enabled:true,changed:(_){})))));
+    final slider = tester.widgetList<Slider>(find.byType(Slider)).firstWhere((slider) => slider.value == 60);
+    expect(slider.max, 120);
+  });
   test('flash preview follows host step cycle for indivisible periods', () {
     final p = stripPreset(0)..['period_ms'] = 850;
     expect(stripPreview(p, 3, 900).first, const Color.fromARGB(255, 36, 0, 0));

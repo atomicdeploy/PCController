@@ -482,7 +482,7 @@ func (model Model) stripConfiguration() (int, int) {
 	if pixels < 1 || pixels > native.StripMaximumPixels {
 		pixels = native.StripMaximumPixels
 	}
-	if fps < 1 || fps > 30 {
+	if fps < 1 || fps > appconfig.StripMaximumFPS {
 		fps = 30
 	}
 	return pixels, fps

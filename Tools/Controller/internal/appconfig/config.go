@@ -1091,8 +1091,8 @@ func (value Config) Validate() error {
 		default:
 			return fmt.Errorf("strip_effects[%d].program.primitive is unsupported", index)
 		}
-		if effect.DefaultFPS < 1 || effect.DefaultFPS > 30 {
-			return fmt.Errorf("strip_effects[%d].default_fps must be 1..30", index)
+		if effect.DefaultFPS < 1 || effect.DefaultFPS > StripMaximumFPS {
+			return fmt.Errorf("strip_effects[%d].default_fps must be 1..%d", index, StripMaximumFPS)
 		}
 		if effect.DefaultDurationMS < 100 || effect.DefaultDurationMS > 3_600_000 {
 			return fmt.Errorf("strip_effects[%d].default_duration_ms must be 100..3600000", index)

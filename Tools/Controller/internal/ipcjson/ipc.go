@@ -374,7 +374,7 @@ func advertisedStripControl(connected bool, capabilities uint32) *stripControlDe
 	}
 	return &stripControlDescriptor{
 		MinimumPixels: 1, MaximumPixels: native.StripMaximumPixels, DefaultPixels: native.StripMaximumPixels,
-		MinimumFPS: 1, MaximumFPS: 30, DefaultFPS: 20,
+		MinimumFPS: 1, MaximumFPS: appconfig.StripMaximumFPS, DefaultFPS: 20,
 		Modes: []string{"solid", "pixel", "frame", "rainbow", "effect"},
 	}
 }
