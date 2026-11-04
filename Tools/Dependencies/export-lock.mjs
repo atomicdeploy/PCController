@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Export immutable CI inputs from canonical dependency locks without network access.
+// Export CLI integrity, dependency names and recorded lock evidence without network access.
 
 import { createHash } from 'node:crypto'
 import { appendFileSync, readFileSync } from 'node:fs'
@@ -114,7 +114,7 @@ function currentOutputs(lock, product) {
     minicore_index_url: lock.firmware.package_indexes[0],
     arduino_libraries_json: JSON.stringify(
       lock.firmware.libraries.map(
-        (library) => `${library.name}@${library.version}`,
+        (library) => library.name,
       ),
     ),
     toolchain_lock_path: 'Tools/Controller/toolchain-lock.json',

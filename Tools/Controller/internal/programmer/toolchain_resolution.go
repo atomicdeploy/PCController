@@ -311,6 +311,9 @@ func (lock ToolchainLock) Validate() error {
 	if err := lock.Firmware.Validate(); err != nil {
 		return err
 	}
+	if err := lock.Firmware.validateLockedDependencies(); err != nil {
+		return err
+	}
 	if lock.Bootloader.Tag == "" || lock.Bootloader.SourceCommit == "" || lock.Go.Version == "" {
 		return errors.New("toolchain lock requires bootloader and Go identities")
 	}

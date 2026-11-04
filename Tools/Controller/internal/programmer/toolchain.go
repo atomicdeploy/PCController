@@ -47,7 +47,7 @@ type ToolchainCLI struct {
 	Assets     []ToolchainAsset `json:"assets"`
 }
 
-// ToolchainProfile is the reproducible machine bootstrap manifest. Public
+// ToolchainProfile records bootstrap dependencies and resolved versions. Public
 // commands call this a generic firmware toolchain; dependency-specific names
 // stay confined to the manifest and implementation boundary.
 type ToolchainProfile struct {
@@ -85,8 +85,8 @@ func (profile ToolchainProfile) Validate() error {
 	if strings.TrimSpace(profile.Name) == "" || strings.TrimSpace(profile.FQBN) == "" {
 		return errors.New("toolchain profile requires name and FQBN")
 	}
-	if profile.CLI.Version == "" || profile.CoreID == "" || profile.CoreVersion == "" {
-		return errors.New("toolchain profile requires CLI, core ID, and core versions")
+	if profile.CLI.Version == "" || profile.CoreID == "" {
+		return errors.New("toolchain profile requires CLI version and core ID")
 	}
 	if len(profile.PackageIndexes) == 0 || len(profile.CLI.Assets) == 0 {
 		return errors.New("toolchain profile requires package indexes and CLI assets")
@@ -105,8 +105,20 @@ func (profile ToolchainProfile) Validate() error {
 		}
 	}
 	for _, library := range profile.Libraries {
-		if strings.TrimSpace(library.Name) == "" || strings.TrimSpace(library.Version) == "" {
-			return errors.New("toolchain library entries require name and version")
+		if strings.TrimSpace(library.Name) == "" {
+			return errors.New("toolchain library entries require a name")
+		}
+	}
+	return nil
+}
+
+func (profile ToolchainProfile) validateLockedDependencies() error {
+	if strings.TrimSpace(profile.CoreVersion) == "" {
+		return errors.New("locked toolchain requires a core version")
+	}
+	for _, library := range profile.Libraries {
+		if strings.TrimSpace(library.Version) == "" {
+			return fmt.Errorf("locked toolchain requires a version for %s", library.Name)
 		}
 	}
 	return nil
@@ -114,6 +126,7 @@ func (profile ToolchainProfile) Validate() error {
 
 type ToolchainBootstrapOptions struct {
 	Profile     ToolchainProfile
+	Locked      bool
 	CLI         string
 	InstallDir  string
 	Environment []string
@@ -125,10 +138,11 @@ type ToolchainBootstrapOptions struct {
 }
 
 type ToolchainBootstrapReport struct {
-	Profile    string `json:"profile"`
-	FQBN       string `json:"fqbn"`
-	CLIPath    string `json:"cli_path"`
-	CLIVersion string `json:"cli_version"`
+	DependenciesLocked bool   `json:"dependencies_locked"`
+	Profile            string `json:"profile"`
+	FQBN               string `json:"fqbn"`
+	CLIPath            string `json:"cli_path"`
+	CLIVersion         string `json:"cli_version"`
 	// CLIInstalled means the selected executable is already available at return.
 	CLIInstalled         bool                `json:"cli_installed"`
 	CLIDownloadedThisRun bool                `json:"cli_downloaded_this_run"`
@@ -141,8 +155,9 @@ type ToolchainBootstrapReport struct {
 }
 
 // BootstrapToolchain installs a pinned CLI into the host data directory, then
-// installs the exact AVR core, compiler/programmer tools, and libraries named
-// by the profile. Every child receives the caller's complete environment.
+// installs the latest indexed core and libraries by default. Locked is an
+// explicit exact-version rollback/replay choice. Every child receives the
+// caller's complete environment.
 func BootstrapToolchain(
 	ctx context.Context,
 	options ToolchainBootstrapOptions,
@@ -157,6 +172,11 @@ func BootstrapToolchain(
 	}
 	if err := profile.Validate(); err != nil {
 		return ToolchainBootstrapReport{}, err
+	}
+	if options.Locked {
+		if err := profile.validateLockedDependencies(); err != nil {
+			return ToolchainBootstrapReport{}, err
+		}
 	}
 	environment := options.Environment
 	if environment == nil {
@@ -186,7 +206,8 @@ func BootstrapToolchain(
 	}
 	workspace := newToolchainWorkspace(installRoot)
 	report := ToolchainBootstrapReport{
-		Profile: profile.Name, FQBN: profile.FQBN, CLIVersion: profile.CLI.Version,
+		DependenciesLocked: options.Locked,
+		Profile:            profile.Name, FQBN: profile.FQBN, CLIVersion: profile.CLI.Version,
 		ConfigPath: workspace.configPath, DataDir: workspace.dataDir,
 		DownloadsDir: workspace.downloadsDir, UserDir: workspace.userDir,
 		ProxyVariables: proxyEnvironmentNames(environment),
@@ -239,7 +260,7 @@ func BootstrapToolchain(
 	if runner == nil {
 		runner = DependencyEnvironmentRunnerFunc(runArduinoEnvironment)
 	}
-	steps := profile.installSteps()
+	steps := profile.installSteps(options.Locked)
 	directEnvironment := withoutProxyEnvironment(environment)
 	for _, configured := range steps {
 		arguments := append([]string{"--config-file", workspace.configPath}, configured.args...)
@@ -403,7 +424,7 @@ func (profile ToolchainProfile) cliAsset(goos, goarch string) (ToolchainAsset, e
 	return ToolchainAsset{}, fmt.Errorf("toolchain profile has no CLI asset for %s/%s", goos, goarch)
 }
 
-func (profile ToolchainProfile) installSteps() []struct {
+func (profile ToolchainProfile) installSteps(locked bool) []struct {
 	name string
 	args []string
 } {
@@ -414,21 +435,31 @@ func (profile ToolchainProfile) installSteps() []struct {
 		}
 		return result
 	}
+	dependency := func(name, version string) string {
+		if locked {
+			return name + "@" + version
+		}
+		return name
+	}
+	selection := "latest indexed"
+	if locked {
+		selection = "locked"
+	}
 	steps := []struct {
 		name string
 		args []string
 	}{
 		{"refresh core index", withIndexes("core", "update-index")},
 		{"refresh library index", []string{"lib", "update-index"}},
-		{"install pinned core " + profile.CoreID + "@" + profile.CoreVersion,
-			withIndexes("core", "install", profile.CoreID+"@"+profile.CoreVersion)},
+		{"install " + selection + " core " + dependency(profile.CoreID, profile.CoreVersion),
+			withIndexes("core", "install", dependency(profile.CoreID, profile.CoreVersion))},
 	}
 	for _, library := range profile.Libraries {
 		steps = append(steps, struct {
 			name string
 			args []string
-		}{"install pinned library " + library.Name + "@" + library.Version,
-			[]string{"lib", "install", library.Name + "@" + library.Version}})
+		}{"install " + selection + " library " + dependency(library.Name, library.Version),
+			[]string{"lib", "install", dependency(library.Name, library.Version)}})
 	}
 	return append(steps,
 		struct {

@@ -8,12 +8,14 @@ import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
 import { parseIntelHex } from './firmware.mjs'
 import { loadProjectEnv } from '../Build/env.mjs'
+import { satisfiesMinimumVersion } from './dependency-version.mjs'
 
 loadProjectEnv()
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const targets = JSON.parse(readFileSync(join(root, 'Tools/Firmware/targets.json'), 'utf8'))
 const toolchain = JSON.parse(readFileSync(join(root, 'Tools/Controller/toolchain-lock.json'), 'utf8')).firmware
+const dependencyPolicy = JSON.parse(readFileSync(join(root, 'Tools/Controller/toolchain-profile.json'), 'utf8'))
 const names = { constrained: 0, 'expanded-panel': 1, 'expanded-autonomous': 2 }
 const [action = 'help', name, profileName = 'constrained'] = process.argv.slice(2)
 function run(args, capture = false) {
@@ -69,8 +71,8 @@ try {
     const cli = run(['version', '--format', 'json'], true)
     if (cli.VersionString !== toolchain.cli.version) throw new Error(`configured Arduino CLI drift: expected ${toolchain.cli.version}, found ${cli.VersionString}`)
     const radio = run(['lib', 'list', '--format', 'json'], true).installed_libraries.map(entry => entry.library).filter(library => library.name === 'rc-switch')
-    const radioVersion = toolchain.libraries.find(library => library.name === 'rc-switch').version
-    if (radio.length !== 1 || radio[0].version !== radioVersion) throw new Error(`rc-switch must resolve uniquely to configured version ${radioVersion}; reconcile the existing library cache first`)
+    const radioMinimum = dependencyPolicy.libraries.find(library => library.name === 'rc-switch').constraint.minimum_version
+    if (radio.length !== 1 || !satisfiesMinimumVersion(radio[0].version, radioMinimum)) throw new Error(`rc-switch must resolve uniquely to a stable version >= ${radioMinimum}; reconcile the existing library cache first`)
     const installed = run(['core', 'list', '--format', 'json'], true).platforms.find(core => core.id === target.core)
     if (!installed?.installed_version) throw new Error(`Install ${target.core} >= ${target.minimumCoreVersion} in the existing CLI cache using ${target.index}; no duplicate toolchain is provisioned automatically`)
     const parts = version => version.split('.').map(Number)
