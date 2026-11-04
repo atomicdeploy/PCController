@@ -8,6 +8,7 @@
 #include "LocalLib/ShiftRegisters.h"
 #include "LocalLib/TonePlayer.h"
 #include "Project/FrontPanelModel.h"
+#include "Project/MotionKeyDisplay.h"
 #include "Project/MotionDoorPolicy.h"
 #include "Project/RelayController.h"
 #include "Project/SettingsStore.h"
@@ -27,6 +28,21 @@ namespace {
 void require(bool condition, const std::string &message) {
   if (!condition) {
     throw std::runtime_error(message);
+  }
+}
+
+void testMotionKeyLabels() {
+  const char *expected[] = {"    ", "    ", "   1", "   2",
+                            "    ", "    ", "   1", "   2",
+                            "   3", "   3", "1  3", "2  3",
+                            "   4", "   4", "1  4", "2  4"};
+  for (unsigned mask = 0; mask < 256; ++mask) {
+    char text[4];
+    const bool active = formatMotionKeyLabels(static_cast<uint8_t>(mask), text);
+    require(active == ((mask & 0x0A) != 0),
+            "KEY label must require an enabled motion pair");
+    require(std::string(text, 4) == expected[mask & 0x0F],
+            "KEY label leaked relay mask instead of K1-K4 ordinal");
   }
 }
 
@@ -617,6 +633,7 @@ void testBuzzerTimerAndQueue() {
 int main() {
   try {
     testKeyGestures();
+    testMotionKeyLabels();
     testRelayInterlocks();
     testMotionDoorPolicyMatrixAndEntryPaths();
     testTransitionsAndRollover();

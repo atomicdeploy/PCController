@@ -36,6 +36,7 @@
 #include "Project/EepromMenuLabels.h"
 #endif
 #include "Project/FrontPanelModel.h"
+#include "Project/MotionKeyDisplay.h"
 #include "Project/IlluminationController.h"
 #include "Project/Ina219Sensor.h"
 #include "Project/MacroQueue.h"
