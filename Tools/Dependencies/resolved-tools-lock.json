@@ -237,16 +237,16 @@
       },
       {
         "name": "github/codeql-action/analyze",
-        "revision": "6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee",
-        "version": "v4.39.0",
+        "revision": "9b3254085494b55a0f7c4c2b3d2d52cc712ce370",
+        "version": "v4.39.1",
         "workflows": [
           "codeql.yml"
         ]
       },
       {
         "name": "github/codeql-action/init",
-        "revision": "6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee",
-        "version": "v4.39.0",
+        "revision": "9b3254085494b55a0f7c4c2b3d2d52cc712ce370",
+        "version": "v4.39.1",
         "workflows": [
           "codeql.yml"
         ]

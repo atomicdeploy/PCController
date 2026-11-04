@@ -69,6 +69,7 @@ jobs:
           node --check Tools/Audit/sync-github-requirements.mjs
           node --test Tools/Audit/roadmap-followup.test.mjs
           node --test Tools/Dependencies/export-lock.test.mjs
+          node --test Tools/Dependencies/update.test.mjs
           node --test .github/scripts/release-asset-collisions.test.mjs
           node --test .github/scripts/release-showcase.test.mjs
           node --test .github/scripts/security-config-check.test.mjs
