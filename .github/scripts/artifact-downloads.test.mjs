@@ -43,3 +43,10 @@ test("distribution workflows upload exactly one raw package and one raw checksum
     assert.match(source, /node \.github\/scripts\/unpack-firmware-artifact\.mjs/u);
   }
 });
+
+test("raw package consumers preserve Windows ZIPs instead of extracting their contents", () => {
+  for (const workflow of ["host", "virtual-board", "build", "release"]) {
+    const source = readFileSync(new URL(`../workflows/${workflow}.yml`, import.meta.url), "utf8");
+    assert.match(source, /pattern: PCController-[^\r\n]*\r?\n\s+skip-decompress: true/u);
+  }
+});

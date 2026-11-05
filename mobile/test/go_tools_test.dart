@@ -49,7 +49,7 @@ PeerSession toolsSession(List<Json> calls) =>
         ],
         'strip': {
           'maximum_pixels': 100,
-          'maximum_fps': 30,
+          'maximum_fps': 120,
           'default_pixels': 100,
           'default_fps': 20,
           'modes': ['solid', 'pixel', 'frame', 'rainbow', 'effect'],

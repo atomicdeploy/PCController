@@ -10,6 +10,7 @@ import 'go_commands.dart';
 import 'preferences.dart';
 import 'transport.dart';
 import 'pixel_diagnostic.dart';
+import 'strip_designer.dart' show stripMaximumFPS;
 
 class GoToolsPage extends StatefulWidget {
   const GoToolsPage({
@@ -499,7 +500,7 @@ class _GoToolsPageState extends State<GoToolsPage> {
         maxPixels <= 100 &&
         maxFps is int &&
         maxFps >= 1 &&
-        maxFps <= 30;
+        maxFps <= stripMaximumFPS;
     final hasRgb = widget.session.state['have_status_led'] == true;
     final stripEffects = objects(widget.session.peripherals['strip_effects']);
     final valid =

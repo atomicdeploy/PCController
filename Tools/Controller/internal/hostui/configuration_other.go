@@ -1,12 +1,11 @@
-//go:build !windows
+//go:build !windows && !darwin
 
 package hostui
 
 import (
 	"os"
-	"runtime"
 )
 
 func ConfigurationDesktopAvailable() bool {
-	return runtime.GOOS == "darwin" || os.Getenv("DISPLAY") != "" || os.Getenv("WAYLAND_DISPLAY") != ""
+	return os.Getenv("DISPLAY") != "" || os.Getenv("WAYLAND_DISPLAY") != ""
 }

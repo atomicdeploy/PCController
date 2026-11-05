@@ -2,11 +2,32 @@ package main
 
 import (
 	"bytes"
+	"os"
 	"path/filepath"
 	"testing"
 
 	"pccontroller.local/controller/internal/appconfig"
 )
+
+func TestConfigOpenDoesNotParseExistingBrokenFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	broken := []byte(`{"ui":`)
+	if err := os.WriteFile(path, broken, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	previous := openConfiguration
+	t.Cleanup(func() { openConfiguration = previous })
+	called := false
+	openConfiguration = func(file, target string) error { called = file == path && target == "file"; return nil }
+	var output bytes.Buffer
+	if err := runConfigMaintenance([]string{"config", "open", "file"}, path, &output); err != nil || !called {
+		t.Fatalf("repair editor blocked: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(got, broken) {
+		t.Fatal("opening rewrote the broken configuration")
+	}
+}
 
 func TestConfigIntroResetPreservesOtherSettingsAndOpenTargets(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")

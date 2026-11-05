@@ -4189,6 +4189,7 @@
               "controller.udp.unsubscribe",
               "controller.ui.config",
               "controller.ui.config.get",
+              "controller.ui.config.open",
               "controller.ui.config.set",
               "controller.unsubscribe",
               "controller.update.eeprom",

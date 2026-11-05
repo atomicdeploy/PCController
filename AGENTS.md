@@ -36,6 +36,10 @@
   suffixes. Finish, test, merge, and delete them promptly; do not delete any
   branch until its unique commits and dirty work are represented on GitHub and
   proven merged or deliberately superseded on the corresponding PR/issue.
+- When authorized to complete a change, merge its PR once required checks and
+  review findings are satisfied; opening a ready PR is not the completion step.
+  Finish active blockers first and never bypass repository protections to empty
+  the PR list. Report genuine external blockers explicitly.
 - An ancestor/merged-PR marker is not proof that a historical fix still exists
   in current functional source. Compare the actual behavior/content and retain
   focused regression tests when reconciling rewritten or relocated firmware;

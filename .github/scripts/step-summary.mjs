@@ -146,15 +146,17 @@ if (kind === "firmware") {
   const dependencies = existsSync(absolute(dependenciesPath))
     ? readJson(dependenciesPath)
     : {};
-  const dependencyLibraries = Array.isArray(dependencies.libraries)
-    ? dependencies.libraries
-    : Object.entries(dependencies.libraries || {}).map(([name, version]) => ({
-        name,
-        version,
-        url: name === "rc-switch" ? "https://github.com/sui77/rc-switch" : repositoryUrl,
-      }));
+  const inventory = name => {
+    const path = absolute(`${packageRootPath}/${name}.json`);
+    return existsSync(path) ? readJson(path) : {};
+  };
+  const installedCLI = inventory("resolved-cli");
+  const installedCore = (inventory("resolved-cores").platforms || [])
+    .find(item => item.id === "MiniCore:avr");
+  const dependencyLibraries = (inventory("resolved-libraries").installed_libraries || [])
+    .map(item => item.library);
   const libraries = dependencyLibraries
-    .map((item) => `| [${escape(item.name)}](${item.url || repositoryUrl}) | ${code(item.version)} | pinned and resolved during this build |`)
+    .map((item) => `| ${escape(item.name)} | ${code(item.version)} | installed library inventory |`)
     .join("\n");
   const artifacts = (manifest.artifacts || [])
     .map(
@@ -254,9 +256,13 @@ ${stackPath}
 
 | Dependency | Version | Resolution |
 |---|---:|---|
-| [Arduino CLI](https://github.com/arduino/arduino-cli/releases) | ${code(dependencies.arduinoCli?.version || "recorded in artifact")} | official archive, pinned SHA-256 |
-| [MiniCore](https://github.com/MCUdude/MiniCore) | ${code(dependencies.miniCore?.version || "recorded in artifact")} | canonical package index |
+| [Arduino CLI](https://github.com/arduino/arduino-cli/releases) | ${code(installedCLI.VersionString || "not recorded")} | installed CLI inventory |
+| [MiniCore](https://github.com/MCUdude/MiniCore) | ${code(installedCore?.installed_version || "not recorded")} | installed core inventory |
 ${libraries}
+
+The package retains the exact CLI/core/library inventories. The separate
+${code("declared-dependencies.json")} is an **audit snapshot**, not installed-version
+evidence (snapshot MiniCore: ${code(dependencies.miniCore?.version || "not recorded")}).
 
 </details>
 

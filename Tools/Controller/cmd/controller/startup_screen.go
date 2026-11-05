@@ -99,6 +99,18 @@ func showStartupLoading(args []string, outputTerminal, inputTerminal bool) bool 
 	if !outputTerminal {
 		return false
 	}
+	remaining, _, _, err := extractGlobalArguments(args)
+	if err != nil {
+		return false
+	}
+	for _, arg := range remaining {
+		if arg == "--help" || arg == "-h" || arg == "--simple" || arg == "--simple=true" {
+			return false
+		}
+	}
+	if len(remaining) > 1 && remaining[0] == "web" && remaining[1] == "export" {
+		return false
+	}
 	switch startupmode.Command(args) {
 	case "tui":
 		return true

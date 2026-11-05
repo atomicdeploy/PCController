@@ -119,6 +119,7 @@ jobs:
       - name: "📚 Record dependencies"
         run: |
           arduino-cli version > .build/firmware/dependencies.txt
+          arduino-cli version --format json > .build/firmware/resolved-cli.json
           arduino-cli core list >> .build/firmware/dependencies.txt
           arduino-cli lib list >> .build/firmware/dependencies.txt
           arduino-cli core list --format json > .build/firmware/resolved-cores.json

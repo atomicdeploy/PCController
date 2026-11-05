@@ -42,6 +42,8 @@ func TestStartupLoadingIsIndependentOfIntroAndConfiguration(t *testing.T) {
 	for _, args := range [][]string{
 		{"version"}, {"config", "intro", "reset"}, {"web", "--no-tui"},
 		{"web", "--no-tui=true"}, {"--config"}, {"firmware", "inspect"},
+		{"tui", "--help"}, {"web", "-h"}, {"web", "export"},
+		{"--intro", "always", "tui", "--simple"}, {"tui", "--simple=true"},
 	} {
 		if showStartupLoading(args, true, true) {
 			t.Errorf("unexpected splash for %v", args)

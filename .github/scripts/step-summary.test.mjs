@@ -50,6 +50,28 @@ function runSummary(directory, arguments_, expectedStatus = 0) {
   return readFileSync(summary, "utf8");
 }
 
+test("firmware summary uses installed inventories, never the historical lock as build evidence", () => {
+  const directory = mkdtempSync(join(tmpdir(), "pccontroller-dependencies-"));
+  try {
+    const archive = resolve(directory, "firmware.tar.gz");
+    const manifest = resolve(directory, "firmware-manifest.json");
+    const lock = resolve(directory, "declared-dependencies.json");
+    writeFileSync(archive, "fixture");
+    writeFileSync(manifest, JSON.stringify({ artifacts: [], target: {} }));
+    writeFileSync(lock, JSON.stringify({ miniCore: { version: "3.0.0" }, libraries: [{ name: "rc-switch", version: "2.0.0" }] }));
+    writeFileSync(resolve(directory, "resolved-cli.json"), JSON.stringify({ VersionString: "1.5.1" }));
+    writeFileSync(resolve(directory, "resolved-cores.json"), JSON.stringify({ platforms: [{ id: "MiniCore:avr", installed_version: "3.1.3" }] }));
+    writeFileSync(resolve(directory, "resolved-libraries.json"), JSON.stringify({ installed_libraries: [{ library: { name: "rc-switch", version: "2.6.4" } }] }));
+    const output = runSummary(directory, ["firmware", manifest, archive, "", "", lock, directory]);
+    assert.match(output, /`3\.1\.3` \| installed core inventory/u);
+    assert.match(output, /rc-switch \| `2\.6\.4` \| installed library inventory/u);
+    assert.match(output, /audit snapshot/u);
+    assert.doesNotMatch(output, /pinned and resolved|`2\.0\.0`/u);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("native summaries print target-correct checksum commands", () => {
   const directory = mkdtempSync(join(tmpdir(), "pccontroller-summary-"));
   try {

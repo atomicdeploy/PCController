@@ -146,7 +146,11 @@ func runConfigMaintenance(args []string, configPath string, stdout io.Writer) er
 				fmt.Fprintln(stdout, resolved)
 				return nil
 			}
-			if _, err := appconfig.Open(resolved); err != nil {
+			if _, err := os.Stat(resolved); errors.Is(err, os.ErrNotExist) {
+				if _, err := appconfig.Open(resolved); err != nil {
+					return err
+				}
+			} else if err != nil {
 				return err
 			}
 			return openConfiguration(resolved, "file")
