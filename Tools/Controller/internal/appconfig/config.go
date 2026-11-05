@@ -458,7 +458,7 @@ func Defaults() Config {
 			TableLayout:            "compact",
 			ControlValueColors:     true,
 			PWMChannels:            DefaultPWMChannels(),
-			WelcomeMelody:          "notify",
+			WelcomeMelody:          "welcome",
 			IntroMode:              "auto",
 			StripColorOrder:        "BRG",
 			StripFirmwareOrder:     "BRG",

@@ -1401,9 +1401,17 @@ func runTUIWithInitialAction(
 			PushHostPanel:    hostPanel.Push,
 			ReleaseHostPanel: hostPanel.Release,
 			WelcomeMelody: func(ctx context.Context) error {
-				name := strings.TrimSpace(store.Current().UI.WelcomeMelody)
-				_, err := engine.Execute(ctx, shell.Join([]string{"melody", "wait", name}))
-				return err
+				config := store.Current()
+				for _, melody := range appconfig.EffectiveMelodies(config) {
+					if strings.EqualFold(melody.Name, strings.TrimSpace(config.UI.WelcomeMelody)) {
+						err := outputs.RunWelcome(ctx, melody)
+						if err == control.ErrWelcomeSkipped {
+							return nil
+						}
+						return err
+					}
+				}
+				return fmt.Errorf("welcome melody %q is not configured", config.UI.WelcomeMelody)
 			},
 			Integrations: func() hostui.IntegrationStatus {
 				return primaryHostUIStatus(primary, store.Current())

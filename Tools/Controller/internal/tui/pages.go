@@ -965,11 +965,11 @@ func (model Model) welcomeView() string {
 	if status == "" {
 		status = "Waiting for controller"
 	}
-	action := ""
+	action := "Esc  Skip welcome"
 	if model.welcomeCanContinue {
 		action = "Enter / click to continue with the warning"
 	}
-	return StartupFrame(model.prefs.AppTitle, status, model.width, model.prefs.Tagline, model.welcomeError, action)
+	return WelcomeFrame(model.prefs.AppTitle, status, model.width, model.welcomeFrame, model.prefs.Tagline, model.welcomeError, action)
 }
 
 func (model Model) contentHeight() int {

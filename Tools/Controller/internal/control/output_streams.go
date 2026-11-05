@@ -641,7 +641,7 @@ func (scheduler *OutputScheduler) stop(kind string) bool {
 		scheduler.mu.Unlock()
 		return false
 	}
-	if kind == "effect" {
+	if kind == "effect" || kind == "strip" {
 		slot.stopRequested = true
 	}
 	slot.cancel()

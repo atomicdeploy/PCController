@@ -53,6 +53,7 @@ type StatusLEDEffect struct {
 
 func DefaultMelodies() []Melody {
 	return []Melody{
+		DefaultWelcomeMelody(),
 		{
 			Name: "notify",
 			Notes: []MelodyNote{
@@ -86,6 +87,7 @@ func DefaultMelodies() []Melody {
 // not erase a melody that was deliberately moved out of constrained AVR flash.
 func BuiltInLegacyFeedbackMelodies() []Melody {
 	return []Melody{
+		DefaultWelcomeMelody(),
 		DefaultFinishMelody(),
 		DefaultLostMelody(),
 		DefaultIncorrectBeepMelody(),
@@ -94,6 +96,23 @@ func BuiltInLegacyFeedbackMelodies() []Melody {
 		DefaultSuccessCueMelody(),
 		DefaultErrorCueMelody(),
 	}
+}
+
+// An original ascending arpeggio and resolving phrase, with space between notes
+// for serial delivery and a small piezo speaker. One finite pass, never a loop.
+func DefaultWelcomeMelody() Melody {
+	return Melody{Name: "welcome", Notes: []MelodyNote{
+		{FrequencyHz: 523, DurationMS: 160, GapMS: 40},
+		{FrequencyHz: 659, DurationMS: 160, GapMS: 40},
+		{FrequencyHz: 784, DurationMS: 160, GapMS: 40},
+		{FrequencyHz: 1047, DurationMS: 300, GapMS: 100},
+		{FrequencyHz: 988, DurationMS: 160, GapMS: 40},
+		{FrequencyHz: 784, DurationMS: 160, GapMS: 40},
+		{FrequencyHz: 880, DurationMS: 240, GapMS: 60},
+		{FrequencyHz: 659, DurationMS: 240, GapMS: 60},
+		{FrequencyHz: 784, DurationMS: 160, GapMS: 40},
+		{FrequencyHz: 1047, DurationMS: 500, GapMS: 200},
+	}}
 }
 
 func DefaultFinishMelody() Melody {

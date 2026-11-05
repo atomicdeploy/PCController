@@ -80,6 +80,32 @@ initialization happen before `main`, so the application cannot paint during that
 earlier interval. No particular machine's slowest stage is implied without
 profiling it.
 
+The interactive welcome animates a full-color spectrum inside that same branded
+card. Once the board has authenticated, supplied STATUS and finished its boot
+cue, the primary TUI streams a rolling rainbow and a short original ten-note
+fanfare through the existing output scheduler. The standard sequence lasts
+about 3.2 seconds; transport delays can stretch it, with an eight-second playback
+deadline. The rainbow fades in/out, peaks at 28% channel intensity, uses the
+current host pixel-order preference and the firmware's 100-pixel stream limit.
+Frames are ACK-paced rather than queued to catch up on a slow serial link.
+
+**Esc skips immediately**, including while waiting for a board. Silent mode
+suppresses notes; unknown settings are not permission to sound. Missing strip
+capability permits audio-only playback. Busy outputs, running programs, HOT,
+programming, E-STOP or an unknown buzzer-busy capability skip hardware playback.
+A manual melody/strip replacement cancels the welcome without clearing the new
+owner's frame; reconnects fence cleanup from a different board generation.
+The sequence does not change relay/PWM outputs, RF assignments, settings or
+EEPROM, and does not clear retained macro recordings to obtain strip memory.
+Attached/remote TUIs do not replay it.
+
+New configurations select `ui.welcome_melody: "welcome"`. Existing `notify` or
+custom selections are preserved; select `welcome` to use the new fanfare. The
+usual `auto`/`always`/`skip` introduction preference still controls playback;
+it is not an unconditional effect on every application launch. The immediate
+pre-TUI frame remains static until terminal initialization; physical light/sound
+cannot start before the board connection and safety checks complete.
+
 ```console
 controller config intro
 controller config intro reset
