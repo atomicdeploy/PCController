@@ -404,7 +404,7 @@ func TestSemanticActionDispatchUsesTheAdvertisedProfileCatalog(t *testing.T) {
 }
 
 func TestPeripheralSettingsCarriesTypedStripEffectDescriptors(t *testing.T) {
-	settings := peripheralSettings{StripEffects: control.SupportedStripEffectDescriptors(true, native.CapabilityAddressableLED)}
+	settings := peripheralSettings{StripEffects: control.SupportedConfiguredStripEffectDescriptors(true, native.CapabilityAddressableLED, appconfig.DefaultStripEffects())}
 	encoded, err := json.Marshal(settings)
 	if err != nil {
 		t.Fatal(err)

@@ -373,6 +373,8 @@ type stripControlDescriptor struct {
 	MaximumFPS    int      `json:"maximum_fps"`
 	DefaultFPS    int      `json:"default_fps"`
 	Modes         []string `json:"modes"`
+	ColorOrder    string   `json:"color_order"`
+	ColorOrders   []string `json:"color_orders"`
 }
 
 func advertisedStripControl(connected bool, capabilities uint32) *stripControlDescriptor {
@@ -2193,10 +2195,15 @@ func (service *Service) peripheralSettings() peripheralSettings {
 	appconfig.ApplyPWMChannelConfig(peripherals, controls, config.UI)
 	snapshot := service.Client.Snapshot()
 	stripEffects := snapshot.StripEffects
+	strip := advertisedStripControl(snapshot.Connected, snapshot.Hello.Capabilities)
+	if strip != nil {
+		strip.ColorOrder = appconfig.EffectiveStripOrder(config.UI.StripColorOrder)
+		strip.ColorOrders = appconfig.StripColorOrders()
+	}
 	return peripheralSettings{
 		Names: clonePeripheralNames(names), BoardProfile: profileDescriptor,
 		Peripherals: peripherals, Controls: controls, Folders: appconfig.ChannelFolderCatalog(profile, names),
-		Strip: advertisedStripControl(snapshot.Connected, snapshot.Hello.Capabilities), StripEffects: stripEffects,
+		Strip: strip, StripEffects: stripEffects,
 	}
 }
 

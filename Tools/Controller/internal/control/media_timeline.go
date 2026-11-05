@@ -224,6 +224,11 @@ func compileMediaTimeline(plan MediaTimelinePlan, runner *MacroRunner) ([]mediaT
 			}
 		} else if effect.Kind == "strip-stream" {
 			count, fps := effect.DefaultPixels, effect.DefaultFPS
+			if effect.Program.Primitive == "layers" {
+				if err := appconfig.ValidateStripLayers(effect.Program, count); err != nil {
+					return nil, err
+				}
+			}
 			if count < 1 || count > native.StripMaximumPixels || fps < 1 || fps > appconfig.StripMaximumFPS {
 				return nil, fmt.Errorf("strip timeline requires valid pixels and 1..%d FPS", appconfig.StripMaximumFPS)
 			}

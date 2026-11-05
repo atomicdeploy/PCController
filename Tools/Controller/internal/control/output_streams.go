@@ -39,23 +39,24 @@ type StreamOperation struct {
 }
 
 type OutputStreamState struct {
-	MelodyID              uint64  `json:"melody_id,omitempty"`
-	MelodyName            string  `json:"melody_name,omitempty"`
-	EffectID              uint64  `json:"effect_id,omitempty"`
-	EffectName            string  `json:"effect_name,omitempty"`
-	EffectRetained        bool    `json:"effect_retained,omitempty"`
-	EffectReleasePending  bool    `json:"effect_release_pending,omitempty"`
-	EffectPendingID       uint64  `json:"effect_pending_id,omitempty"`
-	EffectPendingName     string  `json:"effect_pending_name,omitempty"`
-	StatusOwner           string  `json:"status_owner"`
-	StatusOwnerGeneration uint64  `json:"status_owner_generation,omitempty"`
-	StatusOwnerDevice     string  `json:"status_owner_device,omitempty"`
-	StatusOwnerConnected  bool    `json:"status_owner_connected,omitempty"`
-	StatusOwnerStale      bool    `json:"status_owner_stale,omitempty"`
-	StripID               uint64  `json:"strip_id,omitempty"`
-	StripName             string  `json:"strip_name,omitempty"`
-	StatusBase            [4]byte `json:"status_base"`
-	HaveStatusBase        bool    `json:"have_status_base"`
+	MelodyID              uint64           `json:"melody_id,omitempty"`
+	MelodyName            string           `json:"melody_name,omitempty"`
+	EffectID              uint64           `json:"effect_id,omitempty"`
+	EffectName            string           `json:"effect_name,omitempty"`
+	EffectRetained        bool             `json:"effect_retained,omitempty"`
+	EffectReleasePending  bool             `json:"effect_release_pending,omitempty"`
+	EffectPendingID       uint64           `json:"effect_pending_id,omitempty"`
+	EffectPendingName     string           `json:"effect_pending_name,omitempty"`
+	StatusOwner           string           `json:"status_owner"`
+	StatusOwnerGeneration uint64           `json:"status_owner_generation,omitempty"`
+	StatusOwnerDevice     string           `json:"status_owner_device,omitempty"`
+	StatusOwnerConnected  bool             `json:"status_owner_connected,omitempty"`
+	StatusOwnerStale      bool             `json:"status_owner_stale,omitempty"`
+	StripID               uint64           `json:"strip_id,omitempty"`
+	StripName             string           `json:"strip_name,omitempty"`
+	StripStats            StripStreamStats `json:"strip_stats"`
+	StatusBase            [4]byte          `json:"status_base"`
+	HaveStatusBase        bool             `json:"have_status_base"`
 }
 
 type runningOutput struct {
@@ -98,6 +99,7 @@ type OutputScheduler struct {
 	retainedEffect    *retainedOutput
 	strip             *runningOutput
 	stripMu           sync.Mutex
+	stripStats        StripStreamStats
 	statusBase        [4]byte
 	haveStatusBase    bool
 }
@@ -150,6 +152,7 @@ func (scheduler *OutputScheduler) State() OutputStreamState {
 	scheduler.mu.Lock()
 	defer scheduler.mu.Unlock()
 	var state OutputStreamState
+	state.StripStats = scheduler.stripStats
 	if scheduler.melody != nil {
 		state.MelodyID = scheduler.melody.id
 		state.MelodyName = scheduler.melody.name
