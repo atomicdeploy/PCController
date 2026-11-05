@@ -3,6 +3,9 @@
 import { spawn } from 'node:child_process'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { loadProjectEnv } from './env.mjs'
+
+loadProjectEnv()
 
 const [browser, output, baseURL = 'http://127.0.0.1:4179'] = process.argv.slice(2)
 if (!browser || !output) throw new Error('Usage: node verify-channel-routing.mjs <browser.exe> <evidence-directory> [fixture-origin]')
