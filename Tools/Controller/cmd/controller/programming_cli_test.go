@@ -13,6 +13,25 @@ import (
 	"pccontroller.local/controller/internal/programmer"
 )
 
+func TestExternalPrebuiltUploadRetainsAVRGuard(t *testing.T) {
+	options := programmer.Options{Method: programmer.MethodArduino, Operation: programmer.OperationWriteFlash, FQBN: "esp32:esp32:esp32s3", InputFile: "firmware.bin"}
+	if err := validateExternalToolchainSelection(options, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateExternalToolchainSelection(options, false); err == nil {
+		t.Fatal("prebuilt upload bypassed explicit external board selection")
+	}
+	options.OutputDir = "other-build"
+	if err := validateExternalToolchainSelection(options, true); err == nil {
+		t.Fatal("accepted ambiguous upload inputs")
+	}
+	options.OutputDir = ""
+	options.FQBN = "MiniCore:avr:328"
+	if err := validateExternalToolchainSelection(options, true); err == nil || !strings.Contains(err.Error(), "guarded libavrdude") {
+		t.Fatalf("AVR prebuilt upload bypassed lifecycle: %v", err)
+	}
+}
+
 type applicationIdentityRuntimeStub struct {
 	hello       native.Hello
 	connectErr  error

@@ -70,20 +70,30 @@ func ensureLatestBoardToolchain(
 	configured := strings.TrimSpace(current.Programming.ToolchainCLI)
 	configuredConfig := strings.TrimSpace(current.Programming.ToolchainConfig)
 	providers := discoverToolchainProviders(ctx, configured, paths.ToolchainDir, profile)
-	selected := selectLatestCompatibleCLI(providers, profile.CLI.Version)
+	selected := selectBoardToolchainCLI(providers, profile.CLI.Version, current.Programming.ToolchainManaged)
+	if selected == nil && !current.Programming.ToolchainManaged {
+		return artifacts.ToolchainReadiness{}, errors.New("compatible system Arduino CLI is unavailable; install/update the system CLI or explicitly select toolchain bootstrap --managed")
+	}
 	cliPath := ""
-	configPath := toolchainConfigPath(configuredConfig, paths.ToolchainDir)
+	configPath := ""
+	if current.Programming.ToolchainManaged {
+		configPath = toolchainConfigPath(configuredConfig, paths.ToolchainDir)
+	} else if selected != nil && sameExecutable(selected.path, resolveExecutable(configured)) && !programmer.IsManagedToolchainPath(configuredConfig, paths.ToolchainDir) {
+		configPath = configuredConfig
+	}
 	if resolveErr == nil {
 		selectedPath := ""
 		if selected != nil {
 			selectedPath = selected.path
 		}
 		progress("toolchain-provisioning", -1, fmt.Sprintf(
-			"ensuring %s %s and %s@%s in the shared PCController tool tree",
+			"ensuring %s %s and %s@%s in the selected Arduino environment",
 			profile.CLI.Dependency, profile.CLI.Version, profile.CoreID, profile.CoreVersion,
 		))
 		report, bootstrapErr := programmer.BootstrapToolchain(ctx, programmer.ToolchainBootstrapOptions{
 			Profile: profile, CLI: selectedPath, InstallDir: paths.ToolchainDir,
+			Managed:     current.Programming.ToolchainManaged,
+			ConfigPath:  systemToolchainConfig(configPath, current.Programming.ToolchainManaged),
 			DirectRetry: true,
 		}, nil)
 		if bootstrapErr == nil {
@@ -93,7 +103,7 @@ func ensureLatestBoardToolchain(
 			return artifacts.ToolchainReadiness{}, bootstrapErr
 		} else {
 			cliPath = selected.path
-			if verifyErr := verifyInstalledArduinoToolchain(ctx, cliPath, configPath, profile); verifyErr != nil {
+			if verifyErr := verifyInstalledArduinoToolchain(ctx, cliPath, configPath, profile, current.Programming.ToolchainManaged); verifyErr != nil {
 				return artifacts.ToolchainReadiness{}, fmt.Errorf(
 					"provision latest board toolchain: %v; verify existing exact installation: %w",
 					bootstrapErr, verifyErr,
@@ -114,7 +124,7 @@ func ensureLatestBoardToolchain(
 		}
 		cliPath = selected.path
 	}
-	if err := verifyInstalledArduinoToolchain(ctx, cliPath, configPath, profile); err != nil {
+	if err := verifyInstalledArduinoToolchain(ctx, cliPath, configPath, profile, current.Programming.ToolchainManaged); err != nil {
 		if resolveErr != nil {
 			return artifacts.ToolchainReadiness{}, fmt.Errorf(
 				"resolve latest compatible toolchain: %v; verify embedded locked installation: %w",
@@ -179,6 +189,7 @@ func verifyInstalledArduinoToolchain(
 	ctx context.Context,
 	cliPath, configPath string,
 	profile programmer.ToolchainProfile,
+	managed bool,
 ) error {
 	version, err := probeArduinoCLIVersion(ctx, cliPath)
 	if err != nil {
@@ -187,17 +198,19 @@ func verifyInstalledArduinoToolchain(
 	if normalizeToolVersion(version) != normalizeToolVersion(profile.CLI.Version) {
 		return fmt.Errorf("firmware CLI %s is installed; exact %s is required", version, profile.CLI.Version)
 	}
-	if info, err := os.Stat(configPath); err != nil || !info.Mode().IsRegular() {
-		return fmt.Errorf("managed firmware CLI configuration is unavailable at %s", configPath)
+	if configPath != "" {
+		if info, err := os.Stat(configPath); err != nil || !info.Mode().IsRegular() {
+			return fmt.Errorf("firmware CLI configuration is unavailable at %s", configPath)
+		}
 	}
-	coreInventory, err := runArduinoCLIJSON(ctx, cliPath, configPath, "core", "list", "--format", "json")
+	coreInventory, err := runArduinoCLIJSON(ctx, cliPath, configPath, managed, "core", "list", "--format", "json")
 	if err != nil {
 		return fmt.Errorf("inventory installed board cores: %w", err)
 	}
 	if !coreInventoryHas(coreInventory, profile.CoreID, profile.CoreVersion) {
 		return fmt.Errorf("installed core %s does not match exact version %s", profile.CoreID, profile.CoreVersion)
 	}
-	libraryInventory, err := runArduinoCLIJSON(ctx, cliPath, configPath, "lib", "list", "--format", "json")
+	libraryInventory, err := runArduinoCLIJSON(ctx, cliPath, configPath, managed, "lib", "list", "--format", "json")
 	if err != nil {
 		return fmt.Errorf("inventory installed firmware libraries: %w", err)
 	}
@@ -207,14 +220,17 @@ func verifyInstalledArduinoToolchain(
 	return nil
 }
 
-func runArduinoCLIJSON(ctx context.Context, cliPath, configPath string, args ...string) ([]byte, error) {
+func runArduinoCLIJSON(ctx context.Context, cliPath, configPath string, managed bool, args ...string) ([]byte, error) {
 	probe, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	environment, err := arduinoCLIEnvironment(os.Environ(), configPath)
+	environment, err := selectedArduinoCLIEnvironment(os.Environ(), configPath, managed)
 	if err != nil {
 		return nil, fmt.Errorf("prepare firmware CLI environment: %w", err)
 	}
-	arguments := append([]string{"--config-file", configPath}, args...)
+	arguments := append([]string(nil), args...)
+	if configPath != "" {
+		arguments = append([]string{"--config-file", configPath}, arguments...)
+	}
 	command := exec.CommandContext(probe, cliPath, arguments...)
 	command.Env = environment
 	command.Stdin = nil
@@ -235,12 +251,22 @@ type arduinoCLIConfiguration struct {
 	} `yaml:"directories"`
 }
 
+func selectedArduinoCLIEnvironment(base []string, configPath string, managed bool) ([]string, error) {
+	if !managed {
+		return append([]string(nil), base...), nil
+	}
+	return arduinoCLIEnvironment(base, configPath)
+}
+
 // arduinoCLIEnvironment makes the paths in the reviewed CLI configuration
 // authoritative for child-process discovery. Arduino CLI otherwise attempts
 // to resolve a Windows Documents known folder before fully applying the YAML;
 // virtual service accounts do not have one and consequently expose an empty
 // installed-core inventory even when the shared toolchain is intact.
 func arduinoCLIEnvironment(base []string, configPath string) ([]string, error) {
+	if strings.TrimSpace(configPath) == "" {
+		return append([]string(nil), base...), nil
+	}
 	content, err := os.ReadFile(configPath)
 	if err != nil {
 		return nil, err
@@ -401,10 +427,10 @@ func discoverToolchainProviders(
 			managed:    managed,
 		})
 	}
-	addArduino(configured, false)
+	addArduino(configured, programmer.IsManagedToolchainPath(resolveExecutable(configured), installRoot))
 	addArduino(managedCLIPath(installRoot, profile), true)
 	if path, err := exec.LookPath(executableName("arduino-cli")); err == nil {
-		addArduino(path, false)
+		addArduino(path, programmer.IsManagedToolchainPath(path, installRoot))
 	}
 
 	for _, name := range []string{"platformio", "pio"} {
@@ -451,6 +477,45 @@ func selectLatestCompatibleCLI(providers []detectedToolchainProvider, required s
 		}
 	}
 	return selected
+}
+
+func systemToolchainConfig(path string, managed bool) string {
+	if managed {
+		return ""
+	}
+	return path
+}
+
+// Old automatic bootstrap selections must not override the system-first
+// default. Do not persist this projection or install anything while reading it.
+func preferredToolchainConfig(config appconfig.Config) appconfig.Config {
+	if config.Programming.ToolchainManaged {
+		return config
+	}
+	paths, err := programmer.DefaultHostDataPaths()
+	if err != nil {
+		return config
+	}
+	if programmer.IsManagedToolchainPath(config.Programming.ToolchainConfig, paths.ToolchainDir) {
+		config.Programming.ToolchainConfig = ""
+	}
+	if config.Programming.ToolchainCLI == "" || programmer.IsManagedToolchainPath(config.Programming.ToolchainCLI, paths.ToolchainDir) {
+		config.Programming.ToolchainCLI = "arduino-cli"
+		if path, err := programmer.ResolveSystemToolchainCLI("", paths.ToolchainDir); err == nil {
+			config.Programming.ToolchainCLI = path
+		}
+	}
+	return config
+}
+
+func selectBoardToolchainCLI(providers []detectedToolchainProvider, required string, managed bool) *detectedToolchainProvider {
+	var eligible []detectedToolchainProvider
+	for _, provider := range providers {
+		if provider.managed == managed {
+			eligible = append(eligible, provider)
+		}
+	}
+	return selectLatestCompatibleCLI(eligible, required)
 }
 
 func probeArduinoCLIVersion(ctx context.Context, path string) (string, error) {

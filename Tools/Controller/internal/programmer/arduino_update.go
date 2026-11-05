@@ -30,6 +30,7 @@ var RequiredArduinoLibraries = []string{
 
 type ToolchainSyncOptions struct {
 	ToolchainCLI string
+	ConfigPath   string
 	Environment  []string
 	DirectRetry  bool
 	DryRun       bool
@@ -176,7 +177,7 @@ func SyncToolchainWithRunner(
 	directEnvironment := withoutProxyEnvironment(environment)
 	var failures []error
 	for _, configured := range steps {
-		command := Command{Name: executable, Args: configured.args}
+		command := Command{Name: executable, Args: toolchainCLIArguments(executable, options.ConfigPath, configured.args...)}
 		step := ToolchainSyncStep{
 			Name: configured.name, Command: command,
 			UsedProxy: len(proxyNames) != 0,

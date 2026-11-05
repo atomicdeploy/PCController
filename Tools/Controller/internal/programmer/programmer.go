@@ -52,6 +52,7 @@ type Options struct {
 	HexPath       string
 	SketchPath    string
 	OutputDir     string
+	InputFile     string
 	BuildPath     string
 	FQBN          string
 	Programmer    string
@@ -251,14 +252,24 @@ func Build(options Options) (Command, error) {
 			if options.Port == "" {
 				return Command{}, errors.New("dependency CLI upload requires a serial port")
 			}
-			if options.SketchPath == "" {
-				return Command{}, errors.New("dependency CLI upload requires a project path")
+			if options.SketchPath == "" && options.InputFile == "" {
+				return Command{}, errors.New("dependency CLI upload requires a project path or input file")
+			}
+			if options.OutputDir != "" && options.InputFile != "" {
+				return Command{}, errors.New("dependency CLI upload cannot combine an input file with an input directory")
 			}
 			args := []string{"upload", "--port", options.Port, "--fqbn", options.FQBN}
+			if !options.NoVerify {
+				args = append(args, "--verify")
+			}
 			if options.OutputDir != "" {
 				args = append(args, "--input-dir", options.OutputDir)
 			}
-			args = append(args, options.SketchPath)
+			if options.InputFile != "" {
+				args = append(args, "--input-file", options.InputFile)
+			} else {
+				args = append(args, options.SketchPath)
+			}
 			return Command{Name: executable, Args: toolchainCLIArguments(
 				executable, options.ArduinoConfig, args...,
 			)}, nil

@@ -40,6 +40,21 @@ controller program --method toolchain --operation compile --external-board --fqb
 controller program --method toolchain --operation write-flash --external-board --fqbn esp32:esp32:esp32s3 --sketch external-sketch --output-dir external-output --port COM9
 ```
 
+For an already-built binary, use `--input-file firmware.bin` instead of
+`--output-dir` and `--sketch`. Uploads request Arduino CLI's `--verify` and use
+the selected core's upload recipe. Never substitute a binary for a different
+board/FQBN. A running primary must release the selected port first.
+
+Arduino CLI has no flash/EEPROM readback command. Backups therefore use the
+existing guarded Urclock/USBasp/AVRDUDE route, not a fictitious CLI backup or
+`sketch archive` (which only archives source). AVRDUDE can be discovered from
+the configured Arduino CLI's core-tool installation; `--toolchain-cli` and
+`--toolchain-config` bind discovery to that installation. PCController AVR
+uploads retain their mandatory backup, EEPROM preservation and independent
+readback rather than bypassing these safeguards through a generic upload.
+See the upstream [upload command](https://arduino.github.io/arduino-cli/1.5/commands/arduino-cli_upload/)
+and [command reference](https://arduino.github.io/arduino-cli/1.5/commands/arduino-cli/).
+
 PCController's commissioned ATmega328P profile retains its generated defaults,
 bridge ownership, semantic EEPROM lifecycle, and mandatory independent
 readback checks.
@@ -92,8 +107,16 @@ Tools\Controller\bin\controller.exe toolchain bootstrap --dry-run
 Tools\Controller\bin\controller.exe toolchain bootstrap
 ```
 
-The first command is read-only. By default bootstrap resolves the current
-stable policy, then:
+The first command is read-only. By default bootstrap uses the system Arduino
+CLI and its existing user environment. If that CLI is missing or incompatible,
+install/update it explicitly; PCController does not silently choose a managed
+copy. To request the isolated installer instead, use:
+
+```console
+controller toolchain bootstrap --managed
+```
+
+This explicit managed mode resolves the stable policy, then:
 
 1. selects the current operating-system/architecture firmware-CLI asset;
 2. verifies its registry-provided SHA-256 before extraction;
@@ -101,7 +124,8 @@ stable policy, then:
 4. binds child processes to those directories through a generated config and
    explicit environment values;
 5. refreshes core and library indexes;
-6. installs the exact MiniCore and library versions from that resolution;
+6. installs the latest indexed MiniCore and project libraries (exact versions
+   only with `--locked`);
 7. installs the AVR compiler, AVRDUDE, and Urclock metadata supplied by the
    resolved MiniCore package;
 8. records the managed firmware-CLI path in PC-side host configuration.
@@ -115,8 +139,8 @@ root. Omitting `--cli` installs the verified portable executable there too;
 To reproduce the checked-in lock without registry resolution, use:
 
 ```console
-Tools\Controller\bin\controller.exe toolchain bootstrap --locked --dry-run
-Tools\Controller\bin\controller.exe toolchain bootstrap --locked
+Tools\Controller\bin\controller.exe toolchain bootstrap --managed --locked --dry-run
+Tools\Controller\bin\controller.exe toolchain bootstrap --managed --locked
 ```
 
 Use the managed executable and its generated configuration explicitly for a
@@ -143,6 +167,50 @@ sketchbook. Reports distinguish `cli_installed` from
 paths. Later Controller compile, core-info, bootloader, and programming
 operations reuse this configuration. `toolchain sync` remains a separate
 operation for auditing/updating an explicitly selected existing installation.
+
+### Seed an existing Arduino installation or additional board families
+
+System mode is the default (`--system` also selects it explicitly). It populates the current user's normal Arduino CLI environment
+(usually Arduino15 plus the Arduino sketchbook), rather than the isolated
+PCController workspace. This is **not** an all-users/admin install. It respects
+Arduino's existing configuration and environment variables without rewriting
+the configuration, changing PATH, or upgrading unrelated installed packages.
+If no `--cli` is supplied, PCController looks for the system `arduino-cli` on
+PATH. Missing system tools produce an actionable error, not an automatic
+managed download. `--managed` is the explicit download/install alternative.
+
+```console
+controller toolchain bootstrap --system --dry-run
+controller toolchain bootstrap --system
+controller toolchain bootstrap --system --cli arduino-cli --toolchain-config C:\Arduino\arduino-cli.yaml
+controller toolchain bootstrap --core MegaCore:avr --index-url https://mcudude.github.io/MegaCore/package_MCUdude_MegaCore_index.json
+controller toolchain bootstrap --core esp32:esp32 --index-url https://espressif.github.io/arduino-esp32/package_esp32_index.json --library FastLED
+```
+
+`--core`, `--library`, and `--index-url` are repeatable and also work in managed
+mode. They supplement the project dependencies. Bare package names select the
+latest indexed release; `NAME@VERSION` selects an explicit version. Under
+`--locked`, every additional dependency must specify its version. Additional
+index URLs must use HTTPS; select trusted package publishers only.
+
+System seeding does not change PCController's active programming installation
+by default. To opt in, pass both `--save-cli` and an existing
+`--toolchain-config FILE`; the explicit file keeps later compile/upload/tool
+discovery on the same installation. `--config` is PCController's own global
+configuration flag, not Arduino's. Reports identify `scope` as `system` or
+`managed`; system paths are left unspecified when controlled by Arduino itself.
+
+For deliberate upgrades of **all** installed cores and libraries, use
+`controller toolchain sync --cli arduino-cli --toolchain-config FILE` instead.
+Sync now preserves the configured Arduino installation on every step.
+
+Runtime readiness also defaults to the system provider and environment, even
+when an older automatic bootstrap saved a managed path. Managed mode is
+persisted only by an explicit `bootstrap --managed` (or
+`board initialize --portable-cli`) as `programming.toolchain_managed: true`.
+Set that preference to `false` to return to system-first operation. Explicit
+isolated dependency-replay automation passes `--managed`; Linux host provisioning
+requires its own `--managed` flag rather than silently opting the target user in.
 
 ## Runtime readiness gate and provider coordination
 

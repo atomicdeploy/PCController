@@ -53,6 +53,7 @@ type linuxHostProvisionOptions struct {
 	TargetUser           string
 	Apply                bool
 	Locked               bool
+	Managed              bool
 	PolicyPath           string
 	LockPath             string
 	DirectRetry          bool
@@ -162,6 +163,7 @@ func runToolchainHostProvision(args []string, stdout, stderr io.Writer) error {
 	policyPath := flags.String("policy", "", "latest-compatible toolchain policy JSON passed to the target-user bootstrap")
 	lockPath := flags.String("lock", "", "exact resolved toolchain lock JSON passed to the target-user bootstrap")
 	locked := flags.Bool("locked", false, "bootstrap the existing exact lock as the target user")
+	managed := flags.Bool("managed", false, "explicitly install an isolated Arduino toolchain for the target user")
 	directRetry := flags.Bool("direct-retry", true, "retry failed target-user network steps once without proxy variables")
 	ubuntuMirrors := flags.String("ubuntu-mirrors", "", "opt-in Ubuntu mirror profile: domestic-first")
 	mirrorCandidates := flags.String("mirror-candidates", "", "reviewed JSON array overriding mirror candidates (paths/policy remain Controller-owned)")
@@ -218,7 +220,7 @@ func runToolchainHostProvision(args []string, stdout, stderr io.Writer) error {
 	defer cancel()
 	report, err := provisionLinuxHost(ctx, linuxHostProvisionOptions{
 		TargetUser: strings.TrimSpace(*targetUser), Apply: *apply,
-		Locked: *locked, PolicyPath: resolvedPolicy, LockPath: resolvedLock,
+		Locked: *locked, Managed: *managed, PolicyPath: resolvedPolicy, LockPath: resolvedLock,
 		DirectRetry: *directRetry, UbuntuMirrors: strings.ToLower(strings.TrimSpace(*ubuntuMirrors)),
 		MirrorCandidatesPath: strings.TrimSpace(*mirrorCandidates), Environment: os.Environ(),
 	}, stdout)
@@ -453,6 +455,9 @@ func provisionLinuxHost(
 		"--user", account.Username, "--", executable,
 		"toolchain", "bootstrap", "--install-dir", paths.ToolchainDir,
 		fmt.Sprintf("--direct-retry=%t", options.DirectRetry),
+	}
+	if options.Managed {
+		bootstrapArguments = append(bootstrapArguments, "--managed")
 	}
 	if options.Locked {
 		bootstrapArguments = append(bootstrapArguments, "--locked", "--lock", options.LockPath)

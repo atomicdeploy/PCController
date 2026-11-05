@@ -202,6 +202,7 @@ func TestBoardInitializationRejectsFeaturesWhenItWillNotCompile(t *testing.T) {
 }
 
 func TestBoardInitializationIgnoresInvalidFeatureDefaultsWithoutCompile(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
 	t.Setenv(firmwareFeaturesEnvironment, "unknown")
 	t.Setenv(programmer.HostDataDirectoryEnvironment, t.TempDir())
 	project := t.TempDir()
@@ -212,6 +213,8 @@ func TestBoardInitializationIgnoresInvalidFeatureDefaultsWithoutCompile(t *testi
 	if _, err := store.Update(func(config *appconfig.Config) error {
 		config.Paths.Project = project
 		config.Programming.ToolchainCLI = ""
+		config.Programming.Avrdude = filepath.Join(project, "must-not-execute-avrdude")
+		config.Programming.AvrdudeBackend = "cli"
 		return nil
 	}); err != nil {
 		t.Fatal(err)

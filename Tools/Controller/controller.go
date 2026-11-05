@@ -2782,13 +2782,16 @@ func (client *Client) SyncToolchain(
 ) (ToolchainSyncReport, error) {
 	if strings.TrimSpace(options.ToolchainCLI) == "" {
 		options.ToolchainCLI = client.currentCommandOptions().ArduinoCLI
+		if options.ConfigPath == "" {
+			options.ConfigPath = client.currentCommandOptions().ArduinoConfig
+		}
 	}
 	return programmer.SyncToolchain(ctx, options, output)
 }
 
-// BootstrapToolchain installs one resolved, profile-local firmware toolchain.
-// It does not replace an unrelated global dependency installation. Callers may
-// supply the latest resolved profile or an intentionally selected rollback lock.
+// BootstrapToolchain seeds the system Arduino environment unless Managed is
+// explicitly requested. It never silently downloads a managed replacement.
+// Callers may supply a resolved profile or an intentional rollback lock.
 func BootstrapToolchain(
 	ctx context.Context,
 	options ToolchainBootstrapOptions,

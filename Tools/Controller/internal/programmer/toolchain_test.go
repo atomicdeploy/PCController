@@ -45,7 +45,7 @@ func TestToolchainBootstrapDryRunPinsCoreLibrariesAndManagedCLI(t *testing.T) {
 	report, err := BootstrapToolchain(
 		context.Background(),
 		ToolchainBootstrapOptions{
-			Profile: DefaultToolchainProfile(), InstallDir: t.TempDir(),
+			Profile: DefaultToolchainProfile(), InstallDir: t.TempDir(), Managed: true,
 			GOOS: "windows", GOARCH: "amd64", DryRun: true, Locked: true,
 			Environment: []string{
 				"PATH=test", "https_proxy=http://secret", "NO_PROXY=localhost",
@@ -97,7 +97,7 @@ func TestToolchainBootstrapDefaultsToUnversionedCoreAndLibraries(t *testing.T) {
 		profile.Libraries[index].Version = ""
 	}
 	report, err := BootstrapToolchain(context.Background(), ToolchainBootstrapOptions{
-		Profile: profile, InstallDir: t.TempDir(), DryRun: true,
+		Profile: profile, InstallDir: t.TempDir(), DryRun: true, Managed: true,
 	}, io.Discard)
 	if err != nil {
 		t.Fatal(err)
@@ -119,9 +119,123 @@ func TestToolchainBootstrapDefaultsToUnversionedCoreAndLibraries(t *testing.T) {
 		t.Fatalf("planned %d installs; missing required core/library", installs)
 	}
 	if _, err := BootstrapToolchain(context.Background(), ToolchainBootstrapOptions{
-		Profile: profile, InstallDir: t.TempDir(), DryRun: true, Locked: true,
+		Profile: profile, InstallDir: t.TempDir(), DryRun: true, Locked: true, Managed: true,
 	}, io.Discard); err == nil {
 		t.Fatal("explicit locked replay accepted missing versions")
+	}
+}
+
+func TestSystemToolchainSeedPreservesConfigAndDirectories(t *testing.T) {
+	root := t.TempDir()
+	cli := filepath.Join(root, "arduino-cli")
+	config := filepath.Join(root, "arduino.yaml")
+	original := []byte("network:\n  connection_timeout: 90s\ndirectories:\n  user: /existing/sketchbook\n")
+	for path, content := range map[string][]byte{cli: []byte("fixture"), config: original} {
+		if err := os.WriteFile(path, content, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var commands []Command
+	report, err := BootstrapToolchain(context.Background(), ToolchainBootstrapOptions{
+		ConfigPath: config, CLI: cli, InstallDir: filepath.Join(root, "managed"),
+		Cores: []string{"MegaCore:avr", "esp32:esp32"}, Libraries: []string{"FastLED"},
+		Indexes:     []string{"https://example.org/package_index.json"},
+		Environment: []string{"ARDUINO_DIRECTORIES_DATA=/existing/data", "ARDUINO_DIRECTORIES_USER=/existing/sketchbook"},
+		Runner: DependencyEnvironmentRunnerFunc(func(_ context.Context, command Command, env []string, _ io.Writer) error {
+			commands = append(commands, command)
+			if testEnvironmentValue(env, "ARDUINO_DIRECTORIES_DATA") != "/existing/data" || testEnvironmentValue(env, "ARDUINO_DIRECTORIES_USER") != "/existing/sketchbook" {
+				t.Fatalf("system seed redirected the existing Arduino environment: %v", env)
+			}
+			return nil
+		}),
+	}, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Scope != "system" || report.ConfigPath != config || report.DataDir != "" || report.UserDir != "" || report.DownloadsDir != "" {
+		t.Fatalf("misleading system report: %+v", report)
+	}
+	got, err := os.ReadFile(config)
+	if err != nil || !bytes.Equal(got, original) {
+		t.Fatalf("existing Arduino config changed: %q, %v", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "managed")); !os.IsNotExist(err) {
+		t.Fatalf("system seed created managed workspace: %v", err)
+	}
+	var all strings.Builder
+	for _, command := range commands {
+		if len(command.Args) < 3 || command.Args[0] != "--config-file" || command.Args[1] != config {
+			t.Fatalf("lost selected config: %+v", command)
+		}
+		all.WriteString(strings.Join(command.Args, " ") + "\n")
+	}
+	for _, wanted := range []string{"core install MiniCore:avr", "core install MegaCore:avr", "core install esp32:esp32", "lib install FastLED", "https://example.org/package_index.json"} {
+		if !strings.Contains(all.String(), wanted) {
+			t.Fatalf("missing %q in %s", wanted, all.String())
+		}
+	}
+	if strings.Contains(all.String(), "upgrade") {
+		t.Fatal("seed upgraded unrelated packages")
+	}
+	if !strings.Contains(commands[len(commands)-1].String(), "lib list") {
+		t.Fatal("inventory did not follow all installs")
+	}
+}
+
+func TestSystemToolchainSeedDryRunDoesNotCreateFiles(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "not-created")
+	report, err := BootstrapToolchain(context.Background(), ToolchainBootstrapOptions{InstallDir: root, DryRun: true}, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Fatalf("dry-run created files: %v", err)
+	}
+	for _, step := range report.Steps {
+		if !step.Planned || step.Succeeded || strings.Contains(step.Command.String(), "--config-file") {
+			t.Fatalf("system default config plan incorrect: %+v", step)
+		}
+	}
+}
+
+func TestDefaultBootstrapDoesNotDownloadWhenSystemCLIIsMissing(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	root := filepath.Join(t.TempDir(), "not-created")
+	_, err := BootstrapToolchain(context.Background(), ToolchainBootstrapOptions{InstallDir: root}, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "--managed") {
+		t.Fatalf("missing explicit opt-in error: %v", err)
+	}
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Fatalf("implicit managed installation created files: %v", err)
+	}
+}
+
+func TestManagedToolchainPathRecognizesOldVersionsAndRejectsSibling(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "toolchain")
+	if !IsManagedToolchainPath(filepath.Join(root, "arduino-cli", "old", "cli"), root) {
+		t.Fatal("old managed version was treated as system")
+	}
+	if IsManagedToolchainPath(root+"-other", root) {
+		t.Fatal("sibling directory was treated as managed")
+	}
+}
+
+func TestToolchainSeedRejectsInvalidSelectionsBeforeInstall(t *testing.T) {
+	for _, options := range []ToolchainBootstrapOptions{
+		{Managed: true, ConfigPath: "missing.yaml"}, {ConfigPath: "missing.yaml"},
+		{Cores: []string{"--help"}}, {Cores: []string{"invalid"}}, {Cores: []string{"vendor:"}},
+		{Libraries: []string{"--git-url"}}, {Libraries: []string{"FastLED@"}},
+		{Locked: true, Cores: []string{"MegaCore:avr"}}, {Locked: true, Libraries: []string{"FastLED"}},
+		{Indexes: []string{"http://example.org/index.json"}}, {Indexes: []string{"https://user:secret@example.org/index.json"}},
+	} {
+		options.DryRun = true
+		options.InstallDir = filepath.Join(t.TempDir(), "not-created")
+		if _, err := BootstrapToolchain(context.Background(), options, io.Discard); err == nil {
+			t.Fatalf("accepted invalid seed: %+v", options)
+		}
+		if _, err := os.Stat(options.InstallDir); !os.IsNotExist(err) {
+			t.Fatal("invalid seed touched installation")
+		}
 	}
 }
 
@@ -141,7 +255,7 @@ func TestToolchainBootstrapExistingCLIIsAvailableAndUsesManagedDirectories(t *te
 	report, err := BootstrapToolchain(
 		context.Background(),
 		ToolchainBootstrapOptions{
-			Profile: DefaultToolchainProfile(), InstallDir: installRoot,
+			Profile: DefaultToolchainProfile(), InstallDir: installRoot, Managed: true,
 			GOOS: "windows", GOARCH: "amd64",
 			Environment: []string{
 				"PATH=test", "HTTPS_PROXY=http://proxy.invalid",

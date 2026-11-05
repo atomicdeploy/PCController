@@ -263,9 +263,13 @@ func initializeBoard(
 	fmt.Fprintln(output, "Project:", project)
 
 	cli := strings.TrimSpace(*toolchainCLI)
-	cliConfig := strings.TrimSpace(store.Current().Programming.ToolchainConfig)
+	if *skipToolchain && cli == "" && strings.TrimSpace(store.Current().Programming.ToolchainCLI) == "" {
+		return errors.New("--skip-toolchain requires a configured or explicit --cli executable")
+	}
+	selection := preferredToolchainConfig(store.Current())
+	cliConfig := strings.TrimSpace(selection.Programming.ToolchainConfig)
 	if cli == "" && !*portableCLI {
-		cli = strings.TrimSpace(store.Current().Programming.ToolchainCLI)
+		cli = strings.TrimSpace(selection.Programming.ToolchainCLI)
 	}
 	if *portableCLI {
 		cliConfig = ""
@@ -274,6 +278,8 @@ func initializeBoard(
 		fmt.Fprintln(output, "\n[toolchain] Installing/repairing the exact core and libraries (proxy values remain hidden)")
 		report, bootstrapErr := programmer.BootstrapToolchain(ctx, programmer.ToolchainBootstrapOptions{
 			Profile: programmer.DefaultToolchainProfile(), CLI: cli, DirectRetry: true,
+			Managed:    *portableCLI || selection.Programming.ToolchainManaged,
+			ConfigPath: systemToolchainConfig(cliConfig, *portableCLI || selection.Programming.ToolchainManaged),
 		}, output)
 		if bootstrapErr != nil {
 			return fmt.Errorf("prepare firmware toolchain: %w", bootstrapErr)
@@ -283,6 +289,7 @@ func initializeBoard(
 		if _, err := store.Update(func(config *appconfig.Config) error {
 			config.Programming.ToolchainCLI = report.CLIPath
 			config.Programming.ToolchainConfig = report.ConfigPath
+			config.Programming.ToolchainManaged = *portableCLI || selection.Programming.ToolchainManaged
 			config.Programming.FQBN = *fqbn
 			config.Programming.Programmer = *programmerName
 			config.Paths.Project = project

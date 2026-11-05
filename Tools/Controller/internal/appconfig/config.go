@@ -243,6 +243,7 @@ type Programming struct {
 	Programmer       string                     `json:"programmer,omitempty"`
 	ToolchainCLI     string                     `json:"toolchain_cli,omitempty"`
 	ToolchainConfig  string                     `json:"toolchain_config,omitempty"`
+	ToolchainManaged bool                       `json:"toolchain_managed,omitempty"`
 	FirmwareFeatures []firmwarefeatures.Feature `json:"firmware_features,omitempty"`
 	Avrdude          string                     `json:"avrdude,omitempty"`
 	AvrdudeConf      string                     `json:"avrdude_conf,omitempty"`

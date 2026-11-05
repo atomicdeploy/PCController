@@ -1108,8 +1108,9 @@ the policy, and TCP endpoints are never pulsed.
 
 ## Programming
 
-Bootstrap the latest resolved, host-data-local firmware toolchain with
-`controller toolchain bootstrap`; use `--locked` only for an intentional exact
+Seed the system Arduino CLI environment with `controller toolchain bootstrap`.
+Use `controller toolchain bootstrap --managed` only when an isolated downloaded
+toolchain is explicitly wanted; use `--locked` only for an intentional exact
 rollback. Its dependency executable, core/compiler data, downloads,
 and user-library directory are isolated below the PCController data root rather
 than the user's standard Arduino15/sketchbook locations. Explicit paths remain
@@ -1118,6 +1119,13 @@ AVRDUDE/Urclock operations discover the programmer supplied by the selected
 MiniCore installation. Add `--dry-run` to inspect a workflow without executing
 it. The complete profile, proxy, artifact, and recovery rules are in
 [Toolchain Bootstrap and Safe Programming](../../docs/Toolchain-and-Safe-Programming.md).
+
+System mode is the default; `--system` also selects it explicitly. Add
+`--dry-run` to inspect the plan without installing anything.
+Repeat `--core PACKAGE:ARCH`, `--library NAME`, and `--index-url HTTPS_URL` to
+include additional board families and libraries. `--toolchain-config FILE`
+selects an existing Arduino config without rewriting it. System seeding does
+not change the active PCController toolchain unless explicitly requested.
 
 From `Tools\Controller`:
 

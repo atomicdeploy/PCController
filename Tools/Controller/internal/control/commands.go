@@ -1294,6 +1294,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 					ctx,
 					programmer.ToolchainSyncOptions{
 						ToolchainCLI: resolved.ArduinoCLI,
+						ConfigPath:   resolved.ArduinoConfig,
 						DirectRetry:  true,
 					},
 					&output,
@@ -1320,17 +1321,27 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 				return "firmware features: " + strings.Join(selected, ", "), nil
 			}
 			if len(args) >= 1 && strings.EqualFold(args[0], "bootstrap") {
-				dryRun := false
-				if len(args) == 2 && strings.EqualFold(args[1], "--dry-run") {
-					dryRun = true
-				} else if len(args) != 1 {
-					return "", errors.New("usage: toolchain bootstrap [--dry-run]")
+				dryRun, managed := false, false
+				for _, argument := range args[1:] {
+					switch strings.ToLower(argument) {
+					case "--dry-run":
+						dryRun = true
+					case "--managed":
+						managed = true
+					default:
+						return "", errors.New("usage: toolchain bootstrap [--managed] [--dry-run]")
+					}
+				}
+				cli, configPath := resolved.ArduinoCLI, resolved.ArduinoConfig
+				if managed {
+					cli, configPath = "", ""
 				}
 				var output bytes.Buffer
 				report, bootstrapErr := programmer.BootstrapToolchain(
 					ctx,
 					programmer.ToolchainBootstrapOptions{
-						Profile:     programmer.DefaultToolchainProfile(),
+						Profile: programmer.DefaultToolchainProfile(),
+						Managed: managed, CLI: cli, ConfigPath: configPath,
 						DirectRetry: true, DryRun: dryRun,
 					},
 					&output,
@@ -1338,6 +1349,8 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 				if bootstrapErr == nil && !dryRun && options.UpdateHostConfig != nil {
 					if err := options.UpdateHostConfig(func(config *appconfig.Config) error {
 						config.Programming.ToolchainCLI = report.CLIPath
+						config.Programming.ToolchainConfig = report.ConfigPath
+						config.Programming.ToolchainManaged = managed
 						return nil
 					}); err != nil {
 						bootstrapErr = fmt.Errorf("save managed toolchain path: %w", err)
