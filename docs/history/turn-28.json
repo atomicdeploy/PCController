@@ -1,0 +1,72 @@
+{
+  "turn": "019f9221-bae0-76e1-97b0-4d86357f3246",
+  "observedStart": "2026-07-24T03:18:32.022Z",
+  "observedEnd": "2026-07-24T03:22:35.421Z",
+  "title": "menu: recover hide-before-exit ordering",
+  "events": [
+    {
+      "id": "call_mtQg1iOKsRx8pt88RnKvIuLB:0",
+      "time": "2026-07-24T03:19:19.420Z",
+      "orderTime": "2026-07-24T03:19:19.420Z",
+      "timeBasis": "record",
+      "hash": "f5b767e64b056eedd67cfe75f04cfb4233ff19f4b9a5479b8cae4039c7e1e8f8",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 29245
+      },
+      "turn": "019f9221-bae0-76e1-97b0-4d86357f3246",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/ui/actions_windows.go",
+          "before": "91e7b6e0520169c3f82c9ae62ee13f1b9dbb051f3246abb9443b729754273607",
+          "after": "763716bb071aa04f3f6552786c6b2631f0d796048c74eb1eaec7744e9f3da734",
+          "method": "patch"
+        },
+        {
+          "path": "internal/ui/menu_routing_windows_test.go",
+          "before": "a92c7ca98763a2aa758d8f142b3bcbf9c3fffc796699a27bac1b3c33b9f591ab",
+          "after": "a60c80ac305d8cffa23588220b592d8ef303b974c8371d6b483ebc15b77411ec",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_gPcznJKl468JndJE72MvYtMY:0",
+      "time": "2026-07-24T03:19:24.950Z",
+      "orderTime": "2026-07-24T03:19:24.950Z",
+      "timeBasis": "record",
+      "hash": "529431cd40bcfcef6ac34406462d66d195d8ceb5cd6b680d3848dbed25524b12",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 29250
+      },
+      "turn": "019f9221-bae0-76e1-97b0-4d86357f3246",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "CHANGELOG.md",
+          "before": "89b4e97ef48a884c0240f42b0437d36270cdfc730819854724157000e556f825",
+          "after": "8bbd11a5b95e35574fef5df18998055319889fa637781a36ae9a0fd3e605a9e0",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    }
+  ],
+  "finalChanges": [
+    {
+      "path": "internal/ui/actions_windows.go",
+      "sha256": "763716bb071aa04f3f6552786c6b2631f0d796048c74eb1eaec7744e9f3da734"
+    },
+    {
+      "path": "internal/ui/menu_routing_windows_test.go",
+      "sha256": "a60c80ac305d8cffa23588220b592d8ef303b974c8371d6b483ebc15b77411ec"
+    },
+    {
+      "path": "CHANGELOG.md",
+      "sha256": "8bbd11a5b95e35574fef5df18998055319889fa637781a36ae9a0fd3e605a9e0"
+    }
+  ]
+}

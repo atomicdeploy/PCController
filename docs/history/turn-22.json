@@ -1,0 +1,675 @@
+{
+  "turn": "019f916b-44b2-7753-a896-3a2daa8186fb",
+  "observedStart": "2026-07-23T23:59:14.161Z",
+  "observedEnd": "2026-07-24T00:31:21.537Z",
+  "title": "window: recover hide/show and persisted placement",
+  "events": [
+    {
+      "id": "call_U37C4BMjt1gmsQwzDFdq2YMm:0",
+      "time": "2026-07-24T00:00:04.312Z",
+      "orderTime": "2026-07-24T00:07:44.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "6b69128c75173c3af24b1271a497ee05b7ec9f81fe056697b66c1c2f8dbc060a",
+      "source": {
+        "session": "019f916c-0834-7122-9737-349ea26f4fee",
+        "line": 393
+      },
+      "turn": "019f9171-3e77-79d2-9049-4b7f9daaca10",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/ui/actions_windows.go",
+          "before": "01b7714e3d8641a8500932be4a8a4420aa67d2c0013f5d162ed36566211ad993",
+          "after": "800795979c256badf883cec37f7cf9cfbda75ae9eefdb742f03def9b54017fc6",
+          "method": "patch"
+        },
+        {
+          "path": "internal/ui/menu_routing_windows_test.go",
+          "before": "40658d1ad92ca09bd208bd0756ce802e1c186fb7eafced5a0de83ec03fe1603c",
+          "after": "04623eec52b428996e81f2f8b19c5840ebdcff05f71c7dc481da902eae115a01",
+          "method": "patch"
+        },
+        {
+          "path": "internal/cli/cli_test.go",
+          "before": "df743d5da23a4e0fc38497576d985d5c3eb5e542ef53020a8c75568aea27bf49",
+          "after": "101420d8da71e948fc6fc9e1e7f9bbd7915747d5d466518eea9a0e8d3eb699ba",
+          "method": "patch"
+        },
+        {
+          "path": "assets/iconpacks_test.go",
+          "before": "ad6b053d540ac32837a5bdf0694c847fe340c61b5841cca40cf7c9b88c0aa30e",
+          "after": "625cee3b2bf41494e27086ff85a59ad40526c0ba7121fdc6b61a123eec84d7c2",
+          "method": "patch"
+        },
+        {
+          "path": "tools/generate-assets.ps1",
+          "before": "ac69656cfaed1bf5a8ca372cdd9c1c1f4b41c972adc52a11b2e5d117f5a21cf0",
+          "after": "73e9456fd45d88cc47c7f01651f8e653477b0d9fdefef3190baa5f71e6a8d885",
+          "method": "patch"
+        },
+        {
+          "path": "docs/integration.md",
+          "before": "63fa03ef03e184516749539caf31d801d726b5bde415df8e7caebad549a6a753",
+          "after": "37b9d2a7b5306d1665e3ccb8ba23004ee9ee3cc08a79e941a29e4f64c84847fe",
+          "method": "patch"
+        }
+      ],
+      "problems": [
+        {
+          "path": "internal/comserver/dispatch.go",
+          "reason": "missing preimage"
+        },
+        {
+          "path": "internal/comserver/server_windows.go",
+          "reason": "missing preimage"
+        },
+        {
+          "path": "internal/comserver/dispatch_test.go",
+          "reason": "missing preimage"
+        },
+        {
+          "path": "internal/comserver/server_windows_test.go",
+          "reason": "missing preimage"
+        },
+        {
+          "path": "README.md",
+          "reason": "hunk context not found"
+        }
+      ]
+    },
+    {
+      "id": "call_oN1mXRgvjiK3nLHUw7SwpM1A:0",
+      "time": "2026-07-24T00:00:10.658Z",
+      "orderTime": "2026-07-24T00:08:25.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "5e3109788f833ed358f0cad4fb1b7396166e6c343d9c0075929a95d4ec196247",
+      "source": {
+        "session": "019f916c-210f-76f0-808c-126890b481d5",
+        "line": 405
+      },
+      "turn": "019f916c-22c9-7be3-9b70-382d3991ef65",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/commands/dispatcher_test.go",
+          "before": "b6f55b940214906b01d3bcb9d16925e517d43f33ba0632fd2487202cd09fff7c",
+          "after": "c845fdf7d79158a58f10c18943a31c1b8d6d33cee939d9f52077ced262927062",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_al9bLDF7nqowGeRzyfuzkZ5N:0",
+      "time": "2026-07-24T00:00:10.658Z",
+      "orderTime": "2026-07-24T00:08:57.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "83bb7d0d49beeae98fb7157f71989a7260016bb6215f4a8302685364d9f327b1",
+      "source": {
+        "session": "019f916c-210f-76f0-808c-126890b481d5",
+        "line": 418
+      },
+      "turn": "019f916c-22c9-7be3-9b70-382d3991ef65",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "docs/integration.md",
+          "before": "37b9d2a7b5306d1665e3ccb8ba23004ee9ee3cc08a79e941a29e4f64c84847fe",
+          "after": "146d74a3961189d854fca76707669ac9e2696dbb636d1db6024e48c7328a49b3",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_lKcNUaKXLlTWiNolcJtDm0Gm:0",
+      "time": "2026-07-23T23:59:34.228Z",
+      "orderTime": "2026-07-24T00:09:07.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "a3a6c725fd159b664a241d5265428542fda3c80058c1587662ce7efb38ad5431",
+      "source": {
+        "session": "019f916b-9290-7c32-8dae-7556cec20fae",
+        "line": 374
+      },
+      "turn": "019f9173-a629-7f83-b7e8-4bf447d33e12",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/ui/window_session_windows.go",
+          "before": null,
+          "after": "fc492ded74b3338d18ec3c5493a037d6a3d859f86ce0ef27f4ec441ed07c640f",
+          "method": "patch"
+        },
+        {
+          "path": "internal/ui/window_session_windows_test.go",
+          "before": null,
+          "after": "9a0ad51318c666da1988d7108950b3cb79fee983d324cc214ccd28e1622f1984",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_iFhc5VDPIsXxtB2Hx1tblfBz:0",
+      "time": "2026-07-23T23:59:34.228Z",
+      "orderTime": "2026-07-24T00:10:05.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "04b3604e7dff14eba174f5d7c6b0431bb0b30514bb44065c705ba324de314e2e",
+      "source": {
+        "session": "019f916b-9290-7c32-8dae-7556cec20fae",
+        "line": 381
+      },
+      "turn": "019f9173-a629-7f83-b7e8-4bf447d33e12",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/ui/window_session_windows.go",
+          "before": "fc492ded74b3338d18ec3c5493a037d6a3d859f86ce0ef27f4ec441ed07c640f",
+          "after": "c7e1d85cfbd8ff824c03398649a7dc7384fe5aa877f3cdcabf63a8e7da81f9f1",
+          "method": "patch"
+        },
+        {
+          "path": "internal/ui/window_session_windows_test.go",
+          "before": "9a0ad51318c666da1988d7108950b3cb79fee983d324cc214ccd28e1622f1984",
+          "after": "fd56899be1a9b38aade4292984bcf310f6dc98ddfb247ef37649cc36667b197f",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_WaD4QdqxNLwO9VUcABX7FLAX:0",
+      "time": "2026-07-24T00:10:30.415Z",
+      "orderTime": "2026-07-24T00:10:30.415Z",
+      "timeBasis": "record",
+      "hash": "df5725192ef6ae88c98dd6f6520200f39096870169dd62e94004057bfb1efa53",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 25043
+      },
+      "turn": "019f916b-44b2-7753-a896-3a2daa8186fb",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/ui/shell_windows.go",
+          "before": "2f51de5e859c2e6901a3e5417469d2805680691925b80197ab57482a065af93d",
+          "after": "229b70c08bb36569d897b1434b5d0ffe2b51591a2049454cc3571b45a657a9ba",
+          "method": "patch-after-gofmt"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_9kxT9aKueI2DdIf8RrrcKepp:0",
+      "time": "2026-07-23T23:59:34.228Z",
+      "orderTime": "2026-07-24T00:10:41.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "417a0994a6b3d0cd83604fc2200b90c246ee55b213bc97af428db1ae5870de72",
+      "source": {
+        "session": "019f916b-9290-7c32-8dae-7556cec20fae",
+        "line": 397
+      },
+      "turn": "019f9173-a629-7f83-b7e8-4bf447d33e12",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/ui/window_session_windows_test.go",
+          "before": "fd56899be1a9b38aade4292984bcf310f6dc98ddfb247ef37649cc36667b197f",
+          "after": "937916e1af0e0a39c830c4af91f08335a0daa5ca2a7e6cd22c83e73b976f8389",
+          "method": "patch-after-gofmt"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_GOlb40NjS7YAZ8mUFYbtFm7t:0",
+      "time": "2026-07-24T00:00:04.312Z",
+      "orderTime": "2026-07-24T00:11:09.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "a04c39be39b997cbddd1e16d004ea63dbecf180899bd661373fa721ab84870ea",
+      "source": {
+        "session": "019f916c-0834-7122-9737-349ea26f4fee",
+        "line": 452
+      },
+      "turn": "019f9171-3e77-79d2-9049-4b7f9daaca10",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/ui/menu_routing_windows_test.go",
+          "before": "04623eec52b428996e81f2f8b19c5840ebdcff05f71c7dc481da902eae115a01",
+          "after": "e076a90cfe599db95dc7fe13dd15f8612d6474b11b9eaec06eb2d7fa3daf6112",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_ePdYMw2RqQDrLhcO9ebGf403:0",
+      "time": "2026-07-24T00:11:41.798Z",
+      "orderTime": "2026-07-24T00:11:41.798Z",
+      "timeBasis": "record",
+      "hash": "247c2c647e8f0876c0830bd9d386a1a6eb71a9094f94da31c9be07447999b08a",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 25078
+      },
+      "turn": "019f916b-44b2-7753-a896-3a2daa8186fb",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/application/application_windows.go",
+          "before": "d24e9da3cafad7456b4f345e94a64f2d2b932b161ebe1ce8edb4ff3065b8b407",
+          "after": "9015a926f8e02d113a356cb7ff2cb44ca9d8828a722a012fae4ee2f145754ab9",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_PT5xesirieSJbjnBr1aW6RJF:0",
+      "time": "2026-07-24T00:13:06.838Z",
+      "orderTime": "2026-07-24T00:13:06.838Z",
+      "timeBasis": "record",
+      "hash": "33d4511f59abbb7381ad9e496bf00ab1d7459209e932902d31ab5ffa6efce27a",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 25103
+      },
+      "turn": "019f916b-44b2-7753-a896-3a2daa8186fb",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/ui/window_placement_shell_windows.go",
+          "before": null,
+          "after": "633b69aced4823afe64904443b37304c0ff4d53c6ba69bd9371854164ab80a47",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_94MFDczVSSb2vopok7z0qNnV:0",
+      "time": "2026-07-24T00:13:12.200Z",
+      "orderTime": "2026-07-24T00:13:12.200Z",
+      "timeBasis": "record",
+      "hash": "d02ab0ea5a9c5b189324faf6f4946dcf4868fe8b1ed987b73b0d58de10e8669d",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 25110
+      },
+      "turn": "019f916b-44b2-7753-a896-3a2daa8186fb",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/ui/shell_windows.go",
+          "before": "229b70c08bb36569d897b1434b5d0ffe2b51591a2049454cc3571b45a657a9ba",
+          "after": "804e0c7a4933d4376c25007cbd6383d31e176852d50731401ea42a88905972c3",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_s9qQJbcHlbNXmmzS1PQ8L6TQ:0",
+      "time": "2026-07-24T00:13:24.685Z",
+      "orderTime": "2026-07-24T00:13:24.685Z",
+      "timeBasis": "record",
+      "hash": "4fb275034a3b5d257ee4823468fb51c27f97e72fe050fd62464d21d40777614c",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 25116
+      },
+      "turn": "019f916b-44b2-7753-a896-3a2daa8186fb",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/ui/shell_windows.go",
+          "before": "804e0c7a4933d4376c25007cbd6383d31e176852d50731401ea42a88905972c3",
+          "after": "3dd4fa084c64f7c3d20573539191e75e96bc3dccbbfea7d8cbe8e3b3c7ac85f5",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_IdqFZ0OLmSdpRlIxJ4gOoGTk:0",
+      "time": "2026-07-24T00:13:33.088Z",
+      "orderTime": "2026-07-24T00:13:33.088Z",
+      "timeBasis": "record",
+      "hash": "e9293af6ce90926ac09f3b9fcac15c93fe112b61c6e66c95df5a27de5d6e930e",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 25121
+      },
+      "turn": "019f916b-44b2-7753-a896-3a2daa8186fb",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/ui/shell_windows.go",
+          "before": "3dd4fa084c64f7c3d20573539191e75e96bc3dccbbfea7d8cbe8e3b3c7ac85f5",
+          "after": "d833abc5b191a81df231634f39822f4c639942f8124c46e80265868906f372a1",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_8BXAGYZxcgMfLlo7k8jgY8NY:0",
+      "time": "2026-07-24T00:13:37.241Z",
+      "orderTime": "2026-07-24T00:13:37.241Z",
+      "timeBasis": "record",
+      "hash": "aade8cacd39cefc58954cfeda5a1806bd8f3b2f3d8d3cd08f764f1f5d6d9fb25",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 25126
+      },
+      "turn": "019f916b-44b2-7753-a896-3a2daa8186fb",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/ui/shell_windows.go",
+          "before": "d833abc5b191a81df231634f39822f4c639942f8124c46e80265868906f372a1",
+          "after": "f1dd3d0359f2c25dc0674769c93ba2bdb58bed232e7e0ab1ed46d32cbf8d9285",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_Vb15SNaJToqwV5gbnGnV5RPk:0",
+      "time": "2026-07-24T00:13:45.177Z",
+      "orderTime": "2026-07-24T00:13:45.177Z",
+      "timeBasis": "record",
+      "hash": "e94fe97b9e8047b43eeec0732ab5d52a4a03341e604037a0372115a1180f9e91",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 25131
+      },
+      "turn": "019f916b-44b2-7753-a896-3a2daa8186fb",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/ui/shell_windows.go",
+          "before": "f1dd3d0359f2c25dc0674769c93ba2bdb58bed232e7e0ab1ed46d32cbf8d9285",
+          "after": "63717aeff3ade27f807af1e99ac3df38ec3cec8089c9798d2c6e0343441d91cc",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_1EMcNoE4NCKqfg8na5RCP91O:0",
+      "time": "2026-07-24T00:15:37.270Z",
+      "orderTime": "2026-07-24T00:15:37.270Z",
+      "timeBasis": "record",
+      "hash": "9f7f0167c0e105c53142124c646a7bf5afa72eadfdc5b8bf2749a465c81baddf",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 25190
+      },
+      "turn": "019f916b-44b2-7753-a896-3a2daa8186fb",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/ui/window_placement_shell_windows.go",
+          "before": "633b69aced4823afe64904443b37304c0ff4d53c6ba69bd9371854164ab80a47",
+          "after": "7a410f3f6e1932e961a696aac3237f77d19e19abc01b2df5fc78a5fda890e6bf",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_Y16Lorxbllu2i1BklT0qJ0KM:0",
+      "time": "2026-07-24T00:15:55.994Z",
+      "orderTime": "2026-07-24T00:15:55.994Z",
+      "timeBasis": "record",
+      "hash": "e2fe1df6f941366180966bbfa9a27f10174c205614ced420cee1c37478720991",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 25199
+      },
+      "turn": "019f916b-44b2-7753-a896-3a2daa8186fb",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/application/application_windows.go",
+          "before": "9015a926f8e02d113a356cb7ff2cb44ca9d8828a722a012fae4ee2f145754ab9",
+          "after": "177f338e1ce79e42797078f93269f307cfd3f9445c8f44f32db7590d41601cca",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_kVOzBENQacnraGFzgL63lrrs:0",
+      "time": "2026-07-24T00:16:09.304Z",
+      "orderTime": "2026-07-24T00:16:09.304Z",
+      "timeBasis": "record",
+      "hash": "f4c2c4930b33ff3628f0ca91c1cb40596dc8c2b54cea5ff2cf078913bd28313f",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 25206
+      },
+      "turn": "019f916b-44b2-7753-a896-3a2daa8186fb",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/application/application_windows_test.go",
+          "before": "103ea1bee1d532bf5d637b37b3dd787fc98bd23611c8f61ede40e6984044481f",
+          "after": "2ea335f852c9c7e4b0a5b57be12d9220bc1fc4ffbe80d1de02c1b9a24a236849",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_EOkMlMuDNzHsrtK4eJ9Ptgyl:0",
+      "time": "2026-07-24T00:23:31.778Z",
+      "orderTime": "2026-07-24T00:23:31.778Z",
+      "timeBasis": "record",
+      "hash": "e99dd2b2a907e3a6dc888a4c8f898501d0a3972eff1aa923b4e3ecb09d4ae514",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 25351
+      },
+      "turn": "019f916b-44b2-7753-a896-3a2daa8186fb",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/ui/shell_windows.go",
+          "before": "63717aeff3ade27f807af1e99ac3df38ec3cec8089c9798d2c6e0343441d91cc",
+          "after": "2ea7ecf6032b059e294a3a34b7702276aaa9a8a8747efd93deb90153658bb8b7",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_LXaEfVgvwi5CJ0MU2b000dkP:0",
+      "time": "2026-07-24T00:24:43.749Z",
+      "orderTime": "2026-07-24T00:24:43.749Z",
+      "timeBasis": "record",
+      "hash": "f5b93bf56f59078e67297339c1768e7e4c22077a34f09bb0f9504e707eafceea",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 25369
+      },
+      "turn": "019f916b-44b2-7753-a896-3a2daa8186fb",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/ui/window_placement_shell_windows.go",
+          "before": "7a410f3f6e1932e961a696aac3237f77d19e19abc01b2df5fc78a5fda890e6bf",
+          "after": "47b244a941add2f4ba231cdb376bab40c508bbd5fa4b7c82ad3cea41d4c0da3c",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_3YzOI07i1bUPclbu7O8EytdB:0",
+      "time": "2026-07-24T00:24:58.649Z",
+      "orderTime": "2026-07-24T00:24:58.649Z",
+      "timeBasis": "record",
+      "hash": "3cc90af24cc012542df45d9d93ef8d740a183b230daf53264815e15e54b74cb8",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 25374
+      },
+      "turn": "019f916b-44b2-7753-a896-3a2daa8186fb",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/ui/window_session_windows_test.go",
+          "before": "937916e1af0e0a39c830c4af91f08335a0daa5ca2a7e6cd22c83e73b976f8389",
+          "after": "405687f180dcf290d0f95807fbf29e14bc4f57e3e5bb672d7134607c43b49281",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_3O0jg2og4niBCVmJpIWWhhEZ:0",
+      "time": "2026-07-24T00:25:25.750Z",
+      "orderTime": "2026-07-24T00:25:25.750Z",
+      "timeBasis": "record",
+      "hash": "1e3e7d4c9e52743f05ffba5dded3289eab17af2667c09f7eb6410cf84c1fe48d",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 25389
+      },
+      "turn": "019f916b-44b2-7753-a896-3a2daa8186fb",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "docs/integration.md",
+          "before": "146d74a3961189d854fca76707669ac9e2696dbb636d1db6024e48c7328a49b3",
+          "after": "03d60efaa69036b6fb0361e46d638b04084cd4973fc9e97379a7dccb10dfb8a7",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_Kk6CiEiUFpEk52bHQwPlPUv1:0",
+      "time": "2026-07-24T00:25:43.772Z",
+      "orderTime": "2026-07-24T00:25:43.772Z",
+      "timeBasis": "record",
+      "hash": "ad846625fb0b436ddd79750b3c28b7080743d7f75c2e9afcca09baa426194682",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 25403
+      },
+      "turn": "019f916b-44b2-7753-a896-3a2daa8186fb",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/ui/shell_windows.go",
+          "before": "2ea7ecf6032b059e294a3a34b7702276aaa9a8a8747efd93deb90153658bb8b7",
+          "after": "6b5c8aaa313ab0fe0a9491d3ddc61adff0b7ffd3892e68337296e6262757e1dd",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_SOFZPNYyS6c6Iom7nnvnPNJ3:0",
+      "time": "2026-07-24T00:26:00.616Z",
+      "orderTime": "2026-07-24T00:26:00.616Z",
+      "timeBasis": "record",
+      "hash": "ce78445db7664c4b64ab3d516467e7411bb941acaced959998fd42d73796377c",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 25413
+      },
+      "turn": "019f916b-44b2-7753-a896-3a2daa8186fb",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/ui/actions_windows.go",
+          "before": "800795979c256badf883cec37f7cf9cfbda75ae9eefdb742f03def9b54017fc6",
+          "after": "c7f1a39844e09178ffb6b650c7934e6731cc246f9515e9acc25fae663b81f855",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_KJq8ERukeSZzyuvIl20ug26j:0",
+      "time": "2026-07-24T00:26:09.883Z",
+      "orderTime": "2026-07-24T00:26:09.883Z",
+      "timeBasis": "record",
+      "hash": "c7fd16bb3620e77f90896376a8e9c644250765b103065490275e267ba1894a1b",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 25422
+      },
+      "turn": "019f916b-44b2-7753-a896-3a2daa8186fb",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/ui/menu_routing_windows_test.go",
+          "before": "e076a90cfe599db95dc7fe13dd15f8612d6474b11b9eaec06eb2d7fa3daf6112",
+          "after": "a92c7ca98763a2aa758d8f142b3bcbf9c3fffc796699a27bac1b3c33b9f591ab",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    }
+  ],
+  "finalChanges": [
+    {
+      "path": "internal/ui/actions_windows.go",
+      "sha256": "c7f1a39844e09178ffb6b650c7934e6731cc246f9515e9acc25fae663b81f855"
+    },
+    {
+      "path": "internal/ui/menu_routing_windows_test.go",
+      "sha256": "a92c7ca98763a2aa758d8f142b3bcbf9c3fffc796699a27bac1b3c33b9f591ab"
+    },
+    {
+      "path": "internal/cli/cli_test.go",
+      "sha256": "101420d8da71e948fc6fc9e1e7f9bbd7915747d5d466518eea9a0e8d3eb699ba"
+    },
+    {
+      "path": "assets/iconpacks_test.go",
+      "sha256": "625cee3b2bf41494e27086ff85a59ad40526c0ba7121fdc6b61a123eec84d7c2"
+    },
+    {
+      "path": "tools/generate-assets.ps1",
+      "sha256": "73e9456fd45d88cc47c7f01651f8e653477b0d9fdefef3190baa5f71e6a8d885"
+    },
+    {
+      "path": "docs/integration.md",
+      "sha256": "03d60efaa69036b6fb0361e46d638b04084cd4973fc9e97379a7dccb10dfb8a7"
+    },
+    {
+      "path": "internal/commands/dispatcher_test.go",
+      "sha256": "c845fdf7d79158a58f10c18943a31c1b8d6d33cee939d9f52077ced262927062"
+    },
+    {
+      "path": "internal/ui/window_session_windows.go",
+      "sha256": "c7e1d85cfbd8ff824c03398649a7dc7384fe5aa877f3cdcabf63a8e7da81f9f1"
+    },
+    {
+      "path": "internal/ui/window_session_windows_test.go",
+      "sha256": "405687f180dcf290d0f95807fbf29e14bc4f57e3e5bb672d7134607c43b49281"
+    },
+    {
+      "path": "internal/ui/shell_windows.go",
+      "sha256": "6b5c8aaa313ab0fe0a9491d3ddc61adff0b7ffd3892e68337296e6262757e1dd"
+    },
+    {
+      "path": "internal/application/application_windows.go",
+      "sha256": "177f338e1ce79e42797078f93269f307cfd3f9445c8f44f32db7590d41601cca"
+    },
+    {
+      "path": "internal/ui/window_placement_shell_windows.go",
+      "sha256": "47b244a941add2f4ba231cdb376bab40c508bbd5fa4b7c82ad3cea41d4c0da3c"
+    },
+    {
+      "path": "internal/application/application_windows_test.go",
+      "sha256": "2ea335f852c9c7e4b0a5b57be12d9220bc1fc4ffbe80d1de02c1b9a24a236849"
+    }
+  ]
+}

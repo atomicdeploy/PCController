@@ -1,0 +1,2483 @@
+{
+  "turn": "019f8ef2-abac-7513-af50-db5aef30b92f",
+  "observedStart": "2026-07-23T12:28:16.206Z",
+  "observedEnd": "2026-07-23T13:36:58.582Z",
+  "title": "web: recover synchronized SPA, settings and parsed diagnostics",
+  "events": [
+    {
+      "id": "call_QY3OZN4B6Bfqfy9dpJ11DDAn:0",
+      "time": "2026-07-23T09:07:29.719Z",
+      "orderTime": "2026-07-23T12:37:27.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "be330d5cad8886a8e642ab0823021976a2569863391c98d99077a3fb1beb0a0f",
+      "source": {
+        "session": "019f8e3a-dacd-7bf3-9f2b-0bd47ba6917a",
+        "line": 52
+      },
+      "turn": "019f8ef9-6ce7-77f3-bd52-aeb331b3a027",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "webui/package.json",
+          "before": null,
+          "after": "7d453bcdcd53b715a589e2e429c85f001fbdc18a06f324e57e1324ec3be100c2",
+          "method": "patch"
+        },
+        {
+          "path": "webui/tsconfig.json",
+          "before": null,
+          "after": "1fc3ebf0ead5f745c02617ebf383cf03bb1aca85f28eb09a1497c708bda67202",
+          "method": "patch"
+        },
+        {
+          "path": "webui/vite.config.ts",
+          "before": null,
+          "after": "6777d606cb61c8c2dff847db20cd3beab87780ea970b50adb7640ed17efd853e",
+          "method": "patch"
+        },
+        {
+          "path": "webui/index.html",
+          "before": null,
+          "after": "60f986592e5778089db6ef75d4704913c53b00bbef1294cd32df70d5505301af",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_AWFrgf8Dt6LXTaPHJhKglBr3:0",
+      "time": "2026-07-23T09:07:29.719Z",
+      "orderTime": "2026-07-23T12:38:07.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "9982de213c6733b01561110e38e03d4dffa1785ae481f01482a37600821d4bea",
+      "source": {
+        "session": "019f8e3a-dacd-7bf3-9f2b-0bd47ba6917a",
+        "line": 63
+      },
+      "turn": "019f8ef9-6ce7-77f3-bd52-aeb331b3a027",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "webui/src/contracts.ts",
+          "before": null,
+          "after": "5dc4132f289906bca957587b534edbd91d8f85a7acd47565697a578b72bd308a",
+          "method": "patch"
+        },
+        {
+          "path": "webui/src/api.ts",
+          "before": null,
+          "after": "e98f18d3eb1af159f5f4fffacea6b164cb6810c7eee86d1ab47020c023a097a4",
+          "method": "patch"
+        },
+        {
+          "path": "webui/src/store.ts",
+          "before": null,
+          "after": "b4679628ed78238f959618e13ee81e03d93414f00cccfd96ea22c8ea38cee391",
+          "method": "patch"
+        },
+        {
+          "path": "webui/src/sync.ts",
+          "before": null,
+          "after": "c9f30519eb4f2e4e400ac02e07541efd9ab6e3d2db6d88863a849c78877a4373",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_oPcZuN8nl06zYDbNOZ6MsYJu:0",
+      "time": "2026-07-23T09:27:13.811Z",
+      "orderTime": "2026-07-23T12:40:07.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "95ad8a5a9259afc8172ac0d2b86d410721faf341b9a562411d06914cd7914347",
+      "source": {
+        "session": "019f8e4c-ebf6-7842-b2da-d33bcebdd6b1",
+        "line": 236
+      },
+      "turn": "019f8ef9-3d8d-7473-b5c5-72f05898f848",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/localapi/hub.go",
+          "before": null,
+          "after": "fe22ae437494c6eae216a6765a25f85d0eb7725975c338399bf5190f30763c90",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_6NbJURRC0coK8BI4H9ackhUG:0",
+      "time": "2026-07-23T09:07:29.719Z",
+      "orderTime": "2026-07-23T12:40:09.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "48be0e989a0c1afdb7e4202577d1993b346153c588cc920320f094a4a3263b78",
+      "source": {
+        "session": "019f8e3a-dacd-7bf3-9f2b-0bd47ba6917a",
+        "line": 70
+      },
+      "turn": "019f8ef9-6ce7-77f3-bd52-aeb331b3a027",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "webui/src/contracts.ts",
+          "before": "5dc4132f289906bca957587b534edbd91d8f85a7acd47565697a578b72bd308a",
+          "after": "23b257f486280d7121957fa5b2a8ce72e1eb6b29edd414699acf97d57bcc504b",
+          "method": "patch"
+        },
+        {
+          "path": "webui/src/api.ts",
+          "before": "e98f18d3eb1af159f5f4fffacea6b164cb6810c7eee86d1ab47020c023a097a4",
+          "after": "6377a60f5ea57b07e238219b658c9ce89d4b5e57f541bb35c12f8c13601295ea",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_cG4qDY0pob4nKnsb0NfPuwJH:0",
+      "time": "2026-07-23T09:07:29.719Z",
+      "orderTime": "2026-07-23T12:40:19.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "0e0e589003c33dd0fd3766c4e111c3d81e5b5528b48db9024263bc3a1abacb1c",
+      "source": {
+        "session": "019f8e3a-dacd-7bf3-9f2b-0bd47ba6917a",
+        "line": 76
+      },
+      "turn": "019f8ef9-6ce7-77f3-bd52-aeb331b3a027",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "webui/src/components/icon.tsx",
+          "before": null,
+          "after": "76ced74274c4d0777877a3be5e6d5dbef27e95030328880bbd030dddc078bb13",
+          "method": "patch"
+        },
+        {
+          "path": "webui/src/components/lamp-visual.tsx",
+          "before": null,
+          "after": "e313d3832eb66cb45065cbe312a86da6082639f075fcb44c1881875a24edbee4",
+          "method": "patch"
+        },
+        {
+          "path": "webui/src/components/controls.tsx",
+          "before": null,
+          "after": "fbdbe357f11eb7e368c9c8e0623928eb668ba3ec5bd7fe6239bb93433c92f14c",
+          "method": "patch"
+        },
+        {
+          "path": "webui/src/components/modal.tsx",
+          "before": null,
+          "after": "1f7051896061a13252f42dfd2444899982b3c674574db9364106248fe38440ed",
+          "method": "patch"
+        },
+        {
+          "path": "webui/src/components/toasts.tsx",
+          "before": null,
+          "after": "f9d594a97f3c6c950ee47f327ab1d9923d0112250c48366d5059c8a2df7c8339",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_YJh9VhpLHJ4DDlPv9gTzi1lk:0",
+      "time": "2026-07-23T09:27:13.811Z",
+      "orderTime": "2026-07-23T12:40:48.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "61fdf17e7443a848b8d8a4cc884f2d8e314a9af0cbb9fe2661b287aebcddb588",
+      "source": {
+        "session": "019f8e4c-ebf6-7842-b2da-d33bcebdd6b1",
+        "line": 246
+      },
+      "turn": "019f8ef9-3d8d-7473-b5c5-72f05898f848",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/localapi/session.go",
+          "before": null,
+          "after": "5501d7c986c9b8663e3fe8c909126b80751099e60a95426a95e2eb2a70b6376c",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_npeJ70JgeD841qtoJqvkeoey:0",
+      "time": "2026-07-23T09:27:13.811Z",
+      "orderTime": "2026-07-23T12:41:45.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "22a11e7a7c8aafa4f42ed0c5e5f82679e7b07a8c677d9fd3cdb8e3e9bdc945e9",
+      "source": {
+        "session": "019f8e4c-ebf6-7842-b2da-d33bcebdd6b1",
+        "line": 261
+      },
+      "turn": "019f8ef9-3d8d-7473-b5c5-72f05898f848",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/localapi/websocket.go",
+          "before": null,
+          "after": "4de8efa1f23889346092bb9c67e657bb7774687618ca7a42e1120a0386b8bf52",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_6S6Wv7t3JWRavLzlIHCXPhr4:0",
+      "time": "2026-07-23T09:27:13.811Z",
+      "orderTime": "2026-07-23T12:42:25.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "07b8aa60d93e84f990962d8a3bb2cf03bb4ed4409a38e32be1239c03fe173d5a",
+      "source": {
+        "session": "019f8e4c-ebf6-7842-b2da-d33bcebdd6b1",
+        "line": 271
+      },
+      "turn": "019f8ef9-3d8d-7473-b5c5-72f05898f848",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/localapi/browser.go",
+          "before": null,
+          "after": "81f637d0864fc68e99cd8ed59f4341d41d4b3700e93119b0b1f49460db39b62b",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_y5KLEz58puWQg9ZjdFkCFWi7:0",
+      "time": "2026-07-23T09:07:29.719Z",
+      "orderTime": "2026-07-23T12:42:27.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "a3cc5df71500de124bf5c0285caac2551dbf550eaa0c27416317e366816288c1",
+      "source": {
+        "session": "019f8e3a-dacd-7bf3-9f2b-0bd47ba6917a",
+        "line": 90
+      },
+      "turn": "019f8ef9-6ce7-77f3-bd52-aeb331b3a027",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "webui/src/views/dashboard.tsx",
+          "before": null,
+          "after": "dec51b0d149393316c79f220ff0320f0b0ffffa9caf96f9e7ad672247cfdd612",
+          "method": "patch"
+        },
+        {
+          "path": "webui/src/views/settings.tsx",
+          "before": null,
+          "after": "fd7ce1a5419be4f310af6e72268194a82caa7124554184262ffb87b17901da83",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_ZX5dVijhAudFhKgEwQ04iBQr:0",
+      "time": "2026-07-23T09:27:13.811Z",
+      "orderTime": "2026-07-23T12:44:53.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "761ebbd1a8874342b30a7e6a5882a8e966a3eeb5765f16c661de1508853d280a",
+      "source": {
+        "session": "019f8e4c-ebf6-7842-b2da-d33bcebdd6b1",
+        "line": 304
+      },
+      "turn": "019f8ef9-3d8d-7473-b5c5-72f05898f848",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/application/application_windows.go",
+          "before": "4df8ecaaccac86acd95875be2f4e55a75b572db944c96be8eb18211d3a4cd04c",
+          "after": "ddabe6ab4fd8d32dfffdeabee28696f19afd60366c05b55633121b2f4a4e7f6d",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_L7Qh1iQZ2O3kLROtCtqVwlQU:0",
+      "time": "2026-07-23T09:07:29.719Z",
+      "orderTime": "2026-07-23T12:45:15.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "8a43f32dee66e066d5a18c70ba18cd0bcd11b3b43a056a651754efe01be0504e",
+      "source": {
+        "session": "019f8e3a-dacd-7bf3-9f2b-0bd47ba6917a",
+        "line": 111
+      },
+      "turn": "019f8ef9-6ce7-77f3-bd52-aeb331b3a027",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "webui/src/contracts.ts",
+          "before": "23b257f486280d7121957fa5b2a8ce72e1eb6b29edd414699acf97d57bcc504b",
+          "after": "796119e806f6557c55418ab3caee74f37675f5a08de37186fa8a078a82db4be1",
+          "method": "patch"
+        },
+        {
+          "path": "webui/src/sync.ts",
+          "before": "c9f30519eb4f2e4e400ac02e07541efd9ab6e3d2db6d88863a849c78877a4373",
+          "after": "bd2312f09708a2fc28985ef5302015c0dbd4349677d980085aa77054d262ca02",
+          "method": "patch"
+        },
+        {
+          "path": "webui/src/store.ts",
+          "before": "b4679628ed78238f959618e13ee81e03d93414f00cccfd96ea22c8ea38cee391",
+          "after": "45098399be6c0d2d1009b4a41ffe4ba31e2b89005297d71b8aa71d747139d17c",
+          "method": "patch"
+        },
+        {
+          "path": "webui/vite.config.ts",
+          "before": "6777d606cb61c8c2dff847db20cd3beab87780ea970b50adb7640ed17efd853e",
+          "after": "5ea657ea00c8cea74ed35a8f5d028cae739873a69f8531313eaa815311354878",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_36e1t2gaLFS5jWlxjuW5zCWD:0",
+      "time": "2026-07-23T09:07:29.719Z",
+      "orderTime": "2026-07-23T12:45:53.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "a8e6bbc71453031cae7c8c5894d0220ed466ed6770cb89529d02ab657cfe1e42",
+      "source": {
+        "session": "019f8e3a-dacd-7bf3-9f2b-0bd47ba6917a",
+        "line": 121
+      },
+      "turn": "019f8ef9-6ce7-77f3-bd52-aeb331b3a027",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "webui/src/sync.ts",
+          "before": "bd2312f09708a2fc28985ef5302015c0dbd4349677d980085aa77054d262ca02",
+          "after": "a99eb43d60ac2d3fb5fdcc51146ec81a90d1a8f29ad84588f6729fc0266b9d41",
+          "method": "patch"
+        },
+        {
+          "path": "webui/src/views/settings.tsx",
+          "before": "fd7ce1a5419be4f310af6e72268194a82caa7124554184262ffb87b17901da83",
+          "after": "245abd7cf4ce72f8b6bcbf3f40f4b3201987b9ad1b6df2828d6cec827cddffa7",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_kq9GEdktiIIgiAq7F3jpxhpd:0",
+      "time": "2026-07-23T09:07:29.719Z",
+      "orderTime": "2026-07-23T12:46:10.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "d12aeede5cb000848654b10ed897de736d9de22f5a6a04645a957f2e001e9129",
+      "source": {
+        "session": "019f8e3a-dacd-7bf3-9f2b-0bd47ba6917a",
+        "line": 128
+      },
+      "turn": "019f8ef9-6ce7-77f3-bd52-aeb331b3a027",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/design/tokens.json",
+          "before": null,
+          "after": "eb7f07d9bcc4e77715df2a532a0a26fe6ce015d7a3f7a53d2f121a526fd681c4",
+          "method": "patch"
+        },
+        {
+          "path": "internal/design/tokens.go",
+          "before": null,
+          "after": "b85a755e6cba823e0788882d6464f93f4a40b7176f444b4469b51a0223f51760",
+          "method": "patch"
+        },
+        {
+          "path": "internal/design/tokens_test.go",
+          "before": null,
+          "after": "18233d5704ed4bee3076819b98d8cdc494c9ec5fa2440e5ee189b60f2dddde79",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_83Pw94O4lDLkhrtLbcrfdK8C:0",
+      "time": "2026-07-23T09:27:13.811Z",
+      "orderTime": "2026-07-23T12:46:16.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "8a9118fd96af08b54b86c22eb7ee09959f9e7936b855a745a88698c3dfca2673",
+      "source": {
+        "session": "019f8e4c-ebf6-7842-b2da-d33bcebdd6b1",
+        "line": 335
+      },
+      "turn": "019f8ef9-3d8d-7473-b5c5-72f05898f848",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/localapi/hub.go",
+          "before": "fe22ae437494c6eae216a6765a25f85d0eb7725975c338399bf5190f30763c90",
+          "after": "cc6bcc95fb50bd4324aa34f321b14aa5a41b9e90011387d2ab3eb521d9a02128",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_rWtN0rNMuieQHVvI4dCfgPMM:0",
+      "time": "2026-07-23T09:27:13.811Z",
+      "orderTime": "2026-07-23T12:47:00.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "2967d349374b5f18e62a9baabf77906662ed7a863c25205f747110d4eb37034f",
+      "source": {
+        "session": "019f8e4c-ebf6-7842-b2da-d33bcebdd6b1",
+        "line": 340
+      },
+      "turn": "019f8ef9-3d8d-7473-b5c5-72f05898f848",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/localapi/browser.go",
+          "before": "81f637d0864fc68e99cd8ed59f4341d41d4b3700e93119b0b1f49460db39b62b",
+          "after": "20615d2bdd94ed325d833e7a07ce65d183eb4e74cf1d1db9978d3cbf6bfbbb03",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_pDnsbjoPGegehkQZt6At6IWf:0",
+      "time": "2026-07-23T09:07:29.719Z",
+      "orderTime": "2026-07-23T12:47:05.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "18ef34efc2de790e315497ac2e9a0e6cd3ed36caef51889bf55a118e9fbc5c15",
+      "source": {
+        "session": "019f8e3a-dacd-7bf3-9f2b-0bd47ba6917a",
+        "line": 134
+      },
+      "turn": "019f8ef9-6ce7-77f3-bd52-aeb331b3a027",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "webui/vite.config.ts",
+          "before": "5ea657ea00c8cea74ed35a8f5d028cae739873a69f8531313eaa815311354878",
+          "after": "2c8211ef3012d658f27fcd74adba700f7115857115b3c666e7d9988d3b05820c",
+          "method": "patch"
+        },
+        {
+          "path": "webui/src/vite-env.d.ts",
+          "before": null,
+          "after": "fae5d14daa55b2c956a052502cc4a5951d5a51090c0713f41473e2f1fae77952",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_PcmBPAR4psWrd8r8S9SRViI0:0",
+      "time": "2026-07-23T09:07:29.719Z",
+      "orderTime": "2026-07-23T12:48:02.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "842fab566445daf7d88ab1e216846661f6dcc80b4452c6a9fbb7c7063b96a398",
+      "source": {
+        "session": "019f8e3a-dacd-7bf3-9f2b-0bd47ba6917a",
+        "line": 158
+      },
+      "turn": "019f8ef9-6ce7-77f3-bd52-aeb331b3a027",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "webui/src/contracts.ts",
+          "before": "796119e806f6557c55418ab3caee74f37675f5a08de37186fa8a078a82db4be1",
+          "after": "24d84a0ad598a186880e75392242c195f7b38acd4860b8f39a2a2fae0e8a1949",
+          "method": "patch"
+        },
+        {
+          "path": "webui/src/api.ts",
+          "before": "6377a60f5ea57b07e238219b658c9ce89d4b5e57f541bb35c12f8c13601295ea",
+          "after": "c38be355f382e66477f95b44f0007ec4a04ff8a48c95d0d903f81f561606ce59",
+          "method": "patch"
+        },
+        {
+          "path": "webui/src/store.ts",
+          "before": "45098399be6c0d2d1009b4a41ffe4ba31e2b89005297d71b8aa71d747139d17c",
+          "after": "50f5084772dfc06e5c02d08940b4203ec0017659a588fba77595a420db80b097",
+          "method": "patch"
+        },
+        {
+          "path": "webui/src/sync.ts",
+          "before": "a99eb43d60ac2d3fb5fdcc51146ec81a90d1a8f29ad84588f6729fc0266b9d41",
+          "after": "3d77cada42b04c8f2b697c9668bc0cfb6b211e46c393d35ea9fa74b0826723e9",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_26T9WmVw06r9uj2f0ZkzxQty:0",
+      "time": "2026-07-23T09:07:29.719Z",
+      "orderTime": "2026-07-23T12:48:43.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "5fd5fa49fc2bd69a8d51272e2c218fb49e15a7295a27c0ad45a88415a3cc814b",
+      "source": {
+        "session": "019f8e3a-dacd-7bf3-9f2b-0bd47ba6917a",
+        "line": 167
+      },
+      "turn": "019f8ef9-6ce7-77f3-bd52-aeb331b3a027",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "webui/src/views/diagnostics.tsx",
+          "before": null,
+          "after": "a1fd31b382da46bebdd151d146e90332d6431c53bdfc2983d5b8250ae23fbddc",
+          "method": "patch"
+        },
+        {
+          "path": "webui/src/views/about.tsx",
+          "before": null,
+          "after": "e4cc0e7dba838e2fe7ba908f9bfad34507d05bbead5ba1de93b51ede67a13c40",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_cAcvAzg944i7ViJ0srjBPved:0",
+      "time": "2026-07-23T09:27:13.811Z",
+      "orderTime": "2026-07-23T12:49:25.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "b1fa37444b11d0e424ad42331708d9777a623c823c5290311b56927c916e610a",
+      "source": {
+        "session": "019f8e4c-ebf6-7842-b2da-d33bcebdd6b1",
+        "line": 381
+      },
+      "turn": "019f8ef9-3d8d-7473-b5c5-72f05898f848",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/localapi/browser.go",
+          "before": "20615d2bdd94ed325d833e7a07ce65d183eb4e74cf1d1db9978d3cbf6bfbbb03",
+          "after": "952c5900b9df46984a2272da0b8e8c5c63915ced4177f9210a63fde4a040fa10",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_pMqlPlaHGKjoA2TCOjFZeI4r:0",
+      "time": "2026-07-23T09:27:13.811Z",
+      "orderTime": "2026-07-23T12:49:32.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "801904cffbe07b953d8dca51e35ca211892a408c9a83a95af0cf7567369ee918",
+      "source": {
+        "session": "019f8e4c-ebf6-7842-b2da-d33bcebdd6b1",
+        "line": 386
+      },
+      "turn": "019f8ef9-3d8d-7473-b5c5-72f05898f848",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/localapi/browser_test.go",
+          "before": null,
+          "after": "d34c071fdf7dc3b484298cbfea642e72ca258d5a084daecd33c0ed89abefd853",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_MXXzKpgDerkDWfidrGimaIPl:0",
+      "time": "2026-07-23T09:07:29.719Z",
+      "orderTime": "2026-07-23T12:49:53.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "e9202fbbea862b3ea400a7c4308bbd6c34e38611df4ae17a5eef8c603c5b9867",
+      "source": {
+        "session": "019f8e3a-dacd-7bf3-9f2b-0bd47ba6917a",
+        "line": 172
+      },
+      "turn": "019f8ef9-6ce7-77f3-bd52-aeb331b3a027",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "webui/src/views/settings.tsx",
+          "before": "245abd7cf4ce72f8b6bcbf3f40f4b3201987b9ad1b6df2828d6cec827cddffa7",
+          "after": "83e235c16a4c2abd2c6a7151382be3a5f4328af4f53419ca3ecc655d3d941ded",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_mGIEj0FN6PKqp33TXIqvug4j:0",
+      "time": "2026-07-23T09:07:29.719Z",
+      "orderTime": "2026-07-23T12:50:33.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "6455be575a40d2ca0f322da39d671ce90f31312a6b0bba183f4ec1b511ab278a",
+      "source": {
+        "session": "019f8e3a-dacd-7bf3-9f2b-0bd47ba6917a",
+        "line": 180
+      },
+      "turn": "019f8ef9-6ce7-77f3-bd52-aeb331b3a027",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "webui/src/app.tsx",
+          "before": null,
+          "after": "d01d962466fa4ebc0571b20c6cea05eb13b76bafc338205daca7df9838aafc26",
+          "method": "patch"
+        },
+        {
+          "path": "webui/src/main.tsx",
+          "before": null,
+          "after": "ff023c6fb60223fd4bfe1322cf64c050e130c52e1aeb625c5d56d2e987b5dfcd",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_nZNULsyD5FVAPRtCvnpUmiQS:0",
+      "time": "2026-07-23T09:27:13.811Z",
+      "orderTime": "2026-07-23T12:51:00.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "4ef92000f53dfcffb98637a169ce2ce6332b0445d1f2bbaad1934efb23e1d7c4",
+      "source": {
+        "session": "019f8e4c-ebf6-7842-b2da-d33bcebdd6b1",
+        "line": 394
+      },
+      "turn": "019f8ef9-3d8d-7473-b5c5-72f05898f848",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/localapi/hub.go",
+          "before": "cc6bcc95fb50bd4324aa34f321b14aa5a41b9e90011387d2ab3eb521d9a02128",
+          "after": "1644a63876cfbdfe3adfa6b02f8beae99f7cc70b3ee5f38a6ad88482663cbd3f",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_RFKrbW7dabp6n2WbB0CGPszq:0",
+      "time": "2026-07-23T12:51:22.322Z",
+      "orderTime": "2026-07-23T12:51:22.322Z",
+      "timeBasis": "record",
+      "hash": "70f70a88bc53f6d39c4944e1cc5709adf331d8c82a477c36cf18daa902f3bf5b",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 10262
+      },
+      "turn": "019f8ef2-abac-7513-af50-db5aef30b92f",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/ui/shell_windows.go",
+          "before": "90c0c709be326d5d93ced4470fbba7c8f20f7e8db40a5483fb7ff7c704e31f95",
+          "after": "50a0c6b2005823a79d9b2f0ef50d488527a9694225a7c106ff1fa55c4daa9e99",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_DwCizUi8oALWBNpB8izCvOUe:0",
+      "time": "2026-07-23T09:07:29.719Z",
+      "orderTime": "2026-07-23T12:51:28.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "5fa1fee957f08e5210ffe10e8bb1bb5a671a1455c314e9ca7a3282e4a21835e4",
+      "source": {
+        "session": "019f8e3a-dacd-7bf3-9f2b-0bd47ba6917a",
+        "line": 185
+      },
+      "turn": "019f8ef9-6ce7-77f3-bd52-aeb331b3a027",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "webui/src/styles/app.css",
+          "before": null,
+          "after": "0314c9c18ae532ba344f01133d69ac429ccdc405feaf5413085fca2dd10ee725",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_OLATG7BXX1U9vdRNaukKHb2d:0",
+      "time": "2026-07-23T12:51:30.602Z",
+      "orderTime": "2026-07-23T12:51:30.602Z",
+      "timeBasis": "record",
+      "hash": "ab7aeb044ddb6bc8646e99a3b006ed9bd183f659bc4177bdecb43d550273fb95",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 10267
+      },
+      "turn": "019f8ef2-abac-7513-af50-db5aef30b92f",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/ui/shell_windows.go",
+          "before": "50a0c6b2005823a79d9b2f0ef50d488527a9694225a7c106ff1fa55c4daa9e99",
+          "after": "53ab28e6ae24bb8deb1bf4b3e88bce751d8583fa076929fc201c6b7623c1a6a9",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_og3lD5Sdh39sQzkONdmEcEXC:0",
+      "time": "2026-07-23T09:27:13.811Z",
+      "orderTime": "2026-07-23T12:51:48.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "70c812e6f37f631b37fd8b1dc2608fb25703768328899b42a2cf3477052bbd8a",
+      "source": {
+        "session": "019f8e4c-ebf6-7842-b2da-d33bcebdd6b1",
+        "line": 412
+      },
+      "turn": "019f8ef9-3d8d-7473-b5c5-72f05898f848",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/application/application_windows_test.go",
+          "before": "dcc7a847f415a7ee736fe461c571c03a9ffa9794f6b39a610a107ab92ca7c09d",
+          "after": "dca5af4a63ace6c876361c54a9a4c882e94ae11eb2e11eeed12a9e25932e8eaa",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_mCiBn8lK7a6XWGdeS9KlgNn0:0",
+      "time": "2026-07-23T12:52:24.212Z",
+      "orderTime": "2026-07-23T12:52:24.212Z",
+      "timeBasis": "record",
+      "hash": "8627a47a2c84d9c9409e934865f70b1f9ea3c18a8a37fb578d1be1d6ecfaa01e",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 10296
+      },
+      "turn": "019f8ef2-abac-7513-af50-db5aef30b92f",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/ui/shell_windows.go",
+          "before": "53ab28e6ae24bb8deb1bf4b3e88bce751d8583fa076929fc201c6b7623c1a6a9",
+          "after": "756146b0fa01029cad2fd626692f34adbd1475e72d2e84b513a61cb1098b6bec",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_gTzLlm6sFgqXCFh3cD0YCWbv:0",
+      "time": "2026-07-23T12:52:35.849Z",
+      "orderTime": "2026-07-23T12:52:35.849Z",
+      "timeBasis": "record",
+      "hash": "7ee9f3fd737c3b9c414d5bb6ee8f42775eb78c0edf5d5ad943680cce025a49bc",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 10301
+      },
+      "turn": "019f8ef2-abac-7513-af50-db5aef30b92f",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/dialogs/dialogs_windows_test.go",
+          "before": "d83f87f44067a7ea17626e40a05a5f777a7bf674e2719fec8b4b34bc8e7519b4",
+          "after": "52e4b90fa0010581243ba8af66f736654eb6a038844fbf202e19a99ff631cb17",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_hyS0KLc5fhgF4EhBxF1gYBIq:0",
+      "time": "2026-07-23T09:27:13.811Z",
+      "orderTime": "2026-07-23T12:52:46.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "83e0665a5104bd2e7bdef059c8c51934399413f926345c10298b96247ccaacfb",
+      "source": {
+        "session": "019f8e4c-ebf6-7842-b2da-d33bcebdd6b1",
+        "line": 437
+      },
+      "turn": "019f8ef9-3d8d-7473-b5c5-72f05898f848",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/localapi/hub.go",
+          "before": "1644a63876cfbdfe3adfa6b02f8beae99f7cc70b3ee5f38a6ad88482663cbd3f",
+          "after": "586c9e690d705474bfdf32a74d5af23e65ded5d2c9d604c04f444504e3c6c2c7",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_dWRFWta9c7CNZfzd0oAA5sac:0",
+      "time": "2026-07-23T09:27:13.811Z",
+      "orderTime": "2026-07-23T12:52:54.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "068b95e07620fc620860b89facde6e4561bc61c11ac1053a7e49da371111236d",
+      "source": {
+        "session": "019f8e4c-ebf6-7842-b2da-d33bcebdd6b1",
+        "line": 442
+      },
+      "turn": "019f8ef9-3d8d-7473-b5c5-72f05898f848",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/localapi/browser_test.go",
+          "before": "d34c071fdf7dc3b484298cbfea642e72ca258d5a084daecd33c0ed89abefd853",
+          "after": "25d2bc29200f5d6c3c2bf09d041851779d02ab7f3f0fe1aec105c19c96aa08e9",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_jle8IhUI4BvcEvLvEhQyXEt0:0",
+      "time": "2026-07-23T12:53:38.421Z",
+      "orderTime": "2026-07-23T12:53:38.421Z",
+      "timeBasis": "record",
+      "hash": "63af4839f5ec8b125683092f0c5549a44ff3f1045d76e036345327f4f3099ddf",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 10326
+      },
+      "turn": "019f8ef2-abac-7513-af50-db5aef30b92f",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/commands/dispatcher.go",
+          "before": "41510ddaa763b67c6071a33f314a6e5910e334f32fd9772283e2df5e6d219da6",
+          "after": "574e6f41f8a41dd1f85f90c99350db527898e6ec91eaa2338f9cce02bd2d712a",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_Lix7J8JgG1MzfYggGIQygprG:0",
+      "time": "2026-07-23T12:53:43.383Z",
+      "orderTime": "2026-07-23T12:53:43.383Z",
+      "timeBasis": "record",
+      "hash": "b805b40eafb343631b180a4de2b704d7be42a10509673214aedd9566adae1533",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 10331
+      },
+      "turn": "019f8ef2-abac-7513-af50-db5aef30b92f",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/ui/shell_windows.go",
+          "before": "756146b0fa01029cad2fd626692f34adbd1475e72d2e84b513a61cb1098b6bec",
+          "after": "7d37d5a5226ca371c5bcb4cec8c9f9985c8604ccd779fdf49b9b50461eb5a20e",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_lKjttFR9zGvD0ydj8lghByie:0",
+      "time": "2026-07-23T12:53:52.633Z",
+      "orderTime": "2026-07-23T12:53:52.633Z",
+      "timeBasis": "record",
+      "hash": "f92ad4ce85a2f1d074ad17603f7e75dfc1b8a76b070f2c883169d15672cdb256",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 10336
+      },
+      "turn": "019f8ef2-abac-7513-af50-db5aef30b92f",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/ui/actions_windows.go",
+          "before": "e0d36f36bad875dbef1f3f1d3c08941f2ffcba89d495baefe37b58353966bf9e",
+          "after": "c8dc77d2d0ab1ab0305bc6dfe9858f3c4c10f18f26e6c2104183631a51ab5c55",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_sjj7Ly1KhKvJNy6qjnmqtt1E:0",
+      "time": "2026-07-23T12:54:34.701Z",
+      "orderTime": "2026-07-23T12:54:34.701Z",
+      "timeBasis": "record",
+      "hash": "f5c9f3f91072b4cb0ffd1165d13e7ae3cfd23fe828c86bc09be95aa4a8de774a",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 10348
+      },
+      "turn": "019f8ef2-abac-7513-af50-db5aef30b92f",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/winfx/openurl_windows.go",
+          "before": null,
+          "after": "78157f4169698920eeed8cad2aa334697e97f1eb08f6cd3164e43ca7d148b0a1",
+          "method": "patch"
+        },
+        {
+          "path": "internal/winfx/openurl_windows_test.go",
+          "before": null,
+          "after": "dcfcf8d72d9ed3640a16483cc3cf6a6121b097cacd5a0a6ffffa1572b786afd0",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_r1TU0clkks9eLkteFapcxXwT:0",
+      "time": "2026-07-23T12:54:57.203Z",
+      "orderTime": "2026-07-23T12:54:57.203Z",
+      "timeBasis": "record",
+      "hash": "fe1af6e5f80d583b63f5a9284dfd0fdfe4b13a7b78099806bdb5fc5fcb2577ae",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 10360
+      },
+      "turn": "019f8ef2-abac-7513-af50-db5aef30b92f",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/cli/cli.go",
+          "before": "58e2bb5f3a6a9e6119b16398d9161ca988b10a9766e925735411269481b1b176",
+          "after": "5222742c448b3a3ef25f26d3c4d725348c3a2c21fd6f83f105754f7397d7fbab",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_Wsrreout0frrifOpbEDKbCdN:0",
+      "time": "2026-07-23T09:27:13.811Z",
+      "orderTime": "2026-07-23T12:54:59.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "a02c119562c52ab7572766bb165c214c9ec5330fcb39d2e9f134840d289aa6c0",
+      "source": {
+        "session": "019f8e4c-ebf6-7842-b2da-d33bcebdd6b1",
+        "line": 482
+      },
+      "turn": "019f8ef9-3d8d-7473-b5c5-72f05898f848",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/localapi/hub.go",
+          "before": "586c9e690d705474bfdf32a74d5af23e65ded5d2c9d604c04f444504e3c6c2c7",
+          "after": "55e827a198485dbfbbdb4b26ff385e852fe321c3efb6c6bf8db931db4f700b72",
+          "method": "patch-after-gofmt"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_d3aGLF1p1q26C7TUa0h7dMs2:0",
+      "time": "2026-07-23T12:55:43.831Z",
+      "orderTime": "2026-07-23T12:55:43.831Z",
+      "timeBasis": "record",
+      "hash": "2348e8dfbb868cd568f990b0b6fd6fb2e7dc6eed5af187e25f3f6a517ee4449f",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 10377
+      },
+      "turn": "019f8ef2-abac-7513-af50-db5aef30b92f",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/cli/cli_test.go",
+          "before": "074c764b81236b3250ad66200c3c9cd11f0c9be51660b0e33568f993d965ca85",
+          "after": "df743d5da23a4e0fc38497576d985d5c3eb5e542ef53020a8c75568aea27bf49",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_4bagE766gueGdBCp3WHBcChz:0",
+      "time": "2026-07-23T09:27:13.811Z",
+      "orderTime": "2026-07-23T12:55:50.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "af3d870f2cc6131056f3d4f80cc83fd9a487b1c989688cd1d09d7b4b99eb2bb2",
+      "source": {
+        "session": "019f8e4c-ebf6-7842-b2da-d33bcebdd6b1",
+        "line": 498
+      },
+      "turn": "019f8ef9-3d8d-7473-b5c5-72f05898f848",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/localapi/browser.go",
+          "before": "952c5900b9df46984a2272da0b8e8c5c63915ced4177f9210a63fde4a040fa10",
+          "after": "daba13378e14e519adcd837e5d5c884c66444e8ead4f40429e3629042e4804f6",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_ktaHSgK8sTV53ipRfRTJ2VaB:0",
+      "time": "2026-07-23T12:56:09.795Z",
+      "orderTime": "2026-07-23T12:56:09.795Z",
+      "timeBasis": "record",
+      "hash": "86f7ea419f9a44206db281503f35face5fc9770b002cc9d1a7b585ae215c8837",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 10390
+      },
+      "turn": "019f8ef2-abac-7513-af50-db5aef30b92f",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/commands/dispatcher_test.go",
+          "before": "84d139c5244f934290f8ccd77aea40a30b97654d0b7927ba504bc232998cae82",
+          "after": "b6f55b940214906b01d3bcb9d16925e517d43f33ba0632fd2487202cd09fff7c",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_UY7JvE1wQb9AMlkcM25M4dcy:0",
+      "time": "2026-07-23T09:27:13.811Z",
+      "orderTime": "2026-07-23T12:56:45.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "a31217df7ed2a1a84c6e33171c8535d7140422b7e36408fadd8aaae5b9e5132d",
+      "source": {
+        "session": "019f8e4c-ebf6-7842-b2da-d33bcebdd6b1",
+        "line": 516
+      },
+      "turn": "019f8ef9-3d8d-7473-b5c5-72f05898f848",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/localapi/browser.go",
+          "before": "daba13378e14e519adcd837e5d5c884c66444e8ead4f40429e3629042e4804f6",
+          "after": "785b874d7e12a21864129ca9024076c8630df1213b86291b78d0feb092cdb5d4",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_mRSRWbwiu9jQcjPZvwY0A4st:0",
+      "time": "2026-07-23T09:27:13.811Z",
+      "orderTime": "2026-07-23T12:56:50.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "c4b065c2361c5427cdbcc68bb821bac7a65342f37e2cafca0f8c8f8dd2c74281",
+      "source": {
+        "session": "019f8e4c-ebf6-7842-b2da-d33bcebdd6b1",
+        "line": 523
+      },
+      "turn": "019f8ef9-3d8d-7473-b5c5-72f05898f848",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/localapi/hub.go",
+          "before": "55e827a198485dbfbbdb4b26ff385e852fe321c3efb6c6bf8db931db4f700b72",
+          "after": "6522b3d7c678d8736b7a1961090f955beee6ffc549b0178ee53c13e95376ff06",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_h8Meq933XHNHfTAFAnZlwr30:0",
+      "time": "2026-07-23T09:07:29.719Z",
+      "orderTime": "2026-07-23T12:57:05.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "5d45d90a73b51e4efd47d9725983ea6037b543e6c18768769beccfb485665315",
+      "source": {
+        "session": "019f8e3a-dacd-7bf3-9f2b-0bd47ba6917a",
+        "line": 197
+      },
+      "turn": "019f8ef9-6ce7-77f3-bd52-aeb331b3a027",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "webui/src/contracts.ts",
+          "before": "24d84a0ad598a186880e75392242c195f7b38acd4860b8f39a2a2fae0e8a1949",
+          "after": "18d98ea15e1a5f85a5b5233cc970c784f2139cd3e5bd3967d5a1cdaf68365cff",
+          "method": "patch"
+        },
+        {
+          "path": "webui/src/api.ts",
+          "before": "c38be355f382e66477f95b44f0007ec4a04ff8a48c95d0d903f81f561606ce59",
+          "after": "4a515b2f9967bc1a1c0f1e08bbadf8b3d14309f82e91ed879949c3899607f887",
+          "method": "patch"
+        },
+        {
+          "path": "webui/src/views/diagnostics.tsx",
+          "before": "a1fd31b382da46bebdd151d146e90332d6431c53bdfc2983d5b8250ae23fbddc",
+          "after": "b0fa63bf21e1b7ce26ebb975e1b05670e1634d19bef58564b40566787e6ac22b",
+          "method": "patch"
+        },
+        {
+          "path": "webui/src/store.ts",
+          "before": "50f5084772dfc06e5c02d08940b4203ec0017659a588fba77595a420db80b097",
+          "after": "501c030a654d8384a4563b09c370c83c4f759cbdfdaf8f30c025163b6cce8850",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_xw66XJWEXsDE6N6Qzh3b7O9V:0",
+      "time": "2026-07-23T09:27:13.811Z",
+      "orderTime": "2026-07-23T12:57:18.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "4a6f86b447acd9605fe0c41688087087d21953ab06f936582f9749cc79cddee2",
+      "source": {
+        "session": "019f8e4c-ebf6-7842-b2da-d33bcebdd6b1",
+        "line": 533
+      },
+      "turn": "019f8ef9-3d8d-7473-b5c5-72f05898f848",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/localapi/browser_test.go",
+          "before": "25d2bc29200f5d6c3c2bf09d041851779d02ab7f3f0fe1aec105c19c96aa08e9",
+          "after": "01231a84ada1e50ac961fb41180c2de02dc7dc658c3fccf3956924492393c7e4",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_6vD3xaYFygwcmXBRWE2yFLAV:0",
+      "time": "2026-07-23T12:58:52.526Z",
+      "orderTime": "2026-07-23T12:58:52.526Z",
+      "timeBasis": "record",
+      "hash": "f240af64a4e55368cef54c5816ec98b6c22ab2a9bec89372dd0b138017b5de8c",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 10464
+      },
+      "turn": "019f8ef2-abac-7513-af50-db5aef30b92f",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/application/application_windows.go",
+          "before": "ddabe6ab4fd8d32dfffdeabee28696f19afd60366c05b55633121b2f4a4e7f6d",
+          "after": "8b6f68015743960d9861ac35ea195e237e4e76143d0ad799d98842d847a65e4f",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_axRqhgmjr71BEHJqZGaPFWqR:0",
+      "time": "2026-07-23T12:59:14.791Z",
+      "orderTime": "2026-07-23T12:59:14.791Z",
+      "timeBasis": "record",
+      "hash": "2dbd61c73d5af6b2ca3f9bd4afeafdfe1e3c87ff569ecae1a1bd3f64049024e7",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 10477
+      },
+      "turn": "019f8ef2-abac-7513-af50-db5aef30b92f",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/application/application_windows_test.go",
+          "before": "dca5af4a63ace6c876361c54a9a4c882e94ae11eb2e11eeed12a9e25932e8eaa",
+          "after": "103ea1bee1d532bf5d637b37b3dd787fc98bd23611c8f61ede40e6984044481f",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_c4LB1DlaFenY5C2eVEM9iB2z:0",
+      "time": "2026-07-23T09:07:29.719Z",
+      "orderTime": "2026-07-23T12:59:42.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "aeee579a9a058eb9356dce256533b80be2a1bd9c6c752d562a325297285efabe",
+      "source": {
+        "session": "019f8e3a-dacd-7bf3-9f2b-0bd47ba6917a",
+        "line": 239
+      },
+      "turn": "019f8ef9-6ce7-77f3-bd52-aeb331b3a027",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "webui/package.json",
+          "before": "7d453bcdcd53b715a589e2e429c85f001fbdc18a06f324e57e1324ec3be100c2",
+          "after": "03c5a191c10170b555230cb29e7cd3d12cc5ca23b328ca311c2a83dd2b833bf0",
+          "method": "patch"
+        },
+        {
+          "path": "webui/tsconfig.json",
+          "before": "1fc3ebf0ead5f745c02617ebf383cf03bb1aca85f28eb09a1497c708bda67202",
+          "after": "d181c8dc3718e343730b3b7fe22adc780e698984d4114d7d1c9c6df0ec9e169f",
+          "method": "patch"
+        },
+        {
+          "path": "webui/vite.config.ts",
+          "before": "2c8211ef3012d658f27fcd74adba700f7115857115b3c666e7d9988d3b05820c",
+          "after": "7346b7df6292ec7794ed035a8c67e81960d3519026de87ada85cc444cbd375ff",
+          "method": "patch"
+        },
+        {
+          "path": "webui/vitest.config.ts",
+          "before": null,
+          "after": "36a86b88c128aa25f0e9fc754c0e579e56629e4afc4654f684de82774a56327d",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_GvOEJSEem0OW4JPviZJXxQYz:0",
+      "time": "2026-07-23T09:07:29.719Z",
+      "orderTime": "2026-07-23T12:59:53.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "76f586f51477fc98d3940860b497c3038dcda662268ae8b87a8c1df429f84858",
+      "source": {
+        "session": "019f8e3a-dacd-7bf3-9f2b-0bd47ba6917a",
+        "line": 243
+      },
+      "turn": "019f8ef9-6ce7-77f3-bd52-aeb331b3a027",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "webui/src/store.ts",
+          "before": "501c030a654d8384a4563b09c370c83c4f759cbdfdaf8f30c025163b6cce8850",
+          "after": "7a6d57f73e454f57f8d635b1a3432eb55395c9c18da91af014b2872971e07955",
+          "method": "patch"
+        },
+        {
+          "path": "webui/src/views/diagnostics.tsx",
+          "before": "b0fa63bf21e1b7ce26ebb975e1b05670e1634d19bef58564b40566787e6ac22b",
+          "after": "b0829c4b715d44a7ffdeb9ff53ddace17dd6512f36ad6d7802deeb12827f8d41",
+          "method": "patch"
+        },
+        {
+          "path": "webui/src/views/settings.tsx",
+          "before": "83e235c16a4c2abd2c6a7151382be3a5f4328af4f53419ca3ecc655d3d941ded",
+          "after": "ae641937415a8ba65bbfb10fa746bef35c2621223bf6a24a4ea1eca1e1702f3e",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_ttcHt8z5ECwQvpYz9PxKWDnj:0",
+      "time": "2026-07-23T09:07:29.719Z",
+      "orderTime": "2026-07-23T13:00:19.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "ae0aa963f026e84e69230bd3c93371bca55d0d82157248827fc9f464ad72034d",
+      "source": {
+        "session": "019f8e3a-dacd-7bf3-9f2b-0bd47ba6917a",
+        "line": 253
+      },
+      "turn": "019f8ef9-6ce7-77f3-bd52-aeb331b3a027",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "webui/src/test/setup.ts",
+          "before": null,
+          "after": "a3e1bf18c9e57f39ea0df9a57e58bde94b1456475a63feb6b07250eabdf67527",
+          "method": "patch"
+        },
+        {
+          "path": "webui/src/test/fixtures.ts",
+          "before": null,
+          "after": "d99a7ef59bc6a10a89b2af36f8bbfa7c2cd4ab4a0a6e38a20966788803f32d71",
+          "method": "patch"
+        },
+        {
+          "path": "webui/src/api.test.ts",
+          "before": null,
+          "after": "de29fb70cba93a3473037179cb2befaf414cb629c0b4fe7701ccd910c1be1949",
+          "method": "patch"
+        },
+        {
+          "path": "webui/src/store.test.ts",
+          "before": null,
+          "after": "49d6f570065eed87e85cf8a549c956f87121525399ad623d04a3f0adc3b4211b",
+          "method": "patch"
+        },
+        {
+          "path": "webui/src/components/lamp-visual.test.tsx",
+          "before": null,
+          "after": "604fd42ea9f836385f5dcda921937f42f687bb436fb3fc361525c0cb5a29a842",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_LlWvHizrLflWsd7TZUuYIn3f:0",
+      "time": "2026-07-23T09:27:13.811Z",
+      "orderTime": "2026-07-23T13:01:52.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "5767c731769f00e9d2c3e67c031d65f1f6475caa8ebf1ae50174db17bf6c3346",
+      "source": {
+        "session": "019f8e4c-ebf6-7842-b2da-d33bcebdd6b1",
+        "line": 622
+      },
+      "turn": "019f8ef9-3d8d-7473-b5c5-72f05898f848",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/localapi/session.go",
+          "before": "5501d7c986c9b8663e3fe8c909126b80751099e60a95426a95e2eb2a70b6376c",
+          "after": "a5701cbfc3dd2fb62df5fe87a04a922b9dbc826bb85c3004bef6d11cc14cd4e9",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_oPz1Yv33LH1YBK5LpIlMT6z0:0",
+      "time": "2026-07-23T09:27:13.811Z",
+      "orderTime": "2026-07-23T13:01:56.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "2e673e9db6469bcbd3d9c44cbd2fdd8d171c44ef9ee6d699c4633bf648cf4dc7",
+      "source": {
+        "session": "019f8e4c-ebf6-7842-b2da-d33bcebdd6b1",
+        "line": 627
+      },
+      "turn": "019f8ef9-3d8d-7473-b5c5-72f05898f848",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/localapi/browser.go",
+          "before": "785b874d7e12a21864129ca9024076c8630df1213b86291b78d0feb092cdb5d4",
+          "after": "32480e861e263ccbe9cc41c37048f6a23663bc5ebc6bf2544c5294c817f231ac",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_iSKm7sx5avvuMh2yUye536pW:0",
+      "time": "2026-07-23T09:27:13.811Z",
+      "orderTime": "2026-07-23T13:02:03.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "a25a9af519c8169eddcbaa5b7bd6a70893fab4bf0a9a796f45407168f9bcbc08",
+      "source": {
+        "session": "019f8e4c-ebf6-7842-b2da-d33bcebdd6b1",
+        "line": 632
+      },
+      "turn": "019f8ef9-3d8d-7473-b5c5-72f05898f848",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/localapi/browser_test.go",
+          "before": "01231a84ada1e50ac961fb41180c2de02dc7dc658c3fccf3956924492393c7e4",
+          "after": "30107cc086bf72d8b4c3867908083e7b1e85ed2408d14cb3053b7244226edac0",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_e9Q2bXR2ZB5V3liSR4bf2HVh:0",
+      "time": "2026-07-23T09:07:29.719Z",
+      "orderTime": "2026-07-23T13:02:25.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "d33bf653c5a25360c06bf786e17df650e4ab07dda0c0f319a22eb19537d858cb",
+      "source": {
+        "session": "019f8e3a-dacd-7bf3-9f2b-0bd47ba6917a",
+        "line": 271
+      },
+      "turn": "019f8ef9-6ce7-77f3-bd52-aeb331b3a027",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/design/tokens.json",
+          "before": "eb7f07d9bcc4e77715df2a532a0a26fe6ce015d7a3f7a53d2f121a526fd681c4",
+          "after": "9986cc591ef2f46ac6328305891b339fea08cf59d3fdccd839aec57a9b4cfa73",
+          "method": "patch"
+        },
+        {
+          "path": "internal/design/tokens.go",
+          "before": "b85a755e6cba823e0788882d6464f93f4a40b7176f444b4469b51a0223f51760",
+          "after": "f88d3842c30b49cb955976310294ea715d84925d026790eb6ce4b8fd49d46bb1",
+          "method": "patch"
+        },
+        {
+          "path": "internal/design/tokens_test.go",
+          "before": "18233d5704ed4bee3076819b98d8cdc494c9ec5fa2440e5ee189b60f2dddde79",
+          "after": "8a79517cc3b0f5381ce427b5621c7f569d13797da0c4a1c29c5ba744647c4fd8",
+          "method": "patch"
+        },
+        {
+          "path": "webui/src/styles/app.css",
+          "before": "0314c9c18ae532ba344f01133d69ac429ccdc405feaf5413085fca2dd10ee725",
+          "after": "7bc027799a31a06348a4efe3e00711530853f665218880f466d0b056aafa1db4",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_RZJZieXePZamAwOblrxgBWGh:0",
+      "time": "2026-07-23T09:07:29.719Z",
+      "orderTime": "2026-07-23T13:03:00.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "5c412ed8832fa64ec1a8dd47192388c5cd53dc39a194caafbcab8f07bdecc877",
+      "source": {
+        "session": "019f8e3a-dacd-7bf3-9f2b-0bd47ba6917a",
+        "line": 281
+      },
+      "turn": "019f8ef9-6ce7-77f3-bd52-aeb331b3a027",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/webui/embed.go",
+          "before": null,
+          "after": "390cb6e9044762d3f2d1733cf3ed65352b854c078ebb889ef26b07b0e57ab7c7",
+          "method": "patch"
+        },
+        {
+          "path": "internal/webui/handler.go",
+          "before": null,
+          "after": "929aa1abd0af9952f68183a1b530e993ff909cb07e08fa094126156972d11091",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_7hD3asTV0ZC38YfEr9cpyWo3:0",
+      "time": "2026-07-23T09:27:13.811Z",
+      "orderTime": "2026-07-23T13:03:15.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "ed4cb10dc039fbdd0cba504aa57b7c9a162cf04c77a100e9132356ac9f0b04a2",
+      "source": {
+        "session": "019f8e4c-ebf6-7842-b2da-d33bcebdd6b1",
+        "line": 658
+      },
+      "turn": "019f8ef9-3d8d-7473-b5c5-72f05898f848",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/localapi/browser.go",
+          "before": "32480e861e263ccbe9cc41c37048f6a23663bc5ebc6bf2544c5294c817f231ac",
+          "after": "46b230595fb8ee13e162a73aca9eaf4a2c2287e2dc5a57a2a09cab6983b95328",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_05rRK4jQWeHFwJHMUHyaUogd:0",
+      "time": "2026-07-23T09:27:13.811Z",
+      "orderTime": "2026-07-23T13:03:36.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "dfc2bf45bc2df6fa5d208d5329ad26ff0426f10a40338b05a8b7a4e66d549d95",
+      "source": {
+        "session": "019f8e4c-ebf6-7842-b2da-d33bcebdd6b1",
+        "line": 663
+      },
+      "turn": "019f8ef9-3d8d-7473-b5c5-72f05898f848",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/localapi/browser_test.go",
+          "before": "30107cc086bf72d8b4c3867908083e7b1e85ed2408d14cb3053b7244226edac0",
+          "after": "212b59836ad5ff88cefe26b2626c219b5f56aefac6ffb287c8f2f826d9964e0e",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_gBT3Z91AW88JBZhHAsuW1tYm:0",
+      "time": "2026-07-23T09:27:13.811Z",
+      "orderTime": "2026-07-23T13:04:20.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "ba82eeee8d745acf1f5ecd168b27ba7d032c35bcb10150603da7f963e650ac32",
+      "source": {
+        "session": "019f8e4c-ebf6-7842-b2da-d33bcebdd6b1",
+        "line": 680
+      },
+      "turn": "019f8ef9-3d8d-7473-b5c5-72f05898f848",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/application/application_windows.go",
+          "before": "8b6f68015743960d9861ac35ea195e237e4e76143d0ad799d98842d847a65e4f",
+          "after": "fd7ebb1b3b0ecc94d555d7eab5425294a7e4bb36debc7f85976f4fc0d0af0851",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_FaEgUs6FB6vH7tvjhKxagU8e:0",
+      "time": "2026-07-23T09:07:29.719Z",
+      "orderTime": "2026-07-23T13:04:32.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "ac87e7309057186f2174b8e2e0c0b5c20717eced06da061f1551071f36fd2360",
+      "source": {
+        "session": "019f8e3a-dacd-7bf3-9f2b-0bd47ba6917a",
+        "line": 304
+      },
+      "turn": "019f8ef9-6ce7-77f3-bd52-aeb331b3a027",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/webui/handler.go",
+          "before": "929aa1abd0af9952f68183a1b530e993ff909cb07e08fa094126156972d11091",
+          "after": "796b37442e834aea8ab32d2be604703acf3987f746a38d847e287862816d1f07",
+          "method": "patch"
+        },
+        {
+          "path": "webui/src/app.tsx",
+          "before": "d01d962466fa4ebc0571b20c6cea05eb13b76bafc338205daca7df9838aafc26",
+          "after": "13a0be05787435d2f30d6a112e64bc0f84c774f029ee911ce1f7cfbbe4851b9a",
+          "method": "patch"
+        },
+        {
+          "path": "webui/src/views/dashboard.tsx",
+          "before": "dec51b0d149393316c79f220ff0320f0b0ffffa9caf96f9e7ad672247cfdd612",
+          "after": "ca75189e68cf24053e8fdc357889a3b7010a02c8083c66784970301b2278e3e7",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_0ykouybwfpruYQqRYx8AwzqZ:0",
+      "time": "2026-07-23T09:07:29.719Z",
+      "orderTime": "2026-07-23T13:04:53.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "f5050d77216b2ed401b2c6996a12056dc4b004e0196c6fc1964c4ba00b08a077",
+      "source": {
+        "session": "019f8e3a-dacd-7bf3-9f2b-0bd47ba6917a",
+        "line": 313
+      },
+      "turn": "019f8ef9-6ce7-77f3-bd52-aeb331b3a027",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "webui/src/app.tsx",
+          "before": "13a0be05787435d2f30d6a112e64bc0f84c774f029ee911ce1f7cfbbe4851b9a",
+          "after": "d0677cfd9c15eaba94dd7dd7e11c27afc84280da1379446b6c5d3433a9c8c08f",
+          "method": "patch"
+        },
+        {
+          "path": "webui/src/views/diagnostics.tsx",
+          "before": "b0829c4b715d44a7ffdeb9ff53ddace17dd6512f36ad6d7802deeb12827f8d41",
+          "after": "3290567b55bcedbbeb3ce2f2ee6c788a3102af95d76ff9494859c2da303910c3",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_as2R0tw6JsTqmD0piCH3VfYb:0",
+      "time": "2026-07-23T09:07:29.719Z",
+      "orderTime": "2026-07-23T13:05:22.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "047e5f137ca35b9a5fc7d210efb50f33bbe4420f8af26eb7603ce84dbd938a62",
+      "source": {
+        "session": "019f8e3a-dacd-7bf3-9f2b-0bd47ba6917a",
+        "line": 319
+      },
+      "turn": "019f8ef9-6ce7-77f3-bd52-aeb331b3a027",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/webui/handler.go",
+          "before": "796b37442e834aea8ab32d2be604703acf3987f746a38d847e287862816d1f07",
+          "after": "b945625bf0de2669ee0a446d63c7751818b2bcdae3574c2d26ad7a6999c295ac",
+          "method": "patch"
+        },
+        {
+          "path": "internal/webui/handler_test.go",
+          "before": null,
+          "after": "05d51402fdca345066a0b3f3d8097f241b50310ce158186b1ac847e19380a795",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_tLKgGVPkJnMllABs4yBGOzUm:0",
+      "time": "2026-07-23T09:27:13.811Z",
+      "orderTime": "2026-07-23T13:05:29.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "3ffc13f9ec3f4070300dca52eebf771d9f1259e6f03e73350d2333b904c5739f",
+      "source": {
+        "session": "019f8e4c-ebf6-7842-b2da-d33bcebdd6b1",
+        "line": 698
+      },
+      "turn": "019f8ef9-3d8d-7473-b5c5-72f05898f848",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/localapi/browser_test.go",
+          "before": "212b59836ad5ff88cefe26b2626c219b5f56aefac6ffb287c8f2f826d9964e0e",
+          "after": "45c399b19f8c7f4baf892eec49e149846de1de241bc25f17b7b1abb03e38626f",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_g6N7wXFh6YZQbZoG1xMzchCk:0",
+      "time": "2026-07-23T09:27:13.811Z",
+      "orderTime": "2026-07-23T13:05:56.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "692602d8ee63766baac8c42b24ce7fa242cb1073e1f990cffcc540f51b57deb7",
+      "source": {
+        "session": "019f8e4c-ebf6-7842-b2da-d33bcebdd6b1",
+        "line": 707
+      },
+      "turn": "019f8ef9-3d8d-7473-b5c5-72f05898f848",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/localapi/browser_test.go",
+          "before": "45c399b19f8c7f4baf892eec49e149846de1de241bc25f17b7b1abb03e38626f",
+          "after": "03aa08dcb099627c57aa9b279dfd0935f592aaae5e859937ce6330eab15f6cc9",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_f1dLMUJF72nNayskQDuIK2cn:0",
+      "time": "2026-07-23T09:07:29.719Z",
+      "orderTime": "2026-07-23T13:06:37.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "8e2dc68a79b7012dfc08d69527b7870cf5d2d8d13b26bedb2f22f8fd8f8a671e",
+      "source": {
+        "session": "019f8e3a-dacd-7bf3-9f2b-0bd47ba6917a",
+        "line": 340
+      },
+      "turn": "019f8ef9-6ce7-77f3-bd52-aeb331b3a027",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/webui/handler.go",
+          "before": "b945625bf0de2669ee0a446d63c7751818b2bcdae3574c2d26ad7a6999c295ac",
+          "after": "b2cb1b73a6bac1e0e43aac73331ec55179b2cf0256a63cfb9b299a0c93f207b0",
+          "method": "patch"
+        },
+        {
+          "path": "internal/webui/handler_test.go",
+          "before": "05d51402fdca345066a0b3f3d8097f241b50310ce158186b1ac847e19380a795",
+          "after": "a87a8b771452296f8a61e70623d43123dab2e3877bdc8c335f7aba8e682369a4",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_JV1cN0lK23SeefaHtfsWDbUL:0",
+      "time": "2026-07-23T09:27:13.811Z",
+      "orderTime": "2026-07-23T13:06:44.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "ec91602f3b1e9f6894df229913eaa25135306970e773ae67456783b1a58f673d",
+      "source": {
+        "session": "019f8e4c-ebf6-7842-b2da-d33bcebdd6b1",
+        "line": 725
+      },
+      "turn": "019f8ef9-3d8d-7473-b5c5-72f05898f848",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/localapi/browser.go",
+          "before": "46b230595fb8ee13e162a73aca9eaf4a2c2287e2dc5a57a2a09cab6983b95328",
+          "after": "ceb0bba0abf011377b6f7cd965201749b5cbbdce84a2a6099e43189c566fb6a9",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_L7Ssgzj6bVfsMj5cFt6o1zoq:0",
+      "time": "2026-07-23T09:07:29.719Z",
+      "orderTime": "2026-07-23T13:06:56.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "05bfd7d40d41aed590113fddc398dc1b71267bebfe9be6d77a24a3df16bf0458",
+      "source": {
+        "session": "019f8e3a-dacd-7bf3-9f2b-0bd47ba6917a",
+        "line": 347
+      },
+      "turn": "019f8ef9-6ce7-77f3-bd52-aeb331b3a027",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "tools/build-web.ps1",
+          "before": null,
+          "after": "f8cf437ab0b3c445799b6c01bd4cfc055aec95ff2b97553cc9059d3861a56002",
+          "method": "patch"
+        },
+        {
+          "path": "tools/build.ps1",
+          "before": "2f1b445f1b25c04698bd27a76ad40a00a1a1ecc5ea0a32d3ded90019bb8fb109",
+          "after": "acb4083ad18faf7267b103ebcc9dcaa69c05a7d62bdefc76d7c0f0003e474781",
+          "method": "patch"
+        },
+        {
+          "path": ".gitignore",
+          "before": "1ad10e6e75de9b2cf81a9befb2b4d2ca62d5a838a221f3381de0384f2e53f6fb",
+          "after": "d7e627008d998f785950b90da6d2c2cc5694511637a167c2126a222163a4c139",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_tovKdLGgfKhMobsKM2l7EusO:0",
+      "time": "2026-07-23T09:27:13.811Z",
+      "orderTime": "2026-07-23T13:07:02.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "a7964abfa656a5d7f4104f201d1cc8419965a6a19e40e87bf8b17bd7d6a09698",
+      "source": {
+        "session": "019f8e4c-ebf6-7842-b2da-d33bcebdd6b1",
+        "line": 731
+      },
+      "turn": "019f8ef9-3d8d-7473-b5c5-72f05898f848",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/localapi/browser.go",
+          "before": "ceb0bba0abf011377b6f7cd965201749b5cbbdce84a2a6099e43189c566fb6a9",
+          "after": "12214c5c670bc25d0441502f7c35b022d6aaff76828eaf0b44ed3dfecb326a67",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_ciOSSWiP6YmgcuZ3lbcv2J1W:0",
+      "time": "2026-07-23T09:27:13.811Z",
+      "orderTime": "2026-07-23T13:07:08.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "5a69701eeb8c049e93259b20b79ac928a7ada4e1076ea21ad7e81e4ea435c39f",
+      "source": {
+        "session": "019f8e4c-ebf6-7842-b2da-d33bcebdd6b1",
+        "line": 736
+      },
+      "turn": "019f8ef9-3d8d-7473-b5c5-72f05898f848",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/localapi/browser_test.go",
+          "before": "03aa08dcb099627c57aa9b279dfd0935f592aaae5e859937ce6330eab15f6cc9",
+          "after": "e989422a794f43d45c23114121c269934e6140ea97a52521a373a3c78b03c11b",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_1S8RDIRrisDLUXU6b8bWFLI6:0",
+      "time": "2026-07-23T09:27:13.811Z",
+      "orderTime": "2026-07-23T13:08:29.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "fb30924d73a35981ec66c09f44866ac40e154cfea4fc78cf60fd4e08ebba3e68",
+      "source": {
+        "session": "019f8e4c-ebf6-7842-b2da-d33bcebdd6b1",
+        "line": 775
+      },
+      "turn": "019f8ef9-3d8d-7473-b5c5-72f05898f848",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/localapi/browser.go",
+          "before": "12214c5c670bc25d0441502f7c35b022d6aaff76828eaf0b44ed3dfecb326a67",
+          "after": "72336bd552dfc6c45a832278b5d87026d92e56597d942cf1e25fc8e77a2c7690",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_hHp0R0cspGR7osLQha3ZwyhG:0",
+      "time": "2026-07-23T13:09:05.529Z",
+      "orderTime": "2026-07-23T13:09:05.529Z",
+      "timeBasis": "record",
+      "hash": "cd8bf3a121b00d054c4fe2b949eec38d72c59f4b695ab35d5649545892800fe5",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 10706
+      },
+      "turn": "019f8ef2-abac-7513-af50-db5aef30b92f",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/design/color.go",
+          "before": null,
+          "after": "22d964767d59694a2989ba40c958f6afbff6ed409f433ea1f9f7843fdabe03c1",
+          "method": "patch"
+        },
+        {
+          "path": "internal/design/color_test.go",
+          "before": null,
+          "after": "a98bec44b8ec517e9e2a8fc72262a9913be3879eca1cb13743a1f9afccc7d868",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_evBDAFdoHkYxOLPJkQreU1vv:0",
+      "time": "2026-07-23T09:07:29.719Z",
+      "orderTime": "2026-07-23T13:09:20.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "316e142b00ca429066aa8235535dbc8f582ad255539b7242bfeebe8e88b55322",
+      "source": {
+        "session": "019f8e3a-dacd-7bf3-9f2b-0bd47ba6917a",
+        "line": 381
+      },
+      "turn": "019f8ef9-6ce7-77f3-bd52-aeb331b3a027",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/design/tokens.json",
+          "before": "9986cc591ef2f46ac6328305891b339fea08cf59d3fdccd839aec57a9b4cfa73",
+          "after": "eb34c4b12da304be91872fc02293bf34fdab7183f810153405eaaaf7756efdf2",
+          "method": "patch"
+        },
+        {
+          "path": "internal/design/tokens.go",
+          "before": "f88d3842c30b49cb955976310294ea715d84925d026790eb6ce4b8fd49d46bb1",
+          "after": "07d230b8335b42c06762b1b0f11828ca5457b10088495c4bd869f6791c43ab68",
+          "method": "patch"
+        },
+        {
+          "path": "internal/design/tokens_test.go",
+          "before": "8a79517cc3b0f5381ce427b5621c7f569d13797da0c4a1c29c5ba744647c4fd8",
+          "after": "539cb0de902311329af5fd45dde5c75fa6bab71ef41bd3c7315f9cb14bfe6451",
+          "method": "patch"
+        },
+        {
+          "path": "webui/src/styles/app.css",
+          "before": "7bc027799a31a06348a4efe3e00711530853f665218880f466d0b056aafa1db4",
+          "after": "a2b04b0610c8abdc25a17bf6814b24dde69570744ec0d01c2d73d28ce39ce52e",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_8pq3rkWEHHw9h7q8lHtReGEu:0",
+      "time": "2026-07-23T09:27:13.811Z",
+      "orderTime": "2026-07-23T13:09:48.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "374fbea047da87e2ce33a6224522b49ec22e09a78e5a61a880fa0ec36461a9e4",
+      "source": {
+        "session": "019f8e4c-ebf6-7842-b2da-d33bcebdd6b1",
+        "line": 813
+      },
+      "turn": "019f8ef9-3d8d-7473-b5c5-72f05898f848",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/localapi/browser.go",
+          "before": "72336bd552dfc6c45a832278b5d87026d92e56597d942cf1e25fc8e77a2c7690",
+          "after": "0889b9c395dc67959e39bb4fc5e516905043fa4c9a7bd59928ae86d313118c99",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_KH0Z2BLMSwXSGkK05BUfbw0Q:0",
+      "time": "2026-07-23T09:27:13.811Z",
+      "orderTime": "2026-07-23T13:10:05.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "05fa295dc56edac5de6999a06db378e3048deb148f91d813357bc104401da7c1",
+      "source": {
+        "session": "019f8e4c-ebf6-7842-b2da-d33bcebdd6b1",
+        "line": 823
+      },
+      "turn": "019f8ef9-3d8d-7473-b5c5-72f05898f848",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/localapi/websocket.go",
+          "before": "4de8efa1f23889346092bb9c67e657bb7774687618ca7a42e1120a0386b8bf52",
+          "after": "3efad48f90f8125f70cfecaca29d4fce04072d83cc3cfd17a77ac9bd3d341faf",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_WOjAVISArqQFOoHPbUGpJZFn:0",
+      "time": "2026-07-23T09:27:13.811Z",
+      "orderTime": "2026-07-23T13:10:15.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "578cca692b2e2360b8274ec56480342a8cf426a961f010cc1dca419e86b7192d",
+      "source": {
+        "session": "019f8e4c-ebf6-7842-b2da-d33bcebdd6b1",
+        "line": 828
+      },
+      "turn": "019f8ef9-3d8d-7473-b5c5-72f05898f848",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/localapi/websocket.go",
+          "before": "3efad48f90f8125f70cfecaca29d4fce04072d83cc3cfd17a77ac9bd3d341faf",
+          "after": "7cb59784ea675769ee00cc900ac1f0bed3ab97c9c52ab38824d039315cc94e6c",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_OXccMtz4PCoslOR1CbNnNnHk:0",
+      "time": "2026-07-23T09:27:13.811Z",
+      "orderTime": "2026-07-23T13:12:07.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "15113621db7a5815d3ef84579d3086020cfcee61f18a527ca1a107548bc320e2",
+      "source": {
+        "session": "019f8e4c-ebf6-7842-b2da-d33bcebdd6b1",
+        "line": 877
+      },
+      "turn": "019f8ef9-3d8d-7473-b5c5-72f05898f848",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/localapi/browser.go",
+          "before": "0889b9c395dc67959e39bb4fc5e516905043fa4c9a7bd59928ae86d313118c99",
+          "after": "cc90e9f38af32a7b0e9e1acf46a98e245e0d9742cfb751655c28dfd78b683dec",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_WBR66y8lo4Rd6wvw3jzxB178:0",
+      "time": "2026-07-23T09:07:29.719Z",
+      "orderTime": "2026-07-23T13:12:41.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "3660eec251d9036fa11faa0ca32301981f76be8f929db03b82eb4f86fc8ef007",
+      "source": {
+        "session": "019f8e3a-dacd-7bf3-9f2b-0bd47ba6917a",
+        "line": 451
+      },
+      "turn": "019f8ef9-6ce7-77f3-bd52-aeb331b3a027",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "webui/src/store.ts",
+          "before": "7a6d57f73e454f57f8d635b1a3432eb55395c9c18da91af014b2872971e07955",
+          "after": "271f0eefb948ada8704a627eb5da842599e36a52b511f39a874a058f5bbb3094",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_yWIn9VJ3tK90o4MYeoN6gIfe:0",
+      "time": "2026-07-23T09:07:29.719Z",
+      "orderTime": "2026-07-23T13:13:08.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "20bd76016cdc33c16dcecc118c73e1e6a594f043293c023de3861cc9ff9d82a1",
+      "source": {
+        "session": "019f8e3a-dacd-7bf3-9f2b-0bd47ba6917a",
+        "line": 465
+      },
+      "turn": "019f8ef9-6ce7-77f3-bd52-aeb331b3a027",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "webui/src/views/settings.tsx",
+          "before": "ae641937415a8ba65bbfb10fa746bef35c2621223bf6a24a4ea1eca1e1702f3e",
+          "after": "cd27b09370de3ed865db5fa6d8cdf98da8dfa5537aa8c99d50b796ea7c79c5cb",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_hZEkb3eAPz6eEPFxFebPedqO:0",
+      "time": "2026-07-23T13:13:42.509Z",
+      "orderTime": "2026-07-23T13:13:42.509Z",
+      "timeBasis": "record",
+      "hash": "6e02a52b5b3ed8b62899b6d5e667cfda95fee3ef8038a1278c0f5b5d247838bd",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 10788
+      },
+      "turn": "019f8ef2-abac-7513-af50-db5aef30b92f",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/ui/paint_windows.go",
+          "before": "71e7741488f17bceee7446e2631d946c59bca0846a4669feb9d87694a94d6c91",
+          "after": "69699100a609c44af918b5b40a36a7c719094352f49c7db162388b81e81a8113",
+          "method": "patch"
+        },
+        {
+          "path": "internal/traymenu/palette.go",
+          "before": "40de12199dc3f030ae07684a60ad1729fe7dc7bf0ffedc255670a67ef75f2e40",
+          "after": "1245a077fbb5d19889d587f665c5b49b9a0c9e23fb57693fa04a3aabea98ad55",
+          "method": "patch"
+        }
+      ],
+      "problems": [
+        {
+          "path": "internal/dialogs/helpers_windows.go",
+          "reason": "missing preimage"
+        }
+      ]
+    },
+    {
+      "id": "call_xMnwIRg7E8pYhB7C8aU7GUEa:0",
+      "time": "2026-07-23T13:14:30.851Z",
+      "orderTime": "2026-07-23T13:14:30.851Z",
+      "timeBasis": "record",
+      "hash": "10a2dfd79e51703c1617847c48f672361bf054a0c775c8c26d7d8b288c7fc3fd",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 10796
+      },
+      "turn": "019f8ef2-abac-7513-af50-db5aef30b92f",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/winfx/dialogtab_windows.go",
+          "before": "7a006f4acf9b265abf14ea142092e2acfbdcf33a60e44dabdd48342489e53ba2",
+          "after": "275f9abb67a3f44fab21e4eaa7fa36f6d7d456373ddadf37ca841e8c3806f556",
+          "method": "patch"
+        }
+      ],
+      "problems": [
+        {
+          "path": "internal/winfx/dialogbutton_windows.go",
+          "reason": "hunk context not found"
+        }
+      ]
+    },
+    {
+      "id": "call_8m5JpIqjTpWVFA3cIRuSMkKk:0",
+      "time": "2026-07-23T13:15:51.367Z",
+      "orderTime": "2026-07-23T13:15:51.367Z",
+      "timeBasis": "record",
+      "hash": "09ca7a65b2119d658c4aa3535b4d0e01814f4c13d317067a58d102e9af368d26",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 10836
+      },
+      "turn": "019f8ef2-abac-7513-af50-db5aef30b92f",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "README.md",
+          "before": "0676c21c664245257d5af0c8b878b68d489b22bb7bd7f860714ef5c74e7088c6",
+          "after": "46dc7e445f0b5ac1c9653f01d1cbf7e9e60531b109de4d088eadf2d471fdac09",
+          "method": "patch"
+        },
+        {
+          "path": "docs/firmware-protocol.md",
+          "before": "312629b5e3ba8d237eef543a0273bd15e3483d6ecfb7fe845234cb5bfcfc7fc5",
+          "after": "be2f5737f4a8b72532d071e6cc585939dcef188ef7c036e51131fc2fa207ff89",
+          "method": "patch"
+        },
+        {
+          "path": "docs/configuration.md",
+          "before": "85750f118f582bf13ef717836c5bfeb0a465f213baae76a87492b4173e7d4684",
+          "after": "1055996207fd8e95c559ef89f60434b50d4eefea1ca45dd7abaa0d962f6c9dd8",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_4Hn0eFdaJH7OAdA7J0MV8Qbk",
+      "time": "2026-07-23T12:07:55.733Z",
+      "orderTime": "2026-07-23T13:16:46.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "8b2410bc114c5d14e4c523e7ed9cc7870f85b2a24f0ecefa3c0d9852fc293381",
+      "source": {
+        "session": "019f8ee0-0bc6-73e1-a327-ab0cc955db43",
+        "line": 21
+      },
+      "turn": "019f8f1e-ae16-7950-b050-7352300c9105",
+      "status": "observed-full-read",
+      "changes": [
+        {
+          "path": "internal/localapi/session.go",
+          "before": "a5701cbfc3dd2fb62df5fe87a04a922b9dbc826bb85c3004bef6d11cc14cd4e9",
+          "after": "e33c1f425ce5990215158d1519e02a759af64a42efce6e510eb36d409087c2c6",
+          "method": "observed-full-read"
+        },
+        {
+          "path": "internal/localapi/browser.go",
+          "before": "cc90e9f38af32a7b0e9e1acf46a98e245e0d9742cfb751655c28dfd78b683dec",
+          "after": "c4db3fa5a8eb2bd2a74fcfe68ace9a819f8d6a7180e6adc0aeef6e2fe7342735",
+          "method": "observed-full-read"
+        },
+        {
+          "path": "internal/localapi/hub.go",
+          "before": "6522b3d7c678d8736b7a1961090f955beee6ffc549b0178ee53c13e95376ff06",
+          "after": "d1cc49a5ceeff5c9e07a45c9c03a64db68570d9d983a8222ba203bca5ed986d8",
+          "method": "observed-full-read"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_7Fl9ZAeDHHMV1HZquQcfNrxv:0",
+      "time": "2026-07-23T13:25:12.177Z",
+      "orderTime": "2026-07-23T13:25:12.177Z",
+      "timeBasis": "record",
+      "hash": "d12d006750e619f13afe03409378e884747dbb789bf2d79656139c29909bdb35",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 11035
+      },
+      "turn": "019f8ef2-abac-7513-af50-db5aef30b92f",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "webui/src/sync.ts",
+          "before": "3d77cada42b04c8f2b697c9668bc0cfb6b211e46c393d35ea9fa74b0826723e9",
+          "after": "99f5dd671f466f498a6994063157478b82c5dd0f60a6100b80a6e713a30ac27f",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_wNZZpaQvOxULy2tybZDGoEDZ:0",
+      "time": "2026-07-23T13:28:00.610Z",
+      "orderTime": "2026-07-23T13:28:00.610Z",
+      "timeBasis": "record",
+      "hash": "42302e6501ddf34c3bd1ef62f64100de39a9addf11663e01ab3ae23b6fbfc1d6",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 11082
+      },
+      "turn": "019f8ef2-abac-7513-af50-db5aef30b92f",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "webui/src/sync.ts",
+          "before": "99f5dd671f466f498a6994063157478b82c5dd0f60a6100b80a6e713a30ac27f",
+          "after": "dfddb54926af6e4075d318eaa7e0cee2de47219229b55d7bee7d9531f9d92418",
+          "method": "patch"
+        },
+        {
+          "path": "webui/src/sync.test.ts",
+          "before": null,
+          "after": "9c4abae17a83c3233e440b17798310d92086de1da2556e95950412b6b7ccf4f8",
+          "method": "patch"
+        },
+        {
+          "path": "webui/src/api.ts",
+          "before": "4a515b2f9967bc1a1c0f1e08bbadf8b3d14309f82e91ed879949c3899607f887",
+          "after": "d3a35504a59da57d6bae0cba91178a5f15a06ec349395da5723cadb2dc5b9814",
+          "method": "patch"
+        },
+        {
+          "path": "internal/localapi/browser.go",
+          "before": "c4db3fa5a8eb2bd2a74fcfe68ace9a819f8d6a7180e6adc0aeef6e2fe7342735",
+          "after": "eb372453dce7cfe112d30ba425c13caba96bd4290178328416ca03779d8850e2",
+          "method": "patch"
+        },
+        {
+          "path": "internal/localapi/browser_test.go",
+          "before": "e989422a794f43d45c23114121c269934e6140ea97a52521a373a3c78b03c11b",
+          "after": "c098a39e14271918f2c1b8a29920dba48ceff8d6945b1e88b4c11a8b2ada8fab",
+          "method": "patch"
+        }
+      ],
+      "problems": [
+        {
+          "path": "internal/localapi/server.go",
+          "reason": "missing preimage"
+        }
+      ]
+    },
+    {
+      "id": "call_rP0VRc3SZtsA0RvFxpmXVwbY:0",
+      "time": "2026-07-23T13:28:31.417Z",
+      "orderTime": "2026-07-23T13:28:31.417Z",
+      "timeBasis": "record",
+      "hash": "524a6ca1b28fac99696b7ca4604d399cd1d5a60a5da9836fde58991dea7adeff",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 11101
+      },
+      "turn": "019f8ef2-abac-7513-af50-db5aef30b92f",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "webui/src/components/modal.tsx",
+          "before": "1f7051896061a13252f42dfd2444899982b3c674574db9364106248fe38440ed",
+          "after": "a2ea19c4c47dd323c88bd01720f07d4bd593e4a5fa69b0fe6becba488697f8b5",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_1594DMIy0bB3bYYFkt4awBSf:0",
+      "time": "2026-07-23T13:29:19.320Z",
+      "orderTime": "2026-07-23T13:29:19.320Z",
+      "timeBasis": "record",
+      "hash": "8ae987bfed7a9abf69cb58bf5a381c818054db3734636866af7e17d89bd36401",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 11119
+      },
+      "turn": "019f8ef2-abac-7513-af50-db5aef30b92f",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "webui/src/app.tsx",
+          "before": "d0677cfd9c15eaba94dd7dd7e11c27afc84280da1379446b6c5d3433a9c8c08f",
+          "after": "82bd18ad4362c7e71e36771b5a61a57245f17721eb9bbeacda471a5594738a67",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    }
+  ],
+  "finalChanges": [
+    {
+      "path": "webui/package.json",
+      "sha256": "03c5a191c10170b555230cb29e7cd3d12cc5ca23b328ca311c2a83dd2b833bf0"
+    },
+    {
+      "path": "webui/tsconfig.json",
+      "sha256": "d181c8dc3718e343730b3b7fe22adc780e698984d4114d7d1c9c6df0ec9e169f"
+    },
+    {
+      "path": "webui/vite.config.ts",
+      "sha256": "7346b7df6292ec7794ed035a8c67e81960d3519026de87ada85cc444cbd375ff"
+    },
+    {
+      "path": "webui/index.html",
+      "sha256": "60f986592e5778089db6ef75d4704913c53b00bbef1294cd32df70d5505301af"
+    },
+    {
+      "path": "webui/src/contracts.ts",
+      "sha256": "18d98ea15e1a5f85a5b5233cc970c784f2139cd3e5bd3967d5a1cdaf68365cff"
+    },
+    {
+      "path": "webui/src/api.ts",
+      "sha256": "d3a35504a59da57d6bae0cba91178a5f15a06ec349395da5723cadb2dc5b9814"
+    },
+    {
+      "path": "webui/src/store.ts",
+      "sha256": "271f0eefb948ada8704a627eb5da842599e36a52b511f39a874a058f5bbb3094"
+    },
+    {
+      "path": "webui/src/sync.ts",
+      "sha256": "dfddb54926af6e4075d318eaa7e0cee2de47219229b55d7bee7d9531f9d92418"
+    },
+    {
+      "path": "internal/localapi/hub.go",
+      "sha256": "d1cc49a5ceeff5c9e07a45c9c03a64db68570d9d983a8222ba203bca5ed986d8"
+    },
+    {
+      "path": "webui/src/components/icon.tsx",
+      "sha256": "76ced74274c4d0777877a3be5e6d5dbef27e95030328880bbd030dddc078bb13"
+    },
+    {
+      "path": "webui/src/components/lamp-visual.tsx",
+      "sha256": "e313d3832eb66cb45065cbe312a86da6082639f075fcb44c1881875a24edbee4"
+    },
+    {
+      "path": "webui/src/components/controls.tsx",
+      "sha256": "fbdbe357f11eb7e368c9c8e0623928eb668ba3ec5bd7fe6239bb93433c92f14c"
+    },
+    {
+      "path": "webui/src/components/modal.tsx",
+      "sha256": "a2ea19c4c47dd323c88bd01720f07d4bd593e4a5fa69b0fe6becba488697f8b5"
+    },
+    {
+      "path": "webui/src/components/toasts.tsx",
+      "sha256": "f9d594a97f3c6c950ee47f327ab1d9923d0112250c48366d5059c8a2df7c8339"
+    },
+    {
+      "path": "internal/localapi/session.go",
+      "sha256": "e33c1f425ce5990215158d1519e02a759af64a42efce6e510eb36d409087c2c6"
+    },
+    {
+      "path": "internal/localapi/websocket.go",
+      "sha256": "7cb59784ea675769ee00cc900ac1f0bed3ab97c9c52ab38824d039315cc94e6c"
+    },
+    {
+      "path": "internal/localapi/browser.go",
+      "sha256": "eb372453dce7cfe112d30ba425c13caba96bd4290178328416ca03779d8850e2"
+    },
+    {
+      "path": "webui/src/views/dashboard.tsx",
+      "sha256": "ca75189e68cf24053e8fdc357889a3b7010a02c8083c66784970301b2278e3e7"
+    },
+    {
+      "path": "webui/src/views/settings.tsx",
+      "sha256": "cd27b09370de3ed865db5fa6d8cdf98da8dfa5537aa8c99d50b796ea7c79c5cb"
+    },
+    {
+      "path": "internal/application/application_windows.go",
+      "sha256": "fd7ebb1b3b0ecc94d555d7eab5425294a7e4bb36debc7f85976f4fc0d0af0851"
+    },
+    {
+      "path": "internal/design/tokens.json",
+      "sha256": "eb34c4b12da304be91872fc02293bf34fdab7183f810153405eaaaf7756efdf2"
+    },
+    {
+      "path": "internal/design/tokens.go",
+      "sha256": "07d230b8335b42c06762b1b0f11828ca5457b10088495c4bd869f6791c43ab68"
+    },
+    {
+      "path": "internal/design/tokens_test.go",
+      "sha256": "539cb0de902311329af5fd45dde5c75fa6bab71ef41bd3c7315f9cb14bfe6451"
+    },
+    {
+      "path": "webui/src/vite-env.d.ts",
+      "sha256": "fae5d14daa55b2c956a052502cc4a5951d5a51090c0713f41473e2f1fae77952"
+    },
+    {
+      "path": "webui/src/views/diagnostics.tsx",
+      "sha256": "3290567b55bcedbbeb3ce2f2ee6c788a3102af95d76ff9494859c2da303910c3"
+    },
+    {
+      "path": "webui/src/views/about.tsx",
+      "sha256": "e4cc0e7dba838e2fe7ba908f9bfad34507d05bbead5ba1de93b51ede67a13c40"
+    },
+    {
+      "path": "internal/localapi/browser_test.go",
+      "sha256": "c098a39e14271918f2c1b8a29920dba48ceff8d6945b1e88b4c11a8b2ada8fab"
+    },
+    {
+      "path": "webui/src/app.tsx",
+      "sha256": "82bd18ad4362c7e71e36771b5a61a57245f17721eb9bbeacda471a5594738a67"
+    },
+    {
+      "path": "webui/src/main.tsx",
+      "sha256": "ff023c6fb60223fd4bfe1322cf64c050e130c52e1aeb625c5d56d2e987b5dfcd"
+    },
+    {
+      "path": "internal/ui/shell_windows.go",
+      "sha256": "7d37d5a5226ca371c5bcb4cec8c9f9985c8604ccd779fdf49b9b50461eb5a20e"
+    },
+    {
+      "path": "webui/src/styles/app.css",
+      "sha256": "a2b04b0610c8abdc25a17bf6814b24dde69570744ec0d01c2d73d28ce39ce52e"
+    },
+    {
+      "path": "internal/application/application_windows_test.go",
+      "sha256": "103ea1bee1d532bf5d637b37b3dd787fc98bd23611c8f61ede40e6984044481f"
+    },
+    {
+      "path": "internal/dialogs/dialogs_windows_test.go",
+      "sha256": "52e4b90fa0010581243ba8af66f736654eb6a038844fbf202e19a99ff631cb17"
+    },
+    {
+      "path": "internal/commands/dispatcher.go",
+      "sha256": "574e6f41f8a41dd1f85f90c99350db527898e6ec91eaa2338f9cce02bd2d712a"
+    },
+    {
+      "path": "internal/ui/actions_windows.go",
+      "sha256": "c8dc77d2d0ab1ab0305bc6dfe9858f3c4c10f18f26e6c2104183631a51ab5c55"
+    },
+    {
+      "path": "internal/winfx/openurl_windows.go",
+      "sha256": "78157f4169698920eeed8cad2aa334697e97f1eb08f6cd3164e43ca7d148b0a1"
+    },
+    {
+      "path": "internal/winfx/openurl_windows_test.go",
+      "sha256": "dcfcf8d72d9ed3640a16483cc3cf6a6121b097cacd5a0a6ffffa1572b786afd0"
+    },
+    {
+      "path": "internal/cli/cli.go",
+      "sha256": "5222742c448b3a3ef25f26d3c4d725348c3a2c21fd6f83f105754f7397d7fbab"
+    },
+    {
+      "path": "internal/cli/cli_test.go",
+      "sha256": "df743d5da23a4e0fc38497576d985d5c3eb5e542ef53020a8c75568aea27bf49"
+    },
+    {
+      "path": "internal/commands/dispatcher_test.go",
+      "sha256": "b6f55b940214906b01d3bcb9d16925e517d43f33ba0632fd2487202cd09fff7c"
+    },
+    {
+      "path": "webui/vitest.config.ts",
+      "sha256": "36a86b88c128aa25f0e9fc754c0e579e56629e4afc4654f684de82774a56327d"
+    },
+    {
+      "path": "webui/src/test/setup.ts",
+      "sha256": "a3e1bf18c9e57f39ea0df9a57e58bde94b1456475a63feb6b07250eabdf67527"
+    },
+    {
+      "path": "webui/src/test/fixtures.ts",
+      "sha256": "d99a7ef59bc6a10a89b2af36f8bbfa7c2cd4ab4a0a6e38a20966788803f32d71"
+    },
+    {
+      "path": "webui/src/api.test.ts",
+      "sha256": "de29fb70cba93a3473037179cb2befaf414cb629c0b4fe7701ccd910c1be1949"
+    },
+    {
+      "path": "webui/src/store.test.ts",
+      "sha256": "49d6f570065eed87e85cf8a549c956f87121525399ad623d04a3f0adc3b4211b"
+    },
+    {
+      "path": "webui/src/components/lamp-visual.test.tsx",
+      "sha256": "604fd42ea9f836385f5dcda921937f42f687bb436fb3fc361525c0cb5a29a842"
+    },
+    {
+      "path": "internal/webui/embed.go",
+      "sha256": "390cb6e9044762d3f2d1733cf3ed65352b854c078ebb889ef26b07b0e57ab7c7"
+    },
+    {
+      "path": "internal/webui/handler.go",
+      "sha256": "b2cb1b73a6bac1e0e43aac73331ec55179b2cf0256a63cfb9b299a0c93f207b0"
+    },
+    {
+      "path": "internal/webui/handler_test.go",
+      "sha256": "a87a8b771452296f8a61e70623d43123dab2e3877bdc8c335f7aba8e682369a4"
+    },
+    {
+      "path": "tools/build-web.ps1",
+      "sha256": "f8cf437ab0b3c445799b6c01bd4cfc055aec95ff2b97553cc9059d3861a56002"
+    },
+    {
+      "path": "tools/build.ps1",
+      "sha256": "acb4083ad18faf7267b103ebcc9dcaa69c05a7d62bdefc76d7c0f0003e474781"
+    },
+    {
+      "path": ".gitignore",
+      "sha256": "d7e627008d998f785950b90da6d2c2cc5694511637a167c2126a222163a4c139"
+    },
+    {
+      "path": "internal/design/color.go",
+      "sha256": "22d964767d59694a2989ba40c958f6afbff6ed409f433ea1f9f7843fdabe03c1"
+    },
+    {
+      "path": "internal/design/color_test.go",
+      "sha256": "a98bec44b8ec517e9e2a8fc72262a9913be3879eca1cb13743a1f9afccc7d868"
+    },
+    {
+      "path": "internal/ui/paint_windows.go",
+      "sha256": "69699100a609c44af918b5b40a36a7c719094352f49c7db162388b81e81a8113"
+    },
+    {
+      "path": "internal/traymenu/palette.go",
+      "sha256": "1245a077fbb5d19889d587f665c5b49b9a0c9e23fb57693fa04a3aabea98ad55"
+    },
+    {
+      "path": "internal/winfx/dialogtab_windows.go",
+      "sha256": "275f9abb67a3f44fab21e4eaa7fa36f6d7d456373ddadf37ca841e8c3806f556"
+    },
+    {
+      "path": "README.md",
+      "sha256": "46dc7e445f0b5ac1c9653f01d1cbf7e9e60531b109de4d088eadf2d471fdac09"
+    },
+    {
+      "path": "docs/firmware-protocol.md",
+      "sha256": "be2f5737f4a8b72532d071e6cc585939dcef188ef7c036e51131fc2fa207ff89"
+    },
+    {
+      "path": "docs/configuration.md",
+      "sha256": "1055996207fd8e95c559ef89f60434b50d4eefea1ca45dd7abaa0d962f6c9dd8"
+    },
+    {
+      "path": "webui/src/sync.test.ts",
+      "sha256": "9c4abae17a83c3233e440b17798310d92086de1da2556e95950412b6b7ccf4f8"
+    }
+  ]
+}

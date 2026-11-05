@@ -1,0 +1,266 @@
+{
+  "turn": "019f9634-07d5-7b31-a466-ee80dd581270",
+  "observedStart": "2026-07-24T22:17:00.215Z",
+  "observedEnd": "2026-11-04T23:39:09.672Z",
+  "title": "regressions: recover interrupted frame and settings-size repairs",
+  "events": [
+    {
+      "id": "call_gQ2UYes0erl310UbMHFqkTdh:0",
+      "time": "2026-07-24T22:17:35.128Z",
+      "orderTime": "2026-07-24T22:20:21.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "719b0a19f29b9b7da882437b665b97db4495452a19c3d3bf1d5a40f615c10ee7",
+      "source": {
+        "session": "019f9634-8f85-73c3-85dc-134ae10f428d",
+        "line": 261
+      },
+      "turn": "019f9634-939f-72f3-90cd-8e2aadb13887",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/winfx/chrome_live_windows_test.go",
+          "before": null,
+          "after": "ddd91c079be5e660e87f597f429e57f7a28ea75f5736c2aaf6eae92f54448c45",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_M2oLnurYAixCIu7yytu7o0C1:0",
+      "time": "2026-07-24T22:17:55.060Z",
+      "orderTime": "2026-07-24T22:21:27.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "62c79a828647f6c6db0f17124f7afa68d244446ad52bd1b126153767238cb8fb",
+      "source": {
+        "session": "019f9634-dd8b-7c23-8f12-947f2a0497eb",
+        "line": 260
+      },
+      "turn": "019f9634-e1a5-7553-8500-01854aeebe31",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/winfx/dialoggeometry_windows.go",
+          "before": "c94ae101d9c88d4c1de2cb69c1b1b62c0f5208cdad975fb52226beb7e1e3cbe4",
+          "after": "993b79403f3b9ba2b66d63fec25735dfa29c898ec9b62fb6f86522f00d8585e3",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_KvVmYGCBHriFSbMg60M82ZSw:0",
+      "time": "2026-07-24T22:17:55.060Z",
+      "orderTime": "2026-07-24T22:22:10.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "62a9d7cbcb4939a49b551ce6c30df631e4780b4fadff08046e5b4d9e588b9ca9",
+      "source": {
+        "session": "019f9634-dd8b-7c23-8f12-947f2a0497eb",
+        "line": 270
+      },
+      "turn": "019f9634-e1a5-7553-8500-01854aeebe31",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/winfx/dialoggeometry_windows.go",
+          "before": "993b79403f3b9ba2b66d63fec25735dfa29c898ec9b62fb6f86522f00d8585e3",
+          "after": "a5e8f2ff05b88304ca1125bd2938ae7a6486bb82db6b4082f960fbb4b028d992",
+          "method": "patch"
+        },
+        {
+          "path": "internal/winfx/dialoggeometry_windows_test.go",
+          "before": "6e4d2dbae4d4b07abb47aa30341947922ad5728662e419049c37b99e49adb63c",
+          "after": "26dbdbd928834e8b9da654f04a2bf3905cf0892c63531b5dbeba8ccae5cd272e",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_oxzGEIJ5TauATeIq0SxksCCc:0",
+      "time": "2026-07-24T22:17:35.128Z",
+      "orderTime": "2026-07-24T22:22:36.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "c4f1243e2a97c5ff80d02ad60f11d1806913d3dbc330a2478c6bd806a335ab23",
+      "source": {
+        "session": "019f9634-8f85-73c3-85dc-134ae10f428d",
+        "line": 317
+      },
+      "turn": "019f9634-939f-72f3-90cd-8e2aadb13887",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/winfx/chrome_windows.go",
+          "before": "a4b1261e1dd51991d4daa4b90044e04d68d65a4940b99dab3a19e7314223fd10",
+          "after": "9f70486aacdafda435a5cdc32c58d535071d17283457be3dcf5e0716b7d309ef",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_phVuKqJSLYLu2IPw3aOBmDnd:0",
+      "time": "2026-07-24T22:17:35.128Z",
+      "orderTime": "2026-07-24T22:22:56.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "dbcf0e63ecde80780735f2660e40e969d9f5f926867b49b94c7e2b4c218c42e8",
+      "source": {
+        "session": "019f9634-8f85-73c3-85dc-134ae10f428d",
+        "line": 322
+      },
+      "turn": "019f9634-939f-72f3-90cd-8e2aadb13887",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/winfx/chrome_windows_test.go",
+          "before": "1a34ea324df6839d3419913cac873f7f224f8931c7ed6338d84492beb5ef9711",
+          "after": "4868af900e998b017d01985d0353536441a986d7bd5370805f1f19d20f995f6c",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_ALZARWGMCGXG7S7ITU4jnGlJ:0",
+      "time": "2026-07-24T22:17:35.128Z",
+      "orderTime": "2026-07-24T22:23:16.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "650f7dd46a43590d2c8da2b7137a42051671e57cd169be104bed4b71b70a2811",
+      "source": {
+        "session": "019f9634-8f85-73c3-85dc-134ae10f428d",
+        "line": 332
+      },
+      "turn": "019f9634-939f-72f3-90cd-8e2aadb13887",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/ui/shell_windows.go",
+          "before": "90599573abb4b6e64ae9016184a4d4d8bbface073f5ecc7d5fc858b4fe58ff3a",
+          "after": "d267dbd41438ce4c46d37cffbaecbdb04855b9cda0755f655c95c7efe0966346",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_6ZOvWKHdhzzRQnKmAhlegqjy:0",
+      "time": "2026-07-24T22:17:55.060Z",
+      "orderTime": "2026-07-24T22:23:25.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "c0cd264c8586d15aab64a050203a43606831e6b26142c6764fffcbe2de5b3ada",
+      "source": {
+        "session": "019f9634-dd8b-7c23-8f12-947f2a0497eb",
+        "line": 301
+      },
+      "turn": "019f9634-e1a5-7553-8500-01854aeebe31",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "webui/src/contracts.ts",
+          "before": "2fde57d1929484df74e2561f606e2ece9a0334750f5608ba23db13c93cfe115b",
+          "after": "af290cb60a1d64f600fbc8376d3be87d2d31452133c59d15706d0f6991311dee",
+          "method": "patch"
+        },
+        {
+          "path": "webui/src/direct-api.ts",
+          "before": "b4ced4a9929643623c8c0331fa7b892564772c189288ba8bd557a4847a4efc77",
+          "after": "01aefe3ec64e634efdf4314a76b1fbbbefc92ed39195a0697f0efa1f314ed2a0",
+          "method": "patch"
+        },
+        {
+          "path": "webui/src/test/fixtures.ts",
+          "before": "4890bd8352aa5df2f87ff4200f44bd4e2f1affd445ab9bb8acb3207672804fc4",
+          "after": "b83b36f3f9e5badd99aed2e83b360c447c45400a428c3ab7391ce266c579c697",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_MbTz3gRGdFzpMeOi9i91e4xU:0",
+      "time": "2026-07-24T22:17:35.128Z",
+      "orderTime": "2026-07-24T22:23:30.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "aaa91535550998738228c8cc1ed4973848298a4a26e2d74d71b52c6f7137d2ba",
+      "source": {
+        "session": "019f9634-8f85-73c3-85dc-134ae10f428d",
+        "line": 337
+      },
+      "turn": "019f9634-939f-72f3-90cd-8e2aadb13887",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/ui/shell_windows.go",
+          "before": "d267dbd41438ce4c46d37cffbaecbdb04855b9cda0755f655c95c7efe0966346",
+          "after": "75e2a9f4f61056a7d5fab52db030a34f9ce7c07f2ff7bc9ea486c60f5fddb6d7",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_viN7KoQByY59SiDhwIGsTfux:0",
+      "time": "2026-07-24T22:17:55.060Z",
+      "orderTime": "2026-07-24T22:23:35.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "d0982240d00c602eb429cbeab033e0cdb3fce94442a08fb94f90c7f098152467",
+      "source": {
+        "session": "019f9634-dd8b-7c23-8f12-947f2a0497eb",
+        "line": 306
+      },
+      "turn": "019f9634-e1a5-7553-8500-01854aeebe31",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/dialogs/settings_surface_windows_test.go",
+          "before": "575ddc502d651c75a350d17c4463f7bce7ad81b721bfdce088d5250d9e799695",
+          "after": "de1e7985e1374f1c4a03e128da46e5dd9182ce98ed80c316769a1268f8b7458a",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    }
+  ],
+  "finalChanges": [
+    {
+      "path": "internal/winfx/chrome_live_windows_test.go",
+      "sha256": "ddd91c079be5e660e87f597f429e57f7a28ea75f5736c2aaf6eae92f54448c45"
+    },
+    {
+      "path": "internal/winfx/dialoggeometry_windows.go",
+      "sha256": "a5e8f2ff05b88304ca1125bd2938ae7a6486bb82db6b4082f960fbb4b028d992"
+    },
+    {
+      "path": "internal/winfx/dialoggeometry_windows_test.go",
+      "sha256": "26dbdbd928834e8b9da654f04a2bf3905cf0892c63531b5dbeba8ccae5cd272e"
+    },
+    {
+      "path": "internal/winfx/chrome_windows.go",
+      "sha256": "9f70486aacdafda435a5cdc32c58d535071d17283457be3dcf5e0716b7d309ef"
+    },
+    {
+      "path": "internal/winfx/chrome_windows_test.go",
+      "sha256": "4868af900e998b017d01985d0353536441a986d7bd5370805f1f19d20f995f6c"
+    },
+    {
+      "path": "internal/ui/shell_windows.go",
+      "sha256": "75e2a9f4f61056a7d5fab52db030a34f9ce7c07f2ff7bc9ea486c60f5fddb6d7"
+    },
+    {
+      "path": "webui/src/contracts.ts",
+      "sha256": "af290cb60a1d64f600fbc8376d3be87d2d31452133c59d15706d0f6991311dee"
+    },
+    {
+      "path": "webui/src/direct-api.ts",
+      "sha256": "01aefe3ec64e634efdf4314a76b1fbbbefc92ed39195a0697f0efa1f314ed2a0"
+    },
+    {
+      "path": "webui/src/test/fixtures.ts",
+      "sha256": "b83b36f3f9e5badd99aed2e83b360c447c45400a428c3ab7391ce266c579c697"
+    },
+    {
+      "path": "internal/dialogs/settings_surface_windows_test.go",
+      "sha256": "de1e7985e1374f1c4a03e128da46e5dd9182ce98ed80c316769a1268f8b7458a"
+    }
+  ]
+}

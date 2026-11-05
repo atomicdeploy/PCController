@@ -1,0 +1,150 @@
+{
+  "turn": "019f8ff0-33d9-7093-a0d9-e00c11ef4357",
+  "observedStart": "2026-07-23T17:05:11.708Z",
+  "observedEnd": "2026-07-23T17:20:30.947Z",
+  "title": "settings: recover tab-specific icons",
+  "events": [
+    {
+      "id": "call_flCvxnt2LvY5kqp3MGeiWDHb:0",
+      "time": "2026-07-23T17:10:31.509Z",
+      "orderTime": "2026-07-23T17:10:31.509Z",
+      "timeBasis": "record",
+      "hash": "e5ce49facfae0b9607eb1e64df562b8b491d848da74f5f2c95a625c83694e1d4",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 15656
+      },
+      "turn": "019f8ff0-33d9-7093-a0d9-e00c11ef4357",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/winfx/dialogtab_windows.go",
+          "before": "6940d30e9489840e21bf6f352d154dc3e95ded8db79ffec457f47d03db36fc0f",
+          "after": "ae9527b0df2680a259537083fcb243e02c1e9692b70366e9eab0567c9c95e78c",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_wpWDwwkO24EpmhRRF7940Rzo:0",
+      "time": "2026-07-23T17:12:30.065Z",
+      "orderTime": "2026-07-23T17:12:30.065Z",
+      "timeBasis": "record",
+      "hash": "a8f3d66460074775d968a6e55d9deb1fd0db3cb9cdccf030adb15c98f89f64ea",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 15687
+      },
+      "turn": "019f8ff0-33d9-7093-a0d9-e00c11ef4357",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/winfx/dialogtab_windows_test.go",
+          "before": "0ab5f1c1851923d0c7dfd0882f5c6d5226a5deb43600f69ef6a118383cadad1c",
+          "after": "ecadbd35755166fe922cd4188f2a926adee504de31991f0e04110704e0847d0a",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_DAVPWoZlE6cKmBnOTCkykidG:0",
+      "time": "2026-07-23T17:13:15.264Z",
+      "orderTime": "2026-07-23T17:13:15.264Z",
+      "timeBasis": "record",
+      "hash": "b64dd75fc370ba36349eed42f0615f45d9c57d3017296eadce98233b4fcc06eb",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 15712
+      },
+      "turn": "019f8ff0-33d9-7093-a0d9-e00c11ef4357",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/winfx/dialogtab_windows.go",
+          "before": "ae9527b0df2680a259537083fcb243e02c1e9692b70366e9eab0567c9c95e78c",
+          "after": "cc216bacbceff141449d0bd91d89beac6ddd3cb97949304137091a67e30309e3",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_SZ5ZPM2NxNem4qJALtyhlJvM:0",
+      "time": "2026-07-23T17:13:22.987Z",
+      "orderTime": "2026-07-23T17:13:22.987Z",
+      "timeBasis": "record",
+      "hash": "fd9bd767a7c52ede3d0a15cd992bcb45f31a2cc743c59c0792cd053d5e436402",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 15717
+      },
+      "turn": "019f8ff0-33d9-7093-a0d9-e00c11ef4357",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/winfx/dialogtab_windows_test.go",
+          "before": "ecadbd35755166fe922cd4188f2a926adee504de31991f0e04110704e0847d0a",
+          "after": "d7e16795e7400d96cb0693115cad0f23b9db57544abc6dad259d6999d81bd9fd",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_iusdi1hkdvqwVATAFhVpoG6W:0",
+      "time": "2026-07-23T17:16:15.381Z",
+      "orderTime": "2026-07-23T17:16:15.381Z",
+      "timeBasis": "record",
+      "hash": "558464316e97803e34b069036de392f920ca6680f3649d4f235d55ef896761bf",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 15802
+      },
+      "turn": "019f8ff0-33d9-7093-a0d9-e00c11ef4357",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/winfx/dialogtab_windows.go",
+          "before": "cc216bacbceff141449d0bd91d89beac6ddd3cb97949304137091a67e30309e3",
+          "after": "b2df14ff0d94c873091a3ab3d6bb3a875b23d77c87cfb3d5f5bd1e70546dc2f4",
+          "method": "patch-after-gofmt"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_GsPTiJn3Hsqi4PWKGVPlJGjh:0",
+      "time": "2026-07-23T17:16:25.670Z",
+      "orderTime": "2026-07-23T17:16:25.670Z",
+      "timeBasis": "record",
+      "hash": "4ae683a4ed0e03101315b72d3398ffab83d3103fb473b2091cca3e9c43332305",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 15807
+      },
+      "turn": "019f8ff0-33d9-7093-a0d9-e00c11ef4357",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/winfx/dialogtab_windows_test.go",
+          "before": "d7e16795e7400d96cb0693115cad0f23b9db57544abc6dad259d6999d81bd9fd",
+          "after": "3b275dc44021d56af0e2b87e2982bbf79bd3c50c1832bede5cd0655071534109",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    }
+  ],
+  "finalChanges": [
+    {
+      "path": "internal/winfx/dialogtab_windows.go",
+      "sha256": "b2df14ff0d94c873091a3ab3d6bb3a875b23d77c87cfb3d5f5bd1e70546dc2f4"
+    },
+    {
+      "path": "internal/winfx/dialogtab_windows_test.go",
+      "sha256": "3b275dc44021d56af0e2b87e2982bbf79bd3c50c1832bede5cd0655071534109"
+    }
+  ]
+}

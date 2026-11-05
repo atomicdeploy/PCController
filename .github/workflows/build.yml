@@ -1,0 +1,110 @@
+name: build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        edition:
+          - develop
+          - production
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: webui/package-lock.json
+
+      - name: Verify PowerShell terminal output contract
+        shell: pwsh
+        run: ./tools/test-terminal.ps1
+
+      - name: Build ${{ matrix.edition }} executable
+        shell: pwsh
+        run: ./tools/package.ps1 -Edition '${{ matrix.edition }}' -Force
+
+      - name: Upload release executable
+        uses: actions/upload-artifact@v7
+        with:
+          name: RayanLamp-windows-amd64-${{ matrix.edition }}
+          path: dist/RayanLamp.exe
+          if-no-files-found: error
+
+  linux-cross:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: amd64
+            edition: develop
+          - architecture: amd64
+            edition: production
+          - architecture: "386"
+            edition: production
+          - architecture: arm64
+            edition: production
+    env:
+      CLICOLOR_FORCE: "1"
+      RAYANLAMP_EMOJI: "1"
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: webui/package-lock.json
+
+      - name: Verify terminal output contracts
+        if: matrix.architecture == 'amd64' && matrix.edition == 'develop'
+        shell: bash
+        run: |
+          bash ./tools/test-terminal.sh
+          pwsh -File ./tools/test-terminal.ps1
+
+      - name: Cross-build Windows executable on Linux
+        shell: bash
+        run: >-
+          bash ./tools/build-linux.sh
+          --architecture "${{ matrix.architecture }}"
+          --edition "${{ matrix.edition }}"
+          --force
+
+      - name: Upload cross-built executable
+        uses: actions/upload-artifact@v7
+        with:
+          name: RayanLamp-windows-${{ matrix.architecture }}-${{ matrix.edition }}-from-linux
+          path: dist/RayanLamp.exe
+          if-no-files-found: error
