@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { APIError, type PCControllerDesktopClient } from "../api";
+import { audioImportAccept } from "../audio";
 import type {
   AppConfig,
   DeepPartial,
@@ -761,7 +762,7 @@ export function NotificationSettings({
             value={item.sound_source}
             options={[
               { value: "bundled", label: "Bundled PCController effects" },
-              { value: "custom", label: "Custom PCM WAV" }
+              { value: "custom", label: "Custom sound" }
             ]}
             onChange={(sound_source) => {
               if (sound_source === "custom" && !item.sound_file) {
@@ -775,8 +776,8 @@ export function NotificationSettings({
             ref={fileInput}
             class="audio-file-input"
             type="file"
-            accept=".wav,audio/wav,audio/x-wav"
-            aria-label={t("Choose custom WAV")}
+            accept={audioImportAccept}
+            aria-label={t("Choose custom sound")}
             onChange={(event) =>
               void importFile(event.currentTarget.files?.[0])
             }
@@ -788,13 +789,13 @@ export function NotificationSettings({
             <span class="audio-file-copy">
               <strong>
                 {item.sound_file
-                  ? item.sound_name || t("Content-addressed custom WAV")
+                  ? item.sound_name || t("Custom sound")
                   : t("No custom sound imported")}
               </strong>
               <small>
                 {item.sound_file
                   ? `SHA-256 ${shortAssetID(item.sound_file)}`
-                  : t("PCM WAV · mono or stereo · up to 4 MiB")}
+                  : t("WAV, MP3, FLAC · 10 sec · 4 MiB")}
               </small>
             </span>
             <Button

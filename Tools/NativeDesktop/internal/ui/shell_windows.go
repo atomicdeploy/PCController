@@ -2906,7 +2906,7 @@ func (s *Shell) ResolveAudio(cue string) (sfx.Asset, error) {
 	return s.audio.Resolve(sfx.Cue(cue))
 }
 
-// ImportAudio validates and stores one custom WAV in the shared asset store.
+// ImportAudio validates and stores one custom sound in the shared asset store.
 func (s *Shell) ImportAudio(name string, wave []byte) (sfx.ImportedAsset, error) {
 	if s == nil || s.audio == nil {
 		return sfx.ImportedAsset{}, errors.New("shared sound effects are unavailable")

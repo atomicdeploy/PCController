@@ -542,7 +542,7 @@ func (m *Model) notificationSettingsGroups() []*huh.Group {
 			m.settingsBool(m.text("Custom messages"), m.text("Render `message:` device events."), &d.cfg.Notifications.CustomMessage),
 			m.settingsBool(m.text("Audible cues"), m.text("Play cues independently of toast delivery."), &d.cfg.Notifications.Sound),
 			m.settingsSelect(m.text("Sound source"), m.text("Use the shared bundled catalog or a content-addressed custom WAV."), &d.cfg.Notifications.SoundSource, config.SoundSourceBundled, config.SoundSourceCustom),
-			settingsInput(m.text("Import custom WAV"), m.text("Optional local PCM WAV path; Apply imports it through the active GUI/headless primary."), &d.customSoundPath, cleanSingleLine),
+			settingsInput(m.text("Import custom sound"), m.text("WAV, MP3 or FLAC path"), &d.customSoundPath, cleanSingleLine),
 			settingsInput(m.text("Custom sound asset"), m.text("SHA-256 ID imported by the native or Web settings surface."), &d.cfg.Notifications.SoundFile, soundAssetID),
 			settingsInput(m.text("Custom sound name"), m.text("Reader-facing name shared by native and Web settings."), &d.cfg.Notifications.SoundName, nil),
 			m.settingsSelect(m.text("Delivery"), m.text("Automatic modern toast with legacy balloon fallback."), &d.cfg.Notifications.Delivery, "auto", "toast", "balloon"),

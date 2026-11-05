@@ -17,8 +17,8 @@ const (
 )
 
 var (
-	ErrWaveTooLarge = errors.New("sfx: WAV exceeds 4 MiB")
-	ErrInvalidWave  = errors.New("sfx: invalid PCM WAV")
+	ErrWaveTooLarge = errors.New("sfx: audio exceeds 4 MiB")
+	ErrInvalidWave  = errors.New("sfx: invalid audio")
 )
 
 // WaveInfo describes the validated PCM stream contained in one WAV asset.

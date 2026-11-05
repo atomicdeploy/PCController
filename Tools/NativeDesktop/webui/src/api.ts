@@ -1,3 +1,4 @@
+import { audioImportContentType } from "./audio";
 import type {
   APIEnvelope,
   AppConfig,
@@ -300,7 +301,7 @@ export class PCControllerDesktopAPI implements PCControllerDesktopClient {
     revision?: Revision
   ): Promise<UIConfigResult> {
     const headers: Record<string, string> = {
-      "Content-Type": "audio/wav",
+      "Content-Type": audioImportContentType(file),
       "X-PCControllerDesktop-Filename": safeAudioFilenameHeader(file.name)
     };
     if (revision !== undefined && revision !== "") {

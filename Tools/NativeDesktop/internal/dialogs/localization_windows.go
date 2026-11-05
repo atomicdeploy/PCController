@@ -59,7 +59,7 @@ var persianDialogStrings = map[string]string{
 	"&Save output…":          "&ذخیرهٔ خروجی…",
 	"&Test toast":            "&آزمایش اعلان",
 	"Test &audio":            "آزمایش &صدا",
-	"&Import WAV…":           "&واردکردن WAV…",
+	"&Import audio…":         "&واردکردن صدا…",
 	"Browse &on…":            "انتخاب روشن‌شدن (&N)…",
 	"Browse o&ff…":           "انتخاب خاموش‌شدن (&F)…",
 	"Browse &event…":         "انتخاب رویداد (&E)…",
@@ -119,7 +119,7 @@ var persianDialogStrings = map[string]string{
 	"Show sanitized message: events from the device": "پیام‌های پالایش‌شدهٔ دستگاه را نمایش بده",
 	"Play audible cues":                              "نشانه‌های صوتی پخش شوند",
 	"Sound source:":                                  "منبع صدا:",
-	"Custom WAV:":                                    "WAV سفارشی:",
+	"Custom sound:":                                  "صدای سفارشی:",
 	"Try notifications:":                             "آزمایش اعلان‌ها:",
 	"Automatic delivery prefers a modern toast and falls back to the existing tray balloon.": "حالت خودکار ابتدا اعلان مدرن را امتحان می‌کند و در صورت نیاز به بالون ناحیهٔ اعلان برمی‌گردد.",
 
@@ -215,7 +215,7 @@ var persianDialogStrings = map[string]string{
 	"None (frameless)":                   "بدون قاب",
 	"Modern toast":                       "اعلان مدرن",
 	"Legacy balloon":                     "بالون قدیمی",
-	"Custom WAV":                         "WAV سفارشی",
+	"Custom sound":                       "صدای سفارشی",
 	"System default":                     "پیش‌فرض سیستم",
 	"English":                            "انگلیسی",
 	"Persian":                            "فارسی",
@@ -226,14 +226,14 @@ var persianDialogStrings = map[string]string{
 	"Device endpoint":          "نقطهٔ پایانی دستگاه",
 	"Endpoint:":                "نقطهٔ پایانی:",
 	"Show raw response":        "نمایش پاسخ خام",
-	"Endpoint fetching is unavailable in this session.": "دریافت نقطهٔ پایانی در این نشست در دسترس نیست.",
-	"Copied diagnostic output to the clipboard.":        "خروجی عیب‌یابی در کلیپ‌بورد رونویسی شد.",
-	"Choose an endpoint":                                "یک نقطهٔ پایانی انتخاب کنید",
-	"Endpoint not permitted":                            "نقطهٔ پایانی مجاز نیست",
-	"Save PCController diagnostics":                     "ذخیرهٔ عیب‌یابی PCController",
-	"Text files (*.txt)|*.txt|All files (*.*)|*.*":      "فایل‌های متنی (*.txt)|*.txt|همهٔ فایل‌ها (*.*)|*.*",
-	"All files (*.*)|*.*":                               "همهٔ فایل‌ها (*.*)|*.*",
-	"PCM Wave audio (*.wav)|*.wav|All files (*.*)|*.*":  "صدای PCM Wave (*.wav)|*.wav|همهٔ فایل‌ها (*.*)|*.*",
+	"Endpoint fetching is unavailable in this session.":                 "دریافت نقطهٔ پایانی در این نشست در دسترس نیست.",
+	"Copied diagnostic output to the clipboard.":                        "خروجی عیب‌یابی در کلیپ‌بورد رونویسی شد.",
+	"Choose an endpoint":                                                "یک نقطهٔ پایانی انتخاب کنید",
+	"Endpoint not permitted":                                            "نقطهٔ پایانی مجاز نیست",
+	"Save PCController diagnostics":                                     "ذخیرهٔ عیب‌یابی PCController",
+	"Text files (*.txt)|*.txt|All files (*.*)|*.*":                      "فایل‌های متنی (*.txt)|*.txt|همهٔ فایل‌ها (*.*)|*.*",
+	"All files (*.*)|*.*":                                               "همهٔ فایل‌ها (*.*)|*.*",
+	"Audio (*.wav;*.mp3;*.flac)|*.wav;*.mp3;*.flac|All files (*.*)|*.*": "صدا (*.wav;*.mp3;*.flac)|*.wav;*.mp3;*.flac|همهٔ فایل‌ها (*.*)|*.*",
 	"Supported scripts (*.ps1;*.cmd;*.bat;*.exe;*.com)|*.ps1;*.cmd;*.bat;*.exe;*.com|All files (*.*)|*.*": "اسکریپت‌های پشتیبانی‌شده (*.ps1;*.cmd;*.bat;*.exe;*.com)|*.ps1;*.cmd;*.bat;*.exe;*.com|همهٔ فایل‌ها (*.*)|*.*",
 	"Select automation working directory": "انتخاب پوشهٔ کاری خودکارسازی",
 	"Select device-on script":             "انتخاب اسکریپت روشن‌شدن دستگاه",
@@ -399,7 +399,7 @@ func applySettingsLocalization(
 	setModel(controls.delivery, deliveryLabels)
 	setModel(controls.soundSource, soundSourceLabels)
 	if controls.controllerMode {
-		setModel(controls.soundSource, []string{"Bundled PCController sounds", "Custom WAV"})
+		setModel(controls.soundSource, []string{"Bundled PCController sounds", "Custom sound"})
 	}
 
 	if controls.tabs != nil {

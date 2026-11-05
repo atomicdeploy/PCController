@@ -395,7 +395,7 @@ session, and mutations additionally require the in-memory CSRF token.
 | `POST` | `/audio/play` with optional `{"cue":"message","count":1}` | `audio.play` |
 | `POST` | `/audio/import` with `{"path":"…"}` | Bearer-authenticated local-file `audio.import` for TUI/API automation |
 | `GET`, `HEAD` | `/ui/audio/{cue}` | Browser-session stream of the currently selected PCM WAV |
-| `POST` | `/ui/audio/import` with raw `audio/wav` | Validate/store a custom WAV and atomically select its SHA-256 ID |
+| `POST` | `/ui/audio/import` with raw audio | Decode/store WAV, MP3 or FLAC and atomically select its SHA-256 ID |
 | `GET` | `/version` | `version` |
 
 The loopback HTTP and WebSocket API is intentionally versionless: these paths
@@ -427,15 +427,30 @@ The two `/ui/audio/*` routes use the short-lived browser session and require
 CSRF protection plus the current `If-Match` configuration revision for import.
 `GET /ui/audio/{cue}` accepts `on`, `off`,
 `message`, or `error` and returns the exact resolved WAV with an ETag. Import
-accepts at most 4 MiB of validated integer PCM WAV and an optional
+accepts at most 4 MiB of PCM WAV, MP3 or FLAC and an optional
 `X-PCControllerDesktop-Filename` display-name header; its response is the usual redacted
 UI configuration/revision shape, never a filesystem path or bearer token.
+Compressed sources are decoded once with built-in Go codecs, then stored and
+played as PCM WAV. No FFmpeg process, codec DLL or installed media player is
+required. Both source and decoded output are limited to 4 MiB; audio is limited
+to 10 seconds, mono/stereo and 8–96 kHz. Overlong audio is rejected, not clipped.
+Existing WAV assets retain their original bytes and IDs. Ogg/Vorbis, Opus,
+AAC/M4A and other containers are not accepted by the host importer.
+Vorbis import is deferred: the evaluated Go decoder allocates comment/codebook
+tables from untrusted counts before validating them. Input/output byte caps do
+not bound those allocations; safe support needs a hardened or isolated decoder.
+MIME aliases are `audio/x-wav`, `audio/wave`, `audio/vnd.wave`, `audio/mp3`,
+`audio/x-flac`. Content is always decoded/validated even
+when its filename or supplied media type is misleading.
 Direct/static mode has no Go owner, so the elected realtime tab alone plays
 the canonical `shared/sfx/{cue}.wav` files or a SHA-256-addressed custom WAV
 from browser IndexedDB. BroadcastChannel followers update state and messages
 without replaying audio. Coordinators advertise this surface as the
 `audio_sfx` capability; direct mode supplies the equivalent browser
 implementation.
+Its compressed import uses the browser's Web Audio decoder; unsupported browser
+codecs produce an error without replacing the existing selection. Import does
+not resume audio or emit a preview. Browser-only storage is also normalized PCM.
 
 Terminal reads are cursor based. When `reset` is true, discard the visible
 transcript and still advance through every returned chunk. Session purges use
@@ -445,7 +460,7 @@ prevents a reset loop and fences later output to the new session.
 No-body routes reject request bodies. Ordinary JSON routes require
 `Content-Type: application/json`; bodies are limited to 1 MiB and reject
 unknown members. The one deliberate exception is raw custom-audio import,
-which requires `audio/wav` and has its own 4 MiB limit. Configuration patches
+which accepts `audio/wav`, `audio/mpeg` or `audio/flac` (and their documented aliases) and has its own 4 MiB limit. Configuration patches
 recursively merge into the current value, validate a new runtime client before
 committing, save atomically, and only then update shell integrations.
 

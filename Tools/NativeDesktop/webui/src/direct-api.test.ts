@@ -234,7 +234,7 @@ describe("DirectDeviceAPI", () => {
 
   it("plays in-browser cues and imports a content-addressed custom WAV", async () => {
     const play = vi.fn(async () => undefined);
-    const importCustomWAV = vi.fn(async () => ({
+    const importCustomAudio = vi.fn(async () => ({
       id: "a".repeat(64),
       name: "Soft switch.wav",
       bytes: 1_024,
@@ -247,7 +247,7 @@ describe("DirectDeviceAPI", () => {
     }));
     const audio = {
       play,
-      importCustomWAV,
+      importCustomAudio,
       describe: vi.fn(async () => null),
       armUserGestureUnlock: vi.fn(() => () => undefined)
     } satisfies BrowserAudioPlayback;
@@ -267,7 +267,7 @@ describe("DirectDeviceAPI", () => {
       expect.objectContaining({ sound_source: "bundled" }),
       2
     );
-    expect(importCustomWAV).toHaveBeenCalledWith(file);
+    expect(importCustomAudio).toHaveBeenCalledWith(file);
     expect(imported.config.notifications).toMatchObject({
       sound: true,
       sound_source: "custom",

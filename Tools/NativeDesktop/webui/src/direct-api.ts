@@ -494,7 +494,7 @@ export class DirectDeviceAPI implements PCControllerDesktopClient {
     file: File,
     revision?: Revision
   ): Promise<UIConfigResult> {
-    const asset = await this.audio.importCustomWAV(file);
+    const asset = await this.audio.importCustomAudio(file);
     return this.patchConfig(
       {
         notifications: {

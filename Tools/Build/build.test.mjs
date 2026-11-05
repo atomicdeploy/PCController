@@ -74,6 +74,7 @@ import {
         hostSourceIdentity,
 	installPackage,
 	inspectICO,
+	isModuleNotice,
 	isNativeWindowsGNUCompiler,
 	packBuildTimestamp,
 	parseArguments,
@@ -94,6 +95,13 @@ import {
 	windowsSmokeSource
 } from './build.mjs'
 import { createStableTestPlan, goTestSourceIdentity, stableTestBinaryName } from './go-tests.mjs'
+
+test('module notices include Unlicense alongside license and notice variants', () => {
+	for (const name of ['LICENSE', 'LICENSE.txt', 'LICENCE.md', 'UNLICENSE', 'COPYING', 'NOTICE']) {
+		assert.equal(isModuleNotice(name), true, name)
+	}
+	for (const name of ['README.md', 'main.go', 'go.mod']) assert.equal(isModuleNotice(name), false, name)
+})
 import { PRODUCT_METADATA } from './product-metadata.mjs'
 import {
 	BOARD,

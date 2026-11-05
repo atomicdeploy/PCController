@@ -592,245 +592,6 @@ function registerSW(options = {}) {
 	return updateServiceWorker;
 }
 //#endregion
-//#region src/api.ts
-var defaultTimeout = 12e3;
-var diagnosticsRefreshTimeout = 55e3;
-var APIError = class extends Error {
-	status;
-	code;
-	constructor(status, code, message) {
-		super(message);
-		this.name = "APIError";
-		this.status = status;
-		this.code = code;
-	}
-};
-function isEnvelope(value) {
-	return Boolean(value && typeof value === "object" && typeof value.ok === "boolean");
-}
-function unwrapResponse(value) {
-	if (!isEnvelope(value)) return value;
-	if (value.ok && value.result !== void 0) return value.result;
-	const error = value.error;
-	throw new APIError(500, error?.code ?? "invalid_response", error?.message ?? "The local API returned an incomplete response.");
-}
-var PCControllerDesktopAPI = class {
-	kind = "relay";
-	displayName = "Go coordinator";
-	csrf = "";
-	sessionRequest = null;
-	get syncKey() {
-		return `relay:${window.location.origin}`;
-	}
-	get csrfToken() {
-		return this.csrf;
-	}
-	async establishSession(force = false) {
-		if (force) this.csrf = "";
-		if (this.csrf) return this.csrf;
-		if (this.sessionRequest) return this.sessionRequest;
-		this.sessionRequest = this.requestSession().finally(() => {
-			this.sessionRequest = null;
-		});
-		return this.sessionRequest;
-	}
-	async requestSession() {
-		const response = await fetch("/app/session", {
-			method: "POST",
-			credentials: "same-origin",
-			headers: { Accept: "application/json" },
-			cache: "no-store"
-		});
-		const result = unwrapResponse(await this.readJSON(response));
-		if (!result || typeof result.csrf_token !== "string" || !result.csrf_token) throw new APIError(response.status, "invalid_session", "The local controller did not provide a CSRF token.");
-		this.csrf = result.csrf_token;
-		return this.csrf;
-	}
-	async bootstrap() {
-		await this.establishSession();
-		return this.request("/ui/bootstrap");
-	}
-	async getConfig() {
-		return this.request("/ui/config");
-	}
-	async patchConfig(patch, revision) {
-		const headers = {};
-		if (revision !== void 0 && revision !== "") headers["If-Match"] = String(revision);
-		return this.request("/ui/config", {
-			method: "PATCH",
-			headers,
-			body: JSON.stringify(patch)
-		});
-	}
-	async beginHotkeyCapture() {
-		return this.request("/ui/hotkeys/capture", {
-			method: "POST",
-			body: JSON.stringify({})
-		});
-	}
-	async renewHotkeyCapture(leaseID) {
-		return this.request("/ui/hotkeys/capture", {
-			method: "POST",
-			body: JSON.stringify({ lease_id: leaseID })
-		});
-	}
-	async releaseHotkeyCapture(leaseID, keepalive = false) {
-		return this.request("/ui/hotkeys/capture", {
-			method: "DELETE",
-			body: JSON.stringify({ lease_id: leaseID }),
-			keepalive
-		});
-	}
-	async probeHotkey(leaseID, chord) {
-		return this.request("/ui/hotkeys/probe", {
-			method: "POST",
-			body: JSON.stringify({
-				lease_id: leaseID,
-				chord
-			})
-		});
-	}
-	async integrationRegistrationStatus() {
-		return this.request("/ui/integration/registration");
-	}
-	async updateIntegrationRegistration(method) {
-		return this.request("/ui/integration/registration", {
-			method: "POST",
-			body: JSON.stringify({ method })
-		});
-	}
-	async status() {
-		return this.request("/status");
-	}
-	async command(command) {
-		const path = command === "reconnect" ? "/reconnect" : command.startsWith("window/") ? `/${command}` : `/device/${command}`;
-		return this.request(path, { method: "POST" });
-	}
-	async diagnostics(endpoint) {
-		const query = new URLSearchParams({ endpoint });
-		return this.request(`/diagnostics?${query}`);
-	}
-	async uiDiagnostics() {
-		return this.request("/ui/diagnostics");
-	}
-	async refreshUIDiagnostics(endpoints) {
-		return this.request("/ui/diagnostics/refresh", {
-			method: "POST",
-			body: JSON.stringify(endpoints && endpoints.length > 0 ? { endpoints } : {})
-		}, true, diagnosticsRefreshTimeout);
-	}
-	async notify(title, message) {
-		return this.request("/notifications", {
-			method: "POST",
-			body: JSON.stringify({
-				title,
-				message
-			})
-		});
-	}
-	async playAudio(cue = "message", count = 1) {
-		validateAudioRequest(cue, count);
-		return this.request("/audio/play", {
-			method: "POST",
-			body: JSON.stringify({
-				cue,
-				count
-			})
-		});
-	}
-	async importAudio(file, revision) {
-		const headers = {
-			"Content-Type": "audio/wav",
-			"X-PCControllerDesktop-Filename": safeAudioFilenameHeader(file.name)
-		};
-		if (revision !== void 0 && revision !== "") headers["If-Match"] = String(revision);
-		return this.request("/ui/audio/import", {
-			method: "POST",
-			headers,
-			body: file
-		});
-	}
-	realtimeURL() {
-		const url = new URL("/events", window.location.href);
-		url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-		return url.href;
-	}
-	realtimeOpened(_socket) {
-		return [];
-	}
-	realtimeClosed() {
-		return [];
-	}
-	decodeRealtimeMessage(raw) {
-		if (typeof raw !== "string") return [];
-		let parsed;
-		try {
-			parsed = JSON.parse(raw);
-		} catch {
-			return [];
-		}
-		const envelope = parsed && typeof parsed === "object" && "result" in parsed ? parsed.result : parsed;
-		return envelope && typeof envelope === "object" ? [envelope] : [];
-	}
-	async request(path, init = {}, retrySession = true, timeoutMs = defaultTimeout) {
-		const method = (init.method ?? "GET").toUpperCase();
-		const mutating = method !== "GET" && method !== "HEAD";
-		if (mutating) await this.establishSession();
-		const controller = new AbortController();
-		const timer = window.setTimeout(() => controller.abort(), timeoutMs);
-		const headers = new Headers(init.headers);
-		headers.set("Accept", "application/json");
-		if (init.body !== void 0 && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
-		if (mutating) headers.set("X-PCControllerDesktop-CSRF", this.csrf);
-		try {
-			const response = await fetch(path, {
-				...init,
-				method,
-				headers,
-				credentials: "same-origin",
-				cache: "no-store",
-				signal: controller.signal
-			});
-			if (response.status === 401 && retrySession && path !== "/app/session") {
-				this.csrf = "";
-				await this.establishSession(true);
-				return this.request(path, init, false, timeoutMs);
-			}
-			const value = await this.readJSON(response);
-			if (!response.ok) {
-				const envelope = isEnvelope(value) ? value : void 0;
-				throw new APIError(response.status, envelope?.error?.code ?? `http_${response.status}`, envelope?.error?.message ?? `The local controller returned HTTP ${response.status}.`);
-			}
-			return unwrapResponse(value);
-		} catch (error) {
-			if (error instanceof DOMException && error.name === "AbortError") throw new APIError(408, "timeout", "The local controller did not respond in time.");
-			throw error;
-		} finally {
-			window.clearTimeout(timer);
-		}
-	}
-	async readJSON(response) {
-		if (!(response.headers.get("Content-Type") ?? "").toLowerCase().includes("application/json")) throw new APIError(response.status, "invalid_response", "The local controller returned a non-JSON response.");
-		try {
-			return await response.json();
-		} catch {
-			throw new APIError(response.status, "invalid_response", "The local controller returned malformed JSON.");
-		}
-	}
-};
-function validateAudioRequest(cue, count) {
-	if (![
-		"on",
-		"off",
-		"message",
-		"error"
-	].includes(cue)) throw new APIError(400, "invalid_audio_cue", "Unknown audio cue.");
-	if (!Number.isInteger(count) || count < 1 || count > 10) throw new APIError(400, "invalid_audio_count", "Audio cue count must be an integer between 1 and 10.");
-}
-function safeAudioFilenameHeader(value) {
-	return (value.split(/[\\/]/).at(-1)?.trim() ?? "").replace(/[^\x20-\x7e]/g, "_").replace(/[";]/g, "_").slice(0, 128) || "Custom sound.wav";
-}
-//#endregion
 //#region src/audio.ts
 var audioDatabaseName = "pccontroller-desktop.web.audio.v1";
 var audioStoreName = "sounds";
@@ -883,9 +644,9 @@ var BrowserAudioPlayer = class {
 		this.playbackTail = operation;
 		return operation;
 	}
-	async importCustomWAV(file) {
+	async importCustomAudio(file) {
 		if (file.size > maxAudioBytes) throw new Error("Custom audio must be 4 MiB or smaller.");
-		const data = await file.arrayBuffer();
+		const data = await normalizeImportedAudio(await file.arrayBuffer(), (bytes) => this.audioContext().decodeAudioData(bytes));
 		const info = inspectWAV(data);
 		const id = await audioContentID(data);
 		const importedAt = (/* @__PURE__ */ new Date()).toISOString();
@@ -1005,6 +766,60 @@ var BrowserAudioPlayer = class {
 var browserAudio = new BrowserAudioPlayer();
 function bundledAudioURL(cue, baseURL) {
 	return new URL(`shared/sfx/${cue}.wav`, baseURL).href;
+}
+function audioImportContentType(file) {
+	return {
+		wav: "audio/wav",
+		mp3: "audio/mpeg",
+		flac: "audio/flac"
+	}[file.name.split(".").pop()?.toLowerCase() || ""] || file.type || "application/octet-stream";
+}
+async function normalizeImportedAudio(data, decode) {
+	if (data.byteLength > maxAudioBytes) throw new Error("Custom audio must be 4 MiB or smaller.");
+	const bytes = new Uint8Array(data);
+	if (fourCC(bytes, 0) === "RIFF") {
+		inspectWAV(data);
+		return data;
+	}
+	if (!(fourCC(bytes, 0) === "fLaC" || bytes[0] === 73 && bytes[1] === 68 && bytes[2] === 51 || bytes[0] === 255 && (bytes[1] & 224) === 224)) throw new Error("Choose PCM WAV, MP3 or FLAC audio.");
+	let buffer;
+	try {
+		buffer = await decode(data.slice(0));
+	} catch {
+		throw new Error("This browser cannot decode this audio file. Try importing it through the desktop host.");
+	}
+	const { sampleRate, numberOfChannels: channels, length: frames } = buffer;
+	if (sampleRate < 8e3 || sampleRate > 96e3 || channels < 1 || channels > 2 || frames < 1 || frames > sampleRate * maxAudioSeconds) throw new Error("Custom audio must be mono or stereo, 8–96 kHz and no longer than 10 seconds.");
+	const size = frames * channels * 2;
+	if (size + 44 > maxAudioBytes) throw new Error("Decoded custom audio must be 4 MiB or smaller.");
+	const wave = new ArrayBuffer(44 + size);
+	const out = new Uint8Array(wave);
+	const view = new DataView(wave);
+	const tag = (offset, text) => {
+		for (let i = 0; i < text.length; i++) out[offset + i] = text.charCodeAt(i);
+	};
+	tag(0, "RIFF");
+	tag(8, "WAVEfmt ");
+	tag(36, "data");
+	view.setUint32(4, wave.byteLength - 8, true);
+	view.setUint32(16, 16, true);
+	view.setUint16(20, 1, true);
+	view.setUint16(22, channels, true);
+	view.setUint32(24, sampleRate, true);
+	view.setUint32(28, sampleRate * channels * 2, true);
+	view.setUint16(32, channels * 2, true);
+	view.setUint16(34, 16, true);
+	view.setUint32(40, size, true);
+	for (let channel = 0; channel < channels; channel++) {
+		const values = buffer.getChannelData(channel);
+		for (let i = 0; i < frames; i++) {
+			if (!Number.isFinite(values[i])) throw new Error("Invalid audio sample.");
+			const value = Math.max(-1, Math.min(1, values[i]));
+			view.setInt16(44 + (i * channels + channel) * 2, Math.round(value * (value < 0 ? 32768 : 32767)), true);
+		}
+	}
+	inspectWAV(wave);
+	return wave;
 }
 function inspectWAV(data) {
 	if (data.byteLength < 44) throw new Error("Custom audio is too small to be a WAV file.");
@@ -1267,6 +1082,245 @@ async function putStoredAudio(record) {
 function withoutData(record) {
 	const { data: _data, ...metadata } = record;
 	return metadata;
+}
+//#endregion
+//#region src/api.ts
+var defaultTimeout = 12e3;
+var diagnosticsRefreshTimeout = 55e3;
+var APIError = class extends Error {
+	status;
+	code;
+	constructor(status, code, message) {
+		super(message);
+		this.name = "APIError";
+		this.status = status;
+		this.code = code;
+	}
+};
+function isEnvelope(value) {
+	return Boolean(value && typeof value === "object" && typeof value.ok === "boolean");
+}
+function unwrapResponse(value) {
+	if (!isEnvelope(value)) return value;
+	if (value.ok && value.result !== void 0) return value.result;
+	const error = value.error;
+	throw new APIError(500, error?.code ?? "invalid_response", error?.message ?? "The local API returned an incomplete response.");
+}
+var PCControllerDesktopAPI = class {
+	kind = "relay";
+	displayName = "Go coordinator";
+	csrf = "";
+	sessionRequest = null;
+	get syncKey() {
+		return `relay:${window.location.origin}`;
+	}
+	get csrfToken() {
+		return this.csrf;
+	}
+	async establishSession(force = false) {
+		if (force) this.csrf = "";
+		if (this.csrf) return this.csrf;
+		if (this.sessionRequest) return this.sessionRequest;
+		this.sessionRequest = this.requestSession().finally(() => {
+			this.sessionRequest = null;
+		});
+		return this.sessionRequest;
+	}
+	async requestSession() {
+		const response = await fetch("/app/session", {
+			method: "POST",
+			credentials: "same-origin",
+			headers: { Accept: "application/json" },
+			cache: "no-store"
+		});
+		const result = unwrapResponse(await this.readJSON(response));
+		if (!result || typeof result.csrf_token !== "string" || !result.csrf_token) throw new APIError(response.status, "invalid_session", "The local controller did not provide a CSRF token.");
+		this.csrf = result.csrf_token;
+		return this.csrf;
+	}
+	async bootstrap() {
+		await this.establishSession();
+		return this.request("/ui/bootstrap");
+	}
+	async getConfig() {
+		return this.request("/ui/config");
+	}
+	async patchConfig(patch, revision) {
+		const headers = {};
+		if (revision !== void 0 && revision !== "") headers["If-Match"] = String(revision);
+		return this.request("/ui/config", {
+			method: "PATCH",
+			headers,
+			body: JSON.stringify(patch)
+		});
+	}
+	async beginHotkeyCapture() {
+		return this.request("/ui/hotkeys/capture", {
+			method: "POST",
+			body: JSON.stringify({})
+		});
+	}
+	async renewHotkeyCapture(leaseID) {
+		return this.request("/ui/hotkeys/capture", {
+			method: "POST",
+			body: JSON.stringify({ lease_id: leaseID })
+		});
+	}
+	async releaseHotkeyCapture(leaseID, keepalive = false) {
+		return this.request("/ui/hotkeys/capture", {
+			method: "DELETE",
+			body: JSON.stringify({ lease_id: leaseID }),
+			keepalive
+		});
+	}
+	async probeHotkey(leaseID, chord) {
+		return this.request("/ui/hotkeys/probe", {
+			method: "POST",
+			body: JSON.stringify({
+				lease_id: leaseID,
+				chord
+			})
+		});
+	}
+	async integrationRegistrationStatus() {
+		return this.request("/ui/integration/registration");
+	}
+	async updateIntegrationRegistration(method) {
+		return this.request("/ui/integration/registration", {
+			method: "POST",
+			body: JSON.stringify({ method })
+		});
+	}
+	async status() {
+		return this.request("/status");
+	}
+	async command(command) {
+		const path = command === "reconnect" ? "/reconnect" : command.startsWith("window/") ? `/${command}` : `/device/${command}`;
+		return this.request(path, { method: "POST" });
+	}
+	async diagnostics(endpoint) {
+		const query = new URLSearchParams({ endpoint });
+		return this.request(`/diagnostics?${query}`);
+	}
+	async uiDiagnostics() {
+		return this.request("/ui/diagnostics");
+	}
+	async refreshUIDiagnostics(endpoints) {
+		return this.request("/ui/diagnostics/refresh", {
+			method: "POST",
+			body: JSON.stringify(endpoints && endpoints.length > 0 ? { endpoints } : {})
+		}, true, diagnosticsRefreshTimeout);
+	}
+	async notify(title, message) {
+		return this.request("/notifications", {
+			method: "POST",
+			body: JSON.stringify({
+				title,
+				message
+			})
+		});
+	}
+	async playAudio(cue = "message", count = 1) {
+		validateAudioRequest(cue, count);
+		return this.request("/audio/play", {
+			method: "POST",
+			body: JSON.stringify({
+				cue,
+				count
+			})
+		});
+	}
+	async importAudio(file, revision) {
+		const headers = {
+			"Content-Type": audioImportContentType(file),
+			"X-PCControllerDesktop-Filename": safeAudioFilenameHeader(file.name)
+		};
+		if (revision !== void 0 && revision !== "") headers["If-Match"] = String(revision);
+		return this.request("/ui/audio/import", {
+			method: "POST",
+			headers,
+			body: file
+		});
+	}
+	realtimeURL() {
+		const url = new URL("/events", window.location.href);
+		url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+		return url.href;
+	}
+	realtimeOpened(_socket) {
+		return [];
+	}
+	realtimeClosed() {
+		return [];
+	}
+	decodeRealtimeMessage(raw) {
+		if (typeof raw !== "string") return [];
+		let parsed;
+		try {
+			parsed = JSON.parse(raw);
+		} catch {
+			return [];
+		}
+		const envelope = parsed && typeof parsed === "object" && "result" in parsed ? parsed.result : parsed;
+		return envelope && typeof envelope === "object" ? [envelope] : [];
+	}
+	async request(path, init = {}, retrySession = true, timeoutMs = defaultTimeout) {
+		const method = (init.method ?? "GET").toUpperCase();
+		const mutating = method !== "GET" && method !== "HEAD";
+		if (mutating) await this.establishSession();
+		const controller = new AbortController();
+		const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+		const headers = new Headers(init.headers);
+		headers.set("Accept", "application/json");
+		if (init.body !== void 0 && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+		if (mutating) headers.set("X-PCControllerDesktop-CSRF", this.csrf);
+		try {
+			const response = await fetch(path, {
+				...init,
+				method,
+				headers,
+				credentials: "same-origin",
+				cache: "no-store",
+				signal: controller.signal
+			});
+			if (response.status === 401 && retrySession && path !== "/app/session") {
+				this.csrf = "";
+				await this.establishSession(true);
+				return this.request(path, init, false, timeoutMs);
+			}
+			const value = await this.readJSON(response);
+			if (!response.ok) {
+				const envelope = isEnvelope(value) ? value : void 0;
+				throw new APIError(response.status, envelope?.error?.code ?? `http_${response.status}`, envelope?.error?.message ?? `The local controller returned HTTP ${response.status}.`);
+			}
+			return unwrapResponse(value);
+		} catch (error) {
+			if (error instanceof DOMException && error.name === "AbortError") throw new APIError(408, "timeout", "The local controller did not respond in time.");
+			throw error;
+		} finally {
+			window.clearTimeout(timer);
+		}
+	}
+	async readJSON(response) {
+		if (!(response.headers.get("Content-Type") ?? "").toLowerCase().includes("application/json")) throw new APIError(response.status, "invalid_response", "The local controller returned a non-JSON response.");
+		try {
+			return await response.json();
+		} catch {
+			throw new APIError(response.status, "invalid_response", "The local controller returned malformed JSON.");
+		}
+	}
+};
+function validateAudioRequest(cue, count) {
+	if (![
+		"on",
+		"off",
+		"message",
+		"error"
+	].includes(cue)) throw new APIError(400, "invalid_audio_cue", "Unknown audio cue.");
+	if (!Number.isInteger(count) || count < 1 || count > 10) throw new APIError(400, "invalid_audio_count", "Audio cue count must be an integer between 1 and 10.");
+}
+function safeAudioFilenameHeader(value) {
+	return (value.split(/[\\/]/).at(-1)?.trim() ?? "").replace(/[^\x20-\x7e]/g, "_").replace(/[";]/g, "_").slice(0, 128) || "Custom sound.wav";
 }
 //#endregion
 //#region src/build-edition.ts
@@ -2487,7 +2541,7 @@ var DirectDeviceAPI = class {
 		};
 	}
 	async importAudio(file, revision) {
-		const asset = await this.audio.importCustomWAV(file);
+		const asset = await this.audio.importCustomAudio(file);
 		return this.patchConfig({ notifications: {
 			sound: true,
 			sound_source: "custom",
@@ -4300,11 +4354,11 @@ var fa = {
 	"State and message sounds work even when visual notifications are disabled.": "صدای وضعیت و پیام حتی با اعلان تصویری غیرفعال نیز پخش می‌شود.",
 	"Sound source": "منبع صدا",
 	"Bundled PCController effects": "جلوه‌های همراه PCController",
-	"Custom PCM WAV": "فایل PCM WAV سفارشی",
-	"Choose custom WAV": "انتخاب WAV سفارشی",
+	"Custom sound": "صدای سفارشی",
+	"Choose custom sound": "انتخاب صدای سفارشی",
 	"Content-addressed custom WAV": "WAV سفارشی با شناسهٔ محتوا",
 	"No custom sound imported": "صدای سفارشی وارد نشده",
-	"PCM WAV · mono or stereo · up to 4 MiB": "PCM WAV · تک‌کاناله یا استریو · تا ۴ مگابایت",
+	"WAV, MP3, FLAC · 10 sec · 4 MiB": "WAV، MP3، FLAC · ۱۰ ثانیه · ۴ مگابایت",
 	"Replace": "جایگزینی",
 	"Import": "وارد کردن",
 	"Verify audio": "بررسی صدا",
@@ -7717,7 +7771,7 @@ function NotificationSettings({ api, value, patch, direct, visualAvailable, audi
 						label: "Bundled PCController effects"
 					}, {
 						value: "custom",
-						label: "Custom PCM WAV"
+						label: "Custom sound"
 					}],
 					onChange: (sound_source) => {
 						if (sound_source === "custom" && !item.sound_file) {
@@ -7731,8 +7785,8 @@ function NotificationSettings({ api, value, patch, direct, visualAvailable, audi
 					ref: fileInput,
 					class: "audio-file-input",
 					type: "file",
-					accept: ".wav,audio/wav,audio/x-wav",
-					"aria-label": t("Choose custom WAV"),
+					accept: ".wav,.mp3,.flac,audio/wav,audio/mpeg,audio/flac",
+					"aria-label": t("Choose custom sound"),
 					onChange: (event) => void importFile(event.currentTarget.files?.[0])
 				}),
 				/* @__PURE__ */ u("div", {
@@ -7745,7 +7799,7 @@ function NotificationSettings({ api, value, patch, direct, visualAvailable, audi
 						}),
 						/* @__PURE__ */ u("span", {
 							class: "audio-file-copy",
-							children: [/* @__PURE__ */ u("strong", { children: item.sound_file ? item.sound_name || t("Content-addressed custom WAV") : t("No custom sound imported") }), /* @__PURE__ */ u("small", { children: item.sound_file ? `SHA-256 ${shortAssetID(item.sound_file)}` : t("PCM WAV · mono or stereo · up to 4 MiB") })]
+							children: [/* @__PURE__ */ u("strong", { children: item.sound_file ? item.sound_name || t("Custom sound") : t("No custom sound imported") }), /* @__PURE__ */ u("small", { children: item.sound_file ? `SHA-256 ${shortAssetID(item.sound_file)}` : t("WAV, MP3, FLAC · 10 sec · 4 MiB") })]
 						}),
 						/* @__PURE__ */ u(Button, {
 							kind: "quiet",
@@ -10030,4 +10084,4 @@ applyWebLocale(document.documentElement.dataset.locale);
 R(/* @__PURE__ */ u(App, {}), root);
 //#endregion
 
-//# sourceMappingURL=index-CvIERnZT.js.map
+//# sourceMappingURL=index-BuoRu0iz.js.map

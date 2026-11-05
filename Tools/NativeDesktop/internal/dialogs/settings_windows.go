@@ -16,6 +16,7 @@ import (
 
 	"pccontroller.local/desktop/internal/commands"
 	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/sfx"
 	"pccontroller.local/desktop/internal/winfx"
 )
 
@@ -24,7 +25,7 @@ const (
 	settingsCancelCaption        = "&Cancel"
 	settingsTestToastCaption     = "&Test toast"
 	settingsTestSoundCaption     = "Test &audio"
-	settingsImportSoundCaption   = "&Import WAV…"
+	settingsImportSoundCaption   = "&Import audio…"
 	settingsBrowseOnCaption      = "Browse &on…"
 	settingsBrowseOffCaption     = "Browse o&ff…"
 	settingsBrowseMessageCaption = "Browse &event…"
@@ -148,7 +149,7 @@ type SettingsPreviewFunc func(config.Config)
 // remains owned by the caller.
 type SettingsActionFunc func() error
 
-// SettingsSoundImportFunc imports one user-selected WAV into the shared,
+// SettingsSoundImportFunc imports one user-selected sound into the shared,
 // content-addressed native/Web asset store.
 type SettingsSoundImportFunc func(path string) (id, name string, err error)
 
@@ -1211,7 +1212,7 @@ func settingsNotificationPage(
 	soundLabels := soundSourceLabels
 	if controls.controllerMode {
 		stateCaption, messageCaption = "Notify when the program enters Running or Idle", "Show controller messages"
-		soundLabels = []string{"Bundled PCController sounds", "Custom WAV"}
+		soundLabels = []string{"Bundled PCController sounds", "Custom sound"}
 	}
 	controls.soundFile = cfg.Notifications.SoundFile
 	controls.soundImportAvailable = actions.ImportSound != nil
@@ -1286,7 +1287,7 @@ func settingsNotificationPage(
 					updateSettingsEnabled(controls)
 				},
 			},
-			decl.Label{Row: 7, Column: 0, Text: "Custom WAV:"},
+			decl.Label{Row: 7, Column: 0, Text: "Custom sound:"},
 			decl.LineEdit{
 				AssignTo: &controls.soundName,
 				Row:      7,
@@ -1301,7 +1302,7 @@ func settingsNotificationPage(
 				MinSize:     decl.Size{Width: 118},
 				Text:        settingsImportSoundCaption,
 				Enabled:     actions.ImportSound != nil,
-				ToolTipText: "Import one PCM WAV used by native and Web playback without duplicating it in configuration.",
+				ToolTipText: "WAV, MP3 or FLAC · up to 10 seconds and 4 MiB",
 				OnClicked: func() {
 					if dialog == nil || *dialog == nil {
 						return
@@ -2902,7 +2903,7 @@ func chooseCustomSound(
 		),
 		Filter: dialogText(
 			localizer,
-			"PCM Wave audio (*.wav)|*.wav|All files (*.*)|*.*",
+			sfx.ImportFileFilter,
 		),
 		FilterIndex: 1,
 	}

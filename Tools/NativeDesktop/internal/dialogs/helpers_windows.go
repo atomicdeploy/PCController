@@ -57,7 +57,7 @@ var (
 	borderModeValues  = []string{config.BorderAuto, config.BorderNone}
 	deliveryLabels    = []string{"Automatic", "Modern toast", "Legacy balloon"}
 	deliveryValues    = []string{"auto", "toast", "balloon"}
-	soundSourceLabels = []string{"Bundled PCController sounds", "Custom WAV"}
+	soundSourceLabels = []string{"Bundled PCController sounds", "Custom sound"}
 	soundSourceValues = []string{
 		config.SoundSourceBundled,
 		config.SoundSourceCustom,

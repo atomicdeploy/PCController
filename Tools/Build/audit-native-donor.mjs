@@ -25,8 +25,8 @@ const exclusions = new Map([
 // unrelated deleted asset must still fail this audit.
 const regeneratedAssets = new Map([
   ['internal/webui/dist/assets/index-BJJi2oIR.css', 'internal/webui/dist/assets/index-1vVQeuVg.css'],
-  ['internal/webui/dist/assets/index-P8wU9w4v.js', 'internal/webui/dist/assets/index-CvIERnZT.js'],
-  ['internal/webui/dist/assets/index-P8wU9w4v.js.map', 'internal/webui/dist/assets/index-CvIERnZT.js.map'],
+  ['internal/webui/dist/assets/index-P8wU9w4v.js', 'internal/webui/dist/assets/index-BuoRu0iz.js'],
+  ['internal/webui/dist/assets/index-P8wU9w4v.js.map', 'internal/webui/dist/assets/index-BuoRu0iz.js.map'],
   ['internal/webui/dist/assets/addon-webgl-qNQI_Zx4.js', 'internal/webui/dist/assets/addon-webgl-DTes4Zuf.js'],
   ['internal/webui/dist/assets/addon-webgl-qNQI_Zx4.js.map', 'internal/webui/dist/assets/addon-webgl-DTes4Zuf.js.map'],
   ['internal/webui/dist/assets/xterm-B6pQ9H5k.js', 'internal/webui/dist/assets/xterm-BbplF7Um.js'],

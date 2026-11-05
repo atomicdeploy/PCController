@@ -200,7 +200,7 @@ func (s *Service) ResolveAudio(cue string) (sfx.Asset, error) {
 	return s.sounds.Resolve(sfx.Cue(cue))
 }
 
-// ImportAudio stores one validated, content-addressed custom WAV.
+// ImportAudio stores one validated, content-addressed custom sound.
 func (s *Service) ImportAudio(name string, wave []byte) (sfx.ImportedAsset, error) {
 	if s == nil || s.sounds == nil {
 		return sfx.ImportedAsset{}, errors.New("eventeffects: sound assets are unavailable")
@@ -208,7 +208,7 @@ func (s *Service) ImportAudio(name string, wave []byte) (sfx.ImportedAsset, erro
 	return s.sounds.Import(name, wave)
 }
 
-// ImportAudioFile validates and stores one local PCM WAV for TUI/IPC callers.
+// ImportAudioFile validates and stores one local audio file for TUI/IPC callers.
 func (s *Service) ImportAudioFile(path string) (sfx.ImportedAsset, error) {
 	if s == nil || s.sounds == nil {
 		return sfx.ImportedAsset{}, errors.New("eventeffects: sound assets are unavailable")

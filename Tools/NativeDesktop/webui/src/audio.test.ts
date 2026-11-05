@@ -3,11 +3,49 @@ import {
   BrowserAudioPlayer,
   bundledAudioURL,
   inspectWAV,
+  normalizeImportedAudio,
+  audioImportContentType,
   sha256Hex
 } from "./audio";
 import type { NotificationsConfig } from "./contracts";
 
 describe("browser audio assets", () => {
+  it("normalizes compressed imports once without playing or changing existing WAV bytes", async () => {
+    const decode = vi.fn(async () => ({
+      sampleRate: 8000, numberOfChannels: 1, length: 3,
+      getChannelData: () => new Float32Array([-1, 0, 1])
+    }) as unknown as AudioBuffer);
+    for (const magic of ["ID3", "fLaC"]) {
+      const result = await normalizeImportedAudio(new TextEncoder().encode(magic).buffer, decode);
+      expect(inspectWAV(result).dataBytes).toBe(6);
+      const view = new DataView(result);
+      expect([view.getInt16(44, true), view.getInt16(46, true), view.getInt16(48, true)])
+        .toEqual([-32768, 0, 32767]);
+    }
+    expect(decode).toHaveBeenCalledTimes(2);
+    const wave = pcmWAV({});
+    expect(await normalizeImportedAudio(wave, decode)).toBe(wave);
+    expect(decode).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects overlong, invalid and unsupported compressed imports", async () => {
+    const source = new TextEncoder().encode("fLaC").buffer;
+    const long = vi.fn(async () => ({ sampleRate: 8000, numberOfChannels: 1, length: 88000 }) as AudioBuffer);
+    await expect(normalizeImportedAudio(source, long)).rejects.toThrow(/10 seconds/);
+    await expect(normalizeImportedAudio(source, async () => { throw new Error("decode failed"); }))
+      .rejects.toThrow(/desktop host/);
+    await expect(normalizeImportedAudio(new ArrayBuffer(40), long)).rejects.toThrow(/Choose PCM WAV/);
+    await expect(normalizeImportedAudio(new ArrayBuffer((4 << 20) + 1), long)).rejects.toThrow(/4 MiB/);
+    expect(long).toHaveBeenCalledOnce();
+  });
+
+  it("uploads the correct compressed media type including files with no browser MIME", () => {
+    for (const [extension, mime] of [["WAV", "audio/wav"], ["mp3", "audio/mpeg"],
+      ["flac", "audio/flac"]]) {
+      expect(audioImportContentType(new File([], `chime.${extension}`))).toBe(mime);
+    }
+  });
+
   it("validates bounded uncompressed PCM WAV metadata", () => {
     const value = pcmWAV({ sampleRate: 8_000, frames: 800 });
 

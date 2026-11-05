@@ -207,7 +207,7 @@ describe("shared audio settings", () => {
       type: "audio/wav"
     });
 
-    fireEvent.change(screen.getByLabelText("Choose custom WAV"), {
+    fireEvent.change(screen.getByLabelText("Choose custom sound"), {
       target: { files: [file] }
     });
 
