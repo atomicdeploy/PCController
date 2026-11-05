@@ -13,6 +13,8 @@ import { fileURLToPath } from "node:url";
 import { loadProjectEnv } from "../../Tools/Build/env.mjs";
 import { PRODUCT_METADATA } from "../../Tools/Build/product-metadata.mjs";
 import { repositoryWebUrl, resolveRepository } from "./repository-context.mjs";
+import { TARGETS } from "./codebase-summary.mjs";
+import { findDistributionArtifact, distributionDownloadLabel, findDistributionChecksum, distributionArchivePattern } from "./artifact-downloads.mjs";
 
 loadProjectEnv();
 
@@ -74,8 +76,15 @@ const artifactCta = (url, label) =>
   url
     ? `> [**⬇️ Download ${escape(label)}**](${url})
 >
-> Retained for ${retention}. The SHA-256 below verifies package integrity.`
+> Sign in to GitHub to download. Available for ${retention}.`
     : `> **${escape(label)}** — upload metadata is unavailable outside GitHub Actions.`;
+const downloadLink = (url, label = "Download .tar.gz") => url
+  ? `[⬇️ ${escape(label)}](${url})`
+  : "⚠️ Download unavailable";
+const integrityTable = (archive, digest) => `| Checksum | SHA-256 |
+|---|---|
+| Package archive | ${code(archive.sha256)} |
+| Actions artifact | ${digest ? code(digest) : "—"} |`;
 const emit = (markdown) => {
   const text = `${markdown.trim()}\n`;
   if (process.env.GITHUB_STEP_SUMMARY) {
@@ -123,6 +132,7 @@ if (kind === "firmware") {
     artifactDigest = "",
     dependenciesPath = "Tools/Controller/toolchain-lock.json",
     packageRootPath = ".build/firmware",
+    checksumUrl = "",
   ] = arguments_;
   const manifest = readJson(manifestPath);
   const archive = archiveDetails(archivePath);
@@ -136,15 +146,17 @@ if (kind === "firmware") {
   const dependencies = existsSync(absolute(dependenciesPath))
     ? readJson(dependenciesPath)
     : {};
-  const dependencyLibraries = Array.isArray(dependencies.libraries)
-    ? dependencies.libraries
-    : Object.entries(dependencies.libraries || {}).map(([name, version]) => ({
-        name,
-        version,
-        url: name === "rc-switch" ? "https://github.com/sui77/rc-switch" : repositoryUrl,
-      }));
+  const inventory = name => {
+    const path = absolute(`${packageRootPath}/${name}.json`);
+    return existsSync(path) ? readJson(path) : {};
+  };
+  const installedCLI = inventory("resolved-cli");
+  const installedCore = (inventory("resolved-cores").platforms || [])
+    .find(item => item.id === "MiniCore:avr");
+  const dependencyLibraries = (inventory("resolved-libraries").installed_libraries || [])
+    .map(item => item.library);
   const libraries = dependencyLibraries
-    .map((item) => `| [${escape(item.name)}](${item.url || repositoryUrl}) | ${code(item.version)} | pinned and resolved during this build |`)
+    .map((item) => `| ${escape(item.name)} | ${code(item.version)} | installed library inventory |`)
     .join("\n");
   const artifacts = (manifest.artifacts || [])
     .map(
@@ -180,6 +192,8 @@ ${artifactCta(artifactUrl, `${productName} Firmware · ATmega328P`)}
 | Version | ${code(process.env.PCCONTROLLER_VERSION || "development")} |
 | Source | [${code(shortCommit)}](${commitUrl}) · ${number(manifest.source?.files)} files · ${code(manifest.source?.sha256)} |
 | Workflow | [${escape(workflowName)}](${runUrl}) |
+| Download | ${downloadLink(artifactUrl, "Firmware · ATmega328P")} |
+| SHA-256 sidecar | ${checksumUrl ? `[🔐 Download checksum](${checksumUrl})` : "⚠️ Download unavailable"} |
 | Package | ${code(archive.name)} · ${bytes(archive.bytes)} |
 
 ${flashNotice}
@@ -242,9 +256,13 @@ ${stackPath}
 
 | Dependency | Version | Resolution |
 |---|---:|---|
-| [Arduino CLI](https://github.com/arduino/arduino-cli/releases) | ${code(dependencies.arduinoCli?.version || "recorded in artifact")} | official archive, pinned SHA-256 |
-| [MiniCore](https://github.com/MCUdude/MiniCore) | ${code(dependencies.miniCore?.version || "recorded in artifact")} | canonical package index |
+| [Arduino CLI](https://github.com/arduino/arduino-cli/releases) | ${code(installedCLI.VersionString || "not recorded")} | installed CLI inventory |
+| [MiniCore](https://github.com/MCUdude/MiniCore) | ${code(installedCore?.installed_version || "not recorded")} | installed core inventory |
 ${libraries}
+
+The package retains the exact CLI/core/library inventories. The separate
+${code("declared-dependencies.json")} is an **audit snapshot**, not installed-version
+evidence (snapshot MiniCore: ${code(dependencies.miniCore?.version || "not recorded")}).
 
 </details>
 
@@ -258,13 +276,18 @@ ${artifacts}
 
 ${progress(compressedPercent, "Archive size versus staged files")}
 
-The ${code(archive.name)} archive is ${bytes(archive.bytes)} versus ${bytes(rawBytes)} of staged build output (${compressedPercent.toFixed(2)}%). Its SHA-256 is ${code(archive.sha256)}.
+| Archive | Download | Compressed | Unpacked | Ratio |
+|---|---|---:|---:|---:|
+| ${code(archive.name)} | ${downloadLink(artifactUrl)} | ${bytes(archive.bytes)} | ${bytes(rawBytes)} | ${compressedPercent.toFixed(2)}% |
 
-## ✅ Integrity
+<details>
+<summary><strong>🔐 Checksums and verification</strong></summary>
 
-${artifactDigest ? `GitHub artifact digest: ${code(artifactDigest)}.` : "GitHub artifact digest is recorded by the upload step."}
+${integrityTable(archive, artifactDigest)}
 
 ${verificationBlock("Linux", archive.name)}
+
+</details>
 
 > Urclock uses the application image. ISP recovery uses the full-flash image. Hardware validation is separate.
 
@@ -302,8 +325,8 @@ ${artifactCta(artifactUrl, `Host · ${target}`)}
 | Native target | ${code(`${manifest.target?.platform}/${manifest.target?.architecture}`)} |
 | Source | [${code(shortCommit)}](${commitUrl}) · tree ${code(manifest.identity?.sourceSHA256)} |
 | Workflow | [${escape(workflowName)}](${runUrl}) |
+| Download | ${downloadLink(artifactUrl, `Host · ${target}`)} |
 | Package | ${code(archive.name)} · ${bytes(archive.bytes)} |
-| Package SHA-256 | ${code(archive.sha256)} |
 
 ## 🧪 Validation matrix
 
@@ -325,11 +348,14 @@ ${artifacts}
 
 </details>
 
-## ✅ Integrity
+<details>
+<summary><strong>🔐 Checksums and verification</strong></summary>
 
-${artifactDigest ? `GitHub artifact digest: ${code(artifactDigest)}.` : "GitHub artifact digest is recorded by the upload step."}
+${integrityTable(archive, artifactDigest)}
 
 ${verificationBlock(target, archive.name)}
+
+</details>
 
 ---
 
@@ -353,17 +379,20 @@ ${artifactCta(artifactUrl, `Virtual Board · ${target}`)}
 | Target | **${escape(target)}** |
 | Binary | ${code(basename(binary))} · ${bytes(statSync(binary).size)} |
 | Binary SHA-256 | ${code(hashFile(binary))} |
+| Download | ${downloadLink(artifactUrl, `Virtual Board · ${target}`)} |
 | Package | ${code(archive.name)} · ${bytes(archive.bytes)} |
-| Package SHA-256 | ${code(archive.sha256)} |
 | Native CTest | ✅ passed |
 | Source | [${code(shortCommit)}](${commitUrl}) |
 | Workflow | [${escape(workflowName)}](${runUrl}) |
 
-## ✅ Integrity
+<details>
+<summary><strong>🔐 Checksums and verification</strong></summary>
 
-${artifactDigest ? `GitHub artifact digest: ${code(artifactDigest)}.` : "GitHub artifact digest is recorded by the upload step."}
+${integrityTable(archive, artifactDigest)}
 
 ${verificationBlock(target, archive.name)}
+
+</details>
 
 ---
 
@@ -389,8 +418,26 @@ ${verificationBlock(target, archive.name)}
   const indexPath = resolve(base, "artifact-index.json");
   const artifactIndex = existsSync(indexPath) ? readJson(indexPath) : { artifacts: [] };
   const uploadedArtifacts = artifactIndex.artifacts || [];
+  const availableUrl = (artifact) => artifact?.id && !artifact.expired
+    ? `${runUrl}/artifacts/${artifact.id}` : "";
+  const downloadFor = (name) => {
+    const artifact = findDistributionArtifact(uploadedArtifacts, name);
+    const checksum = findDistributionChecksum(uploadedArtifacts, artifact);
+    return downloadLink(availableUrl(artifact), distributionDownloadLabel(artifact)) +
+      (checksum && availableUrl(artifact) ? ` · [🔐 SHA-256](${availableUrl(checksum)})` : "");
+  };
+  const expectedArtifacts = ["PCController-Firmware-ATmega328P", ...TARGETS.flatMap(({id}) =>
+    [`PCController-Host-${id}`, `PCController-VirtualBoard-${id}`])];
+  const missingArtifacts = expectedArtifacts.filter(name => {
+    const artifact = findDistributionArtifact(uploadedArtifacts, name);
+    return !availableUrl(artifact) || (/\.(?:tar\.gz|zip)$/u.test(artifact.name) &&
+      !availableUrl(findDistributionChecksum(uploadedArtifacts, artifact)));
+  });
+  const complete = missingArtifacts.length === 0 && files.length === expectedArtifacts.length;
   const artifactForPackage = (path) => {
     const fileName = basename(path);
+    const raw = uploadedArtifacts.find(item => item.name === fileName);
+    if (raw) return raw;
     if (/PCController-Firmware-/u.test(fileName)) {
       return uploadedArtifacts.find(
         (item) => item.name === "PCController-Firmware-ATmega328P",
@@ -401,7 +448,7 @@ ${verificationBlock(target, archive.name)}
       const match = uploadedArtifacts.find(
         (item) =>
           item.name.startsWith(prefix) &&
-          fileName.endsWith(`-${item.name.slice(prefix.length)}.tar.gz`),
+          distributionArchivePattern(`PCController-${product}`, item.name.slice(prefix.length)).test(fileName),
       );
       if (match) return match;
     }
@@ -410,10 +457,7 @@ ${verificationBlock(target, archive.name)}
   const rows = files
     .map((path) => {
       const uploaded = artifactForPackage(path);
-      const downloadUrl = uploaded?.id
-        ? `${runUrl}/artifacts/${uploaded.id}`
-        : `${runUrl}#artifacts`;
-      return `| [${code(basename(path))}](${downloadUrl}) | ${bytes(statSync(path).size)} | ${code(hashFile(path))} |`;
+      return `| ${code(basename(path))} | ${downloadLink(availableUrl(uploaded), distributionDownloadLabel(uploaded))} | ${bytes(statSync(path).size)} | ${code(hashFile(path))} |`;
     })
     .join("\n");
   const firmwareManifest = firmwareManifestPath
@@ -429,14 +473,31 @@ ${verificationBlock(target, archive.name)}
     stack.sramCapacityBytes,
   );
   emit(`
-# ✅ ${escape(productName)} build complete
+# ${complete ? "✅" : "⚠️"} ${escape(productName)} ${complete ? "build complete" : "build incomplete"}
 
-Firmware, Host, and Virtual Board builds completed for source [${code(shortCommit)}](${commitUrl}).
+Available packages for source [${code(shortCommit)}](${commitUrl}).
+${complete ? "" : "\n> [!WARNING]\n> Some packages were not produced or are unavailable. Check the failed/skipped jobs; missing downloads are not successful builds.\n"}
 
 > [**⬇️ Open all ${files.length} downloadable packages**](${runUrl}#artifacts)
 
+## ⬇️ Download packages
+
+Sign in to GitHub and download a package plus its SHA-256 sidecar below.
+Verify the checksum, then extract the package once. Firmware HEX/EEPROM files
+are inside the firmware package. Older ZIP-labeled runs retain their original layout.
+
+| Platform / board | 🖥️ Host application | 🧪 Virtual Board | ⚡ Firmware |
+|---|---|---|---|
+| **Windows x64** | ${downloadFor("PCController-Host-Windows-x64")} | ${downloadFor("PCController-VirtualBoard-Windows-x64")} | — |
+| Linux x64 | ${downloadFor("PCController-Host-Linux-x64")} | ${downloadFor("PCController-VirtualBoard-Linux-x64")} | — |
+| Linux ARM64 | ${downloadFor("PCController-Host-Linux-ARM64")} | ${downloadFor("PCController-VirtualBoard-Linux-ARM64")} | — |
+| macOS Intel | ${downloadFor("PCController-Host-macOS-Intel")} | ${downloadFor("PCController-VirtualBoard-macOS-Intel")} | — |
+| macOS Apple Silicon | ${downloadFor("PCController-Host-macOS-Apple-Silicon")} | ${downloadFor("PCController-VirtualBoard-macOS-Apple-Silicon")} | — |
+| **AVR ATmega328P** | — | — | ${downloadFor("PCController-Firmware-ATmega328P")} |
+
 ## ⚡ AVR ATmega328P target
 
+${firmwareManifestPath ? `
 | Budget | Visual | Used | Free |
 |---|---|---:|---:|
 | Application flash | ${progress(flashPercent, "Application flash")} | **${number(application?.dataBytes)} / ${number(application?.capacityBytes)} B** (${flashPercent.toFixed(2)}%) | **${number(application?.freeBytes)} B** |
@@ -446,29 +507,28 @@ Firmware, Host, and Virtual Board builds completed for source [${code(shortCommi
 Flash ${bar(flashPercent)}
 SRAM  ${bar(peakPercent)}
 ~~~
+` : "⚠️ Firmware memory report unavailable for this run."}
 
 Firmware: ${code("PCController-Firmware-ATmega328P")}. Includes application and recovery images, dependencies, and manifest.
 
-## 🌍 Native platform coverage
+<details>
+<summary><strong>🔐 Package sizes and SHA-256 checksums</strong></summary>
 
-| Product | Linux x64 | Linux ARM64 | Windows x64 | macOS Intel | macOS Apple Silicon |
-|---|:---:|:---:|:---:|:---:|:---:|
-| Host | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Virtual Board | ✅ | ✅ | ✅ | ✅ | ✅ |
-
-## 📦 Build catalog
-
-| Package / direct artifact | Size | SHA-256 |
-|---|---:|---|
+| Package | Download | Size | SHA-256 |
+|---|---|---:|---|
 ${rows}
+
+</details>
 
 ## 🛡️ Validation
 
+${complete ? `
 - ✅ MiniCore ATmega328P compilation and strict Intel HEX validation
 - ✅ Static and modeled peak-SRAM enforcement with stack-path evidence
-- ✅ Native Go tests, vet, C ABI smoke checks, and packaging on five targets
-- ✅ Native CMake/CTest Virtual Board validation on the same five targets
+- ✅ Native Go tests, vet, C ABI smoke checks, and cross-platform packaging
+- ✅ Native CMake/CTest Virtual Board validation across supported targets
 - ✅ SHA-256 sidecars, canonical manifests, and direct Actions downloads
+` : "See the individual job summaries for validation results. Available artifacts do not imply that the complete build passed."}
 
 Release runs add attestations, a release manifest, firmware images, and a download chooser.
 
@@ -476,6 +536,7 @@ Release runs add attestations, a release manifest, firmware images, and a downlo
 
 [Run details](${runUrl}) · [source ${shortCommit}](${commitUrl}) · [release guide](${repositoryUrl}/blob/${commit}/docs/CI-CD-and-Releases.md)
 `);
+  if (!complete) process.exitCode = 1;
 } else {
   process.stderr.write("Usage: step-summary.mjs firmware|host|simulator|catalog ...\n");
   process.exit(2);

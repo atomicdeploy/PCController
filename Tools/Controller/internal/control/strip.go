@@ -42,7 +42,7 @@ func configuredStripEffectDescriptors(definitions []appconfig.StripEffect) []Str
 			Description: definition.Description, Program: definition.Program,
 			Engine: "host-stream", Editable: true, DefaultFPS: definition.DefaultFPS,
 			DefaultDurationMS: definition.DefaultDurationMS, DefaultPixels: definition.DefaultPixels,
-			MinPixels: 1, MaxPixels: native.StripMaximumPixels, MinFPS: 1, MaxFPS: 30,
+			MinPixels: 1, MaxPixels: native.StripMaximumPixels, MinFPS: 1, MaxFPS: appconfig.StripMaximumFPS,
 		})
 	}
 	return result
@@ -164,8 +164,8 @@ func stripStreamCommand(ctx context.Context, outputs *OutputScheduler, args []st
 		if err != nil {
 			return "", err
 		}
-		if fps < 1 || fps > 30 {
-			return "", fmt.Errorf("strip FPS must be 1..30")
+		if fps < 1 || fps > appconfig.StripMaximumFPS {
+			return "", fmt.Errorf("strip FPS must be 1..%d", appconfig.StripMaximumFPS)
 		}
 		// Validate configuration synchronously, so offline/old firmware never reports a started stream.
 		outputs.stop("strip")
@@ -241,8 +241,8 @@ func (outputs *OutputScheduler) startStripEffect(ctx context.Context, definition
 	if err != nil {
 		return StreamOperation{}, err
 	}
-	if fps < 1 || fps > 30 {
-		return StreamOperation{}, fmt.Errorf("strip FPS must be 1..30")
+	if fps < 1 || fps > appconfig.StripMaximumFPS {
+		return StreamOperation{}, fmt.Errorf("strip FPS must be 1..%d", appconfig.StripMaximumFPS)
 	}
 	outputs.stop("strip")
 	outputs.stripMu.Lock()
@@ -296,6 +296,10 @@ func (outputs *OutputScheduler) sendConfiguredStripFrame(ctx context.Context, rg
 }
 
 func (outputs *OutputScheduler) sendStripFrameLocked(ctx context.Context, rgb []byte) error {
+	if runtime, ok := outputs.target.(*Runtime); ok {
+		// A file reload or another client cannot mix color orders within a frame.
+		ctx = context.WithValue(ctx, stripOrderContextKey{}, runtime.stripOutputConfig())
+	}
 	frames, err := native.StripFramePayloads(rgb)
 	if err != nil {
 		return err

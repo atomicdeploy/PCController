@@ -85,6 +85,31 @@ int main() {
 #else
     require(board.outputSnapshot().strip.at(1)==255,"constrained fixed-brightness profile preserved");
 #endif
+    // The unified KEY page must show K1-K4, not decimal relay masks 2/3/8/12.
+    // Exercise real UART Down/Up dispatch and the shared display renderer.
+    const uint8_t keySegments[] = {0x06, 0x5B, 0x4F, 0x66};
+    const uint8_t keyRelays[] = {2, 3, 8, 12};
+    for (uint8_t key = 0; key < 4; ++key) {
+      request(wire::MenuSetPage, 41, {0x89});
+      receive(1000000);
+      request(wire::RemoteKeyGesture, 42, {key, 5});
+      // Allow the existing 450 ms "Go" mode-entry animation to finish.
+      for (unsigned tick = 0; tick < 60; ++tick) receive(10000);
+      const auto held = board.outputSnapshot();
+      require(held.relayMask == keyRelays[key], "KEY display fix changed relay mapping");
+      if (held.segments != std::array<uint8_t, 4>{0, 0, 0, keySegments[key]}) {
+        std::cerr << "key " << unsigned(key + 1) << " segments:";
+        for (auto segment : held.segments) std::cerr << ' ' << unsigned(segment);
+        std::cerr << '\n';
+      }
+      require(held.segments == std::array<uint8_t, 4>{0, 0, 0, keySegments[key]},
+              "KEY page displayed relay mask instead of key ordinal");
+      request(wire::RemoteKeyGesture, 43, {key, 6});
+      receive(30000);
+      require((board.outputSnapshot().relayMask & 0x0A) == 0,
+              "KEY release must still disable motion");
+    }
+    request(wire::MenuSetPage, 44, {0x80});
     request(wire::RadioLearnStart,27,{0,0});
     board.console("rf 0xABCDEF 24 1 350"); receive();
     board.console("rf 0xABCDEF 24 1 350");

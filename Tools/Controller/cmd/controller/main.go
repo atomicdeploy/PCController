@@ -52,6 +52,7 @@ var (
 func main() {
 	prepareStartupPresentation(os.Args[1:], os.Stdout)
 	if _, err := envfile.LoadProcess(); err != nil {
+		finishStartupPresentation(os.Stdout)
 		fmt.Fprintln(os.Stderr, "environment:", err)
 		os.Exit(1)
 	}
@@ -63,6 +64,7 @@ func main() {
 	nativeshell.ApplyConsoleIcon()
 	_, _ = setProcessConsoleTitle(productidentity.DefaultAppTitle())
 	if err := netpolicy.EnsureProcessLocalNetworkNoProxy(); err != nil {
+		finishStartupPresentation(os.Stdout)
 		fmt.Fprintln(os.Stderr, "network proxy bypass policy:", err)
 		os.Exit(1)
 	}
@@ -120,7 +122,9 @@ func main() {
 	// A replacement must survive normal config/IPC/device startup long enough
 	// to prove it is not an immediate crash loop before the helper commits it.
 	artifacts.ScheduleSelfUpdateHealthAcknowledgement(10 * time.Second)
-	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
+	err := run(os.Args[1:], os.Stdout, os.Stderr)
+	finishStartupPresentation(os.Stdout)
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
@@ -143,13 +147,14 @@ func run(args []string, stdout, stderr io.Writer) (resultErr error) {
 		if openErr != nil {
 			return openErr
 		}
-		if overrideErr := store.SetPresentationOverrides(presentation.AppName, presentation.Tagline); overrideErr != nil {
+		if overrideErr := store.SetPresentationOverrides(presentation.AppName, presentation.Tagline, presentation.IntroMode); overrideErr != nil {
 			return overrideErr
 		}
 		if overrideErr := applyMeasurementTimingEnvironment(store); overrideErr != nil {
 			return overrideErr
 		}
 		applyConfiguredConsoleTitle(store.Current().UI.AppTitle)
+		updateStartupPresentation(stdout, store.Current().UI.AppTitle, "Loading configuration…")
 		runtimeConfig, runtimeErr := store.Runtime()
 		if runtimeErr != nil {
 			return runtimeErr
@@ -252,13 +257,14 @@ func run(args []string, stdout, stderr io.Writer) (resultErr error) {
 	if err != nil {
 		return err
 	}
-	if err := store.SetPresentationOverrides(presentation.AppName, presentation.Tagline); err != nil {
+	if err := store.SetPresentationOverrides(presentation.AppName, presentation.Tagline, presentation.IntroMode); err != nil {
 		return err
 	}
 	if err := applyMeasurementTimingEnvironment(store); err != nil {
 		return err
 	}
 	applyConfiguredConsoleTitle(store.Current().UI.AppTitle)
+	updateStartupPresentation(stdout, store.Current().UI.AppTitle, "Loading configuration…")
 	runtimeConfig, runtimeErr := store.Runtime()
 	if runtimeErr != nil {
 		return runtimeErr
@@ -593,6 +599,7 @@ func runWebWithContext(
 		// every other runtime setting remain config-owned.
 		configurePrimaryIPC(runtimeConfig)
 	}
+	updateStartupPresentation(stdout, "", "Checking local host…")
 	claimContext, claimCancel := context.WithTimeout(context.Background(), 3*time.Second)
 	claim, existing, err := claimOrResolveHostInstance(claimContext, "web")
 	claimCancel()
@@ -658,12 +665,14 @@ func runWebWithContext(
 	// and board connection must remain usable even when a locked-down profile
 	// prevents a notification registration write.
 	if externalContext == nil {
+		updateStartupPresentation(stdout, "", "Preparing desktop integration…")
 		if status, desktopErr := ensureWebDesktopIntegration(store); desktopErr != nil {
 			fmt.Fprintln(stderr, "desktop notification identity:", desktopErr)
 		} else if status.Supported && (!status.ProtocolReady || !status.ShortcutReady || !status.DesktopShortcutReady) {
 			fmt.Fprintln(stderr, "desktop notification identity is incomplete")
 		}
 	}
+	updateStartupPresentation(stdout, "", "Loading history and runtime…")
 	runtime := newRuntime(connection, store)
 	bindRuntimeDevicePersistence(runtime, store)
 	if *noAuto {
@@ -748,6 +757,7 @@ func runWebWithContext(
 		openWhenConnected()
 	})
 
+	updateStartupPresentation(stdout, "", "Starting host services…")
 	primary, err := startPrimaryIPCClaimed(ctx, runtime, engine, store, claim)
 	if errors.Is(err, errPrimaryAlreadyRunning) {
 		_ = runtime.Close()
@@ -789,6 +799,7 @@ func runWebWithContext(
 	if initial.Kind != "" {
 		applyInitialWebAction(ctx, primary, runtime, engine, initial)
 	}
+	updateStartupPresentation(stdout, "", "Starting system tray…")
 	nativeShell, shellErr := startPrimaryNativeShell(ctx, cancel, appURL, runtime, store, primary, *noTray)
 	if shellErr != nil {
 		fmt.Fprintln(stderr, "native web shell:", shellErr)
@@ -1114,6 +1125,7 @@ func runTUIWithInitialAction(
 		}
 		return runRemoteTUI(address, auth, stdout, store, consoleOptions, *syncNavigation)
 	}
+	updateStartupPresentation(stdout, "", "Checking local host…")
 	claim, havePrimary, err := preparePrimaryMode("tui")
 	if err != nil {
 		return err
@@ -1150,6 +1162,7 @@ func runTUIWithInitialAction(
 	if *simpleMode {
 		return errors.New("--simple requires an existing IPC primary; start without --simple to own the local runtime")
 	}
+	updateStartupPresentation(stdout, "", "Enumerating serial devices…")
 	if err := selectInteractiveDevice(
 		connection,
 		os.Stdin,
@@ -1158,6 +1171,7 @@ func runTUIWithInitialAction(
 		return err
 	}
 
+	updateStartupPresentation(stdout, "", "Loading history and runtime…")
 	runtime := newRuntime(connection, store)
 	rfReplace := control.NewRFReplaceService(runtime)
 	bindRuntimeDevicePersistence(runtime, store)
@@ -1216,6 +1230,7 @@ func runTUIWithInitialAction(
 	})
 	watchContext, stopWatching := context.WithCancel(context.Background())
 	defer stopWatching()
+	updateStartupPresentation(stdout, "", "Starting host services…")
 	primary, err := startPrimaryIPCClaimed(watchContext, runtime, engine, store, claim)
 	if errors.Is(err, errPrimaryAlreadyRunning) {
 		_ = runtime.Close()
@@ -1234,6 +1249,7 @@ func runTUIWithInitialAction(
 		_ = runtime.Close()
 		return err
 	}
+	updateStartupPresentation(stdout, "", "Starting system tray…")
 	nativeShell, shellErr := startPrimaryNativeShell(
 		watchContext, primary.RequestQuit, appURL, runtime, store, primary, *noTray,
 	)
@@ -1320,11 +1336,13 @@ func runTUIWithInitialAction(
 			}
 		}
 	}()
+	updateStartupPresentation(stdout, "", "Loading terminal controls…")
 	tui.ConfigureInteractiveColorProfile()
 	program := tea.NewProgram(
 		tui.NewApplicationWithOptions(runtime, engine, tui.Options{
-			AutoConnect: !*noAuto,
-			UIConfig:    func() appconfig.UI { return store.Current().UI },
+			StartupWidth: startupTerminalWidth(stdout),
+			AutoConnect:  !*noAuto,
+			UIConfig:     func() appconfig.UI { return store.Current().UI },
 			SaveUI: func(value appconfig.UI) error {
 				_, err := store.UpdateUI(value)
 				return err
@@ -1383,9 +1401,17 @@ func runTUIWithInitialAction(
 			PushHostPanel:    hostPanel.Push,
 			ReleaseHostPanel: hostPanel.Release,
 			WelcomeMelody: func(ctx context.Context) error {
-				name := strings.TrimSpace(store.Current().UI.WelcomeMelody)
-				_, err := engine.Execute(ctx, shell.Join([]string{"melody", "wait", name}))
-				return err
+				config := store.Current()
+				for _, melody := range appconfig.EffectiveMelodies(config) {
+					if strings.EqualFold(melody.Name, strings.TrimSpace(config.UI.WelcomeMelody)) {
+						err := outputs.RunWelcome(ctx, melody)
+						if err == control.ErrWelcomeSkipped {
+							return nil
+						}
+						return err
+					}
+				}
+				return fmt.Errorf("welcome melody %q is not configured", config.UI.WelcomeMelody)
 			},
 			Integrations: func() hostui.IntegrationStatus {
 				return primaryHostUIStatus(primary, store.Current())
@@ -1445,6 +1471,7 @@ func runTUIWithInitialAction(
 		case <-watchContext.Done():
 		}
 	}()
+	handoffStartupPresentation()
 	_, err = program.Run()
 	_ = hostui.WriteOSC(stdout, "9;4;0;0")
 	_ = hostui.ClearUpdateTaskbarProgress()

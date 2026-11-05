@@ -63,6 +63,8 @@ jobs:
       FORCE_COLOR: "1"
       PCCONTROLLER_VERSION: ${{ inputs.version || format('0.0.0-ci.{0}', github.run_number) }}
       TZ: UTC
+      VITEST_BLOB_LABEL: ${{ matrix.target }}
+      PCCONTROLLER_VITEST_BLOB: ${{ github.workspace }}/.build/vitest/${{ matrix.target }}.json
 
     steps:
       - name: "📥 Check out source"
@@ -151,8 +153,14 @@ jobs:
         if: inputs.firmware_artifact_name != ''
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
-          name: ${{ inputs.firmware_artifact_name }}
-          path: .build/firmware
+          pattern: ${{ inputs.firmware_artifact_name }}*
+          skip-decompress: true
+          path: .build/firmware-download
+          merge-multiple: true
+
+      - name: "📂 Verify and unpack the firmware defaults"
+        if: inputs.firmware_artifact_name != ''
+        run: node .github/scripts/unpack-firmware-artifact.mjs .build/firmware-download .build/firmware
 
       - name: "🔎 Validate the downloaded firmware and EEPROM pair"
         if: inputs.firmware_artifact_name != ''
@@ -220,6 +228,15 @@ jobs:
           node Tools/Controller/tests/board-mirroring-linux.test.mjs \
             Tools/Controller/bin/controller .build/mirror-firmware/bin/virtual_board
 
+      - name: "⬆️ Preserve native WebUI test results"
+        if: ${{ always() && hashFiles('.build/vitest/*.json') != '' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: Vitest-Blob-${{ matrix.target }}
+          path: .build/vitest/${{ matrix.target }}.json
+          if-no-files-found: error
+          retention-days: 14
+
       - name: "🧷 Assert both defaults are embedded in the host manifest"
         if: inputs.firmware_artifact_name != ''
         shell: bash
@@ -239,20 +256,25 @@ jobs:
         id: upload
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: PCController-Host-${{ matrix.target }}
-          path: |
-            ${{ steps.package.outputs.archive }}
-            ${{ steps.package.outputs.checksum }}
+          path: ${{ steps.package.outputs.archive }}
+          archive: false
           if-no-files-found: error
           retention-days: ${{ github.event_name == 'pull_request' && 14 || 90 }}
-          compression-level: 0
+
+      - name: "🔐 Upload Host checksum"
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          path: ${{ steps.package.outputs.checksum }}
+          archive: false
+          if-no-files-found: error
+          retention-days: ${{ github.event_name == 'pull_request' && 14 || 90 }}
 
   summary:
     name: "📋 Host · Codebase summary"
     if: ${{ always() }}
     needs: test-build-package
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 10
 
     steps:
       - name: "📥 Check out source"
@@ -292,6 +314,7 @@ jobs:
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           pattern: PCController-Host-*
+          skip-decompress: true
           path: build-summary/packages
           merge-multiple: true
 
@@ -303,3 +326,37 @@ jobs:
           build-summary/jobs.json
           build-summary/artifacts.json
           build-summary/packages
+
+      - name: "⬇️ Gather native WebUI test reports"
+        if: ${{ always() }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          pattern: Vitest-Blob-*
+          path: build-summary/vitest
+          merge-multiple: true
+
+      - name: "📦 Restore the same locked Vitest version"
+        if: ${{ always() }}
+        run: npm ci --prefix Tools/Controller/web --ignore-scripts
+
+      - name: "🧪 Publish one merged WebUI test report"
+        if: ${{ always() }}
+        working-directory: Tools/Controller/web
+        run: >-
+          node node_modules/vitest/vitest.mjs --configLoader runner
+          --merge-reports=../../../build-summary/vitest
+          --reporter=github-actions --reporter=json
+          --outputFile.json=../../../build-summary/webui-tests.json
+
+      - name: "🔎 Require results from every native target"
+        if: ${{ always() }}
+        run: node .github/scripts/verify-vitest-blobs.mjs build-summary/vitest
+
+      - name: "⬆️ Upload consolidated WebUI test report"
+        if: ${{ always() && hashFiles('build-summary/webui-tests.json') != '' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: WebUI-Test-Report
+          path: build-summary/webui-tests.json
+          if-no-files-found: error
+          retention-days: ${{ github.event_name == 'pull_request' && 14 || 90 }}

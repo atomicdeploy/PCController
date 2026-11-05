@@ -634,6 +634,8 @@ type Client struct {
 	automations        []appconfig.Automation
 	safety             appconfig.Safety
 	rfConfig           appconfig.RFConfig
+	stripColorOrder    string
+	stripFirmwareOrder string
 	osPolicy           hostos.Policy
 	events             chan Event
 	done               chan struct{}
@@ -827,6 +829,8 @@ func (client *Client) ApplyHostOptions(options Options) bool {
 	client.optionsMu.Lock()
 	client.commandOptions = control.CommandOptions{
 		ProjectPath: options.ProjectPath, FQBN: fqbn,
+		StripOrder:            client.commandOptions.StripOrder,
+		SaveStripOrder:        client.commandOptions.SaveStripOrder,
 		FirmwareFeatures:      firmwareFeatures,
 		FirmwareFeaturesError: firmwareFeaturesErr,
 		ArduinoCLI:            options.ToolchainCLI, Avrdude: options.Avrdude,
@@ -877,9 +881,11 @@ func (client *Client) currentHostConfig() appconfig.Config {
 	automations := cloneAppAutomations(client.automations)
 	safety := client.safety
 	rfConfig := cloneRFConfigOrDefault(client.rfConfig)
+	stripOrder, stripFirmware := client.stripColorOrder, client.stripFirmwareOrder
 	osPolicy := hostos.ClonePolicy(client.osPolicy)
 	client.hostMu.RUnlock()
 	config := appconfig.Defaults()
+	config.UI.StripColorOrder, config.UI.StripFirmwareOrder = stripOrder, stripFirmware
 	config.Programming.FirmwareFeatures = append(
 		[]programmer.FirmwareFeature(nil),
 		client.currentCommandOptions().FirmwareFeatures...,
@@ -921,6 +927,7 @@ func (client *Client) updateHostConfig(
 	client.automations = cloneAppAutomations(config.Automations)
 	client.safety = config.Safety
 	client.rfConfig = cloneRFConfigOrDefault(config.RF)
+	client.stripColorOrder, client.stripFirmwareOrder = config.UI.StripColorOrder, config.UI.StripFirmwareOrder
 	client.osPolicy = hostos.ClonePolicy(config.OSActions)
 	client.hostMu.Unlock()
 	client.optionsMu.Lock()
@@ -937,6 +944,14 @@ func (client *Client) currentCommandOptions() control.CommandOptions {
 	client.optionsMu.RLock()
 	defer client.optionsMu.RUnlock()
 	return client.commandOptions
+}
+
+// ConfigureStripColorOrder binds an embedding host's persistent configuration.
+// Neither reading nor saving the preference emits any hardware command.
+func (client *Client) ConfigureStripColorOrder(read func() (string, string), save func(string) error) {
+	client.optionsMu.Lock()
+	client.commandOptions.StripOrder, client.commandOptions.SaveStripOrder = read, save
+	client.optionsMu.Unlock()
 }
 
 // SetMacros replaces the host-owned macro catalog with a defensive copy.

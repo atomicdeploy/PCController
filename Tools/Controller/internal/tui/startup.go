@@ -13,7 +13,17 @@ import (
 // StartupFrame is a pure, immediate presentation: no configuration, transport,
 // timers or device work. It shares the full TUI palette without changing the
 // global renderer's colour profile or emitting a fictitious progress value.
-func StartupFrame(title, phase string, width int) string {
+func StartupFrame(title, phase string, width int, details ...string) string {
+	return welcomeFrame(title, phase, width, 0, details...)
+}
+
+// WelcomeFrame animates the same first-paint card; it is not a second splash.
+// The spectrum is decoration, never a guessed loading percentage.
+func WelcomeFrame(title, phase string, width, frame int, details ...string) string {
+	return welcomeFrame(title, phase, width, frame, details...)
+}
+
+func welcomeFrame(title, phase string, width, frame int, details ...string) string {
 	if width < 8 {
 		return ""
 	}
@@ -39,10 +49,22 @@ func StartupFrame(title, phase string, width int) string {
 			accent.Render("─┤  ") + bright.Render("PC") + accent.Render("   ├─"), accent.Render(" ╰─┬─┬─┬─╯ "), accent.Render("   │ │ │   ")}, "\n")
 		captionWidth := contentWidth - 14
 		caption := "\n" + bright.Render(ansi.Truncate(title, captionWidth, "…")) + "\n" +
-			accent.Render("TERMINAL") + "\n\n" + muted.Render(ansi.Truncate(phase, captionWidth, "…"))
-		content = lipgloss.JoinHorizontal(lipgloss.Top, mark, "  ", caption)
+			accent.Render("TERMINAL")
+		content = lipgloss.JoinHorizontal(lipgloss.Top, mark, "  ", caption) + "\n" + muted.Width(contentWidth).Render(phase)
 	}
+	for _, detail := range details {
+		if detail = clean(detail); detail != "" {
+			content += "\n" + muted.Width(contentWidth).Render(detail)
+		}
+	}
+	palette := []lipgloss.Color{"#F472B6", "#FB7185", "#FBBF24", "#4ADE80", "#22D3EE", "#818CF8", "#C084FC"}
+	var spectrum strings.Builder
+	for column := 0; column < contentWidth; column++ {
+		color := palette[(column*len(palette)/contentWidth+frame/2)%len(palette)]
+		spectrum.WriteString(renderer.NewStyle().Foreground(color).Render("━"))
+	}
+	content += "\n\n" + spectrum.String()
 	card := renderer.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorPanel).
-		Padding(1).Width(contentWidth).Render(content)
+		Padding(1).Width(contentWidth + 2).Render(content)
 	return "\n" + renderer.PlaceHorizontal(width, lipgloss.Center, card) + "\n"
 }

@@ -22,7 +22,7 @@ test('canonical lock exports the complete six-library firmware set', () => {
   assert.match(outputs.arduino_cli_linux_64_sha256, /^[0-9a-f]{64}$/u)
   assert.deepEqual(
     JSON.parse(outputs.arduino_libraries_json),
-    lock.firmware.libraries.map((library) => `${library.name}@${library.version}`),
+    lock.firmware.libraries.map((library) => library.name),
   )
 })
 
@@ -30,6 +30,15 @@ test('canonical export rejects a missing required library', () => {
   const changed = structuredClone(lock)
   changed.libraries = changed.libraries.filter((library) => library.name !== 'OneWire')
   assert.throws(() => validateLock(changed), /missing required library OneWire/u)
+})
+
+test('firmware workflows install current indexed MiniCore, not the recorded snapshot', () => {
+  for (const file of ['firmware.yml', 'codeql.yml', 'deploy-avr.yml']) {
+    const workflow = readFileSync(join(repository, '.github', 'workflows', file), 'utf8')
+    assert.match(workflow, /core install "\$MINICORE_PACKAGE"/u)
+    assert.doesNotMatch(workflow, /\$MINICORE_PACKAGE@/u)
+  }
+  assert.ok(JSON.parse(currentOutputs(lock, product).arduino_libraries_json).every(name => !name.includes('@')))
 })
 
 test('visible product slug derives from package metadata', () => {

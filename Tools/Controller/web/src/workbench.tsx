@@ -41,6 +41,7 @@ import {
 } from './components'
 import { formatClock } from './i18n'
 import { rpc } from './api'
+import { DEFAULT_STRIP_MAXIMUM_FPS } from './strip-limits'
 import { redactSensitiveCommand, shellArgument } from './command-line'
 import {
   BrowserConsoleModel,
@@ -565,7 +566,7 @@ export function WorkbenchView(props: SharedViewProps) {
                 min_pixels: 1,
                 max_pixels: 100,
                 min_fps: 1,
-                max_fps: 30,
+                max_fps: snapshot.strip_effects?.find((strip) => strip.id === effect.id)?.max_fps ?? DEFAULT_STRIP_MAXIMUM_FPS,
               }))}
             commandSurface={run}
           />

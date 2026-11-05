@@ -15,6 +15,7 @@ JSON-RPC, REST, or WebSocket command bridge:
 host-menu list
 host-menu open host
 host-menu open macro-library
+host-menu open strip-controls
 host-menu status
 host-menu key K2 press
 host-menu key K4 press
@@ -47,6 +48,32 @@ Before capture, the host cancels RF learning and explicitly stops both motion
 groups. If the host disappears, firmware releases its capture after its bounded
 offline timeout and restores the board default page.
 
+## LED strip controls
+
+The default HOST menu includes **LED strip** (`StrP`, node `0x86`). These
+controls are host-presented: no additional AVR menu code, EEPROM page, or
+firmware flash is needed on boards that already support host capture and strip
+commands. They also use the same capture path on VirtualBoard.
+
+- **Solid color**, **Solid level %**, and **LED count** stage session choices;
+  **Apply solid** sends them. Browsing does not change physical LEDs.
+- **Strip effect** comes from the watched host effect library. **Play effect**
+  uses that effect's configured frame rate and the selected LED count.
+- **Stop keep frame** stops host streaming without clearing the last frame.
+  **Strip off** stops streaming and clears the LEDs.
+- **Strip stream** reports the host scheduler, not invented LED readback:
+  `Stream idle` does not mean that the LEDs are off.
+
+Solid brightness is scaled in the shared frame path, including on constrained
+AVR profiles; configured RGB wire order is retained. Actions use the existing
+command scheduler and propagate offline, unsupported-board, busy, and device
+errors. Menu selections are volatile and do not write MCU EEPROM.
+
+Loading the previous unmodified six-menu default layout adds the strip node
+when a directory slot is available. Custom layouts and full eight-entry
+directories are preserved; add `strip-controls` and its parent submenu from
+the default `host_menus` definition when customizing those layouts.
+
 ## Configuration
 
 The same `host_menus` shape is supported in JSON, YAML, and TOML and hot-reloads
@@ -55,7 +82,8 @@ parent, four-character label, LCD title/content, brightness request, edit
 visual, flags, and items. Item types are `readonly`, `text`, `number`, `bool`,
 `select`, `submenu`, and `action`. A select item may use static `options` or an
 `options_source`; the built-in `macro.library` source resolves the current
-ID-sorted macro list in memory without duplicating definitions in the menu
+ID-sorted macro list in memory; `strip.effects` resolves the watched strip
+effect catalog. Neither duplicates definitions in the menu
 configuration. Editing an active label/title/content updates
 the TUI preview and physical/virtual display immediately; an inactive edit
 still emits the normalized definition event but does not steal the display.

@@ -1459,11 +1459,13 @@ func runRemoteTUIContext(
 	instanceLease := newRemoteTUIInstanceLease(client, navigationReporter, 0)
 	defer instanceLease.Close()
 
+	updateStartupPresentation(stdout, "", "Connecting to controller host…")
 	probeContext, probeCancel := context.WithTimeout(ctx, 8*time.Second)
 	initial, initialReceivedAt, engine, err := remoteTUIBootstrap(probeContext, client.Snapshot, client.CommandEngine)
 	if err == nil {
 		if err == nil {
 			if syncNavigation {
+				updateStartupPresentation(stdout, "", "Synchronizing host events…")
 				cursorContext, cursorCancel := context.WithTimeout(ctx, 3*time.Second)
 				cursorErr := client.WaitEventCursor(cursorContext)
 				cursorCancel()
@@ -1473,6 +1475,7 @@ func runRemoteTUIContext(
 				}
 			}
 			probeCancel()
+			updateStartupPresentation(stdout, "", "Loading host preferences…")
 			settingsContext, settingsCancel := context.WithTimeout(ctx, 4*time.Second)
 			remoteHostUI, haveRemoteHostUI, remoteRF := remoteTUIStartupPreferences(settingsContext, client)
 			settingsCancel()
@@ -1511,9 +1514,11 @@ func runRemoteTUIContext(
 			}
 			dummyRuntime := control.New(control.Options{})
 			defer dummyRuntime.Close()
+			updateStartupPresentation(stdout, clientUI().AppTitle, "Loading terminal controls…")
 			tui.ConfigureInteractiveColorProfile()
 			program := tea.NewProgram(
 				tui.NewApplicationWithOptions(dummyRuntime, engine, tui.Options{
+					StartupWidth: startupTerminalWidth(stdout),
 					// Appearance and terminal preferences belong to this client and
 					// are intentionally saved locally. Host integrations and RF
 					// presentation data belong to the remote primary; until their
@@ -1572,6 +1577,7 @@ func runRemoteTUIContext(
 				tea.WithMouseCellMotion(),
 				tea.WithContext(ctx),
 			)
+			handoffStartupPresentation()
 			_, runErr := program.Run()
 			_ = hostui.WriteOSC(stdout, "9;4;0;0")
 			_ = hostui.ClearUpdateTaskbarProgress()

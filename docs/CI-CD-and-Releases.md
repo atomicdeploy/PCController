@@ -30,13 +30,24 @@ artifacts.
 
 ## Artifact catalog
 
-Actions publishes one friendly artifact for each deliverable/target:
+Actions publishes one directly downloadable archive for each deliverable/target,
+plus a separate `<archive-name>.sha256` checksum artifact:
 
 | Deliverable | Artifact name | Contents |
 |---|---|---|
-| AVR firmware | `PCController-Firmware-ATmega328P` | Application HEX, full-flash recovery HEX, validated 1 KiB safe-default EEPROM, manifests, dependency inventory, archive, checksum |
-| Native host | `PCController-Host-<platform>` | Versioned package with native executable/library, the exact same-run firmware/EEPROM defaults, metadata, notices, and checksum |
-| Virtual Board | `PCController-VirtualBoard-<platform>` | Versioned simulator package, metadata, notices, and checksum |
+| AVR firmware | `PCController-Firmware-<version>-AVR-ATmega328P.tar.gz` | Application HEX, full-flash recovery HEX, validated 1 KiB safe-default EEPROM, manifests, dependency inventory |
+| Windows host | `PCController-Host-<version>-Windows-x64-Portable.zip` | Host application, bundled tools/assets and first-run guide; extract and run, optional per-user install |
+| Windows Virtual Board | `PCController-VirtualBoard-<version>-Windows-x64-Portable.zip` | Native firmware runtime and guide; not the Host application |
+| Linux/macOS host | `PCController-Host-<version>-<platform>.tar.gz` | Native executable/library, the exact same-run firmware/EEPROM defaults, metadata, notices |
+| Linux/macOS Virtual Board | `PCController-VirtualBoard-<version>-<platform>.tar.gz` | Native simulator, metadata, notices |
+
+The pinned upload action uses `archive: false`: GitHub stores each file as-is
+instead of wrapping an existing archive in another ZIP. The artifact name is
+the uploaded filename. Windows ZIPs open with File Explorer **Extract All**;
+`Portable` distinguishes them from an installer. Keeping tar preserves executable permissions on Linux
+and macOS; one extraction produces the usable package. Internal test reports
+and loose-file evidence may still use ordinary ZIP artifacts, without a nested
+distribution archive.
 
 Supported host labels are Linux x64, Linux ARM64, Windows x64, macOS Intel,
 and macOS Apple Silicon. Release archives add the selected version to their
@@ -44,7 +55,8 @@ product-named root directory.
 
 The firmware job publishes its artifact name as a reusable-workflow output.
 Every host target first cleans generated output, then downloads that exact
-artifact, verifies the application and complete EEPROM ranges/hashes, embeds
+archive and checksum, verifies the archive before unpacking firmware evidence,
+verifies the application and complete EEPROM ranges/hashes, embeds
 them, and requires both independent enabled flags in `host-manifest.json`.
 This ordering prevents host cleanup from silently deleting the firmware input.
 
@@ -57,10 +69,35 @@ maintainer explicitly removes them.
 
 1. Open the current [Build workflow](https://github.com/atomicdeploy/PCController/actions/workflows/build.yml).
 2. Select a successful run for the exact commit you want.
-3. Download the firmware, Host, or Virtual Board artifact matching the
-   target.
-4. Keep the archive beside its `.sha256` sidecar.
-5. Verify before extracting.
+3. In the run's **Summary → Download packages** table, click
+   **⬇️ Download ZIP** at **Windows x64 / Host application** for Windows, or
+   **⬇️ Download .tar.gz** at **AVR ATmega328P / Firmware** for the board images. Other platform cells work
+   the same way. These are direct links to artifacts from that exact run, not
+   links back to the workflow list. GitHub requires you to sign in to download.
+4. Download the adjacent **🔐 SHA-256** sidecar into the same folder.
+5. Verify, then extract the archive once using the commands below. Firmware
+   HEX/EEPROM files are inside the extracted firmware package.
+
+Previously published artifacts keep their old layout: older unversioned artifact
+names such as `PCController-Host-Windows-x64` may contain an inner archive.
+New `*-Windows-x64-Portable.zip` downloads contain the actual application folder,
+not another archive. New workflow source
+does not retroactively change files uploaded by an older run.
+
+The catalog runs even when another target fails, retaining available links and
+marking missing packages without claiming the build passed. For older runs with
+no catalog, use **Host · Codebase summary**, the firmware job summary, or the
+run's **Artifacts** section. Missing or expired artifacts are not download links.
+
+### WebUI test report
+
+Every native host still runs the WebUI tests. Each produces a platform-labeled
+Vitest blob and retains failure annotations, with only its duplicate job summary
+disabled. The Host summary job uses Vitest's native `--merge-reports` to publish
+one **Vitest Test Report** and one downloadable **WebUI-Test-Report** JSON file.
+Platform labels remain distinct; missing runner reports fail the completeness
+check instead of being treated as passing tests. Raw `Vitest-Blob-*` artifacts
+remain available for diagnostics. No test suite is skipped or result rewritten.
 
 Linux:
 
@@ -81,12 +118,17 @@ tar -xzf "$archive"
 Windows PowerShell:
 
 ```powershell
-$archive = "PCController-Host-<version>-Windows-x64.tar.gz"
+$archive = "PCController-Host-<version>-Windows-x64-Portable.zip"
 $expected = (Get-Content ".\$archive.sha256" -Raw).Split()[0]
 $actual = (Get-FileHash ".\$archive" -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($actual -ne $expected.ToLowerInvariant()) { throw "SHA-256 mismatch" }
-tar.exe -xzf $archive
+Expand-Archive -LiteralPath $archive -DestinationPath .
 ```
+
+Open the extracted folder and run `controller.exe`. Keep its `tools`, `assets`
+and other subfolders together; don't run the executable from inside the ZIP.
+The product/component, version, operating system, architecture and `Portable`
+suffix distinguish each download without changing the executable's stable name.
 
 ## Release integrity and draft repair
 
@@ -202,7 +244,7 @@ build.cmd --all --clean --no-upx --version <semver>
 
 Build and test the Virtual Board with the CMake commands in its
 [maintained guide](../Tools/VirtualBoard/README.md); the flagship CI workflow
-runs the checked-in `release` preset independently on all five targets.
+runs the checked-in `release` preset independently on each supported target.
 
 The local build writes generated output only to canonical project locations:
 

@@ -54,6 +54,8 @@ type CommandOptions struct {
 	AvrdudeAdapter        string
 	Programmer            string
 	HostConfig            func() appconfig.Config
+	StripOrder            func() (string, string)
+	SaveStripOrder        func(string) error
 	BuzzerRuntime         func(native.Settings, bool) appconfig.BuzzerRuntimeStatus
 	HostFacts             hostfacts.Provider
 	UpdateHostConfig      func(func(*appconfig.Config) error) error
@@ -159,6 +161,19 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 	engine := shell.New(100)
 	if options.HostConfig != nil || options.Resolve != nil {
 		runtime.configurePWMRecallPersistence(func() CommandOptions { return resolveCommandOptions(options) })
+		runtime.stripConfigMu.Lock()
+		runtime.stripConfig = func() appconfig.UI {
+			current := resolveCommandOptions(options)
+			if current.StripOrder != nil {
+				order, firmware := current.StripOrder()
+				return appconfig.UI{StripColorOrder: order, StripFirmwareOrder: firmware}
+			}
+			if current.HostConfig != nil {
+				return current.HostConfig().UI
+			}
+			return appconfig.UI{}
+		}
+		runtime.stripConfigMu.Unlock()
 	}
 	macroRunner := NewMacroRunner(
 		runtime,
@@ -804,11 +819,17 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 	})
 	mustRegister(shell.Command{
 		Name:    "strip",
-		Usage:   "strip config COUNT | frame RGBHEX | rainbow [COUNT [FPS]] | effect list | effect play NAME [COUNT [FPS]] | stop | status | pixel N R G B [BRIGHTNESS] | fill R G B [BRIGHTNESS] | clear",
+		Usage:   "strip order [GRB|RGB|BRG|BGR|RBG|GBR] | config COUNT | frame RGBHEX | rainbow [COUNT [FPS]] | effect list | effect play NAME [COUNT [FPS]] | stop | status | pixel N R G B [BRIGHTNESS] | fill R G B [BRIGHTNESS] | clear",
 		Summary: "stream exact RGB frames or a rolling rainbow to 1..100 addressable LEDs",
 		Run: func(ctx context.Context, args []string) (string, error) {
 			if len(args) > 0 {
 				switch strings.ToLower(args[0]) {
+				case "order":
+					result, err := stripOrderCommand(outputs, resolveCommandOptions(options), args[1:])
+					if err == nil && len(args) == 2 {
+						runtime.PublishHostEvent("strip-order", result)
+					}
+					return result, err
 				case "config", "frame", "rainbow", "effect", "stop", "status":
 					definitions := appconfig.DefaultStripEffects()
 					if options.HostConfig != nil {
@@ -1746,6 +1767,12 @@ func resolveCommandOptions(base CommandOptions) CommandOptions {
 	}
 	if resolved.HostConfig == nil {
 		resolved.HostConfig = base.HostConfig
+	}
+	if resolved.StripOrder == nil {
+		resolved.StripOrder = base.StripOrder
+	}
+	if resolved.SaveStripOrder == nil {
+		resolved.SaveStripOrder = base.SaveStripOrder
 	}
 	if resolved.UpdateHostConfig == nil {
 		resolved.UpdateHostConfig = base.UpdateHostConfig

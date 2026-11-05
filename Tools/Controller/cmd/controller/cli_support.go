@@ -16,6 +16,7 @@ import (
 	"syscall"
 
 	"pccontroller.local/controller/internal/appconfig"
+	"pccontroller.local/controller/internal/hostui"
 	"pccontroller.local/controller/internal/installer"
 	"pccontroller.local/controller/internal/productidentity"
 	"pccontroller.local/controller/internal/programmer"
@@ -73,7 +74,7 @@ func isConfigMaintenance(args []string) bool {
 		return false
 	}
 	switch strings.ToLower(args[1]) {
-	case "open", "clear", "delete", "reset":
+	case "open", "clear", "delete", "reset", "intro":
 		return true
 	case "path":
 		return len(args) == 3
@@ -98,6 +99,36 @@ func runConfigMaintenance(args []string, configPath string, stdout io.Writer) er
 	}
 	action := strings.ToLower(args[1])
 	switch action {
+	case "intro":
+		store, err := appconfig.Open(configPath)
+		if err != nil {
+			return err
+		}
+		if len(args) > 3 {
+			return configUsageError()
+		}
+		if len(args) == 3 {
+			mode := strings.ToLower(args[2])
+			_, err = store.Update(func(config *appconfig.Config) error {
+				if mode == "reset" {
+					config.UI.SetupComplete = false
+					return nil
+				}
+				if mode == "" {
+					return configUsageError()
+				}
+				if err := appconfig.ValidateIntroMode(mode); err != nil {
+					return err
+				}
+				config.UI.IntroMode = mode
+				return nil
+			})
+			if err != nil {
+				return err
+			}
+		}
+		ui := store.Persistent().UI
+		return json.NewEncoder(stdout).Encode(map[string]any{"config_file": store.Path(), "intro_mode": ui.IntroMode, "setup_complete": ui.SetupComplete})
 	case "path", "open":
 		if len(args) > 3 {
 			return configUsageError()
@@ -105,6 +136,24 @@ func runConfigMaintenance(args []string, configPath string, stdout io.Writer) er
 		kind := "config"
 		if len(args) == 3 {
 			kind = strings.ToLower(args[2])
+		}
+		if kind == "file" {
+			resolved, err := appconfig.ResolvePath(configPath)
+			if err != nil {
+				return err
+			}
+			if action == "path" {
+				fmt.Fprintln(stdout, resolved)
+				return nil
+			}
+			if _, err := os.Stat(resolved); errors.Is(err, os.ErrNotExist) {
+				if _, err := appconfig.Open(resolved); err != nil {
+					return err
+				}
+			} else if err != nil {
+				return err
+			}
+			return openConfiguration(resolved, "file")
 		}
 		path, err := configMaintenancePath(kind, configPath)
 		if err != nil {
@@ -184,8 +233,10 @@ var openDirectory = func(path string) error {
 	return nil
 }
 
+var openConfiguration = hostui.OpenConfiguration
+
 func configUsageError() error {
-	return errors.New("usage: config path [config|data] | open [config|data] | clear --confirm | show|validate | config secrets status|set REF (--from-env NAME|--stdin)|clear REF")
+	return errors.New("usage: config path [file|config|data] | open [file|config|data] | intro [auto|always|skip|reset] | clear --confirm | show|validate | config secrets status|set REF (--from-env NAME|--stdin)|clear REF")
 }
 
 func runConfigSecrets(args []string, stdin io.Reader, stdout io.Writer, store *appconfig.Store) error {
@@ -345,7 +396,9 @@ Device, firmware and recovery:
 Host configuration and integration:
 	controller [--app-name NAME] [--tagline TEXT] COMMAND...
 	controller app launch tui|webui [--mode ensure|launch|focus] [--target INSTANCE] [--page PAGE] [--peer NAME]
-	controller config path [config|data] | open [config|data] | clear --confirm | show|validate
+	controller config path [file|config|data] | open [file|config|data] | clear --confirm | show|validate
+	controller config intro [auto|always|skip|reset]
+	controller --intro auto|always|skip [tui|web]   override introduction for this process only
 	controller config secrets status|set REF (--from-env NAME|--stdin)|clear REF
 	controller network edge-enable|edge-disable|peer-add|peer-remove|probe|firewall-ensure|status
 	controller --open-user-data | --open-config-dir | --clear-settings

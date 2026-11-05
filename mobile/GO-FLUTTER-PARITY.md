@@ -32,6 +32,8 @@ Findings corrected in Flutter:
 - Strip programs require stable IDs, with human names as captions. Pixel/FPS
   ranges and modes come from hardware metadata. Native board/host buzzer routing
   is separate from Android PCM mirroring preferences.
+  Host stream FPS admits 1..120; offline strip authoring shares that ceiling,
+  while existing effects retain their chosen rates. Delivered FPS is transport-bound.
 - Native PWM -32010 confirmation_unavailable/write_acknowledged/retryable:false
   means an acknowledged write lacks confirmed readback. Preserve stale observations;
   do not disconnect or replay the write.

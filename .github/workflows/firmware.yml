@@ -33,7 +33,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     outputs:
-      artifact_name: ${{ steps.pins.outputs.product_slug }}-Firmware-ATmega328P
+      artifact_name: ${{ steps.package.outputs.archive-name }}
     env:
       FORCE_COLOR: "1"
       PCCONTROLLER_VERSION: ${{ inputs.version || format('0.0.0-ci.{0}', github.run_number) }}
@@ -77,16 +77,15 @@ jobs:
       - name: "🕰️ Freeze reproducible build time"
         run: echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)" >> "$GITHUB_ENV"
 
-      - name: "🧩 Install pinned MiniCore platform"
+      - name: "🧩 Install latest indexed MiniCore platform"
         env:
           MINICORE_INDEX_URL: ${{ steps.pins.outputs.minicore_index_url }}
           MINICORE_PACKAGE: ${{ steps.pins.outputs.minicore_package }}
-          MINICORE_VERSION: ${{ steps.pins.outputs.minicore_version }}
         run: |
           arduino-cli core update-index --additional-urls "$MINICORE_INDEX_URL"
-          arduino-cli core install "$MINICORE_PACKAGE@$MINICORE_VERSION" --additional-urls "$MINICORE_INDEX_URL"
+          arduino-cli core install "$MINICORE_PACKAGE" --additional-urls "$MINICORE_INDEX_URL"
 
-      - name: "📚 Install every pinned Arduino library"
+      - name: "📚 Install latest indexed Arduino libraries"
         env:
           ARDUINO_LIBRARIES_JSON: ${{ steps.pins.outputs.arduino_libraries_json }}
         run: >-
@@ -120,6 +119,7 @@ jobs:
       - name: "📚 Record dependencies"
         run: |
           arduino-cli version > .build/firmware/dependencies.txt
+          arduino-cli version --format json > .build/firmware/resolved-cli.json
           arduino-cli core list >> .build/firmware/dependencies.txt
           arduino-cli lib list >> .build/firmware/dependencies.txt
           arduino-cli core list --format json > .build/firmware/resolved-cores.json
@@ -136,41 +136,30 @@ jobs:
           "${PRODUCT_SLUG}-Firmware"
           AVR-ATmega328P
 
-      - name: "🎁 Stage firmware artifact"
-        shell: bash
-        env:
-          PACKAGE_ARCHIVE: ${{ steps.package.outputs.archive }}
-          PACKAGE_CHECKSUM: ${{ steps.package.outputs.checksum }}
-        run: |
-          set -euo pipefail
-          staging=".build/actions-artifact"
-          rm -rf "${staging}"
-          mkdir -p "${staging}"
-          cp "${PACKAGE_ARCHIVE}" "${PACKAGE_CHECKSUM}" "${staging}/"
-          find .build/firmware -maxdepth 1 -type f \
-            \( -name '*.hex' -o -name '*.eep' -o -name 'firmware-manifest.json' \
-               -o -name 'dependencies.txt' -o -name '*-dependencies.json' \
-               -o -name 'resolved-*.json' \) \
-            -exec cp '{}' "${staging}/" ';'
-          test "$(find "${staging}" -maxdepth 1 -type f -name '*.hex' | wc -l)" -eq 3
-          test "$(find "${staging}" -maxdepth 1 -type f -name '*.tar.gz' | wc -l)" -eq 1
-          find "${staging}" -maxdepth 1 -type f -printf '%f\n' | sort
-
       - name: "⬆️ Upload firmware artifact"
         id: upload
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: ${{ steps.pins.outputs.product_slug }}-Firmware-ATmega328P
-          path: .build/actions-artifact/*
+          path: ${{ steps.package.outputs.archive }}
+          archive: false
           if-no-files-found: error
           retention-days: ${{ github.event_name == 'pull_request' && 14 || 90 }}
-          compression-level: 9
+
+      - name: "🔐 Upload firmware checksum"
+        id: upload-checksum
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          path: ${{ steps.package.outputs.checksum }}
+          archive: false
+          if-no-files-found: error
+          retention-days: ${{ github.event_name == 'pull_request' && 14 || 90 }}
 
       - name: "✨ Publish AVR build summary"
         if: always() && steps.upload.outcome == 'success'
         env:
           ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
           ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          CHECKSUM_URL: ${{ steps.upload-checksum.outputs.artifact-url }}
         run: >-
           node .github/scripts/step-summary.mjs
           firmware
@@ -180,6 +169,7 @@ jobs:
           "$ARTIFACT_DIGEST"
           Tools/Controller/toolchain-lock.json
           "${{ steps.package.outputs.package-root }}"
+          "$CHECKSUM_URL"
 
       # Keep every shipped opt-in firmware profile inside the same immutable
       # flash/identity, SRAM, manifest, EEPROM, and Intel HEX gates as the
@@ -201,12 +191,19 @@ jobs:
       - name: "🔎 Recheck feature-profile records and boundaries"
         run: ./firmware.sh check
 
-      - name: "🧩 Install declared larger-MCU core in the existing CLI cache"
+      - name: "🔎 Resolve latest stable larger-MCU core"
+        id: target-core
+        run: node Tools/Dependencies/target-cores.mjs mega2560
+
+      - name: "🧩 Install resolved larger-MCU core in the existing CLI cache"
+        env:
+          TARGET_CORE: ${{ steps.target-core.outputs.core }}
+          TARGET_CORE_VERSION: ${{ steps.target-core.outputs.version }}
         run: |
           node -e 'const { execFileSync } = require("node:child_process");
           const target = require("./Tools/Firmware/targets.json").mega2560;
           execFileSync("arduino-cli", ["core", "update-index", "--additional-urls", target.index], { stdio: "inherit" });
-          execFileSync("arduino-cli", ["core", "install", target.core + "@" + target.minimumCoreVersion, "--additional-urls", target.index], { stdio: "inherit" });'
+          execFileSync("arduino-cli", ["core", "install", process.env.TARGET_CORE + "@" + process.env.TARGET_CORE_VERSION, "--additional-urls", target.index], { stdio: "inherit" });'
 
       - name: "🧪 Compile each ATmega2560 production profile without device access"
         run: |

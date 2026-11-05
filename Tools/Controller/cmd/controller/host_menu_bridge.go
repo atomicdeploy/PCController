@@ -24,7 +24,11 @@ func newHostMenuManager(
 	engine *shell.Engine,
 ) *hostmenu.Manager {
 	macroMenus := newHostMacroMenuActions(store, runtime, engine)
+	stripMenus := newHostStripMenuActions(store, runtime, engine)
 	read := func(ctx context.Context, action string) (string, error) {
+		if output, handled, err := stripMenus.Read(strings.ToLower(strings.TrimSpace(action))); handled {
+			return output, err
+		}
 		config := store.Current()
 		snapshot := runtime.Snapshot()
 		switch strings.ToLower(strings.TrimSpace(action)) {
@@ -76,6 +80,9 @@ func newHostMenuManager(
 	write := func(ctx context.Context, action, value string) (string, error) {
 		rawAction := strings.TrimSpace(action)
 		action = strings.ToLower(rawAction)
+		if output, handled, err := stripMenus.Write(action, value); handled {
+			return output, err
+		}
 		if output, handled, err := macroMenus.Write(action, value); handled {
 			return output, err
 		}
@@ -136,6 +143,9 @@ func newHostMenuManager(
 	}
 	execute := func(ctx context.Context, action string) (string, error) {
 		normalized := strings.ToLower(strings.TrimSpace(action))
+		if output, handled, err := stripMenus.Execute(ctx, normalized); handled {
+			return output, err
+		}
 		if output, handled, err := macroMenus.Execute(ctx, action); handled {
 			return output, err
 		}
@@ -165,6 +175,9 @@ func newHostMenuManager(
 	if err := macroMenus.Sync(manager, store.Current().Macros); err != nil {
 		runtime.PublishHostEvent("menu.options.error", err.Error())
 	}
+	if err := manager.UpdateSelectOptions("strip.effects", stripHostMenuOptions(store.Current().StripEffects)); err != nil {
+		runtime.PublishHostEvent("menu.options.error", err.Error())
+	}
 	return manager
 }
 
@@ -175,6 +188,9 @@ func updateHostMenuManager(
 ) {
 	manager.UpdateConfig(config.HostMenus)
 	if err := manager.UpdateSelectOptions(macroHostMenuOptionsSource, macroHostMenuOptions(config.Macros)); err != nil {
+		runtime.PublishHostEvent("menu.options.error", err.Error())
+	}
+	if err := manager.UpdateSelectOptions("strip.effects", stripHostMenuOptions(config.StripEffects)); err != nil {
 		runtime.PublishHostEvent("menu.options.error", err.Error())
 	}
 }

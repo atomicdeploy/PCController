@@ -12,6 +12,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { usageColor, usageProgress } from "./usage-progress.mjs";
+import { distributionSuffix } from "./artifact-downloads.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const script = resolve(root, ".github", "scripts", "step-summary.mjs");
@@ -38,21 +39,43 @@ test("usage bars are green through 50, orange above 50, and red above 80", () =>
   );
 });
 
-function runSummary(directory, arguments_) {
+function runSummary(directory, arguments_, expectedStatus = 0) {
   const summary = resolve(directory, "summary.md");
   const result = spawnSync(process.execPath, [script, ...arguments_], {
     cwd: root,
     encoding: "utf8",
     env: { ...commonEnvironment, GITHUB_STEP_SUMMARY: summary },
   });
-  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.equal(result.status, expectedStatus, `${result.stdout}\n${result.stderr}`);
   return readFileSync(summary, "utf8");
 }
+
+test("firmware summary uses installed inventories, never the historical lock as build evidence", () => {
+  const directory = mkdtempSync(join(tmpdir(), "pccontroller-dependencies-"));
+  try {
+    const archive = resolve(directory, "firmware.tar.gz");
+    const manifest = resolve(directory, "firmware-manifest.json");
+    const lock = resolve(directory, "declared-dependencies.json");
+    writeFileSync(archive, "fixture");
+    writeFileSync(manifest, JSON.stringify({ artifacts: [], target: {} }));
+    writeFileSync(lock, JSON.stringify({ miniCore: { version: "3.0.0" }, libraries: [{ name: "rc-switch", version: "2.0.0" }] }));
+    writeFileSync(resolve(directory, "resolved-cli.json"), JSON.stringify({ VersionString: "1.5.1" }));
+    writeFileSync(resolve(directory, "resolved-cores.json"), JSON.stringify({ platforms: [{ id: "MiniCore:avr", installed_version: "3.1.3" }] }));
+    writeFileSync(resolve(directory, "resolved-libraries.json"), JSON.stringify({ installed_libraries: [{ library: { name: "rc-switch", version: "2.6.4" } }] }));
+    const output = runSummary(directory, ["firmware", manifest, archive, "", "", lock, directory]);
+    assert.match(output, /`3\.1\.3` \| installed core inventory/u);
+    assert.match(output, /rc-switch \| `2\.6\.4` \| installed library inventory/u);
+    assert.match(output, /audit snapshot/u);
+    assert.doesNotMatch(output, /pinned and resolved|`2\.0\.0`/u);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 test("native summaries print target-correct checksum commands", () => {
   const directory = mkdtempSync(join(tmpdir(), "pccontroller-summary-"));
   try {
-    const archive = resolve(directory, "PCController-Host-test-Windows-x64.tar.gz");
+    const archive = resolve(directory, "PCController-Host-test-Windows-x64-Portable.zip");
     const manifest = resolve(directory, "controller-manifest.json");
     writeFileSync(archive, "controller archive", "utf8");
     writeFileSync(
@@ -82,11 +105,14 @@ test("native summaries print target-correct checksum commands", () => {
       manifest,
       archive,
       "Windows-x64",
+      `${commonEnvironment.GITHUB_SERVER_URL}/${commonEnvironment.GITHUB_REPOSITORY}/actions/runs/123/artifacts/101`,
     ]);
     assert.match(windows, /~~~powershell[\s\S]*Get-FileHash/u);
     assert.doesNotMatch(windows, /sha256sum -c/u);
     assert.match(windows, /Embedded firmware default \| ✅ enabled/u);
     assert.match(windows, /Embedded EEPROM default \| ✅ enabled · 1,024 B/u);
+    assert.match(windows, /\| Download \| \[⬇️ Host · Windows-x64\]\(https:\/\/github.com\/example-org\/example-controller\/actions\/runs\/123\/artifacts\/101\) \|/u);
+    assert.doesNotMatch(windows, /Its SHA-256 is|GitHub artifact digest:/u);
 
     const binary = resolve(directory, "virtual_board");
     const simulatorArchive = resolve(
@@ -125,7 +151,7 @@ test("catalog presents AVR separately with live artifact links", () => {
     for (const product of ["Host", "VirtualBoard"]) {
       for (const target of targets) {
         writeFileSync(
-          resolve(directory, `PCController-${product}-test-${target}.tar.gz`),
+          resolve(directory, `PCController-${product}-test-${target}${distributionSuffix(target)}`),
           `${product}-${target}`,
           "utf8",
         );
@@ -174,6 +200,40 @@ test("catalog presents AVR separately with live artifact links", () => {
       /actions\/runs\/123\/artifacts\/42/u,
     );
     assert.doesNotMatch(catalog, /AVR Firmware \| ✅ ATmega328P/u);
+    assert.match(catalog, /\| \*\*Windows x64\*\* \| \[⬇️ Download ZIP\]\([^\n]+\/artifacts\/102\)/u);
+    assert.match(catalog, /\| \*\*AVR ATmega328P\*\* \| — \| — \| \[⬇️ Download ZIP\]\([^\n]+\/artifacts\/42\)/u);
+    assert.ok(catalog.indexOf("## ⬇️ Download packages") < catalog.indexOf("## ⚡ AVR"));
+    assert.doesNotMatch(catalog, /five (?:hosts|targets)|\| Host \| ✅/iu);
+    const rawArtifacts = [
+      { id: 42, name: "PCController-Firmware-test-AVR-ATmega328P.tar.gz" },
+      ...targets.flatMap((target, index) => [
+        { id: 100 + index, name: `PCController-Host-test-${target}${distributionSuffix(target)}` },
+        { id: 200 + index, name: `PCController-VirtualBoard-test-${target}${distributionSuffix(target)}` },
+      ]),
+    ];
+    writeFileSync(resolve(directory, "artifact-index.json"), JSON.stringify({ artifacts: [
+      ...rawArtifacts,
+      ...rawArtifacts.map(item => ({ id: item.id + 1000, name: `${item.name}.sha256` })),
+    ] }));
+    writeFileSync(resolve(directory, "summary.md"), "");
+    const rawCatalog = runSummary(directory, ["catalog", directory]);
+    assert.match(rawCatalog, /build complete/u);
+    assert.match(rawCatalog, /\| \*\*Windows x64\*\* \| \[⬇️ Download ZIP\]\([^\n]+\/artifacts\/102\) · \[🔐 SHA-256\]\([^\n]+\/artifacts\/1102\)/u);
+    assert.match(rawCatalog, /\| \*\*AVR ATmega328P\*\* \| — \| — \| \[⬇️ Download \.tar\.gz\]\([^\n]+\/artifacts\/42\)/u);
+    assert.match(rawCatalog, /Windows-x64-Portable\.zip/u);
+    writeFileSync(resolve(directory, "artifact-index.json"), JSON.stringify({ artifacts: rawArtifacts }));
+    writeFileSync(resolve(directory, "summary.md"), "");
+    assert.match(runSummary(directory, ["catalog", directory], 1), /build incomplete/u);
+    writeFileSync(resolve(directory, "artifact-index.json"), JSON.stringify({artifacts: [
+      {id: 42, name: "PCController-Firmware-ATmega328P", expired: true},
+    ]}));
+    // The helper appends summaries, so clear only this test-owned fixture.
+    writeFileSync(resolve(directory, "summary.md"), "");
+    const unavailable = runSummary(directory, ["catalog", directory], 1);
+    assert.doesNotMatch(unavailable, /\/artifacts\/42/u);
+    assert.match(unavailable, /⚠️ Download unavailable/u);
+    assert.match(unavailable, /build incomplete/u);
+    assert.doesNotMatch(unavailable, /✅ Native Go tests/u);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

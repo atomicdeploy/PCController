@@ -110,6 +110,9 @@ type UI struct {
 	PeripheralNames        map[string]string           `json:"peripheral_names,omitempty"`
 	PWMChannels            map[string]PWMChannelConfig `json:"pwm_channels,omitempty"`
 	SetupComplete          bool                        `json:"setup_complete"`
+	IntroMode              string                      `json:"intro_mode"`
+	StripColorOrder        string                      `json:"strip_color_order"`
+	StripFirmwareOrder     string                      `json:"strip_firmware_order"`
 	WelcomeMelody          string                      `json:"welcome_melody"`
 	StatusIntervalMS       int                         `json:"status_interval_ms"`
 	MeasurementFreshnessMS int                         `json:"measurement_freshness_ms"`
@@ -455,7 +458,10 @@ func Defaults() Config {
 			TableLayout:            "compact",
 			ControlValueColors:     true,
 			PWMChannels:            DefaultPWMChannels(),
-			WelcomeMelody:          "notify",
+			WelcomeMelody:          "welcome",
+			IntroMode:              "auto",
+			StripColorOrder:        "BRG",
+			StripFirmwareOrder:     "BRG",
 			StatusIntervalMS:       500,
 			MeasurementFreshnessMS: DefaultMeasurementFreshnessMS,
 			IdleStatusIntervalMS:   0,
@@ -819,6 +825,15 @@ func (value Config) Validate() error {
 	if err := value.validateBoardProfiles(); err != nil {
 		return err
 	}
+	if err := ValidateIntroMode(value.UI.IntroMode); err != nil {
+		return err
+	}
+	if err := ValidateStripOrder(value.UI.StripColorOrder); err != nil {
+		return err
+	}
+	if err := ValidateStripOrder(value.UI.StripFirmwareOrder); err != nil {
+		return err
+	}
 	if melody := strings.TrimSpace(value.UI.WelcomeMelody); melody == "" || len(melody) > 64 {
 		return errors.New("ui.welcome_melody must contain 1..64 characters")
 	}
@@ -1091,8 +1106,8 @@ func (value Config) Validate() error {
 		default:
 			return fmt.Errorf("strip_effects[%d].program.primitive is unsupported", index)
 		}
-		if effect.DefaultFPS < 1 || effect.DefaultFPS > 30 {
-			return fmt.Errorf("strip_effects[%d].default_fps must be 1..30", index)
+		if effect.DefaultFPS < 1 || effect.DefaultFPS > StripMaximumFPS {
+			return fmt.Errorf("strip_effects[%d].default_fps must be 1..%d", index, StripMaximumFPS)
 		}
 		if effect.DefaultDurationMS < 100 || effect.DefaultDurationMS > 3_600_000 {
 			return fmt.Errorf("strip_effects[%d].default_duration_ms must be 100..3600000", index)
@@ -1365,6 +1380,7 @@ type Store struct {
 	secrets                      *secretstore.Resolver
 	appTitleOverride             string
 	taglineOverride              string
+	introOverride                string
 	buzzerOverride               BuzzerRuntimeOverrides
 	statusIntervalOverride       int
 	measurementFreshnessOverride int
@@ -1414,12 +1430,15 @@ func (store *Store) Current() Config {
 // it to the watched configuration. Empty values leave the corresponding
 // configuration value authoritative. Callers resolve precedence before this
 // method, so command-line flags can override environment variables cleanly.
-func (store *Store) SetPresentationOverrides(appTitle, tagline string) error {
+func (store *Store) SetPresentationOverrides(appTitle, tagline string, intro ...string) error {
 	appTitle = strings.TrimSpace(appTitle)
 	tagline = strings.TrimSpace(tagline)
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	candidate := clone(store.value)
+	if len(intro) > 0 && intro[0] != "" {
+		candidate.UI.IntroMode = intro[0]
+	}
 	if appTitle != "" {
 		candidate.UI.AppTitle = appTitle
 	}
@@ -1431,6 +1450,9 @@ func (store *Store) SetPresentationOverrides(appTitle, tagline string) error {
 	}
 	store.appTitleOverride = appTitle
 	store.taglineOverride = tagline
+	if len(intro) > 0 {
+		store.introOverride = intro[0]
+	}
 	store.notifyLocked(store.value)
 	store.notifyRuntimeLocked()
 	return nil
@@ -1524,6 +1546,9 @@ func (store *Store) BuzzerRuntimeState() BuzzerRuntimeState {
 
 func (store *Store) effectiveLocked() Config {
 	value := clone(store.value)
+	if store.introOverride != "" {
+		value.UI.IntroMode = store.introOverride
+	}
 	if store.appTitleOverride != "" {
 		value.UI.AppTitle = store.appTitleOverride
 	}
@@ -1615,6 +1640,9 @@ func (store *Store) SubscribeRuntime(ctx context.Context) <-chan Config {
 }
 
 func (store *Store) notifyLocked(value Config) {
+	if store.introOverride != "" {
+		value.UI.IntroMode = store.introOverride
+	}
 	if store.appTitleOverride != "" {
 		value.UI.AppTitle = store.appTitleOverride
 	}
@@ -1671,6 +1699,9 @@ func (store *Store) commitLocked(value Config, digest [sha256.Size]byte, runtime
 
 func (store *Store) runtimeLocked() Config {
 	runtime := clone(store.runtimeValue)
+	if store.introOverride != "" {
+		runtime.UI.IntroMode = store.introOverride
+	}
 	if store.appTitleOverride != "" {
 		runtime.UI.AppTitle = store.appTitleOverride
 	}
@@ -1687,6 +1718,9 @@ func (store *Store) runtimeLocked() Config {
 // UpdateUI atomically replaces and persists the host UI section.
 func (store *Store) UpdateUI(value UI) (Config, error) {
 	store.mu.RLock()
+	if store.introOverride != "" {
+		value.IntroMode = store.value.UI.IntroMode
+	}
 	if store.appTitleOverride != "" {
 		value.AppTitle = store.value.UI.AppTitle
 	}

@@ -75,6 +75,7 @@ const humanBytes = (value) => {
 function mediaType(name) {
   const lower = name.toLowerCase();
   if (lower.endsWith(".tar.gz")) return "application/gzip";
+  if (lower.endsWith(".zip")) return "application/zip";
   if (lower.endsWith(".json")) return "application/json";
   if (lower.endsWith(".md")) return "text/markdown";
   if (lower.endsWith(".txt") || lower.endsWith(".sha256")) return "text/plain";
@@ -103,10 +104,10 @@ function classifyComponent(name) {
 
 function classifyRole(name, component) {
   const lower = name.toLowerCase();
-  if (lower.endsWith(".tar.gz.sha256")) return "archive-checksum";
+  if (/\.(?:tar\.gz|zip)\.sha256$/u.test(lower)) return "archive-checksum";
   if (lower.endsWith(".sha256")) return "checksum";
   if (lower === "sha256sums.txt") return "checksum-manifest";
-  if (lower.endsWith(".tar.gz")) return `${component}-archive`;
+  if (/\.(?:tar\.gz|zip)$/u.test(lower)) return `${component}-archive`;
   if (lower.endsWith(".eep")) return "eeprom-image";
   if (lower.endsWith(".hex")) {
     if (
@@ -534,7 +535,8 @@ Download ${code("SHA256SUMS.txt")} and the 13 primary payloads into one director
 
 \`\`\`bash
 sha256sum --check SHA256SUMS.txt
-for archive in PCController-*.tar.gz; do
+for archive in PCController-*.tar.gz PCController-*.zip; do
+  [ -f "$archive" ] || continue
   gh attestation verify "$archive" --repo ${repository}
 done
 \`\`\`
@@ -543,7 +545,8 @@ done
 
 \`\`\`bash
 shasum -a 256 -c SHA256SUMS.txt
-for archive in PCController-*.tar.gz; do
+for archive in PCController-*.tar.gz PCController-*.zip; do
+  [ -f "$archive" ] || continue
   gh attestation verify "$archive" --repo ${repository}
 done
 \`\`\`
@@ -557,7 +560,7 @@ Get-Content .\\SHA256SUMS.txt | ForEach-Object {
     throw "SHA-256 mismatch: $file"
   }
 }
-Get-ChildItem -Filter 'PCController-*.tar.gz' | ForEach-Object {
+Get-ChildItem -File | Where-Object { $_.Name -match '^PCController-.*\\.(tar\\.gz|zip)$' } | ForEach-Object {
   gh attestation verify $_.FullName --repo ${repository}
 }
 \`\`\`

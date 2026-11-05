@@ -556,6 +556,7 @@
             "controller.udp.unsubscribe",
             "controller.ui.config",
             "controller.ui.config.get",
+            "controller.ui.config.open",
             "controller.ui.config.set",
             "controller.unsubscribe",
             "controller.update.eeprom",
@@ -1633,6 +1634,11 @@
       "capability": "read",
       "summary": "Return host-owned UI settings, including status_interval_ms and measurement_freshness_ms.",
       "idempotency": "safe"
+    },
+    "controller.ui.config.open": {
+      "capability": "host_configuration",
+      "summary": "Open the active configuration file or its containing folder on the host desktop; target is file or folder. Requires an available interactive desktop.",
+      "idempotency": "idempotent-with-authoritative-readback"
     },
     "controller.ui.config.set": {
       "capability": "host_configuration",

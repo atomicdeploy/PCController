@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -228,6 +229,7 @@ type Model struct {
 	welcomeMelodyPending bool
 	welcomeCanContinue   bool
 	welcomeMelody        func(context.Context) error
+	welcomeCancel        context.CancelFunc
 	markWelcomed         func()
 	debug                bool
 	notice               string
@@ -381,7 +383,7 @@ func NewApplicationWithOptions(
 		}
 	}
 	if !options.DisableWelcome {
-		options.ForceWelcome = options.ForceWelcome || !value.SetupComplete
+		options.ForceWelcome = options.ForceWelcome || value.ShouldShowIntro()
 	}
 	if options.MarkWelcomed == nil {
 		save := options.SaveUI
@@ -475,6 +477,7 @@ func NewWithOptions(runtime *control.Runtime, engine *shell.Engine, options Opti
 		ownerActions = portowner.DefaultActions()
 	}
 	model := Model{
+		width:   options.StartupWidth,
 		runtime: runtime, engine: engine, remote: options.Remote, input: input, spinner: progress,
 		page: PageDashboard, historyPos: -1, completionIndex: -1, uiConfig: options.UIConfig,
 		saveUI: options.SaveUI, applyTUIConsole: options.ApplyTUIConsole, uiValue: uiValue,
@@ -665,7 +668,13 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		if model.welcome {
-			if model.welcomeCanContinue && (message.String() == "enter" || message.String() == "esc" || message.String() == " ") {
+			if message.String() == "ctrl+c" {
+				if model.welcomeCancel != nil {
+					model.welcomeCancel()
+				}
+				return model, tea.Quit
+			}
+			if message.String() == "esc" || (model.welcomeCanContinue && (message.String() == "enter" || message.String() == " ")) {
 				model.finishWelcome()
 			}
 			return model, nil
@@ -792,9 +801,12 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 
 	case welcomeMelodyResultMsg:
 		model.welcomeMelodyPending = false
+		if !model.welcome {
+			break
+		} // A skipped welcome cannot reopen itself.
 		if message.err != nil {
-			model.welcomeError = "Host welcome melody failed: " + message.err.Error()
-			model.welcomePhase = "Setup could not confirm audio completion"
+			model.welcomeError = "Welcome playback: " + message.err.Error()
+			model.welcomePhase = "Welcome playback stopped"
 			model.welcomeCanContinue = true
 		} else {
 			model.welcomePhase = "Controller and host outputs are ready"
@@ -828,6 +840,9 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if strings.HasPrefix(event.Kind, "macro") && model.remote != nil && model.remote.Snapshot != nil && !model.remoteSnapshotPending {
 			model.remoteSnapshotPending = true
 			commands = append(commands, refreshRemoteSnapshot(model.remote.Snapshot, model.remoteStatusSequence, model.remoteLEDSequence))
+		}
+		if event.Kind == "strip-order" {
+			model.consumeStructuredResult(commandResultMsg{line: "strip order", output: event.Text})
 		}
 		if event.Kind == "client.navigation.session.reset" {
 			model.navigationCursor.Reset()
@@ -1619,7 +1634,11 @@ func pageForName(value string) (Page, bool) {
 
 func (model Model) View() string {
 	if !model.ready {
-		return "Starting " + model.prefs.AppTitle + "…"
+		width := model.width
+		if width <= 0 {
+			width = 80
+		}
+		return StartupFrame(model.prefs.AppTitle, "Loading terminal controls…", width)
 	}
 	if model.welcome {
 		return model.welcomeView()
@@ -1831,6 +1850,9 @@ func (model *Model) finishWelcome() {
 		return
 	}
 	model.welcome = false
+	if model.welcomeCancel != nil {
+		model.welcomeCancel()
+	}
 	if model.markWelcomed != nil {
 		model.markWelcomed()
 	}
@@ -1857,6 +1879,9 @@ func (model *Model) advanceWelcome(now time.Time) tea.Cmd {
 		return nil
 	}
 	if !model.welcomeDeadline.IsZero() && now.After(model.welcomeDeadline) {
+		if model.welcomeCancel != nil {
+			model.welcomeCancel()
+		}
 		model.welcomePhase = "Setup timed out with a bounded wait"
 		if model.welcomeError == "" {
 			model.welcomeError = "The controller stayed offline, never sent final READY/STATUS, or audio did not complete."
@@ -1877,6 +1902,9 @@ func (model *Model) advanceWelcome(now time.Time) tea.Cmd {
 		model.welcomePhase = "HELLO accepted · waiting for final READY/STATUS"
 		return nil
 	}
+	if model.welcomeMelodyPending {
+		return nil
+	}
 	if model.welcomeReadyAt.IsZero() {
 		model.welcomeReadyAt = now
 	}
@@ -1886,14 +1914,10 @@ func (model *Model) advanceWelcome(now time.Time) tea.Cmd {
 		model.welcomePhase = "Controller ready · board welcome melody is playing"
 		return nil
 	}
-	if known && model.welcomeSawBusy {
-		model.welcomePhase = "Board welcome melody completed"
-		model.finishWelcome()
-		return nil
-	}
-	// If READY arrived after the board queue was already idle (or older firmware
-	// lacks cap20), play the configured host melody and await the scheduler's
-	// completion instead of guessing from elapsed animation frames.
+	// The firmware boot cue finishing is not completion of the host welcome.
+	// Await the host light/sound scheduler, which decides whether advertised
+	// capabilities and current output ownership permit playback. Older firmware
+	// without a reliable busy flag is skipped conservatively by the scheduler.
 	grace := 500 * time.Millisecond
 	if !known {
 		grace = 1200 * time.Millisecond
@@ -1909,16 +1933,17 @@ func (model *Model) advanceWelcome(now time.Time) tea.Cmd {
 	}
 	model.welcomeMelodyStarted = true
 	if model.welcomeMelody == nil {
-		model.welcomeError = "Configured host welcome melody callback is unavailable."
-		model.welcomePhase = "Setup audio could not be started"
+		model.welcomeError = "Welcome playback is unavailable. Press Enter to continue."
+		model.welcomePhase = "Welcome playback could not start"
 		model.welcomeCanContinue = true
 		return nil
 	}
 	model.welcomeMelodyPending = true
-	model.welcomePhase = "Playing configured host welcome melody"
+	model.welcomePhase = "Welcome · light and sound"
 	play := model.welcomeMelody
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	model.welcomeCancel = cancel
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		return welcomeMelodyResultMsg{err: play(ctx)}
 	}
@@ -2575,6 +2600,14 @@ func (model *Model) updateInputPlaceholder() {
 }
 
 func (model *Model) consumeStructuredResult(message commandResultMsg) {
+	if message.err == nil && strings.HasPrefix(message.line, "strip order") {
+		var value struct {
+			Order string `json:"color_order"`
+		}
+		if json.Unmarshal([]byte(message.output), &value) == nil && value.Order != "" && appconfig.ValidateStripOrder(value.Order) == nil {
+			model.uiValue.StripColorOrder = value.Order
+		}
+	}
 	if message.err != nil || !strings.HasPrefix(message.output, "PWM available=") {
 		return
 	}

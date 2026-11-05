@@ -67,9 +67,11 @@ import {
   Toggle,
 } from './components'
 import { rpc } from './api'
+import { DEFAULT_STRIP_MAXIMUM_FPS } from './strip-limits'
 import { redactSensitiveCommand, shellArgument as quoteArgument } from './command-line'
 import { SevenSegmentPreview } from './seven-segment-preview'
 import { UDPSettings } from './udp-settings'
+import { StripColorOrder } from './strip-color-order'
 import type { FrontPanelState } from './types'
 import type { SharedViewProps } from './views'
 import { peripheralAvailability } from './peripheral-availability'
@@ -208,6 +210,7 @@ export function advancedMessageRequest(
 
 export function AdvancedWorkbench({
   snapshot,
+  events,
   locale,
   run,
   busy,
@@ -741,7 +744,8 @@ export function AdvancedWorkbench({
         >
           <div className="advanced-fields">
             <TextField label={copy('LED count', 'تعداد LED')} type="number" min={1} max={100} value={stripCount} onChange={(event) => { const count = boundedInteger(event.target.value, 100, 1, 100); setStripCount(count); setPixel((current) => Math.min(current, count - 1)) }} />
-            <TextField label={copy('Frames per second', 'فریم در ثانیه')} type="number" min={1} max={30} value={stripFPS} onChange={(event) => setStripFPS(boundedInteger(event.target.value, 20, 1, 30))} />
+            {snapshot.connected && Boolean((snapshot.hello.capabilities ?? 0) & (1 << 7)) && <StripColorOrder locale={locale} revision={events.find(event => event.kind === 'strip-order')?.id} />}
+            <TextField label={copy('Frames per second', 'فریم در ثانیه')} type="number" min={1} max={snapshot.strip_effects?.[0]?.max_fps ?? DEFAULT_STRIP_MAXIMUM_FPS} value={stripFPS} onChange={(event) => setStripFPS(boundedInteger(event.target.value, 20, 1, snapshot.strip_effects?.[0]?.max_fps ?? DEFAULT_STRIP_MAXIMUM_FPS))} />
           </div>
           <div className="advanced-actions">
             <Button disabled={!online} busy={busy === `strip config ${stripCount}`} onClick={() => void run(`strip config ${stripCount}`)}>{copy('Set LED count', 'تنظیم تعداد LED')}</Button>

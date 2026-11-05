@@ -143,6 +143,9 @@ describe('first-run setup selection', () => {
     expect(shouldOpenSetup({ setup_complete: true })).toBe(false)
     expect(shouldOpenSetup(null)).toBe(false)
     expect(shouldOpenSetup({ setup_complete: true }, true)).toBe(true)
+	 expect(shouldOpenSetup({ setup_complete: true, intro_mode: 'always' })).toBe(true)
+	 expect(shouldOpenSetup({ setup_complete: false, intro_mode: 'skip' })).toBe(false)
+	 expect(shouldOpenSetup({ setup_complete: false, intro_mode: 'auto' })).toBe(true)
   })
 })
 

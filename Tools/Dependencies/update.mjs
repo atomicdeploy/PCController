@@ -22,6 +22,9 @@ import { loadProjectEnv } from '../Build/env.mjs'
 import { createChalk, renderUnicodeTable } from '../Build/presentation.mjs'
 import { PRODUCT_METADATA, resolveProductTitle } from '../Build/product-metadata.mjs'
 import { configuredProxyNames, withDirectFallback } from './network.mjs'
+import { recordFirmwareResolution } from './firmware-upgrades.mjs'
+import { resolveTargetCores } from './target-cores.mjs'
+import { compareVersions, stableParts } from './stable-version.mjs'
 
 loadProjectEnv()
 
@@ -127,7 +130,7 @@ function assertTrustedDependencyURL(value, label = 'dependency source') {
   } else if (host === 'downloads.arduino.cc') {
     trusted = path === '/libraries/library_index.json.gz' || path.startsWith('/libraries/github.com/')
   } else if (host === 'mcudude.github.io') {
-    trusted = path.startsWith('/MiniCore/')
+    trusted = path.startsWith('/MiniCore/') || path === '/MegaCore/package_MCUdude_MegaCore_index.json'
   } else if (host === 'nodejs.org') {
     trusted = path === '/dist/index.json' || path.startsWith('/dist/v')
   } else if (host === 'go.dev') {
@@ -366,23 +369,6 @@ function curlText(url, directRetry = true, accept = 'text/plain, application/oct
 
 function sha256File(path) {
   return createHash('sha256').update(readFileSync(path)).digest('hex')
-}
-
-function stableParts(value) {
-  const normalized = String(value).trim().replace(/^go|^v|^u/, '')
-  if (!/^\d+(?:\.\d+){1,3}$/.test(normalized)) return null
-  return normalized.split('.').map(Number)
-}
-
-function compareVersions(left, right) {
-  const a = stableParts(left)
-  const b = stableParts(right)
-  if (!a || !b) return String(left).localeCompare(String(right))
-  for (let index = 0; index < Math.max(a.length, b.length); index++) {
-    const delta = (a[index] ?? 0) - (b[index] ?? 0)
-    if (delta) return Math.sign(delta)
-  }
-  return 0
 }
 
 function compareCompositeVersions(left, right) {
@@ -1108,10 +1094,14 @@ function main() {
       return
     }
     log('🔎', 'Dependencies', `resolving stable channels (${report.proxy_variables.length ? `proxy variables: ${report.proxy_variables.join(', ')}` : 'direct network'})`)
+    const previousToolchain = readJSON(toolchainLockPath)
     const toolchain = resolveToolchain(options.mode, options.directRetry)
-    report.canary = toolchain.canary
-    const toolchainChanges = toolchain.changes ?? []
-    report.changes.push(...toolchainChanges)
+    recordFirmwareResolution(report, readJSON(toolchainPolicyPath), previousToolchain, toolchain)
+    // Retain completed registry evidence even if host/package resolution fails later.
+    writeJSONAtomic(options.report, { ...report, status: 'in-progress' })
+    report.firmware_checks.push(...resolveTargetCores(readJSON(join(repo, 'Tools/Firmware/targets.json')),
+      url => curlJSON(url, options.directRetry)))
+    writeJSONAtomic(options.report, { ...report, status: 'in-progress' })
 
     let hostTools = resolveHostTools(options.directRetry)
     const currentTools = readJSON(toolsLockPath)
@@ -1169,12 +1159,14 @@ function main() {
     log('✅', 'Report', options.report, chalk.green)
     if (options.mode === 'check' && options.requireCurrent && report.updates_available) process.exitCode = 2
   } catch (error) {
+    report.updates_available = report.changes.length !== 0
     report.completed_at_utc = new Date().toISOString()
     report.status = 'failed'
     report.error = error instanceof Error ? error.message : String(error)
     writeJSONAtomic(options.report, report)
     log('❌', 'Dependency validation failed', report.error, chalk.red)
-    console.log('UPDATES_APPLIED=false')
+    console.log(`UPDATES_AVAILABLE=${report.updates_available}`)
+    console.log(`UPDATES_APPLIED=${report.updates_applied}`)
     process.exitCode = 1
   }
 }

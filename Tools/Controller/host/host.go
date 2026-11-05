@@ -302,6 +302,13 @@ func (host *Host) start(parent context.Context) error {
 		controllerOptions = &value
 	}
 	client := controller.New(*controllerOptions)
+	client.ConfigureStripColorOrder(store.StripOrder, func(order string) error {
+		_, err := store.Update(func(config *appconfig.Config) error {
+			config.UI.StripColorOrder = order
+			return nil
+		})
+		return err
+	})
 	if err := configureHistory(client, runtimeConfig, store.Path()); err != nil {
 		_ = client.Shutdown()
 		host.releaseProcessOwner()
@@ -342,6 +349,8 @@ func (host *Host) start(parent context.Context) error {
 		AppInstances:          instances,
 		Shutdown:              cancel,
 		HostConfig:            store.CurrentRuntime,
+		ConfigFile:            store.Path(),
+		OpenConfig:            func(target string) error { return hostui.OpenConfiguration(store.Path(), target) },
 		PersistentHostConfig:  store.Persistent,
 		SubscribeHostConfig:   store.SubscribeRuntime,
 		UpdateHostConfig: func(change func(*appconfig.Config) error) error {

@@ -475,6 +475,7 @@ export interface UIConfig {
   name: string
 	tagline?: string
   setup_complete: boolean
+	intro_mode?: 'auto' | 'always' | 'skip'
   appearance: Appearance
   appearance_etag: string
   welcome_melody?: string
@@ -502,6 +503,9 @@ export interface HostUISettings {
   app_title: string
 	tagline: string
   setup_complete: boolean
+	intro_mode?: 'auto' | 'always' | 'skip'
+	config_file?: string
+	config_open_supported?: boolean
   welcome_melody: string
   appearance: Appearance
   appearance_etag: string

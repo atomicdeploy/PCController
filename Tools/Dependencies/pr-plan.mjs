@@ -2,10 +2,11 @@
 // Produce the dependency PR's deterministic review plan from structured evidence.
 
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { loadProjectEnv } from '../Build/env.mjs'
+import { dependencyPRTitle, groupDependencyChanges, renderFirmwareChecks } from './firmware-upgrades.mjs'
 
 loadProjectEnv()
 
@@ -57,7 +58,7 @@ function buildDependencyPRPlan(report, context = {}) {
   const changes = report.changes ?? []
   const identities = changes.filter((change) => !['host-lock'].includes(change.area))
   const links = [...new Set(changes.map(releaseNotes).filter(Boolean))].sort()
-  const validationPassed = (report.validation ?? []).length > 0 &&
+  const validationPassed = report.status === 'passed' && (report.validation ?? []).length > 0 &&
     (report.validation ?? []).every((item) => item.status === 'passed')
   const plan = {
     format: 'controller-dependency-pr-plan/v1',
@@ -66,6 +67,8 @@ function buildDependencyPRPlan(report, context = {}) {
     updates_available: Boolean(report.updates_available),
     updates_applied: Boolean(report.updates_applied),
     changes,
+    title: dependencyPRTitle(changes),
+    firmware_checks: report.firmware_checks ?? [],
     release_notes: links,
     impact: {
       license: identities.length
@@ -82,16 +85,19 @@ function buildDependencyPRPlan(report, context = {}) {
 }
 
 function renderDependencyPRMarkdown(plan) {
-  const rows = plan.changes.map((item) =>
-    `| ${escapeCell(item.area)} | ${escapeCell(item.name)} | \`${escapeCell(item.current)}\` | \`${escapeCell(item.resolved ?? item.compatible)}\` |`,
-  )
+  const groups = groupDependencyChanges(plan.changes)
+  const sections = [['🔧 Core updates', groups.core], ['📚 Library updates', groups.libraries], ['Other dependency changes', groups.other]]
+    .filter(([, changes]) => changes.length)
+    .flatMap(([heading, changes]) => [
+      `### ${heading}`, '', '| Area | Dependency | Current | Candidate |', '|---|---|---|---|',
+      ...changes.map(item => `| ${escapeCell(item.area)} | ${escapeCell(item.name)} | \`${escapeCell(item.current)}\` | \`${escapeCell(item.resolved ?? item.compatible)}\` |`), '',
+    ])
   const validation = plan.validation_passed ? '✅ Full candidate validation passed' : '❌ Full candidate validation did not pass'
   return [
-    '## ✅ Latest-compatible dependency candidate', '',
+    `## ${plan.validation_passed ? '✅' : '⚠️'} Latest-compatible dependency candidate`, '',
     `${validation}. Exact versions and hashes are captured in the attached dependency report and lock files.`, '',
-    '| Area | Dependency | Current | Candidate |',
-    '|---|---|---|---|',
-    ...(rows.length ? rows : ['| — | No dependency change | — | — |']), '',
+    renderFirmwareChecks(plan.firmware_checks),
+    ...(sections.length ? sections : ['No dependency change.', '']),
     '### Release notes', '',
     ...(plan.release_notes.length ? plan.release_notes.map((url) => `- ${url}`) : ['- No upstream identity changed.']), '',
     '### Impact review', '',
@@ -119,6 +125,7 @@ function main(argv = process.argv.slice(2)) {
   mkdirSync(dirname(markdownPath), { recursive: true })
   writeFileSync(planPath, `${JSON.stringify(plan, null, 2)}\n`)
   writeFileSync(markdownPath, renderDependencyPRMarkdown(plan))
+  if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `title=${plan.title}\n`)
   process.stdout.write(`Dependency PR plan: ${planPath}\nDependency PR body: ${markdownPath}\n`)
 }
 

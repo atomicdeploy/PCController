@@ -70,7 +70,7 @@ jobs:
       version: ${{ inputs.tag || github.ref_name }}
 
   host:
-    name: "🖥️ Release Host · Five targets"
+    name: "🖥️ Release Host · Native packages"
     needs: [preflight, firmware]
     uses: ./.github/workflows/host.yml
     with:
@@ -78,7 +78,7 @@ jobs:
       firmware_artifact_name: ${{ needs.firmware.outputs.artifact_name }}
 
   virtual-board:
-    name: "🧪 Release Virtual Board · Five targets"
+    name: "🧪 Release Virtual Board · Native packages"
     needs: preflight
     uses: ./.github/workflows/virtual-board.yml
     with:
@@ -107,12 +107,14 @@ jobs:
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           pattern: PCController-*
+          skip-decompress: true
           path: release-downloads
           merge-multiple: true
 
       - name: "📦 Stage release assets and firmware images"
         run: |
           set -euo pipefail
+          node .github/scripts/unpack-firmware-artifact.mjs release-downloads release-downloads/firmware
           mkdir -p release-assets
 
           copy_unique() {
@@ -129,7 +131,7 @@ jobs:
             copy_unique "$source" "release-assets/$(basename "$source")"
           done < <(
             find release-downloads -type f \
-              \( -name '*.tar.gz' -o -name '*.tar.gz.sha256' \) -print0
+              \( -name '*.tar.gz' -o -name '*.tar.gz.sha256' -o -name '*.zip' -o -name '*.zip.sha256' \) -print0
           )
 
           application="$(find release-downloads -type f -name 'PCController.ino.hex' -print -quit)"
@@ -145,8 +147,8 @@ jobs:
             copy_unique "$declared_dependencies" "release-assets/PCController-${RELEASE_TAG}-Dependencies.json"
           fi
 
-          archive_count="$(find release-assets -maxdepth 1 -type f -name '*.tar.gz' | wc -l | tr -d ' ')"
-          checksum_count="$(find release-assets -maxdepth 1 -type f -name '*.tar.gz.sha256' | wc -l | tr -d ' ')"
+          archive_count="$(find release-assets -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.zip' \) | wc -l | tr -d ' ')"
+          checksum_count="$(find release-assets -maxdepth 1 -type f \( -name '*.tar.gz.sha256' -o -name '*.zip.sha256' \) | wc -l | tr -d ' ')"
           test "$archive_count" -eq 11
           test "$checksum_count" -eq 11
 
@@ -156,7 +158,7 @@ jobs:
           (
             cd release-assets
             find . -maxdepth 1 -type f \
-              \( -name '*.tar.gz' -o -name '*.hex' \) \
+              \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.hex' \) \
               -printf '%f\0' | sort -z | xargs -0 sha256sum
           ) > release-assets/SHA256SUMS.txt
           test "$(wc -l < release-assets/SHA256SUMS.txt | tr -d ' ')" -eq 13
@@ -174,6 +176,8 @@ jobs:
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
         with:
           subject-path: |
+            release-assets/*.zip
+            release-assets/*.zip.sha256
             release-assets/*.tar.gz
             release-assets/*.tar.gz.sha256
             release-assets/*.hex
@@ -208,6 +212,8 @@ jobs:
             > existing-release-assets.json
           shopt -s nullglob
           published_assets=(
+            release-assets/*.zip
+            release-assets/*.zip.sha256
             release-assets/*.tar.gz
             release-assets/*.tar.gz.sha256
             release-assets/*.hex
@@ -245,6 +251,8 @@ jobs:
           overwrite_files: true
           fail_on_unmatched_files: true
           files: |
+            release-assets/*.zip
+            release-assets/*.zip.sha256
             release-assets/*.tar.gz
             release-assets/*.tar.gz.sha256
             release-assets/*.hex
@@ -276,7 +284,7 @@ jobs:
           while IFS= read -r path; do
             keep["$(basename "$path")"]=1
           done < <(find release-assets -maxdepth 1 -type f \
-            \( -name '*.tar.gz' -o -name '*.tar.gz.sha256' -o -name '*.hex' \
+            \( -name '*.tar.gz' -o -name '*.tar.gz.sha256' -o -name '*.zip' -o -name '*.zip.sha256' -o -name '*.hex' \
                -o -name 'SHA256SUMS.txt' -o -name '*-Firmware-Manifest.json' \
                -o -name '*-Dependencies.json' -o -name 'release-manifest.json' \) \
             -print)

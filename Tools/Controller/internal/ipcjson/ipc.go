@@ -270,6 +270,8 @@ type Service struct {
 	// only by contracts that must return secret references while never exposing
 	// resolved plaintext values.
 	PersistentHostConfig func() appconfig.Config
+	ConfigFile           string
+	OpenConfig           func(string) error
 	UpdateHostConfig     func(func(*appconfig.Config) error) error
 	// SubscribeHostConfig delivers the current effective host configuration and
 	// every hot-applied replacement. Long-lived remote transports use it to
@@ -332,6 +334,11 @@ type browserUISettings struct {
 	AppTitle               string                                `json:"app_title"`
 	Tagline                string                                `json:"tagline"`
 	SetupComplete          bool                                  `json:"setup_complete"`
+	IntroMode              string                                `json:"intro_mode"`
+	StripColorOrder        string                                `json:"strip_color_order"`
+	StripFirmwareOrder     string                                `json:"strip_firmware_order"`
+	ConfigFile             string                                `json:"config_file,omitempty"`
+	ConfigOpenSupported    bool                                  `json:"config_open_supported"`
 	WelcomeMelody          string                                `json:"welcome_melody"`
 	StatusIntervalMS       int                                   `json:"status_interval_ms"`
 	MeasurementFreshnessMS int                                   `json:"measurement_freshness_ms"`
@@ -374,7 +381,7 @@ func advertisedStripControl(connected bool, capabilities uint32) *stripControlDe
 	}
 	return &stripControlDescriptor{
 		MinimumPixels: 1, MaximumPixels: native.StripMaximumPixels, DefaultPixels: native.StripMaximumPixels,
-		MinimumFPS: 1, MaximumFPS: 30, DefaultFPS: 20,
+		MinimumFPS: 1, MaximumFPS: appconfig.StripMaximumFPS, DefaultFPS: 20,
 		Modes: []string{"solid", "pixel", "frame", "rainbow", "effect"},
 	}
 }
@@ -806,6 +813,20 @@ func (service *Service) dispatch(
 		}
 	case "controller.ui.config", "controller.ui.config.get":
 		result = service.browserUISettings()
+	case "controller.ui.config.open":
+		var params struct {
+			Target string `json:"target"`
+		}
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			if params.Target != "file" && params.Target != "folder" {
+				err = errors.New("target must be file or folder")
+			} else if service.OpenConfig == nil {
+				err = errors.New("configuration desktop actions are unavailable on this host")
+			} else {
+				err = service.OpenConfig(params.Target)
+				result = map[string]bool{"requested": err == nil}
+			}
+		}
 	case "controller.peripherals", "controller.peripherals.get":
 		result = service.peripheralSettings()
 	case "controller.board_profile.get":
@@ -2102,6 +2123,11 @@ func (service *Service) browserUISettings() browserUISettings {
 		AppTitle:               productidentity.Title(ui.AppTitle),
 		Tagline:                ui.Tagline,
 		SetupComplete:          ui.SetupComplete,
+		IntroMode:              service.persistentHostConfig().UI.IntroMode,
+		StripColorOrder:        appconfig.EffectiveStripOrder(ui.StripColorOrder),
+		StripFirmwareOrder:     appconfig.EffectiveStripOrder(ui.StripFirmwareOrder),
+		ConfigFile:             service.ConfigFile,
+		ConfigOpenSupported:    service.OpenConfig != nil && hostui.ConfigurationDesktopAvailable(),
 		WelcomeMelody:          ui.WelcomeMelody,
 		StatusIntervalMS:       ui.StatusIntervalMS,
 		MeasurementFreshnessMS: ui.MeasurementFreshnessMS,
@@ -2598,7 +2624,7 @@ func requestCapability(method string, params json.RawMessage) string {
 	case "controller.rf.binding.put", "controller.rf.binding.remove", "controller.rf.preferences.set":
 		return capabilityHostConfig
 	case "controller.host_menu.configure", "controller.host_menu.config.set",
-		"controller.ui.config.set",
+		"controller.ui.config.set", "controller.ui.config.open",
 		"controller.peripherals.set", "controller.board_profile.update",
 		"controller.peripheral.presentation.update",
 		"controller.peripheral.folder.update",
@@ -2673,6 +2699,17 @@ func commandCapability(command string) string {
 		return capabilityBoard
 	}
 	switch words[0] {
+	case "strip":
+		if len(words) >= 2 && words[1] == "order" {
+			if len(words) == 2 {
+				return capabilityRead
+			}
+			return capabilityHostConfig
+		}
+		if len(words) == 2 && words[1] == "status" {
+			return capabilityRead
+		}
+		return capabilityBoard
 	case "help", "?", "ports", "hello", "status", "st", "temp", "temperature":
 		return capabilityRead
 	case "audio":
@@ -3157,6 +3194,7 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 			"build_time":               strings.TrimSpace(service.HostBuildTime),
 			"web_resource_path":        strings.TrimSpace(service.WebResourcePath),
 			"setup_complete":           config.UI.SetupComplete,
+			"intro_mode":               config.UI.IntroMode,
 			"welcome_melody":           config.UI.WelcomeMelody,
 			"status_interval_ms":       settings.StatusIntervalMS,
 			"measurement_freshness_ms": settings.MeasurementFreshnessMS,

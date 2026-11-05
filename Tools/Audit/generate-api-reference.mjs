@@ -94,7 +94,7 @@ const capabilityGroups = {
   host_configuration: [
     "controller.udp.config.set", "controller.udp.subscribe", "controller.udp.unsubscribe",
 		"controller.mirror.configure",
-    "controller.host_menu.configure", "controller.host_menu.config.set", "controller.ui.config.set",
+    "controller.host_menu.configure", "controller.host_menu.config.set", "controller.ui.config.set", "controller.ui.config.open",
     "controller.peripherals.set", "controller.board_profile.update", "controller.peripheral.presentation.update",
     "controller.peripheral.folder.update",
     "controller.hotkeys.set", "controller.os.configure",
@@ -170,6 +170,7 @@ const methodOverrides = {
   "controller.ui.config": "Return host-owned UI settings, including status_interval_ms and measurement_freshness_ms.",
   "controller.ui.config.get": "Return host-owned UI settings, including status_interval_ms and measurement_freshness_ms.",
   "controller.ui.config.set": "Atomically persist host UI fields; status_interval_ms is 50..60000 and measurement_freshness_ms is refresh+100..120000.",
+  "controller.ui.config.open": "Open the active configuration file or its containing folder on the host desktop; target is file or folder. Requires an available interactive desktop.",
   "controller.snapshot": "Return the authoritative cached controller snapshot.",
 	"controller.board_profile.get": "Return the attached board identity, configured wiring mode, and opaque profile revision.",
 	"controller.board_profile.update": "Bind the attached physical board identity to one explicit host-owned wiring profile.",

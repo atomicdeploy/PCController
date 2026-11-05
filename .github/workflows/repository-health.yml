@@ -62,6 +62,8 @@ jobs:
           node --check .github/scripts/step-summary.mjs
           node Tools/Dependencies/export-lock.mjs validate
           node --test .github/scripts/assert-defaults.test.mjs
+          node --test .github/scripts/artifact-downloads.test.mjs
+          node --test .github/scripts/unpack-firmware-artifact.test.mjs
           node --test .github/scripts/codebase-summary.test.mjs
           node --test .github/scripts/package-directory.test.mjs
           node --test .github/scripts/repository-context.test.mjs
@@ -70,10 +72,13 @@ jobs:
           node --test Tools/Audit/roadmap-followup.test.mjs
           node --test Tools/Dependencies/export-lock.test.mjs
           node --test Tools/Dependencies/update.test.mjs
+          node --test Tools/Dependencies/firmware-upgrades.test.mjs Tools/Dependencies/pr-plan.test.mjs
+          node --test Tools/Dependencies/target-cores.test.mjs
           node --test .github/scripts/release-asset-collisions.test.mjs
           node --test .github/scripts/release-showcase.test.mjs
           node --test .github/scripts/security-config-check.test.mjs
           node --test .github/scripts/step-summary.test.mjs
+          node --test .github/scripts/verify-vitest-blobs.test.mjs
 
       - name: "✅ Validate every GitHub Actions workflow"
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12

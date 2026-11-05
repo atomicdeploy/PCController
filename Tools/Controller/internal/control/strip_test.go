@@ -203,7 +203,7 @@ func TestTypedStripEffectCatalogIsLiveCapabilityGated(t *testing.T) {
 		if descriptor.ID != want[index] || descriptor.Name == "" || descriptor.Description == "" ||
 			descriptor.DefaultFPS < descriptor.MinFPS || descriptor.DefaultFPS > descriptor.MaxFPS ||
 			descriptor.MinPixels != 1 || descriptor.MaxPixels != native.StripMaximumPixels ||
-			descriptor.MinFPS != 1 || descriptor.MaxFPS != 30 {
+			descriptor.MinFPS != 1 || descriptor.MaxFPS != 120 {
 			t.Fatalf("descriptor[%d]=%+v", index, descriptor)
 		}
 	}

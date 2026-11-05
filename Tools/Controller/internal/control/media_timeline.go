@@ -224,8 +224,8 @@ func compileMediaTimeline(plan MediaTimelinePlan, runner *MacroRunner) ([]mediaT
 			}
 		} else if effect.Kind == "strip-stream" {
 			count, fps := effect.DefaultPixels, effect.DefaultFPS
-			if count < 1 || count > native.StripMaximumPixels || fps < 1 || fps > 30 {
-				return nil, errors.New("strip timeline requires valid pixels and 1..30 FPS")
+			if count < 1 || count > native.StripMaximumPixels || fps < 1 || fps > appconfig.StripMaximumFPS {
+				return nil, fmt.Errorf("strip timeline requires valid pixels and 1..%d FPS", appconfig.StripMaximumFPS)
 			}
 			duration := cue.DurationMS
 			if duration == 0 {

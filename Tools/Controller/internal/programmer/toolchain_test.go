@@ -46,7 +46,7 @@ func TestToolchainBootstrapDryRunPinsCoreLibrariesAndManagedCLI(t *testing.T) {
 		context.Background(),
 		ToolchainBootstrapOptions{
 			Profile: DefaultToolchainProfile(), InstallDir: t.TempDir(),
-			GOOS: "windows", GOARCH: "amd64", DryRun: true,
+			GOOS: "windows", GOARCH: "amd64", DryRun: true, Locked: true,
 			Environment: []string{
 				"PATH=test", "https_proxy=http://secret", "NO_PROXY=localhost",
 			},
@@ -87,6 +87,41 @@ func TestToolchainBootstrapDryRunPinsCoreLibrariesAndManagedCLI(t *testing.T) {
 		if !strings.Contains(joined, expected) {
 			t.Fatalf("bootstrap plan missing %q:\n%s", expected, joined)
 		}
+	}
+}
+
+func TestToolchainBootstrapDefaultsToUnversionedCoreAndLibraries(t *testing.T) {
+	profile := DefaultToolchainProfile()
+	profile.CoreVersion = ""
+	for index := range profile.Libraries {
+		profile.Libraries[index].Version = ""
+	}
+	report, err := BootstrapToolchain(context.Background(), ToolchainBootstrapOptions{
+		Profile: profile, InstallDir: t.TempDir(), DryRun: true,
+	}, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.DependenciesLocked {
+		t.Fatal("default bootstrap unexpectedly locked dependencies")
+	}
+	installs := 0
+	for _, step := range report.Steps {
+		args := step.Command.Args
+		if len(args) >= 5 && args[3] == "install" {
+			installs++
+			if strings.Contains(args[4], "@") {
+				t.Fatalf("default bootstrap retained a dependency pin: %v", args)
+			}
+		}
+	}
+	if installs != len(profile.Libraries)+1 {
+		t.Fatalf("planned %d installs; missing required core/library", installs)
+	}
+	if _, err := BootstrapToolchain(context.Background(), ToolchainBootstrapOptions{
+		Profile: profile, InstallDir: t.TempDir(), DryRun: true, Locked: true,
+	}, io.Discard); err == nil {
+		t.Fatal("explicit locked replay accepted missing versions")
 	}
 }
 

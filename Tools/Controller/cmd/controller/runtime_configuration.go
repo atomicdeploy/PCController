@@ -297,6 +297,7 @@ func commandOptions(store *appconfig.Store, fallbackProject string) control.Comm
 		AvrdudeBackend:        config.Programming.AvrdudeBackend, AvrdudeAdapter: config.Programming.AvrdudeAdapter,
 		Programmer: configuredProgrammer(config),
 		HostConfig: store.Current,
+		StripOrder: store.StripOrder,
 		BuzzerRuntime: func(settings native.Settings, haveBoard bool) appconfig.BuzzerRuntimeStatus {
 			state := store.BuzzerRuntimeState()
 			var backend, executable, backendError string
@@ -631,8 +632,9 @@ func firstDeviceName(values ...string) string {
 }
 
 type presentationOverrides struct {
-	AppName string
-	Tagline string
+	AppName   string
+	Tagline   string
+	IntroMode string
 }
 
 func extractGlobalArguments(args []string) ([]string, string, presentationOverrides, error) {
@@ -673,7 +675,12 @@ func extractGlobalArguments(args []string) ([]string, string, presentationOverri
 			if value == "" {
 				return nil, "", presentationOverrides{}, fmt.Errorf("--%s requires a non-empty value", name)
 			}
-			if name == "app-name" {
+			if name == "intro" {
+				if err := appconfig.ValidateIntroMode(value); err != nil {
+					return nil, "", presentationOverrides{}, err
+				}
+				overrides.IntroMode = value
+			} else if name == "app-name" {
 				overrides.AppName = value
 			} else {
 				overrides.Tagline = value
@@ -686,7 +693,7 @@ func extractGlobalArguments(args []string) ([]string, string, presentationOverri
 }
 
 func globalPresentationFlag(argument string) (name, value string, recognized bool) {
-	for _, candidate := range []string{"app-name", "tagline", "app-tagline"} {
+	for _, candidate := range []string{"app-name", "tagline", "app-tagline", "intro"} {
 		flagName := "--" + candidate
 		if argument == flagName {
 			if candidate == "app-tagline" {

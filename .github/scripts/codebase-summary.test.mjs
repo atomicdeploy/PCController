@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
+import { distributionSuffix } from "./artifact-downloads.mjs";
 
 import {
   TARGETS,
@@ -43,7 +44,7 @@ const writePackage = (
   target,
   { sidecar = "valid", version = "1.2.3-alpha.1" } = {},
 ) => {
-  const archiveName = `${prefix}-${version}-${target}.tar.gz`;
+  const archiveName = `${prefix}-${version}-${target}${distributionSuffix(target)}`;
   const archivePath = resolve(directory, archiveName);
   const content = Buffer.from(`native package for ${target}\n`, "utf8");
   const sha256 = createHash("sha256").update(content).digest("hex");
@@ -116,6 +117,19 @@ test("run data parser accepts gh api documents and paginated --slurp output", ()
   );
   assert.deepEqual(parsed.jobs.map(({ id }) => id), [1, 2]);
   assert.deepEqual(parsed.artifacts.map(({ id }) => id), [3, 4]);
+});
+
+test("raw package summaries link the archive and separate checksum without a ZIP wrapper", () => {
+  const jobs = { jobs: TARGETS.map((target, index) => job(index + 1, "🖥️ Host", target.id)) };
+  const artifacts = TARGETS.flatMap((target, index) => {
+    const archive = artifact(index + 301, "PCController-Host-1.2.3", `${target.id}.tar.gz`);
+    return [archive, { ...archive, id: index + 401, name: `${archive.name}.sha256` }];
+  });
+  const summary = renderCodebaseSummary("host", jobs, { artifacts }, context);
+  assert.match(summary, /5\/5 targets passed · 5\/5 artifacts available/u);
+  assert.match(summary, /\[⬇️ Download \.tar\.gz\]\([^\n]+\/artifacts\/301\)/u);
+  assert.match(summary, /\[🔐 SHA-256\]\([^\n]+\/artifacts\/401\)/u);
+  assert.doesNotMatch(summary, /\[⬇️ Download ZIP\]/u);
 });
 
 test("Host summary prints shared gates once and keeps every incomplete target visible", () => {

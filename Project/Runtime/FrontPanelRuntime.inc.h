@@ -1369,9 +1369,15 @@ void serviceDisplay(uint32_t at) {
                          ? TextOn
                          : TextOff));
       return;
-    case MODE_MOTION_CONTROL:
-      display.showInteger(relays.activeRelayMask());
+    case MODE_MOTION_CONTROL: {
+      char keys[4];
+      if (formatMotionKeyLabels(relays.activeRelayMask(), keys)) {
+        display.showText(keys);
+      } else {
+        display.showText(commonText(TextKey));
+      }
       return;
+    }
     default:
       break;
   }

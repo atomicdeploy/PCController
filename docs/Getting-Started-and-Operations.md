@@ -21,6 +21,117 @@ tests live, and which per-user files must never enter Git.
 
 ## 1. Prerequisites
 
+### Pixel color order
+
+Use **Control → WS2811 strip → Pixel color order** in the TUI (Left/Right,
+or Enter for the next order), or the **Per-pixel light & effect engine** selector
+in the WebUI workbench. Both use the same host setting and common-first catalog:
+GRB, RGB, BRG, BGR, RBG, GBR. The CLI equivalents are `strip order` to inspect
+and `strip order GRB` to save. Changes apply to subsequent pixel/fill commands
+and complete host-streamed frames; saving alone does not actuate any output.
+
+`ui.strip_color_order` persists the desired LED-wire order in the active host
+configuration. BRG remains the default, preserving existing production colors.
+Conversion is performed once at the primary host's native output boundary;
+effect RGB data stays logical RGB. This needs no new firmware or EEPROM write.
+It does not alter the separate status RGB LED or firmware-autonomous output.
+
+For custom firmware, `ui.strip_firmware_order` must match its compiled encoder:
+BRG for the production WS2811 build, GRB for `PCCONTROLLER_USE_WS2812B=1`.
+This advanced baseline is not the desired LED order: the host compensates for
+it when preparing protocol RGB triples. It cannot be auto-detected from the
+current firmware HELLO. A different controller host must have its own matching
+configuration; this is a host preference, not a board EEPROM setting.
+
+### Host configuration and startup introduction
+
+`controller config path` prints the active configuration file. Selection order
+is `--config FILE`, then `PCCONTROLLER_CONFIG`, then the platform default:
+Windows `%APPDATA%\PCController\config.json`, Linux
+`$XDG_CONFIG_HOME/PCController/config.json` (normally `~/.config/PCController/config.json`),
+or macOS `~/Library/Application Support/PCController/config.json`. A Windows
+service uses the explicit file recorded by its installation, which can differ
+from the signed-in user's default. Host settings are separate from board EEPROM.
+
+The first-run marker is `ui.setup_complete`. Successful setup, or explicit
+continuation after its bounded readiness warning, stores `true`. `ui.intro_mode`
+controls the interactive introduction: `auto` (default) shows it until that
+marker is set; `always` shows it on each launch; `skip` suppresses it. Every
+visible TUI launch still paints a static loading frame immediately on entry to
+the application, before `.env` or configuration-file access. Loading and
+interactive readiness use the same renderer and alternate screen; phase changes
+replace that frame in place. Once loaded, `skip`/completed `auto` goes straight
+to the normal TUI. Redirected output and explicitly disabled (`web --no-tui`)
+terminal hosts do not receive a splash. The earliest frame uses packaged or
+process/flag branding; saved configuration branding replaces it once loaded.
+
+Startup stages are real work, not a percentage animation: configuration and
+secret resolution, local-host ownership, serial-device enumeration (local TUI),
+history/runtime loading, IPC/Web and configured host integrations, desktop/tray
+setup, then terminal controls. History currently scans the event timeline,
+loads up to 32 MiB of measurement history, and waits for measurement compaction
+before proceeding. Attached TUIs also fetch the host snapshot/commands
+(8-second context), navigation cursor when enabled (3 seconds), and host
+preferences (4 seconds). These are timeout ceilings, not mandatory delays.
+Normal local USB/HELLO connection runs asynchronously after TUI initialization;
+the optional introduction separately waits for board readiness and welcome
+audio, with a 30-second readiness deadline. OS executable loading and Go package
+initialization happen before `main`, so the application cannot paint during that
+earlier interval. No particular machine's slowest stage is implied without
+profiling it.
+
+The interactive welcome animates a full-color spectrum inside that same branded
+card. Once the board has authenticated, supplied STATUS and finished its boot
+cue, the primary TUI streams a rolling rainbow and a short original ten-note
+fanfare through the existing output scheduler. The standard sequence lasts
+about 3.2 seconds; transport delays can stretch it, with an eight-second playback
+deadline. The rainbow fades in/out, peaks at 28% channel intensity, uses the
+current host pixel-order preference and the firmware's 100-pixel stream limit.
+Frames are ACK-paced rather than queued to catch up on a slow serial link.
+
+**Esc skips immediately**, including while waiting for a board. Silent mode
+suppresses notes; unknown settings are not permission to sound. Missing strip
+capability permits audio-only playback. Busy outputs, running programs, HOT,
+programming, E-STOP or an unknown buzzer-busy capability skip hardware playback.
+A manual melody/strip replacement cancels the welcome without clearing the new
+owner's frame; reconnects fence cleanup from a different board generation.
+The sequence does not change relay/PWM outputs, RF assignments, settings or
+EEPROM, and does not clear retained macro recordings to obtain strip memory.
+Attached/remote TUIs do not replay it.
+
+New configurations select `ui.welcome_melody: "welcome"`. Existing `notify` or
+custom selections are preserved; select `welcome` to use the new fanfare. The
+usual `auto`/`always`/`skip` introduction preference still controls playback;
+it is not an unconditional effect on every application launch. The immediate
+pre-TUI frame remains static until terminal initialization; physical light/sound
+cannot start before the board connection and safety checks complete.
+
+```console
+controller config intro
+controller config intro reset
+controller config intro auto
+controller config intro always
+controller config intro skip
+controller --intro always tui
+controller --intro skip web
+controller config open file
+controller config open config
+```
+
+`intro reset` clears only the first-run marker, preserving the selected mode and
+all other settings. Select `auto` as well if the mode was `skip`. The global
+`--intro auto|always|skip` flag applies only to the current process and does not
+overwrite the saved preference. `config open file` opens the active file in a
+text editor; `config open config` opens its containing folder. `config path data`
+and `config open data` locate the separate host data directory.
+
+The Web UI's **Application preferences → Appearance → Startup introduction**
+has the same mode selector, contextual reset action, actual configuration path,
+and **Open configuration on host / Open folder on host** actions. These open on
+the controller's desktop, not the browser device; headless hosts may have no
+desktop session. Changing these preferences applies to the next launch. Existing
+setup readiness and hardware authorization checks remain unchanged.
+
 For a complete local validation environment, install:
 
 - Go and Node.js versions accepted by the checked-in module/package metadata;

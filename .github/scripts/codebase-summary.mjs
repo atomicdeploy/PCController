@@ -13,6 +13,7 @@ import {
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadProjectEnv } from "../../Tools/Build/env.mjs";
+import { findDistributionArtifact, distributionDownloadLabel, findDistributionChecksum, distributionSuffix, distributionArchivePattern } from "./artifact-downloads.mjs";
 
 loadProjectEnv();
 
@@ -71,8 +72,6 @@ const titleCase = (value) =>
     .replace(/\b\w/gu, (character) => character.toUpperCase());
 const markdownLink = (label, url) =>
   url ? `[${escapeTable(label)}](${url})` : escapeTable(label);
-const escapeRegExp = (value) =>
-  String(value).replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 
 const formatBytes = (value) => {
   const size = Number(value || 0);
@@ -212,17 +211,14 @@ export function inspectPackageDirectory(codebase, packagesDirectory) {
 
   return Object.fromEntries(
     TARGETS.map((target) => {
-      const expectedName = `${definition.artifactPrefix}-<version>-${target.id}.tar.gz`;
+      const expectedName = `${definition.artifactPrefix}-<version>-${target.id}${distributionSuffix(target.id)}`;
       if (!files) {
         return [
           target.id,
           packageFailure("Packages directory unavailable", "warning", { expectedName }),
         ];
       }
-      const pattern = new RegExp(
-        `^${escapeRegExp(definition.artifactPrefix)}-(.+)-${escapeRegExp(target.id)}\\.tar\\.gz$`,
-        "iu",
-      );
+      const pattern = distributionArchivePattern(definition.artifactPrefix, target.id);
       const matches = files
         .filter((path) => pattern.test(basename(path)))
         .toSorted((left, right) => left.localeCompare(right, "en"));
@@ -276,10 +272,7 @@ const findJob = (jobs, definition, target) =>
   );
 
 const findArtifact = (artifacts, definition, target) => {
-  const expected = normalize(`${definition.artifactPrefix}-${target.id}`);
-  return latest(
-    artifacts.filter((artifact) => normalize(artifact.name) === expected),
-  );
+  return findDistributionArtifact(artifacts, `${definition.artifactPrefix}-${target.id}`);
 };
 
 const jobState = (job) => {
@@ -335,14 +328,14 @@ const artifactUrl = (artifact, context) => {
   return artifact.archive_download_url || artifact.url || "";
 };
 
-const renderArtifact = (artifact, state, context, expectedName) => {
+const renderArtifact = (artifact, state, context, expectedName, artifacts) => {
   if (!state.available) {
     return `${state.label}<br>${code(artifact?.name || expectedName)}`;
   }
-  const name = markdownLink(artifact.name, artifactUrl(artifact, context));
-  const digest = String(artifact.digest || "").replace(/^sha256:/iu, "");
-  const integrity = digest ? ` · ${code(`sha256:${digest.slice(0, 12)}…`)}` : "";
-  return `${name}<br>${formatBytes(artifact.size_in_bytes)}${integrity}`;
+  const name = markdownLink(`⬇️ ${distributionDownloadLabel(artifact)}`, artifactUrl(artifact, context));
+  const checksum = findDistributionChecksum(artifacts, artifact);
+  const checksumLink = checksum ? ` · ${markdownLink("🔐 SHA-256", artifactUrl(checksum, context))}` : "";
+  return `${name}${checksumLink}<br>${code(artifact.name)} · ${formatBytes(artifact.size_in_bytes)}`;
 };
 
 const renderPackageCells = (evidence) => {
@@ -447,12 +440,9 @@ export function buildCodebaseSummary(codebase, jobsDocument, artifactsDocument, 
         record.artifactState,
         context,
         `${definition.artifactPrefix}-${record.target.id}`,
+        artifacts,
       );
-      if (!packageMode) {
-        return `| **${record.target.id}** | ${record.target.runner} | ${jobResult} | ${packageResult} |`;
-      }
-      const packageCells = renderPackageCells(record.packageState);
-      return `| **${record.target.id}** | ${record.target.runner} | ${jobResult} | ${packageResult} | ${packageCells.archive} | ${packageCells.size} | ${packageCells.checksum} |`;
+      return `| **${record.target.id}** | ${record.target.runner} | ${jobResult} | ${packageResult} |`;
     })
     .join("\n");
   const validations = definition.sharedValidation.map((item) => `- ${item}`).join("\n");
@@ -465,10 +455,19 @@ export function buildCodebaseSummary(codebase, jobsDocument, artifactsDocument, 
   const packageCount = packageMode
     ? ` · ${verified}/${TARGETS.length} archives verified`
     : "";
-  const packageHeaders = packageMode
-    ? " | Archive | Archive size | Archive SHA-256"
-    : "";
-  const packageSeparators = packageMode ? "|---|---:|---" : "";
+  const packageDetails = packageMode ? `
+<details>
+<summary><strong>🔐 Archive integrity</strong></summary>
+
+| Target | Archive | Archive size | Archive SHA-256 |
+|---|---|---:|---|
+${records.map(record => {
+    const cells = renderPackageCells(record.packageState);
+    return `| ${record.target.id} | ${cells.archive} | ${cells.size} | ${cells.checksum} |`;
+  }).join("\n")}
+
+</details>
+` : "";
   const incompleteTargets = records
     .filter(
       (record) =>
@@ -482,15 +481,20 @@ export function buildCodebaseSummary(codebase, jobsDocument, artifactsDocument, 
 
 ${passed}/${TARGETS.length} targets passed · ${available}/${TARGETS.length} artifacts available${packageCount} · [workflow run](${context.runUrl})
 ${warning}
+## ⬇️ Downloads by platform
+
+Sign in to GitHub, download the package and its SHA-256 sidecar, verify, then extract once.
+Older runs labeled ZIP still contain a nested archive.
+
+| Target | Native runner | Build | Download |
+|---|---|---|---|
+${rows}
+
+${packageDetails}
+
 ## 🧪 Validation on successful targets
 
 ${validations}
-
-## 🌐 Platform differences
-
-| Target | Native runner | Build | Actions artifact${packageHeaders} |
-|---|---|---|---${packageSeparators}|
-${rows}
 
 ---
 

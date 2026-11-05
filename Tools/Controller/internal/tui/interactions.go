@@ -803,12 +803,18 @@ func (model Model) adjustSelection(delta int) (Model, tea.Cmd, bool) {
 	case PageOutputs:
 		if row, ok := model.selectedOutputRow(); ok && row.Adjust != "" {
 			switch row.Adjust {
+			case "strip-order":
+				direction := "next"
+				if delta < 0 {
+					direction = "previous"
+				}
+				return model.dispatchLine("strip order " + direction)
 			case "strip-count":
 				pixels, _ := model.stripConfiguration()
 				model.stripPixels = wrapInt(pixels-1, delta, native.StripMaximumPixels) + 1
 			case "strip-fps":
 				_, fps := model.stripConfiguration()
-				model.stripFPS = wrapInt(fps-1, delta, 30) + 1
+				model.stripFPS = wrapInt(fps-1, delta, appconfig.StripMaximumFPS) + 1
 			case "strip-color":
 				model.stripColor = wrapInt(model.stripColorIndex(), delta, len(stripColorPresets))
 			}
@@ -2004,13 +2010,13 @@ func (model Model) handleContentClick(row, x int) (tea.Model, tea.Cmd) {
 	case PageOutputs:
 		tableWidth := model.presentationTableWidth(118)
 		columns := outputTableColumns(tableWidth)
-		rows := model.controlTableRows(model.snapshot(), max(8, columns[1].Width-7))
+		rows := model.controlTableRows(model.snapshot(), controlLevelWidth(columns[1].Width))
 		index, ok := controlTableLogicalAt(rows, tableBodyRows(model.contentHeight()), model.cursor, row-3)
 		if ok {
 			model.cursor = index
 			if selected := rows[index]; selected.Kind == "pwm" {
 				tableStart := max(0, (model.width-tableWidth)/2)
-				levelWidth := max(8, columns[1].Width-7)
+				levelWidth := controlLevelWidth(columns[1].Width)
 				sliderStart := tableStart + 1 + columns[0].Width + 1
 				if x < sliderStart-1 || x > sliderStart+levelWidth {
 					return model, nil
@@ -2123,7 +2129,7 @@ func (model Model) setOutputPWMFromX(index, x int) (tea.Model, tea.Cmd) {
 	tableWidth := model.presentationTableWidth(118)
 	columns := outputTableColumns(tableWidth)
 	tableStart := max(0, (model.width-tableWidth)/2)
-	levelWidth := max(8, columns[1].Width-7)
+	levelWidth := controlLevelWidth(columns[1].Width)
 	sliderStart := tableStart + 1 + columns[0].Width + 1
 	percent := (x - sliderStart) * 100 / max(1, levelWidth-1)
 	percent = min(100, max(0, percent))

@@ -113,6 +113,13 @@ export default defineConfig(() => {
     }
   },
   test: {
+    // Preserve native-platform test coverage and annotations, but publish one
+    // merged report from the reusable Host workflow instead of one per runner.
+    reporters: process.env.PCCONTROLLER_VITEST_BLOB ? [
+      'default',
+      ['github-actions', { jobSummary: { enabled: false } }],
+      ['blob', { outputFile: process.env.PCCONTROLLER_VITEST_BLOB }],
+    ] : undefined,
     // Keep the heavy SSR import graph isolated without starting enough concurrent
     // workers to make Windows thread teardown miss Vitest's diagnostic deadline.
     pool: 'threads',

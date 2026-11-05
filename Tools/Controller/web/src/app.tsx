@@ -168,8 +168,8 @@ export function pageViewFor(page: PageID): LazyExoticComponent<ComponentType<any
   return navigation.find((item) => item.id === page)?.view ?? DashboardPage
 }
 
-export function shouldOpenSetup(config: Pick<UIConfig, 'setup_complete'> | null, demo = false): boolean {
-  return demo || (config !== null && !config.setup_complete)
+export function shouldOpenSetup(config: Pick<UIConfig, 'setup_complete' | 'intro_mode'> | null, demo = false): boolean {
+  return demo || (config !== null && (config.intro_mode === 'always' || (config.intro_mode !== 'skip' && !config.setup_complete)))
 }
 
 const defaultAppearance: Appearance = {
@@ -1905,6 +1905,7 @@ export default function App() {
     </div>
     <AppPreferencesDialog
       open={appPreferencesOpen}
+	  hostSettingsEnabled={!demo && uiConfig !== null}
       locale={appearance.locale}
       appearance={appearance}
       quickHeader={quickHeader}

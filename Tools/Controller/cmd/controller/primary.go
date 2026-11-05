@@ -506,6 +506,8 @@ func startPrimaryIPCAtWithIdentity(
 		server.localDevice = startLocalDeviceHost(ctx, sharedClient, store)
 		service.LocalDevice = server.localDevice
 		service.HostConfig = store.CurrentRuntime
+		service.ConfigFile = store.Path()
+		service.OpenConfig = func(target string) error { return hostui.OpenConfiguration(store.Path(), target) }
 		service.PersistentHostConfig = store.Persistent
 		service.SubscribeHostConfig = store.SubscribeRuntime
 		service.BuzzerRuntimeStatus = func() appconfig.BuzzerRuntimeStatus {

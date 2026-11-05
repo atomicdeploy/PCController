@@ -346,7 +346,7 @@ func programStateSummary(state control.ProgramStateSnapshot) string {
 func (model Model) outputsPage(snapshot control.Snapshot) string {
 	tableWidth := model.presentationTableWidth(118)
 	columns := outputTableColumns(tableWidth)
-	rows := model.controlTableRows(snapshot, max(8, columns[1].Width-7))
+	rows := model.controlTableRows(snapshot, controlLevelWidth(columns[1].Width))
 	tableView := renderControlTable(tableWidth, tableBodyRows(model.contentHeight()), model.cursor, columns, rows, model.uiValue.ControlValueColors)
 	detail := "↑/↓ select · ←/→ adjust · Home/End limits · Enter activate · F2 rename"
 	if snapshot.Connected && snapshot.Hello.Capabilities&native.CapabilityAddressableLED != 0 {
@@ -436,8 +436,9 @@ func (model Model) controlTableRows(snapshot control.Snapshot, levelWidth int) [
 		target := uint16(targetBrightness)*16 + uint16(targetBrightness)/16
 		rows = append(rows, controlTableRow{
 			Group: "LIGHTING", Name: "CH 12 · Enclosure illumination · manual override",
-			Value: sliderPercentPlain(percent, levelWidth) + fmt.Sprintf(" %3d%% · applied %d/4095 · policy %d/4095", percent, value, target), Tone: controlToneLevel,
-			Kind: "pwm", Index: 11, PeripheralKey: "pwm.11",
+			Value: sliderPercentPlain(percent, levelWidth) + fmt.Sprintf(" %3d%%", percent), Tone: controlToneLevel,
+			Detail: fmt.Sprintf("applied %d/4095 · policy %d/4095", value, target),
+			Kind:   "pwm", Index: 11, PeripheralKey: "pwm.11",
 		})
 		rows = append(rows, controlTableRow{Name: "All user PWM", Value: "Set 0%", Tone: controlToneAction, Action: "pwm off", Kind: "pwm-all"})
 	}
@@ -457,6 +458,7 @@ func (model Model) controlTableRows(snapshot control.Snapshot, levelWidth int) [
 		}
 		rows = append(rows,
 			mutation(controlTableRow{Group: "WS2811 STRIP", Name: "Pixel count", Value: fmt.Sprintf("%d · ←/→ adjust · Enter configure", pixels), Tone: controlToneLevel, Action: fmt.Sprintf("strip config %d", pixels), Adjust: "strip-count", Kind: "strip"}),
+			controlTableRow{Name: "Pixel color order", Value: appconfig.EffectiveStripOrder(model.uiValue.StripColorOrder) + " · ←/→ change", Tone: controlToneLevel, Action: "strip order next", Adjust: "strip-order", Kind: "strip"},
 			mutation(controlTableRow{Name: "Rainbow", Value: fmt.Sprintf("%d px @ %d FPS · Enter start", pixels, fps), Tone: controlToneAction, Action: fmt.Sprintf("strip rainbow %d %d", pixels, fps), Adjust: "strip-fps", Kind: "strip"}),
 			mutation(controlTableRow{Name: "Fill color", Value: fmt.Sprintf("#%02X%02X%02X · ←/→ color · Enter apply", color[0], color[1], color[2]), Tone: controlToneLevel, Action: fmt.Sprintf("strip fill %d %d %d", color[0], color[1], color[2]), Adjust: "strip-color", Kind: "strip"}),
 		)
@@ -482,7 +484,7 @@ func (model Model) stripConfiguration() (int, int) {
 	if pixels < 1 || pixels > native.StripMaximumPixels {
 		pixels = native.StripMaximumPixels
 	}
-	if fps < 1 || fps > 30 {
+	if fps < 1 || fps > appconfig.StripMaximumFPS {
 		fps = 30
 	}
 	return pixels, fps
@@ -959,49 +961,15 @@ func (model Model) consolePage() string {
 }
 
 func (model Model) welcomeView() string {
-	frames := []string{"◇", "◈", "◆", "◈"}
-	icon := frames[(model.welcomeFrame/2)%len(frames)]
-	progress := 2
-	phase := strings.ToLower(model.welcomePhase)
-	switch {
-	case strings.Contains(phase, "hello"):
-		progress = 5
-	case strings.Contains(phase, "ready/status"):
-		progress = 8
-	case strings.Contains(phase, "board welcome"), strings.Contains(phase, "buzzer"):
-		progress = 12
-	case strings.Contains(phase, "host welcome"), strings.Contains(phase, "scheduler"):
-		progress = 16
-	case strings.Contains(phase, "complete"), strings.Contains(phase, "ready"):
-		progress = 20
-	}
-	bar := strings.Repeat("━", progress) + strings.Repeat("─", 20-progress)
 	status := model.welcomePhase
 	if status == "" {
 		status = "Waiting for controller"
 	}
-	action := ""
+	action := "Esc  Skip welcome"
 	if model.welcomeCanContinue {
-		action = buttonStyle.Render("Enter / click to continue with the warning")
+		action = "Enter / click to continue with the warning"
 	}
-	errorLine := ""
-	if model.welcomeError != "" {
-		errorLine = errorStyle.Render(model.welcomeError)
-	}
-	body := lipgloss.JoinVertical(
-		lipgloss.Center,
-		titleStyle.Copy().Bold(true).Render(icon+"  "+model.prefs.AppTitle+"  "+icon),
-		"",
-		valueStyle.Render(model.prefs.Tagline),
-		labelStyle.Render("Native opcodes · Urboot/Urclock · RF · motion · PWM · telemetry"),
-		"",
-		lipgloss.NewStyle().Foreground(colorAccent2).Render(bar),
-		valueStyle.Render(status),
-		errorLine,
-		"",
-		action,
-	)
-	return lipgloss.Place(model.width, model.height, lipgloss.Center, lipgloss.Center, cardStyle.Copy().Padding(2, 5).Render(body))
+	return WelcomeFrame(model.prefs.AppTitle, status, model.width, model.welcomeFrame, model.prefs.Tagline, model.welcomeError, action)
 }
 
 func (model Model) contentHeight() int {
@@ -1237,6 +1205,12 @@ func outputTableColumns(width int) []dataColumn {
 		{Title: "CONTROL", Width: name, Align: lipgloss.Left},
 		{Title: "STATUS", Width: value, Align: lipgloss.Left},
 	}
+}
+
+// Reserve two brackets and five cells for the fixed-width " 100%" suffix.
+// Rendering and pointer hit-testing must use the same bar width after resize.
+func controlLevelWidth(valueWidth int) int {
+	return max(0, valueWidth-7)
 }
 
 func settingsTableColumns(width int) []dataColumn {
