@@ -30,13 +30,21 @@ artifacts.
 
 ## Artifact catalog
 
-Actions publishes one friendly artifact for each deliverable/target:
+Actions publishes one directly downloadable archive for each deliverable/target,
+plus a separate `.tar.gz.sha256` checksum artifact:
 
 | Deliverable | Artifact name | Contents |
 |---|---|---|
-| AVR firmware | `PCController-Firmware-ATmega328P` | Application HEX, full-flash recovery HEX, validated 1 KiB safe-default EEPROM, manifests, dependency inventory, archive, checksum |
-| Native host | `PCController-Host-<platform>` | Versioned package with native executable/library, the exact same-run firmware/EEPROM defaults, metadata, notices, and checksum |
-| Virtual Board | `PCController-VirtualBoard-<platform>` | Versioned simulator package, metadata, notices, and checksum |
+| AVR firmware | `PCController-Firmware-<version>-AVR-ATmega328P.tar.gz` | Application HEX, full-flash recovery HEX, validated 1 KiB safe-default EEPROM, manifests, dependency inventory |
+| Native host | `PCController-Host-<version>-<platform>.tar.gz` | Native executable/library, the exact same-run firmware/EEPROM defaults, metadata, notices |
+| Virtual Board | `PCController-VirtualBoard-<version>-<platform>.tar.gz` | Native simulator, metadata, notices |
+
+The pinned upload action uses `archive: false`: GitHub stores each file as-is
+instead of wrapping an existing archive in another ZIP. The artifact name is
+the uploaded filename. Keeping tar preserves executable permissions on Linux
+and macOS; one extraction produces the usable package. Internal test reports
+and loose-file evidence may still use ordinary ZIP artifacts, without a nested
+distribution archive.
 
 Supported host labels are Linux x64, Linux ARM64, Windows x64, macOS Intel,
 and macOS Apple Silicon. Release archives add the selected version to their
@@ -44,7 +52,8 @@ product-named root directory.
 
 The firmware job publishes its artifact name as a reusable-workflow output.
 Every host target first cleans generated output, then downloads that exact
-artifact, verifies the application and complete EEPROM ranges/hashes, embeds
+archive and checksum, verifies the archive before unpacking firmware evidence,
+verifies the application and complete EEPROM ranges/hashes, embeds
 them, and requires both independent enabled flags in `host-manifest.json`.
 This ordering prevents host cleanup from silently deleting the firmware input.
 
@@ -58,13 +67,17 @@ maintainer explicitly removes them.
 1. Open the current [Build workflow](https://github.com/atomicdeploy/PCController/actions/workflows/build.yml).
 2. Select a successful run for the exact commit you want.
 3. In the run's **Summary → Download packages** table, click
-   **⬇️ Download ZIP** at **Windows x64 / Host application** for Windows, or
+   **⬇️ Download .tar.gz** at **Windows x64 / Host application** for Windows, or
    **AVR ATmega328P / Firmware** for the board images. Other platform cells work
    the same way. These are direct links to artifacts from that exact run, not
    links back to the workflow list. GitHub requires you to sign in to download.
-4. Extract the downloaded ZIP. Keep the versioned archive beside its `.sha256`
-   sidecar. The firmware ZIP also exposes the individual HEX/EEPROM files.
-5. Verify before extracting.
+4. Download the adjacent **🔐 SHA-256** sidecar into the same folder.
+5. Verify, then extract the `.tar.gz` once using the commands below. Firmware
+   HEX/EEPROM files are inside the extracted firmware package.
+
+Previously published artifacts keep their old layout: links labeled
+**Download ZIP** require extracting that outer ZIP first. New workflow source
+does not retroactively change files uploaded by an older run.
 
 The catalog runs even when another target fails, retaining available links and
 marking missing packages without claiming the build passed. For older runs with

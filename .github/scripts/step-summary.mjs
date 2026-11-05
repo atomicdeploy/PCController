@@ -14,6 +14,7 @@ import { loadProjectEnv } from "../../Tools/Build/env.mjs";
 import { PRODUCT_METADATA } from "../../Tools/Build/product-metadata.mjs";
 import { repositoryWebUrl, resolveRepository } from "./repository-context.mjs";
 import { TARGETS } from "./codebase-summary.mjs";
+import { findDistributionArtifact, distributionDownloadLabel, findDistributionChecksum } from "./artifact-downloads.mjs";
 
 loadProjectEnv();
 
@@ -77,13 +78,13 @@ const artifactCta = (url, label) =>
 >
 > Sign in to GitHub to download. Available for ${retention}.`
     : `> **${escape(label)}** — upload metadata is unavailable outside GitHub Actions.`;
-const downloadLink = (url, label = "Download ZIP") => url
+const downloadLink = (url, label = "Download .tar.gz") => url
   ? `[⬇️ ${escape(label)}](${url})`
   : "⚠️ Download unavailable";
 const integrityTable = (archive, digest) => `| Checksum | SHA-256 |
 |---|---|
 | Package archive | ${code(archive.sha256)} |
-| Actions artifact ZIP | ${digest ? code(digest) : "—"} |`;
+| Actions artifact | ${digest ? code(digest) : "—"} |`;
 const emit = (markdown) => {
   const text = `${markdown.trim()}\n`;
   if (process.env.GITHUB_STEP_SUMMARY) {
@@ -131,6 +132,7 @@ if (kind === "firmware") {
     artifactDigest = "",
     dependenciesPath = "Tools/Controller/toolchain-lock.json",
     packageRootPath = ".build/firmware",
+    checksumUrl = "",
   ] = arguments_;
   const manifest = readJson(manifestPath);
   const archive = archiveDetails(archivePath);
@@ -189,6 +191,7 @@ ${artifactCta(artifactUrl, `${productName} Firmware · ATmega328P`)}
 | Source | [${code(shortCommit)}](${commitUrl}) · ${number(manifest.source?.files)} files · ${code(manifest.source?.sha256)} |
 | Workflow | [${escape(workflowName)}](${runUrl}) |
 | Download | ${downloadLink(artifactUrl, "Firmware · ATmega328P")} |
+| SHA-256 sidecar | ${checksumUrl ? `[🔐 Download checksum](${checksumUrl})` : "⚠️ Download unavailable"} |
 | Package | ${code(archive.name)} · ${bytes(archive.bytes)} |
 
 ${flashNotice}
@@ -411,13 +414,24 @@ ${verificationBlock(target, archive.name)}
   const uploadedArtifacts = artifactIndex.artifacts || [];
   const availableUrl = (artifact) => artifact?.id && !artifact.expired
     ? `${runUrl}/artifacts/${artifact.id}` : "";
-  const downloadFor = (name) => downloadLink(availableUrl(uploadedArtifacts.find(item => item.name === name)));
+  const downloadFor = (name) => {
+    const artifact = findDistributionArtifact(uploadedArtifacts, name);
+    const checksum = findDistributionChecksum(uploadedArtifacts, artifact);
+    return downloadLink(availableUrl(artifact), distributionDownloadLabel(artifact)) +
+      (checksum && availableUrl(artifact) ? ` · [🔐 SHA-256](${availableUrl(checksum)})` : "");
+  };
   const expectedArtifacts = ["PCController-Firmware-ATmega328P", ...TARGETS.flatMap(({id}) =>
     [`PCController-Host-${id}`, `PCController-VirtualBoard-${id}`])];
-  const missingArtifacts = expectedArtifacts.filter(name => !availableUrl(uploadedArtifacts.find(item => item.name === name)));
+  const missingArtifacts = expectedArtifacts.filter(name => {
+    const artifact = findDistributionArtifact(uploadedArtifacts, name);
+    return !availableUrl(artifact) || (artifact.name.endsWith(".tar.gz") &&
+      !availableUrl(findDistributionChecksum(uploadedArtifacts, artifact)));
+  });
   const complete = missingArtifacts.length === 0 && files.length === expectedArtifacts.length;
   const artifactForPackage = (path) => {
     const fileName = basename(path);
+    const raw = uploadedArtifacts.find(item => item.name === fileName);
+    if (raw) return raw;
     if (/PCController-Firmware-/u.test(fileName)) {
       return uploadedArtifacts.find(
         (item) => item.name === "PCController-Firmware-ATmega328P",
@@ -437,7 +451,7 @@ ${verificationBlock(target, archive.name)}
   const rows = files
     .map((path) => {
       const uploaded = artifactForPackage(path);
-      return `| ${code(basename(path))} | ${downloadLink(availableUrl(uploaded))} | ${bytes(statSync(path).size)} | ${code(hashFile(path))} |`;
+      return `| ${code(basename(path))} | ${downloadLink(availableUrl(uploaded), distributionDownloadLabel(uploaded))} | ${bytes(statSync(path).size)} | ${code(hashFile(path))} |`;
     })
     .join("\n");
   const firmwareManifest = firmwareManifestPath
@@ -462,9 +476,9 @@ ${complete ? "" : "\n> [!WARNING]\n> Some packages were not produced or are unav
 
 ## ⬇️ Download packages
 
-Sign in to GitHub, choose a download below, then extract the downloaded ZIP.
-Host packages contain a versioned archive and checksum; firmware also includes
-the individual HEX/EEPROM files. Keep the checksum beside its archive.
+Sign in to GitHub and download a package plus its SHA-256 sidecar below.
+Verify the checksum, then extract the package once. Firmware HEX/EEPROM files
+are inside the firmware package. Older ZIP-labeled runs retain their original layout.
 
 | Platform / board | 🖥️ Host application | 🧪 Virtual Board | ⚡ Firmware |
 |---|---|---|---|

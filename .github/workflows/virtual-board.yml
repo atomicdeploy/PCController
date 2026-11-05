@@ -110,13 +110,18 @@ jobs:
         id: upload
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: PCController-VirtualBoard-${{ matrix.target }}
-          path: |
-            ${{ steps.package.outputs.archive }}
-            ${{ steps.package.outputs.checksum }}
+          path: ${{ steps.package.outputs.archive }}
+          archive: false
           if-no-files-found: error
           retention-days: ${{ github.event_name == 'pull_request' && 14 || 90 }}
-          compression-level: 0
+
+      - name: "🔐 Upload Virtual Board checksum"
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          path: ${{ steps.package.outputs.checksum }}
+          archive: false
+          if-no-files-found: error
+          retention-days: ${{ github.event_name == 'pull_request' && 14 || 90 }}
 
   summary:
     name: "📋 Virtual Board · Codebase summary"

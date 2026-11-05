@@ -13,6 +13,7 @@ import {
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadProjectEnv } from "../../Tools/Build/env.mjs";
+import { findDistributionArtifact, distributionDownloadLabel, findDistributionChecksum } from "./artifact-downloads.mjs";
 
 loadProjectEnv();
 
@@ -276,10 +277,7 @@ const findJob = (jobs, definition, target) =>
   );
 
 const findArtifact = (artifacts, definition, target) => {
-  const expected = normalize(`${definition.artifactPrefix}-${target.id}`);
-  return latest(
-    artifacts.filter((artifact) => normalize(artifact.name) === expected),
-  );
+  return findDistributionArtifact(artifacts, `${definition.artifactPrefix}-${target.id}`);
 };
 
 const jobState = (job) => {
@@ -335,12 +333,14 @@ const artifactUrl = (artifact, context) => {
   return artifact.archive_download_url || artifact.url || "";
 };
 
-const renderArtifact = (artifact, state, context, expectedName) => {
+const renderArtifact = (artifact, state, context, expectedName, artifacts) => {
   if (!state.available) {
     return `${state.label}<br>${code(artifact?.name || expectedName)}`;
   }
-  const name = markdownLink("⬇️ Download ZIP", artifactUrl(artifact, context));
-  return `${name}<br>${code(artifact.name)} · ${formatBytes(artifact.size_in_bytes)}`;
+  const name = markdownLink(`⬇️ ${distributionDownloadLabel(artifact)}`, artifactUrl(artifact, context));
+  const checksum = findDistributionChecksum(artifacts, artifact);
+  const checksumLink = checksum ? ` · ${markdownLink("🔐 SHA-256", artifactUrl(checksum, context))}` : "";
+  return `${name}${checksumLink}<br>${code(artifact.name)} · ${formatBytes(artifact.size_in_bytes)}`;
 };
 
 const renderPackageCells = (evidence) => {
@@ -445,6 +445,7 @@ export function buildCodebaseSummary(codebase, jobsDocument, artifactsDocument, 
         record.artifactState,
         context,
         `${definition.artifactPrefix}-${record.target.id}`,
+        artifacts,
       );
       return `| **${record.target.id}** | ${record.target.runner} | ${jobResult} | ${packageResult} |`;
     })
@@ -487,7 +488,8 @@ ${passed}/${TARGETS.length} targets passed · ${available}/${TARGETS.length} art
 ${warning}
 ## ⬇️ Downloads by platform
 
-Sign in to GitHub to download a ZIP, then extract the versioned archive and checksum inside it.
+Sign in to GitHub, download the package and its SHA-256 sidecar, verify, then extract once.
+Older runs labeled ZIP still contain a nested archive.
 
 | Target | Native runner | Build | Download |
 |---|---|---|---|

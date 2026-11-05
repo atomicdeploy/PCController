@@ -153,8 +153,13 @@ jobs:
         if: inputs.firmware_artifact_name != ''
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
-          name: ${{ inputs.firmware_artifact_name }}
-          path: .build/firmware
+          pattern: ${{ inputs.firmware_artifact_name }}*
+          path: .build/firmware-download
+          merge-multiple: true
+
+      - name: "📂 Verify and unpack the firmware defaults"
+        if: inputs.firmware_artifact_name != ''
+        run: node .github/scripts/unpack-firmware-artifact.mjs .build/firmware-download .build/firmware
 
       - name: "🔎 Validate the downloaded firmware and EEPROM pair"
         if: inputs.firmware_artifact_name != ''
@@ -250,13 +255,18 @@ jobs:
         id: upload
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: PCController-Host-${{ matrix.target }}
-          path: |
-            ${{ steps.package.outputs.archive }}
-            ${{ steps.package.outputs.checksum }}
+          path: ${{ steps.package.outputs.archive }}
+          archive: false
           if-no-files-found: error
           retention-days: ${{ github.event_name == 'pull_request' && 14 || 90 }}
-          compression-level: 0
+
+      - name: "🔐 Upload Host checksum"
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          path: ${{ steps.package.outputs.checksum }}
+          archive: false
+          if-no-files-found: error
+          retention-days: ${{ github.event_name == 'pull_request' && 14 || 90 }}
 
   summary:
     name: "📋 Host · Codebase summary"

@@ -82,6 +82,10 @@ jobs:
           test "$package_count" -eq 11
           find build-downloads -type f -name '*.tar.gz' -printf '%f\n' | sort
 
+      - name: "📂 Read available firmware evidence"
+        if: ${{ always() && hashFiles('build-downloads/PCController-Firmware-*.tar.gz') != '' }}
+        run: node .github/scripts/unpack-firmware-artifact.mjs build-downloads build-downloads/firmware
+
       - name: "✨ Publish build summary"
         if: ${{ always() }}
         run: node .github/scripts/step-summary.mjs catalog build-downloads

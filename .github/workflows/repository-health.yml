@@ -62,6 +62,8 @@ jobs:
           node --check .github/scripts/step-summary.mjs
           node Tools/Dependencies/export-lock.mjs validate
           node --test .github/scripts/assert-defaults.test.mjs
+          node --test .github/scripts/artifact-downloads.test.mjs
+          node --test .github/scripts/unpack-firmware-artifact.test.mjs
           node --test .github/scripts/codebase-summary.test.mjs
           node --test .github/scripts/package-directory.test.mjs
           node --test .github/scripts/repository-context.test.mjs

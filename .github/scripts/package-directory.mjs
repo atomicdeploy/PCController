@@ -215,7 +215,7 @@ const packageRootPath = relative(root, packageRoot).replaceAll("\\", "/");
 if (process.env.GITHUB_OUTPUT) {
   appendFileSync(
     process.env.GITHUB_OUTPUT,
-    `archive=${archivePath}\nchecksum=${checksumPath}\nsha256=${sha256}\nbytes=${statSync(archive).size}\npackage-root=${packageRootPath}\n`,
+    `archive=${archivePath}\narchive-name=${basename(archive)}\nchecksum=${checksumPath}\nsha256=${sha256}\nbytes=${statSync(archive).size}\npackage-root=${packageRootPath}\n`,
     "utf8",
   );
 }

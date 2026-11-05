@@ -113,6 +113,7 @@ jobs:
       - name: "📦 Stage release assets and firmware images"
         run: |
           set -euo pipefail
+          node .github/scripts/unpack-firmware-artifact.mjs release-downloads release-downloads/firmware
           mkdir -p release-assets
 
           copy_unique() {

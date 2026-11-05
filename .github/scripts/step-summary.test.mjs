@@ -181,6 +181,26 @@ test("catalog presents AVR separately with live artifact links", () => {
     assert.match(catalog, /\| \*\*AVR ATmega328P\*\* \| — \| — \| \[⬇️ Download ZIP\]\([^\n]+\/artifacts\/42\)/u);
     assert.ok(catalog.indexOf("## ⬇️ Download packages") < catalog.indexOf("## ⚡ AVR"));
     assert.doesNotMatch(catalog, /five (?:hosts|targets)|\| Host \| ✅/iu);
+    const rawArtifacts = [
+      { id: 42, name: "PCController-Firmware-test-AVR-ATmega328P.tar.gz" },
+      ...targets.flatMap((target, index) => [
+        { id: 100 + index, name: `PCController-Host-test-${target}.tar.gz` },
+        { id: 200 + index, name: `PCController-VirtualBoard-test-${target}.tar.gz` },
+      ]),
+    ];
+    writeFileSync(resolve(directory, "artifact-index.json"), JSON.stringify({ artifacts: [
+      ...rawArtifacts,
+      ...rawArtifacts.map(item => ({ id: item.id + 1000, name: `${item.name}.sha256` })),
+    ] }));
+    writeFileSync(resolve(directory, "summary.md"), "");
+    const rawCatalog = runSummary(directory, ["catalog", directory]);
+    assert.match(rawCatalog, /build complete/u);
+    assert.match(rawCatalog, /\| \*\*Windows x64\*\* \| \[⬇️ Download \.tar\.gz\]\([^\n]+\/artifacts\/102\) · \[🔐 SHA-256\]\([^\n]+\/artifacts\/1102\)/u);
+    assert.match(rawCatalog, /\| \*\*AVR ATmega328P\*\* \| — \| — \| \[⬇️ Download \.tar\.gz\]\([^\n]+\/artifacts\/42\)/u);
+    assert.doesNotMatch(rawCatalog, /\[⬇️ Download ZIP\]/u);
+    writeFileSync(resolve(directory, "artifact-index.json"), JSON.stringify({ artifacts: rawArtifacts }));
+    writeFileSync(resolve(directory, "summary.md"), "");
+    assert.match(runSummary(directory, ["catalog", directory], 1), /build incomplete/u);
     writeFileSync(resolve(directory, "artifact-index.json"), JSON.stringify({artifacts: [
       {id: 42, name: "PCController-Firmware-ATmega328P", expired: true},
     ]}));
