@@ -161,6 +161,7 @@ type Shell struct {
 	trackingMouse              bool
 	foregroundRecovery         *foregroundRecovery
 	glassFrame                 *image.RGBA
+	glassCache                 glassCompositionCache
 	hitSurface                 *image.RGBA
 	presentedSurface           *image.RGBA
 	dark                       bool
@@ -2315,13 +2316,7 @@ func (s *Shell) advanceVisualAnimation() bool {
 		return false
 	}
 	now := time.Now()
-	elapsed := now.Sub(s.visualTick)
-	if s.visualTick.IsZero() || elapsed <= 0 {
-		elapsed = 16 * time.Millisecond
-	}
-	if elapsed > 50*time.Millisecond {
-		elapsed = 50 * time.Millisecond
-	}
+	elapsed := visualFrameElapsed(s.visualTick, now)
 	s.visualTick = now
 
 	step := elapsed.Seconds() / 0.14
@@ -2367,9 +2362,7 @@ func (s *Shell) advanceVisualAnimation() bool {
 	}
 	if s.snapshot.PendingCommand != "" {
 		s.visualPhase += elapsed.Seconds() / 1.1
-		for s.visualPhase >= 1 {
-			s.visualPhase--
-		}
+		s.visualPhase -= float64(int64(s.visualPhase))
 		active = true
 	}
 	s.visualPointerDirty = false
