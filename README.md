@@ -350,15 +350,16 @@ commit has passed it.
 
 Until a stable release exists, open [📦 Build runs](https://github.com/atomicdeploy/PCController/actions/workflows/build.yml),
 select the successful run for your desired commit, then use its **⬇️ Download
-packages** table. Every platform cell links directly to that run's `.tar.gz` package.
+packages** table. Every platform cell links directly to that run's package: ZIP
+for Windows, `.tar.gz` for Linux/macOS and firmware.
 Sign in to GitHub to download; these are engineering builds, not stable releases.
 
 | Download | Where to click in the selected run | Artifact |
 |---|---|---|
-| [🪟 Windows host](https://github.com/atomicdeploy/PCController/actions/workflows/build.yml) | **Windows x64 → Host application → ⬇️ Download .tar.gz** | `PCController-Host-<version>-Windows-x64.tar.gz` |
+| [🪟 Windows host](https://github.com/atomicdeploy/PCController/actions/workflows/build.yml) | **Windows x64 → Host application → ⬇️ Download ZIP** | `PCController-Host-<version>-Windows-x64-Portable.zip` |
 | [⚡ AVR firmware](https://github.com/atomicdeploy/PCController/actions/workflows/build.yml) | **AVR ATmega328P → Firmware → ⬇️ Download .tar.gz** | `PCController-Firmware-<version>-AVR-ATmega328P.tar.gz` |
 | [🖥️ Linux / macOS host](https://github.com/atomicdeploy/PCController/actions/workflows/build.yml) | Your platform's **Host application** cell | `PCController-Host-<version>-<platform>.tar.gz` |
-| [🧪 Virtual Board](https://github.com/atomicdeploy/PCController/actions/workflows/build.yml) | Your platform's **Virtual Board** cell | `PCController-VirtualBoard-<version>-<platform>.tar.gz` |
+| [🧪 Virtual Board](https://github.com/atomicdeploy/PCController/actions/workflows/build.yml) | Your platform's **Virtual Board** cell | `PCController-VirtualBoard-<version>-Windows-x64-Portable.zip` (Windows); `.tar.gz` on Linux/macOS |
 
 The links above open the run chooser, not a fixed old build. Failed runs still
 list available downloads and mark missing packages. For older runs without a

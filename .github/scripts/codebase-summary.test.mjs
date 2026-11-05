@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
+import { distributionSuffix } from "./artifact-downloads.mjs";
 
 import {
   TARGETS,
@@ -43,7 +44,7 @@ const writePackage = (
   target,
   { sidecar = "valid", version = "1.2.3-alpha.1" } = {},
 ) => {
-  const archiveName = `${prefix}-${version}-${target}.tar.gz`;
+  const archiveName = `${prefix}-${version}-${target}${distributionSuffix(target)}`;
   const archivePath = resolve(directory, archiveName);
   const content = Buffer.from(`native package for ${target}\n`, "utf8");
   const sha256 = createHash("sha256").update(content).digest("hex");

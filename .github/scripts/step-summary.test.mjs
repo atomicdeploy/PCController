@@ -12,6 +12,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { usageColor, usageProgress } from "./usage-progress.mjs";
+import { distributionSuffix } from "./artifact-downloads.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const script = resolve(root, ".github", "scripts", "step-summary.mjs");
@@ -52,7 +53,7 @@ function runSummary(directory, arguments_, expectedStatus = 0) {
 test("native summaries print target-correct checksum commands", () => {
   const directory = mkdtempSync(join(tmpdir(), "pccontroller-summary-"));
   try {
-    const archive = resolve(directory, "PCController-Host-test-Windows-x64.tar.gz");
+    const archive = resolve(directory, "PCController-Host-test-Windows-x64-Portable.zip");
     const manifest = resolve(directory, "controller-manifest.json");
     writeFileSync(archive, "controller archive", "utf8");
     writeFileSync(
@@ -128,7 +129,7 @@ test("catalog presents AVR separately with live artifact links", () => {
     for (const product of ["Host", "VirtualBoard"]) {
       for (const target of targets) {
         writeFileSync(
-          resolve(directory, `PCController-${product}-test-${target}.tar.gz`),
+          resolve(directory, `PCController-${product}-test-${target}${distributionSuffix(target)}`),
           `${product}-${target}`,
           "utf8",
         );
@@ -184,8 +185,8 @@ test("catalog presents AVR separately with live artifact links", () => {
     const rawArtifacts = [
       { id: 42, name: "PCController-Firmware-test-AVR-ATmega328P.tar.gz" },
       ...targets.flatMap((target, index) => [
-        { id: 100 + index, name: `PCController-Host-test-${target}.tar.gz` },
-        { id: 200 + index, name: `PCController-VirtualBoard-test-${target}.tar.gz` },
+        { id: 100 + index, name: `PCController-Host-test-${target}${distributionSuffix(target)}` },
+        { id: 200 + index, name: `PCController-VirtualBoard-test-${target}${distributionSuffix(target)}` },
       ]),
     ];
     writeFileSync(resolve(directory, "artifact-index.json"), JSON.stringify({ artifacts: [
@@ -195,9 +196,9 @@ test("catalog presents AVR separately with live artifact links", () => {
     writeFileSync(resolve(directory, "summary.md"), "");
     const rawCatalog = runSummary(directory, ["catalog", directory]);
     assert.match(rawCatalog, /build complete/u);
-    assert.match(rawCatalog, /\| \*\*Windows x64\*\* \| \[⬇️ Download \.tar\.gz\]\([^\n]+\/artifacts\/102\) · \[🔐 SHA-256\]\([^\n]+\/artifacts\/1102\)/u);
+    assert.match(rawCatalog, /\| \*\*Windows x64\*\* \| \[⬇️ Download ZIP\]\([^\n]+\/artifacts\/102\) · \[🔐 SHA-256\]\([^\n]+\/artifacts\/1102\)/u);
     assert.match(rawCatalog, /\| \*\*AVR ATmega328P\*\* \| — \| — \| \[⬇️ Download \.tar\.gz\]\([^\n]+\/artifacts\/42\)/u);
-    assert.doesNotMatch(rawCatalog, /\[⬇️ Download ZIP\]/u);
+    assert.match(rawCatalog, /Windows-x64-Portable\.zip/u);
     writeFileSync(resolve(directory, "artifact-index.json"), JSON.stringify({ artifacts: rawArtifacts }));
     writeFileSync(resolve(directory, "summary.md"), "");
     assert.match(runSummary(directory, ["catalog", directory], 1), /build incomplete/u);

@@ -45,8 +45,9 @@ function fixture({
     );
   }
   for (const target of TARGETS) {
-    add(`PCController-Host-${TAG}-${target}.tar.gz`);
-    add(`PCController-VirtualBoard-${TAG}-${target}.tar.gz`);
+    const suffix = target.startsWith("Windows-") ? "-Portable.zip" : ".tar.gz";
+    add(`PCController-Host-${TAG}-${target}${suffix}`);
+    add(`PCController-VirtualBoard-${TAG}-${target}${suffix}`);
   }
   add(
     "firmware-manifest.json",
@@ -79,7 +80,7 @@ function fixture({
   );
 
   for (const [name, content] of [...files]) {
-    if (!name.endsWith(".tar.gz")) continue;
+    if (!/\.(?:tar\.gz|zip)$/u.test(name)) continue;
     add(`${name}.sha256`, `${hash(content)}  ${name}\n`);
   }
   const checksummed = [...files]
@@ -144,6 +145,10 @@ test("generates a deterministic chooser, release body, and release manifest", ()
       freeBytes: 284,
     });
     assert.equal(parsed.integrity.validatedSidecars.length, 11);
+    const windowsZip = parsed.assets.find(asset => asset.file === `PCController-Host-${TAG}-Windows-x64-Portable.zip`);
+    assert.equal(windowsZip.role, "controller-archive");
+    assert.equal(windowsZip.mediaType, "application/zip");
+    assert.match(firstNotes, /Windows-x64-Portable\.zip/u);
     assert.ok(parsed.assets.every((asset) => /^[0-9a-f]{64}$/u.test(asset.sha256)));
     assert.ok(!parsed.assets.some((asset) => asset.file === "RELEASE-NOTES.md"));
     assert.match(

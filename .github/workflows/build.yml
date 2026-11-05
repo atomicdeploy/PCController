@@ -78,9 +78,9 @@ jobs:
       - name: "🔎 Validate eleven-package catalog"
         run: |
           set -euo pipefail
-          package_count="$(find build-downloads -type f -name '*.tar.gz' | wc -l | tr -d ' ')"
+          package_count="$(find build-downloads -type f \( -name '*.tar.gz' -o -name '*.zip' \) | wc -l | tr -d ' ')"
           test "$package_count" -eq 11
-          find build-downloads -type f -name '*.tar.gz' -printf '%f\n' | sort
+          find build-downloads -type f \( -name '*.tar.gz' -o -name '*.zip' \) -printf '%f\n' | sort
 
       - name: "📂 Read available firmware evidence"
         if: ${{ always() && hashFiles('build-downloads/PCController-Firmware-*.tar.gz') != '' }}

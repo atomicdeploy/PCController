@@ -23,6 +23,7 @@ loadProjectEnv();
 import { gzipSync } from "node:zlib";
 import { PRODUCT_METADATA } from "../../Tools/Build/product-metadata.mjs";
 import { repositoryWebUrl, resolveRepository } from "./repository-context.mjs";
+import { distributionSuffix } from "./artifact-downloads.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const productName = PRODUCT_METADATA.productName;
@@ -53,7 +54,9 @@ const name = safe(packageName, "package name");
 const target = safe(targetName, "target name");
 const outputDirectory = resolve(root, ".build", "release");
 const stagingDirectory = resolve(root, ".build", "package-staging", `${name}-${target}`);
-const packageRootName = `${name}-${version}-${target}`;
+const archiveSuffix = distributionSuffix(target);
+const windowsZip = archiveSuffix.endsWith(".zip");
+const packageRootName = `${name}-${version}-${target}${windowsZip ? "-Portable" : ""}`;
 const packageRoot = join(stagingDirectory, packageRootName);
 mkdirSync(outputDirectory, { recursive: true });
 rmSync(stagingDirectory, { recursive: true, force: true });
@@ -101,7 +104,7 @@ writeFileSync(
 );
 
 const packageReadme = (() => {
-  const header = `# ${name} ${version} — ${target}\n\nThis is a CI-built, source-identified ${productName} distribution. Source: [${sourceRepository}@${sourceCommit}](${sourceUrl}/tree/${sourceRef}).\n\n`;
+  const header = `# ${name} ${version} — ${target}\n\n${windowsZip ? "In File Explorer, right-click the ZIP and choose **Extract All**. Open the extracted folder before running the application; keep its subfolders together. This is a portable package, not an installer.\n\n" : ""}This is a CI-built, source-identified ${productName} distribution. Source: [${sourceRepository}@${sourceCommit}](${sourceUrl}/tree/${sourceRef}).\n\n`;
   const footer = `\n## Trust and support\n\n- \`PACKAGE-MANIFEST.json\` identifies the exact source and package root.\n- \`THIRD_PARTY_NOTICES.md\` records bundled dependency notices.\n- Release downloads include a sibling \`.sha256\` file and GitHub build-provenance attestation.\n- Full documentation: [${productName} ${target} guide](${sourceUrl}/blob/${sourceRef}/docs/CI-CD-and-Releases.md).\n`;
   if (/firmware/iu.test(name)) {
     if (/mega2560/iu.test(target)) {
@@ -154,7 +157,7 @@ for (const path of [...stagedEntries, packageRoot].sort(
   }
 }
 
-const archive = resolve(outputDirectory, `${packageRootName}.tar.gz`);
+const archive = resolve(outputDirectory, `${name}-${version}-${target}${archiveSuffix}`);
 const uncompressedArchive = resolve(outputDirectory, `${packageRootName}.tar`);
 rmSync(uncompressedArchive, { force: true });
 rmSync(archive, { force: true });
@@ -198,10 +201,25 @@ if (result.error) {
 if (result.status !== 0) {
   throw new Error(`tar exited with status ${result.status}`);
 }
-writeFileSync(
-  archive,
-  gzipSync(readFileSync(uncompressedArchive), { level: 9, mtime: 0 }),
-);
+if (windowsZip) {
+  // bsdtar's @archive reads entries, not the tar file as a nested payload.
+  // Converting normalized tar entries avoids ZIP filesystem ctime fields.
+  // GNU-tar development hosts use Info-ZIP's metadata-free mode instead.
+  const zipResult = gnuTar
+    ? spawnSync("zip", ["-X", "-q", archive, "-@"], {
+        cwd: stagingDirectory, input: memberNames.map(member =>
+          statSync(join(stagingDirectory, member)).isDirectory() ? `${member}/` : member).join("\n") + "\n",
+        encoding: "utf8", env: { ...process.env, TZ: "UTC" }, windowsHide: true,
+      })
+    : spawnSync("tar", ["--format=zip", "-cf", archive, `@${uncompressedArchive}`], {
+        encoding: "utf8", env: { ...process.env, TZ: "UTC" }, windowsHide: true,
+      });
+  if (zipResult.error || zipResult.status !== 0) {
+    throw new Error(`ZIP creation failed: ${zipResult.error?.message || zipResult.stderr || zipResult.status}`);
+  }
+} else {
+  writeFileSync(archive, gzipSync(readFileSync(uncompressedArchive), { level: 9, mtime: 0 }));
+}
 rmSync(uncompressedArchive, { force: true });
 
 const archiveBytes = readFileSync(archive);

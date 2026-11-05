@@ -1,16 +1,16 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { findDistributionArtifact, findDistributionChecksum, distributionDownloadLabel } from "./artifact-downloads.mjs";
+import { findDistributionArtifact, findDistributionChecksum, distributionDownloadLabel, distributionSuffix } from "./artifact-downloads.mjs";
 
 test("versioned raw archives resolve every target without selecting checksum artifacts", () => {
   for (const product of ["Host", "VirtualBoard"]) {
     for (const target of ["Windows-x64", "Linux-x64", "Linux-ARM64", "macOS-Intel", "macOS-Apple-Silicon"]) {
-      const archive = { id: 1, name: `PCController-${product}-1.2.3-alpha.1-${target}.tar.gz` };
+      const archive = { id: 1, name: `PCController-${product}-1.2.3-alpha.1-${target}${distributionSuffix(target)}` };
       const checksum = { id: 2, name: `${archive.name}.sha256` };
       assert.equal(findDistributionArtifact([checksum, archive], `PCController-${product}-${target}`), archive);
       assert.equal(findDistributionChecksum([checksum, archive], archive), checksum);
-      assert.equal(distributionDownloadLabel(archive), "Download .tar.gz");
+      assert.equal(distributionDownloadLabel(archive), target.startsWith("Windows") ? "Download ZIP" : "Download .tar.gz");
       assert.equal(findDistributionArtifact([checksum], `PCController-${product}-${target}`), undefined);
       assert.equal(findDistributionChecksum([{ ...checksum, expired: true }], archive), undefined);
     }

@@ -31,17 +31,20 @@ artifacts.
 ## Artifact catalog
 
 Actions publishes one directly downloadable archive for each deliverable/target,
-plus a separate `.tar.gz.sha256` checksum artifact:
+plus a separate `<archive-name>.sha256` checksum artifact:
 
 | Deliverable | Artifact name | Contents |
 |---|---|---|
 | AVR firmware | `PCController-Firmware-<version>-AVR-ATmega328P.tar.gz` | Application HEX, full-flash recovery HEX, validated 1 KiB safe-default EEPROM, manifests, dependency inventory |
-| Native host | `PCController-Host-<version>-<platform>.tar.gz` | Native executable/library, the exact same-run firmware/EEPROM defaults, metadata, notices |
-| Virtual Board | `PCController-VirtualBoard-<version>-<platform>.tar.gz` | Native simulator, metadata, notices |
+| Windows host | `PCController-Host-<version>-Windows-x64-Portable.zip` | Host application, bundled tools/assets and first-run guide; extract and run, optional per-user install |
+| Windows Virtual Board | `PCController-VirtualBoard-<version>-Windows-x64-Portable.zip` | Native firmware runtime and guide; not the Host application |
+| Linux/macOS host | `PCController-Host-<version>-<platform>.tar.gz` | Native executable/library, the exact same-run firmware/EEPROM defaults, metadata, notices |
+| Linux/macOS Virtual Board | `PCController-VirtualBoard-<version>-<platform>.tar.gz` | Native simulator, metadata, notices |
 
 The pinned upload action uses `archive: false`: GitHub stores each file as-is
 instead of wrapping an existing archive in another ZIP. The artifact name is
-the uploaded filename. Keeping tar preserves executable permissions on Linux
+the uploaded filename. Windows ZIPs open with File Explorer **Extract All**;
+`Portable` distinguishes them from an installer. Keeping tar preserves executable permissions on Linux
 and macOS; one extraction produces the usable package. Internal test reports
 and loose-file evidence may still use ordinary ZIP artifacts, without a nested
 distribution archive.
@@ -67,16 +70,18 @@ maintainer explicitly removes them.
 1. Open the current [Build workflow](https://github.com/atomicdeploy/PCController/actions/workflows/build.yml).
 2. Select a successful run for the exact commit you want.
 3. In the run's **Summary → Download packages** table, click
-   **⬇️ Download .tar.gz** at **Windows x64 / Host application** for Windows, or
-   **AVR ATmega328P / Firmware** for the board images. Other platform cells work
+   **⬇️ Download ZIP** at **Windows x64 / Host application** for Windows, or
+   **⬇️ Download .tar.gz** at **AVR ATmega328P / Firmware** for the board images. Other platform cells work
    the same way. These are direct links to artifacts from that exact run, not
    links back to the workflow list. GitHub requires you to sign in to download.
 4. Download the adjacent **🔐 SHA-256** sidecar into the same folder.
-5. Verify, then extract the `.tar.gz` once using the commands below. Firmware
+5. Verify, then extract the archive once using the commands below. Firmware
    HEX/EEPROM files are inside the extracted firmware package.
 
-Previously published artifacts keep their old layout: links labeled
-**Download ZIP** require extracting that outer ZIP first. New workflow source
+Previously published artifacts keep their old layout: older unversioned artifact
+names such as `PCController-Host-Windows-x64` may contain an inner archive.
+New `*-Windows-x64-Portable.zip` downloads contain the actual application folder,
+not another archive. New workflow source
 does not retroactively change files uploaded by an older run.
 
 The catalog runs even when another target fails, retaining available links and
@@ -113,12 +118,17 @@ tar -xzf "$archive"
 Windows PowerShell:
 
 ```powershell
-$archive = "PCController-Host-<version>-Windows-x64.tar.gz"
+$archive = "PCController-Host-<version>-Windows-x64-Portable.zip"
 $expected = (Get-Content ".\$archive.sha256" -Raw).Split()[0]
 $actual = (Get-FileHash ".\$archive" -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($actual -ne $expected.ToLowerInvariant()) { throw "SHA-256 mismatch" }
-tar.exe -xzf $archive
+Expand-Archive -LiteralPath $archive -DestinationPath .
 ```
+
+Open the extracted folder and run `controller.exe`. Keep its `tools`, `assets`
+and other subfolders together; don't run the executable from inside the ZIP.
+The product/component, version, operating system, architecture and `Portable`
+suffix distinguish each download without changing the executable's stable name.
 
 ## Release integrity and draft repair
 

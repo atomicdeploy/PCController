@@ -13,7 +13,7 @@ import {
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadProjectEnv } from "../../Tools/Build/env.mjs";
-import { findDistributionArtifact, distributionDownloadLabel, findDistributionChecksum } from "./artifact-downloads.mjs";
+import { findDistributionArtifact, distributionDownloadLabel, findDistributionChecksum, distributionSuffix, distributionArchivePattern } from "./artifact-downloads.mjs";
 
 loadProjectEnv();
 
@@ -72,8 +72,6 @@ const titleCase = (value) =>
     .replace(/\b\w/gu, (character) => character.toUpperCase());
 const markdownLink = (label, url) =>
   url ? `[${escapeTable(label)}](${url})` : escapeTable(label);
-const escapeRegExp = (value) =>
-  String(value).replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 
 const formatBytes = (value) => {
   const size = Number(value || 0);
@@ -213,17 +211,14 @@ export function inspectPackageDirectory(codebase, packagesDirectory) {
 
   return Object.fromEntries(
     TARGETS.map((target) => {
-      const expectedName = `${definition.artifactPrefix}-<version>-${target.id}.tar.gz`;
+      const expectedName = `${definition.artifactPrefix}-<version>-${target.id}${distributionSuffix(target.id)}`;
       if (!files) {
         return [
           target.id,
           packageFailure("Packages directory unavailable", "warning", { expectedName }),
         ];
       }
-      const pattern = new RegExp(
-        `^${escapeRegExp(definition.artifactPrefix)}-(.+)-${escapeRegExp(target.id)}\\.tar\\.gz$`,
-        "iu",
-      );
+      const pattern = distributionArchivePattern(definition.artifactPrefix, target.id);
       const matches = files
         .filter((path) => pattern.test(basename(path)))
         .toSorted((left, right) => left.localeCompare(right, "en"));

@@ -14,7 +14,7 @@ import { loadProjectEnv } from "../../Tools/Build/env.mjs";
 import { PRODUCT_METADATA } from "../../Tools/Build/product-metadata.mjs";
 import { repositoryWebUrl, resolveRepository } from "./repository-context.mjs";
 import { TARGETS } from "./codebase-summary.mjs";
-import { findDistributionArtifact, distributionDownloadLabel, findDistributionChecksum } from "./artifact-downloads.mjs";
+import { findDistributionArtifact, distributionDownloadLabel, findDistributionChecksum, distributionArchivePattern } from "./artifact-downloads.mjs";
 
 loadProjectEnv();
 
@@ -424,7 +424,7 @@ ${verificationBlock(target, archive.name)}
     [`PCController-Host-${id}`, `PCController-VirtualBoard-${id}`])];
   const missingArtifacts = expectedArtifacts.filter(name => {
     const artifact = findDistributionArtifact(uploadedArtifacts, name);
-    return !availableUrl(artifact) || (artifact.name.endsWith(".tar.gz") &&
+    return !availableUrl(artifact) || (/\.(?:tar\.gz|zip)$/u.test(artifact.name) &&
       !availableUrl(findDistributionChecksum(uploadedArtifacts, artifact)));
   });
   const complete = missingArtifacts.length === 0 && files.length === expectedArtifacts.length;
@@ -442,7 +442,7 @@ ${verificationBlock(target, archive.name)}
       const match = uploadedArtifacts.find(
         (item) =>
           item.name.startsWith(prefix) &&
-          fileName.endsWith(`-${item.name.slice(prefix.length)}.tar.gz`),
+          distributionArchivePattern(`PCController-${product}`, item.name.slice(prefix.length)).test(fileName),
       );
       if (match) return match;
     }
