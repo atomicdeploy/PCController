@@ -1,0 +1,7 @@
+@font-face {
+  font-family: "Vazirmatn";
+  src: url("./shared/fonts/Vazirmatn-Regular.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}

@@ -1,0 +1,19 @@
+@font-face {
+  font-family: 'Controller Channel Icons';
+  src: url('./assets/Phosphor.ttf') format('truetype');
+  font-display: block;
+}
+.channel-icon {
+  font-family: 'Controller Channel Icons';
+  font-style: normal;
+  font-weight: normal;
+  font-size: 1.1em;
+  line-height: 1;
+  display: inline-block;
+  inline-size: 1.2em;
+  text-align: center;
+  margin-inline-end: .4em;
+  vertical-align: -.08em;
+  flex-shrink: 0;
+}
+.channel-icon-name { font-size: .75em; margin-inline-end: .4em; }

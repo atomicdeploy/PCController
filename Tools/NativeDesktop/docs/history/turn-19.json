@@ -1,0 +1,214 @@
+{
+  "turn": "019f90eb-e1a4-7bf1-9a03-76ce0a5fcaf3",
+  "observedStart": "2026-07-23T21:40:05.832Z",
+  "observedEnd": "2026-07-23T22:28:13.881Z",
+  "title": "chrome: recover borderless transparency and backdrop transitions",
+  "events": [
+    {
+      "id": "call_wdkC4MpaZq9GvGrkqeMR7VBT",
+      "time": "2026-07-23T21:41:26.354Z",
+      "orderTime": "2026-07-23T21:41:26.354Z",
+      "timeBasis": "record",
+      "hash": "16dede7282ae8b6cfcb0802b2ad424d2c34795209a026c69c691d5fb076c227f",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 21446
+      },
+      "turn": "019f90eb-e1a4-7bf1-9a03-76ce0a5fcaf3",
+      "status": "observed-full-read",
+      "changes": [
+        {
+          "path": "internal/winfx/backdrop_windows.go",
+          "before": null,
+          "after": "14ed4b2794baf4b4df36d6cd71dffc1d92730f18cf08dfa44a3e20222a9059c7",
+          "method": "observed-full-read"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_64zeLu8LZIWOjEJKxG8VVsIe",
+      "time": "2026-07-23T21:42:01.079Z",
+      "orderTime": "2026-07-23T21:42:01.079Z",
+      "timeBasis": "record",
+      "hash": "56c19fa0bac99a0ed92020244d854dafb308e5da9af3dc3c31dd78c69287edbf",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 21463
+      },
+      "turn": "019f90eb-e1a4-7bf1-9a03-76ce0a5fcaf3",
+      "status": "observed-full-read",
+      "changes": [
+        {
+          "path": "internal/winfx/pixelregion_windows.go",
+          "before": "49a92dc35558d4b010aeec67bd3cccb81c8359b22d36caf6a69183eb617abaad",
+          "after": "ef5491cae1f6a59bb393ec70c1a00f4d3c38f57e4898097d5ad2d968400608fe",
+          "method": "observed-full-read"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_FWGfyJTVBm9da5HM8dnuMwAi:0",
+      "time": "2026-07-23T20:06:54.436Z",
+      "orderTime": "2026-07-23T21:50:52.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "3febde9eae0dfc14626470969485a1b1b72aaf40e6fe7c358205158ec6a2a802",
+      "source": {
+        "session": "019f9096-906d-7e22-8a87-48372f0bd462",
+        "line": 261
+      },
+      "turn": "019f90ec-2fc2-75b1-86d6-60bb16ce8cf3",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/winfx/backdrop_windows.go",
+          "before": "14ed4b2794baf4b4df36d6cd71dffc1d92730f18cf08dfa44a3e20222a9059c7",
+          "after": "2da436c73c1cf002985db1605c3f8dae5e957a63dd770728753adb434a5f8096",
+          "method": "patch"
+        },
+        {
+          "path": "internal/winfx/corners_windows.go",
+          "before": "315db511023a1c9ca41bf773640dfcc1220f6a177c1ee22a62a928579f4a46af",
+          "after": "3773bb84a0b3195fbb5aa58d0476ca29632890a3afdf977708329f2b39bf0a33",
+          "method": "patch"
+        },
+        {
+          "path": "internal/ui/window_state_windows.go",
+          "before": "59bea373b30c9123fa2567d2012fd49e2ad9089a7bf6a7c188e9dc151d13efdc",
+          "after": "32e5b40422b0bcbe40c63305d3cd9b3f76b438237eb2ec9c31f55f0622b92ddf",
+          "method": "patch"
+        },
+        {
+          "path": "internal/ui/window_shape_windows.go",
+          "before": "f1c6bfbe0676b1d579fbf6abdcfff83b1266cf0b9d5f3441cd5e5e59c11ce590",
+          "after": "07d2ab6d736414984262f43bf49174f1b836950b34b783cffa1cd3cbe46c3339",
+          "method": "patch"
+        },
+        {
+          "path": "internal/ui/window_state_windows_test.go",
+          "before": "805718929379e9d3e10c0b73baf65c8640228016ea8821a068d191d4b9949f72",
+          "after": "60b03982144405f5e9565769711a05920085d73342d90c9427d7f9de16849f26",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_QJQMwn39n5zKl2EnYTnDJD8b:0",
+      "time": "2026-07-23T19:12:45.811Z",
+      "orderTime": "2026-07-23T21:56:06.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "945baae3aefacbc2763d52d0a69297ee90857a76445b19279dfd2dfbfe5c0e98",
+      "source": {
+        "session": "019f9064-fe6c-7123-a1e0-529b5c8daf91",
+        "line": 397
+      },
+      "turn": "019f90ec-4eb2-7400-9385-e5806132dd8c",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/winfx/backdrop_windows.go",
+          "before": "2da436c73c1cf002985db1605c3f8dae5e957a63dd770728753adb434a5f8096",
+          "after": "a11f439d7dc814a1f99ad165e69ecbd1771efd34da0380f98ebf64cff3fc5cf6",
+          "method": "patch"
+        }
+      ],
+      "problems": [
+        {
+          "path": "internal/winfx/backdrop_test.go",
+          "reason": "missing preimage"
+        }
+      ]
+    },
+    {
+      "id": "call_wcvpP8I29U0I0JmNkC4V9Ooy:0",
+      "time": "2026-07-23T19:12:45.811Z",
+      "orderTime": "2026-07-23T21:56:52.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "04166ff9ca5931bf4787323946cb2a12aae5ac357d4fa707b1f079cd88888122",
+      "source": {
+        "session": "019f9064-fe6c-7123-a1e0-529b5c8daf91",
+        "line": 413
+      },
+      "turn": "019f90ec-4eb2-7400-9385-e5806132dd8c",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/ui/shell_windows.go",
+          "before": "a29bfc67e71ccaed1b627f6b3b8b9774560a55e10f17392e710398515498a958",
+          "after": "2f51de5e859c2e6901a3e5417469d2805680691925b80197ab57482a065af93d",
+          "method": "patch"
+        },
+        {
+          "path": "internal/ui/window_state_windows_test.go",
+          "before": "60b03982144405f5e9565769711a05920085d73342d90c9427d7f9de16849f26",
+          "after": "b7fe744762d63eff932a97e6b4a1841191df3c22b065fcb458357c864b26ea5a",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_nvbFTDzyWNhVjiCQCWOSR69M:0",
+      "time": "2026-07-23T22:05:09.035Z",
+      "orderTime": "2026-07-23T22:05:09.035Z",
+      "timeBasis": "record",
+      "hash": "6ffb6fd9e375affba8800e76feee86d63cc740149a135c1781c2bd147332485f",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 22067
+      },
+      "turn": "019f90eb-e1a4-7bf1-9a03-76ce0a5fcaf3",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "docs/visual-regression-contract.md",
+          "before": "3dae78faed5ad513755163e709423d0f089229f4c15c22bfad0ddc4cccce5e0a",
+          "after": "9c7d7c52e7aa8dc7a4b1beb851fa08ebf5b39764f72d273d6a3369d1b792ff17",
+          "method": "patch"
+        }
+      ],
+      "problems": [
+        {
+          "path": "CHANGELOG.md",
+          "reason": "hunk context not found"
+        }
+      ]
+    }
+  ],
+  "finalChanges": [
+    {
+      "path": "internal/winfx/backdrop_windows.go",
+      "sha256": "a11f439d7dc814a1f99ad165e69ecbd1771efd34da0380f98ebf64cff3fc5cf6"
+    },
+    {
+      "path": "internal/winfx/pixelregion_windows.go",
+      "sha256": "ef5491cae1f6a59bb393ec70c1a00f4d3c38f57e4898097d5ad2d968400608fe"
+    },
+    {
+      "path": "internal/winfx/corners_windows.go",
+      "sha256": "3773bb84a0b3195fbb5aa58d0476ca29632890a3afdf977708329f2b39bf0a33"
+    },
+    {
+      "path": "internal/ui/window_state_windows.go",
+      "sha256": "32e5b40422b0bcbe40c63305d3cd9b3f76b438237eb2ec9c31f55f0622b92ddf"
+    },
+    {
+      "path": "internal/ui/window_shape_windows.go",
+      "sha256": "07d2ab6d736414984262f43bf49174f1b836950b34b783cffa1cd3cbe46c3339"
+    },
+    {
+      "path": "internal/ui/window_state_windows_test.go",
+      "sha256": "b7fe744762d63eff932a97e6b4a1841191df3c22b065fcb458357c864b26ea5a"
+    },
+    {
+      "path": "internal/ui/shell_windows.go",
+      "sha256": "2f51de5e859c2e6901a3e5417469d2805680691925b80197ab57482a065af93d"
+    },
+    {
+      "path": "docs/visual-regression-contract.md",
+      "sha256": "9c7d7c52e7aa8dc7a4b1beb851fa08ebf5b39764f72d273d6a3369d1b792ff17"
+    }
+  ]
+}

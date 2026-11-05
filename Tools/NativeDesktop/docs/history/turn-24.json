@@ -1,0 +1,255 @@
+{
+  "turn": "019f91ba-52a9-7cf3-95eb-b5bfd47a85ce",
+  "observedStart": "2026-07-24T01:25:35.068Z",
+  "observedEnd": "2026-07-24T01:43:21.020Z",
+  "title": "api: recover versionless coordinator routes",
+  "events": [
+    {
+      "id": "call_h2J8bdXu45ArqQCAyzH8HokJ:0",
+      "time": "2026-07-24T01:30:00.409Z",
+      "orderTime": "2026-07-24T01:30:00.409Z",
+      "timeBasis": "record",
+      "hash": "7e7a1d673ada18ff70829054542cac16bb51a0caba2d19a042b61ea10bf3b0de",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 26858
+      },
+      "turn": "019f91ba-52a9-7cf3-95eb-b5bfd47a85ce",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/localapi/hub.go",
+          "before": "d1cc49a5ceeff5c9e07a45c9c03a64db68570d9d983a8222ba203bca5ed986d8",
+          "after": "092a0e55f88626a428f758c032db31a57be0981c26081c40847ff453b5c733c8",
+          "method": "patch"
+        },
+        {
+          "path": "internal/localapi/browser.go",
+          "before": "5a9dcd3480fb226b9ead0956e3309954c2b509cd33c27add078009456defeabb",
+          "after": "b3ea8b4239f811d861882104669c0874289416ec5e75a8b42be7ccea45f02ea3",
+          "method": "patch"
+        },
+        {
+          "path": "internal/localapi/terminal_websocket.go",
+          "before": "956ecf56b84e8e6d402a8e711d8430b8cc0249516fc05ee9ce3e690dafb3701b",
+          "after": "c77576e32263289e884befd48677e7a07c5aa0bc61e652f53bd802af0236a149",
+          "method": "patch"
+        },
+        {
+          "path": "internal/application/application_windows.go",
+          "before": "177f338e1ce79e42797078f93269f307cfd3f9445c8f44f32db7590d41601cca",
+          "after": "f1846c576c599af9fe41cddc4078823c8c4734305ad8ca0917984787031315fc",
+          "method": "patch"
+        }
+      ],
+      "problems": [
+        {
+          "path": "internal/localapi/server.go",
+          "reason": "missing preimage"
+        }
+      ]
+    },
+    {
+      "id": "call_DLolVnu8HgMph3JxJX7W8ijK:0",
+      "time": "2026-07-24T01:31:14.642Z",
+      "orderTime": "2026-07-24T01:31:14.642Z",
+      "timeBasis": "record",
+      "hash": "956847a7cd816dcd093ce74e765c24868c1153639644a85b4b0dfded9d35b02e",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 26884
+      },
+      "turn": "019f91ba-52a9-7cf3-95eb-b5bfd47a85ce",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "webui/vite.config.ts",
+          "before": "6ab2beb31aca03cf0c83a68ba758e380a5c740e7a4d2ae583af2bdf046e5540c",
+          "after": "db45b57a5f63f4f9b76fe141eafd54983fa4120ce0b58f812d97bca3db4ee9bb",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_UICeIqt031IiVGVRfIPBdkOG:0",
+      "time": "2026-07-24T01:32:53.648Z",
+      "orderTime": "2026-07-24T01:32:53.648Z",
+      "timeBasis": "record",
+      "hash": "d5bab7a3ff6ff6efdec01b5f9c698e3722de8ffb5a0553d8884ac1b9e14c0ee2",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 26914
+      },
+      "turn": "019f91ba-52a9-7cf3-95eb-b5bfd47a85ce",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "README.md",
+          "before": "833a02ce6cc16021c84e625da317e48175ae31685d5cc068b3693c422212fc92",
+          "after": "1a82d4748a2d0ea8eec6b52a97b001bb670960b9208182cd499d2e94dc7bf042",
+          "method": "patch"
+        },
+        {
+          "path": "tools/internal/webexport/static-readme.txt",
+          "before": "25335b681fb57f750b353b86a86dd52b83d2aca3ab1b5d6bff67eed100fa04e3",
+          "after": "e8503b37ff605851054fec685046c12e9cca663f3c5bf84c3b09798f6cbf0085",
+          "method": "patch"
+        },
+        {
+          "path": "CHANGELOG.md",
+          "before": "f7fc763aecaac2be991a73967018cbc5b36167456eb0f257e3fbf9f8f4a2efb2",
+          "after": "33415f4b228effeeed51e22714dc9a32d0803f1839c52a3ad47a4bfca7ff85b0",
+          "method": "patch"
+        }
+      ],
+      "problems": [
+        {
+          "path": "docs/integration.md",
+          "reason": "hunk context not found"
+        },
+        {
+          "path": "docs/building.md",
+          "reason": "hunk context not found"
+        },
+        {
+          "path": "internal/tui/transport_api_test.go",
+          "reason": "hunk context not found"
+        },
+        {
+          "path": "internal/localapi/server_test.go",
+          "reason": "missing preimage"
+        }
+      ]
+    },
+    {
+      "id": "call_5sRl188RABUq21w7Gd7RTndc:0",
+      "time": "2026-07-24T01:32:58.261Z",
+      "orderTime": "2026-07-24T01:32:58.261Z",
+      "timeBasis": "record",
+      "hash": "7f4e80be64c80af0776225e37aeb5bbb9c018b8b9c0357a248a01f3d3d605d38",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 26923
+      },
+      "turn": "019f91ba-52a9-7cf3-95eb-b5bfd47a85ce",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "webui/vite.config.ts",
+          "before": "db45b57a5f63f4f9b76fe141eafd54983fa4120ce0b58f812d97bca3db4ee9bb",
+          "after": "915811ada480bcb84b643396dab6b16f8f7e98404bcc22f38f562705abd50b13",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_7NQHwAc05BHEJImB3CVEQIqw:0",
+      "time": "2026-07-24T01:33:31.075Z",
+      "orderTime": "2026-07-24T01:33:31.075Z",
+      "timeBasis": "record",
+      "hash": "d7fd3d384f2ec420d82802fef14cf678895f2f59a8c075b875e787ca92a8e54e",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 26937
+      },
+      "turn": "019f91ba-52a9-7cf3-95eb-b5bfd47a85ce",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/localapi/browser_test.go",
+          "before": "deb27298566d271f28c882a0eb66643533fa4aa31da8f81ff0861f531c3f9476",
+          "after": "b271d7ded898779fa388d1b503b9b82025e9b7fd4d21cd5a0785083d53c82725",
+          "method": "patch"
+        }
+      ],
+      "problems": [
+        {
+          "path": "internal/localapi/server_test.go",
+          "reason": "missing preimage"
+        }
+      ]
+    },
+    {
+      "id": "call_aTsBns21hvgk72hDmTLDDEPT:0",
+      "time": "2026-07-24T01:36:02.944Z",
+      "orderTime": "2026-07-24T01:36:02.944Z",
+      "timeBasis": "record",
+      "hash": "8607b58bafc1e3ee65fbd0ee7ff4af6847a6ce275cb26f9714a06fddc382885e",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 26990
+      },
+      "turn": "019f91ba-52a9-7cf3-95eb-b5bfd47a85ce",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "webui/src/coordinator-routes.ts",
+          "before": null,
+          "after": "5c1e193f4340c04b0d9447bf89ce9712b3fe529c41b05ae0276f62bb9995ecb6",
+          "method": "patch"
+        },
+        {
+          "path": "webui/src/coordinator-routes.test.ts",
+          "before": null,
+          "after": "3896bf61e244550290d2bdf41bc7928b70a1bccef46c3af434236bcb0d6345e6",
+          "method": "patch"
+        },
+        {
+          "path": "webui/vite.config.ts",
+          "before": "915811ada480bcb84b643396dab6b16f8f7e98404bcc22f38f562705abd50b13",
+          "after": "b3da44934306165d137de563a63fb9af03ddce3f35414db7f1e16611ba94f59d",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    }
+  ],
+  "finalChanges": [
+    {
+      "path": "internal/localapi/hub.go",
+      "sha256": "092a0e55f88626a428f758c032db31a57be0981c26081c40847ff453b5c733c8"
+    },
+    {
+      "path": "internal/localapi/browser.go",
+      "sha256": "b3ea8b4239f811d861882104669c0874289416ec5e75a8b42be7ccea45f02ea3"
+    },
+    {
+      "path": "internal/localapi/terminal_websocket.go",
+      "sha256": "c77576e32263289e884befd48677e7a07c5aa0bc61e652f53bd802af0236a149"
+    },
+    {
+      "path": "internal/application/application_windows.go",
+      "sha256": "f1846c576c599af9fe41cddc4078823c8c4734305ad8ca0917984787031315fc"
+    },
+    {
+      "path": "webui/vite.config.ts",
+      "sha256": "b3da44934306165d137de563a63fb9af03ddce3f35414db7f1e16611ba94f59d"
+    },
+    {
+      "path": "README.md",
+      "sha256": "1a82d4748a2d0ea8eec6b52a97b001bb670960b9208182cd499d2e94dc7bf042"
+    },
+    {
+      "path": "tools/internal/webexport/static-readme.txt",
+      "sha256": "e8503b37ff605851054fec685046c12e9cca663f3c5bf84c3b09798f6cbf0085"
+    },
+    {
+      "path": "CHANGELOG.md",
+      "sha256": "33415f4b228effeeed51e22714dc9a32d0803f1839c52a3ad47a4bfca7ff85b0"
+    },
+    {
+      "path": "internal/localapi/browser_test.go",
+      "sha256": "b271d7ded898779fa388d1b503b9b82025e9b7fd4d21cd5a0785083d53c82725"
+    },
+    {
+      "path": "webui/src/coordinator-routes.ts",
+      "sha256": "5c1e193f4340c04b0d9447bf89ce9712b3fe529c41b05ae0276f62bb9995ecb6"
+    },
+    {
+      "path": "webui/src/coordinator-routes.test.ts",
+      "sha256": "3896bf61e244550290d2bdf41bc7928b70a1bccef46c3af434236bcb0d6345e6"
+    }
+  ]
+}

@@ -36,6 +36,13 @@ hardware-free virtual board. The browser, terminal UI, CLI, automation engine,
 and network APIs all use the same command dispatcher, safety rules, connection
 owner, and event stream.
 
+The Windows desktop work retains the complete RayanLamp source tree under
+[`Tools/NativeDesktop`](Tools/NativeDesktop), not a selected GUI extract.
+See the [source coverage and feature-integration inventory](docs/NATIVE-DONOR-COVERAGE.md)
+for the exact donor revision, repeatable file audit, font replacement, and
+remaining native integration gaps. Complete source preservation is verified;
+full native feature parity is still in progress.
+
 <p align="center">
   <img alt="Real-time board control" src="https://img.shields.io/badge/Real--time-board_control-8b5cf6?style=flat-square">
   <img alt="Recoverable programming" src="https://img.shields.io/badge/Recoverable-programming-ec4899?style=flat-square">
@@ -381,6 +388,7 @@ Release archives add the version and include SHA-256 metadata. Follow
 | [Getting Started and Operations](docs/Getting-Started-and-Operations.md) | First connection, WebUI/TUI/CLI operation, RF, automation, and troubleshooting |
 | [Front Panel and Menus](docs/Front-Panel-and-Menus.md) | Physical controls, editors, display semantics, and hosted menus |
 | [Host Configuration and Integrations](docs/Host-Configuration-and-Integrations.md) | JSON configuration, hotkeys, notifications, discovery, local devices, webhooks, and bridges |
+| [OpenRGB, SignalRGB and lighting inputs](docs/RGB-INPUT.md) | DDP, Art-Net, sACN, WLED/Hyperion, serial Adalight/TPM2, SignalRGB plugin setup, ownership and recovery |
 | [Protocol and Network API](Tools/Controller/docs/Protocol-and-Network-API.md) | UART frames, commands, JSON-RPC, REST, WebSocket, authorization, and events |
 | [Machine-readable API contracts](Tools/Controller/api/reference.html) | Offline OpenAPI 3.1, AsyncAPI 3.0, JSON-RPC methods, errors, capabilities, and idempotency |
 | [Portable WebUI](Tools/Controller/docs/Portable-WebUI.md) | Deterministic export, separate-origin hosting, transport discovery, CORS, and tokens |

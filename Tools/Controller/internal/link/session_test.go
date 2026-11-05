@@ -595,7 +595,7 @@ func TestReconnectResetIsOneShotAndHelloRetriesDoNotRepulse(t *testing.T) {
 	}
 	_ = session.Close()
 	firstPort.mu.Lock()
-	if len(firstPort.dtr) != 2 {
+	if len(firstPort.dtr) != 3 {
 		t.Fatalf("DTR toggled %d times during HELLO retries, want one pulse", len(firstPort.dtr))
 	}
 	if len(firstPort.rts) != 0 {
@@ -633,7 +633,7 @@ func TestPulseResetUsesOnlyDTRAndLeavesItInactive(t *testing.T) {
 	}
 	port.mu.Lock()
 	defer port.mu.Unlock()
-	if len(port.dtr) != 2 || !port.dtr[0] || port.dtr[1] {
+	if len(port.dtr) != 3 || port.dtr[0] || !port.dtr[1] || port.dtr[2] {
 		t.Fatalf("DTR sequence: %#v", port.dtr)
 	}
 	if len(port.rts) != 0 {

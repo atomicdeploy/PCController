@@ -1,0 +1,267 @@
+{
+  "turn": "019f926c-ba23-7da3-a4b9-685e277272d6",
+  "observedStart": "2026-07-24T04:40:26.995Z",
+  "observedEnd": "2026-07-24T05:13:46.123Z",
+  "title": "console: recover shell waiting and unified executable startup",
+  "events": [
+    {
+      "id": "call_uxtB1XehBWLFtV9JzWtERXMT:0",
+      "time": "2026-07-24T04:07:23.399Z",
+      "orderTime": "2026-07-24T04:42:23.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "c52cdd7666c205aefaa83cffa646d68f645aef7af7edd95acae4922080a75902",
+      "source": {
+        "session": "019f924e-7570-7350-947c-71b35195b082",
+        "line": 589
+      },
+      "turn": "019f926d-d6dd-77a1-958f-38d4f172de6c",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "tools/build-linux.sh",
+          "before": "0a450402884798da5128c157e8ce71e8f4bdab69c7a152cad8daee5390f10dbc",
+          "after": "2531af9ff9d21db1091bb04d3d12f04904f34bfda4fc82aa0308b5f3817fcfcc",
+          "method": "patch"
+        },
+        {
+          "path": "tools/verify-pe/main.go",
+          "before": "ec167675ffa3222831e03bae369ba0f6256a33f0474dfd6ef45a54da6eccc7fb",
+          "after": "f7a4bf8045ba7a88e84abbd05b4b3a51c1b1752b8520cd0310ef39e28159c6e6",
+          "method": "patch"
+        },
+        {
+          "path": "tools/verify-pe/main_test.go",
+          "before": "4825fcaae2724dfd0ee4dae647d3d6f547d0f43792b4889755812785a309ad26",
+          "after": "6f6bdbf3f1248ac575ac01c8164e79ac7fc29ba53a6615e266efb895bae7fa0e",
+          "method": "patch"
+        }
+      ],
+      "problems": [
+        {
+          "path": "tools/build.ps1",
+          "reason": "hunk context not found"
+        },
+        {
+          "path": "docs/building.md",
+          "reason": "hunk context not found"
+        },
+        {
+          "path": "README.md",
+          "reason": "hunk context not found"
+        }
+      ]
+    },
+    {
+      "id": "call_sDljBkFzyiuUSYXJyRbYEhEU:0",
+      "time": "2026-07-24T04:07:16.844Z",
+      "orderTime": "2026-07-24T04:44:05.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "1c7c08a8fc90c7ffca06f96914cfc83c3c82ede3bed6e6a69c6ecf8fa98b441d",
+      "source": {
+        "session": "019f924e-5be2-7ad1-af71-3cf000614741",
+        "line": 442
+      },
+      "turn": "019f926d-bce5-7453-9c40-68c853c5b436",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "cmd/RayanLamp/console_windows_test.go",
+          "before": null,
+          "after": "13d67b6595cadfad87b28e2865d5ea6e8db03297eb4a01adffc61a0663ac8a5b",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_KkwgUleElkQNPeEuHPublPPD:0",
+      "time": "2026-07-24T04:48:02.313Z",
+      "orderTime": "2026-07-24T04:48:02.313Z",
+      "timeBasis": "record",
+      "hash": "2237c4f0e2bfa34d2f631380dbdc65d2c92baedb931f5f651141ef6584ef35ab",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 31096
+      },
+      "turn": "019f926c-ba23-7da3-a4b9-685e277272d6",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "resources/RayanLamp.exe.manifest",
+          "before": "a3d4870ff351ad7106e0501bfd314b741e6961c10a47660282cc5317da9cd173",
+          "after": "5652d5c14f549230ab137df3ef5f1f2ba78f102e7b8999562eec7ec48b72d802",
+          "method": "patch"
+        },
+        {
+          "path": "tools/verify-pe/main.go",
+          "before": "f7a4bf8045ba7a88e84abbd05b4b3a51c1b1752b8520cd0310ef39e28159c6e6",
+          "after": "1a4e7ea29579b9838a570f33890a497f3559504447eb9c3dc556d06b52996cc8",
+          "method": "patch"
+        },
+        {
+          "path": "CHANGELOG.md",
+          "before": "ad060e2a1f11c4f2946a3608c7fa8138fc45f65e550ae4e98084c738ee8566ed",
+          "after": "3412866ccfe4639ecd2361eb08df7a675b59fcf03b8893ca6a7167f0c4ae4823",
+          "method": "patch"
+        }
+      ],
+      "problems": [
+        {
+          "path": "README.md",
+          "reason": "hunk context not found"
+        },
+        {
+          "path": "docs/building.md",
+          "reason": "hunk context not found"
+        },
+        {
+          "path": "docs/architecture.md",
+          "reason": "hunk context not found"
+        }
+      ]
+    },
+    {
+      "id": "call_dFWnB1q50xBpyKXqKeDviDBO:0",
+      "time": "2026-07-24T04:07:23.399Z",
+      "orderTime": "2026-07-24T04:49:13.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "14247885abd3111632e05a0d1720d776e0d175871fa87d6f061529dbfe29fe30",
+      "source": {
+        "session": "019f924e-7570-7350-947c-71b35195b082",
+        "line": 698
+      },
+      "turn": "019f9273-ee4b-7c32-85a0-f8ce2e46e7ae",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "tools/verify-pe/main.go",
+          "before": "1a4e7ea29579b9838a570f33890a497f3559504447eb9c3dc556d06b52996cc8",
+          "after": "e502c947c8cb82bde352be12050e9b0c2091245f5a40359bbcc70a6858507cf2",
+          "method": "patch"
+        },
+        {
+          "path": "tools/verify-pe/main_test.go",
+          "before": "6f6bdbf3f1248ac575ac01c8164e79ac7fc29ba53a6615e266efb895bae7fa0e",
+          "after": "2e680b9a407fe0dff6745d4a200f4cc4896824e882bd4b42feb564572ba9a195",
+          "method": "patch"
+        }
+      ],
+      "problems": [
+        {
+          "path": "docs/architecture.md",
+          "reason": "hunk context not found"
+        },
+        {
+          "path": "docs/building.md",
+          "reason": "hunk context not found"
+        },
+        {
+          "path": "README.md",
+          "reason": "hunk context not found"
+        }
+      ]
+    },
+    {
+      "id": "call_x4iBcIwikzercDLacyvuhtDK:0",
+      "time": "2026-07-24T04:07:23.399Z",
+      "orderTime": "2026-07-24T04:50:00.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "cc6f05fbe3f53e0956cce1b59ff5aa7fff765ca22c2ed917bc74ad68ddde3779",
+      "source": {
+        "session": "019f924e-7570-7350-947c-71b35195b082",
+        "line": 704
+      },
+      "turn": "019f9273-ee4b-7c32-85a0-f8ce2e46e7ae",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "tools/verify-pe/main_test.go",
+          "before": "2e680b9a407fe0dff6745d4a200f4cc4896824e882bd4b42feb564572ba9a195",
+          "after": "79d4e4a33daf34473ca111cf666f84652d8d5945e61817ace0f1ade27fea9318",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_8q4Ak9sHRHTob3bjNemDdIyO:0",
+      "time": "2026-07-24T05:09:01.645Z",
+      "orderTime": "2026-07-24T05:09:01.645Z",
+      "timeBasis": "record",
+      "hash": "f9fb689cfca33972e29ad2e78a9e0fdd943496238bc50a12b21da3f8a5850492",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 31529
+      },
+      "turn": "019f926c-ba23-7da3-a4b9-685e277272d6",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "cmd/RayanLamp/console_windows_test.go",
+          "before": "13d67b6595cadfad87b28e2865d5ea6e8db03297eb4a01adffc61a0663ac8a5b",
+          "after": "3cebf57779794a397e6042d17692d04c2214d42883991120cadb1a8fb36802d1",
+          "method": "patch"
+        }
+      ],
+      "problems": [
+        {
+          "path": "cmd/RayanLamp/console_windows.go",
+          "reason": "missing preimage"
+        }
+      ]
+    },
+    {
+      "id": "call_dB55LszgP7pGJDNahuS4Hg8f:0",
+      "time": "2026-07-24T05:09:10.178Z",
+      "orderTime": "2026-07-24T05:09:10.178Z",
+      "timeBasis": "record",
+      "hash": "5cf3ed1a4306aa6ea36f521a09a6b65f07d39726886685fcccaf8c12d4fca7b6",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 31534
+      },
+      "turn": "019f926c-ba23-7da3-a4b9-685e277272d6",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "CHANGELOG.md",
+          "before": "3412866ccfe4639ecd2361eb08df7a675b59fcf03b8893ca6a7167f0c4ae4823",
+          "after": "17a5c92bf9935c6bcc5a2321da200b52cfe9605cf5a60d8bbe0daf9b1d92aa5a",
+          "method": "patch"
+        }
+      ],
+      "problems": [
+        {
+          "path": "README.md",
+          "reason": "hunk context not found"
+        }
+      ]
+    }
+  ],
+  "finalChanges": [
+    {
+      "path": "tools/build-linux.sh",
+      "sha256": "2531af9ff9d21db1091bb04d3d12f04904f34bfda4fc82aa0308b5f3817fcfcc"
+    },
+    {
+      "path": "tools/verify-pe/main.go",
+      "sha256": "e502c947c8cb82bde352be12050e9b0c2091245f5a40359bbcc70a6858507cf2"
+    },
+    {
+      "path": "tools/verify-pe/main_test.go",
+      "sha256": "79d4e4a33daf34473ca111cf666f84652d8d5945e61817ace0f1ade27fea9318"
+    },
+    {
+      "path": "cmd/RayanLamp/console_windows_test.go",
+      "sha256": "3cebf57779794a397e6042d17692d04c2214d42883991120cadb1a8fb36802d1"
+    },
+    {
+      "path": "resources/RayanLamp.exe.manifest",
+      "sha256": "5652d5c14f549230ab137df3ef5f1f2ba78f102e7b8999562eec7ec48b72d802"
+    },
+    {
+      "path": "CHANGELOG.md",
+      "sha256": "17a5c92bf9935c6bcc5a2321da200b52cfe9605cf5a60d8bbe0daf9b1d92aa5a"
+    }
+  ]
+}

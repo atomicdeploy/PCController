@@ -389,15 +389,16 @@ func (model Model) controlTableRows(snapshot control.Snapshot, levelWidth int) [
 		rows = append(rows, controlTableRow{Name: "All relays", Value: "Turn OFF", Tone: controlToneAction, Action: "relay off", Kind: "relay-all"})
 		motionAFallback, _ := appconfig.PeripheralDefaultName("motion.a")
 		motionBFallback, _ := appconfig.PeripheralDefaultName("motion.b")
-		motionA := model.peripheralName("motion.a", motionAFallback)
-		motionB := model.peripheralName("motion.b", motionBFallback)
+		motionAKey, motionBKey := model.motionControlKey("a"), model.motionControlKey("b")
+		motionA := model.peripheralName(motionAKey, motionAFallback)
+		motionB := model.peripheralName(motionBKey, motionBFallback)
 		rows = append(rows,
-			controlTableRow{Group: "MOTION", Name: motionA + " · UP", Value: "Run", Tone: controlToneAction, Action: "relay side left up", Kind: "motion", PeripheralKey: "motion.a"},
-			controlTableRow{Name: motionA + " · STOP", Value: "Stop", Tone: controlToneAction, Action: "relay side left stop", Kind: "motion", PeripheralKey: "motion.a"},
-			controlTableRow{Name: motionA + " · DOWN", Value: "Run", Tone: controlToneAction, Action: "relay side left down", Kind: "motion", PeripheralKey: "motion.a"},
-			controlTableRow{Name: motionB + " · UP", Value: "Run", Tone: controlToneAction, Action: "relay side right up", Kind: "motion", PeripheralKey: "motion.b"},
-			controlTableRow{Name: motionB + " · STOP", Value: "Stop", Tone: controlToneAction, Action: "relay side right stop", Kind: "motion", PeripheralKey: "motion.b"},
-			controlTableRow{Name: motionB + " · DOWN", Value: "Run", Tone: controlToneAction, Action: "relay side right down", Kind: "motion", PeripheralKey: "motion.b"},
+			controlTableRow{Group: "MOTION", Name: motionA + " · UP", Value: "Run", Tone: controlToneAction, Action: "relay side left up", Kind: "motion", PeripheralKey: motionAKey},
+			controlTableRow{Name: motionA + " · STOP", Value: "Stop", Tone: controlToneAction, Action: "relay side left stop", Kind: "motion", PeripheralKey: motionAKey},
+			controlTableRow{Name: motionA + " · DOWN", Value: "Run", Tone: controlToneAction, Action: "relay side left down", Kind: "motion", PeripheralKey: motionAKey},
+			controlTableRow{Name: motionB + " · UP", Value: "Run", Tone: controlToneAction, Action: "relay side right up", Kind: "motion", PeripheralKey: motionBKey},
+			controlTableRow{Name: motionB + " · STOP", Value: "Stop", Tone: controlToneAction, Action: "relay side right stop", Kind: "motion", PeripheralKey: motionBKey},
+			controlTableRow{Name: motionB + " · DOWN", Value: "Run", Tone: controlToneAction, Action: "relay side right down", Kind: "motion", PeripheralKey: motionBKey},
 		)
 	}
 	if snapshot.HaveStatus && snapshot.Hello.Capabilities&native.CapabilityPWM != 0 && status.PWMAvailable {
@@ -435,7 +436,7 @@ func (model Model) controlTableRows(snapshot control.Snapshot, levelWidth int) [
 		}
 		target := uint16(targetBrightness)*16 + uint16(targetBrightness)/16
 		rows = append(rows, controlTableRow{
-			Group: "LIGHTING", Name: "CH 12 · Enclosure illumination · manual override",
+			Group: "LIGHTING", Name: "CH 12 · " + model.peripheralName("pwm.11", "Enclosure illumination") + " · manual override",
 			Value: sliderPercentPlain(percent, levelWidth) + fmt.Sprintf(" %3d%%", percent), Tone: controlToneLevel,
 			Detail: fmt.Sprintf("applied %d/4095 · policy %d/4095", value, target),
 			Kind:   "pwm", Index: 11, PeripheralKey: "pwm.11",
@@ -473,6 +474,28 @@ func (model Model) controlTableRows(snapshot control.Snapshot, levelWidth int) [
 			controlTableRow{Name: "Stop stream", Value: "Enter stop", Tone: controlToneAction, Action: "strip stop", Kind: "strip"},
 			controlTableRow{Name: "Stream status", Value: "Enter inspect", Tone: controlToneAction, Action: "strip status", Kind: "strip"},
 		)
+	}
+	if model.channels.source.Read != nil && model.channels.owner == model.channelCatalogOwner() {
+		advertised := make(map[string]bool)
+		for _, control := range model.channels.value.Controls {
+			advertised[control.Key] = true
+		}
+		filtered := make([]controlTableRow, 0, len(rows))
+		group := ""
+		for _, row := range rows {
+			if row.Group != "" {
+				group = row.Group
+			}
+			if row.PeripheralKey != "" && !advertised[row.PeripheralKey] {
+				continue
+			}
+			row.Group, group = group, ""
+			filtered = append(filtered, row)
+		}
+		rows = filtered
+	}
+	for index := range rows {
+		_, rows[index].Icon = model.channelPresentation(rows[index].PeripheralKey)
 	}
 	return rows
 }

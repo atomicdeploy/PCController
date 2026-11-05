@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { closeSync, existsSync, fstatSync, openSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveRepository } from "./repository-context.mjs";
@@ -7,6 +8,7 @@ import { loadProjectEnv } from "../../Tools/Build/env.mjs";
 import {
   actionPinFindings,
   isGeneratedOrBinaryPath,
+  isVendoredNativeSource,
   markdownAnchors,
   privacyFindings,
   readOrdinaryTextFile,
@@ -147,6 +149,11 @@ const forbiddenTrackedPaths = [
   /^Tools\/VirtualBoard\/build\//i,
 ];
 const forbiddenTrackedExtensions = /\.(dll|elf|exe|hex|o|obj|upx|zip)$/i;
+// Preserve the complete donor artwork, not an arbitrary exemption for large
+// future files. A changed animation requires explicit size/provenance review.
+const reviewedLargeAssets = new Map([
+  ["Tools/NativeDesktop/assets/lamp-transition.apng", "1cc2a888ba804f1a0a6560447bf69680e0d99a617d5d1548b42558e5d09cb86d"],
+]);
 
 for (const relativePath of trackedFiles) {
   const normalized = relativePath.replaceAll("\\", "/");
@@ -157,12 +164,22 @@ for (const relativePath of trackedFiles) {
     report(`generated binary is tracked: ${normalized}`);
   }
   const absolutePath = resolve(root, relativePath);
-  if (
-    filesCameFromGit &&
-    existsSync(absolutePath) &&
-    statSync(absolutePath).size > 5 * 1024 * 1024
-  ) {
-    report(`tracked file exceeds 5 MiB: ${normalized}`);
+  if (filesCameFromGit) {
+    let descriptor;
+    try {
+      descriptor = openSync(absolutePath, "r");
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+      continue; // A tracked file may be intentionally deleted before staging.
+    }
+    try {
+      if (fstatSync(descriptor).size > 5 * 1024 * 1024 &&
+          reviewedLargeAssets.get(normalized) !== createHash("sha256").update(readFileSync(descriptor)).digest("hex")) {
+        report(`tracked file exceeds 5 MiB: ${normalized}`);
+      }
+    } finally {
+      closeSync(descriptor);
+    }
   }
 }
 
@@ -218,7 +235,8 @@ for (const relativePath of sourceFiles) {
   const absolutePath = resolve(root, relativePath);
   if (
     !existsSync(absolutePath) ||
-    isGeneratedOrBinaryPath(normalized)
+    isGeneratedOrBinaryPath(normalized) ||
+    isVendoredNativeSource(normalized)
   ) {
     continue;
   }
@@ -277,6 +295,7 @@ function hasMarkdownAnchor(path, fragment) {
 }
 
 for (const relativePath of trackedFiles.filter((path) => path.endsWith(".md"))) {
+  if (isVendoredNativeSource(relativePath)) continue;
   const markdownPath = resolve(root, relativePath);
   // A local acceptance run may include intentionally deleted tracked docs
   // before the changes are committed. Git no longer lists them after merge,

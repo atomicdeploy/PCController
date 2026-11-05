@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#17354A"/>
+      <stop offset="1" stop-color="#071722"/>
+    </linearGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="2.2"/>
+    </filter>
+  </defs>
+  <rect x="5" y="5" width="54" height="54" rx="17" fill="url(#tile)"
+        stroke="#45E2D0" stroke-width="2.4"/>
+  <path d="M17 15c8-7 22-8 31-1" fill="none" stroke="#FFFFFF"
+        stroke-width="2.5" stroke-linecap="round" opacity=".28"/>
+  <circle cx="32" cy="34" r="17" fill="#45E2D0" opacity=".13" filter="url(#glow)"/>
+  <g fill="none" stroke="#45E2D0" stroke-width="4" stroke-linecap="round"
+     stroke-linejoin="round">
+          <path d="M47 24a17 17 0 0 0-29-5l-4 5M17 24h-7v-8
+               M17 40a17 17 0 0 0 29 5l4-5M47 40h7v8"/>
+  </g>
+</svg>

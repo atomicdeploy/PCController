@@ -17,6 +17,7 @@
 *.elf
 *.bin
 *.map
+!Tools/NativeDesktop/internal/webui/dist/**/*.map
 *.lst
 /Tools/Controller/internal/defaultassets/assets/default-metadata.json
 
@@ -39,6 +40,7 @@ coverage.html
 # Node package/install state
 **/node_modules/
 **/.vite-cache/
+**/.vitest/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

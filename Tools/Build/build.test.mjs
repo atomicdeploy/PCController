@@ -303,6 +303,24 @@ test('embedded toast bytes invalidate both package identity and stable Go tests'
 	}
 })
 
+test('native module source and assets invalidate controller package and test identities', async t => {
+	const root = await mkdtemp(join(tmpdir(), 'controller-native-identity-'))
+	t.after(() => rm(root, { recursive: true, force: true }))
+	const host = join(root, 'Controller')
+	const native = join(root, 'NativeDesktop')
+	await mkdir(host)
+	await mkdir(join(native, 'assets'), { recursive: true })
+	await mkdir(join(native, 'internal', 'ui'), { recursive: true })
+	for (const name of ['go.mod', 'internal/ui/paint_windows.go', 'assets/icon.png']) {
+		await writeFile(join(native, name), 'before')
+		const beforePackage = hostSourceIdentity(host)
+		const beforeTest = goTestSourceIdentity(host, 'fixture')
+		await writeFile(join(native, name), 'after')
+		assert.notEqual(hostSourceIdentity(host).sha256, beforePackage.sha256)
+		assert.notEqual(goTestSourceIdentity(host, 'fixture').sha256, beforeTest.sha256)
+	}
+})
+
 test('package publishing tolerates a shell holding the canonical directory', async t => {
         const root = await mkdtemp(join(tmpdir(), 'pccontroller-package-lock-'))
         t.after(() => rm(root, { recursive: true, force: true }))

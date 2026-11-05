@@ -1,0 +1,139 @@
+{
+  "turn": "019f8fa0-9470-7523-9d59-22a63ca5e860",
+  "observedStart": "2026-07-23T15:38:13.544Z",
+  "observedEnd": "2026-07-23T15:44:31.237Z",
+  "title": "snap: recover temporary Ctrl bypass during dragging",
+  "events": [
+    {
+      "id": "call_4Tc9QM5T4nVJ28rjvRfjBbm1:0",
+      "time": "2026-07-23T15:02:08.482Z",
+      "orderTime": "2026-07-23T15:39:18.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "848d052fb6634d823787daa584cfe55587380dc4174993f1b640653c6235a8e6",
+      "source": {
+        "session": "019f8f7f-8adf-7223-bdd2-c4fb9abd0998",
+        "line": 707
+      },
+      "turn": "019f8fa0-be74-7330-a3a5-36321e2dfc9e",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/ui/snap_windows.go",
+          "before": "b3440b2a28611141224d71095e88b91122e87e7c096b4b7e63f78e5f088cf56e",
+          "after": "674159398ced693a707df0b790b35cf04be2286e93aee3b35ec2695e71a19691",
+          "method": "patch"
+        },
+        {
+          "path": "internal/ui/snap_windows_test.go",
+          "before": "a17e5d6c8758906ac330cf6b436ea1f99c4517f107e0e51dcb5a114f905c489b",
+          "after": "7bd0ab09904fd135176962fe7083ff699adbecb13db304134ce73fdab978a39b",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_yytVx1MvHxnwcFK0oVnYvROD:0",
+      "time": "2026-07-23T15:41:40.300Z",
+      "orderTime": "2026-07-23T15:41:40.300Z",
+      "timeBasis": "record",
+      "hash": "9bca95c5d719847e22397901af7f313e566f28ee0222e83972cb43e73dcbfc48",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 13589
+      },
+      "turn": "019f8fa0-9470-7523-9d59-22a63ca5e860",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/ui/shell_windows.go",
+          "before": "59ba75915124e24c6227c724ba9b8cc1c12475c6395ed6019fe3fe29af8d83a8",
+          "after": "7afdc24bed9d9c162266d8a0eab144df83beebb99ce9a5006ef4c848887ed97c",
+          "method": "patch"
+        },
+        {
+          "path": "internal/ui/snap_windows_test.go",
+          "before": "7bd0ab09904fd135176962fe7083ff699adbecb13db304134ce73fdab978a39b",
+          "after": "ad14e90e3addea962b49cc2098d4ad1a43ad55991676dbaaf3280fc987db3ccc",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_aRAnysi8jPY8xZsXBJS3tRHU:0",
+      "time": "2026-07-23T15:42:36.201Z",
+      "orderTime": "2026-07-23T15:42:36.201Z",
+      "timeBasis": "record",
+      "hash": "4277c0cb436ebc5edc9b8174e3e649819e15116bf9e433eb5cda66c50a47c2d4",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 13609
+      },
+      "turn": "019f8fa0-9470-7523-9d59-22a63ca5e860",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "webui/src/views/settings.tsx",
+          "before": "9da0f0f4aeb76cfe073cdc8f36594333e780360171f189a5b792dee38dc6872f",
+          "after": "97a7d3f237d2bf42125859981971121411f4af72fb5685f5757cb535b618f0d9",
+          "method": "patch"
+        },
+        {
+          "path": "docs/configuration.md",
+          "before": "1055996207fd8e95c559ef89f60434b50d4eefea1ca45dd7abaa0d962f6c9dd8",
+          "after": "2166ee87dd30240c5c88c7dc4de4977014050ba59f86c12973c5f909c09734d5",
+          "method": "patch"
+        },
+        {
+          "path": "docs/architecture.md",
+          "before": "da66ee62c266fbdbc37094e36dea01649ca0836e4d1b8903fba8ad091af2a027",
+          "after": "83acae668268b10583b06fdaea839eb84bc456b549bc0355908e79a12b74e201",
+          "method": "patch"
+        },
+        {
+          "path": "README.md",
+          "before": "46dc7e445f0b5ac1c9653f01d1cbf7e9e60531b109de4d088eadf2d471fdac09",
+          "after": "b1b604c8795131f9ca392e68c5ce8a0c0b6ada4b5f8e1e2bb819fe260602887c",
+          "method": "patch"
+        }
+      ],
+      "problems": [
+        {
+          "path": "internal/dialogs/settings_windows.go",
+          "reason": "missing preimage"
+        }
+      ]
+    }
+  ],
+  "finalChanges": [
+    {
+      "path": "internal/ui/snap_windows.go",
+      "sha256": "674159398ced693a707df0b790b35cf04be2286e93aee3b35ec2695e71a19691"
+    },
+    {
+      "path": "internal/ui/snap_windows_test.go",
+      "sha256": "ad14e90e3addea962b49cc2098d4ad1a43ad55991676dbaaf3280fc987db3ccc"
+    },
+    {
+      "path": "internal/ui/shell_windows.go",
+      "sha256": "7afdc24bed9d9c162266d8a0eab144df83beebb99ce9a5006ef4c848887ed97c"
+    },
+    {
+      "path": "webui/src/views/settings.tsx",
+      "sha256": "97a7d3f237d2bf42125859981971121411f4af72fb5685f5757cb535b618f0d9"
+    },
+    {
+      "path": "docs/configuration.md",
+      "sha256": "2166ee87dd30240c5c88c7dc4de4977014050ba59f86c12973c5f909c09734d5"
+    },
+    {
+      "path": "docs/architecture.md",
+      "sha256": "83acae668268b10583b06fdaea839eb84bc456b549bc0355908e79a12b74e201"
+    },
+    {
+      "path": "README.md",
+      "sha256": "b1b604c8795131f9ca392e68c5ce8a0c0b6ada4b5f8e1e2bb819fe260602887c"
+    }
+  ]
+}

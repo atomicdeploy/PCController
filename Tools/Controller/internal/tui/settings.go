@@ -273,6 +273,8 @@ func (model Model) appSettingRows() []settingRow {
 			case rows[index].Key == "lcd.services":
 				rows[index].Editable = false
 				rows[index].Value = "local host service unavailable in remote mode"
+			case strings.HasPrefix(rows[index].Key, peripheralNameSettingPrefix) && model.channels.source.Read != nil:
+				rows[index].Editable = model.channels.source.Rename != nil && model.channels.value.BoardProfile.Attached && model.channels.value.BoardProfile.Configured
 			case rows[index].Key == "app.title", rows[index].Key == "app.tagline",
 				strings.HasPrefix(rows[index].Key, peripheralNameSettingPrefix):
 				rows[index].Editable = model.remote.SaveHostUI != nil
@@ -287,6 +289,9 @@ func (model Model) appSettingRows() []settingRow {
 
 func (model Model) peripheralNameSettingRows() []settingRow {
 	descriptors := appconfig.PeripheralDescriptors()
+	if model.channels.source.Read != nil {
+		descriptors = model.channels.value.Peripherals
+	}
 	rows := make([]settingRow, 0, len(descriptors))
 	previousKind := ""
 	for _, descriptor := range descriptors {
@@ -296,14 +301,14 @@ func (model Model) peripheralNameSettingRows() []settingRow {
 		group := ""
 		if descriptor.Kind != previousKind {
 			group = map[string]string{
-				"relay": "NAMES · RELAY", "motion": "MOTION", "pwm": "PWM",
+				"relay": "NAMES · RELAY", "motion": "MOTION", "seat": "MOTION", "pwm": "PWM",
 				"display": "DISPLAYS", "sensor": "SENSORS",
 			}[descriptor.Kind]
 			previousKind = descriptor.Kind
 		}
 		name := model.peripheralName(descriptor.Key, descriptor.DefaultName)
 		qualifier := "default"
-		if custom := strings.TrimSpace(model.uiValue.PeripheralNames[descriptor.Key]); custom != "" && custom != descriptor.DefaultName {
+		if name != descriptor.DefaultName {
 			qualifier = "custom"
 		}
 		rows = append(rows, settingRow{
@@ -322,7 +327,7 @@ func (model Model) peripheralAdvertised(descriptor appconfig.PeripheralDescripto
 	}
 	capabilities := snapshot.Hello.Capabilities
 	switch descriptor.Kind {
-	case "relay", "motion":
+	case "relay", "motion", "seat":
 		return capabilities&native.CapabilityRelayMotion != 0
 	case "pwm":
 		return snapshot.HaveStatus && capabilities&native.CapabilityPWM != 0 && snapshot.Status.PWMAvailable
@@ -386,7 +391,8 @@ func (model Model) beginSettingEditor() (Model, bool) {
 		return model, true
 	}
 	model.settingEditor = editor
-	if _, ok := peripheralDescriptorForSettingKey(editor.Key); ok {
+	if _, ok := model.catalogSettingDescriptor(editor.Key); ok {
+		model.channels.renameRevision = model.channels.value.BoardProfile.Revision
 		model.setNotice("Host-only name · Enter saves · Ctrl+U then Enter restores default · Esc discards")
 	} else {
 		model.setNotice("Edit draft · Enter saves · Esc discards")
@@ -458,7 +464,7 @@ func (model Model) buildBoardSettingEditor(editor *settingEditor) {
 func (model Model) buildAppSettingEditor(editor *settingEditor) {
 	ui := model.uiValue
 	status := model.hostIntegrationValue.StatusLED
-	if descriptor, ok := peripheralDescriptorForSettingKey(editor.Key); ok {
+	if descriptor, ok := model.catalogSettingDescriptor(editor.Key); ok {
 		editor.IsText = true
 		editor.Text = model.peripheralName(descriptor.Key, descriptor.DefaultName)
 		return

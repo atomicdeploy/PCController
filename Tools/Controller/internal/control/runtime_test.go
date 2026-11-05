@@ -210,7 +210,7 @@ func TestPulseResetUsesRememberedPortBeforeAuthentication(t *testing.T) {
 	if err := runtime.PulseResetPortFor(context.Background(), "", time.Millisecond); err != nil {
 		t.Fatal(err)
 	}
-	if len(port.dtr) != 2 || !port.dtr[0] || port.dtr[1] {
+	if len(port.dtr) != 3 || port.dtr[0] || !port.dtr[1] || port.dtr[2] {
 		t.Fatalf("unexpected DTR sequence: %v", port.dtr)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)

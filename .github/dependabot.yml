@@ -26,7 +26,10 @@ updates:
           - "*"
 
   - package-ecosystem: gomod
-    directory: /Tools/Controller
+    directories:
+      - /Tools/Controller
+      - /Tools/NativeDesktop
+      - /Tools/NativeDesktop/vendor/github.com/lxn/walk
     schedule:
       interval: weekly
       day: monday
@@ -56,6 +59,7 @@ updates:
       - /Tools/Build
       - /Tools/Firmware
       - /Tools/Controller/web
+      - /Tools/NativeDesktop/webui
     schedule:
       interval: weekly
       day: monday

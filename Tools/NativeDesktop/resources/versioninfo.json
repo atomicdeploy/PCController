@@ -1,0 +1,41 @@
+{
+  "FixedFileInfo": {
+    "FileVersion": {
+      "Major": 1,
+      "Minor": 0,
+      "Patch": 0,
+      "Build": 0
+    },
+    "ProductVersion": {
+      "Major": 1,
+      "Minor": 0,
+      "Patch": 0,
+      "Build": 0
+    },
+    "FileFlagsMask": "3f",
+    "FileFlags": "00",
+    "FileOS": "040004",
+    "FileType": "01",
+    "FileSubType": "00"
+  },
+  "StringFileInfo": {
+    "Comments": "Unified Windows, command-line, and terminal controller for Rayan's Lamp",
+    "CompanyName": "YektaYar",
+    "FileDescription": "Rayan Lamp Unified Controller",
+    "FileVersion": "1.0.0.0",
+    "InternalName": "RayanLamp",
+    "LegalCopyright": "Copyright \u00a9 2026",
+    "LegalTrademarks": "",
+    "OriginalFilename": "RayanLamp.exe",
+    "PrivateBuild": "",
+    "ProductName": "Rayan Lamp",
+    "ProductVersion": "1.0.0",
+    "SpecialBuild": ""
+  },
+  "VarFileInfo": {
+    "Translation": {
+      "LangID": "0409",
+      "CharsetID": "04B0"
+    }
+  }
+}

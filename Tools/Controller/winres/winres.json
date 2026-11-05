@@ -23,6 +23,7 @@
         "minimum-os": "win7",
         "execution-level": "",
         "dpi-awareness": "per monitor v2",
+        "use-common-controls-v6": true,
         "long-path-aware": true
       }
     }

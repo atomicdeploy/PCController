@@ -10,6 +10,7 @@ import (
 
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/native"
+	"pccontroller.local/controller/internal/rgbinput"
 )
 
 const (
@@ -100,6 +101,8 @@ type OutputScheduler struct {
 	strip             *runningOutput
 	stripMu           sync.Mutex
 	stripStats        StripStreamStats
+	rgbInput          *rgbinput.Receiver
+	rgbInputRun       *runningOutput
 	statusBase        [4]byte
 	haveStatusBase    bool
 }

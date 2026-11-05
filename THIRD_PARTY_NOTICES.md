@@ -7,6 +7,21 @@ relicense any item listed here.
 
 ## Source incorporated in this repository
 
+### RayanLamp native desktop
+
+`Tools/NativeDesktop` preserves the complete RayanLamp source import and its
+vendored dependencies. Original project code and artwork are copyright 2026
+YektaYar, under the [retained MIT license](Tools/NativeDesktop/LICENSE).
+[Donor attribution and dependency terms](Tools/NativeDesktop/docs/attribution.md)
+remain authoritative; the PCController dual-license declaration does not
+relicense vendored code. The donor-only YekanBakh font is excluded from current
+assets and packages. Its replacement Vazirmatn uses the
+[SIL Open Font License](Tools/NativeDesktop/assets/fonts/OFL.txt).
+
+See the [source-preservation and runtime coverage audit](docs/NATIVE-DONOR-COVERAGE.md)
+for the imported revision and the distinction between retained source and
+integrated runtime features.
+
 ### Adafruit NeoPixel AVR timing loop
 
 `Project/AddressableLeds.cpp` contains an adapted 20-cycle AVR WS281x sender

@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import {
   actionPinFindings,
   isGeneratedOrBinaryPath,
+  isVendoredNativeSource,
   isOrdinaryTextFile,
   markdownAnchors,
   privacyFindings,
@@ -15,6 +16,16 @@ import {
 } from "./repository-policy.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+
+test("native donor policy distinguishes upstream dependencies from maintained integration", () => {
+  assert.equal(isVendoredNativeSource("Tools/NativeDesktop/vendor/github.com/lxn/walk/README.md"), true);
+  assert.equal(isVendoredNativeSource("Tools/NativeDesktop/internal/ui/paint_windows.go"), false);
+  assert.equal(isGeneratedOrBinaryPath("Tools/NativeDesktop/internal/webui/dist/sw.js.map"), true);
+  assert.equal(isGeneratedOrBinaryPath("Tools/NativeDesktop/webui/src/main.ts"), false);
+  const context = { repository: "atomicdeploy/PCController" };
+  assert.deepEqual(privacyFindings("Tools/NativeDesktop/webui/package-lock.json", "https://github.com/vendor/dependency", context), []);
+  assert.equal(privacyFindings("Tools/NativeDesktop/internal/ui/example.go", "https://github.com/other/private-project", context)[0].kind, "unreviewed repository reference");
+});
 
 test("reusable hosts preserve and assert the exact firmware-job defaults", () => {
   const host = readFileSync(resolve(root, ".github/workflows/host.yml"), "utf8");

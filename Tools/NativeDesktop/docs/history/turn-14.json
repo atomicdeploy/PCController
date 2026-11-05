@@ -1,0 +1,294 @@
+{
+  "turn": "019f9052-2c61-7fb1-aea9-9a24a6f6c7d8",
+  "observedStart": "2026-07-23T18:52:13.753Z",
+  "observedEnd": "2026-07-23T19:12:11.011Z",
+  "title": "controls: recover release-to-activate button behavior",
+  "events": [
+    {
+      "id": "call_aDKTEH1otnePKPYSpFYr3F85:0",
+      "time": "2026-07-23T18:57:09.647Z",
+      "orderTime": "2026-07-23T18:57:09.647Z",
+      "timeBasis": "record",
+      "hash": "03879764914a171c809376698e5d488840f4feae7ca4f219545d89b97b84b17e",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 17923
+      },
+      "turn": "019f9052-2c61-7fb1-aea9-9a24a6f6c7d8",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/ui/button_activation_windows.go",
+          "before": null,
+          "after": "f6c3a7ebf138c4bd58de885ee7082855b68cdf90abf1e59811f1484404160fdc",
+          "method": "patch"
+        },
+        {
+          "path": "internal/ui/shell_windows.go",
+          "before": "7683ee3448e829fe308d0b11173098eaeeaa71131f243fbd117aadff13f5f982",
+          "after": "52ed32ad12e94cc7cae0fee2cac20064715ddf84d55915aa449911e8495bb2e9",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_GtWd4PhmWzPCSn6fkmDMo1vy:0",
+      "time": "2026-07-23T18:57:26.223Z",
+      "orderTime": "2026-07-23T18:57:26.223Z",
+      "timeBasis": "record",
+      "hash": "90858feeeab2e81001c6d2ff046d9544c44b49fa598162f8e4efc84ea9d6fe90",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 17928
+      },
+      "turn": "019f9052-2c61-7fb1-aea9-9a24a6f6c7d8",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/ui/shell_windows.go",
+          "before": "52ed32ad12e94cc7cae0fee2cac20064715ddf84d55915aa449911e8495bb2e9",
+          "after": "616c532ade3310a2f9bca42eaded5b7f2c3b004986d7ccdc450331406ee76a34",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_6tW3CZYN8Yc7kg1ZrmRalf23:0",
+      "time": "2026-07-23T18:57:54.455Z",
+      "orderTime": "2026-07-23T18:57:54.455Z",
+      "timeBasis": "record",
+      "hash": "9bfd86749e64472e969f13a65b8b352dc39aae0f8f5eae79fc1e1ca2827a7365",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 17933
+      },
+      "turn": "019f9052-2c61-7fb1-aea9-9a24a6f6c7d8",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/ui/shell_windows.go",
+          "before": "616c532ade3310a2f9bca42eaded5b7f2c3b004986d7ccdc450331406ee76a34",
+          "after": "ce6239700640e2dfcd1dceba9314cf1079e5ccb80c71c48cd314eb2e78f99c4d",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_KHxHhtkAcsLsOqq9zxDklyrr:0",
+      "time": "2026-07-23T18:58:46.045Z",
+      "orderTime": "2026-07-23T18:58:46.045Z",
+      "timeBasis": "record",
+      "hash": "36d45c00a8d6dff5abcae114a895555d4340970bc76bdefc42d1610f6e55ed31",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 17946
+      },
+      "turn": "019f9052-2c61-7fb1-aea9-9a24a6f6c7d8",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/ui/button_activation_windows.go",
+          "before": "f6c3a7ebf138c4bd58de885ee7082855b68cdf90abf1e59811f1484404160fdc",
+          "after": "7f1a9bb086522d6dae786cf2e74dd3a62f3430fdc6dccc8652ebeea97e5e899f",
+          "method": "patch"
+        },
+        {
+          "path": "internal/ui/shell_windows.go",
+          "before": "ce6239700640e2dfcd1dceba9314cf1079e5ccb80c71c48cd314eb2e78f99c4d",
+          "after": "e5739816b8c6de039a2425ea5459e46112da6d2d7ddb61e1766ca603d4df368e",
+          "method": "patch"
+        },
+        {
+          "path": "internal/ui/button_activation_windows_test.go",
+          "before": null,
+          "after": "ff3752cfceb059359c8ece22377b9355f04328ccb7175b72d6270e91105acc45",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_JlgDHqan2RTHkUTM0nR4CXp4:0",
+      "time": "2026-07-23T18:59:01.374Z",
+      "orderTime": "2026-07-23T18:59:01.374Z",
+      "timeBasis": "record",
+      "hash": "2b23badf88907db18b0fc60ba6af766588df2b4204ad00ca0b792f7a900f7d2c",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 17959
+      },
+      "turn": "019f9052-2c61-7fb1-aea9-9a24a6f6c7d8",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/ui/shell_windows.go",
+          "before": "e5739816b8c6de039a2425ea5459e46112da6d2d7ddb61e1766ca603d4df368e",
+          "after": "e0c3f7bfc1a4a64796830a3d04530b5aa5c8a0bbf1c085293e3827b8a9625943",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_274zVgq44QXyOxIcivjv7Nue:0",
+      "time": "2026-07-23T19:01:49.111Z",
+      "orderTime": "2026-07-23T19:01:49.111Z",
+      "timeBasis": "record",
+      "hash": "ce3180720c9ba0a16cf8669aed85c52706c231b296b53f4ad05330f37c002d76",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 18026
+      },
+      "turn": "019f9052-2c61-7fb1-aea9-9a24a6f6c7d8",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/ui/shell_windows.go",
+          "before": "e0c3f7bfc1a4a64796830a3d04530b5aa5c8a0bbf1c085293e3827b8a9625943",
+          "after": "073ed5555ef6287404203cf77c0ab5375fecd5e011ec77d51724a4be62cd6be7",
+          "method": "patch"
+        },
+        {
+          "path": "docs/visual-regression-contract.md",
+          "before": "18c4221c3ed948d26798185f2fa6307453a2ef40e1180137840bdd87a8ce88f5",
+          "after": "3dae78faed5ad513755163e709423d0f089229f4c15c22bfad0ddc4cccce5e0a",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_MdNcy9ynUqLy65hdezIUC9Qc:0",
+      "time": "2026-07-23T19:05:25.009Z",
+      "orderTime": "2026-07-23T19:05:25.009Z",
+      "timeBasis": "record",
+      "hash": "bf6a4460118a66cb87d4c883c40435bec4c1fa37bf37b0aa4d7150a05a9fde7c",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 18098
+      },
+      "turn": "019f9052-2c61-7fb1-aea9-9a24a6f6c7d8",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/ui/button_activation_windows.go",
+          "before": "7f1a9bb086522d6dae786cf2e74dd3a62f3430fdc6dccc8652ebeea97e5e899f",
+          "after": "75ab24d301ea6c4050f5941574bcf3dfa06cab57b24d0b598ca89f6bed0be66f",
+          "method": "patch-after-gofmt"
+        },
+        {
+          "path": "internal/ui/shell_windows.go",
+          "before": "073ed5555ef6287404203cf77c0ab5375fecd5e011ec77d51724a4be62cd6be7",
+          "after": "5cc2c8c767afb1c4f3f50989862077cce7332f768a6b15ebd0701b1827106289",
+          "method": "patch"
+        },
+        {
+          "path": "internal/ui/button_activation_windows_test.go",
+          "before": "ff3752cfceb059359c8ece22377b9355f04328ccb7175b72d6270e91105acc45",
+          "after": "205bfc089544780c8174c2a28812db881eecce7821399faee0a145b4dc556f02",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_rDaAdBpJTtgqQ84ocX4GEgxW:0",
+      "time": "2026-07-23T19:05:34.418Z",
+      "orderTime": "2026-07-23T19:05:34.418Z",
+      "timeBasis": "record",
+      "hash": "61f6b5b5b8af0b3f1a6b0589b9cd22fe66cb305788d0a4b9c55dc14189f2378d",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 18104
+      },
+      "turn": "019f9052-2c61-7fb1-aea9-9a24a6f6c7d8",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/ui/button_activation_windows.go",
+          "before": "75ab24d301ea6c4050f5941574bcf3dfa06cab57b24d0b598ca89f6bed0be66f",
+          "after": "bc75fc1b9db7b50008a321c507d6de1ba9bfb905eada551742b3423b276ce46d",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_O2u4qcRLs0EHbmbjyxbN8pYk:0",
+      "time": "2026-07-23T19:05:42.021Z",
+      "orderTime": "2026-07-23T19:05:42.021Z",
+      "timeBasis": "record",
+      "hash": "fd9950901e89d46ebdbbebcf7811fecc467fe13aa973e18acf3ce3affc9091f9",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 18109
+      },
+      "turn": "019f9052-2c61-7fb1-aea9-9a24a6f6c7d8",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/ui/button_activation_windows_test.go",
+          "before": "205bfc089544780c8174c2a28812db881eecce7821399faee0a145b4dc556f02",
+          "after": "064abeb0bba0619885e7a57a4ebc4c0bef01349bc41dfb6bd85062a0a7a58248",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_MtyKyOox2JGjNA8o9f24jetX:0",
+      "time": "2026-07-23T19:06:45.723Z",
+      "orderTime": "2026-07-23T19:06:45.723Z",
+      "timeBasis": "record",
+      "hash": "0c9a733207fb75aa865b8edbc5a277eed3a137c50cecb61c909aee5b42a8b924",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 18134
+      },
+      "turn": "019f9052-2c61-7fb1-aea9-9a24a6f6c7d8",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/ui/button_activation_windows.go",
+          "before": "bc75fc1b9db7b50008a321c507d6de1ba9bfb905eada551742b3423b276ce46d",
+          "after": "5a897baa53d93fb4b88006c993611767d5b6cc269d96d48be86a6f539ace7ce2",
+          "method": "patch"
+        },
+        {
+          "path": "internal/ui/shell_windows.go",
+          "before": "5cc2c8c767afb1c4f3f50989862077cce7332f768a6b15ebd0701b1827106289",
+          "after": "a29bfc67e71ccaed1b627f6b3b8b9774560a55e10f17392e710398515498a958",
+          "method": "patch"
+        },
+        {
+          "path": "internal/ui/button_activation_windows_test.go",
+          "before": "064abeb0bba0619885e7a57a4ebc4c0bef01349bc41dfb6bd85062a0a7a58248",
+          "after": "cd1ad4254be642d0b346b8a3627e32a64e7b5edbd18f873bf9a78c614c7ff4fb",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    }
+  ],
+  "finalChanges": [
+    {
+      "path": "internal/ui/button_activation_windows.go",
+      "sha256": "5a897baa53d93fb4b88006c993611767d5b6cc269d96d48be86a6f539ace7ce2"
+    },
+    {
+      "path": "internal/ui/shell_windows.go",
+      "sha256": "a29bfc67e71ccaed1b627f6b3b8b9774560a55e10f17392e710398515498a958"
+    },
+    {
+      "path": "internal/ui/button_activation_windows_test.go",
+      "sha256": "cd1ad4254be642d0b346b8a3627e32a64e7b5edbd18f873bf9a78c614c7ff4fb"
+    },
+    {
+      "path": "docs/visual-regression-contract.md",
+      "sha256": "3dae78faed5ad513755163e709423d0f089229f4c15c22bfad0ddc4cccce5e0a"
+    }
+  ]
+}

@@ -34,6 +34,7 @@ type controlTableRow struct {
 	Adjust        string
 	Kind          string
 	Index         int
+	Icon          string
 	PeripheralKey string
 }
 
@@ -112,7 +113,11 @@ func renderControlTable(
 		if selected {
 			marker = "▸ "
 		}
-		name := alignCell(marker+row.Name, columns[0].Width, lipgloss.Left)
+		caption := row.Name
+		if row.Icon != "" {
+			caption = terminalChannelIcon(row.Icon) + " " + caption
+		}
+		name := alignCell(marker+caption, columns[0].Width, lipgloss.Left)
 		// Optional diagnostics must never force an otherwise fitting measurement
 		// (especially the percent sign in 100%) through ellipsis truncation.
 		valueText := row.Value

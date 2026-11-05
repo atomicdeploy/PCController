@@ -278,9 +278,13 @@ func run(args []string, stdout, stderr io.Writer) (resultErr error) {
 		// unrelated listener or forwarded neighbour instead of this machine.
 		return runHostUpdateCommand(args[1:], stdout, stderr)
 	case "tui":
+		stopConsoleBridge := startNativeConsoleBridge()
+		defer stopConsoleBridge()
 		return runTUI(args[1:], stdout, stderr, store)
 	case "web":
 		return runWeb(args[1:], stdout, stderr, store)
+	case "gui":
+		return runNativeGUI(args[1:], stdout, stderr, store)
 	case "ports":
 		return runPorts(args[1:], stdout, stderr, store)
 	case "shell":
@@ -1343,6 +1347,7 @@ func runTUIWithInitialAction(
 			StartupWidth: startupTerminalWidth(stdout),
 			AutoConnect:  !*noAuto,
 			UIConfig:     func() appconfig.UI { return store.Current().UI },
+			ChannelCatalog: newTUIChannelCatalog(callPrimary),
 			SaveUI: func(value appconfig.UI) error {
 				_, err := store.UpdateUI(value)
 				return err

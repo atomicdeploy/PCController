@@ -145,7 +145,9 @@ import type {
 import { hardwareProblemPresentation } from './hardware-problem'
 import { buzzerPathFromState, type BuzzerPath } from './buzzer-routing'
 import { peripheralAvailability } from './peripheral-availability'
-import { resolvedControlName } from './control-descriptors'
+import { resolvedControlName, resolvedControlIcon, motionControlKey } from './control-descriptors'
+import { ChannelIcon } from './channel-icon'
+import { useChannelSettings, channelPresentationEventID, channelPresentationOwner } from './use-channel-settings'
 
 export interface SharedViewProps {
   reduceMotion?: boolean
@@ -361,26 +363,14 @@ export function DashboardView(props: SharedViewProps) {
       : boardConnection.title
   const hash = snapshot.hello.build_hash ? snapshot.hello.build_hash.toString(16).toUpperCase().padStart(8, '0') : '—'
   const activeRelayCount = Array.from({ length: 8 }, (_, index) => Boolean(status.active_relays & (1 << index))).filter(Boolean).length
-  const configurationEventID = events.find((event) => event.kind === 'config')?.id ?? 0
   const freshnessWindow = props.transport.measurementFreshnessMS ?? 1500
   const freshnessNow = useFreshnessClock(snapshot.status_updated, freshnessWindow)
   const measurementFreshness = formatMeasurementFreshness(locale, snapshot.status_updated, freshnessWindow, freshnessNow)
-  const [hostUI, setHostUI] = useState<HostUISettings | null>(null)
+  const [hostUI] = useChannelSettings(boardReady, snapshot, events, props.transport.streamState)
   const [layoutEditing, setLayoutEditing] = useState(false)
   const [layout, setLayout] = useState(() => loadCardLayout('dashboard', dashboardCardIDs))
   const [draggedCard, setDraggedCard] = useState<DashboardCardID | null>(null)
   const dashboardDragTarget = useRef<DashboardCardID | null>(null)
-  useEffect(() => {
-    if (!boardReady) {
-      setHostUI(null)
-      return
-    }
-    let active = true
-    void rpc<HostUISettings>('controller.ui.config.get')
-      .then((value) => { if (active) setHostUI(value) })
-      .catch(() => { if (active) setHostUI(null) })
-    return () => { active = false }
-  }, [boardReady, configurationEventID])
   const peripheralName = (key: string, fallback: string) => resolvedControlName(hostUI?.controls, key, hostUI?.peripheral_names?.[key]?.trim() || fallback)
   const relayDefaults = [
     copy('Side A direction', 'جهت سمت A'), copy('Side A output', 'خروجی سمت A'),
@@ -553,7 +543,7 @@ export function DashboardView(props: SharedViewProps) {
                   onClick={() => void command(`relay ${index + 1} ${active ? 'off' : 'on'}`, copy(`R${index + 1} ${active ? 'off' : 'on'}`, `رلهٔ ${index + 1} ${active ? 'خاموش' : 'روشن'} شد`))}
                   aria-pressed={active}
                 >
-                  <span>R{index + 1} · {peripheralName(`relay.${index + 1}`, relayDefaults[index])}</span><strong>{active ? t('on') : t('off')}</strong><i aria-hidden="true" />
+                  <span><ChannelIcon icon={resolvedControlIcon(hostUI?.controls, `relay.${index + 1}`)} />R{index + 1} · {peripheralName(`relay.${index + 1}`, relayDefaults[index])}</span><strong>{active ? t('on') : t('off')}</strong><i aria-hidden="true" />
                 </button>
               )
             })}
@@ -609,7 +599,7 @@ export function ControlsView(props: SharedViewProps) {
   const [pwmPending, setPWMPending] = useState<number[]>([])
   const [pwmError, setPWMError] = useState('')
   const [pwmAllBusy, setPWMAllBusy] = useState(false)
-  const [hostUI, setHostUI] = useState<HostUISettings | null>(null)
+  const [hostUI, setHostUI] = useChannelSettings(boardReady, snapshot, props.events, props.transport.streamState)
 	const pwmConfigRef = useRef<Record<string, PWMChannelConfig>>({})
   const [red, setRed] = useState(25)
   const [green, setGreen] = useState(130)
@@ -621,7 +611,6 @@ export function ControlsView(props: SharedViewProps) {
 	const [statusMinimum, setStatusMinimum] = useState(8)
 	const [statusRepeat, setStatusRepeat] = useState<'once' | 'loop'>('loop')
 	const [statusProfile, setStatusProfile] = useState('ready')
-  const configurationEventID = props.events.find((event) => event.kind === 'config')?.id ?? 0
   const pwmReportedRef = useRef(pwmReported)
   const pwmRevisionRef = useRef(0)
   const pwmOwnerRef = useRef('')
@@ -684,17 +673,6 @@ export function ControlsView(props: SharedViewProps) {
 
   useEffect(() => () => pwmSchedulerRef.current?.dispose(), [])
 
-  useEffect(() => {
-    if (!boardReady) {
-      setHostUI(null)
-      return
-    }
-    let active = true
-    void rpc<HostUISettings>('controller.ui.config.get')
-      .then((value) => { if (active) setHostUI(value) })
-      .catch(() => { if (active) setHostUI(null) })
-    return () => { active = false }
-  }, [boardReady, configurationEventID, props.events.find(event => event.kind === 'peripherals.changed')?.id, snapshot.port.name])
 
   useEffect(() => {
     if (!boardReady || !available.pwm) {
@@ -838,7 +816,7 @@ export function ControlsView(props: SharedViewProps) {
               const active = Boolean(snapshot.status.active_relays & (1 << index))
               return (
                 <article key={index} data-control-key={`relay.${index + 1}`} tabIndex={-1} className={`relay-switch${active ? ' is-active' : ''}`}>
-                  <span>R{index + 1}</span><RelayToggle active={active} disabled={!snapshot.connected || emergencyStopActive && !active} label={copy(`Toggle relay ${index + 1}`, `تغییر وضعیت رله ${index + 1}`)} onToggle={() => void command(`relay ${index + 1} ${active ? 'off' : 'on'}`)} /><small>{peripheralName(`relay.${index + 1}`, relayDefaults[index])}</small>
+                  <span>R{index + 1}</span><RelayToggle active={active} disabled={!snapshot.connected || emergencyStopActive && !active} label={copy(`Toggle relay ${index + 1}`, `تغییر وضعیت رله ${index + 1}`)} onToggle={() => void command(`relay ${index + 1} ${active ? 'off' : 'on'}`)} /><small><ChannelIcon icon={resolvedControlIcon(hostUI?.controls, `relay.${index + 1}`)} />{peripheralName(`relay.${index + 1}`, relayDefaults[index])}</small>
                   <div className="relay-switch__actions"><Button compact disabled={active || emergencyStopActive} onClick={() => void command(`relay ${index + 1} on`)}>{t('on')}</Button><Button compact disabled={!active} onClick={() => void command(`relay ${index + 1} off`)}>{t('off')}</Button></div>
                 </article>
               )
@@ -846,6 +824,8 @@ export function ControlsView(props: SharedViewProps) {
           </div>
           <div className="motion-actions">
             {(['left', 'right'] as const).map((side) => {
+              const key = motionControlKey(hostUI?.controls, side)
+              if (!key) return null
               const state = snapshot.motion?.[side]
               const presented = presentedMotionDirection(state)
               const label = presented === 'up'
@@ -855,9 +835,9 @@ export function ControlsView(props: SharedViewProps) {
                   : presented === 'stop'
                     ? copy('STOPPED', 'متوقف')
                     : copy('UNKNOWN', 'نامشخص')
-              return <div key={side} className="motion-side" data-control-key={side === 'left' ? 'seat.a' : 'seat.b'} tabIndex={-1}>
+              return <div key={side} className="motion-side" data-control-key={key} tabIndex={-1}>
                 <div className="motion-side__identity">
-                  <strong>{side === 'left' ? peripheralName('seat.a', copy('Side A motion', 'حرکت سمت A')) : peripheralName('seat.b', copy('Side B motion', 'حرکت سمت B'))}</strong>
+                  <strong><ChannelIcon icon={resolvedControlIcon(hostUI?.controls, key)} />{peripheralName(key, side === 'left' ? copy('Side A motion', 'حرکت سمت A') : copy('Side B motion', 'حرکت سمت B'))}</strong>
                   <StatusBadge tone={presented === 'unknown' ? 'neutral' : presented === 'stop' ? 'good' : state?.transitioning ? 'warn' : 'info'} pulse={state?.transitioning}>{state?.transitioning ? `${label} · ${copy('SYNCING', 'همگام‌سازی')}` : label}</StatusBadge>
                 </div>
                 <div className="motion-side__actions">
@@ -880,7 +860,7 @@ export function ControlsView(props: SharedViewProps) {
               const name = pwmName(channel)
 			  const config = pwmConfig(channel)
               return <div key={channel} data-control-key={`pwm.${channel}`} tabIndex={-1} className={`pwm-mixer__row${snapshot.status.pwm_channel === channel && !pending ? ' is-live' : ''}${pending ? ' is-pending' : ''}`}>
-				<div><strong>{config?.icon === 'lightbulb' ? '💡 ' : config?.output_type === 'motor' ? '⚙️ ' : ''}{name}</strong><small>{name === pwmDefaults[channel] ? `pwm.${channel}` : `${pwmDefaults[channel]} · pwm.${channel}`}</small><small>{pending
+				<div><strong><ChannelIcon icon={resolvedControlIcon(hostUI?.controls, `pwm.${channel}`)} />{name}</strong><small>{name === pwmDefaults[channel] ? `pwm.${channel}` : `${pwmDefaults[channel]} · pwm.${channel}`}</small><small>{pending
 				  ? copy(`Board ${reported} · draft ${draft}`, `برد ${reported} · پیش‌نویس ${draft}`)
 				  : copy(`${pwmPercent(reported, config)}% brightness · raw ${reported}`, `${pwmPercent(reported, config)}٪ روشنایی · خام ${reported}`)}</small>
 				  <div className="pwm-channel-config">
@@ -1110,7 +1090,7 @@ export function EventsView({ events, locale, t }: SharedViewProps) {
   )
 }
 
-export function SettingsView({ appTitle, snapshot, locale, t, command, appearance, onAppearance, token, onToken, onAppTitle, boardSettingsReadState, uiConfig, onMeasurementTiming, onBuzzerPath, transport, navigationSync, navigationSyncStatus = { state: 'idle', detail: '' }, onNavigationSync, appInstances = [] }: SharedViewProps & { appearance: Appearance; onAppearance: (value: Appearance) => void; token: string; onToken: (value: string) => void; onAppTitle: (value: string) => Promise<string>; uiConfig: UIConfig | null; onMeasurementTiming?: (statusIntervalMS: number, measurementFreshnessMS: number) => void; onBuzzerPath: (value: BuzzerPath) => Promise<void>; navigationSync: boolean; navigationSyncStatus?: { state: 'idle' | 'pending' | 'error'; detail: string }; onNavigationSync: (value: boolean) => void; appInstances?: AppInstanceSummary[] }) {
+export function SettingsView({ appTitle, snapshot, events, locale, t, command, appearance, onAppearance, token, onToken, onAppTitle, boardSettingsReadState, uiConfig, onMeasurementTiming, onBuzzerPath, transport, navigationSync, navigationSyncStatus = { state: 'idle', detail: '' }, onNavigationSync, appInstances = [] }: SharedViewProps & { appearance: Appearance; onAppearance: (value: Appearance) => void; token: string; onToken: (value: string) => void; onAppTitle: (value: string) => Promise<string>; uiConfig: UIConfig | null; onMeasurementTiming?: (statusIntervalMS: number, measurementFreshnessMS: number) => void; onBuzzerPath: (value: BuzzerPath) => Promise<void>; navigationSync: boolean; navigationSyncStatus?: { state: 'idle' | 'pending' | 'error'; detail: string }; onNavigationSync: (value: boolean) => void; appInstances?: AppInstanceSummary[] }) {
   const copy = (english: string, persian: string) => locale === 'fa' ? persian : english
   const available = peripheralAvailability(snapshot)
   const validationMessage = (message: string) => locale !== 'fa' ? message : ({
@@ -1640,7 +1620,7 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
           )}
         </Card>
 
-        <PeripheralNamesEditor locale={locale} />
+        <PeripheralNamesEditor locale={locale} refreshToken={`${channelPresentationEventID(events)}/${transport.streamState}`} scope={channelPresentationOwner(snapshot)} />
 
         {uiConfig && <Card icon={Gauge} iconTone="green" title={copy('Live measurements', 'اندازه‌گیری‌های زنده')} eyebrow={measurementTimingBusy ? copy('Synchronizing', 'در حال همگام‌سازی') : `${formatNumber(locale, 1000 / measurementRefreshMS, measurementRefreshMS === 200 ? 0 : 1)} ${copy('Hz', 'هرتز')}`} className="settings-card settings-card--wide">
           <form className="segment-scroll-settings" onSubmit={(event) => void saveMeasurementTiming(event)}>

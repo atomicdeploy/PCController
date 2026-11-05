@@ -131,10 +131,24 @@ export function goTestSourceIdentity(moduleRoot, goVersion, environment = {}) {
 	const files = []
 	walkGoFiles(moduleRoot, moduleRoot, files)
 	walkEmbeddedFiles(resolve(moduleRoot, '..', 'AvrdudeAdapter'), files)
+	// Controller imports the sibling native module through a local replacement.
+	// Its Go source, reviewed vendor patches, module locks and embedded artwork
+	// must invalidate cached controller test binaries too.
+	const nativeDesktop = resolve(moduleRoot, '..', 'NativeDesktop')
+	if (nativeDesktop !== resolve(moduleRoot) && existsSync(nativeDesktop)) {
+		walkGoFiles(nativeDesktop, nativeDesktop, files)
+		walkEmbeddedFiles(join(nativeDesktop, 'assets'), files)
+		walkEmbeddedFiles(join(nativeDesktop, 'internal', 'webui', 'dist'), files)
+		for (const name of ['go.mod', 'go.sum', 'vendor/modules.txt', 'vendor/github.com/lxn/walk/go.mod']) {
+			const path = join(nativeDesktop, name)
+			if (existsSync(path)) files.push(path)
+		}
+	}
 	// Go's compiler embeds these generated web assets into internal/webui. They
 	// must invalidate the stable test cache just like a changed .go source file.
 	walkEmbeddedFiles(join(moduleRoot, 'internal', 'webui', 'dist'), files)
 	walkEmbeddedFiles(join(moduleRoot, 'internal', 'defaultassets', 'assets'), files)
+	walkEmbeddedFiles(join(moduleRoot, 'assets'), files)
 	const artwork = join(moduleRoot, 'winres')
 	if (existsSync(artwork)) {
 		for (const name of readdirSync(artwork)) {

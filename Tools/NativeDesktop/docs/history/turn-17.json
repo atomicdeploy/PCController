@@ -1,0 +1,294 @@
+{
+  "turn": "019f9096-2e6d-75c1-92de-cd66d376528c",
+  "observedStart": "2026-07-23T20:06:29.281Z",
+  "observedEnd": "2026-07-23T20:32:28.448Z",
+  "title": "diagnostics: recover AP/ST Wi-Fi configuration projection",
+  "events": [
+    {
+      "id": "call_GNSLFVSxDbf01lotzpDKvbfR",
+      "time": "2026-07-23T20:06:48.967Z",
+      "orderTime": "2026-07-23T20:07:30.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "210687ab93e203e9e884a53e87d177ea11b3d3661f214ce63fe227fe39e4fa00",
+      "source": {
+        "session": "019f9096-7ae6-7953-901b-0886eadf74e3",
+        "line": 142
+      },
+      "turn": "019f9096-7c6a-7061-8389-d96d8ea11e1b",
+      "status": "observed-full-read",
+      "changes": [
+        {
+          "path": "internal/diagnostics/types.go",
+          "before": null,
+          "after": "e769adcd51afde92c273d5f3ecd081e6b828414486a933e308c016330766a84e",
+          "method": "observed-full-read"
+        },
+        {
+          "path": "internal/diagnostics/parse.go",
+          "before": null,
+          "after": "233fbe4343dbc12c27aa2df74c383463888f64781bbf1cc5c8a54defcf8b070e",
+          "method": "observed-full-read"
+        },
+        {
+          "path": "internal/diagnostics/projection.go",
+          "before": null,
+          "after": "be1d64df4b7cbd3d91a78591455977bb94dc7bb01612f35e2e44f43377d785b0",
+          "method": "observed-full-read"
+        },
+        {
+          "path": "internal/diagnostics/endpoints.go",
+          "before": null,
+          "after": "7a3677640e0b43e45736cf2d2ab24570c03a1ac0213da257133834a362731c23",
+          "method": "observed-full-read"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_9xlerDS4wUcK7P1xxqJwRJoK",
+      "time": "2026-07-23T20:06:48.967Z",
+      "orderTime": "2026-07-23T20:09:10.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "50a308557752c644c4eb2078cf1579a3c3a2a8caafd12220fd3840f6b88e10cd",
+      "source": {
+        "session": "019f9096-7ae6-7953-901b-0886eadf74e3",
+        "line": 188
+      },
+      "turn": "019f9096-7c6a-7061-8389-d96d8ea11e1b",
+      "status": "observed-full-read",
+      "changes": [
+        {
+          "path": "internal/config/diagnostics.go",
+          "before": "1773d245241f1134a9a3871983439f16cc0eedbfa632591a9fc8df30992f4dce",
+          "after": "7eb798891a1c6e61540de4c0d6a7fa28ac6aa17228be5b38b35e0017c4b9c124",
+          "method": "observed-full-read"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_zv4V4IRpVOa41MsDoHREsor6:0",
+      "time": "2026-07-23T20:17:25.776Z",
+      "orderTime": "2026-07-23T20:17:25.776Z",
+      "timeBasis": "record",
+      "hash": "b9f8e76cd21984de30724258f178bcd700d93d19a498330e950b961ce9cb0c53",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 19555
+      },
+      "turn": "019f9096-2e6d-75c1-92de-cd66d376528c",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/diagnostics/endpoints.go",
+          "before": "7a3677640e0b43e45736cf2d2ab24570c03a1ac0213da257133834a362731c23",
+          "after": "c310f6e4aecd71608d0444f988e87b2d4298866651fd1599adfce1fc29f45dda",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_hAKkWdIa0BQ1St8VVKp2Dopm:0",
+      "time": "2026-07-23T20:17:44.058Z",
+      "orderTime": "2026-07-23T20:17:44.058Z",
+      "timeBasis": "record",
+      "hash": "18a3e98e392dba478ce031d776c9d9421b24dfa9fb1f3262e35a61c1c9fea99b",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 19560
+      },
+      "turn": "019f9096-2e6d-75c1-92de-cd66d376528c",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/config/diagnostics.go",
+          "before": "7eb798891a1c6e61540de4c0d6a7fa28ac6aa17228be5b38b35e0017c4b9c124",
+          "after": "788c7b28d7c5bf7915e2fdf766da70ba7b0f6d08eddd82dc22ee62f0f877b96d",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_o5oN9xXPI3f91JbpbFvbJzq3:0",
+      "time": "2026-07-23T20:17:58.230Z",
+      "orderTime": "2026-07-23T20:17:58.230Z",
+      "timeBasis": "record",
+      "hash": "37c3251f217cc3bdb9c4464ea508b80c1989c3e1218e66e0a05c98e2eb9df5de",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 19565
+      },
+      "turn": "019f9096-2e6d-75c1-92de-cd66d376528c",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/diagnostics/parse.go",
+          "before": "233fbe4343dbc12c27aa2df74c383463888f64781bbf1cc5c8a54defcf8b070e",
+          "after": "6c1953e156b3fa6a54f96ba7a4e4e30a0720e5a9ffc38786f91207d54c9ed428",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_gbXMIZLfSuK2aoc9dZNLbmZv:0",
+      "time": "2026-07-23T20:18:05.912Z",
+      "orderTime": "2026-07-23T20:18:05.912Z",
+      "timeBasis": "record",
+      "hash": "16cff8ee8b9ed4d1930110c300f4267936e1435f20080af5496650dbd8428bb2",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 19570
+      },
+      "turn": "019f9096-2e6d-75c1-92de-cd66d376528c",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/diagnostics/parse.go",
+          "before": "6c1953e156b3fa6a54f96ba7a4e4e30a0720e5a9ffc38786f91207d54c9ed428",
+          "after": "a0a461acf4fad91c42fdf44c9ee7de4689f76d62ac6d15b54a47750240d9a1f5",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_7ERo6ZKggCJfpR7aIBzBlVtl:0",
+      "time": "2026-07-23T20:18:14.706Z",
+      "orderTime": "2026-07-23T20:18:14.706Z",
+      "timeBasis": "record",
+      "hash": "0aa0cb7a63352d59e17207631482ca9a7e40327db084e7c33353b11f922dd461",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 19575
+      },
+      "turn": "019f9096-2e6d-75c1-92de-cd66d376528c",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/diagnostics/types.go",
+          "before": "e769adcd51afde92c273d5f3ecd081e6b828414486a933e308c016330766a84e",
+          "after": "65e8ba859b73436efab7ae8fe0c139570c1a51cde8d79b7c64ea2209eb58c0da",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_gGwkR9eBkF88TdSidPovqHeA:0",
+      "time": "2026-07-23T20:18:39.183Z",
+      "orderTime": "2026-07-23T20:18:39.183Z",
+      "timeBasis": "record",
+      "hash": "d3af13eaa4d9c57563c3d5a820623ba2d29fe9a28e546fd531c54003847e2d3a",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 19580
+      },
+      "turn": "019f9096-2e6d-75c1-92de-cd66d376528c",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/diagnostics/projection.go",
+          "before": "be1d64df4b7cbd3d91a78591455977bb94dc7bb01612f35e2e44f43377d785b0",
+          "after": "9227c4897aa03d617d6efba1650ba184eb98da5e1a71475dd4ba6f940008b454",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_v5SK9OC36eD3zO0pLBtqwTCi:0",
+      "time": "2026-07-23T20:22:40.821Z",
+      "orderTime": "2026-07-23T20:22:40.821Z",
+      "timeBasis": "record",
+      "hash": "48cf2c872d3d9e07e52b476b65908ac0758356392b7ddbdd8f1e59dc0f7654f8",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 19678
+      },
+      "turn": "019f9096-2e6d-75c1-92de-cd66d376528c",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "webui/src/views/diagnostics.tsx",
+          "before": "19682a2e7d42dfb997191314c281ea26efb904e828abf0a87f6b8978bfa5d47b",
+          "after": "6759e04f14e1348992a03f00fef51288e0105892a873f9c950d04adf07022a3e",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_8ApEAuJXc6RJFKOfft12sWBe:0",
+      "time": "2026-07-23T20:24:07.284Z",
+      "orderTime": "2026-07-23T20:24:07.284Z",
+      "timeBasis": "record",
+      "hash": "bb72674fc6d9cf98e404d4ad8b80829ae8e53052fe01d851cf6e98b413647f19",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 19721
+      },
+      "turn": "019f9096-2e6d-75c1-92de-cd66d376528c",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/diagnostics/types.go",
+          "before": "65e8ba859b73436efab7ae8fe0c139570c1a51cde8d79b7c64ea2209eb58c0da",
+          "after": "78000ac8a64633917c5d4836d4500fd7fe63da475b1f23b103ed3ed542061418",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_NDttdLMfXtTzuidYaM0KMPdO:0",
+      "time": "2026-07-23T20:24:22.346Z",
+      "orderTime": "2026-07-23T20:24:22.346Z",
+      "timeBasis": "record",
+      "hash": "34eeeafe700e52ef5ae1e3b1fc381be01a4a762364038d56fd3b85f56136d29b",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 19726
+      },
+      "turn": "019f9096-2e6d-75c1-92de-cd66d376528c",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/diagnostics/parse.go",
+          "before": "a0a461acf4fad91c42fdf44c9ee7de4689f76d62ac6d15b54a47750240d9a1f5",
+          "after": "6f370d30293cc163b1cdf533f66a5d805ce40f744734f63b36c6c654d50228c3",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    }
+  ],
+  "finalChanges": [
+    {
+      "path": "internal/diagnostics/types.go",
+      "sha256": "78000ac8a64633917c5d4836d4500fd7fe63da475b1f23b103ed3ed542061418"
+    },
+    {
+      "path": "internal/diagnostics/parse.go",
+      "sha256": "6f370d30293cc163b1cdf533f66a5d805ce40f744734f63b36c6c654d50228c3"
+    },
+    {
+      "path": "internal/diagnostics/projection.go",
+      "sha256": "9227c4897aa03d617d6efba1650ba184eb98da5e1a71475dd4ba6f940008b454"
+    },
+    {
+      "path": "internal/diagnostics/endpoints.go",
+      "sha256": "c310f6e4aecd71608d0444f988e87b2d4298866651fd1599adfce1fc29f45dda"
+    },
+    {
+      "path": "internal/config/diagnostics.go",
+      "sha256": "788c7b28d7c5bf7915e2fdf766da70ba7b0f6d08eddd82dc22ee62f0f877b96d"
+    },
+    {
+      "path": "webui/src/views/diagnostics.tsx",
+      "sha256": "6759e04f14e1348992a03f00fef51288e0105892a873f9c950d04adf07022a3e"
+    }
+  ]
+}

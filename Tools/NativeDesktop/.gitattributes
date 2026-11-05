@@ -1,0 +1,18 @@
+# Portable text sources; keep binary assets byte-for-byte.
+* text=auto
+*.sh text eol=lf
+*.go text eol=lf
+*.ps1 text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.ts text eol=lf
+*.tsx text eol=lf
+*.css text eol=lf
+*.yml text eol=lf
+*.svg text eol=lf
+*.png binary
+*.apng binary
+*.ico binary
+*.wav binary
+*.ttf binary
+*.woff2 binary

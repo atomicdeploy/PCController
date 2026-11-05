@@ -1,0 +1,226 @@
+//go:build windows
+
+package dialogs
+
+import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strconv"
+	"testing"
+	"time"
+
+	"github.com/lxn/walk"
+	"github.com/lxn/win"
+
+	"rayanlamp.local/app/internal/config"
+	"rayanlamp.local/app/internal/winfx"
+)
+
+// This test owns every HWND it uses. It does not inject input or operate other
+// applications. Screenshots are optional evidence, never renderer input.
+func TestSettingsWindowGeometryLifecycle(t *testing.T) {
+	if os.Getenv("RAYANLAMP_WINDOW_TESTS") != "1" {
+		t.Skip("set RAYANLAMP_WINDOW_TESTS=1 for native window integration")
+	}
+	for _, name := range []string{"owned", "ownerless", "persian"} {
+		t.Run(name, func(t *testing.T) {
+			runtime.LockOSThread()
+			defer runtime.UnlockOSThread()
+			owner, err := walk.NewMainWindow()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer owner.Dispose()
+			if err := owner.SetBoundsPixels(walk.Rectangle{X: 100, Y: 100, Width: 420, Height: 420}); err != nil {
+				t.Fatal(err)
+			}
+			var parent walk.Form = owner
+			if name == "ownerless" {
+				parent = nil
+			}
+			cfg := config.Default()
+			cfg.UI.Animations = false // This fixture verifies settled fonts and geometry.
+			cfg.UI.Locale = "en"
+			if name == "persian" {
+				cfg.UI.Locale = "fa"
+			}
+			var saved config.WindowBounds
+			actions := SettingsActions{PersistWindowBounds: func(bounds config.WindowBounds) {
+				saved = bounds
+			}}
+			session, err := newSettingsDialogSession(parent, cfg, actions, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer session.dialog.Dispose()
+			// Raise only this fixture's own HWND for unobscured screen evidence.
+			win.SetWindowPos(session.dialog.Handle(), win.HWND_TOPMOST, 0, 0, 0, 0, win.SWP_NOMOVE|win.SWP_NOSIZE|win.SWP_NOACTIVATE)
+			prepared := session.dialog.BoundsPixels()
+			session.shown = true
+			session.dialog.Show()
+			pumpSettingsTestMessages(owner, 400*time.Millisecond)
+			first := session.dialog.BoundsPixels()
+			assertDialogPhysicalFonts(t, session.dialog, cfg.UI.Locale, 50)
+			if first != prepared {
+				t.Fatalf("first show replaced prepared bounds: before=%+v after=%+v", prepared, first)
+			}
+			logical, err := winfx.CaptureDialogPlacement(uintptr(session.dialog.Handle()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Logf("first show: pixels=%+v, logical=%+v, DPI=%d, configured=%+v", first, logical, session.dialog.DPI(), cfg.UI.SettingsBounds)
+			captureSettingsTestWindow(t, session.dialog, name+"-first")
+			if logical.Width < config.SettingsWindowMinWidth || logical.Height < config.SettingsWindowMinHeight {
+				t.Fatalf("Settings collapsed to %+v", logical)
+			}
+			metrics, err := winfx.MonitorMetricsForRect(winfx.Rect{
+				Left: int32(first.X), Top: int32(first.Y),
+				Right: int32(first.X + first.Width), Bottom: int32(first.Y + first.Height),
+			}, uint32(session.dialog.DPI()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if int(metrics.WorkArea.Width()) >= cfg.UI.SettingsBounds.Width*session.dialog.DPI()/96 &&
+				int(metrics.WorkArea.Height()) >= cfg.UI.SettingsBounds.Height*session.dialog.DPI()/96 &&
+				(logical.Width != cfg.UI.SettingsBounds.Width || logical.Height != cfg.UI.SettingsBounds.Height) {
+				t.Fatalf("first show ignored configured logical size: got=%+v want=%+v", logical, cfg.UI.SettingsBounds)
+			}
+
+			resized := first
+			resized.Width += 60
+			resized.Height -= 20
+			if err := session.dialog.SetBoundsPixels(resized); err != nil {
+				t.Fatal(err)
+			}
+			pumpSettingsTestMessages(owner, 200*time.Millisecond)
+			resized = session.dialog.BoundsPixels()
+			session.dialog.Show()
+			pumpSettingsTestMessages(owner, 150*time.Millisecond)
+			if got := session.dialog.BoundsPixels(); got != resized {
+				t.Fatalf("repeated Show changed resized bounds: got=%+v want=%+v", got, resized)
+			}
+			if !owner.Enabled() {
+				t.Fatal("modeless Settings disabled its owner")
+			}
+			// First-show fixes must also survive subsequent layout passes.
+			// Locale/font/RTL changes and every tab used to be tested only as
+			// source strings, which could not detect a native size overwrite.
+			for _, locale := range []string{"fa", "en"} {
+				localized := cfg
+				localized.UI.Locale = locale
+				applySettingsLocalization(session, localized)
+				pumpSettingsTestMessages(owner, 200*time.Millisecond)
+				assertDialogPhysicalFonts(t, session.dialog, locale, 50)
+				if got := session.dialog.BoundsPixels(); got != resized {
+					t.Fatalf("live locale %s replaced user bounds: got=%+v want=%+v", locale, got, resized)
+				}
+				if locale == "fa" && name == "persian" {
+					for index := 0; index < session.controls.tabs.Pages().Len(); index++ {
+						_ = session.controls.tabs.SetCurrentIndex(index)
+						pumpSettingsTestMessages(owner, 400*time.Millisecond)
+						page := session.controls.tabs.Pages().At(index)
+						t.Logf("Persian page %d: visible=%t bounds=%+v children=%d", index, page.Visible(), page.BoundsPixels(), page.Children().Len())
+						if bounds := page.BoundsPixels(); bounds.Width < 100 || bounds.Height < 100 {
+							t.Fatalf("Persian page %d collapsed: %+v", index, bounds)
+						}
+						captureSettingsTestWindow(t, session.dialog, "persian-tab-"+strconv.Itoa(index))
+					}
+				}
+			}
+			for index := 0; index < session.controls.tabs.Pages().Len(); index++ {
+				if err := session.controls.tabs.SetCurrentIndex(index); err != nil {
+					t.Fatal(err)
+				}
+				pumpSettingsTestMessages(owner, 100*time.Millisecond)
+				if got := session.dialog.BoundsPixels(); got != resized {
+					t.Fatalf("tab %d replaced user bounds: got=%+v want=%+v", index, got, resized)
+				}
+			}
+			captureSettingsTestWindow(t, session.dialog, name+"-live-layout")
+			session.dialog.Cancel()
+			if saved.Width == 0 || saved.Height == 0 {
+				t.Fatal("close did not persist Settings dimensions")
+			}
+			cfg.UI.SettingsBounds = saved
+			reopened, err := newSettingsDialogSession(parent, cfg, actions, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer reopened.dialog.Dispose()
+			win.SetWindowPos(reopened.dialog.Handle(), win.HWND_TOPMOST, 0, 0, 0, 0, win.SWP_NOMOVE|win.SWP_NOSIZE|win.SWP_NOACTIVATE)
+			reopened.shown = true
+			reopened.dialog.Show()
+			pumpSettingsTestMessages(owner, 400*time.Millisecond)
+			got := reopened.dialog.BoundsPixels()
+			// Integer logical dimensions can round by one physical pixel at
+			// fractional scaling (e.g. 940px -> 627 DIP -> 941px at 150%).
+			if got.Width < resized.Width-1 || got.Width > resized.Width+1 ||
+				got.Height < resized.Height-1 || got.Height > resized.Height+1 {
+				t.Fatalf("reopen lost resized dimensions: got=%+v want=%+v saved=%+v", got, resized, saved)
+			}
+			t.Logf("reopen: pixels=%+v, saved=%+v", got, saved)
+			captureSettingsTestWindow(t, reopened.dialog, name+"-reopened")
+		})
+	}
+}
+
+func assertDialogPhysicalFonts(t *testing.T, dialog *walk.Dialog, locale string, minimum int) {
+	t.Helper()
+	checked := 0
+	visit := func(window walk.Window) {
+		font := window.Font()
+		want := defaultUIFontFamily
+		if locale == "fa" {
+			want = winfx.PersianFontFamily(font.Bold())
+		}
+		if font.Family() != want {
+			t.Fatalf("%T font family = %q, want %q", window, font.Family(), want)
+		}
+		handle := win.SendMessage(window.Handle(), win.WM_GETFONT, 0, 0)
+		if handle != 0 {
+			face, err := winfx.FontFaceName(handle)
+			if err != nil || face != want {
+				t.Fatalf("%T actually renders %q, want %q: %v", window, face, want, err)
+			}
+			checked++
+		}
+	}
+	visit(dialog)
+	walkDialogWidgets(dialog, func(widget walk.Widget) { visit(widget) })
+	if checked < minimum {
+		t.Fatalf("only %d native control fonts were verified", checked)
+	}
+	t.Logf("verified %d actual HWND font faces for locale %s", checked, locale)
+}
+
+func pumpSettingsTestMessages(owner *walk.MainWindow, duration time.Duration) {
+	// Walk's loop also commits asynchronous layouts via RunSynchronized;
+	// a plain PeekMessage loop cannot test real control rendering.
+	timer := time.AfterFunc(duration, func() {
+		owner.Synchronize(func() { win.PostQuitMessage(0) })
+	})
+	defer timer.Stop()
+	owner.Run()
+}
+
+func captureSettingsTestWindow(t *testing.T, dialog *walk.Dialog, name string) {
+	t.Helper()
+	tool, directory := os.Getenv("RAYANLAMP_CAPTURE_TOOL"), os.Getenv("RAYANLAMP_SCREENSHOTS")
+	if tool == "" || directory == "" {
+		return
+	}
+	win.SetWindowPos(dialog.Handle(), win.HWND_TOPMOST, 0, 0, 0, 0, win.SWP_NOMOVE|win.SWP_NOSIZE|win.SWP_NOACTIVATE)
+	win.RedrawWindow(dialog.Handle(), nil, 0, win.RDW_INVALIDATE|win.RDW_UPDATENOW|win.RDW_ALLCHILDREN)
+	_ = winfx.FlushComposition()
+	if err := os.MkdirAll(directory, 0700); err != nil {
+		t.Fatal(err)
+	}
+	output, err := exec.Command(tool, strconv.Itoa(os.Getpid()),
+		filepath.Join(directory, name+".png"), dialog.Title(), "screen", "12").CombinedOutput()
+	if err != nil {
+		t.Fatalf("screenshot: %v: %s", err, output)
+	}
+	t.Logf("%s", output)
+}
