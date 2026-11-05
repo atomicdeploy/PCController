@@ -355,7 +355,7 @@ type browserUISettings struct {
 	After                  map[string]any                        `json:"after,omitempty"`
 }
 
-type peripheralSettings struct {
+type PeripheralSettings struct {
 	Names        map[string]string                `json:"peripheral_names"`
 	BoardProfile boardProfileDescriptor           `json:"board_profile"`
 	Peripherals  []appconfig.PeripheralDescriptor `json:"peripherals"`
@@ -373,6 +373,8 @@ type stripControlDescriptor struct {
 	MaximumFPS    int      `json:"maximum_fps"`
 	DefaultFPS    int      `json:"default_fps"`
 	Modes         []string `json:"modes"`
+	ColorOrder    string   `json:"color_order"`
+	ColorOrders   []string `json:"color_orders"`
 }
 
 func advertisedStripControl(connected bool, capabilities uint32) *stripControlDescriptor {
@@ -2182,7 +2184,7 @@ func normalizePeripheralNames(names map[string]string) (map[string]string, error
 	return result, nil
 }
 
-func (service *Service) peripheralSettings() peripheralSettings {
+func (service *Service) peripheralSettings() PeripheralSettings {
 	config := service.hostConfig()
 	names := config.UI.PeripheralNames
 	if service.Client.Snapshot().Hello.BuildFeatures&native.BuildFeatureNativeHAL != 0 {
@@ -2193,10 +2195,15 @@ func (service *Service) peripheralSettings() peripheralSettings {
 	appconfig.ApplyPWMChannelConfig(peripherals, controls, config.UI)
 	snapshot := service.Client.Snapshot()
 	stripEffects := snapshot.StripEffects
-	return peripheralSettings{
+	strip := advertisedStripControl(snapshot.Connected, snapshot.Hello.Capabilities)
+	if strip != nil {
+		strip.ColorOrder = appconfig.EffectiveStripOrder(config.UI.StripColorOrder)
+		strip.ColorOrders = appconfig.StripColorOrders()
+	}
+	return PeripheralSettings{
 		Names: clonePeripheralNames(names), BoardProfile: profileDescriptor,
 		Peripherals: peripherals, Controls: controls, Folders: appconfig.ChannelFolderCatalog(profile, names),
-		Strip: advertisedStripControl(snapshot.Connected, snapshot.Hello.Capabilities), StripEffects: stripEffects,
+		Strip: strip, StripEffects: stripEffects,
 	}
 }
 
@@ -2694,6 +2701,14 @@ func requestCapability(method string, params json.RawMessage) string {
 }
 
 func commandCapability(command string) string {
+	// Parse the RGB-input command exactly as the shell does, including quotes.
+	// Opening a listener requires integration authority, not just output access.
+	if parsed := bridgeCommandWords(command); len(parsed) > 0 && parsed[0] == "rgb-input" {
+		if len(parsed) == 2 && parsed[1] == "status" {
+			return capabilityRead
+		}
+		return capabilityIntegrations
+	}
 	words := strings.Fields(strings.ToLower(strings.TrimSpace(command)))
 	if len(words) == 0 {
 		return capabilityBoard

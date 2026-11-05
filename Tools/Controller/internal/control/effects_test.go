@@ -17,6 +17,7 @@ func TestEffectUpsertJSONPersistsTheCompleteSequenceDefinition(t *testing.T) {
 	runtime := New(Options{})
 	t.Cleanup(func() { _ = runtime.Close() })
 	config := appconfig.Defaults()
+	config.StripEffects = appconfig.DefaultStripEffects()
 	config.Macros = nil
 	config.StripEffects = nil
 	engine := NewCommandEngine(runtime, CommandOptions{
@@ -97,6 +98,7 @@ func TestEffectCatalogAndEditsUseOnePCControllerStore(t *testing.T) {
 	runtime := New(Options{})
 	t.Cleanup(func() { _ = runtime.Close() })
 	config := appconfig.Defaults()
+	config.StripEffects = appconfig.DefaultStripEffects()
 	engine := NewCommandEngine(runtime, CommandOptions{
 		Macros:     func() []appconfig.Macro { return config.Macros },
 		HostConfig: func() appconfig.Config { return config },
@@ -149,6 +151,7 @@ func TestEffectLibraryExportsAndImportsLivingEffectsJSON(t *testing.T) {
 	runtime := New(Options{})
 	t.Cleanup(func() { _ = runtime.Close() })
 	config := appconfig.Defaults()
+	config.StripEffects = appconfig.DefaultStripEffects()
 	engine := NewCommandEngine(runtime, CommandOptions{
 		Macros:     func() []appconfig.Macro { return config.Macros },
 		HostConfig: func() appconfig.Config { return config },
@@ -189,6 +192,7 @@ func TestEffectRestoreExamplesOnlyAddsMissingEditableDefaults(t *testing.T) {
 	runtime := New(Options{})
 	t.Cleanup(func() { _ = runtime.Close() })
 	config := appconfig.Defaults()
+	config.StripEffects = appconfig.DefaultStripEffects()
 	config.StripEffects = config.StripEffects[:1]
 	config.StripEffects[0].Name = "My police lights"
 	engine := NewCommandEngine(runtime, CommandOptions{
@@ -227,6 +231,7 @@ func TestEffectAndGroupPresentationRemainPCControllerOwned(t *testing.T) {
 	runtime := New(Options{})
 	t.Cleanup(func() { _ = runtime.Close() })
 	config := appconfig.Defaults()
+	config.StripEffects = appconfig.DefaultStripEffects()
 	engine := NewCommandEngine(runtime, CommandOptions{
 		Macros:     func() []appconfig.Macro { return config.Macros },
 		HostConfig: func() appconfig.Config { return config },
@@ -269,6 +274,7 @@ func TestEffectGroupsPersistWithoutEffectsAndSurviveExportImport(t *testing.T) {
 	runtime := New(Options{})
 	t.Cleanup(func() { _ = runtime.Close() })
 	config := appconfig.Defaults()
+	config.StripEffects = appconfig.DefaultStripEffects()
 	config.Macros, config.StripEffects = nil, nil
 	engine := NewCommandEngine(runtime, CommandOptions{
 		Macros:     func() []appconfig.Macro { return config.Macros },
@@ -369,6 +375,7 @@ func TestUnifiedEffectIdentityRejectsCrossKindCollision(t *testing.T) {
 	runtime := New(Options{})
 	t.Cleanup(func() { _ = runtime.Close() })
 	config := appconfig.Defaults()
+	config.StripEffects = appconfig.DefaultStripEffects()
 	config.StripEffects = append(config.StripEffects, appconfig.StripEffect{
 		ID: "9", Name: "Reserved", Program: config.StripEffects[0].Program,
 		DefaultFPS: 20, DefaultDurationMS: 1000, DefaultPixels: 10,

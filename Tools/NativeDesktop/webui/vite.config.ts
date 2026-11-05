@@ -65,7 +65,7 @@ const canonicalAppIcon = fileURLToPath(
   new URL("../assets/icons/app.png", import.meta.url)
 );
 const canonicalWebFont = fileURLToPath(
-  new URL("../assets/fonts/yekanbakh-vf.ttf", import.meta.url)
+  new URL("../assets/fonts/Vazirmatn-Regular.ttf", import.meta.url)
 );
 const sharedSFXCues = ["on", "off", "message", "error"] as const;
 const sharedSFXManifestEntries = sharedSFXCues.map((cue) => {
@@ -84,7 +84,7 @@ const sharedAssetManifestEntries = [
       .digest("hex")
   },
   {
-    url: "shared/fonts/yekanbakh-vf.ttf",
+    url: "shared/fonts/Vazirmatn-Regular.ttf",
     revision: createHash("sha256")
       .update(readFileSync(canonicalWebFont))
       .digest("hex")
@@ -141,7 +141,7 @@ export default defineConfig({
         if (!staticExport) return;
         this.emitFile({
           type: "asset",
-          fileName: "shared/fonts/yekanbakh-vf.ttf",
+          fileName: "shared/fonts/Vazirmatn-Regular.ttf",
           source: readFileSync(canonicalWebFont)
         });
       },
@@ -162,7 +162,7 @@ export default defineConfig({
             }
             return;
           }
-          if (pathname === "/shared/fonts/yekanbakh-vf.ttf") {
+          if (pathname === "/shared/fonts/Vazirmatn-Regular.ttf") {
             try {
               response.statusCode = 200;
               response.setHeader("Content-Type", "font/ttf");
@@ -215,7 +215,7 @@ export default defineConfig({
           "manifest.webmanifest",
           "icons/app-192.png",
           "icons/app-maskable-512.png",
-          "shared/fonts/yekanbakh-vf.ttf"
+          "shared/fonts/Vazirmatn-Regular.ttf"
         ],
         additionalManifestEntries: sharedAssetManifestEntries,
         runtimeCaching: [

@@ -273,7 +273,7 @@ func (model Model) commitAppSettingEditor() (Model, tea.Cmd, bool) {
 		}
 		return model, nil, true
 	}
-	if descriptor, ok := peripheralDescriptorForSettingKey(editor.Key); ok {
+	if descriptor, ok := model.catalogSettingDescriptor(editor.Key); ok {
 		if model.remote != nil && model.remote.SaveHostUI == nil {
 			model.setNotice("Remote peripheral naming is unavailable from this host")
 			return model, nil, true

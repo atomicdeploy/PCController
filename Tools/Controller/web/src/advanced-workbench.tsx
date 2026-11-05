@@ -72,6 +72,7 @@ import { redactSensitiveCommand, shellArgument as quoteArgument } from './comman
 import { SevenSegmentPreview } from './seven-segment-preview'
 import { UDPSettings } from './udp-settings'
 import { StripColorOrder } from './strip-color-order'
+import { RGBInput } from './rgb-input'
 import type { FrontPanelState } from './types'
 import type { SharedViewProps } from './views'
 import { peripheralAvailability } from './peripheral-availability'
@@ -768,6 +769,7 @@ export function AdvancedWorkbench({
           <RangeField label={copy('Pixel brightness', 'روشنایی پیکسل')} value={pixelBrightness} min={0} max={255} disabled={!online} onChange={setPixelBrightness} />
           <Button tone="primary" icon={Palette} disabled={!online} busy={busy === `strip pixel ${pixel} ${pixelRed} ${pixelGreen} ${pixelBlue} ${pixelBrightness}`} onClick={() => void run(`strip pixel ${pixel} ${pixelRed} ${pixelGreen} ${pixelBlue} ${pixelBrightness}`)}>{copy('Apply pixel', 'اعمال پیکسل')}</Button>
           <div className="advanced-divider" />
+          {available.statusLED && <RGBInput locale={locale} online={online} revision={Math.max(0, ...events.filter(event => /RGB input/.test(event.text)).map(event => event.id))} />}
           <TextField label={copy('Configured effect name', 'نام افکت تعریف‌شده')} value={effectName} dir="ltr" spellCheck={false} onChange={(event) => setEffectName(event.target.value)} />
           <div className="advanced-actions">
             <Button icon={Sparkles} busy={busy === 'rgb effect list'} onClick={() => void run('rgb effect list')}>{copy('List effects', 'فهرست افکت‌ها')}</Button>

@@ -11,6 +11,7 @@ const generatedPathPatterns = [
   /^Tools\/Controller\/bin(?:\/|$)/iu,
   /^Tools\/Controller\/\.bin-previous-[^/]+(?:\/|$)/iu,
   /^Tools\/Controller\/internal\/webui\/dist(?:\/|$)/iu,
+  /^Tools\/NativeDesktop\/internal\/webui\/dist(?:\/|$)/iu,
   /^Tools\/Controller\/web\/(?:coverage|dist)(?:\/|$)/iu,
   /^Tools\/VirtualBoard\/(?:build|\.build)(?:\/|$)/iu,
 ];
@@ -40,6 +41,11 @@ const repositoryIdentityPaths = new Set([
 // repository; private paths, stale-origin language and unrelated URLs remain
 // forbidden.
 const reviewedExternalRepositories = new Map([
+  ["Tools/NativeDesktop/assets/fonts/OFL.txt", new Set(["rastikerdar/vazirmatn"])],
+  ["Tools/NativeDesktop/CHANGELOG.md", new Set(["atomicdeploy/rayanlamp"])],
+  ["Tools/NativeDesktop/docs/history/validation-2026-11-05.md", new Set(["atomicdeploy/rayanlamp"])],
+  ["Tools/NativeDesktop/docs/building.md", new Set(["josephspurrier/goversioninfo"])],
+  ["docs/RGB-INPUT.md", new Set(["wled/wled"])],
   ["docs/Controller-Convergence.md", new Set(["atomicdeploy/pakarcontroller"])],
   ["docs/verification/serial-response-deadlines.md", new Set(["toghroltp/pealayer"])],
   ["mobile/assets/fonts/Vazirmatn-OFL.txt", new Set(["rastikerdar/vazirmatn"])],
@@ -66,6 +72,7 @@ const thirdPartyProvenancePaths = new Set([
   "Tools/Controller/internal/programmer/toolchain.go",
   "Tools/Controller/toolchain-lock.json",
   "Tools/Controller/web/package-lock.json",
+  "Tools/NativeDesktop/webui/package-lock.json",
   "Tools/Controller/web/third-party-notices/victory-vendor.txt",
   "Tools/Dependencies/pr-plan.mjs",
   "Tools/Dependencies/resolved-tools-lock.json",
@@ -117,6 +124,12 @@ function addMatches(findings, text, pattern, kind) {
 export function isGeneratedOrBinaryPath(path) {
   const value = normalized(path);
   return generatedPathPatterns.some((pattern) => pattern.test(value));
+}
+
+// Upstream vendored documentation is not product documentation. Preserve its
+// attribution and relative links; security analysis still scans the source.
+export function isVendoredNativeSource(path) {
+  return normalized(path).startsWith("Tools/NativeDesktop/vendor/");
 }
 
 // Read a bounded text candidate from one opened descriptor. Returning the

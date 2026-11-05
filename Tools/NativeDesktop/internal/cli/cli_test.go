@@ -247,7 +247,7 @@ func TestPrivateCleanupHelperParsing(t *testing.T) {
 		"/parent-pid",
 		"4294967295",
 		"/install-path",
-		`C:\Users\David\AppData\Local\Programs\RayanLamp`,
+		`C:\Program Files\RayanLamp`,
 		"/remove-user-data",
 	})
 	if err != nil {

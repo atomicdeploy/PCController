@@ -206,6 +206,9 @@ func taskbarCommandMethod(wParam uintptr) (string, bool) {
 }
 
 func (s *Shell) initializeTaskbarIntegration() error {
+	if s.controller != nil {
+		return nil
+	} // Do not register donor lamp thumbnail actions.
 	if s == nil || s.mw == nil {
 		return fmt.Errorf("taskbar: main window is unavailable")
 	}

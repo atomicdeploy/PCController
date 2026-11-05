@@ -6,6 +6,9 @@ const routineEventKinds = new Set([
 ])
 
 export function isSignificantControllerEvent(event: Pick<ControllerEvent, 'kind' | 'stream'>): boolean {
+  // Catalog changes are infrequent user edits, although transported as state.
+  // Keep them available to every view and cross-tab consumer, not just logs.
+  if (event.kind.trim().toLowerCase() === 'peripherals.changed') return true
   if (event.stream) return event.stream === 'activity'
   return !routineEventKinds.has(event.kind.trim().toLowerCase())
 }

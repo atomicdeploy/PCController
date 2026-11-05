@@ -78,7 +78,7 @@ func TestExportDirectoryIsDeterministicAndComplete(t *testing.T) {
 		"icons/app.png",
 		"index.html",
 		"manifest.webmanifest",
-		"shared/fonts/yekanbakh-vf.ttf",
+		"shared/fonts/Vazirmatn-Regular.ttf",
 		"shared/icons/app.png",
 		"shared/sfx/error.wav",
 		"shared/sfx/message.wav",
@@ -253,7 +253,7 @@ func TestCollectEntriesRejectsGeneratedReadmeCollision(t *testing.T) {
 }
 
 func TestCollectEntriesAcceptsOneExactCanonicalSharedAsset(t *testing.T) {
-	font, err := assets.Files.ReadFile("fonts/yekanbakh-vf.ttf")
+	font, err := assets.Files.ReadFile("fonts/Vazirmatn-Regular.ttf")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,7 +267,7 @@ func TestCollectEntriesAcceptsOneExactCanonicalSharedAsset(t *testing.T) {
 		"manifest.webmanifest": &fstest.MapFile{Data: []byte("{}")},
 		"sw.js":                &fstest.MapFile{Data: []byte("")},
 		"theme-init.js":        &fstest.MapFile{Data: []byte("")},
-		"shared/fonts/yekanbakh-vf.ttf": &fstest.MapFile{
+		"shared/fonts/Vazirmatn-Regular.ttf": &fstest.MapFile{
 			Data: font,
 		},
 	}
@@ -277,7 +277,7 @@ func TestCollectEntriesAcceptsOneExactCanonicalSharedAsset(t *testing.T) {
 	}
 	count := 0
 	for _, entry := range entries {
-		if entry.name == "shared/fonts/yekanbakh-vf.ttf" {
+		if entry.name == "shared/fonts/Vazirmatn-Regular.ttf" {
 			count++
 			if !bytes.Equal(entry.data, font) {
 				t.Fatal("retained font differs from the canonical font")
@@ -300,7 +300,7 @@ func TestCollectEntriesRejectsModifiedCanonicalSharedAsset(t *testing.T) {
 		"manifest.webmanifest": &fstest.MapFile{Data: []byte("{}")},
 		"sw.js":                &fstest.MapFile{Data: []byte("")},
 		"theme-init.js":        &fstest.MapFile{Data: []byte("")},
-		"shared/fonts/yekanbakh-vf.ttf": &fstest.MapFile{
+		"shared/fonts/Vazirmatn-Regular.ttf": &fstest.MapFile{
 			Data: []byte("not-the-canonical-font"),
 		},
 	}

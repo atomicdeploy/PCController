@@ -25,7 +25,7 @@ type boardProfileDescriptor struct {
 	Revision        string `json:"revision"`
 }
 
-type presentationUpdateResult struct {
+type PresentationUpdateResult struct {
 	BoardProfile boardProfileDescriptor         `json:"board_profile"`
 	Peripheral   appconfig.PeripheralDescriptor `json:"peripheral"`
 	Control      *appconfig.ControlDescriptor   `json:"control,omitempty"`
@@ -33,7 +33,7 @@ type presentationUpdateResult struct {
 	Folders      []appconfig.ChannelFolder      `json:"folders"`
 }
 
-func presentationResult(settings peripheralSettings, key string) (presentationUpdateResult, error) {
+func presentationResult(settings PeripheralSettings, key string) (PresentationUpdateResult, error) {
 	var matchedControl *appconfig.ControlDescriptor
 	for index := range settings.Controls {
 		if settings.Controls[index].Key == key {
@@ -44,7 +44,7 @@ func presentationResult(settings peripheralSettings, key string) (presentationUp
 	}
 	for _, peripheral := range settings.Peripherals {
 		if peripheral.Key == key {
-			return presentationUpdateResult{
+			return PresentationUpdateResult{
 				BoardProfile: settings.BoardProfile,
 				Peripheral:   peripheral,
 				Control:      matchedControl,
@@ -53,7 +53,7 @@ func presentationResult(settings peripheralSettings, key string) (presentationUp
 			}, nil
 		}
 	}
-	return presentationUpdateResult{}, errors.New("updated peripheral disappeared from the active profile")
+	return PresentationUpdateResult{}, errors.New("updated peripheral disappeared from the active profile")
 }
 
 func (service *Service) activeBoardProfile() (boardProfileDescriptor, appconfig.BoardProfile) {
@@ -120,24 +120,24 @@ func (service *Service) updateActiveBoardProfile(key, mode string, exposeRawRela
 	return updated, nil
 }
 
-func (service *Service) updatePeripheralPresentation(key string, name, icon, color, upColor, downColor, group *string, order *int, hidden, locked *bool, expectedRevision string) (presentationUpdateResult, error) {
+func (service *Service) updatePeripheralPresentation(key string, name, icon, color, upColor, downColor, group *string, order *int, hidden, locked *bool, expectedRevision string) (PresentationUpdateResult, error) {
 	if service.UpdateHostConfig == nil {
-		return presentationUpdateResult{}, errors.New("persistent host configuration is unavailable")
+		return PresentationUpdateResult{}, errors.New("persistent host configuration is unavailable")
 	}
 	current, _ := service.activeBoardProfile()
 	if !current.Attached || !current.Configured {
-		return presentationUpdateResult{}, errors.New("configure the attached board profile before changing presentation")
+		return PresentationUpdateResult{}, errors.New("configure the attached board profile before changing presentation")
 	}
 	key = strings.TrimSpace(key)
 	if key == "" || name == nil && icon == nil && color == nil && upColor == nil && downColor == nil && group == nil && order == nil && hidden == nil && locked == nil {
-		return presentationUpdateResult{}, &RPCError{Code: -32602, Message: "key and at least one presentation field are required"}
+		return PresentationUpdateResult{}, &RPCError{Code: -32602, Message: "key and at least one presentation field are required"}
 	}
 	known := false
 	defaultHidden := false
 	for _, peripheral := range service.peripheralSettings().Peripherals {
 		if peripheral.Key == key {
 			if group != nil && strings.TrimSpace(*group) != "" && peripheral.Control == "seat-internal" {
-				return presentationUpdateResult{}, &RPCError{Code: -32602, Message: "raw seat relays cannot be assigned to an operator folder"}
+				return PresentationUpdateResult{}, &RPCError{Code: -32602, Message: "raw seat relays cannot be assigned to an operator folder"}
 			}
 			known = true
 			defaultHidden = peripheral.Hidden
@@ -145,7 +145,7 @@ func (service *Service) updatePeripheralPresentation(key string, name, icon, col
 		}
 	}
 	if !known {
-		return presentationUpdateResult{}, &RPCError{Code: -32602, Message: fmt.Sprintf("peripheral key %q is not advertised by the active profile", key)}
+		return PresentationUpdateResult{}, &RPCError{Code: -32602, Message: fmt.Sprintf("peripheral key %q is not advertised by the active profile", key)}
 	}
 	changedFields := make([]string, 0, 9)
 	changedKeys := []string{key}
@@ -220,23 +220,23 @@ func (service *Service) updatePeripheralPresentation(key string, name, icon, col
 		return nil
 	})
 	if err != nil {
-		return presentationUpdateResult{}, err
+		return PresentationUpdateResult{}, err
 	}
 	settings := service.peripheralSettings()
 	service.publishPeripheralChange(settings.BoardProfile, changedKeys, changedFields)
 	return presentationResult(settings, key)
 }
 
-func (service *Service) updateChannelFolder(change appconfig.ChannelFolderMutation, expectedRevision string) (peripheralSettings, error) {
+func (service *Service) updateChannelFolder(change appconfig.ChannelFolderMutation, expectedRevision string) (PeripheralSettings, error) {
 	if service.UpdateHostConfig == nil {
-		return peripheralSettings{}, errors.New("persistent host configuration is unavailable")
+		return PeripheralSettings{}, errors.New("persistent host configuration is unavailable")
 	}
 	current, _ := service.activeBoardProfile()
 	if !current.Attached || !current.Configured {
-		return peripheralSettings{}, errors.New("configure the attached board profile before changing folders")
+		return PeripheralSettings{}, errors.New("configure the attached board profile before changing folders")
 	}
 	if expectedRevision == "" {
-		return peripheralSettings{}, &RPCError{Code: -32602, Message: "expected_revision is required"}
+		return PeripheralSettings{}, &RPCError{Code: -32602, Message: "expected_revision is required"}
 	}
 	var changedKeys []string
 	err := service.UpdateHostConfig(func(config *appconfig.Config) error {
@@ -253,7 +253,7 @@ func (service *Service) updateChannelFolder(change appconfig.ChannelFolderMutati
 		return nil
 	})
 	if err != nil {
-		return peripheralSettings{}, err
+		return PeripheralSettings{}, err
 	}
 	settings := service.peripheralSettings()
 	service.publishPeripheralChange(settings.BoardProfile, changedKeys, []string{"folders", "group"})

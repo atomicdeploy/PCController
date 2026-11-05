@@ -10,6 +10,6 @@ import "embed"
 //go:embed icons/app.png icons/lamp-on.png icons/lamp-off.png icons/lamp-unknown.png icons/menu-*.png
 //go:embed icons/lamp-on.ico icons/lamp-off.ico icons/lamp-unknown.ico icons/lamp-connecting.ico icons/lamp-error.ico
 //go:embed icons/menu-settings.ico icons/menu-diagnostics.ico icons/menu-reconnect.ico
-//go:embed fonts/yekanbakh-vf.ttf
+//go:embed fonts/Vazirmatn-Regular.ttf
 //go:embed sfx/*.wav
 var Files embed.FS

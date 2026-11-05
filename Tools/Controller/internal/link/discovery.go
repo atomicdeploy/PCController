@@ -210,8 +210,16 @@ func authenticationTimeout(options DiscoveryOptions) time.Duration {
 		attempts = 1
 	}
 	betweenAttempts := time.Duration(attempts-1) * 100 * time.Millisecond
+	resetBudget := time.Duration(0)
+	if options.ResetAfterOpen != nil {
+		pulse := options.ResetPulse
+		if pulse <= 0 {
+			pulse = defaultResetPulse
+		}
+		resetBudget = dtrReleaseSettle + pulse
+	}
 	return startupWait + time.Duration(attempts)*requestTimeout +
-		betweenAttempts + authenticationTimeoutSlack
+		betweenAttempts + resetBudget + authenticationTimeoutSlack
 }
 
 func closeFailedAuthentication(
@@ -239,7 +247,7 @@ func authenticateOpened(
 		options.ResetAfterOpen(port) {
 		pulse := options.ResetPulse
 		if pulse <= 0 {
-			pulse = 120 * time.Millisecond
+			pulse = defaultResetPulse
 		}
 		if err := session.PulseDTR(ctx, pulse); err != nil {
 			return native.Hello{}, fmt.Errorf("reset %s after reconnect: %w", port.Name, err)

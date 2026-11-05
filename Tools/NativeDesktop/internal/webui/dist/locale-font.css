@@ -1,7 +1,7 @@
 @font-face {
-  font-family: "YekanBakh";
-  src: url("./shared/fonts/yekanbakh-vf.ttf") format("truetype");
+  font-family: "Vazirmatn";
+  src: url("./shared/fonts/Vazirmatn-Regular.ttf") format("truetype");
   font-style: normal;
-  font-weight: 100 900;
+  font-weight: 400;
   font-display: swap;
 }

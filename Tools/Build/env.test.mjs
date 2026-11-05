@@ -62,6 +62,13 @@ test('rejects a missing explicitly selected environment file', () => {
 })
 
 test('production Node entrypoints load the repository environment contract', () => {
+  // Immutable donor-history utilities are retained for provenance, not called
+  // by PCController's production build or launch paths. Do not make them load
+  // the current product environment while inspecting historical repositories.
+  const donorHistoryUtilities = new Set([
+    'Tools/NativeDesktop/tools/repair-history-dates.mjs',
+    'Tools/NativeDesktop/tools/verify-history.mjs'
+  ])
   const entrypoints = new Set([
     'Tools/Build/product-metadata.mjs',
     'Tools/CommandPlan/controller-command.mjs',
@@ -70,6 +77,7 @@ test('production Node entrypoints load the repository environment contract', () 
   const visit = (directory) => {
     for (const entry of readdirSync(resolve(repositoryRoot, directory), { withFileTypes: true })) {
       const relative = `${directory}/${entry.name}`
+      if (donorHistoryUtilities.has(relative)) continue
       if (entry.isDirectory()) {
         if (!['.build', '.cache', 'bin', 'dist', 'node_modules'].includes(entry.name)) visit(relative)
         continue

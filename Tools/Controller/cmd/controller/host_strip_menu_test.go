@@ -15,6 +15,7 @@ import (
 
 func TestStripHostMenuStagesThenUsesSharedCommands(t *testing.T) {
 	config := appconfig.Defaults()
+	config.StripEffects = appconfig.DefaultStripEffects()
 	live := control.Snapshot{Connected: true, Hello: native.Hello{Capabilities: native.CapabilityAddressableLED}}
 	var calls []string
 	var commandError error
@@ -105,6 +106,7 @@ func TestStripHostMenuStagesThenUsesSharedCommands(t *testing.T) {
 
 func TestStripHostMenuCatalogRefreshAndLocalizedNames(t *testing.T) {
 	config := appconfig.Defaults()
+	config.StripEffects = appconfig.DefaultStripEffects()
 	a := &hostStripMenuActions{config: func() appconfig.Config { return config }}
 	selected, _, _ := a.Read("host.strip.effect")
 	if selected != config.StripEffects[0].ID {

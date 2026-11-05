@@ -168,6 +168,7 @@ type UIConfig struct {
 	RoundedCorners    bool         `json:"rounded_corners"`
 	LayeredForeground bool         `json:"layered_foreground"`
 	TitleBarMode      string       `json:"title_bar_mode"`
+	ControllerChrome  string       `json:"controller_chrome,omitempty"`
 	BorderMode        string       `json:"border_mode"`
 	SettingsTab       int          `json:"settings_tab"`
 	SettingsBounds    WindowBounds `json:"settings_bounds"`

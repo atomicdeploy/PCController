@@ -43,7 +43,7 @@ var requiredDistributionFiles = []string{
 }
 
 var sharedAssetArchiveNames = []string{
-	"shared/fonts/yekanbakh-vf.ttf",
+	"shared/fonts/Vazirmatn-Regular.ttf",
 	"shared/icons/app.png",
 	"shared/sfx/on.wav",
 	"shared/sfx/off.wav",

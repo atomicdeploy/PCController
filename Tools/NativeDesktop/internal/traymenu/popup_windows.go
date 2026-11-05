@@ -766,6 +766,9 @@ func popupWindowProc(rawHWND uintptr, message uint32, wParam, lParam uintptr) ui
 		win.SetCursor(win.LoadCursor(0, win.MAKEINTRESOURCE(win.IDC_ARROW)))
 		return 1
 	case win.WM_MOUSEMOVE:
+		// Mouse capture can suppress WM_SETCURSOR. Reassert during captured
+		// navigation too, rather than inheriting the owner's last edge cursor.
+		win.SetCursor(win.LoadCursor(0, win.MAKEINTRESOURCE(win.IDC_ARROW)))
 		index := session.dimensions.rowAt(win.GET_X_LPARAM(lParam), win.GET_Y_LPARAM(lParam))
 		if session.navigation.selectIndex(index) {
 			session.selectionChanged()
@@ -912,6 +915,11 @@ func popupOverlayWindowProc(
 ) uintptr {
 	hwnd := win.HWND(rawHWND)
 	switch message {
+	case win.WM_SETCURSOR:
+		// The transparent visual overlay must not inherit a resize cursor
+		// from the owner's non-client border beneath the popup.
+		win.SetCursor(win.LoadCursor(0, win.MAKEINTRESOURCE(win.IDC_ARROW)))
+		return 1
 	case win.WM_PAINT:
 		var paint win.PAINTSTRUCT
 		if destination := win.BeginPaint(hwnd, &paint); destination != 0 {

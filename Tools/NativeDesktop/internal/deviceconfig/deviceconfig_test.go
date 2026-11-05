@@ -43,7 +43,7 @@ func TestProjectWhitelistsTypedFieldsAndCannotSerializeRawCredentials(t *testing
 			AccessPointStatus:  "Enabled",
 			Country:            "IR",
 			Description: diagnostics.DeviceDescription{
-				ModelName:    "ASA0002E",
+				ModelName:    "TestController",
 				Manufacturer: "YektaYar",
 			},
 		},

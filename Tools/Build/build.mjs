@@ -1357,6 +1357,20 @@ function walkFiles(current, output, include, excludeBuildState = true) {
 
 export function hostSourceIdentity(hostRoot = HOST_ROOT) {
 	const files = []
+	const rgbIntegrations = resolve(hostRoot, '..', 'Integrations', 'SignalRGB')
+	if (existsSync(rgbIntegrations)) walkFiles(rgbIntegrations, files, () => true)
+	const rgbGuide = resolve(hostRoot, '..', '..', 'docs', 'RGB-INPUT.md')
+	if (existsSync(rgbGuide)) files.push(rgbGuide)
+	// The native desktop is a local module, including reviewed vendored Walk
+	// fixes and embedded assets. A GUI-only edit must invalidate host packages.
+	const nativeDesktop = resolve(hostRoot, '..', 'NativeDesktop')
+	if (existsSync(nativeDesktop)) {
+		for (const name of ['desktop', 'presentation', 'internal', 'assets', 'vendor']) {
+			const directory = join(nativeDesktop, name)
+			if (existsSync(directory)) walkFiles(directory, files, () => true)
+		}
+		for (const name of ['go.mod', 'go.sum']) if (existsSync(join(nativeDesktop, name))) files.push(join(nativeDesktop, name))
+	}
 	walkFiles(hostRoot, files, path => ['.go', '.c', '.h'].includes(extname(path).toLowerCase()))
 	const programmerBridge = resolve(hostRoot, '..', 'AvrdudeAdapter')
 	if (existsSync(programmerBridge)) walkFiles(programmerBridge, files, () => true)
@@ -1573,6 +1587,21 @@ function copyProjectNotices(destination) {
 	}
 	const licenses = join(PROJECT_ROOT, 'LICENSES')
 	if (existsSync(licenses)) cpSync(licenses, join(project, 'LICENSES'), { recursive: true })
+	const nativeNotices = join(destination, 'native-desktop')
+	for (const name of ['LICENSE', 'docs/attribution.md', 'assets/fonts/OFL.txt']) {
+		const source = join(PROJECT_ROOT, 'Tools', 'NativeDesktop', name)
+		if (!existsSync(source)) continue
+		const target = join(nativeNotices, name)
+		mkdirSync(dirname(target), { recursive: true })
+		copyFileSync(source, target)
+	}
+	const iconNotices = join(destination, 'web-assets')
+	for (const name of ['Phosphor-LICENSE.txt', 'egui-phosphor-LICENSE.txt']) {
+		const source = join(WEB_ROOT, 'src', 'assets', name)
+		if (!existsSync(source)) continue
+		mkdirSync(iconNotices, { recursive: true })
+		copyFileSync(source, join(iconNotices, name))
+	}
 }
 
 export function collectWebNotices(destination, webRoot = WEB_ROOT) {
@@ -2537,7 +2566,13 @@ function buildHost(options, identity, env, log, embeddedDefaults = { enabled: fa
 		toastLogo = join(toastDirectory, 'toast-logo.png')
 		copyFileSync(identity.toastIcon, toastLogo)
 	}
-	const artifacts = [executable, ...(toastLogo ? [toastLogo] : []), ...shared.paths]
+	const rgbIntegrationDirectory = join(stage, 'integrations', 'SignalRGB')
+	mkdirSync(rgbIntegrationDirectory, { recursive: true })
+	const rgbPlugin = join(rgbIntegrationDirectory, 'PCController.js')
+	const rgbGuide = join(stage, 'integrations', 'RGB-INPUT.md')
+	copyFileSync(join(PROJECT_ROOT, 'Tools', 'Integrations', 'SignalRGB', 'PCController.js'), rgbPlugin)
+	copyFileSync(join(PROJECT_ROOT, 'docs', 'RGB-INPUT.md'), rgbGuide)
+	const artifacts = [executable, rgbPlugin, rgbGuide, ...(toastLogo ? [toastLogo] : []), ...shared.paths]
 		.concat(programmerLibrary.paths)
 		.map(path => artifactRecord(path, stage))
 	const manifest = {

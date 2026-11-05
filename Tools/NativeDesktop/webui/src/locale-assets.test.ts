@@ -4,21 +4,21 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 describe("canonical locale assets and responsive contract", () => {
-  it("uses the reviewed YekanBakh variable font as one canonical source", async () => {
+  it("uses the reviewed Vazirmatn regular font as one canonical source", async () => {
     const font = await readFile(
-      resolve(process.cwd(), "../assets/fonts/yekanbakh-vf.ttf")
+      resolve(process.cwd(), "../assets/fonts/Vazirmatn-Regular.ttf")
     );
     expect(createHash("sha256").update(font).digest("hex")).toBe(
-      "ca3ef382b43c62d747891bcd72f6b492ec08707ec3d4d747fe20b6eed8d244f0"
+      "b69fd4c680b8f3f225feabcc655a2c585d97627b8f5f5c0f9985e894069f3a56"
     );
 
     const declaration = await readFile(
       resolve(process.cwd(), "public/locale-font.css"),
       "utf8"
     );
-    expect(declaration).toContain('font-family: "YekanBakh"');
-    expect(declaration).toContain('url("./shared/fonts/yekanbakh-vf.ttf")');
-    expect(declaration).toContain("font-weight: 100 900");
+    expect(declaration).toContain('font-family: "Vazirmatn"');
+    expect(declaration).toContain('url("./shared/fonts/Vazirmatn-Regular.ttf")');
+    expect(declaration).toContain("font-weight: 400");
   });
 
   it("keeps explicit desktop, tablet, phone, and narrow-phone layouts", async () => {

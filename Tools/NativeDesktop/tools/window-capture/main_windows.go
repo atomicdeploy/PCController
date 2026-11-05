@@ -48,6 +48,7 @@ var (
 	getWindowThreadProcessID = user32.NewProc("GetWindowThreadProcessId")
 	isWindowVisible          = user32.NewProc("IsWindowVisible")
 	getWindowRect            = user32.NewProc("GetWindowRect")
+	getForegroundWindow      = user32.NewProc("GetForegroundWindow")
 	getWindowText            = user32.NewProc("GetWindowTextW")
 	getWindowTextLength      = user32.NewProc("GetWindowTextLengthW")
 	getWindowDC              = user32.NewProc("GetWindowDC")
@@ -101,18 +102,25 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	fmt.Printf("captured hwnd=%#x title=%q to %s\n", hwnd, windowTitle(hwnd), os.Args[2])
+	foreground, _, _ := getForegroundWindow.Call()
+	fmt.Printf("captured hwnd=%#x title=%q foreground=%t to %s\n", hwnd, windowTitle(hwnd), foreground == hwnd, os.Args[2])
 }
 
 func findWindow(pid uint32, titleSubstring string) uintptr {
 	var chosen uintptr
 	wanted := strings.ToLower(strings.TrimSpace(titleSubstring))
+	exact := strings.HasPrefix(wanted, "=")
+	wanted = strings.TrimPrefix(wanted, "=")
 	callback := syscall.NewCallback(func(hwnd, _ uintptr) uintptr {
 		var owner uint32
 		getWindowThreadProcessID.Call(hwnd, uintptr(unsafe.Pointer(&owner)))
 		visible, _, _ := isWindowVisible.Call(hwnd)
-		if owner == pid && visible != 0 &&
-			(wanted == "" || strings.Contains(strings.ToLower(windowTitle(hwnd)), wanted)) {
+		name := strings.ToLower(windowTitle(hwnd))
+		matches := wanted == "" || strings.Contains(name, wanted)
+		if exact {
+			matches = name == wanted
+		}
+		if owner == pid && visible != 0 && matches {
 			var bounds rect
 			ok, _, _ := getWindowRect.Call(hwnd, uintptr(unsafe.Pointer(&bounds)))
 			if ok != 0 && bounds.Right > bounds.Left && bounds.Bottom > bounds.Top {

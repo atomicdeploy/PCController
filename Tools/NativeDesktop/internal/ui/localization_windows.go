@@ -82,7 +82,7 @@ func (s *Shell) initializeLocalization() {
 
 	if err := winfx.EnsurePersianFont(); err != nil {
 		s.logf(
-			"register Yekan Bakh VF privately; falling back to Segoe UI: %v",
+			"register Vazirmatn privately; falling back to Segoe UI: %v",
 			err,
 		)
 		return
@@ -104,6 +104,9 @@ func (s *Shell) localizerSnapshot() i18n.Localizer {
 }
 
 func (s *Shell) tr(id i18n.MessageID) string {
+	if s.controller != nil && id == i18n.MsgAppName {
+		return s.controller.Title
+	}
 	return s.localizerSnapshot().Text(id)
 }
 

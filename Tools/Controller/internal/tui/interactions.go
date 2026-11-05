@@ -684,6 +684,7 @@ func (model *Model) switchPage(page Page) {
 	model.terminalVisible = false
 	model.terminalHidden = false
 	model.renameTarget = ""
+	model.channels.renameRevision = ""
 	model.input.Prompt = "❯ "
 	model.input.SetValue("")
 	model.macroSearchEditing = false
@@ -885,6 +886,12 @@ func (model Model) selectedOutputRow() (controlTableRow, bool) {
 }
 
 func (model Model) peripheralName(key, fallback string) string {
+	if name, _ := model.channelPresentation(key); strings.TrimSpace(name) != "" {
+		return name
+	}
+	if model.channels.source.Read != nil {
+		return fallback
+	}
 	if name := strings.TrimSpace(model.uiValue.PeripheralNames[key]); name != "" {
 		return name
 	}
@@ -897,13 +904,7 @@ func (model Model) beginPeripheralRename() (Model, tea.Cmd, bool) {
 		model.setNotice("Select a relay, motion side, or PWM channel before renaming")
 		return model, nil, true
 	}
-	var descriptor appconfig.PeripheralDescriptor
-	for _, candidate := range appconfig.PeripheralDescriptors() {
-		if candidate.Key == row.PeripheralKey {
-			descriptor, ok = candidate, true
-			break
-		}
-	}
+	descriptor, ok := model.channelDescriptorByKey(row.PeripheralKey)
 	if !ok {
 		return model, nil, true
 	}
@@ -915,7 +916,7 @@ func (model Model) beginSelectedPeripheralRename() (Model, tea.Cmd, bool) {
 	if !ok {
 		return model, nil, false
 	}
-	descriptor, ok := peripheralDescriptorForSettingKey(row.Key)
+	descriptor, ok := model.catalogSettingDescriptor(row.Key)
 	if !ok {
 		model.setNotice("Select a peripheral-name row before using F2")
 		return model, nil, true
@@ -924,6 +925,7 @@ func (model Model) beginSelectedPeripheralRename() (Model, tea.Cmd, bool) {
 }
 
 func (model Model) beginPeripheralRenameDescriptor(descriptor appconfig.PeripheralDescriptor) (Model, tea.Cmd, bool) {
+	model.channels.renameRevision = model.channels.value.BoardProfile.Revision
 	model.renameTarget = descriptor.Key
 	model.renameTerminalWasVisible = model.terminalIsVisible()
 	model.input.Prompt = "F2 Rename " + descriptor.Key + " › "
@@ -947,7 +949,7 @@ func (model *Model) cancelPeripheralRename() {
 }
 
 func (model Model) finishPeripheralRename() (Model, tea.Cmd, bool) {
-	descriptor, ok := peripheralDescriptorByKey(model.renameTarget)
+	descriptor, ok := model.channelDescriptorByKey(model.renameTarget)
 	if !ok {
 		model.setNotice("Peripheral rename target is no longer in the host registry")
 		return model, nil, true
@@ -975,7 +977,7 @@ func (model Model) finishPeripheralRename() (Model, tea.Cmd, bool) {
 }
 
 func (model Model) savePeripheralName(descriptor appconfig.PeripheralDescriptor, value string) (Model, string, bool, error) {
-	if model.remote != nil && model.remote.SaveHostUI == nil {
+	if model.channels.source.Read == nil && model.remote != nil && model.remote.SaveHostUI == nil {
 		return model, "", false, errors.New("remote peripheral naming is unavailable")
 	}
 	name := strings.TrimSpace(value)
@@ -988,6 +990,9 @@ func (model Model) savePeripheralName(descriptor appconfig.PeripheralDescriptor,
 		}
 	}
 
+	if model.channels.source.Read != nil {
+		return model.saveCatalogName(descriptor, name)
+	}
 	ui := model.uiValue
 	names := make(map[string]string, len(ui.PeripheralNames)+1)
 	for key, current := range ui.PeripheralNames {

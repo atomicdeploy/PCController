@@ -20,6 +20,9 @@ type buttonActivationState struct {
 }
 
 func releaseActivatedAction(action actionID) bool {
+	if action >= actionKey1 && action < 128 {
+		return true
+	}
 	switch action {
 	case actionToggle, actionOn, actionOff,
 		actionSettings, actionDiagnostics, actionReconnect,

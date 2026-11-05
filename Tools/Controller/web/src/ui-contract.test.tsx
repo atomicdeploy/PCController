@@ -528,7 +528,7 @@ describe('offline and settings UI contracts', () => {
     expect(markup).toContain('text-field__control')
     expect(markup).toContain('text-field__action')
     expect(markup).toContain('Application title')
-    expect(markup).toContain('Peripheral names')
+    expect(markup).toContain('Channel names')
     expect(markup).toContain('Global shortcuts')
     expect(markup).toContain('Record shortcut')
     expect(markup).toContain('Sync this tab with other instances')

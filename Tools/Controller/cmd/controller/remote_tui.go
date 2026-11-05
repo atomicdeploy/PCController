@@ -32,11 +32,14 @@ import (
 // constructs, scans, or opens a local serial runtime; the remote primary stays
 // the sole owner of the board transport.
 type remoteTUIIPC struct {
-	ctx     context.Context
-	address string
-	auth    string
-	callFn  func(context.Context, string, any, any) error
-	retry   time.Duration
+	// Optional native presentation observer, installed before StartLive. It sees
+	// acknowledged changed-only edges without the telemetry flush coalescer.
+	observeState func(controllerapi.Event)
+	ctx          context.Context
+	address      string
+	auth         string
+	callFn       func(context.Context, string, any, any) error
+	retry        time.Duration
 
 	events                chan control.Event
 	eventsMu              sync.RWMutex
@@ -1213,7 +1216,22 @@ func (client *remoteTUIIPC) consumeLiveMessage(data []byte, pendingRequestID uin
 		})
 	case "controller.state":
 		var event controllerapi.Event
-		if json.Unmarshal(message.Params, &event) != nil || event.Kind != "status_led.changed" {
+		if json.Unmarshal(message.Params, &event) != nil {
+			return false, nil
+		}
+		if client.observeState != nil && (event.Kind == "front_panel.segment" || event.Kind == "front_panel.changed") {
+			if client.advanceLiveStateCursor(event.ID) {
+				client.observeState(event)
+			}
+			return false, nil
+		}
+		if event.Kind == "peripherals.changed" {
+			if client.advanceLiveStateCursor(event.ID) {
+				client.publishActivity(event.Kind, event.Text)
+			}
+			return false, nil
+		}
+		if event.Kind != "status_led.changed" {
 			return false, nil
 		}
 		if !client.advanceLiveStateCursor(event.ID) {
@@ -1526,6 +1544,7 @@ func runRemoteTUIContext(
 					// the full TUI reports the capability as unavailable instead of
 					// silently changing this SSH client's unrelated configuration.
 					UIConfig: clientUI,
+					ChannelCatalog: newTUIChannelCatalog(client.call),
 					SaveUI:   saveClientUI,
 					ApplyTUIConsole: func(value appconfig.TUIConsole) error {
 						settings := consoleOptions.resolve(value)

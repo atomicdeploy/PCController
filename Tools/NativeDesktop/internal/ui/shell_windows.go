@@ -42,6 +42,7 @@ import (
 	"rayanlamp.local/app/internal/vector"
 	"rayanlamp.local/app/internal/winfx"
 	"rayanlamp.local/app/internal/wmipc"
+	"rayanlamp.local/app/presentation"
 )
 
 const (
@@ -106,10 +107,26 @@ type audioJob struct {
 }
 
 type Shell struct {
-	core       *appcore.Core
-	dispatcher *commands.Dispatcher
-	configPath string
-	log        Logger
+	controller               *presentation.Options
+	controllerState          presentation.Snapshot
+	controllerBusy           bool
+	controllerIconFonts      map[int]*walk.Font
+	controllerChannels       bool
+	controllerPreferences    bool
+	controllerPage           int
+	controllerActionIDs      map[actionID]string
+	controllerChannelHits    []controllerChannelHit
+	controllerGesture        controllerChannelGesture
+	controllerPendingPWM     controllerChannelGesture
+	controllerTrayStatus     string
+	controllerMinimumHeight  int
+	controllerSegmentLevels  [4][8]float64
+	controllerSegmentTargets [4][8]float64
+	controllerSegmentsReady  bool
+	core                     *appcore.Core
+	dispatcher               *commands.Dispatcher
+	configPath               string
+	log                      Logger
 
 	mw                   *walk.MainWindow
 	surface              *walk.CustomWidget
@@ -133,8 +150,8 @@ type Shell struct {
 	snapshot                   model.Snapshot
 	layout                     surfaceLayout
 	hover                      actionID
-	hoverLevels                [32]float64
-	pressLevels                [32]float64
+	hoverLevels                [128]float64
+	pressLevels                [128]float64
 	buttonActivation           buttonActivationState
 	visualPhase                float64
 	visualTick                 time.Time
@@ -246,11 +263,16 @@ func New(
 	configPath string,
 	logger Logger,
 ) (*Shell, error) {
+	return newShell(core, dispatcher, configPath, logger, nil)
+}
+
+func newShell(core *appcore.Core, dispatcher *commands.Dispatcher, configPath string, logger Logger, controller *presentation.Options) (*Shell, error) {
 	if core == nil || dispatcher == nil {
 		return nil, errors.New("ui: core and dispatcher are required")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	shell := &Shell{
+		controller: controller,
 		core:       core,
 		dispatcher: dispatcher,
 		configPath: configPath,
@@ -280,23 +302,25 @@ func New(
 		)
 	}
 	go shell.runAudio()
-	if executable, executableErr := os.Executable(); executableErr != nil {
-		shell.logf(
-			"initialize start-with-Windows persistence: locate executable: %v",
-			executableErr,
-		)
-	} else {
-		persistence, persistenceErr := winfx.NewStartWithWindowsPersistence(
-			executable,
-			shell.cfg.Integration.StartWithWindows,
-		)
-		if persistenceErr != nil {
+	if controller == nil {
+		if executable, executableErr := os.Executable(); executableErr != nil {
 			shell.logf(
-				"initialize start-with-Windows persistence: %v",
-				persistenceErr,
+				"initialize start-with-Windows persistence: locate executable: %v",
+				executableErr,
 			)
 		} else {
-			shell.startWithWindowsPersistence = persistence
+			persistence, persistenceErr := winfx.NewStartWithWindowsPersistence(
+				executable,
+				shell.cfg.Integration.StartWithWindows,
+			)
+			if persistenceErr != nil {
+				shell.logf(
+					"initialize start-with-Windows persistence: %v",
+					persistenceErr,
+				)
+			} else {
+				shell.startWithWindowsPersistence = persistence
+			}
 		}
 	}
 	if err := shell.createWindow(); err != nil {
@@ -327,17 +351,19 @@ func New(
 	shell.automation = automation.New(shell.cfg.Automation, func(message string) {
 		shell.logf("%s", message)
 	})
-	shell.systemRecovery = newSystemRecoveryCoordinator(
-		defaultSystemRecoveryDelay,
-		shell.core.Snapshot,
-		shell.core.Reconnect,
-		func() {
-			shell.handleSystemAutomation(
-				automation.SystemEventNetworkChange,
-			)
-		},
-		shell.logf,
-	)
+	if controller == nil {
+		shell.systemRecovery = newSystemRecoveryCoordinator(
+			defaultSystemRecoveryDelay,
+			shell.core.Snapshot,
+			shell.core.Reconnect,
+			func() {
+				shell.handleSystemAutomation(
+					automation.SystemEventNetworkChange,
+				)
+			},
+			shell.logf,
+		)
+	}
 	shell.installEvents()
 	shell.applyConfigUI(shell.cfg, false)
 	shell.updateTray()
@@ -458,6 +484,10 @@ func (s *Shell) Close() {
 		return
 	}
 	s.quitting.Store(true)
+	for _, font := range s.controllerIconFonts {
+		font.Dispose()
+	}
+	s.controllerIconFonts = nil
 	s.cancelButtonActivation()
 	s.cleanupWindowFade()
 	// The exit fade ends with an internal SW_HIDE. Flush the placement captured
@@ -714,6 +744,12 @@ func (s *Shell) createWindow() error {
 				return 0, true
 			case win.WM_CAPTURECHANGED:
 				s.deferPointerCaptureCancellation()
+				s.mw.Synchronize(func() {
+					if s.controllerGesture.key != "" {
+						s.controllerGesture = controllerChannelGesture{}
+						s.surface.Invalidate()
+					}
+				})
 			case win.WM_CANCELMODE:
 				s.cancelButtonActivation()
 			case win.WM_KILLFOCUS:
@@ -739,6 +775,10 @@ func (s *Shell) createWindow() error {
 	s.cfg.UI.WindowBounds = bounds
 	windowSize := viewSizePixels(s.cfg.UI)
 	minimum, maximum := viewMinMaxPixels(s.cfg.UI.ViewMode)
+	if s.controller != nil {
+		minimum.Width = 560
+		minimum.Height = 550
+	}
 	if err := mw.SetMinMaxSizePixels(minimum, maximum); err != nil {
 		return err
 	}
@@ -909,7 +949,12 @@ func (s *Shell) restoreCaptionIcon(redrawFrame bool) {
 
 func (s *Shell) loadArtwork() error {
 	var err error
-	if s.appIcon, err = newProductIconImage(); err != nil {
+	if s.controller != nil {
+		s.appIcon, err = walk.NewIconFromResource("APP")
+	} else {
+		s.appIcon, err = newProductIconImage()
+	}
+	if err != nil {
 		return err
 	}
 	if err := s.mw.SetIcon(s.appIcon); err != nil {
@@ -955,6 +1000,10 @@ func (s *Shell) loadArtwork() error {
 			return decodeErr
 		}
 		s.artworkSources[item.id] = decoded
+	}
+	if s.controller != nil {
+		s.currentAnimationFrame = -1
+		return nil
 	}
 	if s.lampOnSVG, err = assets.Files.ReadFile("lamp-on.svg"); err != nil {
 		return fmt.Errorf("read embedded lamp-on.svg: %w", err)
@@ -1101,6 +1150,9 @@ func (s *Shell) createTray() error {
 }
 
 func (s *Shell) createNotifications() error {
+	if s.controller != nil {
+		return nil
+	} // PCController owns notification identity/actions.
 	cacheDir := filepath.Join(filepath.Dir(s.configPath), "cache")
 	allowToastRegistration, registrationErr :=
 		shellintegration.IsCurrentExecutableRegistered()
@@ -1188,8 +1240,10 @@ func (s *Shell) installEvents() {
 	if err := winfx.ReassertWindowChrome(s.HWND(), s.nativeTitleBar); err != nil {
 		s.logf("restore main window frame policy: %v", err)
 	}
-	if err := wmipc.RegisterPrimary(s.HWND()); err != nil {
-		s.logf("WM IPC registration: %v", err)
+	if s.controller == nil {
+		if err := wmipc.RegisterPrimary(s.HWND()); err != nil {
+			s.logf("WM IPC registration: %v", err)
+		}
 	}
 }
 
@@ -1485,6 +1539,10 @@ func (s *Shell) applyViewMode(ui config.UIConfig) error {
 		return errors.New("main window is unavailable")
 	}
 	minimum, maximum := viewMinMaxPixels(ui.ViewMode)
+	if s.controller != nil {
+		minimum.Width = 560
+		minimum.Height = 550
+	}
 	current := s.mw.BoundsPixels()
 	next := liveViewBounds(current, ui)
 	if err := s.mw.SetMinMaxSizePixels(minimum, maximum); err != nil {
@@ -1514,6 +1572,9 @@ func liveViewBounds(current walk.Rectangle, ui config.UIConfig) walk.Rectangle {
 }
 
 func (s *Shell) registerHotkeys(cfg config.HotkeysConfig) error {
+	if s.controller != nil {
+		return nil
+	} // Host owns global hotkey registration.
 	var failures []error
 	for _, item := range []struct {
 		id    int32
@@ -1681,7 +1742,7 @@ func (s *Shell) windowMessage(hwnd, message, wParam, lParam uintptr) (uintptr, b
 		s.handleTaskbarButtonCreated()
 		return 0, true
 	}
-	if uint32(message) == wmipc.MessageID() {
+	if s.controller == nil && uint32(message) == wmipc.MessageID() {
 		request, err := wmipc.Decode(lParam)
 		if err != nil {
 			s.logf("rejected WM IPC: %v", err)
@@ -2142,6 +2203,9 @@ func (s *Shell) setMotionPolicy(enabled bool) {
 }
 
 func (s *Shell) onMouseMove(x, y int, _ walk.MouseButton) {
+	if s.controller != nil && s.moveControllerChannel(x, y) {
+		return
+	}
 	if !s.trackingMouse && s.surface != nil {
 		event := win.TRACKMOUSEEVENT{
 			CbSize:    uint32(unsafe.Sizeof(win.TRACKMOUSEEVENT{})),
@@ -2162,6 +2226,9 @@ func (s *Shell) onMouseMove(x, y int, _ walk.MouseButton) {
 		return
 	}
 	s.hover = action
+	if s.controller != nil {
+		_ = s.surface.SetToolTipText(s.controllerActionHint(action))
+	}
 	s.startVisualAnimation()
 	if action == actionNone {
 		s.surface.SetCursor(walk.CursorArrow())
@@ -2176,6 +2243,9 @@ func (s *Shell) onMouseLeave() {
 		return
 	}
 	s.trackingMouse = false
+	if s.controller != nil {
+		_ = s.surface.SetToolTipText("")
+	}
 	pressChanged := s.buttonActivation.pointerMove(actionNone)
 	hoverChanged := s.hover != actionNone
 	if hoverChanged {
@@ -2212,6 +2282,9 @@ func (s *Shell) startVisualAnimation() {
 func (s *Shell) settleVisualAppearance() {
 	if s == nil {
 		return
+	}
+	if s.controller != nil {
+		s.controllerSegmentLevels = s.controllerSegmentTargets
 	}
 	if s.visualTimerRunning && s.surface != nil {
 		win.KillTimer(s.surface.Handle(), visualTimerID)
@@ -2256,6 +2329,9 @@ func (s *Shell) advanceVisualAnimation() bool {
 		step = 1
 	}
 	active := false
+	if s.controller != nil {
+		active = s.advanceControllerSegments(elapsed)
+	}
 	for index := 1; index < len(s.hoverLevels); index++ {
 		target := 0.0
 		if actionID(index) == s.hover {
@@ -2387,6 +2463,9 @@ func (s *Shell) onMouseDown(x, y int, button walk.MouseButton) {
 	if button != walk.LeftButton {
 		return
 	}
+	if s.controller != nil && s.beginControllerChannel(x, y) {
+		return
+	}
 	// A pointer gesture takes ownership of the custom surface just as moving
 	// focus to another native button would. Do not let a held shortcut later
 	// dispatch a second, unrelated action on key-up.
@@ -2417,6 +2496,9 @@ func (s *Shell) onMouseUp(x, y int, button walk.MouseButton) {
 	if s == nil || button != walk.LeftButton {
 		return
 	}
+	if s.controller != nil && s.endControllerChannel(x, y) {
+		return
+	}
 	armed, activate := s.buttonActivation.pointerUp(s.layout.hit(x, y))
 	if armed == actionNone {
 		return
@@ -2434,6 +2516,7 @@ func (s *Shell) cancelPointerActivation() {
 	if s == nil {
 		return
 	}
+	s.controllerGesture = controllerChannelGesture{}
 	if armed := s.buttonActivation.cancelPointer(); armed != actionNone {
 		s.startVisualAnimation()
 		if s.surface != nil {
@@ -2510,6 +2593,12 @@ func (s *Shell) onKeyDown(key walk.Key) {
 		return
 	}
 	action := keyboardActivationAction(key)
+	if s.controller != nil {
+		action = controllerKeyboardAction(key)
+		if action >= actionKey1 && action <= actionKey4 && !s.controllerState.CanNavigate {
+			return
+		}
+	}
 	if !s.buttonActivation.keyDown(key, action) {
 		return
 	}
@@ -2537,6 +2626,9 @@ func (s *Shell) onKeyUp(key walk.Key) {
 }
 
 func (s *Shell) activateSurfaceAction(action actionID) {
+	if s.controller != nil && s.activateControllerAction(action) {
+		return
+	}
 	switch action {
 	case actionToggle:
 		s.invoke("lamp.toggle", nil)
@@ -2598,6 +2690,10 @@ func (s *Shell) closeWindowBoundIntegrations() {
 }
 
 func (s *Shell) invoke(method string, params any) {
+	if s.controller != nil {
+		s.invokeController(method)
+		return
+	}
 	request, err := ipc.NewRequest(fmt.Sprintf("ui-%d", time.Now().UnixNano()), method, params)
 	if err != nil {
 		s.showError(s.tr(i18n.MsgErrorRunCommand), err)
@@ -2711,6 +2807,10 @@ func (s *Shell) ImportAudioFile(path string) (sfx.ImportedAsset, error) {
 }
 
 func (s *Shell) updateTray() {
+	if s.controller != nil {
+		s.updateControllerTray()
+		return
+	}
 	if s.tray == nil {
 		return
 	}
@@ -2748,6 +2848,10 @@ func (s *Shell) updateTray() {
 }
 
 func (s *Shell) updateWindowStateIcon() {
+	if s.controller != nil {
+		_ = s.applyWindowStateIcon(s.appIcon)
+		return
+	}
 	if s == nil {
 		return
 	}

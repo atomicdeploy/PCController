@@ -262,7 +262,13 @@ func applyBackdrop(
 		failures = append(failures, fmt.Errorf("extend glass into client: %w", err))
 	}
 
-	if requested == BackdropAuto {
+	// Keep the donor's complete composition stack for persistent acrylic too.
+	// A standalone ACCENT_ENABLE_ACRYLICBEHIND followed by SYSTEMBACKDROP_NONE
+	// tears down the DWM material under our alpha foreground (black on DirectX).
+	// The transparent Accent blur, full glass frame and DWM blur must coexist;
+	// our foreground compositor supplies the acrylic tint and raised surfaces.
+	// Unlike transient system acrylic, this stack is not tied to activation.
+	if requested == BackdropAuto || requested == BackdropAcrylic {
 		applied := false
 		if info.SupportsSystemBackdrop {
 			if err := setDWMInt32(

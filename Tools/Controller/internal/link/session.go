@@ -751,35 +751,51 @@ func (s *Session) Hello() native.Hello {
 	return s.hello
 }
 
-// PulseDTR performs the reconnect-only reset gesture without touching RTS.
-// Keeping it separate from PulseReset makes the one-shot policy observable and
-// avoids surprising adapters that assign RTS another function.
-func (s *Session) PulseDTR(ctx context.Context, lowTime time.Duration) error {
+// Give the adapter/reset capacitor a released interval before the falling
+// edge. An inherited/asserted DTR level is not evidence that RESET was pulsed.
+const dtrReleaseSettle = 20 * time.Millisecond
+const defaultResetPulse = 120 * time.Millisecond
+
+// PulseDTR performs an explicitly permitted reset without touching RTS. True
+// asserts active-low DTR; false releases it. Driver success is not electrical
+// confirmation: callers still authenticate a fresh application HELLO.
+func (s *Session) PulseDTR(ctx context.Context, lowTime time.Duration) (err error) {
 	if lowTime <= 0 {
-		lowTime = 120 * time.Millisecond
+		lowTime = defaultResetPulse
 	}
 	if err := s.acquireWrite(ctx); err != nil {
 		return err
 	}
 	defer func() { <-s.writeGate }()
+	wait := func(duration time.Duration) error {
+		timer := time.NewTimer(duration)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-s.closing:
+			return ErrClosed
+		case <-timer.C:
+			return nil
+		}
+	}
+	if err := s.port.SetDTR(false); err != nil {
+		return fmt.Errorf("release DTR before reset: %w", err)
+	}
+	if err := wait(dtrReleaseSettle); err != nil {
+		return err // Already released; never assert after cancellation.
+	}
+	// Even a failed assertion can have changed the physical line. Always try
+	// release, and retain release failures alongside cancellation/driver errors.
+	defer func() {
+		if releaseErr := s.port.SetDTR(false); releaseErr != nil {
+			err = errors.Join(err, fmt.Errorf("release DTR after reset: %w", releaseErr))
+		}
+	}()
 	if err := s.port.SetDTR(true); err != nil {
 		return fmt.Errorf("assert DTR: %w", err)
 	}
-	timer := time.NewTimer(lowTime)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		_ = s.port.SetDTR(false)
-		return ctx.Err()
-	case <-s.closing:
-		_ = s.port.SetDTR(false)
-		return ErrClosed
-	case <-timer.C:
-	}
-	if err := s.port.SetDTR(false); err != nil {
-		return fmt.Errorf("release DTR: %w", err)
-	}
-	return nil
+	return wait(lowTime)
 }
 
 func (s *Session) Events() <-chan Event {

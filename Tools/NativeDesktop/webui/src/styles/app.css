@@ -134,7 +134,7 @@
       radial-gradient(circle at 84% 8%, color-mix(in srgb, var(--warm) 10%, transparent) 0 9rem, transparent 29rem),
       radial-gradient(circle at 8% 92%, color-mix(in srgb, var(--accent) 15%, transparent) 0 10rem, transparent 34rem),
       linear-gradient(145deg, var(--canvas), var(--canvas-alt));
-    font-family: "YekanBakh", var(--rl-text-font-family);
+    font-family: "Vazirmatn", var(--rl-text-font-family);
     font-size: var(--rl-text-size-body-px);
     line-height: var(--rl-text-line-height);
     text-rendering: optimizeLegibility;

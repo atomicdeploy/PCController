@@ -337,6 +337,14 @@ func TestPulseDTRCancellationRestoresLineAndWriteGate(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- session.PulseDTR(ctx, time.Minute) }()
 	select {
+	case released := <-port.changes:
+		if released {
+			t.Fatal("DTR must be released before the assertion edge")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("DTR pre-release did not start")
+	}
+	select {
 	case asserted := <-port.changes:
 		if !asserted {
 			t.Fatal("DTR was not asserted first")

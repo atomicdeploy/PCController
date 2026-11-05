@@ -29,9 +29,10 @@ import (
 )
 
 type Model struct {
-	runtime *control.Runtime
-	engine  *shell.Engine
-	remote  *RemoteBackend
+	runtime  *control.Runtime
+	engine   *shell.Engine
+	remote   *RemoteBackend
+	channels channelCatalogState
 
 	remoteSnapshot         control.Snapshot
 	remoteSnapshotPending  bool
@@ -477,8 +478,9 @@ func NewWithOptions(runtime *control.Runtime, engine *shell.Engine, options Opti
 		ownerActions = portowner.DefaultActions()
 	}
 	model := Model{
-		width:   options.StartupWidth,
-		runtime: runtime, engine: engine, remote: options.Remote, input: input, spinner: progress,
+		channels: channelCatalogState{source: options.ChannelCatalog},
+		width:    options.StartupWidth,
+		runtime:  runtime, engine: engine, remote: options.Remote, input: input, spinner: progress,
 		page: PageDashboard, historyPos: -1, completionIndex: -1, uiConfig: options.UIConfig,
 		saveUI: options.SaveUI, applyTUIConsole: options.ApplyTUIConsole, uiValue: uiValue,
 		hostIntegrations:     options.HostIntegrations,
@@ -582,6 +584,9 @@ func NewWithOptions(runtime *control.Runtime, engine *shell.Engine, options Opti
 
 func (model Model) Init() tea.Cmd {
 	commands := []tea.Cmd{tick(model.statusInterval()), tea.SetWindowTitle(model.terminalTitle())}
+	if model.channels.source.Read != nil {
+		commands = append(commands, func() tea.Msg { return channelCatalogRefreshMsg{} })
+	}
 	if model.connectPending && model.preview == nil && model.remote == nil {
 		commands = append(commands, connect(model.runtime))
 	}
@@ -620,6 +625,12 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	inputBefore := model.input.Value()
 
 	switch message := message.(type) {
+	case channelCatalogRefreshMsg:
+		command := model.refreshChannelCatalog()
+		return model, command
+	case channelCatalogResultMsg:
+		command := model.acceptChannelCatalog(message)
+		return model, command
 	case appActionMsg:
 		action := hostui.AppAction(message)
 		if !hostui.TargetsInstance(action.Target, model.instanceID, "tui") {
@@ -837,6 +848,11 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			event = control.Event(value)
 			replay = true
 		}
+		if event.Kind == "peripherals.changed" || event.Kind == "config" ||
+			strings.HasPrefix(event.Kind, "connection") || strings.HasPrefix(event.Kind, "device") ||
+			event.Kind == "client.navigation.session.reset" {
+			commands = append(commands, model.refreshChannelCatalog())
+		}
 		if strings.HasPrefix(event.Kind, "macro") && model.remote != nil && model.remote.Snapshot != nil && !model.remoteSnapshotPending {
 			model.remoteSnapshotPending = true
 			commands = append(commands, refreshRemoteSnapshot(model.remote.Snapshot, model.remoteStatusSequence, model.remoteLEDSequence))
@@ -967,6 +983,9 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if update.ConnectionChange {
 			wasConnected := model.remoteLiveConnected
+			if update.Connected && !wasConnected {
+				commands = append(commands, model.refreshChannelCatalog())
+			}
 			model.remoteLiveConnected = update.Connected
 			if !update.Connected && update.Error != "" && (wasConnected || !model.remoteLiveSeen) {
 				model.appendLog("warning", "remote live stream reconnecting: "+update.Error)

@@ -24,9 +24,18 @@ Rayan Lamp device names, network endpoints, and observed wire messages describe
 interoperability with the user's lamp firmware. Firmware code and firmware
 artwork are not included.
 
-## YekanBakh variable font
+## PCController font replacement
 
-`assets/fonts/yekanbakh-vf.ttf` is a third-party YekanBakh variable font, not
+This PCController adaptation uses `assets/fonts/Vazirmatn-Regular.ttf`, copied
+from PCController's existing mobile font asset. Vazirmatn is also the Persian
+family used by the PCController WebUI. Its SIL Open Font License 1.1 is included
+as `assets/fonts/OFL.txt`. Windows uses Segoe UI for normal UI text. The original
+YekanBakh asset is excluded from the current build tree; its historical import
+remains in Git provenance, not in packaged PCController assets.
+
+## Original donor font notice (historical)
+
+The donor's former `assets/fonts/yekanbakh-vf.ttf` is a third-party YekanBakh variable font, not
 original RayanLamp artwork and not covered by this project's MIT license.
 On 2026-11-05 the project owner explicitly confirmed permission to redistribute
 the bundled font in the public AtomicDeploy/RayanLamp repository. This records

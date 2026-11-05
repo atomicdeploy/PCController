@@ -25,6 +25,7 @@ import (
 	"pccontroller.local/controller/internal/ports"
 	"pccontroller.local/controller/internal/productidentity"
 	"pccontroller.local/controller/internal/script"
+	"pccontroller.local/controller/internal/shell"
 	"pccontroller.local/controller/internal/webui"
 )
 
@@ -172,6 +173,9 @@ func runExecCommand(connection *connectionFlags, commandText string, stdout io.W
 			_ = claim.Close()
 		}
 	}()
+	if words, _ := shell.Split(commandText); len(words) >= 2 && strings.EqualFold(words[0], "rgb-input") && strings.EqualFold(words[1], "start") {
+		return errors.New("start the persistent PCController TUI, Web or GUI host first, then enable RGB input through it")
+	}
 	runtime := newRuntime(connection, store)
 	bindRuntimeDevicePersistence(runtime, store)
 	defer runtime.Close()
@@ -217,6 +221,9 @@ func runExecCommand(connection *connectionFlags, commandText string, stdout io.W
 }
 
 func commandAllowsDisconnected(command string) bool {
+	if words, _ := shell.Split(command); len(words) == 2 && strings.EqualFold(words[0], "rgb-input") && (strings.EqualFold(words[1], "status") || strings.EqualFold(words[1], "stop")) {
+		return true
+	}
 	words := strings.Fields(strings.ToLower(strings.TrimSpace(command)))
 	if len(words) >= 2 && words[0] == "audio" && (words[1] == "list" || words[1] == "play") {
 		return true
@@ -923,7 +930,7 @@ func runReset(args []string, stdout, stderr io.Writer, store *appconfig.Store) e
 	flags := flag.NewFlagSet("reset", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	connection := addConnectionFlags(flags, store.Current().Connection)
-	duration := flags.Duration("pulse", 120*time.Millisecond, "DTR/RTS low pulse duration")
+	duration := flags.Duration("pulse", 120*time.Millisecond, "DTR low pulse duration (RTS unchanged)")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -947,7 +954,7 @@ func runReset(args []string, stdout, stderr io.Writer, store *appconfig.Store) e
 		}
 		fmt.Fprintln(
 			stdout,
-			"DTR/RTS reset complete over IPC; application HELLO reauthenticated.",
+			"DTR reset complete over IPC; application HELLO reauthenticated.",
 		)
 		return nil
 	}
@@ -979,7 +986,7 @@ func runReset(args []string, stdout, stderr io.Writer, store *appconfig.Store) e
 		}
 		fmt.Fprintln(
 			stdout,
-			"DTR/RTS reset complete over IPC; application HELLO reauthenticated.",
+			"DTR reset complete over IPC; application HELLO reauthenticated.",
 		)
 		return nil
 	}
@@ -990,15 +997,15 @@ func runReset(args []string, stdout, stderr io.Writer, store *appconfig.Store) e
 	defer primary.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	if err := runtime.EnsureConnected(ctx); err != nil {
-		return err
-	}
+	// Recovery must work before HELLO: the selected/unique physical-port path
+	// in PulseResetFor owns enumeration, close quarantine and the raw reset.
+	// Requiring EnsureConnected here makes a wedged AVR impossible to reset.
 	if err := runtime.PulseResetFor(ctx, *duration); err != nil {
 		return err
 	}
-	if err := runtime.Reconnect(ctx, "DTR/RTS reset pulse completed"); err != nil {
+	if err := runtime.Reconnect(ctx, "DTR reset pulse completed"); err != nil {
 		return err
 	}
-	fmt.Fprintln(stdout, "DTR/RTS reset complete; application HELLO reauthenticated.")
+	fmt.Fprintln(stdout, "DTR reset complete; application HELLO reauthenticated.")
 	return nil
 }

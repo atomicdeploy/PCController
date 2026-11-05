@@ -123,7 +123,7 @@ func TestPeripheralNamesRPCNormalizesPersistsAndNeverTouchesBoardSettings(t *tes
 	set := service.Dispatch(context.Background(), Request{
 		Method: "controller.peripherals.set", Params: params,
 	})
-	updated, ok := set.Result.(peripheralSettings)
+	updated, ok := set.Result.(PeripheralSettings)
 	if set.Error != nil || !ok {
 		t.Fatalf("peripheral set result=%#v error=%v", set.Result, set.Error)
 	}
@@ -167,7 +167,7 @@ func TestPeripheralNamesRESTUsesTheSameTypedContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer response.Body.Close()
-	var result peripheralSettings
+	var result PeripheralSettings
 	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +213,7 @@ func TestPeripheralCatalogUsesExplicitBoardProfileWithoutLegacyMotionAliases(t *
 		},
 	}
 	response := service.Dispatch(context.Background(), Request{Method: "controller.peripherals.get"})
-	settings, ok := response.Result.(peripheralSettings)
+	settings, ok := response.Result.(PeripheralSettings)
 	if response.Error != nil || !ok {
 		t.Fatalf("result=%#v error=%v", response.Result, response.Error)
 	}
@@ -275,7 +275,7 @@ func TestBrowserAndPWMNamesFollowTheBoardProfile(t *testing.T) {
 }
 
 func TestPresentationUpdateResultCarriesTheAuthoritativeControl(t *testing.T) {
-	settings := peripheralSettings{
+	settings := PeripheralSettings{
 		BoardProfile: boardProfileDescriptor{Key: "cafe-cinema", Revision: "next-revision"},
 		Peripherals: []appconfig.PeripheralDescriptor{{
 			Key: "relay.5", Kind: "relay", Index: 5, DefaultName: "User Relay 5",
@@ -404,7 +404,7 @@ func TestSemanticActionDispatchUsesTheAdvertisedProfileCatalog(t *testing.T) {
 }
 
 func TestPeripheralSettingsCarriesTypedStripEffectDescriptors(t *testing.T) {
-	settings := peripheralSettings{StripEffects: control.SupportedStripEffectDescriptors(true, native.CapabilityAddressableLED)}
+	settings := PeripheralSettings{StripEffects: control.SupportedConfiguredStripEffectDescriptors(true, native.CapabilityAddressableLED, appconfig.DefaultStripEffects())}
 	encoded, err := json.Marshal(settings)
 	if err != nil {
 		t.Fatal(err)

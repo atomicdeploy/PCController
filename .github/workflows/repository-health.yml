@@ -23,6 +23,8 @@ jobs:
     steps:
       - name: "📥 Check out source"
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0 # The native donor audit verifies its immutable import tree.
 
       - name: "🔐 Read exact Host dependency lock"
         id: host-dependencies
@@ -45,6 +47,9 @@ jobs:
 
       - name: "🧭 Check repository structure and links"
         run: node .github/scripts/repository-check.mjs
+
+      - name: "🧬 Verify complete native donor source preservation"
+        run: node Tools/Build/audit-native-donor.mjs
 
       - name: "🔐 Check Dependabot, CodeQL, and immutable action pins"
         run: node .github/scripts/security-config-check.mjs

@@ -551,7 +551,19 @@ export interface ControlDescriptor {
 	gamma?: number
 }
 
+export interface BoardProfileDescriptor {
+  board_identity: string
+  revision: string
+  configured: boolean
+  attached: boolean
+}
+export interface PresentationUpdateResult {
+  board_profile: BoardProfileDescriptor
+  peripheral: PeripheralDescriptor
+  controls: ControlDescriptor[]
+}
 export interface PeripheralSettings {
+  board_profile: BoardProfileDescriptor
   peripheral_names: Record<string, string>
   peripherals: PeripheralDescriptor[]
   controls: ControlDescriptor[]

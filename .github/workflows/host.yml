@@ -218,6 +218,11 @@ jobs:
         shell: cmd
         run: build.cmd --host-only --version %PCCONTROLLER_VERSION%
 
+      - name: "🪟 Verify retained native desktop module"
+        if: matrix.windows
+        shell: cmd
+        run: node Tools/Build/go-tests.mjs --module Tools/NativeDesktop
+
       - name: "🔄 Exercise real two-board mirroring against production firmware"
         if: startsWith(matrix.target, 'Linux-')
         shell: bash

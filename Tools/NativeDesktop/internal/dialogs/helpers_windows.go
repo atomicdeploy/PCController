@@ -191,6 +191,20 @@ func newDialogThemeSession(dialog *walk.Dialog) *dialogThemeSession {
 	return &dialogThemeSession{dialog: dialog}
 }
 
+// ThemeSession lets embedded native pages share the donor's complete control,
+// brush, accessibility and caption lifecycle instead of theming only HWNDs.
+type ThemeSession = dialogThemeSession
+
+func NewThemeSession(dialog *walk.Dialog) *ThemeSession {
+	return newDialogThemeSession(dialog)
+}
+
+// Refresh also themes controls created since the previous Apply call.
+func (session *dialogThemeSession) Refresh(theme string, motion bool) bool {
+	session.controlsThemed = false
+	return session.Apply(theme, motion)
+}
+
 func (session *dialogThemeSession) Apply(
 	theme string,
 	motion ...bool,

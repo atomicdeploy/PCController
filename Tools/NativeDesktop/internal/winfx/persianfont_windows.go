@@ -16,8 +16,8 @@ import (
 )
 
 const (
-	PersianFontRegular = "Yekan Bakh VF Regular"
-	PersianFontBold    = "Yekan Bakh VF Bold"
+	PersianFontRegular = "Vazirmatn"
+	PersianFontBold    = "Vazirmatn"
 )
 
 var bundledPersianFont struct {
@@ -35,7 +35,7 @@ var bundledPersianFont struct {
 // and a modeless/SDK dialog can outlive a particular Shell.
 func EnsurePersianFont() error {
 	bundledPersianFont.once.Do(func() {
-		data, err := assets.Files.ReadFile("fonts/yekanbakh-vf.ttf")
+		data, err := assets.Files.ReadFile("fonts/Vazirmatn-Regular.ttf")
 		if err != nil {
 			bundledPersianFont.err = err
 			return
@@ -45,10 +45,10 @@ func EnsurePersianFont() error {
 			bundledPersianFont.err = err
 			return
 		}
-		regular := availablePersianFace([]string{PersianFontRegular, "Yekan Bakh VF"}, win.FW_NORMAL)
+		regular := availablePersianFace([]string{PersianFontRegular}, win.FW_NORMAL)
 		if regular == "" {
 			_ = resource.Close()
-			bundledPersianFont.err = fmt.Errorf("GDI could not select the embedded Yekan Bakh VF")
+			bundledPersianFont.err = fmt.Errorf("GDI could not select the embedded Vazirmatn")
 			return
 		}
 		bold := availablePersianFace([]string{PersianFontBold}, win.FW_BOLD)

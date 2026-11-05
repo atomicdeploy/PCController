@@ -193,6 +193,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 			panic(err)
 		}
 	}
+	mustRegister(rgbInputCommand(runtime, outputs))
 	mustRegister(shell.Command{
 		Name: "clear", Usage: "clear", Summary: "clear the interactive console",
 		Run: func(context.Context, []string) (string, error) {
@@ -831,7 +832,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 					}
 					return result, err
 				case "config", "frame", "rainbow", "effect", "stop", "status":
-					definitions := appconfig.DefaultStripEffects()
+					var definitions []appconfig.StripEffect
 					if options.HostConfig != nil {
 						definitions = options.HostConfig().StripEffects
 					}

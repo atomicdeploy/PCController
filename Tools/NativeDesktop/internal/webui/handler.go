@@ -107,13 +107,13 @@ func (handler staticHandler) ServeHTTP(
 		)
 		return
 	}
-	if relative == "shared/fonts/yekanbakh-vf.ttf" {
+	if relative == "shared/fonts/Vazirmatn-Regular.ttf" {
 		handler.serveCanonicalAsset(
 			response,
 			request,
-			"fonts/yekanbakh-vf.ttf",
+			"fonts/Vazirmatn-Regular.ttf",
 			"font/ttf",
-			"yekanbakh-vf.ttf",
+			"Vazirmatn-Regular.ttf",
 		)
 		return
 	}

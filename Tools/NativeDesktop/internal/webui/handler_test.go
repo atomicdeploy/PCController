@@ -251,7 +251,7 @@ func TestEmbeddedContentTypesAndFingerprints(t *testing.T) {
 		"icon.png":         "image/png",
 		"icon.ico":         "image/x-icon",
 		"sound.wav":        "audio/wav",
-		"yekanbakh-vf.ttf": "font/ttf",
+		"Vazirmatn-Regular.ttf": "font/ttf",
 		"unknown.data":     "",
 	} {
 		if got := embeddedContentType(name); got != want {
@@ -457,13 +457,13 @@ func TestHandlerReusesCanonicalProductIcon(t *testing.T) {
 
 func TestHandlerReusesCanonicalPersianFont(t *testing.T) {
 	t.Parallel()
-	want, err := assets.Files.ReadFile("fonts/yekanbakh-vf.ttf")
+	want, err := assets.Files.ReadFile("fonts/Vazirmatn-Regular.ttf")
 	if err != nil {
 		t.Fatal(err)
 	}
 	request := httptest.NewRequest(
 		http.MethodGet,
-		"/app/shared/fonts/yekanbakh-vf.ttf",
+		"/app/shared/fonts/Vazirmatn-Regular.ttf",
 		nil,
 	)
 	response := httptest.NewRecorder()
@@ -516,7 +516,7 @@ func TestDistributionDoesNotDuplicateCanonicalAssets(t *testing.T) {
 		"icons/app-192.png",
 		"icons/app-maskable-512.png",
 		"shared/icons/app.png",
-		"shared/fonts/yekanbakh-vf.ttf",
+		"shared/fonts/Vazirmatn-Regular.ttf",
 		"shared/sfx/on.wav",
 		"shared/sfx/off.wav",
 		"shared/sfx/message.wav",

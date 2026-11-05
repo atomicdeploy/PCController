@@ -99,6 +99,10 @@ func scaleMenuArtwork(value, dpi int32) int32 {
 }
 
 func (s *Shell) OpenSettings() {
+	if s.controller != nil {
+		s.activateControllerAction(actionSettings)
+		return
+	}
 	if s == nil || s.mw == nil || s.quitting.Load() || s.closed.Load() {
 		return
 	}
@@ -331,6 +335,10 @@ func (s *Shell) persistSettingsBounds(bounds config.WindowBounds) {
 }
 
 func (s *Shell) OpenDiagnostics() {
+	if s.controller != nil {
+		s.openControllerPage("events")
+		return
+	}
 	if s == nil || s.mw == nil || s.quitting.Load() || s.closed.Load() {
 		return
 	}
@@ -365,6 +373,10 @@ func (s *Shell) OpenDiagnostics() {
 // authority used by the local API. No bearer token is placed in the URL; the
 // page establishes its own short-lived, same-origin browser session.
 func (s *Shell) OpenWebUI() {
+	if s.controller != nil {
+		s.openControllerPage("")
+		return
+	}
 	if s == nil || s.quitting.Load() || s.closed.Load() {
 		return
 	}
@@ -386,6 +398,10 @@ func (s *Shell) OpenWebUI() {
 }
 
 func (s *Shell) showAppMenuAt(x, y int32) {
+	if s.controller != nil {
+		s.showControllerMenu(x, y)
+		return
+	}
 	cfg := s.Config()
 	stateIcon := "icons/lamp-unknown.png"
 	stateLabel := s.tr(i18n.MsgTrayStateUnknown)

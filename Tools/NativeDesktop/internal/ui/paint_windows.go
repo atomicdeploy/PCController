@@ -34,9 +34,29 @@ const (
 	actionTitleMinimize
 	actionTitleZoom
 	actionTitleClose
+	actionKey1
+	actionKey2
+	actionKey3
+	actionKey4
+	actionChannels
+	actionRF
+	actionPrograms
+	actionConsole
+	actionChannelBack
+	actionChannelPrevious
+	actionChannelNext
+	actionBuzzer
+	actionStrip
+	actionDisplay
+	actionConnection
+	actionFirmware
+	actionEvents
+	actionChannelFirst actionID = 32
 )
 
 type surfaceLayout struct {
+	controllerButtons     []controllerButton
+	controllerCards       []walk.Rectangle
 	lamp, toggle, on, off walk.Rectangle
 	card                  walk.Rectangle
 	settings, diagnostics walk.Rectangle
@@ -172,6 +192,11 @@ func mirrorDashboardGeometry(
 
 func (layout surfaceLayout) hit(x, y int) actionID {
 	point := walk.Point{X: x, Y: y}
+	for _, button := range layout.controllerButtons {
+		if button.enabled && pointInRect(point, button.rect) {
+			return button.action
+		}
+	}
 	for _, item := range []struct {
 		action actionID
 		rect   walk.Rectangle
@@ -529,7 +554,33 @@ func (s *Shell) composeGlassControls(foreground *image.RGBA) *image.RGBA {
 		pending bool
 	}
 	controls := make([]controlLayer, 0, 7)
-	if s.layout.titleDrag.Width > 0 && s.layout.titleDrag.Height > 0 {
+	var customPalette *palette
+	if s.controller != nil {
+		p := controllerPalette(s.dark)
+		if s.highContrast {
+			p = highContrastPalette()
+		}
+		customPalette = &p
+		// DWM's desktop tint must not replace the product canvas palette. Keep
+		// a little material transmission without a grey/cyan backdrop wash.
+		canvasPalette := p
+		canvasPalette.panel = p.backgroundTop
+		drawGlassRoundedBody(glass, walk.Rectangle{Width: foreground.Bounds().Dx(), Height: foreground.Bounds().Dy()}, 0, glassStyle{Palette: &canvasPalette, Dark: s.dark, Panel: true, Alpha: 72})
+	}
+	for _, card := range s.layout.controllerCards {
+		drawGlassRoundedBody(glass, card, 18, glassStyle{Palette: customPalette, Dark: s.dark, Panel: true, Alpha: 180, BorderAlpha: 48})
+	}
+	for _, button := range s.layout.controllerButtons {
+		buttonPalette := customPalette
+		if customPalette != nil && button.tint != 0 {
+			p := *customPalette
+			p.accent = button.tint
+			buttonPalette = &p
+		}
+		controls = append(controls, controlLayer{rect: button.rect, radius: 10,
+			style: glassStyle{Palette: buttonPalette, Dark: s.dark, Primary: button.active, Hover: s.hoverProgress(button.action), Pressed: s.pressProgress(button.action), RevealX: float64(s.visualPointer.X), RevealY: float64(s.visualPointer.Y), Alpha: 150, BorderAlpha: 72, Elevation: 4}})
+	}
+	if s.controller == nil && s.layout.titleDrag.Width > 0 && s.layout.titleDrag.Height > 0 {
 		drawGlassRoundedBody(
 			glass,
 			s.layout.titleDrag,
@@ -540,7 +591,7 @@ func (s *Shell) composeGlassControls(foreground *image.RGBA) *image.RGBA {
 			},
 		)
 	}
-	if s.Config().UI.ViewMode == config.ViewDashboard {
+	if s.controller == nil && s.Config().UI.ViewMode == config.ViewDashboard {
 		drawGlassRoundedBody(
 			glass,
 			s.layout.card,
@@ -626,12 +677,15 @@ func (s *Shell) composeGlassControls(foreground *image.RGBA) *image.RGBA {
 			)
 		}
 	}
-	s.drawTrafficLightsRGBA(glass)
+	if s.controller == nil || s.Config().UI.ControllerChrome != "windows" {
+		s.drawTrafficLightsRGBA(glass)
+	}
 	draw.Draw(glass, glass.Bounds(), foreground, foreground.Bounds().Min, draw.Over)
 	return glass
 }
 
 type glassStyle struct {
+	Palette     *palette
 	Dark        bool
 	Primary     bool
 	Panel       bool
@@ -749,6 +803,20 @@ func drawGlassRoundedRectLayers(
 	}
 	hover := clampFloat(style.Hover, 0, 1)
 	accentR, accentG, accentB := 64.0, 204.0, 248.0
+	if p := style.Palette; p != nil {
+		components := func(c walk.Color) (float64, float64, float64) {
+			return float64(c & 255), float64((c >> 8) & 255), float64((c >> 16) & 255)
+		}
+		fillR, fillG, fillB = components(p.panelHover)
+		borderR, borderG, borderB = components(p.secondary)
+		accentR, accentG, accentB = components(p.accent)
+		if style.Panel {
+			fillR, fillG, fillB = components(p.panel)
+		}
+		if style.Primary {
+			fillR, fillG, fillB = components(p.accent)
+		}
+	}
 	fillR += (accentR - fillR) * hover * 0.18
 	fillG += (accentG - fillG) * hover * 0.18
 	fillB += (accentB - fillB) * hover * 0.18
@@ -1389,6 +1457,9 @@ func (s *Shell) paintForeground(
 	} else if s.dark {
 		colors = darkPalette()
 	}
+	if s.controller != nil && !s.highContrast {
+		colors = controllerPalette(s.dark)
+	}
 
 	if s.backdrop == winfx.BackdropSolid {
 		if err := canvas.GradientFillRectanglePixels(
@@ -1407,6 +1478,9 @@ func (s *Shell) paintForeground(
 		content.Y += titleHeight
 		content.Height -= titleHeight
 	}
+	if s.controller != nil {
+		return s.paintController(canvas, content, colors)
+	}
 	if s.Config().UI.ViewMode == config.ViewDashboard {
 		return s.paintDashboard(canvas, content, colors)
 	}
@@ -1419,6 +1493,10 @@ func (s *Shell) paintTitleBar(
 	height int,
 	colors palette,
 ) {
+	if s.controller != nil {
+		s.paintControllerChrome(canvas, bounds, height, colors)
+		return
+	}
 	const controlWidth = 24
 	s.layout.titleDrag = walk.Rectangle{
 		X: bounds.X + 4, Y: bounds.Y + 3,

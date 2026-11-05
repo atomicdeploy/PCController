@@ -23,7 +23,7 @@ reviewing those patches. The bundled `internal/webui/dist` is intentional.
 Keep `.gitignore` exclusions: build outputs, local work, test executables,
 temporary resource objects, node_modules, raw conversations, and private
 recovery files. `assets/fonts/yekanbakh-vf.ttf` has the separately documented
-[redistribution authorization](attribution.md#yekanbakh-variable-font), not an
+[redistribution authorization](attribution.md#original-donor-font-notice-historical), not an
 MIT font license.
 
 ## First publication

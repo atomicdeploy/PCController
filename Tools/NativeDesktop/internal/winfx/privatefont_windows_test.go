@@ -44,13 +44,13 @@ func TestEmbeddedPersianFontIsSelectedByGDI(t *testing.T) {
 }
 
 func TestPrivateFontResourceOwnsBackingBytesAndClosesIdempotently(t *testing.T) {
-	data, err := assets.Files.ReadFile("fonts/yekanbakh-vf.ttf")
+	data, err := assets.Files.ReadFile("fonts/Vazirmatn-Regular.ttf")
 	if err != nil {
-		t.Fatalf("read embedded Yekan Bakh VF: %v", err)
+		t.Fatalf("read embedded Vazirmatn: %v", err)
 	}
 	resource, err := AddPrivateFont(data)
 	if err != nil {
-		t.Fatalf("register embedded Yekan Bakh VF: %v", err)
+		t.Fatalf("register embedded Vazirmatn: %v", err)
 	}
 	if resource.handle == 0 || len(resource.data) != len(data) {
 		t.Fatalf(
