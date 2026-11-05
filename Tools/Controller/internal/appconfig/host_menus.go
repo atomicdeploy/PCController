@@ -2,6 +2,7 @@ package appconfig
 
 import (
 	"fmt"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -104,6 +105,7 @@ func DefaultHostMenus() HostMenuConfig {
 					{ID: "macros", Label: "MACR", Title: "Macros", Type: "submenu", Submenu: "macro-library"},
 					{ID: "settings", Label: "CFG", Title: "HOST settings", Type: "submenu", Submenu: "pc-settings"},
 					{ID: "system", Label: "SYS", Title: "System actions", Type: "submenu", Submenu: "system-actions"},
+					{ID: "strip", Label: "StrP", Title: "LED strip", Type: "submenu", Submenu: "strip-controls"},
 				}},
 			{ID: "pc-settings", NodeID: 0x81, ParentID: 0x80, OrderID: 0x81,
 				Label: "CFG", Title: "HOST Settings", Content: "Configuration", Brightness: 5,
@@ -148,6 +150,22 @@ func DefaultHostMenus() HostMenuConfig {
 					{ID: "status", Label: "STAT", Title: "Playback", Type: "readonly", ReadAction: "host.macro.playback"},
 					{ID: "cancel", Label: "STOP", Title: "Cancel safely", Type: "action", WriteAction: "host.macro.cancel"},
 					{ID: "keep", Label: "KEEP", Title: "Cancel keep output", Type: "action", WriteAction: "host.macro.cancel.keep", Guarded: true},
+				}},
+			{ID: "strip-controls", NodeID: 0x86, ParentID: 0x80, OrderID: 0x86,
+				Label: "StrP", Title: "LED Strip", Content: "Host controls", Brightness: 5,
+				EditVisual: "blink", Flags: HostMenuFlags{Visible: true, Selectable: true, Editable: true, Action: true}, Items: []HostMenuItem{
+					{ID: "status", Label: "STAT", Title: "Strip stream", Type: "readonly", ReadAction: "host.strip.status"},
+					{ID: "color", Label: "COLR", Title: "Solid color", Type: "select", Value: "ffffff", ReadAction: "host.strip.color", WriteAction: "host.strip.color", Options: []HostMenuOption{
+						{Label: "White", Value: "ffffff"}, {Label: "Red", Value: "ff0000"}, {Label: "Orange", Value: "ff8000"}, {Label: "Yellow", Value: "ffff00"},
+						{Label: "Green", Value: "00ff00"}, {Label: "Cyan", Value: "00ffff"}, {Label: "Blue", Value: "0000ff"}, {Label: "Purple", Value: "8000ff"},
+					}},
+					{ID: "brightness", Label: "BRIT", Title: "Solid level %", Type: "number", Value: "100", Min: 0, Max: 100, Step: 5, ReadAction: "host.strip.brightness", WriteAction: "host.strip.brightness"},
+					{ID: "pixels", Label: "LEDS", Title: "LED count", Type: "number", Value: "100", Min: 1, Max: 100, Step: 1, ReadAction: "host.strip.pixels", WriteAction: "host.strip.pixels"},
+					{ID: "apply", Label: "SET", Title: "Apply solid", Type: "action", WriteAction: "host.strip.apply"},
+					{ID: "effect", Label: "EFCT", Title: "Strip effect", Type: "select", OptionsSource: "strip.effects", ReadAction: "host.strip.effect", WriteAction: "host.strip.effect"},
+					{ID: "play", Label: "PLAY", Title: "Play effect", Type: "action", WriteAction: "host.strip.play"},
+					{ID: "stop", Label: "STOP", Title: "Stop keep frame", Type: "action", WriteAction: "host.strip.stop"},
+					{ID: "off", Label: "OFF", Title: "Strip off", Type: "action", WriteAction: "host.strip.off"},
 				}},
 		},
 	}
@@ -402,6 +420,15 @@ func normalizeHostMenus(source HostMenuConfig) HostMenuConfig {
 		if !override.Flags.Visible && !override.Flags.Selectable && !override.Flags.Editable && !override.Flags.Action && !override.Flags.ReadOnly {
 			override.Flags.Visible, override.Flags.Selectable = true, true
 		}
+	}
+	// Upgrade only the shipped six-menu layout. Never replace a user-authored
+	// array, collide with a custom node, or exceed the eight-entry wire limit.
+	defaults := DefaultHostMenus()
+	legacy := cloneHostMenus(defaults)
+	legacy.Menus = legacy.Menus[:len(legacy.Menus)-1]
+	legacy.Menus[0].Items = legacy.Menus[0].Items[:len(legacy.Menus[0].Items)-1]
+	if len(result.Menus)+len(result.BuiltinOverrides) < 8 && reflect.DeepEqual(result.Menus, legacy.Menus) {
+		result.Menus = defaults.Menus
 	}
 	return result
 }
