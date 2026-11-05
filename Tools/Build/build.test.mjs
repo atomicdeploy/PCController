@@ -488,6 +488,7 @@ test('safe default builds both targets without touching hardware', () => {
 	assert.equal(options.upload, false)
 	assert.equal(options.installBootloader, false)
 	assert.equal(options.avrdudeLibrary, true)
+	assert.equal(options.avrdudeMode, 'native')
 	const plan = createPlan(options, resolveBuildIdentity(options, {}), 'win32')
 	const adapter = plan.actions.find(action => action.id === 'libavrdude-adapter')
 	assert.equal(adapter.hardware, false)
@@ -501,6 +502,17 @@ test('libavrdude packaging has an explicit CLI-only opt-out', () => {
 	assert.equal(options.avrdudeLibrary, false)
 	const plan = createPlan(options, resolveBuildIdentity(options, {}), 'win32')
 	assert.equal(plan.actions.some(action => action.id === 'libavrdude-adapter'), false)
+})
+
+test('programmer builds offer native, isolated helper and CLI-only modes', () => {
+	for (const mode of ['native', 'helper', 'cli']) {
+		for (const flags of [['--avrdude-mode', mode], [`--avrdude-mode=${mode}`]]) {
+			const options = parseArguments(['--host-only', ...flags], {})
+			assert.equal(options.avrdudeMode, mode)
+			assert.equal(options.avrdudeLibrary, mode !== 'cli')
+		}
+	}
+	assert.throws(() => parseArguments(['--avrdude-mode', 'unknown'], {}), /native, helper, or cli/)
 })
 
 test('Windows libavrdude downloads use the Git for Windows CA bundle', async t => {
@@ -574,9 +586,10 @@ test('host plan reproducibly builds the web application before Go embedding', ()
 	], {})
 	const plan = createPlan(options, resolveBuildIdentity(options, {}), 'win32')
         assert.equal(plan.actions[0].id, 'embedded-defaults')
-	assert.deepEqual(plan.actions.slice(1, 8).map(action => action.id), [
+	assert.deepEqual(plan.actions.slice(1, 9).map(action => action.id), [
 		'web-install', 'web-typecheck', 'web-test', 'web-build',
-		'toolchain-policy-check', 'product-identity-check', 'go-mod-download'
+		'toolchain-policy-check', 'product-identity-check', 'libavrdude-adapter',
+		'go-mod-download'
 	])
         assert.deepEqual(plan.actions[1].command.args, ['ci', '--no-audit', '--no-fund'])
         assert.equal(plan.actions[1].command.cwd, join(PROJECT_ROOT, 'Tools', 'Controller', 'web'))

@@ -36,7 +36,10 @@ func PreflightProgrammer(ctx context.Context, options Options) (resolvedOptions 
 		return options, err
 	}
 	resolved := ""
-	if adapter != "" {
+	if adapter == nativeAvrdudeCommand {
+		options.AvrdudeBackend = "native"
+		options.AvrdudeAdapter = ""
+	} else if adapter != "" {
 		resolved, err = exec.LookPath(adapter)
 		if err != nil {
 			return options, fmt.Errorf("configured libavrdude adapter %q is unavailable: %w", adapter, err)

@@ -10,17 +10,24 @@ public command hierarchy.
 ## Programmer backends and board families
 
 Packaged hosts build AVRDUDE 8.3 from a checksum-locked upstream commit and
-link `pccontroller-avrdude` directly to that exact `libavrdude` source. The
-adapter translates the library message and progress callbacks into JSON Lines;
-Controller feeds those events into the same `update.*` progress hook used by
-the TUI, Web UI, RPC, and bridge coordinator. The matching `avrdude` CLI is
-packaged from the same source only for Urclock metadata/version extensions that
-the library does not expose as operations.
+statically link it through CGO directly into PCController by default. No
+libavrdude DLL or external programmer executable is required for guarded
+programming, backups, Urclock metadata/version queries, or ISP fuse evidence.
+Callbacks feed the same `update.*` progress hook used by TUI, Web UI and RPC.
 
-`programming.avrdude_backend` and `--avrdude-backend` accept `auto`, `library`,
-or `cli`. `auto` is the default and prefers the packaged library adapter.
-`--avrdude-adapter` can select an explicitly reviewed adapter. The CLI backend
-remains an explicit compatibility/recovery choice.
+`programming.avrdude_backend` and `--avrdude-backend` accept `auto`, `native`,
+`library`, `helper`, or `cli`. Auto prefers native, respecting explicitly
+configured helper/CLI paths. Native fails closed when not compiled in; library
+permits native or helper. Build with `--avrdude-mode helper` for process crash
+isolation, or `--avrdude-mode cli` for an externally provisioned CLI-only host.
+Native operations serialize all library state and retain board ownership until
+cooperative cancellation and cleanup complete; a blocked device call can delay
+cancellation. Helper mode retains process-tree termination. See the
+[bridge build and cancellation contract](../Tools/AvrdudeAdapter/README.md).
+
+Arduino core bootloader installation still uses the selected Arduino CLI and
+its core-provided programming recipe/tools; this is not a bundled-CLI dependency
+of the direct libavrdude path.
 
 The programmer layer is not tied to one AVR part or programmer: `--method
 avrdude --mcu PART --programmer ID` selects any part/programmer pair present in

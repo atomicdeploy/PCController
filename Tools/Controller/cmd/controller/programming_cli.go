@@ -101,7 +101,7 @@ func runProgramWithConfig(
 	noFirmwareFeatures := flags.Bool("no-firmware-features", false, "override configured compile features with the default-off profile")
 	avrdude := flags.String("avrdude", config.Programming.Avrdude, "avrdude executable")
 	avrdudeConf := flags.String("avrdude-conf", config.Programming.AvrdudeConf, "avrdude.conf path")
-	avrdudeBackend := flags.String("avrdude-backend", config.Programming.AvrdudeBackend, "auto|library|cli AVRDUDE backend")
+	avrdudeBackend := flags.String("avrdude-backend", config.Programming.AvrdudeBackend, "auto|native|library|helper|cli AVRDUDE backend (auto prefers embedded library)")
 	avrdudeAdapter := flags.String("avrdude-adapter", config.Programming.AvrdudeAdapter, "pinned libavrdude adapter executable")
 	flashBytes := flags.Uint("flash-bytes", uint(config.Programming.FlashBytes), "selected non-default MCU flash capacity")
 	eepromBytes := flags.Uint("eeprom-bytes", uint(config.Programming.EEPROMBytes), "selected non-default MCU EEPROM capacity")

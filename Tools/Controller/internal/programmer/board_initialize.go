@@ -196,7 +196,7 @@ func InitializeBoardCoreWithRunner(
 	report.BootloaderInstalled = true
 
 	fmt.Fprintln(output, "[4/4] Re-reading target signature, fuses, and lock bits after bootloader install")
-	verify := withAvrdudeCLICompatibility(isp)
+	verify := isp
 	verify.Operation = OperationProbe
 	if strings.EqualFold(coreProgrammer, "usbasp_slow") && verify.USBaspBitClockUS <= 0 {
 		verify.USBaspBitClockUS = defaultUSBaspSlowBitClockUS
@@ -205,10 +205,7 @@ func InitializeBoardCoreWithRunner(
 	if err != nil {
 		return report, err
 	}
-	verifyCommand.Args = append(
-		verifyCommand.Args,
-		"-Ulfuse:r:-:h", "-Uhfuse:r:-:h", "-Uefuse:r:-:h", "-Ulock:r:-:h",
-	)
+	verifyCommand = appendFuseEvidence(verifyCommand)
 	if err := runner.Run(ctx, verifyCommand, output); err != nil {
 		return report, fmt.Errorf("verify target after core bootloader install: %w", err)
 	}
@@ -266,13 +263,19 @@ func resolveBoardCoreFusePolicy(
 }
 
 func buildSlowFuseCorrectionCommand(isp Options, policy boardCoreFusePolicy) (Command, error) {
-	isp = withAvrdudeCLICompatibility(isp)
 	isp.Operation = OperationProbe
 	command, err := Build(isp)
 	if err != nil {
 		return Command{}, err
 	}
 	command = withUSBaspBitClock(command, defaultUSBaspSlowBitClockUS)
+	if command.ProgressProtocol == libavrdudeJSONLProtocol {
+		command.Args = append(command.Args, "--no-auto-erase",
+			"--update", fmt.Sprintf("lfuse:w:0x%02X:m", policy.Low),
+			"--update", fmt.Sprintf("hfuse:w:0x%02X:m", policy.High),
+			"--update", fmt.Sprintf("efuse:w:0x%02X:m", policy.Extended))
+		return command, nil
+	}
 	command.Args = append(command.Args,
 		"-D",
 		fmt.Sprintf("-Ulfuse:w:0x%02X:m", policy.Low),

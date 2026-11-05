@@ -108,7 +108,7 @@ function walkGoFiles(root, current, files) {
 		if (entry.isDirectory()) {
 			if (['.cache', '.git', 'bin', 'node_modules', 'web'].includes(entry.name) || entry.name.startsWith('.build')) continue
 			walkGoFiles(root, join(current, entry.name), files)
-		} else if (entry.isFile() && extname(entry.name).toLowerCase() === '.go') {
+		} else if (entry.isFile() && ['.go', '.c', '.h'].includes(extname(entry.name).toLowerCase())) {
 			files.push(join(current, entry.name))
 		}
 	}
@@ -130,6 +130,7 @@ function sha256(value) {
 export function goTestSourceIdentity(moduleRoot, goVersion, environment = {}) {
 	const files = []
 	walkGoFiles(moduleRoot, moduleRoot, files)
+	walkEmbeddedFiles(resolve(moduleRoot, '..', 'AvrdudeAdapter'), files)
 	// Go's compiler embeds these generated web assets into internal/webui. They
 	// must invalidate the stable test cache just like a changed .go source file.
 	walkEmbeddedFiles(join(moduleRoot, 'internal', 'webui', 'dist'), files)
@@ -150,7 +151,7 @@ export function goTestSourceIdentity(moduleRoot, goVersion, environment = {}) {
 	).join('')
 	return {
 		sha256: sha256(`${goVersion.trim()}\n${[
-			'GOOS', 'GOARCH', 'GOFLAGS', 'CGO_ENABLED', 'CC', 'CXX'
+			'GOOS', 'GOARCH', 'GOFLAGS', 'CGO_ENABLED', 'CC', 'CXX', 'CGO_CFLAGS', 'CGO_LDFLAGS', 'PCCONTROLLER_AVRDUDE_TEST_CONFIG'
 		].map(key => `${key}=${environment[key] || ''}`).join('\n')}\n${manifest}`),
 		files: files.length,
 		goVersion: goVersion.trim()
@@ -279,8 +280,12 @@ export function main(argv = process.argv.slice(2), env = process.env) {
 	const plan = createStableTestPlan(packages, options.output)
 	const cachePath = join(options.output, selectedTestCacheName(options.packages, options.run))
 	const cache = loadCache(cachePath)
-	const binariesExist = plan.every(item => existsSync(item.binary))
-	const current = cache?.sourceSHA256 === identity.sha256 && binariesExist
+	// Tagged native and non-native passes deliberately share stable executable
+	// names. A cache receipt must match the actual binary, not just its presence.
+	const matches = receipt => receipt?.sourceSHA256 === identity.sha256 && plan.every(item =>
+		existsSync(item.binary) && receipt.packages?.some(record =>
+			record.importPath === item.importPath && record.sha256 === sha256(readFileSync(item.binary))))
+	const current = matches(cache)
 
 	process.stdout.write(`Go tests: ${packages.length} packages, stable root ${options.output}\n`)
 	if (options.dryRun) {
@@ -292,8 +297,7 @@ export function main(argv = process.argv.slice(2), env = process.env) {
 		// Re-read after acquiring the machine-wide lock: another worktree may
 		// have populated the stable cache while this process was waiting.
 		const lockedCache = loadCache(cachePath)
-		const lockedCurrent = lockedCache?.sourceSHA256 === identity.sha256 &&
-			plan.every(item => existsSync(item.binary))
+		const lockedCurrent = matches(lockedCache)
 		if (lockedCurrent && !options.retest) {
 			process.stdout.write(`✅ Go test cache matches ${identity.sha256.slice(0, 12)}; no test executable was rebuilt or run.\n`)
 			return 0
@@ -316,7 +320,7 @@ export function main(argv = process.argv.slice(2), env = process.env) {
 			sourceSHA256: identity.sha256,
 			goVersion: identity.goVersion,
 			sourceFiles: identity.files,
-			packages: plan.map(item => ({ importPath: item.importPath, binary: basename(item.binary) }))
+			packages: plan.map(item => ({ importPath: item.importPath, binary: basename(item.binary), sha256: sha256(readFileSync(item.binary)) }))
 		})
 		process.stdout.write(`✅ Stable-path Go tests passed; cache ${cachePath}\n`)
 		return 0

@@ -75,6 +75,40 @@ func TestAvrdudeCLIBackendRejectsAdapter(t *testing.T) {
 	}
 }
 
+func TestExplicitAvrdudePathWinsForNormalizedAutoBackend(t *testing.T) {
+	for _, backend := range []string{"", "auto", "AUTO", " Auto "} {
+		t.Run(backend, func(t *testing.T) {
+			adapter, executable, configuration, err := resolveAvrdudeCommandTools(Options{
+				AvrdudeBackend: backend, Avrdude: "selected-avrdude", AvrdudeConf: "selected.conf",
+			})
+			if err != nil || adapter != "" || executable != "selected-avrdude" || configuration != "selected.conf" {
+				t.Fatalf("explicit CLI not retained: %q %q %q %v", adapter, executable, configuration, err)
+			}
+		})
+	}
+}
+
+func TestPackagedAvrdudeConfigurationUsesLoadedImage(t *testing.T) {
+	root := t.TempDir()
+	library := filepath.Join(root, "package", "controller.dll")
+	configuration := filepath.Join(filepath.Dir(library), "tools", "avrdude", "avrdude.conf")
+	if err := os.MkdirAll(filepath.Dir(configuration), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configuration, []byte("# matched package"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if got := packagedAvrdudeTool(library, "avrdude.conf"); got != configuration {
+		t.Fatalf("loaded library configuration = %q", got)
+	}
+	if got := packagedAvrdudeTool(filepath.Join(root, "embedder", "application.exe"), "avrdude.conf"); got != "" {
+		t.Fatalf("unrelated executable resolved configuration = %q", got)
+	}
+	if got := packagedAvrdudeTool("", "avrdude.conf"); got != "" {
+		t.Fatalf("failed image resolution must not search the working directory: %q", got)
+	}
+}
+
 func TestPackagedAvrdudeToolsPreferSubdirectoryWithLegacyFallback(t *testing.T) {
 	root := t.TempDir()
 	controller := filepath.Join(root, executableName("controller"))
@@ -99,7 +133,7 @@ func TestPackagedAvrdudeToolsPreferSubdirectoryWithLegacyFallback(t *testing.T) 
 	}
 }
 
-func TestAutoBackendUsesCLIForUrclockMetadata(t *testing.T) {
+func TestAutoBackendUsesLibraryForUrclockMetadata(t *testing.T) {
 	directory := t.TempDir()
 	adapter := filepath.Join(directory, executableName("pccontroller-avrdude"))
 	avrdude := filepath.Join(directory, executableName("avrdude"))
@@ -117,11 +151,35 @@ func TestAutoBackendUsesCLIForUrclockMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if command.Name != avrdude || command.ProgressProtocol != "" {
-		t.Fatalf("metadata did not select CLI compatibility backend: %#v", command)
+	if command.Name != adapter || command.ProgressProtocol != libavrdudeJSONLProtocol {
+		t.Fatalf("metadata did not retain library backend: %#v", command)
 	}
-	if joined := strings.Join(command.Args, " "); !strings.Contains(joined, "-xshowall") {
+	if joined := strings.Join(command.Args, " "); !strings.Contains(joined, "--extended showall") {
 		t.Fatalf("metadata command missing showall: %s", joined)
+	}
+}
+
+func TestNativeBackendSelectionAndFuseArguments(t *testing.T) {
+	adapter, err := resolveAvrdudeAdapter("native", "")
+	if nativeAvrdudeAvailable {
+		if err != nil || adapter != nativeAvrdudeCommand {
+			t.Fatalf("native: %q %v", adapter, err)
+		}
+	} else if err == nil {
+		t.Fatal("native must fail closed in a non-CGO build")
+	}
+	if _, err := resolveAvrdudeAdapter("native", "helper"); err == nil {
+		t.Fatal("native accepted helper")
+	}
+	command := Command{Name: nativeAvrdudeCommand, ProgressProtocol: libavrdudeJSONLProtocol,
+		Args: []string{"--programmer", "usbasp"}}
+	command = appendFuseEvidence(command)
+	command = withUSBaspBitClock(command, 32)
+	if !isUSBaspCommand(command) || !hasBitClock(command) || command.ProgressProtocol != libavrdudeJSONLProtocol {
+		t.Fatalf("library slow-clock routing: %#v", command)
+	}
+	if strings.Contains(strings.Join(command.Args, " "), "-U") {
+		t.Fatal("library received CLI fuse switches")
 	}
 }
 

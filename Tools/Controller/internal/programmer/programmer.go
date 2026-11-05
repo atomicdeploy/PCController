@@ -62,9 +62,9 @@ type Options struct {
 	ArduinoConfig string
 	Avrdude       string
 	AvrdudeConf   string
-	// AvrdudeBackend selects "auto" (prefer the pinned libavrdude adapter),
-	// "library", or "cli". AvrdudeAdapter can name an explicit adapter;
-	// otherwise auto/library discover the packaged sibling or PATH entry.
+	// AvrdudeBackend selects "auto" (prefer embedded libavrdude),
+	// "native" (strict CGO), "library" (native or helper), "helper" (isolated),
+	// or "cli". Explicit executable selections remain authoritative.
 	AvrdudeBackend string
 	AvrdudeAdapter string
 	// Explicit memory geometry makes guarded readback available to additional
@@ -311,30 +311,6 @@ func Build(options Options) (Command, error) {
 		adapter, executable, configuration, err := resolveAvrdudeCommandTools(options)
 		if err != nil {
 			return Command{}, err
-		}
-		// Urclock's metadata/version extensions are CLI-only. Auto mode keeps
-		// those compatibility operations working while all read/write/probe
-		// operations use the pinned library adapter and its callback stream.
-		if adapter != "" && (options.Operation == OperationMetadata || options.Operation == OperationStart) {
-			if strings.EqualFold(strings.TrimSpace(options.AvrdudeBackend), "library") {
-				return Command{}, fmt.Errorf(
-					"operation %s requires the AVRDUDE CLI compatibility backend",
-					options.Operation,
-				)
-			}
-			packagedCLI := filepath.Join(filepath.Dir(adapter), executableName("avrdude"))
-			adapter = ""
-			if strings.TrimSpace(options.Avrdude) == "" {
-				if info, statErr := os.Stat(packagedCLI); statErr == nil && info.Mode().IsRegular() {
-					options.Avrdude = packagedCLI
-				}
-			}
-			executable, configuration, err = FindAvrdudeWithCLIConfig(
-				options.Avrdude, options.AvrdudeConf, options.ArduinoCLI, options.ArduinoConfig,
-			)
-			if err != nil {
-				return Command{}, fmt.Errorf("resolve AVRDUDE CLI compatibility backend: %w", err)
-			}
 		}
 		programmer := options.Programmer
 		switch options.Method {
@@ -938,13 +914,18 @@ func BackupWithRunner(
 	}
 	// Resolve once, before any read. Every backup step must use the same
 	// configured CLI/data directory and AVRDUDE pair.
-	executable, configuration, resolveErr := FindAvrdudeWithCLIConfig(
-		options.Avrdude, options.AvrdudeConf, options.ArduinoCLI, options.ArduinoConfig,
-	)
+	adapter, executable, configuration, resolveErr := resolveAvrdudeCommandTools(options)
 	if resolveErr != nil {
 		return "", resolveErr
 	}
-	options.Avrdude, options.AvrdudeConf = executable, configuration
+	options.AvrdudeConf = configuration
+	if adapter == nativeAvrdudeCommand {
+		options.AvrdudeBackend, options.AvrdudeAdapter = "native", ""
+	} else if adapter != "" {
+		options.AvrdudeAdapter = adapter
+	} else {
+		options.Avrdude = executable
+	}
 	root := strings.TrimSpace(options.OutputPath)
 	if options.MCU == "" {
 		options.MCU = generatedBoardMCU
@@ -1040,7 +1021,7 @@ func BackupWithRunner(
 		failures = append(failures, fmt.Errorf("metadata: %w", createErr))
 		manifest.Errors = append(manifest.Errors, failures[len(failures)-1].Error())
 	} else {
-		metadataOptions := withAvrdudeCLICompatibility(options)
+		metadataOptions := options
 		if options.Method == MethodUrclock {
 			metadataOptions.Operation = OperationMetadata
 		} else {
@@ -1048,13 +1029,7 @@ func BackupWithRunner(
 		}
 		command, buildErr := Build(metadataOptions)
 		if buildErr == nil && options.Method != MethodUrclock {
-			command.Args = append(
-				command.Args,
-				"-Ulfuse:r:-:h",
-				"-Uhfuse:r:-:h",
-				"-Uefuse:r:-:h",
-				"-Ulock:r:-:h",
-			)
+			command = appendFuseEvidence(command)
 		}
 		if buildErr != nil {
 			failures = append(failures, fmt.Errorf("metadata: %w", buildErr))
@@ -1245,12 +1220,7 @@ func verifyEESAVEWithRunner(
 		return err
 	}
 	defer os.Remove(path)
-	executable, configuration, err := FindAvrdudeWithCLIConfig(
-		options.Avrdude,
-		options.AvrdudeConf,
-		options.ArduinoCLI,
-		options.ArduinoConfig,
-	)
+	adapter, executable, configuration, err := resolveAvrdudeCommandTools(options)
 	if err != nil {
 		return err
 	}
@@ -1276,6 +1246,18 @@ func verifyEESAVEWithRunner(
 			preflight.Args[:4],
 			append([]string{"-B" + strconv.FormatFloat(options.USBaspBitClockUS, 'f', -1, 64)}, preflight.Args[4:]...)...,
 		)
+	}
+	if adapter != "" {
+		probeOptions := options
+		probeOptions.MCU = mcu
+		probeOptions.Operation = OperationProbe
+		args, buildErr := libavrdudeAdapterArguments(probeOptions, configuration, "usbasp")
+		if buildErr != nil {
+			return buildErr
+		}
+		preflight.Name = adapter
+		preflight.ProgressProtocol = libavrdudeJSONLProtocol
+		preflight.Args = append(args, "--update", "hfuse:r:"+path+":h")
 	}
 	if output != nil {
 		fmt.Fprintln(output, "USBasp EEPROM-preservation preflight:", preflight.String())
@@ -1318,6 +1300,13 @@ func Run(ctx context.Context, command Command, output io.Writer) error {
 		)
 	}
 	defer cancel()
+	if command.Name == nativeAvrdudeCommand {
+		err := runNativeAvrdude(runContext, command, output)
+		if command.Timeout > 0 && context.Cause(runContext) == errProgrammerCommandTimeout {
+			return &CommandTimeoutError{Stage: commandStage(command), Command: command.String(), Timeout: command.Timeout, Elapsed: time.Since(started)}
+		}
+		return err
+	}
 	process := exec.CommandContext(runContext, command.Name, command.Args...)
 	var stream io.Writer
 	var adapterStream *libavrdudeEventOutput
@@ -1436,6 +1425,9 @@ func (runner *usbaspSlowFallbackRunner) Run(
 	if err == nil {
 		return nil
 	}
+	if ctx.Err() != nil {
+		return err
+	}
 	runner.slow = true
 	writer := output
 	if writer == nil {
@@ -1455,8 +1447,9 @@ func (runner *usbaspSlowFallbackRunner) Run(
 }
 
 func isUSBaspCommand(command Command) bool {
-	for _, argument := range command.Args {
-		if strings.EqualFold(argument, "-cusbasp") {
+	for i, argument := range command.Args {
+		if strings.EqualFold(argument, "-cusbasp") ||
+			(argument == "--programmer" && i+1 < len(command.Args) && command.Args[i+1] == "usbasp") {
 			return true
 		}
 	}
@@ -1465,7 +1458,7 @@ func isUSBaspCommand(command Command) bool {
 
 func hasBitClock(command Command) bool {
 	for _, argument := range command.Args {
-		if argument == "-B" || strings.HasPrefix(strings.ToUpper(argument), "-B") {
+		if argument == "--bitclock-us" || argument == "-B" || strings.HasPrefix(strings.ToUpper(argument), "-B") {
 			return true
 		}
 	}
@@ -1473,10 +1466,14 @@ func hasBitClock(command Command) bool {
 }
 
 func withUSBaspBitClock(command Command, microseconds float64) Command {
+	if command.ProgressProtocol == libavrdudeJSONLProtocol {
+		command.Args = append(append([]string(nil), command.Args...), "--bitclock-us", strconv.FormatFloat(microseconds, 'f', -1, 64))
+		return command
+	}
 	// Avoid a len+1 capacity computation for caller-owned argument slices; the
 	// append growth path performs its own checked allocation.
 	result := Command{
-		Name: command.Name, Stage: command.Stage, Timeout: command.Timeout,
+		Name: command.Name, Stage: command.Stage, Timeout: command.Timeout, ProgressProtocol: command.ProgressProtocol,
 	}
 	inserted := false
 	for _, argument := range command.Args {
