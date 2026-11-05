@@ -36,6 +36,7 @@ func TestStripCommandsAdmitHighFPSAndRejectOutsideBoundsBeforeSending(t *testing
 func TestStripTimelineAdmitsHighFPS(t *testing.T) {
 	for _, fps := range []int{60, 120, 0, 121} {
 		config := appconfig.Defaults()
+		config.StripEffects = appconfig.DefaultStripEffects()
 		config.StripEffects[0].DefaultFPS = fps
 		runner := NewMacroRunner(nil, nil, nil)
 		runner.hostConfig = func() appconfig.Config { return config }

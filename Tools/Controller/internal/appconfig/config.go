@@ -363,15 +363,16 @@ type StripProgram struct {
 	DimIntensity   byte                 `json:"dim_intensity,omitempty"`
 	TailPixels     int                  `json:"tail_pixels,omitempty"`
 	Envelope       []StripEnvelopePoint `json:"envelope,omitempty"`
+	PixelsPerMeter int                  `json:"pixels_per_meter,omitempty"`
+	Segments       []StripSegment       `json:"segments,omitempty"`
+	Layers         []StripLayer         `json:"layers,omitempty"`
 }
 
 //go:embed assets/default-effects.json
 var defaultEffectsJSON []byte
 
-// DefaultStripEffects loads the editable first-install seed catalog. Named
-// effects are data, not renderer branches or Go configuration literals. A new
-// installation copies these values into its ordinary watched configuration;
-// after that they can be renamed, duplicated, edited, exported, or deleted.
+// DefaultStripEffects is the opt-in example catalog, not installation defaults.
+// Only the explicit restore-examples action copies these into user storage.
 func DefaultStripEffects() []StripEffect {
 	var effects []StripEffect
 	if err := json.Unmarshal(defaultEffectsJSON, &effects); err != nil {
@@ -533,7 +534,7 @@ func Defaults() Config {
 		},
 		Scripts:       map[string]string{},
 		Macros:        []Macro{},
-		StripEffects:  DefaultStripEffects(),
+		StripEffects:  []StripEffect{},
 		Melodies:      DefaultMelodies(),
 		StatusEffects: DefaultStatusLEDEffects(),
 	}
@@ -1085,6 +1086,10 @@ func (value Config) Validate() error {
 			return fmt.Errorf("strip_effects[%d].program.period_ms must be 50..3600000", index)
 		}
 		switch strings.ToLower(strings.TrimSpace(program.Primitive)) {
+		case "layers":
+			if err := ValidateStripLayers(program, effect.DefaultPixels); err != nil {
+				return fmt.Errorf("strip_effects[%d]: %w", index, err)
+			}
 		case "alternating-zones":
 			if program.StepMS < 10 || program.StepMS > program.PeriodMS || program.SwapAfterSteps < 1 || program.SwapAfterSteps > 1024 {
 				return fmt.Errorf("strip_effects[%d] alternating-zones requires step_ms 10..period_ms and swap_after_steps 1..1024", index)

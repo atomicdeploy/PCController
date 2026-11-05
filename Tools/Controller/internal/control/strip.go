@@ -49,7 +49,7 @@ func configuredStripEffectDescriptors(definitions []appconfig.StripEffect) []Str
 }
 
 func StripEffectDescriptors() []StripEffectDescriptor {
-	return configuredStripEffectDescriptors(appconfig.DefaultStripEffects())
+	return nil // Only an explicitly configured user catalog supplies effects.
 }
 
 func SupportedStripEffectDescriptors(connected bool, capabilities uint32) []StripEffectDescriptor {
@@ -96,7 +96,7 @@ func stripStreamCommand(ctx context.Context, outputs *OutputScheduler, args []st
 			break
 		}
 		state := outputs.State()
-		data, err := json.Marshal(map[string]any{"running": state.StripID != 0, "id": state.StripID, "name": state.StripName, "maximum_pixels": native.StripMaximumPixels})
+		data, err := json.Marshal(map[string]any{"running": state.StripID != 0, "id": state.StripID, "name": state.StripName, "maximum_pixels": native.StripMaximumPixels, "stats": state.StripStats})
 		return string(data), err
 	case "stop":
 		if len(args) != 1 {
@@ -221,7 +221,7 @@ func playStripProgramCommand(ctx context.Context, outputs *OutputScheduler, id s
 }
 
 func stripEffectByID(id string, configured ...[]appconfig.StripEffect) (stripEffectDefinition, appconfig.StripProgram, bool) {
-	definitions := appconfig.DefaultStripEffects()
+	var definitions []appconfig.StripEffect
 	if len(configured) != 0 {
 		definitions = configured[0]
 	}
@@ -237,6 +237,11 @@ func stripEffectByID(id string, configured ...[]appconfig.StripEffect) (stripEff
 }
 
 func (outputs *OutputScheduler) startStripEffect(ctx context.Context, definition stripEffectDefinition, program appconfig.StripProgram, count, fps int) (StreamOperation, error) {
+	if program.Primitive == "layers" {
+		if err := appconfig.ValidateStripLayers(program, count); err != nil {
+			return StreamOperation{}, err
+		}
+	}
 	payload, err := native.StripConfigurePayload(count)
 	if err != nil {
 		return StreamOperation{}, err
@@ -332,13 +337,21 @@ func nextStripFrameTime(previous, now time.Time, period time.Duration) time.Time
 }
 
 func (outputs *OutputScheduler) streamStripEffect(ctx context.Context, count, fps int, renderer stripEffectRenderer) error {
+	outputs.beginStripStats(count, fps)
 	period := time.Second / time.Duration(fps)
 	started := time.Now()
+	lastNotification := started
 	nextFrame := started
 	consecutiveTimeouts := 0
 	for {
 		// Render from elapsed monotonic time; slow ACKs skip frames rather than queueing stale colors.
-		if err := outputs.sendStripFrame(ctx, renderer(count, time.Since(started))); err != nil {
+		err := outputs.sendStripFrame(ctx, renderer(count, time.Since(started)))
+		outputs.recordStripFrame(err)
+		if time.Since(lastNotification) >= 500*time.Millisecond {
+			outputs.target.PublishHostEvent("output", "strip progress")
+			lastNotification = time.Now()
+		}
+		if err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
@@ -382,6 +395,8 @@ func (outputs *OutputScheduler) streamStripEffect(ctx context.Context, count, fp
 
 func renderStripProgram(program appconfig.StripProgram, count int, elapsed time.Duration) []byte {
 	switch strings.ToLower(strings.TrimSpace(program.Primitive)) {
+	case "layers":
+		return renderStripLayers(program, count, elapsed)
 	case "alternating-zones":
 		return stripAlternatingZonesFrame(program, count, elapsed)
 	case "envelope":

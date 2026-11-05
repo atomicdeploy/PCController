@@ -27,6 +27,7 @@ func TestPublicPortInfoPublishesCrossPlatformDisplayIdentity(t *testing.T) {
 func TestSharedFacadeSnapshotUsesRuntimeEffectCatalog(t *testing.T) {
 	runtime := control.New(control.Options{})
 	config := appconfig.Defaults()
+	config.StripEffects = appconfig.DefaultStripEffects() // This fixture explicitly requests examples.
 	configReads := 0
 	engine := control.NewCommandEngine(runtime, control.CommandOptions{
 		HostConfig: func() appconfig.Config { configReads++; return config },

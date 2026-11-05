@@ -831,7 +831,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 					}
 					return result, err
 				case "config", "frame", "rainbow", "effect", "stop", "status":
-					definitions := appconfig.DefaultStripEffects()
+					var definitions []appconfig.StripEffect
 					if options.HostConfig != nil {
 						definitions = options.HostConfig().StripEffects
 					}
