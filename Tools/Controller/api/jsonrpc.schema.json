@@ -350,6 +350,440 @@
         }
       }
     },
+    "ChannelRoutingQuery": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "SemanticChannel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "kind",
+        "target",
+        "name"
+      ],
+      "properties": {
+        "key": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^(?!(?:relay|pwm|seat|motion|display|sensor|strip)(?:\\.|$))(?!.*\\.\\.)(?!.*\\.$)[a-z][a-z0-9._-]*$"
+        },
+        "kind": {
+          "enum": [
+            "relay",
+            "pwm"
+          ]
+        },
+        "target": {
+          "enum": [
+            "relay.5",
+            "relay.6",
+            "relay.7",
+            "relay.8",
+            "pwm.0",
+            "pwm.1",
+            "pwm.2",
+            "pwm.3",
+            "pwm.4",
+            "pwm.5",
+            "pwm.6",
+            "pwm.7",
+            "pwm.8",
+            "pwm.9",
+            "pwm.10"
+          ]
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "icon": {
+          "type": "string",
+          "maxLength": 64
+        }
+      }
+    },
+    "ChannelRouting": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "channels"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "channels": {
+          "type": "array",
+          "maxItems": 15,
+          "items": {
+            "$ref": "#/$defs/SemanticChannel"
+          }
+        }
+      }
+    },
+    "ChannelRoutingUpdate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "board_identity",
+        "expected_revision",
+        "routing"
+      ],
+      "properties": {
+        "board_identity": {
+          "type": "string",
+          "minLength": 1
+        },
+        "expected_revision": {
+          "type": "string",
+          "minLength": 1
+        },
+        "routing": {
+          "$ref": "#/$defs/ChannelRouting"
+        }
+      }
+    },
+    "ChannelRoutingCatalog": {
+      "type": "object",
+      "required": [
+        "host_instance_id",
+        "connection_generation",
+        "pwm_configuration_revision",
+        "board_profile",
+        "routing",
+        "targets"
+      ],
+      "properties": {
+        "host_instance_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "connection_generation": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "pwm_configuration_revision": {
+          "type": "string",
+          "minLength": 1
+        },
+        "board_profile": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "routing": {
+          "$ref": "#/$defs/ChannelRouting"
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    "SemanticOutputRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expected_host_instance_id",
+        "expected_connection_generation",
+        "board_identity",
+        "expected_revision",
+        "key"
+      ],
+      "properties": {
+        "expected_host_instance_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "expected_connection_generation": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "board_identity": {
+          "type": "string",
+          "minLength": 1
+        },
+        "expected_revision": {
+          "type": "string",
+          "minLength": 1
+        },
+        "key": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^(?!(?:relay|pwm|seat|motion|display|sensor|strip)(?:\\.|$))(?!.*\\.\\.)(?!.*\\.$)[a-z][a-z0-9._-]*$"
+        },
+        "value": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4095
+        },
+        "percent_milli": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100000
+        },
+        "expected_pwm_configuration_revision": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "value"
+          ],
+          "not": {
+            "required": [
+              "percent_milli"
+            ]
+          }
+        },
+        {
+          "required": [
+            "percent_milli",
+            "expected_pwm_configuration_revision"
+          ],
+          "not": {
+            "required": [
+              "value"
+            ]
+          }
+        }
+      ],
+      "description": "Semantic kind is validated against the current binding. Revisions are opaque. Unknown outcomes must never be automatically retried."
+    },
+    "PhysicalOutputRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expected_host_instance_id",
+        "expected_connection_generation",
+        "board_identity",
+        "expected_revision",
+        "target"
+      ],
+      "properties": {
+        "expected_host_instance_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "expected_connection_generation": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "board_identity": {
+          "type": "string",
+          "minLength": 1
+        },
+        "expected_revision": {
+          "type": "string",
+          "minLength": 1
+        },
+        "target": {
+          "enum": [
+            "relay.5",
+            "relay.6",
+            "relay.7",
+            "relay.8",
+            "pwm.0",
+            "pwm.1",
+            "pwm.2",
+            "pwm.3",
+            "pwm.4",
+            "pwm.5",
+            "pwm.6",
+            "pwm.7",
+            "pwm.8",
+            "pwm.9",
+            "pwm.10"
+          ]
+        },
+        "value": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4095
+        },
+        "percent_milli": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100000
+        },
+        "expected_pwm_configuration_revision": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "value"
+          ],
+          "not": {
+            "required": [
+              "percent_milli"
+            ]
+          }
+        },
+        {
+          "required": [
+            "percent_milli",
+            "expected_pwm_configuration_revision"
+          ],
+          "not": {
+            "required": [
+              "value"
+            ]
+          }
+        }
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "target": {
+                "pattern": "^relay\\."
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "value"
+            ],
+            "properties": {
+              "value": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1
+              }
+            },
+            "not": {
+              "required": [
+                "percent_milli"
+              ]
+            }
+          }
+        }
+      ],
+      "description": "Semantic kind is validated against the current binding. Revisions are opaque. Unknown outcomes must never be automatically retried."
+    },
+    "PinnedOutputResult": {
+      "type": "object",
+      "required": [
+        "accepted",
+        "outcome",
+        "target",
+        "value",
+        "observed_value",
+        "host_instance_id",
+        "board_identity",
+        "revision",
+        "connection_generation"
+      ],
+      "properties": {
+        "accepted": {
+          "const": true
+        },
+        "outcome": {
+          "const": "confirmed"
+        },
+        "target": {
+          "enum": [
+            "relay.5",
+            "relay.6",
+            "relay.7",
+            "relay.8",
+            "pwm.0",
+            "pwm.1",
+            "pwm.2",
+            "pwm.3",
+            "pwm.4",
+            "pwm.5",
+            "pwm.6",
+            "pwm.7",
+            "pwm.8",
+            "pwm.9",
+            "pwm.10"
+          ]
+        },
+        "value": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4095
+        },
+        "observed_value": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4095
+        },
+        "host_instance_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "board_identity": {
+          "type": "string",
+          "minLength": 1
+        },
+        "revision": {
+          "type": "string",
+          "minLength": 1
+        },
+        "connection_generation": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "percent_milli": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100000
+        },
+        "pwm_configuration_revision": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "description": "The host requires matching observed_value and value. Logical writes also echo percent_milli and pwm_configuration_revision. This is board-register readback, not electrical measurement."
+    },
+    "SemanticOutputResult": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/PinnedOutputResult"
+        },
+        {
+          "type": "object",
+          "required": [
+            "key"
+          ],
+          "properties": {
+            "key": {
+              "type": "string",
+              "maxLength": 64,
+              "pattern": "^(?!(?:relay|pwm|seat|motion|display|sensor|strip)(?:\\.|$))(?!.*\\.\\.)(?!.*\\.$)[a-z][a-z0-9._-]*$"
+            }
+          }
+        }
+      ]
+    },
+    "PinnedOutputErrorData": {
+      "type": "object",
+      "required": [
+        "outcome"
+      ],
+      "properties": {
+        "outcome": {
+          "enum": [
+            "rejected",
+            "unknown"
+          ]
+        }
+      },
+      "description": "rejected means pre-runtime admission failed; unknown means no safe claim of non-actuation. Missing response/data is unknown. Do not retry hardware automatically."
+    },
     "id": {
       "oneOf": [
         {
@@ -413,6 +847,9 @@
             "controller.board.firmware.upload",
             "controller.bridge.call",
             "controller.bridge.list",
+            "controller.channel_routing.get",
+            "controller.channel_routing.update",
+            "controller.channel.set",
             "controller.close",
             "controller.command.catalog",
             "controller.command.execute",
@@ -496,6 +933,7 @@
             "controller.os.policy",
             "controller.os.power",
             "controller.os.status",
+            "controller.output.set",
             "controller.peer.update.host",
             "controller.peripheral.folder.update",
             "controller.peripheral.presentation.update",
@@ -646,6 +1084,94 @@
             "properties": {
               "params": {
                 "$ref": "#/$defs/ActionOutcomeRequest"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "controller.channel_routing.get"
+              }
+            },
+            "required": [
+              "method"
+            ]
+          },
+          "then": {
+            "required": [
+              "params"
+            ],
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/ChannelRoutingQuery"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "controller.channel_routing.update"
+              }
+            },
+            "required": [
+              "method"
+            ]
+          },
+          "then": {
+            "required": [
+              "params"
+            ],
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/ChannelRoutingUpdate"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "controller.channel.set"
+              }
+            },
+            "required": [
+              "method"
+            ]
+          },
+          "then": {
+            "required": [
+              "params"
+            ],
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/SemanticOutputRequest"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "controller.output.set"
+              }
+            },
+            "required": [
+              "method"
+            ]
+          },
+          "then": {
+            "required": [
+              "params"
+            ],
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/PhysicalOutputRequest"
               }
             }
           }
@@ -919,6 +1445,39 @@
       "capability": "read",
       "summary": "bridge list",
       "idempotency": "safe"
+    },
+    "controller.channel_routing.get": {
+      "capability": "read",
+      "summary": "Return host-owned semantic bindings, eligible physical targets, board/session pins and PWM configuration revision.",
+      "idempotency": "safe",
+      "params_schema": {
+        "$ref": "#/$defs/ChannelRoutingQuery"
+      },
+      "result_schema": {
+        "$ref": "#/$defs/ChannelRoutingCatalog"
+      }
+    },
+    "controller.channel_routing.update": {
+      "capability": "host_configuration",
+      "summary": "Atomically replace revision-fenced compatible bindings while affected outputs are observed idle; never actuate outputs or migrate numeric cues.",
+      "idempotency": "idempotent-with-authoritative-readback",
+      "params_schema": {
+        "$ref": "#/$defs/ChannelRoutingUpdate"
+      },
+      "result_schema": {
+        "$ref": "#/$defs/ChannelRoutingCatalog"
+      }
+    },
+    "controller.channel.set": {
+      "capability": "board_commands",
+      "summary": "Resolve a stable semantic key and confirm one owner/revision/session-pinned physical output; never automatically retry unknown outcomes.",
+      "idempotency": "non-idempotent",
+      "params_schema": {
+        "$ref": "#/$defs/SemanticOutputRequest"
+      },
+      "result_schema": {
+        "$ref": "#/$defs/SemanticOutputResult"
+      }
     },
     "controller.close": {
       "capability": "connection_control",
@@ -1334,6 +1893,17 @@
       "capability": "read",
       "summary": "os status",
       "idempotency": "safe"
+    },
+    "controller.output.set": {
+      "capability": "board_commands",
+      "summary": "Confirm one explicit physical output with owner/revision/session pins; PWM accepts raw value or curve-aware percent_milli with a PWM configuration revision. No batch atomicity or automatic retry.",
+      "idempotency": "non-idempotent",
+      "params_schema": {
+        "$ref": "#/$defs/PhysicalOutputRequest"
+      },
+      "result_schema": {
+        "$ref": "#/$defs/PinnedOutputResult"
+      }
     },
     "controller.peer.update.host": {
       "capability": "programming",
