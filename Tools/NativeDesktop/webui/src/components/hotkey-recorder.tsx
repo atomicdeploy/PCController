@@ -1,4 +1,4 @@
-import { Fragment, type JSX } from "preact";
+import { Fragment, type TargetedKeyboardEvent } from "preact";
 import { useEffect, useId, useRef, useState } from "preact/hooks";
 import { Button } from "./controls";
 import { Icon } from "./icon";
@@ -524,7 +524,7 @@ export function HotkeyRecorder({
   }, [captureActive, operation, preparing, recording]);
 
   const handleKeyDown = (
-    event: JSX.TargetedKeyboardEvent<HTMLButtonElement>
+    event: TargetedKeyboardEvent<HTMLButtonElement>
   ) => {
     if (!recording || operation !== "") return;
     event.preventDefault();
@@ -583,7 +583,7 @@ export function HotkeyRecorder({
   };
 
   const handleKeyUp = (
-    event: JSX.TargetedKeyboardEvent<HTMLButtonElement>
+    event: TargetedKeyboardEvent<HTMLButtonElement>
   ) => {
     if (!recording || operation !== "") return;
     event.preventDefault();

@@ -100,7 +100,7 @@ transparency preferences suppress decorative effects.
 Building requires:
 
 - Go 1.25.8 or the version declared by `go.mod`;
-- Node.js 20.19+ within the 20.x line, or 22.12+, and npm 10+ to reproduce the committed web
+- Node.js 22.22.2+ within 22.x, 24.15+ within 24.x, or 26+, and npm 10+ to reproduce the committed web
   distribution;
 - PowerShell 5.1 or newer;
 - network access on the first release build so the pinned
