@@ -231,6 +231,8 @@ type RemoteBackend struct {
 }
 
 type Options struct {
+	// StartupWidth preserves the loading card geometry until WindowSizeMsg arrives.
+	StartupWidth       int
 	UIConfig           func() appconfig.UI
 	SaveUI             func(appconfig.UI) error
 	ApplyTUIConsole    func(appconfig.TUIConsole) error

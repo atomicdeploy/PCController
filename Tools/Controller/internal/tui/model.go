@@ -476,6 +476,7 @@ func NewWithOptions(runtime *control.Runtime, engine *shell.Engine, options Opti
 		ownerActions = portowner.DefaultActions()
 	}
 	model := Model{
+		width:   options.StartupWidth,
 		runtime: runtime, engine: engine, remote: options.Remote, input: input, spinner: progress,
 		page: PageDashboard, historyPos: -1, completionIndex: -1, uiConfig: options.UIConfig,
 		saveUI: options.SaveUI, applyTUIConsole: options.ApplyTUIConsole, uiValue: uiValue,
@@ -1623,7 +1624,11 @@ func pageForName(value string) (Page, bool) {
 
 func (model Model) View() string {
 	if !model.ready {
-		return "Starting " + model.prefs.AppTitle + "…"
+		width := model.width
+		if width <= 0 {
+			width = 80
+		}
+		return StartupFrame(model.prefs.AppTitle, "Loading terminal controls…", width)
 	}
 	if model.welcome {
 		return model.welcomeView()

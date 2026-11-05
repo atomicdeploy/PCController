@@ -50,11 +50,12 @@ var (
 )
 
 func main() {
+	prepareStartupPresentation(os.Args[1:], os.Stdout)
 	if _, err := envfile.LoadProcess(); err != nil {
+		finishStartupPresentation(os.Stdout)
 		fmt.Fprintln(os.Stderr, "environment:", err)
 		os.Exit(1)
 	}
-	prepareStartupPresentation(os.Args[1:], os.Stdout)
 	// A console can be created by conhost before Windows consults the named
 	// executable icon resource. Explicitly apply the packaged product icon so
 	// direct launches and inherited build/terminal consoles do not retain the
@@ -63,6 +64,7 @@ func main() {
 	nativeshell.ApplyConsoleIcon()
 	_, _ = setProcessConsoleTitle(productidentity.DefaultAppTitle())
 	if err := netpolicy.EnsureProcessLocalNetworkNoProxy(); err != nil {
+		finishStartupPresentation(os.Stdout)
 		fmt.Fprintln(os.Stderr, "network proxy bypass policy:", err)
 		os.Exit(1)
 	}
@@ -152,6 +154,7 @@ func run(args []string, stdout, stderr io.Writer) (resultErr error) {
 			return overrideErr
 		}
 		applyConfiguredConsoleTitle(store.Current().UI.AppTitle)
+		updateStartupPresentation(stdout, store.Current().UI.AppTitle, "Loading configuration…")
 		runtimeConfig, runtimeErr := store.Runtime()
 		if runtimeErr != nil {
 			return runtimeErr
@@ -261,6 +264,7 @@ func run(args []string, stdout, stderr io.Writer) (resultErr error) {
 		return err
 	}
 	applyConfiguredConsoleTitle(store.Current().UI.AppTitle)
+	updateStartupPresentation(stdout, store.Current().UI.AppTitle, "Loading configuration…")
 	runtimeConfig, runtimeErr := store.Runtime()
 	if runtimeErr != nil {
 		return runtimeErr
@@ -595,6 +599,7 @@ func runWebWithContext(
 		// every other runtime setting remain config-owned.
 		configurePrimaryIPC(runtimeConfig)
 	}
+	updateStartupPresentation(stdout, "", "Checking local host…")
 	claimContext, claimCancel := context.WithTimeout(context.Background(), 3*time.Second)
 	claim, existing, err := claimOrResolveHostInstance(claimContext, "web")
 	claimCancel()
@@ -660,12 +665,14 @@ func runWebWithContext(
 	// and board connection must remain usable even when a locked-down profile
 	// prevents a notification registration write.
 	if externalContext == nil {
+		updateStartupPresentation(stdout, "", "Preparing desktop integration…")
 		if status, desktopErr := ensureWebDesktopIntegration(store); desktopErr != nil {
 			fmt.Fprintln(stderr, "desktop notification identity:", desktopErr)
 		} else if status.Supported && (!status.ProtocolReady || !status.ShortcutReady || !status.DesktopShortcutReady) {
 			fmt.Fprintln(stderr, "desktop notification identity is incomplete")
 		}
 	}
+	updateStartupPresentation(stdout, "", "Loading history and runtime…")
 	runtime := newRuntime(connection, store)
 	bindRuntimeDevicePersistence(runtime, store)
 	if *noAuto {
@@ -750,6 +757,7 @@ func runWebWithContext(
 		openWhenConnected()
 	})
 
+	updateStartupPresentation(stdout, "", "Starting host services…")
 	primary, err := startPrimaryIPCClaimed(ctx, runtime, engine, store, claim)
 	if errors.Is(err, errPrimaryAlreadyRunning) {
 		_ = runtime.Close()
@@ -791,6 +799,7 @@ func runWebWithContext(
 	if initial.Kind != "" {
 		applyInitialWebAction(ctx, primary, runtime, engine, initial)
 	}
+	updateStartupPresentation(stdout, "", "Starting system tray…")
 	nativeShell, shellErr := startPrimaryNativeShell(ctx, cancel, appURL, runtime, store, primary, *noTray)
 	if shellErr != nil {
 		fmt.Fprintln(stderr, "native web shell:", shellErr)
@@ -1116,6 +1125,7 @@ func runTUIWithInitialAction(
 		}
 		return runRemoteTUI(address, auth, stdout, store, consoleOptions, *syncNavigation)
 	}
+	updateStartupPresentation(stdout, "", "Checking local host…")
 	claim, havePrimary, err := preparePrimaryMode("tui")
 	if err != nil {
 		return err
@@ -1152,6 +1162,7 @@ func runTUIWithInitialAction(
 	if *simpleMode {
 		return errors.New("--simple requires an existing IPC primary; start without --simple to own the local runtime")
 	}
+	updateStartupPresentation(stdout, "", "Enumerating serial devices…")
 	if err := selectInteractiveDevice(
 		connection,
 		os.Stdin,
@@ -1160,6 +1171,7 @@ func runTUIWithInitialAction(
 		return err
 	}
 
+	updateStartupPresentation(stdout, "", "Loading history and runtime…")
 	runtime := newRuntime(connection, store)
 	rfReplace := control.NewRFReplaceService(runtime)
 	bindRuntimeDevicePersistence(runtime, store)
@@ -1218,6 +1230,7 @@ func runTUIWithInitialAction(
 	})
 	watchContext, stopWatching := context.WithCancel(context.Background())
 	defer stopWatching()
+	updateStartupPresentation(stdout, "", "Starting host services…")
 	primary, err := startPrimaryIPCClaimed(watchContext, runtime, engine, store, claim)
 	if errors.Is(err, errPrimaryAlreadyRunning) {
 		_ = runtime.Close()
@@ -1236,6 +1249,7 @@ func runTUIWithInitialAction(
 		_ = runtime.Close()
 		return err
 	}
+	updateStartupPresentation(stdout, "", "Starting system tray…")
 	nativeShell, shellErr := startPrimaryNativeShell(
 		watchContext, primary.RequestQuit, appURL, runtime, store, primary, *noTray,
 	)
@@ -1322,11 +1336,13 @@ func runTUIWithInitialAction(
 			}
 		}
 	}()
+	updateStartupPresentation(stdout, "", "Loading terminal controls…")
 	tui.ConfigureInteractiveColorProfile()
 	program := tea.NewProgram(
 		tui.NewApplicationWithOptions(runtime, engine, tui.Options{
-			AutoConnect: !*noAuto,
-			UIConfig:    func() appconfig.UI { return store.Current().UI },
+			StartupWidth: startupTerminalWidth(stdout),
+			AutoConnect:  !*noAuto,
+			UIConfig:     func() appconfig.UI { return store.Current().UI },
 			SaveUI: func(value appconfig.UI) error {
 				_, err := store.UpdateUI(value)
 				return err
@@ -1447,6 +1463,7 @@ func runTUIWithInitialAction(
 		case <-watchContext.Done():
 		}
 	}()
+	handoffStartupPresentation()
 	_, err = program.Run()
 	_ = hostui.WriteOSC(stdout, "9;4;0;0")
 	_ = hostui.ClearUpdateTaskbarProgress()

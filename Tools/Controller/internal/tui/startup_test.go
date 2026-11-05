@@ -6,7 +6,26 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"pccontroller.local/controller/internal/control"
 )
+
+func TestStartupFrameContinuesUntilTerminalSizeArrives(t *testing.T) {
+	runtime := control.New(control.Options{})
+	defer runtime.Close()
+	for _, width := range []int{0, 34, 80, 120} {
+		model := NewWithOptions(runtime, nil, Options{StartupWidth: width, DisableWelcome: true})
+		if model.ready {
+			t.Fatal("model declared ready before terminal size arrived")
+		}
+		wantWidth := width
+		if wantWidth == 0 {
+			wantWidth = 80
+		}
+		if got, want := model.View(), StartupFrame(model.prefs.AppTitle, "Loading terminal controls…", wantWidth); got != want {
+			t.Fatalf("width %d: first TUI paint did not retain shared loading frame", width)
+		}
+	}
+}
 
 func TestStartupFrameUsesSharedColorsAndFitsNarrowTerminals(t *testing.T) {
 	for _, width := range []int{8, 20, 34, 60, 80, 120} {

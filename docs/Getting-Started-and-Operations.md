@@ -55,9 +55,30 @@ from the signed-in user's default. Host settings are separate from board EEPROM.
 
 The first-run marker is `ui.setup_complete`. Successful setup, or explicit
 continuation after its bounded readiness warning, stores `true`. `ui.intro_mode`
-controls the unified startup presentation: `auto` (default) shows it until that
-marker is set; `always` shows it on each launch; `skip` suppresses it. The early
-loading frame and interactive readiness phases use the same renderer and screen.
+controls the interactive introduction: `auto` (default) shows it until that
+marker is set; `always` shows it on each launch; `skip` suppresses it. Every
+visible TUI launch still paints a static loading frame immediately on entry to
+the application, before `.env` or configuration-file access. Loading and
+interactive readiness use the same renderer and alternate screen; phase changes
+replace that frame in place. Once loaded, `skip`/completed `auto` goes straight
+to the normal TUI. Redirected output and explicitly disabled (`web --no-tui`)
+terminal hosts do not receive a splash. The earliest frame uses packaged or
+process/flag branding; saved configuration branding replaces it once loaded.
+
+Startup stages are real work, not a percentage animation: configuration and
+secret resolution, local-host ownership, serial-device enumeration (local TUI),
+history/runtime loading, IPC/Web and configured host integrations, desktop/tray
+setup, then terminal controls. History currently scans the event timeline,
+loads up to 32 MiB of measurement history, and waits for measurement compaction
+before proceeding. Attached TUIs also fetch the host snapshot/commands
+(8-second context), navigation cursor when enabled (3 seconds), and host
+preferences (4 seconds). These are timeout ceilings, not mandatory delays.
+Normal local USB/HELLO connection runs asynchronously after TUI initialization;
+the optional introduction separately waits for board readiness and welcome
+audio, with a 30-second readiness deadline. OS executable loading and Go package
+initialization happen before `main`, so the application cannot paint during that
+earlier interval. No particular machine's slowest stage is implied without
+profiling it.
 
 ```console
 controller config intro
