@@ -9,14 +9,14 @@ import (
 	"sort"
 )
 
-// Keep the same semantic sequence as Pealayer, regardless of catalog order.
+// Keep Off physically left of On, regardless of the host catalog order.
 func orderedControllerActions(actions []presentation.Action) []presentation.Action {
 	result := append([]presentation.Action(nil), actions...)
 	rank := func(verb string) int {
 		switch verb {
-		case "on":
-			return 0
 		case "off":
+			return 0
+		case "on":
 			return 1
 		case "decrease":
 			return 2

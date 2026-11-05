@@ -11,13 +11,31 @@ import (
 func TestControllerCardActionOrder(t *testing.T) {
 	input := []presentation.Action{{ID: "off", Verb: "off"}, {ID: "inc", Verb: "increase"}, {ID: "on", Verb: "on"}, {ID: "dec", Verb: "decrease"}}
 	got := orderedControllerActions(input)
-	for i, want := range []string{"on", "off", "dec", "inc"} {
+	for i, want := range []string{"off", "on", "dec", "inc"} {
 		if got[i].ID != want {
 			t.Fatalf("slot %d=%s want %s", i, got[i].ID, want)
 		}
 	}
 	if input[0].ID != "off" {
 		t.Fatal("mutated authoritative catalog")
+	}
+}
+
+func TestControllerCardOffPrecedesOnForEitherCatalogOrder(t *testing.T) {
+	for _, verbs := range [][]string{{"on", "off"}, {"off", "on"}, {"increase", "on", "decrease", "off"}} {
+		var input []presentation.Action
+		for _, verb := range verbs {
+			input = append(input, presentation.Action{ID: "channel." + verb, Verb: verb})
+		}
+		got := orderedControllerActions(input)
+		if got[0].Verb != "off" || got[1].Verb != "on" || got[0].ID != "channel.off" || got[1].ID != "channel.on" {
+			t.Fatalf("catalog %v yielded %v; expected Off then On without changing command IDs", verbs, got)
+		}
+		for i, verb := range verbs {
+			if input[i].Verb != verb {
+				t.Fatal("mutated authoritative catalog")
+			}
+		}
 	}
 }
 

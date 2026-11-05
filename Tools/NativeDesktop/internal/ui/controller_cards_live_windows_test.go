@@ -66,7 +66,7 @@ func testControllerCardsRenderedInteraction(t *testing.T, backend string) {
 	s.controllerState.Channels = []presentation.Channel{
 		{Key: "relay.5", Name: "Relay five", Kind: "relay", Known: true, State: "off", Order: 0, Actions: []presentation.Action{{ID: "off", Verb: "off"}, {ID: "on", Verb: "on"}}},
 		{Key: "relay.6", Name: "Relay six", Kind: "relay", Known: true, State: "on", Order: 1},
-		{Key: "pwm.0", Name: "Window", Kind: "mosfet", Known: true, Percent: 30, Order: 0},
+		{Key: "pwm.0", Name: "Window", Kind: "mosfet", Known: true, State: "on", Percent: 30, Order: 0, Actions: []presentation.Action{{ID: "pwm.on", Verb: "on"}, {ID: "pwm.off", Verb: "off"}}},
 		{Key: "pwm.1", Name: "Chandelier", Kind: "mosfet", Known: true, Percent: 70, Order: 1},
 	}
 	s.applyConfigUI(cfg, false)
@@ -106,8 +106,28 @@ func testControllerCardsRenderedInteraction(t *testing.T, backend string) {
 			t.Fatal("Windows caption reused raised card button")
 		}
 	}
-	if s.controllerActionIDs[actionChannelFirst] != "on" || s.controllerActionIDs[actionChannelFirst+1] != "off" {
-		t.Fatal("rendered action order differs from Pealayer")
+	if s.controllerActionIDs[actionChannelFirst] != "off" || s.controllerActionIDs[actionChannelFirst+1] != "on" {
+		t.Fatal("rendered card must have Off left and On right")
+	}
+	for _, pair := range []struct {
+		off, on string
+		active  string
+	}{{"off", "on", "off"}, {"pwm.off", "pwm.on", "pwm.on"}} {
+		buttons := map[string]controllerButton{}
+		for _, button := range s.layout.controllerButtons {
+			id := s.controllerActionIDs[button.action]
+			if id == pair.off || id == pair.on {
+				buttons[id] = button
+			}
+		}
+		off, offFound := buttons[pair.off]
+		on, onFound := buttons[pair.on]
+		if !offFound || !onFound || off.rect.X+off.rect.Width > on.rect.X || off.rect.Y != on.rect.Y {
+			t.Fatalf("Off/On physical positions incorrect: %v", buttons)
+		}
+		if off.active != (pair.active == pair.off) || on.active != (pair.active == pair.on) {
+			t.Fatalf("semantic active state changed while ordering buttons: %v", buttons)
+		}
 	}
 	before := s.controllerChannelHits[0]
 	for _, button := range s.layout.controllerButtons {
