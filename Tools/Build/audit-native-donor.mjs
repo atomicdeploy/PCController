@@ -20,12 +20,16 @@ const exclusions = new Map([
   ['assets/fonts/yekanbakh-vf.ttf', 'User-requested replacement with PCController WebUI family Vazirmatn; donor-only redistribution permission. Original blob remains in the immutable import.'],
 ]);
 // Content-hashed bundles regenerated from retained donor Web source after the
-// licensed font adaptation. Keep exact old/new pairs: missing source or an
+// licensed font adaptation and scheduler origin guard. Keep exact old/new pairs: missing source or an
 // unrelated deleted asset must still fail this audit.
 const regeneratedAssets = new Map([
   ['internal/webui/dist/assets/index-BJJi2oIR.css', 'internal/webui/dist/assets/index-BI9zYtDG.css'],
-  ['internal/webui/dist/assets/index-P8wU9w4v.js', 'internal/webui/dist/assets/index-DSk-ClD5.js'],
-  ['internal/webui/dist/assets/index-P8wU9w4v.js.map', 'internal/webui/dist/assets/index-DSk-ClD5.js.map'],
+  ['internal/webui/dist/assets/index-P8wU9w4v.js', 'internal/webui/dist/assets/index-SrMXIX_H.js'],
+  ['internal/webui/dist/assets/index-P8wU9w4v.js.map', 'internal/webui/dist/assets/index-SrMXIX_H.js.map'],
+  ['internal/webui/dist/assets/addon-webgl-qNQI_Zx4.js', 'internal/webui/dist/assets/addon-webgl-DTes4Zuf.js'],
+  ['internal/webui/dist/assets/addon-webgl-qNQI_Zx4.js.map', 'internal/webui/dist/assets/addon-webgl-DTes4Zuf.js.map'],
+  ['internal/webui/dist/assets/xterm-B6pQ9H5k.js', 'internal/webui/dist/assets/xterm-BbplF7Um.js'],
+  ['internal/webui/dist/assets/xterm-B6pQ9H5k.js.map', 'internal/webui/dist/assets/xterm-BbplF7Um.js.map'],
 ]);
 const git = (cwd, args, input) => execFileSync('git', args, {
   cwd, input, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024,

@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import designTokens from "../internal/design/tokens.json";
+import { xtermSchedulerGuard } from "./xterm-scheduler-guard";
 import { rayanLampManifest } from "./manifest";
 import {
   coordinatorExactProxyPattern,
@@ -194,6 +195,7 @@ export default defineConfig({
         });
       }
     },
+    xtermSchedulerGuard(),
     preact(),
     VitePWA({
       registerType: "prompt",

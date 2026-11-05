@@ -1709,6 +1709,7 @@ var oa = typeof Ve.postMessage == "function" && !Ve.importScripts;
 	if (oa) {
 		let s = [];
 		Ve.addEventListener("message", (e) => {
+			if (e.source !== globalThis || e.origin !== globalThis.location.origin) return;
 			if (e.data && e.data.vscodeScheduleAsyncWork) for (let i = 0, r = s.length; i < r; i++) {
 				let n = s[i];
 				if (n.id === e.data.vscodeScheduleAsyncWork) {
@@ -10400,4 +10401,4 @@ var Dl = class extends D {
 //#endregion
 export { Dl as Terminal };
 
-//# sourceMappingURL=xterm-B6pQ9H5k.js.map
+//# sourceMappingURL=xterm-BbplF7Um.js.map

@@ -8713,7 +8713,7 @@ function CoordinatorTerminal({ api }) {
 		let disposeInput = null;
 		let disposeWebGL = null;
 		let fit = null;
-		Promise.all([__vitePreload(() => import("./xterm-B6pQ9H5k.js"), [], import.meta.url), __vitePreload(() => import("./addon-fit-ZHSQZTEP.js"), [], import.meta.url)]).then(([xtermModule, fitModule]) => {
+		Promise.all([__vitePreload(() => import("./xterm-BbplF7Um.js"), [], import.meta.url), __vitePreload(() => import("./addon-fit-ZHSQZTEP.js"), [], import.meta.url)]).then(([xtermModule, fitModule]) => {
 			if (!active || !host.current) return;
 			const xterm = new xtermModule.Terminal({
 				allowProposedApi: false,
@@ -8742,7 +8742,7 @@ function CoordinatorTerminal({ api }) {
 			xterm.open(host.current);
 			host.current.dataset.renderer = "canvas";
 			__vitePreload(async () => {
-				const { WebglAddon } = await import("./addon-webgl-qNQI_Zx4.js");
+				const { WebglAddon } = await import("./addon-webgl-DTes4Zuf.js");
 				return { WebglAddon };
 			}, [], import.meta.url).then(({ WebglAddon }) => {
 				if (!active || !host.current?.isConnected) return;
@@ -10016,4 +10016,4 @@ applyWebLocale(document.documentElement.dataset.locale);
 R(/* @__PURE__ */ u(App, {}), root);
 //#endregion
 
-//# sourceMappingURL=index-DSk-ClD5.js.map
+//# sourceMappingURL=index-SrMXIX_H.js.map

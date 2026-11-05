@@ -3847,6 +3847,7 @@ var Ts = typeof Ie.postMessage == "function" && !Ie.importScripts;
 	if (Ts) {
 		let i = [];
 		Ie.addEventListener("message", (t) => {
+			if (t.source !== globalThis || t.origin !== globalThis.location.origin) return;
 			if (t.data && t.data.vscodeScheduleAsyncWork) for (let n = 0, s = i.length; n < s; n++) {
 				let o = i[n];
 				if (o.id === t.data.vscodeScheduleAsyncWork) {
@@ -4689,4 +4690,4 @@ var xr = class extends B {
 //#endregion
 export { xr as WebglAddon };
 
-//# sourceMappingURL=addon-webgl-qNQI_Zx4.js.map
+//# sourceMappingURL=addon-webgl-DTes4Zuf.js.map

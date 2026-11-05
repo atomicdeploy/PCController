@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { closeSync, existsSync, fstatSync, openSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveRepository } from "./repository-context.mjs";
@@ -164,13 +164,22 @@ for (const relativePath of trackedFiles) {
     report(`generated binary is tracked: ${normalized}`);
   }
   const absolutePath = resolve(root, relativePath);
-  if (
-    filesCameFromGit &&
-    existsSync(absolutePath) &&
-    statSync(absolutePath).size > 5 * 1024 * 1024 &&
-    reviewedLargeAssets.get(normalized) !== createHash("sha256").update(readFileSync(absolutePath)).digest("hex")
-  ) {
-    report(`tracked file exceeds 5 MiB: ${normalized}`);
+  if (filesCameFromGit) {
+    let descriptor;
+    try {
+      descriptor = openSync(absolutePath, "r");
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+      continue; // A tracked file may be intentionally deleted before staging.
+    }
+    try {
+      if (fstatSync(descriptor).size > 5 * 1024 * 1024 &&
+          reviewedLargeAssets.get(normalized) !== createHash("sha256").update(readFileSync(descriptor)).digest("hex")) {
+        report(`tracked file exceeds 5 MiB: ${normalized}`);
+      }
+    } finally {
+      closeSync(descriptor);
+    }
   }
 }
 
