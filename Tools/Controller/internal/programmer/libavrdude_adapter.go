@@ -57,8 +57,7 @@ func resolveAvrdudeAdapter(backend, explicit string) (string, error) {
 		name += ".exe"
 	}
 	if current, err := os.Executable(); err == nil {
-		candidate := filepath.Join(filepath.Dir(current), name)
-		if info, statErr := os.Stat(candidate); statErr == nil && info.Mode().IsRegular() {
+		if candidate := packagedAvrdudeTool(current, name); candidate != "" {
 			return candidate, nil
 		}
 	}
@@ -67,11 +66,21 @@ func resolveAvrdudeAdapter(backend, explicit string) (string, error) {
 	}
 	if backend == "library" {
 		return "", fmt.Errorf(
-			"libavrdude backend requested but %s was not found beside the controller or on PATH",
+			"libavrdude backend requested but %s was not found in tools/avrdude, beside the controller or on PATH",
 			name,
 		)
 	}
 	return "", nil
+}
+
+func packagedAvrdudeTool(controller, name string) string {
+	for _, directory := range []string{filepath.Join(filepath.Dir(controller), "tools", "avrdude"), filepath.Dir(controller)} {
+		candidate := filepath.Join(directory, name)
+		if info, err := os.Stat(candidate); err == nil && info.Mode().IsRegular() {
+			return candidate
+		}
+	}
+	return ""
 }
 
 func resolveAvrdudeCommandTools(options Options) (adapter, executable, configuration string, err error) {

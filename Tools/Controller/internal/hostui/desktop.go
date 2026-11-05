@@ -1,9 +1,14 @@
 package hostui
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"pccontroller.local/controller/winres"
 )
 
 const ToastLogoFileName = "toast-logo.png"
@@ -45,14 +50,60 @@ type DesktopIntegrationStatus struct {
 	LastError            string   `json:"last_error,omitempty"`
 }
 
-// ResolveToastLogoPath returns the stable product image installed beside the
-// exact controller executable. Install/package verification owns its digest.
+// ResolveToastLogoPath prefers an explicit assets/toast override. Windows needs
+// a file URI, so built-in artwork is materialized in a content-addressed cache.
 func ResolveToastLogoPath(executable string) (string, error) {
+	return resolveToastAsset(executable, ToastLogoFileName)
+}
+
+func resolveToastAsset(executable, name string) (string, error) {
 	resolved, err := resolveDesktopExecutable(executable)
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(filepath.Dir(resolved), ToastLogoFileName), nil
+	override := filepath.Join(filepath.Dir(resolved), "assets", "toast", name)
+	if _, err := os.Lstat(override); err == nil {
+		return override, nil // The notifier validates file type, bounds and PNG signature.
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
+	embeddedName := name
+	if name == ToastLogoFileName {
+		embeddedName = "icon.png"
+	}
+	data, err := winres.ToastImages.ReadFile(embeddedName)
+	if err != nil {
+		return "", err
+	}
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		return "", err
+	}
+	directory := filepath.Join(cache, "PCController", "assets", "toast", fmt.Sprintf("%x", sha256.Sum256(data)))
+	if err := os.MkdirAll(directory, 0700); err != nil {
+		return "", err
+	}
+	path := filepath.Join(directory, name)
+	if existing, err := os.ReadFile(path); err == nil && bytes.Equal(existing, data) {
+		return path, nil
+	}
+	file, err := os.CreateTemp(directory, ".toast-*.png")
+	if err != nil {
+		return "", err
+	}
+	defer os.Remove(file.Name())
+	_, writeErr := file.Write(data)
+	closeErr := file.Close()
+	if writeErr != nil {
+		return "", writeErr
+	}
+	if closeErr != nil {
+		return "", closeErr
+	}
+	if err := os.Rename(file.Name(), path); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 // DesktopIntegrationCleanupStatus reports only artifacts that were positively

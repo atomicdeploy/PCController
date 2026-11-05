@@ -141,7 +141,10 @@ tray-controller half of issue #116 remains tracked independently.
 
 Windows desktop integration is explicit and reversible. `desktop ensure`
 installs the current executable's per-user protocol, Start-menu and Desktop entries, and
-hash-bound `toast-logo.png` identity. Every WinRT toast uses that local PNG as
+the built-in toast logo identity. Default logo and semantic PNGs are embedded
+in the executable and materialized in a content-addressed per-user cache for
+Windows. Optional overrides go in `assets/toast/` beside the executable (for
+example `toast-logo.png` or `toast-event-relay.png`). Every WinRT toast uses a PNG as
 its `appLogoOverride`; Windows is never asked to silently render a text-only
 product toast. `desktop test` sends a branded, actionable end-to-end
 diagnostic. `desktop uninstall` removes only entries whose ownership still
@@ -231,6 +234,30 @@ Tools\Controller\bin\controller.exe web export --output pccontroller-webui.zip
 Follow the [portable WebUI contract](../Tools/Controller/docs/Portable-WebUI.md)
 when selecting a controller origin; tokens never belong in the exported
 configuration file or URL.
+
+To customize the host's Web UI, create `assets/webui/` beside the actual
+controller executable and restart the host once to enable overrides. Put
+`index.html` directly in that directory, with scripts/styles under `assets/`,
+fonts under `fonts/`, and other files at their matching URL paths. For example,
+`assets/webui/favicon.ico` overrides `/favicon.ico`, and
+`assets/webui/assets/custom.css` serves `/assets/custom.css`. You can extract
+the exported WebUI ZIP into this directory as a starting point, or supply only
+individual files. Missing files fall back to the built-in bundle. A custom
+`index.html` also handles browser navigation routes.
+
+Edits and removals within an enabled directory take effect on browser refresh;
+removing a file restores its embedded fallback. Local assets use revalidation
+caching. The default service worker switches to network-only mode and clears
+PCController's old UI caches, so an installed PWA does not conceal edits (an
+already-open tab may need another refresh after its worker updates). Supplying
+your own `service-worker.js` also replaces that cache policy. Remove the override
+directory and restart to restore the normal embedded PWA caching and bundle
+version tracking. `web export` always exports the original built-in bundle.
+
+Only put public UI files in this directory: everything in it is intended for
+browser access. API and configured WebSocket routes remain reserved; traversal
+and symlink escapes outside the directory are blocked. Overrides do not change
+backend authentication or hardware authorization.
 
 `web` is a complete headless primary mode. It owns serial discovery/reconnect,
 the command dispatcher, automations, global hotkeys, integrations, IPC, and the

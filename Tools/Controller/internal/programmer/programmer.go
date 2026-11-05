@@ -1521,6 +1521,17 @@ func findAvrdudeWithContext(ctx context.Context, executable, configuration, ardu
 		return executable, configuration, nil
 	}
 
+	if current, err := os.Executable(); err == nil {
+		if candidate := packagedAvrdudeTool(current, executableName("avrdude")); candidate != "" {
+			conf := configuration
+			if conf == "" {
+				conf = inferAvrdudeConf(candidate)
+			}
+			if conf != "" {
+				return candidate, conf, nil
+			}
+		}
+	}
 	if resolved, err := exec.LookPath(executableName("avrdude")); err == nil {
 		if configuration == "" {
 			configuration = inferAvrdudeConf(resolved)

@@ -75,6 +75,30 @@ func TestAvrdudeCLIBackendRejectsAdapter(t *testing.T) {
 	}
 }
 
+func TestPackagedAvrdudeToolsPreferSubdirectoryWithLegacyFallback(t *testing.T) {
+	root := t.TempDir()
+	controller := filepath.Join(root, executableName("controller"))
+	for _, name := range []string{executableName("pccontroller-avrdude"), executableName("avrdude")} {
+		legacy := filepath.Join(root, name)
+		if err := os.WriteFile(legacy, []byte("fixture"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if got := packagedAvrdudeTool(controller, name); got != legacy {
+			t.Fatalf("legacy=%q", got)
+		}
+		packaged := filepath.Join(root, "tools", "avrdude", name)
+		if err := os.MkdirAll(filepath.Dir(packaged), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(packaged, []byte("fixture"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if got := packagedAvrdudeTool(controller, name); got != packaged {
+			t.Fatalf("packaged=%q", got)
+		}
+	}
+}
+
 func TestAutoBackendUsesCLIForUrclockMetadata(t *testing.T) {
 	directory := t.TempDir()
 	adapter := filepath.Join(directory, executableName("pccontroller-avrdude"))

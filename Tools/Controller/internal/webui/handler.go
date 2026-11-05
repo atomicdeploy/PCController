@@ -14,7 +14,9 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -31,6 +33,7 @@ var embeddedFiles embed.FS
 
 var embeddedHandler = mustEmbeddedHandler()
 var embeddedEntryResourcePath = mustEmbeddedEntryResourcePath()
+var localOverrideDirectory = executableOverrideDirectory()
 
 type assetMetadata struct {
 	etag    string
@@ -39,27 +42,49 @@ type assetMetadata struct {
 }
 
 type staticHandler struct {
-	files            fs.FS
-	assets           map[string]assetMetadata
-	reservedPrefixes []string
+	files             fs.FS
+	assets            map[string]assetMetadata
+	reservedPrefixes  []string
+	overrideDirectory string
 }
 
-// Handler returns a handler for the embedded production bundle. With no extra
-// prefixes it reuses a process-wide handler. Passing the configured WebSocket
-// path creates an otherwise identical handler that also reserves that route.
+// Handler serves the production bundle, optionally overlaid by assets/webui
+// beside the executable when that directory exists at startup. Passing the
+// configured WebSocket path also reserves that route.
 // Handlers are safe for concurrent use and do not create a network listener.
 func Handler(additionalReservedPrefixes ...string) http.Handler {
-	if len(additionalReservedPrefixes) == 0 {
+	if len(additionalReservedPrefixes) == 0 && localOverrideDirectory == "" {
 		return embeddedHandler
 	}
-	return mustEmbeddedHandler(additionalReservedPrefixes...)
+	handler := mustEmbeddedHandler(additionalReservedPrefixes...).(*staticHandler)
+	handler.overrideDirectory = localOverrideDirectory
+	return handler
 }
 
 // EntryResourcePath identifies the exact immutable JavaScript entry embedded
 // in this process. Browser tabs compare it with their loaded module URL after
 // reconnecting, so same-version host replacement stays safe without compiling
 // a per-build timestamp into otherwise reproducible Web assets.
-func EntryResourcePath() string { return embeddedEntryResourcePath }
+func EntryResourcePath() string {
+	// A user-managed bundle can have entirely different entry filenames. Do not
+	// tell its tabs to reload against the embedded bundle's immutable identity.
+	if localOverrideDirectory != "" {
+		return ""
+	}
+	return embeddedEntryResourcePath
+}
+
+func executableOverrideDirectory() string {
+	executable, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	directory := filepath.Join(filepath.Dir(executable), "assets", "webui")
+	if info, err := os.Stat(directory); err == nil && info.IsDir() {
+		return directory
+	}
+	return ""
+}
 
 func mustEmbeddedEntryResourcePath() string {
 	root, err := fs.Sub(embeddedFiles, "dist")
@@ -172,6 +197,15 @@ func (handler *staticHandler) ServeHTTP(writer http.ResponseWriter, request *htt
 	if name == "" {
 		name = "index.html"
 	}
+	if handler.serveOverride(writer, request, name) {
+		return
+	}
+	if handler.overrideDirectory != "" && name == "service-worker.js" {
+		writer.Header().Set("Content-Type", contentType(name))
+		writer.Header().Set("Cache-Control", "no-cache")
+		http.ServeContent(writer, request, name, time.Time{}, strings.NewReader(overrideServiceWorker))
+		return
+	}
 	// Development bundles may omit the generated ICO. Production bundles contain
 	// the real multi-resolution icon and take this path directly; SVG is only a
 	// compatibility fallback for incomplete development filesystems.
@@ -194,12 +228,15 @@ func (handler *staticHandler) ServeHTTP(writer http.ResponseWriter, request *htt
 	// receive a 404 and render an unstyled, inert shell. Redirect only the two
 	// well-known entry assets to the current bundle; chunks remain strict so a
 	// genuinely inconsistent package still fails loudly instead of mixing code.
-	if replacement, exists := handler.staleEntryReplacement(name); exists {
+	if replacement, exists := handler.staleEntryReplacement(name); exists && handler.overrideDirectory == "" {
 		writer.Header().Set("Cache-Control", "no-store")
 		http.Redirect(writer, request, "/"+replacement, http.StatusTemporaryRedirect)
 		return
 	}
 	if acceptsSPAFallback(requestPath, request.Header.Get("Accept")) {
+		if handler.serveOverride(writer, request, "index.html") {
+			return
+		}
 		handler.serveAsset(writer, request, "index.html")
 		return
 	}
@@ -270,7 +307,7 @@ func (handler *staticHandler) serveAsset(
 	writer.Header().Set("Accept-Ranges", "bytes")
 	writer.Header().Set("Content-Type", contentType(name))
 	writer.Header().Set("ETag", metadata.etag)
-	if name != "index.html" && fingerprintedAsset(name) {
+	if handler.overrideDirectory == "" && name != "index.html" && fingerprintedAsset(name) {
 		writer.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	} else {
 		writer.Header().Set("Cache-Control", "no-cache")
