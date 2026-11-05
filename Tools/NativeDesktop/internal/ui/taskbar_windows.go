@@ -31,14 +31,20 @@ type taskbarPresentation struct {
 }
 
 type taskbarButtonIcons struct {
-	dpi       uint32
-	toggle    win.HICON
-	on        win.HICON
-	off       win.HICON
-	reconnect win.HICON
+	controller [4]win.HICON
+	dpi        uint32
+	toggle     win.HICON
+	on         win.HICON
+	off        win.HICON
+	reconnect  win.HICON
 }
 
 func (icons taskbarButtonIcons) dispose() {
+	for _, icon := range icons.controller {
+		if icon != 0 {
+			win.DestroyIcon(icon)
+		}
+	}
 	for _, icon := range []win.HICON{
 		icons.toggle,
 		icons.on,
@@ -206,11 +212,11 @@ func taskbarCommandMethod(wParam uintptr) (string, bool) {
 }
 
 func (s *Shell) initializeTaskbarIntegration() error {
-	if s.controller != nil {
-		return nil
-	} // Do not register donor lamp thumbnail actions.
 	if s == nil || s.mw == nil {
 		return fmt.Errorf("taskbar: main window is unavailable")
+	}
+	if s.controllerOwner != nil {
+		return nil
 	}
 	taskbar, err := winfx.NewTaskbar(s.HWND())
 	if err != nil {
@@ -234,7 +240,7 @@ func (s *Shell) rebuildTaskbarButtonIcons() error {
 		dpi = 96
 	}
 	if s.taskbarButtonIcons.dpi == dpi &&
-		s.taskbarButtonIcons.toggle != 0 {
+		((s.controller == nil && s.taskbarButtonIcons.toggle != 0) || (s.controller != nil && s.taskbarButtonIcons.controller[0] != 0)) {
 		return nil
 	}
 	width := int(win.GetSystemMetricsForDpi(win.SM_CXSMICON, dpi))
@@ -247,40 +253,45 @@ func (s *Shell) rebuildTaskbarButtonIcons() error {
 	}
 
 	next := taskbarButtonIcons{dpi: dpi}
-	toggle, err := newProductIconHandle(width, height)
-	if err != nil {
-		return fmt.Errorf("taskbar: create product icon: %w", err)
-	}
-	next.toggle = toggle
-
-	for _, item := range []struct {
-		path   string
-		target *win.HICON
-	}{
-		{"icons/lamp-on.ico", &next.on},
-		{"icons/lamp-off.ico", &next.off},
-		{"icons/menu-reconnect.ico", &next.reconnect},
-	} {
-		data, err := assets.Files.ReadFile(item.path)
-		if err != nil {
-			next.dispose()
-			return fmt.Errorf("taskbar: read %s: %w", item.path, err)
+	if s.controller != nil {
+		for i := range next.controller {
+			icon, err := newControllerTaskbarIcon(i, width, height)
+			if err != nil {
+				next.dispose()
+				return err
+			}
+			next.controller[i] = icon
 		}
-		icon, err := newPackedIconHandle(data, width, height)
+	} else {
+		toggle, err := newProductIconHandle(width, height)
 		if err != nil {
-			next.dispose()
-			return fmt.Errorf("taskbar: create %s: %w", item.path, err)
+			return fmt.Errorf("taskbar: create product icon: %w", err)
 		}
-		*item.target = icon
+		next.toggle = toggle
+		for _, item := range []struct {
+			path   string
+			target *win.HICON
+		}{
+			{"icons/lamp-on.ico", &next.on},
+			{"icons/lamp-off.ico", &next.off},
+			{"icons/menu-reconnect.ico", &next.reconnect},
+		} {
+			data, err := assets.Files.ReadFile(item.path)
+			if err != nil {
+				next.dispose()
+				return fmt.Errorf("taskbar: read %s: %w", item.path, err)
+			}
+			icon, err := newPackedIconHandle(data, width, height)
+			if err != nil {
+				next.dispose()
+				return fmt.Errorf("taskbar: create %s: %w", item.path, err)
+			}
+			*item.target = icon
+		}
 	}
 
 	if s.taskbarIntegration != nil {
-		if err := s.taskbarIntegration.SetButtons(taskbarButtonsForLocalizer(
-			s.snapshot,
-			s.taskbarSuspended,
-			next,
-			s.localizerSnapshot(),
-		)); err != nil {
+		if err := s.taskbarIntegration.SetButtons(s.currentTaskbarButtons(next)); err != nil {
 			next.dispose()
 			return err
 		}
@@ -299,12 +310,7 @@ func (s *Shell) handleTaskbarButtonCreated() {
 		s.logf("taskbar thumbnail icons: %v", err)
 		return
 	}
-	if err := s.taskbarIntegration.NotifyButtonCreated(taskbarButtonsForLocalizer(
-		s.snapshot,
-		s.taskbarSuspended,
-		s.taskbarButtonIcons,
-		s.localizerSnapshot(),
-	)); err != nil {
+	if err := s.taskbarIntegration.NotifyButtonCreated(s.currentTaskbarButtons(s.taskbarButtonIcons)); err != nil {
 		s.logf("taskbar thumbnail toolbar: %v", err)
 		return
 	}
@@ -315,18 +321,8 @@ func (s *Shell) updateTaskbarIntegration() {
 	if s == nil || s.taskbarIntegration == nil {
 		return
 	}
-	localizer := s.localizerSnapshot()
-	presentation := taskbarPresentationForLocalizer(
-		s.snapshot,
-		s.taskbarSuspended,
-		localizer,
-	)
-	if err := s.taskbarIntegration.SetButtons(taskbarButtonsForLocalizer(
-		s.snapshot,
-		s.taskbarSuspended,
-		s.taskbarButtonIcons,
-		localizer,
-	)); err != nil {
+	presentation := s.currentTaskbarPresentation()
+	if err := s.taskbarIntegration.SetButtons(s.currentTaskbarButtons(s.taskbarButtonIcons)); err != nil {
 		s.logf("update taskbar thumbnail buttons: %v", err)
 	}
 	if err := s.taskbarIntegration.SetThumbnailTooltip(

@@ -96,6 +96,7 @@ func newControllerWindowFixture(t *testing.T) (*Shell, config.Config) {
 		t.Fatal(err)
 	}
 	shell.appIcon = icon
+	shell.settingsIcon = icon
 	if err := shell.mw.SetIcon(icon); err != nil {
 		t.Fatal(err)
 	}

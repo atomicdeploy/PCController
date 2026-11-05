@@ -51,6 +51,7 @@ const (
 	actionConnection
 	actionFirmware
 	actionEvents
+	actionCompact
 	actionChannelFirst actionID = 32
 )
 

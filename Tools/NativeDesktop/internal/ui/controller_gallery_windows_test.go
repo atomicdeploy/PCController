@@ -84,6 +84,30 @@ func TestControllerDocumentationGallery(t *testing.T) {
 	s.activateControllerPreference("compact")
 	pumpControllerFixture(s)
 	captureControllerFixture(t, s, "gui-compact")
+	s.activateControllerPreference("compact")
+	backdrop.SetBoundsPixels(walk.Rectangle{Width: int(win.GetSystemMetrics(win.SM_CXSCREEN)), Height: int(win.GetSystemMetrics(win.SM_CYSCREEN))})
+	s.OpenSettings()
+	pumpControllerFixture(s)
+	if s.settings == nil || s.settings.IsDisposed() {
+		t.Fatal("restored settings did not open")
+	}
+	settingsHandle := win.HWND(s.settings.HWND())
+	var settingsPID uint32
+	win.GetWindowThreadProcessId(settingsHandle, &settingsPID)
+	if settingsPID != uint32(os.Getpid()) {
+		t.Fatal("settings capture does not own HWND")
+	}
+	win.SetWindowPos(settingsHandle, win.HWND_TOPMOST, 0, 0, 0, 0, win.SWP_NOMOVE|win.SWP_NOSIZE|win.SWP_NOACTIVATE)
+	pumpControllerFixture(s)
+	win.RedrawWindow(settingsHandle, nil, 0, win.RDW_INVALIDATE|win.RDW_UPDATENOW|win.RDW_ALLCHILDREN)
+	_ = winfx.FlushComposition()
+	settingsPath := filepath.Join(os.Getenv("RAYANLAMP_SCREENSHOTS"), "gui-settings.png")
+	if output, err := exec.Command(os.Getenv("RAYANLAMP_CAPTURE_TOOL"), strconv.Itoa(os.Getpid()), settingsPath, "Desktop settings — PCController", "screen", "0").CombinedOutput(); err != nil {
+		t.Fatalf("settings capture: %v %s", err, output)
+	}
+	s.settings.Dispose()
+	pumpControllerFixture(s)
+	backdrop.SetBoundsPixels(walk.Rectangle{X: 40, Y: 40, Width: 1280, Height: 900})
 	for i := 0; i < 120; i++ {
 		s.controllerHistory = append(s.controllerHistory, controllerTelemetryPoint{at: time.Unix(100+int64(i), 0), power: true, thermal: true, volts: 12 + 0.04*math.Sin(float64(i)/8), amps: 1.4 + 0.3*math.Sin(float64(i)/12), temperature: 36 + 1.5*math.Sin(float64(i)/24)})
 	}

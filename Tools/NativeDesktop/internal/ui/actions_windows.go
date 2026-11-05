@@ -99,11 +99,11 @@ func scaleMenuArtwork(value, dpi int32) int32 {
 }
 
 func (s *Shell) OpenSettings() {
-	if s.controller != nil {
-		s.activateControllerAction(actionSettings)
+	if s == nil || s.mw == nil || s.quitting.Load() || s.closed.Load() {
 		return
 	}
-	if s == nil || s.mw == nil || s.quitting.Load() || s.closed.Load() {
+	if s.controllerOwner != nil {
+		s.controllerOwner.OpenSettings()
 		return
 	}
 	s.mw.Synchronize(func() {
@@ -127,7 +127,15 @@ func (s *Shell) OpenSettings() {
 			s.mw,
 			s.Config(),
 			dialogs.SettingsActions{
-				Preview: s.ApplyConfig,
+				ControllerMode:   s.controller != nil,
+				OpenHostSettings: func() { s.openControllerForm("settings") },
+				OpenWebUI:        s.OpenWebUI,
+				Preview: func(cfg config.Config) {
+					if s.controller != nil {
+						cfg = s.applyRememberedWindowSession(cfg)
+					}
+					s.ApplyConfig(cfg)
+				},
 				Save: func(updated config.Config) error {
 					return s.persistSettings(updated)
 				},
@@ -152,6 +160,11 @@ func (s *Shell) OpenSettings() {
 				Icon:                 s.settingsIcon,
 				HotkeyCaptureChanged: s.setHotkeyCapture,
 				TestToast: func() error {
+					if s.controller != nil && s.controller.Notify != nil {
+						ctx, cancel := context.WithTimeout(s.ctx, 8*time.Second)
+						defer cancel()
+						return s.controller.Notify(ctx, "PCController", "Desktop notification test", s.Config().Notifications.Delivery)
+					}
 					if s.notifier == nil {
 						return fmt.Errorf("notification service is unavailable")
 					}
@@ -239,6 +252,9 @@ func (s *Shell) settingsRegistrationAction(method string) error {
 
 func (s *Shell) persistSettings(updated config.Config) error {
 	updated = s.applyRememberedWindowSession(updated)
+	if s.controller != nil {
+		updated = controllerViewConfig(s.Config(), updated)
+	}
 	data, err := json.Marshal(updated)
 	if err != nil {
 		return err

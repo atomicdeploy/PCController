@@ -125,7 +125,7 @@ func TestControllerWidgetWindowsLifecycle(t *testing.T) {
 		t.Fatal("compact mode contains non-front-panel cards")
 	}
 	for _, b := range s.layout.controllerButtons {
-		if b.action < actionKey1 || b.action > actionKey4 {
+		if (b.action < actionKey1 || b.action > actionKey4) && b.action != actionCompact {
 			t.Fatalf("non-panel compact action %d", b.action)
 		}
 	}

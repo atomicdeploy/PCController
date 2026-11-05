@@ -80,20 +80,8 @@ func RunController(ctx context.Context, options presentation.Options) error {
 	if err != nil {
 		return err
 	}
-	if _, err := os.Stat(options.ConfigPath); errors.Is(err, os.ErrNotExist) {
-		cfg.UI.ViewMode = config.ViewDashboard
-		cfg.UI.WindowBounds = config.WindowBounds{X: -1, Y: -1, Width: 900, Height: 640}
-		cfg.UI.TitleBarMode = config.TitleBarCustom
-		cfg.UI.Backdrop = config.BackdropAcrylic
-		cfg.UI.MagneticSnap = true
-	}
-	cfg.Hotkeys = config.HotkeysConfig{}
-	cfg.Automation.Enabled = false
-	cfg.Notifications.Enabled, cfg.Notifications.Sound = false, false
-	cfg.Integration.LocalAPIEnabled = false
-	cfg.Integration.StartWithWindows = false
-	// No lamp route may ever be reached, including during a system resume.
-	cfg.Lamp.BaseURL = "http://127.0.0.1:1"
+	_, statErr := os.Stat(options.ConfigPath)
+	cfg = controllerStartupConfig(cfg, errors.Is(statErr, os.ErrNotExist))
 	// Window-position persistence reads the on-disk configuration. Persist the
 	// adapted mode too, so it cannot resurrect donor lamp routes or chrome.
 	if err := config.Save(options.ConfigPath, cfg); err != nil {
@@ -125,6 +113,12 @@ func RunController(ctx context.Context, options presentation.Options) error {
 				return
 			case <-shell.ctx.Done():
 				return
+			case message, ok := <-options.Messages:
+				if !ok {
+					options.Messages = nil
+					continue
+				}
+				shell.mw.Synchronize(func() { shell.handleControllerMessage(message) })
 			case state, ok := <-options.Updates:
 				if !ok {
 					return
@@ -133,7 +127,9 @@ func RunController(ctx context.Context, options presentation.Options) error {
 					if shell.closed.Load() {
 						return
 					}
+					previous := shell.controllerState
 					shell.controllerState = state
+					shell.handleControllerEvents(previous, state)
 					shell.observeControllerTelemetry(state)
 					shell.syncControllerWidgets()
 					shell.updateControllerSegments(state)
@@ -153,6 +149,7 @@ func RunController(ctx context.Context, options presentation.Options) error {
 						_ = shell.mw.SetMinMaxSizePixels(walk.Size{Width: minWidth, Height: minimum}, walk.Size{Width: 1400, Height: 1400})
 					}
 					shell.updateControllerTray()
+					shell.updateTaskbarIntegration()
 					_ = shell.surface.Invalidate()
 				})
 			}
@@ -199,6 +196,12 @@ func controllerKeyboardAction(key walk.Key) actionID {
 }
 
 func (s *Shell) controllerActionHint(action actionID) string {
+	if action == actionCompact {
+		if s.Config().UI.ViewMode == config.ViewCompact {
+			return "Expand dashboard"
+		}
+		return "Compact front panel"
+	}
 	switch action {
 	case actionConnection:
 		return "Board connection"
@@ -279,6 +282,8 @@ func (s *Shell) activateControllerAction(action actionID) bool {
 		s.controllerChannels = false
 		s.cancelButtonActivation()
 		s.surface.Invalidate()
+	case actionCompact:
+		s.activateControllerPreference("compact")
 	case actionKey1, actionKey2, actionKey3, actionKey4:
 		if s.controllerState.Connected && s.controllerState.CanNavigate && !s.controllerState.Busy && !s.controllerBusy {
 			s.invokeController([]string{"menu prev", "menu next", "menu dec", "menu inc"}[int(action-actionKey1)])
@@ -445,6 +450,7 @@ func (s *Shell) controllerMenuItems() []traymenu.Item {
 		{Separator: true}, {ID: "console", Label: consoleLabel, Disabled: s.controller.ShowConsole == nil}, {ID: "control", Label: "Hardware channels"},
 		{ID: "rf", Label: "RF assignments"}, {ID: "programs", Label: "Programs"}, {ID: "firmware", Label: "Firmware"},
 		{ID: "events", Label: "Events"}, {ID: "settings", Label: "Preferences"},
+		{ID: "desktop-settings", Label: "Desktop settings…"},
 		{Separator: true}, {ID: "appearance", Label: "Window appearance…"},
 		{ID: "compact", Label: "Compact front panel", Checked: s.Config().UI.ViewMode == config.ViewCompact},
 		{ID: "widgets", Label: "Desktop widgets…"},
@@ -463,7 +469,7 @@ func (s *Shell) controllerMenuItems() []traymenu.Item {
 	if len(hostItems) > 0 {
 		items = append(append(hostItems, traymenu.Item{Separator: true}), items...)
 	}
-	icons := map[traymenu.ActionID]string{"show": "window-show", "hide": "window-hide", "console": "diagnostics", "control": "settings", "rf": "reconnect", "programs": "startup", "firmware": "startup", "events": "diagnostics", "settings": "settings", "appearance": "settings", "reconnect": "reconnect", "quit": "exit"}
+	icons := map[traymenu.ActionID]string{"show": "window-show", "hide": "window-hide", "console": "diagnostics", "control": "settings", "rf": "reconnect", "programs": "startup", "firmware": "startup", "events": "diagnostics", "settings": "settings", "desktop-settings": "settings", "compact": "window-show", "widgets": "window-show", "appearance": "settings", "reconnect": "reconnect", "quit": "exit"}
 	for index := range items {
 		if strings.HasPrefix(string(items[index].ID), "host:") {
 			name := "settings"
@@ -511,6 +517,8 @@ func (s *Shell) showControllerMenu(x, y int32) {
 		return
 	}
 	switch result.Action {
+	case "desktop-settings":
+		s.OpenSettings()
 	case "widgets":
 		s.showControllerWidgetMenu(x, y)
 	case "compact":
@@ -599,15 +607,5 @@ func (s *Shell) logControllerMenuMaterial(result traymenu.Result, err error) {
 }
 
 func configureControllerTokens() {
-	design.Default.Colors.Dark = design.ThemePalette{
-		Accent: "#a78bfa", AccentHover: "#d8ccff", Warm: "#e7ae63", Success: "#73c69a", Danger: "#ed7889",
-		Canvas: "#121116", CanvasAlt: "#0b0a0e", Surface: "#1d1b22", SurfaceHigh: "#33303b", SurfaceOverlay: "#33303b",
-		Text: "#f5f2f7", TextMuted: "#938c9b", TextSubtle: "#938c9b", Stroke: "#4a4353", StrokeHighlight: "#70657f", Shadow: "#000000",
-	}
-	design.Default.Colors.Light = design.ThemePalette{
-		Accent: "#6845bf", AccentHover: "#5334a3", Warm: "#8a5917", Success: "#307752", Danger: "#b33f53",
-		Canvas: "#f5f3f6", CanvasAlt: "#ebe8ed", Surface: "#ffffff", SurfaceHigh: "#ded8e5", SurfaceOverlay: "#ebe8ed",
-		Text: "#242126", TextMuted: "#7b7382", TextSubtle: "#7b7382", Stroke: "#c2b9cc", StrokeHighlight: "#ffffff", Shadow: "#000000",
-	}
-	design.Default.Text.FontFamily = "Segoe UI"
+	design.Default = design.ControllerTokens()
 }

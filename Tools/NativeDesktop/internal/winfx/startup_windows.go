@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"syscall"
 
 	"golang.org/x/sys/windows/registry"
 )
@@ -53,11 +54,24 @@ const (
 // Enabling refuses to replace a value owned by another command. Disabling
 // removes the value only when it still points at exePath exactly.
 func SetStartWithWindows(enabled bool, exePath string) error {
+	return setStartWithWindowsEntry(enabled, exePath, runValueName)
+}
+
+func setStartWithWindowsEntry(enabled bool, exePath, valueName string, arguments ...string) error {
+	if strings.TrimSpace(valueName) == "" || strings.ContainsRune(valueName, 0) {
+		return errors.New("winfx: invalid startup entry name")
+	}
 	command, err := quoteRunCommand(exePath)
 	if err != nil {
 		return err
 	}
 
+	for _, argument := range arguments {
+		if strings.ContainsRune(argument, 0) {
+			return errors.New("winfx: invalid startup argument")
+		}
+		command += " " + syscall.EscapeArg(argument)
+	}
 	const access = registry.QUERY_VALUE | registry.SET_VALUE
 	var key registry.Key
 	if enabled {
@@ -84,7 +98,7 @@ func SetStartWithWindows(enabled bool, exePath string) error {
 	}
 	defer key.Close()
 
-	current, _, readErr := key.GetStringValue(runValueName)
+	current, _, readErr := key.GetStringValue(valueName)
 	exists := true
 	if errors.Is(readErr, registry.ErrNotExist) {
 		exists = false
@@ -97,12 +111,12 @@ func SetStartWithWindows(enabled bool, exePath string) error {
 	case startWithWindowsNoop:
 		return nil
 	case startWithWindowsSet:
-		if err := key.SetStringValue(runValueName, command); err != nil {
+		if err := key.SetStringValue(valueName, command); err != nil {
 			return fmt.Errorf("write HKCU Run value: %w", err)
 		}
 		return nil
 	case startWithWindowsDelete:
-		if err := key.DeleteValue(runValueName); err != nil &&
+		if err := key.DeleteValue(valueName); err != nil &&
 			!errors.Is(err, registry.ErrNotExist) {
 			return fmt.Errorf("remove HKCU Run value: %w", err)
 		}
@@ -236,6 +250,14 @@ func NewStartWithWindowsPersistence(
 		initial,
 		SetStartWithWindows,
 	)
+}
+
+// NewNamedStartWithWindowsPersistence reuses the donor's ownership checks for
+// another application identity. Construction never changes the registry.
+func NewNamedStartWithWindowsPersistence(valueName, executable string, initial bool, arguments ...string) (*StartWithWindowsPersistence, error) {
+	return newStartWithWindowsPersistence(executable, initial, func(enabled bool, exe string) error {
+		return setStartWithWindowsEntry(enabled, exe, valueName, arguments...)
+	})
 }
 
 func newStartWithWindowsPersistence(

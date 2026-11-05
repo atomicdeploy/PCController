@@ -12,3 +12,4 @@ type Page = presentation.Page
 type Field = presentation.Field
 type PageAction = presentation.PageAction
 type MenuItem = presentation.MenuItem
+type Message = presentation.Message

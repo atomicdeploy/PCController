@@ -160,20 +160,21 @@ type LampConfig struct {
 }
 
 type UIConfig struct {
-	ControllerWidgets map[string]ControllerWidget `json:"controller_widgets,omitempty"`
-	ViewMode          string                      `json:"view_mode"`
-	Theme             string                      `json:"theme"`
-	Locale            string                      `json:"locale"`
-	Backdrop          string                      `json:"backdrop"`
-	RenderBackend     string                      `json:"render_backend"`
-	RoundedCorners    bool                        `json:"rounded_corners"`
-	LayeredForeground bool                        `json:"layered_foreground"`
-	TitleBarMode      string                      `json:"title_bar_mode"`
-	ControllerChrome  string                      `json:"controller_chrome,omitempty"`
-	NativeMenus       bool                        `json:"native_menus,omitempty"`
-	BorderMode        string                      `json:"border_mode"`
-	SettingsTab       int                         `json:"settings_tab"`
-	SettingsBounds    WindowBounds                `json:"settings_bounds"`
+	ControllerExpandedBounds WindowBounds                `json:"controller_expanded_bounds,omitempty"`
+	ControllerWidgets        map[string]ControllerWidget `json:"controller_widgets,omitempty"`
+	ViewMode                 string                      `json:"view_mode"`
+	Theme                    string                      `json:"theme"`
+	Locale                   string                      `json:"locale"`
+	Backdrop                 string                      `json:"backdrop"`
+	RenderBackend            string                      `json:"render_backend"`
+	RoundedCorners           bool                        `json:"rounded_corners"`
+	LayeredForeground        bool                        `json:"layered_foreground"`
+	TitleBarMode             string                      `json:"title_bar_mode"`
+	ControllerChrome         string                      `json:"controller_chrome,omitempty"`
+	NativeMenus              bool                        `json:"native_menus,omitempty"`
+	BorderMode               string                      `json:"border_mode"`
+	SettingsTab              int                         `json:"settings_tab"`
+	SettingsBounds           WindowBounds                `json:"settings_bounds"`
 	// ShowTitleBar is retained for configurations written before the
 	// none/custom/native title-bar selector was introduced. Normalize keeps
 	// it true only for the custom in-client title bar.

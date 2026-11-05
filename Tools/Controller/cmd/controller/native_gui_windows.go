@@ -126,6 +126,7 @@ func runNativeGUI(args []string, stdout, stderr io.Writer, store *appconfig.Stor
 	pageChanges := make(chan struct{}, 1)
 	defer func() { cancel(); client.Close() }()
 	updates := make(chan desktop.Snapshot, 128)
+	messages := make(chan desktop.Message, 32)
 	readbacks := make(chan control.Snapshot, 1)
 	type channelCatalog struct {
 		Controls     []appconfig.ControlDescriptor `json:"controls"`
@@ -191,6 +192,13 @@ func runNativeGUI(args []string, stdout, stderr io.Writer, store *appconfig.Stor
 					return
 				}
 				eventHistory.append(event)
+				if nativeDesktopReceivesMessage(event) {
+					select {
+					case messages <- desktop.Message{Text: event.Text, Source: event.Source}:
+					case <-ctx.Done():
+						return
+					}
+				}
 				select {
 				case pageChanges <- struct{}{}:
 				default:
@@ -266,9 +274,24 @@ func runNativeGUI(args []string, stdout, stderr io.Writer, store *appconfig.Stor
 	}()
 	console := newNativeConsole(store.Path(), *address, auth)
 	pages := nativePages{client: client, events: eventHistory}
+	notifiers := map[string]hostui.Notifier{}
+	for _, delivery := range []string{"auto", "toast", "balloon"} {
+		notifiers[delivery] = hostui.NewNotifier(hostui.NotifierOptions{Delivery: delivery})
+	}
 	return desktop.Run(ctx, desktop.Options{
+		Notify: func(ctx context.Context, title, message, delivery string) error {
+			if delivery == "off" {
+				return nil
+			}
+			notifier := notifiers[delivery]
+			if notifier == nil {
+				return errors.New("unknown desktop notification delivery")
+			}
+			// The desktop owns custom WAV cues. Do not also play an OS sound.
+			return notifier.Notify(ctx, hostui.Notification{Title: title, Body: message, Silent: true})
+		},
 		Title:      productidentity.Title(store.Current().UI.AppTitle),
-		ConfigPath: filepath.Join(filepath.Dir(store.Path()), "native-desktop.json"), Updates: updates,
+		ConfigPath: filepath.Join(filepath.Dir(store.Path()), "native-desktop.json"), Updates: updates, Messages: messages,
 		Log:     func(format string, args ...any) { fmt.Fprintf(stderr, format+"\n", args...) },
 		Execute: func(ctx context.Context, command string) error { _, err := client.Execute(ctx, command); return err },
 		SetPWM: func(actionCtx context.Context, key string, percent float64) error {

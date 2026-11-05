@@ -10,11 +10,14 @@ import (
 	"strconv"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/lxn/walk"
 	"github.com/lxn/win"
+	"golang.org/x/sys/windows"
 
 	"rayanlamp.local/app/internal/config"
+	"rayanlamp.local/app/internal/design"
 	"rayanlamp.local/app/internal/winfx"
 )
 
@@ -28,6 +31,8 @@ func TestSettingsWindowGeometryLifecycle(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			runtime.LockOSThread()
 			defer runtime.UnlockOSThread()
+			deactivate := activateSettingsTestManifest(t)
+			defer deactivate()
 			owner, err := walk.NewMainWindow()
 			if err != nil {
 				t.Fatal(err)
@@ -166,6 +171,109 @@ func TestSettingsWindowGeometryLifecycle(t *testing.T) {
 	}
 }
 
+// The canonical test executable deliberately has no product PE resources.
+// Match the packaged Common Controls v6 manifest on this test's UI thread.
+func activateSettingsTestManifest(t *testing.T) func() {
+	t.Helper()
+	dpiProc := windows.NewLazySystemDLL("user32.dll").NewProc("SetThreadDpiAwarenessContext")
+	var previousDPI uintptr
+	if dpiProc.Find() == nil {
+		previousDPI, _, _ = dpiProc.Call(^uintptr(3)) // PER_MONITOR_AWARE_V2
+		if previousDPI == 0 {
+			t.Fatal("enable per-monitor-v2 DPI context")
+		}
+	}
+	_, source, _, _ := runtime.Caller(0)
+	manifest, err := windows.UTF16PtrFromString(filepath.Join(filepath.Dir(source), "..", "..", "resources", "RayanLamp.exe.manifest"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	activation := win.CreateActCtx(&win.ACTCTX{Source: manifest})
+	if activation == win.HANDLE(^uintptr(0)) {
+		t.Fatal("create product manifest activation context")
+	}
+	cookie, ok := win.ActivateActCtx(activation)
+	if !ok {
+		t.Fatal("activate product manifest")
+	}
+	kernel := windows.NewLazySystemDLL("kernel32.dll")
+	return func() {
+		kernel.NewProc("DeactivateActCtx").Call(0, cookie)
+		kernel.NewProc("ReleaseActCtx").Call(uintptr(activation))
+		if previousDPI != 0 {
+			dpiProc.Call(previousDPI)
+		}
+	}
+}
+
+func TestControllerSettingsRetainDonorEditorsWithoutLampRoutes(t *testing.T) {
+	if os.Getenv("RAYANLAMP_WINDOW_TESTS") != "1" {
+		t.Skip("native window integration is opt-in")
+	}
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	deactivate := activateSettingsTestManifest(t)
+	defer deactivate()
+	originalTokens := design.Default
+	design.Default = design.ControllerTokens()
+	defer func() { design.Default = originalTokens }()
+	owner, err := walk.NewMainWindow()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer owner.Dispose()
+	cfg := config.Default()
+	cfg.UI.Locale, cfg.UI.Theme, cfg.UI.Animations = "en", "dark", false
+	cfg.UI.SettingsTab = 5 // Old six-tab donor preference must clamp safely.
+	cfg.Lamp.BaseURL = "http://127.0.0.1:1"
+	session, err := newSettingsDialogSession(owner, cfg, SettingsActions{ControllerMode: true}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.dialog.Dispose()
+	session.shown = true
+	session.dialog.Show()
+	pumpSettingsTestMessages(owner, 300*time.Millisecond)
+	c := session.controls
+	assertDialogPhysicalFonts(t, session.dialog, cfg.UI.Locale, 50)
+	if c.tabs.Pages().Len() != 5 || c.tabs.CurrentIndex() != 4 {
+		t.Fatal("controller settings lost tabs or invalid persisted selection")
+	}
+	if c.baseURL != nil || c.localAPIListen != nil || c.hotkeyRecorders == nil || c.onScript == nil || c.soundSource == nil || c.startWithWindows == nil {
+		t.Fatal("donor controls were not adapted to controller mode")
+	}
+	if session.dialog.Title() != "Desktop settings — PCController" {
+		t.Fatal(session.dialog.Title())
+	}
+	_ = c.onScript.SetText(`C:\Automation\running.ps1`)
+	c.automationEnabled.SetChecked(true)
+	c.notificationsEnabled.SetChecked(true)
+	c.sound.SetChecked(true)
+	got, err := collectSettings(cfg, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Lamp != cfg.Lamp || got.Integration.LocalAPIToken != cfg.Integration.LocalAPIToken || got.Automation.OnScript != `C:\Automation\running.ps1` || !got.Notifications.Sound {
+		t.Fatal("controller settings corrupted dormant settings or discarded drafts")
+	}
+	for index := 0; index < c.tabs.Pages().Len(); index++ {
+		_ = c.tabs.SetCurrentIndex(index)
+		pumpSettingsTestMessages(owner, 100*time.Millisecond)
+		captureSettingsTestWindow(t, session.dialog, "controller-settings-"+strconv.Itoa(index))
+	}
+	_ = c.automationTimeout.SetText("invalid")
+	if _, err := collectSettings(cfg, c); err == nil {
+		t.Fatal("invalid numeric edit was silently accepted")
+	}
+	if c.onScript.Text() != `C:\Automation\running.ps1` {
+		t.Fatal("validation discarded script draft")
+	}
+	session.dialog.Cancel()
+	if !owner.Enabled() {
+		t.Fatal("modeless dialog disabled its owner")
+	}
+}
+
 func assertDialogPhysicalFonts(t *testing.T, dialog *walk.Dialog, locale string, minimum int) {
 	t.Helper()
 	checked := 0
@@ -180,6 +288,18 @@ func assertDialogPhysicalFonts(t *testing.T, dialog *walk.Dialog, locale string,
 		}
 		handle := win.SendMessage(window.Handle(), win.WM_GETFONT, 0, 0)
 		if handle != 0 {
+			var physical win.LOGFONT
+			if win.GetObject(win.HGDIOBJ(handle), unsafe.Sizeof(physical), unsafe.Pointer(&physical)) == 0 {
+				t.Fatal("read actual HWND font metrics")
+			}
+			wantHeight := int32((font.PointSize()*dialog.DPI() + 36) / 72)
+			height := physical.LfHeight
+			if height < 0 {
+				height = -height
+			}
+			if height < wantHeight-1 || height > wantHeight+1 {
+				t.Fatalf("%T bitmap-scaled font: actual=%d expected=%d at DPI %d", window, height, wantHeight, dialog.DPI())
+			}
 			face, err := winfx.FontFaceName(handle)
 			if err != nil || face != want {
 				t.Fatalf("%T actually renders %q, want %q: %v", window, face, want, err)

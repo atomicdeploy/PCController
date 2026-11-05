@@ -18,6 +18,30 @@ import (
 const defaultUIFontFamily = "Segoe UI"
 
 var persianDialogStrings = map[string]string{
+	"Bundled PCController sounds":                    "صداهای داخلی PCController",
+	"Compact front panel":                            "پنل جلویی فشرده",
+	"Desktop settings — PCController":                "تنظیمات دسکتاپ — PCController",
+	"Keep PCController above other windows":          "پنجرهٔ PCController همیشه روی پنجره‌های دیگر بماند",
+	"Notify when the program enters Running or Idle": "هنگام ورود برنامه به حالت اجرا یا آماده اعلان بده",
+	"Show controller messages":                       "پیام‌های کنترلر را نمایش بده",
+	"Compact / dashboard":                            "فشرده / داشبورد",
+	"Switch the desktop view":                        "تغییر نمای دسکتاپ",
+	"Hardware channels":                              "کانال‌های سخت‌افزار",
+	"Show channel controls":                          "نمایش کنترل کانال‌ها",
+	"Console / TUI":                                  "کنسول / رابط متنی",
+	"Show or hide the console":                       "نمایش یا پنهان‌کردن کنسول",
+	"Bring PCController forward":                     "پنجرهٔ PCController را به پیش‌زمینه بیاور",
+	"Select Record, then press the shortcut. Desktop shortcuts pause during recording.": "«ضبط» را انتخاب کنید، سپس میان‌بر را بزنید. هنگام ضبط، میان‌برهای دسکتاپ موقتاً متوقف می‌شوند.",
+	"Run local scripts for program and Windows events":                                  "برای رویدادهای برنامه و ویندوز اسکریپت محلی اجرا شود",
+	"Running-mode script:":                    "اسکریپت حالت اجرا:",
+	"Idle-mode script:":                       "اسکریپت حالت آماده:",
+	"Select Running-mode script":              "انتخاب اسکریپت حالت اجرا",
+	"Select Idle-mode script":                 "انتخاب اسکریپت حالت آماده",
+	"Start PCController desktop with Windows": "دسکتاپ PCController همراه ویندوز اجرا شود",
+	"Host preferences…":                       "تنظیمات میزبان…",
+	"Open Web UI":                             "بازکردن رابط وب",
+	"Import PCController sound effect":        "افزودن صدای PCController",
+	"Scripts run hidden with PCCONTROLLER_* event variables. Only explicitly configured local files are executed.": "اسکریپت‌ها با متغیرهای ‎PCCONTROLLER_*‎ و به‌صورت پنهان اجرا می‌شوند. فقط فایل‌های محلی که صریحاً تنظیم شده‌اند اجرا خواهند شد.",
 	"Settings — Rayan Lamp": "تنظیمات — چراغ رایان",
 	"Settings":              "تنظیمات",
 	"Check the highlighted settings and try again.": "تنظیمات مشخص‌شده را بررسی و دوباره تلاش کنید.",
@@ -344,6 +368,9 @@ func applySettingsLocalization(
 	_ = session.dialog.SetTitle(
 		dialogText(localizer, "Settings — Rayan Lamp"),
 	)
+	if session.actions.ControllerMode {
+		_ = session.dialog.SetTitle(dialogText(localizer, "Desktop settings — PCController"))
+	}
 	if session.localeFonts == nil {
 		session.localeFonts = make(dialogFontCache)
 	}
@@ -363,6 +390,9 @@ func applySettingsLocalization(
 		}
 	}
 	setModel(controls.viewMode, viewModeLabels)
+	if controls.controllerMode {
+		setModel(controls.viewMode, []string{"Compact front panel", "Dashboard"})
+	}
 	setModel(controls.theme, themeLabels)
 	setModel(controls.locale, localeLabels)
 	setModel(controls.backdrop, backdropLabels)
@@ -371,6 +401,9 @@ func applySettingsLocalization(
 	setModel(controls.borderMode, borderModeLabels)
 	setModel(controls.delivery, deliveryLabels)
 	setModel(controls.soundSource, soundSourceLabels)
+	if controls.controllerMode {
+		setModel(controls.soundSource, []string{"Bundled PCController sounds", "Custom WAV"})
+	}
 
 	if controls.tabs != nil {
 		titles := []string{
@@ -380,6 +413,9 @@ func applySettingsLocalization(
 			"Hotkeys",
 			"Automation",
 			"Integration",
+		}
+		if controls.controllerMode {
+			titles = []string{"Appearance", "Notifications", "Hotkeys", "Automation", "Integration"}
 		}
 		pages := controls.tabs.Pages()
 		for index := 0; index < pages.Len() && index < len(titles); index++ {

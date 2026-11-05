@@ -88,6 +88,10 @@ These are reproducible **offline previews**, rendered by the actual application 
 | --- | --- |
 | ![Compact front panel](docs/assets/screenshots/gui-compact.png) | ![Independent acrylic widgets](docs/assets/screenshots/gui-widgets.png) |
 
+### Desktop preferences
+
+![PCController desktop preferences](docs/assets/screenshots/gui-settings.png)
+
 | TUI dashboard | TUI Control page |
 | --- | --- |
 | ![PCController TUI dashboard](docs/assets/screenshots/tui-dashboard.svg) | ![PCController TUI Control page](docs/assets/screenshots/tui-controls.svg) |

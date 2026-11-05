@@ -130,6 +130,7 @@ type Shell struct {
 	controllerSegmentLevels     [4][8]float64
 	controllerSegmentTargets    [4][8]float64
 	controllerSegmentsReady     bool
+	controllerNotifications     chan controllerNotification
 	core                        *appcore.Core
 	dispatcher                  *commands.Dispatcher
 	configPath                  string
@@ -331,6 +332,16 @@ func newShell(core *appcore.Core, dispatcher *commands.Dispatcher, configPath st
 			}
 		}
 	}
+	if controller != nil {
+		if executable, err := os.Executable(); err == nil {
+			persistence, err := winfx.NewNamedStartWithWindowsPersistence("PCController", executable, shell.cfg.Integration.StartWithWindows, "gui")
+			if err != nil {
+				shell.logf("initialize PCController startup preference: %v", err)
+			} else {
+				shell.startWithWindowsPersistence = persistence
+			}
+		}
+	}
 	if err := shell.createWindow(); err != nil {
 		cancel()
 		shell.dispose()
@@ -356,9 +367,13 @@ func newShell(core *appcore.Core, dispatcher *commands.Dispatcher, configPath st
 		shell.logf("notification initialization: %v", err)
 	}
 
-	shell.automation = automation.New(shell.cfg.Automation, func(message string) {
-		shell.logf("%s", message)
-	})
+	if controller != nil {
+		shell.controllerNotifications = make(chan controllerNotification, 32)
+		go shell.runControllerNotifications()
+		shell.automation = automation.NewController(shell.cfg.Automation, func(message string) { shell.logf("%s", message) })
+	} else {
+		shell.automation = automation.New(shell.cfg.Automation, func(message string) { shell.logf("%s", message) })
+	}
 	if controller == nil {
 		shell.systemRecovery = newSystemRecoveryCoordinator(
 			defaultSystemRecoveryDelay,
@@ -557,6 +572,9 @@ func (s *Shell) ApplyConfig(cfg config.Config) {
 	if s == nil || s.mw == nil || s.quitting.Load() || s.closed.Load() {
 		return
 	}
+	if s.controller != nil {
+		cfg = controllerViewConfig(s.Config(), cfg)
+	}
 	cfg, _ = s.prepareConfig(cfg)
 	s.cfgMu.Lock()
 	if s.quitting.Load() || s.closed.Load() {
@@ -653,6 +671,14 @@ func (s *Shell) ShowNotification(title, message string, audible bool) error {
 		if err := s.QueueAudio(string(sfx.CueMessage), 1); err != nil {
 			s.logf("queue notification sound: %v", err)
 		}
+	}
+	if s.controller != nil {
+		if !cfg.Notifications.Enabled || s.controller.Notify == nil {
+			return nil
+		}
+		ctx, cancel := context.WithTimeout(s.ctx, 8*time.Second)
+		defer cancel()
+		return s.controller.Notify(ctx, title, message, cfg.Notifications.Delivery)
 	}
 	if !cfg.Notifications.Enabled || s.notifier == nil {
 		return nil
@@ -1605,9 +1631,9 @@ func liveViewBounds(current walk.Rectangle, ui config.UIConfig) walk.Rectangle {
 }
 
 func (s *Shell) registerHotkeys(cfg config.HotkeysConfig) error {
-	if s.controller != nil {
+	if s.controllerOwner != nil {
 		return nil
-	} // Host owns global hotkey registration.
+	}
 	var failures []error
 	for _, item := range []struct {
 		id    int32
@@ -1798,6 +1824,13 @@ func (s *Shell) windowMessage(hwnd, message, wParam, lParam uintptr) (uintptr, b
 	}
 	switch uint32(message) {
 	case win.WM_COMMAND:
+		if s.controller != nil {
+			if action, ok := controllerTaskbarAction(wParam); ok {
+				s.activateControllerAction(action)
+				return 0, true
+			}
+			return 0, false
+		}
 		if method, ok := taskbarCommandMethod(wParam); ok {
 			s.invoke(method, nil)
 			return 0, true
@@ -1911,6 +1944,20 @@ func (s *Shell) windowMessage(hwnd, message, wParam, lParam uintptr) (uintptr, b
 		if s.hotkeyCaptureActive {
 			// A message already queued before UnregisterHotKey must not trigger
 			// an action while the user is learning that same chord.
+			return 0, true
+		}
+		if s.controller != nil {
+			switch int32(wParam) {
+			case hotkeyToggle:
+				s.activateControllerAction(actionCompact)
+			case hotkeyOn:
+				s.activateControllerAction(actionChannels)
+				s.Show()
+			case hotkeyOff:
+				s.activateControllerAction(actionConsole)
+			case hotkeyShow:
+				s.Show()
+			}
 			return 0, true
 		}
 		switch int32(wParam) {
@@ -2081,6 +2128,8 @@ func (s *Shell) windowMessage(hwnd, message, wParam, lParam uintptr) (uintptr, b
 	case winfx.WMSystemNetworkChange:
 		if s.systemRecovery != nil {
 			s.systemRecovery.NetworkChanged()
+		} else if s.controller != nil && s.controllerOwner == nil {
+			s.handleSystemAutomation(automation.SystemEventNetworkChange)
 		}
 		return 0, true
 	case wmPowerBroadcast:
@@ -2115,7 +2164,11 @@ func (s *Shell) handleSystemAutomation(event automation.SystemEvent) {
 	if s == nil || s.automation == nil || s.core == nil {
 		return
 	}
-	s.automation.HandleSystemEvent(event, s.core.Snapshot())
+	if s.controller != nil {
+		s.automation.HandleSystemEvent(event, controllerAutomationSnapshot(s.controllerState))
+	} else {
+		s.automation.HandleSystemEvent(event, s.core.Snapshot())
+	}
 }
 
 func shellAppearanceMessage(message uint32) bool {

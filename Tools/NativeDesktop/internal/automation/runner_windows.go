@@ -39,6 +39,7 @@ const (
 )
 
 type Runner struct {
+	prefix string
 	mu     sync.RWMutex
 	cfg    config.AutomationConfig
 	log    LogFunc
@@ -60,12 +61,23 @@ type job struct {
 }
 
 func New(cfg config.AutomationConfig, logger LogFunc) *Runner {
+	return newRunner(cfg, logger, "RAYANLAMP")
+}
+
+// NewController adapts the donor queue to program modes and PCController's
+// public event-variable identity, while retaining the standalone donor API.
+func NewController(cfg config.AutomationConfig, logger LogFunc) *Runner {
+	return newRunner(cfg, logger, "PCCONTROLLER")
+}
+
+func newRunner(cfg config.AutomationConfig, logger LogFunc, prefix string) *Runner {
 	r := &Runner{
-		cfg:   cfg,
-		log:   logger,
-		queue: make(chan job, queueSize),
-		stop:  make(chan struct{}),
-		done:  make(chan struct{}),
+		prefix: prefix,
+		cfg:    cfg,
+		log:    logger,
+		queue:  make(chan job, queueSize),
+		stop:   make(chan struct{}),
+		done:   make(chan struct{}),
 	}
 	go r.run()
 	return r
@@ -93,6 +105,9 @@ func (r *Runner) Handle(event model.Event) {
 			return
 		}
 		pending.event = "state"
+		if r.prefix == "PCCONTROLLER" {
+			pending.event = "mode"
+		}
 		pending.state = event.Snapshot.State
 		pending.previous = event.PreviousState
 		pending.source = event.Snapshot.LastSource
@@ -108,6 +123,9 @@ func (r *Runner) Handle(event model.Event) {
 		pending.message = event.Message
 		pending.state = event.Snapshot.State
 		pending.source = "websocket"
+		if r.prefix == "PCCONTROLLER" {
+			pending.source = "pccontroller"
+		}
 		pending.device = event.Snapshot.DeviceURL
 	default:
 		return
@@ -230,15 +248,7 @@ func (r *Runner) execute(pending job) {
 	if cfg.WorkingDirectory != "" {
 		command.Dir = cfg.WorkingDirectory
 	}
-	command.Env = append(os.Environ(),
-		"RAYANLAMP_EVENT="+pending.event,
-		"RAYANLAMP_STATE="+pending.state.String(),
-		"RAYANLAMP_PREVIOUS_STATE="+pending.previous.String(),
-		"RAYANLAMP_SOURCE="+pending.source,
-		"RAYANLAMP_MESSAGE="+pending.message,
-		"RAYANLAMP_DEVICE_URL="+pending.device,
-		"RAYANLAMP_EVENT_TIME="+pending.at.Format(time.RFC3339Nano),
-	)
+	command.Env = append(os.Environ(), r.eventEnvironment(pending)...)
 	command.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 
 	var output *limitedWriter
@@ -265,6 +275,33 @@ func (r *Runner) execute(pending job) {
 	}
 	r.logf("automation %s script completed in %s%s",
 		pending.event, elapsed, formatOutput(output))
+}
+
+func (r *Runner) eventEnvironment(pending job) []string {
+	prefix := r.prefix
+	if prefix == "" {
+		prefix = "RAYANLAMP"
+	}
+	stateName := func(state model.LampState) string {
+		if r.prefix == "PCCONTROLLER" {
+			if state == model.StateOn {
+				return "running"
+			}
+			if state == model.StateOff {
+				return "idle"
+			}
+		}
+		return state.String()
+	}
+	return []string{
+		prefix + "_EVENT=" + pending.event,
+		prefix + "_STATE=" + stateName(pending.state),
+		prefix + "_PREVIOUS_STATE=" + stateName(pending.previous),
+		prefix + "_SOURCE=" + pending.source,
+		prefix + "_MESSAGE=" + pending.message,
+		prefix + "_DEVICE_URL=" + pending.device,
+		prefix + "_EVENT_TIME=" + pending.at.Format(time.RFC3339Nano),
+	}
 }
 
 func scriptCommand(ctx context.Context, script string) (*exec.Cmd, error) {

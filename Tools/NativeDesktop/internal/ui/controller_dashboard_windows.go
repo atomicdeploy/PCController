@@ -149,6 +149,13 @@ func (s *Shell) paintController(canvas *walk.Canvas, bounds walk.Rectangle, colo
 	s.controllerCard(canvas, panel, colors)
 	s.drawControllerPanelIcon(canvas, walk.Rectangle{X: x + 18, Y: y + 17, Width: 24, Height: 20}, colors.accent)
 	s.controllerText(canvas, "Front panel", s.bodyFont, colors.text, walk.Rectangle{X: x + 48, Y: y + 13, Width: width - 80, Height: 26}, false)
+	if s.controllerWidgetID == "" {
+		glyph := "\uE73F"
+		if compact {
+			glyph = "\uE740"
+		}
+		s.controllerControl(canvas, walk.Rectangle{X: x + width - 42, Y: y + 12, Width: 28, Height: 28}, actionCompact, glyph, "", true, compact, colors)
+	}
 	screen := walk.Rectangle{X: x + 24, Y: y + 52, Width: width - 48, Height: 126}
 	controllerFill(canvas, screen, walk.RGB(13, 13, 17), 12)
 	pen, err := walk.NewCosmeticPen(walk.PenSolid, walk.RGB(52, 47, 52))

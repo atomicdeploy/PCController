@@ -3,10 +3,26 @@
 package automation
 
 import (
+	"strings"
 	"testing"
 
 	"rayanlamp.local/app/internal/config"
+	"rayanlamp.local/app/internal/model"
 )
+
+func TestControllerAutomationEnvironmentRetainsDonorContract(t *testing.T) {
+	pending := job{event: "mode", state: model.StateOn, previous: model.StateOff, device: "pccontroller://localhost:8787"}
+	controller := strings.Join((&Runner{prefix: "PCCONTROLLER"}).eventEnvironment(pending), "\n")
+	for _, want := range []string{"PCCONTROLLER_EVENT=mode", "PCCONTROLLER_STATE=running", "PCCONTROLLER_PREVIOUS_STATE=idle", "PCCONTROLLER_DEVICE_URL=pccontroller://"} {
+		if !strings.Contains(controller, want) {
+			t.Fatalf("missing %q: %s", want, controller)
+		}
+	}
+	donor := strings.Join((&Runner{}).eventEnvironment(pending), "\n")
+	if !strings.Contains(donor, "RAYANLAMP_STATE=on") || strings.Contains(donor, "PCCONTROLLER_") {
+		t.Fatal("standalone environment changed")
+	}
+}
 
 func TestSystemEventScriptMapping(t *testing.T) {
 	cfg := config.AutomationConfig{

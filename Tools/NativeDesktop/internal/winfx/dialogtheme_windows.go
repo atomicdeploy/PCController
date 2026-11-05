@@ -512,6 +512,9 @@ func themeDialogWindow(hwnd uintptr, dark, highContrast, animate bool) {
 	}
 	if strings.EqualFold(className, "Button") {
 		style := dialogWindowStyle(hwnd)
+		if isDialogCheckStyle(style) {
+			setDialogCheckTheme(hwnd, dark, dialogCustomControlChromeEnabled(highContrast))
+		}
 		if isDialogPushButtonStyle(style) {
 			setDialogButtonTheme(
 				hwnd,

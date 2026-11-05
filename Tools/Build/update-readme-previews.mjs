@@ -55,6 +55,10 @@ These are reproducible **offline previews**, rendered by the actual application 
 | --- | --- |
 | ![Compact front panel](docs/assets/screenshots/gui-compact.png) | ![Independent acrylic widgets](docs/assets/screenshots/gui-widgets.png) |
 
+### Desktop preferences
+
+![PCController desktop preferences](docs/assets/screenshots/gui-settings.png)
+
 | TUI dashboard | TUI Control page |
 | --- | --- |
 | ![PCController TUI dashboard](docs/assets/screenshots/tui-dashboard.svg) | ![PCController TUI Control page](docs/assets/screenshots/tui-controls.svg) |
@@ -68,7 +72,7 @@ if ((a < 0) !== (b < 0) || (a >= 0 && b < a)) throw new Error('Malformed README 
 if (a !== readme.lastIndexOf(start) || b !== readme.lastIndexOf(end)) throw new Error('Duplicate README gallery markers; refusing to rewrite')
 const files = ['tui-dashboard.svg', 'tui-controls.svg']
 if (!args.has('--tui-only')) {
-  for (const name of ['dashboard', 'channels', 'compact', 'widgets']) {
+  for (const name of ['dashboard', 'channels', 'compact', 'widgets', 'settings']) {
     const file = `gui-${name}.png`
     const png = readFileSync(join(staging, file))
     if (png.length < 100 || png.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a') throw new Error(`Invalid ${file}`)

@@ -158,6 +158,9 @@ func showWindowsBalloon(ctx context.Context, notification Notification, _ error)
 
 	data.Flags = balloonNIFInfo
 	data.InfoFlags = balloonNIIFUser
+	if notification.Silent {
+		data.InfoFlags |= 0x00000010 /* NIIF_NOSOUND */
+	}
 	data.BalloonIcon = icon
 	copyBalloonUTF16(data.InfoTitle[:], notification.Title)
 	body := strings.TrimSpace(notification.Body)
