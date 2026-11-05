@@ -91,7 +91,9 @@ existing 5/13-cycle high pulses. The test rejects unrecognized instruction
 sequences instead of assuming their timing. Physical LED acceptance remains a
 separate check using the host's `strip rainbow 100 20` command.
 
-The requested frame rate is a ceiling, not a delivery measurement. A 100-pixel
+The configurable host-stream frame rate is 1..120 FPS (including 60 FPS).
+Existing effects keep their selected defaults. The requested frame rate is a
+ceiling, not a delivery measurement. A 100-pixel
 frame requires seven acknowledged data chunks plus a show request. On the tested
 serial connection, complete frame commands took 66–76 ms, already exceeding a
 20 FPS frame's 50 ms budget. When a transfer finishes late, the scheduler renders

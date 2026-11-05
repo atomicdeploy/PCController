@@ -1,6 +1,9 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+
 import 'transport.dart';
+
+const stripMaximumFPS = 120;
 
 const stripPresetNames = ['Police red / blue', 'White thunder', 'Converging red dots', 'Fade', 'Pulse'];
 Json stripPreset(int index) {
@@ -66,7 +69,7 @@ class _StripDesignerState extends State<StripDesigner> {
       if(error==null)...[
         const SizedBox(height:12),
         slider('Pixels',count,1,100,(v)=>widget.changed({...widget.effect,'default_pixels':v})),
-        slider('FPS',widget.effect['default_fps'] as int? ?? 20,1,30,(v)=>widget.changed({...widget.effect,'default_fps':v})),
+        slider('FPS',widget.effect['default_fps'] as int? ?? 20,1,widget.effect['max_fps'] as int? ?? stripMaximumFPS,(v)=>widget.changed({...widget.effect,'default_fps':v})),
         slider('Cycle (ms)',p['period_ms'],math.max(50,math.max(points.isEmpty?0:(points.last['at_ms'] as int)+1,p['step_ms'] as int? ?? 0)),3600000,(v)=>program({...p,'period_ms':v})),
         for(final key in ['primary',if(p['primitive']=='alternating-zones')'secondary'])...[
           Text(key=='primary'?'Color':'Secondary color',style:Theme.of(context).textTheme.titleSmall),

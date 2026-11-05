@@ -693,7 +693,7 @@ int effectSpanUs(List<Json> steps) => steps.fold<int>(0, (span, step) {
 
 String? effectDefinitionError(Json effect) {
   if (effect['kind'] == 'strip-stream') {
-    for(final entry in {'default_pixels':100,'default_fps':30,'duration_ms':3600000}.entries) {
+    for(final entry in {'default_pixels':100,'default_fps':stripMaximumFPS,'duration_ms':3600000}.entries) {
       final v=effect[entry.key];
       if(v is! int || v < (entry.key=='duration_ms'?100:1) || v > entry.value)return 'Invalid ${entry.key.replaceAll('_',' ')}.';
     }

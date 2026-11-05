@@ -428,7 +428,7 @@ func TestPeripheralSettingsCarriesTypedStripEffectDescriptors(t *testing.T) {
 		decoded.StripEffects[1].ID != "white-thunder" || decoded.StripEffects[2].ID != "converging-red" ||
 		decoded.StripEffects[0].Name == "" || decoded.StripEffects[0].Description == "" ||
 		decoded.StripEffects[0].DefaultFPS != 20 || decoded.StripEffects[0].MinPixels != 1 ||
-		decoded.StripEffects[0].MaxPixels != native.StripMaximumPixels || decoded.StripEffects[0].MinFPS != 1 || decoded.StripEffects[0].MaxFPS != 30 {
+		decoded.StripEffects[0].MaxPixels != native.StripMaximumPixels || decoded.StripEffects[0].MinFPS != 1 || decoded.StripEffects[0].MaxFPS != 120 {
 		t.Fatalf("strip effects=%+v json=%s", decoded.StripEffects, encoded)
 	}
 }
@@ -442,7 +442,7 @@ func TestAddressableStripControlContractIsCapabilityGated(t *testing.T) {
 	}
 	got := advertisedStripControl(true, native.CapabilityAddressableLED)
 	if got == nil || got.MinimumPixels != 1 || got.MaximumPixels != native.StripMaximumPixels ||
-		got.DefaultPixels != native.StripMaximumPixels || got.MinimumFPS != 1 || got.MaximumFPS != 30 ||
+		got.DefaultPixels != native.StripMaximumPixels || got.MinimumFPS != 1 || got.MaximumFPS != 120 ||
 		got.DefaultFPS != 20 || strings.Join(got.Modes, ",") != "solid,pixel,frame,rainbow,effect" {
 		t.Fatalf("advertised strip contract=%+v", got)
 	}

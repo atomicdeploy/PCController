@@ -14,6 +14,7 @@ import {
 import { rpc } from './api'
 import { Button, Segmented, StatusBadge, TextField } from './components'
 import { shellArgument } from './command-line'
+import { DEFAULT_STRIP_MAXIMUM_FPS } from './strip-limits'
 import {
   applyMacroEventToSnapshot,
   macroEventNeedsSnapshot,
@@ -321,7 +322,7 @@ export function MacroLibraryPanel({ online, locale, events, initialSnapshot, str
                 <TextField label={copy('Name', 'نام')} value={stripDraft.name} maxLength={64} onChange={(event) => setStripDraft({ ...stripDraft, name: event.target.value })} />
                 <TextField label={copy('Category', 'دسته‌بندی')} value={stripDraft.category || ''} maxLength={64} onChange={(event) => setStripDraft({ ...stripDraft, category: event.target.value })} />
                 <TextField label={copy('Description', 'توضیح')} value={stripDraft.description || ''} maxLength={64} onChange={(event) => setStripDraft({ ...stripDraft, description: event.target.value })} />
-                <TextField label={copy('Frames / second', 'فریم در ثانیه')} type="number" min={1} max={30} value={stripDraft.default_fps} onChange={(event) => setStripDraft({ ...stripDraft, default_fps: Number(event.target.value) })} />
+                <TextField label={copy('Frames / second', 'فریم در ثانیه')} type="number" min={stripDraft.min_fps} max={stripDraft.max_fps} value={stripDraft.default_fps} onChange={(event) => setStripDraft({ ...stripDraft, default_fps: Number(event.target.value) })} />
                 <TextField label={copy('Duration (ms)', 'مدت (میلی‌ثانیه)')} type="number" min={100} max={3600000} value={stripDraft.default_duration_ms} onChange={(event) => setStripDraft({ ...stripDraft, default_duration_ms: Number(event.target.value) })} />
                 <TextField label={copy('LED count', 'تعداد LED')} type="number" min={1} max={100} value={stripDraft.default_pixels} onChange={(event) => setStripDraft({ ...stripDraft, default_pixels: Number(event.target.value) })} />
               </div>
@@ -342,7 +343,7 @@ export function MacroLibraryPanel({ online, locale, events, initialSnapshot, str
                 {selectedStrip && <Button tone="danger" icon={Trash2} onClick={() => void perform('controller.effect.delete', {}, `effect delete ${shellArgument(stripDraft.id)}`)}>{copy('Delete', 'حذف')}</Button>}
                 <Button tone="ghost" onClick={() => {
                   setSelectedStripID('')
-                  setStripDraft({ id: '', name: '', category: 'Lighting', description: '', program: { primitive: 'alternating-zones', primary: { red: 255, green: 0, blue: 0 }, secondary: { red: 0, green: 0, blue: 255 }, period_ms: 800, step_ms: 100, swap_after_steps: 4, dim_intensity: 36 }, engine: 'host-stream', editable: true, default_fps: 20, default_duration_ms: 5000, default_pixels: 100, min_pixels: 1, max_pixels: 100, min_fps: 1, max_fps: 30 })
+                  setStripDraft({ id: '', name: '', category: 'Lighting', description: '', program: { primitive: 'alternating-zones', primary: { red: 255, green: 0, blue: 0 }, secondary: { red: 0, green: 0, blue: 255 }, period_ms: 800, step_ms: 100, swap_after_steps: 4, dim_intensity: 36 }, engine: 'host-stream', editable: true, default_fps: 20, default_duration_ms: 5000, default_pixels: 100, min_pixels: 1, max_pixels: 100, min_fps: 1, max_fps: DEFAULT_STRIP_MAXIMUM_FPS })
                 }}>{copy('New', 'جدید')}</Button>
               </div>
             </>}

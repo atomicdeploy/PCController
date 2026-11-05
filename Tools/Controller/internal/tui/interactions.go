@@ -814,7 +814,7 @@ func (model Model) adjustSelection(delta int) (Model, tea.Cmd, bool) {
 				model.stripPixels = wrapInt(pixels-1, delta, native.StripMaximumPixels) + 1
 			case "strip-fps":
 				_, fps := model.stripConfiguration()
-				model.stripFPS = wrapInt(fps-1, delta, 30) + 1
+				model.stripFPS = wrapInt(fps-1, delta, appconfig.StripMaximumFPS) + 1
 			case "strip-color":
 				model.stripColor = wrapInt(model.stripColorIndex(), delta, len(stripColorPresets))
 			}
