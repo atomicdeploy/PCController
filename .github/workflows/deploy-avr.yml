@@ -237,15 +237,14 @@ jobs:
           echo "$install_dir" >> "$GITHUB_PATH"
           "$install_dir/arduino-cli" version
 
-      - name: "🧩 Install the pinned MiniCore AVRDUDE backend"
+      - name: "🧩 Install the latest indexed MiniCore AVRDUDE backend"
         env:
           MINICORE_INDEX_URL: ${{ steps.pins.outputs.minicore_index_url }}
           MINICORE_PACKAGE: ${{ steps.pins.outputs.minicore_package }}
-          MINICORE_VERSION: ${{ steps.pins.outputs.minicore_version }}
         run: |
           set -euo pipefail
           arduino-cli core update-index --additional-urls "$MINICORE_INDEX_URL"
-          arduino-cli core install "$MINICORE_PACKAGE@$MINICORE_VERSION" \
+          arduino-cli core install "$MINICORE_PACKAGE" \
             --additional-urls "$MINICORE_INDEX_URL"
           data_dir="$(arduino-cli config get directories.data)"
           avrdude="$(find "$data_dir/packages/MiniCore/tools/avrdude" -type f -name avrdude -perm -u+x | sort -V | tail -n 1)"

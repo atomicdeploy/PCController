@@ -2,11 +2,14 @@
 
 # Reproducible Dependency Maintenance
 
-PCController follows a **latest stable, exactly locked** dependency policy.
-Policy files describe what may be selected; lock files record exactly what was
-selected, including immutable versions, source identities, URLs, and hashes.
-This keeps routine updates current without making a rebuild depend on whatever
-a registry happens to return later.
+PCController installs **MiniCore and Arduino firmware libraries unpinned by
+default**, using the current package/library indexes. Normal bootstrap, firmware,
+CodeQL and deployment-backend provisioning do not append `@version` to these
+dependencies. Actual installed inventories are recorded with firmware artifacts.
+Lock files retain resolved versions, source identities, URLs and hashes as
+snapshots for audit and explicit `toolchain bootstrap --locked` replay; they do
+not force normal core/library installs back to that snapshot. CLI/tool binaries,
+Urboot source identities and immutable GitHub Action pins remain unchanged.
 
 The dependency updater is hardware-free. It does not enumerate or open COM18,
 reset a board, start the TUI, write EEPROM, or invoke a programmer.
@@ -15,7 +18,8 @@ reset a board, start the TUI, write EEPROM, or invoke a programmer.
 
 | Area | Selection policy | Reproducible evidence |
 | --- | --- | --- |
-| Firmware CLI, MiniCore, firmware libraries, Urboot, Go | Stable channel at or above the declared minimum in `Tools/Controller/toolchain-profile.json` | Exact `Tools/Controller/toolchain-lock.json`, including archive/source hashes and the Urboot commit/tree |
+| MiniCore and Arduino firmware libraries | Latest indexed versions by default; compatibility floors are not exact pins | Actual installed inventories; resolved lock snapshot for explicit locked replay |
+| Firmware CLI, Urboot, Go | Stable channel at or above the declared minimum in `Tools/Controller/toolchain-profile.json` | Exact `Tools/Controller/toolchain-lock.json`, including archive/source hashes and the Urboot commit/tree |
 | Node.js, UPX, go-winres, native Windows GCC, and GitHub Actions | Stable/LTS policy in `Tools/Dependencies/dependency-policy.json` | Exact `Tools/Dependencies/resolved-tools-lock.json`, including the compiler package/target/archive integrity and every immutable Action revision with its workflow consumers; revisions are maintained by the updater and Dependabot |
 | Go modules | Latest compatible source requirements | `Tools/Controller/go.mod` and `go.sum` |
 | Build-output npm packages | Compatible ranges, Node.js 22.12 or newer | `Tools/Build/package-lock.json` |
@@ -24,31 +28,24 @@ reset a board, start the TUI, write EEPROM, or invoke a programmer.
 These are the only dependency policy/lock sources. CI does not maintain a
 second abbreviated pin file. `Tools/Dependencies/export-lock.mjs` is a
 network-free read-only adapter that validates this canonical lock and exports
-the exact Linux build inputs plus package-metadata product identity to reusable
+checksum-locked CLI inputs, unversioned core/library names and product identity to reusable
 workflows; it never resolves or writes a dependency.
 
-The policy is intentionally latest-first. `toolchain bootstrap` consumes the
-resolved stable lock by default; `--locked` is an explicit rollback/recovery
-choice, not the normal update policy. Lock writers compare substantive fields
+The policy is intentionally latest-first. `toolchain bootstrap` uses unversioned
+core/library installs by default; `--locked` is an explicit exact rollback/recovery
+choice, also used for reviewed dependency-candidate validation. Lock writers compare substantive fields
 and preserve the existing file byte-for-byte when only a resolution timestamp
 would change.
 
-The currently resolved firmware set is CLI 1.5.1, MiniCore 3.1.3, Urboot
-`u8.0.1`, Go 1.27.2, and these libraries:
+The firmware library set is Adafruit PWM Servo Driver Library, Adafruit INA219,
+rc-switch, TM1637TinyDisplay, DallasTemperature and OneWire. Normal installs
+select their current indexed releases; inspect the recorded installed inventories
+for a particular build. The canonical lock keeps the exact snapshot available
+for deliberate replay, and the policy retains compatibility minimums.
 
-| Library | Resolved version |
-| --- | ---: |
-| Adafruit PWM Servo Driver Library | 3.0.3 |
-| Adafruit INA219 | 1.2.3 |
-| rc-switch | 2.6.4 |
-| TM1637TinyDisplay | 1.12.2 |
-| DallasTemperature | 4.0.6 |
-| OneWire | 2.3.8 |
-
-The host-tool lock currently resolves Node.js LTS 24.21.0 (`Krypton`), UPX
-5.2.1, and go-winres 0.3.3. Treat these numbers as a lock snapshot, not as
-hard-coded recommendations: the updater resolves a newer compatible stable
-release when one becomes available and records its exact identity.
+Host tools have their own canonical lock. Read current versions and hashes from
+that file rather than copied version tables; this core/library change does not
+unpin host tools or immutable GitHub Actions.
 
 ## Stable selection and canaries
 
@@ -224,7 +221,7 @@ pull request. A check-only dispatch reports drift without changing locks.
 This is the repository's only scheduled dependency updater. The firmware and
 protected-deploy workflows consume the canonical lock through the read-only
 export adapter, so reporting and reproducible installation do not introduce a
-second update engine. Firmware CI installs all six locked libraries and records
+second update engine. Firmware CI installs all six libraries without exact pins and records
 the complete canonical lock with its package.
 
 The workflow always uploads its structured report and generated evidence. If a

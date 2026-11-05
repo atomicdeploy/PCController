@@ -6,8 +6,8 @@
     "node": ">=20.19.0"
   },
   "scripts": {
-    "lint": "node --check firmware.mjs && node --check firmware.test.mjs",
-    "test": "node --test firmware.test.mjs",
+    "lint": "node --check firmware.mjs && node --check firmware.test.mjs && node --check dependency-version.mjs && node --check targets.mjs",
+    "test": "node --test firmware.test.mjs dependency-version.test.mjs",
     "check": "npm run lint && npm test"
   }
 }

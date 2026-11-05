@@ -1512,6 +1512,7 @@ func runToolchainBootstrap(
 		ctx,
 		programmer.ToolchainBootstrapOptions{
 			Profile: profile, CLI: *firmwareCLI, InstallDir: *installDir,
+			Locked:      *locked,
 			DirectRetry: *directRetry, DryRun: *dryRun,
 		},
 		stdout,
