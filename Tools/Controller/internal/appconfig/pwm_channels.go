@@ -1,11 +1,26 @@
 package appconfig
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"math"
 	"strconv"
 	"strings"
 )
+
+// PWMConfigurationRevision fences logical-to-raw conversions separately from
+// board profiles: PWM configuration is currently owned by the host UI config.
+func PWMConfigurationRevision(ui UI) string {
+	channels := make([]PWMChannelConfig, PWMChannelCount)
+	for index := range channels {
+		channels[index] = PWMChannel(ui, index)
+	}
+	content, _ := json.Marshal(channels)
+	digest := sha256.Sum256(content)
+	return hex.EncodeToString(digest[:12])
+}
 
 const (
 	PWMChannelCount       = 16

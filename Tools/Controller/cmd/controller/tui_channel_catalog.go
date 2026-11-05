@@ -11,6 +11,10 @@ import (
 // contract. No second config store or serial connection is created here.
 func newTUIChannelCatalog(call func(context.Context, string, any, any) error) tui.ChannelCatalogSource {
 	return tui.ChannelCatalogSource{
+		SetSemantic: func(ctx context.Context, key string, value uint16, identity, revision, host string, generation uint64) error {
+			var result map[string]any
+			return call(ctx, "controller.channel.set", map[string]any{"key": key, "value": value, "board_identity": identity, "expected_revision": revision, "expected_host_instance_id": host, "expected_connection_generation": generation}, &result)
+		},
 		Read: func(ctx context.Context) (ipcjson.PeripheralSettings, error) {
 			var value ipcjson.PeripheralSettings
 			err := call(ctx, "controller.peripherals.get", map[string]any{}, &value)

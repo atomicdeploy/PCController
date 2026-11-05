@@ -802,6 +802,10 @@ func (model Model) activateSelection() (Model, tea.Cmd, bool) {
 func (model Model) adjustSelection(delta int) (Model, tea.Cmd, bool) {
 	switch model.page {
 	case PageOutputs:
+		if row, ok := model.selectedOutputRow(); ok && row.Kind == "semantic-pwm" && row.SemanticValue != nil {
+			value := min(4095, max(0, int(*row.SemanticValue)+delta*41))
+			return model.setSemanticOutput(row, uint16(value))
+		}
 		if row, ok := model.selectedOutputRow(); ok && row.Adjust != "" {
 			switch row.Adjust {
 			case "strip-order":
@@ -858,6 +862,19 @@ func (model Model) adjustSelection(delta int) (Model, tea.Cmd, bool) {
 
 func (model Model) activateOutput() (Model, tea.Cmd, bool) {
 	if row, ok := model.selectedOutputRow(); ok {
+		if strings.HasPrefix(row.Kind, "semantic-") {
+			if row.SemanticValue == nil {
+				return model, nil, true
+			}
+			value := uint16(0)
+			if *row.SemanticValue == 0 {
+				value = 1
+				if row.Kind == "semantic-pwm" {
+					value = 4095
+				}
+			}
+			return model.setSemanticOutput(row, value)
+		}
 		if row.Action != "" {
 			return model.dispatchLine(row.Action)
 		}
