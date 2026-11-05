@@ -6,6 +6,8 @@ package programmer
 #include <stdlib.h>
 #include "../../../AvrdudeAdapter/bridge.h"
 int pcc_go_avr_run(int argc, char **argv, uintptr_t user);
+char *pcc_go_avr_module_path(void);
+#cgo linux LDFLAGS: -ldl
 */
 import "C"
 
@@ -19,6 +21,17 @@ import (
 )
 
 const nativeAvrdudeAvailable = true
+
+// Resolve the image that owns the bridge, not the executable embedding a C ABI
+// library. The matching configuration is shipped next to that image's package.
+func nativeAvrdudeModulePath() string {
+	path := C.pcc_go_avr_module_path()
+	if path == nil {
+		return ""
+	}
+	defer C.free(unsafe.Pointer(path))
+	return C.GoString(path)
+}
 
 // Covers configuration, callbacks, programmer state and cleanup across every
 // board/client in this process. A canceled waiter must never start a C call.

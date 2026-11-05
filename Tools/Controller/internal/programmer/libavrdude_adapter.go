@@ -83,6 +83,9 @@ func resolveAvrdudeAdapter(backend, explicit string) (string, error) {
 }
 
 func packagedAvrdudeTool(controller, name string) string {
+	if controller == "" {
+		return ""
+	}
 	for _, directory := range []string{filepath.Join(filepath.Dir(controller), "tools", "avrdude"), filepath.Dir(controller)} {
 		candidate := filepath.Join(directory, name)
 		if info, err := os.Stat(candidate); err == nil && info.Mode().IsRegular() {
@@ -93,6 +96,7 @@ func packagedAvrdudeTool(controller, name string) string {
 }
 
 func resolveAvrdudeCommandTools(options Options) (adapter, executable, configuration string, err error) {
+	options.AvrdudeBackend = strings.ToLower(strings.TrimSpace(options.AvrdudeBackend))
 	// Explicit CLI selection/path remains authoritative; auto otherwise prefers
 	// the in-process library, then the isolated helper, then the system CLI.
 	if (options.AvrdudeBackend == "" || options.AvrdudeBackend == "auto") &&
@@ -112,9 +116,7 @@ func resolveAvrdudeCommandTools(options Options) (adapter, executable, configura
 	configuration = strings.TrimSpace(options.AvrdudeConf)
 	if adapter == nativeAvrdudeCommand {
 		if configuration == "" {
-			if current, e := os.Executable(); e == nil {
-				configuration = packagedAvrdudeTool(current, "avrdude.conf")
-			}
+			configuration = packagedAvrdudeTool(nativeAvrdudeModulePath(), "avrdude.conf")
 		}
 		if configuration == "" {
 			return "", "", "", errors.New("embedded libavrdude requires its matching tools/avrdude/avrdude.conf or an explicit configuration")
