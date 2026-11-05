@@ -1,4 +1,8 @@
-import type { ComponentChildren, JSX } from "preact";
+import type {
+  ButtonHTMLAttributes,
+  ComponentChildren,
+  TargetedInputEvent
+} from "preact";
 import { t } from "../i18n";
 
 export function Card({
@@ -91,20 +95,29 @@ export function TextField({
   onInput?: (value: string) => void;
 }) {
   const id = fieldID(label);
+  const inputProps = {
+    id,
+    value,
+    placeholder,
+    readOnly,
+    autocomplete: autoComplete,
+    dir:
+      dir ??
+      (type === "url" || type === "password" ? ("ltr" as const) : undefined),
+    onInput: (event: TargetedInputEvent<HTMLInputElement>) =>
+      onInput?.(event.currentTarget.value)
+  };
   return (
     <label class="input-field" for={id}>
       <span class="field-label">{t(label)}</span>
       {description && <span class="field-description">{t(description)}</span>}
-      <input
-        id={id}
-        type={type}
-        value={value}
-        placeholder={placeholder}
-        readOnly={readOnly}
-        autocomplete={autoComplete}
-        dir={dir ?? (type === "url" || type === "password" ? "ltr" : undefined)}
-        onInput={(event) => onInput?.(event.currentTarget.value)}
-      />
+      {type === "password" ? (
+        <input type="password" {...inputProps} />
+      ) : type === "url" ? (
+        <input type="url" {...inputProps} />
+      ) : (
+        <input type="text" {...inputProps} />
+      )}
     </label>
   );
 }
@@ -227,7 +240,7 @@ export function Button({
   busy?: boolean;
   icon?: ComponentChildren;
   class?: string;
-} & JSX.ButtonHTMLAttributes<HTMLButtonElement>) {
+} & ButtonHTMLAttributes<HTMLButtonElement>) {
   return (
     <button
       class={`button button-${kind}${busy ? " is-busy" : ""} ${className}`}
