@@ -54,6 +54,81 @@ func TestControllerWindowsSnapToPeers(t *testing.T) {
 	}
 }
 
+func TestControllerCompactUsesWindowSurface(t *testing.T) {
+	s, cfg := newControllerWindowFixture(t)
+	cfg.UI.ViewMode = config.ViewCompact
+	cfg.UI.WindowBounds = config.WindowBounds{X: 80, Y: 80, Width: 400, Height: 340}
+	s.mw.Show()
+	for _, backend := range []string{"auto", "legacy"} {
+		for _, glass := range []bool{true, false} {
+			for _, theme := range []string{"dark", "light"} {
+				for _, title := range []string{config.TitleBarNone, config.TitleBarCustom} {
+					cfg.UI.RenderBackend, cfg.UI.LayeredForeground, cfg.UI.Theme = backend, glass, theme
+					cfg.UI.TitleBarMode, cfg.UI.ControllerChrome = title, "windows"
+					s.cfg = cfg
+					s.applyConfigUI(cfg, false)
+					pumpControllerFixture(s)
+					canvas, err := s.surface.CreateCanvas()
+					if err != nil {
+						t.Fatal(err)
+					}
+					paint := func() {
+						t.Helper()
+						if err := s.paint(canvas, s.surface.ClientBoundsPixels()); err != nil {
+							t.Fatal(err)
+						}
+						if len(s.layout.controllerCards) != 0 {
+							t.Fatalf("inset compact enclosure: backend=%s glass=%v theme=%s title=%s", backend, glass, theme, title)
+						}
+					}
+					paint()
+					keys := map[actionID]walk.Rectangle{}
+					bounds := s.surface.ClientBoundsPixels()
+					for _, button := range s.layout.controllerButtons {
+						if button.action >= actionKey1 && button.action <= actionKey4 {
+							keys[button.action] = button.rect
+							if button.rect.Width != 44 || button.rect.Height != 44 || button.rect.Y+button.rect.Height+24 > bounds.Height {
+								t.Fatalf("compact key/label clipped or shrunk: %+v in %+v", button.rect, bounds)
+							}
+						}
+					}
+					if len(keys) != 4 {
+						t.Fatal("compact mode lost a physical key")
+					}
+					s.hoverLevels[actionKey1], s.pressLevels[actionKey1] = 1, 1
+					win.SendMessage(s.mw.Handle(), wmNCActivate, 0, 0)
+					pumpControllerFixture(s)
+					paint()
+					for _, button := range s.layout.controllerButtons {
+						if rect, ok := keys[button.action]; ok && rect != button.rect {
+							t.Fatal("hover/press/deactivation moved a compact control")
+						}
+					}
+					s.controllerWidgetID = "front-panel"
+					paint() // Detached front panels share the same single-surface layout.
+					s.controllerWidgetID = ""
+					canvas.Dispose()
+				}
+			}
+		}
+	}
+	cfg.UI.ViewMode = config.ViewDashboard
+	s.cfg = cfg
+	s.applyConfigUI(cfg, false)
+	pumpControllerFixture(s)
+	canvas, err := s.surface.CreateCanvas()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer canvas.Dispose()
+	if err := s.paint(canvas, s.surface.ClientBoundsPixels()); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.layout.controllerCards) == 0 {
+		t.Fatal("dashboard lost its grouped cards")
+	}
+}
+
 func TestControllerWidgetWindowsLifecycle(t *testing.T) {
 	s, cfg := newControllerWindowFixture(t)
 	cfg.UI.ViewMode = config.ViewDashboard
@@ -121,8 +196,8 @@ func TestControllerWidgetWindowsLifecycle(t *testing.T) {
 	if err := s.paint(canvas, s.surface.ClientBoundsPixels()); err != nil {
 		t.Fatal(err)
 	}
-	if len(s.layout.controllerCards) != 1 {
-		t.Fatal("compact mode contains non-front-panel cards")
+	if len(s.layout.controllerCards) != 0 {
+		t.Fatal("compact mode must use the window surface, not an inset card")
 	}
 	for _, b := range s.layout.controllerButtons {
 		if (b.action < actionKey1 || b.action > actionKey4) && b.action != actionCompact {
