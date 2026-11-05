@@ -40,6 +40,9 @@
   review findings are satisfied; opening a ready PR is not the completion step.
   Finish active blockers first and never bypass repository protections to empty
   the PR list. Report genuine external blockers explicitly.
+- Prefer the system Arduino CLI and its existing core/library environment.
+  Managed toolchains require explicit selection; never silently fall back to a
+  managed executable or redirect a system executable into managed directories.
 - An ancestor/merged-PR marker is not proof that a historical fix still exists
   in current functional source. Compare the actual behavior/content and retain
   focused regression tests when reconciling rewritten or relocated firmware;

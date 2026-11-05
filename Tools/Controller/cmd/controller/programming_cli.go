@@ -51,6 +51,7 @@ func runProgramWithConfig(
 	stdout, stderr io.Writer,
 	config appconfig.Config,
 ) error {
+	config = preferredToolchainConfig(config)
 	var normalizeErr error
 	args, normalizeErr = normalizeProgramCLIArgs(args)
 	if normalizeErr != nil {
@@ -1432,12 +1433,13 @@ func runToolchainSync(
 	stdout, stderr io.Writer,
 	store *appconfig.Store,
 ) error {
+	config := preferredToolchainConfig(store.Current())
 	flags := flag.NewFlagSet("toolchain sync", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	arduinoConfig := flags.String("toolchain-config", store.Current().Programming.ToolchainConfig, "Arduino CLI configuration to synchronize")
+	arduinoConfig := flags.String("toolchain-config", config.Programming.ToolchainConfig, "Arduino CLI configuration to synchronize")
 	firmwareCLI := flags.String(
 		"cli",
-		store.Current().Programming.ToolchainCLI,
+		config.Programming.ToolchainCLI,
 		"firmware dependency CLI executable",
 	)
 	directRetry := flags.Bool(
@@ -1479,7 +1481,8 @@ func runToolchainBootstrap(
 	flags := flag.NewFlagSet("toolchain bootstrap", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	system := flags.Bool("system", false, "seed the existing Arduino user environment instead of isolated managed directories")
-	arduinoConfig := flags.String("toolchain-config", "", "existing Arduino CLI config file (requires --system; never rewritten)")
+	managed := flags.Bool("managed", false, "explicitly install/use the isolated PCController-managed toolchain")
+	arduinoConfig := flags.String("toolchain-config", "", "existing system Arduino CLI config file (never rewritten)")
 	var cores, libraries, indexes stringListFlag
 	flags.Var(&cores, "core", "additional PACKAGE:ARCH[@VERSION] to install (repeatable)")
 	flags.Var(&libraries, "library", "additional library NAME[@VERSION] to install (repeatable)")
@@ -1496,9 +1499,12 @@ func runToolchainBootstrap(
 		return err
 	}
 	if flags.NArg() != 0 {
-		return errors.New("usage: controller toolchain bootstrap [--system [--toolchain-config FILE]] [--core ID] [--library NAME] [--index-url URL] [--policy FILE] [--locked --lock FILE] [--install-dir DIR] [--cli PATH] [--dry-run]")
+		return errors.New("usage: controller toolchain bootstrap [--system|--managed] [--toolchain-config FILE] [--core ID] [--library NAME] [--index-url URL] [--policy FILE] [--locked --lock FILE] [--install-dir DIR] [--cli PATH] [--dry-run]")
 	}
-	if *system {
+	if *system && *managed {
+		return errors.New("--system and --managed are mutually exclusive")
+	}
+	if !*managed {
 		explicitSave := false
 		flags.Visit(func(value *flag.Flag) {
 			if value.Name == "save-cli" {
@@ -1509,7 +1515,7 @@ func runToolchainBootstrap(
 			*saveCLI = false
 		}
 		if *saveCLI && strings.TrimSpace(*arduinoConfig) == "" {
-			return errors.New("--system --save-cli requires --toolchain-config so later programming uses the same Arduino installation")
+			return errors.New("system --save-cli requires --toolchain-config so later programming uses the same Arduino installation")
 		}
 	}
 	if *arduinoConfig != "" {
@@ -1550,7 +1556,7 @@ func runToolchainBootstrap(
 		ctx,
 		programmer.ToolchainBootstrapOptions{
 			Profile: profile, CLI: *firmwareCLI, InstallDir: *installDir,
-			System: *system, ConfigPath: *arduinoConfig, Cores: cores, Libraries: libraries, Indexes: indexes,
+			Managed: *managed, ConfigPath: *arduinoConfig, Cores: cores, Libraries: libraries, Indexes: indexes,
 			Locked:      *locked,
 			DirectRetry: *directRetry, DryRun: *dryRun,
 		},
@@ -1560,6 +1566,7 @@ func runToolchainBootstrap(
 		_, saveErr := store.Update(func(config *appconfig.Config) error {
 			config.Programming.ToolchainCLI = report.CLIPath
 			config.Programming.ToolchainConfig = report.ConfigPath
+			config.Programming.ToolchainManaged = *managed
 			return nil
 		})
 		if saveErr != nil {

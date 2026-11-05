@@ -8,8 +8,53 @@ import (
 	"strings"
 	"testing"
 
+	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/programmer"
 )
+
+func TestSystemToolchainNeverFallsBackWithoutExplicitManagedSelection(t *testing.T) {
+	providers := []detectedToolchainProvider{
+		{name: "arduino-cli", path: "managed", version: "1.5.1", compatible: true, managed: true},
+		{name: "arduino-cli", path: "system", version: "1.5.1", compatible: true},
+	}
+	if got := selectBoardToolchainCLI(providers, "1.5.1", false); got == nil || got.path != "system" {
+		t.Fatalf("system was not preferred: %+v", got)
+	}
+	if got := selectBoardToolchainCLI(providers[:1], "1.5.1", false); got != nil {
+		t.Fatalf("silently selected managed fallback: %+v", got)
+	}
+	if got := selectBoardToolchainCLI(providers, "1.5.1", true); got == nil || got.path != "managed" {
+		t.Fatalf("explicit managed selection ignored: %+v", got)
+	}
+}
+
+func TestSystemToolchainEnvironmentDoesNotCreateServiceProfile(t *testing.T) {
+	base := []string{"USERPROFILE=existing", "ARDUINO_DIRECTORIES_USER=custom"}
+	got, err := selectedArduinoCLIEnvironment(base, "user-config-must-not-be-rewritten.yaml", false)
+	if err != nil || !reflect.DeepEqual(got, base) {
+		t.Fatalf("system environment changed: %v %v", got, err)
+	}
+}
+
+func TestOldManagedSelectionCannotOverrideSystemDefault(t *testing.T) {
+	t.Setenv("PCCONTROLLER_DATA_DIR", t.TempDir())
+	t.Setenv("PATH", t.TempDir())
+	paths, err := programmer.DefaultHostDataPaths()
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := appconfig.Defaults()
+	config.Programming.ToolchainCLI = filepath.Join(paths.ToolchainDir, "old", "arduino-cli")
+	config.Programming.ToolchainConfig = filepath.Join(paths.ToolchainDir, "firmware-cli.yaml")
+	got := preferredToolchainConfig(config)
+	if got.Programming.ToolchainCLI != "arduino-cli" || got.Programming.ToolchainConfig != "" {
+		t.Fatalf("old managed paths survived: %+v", got.Programming)
+	}
+	config.Programming.ToolchainManaged = true
+	if got := preferredToolchainConfig(config); !reflect.DeepEqual(got.Programming, config.Programming) {
+		t.Fatal("explicit managed preference was discarded")
+	}
+}
 
 func TestArduinoCLIEnvironmentBindsConfiguredDirectories(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "firmware-cli.yaml")

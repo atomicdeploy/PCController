@@ -283,7 +283,7 @@ func (options *connectionFlags) fromConfig(
 }
 
 func commandOptions(store *appconfig.Store, fallbackProject string) control.CommandOptions {
-	config := store.Current()
+	config := preferredToolchainConfig(store.Current())
 	firmwareFeatures, firmwareFeaturesErr := configuredFirmwareFeatures(config)
 	options := control.CommandOptions{
 		ProjectPath:           configuredProject(config, fallbackProject),
@@ -343,7 +343,7 @@ func commandOptions(store *appconfig.Store, fallbackProject string) control.Comm
 		return runDriver(args, output, output)
 	}
 	options.Resolve = func() control.CommandOptions {
-		current := store.Current()
+		current := preferredToolchainConfig(store.Current())
 		currentFeatures, currentFeaturesErr := configuredFirmwareFeatures(current)
 		return control.CommandOptions{
 			ProjectPath:           configuredProject(current, fallbackProject),

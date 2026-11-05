@@ -107,8 +107,16 @@ Tools\Controller\bin\controller.exe toolchain bootstrap --dry-run
 Tools\Controller\bin\controller.exe toolchain bootstrap
 ```
 
-The first command is read-only. By default bootstrap resolves the current
-stable policy, then:
+The first command is read-only. By default bootstrap uses the system Arduino
+CLI and its existing user environment. If that CLI is missing or incompatible,
+install/update it explicitly; PCController does not silently choose a managed
+copy. To request the isolated installer instead, use:
+
+```console
+controller toolchain bootstrap --managed
+```
+
+This explicit managed mode resolves the stable policy, then:
 
 1. selects the current operating-system/architecture firmware-CLI asset;
 2. verifies its registry-provided SHA-256 before extraction;
@@ -131,8 +139,8 @@ root. Omitting `--cli` installs the verified portable executable there too;
 To reproduce the checked-in lock without registry resolution, use:
 
 ```console
-Tools\Controller\bin\controller.exe toolchain bootstrap --locked --dry-run
-Tools\Controller\bin\controller.exe toolchain bootstrap --locked
+Tools\Controller\bin\controller.exe toolchain bootstrap --managed --locked --dry-run
+Tools\Controller\bin\controller.exe toolchain bootstrap --managed --locked
 ```
 
 Use the managed executable and its generated configuration explicitly for a
@@ -162,13 +170,14 @@ operation for auditing/updating an explicitly selected existing installation.
 
 ### Seed an existing Arduino installation or additional board families
 
-Use `--system` to populate the current user's normal Arduino CLI environment
+System mode is the default (`--system` also selects it explicitly). It populates the current user's normal Arduino CLI environment
 (usually Arduino15 plus the Arduino sketchbook), rather than the isolated
 PCController workspace. This is **not** an all-users/admin install. It respects
 Arduino's existing configuration and environment variables without rewriting
 the configuration, changing PATH, or upgrading unrelated installed packages.
-If no `--cli` is supplied, the checksum-verified CLI is still installed under
-PCController's tool directory; only the core/library destination changes.
+If no `--cli` is supplied, PCController looks for the system `arduino-cli` on
+PATH. Missing system tools produce an actionable error, not an automatic
+managed download. `--managed` is the explicit download/install alternative.
 
 ```console
 controller toolchain bootstrap --system --dry-run
@@ -194,6 +203,14 @@ configuration flag, not Arduino's. Reports identify `scope` as `system` or
 For deliberate upgrades of **all** installed cores and libraries, use
 `controller toolchain sync --cli arduino-cli --toolchain-config FILE` instead.
 Sync now preserves the configured Arduino installation on every step.
+
+Runtime readiness also defaults to the system provider and environment, even
+when an older automatic bootstrap saved a managed path. Managed mode is
+persisted only by an explicit `bootstrap --managed` (or
+`board initialize --portable-cli`) as `programming.toolchain_managed: true`.
+Set that preference to `false` to return to system-first operation. Explicit
+isolated dependency-replay automation passes `--managed`; Linux host provisioning
+requires its own `--managed` flag rather than silently opting the target user in.
 
 ## Runtime readiness gate and provider coordination
 

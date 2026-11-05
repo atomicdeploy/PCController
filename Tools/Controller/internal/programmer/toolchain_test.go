@@ -45,7 +45,7 @@ func TestToolchainBootstrapDryRunPinsCoreLibrariesAndManagedCLI(t *testing.T) {
 	report, err := BootstrapToolchain(
 		context.Background(),
 		ToolchainBootstrapOptions{
-			Profile: DefaultToolchainProfile(), InstallDir: t.TempDir(),
+			Profile: DefaultToolchainProfile(), InstallDir: t.TempDir(), Managed: true,
 			GOOS: "windows", GOARCH: "amd64", DryRun: true, Locked: true,
 			Environment: []string{
 				"PATH=test", "https_proxy=http://secret", "NO_PROXY=localhost",
@@ -97,7 +97,7 @@ func TestToolchainBootstrapDefaultsToUnversionedCoreAndLibraries(t *testing.T) {
 		profile.Libraries[index].Version = ""
 	}
 	report, err := BootstrapToolchain(context.Background(), ToolchainBootstrapOptions{
-		Profile: profile, InstallDir: t.TempDir(), DryRun: true,
+		Profile: profile, InstallDir: t.TempDir(), DryRun: true, Managed: true,
 	}, io.Discard)
 	if err != nil {
 		t.Fatal(err)
@@ -119,7 +119,7 @@ func TestToolchainBootstrapDefaultsToUnversionedCoreAndLibraries(t *testing.T) {
 		t.Fatalf("planned %d installs; missing required core/library", installs)
 	}
 	if _, err := BootstrapToolchain(context.Background(), ToolchainBootstrapOptions{
-		Profile: profile, InstallDir: t.TempDir(), DryRun: true, Locked: true,
+		Profile: profile, InstallDir: t.TempDir(), DryRun: true, Locked: true, Managed: true,
 	}, io.Discard); err == nil {
 		t.Fatal("explicit locked replay accepted missing versions")
 	}
@@ -137,7 +137,7 @@ func TestSystemToolchainSeedPreservesConfigAndDirectories(t *testing.T) {
 	}
 	var commands []Command
 	report, err := BootstrapToolchain(context.Background(), ToolchainBootstrapOptions{
-		System: true, ConfigPath: config, CLI: cli, InstallDir: filepath.Join(root, "managed"),
+		ConfigPath: config, CLI: cli, InstallDir: filepath.Join(root, "managed"),
 		Cores: []string{"MegaCore:avr", "esp32:esp32"}, Libraries: []string{"FastLED"},
 		Indexes:     []string{"https://example.org/package_index.json"},
 		Environment: []string{"ARDUINO_DIRECTORIES_DATA=/existing/data", "ARDUINO_DIRECTORIES_USER=/existing/sketchbook"},
@@ -184,7 +184,7 @@ func TestSystemToolchainSeedPreservesConfigAndDirectories(t *testing.T) {
 
 func TestSystemToolchainSeedDryRunDoesNotCreateFiles(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "not-created")
-	report, err := BootstrapToolchain(context.Background(), ToolchainBootstrapOptions{System: true, InstallDir: root, DryRun: true}, io.Discard)
+	report, err := BootstrapToolchain(context.Background(), ToolchainBootstrapOptions{InstallDir: root, DryRun: true}, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,9 +198,31 @@ func TestSystemToolchainSeedDryRunDoesNotCreateFiles(t *testing.T) {
 	}
 }
 
+func TestDefaultBootstrapDoesNotDownloadWhenSystemCLIIsMissing(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	root := filepath.Join(t.TempDir(), "not-created")
+	_, err := BootstrapToolchain(context.Background(), ToolchainBootstrapOptions{InstallDir: root}, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "--managed") {
+		t.Fatalf("missing explicit opt-in error: %v", err)
+	}
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Fatalf("implicit managed installation created files: %v", err)
+	}
+}
+
+func TestManagedToolchainPathRecognizesOldVersionsAndRejectsSibling(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "toolchain")
+	if !IsManagedToolchainPath(filepath.Join(root, "arduino-cli", "old", "cli"), root) {
+		t.Fatal("old managed version was treated as system")
+	}
+	if IsManagedToolchainPath(root+"-other", root) {
+		t.Fatal("sibling directory was treated as managed")
+	}
+}
+
 func TestToolchainSeedRejectsInvalidSelectionsBeforeInstall(t *testing.T) {
 	for _, options := range []ToolchainBootstrapOptions{
-		{ConfigPath: "missing.yaml"}, {System: true, ConfigPath: "missing.yaml"},
+		{Managed: true, ConfigPath: "missing.yaml"}, {ConfigPath: "missing.yaml"},
 		{Cores: []string{"--help"}}, {Cores: []string{"invalid"}}, {Cores: []string{"vendor:"}},
 		{Libraries: []string{"--git-url"}}, {Libraries: []string{"FastLED@"}},
 		{Locked: true, Cores: []string{"MegaCore:avr"}}, {Locked: true, Libraries: []string{"FastLED"}},
@@ -233,7 +255,7 @@ func TestToolchainBootstrapExistingCLIIsAvailableAndUsesManagedDirectories(t *te
 	report, err := BootstrapToolchain(
 		context.Background(),
 		ToolchainBootstrapOptions{
-			Profile: DefaultToolchainProfile(), InstallDir: installRoot,
+			Profile: DefaultToolchainProfile(), InstallDir: installRoot, Managed: true,
 			GOOS: "windows", GOARCH: "amd64",
 			Environment: []string{
 				"PATH=test", "HTTPS_PROXY=http://proxy.invalid",

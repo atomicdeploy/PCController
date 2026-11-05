@@ -127,9 +127,9 @@ func (profile ToolchainProfile) validateLockedDependencies() error {
 type ToolchainBootstrapOptions struct {
 	Profile ToolchainProfile
 	Locked  bool
-	// System uses Arduino CLI's existing user configuration and directories.
-	// It never rewrites that configuration or upgrades unrelated dependencies.
-	System      bool
+	// Managed explicitly opts into the isolated downloaded toolchain. The
+	// default uses the system CLI and never silently downloads a replacement.
+	Managed     bool
 	ConfigPath  string
 	Cores       []string
 	Libraries   []string
@@ -162,9 +162,9 @@ type ToolchainBootstrapReport struct {
 	Steps                []ToolchainSyncStep `json:"steps"`
 }
 
-// BootstrapToolchain installs a pinned CLI into the host data directory, then
-// installs the latest indexed core and libraries by default. Locked is an
-// explicit exact-version rollback/replay choice. Every child receives the
+// BootstrapToolchain seeds the system Arduino environment by default. Managed
+// explicitly installs a verified CLI and isolated workspace instead. Locked is
+// an explicit exact-version rollback/replay choice. Every child receives the
 // caller's complete environment.
 func BootstrapToolchain(
 	ctx context.Context,
@@ -225,12 +225,22 @@ func BootstrapToolchain(
 		DownloadsDir: workspace.downloadsDir, UserDir: workspace.userDir,
 		ProxyVariables: proxyEnvironmentNames(environment),
 	}
-	if options.System {
+	if !options.Managed {
 		report.Scope = "system"
 		report.ConfigPath = strings.TrimSpace(options.ConfigPath)
 		report.DataDir, report.DownloadsDir, report.UserDir = "", "", ""
 	}
 	cliPath := strings.TrimSpace(options.CLI)
+	if !options.Managed {
+		cliPath, err = ResolveSystemToolchainCLI(cliPath, installRoot)
+		if err != nil {
+			if !options.DryRun {
+				return report, err
+			}
+			cliPath = "arduino-cli"
+			fmt.Fprintln(output, "dry-run: system Arduino CLI is required; managed fallback is not enabled")
+		}
+	}
 	if cliPath == "" {
 		asset, err := profile.cliAsset(goos, goarch)
 		if err != nil {
@@ -265,7 +275,7 @@ func BootstrapToolchain(
 			return report, resolveErr
 		}
 		cliPath = resolved
-		if !options.System {
+		if options.Managed {
 			if err := writeToolchainConfig(workspace, profile.PackageIndexes); err != nil {
 				return report, err
 			}
@@ -273,7 +283,7 @@ func BootstrapToolchain(
 		report.CLIInstalled = true
 	}
 	report.CLIPath = cliPath
-	if !options.System {
+	if options.Managed {
 		environment = withToolchainDirectoryEnvironment(environment, workspace)
 	}
 	environment = withDependencyProxyEnvironment(environment)
@@ -499,8 +509,8 @@ func (profile ToolchainProfile) installSteps(locked bool) []toolchainInstallStep
 }
 
 func validateToolchainSeedOptions(options ToolchainBootstrapOptions) error {
-	if options.ConfigPath != "" && !options.System {
-		return errors.New("an existing Arduino config requires --system; managed bootstrap owns its generated config")
+	if options.ConfigPath != "" && options.Managed {
+		return errors.New("an existing Arduino config cannot be combined with --managed; managed bootstrap owns its generated config")
 	}
 	if options.ConfigPath != "" {
 		info, err := os.Stat(options.ConfigPath)
@@ -533,6 +543,40 @@ func validateToolchainSeedOptions(options ToolchainBootstrapOptions) error {
 		}
 	}
 	return nil
+}
+
+// IsManagedToolchainPath classifies the entire managed tree, including older
+// CLI versions, so a persisted automatic selection cannot masquerade as system.
+func IsManagedToolchainPath(path, root string) bool {
+	if strings.TrimSpace(path) == "" || strings.TrimSpace(root) == "" {
+		return false
+	}
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+	base, err := filepath.Abs(root)
+	if err != nil {
+		return false
+	}
+	relative, err := filepath.Rel(base, absolute)
+	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) && !filepath.IsAbs(relative)
+}
+
+func ResolveSystemToolchainCLI(configured, managedRoot string) (string, error) {
+	if strings.TrimSpace(configured) != "" && !IsManagedToolchainPath(configured, managedRoot) {
+		resolved, err := resolveAvailableToolchainCLI(configured)
+		if err != nil {
+			return "", err
+		}
+		if !IsManagedToolchainPath(resolved, managedRoot) {
+			return resolved, nil
+		}
+	}
+	if path, err := exec.LookPath(executableNameForOS("arduino-cli", runtime.GOOS)); err == nil && !IsManagedToolchainPath(path, managedRoot) {
+		return path, nil
+	}
+	return "", errors.New("system Arduino CLI is unavailable; install arduino-cli on PATH or explicitly run toolchain bootstrap --managed")
 }
 
 func installToolchainCLI(

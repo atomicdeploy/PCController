@@ -949,7 +949,7 @@ function validateEverything(hostTools, directRetry) {
   installResolvedHostTools(hostTools, directRetry)
   let bootstrapResult
   step('Exact toolchain bootstrap', () => {
-    bootstrapResult = controllerToolchain('bootstrap', ['--locked'])
+    bootstrapResult = controllerToolchain('bootstrap', ['--managed', '--locked'])
     if (bootstrapResult.stdout) process.stdout.write(bootstrapResult.stdout)
     if (bootstrapResult.stderr) process.stderr.write(bootstrapResult.stderr)
   })
