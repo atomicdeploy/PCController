@@ -36,6 +36,7 @@ type controlTableRow struct {
 	Index         int
 	Icon          string
 	PeripheralKey string
+	SemanticValue *uint16
 }
 
 type controlTableLine struct {

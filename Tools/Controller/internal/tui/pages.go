@@ -497,6 +497,34 @@ func (model Model) controlTableRows(snapshot control.Snapshot, levelWidth int) [
 	for index := range rows {
 		_, rows[index].Icon = model.channelPresentation(rows[index].PeripheralKey)
 	}
+	if model.channels.owner == model.channelCatalogOwner() && model.channels.value.ChannelRouting.Enabled {
+		for index, channel := range model.channels.value.ChannelRouting.Channels {
+			kind, physical, ok := appconfig.RoutingTarget(channel.Target)
+			if !ok {
+				continue
+			}
+			row := controlTableRow{Name: channel.Name, Icon: channel.Icon, Detail: channel.Target, PeripheralKey: channel.Key, Kind: "semantic-" + kind, Value: "—"}
+			if index == 0 {
+				row.Group = "SEMANTIC CHANNELS"
+			}
+			if kind == "relay" && snapshot.Connected && snapshot.HaveStatus {
+				value := uint16(0)
+				if snapshot.Status.ActiveRelays&(1<<physical) != 0 {
+					value = 1
+				}
+				row.SemanticValue = &value
+				row.Value, row.Tone = "○ OFF", controlToneOff
+				if value != 0 {
+					row.Value, row.Tone = "● ON", controlToneOn
+				}
+			} else if kind == "pwm" && snapshot.Connected && model.havePWMValues {
+				value := model.pwmValues[physical]
+				row.SemanticValue = &value
+				row.Value, row.Tone = fmt.Sprintf("%d / 4095", value), controlToneLevel
+			}
+			rows = append(rows, row)
+		}
+	}
 	return rows
 }
 

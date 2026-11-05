@@ -1103,6 +1103,11 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			model.appendLog("info", "remote IPC connection restored")
 		}
 
+	case semanticChannelResultMsg:
+		model.channels.setPending = false
+		if message.err != nil {
+			model.appendLog("error", message.key+": "+message.err.Error())
+		}
 	case commandResultMsg:
 		normalizedLine := strings.ToLower(strings.TrimSpace(message.line))
 		if normalizedLine == "reconnect" {

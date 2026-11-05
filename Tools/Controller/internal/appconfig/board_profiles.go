@@ -26,6 +26,7 @@ type BoardProfile struct {
 	Presentation    map[string]PeripheralPresentation `json:"presentation,omitempty"`
 	Folders         []ChannelFolder                   `json:"folders,omitempty"`
 	PWMRecall       map[string]uint16                 `json:"pwm_recall,omitempty"`
+	ChannelRouting  ChannelRouting                    `json:"channel_routing,omitempty"`
 }
 
 // PeripheralPresentation is mutable operator vocabulary attached to a stable
@@ -95,6 +96,9 @@ func (value Config) validateBoardProfiles() error {
 		}
 		if err := validateChannelFolders(profile.Folders); err != nil {
 			return fmt.Errorf("board_profiles[%q].folders: %w", identity, err)
+		}
+		if err := ValidateChannelRouting(profile.ChannelRouting); err != nil {
+			return fmt.Errorf("board_profiles[%q].channel_routing: %w", identity, err)
 		}
 		for key, raw := range profile.PWMRecall {
 			channel, err := ParsePWMChannel(strings.TrimPrefix(key, "pwm."))
@@ -191,6 +195,7 @@ func cloneBoardProfiles(source map[string]BoardProfile) map[string]BoardProfile 
 	result := make(map[string]BoardProfile, len(source))
 	for identity, profile := range source {
 		copyProfile := profile
+		copyProfile.ChannelRouting.Channels = append([]SemanticChannel(nil), profile.ChannelRouting.Channels...)
 		copyProfile.PWMRecall = make(map[string]uint16, len(profile.PWMRecall))
 		for key, raw := range profile.PWMRecall {
 			copyProfile.PWMRecall[key] = raw

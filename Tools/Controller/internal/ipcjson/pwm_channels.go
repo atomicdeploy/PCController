@@ -238,6 +238,8 @@ func mergePWMChannelConfig(current, value appconfig.PWMChannelConfig) appconfig.
 }
 
 func (service *Service) updatePWMChannelConfig(channel int, value appconfig.PWMChannelConfig) (appconfig.PWMChannelConfig, error) {
+	service.channelRoutingMu.Lock()
+	defer service.channelRoutingMu.Unlock()
 	if channel < 0 || channel >= appconfig.PWMChannelCount {
 		return appconfig.PWMChannelConfig{}, &RPCError{Code: -32602, Message: "channel must be 0..15"}
 	}

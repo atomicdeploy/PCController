@@ -57,8 +57,10 @@ func presentationResult(settings PeripheralSettings, key string) (PresentationUp
 }
 
 func (service *Service) activeBoardProfile() (boardProfileDescriptor, appconfig.BoardProfile) {
-	config := service.hostConfig()
-	snapshot := service.Client.Snapshot()
+	return describeBoardProfile(service.hostConfig(), service.Client.Snapshot())
+}
+
+func describeBoardProfile(config appconfig.Config, snapshot controller.Snapshot) (boardProfileDescriptor, appconfig.BoardProfile) {
 	identity, profile, configured := boardProfileForSnapshot(config, snapshot)
 	descriptor := boardProfileDescriptor{
 		Key: profile.Key, BoardIdentity: identity.Value, IdentitySource: identity.Source,
@@ -87,6 +89,8 @@ func boardProfileForSnapshot(config appconfig.Config, snapshot controller.Snapsh
 }
 
 func (service *Service) updateActiveBoardProfile(key, mode string, exposeRawRelays *bool, expectedRevision string) (boardProfileDescriptor, error) {
+	service.channelRoutingMu.Lock()
+	defer service.channelRoutingMu.Unlock()
 	if service.UpdateHostConfig == nil {
 		return boardProfileDescriptor{}, errors.New("persistent host configuration is unavailable")
 	}
@@ -121,6 +125,8 @@ func (service *Service) updateActiveBoardProfile(key, mode string, exposeRawRela
 }
 
 func (service *Service) updatePeripheralPresentation(key string, name, icon, color, upColor, downColor, group *string, order *int, hidden, locked *bool, expectedRevision string) (PresentationUpdateResult, error) {
+	service.channelRoutingMu.Lock()
+	defer service.channelRoutingMu.Unlock()
 	if service.UpdateHostConfig == nil {
 		return PresentationUpdateResult{}, errors.New("persistent host configuration is unavailable")
 	}

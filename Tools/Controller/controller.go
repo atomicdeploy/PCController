@@ -1806,6 +1806,14 @@ func (client *Client) RescanLCD(ctx context.Context) (byte, error) {
 	return client.runtime.LCDPresenter().RescanPhysical(ctx)
 }
 
+// SetRoutedOutput writes a resolved general-purpose channel on one board session.
+// Semantic identity resolution belongs to the host board-profile API.
+func (client *Client) SetRoutedOutput(ctx context.Context, generation uint64, target string, value uint16) error {
+	return client.runtime.SetRoutedOutput(ctx, generation, target, value)
+}
+
+func (client *Client) ChannelRoutingBusy() bool { return client.runtime.ChannelRoutingBusy() }
+
 // SetRelay controls the human-facing R1..R8 relay number. The firmware remains
 // the authority for the R1..R4 motion interlock.
 func (client *Client) SetRelay(

@@ -15,11 +15,18 @@ func TestTUIChannelCatalogUsesOwnerRPC(t *testing.T) {
 				t.Fatalf("lost mutation fence: %#v", params)
 			}
 		}
+		if method == "controller.channel.set" {
+			value := params.(map[string]any)
+			if value["key"] != "lighting.aisle" || value["value"] != uint16(1) || value["board_identity"] != "board" || value["expected_revision"] != "current" || value["expected_host_instance_id"] != "host" || value["expected_connection_generation"] != uint64(7) {
+				t.Fatalf("lost semantic mutation fence: %#v", value)
+			}
+		}
 		return nil
 	})
 	_, _ = source.Read(context.Background())
 	_, _ = source.Rename(context.Background(), "motion.a", "Lift", "current")
-	if len(methods) != 2 || methods[0] != "controller.peripherals.get" {
+	_ = source.SetSemantic(context.Background(), "lighting.aisle", 1, "board", "current", "host", 7)
+	if len(methods) != 3 || methods[0] != "controller.peripherals.get" {
 		t.Fatalf("unexpected calls %v", methods)
 	}
 }

@@ -102,6 +102,28 @@ test("derives public API titles and schema ID from product metadata", () => {
   assert.equal(JSON.stringify(asyncapi).includes("access_token"), false);
 });
 
+test("publishes routing pins, logical PWM conversion and non-retryable output contracts", () => {
+  const schema = JSON.parse(readFileSync(join(outputDirectory, "jsonrpc.schema.json"), "utf8"));
+  for (const method of ["controller.channel.set", "controller.output.set"]) {
+    const contract = schema["x-methods"][method];
+    assert.equal(contract.capability, "board_commands");
+    assert.equal(contract.idempotency, "non-idempotent");
+    const request = schema.$defs[contract.params_schema.$ref.split("/").at(-1)];
+    for (const pin of ["expected_host_instance_id", "expected_connection_generation", "board_identity", "expected_revision"]) assert.ok(request.required.includes(pin));
+    assert.equal(request.additionalProperties, false);
+    assert.equal(request.properties.percent_milli.maximum, 100000);
+    assert.equal(request.properties.value.maximum, 4095);
+    assert.ok(request.oneOf.some(branch => branch.required.includes("expected_pwm_configuration_revision")));
+  }
+  assert.equal(schema["x-methods"]["controller.channel_routing.update"].capability, "host_configuration");
+  assert.equal(schema.$defs.ChannelRouting.properties.channels.maxItems, 15);
+  assert.equal(schema.$defs.PinnedOutputResult.properties.outcome.const, "confirmed");
+  assert.ok(schema.$defs.PinnedOutputResult.required.includes("observed_value"));
+  assert.deepEqual(schema.$defs.PinnedOutputErrorData.properties.outcome.enum, ["rejected", "unknown"]);
+  assert.equal(schema.$defs.PhysicalOutputRequest.properties.target.enum.includes("relay.1"), false);
+  assert.equal(schema.$defs.PhysicalOutputRequest.properties.target.enum.includes("pwm.11"), false);
+});
+
 test("generates typed app action requests and per-target outcomes", () => {
 	const openapi = JSON.parse(readFileSync(join(outputDirectory, "openapi.json"), "utf8"));
 	const rpcSchema = JSON.parse(readFileSync(join(outputDirectory, "jsonrpc.schema.json"), "utf8"));

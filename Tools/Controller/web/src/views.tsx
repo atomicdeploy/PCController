@@ -94,6 +94,8 @@ import { connectionPresentation, hardwareResetAvailable } from './connection-pre
 import { EventList } from './event-collection'
 import { HotkeyEditor } from './hotkey-settings-editor'
 import { PeripheralNamesEditor } from './peripheral-names-editor'
+import { ChannelRoutingEditor } from './channel-routing-editor'
+import { SemanticChannelControls } from './semantic-channel-controls'
 import { CardLayoutEditor, CardLayoutFrame, type CardLayoutCopy, type LayoutCardDescriptor } from './card-layout-controls'
 import { loadCardLayout, moveCard, resetCardLayout, saveCardLayout, toggleCard } from './dashboard-layout'
 import { pointerReorderTargetChanged } from './pointer-reorder'
@@ -807,6 +809,7 @@ export function ControlsView(props: SharedViewProps) {
         </Button>
       </div>
       <section className="control-layout">
+        <SemanticChannelControls snapshot={snapshot} events={props.events} locale={locale} streamState={props.transport.streamState}/>
         {available.relays && <Card icon={CircuitBoard} iconTone={snapshot.status.active_relays ? 'amber' : 'green'} eyebrow={copy('Eight protected outputs', 'هشت خروجی محافظت‌شده')} title={copy('Relays & motion', 'رله‌ها و حرکت')} className="relay-control-card" action={<StatusBadge tone={snapshot.status.active_relays ? 'warn' : 'good'}>{snapshot.status.active_relays ? copy('ENERGIZED', 'برقدار') : copy('RELEASED', 'آزاد')}</StatusBadge>} menu={[
           { label: copy('Refresh output state', 'تازه‌سازی وضعیت خروجی‌ها'), icon: RefreshCw, onSelect: () => { void command('status') } },
           { label: copy('Release every relay', 'آزادسازی همهٔ رله‌ها'), icon: Unplug, tone: 'danger', onSelect: () => openDialog({ tone: 'danger', title: t('confirmEmergencyTitle'), body: t('confirmEmergencyBody'), confirmLabel: t('emergencyOff'), action: async () => { await command('relay off') } }) },
@@ -1621,6 +1624,7 @@ export function SettingsView({ appTitle, snapshot, events, locale, t, command, a
         </Card>
 
         <PeripheralNamesEditor locale={locale} refreshToken={`${channelPresentationEventID(events)}/${transport.streamState}`} scope={channelPresentationOwner(snapshot)} />
+        <ChannelRoutingEditor locale={locale} refreshToken={`${channelPresentationEventID(events)}/${transport.streamState}`} scope={channelPresentationOwner(snapshot)} />
 
         {uiConfig && <Card icon={Gauge} iconTone="green" title={copy('Live measurements', 'اندازه‌گیری‌های زنده')} eyebrow={measurementTimingBusy ? copy('Synchronizing', 'در حال همگام‌سازی') : `${formatNumber(locale, 1000 / measurementRefreshMS, measurementRefreshMS === 200 ? 0 : 1)} ${copy('Hz', 'هرتز')}`} className="settings-card settings-card--wide">
           <form className="segment-scroll-settings" onSubmit={(event) => void saveMeasurementTiming(event)}>
