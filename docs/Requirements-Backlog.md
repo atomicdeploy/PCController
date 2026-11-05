@@ -173,6 +173,12 @@ The Host workflow retains native WebUI test coverage and consolidates its
 platform-labeled Vitest results. Live Actions-run acceptance remains pending
 until the workflow changes are merged and executed.
 
+Dependency automation under #89 checks the configured stable core and all
+declared Arduino libraries daily. Its report now retains completed firmware
+checks through later host failures, and dependency PRs separate core and library
+updates with count-based titles. Live scheduled-run acceptance remains separate
+from local reporting checks.
+
 ## [#12 — Documentation, licensing, GitHub, and final code quality](https://github.com/atomicdeploy/PCController/issues/12)
 
 3 open / 1 closed / 4 total

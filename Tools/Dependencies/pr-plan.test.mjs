@@ -37,4 +37,5 @@ test('failed or partial reports produce an honest non-passing plan', () => {
   assert.match(plan.impact.security, /reviewer confirmation is required/u)
   assert.match(plan.impact.size, /did not complete/u)
   assert.match(renderDependencyPRMarkdown(plan), /did not pass/u)
+  assert.equal(buildDependencyPRPlan({ ...report, status: 'failed' }).validation_passed, false)
 })

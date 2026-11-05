@@ -69,6 +69,25 @@ new compatible revisions to Dependabot.
 
 ## Commands
 
+The scheduled **Dependency Resolution and Validation** workflow checks daily at
+01:17 UTC; **Run workflow → check_only** performs the same registry lookup without
+changing locks or creating a PR. MiniCore and every declared Arduino library
+appear in a dedicated check table, including unchanged versions. Completed
+firmware evidence survives a later host-registry or validation failure; a failed
+candidate cannot create an upgrade PR.
+
+Opt-in ATmega2560 builds also resolve MegaCore's latest stable release from its
+official index, respecting `targets.json`'s minimum without treating it as an
+exact pin. The scheduled report records the selected version and archive hash;
+the firmware workflow installs that exact resolved version and validates all
+three target profiles. This remains build-only, not programming authorization.
+
+Core/library grouping and count-based PR titles adapt the PU850-esp updater's
+reporting approach (reviewed revision `431104072952f694a35b3a83c19f13fbb098ca5b`).
+The existing numeric stable-version resolver, one cached library-index fetch,
+source allowlists, hashes and firmware memory gates remain authoritative here;
+there is no second shell resolver or dependency-selection policy.
+
 From the repository root on Windows:
 
 ```cmd

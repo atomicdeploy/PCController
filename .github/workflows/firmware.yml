@@ -191,12 +191,19 @@ jobs:
       - name: "🔎 Recheck feature-profile records and boundaries"
         run: ./firmware.sh check
 
-      - name: "🧩 Install declared larger-MCU core in the existing CLI cache"
+      - name: "🔎 Resolve latest stable larger-MCU core"
+        id: target-core
+        run: node Tools/Dependencies/target-cores.mjs mega2560
+
+      - name: "🧩 Install resolved larger-MCU core in the existing CLI cache"
+        env:
+          TARGET_CORE: ${{ steps.target-core.outputs.core }}
+          TARGET_CORE_VERSION: ${{ steps.target-core.outputs.version }}
         run: |
           node -e 'const { execFileSync } = require("node:child_process");
           const target = require("./Tools/Firmware/targets.json").mega2560;
           execFileSync("arduino-cli", ["core", "update-index", "--additional-urls", target.index], { stdio: "inherit" });
-          execFileSync("arduino-cli", ["core", "install", target.core + "@" + target.minimumCoreVersion, "--additional-urls", target.index], { stdio: "inherit" });'
+          execFileSync("arduino-cli", ["core", "install", process.env.TARGET_CORE + "@" + process.env.TARGET_CORE_VERSION, "--additional-urls", target.index], { stdio: "inherit" });'
 
       - name: "🧪 Compile each ATmega2560 production profile without device access"
         run: |

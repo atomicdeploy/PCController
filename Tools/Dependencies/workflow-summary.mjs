@@ -4,6 +4,7 @@
 import { appendFileSync, existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { loadProjectEnv } from '../Build/env.mjs'
+import { renderFirmwareChecks } from './firmware-upgrades.mjs'
 
 loadProjectEnv()
 
@@ -21,13 +22,14 @@ const output = [
   '# 🔄 Dependency resolution', '',
   `**Status:** ${report.status === 'passed' ? '✅ passed' : '❌ failed'}`,
   `**Mode:** ${report.mode ?? 'unknown'}`,
-  `**Updates available:** ${report.updates_available ? 'yes' : 'no'}`,
+  `**Updates available:** ${report.updates_available ? 'yes' : report.status === 'passed' ? 'no' : 'unknown — resolution incomplete'}`,
   `**Updates applied:** ${report.updates_applied ? 'yes' : 'no'}`,
   report.error ? `**Error:** \`${String(report.error).slice(0, 2000)}\`` : '', '',
+  renderFirmwareChecks(report.firmware_checks),
   '## Stable dependency changes', '',
   '| Area | Dependency | Current | Resolved |',
   '|---|---|---|---|',
-  ...(rows.length ? rows : ['| — | No stable changes | — | — |']), '',
+  ...(rows.length ? rows : [`| — | ${report.status === 'passed' ? 'No stable changes' : 'Resolution incomplete'} | — | — |`]), '',
   '## Validation', '',
   '| Result | Gate | Evidence |',
   '|:---:|---|---|',
@@ -35,7 +37,7 @@ const output = [
   '## Observation-only canaries', '',
   `- CLI: \`${report.canary?.cli_release || 'none'}\``,
   `- Urboot: \`${report.canary?.bootloader_ref || 'none'}@${report.canary?.bootloader_commit || 'none'}\``, '',
-].filter((line) => line !== '').join('\n') + '\n'
+].filter((line, index, values) => line !== '' || values[index - 1] !== '').join('\n') + '\n'
 
 if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, output)
 else process.stdout.write(output)
