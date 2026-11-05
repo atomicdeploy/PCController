@@ -93,6 +93,9 @@ These are reproducible **offline previews**, rendered by the actual application 
 Regenerate with `node Tools/Build/update-readme-previews.mjs` on Windows; use `--tui-only` for terminal assets on other systems.
 <!-- controller-preview-gallery:end -->
 
+Use **Desktop widgets…** in the desktop/tray menu to show individual acrylic
+windows. See [desktop widgets, snapping and compact mode](docs/DESKTOP-WIDGETS.md).
+
 ## 🧭 System architecture
 
 ```mermaid

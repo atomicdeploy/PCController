@@ -56,7 +56,7 @@ func (s *Shell) controllerWidgetMinimum() walk.Size {
 	return walk.Size{Width: 320, Height: 290}
 }
 
-func (s *Shell) showControllerWidgetMenu(x, y int32) {
+func (s *Shell) controllerWidgetMenuItems() []traymenu.Item {
 	root := s.controllerRoot()
 	items := []traymenu.Item{}
 	add := func(id, label string, enabled bool) {
@@ -64,7 +64,8 @@ func (s *Shell) showControllerWidgetMenu(x, y int32) {
 		if w := root.controllerWidgets[id]; w != nil {
 			visible = w.mw.Visible()
 		}
-		items = append(items, traymenu.Item{ID: traymenu.ActionID(id), Label: label, Checked: visible, Disabled: !enabled})
+		// An already open chart remains hideable after telemetry disappears.
+		items = append(items, traymenu.Item{ID: traymenu.ActionID(id), Label: label, Checked: visible, Disabled: !enabled && !visible})
 	}
 	add("front-panel", "Front panel", true)
 	add("telemetry", "Live charts", root.controllerState.HavePower || root.controllerState.HaveTemperature || len(root.controllerHistory) > 0)
@@ -73,6 +74,12 @@ func (s *Shell) showControllerWidgetMenu(x, y int32) {
 		add("channel:"+ch.Key, ch.Name, true)
 	}
 	items = append(items, traymenu.Item{Separator: true}, traymenu.Item{ID: "snap", Label: "Magnetic window snapping", Checked: root.Config().UI.MagneticSnap})
+	return items
+}
+
+func (s *Shell) showControllerWidgetMenu(x, y int32) {
+	root := s.controllerRoot()
+	items := root.controllerWidgetMenuItems()
 	result, err := traymenu.ShowAtAnchor(root.controllerMenuOptions(items), traymenu.Rect{Left: x, Top: y, Right: x, Bottom: y})
 	if err != nil {
 		root.showError("Desktop widgets", err)
@@ -171,8 +178,17 @@ func (s *Shell) syncControllerWidgets() {
 	}
 	for _, child := range s.controllerWidgets {
 		child.controllerState, child.controllerBusy = s.controllerState, s.controllerBusy
+		if label := s.controllerWidgetLabel(child.controllerWidgetID); label != "" {
+			title := "PCController · " + label
+			if child.controller.Title != title {
+				child.controller.Title = title
+				_ = child.mw.SetTitle(title)
+			}
+		}
 		child.updateControllerSegments(s.controllerState)
-		child.surface.Invalidate()
+		if child.mw.Visible() {
+			child.surface.Invalidate()
+		}
 	}
 }
 

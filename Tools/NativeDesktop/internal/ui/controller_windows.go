@@ -85,6 +85,7 @@ func RunController(ctx context.Context, options presentation.Options) error {
 		cfg.UI.WindowBounds = config.WindowBounds{X: -1, Y: -1, Width: 900, Height: 640}
 		cfg.UI.TitleBarMode = config.TitleBarCustom
 		cfg.UI.Backdrop = config.BackdropAcrylic
+		cfg.UI.MagneticSnap = true
 	}
 	cfg.Hotkeys = config.HotkeysConfig{}
 	cfg.Automation.Enabled = false
@@ -113,6 +114,9 @@ func RunController(ctx context.Context, options presentation.Options) error {
 	}
 	defer shell.Close()
 	dispatcher.SetHooks(shell.Hooks())
+	// Restore saved standalone widgets even before the first host observation.
+	// Channel widgets are restored when their catalog entries arrive.
+	shell.mw.Starting().Attach(func() { shell.syncControllerWidgets() })
 	go func() {
 		for {
 			select {
@@ -262,6 +266,12 @@ func (s *Shell) activateControllerAction(action actionID) bool {
 	if s.controllerInline != nil && (action == actionSettings || action == actionChannels || action == actionChannelBack || action == actionChannelPrevious || action == actionChannelNext) {
 		s.controllerInline.input.SetFocus()
 		return true
+	}
+	if (action == actionSettings || action == actionChannels) && s.controllerWidgetID == "" && s.Config().UI.ViewMode == config.ViewCompact {
+		s.activateControllerPreference("compact")
+		if s.Config().UI.ViewMode == config.ViewCompact {
+			return true // Saving the expanded view failed; retain compact layout.
+		}
 	}
 	switch action {
 	case actionSettings:

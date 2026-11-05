@@ -3,8 +3,13 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 	"time"
+	"unsafe"
+
+	"github.com/lxn/walk"
+	"github.com/lxn/win"
 
 	"rayanlamp.local/app/internal/config"
 	"rayanlamp.local/app/internal/winfx"
@@ -127,5 +132,99 @@ func TestControllerWidgetWindowsLifecycle(t *testing.T) {
 	// Closing a widget must leave the other compositors alive.
 	if s.mw.BoundsPixels().Width < 340 {
 		t.Fatal("compact mode used the donor lamp's 176px geometry")
+	}
+	for _, action := range []actionID{actionSettings, actionChannels} {
+		if s.Config().UI.ViewMode != config.ViewCompact {
+			s.activateControllerPreference("compact")
+			pumpControllerFixture(s)
+		}
+		s.activateControllerAction(action)
+		pumpControllerFixture(s)
+		if s.Config().UI.ViewMode != config.ViewDashboard || s.mw.BoundsPixels().Width < 560 {
+			t.Fatal("full page remained in the compact front-panel window")
+		}
+	}
+}
+
+func TestControllerWidgetsRestoreAndFollowCatalog(t *testing.T) {
+	s, cfg := newControllerWindowFixture(t)
+	cfg.UI.ControllerWidgets = map[string]config.ControllerWidget{
+		"front-panel":   {Visible: true, Bounds: config.WindowBounds{X: 120, Y: 120, Width: 400, Height: 340}},
+		"telemetry":     {Visible: true, Bounds: config.WindowBounds{X: 530, Y: 120, Width: 400, Height: 440}},
+		"channel:pwm.0": {Visible: true, Bounds: config.WindowBounds{X: 120, Y: 470, Width: 400, Height: 300}},
+		"channel:pwm.1": {Visible: false},
+	}
+	s.cfg = cfg
+	if err := config.Save(s.configPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+	s.syncControllerWidgets()
+	pumpControllerFixture(s)
+	if len(s.controllerWidgets) != 2 {
+		t.Fatal("offline front-panel/chart windows did not restore before the channel catalog")
+	}
+	for _, item := range s.controllerWidgetMenuItems() {
+		if item.ID == "telemetry" && (!item.Checked || item.Disabled) {
+			t.Fatal("restored chart cannot be hidden without live telemetry")
+		}
+	}
+	s.controllerState.Channels = []presentation.Channel{
+		{Key: "pwm.0", Name: "Window", Kind: "mosfet"},
+		{Key: "pwm.1", Name: "Garden", Kind: "mosfet"},
+	}
+	s.syncControllerWidgets()
+	pumpControllerFixture(s)
+	w := s.controllerWidgets["channel:pwm.0"]
+	if w == nil || !w.mw.Visible() || s.controllerWidgets["channel:pwm.1"] != nil {
+		t.Fatal("catalog restoration lost saved visibility")
+	}
+	b := w.mw.BoundsPixels()
+	if b.X != 120 || b.Y != 470 || b.Width != 400 || b.Height != 300 {
+		t.Fatalf("saved widget placement changed: %+v", b)
+	}
+	s.controllerState.Channels[0].Name = "Window lights"
+	s.syncControllerWidgets()
+	if !strings.Contains(w.mw.Title(), "Window lights") {
+		t.Fatal("detached channel title did not follow rename")
+	}
+}
+
+func TestControllerWidgetNativeMoveSnapsAndPersists(t *testing.T) {
+	s, cfg := newControllerWindowFixture(t)
+	if controlModifierDown() {
+		t.Skip("Ctrl is held; native snapping is explicitly bypassed")
+	}
+	cfg.UI.MagneticSnap = true
+	s.cfg = cfg
+	if err := config.Save(s.configPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+	s.controllerState.Channels = []presentation.Channel{{Key: "pwm.0", Name: "Window", Kind: "mosfet"}}
+	for _, id := range []string{"front-panel", "channel:pwm.0"} {
+		if err := s.openControllerWidget(id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pumpControllerFixture(s)
+	peer, moving := s.controllerWidgets["front-panel"], s.controllerWidgets["channel:pwm.0"]
+	peer.mw.SetBoundsPixels(walk.Rectangle{X: 100, Y: 100, Width: 400, Height: 340})
+	win.SendMessage(moving.mw.Handle(), wmEnterSizeMove, 0, 0)
+	proposal := winfx.Rect{Left: 507, Top: 104, Right: 907, Bottom: 404}
+	if result := win.SendMessage(moving.mw.Handle(), wmMoving, 0, uintptr(unsafe.Pointer(&proposal))); result == 0 {
+		t.Fatal("WM_MOVING did not handle peer snapping")
+	}
+	if proposal.Left != 500 || proposal.Top != 100 {
+		t.Fatalf("native move did not align the widget grid: %+v", proposal)
+	}
+	moving.mw.SetBoundsPixels(walk.Rectangle{X: int(proposal.Left), Y: int(proposal.Top), Width: 400, Height: 300})
+	win.SendMessage(moving.mw.Handle(), wmExitSizeMove, 0, 0)
+	pumpControllerFixture(s)
+	loaded, err := config.Load(s.configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	placement := loaded.UI.ControllerWidgets["channel:pwm.0"]
+	if !placement.Visible || placement.Bounds.X != 500 || placement.Bounds.Y != 100 {
+		t.Fatalf("snapped placement not persisted: %+v", placement)
 	}
 }
