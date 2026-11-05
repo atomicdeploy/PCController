@@ -38,14 +38,14 @@ test("usage bars are green through 50, orange above 50, and red above 80", () =>
   );
 });
 
-function runSummary(directory, arguments_) {
+function runSummary(directory, arguments_, expectedStatus = 0) {
   const summary = resolve(directory, "summary.md");
   const result = spawnSync(process.execPath, [script, ...arguments_], {
     cwd: root,
     encoding: "utf8",
     env: { ...commonEnvironment, GITHUB_STEP_SUMMARY: summary },
   });
-  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.equal(result.status, expectedStatus, `${result.stdout}\n${result.stderr}`);
   return readFileSync(summary, "utf8");
 }
 
@@ -82,11 +82,14 @@ test("native summaries print target-correct checksum commands", () => {
       manifest,
       archive,
       "Windows-x64",
+      `${commonEnvironment.GITHUB_SERVER_URL}/${commonEnvironment.GITHUB_REPOSITORY}/actions/runs/123/artifacts/101`,
     ]);
     assert.match(windows, /~~~powershell[\s\S]*Get-FileHash/u);
     assert.doesNotMatch(windows, /sha256sum -c/u);
     assert.match(windows, /Embedded firmware default \| ✅ enabled/u);
     assert.match(windows, /Embedded EEPROM default \| ✅ enabled · 1,024 B/u);
+    assert.match(windows, /\| Download \| \[⬇️ Host · Windows-x64\]\(https:\/\/github.com\/example-org\/example-controller\/actions\/runs\/123\/artifacts\/101\) \|/u);
+    assert.doesNotMatch(windows, /Its SHA-256 is|GitHub artifact digest:/u);
 
     const binary = resolve(directory, "virtual_board");
     const simulatorArchive = resolve(
@@ -174,6 +177,20 @@ test("catalog presents AVR separately with live artifact links", () => {
       /actions\/runs\/123\/artifacts\/42/u,
     );
     assert.doesNotMatch(catalog, /AVR Firmware \| ✅ ATmega328P/u);
+    assert.match(catalog, /\| \*\*Windows x64\*\* \| \[⬇️ Download ZIP\]\([^\n]+\/artifacts\/102\)/u);
+    assert.match(catalog, /\| \*\*AVR ATmega328P\*\* \| — \| — \| \[⬇️ Download ZIP\]\([^\n]+\/artifacts\/42\)/u);
+    assert.ok(catalog.indexOf("## ⬇️ Download packages") < catalog.indexOf("## ⚡ AVR"));
+    assert.doesNotMatch(catalog, /five (?:hosts|targets)|\| Host \| ✅/iu);
+    writeFileSync(resolve(directory, "artifact-index.json"), JSON.stringify({artifacts: [
+      {id: 42, name: "PCController-Firmware-ATmega328P", expired: true},
+    ]}));
+    // The helper appends summaries, so clear only this test-owned fixture.
+    writeFileSync(resolve(directory, "summary.md"), "");
+    const unavailable = runSummary(directory, ["catalog", directory], 1);
+    assert.doesNotMatch(unavailable, /\/artifacts\/42/u);
+    assert.match(unavailable, /⚠️ Download unavailable/u);
+    assert.match(unavailable, /build incomplete/u);
+    assert.doesNotMatch(unavailable, /✅ Native Go tests/u);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

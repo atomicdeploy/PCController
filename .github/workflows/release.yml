@@ -70,7 +70,7 @@ jobs:
       version: ${{ inputs.tag || github.ref_name }}
 
   host:
-    name: "🖥️ Release Host · Five targets"
+    name: "🖥️ Release Host · Native packages"
     needs: [preflight, firmware]
     uses: ./.github/workflows/host.yml
     with:
@@ -78,7 +78,7 @@ jobs:
       firmware_artifact_name: ${{ needs.firmware.outputs.artifact_name }}
 
   virtual-board:
-    name: "🧪 Release Virtual Board · Five targets"
+    name: "🧪 Release Virtual Board · Native packages"
     needs: preflight
     uses: ./.github/workflows/virtual-board.yml
     with:

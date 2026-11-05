@@ -339,10 +339,8 @@ const renderArtifact = (artifact, state, context, expectedName) => {
   if (!state.available) {
     return `${state.label}<br>${code(artifact?.name || expectedName)}`;
   }
-  const name = markdownLink(artifact.name, artifactUrl(artifact, context));
-  const digest = String(artifact.digest || "").replace(/^sha256:/iu, "");
-  const integrity = digest ? ` · ${code(`sha256:${digest.slice(0, 12)}…`)}` : "";
-  return `${name}<br>${formatBytes(artifact.size_in_bytes)}${integrity}`;
+  const name = markdownLink("⬇️ Download ZIP", artifactUrl(artifact, context));
+  return `${name}<br>${code(artifact.name)} · ${formatBytes(artifact.size_in_bytes)}`;
 };
 
 const renderPackageCells = (evidence) => {
@@ -448,11 +446,7 @@ export function buildCodebaseSummary(codebase, jobsDocument, artifactsDocument, 
         context,
         `${definition.artifactPrefix}-${record.target.id}`,
       );
-      if (!packageMode) {
-        return `| **${record.target.id}** | ${record.target.runner} | ${jobResult} | ${packageResult} |`;
-      }
-      const packageCells = renderPackageCells(record.packageState);
-      return `| **${record.target.id}** | ${record.target.runner} | ${jobResult} | ${packageResult} | ${packageCells.archive} | ${packageCells.size} | ${packageCells.checksum} |`;
+      return `| **${record.target.id}** | ${record.target.runner} | ${jobResult} | ${packageResult} |`;
     })
     .join("\n");
   const validations = definition.sharedValidation.map((item) => `- ${item}`).join("\n");
@@ -465,10 +459,19 @@ export function buildCodebaseSummary(codebase, jobsDocument, artifactsDocument, 
   const packageCount = packageMode
     ? ` · ${verified}/${TARGETS.length} archives verified`
     : "";
-  const packageHeaders = packageMode
-    ? " | Archive | Archive size | Archive SHA-256"
-    : "";
-  const packageSeparators = packageMode ? "|---|---:|---" : "";
+  const packageDetails = packageMode ? `
+<details>
+<summary><strong>🔐 Archive integrity</strong></summary>
+
+| Target | Archive | Archive size | Archive SHA-256 |
+|---|---|---:|---|
+${records.map(record => {
+    const cells = renderPackageCells(record.packageState);
+    return `| ${record.target.id} | ${cells.archive} | ${cells.size} | ${cells.checksum} |`;
+  }).join("\n")}
+
+</details>
+` : "";
   const incompleteTargets = records
     .filter(
       (record) =>
@@ -482,15 +485,19 @@ export function buildCodebaseSummary(codebase, jobsDocument, artifactsDocument, 
 
 ${passed}/${TARGETS.length} targets passed · ${available}/${TARGETS.length} artifacts available${packageCount} · [workflow run](${context.runUrl})
 ${warning}
+## ⬇️ Downloads by platform
+
+Sign in to GitHub to download a ZIP, then extract the versioned archive and checksum inside it.
+
+| Target | Native runner | Build | Download |
+|---|---|---|---|
+${rows}
+
+${packageDetails}
+
 ## 🧪 Validation on successful targets
 
 ${validations}
-
-## 🌐 Platform differences
-
-| Target | Native runner | Build | Actions artifact${packageHeaders} |
-|---|---|---|---${packageSeparators}|
-${rows}
 
 ---
 

@@ -57,10 +57,29 @@ maintainer explicitly removes them.
 
 1. Open the current [Build workflow](https://github.com/atomicdeploy/PCController/actions/workflows/build.yml).
 2. Select a successful run for the exact commit you want.
-3. Download the firmware, Host, or Virtual Board artifact matching the
-   target.
-4. Keep the archive beside its `.sha256` sidecar.
+3. In the run's **Summary → Download packages** table, click
+   **⬇️ Download ZIP** at **Windows x64 / Host application** for Windows, or
+   **AVR ATmega328P / Firmware** for the board images. Other platform cells work
+   the same way. These are direct links to artifacts from that exact run, not
+   links back to the workflow list. GitHub requires you to sign in to download.
+4. Extract the downloaded ZIP. Keep the versioned archive beside its `.sha256`
+   sidecar. The firmware ZIP also exposes the individual HEX/EEPROM files.
 5. Verify before extracting.
+
+The catalog runs even when another target fails, retaining available links and
+marking missing packages without claiming the build passed. For older runs with
+no catalog, use **Host · Codebase summary**, the firmware job summary, or the
+run's **Artifacts** section. Missing or expired artifacts are not download links.
+
+### WebUI test report
+
+Every native host still runs the WebUI tests. Each produces a platform-labeled
+Vitest blob and retains failure annotations, with only its duplicate job summary
+disabled. The Host summary job uses Vitest's native `--merge-reports` to publish
+one **Vitest Test Report** and one downloadable **WebUI-Test-Report** JSON file.
+Platform labels remain distinct; missing runner reports fail the completeness
+check instead of being treated as passing tests. Raw `Vitest-Blob-*` artifacts
+remain available for diagnostics. No test suite is skipped or result rewritten.
 
 Linux:
 
@@ -202,7 +221,7 @@ build.cmd --all --clean --no-upx --version <semver>
 
 Build and test the Virtual Board with the CMake commands in its
 [maintained guide](../Tools/VirtualBoard/README.md); the flagship CI workflow
-runs the checked-in `release` preset independently on all five targets.
+runs the checked-in `release` preset independently on each supported target.
 
 The local build writes generated output only to canonical project locations:
 

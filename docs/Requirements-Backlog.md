@@ -166,6 +166,12 @@ boundary; the interactive tray is not misrepresented as part of the service.
 | `authorized-reusable-component-porting` | [#118](https://github.com/atomicdeploy/PCController/issues/118) | 🟡 open | Directly port all applicable generalized components from authorized sibling applications |
 | `canonical-cross-language-contracts` | [#125](https://github.com/atomicdeploy/PCController/issues/125) | 🟡 open | Generate protocol, settings, hardware, and capability definitions from canonical contracts |
 
+Artifact usability under #64 includes direct per-run Host/firmware download
+tables and expandable integrity details; see [CI/CD download instructions](CI-CD-and-Releases.md#download-an-engineering-build).
+The Host workflow retains native WebUI test coverage and consolidates its
+platform-labeled Vitest results. Live Actions-run acceptance remains pending
+until the workflow changes are merged and executed.
+
 ## [#12 — Documentation, licensing, GitHub, and final code quality](https://github.com/atomicdeploy/PCController/issues/12)
 
 3 open / 1 closed / 4 total

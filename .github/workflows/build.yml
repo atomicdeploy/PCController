@@ -29,7 +29,7 @@ jobs:
       version: ${{ inputs.version || format('0.0.0-ci.{0}', github.run_number) }}
 
   host:
-    name: "🖥️ Host · Five native targets"
+    name: "🖥️ Host · Native packages"
     needs: firmware
     uses: ./.github/workflows/host.yml
     with:
@@ -37,12 +37,13 @@ jobs:
       firmware_artifact_name: ${{ needs.firmware.outputs.artifact_name }}
 
   virtual-board:
-    name: "🧪 Virtual Board · Five native targets"
+    name: "🧪 Virtual Board · Native packages"
     uses: ./.github/workflows/virtual-board.yml
     with:
       version: ${{ inputs.version || format('0.0.0-ci.{0}', github.run_number) }}
 
   build:
+    if: ${{ always() }}
     needs: [firmware, host, virtual-board]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -66,6 +67,8 @@ jobs:
             > build-downloads/artifact-index.json
 
       - name: "⬇️ Download build artifacts"
+        if: ${{ always() }}
+        continue-on-error: true
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           pattern: PCController-*
@@ -80,4 +83,5 @@ jobs:
           find build-downloads -type f -name '*.tar.gz' -printf '%f\n' | sort
 
       - name: "✨ Publish build summary"
+        if: ${{ always() }}
         run: node .github/scripts/step-summary.mjs catalog build-downloads

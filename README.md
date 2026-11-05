@@ -348,14 +348,23 @@ commit has passed it.
 
 ## 📦 Downloads and releases
 
-Until a stable release exists, use the artifacts from the current
-[Build workflow](https://github.com/atomicdeploy/PCController/actions/workflows/build.yml)
-or build from source. The repository publishes one clearly named artifact per
-deliverable and host target:
+Until a stable release exists, open [📦 Build runs](https://github.com/atomicdeploy/PCController/actions/workflows/build.yml),
+select the successful run for your desired commit, then use its **⬇️ Download
+packages** table. Every platform cell links directly to that run's artifact ZIP.
+Sign in to GitHub to download; these are engineering builds, not stable releases.
 
-- `PCController-Firmware-ATmega328P`
-- `PCController-Host-<platform>`
-- `PCController-VirtualBoard-<platform>`
+| Download | Where to click in the selected run | Artifact |
+|---|---|---|
+| [🪟 Windows host](https://github.com/atomicdeploy/PCController/actions/workflows/build.yml) | **Windows x64 → Host application → ⬇️ Download ZIP** | `PCController-Host-Windows-x64` |
+| [⚡ AVR firmware](https://github.com/atomicdeploy/PCController/actions/workflows/build.yml) | **AVR ATmega328P → Firmware → ⬇️ Download ZIP** | `PCController-Firmware-ATmega328P` |
+| [🖥️ Linux / macOS host](https://github.com/atomicdeploy/PCController/actions/workflows/build.yml) | Your platform's **Host application** cell | `PCController-Host-<platform>` |
+| [🧪 Virtual Board](https://github.com/atomicdeploy/PCController/actions/workflows/build.yml) | Your platform's **Virtual Board** cell | `PCController-VirtualBoard-<platform>` |
+
+The links above open the run chooser, not a fixed old build. Failed runs still
+list available downloads and mark missing packages. For older runs without a
+catalog, use **Host · Codebase summary**, the firmware job's download table, or
+the run's **Artifacts** section.
+Extract the ZIP first; keep its versioned archive and `.sha256` file together.
 
 Release archives add the version and include SHA-256 metadata. Follow
 [CI/CD and Releases](docs/CI-CD-and-Releases.md) for verification and extraction.

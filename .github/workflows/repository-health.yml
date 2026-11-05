@@ -74,6 +74,7 @@ jobs:
           node --test .github/scripts/release-showcase.test.mjs
           node --test .github/scripts/security-config-check.test.mjs
           node --test .github/scripts/step-summary.test.mjs
+          node --test .github/scripts/verify-vitest-blobs.test.mjs
 
       - name: "✅ Validate every GitHub Actions workflow"
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
