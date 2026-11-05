@@ -75,6 +75,40 @@ func TestAvrdudeCLIBackendRejectsAdapter(t *testing.T) {
 	}
 }
 
+func TestExplicitAvrdudePathWinsForNormalizedAutoBackend(t *testing.T) {
+	for _, backend := range []string{"", "auto", "AUTO", " Auto "} {
+		t.Run(backend, func(t *testing.T) {
+			adapter, executable, configuration, err := resolveAvrdudeCommandTools(Options{
+				AvrdudeBackend: backend, Avrdude: "selected-avrdude", AvrdudeConf: "selected.conf",
+			})
+			if err != nil || adapter != "" || executable != "selected-avrdude" || configuration != "selected.conf" {
+				t.Fatalf("explicit CLI not retained: %q %q %q %v", adapter, executable, configuration, err)
+			}
+		})
+	}
+}
+
+func TestPackagedAvrdudeConfigurationUsesLoadedImage(t *testing.T) {
+	root := t.TempDir()
+	library := filepath.Join(root, "package", "controller.dll")
+	configuration := filepath.Join(filepath.Dir(library), "tools", "avrdude", "avrdude.conf")
+	if err := os.MkdirAll(filepath.Dir(configuration), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configuration, []byte("# matched package"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if got := packagedAvrdudeTool(library, "avrdude.conf"); got != configuration {
+		t.Fatalf("loaded library configuration = %q", got)
+	}
+	if got := packagedAvrdudeTool(filepath.Join(root, "embedder", "application.exe"), "avrdude.conf"); got != "" {
+		t.Fatalf("unrelated executable resolved configuration = %q", got)
+	}
+	if got := packagedAvrdudeTool("", "avrdude.conf"); got != "" {
+		t.Fatalf("failed image resolution must not search the working directory: %q", got)
+	}
+}
+
 func TestPackagedAvrdudeToolsPreferSubdirectoryWithLegacyFallback(t *testing.T) {
 	root := t.TempDir()
 	controller := filepath.Join(root, executableName("controller"))

@@ -14,6 +14,25 @@ import (
 	"testing"
 )
 
+func TestNativeAvrdudeResolvesOwningImage(t *testing.T) {
+	image := nativeAvrdudeModulePath()
+	if !filepath.IsAbs(image) {
+		t.Fatalf("native image path is not absolute: %q", image)
+	}
+	actual, err := os.Stat(image)
+	if err != nil {
+		t.Fatal(err)
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected, err := os.Stat(executable)
+	if err != nil || !os.SameFile(actual, expected) {
+		t.Fatalf("static test executable must own the bridge: %q != %q (%v)", image, executable, err)
+	}
+}
+
 func TestNativeAvrdudeRepeatedConfigurationAndCanceledWait(t *testing.T) {
 	configuration := filepath.Join(t.TempDir(), "avrdude.conf")
 	if err := os.WriteFile(configuration, []byte("# deliberately empty, no programmer can be opened\n"), 0600); err != nil {
