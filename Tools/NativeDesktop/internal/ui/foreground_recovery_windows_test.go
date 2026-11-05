@@ -44,12 +44,14 @@ func TestReleaseHiddenRenderResourcesDropsCPUSurfaces(t *testing.T) {
 	shell := &Shell{
 		foregroundRecovery: recovery,
 		glassFrame:         image.NewRGBA(image.Rect(0, 0, 11, 9)),
+		glassCache:         glassCompositionCache{background: image.NewRGBA(image.Rect(0, 0, 11, 9)), controls: make([]glassControlRaster, 2)},
 		hitSurface:         recovery.recovered,
 		presentedSurface:   recovery.recovered,
 	}
 	shell.releaseHiddenRenderResources()
 	if shell.foregroundRecovery != nil ||
 		shell.glassFrame != nil ||
+		shell.glassCache.background != nil || len(shell.glassCache.controls) != 0 ||
 		shell.hitSurface != nil ||
 		shell.presentedSurface != nil {
 		t.Fatal("hidden shell retained a render surface")

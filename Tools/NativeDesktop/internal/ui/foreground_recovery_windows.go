@@ -135,6 +135,7 @@ func (s *Shell) releaseHiddenRenderResources() {
 	s.closeDirectXPresenter()
 	s.disposeForegroundRecovery()
 	s.glassFrame = nil
+	s.glassCache = glassCompositionCache{}
 	s.hitSurface = nil
 	s.presentedSurface = nil
 }

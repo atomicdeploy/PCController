@@ -1,5 +1,41 @@
 # Native desktop: acrylic regression checkpoint
 
+## Glass hover frame budget
+
+The former compositor rebuilt the full software glass canvas, static cards and
+every button's material/shadow on each hover tick. A 640x720 fixture with eight
+buttons took 41.56 ms per frame before foreground recovery and presentation.
+The visual clock also discarded elapsed time above 50 ms, stretching a 140 ms
+transition whenever painting delayed the message queue.
+
+The compositor now retains the current static background and one current
+body/shadow raster per control. Only changed material keys rerasterize. Keys own
+palette values and include geometry, hover, press and pending phase; pointer
+coordinates do not invalidate idle siblings. Layout/mask changes invalidate
+affected shadow caches. Hiding the window or leaving glass mode releases the
+cache. Live text, segments and other foreground content remain outside it.
+The animation clock consumes actual elapsed time, and the existing idle timer
+shutdown and reduced-motion behavior remain intact.
+
+Validation uses the stable Windows runner:
+
+```powershell
+node Tools/Build/go-tests.mjs --module Tools/NativeDesktop --package internal/ui
+```
+
+`TestGlassHoverFrameTiming` reports compositor timing without a brittle
+machine-speed assertion. Cache tests cover light/dark/high-contrast palettes,
+live foreground changes, resizing, pointer/press state, masked adjacent shadows,
+clipped controls and hidden-resource release. A reference comparison retains the
+original layered material with only bounded 8-bit alpha rounding differences.
+
+For an interactive desktop, set `RAYANLAMP_WINDOW_TESTS=1` and run
+`TestControllerGlassHoverPresentation` through the same stable runner. It owns
+an offline native window, loads the product's Common Controls manifest, and
+measures full paint plus presentation submission in both DirectX and compatibility
+modes. It never starts a board core or injects mouse/keyboard input. These timings
+are not monitor scanout FPS or remote-machine/hardware acceptance.
+
 ## Cause and repair
 
 The controller integration replaced the donor's combined composition stack with

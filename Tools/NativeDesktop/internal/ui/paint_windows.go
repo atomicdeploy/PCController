@@ -306,6 +306,7 @@ func (s *Shell) paint(windowCanvas *walk.Canvas, _ walk.Rectangle) error {
 		s.hitSurface = nil
 		s.presentedSurface = nil
 		s.glassFrame = nil
+		s.glassCache = glassCompositionCache{}
 		s.disposeForegroundRecovery()
 		return s.paintForeground(windowCanvas, bounds)
 	}
@@ -354,6 +355,7 @@ func (s *Shell) paint(windowCanvas *walk.Canvas, _ walk.Rectangle) error {
 		foreground = s.composeGlassControls(foreground)
 	} else {
 		s.glassFrame = nil
+		s.glassCache = glassCompositionCache{}
 	}
 	if err := s.compositeSurfaceTextRuns(foreground, textRuns); err != nil {
 		return err
@@ -543,17 +545,10 @@ func (s *Shell) composeGlassControls(foreground *image.RGBA) *image.RGBA {
 	}
 	if s.glassFrame == nil || s.glassFrame.Bounds() != foreground.Bounds() {
 		s.glassFrame = image.NewRGBA(foreground.Bounds())
-	} else {
-		clear(s.glassFrame.Pix)
 	}
 	glass := s.glassFrame
-	type controlLayer struct {
-		rect    walk.Rectangle
-		radius  float64
-		style   glassStyle
-		pending bool
-	}
-	controls := make([]controlLayer, 0, 7)
+	controls := make([]glassControlLayer, 0, 7)
+	panels := make([]glassControlLayer, 0, 4)
 	var customPalette *palette
 	if s.controller != nil {
 		p := controllerPalette(s.dark)
@@ -565,10 +560,10 @@ func (s *Shell) composeGlassControls(foreground *image.RGBA) *image.RGBA {
 		// a little material transmission without a grey/cyan backdrop wash.
 		canvasPalette := p
 		canvasPalette.panel = p.backgroundTop
-		drawGlassRoundedBody(glass, walk.Rectangle{Width: foreground.Bounds().Dx(), Height: foreground.Bounds().Dy()}, 0, glassStyle{Palette: &canvasPalette, Dark: s.dark, Panel: true, Alpha: 72})
+		panels = append(panels, glassControlLayer{rect: walk.Rectangle{Width: foreground.Bounds().Dx(), Height: foreground.Bounds().Dy()}, style: glassStyle{Palette: &canvasPalette, Dark: s.dark, Panel: true, Alpha: 72}})
 	}
 	for _, card := range s.layout.controllerCards {
-		drawGlassRoundedBody(glass, card, 18, glassStyle{Palette: customPalette, Dark: s.dark, Panel: true, Alpha: 180, BorderAlpha: 48})
+		panels = append(panels, glassControlLayer{rect: card, radius: 18, style: glassStyle{Palette: customPalette, Dark: s.dark, Panel: true, Alpha: 180, BorderAlpha: 48}})
 	}
 	for _, button := range s.layout.controllerButtons {
 		buttonPalette := customPalette
@@ -577,30 +572,20 @@ func (s *Shell) composeGlassControls(foreground *image.RGBA) *image.RGBA {
 			p.accent = button.tint
 			buttonPalette = &p
 		}
-		controls = append(controls, controlLayer{rect: button.rect, radius: 10,
+		controls = append(controls, glassControlLayer{rect: button.rect, radius: 10,
 			style: glassStyle{Palette: buttonPalette, Dark: s.dark, Primary: button.active, Hover: s.hoverProgress(button.action), Pressed: s.pressProgress(button.action), RevealX: float64(s.visualPointer.X), RevealY: float64(s.visualPointer.Y), Alpha: 150, BorderAlpha: 72, Elevation: 4}})
 	}
 	if s.controller == nil && s.layout.titleDrag.Width > 0 && s.layout.titleDrag.Height > 0 {
-		drawGlassRoundedBody(
-			glass,
-			s.layout.titleDrag,
-			12,
-			glassStyle{
-				Dark: s.dark, Panel: true,
-				Alpha: 22, BorderAlpha: 38,
-			},
-		)
+		panels = append(panels, glassControlLayer{rect: s.layout.titleDrag, radius: 12, style: glassStyle{
+			Dark: s.dark, Panel: true,
+			Alpha: 22, BorderAlpha: 38,
+		}})
 	}
 	if s.controller == nil && s.Config().UI.ViewMode == config.ViewDashboard {
-		drawGlassRoundedBody(
-			glass,
-			s.layout.card,
-			20,
-			glassStyle{
-				Dark: s.dark, Panel: true,
-				Alpha: 30, BorderAlpha: 56,
-			},
-		)
+		panels = append(panels, glassControlLayer{rect: s.layout.card, radius: 20, style: glassStyle{
+			Dark: s.dark, Panel: true,
+			Alpha: 30, BorderAlpha: 56,
+		}})
 		for _, control := range []struct {
 			rect    walk.Rectangle
 			action  actionID
@@ -618,7 +603,7 @@ func (s *Shell) composeGlassControls(foreground *image.RGBA) *image.RGBA {
 			}
 			controls = append(
 				controls,
-				controlLayer{
+				glassControlLayer{
 					rect: control.rect, radius: 14,
 					pending: control.pending,
 					style: glassStyle{
@@ -648,22 +633,14 @@ func (s *Shell) composeGlassControls(foreground *image.RGBA) *image.RGBA {
 			Rect: control.rect, Radius: control.radius,
 		})
 	}
-	for _, control := range controls {
-		drawGlassRoundedShadowMasked(
-			glass,
-			control.rect,
-			control.radius,
-			control.style,
-			masks,
-		)
+	s.glassCache.prepare(glass.Bounds(), panels, controls, masks)
+	copy(glass.Pix, s.glassCache.background.Pix)
+	for _, raster := range s.glassCache.controls {
+		draw.Draw(glass, raster.shadow.Bounds(), raster.shadow, raster.shadow.Bounds().Min, draw.Over)
 	}
-	for _, control := range controls {
-		drawGlassRoundedBody(
-			glass,
-			control.rect,
-			control.radius,
-			control.style,
-		)
+	for i, control := range controls {
+		raster := s.glassCache.controls[i]
+		draw.Draw(glass, raster.body.Bounds(), raster.body, raster.body.Bounds().Min, draw.Over)
 		if control.pending {
 			drawFluentSpinner(
 				glass,
