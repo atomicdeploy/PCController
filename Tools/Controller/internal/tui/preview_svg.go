@@ -21,7 +21,8 @@ func PreviewSVG(frame string) string {
 		width = max(width, ansi.StringWidth(line))
 	}
 	var out strings.Builder
-	fmt.Fprintf(&out, `<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" viewBox="0 0 %d %d" role="img" aria-label="PCController terminal interface preview"><rect width="100%%" height="100%%" rx="12" fill="#121116"/><g font-family="Cascadia Mono,Consolas,DejaVu Sans Mono,monospace" font-size="14" xml:space="preserve">`, width*9+32, len(lines)*20+32, width*9+32, len(lines)*20+32)
+	// Keep terminal spacing explicit, including in SVG2 browsers.
+	fmt.Fprintf(&out, `<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" viewBox="0 0 %d %d" role="img" aria-label="PCController terminal interface preview"><rect width="100%%" height="100%%" rx="12" fill="#121116"/><g font-family="Cascadia Mono,Consolas,DejaVu Sans Mono,monospace" font-size="14" style="white-space:pre" xml:space="preserve">`, width*9+32, len(lines)*20+32, width*9+32, len(lines)*20+32)
 	fg, bg, bold, inverse := "#f5f2f7", "", false, false
 	for row, line := range lines {
 		x, offset := 16, 0
@@ -45,7 +46,14 @@ func PreviewSVG(frame string) string {
 			if bold {
 				weight = "bold"
 			}
-			fmt.Fprintf(&out, `<text x="%d" y="%d" fill="%s" font-weight="%s" textLength="%d" lengthAdjust="spacingAndGlyphs">%s</text>`, x, 31+row*20, ink, weight, pixels, html.EscapeString(text))
+			// Browsers exclude trailing whitespace from textLength, even with
+			// white-space:pre. Advance the complete terminal span ourselves and
+			// fit only its visible content; NBSP preserves interior cell padding.
+			visible := strings.Trim(text, " ")
+			if visible != "" {
+				leading := len(text) - len(strings.TrimLeft(text, " "))
+				fmt.Fprintf(&out, `<text x="%d" y="%d" fill="%s" font-weight="%s" textLength="%d" lengthAdjust="spacingAndGlyphs">%s</text>`, x+leading*9, 31+row*20, ink, weight, ansi.StringWidth(visible)*9, html.EscapeString(strings.ReplaceAll(visible, " ", "\u00a0")))
+			}
 			x += pixels
 		}
 		for _, match := range previewSGR.FindAllStringSubmatchIndex(line, -1) {

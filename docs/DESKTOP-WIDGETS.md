@@ -30,6 +30,10 @@ Opening a widget does not create another board connection. Charts use bounded
 in-memory samples and retain their last values with an Offline label when the
 connection is lost.
 
+Chart strokes use subpixel vector antialiasing, rounded joins and DPI-scaled
+widths. Missing samples break the line. Raster images are reused between data
+updates and released when a widget is hidden.
+
 The [README gallery](../README.md) shows
 offline sample renders. Regenerate it using
 `node Tools/Build/update-readme-previews.mjs` on Windows.

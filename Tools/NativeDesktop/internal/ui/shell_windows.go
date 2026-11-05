@@ -110,6 +110,7 @@ type Shell struct {
 	controllerOwner             *Shell
 	controllerWidgetID          string
 	controllerWidgets           map[string]*Shell
+	controllerChartRasters      map[int]*controllerChartRaster
 	controllerHistory           []controllerTelemetryPoint
 	controller                  *presentation.Options
 	controllerState             presentation.Snapshot
@@ -500,6 +501,7 @@ func (s *Shell) Close() {
 		s.appIcon = nil
 	}
 	s.closeControllerInline()
+	s.disposeControllerChartRasters()
 	for _, font := range s.controllerIconFonts {
 		font.Dispose()
 	}

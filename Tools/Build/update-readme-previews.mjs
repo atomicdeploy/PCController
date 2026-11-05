@@ -42,7 +42,25 @@ if (!args.has('--tui-only')) {
   })
 }
 const start = '<!-- controller-preview-gallery:start -->', end = '<!-- controller-preview-gallery:end -->'
-const gallery = `${start}\n## 🖥️ Desktop and terminal interfaces\n\nThese are reproducible **offline previews**, rendered by the actual application UI. They do not certify a live board connection.\n\n| Acrylic desktop | Channel cards |\n| --- | --- |\n| ![PCController desktop](docs/assets/screenshots/gui-dashboard.png) | ![Hardware channels](docs/assets/screenshots/gui-channels.png) |\n\n| Compact front panel | Detachable card windows |\n| --- | --- |\n| ![Compact front panel](docs/assets/screenshots/gui-compact.png) | ![Independent acrylic widgets](docs/assets/screenshots/gui-widgets.png) |\n\n![PCController TUI dashboard](docs/assets/screenshots/tui-dashboard.svg)\n\nRegenerate with \`node Tools/Build/update-readme-previews.mjs\` on Windows; use \`--tui-only\` for terminal assets on other systems.\n${end}`
+const gallery = `${start}
+## 🖥️ Desktop and terminal interfaces
+
+These are reproducible **offline previews**, rendered by the actual application UI. They do not certify a live board connection.
+
+| Acrylic desktop | Channel cards |
+| --- | --- |
+| ![PCController desktop](docs/assets/screenshots/gui-dashboard.png) | ![Hardware channels](docs/assets/screenshots/gui-channels.png) |
+
+| Compact front panel | Detachable card windows |
+| --- | --- |
+| ![Compact front panel](docs/assets/screenshots/gui-compact.png) | ![Independent acrylic widgets](docs/assets/screenshots/gui-widgets.png) |
+
+| TUI dashboard | TUI Control page |
+| --- | --- |
+| ![PCController TUI dashboard](docs/assets/screenshots/tui-dashboard.svg) | ![PCController TUI Control page](docs/assets/screenshots/tui-controls.svg) |
+
+Regenerate on Windows with \`screenshots.cmd\`, or \`node Tools/Build/update-readme-previews.mjs\`. On other systems use \`bash screenshots.sh --tui-only\` for terminal assets.
+${end}`
 const readmePath = join(root, 'README.md')
 const readme = readFileSync(readmePath, 'utf8')
 const a = readme.indexOf(start), b = readme.indexOf(end)

@@ -17,7 +17,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "environment:", err)
 		os.Exit(1)
 	}
-	pageName := flag.String("page", "dashboard", "dashboard, controls, menus, board, app, rf, program, automate, events, or console")
+	pageName := flag.String("page", "dashboard", "dashboard, controls, menus, board, app, rf, program, effects, events, or console")
 	width := flag.Int("width", 132, "render width")
 	height := flag.Int("height", 38, "render height")
 	frame := flag.Int("frame", 0, "animation frame for welcome preview")

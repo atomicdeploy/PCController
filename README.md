@@ -88,9 +88,11 @@ These are reproducible **offline previews**, rendered by the actual application 
 | --- | --- |
 | ![Compact front panel](docs/assets/screenshots/gui-compact.png) | ![Independent acrylic widgets](docs/assets/screenshots/gui-widgets.png) |
 
-![PCController TUI dashboard](docs/assets/screenshots/tui-dashboard.svg)
+| TUI dashboard | TUI Control page |
+| --- | --- |
+| ![PCController TUI dashboard](docs/assets/screenshots/tui-dashboard.svg) | ![PCController TUI Control page](docs/assets/screenshots/tui-controls.svg) |
 
-Regenerate with `node Tools/Build/update-readme-previews.mjs` on Windows; use `--tui-only` for terminal assets on other systems.
+Regenerate on Windows with `screenshots.cmd`, or `node Tools/Build/update-readme-previews.mjs`. On other systems use `bash screenshots.sh --tui-only` for terminal assets.
 <!-- controller-preview-gallery:end -->
 
 Use **Desktop widgets…** in the desktop/tray menu to show individual acrylic

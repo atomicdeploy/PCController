@@ -339,12 +339,7 @@ func (s *Shell) paintControllerCharts(c *walk.Canvas, b walk.Rectangle, p palett
 			hi += 0.5
 		}
 		plot := walk.Rectangle{X: r.X + 12, Y: r.Y + 36, Width: r.Width - 24, Height: max(8, r.Height-48)}
-		pen, err := walk.NewCosmeticPen(walk.PenSolid, m.color)
-		if err != nil {
-			continue
-		}
-		var previous walk.Point
-		have := false
+		points := make([]controllerChartPoint, 0, len(history))
 		span := last.at.Sub(history[0].at).Seconds()
 		if span <= 0 {
 			span = 1
@@ -352,18 +347,14 @@ func (s *Shell) paintControllerCharts(c *walk.Canvas, b walk.Rectangle, p palett
 		for _, point := range history {
 			v, ok := m.value(point)
 			if !ok {
-				have = false
+				points = append(points, controllerChartPoint{})
 				continue
 			}
-			next := walk.Point{X: plot.X + int(point.at.Sub(history[0].at).Seconds()/span*float64(plot.Width)), Y: plot.Y + plot.Height - int((v-lo)/(hi-lo)*float64(plot.Height))}
-			if have {
-				c.DrawLinePixels(pen, previous, next)
-			} else {
-				controllerFill(c, walk.Rectangle{X: next.X, Y: next.Y, Width: 2, Height: 2}, m.color, 1)
-			}
-			previous, have = next, true
+			points = append(points, controllerChartPoint{x: point.at.Sub(history[0].at).Seconds() / span, y: 1 - (v-lo)/(hi-lo), valid: true})
 		}
-		pen.Dispose()
+		if err := s.drawControllerChart(c, i, plot, m.color, points); err != nil {
+			return err
+		}
 	}
 	return nil
 }
