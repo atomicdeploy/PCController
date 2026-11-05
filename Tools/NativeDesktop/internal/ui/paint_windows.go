@@ -1451,6 +1451,9 @@ func (s *Shell) paintForeground(
 	if effectiveTitleBarMode(s.Config().UI) == config.TitleBarCustom &&
 		bounds.Height >= 96 {
 		titleHeight := 38
+		if s.controller != nil && s.Config().UI.ControllerChrome == "windows" {
+			titleHeight = 32
+		}
 		s.paintTitleBar(canvas, bounds, titleHeight, colors)
 		content.Y += titleHeight
 		content.Height -= titleHeight

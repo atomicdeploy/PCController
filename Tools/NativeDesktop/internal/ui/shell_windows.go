@@ -107,26 +107,32 @@ type audioJob struct {
 }
 
 type Shell struct {
-	controller               *presentation.Options
-	controllerState          presentation.Snapshot
-	controllerBusy           bool
-	controllerIconFonts      map[int]*walk.Font
-	controllerChannels       bool
-	controllerPreferences    bool
-	controllerPage           int
-	controllerActionIDs      map[actionID]string
-	controllerChannelHits    []controllerChannelHit
-	controllerGesture        controllerChannelGesture
-	controllerPendingPWM     controllerChannelGesture
-	controllerTrayStatus     string
-	controllerMinimumHeight  int
-	controllerSegmentLevels  [4][8]float64
-	controllerSegmentTargets [4][8]float64
-	controllerSegmentsReady  bool
-	core                     *appcore.Core
-	dispatcher               *commands.Dispatcher
-	configPath               string
-	log                      Logger
+	controllerOwner             *Shell
+	controllerWidgetID          string
+	controllerWidgets           map[string]*Shell
+	controllerHistory           []controllerTelemetryPoint
+	controller                  *presentation.Options
+	controllerState             presentation.Snapshot
+	controllerBusy              bool
+	controllerIconFonts         map[int]*walk.Font
+	controllerChannels          bool
+	controllerPreferences       bool
+	controllerPage              int
+	controllerActionIDs         map[actionID]string
+	controllerChannelHits       []controllerChannelHit
+	controllerGesture           controllerChannelGesture
+	controllerGestureGeneration uint64
+	controllerInline            *controllerInlineEdit
+	controllerPendingPWM        controllerChannelGesture
+	controllerTrayStatus        string
+	controllerMinimumHeight     int
+	controllerSegmentLevels     [4][8]float64
+	controllerSegmentTargets    [4][8]float64
+	controllerSegmentsReady     bool
+	core                        *appcore.Core
+	dispatcher                  *commands.Dispatcher
+	configPath                  string
+	log                         Logger
 
 	mw                   *walk.MainWindow
 	surface              *walk.CustomWidget
@@ -485,6 +491,15 @@ func (s *Shell) Close() {
 		return
 	}
 	s.quitting.Store(true)
+	for _, widget := range s.controllerWidgets {
+		widget.Close()
+	}
+	s.controllerWidgets = nil
+	// Widget HWNDs borrow the root's immutable product icon.
+	if s.controllerOwner != nil {
+		s.appIcon = nil
+	}
+	s.closeControllerInline()
 	for _, font := range s.controllerIconFonts {
 		font.Dispose()
 	}
@@ -574,6 +589,7 @@ func (s *Shell) ApplyConfig(cfg config.Config) {
 			return
 		}
 		s.applyConfigUI(cfg, true)
+		s.syncControllerWidgetAppearance()
 	})
 }
 
@@ -615,6 +631,10 @@ func (s *Shell) Hide() {
 
 func (s *Shell) Quit() {
 	if s == nil || s.mw == nil {
+		return
+	}
+	if s.controllerOwner != nil {
+		s.Hide()
 		return
 	}
 	if !s.quitting.CompareAndSwap(false, true) {
@@ -745,11 +765,9 @@ func (s *Shell) createWindow() error {
 				return 0, true
 			case win.WM_CAPTURECHANGED:
 				s.deferPointerCaptureCancellation()
+				token := s.controllerGesture.token
 				s.mw.Synchronize(func() {
-					if s.controllerGesture.key != "" {
-						s.controllerGesture = controllerChannelGesture{}
-						s.surface.Invalidate()
-					}
+					s.cancelControllerGestureToken(token)
 				})
 			case win.WM_CANCELMODE:
 				s.cancelButtonActivation()
@@ -779,6 +797,12 @@ func (s *Shell) createWindow() error {
 	if s.controller != nil {
 		minimum.Width = 560
 		minimum.Height = 550
+		if s.cfg.UI.ViewMode == config.ViewCompact {
+			minimum = walk.Size{Width: 340, Height: 330}
+		}
+		if s.controllerWidgetID != "" {
+			minimum = s.controllerWidgetMinimum()
+		}
 	}
 	if err := mw.SetMinMaxSizePixels(minimum, maximum); err != nil {
 		return err
@@ -1543,6 +1567,12 @@ func (s *Shell) applyViewMode(ui config.UIConfig) error {
 	if s.controller != nil {
 		minimum.Width = 560
 		minimum.Height = 550
+		if ui.ViewMode == config.ViewCompact {
+			minimum = walk.Size{Width: 340, Height: 330}
+		}
+		if s.controllerWidgetID != "" {
+			minimum = s.controllerWidgetMinimum()
+		}
 	}
 	current := s.mw.BoundsPixels()
 	next := liveViewBounds(current, ui)
@@ -1995,6 +2025,7 @@ func (s *Shell) windowMessage(hwnd, message, wParam, lParam uintptr) (uintptr, b
 			dpi,
 			cfg.UI.MagneticSnapDistance,
 			controlDown,
+			s.controllerSnapNeighbours()...,
 		)
 		if handled {
 			uiCopyMemory.Call(
@@ -2579,10 +2610,26 @@ func (s *Shell) dragLampOrToggle() {
 
 func (s *Shell) onKeyDown(key walk.Key) {
 	if key == walk.KeyEscape {
+		if s.controllerInline != nil {
+			if !s.controllerBusy {
+				s.closeControllerInline()
+			}
+			return
+		}
+		if s.controllerGesture.key != "" {
+			s.cancelPointerActivation()
+			if s.surface != nil {
+				s.surface.Invalidate()
+			}
+			return
+		}
 		s.cancelButtonActivation()
 		if s.Config().UI.CloseToTray {
 			s.Hide()
 		}
+		return
+	}
+	if s.controllerInline != nil {
 		return
 	}
 	action := keyboardActivationAction(key)

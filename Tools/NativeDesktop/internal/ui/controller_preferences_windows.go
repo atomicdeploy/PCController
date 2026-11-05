@@ -38,7 +38,7 @@ func (s *Shell) paintControllerPreferences(c *walk.Canvas, b walk.Rectangle, p p
 	y += 108
 	row(y, "Controls & motion", "\uE713", []option{{"glass", "Raised glass", cfg.LayeredForeground}, {"flat", "Flat", !cfg.LayeredForeground}, {"motion", "Animations", cfg.Animations}})
 	y += 108
-	row(y, "Desktop", "\uE7F4", []option{{"acrylic", "Acrylic", cfg.Backdrop == config.BackdropAcrylic}, {"solid", "Solid", cfg.Backdrop == config.BackdropSolid}, {"pin", "Always on top", cfg.AlwaysOnTop}})
+	row(y, "Desktop", "\uE7F4", []option{{"acrylic", "Acrylic", cfg.Backdrop == config.BackdropAcrylic}, {"solid", "Solid", cfg.Backdrop == config.BackdropSolid}, {"pin", "Always on top", cfg.AlwaysOnTop}, {"compact", "Compact", cfg.ViewMode == config.ViewCompact}, {"native-menu", "Native menus", cfg.NativeMenus}})
 	y += 108
 	for i, item := range []option{{"host", "Host configuration", false}, {"console", "Console / TUI", s.controller.ConsoleVisible != nil && s.controller.ConsoleVisible()}} {
 		id := actionChannelFirst + actionID(len(s.controllerActionIDs))
@@ -60,6 +60,22 @@ func (s *Shell) activateControllerPreference(id string) {
 	}
 	cfg := s.Config()
 	switch {
+	case id == "compact":
+		if s.controllerInline != nil {
+			s.controllerInline.input.SetFocus()
+			return
+		}
+		if cfg.UI.ViewMode == config.ViewCompact {
+			cfg.UI.ViewMode = config.ViewDashboard
+			cfg.UI.WindowBounds.Width, cfg.UI.WindowBounds.Height = 900, 760
+		} else {
+			cfg.UI.ViewMode = config.ViewCompact
+			cfg.UI.WindowBounds.Width, cfg.UI.WindowBounds.Height = 400, 340
+		}
+		s.controllerPreferences, s.controllerChannels = false, false
+		s.controllerMinimumHeight = 0
+	case id == "native-menu":
+		cfg.UI.NativeMenus = !cfg.UI.NativeMenus
 	case strings.HasPrefix(id, "theme:"):
 		cfg.UI.Theme = strings.TrimPrefix(id, "theme:")
 	case strings.HasPrefix(id, "chrome:"):

@@ -5,6 +5,7 @@ package ui
 import (
 	"fmt"
 	"github.com/lxn/walk"
+	"rayanlamp.local/app/internal/config"
 	"strings"
 )
 
@@ -91,38 +92,47 @@ func (s *Shell) controllerCard(canvas *walk.Canvas, rect walk.Rectangle, colors 
 }
 
 func (s *Shell) paintController(canvas *walk.Canvas, bounds walk.Rectangle, colors palette) error {
+	if s.controllerWidgetID != "" && s.controllerWidgetID != "front-panel" {
+		return s.paintControllerWidget(canvas, bounds, colors)
+	}
 	s.controllerChannelHits = nil
 	state := s.controllerState
 	margin := 24
+	compact := s.Config().UI.ViewMode == config.ViewCompact && !s.controllerPreferences && !s.controllerChannels
+	if compact {
+		margin = 12
+	}
 	width := bounds.Width - margin*2
 	x, y := bounds.X+margin, bounds.Y+18
-	// Brand and lifecycle status occupy one aligned header; identity is not a
-	// repeated all-caps section title. Windows owns the title-bar controls.
-	if s.appIcon != nil {
-		_ = canvas.DrawImageStretchedPixels(s.appIcon, walk.Rectangle{X: x, Y: y + 4, Width: 36, Height: 36})
+	if !compact {
+		// Brand and lifecycle status occupy one aligned header; identity is not a
+		// repeated all-caps section title. Windows owns the title-bar controls.
+		if s.appIcon != nil {
+			_ = canvas.DrawImageStretchedPixels(s.appIcon, walk.Rectangle{X: x, Y: y + 4, Width: 36, Height: 36})
+		}
+		title := strings.TrimSuffix(s.controller.Title, " — Preview")
+		s.controllerText(canvas, title, s.titleFont, colors.text, walk.Rectangle{X: x + 48, Y: y, Width: width - 280, Height: 28}, false)
+		secondary := state.Endpoint
+		if strings.Contains(s.controller.Title, "Preview") {
+			secondary = "Design preview"
+		}
+		s.controllerText(canvas, secondary, s.captionFont, colors.secondary, walk.Rectangle{X: x + 48, Y: y + 27, Width: width - 280, Height: 20}, false)
+		status, color := "Offline", colors.secondary
+		if state.Connected {
+			status, color = "Connected", colors.success
+		}
+		pill := walk.Rectangle{X: x + width - 214, Y: y + 8, Width: 124, Height: 28}
+		s.controllerControl(canvas, pill, actionConnection, "", "", s.controller.LoadPage != nil, false, colors)
+		controllerFill(canvas, walk.Rectangle{X: pill.X + 10, Y: pill.Y + 11, Width: 6, Height: 6}, color, 3)
+		s.controllerText(canvas, status, s.captionFont, color, walk.Rectangle{X: pill.X + 23, Y: pill.Y, Width: 94, Height: pill.Height}, false)
+		s.controllerControl(canvas, walk.Rectangle{X: x + width - 36, Y: y + 4, Width: 36, Height: 36}, actionSettings, "\uE713", "", true, false, colors)
+		consoleVisible := s.controller.ConsoleVisible != nil && s.controller.ConsoleVisible()
+		s.controllerControl(canvas, walk.Rectangle{X: x + width - 78, Y: y + 4, Width: 36, Height: 36}, actionConsole, "\uE756", "", s.controller.ShowConsole != nil, consoleVisible, colors)
+		if s.controllerPreferences {
+			return s.paintControllerPreferences(canvas, walk.Rectangle{X: x, Y: y + 70, Width: width, Height: bounds.Height - 100}, colors)
+		}
+		y += 68
 	}
-	title := strings.TrimSuffix(s.controller.Title, " — Preview")
-	s.controllerText(canvas, title, s.titleFont, colors.text, walk.Rectangle{X: x + 48, Y: y, Width: width - 280, Height: 28}, false)
-	secondary := state.Endpoint
-	if strings.Contains(s.controller.Title, "Preview") {
-		secondary = "Design preview"
-	}
-	s.controllerText(canvas, secondary, s.captionFont, colors.secondary, walk.Rectangle{X: x + 48, Y: y + 27, Width: width - 280, Height: 20}, false)
-	status, color := "Offline", colors.secondary
-	if state.Connected {
-		status, color = "Connected", colors.success
-	}
-	pill := walk.Rectangle{X: x + width - 214, Y: y + 8, Width: 124, Height: 28}
-	s.controllerControl(canvas, pill, actionConnection, "", "", s.controller.LoadPage != nil, false, colors)
-	controllerFill(canvas, walk.Rectangle{X: pill.X + 10, Y: pill.Y + 11, Width: 6, Height: 6}, color, 3)
-	s.controllerText(canvas, status, s.captionFont, color, walk.Rectangle{X: pill.X + 23, Y: pill.Y, Width: 94, Height: pill.Height}, false)
-	s.controllerControl(canvas, walk.Rectangle{X: x + width - 36, Y: y + 4, Width: 36, Height: 36}, actionSettings, "\uE713", "", true, false, colors)
-	consoleVisible := s.controller.ConsoleVisible != nil && s.controller.ConsoleVisible()
-	s.controllerControl(canvas, walk.Rectangle{X: x + width - 78, Y: y + 4, Width: 36, Height: 36}, actionConsole, "\uE756", "", s.controller.ShowConsole != nil, consoleVisible, colors)
-	if s.controllerPreferences {
-		return s.paintControllerPreferences(canvas, walk.Rectangle{X: x, Y: y + 70, Width: width, Height: bounds.Height - 100}, colors)
-	}
-	y += 68
 	if s.controllerChannels {
 		return s.paintControllerChannels(canvas, walk.Rectangle{X: x, Y: y, Width: width, Height: bounds.Height - (y - bounds.Y) - 24}, colors)
 	}
@@ -130,7 +140,7 @@ func (s *Shell) paintController(canvas *walk.Canvas, bounds walk.Rectangle, colo
 	// A real front-panel instrument: neutral enclosure, independently red LED
 	// segments, equal physical keys, and quieter labels beneath each key.
 	fullWidth, panelY := width, y
-	wide := width >= 700
+	wide := width >= 700 && !compact
 	if wide {
 		width = (fullWidth - 16) * 3 / 5
 	}
@@ -163,6 +173,9 @@ func (s *Shell) paintController(canvas *walk.Canvas, bounds walk.Rectangle, colo
 		enabled := state.Connected && state.CanNavigate && !s.controllerBusy && !state.Busy
 		s.controllerControl(canvas, key, actionKey1+actionID(i), glyphs[i], "", enabled, state.PressedKeys&(1<<uint(i)) != 0, colors)
 		s.controllerText(canvas, label, s.captionFont, colors.secondary, walk.Rectangle{X: center - cell/2, Y: y + 240, Width: cell, Height: 20}, true)
+	}
+	if compact {
+		return nil
 	}
 	y += panelHeight + 16
 	if wide {

@@ -254,6 +254,10 @@ func (s *Shell) persistWindowPlacement() {
 	if s == nil {
 		return
 	}
+	if s.controllerOwner != nil {
+		s.persistControllerWidget()
+		return
+	}
 	bounds, visible, state := s.rememberedWindowSession()
 	if s.configPath == "" {
 		return

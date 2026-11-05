@@ -160,18 +160,20 @@ type LampConfig struct {
 }
 
 type UIConfig struct {
-	ViewMode          string       `json:"view_mode"`
-	Theme             string       `json:"theme"`
-	Locale            string       `json:"locale"`
-	Backdrop          string       `json:"backdrop"`
-	RenderBackend     string       `json:"render_backend"`
-	RoundedCorners    bool         `json:"rounded_corners"`
-	LayeredForeground bool         `json:"layered_foreground"`
-	TitleBarMode      string       `json:"title_bar_mode"`
-	ControllerChrome  string       `json:"controller_chrome,omitempty"`
-	BorderMode        string       `json:"border_mode"`
-	SettingsTab       int          `json:"settings_tab"`
-	SettingsBounds    WindowBounds `json:"settings_bounds"`
+	ControllerWidgets map[string]ControllerWidget `json:"controller_widgets,omitempty"`
+	ViewMode          string                      `json:"view_mode"`
+	Theme             string                      `json:"theme"`
+	Locale            string                      `json:"locale"`
+	Backdrop          string                      `json:"backdrop"`
+	RenderBackend     string                      `json:"render_backend"`
+	RoundedCorners    bool                        `json:"rounded_corners"`
+	LayeredForeground bool                        `json:"layered_foreground"`
+	TitleBarMode      string                      `json:"title_bar_mode"`
+	ControllerChrome  string                      `json:"controller_chrome,omitempty"`
+	NativeMenus       bool                        `json:"native_menus,omitempty"`
+	BorderMode        string                      `json:"border_mode"`
+	SettingsTab       int                         `json:"settings_tab"`
+	SettingsBounds    WindowBounds                `json:"settings_bounds"`
 	// ShowTitleBar is retained for configurations written before the
 	// none/custom/native title-bar selector was introduced. Normalize keeps
 	// it true only for the custom in-client title bar.
@@ -187,6 +189,11 @@ type UIConfig struct {
 	MagneticSnap         bool         `json:"magnetic_snap"`
 	MagneticSnapDistance int          `json:"magnetic_snap_distance"`
 	WindowBounds         WindowBounds `json:"window_bounds"`
+}
+
+type ControllerWidget struct {
+	Visible bool         `json:"visible"`
+	Bounds  WindowBounds `json:"bounds"`
 }
 
 // WindowBounds uses -1 for X or Y to request platform-default centering.

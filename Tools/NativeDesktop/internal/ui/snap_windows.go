@@ -50,6 +50,7 @@ func (s *magneticDragSession) Apply(
 	dpi uint32,
 	thresholdDIP int,
 	controlDown bool,
+	nearby ...winfx.Rect,
 ) (winfx.Rect, winfx.SnapResult, bool) {
 	if s == nil {
 		if controlDown {
@@ -58,7 +59,7 @@ func (s *magneticDragSession) Apply(
 		snapped, result := winfx.SnapRect(
 			target,
 			workArea,
-			nil,
+			nearby,
 			dpi,
 			thresholdDIP,
 		)
@@ -113,7 +114,7 @@ func (s *magneticDragSession) Apply(
 	candidate, candidateResult := winfx.SnapRect(
 		raw,
 		workArea,
-		nil,
+		nearby,
 		dpi,
 		thresholdDIP,
 	)

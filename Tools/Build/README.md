@@ -45,6 +45,29 @@ console icon.
 
 ## Common commands
 
+### README interface previews
+
+Run `node Tools/Build/update-readme-previews.mjs` on Windows from an interactive
+desktop session to regenerate the README gallery. It builds the real TUI preview
+and the isolated native GUI fixture, captures dashboard, channels, compact mode
+and detachable widgets, and replaces only the marked gallery in the root README.
+The PNG and SVG assets live in `docs/assets/screenshots/`.
+
+The GUI uses a temporary configuration and an owned gradient backdrop so acrylic
+does not capture private desktop content. The windows appear briefly during
+capture; no input is injected, no board or network session is opened, and no
+installed application is stopped. These are sample-data previews, not evidence of
+physical hardware operation. Go and Node are required; dependencies must already
+be available or downloadable by Go. The canonical stable-path Go runner is used
+for native capture.
+
+Use `node Tools/Build/update-readme-previews.mjs --tui-only` on any supported Go
+host to refresh just the terminal SVG assets without changing the README gallery.
+For an individual terminal page, `tui-preview --page controls --format svg`
+exports the actual ANSI layout and palette as a self-contained SVG.
+
+### Build and packaging
+
 ```console
 build.cmd --dry-run
 build.cmd --plan-json

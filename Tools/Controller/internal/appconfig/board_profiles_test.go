@@ -87,6 +87,29 @@ func TestProfileDescriptorsExposePersistentPresentationOrder(t *testing.T) {
 	}
 }
 
+func TestProfileActionPresentationOrder(t *testing.T) {
+	for _, mode := range []string{BoardModeUnconfigured, BoardModeOrdinaryRelays, BoardModeCinemaSeatMotion} {
+		for _, raw := range []bool{false, true} {
+			_, controls := ProfileDescriptors(mode, raw, nil, nil)
+			for _, control := range controls {
+				want := map[string][]string{
+					"relay":  {"on", "off"},
+					"mosfet": {"on", "off", "decrease", "increase", "toggle"},
+					"seat":   {"up", "down", "stop"},
+				}[control.Kind]
+				if len(control.Actions) != len(want) {
+					t.Fatalf("%s raw=%v %s: actions=%+v", mode, raw, control.Key, control.Actions)
+				}
+				for i, verb := range want {
+					if action := control.Actions[i]; action.Verb != verb || action.ID != control.Key+"."+verb {
+						t.Fatalf("%s raw=%v %s: action %d=%+v, want %s", mode, raw, control.Key, i, action, verb)
+					}
+				}
+			}
+		}
+	}
+}
+
 func TestBoardProfileValidationAndRevision(t *testing.T) {
 	config := Defaults()
 	config.BoardProfiles = map[string]BoardProfile{

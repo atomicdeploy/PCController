@@ -4,6 +4,7 @@ package ui
 
 import (
 	"github.com/lxn/walk"
+	"github.com/lxn/win"
 	"rayanlamp.local/app/presentation"
 	"time"
 )
@@ -72,15 +73,42 @@ func (s *Shell) paintControllerChrome(canvas *walk.Canvas, bounds walk.Rectangle
 		}
 		return
 	}
-	s.layout.titleDrag = walk.Rectangle{X: bounds.X, Y: bounds.Y, Width: bounds.Width - 124, Height: height}
-	s.controllerText(canvas, s.controller.Title, s.captionFont, colors.secondary, walk.Rectangle{X: bounds.X + 18, Y: bounds.Y, Width: bounds.Width - 152, Height: height}, false)
-	for i, item := range []struct {
-		action actionID
-		glyph  string
-	}{{actionTitleMinimize, "\uE921"}, {actionTitleZoom, "\uE922"}, {actionTitleClose, "\uE8BB"}} {
-		rect := walk.Rectangle{X: bounds.X + bounds.Width - 120 + i*38, Y: bounds.Y + 3, Width: 32, Height: 32}
-		s.controllerControl(canvas, rect, item.action, item.glyph, "", true, false, colors)
-		switch item.action {
+	const width = 46
+	s.layout.titleDrag = walk.Rectangle{X: bounds.X, Y: bounds.Y, Width: bounds.Width - 3*width, Height: height}
+	s.controllerText(canvas, s.controller.Title, s.captionFont, colors.secondary, walk.Rectangle{X: bounds.X + 12, Y: bounds.Y, Width: bounds.Width - 3*width - 24, Height: height}, false)
+	for i, action := range []actionID{actionTitleMinimize, actionTitleZoom, actionTitleClose} {
+		rect := walk.Rectangle{X: bounds.X + bounds.Width - 3*width + i*width, Y: bounds.Y, Width: width, Height: height}
+		hover := s.hoverProgress(action)
+		ink := colors.text
+		if hover > 0 {
+			fill := blend(colors.panel, colors.panelHover, hover)
+			if action == actionTitleClose {
+				fill = blend(colors.panel, walk.RGB(196, 43, 28), hover)
+				ink = walk.RGB(255, 255, 255)
+			}
+			controllerFill(canvas, rect, fill, 0)
+		}
+		pen, err := walk.NewCosmeticPen(walk.PenSolid, ink)
+		if err == nil {
+			cx, cy := rect.X+rect.Width/2, rect.Y+rect.Height/2
+			switch action {
+			case actionTitleMinimize:
+				canvas.DrawLinePixels(pen, walk.Point{X: cx - 5, Y: cy}, walk.Point{X: cx + 5, Y: cy})
+			case actionTitleZoom:
+				if s.mw != nil && win.IsZoomed(s.mw.Handle()) {
+					canvas.DrawRectanglePixels(pen, walk.Rectangle{X: cx - 3, Y: cy - 5, Width: 8, Height: 8})
+					controllerFill(canvas, walk.Rectangle{X: cx - 5, Y: cy - 3, Width: 8, Height: 8}, colors.panel, 0)
+					canvas.DrawRectanglePixels(pen, walk.Rectangle{X: cx - 5, Y: cy - 3, Width: 8, Height: 8})
+				} else {
+					canvas.DrawRectanglePixels(pen, walk.Rectangle{X: cx - 5, Y: cy - 5, Width: 10, Height: 10})
+				}
+			case actionTitleClose:
+				canvas.DrawLinePixels(pen, walk.Point{X: cx - 5, Y: cy - 5}, walk.Point{X: cx + 5, Y: cy + 5})
+				canvas.DrawLinePixels(pen, walk.Point{X: cx + 5, Y: cy - 5}, walk.Point{X: cx - 5, Y: cy + 5})
+			}
+			pen.Dispose()
+		}
+		switch action {
 		case actionTitleClose:
 			s.layout.titleClose = rect
 		case actionTitleZoom:

@@ -16,7 +16,7 @@ including dependencies, assets, tests, tools, documentation and recovery records
 - Parent integration commit: `3aed9ef6`.
 - The subtree tree object equals the donor tree object exactly. This verifies
   every pathname, file mode and blob, not merely file counts or ancestry.
-- Current working-copy result: **2,395 identical files, 30 adapted files, seven
+- Current working-copy result: **2,389 identical files, 36 adapted files, seven
   regenerated content-hashed Web bundles, one explicitly excluded font, zero
   missing source files**. Exact old/new generated bundle paths are audited; the
   original bytes remain in the immutable import. Git clean/EOL filters
@@ -65,7 +65,7 @@ unfinished integration work; neither counts as full PCController feature parity.
 | DirectX/DirectComposition, GDI fallback, device-loss and hidden-window resource handling | `internal/windx`, `internal/graphics`, `internal/ui` | Connected through the real donor shell; full lifecycle/soak acceptance still separate |
 | DWM/acrylic, Fluent controls, reveal/elevation, high contrast and reduced motion | `internal/winfx`, `internal/design`, `internal/ui/paint_windows.go` | Connected; acrylic regression repaired; not every native form uses the same material |
 | APNG, vector rendering, pixel-correct icons and bounded caches | `internal/animation`, `internal/vector`, `assets` | Source retained; shell uses donor drawing infrastructure; lamp artwork is not substituted for board controls |
-| Tray, styled popup, close-to-tray, always-on-top, snap and custom/native chrome | `internal/traymenu`, `internal/ui`, `internal/winfx` | Connected with PCController actions and added macOS-style chrome |
+| Tray, styled popup, close-to-tray, always-on-top, snap and custom/native chrome | `internal/traymenu`, `internal/ui`, `internal/winfx` | Connected; GUI consumes the original host tray model with custom/native renderer preference, plus macOS-style chrome |
 | Native settings, diagnostics and hotkey recorder dialogs | `internal/dialogs` | Partial: source retained in full; current PCController preferences/forms expose only a subset |
 | English/Persian, RTL, localization and native font selection | `internal/i18n`, localization files, `internal/winfx/persianfont_windows.go` | Partial: donor engine preserved and font replaced; new controller pages still contain English literals |
 | Macro hotkeys, conflict detection and Windows registration | `internal/ui`, `internal/dialogs/hotkey_recorder_windows.go`, `internal/winfx` | Retained; donor lamp hotkeys disabled in controller mode until board-action binding exists |
@@ -91,6 +91,24 @@ keys and faded seven-segment mirroring, observed hardware channels, PWM sliders,
 metadata editing/reordering, board connection, RF/program/buzzer/strip/display
 forms, firmware/backups and events. Those additions do not erase the retained
 donor implementation and do not close every integration gap listed above.
+
+### Desktop restoration and documentation previews
+
+Compact mode again preserves the saved view and renders only the front panel.
+Detachable front-panel, individual-channel and telemetry windows share the same
+host observation/command owner; each has its own compositor, saved placement and
+visibility. Magnetic snapping includes sibling windows. Native fixture checks
+cover show/hide, observation propagation, no duplicate tray, and sibling snapping.
+
+The original `Tools/Controller/internal/nativeshell/menu.go` remains the tray
+action owner: status; Dashboard, Controls, Workbench, Updates and Settings when
+connected; contextual connect/reconnect; and Exit. The GUI adds desktop-only
+actions without replacing that host list. Preferences can select the native
+Windows menu renderer instead of the styled menu.
+
+`node Tools/Build/update-readme-previews.mjs` regenerates the README gallery from
+actual GUI/TUI renderers with isolated sample data. These screenshots are not
+live-board, deployment or full donor-parity acceptance evidence.
 
 ## Completion rule
 

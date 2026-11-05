@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"testing"
 	"time"
 
@@ -21,12 +22,23 @@ import (
 
 // Opt-in, app-owned window: no input injection, transport, tray, or board core.
 // Reports CPU paint + presentation submission, not monitor scanout FPS.
-func TestControllerGlassHoverPresentation(t *testing.T) {
+func newControllerWindowFixture(t *testing.T) (*Shell, config.Config) {
+	t.Helper()
 	if os.Getenv("RAYANLAMP_WINDOW_TESTS") != "1" {
 		t.Skip("set RAYANLAMP_WINDOW_TESTS=1 for native window integration")
 	}
 	runtime.LockOSThread()
-	defer runtime.UnlockOSThread()
+	t.Cleanup(runtime.UnlockOSThread)
+	// Match the packaged PerMonitorV2 manifest without changing other threads.
+	dpiProc := windows.NewLazySystemDLL("user32.dll").NewProc("SetThreadDpiAwarenessContext")
+	if dpiProc.Find() == nil {
+		previous, _, _ := dpiProc.Call(^uintptr(3))
+		if previous != 0 {
+			t.Cleanup(func() { dpiProc.Call(previous) })
+		}
+	}
+	panicHandler := walk.App().Panicking().Attach(func(err error) { t.Errorf("native callback: %v\n%s", err, debug.Stack()) })
+	t.Cleanup(func() { walk.App().Panicking().Detach(panicHandler) })
 	// Stable-path test executables do not embed the product's PE manifest.
 	// Activate its Common Controls v6 dependency for this test's UI thread.
 	_, source, _, _ := runtime.Caller(0)
@@ -39,13 +51,15 @@ func TestControllerGlassHoverPresentation(t *testing.T) {
 		t.Fatal("create product manifest activation context")
 	}
 	kernel := windows.NewLazySystemDLL("kernel32.dll")
-	defer kernel.NewProc("ReleaseActCtx").Call(uintptr(activation))
+	t.Cleanup(func() { kernel.NewProc("ReleaseActCtx").Call(uintptr(activation)) })
 	cookie, ok := win.ActivateActCtx(activation)
 	if !ok {
 		t.Fatal("activate product manifest")
 	}
-	defer kernel.NewProc("DeactivateActCtx").Call(0, cookie)
+	t.Cleanup(func() { kernel.NewProc("DeactivateActCtx").Call(0, cookie) })
+	configureControllerTokens()
 	cfg := config.Default()
+	cfg.UI.ViewMode = config.ViewDashboard
 	cfg.Lamp.BaseURL = "http://127.0.0.1:1"
 	cfg.UI.Locale, cfg.UI.Theme = "en", "dark"
 	cfg.UI.ViewMode, cfg.UI.Backdrop = config.ViewDashboard, config.BackdropAcrylic
@@ -64,7 +78,7 @@ func TestControllerGlassHoverPresentation(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	t.Cleanup(cancel)
 	shell := &Shell{core: core, dispatcher: dispatcher, configPath: path,
 		controller:      &presentation.Options{Title: "PCController animation fixture"},
 		controllerState: presentation.Snapshot{Preview: true, HavePanel: true, Segments: [4]byte{0x3f, 0x06, 0x5b, 0x4f}, Brightness: 7},
@@ -74,10 +88,10 @@ func TestControllerGlassHoverPresentation(t *testing.T) {
 	if err := shell.createWindow(); err != nil {
 		t.Fatal(err)
 	}
-	defer shell.Close()
+	t.Cleanup(shell.Close)
 	// Test binaries lack the APP PE resource; use the source icon for this
 	// fixture without changing the packaged application's resource path.
-	icon, err := walk.NewIconFromFile(filepath.Join(filepath.Dir(source), "..", "..", "assets", "RayanLamp.ico"))
+	icon, err := walk.NewIconFromFile(filepath.Join(filepath.Dir(source), "..", "..", "..", "Controller", "winres", "icon.ico"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,6 +100,11 @@ func TestControllerGlassHoverPresentation(t *testing.T) {
 		t.Fatal(err)
 	}
 	shell.installEvents()
+	return shell, cfg
+}
+
+func TestControllerGlassHoverPresentation(t *testing.T) {
+	shell, cfg := newControllerWindowFixture(t)
 	for _, backend := range []string{"auto", "legacy"} {
 		cfg.UI.RenderBackend = backend
 		shell.cfgMu.Lock()

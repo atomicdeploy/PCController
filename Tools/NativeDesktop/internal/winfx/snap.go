@@ -88,8 +88,8 @@ func ScaledSnapThreshold(thresholdDIP int, dpi uint32) int32 {
 // SnapRect magnetically translates moving toward a monitor work area and
 // nearby window edges. It preserves size and chooses the smallest translation
 // independently on each axis. Nearby vertical edges are considered only when
-// the windows overlap vertically; nearby horizontal edges require horizontal
-// overlap. Work-area edges win equal-distance ties.
+// the windows overlap vertically or are within the snap distance; horizontal
+// edges use the same proximity rule. Work-area edges win equal-distance ties.
 //
 // This function performs a single stateless calculation. WM_MOVING callers
 // should use DragSnap.SnapMovingRect to get breakaway hysteresis.
@@ -163,7 +163,7 @@ func snapChoices(
 		if !other.Valid() || other == moving {
 			continue
 		}
-		if rangesOverlap(moving.Top, moving.Bottom, other.Top, other.Bottom) {
+		if rangesWithinSnapDistance(moving.Top, moving.Bottom, other.Top, other.Bottom, threshold) {
 			// Adjacent edges.
 			consider(
 				&x,
@@ -191,7 +191,7 @@ func snapChoices(
 				snapEdgeTrailing,
 			)
 		}
-		if rangesOverlap(moving.Left, moving.Right, other.Left, other.Right) {
+		if rangesWithinSnapDistance(moving.Left, moving.Right, other.Left, other.Right, threshold) {
 			consider(
 				&y,
 				int64(other.Top)-int64(moving.Bottom),
@@ -219,6 +219,12 @@ func snapChoices(
 		}
 	}
 	return x, y
+}
+
+// Adjacent widget windows must align on both axes in the same move. Requiring
+// literal overlap prevented top/left alignment while a small gap still existed.
+func rangesWithinSnapDistance(a0, a1, b0, b1 int32, threshold int64) bool {
+	return int64(a0) <= int64(b1)+threshold && int64(b0) <= int64(a1)+threshold
 }
 
 func applySnapChoices(moving Rect, x, y snapChoice) (Rect, SnapResult) {

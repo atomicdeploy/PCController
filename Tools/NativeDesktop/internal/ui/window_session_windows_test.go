@@ -3,6 +3,7 @@
 package ui
 
 import (
+	"reflect"
 	"testing"
 
 	"rayanlamp.local/app/internal/config"
@@ -118,7 +119,7 @@ func TestResolveStartupWindowAction(t *testing.T) {
 					test.want,
 				)
 			}
-			if test.ui != before {
+			if !reflect.DeepEqual(test.ui, before) {
 				t.Fatalf("resolver mutated remembered UI state: got %+v, want %+v",
 					test.ui, before)
 			}

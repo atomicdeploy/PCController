@@ -19,6 +19,7 @@ import (
 	"pccontroller.local/controller/internal/control"
 	"pccontroller.local/controller/internal/hostui"
 	"pccontroller.local/controller/internal/native"
+	"pccontroller.local/controller/internal/nativeshell"
 	"pccontroller.local/controller/internal/productidentity"
 	"rayanlamp.local/app/desktop"
 )
@@ -348,11 +349,50 @@ func runNativeGUI(args []string, stdout, stderr io.Writer, store *appconfig.Stor
 				return err
 			}
 			if page != "" {
-				page = map[string]string{"control": "controls", "rf": "device", "programs": "workbench", "firmware": "updates", "events": "events", "settings": "settings"}[page]
+				if alias, ok := map[string]string{"control": "controls", "rf": "device", "programs": "workbench", "firmware": "updates"}[page]; ok {
+					page = alias
+				}
 				target, err = webURLForAppAction(target, hostui.AppAction{Kind: "app.page", Value: page})
 				if err != nil {
 					return err
 				}
+			}
+			if *address == configured.Listen {
+				return openAuthenticatedBrowser(target, store)
+			}
+			return openBrowser(target)
+		},
+		InvokeHostMenu: func(actionCtx context.Context, id string) error {
+			if id == "exit" {
+				var reply any
+				return client.call(actionCtx, "controller.quit", nil, &reply)
+			}
+			if id == "reconnect" {
+				_, err := client.Execute(actionCtx, "reconnect")
+				return err
+			}
+			known := false
+			for _, command := range []nativeshell.Command{nativeshell.CommandDashboard, nativeshell.CommandControls, nativeshell.CommandWorkbench, nativeshell.CommandUpdates, nativeshell.CommandSettings} {
+				page, _ := nativeshell.PageForCommand(command)
+				known = known || id == page
+			}
+			if !known {
+				return fmt.Errorf("unknown host tray action %q", id)
+			}
+			current, err := client.Snapshot(actionCtx)
+			if err != nil {
+				return err
+			}
+			if !current.Connected {
+				return errors.New("controller disconnected before the page could open")
+			}
+			target, err := browserURL(*address)
+			if err != nil {
+				return err
+			}
+			target, err = nativeWebPageURL(target, id)
+			if err != nil {
+				return err
 			}
 			if *address == configured.Listen {
 				return openAuthenticatedBrowser(target, store)
@@ -368,6 +408,8 @@ func runNativeGUI(args []string, stdout, stderr io.Writer, store *appconfig.Stor
 
 func desktopSnapshot(state control.Snapshot, address string) desktop.Snapshot {
 	return desktop.Snapshot{
+		ObservedAt: state.StatusUpdated, Generation: state.ConnectionGeneration,
+		HostMenu:  desktopHostMenu(state),
 		Busy:      state.EmergencyStop.Active || state.Programming.Active || state.Programming.RestorationPending,
 		Connected: state.Connected, HavePanel: state.HaveFrontPanel || state.HaveFrontPanelSegments,
 		HaveStatus: state.HaveStatus, CanNavigate: state.Connected && state.Hello.Capabilities&native.CapabilityMenuRemote != 0,
@@ -377,6 +419,21 @@ func desktopSnapshot(state control.Snapshot, address string) desktop.Snapshot {
 		LCDLine1: state.FrontPanel.LCDLine1, LCDLine2: state.FrontPanel.LCDLine2, Mode: strconv.Itoa(int(state.FrontPanel.ProgramMode)), Endpoint: address,
 		SupplyMV: state.Status.SupplyMV, CurrentMA: state.Status.CurrentMA, TemperatureC: float64(state.Status.TLEDCenti) / 100,
 	}
+}
+
+func desktopHostMenu(state control.Snapshot) []desktop.MenuItem {
+	var items []desktop.MenuItem
+	for _, item := range nativeshell.BuildMenu(nativeshell.State{Connected: state.Connected, Paused: state.Paused, Port: state.Port.Name, ConnectionState: state.ConnectionState}) {
+		id, _ := nativeshell.PageForCommand(item.Command)
+		if item.Command == nativeshell.CommandReconnect {
+			id = "reconnect"
+		}
+		if item.Command == nativeshell.CommandExit {
+			id = "exit"
+		}
+		items = append(items, desktop.MenuItem{ID: id, Label: item.Label, Disabled: !item.Enabled, Separator: item.Kind == nativeshell.ItemSeparator, Default: item.Default})
+	}
+	return items
 }
 
 func mergeDesktopSnapshot(previous, next control.Snapshot) control.Snapshot {
