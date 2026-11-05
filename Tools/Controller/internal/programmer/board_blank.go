@@ -166,15 +166,13 @@ func BlankBoardWithRunner(
 	report.FlashBytes = ATmega328PFlashSize
 
 	fmt.Fprintln(output, "[6/6] Re-reading signature, fuses, and lock bits")
-	verify := withAvrdudeCLICompatibility(isp)
+	verify := isp
 	verify.Operation = OperationProbe
 	verifyCommand, err := Build(verify)
 	if err != nil {
 		return report, err
 	}
-	verifyCommand.Args = append(verifyCommand.Args,
-		"-Ulfuse:r:-:h", "-Uhfuse:r:-:h", "-Uefuse:r:-:h", "-Ulock:r:-:h",
-	)
+	verifyCommand = appendFuseEvidence(verifyCommand)
 	var postMetadata bytes.Buffer
 	if err := ispRunner.Run(ctx, verifyCommand, io.MultiWriter(output, &postMetadata)); err != nil {
 		return report, fmt.Errorf("verify target metadata after blanking: %w", err)

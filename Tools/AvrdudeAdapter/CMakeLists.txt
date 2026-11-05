@@ -13,6 +13,7 @@ project(PCControllerAvrdudeAdapter VERSION "${PCCONTROLLER_AVRDUDE_VERSION}" LAN
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 include(FetchContent)
 include(GNUInstallDirs)
@@ -101,6 +102,12 @@ if(WIN32)
 endif()
 
 add_executable(pccontroller-avrdude adapter.c)
+add_library(pccontroller-avrdude-bridge STATIC adapter.c)
+target_link_libraries(pccontroller-avrdude-bridge PRIVATE libavrdude)
+target_compile_definitions(pccontroller-avrdude-bridge PRIVATE
+  PCCONTROLLER_AVRDUDE_EMBEDDED=1
+  PCCONTROLLER_AVRDUDE_VERSION="${PCCONTROLLER_AVRDUDE_VERSION}")
+add_dependencies(pccontroller-avrdude pccontroller-avrdude-bridge)
 set_target_properties(pccontroller-avrdude PROPERTIES C_EXTENSIONS OFF)
 add_dependencies(pccontroller-avrdude avrdude conf)
 target_link_libraries(pccontroller-avrdude PRIVATE libavrdude)

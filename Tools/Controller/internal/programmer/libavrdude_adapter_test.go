@@ -99,7 +99,7 @@ func TestPackagedAvrdudeToolsPreferSubdirectoryWithLegacyFallback(t *testing.T) 
 	}
 }
 
-func TestAutoBackendUsesCLIForUrclockMetadata(t *testing.T) {
+func TestAutoBackendUsesLibraryForUrclockMetadata(t *testing.T) {
 	directory := t.TempDir()
 	adapter := filepath.Join(directory, executableName("pccontroller-avrdude"))
 	avrdude := filepath.Join(directory, executableName("avrdude"))
@@ -117,11 +117,35 @@ func TestAutoBackendUsesCLIForUrclockMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if command.Name != avrdude || command.ProgressProtocol != "" {
-		t.Fatalf("metadata did not select CLI compatibility backend: %#v", command)
+	if command.Name != adapter || command.ProgressProtocol != libavrdudeJSONLProtocol {
+		t.Fatalf("metadata did not retain library backend: %#v", command)
 	}
-	if joined := strings.Join(command.Args, " "); !strings.Contains(joined, "-xshowall") {
+	if joined := strings.Join(command.Args, " "); !strings.Contains(joined, "--extended showall") {
 		t.Fatalf("metadata command missing showall: %s", joined)
+	}
+}
+
+func TestNativeBackendSelectionAndFuseArguments(t *testing.T) {
+	adapter, err := resolveAvrdudeAdapter("native", "")
+	if nativeAvrdudeAvailable {
+		if err != nil || adapter != nativeAvrdudeCommand {
+			t.Fatalf("native: %q %v", adapter, err)
+		}
+	} else if err == nil {
+		t.Fatal("native must fail closed in a non-CGO build")
+	}
+	if _, err := resolveAvrdudeAdapter("native", "helper"); err == nil {
+		t.Fatal("native accepted helper")
+	}
+	command := Command{Name: nativeAvrdudeCommand, ProgressProtocol: libavrdudeJSONLProtocol,
+		Args: []string{"--programmer", "usbasp"}}
+	command = appendFuseEvidence(command)
+	command = withUSBaspBitClock(command, 32)
+	if !isUSBaspCommand(command) || !hasBitClock(command) || command.ProgressProtocol != libavrdudeJSONLProtocol {
+		t.Fatalf("library slow-clock routing: %#v", command)
+	}
+	if strings.Contains(strings.Join(command.Args, " "), "-U") {
+		t.Fatal("library received CLI fuse switches")
 	}
 }
 

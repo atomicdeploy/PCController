@@ -445,6 +445,7 @@ export function parseArguments(argv, env = process.env) {
 		stageOnly: false,
 		sharedLibrary: true,
 		avrdudeLibrary: true,
+		avrdudeMode: 'native',
 		compilerBootstrap: true,
 		verbose: false,
 		noColor: hasEnvironmentName(env, 'NO_COLOR'),
@@ -521,6 +522,13 @@ export function parseArguments(argv, env = process.env) {
 			case '--stage-only': options.stageOnly = true; break
 			case '--no-shared-library': options.sharedLibrary = false; break
 			case '--no-avrdude-library': options.avrdudeLibrary = false; break
+			case '--avrdude-mode': {
+				const [value, next] = valueAfter(argv, index, inline, name)
+				options.avrdudeMode = value; index = next
+				if (!['native', 'helper', 'cli'].includes(options.avrdudeMode)) throw new BuildError('--avrdude-mode requires native, helper, or cli')
+				options.avrdudeLibrary = options.avrdudeMode !== 'cli'
+				break
+			}
 			case '--no-compiler-bootstrap': options.compilerBootstrap = false; break
 			case '--verbose': options.verbose = true; break
 			case '--no-color': options.noColor = true; break
@@ -786,6 +794,12 @@ export function createPlan(options, identity, platform = process.platform) {
 			[relative(PROJECT_ROOT, PRODUCT_IDENTITY_GENERATOR).replaceAll('\\', '/'), '--check'],
 			PROJECT_ROOT
 		))
+		if (options.avrdudeLibrary) actions.push(commandAction(
+			'libavrdude-adapter',
+			`Build pinned libavrdude (${options.avrdudeMode}) and shared callback bridge`,
+			'cmake', ['--build', '<avrdude-adapter-build>', '--target', 'pccontroller-avrdude'],
+			AVRDUDE_ADAPTER_ROOT
+		))
 		actions.push(commandAction('go-mod-download', 'Resolve Go modules', 'go', ['mod', 'download'], HOST_ROOT))
 		if (options.tests) actions.push(commandAction(
 			'go-test',
@@ -801,7 +815,8 @@ export function createPlan(options, identity, platform = process.platform) {
 		))
 		if (options.vet) actions.push(commandAction('go-vet', 'Run Go vet', 'go', ['vet', './...'], HOST_ROOT))
 		const plannedExecutable = `<staging>/${platformExecutableName(identity, platform)}`
-		actions.push(commandAction('host-build', 'Build controller host', 'go', ['build', '-buildvcs=false', '-trimpath', '-ldflags', `<identity ${identity.version} ${identity.hostBuildTime}>`, '-o', plannedExecutable, './cmd/controller'], HOST_ROOT))
+		const nativeProgrammer = options.avrdudeLibrary && options.avrdudeMode === 'native'
+		actions.push(commandAction('host-build', 'Build controller host', 'go', ['build', ...(nativeProgrammer ? ['-tags', 'libavrdude'] : []), '-buildvcs=false', '-trimpath', '-ldflags', `<identity ${identity.version} ${identity.hostBuildTime}>`, '-o', plannedExecutable, './cmd/controller'], HOST_ROOT))
 		if (platform === 'win32' && options.resources) actions.push(commandAction('winres', 'Apply Win32 resources', 'go-winres', [
 			'patch', '--in', '<staging>/winres-identity.json', '--delete', '--no-backup',
 			'--product-version', identity.version, '--file-version', identity.version,
@@ -812,16 +827,10 @@ export function createPlan(options, identity, platform = process.platform) {
 			actions.push(commandAction('upx-test', 'Test compressed controller host', 'upx', ['-t', plannedExecutable], HOST_ROOT))
 		}
 		if (options.sharedLibrary) actions.push(commandAction('c-abi', 'Build and smoke-test C ABI', 'go', [
-			'build', '-buildvcs=false', '-trimpath', '-tags', 'controllerlib',
+			'build', '-buildvcs=false', '-trimpath', '-tags', nativeProgrammer ? 'controllerlib,libavrdude' : 'controllerlib',
 			'-ldflags', '<embedded presentation defaults>',
 			'-buildmode=c-shared', '-o', '<staging>/pccontroller', './cmd/controller-cabi'
 		], HOST_ROOT))
-		if (options.avrdudeLibrary) actions.push(commandAction(
-			'libavrdude-adapter',
-			'Build pinned libavrdude and its structured progress adapter',
-			'cmake', ['--build', '<avrdude-adapter-build>', '--target', 'pccontroller-avrdude'],
-			AVRDUDE_ADAPTER_ROOT
-		))
 		actions.push({ id: 'licenses', stage: 'Collect project and Go-module notices', hardware: false })
 		actions.push({ id: 'host-manifest', stage: 'Write canonical host package manifest', hardware: false })
 		if (platform === 'win32') actions.push({
@@ -915,7 +924,8 @@ Safe build options:
   --no-upx                  Leave Windows controller executable unpacked
   --stage-only              Prepare host package for coordinator-owned update, without replacing the running package
   --no-shared-library       Skip C ABI library/header/smoke test
-  --no-avrdude-library      Skip the pinned libavrdude adapter (CLI fallback only)
+  --avrdude-mode MODE       native (default, static CGO), helper (isolated), cli
+  --no-avrdude-library      Alias for a CLI-only build; no embedded programmer
   --no-compiler-bootstrap   Do not install a missing native Windows C compiler
   --version VALUE           Host version identity (default: product metadata)
   --app-name TEXT           Embed the default host/WebUI application name
@@ -1347,7 +1357,9 @@ function walkFiles(current, output, include, excludeBuildState = true) {
 
 export function hostSourceIdentity(hostRoot = HOST_ROOT) {
 	const files = []
-	walkFiles(hostRoot, files, path => extname(path).toLowerCase() === '.go')
+	walkFiles(hostRoot, files, path => ['.go', '.c', '.h'].includes(extname(path).toLowerCase()))
+	const programmerBridge = resolve(hostRoot, '..', 'AvrdudeAdapter')
+	if (existsSync(programmerBridge)) walkFiles(programmerBridge, files, () => true)
 	for (const path of [join(hostRoot, 'go.mod'), join(hostRoot, 'go.sum'), join(hostRoot, 'winres', 'winres.json')]) {
 		if (existsSync(path)) files.push(path)
 	}
@@ -1964,10 +1976,10 @@ int main(void) {
 `
 }
 
-function buildSharedLibrary(go, stage, env, goArch, options, log, ldflags) {
+function buildSharedLibrary(go, stage, env, goArch, options, log, ldflags, nativeProgrammer = null) {
 	const extension = process.platform === 'win32' ? '.dll' : process.platform === 'darwin' ? '.dylib' : '.so'
 	const output = join(stage, `pccontroller${extension}`)
-	const compiler = selectCCompiler(env, goArch, options)
+	const compiler = selectCCompiler({ ...env, ...(nativeProgrammer || {}) }, goArch, options)
 	log.detail(`C compiler: ${compiler.command}`)
 	let compilerIdentity = {
 		compiler: basename(compiler.command),
@@ -1983,10 +1995,10 @@ function buildSharedLibrary(go, stage, env, goArch, options, log, ldflags) {
 		}
 	}
 	run(go, [
-		'build', '-buildvcs=false', '-trimpath', '-tags', 'controllerlib',
+		'build', '-buildvcs=false', '-trimpath', '-tags', nativeProgrammer ? 'controllerlib,libavrdude' : 'controllerlib',
 		'-ldflags', ldflags,
 		'-buildmode=c-shared', '-o', output, './cmd/controller-cabi'
-	], { cwd: HOST_ROOT, env: { ...compiler.env, CGO_ENABLED: '1' }, verbose: options.verbose })
+	], { cwd: HOST_ROOT, env: { ...compiler.env, CGO_ENABLED: '1', ...(nativeProgrammer || {}) }, verbose: options.verbose })
 	const header = join(stage, 'pccontroller.h')
 	if (!existsSync(output) || !existsSync(header)) throw new BuildError('C ABI build did not produce both library and header')
 	const headerText = readFileSync(header, 'utf8')
@@ -2269,6 +2281,11 @@ function buildAvrdudeAdapter(stage, env, options) {
 	const cmake = requireTool('cmake', env)
 	const ninja = requireTool('ninja', env)
 	const buildRoot = join(BUILD_ROOT, 'avrdude-adapter-host')
+	// CMake's file API supplies its resolved, ordered transitive library list.
+	// Do not reconstruct platform USB/FTDI/system dependencies by hand in Go.
+	const query = join(buildRoot, '.cmake', 'api', 'v1', 'query')
+	mkdirSync(query, { recursive: true })
+	writeFileSync(join(query, 'codemodel-v2'), '')
 	const configure = [
 		'-S', AVRDUDE_ADAPTER_ROOT, '-B', buildRoot,
 		'-G', 'Ninja', `-DCMAKE_MAKE_PROGRAM=${ninja}`, '-DCMAKE_BUILD_TYPE=Release'
@@ -2308,8 +2325,11 @@ function buildAvrdudeAdapter(stage, env, options) {
 	const cli = join(toolDirectory, `avrdude${suffix}`)
 	const configuration = join(toolDirectory, 'avrdude.conf')
 	const copying = join(toolDirectory, 'COPYING.txt')
-	copyFileSync(builtAdapter, adapter)
-	copyFileSync(builtCLI, cli)
+	const native = options.avrdudeMode === 'native'
+	if (!native) {
+		copyFileSync(builtAdapter, adapter)
+		copyFileSync(builtCLI, cli)
+	}
 	copyFileSync(builtConfig, configuration)
 	const fetchedSource = sourceOverride
 		? resolve(sourceOverride)
@@ -2324,11 +2344,42 @@ function buildAvrdudeAdapter(stage, env, options) {
 	const smokeEnv = process.platform === 'win32'
 		? { ...withoutEnvironmentNames(env, ['PATH']), PATH: join(env.SystemRoot || env.SYSTEMROOT || 'C:\\Windows', 'System32') }
 		: env
-	run(adapter, ['--version-json'], { cwd: toolDirectory, env: smokeEnv, capture: true })
-	run(cli, ['-C', configuration, '-?'], { cwd: toolDirectory, env: smokeEnv, capture: true })
+	if (!native) {
+		run(adapter, ['--version-json'], { cwd: toolDirectory, env: smokeEnv, capture: true })
+		run(cli, ['-C', configuration, '-?'], { cwd: toolDirectory, env: smokeEnv, capture: true })
+	}
+	const reply = join(buildRoot, '.cmake', 'api', 'v1', 'reply')
+	const indexName = readdirSync(reply).filter(name => /^index-.*\.json$/.test(name)).sort().at(-1)
+	const index = JSON.parse(readFileSync(join(reply, indexName), 'utf8'))
+	const model = JSON.parse(readFileSync(join(reply, index.reply['codemodel-v2'].jsonFile), 'utf8'))
+	const targets = model.configurations[0].targets
+	const target = name => JSON.parse(readFileSync(join(reply, targets.find(t => t.name === name).jsonFile), 'utf8'))
+	const bridge = target('pccontroller-avrdude-bridge')
+	const link = target('pccontroller-avrdude').link
+	const quote = value => JSON.stringify(value.replaceAll('\\', '/'))
+	const linkFlags = link.commandFragments.filter(f => ['libraries', 'libraryPath', 'frameworkPath'].includes(f.role))
+		.map(f => {
+			// CMake can emit build-root-relative archive paths. Absolute paths
+			// survive Go's package-local link working directories.
+			const fragment = f.fragment
+			if (!fragment.startsWith('-') && !fragment.startsWith('"') && /\.(a|lib|so|dylib)$/.test(fragment)) return quote(resolve(buildRoot, fragment))
+			return fragment
+		}).join(' ')
+	const compilerCache = readFileSync(join(buildRoot, 'CMakeCache.txt'), 'utf8')
+	const cc = compilerCache.match(/^CMAKE_C_COMPILER:FILEPATH=(.+)$/m)?.[1]?.trim()
+	if (!cc) throw new BuildError('CMake did not report the native libavrdude compiler')
+	const cgoEnv = {
+		CC: cc, CGO_ENABLED: '1',
+		// Go does not fingerprint external static archives for its cache key.
+		// The adapter identity includes this bridge and the transitive libraries.
+		CGO_CFLAGS: `${env.CGO_CFLAGS || ''} -DPCC_AVR_BUILD_SHA=0x${sha256File(builtAdapter).slice(0, 16)}`.trim(),
+		CGO_LDFLAGS: `${env.CGO_LDFLAGS || ''} ${quote(resolve(buildRoot, bridge.artifacts[0].path))} ${linkFlags} ${process.platform === 'win32' ? '-static -static-libgcc -static-libstdc++' : ''}`.trim()
+	}
+	writeFileSync(join(buildRoot, 'cgo-env.json'), `${JSON.stringify(cgoEnv, null, 2)}\n`)
 	return {
 		enabled: true,
-		paths: [adapter, cli, configuration, copying],
+		paths: [...(native ? [] : [adapter, cli]), configuration, copying],
+		cgoEnv,
 		dependency: {
 			name: dependency.name,
 			version: dependency.version,
@@ -2336,8 +2387,9 @@ function buildAvrdudeAdapter(stage, env, options) {
 			sourceURL: dependency.source_url,
 			sourceSHA256: dependency.source_sha256,
 			license: dependency.license,
-			protocol: 'libavrdude-jsonl',
-			compatibilityCLI: true
+			protocol: native ? 'libavrdude-cgo' : 'libavrdude-jsonl',
+			mode: native ? 'native' : 'helper',
+			compatibilityCLI: !native
 		}
 	}
 }
@@ -2358,6 +2410,15 @@ function buildHost(options, identity, env, log, embeddedDefaults = { enabled: fa
 	})
 	const go = requireTool('go', env)
 	const goEnv = { ...env, GOCACHE: env.GOCACHE || join(HOST_ROOT, '.cache', 'go-build') }
+	let programmerLibrary = { enabled: false, paths: [], dependency: null }
+	if (options.avrdudeLibrary) {
+		log.stage('🔌', `Building pinned libavrdude (${options.avrdudeMode})`)
+		programmerLibrary = buildAvrdudeAdapter(stage, env, options)
+	}
+	const nativeAvrdude = options.avrdudeLibrary && options.avrdudeMode === 'native'
+	const nativeEnv = nativeAvrdude ? { ...goEnv, ...programmerLibrary.cgoEnv,
+		GOFLAGS: `${goEnv.GOFLAGS || ''} -tags=libavrdude`.trim(),
+		PCCONTROLLER_AVRDUDE_TEST_CONFIG: join(stage, 'tools', 'avrdude', 'avrdude.conf') } : goEnv
 	removeGeneratedWinResources()
 
 	log.stage('📦', 'Resolving Go modules')
@@ -2372,6 +2433,9 @@ function buildHost(options, identity, env, log, embeddedDefaults = { enabled: fa
 			...(options.retest ? ['--retest'] : [])
 		]
 		run(process.execPath, args, { cwd: PROJECT_ROOT, env: goEnv, verbose: options.verbose })
+		if (nativeAvrdude) run(process.execPath, [STABLE_GO_TEST_RUNNER,
+			'--package', 'internal/programmer', '--run', 'TestNativeAvrdude|TestNativeBackendSelectionAndFuseArguments',
+			'--retest'], { cwd: PROJECT_ROOT, env: nativeEnv, verbose: options.verbose })
 	} else log.warning('Go tests were explicitly skipped.')
 	if (options.vet) {
 		log.stage('🔎', 'Running Go vet')
@@ -2392,11 +2456,9 @@ function buildHost(options, identity, env, log, embeddedDefaults = { enabled: fa
 	const presentationFlags = presentationLinkerFlags(identity)
 	const ldflags = `-s -w -X main.version=${identity.version} -X main.sourceHash=${before.sha256} -X main.buildTime=${identity.hostBuildTime} ${presentationFlags}`
 	log.stage('🖥️', `Building host ${identity.version} from ${before.sha256.slice(0, 12)}`)
-	const executableCGO = process.platform === 'darwin' ? '1' : '0'
-	run(go, ['build', '-buildvcs=false', '-trimpath', '-ldflags', ldflags, '-o', executable, './cmd/controller'], {
-		// go.bug.st/serial uses Apple IOKit through CGO on macOS. Windows and
-		// Linux retain the self-contained executable build.
-		cwd: HOST_ROOT, env: { ...goEnv, CGO_ENABLED: executableCGO }, verbose: options.verbose
+	const executableCGO = nativeAvrdude || process.platform === 'darwin' ? '1' : '0'
+	run(go, ['build', ...(nativeAvrdude ? ['-tags', 'libavrdude'] : []), '-buildvcs=false', '-trimpath', '-ldflags', ldflags, '-o', executable, './cmd/controller'], {
+		cwd: HOST_ROOT, env: { ...goEnv, CGO_ENABLED: executableCGO, ...(nativeAvrdude ? programmerLibrary.cgoEnv : {}) }, verbose: options.verbose
 	})
 	const after = hostSourceIdentity()
 	if (after.sha256 !== before.sha256) throw new BuildError('Controller source changed during packaging; retry from a stable tree')
@@ -2420,6 +2482,10 @@ function buildHost(options, identity, env, log, embeddedDefaults = { enabled: fa
 	const presentationConfig = join(stage, 'build-presentation-check.json')
 	const versionArguments = ['--config', presentationConfig, 'version']
 	let versionOutput = run(executable, versionArguments, { cwd: stage, env: verificationEnv, capture: true }).stdout.trim()
+	if (nativeAvrdude && process.platform === 'win32') {
+		const cleanRuntimeEnv = { ...withoutEnvironmentNames(verificationEnv, ['PATH']), PATH: join(env.SystemRoot || env.SYSTEMROOT || 'C:\\Windows', 'System32') }
+		run(executable, versionArguments, { cwd: stage, env: cleanRuntimeEnv, capture: true })
+	}
 	const expectedIdentity = [identity.version, `source-hash=${before.sha256}`, `built=${identity.hostBuildTime}`]
 	for (const expected of expectedIdentity) {
 		if (!versionOutput.includes(expected)) throw new BuildError(`controller identity check is missing ${expected}`)
@@ -2455,14 +2521,10 @@ function buildHost(options, identity, env, log, embeddedDefaults = { enabled: fa
 	let shared = { paths: [], compiler: null }
 	if (options.sharedLibrary) {
 		log.stage('🧩', 'Building and smoke-testing the C ABI library')
-		shared = buildSharedLibrary(go, stage, goEnv, goArch, options, log, presentationFlags)
+		shared = buildSharedLibrary(go, stage, goEnv, goArch, options, log, presentationFlags, nativeAvrdude ? programmerLibrary.cgoEnv : null)
 	} else log.warning('C ABI package was explicitly skipped.')
 
-	let programmerLibrary = { enabled: false, paths: [], dependency: null }
-	if (options.avrdudeLibrary) {
-		log.stage('🔌', 'Building pinned libavrdude callback adapter')
-		programmerLibrary = buildAvrdudeAdapter(stage, env, options)
-	} else log.warning('libavrdude adapter was explicitly skipped; AVRDUDE CLI fallback remains available.')
+	if (!options.avrdudeLibrary) log.warning('libavrdude was explicitly skipped; AVRDUDE CLI fallback remains available.')
 
 	log.stage('📜', 'Collecting project and dependency notices')
 	const notices = collectModuleNotices(go, stage, goEnv, options)
@@ -2512,7 +2574,7 @@ function buildHost(options, identity, env, log, embeddedDefaults = { enabled: fa
 			windowsResources: process.platform === 'win32' ? (resourceGenerated ? 'verified' : 'skipped') : 'not-applicable',
 			upx,
 			sharedLibrary: options.sharedLibrary ? 'smoke-passed' : 'skipped',
-			programmerLibrary: programmerLibrary.enabled ? 'callback-adapter-verified' : 'skipped'
+			programmerLibrary: nativeAvrdude ? 'static-cgo-linked' : programmerLibrary.enabled ? 'callback-adapter-verified' : 'skipped'
 		},
 		artifacts
 	}

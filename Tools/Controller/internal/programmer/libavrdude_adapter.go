@@ -18,17 +18,17 @@ import (
 )
 
 const libavrdudeJSONLProtocol = "libavrdude-jsonl"
+const nativeAvrdudeCommand = "@libavrdude"
 
-func withAvrdudeCLICompatibility(options Options) Options {
-	if strings.TrimSpace(options.Avrdude) == "" && strings.TrimSpace(options.AvrdudeAdapter) != "" {
-		candidate := filepath.Join(filepath.Dir(options.AvrdudeAdapter), executableName("avrdude"))
-		if info, err := os.Stat(candidate); err == nil && info.Mode().IsRegular() {
-			options.Avrdude = candidate
+func appendFuseEvidence(command Command) Command {
+	for _, memory := range []string{"lfuse", "hfuse", "efuse", "lock"} {
+		if command.ProgressProtocol == libavrdudeJSONLProtocol {
+			command.Args = append(command.Args, "--read-fuse", memory)
+		} else {
+			command.Args = append(command.Args, "-U"+memory+":r:-:h")
 		}
 	}
-	options.AvrdudeBackend = "cli"
-	options.AvrdudeAdapter = ""
-	return options
+	return command
 }
 
 func resolveAvrdudeAdapter(backend, explicit string) (string, error) {
@@ -36,8 +36,11 @@ func resolveAvrdudeAdapter(backend, explicit string) (string, error) {
 	if backend == "" {
 		backend = "auto"
 	}
-	if backend != "auto" && backend != "library" && backend != "cli" {
-		return "", fmt.Errorf("unknown AVRDUDE backend %q; use auto, library, or cli", backend)
+	if backend != "auto" && backend != "library" && backend != "native" && backend != "helper" && backend != "cli" {
+		return "", fmt.Errorf("unknown AVRDUDE backend %q; use auto, native, library, helper, or cli", backend)
+	}
+	if backend == "native" && explicit != "" {
+		return "", errors.New("native AVRDUDE backend cannot be combined with a helper path")
 	}
 	if backend == "cli" {
 		if strings.TrimSpace(explicit) != "" {
@@ -52,6 +55,12 @@ func resolveAvrdudeAdapter(backend, explicit string) (string, error) {
 		}
 		return resolved, nil
 	}
+	if backend != "helper" && nativeAvrdudeAvailable {
+		return nativeAvrdudeCommand, nil
+	}
+	if backend == "native" {
+		return "", errors.New("embedded libavrdude is not available in this build")
+	}
 	name := "pccontroller-avrdude"
 	if runtime.GOOS == "windows" {
 		name += ".exe"
@@ -64,7 +73,7 @@ func resolveAvrdudeAdapter(backend, explicit string) (string, error) {
 	if resolved, err := exec.LookPath(name); err == nil {
 		return resolved, nil
 	}
-	if backend == "library" {
+	if backend == "library" || backend == "helper" {
 		return "", fmt.Errorf(
 			"libavrdude backend requested but %s was not found in tools/avrdude, beside the controller or on PATH",
 			name,
@@ -84,6 +93,12 @@ func packagedAvrdudeTool(controller, name string) string {
 }
 
 func resolveAvrdudeCommandTools(options Options) (adapter, executable, configuration string, err error) {
+	// Explicit CLI selection/path remains authoritative; auto otherwise prefers
+	// the in-process library, then the isolated helper, then the system CLI.
+	if (options.AvrdudeBackend == "" || options.AvrdudeBackend == "auto") &&
+		strings.TrimSpace(options.Avrdude) != "" && strings.TrimSpace(options.AvrdudeAdapter) == "" {
+		options.AvrdudeBackend = "cli"
+	}
 	adapter, err = resolveAvrdudeAdapter(options.AvrdudeBackend, options.AvrdudeAdapter)
 	if err != nil {
 		return "", "", "", err
@@ -95,6 +110,17 @@ func resolveAvrdudeCommandTools(options Options) (adapter, executable, configura
 		return adapter, executable, configuration, err
 	}
 	configuration = strings.TrimSpace(options.AvrdudeConf)
+	if adapter == nativeAvrdudeCommand {
+		if configuration == "" {
+			if current, e := os.Executable(); e == nil {
+				configuration = packagedAvrdudeTool(current, "avrdude.conf")
+			}
+		}
+		if configuration == "" {
+			return "", "", "", errors.New("embedded libavrdude requires its matching tools/avrdude/avrdude.conf or an explicit configuration")
+		}
+		return adapter, "", configuration, nil
+	}
 	if configuration == "" {
 		candidate := filepath.Join(filepath.Dir(adapter), "avrdude.conf")
 		if info, statErr := os.Stat(candidate); statErr == nil && info.Mode().IsRegular() {
@@ -194,10 +220,12 @@ func libavrdudeAdapterArguments(options Options, configuration, programmer strin
 		update = "eeprom:w:" + options.HexPath + ":i"
 	case OperationChipErase:
 		args = append(args, "--chip-erase")
-	case OperationProbe, OperationStart:
+	case OperationProbe:
 		// Opening, initializing and signature validation are the operation.
 	case OperationMetadata:
-		return nil, errors.New("libavrdude adapter metadata is not yet supported; select the cli backend")
+		args = append(args, "--extended", "showall")
+	case OperationStart:
+		args = append(args, "--extended", "showversion")
 	default:
 		return nil, fmt.Errorf("libavrdude adapter does not support operation %s", options.Operation)
 	}

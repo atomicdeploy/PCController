@@ -43,6 +43,10 @@
 - Prefer the system Arduino CLI and its existing core/library environment.
   Managed toolchains require explicit selection; never silently fall back to a
   managed executable or redirect a system executable into managed directories.
+- Packaged hosts prefer the statically linked CGO libavrdude backend. Retain
+  explicit isolated-helper and CLI selections. Serialize native calls through
+  cleanup, preserve progress and guarded backup/readback, and never release
+  board ownership while a canceled native operation is still running.
 - An ancestor/merged-PR marker is not proof that a historical fix still exists
   in current functional source. Compare the actual behavior/content and retain
   focused regression tests when reconciling rewritten or relocated firmware;
