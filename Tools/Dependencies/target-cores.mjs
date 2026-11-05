@@ -1,3 +1,5 @@
+import { loadProjectEnv } from '../Build/env.mjs';
+
 // Resolve opt-in board cores using their official package indexes, not the
 // compatibility minimum as an exact install pin.
 import { appendFileSync, readFileSync } from 'node:fs'
@@ -36,6 +38,7 @@ export function resolveTargetCores(targets, fetchIndex = fetchIndexJSON) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  loadProjectEnv();
   const targets = JSON.parse(readFileSync(new URL('../Firmware/targets.json', import.meta.url), 'utf8'))
   const selected = resolveTargetCores(targets).find(item => item.target === process.argv[2])
   if (!selected) throw new Error('Specify a declared AVR target')

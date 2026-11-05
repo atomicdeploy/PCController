@@ -2,6 +2,9 @@
 import { appendFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { TARGETS } from "./codebase-summary.mjs";
+import { loadProjectEnv } from "../../Tools/Build/env.mjs";
+
+loadProjectEnv();
 
 const directory = resolve(process.argv[2] || "build-summary/vitest");
 const missing = TARGETS.filter(({ id }) => !existsSync(resolve(directory, `${id}.json`)));

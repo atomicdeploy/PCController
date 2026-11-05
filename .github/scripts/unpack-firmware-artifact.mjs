@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadProjectEnv } from "../../Tools/Build/env.mjs";
 
 // Consume the raw Actions archive without extracting arbitrary tar paths or
 // symlinks. Only named top-level firmware evidence is copied into the build.
@@ -37,6 +38,7 @@ export function unpackFirmwareArtifact(directory, destination) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  loadProjectEnv();
   const [directory, destination] = process.argv.slice(2);
   if (!directory || !destination) throw new Error("Usage: unpack-firmware-artifact.mjs DOWNLOAD_DIRECTORY DESTINATION");
   console.log(`Unpacked ${unpackFirmwareArtifact(resolve(directory), resolve(destination))} verified firmware files`);
