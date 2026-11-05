@@ -169,13 +169,13 @@ func runNativeGUI(args []string, stdout, stderr io.Writer, store *appconfig.Stor
 	if err != nil {
 		return fmt.Errorf("connect native desktop to controller: %w", err)
 	}
-	updates <- desktopSnapshot(initial, *address)
+	updates <- desktopSnapshot(initial, *address, productidentity.Title(store.Current().UI.AppTitle))
 	client.StartLive()
 	go func() {
 		state := initial
 		var catalog channelCatalog
 		publish := func() {
-			snapshot := desktopSnapshot(state, *address)
+			snapshot := desktopSnapshot(state, *address, productidentity.Title(store.Current().UI.AppTitle))
 			snapshot.Channels = desktopChannels(state, catalog.Controls)
 			snapshot.CatalogRevision = catalog.BoardProfile.Revision
 			select {
@@ -394,20 +394,19 @@ func runNativeGUI(args []string, stdout, stderr io.Writer, store *appconfig.Stor
 				_, err := client.Execute(actionCtx, "reconnect")
 				return err
 			}
-			known := false
-			for _, command := range []nativeshell.Command{nativeshell.CommandDashboard, nativeshell.CommandControls, nativeshell.CommandWorkbench, nativeshell.CommandUpdates, nativeshell.CommandSettings} {
-				page, _ := nativeshell.PageForCommand(command)
-				known = known || id == page
-			}
-			if !known {
-				return fmt.Errorf("unknown host tray action %q", id)
-			}
 			current, err := client.Snapshot(actionCtx)
 			if err != nil {
 				return err
 			}
 			if !current.Connected {
 				return errors.New("controller disconnected before the page could open")
+			}
+			known := false
+			for _, item := range desktopHostMenu(current) {
+				known = known || (item.ID == id && id != "" && !item.Disabled && !item.Separator)
+			}
+			if !known {
+				return fmt.Errorf("unknown host tray action %q", id)
 			}
 			target, err := browserURL(*address)
 			if err != nil {
@@ -429,10 +428,12 @@ func runNativeGUI(args []string, stdout, stderr io.Writer, store *appconfig.Stor
 	})
 }
 
-func desktopSnapshot(state control.Snapshot, address string) desktop.Snapshot {
+func desktopSnapshot(state control.Snapshot, address, title string) desktop.Snapshot {
+	trayState := desktopTrayState(state, title)
 	return desktop.Snapshot{
 		ObservedAt: state.StatusUpdated, Generation: state.ConnectionGeneration,
-		HostMenu:  desktopHostMenu(state),
+		HostMenu: desktopHostMenu(state),
+		TrayIcon: string(nativeshell.StateIcon(trayState)), TrayTooltip: nativeshell.Tooltip(trayState),
 		Busy:      state.EmergencyStop.Active || state.Programming.Active || state.Programming.RestorationPending,
 		Connected: state.Connected, HavePanel: state.HaveFrontPanel || state.HaveFrontPanelSegments,
 		HaveStatus: state.HaveStatus, CanNavigate: state.Connected && state.Hello.Capabilities&native.CapabilityMenuRemote != 0,
@@ -444,9 +445,13 @@ func desktopSnapshot(state control.Snapshot, address string) desktop.Snapshot {
 	}
 }
 
+func desktopTrayState(state control.Snapshot, title string) nativeshell.State {
+	return nativeshell.State{Title: title, Connected: state.Connected, Paused: state.Paused, Port: state.Port.Name, ConnectionState: state.ConnectionState}
+}
+
 func desktopHostMenu(state control.Snapshot) []desktop.MenuItem {
 	var items []desktop.MenuItem
-	for _, item := range nativeshell.BuildMenu(nativeshell.State{Connected: state.Connected, Paused: state.Paused, Port: state.Port.Name, ConnectionState: state.ConnectionState}) {
+	for _, item := range nativeshell.BuildMenu(desktopTrayState(state, "")) {
 		id, _ := nativeshell.PageForCommand(item.Command)
 		if item.Command == nativeshell.CommandReconnect {
 			id = "reconnect"

@@ -34,6 +34,7 @@ const (
 
 var (
 	menuUser32                    = windows.NewLazySystemDLL("user32.dll")
+	menuGetDPIForWindow           = menuUser32.NewProc("GetDpiForWindow")
 	menuAppendMenuW               = menuUser32.NewProc("AppendMenuW")
 	menuMonitorFromRect           = menuUser32.NewProc("MonitorFromRect")
 	menuSetWindowRgn              = menuUser32.NewProc("SetWindowRgn")
@@ -145,7 +146,10 @@ func monitorDPI(monitor win.HMONITOR, owner uintptr) int32 {
 			return int32(x)
 		}
 	}
-	dpi := win.GetDpiForWindow(win.HWND(owner))
+	if menuGetDPIForWindow.Find() != nil {
+		return baseDPI
+	}
+	dpi, _, _ := menuGetDPIForWindow.Call(owner)
 	if dpi < 48 || dpi > 768 {
 		return baseDPI
 	}

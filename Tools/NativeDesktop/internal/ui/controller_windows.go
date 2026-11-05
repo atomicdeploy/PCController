@@ -397,12 +397,34 @@ func (s *Shell) updateControllerTray() {
 	if s.controllerState.Connected {
 		status = "Connected"
 	}
-	if s.controllerTrayStatus == status {
+	tooltip := s.controllerState.TrayTooltip
+	if tooltip == "" {
+		tooltip = s.controller.Title + " · " + status
+	}
+	iconState := s.controllerState.TrayIcon
+	if iconState == "" {
+		iconState = "offline"
+		if s.controllerState.Connected {
+			iconState = "connected"
+		}
+	}
+	cacheKey := tooltip + "\x00" + iconState
+	if s.controllerTrayStatus == cacheKey {
 		return
 	}
-	s.controllerTrayStatus = status
-	_ = s.tray.SetIcon(s.appIcon)
-	_ = s.tray.SetToolTip(s.controller.Title + " · " + status)
+	icon := s.controllerTrayIcons[iconState]
+	if icon == nil {
+		icon = s.appIcon
+	}
+	if err := s.tray.SetIcon(icon); err != nil {
+		s.logf("tray icon: %v", err)
+		return
+	}
+	if err := s.tray.SetToolTip(tooltip); err != nil {
+		s.logf("tray tooltip: %v", err)
+		return
+	}
+	s.controllerTrayStatus = cacheKey
 }
 
 func (s *Shell) drawControllerDigit(canvas *walk.Canvas, rect walk.Rectangle, digit int, bits, brightness byte, colors palette) {
@@ -460,17 +482,24 @@ func (s *Shell) controllerMenuItems() []traymenu.Item {
 	// receive this exact list, with desktop-only presentation actions appended.
 	var hostItems []traymenu.Item
 	for i, item := range s.controllerState.HostMenu {
+		if item.Separator {
+			hostItems = append(hostItems, traymenu.Item{Separator: true})
+			continue
+		}
 		id := "host:" + item.ID
 		if item.ID == "" {
 			id = fmt.Sprintf("host-status:%d", i)
 		}
-		hostItems = append(hostItems, traymenu.Item{ID: traymenu.ActionID(id), Label: item.Label, Disabled: item.Disabled || s.controller.InvokeHostMenu == nil, Separator: item.Separator})
+		hostItems = append(hostItems, traymenu.Item{ID: traymenu.ActionID(id), Label: item.Label, Disabled: item.Disabled || s.controller.InvokeHostMenu == nil, Default: item.Default})
 	}
 	if len(hostItems) > 0 {
 		items = append(append(hostItems, traymenu.Item{Separator: true}), items...)
 	}
 	icons := map[traymenu.ActionID]string{"show": "window-show", "hide": "window-hide", "console": "diagnostics", "control": "settings", "rf": "reconnect", "programs": "startup", "firmware": "startup", "events": "diagnostics", "settings": "settings", "desktop-settings": "settings", "compact": "window-show", "widgets": "window-show", "appearance": "settings", "reconnect": "reconnect", "quit": "exit"}
 	for index := range items {
+		if items[index].Separator {
+			continue
+		}
 		if strings.HasPrefix(string(items[index].ID), "host:") {
 			name := "settings"
 			switch items[index].ID {

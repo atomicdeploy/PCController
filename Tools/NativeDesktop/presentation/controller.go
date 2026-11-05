@@ -14,6 +14,7 @@ type Snapshot struct {
 	CatalogRevision                                     string
 	Channels                                            []Channel
 	HostMenu                                            []MenuItem
+	TrayIcon, TrayTooltip                               string
 	Connected, HavePanel, HaveStatus, Busy, CanNavigate bool
 	HavePower, HaveTemperature                          bool
 	Segments                                            [4]byte

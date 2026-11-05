@@ -16,7 +16,7 @@ including dependencies, assets, tests, tools, documentation and recovery records
 - Parent integration commit: `3aed9ef6`.
 - The subtree tree object equals the donor tree object exactly. This verifies
   every pathname, file mode and blob, not merely file counts or ancestry.
-- Current working-copy result: **2,377 identical files, 48 adapted files, seven
+- Current working-copy result: **2,371 identical files, 54 adapted files, seven
   regenerated content-hashed Web bundles, one explicitly excluded font, zero
   missing source files**. Exact old/new generated bundle paths are audited; the
   original bytes remain in the immutable import. Git clean/EOL filters
@@ -108,6 +108,38 @@ action owner: status; Dashboard, Controls, Workbench, Updates and Settings when
 connected; contextual connect/reconnect; and Exit. The GUI adds desktop-only
 actions without replacing that host list. Preferences can select the native
 Windows menu renderer instead of the styled menu.
+
+The original menu model is byte-for-byte unchanged from `a304c3ec` (blob
+`c9919e90c8c0d2c8a385317c2f2070b4ba6452ce`). Its original options are:
+
+- Status: connected (including port), connecting/reconnecting, paused or offline.
+- Dashboard (the default), Controls, Workbench, Updates and Settings, only while
+  the board is connected.
+- Connect now when offline/paused; Reconnect now while connecting/reconnecting;
+  Reconnect controller while connected.
+- Exit, which exits the host. The added Close desktop action closes only the GUI.
+
+The GUI prepends that complete authoritative list to its desktop-only actions;
+both acrylic and native HMENU renderers consume the resulting shared list.
+Native Windows menus is a persistent option under Window appearance, also
+available in Preferences > Desktop. High contrast selects native automatically.
+The normal GUI-owned host starts with `--no-tray`, and detached widgets create no
+additional tray. Standalone Web/TUI hosts retain their existing native tray.
+
+The 2026-11-06 follow-up audit found and repaired actual bridge regressions:
+host separators had acquired command fields and failed menu validation, Dashboard's
+default marker was discarded, left-click was intercepted by an inert lamp-toggle
+path, and the GUI flattened four-state tray icons/tooltips to connected/offline.
+The adapter now retains valid separators, default/keyboard semantics, all four
+packaged product status icons and the canonical tooltip. Left/right clicks and
+keyboard invocation open the shared menu. The native renderer retains icons as
+DPI-scaled 32-bit bitmaps in the icon column, independently of checkmarks.
+
+Focused checks compare every original action, label, enabled/default/separator
+state and dispatch identity, validate the merged model under both renderer
+preferences, inspect native HMENU flags/artwork at 96/144/192 DPI, and verify
+click routing without hardware actuation. They are not human tray-click or
+older-machine acceptance.
 
 `node Tools/Build/update-readme-previews.mjs` regenerates the README gallery from
 actual GUI/TUI renderers with isolated sample data. These screenshots are not

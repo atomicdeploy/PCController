@@ -258,7 +258,14 @@ func showCustom(
 	dimensions := buildDimensionsForDirection(
 		options.Items,
 		dpi,
-		font.measure,
+		func(text string) int32 {
+			for _, item := range options.Items {
+				if item.Default && item.Label == text {
+					return font.measureBold(text)
+				}
+			}
+			return font.measure(text)
+		},
 		options.RightToLeft,
 	)
 	margin := scale(4, dpi)

@@ -126,6 +126,7 @@ type Shell struct {
 	controllerInline            *controllerInlineEdit
 	controllerPendingPWM        controllerChannelGesture
 	controllerTrayStatus        string
+	controllerTrayIcons         map[string]walk.Image
 	controllerMinimumHeight     int
 	controllerSegmentLevels     [4][8]float64
 	controllerSegmentTargets    [4][8]float64
@@ -1013,6 +1014,16 @@ func (s *Shell) loadArtwork() error {
 	if err := s.mw.SetIcon(s.appIcon); err != nil {
 		return err
 	}
+	if s.controller != nil {
+		s.controllerTrayIcons = make(map[string]walk.Image, 4)
+		for _, state := range []string{"connected", "reconnecting", "paused", "offline"} {
+			icon, err := walk.NewIconFromResource("TRAY_" + strings.ToUpper(state))
+			if err != nil {
+				return fmt.Errorf("load controller %s tray icon: %w", state, err)
+			}
+			s.controllerTrayIcons[state] = icon
+		}
+	}
 
 	iconTargets := []struct {
 		path   string
@@ -1173,7 +1184,14 @@ func (s *Shell) createTray() error {
 		return fmt.Errorf("create notification-area icon: %w", err)
 	}
 	s.tray = tray
-	if err := tray.SetIcon(s.connectingIcon); err != nil {
+	initialIcon := s.connectingIcon
+	if s.controller != nil {
+		initialIcon = s.controllerTrayIcons["offline"]
+		if initialIcon == nil {
+			initialIcon = s.appIcon
+		}
+	}
+	if err := tray.SetIcon(initialIcon); err != nil {
 		return err
 	}
 	initialTooltip := fmt.Sprintf(
@@ -1182,16 +1200,19 @@ func (s *Shell) createTray() error {
 		s.tr(i18n.MsgConnectionReconnecting),
 		s.tr(i18n.MsgTrayLeftClickHint),
 	)
+	if s.controller != nil {
+		initialTooltip = s.controller.Title + " — Offline"
+	}
 	if err := tray.SetToolTip(initialTooltip); err != nil {
 		return err
 	}
 	tray.MouseDown().Attach(func(_, _ int, button walk.MouseButton) {
-		if button == walk.LeftButton {
+		if trayToggleOnPress(s.controller != nil, button) {
 			s.invoke("lamp.toggle", nil)
 		}
 	})
 	tray.MouseUp().Attach(func(x, y int, button walk.MouseButton) {
-		if button == walk.RightButton {
+		if trayMenuOnRelease(s.controller != nil, button) {
 			s.showAppMenuAt(int32(x), int32(y))
 		}
 	})
@@ -3037,6 +3058,12 @@ func (s *Shell) dispose() {
 		s.vectorOffBitmap.Dispose()
 		s.vectorOffBitmap = nil
 	}
+	for _, icon := range s.controllerTrayIcons {
+		if icon != nil {
+			icon.Dispose()
+		}
+	}
+	s.controllerTrayIcons = nil
 	for _, icon := range []walk.Image{
 		s.appIcon, s.onIcon, s.offIcon, s.unknownIcon, s.connectingIcon, s.errorIcon,
 		s.settingsIcon, s.diagnosticsIcon,
