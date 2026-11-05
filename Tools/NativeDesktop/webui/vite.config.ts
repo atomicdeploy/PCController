@@ -110,6 +110,9 @@ function coordinatorProxy(): ProxyOptions {
 }
 
 export default defineConfig({
+  // Keep these modules in the normal transform pipeline during development,
+  // so dependency prebundling cannot bypass the scheduler sender guard.
+  optimizeDeps: { exclude: ["@xterm/xterm", "@xterm/addon-webgl"] },
   // Relative asset URLs make the compiled dashboard valid both at the Go
   // manager's /app/ prefix and at any directory used by the static export.
   base: "./",
