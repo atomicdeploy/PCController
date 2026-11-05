@@ -177,7 +177,7 @@ func TestStripStreamStopsAfterRepeatedUnconfirmedFrames(t *testing.T) {
 
 func TestStripEffectCatalogUsesExactConfiguredIDs(t *testing.T) {
 	for _, id := range []string{"police", "white-thunder", "converging-red"} {
-		definition, program, ok := stripEffectByID(id)
+		definition, program, ok := stripEffectByID(id, appconfig.DefaultStripEffects())
 		if !ok || definition.ID == "" || program.Primitive == "" {
 			t.Fatalf("missing effect %q", id)
 		}
@@ -194,7 +194,10 @@ func TestTypedStripEffectCatalogIsLiveCapabilityGated(t *testing.T) {
 	if got := SupportedStripEffectDescriptors(true, 0); len(got) != 0 {
 		t.Fatalf("unsupported catalog=%+v", got)
 	}
-	catalog := SupportedStripEffectDescriptors(true, native.CapabilityAddressableLED)
+	if got := SupportedStripEffectDescriptors(true, native.CapabilityAddressableLED); len(got) != 0 {
+		t.Fatal("examples must never be built in")
+	}
+	catalog := SupportedConfiguredStripEffectDescriptors(true, native.CapabilityAddressableLED, appconfig.DefaultStripEffects())
 	if len(catalog) != 3 {
 		t.Fatalf("catalog=%+v", catalog)
 	}
@@ -208,7 +211,7 @@ func TestTypedStripEffectCatalogIsLiveCapabilityGated(t *testing.T) {
 		}
 	}
 	catalog[0].Name = "mutated"
-	if StripEffectDescriptors()[0].Name != "Police red / blue" {
+	if configuredStripEffectDescriptors(appconfig.DefaultStripEffects())[0].Name != "Police red / blue" {
 		t.Fatal("catalog caller mutated the canonical descriptors")
 	}
 }
@@ -269,7 +272,7 @@ func TestEffectCatalogRoutesThroughPublicCommandEngine(t *testing.T) {
 	t.Cleanup(func() { _ = runtime.Close() })
 	engine := NewCommandEngine(runtime, CommandOptions{})
 	list, err := engine.Execute(context.Background(), "effect list")
-	if err != nil || !strings.Contains(list, "white-thunder") {
+	if err != nil || strings.Contains(list, "white-thunder") {
 		t.Fatalf("public effect route: %q, %v", list, err)
 	}
 	if _, err := engine.Execute(context.Background(), "strip effect list"); err == nil {

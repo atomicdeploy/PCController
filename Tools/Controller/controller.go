@@ -998,7 +998,7 @@ func (client *Client) currentStripEffects() []appconfig.StripEffect {
 
 func toAppStripEffects(source []StripEffect) []appconfig.StripEffect {
 	if source == nil {
-		return appconfig.DefaultStripEffects()
+		return nil
 	}
 	result := make([]appconfig.StripEffect, len(source))
 	for index, effect := range source {
