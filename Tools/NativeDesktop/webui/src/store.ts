@@ -10,7 +10,7 @@ import type {
   VersionInfo
 } from "./contracts";
 import { emptySnapshot, isAppConfig, isSnapshot } from "./contracts";
-import type { ClientKind, RayanLampClient } from "./api";
+import type { ClientKind, PCControllerDesktopClient } from "./api";
 import {
   applyWebTheme,
   type WebTheme
@@ -53,7 +53,7 @@ export const capabilities = signal<Capabilities>({});
 export const diagnostics = signal<UIDiagnosticsSnapshot | null>(null);
 export const revision = signal<Revision>(0);
 export const route = signal<RouteName>("dashboard");
-export const settingsSection = signal<keyof AppConfig>("lamp");
+export const settingsSection = signal<keyof AppConfig>("device");
 export const settingsSaving = signal(false);
 export const settingsError = signal("");
 export const eventConnected = signal(false);
@@ -72,14 +72,14 @@ export const isOnline = computed(
 );
 
 export const stateLabel = computed(() => {
-  if (!isOnline.value) return t("Lamp unavailable");
+  if (!isOnline.value) return t("Device unavailable");
   switch (snapshot.value.state) {
     case "on":
-      return t("Lamp is on");
+      return t("Device is on");
     case "off":
-      return t("Lamp is off");
+      return t("Device is off");
     default:
-      return t("Checking lamp");
+      return t("Checking device");
   }
 });
 
@@ -136,7 +136,7 @@ export function applyBootstrap(value: unknown): void {
   const candidate = value as Record<string, unknown>;
   const nextSnapshot = candidate.snapshot ?? candidate.status;
   if (!isSnapshot(nextSnapshot)) {
-    throw new Error("The controller bootstrap did not contain a valid lamp snapshot.");
+    throw new Error("The controller bootstrap did not contain a valid device snapshot.");
   }
   const nextConfig = candidate.config;
   if (!isAppConfig(nextConfig)) {
@@ -172,8 +172,8 @@ export function applyBootstrap(value: unknown): void {
   });
   browserConsole.event(
     nextSnapshot.state === "unknown" ? "info" : "success",
-    "lamp.state",
-    "Initial lamp state synchronized",
+    "device.state",
+    "Initial device state synchronized",
     {
       source: nextSnapshot.last_source || "bootstrap",
       state: nextSnapshot.state
@@ -203,8 +203,8 @@ export function applySnapshot(next: Snapshot): void {
   if (next.state !== previousState) {
     browserConsole.event(
       next.state === "unknown" ? "warn" : "success",
-      "lamp.state",
-      `Lamp changed from ${previousState} to ${next.state}`,
+      "device.state",
+      `Device changed from ${previousState} to ${next.state}`,
       {
         source: next.last_source || "state-update",
         state: next.state
@@ -221,7 +221,7 @@ export function markControllerAvailable(): void {
 }
 
 export function markControllerUnavailable(
-  reason = "The RayanLamp controller is unavailable."
+  reason = "The PCControllerDesktop controller is unavailable."
 ): void {
   batch(() => {
     controllerAvailable.value = false;
@@ -274,14 +274,14 @@ function mergeRecord<T>(base: T, patch: DeepPartial<T>): T {
   return output as T;
 }
 
-let apiClient: RayanLampClient | null = null;
+let apiClient: PCControllerDesktopClient | null = null;
 let pendingPatch: DeepPartial<AppConfig> = {};
 let patchTimer = 0;
 let patchInFlight: Promise<void> | null = null;
 let persistenceGeneration = 0;
 
 export function configureSettingsPersistence(
-  api: RayanLampClient | null
+  api: PCControllerDesktopClient | null
 ): void {
   if (apiClient === api) return;
   persistenceGeneration++;

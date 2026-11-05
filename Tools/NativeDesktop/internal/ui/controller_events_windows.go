@@ -6,9 +6,9 @@ import (
 	"strings"
 	"unicode"
 
-	"rayanlamp.local/app/internal/model"
-	"rayanlamp.local/app/internal/sfx"
-	"rayanlamp.local/app/presentation"
+	"pccontroller.local/desktop/internal/model"
+	"pccontroller.local/desktop/internal/sfx"
+	"pccontroller.local/desktop/presentation"
 )
 
 type controllerNotification struct {

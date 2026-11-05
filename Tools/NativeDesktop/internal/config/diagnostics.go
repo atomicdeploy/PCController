@@ -7,7 +7,7 @@ import (
 	"net/url"
 	"strings"
 
-	"rayanlamp.local/app/internal/diagnostics"
+	"pccontroller.local/desktop/internal/diagnostics"
 )
 
 var (
@@ -98,7 +98,7 @@ func (d *DiagnosticsConfig) normalize() error {
 		d.ExpertEndpoints,
 		legacyExpertDiagnosticEndpoints[:],
 	)
-	// Expert diagnostics targeted the separate PU/debug subsystem, not the lamp
+	// Expert diagnostics targeted the separate PU/debug subsystem, not the device
 	// or ESP. Retire the old switch during migration rather than leaving a
 	// misleading enabled flag in persisted configuration.
 	d.ExpertEnabled = false

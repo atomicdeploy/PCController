@@ -23,7 +23,7 @@ const defaultTimeout = 12_000;
 const diagnosticsRefreshTimeout = 55_000;
 
 export type ClientKind = "auto" | "relay" | "direct";
-export type LampCommand =
+export type DeviceCommand =
   | "on"
   | "off"
   | "toggle"
@@ -32,10 +32,10 @@ export type LampCommand =
   | "window/show"
   | "window/hide";
 
-// RayanLampClient is the UI-facing controller contract. The relay implements
+// PCControllerDesktopClient is the UI-facing controller contract. The relay implements
 // it with the Go manager's authenticated loopback API; the portable build also
 // supplies a direct firmware implementation.
-export interface RayanLampClient {
+export interface PCControllerDesktopClient {
   readonly kind: ClientKind;
   readonly displayName: string;
   readonly syncKey: string;
@@ -59,7 +59,7 @@ export interface RayanLampClient {
     method: IntegrationRegistrationAction
   ): Promise<IntegrationRegistrationStatus>;
   status(): Promise<Snapshot>;
-  command(command: LampCommand): Promise<unknown>;
+  command(command: DeviceCommand): Promise<unknown>;
   diagnostics(endpoint: string): Promise<DiagnosticResult>;
   uiDiagnostics(): Promise<UIDiagnosticsSnapshot>;
   refreshUIDiagnostics(endpoints?: string[]): Promise<UIDiagnosticsRefreshResult>;
@@ -107,7 +107,7 @@ export function unwrapResponse<T>(value: unknown): T {
   );
 }
 
-export class RayanLampAPI implements RayanLampClient {
+export class PCControllerDesktopAPI implements PCControllerDesktopClient {
   readonly kind = "relay" as const;
   readonly displayName = "Go coordinator";
   private csrf = "";
@@ -247,13 +247,13 @@ export class RayanLampAPI implements RayanLampClient {
     return this.request<Snapshot>("/status");
   }
 
-  async command(command: LampCommand): Promise<unknown> {
+  async command(command: DeviceCommand): Promise<unknown> {
     const path =
       command === "reconnect"
         ? "/reconnect"
         : command.startsWith("window/")
           ? `/${command}`
-          : `/lamp/${command}`;
+          : `/device/${command}`;
     return this.request(path, { method: "POST" });
   }
 
@@ -301,7 +301,7 @@ export class RayanLampAPI implements RayanLampClient {
   ): Promise<UIConfigResult> {
     const headers: Record<string, string> = {
       "Content-Type": "audio/wav",
-      "X-RayanLamp-Filename": safeAudioFilenameHeader(file.name)
+      "X-PCControllerDesktop-Filename": safeAudioFilenameHeader(file.name)
     };
     if (revision !== undefined && revision !== "") {
       headers["If-Match"] = String(revision);
@@ -362,7 +362,7 @@ export class RayanLampAPI implements RayanLampClient {
       headers.set("Content-Type", "application/json");
     }
     if (mutating) {
-      headers.set("X-RayanLamp-CSRF", this.csrf);
+      headers.set("X-PCControllerDesktop-CSRF", this.csrf);
     }
 
     try {

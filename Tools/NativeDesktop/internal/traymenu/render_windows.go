@@ -18,7 +18,7 @@ import (
 	"github.com/lxn/win"
 	"golang.org/x/sys/windows"
 
-	"rayanlamp.local/app/internal/graphics"
+	"pccontroller.local/desktop/internal/graphics"
 )
 
 const (

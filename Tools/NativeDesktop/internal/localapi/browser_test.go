@@ -13,12 +13,12 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"rayanlamp.local/app/internal/buildinfo"
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/diagnostics"
-	"rayanlamp.local/app/internal/ipc"
-	"rayanlamp.local/app/internal/model"
-	"rayanlamp.local/app/internal/webui"
+	"pccontroller.local/desktop/internal/buildinfo"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/diagnostics"
+	"pccontroller.local/desktop/internal/ipc"
+	"pccontroller.local/desktop/internal/model"
+	"pccontroller.local/desktop/internal/webui"
 )
 
 type testEventSource struct {
@@ -35,7 +35,7 @@ func newTestEventSource() *testEventSource {
 	return &testEventSource{
 		snapshot: model.Snapshot{
 			State:           model.StateOff,
-			DeviceURL:       cfg.Lamp.BaseURL,
+			DeviceURL:       cfg.Device.BaseURL,
 			HTTPReachable:   true,
 			LastSource:      "test",
 			LastConnected:   time.Now().UTC(),
@@ -107,7 +107,7 @@ func startBrowserAPI(
 		EventSource: source,
 		AppHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			_, _ = io.WriteString(w, "<!doctype html><title>Rayan Lamp</title>")
+			_, _ = io.WriteString(w, "<!doctype html><title>PCController</title>")
 		}),
 	}
 	for _, apply := range configure {
@@ -141,8 +141,8 @@ type testDiagnosticsSource struct {
 
 func newTestDiagnosticsSource() *testDiagnosticsSource {
 	source := newTestEventSource()
-	snapshot := diagnostics.NewSnapshot(source.Config().Lamp.BaseURL)
-	snapshot.Device.DeviceName = "Rayan Lamp"
+	snapshot := diagnostics.NewSnapshot(source.Config().Device.BaseURL)
+	snapshot.Device.DeviceName = "PCController"
 	snapshot.Endpoints["/info"] = diagnostics.EndpointResult{
 		Document: diagnostics.Document{
 			Endpoint:  "/info",
@@ -319,7 +319,7 @@ func TestBrowserMutationRequiresCSRFAndBearerRemainsCompatible(t *testing.T) {
 
 	call := func(token string, bearer bool) int {
 		t.Helper()
-		request, err := http.NewRequest(http.MethodPost, running.origin+"/lamp/on", nil)
+		request, err := http.NewRequest(http.MethodPost, running.origin+"/device/on", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -545,7 +545,7 @@ func TestBootstrapCapabilityOverridesAreHostSpecific(t *testing.T) {
 			t.Errorf("headless override %q = true", name)
 		}
 	}
-	if !envelope.Result.Capabilities["lamp_control"] ||
+	if !envelope.Result.Capabilities["device_control"] ||
 		!envelope.Result.Capabilities["configuration"] {
 		t.Fatalf(
 			"host-neutral capabilities were lost: %#v",
@@ -854,7 +854,7 @@ func TestDiagnosticsBootstrapRoutesAndStreamUseParsedSnapshot(t *testing.T) {
 	bootstrapResponse, bootstrap := request(http.MethodGet, "/ui/bootstrap", "")
 	if bootstrapResponse.StatusCode != http.StatusOK ||
 		!strings.Contains(string(bootstrap), `"diagnostics":true`) ||
-		!strings.Contains(string(bootstrap), `"device_name":"Rayan Lamp"`) {
+		!strings.Contains(string(bootstrap), `"device_name":"PCController"`) {
 		t.Fatalf("diagnostics bootstrap = %d %s", bootstrapResponse.StatusCode, bootstrap)
 	}
 	if strings.Contains(string(bootstrap), "secret-raw-diagnostics") {
@@ -863,7 +863,7 @@ func TestDiagnosticsBootstrapRoutesAndStreamUseParsedSnapshot(t *testing.T) {
 
 	getResponse, getBody := request(http.MethodGet, "/ui/diagnostics", "")
 	if getResponse.StatusCode != http.StatusOK ||
-		!strings.Contains(string(getBody), `"device_name":"Rayan Lamp"`) {
+		!strings.Contains(string(getBody), `"device_name":"PCController"`) {
 		t.Fatalf("GET diagnostics = %d %s", getResponse.StatusCode, getBody)
 	}
 
@@ -880,7 +880,7 @@ func TestDiagnosticsBootstrapRoutesAndStreamUseParsedSnapshot(t *testing.T) {
 	if err := connection.ReadJSON(&hello); err != nil {
 		t.Fatal(err)
 	}
-	if hello.Diagnostics == nil || hello.Diagnostics.Device.DeviceName != "Rayan Lamp" {
+	if hello.Diagnostics == nil || hello.Diagnostics.Device.DeviceName != "PCController" {
 		t.Fatalf("diagnostics hello = %#v", hello)
 	}
 
@@ -915,7 +915,7 @@ func TestDiagnosticsBootstrapRoutesAndStreamUseParsedSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	if event.Type != "diagnostics" || event.Diagnostics == nil ||
-		event.Diagnostics.Device.DeviceName != "Rayan Lamp" {
+		event.Diagnostics.Device.DeviceName != "PCController" {
 		t.Fatalf("diagnostics event = %#v", event)
 	}
 }
@@ -923,7 +923,7 @@ func TestDiagnosticsBootstrapRoutesAndStreamUseParsedSnapshot(t *testing.T) {
 func TestBrowserRegistrationRouteIsReadOnlyByDefaultAndCSRFProtected(t *testing.T) {
 	source := newTestEventSource()
 	handler := &recordedHandler{result: map[string]any{
-		"executable":       `C:\Apps\RayanLamp.exe`,
+		"executable":       `C:\Apps\PCControllerDesktop.exe`,
 		"shell_registered": false,
 		"com_registered":   false,
 	}}

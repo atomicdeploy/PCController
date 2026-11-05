@@ -1,7 +1,7 @@
 //go:build windows
 
 // Package application composes the independently testable core, transports,
-// and Windows shell into the primary RayanLamp process.
+// and Windows shell into the primary PCControllerDesktop process.
 package application
 
 import (
@@ -15,21 +15,21 @@ import (
 	"sync/atomic"
 	"time"
 
-	"rayanlamp.local/app/internal/appcore"
-	"rayanlamp.local/app/internal/cli"
-	"rayanlamp.local/app/internal/commands"
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/ipc"
-	"rayanlamp.local/app/internal/localapi"
-	"rayanlamp.local/app/internal/sfx"
-	"rayanlamp.local/app/internal/ui"
-	"rayanlamp.local/app/internal/webui"
-	"rayanlamp.local/app/internal/winfx"
+	"pccontroller.local/desktop/internal/appcore"
+	"pccontroller.local/desktop/internal/cli"
+	"pccontroller.local/desktop/internal/commands"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/ipc"
+	"pccontroller.local/desktop/internal/localapi"
+	"pccontroller.local/desktop/internal/sfx"
+	"pccontroller.local/desktop/internal/ui"
+	"pccontroller.local/desktop/internal/webui"
+	"pccontroller.local/desktop/internal/winfx"
 )
 
 var (
-	ErrAlreadyRunning = errors.New("RayanLamp is already running")
-	ErrClosed         = errors.New("RayanLamp application is closed")
+	ErrAlreadyRunning = errors.New("PCControllerDesktop is already running")
+	ErrClosed         = errors.New("PCControllerDesktop application is closed")
 )
 
 type primaryIPCServer interface {
@@ -272,7 +272,7 @@ func startupWindowModeForOptions(options cli.Options) ui.StartupWindowMode {
 		case "window.show", "settings.show", "diagnostics.show":
 			return ui.StartupForceShow
 		default:
-			// Lamp/control commands may bootstrap a primary instance in the
+			// Device/control commands may bootstrap a primary instance in the
 			// background, but that one-shot launch intent must not overwrite
 			// the user's remembered visibility or native show state.
 			return ui.StartupForceHidden
@@ -484,7 +484,7 @@ func newLogger(configPath string) (*log.Logger, *os.File, error) {
 	if err := os.MkdirAll(logDir, 0o700); err != nil {
 		return nil, nil, fmt.Errorf("create log directory: %w", err)
 	}
-	logPath := filepath.Join(logDir, "RayanLamp.log")
+	logPath := filepath.Join(logDir, "PCControllerDesktop.log")
 	if info, err := os.Stat(logPath); err == nil && info.Size() > 2<<20 {
 		_ = os.Rename(logPath, logPath+".previous")
 	}

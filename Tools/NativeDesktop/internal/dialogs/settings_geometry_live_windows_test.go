@@ -16,16 +16,16 @@ import (
 	"github.com/lxn/win"
 	"golang.org/x/sys/windows"
 
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/design"
-	"rayanlamp.local/app/internal/winfx"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/design"
+	"pccontroller.local/desktop/internal/winfx"
 )
 
 // This test owns every HWND it uses. It does not inject input or operate other
 // applications. Screenshots are optional evidence, never renderer input.
 func TestSettingsWindowGeometryLifecycle(t *testing.T) {
-	if os.Getenv("RAYANLAMP_WINDOW_TESTS") != "1" {
-		t.Skip("set RAYANLAMP_WINDOW_TESTS=1 for native window integration")
+	if os.Getenv("PCCONTROLLER_DESKTOP_WINDOW_TESTS") != "1" {
+		t.Skip("set PCCONTROLLER_DESKTOP_WINDOW_TESTS=1 for native window integration")
 	}
 	for _, name := range []string{"owned", "ownerless", "persian"} {
 		t.Run(name, func(t *testing.T) {
@@ -184,7 +184,7 @@ func activateSettingsTestManifest(t *testing.T) func() {
 		}
 	}
 	_, source, _, _ := runtime.Caller(0)
-	manifest, err := windows.UTF16PtrFromString(filepath.Join(filepath.Dir(source), "..", "..", "resources", "RayanLamp.exe.manifest"))
+	manifest, err := windows.UTF16PtrFromString(filepath.Join(filepath.Dir(source), "..", "..", "resources", "PCControllerDesktop.exe.manifest"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,8 +206,8 @@ func activateSettingsTestManifest(t *testing.T) func() {
 	}
 }
 
-func TestControllerSettingsRetainDonorEditorsWithoutLampRoutes(t *testing.T) {
-	if os.Getenv("RAYANLAMP_WINDOW_TESTS") != "1" {
+func TestControllerSettingsRetainDonorEditorsWithoutDeviceRoutes(t *testing.T) {
+	if os.Getenv("PCCONTROLLER_DESKTOP_WINDOW_TESTS") != "1" {
 		t.Skip("native window integration is opt-in")
 	}
 	runtime.LockOSThread()
@@ -225,7 +225,7 @@ func TestControllerSettingsRetainDonorEditorsWithoutLampRoutes(t *testing.T) {
 	cfg := config.Default()
 	cfg.UI.Locale, cfg.UI.Theme, cfg.UI.Animations = "en", "dark", false
 	cfg.UI.SettingsTab = 5 // Old six-tab donor preference must clamp safely.
-	cfg.Lamp.BaseURL = "http://127.0.0.1:1"
+	cfg.Device.BaseURL = "http://127.0.0.1:1"
 	session, err := newSettingsDialogSession(owner, cfg, SettingsActions{ControllerMode: true}, true)
 	if err != nil {
 		t.Fatal(err)
@@ -253,7 +253,7 @@ func TestControllerSettingsRetainDonorEditorsWithoutLampRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Lamp != cfg.Lamp || got.Integration.LocalAPIToken != cfg.Integration.LocalAPIToken || got.Automation.OnScript != `C:\Automation\running.ps1` || !got.Notifications.Sound {
+	if got.Device != cfg.Device || got.Integration.LocalAPIToken != cfg.Integration.LocalAPIToken || got.Automation.OnScript != `C:\Automation\running.ps1` || !got.Notifications.Sound {
 		t.Fatal("controller settings corrupted dormant settings or discarded drafts")
 	}
 	for index := 0; index < c.tabs.Pages().Len(); index++ {
@@ -327,7 +327,7 @@ func pumpSettingsTestMessages(owner *walk.MainWindow, duration time.Duration) {
 
 func captureSettingsTestWindow(t *testing.T, dialog *walk.Dialog, name string) {
 	t.Helper()
-	tool, directory := os.Getenv("RAYANLAMP_CAPTURE_TOOL"), os.Getenv("RAYANLAMP_SCREENSHOTS")
+	tool, directory := os.Getenv("PCCONTROLLER_DESKTOP_CAPTURE_TOOL"), os.Getenv("PCCONTROLLER_DESKTOP_SCREENSHOTS")
 	if tool == "" || directory == "" {
 		return
 	}

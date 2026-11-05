@@ -12,14 +12,14 @@ import (
 	"time"
 
 	"github.com/lxn/walk"
-	"rayanlamp.local/app/assets"
-	"rayanlamp.local/app/internal/appcore"
-	"rayanlamp.local/app/internal/commands"
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/design"
-	"rayanlamp.local/app/internal/traymenu"
-	"rayanlamp.local/app/internal/winfx"
-	"rayanlamp.local/app/presentation"
+	"pccontroller.local/desktop/assets"
+	"pccontroller.local/desktop/internal/appcore"
+	"pccontroller.local/desktop/internal/commands"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/design"
+	"pccontroller.local/desktop/internal/traymenu"
+	"pccontroller.local/desktop/internal/winfx"
+	"pccontroller.local/desktop/presentation"
 )
 
 type controllerButton struct {
@@ -83,7 +83,7 @@ func RunController(ctx context.Context, options presentation.Options) error {
 	_, statErr := os.Stat(options.ConfigPath)
 	cfg = controllerStartupConfig(cfg, errors.Is(statErr, os.ErrNotExist))
 	// Window-position persistence reads the on-disk configuration. Persist the
-	// adapted mode too, so it cannot resurrect donor lamp routes or chrome.
+	// adapted mode too, so it cannot resurrect donor device routes or chrome.
 	if err := config.Save(options.ConfigPath, cfg); err != nil {
 		return err
 	}
@@ -329,7 +329,7 @@ func (s *Shell) activateControllerAction(action actionID) bool {
 		}
 	case actionReconnect:
 		s.invokeController("reconnect")
-	case actionToggle, actionOn, actionOff: // Never reinterpret donor lamp actions as outputs.
+	case actionToggle, actionOn, actionOff: // Never reinterpret donor device actions as outputs.
 	default:
 		return false
 	}
@@ -337,7 +337,7 @@ func (s *Shell) activateControllerAction(action actionID) bool {
 }
 
 func (s *Shell) invokeController(command string) {
-	if command == "lamp.on" || command == "lamp.off" || command == "lamp.toggle" {
+	if command == "device.on" || command == "device.off" || command == "device.toggle" {
 		return
 	}
 	s.runControllerOperation(func(ctx context.Context) error { return s.controller.Execute(ctx, command) })
@@ -576,7 +576,7 @@ func (s *Shell) showControllerMenu(x, y int32) {
 
 func (s *Shell) openControllerAppearance() {
 	// Reuse the donor's themed menu and transactional appearance implementation;
-	// omit its lamp address, lamp diagnostics and registration settings.
+	// omit its device address, device diagnostics and registration settings.
 	items := []traymenu.Item{{ID: "system", Label: "System theme"}, {ID: "dark", Label: "Dark theme"}, {ID: "light", Label: "Light theme"}, {Separator: true}, {ID: "auto", Label: "Automatic material"}, {ID: "mica", Label: "Mica"}, {ID: "acrylic", Label: "Acrylic"}, {ID: "solid", Label: "Solid"}, {Separator: true}, {ID: "motion", Label: "Animations", Checked: s.Config().UI.Animations}, {ID: "pin", Label: "Always on top", Checked: s.Config().UI.AlwaysOnTop}}
 	items = append(items, traymenu.Item{Separator: true}, traymenu.Item{ID: "glass", Label: "Raised glass controls", Checked: s.Config().UI.LayeredForeground}, traymenu.Item{ID: "flat", Label: "Flat controls", Checked: !s.Config().UI.LayeredForeground})
 	items = append(items, traymenu.Item{Separator: true}, traymenu.Item{ID: "macos", Label: "macOS titlebar", Checked: s.Config().UI.ControllerChrome != "windows"}, traymenu.Item{ID: "windows", Label: "Windows titlebar", Checked: s.Config().UI.ControllerChrome == "windows"})

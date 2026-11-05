@@ -6,7 +6,7 @@ import (
 	"image"
 	"testing"
 
-	"rayanlamp.local/app/internal/animation"
+	"pccontroller.local/desktop/internal/animation"
 )
 
 func TestResidentAnimationBytesCountsOnlyResidentPixels(t *testing.T) {

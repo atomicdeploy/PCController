@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"rayanlamp.local/app/internal/ipc"
+	"pccontroller.local/desktop/internal/ipc"
 )
 
 func TestWindowsAliases(t *testing.T) {
@@ -15,7 +15,7 @@ func TestWindowsAliases(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if options.Method != "lamp.on" || !options.JSON {
+	if options.Method != "device.on" || !options.JSON {
 		t.Fatalf("unexpected options: %+v", options)
 	}
 }
@@ -45,7 +45,7 @@ func TestHideWindowsAndGNUAliases(t *testing.T) {
 }
 
 func TestNotifyAndEndpoint(t *testing.T) {
-	options, err := Parse([]string{"--notify", "hello", "from", "the", "lamp", "--title", "Rayan"})
+	options, err := Parse([]string{"--notify", "hello", "from", "the", "device", "--title", "Controller"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestNotifyAndEndpoint(t *testing.T) {
 		t.Fatalf("unexpected method: %s", options.Method)
 	}
 	params := options.Params.(map[string]string)
-	if params["message"] != "hello from the lamp" || params["title"] != "Rayan" {
+	if params["message"] != "hello from the device" || params["title"] != "Controller" {
 		t.Fatalf("unexpected params: %#v", params)
 	}
 
@@ -119,9 +119,9 @@ func TestURIActivationMapsToCanonicalCommands(t *testing.T) {
 		args   []string
 		method string
 	}{
-		{[]string{"/uri", "rayan-lamp://on"}, "lamp.on"},
-		{[]string{"--uri=rayan-lamp:/off"}, "lamp.off"},
-		{[]string{"/URI", "RAYAN-LAMP://SETTINGS"}, "settings.show"},
+		{[]string{"/uri", "pccontroller-desktop://on"}, "device.on"},
+		{[]string{"--uri=pccontroller-desktop:/off"}, "device.off"},
+		{[]string{"/URI", "PCCONTROLLER-DESKTOP://SETTINGS"}, "settings.show"},
 	} {
 		options, err := Parse(test.args)
 		if err != nil {
@@ -137,9 +137,9 @@ func TestURIActivationRejectsInvalidAndConflictingCommands(t *testing.T) {
 	for _, args := range [][]string{
 		{"/uri", ""},
 		{"/uri", "https://example.com/on"},
-		{"/uri", "rayan-lamp://quit"},
-		{"/uri", "rayan-lamp://on", "/off"},
-		{"/register-shell", "/uri", "rayan-lamp://on"},
+		{"/uri", "pccontroller-desktop://quit"},
+		{"/uri", "pccontroller-desktop://on", "/off"},
+		{"/register-shell", "/uri", "pccontroller-desktop://on"},
 	} {
 		if options, err := Parse(args); err == nil {
 			t.Fatalf("Parse(%v) = %+v, want error", args, options)
@@ -247,7 +247,7 @@ func TestPrivateCleanupHelperParsing(t *testing.T) {
 		"/parent-pid",
 		"4294967295",
 		"/install-path",
-		`C:\Program Files\RayanLamp`,
+		`C:\Program Files\PCControllerDesktop`,
 		"/remove-user-data",
 	})
 	if err != nil {
@@ -302,7 +302,7 @@ func TestPrintResponseUsesCompleteANSIAndEmojiWhenForced(t *testing.T) {
 		t.Setenv(name, "")
 	}
 	t.Setenv("FORCE_COLOR", "1")
-	t.Setenv("RAYANLAMP_EMOJI", "always")
+	t.Setenv("PCCONTROLLER_DESKTOP_EMOJI", "always")
 	var output bytes.Buffer
 
 	err := PrintResponse(
@@ -324,7 +324,7 @@ func TestPrintResponseUsesCompleteANSIAndEmojiWhenForced(t *testing.T) {
 
 func TestPrintResponseIsPlainWhenRedirectedOrNoColor(t *testing.T) {
 	t.Setenv("FORCE_COLOR", "0")
-	t.Setenv("RAYANLAMP_EMOJI", "never")
+	t.Setenv("PCCONTROLLER_DESKTOP_EMOJI", "never")
 	var output bytes.Buffer
 
 	err := PrintResponse(

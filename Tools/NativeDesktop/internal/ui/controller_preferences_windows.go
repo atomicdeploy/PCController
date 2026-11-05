@@ -4,7 +4,7 @@ package ui
 
 import (
 	"github.com/lxn/walk"
-	"rayanlamp.local/app/internal/config"
+	"pccontroller.local/desktop/internal/config"
 	"strings"
 )
 

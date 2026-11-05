@@ -2,7 +2,7 @@
 
 package ui
 
-import "rayanlamp.local/app/internal/config"
+import "pccontroller.local/desktop/internal/config"
 
 func controllerStartupConfig(cfg config.Config, firstRun bool) config.Config {
 	if firstRun {
@@ -15,7 +15,7 @@ func controllerStartupConfig(cfg config.Config, firstRun bool) config.Config {
 		cfg.Notifications.Enabled, cfg.Notifications.Sound = false, false
 	}
 	// The donor core is never started, but keep its dormant endpoint inert too.
-	cfg.Lamp.BaseURL = "http://127.0.0.1:1"
+	cfg.Device.BaseURL = "http://127.0.0.1:1"
 	return cfg
 }
 

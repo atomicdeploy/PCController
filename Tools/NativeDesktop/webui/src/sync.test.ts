@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { RayanLampClient } from "./api";
+import type { PCControllerDesktopClient } from "./api";
 import {
   audioCueCount,
   connectionSyncNames,
@@ -148,25 +148,25 @@ describe("audible cue projection", () => {
 
 describe("per-connection realtime coordination", () => {
   it("isolates relay and direct targets while remaining stable per target", () => {
-    const first = connectionSyncNames("direct:http://rayanlamp.local");
-    expect(connectionSyncNames("direct:http://rayanlamp.local")).toEqual(first);
+    const first = connectionSyncNames("direct:http://pccontroller-desktop.local");
+    expect(connectionSyncNames("direct:http://pccontroller-desktop.local")).toEqual(first);
     expect(connectionSyncNames("relay:http://127.0.0.1:47831")).not.toEqual(
       first
     );
-    expect(connectionSyncNames("direct:http://other-lamp.local")).not.toEqual(
+    expect(connectionSyncNames("direct:http://other-device.local")).not.toEqual(
       first
     );
   });
 
   it("keeps config synchronization active when device events are disabled", () => {
     vi.stubGlobal("BroadcastChannel", TestBroadcastChannel);
-    const realtimeURL = vi.fn(() => "ws://rayanlamp.local/ws");
+    const realtimeURL = vi.fn(() => "ws://pccontroller-desktop.local/ws");
     const api = {
       kind: "direct",
-      displayName: "Direct to lamp",
-      syncKey: "direct:http://rayanlamp.local",
+      displayName: "Direct to device",
+      syncKey: "direct:http://pccontroller-desktop.local",
       realtimeURL
-    } as unknown as RayanLampClient;
+    } as unknown as PCControllerDesktopClient;
     const bootstrap = structuredClone(testBootstrap);
     bootstrap.config.ui.theme = "dark";
     applyBootstrap(bootstrap);
@@ -206,16 +206,16 @@ describe("per-connection realtime coordination", () => {
       const playAudio = vi.fn(async () => ({}));
       const api = {
         kind: "direct",
-        displayName: "Direct to lamp",
-        syncKey: "direct:http://rayanlamp.local",
-        realtimeURL: () => "ws://rayanlamp.local/ws",
+        displayName: "Direct to device",
+        syncKey: "direct:http://pccontroller-desktop.local",
+        realtimeURL: () => "ws://pccontroller-desktop.local/ws",
         realtimeOpened: () => [
           { type: "snapshot", snapshot: structuredClone(bootstrap.snapshot) }
         ],
         realtimeClosed: () => [],
         decodeRealtimeMessage: () => [],
         playAudio
-      } as unknown as RayanLampClient;
+      } as unknown as PCControllerDesktopClient;
 
       const sync = new RealtimeSync(api);
       sync.start();
@@ -242,16 +242,16 @@ describe("per-connection realtime coordination", () => {
       const playAudio = vi.fn(async () => ({}));
       const api = {
         kind: "direct",
-        displayName: "Direct to lamp",
-        syncKey: "direct:http://rayanlamp.local",
-        realtimeURL: () => "ws://rayanlamp.local/ws",
+        displayName: "Direct to device",
+        syncKey: "direct:http://pccontroller-desktop.local",
+        realtimeURL: () => "ws://pccontroller-desktop.local/ws",
         realtimeOpened: () => [
           { type: "snapshot", snapshot: structuredClone(bootstrap.snapshot) }
         ],
         realtimeClosed: () => [],
         decodeRealtimeMessage: () => [],
         playAudio
-      } as unknown as RayanLampClient;
+      } as unknown as PCControllerDesktopClient;
       const first = new RealtimeSync(api);
       const second = new RealtimeSync(api);
 
@@ -280,11 +280,11 @@ describe("per-connection realtime coordination", () => {
       const playAudio = vi.fn(async () => ({}));
       const api = {
         kind: "direct",
-        displayName: "Direct to lamp",
-        syncKey: "direct:http://rayanlamp.local",
-        realtimeURL: () => "ws://rayanlamp.local/ws",
+        displayName: "Direct to device",
+        syncKey: "direct:http://pccontroller-desktop.local",
+        realtimeURL: () => "ws://pccontroller-desktop.local/ws",
         playAudio
-      } as unknown as RayanLampClient;
+      } as unknown as PCControllerDesktopClient;
       const sync = new RealtimeSync(api, { connectEvents: false });
       sync.start();
       await vi.advanceTimersByTimeAsync(100);
@@ -307,11 +307,11 @@ describe("per-connection realtime coordination", () => {
     const playAudio = vi.fn(async () => ({}));
     const api = {
       kind: "direct",
-      displayName: "Direct to lamp",
-      syncKey: "direct:http://rayanlamp.local",
-      realtimeURL: () => "ws://rayanlamp.local/ws",
+      displayName: "Direct to device",
+      syncKey: "direct:http://pccontroller-desktop.local",
+      realtimeURL: () => "ws://pccontroller-desktop.local/ws",
       playAudio
-    } as unknown as RayanLampClient;
+    } as unknown as PCControllerDesktopClient;
     const sync = new RealtimeSync(api, { connectEvents: false });
     sync.start();
     const publisher = new TestBroadcastChannel(
@@ -329,7 +329,7 @@ describe("per-connection realtime coordination", () => {
       protocol: 1,
       sender: "leader-tab",
       kind: "message",
-      title: "Rayan Lamp",
+      title: "PCController",
       message: "beep",
       cueCount: 2,
       connected: true
@@ -355,7 +355,7 @@ describe("per-connection realtime coordination", () => {
         realtimeClosed: () => [],
         decodeRealtimeMessage: () => [],
         establishSession: vi.fn(async () => "csrf-next")
-      } as unknown as RayanLampClient;
+      } as unknown as PCControllerDesktopClient;
       const sync = new RealtimeSync(api);
       sync.start();
       await vi.advanceTimersByTimeAsync(100);
@@ -372,7 +372,7 @@ describe("per-connection realtime coordination", () => {
       expect(isOnline.value).toBe(false);
       expect(appPhase.value).toBe("offline");
       expect(snapshot.value.last_error).toBe(
-        "The RayanLamp controller shut down."
+        "The PCControllerDesktop controller shut down."
       );
       sync.stop();
     } finally {
@@ -397,7 +397,7 @@ describe("per-connection realtime coordination", () => {
         realtimeClosed: () => [],
         decodeRealtimeMessage: () => [],
         establishSession
-      } as unknown as RayanLampClient;
+      } as unknown as PCControllerDesktopClient;
       const sync = new RealtimeSync(api);
       sync.start();
       await vi.advanceTimersByTimeAsync(100);
@@ -426,13 +426,13 @@ describe("relay close messaging", () => {
         reason: "server shutting down",
         wasClean: true
       })
-    ).toBe("The RayanLamp controller shut down.");
+    ).toBe("The PCControllerDesktop controller shut down.");
     expect(
       relayDisconnectReason({
         code: 1006,
         reason: "",
         wasClean: false
       })
-    ).toBe("The RayanLamp controller connection was lost.");
+    ).toBe("The PCControllerDesktop controller connection was lost.");
   });
 });

@@ -11,10 +11,10 @@ import (
 
 	"github.com/lxn/walk"
 	"github.com/lxn/win"
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/traymenu"
-	"rayanlamp.local/app/internal/winfx"
-	"rayanlamp.local/app/presentation"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/traymenu"
+	"pccontroller.local/desktop/internal/winfx"
+	"pccontroller.local/desktop/presentation"
 )
 
 type controllerTelemetryPoint struct {

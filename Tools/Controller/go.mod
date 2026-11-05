@@ -1,7 +1,7 @@
 module pccontroller.local/controller
 
-// Imported, history-preserving RayanLamp native presentation stack.
-replace rayanlamp.local/app => ../NativeDesktop
+// Imported, history-preserving PCControllerDesktop native presentation stack.
+replace pccontroller.local/desktop => ../NativeDesktop
 
 // Preserve donor fixes to Walk's DPI/RTL geometry and native controls.
 replace github.com/lxn/walk => ../NativeDesktop/vendor/github.com/lxn/walk
@@ -26,7 +26,7 @@ require (
 	golang.org/x/net v0.62.0
 	golang.org/x/sys v0.49.0
 	gopkg.in/yaml.v3 v3.0.1
-	rayanlamp.local/app v0.0.0
+	pccontroller.local/desktop v0.0.0
 )
 
 require (

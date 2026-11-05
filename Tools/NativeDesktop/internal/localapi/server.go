@@ -21,9 +21,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/diagnostics"
-	"rayanlamp.local/app/internal/ipc"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/diagnostics"
+	"pccontroller.local/desktop/internal/ipc"
 )
 
 const (
@@ -473,7 +473,7 @@ func (a *api) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	mode, session := a.authenticate(r)
 	if mode == authenticationNone {
-		w.Header().Set("WWW-Authenticate", `Bearer realm="RayanLamp local API"`)
+		w.Header().Set("WWW-Authenticate", `Bearer realm="PCControllerDesktop local API"`)
 		writeError(w, http.StatusUnauthorized, "unauthorized", "valid bearer token required")
 		return
 	}
@@ -527,14 +527,14 @@ func (a *api) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.noBodyCommand(w, r, http.MethodGet, "ping")
 	case "/status":
 		a.noBodyCommand(w, r, http.MethodGet, "status")
-	case "/lamp/on":
-		a.noBodyCommand(w, r, http.MethodPost, "lamp.on")
-	case "/lamp/off":
-		a.noBodyCommand(w, r, http.MethodPost, "lamp.off")
-	case "/lamp/toggle":
-		a.noBodyCommand(w, r, http.MethodPost, "lamp.toggle")
-	case "/lamp/refresh":
-		a.noBodyCommand(w, r, http.MethodPost, "lamp.refresh")
+	case "/device/on":
+		a.noBodyCommand(w, r, http.MethodPost, "device.on")
+	case "/device/off":
+		a.noBodyCommand(w, r, http.MethodPost, "device.off")
+	case "/device/toggle":
+		a.noBodyCommand(w, r, http.MethodPost, "device.toggle")
+	case "/device/refresh":
+		a.noBodyCommand(w, r, http.MethodPost, "device.refresh")
 	case "/window/show":
 		a.noBodyCommand(w, r, http.MethodPost, "window.show")
 	case "/window/hide":
@@ -603,7 +603,7 @@ func isCoordinatorAPIPath(value string) bool {
 		return true
 	}
 	for _, prefix := range []string{
-		"/lamp/",
+		"/device/",
 		"/window/",
 		"/terminal/",
 		"/ui/",

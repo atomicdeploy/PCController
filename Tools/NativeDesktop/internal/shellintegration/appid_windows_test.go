@@ -24,7 +24,7 @@ func TestSetAppUserModelIDUsesStableIdentity(t *testing.T) {
 	if got != AppUserModelID {
 		t.Fatalf("AppUserModelID = %q", got)
 	}
-	if AppUserModelID != "YektaYar.RayanLamp" {
+	if AppUserModelID != "DRSDavidSoft.PCController" {
 		t.Fatalf("stable AppUserModelID changed to %q", AppUserModelID)
 	}
 }

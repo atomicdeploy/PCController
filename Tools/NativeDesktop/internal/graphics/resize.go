@@ -1,4 +1,4 @@
-// Package graphics contains image operations used by RayanLamp's native UI.
+// Package graphics contains image operations used by PCControllerDesktop's native UI.
 package graphics
 
 import (

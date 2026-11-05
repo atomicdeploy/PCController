@@ -152,7 +152,7 @@ const forbiddenTrackedExtensions = /\.(dll|elf|exe|hex|o|obj|upx|zip)$/i;
 // Preserve the complete donor artwork, not an arbitrary exemption for large
 // future files. A changed animation requires explicit size/provenance review.
 const reviewedLargeAssets = new Map([
-  ["Tools/NativeDesktop/assets/lamp-transition.apng", "1cc2a888ba804f1a0a6560447bf69680e0d99a617d5d1548b42558e5d09cb86d"],
+  ["Tools/NativeDesktop/assets/device-transition.apng", "1cc2a888ba804f1a0a6560447bf69680e0d99a617d5d1548b42558e5d09cb86d"],
 ]);
 
 for (const relativePath of trackedFiles) {

@@ -76,7 +76,7 @@ func (s *memoryAssociationStore) DeleteTree(path string) error {
 }
 
 func TestRegisterWithStoreCreatesExactAssociation(t *testing.T) {
-	executable := makeTestExecutable(t, "Rayan Lamp.exe")
+	executable := makeTestExecutable(t, "PCController.exe")
 	store := newMemoryAssociationStore()
 
 	if err := registerWithStore(store, executable); err != nil {
@@ -99,7 +99,7 @@ func TestRegisterWithStoreCreatesExactAssociation(t *testing.T) {
 }
 
 func TestRegisterWithStoreIsIdempotentForSameOwner(t *testing.T) {
-	executable := makeTestExecutable(t, "RayanLamp.exe")
+	executable := makeTestExecutable(t, "PCControllerDesktop.exe")
 	store := newMemoryAssociationStore()
 	if err := registerWithStore(store, executable); err != nil {
 		t.Fatal(err)
@@ -114,9 +114,9 @@ func TestRegisterWithStoreIsIdempotentForSameOwner(t *testing.T) {
 }
 
 func TestRegisterWithStorePreservesDifferentOwner(t *testing.T) {
-	executable := makeTestExecutable(t, "RayanLamp.exe")
+	executable := makeTestExecutable(t, "PCControllerDesktop.exe")
 	store := newMemoryAssociationStore()
-	foreign := `"C:\Other\RayanLamp.exe" /uri "%1"`
+	foreign := `"C:\Other\PCControllerDesktop.exe" /uri "%1"`
 	store.keys[protocolRootPath] = true
 	store.keys[protocolOpenPath] = true
 	store.values[protocolOpenPath] = map[string]string{"": foreign}
@@ -132,7 +132,7 @@ func TestRegisterWithStorePreservesDifferentOwner(t *testing.T) {
 }
 
 func TestRegisterWithStoreTreatsOwnerlessExistingTreeAsConflict(t *testing.T) {
-	executable := makeTestExecutable(t, "RayanLamp.exe")
+	executable := makeTestExecutable(t, "PCControllerDesktop.exe")
 	store := newMemoryAssociationStore()
 	store.keys[protocolRootPath] = true
 	store.values[protocolRootPath] = map[string]string{"": "Another handler"}
@@ -147,7 +147,7 @@ func TestRegisterWithStoreTreatsOwnerlessExistingTreeAsConflict(t *testing.T) {
 }
 
 func TestRegisterWithStoreCleansNewPartialTreeAfterFailure(t *testing.T) {
-	executable := makeTestExecutable(t, "RayanLamp.exe")
+	executable := makeTestExecutable(t, "PCControllerDesktop.exe")
 	store := newMemoryAssociationStore()
 	store.failPath = protocolIconPath
 
@@ -164,7 +164,7 @@ func TestRegisterWithStoreCleansNewPartialTreeAfterFailure(t *testing.T) {
 }
 
 func TestUnregisterWithStoreDeletesOnlySameOwner(t *testing.T) {
-	executable := makeTestExecutable(t, "RayanLamp.exe")
+	executable := makeTestExecutable(t, "PCControllerDesktop.exe")
 	store := newMemoryAssociationStore()
 	if err := registerWithStore(store, executable); err != nil {
 		t.Fatal(err)
@@ -182,9 +182,9 @@ func TestUnregisterWithStoreDeletesOnlySameOwner(t *testing.T) {
 }
 
 func TestUnregisterWithStorePreservesDifferentOwner(t *testing.T) {
-	executable := makeTestExecutable(t, "RayanLamp.exe")
+	executable := makeTestExecutable(t, "PCControllerDesktop.exe")
 	store := newMemoryAssociationStore()
-	foreign := `"C:\Moved\RayanLamp.exe" /uri "%1"`
+	foreign := `"C:\Moved\PCControllerDesktop.exe" /uri "%1"`
 	store.keys[protocolRootPath] = true
 	store.keys[protocolOpenPath] = true
 	store.values[protocolOpenPath] = map[string]string{"": foreign}
@@ -200,14 +200,14 @@ func TestUnregisterWithStorePreservesDifferentOwner(t *testing.T) {
 }
 
 func TestUnregisterWithStoreIsIdempotentWhenAbsent(t *testing.T) {
-	executable := makeTestExecutable(t, "RayanLamp.exe")
+	executable := makeTestExecutable(t, "PCControllerDesktop.exe")
 	if err := unregisterWithStore(newMemoryAssociationStore(), executable); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestIsRegisteredWithStoreIsReadOnlyAndOwnerSpecific(t *testing.T) {
-	executable := makeTestExecutable(t, "RayanLamp.exe")
+	executable := makeTestExecutable(t, "PCControllerDesktop.exe")
 	store := newMemoryAssociationStore()
 
 	registered, err := isRegisteredWithStore(store, executable)
@@ -233,7 +233,7 @@ func TestIsRegisteredWithStoreIsReadOnlyAndOwnerSpecific(t *testing.T) {
 		t.Fatalf("read-only probe mutated the store: writes=%v deletes=%v", store.writes, store.deletions)
 	}
 
-	store.values[protocolOpenPath][""] = `"C:\Other\RayanLamp.exe" /uri "%1"`
+	store.values[protocolOpenPath][""] = `"C:\Other\PCControllerDesktop.exe" /uri "%1"`
 	registered, err = isRegisteredWithStore(store, executable)
 	if err != nil {
 		t.Fatal(err)
@@ -244,7 +244,7 @@ func TestIsRegisteredWithStoreIsReadOnlyAndOwnerSpecific(t *testing.T) {
 }
 
 func TestRegistryHelpersRejectNilOrSurfaceStoreErrors(t *testing.T) {
-	executable := makeTestExecutable(t, "RayanLamp.exe")
+	executable := makeTestExecutable(t, "PCControllerDesktop.exe")
 	if err := registerWithStore(nil, executable); err == nil {
 		t.Fatal("nil register store was accepted")
 	}

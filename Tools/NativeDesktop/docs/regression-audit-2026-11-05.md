@@ -10,9 +10,9 @@ This pass addresses the white main-window border and collapsed Settings size,
 plus related chrome transitions, geometry persistence, and message routing.
 No computer-control tool or input automation was used. Native tests create
 their own windows through the production setup and record regular desktop
-screenshots. The tests never start the lamp connection lifecycle or actuate it.
+screenshots. The tests never start the device connection lifecycle or actuate it.
 
-When this regression pass began, the supplied directory had no `.git` metadata. No usable RayanLamp
+When this regression pass began, the supplied directory had no `.git` metadata. No usable PCControllerDesktop
 Git history was found in the inspected workspace/backups; the repository URL
 recorded in the changelog was not accessible as a repository. Consequently no
 honest commit-hash range or `git bisect` result is available. The causal feature
@@ -24,7 +24,7 @@ not retroactively provide original build snapshots or a valid build-bisect range
 
 The previous distribution was preserved before rebuilding:
 
-- `RayanLamp.exe`: 41,645,056 bytes;
+- `PCControllerDesktop.exe`: 41,645,056 bytes;
 - SHA-256: `6A1C3D8CD3BAEC5D845D858DBF410C882937F642289AE51D4BFCAA0E7E398C69`;
 - executable timestamp: July 25, 01:24; the later interrupted source edits
   were not included in that binary. A source ZIP was also retained under the
@@ -87,12 +87,12 @@ acceptance uses actual screenshots rather than claiming attribute readback.
 
 ## Build and test receipt
 
-- Output: `dist/RayanLamp.exe`, Windows/amd64 **develop**, CGO disabled;
+- Output: `dist/PCControllerDesktop.exe`, Windows/amd64 **develop**, CGO disabled;
   41,674,752 bytes.
 - SHA-256: `E8CD6F23B2C529113CBC39C6B5E9A1D4928DF986F962188CF2B54DE2A637C35B`.
 - Canonical PE verification passed: architecture, console subsystem, icons,
   manifest, VERSIONINFO, native debug payload, and embedded develop Web edition.
-- Full `go vet -tags rayanlamp_develop ./...` passed.
+- Full `go vet -tags pccontroller_desktop_develop ./...` passed.
 - Complete tests for config, UI, dialogs, winfx, CLI, and embedded Web passed.
   The TUI suite passed with only network API-transport tests excluded.
 - Web TypeScript check and all 193 tests across 23 files passed. Vite/PWA

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"rayanlamp.local/app/internal/config"
+	"pccontroller.local/desktop/internal/config"
 )
 
 type standaloneLifecycleAPIServer struct {

@@ -1,11 +1,11 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { rayanLampManifest } from "../manifest";
+import { controllerManifest } from "../manifest";
 
 describe("installable mobile web app shell", () => {
   it("keeps install and icon URLs portable across /app/ and static exports", () => {
-    expect(rayanLampManifest).toMatchObject({
+    expect(controllerManifest).toMatchObject({
       id: "./",
       start_url: "./",
       scope: "./",
@@ -13,7 +13,7 @@ describe("installable mobile web app shell", () => {
       orientation: "any",
       prefer_related_applications: false
     });
-    expect(rayanLampManifest.icons).toEqual(
+    expect(controllerManifest.icons).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           src: "icons/app-192.png",
@@ -48,7 +48,7 @@ describe("installable mobile web app shell", () => {
     expect(meta("apple-mobile-web-app-status-bar-style")).toBe(
       "black-translucent"
     );
-    expect(meta("apple-mobile-web-app-title")).toBe("Rayan Lamp");
+    expect(meta("apple-mobile-web-app-title")).toBe("PCController");
     expect(meta("format-detection")).toBe("telephone=no");
     expect(viewport).toContain("viewport-fit=cover");
     expect(viewport).toContain("interactive-widget=resizes-content");

@@ -7,12 +7,12 @@ import (
 	"github.com/lxn/walk"
 	"testing"
 
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/traymenu"
-	"rayanlamp.local/app/presentation"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/traymenu"
+	"pccontroller.local/desktop/presentation"
 )
 
-func TestControllerTrayClicksNeverDispatchLampActions(t *testing.T) {
+func TestControllerTrayClicksNeverDispatchDeviceActions(t *testing.T) {
 	for _, button := range []walk.MouseButton{walk.LeftButton, walk.RightButton} {
 		if trayToggleOnPress(true, button) || !trayMenuOnRelease(true, button) {
 			t.Fatal("controller tray lost original open-menu click behavior")

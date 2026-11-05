@@ -7,8 +7,8 @@ import (
 	"github.com/lxn/walk"
 	d "github.com/lxn/walk/declarative"
 	"math"
-	"rayanlamp.local/app/internal/dialogs"
-	"rayanlamp.local/app/presentation"
+	"pccontroller.local/desktop/internal/dialogs"
+	"pccontroller.local/desktop/presentation"
 	"strings"
 )
 

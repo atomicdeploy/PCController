@@ -13,18 +13,18 @@ import (
 	"github.com/lxn/walk"
 	"github.com/lxn/win"
 
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/design"
-	"rayanlamp.local/app/internal/i18n"
-	"rayanlamp.local/app/internal/model"
-	"rayanlamp.local/app/internal/winfx"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/design"
+	"pccontroller.local/desktop/internal/i18n"
+	"pccontroller.local/desktop/internal/model"
+	"pccontroller.local/desktop/internal/winfx"
 )
 
 type actionID uint8
 
 const (
 	actionNone actionID = iota
-	actionLamp
+	actionDevice
 	actionToggle
 	actionOn
 	actionOff
@@ -56,22 +56,22 @@ const (
 )
 
 type surfaceLayout struct {
-	controllerButtons     []controllerButton
-	controllerCards       []walk.Rectangle
-	lamp, toggle, on, off walk.Rectangle
-	card                  walk.Rectangle
-	settings, diagnostics walk.Rectangle
-	reconnect             walk.Rectangle
-	titleDrag             walk.Rectangle
-	titleMinimize         walk.Rectangle
-	titleZoom             walk.Rectangle
-	titleClose            walk.Rectangle
+	controllerButtons       []controllerButton
+	controllerCards         []walk.Rectangle
+	device, toggle, on, off walk.Rectangle
+	card                    walk.Rectangle
+	settings, diagnostics   walk.Rectangle
+	reconnect               walk.Rectangle
+	titleDrag               walk.Rectangle
+	titleMinimize           walk.Rectangle
+	titleZoom               walk.Rectangle
+	titleClose              walk.Rectangle
 }
 
 type dashboardGeometry struct {
-	title, settings, diagnostics walk.Rectangle
-	card, lamp, lampHit, state   walk.Rectangle
-	toggle, on, off, hint        walk.Rectangle
+	title, settings, diagnostics   walk.Rectangle
+	card, device, deviceHit, state walk.Rectangle
+	toggle, on, off, hint          walk.Rectangle
 }
 
 func calculateDashboardGeometry(bounds walk.Rectangle) dashboardGeometry {
@@ -125,22 +125,22 @@ func calculateDashboardGeometry(bounds walk.Rectangle) dashboardGeometry {
 		X: originX + margin, Y: cardBottom - stateHeight - 8,
 		Width: width - 2*margin, Height: stateHeight,
 	}
-	lampAvailableHeight := state.Y - cardTop - 4
-	lampSize := minInt(width-2*margin-8, lampAvailableHeight)
-	if lampSize > 512 {
-		lampSize = 512
+	deviceAvailableHeight := state.Y - cardTop - 4
+	deviceSize := minInt(width-2*margin-8, deviceAvailableHeight)
+	if deviceSize > 512 {
+		deviceSize = 512
 	}
-	if lampSize < 1 {
-		lampSize = 1
+	if deviceSize < 1 {
+		deviceSize = 1
 	}
-	lamp := walk.Rectangle{
-		X:     originX + (width-lampSize)/2,
-		Y:     cardTop + (lampAvailableHeight-lampSize)/2,
-		Width: lampSize, Height: lampSize,
+	device := walk.Rectangle{
+		X:     originX + (width-deviceSize)/2,
+		Y:     cardTop + (deviceAvailableHeight-deviceSize)/2,
+		Width: deviceSize, Height: deviceSize,
 	}
-	lampHit := walk.Rectangle{
-		X: lamp.X + lampSize/8, Y: lamp.Y + lampSize/10,
-		Width: lampSize * 3 / 4, Height: lampSize * 4 / 5,
+	deviceHit := walk.Rectangle{
+		X: device.X + deviceSize/8, Y: device.Y + deviceSize/10,
+		Width: deviceSize * 3 / 4, Height: deviceSize * 4 / 5,
 	}
 
 	return dashboardGeometry{
@@ -157,7 +157,7 @@ func calculateDashboardGeometry(bounds walk.Rectangle) dashboardGeometry {
 			X: right - infoWidth, Y: originY + headerTop,
 			Width: infoWidth, Height: headerHeight,
 		},
-		card: card, lamp: lamp, lampHit: lampHit, state: state,
+		card: card, device: device, deviceHit: deviceHit, state: state,
 		toggle: toggle, on: on, off: off, hint: hint,
 	}
 }
@@ -181,8 +181,8 @@ func mirrorDashboardGeometry(
 		bounds,
 	)
 	geometry.card = mirrorRectangleHorizontally(geometry.card, bounds)
-	geometry.lamp = mirrorRectangleHorizontally(geometry.lamp, bounds)
-	geometry.lampHit = mirrorRectangleHorizontally(geometry.lampHit, bounds)
+	geometry.device = mirrorRectangleHorizontally(geometry.device, bounds)
+	geometry.deviceHit = mirrorRectangleHorizontally(geometry.deviceHit, bounds)
 	geometry.state = mirrorRectangleHorizontally(geometry.state, bounds)
 	geometry.toggle = mirrorRectangleHorizontally(geometry.toggle, bounds)
 	geometry.on = mirrorRectangleHorizontally(geometry.on, bounds)
@@ -211,7 +211,7 @@ func (layout surfaceLayout) hit(x, y int) actionID {
 		{actionTitleMinimize, layout.titleMinimize},
 		{actionTitleZoom, layout.titleZoom},
 		{actionTitleClose, layout.titleClose},
-		{actionLamp, layout.lamp},
+		{actionDevice, layout.device},
 	} {
 		if pointInRect(point, item.rect) {
 			return item.action
@@ -1624,13 +1624,13 @@ func (s *Shell) paintCompact(
 	bounds walk.Rectangle,
 	colors palette,
 ) error {
-	lampSize := minInt(bounds.Width-4, bounds.Height-4)
-	lampRect := walk.Rectangle{
-		X:     bounds.X + (bounds.Width-lampSize)/2,
-		Y:     bounds.Y + (bounds.Height-lampSize)/2,
-		Width: lampSize, Height: lampSize,
+	deviceSize := minInt(bounds.Width-4, bounds.Height-4)
+	deviceRect := walk.Rectangle{
+		X:     bounds.X + (bounds.Width-deviceSize)/2,
+		Y:     bounds.Y + (bounds.Height-deviceSize)/2,
+		Width: deviceSize, Height: deviceSize,
 	}
-	s.layout.lamp = lampRect
+	s.layout.device = deviceRect
 	s.layout.toggle = walk.Rectangle{}
 	s.layout.on = walk.Rectangle{}
 	s.layout.off = walk.Rectangle{}
@@ -1638,10 +1638,10 @@ func (s *Shell) paintCompact(
 	s.layout.diagnostics = walk.Rectangle{}
 	s.layout.reconnect = walk.Rectangle{}
 
-	if err := s.drawLamp(canvas, lampRect); err != nil {
+	if err := s.drawDevice(canvas, deviceRect); err != nil {
 		return err
 	}
-	badge := s.drawConnectionOverlay(canvas, lampRect, colors)
+	badge := s.drawConnectionOverlay(canvas, deviceRect, colors)
 	if badge.Width > 0 {
 		s.layout.reconnect = badge
 	}
@@ -1704,11 +1704,11 @@ func (s *Shell) paintDashboard(
 		}
 	}
 
-	s.layout.lamp = geometry.lampHit
-	if err := s.drawLamp(canvas, geometry.lamp); err != nil {
+	s.layout.device = geometry.deviceHit
+	if err := s.drawDevice(canvas, geometry.device); err != nil {
 		return err
 	}
-	badge := s.drawConnectionOverlay(canvas, geometry.lamp, colors)
+	badge := s.drawConnectionOverlay(canvas, geometry.device, colors)
 	if badge.Width > 0 {
 		s.layout.reconnect = badge
 	}
@@ -1744,47 +1744,47 @@ func (s *Shell) paintDashboard(
 	return nil
 }
 
-func (s *Shell) drawLamp(canvas *walk.Canvas, lampRect walk.Rectangle) error {
-	if err := s.ensureVectorArtwork(lampRect.Width); err != nil {
+func (s *Shell) drawDevice(canvas *walk.Canvas, deviceRect walk.Rectangle) error {
+	if err := s.ensureVectorArtwork(deviceRect.Width); err != nil {
 		return err
 	}
 	if s.animationActive && s.currentAnimationFrame >= 0 {
 		bitmap, bitmapErr := s.animationBitmap(
 			s.currentAnimationFrame,
-			lampRect.Width,
+			deviceRect.Width,
 		)
 		if bitmapErr != nil {
 			return bitmapErr
 		}
 		return canvas.DrawImagePixels(
 			bitmap,
-			walk.Point{X: lampRect.X, Y: lampRect.Y},
+			walk.Point{X: deviceRect.X, Y: deviceRect.Y},
 		)
 	}
-	lampBitmap := s.vectorOffBitmap
+	deviceBitmap := s.vectorOffBitmap
 	if s.snapshot.State == model.StateOn {
-		lampBitmap = s.vectorOnBitmap
+		deviceBitmap = s.vectorOnBitmap
 	}
-	if lampBitmap == nil {
+	if deviceBitmap == nil {
 		return nil
 	}
 	if err := canvas.DrawImagePixels(
-		lampBitmap,
-		walk.Point{X: lampRect.X, Y: lampRect.Y},
+		deviceBitmap,
+		walk.Point{X: deviceRect.X, Y: deviceRect.Y},
 	); err != nil {
 		return err
 	}
 	// The hidden first-frame paint establishes the active device-pixel size.
 	// Complete its native animation cache in the background so the large
-	// decoded APNG sources do not remain resident while the lamp is idle or
+	// decoded APNG sources do not remain resident while the device is idle or
 	// waiting for its first real state transition.
-	s.prepareAnimationCacheAsync(s.animation, lampRect.Width)
+	s.prepareAnimationCacheAsync(s.animation, deviceRect.Width)
 	return nil
 }
 
 func (s *Shell) drawConnectionOverlay(
 	canvas *walk.Canvas,
-	lampRect walk.Rectangle,
+	deviceRect walk.Rectangle,
 	colors palette,
 ) walk.Rectangle {
 	if !shouldDrawConnectionOverlay(s.snapshot) {
@@ -1798,7 +1798,7 @@ func (s *Shell) drawConnectionOverlay(
 	} else if s.snapshot.HTTPReachable {
 		color = colors.warning
 	}
-	size := lampRect.Width / 5
+	size := deviceRect.Width / 5
 	if size < 34 {
 		size = 34
 	}
@@ -1806,8 +1806,8 @@ func (s *Shell) drawConnectionOverlay(
 		size = 58
 	}
 	badge := walk.Rectangle{
-		X:     lampRect.X + lampRect.Width - size - lampRect.Width/10,
-		Y:     lampRect.Y + lampRect.Height - size - lampRect.Height/12,
+		X:     deviceRect.X + deviceRect.Width - size - deviceRect.Width/10,
+		Y:     deviceRect.Y + deviceRect.Height - size - deviceRect.Height/12,
 		Width: size, Height: size,
 	}
 	artwork := artworkReconnect
@@ -2072,7 +2072,7 @@ func (s *Shell) stateLabel(colors palette) (string, walk.Color) {
 	case model.StateOff:
 		return s.tr(i18n.MsgMainLightOff), colors.secondary
 	default:
-		return s.tr(i18n.MsgMainFindingLamp), colors.accent
+		return s.tr(i18n.MsgMainFindingDevice), colors.accent
 	}
 }
 
@@ -2084,12 +2084,12 @@ func (s *Shell) stateSubtitle() string {
 		if !s.snapshot.LastConnected.IsZero() {
 			return "Listening live · connected " + relativeTime(s.snapshot.LastConnected)
 		}
-		return "Listening for live lamp events"
+		return "Listening for live device events"
 	}
 	if s.snapshot.HTTPReachable {
 		return "Reachable · WebSocket is reconnecting"
 	}
-	return "Resolving rayanlamp.local…"
+	return "Resolving pccontroller-desktop.local…"
 }
 
 func relativeTime(at time.Time) string {

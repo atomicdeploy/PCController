@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Shared terminal presentation for RayanLamp's Bash tooling. The source is
+# Shared terminal presentation for PCControllerDesktop's Bash tooling. The source is
 # ASCII-only; emoji glyphs are assembled from Unicode code points at runtime.
 
 rl_terminal_reset=""
@@ -39,7 +39,7 @@ rl_force_color_requested() {
         return
     fi
     if rl_environment_enabled CLICOLOR_FORCE ||
-        rl_environment_enabled RAYANLAMP_FORCE_COLOR; then
+        rl_environment_enabled PCCONTROLLER_DESKTOP_FORCE_COLOR; then
         return 0
     fi
     return 1
@@ -74,7 +74,7 @@ rl_emoji_enabled() {
         return 1
     fi
     local emoji_preference
-    emoji_preference="$(rl_environment_value RAYANLAMP_EMOJI)"
+    emoji_preference="$(rl_environment_value PCCONTROLLER_DESKTOP_EMOJI)"
     if [[ -n "$emoji_preference" ]]; then
         case "$emoji_preference" in
             1|always|force|on|true|yes) return 0 ;;

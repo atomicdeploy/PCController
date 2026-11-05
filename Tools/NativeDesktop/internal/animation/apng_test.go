@@ -5,11 +5,11 @@ import (
 	"testing"
 	"time"
 
-	"rayanlamp.local/app/assets"
+	"pccontroller.local/desktop/assets"
 )
 
 func TestDecodeEmbeddedTransition(t *testing.T) {
-	file, err := assets.Files.Open("lamp-transition.apng")
+	file, err := assets.Files.Open("device-transition.apng")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +35,7 @@ func TestDecodeEmbeddedTransition(t *testing.T) {
 }
 
 func TestReleaseFramesRetainsPlaybackManifest(t *testing.T) {
-	data, err := assets.Files.ReadFile("lamp-transition.apng")
+	data, err := assets.Files.ReadFile("device-transition.apng")
 	if err != nil {
 		t.Fatal(err)
 	}

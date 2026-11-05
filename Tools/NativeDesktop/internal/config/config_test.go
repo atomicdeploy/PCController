@@ -13,18 +13,18 @@ import (
 	"testing"
 	"time"
 
-	"rayanlamp.local/app/internal/winfx"
+	"pccontroller.local/desktop/internal/winfx"
 )
 
 func TestDefault(t *testing.T) {
 	first := Default()
 	second := Default()
 
-	if first.Lamp.BaseURL != DefaultBaseURL {
-		t.Fatalf("BaseURL = %q, want %q", first.Lamp.BaseURL, DefaultBaseURL)
+	if first.Device.BaseURL != DefaultBaseURL {
+		t.Fatalf("BaseURL = %q, want %q", first.Device.BaseURL, DefaultBaseURL)
 	}
-	if !first.Lamp.WebSocket || first.Lamp.RequestTimeout.Value() != 5*time.Second {
-		t.Fatalf("unexpected lamp defaults: %+v", first.Lamp)
+	if !first.Device.WebSocket || first.Device.RequestTimeout.Value() != 5*time.Second {
+		t.Fatalf("unexpected device defaults: %+v", first.Device)
 	}
 	if !first.UI.CloseToTray || !first.UI.PrewarmTrayMenu ||
 		!first.UI.ShowTaskbar || !first.UI.Animations ||
@@ -208,7 +208,7 @@ func TestResolvePathPrecedence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := filepath.Join(root, "appdata", "RayanLamp", "config.json")
+	want := filepath.Join(root, "appdata", "PCControllerDesktop", "config.json")
 	if fallback != want {
 		t.Fatalf("fallback path = %q, want %q", fallback, want)
 	}
@@ -219,7 +219,7 @@ func TestLoadMissingReturnsDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Lamp.BaseURL != DefaultBaseURL || cfg.Integration.LocalAPIToken == "" {
+	if cfg.Device.BaseURL != DefaultBaseURL || cfg.Integration.LocalAPIToken == "" {
 		t.Fatalf("missing file did not return usable defaults: %+v", cfg)
 	}
 }
@@ -227,8 +227,8 @@ func TestLoadMissingReturnsDefault(t *testing.T) {
 func TestLoadOverlayAndNormalize(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	content := `{
-	  "lamp": {
-	    "base_url": " HTTP://RAYANLAMP.LOCAL/ ",
+	  "device": {
+	    "base_url": " HTTP://PCCONTROLLER-DESKTOP.LOCAL/ ",
 	    "request_timeout": "8s"
 	  },
 	  "ui": {
@@ -258,11 +258,11 @@ func TestLoadOverlayAndNormalize(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Lamp.BaseURL != DefaultBaseURL {
-		t.Fatalf("normalized URL = %q", cfg.Lamp.BaseURL)
+	if cfg.Device.BaseURL != DefaultBaseURL {
+		t.Fatalf("normalized URL = %q", cfg.Device.BaseURL)
 	}
-	if cfg.Lamp.RequestTimeout.Value() != 8*time.Second || !cfg.Lamp.WebSocket {
-		t.Fatalf("overlay lost lamp defaults: %+v", cfg.Lamp)
+	if cfg.Device.RequestTimeout.Value() != 8*time.Second || !cfg.Device.WebSocket {
+		t.Fatalf("overlay lost device defaults: %+v", cfg.Device)
 	}
 	if cfg.UI.Theme != "dark" || cfg.UI.Backdrop != "acrylic" ||
 		cfg.UI.ViewMode != ViewCompact || !cfg.UI.CloseToTray ||
@@ -288,15 +288,15 @@ func TestLoadOverlayAndNormalize(t *testing.T) {
 }
 
 func TestWindowsAutomationScriptsNormalizeAndValidate(t *testing.T) {
-	t.Setenv("RAYANLAMP_AUTOMATION_TEST_ROOT", filepath.Join("C:", "Scripts"))
+	t.Setenv("PCCONTROLLER_DESKTOP_AUTOMATION_TEST_ROOT", filepath.Join("C:", "Scripts"))
 
 	cfg := Default()
-	cfg.Automation.LockScript = ` ${RAYANLAMP_AUTOMATION_TEST_ROOT}\lock.ps1 `
-	cfg.Automation.UnlockScript = ` ${RAYANLAMP_AUTOMATION_TEST_ROOT}\unlock.ps1 `
-	cfg.Automation.SuspendScript = ` ${RAYANLAMP_AUTOMATION_TEST_ROOT}\suspend.ps1 `
-	cfg.Automation.ResumeScript = ` ${RAYANLAMP_AUTOMATION_TEST_ROOT}\resume.ps1 `
+	cfg.Automation.LockScript = ` ${PCCONTROLLER_DESKTOP_AUTOMATION_TEST_ROOT}\lock.ps1 `
+	cfg.Automation.UnlockScript = ` ${PCCONTROLLER_DESKTOP_AUTOMATION_TEST_ROOT}\unlock.ps1 `
+	cfg.Automation.SuspendScript = ` ${PCCONTROLLER_DESKTOP_AUTOMATION_TEST_ROOT}\suspend.ps1 `
+	cfg.Automation.ResumeScript = ` ${PCCONTROLLER_DESKTOP_AUTOMATION_TEST_ROOT}\resume.ps1 `
 	cfg.Automation.NetworkChangeScript =
-		` ${RAYANLAMP_AUTOMATION_TEST_ROOT}\network.ps1 `
+		` ${PCCONTROLLER_DESKTOP_AUTOMATION_TEST_ROOT}\network.ps1 `
 	if err := cfg.Normalize(); err != nil {
 		t.Fatal(err)
 	}
@@ -736,7 +736,7 @@ func TestLoadRejectsUnknownAndTrailingData(t *testing.T) {
 		name string
 		data string
 	}{
-		{"unknown", `{"lamp":{"mystery":true}}`},
+		{"unknown", `{"device":{"mystery":true}}`},
 		{"trailing", `{} {}`},
 	}
 	for _, test := range tests {
@@ -756,7 +756,7 @@ func TestSaveLoadRoundTripAndReplace(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "config.json")
 	cfg := Default()
 	cfg.UI.AlwaysOnTop = true
-	cfg.Lamp.HTTPPoll = Duration(45 * time.Second)
+	cfg.Device.HTTPPoll = Duration(45 * time.Second)
 
 	if err := Save(path, cfg); err != nil {
 		t.Fatal(err)
@@ -801,13 +801,13 @@ func TestUpdate(t *testing.T) {
 
 	updated, err := Update(path, func(cfg *Config) error {
 		cfg.UI.AlwaysOnTop = true
-		cfg.Lamp.BaseURL = "http://example.local/"
+		cfg.Device.BaseURL = "http://example.local/"
 		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !updated.UI.AlwaysOnTop || updated.Lamp.BaseURL != "http://example.local" {
+	if !updated.UI.AlwaysOnTop || updated.Device.BaseURL != "http://example.local" {
 		t.Fatalf("unexpected updated config: %+v", updated)
 	}
 
@@ -936,7 +936,7 @@ func TestDiagnosticsPolicy(t *testing.T) {
 	for _, endpoint := range []string{
 		"/weight/get",
 		"/info?secret=true",
-		"http://rayanlamp.local/info",
+		"http://pccontroller-desktop.local/info",
 		"/INFO",
 		"",
 	} {
@@ -1078,9 +1078,9 @@ func TestValidation(t *testing.T) {
 		name   string
 		mutate func(*Config)
 	}{
-		{"scheme", func(c *Config) { c.Lamp.BaseURL = "file:///tmp/lamp" }},
-		{"timeout", func(c *Config) { c.Lamp.RequestTimeout = Duration(50 * time.Millisecond) }},
-		{"reconnect", func(c *Config) { c.Lamp.ReconnectMax = Duration(time.Millisecond) }},
+		{"scheme", func(c *Config) { c.Device.BaseURL = "file:///tmp/device" }},
+		{"timeout", func(c *Config) { c.Device.RequestTimeout = Duration(50 * time.Millisecond) }},
+		{"reconnect", func(c *Config) { c.Device.ReconnectMax = Duration(time.Millisecond) }},
 		{"theme", func(c *Config) { c.UI.Theme = "purple" }},
 		{"locale", func(c *Config) { c.UI.Locale = "fa-IR" }},
 		{"backdrop", func(c *Config) { c.UI.Backdrop = "glassiest" }},

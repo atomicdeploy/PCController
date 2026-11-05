@@ -6,8 +6,8 @@ import (
 	"reflect"
 	"testing"
 
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/i18n"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/i18n"
 )
 
 func TestDialogPersianTranslationRoundTrip(t *testing.T) {
@@ -15,12 +15,12 @@ func TestDialogPersianTranslationRoundTrip(t *testing.T) {
 	persian := i18n.New(i18n.Persian)
 	english := i18n.New(i18n.English)
 	for _, source := range []string{
-		"Settings — Rayan Lamp",
-		"Lamp address:",
+		"Settings — PCController",
+		"Device address:",
 		"Enable desktop notifications",
 		"Keyboard shortcuts",
 		"Windows registration",
-		"Rayan Lamp Diagnostics",
+		"PCController Diagnostics",
 	} {
 		translated := dialogText(persian, source)
 		if translated == source {
@@ -55,7 +55,7 @@ func TestDialogTranslationDoesNotShapeOpaqueValues(t *testing.T) {
 	for _, value := range []string{
 		"http://127.0.0.1:47831",
 		"Ctrl+Alt+L",
-		"C:\\RayanLamp\\script2.ps1",
+		"C:\\PCControllerDesktop\\script2.ps1",
 		"/config/st",
 	} {
 		if got := dialogText(localizer, value); got != value {

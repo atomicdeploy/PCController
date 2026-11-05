@@ -1,4 +1,4 @@
-# RayanLamp source preservation and PCController integration
+# Native desktop source preservation and PCController integration
 
 Audited 2026-11-06 against the referenced **Build RayanLamp Go app** chat
 (`019f8cfc-271a-72e1-8747-e3eb883de5ec`) and its actual clean checkout.
@@ -16,18 +16,28 @@ including dependencies, assets, tests, tools, documentation and recovery records
 - Parent integration commit: `3aed9ef6`.
 - The subtree tree object equals the donor tree object exactly. This verifies
   every pathname, file mode and blob, not merely file counts or ancestry.
-- Current working-copy result: **2,371 identical files, 54 adapted files, seven
+- Current working-copy result: **2,057 identical files, 368 adapted files, seven
   regenerated content-hashed Web bundles, one explicitly excluded font, zero
   missing source files**. Exact old/new generated bundle paths are audited; the
   original bytes remain in the immutable import. Git clean/EOL filters
   are applied to avoid treating Windows line endings as source changes.
+- Desktop identity adaptation renames 65 imported paths without dropping their
+  source. `Tools/Audit/native-desktop-path-migration.json` records each old/new
+  pair, and the audit hashes the current target. Current Go imports use
+  `pccontroller.local/desktop`; models, resources, SDK names, test switches and
+  current UI copy identify PCController. Historical project names remain only
+  as provenance/attribution, not as the current product identity.
+- Existing desktop settings retain a read-only migration for the former
+  connection key; new saves emit `device`. Compatibility wire vocabulary is
+  isolated in `Tools/NativeDesktop/compatibility/device-protocol.json`. Lighting
+  icon IDs and user channel labels are intentionally unchanged.
 - Original donor blobs remain recoverable from that import even when the working
   adaptation changes a file. The donor's individual commits were **not** merged
   as PCController ancestry: this is a squashed source import, not full-history
   integration. Recovered-history documents remain imported with their caveats.
 - Build products, caches, local secrets and untracked scratch material are not
   source-tree omissions. The donor checkout was clean at the audit.
-- The private GlassDWM C# prototype and lamp firmware outside RayanLamp were not
+- The private GlassDWM C# prototype and donor firmware outside that repository were not
   part of this donor repository. Do not claim they were imported.
 
 The only intentionally absent donor file in the working adaptation is
@@ -41,7 +51,7 @@ From the PCController repository root:
 
 ```powershell
 node Tools/Build/audit-native-donor.mjs
-node Tools/Build/audit-native-donor.mjs --donor 'C:/path/to/RayanLamp'
+node Tools/Build/audit-native-donor.mjs --donor 'C:/path/to/original-donor'
 node Tools/Build/audit-native-donor.mjs --json
 ```
 
@@ -72,8 +82,8 @@ unfinished integration work; neither counts as full PCController feature parity.
 | Toast/balloon actions, imported WAV and shared sound pipeline | `internal/notify`, `internal/sfx`, `internal/eventeffects` | Running/Idle and targeted host messages connected through PCController's branded notifier; explicit toast/balloon selection, bounded delivery queue and imported WAV retained. OS sound suppressed when desktop owns the cue; actual audio/notification acceptance remains separate |
 | Taskbar thumbnail controls, progress, Explorer recreation | `internal/ui/taskbar_windows.go`, `internal/winfx/taskbar_windows.go` | Connected to four front-panel keys with navigation/connection/busy gates, status/error/suspend progress and existing Explorer recreation. Actual Explorer thumbnail-click acceptance remains separate |
 | Suspend/resume, lock/unlock and network-change recovery | `internal/ui`, `internal/appcore`, `internal/winfx` | Partial: window lifecycle reused; PCController transport remains owned by its existing core, never donor lamp reconnection |
-| Bounded automation queue, timeouts, output and environment contract | `internal/automation` | Connected to observed Running/Idle, targeted messages and Windows events; opt-in local scripts, timeout/output bounds and PCCONTROLLER_* environment. Standalone RAYANLAMP_* contract retained |
-| Lamp HTTP/WebSocket, reconnect, fallback, address caching | `internal/lamp`, `internal/appcore` | Retained, intentionally dormant in PCController mode; hardware uses existing PCController RPC, not lamp endpoints |
+| Bounded automation queue, timeouts, output and environment contract | `internal/automation` | Connected to observed Running/Idle, targeted messages and Windows events; opt-in local scripts, timeout/output bounds and PCCONTROLLER_* environment. Standalone PCCONTROLLER_DESKTOP_* contract retained |
+| Compatibility HTTP/WebSocket, reconnect, fallback, address caching | `internal/device`, `internal/appcore`, `compatibility` | Retained, intentionally dormant in PCController mode; hardware uses existing PCController RPC, not compatibility endpoints |
 | Unified dispatcher, CLI/VT100, named pipes, WM_COPYDATA, loopback API | `internal/commands`, `internal/cli`, `internal/ipc`, `internal/wmipc`, `internal/localapi` | Donor source retained; controller uses its existing owner RPC; donor WM_COPYDATA/local API are not board command entry points |
 | Public Go client, native SDK DLL and COM Automation | `sdk`, `internal/dllapi`, `internal/comserver`, `cmd` | Retained; donor exports are not yet adapted PCController SDK/COM contracts |
 | URI activation, Jump Lists, startup and self-install | `internal/shellintegration`, `internal/selfinstall` | Startup connected using exact-owned PCController Run entry and `gui` argument, only on an explicit saved preference change. URI/Jump List/self-install use the existing host paths; donor-specific registrations remain dormant |

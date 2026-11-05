@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
-import type { RayanLampClient } from "../api";
+import type { PCControllerDesktopClient } from "../api";
 import type {
   DiagnosticDeviceInfo,
   DiagnosticEndpointResult,
@@ -29,7 +29,7 @@ const endpointAllowlist = [
   "/description.xml"
 ] as const;
 
-export function Diagnostics({ api }: { api: RayanLampClient }) {
+export function Diagnostics({ api }: { api: PCControllerDesktopClient }) {
   const [loading, setLoading] = useState(!diagnostics.value);
   const [rawEndpoint, setRawEndpoint] =
     useState<(typeof endpointAllowlist)[number]>("/info");

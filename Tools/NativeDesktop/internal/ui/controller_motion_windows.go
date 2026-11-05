@@ -5,7 +5,7 @@ package ui
 import (
 	"github.com/lxn/walk"
 	"github.com/lxn/win"
-	"rayanlamp.local/app/presentation"
+	"pccontroller.local/desktop/presentation"
 	"time"
 )
 

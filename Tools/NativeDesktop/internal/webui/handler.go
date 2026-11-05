@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"rayanlamp.local/app/assets"
+	"pccontroller.local/desktop/assets"
 )
 
 const (

@@ -8,10 +8,10 @@ import (
 
 	"github.com/lxn/win"
 
-	"rayanlamp.local/app/assets"
-	"rayanlamp.local/app/internal/i18n"
-	"rayanlamp.local/app/internal/model"
-	"rayanlamp.local/app/internal/winfx"
+	"pccontroller.local/desktop/assets"
+	"pccontroller.local/desktop/internal/i18n"
+	"pccontroller.local/desktop/internal/model"
+	"pccontroller.local/desktop/internal/winfx"
 )
 
 const (
@@ -199,11 +199,11 @@ func taskbarCommandMethod(wParam uintptr) (string, bool) {
 	}
 	switch uint32(wParam & 0xffff) {
 	case taskbarButtonToggle:
-		return "lamp.toggle", true
+		return "device.toggle", true
 	case taskbarButtonOn:
-		return "lamp.on", true
+		return "device.on", true
 	case taskbarButtonOff:
-		return "lamp.off", true
+		return "device.off", true
 	case taskbarButtonRetry:
 		return "reconnect", true
 	default:
@@ -272,8 +272,8 @@ func (s *Shell) rebuildTaskbarButtonIcons() error {
 			path   string
 			target *win.HICON
 		}{
-			{"icons/lamp-on.ico", &next.on},
-			{"icons/lamp-off.ico", &next.off},
+			{"icons/device-on.ico", &next.on},
+			{"icons/device-off.ico", &next.off},
 			{"icons/menu-reconnect.ico", &next.reconnect},
 		} {
 			data, err := assets.Files.ReadFile(item.path)

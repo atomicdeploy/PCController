@@ -13,12 +13,12 @@ import (
 	"sync"
 	"unicode"
 
-	"rayanlamp.local/app/assets"
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/winfx"
+	"pccontroller.local/desktop/assets"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/winfx"
 )
 
-// Cue identifies one semantic Rayan Lamp sound.
+// Cue identifies one semantic PCController sound.
 type Cue string
 
 const (
@@ -43,10 +43,10 @@ type bundledDefinition struct {
 }
 
 var bundledDefinitions = []bundledDefinition{
-	{cue: CueOn, path: "sfx/on.wav", name: "Lamp on"},
-	{cue: CueOff, path: "sfx/off.wav", name: "Lamp off"},
-	{cue: CueMessage, path: "sfx/message.wav", name: "Lamp message"},
-	{cue: CueError, path: "sfx/error.wav", name: "Lamp error"},
+	{cue: CueOn, path: "sfx/on.wav", name: "Device on"},
+	{cue: CueOff, path: "sfx/off.wav", name: "Device off"},
+	{cue: CueMessage, path: "sfx/message.wav", name: "Device message"},
+	{cue: CueError, path: "sfx/error.wav", name: "Device error"},
 }
 
 // PlaybackFunc plays a complete validated PCM WAV byte stream. The production

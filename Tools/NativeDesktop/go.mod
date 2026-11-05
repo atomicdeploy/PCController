@@ -1,4 +1,4 @@
-module rayanlamp.local/app
+module pccontroller.local/desktop
 
 go 1.25.8
 

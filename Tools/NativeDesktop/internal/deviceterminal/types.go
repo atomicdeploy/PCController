@@ -1,6 +1,6 @@
 // Package deviceterminal owns the one optional Telnet-style connection to the
-// configured Rayan Lamp. It deliberately keeps terminal traffic separate from
-// lamp events: terminal output is ordered, potentially sensitive, and must
+// configured PCController. It deliberately keeps terminal traffic separate from
+// device events: terminal output is ordered, potentially sensitive, and must
 // never be routed through lossy notification/automation fan-out.
 package deviceterminal
 
@@ -73,6 +73,6 @@ type ReadResult struct {
 	Reset    bool     `json:"reset,omitempty"`
 }
 
-// DialFunc is supplied by appcore so the terminal reuses the lamp client's
+// DialFunc is supplied by appcore so the terminal reuses the device client's
 // cached .local resolution rather than creating a second resolver policy.
 type DialFunc func(context.Context) (net.Conn, error)

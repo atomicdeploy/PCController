@@ -77,7 +77,7 @@ describe("StyledBrowserConsole", () => {
       source: "relay",
       error_code: 401,
       action:
-        "Bearer abc.def.ghi https://david:password@lamp.local/?token=private",
+        "Bearer abc.def.ghi https://david:password@device.local/?token=private",
       csrf_token: "must-not-appear",
       unexpected: "must-not-appear",
       nested: { password: "must-not-appear" }
@@ -92,7 +92,7 @@ describe("StyledBrowserConsole", () => {
       source: "relay",
       error_code: 401,
       action:
-        "Bearer [REDACTED] https://[REDACTED]@lamp.local/?token=[REDACTED]"
+        "Bearer [REDACTED] https://[REDACTED]@device.local/?token=[REDACTED]"
     });
     expect(JSON.stringify(call)).not.toContain("must-not-appear");
     expect(JSON.stringify(call)).not.toContain("private");
@@ -105,11 +105,11 @@ describe("StyledBrowserConsole", () => {
     const output = new StyledBrowserConsole(target, () => now);
     const options = { dedupeKey: "same-state", dedupeWindowMs: 1_000 };
 
-    output.event("info", "lamp.state", "Lamp is on", { state: "on" }, options);
+    output.event("info", "device.state", "Device is on", { state: "on" }, options);
     now = 500;
-    output.event("info", "lamp.state", "Lamp is on", { state: "on" }, options);
+    output.event("info", "device.state", "Device is on", { state: "on" }, options);
     now = 1_101;
-    output.event("info", "lamp.state", "Lamp is on", { state: "on" }, options);
+    output.event("info", "device.state", "Device is on", { state: "on" }, options);
 
     expect(target.info).toHaveBeenCalledTimes(2);
   });
@@ -134,7 +134,7 @@ describe("StyledBrowserConsole", () => {
       "device.event",
       "first\u001b[31m\nsecond\u202Ehidden",
       {
-        source: "lamp\u009b",
+        source: "device\u009b",
         action: "refresh\r\nnow"
       }
     );

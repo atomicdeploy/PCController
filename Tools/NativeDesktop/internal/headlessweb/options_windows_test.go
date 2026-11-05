@@ -11,14 +11,14 @@ func TestParseLaunchOptions(t *testing.T) {
 	t.Parallel()
 	options, err := ParseLaunchOptions([]string{
 		"--no-open",
-		"--config", `C:\Temp\rayan.json`,
+		"--config", `C:\Temp\controller.json`,
 		"--listen", "localhost:49123",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if options.Open ||
-		options.ConfigPath != `C:\Temp\rayan.json` ||
+		options.ConfigPath != `C:\Temp\controller.json` ||
 		options.Listen != "localhost:49123" {
 		t.Fatalf("options = %#v", options)
 	}
@@ -43,7 +43,7 @@ func TestUsageExplainsNativeSurfaceBoundary(t *testing.T) {
 	t.Parallel()
 	usage := Usage()
 	for _, required := range []string{
-		"RayanLamp.exe serve",
+		"PCControllerDesktop.exe serve",
 		"--no-open",
 		"--config PATH",
 		"--listen HOST:PORT",

@@ -9,13 +9,13 @@ import (
 
 	"github.com/lxn/walk"
 
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/design"
-	"rayanlamp.local/app/internal/winfx"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/design"
+	"pccontroller.local/desktop/internal/winfx"
 )
 
 var (
-	viewModeLabels = []string{"Compact lamp", "Dashboard"}
+	viewModeLabels = []string{"Compact device", "Dashboard"}
 	viewModeValues = []string{config.ViewCompact, config.ViewDashboard}
 	themeLabels    = []string{"Follow Windows", "Light", "Dark"}
 	themeValues    = []string{"system", "light", "dark"}
@@ -57,7 +57,7 @@ var (
 	borderModeValues  = []string{config.BorderAuto, config.BorderNone}
 	deliveryLabels    = []string{"Automatic", "Modern toast", "Legacy balloon"}
 	deliveryValues    = []string{"auto", "toast", "balloon"}
-	soundSourceLabels = []string{"Bundled Rayan Lamp sounds", "Custom WAV"}
+	soundSourceLabels = []string{"Bundled PCController sounds", "Custom WAV"}
 	soundSourceValues = []string{
 		config.SoundSourceBundled,
 		config.SoundSourceCustom,

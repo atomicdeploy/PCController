@@ -5,7 +5,7 @@ package comserver
 import (
 	"context"
 
-	"rayanlamp.local/app/internal/ipc"
+	"pccontroller.local/desktop/internal/ipc"
 )
 
 // Run is unavailable outside Windows.

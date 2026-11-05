@@ -14,9 +14,9 @@ import (
 	"github.com/lxn/walk"
 	decl "github.com/lxn/walk/declarative"
 
-	"rayanlamp.local/app/internal/commands"
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/winfx"
+	"pccontroller.local/desktop/internal/commands"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/winfx"
 )
 
 const (
@@ -436,7 +436,7 @@ type settingsDialogSession struct {
 }
 
 // ShowSettingsModeless creates and shows an owned settings window without
-// entering Walk's nested modal message loop. The main lamp window therefore
+// entering Walk's nested modal message loop. The main device window therefore
 // remains interactive. Save completion and errors are marshaled back onto the
 // UI thread.
 func ShowSettingsModeless(
@@ -454,7 +454,7 @@ func ShowSettingsModeless(
 }
 
 // ShowSettingsWithActions retains the synchronous API for embedders that need
-// it. RayanLamp's shell uses ShowSettingsModeless.
+// it. PCControllerDesktop's shell uses ShowSettingsModeless.
 func ShowSettingsWithActions(
 	owner walk.Form,
 	cfg config.Config,
@@ -501,7 +501,7 @@ func newSettingsDialogSession(
 	_ = winfx.EnsurePersianFont()
 	pages := []decl.TabPage{}
 	if !actions.ControllerMode {
-		pages = append(pages, settingsLampPage(controls, working))
+		pages = append(pages, settingsDevicePage(controls, working))
 	}
 	pages = append(pages, settingsAppearancePage(controls, working), settingsNotificationPage(controls, working, actions, &session.dialog), settingsHotkeyPage(controls, working), settingsAutomationPage(controls, working, &session.dialog))
 	if !actions.ControllerMode {
@@ -510,7 +510,7 @@ func newSettingsDialogSession(
 		pages = append(pages, settingsControllerIntegrationPage(controls, working, actions))
 	}
 
-	title := dialogText(localizer, "Settings — Rayan Lamp")
+	title := dialogText(localizer, "Settings — PCController")
 	if actions.ControllerMode {
 		title = dialogText(localizer, "Desktop settings — PCController")
 	}
@@ -931,19 +931,19 @@ func currentSettingsTab(controls *settingsControls) int {
 	return settingsTabIndex(controls.tabs.CurrentIndex())
 }
 
-func settingsLampPage(controls *settingsControls, cfg config.Config) decl.TabPage {
+func settingsDevicePage(controls *settingsControls, cfg config.Config) decl.TabPage {
 	return decl.TabPage{
-		Title:  "Lamp",
+		Title:  "Device",
 		Layout: decl.Grid{Columns: 3, Margins: decl.Margins{Left: 12, Top: 14, Right: 12, Bottom: 12}, Spacing: 8},
 		Children: []decl.Widget{
-			decl.Label{Row: 0, Column: 0, Text: "Lamp address:"},
+			decl.Label{Row: 0, Column: 0, Text: "Device address:"},
 			decl.LineEdit{
 				AssignTo:    &controls.baseURL,
 				Row:         0,
 				Column:      1,
 				ColumnSpan:  2,
-				Text:        cfg.Lamp.BaseURL,
-				CueBanner:   "http://rayanlamp.local",
+				Text:        cfg.Device.BaseURL,
+				CueBanner:   "http://pccontroller-desktop.local",
 				ToolTipText: "Only http and https URLs without embedded credentials are accepted.",
 			},
 			decl.Label{Row: 1, Column: 0, Text: "Request timeout:"},
@@ -952,7 +952,7 @@ func settingsLampPage(controls *settingsControls, cfg config.Config) decl.TabPag
 				Row:        1,
 				Column:     1,
 				ColumnSpan: 2,
-				Text:       cfg.Lamp.RequestTimeout.String(),
+				Text:       cfg.Device.RequestTimeout.String(),
 				CueBanner:  "5s",
 			},
 			decl.CheckBox{
@@ -961,7 +961,7 @@ func settingsLampPage(controls *settingsControls, cfg config.Config) decl.TabPag
 				Column:     0,
 				ColumnSpan: 3,
 				Text:       "Listen continuously for WebSocket events",
-				Checked:    cfg.Lamp.WebSocket,
+				Checked:    cfg.Device.WebSocket,
 				OnCheckedChanged: func() {
 					updateSettingsEnabled(controls)
 				},
@@ -972,7 +972,7 @@ func settingsLampPage(controls *settingsControls, cfg config.Config) decl.TabPag
 				Row:        3,
 				Column:     1,
 				ColumnSpan: 2,
-				Text:       cfg.Lamp.ReconnectMin.String(),
+				Text:       cfg.Device.ReconnectMin.String(),
 				CueBanner:  "1s",
 			},
 			decl.Label{Row: 4, Column: 0, Text: "Reconnect maximum:"},
@@ -981,7 +981,7 @@ func settingsLampPage(controls *settingsControls, cfg config.Config) decl.TabPag
 				Row:        4,
 				Column:     1,
 				ColumnSpan: 2,
-				Text:       cfg.Lamp.ReconnectMax.String(),
+				Text:       cfg.Device.ReconnectMax.String(),
 				CueBanner:  "30s",
 			},
 			decl.Label{Row: 5, Column: 0, Text: "HTTP poll interval:"},
@@ -990,7 +990,7 @@ func settingsLampPage(controls *settingsControls, cfg config.Config) decl.TabPag
 				Row:        5,
 				Column:     1,
 				ColumnSpan: 2,
-				Text:       cfg.Lamp.HTTPPoll.String(),
+				Text:       cfg.Device.HTTPPoll.String(),
 				CueBanner:  "30s (0 disables polling)",
 			},
 			decl.Label{Row: 6, Column: 0, Text: "Device terminal port:"},
@@ -1000,7 +1000,7 @@ func settingsLampPage(controls *settingsControls, cfg config.Config) decl.TabPag
 				Column:      1,
 				MinValue:    1,
 				MaxValue:    65535,
-				Value:       float64(cfg.Lamp.TelnetPort),
+				Value:       float64(cfg.Device.TelnetPort),
 				Decimals:    0,
 				ToolTipText: "The audited firmware defaults to TCP port 23. The terminal connects only when you explicitly open it.",
 			},
@@ -1008,7 +1008,7 @@ func settingsLampPage(controls *settingsControls, cfg config.Config) decl.TabPag
 				Row:         6,
 				Column:      2,
 				Text:        "Manual only",
-				ToolTipText: "RayanLamp never occupies the firmware's single terminal client slot at startup.",
+				ToolTipText: "PCControllerDesktop never occupies the firmware's single terminal client slot at startup.",
 			},
 			decl.Label{
 				Row:         7,
@@ -1025,8 +1025,8 @@ func settingsLampPage(controls *settingsControls, cfg config.Config) decl.TabPag
 func settingsAppearancePage(controls *settingsControls, cfg config.Config) decl.TabPage {
 	localizer := dialogLocalizer(cfg)
 	layoutLabels := viewModeLabels
-	keepAbove := "Keep the lamp window above other windows"
-	captionHelp := "None removes the title bar, Custom uses Rayan Lamp controls, and Native uses the Windows caption. Window border controls the resize frame separately."
+	keepAbove := "Keep the device window above other windows"
+	captionHelp := "None removes the title bar, Custom uses PCController controls, and Native uses the Windows caption. Window border controls the resize frame separately."
 	if controls.controllerMode {
 		layoutLabels = []string{"Compact front panel", "Dashboard"}
 		keepAbove = "Keep PCController above other windows"
@@ -1207,7 +1207,7 @@ func settingsNotificationPage(
 	actions SettingsActions,
 	dialog **walk.Dialog,
 ) decl.TabPage {
-	stateCaption, messageCaption := "Notify when the lamp turns on or off", "Show sanitized message: events from the lamp"
+	stateCaption, messageCaption := "Notify when the device turns on or off", "Show sanitized message: events from the device"
 	soundLabels := soundSourceLabels
 	if controls.controllerMode {
 		stateCaption, messageCaption = "Notify when the program enters Running or Idle", "Show controller messages"
@@ -1324,7 +1324,7 @@ func settingsNotificationPage(
 						showDialogError(
 							*dialog,
 							"Test toast failed",
-							"Rayan Lamp could not show the test notification.",
+							"PCController could not show the test notification.",
 							err,
 						)
 					}
@@ -1344,7 +1344,7 @@ func settingsNotificationPage(
 						showDialogError(
 							*dialog,
 							"Test sound failed",
-							"Rayan Lamp could not play the test cue.",
+							"PCController could not play the test cue.",
 							err,
 						)
 					}
@@ -1371,23 +1371,23 @@ func settingsHotkeyPage(controls *settingsControls, cfg config.Config) decl.TabP
 	group := newHotkeyRecorderGroup()
 	controls.hotkeyRecorders = group
 	controls.hotkeyToggle = group.Add(
-		label("Toggle lamp", "Compact / dashboard"),
+		label("Toggle device", "Compact / dashboard"),
 		label("Switch on ↔ off", "Switch the desktop view"),
 		cfg.Hotkeys.Toggle,
 	)
 	controls.hotkeyOn = group.Add(
 		label("Turn on", "Hardware channels"),
-		label("Force the lamp on", "Show channel controls"),
+		label("Force the device on", "Show channel controls"),
 		cfg.Hotkeys.On,
 	)
 	controls.hotkeyOff = group.Add(
 		label("Turn off", "Console / TUI"),
-		label("Force the lamp off", "Show or hide the console"),
+		label("Force the device off", "Show or hide the console"),
 		cfg.Hotkeys.Off,
 	)
 	controls.hotkeyShow = group.Add(
 		"Show window",
-		label("Bring Rayan Lamp forward", "Bring PCController forward"),
+		label("Bring PCController forward", "Bring PCController forward"),
 		cfg.Hotkeys.Show,
 	)
 
@@ -1409,7 +1409,7 @@ func settingsHotkeyPage(controls *settingsControls, cfg config.Config) decl.TabP
 				},
 			},
 			decl.Label{
-				Text: label("Select Record, then press the complete combination. Existing global shortcuts pause while Rayan Lamp is listening.", "Select Record, then press the shortcut. Desktop shortcuts pause during recording."),
+				Text: label("Select Record, then press the complete combination. Existing global shortcuts pause while PCController is listening.", "Select Record, then press the shortcut. Desktop shortcuts pause during recording."),
 			},
 			controls.hotkeyToggle.Declaration(),
 			controls.hotkeyOn.Declaration(),
@@ -1449,13 +1449,13 @@ func settingsAutomationPage(
 				Row:        0,
 				Column:     0,
 				ColumnSpan: 3,
-				Text:       label("Run local scripts for lamp and Windows events", "Run local scripts for program and Windows events"),
+				Text:       label("Run local scripts for device and Windows events", "Run local scripts for program and Windows events"),
 				Checked:    cfg.Automation.Enabled,
 				OnCheckedChanged: func() {
 					updateSettingsEnabled(controls)
 				},
 			},
-			decl.Label{Row: 1, Column: 0, Text: label("Lamp-on script:", "Running-mode script:")},
+			decl.Label{Row: 1, Column: 0, Text: label("Device-on script:", "Running-mode script:")},
 			decl.LineEdit{
 				AssignTo:  &controls.onScript,
 				Row:       1,
@@ -1470,10 +1470,10 @@ func settingsAutomationPage(
 				MinSize:  decl.Size{Width: 132},
 				Text:     settingsBrowseOnCaption,
 				OnClicked: func() {
-					browse(label("Select lamp-on script", "Select Running-mode script"), func() *walk.LineEdit { return controls.onScript })
+					browse(label("Select device-on script", "Select Running-mode script"), func() *walk.LineEdit { return controls.onScript })
 				},
 			},
-			decl.Label{Row: 2, Column: 0, Text: label("Lamp-off script:", "Idle-mode script:")},
+			decl.Label{Row: 2, Column: 0, Text: label("Device-off script:", "Idle-mode script:")},
 			decl.LineEdit{
 				AssignTo:  &controls.offScript,
 				Row:       2,
@@ -1488,7 +1488,7 @@ func settingsAutomationPage(
 				MinSize:  decl.Size{Width: 132},
 				Text:     settingsBrowseOffCaption,
 				OnClicked: func() {
-					browse(label("Select lamp-off script", "Select Idle-mode script"), func() *walk.LineEdit { return controls.offScript })
+					browse(label("Select device-off script", "Select Idle-mode script"), func() *walk.LineEdit { return controls.offScript })
 				},
 			},
 			decl.Label{Row: 3, Column: 0, Text: "Message script:"},
@@ -1640,7 +1640,7 @@ func settingsAutomationPage(
 				Row:        12,
 				Column:     0,
 				ColumnSpan: 3,
-				Text:       label("Scripts run hidden with RAYANLAMP_* event variables. Only explicitly configured local files are executed.", "Scripts receive PCCONTROLLER_* event variables."),
+				Text:       label("Scripts run hidden with PCCONTROLLER_DESKTOP_* event variables. Only explicitly configured local files are executed.", "Scripts receive PCCONTROLLER_* event variables."),
 			},
 			decl.VSpacer{Row: 13, Column: 0, ColumnSpan: 3},
 		},
@@ -1662,7 +1662,7 @@ func settingsIntegrationPage(
 				Row:        0,
 				Column:     0,
 				ColumnSpan: 4,
-				Text:       "Start Rayan Lamp when I sign in",
+				Text:       "Start PCController when I sign in",
 				Checked:    cfg.Integration.StartWithWindows,
 			},
 			decl.CheckBox{
@@ -1801,7 +1801,7 @@ func settingsIntegrationPage(
 				MinSize:     decl.Size{Width: 170},
 				Text:        settingsRegisterShellCaption,
 				Enabled:     false,
-				ToolTipText: "Opt in or out of rayan-lamp: URI handling and Rayan Lamp Jump List tasks for this executable.",
+				ToolTipText: "Opt in or out of pccontroller-desktop: URI handling and PCController Jump List tasks for this executable.",
 				OnClicked: func() {
 					requestSettingsRegistrationAction(
 						controls,
@@ -1826,7 +1826,7 @@ func settingsIntegrationPage(
 				MinSize:     decl.Size{Width: 170},
 				Text:        settingsRegisterCOMCaption,
 				Enabled:     false,
-				ToolTipText: "Opt in or out of the RayanLamp.Application COM object for this executable.",
+				ToolTipText: "Opt in or out of the PCControllerDesktop.Application COM object for this executable.",
 				OnClicked: func() {
 					requestSettingsRegistrationAction(
 						controls,
@@ -2001,7 +2001,7 @@ func registrationUnregisterPrompt(
 	}
 	return "Unregister " + name,
 		"Remove " + name + " for the current executable?",
-		"Rayan Lamp will remove only entries still owned by this exact executable:\n\n" +
+		"PCController will remove only entries still owned by this exact executable:\n\n" +
 			executable +
 			"\n\nRegistrations owned by another executable are preserved."
 }
@@ -2094,21 +2094,21 @@ func beginSettingsRegistrationRequest(
 				showDialogError(
 					dialog,
 					registrationActionErrorTitle(actionErr),
-					"Rayan Lamp could not complete the requested registration change or refresh its exact-owned status.",
+					"PCController could not complete the requested registration change or refresh its exact-owned status.",
 					errors.Join(actionErr, fmt.Errorf("refresh status: %w", statusErr)),
 				)
 			case actionErr != nil:
 				showDialogError(
 					dialog,
 					registrationActionErrorTitle(actionErr),
-					"Rayan Lamp refreshed the current registration status after the requested change failed.",
+					"PCController refreshed the current registration status after the requested change failed.",
 					actionErr,
 				)
 			case statusErr != nil:
 				showDialogError(
 					dialog,
 					"Registration status refresh failed",
-					"The registration command completed, but Rayan Lamp could not verify the resulting exact-owned state.",
+					"The registration command completed, but PCController could not verify the resulting exact-owned state.",
 					statusErr,
 				)
 			}
@@ -2386,15 +2386,15 @@ func populateSettingsControls(controls *settingsControls, cfg config.Config) {
 		}
 	}
 
-	setText(controls.baseURL, cfg.Lamp.BaseURL)
-	setText(controls.requestTimeout, cfg.Lamp.RequestTimeout.String())
-	setChecked(controls.webSocket, cfg.Lamp.WebSocket)
-	setText(controls.reconnectMin, cfg.Lamp.ReconnectMin.String())
-	setText(controls.reconnectMax, cfg.Lamp.ReconnectMax.String())
-	setText(controls.httpPoll, cfg.Lamp.HTTPPoll.String())
+	setText(controls.baseURL, cfg.Device.BaseURL)
+	setText(controls.requestTimeout, cfg.Device.RequestTimeout.String())
+	setChecked(controls.webSocket, cfg.Device.WebSocket)
+	setText(controls.reconnectMin, cfg.Device.ReconnectMin.String())
+	setText(controls.reconnectMax, cfg.Device.ReconnectMax.String())
+	setText(controls.httpPoll, cfg.Device.HTTPPoll.String())
 	if controls.telnetPort != nil &&
-		int(math.Round(controls.telnetPort.Value())) != cfg.Lamp.TelnetPort {
-		_ = controls.telnetPort.SetValue(float64(cfg.Lamp.TelnetPort))
+		int(math.Round(controls.telnetPort.Value())) != cfg.Device.TelnetPort {
+		_ = controls.telnetPort.SetValue(float64(cfg.Device.TelnetPort))
 	}
 
 	setIndex(controls.viewMode, viewModeValues, cfg.UI.ViewMode)
@@ -2651,7 +2651,7 @@ func collectPreviewSettings(
 	candidate.UI.SettingsTab = currentSettingsTab(controls)
 
 	if controls.webSocket != nil {
-		candidate.Lamp.WebSocket = controls.webSocket.Checked()
+		candidate.Device.WebSocket = controls.webSocket.Checked()
 	}
 	candidate.Notifications.Enabled = controls.notificationsEnabled.Checked()
 	candidate.Notifications.StateChanges = controls.stateChanges.Checked()
@@ -2718,21 +2718,21 @@ func collectSettings(base config.Config, controls *settingsControls) (config.Con
 
 	var err error
 	if !controls.controllerMode {
-		candidate.Lamp.BaseURL = controls.baseURL.Text()
-		if candidate.Lamp.RequestTimeout, err = parseDuration(controls.requestTimeout.Text(), "Request timeout"); err != nil {
+		candidate.Device.BaseURL = controls.baseURL.Text()
+		if candidate.Device.RequestTimeout, err = parseDuration(controls.requestTimeout.Text(), "Request timeout"); err != nil {
 			return config.Config{}, err
 		}
-		candidate.Lamp.WebSocket = controls.webSocket.Checked()
-		if candidate.Lamp.ReconnectMin, err = parseDuration(controls.reconnectMin.Text(), "Reconnect minimum"); err != nil {
+		candidate.Device.WebSocket = controls.webSocket.Checked()
+		if candidate.Device.ReconnectMin, err = parseDuration(controls.reconnectMin.Text(), "Reconnect minimum"); err != nil {
 			return config.Config{}, err
 		}
-		if candidate.Lamp.ReconnectMax, err = parseDuration(controls.reconnectMax.Text(), "Reconnect maximum"); err != nil {
+		if candidate.Device.ReconnectMax, err = parseDuration(controls.reconnectMax.Text(), "Reconnect maximum"); err != nil {
 			return config.Config{}, err
 		}
-		if candidate.Lamp.HTTPPoll, err = parseDuration(controls.httpPoll.Text(), "HTTP poll interval"); err != nil {
+		if candidate.Device.HTTPPoll, err = parseDuration(controls.httpPoll.Text(), "HTTP poll interval"); err != nil {
 			return config.Config{}, err
 		}
-		candidate.Lamp.TelnetPort = int(math.Round(controls.telnetPort.Value()))
+		candidate.Device.TelnetPort = int(math.Round(controls.telnetPort.Value()))
 	}
 
 	appearance, err := readAppearanceSettings(controls)
@@ -2898,7 +2898,7 @@ func chooseCustomSound(
 	dialog := walk.FileDialog{
 		Title: dialogText(
 			localizer,
-			"Import Rayan Lamp sound effect",
+			"Import PCController sound effect",
 		),
 		Filter: dialogText(
 			localizer,

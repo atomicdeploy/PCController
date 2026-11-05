@@ -9,8 +9,8 @@ import (
 	"sync"
 	"testing"
 
-	"rayanlamp.local/app/assets"
-	"rayanlamp.local/app/internal/config"
+	"pccontroller.local/desktop/assets"
+	"pccontroller.local/desktop/internal/config"
 )
 
 func TestUIAudioAssetIsSessionProtectedAndExact(t *testing.T) {

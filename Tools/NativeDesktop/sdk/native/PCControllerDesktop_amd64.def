@@ -1,0 +1,12 @@
+LIBRARY "PCControllerDesktop"
+EXPORTS
+    PCControllerDesktop_ABIVersion
+    PCControllerDesktop_IsRunning
+    PCControllerDesktop_EnsurePrimaryW
+    PCControllerDesktop_ExecuteUtf8
+    PCControllerDesktop_ExecuteW
+    PCControllerDesktop_On
+    PCControllerDesktop_Off
+    PCControllerDesktop_Toggle
+    PCControllerDesktop_GetState
+    PCControllerDesktop_Free

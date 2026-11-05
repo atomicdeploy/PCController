@@ -14,8 +14,8 @@ import (
 	"syscall"
 	"time"
 
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/model"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/model"
 )
 
 const (
@@ -27,7 +27,7 @@ type LogFunc func(message string)
 
 // SystemEvent identifies Windows lifecycle changes that can trigger an
 // explicitly configured automation script. Values are also exported through
-// RAYANLAMP_EVENT and therefore form part of the automation contract.
+// PCCONTROLLER_DESKTOP_EVENT and therefore form part of the automation contract.
 type SystemEvent string
 
 const (
@@ -52,8 +52,8 @@ type Runner struct {
 type job struct {
 	script   string
 	event    string
-	state    model.LampState
-	previous model.LampState
+	state    model.OutputState
+	previous model.OutputState
 	source   string
 	message  string
 	device   string
@@ -61,7 +61,7 @@ type job struct {
 }
 
 func New(cfg config.AutomationConfig, logger LogFunc) *Runner {
-	return newRunner(cfg, logger, "RAYANLAMP")
+	return newRunner(cfg, logger, "PCCONTROLLER_DESKTOP")
 }
 
 // NewController adapts the donor queue to program modes and PCController's
@@ -280,9 +280,9 @@ func (r *Runner) execute(pending job) {
 func (r *Runner) eventEnvironment(pending job) []string {
 	prefix := r.prefix
 	if prefix == "" {
-		prefix = "RAYANLAMP"
+		prefix = "PCCONTROLLER_DESKTOP"
 	}
-	stateName := func(state model.LampState) string {
+	stateName := func(state model.OutputState) string {
 		if r.prefix == "PCCONTROLLER" {
 			if state == model.StateOn {
 				return "running"

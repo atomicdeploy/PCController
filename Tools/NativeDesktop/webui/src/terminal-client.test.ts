@@ -35,7 +35,7 @@ class FakeSocket extends EventTarget {
 
 const connectedStatus: DeviceTerminalStatus = {
   state: "connected",
-  host: "rayanlamp.local",
+  host: "pccontroller-desktop.local",
   port: 23,
   session: 4,
   sequence: 12,
@@ -179,8 +179,8 @@ describe("terminal input framing", () => {
     expect(terminalWebSocketURL("http://127.0.0.1:47831/app/")).toBe(
       "ws://127.0.0.1:47831/ui/terminal"
     );
-    expect(terminalWebSocketURL("https://lamp-ui.example/app/")).toBe(
-      "wss://lamp-ui.example/ui/terminal"
+    expect(terminalWebSocketURL("https://device-ui.example/app/")).toBe(
+      "wss://device-ui.example/ui/terminal"
     );
   });
 });

@@ -1,5 +1,5 @@
 import { render } from "preact";
-import "virtual:rayanlamp-design.css";
+import "virtual:pccontroller-desktop-design.css";
 import "./styles/app.css";
 import { App } from "./app";
 import { browserConsole } from "./browser-console";
@@ -8,11 +8,11 @@ import { applyWebLocale } from "./i18n";
 
 const root = document.getElementById("app");
 if (!root) {
-  throw new Error("Rayan Lamp web root is missing.");
+  throw new Error("PCController web root is missing.");
 }
 
 browserConsole.start({
-  source: import.meta.env.VITE_RAYANLAMP_STATIC_EXPORT === "true"
+  source: import.meta.env.VITE_PCCONTROLLER_DESKTOP_STATIC_EXPORT === "true"
     ? "static-web"
     : "bundled-web",
   action: buildEdition

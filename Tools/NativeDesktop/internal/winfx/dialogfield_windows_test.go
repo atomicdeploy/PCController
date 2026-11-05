@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"rayanlamp.local/app/internal/design"
+	"pccontroller.local/desktop/internal/design"
 )
 
 func TestDialogFieldClassesKeepNativeEditImplementations(t *testing.T) {

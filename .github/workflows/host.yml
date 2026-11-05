@@ -221,14 +221,15 @@ jobs:
       - name: "🪟 Verify retained native desktop module"
         if: matrix.windows
         shell: cmd
-        run: node Tools/Build/go-tests.mjs --module Tools/NativeDesktop
+        run: |
+          node Tools/Build/check-desktop-identity.mjs && node Tools/Build/go-tests.mjs --module Tools/NativeDesktop
 
       - name: "🌐 Verify retained native Web UI"
         if: matrix.windows
         shell: bash
         working-directory: Tools/NativeDesktop/webui
         env:
-          RAYANLAMP_WEB_OUT_DIR: ${{ github.workspace }}/.build/native-webui
+          PCCONTROLLER_DESKTOP_WEB_OUT_DIR: ${{ github.workspace }}/.build/native-webui
         run: |
           npm ci --no-audit --no-fund
           npm run verify

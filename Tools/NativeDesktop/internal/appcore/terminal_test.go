@@ -9,12 +9,12 @@ import (
 	"testing"
 	"time"
 
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/deviceterminal"
-	"rayanlamp.local/app/internal/lamp"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/device"
+	"pccontroller.local/desktop/internal/deviceterminal"
 )
 
-func TestDeviceTerminalUsesConfiguredLampAndSharesOrderedBytes(t *testing.T) {
+func TestDeviceTerminalUsesConfiguredDeviceAndSharesOrderedBytes(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -30,17 +30,17 @@ func TestDeviceTerminalUsesConfiguredLampAndSharesOrderedBytes(t *testing.T) {
 		_, _ = connection.Write([]byte{
 			0xff, 0xfb, 0x01, // firmware's IAC WILL ECHO
 		})
-		_, _ = connection.Write([]byte("\x1b[2JWelcome to Rayan Lamp\r\nShell is on Serial\r\n"))
+		_, _ = connection.Write([]byte("\x1b[2JWelcome to PCController\r\nShell is on Serial\r\n"))
 		var one [1]byte
 		_, _ = connection.Read(one[:])
 	}()
 
 	cfg := config.Default()
-	cfg.Lamp.BaseURL = "http://127.0.0.1"
-	cfg.Lamp.TelnetPort = port
-	cfg.Lamp.WebSocket = false
-	cfg.Lamp.HTTPPoll = 0
-	cfg.Lamp.RequestTimeout = config.Duration(2 * time.Second)
+	cfg.Device.BaseURL = "http://127.0.0.1"
+	cfg.Device.TelnetPort = port
+	cfg.Device.WebSocket = false
+	cfg.Device.HTTPPoll = 0
+	cfg.Device.RequestTimeout = config.Duration(2 * time.Second)
 	core, err := New(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -62,7 +62,7 @@ func TestDeviceTerminalUsesConfiguredLampAndSharesOrderedBytes(t *testing.T) {
 	var transcript strings.Builder
 	var result deviceterminal.ReadResult
 	after := uint64(0)
-	for !strings.Contains(transcript.String(), "Welcome to Rayan Lamp") {
+	for !strings.Contains(transcript.String(), "Welcome to PCController") {
 		result, err = core.TerminalRead(ctx, after, 0, 2*time.Second)
 		if err != nil {
 			t.Fatalf("read: %v", err)
@@ -81,7 +81,7 @@ func TestDeviceTerminalUsesConfiguredLampAndSharesOrderedBytes(t *testing.T) {
 	if strings.ContainsRune(transcript.String(), rune(0xff)) {
 		t.Fatalf("Telnet negotiation leaked into transcript: %q", transcript.String())
 	}
-	if !strings.Contains(transcript.String(), "Welcome to Rayan Lamp") {
+	if !strings.Contains(transcript.String(), "Welcome to PCController") {
 		t.Fatalf("transcript = %q", transcript.String())
 	}
 	if !result.Snapshot.ReadOnly {
@@ -96,9 +96,9 @@ func TestDeviceTerminalUsesConfiguredLampAndSharesOrderedBytes(t *testing.T) {
 	}
 
 	updated := cfg
-	updated.Lamp.TelnetPort = port + 1
-	if updated.Lamp.TelnetPort > 65535 {
-		updated.Lamp.TelnetPort = port - 1
+	updated.Device.TelnetPort = port + 1
+	if updated.Device.TelnetPort > 65535 {
+		updated.Device.TelnetPort = port - 1
 	}
 	if err := core.ApplyConfig(updated); err != nil {
 		t.Fatalf("apply config: %v", err)
@@ -110,11 +110,11 @@ func TestDeviceTerminalUsesConfiguredLampAndSharesOrderedBytes(t *testing.T) {
 
 func TestApplyConfigSerializesTerminalConnectTarget(t *testing.T) {
 	cfg := config.Default()
-	cfg.Lamp.BaseURL = "http://old-rayanlamp.invalid"
-	cfg.Lamp.TelnetPort = 23001
-	cfg.Lamp.WebSocket = false
-	cfg.Lamp.HTTPPoll = 0
-	cfg.Lamp.RequestTimeout = config.Duration(2 * time.Second)
+	cfg.Device.BaseURL = "http://old-pccontroller-desktop.invalid"
+	cfg.Device.TelnetPort = 23001
+	cfg.Device.WebSocket = false
+	cfg.Device.HTTPPoll = 0
+	cfg.Device.RequestTimeout = config.Duration(2 * time.Second)
 	core, err := New(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -124,7 +124,7 @@ func TestApplyConfigSerializesTerminalConnectTarget(t *testing.T) {
 	peers := make(chan net.Conn, 2)
 	core.terminalDial = func(
 		_ context.Context,
-		_ *lamp.Client,
+		_ *device.Client,
 		port int,
 	) (net.Conn, error) {
 		connection, peer := net.Pipe()
@@ -147,7 +147,7 @@ func TestApplyConfigSerializesTerminalConnectTarget(t *testing.T) {
 	// Give ApplyConfig an existing network generation whose shutdown can be
 	// paused deterministically. At applyPaused it owns lifecycleOpMu, has
 	// selected the old generation for shutdown, and has not committed the new
-	// lamp target yet.
+	// device target yet.
 	networkContext, cancelNetwork := context.WithCancel(context.Background())
 	run := &networkRun{ctx: networkContext, cancel: cancelNetwork}
 	applyPaused := make(chan struct{})
@@ -164,8 +164,8 @@ func TestApplyConfigSerializesTerminalConnectTarget(t *testing.T) {
 	core.lifecycleMu.Unlock()
 
 	updated := cfg
-	updated.Lamp.BaseURL = "http://new-rayanlamp.invalid"
-	updated.Lamp.TelnetPort = 23002
+	updated.Device.BaseURL = "http://new-pccontroller-desktop.invalid"
+	updated.Device.TelnetPort = 23002
 	applyDone := make(chan error, 1)
 	go func() {
 		applyDone <- core.ApplyConfig(updated)
@@ -219,16 +219,16 @@ func TestApplyConfigSerializesTerminalConnectTarget(t *testing.T) {
 			earlyPort,
 		)
 	}
-	if dialPort != updated.Lamp.TelnetPort {
+	if dialPort != updated.Device.TelnetPort {
 		t.Errorf(
 			"terminal dialed stale port %d, want %d",
 			dialPort,
-			updated.Lamp.TelnetPort,
+			updated.Device.TelnetPort,
 		)
 	}
 	if connected.snapshot.State != deviceterminal.StateConnected ||
-		connected.snapshot.Host != "new-rayanlamp.invalid" ||
-		connected.snapshot.Port != updated.Lamp.TelnetPort {
+		connected.snapshot.Host != "new-pccontroller-desktop.invalid" ||
+		connected.snapshot.Port != updated.Device.TelnetPort {
 		t.Fatalf("connected replacement snapshot = %#v", connected.snapshot)
 	}
 	if status := core.TerminalStatus(); status.State != deviceterminal.StateConnected ||
@@ -246,8 +246,8 @@ func TestTerminalLifecycleCancelsBlockedDialPromptly(t *testing.T) {
 		{
 			name: "apply config",
 			action: func(core *Core, cfg config.Config) error {
-				cfg.Lamp.BaseURL = "http://replacement-rayanlamp.invalid"
-				cfg.Lamp.TelnetPort++
+				cfg.Device.BaseURL = "http://replacement-pccontroller-desktop.invalid"
+				cfg.Device.TelnetPort++
 				return core.ApplyConfig(cfg)
 			},
 		},
@@ -264,13 +264,13 @@ func TestTerminalLifecycleCancelsBlockedDialPromptly(t *testing.T) {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			cfg := config.Default()
-			cfg.Lamp.BaseURL = "http://blocked-rayanlamp.invalid"
-			cfg.Lamp.TelnetPort = 24001
-			cfg.Lamp.WebSocket = false
-			cfg.Lamp.HTTPPoll = 0
+			cfg.Device.BaseURL = "http://blocked-pccontroller-desktop.invalid"
+			cfg.Device.TelnetPort = 24001
+			cfg.Device.WebSocket = false
+			cfg.Device.HTTPPoll = 0
 			// A coarse lifecycle lock would make the action wait for all 30
 			// seconds. The injected dial exits only when appcore cancels it.
-			cfg.Lamp.RequestTimeout = config.Duration(30 * time.Second)
+			cfg.Device.RequestTimeout = config.Duration(30 * time.Second)
 			core, err := New(cfg)
 			if err != nil {
 				t.Fatal(err)
@@ -280,7 +280,7 @@ func TestTerminalLifecycleCancelsBlockedDialPromptly(t *testing.T) {
 			dialEntered := make(chan struct{}, 1)
 			core.terminalDial = func(
 				ctx context.Context,
-				_ *lamp.Client,
+				_ *device.Client,
 				_ int,
 			) (net.Conn, error) {
 				dialEntered <- struct{}{}
@@ -342,10 +342,10 @@ func TestTerminalLifecycleCancelsBlockedDialPromptly(t *testing.T) {
 
 func TestDecorateTerminalSnapshotPreservesLiveTarget(t *testing.T) {
 	cfg := config.Default()
-	cfg.Lamp.BaseURL = "http://configured-rayanlamp.invalid"
-	cfg.Lamp.TelnetPort = 23002
-	cfg.Lamp.WebSocket = false
-	cfg.Lamp.HTTPPoll = 0
+	cfg.Device.BaseURL = "http://configured-pccontroller-desktop.invalid"
+	cfg.Device.TelnetPort = 23002
+	cfg.Device.WebSocket = false
+	cfg.Device.HTTPPoll = 0
 	core, err := New(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -367,8 +367,8 @@ func TestDecorateTerminalSnapshotPreservesLiveTarget(t *testing.T) {
 		Host:  live.Host,
 		Port:  live.Port,
 	})
-	if disconnected.Host != "configured-rayanlamp.invalid" ||
-		disconnected.Port != cfg.Lamp.TelnetPort {
+	if disconnected.Host != "configured-pccontroller-desktop.invalid" ||
+		disconnected.Port != cfg.Device.TelnetPort {
 		t.Fatalf("disconnected target was not decorated from config: %#v", disconnected)
 	}
 }

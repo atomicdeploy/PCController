@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-func TestLampStateJSONRoundTrip(t *testing.T) {
+func TestOutputStateJSONRoundTrip(t *testing.T) {
 	t.Parallel()
-	for _, state := range []LampState{StateUnknown, StateOff, StateOn} {
+	for _, state := range []OutputState{StateUnknown, StateOff, StateOn} {
 		state := state
 		t.Run(state.String(), func(t *testing.T) {
 			t.Parallel()
@@ -15,7 +15,7 @@ func TestLampStateJSONRoundTrip(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Marshal(%v): %v", state, err)
 			}
-			var decoded LampState
+			var decoded OutputState
 			if err := json.Unmarshal(data, &decoded); err != nil {
 				t.Fatalf("Unmarshal(%s): %v", data, err)
 			}
@@ -26,15 +26,15 @@ func TestLampStateJSONRoundTrip(t *testing.T) {
 	}
 }
 
-func TestLampStateJSONRejectsInvalidValue(t *testing.T) {
+func TestOutputStateJSONRejectsInvalidValue(t *testing.T) {
 	t.Parallel()
-	var state LampState
+	var state OutputState
 	if err := json.Unmarshal([]byte(`"maybe"`), &state); err == nil {
 		t.Fatal("expected invalid state error")
 	}
 }
 
-func TestLampStateJSONNullMeansUnknown(t *testing.T) {
+func TestOutputStateJSONNullMeansUnknown(t *testing.T) {
 	t.Parallel()
 	state := StateOn
 	if err := json.Unmarshal([]byte("null"), &state); err != nil {

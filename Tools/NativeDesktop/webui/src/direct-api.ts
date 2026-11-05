@@ -1,7 +1,7 @@
 import {
   APIError,
-  type LampCommand,
-  type RayanLampClient
+  type DeviceCommand,
+  type PCControllerDesktopClient
 } from "./api";
 import {
   browserAudio,
@@ -32,16 +32,16 @@ import {
   DIRECT_DIAGNOSTIC_ENDPOINTS,
   diagnosticDeviceFromDocuments,
   directDiagnosticURL,
-  directLampCommandURL,
+  directDeviceCommandURL,
   directProjectionDiagnosticURLs,
   directWebSocketURL,
   isDirectDiagnosticEndpoint,
-  normalizeLampBaseURL,
+  normalizeDeviceBaseURL,
   parseDiagnosticDocument,
   parseDirectEvent,
   parseDirectProjectionDiagnostic,
   parseDurationMilliseconds,
-  parseLampStatePayload,
+  parseOutputStatePayload,
   type DirectDiagnosticDocuments,
   type DirectDiagnosticEndpoint
 } from "./direct-protocol";
@@ -50,11 +50,11 @@ import {
   saveConnectionPreferences
 } from "./connection-preferences";
 
-const directConfigStorageKey = "rayanlamp.web.direct.config.v1";
+const directConfigStorageKey = "pccontroller-desktop.web.direct.config.v1";
 const maxControlResponseBytes = 64 << 10;
 const maxDiagnosticResponseBytes = 1 << 20;
 
-export interface DirectLampAPIOptions {
+export interface DirectDeviceAPIOptions {
   fetch?: typeof fetch;
   pageURL?: string;
   now?: () => Date;
@@ -62,13 +62,13 @@ export interface DirectLampAPIOptions {
 }
 
 /**
- * Browser-only client for firmware that exposes the audited Rayan Lamp HTTP
+ * Browser-only client for firmware that exposes the audited PCController HTTP
  * and WebSocket surface. It deliberately never sends credentials or custom
  * request headers, keeping cross-origin device reads in the CORS-simple path.
  */
-export class DirectLampAPI implements RayanLampClient {
+export class DirectDeviceAPI implements PCControllerDesktopClient {
   readonly kind = "direct" as const;
-  readonly displayName = "Direct to lamp";
+  readonly displayName = "Direct to device";
 
   private baseURL: string;
   private config: AppConfig;
@@ -82,8 +82,8 @@ export class DirectLampAPI implements RayanLampClient {
   private readonly audio: BrowserAudioPlayback;
   private socket: WebSocket | null = null;
 
-  constructor(rawBaseURL: string, options: DirectLampAPIOptions = {}) {
-    this.baseURL = normalizeLampBaseURL(rawBaseURL);
+  constructor(rawBaseURL: string, options: DirectDeviceAPIOptions = {}) {
+    this.baseURL = normalizeDeviceBaseURL(rawBaseURL);
     this.fetcher = options.fetch ?? fetch.bind(globalThis);
     this.pageURL = options.pageURL;
     this.clock = options.now ?? (() => new Date());
@@ -109,7 +109,7 @@ export class DirectLampAPI implements RayanLampClient {
       await this.status();
     } catch {
       // Direct mode must still render its controls and actionable connection
-      // error when the lamp is currently sleeping or unreachable.
+      // error when the device is currently sleeping or unreachable.
     }
 
     try {
@@ -123,18 +123,18 @@ export class DirectLampAPI implements RayanLampClient {
       snapshot: clone(this.current),
       config: clone(this.config),
       version: {
-        name: "RayanLampWeb",
-        display_name: "Rayan Lamp Web",
+        name: "PCControllerDesktopWeb",
+        display_name: "PCController Web",
         version: "1.0.0",
-        company: "YektaYar",
-        description: "Portable browser controller connected directly to the lamp",
+        company: "AtomicDeploy",
+        description: "Portable browser controller connected directly to the device",
         edition: buildEdition
       },
       revision: this.revision,
       capabilities: {
-        lamp_control: true,
+        device_control: true,
         realtime_events: true,
-        websocket_events: this.config.lamp.websocket,
+        websocket_events: this.config.device.websocket,
         transport_direct: true,
         transport_relay: false,
         native_shell: false,
@@ -182,8 +182,8 @@ export class DirectLampAPI implements RayanLampClient {
     const candidate = mergeRecord(this.config, patch);
     validateDirectConfig(candidate);
     const oldBaseURL = this.baseURL;
-    this.baseURL = normalizeLampBaseURL(candidate.lamp.base_url);
-    candidate.lamp.base_url = this.baseURL;
+    this.baseURL = normalizeDeviceBaseURL(candidate.device.base_url);
+    candidate.device.base_url = this.baseURL;
     candidate.diagnostics.safe_endpoints = uniqueAuditedEndpoints(
       candidate.diagnostics.safe_endpoints
     );
@@ -203,11 +203,11 @@ export class DirectLampAPI implements RayanLampClient {
     }
     persistDirectConfig(this.config, this.revision);
 
-    if (patch.lamp !== undefined) {
+    if (patch.device !== undefined) {
       const preferences = readConnectionPreferences();
       saveConnectionPreferences({
         ...preferences,
-        lampURL: this.baseURL
+        deviceURL: this.baseURL
       });
     }
     this.broadcastConfig();
@@ -255,15 +255,15 @@ export class DirectLampAPI implements RayanLampClient {
   async status(): Promise<Snapshot> {
     try {
       const payload = await this.requestText(
-        directLampCommandURL(this.baseURL, "get"),
+        directDeviceCommandURL(this.baseURL, "get"),
         maxControlResponseBytes
       );
-      const state = parseLampStatePayload(payload);
+      const state = parseOutputStatePayload(payload);
       if (state === "unknown") {
         throw new APIError(
           502,
-          "invalid_lamp_state",
-          "The lamp returned a response whose state was not recognized."
+          "invalid_device_state",
+          "The device returned a response whose state was not recognized."
         );
       }
       this.applyHTTPState(state, "http");
@@ -274,7 +274,7 @@ export class DirectLampAPI implements RayanLampClient {
     }
   }
 
-  async command(command: LampCommand): Promise<unknown> {
+  async command(command: DeviceCommand): Promise<unknown> {
     if (command === "window/show" || command === "window/hide") {
       throw nativeOnly("Native window control");
     }
@@ -296,7 +296,7 @@ export class DirectLampAPI implements RayanLampClient {
         throw new APIError(
           409,
           "state_unknown",
-          "The lamp state is unknown, so a safe toggle cannot be chosen."
+          "The device state is unknown, so a safe toggle cannot be chosen."
         );
       }
       resolved = this.current.state === "on" ? "off" : "on";
@@ -307,10 +307,10 @@ export class DirectLampAPI implements RayanLampClient {
     this.current = { ...this.current, pending_command: resolved };
     try {
       const payload = await this.requestText(
-        directLampCommandURL(this.baseURL, resolved),
+        directDeviceCommandURL(this.baseURL, resolved),
         maxControlResponseBytes
       );
-      const reported = parseLampStatePayload(payload);
+      const reported = parseOutputStatePayload(payload);
       this.applyHTTPState(
         reported === "unknown" ? resolved : reported,
         `http:${resolved}`
@@ -327,7 +327,7 @@ export class DirectLampAPI implements RayanLampClient {
       throw new APIError(
         400,
         "endpoint_not_allowed",
-        "Only audited public lamp diagnostic endpoints may be requested."
+        "Only audited public device diagnostic endpoints may be requested."
       );
     }
     const content = await this.requestText(
@@ -569,11 +569,11 @@ export class DirectLampAPI implements RayanLampClient {
     return [
       {
         type: "message",
-        title: "Rayan Lamp",
+        title: "PCController",
         message:
           event.count === 1
-            ? "The lamp requested an audible cue."
-            : `The lamp requested ${event.count} audible cues.`,
+            ? "The device requested an audible cue."
+            : `The device requested ${event.count} audible cues.`,
         result: { kind: "beep", count: event.count }
       }
     ];
@@ -617,7 +617,7 @@ export class DirectLampAPI implements RayanLampClient {
 
     const controller = new AbortController();
     const timeout =
-      parseDurationMilliseconds(this.config.lamp.request_timeout) ?? 5_000;
+      parseDurationMilliseconds(this.config.device.request_timeout) ?? 5_000;
     const timer = window.setTimeout(() => controller.abort(), timeout);
     try {
       const response = await this.fetcher(url, {
@@ -631,8 +631,8 @@ export class DirectLampAPI implements RayanLampClient {
       if (!response.ok) {
         throw new APIError(
           response.status,
-          `lamp_http_${response.status}`,
-          `The lamp returned HTTP ${response.status}.`
+          `device_http_${response.status}`,
+          `The device returned HTTP ${response.status}.`
         );
       }
       const declared = Number(response.headers.get("Content-Length") ?? "0");
@@ -640,7 +640,7 @@ export class DirectLampAPI implements RayanLampClient {
         throw new APIError(
           413,
           "response_too_large",
-          "The lamp response exceeded the browser safety limit."
+          "The device response exceeded the browser safety limit."
         );
       }
       const content = await response.text();
@@ -648,7 +648,7 @@ export class DirectLampAPI implements RayanLampClient {
         throw new APIError(
           413,
           "response_too_large",
-          "The lamp response exceeded the browser safety limit."
+          "The device response exceeded the browser safety limit."
         );
       }
       return content;
@@ -656,15 +656,15 @@ export class DirectLampAPI implements RayanLampClient {
       if (isAbortError(error)) {
         throw new APIError(
           408,
-          "lamp_timeout",
-          `The lamp did not respond within ${this.config.lamp.request_timeout}.`
+          "device_timeout",
+          `The device did not respond within ${this.config.device.request_timeout}.`
         );
       }
       if (error instanceof APIError) throw error;
       throw new APIError(
         0,
-        "lamp_network_error",
-        "The browser could not reach the lamp. Check its address, local-network access, and CORS support."
+        "device_network_error",
+        "The browser could not reach the device. Check its address, local-network access, and CORS support."
       );
     } finally {
       window.clearTimeout(timer);
@@ -734,32 +734,32 @@ export class DirectLampAPI implements RayanLampClient {
 
 export function directPageAccessError(
   pageURL: string,
-  lampURL: string
+  deviceURL: string
 ): APIError | null {
   let page: URL;
-  let lamp: URL;
+  let device: URL;
   try {
     page = new URL(pageURL);
-    lamp = new URL(normalizeLampBaseURL(lampURL));
+    device = new URL(normalizeDeviceBaseURL(deviceURL));
   } catch {
     return new APIError(
       400,
       "invalid_url",
-      "The dashboard or lamp URL is invalid."
+      "The dashboard or device URL is invalid."
     );
   }
   if (page.protocol === "file:") {
     return new APIError(
       0,
       "file_origin_unsupported",
-      "Serve the exported ZIP from a local HTTP server; browsers do not reliably allow lamp access from file:// pages."
+      "Serve the exported ZIP from a local HTTP server; browsers do not reliably allow device access from file:// pages."
     );
   }
-  if (page.protocol === "https:" && lamp.protocol === "http:") {
+  if (page.protocol === "https:" && device.protocol === "http:") {
     return new APIError(
       0,
       "mixed_content",
-      "This HTTPS page cannot contact an HTTP lamp. Serve the dashboard over HTTP on the local network, or enable HTTPS on the lamp."
+      "This HTTPS page cannot contact an HTTP device. Serve the dashboard over HTTP on the local network, or enable HTTPS on the device."
     );
   }
   return null;
@@ -767,7 +767,7 @@ export function directPageAccessError(
 
 function defaultDirectConfig(baseURL: string): AppConfig {
   return {
-    lamp: {
+    device: {
       base_url: baseURL,
       request_timeout: "5s",
       websocket: true,
@@ -848,8 +848,8 @@ function loadDirectConfig(baseURL: string): AppConfig {
     const decoded = JSON.parse(raw) as DeepPartial<AppConfig>;
     const merged = mergeRecord(fallback, decoded);
     // The connection picker is authoritative; a stale settings document must
-    // never silently switch the selected lamp.
-    merged.lamp.base_url = baseURL;
+    // never silently switch the selected device.
+    merged.device.base_url = baseURL;
     validateDirectConfig(merged);
     merged.diagnostics.safe_endpoints = uniqueAuditedEndpoints(
       merged.diagnostics.safe_endpoints
@@ -886,7 +886,7 @@ function persistDirectConfig(config: AppConfig, revision: number): void {
 }
 
 function validateDirectConfig(config: AppConfig): void {
-  normalizeLampBaseURL(config.lamp.base_url);
+  normalizeDeviceBaseURL(config.device.base_url);
   if (
     config.ui.theme !== "system" &&
     config.ui.theme !== "light" &&
@@ -962,9 +962,9 @@ function validateDirectConfig(config: AppConfig): void {
     );
   }
   if (
-    !Number.isInteger(config.lamp.telnet_port) ||
-    config.lamp.telnet_port < 1 ||
-    config.lamp.telnet_port > 65_535
+    !Number.isInteger(config.device.telnet_port) ||
+    config.device.telnet_port < 1 ||
+    config.device.telnet_port > 65_535
   ) {
     throw new APIError(
       400,
@@ -972,15 +972,15 @@ function validateDirectConfig(config: AppConfig): void {
       "Device terminal port must be an integer between 1 and 65535."
     );
   }
-  const timeout = parseDurationMilliseconds(config.lamp.request_timeout);
-  const reconnectMin = parseDurationMilliseconds(config.lamp.reconnect_min);
-  const reconnectMax = parseDurationMilliseconds(config.lamp.reconnect_max);
-  const poll = parseDurationMilliseconds(config.lamp.http_poll);
+  const timeout = parseDurationMilliseconds(config.device.request_timeout);
+  const reconnectMin = parseDurationMilliseconds(config.device.reconnect_min);
+  const reconnectMax = parseDurationMilliseconds(config.device.reconnect_max);
+  const poll = parseDurationMilliseconds(config.device.http_poll);
   if (timeout === null || timeout < 100 || timeout > 120_000) {
     throw new APIError(
       400,
       "invalid_config",
-      "Lamp request timeout must be between 100ms and 2m."
+      "Device request timeout must be between 100ms and 2m."
     );
   }
   if (
@@ -1114,7 +1114,7 @@ function clone<T>(value: T): T {
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "The lamp request failed.";
+  return error instanceof Error ? error.message : "The device request failed.";
 }
 
 function isAbortError(error: unknown): boolean {
@@ -1140,7 +1140,7 @@ function syncChannelName(key: string): string {
     hash ^= key.charCodeAt(index);
     hash = Math.imul(hash, 0x01000193);
   }
-  return `rayanlamp-web-v1-${(hash >>> 0).toString(16).padStart(8, "0")}`;
+  return `pccontroller-desktop-web-v1-${(hash >>> 0).toString(16).padStart(8, "0")}`;
 }
 
 function randomID(): string {

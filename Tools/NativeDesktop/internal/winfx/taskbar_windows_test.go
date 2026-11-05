@@ -13,7 +13,7 @@ func TestMakeThumbnailButtonsValidatesAndBuildsNativeLayout(t *testing.T) {
 		{
 			ID:       10,
 			Icon:     0x100,
-			Tooltip:  "Toggle lamp",
+			Tooltip:  "Toggle device",
 			Disabled: true,
 		},
 		{
@@ -42,7 +42,7 @@ func TestMakeThumbnailButtonsValidatesAndBuildsNativeLayout(t *testing.T) {
 	if buttons[1].Flags != thumbnailButtonHidden {
 		t.Fatalf("second flags = %#x, want hidden", buttons[1].Flags)
 	}
-	if got := utf16Text(buttons[0].Tooltip[:]); got != "Toggle lamp" {
+	if got := utf16Text(buttons[0].Tooltip[:]); got != "Toggle device" {
 		t.Fatalf("first tooltip = %q", got)
 	}
 

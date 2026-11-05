@@ -5,7 +5,7 @@ package ui
 import (
 	"fmt"
 	"github.com/lxn/walk"
-	"rayanlamp.local/app/internal/config"
+	"pccontroller.local/desktop/internal/config"
 	"strings"
 )
 

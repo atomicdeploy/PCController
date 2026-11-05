@@ -1,4 +1,4 @@
-# RayanLamp memory profile
+# PCControllerDesktop memory profile
 
 This document records the July 2026 RAM investigation and the invariants that
 future rendering, animation, and server changes must preserve.
@@ -58,7 +58,7 @@ than cosmetic working-set trimming.
 - Custom WAV data was an unbounded in-memory history. Only the selected sound
   remains resident; content-addressed files remain authoritative and can be
   reselected exactly.
-- UI-only settings changes created throwaway lamp clients, replaced HTTP
+- UI-only settings changes created throwaway device clients, replaced HTTP
   transports retained idle connections, and diagnostics subscribers queued
   stale full snapshots. These are now lifecycle-bounded and latest-only.
 - WebSocket/terminal queues are bounded, diagnostics JSON is not serialized
@@ -88,12 +88,12 @@ is GDI/`UpdateLayeredWindow` presentation instead of GPU
 DirectComposition. **Automatic** remains the default for hardware acceleration.
 
 Hiding the main window now releases its DirectX presenter and reusable render
-surfaces while the tray, hotkeys, IPC/API, automation, notifications, lamp
+surfaces while the tray, hotkeys, IPC/API, automation, notifications, device
 connection, and Web UI continue running. The resources are recreated when the
 window is shown.
 
 For a machine that needs only the browser dashboard/coordinator,
-`RayanLamp.exe serve --no-open` avoids the native GUI and tray entirely. Turning
+`PCControllerDesktop.exe serve --no-open` avoids the native GUI and tray entirely. Turning
 off animations also avoids the APNG/native-frame cache, but that is an explicit
 visual-feature tradeoff rather than a lossless memory mode.
 

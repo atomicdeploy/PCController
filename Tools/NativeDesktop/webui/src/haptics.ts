@@ -2,7 +2,7 @@
  * Restrained, capability-aware vibration feedback for the mobile Web UI.
  *
  * This surface intentionally accepts only normalized semantic cues. It never
- * receives or retains lamp frames, message bodies, terminal data, or other raw
+ * receives or retains device frames, message bodies, terminal data, or other raw
  * payloads.
  */
 
@@ -71,7 +71,7 @@ export class WebHaptics {
       );
     } catch {
       // Unsupported, policy-blocked, or partially implemented vibration APIs
-      // should never affect lamp controls.
+      // should never affect device controls.
       return false;
     }
   }

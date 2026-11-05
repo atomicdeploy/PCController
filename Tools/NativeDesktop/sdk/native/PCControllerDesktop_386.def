@@ -1,0 +1,12 @@
+LIBRARY "PCControllerDesktop"
+EXPORTS
+    PCControllerDesktop_ABIVersion=PCControllerDesktop_ABIVersion@0
+    PCControllerDesktop_IsRunning=PCControllerDesktop_IsRunning@4
+    PCControllerDesktop_EnsurePrimaryW=PCControllerDesktop_EnsurePrimaryW@12
+    PCControllerDesktop_ExecuteUtf8=PCControllerDesktop_ExecuteUtf8@24
+    PCControllerDesktop_ExecuteW=PCControllerDesktop_ExecuteW@24
+    PCControllerDesktop_On=PCControllerDesktop_On@8
+    PCControllerDesktop_Off=PCControllerDesktop_Off@8
+    PCControllerDesktop_Toggle=PCControllerDesktop_Toggle@8
+    PCControllerDesktop_GetState=PCControllerDesktop_GetState@8
+    PCControllerDesktop_Free=PCControllerDesktop_Free@4

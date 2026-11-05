@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/preact";
 import { describe, expect, it } from "vitest";
-import type { RayanLampClient } from "../api";
+import type { PCControllerDesktopClient } from "../api";
 import { activeClientKind, capabilities } from "../store";
 import {
   DeviceTerminal,
@@ -18,7 +18,7 @@ describe("device terminal availability", () => {
     };
     const api = {
       kind: "direct"
-    } as RayanLampClient;
+    } as PCControllerDesktopClient;
 
     render(<DeviceTerminal api={api} />);
 
@@ -29,7 +29,7 @@ describe("device terminal availability", () => {
     ).toBeTruthy();
     expect(screen.getByText(/same origin that forwards/)).toBeTruthy();
     expect(
-      screen.queryByLabelText("Rayan Lamp device terminal input")
+      screen.queryByLabelText("PCController device terminal input")
     ).toBeNull();
   });
 
@@ -42,7 +42,7 @@ describe("device terminal availability", () => {
     };
     const api = {
       kind: "relay"
-    } as RayanLampClient;
+    } as PCControllerDesktopClient;
 
     render(<DeviceTerminal api={api} />);
 
@@ -68,7 +68,7 @@ describe("terminal input policy", () => {
   it("stops keyboard forwarding for a firmware-declared read-only shell", () => {
     const status = {
       state: "connected",
-      host: "rayanlamp.local",
+      host: "pccontroller-desktop.local",
       port: 23,
       session: 1,
       sequence: 2,

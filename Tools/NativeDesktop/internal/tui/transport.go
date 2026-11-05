@@ -10,12 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/deviceterminal"
-	"rayanlamp.local/app/internal/model"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/deviceterminal"
+	"pccontroller.local/desktop/internal/model"
 )
 
-// TransportMode selects how the terminal UI talks to RayanLamp.
+// TransportMode selects how the terminal UI talks to PCControllerDesktop.
 type TransportMode string
 
 const (
@@ -65,7 +65,7 @@ func (e *ConfirmationError) Unwrap() error {
 // Transport is the deliberately small boundary between the Bubble Tea model
 // and the GUI/headless application. Implementations must not retry ambiguous
 // state-changing commands: in particular, retrying Toggle could undo a command
-// that reached the lamp before the response was lost.
+// that reached the device before the response was lost.
 type Transport interface {
 	Mode() TransportMode
 	Label() string
@@ -148,7 +148,7 @@ type TerminalTransport interface {
 }
 
 // QuitEventTransport is implemented by a primary transport that can receive a
-// remote quit command. Run watches this channel so RayanLamp.exe cli --quit and
+// remote quit command. Run watches this channel so PCControllerDesktop.exe cli --quit and
 // installers shut down a standalone TUI just like the GUI primary.
 type QuitEventTransport interface {
 	QuitEvents() <-chan struct{}

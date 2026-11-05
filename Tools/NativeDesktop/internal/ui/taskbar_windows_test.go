@@ -7,9 +7,9 @@ import (
 
 	"github.com/lxn/win"
 
-	"rayanlamp.local/app/internal/i18n"
-	"rayanlamp.local/app/internal/model"
-	"rayanlamp.local/app/internal/winfx"
+	"pccontroller.local/desktop/internal/i18n"
+	"pccontroller.local/desktop/internal/model"
+	"pccontroller.local/desktop/internal/winfx"
 )
 
 func TestTaskbarPresentationMapping(t *testing.T) {
@@ -25,19 +25,19 @@ func TestTaskbarPresentationMapping(t *testing.T) {
 			snapshot:  model.Snapshot{PendingCommand: "on", LastError: "old"},
 			suspended: true,
 			progress:  winfx.TaskbarProgressPaused,
-			tooltip:   "Rayan Lamp — Suspended",
+			tooltip:   "PCController — Suspended",
 		},
 		{
 			name:     "pending overrides old error",
 			snapshot: model.Snapshot{PendingCommand: "off", LastError: "old"},
 			progress: winfx.TaskbarProgressIndeterminate,
-			tooltip:  "Rayan Lamp — Turning off…",
+			tooltip:  "PCController — Turning off…",
 		},
 		{
 			name:     "fully disconnected failure",
 			snapshot: model.Snapshot{State: model.StateOn, LastError: "failed"},
 			progress: winfx.TaskbarProgressError,
-			tooltip:  "Rayan Lamp — Disconnected",
+			tooltip:  "PCController — Disconnected",
 		},
 		{
 			name: "connected operation failure",
@@ -47,25 +47,25 @@ func TestTaskbarPresentationMapping(t *testing.T) {
 				HTTPReachable: true,
 			},
 			progress: winfx.TaskbarProgressError,
-			tooltip:  "Rayan Lamp — Operation failed",
+			tooltip:  "PCController — Operation failed",
 		},
 		{
 			name:     "initial connect",
 			snapshot: model.Snapshot{State: model.StateUnknown},
 			progress: winfx.TaskbarProgressIndeterminate,
-			tooltip:  "Rayan Lamp — Connecting…",
+			tooltip:  "PCController — Connecting…",
 		},
 		{
 			name:     "on",
 			snapshot: model.Snapshot{State: model.StateOn},
 			progress: winfx.TaskbarProgressNone,
-			tooltip:  "Rayan Lamp — On",
+			tooltip:  "PCController — On",
 		},
 		{
 			name:     "off",
 			snapshot: model.Snapshot{State: model.StateOff},
 			progress: winfx.TaskbarProgressNone,
-			tooltip:  "Rayan Lamp — Off",
+			tooltip:  "PCController — Off",
 		},
 	}
 	for _, test := range tests {
@@ -97,7 +97,7 @@ func TestTaskbarPresentationAndButtonsUsePersianCopy(t *testing.T) {
 		false,
 		localizer,
 	)
-	if presentation.tooltip != "چراغ رایان — خاموش" {
+	if presentation.tooltip != "PCController — خاموش" {
 		t.Fatalf("Persian tooltip = %q", presentation.tooltip)
 	}
 	buttons := taskbarButtonsForLocalizer(
@@ -107,7 +107,7 @@ func TestTaskbarPresentationAndButtonsUsePersianCopy(t *testing.T) {
 		localizer,
 	)
 	if len(buttons) != 4 ||
-		buttons[0].Tooltip != "تغییر وضعیت چراغ" ||
+		buttons[0].Tooltip != "تغییر وضعیت دستگاه" ||
 		buttons[1].Tooltip != "روشن کردن" ||
 		buttons[2].Tooltip != "خاموش کردن" ||
 		buttons[3].Tooltip != "اتصال دوباره" {
@@ -120,9 +120,9 @@ func TestTaskbarThumbnailCommandRouting(t *testing.T) {
 		id     uint32
 		method string
 	}{
-		{taskbarButtonToggle, "lamp.toggle"},
-		{taskbarButtonOn, "lamp.on"},
-		{taskbarButtonOff, "lamp.off"},
+		{taskbarButtonToggle, "device.toggle"},
+		{taskbarButtonOn, "device.on"},
+		{taskbarButtonOff, "device.off"},
 		{taskbarButtonRetry, "reconnect"},
 	}
 	for _, test := range tests {

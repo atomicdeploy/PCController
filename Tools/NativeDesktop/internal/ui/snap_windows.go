@@ -5,7 +5,7 @@ package ui
 import (
 	"errors"
 
-	"rayanlamp.local/app/internal/winfx"
+	"pccontroller.local/desktop/internal/winfx"
 )
 
 type snapCursorPoint struct {

@@ -1,8 +1,8 @@
 import {
   APIError,
-  RayanLampAPI,
-  type LampCommand,
-  type RayanLampClient
+  PCControllerDesktopAPI,
+  type DeviceCommand,
+  type PCControllerDesktopClient
 } from "./api";
 import type {
   AppConfig,
@@ -23,7 +23,7 @@ import type {
   UIDiagnosticsSnapshot
 } from "./contracts";
 import type { ConnectionPreferences } from "./connection-preferences";
-import { DirectLampAPI } from "./direct-api";
+import { DirectDeviceAPI } from "./direct-api";
 import {
   browserConsole,
   browserErrorMetadata
@@ -31,18 +31,18 @@ import {
 
 /**
  * Selects the same-origin Go coordinator when it is available, otherwise the
- * browser talks to the configured lamp directly. Fallback is intentionally
+ * browser talks to the configured device directly. Fallback is intentionally
  * confined to "auto"; explicit relay/direct choices never change transport.
  */
-export class AutoRayanLampClient implements RayanLampClient {
-  private active: RayanLampClient | null = null;
+export class AutoPCControllerDesktopClient implements PCControllerDesktopClient {
+  private active: PCControllerDesktopClient | null = null;
 
   constructor(
-    private readonly relay: RayanLampClient,
-    private readonly direct: RayanLampClient
+    private readonly relay: PCControllerDesktopClient,
+    private readonly direct: PCControllerDesktopClient
   ) {}
 
-  get kind(): RayanLampClient["kind"] {
+  get kind(): PCControllerDesktopClient["kind"] {
     return this.active?.kind ?? "auto";
   }
 
@@ -66,7 +66,7 @@ export class AutoRayanLampClient implements RayanLampClient {
       browserConsole.event(
         "warn",
         "transport.error",
-        "Coordinator unavailable; trying the direct lamp transport",
+        "Coordinator unavailable; trying the direct device transport",
         {
           source: "relay",
           action: "fallback-to-direct",
@@ -85,7 +85,7 @@ export class AutoRayanLampClient implements RayanLampClient {
         "automatic_connection_failed",
         `Neither connection mode is available. Go coordinator: ${messageOf(
           relayError
-        )} Direct lamp: ${messageOf(directError)}`
+        )} Direct device: ${messageOf(directError)}`
       );
     }
   }
@@ -143,7 +143,7 @@ export class AutoRayanLampClient implements RayanLampClient {
     return this.requireActive().status();
   }
 
-  command(command: LampCommand): Promise<unknown> {
+  command(command: DeviceCommand): Promise<unknown> {
     return this.requireActive().command(command);
   }
 
@@ -192,7 +192,7 @@ export class AutoRayanLampClient implements RayanLampClient {
     return this.requireActive().decodeRealtimeMessage(raw);
   }
 
-  private requireActive(): RayanLampClient {
+  private requireActive(): PCControllerDesktopClient {
     if (!this.active) {
       throw new APIError(
         503,
@@ -204,16 +204,16 @@ export class AutoRayanLampClient implements RayanLampClient {
   }
 }
 
-export function createRayanLampClient(
+export function createPCControllerDesktopClient(
   preferences: ConnectionPreferences
-): RayanLampClient {
-  if (preferences.mode === "relay") return new RayanLampAPI();
+): PCControllerDesktopClient {
+  if (preferences.mode === "relay") return new PCControllerDesktopAPI();
   if (preferences.mode === "direct") {
-    return new DirectLampAPI(preferences.lampURL);
+    return new DirectDeviceAPI(preferences.deviceURL);
   }
-  return new AutoRayanLampClient(
-    new RayanLampAPI(),
-    new DirectLampAPI(preferences.lampURL)
+  return new AutoPCControllerDesktopClient(
+    new PCControllerDesktopAPI(),
+    new DirectDeviceAPI(preferences.deviceURL)
   );
 }
 

@@ -1,4 +1,4 @@
-// Command generate-sfx writes the deterministic bundled Rayan Lamp PCM WAV
+// Command generate-sfx writes the deterministic bundled PCController PCM WAV
 // catalog. It is host-neutral so Linux release builders can reproduce the
 // exact assets without Windows audio APIs or CGO.
 package main
@@ -12,7 +12,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"rayanlamp.local/app/internal/sfxgen"
+	"pccontroller.local/desktop/internal/sfxgen"
 )
 
 func main() {

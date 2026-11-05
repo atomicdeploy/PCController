@@ -6,8 +6,8 @@ import (
 	"reflect"
 	"testing"
 
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/winfx"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/winfx"
 )
 
 func TestResolveStartupWindowAction(t *testing.T) {

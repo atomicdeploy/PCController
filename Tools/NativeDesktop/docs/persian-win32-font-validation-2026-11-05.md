@@ -48,8 +48,8 @@ EXE backup are in `work/persian-font-20261105/`. These files are not shipped.
 
 - Source: `74b9f0c52836c97cebd7fe607d1f70a6c1326aa9` (font/RTL fix plus graceful
   ellipsis for dashboard hints that exceed the available width).
-- Artifact: `dist/RayanLamp.exe`, Windows amd64, develop, CGO disabled.
-- Version readback: `RayanLamp 1.0.0 develop (74b9f0c52836, 2026-11-05T01:40:02Z)`.
+- Artifact: `dist/PCControllerDesktop.exe`, Windows amd64, develop, CGO disabled.
+- Version readback: `PCControllerDesktop 1.0.0 develop (74b9f0c52836, 2026-11-05T01:40:02Z)`.
 - SHA-256: `B6198D0D5CE94B691242C8AB38F13B5B0D27929C64BAD3D094121AA9C7D92AF0`.
 
 Windows-owned caption bars, file pickers, notifications and TaskDialogs retain

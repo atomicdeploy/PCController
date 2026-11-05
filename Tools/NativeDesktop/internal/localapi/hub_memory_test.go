@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/diagnostics"
-	"rayanlamp.local/app/internal/model"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/diagnostics"
+	"pccontroller.local/desktop/internal/model"
 )
 
 type hubBufferSource struct {
@@ -27,9 +27,9 @@ func newHubBufferSource() *hubBufferSource {
 		cfg: cfg,
 		snapshot: model.Snapshot{
 			State:     model.StateOff,
-			DeviceURL: cfg.Lamp.BaseURL,
+			DeviceURL: cfg.Device.BaseURL,
 		},
-		diagnostics: diagnostics.NewSnapshot(cfg.Lamp.BaseURL),
+		diagnostics: diagnostics.NewSnapshot(cfg.Device.BaseURL),
 	}
 }
 
@@ -118,7 +118,7 @@ func TestEventHubUsesLatestDiagnosticsSubscriptionAndCompactEnvelopeQueue(
 		t.Fatalf("initial envelope = %#v", hello)
 	}
 
-	large := diagnostics.NewSnapshot(source.cfg.Lamp.BaseURL)
+	large := diagnostics.NewSnapshot(source.cfg.Device.BaseURL)
 	large.Endpoints["/info"] = diagnostics.EndpointResult{
 		Document: diagnostics.Document{
 			Endpoint: "/info",
@@ -151,7 +151,7 @@ func TestEventHubWithoutClientsRetainsOnlyAuthoritativeState(t *testing.T) {
 		clients:        make(map[*streamClient]struct{}),
 		configRevision: 1,
 	}
-	snapshot := diagnostics.NewSnapshot("http://rayanlamp.local")
+	snapshot := diagnostics.NewSnapshot("http://pccontroller-desktop.local")
 	snapshot.Endpoints["/info"] = diagnostics.EndpointResult{
 		Document: diagnostics.Document{
 			Endpoint: "/info",

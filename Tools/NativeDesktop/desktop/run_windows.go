@@ -4,7 +4,7 @@ package desktop
 
 import (
 	"context"
-	"rayanlamp.local/app/internal/ui"
+	"pccontroller.local/desktop/internal/ui"
 )
 
 func Run(ctx context.Context, options Options) error {

@@ -36,7 +36,7 @@ hardware-free virtual board. The browser, terminal UI, CLI, automation engine,
 and network APIs all use the same command dispatcher, safety rules, connection
 owner, and event stream.
 
-The Windows desktop work retains the complete RayanLamp source tree under
+The Windows desktop work retains the complete imported presentation source tree under
 [`Tools/NativeDesktop`](Tools/NativeDesktop), not a selected GUI extract.
 See the [source coverage and feature-integration inventory](docs/NATIVE-DONOR-COVERAGE.md)
 for the exact donor revision, repeatable file audit, font replacement, and

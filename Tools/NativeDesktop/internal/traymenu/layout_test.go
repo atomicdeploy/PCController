@@ -111,9 +111,9 @@ func TestBuildDimensionsMirrorsColumnsForRTL(t *testing.T) {
 func TestFitDimensionsHeightKeepsStyledMenuOnShortHighDPIMonitor(t *testing.T) {
 	t.Parallel()
 	items := []Item{
-		{ID: "show", Label: "Lamp is off", IconPNG: []byte{1}},
+		{ID: "show", Label: "Device is off", IconPNG: []byte{1}},
 		{Separator: true},
-		{ID: "toggle", Label: "Toggle lamp", IconPNG: []byte{1}},
+		{ID: "toggle", Label: "Toggle device", IconPNG: []byte{1}},
 		{ID: "on", Label: "Turn on", IconPNG: []byte{1}},
 		{ID: "off", Label: "Turn off", IconPNG: []byte{1}},
 		{Separator: true},
@@ -126,7 +126,7 @@ func TestFitDimensionsHeightKeepsStyledMenuOnShortHighDPIMonitor(t *testing.T) {
 		{ID: "pin", Label: "Always on top", IconPNG: []byte{1}},
 		{ID: "startup", Label: "Start with Windows", IconPNG: []byte{1}},
 		{Separator: true},
-		{ID: "quit", Label: "Exit Rayan Lamp", IconPNG: []byte{1}},
+		{ID: "quit", Label: "Exit PCController", IconPNG: []byte{1}},
 	}
 	original := buildDimensions(items, 192, func(value string) int32 {
 		return int32(len(value) * 16)

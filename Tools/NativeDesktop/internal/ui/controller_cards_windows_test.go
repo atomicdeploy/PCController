@@ -4,7 +4,7 @@ package ui
 
 import (
 	"github.com/lxn/walk"
-	"rayanlamp.local/app/presentation"
+	"pccontroller.local/desktop/presentation"
 	"testing"
 )
 

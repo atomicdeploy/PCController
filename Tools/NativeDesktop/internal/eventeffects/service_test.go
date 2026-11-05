@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/model"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/model"
 )
 
 type automationRecorder struct {

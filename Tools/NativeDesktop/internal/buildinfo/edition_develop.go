@@ -1,4 +1,4 @@
-//go:build !rayanlamp_production
+//go:build !pccontroller_desktop_production
 
 package buildinfo
 
@@ -9,7 +9,7 @@ const (
 	Edition = EditionDevelop
 
 	// DeveloperTools reports whether build-time debugging payloads are
-	// available. Product diagnostics and raw lamp endpoint inspection are
+	// available. Product diagnostics and raw device endpoint inspection are
 	// support features and remain available in both editions.
 	DeveloperTools = true
 )

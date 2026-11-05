@@ -20,13 +20,13 @@ func TestTaskDialogRTLConstantsMatchWin32(t *testing.T) {
 
 func TestTaskDialogDetectsPersianWithoutTreatingTechnicalTextAsRTL(t *testing.T) {
 	t.Parallel()
-	if !taskDialogContainsRTL("تنظیمات چراغ رایان") {
+	if !taskDialogContainsRTL("تنظیمات PCController") {
 		t.Fatal("Persian task-dialog content was not detected")
 	}
 	for _, value := range []string{
-		"http://rayanlamp.local/",
+		"http://pccontroller-desktop.local/",
 		"Ctrl+Alt+L",
-		"C:\\RayanLamp\\script.ps1",
+		"C:\\PCControllerDesktop\\script.ps1",
 		"/config/st",
 	} {
 		if taskDialogContainsRTL(value) {

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"rayanlamp.local/app/internal/deviceterminal"
-	"rayanlamp.local/app/internal/diagnostics"
+	"pccontroller.local/desktop/internal/deviceterminal"
+	"pccontroller.local/desktop/internal/diagnostics"
 )
 
 func TestProjectWhitelistsTypedFieldsAndCannotSerializeRawCredentials(t *testing.T) {
@@ -20,10 +20,10 @@ func TestProjectWhitelistsTypedFieldsAndCannotSerializeRawCredentials(t *testing
 	uptime := int64(1234)
 	now := time.Date(2026, time.July, 24, 1, 2, 3, 0, time.UTC)
 	source := diagnostics.Snapshot{
-		DeviceURL: "http://rayanlamp.local",
+		DeviceURL: "http://pccontroller-desktop.local",
 		Device: diagnostics.DeviceInfo{
-			DeviceName:         "Rayan Lamp",
-			Hostname:           "rayanlamp",
+			DeviceName:         "PCController",
+			Hostname:           "pccontroller-desktop",
 			Firmware:           "1.2.3",
 			FirmwareHash:       "abc123",
 			Build:              "Jul 24 2026",
@@ -37,14 +37,14 @@ func TestProjectWhitelistsTypedFieldsAndCannotSerializeRawCredentials(t *testing
 			StationGateway:     "192.168.1.1",
 			StationDNS:         "192.168.1.1",
 			StationStatus:      "Connected",
-			AccessPointSSID:    "RayanLamp-AP",
+			AccessPointSSID:    "PCControllerDesktop-AP",
 			AccessPointIP:      "192.168.4.1",
 			AccessPointNetmask: "255.255.255.0",
 			AccessPointStatus:  "Enabled",
 			Country:            "IR",
 			Description: diagnostics.DeviceDescription{
 				ModelName:    "TestController",
-				Manufacturer: "YektaYar",
+				Manufacturer: "AtomicDeploy",
 			},
 		},
 		Endpoints: map[string]diagnostics.EndpointResult{
@@ -72,9 +72,9 @@ func TestProjectWhitelistsTypedFieldsAndCannotSerializeRawCredentials(t *testing
 		LastActivity: &activity,
 	}, true)
 
-	if got.Hostname != "rayanlamp" ||
+	if got.Hostname != "pccontroller-desktop" ||
 		got.Station.SSID != "Office" ||
-		got.AccessPoint.SSID != "RayanLamp-AP" ||
+		got.AccessPoint.SSID != "PCControllerDesktop-AP" ||
 		got.Firmware.UptimeSeconds == nil ||
 		*got.Firmware.UptimeSeconds != uptime {
 		t.Fatalf("projection = %+v", got)
@@ -145,7 +145,7 @@ func TestProjectDoesNotAdvertiseWritesBeforeTerminalCapabilityIsKnown(t *testing
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got := Project(diagnostics.NewSnapshot("http://lamp.local"), test.terminal, false)
+			got := Project(diagnostics.NewSnapshot("http://device.local"), test.terminal, false)
 			if got.Capabilities.TerminalReachable != test.reachable ||
 				got.Capabilities.TerminalReadOnly != test.readOnly ||
 				got.Capabilities.WriteAvailable != test.writable {

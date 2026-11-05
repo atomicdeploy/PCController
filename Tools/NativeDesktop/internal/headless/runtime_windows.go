@@ -1,10 +1,10 @@
 //go:build windows
 
-// Package headless composes the RayanLamp core, command dispatcher, and
+// Package headless composes the PCControllerDesktop core, command dispatcher, and
 // per-user IPC ownership gate without constructing the Windows GUI shell.
 //
 // New claims primary-instance ownership and persists the normalized
-// configuration, but deliberately does not start lamp network activity.
+// configuration, but deliberately does not start device network activity.
 // Callers can therefore Subscribe before Start and cannot miss an initial
 // WebSocket or HTTP state event.
 package headless
@@ -20,26 +20,26 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	"rayanlamp.local/app/internal/appcore"
-	"rayanlamp.local/app/internal/commands"
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/diagnostics"
-	"rayanlamp.local/app/internal/ipc"
-	"rayanlamp.local/app/internal/model"
+	"pccontroller.local/desktop/internal/appcore"
+	"pccontroller.local/desktop/internal/commands"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/diagnostics"
+	"pccontroller.local/desktop/internal/ipc"
+	"pccontroller.local/desktop/internal/model"
 )
 
 var (
 	// ErrPipeBusy means another process already owns the current user's
-	// RayanLamp named pipe. Auto-mode callers should attach to that process
-	// instead of starting another lamp controller.
-	ErrPipeBusy = errors.New("RayanLamp primary IPC pipe is already owned")
+	// PCControllerDesktop named pipe. Auto-mode callers should attach to that process
+	// instead of starting another device controller.
+	ErrPipeBusy = errors.New("PCControllerDesktop primary IPC pipe is already owned")
 
 	// ErrNotStarted is returned when a direct Call is made before Start.
-	ErrNotStarted = errors.New("headless RayanLamp runtime is not started")
+	ErrNotStarted = errors.New("headless PCControllerDesktop runtime is not started")
 
 	// ErrClosed is returned when an operation requires a live runtime after
 	// Close has begun.
-	ErrClosed = errors.New("headless RayanLamp runtime is closed")
+	ErrClosed = errors.New("headless PCControllerDesktop runtime is closed")
 )
 
 const defaultOwnershipProbeTimeout = 750 * time.Millisecond
@@ -144,7 +144,7 @@ type Runtime struct {
 
 // New validates or loads configuration, constructs the core and dispatcher,
 // claims the per-user named pipe, then persists the normalized configuration.
-// It never starts the lamp transport; call Subscribe followed by Start.
+// It never starts the device transport; call Subscribe followed by Start.
 func New(options Options) (*Runtime, error) {
 	return newWithDependencies(options, productionDependencies())
 }
@@ -184,7 +184,7 @@ func newWithDependencies(options Options, deps dependencies) (*Runtime, error) {
 		if ownershipCollision(err) || probeExistingPrimary(deps) {
 			return nil, &PipeBusyError{Cause: err}
 		}
-		return nil, fmt.Errorf("claim RayanLamp primary IPC pipe: %w", err)
+		return nil, fmt.Errorf("claim PCControllerDesktop primary IPC pipe: %w", err)
 	}
 
 	// Saving only after Listen succeeds is the ownership boundary. A losing
@@ -192,7 +192,7 @@ func newWithDependencies(options Options, deps dependencies) (*Runtime, error) {
 	// replace the primary process's configuration with it.
 	if err := deps.saveConfig(configPath, core.Config()); err != nil {
 		_ = server.Close()
-		return nil, fmt.Errorf("persist headless RayanLamp configuration: %w", err)
+		return nil, fmt.Errorf("persist headless PCControllerDesktop configuration: %w", err)
 	}
 
 	runtimeContext, cancel := context.WithCancel(context.Background())
@@ -282,7 +282,7 @@ func (r *Runtime) Start(parent context.Context) error {
 	if err := r.deps.startCore(r.core, parent); err != nil {
 		r.lifecycleMu.Unlock()
 		_ = r.Close()
-		return fmt.Errorf("start headless RayanLamp core: %w", err)
+		return fmt.Errorf("start headless PCControllerDesktop core: %w", err)
 	}
 	r.started = true
 	r.ready.MarkReady()
@@ -358,7 +358,7 @@ func closedEventChannel() (<-chan model.Event, func()) {
 	return events, func() {}
 }
 
-// Snapshot returns the most recently merged lamp state.
+// Snapshot returns the most recently merged device state.
 func (r *Runtime) Snapshot() model.Snapshot {
 	if r == nil || r.core == nil {
 		return model.Snapshot{}

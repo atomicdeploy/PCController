@@ -15,7 +15,7 @@ import {
   updateConfig,
   webTheme
 } from "./store";
-import type { RayanLampAPI } from "./api";
+import type { PCControllerDesktopAPI } from "./api";
 import type { UIConfigResult } from "./contracts";
 import {
   testBootstrap,
@@ -42,11 +42,11 @@ describe("application store", () => {
     expect(webTheme.value).toBe("dark");
     expect(document.documentElement.dataset.theme).toBe("dark");
     expect(snapshot.value).toEqual(testSnapshot);
-    expect(diagnostics.value?.device_url).toBe("http://rayanlamp.local");
+    expect(diagnostics.value?.device_url).toBe("http://pccontroller-desktop.local");
     expect(appPhase.value).toBe("online");
   });
 
-  it("derives degraded and reconnecting states without inventing lamp state", () => {
+  it("derives degraded and reconnecting states without inventing device state", () => {
     expect(
       derivePhase({
         ...testSnapshot,
@@ -64,12 +64,12 @@ describe("application store", () => {
     ).toBe("connecting");
   });
 
-  it("invalidates stale lamp connectivity as soon as the coordinator exits", () => {
+  it("invalidates stale device connectivity as soon as the coordinator exits", () => {
     applyBootstrap(structuredClone(testBootstrap));
     expect(controllerAvailable.value).toBe(true);
     expect(isOnline.value).toBe(true);
 
-    markControllerUnavailable("The RayanLamp controller shut down.");
+    markControllerUnavailable("The PCControllerDesktop controller shut down.");
 
     expect(controllerAvailable.value).toBe(false);
     expect(isOnline.value).toBe(false);
@@ -78,7 +78,7 @@ describe("application store", () => {
     expect(snapshot.value.http_reachable).toBe(false);
     expect(snapshot.value.websocket_online).toBe(false);
     expect(snapshot.value.last_error).toBe(
-      "The RayanLamp controller shut down."
+      "The PCControllerDesktop controller shut down."
     );
 
     applySnapshot(structuredClone(testSnapshot));
@@ -100,7 +100,7 @@ describe("application store", () => {
       configureSettingsPersistence({
         patchConfig,
         getConfig: vi.fn()
-      } as unknown as RayanLampAPI);
+      } as unknown as PCControllerDesktopAPI);
 
       updateConfig({ ui: { always_on_top: true } }, true);
       const firstFlush = flushConfigPatch();

@@ -36,7 +36,7 @@ var (
 type ActionID string
 
 // Item describes one command or separator. IconPNG accepts ordinary PNG bytes
-// such as assets.Files.ReadFile("icons/lamp-on.png"). IconHandle accepts a
+// such as assets.Files.ReadFile("icons/device-on.png"). IconHandle accepts a
 // caller-owned HICON and is never destroyed by this package. If both are set,
 // IconPNG is preferred by the custom renderer.
 type Item struct {

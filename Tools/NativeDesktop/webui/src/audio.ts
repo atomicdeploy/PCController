@@ -1,6 +1,6 @@
 import type { AudioCue, NotificationsConfig } from "./contracts";
 
-const audioDatabaseName = "rayanlamp.web.audio.v1";
+const audioDatabaseName = "pccontroller-desktop.web.audio.v1";
 const audioStoreName = "sounds";
 const maxAudioBytes = 4 << 20;
 const maxAudioSeconds = 10;
@@ -227,7 +227,7 @@ export class BrowserAudioPlayer implements BrowserAudioPlayback {
         }
       } catch {
         // A missing, corrupt, or unavailable browser asset must not make every
-        // future event silent. DirectLampAPI repairs the persisted selection;
+        // future event silent. DirectDeviceAPI repairs the persisted selection;
         // this last-resort path still plays the cue-specific bundled effect.
       }
     }

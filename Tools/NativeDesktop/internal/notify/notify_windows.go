@@ -17,9 +17,9 @@ import (
 
 	"git.sr.ht/~jackmordaunt/go-toast/wintoast"
 
-	"rayanlamp.local/app/assets"
-	"rayanlamp.local/app/internal/buildinfo"
-	"rayanlamp.local/app/internal/i18n"
+	"pccontroller.local/desktop/assets"
+	"pccontroller.local/desktop/internal/buildinfo"
+	"pccontroller.local/desktop/internal/i18n"
 )
 
 type Mode string
@@ -319,7 +319,7 @@ func (m *Manager) configureToast() error {
 		return ErrRegistrationRequired
 	}
 	appData := wintoast.AppData{
-		AppID:               "YektaYar.RayanLamp",
+		AppID:               "DRSDavidSoft.PCController",
 		GUID:                "{66F0C709-6E91-45BE-9013-5A96219E6D3D}",
 		IconPath:            m.iconPath,
 		IconBackgroundColor: "#10283A",

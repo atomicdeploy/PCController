@@ -8,7 +8,7 @@ import (
 )
 
 func TestParseASAInfoPlaintext(t *testing.T) {
-	const payload = `hostname: rayanlamp
+	const payload = `hostname: pccontroller-desktop
 wifi version: ESP8266/Arduino 3.1.2/WebServer:3.6.0
 esp chip id: a1b2c3
 flash chip id: deadbeef
@@ -32,7 +32,7 @@ uptime: 2 days, 03:04:05
 		t.Fatalf("raw response was not retained: raw=%q safe=%q", document.Raw, document.SafeRaw)
 	}
 	info := Project(map[string]Document{EndpointInfo: document})
-	if info.Hostname != "rayanlamp" ||
+	if info.Hostname != "pccontroller-desktop" ||
 		info.WiFiVersion != "ESP8266/Arduino 3.1.2/WebServer:3.6.0" ||
 		info.ESPChipID != "a1b2c3" ||
 		info.ClientIP != "192.168.1.20" {
@@ -62,9 +62,9 @@ uptime: 2 days, 03:04:05
 
 func TestParseInfoJSONAndRedaction(t *testing.T) {
 	payload := []byte(`{
-	  "device": "Rayan Lamp Mock",
+	  "device": "PCController Mock",
 	  "firmware": "mock-2",
-	  "hostname": "mock-lamp",
+	  "hostname": "mock-device",
 	  "state": "ON",
 	  "uptime_seconds": 42,
 	  "nested": {"api_token": "do-not-serialize"}
@@ -93,7 +93,7 @@ func TestParseInfoJSONAndRedaction(t *testing.T) {
 		t.Fatalf("serialized document leaked raw secret: %s", serialized)
 	}
 	info := Project(map[string]Document{EndpointInfo: document})
-	if info.DeviceName != "Rayan Lamp Mock" || info.Firmware != "mock-2" ||
+	if info.DeviceName != "PCController Mock" || info.Firmware != "mock-2" ||
 		info.ReportedState != "on" || info.UptimeSeconds == nil ||
 		*info.UptimeSeconds != 42 {
 		t.Fatalf("JSON projection = %+v", info)
@@ -152,12 +152,12 @@ func TestParseWiFiFormats(t *testing.T) {
 
 	jsonStatus := Parse(
 		EndpointWiFiStatus,
-		[]byte(`{"connected":true,"ssid":"RayanLamp-Mock","ip":"127.0.0.1","rssi":-42}`),
+		[]byte(`{"connected":true,"ssid":"PCControllerDesktop-Mock","ip":"127.0.0.1","rssi":-42}`),
 		time.Time{},
 	)
 	jsonInfo := Project(map[string]Document{EndpointWiFiStatus: jsonStatus})
 	if jsonInfo.WiFiConnected == nil || !*jsonInfo.WiFiConnected ||
-		jsonInfo.SSID != "RayanLamp-Mock" || jsonInfo.WiFiIP != "127.0.0.1" ||
+		jsonInfo.SSID != "PCControllerDesktop-Mock" || jsonInfo.WiFiIP != "127.0.0.1" ||
 		jsonInfo.RSSIDBm == nil || *jsonInfo.RSSIDBm != -42 {
 		t.Fatalf("JSON Wi-Fi projection = %+v", jsonInfo)
 	}
@@ -181,7 +181,7 @@ func TestParseNetworkConfigsRedactsBeforeRetentionAndProjects(t *testing.T) {
 	accessPoint := Parse(
 		EndpointConfigAP,
 		[]byte(
-			"ssid: RayanLamp-AP\n"+
+			"ssid: PCControllerDesktop-AP\n"+
 				"pass: "+secret+"\n"+
 				"ip: 192.168.4.1\n"+
 				"netmask: 255.255.255.0\n",
@@ -231,7 +231,7 @@ func TestParseNetworkConfigsRedactsBeforeRetentionAndProjects(t *testing.T) {
 		info.StationGateway != "192.168.10.1" ||
 		info.StationDNS != "192.168.10.1, 1.1.1.1" ||
 		info.AccessPointStatus != "Enabled" ||
-		info.AccessPointSSID != "RayanLamp-AP" ||
+		info.AccessPointSSID != "PCControllerDesktop-AP" ||
 		info.AccessPointIP != "192.168.4.1" {
 		t.Fatalf("network configuration projection = %+v", info)
 	}
@@ -310,14 +310,14 @@ func TestMalformedSensitiveJSONCannotRetainShortCredentialKey(t *testing.T) {
 func TestParseDescriptionXMLAndMalformedJSONFallback(t *testing.T) {
 	description := Parse(
 		EndpointDescription,
-		[]byte(`<?xml version="1.0"?><root><device><friendlyName>Rayan Lamp</friendlyName><modelName>ESP8266</modelName><manufacturer>Rayan</manufacturer></device></root>`),
+		[]byte(`<?xml version="1.0"?><root><device><friendlyName>PCController</friendlyName><modelName>ESP8266</modelName><manufacturer>Controller</manufacturer></device></root>`),
 		time.Time{},
 	)
 	info := Project(map[string]Document{EndpointDescription: description})
 	if description.Format != FormatXML ||
-		info.Description.FriendlyName != "Rayan Lamp" ||
+		info.Description.FriendlyName != "PCController" ||
 		info.Description.ModelName != "ESP8266" ||
-		info.DeviceName != "Rayan Lamp" {
+		info.DeviceName != "PCController" {
 		t.Fatalf("description = %+v info=%+v", description, info)
 	}
 

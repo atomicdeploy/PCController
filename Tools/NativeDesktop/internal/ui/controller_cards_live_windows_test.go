@@ -10,9 +10,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/winfx"
-	"rayanlamp.local/app/presentation"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/winfx"
+	"pccontroller.local/desktop/presentation"
 	"strconv"
 	"testing"
 	"time"
@@ -33,7 +33,7 @@ func TestControllerCardsRenderedInteraction(t *testing.T) {
 
 func captureControllerFixture(t *testing.T, s *Shell, name string) {
 	t.Helper()
-	tool, directory := os.Getenv("RAYANLAMP_CAPTURE_TOOL"), os.Getenv("RAYANLAMP_SCREENSHOTS")
+	tool, directory := os.Getenv("PCCONTROLLER_DESKTOP_CAPTURE_TOOL"), os.Getenv("PCCONTROLLER_DESKTOP_SCREENSHOTS")
 	if tool == "" || directory == "" {
 		return
 	}
@@ -47,7 +47,7 @@ func captureControllerFixture(t *testing.T, s *Shell, name string) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(directory, name+".png")
-	margin := os.Getenv("RAYANLAMP_CAPTURE_MARGIN")
+	margin := os.Getenv("PCCONTROLLER_DESKTOP_CAPTURE_MARGIN")
 	if margin == "" {
 		margin = "12"
 	}

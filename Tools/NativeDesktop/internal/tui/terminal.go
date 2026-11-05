@@ -14,8 +14,8 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"rayanlamp.local/app/internal/deviceterminal"
-	"rayanlamp.local/app/internal/terminal"
+	"pccontroller.local/desktop/internal/deviceterminal"
+	"pccontroller.local/desktop/internal/terminal"
 )
 
 const (
@@ -595,7 +595,7 @@ func (m *Model) renderTerminalOverlay() tea.View {
 
 	host := strings.TrimSpace(m.terminal.snapshot.Host)
 	if host == "" {
-		host = m.text("configured lamp")
+		host = m.text("configured device")
 	}
 	port := m.terminal.snapshot.Port
 	if port == 0 {
@@ -652,7 +652,7 @@ func (m *Model) renderTerminalOverlay() tea.View {
 			fmt.Sprintf("%d", m.terminal.queuedBytes) + " " + m.text("bytes queued")
 	}
 	if status == "" {
-		status = m.text("Raw keyboard input is sent to the lamp")
+		status = m.text("Raw keyboard input is sent to the device")
 	}
 	footer := m.text("Esc / Ctrl+] detach · Ctrl+C sends ETX · Ctrl+D disconnect · Ctrl+R / F5 reconnect")
 	lines := []string{
@@ -681,7 +681,7 @@ func (m *Model) renderTerminalOverlay() tea.View {
 		),
 	)
 	view := m.configuredView(content)
-	view.WindowTitle = m.text("Rayan Lamp") + " · " + m.text("DEVICE TERMINAL")
+	view.WindowTitle = m.text("PCController") + " · " + m.text("DEVICE TERMINAL")
 	if m.terminal.connecting || m.terminal.disconnect {
 		view.ProgressBar = tea.NewProgressBar(tea.ProgressBarIndeterminate, 0)
 	}

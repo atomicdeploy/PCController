@@ -149,7 +149,7 @@ func startHitTestWindow(
 			ready <- fixtureResult{err: err}
 			return
 		}
-		title, _ := windows.UTF16FromString("RayanLamp alpha hit test")
+		title, _ := windows.UTF16FromString("PCControllerDesktop alpha hit test")
 		hwnd := win.CreateWindowEx(
 			win.WS_EX_TOOLWINDOW|win.WS_EX_NOACTIVATE|win.WS_EX_TOPMOST,
 			&hitTestClassName[0],
@@ -242,7 +242,7 @@ func startHitTestWindow(
 func ensureHitTestWindowClass() error {
 	hitTestClassOnce.Do(func() {
 		hitTestClassName, _ = windows.UTF16FromString(
-			"RayanLamp.PixelRegion.IntegrationTest",
+			"PCControllerDesktop.PixelRegion.IntegrationTest",
 		)
 		class := win.WNDCLASSEX{
 			CbSize:        uint32(unsafe.Sizeof(win.WNDCLASSEX{})),

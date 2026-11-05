@@ -123,7 +123,7 @@ func ApplyWindowCorners(hwnd uintptr, enabled bool, radiusPixels int) error {
 
 // ApplyWindowCornersForSize is the WM_SIZE-safe variant. During a live native
 // resize GetWindowRect may still expose the previous committed rectangle while
-// WM_SIZE already carries the new client dimensions. Because RayanLamp removes
+// WM_SIZE already carries the new client dimensions. Because PCControllerDesktop removes
 // the non-client inset, those dimensions are the exact region size.
 func ApplyWindowCornersForSize(
 	hwnd uintptr,

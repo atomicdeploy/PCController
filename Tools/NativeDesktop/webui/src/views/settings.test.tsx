@@ -8,8 +8,8 @@ import {
 import { describe, expect, it, vi } from "vitest";
 import {
   APIError,
-  type RayanLampAPI,
-  type RayanLampClient
+  type PCControllerDesktopAPI,
+  type PCControllerDesktopClient
 } from "../api";
 import type { DeepPartial, AppConfig } from "../contracts";
 import { testConfig } from "../test/fixtures";
@@ -17,7 +17,7 @@ import {
   AppearanceSettings,
   HotkeySettings,
   IntegrationSettings,
-  LampSettings,
+  DeviceSettings,
   NotificationSettings
 } from "./settings";
 
@@ -132,13 +132,13 @@ describe("native appearance settings", () => {
   });
 });
 
-describe("lamp transport settings", () => {
+describe("device transport settings", () => {
   it("applies a bounded device terminal port immediately", () => {
     const patch = vi.fn<
       (value: DeepPartial<AppConfig>, immediate?: boolean) => void
     >();
     render(
-      <LampSettings
+      <DeviceSettings
         value={structuredClone(testConfig)}
         patch={patch}
         direct={false}
@@ -151,7 +151,7 @@ describe("lamp transport settings", () => {
     );
 
     expect(patch).toHaveBeenCalledWith(
-      { lamp: { telnet_port: 2323 } },
+      { device: { telnet_port: 2323 } },
       true
     );
   });
@@ -162,7 +162,7 @@ describe("shared audio settings", () => {
     const playAudio = vi.fn(async () => ({}));
     render(
       <NotificationSettings
-        api={{ playAudio } as unknown as RayanLampClient}
+        api={{ playAudio } as unknown as PCControllerDesktopClient}
         value={structuredClone(testConfig)}
         patch={vi.fn()}
         direct
@@ -194,7 +194,7 @@ describe("shared audio settings", () => {
     );
     render(
       <NotificationSettings
-        api={{ importAudio } as unknown as RayanLampClient}
+        api={{ importAudio } as unknown as PCControllerDesktopClient}
         value={structuredClone(testConfig)}
         patch={vi.fn()}
         direct={false}
@@ -219,15 +219,15 @@ describe("shared audio settings", () => {
 describe("current executable registration", () => {
   it("shows opt-in status for the exact current executable without persisting config", async () => {
     const api = registrationAPI({
-      executable: "C:\\Portable\\RayanLamp.exe",
+      executable: "C:\\Portable\\PCControllerDesktop.exe",
       shell_registered: false,
       com_registered: true
     });
     const patch = renderIntegration(api);
 
     expect(
-      (await screen.findByTitle("C:\\Portable\\RayanLamp.exe")).textContent
-    ).toBe("C:\\Portable\\RayanLamp.exe");
+      (await screen.findByTitle("C:\\Portable\\PCControllerDesktop.exe")).textContent
+    ).toBe("C:\\Portable\\PCControllerDesktop.exe");
     expect(
       screen.getByText(/Portable mode stays unregistered by default/)
     ).toBeTruthy();
@@ -248,17 +248,17 @@ describe("current executable registration", () => {
     const status = vi
       .fn()
       .mockResolvedValueOnce({
-        executable: "C:\\Portable\\RayanLamp.exe",
+        executable: "C:\\Portable\\PCControllerDesktop.exe",
         shell_registered: false,
         com_registered: false
       })
       .mockResolvedValue({
-        executable: "C:\\Portable\\RayanLamp.exe",
+        executable: "C:\\Portable\\PCControllerDesktop.exe",
         shell_registered: true,
         com_registered: false
       });
     const update = vi.fn(async () => ({
-      executable: "C:\\Portable\\RayanLamp.exe",
+      executable: "C:\\Portable\\PCControllerDesktop.exe",
       shell_registered: true,
       com_registered: false
     }));
@@ -285,17 +285,17 @@ describe("current executable registration", () => {
     const status = vi
       .fn()
       .mockResolvedValueOnce({
-        executable: "C:\\Portable\\RayanLamp.exe",
+        executable: "C:\\Portable\\PCControllerDesktop.exe",
         shell_registered: true,
         com_registered: false
       })
       .mockResolvedValue({
-        executable: "C:\\Portable\\RayanLamp.exe",
+        executable: "C:\\Portable\\PCControllerDesktop.exe",
         shell_registered: false,
         com_registered: false
       });
     const update = vi.fn(async () => ({
-      executable: "C:\\Portable\\RayanLamp.exe",
+      executable: "C:\\Portable\\PCControllerDesktop.exe",
       shell_registered: false,
       com_registered: false
     }));
@@ -325,12 +325,12 @@ describe("current executable registration", () => {
     const status = vi
       .fn()
       .mockResolvedValueOnce({
-        executable: "C:\\Portable\\RayanLamp.exe",
+        executable: "C:\\Portable\\PCControllerDesktop.exe",
         shell_registered: false,
         com_registered: false
       })
       .mockResolvedValue({
-        executable: "C:\\Portable\\RayanLamp.exe",
+        executable: "C:\\Portable\\PCControllerDesktop.exe",
         shell_registered: true,
         com_registered: false
       });
@@ -360,7 +360,7 @@ describe("current executable registration", () => {
   });
 });
 
-function renderIntegration(api: RayanLampClient) {
+function renderIntegration(api: PCControllerDesktopClient) {
   const patch = vi.fn<
     (value: DeepPartial<AppConfig>, immediate?: boolean) => void
   >();
@@ -377,17 +377,17 @@ function renderIntegration(api: RayanLampClient) {
 
 function registrationAPI(
   result = {
-    executable: "C:\\Portable\\RayanLamp.exe",
+    executable: "C:\\Portable\\PCControllerDesktop.exe",
     shell_registered: false,
     com_registered: false
   },
   status = vi.fn(async () => result),
   update = vi.fn(async () => result)
-): RayanLampClient {
+): PCControllerDesktopClient {
   return {
     integrationRegistrationStatus: status,
     updateIntegrationRegistration: update
-  } as unknown as RayanLampClient;
+  } as unknown as PCControllerDesktopClient;
 }
 
 function enableRenderedDialogs() {
@@ -412,10 +412,10 @@ describe("global hotkey settings", () => {
     );
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Record Toggle lamp shortcut" })
+      screen.getByRole("button", { name: "Record Toggle device shortcut" })
     );
     const recorder = screen.getByRole("button", {
-      name: "Cancel recording for Toggle lamp"
+      name: "Cancel recording for Toggle device"
     });
     fireEvent.keyDown(recorder, {
       key: "Control",
@@ -447,11 +447,11 @@ describe("global hotkey settings", () => {
     );
 
     const toggle = screen.getByRole("button", {
-      name: "Record Toggle lamp shortcut"
+      name: "Record Toggle device shortcut"
     });
     fireEvent.click(toggle);
     const activeToggle = screen.getByRole("button", {
-      name: "Cancel recording for Toggle lamp"
+      name: "Cancel recording for Toggle device"
     });
     const turnOn = screen.getByRole("button", {
       name: "Record Turn on shortcut"
@@ -460,7 +460,7 @@ describe("global hotkey settings", () => {
     fireEvent.click(turnOn);
 
     expect(
-      screen.getByRole("button", { name: "Record Toggle lamp shortcut" })
+      screen.getByRole("button", { name: "Record Toggle device shortcut" })
     ).toBeTruthy();
     expect(
       screen.getByRole("button", { name: "Cancel recording for Turn on" })
@@ -481,7 +481,7 @@ describe("global hotkey settings", () => {
       renewHotkeyCapture: vi.fn(async () => lease),
       releaseHotkeyCapture: vi.fn(async () => ({ released: true })),
       probeHotkey: vi.fn()
-    } as unknown as RayanLampAPI;
+    } as unknown as PCControllerDesktopAPI;
     const patch = vi.fn<
       (value: DeepPartial<AppConfig>, immediate?: boolean) => void
     >();
@@ -496,10 +496,10 @@ describe("global hotkey settings", () => {
     );
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Record Toggle lamp shortcut" })
+      screen.getByRole("button", { name: "Record Toggle device shortcut" })
     );
     await screen.findByRole("button", {
-      name: "Cancel recording for Toggle lamp"
+      name: "Cancel recording for Toggle device"
     });
     fireEvent.click(
       screen.getByRole("button", { name: "Record Turn on shortcut" })
@@ -526,7 +526,7 @@ describe("global hotkey settings", () => {
   it("does not call unsupported native capture endpoints", () => {
     const api = {
       beginHotkeyCapture: vi.fn()
-    } as unknown as RayanLampAPI;
+    } as unknown as PCControllerDesktopAPI;
     render(
       <HotkeySettings
         api={api}
@@ -538,14 +538,14 @@ describe("global hotkey settings", () => {
     );
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Record Toggle lamp shortcut" })
+      screen.getByRole("button", { name: "Record Toggle device shortcut" })
     );
 
     expect(api.beginHotkeyCapture).not.toHaveBeenCalled();
     expect(screen.getByText(/Browser-only recording cannot preflight/)).toBeTruthy();
     expect(
       screen.getByRole("button", {
-        name: "Cancel recording for Toggle lamp"
+        name: "Cancel recording for Toggle device"
       })
     ).toBeTruthy();
   });

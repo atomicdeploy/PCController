@@ -8,8 +8,8 @@ import (
 
 	"github.com/lxn/walk"
 
-	"rayanlamp.local/app/internal/animation"
-	"rayanlamp.local/app/internal/graphics"
+	"pccontroller.local/desktop/internal/animation"
+	"pccontroller.local/desktop/internal/graphics"
 )
 
 const maxScaledArtworkEntries = 80

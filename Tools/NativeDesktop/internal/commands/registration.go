@@ -7,12 +7,12 @@ import (
 	"path/filepath"
 	"sync"
 
-	"rayanlamp.local/app/internal/comserver"
-	"rayanlamp.local/app/internal/shellintegration"
+	"pccontroller.local/desktop/internal/comserver"
+	"pccontroller.local/desktop/internal/shellintegration"
 )
 
 // RegistrationStatus is a read-only snapshot of registrations owned by the
-// exact executable hosting the authoritative RayanLamp dispatcher.
+// exact executable hosting the authoritative PCControllerDesktop dispatcher.
 type RegistrationStatus struct {
 	Executable      string `json:"executable"`
 	ShellRegistered bool   `json:"shell_registered"`

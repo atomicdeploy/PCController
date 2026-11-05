@@ -25,32 +25,32 @@ func TestSameRegistrationCommand(t *testing.T) {
 	}{
 		{
 			name:     "exact",
-			actual:   `"C:\Program Files\RayanLamp\RayanLamp.exe" /com-server`,
-			expected: `"C:\Program Files\RayanLamp\RayanLamp.exe" /com-server`,
+			actual:   `"C:\Program Files\PCControllerDesktop\PCControllerDesktop.exe" /com-server`,
+			expected: `"C:\Program Files\PCControllerDesktop\PCControllerDesktop.exe" /com-server`,
 			want:     true,
 		},
 		{
 			name:     "windows path casing",
-			actual:   `"c:\program files\rayanlamp\rayanlamp.exe" /COM-SERVER`,
-			expected: `"C:\Program Files\RayanLamp\RayanLamp.exe" /com-server`,
+			actual:   `"c:\program files\pccontrollerdesktop\pccontrollerdesktop.exe" /COM-SERVER`,
+			expected: `"C:\Program Files\PCControllerDesktop\PCControllerDesktop.exe" /com-server`,
 			want:     true,
 		},
 		{
 			name:     "surrounding whitespace",
-			actual:   `  "C:\Apps\RayanLamp.exe" /com-server  `,
-			expected: `"C:\Apps\RayanLamp.exe" /com-server`,
+			actual:   `  "C:\Apps\PCControllerDesktop.exe" /com-server  `,
+			expected: `"C:\Apps\PCControllerDesktop.exe" /com-server`,
 			want:     true,
 		},
 		{
 			name:     "different executable",
-			actual:   `"C:\Other\RayanLamp.exe" /com-server`,
-			expected: `"C:\Apps\RayanLamp.exe" /com-server`,
+			actual:   `"C:\Other\PCControllerDesktop.exe" /com-server`,
+			expected: `"C:\Apps\PCControllerDesktop.exe" /com-server`,
 			want:     false,
 		},
 		{
 			name:     "extra arguments",
-			actual:   `"C:\Apps\RayanLamp.exe" /com-server /unexpected`,
-			expected: `"C:\Apps\RayanLamp.exe" /com-server`,
+			actual:   `"C:\Apps\PCControllerDesktop.exe" /com-server /unexpected`,
+			expected: `"C:\Apps\PCControllerDesktop.exe" /com-server`,
 			want:     false,
 		},
 	}
@@ -245,7 +245,7 @@ func TestSharedRegistrationOwnershipValidation(t *testing.T) {
 func TestHasOwnedRegistrationProtectsIncompletePreexistingView(t *testing.T) {
 	t.Parallel()
 
-	executable := `C:\Apps\RayanLamp.exe`
+	executable := `C:\Apps\PCControllerDesktop.exe`
 	expected, err := RegistrationCommand(executable)
 	if err != nil {
 		t.Fatal(err)
@@ -284,7 +284,7 @@ func TestHasOwnedRegistrationProtectsIncompletePreexistingView(t *testing.T) {
 func TestHasOwnedRegistrationReportsOwnedAlongsideForeignView(t *testing.T) {
 	t.Parallel()
 
-	executable := `C:\Apps\RayanLamp.exe`
+	executable := `C:\Apps\PCControllerDesktop.exe`
 	expected, err := RegistrationCommand(executable)
 	if err != nil {
 		t.Fatal(err)
@@ -303,7 +303,7 @@ func TestHasOwnedRegistrationReportsOwnedAlongsideForeignView(t *testing.T) {
 					if view == views[ownedIndex].access {
 						return expected, true, nil
 					}
-					return `"C:\Other\RayanLamp.exe" /com-server`, true, nil
+					return `"C:\Other\PCControllerDesktop.exe" /com-server`, true, nil
 				},
 				func(string, string, uint32) (string, bool, error) {
 					t.Fatal("shared values read although no shared key exists")
@@ -327,7 +327,7 @@ func TestOwnedRegistrationDistinguishesSharedMetadataFromServerView(
 ) {
 	t.Parallel()
 
-	executable := `C:\Apps\RayanLamp.exe`
+	executable := `C:\Apps\PCControllerDesktop.exe`
 	views := registryViewsForProcess(true)
 	sharedValues := map[string]string{
 		strings.ToLower(classesRoot + `\` + ProgID + `\CLSID`):          CLSID,
@@ -388,10 +388,10 @@ func TestDeleteOwnedClassViewsPreservesTransferredView(t *testing.T) {
 	removeCalls := 0
 	err := deleteOwnedClassViews(
 		classesRoot+`\CLSID\`+CLSID,
-		`"C:\Apps\RayanLamp.exe" /com-server`,
+		`"C:\Apps\PCControllerDesktop.exe" /com-server`,
 		views,
 		func(string, uint32) (string, bool, error) {
-			return `"C:\Other\RayanLamp.exe" /com-server`, true, nil
+			return `"C:\Other\PCControllerDesktop.exe" /com-server`, true, nil
 		},
 		func(string, uint32) error {
 			removeCalls++
@@ -412,7 +412,7 @@ func TestDeleteOwnedClassViewsPreservesMissingMarker(t *testing.T) {
 	removeCalls := 0
 	err := deleteOwnedClassViews(
 		classesRoot+`\CLSID\`+CLSID,
-		`"C:\Apps\RayanLamp.exe" /com-server`,
+		`"C:\Apps\PCControllerDesktop.exe" /com-server`,
 		[]registryView{{label: "native"}},
 		func(string, uint32) (string, bool, error) {
 			return "", false, nil
@@ -433,7 +433,7 @@ func TestDeleteOwnedClassViewsPreservesMissingMarker(t *testing.T) {
 func TestDeleteOwnedClassViewsRechecksEveryView(t *testing.T) {
 	t.Parallel()
 
-	expected := `"C:\Apps\RayanLamp.exe" /com-server`
+	expected := `"C:\Apps\PCControllerDesktop.exe" /com-server`
 	views := registryViewsForProcess(true)
 	var reads []uint32
 	var removals []uint32

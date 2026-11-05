@@ -12,18 +12,18 @@ import (
 	"testing"
 	"time"
 
-	"rayanlamp.local/app/internal/appcore"
-	"rayanlamp.local/app/internal/buildinfo"
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/deviceconfig"
-	"rayanlamp.local/app/internal/ipc"
-	"rayanlamp.local/app/internal/model"
+	"pccontroller.local/desktop/internal/appcore"
+	"pccontroller.local/desktop/internal/buildinfo"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/deviceconfig"
+	"pccontroller.local/desktop/internal/ipc"
+	"pccontroller.local/desktop/internal/model"
 )
 
 func newTestDispatcher(t *testing.T) (*Dispatcher, string) {
 	t.Helper()
 	cfg := config.Default()
-	cfg.Lamp.BaseURL = "http://127.0.0.1:1"
+	cfg.Device.BaseURL = "http://127.0.0.1:1"
 	core, err := appcore.New(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -258,7 +258,7 @@ func TestDeviceConfigGetReturnsOnlyTypedPublicProjection(t *testing.T) {
 
 func TestConfigPatchPersists(t *testing.T) {
 	dispatcher, path := newTestDispatcher(t)
-	patch := json.RawMessage(`{"ui":{"always_on_top":true,"locale":" FA "},"lamp":{"http_poll":"45s"}}`)
+	patch := json.RawMessage(`{"ui":{"always_on_top":true,"locale":" FA "},"device":{"http_poll":"45s"}}`)
 	req := ipc.Request{
 		ProtocolVersion: ipc.ProtocolVersion,
 		Method:          "config.patch",
@@ -270,7 +270,7 @@ func TestConfigPatchPersists(t *testing.T) {
 	}
 	cfg := result.(config.Config)
 	if !cfg.UI.AlwaysOnTop || cfg.UI.Locale != config.LocalePersian ||
-		cfg.Lamp.HTTPPoll.String() != "45s" {
+		cfg.Device.HTTPPoll.String() != "45s" {
 		t.Fatalf("unexpected config: %+v", cfg)
 	}
 	loaded, err := config.Load(path)
@@ -278,7 +278,7 @@ func TestConfigPatchPersists(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !loaded.UI.AlwaysOnTop || loaded.UI.Locale != config.LocalePersian ||
-		loaded.Lamp.HTTPPoll.String() != "45s" {
+		loaded.Device.HTTPPoll.String() != "45s" {
 		t.Fatalf("patch not persisted: %+v", loaded)
 	}
 }
@@ -491,7 +491,7 @@ func TestNoParameterCommandsAreStrict(t *testing.T) {
 		Quit:            func() { hookCalls++ },
 	})
 	methods := []string{
-		"ping", "status", "lamp.on", "lamp.off", "lamp.toggle", "lamp.refresh", "reconnect",
+		"ping", "status", "device.on", "device.off", "device.toggle", "device.refresh", "reconnect",
 		"window.show", "window.hide", "settings.show", "diagnostics.show", "web.show",
 		"config.get", "device.config.get", "audio.play", "version", "quit",
 	}
@@ -563,7 +563,7 @@ func TestStructuredParamsRejectNullUnknownAndTrailingJSON(t *testing.T) {
 	}
 }
 
-func TestLampFailuresAreCodedButContextErrorsRemainDetectable(t *testing.T) {
+func TestDeviceFailuresAreCodedButContextErrorsRemainDetectable(t *testing.T) {
 	t.Run("HTTP failure", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			http.Error(w, "offline", http.StatusServiceUnavailable)
@@ -571,7 +571,7 @@ func TestLampFailuresAreCodedButContextErrorsRemainDetectable(t *testing.T) {
 		defer server.Close()
 		dispatcher := dispatcherForURL(t, server.URL, filepath.Join(t.TempDir(), "config.json"))
 
-		_, err := dispatcher.Handler(context.Background(), request(t, "lamp.on", nil))
+		_, err := dispatcher.Handler(context.Background(), request(t, "device.on", nil))
 		assertCommandCode(t, err, "device_unavailable")
 	})
 
@@ -584,7 +584,7 @@ func TestLampFailuresAreCodedButContextErrorsRemainDetectable(t *testing.T) {
 
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 		defer cancel()
-		_, err := dispatcher.Handler(ctx, request(t, "lamp.on", nil))
+		_, err := dispatcher.Handler(ctx, request(t, "device.on", nil))
 		if !errors.Is(err, context.DeadlineExceeded) {
 			t.Fatalf("error = %v, want context deadline", err)
 		}
@@ -598,9 +598,9 @@ func TestConfigSaveFailureLeavesRuntimeAndStreamUntouched(t *testing.T) {
 	defer server.Close()
 
 	cfg := config.Default()
-	cfg.Lamp.BaseURL = server.URL
-	cfg.Lamp.WebSocket = false
-	cfg.Lamp.HTTPPoll = 0
+	cfg.Device.BaseURL = server.URL
+	cfg.Device.WebSocket = false
+	cfg.Device.HTTPPoll = 0
 	core, err := appcore.New(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -628,14 +628,14 @@ func TestConfigSaveFailureLeavesRuntimeAndStreamUntouched(t *testing.T) {
 	_, err = dispatcher.Handler(context.Background(), ipc.Request{
 		ProtocolVersion: ipc.ProtocolVersion,
 		Method:          "config.patch",
-		Params:          json.RawMessage(`{"lamp":{"base_url":"http://127.0.0.1:2"}}`),
+		Params:          json.RawMessage(`{"device":{"base_url":"http://127.0.0.1:2"}}`),
 	})
 	if err == nil {
 		t.Fatal("expected config save failure")
 	}
 	current := core.Config()
-	if current.Lamp.BaseURL != previous.Lamp.BaseURL {
-		t.Fatalf("runtime changed after failed save: %q", current.Lamp.BaseURL)
+	if current.Device.BaseURL != previous.Device.BaseURL {
+		t.Fatalf("runtime changed after failed save: %q", current.Device.BaseURL)
 	}
 	if snapshot := core.Snapshot(); snapshot.State != model.StateOn {
 		t.Fatalf("state reset after failed save: %#v", snapshot)
@@ -653,9 +653,9 @@ func TestConfigSaveFailureLeavesRuntimeAndStreamUntouched(t *testing.T) {
 func dispatcherForURL(t *testing.T, baseURL, path string) *Dispatcher {
 	t.Helper()
 	cfg := config.Default()
-	cfg.Lamp.BaseURL = baseURL
-	cfg.Lamp.WebSocket = false
-	cfg.Lamp.HTTPPoll = 0
+	cfg.Device.BaseURL = baseURL
+	cfg.Device.WebSocket = false
+	cfg.Device.HTTPPoll = 0
 	core, err := appcore.New(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -678,7 +678,7 @@ func assertCommandCode(t *testing.T, err error, expected string) {
 	}
 }
 
-func waitCommandState(t *testing.T, events <-chan model.Event, expected model.LampState) {
+func waitCommandState(t *testing.T, events <-chan model.Event, expected model.OutputState) {
 	t.Helper()
 	timer := time.NewTimer(3 * time.Second)
 	defer timer.Stop()

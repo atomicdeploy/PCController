@@ -1,4 +1,4 @@
-// Package sfx owns Rayan Lamp's shared bundled and user-imported sound assets.
+// Package sfx owns PCController's shared bundled and user-imported sound assets.
 package sfx
 
 import (

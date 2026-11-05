@@ -13,7 +13,7 @@ import (
 	"time"
 	"unsafe"
 
-	"rayanlamp.local/app/internal/ipc"
+	"pccontroller.local/desktop/internal/ipc"
 )
 
 const (
@@ -25,7 +25,7 @@ const (
 	smtoAbortIfHung = 0x0002
 )
 
-const WindowProperty = "RayanLamp.PrimaryWindow.{66F0C709-6E91-45BE-9013-5A96219E6D3D}"
+const WindowProperty = "PCControllerDesktop.PrimaryWindow.{66F0C709-6E91-45BE-9013-5A96219E6D3D}"
 
 var (
 	user32                 = syscall.NewLazyDLL("user32.dll")

@@ -33,8 +33,8 @@ describe("browser audio assets", () => {
     expect(
       bundledAudioURL("message", "https://desk.example/app/")
     ).toBe("https://desk.example/app/shared/sfx/message.wav");
-    expect(bundledAudioURL("on", "file:///C:/RayanLamp/")).toBe(
-      "file:///C:/RayanLamp/shared/sfx/on.wav"
+    expect(bundledAudioURL("on", "file:///C:/PCControllerDesktop/")).toBe(
+      "file:///C:/PCControllerDesktop/shared/sfx/on.wav"
     );
   });
 

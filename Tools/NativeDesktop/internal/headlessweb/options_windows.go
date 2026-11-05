@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-// LaunchOptions is the command-line surface of `RayanLamp.exe serve`.
+// LaunchOptions is the command-line surface of `PCControllerDesktop.exe serve`.
 type LaunchOptions struct {
 	ConfigPath string
 	Listen     string
@@ -23,7 +23,7 @@ type LaunchOptions struct {
 // silently constructing the native shell.
 func ParseLaunchOptions(args []string) (LaunchOptions, error) {
 	options := LaunchOptions{Open: true}
-	set := flag.NewFlagSet("RayanLamp serve", flag.ContinueOnError)
+	set := flag.NewFlagSet("PCControllerDesktop serve", flag.ContinueOnError)
 	set.SetOutput(io.Discard)
 
 	var noOpen bool
@@ -54,10 +54,10 @@ func quoteArgument(value string) string {
 
 // Usage returns the complete dedicated server-mode help.
 func Usage() string {
-	return `RayanLamp headless web dashboard
+	return `PCControllerDesktop headless web dashboard
 
 Usage:
-  RayanLamp.exe serve [--no-open] [--config PATH] [--listen HOST:PORT]
+  PCControllerDesktop.exe serve [--no-open] [--config PATH] [--listen HOST:PORT]
 
 Options:
   --no-open             Serve without opening the default browser
@@ -66,7 +66,7 @@ Options:
   --help, --version     Show help or product version
 
 The serve mode creates no native window, tray icon, global hotkeys, or native
-dialogs. It owns the ordinary per-user IPC pipe, the lamp connection, event
+dialogs. It owns the ordinary per-user IPC pipe, the device connection, event
 automation and audible cues, and the embedded loopback dashboard. Running
 serve explicitly enables the local API in the selected configuration.`
 }

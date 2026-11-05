@@ -8,7 +8,7 @@ import (
 )
 
 // sanitizeTerminalLine turns all externally sourced text into one printable
-// line before Lip Gloss adds RayanLamp-owned styling. ANSI CSI/OSC sequences,
+// line before Lip Gloss adds PCControllerDesktop-owned styling. ANSI CSI/OSC sequences,
 // C0/C1 controls, and bidi overrides must never reach the user's terminal.
 func sanitizeTerminalLine(value string) string {
 	value = ansi.Strip(value)

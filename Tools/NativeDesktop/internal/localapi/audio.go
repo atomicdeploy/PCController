@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-const audioFilenameHeader = "X-RayanLamp-Filename"
+const audioFilenameHeader = "X-PCControllerDesktop-Filename"
 
 // AudioAsset is one resolved PCM-WAV cue. Data must remain immutable for the
 // duration of the callback; the API does not retain it after the response.
@@ -193,7 +193,7 @@ func validAudioAssetID(value string) bool {
 func safeAudioDownloadName(value string) string {
 	value = safeAudioDisplayName(value)
 	if value == "" {
-		return "rayanlamp-sfx.wav"
+		return "pccontroller-desktop-sfx.wav"
 	}
 	if !strings.EqualFold(filepath.Ext(value), ".wav") {
 		value += ".wav"

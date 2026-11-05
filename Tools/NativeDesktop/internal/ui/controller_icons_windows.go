@@ -5,7 +5,7 @@ package ui
 import (
 	"github.com/lxn/walk"
 	d "github.com/lxn/walk/declarative"
-	"rayanlamp.local/app/internal/dialogs"
+	"pccontroller.local/desktop/internal/dialogs"
 	"strings"
 )
 

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"rayanlamp.local/app/internal/ipc"
+	"pccontroller.local/desktop/internal/ipc"
 )
 
 func TestResolveName(t *testing.T) {
@@ -46,9 +46,9 @@ func TestBridgeDispatchMapping(t *testing.T) {
 		wantMethod string
 		wantParams string
 	}{
-		{name: "on", dispID: dispIDOn, flags: dispatchMethod, wantMethod: "lamp.on"},
-		{name: "off", dispID: dispIDOff, flags: dispatchMethod, wantMethod: "lamp.off"},
-		{name: "toggle", dispID: dispIDToggle, flags: dispatchMethod, wantMethod: "lamp.toggle"},
+		{name: "on", dispID: dispIDOn, flags: dispatchMethod, wantMethod: "device.on"},
+		{name: "off", dispID: dispIDOff, flags: dispatchMethod, wantMethod: "device.off"},
+		{name: "toggle", dispID: dispIDToggle, flags: dispatchMethod, wantMethod: "device.toggle"},
 		{name: "show", dispID: dispIDShow, flags: dispatchMethod, wantMethod: "window.show"},
 		{name: "hide", dispID: dispIDHide, flags: dispatchMethod, wantMethod: "window.hide"},
 		{name: "reconnect", dispID: dispIDReconnect, flags: dispatchMethod, wantMethod: "reconnect"},
@@ -163,7 +163,7 @@ func TestAutomationState(t *testing.T) {
 }
 
 func TestRegistrationCommand(t *testing.T) {
-	executable := filepath.Join(t.TempDir(), "Rayan Lamp.exe")
+	executable := filepath.Join(t.TempDir(), "PCController.exe")
 	absolute, err := filepath.Abs(executable)
 	if err != nil {
 		t.Fatal(err)

@@ -117,7 +117,7 @@ describe("web theme controller", () => {
 
     expect(webTheme.value).toBe("light");
     expect(resolvedWebTheme.value).toBe("light");
-    expect(localStorage.getItem("rayanlamp.web.theme")).toBe("light");
+    expect(localStorage.getItem("pccontroller-desktop.web.theme")).toBe("light");
     expect(
       document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
         ?.content
@@ -145,7 +145,7 @@ describe("pre-paint theme bootstrap", () => {
 
     expect(themeScript).toBeGreaterThan(0);
     expect(appModule).toBeGreaterThan(themeScript);
-    expect(bootstrap).toContain("rayanlamp.web.theme");
+    expect(bootstrap).toContain("pccontroller-desktop.web.theme");
     expect(bootstrap).toContain("prefers-color-scheme: light");
     expect(bootstrap).not.toContain("import ");
   });

@@ -13,19 +13,19 @@ import (
 	"strings"
 	"time"
 
-	"rayanlamp.local/app/internal/buildinfo"
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/diagnostics"
-	"rayanlamp.local/app/internal/ipc"
-	"rayanlamp.local/app/internal/model"
+	"pccontroller.local/desktop/internal/buildinfo"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/diagnostics"
+	"pccontroller.local/desktop/internal/ipc"
+	"pccontroller.local/desktop/internal/model"
 )
 
-const csrfHeader = "X-RayanLamp-CSRF"
+const csrfHeader = "X-PCControllerDesktop-CSRF"
 
 // PublicConfig is the browser-safe configuration representation. In
 // particular, it has no field capable of serializing LocalAPIToken.
 type PublicConfig struct {
-	Lamp          config.LampConfig          `json:"lamp"`
+	Device        config.DeviceConfig        `json:"device"`
 	UI            config.UIConfig            `json:"ui"`
 	Notifications config.NotificationsConfig `json:"notifications"`
 	Hotkeys       config.HotkeysConfig       `json:"hotkeys"`
@@ -71,7 +71,7 @@ func redactConfig(cfg config.Config) PublicConfig {
 	cfg.Diagnostics.SafeEndpoints = append([]string(nil), cfg.Diagnostics.SafeEndpoints...)
 	cfg.Diagnostics.ExpertEndpoints = append([]string(nil), cfg.Diagnostics.ExpertEndpoints...)
 	return PublicConfig{
-		Lamp:          cfg.Lamp,
+		Device:        cfg.Device,
 		UI:            cfg.UI,
 		Notifications: cfg.Notifications,
 		Hotkeys:       cfg.Hotkeys,
@@ -256,7 +256,7 @@ func (a *api) uiBootstrap(w http.ResponseWriter, r *http.Request) {
 	}
 	sequence, revision, snapshot, cfg, diagnosticsSnapshot := a.hub.current()
 	capabilities := map[string]bool{
-		"lamp_control":     true,
+		"device_control":   true,
 		"realtime_events":  true,
 		"websocket_events": true,
 		"native_shell":     true,
@@ -607,9 +607,9 @@ func (a *api) sameOrigin(raw string) bool {
 
 func (a *api) appConnectSources() []string {
 	// Direct mode is browser-configurable and its device origin may differ
-	// from the relay's persisted lamp URL. Keep executable content self-only,
+	// from the relay's persisted device URL. Keep executable content self-only,
 	// while allowing the trusted bundled client to connect to an explicitly
-	// selected HTTP(S)/WebSocket lamp endpoint.
+	// selected HTTP(S)/WebSocket device endpoint.
 	sources := []string{"'self'"}
 	if a != nil && a.expectedHost != "" {
 		sources = append(sources, "ws://"+a.expectedHost)

@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"rayanlamp.local/app/internal/ipc"
+	"pccontroller.local/desktop/internal/ipc"
 )
 
 const testToken = "local-api-test-token"
@@ -59,10 +59,10 @@ func TestRouteMapping(t *testing.T) {
 	}{
 		{name: "ping", httpMethod: http.MethodGet, path: "/ping", command: "ping"},
 		{name: "status", httpMethod: http.MethodGet, path: "/status", command: "status"},
-		{name: "lamp on", httpMethod: http.MethodPost, path: "/lamp/on", command: "lamp.on"},
-		{name: "lamp off", httpMethod: http.MethodPost, path: "/lamp/off", command: "lamp.off"},
-		{name: "lamp toggle", httpMethod: http.MethodPost, path: "/lamp/toggle", command: "lamp.toggle"},
-		{name: "lamp refresh", httpMethod: http.MethodPost, path: "/lamp/refresh", command: "lamp.refresh"},
+		{name: "device on", httpMethod: http.MethodPost, path: "/device/on", command: "device.on"},
+		{name: "device off", httpMethod: http.MethodPost, path: "/device/off", command: "device.off"},
+		{name: "device toggle", httpMethod: http.MethodPost, path: "/device/toggle", command: "device.toggle"},
+		{name: "device refresh", httpMethod: http.MethodPost, path: "/device/refresh", command: "device.refresh"},
 		{name: "show window", httpMethod: http.MethodPost, path: "/window/show", command: "window.show"},
 		{name: "hide window", httpMethod: http.MethodPost, path: "/window/hide", command: "window.hide"},
 		{name: "show settings", httpMethod: http.MethodPost, path: "/settings/show", command: "settings.show"},
@@ -96,17 +96,17 @@ func TestRouteMapping(t *testing.T) {
 			name:       "patch config",
 			httpMethod: http.MethodPatch,
 			path:       "/config",
-			body:       `{"ui":{"always_on_top":true},"lamp":{"timeout":"3s"}}`,
+			body:       `{"ui":{"always_on_top":true},"device":{"timeout":"3s"}}`,
 			command:    "config.patch",
-			params:     `{"ui":{"always_on_top":true},"lamp":{"timeout":"3s"}}`,
+			params:     `{"ui":{"always_on_top":true},"device":{"timeout":"3s"}}`,
 		},
 		{
 			name:       "notification",
 			httpMethod: http.MethodPost,
 			path:       "/notifications",
-			body:       `{"title":"Lamp","message":"Turned on"}`,
+			body:       `{"title":"Device","message":"Turned on"}`,
 			command:    "notifications.show",
-			params:     `{"title":"Lamp","message":"Turned on"}`,
+			params:     `{"title":"Device","message":"Turned on"}`,
 		},
 		{
 			name:       "audio cue",
@@ -367,7 +367,7 @@ func TestStrictMethodsContentTypesAndInputs(t *testing.T) {
 		{
 			name:       "body on no-body route",
 			method:     http.MethodPost,
-			path:       "/lamp/on",
+			path:       "/device/on",
 			body:       `{}`,
 			wantStatus: http.StatusBadRequest,
 		},
@@ -406,7 +406,7 @@ func TestStrictMethodsContentTypesAndInputs(t *testing.T) {
 			name:        "empty notification message",
 			method:      http.MethodPost,
 			path:        "/notifications",
-			body:        `{"title":"Lamp","message":" "}`,
+			body:        `{"title":"Device","message":" "}`,
 			contentType: "application/json",
 			wantStatus:  http.StatusBadRequest,
 		},
@@ -503,7 +503,7 @@ func TestCommandErrorMapping(t *testing.T) {
 		wantLeak   bool
 	}{
 		{name: "invalid argument", err: codedTestError{code: "invalid_argument", message: "bad endpoint"}, wantStatus: http.StatusBadRequest, wantCode: "invalid_argument", wantLeak: true},
-		{name: "offline", err: codedTestError{code: "offline", message: "lamp unavailable"}, wantStatus: http.StatusServiceUnavailable, wantCode: "offline", wantLeak: true},
+		{name: "offline", err: codedTestError{code: "offline", message: "device unavailable"}, wantStatus: http.StatusServiceUnavailable, wantCode: "offline", wantLeak: true},
 		{name: "timeout", err: context.DeadlineExceeded, wantStatus: http.StatusGatewayTimeout, wantCode: "timeout"},
 		{name: "uncoded hidden", err: errors.New("secret internal detail"), wantStatus: http.StatusInternalServerError, wantCode: "internal_error"},
 	}

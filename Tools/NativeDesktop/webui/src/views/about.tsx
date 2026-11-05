@@ -17,18 +17,18 @@ export function About() {
       <header class="view-heading">
         <div>
           <span class="eyebrow">{t("Application")}</span>
-          <h1>{t("About Rayan Lamp")}</h1>
-          <p>{t("A private, single-executable Windows controller by YektaYar.")}</p>
+          <h1>{t("About PCController")}</h1>
+          <p>{t("A private, single-executable Windows controller by AtomicDeploy.")}</p>
         </div>
       </header>
       <div class="about-grid">
         <Card class="about-identity">
           <div class="about-mark" aria-hidden="true">
-            <Icon name="lamp" size={42} />
+            <Icon name="device" size={42} />
           </div>
           <div>
-            <span class="eyebrow">{info?.company || "YektaYar"}</span>
-            <h2>{info?.display_name || t("Rayan Lamp")}</h2>
+            <span class="eyebrow">{info?.company || "AtomicDeploy"}</span>
+            <h2>{info?.display_name || t("PCController")}</h2>
             <p>{t(info?.description || "Local controller")}</p>
           </div>
           <dl>
@@ -48,7 +48,7 @@ export function About() {
           <h2>{t("Local by design")}</h2>
           <p>
             {activeClientKind.value === "direct"
-              ? t("Direct mode sends simple requests from this browser to the configured lamp. No cloud service or manager token is involved.")
+              ? t("Direct mode sends simple requests from this browser to the configured device. No cloud service or manager token is involved.")
               : t("The Go coordinator serves this dashboard on a loopback-only listener. Its temporary browser session never exposes the long-lived API bearer token.")}
           </p>
         </Card>
@@ -57,10 +57,10 @@ export function About() {
           <h2>{t("Shared state")}</h2>
           <p>
             {activeClientKind.value === "direct"
-              ? t("Tabs share one elected firmware event socket and fan confirmed lamp state through BroadcastChannel.")
+              ? t("Tabs share one elected firmware event socket and fan confirmed device state through BroadcastChannel.")
               : capabilities.value.native_shell === false
-                ? t("The headless web host, CLI, terminal UI, IPC clients, and automation share one command dispatcher and confirmed lamp snapshot.")
-                : t("Native UI, tray, CLI, terminal UI, automation, and this web client all reach the same command dispatcher and confirmed lamp snapshot.")}
+                ? t("The headless web host, CLI, terminal UI, IPC clients, and automation share one command dispatcher and confirmed device snapshot.")
+                : t("Native UI, tray, CLI, terminal UI, automation, and this web client all reach the same command dispatcher and confirmed device snapshot.")}
           </p>
         </Card>
         <Card class="capability-card">

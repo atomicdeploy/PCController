@@ -3,7 +3,7 @@
 
   var requested = "system";
   try {
-    var stored = localStorage.getItem("rayanlamp.web.theme");
+    var stored = localStorage.getItem("pccontroller-desktop.web.theme");
     if (stored === "light" || stored === "dark" || stored === "system") {
       requested = stored;
     }
@@ -37,7 +37,7 @@
 
   var locale = "auto";
   try {
-    var storedLocale = localStorage.getItem("rayanlamp.web.locale");
+    var storedLocale = localStorage.getItem("pccontroller-desktop.web.locale");
     if (
       storedLocale === "auto" ||
       storedLocale === "en" ||

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"rayanlamp.local/app/internal/winfx"
+	"pccontroller.local/desktop/internal/winfx"
 )
 
 func TestImmediateBackdropCommitRequired(t *testing.T) {

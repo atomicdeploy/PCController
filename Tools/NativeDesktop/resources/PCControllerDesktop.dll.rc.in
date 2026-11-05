@@ -1,0 +1,31 @@
+#include <windows.h>
+
+1 VERSIONINFO
+FILEVERSION @FILE_VERSION_COMMAS@
+PRODUCTVERSION @FILE_VERSION_COMMAS@
+FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
+FILEFLAGS 0
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_DLL
+FILESUBTYPE 0
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "Comments", "Optional attach-only native SDK for the unified PCControllerDesktop controller\0"
+            VALUE "CompanyName", "AtomicDeploy\0"
+            VALUE "FileDescription", "PCController Native SDK\0"
+            VALUE "FileVersion", "@FILE_VERSION@\0"
+            VALUE "InternalName", "PCControllerDesktopSDK\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026\0"
+            VALUE "OriginalFilename", "PCControllerDesktop.dll\0"
+            VALUE "ProductName", "PCController\0"
+            VALUE "ProductVersion", "@PRODUCT_VERSION@\0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0409, 1200
+    END
+END

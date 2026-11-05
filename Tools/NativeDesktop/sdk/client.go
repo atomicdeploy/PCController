@@ -1,7 +1,7 @@
 // Package sdk provides the supported Go client for controlling the authoritative
-// RayanLamp primary instance.
+// PCControllerDesktop primary instance.
 //
-// The client is attach-only. It never creates a second lamp connection, loads
+// The client is attach-only. It never creates a second device connection, loads
 // configuration, or starts a GUI. Calls use the same current-user named pipe
 // as the CLI, COM server, URI handler, and other local integrations.
 package sdk
@@ -16,7 +16,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"rayanlamp.local/app/internal/ipc"
+	"pccontroller.local/desktop/internal/ipc"
 )
 
 const (
@@ -30,10 +30,10 @@ const (
 var (
 	// ErrUnsupported reports that the named-pipe client is unavailable on the
 	// current operating system.
-	ErrUnsupported = errors.New("RayanLamp SDK is only supported on Windows")
+	ErrUnsupported = errors.New("PCControllerDesktop SDK is only supported on Windows")
 
 	// ErrInvalidOptions reports invalid client construction options.
-	ErrInvalidOptions = errors.New("invalid RayanLamp SDK options")
+	ErrInvalidOptions = errors.New("invalid PCControllerDesktop SDK options")
 )
 
 // Options configures an attach-only Client.
@@ -63,7 +63,7 @@ type Response struct {
 func (r Response) DecodeResult(target any) error {
 	if !r.OK {
 		if r.Error == nil {
-			return errors.New("RayanLamp command failed")
+			return errors.New("PCControllerDesktop command failed")
 		}
 		return fmt.Errorf("%s: %s", r.Error.Code, r.Error.Message)
 	}
@@ -71,14 +71,14 @@ func (r Response) DecodeResult(target any) error {
 		return nil
 	}
 	if err := json.Unmarshal(r.Result, target); err != nil {
-		return fmt.Errorf("decode RayanLamp command result: %w", err)
+		return fmt.Errorf("decode PCControllerDesktop command result: %w", err)
 	}
 	return nil
 }
 
 type callFunc func(context.Context, ipc.Request) (ipc.Response, error)
 
-// Client sends commands to the current user's primary RayanLamp instance.
+// Client sends commands to the current user's primary PCControllerDesktop instance.
 // Client is safe for concurrent use.
 type Client struct {
 	timeout time.Duration
@@ -133,21 +133,21 @@ func (c *Client) Call(
 	params any,
 ) (Response, error) {
 	if c == nil || c.call == nil {
-		return Response{}, errors.New("RayanLamp SDK client is not initialized")
+		return Response{}, errors.New("PCControllerDesktop SDK client is not initialized")
 	}
 	method = strings.TrimSpace(method)
 	if method == "" {
-		return Response{}, errors.New("RayanLamp SDK method is required")
+		return Response{}, errors.New("PCControllerDesktop SDK method is required")
 	}
 	if !utf8.ValidString(method) {
-		return Response{}, errors.New("RayanLamp SDK method must be valid UTF-8")
+		return Response{}, errors.New("PCControllerDesktop SDK method must be valid UTF-8")
 	}
 	if len(method) > 64 {
-		return Response{}, errors.New("RayanLamp SDK method exceeds 64 bytes")
+		return Response{}, errors.New("PCControllerDesktop SDK method exceeds 64 bytes")
 	}
 	for _, character := range method {
 		if character < 0x20 || character == 0x7f {
-			return Response{}, errors.New("RayanLamp SDK method contains a control character")
+			return Response{}, errors.New("PCControllerDesktop SDK method contains a control character")
 		}
 	}
 
@@ -204,17 +204,17 @@ func (c *Client) Status(ctx context.Context) (Response, error) {
 	return c.Call(ctx, "status", nil)
 }
 
-// On asks the primary to turn the lamp on.
+// On asks the primary to turn the device on.
 func (c *Client) On(ctx context.Context) (Response, error) {
-	return c.Call(ctx, "lamp.on", nil)
+	return c.Call(ctx, "device.on", nil)
 }
 
-// Off asks the primary to turn the lamp off.
+// Off asks the primary to turn the device off.
 func (c *Client) Off(ctx context.Context) (Response, error) {
-	return c.Call(ctx, "lamp.off", nil)
+	return c.Call(ctx, "device.off", nil)
 }
 
-// Toggle asks the primary to toggle the lamp.
+// Toggle asks the primary to toggle the device.
 func (c *Client) Toggle(ctx context.Context) (Response, error) {
-	return c.Call(ctx, "lamp.toggle", nil)
+	return c.Call(ctx, "device.toggle", nil)
 }

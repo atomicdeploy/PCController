@@ -10,7 +10,7 @@ import (
 )
 
 func TestRegisterShellReportsJumpListPartialFailure(t *testing.T) {
-	executable := makeTestExecutable(t, "RayanLamp.exe")
+	executable := makeTestExecutable(t, "PCControllerDesktop.exe")
 	store := newMemoryAssociationStore()
 	jumpFailure := errors.New("injected Jump List policy failure")
 	err := registerShellWithStore(
@@ -28,7 +28,7 @@ func TestRegisterShellReportsJumpListPartialFailure(t *testing.T) {
 }
 
 func TestUnregisterShellAttemptsEveryOwnedCleanupPhase(t *testing.T) {
-	executable := makeTestExecutable(t, "RayanLamp.exe")
+	executable := makeTestExecutable(t, "PCControllerDesktop.exe")
 	store := newMemoryAssociationStore()
 	if err := registerWithStore(store, executable); err != nil {
 		t.Fatal(err)
@@ -59,12 +59,12 @@ func TestUnregisterShellAttemptsEveryOwnedCleanupPhase(t *testing.T) {
 }
 
 func TestUnregisterShellNeverTouchesForeignOwner(t *testing.T) {
-	executable := makeTestExecutable(t, "RayanLamp.exe")
+	executable := makeTestExecutable(t, "PCControllerDesktop.exe")
 	store := newMemoryAssociationStore()
 	store.keys[protocolRootPath] = true
 	store.keys[protocolOpenPath] = true
 	store.values[protocolOpenPath] = map[string]string{
-		"": `"C:\Foreign\RayanLamp.exe" /uri "%1"`,
+		"": `"C:\Foreign\PCControllerDesktop.exe" /uri "%1"`,
 	}
 
 	var jumpCalls int
@@ -106,7 +106,7 @@ func (store *ownershipTransferStore) GetString(
 }
 
 func TestUnregisterShellRechecksOwnerBeforeSharedCleanup(t *testing.T) {
-	executable := makeTestExecutable(t, "RayanLamp.exe")
+	executable := makeTestExecutable(t, "PCControllerDesktop.exe")
 	base := newMemoryAssociationStore()
 	if err := registerWithStore(base, executable); err != nil {
 		t.Fatal(err)
@@ -119,7 +119,7 @@ func TestUnregisterShellRechecksOwnerBeforeSharedCleanup(t *testing.T) {
 	base.keys[legacyToastServerPath] = true
 	base.values[legacyToastServerPath] = map[string]string{"": executable}
 
-	foreign := `"C:\NewOwner\RayanLamp.exe" /uri "%1"`
+	foreign := `"C:\NewOwner\PCControllerDesktop.exe" /uri "%1"`
 	store := &ownershipTransferStore{
 		memoryAssociationStore: base,
 		replacement:            foreign,
@@ -154,7 +154,7 @@ func TestUnregisterShellRechecksOwnerBeforeSharedCleanup(t *testing.T) {
 }
 
 func TestUnregisterShellReportsPartialButStillRemovesURI(t *testing.T) {
-	executable := makeTestExecutable(t, "RayanLamp.exe")
+	executable := makeTestExecutable(t, "PCControllerDesktop.exe")
 	store := newMemoryAssociationStore()
 	if err := registerWithStore(store, executable); err != nil {
 		t.Fatal(err)
@@ -174,7 +174,7 @@ func TestUnregisterShellReportsPartialButStillRemovesURI(t *testing.T) {
 }
 
 func TestUnregisterShellReportsTotalFailureWhenNothingCompleted(t *testing.T) {
-	executable := makeTestExecutable(t, "RayanLamp.exe")
+	executable := makeTestExecutable(t, "PCControllerDesktop.exe")
 	store := newMemoryAssociationStore()
 	if err := registerWithStore(store, executable); err != nil {
 		t.Fatal(err)
@@ -215,7 +215,7 @@ func TestUnregisterShellReportsTotalFailureWhenNothingCompleted(t *testing.T) {
 }
 
 func TestCleanupLegacyMetadataDeletesOnlyOwnedActivator(t *testing.T) {
-	executable := makeTestExecutable(t, "RayanLamp.exe")
+	executable := makeTestExecutable(t, "PCControllerDesktop.exe")
 	store := newMemoryAssociationStore()
 	store.keys[appUserModelRegistryPath] = true
 	store.values[appUserModelRegistryPath] = map[string]string{
@@ -238,7 +238,7 @@ func TestCleanupLegacyMetadataDeletesOnlyOwnedActivator(t *testing.T) {
 }
 
 func TestCleanupLegacyMetadataPreservesForeignActivatorAndAppID(t *testing.T) {
-	executable := makeTestExecutable(t, "RayanLamp.exe")
+	executable := makeTestExecutable(t, "PCControllerDesktop.exe")
 	store := newMemoryAssociationStore()
 	store.keys[appUserModelRegistryPath] = true
 	store.values[appUserModelRegistryPath] = map[string]string{
@@ -246,7 +246,7 @@ func TestCleanupLegacyMetadataPreservesForeignActivatorAndAppID(t *testing.T) {
 	}
 	store.keys[legacyToastActivatorPath] = true
 	store.keys[legacyToastServerPath] = true
-	foreign := `C:\PortableElsewhere\RayanLamp.exe`
+	foreign := `C:\PortableElsewhere\PCControllerDesktop.exe`
 	store.values[legacyToastServerPath] = map[string]string{"": foreign}
 
 	if err := cleanupLegacyMetadataWithStore(store, executable); err != nil {
@@ -263,7 +263,7 @@ func TestCleanupLegacyMetadataPreservesForeignActivatorAndAppID(t *testing.T) {
 }
 
 func TestCleanupLegacyMetadataRemovesStaleMatchingAppIDWithoutActivator(t *testing.T) {
-	executable := makeTestExecutable(t, "RayanLamp.exe")
+	executable := makeTestExecutable(t, "PCControllerDesktop.exe")
 	store := newMemoryAssociationStore()
 	store.keys[appUserModelRegistryPath] = true
 	store.values[appUserModelRegistryPath] = map[string]string{
@@ -281,7 +281,7 @@ func TestCleanupLegacyMetadataRemovesStaleMatchingAppIDWithoutActivator(t *testi
 func TestActivationOwnershipRequiresExactExecutableOnly(t *testing.T) {
 	t.Parallel()
 
-	executable := `C:\Program Files\RayanLamp\RayanLamp.exe`
+	executable := `C:\Program Files\PCControllerDesktop\PCControllerDesktop.exe`
 	for _, owned := range []string{
 		executable,
 		`"` + executable + `"`,
@@ -292,7 +292,7 @@ func TestActivationOwnershipRequiresExactExecutableOnly(t *testing.T) {
 		}
 	}
 	for _, foreign := range []string{
-		`C:\Other\RayanLamp.exe`,
+		`C:\Other\PCControllerDesktop.exe`,
 		`"` + executable + `" /background`,
 		executable + " /com-server",
 	} {

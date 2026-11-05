@@ -7,8 +7,8 @@ import (
 	"testing"
 	"unsafe"
 
-	"rayanlamp.local/app/assets"
-	"rayanlamp.local/app/internal/winfx"
+	"pccontroller.local/desktop/assets"
+	"pccontroller.local/desktop/internal/winfx"
 )
 
 func TestPersianPopupUsesPhysicalYekanFaceAtEveryDPI(t *testing.T) {
@@ -22,7 +22,7 @@ func TestPersianPopupUsesPhysicalYekanFaceAtEveryDPI(t *testing.T) {
 			t.Fatal(err)
 		}
 		face, err := winfx.FontFaceName(uintptr(font.handle))
-		width := font.measure("تنظیمات چراغ رایان ۱۲۳۴۵۶۷۸۹۰")
+		width := font.measure("تنظیمات PCController ۱۲۳۴۵۶۷۸۹۰")
 		font.close()
 		if err != nil || face != family || width <= 0 {
 			t.Fatalf("DPI %d: face=%q width=%d error=%v", dpi, face, width, err)
@@ -30,13 +30,13 @@ func TestPersianPopupUsesPhysicalYekanFaceAtEveryDPI(t *testing.T) {
 	}
 }
 
-func TestEmbeddedLampIconsDecode(t *testing.T) {
+func TestEmbeddedDeviceIconsDecode(t *testing.T) {
 	t.Parallel()
 	for _, name := range []string{
 		"icons/app.png",
-		"icons/lamp-on.png",
-		"icons/lamp-off.png",
-		"icons/lamp-unknown.png",
+		"icons/device-on.png",
+		"icons/device-off.png",
+		"icons/device-unknown.png",
 	} {
 		name := name
 		t.Run(name, func(t *testing.T) {

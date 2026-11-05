@@ -6,10 +6,10 @@ import (
 	"reflect"
 	"testing"
 
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/model"
-	"rayanlamp.local/app/internal/winfx"
-	"rayanlamp.local/app/presentation"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/model"
+	"pccontroller.local/desktop/internal/winfx"
+	"pccontroller.local/desktop/presentation"
 )
 
 func TestControllerStartupPreservesSavedFeatures(t *testing.T) {
@@ -20,13 +20,13 @@ func TestControllerStartupPreservesSavedFeatures(t *testing.T) {
 	cfg.Automation.Enabled = true
 	cfg.Integration.StartWithWindows, cfg.Integration.LocalAPIEnabled = true, true
 	want := cfg
-	want.Lamp.BaseURL = "http://127.0.0.1:1"
+	want.Device.BaseURL = "http://127.0.0.1:1"
 	if got := controllerStartupConfig(cfg, false); !reflect.DeepEqual(got, want) {
 		t.Fatal("startup discarded explicit desktop preferences")
 	}
 	first := controllerStartupConfig(config.Default(), true)
 	if first.Hotkeys != (config.HotkeysConfig{}) || first.UI.ViewMode != config.ViewDashboard {
-		t.Fatal("first launch enabled lamp shortcuts or wrong view")
+		t.Fatal("first launch enabled device shortcuts or wrong view")
 	}
 }
 
@@ -81,7 +81,7 @@ func TestControllerAutomationModesAreObservedNotInferred(t *testing.T) {
 			t.Fatal("fabricated observed program mode")
 		}
 	}
-	for mode, want := range map[string]model.LampState{"running": model.StateOn, "IDLE": model.StateOff, "unknown": model.StateUnknown} {
+	for mode, want := range map[string]model.OutputState{"running": model.StateOn, "IDLE": model.StateOff, "unknown": model.StateUnknown} {
 		if controllerAutomationSnapshot(presentation.Snapshot{Connected: true, HaveStatus: true, Mode: mode}).State != want {
 			t.Fatal(mode)
 		}
@@ -109,7 +109,7 @@ func TestControllerRestoredSettingsWindowLifecycle(t *testing.T) {
 	}
 }
 
-func TestControllerTaskbarNativeIconsDoNotRequireLampResources(t *testing.T) {
+func TestControllerTaskbarNativeIconsDoNotRequireDeviceResources(t *testing.T) {
 	s, _ := newControllerWindowFixture(t)
 	if err := s.rebuildTaskbarButtonIcons(); err != nil {
 		t.Fatal(err)
@@ -121,7 +121,7 @@ func TestControllerTaskbarNativeIconsDoNotRequireLampResources(t *testing.T) {
 		}
 	}
 	if before.toggle != 0 || before.on != 0 || before.off != 0 {
-		t.Fatal("controller retained lamp thumbnail actions")
+		t.Fatal("controller retained device thumbnail actions")
 	}
 	if err := s.rebuildTaskbarButtonIcons(); err != nil {
 		t.Fatal(err)

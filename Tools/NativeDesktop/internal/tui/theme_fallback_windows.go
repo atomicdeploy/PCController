@@ -5,7 +5,7 @@ package tui
 import (
 	"github.com/lxn/win"
 
-	"rayanlamp.local/app/internal/winfx"
+	"pccontroller.local/desktop/internal/winfx"
 )
 
 func systemThemeFallbackDark() bool {

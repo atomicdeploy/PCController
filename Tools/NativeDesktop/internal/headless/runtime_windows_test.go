@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"pccontroller.local/desktop/compatibility"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -15,11 +16,11 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	"rayanlamp.local/app/internal/appcore"
-	"rayanlamp.local/app/internal/commands"
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/ipc"
-	"rayanlamp.local/app/internal/model"
+	"pccontroller.local/desktop/internal/appcore"
+	"pccontroller.local/desktop/internal/commands"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/ipc"
+	"pccontroller.local/desktop/internal/model"
 )
 
 type recordingServer struct {
@@ -55,8 +56,8 @@ func (r *orderRecorder) snapshot() []string {
 
 func testConfig() config.Config {
 	cfg := config.Default()
-	cfg.Lamp.WebSocket = false
-	cfg.Lamp.HTTPPoll = 0
+	cfg.Device.WebSocket = false
+	cfg.Device.HTTPPoll = 0
 	return cfg
 }
 
@@ -189,7 +190,7 @@ func TestNewWithProvidedConfigDoesNotReload(t *testing.T) {
 
 func TestNewLoadsWhenConfigIsNotProvided(t *testing.T) {
 	cfg := testConfig()
-	cfg.Lamp.BaseURL = "http://127.0.0.1:12345"
+	cfg.Device.BaseURL = "http://127.0.0.1:12345"
 	deps := testDependencies()
 	var loadCount atomic.Int32
 	deps.loadConfig = func(string) (config.Config, error) {
@@ -207,8 +208,8 @@ func TestNewLoadsWhenConfigIsNotProvided(t *testing.T) {
 	if loadCount.Load() != 1 {
 		t.Fatalf("load count = %d, want 1", loadCount.Load())
 	}
-	if runtime.Config().Lamp.BaseURL != cfg.Lamp.BaseURL {
-		t.Fatalf("base URL = %q, want %q", runtime.Config().Lamp.BaseURL, cfg.Lamp.BaseURL)
+	if runtime.Config().Device.BaseURL != cfg.Device.BaseURL {
+		t.Fatalf("base URL = %q, want %q", runtime.Config().Device.BaseURL, cfg.Device.BaseURL)
 	}
 }
 
@@ -359,7 +360,7 @@ func TestIPCHandlerWaitsUntilStart(t *testing.T) {
 
 func TestSubscribeBeforeStartCapturesInitialHTTPState(t *testing.T) {
 	device := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/lamp/get" {
+		if r.URL.Path != compatibility.StateEndpoint("get") {
 			http.NotFound(w, r)
 			return
 		}
@@ -368,7 +369,7 @@ func TestSubscribeBeforeStartCapturesInitialHTTPState(t *testing.T) {
 	defer device.Close()
 
 	cfg := testConfig()
-	cfg.Lamp.BaseURL = device.URL
+	cfg.Device.BaseURL = device.URL
 	deps := testDependencies()
 	runtime, err := newWithDependencies(Options{
 		ConfigPath: testConfigPath(t),

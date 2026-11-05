@@ -8,7 +8,7 @@ import (
 
 type testCodedError struct{}
 
-func (testCodedError) Error() string { return "no lamp" }
+func (testCodedError) Error() string { return "no device" }
 func (testCodedError) Code() string  { return "offline" }
 
 func TestResponseRoundTrip(t *testing.T) {

@@ -14,7 +14,7 @@ import (
 	"github.com/lxn/win"
 	"golang.org/x/sys/windows"
 
-	"rayanlamp.local/app/internal/winfx"
+	"pccontroller.local/desktop/internal/winfx"
 )
 
 var (
@@ -471,7 +471,7 @@ func acquirePopupWindow(
 }
 
 func createPopupWindow(key popupWindowKey, dpi int32) (*popupWindow, error) {
-	windowTitle, err := windows.UTF16FromString("RayanLamp")
+	windowTitle, err := windows.UTF16FromString("PCControllerDesktop")
 	if err != nil {
 		return nil, err
 	}
@@ -516,8 +516,8 @@ func popupWindowIsValid(window *popupWindow) bool {
 		win.GetWindowThreadProcessId(window.overlay, nil) == window.key.threadID &&
 		win.GetWindow(window.hwnd, win.GW_OWNER) == window.key.owner &&
 		win.GetParent(window.overlay) == window.hwnd &&
-		windowClassMatches(window.hwnd, "RayanLamp.TrayPopup.v2") &&
-		windowClassMatches(window.overlay, "RayanLamp.TrayPopup.Overlay.v1")
+		windowClassMatches(window.hwnd, "PCControllerDesktop.TrayPopup.v2") &&
+		windowClassMatches(window.overlay, "PCControllerDesktop.TrayPopup.Overlay.v1")
 }
 
 func windowClassMatches(hwnd win.HWND, expected string) bool {
@@ -667,7 +667,7 @@ func DiscardCached(owner uintptr) {
 func registerPopupClass() error {
 	popupClassOnce.Do(func() {
 		var err error
-		popupClassName, err = windows.UTF16FromString("RayanLamp.TrayPopup.v2")
+		popupClassName, err = windows.UTF16FromString("PCControllerDesktop.TrayPopup.v2")
 		if err != nil {
 			popupClassErr = err
 			return
@@ -686,7 +686,7 @@ func registerPopupClass() error {
 		}
 
 		popupOverlayClassName, err = windows.UTF16FromString(
-			"RayanLamp.TrayPopup.Overlay.v1",
+			"PCControllerDesktop.TrayPopup.Overlay.v1",
 		)
 		if err != nil {
 			popupClassErr = err

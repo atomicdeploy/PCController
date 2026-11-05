@@ -14,18 +14,18 @@ import (
 	"github.com/lxn/walk"
 	"github.com/lxn/win"
 	"golang.org/x/sys/windows"
-	"rayanlamp.local/app/internal/appcore"
-	"rayanlamp.local/app/internal/commands"
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/presentation"
+	"pccontroller.local/desktop/internal/appcore"
+	"pccontroller.local/desktop/internal/commands"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/presentation"
 )
 
 // Opt-in, app-owned window: no input injection, transport, tray, or board core.
 // Reports CPU paint + presentation submission, not monitor scanout FPS.
 func newControllerWindowFixture(t *testing.T) (*Shell, config.Config) {
 	t.Helper()
-	if os.Getenv("RAYANLAMP_WINDOW_TESTS") != "1" {
-		t.Skip("set RAYANLAMP_WINDOW_TESTS=1 for native window integration")
+	if os.Getenv("PCCONTROLLER_DESKTOP_WINDOW_TESTS") != "1" {
+		t.Skip("set PCCONTROLLER_DESKTOP_WINDOW_TESTS=1 for native window integration")
 	}
 	runtime.LockOSThread()
 	t.Cleanup(runtime.UnlockOSThread)
@@ -42,7 +42,7 @@ func newControllerWindowFixture(t *testing.T) (*Shell, config.Config) {
 	// Stable-path test executables do not embed the product's PE manifest.
 	// Activate its Common Controls v6 dependency for this test's UI thread.
 	_, source, _, _ := runtime.Caller(0)
-	manifest, err := windows.UTF16PtrFromString(filepath.Join(filepath.Dir(source), "..", "..", "resources", "RayanLamp.exe.manifest"))
+	manifest, err := windows.UTF16PtrFromString(filepath.Join(filepath.Dir(source), "..", "..", "resources", "PCControllerDesktop.exe.manifest"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +60,7 @@ func newControllerWindowFixture(t *testing.T) (*Shell, config.Config) {
 	configureControllerTokens()
 	cfg := config.Default()
 	cfg.UI.ViewMode = config.ViewDashboard
-	cfg.Lamp.BaseURL = "http://127.0.0.1:1"
+	cfg.Device.BaseURL = "http://127.0.0.1:1"
 	cfg.UI.Locale, cfg.UI.Theme = "en", "dark"
 	cfg.UI.ViewMode, cfg.UI.Backdrop = config.ViewDashboard, config.BackdropAcrylic
 	cfg.UI.WindowBounds = config.WindowBounds{X: 80, Y: 80, Width: 640, Height: 720}

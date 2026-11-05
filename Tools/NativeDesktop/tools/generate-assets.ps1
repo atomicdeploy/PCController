@@ -10,7 +10,7 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 $assetRoot = Join-Path $projectRoot 'assets'
 $frameRoot = Join-Path $assetRoot 'animation'
 $iconRoot = Join-Path $assetRoot 'icons'
-$temporaryRoot = Join-Path $assetRoot ('.rayanlamp-assets-' + [Guid]::NewGuid().ToString('N'))
+$temporaryRoot = Join-Path $assetRoot ('.pccontroller-desktop-assets-' + [Guid]::NewGuid().ToString('N'))
 $tempSvg = Join-Path $temporaryRoot 'frame.svg'
 $tempBadge = Join-Path $temporaryRoot 'badge.png'
 $iconSizes = @(256, 128, 112, 96, 80, 72, 64, 56, 48, 40, 36, 32, 28, 24, 20, 16)
@@ -187,7 +187,7 @@ function Ease-Out-Cubic([double]$x) {
     return 1.0 - [Math]::Pow(1.0 - $x, 3)
 }
 
-function New-LampSvg {
+function New-DeviceSvg {
     param([double]$Progress)
 
     $p = Ease-Out-Cubic $Progress
@@ -263,7 +263,7 @@ function New-LampSvg {
 "@
 }
 
-function New-LampSmallIconSvg {
+function New-DeviceSmallIconSvg {
     param([double]$Progress)
 
     $p = Ease-Out-Cubic $Progress
@@ -372,7 +372,7 @@ function New-MenuIcon {
 }
 
 try {
-    Get-ChildItem -LiteralPath $frameRoot -Filter 'lamp_*.png' -File |
+    Get-ChildItem -LiteralPath $frameRoot -Filter 'device_*.png' -File |
         Remove-Item -Force
     foreach ($unusedPack in @(
         'menu-pin.ico',
@@ -387,11 +387,11 @@ try {
 
     for ($i = 0; $i -lt $FrameCount; $i++) {
         $progress = if ($FrameCount -le 1) { 1.0 } else { $i / ($FrameCount - 1.0) }
-        Write-Utf8NoBom -LiteralPath $tempSvg -Value (New-LampSvg $progress)
-        $frameName = 'lamp_{0:D3}.png' -f $i
+        Write-Utf8NoBom -LiteralPath $tempSvg -Value (New-DeviceSvg $progress)
+        $frameName = 'device_{0:D3}.png' -f $i
         $framePath = Join-Path $frameRoot $frameName
         if ($i -eq 0) {
-            Copy-Item -LiteralPath $tempSvg -Destination (Join-Path $assetRoot 'lamp-off.svg') -Force
+            Copy-Item -LiteralPath $tempSvg -Destination (Join-Path $assetRoot 'device-off.svg') -Force
         }
         if ($i -eq ($FrameCount - 1)) {
             # oksvg renders the authored paths directly but does not reliably
@@ -402,33 +402,33 @@ try {
                 '<g>'
             )
             Write-Utf8NoBom `
-                -LiteralPath (Join-Path $assetRoot 'lamp-on.svg') `
+                -LiteralPath (Join-Path $assetRoot 'device-on.svg') `
                 -Value $steadySvg
         }
         Write-SvgPng -SvgPath $tempSvg -OutputPath $framePath -Size 512
     }
 
-    Copy-Item -LiteralPath $tempSvg -Destination (Join-Path $assetRoot 'lamp-transition.svg') -Force
-    Copy-Item -LiteralPath (Join-Path $frameRoot ('lamp_{0:D3}.png' -f 0)) -Destination (Join-Path $iconRoot 'lamp-off.png') -Force
-    Copy-Item -LiteralPath (Join-Path $frameRoot ('lamp_{0:D3}.png' -f ($FrameCount - 1))) -Destination (Join-Path $iconRoot 'lamp-on.png') -Force
+    Copy-Item -LiteralPath $tempSvg -Destination (Join-Path $assetRoot 'device-transition.svg') -Force
+    Copy-Item -LiteralPath (Join-Path $frameRoot ('device_{0:D3}.png' -f 0)) -Destination (Join-Path $iconRoot 'device-off.png') -Force
+    Copy-Item -LiteralPath (Join-Path $frameRoot ('device_{0:D3}.png' -f ($FrameCount - 1))) -Destination (Join-Path $iconRoot 'device-on.png') -Force
 
     $appSvg = Join-Path $iconRoot 'app.svg'
     $appSmallSvg = Join-Path $iconRoot 'app-small.svg'
-    Write-Utf8NoBom -LiteralPath $appSvg -Value (New-LampSvg 0.42)
+    Write-Utf8NoBom -LiteralPath $appSvg -Value (New-DeviceSvg 0.42)
     Write-Utf8NoBom -LiteralPath $appSmallSvg `
-        -Value (New-LampSmallIconSvg 0.42)
+        -Value (New-DeviceSmallIconSvg 0.42)
     Write-SvgPng -SvgPath $appSvg -OutputPath (Join-Path $iconRoot 'app.png') -Size 512
     Write-IconPack `
         -SvgPath $appSvg `
         -SmallSvgPath $appSmallSvg `
-        -OutputPath (Join-Path $assetRoot 'RayanLamp.ico')
+        -OutputPath (Join-Path $assetRoot 'PCControllerDesktop.ico')
 
     Invoke-Magick -Arguments @(
         '-background', 'none', '-density', '384', $appSvg,
         '-resize', '256x256!', '-colorspace', 'Gray',
         '-fill', '#7B8794', '-colorize', '35',
         '-depth', '8', '-strip', '-define', 'png:color-type=6',
-        (Join-Path $iconRoot 'lamp-unknown.png')
+        (Join-Path $iconRoot 'device-unknown.png')
     )
     Invoke-Magick -Arguments @(
         '-size', '256x256', 'xc:none',
@@ -439,11 +439,11 @@ try {
         $tempBadge
     )
     Invoke-Magick -Arguments @(
-        (Join-Path $iconRoot 'lamp-unknown.png'),
+        (Join-Path $iconRoot 'device-unknown.png'),
         '-fill', '#24C8FF', '-colorize', '18',
         $tempBadge, '-compose', 'over', '-composite',
         '-depth', '8', '-strip', '-define', 'png:color-type=6',
-        (Join-Path $iconRoot 'lamp-connecting.png')
+        (Join-Path $iconRoot 'device-connecting.png')
     )
     Invoke-Magick -Arguments @(
         '-size', '256x256', 'xc:none',
@@ -455,31 +455,31 @@ try {
         $tempBadge
     )
     Invoke-Magick -Arguments @(
-        (Join-Path $iconRoot 'lamp-unknown.png'),
+        (Join-Path $iconRoot 'device-unknown.png'),
         '-fill', '#F0445C', '-colorize', '26',
         $tempBadge, '-compose', 'over', '-composite',
         '-depth', '8', '-strip', '-define', 'png:color-type=6',
-        (Join-Path $iconRoot 'lamp-error.png')
+        (Join-Path $iconRoot 'device-error.png')
     )
 
-    $lampOffSmallSvg = Join-Path $iconRoot 'lamp-off-small.svg'
-    $lampOnSmallSvg = Join-Path $iconRoot 'lamp-on-small.svg'
-    Write-Utf8NoBom -LiteralPath $lampOffSmallSvg `
-        -Value (New-LampSmallIconSvg 0)
-    Write-Utf8NoBom -LiteralPath $lampOnSmallSvg `
-        -Value (New-LampSmallIconSvg 1)
+    $deviceOffSmallSvg = Join-Path $iconRoot 'device-off-small.svg'
+    $deviceOnSmallSvg = Join-Path $iconRoot 'device-on-small.svg'
+    Write-Utf8NoBom -LiteralPath $deviceOffSmallSvg `
+        -Value (New-DeviceSmallIconSvg 0)
+    Write-Utf8NoBom -LiteralPath $deviceOnSmallSvg `
+        -Value (New-DeviceSmallIconSvg 1)
     Write-IconPack `
-        -SvgPath (Join-Path $assetRoot 'lamp-off.svg') `
-        -SmallSvgPath $lampOffSmallSvg `
-        -OutputPath (Join-Path $iconRoot 'lamp-off.ico')
+        -SvgPath (Join-Path $assetRoot 'device-off.svg') `
+        -SmallSvgPath $deviceOffSmallSvg `
+        -OutputPath (Join-Path $iconRoot 'device-off.ico')
     Write-IconPack `
-        -SvgPath (Join-Path $assetRoot 'lamp-on.svg') `
-        -SmallSvgPath $lampOnSmallSvg `
-        -OutputPath (Join-Path $iconRoot 'lamp-on.ico')
+        -SvgPath (Join-Path $assetRoot 'device-on.svg') `
+        -SmallSvgPath $deviceOnSmallSvg `
+        -OutputPath (Join-Path $iconRoot 'device-on.ico')
     foreach ($state in @('unknown', 'connecting', 'error')) {
         Write-RasterIconPack `
-            -SourcePath (Join-Path $iconRoot "lamp-$state.png") `
-            -OutputPath (Join-Path $iconRoot "lamp-$state.ico")
+            -SourcePath (Join-Path $iconRoot "device-$state.png") `
+            -OutputPath (Join-Path $iconRoot "device-$state.ico")
     }
 
     New-MenuIcon 'menu-settings' '#55D3FF' @'
@@ -515,10 +515,10 @@ try {
       <path d="M32 14v18M20 20a17 17 0 1 0 24 0"/>
 '@
 
-    $frames = Get-ChildItem -LiteralPath $frameRoot -Filter 'lamp_*.png' | Sort-Object Name | ForEach-Object FullName
+    $frames = Get-ChildItem -LiteralPath $frameRoot -Filter 'device_*.png' | Sort-Object Name | ForEach-Object FullName
     Invoke-Magick -Arguments (
         @('-delay', '3') + @($frames) +
-        @('-delay', '18', $frames[-1], '-loop', '0', "APNG:$(Join-Path $assetRoot 'lamp-transition.apng')")
+        @('-delay', '18', $frames[-1], '-loop', '0', "APNG:$(Join-Path $assetRoot 'device-transition.apng')")
     )
 }
 finally {
@@ -530,6 +530,6 @@ finally {
     }
 }
 
-Write-RayanLampStatus -Level Success `
-    -Icon (Get-RayanLampEmojiGlyph -Name Assets) -Label 'ASSETS' `
+Write-PCControllerDesktopStatus -Level Success `
+    -Icon (Get-PCControllerDesktopEmojiGlyph -Name Assets) -Label 'ASSETS' `
     -Message "Generated $FrameCount transition frames, vector masters, 8-bit PNGs, APNG, and exact-size multi-resolution ICO packs."

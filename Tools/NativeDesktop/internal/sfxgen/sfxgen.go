@@ -1,4 +1,4 @@
-// Package sfxgen deterministically synthesizes Rayan Lamp's bundled sound
+// Package sfxgen deterministically synthesizes PCController's bundled sound
 // effects. The generated assets are small, dependency-free PCM WAV files that
 // can be played byte-for-byte by both Win32 and browser audio engines.
 package sfxgen
@@ -36,28 +36,28 @@ var specifications = []specification{
 	{
 		cue:         "on",
 		fileName:    "on.wav",
-		displayName: "Lamp on",
+		displayName: "Device on",
 		duration:    360 * time.Millisecond,
 		sample:      onSample,
 	},
 	{
 		cue:         "off",
 		fileName:    "off.wav",
-		displayName: "Lamp off",
+		displayName: "Device off",
 		duration:    330 * time.Millisecond,
 		sample:      offSample,
 	},
 	{
 		cue:         "message",
 		fileName:    "message.wav",
-		displayName: "Lamp message",
+		displayName: "Device message",
 		duration:    390 * time.Millisecond,
 		sample:      messageSample,
 	},
 	{
 		cue:         "error",
 		fileName:    "error.wav",
-		displayName: "Lamp error",
+		displayName: "Device error",
 		duration:    440 * time.Millisecond,
 		sample:      errorSample,
 	},

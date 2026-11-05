@@ -5,7 +5,7 @@ import type {
   ConnectionPreferences
 } from "../connection-preferences";
 import { isStaticExport } from "../connection-preferences";
-import { normalizeLampBaseURL } from "../direct-protocol";
+import { normalizeDeviceBaseURL } from "../direct-protocol";
 import { Button, SelectField, TextField } from "./controls";
 import { Icon } from "./icon";
 import { Modal } from "./modal";
@@ -27,28 +27,28 @@ export function ConnectionDialog({
   onApply: (value: ConnectionPreferences) => void;
 }) {
   const [mode, setMode] = useState<ConnectionMode>(preferences.mode);
-  const [lampURL, setLampURL] = useState(preferences.lampURL);
+  const [deviceURL, setDeviceURL] = useState(preferences.deviceURL);
   const [error, setError] = useState("");
 
   useEffect(() => {
     if (!open) return;
     setMode(preferences.mode);
-    setLampURL(preferences.lampURL);
+    setDeviceURL(preferences.deviceURL);
     setError("");
-  }, [open, preferences.mode, preferences.lampURL]);
+  }, [open, preferences.mode, preferences.deviceURL]);
 
   const apply = () => {
     try {
       onApply({
         mode,
-        lampURL: normalizeLampBaseURL(lampURL)
+        deviceURL: normalizeDeviceBaseURL(deviceURL)
       });
       onClose();
     } catch (cause) {
       setError(
         cause instanceof Error
           ? cause.message
-          : t("Enter a valid lamp address.")
+          : t("Enter a valid device address.")
       );
     }
   };
@@ -57,13 +57,13 @@ export function ConnectionDialog({
     <Modal
       open={open}
       title={t("Connection mode")}
-      description={t("Choose who owns lamp communication. This preference is shared with other dashboard tabs.")}
+      description={t("Choose who owns device communication. This preference is shared with other dashboard tabs.")}
       onClose={onClose}
     >
       <div class="connection-dialog">
         <div class="active-transport" role="status">
           <span class={`transport-glyph transport-${activeKind}`}>
-            <Icon name={activeKind === "direct" ? "lamp" : "network"} />
+            <Icon name={activeKind === "direct" ? "device" : "network"} />
           </span>
           <span>
             <small>{t("Active now")}</small>
@@ -85,7 +85,7 @@ export function ConnectionDialog({
             },
             {
               value: "direct",
-              label: t("Direct to lamp")
+              label: t("Direct to device")
             }
           ]}
           onChange={(value) => setMode(value as ConnectionMode)}
@@ -97,12 +97,12 @@ export function ConnectionDialog({
             <span>
               <strong>{t("Go coordinator")}</strong>
               <small>
-                {t("Uses the same-origin RayanLamp manager for resilient discovery, settings, diagnostics, automation, and native integration.")}
+                {t("Uses the same-origin PCControllerDesktop manager for resilient discovery, settings, diagnostics, automation, and native integration.")}
               </small>
             </span>
           </div>
           <div class={mode === "direct" ? "is-selected" : ""}>
-            <Icon name="lamp" />
+            <Icon name="device" />
             <span>
               <strong>{t("Direct browser connection")}</strong>
               <small>
@@ -114,25 +114,25 @@ export function ConnectionDialog({
 
         {(mode === "direct" || mode === "auto") && (
           <TextField
-            label={t("Lamp address")}
+            label={t("Device address")}
             type="url"
-            value={lampURL}
-            placeholder="http://rayanlamp.local"
+            value={deviceURL}
+            placeholder="http://pccontroller-desktop.local"
             description={t("HTTP or HTTPS origin only; no path, query, fragment, or credentials.")}
-            onInput={setLampURL}
+            onInput={setDeviceURL}
           />
         )}
 
         {isStaticExport() && mode === "relay" && (
           <p class="connection-note">
             <Icon name="info" size={16} />
-            {t("The static edition cannot borrow the manager’s private browser session cross-origin. Open the dashboard served by RayanLamp.exe to use coordinator mode.")}
+            {t("The static edition cannot borrow the manager’s private browser session cross-origin. Open the dashboard served by PCControllerDesktop.exe to use coordinator mode.")}
           </p>
         )}
         {(mode === "direct" || mode === "auto") && (
           <p class="connection-note">
             <Icon name="info" size={16} />
-            {t("Serve the ZIP over HTTP. An HTTPS page cannot control the current HTTP/WS lamp because browsers block mixed content.")}
+            {t("Serve the ZIP over HTTP. An HTTPS page cannot control the current HTTP/WS device because browsers block mixed content.")}
           </p>
         )}
         {error && (

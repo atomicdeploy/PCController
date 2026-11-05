@@ -7,14 +7,15 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"pccontroller.local/desktop/compatibility"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"rayanlamp.local/app/internal/diagnostics"
-	"rayanlamp.local/app/internal/lamp"
+	"pccontroller.local/desktop/internal/device"
+	"pccontroller.local/desktop/internal/diagnostics"
 )
 
 func TestDiagnosticsSubscriptionRetainsOnlyNewestWholeSnapshot(t *testing.T) {
@@ -32,7 +33,7 @@ func TestDiagnosticsSubscriptionRetainsOnlyNewestWholeSnapshot(t *testing.T) {
 	for index := 0; index < publishes; index++ {
 		core.diagnostics.recordSuccess(diagnostics.Parse(
 			diagnostics.EndpointInfo,
-			[]byte(fmt.Sprintf("hostname: lamp-%03d\n", index)),
+			[]byte(fmt.Sprintf("hostname: device-%03d\n", index)),
 			time.Unix(int64(index+1), 0).UTC(),
 		))
 	}
@@ -40,7 +41,7 @@ func TestDiagnosticsSubscriptionRetainsOnlyNewestWholeSnapshot(t *testing.T) {
 		t.Fatalf("queued diagnostics snapshots = %d, want 1", got)
 	}
 	snapshot := <-updates
-	if got, want := snapshot.Device.Hostname, "lamp-099"; got != want {
+	if got, want := snapshot.Device.Hostname, "device-099"; got != want {
 		t.Fatalf("latest diagnostics hostname = %q, want %q", got, want)
 	}
 }
@@ -50,7 +51,7 @@ func TestRefreshDiagnosticsParsesAndCachesSharedSnapshot(t *testing.T) {
 		switch request.URL.Path {
 		case diagnostics.EndpointInfo:
 			_, _ = writer.Write([]byte(
-				"hostname: test-lamp\n" +
+				"hostname: test-device\n" +
 					"program usage: 25%\n" +
 					"heap memory: 32768\n" +
 					"uptime: 01:02:03\n",
@@ -79,7 +80,7 @@ func TestRefreshDiagnosticsParsesAndCachesSharedSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if snapshot.Device.Hostname != "test-lamp" ||
+	if snapshot.Device.Hostname != "test-device" ||
 		snapshot.Device.ProgramUsagePercent == nil ||
 		*snapshot.Device.ProgramUsagePercent != 25 ||
 		snapshot.Device.RSSIDBm == nil || *snapshot.Device.RSSIDBm != -48 ||
@@ -133,7 +134,7 @@ func TestAutomaticDiagnosticsRefreshAfterDeviceReachable(t *testing.T) {
 		requests[request.URL.Path]++
 		mu.Unlock()
 		switch request.URL.Path {
-		case "/lamp/get":
+		case compatibility.StateEndpoint("get"):
 			_, _ = writer.Write([]byte("ON"))
 		case diagnostics.EndpointInfo:
 			_, _ = writer.Write([]byte("hostname: automatic\nuptime: 00:00:01\n"))
@@ -148,7 +149,7 @@ func TestAutomaticDiagnosticsRefreshAfterDeviceReachable(t *testing.T) {
 			_, _ = writer.Write([]byte("country: IR\n"))
 		case diagnostics.EndpointDescription:
 			writer.Header().Set("Content-Type", "application/xml")
-			_, _ = writer.Write([]byte(`<device><friendlyName>Automatic Lamp</friendlyName></device>`))
+			_, _ = writer.Write([]byte(`<device><friendlyName>Automatic Device</friendlyName></device>`))
 		case diagnostics.EndpointConfigST:
 			_, _ = writer.Write([]byte(
 				"ssid: Automatic Wi-Fi\n" +
@@ -186,8 +187,9 @@ func TestAutomaticDiagnosticsRefreshAfterDeviceReachable(t *testing.T) {
 		snapshot := core.DiagnosticsSnapshot()
 		if len(snapshot.Endpoints) == len(diagnostics.SafeEndpoints()) &&
 			snapshot.Device.Hostname == "automatic" &&
-			snapshot.Device.Description.FriendlyName == "Automatic Lamp" &&
+			snapshot.Device.Description.FriendlyName == "Automatic Device" &&
 			snapshot.Device.SSID == "Automatic Wi-Fi" &&
+			snapshot.Device.AccessPointSSID == "Automatic AP" &&
 			snapshot.Device.WiFiConnected != nil {
 			break
 		}
@@ -280,7 +282,7 @@ func TestDiagnosticFailureKeepsLastGoodDocument(t *testing.T) {
 	}
 }
 
-func TestApplyLampConfigResetsDiagnosticsDeviceGeneration(t *testing.T) {
+func TestApplyDeviceConfigResetsDiagnosticsDeviceGeneration(t *testing.T) {
 	core, err := New(coreTestConfig("http://127.0.0.1:1"))
 	if err != nil {
 		t.Fatal(err)
@@ -291,7 +293,7 @@ func TestApplyLampConfigResetsDiagnosticsDeviceGeneration(t *testing.T) {
 		time.Now(),
 	))
 	updated := core.Config()
-	updated.Lamp.BaseURL = "http://127.0.0.1:2"
+	updated.Device.BaseURL = "http://127.0.0.1:2"
 	if err := core.ApplyConfig(updated); err != nil {
 		t.Fatal(err)
 	}
@@ -308,7 +310,7 @@ func TestRefreshDiagnosticsNilContext(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = core.RefreshDiagnostics(nil, diagnostics.EndpointInfo)
-	if !errors.Is(err, lamp.ErrNilContext) {
+	if !errors.Is(err, device.ErrNilContext) {
 		t.Fatalf("nil context error = %v", err)
 	}
 }

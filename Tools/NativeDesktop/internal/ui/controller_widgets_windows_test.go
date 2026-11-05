@@ -11,9 +11,9 @@ import (
 	"github.com/lxn/walk"
 	"github.com/lxn/win"
 
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/winfx"
-	"rayanlamp.local/app/presentation"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/winfx"
+	"pccontroller.local/desktop/presentation"
 )
 
 func TestControllerTelemetryHistoryIsBoundedAndObserved(t *testing.T) {
@@ -206,7 +206,7 @@ func TestControllerWidgetWindowsLifecycle(t *testing.T) {
 	}
 	// Closing a widget must leave the other compositors alive.
 	if s.mw.BoundsPixels().Width < 340 {
-		t.Fatal("compact mode used the donor lamp's 176px geometry")
+		t.Fatal("compact mode used the donor device's 176px geometry")
 	}
 	for _, action := range []actionID{actionSettings, actionChannels} {
 		if s.Config().UI.ViewMode != config.ViewCompact {

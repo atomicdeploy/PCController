@@ -1,5 +1,5 @@
 // Package winfx contains the small, pointer-width-safe Win32 integration
-// surface used by RayanLamp.
+// surface used by PCControllerDesktop.
 //
 // The package deliberately does not create windows or own a message loop.
 // Callers may therefore use it with Walk or with a raw Win32 window. Functions

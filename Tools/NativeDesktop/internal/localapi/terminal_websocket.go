@@ -12,8 +12,8 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"rayanlamp.local/app/internal/deviceterminal"
-	"rayanlamp.local/app/internal/ipc"
+	"pccontroller.local/desktop/internal/deviceterminal"
+	"pccontroller.local/desktop/internal/ipc"
 )
 
 const (
@@ -54,7 +54,7 @@ type terminalOutbound struct {
 }
 
 // terminalWebSocket is a browser-session-only byte bridge. It is deliberately
-// separate from /events so terminal traffic cannot starve ordered lamp,
+// separate from /events so terminal traffic cannot starve ordered device,
 // configuration, or diagnostics events.
 func (a *api) terminalWebSocket(w http.ResponseWriter, r *http.Request) {
 	if !allowMethod(w, r, http.MethodGet) {

@@ -9,10 +9,10 @@ import (
 	"fmt"
 	"time"
 
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/deviceterminal"
-	"rayanlamp.local/app/internal/ipc"
-	"rayanlamp.local/app/internal/model"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/deviceterminal"
+	"pccontroller.local/desktop/internal/ipc"
+	"pccontroller.local/desktop/internal/model"
 )
 
 type ipcTransport struct {
@@ -110,10 +110,10 @@ func (transport *ipcTransport) Execute(
 		return model.Snapshot{}, err
 	}
 	method := map[Action]string{
-		ActionToggle:    "lamp.toggle",
-		ActionOn:        "lamp.on",
-		ActionOff:       "lamp.off",
-		ActionRefresh:   "lamp.refresh",
+		ActionToggle:    "device.toggle",
+		ActionOn:        "device.on",
+		ActionOff:       "device.off",
+		ActionRefresh:   "device.refresh",
 		ActionReconnect: "reconnect",
 	}[action]
 	response, err := callIPC(ctx, method)

@@ -14,8 +14,8 @@ import (
 	"strings"
 	"unicode/utf16"
 
-	"rayanlamp.local/app/internal/buildinfo"
-	"rayanlamp.local/app/internal/terminal"
+	"pccontroller.local/desktop/internal/buildinfo"
+	"pccontroller.local/desktop/internal/terminal"
 )
 
 const resourceDirectoryIndex = 2
@@ -88,7 +88,7 @@ type manifestWindowsSettings struct {
 
 func main() {
 	var opts options
-	flag.StringVar(&opts.filePath, "file", "dist/RayanLamp.exe", "Windows executable to inspect")
+	flag.StringVar(&opts.filePath, "file", "dist/PCControllerDesktop.exe", "Windows executable to inspect")
 	flag.StringVar(&opts.architecture, "arch", "amd64", "expected architecture: amd64, 386, or arm64")
 	flag.StringVar(&opts.edition, "edition", "", "expected edition: develop or production")
 	flag.StringVar(&opts.fileVersion, "file-version", "", "expected four-part Windows file version")
@@ -162,7 +162,7 @@ func verify(opts options) error {
 	}
 
 	resourceASCII := []string{
-		"YektaYar.RayanLamp",
+		"DRSDavidSoft.PCController",
 		`version="` + opts.fileVersion + `"`,
 	}
 	for _, expected := range resourceASCII {
@@ -174,8 +174,8 @@ func verify(opts options) error {
 		return err
 	}
 	resourceUTF16 := []string{
-		"Rayan Lamp",
-		"RayanLamp.exe",
+		"PCController",
+		"PCControllerDesktop.exe",
 		opts.fileVersion,
 	}
 	for _, expected := range resourceUTF16 {
@@ -221,8 +221,8 @@ func verifyEdition(image executable, edition string) error {
 	var marker string
 	switch edition {
 	case buildinfo.EditionDevelop:
-		expectedTag = "rayanlamp_develop"
-		oppositeTag = "rayanlamp_production"
+		expectedTag = "pccontroller_desktop_develop"
+		oppositeTag = "pccontroller_desktop_production"
 		marker = `{"edition":"develop","developer_tools":true}`
 		if !image.debugSections || image.symbolCount == 0 {
 			return errors.New(
@@ -230,8 +230,8 @@ func verifyEdition(image executable, edition string) error {
 			)
 		}
 	case buildinfo.EditionProduction:
-		expectedTag = "rayanlamp_production"
-		oppositeTag = "rayanlamp_develop"
+		expectedTag = "pccontroller_desktop_production"
+		oppositeTag = "pccontroller_desktop_develop"
 		marker = `{"edition":"production","developer_tools":false}`
 		if image.debugSections || image.symbolCount != 0 {
 			return errors.New(

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"rayanlamp.local/app/internal/graphics"
+	"pccontroller.local/desktop/internal/graphics"
 )
 
 func TestEmbeddedIconPacksContainExactDPISizes(t *testing.T) {
@@ -13,11 +13,11 @@ func TestEmbeddedIconPacksContainExactDPISizes(t *testing.T) {
 		56, 64, 72, 80, 96, 112, 128, 256,
 	}
 	paths := []string{
-		"icons/lamp-on.ico",
-		"icons/lamp-off.ico",
-		"icons/lamp-unknown.ico",
-		"icons/lamp-connecting.ico",
-		"icons/lamp-error.ico",
+		"icons/device-on.ico",
+		"icons/device-off.ico",
+		"icons/device-unknown.ico",
+		"icons/device-connecting.ico",
+		"icons/device-error.ico",
 		"icons/menu-settings.ico",
 		"icons/menu-diagnostics.ico",
 		"icons/menu-reconnect.ico",
@@ -61,9 +61,9 @@ func TestEmbeddedIconPacksContainExactDPISizes(t *testing.T) {
 
 func TestRuntimeBundleExcludesPEOnlyAndUnusedRasterDuplicates(t *testing.T) {
 	for _, path := range []string{
-		"RayanLamp.ico",
-		"icons/lamp-connecting.png",
-		"icons/lamp-error.png",
+		"PCControllerDesktop.ico",
+		"icons/device-connecting.png",
+		"icons/device-error.png",
 		"icons/menu-pin.ico",
 		"icons/menu-startup.ico",
 		"icons/menu-window-show.ico",

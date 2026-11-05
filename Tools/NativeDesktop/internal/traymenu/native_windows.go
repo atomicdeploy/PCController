@@ -27,7 +27,7 @@ func showNative(options Options, anchor, workArea Rect) (Result, error) {
 	}
 	if owner == 0 {
 		className, _ := windows.UTF16FromString("STATIC")
-		windowName, _ := windows.UTF16FromString("RayanLamp tray menu")
+		windowName, _ := windows.UTF16FromString("PCControllerDesktop tray menu")
 		temporaryOwner = win.CreateWindowEx(
 			win.WS_EX_TOOLWINDOW,
 			&className[0],

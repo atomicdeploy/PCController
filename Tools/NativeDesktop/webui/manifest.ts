@@ -2,11 +2,11 @@ import type { ManifestOptions } from "vite-plugin-pwa";
 
 // Keep every URL relative: the same production bundle is served below /app/
 // by the native coordinator and from an arbitrary folder in the static ZIP.
-export const rayanLampManifest = {
+export const controllerManifest = {
   id: "./",
-  name: "Rayan Lamp",
-  short_name: "Rayan Lamp",
-  description: "A private local control surface for Rayan Lamp.",
+  name: "PCController",
+  short_name: "PCController",
+  description: "A private local control surface for PCController.",
   start_url: "./",
   scope: "./",
   display: "standalone",

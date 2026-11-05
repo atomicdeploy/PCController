@@ -1,5 +1,5 @@
 // Package i18n provides the shared, presentation-agnostic localization
-// foundation used by RayanLamp's native, terminal, and web-facing surfaces.
+// foundation used by PCControllerDesktop's native, terminal, and web-facing surfaces.
 package i18n
 
 import (

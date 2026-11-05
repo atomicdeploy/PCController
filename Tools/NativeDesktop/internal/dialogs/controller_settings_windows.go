@@ -4,7 +4,7 @@ package dialogs
 
 import (
 	decl "github.com/lxn/walk/declarative"
-	"rayanlamp.local/app/internal/config"
+	"pccontroller.local/desktop/internal/config"
 )
 
 func settingsControllerIntegrationPage(controls *settingsControls, cfg config.Config, actions SettingsActions) decl.TabPage {

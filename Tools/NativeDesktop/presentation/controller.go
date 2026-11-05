@@ -1,5 +1,5 @@
 // Package presentation defines the controller presentation seam. No serial,
-// lamp HTTP, board ownership or authentication implementation lives here.
+// device HTTP, board ownership or authentication implementation lives here.
 package presentation
 
 import (

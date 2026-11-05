@@ -13,9 +13,9 @@ import (
 	decl "github.com/lxn/walk/declarative"
 	"github.com/lxn/win"
 
-	"rayanlamp.local/app/internal/design"
-	"rayanlamp.local/app/internal/i18n"
-	"rayanlamp.local/app/internal/winfx"
+	"pccontroller.local/desktop/internal/design"
+	"pccontroller.local/desktop/internal/i18n"
+	"pccontroller.local/desktop/internal/winfx"
 )
 
 const (
@@ -933,7 +933,7 @@ func (binding *hotkeyRecorderBinding) updateControls() {
 // enumerate first.
 func hotkeyRecorderButtonCaptions(action string) (record, clear string) {
 	switch strings.ToLower(strings.TrimSpace(action)) {
-	case "toggle lamp":
+	case "toggle device":
 		return "Record &toggle", "Clear to&ggle"
 	case "turn on":
 		return "Record o&n", "Clea&r on"

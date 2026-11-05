@@ -38,7 +38,7 @@ if (!args.has('--tui-only')) {
   const capture = join(tools, 'window-capture.exe')
   run('go', ['build', '-mod=vendor', '-o', capture, './tools/window-capture'], join(root, 'Tools', 'NativeDesktop'))
   run(process.execPath, ['Tools/Build/go-tests.mjs', '--module', 'Tools/NativeDesktop', '--package', 'internal/ui', '--run', '^TestControllerDocumentationGallery$', '--retest'], root, false, {
-    GOFLAGS: '-mod=vendor', RAYANLAMP_WINDOW_TESTS: '1', RAYANLAMP_CAPTURE_TOOL: capture, RAYANLAMP_SCREENSHOTS: staging, RAYANLAMP_CAPTURE_MARGIN: '0'
+    GOFLAGS: '-mod=vendor', PCCONTROLLER_DESKTOP_WINDOW_TESTS: '1', PCCONTROLLER_DESKTOP_CAPTURE_TOOL: capture, PCCONTROLLER_DESKTOP_SCREENSHOTS: staging, PCCONTROLLER_DESKTOP_CAPTURE_MARGIN: '0'
   })
 }
 const start = '<!-- controller-preview-gallery:start -->', end = '<!-- controller-preview-gallery:end -->'

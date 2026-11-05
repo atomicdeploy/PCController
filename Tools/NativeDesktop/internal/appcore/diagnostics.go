@@ -10,8 +10,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"rayanlamp.local/app/internal/diagnostics"
-	"rayanlamp.local/app/internal/lamp"
+	"pccontroller.local/desktop/internal/device"
+	"pccontroller.local/desktop/internal/diagnostics"
 )
 
 const (
@@ -62,7 +62,7 @@ func (c *Core) RefreshDiagnostics(
 	endpoints ...string,
 ) (diagnostics.Snapshot, error) {
 	if ctx == nil {
-		return c.DiagnosticsSnapshot(), lamp.ErrNilContext
+		return c.DiagnosticsSnapshot(), device.ErrNilContext
 	}
 	client, epoch, err := c.currentClient()
 	if err != nil {
@@ -90,7 +90,7 @@ func (c *Core) fetchDiagnosticRaw(
 	endpoint string,
 ) ([]byte, error) {
 	if ctx == nil {
-		return nil, lamp.ErrNilContext
+		return nil, device.ErrNilContext
 	}
 	cfg := c.Config()
 	if err := cfg.Diagnostics.ValidateRequest(http.MethodGet, endpoint); err != nil {
@@ -129,7 +129,7 @@ func (c *Core) fetchDiagnosticRaw(
 
 // SubscribeDiagnostics publishes whole immutable snapshots. Delivery is
 // latest-value-wins, matching Core.Subscribe without mixing device metadata
-// churn into lamp state events.
+// churn into device state events.
 func (c *Core) SubscribeDiagnostics(
 	buffer int,
 ) (<-chan diagnostics.Snapshot, func()) {
@@ -181,7 +181,7 @@ func normalizeDiagnosticSelection(
 
 func (c *Core) runDiagnostics(
 	ctx context.Context,
-	client *lamp.Client,
+	client *device.Client,
 	generation uint64,
 ) {
 	ready := time.NewTicker(diagnosticsReadyPoll)
@@ -219,7 +219,7 @@ periodic:
 
 func (c *Core) refreshDiagnosticsForGeneration(
 	ctx context.Context,
-	client *lamp.Client,
+	client *device.Client,
 	generation uint64,
 	dueOnly bool,
 ) (diagnostics.Snapshot, error) {
@@ -265,7 +265,7 @@ func (c *Core) dueDiagnosticEndpoints(now time.Time) []string {
 
 func (c *Core) refreshDiagnostics(
 	ctx context.Context,
-	client *lamp.Client,
+	client *device.Client,
 	endpoints []string,
 	stillCurrent func() bool,
 ) (diagnostics.Snapshot, error) {

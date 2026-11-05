@@ -1,6 +1,6 @@
 //go:build windows
 
-// Package selfinstall implements RayanLamp's explicit, per-user file
+// Package selfinstall implements PCControllerDesktop's explicit, per-user file
 // installation lifecycle. Ordinary portable startup never calls this package.
 package selfinstall
 
@@ -21,18 +21,18 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	"rayanlamp.local/app/internal/comserver"
-	"rayanlamp.local/app/internal/ipc"
-	"rayanlamp.local/app/internal/shellintegration"
-	"rayanlamp.local/app/internal/winfx"
+	"pccontroller.local/desktop/internal/comserver"
+	"pccontroller.local/desktop/internal/ipc"
+	"pccontroller.local/desktop/internal/shellintegration"
+	"pccontroller.local/desktop/internal/winfx"
 )
 
 const (
-	installDirectoryName = "RayanLamp"
-	executableName       = "RayanLamp.exe"
-	stagePrefix          = "RayanLamp.install."
-	backupPrefix         = "RayanLamp.backup."
-	helperPrefix         = "RayanLamp.cleanup."
+	installDirectoryName = "PCControllerDesktop"
+	executableName       = "PCControllerDesktop.exe"
+	stagePrefix          = "PCControllerDesktop.install."
+	backupPrefix         = "PCControllerDesktop.backup."
+	helperPrefix         = "PCControllerDesktop.cleanup."
 	helperSuffix         = ".exe"
 
 	defaultOperationTimeout = 30 * time.Second
@@ -42,9 +42,9 @@ const (
 
 var (
 	ErrAlreadyInstalled = errors.New(
-		"RayanLamp is already installed; pass --force to update it",
+		"PCControllerDesktop is already installed; pass --force to update it",
 	)
-	ErrNotInstalled = errors.New("RayanLamp is not installed for this user")
+	ErrNotInstalled = errors.New("PCControllerDesktop is not installed for this user")
 	ErrUnsafePath   = errors.New("selfinstall: refusing an unexpected path")
 )
 
@@ -340,7 +340,7 @@ func installWithDependencies(
 		cancelOperation()
 		if err != nil {
 			return InstallResult{}, fmt.Errorf(
-				"stop running RayanLamp before installation: %w",
+				"stop running PCControllerDesktop before installation: %w",
 				err,
 			)
 		}
@@ -506,7 +506,7 @@ func installWithDependencies(
 			// down a valid installation.
 			warning = errors.Join(
 				warning,
-				fmt.Errorf("launch installed RayanLamp: %w", err),
+				fmt.Errorf("launch installed PCControllerDesktop: %w", err),
 			)
 		}
 	}
@@ -542,7 +542,7 @@ func uninstallWithDependencies(
 	cancelOperation()
 	if err != nil {
 		return result, fmt.Errorf(
-			"stop running RayanLamp before uninstall: %w",
+			"stop running PCControllerDesktop before uninstall: %w",
 			err,
 		)
 	}
@@ -752,7 +752,7 @@ func runCleanupHelperWithDependencies(
 	cancel()
 	if running {
 		return errors.New(
-			"selfinstall: cleanup stopped because RayanLamp started again",
+			"selfinstall: cleanup stopped because PCControllerDesktop started again",
 		)
 	}
 	if err := removeExactInstallDirectoryWithRetry(
@@ -1263,10 +1263,10 @@ func stopPrimary(ctx context.Context) error {
 	response, callErr := ipc.Call(ctx, request)
 	if callErr == nil && !response.OK {
 		if response.Error == nil {
-			return errors.New("running RayanLamp rejected the quit request")
+			return errors.New("running PCControllerDesktop rejected the quit request")
 		}
 		return fmt.Errorf(
-			"running RayanLamp rejected the quit request: %s",
+			"running PCControllerDesktop rejected the quit request: %s",
 			response.Error.Message,
 		)
 	}

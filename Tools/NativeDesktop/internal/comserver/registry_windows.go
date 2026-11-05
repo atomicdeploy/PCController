@@ -398,7 +398,7 @@ func scanOwnedRegistrationWithReaders(
 }
 
 // Unregister removes only the per-user COM registration owned by the current
-// executable. A registration pointing at another RayanLamp installation is
+// executable. A registration pointing at another PCControllerDesktop installation is
 // deliberately preserved.
 func Unregister() error {
 	executable, err := os.Executable()
@@ -410,7 +410,7 @@ func Unregister() error {
 
 // UnregisterExecutable removes only the per-user COM registration owned by
 // executable. It exists for the self-uninstaller, which may run from a
-// detached temporary copy after stopping an installed RayanLamp process.
+// detached temporary copy after stopping an installed PCControllerDesktop process.
 func UnregisterExecutable(executable string) error {
 	executable = strings.TrimSpace(executable)
 	if executable == "" {

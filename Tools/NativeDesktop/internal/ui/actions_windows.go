@@ -12,22 +12,22 @@ import (
 	"github.com/lxn/walk"
 	"github.com/lxn/win"
 
-	"rayanlamp.local/app/assets"
-	"rayanlamp.local/app/internal/commands"
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/dialogs"
-	"rayanlamp.local/app/internal/i18n"
-	"rayanlamp.local/app/internal/ipc"
-	"rayanlamp.local/app/internal/model"
-	"rayanlamp.local/app/internal/traymenu"
-	"rayanlamp.local/app/internal/winfx"
+	"pccontroller.local/desktop/assets"
+	"pccontroller.local/desktop/internal/commands"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/dialogs"
+	"pccontroller.local/desktop/internal/i18n"
+	"pccontroller.local/desktop/internal/ipc"
+	"pccontroller.local/desktop/internal/model"
+	"pccontroller.local/desktop/internal/traymenu"
+	"pccontroller.local/desktop/internal/winfx"
 )
 
 var appMenuArtworkPaths = []string{
 	"icons/app.png",
-	"icons/lamp-on.png",
-	"icons/lamp-off.png",
-	"icons/lamp-unknown.png",
+	"icons/device-on.png",
+	"icons/device-off.png",
+	"icons/device-unknown.png",
 	"icons/menu-window-show.png",
 	"icons/menu-window-hide.png",
 	"icons/menu-settings.png",
@@ -419,13 +419,13 @@ func (s *Shell) showAppMenuAt(x, y int32) {
 		return
 	}
 	cfg := s.Config()
-	stateIcon := "icons/lamp-unknown.png"
+	stateIcon := "icons/device-unknown.png"
 	stateLabel := s.tr(i18n.MsgTrayStateUnknown)
 	switch s.snapshot.State {
 	case model.StateOn:
-		stateIcon, stateLabel = "icons/lamp-on.png", s.tr(i18n.MsgMainLightOn)
+		stateIcon, stateLabel = "icons/device-on.png", s.tr(i18n.MsgMainLightOn)
 	case model.StateOff:
-		stateIcon, stateLabel = "icons/lamp-off.png", s.tr(i18n.MsgMainLightOff)
+		stateIcon, stateLabel = "icons/device-off.png", s.tr(i18n.MsgMainLightOff)
 	}
 
 	item := func(id, label, shortcut, iconPath string) traymenu.Item {
@@ -449,14 +449,14 @@ func (s *Shell) showAppMenuAt(x, y int32) {
 				win.IsWindowVisible(s.mw.Handle()) &&
 				!win.IsIconic(s.mw.Handle()),
 		)
-	stateItem := item("lamp_state", stateLabel, "", stateIcon)
+	stateItem := item("device_state", stateLabel, "", stateIcon)
 	stateItem.Disabled = true
 	items := []traymenu.Item{
 		stateItem,
 		{Separator: true},
 		item("toggle", s.tr(i18n.MsgActionToggle), cfg.Hotkeys.Toggle, "icons/app.png"),
-		item("on", s.tr(i18n.MsgActionTurnOn), cfg.Hotkeys.On, "icons/lamp-on.png"),
-		item("off", s.tr(i18n.MsgActionTurnOff), cfg.Hotkeys.Off, "icons/lamp-off.png"),
+		item("on", s.tr(i18n.MsgActionTurnOn), cfg.Hotkeys.On, "icons/device-on.png"),
+		item("off", s.tr(i18n.MsgActionTurnOff), cfg.Hotkeys.Off, "icons/device-off.png"),
 		{Separator: true},
 		item("view_mode", viewLabel, "", "icons/app.png"),
 		item("settings", s.tr(i18n.MsgActionSettings)+"…", "", "icons/menu-settings.png"),
@@ -531,11 +531,11 @@ func (s *Shell) showAppMenuAt(x, y int32) {
 	case "hide":
 		s.Hide()
 	case "toggle":
-		s.invoke("lamp.toggle", nil)
+		s.invoke("device.toggle", nil)
 	case "on":
-		s.invoke("lamp.on", nil)
+		s.invoke("device.on", nil)
 	case "off":
-		s.invoke("lamp.off", nil)
+		s.invoke("device.off", nil)
 	case "view_mode":
 		s.patchConfig(map[string]any{
 			"ui": map[string]any{"view_mode": nextView},

@@ -1,5 +1,5 @@
 import { effect } from "@preact/signals";
-import type { LampState } from "./contracts";
+import type { OutputState } from "./contracts";
 import type { ConnectionPhase } from "./contracts";
 import {
   appPhase,
@@ -25,7 +25,7 @@ export function faviconURL(state: FaviconState): string {
 }
 
 export function faviconState(
-  state: LampState,
+  state: OutputState,
   phase: ConnectionPhase,
   available: boolean
 ): FaviconState {
@@ -55,16 +55,16 @@ export function updateFavicon(
   target: Document = document
 ): void {
   const current = target.querySelector<HTMLLinkElement>(
-    'link[data-rayanlamp-favicon]'
+    'link[data-pccontroller-desktop-favicon]'
   );
-  if (current?.dataset.lampState === state) return;
+  if (current?.dataset.deviceState === state) return;
 
   const next = target.createElement("link");
   next.rel = "icon";
   next.type = "image/svg+xml";
   next.setAttribute("sizes", "any");
-  next.dataset.rayanlampFavicon = "";
-  next.dataset.lampState = state;
+  next.setAttribute("data-pccontroller-desktop-favicon", "");
+  next.dataset.deviceState = state;
   next.href = new URL(faviconURL(state), target.baseURI).href;
 
   if (current) {

@@ -20,30 +20,30 @@ import (
 	"github.com/lxn/walk"
 	decl "github.com/lxn/walk/declarative"
 
-	"rayanlamp.local/app/internal/buildinfo"
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/diagnostics"
-	"rayanlamp.local/app/internal/i18n"
-	"rayanlamp.local/app/internal/model"
-	"rayanlamp.local/app/internal/winfx"
+	"pccontroller.local/desktop/internal/buildinfo"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/diagnostics"
+	"pccontroller.local/desktop/internal/i18n"
+	"pccontroller.local/desktop/internal/model"
+	"pccontroller.local/desktop/internal/winfx"
 )
 
 const maxDiagnosticOutput = 1 << 20
 
 type diagnosticsController struct {
-	dialog        *walk.Dialog
-	cfg           config.Config
-	source        DiagnosticsSource
-	endpoints     []string
-	endpointCombo *walk.ComboBox
-	refreshButton *walk.PushButton
-	status        *walk.Label
-	output        *walk.TextEdit
-	lampSummary   *walk.TextEdit
-	rawView       *walk.CheckBox
-	snapshot      diagnostics.Snapshot
-	lampSnapshot  model.Snapshot
-	localizer     i18n.Localizer
+	dialog         *walk.Dialog
+	cfg            config.Config
+	source         DiagnosticsSource
+	endpoints      []string
+	endpointCombo  *walk.ComboBox
+	refreshButton  *walk.PushButton
+	status         *walk.Label
+	output         *walk.TextEdit
+	deviceSummary  *walk.TextEdit
+	rawView        *walk.CheckBox
+	snapshot       diagnostics.Snapshot
+	deviceSnapshot model.Snapshot
+	localizer      i18n.Localizer
 
 	closed   atomic.Bool
 	sequence atomic.Uint64
@@ -110,7 +110,7 @@ func ShowDiagnostics(
 		osSummary,
 		renderingSummary,
 	)
-	diagnosticSnapshot := diagnostics.NewSnapshot(working.Lamp.BaseURL)
+	diagnosticSnapshot := diagnostics.NewSnapshot(working.Device.BaseURL)
 	if source != nil {
 		diagnosticSnapshot = source.DiagnosticsSnapshot()
 	}
@@ -123,13 +123,13 @@ func ShowDiagnostics(
 	initialOutput := localizedDiagnosticIntroduction(localizer, false)
 
 	controller := &diagnosticsController{
-		cfg:          working,
-		source:       source,
-		endpoints:    endpoints,
-		snapshot:     diagnosticSnapshot,
-		lampSnapshot: snapshot,
-		localizer:    localizer,
-		done:         make(chan struct{}),
+		cfg:            working,
+		source:         source,
+		endpoints:      endpoints,
+		snapshot:       diagnosticSnapshot,
+		deviceSnapshot: snapshot,
+		localizer:      localizer,
+		done:           make(chan struct{}),
 	}
 	var dialog *walk.Dialog
 	var closeButton *walk.PushButton
@@ -137,7 +137,7 @@ func ShowDiagnostics(
 
 	spec := decl.Dialog{
 		AssignTo:           &dialog,
-		Title:              dialogText(localizer, "Rayan Lamp Diagnostics"),
+		Title:              dialogText(localizer, "PCController Diagnostics"),
 		Size:               decl.Size{Width: 800, Height: 650},
 		MinSize:            decl.Size{Width: 700, Height: 540},
 		Layout:             decl.VBox{Margins: decl.Margins{Left: 10, Top: 10, Right: 10, Bottom: 10}, Spacing: 8},
@@ -156,11 +156,11 @@ func ShowDiagnostics(
 						Layout:        decl.VBox{Margins: decl.Margins{Left: 10, Top: 8, Right: 10, Bottom: 10}, Spacing: 6},
 						Children: []decl.Widget{
 							dialogCardHeading(
-								dialogText(localizer, "Lamp and connection"),
+								dialogText(localizer, "Device and connection"),
 								localizer,
 							),
 							decl.TextEdit{
-								AssignTo:      &controller.lampSummary,
+								AssignTo:      &controller.deviceSummary,
 								Text:          stateSummary,
 								ReadOnly:      true,
 								VScroll:       true,
@@ -322,7 +322,7 @@ func ShowDiagnostics(
 			localeFonts.apply(dialog, controller.localizer)
 			_ = dialog.SetTitle(dialogText(
 				controller.localizer,
-				"Rayan Lamp Diagnostics",
+				"PCController Diagnostics",
 			))
 			applyDialogTextDirection(
 				dialog,
@@ -369,7 +369,7 @@ func (controller *diagnosticsController) startRefresh() {
 
 	serial := controller.sequence.Add(1)
 	controller.cancelActive()
-	timeout := controller.cfg.Lamp.RequestTimeout.Value()
+	timeout := controller.cfg.Device.RequestTimeout.Value()
 	if timeout <= 0 {
 		timeout = 10 * time.Second
 	}
@@ -479,11 +479,11 @@ func (controller *diagnosticsController) renderSelected() {
 	if controller == nil || controller.closed.Load() {
 		return
 	}
-	if controller.lampSummary != nil {
-		_ = controller.lampSummary.SetText(localizedDiagnosticStateAndDeviceSummary(
+	if controller.deviceSummary != nil {
+		_ = controller.deviceSummary.SetText(localizedDiagnosticStateAndDeviceSummary(
 			controller.localizer,
 			controller.cfg,
-			controller.lampSnapshot,
+			controller.deviceSnapshot,
 			controller.snapshot,
 		))
 	}
@@ -602,12 +602,12 @@ func localizedFormatParsedDiagnosticResult(
 func localizedDiagnosticStateAndDeviceSummary(
 	localizer i18n.Localizer,
 	cfg config.Config,
-	lampSnapshot model.Snapshot,
+	stateSnapshot model.Snapshot,
 	deviceSnapshot diagnostics.Snapshot,
 ) string {
 	return localizeDiagnosticReport(
 		localizer,
-		diagnosticStateAndDeviceSummary(cfg, lampSnapshot, deviceSnapshot),
+		diagnosticStateAndDeviceSummary(cfg, stateSnapshot, deviceSnapshot),
 	)
 }
 
@@ -641,7 +641,7 @@ func localizedDiagnosticIntroduction(
 		return diagnosticIntroduction(expert)
 	}
 	message := "یک نقطهٔ پایانی خواندنی و بررسی‌شده را انتخاب کنید و «تازه‌سازی» را بزنید.\r\n\r\n" +
-		"فقط نقطه‌های پایانی ثابت GET که در میان‌افزار چراغ شناسایی شده‌اند در دسترس‌اند. " +
+		"فقط نقطه‌های پایانی ثابت GET که در میان‌افزار دستگاه شناسایی شده‌اند در دسترس‌اند. " +
 		"این پنجره هرگز مسیرهای تنظیمات، به‌روزرسانی، ورود، خرابی یا مسیر دلخواه را درخواست نمی‌کند."
 	if expert {
 		message += "\r\n\r\nعیب‌یابی‌های PU/debug حذف شده‌اند، چون به دستگاه دیگری تعلق دارند."
@@ -731,12 +731,12 @@ var persianDiagnosticLabels = map[string]string{
 	"Firmware":              "میان‌افزار",
 	"Wi-Fi":                 "وای‌فای",
 	"SSID":                  "SSID",
-	"Lamp address":          "نشانی چراغ",
+	"Device address":        "نشانی دستگاه",
 	"Signal":                "قدرت سیگنال",
 	"Device uptime":         "زمان کار دستگاه",
 	"Metadata updated":      "به‌روزرسانی فراداده",
 	"Device metadata":       "فرادادهٔ دستگاه",
-	"Rayan Lamp":            "چراغ رایان",
+	"PCController":          "PCController",
 	"Commit":                "کامیت",
 	"Build date":            "تاریخ ساخت",
 	"Windows NT":            "Windows NT",
@@ -852,9 +852,9 @@ func (controller *diagnosticsController) saveOutput() {
 	dialog := walk.FileDialog{
 		Title: dialogText(
 			controller.localizer,
-			"Save Rayan Lamp diagnostics",
+			"Save PCController diagnostics",
 		),
-		FilePath: "rayanlamp-diagnostics.txt",
+		FilePath: "pccontroller-desktop-diagnostics.txt",
 		Filter: dialogText(
 			controller.localizer,
 			"Text files (*.txt)|*.txt|All files (*.*)|*.*",
@@ -986,7 +986,7 @@ func formatDiagnosticPayload(endpoint string, data []byte, fetched time.Time) st
 func formatDiagnosticError(endpoint string, err error, finished time.Time) string {
 	message := cleanDisplayText(err.Error(), 2000)
 	if errors.Is(err, context.DeadlineExceeded) {
-		message = "The request exceeded the configured lamp request timeout."
+		message = "The request exceeded the configured device request timeout."
 	} else if errors.Is(err, context.Canceled) {
 		message = "The request was canceled."
 	}
@@ -1009,7 +1009,7 @@ func cleanDiagnosticBody(body string) string {
 func diagnosticStateSummary(cfg config.Config, snapshot model.Snapshot) string {
 	device := cleanDisplayText(snapshot.DeviceURL, 300)
 	if device == "" {
-		device = cfg.Lamp.BaseURL
+		device = cfg.Device.BaseURL
 	}
 	lastEvent := cleanDisplayText(snapshot.LastEvent, 220)
 	if lastEvent == "" {
@@ -1045,10 +1045,10 @@ func diagnosticStateSummary(cfg config.Config, snapshot model.Snapshot) string {
 
 func diagnosticStateAndDeviceSummary(
 	cfg config.Config,
-	lampSnapshot model.Snapshot,
+	stateSnapshot model.Snapshot,
 	deviceSnapshot diagnostics.Snapshot,
 ) string {
-	base := diagnosticStateSummary(cfg, lampSnapshot)
+	base := diagnosticStateSummary(cfg, stateSnapshot)
 	info := deviceSnapshot.Device
 	var metadata []string
 	if info.Hostname != "" {
@@ -1073,7 +1073,7 @@ func diagnosticStateAndDeviceSummary(
 		metadata = append(metadata, "SSID: "+info.SSID)
 	}
 	if info.WiFiIP != "" {
-		metadata = append(metadata, "Lamp address: "+info.WiFiIP)
+		metadata = append(metadata, "Device address: "+info.WiFiIP)
 	}
 	if info.RSSIDBm != nil {
 		signal := fmt.Sprintf("Signal: %d dBm", *info.RSSIDBm)
@@ -1134,7 +1134,7 @@ func diagnosticOSSummary(info winfx.OSInfo, probeErr error) string {
 		probeText = cleanDisplayText(probeErr.Error(), 300)
 	}
 	return fmt.Sprintf(
-		"Rayan Lamp: %s\r\nEdition: %s\r\nDeveloper tools: %s\r\nCommit: %s\r\nBuild date: %s\r\nWindows NT: %s\r\nWindows 11: %s\r\nDWM composition: %s\r\nTransparency: %s\r\nHigh contrast: %s\r\nApp color preference: %s\r\nSystem backdrop: %s\r\nAccent acrylic: %s\r\nCapability probe: %s",
+		"PCController: %s\r\nEdition: %s\r\nDeveloper tools: %s\r\nCommit: %s\r\nBuild date: %s\r\nWindows NT: %s\r\nWindows 11: %s\r\nDWM composition: %s\r\nTransparency: %s\r\nHigh contrast: %s\r\nApp color preference: %s\r\nSystem backdrop: %s\r\nAccent acrylic: %s\r\nCapability probe: %s",
 		buildinfo.Version,
 		buildinfo.Edition,
 		displayBool(buildinfo.DeveloperTools, "available", "not included"),
@@ -1167,7 +1167,7 @@ func diagnosticWindowsAndBuildSummary(
 
 func diagnosticIntroduction(expert bool) string {
 	message := "Choose an audited, read-only endpoint and select Refresh.\r\n\r\n" +
-		"Only fixed GET endpoints discovered in the lamp firmware are available. " +
+		"Only fixed GET endpoints discovered in the device firmware are available. " +
 		"Configuration, update, login, crash, and arbitrary paths are never sent from this dialog."
 	if expert {
 		message += "\r\n\r\nPU/debug diagnostics were retired because they belong to a separate device."

@@ -4,7 +4,7 @@ package traymenu
 
 import (
 	"github.com/lxn/win"
-	"rayanlamp.local/app/assets"
+	"pccontroller.local/desktop/assets"
 	"testing"
 	"unsafe"
 )

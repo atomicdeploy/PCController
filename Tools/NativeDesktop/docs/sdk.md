@@ -1,12 +1,12 @@
 # Native and Go SDK
 
-RayanLamp has an optional external SDK for applications that prefer an
+PCControllerDesktop has an optional external SDK for applications that prefer an
 in-process client library over launching a command-line child process. It is a
-controller for the authoritative primary, not another lamp runtime: every call
+controller for the authoritative primary, not another device runtime: every call
 uses the same current-user named pipe and canonical command dispatcher as the
 GUI, CLI, TUI, Web UI, URI handler, and COM Automation server.
 
-The ordinary portable release remains exactly one `RayanLamp.exe`, built with
+The ordinary portable release remains exactly one `PCControllerDesktop.exe`, built with
 `CGO_ENABLED=0`. SDK artifacts are created only by an explicit SDK build and
 are written under `dist-sdk`, never `dist`.
 
@@ -34,9 +34,9 @@ global `PATH`.
 Each architecture directory contains:
 
 ```text
-dist-sdk/<architecture>/RayanLamp.dll
-dist-sdk/<architecture>/RayanLamp.h
-dist-sdk/<architecture>/libRayanLamp.dll.a
+dist-sdk/<architecture>/PCControllerDesktop.dll
+dist-sdk/<architecture>/PCControllerDesktop.h
+dist-sdk/<architecture>/libPCControllerDesktop.dll.a
 ```
 
 The GNU import library is optional; any Windows language can use
@@ -65,23 +65,23 @@ this does not affect the existing CGO-free ARM64 executable cross-build.
 
 ## Attach-only behavior
 
-`RayanLamp_ExecuteUtf8`, `RayanLamp_ExecuteW`, `RayanLamp_On`,
-`RayanLamp_Off`, `RayanLamp_Toggle`, and `RayanLamp_GetState` never launch a
-process and never connect directly to the lamp. If no primary owns the
-current-user pipe they return `RAYANLAMP_STATUS_UNAVAILABLE`, normally with a
+`PCControllerDesktop_ExecuteUtf8`, `PCControllerDesktop_ExecuteW`, `PCControllerDesktop_On`,
+`PCControllerDesktop_Off`, `PCControllerDesktop_Toggle`, and `PCControllerDesktop_GetState` never launch a
+process and never connect directly to the device. If no primary owns the
+current-user pipe they return `PCCONTROLLER_DESKTOP_STATUS_UNAVAILABLE`, normally with a
 structured JSON error envelope.
 
 Bootstrap is a separate, explicit API:
 
 ```c
-int32_t status = RayanLamp_EnsurePrimaryW(
+int32_t status = PCControllerDesktop_EnsurePrimaryW(
     executable_path,
     wcslen(executable_path),
     12000
 );
 ```
 
-It starts only the exact supplied `RayanLamp.exe` path with `/background` and
+It starts only the exact supplied `PCControllerDesktop.exe` path with `/background` and
 waits for named-pipe readiness. It does not search `PATH`, infer an executable,
 or turn Excel, AutoHotkey, or another DLL host into an invisible embedded
 primary. Portable mode performs no automatic SDK, COM, URI, or registry
@@ -89,19 +89,19 @@ registration.
 
 ## C ABI
 
-Include `RayanLamp.h`. The public exports use `WINAPI`, fixed-width integer
+Include `PCControllerDesktop.h`. The public exports use `WINAPI`, fixed-width integer
 statuses, and explicit string lengths:
 
-- `RayanLamp_ABIVersion`
-- `RayanLamp_IsRunning`
-- `RayanLamp_EnsurePrimaryW`
-- `RayanLamp_ExecuteUtf8`
-- `RayanLamp_ExecuteW`
-- `RayanLamp_On`
-- `RayanLamp_Off`
-- `RayanLamp_Toggle`
-- `RayanLamp_GetState`
-- `RayanLamp_Free`
+- `PCControllerDesktop_ABIVersion`
+- `PCControllerDesktop_IsRunning`
+- `PCControllerDesktop_EnsurePrimaryW`
+- `PCControllerDesktop_ExecuteUtf8`
+- `PCControllerDesktop_ExecuteW`
+- `PCControllerDesktop_On`
+- `PCControllerDesktop_Off`
+- `PCControllerDesktop_Toggle`
+- `PCControllerDesktop_GetState`
+- `PCControllerDesktop_Free`
 
 ABI version `0x00010000` means ABI 1.0. It is deliberately separate from the
 living, versionless JSON command contract. A zero status means that transport
@@ -112,7 +112,7 @@ failure. `GetLastError` is set to a corresponding Win32 code after native ABI
 calls.
 
 Returned strings are NUL terminated, while buffer lengths exclude the
-terminator. Free every non-null returned pointer with `RayanLamp_Free`,
+terminator. Free every non-null returned pointer with `PCControllerDesktop_Free`,
 including error responses. No Go pointer crosses the ABI. Inputs and responses
 are bounded to 1 MiB, method names to 64 UTF-8 bytes, and timeouts to
 100–600000 ms; zero selects 12 seconds.
@@ -124,10 +124,10 @@ module or assume that the Go runtime can be reloaded in the same process.
 Example:
 
 ```c
-RAYANLAMP_BUFFER response = {0};
-int32_t status = RayanLamp_ExecuteUtf8(
-    "lamp.toggle",
-    sizeof("lamp.toggle") - 1,
+PCCONTROLLER_DESKTOP_BUFFER response = {0};
+int32_t status = PCControllerDesktop_ExecuteUtf8(
+    "device.toggle",
+    sizeof("device.toggle") - 1,
     NULL,
     0,
     12000,
@@ -135,18 +135,18 @@ int32_t status = RayanLamp_ExecuteUtf8(
 );
 if (response.data != NULL) {
     /* Parse response.data as UTF-8 JSON, even when status is negative. */
-    RayanLamp_Free(response.data);
+    PCControllerDesktop_Free(response.data);
 }
 ```
 
 AutoHotkey v2 can use the UTF-16 entry directly:
 
 ```autohotkey
-dll := A_ScriptDir "\RayanLamp.dll"
-method := "lamp.toggle"
+dll := A_ScriptDir "\PCControllerDesktop.dll"
+method := "device.toggle"
 out := Buffer(A_PtrSize * 2, 0)
 status := DllCall(
-    dll "\RayanLamp_ExecuteW",
+    dll "\PCControllerDesktop_ExecuteW",
     "WStr", method,
     "UPtr", StrLen(method),
     "Ptr", 0,
@@ -159,7 +159,7 @@ pointer := NumGet(out, 0, "Ptr")
 length := NumGet(out, A_PtrSize, "UPtr")
 json := pointer ? StrGet(pointer, length, "UTF-16") : ""
 if pointer
-    DllCall(dll "\RayanLamp_Free", "Ptr", pointer)
+    DllCall(dll "\PCControllerDesktop_Free", "Ptr", pointer)
 ```
 
 For VBA, the opt-in out-of-process COM object remains the friendlier and safer
@@ -168,7 +168,7 @@ manual buffer ownership.
 
 ## Public Go client
 
-Go hosts can import `rayanlamp.local/app/sdk` from the source module:
+Go hosts can import `pccontroller.local/desktop/sdk` from the source module:
 
 ```go
 client, err := sdk.New(sdk.Options{Timeout: 5 * time.Second})

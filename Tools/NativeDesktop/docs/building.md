@@ -3,7 +3,7 @@
 ## Supported targets
 
 The module declares Go 1.25.8. Go 1.21 and later support Windows 10 / Windows
-Server 2016 and newer; that is RayanLamp's operating-system baseline. See the
+Server 2016 and newer; that is PCControllerDesktop's operating-system baseline. See the
 official [Go minimum requirements](https://go.dev/wiki/MinimumRequirements).
 
 The release scripts accept:
@@ -56,7 +56,7 @@ executable.
 Every build embeds `build-edition.json` in the SPA. The PE verifier rejects a
 native/Web edition mismatch, a development executable without symbols/source
 maps, or a production executable that retains native debug sections. Build
-tags `rayanlamp_develop` and `rayanlamp_production` are mutually exclusive.
+tags `pccontroller_desktop_develop` and `pccontroller_desktop_production` are mutually exclusive.
 
 Explicit selection:
 
@@ -94,20 +94,20 @@ The script:
 8. Runs pinned
    [`goversioninfo` v1.7.0](https://github.com/josephspurrier/goversioninfo)
    for the unified executable.
-9. Uses `assets/RayanLamp.ico` once as the PE's standard application-icon
+9. Uses `assets/PCControllerDesktop.ico` once as the PE's standard application-icon
    resource alongside the Per-Monitor-V2/UTF-8/as-invoker/detached-console
    manifest and Explorer file properties. The ICO is not embedded again in
    Go's runtime asset filesystem.
 10. Embeds the compiled SPA/PWA, shared design tokens, manifest, service
     worker, CSS, JavaScript, required Web icon variants, and the canonical
     native/Web SFX and artwork bundle into the same executable.
-11. Builds exactly one console-subsystem `RayanLamp.exe`; the same PE contains
+11. Builds exactly one console-subsystem `PCControllerDesktop.exe`; the same PE contains
     the native GUI, CLI, and TUI modes.
 12. Optionally compresses amd64/386 with UPX and immediately verifies the
     packed image.
 13. Uses `-trimpath`, disables VCS auto-stamping, applies `-s -w` only for
     production, injects the commit and UTC build timestamp, writes only
-    `dist\RayanLamp.exe`, and reports its SHA-256 to the build log.
+    `dist\PCControllerDesktop.exe`, and reports its SHA-256 to the build log.
 14. Removes only the temporary `.syso` object created by that locked build,
     even when it fails.
 
@@ -122,7 +122,7 @@ can still show a brief pre-main flash.
 Release output:
 
 ```text
-dist\RayanLamp.exe
+dist\PCControllerDesktop.exe
 ```
 
 Useful options:
@@ -142,7 +142,7 @@ After building on Windows, exercise the packaged executable through an actual
 Windows pseudoconsole:
 
 ```powershell
-go run ./tools/tui-smoke -exe .\dist\RayanLamp.exe -verbose
+go run ./tools/tui-smoke -exe .\dist\PCControllerDesktop.exe -verbose
 ```
 
 The smoke tool creates an isolated temporary configuration, sends real terminal
@@ -166,7 +166,7 @@ make windows-cross FORCE=1
 make windows-cross-production FORCE=1
 ```
 
-This produces the same single `dist/RayanLamp.exe`, including the rebuilt
+This produces the same single `dist/PCControllerDesktop.exe`, including the rebuilt
 SPA/PWA, multi-resolution icon, Windows version properties, application
 manifest, and runtime CLI/TUI support. The cross-build uses the pinned
 `goversioninfo` Go tool natively on Linux to generate the correct COFF object,
@@ -217,13 +217,13 @@ compile regressions fail before linking the release.
 validated local iteration. `--skip-web-build` fails unless the complete
 checked-in web distribution is present. The script refuses unexpected files
 in `dist`, holds an exclusive build lock, generates resources through unique
-temporary paths, and atomically publishes only `RayanLamp.exe`.
+temporary paths, and atomically publishes only `PCControllerDesktop.exe`.
 
 Build messages use emojis plus capability-aware VT-100 SGR sequences. Set
 `NO_COLOR` to suppress escape codes in redirected logs, or
 `FORCE_COLOR=1` or `CLICOLOR_FORCE=1` to keep color in a CI service that
 supports ANSI output. Set `NO_EMOJI=1` for the stable ASCII labels, or use
-`RAYANLAMP_EMOJI=always|never` to explicitly choose emoji policy for redirected
+`PCCONTROLLER_DESKTOP_EMOJI=always|never` to explicitly choose emoji policy for redirected
 logs. The same controls apply to the PowerShell release path; its human
 statuses use the information stream, preserve native child-process output,
 and leave the final success-stream object as the artifact path.
@@ -231,7 +231,7 @@ and leave the final success-stream object as the artifact path.
 `-SkipTests` and `-SkipVet` exist for a developer's already-validated local
 iteration; they should not be used for published artifacts. The script builds
 through unique temporary paths and only replaces the exact
-`dist\RayanLamp.exe` when `-Force` is explicit.
+`dist\PCControllerDesktop.exe` when `-Force` is explicit.
 
 `-SkipWebBuild` is an offline source-build escape hatch. It is accepted only
 when the complete checked-in `internal\webui\dist` already exists; it never
@@ -253,9 +253,9 @@ To produce the frontend-only, direct-first static artifact:
 ```
 
 This performs a separate Vite build in a validated temporary directory with
-`VITE_RAYANLAMP_STATIC_EXPORT=true`, then creates
-`dist\RayanLamp-Web-Static.zip`. It does not replace or modify the reviewed
-assets embedded in `RayanLamp.exe`. ZIP entries are sorted, use a fixed
+`VITE_PCCONTROLLER_DESKTOP_STATIC_EXPORT=true`, then creates
+`dist\PCControllerDesktop-Web-Static.zip`. It does not replace or modify the reviewed
+assets embedded in `PCControllerDesktop.exe`. ZIP entries are sorted, use a fixed
 1980-01-01 timestamp and portable 0644 mode, exclude source maps and symlinks,
 and include an embedded deployment/security README. The archive is written to
 a synchronized temporary sibling and atomically replaces only that exact
@@ -271,7 +271,7 @@ not duplicate copies of that ordinary 512-pixel icon.
 
 Run `package.ps1` before `export-web.ps1` when producing both deliverables.
 The release packager intentionally insists that `dist` contain only
-`RayanLamp.exe`; move or remove the optional static ZIP before invoking the
+`PCControllerDesktop.exe`; move or remove the optional static ZIP before invoking the
 single-executable packager again. `export-web.ps1 -SkipTests` is available only
 for an already-validated local iteration.
 
@@ -303,7 +303,7 @@ prefer the ordinary uncompressed build where size is not important.
 follows `build-edition.txt` unless `-Edition` is supplied, and emits only:
 
 ```text
-dist\RayanLamp.exe
+dist\PCControllerDesktop.exe
 ```
 
 No README, installer, uninstaller, DLL, runtime, hash sidecar, or ZIP is placed
@@ -312,7 +312,7 @@ fails closed unless `dist` contains that one file and nothing else. Recompute
 the hash when needed:
 
 ```powershell
-Get-FileHash .\dist\RayanLamp.exe -Algorithm SHA256
+Get-FileHash .\dist\PCControllerDesktop.exe -Algorithm SHA256
 ```
 
 Hashes detect corruption; they are not signatures. Published releases should
@@ -340,8 +340,8 @@ MinGW requirements, artifacts, and host examples.
 The single executable has an explicit per-user self-installer:
 
 ```powershell
-.\dist\RayanLamp.exe /install /with-startup /with-shell /with-com /launch
-.\dist\RayanLamp.exe /install-status /json
+.\dist\PCControllerDesktop.exe /install /with-startup /with-shell /with-com /launch
+.\dist\PCControllerDesktop.exe /install-status /json
 ```
 
 `/install` alone installs only the file. `/with-startup`, `/with-shell`, and
@@ -351,15 +351,15 @@ update.
 
 The self-installer:
 
-- accepts exactly the unified `RayanLamp.exe`;
+- accepts exactly the unified `PCControllerDesktop.exe`;
 - verifies the staged copy against the source SHA-256;
 - stages into a unique sibling directory;
-- installs exactly to `%LOCALAPPDATA%\Programs\RayanLamp`;
+- installs exactly to `%LOCALAPPDATA%\Programs\PCControllerDesktop`;
 - requires `/force` before replacing an existing installation;
 - asks the existing controller to quit, swaps directories, and rolls back if
   the new installation fails;
 - optionally creates only the current user's Run value;
-- optionally registers the current executable's `rayan-lamp://` URI handler
+- optionally registers the current executable's `pccontroller-desktop://` URI handler
   and native Jump List tasks;
 - optionally creates ownership-checked per-user COM registration for the
   installed executable;
@@ -375,7 +375,7 @@ equivalent PowerShell switches:
 
 ```powershell
 .\tools\install.ps1 `
-  -SourcePath .\dist\RayanLamp.exe `
+  -SourcePath .\dist\PCControllerDesktop.exe `
   -StartWithWindows -RegisterShellIntegration -RegisterCOM -Launch
 ```
 
@@ -385,7 +385,7 @@ checks their exit codes. Manual `/register-shell`, `/unregister-shell`,
 dialogs unless `/quiet` is supplied. The installer does not silently opt users
 into shell integration, COM, or startup.
 
-`-StartWithWindows` refuses to overwrite an existing `RayanLamp` Run value
+`-StartWithWindows` refuses to overwrite an existing `PCControllerDesktop` Run value
 whose exact quoted command points elsewhere. If a later install phase fails,
 rollback removes only the value newly written by that attempt and rechecks its
 command first; a value whose ownership changed concurrently is preserved.
@@ -403,12 +403,12 @@ The installed or portable unified executable can remove the fixed per-user
 installation:
 
 ```powershell
-RayanLamp.exe /uninstall
+PCControllerDesktop.exe /uninstall
 ```
 
 Non-quiet use requires a native confirmation. `/quiet` is available for
 explicit automation. The uninstaller removes exactly
-`%LOCALAPPDATA%\Programs\RayanLamp`. It removes the Run value, URI/Jump List
+`%LOCALAPPDATA%\Programs\PCControllerDesktop`. It removes the Run value, URI/Jump List
 integration, legacy owned shell metadata, and COM keys only when they point to
 that exact executable; registrations that point elsewhere are preserved with
 a warning. It then starts a detached copy of the same Go executable from the
@@ -418,10 +418,10 @@ Windows file-disposition semantics. This cleanup path invokes no PowerShell,
 does not request elevation, and never schedules reboot-time deletion.
 Configuration and logs remain by default.
 
-To also remove the exact `%APPDATA%\RayanLamp` data directory:
+To also remove the exact `%APPDATA%\PCControllerDesktop` data directory:
 
 ```powershell
-RayanLamp.exe /uninstall /remove-user-data
+PCControllerDesktop.exe /uninstall /remove-user-data
 ```
 
 That flag permanently removes the API token, settings, content-addressed
@@ -436,7 +436,7 @@ and release-automation entry point.
 `assets/embed.go` is the single reviewed runtime bundle for the native UI,
 sound manager, embedded Web host, and static Web exporter. Keep source masters
 on disk without broad wildcard embedding. In particular,
-`assets/RayanLamp.ico` is a PE build input, animation PNG frames are design
+`assets/PCControllerDesktop.ico` is a PE build input, animation PNG frames are design
 sources, and unused raster/ICO variants must not silently become a second
 runtime copy.
 
@@ -450,13 +450,13 @@ icons or third-party image packs are used. It requires ImageMagick 7's
 
 It regenerates:
 
-- `assets/animation/lamp_000.png` through the final frame;
-- `assets/lamp-transition.apng`;
-- `assets/lamp-transition.svg`;
-- `assets/lamp-off.svg` and `assets/lamp-on.svg`;
+- `assets/animation/device_000.png` through the final frame;
+- `assets/device-transition.apng`;
+- `assets/device-transition.svg`;
+- `assets/device-off.svg` and `assets/device-on.svg`;
 - the app, state, connecting, and error PNGs;
 - tray-menu PNGs;
-- the multi-resolution `assets/RayanLamp.ico`.
+- the multi-resolution `assets/PCControllerDesktop.ico`.
 
 The script uses an eased color/glow/scale transition, applies a longer final
 APNG delay, and builds the ICO at 256, 128, 64, 48, 40, 32, 24, 20, and 16
@@ -493,7 +493,7 @@ being embedded a second time.
 `.github/workflows/build.yml` runs the same PowerShell release script on the
 current GitHub-hosted Windows runner. A Linux matrix also exercises the native
 cross-build for amd64, 386, and ARM64, including the PE/resource verifier. Each
-job uploads only its architecture's `RayanLamp.exe`. Every Linux matrix entry
+job uploads only its architecture's `PCControllerDesktop.exe`. Every Linux matrix entry
 runs the frontend checks, host-supported Go tests, selected-target vet,
 cross-compilation of every Windows test package, selected-edition link, and
 structural inspection so 386/ARM64 regressions cannot hide behind the amd64

@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"rayanlamp.local/app/internal/model"
+	"pccontroller.local/desktop/internal/model"
 )
 
 const defaultSystemRecoveryDelay = 900 * time.Millisecond

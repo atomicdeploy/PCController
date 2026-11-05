@@ -1,25 +1,31 @@
-# Firmware protocol
+# Compatibility device protocol
 
-The default base URL is `http://rayanlamp.local`. The configured URL must use
+This document describes the retained standalone HTTP device adapter, not
+PCController firmware or its host RPC. The actual historical route prefix lives
+only in [`compatibility/device-protocol.json`](../compatibility/device-protocol.json).
+Below, `{state}` means that prefix; do not substitute the coordinator's `/device/`
+routes for a firmware endpoint.
+
+The default base URL is `http://pccontroller-desktop.local`. The configured URL must use
 HTTP or HTTPS, contain a host, and contain no credentials, query, fragment, or
 path prefix. HTTPS automatically maps the WebSocket transport to WSS.
 
-## Lamp commands
+## Device commands
 
-RayanLamp uses GET because that is the existing firmware contract:
+The compatibility adapter uses GET because that is the existing device contract:
 
 | Method | Path | Meaning |
 | --- | --- | --- |
-| `GET` | `/lamp/get` | Return the current state |
-| `GET` | `/lamp/on` | Turn the lamp on |
-| `GET` | `/lamp/off` | Turn the lamp off |
-| `GET` | `/lamp/toggle` | Toggle when implemented by the firmware |
+| `GET` | `{state}get` | Return the current state |
+| `GET` | `{state}on` | Turn the output on |
+| `GET` | `{state}off` | Turn the output off |
+| `GET` | `{state}toggle` | Toggle when implemented by the device |
 | WebSocket | `/ws` | State, message, and cue event stream |
 
-`/lamp/get` must include a recognizable state. The parser accepts a plain
+The state read must include a recognizable state. The parser accepts a plain
 state, a JSON string, or a JSON object whose case-insensitive `state`, `status`,
-`lamp`, or `value` member is a state string or Boolean. Recognized strings
-include the model's on/off aliases. A successful `/lamp/on` or `/lamp/off`
+`device`, or `value` member is a state string or Boolean. Recognized strings
+include the model's on/off aliases. A successful on or off command
 response with no state is still authoritative. Toggle can succeed with an
 unknown returned state, in which case a later WebSocket or HTTP snapshot
 confirms it.
@@ -73,8 +79,8 @@ with jitter, resets its failure count after a stable connection, and publishes
 connecting/online/waiting/stopped phases to the model. Changing configuration
 restarts the network generation so stale callbacks cannot update current state.
 
-When polling is non-zero, `/lamp/get` provides a periodic reachability/state
-fallback. Setting `lamp.http_poll` to `"0s"` disables it.
+When polling is non-zero, `/device/get` provides a periodic reachability/state
+fallback. Setting `device.http_poll` to `"0s"` disables it.
 
 The `.local` address cache and invalidation behavior are documented in
 [Architecture](architecture.md#local-resolution-cache).
@@ -118,7 +124,7 @@ the response string. Neither credential is retained in `Document.Raw`,
 `Field.Raw`, cache snapshots, broadcasts, IPC/API results, logs, saved output,
 or UI state. Only the redacted typed projection is available to consumers.
 
-The application refreshes the useful endpoints automatically after the lamp is
+The application refreshes the useful endpoints automatically after the device is
 reachable and keeps a typed, last-known-good cache. Responses may be JSON, XML,
 plain `key: value` lines, or the compact line-oriented ASA format. Parsed device,
 network, firmware, and update values feed both native and web summaries. Exact
@@ -137,14 +143,14 @@ login, password, TLS, ACL, or application authentication.
 On connect the firmware emits `IAC WILL ECHO` (`FF FB 01`), an ANSI
 clear-screen sequence, a colored welcome banner, and then character-oriented
 output. The library is not a complete Telnet implementation: it does not parse
-input-side IAC negotiation. RayanLamp therefore strips emitted Telnet commands
+input-side IAC negotiation. PCControllerDesktop therefore strips emitted Telnet commands
 but does not reply with negotiation bytes that this firmware would mistake for
 shell input. ANSI cursor/color/erase output is preserved; OSC and DCS control
 strings are removed before reaching UI terminal emulators.
 
 The checked source defines `ShellOnSerial`. In that build, `onTelnetInput`
 returns without processing bytes, the network banner says `Shell is on
-Serial`, and commands execute only on UART. RayanLamp detects that banner and
+Serial`, and commands execute only on UART. PCControllerDesktop detects that banner and
 marks the session read-only. If firmware is rebuilt without `ShellOnSerial`,
 its shell accepts character input, executes on LF (CRLF is accepted), and has
 a 64-byte command buffer. Built-ins include read/write configuration and
@@ -153,8 +159,8 @@ reboot operations, and password getters expose plaintext credentials.
 Consequently the app:
 
 - never opens the terminal automatically;
-- connects only to the configured lamp hostname and `lamp.telnet_port`;
-- shares the lamp client's failure-aware `.local` resolution cache;
+- connects only to the configured device hostname and `device.telnet_port`;
+- shares the device client's failure-aware `.local` resolution cache;
 - bounds each input frame to 4096 bytes and in-memory scrollback to 256 KiB;
 - maps the Web terminal's bare Enter key to CRLF, matching the firmware's LF
   command execution while leaving pasted/raw bytes unchanged;
@@ -166,13 +172,13 @@ Consequently the app:
 
 Enabling the firmware's network shell should be paired with authentication,
 removal/redaction of credential getters, interface/subnet restrictions, an
-idle timeout, and rate limiting. HTTP and `/ws` remain the authoritative lamp
+idle timeout, and rate limiting. HTTP and `/ws` remain the authoritative device
 control/state transports.
 
 ## Development mock
 
-The server under `tools/mock-lamp` implements all six public diagnostics and
+The server under `tools/mock-device` implements all six public diagnostics and
 both projection-only configuration sources, and adds test-only `/mock/event`
 and `/mock/disconnect` POST routes. Its fake credential values exist solely to
 exercise the redaction boundary. It binds to `127.0.0.1:8080` by default. See its
-[usage guide](../tools/mock-lamp/README.md).
+[usage guide](../tools/mock-device/README.md).

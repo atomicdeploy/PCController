@@ -9,7 +9,7 @@ import (
 
 	"github.com/lxn/walk"
 	"github.com/lxn/win"
-	"rayanlamp.local/app/internal/dialogs"
+	"pccontroller.local/desktop/internal/dialogs"
 )
 
 type controllerInlineEdit struct {

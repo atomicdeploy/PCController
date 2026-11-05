@@ -1,4 +1,4 @@
-export type LampState = "on" | "off" | "unknown";
+export type OutputState = "on" | "off" | "unknown";
 export type ConnectionPhase =
   | "booting"
   | "connecting"
@@ -7,7 +7,7 @@ export type ConnectionPhase =
   | "offline";
 
 export interface Snapshot {
-  state: LampState;
+  state: OutputState;
   http_reachable: boolean;
   websocket_online: boolean;
   device_url: string;
@@ -20,7 +20,7 @@ export interface Snapshot {
   reconnect_attempt: number;
 }
 
-export interface LampConfig {
+export interface DeviceConfig {
   base_url: string;
   request_timeout: string;
   websocket: boolean;
@@ -123,7 +123,7 @@ export interface DiagnosticsConfig {
 }
 
 export interface AppConfig {
-  lamp: LampConfig;
+  device: DeviceConfig;
   ui: UIConfig;
   notifications: NotificationsConfig;
   hotkeys: HotkeysConfig;
@@ -405,7 +405,7 @@ export function isAppConfig(value: unknown): value is AppConfig {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Partial<AppConfig>;
   return Boolean(
-    candidate.lamp &&
+    candidate.device &&
       candidate.ui &&
       candidate.notifications &&
       candidate.hotkeys &&

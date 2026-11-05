@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"rayanlamp.local/app/internal/i18n"
+	"pccontroller.local/desktop/internal/i18n"
 )
 
 func TestConfigureToastRequiresOptInRegistration(t *testing.T) {
@@ -46,7 +46,7 @@ func TestPortableAutoModeFallsBackToTrayBalloon(t *testing.T) {
 	go manager.toastWorker()
 	defer manager.Close()
 
-	if err := manager.Show("Rayan Lamp", "Portable fallback", false); err != nil {
+	if err := manager.Show("PCController", "Portable fallback", false); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -60,10 +60,10 @@ func TestPortableAutoModeFallsBackToTrayBalloon(t *testing.T) {
 
 func TestToastXMLTreatsRemoteMessageAsText(t *testing.T) {
 	payload, err := makeToastXML(
-		`Lamp <status>`,
+		`Device <status>`,
 		`hello ]]> <action arguments="off"/> & goodbye`,
 		false,
-		`C:\Program Files\Rayan Lamp\toast icon.png`,
+		`C:\Program Files\PCController\toast icon.png`,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -88,7 +88,7 @@ func TestToastXMLTreatsRemoteMessageAsText(t *testing.T) {
 
 func TestPersianToastCarriesLanguageAndLocalizedActions(t *testing.T) {
 	payload, err := makeLocalizedToastXML(
-		"چراغ رایان",
+		"PCController",
 		"وضعیت چراغ تغییر کرد",
 		false,
 		i18n.New(i18n.Persian),
@@ -139,7 +139,7 @@ func TestShowTimesOutStalledToastAndUsesBalloonFallback(t *testing.T) {
 	)
 
 	begin := time.Now()
-	if err := manager.Show("Lamp", "Still bounded", false); err != nil {
+	if err := manager.Show("Device", "Still bounded", false); err != nil {
 		close(release)
 		_ = manager.Close()
 		t.Fatalf("Show: %v", err)
@@ -187,7 +187,7 @@ func TestCloseIsBoundedWhenToastWorkerStalls(t *testing.T) {
 
 	showDone := make(chan error, 1)
 	go func() {
-		showDone <- manager.Show("Lamp", "Closing", false)
+		showDone <- manager.Show("Device", "Closing", false)
 	}()
 	select {
 	case <-started:
@@ -217,7 +217,7 @@ func TestCloseIsBoundedWhenToastWorkerStalls(t *testing.T) {
 		close(release)
 		t.Fatal("Show remained blocked after Close")
 	}
-	if err := manager.Show("Lamp", "After close", false); !errors.Is(err, errManagerClosed) {
+	if err := manager.Show("Device", "After close", false); !errors.Is(err, errManagerClosed) {
 		close(release)
 		t.Fatalf("Show after Close error = %v", err)
 	}

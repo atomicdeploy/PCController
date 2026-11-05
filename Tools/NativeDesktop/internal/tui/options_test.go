@@ -52,7 +52,7 @@ func TestParseLaunchOptions(t *testing.T) {
 
 	options, err := ParseLaunchOptions([]string{
 		"--mode", " API ",
-		"--config", "  lamp-test.json  ",
+		"--config", "  device-test.json  ",
 		"--api-url", "  http://localhost:47891/  ",
 		"--api-token", "  local-test-token  ",
 		"--poll", "750ms",
@@ -71,7 +71,7 @@ func TestParseLaunchOptions(t *testing.T) {
 	if options.Transport.Mode != ModeAPI {
 		t.Errorf("mode = %q, want %q", options.Transport.Mode, ModeAPI)
 	}
-	if options.Transport.ConfigPath != "lamp-test.json" {
+	if options.Transport.ConfigPath != "device-test.json" {
 		t.Errorf("config path = %q", options.Transport.ConfigPath)
 	}
 	if options.Transport.APIURL != "http://localhost:47891/" {
@@ -534,7 +534,7 @@ func TestUsageDocumentsEveryTransportMode(t *testing.T) {
 
 	usage := Usage()
 	for _, text := range []string{
-		"RayanLamp.exe tui [screen] [options]",
+		"PCControllerDesktop.exe tui [screen] [options]",
 		"settings | configure",
 		"serving | serve",
 		"--screen NAME",

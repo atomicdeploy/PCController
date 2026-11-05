@@ -16,7 +16,7 @@ import {
 } from "./test/fixtures";
 
 describe("state-reactive favicon", () => {
-  it("maps lifecycle, availability, and confirmed lamp state", () => {
+  it("maps lifecycle, availability, and confirmed device state", () => {
     expect(faviconState("on", "booting", false)).toBe("connecting");
     expect(faviconState("on", "connecting", true)).toBe("connecting");
     expect(faviconState("on", "online", true)).toBe("on");
@@ -31,20 +31,20 @@ describe("state-reactive favicon", () => {
       <link
         rel="icon"
         href="./icons/favicon-connecting.svg"
-        data-rayanlamp-favicon
-        data-lamp-state="connecting"
+        data-pccontroller-desktop-favicon
+        data-device-state="connecting"
       />
     `;
     const initial = document.querySelector(
-      "link[data-rayanlamp-favicon]"
+      "link[data-pccontroller-desktop-favicon]"
     );
 
     updateFavicon("on");
     const on = document.querySelector<HTMLLinkElement>(
-      "link[data-rayanlamp-favicon]"
+      "link[data-pccontroller-desktop-favicon]"
     );
     expect(on).not.toBe(initial);
-    expect(on?.dataset.lampState).toBe("on");
+    expect(on?.dataset.deviceState).toBe("on");
     expect(on?.href).toBe(
       new URL(faviconURL("on"), document.baseURI).href
     );
@@ -53,10 +53,10 @@ describe("state-reactive favicon", () => {
 
     updateFavicon("off");
     const off = document.querySelector<HTMLLinkElement>(
-      "link[data-rayanlamp-favicon]"
+      "link[data-pccontroller-desktop-favicon]"
     );
     expect(off).not.toBe(on);
-    expect(off?.dataset.lampState).toBe("off");
+    expect(off?.dataset.deviceState).toBe("off");
     expect(off?.href).toBe(
       new URL(faviconURL("off"), document.baseURI).href
     );
@@ -67,11 +67,11 @@ describe("state-reactive favicon", () => {
     document.head.innerHTML = "";
     updateFavicon("offline");
     const current = document.querySelector(
-      "link[data-rayanlamp-favicon]"
+      "link[data-pccontroller-desktop-favicon]"
     );
     updateFavicon("offline");
     expect(
-      document.querySelector("link[data-rayanlamp-favicon]")
+      document.querySelector("link[data-pccontroller-desktop-favicon]")
     ).toBe(current);
   });
 
@@ -82,22 +82,22 @@ describe("state-reactive favicon", () => {
       applyBootstrap(structuredClone(testBootstrap));
       expect(
         document.querySelector<HTMLLinkElement>(
-          "link[data-rayanlamp-favicon]"
-        )?.dataset.lampState
+          "link[data-pccontroller-desktop-favicon]"
+        )?.dataset.deviceState
       ).toBe("off");
 
       applySnapshot({ ...testSnapshot, state: "on" });
       expect(
         document.querySelector<HTMLLinkElement>(
-          "link[data-rayanlamp-favicon]"
-        )?.dataset.lampState
+          "link[data-pccontroller-desktop-favicon]"
+        )?.dataset.deviceState
       ).toBe("on");
 
       markControllerUnavailable();
       expect(
         document.querySelector<HTMLLinkElement>(
-          "link[data-rayanlamp-favicon]"
-        )?.dataset.lampState
+          "link[data-pccontroller-desktop-favicon]"
+        )?.dataset.deviceState
       ).toBe("offline");
     } finally {
       stop();

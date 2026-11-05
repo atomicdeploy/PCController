@@ -1,9 +1,10 @@
+import compatibilityProtocol from "../../compatibility/device-protocol.json";
 import { describe, expect, it, vi } from "vitest";
 import { APIError } from "./api";
 import type { BrowserAudioPlayback } from "./audio";
 import type { Snapshot } from "./contracts";
 import {
-  DirectLampAPI,
+  DirectDeviceAPI,
   directPageAccessError
 } from "./direct-api";
 import { DIRECT_DIAGNOSTIC_ENDPOINTS } from "./direct-protocol";
@@ -13,16 +14,16 @@ function textResponse(value: string, status = 200): Response {
   return new Response(value, { status });
 }
 
-describe("DirectLampAPI", () => {
+describe("DirectDeviceAPI", () => {
   it("bootstraps with CORS-simple GETs and parsed audited diagnostics", async () => {
     const requests: Array<[RequestInfo | URL, RequestInit | undefined]> = [];
     const fetcher = vi.fn(
       async (input: RequestInfo | URL, init?: RequestInit) => {
         requests.push([input, init]);
         const url = String(input);
-        if (url.endsWith("/lamp/get")) return textResponse("OFF");
+        if (url.endsWith("" + compatibilityProtocol.statePrefix + "get")) return textResponse("OFF");
         if (url.endsWith("/info")) {
-          return textResponse("hostname: rayanlamp\nfirmware: 2.1.0");
+          return textResponse("hostname: pccontroller-desktop\nfirmware: 2.1.0");
         }
         if (url.endsWith("/wifi/signal")) return textResponse("-62\nGood");
         if (url.endsWith("/wifi/status")) {
@@ -36,14 +37,14 @@ describe("DirectLampAPI", () => {
         }
         if (url.endsWith("/config/ap")) {
           return textResponse(
-            "ssid: RayanLamp Setup\npass: ap-plaintext-secret\n" +
+            "ssid: PCControllerDesktop Setup\npass: ap-plaintext-secret\n" +
               "ip: 192.168.4.1\nnetmask: 255.255.255.0"
           );
         }
         return textResponse("");
       }
     );
-    const api = new DirectLampAPI("rayanlamp.local", {
+    const api = new DirectDeviceAPI("pccontroller-desktop.local", {
       fetch: fetcher as typeof fetch,
       pageURL: "http://dashboard.local/"
     });
@@ -53,7 +54,7 @@ describe("DirectLampAPI", () => {
     expect(bootstrap.snapshot).toMatchObject({
       state: "off",
       http_reachable: true,
-      device_url: "http://rayanlamp.local"
+      device_url: "http://pccontroller-desktop.local"
     });
     expect(bootstrap.capabilities).toMatchObject({
       transport_direct: true,
@@ -63,7 +64,7 @@ describe("DirectLampAPI", () => {
       audio_sfx: true
     });
     expect(bootstrap.diagnostics?.device).toMatchObject({
-      hostname: "rayanlamp",
+      hostname: "pccontroller-desktop",
       firmware: "2.1.0",
       rssi_dbm: -62,
       wifi_connected: true,
@@ -71,7 +72,7 @@ describe("DirectLampAPI", () => {
       wifi_ip: "172.20.5.130",
       station_status: "Connected",
       access_point_status: "Enabled",
-      access_point_ssid: "RayanLamp Setup",
+      access_point_ssid: "PCControllerDesktop Setup",
       access_point_ip: "192.168.4.1"
     });
     expect(Object.keys(bootstrap.diagnostics?.endpoints ?? {})).toEqual(
@@ -94,7 +95,7 @@ describe("DirectLampAPI", () => {
   });
 
   it("opens while offline and preserves an actionable failure", async () => {
-    const api = new DirectLampAPI("rayanlamp.local", {
+    const api = new DirectDeviceAPI("pccontroller-desktop.local", {
       fetch: vi.fn(async () => {
         throw new TypeError("network");
       }) as typeof fetch,
@@ -113,11 +114,11 @@ describe("DirectLampAPI", () => {
 
   it("toggles from the confirmed state without using an unaudited endpoint", async () => {
     const urls: string[] = [];
-    const api = new DirectLampAPI("http://rayanlamp.local", {
+    const api = new DirectDeviceAPI("http://pccontroller-desktop.local", {
       fetch: vi.fn(async (input: RequestInfo | URL) => {
         urls.push(String(input));
-        if (String(input).endsWith("/lamp/get")) return textResponse("OFF");
-        if (String(input).endsWith("/lamp/off")) return textResponse("");
+        if (String(input).endsWith("" + compatibilityProtocol.statePrefix + "get")) return textResponse("OFF");
+        if (String(input).endsWith("" + compatibilityProtocol.statePrefix + "off")) return textResponse("");
         return textResponse("ON");
       }) as typeof fetch,
       pageURL: "http://dashboard.local/"
@@ -132,15 +133,15 @@ describe("DirectLampAPI", () => {
     expect(off.state).toBe("off");
     expect(on.state).toBe("on");
     expect(urls).toEqual([
-      "http://rayanlamp.local/lamp/get",
-      "http://rayanlamp.local/lamp/on",
-      "http://rayanlamp.local/lamp/off",
-      "http://rayanlamp.local/lamp/on"
+      "http://pccontroller-desktop.local" + compatibilityProtocol.statePrefix + "get",
+      "http://pccontroller-desktop.local" + compatibilityProtocol.statePrefix + "on",
+      "http://pccontroller-desktop.local" + compatibilityProtocol.statePrefix + "off",
+      "http://pccontroller-desktop.local" + compatibilityProtocol.statePrefix + "on"
     ]);
   });
 
   it("normalizes firmware WebSocket state, message, msg, and beep frames", () => {
-    const api = new DirectLampAPI("http://rayanlamp.local", {
+    const api = new DirectDeviceAPI("http://pccontroller-desktop.local", {
       pageURL: "http://dashboard.local/"
     });
     const socket = {
@@ -148,7 +149,7 @@ describe("DirectLampAPI", () => {
       close: vi.fn()
     } as unknown as WebSocket;
 
-    expect(api.realtimeURL()).toBe("ws://rayanlamp.local/ws");
+    expect(api.realtimeURL()).toBe("ws://pccontroller-desktop.local/ws");
     expect(api.realtimeOpened(socket)[0].snapshot?.websocket_online).toBe(true);
     expect(socket.send).toHaveBeenCalledWith("get");
     expect(api.decodeRealtimeMessage("ON")[0].snapshot?.state).toBe("on");
@@ -156,8 +157,8 @@ describe("DirectLampAPI", () => {
       type: "message",
       message: "Hello"
     });
-    expect(api.decodeRealtimeMessage("msg:4,Hello+lamp")[0]).toMatchObject({
-      message: "Hello lamp",
+    expect(api.decodeRealtimeMessage("msg:4,Hello+device")[0]).toMatchObject({
+      message: "Hello device",
       result: { kind: "message", icon: 4 }
     });
     expect(api.decodeRealtimeMessage("beep:2")[0]).toMatchObject({
@@ -175,15 +176,15 @@ describe("DirectLampAPI", () => {
     const fetcher = vi.fn(async () => textResponse("ok"));
     const announcements: string[] = [];
     const unsubscribe = subscribeConnectionPreferences((value) => {
-      announcements.push(value.lampURL);
+      announcements.push(value.deviceURL);
     });
-    const api = new DirectLampAPI("http://rayanlamp.local", {
+    const api = new DirectDeviceAPI("http://pccontroller-desktop.local", {
       fetch: fetcher as typeof fetch,
       pageURL: "http://dashboard.local/"
     });
     const changed = await api.patchConfig(
       {
-        lamp: {
+        device: {
           request_timeout: "7s",
           http_poll: "0s",
           telnet_port: 2_323
@@ -191,17 +192,17 @@ describe("DirectLampAPI", () => {
       },
       1
     );
-    const reloaded = new DirectLampAPI("http://rayanlamp.local", {
+    const reloaded = new DirectDeviceAPI("http://pccontroller-desktop.local", {
       fetch: fetcher as typeof fetch,
       pageURL: "http://dashboard.local/"
     });
 
-    expect(changed.config.lamp.request_timeout).toBe("7s");
-    expect(changed.config.lamp.http_poll).toBe("0s");
-    expect(changed.config.lamp.telnet_port).toBe(2_323);
-    expect(announcements).toContain("http://rayanlamp.local");
-    expect((await reloaded.getConfig()).config.lamp.request_timeout).toBe("7s");
-    expect((await reloaded.getConfig()).config.lamp.telnet_port).toBe(2_323);
+    expect(changed.config.device.request_timeout).toBe("7s");
+    expect(changed.config.device.http_poll).toBe("0s");
+    expect(changed.config.device.telnet_port).toBe(2_323);
+    expect(announcements).toContain("http://pccontroller-desktop.local");
+    expect((await reloaded.getConfig()).config.device.request_timeout).toBe("7s");
+    expect((await reloaded.getConfig()).config.device.telnet_port).toBe(2_323);
     await expect(reloaded.diagnostics("/pu")).rejects.toMatchObject({
       code: "endpoint_not_allowed"
     });
@@ -220,11 +221,11 @@ describe("DirectLampAPI", () => {
 
   it("validates the coordinator terminal port even in browser-local config", async () => {
     for (const telnet_port of [0, 65_536, 23.5]) {
-      const api = new DirectLampAPI("http://rayanlamp.local", {
+      const api = new DirectDeviceAPI("http://pccontroller-desktop.local", {
         pageURL: "http://dashboard.local/"
       });
       await expect(
-        api.patchConfig({ lamp: { telnet_port } }, 1)
+        api.patchConfig({ device: { telnet_port } }, 1)
       ).rejects.toMatchObject({
         code: "invalid_config"
       });
@@ -250,7 +251,7 @@ describe("DirectLampAPI", () => {
       describe: vi.fn(async () => null),
       armUserGestureUnlock: vi.fn(() => () => undefined)
     } satisfies BrowserAudioPlayback;
-    const api = new DirectLampAPI("http://rayanlamp.local", {
+    const api = new DirectDeviceAPI("http://pccontroller-desktop.local", {
       pageURL: "http://dashboard.local/",
       audio
     });
@@ -299,7 +300,7 @@ describe("DirectLampAPI", () => {
   });
 
   it("rejects invalid themes and recovers safely from malformed stored themes", async () => {
-    const api = new DirectLampAPI("http://rayanlamp.local", {
+    const api = new DirectDeviceAPI("http://pccontroller-desktop.local", {
       pageURL: "http://dashboard.local/"
     });
     await expect(
@@ -314,10 +315,10 @@ describe("DirectLampAPI", () => {
     const malformed = (await api.getConfig()).config;
     malformed.ui.theme = "sepia" as "dark";
     localStorage.setItem(
-      "rayanlamp.web.direct.config.v1",
+      "pccontroller-desktop.web.direct.config.v1",
       JSON.stringify(malformed)
     );
-    const reloaded = new DirectLampAPI("http://rayanlamp.local", {
+    const reloaded = new DirectDeviceAPI("http://pccontroller-desktop.local", {
       pageURL: "http://dashboard.local/"
     });
 
@@ -329,26 +330,26 @@ describe("direct browser security diagnostics", () => {
   it("explains file origins and HTTPS-to-HTTP mixed content", () => {
     expect(
       directPageAccessError(
-        "file:///C:/RayanLamp/index.html",
-        "http://rayanlamp.local"
+        "file:///C:/PCControllerDesktop/index.html",
+        "http://pccontroller-desktop.local"
       )
     ).toMatchObject({ code: "file_origin_unsupported" });
     expect(
       directPageAccessError(
         "https://dashboard.example/",
-        "http://rayanlamp.local"
+        "http://pccontroller-desktop.local"
       )
     ).toMatchObject({ code: "mixed_content" });
     expect(
       directPageAccessError(
         "http://dashboard.local/",
-        "http://rayanlamp.local"
+        "http://pccontroller-desktop.local"
       )
     ).toBeNull();
     expect(
       directPageAccessError(
         "https://dashboard.example/",
-        "https://rayanlamp.local"
+        "https://pccontroller-desktop.local"
       )
     ).toBeNull();
   });
@@ -356,7 +357,7 @@ describe("direct browser security diagnostics", () => {
   it("returns typed errors", () => {
     const error = directPageAccessError(
       "file:///index.html",
-      "http://rayanlamp.local"
+      "http://pccontroller-desktop.local"
     );
     expect(error).toBeInstanceOf(APIError);
   });

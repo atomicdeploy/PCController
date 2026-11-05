@@ -1,15 +1,16 @@
-# RayanLamp
+# PCController native desktop
 
-RayanLamp is a native Windows controller for the lamp at
-`http://rayanlamp.local`. It is a clean Go implementation with a compact
-blurred/acrylic window, animated lamp artwork, a notification-area presence,
-global hotkeys, resilient WebSocket state updates, notifications, automation,
-and several deliberately constrained integration surfaces.
+This module supplies PCController's native Windows presentation: the acrylic
+desktop, compact front panel, detached widgets, menus, notifications and desktop
+integrations. Run the product with `controller gui`; its hardware and observations
+are owned by PCController's existing IPC/RPC core, not a separate device client.
 
-The app connects to `/ws` at startup, requests one state snapshot, and then
-listens for `ON`, `OFF`, `message:`, `msg:`, and `beep:` events. HTTP commands
-remain available through `/lamp/get`, `/lamp/on`, `/lamp/off`, and
-`/lamp/toggle`. The tray icon and UI follow the most recent confirmed state.
+The complete imported support code remains available for adaptation and audit.
+The standalone compatibility client and Web workspace use the historical HTTP
+device contract recorded in [`compatibility/device-protocol.json`](compatibility/device-protocol.json).
+They are not PCController board/RPC simulators or alternate hardware owners.
+See the root [integration inventory](../../docs/NATIVE-DONOR-COVERAGE.md) for
+implemented features and remaining parity gaps.
 
 ## Highlights
 
@@ -28,9 +29,9 @@ remain available through `/lamp/get`, `/lamp/on`, `/lamp/off`, and
   automatically to the retained GDI/`UpdateLayeredWindow` renderer. The
   compatibility choice is also the explicit lower-RAM mode, with the same UI
   features, and hidden windows release their GPU and CPU presentation surfaces.
-- Device-pixel SVG lamp rendering for sharp steady states, with an embedded
-  512 px APNG used only while the lamp transition is moving.
-- Individually rendered 16–256 px ICO packs for application, lamp state, and
+- Device-pixel SVG device rendering for sharp steady states, with an embedded
+  512 px APNG used only while the device transition is moving.
+- Individually rendered 16–256 px ICO packs for application, device state, and
   dialog artwork, including caption-optimized 16/20/24/28 px variants and
   alpha-correct Lanczos resizing for every remaining raster size.
 - One canonical runtime asset bundle shared by native and Web surfaces: the
@@ -47,14 +48,14 @@ remain available through `/lamp/get`, `/lamp/on`, `/lamp/off`, and
   GUI, Web UI, TUI, and GUI-free host, independently of visual notifications.
 - Bounded WebSocket reconnect with jitter, HTTP polling fallback, and
   failure-aware `.local` address caching.
-- A single self-contained `RayanLamp.exe` for GUI, JSON/VT100 command-line,
+- A single self-contained `PCControllerDesktop.exe` for GUI, JSON/VT100 command-line,
   interactive terminal, GUI-free web-dashboard serving, standalone headless,
   and COM-server operation.
 - Full-screen Charm terminal UI built with Bubble Tea, Lip Gloss, Bubbles,
   and Huh: responsive keyboard/mouse control, live activity, a themed
   allow-listed diagnostics prompt/viewer, a shared Telnet-style device
   terminal, and compact help. It can attach to the GUI through local IPC/API
-  or own the lamp connection in standalone mode.
+  or own the device connection in standalone mode.
 - Bundled responsive SPA/PWA at `/app/`, built with Preact and the same
   canonical design tokens as the native surfaces. It provides live state,
   controls, complete settings, parsed diagnostics, multi-tab synchronization,
@@ -65,7 +66,7 @@ remain available through `/lamp/get`, `/lamp/on`, `/lamp/off`, and
   relay/direct/automatic transports, and an offline explanatory shell without
   exposing the long-lived API secret to JavaScript.
 - Deterministic frontend-only ZIP export. Its direct-first build controls the
-  firmware through CORS-safe `/lamp/get`, `/lamp/on`, `/lamp/off`, and `/ws`;
+  firmware through CORS-safe `/device/get`, `/device/on`, `/device/off`, and `/ws`;
   the manager-served build can switch between the Go coordinator and the same
   direct client without changing UI code.
 - One command dispatcher shared by UI actions, CLI, named pipe, WM_COPYDATA,
@@ -73,7 +74,7 @@ remain available through `/lamp/get`, `/lamp/on`, `/lamp/off`, and
 - Optional amd64/386 native SDK DLL and public Go client for external hosts;
   ordinary calls attach to the authoritative primary, while process bootstrap
   is a separate explicit API.
-- Opt-in `rayan-lamp://` activation and native Jump List tasks under one
+- Opt-in `pccontroller-desktop://` activation and native Jump List tasks under one
   stable Windows AppUserModelID, with portable startup remaining registry-free.
 - Live taskbar thumbnail controls and connection/operation progress, plus
   lock/unlock, suspend/resume, and network-change recovery with separately
@@ -114,7 +115,7 @@ machine-wide registration. Only the separately requested native SDK DLL build
 uses a validated MinGW-w64 toolchain.
 
 Rendering never snapshots or reads back the desktop. DWM supplies live material
-behind the app, and RayanLamp presents only its own premultiplied-alpha pixels.
+behind the app, and PCControllerDesktop presents only its own premultiplied-alpha pixels.
 Fully transparent mode automatically retains the per-pixel Windows presenter,
 even when DirectX was requested, because that is the path where alpha-zero
 pixels have exact native pointer click-through semantics.
@@ -160,8 +161,8 @@ single executable.
 
 This runs edition-tagged `go vet` and tests, embeds architecture-correct icon/manifest/version
 resources, type-checks/tests/builds the bundled web client, builds one
-console-subsystem `RayanLamp.exe`, writes
-`dist\RayanLamp.exe`, and reports its SHA-256 without producing sidecars or a
+console-subsystem `PCControllerDesktop.exe`, writes
+`dist\PCControllerDesktop.exe`, and reports its SHA-256 without producing sidecars or a
 ZIP. The same executable contains the native GUI, CLI, and TUI modes; the
 console subsystem makes an invoking shell wait for its real exit code. On
 Windows 11 24H2, Windows Server 2025, and later releases, the detached-console
@@ -176,31 +177,31 @@ output:
 ```
 
 A plain GUI launch from an interactive shell intentionally keeps that shell
-waiting for the primary process. Use `start "" RayanLamp.exe` from `cmd.exe`
+waiting for the primary process. Use `start "" PCControllerDesktop.exe` from `cmd.exe`
 when an asynchronous GUI launch is desired; explicit `cli`, `tui`, `serve`,
 and one-shot handoff commands remain synchronous.
 
 When producing the optional static dashboard ZIP as well, run the package
 command first and then `.\tools\export-web.ps1`; the single-executable packager
-deliberately requires `dist` to contain only `RayanLamp.exe`.
+deliberately requires `dist` to contain only `PCControllerDesktop.exe`.
 
 The unified executable can install itself for the current user. File
 installation is the only default action; every persistent integration remains
 an explicit opt-in:
 
 ```powershell
-.\dist\RayanLamp.exe /install /with-startup /with-shell /with-com /launch
-.\dist\RayanLamp.exe /install-status /json
+.\dist\PCControllerDesktop.exe /install /with-startup /with-shell /with-com /launch
+.\dist\PCControllerDesktop.exe /install-status /json
 ```
 
 The destination is exactly
-`%LOCALAPPDATA%\Programs\RayanLamp`. Startup, URI/Jump List integration, and
+`%LOCALAPPDATA%\Programs\PCControllerDesktop`. Startup, URI/Jump List integration, and
 COM registration are independent optional per-user operations. Portable launch
 writes none of those registrations. It may read the exact Run command to keep
 the displayed startup setting synchronized; foreign commands are preserved,
 and registry changes require an explicit saved setting or install flag.
 Use `/install /force` for a staged, SHA-256-verified in-place update. Remove the
-installation and all exact-owned integrations with `RayanLamp.exe /uninstall`;
+installation and all exact-owned integrations with `PCControllerDesktop.exe /uninstall`;
 configuration and logs are preserved unless `/remove-user-data` is explicitly
 added. The repository PowerShell helpers remain available for build/release
 automation, but they are not required by the installed app. See
@@ -209,8 +210,8 @@ reproducibility details, and uninstall instructions.
 
 ## Use
 
-Launch `RayanLamp.exe`; the default device URL is
-`http://rayanlamp.local`. Click the lamp, use the tray menu, or press
+Launch `PCControllerDesktop.exe`; the default device URL is
+`http://pccontroller-desktop.local`. Click the device, use the tray menu, or press
 `Ctrl+Alt+L` to toggle it. When magnetic edge snap is enabled, hold Ctrl while
 dragging to bypass it temporarily and release Ctrl to resume snapping.
 
@@ -226,7 +227,7 @@ home screen when it is served from an installable secure origin such as
 localhost. Mobile layouts honor display cutouts and on-screen keyboards,
 retain pinch zoom, and suppress the browser tap-highlight flash. When the
 foreground browser exposes the Vibration API, short haptics acknowledge
-explicit lamp commands and normalized message/audio events. Unsupported
+explicit device commands and normalized message/audio events. Unsupported
 browsers, hidden pages, reduced-motion users, startup, and background polling
 remain silent.
 
@@ -241,13 +242,13 @@ To run the embedded dashboard as the primary controller without creating a
 native window, tray icon, global hotkeys, or native dialogs:
 
 ```powershell
-.\RayanLamp.exe serve
-.\RayanLamp.exe serve --no-open
-.\RayanLamp.exe serve --listen localhost:49123
+.\PCControllerDesktop.exe serve
+.\PCControllerDesktop.exe serve --no-open
+.\PCControllerDesktop.exe serve --listen localhost:49123
 ```
 
 `serve` explicitly enables the loopback API in the selected configuration,
-claims the normal per-user named pipe, owns the lamp HTTP/WebSocket connection,
+claims the normal per-user named pipe, owns the device HTTP/WebSocket connection,
 and keeps automation scripts and audible cues active. By default it opens the
 dashboard in the default browser; `--no-open` leaves it running until Ctrl+C or
 an IPC `quit`. A second ordinary launch opens the existing dashboard instead
@@ -261,64 +262,64 @@ Build the reviewed direct-first SPA/PWA as a deterministic static archive:
 .\tools\export-web.ps1
 ```
 
-The output is `dist\RayanLamp-Web-Static.zip`. Extract the complete archive
+The output is `dist\PCControllerDesktop-Web-Static.zip`. Extract the complete archive
 and serve that directory over HTTP; do not double-click `index.html` through
-`file://`. The default target is `http://rayanlamp.local`, and the Connection
-control can select another HTTP/HTTPS lamp origin.
+`file://`. The default target is `http://pccontroller-desktop.local`, and the Connection
+control can select another HTTP/HTTPS device origin.
 
 The same frontend has three connection choices:
 
 - **Automatic** uses the same-origin Go coordinator when present, then falls
-  back to the configured lamp.
+  back to the configured device.
 - **Go coordinator** uses the authenticated manager for native settings,
   automation, diagnostics, notifications, IPC coordination, and one shared
-  lamp connection.
-- **Direct to lamp** uses only the firmware HTTP/WebSocket endpoints and
+  device connection.
+- **Direct to device** uses only the firmware HTTP/WebSocket endpoints and
   browser-local settings.
 
 The standalone ZIP defaults to Direct because a plain static server has no Go
 session endpoint. It can use coordinator mode when hosted behind the same
 origin that forwards `/app/session` plus the versionless coordinator routes
-(`/status`, `/lamp/*`, `/ui/*`, `/events`, and the other documented API paths)
-to RayanLamp; the embedded
+(`/status`, `/device/*`, `/ui/*`, `/events`, and the other documented API paths)
+to PCControllerDesktop; the embedded
 `/app/` copy already provides this arrangement. An HTTPS page cannot contact
-an HTTP/WS-only lamp due to browser mixed-content rules. For the default lamp,
+an HTTP/WS-only device due to browser mixed-content rules. For the default device,
 serve locally at an HTTP `localhost`/`127.0.0.1` URL.
 
 Useful console commands:
 
 ```powershell
-.\RayanLamp.exe cli --status
-.\RayanLamp.exe cli --status --json
-.\RayanLamp.exe cli --on
-.\RayanLamp.exe cli --off
-.\RayanLamp.exe cli --toggle
-.\RayanLamp.exe cli --hide
-.\RayanLamp.exe cli --reconnect
-.\RayanLamp.exe cli --notify "Lamp maintenance starts soon" --title "Office"
-.\RayanLamp.exe cli --audio --cue message --count 2
-.\RayanLamp.exe cli --endpoint /info --json
+.\PCControllerDesktop.exe cli --status
+.\PCControllerDesktop.exe cli --status --json
+.\PCControllerDesktop.exe cli --on
+.\PCControllerDesktop.exe cli --off
+.\PCControllerDesktop.exe cli --toggle
+.\PCControllerDesktop.exe cli --hide
+.\PCControllerDesktop.exe cli --reconnect
+.\PCControllerDesktop.exe cli --notify "Device maintenance starts soon" --title "Office"
+.\PCControllerDesktop.exe cli --audio --cue message --count 2
+.\PCControllerDesktop.exe cli --endpoint /info --json
 ```
 
 The primary app must be running for the controller-only `cli` mode. Starting
-`RayanLamp.exe /on`, `/off`, `/toggle`, `/show`, `/hide`, or `/settings`
+`PCControllerDesktop.exe /on`, `/off`, `/toggle`, `/show`, `/hide`, or `/settings`
 retains the original handoff behavior and sends the request to the primary
 instance instead of opening another one.
 
 For an interactive terminal dashboard:
 
 ```powershell
-.\RayanLamp.exe tui
-.\RayanLamp.exe tui --mode ipc
-.\RayanLamp.exe tui --mode api
-.\RayanLamp.exe tui --mode standalone
-.\RayanLamp.exe tui commands
-.\RayanLamp.exe tui settings
-.\RayanLamp.exe tui device
-.\RayanLamp.exe tui serving
-.\RayanLamp.exe tui diagnostics
-.\RayanLamp.exe tui --terminal
-.\RayanLamp.exe tui --telnet
+.\PCControllerDesktop.exe tui
+.\PCControllerDesktop.exe tui --mode ipc
+.\PCControllerDesktop.exe tui --mode api
+.\PCControllerDesktop.exe tui --mode standalone
+.\PCControllerDesktop.exe tui commands
+.\PCControllerDesktop.exe tui settings
+.\PCControllerDesktop.exe tui device
+.\PCControllerDesktop.exe tui serving
+.\PCControllerDesktop.exe tui diagnostics
+.\PCControllerDesktop.exe tui --terminal
+.\PCControllerDesktop.exe tui --telnet
 ```
 
 The optional screen operand opens a dedicated TUI workspace directly.
@@ -333,8 +334,8 @@ fail clearly instead of silently changing transport; `standalone` never starts
 the GUI, but it does own the local API/Web listener whenever configuration
 enables it. Serving changes start, stop, or rebind that listener gracefully.
 It owns the normal per-user pipe while running, so
-`RayanLamp.exe cli` and other clients can attach without creating a competing
-lamp connection. Press `:` for the searchable command center, `s` for the
+`PCControllerDesktop.exe cli` and other clients can attach without creating a competing
+device connection. Press `:` for the searchable command center, `s` for the
 complete TUI-native application settings, `v` for sanitized device parameters,
 and `w` for serving settings. `Ctrl+S` validates, atomically persists, and
 applies the active settings section. Press `?` for all keys and `d` for the
@@ -343,13 +344,13 @@ notification and audible-cue tests, so audio remains usable even when toast
 delivery is disabled.
 `--telnet` is an alias for `--terminal`. Press `x` to open the shared device
 terminal from an already-running TUI. It connects manually to the
-configured lamp hostname and `telnet_port` (23 by default), so normal startup
+configured device hostname and `telnet_port` (23 by default), so normal startup
 never occupies the firmware's single terminal-client slot. `Ctrl+]` or `Esc`
 detaches from the panel without closing the shared session.
 
 The audited firmware speaks a Telnet-style raw character stream with ANSI
 output, but the checked firmware source currently enables `ShellOnSerial`.
-That build reports “Shell is on Serial” and ignores network input; RayanLamp
+That build reports “Shell is on Serial” and ignores network input; PCControllerDesktop
 detects the banner and labels the session read-only instead of pretending a
 command succeeded. The Device Settings workspace still displays typed,
 sanitized `/config/ap` and `/config/st` projections, but never exposes their
@@ -360,9 +361,9 @@ in the audited firmware, so use it only on a trusted local network. The Web
 dashboard exposes the same shared session under **Terminal**; its Enter key is
 translated to the firmware-compatible CRLF line ending.
 
-Configuration lives at `%APPDATA%\RayanLamp\config.json` by default. An
+Configuration lives at `%APPDATA%\PCControllerDesktop\config.json` by default. An
 explicit `--config PATH` takes precedence, followed by the
-`RAYANLAMP_CONFIG` environment variable. The local API token is a secret;
+`PCCONTROLLER_DESKTOP_CONFIG` environment variable. The local API token is a secret;
 do not paste it into logs, issue reports, or scripts that other users can read.
 
 ## Development firmware mock
@@ -370,15 +371,15 @@ do not paste it into logs, issue reports, or scripts that other users can read.
 Run the local firmware double:
 
 ```powershell
-go run ./tools/mock-lamp `
+go run ./tools/mock-device `
   -listen 127.0.0.1:8080 `
   -telnet-listen 127.0.0.1:2323
 ```
 
 Set the device URL to `http://127.0.0.1:8080`, then inject state, message, and
-beep events through `/mock/event`. Set `lamp.telnet_port` to `2323` to test the
+beep events through `/mock/event`. Set `device.telnet_port` to `2323` to test the
 TUI/Web device terminal; the mock terminal is otherwise disabled. See the
-[mock server guide](tools/mock-lamp/README.md).
+[mock server guide](tools/mock-device/README.md).
 
 ## Documentation
 
@@ -396,7 +397,7 @@ TUI/Web device terminal; the mock terminal is otherwise disabled. See the
 
 ## Security model
 
-RayanLamp treats both firmware messages and local integrations as untrusted
+PCControllerDesktop treats both firmware messages and local integrations as untrusted
 input. Network bodies and IPC packets are bounded, WebSocket messages are
 validated, redirects are rejected, `.local` traffic bypasses proxies, the
 named pipe is ACL-bound to the current user and SYSTEM, and the HTTP API is
@@ -411,6 +412,6 @@ user. Enable only scripts you own and have reviewed.
 
 ## License
 
-RayanLamp source and original artwork are released under the
+PCControllerDesktop source and original artwork are released under the
 [MIT License](LICENSE). Dependency copyrights and licenses remain with their
 respective authors; see [Attribution](docs/attribution.md).

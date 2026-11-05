@@ -1,6 +1,6 @@
 //go:build windows
 
-// Developer-only screenshot utility; never linked into RayanLamp.
+// Developer-only screenshot utility; never linked into PCControllerDesktop.
 package main
 
 import (

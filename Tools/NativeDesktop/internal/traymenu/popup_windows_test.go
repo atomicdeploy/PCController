@@ -12,7 +12,7 @@ import (
 	"github.com/lxn/win"
 	"golang.org/x/sys/windows"
 
-	"rayanlamp.local/app/internal/winfx"
+	"pccontroller.local/desktop/internal/winfx"
 )
 
 func TestOwnerMustBelongToCallingUIThread(t *testing.T) {
@@ -213,7 +213,7 @@ func TestPreparedFirstFrameRemainsHiddenUntilRevealGate(t *testing.T) {
 		Theme:    ThemeLight,
 		Backdrop: BackdropSolid,
 		Items: []Item{
-			{ID: "toggle", Label: "Toggle lamp"},
+			{ID: "toggle", Label: "Toggle device"},
 		},
 	}
 	dimensions := buildDimensions(options.Items, baseDPI, font.measure)

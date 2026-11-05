@@ -1,7 +1,7 @@
 export type BuildEdition = "develop" | "production";
 
 export const buildEdition: BuildEdition =
-  import.meta.env.VITE_RAYANLAMP_BUILD_EDITION === "production"
+  import.meta.env.VITE_PCCONTROLLER_DESKTOP_BUILD_EDITION === "production"
     ? "production"
     : "develop";
 

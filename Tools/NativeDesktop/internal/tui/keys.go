@@ -2,7 +2,7 @@ package tui
 
 import (
 	"charm.land/bubbles/v2/key"
-	"rayanlamp.local/app/internal/i18n"
+	"pccontroller.local/desktop/internal/i18n"
 )
 
 type keyMap struct {

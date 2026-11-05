@@ -6,11 +6,11 @@ import (
 	"strings"
 	"testing"
 
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/model"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/model"
 )
 
-func TestControllerAutomationEnvironmentRetainsDonorContract(t *testing.T) {
+func TestControllerAndStandaloneAutomationEnvironmentsStayDistinct(t *testing.T) {
 	pending := job{event: "mode", state: model.StateOn, previous: model.StateOff, device: "pccontroller://localhost:8787"}
 	controller := strings.Join((&Runner{prefix: "PCCONTROLLER"}).eventEnvironment(pending), "\n")
 	for _, want := range []string{"PCCONTROLLER_EVENT=mode", "PCCONTROLLER_STATE=running", "PCCONTROLLER_PREVIOUS_STATE=idle", "PCCONTROLLER_DEVICE_URL=pccontroller://"} {
@@ -19,7 +19,7 @@ func TestControllerAutomationEnvironmentRetainsDonorContract(t *testing.T) {
 		}
 	}
 	donor := strings.Join((&Runner{}).eventEnvironment(pending), "\n")
-	if !strings.Contains(donor, "RAYANLAMP_STATE=on") || strings.Contains(donor, "PCCONTROLLER_") {
+	if !strings.Contains(donor, "PCCONTROLLER_DESKTOP_STATE=on") || strings.Contains(donor, "PCCONTROLLER_STATE=") {
 		t.Fatal("standalone environment changed")
 	}
 }

@@ -1,13 +1,13 @@
 package buildinfo
 
 const (
-	Name        = "RayanLamp"
-	DisplayName = "Rayan Lamp"
+	Name        = "PCController"
+	DisplayName = "PCController"
 	Version     = "1.0.0"
-	Company     = "YektaYar"
-	Description = "A polished Windows controller for Rayan's Lamp"
+	Company     = "AtomicDeploy"
+	Description = "PCController native desktop interface"
 	Copyright   = "Copyright © 2026"
-	PipeName    = `\\.\pipe\RayanLamp`
+	PipeName    = `\\.\pipe\PCControllerDesktop`
 
 	EditionDevelop    = "develop"
 	EditionProduction = "production"

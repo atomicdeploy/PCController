@@ -18,22 +18,22 @@ import (
 	"github.com/lxn/win"
 	"golang.org/x/sys/windows"
 
-	"rayanlamp.local/app/internal/appcore"
-	"rayanlamp.local/app/internal/commands"
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/winfx"
+	"pccontroller.local/desktop/internal/appcore"
+	"pccontroller.local/desktop/internal/commands"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/winfx"
 )
 
 // This integration fixture owns its shell and has no device/network lifecycle.
 // It uses the app's own APIs and screenshots, never mouse/keyboard automation.
 func TestShellChromeGeometryLifecycle(t *testing.T) {
-	if os.Getenv("RAYANLAMP_WINDOW_TESTS") != "1" {
-		t.Skip("set RAYANLAMP_WINDOW_TESTS=1 for native window integration")
+	if os.Getenv("PCCONTROLLER_DESKTOP_WINDOW_TESTS") != "1" {
+		t.Skip("set PCCONTROLLER_DESKTOP_WINDOW_TESTS=1 for native window integration")
 	}
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	cfg := config.Default()
-	cfg.Lamp.BaseURL = "http://127.0.0.1:1"
+	cfg.Device.BaseURL = "http://127.0.0.1:1"
 	cfg.UI.Locale = "en"
 	cfg.UI.Theme = "dark"
 	cfg.UI.ViewMode = config.ViewDashboard
@@ -113,7 +113,7 @@ func TestShellChromeGeometryLifecycle(t *testing.T) {
 		t.Logf("%s: outer=%+v client=%+v exstyle=%#x", label, outer, client, exStyle)
 	}
 	capture := func(name string, checkFrame bool) {
-		tool, directory := os.Getenv("RAYANLAMP_CAPTURE_TOOL"), os.Getenv("RAYANLAMP_SCREENSHOTS")
+		tool, directory := os.Getenv("PCCONTROLLER_DESKTOP_CAPTURE_TOOL"), os.Getenv("PCCONTROLLER_DESKTOP_SCREENSHOTS")
 		if tool == "" || directory == "" {
 			return
 		}
@@ -132,7 +132,7 @@ func TestShellChromeGeometryLifecycle(t *testing.T) {
 			t.Fatalf("%s: screenshot contains a bright outer frame: %s", name, path)
 		}
 	}
-	if baseline := os.Getenv("RAYANLAMP_BORDER_BASELINE"); baseline != "" {
+	if baseline := os.Getenv("PCCONTROLLER_DESKTOP_BORDER_BASELINE"); baseline != "" {
 		if !screenshotHasWhiteFrame(readChromeScreenshot(t, baseline)) {
 			t.Fatal("pixel regression gate failed to detect the known-bad white frame")
 		}

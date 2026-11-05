@@ -4,14 +4,14 @@ export const testSnapshot: Snapshot = {
   state: "off",
   http_reachable: true,
   websocket_online: true,
-  device_url: "http://rayanlamp.local",
+  device_url: "http://pccontroller-desktop.local",
   last_source: "websocket",
   reconnect_attempt: 0
 };
 
 export const testConfig: AppConfig = {
-  lamp: {
-    base_url: "http://rayanlamp.local",
+  device: {
+    base_url: "http://pccontroller-desktop.local",
     request_timeout: "5s",
     websocket: true,
     reconnect_min: "1s",
@@ -98,15 +98,15 @@ export const testBootstrap: UIBootstrap = {
   snapshot: testSnapshot,
   config: testConfig,
   version: {
-    name: "RayanLamp",
-    display_name: "Rayan Lamp",
+    name: "PCControllerDesktop",
+    display_name: "PCController",
     version: "1.0.0",
-    company: "YektaYar",
+    company: "AtomicDeploy",
     description: "Test controller"
   },
   revision: 7,
   diagnostics: {
-    device_url: "http://rayanlamp.local",
+    device_url: "http://pccontroller-desktop.local",
     device: {},
     endpoints: {},
     refreshing: false

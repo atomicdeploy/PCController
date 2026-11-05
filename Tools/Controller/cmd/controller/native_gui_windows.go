@@ -21,7 +21,7 @@ import (
 	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/nativeshell"
 	"pccontroller.local/controller/internal/productidentity"
-	"rayanlamp.local/app/desktop"
+	"pccontroller.local/desktop/desktop"
 )
 
 func runNativeGUI(args []string, stdout, stderr io.Writer, store *appconfig.Store) error {

@@ -13,9 +13,9 @@ import (
 
 	"github.com/lxn/walk"
 	"github.com/lxn/win"
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/winfx"
-	"rayanlamp.local/app/presentation"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/winfx"
+	"pccontroller.local/desktop/presentation"
 )
 
 // Documentation-only, explicitly offline sample data. No core is started and
@@ -23,7 +23,7 @@ import (
 // and private desktop content from the acrylic screenshots.
 func TestControllerDocumentationGallery(t *testing.T) {
 	s, cfg := newControllerWindowFixture(t)
-	if os.Getenv("RAYANLAMP_SCREENSHOTS") == "" {
+	if os.Getenv("PCCONTROLLER_DESKTOP_SCREENSHOTS") == "" {
 		t.Skip("gallery output not requested")
 	}
 	s.controller.Title = "PCController — Preview"
@@ -63,7 +63,7 @@ func TestControllerDocumentationGallery(t *testing.T) {
 	for i, item := range []struct {
 		key, name, kind, icon string
 		percent               float64
-	}{{"relay.5", "Garden", "relay", "trees", 100}, {"relay.6", "Stage light", "relay", "sun", 0}, {"pwm.0", "Window", "mosfet", "panel-top", 35}, {"pwm.1", "Chandelier", "mosfet", "lamp-ceiling", 70}} {
+	}{{"relay.5", "Garden", "relay", "trees", 100}, {"relay.6", "Stage light", "relay", "sun", 0}, {"pwm.0", "Window", "mosfet", "panel-top", 35}, {"pwm.1", "Chandelier", "mosfet", "device-ceiling", 70}} {
 		state := "off"
 		if item.percent > 0 {
 			state = "on"
@@ -134,8 +134,8 @@ func TestControllerDocumentationGallery(t *testing.T) {
 	}
 	win.RedrawWindow(settingsHandle, nil, 0, win.RDW_INVALIDATE|win.RDW_UPDATENOW|win.RDW_ALLCHILDREN)
 	_ = winfx.FlushComposition()
-	settingsPath := filepath.Join(os.Getenv("RAYANLAMP_SCREENSHOTS"), "gui-settings.png")
-	if output, err := exec.Command(os.Getenv("RAYANLAMP_CAPTURE_TOOL"), strconv.Itoa(os.Getpid()), settingsPath, "Desktop settings — PCController", "screen", "0").CombinedOutput(); err != nil {
+	settingsPath := filepath.Join(os.Getenv("PCCONTROLLER_DESKTOP_SCREENSHOTS"), "gui-settings.png")
+	if output, err := exec.Command(os.Getenv("PCCONTROLLER_DESKTOP_CAPTURE_TOOL"), strconv.Itoa(os.Getpid()), settingsPath, "Desktop settings — PCController", "screen", "0").CombinedOutput(); err != nil {
 		t.Fatalf("settings capture: %v %s", err, output)
 	}
 	s.settings.Dispose()
@@ -157,8 +157,8 @@ func TestControllerDocumentationGallery(t *testing.T) {
 	pumpControllerFixture(s)
 	backdrop.SetBoundsPixels(walk.Rectangle{X: 40, Y: 40, Width: 1280, Height: 528})
 	pumpControllerFixture(s)
-	tool := os.Getenv("RAYANLAMP_CAPTURE_TOOL")
-	path := filepath.Join(os.Getenv("RAYANLAMP_SCREENSHOTS"), "gui-widgets.png")
+	tool := os.Getenv("PCCONTROLLER_DESKTOP_CAPTURE_TOOL")
+	path := filepath.Join(os.Getenv("PCCONTROLLER_DESKTOP_SCREENSHOTS"), "gui-widgets.png")
 	if output, err := exec.Command(tool, strconv.Itoa(os.Getpid()), path, backdrop.Title(), "screen", "0").CombinedOutput(); err != nil {
 		t.Fatalf("gallery capture: %v %s", err, output)
 	}

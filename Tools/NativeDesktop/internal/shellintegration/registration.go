@@ -13,7 +13,7 @@ const (
 	protocolRootPath      = classesRootPath + `\` + Scheme
 	protocolIconPath      = protocolRootPath + `\DefaultIcon`
 	protocolOpenPath      = protocolRootPath + `\shell\open\command`
-	protocolDisplayName   = "URL:Rayan Lamp Protocol"
+	protocolDisplayName   = "URL:PCController Protocol"
 	protocolURLValueName  = "URL Protocol"
 	protocolArgumentToken = "%1"
 
@@ -26,7 +26,7 @@ const (
 )
 
 var ErrRegistrationOwned = errors.New(
-	"shellintegration: rayan-lamp protocol is registered to another executable",
+	"shellintegration: pccontroller-desktop protocol is registered to another executable",
 )
 
 type registrationValue struct {

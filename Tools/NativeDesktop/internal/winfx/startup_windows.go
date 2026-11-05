@@ -14,7 +14,7 @@ import (
 
 const (
 	runRegistryPath = `Software\Microsoft\Windows\CurrentVersion\Run`
-	runValueName    = "RayanLamp"
+	runValueName    = "PCControllerDesktop"
 )
 
 var ErrStartWithWindowsOwnedByAnotherCommand = errors.New(
@@ -49,7 +49,7 @@ const (
 	startWithWindowsConflict
 )
 
-// SetStartWithWindows adds or removes RayanLamp's current-user Run entry. It
+// SetStartWithWindows adds or removes PCControllerDesktop's current-user Run entry. It
 // never writes machine-wide state and stores the executable as a quoted REG_SZ.
 // Enabling refuses to replace a value owned by another command. Disabling
 // removes the value only when it still points at exePath exactly.
@@ -157,7 +157,7 @@ func decideStartWithWindowsAction(
 }
 
 // StartWithWindowsCommand returns the registered command, or an empty string
-// when the RayanLamp value does not exist.
+// when the PCControllerDesktop value does not exist.
 func StartWithWindowsCommand() (string, error) {
 	key, err := registry.OpenKey(
 		registry.CURRENT_USER,
@@ -181,7 +181,7 @@ func StartWithWindowsCommand() (string, error) {
 	return strings.TrimSpace(command), nil
 }
 
-// IsStartWithWindows reports whether a non-empty RayanLamp Run entry exists.
+// IsStartWithWindows reports whether a non-empty PCControllerDesktop Run entry exists.
 func IsStartWithWindows() (bool, error) {
 	command, err := StartWithWindowsCommand()
 	return command != "", err

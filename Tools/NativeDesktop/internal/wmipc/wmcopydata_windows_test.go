@@ -7,7 +7,7 @@ import (
 	"testing"
 	"unsafe"
 
-	"rayanlamp.local/app/internal/ipc"
+	"pccontroller.local/desktop/internal/ipc"
 )
 
 func TestDecode(t *testing.T) {

@@ -96,8 +96,8 @@ func TestProbeHardwareDirectX(t *testing.T) {
 }
 
 func TestPresenterIntegration(t *testing.T) {
-	if os.Getenv("RAYANLAMP_DIRECTX_SMOKE") != "1" {
-		t.Skip("set RAYANLAMP_DIRECTX_SMOKE=1 for the native presenter smoke test")
+	if os.Getenv("PCCONTROLLER_DESKTOP_DIRECTX_SMOKE") != "1" {
+		t.Skip("set PCCONTROLLER_DESKTOP_DIRECTX_SMOKE=1 for the native presenter smoke test")
 	}
 	if _, err := Probe(); err != nil {
 		t.Skipf("hardware DirectX stack unavailable: %v", err)

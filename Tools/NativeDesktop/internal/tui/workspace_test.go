@@ -11,11 +11,11 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"rayanlamp.local/app/internal/commands"
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/deviceconfig"
-	"rayanlamp.local/app/internal/deviceterminal"
-	"rayanlamp.local/app/internal/model"
+	"pccontroller.local/desktop/internal/commands"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/deviceconfig"
+	"pccontroller.local/desktop/internal/deviceterminal"
+	"pccontroller.local/desktop/internal/model"
 )
 
 type workspaceTransport struct {
@@ -144,7 +144,7 @@ func newWorkspaceModelAt(
 		errors:        make(map[string]error),
 		terminal: deviceterminal.Snapshot{
 			State: deviceterminal.StateDisconnected,
-			Host:  "rayanlamp.local",
+			Host:  "pccontroller-desktop.local",
 			Port:  deviceterminal.DefaultPort,
 		},
 	}
@@ -174,7 +174,7 @@ func TestInitialScreenRoutesAndRendersEveryWorkspace(t *testing.T) {
 		{
 			name:       "dashboard",
 			screen:     ScreenDashboard,
-			wantRender: "RAYAN / LAMP",
+			wantRender: "PCController",
 			assert: func(t *testing.T, model *Model) {
 				t.Helper()
 				if model.settingsActive() ||
@@ -291,22 +291,22 @@ func TestInitialScreenRoutesAndRendersEveryWorkspace(t *testing.T) {
 func TestSettingsPatchContainsOnlyChangedFields(t *testing.T) {
 	tuiModel, transport := newWorkspaceModel(t)
 	tuiModel.settings.mode = settingsEditing
-	tuiModel.settings.section = settingsLamp
+	tuiModel.settings.section = settingsDevice
 	tuiModel.settings.cfg = transport.cfg
 	tuiModel.settings.original = transport.cfg
 	tuiModel.settings.draft = newSettingsDraft(transport.cfg)
-	tuiModel.settings.draft.cfg.Lamp.BaseURL = "http://lamp-office.local"
+	tuiModel.settings.draft.cfg.Device.BaseURL = "http://device-office.local"
 
 	patch, err := tuiModel.settingsPatch()
 	if err != nil {
 		t.Fatal(err)
 	}
-	lamp, ok := patch["lamp"].(map[string]any)
+	device, ok := patch["device"].(map[string]any)
 	if !ok {
 		t.Fatalf("patch = %#v", patch)
 	}
-	if len(lamp) != 1 || lamp["base_url"] != "http://lamp-office.local" {
-		t.Fatalf("lamp patch = %#v, want only base_url", lamp)
+	if len(device) != 1 || device["base_url"] != "http://device-office.local" {
+		t.Fatalf("device patch = %#v, want only base_url", device)
 	}
 
 	draft := newSettingsDraft(transport.cfg)
@@ -372,7 +372,7 @@ func TestIntegrationSettingsQueriesRegistrationWithoutMutating(t *testing.T) {
 	tuiModel.settings.original = transport.cfg
 	transport.results[commands.MethodIntegrationRegistrationStatus] =
 		json.RawMessage(`{
-			"executable":"C:\\Portable\\RayanLamp.exe",
+			"executable":"C:\\Portable\\PCControllerDesktop.exe",
 			"shell_registered":true,
 			"com_registered":false
 		}`)
@@ -401,7 +401,7 @@ func TestIntegrationSettingsQueriesRegistrationWithoutMutating(t *testing.T) {
 	}
 	description := tuiModel.registrationStatusDescription()
 	for _, expected := range []string{
-		`C:\Portable\RayanLamp.exe`,
+		`C:\Portable\PCControllerDesktop.exe`,
 		"Shell URI + Jump List",
 		"COM automation",
 	} {
@@ -428,7 +428,7 @@ func TestIntegrationRegistrationActionIsExplicitAndRefreshesStatus(t *testing.T)
 		commands.MethodIntegrationShellRegister
 	transport.results[commands.MethodIntegrationRegistrationStatus] =
 		json.RawMessage(`{
-			"executable":"C:\\Portable\\RayanLamp.exe",
+			"executable":"C:\\Portable\\PCControllerDesktop.exe",
 			"shell_registered":true,
 			"com_registered":false
 		}`)
@@ -493,7 +493,7 @@ func TestRegistrationFailureStillRefreshesAuthoritativeStatus(t *testing.T) {
 		errors.New("partial: URI registered; Jump List failed")
 	transport.results[commands.MethodIntegrationRegistrationStatus] =
 		json.RawMessage(`{
-			"executable":"C:\\Portable\\RayanLamp.exe",
+			"executable":"C:\\Portable\\PCControllerDesktop.exe",
 			"shell_registered":true,
 			"com_registered":false
 		}`)
@@ -677,7 +677,7 @@ func TestAdvancedSettingsMasksTokenStructurally(t *testing.T) {
 
 func TestSettingsWorkspaceLoadsTypedConfiguration(t *testing.T) {
 	tuiModel, _ := newWorkspaceModel(t)
-	command := tuiModel.openSettingsAt(settingsLamp)
+	command := tuiModel.openSettingsAt(settingsDevice)
 	if command == nil || tuiModel.settings.mode != settingsLoading {
 		t.Fatal("settings workspace did not begin loading")
 	}
@@ -687,14 +687,14 @@ func TestSettingsWorkspaceLoadsTypedConfiguration(t *testing.T) {
 		t.Fatal("settings editor did not initialize its form")
 	}
 	if tuiModel.settings.mode != settingsEditing ||
-		tuiModel.settings.section != settingsLamp {
+		tuiModel.settings.section != settingsDevice {
 		t.Fatalf(
 			"settings state = (%v, %q)",
 			tuiModel.settings.mode,
 			tuiModel.settings.section,
 		)
 	}
-	if content := tuiModel.View().Content; !strings.Contains(content, "LAMP CONNECTION") {
+	if content := tuiModel.View().Content; !strings.Contains(content, "DEVICE CONNECTION") {
 		t.Fatalf("settings view omitted section title:\n%s", content)
 	}
 }
@@ -740,8 +740,8 @@ func TestDeviceWorkspaceIgnoresUnknownCredentialFields(t *testing.T) {
 	tuiModel, transport := newWorkspaceModel(t)
 	snapshot := deviceconfig.Snapshot{
 		DeviceURL:  config.DefaultBaseURL,
-		DeviceName: "Rayan Lamp",
-		Hostname:   "rayanlamp",
+		DeviceName: "PCController",
+		Hostname:   "pccontroller-desktop",
 		Station: deviceconfig.Station{
 			SSID: "Office",
 			IP:   "192.0.2.20",

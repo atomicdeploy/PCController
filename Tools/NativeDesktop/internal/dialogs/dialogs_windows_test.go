@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"rayanlamp.local/app/internal/commands"
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/diagnostics"
+	"pccontroller.local/desktop/internal/commands"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/diagnostics"
 )
 
 func TestValueMapping(t *testing.T) {
@@ -28,7 +28,7 @@ func TestValueMapping(t *testing.T) {
 	}
 	if len(viewModeLabels) != 2 ||
 		len(viewModeValues) != 2 ||
-		viewModeLabels[0] != "Compact lamp" ||
+		viewModeLabels[0] != "Compact device" ||
 		viewModeValues[0] != config.ViewCompact ||
 		viewModeLabels[1] != "Dashboard" ||
 		viewModeValues[1] != config.ViewDashboard {
@@ -291,7 +291,7 @@ func TestSettingsActionMnemonicsAreExplicitAndUniquePerSurface(t *testing.T) {
 
 func TestRegistrationPresentationShowsExactPortableState(t *testing.T) {
 	status := commands.RegistrationStatus{
-		Executable: `C:\Portable Apps\RayanLamp.exe`,
+		Executable: `C:\Portable Apps\PCControllerDesktop.exe`,
 	}
 	got := registrationPresentation(status, true, nil, "", true, true)
 	if got.executable != status.Executable {
@@ -314,7 +314,7 @@ func TestRegistrationPresentationShowsExactPortableState(t *testing.T) {
 
 func TestRegistrationPresentationTracksOwnedAndBusyState(t *testing.T) {
 	status := commands.RegistrationStatus{
-		Executable:      `D:\Tools\RayanLamp.exe`,
+		Executable:      `D:\Tools\PCControllerDesktop.exe`,
 		ShellRegistered: true,
 		COMRegistered:   true,
 	}
@@ -406,7 +406,7 @@ func TestRegistrationMethodIsExplicitForEachOwnedState(t *testing.T) {
 
 func TestRegistrationStatusReadDoesNotInvokeMutation(t *testing.T) {
 	statusCalls, actionCalls := 0, 0
-	want := commands.RegistrationStatus{Executable: `C:\RayanLamp.exe`}
+	want := commands.RegistrationStatus{Executable: `C:\PCControllerDesktop.exe`}
 	actions := SettingsActions{
 		RegistrationStatus: func() (commands.RegistrationStatus, error) {
 			statusCalls++
@@ -432,7 +432,7 @@ func TestRegistrationStatusReadDoesNotInvokeMutation(t *testing.T) {
 }
 
 func TestRegistrationUnregisterPromptNamesExactExecutable(t *testing.T) {
-	executable := `C:\Portable\RayanLamp.exe`
+	executable := `C:\Portable\PCControllerDesktop.exe`
 	title, instruction, content := registrationUnregisterPrompt(
 		settingsRegistrationShell,
 		executable,
@@ -689,7 +689,7 @@ func TestAllowedDiagnosticEndpoints(t *testing.T) {
 func TestFormatParsedDiagnosticResultUsesRedactedFieldsAndExplicitRaw(t *testing.T) {
 	document := diagnostics.Parse(
 		diagnostics.EndpointInfo,
-		[]byte("hostname: lamp\napi token: secret-value\n"),
+		[]byte("hostname: device\napi token: secret-value\n"),
 		time.Now(),
 	)
 	result := diagnostics.EndpointResult{
@@ -698,7 +698,7 @@ func TestFormatParsedDiagnosticResultUsesRedactedFieldsAndExplicitRaw(t *testing
 		LastSuccess: document.FetchedAt,
 	}
 	parsed := formatParsedDiagnosticResult(diagnostics.EndpointInfo, result, false)
-	if !strings.Contains(parsed, "Hostname: lamp") ||
+	if !strings.Contains(parsed, "Hostname: device") ||
 		!strings.Contains(parsed, "[redacted]") ||
 		strings.Contains(parsed, "secret-value") {
 		t.Fatalf("parsed output = %s", parsed)
@@ -775,7 +775,7 @@ func TestCallDiagnosticFetchRecoversPanic(t *testing.T) {
 
 func TestFormatDiagnosticErrorRecognizesTimeout(t *testing.T) {
 	got := formatDiagnosticError("/info", context.DeadlineExceeded, time.Now())
-	if !strings.Contains(got, "configured lamp request timeout") {
+	if !strings.Contains(got, "configured device request timeout") {
 		t.Fatalf("timeout text = %q", got)
 	}
 }

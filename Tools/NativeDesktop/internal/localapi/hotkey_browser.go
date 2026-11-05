@@ -10,7 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"rayanlamp.local/app/internal/winfx"
+	"pccontroller.local/desktop/internal/winfx"
 )
 
 const (

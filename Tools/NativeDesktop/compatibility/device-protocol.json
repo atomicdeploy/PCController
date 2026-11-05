@@ -1,0 +1,5 @@
+{
+  "purpose": "Historical HTTP device interoperability only; not PCController host or board RPC.",
+  "statePrefix": "/lamp/",
+  "stateFields": ["state", "status", "lamp", "device", "value"]
+}

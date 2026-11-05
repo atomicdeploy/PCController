@@ -11,9 +11,9 @@ import (
 	"sync"
 	"time"
 
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/model"
-	"rayanlamp.local/app/internal/sfx"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/model"
+	"pccontroller.local/desktop/internal/sfx"
 )
 
 const (
@@ -274,7 +274,7 @@ func (s *Service) handleAudio(event model.Event) {
 		if count > 10 {
 			count = 10
 		}
-		// A beep event is an explicit audible command from the lamp. It remains
+		// A beep event is an explicit audible command from the device. It remains
 		// audible even when incidental notification sounds are disabled, which
 		// matches the GUI shell.
 		s.enqueue(audioJob{cue: CueMessage, count: count})

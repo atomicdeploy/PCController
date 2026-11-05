@@ -62,25 +62,25 @@ func TestProgramConsumesRealKeyBytesAcrossEveryWorkspace(t *testing.T) {
 		}
 	})
 
-	waitForProgramText(t, output, 0, "RAYAN / LAMP")
+	waitForProgramText(t, output, 0, "PCController")
 	steps := []struct {
 		name string
 		key  string
 		want string
 	}{
 		{name: "commands", key: ":", want: "COMMAND CENTER"},
-		{name: "commands close", key: "\x1b", want: "RAYAN / LAMP"},
+		{name: "commands close", key: "\x1b", want: "PCController"},
 		{name: "settings", key: "s", want: "APPLICATION SETTINGS"},
-		{name: "settings close", key: "\x1b", want: "RAYAN / LAMP"},
+		{name: "settings close", key: "\x1b", want: "PCController"},
 		{name: "device", key: "v", want: "DEVICE SETTINGS"},
-		{name: "device close", key: "\x1b", want: "RAYAN / LAMP"},
+		{name: "device close", key: "\x1b", want: "PCController"},
 		{name: "serving", key: "w", want: "SERVING & INTEGRATION"},
 		{name: "serving categories", key: "\x1b", want: "APPLICATION SETTINGS"},
-		{name: "serving close", key: "\x1b", want: "RAYAN / LAMP"},
+		{name: "serving close", key: "\x1b", want: "PCController"},
 		{name: "diagnostics", key: "d", want: "DIAGNOSTICS"},
-		{name: "diagnostics close", key: "\x1b", want: "RAYAN / LAMP"},
+		{name: "diagnostics close", key: "\x1b", want: "PCController"},
 		{name: "terminal", key: "x", want: "DEVICE TERMINAL"},
-		{name: "terminal detach", key: "\x1b", want: "RAYAN / LAMP"},
+		{name: "terminal detach", key: "\x1b", want: "PCController"},
 	}
 	for _, step := range steps {
 		t.Run(step.name, func(t *testing.T) {

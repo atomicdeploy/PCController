@@ -6,9 +6,9 @@ import "embed"
 // local Web host, static Web exporter, and sound manager. Source masters and
 // PE-only resources remain on disk without being embedded a second time.
 //
-//go:embed lamp-transition.apng lamp-on.svg lamp-off.svg
-//go:embed icons/app.png icons/lamp-on.png icons/lamp-off.png icons/lamp-unknown.png icons/menu-*.png
-//go:embed icons/lamp-on.ico icons/lamp-off.ico icons/lamp-unknown.ico icons/lamp-connecting.ico icons/lamp-error.ico
+//go:embed device-transition.apng device-on.svg device-off.svg
+//go:embed icons/app.png icons/device-on.png icons/device-off.png icons/device-unknown.png icons/menu-*.png
+//go:embed icons/device-on.ico icons/device-off.ico icons/device-unknown.ico icons/device-connecting.ico icons/device-error.ico
 //go:embed icons/menu-settings.ico icons/menu-diagnostics.ico icons/menu-reconnect.ico
 //go:embed fonts/Vazirmatn-Regular.ttf
 //go:embed sfx/*.wav

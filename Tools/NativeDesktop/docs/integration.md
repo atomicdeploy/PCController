@@ -1,6 +1,6 @@
 # Commands and integrations
 
-RayanLamp has one living command contract. UI buttons, the tray menu, global
+PCControllerDesktop has one living command contract. UI buttons, the tray menu, global
 hotkeys, the CLI, terminal UI, WM_COPYDATA, named pipe, loopback HTTP, and COM
 Automation all reach the same dispatcher when operating through the GUI.
 
@@ -14,11 +14,11 @@ that may launch the unified executable. See [Native and Go SDK](sdk.md).
 | Canonical method | Parameters | Result/purpose |
 | --- | --- | --- |
 | `ping` | none | App name, version, and primary-instance marker |
-| `status` | none | Current snapshot; aliases: `state`, `lamp.get`, `get` |
-| `lamp.on` | none | Turn on; alias: `on` |
-| `lamp.off` | none | Turn off; alias: `off` |
-| `lamp.toggle` | none | Toggle; alias: `toggle` |
-| `lamp.refresh` | none | Force an HTTP `/lamp/get`; alias: `refresh` |
+| `status` | none | Current snapshot; aliases: `state`, `device.get`, `get` |
+| `device.on` | none | Turn on; alias: `on` |
+| `device.off` | none | Turn off; alias: `off` |
+| `device.toggle` | none | Toggle; alias: `toggle` |
+| `device.refresh` | none | Force an HTTP `/device/get`; alias: `refresh` |
 | `reconnect` | none | Restart device transports |
 | `window.show` | none | Show/activate and remember visibility; alias: `show` |
 | `window.hide` | none | Hide and remember visibility; alias: `hide` |
@@ -26,7 +26,7 @@ that may launch the unified executable. See [Native and Go SDK](sdk.md).
 | `diagnostics.show` | none | Open diagnostics |
 | `diagnostics.fetch` | `{"endpoint":"/info"}` | Fetch one of six public, noncredential GET endpoints |
 | `terminal.status` | none | Telnet-style device-terminal connection metadata |
-| `terminal.connect` | none | Manually connect to the configured lamp hostname and `telnet_port` |
+| `terminal.connect` | none | Manually connect to the configured device hostname and `telnet_port` |
 | `terminal.read` | `{"after":0,"limit":32768,"wait_ms":1000}` | Ordered, cursor-based bounded terminal output |
 | `terminal.write` | `{"data_base64":"c3RhdHVzDQo="}` | Send up to 4096 terminal bytes without putting plaintext in the JSON encoding |
 | `terminal.disconnect` | none | Close the shared device-terminal session |
@@ -58,12 +58,12 @@ The single executable exposes both direct handoff flags and an explicit
 controller-only mode:
 
 ```powershell
-RayanLamp.exe /on
-RayanLamp.exe /settings
-RayanLamp.exe cli --status --json
-RayanLamp.exe cli --endpoint /info
-RayanLamp.exe cli --notify "Text" --title "Optional title"
-RayanLamp.exe cli --audio --cue on --count 2
+PCControllerDesktop.exe /on
+PCControllerDesktop.exe /settings
+PCControllerDesktop.exe cli --status --json
+PCControllerDesktop.exe cli --endpoint /info
+PCControllerDesktop.exe cli --notify "Text" --title "Optional title"
+PCControllerDesktop.exe cli --audio --cue on --count 2
 ```
 
 Windows aliases include `/on`, `/off`, `/toggle`, `/get`, `/status`, `/show`,
@@ -82,19 +82,19 @@ response.
 
 ## Terminal UI
 
-`RayanLamp.exe tui` is the interactive console surface:
+`PCControllerDesktop.exe tui` is the interactive console surface:
 
 ```powershell
-RayanLamp.exe tui
-RayanLamp.exe tui --mode ipc
-RayanLamp.exe tui --mode api
-RayanLamp.exe tui --mode standalone
-RayanLamp.exe tui commands
-RayanLamp.exe tui settings
-RayanLamp.exe tui device
-RayanLamp.exe tui serving
-RayanLamp.exe tui diagnostics
-RayanLamp.exe tui --terminal
+PCControllerDesktop.exe tui
+PCControllerDesktop.exe tui --mode ipc
+PCControllerDesktop.exe tui --mode api
+PCControllerDesktop.exe tui --mode standalone
+PCControllerDesktop.exe tui commands
+PCControllerDesktop.exe tui settings
+PCControllerDesktop.exe tui device
+PCControllerDesktop.exe tui serving
+PCControllerDesktop.exe tui diagnostics
+PCControllerDesktop.exe tui --terminal
 ```
 
 An optional screen operand enters the requested terminal workspace without
@@ -119,10 +119,10 @@ the interface or written to its activity log.
 
 Standalone mode starts no GUI process. The TUI loads and validates the same
 configuration, atomically claims the ordinary per-user named pipe, and only
-then connects to `/ws`. It performs lamp commands over `/lamp/*`, applies the
+then connects to `/ws`. It performs device commands over `/device/*`, applies the
 same reconnect and `.local` caching rules, and tears the connection down when
-the terminal exits. While it runs, `RayanLamp.exe cli` and other named-pipe
-clients attach to the TUI's headless primary instead of creating another lamp
+the terminal exits. While it runs, `PCControllerDesktop.exe cli` and other named-pipe
+clients attach to the TUI's headless primary instead of creating another device
 controller. When `integration.local_api_enabled` is true, standalone mode also
 owns the embedded loopback API/PWA listener. TUI serving commands gracefully
 start, stop, or rebind it and report the observed URL or listener error rather
@@ -130,7 +130,7 @@ than inferring success from configuration alone.
 
 Press `:`/`Ctrl+P` for the searchable command center, `s` for the complete
 TUI-native application settings, `v` for the typed device workspace, and `w`
-for serving. Settings are grouped across lamp, rendering, window behavior,
+for serving. Settings are grouped across device, rendering, window behavior,
 notifications, hotkeys, automation, integration, and an advanced complete JSON
 editor. `Ctrl+S` validates and applies the active section through the canonical
 `config.patch` dispatcher, so GUI/Web clients receive the same live update.
@@ -156,15 +156,15 @@ The single executable can instead make the browser dashboard the presentation
 surface of a true headless primary:
 
 ```powershell
-RayanLamp.exe serve
-RayanLamp.exe serve --no-open
-RayanLamp.exe serve --config C:\path\config.json
-RayanLamp.exe serve --listen 127.0.0.1:49123
+PCControllerDesktop.exe serve
+PCControllerDesktop.exe serve --no-open
+PCControllerDesktop.exe serve --config C:\path\config.json
+PCControllerDesktop.exe serve --listen 127.0.0.1:49123
 ```
 
 This mode does not construct Walk, an HWND, tray state, global hotkeys,
 notifications, or native dialogs. It atomically claims the same named pipe,
-starts the shared lamp core, automation scripts and audible event effects, and
+starts the shared device core, automation scripts and audible event effects, and
 serves the embedded SPA/PWA through the authenticated loopback API. The local
 API is explicitly enabled in the selected configuration; an explicit
 `--listen` loopback address is validated and persisted.
@@ -172,7 +172,7 @@ API is explicitly enabled in the selected configuration; an explicit
 The default launch opens the active `/app/` URL. `--no-open` only suppresses
 that initial browser launch. `window.show`, `settings.show`,
 `diagnostics.show`, and `web.show` handoffs open the dashboard or its matching
-browser route, so a later ordinary `RayanLamp.exe` launch hands over cleanly.
+browser route, so a later ordinary `PCControllerDesktop.exe` launch hands over cleanly.
 Native-window, native-notification, and hotkey-capture capabilities are
 reported false to the browser. `window.hide` and notification commands remain
 unavailable because the headless process does not pretend to own those native
@@ -183,7 +183,7 @@ the authoritative configuration first, then asynchronously shuts down and
 rebinds the listener. This avoids waiting for an HTTP server from inside the
 configuration request it is currently serving. Disable leaves the coordinator
 and named-pipe IPC alive; it only removes the HTTP dashboard. Stop the host
-with Ctrl+C or `RayanLamp.exe cli --quit`.
+with Ctrl+C or `PCControllerDesktop.exe cli --quit`.
 
 If another primary already exists, ordinary `serve` asks it to open its web
 dashboard and exits. `serve --no-open` fails clearly because it did not become
@@ -196,7 +196,7 @@ claiming that a browser was opened.
 The complete TUI launch surface is:
 
 ```text
-RayanLamp.exe tui [screen]
+PCControllerDesktop.exe tui [screen]
   [--mode auto|ipc|api|standalone]
   [--config PATH]
   [--api-url URL] [--api-token TOKEN]
@@ -226,9 +226,9 @@ environment variable disables TUI color without disabling layout or emphasis.
 `FORCE_COLOR=1` or `CLICOLOR_FORCE=1` may opt a known-compatible redirected
 consumer into SGR styling. Emoji are automatic only for an interactive
 Unicode-capable terminal. `NO_EMOJI=1` selects stable ASCII symbols, while
-`RAYANLAMP_EMOJI=always` or `never` provides an explicit override. The TUI
+`PCCONTROLLER_DESKTOP_EMOJI=always` or `never` provides an explicit override. The TUI
 itself requires interactive stdin and stdout; scripts and redirections should
-use `RayanLamp.exe cli`, which never emits terminal controls by default.
+use `PCControllerDesktop.exe cli`, which never emits terminal controls by default.
 
 `--telnet` is an alias for `--terminal`. Core keys are
 `Space`/`Enter`/`t` to toggle, `o` and `f` for explicit on/off,
@@ -243,8 +243,8 @@ it never unexpectedly quits from the dashboard. In the raw device terminal,
 `Ctrl+C` sends ETX and `Esc`/`Ctrl+]` detach.
 
 The TUI activity stream and the Web dashboard's browser console use the same
-stable event vocabulary and severity levels. Events such as `lamp.state`,
-`lamp.command`, `websocket.connected`, `message.received`, `audio.cue`, and
+stable event vocabulary and severity levels. Events such as `device.state`,
+`device.command`, `websocket.connected`, `message.received`, `audio.cue`, and
 `diagnostics.loaded` therefore mean the same thing in either surface. DevTools
 renders them as theme-aware CSS badges with emoji and grouped, allow-listed
 context; the TUI renders the same level and event name using its active
@@ -270,7 +270,7 @@ Protocol version 1 uses one JSON request and response:
 {
   "protocol_version": 1,
   "id": "example-1",
-  "method": "lamp.toggle"
+  "method": "device.toggle"
 }
 ```
 
@@ -294,7 +294,7 @@ Failure:
   "ok": false,
   "error": {
     "code": "device_unavailable",
-    "message": "lamp GET /lamp/get: ..."
+    "message": "device GET /device/get: ..."
   }
 }
 ```
@@ -320,7 +320,7 @@ requesting a visual notification:
 The pipe name has the form:
 
 ```text
-\\.\pipe\RayanLamp.<current-user-SID-hash>
+\\.\pipe\PCControllerDesktop.<current-user-SID-hash>
 ```
 
 The suffix is the lowercase hex encoding of the first eight SHA-256 bytes of
@@ -329,7 +329,7 @@ only to that SID and SYSTEM. The wire format is one JSON request followed by
 `\n`, then one JSON response. Requests and responses are limited to 1 MiB;
 connections and command execution have deadlines.
 
-Use `RayanLamp.exe cli` or the Go IPC package instead of reconstructing this
+Use `PCControllerDesktop.exe cli` or the Go IPC package instead of reconstructing this
 private pipe name in normal automation.
 
 ## WM_COPYDATA
@@ -337,7 +337,7 @@ private pipe name in normal automation.
 The primary top-level window is discovered by the property:
 
 ```text
-RayanLamp.PrimaryWindow.{66F0C709-6E91-45BE-9013-5A96219E6D3D}
+PCControllerDesktop.PrimaryWindow.{66F0C709-6E91-45BE-9013-5A96219E6D3D}
 ```
 
 `WM_COPYDATA` payloads use tag `0x524C414D` (`RLAM`), contain the same request
@@ -374,10 +374,10 @@ session, and mutations additionally require the in-memory CSRF token.
 | HTTP | Route | Dispatcher command / purpose |
 | --- | --- | --- |
 | `GET` | `/status` | `status` |
-| `POST` | `/lamp/on` | `lamp.on` |
-| `POST` | `/lamp/off` | `lamp.off` |
-| `POST` | `/lamp/toggle` | `lamp.toggle` |
-| `POST` | `/lamp/refresh` | `lamp.refresh` |
+| `POST` | `/device/on` | `device.on` |
+| `POST` | `/device/off` | `device.off` |
+| `POST` | `/device/toggle` | `device.toggle` |
+| `POST` | `/device/refresh` | `device.refresh` |
 | `POST` | `/window/show` | `window.show` |
 | `POST` | `/window/hide` | `window.hide` |
 | `POST` | `/reconnect` | `reconnect` |
@@ -403,12 +403,12 @@ are the living protocol, and no `/v1/...` compatibility aliases are retained.
 On graceful coordinator shutdown, `/events` is closed with WebSocket code
 `1001` and reason `server shutting down` before slower service cleanup begins.
 The Web UI immediately invalidates stale control availability, broadcasts the
-loss to sibling tabs, switches its favicon to the offline lamp, and renews its
+loss to sibling tabs, switches its favicon to the offline device, and renews its
 short-lived browser session before reconnecting to a restarted executable.
 The embedded browser additionally uses `/ui/terminal`, a same-origin,
 browser-session-authenticated WebSocket dedicated to terminal bytes. It does
 not reuse `/events`; high-volume terminal output therefore cannot delay
-lamp/configuration/diagnostics events. Binary browser frames carry terminal
+device/configuration/diagnostics events. Binary browser frames carry terminal
 bytes, while small JSON text frames carry connect/disconnect/status/error
 control data. xterm's bare Enter keystroke is normalized to CRLF because the
 audited firmware executes commands on LF; pasted and other raw bytes are left
@@ -428,7 +428,7 @@ CSRF protection plus the current `If-Match` configuration revision for import.
 `GET /ui/audio/{cue}` accepts `on`, `off`,
 `message`, or `error` and returns the exact resolved WAV with an ETag. Import
 accepts at most 4 MiB of validated integer PCM WAV and an optional
-`X-RayanLamp-Filename` display-name header; its response is the usual redacted
+`X-PCControllerDesktop-Filename` display-name header; its response is the usual redacted
 UI configuration/revision shape, never a filesystem path or bearer token.
 Direct/static mode has no Go owner, so the elected realtime tab alone plays
 the canonical `shared/sfx/{cue}.wav` files or a SHA-256-addressed custom WAV
@@ -468,14 +468,14 @@ remembered session.
 PowerShell example:
 
 ```powershell
-$config = Get-Content "$env:APPDATA\RayanLamp\config.json" -Raw |
+$config = Get-Content "$env:APPDATA\PCControllerDesktop\config.json" -Raw |
   ConvertFrom-Json
 $headers = @{
   Authorization = "Bearer $($config.integration.local_api_token)"
 }
 
 Invoke-RestMethod http://127.0.0.1:47831/status -Headers $headers
-Invoke-RestMethod http://127.0.0.1:47831/lamp/toggle `
+Invoke-RestMethod http://127.0.0.1:47831/device/toggle `
   -Method Post -Headers $headers
 Invoke-RestMethod http://127.0.0.1:47831/notifications `
   -Method Post -Headers $headers -ContentType application/json `
@@ -495,14 +495,14 @@ Portable launch never writes shell registration. A user or installer opts the
 current executable in and out explicitly:
 
 ```powershell
-RayanLamp.exe /register-shell
-RayanLamp.exe /unregister-shell
+PCControllerDesktop.exe /register-shell
+PCControllerDesktop.exe /unregister-shell
 ```
 
 The native Settings window, TUI integration workspace, and coordinated Web
 Settings expose the same explicit controls and exact executable path. Merely
 opening any settings surface performs a read-only status query and never
-registers the app. The static/direct-to-lamp Web UI correctly reports these
+registers the app. The static/direct-to-device Web UI correctly reports these
 host-only controls as unavailable.
 
 Both operations are per-user and require no elevation. Registry changes are
@@ -510,34 +510,34 @@ limited to `HKCU\Software\Classes`; Jump List data is published through the
 current user's Windows shell store. Add `/quiet` for noninteractive installer
 use. Manual use retains the native confirmation dialog.
 
-Registration installs an ownership-checked `rayan-lamp` URI handler. Supported
+Registration installs an ownership-checked `pccontroller-desktop` URI handler. Supported
 activations are deliberately parameter-free:
 
 | URI | Canonical command |
 | --- | --- |
-| `rayan-lamp://on` | `lamp.on` |
-| `rayan-lamp://off` | `lamp.off` |
-| `rayan-lamp://toggle` | `lamp.toggle` |
-| `rayan-lamp://show` | `window.show` |
-| `rayan-lamp://hide` | `window.hide` |
-| `rayan-lamp://reconnect` | `reconnect` |
-| `rayan-lamp://settings` | `settings.show` |
-| `rayan-lamp://diagnostics` | `diagnostics.show` |
-| `rayan-lamp://web` | `web.show` |
+| `pccontroller-desktop://on` | `device.on` |
+| `pccontroller-desktop://off` | `device.off` |
+| `pccontroller-desktop://toggle` | `device.toggle` |
+| `pccontroller-desktop://show` | `window.show` |
+| `pccontroller-desktop://hide` | `window.hide` |
+| `pccontroller-desktop://reconnect` | `reconnect` |
+| `pccontroller-desktop://settings` | `settings.show` |
+| `pccontroller-desktop://diagnostics` | `diagnostics.show` |
+| `pccontroller-desktop://web` | `web.show` |
 
 The URI parser accepts the equivalent single-path form
-`rayan-lamp:/action`, is bounded to 2048 visible ASCII bytes, and rejects
+`pccontroller-desktop:/action`, is bounded to 2048 visible ASCII bytes, and rejects
 unknown actions, parameters, queries, fragments, credentials, ports, escapes,
 and extra path components. Activations enter the same single-instance
 handoff/dispatcher as ordinary command flags.
 
 The same opt-in command publishes native unpackaged Win32 Jump List tasks with
-the stable AppUserModelID `YektaYar.RayanLamp`:
+the stable AppUserModelID `DRSDavidSoft.PCController`:
 
-- Toggle lamp
-- Turn lamp on
-- Turn lamp off
-- Show Rayan Lamp
+- Toggle device
+- Turn device on
+- Turn device off
+- Show PCController
 - Open settings
 - Reconnect
 
@@ -559,18 +559,18 @@ or register again from the new location.
 Registration is explicit, per user, and requires no elevation:
 
 ```powershell
-RayanLamp.exe /register-com
-RayanLamp.exe /unregister-com
+PCControllerDesktop.exe /register-com
+PCControllerDesktop.exe /unregister-com
 ```
 
 It writes only below `HKCU\Software\Classes`. Stable identifiers:
 
 | Item | Value |
 | --- | --- |
-| ProgID | `YektaYar.RayanLamp` |
-| Versioned ProgID | `YektaYar.RayanLamp.1` |
+| ProgID | `DRSDavidSoft.PCController` |
+| Versioned ProgID | `DRSDavidSoft.PCController.1` |
 | CLSID | `{D9603C3B-7D90-53B2-AC01-7656B027603F}` |
-| Server | `"RayanLamp.exe" /com-server` |
+| Server | `"PCControllerDesktop.exe" /com-server` |
 
 On 64-bit Windows, the local-server CLSID is published in both the 32-bit and
 64-bit per-user registry views, so 32-bit Office/VBA or AutoHotkey and 64-bit
@@ -582,19 +582,19 @@ reported instead of overwritten.
 PowerShell:
 
 ```powershell
-$lamp = New-Object -ComObject YektaYar.RayanLamp
-$lamp.On()
-$lamp.Off()
-$lamp.Toggle()
-$lamp.Show()
-$lamp.Hide()
-$lamp.Reconnect()
-$lamp.Notify("Hello from COM")
-$state = $lamp.GetState()
-$sameState = $lamp.State
+$device = New-Object -ComObject DRSDavidSoft.PCController
+$device.On()
+$device.Off()
+$device.Toggle()
+$device.Show()
+$device.Hide()
+$device.Reconnect()
+$device.Notify("Hello from COM")
+$state = $device.GetState()
+$sameState = $device.State
 ```
 
-`Show()` and `Hide()` control the native main window without changing the lamp.
+`Show()` and `Hide()` control the native main window without changing the device.
 `State` is read-only. State results are `on`, `off`, or `unknown`. COM
 activation starts the primary app in the background if needed, then the local
 server proxies every call through the per-user pipe with a 12-second deadline.
@@ -607,28 +607,28 @@ validated firmware messages. Each process receives:
 
 | Variable | Value |
 | --- | --- |
-| `RAYANLAMP_EVENT` | `state`, `message`, `lock`, `unlock`, `suspend`, `resume`, or `network-change` |
-| `RAYANLAMP_STATE` | `on`, `off`, or `unknown` |
-| `RAYANLAMP_PREVIOUS_STATE` | previous state |
-| `RAYANLAMP_SOURCE` | source such as `websocket`, `command`, or `windows` |
-| `RAYANLAMP_MESSAGE` | validated message text, otherwise empty |
-| `RAYANLAMP_DEVICE_URL` | normalized configured device URL |
-| `RAYANLAMP_EVENT_TIME` | UTC RFC 3339 timestamp with nanoseconds |
+| `PCCONTROLLER_DESKTOP_EVENT` | `state`, `message`, `lock`, `unlock`, `suspend`, `resume`, or `network-change` |
+| `PCCONTROLLER_DESKTOP_STATE` | `on`, `off`, or `unknown` |
+| `PCCONTROLLER_DESKTOP_PREVIOUS_STATE` | previous state |
+| `PCCONTROLLER_DESKTOP_SOURCE` | source such as `websocket`, `command`, or `windows` |
+| `PCCONTROLLER_DESKTOP_MESSAGE` | validated message text, otherwise empty |
+| `PCCONTROLLER_DESKTOP_DEVICE_URL` | normalized configured device URL |
+| `PCCONTROLLER_DESKTOP_EVENT_TIME` | UTC RFC 3339 timestamp with nanoseconds |
 
 Example `on.ps1`:
 
 ```powershell
 $record = [ordered]@{
-  event = $env:RAYANLAMP_EVENT
-  state = $env:RAYANLAMP_STATE
-  previous = $env:RAYANLAMP_PREVIOUS_STATE
-  source = $env:RAYANLAMP_SOURCE
-  at = $env:RAYANLAMP_EVENT_TIME
+  event = $env:PCCONTROLLER_DESKTOP_EVENT
+  state = $env:PCCONTROLLER_DESKTOP_STATE
+  previous = $env:PCCONTROLLER_DESKTOP_PREVIOUS_STATE
+  source = $env:PCCONTROLLER_DESKTOP_SOURCE
+  at = $env:PCCONTROLLER_DESKTOP_EVENT_TIME
 }
 $record | ConvertTo-Json -Compress
 ```
 
-Scripts run with the same user rights as RayanLamp and can access that user's
+Scripts run with the same user rights as PCControllerDesktop and can access that user's
 files, network, registry, and secrets. There is no sandbox. Use absolute paths,
 keep scripts writable only by trusted users, avoid evaluating message text as
 code, and leave automation disabled unless the configured scripts have been

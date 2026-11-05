@@ -2,7 +2,7 @@
 
 // Package ui owns the Windows main window, tray presence, animation, global
 // hotkeys, notifications, and the small amount of HWND message integration
-// needed by RayanLamp.
+// needed by PCControllerDesktop.
 package ui
 
 import (
@@ -25,24 +25,24 @@ import (
 	"github.com/lxn/win"
 	"golang.org/x/sys/windows"
 
-	"rayanlamp.local/app/assets"
-	"rayanlamp.local/app/internal/animation"
-	"rayanlamp.local/app/internal/appcore"
-	"rayanlamp.local/app/internal/automation"
-	"rayanlamp.local/app/internal/commands"
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/dialogs"
-	"rayanlamp.local/app/internal/i18n"
-	"rayanlamp.local/app/internal/ipc"
-	"rayanlamp.local/app/internal/model"
-	"rayanlamp.local/app/internal/notify"
-	"rayanlamp.local/app/internal/sfx"
-	"rayanlamp.local/app/internal/shellintegration"
-	"rayanlamp.local/app/internal/traymenu"
-	"rayanlamp.local/app/internal/vector"
-	"rayanlamp.local/app/internal/winfx"
-	"rayanlamp.local/app/internal/wmipc"
-	"rayanlamp.local/app/presentation"
+	"pccontroller.local/desktop/assets"
+	"pccontroller.local/desktop/internal/animation"
+	"pccontroller.local/desktop/internal/appcore"
+	"pccontroller.local/desktop/internal/automation"
+	"pccontroller.local/desktop/internal/commands"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/dialogs"
+	"pccontroller.local/desktop/internal/i18n"
+	"pccontroller.local/desktop/internal/ipc"
+	"pccontroller.local/desktop/internal/model"
+	"pccontroller.local/desktop/internal/notify"
+	"pccontroller.local/desktop/internal/sfx"
+	"pccontroller.local/desktop/internal/shellintegration"
+	"pccontroller.local/desktop/internal/traymenu"
+	"pccontroller.local/desktop/internal/vector"
+	"pccontroller.local/desktop/internal/winfx"
+	"pccontroller.local/desktop/internal/wmipc"
+	"pccontroller.local/desktop/presentation"
 )
 
 const (
@@ -219,11 +219,11 @@ type Shell struct {
 	currentAnimationFrame int
 	animationActive       bool
 	animationEpoch        atomic.Uint64
-	lampOnSVG             []byte
-	lampOffSVG            []byte
+	deviceOnSVG           []byte
+	deviceOffSVG          []byte
 	vectorOnBitmap        *walk.Bitmap
 	vectorOffBitmap       *walk.Bitmap
-	vectorLampSize        int
+	vectorDeviceSize      int
 	artworkSources        map[artworkID]image.Image
 	artworkBitmaps        map[artworkBitmapKey]artworkBitmapEntry
 	artworkCacheTick      uint64
@@ -980,7 +980,7 @@ func (s *Shell) restoreCaptionIcon(redrawFrame bool) {
 	}
 	// Preserve the current live taskbar icon while restoring both product-icon
 	// sizes through Walk. This also restores Walk's retained FormBase.icon, so
-	// a future WM_DPICHANGED cannot replace the caption with a lamp-state icon.
+	// a future WM_DPICHANGED cannot replace the caption with a device-state icon.
 	stateBigIcon := queryTaskbarIcon(win.SendMessage, s.mw.Handle())
 	if err := s.mw.SetIcon(s.appIcon); err != nil {
 		s.logf("restore product window icon: %v", err)
@@ -1029,11 +1029,11 @@ func (s *Shell) loadArtwork() error {
 		path   string
 		target *walk.Image
 	}{
-		{"icons/lamp-on.ico", &s.onIcon},
-		{"icons/lamp-off.ico", &s.offIcon},
-		{"icons/lamp-unknown.ico", &s.unknownIcon},
-		{"icons/lamp-connecting.ico", &s.connectingIcon},
-		{"icons/lamp-error.ico", &s.errorIcon},
+		{"icons/device-on.ico", &s.onIcon},
+		{"icons/device-off.ico", &s.offIcon},
+		{"icons/device-unknown.ico", &s.unknownIcon},
+		{"icons/device-connecting.ico", &s.connectingIcon},
+		{"icons/device-error.ico", &s.errorIcon},
 		{"icons/menu-settings.ico", &s.settingsIcon},
 		{"icons/menu-diagnostics.ico", &s.diagnosticsIcon},
 	}
@@ -1069,11 +1069,11 @@ func (s *Shell) loadArtwork() error {
 		s.currentAnimationFrame = -1
 		return nil
 	}
-	if s.lampOnSVG, err = assets.Files.ReadFile("lamp-on.svg"); err != nil {
-		return fmt.Errorf("read embedded lamp-on.svg: %w", err)
+	if s.deviceOnSVG, err = assets.Files.ReadFile("device-on.svg"); err != nil {
+		return fmt.Errorf("read embedded device-on.svg: %w", err)
 	}
-	if s.lampOffSVG, err = assets.Files.ReadFile("lamp-off.svg"); err != nil {
-		return fmt.Errorf("read embedded lamp-off.svg: %w", err)
+	if s.deviceOffSVG, err = assets.Files.ReadFile("device-off.svg"); err != nil {
+		return fmt.Errorf("read embedded device-off.svg: %w", err)
 	}
 
 	s.currentAnimationFrame = -1
@@ -1085,10 +1085,10 @@ func (s *Shell) loadArtwork() error {
 	return nil
 }
 
-func decodeEmbeddedLampAnimation() (*animation.Animation, error) {
-	apngFile, err := assets.Files.Open("lamp-transition.apng")
+func decodeEmbeddedDeviceAnimation() (*animation.Animation, error) {
+	apngFile, err := assets.Files.Open("device-transition.apng")
 	if err != nil {
-		return nil, fmt.Errorf("read lamp transition APNG: %w", err)
+		return nil, fmt.Errorf("read device transition APNG: %w", err)
 	}
 	defer apngFile.Close()
 	decoded, err := animation.DecodeReader(apngFile)
@@ -1098,7 +1098,7 @@ func decodeEmbeddedLampAnimation() (*animation.Animation, error) {
 	return decoded, nil
 }
 
-var loadLampAnimation = decodeEmbeddedLampAnimation
+var loadDeviceAnimation = decodeEmbeddedDeviceAnimation
 
 func (s *Shell) ensureAnimationFrameSources() error {
 	if s == nil {
@@ -1108,7 +1108,7 @@ func (s *Shell) ensureAnimationFrameSources() error {
 		return nil
 	}
 	cancelIdleMemoryRelease()
-	decoded, err := loadLampAnimation()
+	decoded, err := loadDeviceAnimation()
 	if err != nil {
 		return err
 	}
@@ -1143,17 +1143,17 @@ func (s *Shell) setAnimationResourceEnabled(enabled bool) error {
 
 func (s *Shell) ensureVectorArtwork(size int) error {
 	if size < 1 {
-		return errors.New("ui: invalid vector lamp size")
+		return errors.New("ui: invalid vector device size")
 	}
-	if s.vectorLampSize == size && s.vectorOnBitmap != nil && s.vectorOffBitmap != nil {
+	if s.vectorDeviceSize == size && s.vectorOnBitmap != nil && s.vectorOffBitmap != nil {
 		return nil
 	}
 
-	onImage, err := vector.RenderSVG(s.lampOnSVG, size, size)
+	onImage, err := vector.RenderSVG(s.deviceOnSVG, size, size)
 	if err != nil {
 		return fmt.Errorf("render on-state SVG: %w", err)
 	}
-	offImage, err := vector.RenderSVG(s.lampOffSVG, size, size)
+	offImage, err := vector.RenderSVG(s.deviceOffSVG, size, size)
 	if err != nil {
 		return fmt.Errorf("render off-state SVG: %w", err)
 	}
@@ -1174,7 +1174,7 @@ func (s *Shell) ensureVectorArtwork(size int) error {
 	}
 	s.vectorOnBitmap = onBitmap
 	s.vectorOffBitmap = offBitmap
-	s.vectorLampSize = size
+	s.vectorDeviceSize = size
 	return nil
 }
 
@@ -1208,7 +1208,7 @@ func (s *Shell) createTray() error {
 	}
 	tray.MouseDown().Attach(func(_, _ int, button walk.MouseButton) {
 		if trayToggleOnPress(s.controller != nil, button) {
-			s.invoke("lamp.toggle", nil)
+			s.invoke("device.toggle", nil)
 		}
 	})
 	tray.MouseUp().Attach(func(x, y int, button walk.MouseButton) {
@@ -1251,9 +1251,9 @@ func (s *Shell) createNotifications() error {
 		func(action string) {
 			switch strings.ToLower(strings.TrimSpace(action)) {
 			case "on":
-				s.invoke("lamp.on", nil)
+				s.invoke("device.on", nil)
 			case "off":
-				s.invoke("lamp.off", nil)
+				s.invoke("device.off", nil)
 			default:
 				s.Show()
 			}
@@ -1347,9 +1347,9 @@ func (s *Shell) applyEvent(event model.Event) {
 			}
 			if cfg.Notifications.Enabled && cfg.Notifications.StateChanges {
 				go func() {
-					message := s.tr(i18n.MsgNotificationLampTurnedOff)
+					message := s.tr(i18n.MsgNotificationDeviceTurnedOff)
 					if event.Snapshot.State == model.StateOn {
-						message = s.tr(i18n.MsgNotificationLampTurnedOn)
+						message = s.tr(i18n.MsgNotificationDeviceTurnedOn)
 					}
 					_ = s.ShowNotification(
 						s.tr(i18n.MsgAppName),
@@ -1384,7 +1384,7 @@ func (s *Shell) applyEvent(event model.Event) {
 	}
 }
 
-func (s *Shell) updateAnimation(previous, next model.LampState, initial bool) {
+func (s *Shell) updateAnimation(previous, next model.OutputState, initial bool) {
 	activeAnimation := s.animation
 	frameCount := activeAnimation.FrameCount()
 	if next == model.StateUnknown || frameCount == 0 {
@@ -1395,7 +1395,7 @@ func (s *Shell) updateAnimation(previous, next model.LampState, initial bool) {
 		return
 	}
 	// Connection-health, pending-command, HTTP, and WebSocket echo snapshots
-	// can repeat the same lamp state. They must not cancel a real transition
+	// can repeat the same device state. They must not cancel a real transition
 	// that is already playing toward that state.
 	if previous == next {
 		return
@@ -1500,7 +1500,7 @@ func (s *Shell) applyConfigUI(cfg config.Config, reportErrors bool) {
 	s.dark = appearance.Dark
 	s.highContrast = appearance.HighContrast
 	if err := s.setAnimationResourceEnabled(cfg.UI.Animations); err != nil {
-		s.logf("load lamp transition animation: %v", err)
+		s.logf("load device transition animation: %v", err)
 		if reportErrors {
 			s.showError(s.tr(i18n.MsgErrorUpdateSettings), err)
 		}
@@ -1983,11 +1983,11 @@ func (s *Shell) windowMessage(hwnd, message, wParam, lParam uintptr) (uintptr, b
 		}
 		switch int32(wParam) {
 		case hotkeyToggle:
-			s.invoke("lamp.toggle", nil)
+			s.invoke("device.toggle", nil)
 		case hotkeyOn:
-			s.invoke("lamp.on", nil)
+			s.invoke("device.on", nil)
 		case hotkeyOff:
-			s.invoke("lamp.off", nil)
+			s.invoke("device.off", nil)
 		case hotkeyShow:
 			s.Show()
 		}
@@ -2583,8 +2583,8 @@ func (s *Shell) onMouseDown(x, y int, button walk.MouseButton) {
 		return
 	}
 	switch action {
-	case actionLamp:
-		s.dragLampOrToggle()
+	case actionDevice:
+		s.dragDeviceOrToggle()
 	default:
 		if err := winfx.BeginWindowDrag(s.HWND()); err != nil {
 			s.logf("begin borderless drag: %v", err)
@@ -2668,19 +2668,19 @@ func (s *Shell) cancelButtonActivation() {
 	s.cancelKeyboardActivation()
 }
 
-func (s *Shell) dragLampOrToggle() {
+func (s *Shell) dragDeviceOrToggle() {
 	if s == nil || s.mw == nil {
 		return
 	}
 	before := s.mw.BoundsPixels()
 	if err := winfx.BeginWindowDrag(s.HWND()); err != nil {
-		s.logf("begin lamp drag: %v", err)
+		s.logf("begin device drag: %v", err)
 		return
 	}
 	after := s.mw.BoundsPixels()
 	if absInt32(int32(after.X-before.X)) <= 2 &&
 		absInt32(int32(after.Y-before.Y)) <= 2 {
-		s.invoke("lamp.toggle", nil)
+		s.invoke("device.toggle", nil)
 	}
 }
 
@@ -2747,11 +2747,11 @@ func (s *Shell) activateSurfaceAction(action actionID) {
 	}
 	switch action {
 	case actionToggle:
-		s.invoke("lamp.toggle", nil)
+		s.invoke("device.toggle", nil)
 	case actionOn:
-		s.invoke("lamp.on", nil)
+		s.invoke("device.on", nil)
 	case actionOff:
-		s.invoke("lamp.off", nil)
+		s.invoke("device.off", nil)
 	case actionSettings:
 		s.OpenSettings()
 	case actionDiagnostics:

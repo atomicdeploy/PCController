@@ -9,8 +9,8 @@ import (
 	"image/png"
 
 	"github.com/lxn/win"
-	"rayanlamp.local/app/internal/vector"
-	"rayanlamp.local/app/internal/winfx"
+	"pccontroller.local/desktop/internal/vector"
+	"pccontroller.local/desktop/internal/winfx"
 )
 
 const controllerTaskbarFirst uint32 = 0x52B1

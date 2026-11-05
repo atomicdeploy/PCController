@@ -1,6 +1,6 @@
 //go:build windows
 
-// Package headlessweb hosts the embedded dashboard and lamp coordinator
+// Package headlessweb hosts the embedded dashboard and device coordinator
 // without constructing the Walk shell, a tray icon, or any native window.
 package headlessweb
 
@@ -14,16 +14,16 @@ import (
 	"sync/atomic"
 	"time"
 
-	"rayanlamp.local/app/internal/commands"
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/eventeffects"
-	"rayanlamp.local/app/internal/headless"
-	"rayanlamp.local/app/internal/ipc"
-	"rayanlamp.local/app/internal/localapi"
-	"rayanlamp.local/app/internal/model"
-	"rayanlamp.local/app/internal/sfx"
-	"rayanlamp.local/app/internal/webui"
-	"rayanlamp.local/app/internal/winfx"
+	"pccontroller.local/desktop/internal/commands"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/eventeffects"
+	"pccontroller.local/desktop/internal/headless"
+	"pccontroller.local/desktop/internal/ipc"
+	"pccontroller.local/desktop/internal/localapi"
+	"pccontroller.local/desktop/internal/model"
+	"pccontroller.local/desktop/internal/sfx"
+	"pccontroller.local/desktop/internal/webui"
+	"pccontroller.local/desktop/internal/winfx"
 )
 
 var (
@@ -165,7 +165,7 @@ type Host struct {
 }
 
 // New claims primary-instance ownership, starts the embedded loopback server,
-// then starts the lamp core. No native shell objects are constructed.
+// then starts the device core. No native shell objects are constructed.
 func New(options Options) (*Host, error) {
 	return newWithDependencies(options, productionDependencies())
 }
@@ -292,7 +292,7 @@ func newWithDependencies(options Options, deps dependencies) (*Host, error) {
 	host.api = server
 	host.apiMu.Unlock()
 	if err := controller.Start(ctx); err != nil {
-		return nil, fmt.Errorf("start headless lamp coordinator: %w", err)
+		return nil, fmt.Errorf("start headless device coordinator: %w", err)
 	}
 
 	cleanup = false
@@ -575,7 +575,7 @@ func (h *Host) Run(parent context.Context) error {
 }
 
 // Close gracefully stops listener migrations, HTTP, effects, IPC, and the
-// lamp transport. It is concurrent and idempotent.
+// device transport. It is concurrent and idempotent.
 func (h *Host) Close() error {
 	if h == nil {
 		return nil

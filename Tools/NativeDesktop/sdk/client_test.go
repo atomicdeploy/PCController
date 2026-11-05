@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"rayanlamp.local/app/internal/ipc"
+	"pccontroller.local/desktop/internal/ipc"
 )
 
 func TestClientCallUsesLivingEnvelopeAndUniqueIDs(t *testing.T) {
@@ -49,7 +49,7 @@ func TestClientCallUsesLivingEnvelopeAndUniqueIDs(t *testing.T) {
 	if len(requests) != 2 {
 		t.Fatalf("request count = %d, want 2", len(requests))
 	}
-	if requests[0].Method != "lamp.on" || requests[1].Method != "status" {
+	if requests[0].Method != "device.on" || requests[1].Method != "status" {
 		t.Fatalf("methods = %q, %q", requests[0].Method, requests[1].Method)
 	}
 	if requests[0].ID == "" || requests[0].ID == requests[1].ID {
@@ -72,7 +72,7 @@ func TestClientPreservesStructuredCommandFailure(t *testing.T) {
 		return ipc.Failure(
 			request.ID,
 			"device_unavailable",
-			"lamp is offline",
+			"device is offline",
 		), nil
 	})
 	if err != nil {
@@ -89,7 +89,7 @@ func TestClientPreservesStructuredCommandFailure(t *testing.T) {
 		t.Fatalf("error code = %q", response.Error.Code)
 	}
 	if err := response.DecodeResult(nil); err == nil ||
-		!strings.Contains(err.Error(), "lamp is offline") {
+		!strings.Contains(err.Error(), "device is offline") {
 		t.Fatalf("DecodeResult error = %v", err)
 	}
 }

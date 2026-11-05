@@ -11,7 +11,7 @@ import (
 	"github.com/lxn/walk"
 	"github.com/lxn/win"
 
-	"rayanlamp.local/app/internal/graphics"
+	"pccontroller.local/desktop/internal/graphics"
 )
 
 const (

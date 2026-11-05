@@ -197,7 +197,7 @@ func TestWindowBackdropRestoresDWMCornerAfterEveryRefresh(t *testing.T) {
 	defer runtime.UnlockOSThread()
 
 	className, _ := windows.UTF16FromString("STATIC")
-	title, _ := windows.UTF16FromString("RayanLamp corner policy test")
+	title, _ := windows.UTF16FromString("PCControllerDesktop corner policy test")
 	hwnd := win.CreateWindowEx(
 		win.WS_EX_TOOLWINDOW,
 		&className[0],

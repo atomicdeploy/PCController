@@ -23,7 +23,7 @@ Set-StrictMode -Version Latest
 
 $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $expectedOutput = [IO.Path]::GetFullPath(
-    (Join-Path $projectRoot 'dist\RayanLamp.exe')
+    (Join-Path $projectRoot 'dist\PCControllerDesktop.exe')
 )
 $buildArguments = @{
     Architecture = $Architecture
@@ -76,13 +76,13 @@ if ($releaseEntries.Count -ne 1 -or
         $expectedOutput,
         [StringComparison]::OrdinalIgnoreCase
     )) {
-    throw 'The release directory must contain exactly one file: RayanLamp.exe.'
+    throw 'The release directory must contain exactly one file: PCControllerDesktop.exe.'
 }
 
 $hash = (Get-FileHash -LiteralPath $expectedOutput -Algorithm SHA256).Hash.ToLowerInvariant()
-Write-RayanLampStatus -Level Artifact -Message $expectedOutput
-Write-RayanLampStatus -Level Info `
-    -Icon (Get-RayanLampEmojiGlyph -Name Hash) -Label 'SHA-256' -Message $hash
-Write-RayanLampStatus -Level Success `
+Write-PCControllerDesktopStatus -Level Artifact -Message $expectedOutput
+Write-PCControllerDesktopStatus -Level Info `
+    -Icon (Get-PCControllerDesktopEmojiGlyph -Name Hash) -Label 'SHA-256' -Message $hash
+Write-PCControllerDesktopStatus -Level Success `
     -Message 'Verified the single-file Windows release directory contract.'
 Write-Output $expectedOutput

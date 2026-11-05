@@ -12,7 +12,7 @@ void main() {
       expect(() => parseCellSearch(text), throwsFormatException);
     }
   });
-  test('RayanLamp numeric normalization and exact shared range formatting', () {
+  test('PCControllerDesktop numeric normalization and exact shared range formatting', () {
     expect(parseCellSearch('۱،٢;۳–۵ #۸۰'), {1, 2, 3, 4, 5, 80});
     expect(formatCellSelection(parseCellSearch('1,2,3')), '1–3');
     for (final cells in [

@@ -8,20 +8,20 @@ import (
 
 	"github.com/lxn/win"
 
-	"rayanlamp.local/app/internal/wmipc"
+	"pccontroller.local/desktop/internal/wmipc"
 )
 
 // TestLivePrimaryCaptionlessBorderPolicy is an opt-in visual integration
-// probe for a separately running RayanLamp instance. It makes regressions in
+// probe for a separately running PCControllerDesktop instance. It makes regressions in
 // the compositor-owned outer border observable without making the ordinary
 // unit suite depend on a desktop session.
 func TestLivePrimaryCaptionlessBorderPolicy(t *testing.T) {
-	if os.Getenv("RAYANLAMP_LIVE_WINDOW_TEST") != "1" {
-		t.Skip("set RAYANLAMP_LIVE_WINDOW_TEST=1 with RayanLamp running")
+	if os.Getenv("PCCONTROLLER_DESKTOP_LIVE_WINDOW_TEST") != "1" {
+		t.Skip("set PCCONTROLLER_DESKTOP_LIVE_WINDOW_TEST=1 with PCControllerDesktop running")
 	}
 	hwnd := wmipc.FindPrimary()
 	if hwnd == 0 {
-		t.Fatal("running RayanLamp primary window was not found")
+		t.Fatal("running PCControllerDesktop primary window was not found")
 	}
 	style, err := getWindowStyle(hwnd)
 	if err != nil {

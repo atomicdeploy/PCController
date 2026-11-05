@@ -14,20 +14,20 @@ import (
 	"sync/atomic"
 	"time"
 
-	"rayanlamp.local/app/internal/commands"
-	"rayanlamp.local/app/internal/config"
-	"rayanlamp.local/app/internal/deviceterminal"
-	"rayanlamp.local/app/internal/eventeffects"
-	"rayanlamp.local/app/internal/headless"
-	"rayanlamp.local/app/internal/ipc"
-	"rayanlamp.local/app/internal/localapi"
-	"rayanlamp.local/app/internal/model"
-	"rayanlamp.local/app/internal/sfx"
-	"rayanlamp.local/app/internal/webui"
-	"rayanlamp.local/app/internal/winfx"
+	"pccontroller.local/desktop/internal/commands"
+	"pccontroller.local/desktop/internal/config"
+	"pccontroller.local/desktop/internal/deviceterminal"
+	"pccontroller.local/desktop/internal/eventeffects"
+	"pccontroller.local/desktop/internal/headless"
+	"pccontroller.local/desktop/internal/ipc"
+	"pccontroller.local/desktop/internal/localapi"
+	"pccontroller.local/desktop/internal/model"
+	"pccontroller.local/desktop/internal/sfx"
+	"pccontroller.local/desktop/internal/webui"
+	"pccontroller.local/desktop/internal/winfx"
 )
 
-// standaloneTransport is a headless RayanLamp primary, not an uncoordinated
+// standaloneTransport is a headless PCControllerDesktop primary, not an uncoordinated
 // second client. It owns the normal per-user pipe and dispatcher while alive.
 type standaloneTransport struct {
 	runtime            *headless.Runtime
@@ -172,11 +172,11 @@ func newStandaloneTransport(
 	transport.configApplyMu.Unlock()
 	if startErr != nil {
 		_ = transport.Close()
-		return nil, fmt.Errorf("start standalone lamp core: %w", startErr)
+		return nil, fmt.Errorf("start standalone device core: %w", startErr)
 	}
 	if cfg.Integration.LocalAPIEnabled {
 		transport.initializeAPI(cfg, initialAPIRevision)
-		// A port conflict must not make lamp control unavailable, but it is
+		// A port conflict must not make device control unavailable, but it is
 		// retained as serving status and a later settings change can retry it.
 	}
 	return transport, nil
@@ -260,10 +260,10 @@ func (transport *standaloneTransport) Execute(
 		return model.Snapshot{}, err
 	}
 	method := map[Action]string{
-		ActionToggle:    "lamp.toggle",
-		ActionOn:        "lamp.on",
-		ActionOff:       "lamp.off",
-		ActionRefresh:   "lamp.refresh",
+		ActionToggle:    "device.toggle",
+		ActionOn:        "device.on",
+		ActionOff:       "device.off",
+		ActionRefresh:   "device.refresh",
 		ActionReconnect: "reconnect",
 	}[action]
 	request, err := ipc.NewRequest(

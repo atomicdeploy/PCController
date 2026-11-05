@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"rayanlamp.local/app/internal/comserver"
-	"rayanlamp.local/app/internal/shellintegration"
+	"pccontroller.local/desktop/internal/comserver"
+	"pccontroller.local/desktop/internal/shellintegration"
 )
 
 type installFixture struct {
@@ -64,7 +64,7 @@ func newInstallFixture(t *testing.T) *installFixture {
 	}
 	if err := os.WriteFile(
 		fixture.source,
-		[]byte("portable RayanLamp build"),
+		[]byte("portable PCControllerDesktop build"),
 		0o700,
 	); err != nil {
 		t.Fatal(err)
@@ -169,7 +169,7 @@ func TestInstallDefaultsToFileOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(got) != "portable RayanLamp build" {
+	if string(got) != "portable PCControllerDesktop build" {
 		t.Fatalf("installed bytes = %q", got)
 	}
 	if fixture.stopCalls != 1 ||
@@ -303,7 +303,7 @@ func TestUninstallPreservesForeignIntegrationsAndSchedulesCleanup(
 	fixture := newInstallFixture(t)
 	fixture.createInstalled(t, "installed")
 	fixture.shellDropErr = &shellintegration.OwnershipError{
-		RegisteredCommand: `"C:\Other\RayanLamp.exe" /uri "%1"`,
+		RegisteredCommand: `"C:\Other\PCControllerDesktop.exe" /uri "%1"`,
 	}
 	fixture.comDropErr = fmtOwnershipError()
 

@@ -12,11 +12,11 @@ $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $webRoot = [IO.Path]::GetFullPath((Join-Path $projectRoot 'webui'))
 $distRoot = [IO.Path]::GetFullPath((Join-Path $projectRoot 'dist'))
 $outputPath = [IO.Path]::GetFullPath(
-    (Join-Path $distRoot 'RayanLamp-Web-Static.zip')
+    (Join-Path $distRoot 'PCControllerDesktop-Web-Static.zip')
 )
 $temporaryRoot = [IO.Path]::GetFullPath(
     (Join-Path ([IO.Path]::GetTempPath()) (
-        'RayanLamp-web-export-' + [Guid]::NewGuid().ToString('N')
+        'PCControllerDesktop-web-export-' + [Guid]::NewGuid().ToString('N')
     ))
 )
 $sourceRoot = [IO.Path]::GetFullPath(
@@ -37,7 +37,7 @@ if (-not [string]::Equals(
     $temporaryParent,
     [StringComparison]::OrdinalIgnoreCase
 ) -or -not [IO.Path]::GetFileName($temporaryRoot).StartsWith(
-    'RayanLamp-web-export-',
+    'PCControllerDesktop-web-export-',
     [StringComparison]::Ordinal
 )) {
     throw "Unsafe temporary web export path: $temporaryRoot"
@@ -75,9 +75,9 @@ foreach ($name in @(
     'GOOS',
     'GOARCH',
     'CGO_ENABLED',
-    'RAYANLAMP_WEB_OUT_DIR',
-    'VITE_RAYANLAMP_STATIC_EXPORT',
-    'VITE_RAYANLAMP_BUILD_EDITION'
+    'PCCONTROLLER_DESKTOP_WEB_OUT_DIR',
+    'VITE_PCCONTROLLER_DESKTOP_STATIC_EXPORT',
+    'VITE_PCCONTROLLER_DESKTOP_BUILD_EDITION'
 )) {
     $environment[$name] = @{
         Existed = Test-Path -LiteralPath "Env:$name"
@@ -86,37 +86,37 @@ foreach ($name in @(
 }
 
 try {
-    $env:RAYANLAMP_WEB_OUT_DIR = $sourceRoot
+    $env:PCCONTROLLER_DESKTOP_WEB_OUT_DIR = $sourceRoot
 
     Push-Location $webRoot
     try {
-        Write-RayanLampStatus -Level Step `
-            -Icon (Get-RayanLampEmojiGlyph -Name Dependencies) -Label 'DEPS' `
+        Write-PCControllerDesktopStatus -Level Step `
+            -Icon (Get-PCControllerDesktopEmojiGlyph -Name Dependencies) -Label 'DEPS' `
             -Message 'Installing the locked Web UI dependency graph.'
         & npm ci --no-audit --no-fund
         if ($LASTEXITCODE -ne 0) {
             throw 'npm ci failed.'
         }
-        Write-RayanLampStatus -Level Step `
-            -Icon (Get-RayanLampEmojiGlyph -Name Typecheck) -Label 'TYPECHECK' `
+        Write-PCControllerDesktopStatus -Level Step `
+            -Icon (Get-PCControllerDesktopEmojiGlyph -Name Typecheck) -Label 'TYPECHECK' `
             -Message 'Checking the static Web UI TypeScript contract.'
         & npm run typecheck
         if ($LASTEXITCODE -ne 0) {
             throw 'Frontend typecheck failed.'
         }
         if (-not $SkipTests) {
-            Write-RayanLampStatus -Level Step `
-                -Icon (Get-RayanLampEmojiGlyph -Name Test) -Label 'TEST' `
+            Write-PCControllerDesktopStatus -Level Step `
+                -Icon (Get-PCControllerDesktopEmojiGlyph -Name Test) -Label 'TEST' `
                 -Message 'Running Web UI unit tests.'
             & npm test
             if ($LASTEXITCODE -ne 0) {
                 throw 'Frontend unit tests failed.'
             }
         }
-        $env:VITE_RAYANLAMP_STATIC_EXPORT = 'true'
-        $env:VITE_RAYANLAMP_BUILD_EDITION = 'production'
-        Write-RayanLampStatus -Level Step `
-            -Icon (Get-RayanLampEmojiGlyph -Name Web) -Label 'WEB' `
+        $env:VITE_PCCONTROLLER_DESKTOP_STATIC_EXPORT = 'true'
+        $env:VITE_PCCONTROLLER_DESKTOP_BUILD_EDITION = 'production'
+        Write-PCControllerDesktopStatus -Level Step `
+            -Icon (Get-PCControllerDesktopEmojiGlyph -Name Web) -Label 'WEB' `
             -Message 'Building the direct-first static SPA/PWA.'
         & npm run build
         if ($LASTEXITCODE -ne 0) {
@@ -161,8 +161,8 @@ try {
 
     Push-Location $projectRoot
     try {
-        Write-RayanLampStatus -Level Step `
-            -Icon (Get-RayanLampEmojiGlyph -Name Artifact) -Label 'ZIP' `
+        Write-PCControllerDesktopStatus -Level Step `
+            -Icon (Get-PCControllerDesktopEmojiGlyph -Name Artifact) -Label 'ZIP' `
             -Message 'Writing the deterministic static frontend archive.'
         & go run ./tools/export-web --source $sourceRoot --output $outputPath
         if ($LASTEXITCODE -ne 0) {
@@ -178,9 +178,9 @@ finally {
         'GOOS',
         'GOARCH',
         'CGO_ENABLED',
-        'RAYANLAMP_WEB_OUT_DIR',
-        'VITE_RAYANLAMP_STATIC_EXPORT',
-        'VITE_RAYANLAMP_BUILD_EDITION'
+        'PCCONTROLLER_DESKTOP_WEB_OUT_DIR',
+        'VITE_PCCONTROLLER_DESKTOP_STATIC_EXPORT',
+        'VITE_PCCONTROLLER_DESKTOP_BUILD_EDITION'
     )) {
         Restore-EnvironmentValue -Name $name `
             -Value $environment[$name].Value `
@@ -193,7 +193,7 @@ finally {
             $temporaryParent,
             [StringComparison]::OrdinalIgnoreCase
         ) -or -not [IO.Path]::GetFileName($resolvedTemporary).StartsWith(
-            'RayanLamp-web-export-',
+            'PCControllerDesktop-web-export-',
             [StringComparison]::Ordinal
         )) {
             throw "Refusing to remove unsafe temporary path: $resolvedTemporary"
@@ -210,12 +210,12 @@ $hash = (
     Get-FileHash -LiteralPath $outputPath -Algorithm SHA256
 ).Hash.ToLowerInvariant()
 $size = (Get-Item -LiteralPath $outputPath).Length
-Write-RayanLampStatus -Level Artifact -Message $outputPath
-Write-RayanLampStatus -Level Info `
-    -Icon (Get-RayanLampEmojiGlyph -Name Size) -Label 'SIZE' `
+Write-PCControllerDesktopStatus -Level Artifact -Message $outputPath
+Write-PCControllerDesktopStatus -Level Info `
+    -Icon (Get-PCControllerDesktopEmojiGlyph -Name Size) -Label 'SIZE' `
     -Message "$size bytes"
-Write-RayanLampStatus -Level Info `
-    -Icon (Get-RayanLampEmojiGlyph -Name Hash) -Label 'SHA-256' -Message $hash
-Write-RayanLampStatus -Level Success `
+Write-PCControllerDesktopStatus -Level Info `
+    -Icon (Get-PCControllerDesktopEmojiGlyph -Name Hash) -Label 'SHA-256' -Message $hash
+Write-PCControllerDesktopStatus -Level Success `
     -Message 'Validated the reproducible static Web UI archive.'
 Write-Output $outputPath

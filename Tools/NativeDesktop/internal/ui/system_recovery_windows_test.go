@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"rayanlamp.local/app/internal/model"
+	"pccontroller.local/desktop/internal/model"
 )
 
 func TestSystemRecoveryDebouncesAndHealthGatesNetworkChanges(t *testing.T) {
