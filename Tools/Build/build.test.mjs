@@ -586,9 +586,10 @@ test('host plan reproducibly builds the web application before Go embedding', ()
 	], {})
 	const plan = createPlan(options, resolveBuildIdentity(options, {}), 'win32')
         assert.equal(plan.actions[0].id, 'embedded-defaults')
-	assert.deepEqual(plan.actions.slice(1, 8).map(action => action.id), [
+	assert.deepEqual(plan.actions.slice(1, 9).map(action => action.id), [
 		'web-install', 'web-typecheck', 'web-test', 'web-build',
-		'toolchain-policy-check', 'product-identity-check', 'go-mod-download'
+		'toolchain-policy-check', 'product-identity-check', 'libavrdude-adapter',
+		'go-mod-download'
 	])
         assert.deepEqual(plan.actions[1].command.args, ['ci', '--no-audit', '--no-fund'])
         assert.equal(plan.actions[1].command.cwd, join(PROJECT_ROOT, 'Tools', 'Controller', 'web'))
