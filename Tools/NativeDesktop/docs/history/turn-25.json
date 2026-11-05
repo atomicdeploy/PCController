@@ -1,0 +1,646 @@
+{
+  "turn": "019f91ca-92c3-7363-94f8-efa459f7683c",
+  "observedStart": "2026-07-24T01:43:21.020Z",
+  "observedEnd": "2026-07-24T02:13:20.686Z",
+  "title": "web: recover shutdown awareness and stateful favicons",
+  "events": [
+    {
+      "id": "call_8Thi2bDO5jhfH7EeCXhbRMxW:0",
+      "time": "2026-07-24T01:48:41.673Z",
+      "orderTime": "2026-07-24T01:48:41.673Z",
+      "timeBasis": "record",
+      "hash": "ff9b084d5bf3699b92371b3a8502326517bbe1fe0a645d7c0e176cc50bc5b968",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 27297
+      },
+      "turn": "019f91ca-92c3-7363-94f8-efa459f7683c",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "webui/src/store.ts",
+          "before": "28985a238bc989ece91f162597bc3b7d77cc4b368939f5dc57ba7c146c29870b",
+          "after": "57139c35cf239900700f5370485bc50cc2080bd23f19657e99f39c7930f37d9c",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_9X0tDCUb1ZnX1UBrPMSGbDPi:0",
+      "time": "2026-07-24T01:49:19.806Z",
+      "orderTime": "2026-07-24T01:49:19.806Z",
+      "timeBasis": "record",
+      "hash": "9e92b2d40661c0f910ebe365ededc20d5c829a95148db975a157a72e18a3c709",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 27306
+      },
+      "turn": "019f91ca-92c3-7363-94f8-efa459f7683c",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "webui/src/sync.ts",
+          "before": "4dd0fe5475cb532423a6b959840ea37af11e385349812e873248347e11041eaf",
+          "after": "a83534a9402768f093c56994e55916f4b5b34b6df3563f7eec622ffdeaace163",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_26PeuDW7M82mrHdmc7czsnAV:0",
+      "time": "2026-07-24T01:49:24.921Z",
+      "orderTime": "2026-07-24T01:49:24.921Z",
+      "timeBasis": "record",
+      "hash": "775279d8ed202b05b2a0fe00dd2158f6db3a8728b01a1de6776a8733cb1d0547",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 27311
+      },
+      "turn": "019f91ca-92c3-7363-94f8-efa459f7683c",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "webui/src/sync.ts",
+          "before": "a83534a9402768f093c56994e55916f4b5b34b6df3563f7eec622ffdeaace163",
+          "after": "6045e8b69678f33709b1b13075dac88d3d67a7b68936ad0c6205f0ed22e04513",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_IuE8fI3OwazpsFA754ugdc8a:0",
+      "time": "2026-07-24T01:50:00.292Z",
+      "orderTime": "2026-07-24T01:50:00.292Z",
+      "timeBasis": "record",
+      "hash": "f030f68a5207766f8c5e1faaa12b7ceeb8abc5e2a9a1081c83774f4bdf4ff493",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 27316
+      },
+      "turn": "019f91ca-92c3-7363-94f8-efa459f7683c",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "webui/src/favicon.ts",
+          "before": null,
+          "after": "b541ae83a0a1d1aca51ce52aabaefa7a5346598250405b2d625d70fdcc9c9241",
+          "method": "patch"
+        },
+        {
+          "path": "webui/public/icons/favicon-on.svg",
+          "before": null,
+          "after": "10327e9ce685f04a061d621c945bdf6a40f73acfc3c3e7bab6de44faf624aadd",
+          "method": "patch"
+        },
+        {
+          "path": "webui/public/icons/favicon-off.svg",
+          "before": null,
+          "after": "b135a3f26bb30cb2c31c8cf5dce554b0502fc1ed95469b722815f3c5131746fa",
+          "method": "patch"
+        },
+        {
+          "path": "webui/public/icons/favicon-offline.svg",
+          "before": null,
+          "after": "4af8a0ff4f0abe586594e06e2c23ed9383816f8c23019a7526868738c2ecf7aa",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_ukqWzNeyRXiUEbwt8OUQzp29:0",
+      "time": "2026-07-24T01:50:20.836Z",
+      "orderTime": "2026-07-24T01:50:20.836Z",
+      "timeBasis": "record",
+      "hash": "13583eade465713a87888df650749e61deed9390b3b62aebfdb90090eadae985",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 27329
+      },
+      "turn": "019f91ca-92c3-7363-94f8-efa459f7683c",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "webui/src/app.tsx",
+          "before": "3ee0848d5da2565a0fbdeb516316d0b895e71c215883405116b71264046b2f58",
+          "after": "f53168e6255b61659718742f574c578f89432debe76320ff7be8a476082dacc9",
+          "method": "patch"
+        },
+        {
+          "path": "webui/index.html",
+          "before": "7c455afe338afe71e0714b65cdfb194696093ec923cf697a23248a9da809b0eb",
+          "after": "5547b485085924b093d9fa52d38cf47f54ff00ad2dd141f26a8e226b24a6efe4",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_OQpHFnMpLs3bdRuAZP2IlYsH:0",
+      "time": "2026-07-24T01:51:16.483Z",
+      "orderTime": "2026-07-24T01:51:16.483Z",
+      "timeBasis": "record",
+      "hash": "22125d5ca1c8a3c0ec5cb22f336c655f48623524de03c9a6ece8a1cfc2ceb487",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 27349
+      },
+      "turn": "019f91ca-92c3-7363-94f8-efa459f7683c",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/headlessweb/host_windows.go",
+          "before": "2e67057c7121c2be16320b8bc6621c8fa6949ccc3e5554b55419743723b02cf2",
+          "after": "13654a86f811e9bdff4bcc125ccad71f5f17847d0e1529bd7ef690420edca963",
+          "method": "patch"
+        }
+      ],
+      "problems": [
+        {
+          "path": "internal/localapi/server.go",
+          "reason": "missing preimage"
+        }
+      ]
+    },
+    {
+      "id": "call_CtUsrCQxeMdFsAfPm1QHPrA4:0",
+      "time": "2026-07-24T01:51:30.085Z",
+      "orderTime": "2026-07-24T01:51:30.085Z",
+      "timeBasis": "record",
+      "hash": "b13a765fe264a70319711326e0914030691f7b07da01a239c79aa375d01798cd",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 27354
+      },
+      "turn": "019f91ca-92c3-7363-94f8-efa459f7683c",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "webui/src/favicon.test.ts",
+          "before": null,
+          "after": "c00ee6632b641704d16538ba06ab0e9a9795522e8fa5c65831559126e2950151",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_9k9XejlwjcAqzLqndTpEaFh0:0",
+      "time": "2026-07-24T01:51:38.791Z",
+      "orderTime": "2026-07-24T01:51:38.791Z",
+      "timeBasis": "record",
+      "hash": "0ade633ceaefa4d5c434f988fc8c39e0067671b392ab4eaec508aae2ddce7526",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 27359
+      },
+      "turn": "019f91ca-92c3-7363-94f8-efa459f7683c",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "webui/src/store.test.ts",
+          "before": "cccfbd08b16ea8982cdf5a167f75943d162b69bc50b1dd58c817d9b1e554b856",
+          "after": "45dae22a7168361c807bdd6f65262ccc5bce1f153147aef0375355c673a5ba2b",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_8WaMNnBJcZp2AAvgaGrYcQ6p:0",
+      "time": "2026-07-24T01:55:07.621Z",
+      "orderTime": "2026-07-24T01:55:07.621Z",
+      "timeBasis": "record",
+      "hash": "c586956953b3de84fe47f715e8ce2a225027c06b595452941787330671ef4843",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 27410
+      },
+      "turn": "019f91ca-92c3-7363-94f8-efa459f7683c",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "webui/src/store.ts",
+          "before": "57139c35cf239900700f5370485bc50cc2080bd23f19657e99f39c7930f37d9c",
+          "after": "907fc48822b1381627fb43055d4987da898a2b98cd1ebce0595e5c84ba3da23b",
+          "method": "patch"
+        },
+        {
+          "path": "webui/src/favicon.ts",
+          "before": "b541ae83a0a1d1aca51ce52aabaefa7a5346598250405b2d625d70fdcc9c9241",
+          "after": "fb04855f2ae56857b746611d0a482b662a0dc07ea016f92d55a21cba9a07feb7",
+          "method": "patch"
+        },
+        {
+          "path": "webui/index.html",
+          "before": "5547b485085924b093d9fa52d38cf47f54ff00ad2dd141f26a8e226b24a6efe4",
+          "after": "3b0062db116b055315477fcf3f27eb8d8a0760174203f8f70677f0f226803cab",
+          "method": "patch"
+        }
+      ],
+      "problems": [
+        {
+          "path": "webui/src/app.tsx",
+          "reason": "hunk context not found"
+        }
+      ]
+    },
+    {
+      "id": "call_1YOd2vBpL8TnP6ewLfPFtNAX:0",
+      "time": "2026-07-24T01:55:56.273Z",
+      "orderTime": "2026-07-24T01:55:56.273Z",
+      "timeBasis": "record",
+      "hash": "23feef0352dc78a74e2b655a8c24de59c49d83445c6a450f70e5260d43db0470",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 27419
+      },
+      "turn": "019f91ca-92c3-7363-94f8-efa459f7683c",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "webui/src/assets/favicon-on.svg",
+          "before": null,
+          "after": "10327e9ce685f04a061d621c945bdf6a40f73acfc3c3e7bab6de44faf624aadd",
+          "method": "patch"
+        },
+        {
+          "path": "webui/src/assets/favicon-off.svg",
+          "before": null,
+          "after": "b135a3f26bb30cb2c31c8cf5dce554b0502fc1ed95469b722815f3c5131746fa",
+          "method": "patch"
+        },
+        {
+          "path": "webui/src/assets/favicon-offline.svg",
+          "before": null,
+          "after": "4af8a0ff4f0abe586594e06e2c23ed9383816f8c23019a7526868738c2ecf7aa",
+          "method": "patch"
+        },
+        {
+          "path": "webui/src/assets/favicon-connecting.svg",
+          "before": null,
+          "after": "5e7af5febcfdbb6360e50c53efe358276fcd3fa3023689f7f476163180975236",
+          "method": "patch"
+        },
+        {
+          "path": "webui/public/icons/favicon-on.svg",
+          "before": "10327e9ce685f04a061d621c945bdf6a40f73acfc3c3e7bab6de44faf624aadd",
+          "after": null,
+          "method": "patch"
+        },
+        {
+          "path": "webui/public/icons/favicon-off.svg",
+          "before": "b135a3f26bb30cb2c31c8cf5dce554b0502fc1ed95469b722815f3c5131746fa",
+          "after": null,
+          "method": "patch"
+        },
+        {
+          "path": "webui/public/icons/favicon-offline.svg",
+          "before": "4af8a0ff4f0abe586594e06e2c23ed9383816f8c23019a7526868738c2ecf7aa",
+          "after": null,
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_GmRo1S54GfGGzt9jxXxYfh72:0",
+      "time": "2026-07-24T01:56:21.209Z",
+      "orderTime": "2026-07-24T01:56:21.209Z",
+      "timeBasis": "record",
+      "hash": "56d678b045e82c56ff95a8c3e80fe2b29ec3eb80d236f420da5d8df4fa8cc77e",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 27425
+      },
+      "turn": "019f91ca-92c3-7363-94f8-efa459f7683c",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "webui/src/favicon.test.ts",
+          "before": "c00ee6632b641704d16538ba06ab0e9a9795522e8fa5c65831559126e2950151",
+          "after": "7e674d8bacffe0fe2377ab6bd1f1f6509268179e9da3490ded4f620dbed86218",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_JZLBvZPTjZHeiqq09YIlHbqU:0",
+      "time": "2026-07-24T01:56:37.430Z",
+      "orderTime": "2026-07-24T01:56:37.430Z",
+      "timeBasis": "record",
+      "hash": "83eee90ded3d7ecdf5f17b0fc18ec7d8e9db1b62d871be2a75f4d14fcdcc92fb",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 27431
+      },
+      "turn": "019f91ca-92c3-7363-94f8-efa459f7683c",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "webui/src/favicon.ts",
+          "before": "fb04855f2ae56857b746611d0a482b662a0dc07ea016f92d55a21cba9a07feb7",
+          "after": "f417e6d344130c2be6f397327b792ca4e6edf27ec643df5309707976520c3de2",
+          "method": "patch"
+        },
+        {
+          "path": "webui/src/favicon.test.ts",
+          "before": "7e674d8bacffe0fe2377ab6bd1f1f6509268179e9da3490ded4f620dbed86218",
+          "after": "ccec76b5426a4ca78675b3d0b15fbe5d12489e57318bac747353d9e9d7a1cca8",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_hmlqIPVExSEOfIkfywoyWCXn:0",
+      "time": "2026-07-24T01:56:48.691Z",
+      "orderTime": "2026-07-24T01:56:48.691Z",
+      "timeBasis": "record",
+      "hash": "9b514993c64aa1c1d14b3f58f7347cd2638fa01b4e89074314cce39448961cff",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 27437
+      },
+      "turn": "019f91ca-92c3-7363-94f8-efa459f7683c",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "webui/src/api.ts",
+          "before": "9bb5e41f1836cc16883c287a93cf8659600f3145ebbb0fe875a763354fef24e6",
+          "after": "f7896c4a32f28e327cd9ca112642d348dd229d9074da9aecd40e7378d97eb2a6",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_KWTz2EY1mVQy0wq98aXAOiVr:0",
+      "time": "2026-07-24T01:56:57.593Z",
+      "orderTime": "2026-07-24T01:56:57.593Z",
+      "timeBasis": "record",
+      "hash": "31dbd51b12dec4d708d33a85e7b3ec996528647f14a787a18e8d3d846e043a56",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 27442
+      },
+      "turn": "019f91ca-92c3-7363-94f8-efa459f7683c",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "webui/src/api.test.ts",
+          "before": "de29fb70cba93a3473037179cb2befaf414cb629c0b4fe7701ccd910c1be1949",
+          "after": "9c3266ddb691859d10fb31f400d9bce4fe6809f8b4fdf07b4dfc99ab2c2ad194",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_unRnHdjrQI7wGGCKMvNKXATi:0",
+      "time": "2026-07-24T01:57:20.125Z",
+      "orderTime": "2026-07-24T01:57:20.125Z",
+      "timeBasis": "record",
+      "hash": "2e3522fd98b62e0250652b66b9a11fa6bd798d56a720fadafc2bed1006c43176",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 27453
+      },
+      "turn": "019f91ca-92c3-7363-94f8-efa459f7683c",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "webui/src/favicon.test.ts",
+          "before": "ccec76b5426a4ca78675b3d0b15fbe5d12489e57318bac747353d9e9d7a1cca8",
+          "after": "768aedff4fb32978d84b85e0012bc6e31397086f3ccb0680f8820017eb021e76",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_8q3phBZP8TrX5hc0NQ9P5fTK:0",
+      "time": "2026-07-24T01:57:32.766Z",
+      "orderTime": "2026-07-24T01:57:32.766Z",
+      "timeBasis": "record",
+      "hash": "4fc5dbd2be29c55f279322d12504bd4e7aedfb1775693fda4f838f474776e331",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 27462
+      },
+      "turn": "019f91ca-92c3-7363-94f8-efa459f7683c",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "webui/src/favicon.ts",
+          "before": "f417e6d344130c2be6f397327b792ca4e6edf27ec643df5309707976520c3de2",
+          "after": "8fb08015803716ad34035a6083f22d181100eb1f92a3b6583abbeecce7f9ab0d",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_lNHJUXstiy6pUppyGyjetP2w:0",
+      "time": "2026-07-24T01:58:08.039Z",
+      "orderTime": "2026-07-24T01:58:08.039Z",
+      "timeBasis": "record",
+      "hash": "01463d5213ff09ca242446feea351431ab92ef1720ba2413cc71514d0b8158c3",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 27483
+      },
+      "turn": "019f91ca-92c3-7363-94f8-efa459f7683c",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "CHANGELOG.md",
+          "before": "33415f4b228effeeed51e22714dc9a32d0803f1839c52a3ad47a4bfca7ff85b0",
+          "after": "2f2362793a659899dbc354968d5316287687bec20749ee23b67c13d659b8181a",
+          "method": "patch"
+        }
+      ],
+      "problems": [
+        {
+          "path": "docs/integration.md",
+          "reason": "hunk context not found"
+        }
+      ]
+    },
+    {
+      "id": "call_QeYdr5LTGRpL4rN2s2gAKcsD:0",
+      "time": "2026-07-24T00:35:49.864Z",
+      "orderTime": "2026-07-24T01:58:56.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "66a24ecce6b26fe1eddae7c3bc0972140dc89db78a2fbd3259b8e271fa0e2b77",
+      "source": {
+        "session": "019f918c-c534-7811-8168-ab79fe730d4d",
+        "line": 357
+      },
+      "turn": "019f91ca-d27a-70f3-ba0f-b3eb9fbf5af6",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/localapi/websocket_registry.go",
+          "before": null,
+          "after": "6a9857dd73659a9c4bbc75ef4feb08502847c11e6d0dd72921f8192c772074f9",
+          "method": "patch"
+        },
+        {
+          "path": "internal/localapi/websocket.go",
+          "before": "7cb59784ea675769ee00cc900ac1f0bed3ab97c9c52ab38824d039315cc94e6c",
+          "after": "97a159dd01e6312c09e54fe0874c429e5313204c6207bfe54c4aa7e9ded217e8",
+          "method": "patch"
+        }
+      ],
+      "problems": [
+        {
+          "path": "internal/localapi/terminal_websocket.go",
+          "reason": "hunk context not found"
+        },
+        {
+          "path": "internal/localapi/server.go",
+          "reason": "missing preimage"
+        }
+      ]
+    },
+    {
+      "id": "call_f9clt27HHdNbegQDomxNwWdl:0",
+      "time": "2026-07-24T00:35:49.864Z",
+      "orderTime": "2026-07-24T02:01:36.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "08b9db0a79d85d2f4a10ff6435d2f3d8e2617fdcc52958e90defd001270bec72",
+      "source": {
+        "session": "019f918c-c534-7811-8168-ab79fe730d4d",
+        "line": 404
+      },
+      "turn": "019f91ca-d27a-70f3-ba0f-b3eb9fbf5af6",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/localapi/shutdown_test.go",
+          "before": null,
+          "after": "fc52bf5ffe45443799913f3277597bebd6e5e7d5188498076ab30ebb6ced39d8",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_ET1ZpKjPyVZ5rYXld1rNMugF:0",
+      "time": "2026-07-24T02:04:44.136Z",
+      "orderTime": "2026-07-24T02:04:44.136Z",
+      "timeBasis": "record",
+      "hash": "f0a590ae132d87de4e01e73f5cf37a842da9dc86e61ae000f0499bb63d4824b8",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 27607
+      },
+      "turn": "019f91ca-92c3-7363-94f8-efa459f7683c",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/headlessweb/host_windows_test.go",
+          "before": "bc952896e6bfd4dfc856226d47d76578902fe60fa2275979de51d93799928b83",
+          "after": "7a424f4c1627aef3719f131bb9c7152afc08630ff753a682e7e0dfb6347f6ca3",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    }
+  ],
+  "finalChanges": [
+    {
+      "path": "webui/src/store.ts",
+      "sha256": "907fc48822b1381627fb43055d4987da898a2b98cd1ebce0595e5c84ba3da23b"
+    },
+    {
+      "path": "webui/src/sync.ts",
+      "sha256": "6045e8b69678f33709b1b13075dac88d3d67a7b68936ad0c6205f0ed22e04513"
+    },
+    {
+      "path": "webui/src/favicon.ts",
+      "sha256": "8fb08015803716ad34035a6083f22d181100eb1f92a3b6583abbeecce7f9ab0d"
+    },
+    {
+      "path": "webui/public/icons/favicon-on.svg",
+      "sha256": null
+    },
+    {
+      "path": "webui/public/icons/favicon-off.svg",
+      "sha256": null
+    },
+    {
+      "path": "webui/public/icons/favicon-offline.svg",
+      "sha256": null
+    },
+    {
+      "path": "webui/src/app.tsx",
+      "sha256": "f53168e6255b61659718742f574c578f89432debe76320ff7be8a476082dacc9"
+    },
+    {
+      "path": "webui/index.html",
+      "sha256": "3b0062db116b055315477fcf3f27eb8d8a0760174203f8f70677f0f226803cab"
+    },
+    {
+      "path": "internal/headlessweb/host_windows.go",
+      "sha256": "13654a86f811e9bdff4bcc125ccad71f5f17847d0e1529bd7ef690420edca963"
+    },
+    {
+      "path": "webui/src/favicon.test.ts",
+      "sha256": "768aedff4fb32978d84b85e0012bc6e31397086f3ccb0680f8820017eb021e76"
+    },
+    {
+      "path": "webui/src/store.test.ts",
+      "sha256": "45dae22a7168361c807bdd6f65262ccc5bce1f153147aef0375355c673a5ba2b"
+    },
+    {
+      "path": "webui/src/assets/favicon-on.svg",
+      "sha256": "10327e9ce685f04a061d621c945bdf6a40f73acfc3c3e7bab6de44faf624aadd"
+    },
+    {
+      "path": "webui/src/assets/favicon-off.svg",
+      "sha256": "b135a3f26bb30cb2c31c8cf5dce554b0502fc1ed95469b722815f3c5131746fa"
+    },
+    {
+      "path": "webui/src/assets/favicon-offline.svg",
+      "sha256": "4af8a0ff4f0abe586594e06e2c23ed9383816f8c23019a7526868738c2ecf7aa"
+    },
+    {
+      "path": "webui/src/assets/favicon-connecting.svg",
+      "sha256": "5e7af5febcfdbb6360e50c53efe358276fcd3fa3023689f7f476163180975236"
+    },
+    {
+      "path": "webui/src/api.ts",
+      "sha256": "f7896c4a32f28e327cd9ca112642d348dd229d9074da9aecd40e7378d97eb2a6"
+    },
+    {
+      "path": "webui/src/api.test.ts",
+      "sha256": "9c3266ddb691859d10fb31f400d9bce4fe6809f8b4fdf07b4dfc99ab2c2ad194"
+    },
+    {
+      "path": "CHANGELOG.md",
+      "sha256": "2f2362793a659899dbc354968d5316287687bec20749ee23b67c13d659b8181a"
+    },
+    {
+      "path": "internal/localapi/websocket_registry.go",
+      "sha256": "6a9857dd73659a9c4bbc75ef4feb08502847c11e6d0dd72921f8192c772074f9"
+    },
+    {
+      "path": "internal/localapi/websocket.go",
+      "sha256": "97a159dd01e6312c09e54fe0874c429e5313204c6207bfe54c4aa7e9ded217e8"
+    },
+    {
+      "path": "internal/localapi/shutdown_test.go",
+      "sha256": "fc52bf5ffe45443799913f3277597bebd6e5e7d5188498076ab30ebb6ced39d8"
+    },
+    {
+      "path": "internal/headlessweb/host_windows_test.go",
+      "sha256": "7a424f4c1627aef3719f131bb9c7152afc08630ff753a682e7e0dfb6347f6ca3"
+    }
+  ]
+}

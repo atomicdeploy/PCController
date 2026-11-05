@@ -1,0 +1,852 @@
+{
+  "turn": "019f928b-3b49-7351-939b-18da6d56481b",
+  "observedStart": "2026-07-24T05:13:46.123Z",
+  "observedEnd": "2026-07-24T06:08:12.109Z",
+  "title": "tui: recover full app and device configuration workspace",
+  "events": [
+    {
+      "id": "call_MioZWr9lM7lt8jqepJY2leXg",
+      "time": "2026-07-24T05:14:40.938Z",
+      "orderTime": "2026-07-24T05:14:40.938Z",
+      "timeBasis": "record",
+      "hash": "081c2383a7ef753f3184707b5f672b6c0dad7f34e413daab8ae719602b743ac8",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 31633
+      },
+      "turn": "019f928b-3b49-7351-939b-18da6d56481b",
+      "status": "observed-full-read",
+      "changes": [
+        {
+          "path": "internal/tui/transport_ipc_windows.go",
+          "before": "f48bcb3a0d83712bb70e4553f9337df07c6c3bc1648d6628b3f9d3a6f7591c39",
+          "after": "d852ad477f38bfea37b8624407a6d7b27c1139448fbf017bf49671be6a6f6063",
+          "method": "observed-full-read"
+        },
+        {
+          "path": "internal/tui/transport_api.go",
+          "before": "b845448abb1e3405435fc01ccd343357c09bf7b3ede2fa067772772bf7a80b39",
+          "after": "5c388065172ef6f68f5c219dc438960c99ba1e9d24458950547bff96d7a034a7",
+          "method": "observed-full-read"
+        },
+        {
+          "path": "internal/tui/transport_standalone_windows.go",
+          "before": "d9d372de852318e31b58d9c033ffdc215199b2bc362bdf5e28e25cb3936c3b71",
+          "after": "4588d2b448b208acb8edd8f386f04b463bda37468ad140881b9f1f7f45f9fb8a",
+          "method": "observed-full-read"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_sJ161m6D3QKKOed1abnZh6dk:0",
+      "time": "2026-07-24T05:23:19.323Z",
+      "orderTime": "2026-07-24T05:23:19.323Z",
+      "timeBasis": "record",
+      "hash": "3c04731ace837fa496914d684206cdd4da897745253d711db957942e850bad4e",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 31823
+      },
+      "turn": "019f928b-3b49-7351-939b-18da6d56481b",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/tui/settings.go",
+          "before": null,
+          "after": "9083445a2d7f52eab777bbfa17487d772562df52db16f830418eaf966852ce0d",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_A52vTJVM4kJ3lDRHBpRMBh8c:0",
+      "time": "2026-07-24T05:24:51.127Z",
+      "orderTime": "2026-07-24T05:24:51.127Z",
+      "timeBasis": "record",
+      "hash": "f936bb24ec5b196f87cb02804aea985b069aa4f417041882a009a20d8d950f4e",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 31841
+      },
+      "turn": "019f928b-3b49-7351-939b-18da6d56481b",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/tui/commands.go",
+          "before": null,
+          "after": "4d59a82506fabc2a1d8b60537def2e763925c538599988297a36b8df552a0fd7",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_cp70GWkkcA6kiO7rkXxJSbdt:0",
+      "time": "2026-07-24T05:26:20.036Z",
+      "orderTime": "2026-07-24T05:26:20.036Z",
+      "timeBasis": "record",
+      "hash": "0705718251736c63d054075ffb53ebd5e9c1935f55f2cb7fdcda6e68b17dab5e",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 31863
+      },
+      "turn": "019f928b-3b49-7351-939b-18da6d56481b",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/tui/device.go",
+          "before": null,
+          "after": "a623829bdf37ed1622c3c071b18b111bbfc66841f6c57e4fb0abd6d2973a6771",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_WVjTV87BZV5kNMztpJmmWrVN:0",
+      "time": "2026-07-24T05:28:46.811Z",
+      "orderTime": "2026-07-24T05:28:46.811Z",
+      "timeBasis": "record",
+      "hash": "0422ea42a41aad347560716726439fc8566c1f0baed8de3932b6b408ff1590c9",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 31915
+      },
+      "turn": "019f928b-3b49-7351-939b-18da6d56481b",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/tui/commands.go",
+          "before": "4d59a82506fabc2a1d8b60537def2e763925c538599988297a36b8df552a0fd7",
+          "after": "6bc1aa0ba2d82a83d1948e29993aa5640c7b2eaf0f91e6a92f9d94a5819b52b6",
+          "method": "patch"
+        },
+        {
+          "path": "internal/tui/device.go",
+          "before": "a623829bdf37ed1622c3c071b18b111bbfc66841f6c57e4fb0abd6d2973a6771",
+          "after": "00d39ee142c8032623462fc65d3638ea290b679c70f5753820185176ab8d1bae",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_ApHbofkW90jJ4tpsDO6ljhhn:0",
+      "time": "2026-07-24T05:29:27.276Z",
+      "orderTime": "2026-07-24T05:29:27.276Z",
+      "timeBasis": "record",
+      "hash": "e2b6f43ee980a20b0c3b8adf6f03a4670e8a5bd358c32b9fcb8d396e913101d0",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 31935
+      },
+      "turn": "019f928b-3b49-7351-939b-18da6d56481b",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/tui/settings.go",
+          "before": "9083445a2d7f52eab777bbfa17487d772562df52db16f830418eaf966852ce0d",
+          "after": "05c3b0584658e7dbd9509606d5463b86e70f8bdb14152e13e229a97862e85acb",
+          "method": "patch"
+        },
+        {
+          "path": "internal/tui/commands.go",
+          "before": "6bc1aa0ba2d82a83d1948e29993aa5640c7b2eaf0f91e6a92f9d94a5819b52b6",
+          "after": "cf6ed780a2ac78cf8da865fd77181e172a9b139c830bcdd2949c75b506f8b123",
+          "method": "patch"
+        },
+        {
+          "path": "internal/tui/device.go",
+          "before": "00d39ee142c8032623462fc65d3638ea290b679c70f5753820185176ab8d1bae",
+          "after": "eb43917442622c005cd6c45aeebee9b1b23eade85e10940977e2d5dc58a485eb",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_rCYDLWTJTcc4VxAO7jIBvzGd:0",
+      "time": "2026-07-24T05:29:32.284Z",
+      "orderTime": "2026-07-24T05:29:32.284Z",
+      "timeBasis": "record",
+      "hash": "ab8d17f2f28e8fc274c69a219aa28176d1d2258ffdeec6988514d3eba18f9b1f",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 31940
+      },
+      "turn": "019f928b-3b49-7351-939b-18da6d56481b",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/tui/settings.go",
+          "before": "05c3b0584658e7dbd9509606d5463b86e70f8bdb14152e13e229a97862e85acb",
+          "after": "60fed6f27458250b5d0e5b7d7e683300321b4404aeb99e23f06afb6cba153831",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_mj1dzmX0xm6BGkxvbCluDXD5:0",
+      "time": "2026-07-24T05:29:46.653Z",
+      "orderTime": "2026-07-24T05:29:46.653Z",
+      "timeBasis": "record",
+      "hash": "6a127f9a13d3045550dcbe04398d3f538abfa45ee98eefcd3e498f58e4f177f3",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 31949
+      },
+      "turn": "019f928b-3b49-7351-939b-18da6d56481b",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/tui/settings.go",
+          "before": "60fed6f27458250b5d0e5b7d7e683300321b4404aeb99e23f06afb6cba153831",
+          "after": "1e29d555e9e777c053bca721328c3f22f3391deb4f18e476291b51ffd9829869",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_ggR7GrHpdNZrpKU5o0jSfuni:0",
+      "time": "2026-07-24T05:31:45.879Z",
+      "orderTime": "2026-07-24T05:31:45.879Z",
+      "timeBasis": "record",
+      "hash": "9b0c125cc25cd6a2d0e4925d6d057665fabc68788c15354b6be0f9a5fa778af5",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 31984
+      },
+      "turn": "019f928b-3b49-7351-939b-18da6d56481b",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/tui/workspace_test.go",
+          "before": null,
+          "after": "59cc2d8b36c944237d28e7edcdef194f254ee8202e31562abe89f6347c1efde1",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_12UZ1kfmYjRn6KPzheuJetIz:0",
+      "time": "2026-07-24T05:32:00.604Z",
+      "orderTime": "2026-07-24T05:32:00.604Z",
+      "timeBasis": "record",
+      "hash": "04a00ddb4785dd3d110199dee4b549e6b90ea68867b7421460bb8d9138e41180",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 31993
+      },
+      "turn": "019f928b-3b49-7351-939b-18da6d56481b",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/tui/workspace_test.go",
+          "before": "59cc2d8b36c944237d28e7edcdef194f254ee8202e31562abe89f6347c1efde1",
+          "after": "4466799d2ace3dd354c90345312f5d5c0ddf8997eb3685eb179834b80bfa9af6",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_v0zmsPktckTwpKDUXkd068h6:0",
+      "time": "2026-07-24T05:33:22.133Z",
+      "orderTime": "2026-07-24T05:33:22.133Z",
+      "timeBasis": "record",
+      "hash": "0d4ce86bbd7e115cc19ced04d938aad89add5215032a8f7adc17cc96986f6089",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 32017
+      },
+      "turn": "019f928b-3b49-7351-939b-18da6d56481b",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/tui/transport_standalone_windows.go",
+          "before": "4588d2b448b208acb8edd8f386f04b463bda37468ad140881b9f1f7f45f9fb8a",
+          "after": "8135448f9687781c62f37c62a31f23e86177ecbf9bc8c569b89f5e40fe44a379",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_HkNIG3TMiw4slDo6NInNMk5V:0",
+      "time": "2026-07-24T05:33:39.648Z",
+      "orderTime": "2026-07-24T05:33:39.648Z",
+      "timeBasis": "record",
+      "hash": "a6e02fabbc00bc7c6b4082512c5cd8ea973e11c63d815275313f692214a8ae9a",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 32024
+      },
+      "turn": "019f928b-3b49-7351-939b-18da6d56481b",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/tui/transport_standalone_windows.go",
+          "before": "8135448f9687781c62f37c62a31f23e86177ecbf9bc8c569b89f5e40fe44a379",
+          "after": "023a9026ea03ad76c6f399e50b2fd88c0cf80b3ea742a4660255cecea680b9b7",
+          "method": "patch"
+        }
+      ],
+      "problems": [
+        {
+          "path": "internal/tui/transport.go",
+          "reason": "hunk context not found"
+        }
+      ]
+    },
+    {
+      "id": "call_CIS2zjqQKKTrHq2UaNCfD9mC:0",
+      "time": "2026-07-24T05:33:52.240Z",
+      "orderTime": "2026-07-24T05:33:52.240Z",
+      "timeBasis": "record",
+      "hash": "4aa5b3a62be8ad87e0eb3d6945f12f5e826d63d6f5b4a84b69ac853f86df5fb0",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 32029
+      },
+      "turn": "019f928b-3b49-7351-939b-18da6d56481b",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/tui/commands.go",
+          "before": "cf6ed780a2ac78cf8da865fd77181e172a9b139c830bcdd2949c75b506f8b123",
+          "after": "7d28a21588da50bf268b86e007a545dd5e9cf6a2d656a9dc5f02f63c8189092f",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_6S5CHyDEOe8TL7NOBQbvh7GE:0",
+      "time": "2026-07-24T05:35:11.260Z",
+      "orderTime": "2026-07-24T05:35:11.260Z",
+      "timeBasis": "record",
+      "hash": "678f235a71b145b6d25d085d4b3697afe34edefa52b2f3ad8c4aa4849bf33cd6",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 32058
+      },
+      "turn": "019f928b-3b49-7351-939b-18da6d56481b",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/tui/commands.go",
+          "before": "7d28a21588da50bf268b86e007a545dd5e9cf6a2d656a9dc5f02f63c8189092f",
+          "after": "b691d6e391ba53ea0c36346d21b8a52a09f4d6b436ba09688c09ac56e919a383",
+          "method": "patch-after-gofmt"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_aEjSJ4Jxg390JE7VWvcjXVmu:0",
+      "time": "2026-07-24T05:35:59.180Z",
+      "orderTime": "2026-07-24T05:35:59.180Z",
+      "timeBasis": "record",
+      "hash": "86d95c02af6e57197406cee69da909d7e42985565a89f21185a0870fbe4fe6eb",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 32082
+      },
+      "turn": "019f928b-3b49-7351-939b-18da6d56481b",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/tui/settings.go",
+          "before": "1e29d555e9e777c053bca721328c3f22f3391deb4f18e476291b51ffd9829869",
+          "after": "3b3df3b1b983fc126c18df00c0e608caf51cde405ce8eb5f6b7e5186ed2edc85",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_8aq8GgFLgh7BziVfRkxdFfkr:0",
+      "time": "2026-07-24T05:36:07.297Z",
+      "orderTime": "2026-07-24T05:36:07.297Z",
+      "timeBasis": "record",
+      "hash": "c72b10f234260dcead7c2e44b44410883be19d9c42d0ea0e92d72c0fb57dc545",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 32087
+      },
+      "turn": "019f928b-3b49-7351-939b-18da6d56481b",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/tui/settings.go",
+          "before": "3b3df3b1b983fc126c18df00c0e608caf51cde405ce8eb5f6b7e5186ed2edc85",
+          "after": "8fe827ec1571ff9a847dc35cc42fce28320b602be40e3e2528316dc20ecb2b12",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_gjnkxmQ66Ux652RfJDUQjilL:0",
+      "time": "2026-07-24T05:36:15.104Z",
+      "orderTime": "2026-07-24T05:36:15.104Z",
+      "timeBasis": "record",
+      "hash": "c1d09a7a847f585c3fc7a4ebffc48cc75f6fbdb0edc4c68259b3b59da18e60e9",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 32092
+      },
+      "turn": "019f928b-3b49-7351-939b-18da6d56481b",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/tui/device.go",
+          "before": "eb43917442622c005cd6c45aeebee9b1b23eade85e10940977e2d5dc58a485eb",
+          "after": "07b12fe5cf953e764d54b0bc8b1ca194a27b9bf1b82ff517ed7db5cf57e0dc82",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_CHyQpW82sTPico9S6Dtu4ov5:0",
+      "time": "2026-07-24T05:36:18.382Z",
+      "orderTime": "2026-07-24T05:36:18.382Z",
+      "timeBasis": "record",
+      "hash": "72266a01c0c90914d98c3968c235a32745d9ec3d8618d545f8432776e8b1e4ed",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 32097
+      },
+      "turn": "019f928b-3b49-7351-939b-18da6d56481b",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/tui/device.go",
+          "before": "07b12fe5cf953e764d54b0bc8b1ca194a27b9bf1b82ff517ed7db5cf57e0dc82",
+          "after": "c6e23390f8d3288191ff1af18f4dade9ff47a0e9999500136ca990b4ea1e6a12",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_tSCIXAmbCRWB3yNjQ4ylZ7M8:0",
+      "time": "2026-07-24T05:43:56.002Z",
+      "orderTime": "2026-07-24T05:43:56.002Z",
+      "timeBasis": "record",
+      "hash": "5b5200ef1811177c3b1246956dbcd5bd05d208211cd4a3fb6341c0e3abc7cef1",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 32299
+      },
+      "turn": "019f928b-3b49-7351-939b-18da6d56481b",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/tui/settings.go",
+          "before": "8fe827ec1571ff9a847dc35cc42fce28320b602be40e3e2528316dc20ecb2b12",
+          "after": "89fc5b03cbbb2999271e09697de92fd95a2c0475c8b99d6b9afcb55dad4a3f4d",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_qi4KPvl7sBIvAIJ1wO1ddslV:0",
+      "time": "2026-07-24T05:44:14.946Z",
+      "orderTime": "2026-07-24T05:44:14.946Z",
+      "timeBasis": "record",
+      "hash": "9386ff70f8c0fc4f7c569a44f44b04c2010ce3902e04621669a6768c32933d8a",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 32304
+      },
+      "turn": "019f928b-3b49-7351-939b-18da6d56481b",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/tui/workspace_test.go",
+          "before": "4466799d2ace3dd354c90345312f5d5c0ddf8997eb3685eb179834b80bfa9af6",
+          "after": "1521831df07728a469b76c7742e3d25288ac458bb3c69217ff9cbb785a807d43",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_UigmteSbxnyLdAmVahpEDohW:0",
+      "time": "2026-07-24T05:44:56.704Z",
+      "orderTime": "2026-07-24T05:44:56.704Z",
+      "timeBasis": "record",
+      "hash": "7951f1b5072d583cca84b8435605b37073e868e65da27084d186611e5ec31803",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 32320
+      },
+      "turn": "019f928b-3b49-7351-939b-18da6d56481b",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/commands/dispatcher.go",
+          "before": "5c46ff599cf9754469ab8351afb11a5174b2ac979cca47cac26ac6d6d801ecc6",
+          "after": "10da0958eb18faf41406d9e120055728802a812e32d3fa2838f9556eed7a8f8e",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_GnxJFBGUfwR4051hVRmdPKmW:0",
+      "time": "2026-07-24T05:45:05.259Z",
+      "orderTime": "2026-07-24T05:45:05.259Z",
+      "timeBasis": "record",
+      "hash": "cca54ce3d187bb9451dbc07ecd278e8234b38d104e0c0cc359890e5f47feb903",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 32325
+      },
+      "turn": "019f928b-3b49-7351-939b-18da6d56481b",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/tui/transport_standalone_windows.go",
+          "before": "023a9026ea03ad76c6f399e50b2fd88c0cf80b3ea742a4660255cecea680b9b7",
+          "after": "48646d6b3e738745ccc0e904604a67542b2ccf9c6fdecb2d4ce373c4a3639372",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_XHo5CbDQjkhn55rN4XOvXORc:0",
+      "time": "2026-07-24T05:45:13.392Z",
+      "orderTime": "2026-07-24T05:45:13.392Z",
+      "timeBasis": "record",
+      "hash": "943ddfa6288fad2e6f184e098b99a6fc32fcbf9e699d2bbd857139f040b6b80e",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 32330
+      },
+      "turn": "019f928b-3b49-7351-939b-18da6d56481b",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/commands/dispatcher_test.go",
+          "before": "c845fdf7d79158a58f10c18943a31c1b8d6d33cee939d9f52077ced262927062",
+          "after": "607e822aedff293cef2e20f9207055be992362706f02e9d1c0cf01353bf0da2b",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_gEecuUeJIMlDWNpcqi32wRLo:0",
+      "time": "2026-07-24T05:46:07.070Z",
+      "orderTime": "2026-07-24T05:46:07.070Z",
+      "timeBasis": "record",
+      "hash": "e2040a90ad33d1a76610002d90b93c315f211c859e6ea475b4fc2e0175864e79",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 32358
+      },
+      "turn": "019f928b-3b49-7351-939b-18da6d56481b",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/commands/dispatcher.go",
+          "before": "10da0958eb18faf41406d9e120055728802a812e32d3fa2838f9556eed7a8f8e",
+          "after": "d84e9cad796e46ee950e8dd34fe5a988d1404d2117aab934d5d82903daa712c3",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_rhY8rYxLcZyMo5JMvYYcgAVC:0",
+      "time": "2026-07-24T05:46:13.843Z",
+      "orderTime": "2026-07-24T05:46:13.843Z",
+      "timeBasis": "record",
+      "hash": "161fe75b04383f4c043bcbee1994b7105eeefaf095a0462bda23f25ec24a271e",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 32363
+      },
+      "turn": "019f928b-3b49-7351-939b-18da6d56481b",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/ui/shell_windows.go",
+          "before": "0fc1c746dee15d22c935b7155fdc14dbc19a4d201c0f85601ebbb4f0247b6dfc",
+          "after": "a807adcc5d0490697eb70f5a6501434404ff9701bce4c147946112e48f6647d5",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_DTDuva4wT6gWNHFDT1sricx8:0",
+      "time": "2026-07-24T05:46:17.813Z",
+      "orderTime": "2026-07-24T05:46:17.813Z",
+      "timeBasis": "record",
+      "hash": "e5eb18dbc918986ae80e83d15451dae0b9f165d08d25355d54c2fb575929750c",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 32368
+      },
+      "turn": "019f928b-3b49-7351-939b-18da6d56481b",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/tui/transport_standalone_windows.go",
+          "before": "48646d6b3e738745ccc0e904604a67542b2ccf9c6fdecb2d4ce373c4a3639372",
+          "after": "b7c316f91bb738fbabc23f785a515369b0ade99e824548a8c9aaa22b605f69ef",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_F7j8nZJmLlwZjBygBWAmfXz7:0",
+      "time": "2026-07-24T05:46:35.132Z",
+      "orderTime": "2026-07-24T05:46:35.132Z",
+      "timeBasis": "record",
+      "hash": "71a5636a44e9a6a68c588bf6a8fed90224d3be5d92ae0d493b7bff8907581802",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 32383
+      },
+      "turn": "019f928b-3b49-7351-939b-18da6d56481b",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/tui/commands.go",
+          "before": "b691d6e391ba53ea0c36346d21b8a52a09f4d6b436ba09688c09ac56e919a383",
+          "after": "8261f906d103ab948264214db82d0ecf526eda5d5519ea1c496416d51fdc8f76",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_3VrQO5v3Y6tXoMDAIb6A064H:0",
+      "time": "2026-07-24T05:47:14.996Z",
+      "orderTime": "2026-07-24T05:47:14.996Z",
+      "timeBasis": "record",
+      "hash": "15eea84fe3174f2d4bd78fc837bc314f75a3edfb60972584503c650d1c936cf9",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 32408
+      },
+      "turn": "019f928b-3b49-7351-939b-18da6d56481b",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/commands/dispatcher_test.go",
+          "before": "607e822aedff293cef2e20f9207055be992362706f02e9d1c0cf01353bf0da2b",
+          "after": "8a67d6d5819490a7ecc5dca1e27c9dd14d77619906ac2a88968c75fb30d0f27d",
+          "method": "patch-whitespace-normalized"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_CMItJbwAgqrPS2nwpCAvQUfE:0",
+      "time": "2026-07-24T05:47:43.323Z",
+      "orderTime": "2026-07-24T05:47:43.323Z",
+      "timeBasis": "record",
+      "hash": "80f7ba38daa07ac89e2d2c36af5ddc6861f88ac2a5ddc993a11ae23ae9bf8958",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 32422
+      },
+      "turn": "019f928b-3b49-7351-939b-18da6d56481b",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/tui/workspace_test.go",
+          "before": "1521831df07728a469b76c7742e3d25288ac458bb3c69217ff9cbb785a807d43",
+          "after": "8277c7927fc18e896730c180f6196864e5403b57e7459f502d27e1b0ef6495d8",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_mxqqzm0XRb3dsaZL3lwNit5F:0",
+      "time": "2026-07-24T05:14:04.387Z",
+      "orderTime": "2026-07-24T05:48:12.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "e8d53f80cf357f3b6de3239271282c77bdfb0c9efc5ca6f9556c3893bfecc0b7",
+      "source": {
+        "session": "019f928b-825a-79c1-9ea2-10f3a7a7e828",
+        "line": 155
+      },
+      "turn": "019f92a5-bd65-74f0-bf04-aa06bd6525bf",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/tui/device.go",
+          "before": "c6e23390f8d3288191ff1af18f4dade9ff47a0e9999500136ca990b4ea1e6a12",
+          "after": "96a3a844565c79769b10581d60098cceaca919e553acf8424a5efdc0bbef6fa2",
+          "method": "patch"
+        },
+        {
+          "path": "internal/tui/workspace_test.go",
+          "before": "8277c7927fc18e896730c180f6196864e5403b57e7459f502d27e1b0ef6495d8",
+          "after": "955f6b5dfdcd2fde19e5a910980d9d786a7e74187e21c7cd115814fc7f583bb8",
+          "method": "patch"
+        }
+      ],
+      "problems": [
+        {
+          "path": "internal/tui/model.go",
+          "reason": "hunk context not found"
+        }
+      ]
+    },
+    {
+      "id": "call_q4ebj6JaXlAovQMjxOj8nPix:0",
+      "time": "2026-07-24T05:14:04.387Z",
+      "orderTime": "2026-07-24T05:49:57.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "071d7590d606896820c582c22a671f56853f43e84317a0d2b8bb91f4783c45bb",
+      "source": {
+        "session": "019f928b-825a-79c1-9ea2-10f3a7a7e828",
+        "line": 175
+      },
+      "turn": "019f92a5-bd65-74f0-bf04-aa06bd6525bf",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/tui/workspace_test.go",
+          "before": "955f6b5dfdcd2fde19e5a910980d9d786a7e74187e21c7cd115814fc7f583bb8",
+          "after": "af20aaec57f830fc20e91641085f1649af521af00de7498a8c20cbeffec4fb48",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_2HzNNO7d2djSLQDJ91txJF8K:0",
+      "time": "2026-07-24T05:14:10.166Z",
+      "orderTime": "2026-07-24T05:50:24.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "5d7f28e4756597571e1f9d6ee79326a1292f8e2e1db5a517e9488329c023b4bd",
+      "source": {
+        "session": "019f928b-98d3-70a2-b280-6019b78961e8",
+        "line": 480
+      },
+      "turn": "019f92a1-6171-7720-9f61-8099ea9a5209",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/tui/transport_standalone_lifecycle_windows_test.go",
+          "before": null,
+          "after": "328fffc420e6f1265e7c7e6b4b39062a67d8a3327df2447c2e5aed9a64da42f7",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_WHUfHBkUDHe1L0VCFaSziMnY:0",
+      "time": "2026-07-24T05:14:04.387Z",
+      "orderTime": "2026-07-24T05:50:31.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "90f3665404afc63ede9736f53f1e58646be7d0446495e120c84cb45e249a6594",
+      "source": {
+        "session": "019f928b-825a-79c1-9ea2-10f3a7a7e828",
+        "line": 184
+      },
+      "turn": "019f92a5-bd65-74f0-bf04-aa06bd6525bf",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/tui/workspace_test.go",
+          "before": "af20aaec57f830fc20e91641085f1649af521af00de7498a8c20cbeffec4fb48",
+          "after": "f60a014b25f471f6a7a6754430c5d310f2ab7cddc1f6c852d04aeba2e39c7c97",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_6brwaJM3xNJSwI2fPpCkw47X:0",
+      "time": "2026-07-24T06:02:32.888Z",
+      "orderTime": "2026-07-24T06:02:32.888Z",
+      "timeBasis": "record",
+      "hash": "6e0b1c06740972b76aa209030d55dea75c5b6981e6bba44e8569780b6316bd13",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 32734
+      },
+      "turn": "019f928b-3b49-7351-939b-18da6d56481b",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "tools/build.ps1",
+          "before": "41f708aba07d7408eafda02b8b490e2d6d7a21573cbc92a2f260a67479c9ad0e",
+          "after": "338643b80dfc755ed7976b0ffa5af9bf54dcc77bb4b64490e4ea0d6d78ea00e8",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    }
+  ],
+  "finalChanges": [
+    {
+      "path": "internal/tui/transport_ipc_windows.go",
+      "sha256": "d852ad477f38bfea37b8624407a6d7b27c1139448fbf017bf49671be6a6f6063"
+    },
+    {
+      "path": "internal/tui/transport_api.go",
+      "sha256": "5c388065172ef6f68f5c219dc438960c99ba1e9d24458950547bff96d7a034a7"
+    },
+    {
+      "path": "internal/tui/transport_standalone_windows.go",
+      "sha256": "b7c316f91bb738fbabc23f785a515369b0ade99e824548a8c9aaa22b605f69ef"
+    },
+    {
+      "path": "internal/tui/settings.go",
+      "sha256": "89fc5b03cbbb2999271e09697de92fd95a2c0475c8b99d6b9afcb55dad4a3f4d"
+    },
+    {
+      "path": "internal/tui/commands.go",
+      "sha256": "8261f906d103ab948264214db82d0ecf526eda5d5519ea1c496416d51fdc8f76"
+    },
+    {
+      "path": "internal/tui/device.go",
+      "sha256": "96a3a844565c79769b10581d60098cceaca919e553acf8424a5efdc0bbef6fa2"
+    },
+    {
+      "path": "internal/tui/workspace_test.go",
+      "sha256": "f60a014b25f471f6a7a6754430c5d310f2ab7cddc1f6c852d04aeba2e39c7c97"
+    },
+    {
+      "path": "internal/commands/dispatcher.go",
+      "sha256": "d84e9cad796e46ee950e8dd34fe5a988d1404d2117aab934d5d82903daa712c3"
+    },
+    {
+      "path": "internal/commands/dispatcher_test.go",
+      "sha256": "8a67d6d5819490a7ecc5dca1e27c9dd14d77619906ac2a88968c75fb30d0f27d"
+    },
+    {
+      "path": "internal/ui/shell_windows.go",
+      "sha256": "a807adcc5d0490697eb70f5a6501434404ff9701bce4c147946112e48f6647d5"
+    },
+    {
+      "path": "internal/tui/transport_standalone_lifecycle_windows_test.go",
+      "sha256": "328fffc420e6f1265e7c7e6b4b39062a67d8a3327df2447c2e5aed9a64da42f7"
+    },
+    {
+      "path": "tools/build.ps1",
+      "sha256": "338643b80dfc755ed7976b0ffa5af9bf54dcc77bb4b64490e4ea0d6d78ea00e8"
+    }
+  ]
+}

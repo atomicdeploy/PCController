@@ -1,0 +1,1176 @@
+{
+  "turn": "019f924e-1d49-73a1-a883-848943d1ed8b",
+  "observedStart": "2026-07-24T04:07:00.739Z",
+  "observedEnd": "2026-07-24T04:40:26.995Z",
+  "title": "build: recover ANSI-safe tooling and Linux cross-compilation",
+  "events": [
+    {
+      "id": "call_nINrW8Ls5lI8KZQF9F85LXSb:0",
+      "time": "2026-07-24T04:10:10.667Z",
+      "orderTime": "2026-07-24T04:10:10.667Z",
+      "timeBasis": "record",
+      "hash": "a6d764ca28e454b886616984b7db11163d9ba454233129be427ae6d528a6deb2",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 30281
+      },
+      "turn": "019f924e-1d49-73a1-a883-848943d1ed8b",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "tools/terminal.ps1",
+          "before": null,
+          "after": "82b81d3d2dd0fc1d96c266155748bdda0901ce395d03d061639f56f598150c68",
+          "method": "patch"
+        },
+        {
+          "path": "tools/test-terminal.ps1",
+          "before": null,
+          "after": "7ac130390c0e31c3f4a574263af03b5844a2e1587106b8f55766cb9a6874c582",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_IIZUKikWZCt8frsqI1MiFz9m:0",
+      "time": "2026-07-24T04:07:16.844Z",
+      "orderTime": "2026-07-24T04:10:49.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "aa1946a9bc1ee091c9bfffff8e58d06bd8c622b016342338798c5661eebbf536",
+      "source": {
+        "session": "019f924e-5be2-7ad1-af71-3cf000614741",
+        "line": 137
+      },
+      "turn": "019f924e-5c8a-7a52-9af9-dab651d690f6",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/terminal/policy.go",
+          "before": null,
+          "after": "b676e555a3f3816ce9de63f5274ea450b546b5373ba012626ee3f75425e407f8",
+          "method": "patch"
+        },
+        {
+          "path": "internal/terminal/vt_windows.go",
+          "before": null,
+          "after": "d792006b63ac2ec1104a4809148233244e2adbcfc01413801a4ee4f9ebdcd0c7",
+          "method": "patch"
+        },
+        {
+          "path": "internal/terminal/vt_other.go",
+          "before": null,
+          "after": "611d76689986339d6eea621007276669b426b40d0129e2ff986fcfb4c28a6853",
+          "method": "patch"
+        },
+        {
+          "path": "internal/terminal/policy_test.go",
+          "before": null,
+          "after": "62c46d5d831c9f81cbc5dcc219aa11d696bafdafa431f6c0e12db479826162c3",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_OIE2Q2WqKJiiDfLjQABLzPLX:0",
+      "time": "2026-07-24T04:11:09.042Z",
+      "orderTime": "2026-07-24T04:11:09.042Z",
+      "timeBasis": "record",
+      "hash": "dcd9374ed4bceac04b41732647eab19453f38b332704b141b6189bc329ed5886",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 30290
+      },
+      "turn": "019f924e-1d49-73a1-a883-848943d1ed8b",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "tools/build-web.ps1",
+          "before": "95c5b8c75732ef4593c3d2ebca3047032e34fbc0b39480888afbb299affb68da",
+          "after": "c39385ec029128698fabdb6d3a254947c580bd21d2e025713b0687e17c5791ea",
+          "method": "patch"
+        },
+        {
+          "path": "tools/export-web.ps1",
+          "before": "55a9eef85ae806922f73e810a22098a8ade3a67223fc21a430174f468be4bc1e",
+          "after": "0c8033cda24ae0f2eaa3a824961bb3a85983b170e8a338dd4b553c51a72eb024",
+          "method": "patch"
+        },
+        {
+          "path": "tools/generate-assets.ps1",
+          "before": "73e9456fd45d88cc47c7f01651f8e653477b0d9fdefef3190baa5f71e6a8d885",
+          "after": "66c7d7bcb95b72e4cc3f59b7d55017847a7457b964ac81f68aaa0add204ff715",
+          "method": "patch"
+        },
+        {
+          "path": "tools/install.ps1",
+          "before": "e7d5b833284d1cb169eda79a91989e8e2602a746b7989a479077ddd77acd358b",
+          "after": "e8bc1fe7a0e18b0874e859bbdb0a6c520628736a81615533b78b6ca9d768f2f9",
+          "method": "patch"
+        },
+        {
+          "path": "tools/uninstall.ps1",
+          "before": "0ed5aaf5a66c358adde06da120cce210d67d40ffe06085f61faeb0121f7edd42",
+          "after": "ad4738acbd20621c440e4b21f20c8075ff68ea402a1606f31d21055e84100924",
+          "method": "patch"
+        }
+      ],
+      "problems": [
+        {
+          "path": "tools/build.ps1",
+          "reason": "hunk context not found"
+        },
+        {
+          "path": "tools/package.ps1",
+          "reason": "hunk context not found"
+        }
+      ]
+    },
+    {
+      "id": "call_stvf7VMHLooNSwnJAL1LhO49:0",
+      "time": "2026-07-24T04:07:16.844Z",
+      "orderTime": "2026-07-24T04:11:50.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "f8b5f926c2f1608cfc650111ec23ce8e2797d8ba17d4ff1a4e3fab9573370de1",
+      "source": {
+        "session": "019f924e-5be2-7ad1-af71-3cf000614741",
+        "line": 144
+      },
+      "turn": "019f924e-5c8a-7a52-9af9-dab651d690f6",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/cli/cli.go",
+          "before": "5222742c448b3a3ef25f26d3c4d725348c3a2c21fd6f83f105754f7397d7fbab",
+          "after": "5cd791336e0a0de09d2427d0e11fa5575eb2e77741660b987c2828ddddf10922",
+          "method": "patch"
+        }
+      ],
+      "problems": [
+        {
+          "path": "internal/winfx/console_windows.go",
+          "reason": "missing preimage"
+        },
+        {
+          "path": "internal/tui/theme.go",
+          "reason": "missing preimage"
+        },
+        {
+          "path": "internal/tui/activity.go",
+          "reason": "missing preimage"
+        },
+        {
+          "path": "internal/tui/model.go",
+          "reason": "hunk context not found"
+        }
+      ]
+    },
+    {
+      "id": "call_mZj2A72N2ZniBIIPy0FZ68xs:0",
+      "time": "2026-07-24T04:07:23.399Z",
+      "orderTime": "2026-07-24T04:12:22.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "14107e36ea74c3b7b2fbf0f9c5f5af5bbd6f0f93f9342097fcf627834cfade51",
+      "source": {
+        "session": "019f924e-7570-7350-947c-71b35195b082",
+        "line": 184
+      },
+      "turn": "019f924e-7748-7e30-8d9c-566ddace4a62",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "tools/build-linux.sh",
+          "before": null,
+          "after": "05bdcf0f8f33e324d3e6e85e948060348259e53c7563e572bcc2a3bca292727e",
+          "method": "patch"
+        },
+        {
+          "path": "tools/verify-pe/main.go",
+          "before": null,
+          "after": "42a9f2eb78af9916c1c20ceb58d7a56531abd7d7bc583af2e4d51c4e8699a975",
+          "method": "patch"
+        },
+        {
+          "path": "tools/verify-pe/main_test.go",
+          "before": null,
+          "after": "c7cb8a030ba79badba30d3ac4fa2ee40e247f1173dcd0bb0a223437ce67bf5e6",
+          "method": "patch"
+        },
+        {
+          "path": "Makefile",
+          "before": null,
+          "after": "a92be5c5b2a6345aa09761c0c9e5ed0edf37864cde6b62ca59905c8a2bc03792",
+          "method": "patch"
+        },
+        {
+          "path": "README.md",
+          "before": "1a82d4748a2d0ea8eec6b52a97b001bb670960b9208182cd499d2e94dc7bf042",
+          "after": "ee3eb09b1a22319e929e60ae66fe8e1342290695f3848a4443df14fb794cee4c",
+          "method": "patch"
+        }
+      ],
+      "problems": [
+        {
+          "path": ".github/workflows/build.yml",
+          "reason": "hunk context not found"
+        },
+        {
+          "path": "docs/building.md",
+          "reason": "hunk context not found"
+        }
+      ]
+    },
+    {
+      "id": "call_hbWhNfq2Ik2dnzi29u8u7laG:0",
+      "time": "2026-07-24T04:07:16.844Z",
+      "orderTime": "2026-07-24T04:12:31.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "e7a7b1e5b732ee61db4ba0cacc651a5b17123f4e8e2fcf585ec5ee10b4c37ee3",
+      "source": {
+        "session": "019f924e-5be2-7ad1-af71-3cf000614741",
+        "line": 153
+      },
+      "turn": "019f924e-5c8a-7a52-9af9-dab651d690f6",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/cli/cli.go",
+          "before": "5cd791336e0a0de09d2427d0e11fa5575eb2e77741660b987c2828ddddf10922",
+          "after": "5677317ab3bcbd65633e2e2e8d57af38a66bf453c0d918d48162f7a9dd0c74f6",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_IxddC7Px2PTY6oVDr5sV3T2d:0",
+      "time": "2026-07-24T04:13:18.192Z",
+      "orderTime": "2026-07-24T04:13:18.192Z",
+      "timeBasis": "record",
+      "hash": "dc5ea5aff5f287642f2e9ff4e67a89221cea677685ec13f127cc308c10949f95",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 30331
+      },
+      "turn": "019f924e-1d49-73a1-a883-848943d1ed8b",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "tools/terminal.ps1",
+          "before": "82b81d3d2dd0fc1d96c266155748bdda0901ce395d03d061639f56f598150c68",
+          "after": "ffb1446a5051aad92f569eced36c1d659901c3aa9e6c9bfabee3be153d30788c",
+          "method": "patch"
+        },
+        {
+          "path": "tools/test-terminal.ps1",
+          "before": "7ac130390c0e31c3f4a574263af03b5844a2e1587106b8f55766cb9a6874c582",
+          "after": "797dac651ae1288ee0ef572e046d1f51de6315f0a7a86131bb45c536c3f33caf",
+          "method": "patch"
+        },
+        {
+          "path": "tools/build-web.ps1",
+          "before": "c39385ec029128698fabdb6d3a254947c580bd21d2e025713b0687e17c5791ea",
+          "after": "a0de6901988ff067235b980e1381e306d7d30d350b54200efa1830b5da6bf0b0",
+          "method": "patch"
+        },
+        {
+          "path": "tools/export-web.ps1",
+          "before": "0c8033cda24ae0f2eaa3a824961bb3a85983b170e8a338dd4b553c51a72eb024",
+          "after": "93957372d8d596caa4d9457f06899b28f3022db8c9eec638355d473680686e76",
+          "method": "patch"
+        },
+        {
+          "path": "tools/generate-assets.ps1",
+          "before": "66c7d7bcb95b72e4cc3f59b7d55017847a7457b964ac81f68aaa0add204ff715",
+          "after": "ef9c5401b1ea55a3633c35b717f1c73850fe11ea98a9a24428fb0b5d835eab08",
+          "method": "patch"
+        },
+        {
+          "path": "tools/install.ps1",
+          "before": "e8bc1fe7a0e18b0874e859bbdb0a6c520628736a81615533b78b6ca9d768f2f9",
+          "after": "f9c629d8662a5c08edcb53329502657320832b1666da355de10868a03c4fff6c",
+          "method": "patch"
+        },
+        {
+          "path": "tools/uninstall.ps1",
+          "before": "ad4738acbd20621c440e4b21f20c8075ff68ea402a1606f31d21055e84100924",
+          "after": "7aa1880cd5e06da1788709cea578253d265c84fd5c86eab3f05da5d250221e24",
+          "method": "patch"
+        }
+      ],
+      "problems": [
+        {
+          "path": "tools/build.ps1",
+          "reason": "hunk context not found"
+        },
+        {
+          "path": "tools/package.ps1",
+          "reason": "hunk context not found"
+        }
+      ]
+    },
+    {
+      "id": "call_FX1yiovi9TkXoBwm9gWRlIZ2:0",
+      "time": "2026-07-24T04:13:26.990Z",
+      "orderTime": "2026-07-24T04:13:26.990Z",
+      "timeBasis": "record",
+      "hash": "7323a02588fe5749caae9a1cfc3a90f3fa141e2417b37ba17ce24b035f28548e",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 30340
+      },
+      "turn": "019f924e-1d49-73a1-a883-848943d1ed8b",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "tools/test-terminal.ps1",
+          "before": "797dac651ae1288ee0ef572e046d1f51de6315f0a7a86131bb45c536c3f33caf",
+          "after": "a983ced0ab10c11041e9b05226bfb34e979c78a7a9babbc5fa615956a8aaeda8",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_WHkXlaWxFmC8ZQUEJz75pShN:0",
+      "time": "2026-07-24T04:07:16.844Z",
+      "orderTime": "2026-07-24T04:13:55.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "7ee5b1cedf81f75bcc1eb7eed5cf05c0d400e3700c34623713894509f4dc4ef8",
+      "source": {
+        "session": "019f924e-5be2-7ad1-af71-3cf000614741",
+        "line": 191
+      },
+      "turn": "019f924e-5c8a-7a52-9af9-dab651d690f6",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/cli/cli_test.go",
+          "before": "101420d8da71e948fc6fc9e1e7f9bbd7915747d5d466518eea9a0e8d3eb699ba",
+          "after": "389ffcf60520d397161a5300bf95a89237787f4f827da88226cdd8dacfdfc9cf",
+          "method": "patch"
+        }
+      ],
+      "problems": [
+        {
+          "path": "internal/tui/activity_test.go",
+          "reason": "missing preimage"
+        }
+      ]
+    },
+    {
+      "id": "call_ACWZtG4OKQPVfNLBozeyx8pc:0",
+      "time": "2026-07-24T04:14:40.372Z",
+      "orderTime": "2026-07-24T04:14:40.372Z",
+      "timeBasis": "record",
+      "hash": "14179d9404ee101dbc770fccd52b385526daa46b2458fce666afee39c47d0363",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 30368
+      },
+      "turn": "019f924e-1d49-73a1-a883-848943d1ed8b",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "tools/test-terminal.ps1",
+          "before": "a983ced0ab10c11041e9b05226bfb34e979c78a7a9babbc5fa615956a8aaeda8",
+          "after": "bbe5dd045a6e310fee44ea3aae2659c1c32e4541faeba04601c3d4578261ee3a",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_5fw3Z7H2Q4yIyd7Ga6YGagYQ:0",
+      "time": "2026-07-24T04:14:56.944Z",
+      "orderTime": "2026-07-24T04:14:56.944Z",
+      "timeBasis": "record",
+      "hash": "99978c93803fa55c57638204256589e10dfa0a5f475a0bd8586cb829c2d59d6a",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 30378
+      },
+      "turn": "019f924e-1d49-73a1-a883-848943d1ed8b",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "tools/terminal.ps1",
+          "before": "ffb1446a5051aad92f569eced36c1d659901c3aa9e6c9bfabee3be153d30788c",
+          "after": "953788ad456980d27be1078e74b77d030b42582d6abc4d80f9a54ee9f5e6c9b3",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_YrlXpxdXtvrWTZjPSKkUW55G:0",
+      "time": "2026-07-24T04:07:23.399Z",
+      "orderTime": "2026-07-24T04:16:17.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "edaf17b1c2233b65e520f0192d573176d16530a47fb469980771720c88437864",
+      "source": {
+        "session": "019f924e-7570-7350-947c-71b35195b082",
+        "line": 209
+      },
+      "turn": "019f924e-7748-7e30-8d9c-566ddace4a62",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "tools/terminal.sh",
+          "before": null,
+          "after": "463d3a6ba7a9df0feeb01c62ef619950b0bb985e0a58ad5ffb0159c55e6c240b",
+          "method": "patch"
+        },
+        {
+          "path": "tools/test-terminal.sh",
+          "before": null,
+          "after": "ef0a91db4d7e7768a409263dbfa4eb44b5847df58618e9414b138d6c914191cb",
+          "method": "patch"
+        },
+        {
+          "path": "tools/build-linux.sh",
+          "before": "05bdcf0f8f33e324d3e6e85e948060348259e53c7563e572bcc2a3bca292727e",
+          "after": "fd4aaf8d737a6e364e11ac66bf5362d40fa7280866e38143cf5e711d4abffe71",
+          "method": "patch"
+        }
+      ],
+      "problems": [
+        {
+          "path": ".github/workflows/build.yml",
+          "reason": "hunk context not found"
+        }
+      ]
+    },
+    {
+      "id": "call_0gPhYOlilEbC4Spy3Arm4DOn:0",
+      "time": "2026-07-24T04:07:16.844Z",
+      "orderTime": "2026-07-24T04:16:17.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "82ef2c64b80748f1f84c7ce537347d9af409a397f903a77ef57efe0f6f82f928",
+      "source": {
+        "session": "019f924e-5be2-7ad1-af71-3cf000614741",
+        "line": 266
+      },
+      "turn": "019f924e-5c8a-7a52-9af9-dab651d690f6",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/tui/run_test.go",
+          "before": null,
+          "after": "2d645e6b27b7a4d17afc027e8393471d6b19b7beec6bbf359cee1c8588ee832a",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_r8hCeF7bYYeMHMkdksl9oFl4:0",
+      "time": "2026-07-24T04:07:23.399Z",
+      "orderTime": "2026-07-24T04:17:25.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "4a91d0d89bd9e63402edd9a320e67e92333440cd4b0c42dfbf80abb0e5882902",
+      "source": {
+        "session": "019f924e-7570-7350-947c-71b35195b082",
+        "line": 245
+      },
+      "turn": "019f924e-7748-7e30-8d9c-566ddace4a62",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "tools/terminal.sh",
+          "before": "463d3a6ba7a9df0feeb01c62ef619950b0bb985e0a58ad5ffb0159c55e6c240b",
+          "after": "4be1fb65965b354383e2d44d52bbe6c8c85936b4df73654dfdec0da09b735216",
+          "method": "patch"
+        },
+        {
+          "path": "tools/test-terminal.sh",
+          "before": "ef0a91db4d7e7768a409263dbfa4eb44b5847df58618e9414b138d6c914191cb",
+          "after": "b0aeab417884abe51520f5cd0d51e6412af61491958f7ef4f5ca8b0d27a6edea",
+          "method": "patch"
+        },
+        {
+          "path": "tools/build-linux.sh",
+          "before": "fd4aaf8d737a6e364e11ac66bf5362d40fa7280866e38143cf5e711d4abffe71",
+          "after": "146ab41f0d0001b398bbc00e409d6b3252b4ac8735e1c1789b2bdbe3331f02bc",
+          "method": "patch"
+        },
+        {
+          "path": "tools/verify-pe/main.go",
+          "before": "42a9f2eb78af9916c1c20ceb58d7a56531abd7d7bc583af2e4d51c4e8699a975",
+          "after": "4ed44255bec6d914a1c3f34b1bf5f7fe0b52bf05eb4d28f8eeb23a578f6916ff",
+          "method": "patch-after-gofmt"
+        }
+      ],
+      "problems": [
+        {
+          "path": ".github/workflows/build.yml",
+          "reason": "hunk context not found"
+        }
+      ]
+    },
+    {
+      "id": "call_MYIYO5Rx7xfRTUsyoL4AjRN9:0",
+      "time": "2026-07-24T04:07:23.399Z",
+      "orderTime": "2026-07-24T04:18:42.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "c3eebf4631b31e7419be20af24d95f47f2a07fc2d96922cff9155641d82c0de4",
+      "source": {
+        "session": "019f924e-7570-7350-947c-71b35195b082",
+        "line": 262
+      },
+      "turn": "019f924e-7748-7e30-8d9c-566ddace4a62",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "tools/verify-pe/main.go",
+          "before": "4ed44255bec6d914a1c3f34b1bf5f7fe0b52bf05eb4d28f8eeb23a578f6916ff",
+          "after": "d0d615c88cb7a4de8a6f3b620ae0cfc5e0087a422e4d0cf5514ded72cfb9724d",
+          "method": "patch"
+        },
+        {
+          "path": "tools/verify-pe/main_test.go",
+          "before": "c7cb8a030ba79badba30d3ac4fa2ee40e247f1173dcd0bb0a223437ce67bf5e6",
+          "after": "e0f1c923c0078c5e3dc9f275d0126248751d7e3a3e1abe44434155b7851f539c",
+          "method": "patch"
+        },
+        {
+          "path": "tools/terminal.sh",
+          "before": "4be1fb65965b354383e2d44d52bbe6c8c85936b4df73654dfdec0da09b735216",
+          "after": "4f17d8845e786c48dd54ce176111ccfd55de24a6c5dcf50880dc7c9a824bdec0",
+          "method": "patch"
+        },
+        {
+          "path": "tools/test-terminal.sh",
+          "before": "b0aeab417884abe51520f5cd0d51e6412af61491958f7ef4f5ca8b0d27a6edea",
+          "after": "28b1ccfb344d28c53c7a00d2f129b6106319b6de1a2529450cdb28e1195a0dd7",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_RdFGuYEbgSz986pqXXqYdnM2:0",
+      "time": "2026-07-24T04:19:11.514Z",
+      "orderTime": "2026-07-24T04:19:11.514Z",
+      "timeBasis": "record",
+      "hash": "049a6637219ad88f308a7f1cbd23e5ff13dab69cd910b4ba1c5c6d7fabf2219c",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 30516
+      },
+      "turn": "019f924e-1d49-73a1-a883-848943d1ed8b",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "tools/terminal.ps1",
+          "before": "953788ad456980d27be1078e74b77d030b42582d6abc4d80f9a54ee9f5e6c9b3",
+          "after": "db74bee17550797fe2102ca83592d69cccfd5c19f96e210cb2b600f004cb121c",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_gReNom2dsApaqr7x3RYGwsRc:0",
+      "time": "2026-07-24T04:19:20.983Z",
+      "orderTime": "2026-07-24T04:19:20.983Z",
+      "timeBasis": "record",
+      "hash": "976abe6da4eddd42cb0877d5f94a9bff63dc73099e76b3b7b1d859c44fb056f1",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 30521
+      },
+      "turn": "019f924e-1d49-73a1-a883-848943d1ed8b",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "tools/test-terminal.ps1",
+          "before": "bbe5dd045a6e310fee44ea3aae2659c1c32e4541faeba04601c3d4578261ee3a",
+          "after": "1324652e90ba92caa43338b4f8bffffd12a587ad69f30b3575a62687eb2c10aa",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_bCjUZunsFtB5W3WC25QCt4iW:0",
+      "time": "2026-07-24T04:07:23.399Z",
+      "orderTime": "2026-07-24T04:19:21.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "a1d95fb03df2f2d503e92b21ed4223a9437a27b5f90b718dbfeac8ad16db630e",
+      "source": {
+        "session": "019f924e-7570-7350-947c-71b35195b082",
+        "line": 271
+      },
+      "turn": "019f924e-7748-7e30-8d9c-566ddace4a62",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "tools/terminal.sh",
+          "before": "4f17d8845e786c48dd54ce176111ccfd55de24a6c5dcf50880dc7c9a824bdec0",
+          "after": "47e599a3cb841836a16bb4484336b07af3597bbd51ea806efe95320871188676",
+          "method": "patch"
+        },
+        {
+          "path": "tools/test-terminal.sh",
+          "before": "28b1ccfb344d28c53c7a00d2f129b6106319b6de1a2529450cdb28e1195a0dd7",
+          "after": "897a0856c4663d868f3c313e5d5674032a897d87ab666fe99b4530886aa1cbc0",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_ZQgWrBUU8cqzT6aXBtPYnmCP:0",
+      "time": "2026-07-24T04:07:16.844Z",
+      "orderTime": "2026-07-24T04:19:21.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "034cabe0d1088a0eaa5b8fcb112372a187c94949bd15ba40e943b2d50f4264ae",
+      "source": {
+        "session": "019f924e-5be2-7ad1-af71-3cf000614741",
+        "line": 330
+      },
+      "turn": "019f924e-5c8a-7a52-9af9-dab651d690f6",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/terminal/policy.go",
+          "before": "b676e555a3f3816ce9de63f5274ea450b546b5373ba012626ee3f75425e407f8",
+          "after": "d070e35fb377a844abb77582aa5b7c169d858826b8ba2ddf67e746ccc9260919",
+          "method": "patch"
+        },
+        {
+          "path": "internal/terminal/policy_test.go",
+          "before": "62c46d5d831c9f81cbc5dcc219aa11d696bafdafa431f6c0e12db479826162c3",
+          "after": "4240d91a44a7f333d09b2378a154324956355f89d63a16d2b6ffb8667c826f9d",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_UPzdo4BCsfwlgOiZpGQWdFH4:0",
+      "time": "2026-07-24T04:07:16.844Z",
+      "orderTime": "2026-07-24T04:19:41.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "55e2ecc979429d7a53c732331a7eeacc0a4807fbb9fd92ff877ed139d763ae4c",
+      "source": {
+        "session": "019f924e-5be2-7ad1-af71-3cf000614741",
+        "line": 345
+      },
+      "turn": "019f924e-5c8a-7a52-9af9-dab651d690f6",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/terminal/policy.go",
+          "before": "d070e35fb377a844abb77582aa5b7c169d858826b8ba2ddf67e746ccc9260919",
+          "after": "0a9820258197c4a57d91f2c330d1d8cf173370442fd56a9eb3659213261200e2",
+          "method": "patch"
+        },
+        {
+          "path": "internal/terminal/policy_test.go",
+          "before": "4240d91a44a7f333d09b2378a154324956355f89d63a16d2b6ffb8667c826f9d",
+          "after": "55a0bc83fd6e288e3f69f4e35a729b707cdc615a350757167141fd018a16e5cf",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_tTUmeKEWRkCiJBul2fPefHgB:0",
+      "time": "2026-07-24T04:07:23.399Z",
+      "orderTime": "2026-07-24T04:19:43.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "c3772cf3be4be6ac564e074dfaa3f61fb34855fc071371c3622f3ef83fe7969f",
+      "source": {
+        "session": "019f924e-7570-7350-947c-71b35195b082",
+        "line": 282
+      },
+      "turn": "019f924e-7748-7e30-8d9c-566ddace4a62",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "tools/terminal.sh",
+          "before": "47e599a3cb841836a16bb4484336b07af3597bbd51ea806efe95320871188676",
+          "after": "e114ebfa4b44009d9d7cec60a615c45d7837fc34d6876ebc5bba3062fb83a46b",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_bol8PyNUkq70UBchpPe5Da5Q:0",
+      "time": "2026-07-24T04:07:16.844Z",
+      "orderTime": "2026-07-24T04:20:00.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "2147283042b5ff2d13fb07cb4615af02a2139788ad6c14af7313a806c5411832",
+      "source": {
+        "session": "019f924e-5be2-7ad1-af71-3cf000614741",
+        "line": 355
+      },
+      "turn": "019f924e-5c8a-7a52-9af9-dab651d690f6",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/terminal/policy.go",
+          "before": "0a9820258197c4a57d91f2c330d1d8cf173370442fd56a9eb3659213261200e2",
+          "after": "c186066539c9d5c7e131434c9f8b7ed123e941388384674b8476297320d3943d",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_NOsPlrki95OsWWjTsjM3b8mc:0",
+      "time": "2026-07-24T04:07:23.399Z",
+      "orderTime": "2026-07-24T04:20:35.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "fe44daf34b0dd95762db2b22a403536a0d7ad89daafc0754842f7531ae5913b9",
+      "source": {
+        "session": "019f924e-7570-7350-947c-71b35195b082",
+        "line": 313
+      },
+      "turn": "019f924e-7748-7e30-8d9c-566ddace4a62",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "tools/terminal.sh",
+          "before": "e114ebfa4b44009d9d7cec60a615c45d7837fc34d6876ebc5bba3062fb83a46b",
+          "after": "e8ba1a2bdda968f645e0940715336b8c2bae55908242ba105d9e8b5722883353",
+          "method": "patch"
+        }
+      ],
+      "problems": [
+        {
+          "path": "docs/building.md",
+          "reason": "hunk context not found"
+        }
+      ]
+    },
+    {
+      "id": "call_sTs1LhriDHhTfrXE56UJ18FN:0",
+      "time": "2026-07-24T04:20:36.013Z",
+      "orderTime": "2026-07-24T04:20:36.013Z",
+      "timeBasis": "record",
+      "hash": "7316fadee7132c8480f9fe956f2c5bb6a5ac677ce2b2de069ecf2c8e3cbcde0e",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 30574
+      },
+      "turn": "019f924e-1d49-73a1-a883-848943d1ed8b",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "tools/test-terminal.ps1",
+          "before": "1324652e90ba92caa43338b4f8bffffd12a587ad69f30b3575a62687eb2c10aa",
+          "after": "683a78f773290e7ca7c0df231c4e0f4b7d1bc03fb8b904679e1089361ea067ac",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_V5ny4wDXcTIVd7dSgYcwoUgW:0",
+      "time": "2026-07-24T04:07:16.844Z",
+      "orderTime": "2026-07-24T04:20:37.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "877a9305e0a949a93b9b5be559cbb0f1410aa24e5703cff7cfe8a2138c9ba779",
+      "source": {
+        "session": "019f924e-5be2-7ad1-af71-3cf000614741",
+        "line": 367
+      },
+      "turn": "019f924e-5c8a-7a52-9af9-dab651d690f6",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/terminal/policy.go",
+          "before": "c186066539c9d5c7e131434c9f8b7ed123e941388384674b8476297320d3943d",
+          "after": "c250474261e4ce8d6f63826719a408b0ae57a2533ec547c9a151c9939b5b5518",
+          "method": "patch"
+        },
+        {
+          "path": "internal/terminal/policy_test.go",
+          "before": "55a0bc83fd6e288e3f69f4e35a729b707cdc615a350757167141fd018a16e5cf",
+          "after": "7df28437abc7516478457f4e5e598d4a4d8ab24ce739ad187ef3b533105c367d",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_e5B4n8QdYHuRGqPpAKq2R2Y2:0",
+      "time": "2026-07-24T04:07:23.399Z",
+      "orderTime": "2026-07-24T04:20:49.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "1af5dc8828a1a3ee8de92c23ded968a34805dc085f31cfc567ed33b62bd3c338",
+      "source": {
+        "session": "019f924e-7570-7350-947c-71b35195b082",
+        "line": 321
+      },
+      "turn": "019f924e-7748-7e30-8d9c-566ddace4a62",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "tools/build-linux.sh",
+          "before": "146ab41f0d0001b398bbc00e409d6b3252b4ac8735e1c1789b2bdbe3331f02bc",
+          "after": "1e59bb49c861d7070750d3678669a3d16f29753a478d253de26c2f5759a99e9d",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_XBy4sXud5XEIoY7k7SZ8Y8yx:0",
+      "time": "2026-07-24T04:07:23.399Z",
+      "orderTime": "2026-07-24T04:21:00.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "1f718db1be9575a4ea823456a17cc25bfa0c5c97b2c7ae944db7d61aef2c9121",
+      "source": {
+        "session": "019f924e-7570-7350-947c-71b35195b082",
+        "line": 328
+      },
+      "turn": "019f924e-7748-7e30-8d9c-566ddace4a62",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "tools/test-terminal.sh",
+          "before": "897a0856c4663d868f3c313e5d5674032a897d87ab666fe99b4530886aa1cbc0",
+          "after": "b99383573e280ee8c07fff7c5f1695d5ceb24ec8fc0a0107e8de24a01f258995",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_GLbGsTBfkA2WXQhp1fKrzzeO:0",
+      "time": "2026-07-24T04:21:22.746Z",
+      "orderTime": "2026-07-24T04:21:22.746Z",
+      "timeBasis": "record",
+      "hash": "c35c16acf3d666d30b5226e9fabbe8d72345599cca2a1027e6a1a25efe0c492b",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 30595
+      },
+      "turn": "019f924e-1d49-73a1-a883-848943d1ed8b",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "tools/terminal.ps1",
+          "before": "db74bee17550797fe2102ca83592d69cccfd5c19f96e210cb2b600f004cb121c",
+          "after": "e2d7b5723e785ea4abd04d198cee4234b163afb369994ea9bc8444c3b42a7ef2",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_U5NGHvis3IZnfDJV5Co7fqaA:0",
+      "time": "2026-07-24T04:23:06.778Z",
+      "orderTime": "2026-07-24T04:23:06.778Z",
+      "timeBasis": "record",
+      "hash": "a141a01475ec5e3eda1c371211585afc71c20e4b9ddb0e563338d71c1da34b4b",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 30619
+      },
+      "turn": "019f924e-1d49-73a1-a883-848943d1ed8b",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "tools/generate-assets.ps1",
+          "before": "ef9c5401b1ea55a3633c35b717f1c73850fe11ea98a9a24428fb0b5d835eab08",
+          "after": "e718233e15e0c96266b613544d241ddc1afc06866ba57eee961c344769b20dd6",
+          "method": "patch"
+        }
+      ],
+      "problems": [
+        {
+          "path": "tools/package.ps1",
+          "reason": "hunk context not found"
+        },
+        {
+          "path": "tools/build.ps1",
+          "reason": "hunk context not found"
+        }
+      ]
+    },
+    {
+      "id": "call_eM0ufAVsn8TT94ApJyTJI1s6:0",
+      "time": "2026-07-24T04:07:23.399Z",
+      "orderTime": "2026-07-24T04:23:25.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "bac4128ff672957f5b002c47d0cda6bc0c01195de522c956d9232c44709e535c",
+      "source": {
+        "session": "019f924e-7570-7350-947c-71b35195b082",
+        "line": 376
+      },
+      "turn": "019f924e-7748-7e30-8d9c-566ddace4a62",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "Makefile",
+          "before": "a92be5c5b2a6345aa09761c0c9e5ed0edf37864cde6b62ca59905c8a2bc03792",
+          "after": "e68a1185940dd0e7e8917210e24068e559f96ffdcc33cd7665df863f0ff9e376",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_jizMWL6MLf66EUHetajXV7oB:0",
+      "time": "2026-07-24T04:07:23.399Z",
+      "orderTime": "2026-07-24T04:25:30.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "194aae1ecd76093cc7265f044340c942f9e781e82eb4d46a5b6d6210073a832f",
+      "source": {
+        "session": "019f924e-7570-7350-947c-71b35195b082",
+        "line": 429
+      },
+      "turn": "019f924e-7748-7e30-8d9c-566ddace4a62",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "tools/verify-pe/main.go",
+          "before": "d0d615c88cb7a4de8a6f3b620ae0cfc5e0087a422e4d0cf5514ded72cfb9724d",
+          "after": "c5a3d36af5048df454e2354f68a53cba74f5f0896eed8033a1b1965e3dca743f",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_yjUCkhSSx8XJZAydIxxAHXEy:0",
+      "time": "2026-07-24T04:26:47.594Z",
+      "orderTime": "2026-07-24T04:26:47.594Z",
+      "timeBasis": "record",
+      "hash": "a7bac9820a167cf7cc40ee8eba5945a163e091e0c5585545168111a1955f1cd2",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 30680
+      },
+      "turn": "019f924e-1d49-73a1-a883-848943d1ed8b",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "CHANGELOG.md",
+          "before": "a59527533aae19881ef72038c99d3e3c79531adf965029635a7403857a65adc7",
+          "after": "ad060e2a1f11c4f2946a3608c7fa8138fc45f65e550ae4e98084c738ee8566ed",
+          "method": "patch"
+        },
+        {
+          "path": "docs/integration.md",
+          "before": "f9df71b19ef03c0fb3a167caf374bdcea222a7d07e9cb1014354075050cc22f9",
+          "after": "bdaf9f11e0d739eed637511f24d817e35ae91966a2042f0d017b054b84cfc487",
+          "method": "patch"
+        }
+      ],
+      "problems": [
+        {
+          "path": "docs/building.md",
+          "reason": "hunk context not found"
+        }
+      ]
+    },
+    {
+      "id": "call_CXr3xQZMmHy5MFFIEN828LBn:0",
+      "time": "2026-07-24T04:07:23.399Z",
+      "orderTime": "2026-07-24T04:27:08.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "531b0d14a8ab3a6df41ed3939a357bf882791ded3ac14c88c6a32521ee133282",
+      "source": {
+        "session": "019f924e-7570-7350-947c-71b35195b082",
+        "line": 451
+      },
+      "turn": "019f924e-7748-7e30-8d9c-566ddace4a62",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "tools/build-linux.sh",
+          "before": "1e59bb49c861d7070750d3678669a3d16f29753a478d253de26c2f5759a99e9d",
+          "after": "ceaa9efef5a4ba79034c2b5bae77f46cd448e1fedad6d3db47a1e6b78c8a8db3",
+          "method": "patch"
+        },
+        {
+          "path": "tools/verify-pe/main_test.go",
+          "before": "e0f1c923c0078c5e3dc9f275d0126248751d7e3a3e1abe44434155b7851f539c",
+          "after": "2f59ba754646dab2e8a3046e0dc79fe3762d63fa3c040d73b6e04c6c854c9e11",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_ujrIeHGoLPOQMadX29IQrD7T:0",
+      "time": "2026-07-24T04:07:23.399Z",
+      "orderTime": "2026-07-24T04:29:06.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "436a8cd222087a7ef217969829abed526d81385be830e228750328109e198721",
+      "source": {
+        "session": "019f924e-7570-7350-947c-71b35195b082",
+        "line": 488
+      },
+      "turn": "019f924e-7748-7e30-8d9c-566ddace4a62",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "tools/terminal.sh",
+          "before": "e8ba1a2bdda968f645e0940715336b8c2bae55908242ba105d9e8b5722883353",
+          "after": "609551c8928b45846f8c66f33ec8ae9b4d4323232e9a75f80b9ab44058a2f598",
+          "method": "patch"
+        },
+        {
+          "path": "tools/build-linux.sh",
+          "before": "ceaa9efef5a4ba79034c2b5bae77f46cd448e1fedad6d3db47a1e6b78c8a8db3",
+          "after": "b1fb739f21e36282103407e826535866f2411862e9367e885f2de9912a4b9fea",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_6z8pcv68m12dvU4bCcpfFuM5:0",
+      "time": "2026-07-24T04:07:23.399Z",
+      "orderTime": "2026-07-24T04:31:04.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "bd5fac5220971bd7c59776cca4aed9fe91792b2e05b67b56c7202785215b5c6a",
+      "source": {
+        "session": "019f924e-7570-7350-947c-71b35195b082",
+        "line": 521
+      },
+      "turn": "019f924e-7748-7e30-8d9c-566ddace4a62",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "tools/build-linux.sh",
+          "before": "b1fb739f21e36282103407e826535866f2411862e9367e885f2de9912a4b9fea",
+          "after": "0a450402884798da5128c157e8ce71e8f4bdab69c7a152cad8daee5390f10dbc",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_x7DHpC1s6oIMjjLRCT7a1mgr:0",
+      "time": "2026-07-24T04:07:23.399Z",
+      "orderTime": "2026-07-24T04:31:45.000Z",
+      "timeBasis": "inferred-tool-id-within-task",
+      "hash": "bac71de191bfc5d390c172fdc593b5fc90ee641803991ce4cea50fb2ecc716c8",
+      "source": {
+        "session": "019f924e-7570-7350-947c-71b35195b082",
+        "line": 539
+      },
+      "turn": "019f924e-7748-7e30-8d9c-566ddace4a62",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "tools/verify-pe/main.go",
+          "before": "c5a3d36af5048df454e2354f68a53cba74f5f0896eed8033a1b1965e3dca743f",
+          "after": "ec167675ffa3222831e03bae369ba0f6256a33f0474dfd6ef45a54da6eccc7fb",
+          "method": "patch-after-gofmt"
+        },
+        {
+          "path": "tools/verify-pe/main_test.go",
+          "before": "2f59ba754646dab2e8a3046e0dc79fe3762d63fa3c040d73b6e04c6c854c9e11",
+          "after": "4825fcaae2724dfd0ee4dae647d3d6f547d0f43792b4889755812785a309ad26",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    }
+  ],
+  "finalChanges": [
+    {
+      "path": "tools/terminal.ps1",
+      "sha256": "e2d7b5723e785ea4abd04d198cee4234b163afb369994ea9bc8444c3b42a7ef2"
+    },
+    {
+      "path": "tools/test-terminal.ps1",
+      "sha256": "683a78f773290e7ca7c0df231c4e0f4b7d1bc03fb8b904679e1089361ea067ac"
+    },
+    {
+      "path": "internal/terminal/policy.go",
+      "sha256": "c250474261e4ce8d6f63826719a408b0ae57a2533ec547c9a151c9939b5b5518"
+    },
+    {
+      "path": "internal/terminal/vt_windows.go",
+      "sha256": "d792006b63ac2ec1104a4809148233244e2adbcfc01413801a4ee4f9ebdcd0c7"
+    },
+    {
+      "path": "internal/terminal/vt_other.go",
+      "sha256": "611d76689986339d6eea621007276669b426b40d0129e2ff986fcfb4c28a6853"
+    },
+    {
+      "path": "internal/terminal/policy_test.go",
+      "sha256": "7df28437abc7516478457f4e5e598d4a4d8ab24ce739ad187ef3b533105c367d"
+    },
+    {
+      "path": "tools/build-web.ps1",
+      "sha256": "a0de6901988ff067235b980e1381e306d7d30d350b54200efa1830b5da6bf0b0"
+    },
+    {
+      "path": "tools/export-web.ps1",
+      "sha256": "93957372d8d596caa4d9457f06899b28f3022db8c9eec638355d473680686e76"
+    },
+    {
+      "path": "tools/generate-assets.ps1",
+      "sha256": "e718233e15e0c96266b613544d241ddc1afc06866ba57eee961c344769b20dd6"
+    },
+    {
+      "path": "tools/install.ps1",
+      "sha256": "f9c629d8662a5c08edcb53329502657320832b1666da355de10868a03c4fff6c"
+    },
+    {
+      "path": "tools/uninstall.ps1",
+      "sha256": "7aa1880cd5e06da1788709cea578253d265c84fd5c86eab3f05da5d250221e24"
+    },
+    {
+      "path": "internal/cli/cli.go",
+      "sha256": "5677317ab3bcbd65633e2e2e8d57af38a66bf453c0d918d48162f7a9dd0c74f6"
+    },
+    {
+      "path": "tools/build-linux.sh",
+      "sha256": "0a450402884798da5128c157e8ce71e8f4bdab69c7a152cad8daee5390f10dbc"
+    },
+    {
+      "path": "tools/verify-pe/main.go",
+      "sha256": "ec167675ffa3222831e03bae369ba0f6256a33f0474dfd6ef45a54da6eccc7fb"
+    },
+    {
+      "path": "tools/verify-pe/main_test.go",
+      "sha256": "4825fcaae2724dfd0ee4dae647d3d6f547d0f43792b4889755812785a309ad26"
+    },
+    {
+      "path": "Makefile",
+      "sha256": "e68a1185940dd0e7e8917210e24068e559f96ffdcc33cd7665df863f0ff9e376"
+    },
+    {
+      "path": "README.md",
+      "sha256": "ee3eb09b1a22319e929e60ae66fe8e1342290695f3848a4443df14fb794cee4c"
+    },
+    {
+      "path": "internal/cli/cli_test.go",
+      "sha256": "389ffcf60520d397161a5300bf95a89237787f4f827da88226cdd8dacfdfc9cf"
+    },
+    {
+      "path": "tools/terminal.sh",
+      "sha256": "609551c8928b45846f8c66f33ec8ae9b4d4323232e9a75f80b9ab44058a2f598"
+    },
+    {
+      "path": "tools/test-terminal.sh",
+      "sha256": "b99383573e280ee8c07fff7c5f1695d5ceb24ec8fc0a0107e8de24a01f258995"
+    },
+    {
+      "path": "internal/tui/run_test.go",
+      "sha256": "2d645e6b27b7a4d17afc027e8393471d6b19b7beec6bbf359cee1c8588ee832a"
+    },
+    {
+      "path": "CHANGELOG.md",
+      "sha256": "ad060e2a1f11c4f2946a3608c7fa8138fc45f65e550ae4e98084c738ee8566ed"
+    },
+    {
+      "path": "docs/integration.md",
+      "sha256": "bdaf9f11e0d739eed637511f24d817e35ae91966a2042f0d017b054b84cfc487"
+    }
+  ]
+}

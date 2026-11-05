@@ -1,0 +1,809 @@
+{
+  "turn": "01a1a8f2-d10f-7600-9338-b4bafcaebfea",
+  "observedStart": "2026-11-04T23:44:08.028Z",
+  "observedEnd": "2026-11-05T00:22:30.791Z",
+  "title": "regressions: recover verified frame, geometry and message-ID fixes",
+  "events": [
+    {
+      "id": "call_3382083115e14eb680efbd41a9972c7d:0",
+      "time": "2026-11-04T23:46:33.029Z",
+      "orderTime": "2026-11-04T23:46:33.029Z",
+      "timeBasis": "record",
+      "hash": "3eba189da4e51d3eeb30ec5de7685410b0b18e6270ec863532d74c451b96707d",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 52014
+      },
+      "turn": "01a1a8f2-d10f-7600-9338-b4bafcaebfea",
+      "status": "returned",
+      "changes": [
+        {
+          "path": "internal/ui/shell_windows.go",
+          "before": "75e2a9f4f61056a7d5fab52db030a34f9ce7c07f2ff7bc9ea486c60f5fddb6d7",
+          "after": "e2373495583c5e302071fca0f6797546efc06e752690bca6a7e04775df807c72",
+          "method": "patch"
+        },
+        {
+          "path": "internal/winfx/dialoggeometry_windows.go",
+          "before": "a5e8f2ff05b88304ca1125bd2938ae7a6486bb82db6b4082f960fbb4b028d992",
+          "after": "608b275fc09e9cd1ad617648be43145091270bacdeb4df1de3dfb7a0d57c6969",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_5574f6e9a63b4097871688ade9757963:0",
+      "time": "2026-11-04T23:48:20.432Z",
+      "orderTime": "2026-11-04T23:48:20.432Z",
+      "timeBasis": "record",
+      "hash": "94a5a455a1c5ee2e73dd1c0dbc00707dbf58f989266dbab5f0fa8c3555ee8860",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 52053
+      },
+      "turn": "01a1a8f2-d10f-7600-9338-b4bafcaebfea",
+      "status": "returned",
+      "changes": [
+        {
+          "path": "internal/ui/shell_windows.go",
+          "before": "e2373495583c5e302071fca0f6797546efc06e752690bca6a7e04775df807c72",
+          "after": "7a4f3b1b33765734dfe1ab82cb3ef79503987b418bc64f1387a10164229917f7",
+          "method": "patch"
+        },
+        {
+          "path": "internal/winfx/dialoggeometry_windows.go",
+          "before": "608b275fc09e9cd1ad617648be43145091270bacdeb4df1de3dfb7a0d57c6969",
+          "after": "d5efbe08888669366c6ba6198e60469558e02ffe53100e69b669f4d34b306d2e",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_1e5e8e0058814f8f927ce12342339a20:0",
+      "time": "2026-11-04T23:49:05.555Z",
+      "orderTime": "2026-11-04T23:49:05.555Z",
+      "timeBasis": "record",
+      "hash": "a722dc10994262b6a7e0f39d2fb5be6e5dc6892276688e759bffd909481dc9c2",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 52068
+      },
+      "turn": "01a1a8f2-d10f-7600-9338-b4bafcaebfea",
+      "status": "returned",
+      "changes": [
+        {
+          "path": "internal/winfx/dialoggeometry_windows.go",
+          "before": "d5efbe08888669366c6ba6198e60469558e02ffe53100e69b669f4d34b306d2e",
+          "after": "554f61f54390dc40bd738b7c2997f9b1b7ae367899c7499148c720f2ab8bd18c",
+          "method": "patch"
+        }
+      ],
+      "problems": [
+        {
+          "path": "vendor/github.com/lxn/walk/dialog.go",
+          "reason": "missing preimage"
+        },
+        {
+          "path": "internal/dialogs/settings_windows.go",
+          "reason": "missing preimage"
+        }
+      ]
+    },
+    {
+      "id": "call_44a2a6678fd04ce98bbce60cf7bbeac6:0",
+      "time": "2026-11-04T23:50:32.269Z",
+      "orderTime": "2026-11-04T23:50:32.269Z",
+      "timeBasis": "record",
+      "hash": "5c6ce03f262be951b6871a42639cbb00cff313585bb3da1b18ee648eeb6bc7b3",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 52078
+      },
+      "turn": "01a1a8f2-d10f-7600-9338-b4bafcaebfea",
+      "status": "returned",
+      "changes": [
+        {
+          "path": "internal/dialogs/settings_geometry_live_windows_test.go",
+          "before": null,
+          "after": "de8790230dfa9dac1c0f512cc34b45979327e3a07e57150167f5a53e58dc5b71",
+          "method": "patch"
+        },
+        {
+          "path": "internal/winfx/dialoggeometry_windows_test.go",
+          "before": "26dbdbd928834e8b9da654f04a2bf3905cf0892c63531b5dbeba8ccae5cd272e",
+          "after": "edb89f0e870a7a310a45a0a5910fd396ffa8c4312086d294cf649ba70670fb9e",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_1412e4836edd45e0895b9123c6b689c5:0",
+      "time": "2026-11-04T23:51:19.372Z",
+      "orderTime": "2026-11-04T23:51:19.372Z",
+      "timeBasis": "record",
+      "hash": "b5eaeff5d1cf6660d8aa5ceaf5aeb64e306643788a040aa1d57bf49ff86601fd",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 52093
+      },
+      "turn": "01a1a8f2-d10f-7600-9338-b4bafcaebfea",
+      "status": "returned",
+      "changes": [
+        {
+          "path": "internal/dialogs/settings_geometry_live_windows_test.go",
+          "before": "de8790230dfa9dac1c0f512cc34b45979327e3a07e57150167f5a53e58dc5b71",
+          "after": "3b67617ae6119c4ee1d6eb955f620fe4e2e1966407c098131b8fcf55b77376fb",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_a79fa1584065439ea9c90ace7586f053:0",
+      "time": "2026-11-04T23:53:17.353Z",
+      "orderTime": "2026-11-04T23:53:17.353Z",
+      "timeBasis": "record",
+      "hash": "5f1aff366d1cf3d615fd47b241e34ebab7ff578f6ea996af42fdaa3b91c58db9",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 52150
+      },
+      "turn": "01a1a8f2-d10f-7600-9338-b4bafcaebfea",
+      "status": "returned",
+      "changes": [
+        {
+          "path": "internal/dialogs/settings_geometry_live_windows_test.go",
+          "before": "3b67617ae6119c4ee1d6eb955f620fe4e2e1966407c098131b8fcf55b77376fb",
+          "after": "e5da0431576c1bfb10e285a655bbf4cb58514fc92f898d1aa18315a2099771cf",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_ee81ed0fad0641c282ab4e96d1ecddde:0",
+      "time": "2026-11-04T23:55:27.066Z",
+      "orderTime": "2026-11-04T23:55:27.066Z",
+      "timeBasis": "record",
+      "hash": "24ccd1c72895b9027f4413beb0f63fc9b85d4ee5b813750daaeae72d63bc04ca",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 52214
+      },
+      "turn": "01a1a8f2-d10f-7600-9338-b4bafcaebfea",
+      "status": "returned",
+      "changes": [
+        {
+          "path": "internal/dialogs/settings_geometry_live_windows_test.go",
+          "before": "e5da0431576c1bfb10e285a655bbf4cb58514fc92f898d1aa18315a2099771cf",
+          "after": "4756af4a6a3d475be52786a7a4e132c24e82165494136b7d2019398fca807192",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_be753c2af4784062843864c7e0187521:0",
+      "time": "2026-11-04T23:55:41.458Z",
+      "orderTime": "2026-11-04T23:55:41.458Z",
+      "timeBasis": "record",
+      "hash": "18f060fb22e9847eedceb553cf338f0feca1708abb1cdb8e55e4b6ea06c45ef0",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 52222
+      },
+      "turn": "01a1a8f2-d10f-7600-9338-b4bafcaebfea",
+      "status": "returned",
+      "changes": [
+        {
+          "path": "internal/dialogs/settings_geometry_live_windows_test.go",
+          "before": "4756af4a6a3d475be52786a7a4e132c24e82165494136b7d2019398fca807192",
+          "after": "a1b2cddf8eaefe27f4b68f54601402c7e3e9fbe9e5e40cf73c3c3f34aa9c3881",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_ba8a2a8d39ea484385259368aa1fc59b:0",
+      "time": "2026-11-04T23:57:08.865Z",
+      "orderTime": "2026-11-04T23:57:08.865Z",
+      "timeBasis": "record",
+      "hash": "d6332316ae82de125213fb5c6154d519d13b8ae0c3ff33440f7796b7fea2e770",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 52238
+      },
+      "turn": "01a1a8f2-d10f-7600-9338-b4bafcaebfea",
+      "status": "returned",
+      "changes": [
+        {
+          "path": "internal/ui/chrome_geometry_live_windows_test.go",
+          "before": null,
+          "after": "3902a6e08b450643610096fc78bf39b8ace7f6f7a72157b0f88a5e81d15d05a3",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_55abbd8aadfe42649b8ecd04c3d7bc20:0",
+      "time": "2026-11-04T23:57:33.749Z",
+      "orderTime": "2026-11-04T23:57:33.749Z",
+      "timeBasis": "record",
+      "hash": "769e0866555120b9b935aa5b195acd7089162f7a0fd9882c86c9b0b31b80804b",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 52253
+      },
+      "turn": "01a1a8f2-d10f-7600-9338-b4bafcaebfea",
+      "status": "returned",
+      "changes": [
+        {
+          "path": "internal/ui/chrome_geometry_live_windows_test.go",
+          "before": "3902a6e08b450643610096fc78bf39b8ace7f6f7a72157b0f88a5e81d15d05a3",
+          "after": "928205061079cc47a2c7bce7c7a4a040df189ce565766eb3a8a82b451cfdb482",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_54d23db0993849b1b0f22b0e082a3ef7:0",
+      "time": "2026-11-04T23:58:33.194Z",
+      "orderTime": "2026-11-04T23:58:33.194Z",
+      "timeBasis": "record",
+      "hash": "fab3316a55b1388c9ff3c6db72a351216a89bf24b681730c0bf711f9c763a558",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 52277
+      },
+      "turn": "01a1a8f2-d10f-7600-9338-b4bafcaebfea",
+      "status": "returned",
+      "changes": [
+        {
+          "path": "internal/ui/chrome_geometry_live_windows_test.go",
+          "before": "928205061079cc47a2c7bce7c7a4a040df189ce565766eb3a8a82b451cfdb482",
+          "after": "58769032194c8de737e15d5bf09b4e4b16603b6d86a368f1da3a9ab918d2aadf",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_eaf9e222a21146a4a7ef327250a9c63c:0",
+      "time": "2026-11-04T23:59:05.105Z",
+      "orderTime": "2026-11-04T23:59:05.105Z",
+      "timeBasis": "record",
+      "hash": "f9b766dbc8900d93358068c86b50ae594f7e0a8b94018bc50cadaeb65d052ff4",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 52285
+      },
+      "turn": "01a1a8f2-d10f-7600-9338-b4bafcaebfea",
+      "status": "returned",
+      "changes": [
+        {
+          "path": "internal/ui/chrome_geometry_live_windows_test.go",
+          "before": "58769032194c8de737e15d5bf09b4e4b16603b6d86a368f1da3a9ab918d2aadf",
+          "after": "c11431b2c7eda63c739063b90061860136ed2783259771bd9e9b18ed7522d2c7",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_4a1f8a56dbea498d81e993ef36a72946:0",
+      "time": "2026-11-04T23:59:44.129Z",
+      "orderTime": "2026-11-04T23:59:44.129Z",
+      "timeBasis": "record",
+      "hash": "32ddcfd7c5ebacff8d7951f413d29d8ef07b1d42093b03e03c763d93a5f258c2",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 52301
+      },
+      "turn": "01a1a8f2-d10f-7600-9338-b4bafcaebfea",
+      "status": "returned",
+      "changes": [
+        {
+          "path": "internal/ui/chrome_geometry_live_windows_test.go",
+          "before": "c11431b2c7eda63c739063b90061860136ed2783259771bd9e9b18ed7522d2c7",
+          "after": "49d0741d37a9cd4cd3c8ffce49cbc339ddb8d79a5e9404edb5556363c560ea91",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_aa97ee6c3d91470d8ed54f34312c47f0:0",
+      "time": "2026-11-05T00:00:13.450Z",
+      "orderTime": "2026-11-05T00:00:13.450Z",
+      "timeBasis": "record",
+      "hash": "39d7e73a00b589bc54b37346b9257c69eb5392bf4ca55a3432ea14ac144c87de",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 52309
+      },
+      "turn": "01a1a8f2-d10f-7600-9338-b4bafcaebfea",
+      "status": "returned",
+      "changes": [
+        {
+          "path": "internal/ui/chrome_geometry_live_windows_test.go",
+          "before": "49d0741d37a9cd4cd3c8ffce49cbc339ddb8d79a5e9404edb5556363c560ea91",
+          "after": "669b94b93e187fc1bde06bf9ef8c69ebbffa8ade57e5be8f2d8771c5d57ac4f4",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_384d8d6105524e6eb4febe1719e19cff:0",
+      "time": "2026-11-05T00:00:57.377Z",
+      "orderTime": "2026-11-05T00:00:57.377Z",
+      "timeBasis": "record",
+      "hash": "3aab15442b1733e539c0d50dae9123d2fcc865529d20d3037cbbf6d3bbea0235",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 52324
+      },
+      "turn": "01a1a8f2-d10f-7600-9338-b4bafcaebfea",
+      "status": "returned",
+      "changes": [
+        {
+          "path": "internal/ui/shell_windows.go",
+          "before": "7a4f3b1b33765734dfe1ab82cb3ef79503987b418bc64f1387a10164229917f7",
+          "after": "2a14d3422474ec35eb0aa7cab9d7f86e94b624da2cb7f203d882a27e9be0238f",
+          "method": "patch"
+        },
+        {
+          "path": "internal/winfx/chrome_windows.go",
+          "before": "9f70486aacdafda435a5cdc32c58d535071d17283457be3dcf5e0716b7d309ef",
+          "after": "12fa7453ed1a7f711a76f8e6aaae7085495f7462f9538c48d51145f08323e941",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_7c5b8072ed244aa9a7b25d208edb76d6:0",
+      "time": "2026-11-05T00:02:57.038Z",
+      "orderTime": "2026-11-05T00:02:57.038Z",
+      "timeBasis": "record",
+      "hash": "eb73351e0af32bf9d1a97aa85a393eb252ec56d570c6113faf59aa6c5dc4b321",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 52352
+      },
+      "turn": "01a1a8f2-d10f-7600-9338-b4bafcaebfea",
+      "status": "returned",
+      "changes": [
+        {
+          "path": "internal/ui/chrome_geometry_live_windows_test.go",
+          "before": "669b94b93e187fc1bde06bf9ef8c69ebbffa8ade57e5be8f2d8771c5d57ac4f4",
+          "after": "3b190232ba3c0fdc49c33511aacfc187eb6b7308c0fe1879e339e590e4dc66bb",
+          "method": "patch"
+        },
+        {
+          "path": "internal/winfx/chrome_live_windows_test.go",
+          "before": "ddd91c079be5e660e87f597f429e57f7a28ea75f5736c2aaf6eae92f54448c45",
+          "after": "6a126050cf8a4c41d5491999e5a6d5e2805ea848810744224388590f09a4dfcd",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_0cb322b719a84491bbc30f60ea6f0609:0",
+      "time": "2026-11-05T00:03:43.135Z",
+      "orderTime": "2026-11-05T00:03:43.135Z",
+      "timeBasis": "record",
+      "hash": "ccbf8f8531dcaad09a7fc17f400ad529ab0aa2f750d4eefb37d15445e1687582",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 52367
+      },
+      "turn": "01a1a8f2-d10f-7600-9338-b4bafcaebfea",
+      "status": "returned",
+      "changes": [
+        {
+          "path": "internal/ui/chrome_geometry_live_windows_test.go",
+          "before": "3b190232ba3c0fdc49c33511aacfc187eb6b7308c0fe1879e339e590e4dc66bb",
+          "after": "7413fd9b09770b3c476e9decf34356ed7df8ada34926b836297bd30d83c05dec",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_8f635ed551b742919e197f20785b534f:0",
+      "time": "2026-11-05T00:06:30.877Z",
+      "orderTime": "2026-11-05T00:06:30.877Z",
+      "timeBasis": "record",
+      "hash": "05476b6596eff0d659700fd7db8cdea523cc202ac2683db854c7c506825a60a0",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 52421
+      },
+      "turn": "01a1a8f2-d10f-7600-9338-b4bafcaebfea",
+      "status": "returned",
+      "changes": [
+        {
+          "path": "internal/winfx/overlay_windows.go",
+          "before": "771871900b638f893c43cfc0a26446cf28f7cf536347fd6b7b30813ffb953fd3",
+          "after": "8d4a4c0f155e826d323dd002ca17645d1b70fde1df96563cd5ff6804ae22f387",
+          "method": "patch"
+        },
+        {
+          "path": "internal/ui/render_backend_windows.go",
+          "before": "26081db24724d3043a2454d5865b298a41f43f6c35835434779dd84b7a78bb48",
+          "after": "109dddeac091ac66391285c3b50e09a763b9fca0071f83bd0e0cf61b9426b0fb",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_0d4f1eb60dd441999c8ae8485a259fb6:0",
+      "time": "2026-11-05T00:09:39.565Z",
+      "orderTime": "2026-11-05T00:09:39.565Z",
+      "timeBasis": "record",
+      "hash": "c153634517e26aaa5ddd81f816324cd5b9d0d076ad470882814701af1432ec83",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 52465
+      },
+      "turn": "01a1a8f2-d10f-7600-9338-b4bafcaebfea",
+      "status": "returned",
+      "changes": [
+        {
+          "path": "internal/winfx/overlay_windows.go",
+          "before": "8d4a4c0f155e826d323dd002ca17645d1b70fde1df96563cd5ff6804ae22f387",
+          "after": "c4863d6a794a4b0d12790143e703dccada200698bfecc459d9153c78b704e572",
+          "method": "patch"
+        },
+        {
+          "path": "internal/winfx/windowopacity_windows.go",
+          "before": "4b4a15e3a02956544d9996fb501b1a4446309f15421ac319dcedd952de009663",
+          "after": "f02511a18196cafeedc37d84687ec07d9e1627d57b20a51e65cf098ea7bfb801",
+          "method": "patch"
+        },
+        {
+          "path": "internal/ui/chrome_geometry_live_windows_test.go",
+          "before": "7413fd9b09770b3c476e9decf34356ed7df8ada34926b836297bd30d83c05dec",
+          "after": "839b168151ca84832b7cef2ce8826f92fa4d643a675cecf7cb5adf4cadc852b6",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_242103ec7a1b4a1f996207216640515f:0",
+      "time": "2026-11-05T00:10:37.852Z",
+      "orderTime": "2026-11-05T00:10:37.852Z",
+      "timeBasis": "record",
+      "hash": "2536d4346f32f1f9de764e435b1cc4eff77c11c00619a297e6bb2ee7999634d8",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 52485
+      },
+      "turn": "01a1a8f2-d10f-7600-9338-b4bafcaebfea",
+      "status": "returned",
+      "changes": [
+        {
+          "path": "internal/winfx/overlay_windows.go",
+          "before": "c4863d6a794a4b0d12790143e703dccada200698bfecc459d9153c78b704e572",
+          "after": "588a88077fe6a71e11b008216e085ce8b6940db1b98b49d1eb16beb7aa35008d",
+          "method": "patch"
+        },
+        {
+          "path": "internal/ui/render_backend_windows.go",
+          "before": "109dddeac091ac66391285c3b50e09a763b9fca0071f83bd0e0cf61b9426b0fb",
+          "after": "26081db24724d3043a2454d5865b298a41f43f6c35835434779dd84b7a78bb48",
+          "method": "patch"
+        },
+        {
+          "path": "internal/ui/paint_windows.go",
+          "before": "4c70d8e4ca15dadf6b5bfb21f7baa06efccc3f5b612c8954222d8ff38c336001",
+          "after": "40aeae9e08f8b563b52f7e5858c61793f6bae788e14b7e10f2f07e8bbc4e4cd1",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_ed7019b79eb948f3a47caea3908e2781:0",
+      "time": "2026-11-05T00:12:18.882Z",
+      "orderTime": "2026-11-05T00:12:18.882Z",
+      "timeBasis": "record",
+      "hash": "a0edee1ff7b30f7e6bad7f8c107a11c55ea32e4b9f133dea790d3c455e5116d7",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 52532
+      },
+      "turn": "01a1a8f2-d10f-7600-9338-b4bafcaebfea",
+      "status": "returned",
+      "changes": [
+        {
+          "path": "internal/ui/paint_windows.go",
+          "before": "40aeae9e08f8b563b52f7e5858c61793f6bae788e14b7e10f2f07e8bbc4e4cd1",
+          "after": "9979452c83d5410460ad195dabb94c5ad1de288a46522aed37dba09f817272e0",
+          "method": "patch"
+        },
+        {
+          "path": "internal/winfx/windowopacity_windows_test.go",
+          "before": "cb0d37dab2be63543e7936f4c5897c481942e7fd989adfe7d110a8c44de8a703",
+          "after": "f2f995504729fc9fec9c94fa85e020cb0c94be3eccd24acac3a2f418d90d9556",
+          "method": "patch"
+        },
+        {
+          "path": "internal/ui/window_state_windows_test.go",
+          "before": "b7fe744762d63eff932a97e6b4a1841191df3c22b065fcb458357c864b26ea5a",
+          "after": "6078ebb13ed8a1e88dda0762e69eedfea347db8affa87d4506d594b027ed5766",
+          "method": "patch"
+        },
+        {
+          "path": "internal/dialogs/settings_geometry_live_windows_test.go",
+          "before": "a1b2cddf8eaefe27f4b68f54601402c7e3e9fbe9e5e40cf73c3c3f34aa9c3881",
+          "after": "85a64e3aada37abfa38254e6b0b120d5429bda9a259755ffac9a1a4e6a066fa7",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_f013a8b333434140805f6eb0b60097d8:1",
+      "time": "2026-11-05T00:13:34.238Z",
+      "orderTime": "2026-11-05T00:13:34.238Z",
+      "timeBasis": "record",
+      "hash": "49d20798214ba74fc69a7943f0dcb8ccd76cc6bb65c1d5680874a3ce433954d2",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 52547
+      },
+      "turn": "01a1a8f2-d10f-7600-9338-b4bafcaebfea",
+      "status": "returned",
+      "changes": [
+        {
+          "path": "tools/test-native-windows.ps1",
+          "before": null,
+          "after": "3b54d3f9b24163a6df681559a94282aae106f7385627cbe41f3751994d801f7e",
+          "method": "patch"
+        },
+        {
+          "path": "CHANGELOG.md",
+          "before": "874feefdaa8154a9a66ec9160233107360f60c2734b96010f31e604f5e5be4f1",
+          "after": "30ceb92683efde6982e6f299dbea6495c3c11a641a76f4b95eba92a190953dcc",
+          "method": "patch"
+        }
+      ],
+      "problems": [
+        {
+          "path": "docs/configuration.md",
+          "reason": "hunk context not found"
+        }
+      ]
+    },
+    {
+      "id": "call_120fb3eaa3c7479a9608eb25f97830ab:0",
+      "time": "2026-11-05T00:14:05.952Z",
+      "orderTime": "2026-11-05T00:14:05.952Z",
+      "timeBasis": "record",
+      "hash": "15ce28aac45640341bb52b5743dc9a016c5119ecb07ff9947d203d836a989c31",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 52557
+      },
+      "turn": "01a1a8f2-d10f-7600-9338-b4bafcaebfea",
+      "status": "returned",
+      "changes": [
+        {
+          "path": "tools/test-native-windows.ps1",
+          "before": "3b54d3f9b24163a6df681559a94282aae106f7385627cbe41f3751994d801f7e",
+          "after": "491aa0ecd29be91577764259f15f4792abce0ffcce692418fa451d4fa4c78655",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_93b15b00337745169a83cc47ce4736e8:0",
+      "time": "2026-11-05T00:15:22.653Z",
+      "orderTime": "2026-11-05T00:15:22.653Z",
+      "timeBasis": "record",
+      "hash": "0825e9bf883319274f595203a6873a36d0e28d8de119bf765cbb689995cbc433",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 52566
+      },
+      "turn": "01a1a8f2-d10f-7600-9338-b4bafcaebfea",
+      "status": "returned",
+      "changes": [
+        {
+          "path": "docs/visual-regression-contract.md",
+          "before": "f515eb0b780a3adafef43ea39e143d8b6f6beea2d9f67e5afd5b678464e1f8d1",
+          "after": "b6cab5083e1fbd42fecf0f6b0e54a0b3ecc2d48f9b840b3440a055497538d2c5",
+          "method": "patch"
+        },
+        {
+          "path": "docs/regression-audit-2026-11-05.md",
+          "before": null,
+          "after": "6ca23f0b01325f58e755ea0460806093617c0851548a60719ff9c1d343de4b35",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_d4911e2ca0d443baa354fe5addf832bb:0",
+      "time": "2026-11-05T00:17:34.731Z",
+      "orderTime": "2026-11-05T00:17:34.731Z",
+      "timeBasis": "record",
+      "hash": "a0434c8f50dae8f31bdbe6062d7e39548f00dee5f92d0dc90ec033ee44d0d528",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 52611
+      },
+      "turn": "01a1a8f2-d10f-7600-9338-b4bafcaebfea",
+      "status": "returned",
+      "changes": [
+        {
+          "path": "internal/winfx/windowopacity_windows_test.go",
+          "before": "f2f995504729fc9fec9c94fa85e020cb0c94be3eccd24acac3a2f418d90d9556",
+          "after": "e3cc31f79d04899d5dc909131231012e94fa4ef3dd9f876d7ea5a9452fdee023",
+          "method": "patch"
+        },
+        {
+          "path": "internal/ui/chrome_geometry_live_windows_test.go",
+          "before": "839b168151ca84832b7cef2ce8826f92fa4d643a675cecf7cb5adf4cadc852b6",
+          "after": "3a860f4131b23522215b640737405522e9f198cac9273d726798bc0a2b7a458e",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_22813a381a4546d8a02b2a7de7834944:0",
+      "time": "2026-11-05T00:19:25.047Z",
+      "orderTime": "2026-11-05T00:19:25.047Z",
+      "timeBasis": "record",
+      "hash": "1cf809cc281898ea39b46f1ac0514f238fc8c795bd290214f8da3fd155da874a",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 52643
+      },
+      "turn": "01a1a8f2-d10f-7600-9338-b4bafcaebfea",
+      "status": "returned",
+      "changes": [
+        {
+          "path": "internal/cli/cli_test.go",
+          "before": "e587e49fa2258fad7fd692fbcc50ee195220169cb9e74072a459eb56d12bd417",
+          "after": "e3fadbfd7cb23c0f6f7aa58a989815f517c35486fb1c2e1d78d4fd9d036b2bbd",
+          "method": "patch"
+        },
+        {
+          "path": "internal/tui/terminal_environment_test.go",
+          "before": null,
+          "after": "7ed3acbd669ab0e96084182b77eefa4591de04ccfe921419d6c2ca2386619c38",
+          "method": "patch"
+        }
+      ],
+      "problems": [
+        {
+          "path": "internal/tui/activity_test.go",
+          "reason": "missing preimage"
+        },
+        {
+          "path": "internal/tui/theme_test.go",
+          "reason": "missing preimage"
+        },
+        {
+          "path": "internal/tui/terminal_test.go",
+          "reason": "missing preimage"
+        }
+      ]
+    },
+    {
+      "id": "call_43d3adacf30a4827b44bdd424f827fe8:0",
+      "time": "2026-11-05T00:21:39.294Z",
+      "orderTime": "2026-11-05T00:21:39.294Z",
+      "timeBasis": "record",
+      "hash": "16befc39c0f52cad2b8b177013fe7e62f2e3678bb07f66b3e5de8fb111a8a80f",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 52686
+      },
+      "turn": "01a1a8f2-d10f-7600-9338-b4bafcaebfea",
+      "status": "returned",
+      "changes": [
+        {
+          "path": "docs/regression-audit-2026-11-05.md",
+          "before": "6ca23f0b01325f58e755ea0460806093617c0851548a60719ff9c1d343de4b35",
+          "after": "0dbb2ead224fe1f050a5d2926c1dae2ba520de754771424296939399b1e7deb8",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    }
+  ],
+  "finalChanges": [
+    {
+      "path": "internal/ui/shell_windows.go",
+      "sha256": "2a14d3422474ec35eb0aa7cab9d7f86e94b624da2cb7f203d882a27e9be0238f"
+    },
+    {
+      "path": "internal/winfx/dialoggeometry_windows.go",
+      "sha256": "554f61f54390dc40bd738b7c2997f9b1b7ae367899c7499148c720f2ab8bd18c"
+    },
+    {
+      "path": "internal/dialogs/settings_geometry_live_windows_test.go",
+      "sha256": "85a64e3aada37abfa38254e6b0b120d5429bda9a259755ffac9a1a4e6a066fa7"
+    },
+    {
+      "path": "internal/winfx/dialoggeometry_windows_test.go",
+      "sha256": "edb89f0e870a7a310a45a0a5910fd396ffa8c4312086d294cf649ba70670fb9e"
+    },
+    {
+      "path": "internal/ui/chrome_geometry_live_windows_test.go",
+      "sha256": "3a860f4131b23522215b640737405522e9f198cac9273d726798bc0a2b7a458e"
+    },
+    {
+      "path": "internal/winfx/chrome_windows.go",
+      "sha256": "12fa7453ed1a7f711a76f8e6aaae7085495f7462f9538c48d51145f08323e941"
+    },
+    {
+      "path": "internal/winfx/chrome_live_windows_test.go",
+      "sha256": "6a126050cf8a4c41d5491999e5a6d5e2805ea848810744224388590f09a4dfcd"
+    },
+    {
+      "path": "internal/winfx/overlay_windows.go",
+      "sha256": "588a88077fe6a71e11b008216e085ce8b6940db1b98b49d1eb16beb7aa35008d"
+    },
+    {
+      "path": "internal/ui/render_backend_windows.go",
+      "sha256": "26081db24724d3043a2454d5865b298a41f43f6c35835434779dd84b7a78bb48"
+    },
+    {
+      "path": "internal/winfx/windowopacity_windows.go",
+      "sha256": "f02511a18196cafeedc37d84687ec07d9e1627d57b20a51e65cf098ea7bfb801"
+    },
+    {
+      "path": "internal/ui/paint_windows.go",
+      "sha256": "9979452c83d5410460ad195dabb94c5ad1de288a46522aed37dba09f817272e0"
+    },
+    {
+      "path": "internal/winfx/windowopacity_windows_test.go",
+      "sha256": "e3cc31f79d04899d5dc909131231012e94fa4ef3dd9f876d7ea5a9452fdee023"
+    },
+    {
+      "path": "internal/ui/window_state_windows_test.go",
+      "sha256": "6078ebb13ed8a1e88dda0762e69eedfea347db8affa87d4506d594b027ed5766"
+    },
+    {
+      "path": "tools/test-native-windows.ps1",
+      "sha256": "491aa0ecd29be91577764259f15f4792abce0ffcce692418fa451d4fa4c78655"
+    },
+    {
+      "path": "CHANGELOG.md",
+      "sha256": "30ceb92683efde6982e6f299dbea6495c3c11a641a76f4b95eba92a190953dcc"
+    },
+    {
+      "path": "docs/visual-regression-contract.md",
+      "sha256": "b6cab5083e1fbd42fecf0f6b0e54a0b3ecc2d48f9b840b3440a055497538d2c5"
+    },
+    {
+      "path": "docs/regression-audit-2026-11-05.md",
+      "sha256": "0dbb2ead224fe1f050a5d2926c1dae2ba520de754771424296939399b1e7deb8"
+    },
+    {
+      "path": "internal/cli/cli_test.go",
+      "sha256": "e3fadbfd7cb23c0f6f7aa58a989815f517c35486fb1c2e1d78d4fd9d036b2bbd"
+    },
+    {
+      "path": "internal/tui/terminal_environment_test.go",
+      "sha256": "7ed3acbd669ab0e96084182b77eefa4591de04ccfe921419d6c2ca2386619c38"
+    }
+  ]
+}

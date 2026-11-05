@@ -1,0 +1,59 @@
+{
+  "turn": "019f94bb-50e8-7851-8bc9-bc63e79dc930",
+  "observedStart": "2026-07-24T15:25:31.810Z",
+  "observedEnd": "2026-07-24T15:44:43.619Z",
+  "title": "resources: recover process-level product icon",
+  "events": [
+    {
+      "id": "call_pNOrWcaJcLT1TM6EIiccBstL:0",
+      "time": "2026-07-24T15:36:54.978Z",
+      "orderTime": "2026-07-24T15:36:54.978Z",
+      "timeBasis": "record",
+      "hash": "e761ed9a5fe18dd34ec75c7289416b80f75167c976a23add9f56f177c468e96a",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 43277
+      },
+      "turn": "019f94bb-50e8-7851-8bc9-bc63e79dc930",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "tools/verify-pe/main.go",
+          "before": "e502c947c8cb82bde352be12050e9b0c2091245f5a40359bbcc70a6858507cf2",
+          "after": "74ffaefa711e240398d7d6a6f0e6be71f3ad6dc7de7f9368bcbcce027b1d85a8",
+          "method": "patch"
+        },
+        {
+          "path": "tools/verify-pe/main_test.go",
+          "before": "79d4e4a33daf34473ca111cf666f84652d8d5945e61817ace0f1ade27fea9318",
+          "after": "edabce8192b8615ff2c39de2e7e76a66029ba01ed76b6eea3e854501e00e132f",
+          "method": "patch"
+        }
+      ],
+      "problems": [
+        {
+          "path": "vendor/github.com/lxn/walk/window.go",
+          "reason": "missing preimage"
+        },
+        {
+          "path": "docs/visual-regression-contract.md",
+          "reason": "hunk context not found"
+        },
+        {
+          "path": "CHANGELOG.md",
+          "reason": "hunk context not found"
+        }
+      ]
+    }
+  ],
+  "finalChanges": [
+    {
+      "path": "tools/verify-pe/main.go",
+      "sha256": "74ffaefa711e240398d7d6a6f0e6be71f3ad6dc7de7f9368bcbcce027b1d85a8"
+    },
+    {
+      "path": "tools/verify-pe/main_test.go",
+      "sha256": "edabce8192b8615ff2c39de2e7e76a66029ba01ed76b6eea3e854501e00e132f"
+    }
+  ]
+}

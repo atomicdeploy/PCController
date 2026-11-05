@@ -1,0 +1,644 @@
+{
+  "turn": "019f90ad-f8d1-7b03-9d62-10f5e10fb1f8",
+  "observedStart": "2026-07-23T20:32:28.448Z",
+  "observedEnd": "2026-07-23T21:40:05.832Z",
+  "title": "terminal: recover Telnet sessions for TUI and browser",
+  "events": [
+    {
+      "id": "call_chSoAoP3cFGNV0LNkcHtjyU5",
+      "time": "2026-07-23T20:36:07.695Z",
+      "orderTime": "2026-07-23T20:36:07.695Z",
+      "timeBasis": "record",
+      "hash": "102b98d67a51f5ea877eeaebf204c1e47cb955743235cc6e8ecfbbb10744f944",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 20000
+      },
+      "turn": "019f90ad-f8d1-7b03-9d62-10f5e10fb1f8",
+      "status": "observed-full-read",
+      "changes": [
+        {
+          "path": "internal/tui/transport_api.go",
+          "before": "72c3ac97417868c22c60fda0ccf4588701e45a9117dee267b73c95b2638112bc",
+          "after": "b845448abb1e3405435fc01ccd343357c09bf7b3ede2fa067772772bf7a80b39",
+          "method": "observed-full-read"
+        },
+        {
+          "path": "internal/headless/runtime_windows.go",
+          "before": "5b944776e8a4f1d2bb7d4e9aca2f3ef95e4899b6bb7793e996a502a97004fc4e",
+          "after": "56ac7ddf4f8c8ddb2422a11831958f5442b0116c0567375d28de5f9224e0586b",
+          "method": "observed-full-read"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_lgamM8Q7qhhyVhsyNqZU7b4R:0",
+      "time": "2026-07-23T20:41:44.820Z",
+      "orderTime": "2026-07-23T20:41:44.820Z",
+      "timeBasis": "record",
+      "hash": "7f44a4d525d13d63e161d4a817b31132c642abe73c5e83de98c37ca4b1c964e9",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 20123
+      },
+      "turn": "019f90ad-f8d1-7b03-9d62-10f5e10fb1f8",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/deviceterminal/types.go",
+          "before": null,
+          "after": "51e74c7d4140401fd090292fb69b97c54159bdc5454d4d98c828d632668b1fcf",
+          "method": "patch"
+        },
+        {
+          "path": "internal/deviceterminal/protocol.go",
+          "before": null,
+          "after": "ac21b490e9b9ae7474a4bec181ad0c08d95e7cdb484f04febc573118cd2a4034",
+          "method": "patch"
+        },
+        {
+          "path": "internal/deviceterminal/session.go",
+          "before": null,
+          "after": "f925ab8b3fd4ceaa1b28746241a43447165d622f45a30ee82874fcf567692fa0",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_RwBvlQ8LelyybDueyV8P1I2q:0",
+      "time": "2026-07-23T20:41:53.032Z",
+      "orderTime": "2026-07-23T20:41:53.032Z",
+      "timeBasis": "record",
+      "hash": "55cc31318b43e469c68ddc5d7c8fdce46dcb9854d0f65be37bd1aecbdf639974",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 20128
+      },
+      "turn": "019f90ad-f8d1-7b03-9d62-10f5e10fb1f8",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/deviceterminal/session.go",
+          "before": "f925ab8b3fd4ceaa1b28746241a43447165d622f45a30ee82874fcf567692fa0",
+          "after": "22506547b94790197a57b72073abc34bd2a80bb2f1543315aa31ada6498dd4ef",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_2YpK9ikZ7uTAba5No0iYwMK9:0",
+      "time": "2026-07-23T20:42:13.293Z",
+      "orderTime": "2026-07-23T20:42:13.293Z",
+      "timeBasis": "record",
+      "hash": "08f5da43b76e2b3d51b41115115dd783217f30b1c6a4f19443ad9a1a30b56e73",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 20134
+      },
+      "turn": "019f90ad-f8d1-7b03-9d62-10f5e10fb1f8",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/config/config.go",
+          "before": "6a3d135b72e3bf9c752cba86d915dff6c76a7f6cc051830733d75a7e793b80a2",
+          "after": "20931feb604938e511aa3bbb31d11ae957c1d93817317aba5e6b5f0bdcb2eaba",
+          "method": "patch"
+        },
+        {
+          "path": "internal/lamp/resolver.go",
+          "before": "e1df5d0589ddad69a9983318bd46705a3ef7b81ebf7de5aebf8b525335537011",
+          "after": "0fd0956253a30bd804c35b24af77abaa33e71f601a43e042513084e14a094541",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_q2zfNyG1GVvWJ1LCtaiw7xH6:0",
+      "time": "2026-07-23T20:42:55.729Z",
+      "orderTime": "2026-07-23T20:42:55.729Z",
+      "timeBasis": "record",
+      "hash": "bed3d41e8ee999ed8d7d25e89ecd3ac6ebe8ec3a1c2872740194b4f2c5f9a1c9",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 20153
+      },
+      "turn": "019f90ad-f8d1-7b03-9d62-10f5e10fb1f8",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/appcore/core.go",
+          "before": "749622387d04539b78f182f1926d4e1b4838b8c2d78f6d1b6f95e54dc7b6ac5c",
+          "after": "cb5f72f35f9578dc0f7b3fcec2dc280bd84cab2acbdbaba06caf5214c7576675",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_WK8EvMVLRAC78oGCD2JNGBYu:0",
+      "time": "2026-07-23T20:43:29.756Z",
+      "orderTime": "2026-07-23T20:43:29.756Z",
+      "timeBasis": "record",
+      "hash": "401bbd95192ecb604124b075d5c8d7433a4fe357034da569e15c1722994cc588",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 20166
+      },
+      "turn": "019f90ad-f8d1-7b03-9d62-10f5e10fb1f8",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/commands/dispatcher.go",
+          "before": "574e6f41f8a41dd1f85f90c99350db527898e6ec91eaa2338f9cce02bd2d712a",
+          "after": "8479e35c11371d424909e33db4db6eb201d632f82bdf1f6fa6a1abc1f8e446e8",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_MHniFcCSOxZyLbNElhtD21j8:0",
+      "time": "2026-07-23T20:44:13.705Z",
+      "orderTime": "2026-07-23T20:44:13.705Z",
+      "timeBasis": "record",
+      "hash": "4b4b6acb8c2f47b89e76e35d1436e547b9b7631bb5f54afaefb4567f44f74673",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 20183
+      },
+      "turn": "019f90ad-f8d1-7b03-9d62-10f5e10fb1f8",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/localapi/browser.go",
+          "before": "eb372453dce7cfe112d30ba425c13caba96bd4290178328416ca03779d8850e2",
+          "after": "5a9dcd3480fb226b9ead0956e3309954c2b509cd33c27add078009456defeabb",
+          "method": "patch"
+        }
+      ],
+      "problems": [
+        {
+          "path": "internal/localapi/server.go",
+          "reason": "missing preimage"
+        }
+      ]
+    },
+    {
+      "id": "call_vz4SJQT3O01yC2Rf4PWtTmAi:0",
+      "time": "2026-07-23T20:45:22.190Z",
+      "orderTime": "2026-07-23T20:45:22.190Z",
+      "timeBasis": "record",
+      "hash": "11c22fabb8a592fedefa084176f3643b597568a69b52456060097c24c911b100",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 20193
+      },
+      "turn": "019f90ad-f8d1-7b03-9d62-10f5e10fb1f8",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/localapi/terminal_websocket.go",
+          "before": null,
+          "after": "956ecf56b84e8e6d402a8e711d8430b8cc0249516fc05ee9ce3e690dafb3701b",
+          "method": "patch"
+        }
+      ],
+      "problems": [
+        {
+          "path": "internal/localapi/server.go",
+          "reason": "missing preimage"
+        }
+      ]
+    },
+    {
+      "id": "call_sdYLMoudr6Qwle5s9nF892yN:0",
+      "time": "2026-07-23T20:47:16.420Z",
+      "orderTime": "2026-07-23T20:47:16.420Z",
+      "timeBasis": "record",
+      "hash": "4c703d5d2c1cbb9f3dba94eff02cf9d79799d94718c9d21cd79c19e24506ce62",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 20234
+      },
+      "turn": "019f90ad-f8d1-7b03-9d62-10f5e10fb1f8",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/deviceterminal/session.go",
+          "before": "22506547b94790197a57b72073abc34bd2a80bb2f1543315aa31ada6498dd4ef",
+          "after": "ee9cffc28b33965573244ad338b8b36a4165860ecdbaca0f4bb1798d5b091329",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_OQ4WkW00FwqGx8CUAjKTvBLv:0",
+      "time": "2026-07-23T20:48:28.560Z",
+      "orderTime": "2026-07-23T20:48:28.560Z",
+      "timeBasis": "record",
+      "hash": "70b2939753b3e2d93788ee7aa083fda4e628baaecfc93462cf6b25a85dce62da",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 20268
+      },
+      "turn": "019f90ad-f8d1-7b03-9d62-10f5e10fb1f8",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/deviceterminal/session.go",
+          "before": "ee9cffc28b33965573244ad338b8b36a4165860ecdbaca0f4bb1798d5b091329",
+          "after": "750014119cb1d0a67a55ea0d3ccca5bbe6d84314adf7920b63792ab12809e68c",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_j5JHk4vvH4edzp4q5L0ARxjc:0",
+      "time": "2026-07-23T20:49:01.872Z",
+      "orderTime": "2026-07-23T20:49:01.872Z",
+      "timeBasis": "record",
+      "hash": "ee0d03b0926fb9827b0d24e917ac86c5d510f784a4fa4fbe4da49103530a73db",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 20279
+      },
+      "turn": "019f90ad-f8d1-7b03-9d62-10f5e10fb1f8",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/appcore/terminal_test.go",
+          "before": null,
+          "after": "4d3ce15cf24f1b36cd66f40c0b7e346361d138a1b9cbafb223e627eeab3adc01",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_lTMGHawFjikQOvyTG20sAV4P:0",
+      "time": "2026-07-23T20:49:08.631Z",
+      "orderTime": "2026-07-23T20:49:08.631Z",
+      "timeBasis": "record",
+      "hash": "83b5e2cbaabc5fdc92df7c8d0e074d84f1a5af16b1c498e1e927e876e192b229",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 20284
+      },
+      "turn": "019f90ad-f8d1-7b03-9d62-10f5e10fb1f8",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/appcore/terminal_test.go",
+          "before": "4d3ce15cf24f1b36cd66f40c0b7e346361d138a1b9cbafb223e627eeab3adc01",
+          "after": "fb74cb4d82f5d7f6d71f7ae47799cc627a7127adcbf0c1ed1091f2de62d2e7b4",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_rRhhyckb3dKfz8ZqoVeRu453:0",
+      "time": "2026-07-23T20:50:13.261Z",
+      "orderTime": "2026-07-23T20:50:13.261Z",
+      "timeBasis": "record",
+      "hash": "079527103fe7d36426f76993afa649f0096f8ef23c3cbebe729ece4c6db19434",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 20308
+      },
+      "turn": "019f90ad-f8d1-7b03-9d62-10f5e10fb1f8",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/localapi/terminal_websocket_test.go",
+          "before": null,
+          "after": "3c374bc1768306da52fc3511119bfa79939f52e6738c3d5c23bf928c1eaf7ae1",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_M4QevCZvKunU2E0Up9WrnLlY:0",
+      "time": "2026-07-23T20:51:47.735Z",
+      "orderTime": "2026-07-23T20:51:47.735Z",
+      "timeBasis": "record",
+      "hash": "4fb3cadbdb05a903927eb395413824ce6d24ccfebc43bc0729251bd17b2ef3cd",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 20346
+      },
+      "turn": "019f90ad-f8d1-7b03-9d62-10f5e10fb1f8",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/deviceterminal/session.go",
+          "before": "750014119cb1d0a67a55ea0d3ccca5bbe6d84314adf7920b63792ab12809e68c",
+          "after": "9305eb727475b8de7db7ddc3bdd1359961c96b65aa52b7414da44758e2e6a202",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_CJ6554pHJzUM7klB7GFVTIOf:0",
+      "time": "2026-07-23T20:53:41.164Z",
+      "orderTime": "2026-07-23T20:53:41.164Z",
+      "timeBasis": "record",
+      "hash": "9e6d14d5683bc044e094d01807059187bbbced0365f3374a2de1ba56c5e8ad22",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 20383
+      },
+      "turn": "019f90ad-f8d1-7b03-9d62-10f5e10fb1f8",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/deviceterminal/session.go",
+          "before": "9305eb727475b8de7db7ddc3bdd1359961c96b65aa52b7414da44758e2e6a202",
+          "after": "adaab688ef75b4001f26164f4ccc533294b9be30373e196d3ae5469911b8028c",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_IAEaY1cxCgGVSjB8MPrb3yXc:0",
+      "time": "2026-07-23T20:54:30.801Z",
+      "orderTime": "2026-07-23T20:54:30.801Z",
+      "timeBasis": "record",
+      "hash": "5c52d234a89f70e12534981143178c4214c35771335c3591448e0bd43ad178d7",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 20393
+      },
+      "turn": "019f90ad-f8d1-7b03-9d62-10f5e10fb1f8",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "docs/configuration.md",
+          "before": "a54a4a9cbb8df78548056ae2dd273717d86d48f1788c6ca2a0abef42a0a8a123",
+          "after": "1eb9a0df50667ac965a55ca29cabd07cb4d93a51cb20f45ea1de8aac39fde915",
+          "method": "patch"
+        }
+      ],
+      "problems": [
+        {
+          "path": "README.md",
+          "reason": "hunk context not found"
+        },
+        {
+          "path": "docs/integration.md",
+          "reason": "hunk context not found"
+        }
+      ]
+    },
+    {
+      "id": "call_MhfUxXVajUMMFpB8ri2k9Nit:0",
+      "time": "2026-07-23T20:56:01.549Z",
+      "orderTime": "2026-07-23T20:56:01.549Z",
+      "timeBasis": "record",
+      "hash": "eaeb15620c69fe0b9375a8aa5786af130530405c7a30afcca77b90b408e6c0d7",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 20422
+      },
+      "turn": "019f90ad-f8d1-7b03-9d62-10f5e10fb1f8",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "docs/firmware-protocol.md",
+          "before": "be2f5737f4a8b72532d071e6cc585939dcef188ef7c036e51131fc2fa207ff89",
+          "after": "e0cdb3e0246a6861e94b48d3df95bbf7b525a681d870179cfb5c0abd6fa1afa4",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_Jz936tX0XcwhShDF7C6GrVjp:0",
+      "time": "2026-07-23T20:57:17.178Z",
+      "orderTime": "2026-07-23T20:57:17.178Z",
+      "timeBasis": "record",
+      "hash": "13c070b30c4d5df51a25bbcc74aea70d45a21752f6a2c4959725c2a7d5821b4a",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 20457
+      },
+      "turn": "019f90ad-f8d1-7b03-9d62-10f5e10fb1f8",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/deviceterminal/types.go",
+          "before": "51e74c7d4140401fd090292fb69b97c54159bdc5454d4d98c828d632668b1fcf",
+          "after": "77a71cbd83405daa3275d3bedaa139d1e4a37ac073b25ccf5b37946cdde182b7",
+          "method": "patch-after-gofmt"
+        },
+        {
+          "path": "internal/deviceterminal/session.go",
+          "before": "adaab688ef75b4001f26164f4ccc533294b9be30373e196d3ae5469911b8028c",
+          "after": "cfb3388cfd19ca5f580d4fdac155af7b8e4fd1b6a41a799ffa3b9b41658b6c69",
+          "method": "patch"
+        },
+        {
+          "path": "internal/commands/dispatcher.go",
+          "before": "8479e35c11371d424909e33db4db6eb201d632f82bdf1f6fa6a1abc1f8e446e8",
+          "after": "5c46ff599cf9754469ab8351afb11a5174b2ac979cca47cac26ac6d6d801ecc6",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_HmXiGJSiOPaoeRdxHi3njIz9:0",
+      "time": "2026-07-23T20:57:28.611Z",
+      "orderTime": "2026-07-23T20:57:28.611Z",
+      "timeBasis": "record",
+      "hash": "a9930e373ad72bd412a790b59d1179579c1905f8bc85d7b68721ab329da2162f",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 20462
+      },
+      "turn": "019f90ad-f8d1-7b03-9d62-10f5e10fb1f8",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/appcore/terminal_test.go",
+          "before": "fb74cb4d82f5d7f6d71f7ae47799cc627a7127adcbf0c1ed1091f2de62d2e7b4",
+          "after": "d976a7ab9b67ae1c32a5fe2f52eb29d7710bf4863e5356efa2cfa3deb51379a1",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_6acGSITDMvLn0J1tsVTDIU4g:0",
+      "time": "2026-07-23T20:57:32.268Z",
+      "orderTime": "2026-07-23T20:57:32.268Z",
+      "timeBasis": "record",
+      "hash": "600d5d19ed8f2392f56ddf0a9e00402015f236a3b68e4349ec6c0038fff68acc",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 20467
+      },
+      "turn": "019f90ad-f8d1-7b03-9d62-10f5e10fb1f8",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/appcore/terminal_test.go",
+          "before": "d976a7ab9b67ae1c32a5fe2f52eb29d7710bf4863e5356efa2cfa3deb51379a1",
+          "after": "6abc2cfff1490a9389e35002d5185f52c1b5c5c1e4bdac71fe91673647d68c59",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_tJ3CGQbkxAxMMSgy34fQ4JBs:0",
+      "time": "2026-07-23T20:57:41.138Z",
+      "orderTime": "2026-07-23T20:57:41.138Z",
+      "timeBasis": "record",
+      "hash": "d8682a389f9f2e2f19f4f61e6d68ed03ed12f3f2e44505dccf6482477b63da8e",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 20472
+      },
+      "turn": "019f90ad-f8d1-7b03-9d62-10f5e10fb1f8",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "internal/appcore/terminal_test.go",
+          "before": "6abc2cfff1490a9389e35002d5185f52c1b5c5c1e4bdac71fe91673647d68c59",
+          "after": "42d13fd14e4b59ae2cb447c92b810362e7780a4281ca125967a20380b9cdeb4c",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_YZSWq7NiHe1smbEfUrzfbdCR:0",
+      "time": "2026-07-23T20:59:01.982Z",
+      "orderTime": "2026-07-23T20:59:01.982Z",
+      "timeBasis": "record",
+      "hash": "64b1e5b014f0387129cfc1783c0199cb40dbf1e83aa4cc8ea7d230df0feffd18",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 20517
+      },
+      "turn": "019f90ad-f8d1-7b03-9d62-10f5e10fb1f8",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "README.md",
+          "before": "e59dfd05246794ffa6f6c92949692261e7c0e44526a597c44e0353ac64384e70",
+          "after": "833a02ce6cc16021c84e625da317e48175ae31685d5cc068b3693c422212fc92",
+          "method": "patch"
+        }
+      ],
+      "problems": []
+    },
+    {
+      "id": "call_tRoWWWc14MA35Q4kYSXw1wAS:0",
+      "time": "2026-07-23T21:28:34.516Z",
+      "orderTime": "2026-07-23T21:28:34.516Z",
+      "timeBasis": "record",
+      "hash": "ed7527c217a1e6d3e035750816e50493e900b2552a9759635f575e36686fbaca",
+      "source": {
+        "session": "019f8cfc-271a-72e1-8747-e3eb883de5ec",
+        "line": 21241
+      },
+      "turn": "019f90ad-f8d1-7b03-9d62-10f5e10fb1f8",
+      "status": "confirmed",
+      "changes": [
+        {
+          "path": "docs/firmware-protocol.md",
+          "before": "e0cdb3e0246a6861e94b48d3df95bbf7b525a681d870179cfb5c0abd6fa1afa4",
+          "after": "d0494d363a45c1e6b8744658726e08a1d3765f14ac7ba8c59adfa310fc687d2c",
+          "method": "patch"
+        }
+      ],
+      "problems": [
+        {
+          "path": "README.md",
+          "reason": "hunk context not found"
+        },
+        {
+          "path": "docs/integration.md",
+          "reason": "hunk context not found"
+        }
+      ]
+    }
+  ],
+  "finalChanges": [
+    {
+      "path": "internal/tui/transport_api.go",
+      "sha256": "b845448abb1e3405435fc01ccd343357c09bf7b3ede2fa067772772bf7a80b39"
+    },
+    {
+      "path": "internal/headless/runtime_windows.go",
+      "sha256": "56ac7ddf4f8c8ddb2422a11831958f5442b0116c0567375d28de5f9224e0586b"
+    },
+    {
+      "path": "internal/deviceterminal/types.go",
+      "sha256": "77a71cbd83405daa3275d3bedaa139d1e4a37ac073b25ccf5b37946cdde182b7"
+    },
+    {
+      "path": "internal/deviceterminal/protocol.go",
+      "sha256": "ac21b490e9b9ae7474a4bec181ad0c08d95e7cdb484f04febc573118cd2a4034"
+    },
+    {
+      "path": "internal/deviceterminal/session.go",
+      "sha256": "cfb3388cfd19ca5f580d4fdac155af7b8e4fd1b6a41a799ffa3b9b41658b6c69"
+    },
+    {
+      "path": "internal/config/config.go",
+      "sha256": "20931feb604938e511aa3bbb31d11ae957c1d93817317aba5e6b5f0bdcb2eaba"
+    },
+    {
+      "path": "internal/lamp/resolver.go",
+      "sha256": "0fd0956253a30bd804c35b24af77abaa33e71f601a43e042513084e14a094541"
+    },
+    {
+      "path": "internal/appcore/core.go",
+      "sha256": "cb5f72f35f9578dc0f7b3fcec2dc280bd84cab2acbdbaba06caf5214c7576675"
+    },
+    {
+      "path": "internal/commands/dispatcher.go",
+      "sha256": "5c46ff599cf9754469ab8351afb11a5174b2ac979cca47cac26ac6d6d801ecc6"
+    },
+    {
+      "path": "internal/localapi/browser.go",
+      "sha256": "5a9dcd3480fb226b9ead0956e3309954c2b509cd33c27add078009456defeabb"
+    },
+    {
+      "path": "internal/localapi/terminal_websocket.go",
+      "sha256": "956ecf56b84e8e6d402a8e711d8430b8cc0249516fc05ee9ce3e690dafb3701b"
+    },
+    {
+      "path": "internal/appcore/terminal_test.go",
+      "sha256": "42d13fd14e4b59ae2cb447c92b810362e7780a4281ca125967a20380b9cdeb4c"
+    },
+    {
+      "path": "internal/localapi/terminal_websocket_test.go",
+      "sha256": "3c374bc1768306da52fc3511119bfa79939f52e6738c3d5c23bf928c1eaf7ae1"
+    },
+    {
+      "path": "docs/configuration.md",
+      "sha256": "1eb9a0df50667ac965a55ca29cabd07cb4d93a51cb20f45ea1de8aac39fde915"
+    },
+    {
+      "path": "docs/firmware-protocol.md",
+      "sha256": "d0494d363a45c1e6b8744658726e08a1d3765f14ac7ba8c59adfa310fc687d2c"
+    },
+    {
+      "path": "README.md",
+      "sha256": "833a02ce6cc16021c84e625da317e48175ae31685d5cc068b3693c422212fc92"
+    }
+  ]
+}

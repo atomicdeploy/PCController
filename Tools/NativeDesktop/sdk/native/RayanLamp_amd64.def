@@ -1,0 +1,12 @@
+LIBRARY "RayanLamp"
+EXPORTS
+    RayanLamp_ABIVersion
+    RayanLamp_IsRunning
+    RayanLamp_EnsurePrimaryW
+    RayanLamp_ExecuteUtf8
+    RayanLamp_ExecuteW
+    RayanLamp_On
+    RayanLamp_Off
+    RayanLamp_Toggle
+    RayanLamp_GetState
+    RayanLamp_Free
