@@ -96,7 +96,7 @@ const capabilityGroups = {
 		"controller.mirror.configure",
     "controller.host_menu.configure", "controller.host_menu.config.set", "controller.ui.config.set", "controller.ui.config.open",
     "controller.peripherals.set", "controller.board_profile.update", "controller.peripheral.presentation.update",
-    "controller.peripheral.folder.update",
+    "controller.peripheral.folder.update", "controller.channel_routing.update",
     "controller.hotkeys.set", "controller.os.configure",
     "controller.lcd.presentation.configure", "controller.app.page", "controller.app.navigate",
     "controller.app.launch", "controller.app.navigation.commit",
@@ -123,7 +123,7 @@ const capabilityGroups = {
     "controller.discovery.manifest", "controller.discovery.local_manifest", "controller.discovery.check",
     "controller.discovery.status", "controller.host_menu.config", "controller.host_menu.config.get",
     "controller.ui.config", "controller.ui.config.get", "controller.peripherals", "controller.peripherals.get",
-    "controller.board_profile.get",
+    "controller.board_profile.get", "controller.channel_routing.get",
     "controller.os.policy", "controller.os.facts.catalog", "controller.host.facts.catalog",
     "controller.hotkeys.get", "controller.bridge.list", "controller.webhooks.status",
     "controller.webhooks.pending", "controller.webhooks.dead", "controller.ping", "controller.snapshot", "controller.estop.get",
@@ -144,6 +144,7 @@ const capabilityGroups = {
 		"controller.rf.catalog", "controller.pwm.trace.get",
   ],
   board_commands: [
+    "controller.channel.set", "controller.output.set",
 		"controller.mirror.apply", "controller.mirror.resync",
     "controller.program_state.set", "controller.program-state.set", "controller.menu.layout.set",
     "controller.host_menu.directory.replace", "controller.host_menu.content.push", "controller.menu.jump",
@@ -161,6 +162,10 @@ const capabilityGroups = {
 };
 
 const methodOverrides = {
+  "controller.channel_routing.get": "Return host-owned semantic bindings, eligible physical targets, board/session pins and PWM configuration revision.",
+  "controller.channel_routing.update": "Atomically replace revision-fenced compatible bindings while affected outputs are observed idle; never actuate outputs or migrate numeric cues.",
+  "controller.channel.set": "Resolve a stable semantic key and confirm one owner/revision/session-pinned physical output; never automatically retry unknown outcomes.",
+  "controller.output.set": "Confirm one explicit physical output with owner/revision/session pins; PWM accepts raw value or curve-aware percent_milli with a PWM configuration revision. No batch atomicity or automatic retry.",
 	"controller.pwm.trace.get": "Return bounded DEBUG-only PWM acknowledgements; no board read or output change.",
 	"controller.pwm.trace.start": "Temporarily capture one channel 0..15 for explicit duration_ms 1..60000, off by default; no board operation.",
 	"controller.pwm.trace.stop": "Stop temporary PWM acknowledgement capture and retain bounded receipts; no board operation.",
@@ -265,6 +270,10 @@ const nonIdempotentMethods = new Set([
 ]);
 
 const safeCapabilities = new Set(["read", "events"]);
+// Hardware side effects must never be replayed merely because the requested
+// absolute number happens to be unchanged.
+nonIdempotentMethods.add("controller.channel.set");
+nonIdempotentMethods.add("controller.output.set");
 const methods = [];
 for (const [capability, names] of Object.entries(capabilityGroups)) {
   for (const name of names) {
@@ -461,7 +470,53 @@ const rpcActionMethodContracts = {
 	"controller.app.action": { params: "AppActionRequest", result: "ActionOperationEnvelope" },
 	"controller.app.action.ack": { params: "ActionAck", result: "ActionOperationEnvelope" },
 	"controller.app.action.outcome": { params: "ActionOutcomeRequest", result: "ActionOperationEnvelope" },
+  "controller.channel_routing.get": { params: "ChannelRoutingQuery", result: "ChannelRoutingCatalog" },
+  "controller.channel_routing.update": { params: "ChannelRoutingUpdate", result: "ChannelRoutingCatalog" },
+  "controller.channel.set": { params: "SemanticOutputRequest", result: "SemanticOutputResult" },
+  "controller.output.set": { params: "PhysicalOutputRequest", result: "PinnedOutputResult" },
 };
+
+function channelRoutingSchemas(prefix) {
+  const ref = (name) => ({ $ref: `${prefix}${name}` });
+  const text = { type: "string", minLength: 1 };
+  const generation = { type: "integer", minimum: 1 };
+  const raw = { type: "integer", minimum: 0, maximum: 4095 };
+  const percent = { type: "integer", minimum: 0, maximum: 100000 };
+  const targets = [...Array.from({length:4}, (_, n) => `relay.${n+5}`), ...Array.from({length:11}, (_, n) => `pwm.${n}`)];
+  const key = {type:"string", maxLength:64, pattern:"^(?!(?:relay|pwm|seat|motion|display|sensor|strip)(?:\\.|$))(?!.*\\.\\.)(?!.*\\.$)[a-z][a-z0-9._-]*$"};
+  const write = (semantic) => ({
+    type:"object", additionalProperties:false,
+    required:["expected_host_instance_id","expected_connection_generation","board_identity","expected_revision",semantic ? "key" : "target"],
+    properties:{
+      expected_host_instance_id:text, expected_connection_generation:generation, board_identity:text, expected_revision:text,
+      [semantic ? "key" : "target"]:semantic ? key : {enum:targets},
+      value:raw, percent_milli:percent, expected_pwm_configuration_revision:text,
+    },
+    oneOf:[{required:["value"],not:{required:["percent_milli"]}},
+      {required:["percent_milli","expected_pwm_configuration_revision"],not:{required:["value"]}}],
+    ...(!semantic ? {allOf:[{if:{properties:{target:{pattern:"^relay\\."}}},then:{required:["value"],properties:{value:{type:"integer",minimum:0,maximum:1}},not:{required:["percent_milli"]}}}]} : {}),
+    description:"Semantic kind is validated against the current binding. Revisions are opaque. Unknown outcomes must never be automatically retried.",
+  });
+  return {
+    ChannelRoutingQuery:{type:"object",additionalProperties:false},
+    SemanticChannel:{type:"object",additionalProperties:false,required:["key","kind","target","name"],properties:{
+      key,kind:{enum:["relay","pwm"]},target:{enum:targets},name:{...text,maxLength:64},icon:{type:"string",maxLength:64},
+    }},
+    ChannelRouting:{type:"object",additionalProperties:false,required:["enabled","channels"],properties:{enabled:{type:"boolean"},channels:{type:"array",maxItems:15,items:ref("SemanticChannel")}}},
+    ChannelRoutingUpdate:{type:"object",additionalProperties:false,required:["board_identity","expected_revision","routing"],properties:{board_identity:text,expected_revision:text,routing:ref("ChannelRouting")}},
+    ChannelRoutingCatalog:{type:"object",required:["host_instance_id","connection_generation","pwm_configuration_revision","board_profile","routing","targets"],properties:{
+      host_instance_id:text,connection_generation:{type:"integer",minimum:0},pwm_configuration_revision:text,
+      board_profile:{type:"object",additionalProperties:true},routing:ref("ChannelRouting"),targets:{type:"array",items:{type:"object",additionalProperties:true}},
+    }},
+    SemanticOutputRequest:write(true),PhysicalOutputRequest:write(false),
+    PinnedOutputResult:{type:"object",required:["accepted","outcome","target","value","observed_value","host_instance_id","board_identity","revision","connection_generation"],properties:{
+      accepted:{const:true},outcome:{const:"confirmed"},target:{enum:targets},value:raw,observed_value:raw,
+      host_instance_id:text,board_identity:text,revision:text,connection_generation:generation,percent_milli:percent,pwm_configuration_revision:text,
+    },description:"The host requires matching observed_value and value. Logical writes also echo percent_milli and pwm_configuration_revision. This is board-register readback, not electrical measurement."},
+    SemanticOutputResult:{allOf:[ref("PinnedOutputResult"),{type:"object",required:["key"],properties:{key}}]},
+    PinnedOutputErrorData:{type:"object",required:["outcome"],properties:{outcome:{enum:["rejected","unknown"]}},description:"rejected means pre-runtime admission failed; unknown means no safe claim of non-actuation. Missing response/data is unknown. Do not retry hardware automatically."},
+  };
+}
 
 function operationFor(route, method) {
   const operation = {
@@ -742,6 +797,7 @@ const openapi = {
 			description: "Named product surface only. Executables, arguments, environment, shell text, and credentials are not accepted.",
 		},
 		...openAPIActionSchemas,
+    ...channelRoutingSchemas("#/components/schemas/"),
       JSONRPCError: {
         type: "object", required: ["code", "message"], additionalProperties: false,
         properties: { code: { type: "integer", enum: [-32700, -32600, -32601, -32602, -32004, -32003, -32001, -32000] }, message: { type: "string" }, data: true },
@@ -769,6 +825,7 @@ const rpcSchema = {
   ],
 	$defs: {
 		...rpcActionSchemas,
+    ...channelRoutingSchemas("#/$defs/"),
     id: { oneOf: [{ type: "string" }, { type: "integer" }, { type: "null" }] },
     request: {
       type: "object", required: ["jsonrpc", "method"], additionalProperties: false,

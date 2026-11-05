@@ -10,7 +10,65 @@ import (
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/control"
 	"pccontroller.local/controller/internal/ipcjson"
+	"pccontroller.local/controller/internal/shell"
 )
+
+func TestSemanticRoutingTUIReadsMappedPhysicalStateAndUsesStableKey(t *testing.T) {
+	runtime := control.New(control.Options{})
+	defer runtime.Close()
+	snapshot := RichPreviewSnapshot()
+	snapshot.Status.ActiveRelays = 1 << 5
+	model := NewApplicationWithOptions(runtime, shell.New(10), Options{DisableWelcome: true, Remote: &RemoteBackend{Endpoint: "test", InitialSnapshot: snapshot}})
+	model.page = PageOutputs
+	model.channels.value = testChannelCatalog(t, "Physical R5", "one")
+	model.channels.value.HostInstanceID, model.channels.value.ConnectionGeneration = "test-host", 7
+	model.channels.value.ChannelRouting = appconfig.ChannelRouting{Enabled: true, Channels: []appconfig.SemanticChannel{{Key: "lighting.aisle", Kind: "relay", Target: "relay.6", Name: "Aisle", Icon: "lamp"}}}
+	model.channels.owner = model.channelCatalogOwner()
+	calls := 0
+	model.channels.source.SetSemantic = func(_ context.Context, key string, value uint16, identity, revision, host string, generation uint64) error {
+		calls++
+		if key != "lighting.aisle" || value != 0 || identity != "test-board" || revision != "one" || host != "test-host" || generation != 7 {
+			t.Fatalf("lost stable key or owner fence: %s %d %s %s", key, value, identity, revision)
+		}
+		return nil
+	}
+	found := false
+	for index, row := range model.controlTableRows(model.snapshot(), 8) {
+		if row.PeripheralKey != "lighting.aisle" {
+			continue
+		}
+		found = true
+		if row.Name != "Aisle" || row.Icon != "lamp" || row.SemanticValue == nil || *row.SemanticValue != 1 {
+			t.Fatalf("routed row=%+v", row)
+		}
+		model.cursor = index
+		pending, command, _ := model.activateOutput()
+		if command == nil {
+			t.Fatal("no semantic action")
+		}
+		if _, duplicate, _ := pending.activateOutput(); duplicate != nil {
+			t.Fatal("duplicated pending mutation")
+		}
+		message := command().(semanticChannelResultMsg)
+		if message.err != nil || calls != 1 {
+			t.Fatal("semantic action failed")
+		}
+		updated, _ := pending.Update(message)
+		if updated.(Model).channels.setPending {
+			t.Fatal("pending state stuck")
+		}
+	}
+	if !found {
+		t.Fatal("semantic channel absent")
+	}
+	disconnected := model.snapshot()
+	disconnected.Connected = false
+	for _, row := range model.controlTableRows(disconnected, 8) {
+		if row.PeripheralKey == "lighting.aisle" && row.SemanticValue != nil {
+			t.Fatal("disconnected semantic output presented as current")
+		}
+	}
+}
 
 func testChannelCatalog(t *testing.T, name, revision string) ipcjson.PeripheralSettings {
 	t.Helper()

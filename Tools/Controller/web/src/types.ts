@@ -523,6 +523,7 @@ export interface HostUISettings {
 }
 
 export interface PeripheralDescriptor {
+  locked?: boolean
   key: string
   kind: 'relay' | 'motion' | 'seat' | 'pwm' | 'display' | 'sensor'
   role: string

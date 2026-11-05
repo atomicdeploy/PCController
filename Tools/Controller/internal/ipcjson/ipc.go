@@ -285,6 +285,7 @@ type Service struct {
 	HotkeyStatus        func() any
 	LastSessionSnapshot func() (any, error)
 	commandMu           sync.Mutex
+	channelRoutingMu    sync.RWMutex
 	sessionMu           sync.Mutex
 	sessionTickets      map[[sha256.Size]byte]sessionTicket
 	sessionClock        func() time.Time
@@ -356,13 +357,17 @@ type browserUISettings struct {
 }
 
 type PeripheralSettings struct {
-	Names        map[string]string                `json:"peripheral_names"`
-	BoardProfile boardProfileDescriptor           `json:"board_profile"`
-	Peripherals  []appconfig.PeripheralDescriptor `json:"peripherals"`
-	Controls     []appconfig.ControlDescriptor    `json:"controls"`
-	Folders      []appconfig.ChannelFolder        `json:"folders"`
-	Strip        *stripControlDescriptor          `json:"strip,omitempty"`
-	StripEffects []control.StripEffectDescriptor  `json:"strip_effects,omitempty"`
+	HostInstanceID           string                           `json:"host_instance_id"`
+	ConnectionGeneration     uint64                           `json:"connection_generation"`
+	Names                    map[string]string                `json:"peripheral_names"`
+	BoardProfile             boardProfileDescriptor           `json:"board_profile"`
+	Peripherals              []appconfig.PeripheralDescriptor `json:"peripherals"`
+	Controls                 []appconfig.ControlDescriptor    `json:"controls"`
+	Folders                  []appconfig.ChannelFolder        `json:"folders"`
+	Strip                    *stripControlDescriptor          `json:"strip,omitempty"`
+	StripEffects             []control.StripEffectDescriptor  `json:"strip_effects,omitempty"`
+	ChannelRouting           appconfig.ChannelRouting         `json:"channel_routing"`
+	PWMConfigurationRevision string                           `json:"pwm_configuration_revision"`
 }
 
 type stripControlDescriptor struct {
@@ -833,6 +838,33 @@ func (service *Service) dispatch(
 		result = service.peripheralSettings()
 	case "controller.board_profile.get":
 		result, _ = service.activeBoardProfile()
+	case "controller.channel_routing.get":
+		result = service.channelRoutingCatalog()
+	case "controller.channel_routing.update":
+		var params channelRoutingUpdate
+		if err = decodeStrictParams(request.Params, &params); err != nil {
+			err = &RPCError{Code: -32602, Message: err.Error()}
+		} else {
+			result, err = service.updateChannelRouting(ctx, params)
+		}
+	case "controller.channel.set":
+		var params channelValueRequest
+		if err = decodeStrictParams(request.Params, &params); err != nil {
+			err = &RPCError{Code: -32602, Message: err.Error()}
+		} else {
+			result, err = service.setSemanticChannel(ctx, params)
+		}
+		err = outputRPCError(err)
+	case "controller.output.set":
+		var params outputValueRequest
+		if err = decodeStrictParams(request.Params, &params); err != nil {
+			err = &RPCError{Code: -32602, Message: err.Error()}
+		} else {
+			service.channelRoutingMu.RLock()
+			result, err = service.setPinnedOutput(ctx, params)
+			service.channelRoutingMu.RUnlock()
+		}
+		err = outputRPCError(err)
 	case "controller.board_profile.update":
 		var params struct {
 			Key              string `json:"key"`
@@ -2201,9 +2233,12 @@ func (service *Service) peripheralSettings() PeripheralSettings {
 		strip.ColorOrders = appconfig.StripColorOrders()
 	}
 	return PeripheralSettings{
+		HostInstanceID: service.HostInstanceID, ConnectionGeneration: snapshot.ConnectionGeneration,
 		Names: clonePeripheralNames(names), BoardProfile: profileDescriptor,
 		Peripherals: peripherals, Controls: controls, Folders: appconfig.ChannelFolderCatalog(profile, names),
 		Strip: strip, StripEffects: stripEffects,
+		ChannelRouting:           profile.ChannelRouting,
+		PWMConfigurationRevision: appconfig.PWMConfigurationRevision(config.UI),
 	}
 }
 
@@ -2626,7 +2661,7 @@ func requestCapability(method string, params json.RawMessage) string {
 		"controller.webhooks.status",
 		"controller.webhooks.pending", "controller.webhooks.dead":
 		return capabilityRead
-	case "controller.rf.catalog":
+	case "controller.rf.catalog", "controller.channel_routing.get":
 		return capabilityRead
 	case "controller.rf.binding.put", "controller.rf.binding.remove", "controller.rf.preferences.set":
 		return capabilityHostConfig
@@ -2634,7 +2669,7 @@ func requestCapability(method string, params json.RawMessage) string {
 		"controller.ui.config.set", "controller.ui.config.open",
 		"controller.peripherals.set", "controller.board_profile.update",
 		"controller.peripheral.presentation.update",
-		"controller.peripheral.folder.update",
+		"controller.peripheral.folder.update", "controller.channel_routing.update",
 		"controller.hotkeys.set",
 		"controller.os.configure", "controller.lcd.presentation.configure",
 		"controller.app.page", "controller.app.navigate", "controller.app.action.ack", "controller.app.launch",

@@ -14,8 +14,9 @@ import (
 // ChannelCatalogSource uses the same host-owned catalog and revision-fenced
 // mutation as Pealayer and the browser. Terminal preferences never own names.
 type ChannelCatalogSource struct {
-	Read   func(context.Context) (ipcjson.PeripheralSettings, error)
-	Rename func(context.Context, string, string, string) (ipcjson.PresentationUpdateResult, error)
+	Read        func(context.Context) (ipcjson.PeripheralSettings, error)
+	Rename      func(context.Context, string, string, string) (ipcjson.PresentationUpdateResult, error)
+	SetSemantic func(context.Context, string, uint16, string, string, string, uint64) error
 }
 
 type channelCatalogState struct {
@@ -25,6 +26,30 @@ type channelCatalogState struct {
 	version        uint64
 	pending        bool
 	renameRevision string
+	setPending     bool
+}
+
+type semanticChannelResultMsg struct {
+	key string
+	err error
+}
+
+func (model Model) setSemanticOutput(row controlTableRow, value uint16) (Model, tea.Cmd, bool) {
+	if model.channels.setPending || model.channels.source.SetSemantic == nil || model.channels.owner != model.channelCatalogOwner() || model.preview != nil {
+		return model, nil, true
+	}
+	catalog := model.channels.value
+	if !catalog.ChannelRouting.Enabled || !catalog.BoardProfile.Attached || !model.snapshot().Connected {
+		return model, nil, true
+	}
+	model.channels.setPending = true
+	set := model.channels.source.SetSemantic
+	return model, func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+		defer cancel()
+		err := set(ctx, row.PeripheralKey, value, catalog.BoardProfile.BoardIdentity, catalog.BoardProfile.Revision, catalog.HostInstanceID, catalog.ConnectionGeneration)
+		return semanticChannelResultMsg{key: row.PeripheralKey, err: err}
+	}, true
 }
 
 type channelCatalogRefreshMsg struct{}
