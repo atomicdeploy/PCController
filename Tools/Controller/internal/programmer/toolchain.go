@@ -125,8 +125,15 @@ func (profile ToolchainProfile) validateLockedDependencies() error {
 }
 
 type ToolchainBootstrapOptions struct {
-	Profile     ToolchainProfile
-	Locked      bool
+	Profile ToolchainProfile
+	Locked  bool
+	// System uses Arduino CLI's existing user configuration and directories.
+	// It never rewrites that configuration or upgrades unrelated dependencies.
+	System      bool
+	ConfigPath  string
+	Cores       []string
+	Libraries   []string
+	Indexes     []string
 	CLI         string
 	InstallDir  string
 	Environment []string
@@ -138,6 +145,7 @@ type ToolchainBootstrapOptions struct {
 }
 
 type ToolchainBootstrapReport struct {
+	Scope              string `json:"scope"`
 	DependenciesLocked bool   `json:"dependencies_locked"`
 	Profile            string `json:"profile"`
 	FQBN               string `json:"fqbn"`
@@ -178,6 +186,10 @@ func BootstrapToolchain(
 			return ToolchainBootstrapReport{}, err
 		}
 	}
+	if err := validateToolchainSeedOptions(options); err != nil {
+		return ToolchainBootstrapReport{}, err
+	}
+	profile.PackageIndexes = append(append([]string(nil), profile.PackageIndexes...), options.Indexes...)
 	environment := options.Environment
 	if environment == nil {
 		environment = os.Environ()
@@ -206,11 +218,17 @@ func BootstrapToolchain(
 	}
 	workspace := newToolchainWorkspace(installRoot)
 	report := ToolchainBootstrapReport{
+		Scope:              "managed",
 		DependenciesLocked: options.Locked,
 		Profile:            profile.Name, FQBN: profile.FQBN, CLIVersion: profile.CLI.Version,
 		ConfigPath: workspace.configPath, DataDir: workspace.dataDir,
 		DownloadsDir: workspace.downloadsDir, UserDir: workspace.userDir,
 		ProxyVariables: proxyEnvironmentNames(environment),
+	}
+	if options.System {
+		report.Scope = "system"
+		report.ConfigPath = strings.TrimSpace(options.ConfigPath)
+		report.DataDir, report.DownloadsDir, report.UserDir = "", "", ""
 	}
 	cliPath := strings.TrimSpace(options.CLI)
 	if cliPath == "" {
@@ -247,23 +265,40 @@ func BootstrapToolchain(
 			return report, resolveErr
 		}
 		cliPath = resolved
-		if err := writeToolchainConfig(workspace, profile.PackageIndexes); err != nil {
-			return report, err
+		if !options.System {
+			if err := writeToolchainConfig(workspace, profile.PackageIndexes); err != nil {
+				return report, err
+			}
 		}
 		report.CLIInstalled = true
 	}
 	report.CLIPath = cliPath
-	environment = withDependencyProxyEnvironment(
-		withToolchainDirectoryEnvironment(environment, workspace),
-	)
+	if !options.System {
+		environment = withToolchainDirectoryEnvironment(environment, workspace)
+	}
+	environment = withDependencyProxyEnvironment(environment)
 	runner := options.Runner
 	if runner == nil {
 		runner = DependencyEnvironmentRunnerFunc(runArduinoEnvironment)
 	}
 	steps := profile.installSteps(options.Locked)
+	// Keep inventories last, after all explicitly requested dependencies.
+	inventories := append([]toolchainInstallStep(nil), steps[len(steps)-2:]...)
+	steps = steps[:len(steps)-2]
+	for _, core := range options.Cores {
+		steps = append(steps, toolchainInstallStep{"install core " + core,
+			[]string{"core", "install", core, "--additional-urls", strings.Join(profile.PackageIndexes, ",")}})
+	}
+	for _, library := range options.Libraries {
+		steps = append(steps, toolchainInstallStep{"install library " + library, []string{"lib", "install", library}})
+	}
+	steps = append(steps, inventories...)
 	directEnvironment := withoutProxyEnvironment(environment)
 	for _, configured := range steps {
-		arguments := append([]string{"--config-file", workspace.configPath}, configured.args...)
+		arguments := append([]string(nil), configured.args...)
+		if report.ConfigPath != "" {
+			arguments = append([]string{"--config-file", report.ConfigPath}, arguments...)
+		}
 		step := ToolchainSyncStep{
 			Name:      configured.name,
 			Command:   Command{Name: cliPath, Args: arguments},
@@ -424,10 +459,12 @@ func (profile ToolchainProfile) cliAsset(goos, goarch string) (ToolchainAsset, e
 	return ToolchainAsset{}, fmt.Errorf("toolchain profile has no CLI asset for %s/%s", goos, goarch)
 }
 
-func (profile ToolchainProfile) installSteps(locked bool) []struct {
+type toolchainInstallStep struct {
 	name string
 	args []string
-} {
+}
+
+func (profile ToolchainProfile) installSteps(locked bool) []toolchainInstallStep {
 	withIndexes := func(arguments ...string) []string {
 		result := append([]string(nil), arguments...)
 		if len(profile.PackageIndexes) != 0 {
@@ -445,32 +482,57 @@ func (profile ToolchainProfile) installSteps(locked bool) []struct {
 	if locked {
 		selection = "locked"
 	}
-	steps := []struct {
-		name string
-		args []string
-	}{
+	steps := []toolchainInstallStep{
 		{"refresh core index", withIndexes("core", "update-index")},
 		{"refresh library index", []string{"lib", "update-index"}},
 		{"install " + selection + " core " + dependency(profile.CoreID, profile.CoreVersion),
 			withIndexes("core", "install", dependency(profile.CoreID, profile.CoreVersion))},
 	}
 	for _, library := range profile.Libraries {
-		steps = append(steps, struct {
-			name string
-			args []string
-		}{"install " + selection + " library " + dependency(library.Name, library.Version),
+		steps = append(steps, toolchainInstallStep{"install " + selection + " library " + dependency(library.Name, library.Version),
 			[]string{"lib", "install", dependency(library.Name, library.Version)}})
 	}
 	return append(steps,
-		struct {
-			name string
-			args []string
-		}{"core inventory", []string{"core", "list"}},
-		struct {
-			name string
-			args []string
-		}{"library inventory", []string{"lib", "list"}},
+		toolchainInstallStep{"core inventory", []string{"core", "list"}},
+		toolchainInstallStep{"library inventory", []string{"lib", "list"}},
 	)
+}
+
+func validateToolchainSeedOptions(options ToolchainBootstrapOptions) error {
+	if options.ConfigPath != "" && !options.System {
+		return errors.New("an existing Arduino config requires --system; managed bootstrap owns its generated config")
+	}
+	if options.ConfigPath != "" {
+		info, err := os.Stat(options.ConfigPath)
+		if err != nil || !info.Mode().IsRegular() {
+			return fmt.Errorf("Arduino config must be an existing regular file: %s", options.ConfigPath)
+		}
+	}
+	for _, group := range []struct {
+		kind   string
+		values []string
+	}{{"core", options.Cores}, {"library", options.Libraries}} {
+		for _, value := range group.values {
+			name, version, pinned := strings.Cut(value, "@")
+			if strings.TrimSpace(name) == "" || strings.HasPrefix(name, "-") || strings.ContainsAny(value, "\r\n\x00") ||
+				(pinned && (strings.TrimSpace(version) == "" || strings.Contains(version, "@"))) {
+				return fmt.Errorf("invalid %s selection %q", group.kind, value)
+			}
+			if group.kind == "core" && (len(strings.Split(name, ":")) != 2 || strings.ContainsAny(name, " \t") || strings.HasPrefix(name, ":") || strings.HasSuffix(name, ":")) {
+				return fmt.Errorf("core selection must be PACKAGE:ARCH[@VERSION]: %q", value)
+			}
+			if options.Locked && !pinned {
+				return fmt.Errorf("--locked requires an explicit version for additional %s %q", group.kind, value)
+			}
+		}
+	}
+	for _, index := range options.Indexes {
+		parsed, err := url.Parse(index)
+		if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || strings.ContainsAny(index, ",\r\n") {
+			return errors.New("additional package index requires an HTTPS URL without credentials or commas")
+		}
+	}
+	return nil
 }
 
 func installToolchainCLI(

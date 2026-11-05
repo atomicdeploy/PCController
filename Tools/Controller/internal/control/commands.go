@@ -1294,6 +1294,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 					ctx,
 					programmer.ToolchainSyncOptions{
 						ToolchainCLI: resolved.ArduinoCLI,
+						ConfigPath:   resolved.ArduinoConfig,
 						DirectRetry:  true,
 					},
 					&output,

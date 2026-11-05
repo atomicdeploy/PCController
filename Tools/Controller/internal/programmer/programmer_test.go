@@ -112,6 +112,30 @@ func TestArduinoUploadUsesSketchNotInputFile(t *testing.T) {
 	if strings.Contains(joined, "--input-file") {
 		t.Fatalf("unsafe input-file workflow: %s", joined)
 	}
+	if !strings.Contains(joined, "--verify") {
+		t.Fatal("upload omitted verification")
+	}
+}
+
+func TestArduinoUploadPrebuiltBinaryWithVerification(t *testing.T) {
+	options := Options{Method: MethodArduino, Operation: OperationWriteFlash, Port: "COM9", FQBN: "esp32:esp32:esp32s3", ArduinoCLI: "arduino-cli", ArduinoConfig: "selected.yaml", InputFile: "firmware image.bin", SketchPath: "ignored-project"}
+	command, err := Build(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(command.Args, " ")
+	for _, want := range []string{"--config-file selected.yaml", "upload --port COM9 --fqbn esp32:esp32:esp32s3", "--verify", "--input-file firmware image.bin"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("missing %q: %v", want, command.Args)
+		}
+	}
+	if strings.Contains(joined, "ignored-project") {
+		t.Fatal("prebuilt upload selected a sketch instead")
+	}
+	options.OutputDir = "ambiguous"
+	if _, err := Build(options); err == nil {
+		t.Fatal("accepted ambiguous upload inputs")
+	}
 }
 
 func TestGenericToolchainCompilePreservesArbitraryFQBN(t *testing.T) {

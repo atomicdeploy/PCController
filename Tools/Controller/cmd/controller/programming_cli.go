@@ -84,6 +84,7 @@ func runProgramWithConfig(
 	hexPath := flags.String("hex", config.Paths.FirmwareHex, "Intel HEX file for avrdude workflows")
 	sketch := flags.String("sketch", configuredProject(config, findProjectRoot()), "Arduino sketch directory")
 	outputDir := flags.String("output-dir", "", "firmware dependency compile output directory")
+	inputFile := flags.String("input-file", "", "prebuilt binary for external-board Arduino CLI upload")
 	outputPath := flags.String("output", "", "output file for flash/EEPROM reads")
 	fqbn := flags.String("fqbn", configuredFQBN(config), "Arduino FQBN")
 	defaultProgrammer := config.Programming.Programmer
@@ -172,7 +173,8 @@ func runProgramWithConfig(
 		Operation: programmer.Operation(strings.ToLower(*operation)),
 		Port:      *port, HexPath: *hexPath, SketchPath: *sketch,
 		OutputDir: *outputDir, OutputPath: *outputPath,
-		FQBN: *fqbn, Programmer: *programmerName,
+		InputFile: *inputFile,
+		FQBN:      *fqbn, Programmer: *programmerName,
 		MCU: *mcu, BaudRate: *baud, ArduinoCLI: *toolchainCLI, ArduinoConfig: *toolchainConfig,
 		Avrdude: *avrdude, AvrdudeConf: *avrdudeConf,
 		AvrdudeBackend: *avrdudeBackend, AvrdudeAdapter: *avrdudeAdapter,
@@ -414,6 +416,9 @@ func runProgramWithConfig(
 }
 
 func validateExternalToolchainSelection(options programmer.Options, selected bool) error {
+	if options.InputFile != "" && (!selected || options.Method != programmer.MethodArduino || options.Operation != programmer.OperationWriteFlash) {
+		return errors.New("--input-file requires an external-board toolchain write-flash operation")
+	}
 	genericOperation := options.Method == programmer.MethodArduino &&
 		(options.Operation == programmer.OperationCompile || options.Operation == programmer.OperationWriteFlash)
 	if genericOperation && !selected {
@@ -435,8 +440,13 @@ func validateExternalToolchainSelection(options programmer.Options, selected boo
 	if options.Operation == programmer.OperationWriteFlash && strings.Contains(strings.ToLower(parts[1]), "avr") {
 		return errors.New("external-board upload cannot bypass the guarded libavrdude path for AVR targets")
 	}
-	if options.Operation == programmer.OperationWriteFlash && strings.TrimSpace(options.OutputDir) == "" {
-		return errors.New("external-board upload requires --output-dir from the matching toolchain compile")
+	if options.Operation == programmer.OperationWriteFlash {
+		if options.OutputDir != "" && options.InputFile != "" {
+			return errors.New("external-board upload accepts either --output-dir or --input-file, not both")
+		}
+		if strings.TrimSpace(options.OutputDir) == "" && strings.TrimSpace(options.InputFile) == "" {
+			return errors.New("external-board upload requires --output-dir from the matching toolchain compile or --input-file")
+		}
 	}
 	return nil
 }
@@ -1424,6 +1434,7 @@ func runToolchainSync(
 ) error {
 	flags := flag.NewFlagSet("toolchain sync", flag.ContinueOnError)
 	flags.SetOutput(stderr)
+	arduinoConfig := flags.String("toolchain-config", store.Current().Programming.ToolchainConfig, "Arduino CLI configuration to synchronize")
 	firmwareCLI := flags.String(
 		"cli",
 		store.Current().Programming.ToolchainCLI,
@@ -1444,7 +1455,7 @@ func runToolchainSync(
 	ctx, cancel := signalContext()
 	defer cancel()
 	report, err := programmer.SyncToolchain(ctx, programmer.ToolchainSyncOptions{
-		ToolchainCLI: *firmwareCLI, DirectRetry: *directRetry, DryRun: *dryRun,
+		ToolchainCLI: *firmwareCLI, ConfigPath: *arduinoConfig, DirectRetry: *directRetry, DryRun: *dryRun,
 	}, stdout)
 	if *dryRun {
 		fmt.Fprintf(stdout, "\nToolchain sync plan complete: %d steps; no changes made.\n", len(report.Steps))
@@ -1467,6 +1478,12 @@ func runToolchainBootstrap(
 ) error {
 	flags := flag.NewFlagSet("toolchain bootstrap", flag.ContinueOnError)
 	flags.SetOutput(stderr)
+	system := flags.Bool("system", false, "seed the existing Arduino user environment instead of isolated managed directories")
+	arduinoConfig := flags.String("toolchain-config", "", "existing Arduino CLI config file (requires --system; never rewritten)")
+	var cores, libraries, indexes stringListFlag
+	flags.Var(&cores, "core", "additional PACKAGE:ARCH[@VERSION] to install (repeatable)")
+	flags.Var(&libraries, "library", "additional library NAME[@VERSION] to install (repeatable)")
+	flags.Var(&indexes, "index-url", "additional HTTPS board package index (repeatable)")
 	policyPath := flags.String("policy", "", "latest-compatible toolchain policy JSON")
 	lockPath := flags.String("lock", "", "exact resolved toolchain lock JSON")
 	locked := flags.Bool("locked", false, "bootstrap the existing lock without checking registries")
@@ -1479,7 +1496,28 @@ func runToolchainBootstrap(
 		return err
 	}
 	if flags.NArg() != 0 {
-		return errors.New("usage: controller toolchain bootstrap [--policy FILE] [--locked --lock FILE] [--install-dir DIR] [--cli PATH] [--direct-retry=false] [--dry-run]")
+		return errors.New("usage: controller toolchain bootstrap [--system [--toolchain-config FILE]] [--core ID] [--library NAME] [--index-url URL] [--policy FILE] [--locked --lock FILE] [--install-dir DIR] [--cli PATH] [--dry-run]")
+	}
+	if *system {
+		explicitSave := false
+		flags.Visit(func(value *flag.Flag) {
+			if value.Name == "save-cli" {
+				explicitSave = true
+			}
+		})
+		if !explicitSave {
+			*saveCLI = false
+		}
+		if *saveCLI && strings.TrimSpace(*arduinoConfig) == "" {
+			return errors.New("--system --save-cli requires --toolchain-config so later programming uses the same Arduino installation")
+		}
+	}
+	if *arduinoConfig != "" {
+		absolute, err := filepath.Abs(*arduinoConfig)
+		if err != nil {
+			return err
+		}
+		*arduinoConfig = absolute
 	}
 	ctx, cancel := signalContext()
 	defer cancel()
@@ -1512,6 +1550,7 @@ func runToolchainBootstrap(
 		ctx,
 		programmer.ToolchainBootstrapOptions{
 			Profile: profile, CLI: *firmwareCLI, InstallDir: *installDir,
+			System: *system, ConfigPath: *arduinoConfig, Cores: cores, Libraries: libraries, Indexes: indexes,
 			Locked:      *locked,
 			DirectRetry: *directRetry, DryRun: *dryRun,
 		},
@@ -1526,7 +1565,7 @@ func runToolchainBootstrap(
 		if saveErr != nil {
 			bootstrapErr = fmt.Errorf("save managed toolchain path in PC config: %w", saveErr)
 		} else {
-			fmt.Fprintln(stdout, "Saved managed firmware CLI path in PC-side host configuration.")
+			fmt.Fprintln(stdout, "Saved firmware CLI and configuration paths in PC-side host configuration.")
 		}
 	}
 	encoded, _ := json.MarshalIndent(report, "", "  ")

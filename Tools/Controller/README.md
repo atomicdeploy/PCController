@@ -1119,6 +1119,13 @@ MiniCore installation. Add `--dry-run` to inspect a workflow without executing
 it. The complete profile, proxy, artifact, and recovery rules are in
 [Toolchain Bootstrap and Safe Programming](../../docs/Toolchain-and-Safe-Programming.md).
 
+To seed the current user's ordinary Arduino installation, use
+`controller toolchain bootstrap --system` (or add `--dry-run` first).
+Repeat `--core PACKAGE:ARCH`, `--library NAME`, and `--index-url HTTPS_URL` to
+include additional board families and libraries. `--toolchain-config FILE`
+selects an existing Arduino config without rewriting it. System seeding does
+not change the active PCController toolchain unless explicitly requested.
+
 From `Tools\Controller`:
 
 ```console

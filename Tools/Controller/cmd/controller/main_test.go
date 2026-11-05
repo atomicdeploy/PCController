@@ -288,6 +288,39 @@ func TestToolchainCompileAliasReusesManagedTargetUserConfiguration(t *testing.T)
 	}
 }
 
+func TestSystemBootstrapCLIPlanPreservesBothConfigurations(t *testing.T) {
+	root := t.TempDir()
+	configPath := filepath.Join(root, "controller.json")
+	arduinoConfig := filepath.Join(root, "arduino.yaml")
+	arduinoContent := []byte("directories:\n  user: /existing/Arduino\n")
+	if err := os.WriteFile(arduinoConfig, arduinoContent, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := appconfig.Open(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := store.Current().Programming
+	var stdout, stderr bytes.Buffer
+	err = run([]string{"--config", configPath, "toolchain", "bootstrap", "--locked", "--system", "--toolchain-config", arduinoConfig, "--core", "MegaCore:avr@3.0.3", "--library", "FastLED@3.10.3", "--dry-run"}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("bootstrap CLI plan: %v\n%s", err, stderr.String())
+	}
+	for _, want := range []string{arduinoConfig, "MegaCore:avr@3.0.3", "FastLED@3.10.3", `"scope": "system"`} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("missing %q:\n%s", want, stdout.String())
+		}
+	}
+	got, err := os.ReadFile(arduinoConfig)
+	if err != nil || !bytes.Equal(got, arduinoContent) {
+		t.Fatalf("changed Arduino config: %q %v", got, err)
+	}
+	reopened, err := appconfig.Open(configPath)
+	if err != nil || !reflect.DeepEqual(before, reopened.Current().Programming) {
+		t.Fatalf("changed Controller programming config: %v", err)
+	}
+}
+
 func TestCompileDryRunDoesNotRequireToolchainOnPATH(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	var stdout, stderr bytes.Buffer

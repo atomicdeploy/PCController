@@ -8,6 +8,23 @@ import (
 	"testing"
 )
 
+func TestArduinoSyncUsesSelectedConfigurationForEveryStep(t *testing.T) {
+	report, err := SyncToolchainWithRunner(context.Background(), ToolchainSyncOptions{
+		ToolchainCLI: "arduino-cli", ConfigPath: "selected-installation.yaml", DryRun: true,
+	}, io.Discard, DependencyEnvironmentRunnerFunc(func(context.Context, Command, []string, io.Writer) error {
+		t.Fatal("dry-run executed a dependency mutation")
+		return nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range report.Steps {
+		if len(step.Command.Args) < 3 || step.Command.Args[0] != "--config-file" || step.Command.Args[1] != "selected-installation.yaml" {
+			t.Fatalf("lost selected installation: %+v", step)
+		}
+	}
+}
+
 func TestArduinoUpdatePlansAllUpgradesAndRequiredDependencies(t *testing.T) {
 	var commands []Command
 	_, err := SyncToolchainWithRunner(

@@ -2782,6 +2782,9 @@ func (client *Client) SyncToolchain(
 ) (ToolchainSyncReport, error) {
 	if strings.TrimSpace(options.ToolchainCLI) == "" {
 		options.ToolchainCLI = client.currentCommandOptions().ArduinoCLI
+		if options.ConfigPath == "" {
+			options.ConfigPath = client.currentCommandOptions().ArduinoConfig
+		}
 	}
 	return programmer.SyncToolchain(ctx, options, output)
 }
