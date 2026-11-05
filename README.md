@@ -84,6 +84,10 @@ These are reproducible **offline previews**, rendered by the actual application 
 | --- | --- |
 | ![PCController desktop](docs/assets/screenshots/gui-dashboard.png) | ![Hardware channels](docs/assets/screenshots/gui-channels.png) |
 
+| Inline channel rename | Windows titlebar |
+| --- | --- |
+| ![Aligned inline channel rename](docs/assets/screenshots/gui-inline-rename.png) | ![Compact Windows titlebar](docs/assets/screenshots/gui-windows-titlebar.png) |
+
 | Compact front panel | Detachable card windows |
 | --- | --- |
 | ![Compact front panel](docs/assets/screenshots/gui-compact.png) | ![Independent acrylic widgets](docs/assets/screenshots/gui-widgets.png) |
@@ -96,7 +100,7 @@ These are reproducible **offline previews**, rendered by the actual application 
 | --- | --- |
 | ![PCController TUI dashboard](docs/assets/screenshots/tui-dashboard.svg) | ![PCController TUI Control page](docs/assets/screenshots/tui-controls.svg) |
 
-Regenerate on Windows with `screenshots.cmd`, or `node Tools/Build/update-readme-previews.mjs`. On other systems use `bash screenshots.sh --tui-only` for terminal assets.
+Regenerate on Windows with `screenshots.cmd`, `.\screenshots.ps1`, or `node Tools/Build/update-readme-previews.mjs`. On other systems use `bash screenshots.sh --tui-only` for terminal assets.
 <!-- controller-preview-gallery:end -->
 
 Use **Desktop widgets…** in the desktop/tray menu to show individual acrylic

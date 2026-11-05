@@ -81,11 +81,34 @@ func TestControllerDocumentationGallery(t *testing.T) {
 	s.surface.Invalidate()
 	pumpControllerFixture(s)
 	captureControllerFixture(t, s, "gui-channels")
+	s.beginControllerInline("pwm.0")
+	if s.controllerInline == nil {
+		t.Fatal("inline rename preview did not open")
+	}
+	s.controllerInline.input.SetText("Window lights")
+	s.controllerInline.input.SetTextSelection(0, -1)
+	pumpControllerFixture(s)
+	captureControllerFixture(t, s, "gui-inline-rename")
+	s.closeControllerInline()
+	cfg.UI.ControllerChrome = "windows"
+	cfg.UI.TitleBarMode = config.TitleBarCustom
+	s.cfg = cfg
+	s.applyConfigUI(cfg, false)
+	pumpControllerFixture(s)
+	captureControllerFixture(t, s, "gui-windows-titlebar")
+	cfg.UI.ControllerChrome = "macos"
+	cfg.UI.TitleBarMode = config.TitleBarNone
+	s.cfg = cfg
+	s.applyConfigUI(cfg, false)
 	s.activateControllerPreference("compact")
 	pumpControllerFixture(s)
 	captureControllerFixture(t, s, "gui-compact")
 	s.activateControllerPreference("compact")
-	backdrop.SetBoundsPixels(walk.Rectangle{Width: int(win.GetSystemMetrics(win.SM_CXSCREEN)), Height: int(win.GetSystemMetrics(win.SM_CYSCREEN))})
+	work, err := winfx.MonitorWorkAreaForRect(winfx.Rect{Left: 80, Top: 80, Right: 980, Bottom: 860})
+	if err != nil {
+		t.Fatal(err)
+	}
+	backdrop.SetBoundsPixels(walk.Rectangle{X: int(work.Left), Y: int(work.Top), Width: int(work.Right - work.Left), Height: int(work.Bottom - work.Top)})
 	s.OpenSettings()
 	pumpControllerFixture(s)
 	if s.settings == nil || s.settings.IsDisposed() {
@@ -97,8 +120,18 @@ func TestControllerDocumentationGallery(t *testing.T) {
 	if settingsPID != uint32(os.Getpid()) {
 		t.Fatal("settings capture does not own HWND")
 	}
-	win.SetWindowPos(settingsHandle, win.HWND_TOPMOST, 0, 0, 0, 0, win.SWP_NOMOVE|win.SWP_NOSIZE|win.SWP_NOACTIVATE)
+	// Default dialog centering can put its shadow across an always-on-top
+	// taskbar. Keep the whole captured rectangle safely inside our backdrop.
+	var settingsBounds win.RECT
+	win.GetWindowRect(settingsHandle, &settingsBounds)
+	width := min(settingsBounds.Right-settingsBounds.Left, work.Right-work.Left-80)
+	height := min(settingsBounds.Bottom-settingsBounds.Top, work.Bottom-work.Top-80)
+	win.SetWindowPos(settingsHandle, win.HWND_TOPMOST, work.Left+40, work.Top+40, width, height, win.SWP_NOACTIVATE)
 	pumpControllerFixture(s)
+	win.GetWindowRect(settingsHandle, &settingsBounds)
+	if settingsBounds.Left < work.Left || settingsBounds.Top < work.Top || settingsBounds.Right > work.Right || settingsBounds.Bottom > work.Bottom {
+		t.Fatalf("settings capture exceeds isolated work area: window=%+v work=%+v", settingsBounds, work)
+	}
 	win.RedrawWindow(settingsHandle, nil, 0, win.RDW_INVALIDATE|win.RDW_UPDATENOW|win.RDW_ALLCHILDREN)
 	_ = winfx.FlushComposition()
 	settingsPath := filepath.Join(os.Getenv("RAYANLAMP_SCREENSHOTS"), "gui-settings.png")
