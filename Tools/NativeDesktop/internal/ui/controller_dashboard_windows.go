@@ -165,7 +165,7 @@ func (s *Shell) paintController(canvas *walk.Canvas, bounds walk.Rectangle, colo
 		if compact {
 			glyph = "\uE740"
 		}
-		s.controllerControl(canvas, walk.Rectangle{X: x + width - 42, Y: y + 12, Width: 28, Height: 28}, actionCompact, glyph, "", true, compact, colors)
+		s.controllerSmallAction(canvas, walk.Rectangle{X: x + width - 42, Y: y + 12, Width: 28, Height: 28}, actionCompact, glyph, true, compact, colors)
 	}
 	screen := walk.Rectangle{X: x + 24, Y: y + 52, Width: width - 48, Height: 126}
 	keyY, labelY := y+192, y+240

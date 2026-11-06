@@ -67,12 +67,12 @@ func (s *Shell) paintControllerChannels(canvas *walk.Canvas, bounds walk.Rectang
 		editing := s.controllerInline != nil && s.controllerInline.key == ch.Key
 		if editing {
 			s.controllerActionIDs[editID] = "inline-save:"
-			s.controllerSmallAction(canvas, walk.Rectangle{X: x + cw - 68, Y: y + 10, Width: 28, Height: 28}, editID, "\uE73E", s.canSaveControllerInline(), colors)
+			s.controllerSmallAction(canvas, walk.Rectangle{X: x + cw - 68, Y: y + 10, Width: 28, Height: 28}, editID, "\uE73E", s.canSaveControllerInline(), false, colors)
 			cancelID := actionChannelFirst + actionID(slot*8+6)
 			s.controllerActionIDs[cancelID] = "inline-cancel:"
-			s.controllerSmallAction(canvas, walk.Rectangle{X: x + cw - 38, Y: y + 10, Width: 28, Height: 28}, cancelID, "\uE711", !s.controllerBusy, colors)
+			s.controllerSmallAction(canvas, walk.Rectangle{X: x + cw - 38, Y: y + 10, Width: 28, Height: 28}, cancelID, "\uE711", !s.controllerBusy, false, colors)
 		} else {
-			s.controllerSmallAction(canvas, walk.Rectangle{X: x + cw - 38, Y: y + 10, Width: 28, Height: 28}, editID, "\uE70F", s.canEditControllerChannel(), colors)
+			s.controllerSmallAction(canvas, walk.Rectangle{X: x + cw - 38, Y: y + 10, Width: 28, Height: 28}, editID, "\uE70F", s.canEditControllerChannel(), false, colors)
 		}
 		// A dedicated grip makes arrangement discoverable without stealing the
 		// slider or the caption's click-to-rename gesture.
@@ -209,11 +209,17 @@ func (s *Shell) paintControllerChannels(canvas *walk.Canvas, bounds walk.Rectang
 	return nil
 }
 
-func (s *Shell) controllerSmallAction(c *walk.Canvas, r walk.Rectangle, action actionID, glyph string, enabled bool, p palette) {
-	s.controllerControl(c, r, action, "", "", enabled, false, p)
+func controllerSmallActionGlyphBounds(r walk.Rectangle) walk.Rectangle {
+	return walk.Rectangle{X: r.X + 4, Y: r.Y + 4, Width: r.Width - 8, Height: r.Height - 8}
+}
+
+func (s *Shell) controllerSmallAction(c *walk.Canvas, r walk.Rectangle, action actionID, glyph string, enabled, active bool, p palette) {
+	s.controllerControl(c, r, action, "", "", enabled, active, p)
 	ink := p.text
 	if !enabled {
 		ink = p.secondary
+	} else if active {
+		ink = p.accentHover
 	}
-	s.controllerGlyph(c, glyph, ink, walk.Rectangle{X: r.X + 4, Y: r.Y + 4, Width: r.Width - 8, Height: r.Height - 8})
+	s.controllerGlyph(c, glyph, ink, controllerSmallActionGlyphBounds(r))
 }

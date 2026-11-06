@@ -21,6 +21,17 @@ func TestControllerCardActionOrder(t *testing.T) {
 	}
 }
 
+func TestControllerSmallActionKeepsGlyphPaddedAndCentered(t *testing.T) {
+	button := walk.Rectangle{X: 358, Y: 12, Width: 28, Height: 28}
+	glyph := controllerSmallActionGlyphBounds(button)
+	if glyph.Width != 20 || glyph.Height != 20 || glyph.X-button.X != 4 || glyph.Y-button.Y != 4 {
+		t.Fatalf("small action lost its icon padding: button=%+v glyph=%+v", button, glyph)
+	}
+	if glyph.X*2+glyph.Width != button.X*2+button.Width || glyph.Y*2+glyph.Height != button.Y*2+button.Height {
+		t.Fatal("small action icon is not centered in the unchanged click target")
+	}
+}
+
 func TestControllerCardOffPrecedesOnForEitherCatalogOrder(t *testing.T) {
 	for _, verbs := range [][]string{{"on", "off"}, {"off", "on"}, {"increase", "on", "decrease", "off"}} {
 		var input []presentation.Action
